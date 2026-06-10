@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.26 BETA
+  TeknoParrot Manager  |  v0.28 BETA
 ===============================================================================
 
   Registers your extracted games with TeknoParrot so they appear and launch
@@ -57,6 +57,34 @@
     at any time and use LaunchBox's own import wizard to add games in one pass.
     The wizard assigns metadata, box art, and the correct internal emulator ID
     automatically.
+
+  - "Not in TeknoParrot" report. After scanning your staging folder, lists
+    every game folder whose executables did not match any TeknoParrot profile.
+    Games that disappear silently are now surfaced in the ACTION REQUIRED
+    section so you know exactly which titles are not yet supported.
+
+  - Controls status file. After every run, writes a persistent
+    TeknoParrot-Manager-controls.txt listing every registered game, its
+    control family, whether controls were propagated and from which reference
+    game, and how many buttons are still set manually. Useful weeks later
+    when a game aims wrong and you have forgotten what state it was left in.
+
+  - Unattended mode. A -Unattended switch skips all Y/N prompts, uses
+    saved settings, extracts all new games, runs registration, repair, and
+    propagation automatically, and logs everything. Designed for scheduling
+    as a Windows Task to run overnight when new ZIPs appear on the NAS.
+
+  - Auto-detect TeknoParrot path. On first run, instead of asking for the
+    root folder immediately, the script scans common install locations
+    (LaunchBox emulators folder, drive roots, Program Files) for
+    TeknoParrotUi.exe and suggests the match. If multiple installs are
+    found, it lists them numbered so you can pick without typing.
+
+  - Thumbnail download. After registration, optionally downloads game icons
+    from the TeknoParrotUIThumbnails GitHub repository directly into
+    TeknoParrot's Icons folder, which is where TeknoParrotUI looks for them.
+    Only fetches icons that are absent; never overwrites existing files.
+    Reports how many were fetched, already present, or not yet in the repo.
 
   - Restore from backup. A menu option lists all timestamped backups and
     restores the one you pick in one step, without touching File Explorer.
@@ -461,6 +489,185 @@
 
 
 -------------------------------------------------------------------------------
+  THUMBNAIL DOWNLOAD
+-------------------------------------------------------------------------------
+
+  After registration the script offers to download game icons:
+
+      Download thumbnails for registered games missing an icon? (Y/N)
+
+  Answering Y connects to the TeknoParrotUIThumbnails repository on GitHub
+  and downloads a <ProfileCode>.png for every registered game that does not
+  already have one in <TeknoParrotRoot>\Icons\. That is the exact folder
+  TeknoParrotUI reads when it displays game thumbnails.
+
+  Source repository:
+    https://github.com/teknogods/TeknoParrotUIThumbnails
+
+  What it does:
+
+    1. Checks every XML in your UserProfiles folder.
+    2. For each profile code, checks whether <TeknoParrotRoot>\Icons\<Code>.png
+       already exists. If it does, that game is counted as "already present"
+       and skipped -- nothing is overwritten.
+    3. Downloads each missing icon from the repository.
+    4. Reports a summary: fetched / already present / not in repo / failed.
+
+  The Icons folder is created automatically if it does not exist.
+
+  Note that not all TeknoParrot games have a thumbnail in the repository.
+  Games without a matching icon are counted as "not in repo" and skipped
+  without error. You can add custom icons yourself by dropping a
+  <ProfileCode>.png into the Icons folder at any time.
+
+  The download uses TLS 1.2, which GitHub requires but which PS 5.1 may
+  not negotiate by default. The script sets it automatically for this step.
+
+
+-------------------------------------------------------------------------------
+  "NOT IN TEKNOPARROT" REPORT
+-------------------------------------------------------------------------------
+
+  After scanning your staging folder and completing registration, the script
+  reports any game folder whose executables did not match any profile in
+  TeknoParrot's GameProfiles library:
+
+      1 game folder(s) not recognised by TeknoParrot -- see ACTION REQUIRED
+
+  The ACTION REQUIRED section at the end of the run lists the folder names.
+  This is informational -- no action is needed. It tells you whether a folder
+  contains a game TeknoParrot does not yet support, a game that uses an
+  unusual executable name, or a utility folder sitting alongside your games.
+
+  What this is NOT:
+
+    - A game that shares an executable name with multiple profiles -- those
+      appear in "Register these games" (manual registration required).
+    - A game whose path is broken -- those appear in "Fix these game paths".
+    - A game not yet extracted -- those appear in "Extract first".
+
+  The "not in TeknoParrot" report is specifically for folders where no
+  executable matched any profile at all.
+
+
+-------------------------------------------------------------------------------
+  CONTROLS STATUS FILE
+-------------------------------------------------------------------------------
+
+  After every run the script writes TeknoParrot-Manager-controls.txt next to
+  itself. This file is a current-state snapshot of every registered game:
+
+    [button]
+      BlazBlueContinuumShift     52/52 bound   REFERENCE
+      AkaiKatanaShinNesica       47/52 bound   propagated  <- BlazBlueContinuumShift
+      StreetFighter6             47/52 bound   propagated  <- BlazBlueContinuumShift
+        manual: SpeedChange1, SpeedChange2, SpeedChange3
+
+    [driving]
+      Daytona3                   31/31 bound   REFERENCE
+      InitialD8                  29/31 bound   propagated  <- Daytona3
+        manual: GearUp, GearDown
+
+    [lightgun]
+      SomeNewGame                 0/52 bound   no controls
+
+  Each game shows:
+    - Control family (button, driving, lightgun, trackball, analog, spinner)
+    - How many buttons are bound out of the total in the profile
+    - Status: REFERENCE (your bound example game), propagated (controls were
+      copied from a reference), already bound (had controls before this run),
+      bound (bound but not via propagation), partial (some bound, below
+      threshold), no controls, no reference game (waiting for you to bind one)
+    - Which reference game the controls came from (for propagated games)
+    - Any buttons still left manual (listed by name)
+
+  The file is overwritten on every run. It reflects the state of your
+  UserProfiles at the moment the script completed, regardless of whether
+  propagation was run or skipped this time.
+
+  This is particularly useful when a game aims wrong days or weeks later --
+  open the file and you can immediately see whether controls were propagated
+  and from which reference game, without re-running the script.
+
+
+-------------------------------------------------------------------------------
+  UNATTENDED / SCHEDULED MODE
+-------------------------------------------------------------------------------
+
+  Run the script with -Unattended to skip all prompts and proceed automatically:
+
+      .\TeknoParrot-Manager.ps1 -Unattended
+
+  What it does automatically:
+
+    - Loads saved settings from TeknoParrot-Manager.config.json (exits with
+      an error if no saved settings exist -- run once interactively first).
+    - Auto-detects the TeknoParrot path if not in saved settings.
+    - Selects ALL unextracted games (equivalent to pressing A in the picker).
+    - Downloads missing thumbnails.
+    - Runs repair.
+    - Propagates controls if reference games are available.
+    - Skips LaunchBox export (use it interactively when needed).
+    - Always writes the controls status file.
+    - Logs every auto-decision to TeknoParrot-Manager.log.
+
+  What it does NOT do:
+    - It will not proceed without saved settings (exits cleanly with an error).
+    - It will not proceed without a valid TeknoParrot root (exits cleanly).
+    - It continues through low disk space and backup warnings but logs them.
+
+  SCHEDULING WITH WINDOWS TASK SCHEDULER
+
+  To run the script automatically overnight:
+
+  Step 1.  Run the script once interactively and save your settings.
+
+  Step 2.  Open Task Scheduler (taskschd.msc).
+
+  Step 3.  Create Task (not Basic Task). On the General tab:
+             - Name: TeknoParrot AutoSync
+             - Run whether user is logged on or not (if you want it headless)
+             - Run with highest privileges
+
+  Step 4.  Triggers tab: New -> On a schedule, set your preferred time.
+
+  Step 5.  Actions tab: New -> Start a program.
+             Program: powershell.exe
+             Arguments: -ExecutionPolicy Bypass -NonInteractive -File
+               "W:\Emulators\TeknoParrot\Scripts\TeknoParrot-Manager.ps1"
+               -Unattended
+             (adjust the path to match your Scripts folder)
+
+  Step 6.  Conditions tab: optionally check "Start only if the following
+           network connection is available" and select your NAS connection.
+
+  After each scheduled run, check TeknoParrot-Manager.log for a summary and
+  TeknoParrot-Manager-controls.txt for the updated controls state.
+
+
+-------------------------------------------------------------------------------
+  AUTO-DETECT TEKNOPARROT PATH
+-------------------------------------------------------------------------------
+
+  On first run (or any run where the TeknoParrot root is not saved), the
+  script scans common install locations for TeknoParrotUi.exe before asking
+  you to type the path manually:
+
+    - Your LaunchBox Emulators folder under USERPROFILE
+    - Drive roots: C:\TeknoParrot, D:\TeknoParrot, etc.
+    - Drive roots with sub-paths: \Games\TeknoParrot, \Emulators\TeknoParrot
+    - Program Files and Program Files (x86) on every mounted drive
+
+  If exactly one install is found, it is offered for confirmation:
+
+      Auto-detected TeknoParrot at: C:\Users\...\LaunchBox\Emulators\TeknoParrot
+      Use this path? (Y/N)
+
+  If multiple installs are found, they are listed numbered so you can pick
+  without typing. If nothing is found, the manual prompt appears as before.
+
+
+-------------------------------------------------------------------------------
   PER-GAME OVERRIDES
 -------------------------------------------------------------------------------
 
@@ -514,6 +721,10 @@
 
   At the end of every run, the script prints an ACTION REQUIRED section
   listing everything that needs your attention. It has up to four parts:
+
+    Not in TeknoParrot        Game folders whose executables did not match
+                              any TeknoParrot profile. Informational -- no
+                              action is needed. See the full section above.
 
     Register these games      Games found on disk that could not be
                               auto-registered because their executable name
@@ -710,6 +921,6 @@
 
 
 ===============================================================================
-  v0.26 BETA -- Test one game after each run.
+  v0.28 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================

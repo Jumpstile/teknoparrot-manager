@@ -44,5 +44,5 @@ Current version: v0.26 BETA
 
 \- Games staging     : E:\\Games\\TeknoParrot Games
 
-\- ZIP source (NAS)  : V:\\ROMS\\TeknoParrot Collection
+\- ZIP source (NAS)  : W:\\ROMS\\TeknoParrot Collection
 
