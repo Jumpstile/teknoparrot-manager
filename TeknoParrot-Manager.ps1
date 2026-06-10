@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.26 BETA
+# TeknoParrot Manager  |  v0.28 BETA
 # =============================================================================
 #
 # Registers your extracted games with TeknoParrot so they appear and launch
@@ -55,11 +55,11 @@
 #   - Games extracted into per-game subfolders (AutoSync can do this).
 # =============================================================================
 
-param()
+param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.26 BETA       " -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.28 BETA       " -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -190,6 +190,37 @@ function Test-PathInside {
 function Get-ExeAlternatives {
     param([string]$exeName)
     return @($exeName -split '[;|]' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+}
+
+# Scans common install locations for TeknoParrotUi.exe and returns matching
+# root folder paths. Used to suggest the path on first run so the user does
+# not have to type it from memory. Checks LaunchBox emulator folders, drive
+# roots, and standard Program Files locations on every mounted local drive.
+function Find-TeknoParrotRoot {
+    $candidates = New-Object System.Collections.ArrayList
+    $up = $env:USERPROFILE
+    if ($up) {
+        [void]$candidates.Add((Join-Path $up "LaunchBox\Emulators\TeknoParrot"))
+        [void]$candidates.Add((Join-Path $up "AppData\Roaming\LaunchBox\Emulators\TeknoParrot"))
+    }
+    $drives = @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue |
+                Where-Object { $_.Root -and (Test-Path $_.Root) } |
+                ForEach-Object { $_.Root.TrimEnd('\') })
+    foreach ($d in $drives) {
+        [void]$candidates.Add("$d\TeknoParrot")
+        [void]$candidates.Add("$d\Games\TeknoParrot")
+        [void]$candidates.Add("$d\Emulators\TeknoParrot")
+        [void]$candidates.Add("$d\Program Files\TeknoParrot")
+        [void]$candidates.Add("$d\Program Files (x86)\TeknoParrot")
+    }
+    $found = New-Object System.Collections.ArrayList
+    foreach ($path in $candidates) {
+        if ((Test-Path -LiteralPath (Join-Path $path "TeknoParrotUi.exe")) -and
+            $found -notcontains $path) {
+            [void]$found.Add($path)
+        }
+    }
+    return ,$found
 }
 
 # =============================================================================
@@ -731,27 +762,30 @@ function Build-ProfileIndex {
 function Register-Games {
     param([string]$userProfilesDir, [string]$installFolder, [hashtable]$profileIndex)
 
-    $exeFiles   = Get-GameFiles $installFolder
-    $registered = New-Object System.Collections.ArrayList
-    $already    = New-Object System.Collections.ArrayList
-    $ambiguous  = New-Object System.Collections.ArrayList
-    $seenCodes  = @{}
+    $exeFiles       = Get-GameFiles $installFolder
+    $registered     = New-Object System.Collections.ArrayList
+    $already        = New-Object System.Collections.ArrayList
+    $ambiguous      = New-Object System.Collections.ArrayList
+    $seenCodes      = @{}
+    $installBase    = $installFolder.TrimEnd('\')
+    $matchedFolders = @{}   # folders that matched at least one profile key
+    $allExeFolders  = @{}   # folders containing any recognisable executable
 
     foreach ($exe in $exeFiles) {
+        $relPath    = $exe.FullName.Substring($installBase.Length).TrimStart('\')
+        $folderName = ($relPath -split '\\')[0]
+        $allExeFolders[$folderName] = $true
+
         $key = $exe.Name.ToLower()
         if (-not $profileIndex.ContainsKey($key)) { continue }
+        $matchedFolders[$folderName] = $true
 
         $matchList = $profileIndex[$key]
 
         # Same executable name maps to more than one profile.
         # Attempt folder-name fuzzy matching before giving up.
         if ($matchList.Count -gt 1) {
-            # Derive the top-level game folder name relative to $installFolder so
-            # the match is correct even when the exe lives in a subfolder
-            # (e.g. GameFolder\bin\game.exe -- we want "GameFolder", not "bin").
-            $installBase = $installFolder.TrimEnd('\')
-            $relPath     = $exe.FullName.Substring($installBase.Length).TrimStart('\')
-            $folderName  = ($relPath -split '\\')[0]
+            # $folderName is already derived above; just normalise it here.
             $normFolder  = Get-NormalizedGameKey $folderName
 
             $bestFuzzy      = $null
@@ -841,7 +875,8 @@ function Register-Games {
         }
     }
 
-    return [pscustomobject]@{ Registered = $registered; Already = $already; Ambiguous = $ambiguous }
+    $unmatched = @($allExeFolders.Keys | Where-Object { -not $matchedFolders.ContainsKey($_) } | Sort-Object)
+    return [pscustomobject]@{ Registered = $registered; Already = $already; Ambiguous = $ambiguous; Unmatched = $unmatched }
 }
 
 # Checks every UserProfile's GamePath and re-points broken ones (empty path or
@@ -1523,7 +1558,7 @@ function Export-LaunchBoxXml {
             [void]$sb.AppendLine("    <Completed>false</Completed>")
             [void]$sb.AppendLine("    <Hidden>false</Hidden>")
             [void]$sb.AppendLine("    <Enabled>true</Enabled>")
-            [void]$sb.AppendLine("    <Notes>Exported by TeknoParrot Manager v0.26</Notes>")
+            [void]$sb.AppendLine("    <Notes>Exported by TeknoParrot Manager v0.28</Notes>")
             [void]$sb.AppendLine('  </Game>')
             $count++
         } catch {
@@ -1542,7 +1577,216 @@ function Export-LaunchBoxXml {
     }
 }
 
-Write-Log "Script started (v0.26)."
+# =============================================================================
+# THUMBNAIL DOWNLOAD  (optional, fetches game icons from GitHub)
+# =============================================================================
+# Downloads ProfileCode.png from the TeknoParrotUIThumbnails repository into
+# <TeknoParrotRoot>\Icons\ -- the exact path TeknoParrotUI reads at startup.
+# Only fetches icons that are absent; never overwrites existing files.
+# Source: https://github.com/teknogods/TeknoParrotUIThumbnails
+function Invoke-ThumbnailDownload {
+    param([string]$userProfilesDir, [string]$tpRoot)
+
+    $iconsDir = Join-Path $tpRoot "Icons"
+    if (-not (Test-Path $iconsDir)) {
+        try {
+            New-Item -ItemType Directory -Path $iconsDir -ErrorAction Stop | Out-Null
+            Write-Log "Thumbnails: created Icons folder at $iconsDir"
+        } catch {
+            Write-Host "  ERROR: Could not create Icons folder: $_" -ForegroundColor Red
+            Write-Log "Thumbnails: could not create Icons folder -- $_"
+            return
+        }
+    }
+
+    $profiles = @(Get-ChildItem -LiteralPath $userProfilesDir -Filter *.xml -File -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Directory.Name -ne "FullBackup" })
+
+    if ($profiles.Count -eq 0) {
+        Write-Host "  No registered profiles found." -ForegroundColor DarkGray
+        return
+    }
+
+    $missing      = New-Object System.Collections.ArrayList
+    $alreadyCount = 0
+    foreach ($f in $profiles) {
+        if (Test-Path -LiteralPath (Join-Path $iconsDir ($f.BaseName + ".png"))) {
+            $alreadyCount++
+        } else {
+            [void]$missing.Add($f.BaseName)
+        }
+    }
+
+    Write-Host ("  {0} profile(s): {1} already have an icon, {2} missing." -f `
+        $profiles.Count, $alreadyCount, $missing.Count) -ForegroundColor Cyan
+
+    if ($missing.Count -eq 0) {
+        Write-Host "  All registered games already have icons. Nothing to download." -ForegroundColor Green
+        Write-Log "Thumbnails: all $alreadyCount icons already present."
+        return
+    }
+
+    # GitHub requires TLS 1.2; PS 5.1 may negotiate an older version by default.
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+
+    $baseUrl = "https://raw.githubusercontent.com/teknogods/TeknoParrotUIThumbnails/master/Icons/"
+    $fetched  = 0
+    $notAvail = 0
+    $failed   = 0
+    $i        = 0
+    $total    = $missing.Count
+
+    $wc = New-Object System.Net.WebClient
+    try {
+        foreach ($code in $missing) {
+            $i++
+            $destPath = Join-Path $iconsDir ($code + ".png")
+            $url      = $baseUrl + [Uri]::EscapeDataString($code + ".png")
+            Write-Host ("  [{0,3}/{1}] {2}" -f $i, $total, $code) -ForegroundColor DarkCyan -NoNewline
+            try {
+                $wc.DownloadFile($url, $destPath)
+                Write-Host "  OK" -ForegroundColor Green
+                Write-Log "Thumbnails: downloaded $code"
+                $fetched++
+            } catch [System.Net.WebException] {
+                $resp       = $_.Exception.Response
+                $statusCode = if ($null -ne $resp) { [int]$resp.StatusCode } else { 0 }
+                if ($statusCode -eq 404) {
+                    Write-Host "  not in repo" -ForegroundColor DarkGray
+                    $notAvail++
+                } else {
+                    Write-Host ("  FAILED ({0})" -f $_.Exception.Message) -ForegroundColor Red
+                    Write-Log "Thumbnails: FAILED $code -- $($_.Exception.Message)"
+                    $failed++
+                }
+                # Remove any partial file left by a failed download.
+                if (Test-Path -LiteralPath $destPath) {
+                    Remove-Item -LiteralPath $destPath -Force -ErrorAction SilentlyContinue
+                }
+            } catch {
+                Write-Host ("  FAILED ({0})" -f $_) -ForegroundColor Red
+                Write-Log "Thumbnails: FAILED $code -- $_"
+                if (Test-Path -LiteralPath $destPath) {
+                    Remove-Item -LiteralPath $destPath -Force -ErrorAction SilentlyContinue
+                }
+                $failed++
+            }
+        }
+    } finally {
+        $wc.Dispose()
+    }
+
+    Write-Host ""
+    $failSuffix = if ($failed -gt 0) { ", $failed failed" } else { "" }
+    Write-Host ("  Thumbnails: {0} fetched, {1} already present, {2} not in repo{3}." -f `
+        $fetched, $alreadyCount, $notAvail, $failSuffix) -ForegroundColor Green
+    Write-Log ("Thumbnails: fetched=$fetched alreadyPresent=$alreadyCount notAvail=$notAvail failed=$failed")
+}
+
+# =============================================================================
+# CONTROLS STATUS REPORT
+# =============================================================================
+# Writes a snapshot of every registered game's control state to a persistent
+# text file. Groups by control family, shows propagation source and any
+# buttons still left manual. Overwrites the previous file on every call --
+# it is a current-state view, not an append log.
+# Returns the number of games written, or -1 on write failure.
+function Write-ControlsStatus {
+    param([string]$userProfilesDir, $pool, $propagationReports, [string]$outputPath)
+
+    $poolCodes = @{}
+    if ($null -ne $pool) { foreach ($s in $pool) { $poolCodes[$s.Code] = $true } }
+
+    $reportMap = @{}
+    if ($null -ne $propagationReports) {
+        foreach ($r in $propagationReports) { $reportMap[$r.Code] = $r }
+    }
+
+    $files = @(Get-ChildItem -LiteralPath $userProfilesDir -Filter *.xml -File -ErrorAction SilentlyContinue |
+               Where-Object { $_.Directory.Name -ne "FullBackup" } |
+               Sort-Object BaseName)
+
+    $rows = New-Object System.Collections.ArrayList
+    foreach ($f in $files) {
+        try { $doc = Read-Xml $f.FullName } catch { continue }
+        if ($null -eq $doc.GameProfile) { continue }
+
+        $family = Get-ProfileFamily $doc
+        $btns   = @(Get-ButtonNodes $doc)
+        $bound  = 0
+        $manual = New-Object System.Collections.ArrayList
+        foreach ($b in $btns) {
+            if (Test-ButtonIsBound $b) {
+                $bound++
+            } else {
+                $n = $b.SelectSingleNode("ButtonName")
+                if ($n -and -not [string]::IsNullOrWhiteSpace($n.InnerText)) {
+                    [void]$manual.Add($n.InnerText.Trim())
+                }
+            }
+        }
+
+        $status = ""; $reference = ""
+        if     ($poolCodes.ContainsKey($f.BaseName))  { $status = "REFERENCE" }
+        elseif ($reportMap.ContainsKey($f.BaseName)) {
+            $r = $reportMap[$f.BaseName]
+            switch ($r.Status) {
+                "bound"            { $status = "propagated"; $reference = $r.Archetype }
+                "skipped-bound"    { $status = "already bound" }
+                "skipped-override" { $status = "skipped (override)" }
+                "no-archetype"     { $status = "no reference game" }
+                "save-failed"      { $status = "save failed" }
+            }
+        }
+        elseif ($bound -ge 5) { $status = "bound" }
+        elseif ($bound -gt 0) { $status = "partial" }
+        else                  { $status = "no controls" }
+
+        [void]$rows.Add([pscustomobject]@{
+            Code = $f.BaseName; Family = $family
+            Bound = $bound; Total = $btns.Count
+            Manual = $manual; Status = $status; Reference = $reference
+        })
+    }
+
+    $knownFamilies = @('button','driving','lightgun','trackball','analog','spinner')
+    $extraFamilies = @($rows | ForEach-Object { $_.Family } | Sort-Object -Unique |
+                       Where-Object { $knownFamilies -notcontains $_ })
+    $allFamilies   = $knownFamilies + $extraFamilies
+
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.AppendLine("TeknoParrot Manager -- Controls Status")
+    [void]$sb.AppendLine("Generated : $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))")
+    [void]$sb.AppendLine("Profiles  : $($rows.Count)")
+    [void]$sb.AppendLine(("=" * 80))
+
+    foreach ($fam in $allFamilies) {
+        $group = @($rows | Where-Object { $_.Family -eq $fam } | Sort-Object Code)
+        if ($group.Count -eq 0) { continue }
+        [void]$sb.AppendLine("")
+        [void]$sb.AppendLine("[$fam]")
+        foreach ($row in $group) {
+            $boundLabel = "{0}/{1} bound" -f $row.Bound, $row.Total
+            $refPart    = if ($row.Reference) { "  <- $($row.Reference)" } else { "" }
+            [void]$sb.AppendLine(("  {0,-44} {1,-12}  {2}{3}" -f $row.Code, $boundLabel, $row.Status, $refPart))
+            if ($row.Manual.Count -gt 0) {
+                [void]$sb.AppendLine("    manual: $($row.Manual -join ', ')")
+            }
+        }
+    }
+    [void]$sb.AppendLine("")
+    [void]$sb.AppendLine(("=" * 80))
+
+    try {
+        [System.IO.File]::WriteAllText($outputPath, $sb.ToString(), (New-Object System.Text.UTF8Encoding $false))
+        return $rows.Count
+    } catch {
+        Write-Log "Controls status: FAILED to write -- $_"
+        return -1
+    }
+}
+
+Write-Log "Script started (v0.28$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
 # SECTION 1 — Load or prompt for configuration
@@ -1554,6 +1798,13 @@ $mode               = $null   # "AutoSync", "RegisterOnly", or "Restore"
 $zipSource          = $null   # AutoSync only
 $gamesInstallFolder = $null   # always (the extracted-games root to register)
 
+if ($Unattended -and -not (Test-Path $configPath)) {
+    Write-Host ""
+    Write-Host "ERROR: Unattended mode requires saved settings." -ForegroundColor Red
+    Write-Host "Run the script once interactively to save your configuration, then retry with -Unattended." -ForegroundColor Yellow
+    Write-Log "ERROR: Unattended mode -- no saved config at $configPath"; exit 1
+}
+
 if (Test-Path $configPath) {
     try {
         $cfg = Get-Content -Path $configPath -Raw | ConvertFrom-Json
@@ -1563,7 +1814,13 @@ if (Test-Path $configPath) {
         if ($cfg.ZipSourceFolder)    { Write-Host "  ZIP source folder    : $($cfg.ZipSourceFolder)" }
         Write-Host "  Games install folder : $($cfg.GamesInstallFolder)"
         Write-Host ""
-        $use = Read-Host "Use these settings? (Y/N)"
+        if ($Unattended) {
+            Write-Host "  [Unattended] Using saved settings." -ForegroundColor DarkCyan
+            Write-Log "Unattended: auto-accepted saved settings."
+            $use = "Y"
+        } else {
+            $use = Read-Host "Use these settings? (Y/N)"
+        }
         if ($use.ToUpper() -eq "Y") {
             $tpRoot             = $cfg.TeknoParrotRoot
             # Validate mode before accepting it; an unknown value falls through to the prompt.
@@ -1571,6 +1828,10 @@ if (Test-Path $configPath) {
             if ($cfg.Mode -and $knownModes -contains $cfg.Mode) {
                 $mode = $cfg.Mode
             } else {
+                if ($Unattended) {
+                    Write-Host "ERROR: Unattended mode -- saved mode '$($cfg.Mode)' is not recognised." -ForegroundColor Red
+                    Write-Log "ERROR: Unattended mode -- unrecognised mode '$($cfg.Mode)'."; exit 1
+                }
                 Write-Host "  NOTE: saved mode '$($cfg.Mode)' is not recognised -- you will be prompted." -ForegroundColor Yellow
                 Write-Log "Config: unrecognised mode '$($cfg.Mode)' -- ignored."
             }
@@ -1587,10 +1848,43 @@ if (Test-Path $configPath) {
 }
 
 if (-not $tpRoot) {
-    $tpRoot = Read-Host "Enter TeknoParrot root folder (containing TeknoParrotUi.exe)"
+    $detected = @(Find-TeknoParrotRoot)
+    if ($Unattended) {
+        if ($detected.Count -ge 1) {
+            $tpRoot = $detected[0]
+            Write-Host "  [Unattended] TeknoParrot auto-detected at: $tpRoot" -ForegroundColor DarkCyan
+            Write-Log "Unattended: TeknoParrot auto-detected at $tpRoot"
+        } else {
+            Write-Host "ERROR: Unattended mode -- could not auto-detect TeknoParrot and no saved path." -ForegroundColor Red
+            Write-Log "ERROR: Unattended mode -- TeknoParrot root not found."; exit 1
+        }
+    } elseif ($detected.Count -eq 1) {
+        Write-Host ""
+        Write-Host "  Auto-detected TeknoParrot at: $($detected[0])" -ForegroundColor Cyan
+        $useIt = (Read-Host "  Use this path? (Y/N)").Trim().ToUpper()
+        if ($useIt -eq "Y") { $tpRoot = $detected[0] }
+    } elseif ($detected.Count -gt 1) {
+        Write-Host ""
+        Write-Host "  Found TeknoParrot in multiple locations:" -ForegroundColor Cyan
+        for ($i = 0; $i -lt $detected.Count; $i++) {
+            Write-Host ("    {0}) {1}" -f ($i + 1), $detected[$i])
+        }
+        $pick = (Read-Host "  Enter number to use one, or N to type the path manually").Trim()
+        if ($pick -match '^\d+$') {
+            $idx = [int]$pick - 1
+            if ($idx -ge 0 -and $idx -lt $detected.Count) { $tpRoot = $detected[$idx] }
+        }
+    }
+    if (-not $tpRoot) {
+        $tpRoot = Read-Host "Enter TeknoParrot root folder (containing TeknoParrotUi.exe)"
+    }
 }
 
 if (-not $mode) {
+    if ($Unattended) {
+        Write-Host "ERROR: Unattended mode -- no mode in saved settings." -ForegroundColor Red
+        Write-Log "ERROR: Unattended mode -- mode not set."; exit 1
+    }
     Write-Host ""
     Write-Host "--------------------------------------------" -ForegroundColor Cyan
     Write-Host " Mode" -ForegroundColor Cyan
@@ -1613,9 +1907,17 @@ if (-not $mode) {
 }
 
 if ($mode -eq "AutoSync" -and -not $zipSource) {
+    if ($Unattended) {
+        Write-Host "ERROR: Unattended mode -- ZIP source folder not in saved settings." -ForegroundColor Red
+        Write-Log "ERROR: Unattended mode -- zipSource not set."; exit 1
+    }
     $zipSource = Read-Host "Enter ZIP source folder (NAS or local, containing .zip files)"
 }
 if (-not $gamesInstallFolder) {
+    if ($Unattended) {
+        Write-Host "ERROR: Unattended mode -- games install folder not in saved settings." -ForegroundColor Red
+        Write-Log "ERROR: Unattended mode -- gamesInstallFolder not set."; exit 1
+    }
     if ($mode -eq "AutoSync") {
         $gamesInstallFolder = Read-Host "Enter LOCAL staging folder to extract games into, on a drive with free space and OUTSIDE the TeknoParrot and source folders (e.g. D:\TeknoParrotGames)"
     } elseif ($mode -ne "Restore") {
@@ -1720,8 +2022,13 @@ if ($mode -eq "AutoSync") {
             $root, [Math]::Round($freeBytes/1GB,1), [Math]::Round($zipBytes/1GB,1), [Math]::Round(($zipBytes*1.5)/1GB,1)) -ForegroundColor DarkCyan
         if ($freeBytes -lt ($zipBytes * 1.5)) {
             Write-Host "  WARNING: free space on the staging drive may be insufficient." -ForegroundColor Yellow
-            $cont = Read-Host "  Continue anyway? (Y/N)"
-            if ($cont.ToUpper() -ne "Y") { Write-Host "Aborted." -ForegroundColor Yellow; Write-Log "Aborted: low staging-drive space."; exit 1 }
+            if ($Unattended) {
+                Write-Host "  [Unattended] Continuing despite low free space." -ForegroundColor Yellow
+                Write-Log "Unattended: low disk space warning -- continuing."
+            } else {
+                $cont = Read-Host "  Continue anyway? (Y/N)"
+                if ($cont.ToUpper() -ne "Y") { Write-Host "Aborted." -ForegroundColor Yellow; Write-Log "Aborted: low staging-drive space."; exit 1 }
+            }
         }
         Write-Log "Space check: free=$([Math]::Round($freeBytes/1GB,1))GB zips=$([Math]::Round($zipBytes/1GB,1))GB"
     } catch { Write-Log "Space check skipped: $_" }
@@ -1883,11 +2190,16 @@ if ($backupErrors -gt 0) {
     Write-Host "  Continuing without a complete backup means you may not be able to fully" -ForegroundColor Yellow
     Write-Host "  restore this run's changes if something goes wrong." -ForegroundColor Yellow
     Write-Log "Backup WARNING: $backupErrors file(s) failed to copy."
-    $contBackup = (Read-Host "  Continue anyway? (Y/N)").Trim().ToUpper()
-    if ($contBackup -ne "Y") {
-        Write-Host "Aborted." -ForegroundColor Yellow
-        Write-Log "Aborted: user declined to continue with incomplete backup."
-        exit 1
+    if ($Unattended) {
+        Write-Host "  [Unattended] Continuing despite incomplete backup." -ForegroundColor Yellow
+        Write-Log "Unattended: incomplete backup -- continuing."
+    } else {
+        $contBackup = (Read-Host "  Continue anyway? (Y/N)").Trim().ToUpper()
+        if ($contBackup -ne "Y") {
+            Write-Host "Aborted." -ForegroundColor Yellow
+            Write-Log "Aborted: user declined to continue with incomplete backup."
+            exit 1
+        }
     }
 }
 Write-Host "Backup saved to: $backupPath" -ForegroundColor Green
@@ -1909,11 +2221,17 @@ if ($mode -eq "AutoSync") {
     # If onlySync is already populated from the overrides file, use it directly.
     # Otherwise drop straight into the interactive picker (which includes All/Browse/Search).
     if ($onlySyncList.Count -eq 0) {
-        $onlySyncList = Select-GamesInteractive -zipSource $zipSource -installFolder $gamesInstallFolder
-        if ($null -eq $onlySyncList -or $onlySyncList.Count -eq 0) {
-            # Empty return means "All games" was chosen or nothing is left to extract.
-            # Either way, pass an empty list to Invoke-AutoSync (= no filter).
-            $onlySyncList = @()
+        if ($Unattended) {
+            Write-Host "  [Unattended] Game selection: all unextracted games." -ForegroundColor DarkCyan
+            Write-Log "Unattended: game selection = all."
+            # $onlySyncList stays empty -- Invoke-AutoSync treats empty as no filter (all games).
+        } else {
+            $onlySyncList = Select-GamesInteractive -zipSource $zipSource -installFolder $gamesInstallFolder
+            if ($null -eq $onlySyncList -or $onlySyncList.Count -eq 0) {
+                # Empty return means "All games" was chosen or nothing is left to extract.
+                # Either way, pass an empty list to Invoke-AutoSync (= no filter).
+                $onlySyncList = @()
+            }
         }
     }
 
@@ -1998,13 +2316,42 @@ if ($result.Ambiguous.Count -gt 0) {
     Write-Host ""
     Write-Host ("  {0} game(s) need manual registration -- see ACTION REQUIRED at the end of this run." -f $manualRegData.Count) -ForegroundColor Yellow
 }
+if ($result.Unmatched.Count -gt 0) {
+    Write-Host ("  {0} game folder(s) not recognised by TeknoParrot -- see ACTION REQUIRED at the end of this run." -f $result.Unmatched.Count) -ForegroundColor Yellow
+}
+
+# =============================================================================
+# SECTION 8b — Download game thumbnails (optional)
+# =============================================================================
+
+Write-Host ""
+if ($Unattended) {
+    Write-Host "  [Unattended] Downloading missing thumbnails." -ForegroundColor DarkCyan
+    Write-Log "Unattended: thumbnail download = Y."
+    $doThumb = "Y"
+} else {
+    $doThumb = (Read-Host "Download thumbnails for registered games missing an icon? (Y/N)").Trim().ToUpper()
+}
+if ($doThumb -eq "Y") {
+    Write-Host ""
+    Write-Host "Downloading thumbnails from TeknoParrotUIThumbnails..." -ForegroundColor Cyan
+    Write-Host " Source: https://github.com/teknogods/TeknoParrotUIThumbnails" -ForegroundColor DarkCyan
+    Write-Host ""
+    Invoke-ThumbnailDownload -userProfilesDir $userProfilesDir -tpRoot $tpRoot
+}
 
 # =============================================================================
 # SECTION 9  — Game repair: fix broken GamePaths
 # =============================================================================
 
 Write-Host ""
-$doRepair = Read-Host "Check for and repair broken game paths now? (Y/N)"
+if ($Unattended) {
+    Write-Host "  [Unattended] Running repair." -ForegroundColor DarkCyan
+    Write-Log "Unattended: repair = Y."
+    $doRepair = "Y"
+} else {
+    $doRepair = Read-Host "Check for and repair broken game paths now? (Y/N)"
+}
 $nf   = @(); $amb2 = @()   # initialise so the final summary can reference them safely
 if ($doRepair.Trim().ToUpper() -eq "Y") {
     Write-Host ""
@@ -2041,6 +2388,7 @@ if ($doRepair.Trim().ToUpper() -eq "Y") {
 
 $MinBoundForArchetype = 5
 $noArchetypeItems     = @()   # populated after propagation; used in ACTION REQUIRED
+$reports              = $null  # populated if propagation runs; used by Write-ControlsStatus
 
 Write-Host ""
 Write-Host "--------------------------------------------" -ForegroundColor Cyan
@@ -2053,8 +2401,8 @@ if ($pool.Count -eq 0) {
     # First run: nothing to copy FROM yet. Help the user plan what to bind.
     Write-Host " No fully-bound example games found yet, so there is nothing" -ForegroundColor Yellow
     Write-Host " to copy controls from yet. Let's plan which games to bind first." -ForegroundColor Yellow
-    Invoke-DeviceSurvey
-    Write-Log "Propagation: no reference games found (>= $MinBoundForArchetype bound buttons); ran device survey."
+    if (-not $Unattended) { Invoke-DeviceSurvey }
+    Write-Log "Propagation: no reference games found (>= $MinBoundForArchetype bound buttons)$(if (-not $Unattended) { '; ran device survey' })."
 } else {
     Write-Host " Found these bound games to copy controls FROM:" -ForegroundColor Green
     foreach ($s in $pool) {
@@ -2069,11 +2417,17 @@ if ($pool.Count -eq 0) {
     Write-Host " game-specific controls (gear shifts, special buttons) unbound for" -ForegroundColor DarkCyan
     Write-Host " you to set. Your UserProfiles were backed up at the start of this run." -ForegroundColor DarkCyan
     Write-Host ""
-    if ((Read-Host " Want a recommended binding plan for more control types first? (Y/N)").ToUpper() -eq "Y") {
+    if (-not $Unattended -and (Read-Host " Want a recommended binding plan for more control types first? (Y/N)").ToUpper() -eq "Y") {
         Invoke-DeviceSurvey
         Write-Host ""
     }
-    $goCtl = Read-Host " Propagate controls now? (Y/N)"
+    if ($Unattended) {
+        Write-Host "  [Unattended] Propagating controls." -ForegroundColor DarkCyan
+        Write-Log "Unattended: propagation = Y."
+        $goCtl = "Y"
+    } else {
+        $goCtl = Read-Host " Propagate controls now? (Y/N)"
+    }
     if ($goCtl.ToUpper() -eq "Y") {
         $reports = Invoke-ControlPropagation -userProfilesDir $userProfilesDir -pool $pool -minBound $MinBoundForArchetype -noPropagate $noPropagateList -forceArchetype $forceArchetypeMap -familyOverride $familyOverrideMap
         Write-Host ""
@@ -2130,18 +2484,33 @@ Write-Host "  Already present  : $($result.Already.Count)"    -ForegroundColor D
 if ($result.Ambiguous.Count -gt 0) {
     Write-Host "  Manual needed    : $($manualRegData.Count) game(s)  (see ACTION REQUIRED below)" -ForegroundColor Yellow
 }
+if ($result.Unmatched.Count -gt 0) {
+    Write-Host ("  Not in TeknoParrot : {0} folder(s)  (see ACTION REQUIRED below)" -f $result.Unmatched.Count) -ForegroundColor Yellow
+}
 Write-Host ""
 Write-Host "  Backup : $backupPath" -ForegroundColor DarkCyan
 Write-Host "  Log    : $logPath"    -ForegroundColor DarkCyan
 
-Write-Log "Completed. Registered=$($result.Registered.Count) Already=$($result.Already.Count) ManualReg=$($result.Ambiguous.Count)"
+$csStatusPath = Join-Path $PSScriptRoot "TeknoParrot-Manager-controls.txt"
+$csCount = Write-ControlsStatus -userProfilesDir $userProfilesDir -pool $pool -propagationReports $reports -outputPath $csStatusPath
+if ($csCount -ge 0) {
+    Write-Host "  Controls : $csStatusPath" -ForegroundColor DarkCyan
+    Write-Log "Controls status: wrote $csCount games to $csStatusPath"
+}
+
+Write-Log "Completed. Registered=$($result.Registered.Count) Already=$($result.Already.Count) ManualReg=$($result.Ambiguous.Count) Unmatched=$($result.Unmatched.Count)"
 
 # =============================================================================
 # LAUNCHBOX XML EXPORT  (optional, runs before ACTION REQUIRED)
 # =============================================================================
 
 Write-Host ""
-$doLB = (Read-Host "Export a LaunchBox import XML for all registered games? (Y/N)").Trim().ToUpper()
+if ($Unattended) {
+    $doLB = "N"
+    Write-Log "Unattended: LaunchBox export skipped."
+} else {
+    $doLB = (Read-Host "Export a LaunchBox import XML for all registered games? (Y/N)").Trim().ToUpper()
+}
 if ($doLB -eq "Y") {
     $lbPath  = Join-Path $PSScriptRoot "TeknoParrot-LaunchBox-Import.xml"
     $lbCount = Export-LaunchBoxXml -userProfilesDir $userProfilesDir -tpRoot $tpRoot -outputPath $lbPath
@@ -2185,7 +2554,8 @@ if ($doLB -eq "Y") {
 # =============================================================================
 
 $hasAnyAction = ($manualRegData.Count -gt 0) -or ($amb2.Count -gt 0) -or
-                ($nf.Count -gt 0) -or ($noArchetypeItems.Count -gt 0)
+                ($nf.Count -gt 0) -or ($noArchetypeItems.Count -gt 0) -or
+                ($result.Unmatched.Count -gt 0)
 
 if ($hasAnyAction) {
     Write-Host ""
@@ -2299,6 +2669,29 @@ if ($hasAnyAction) {
             Write-Host "  Pick one to bind first: $suggestion" -ForegroundColor DarkCyan
             Write-Host ""
         }
+    }
+
+    # ── 5. Game folders not recognised by TeknoParrot ────────────────────────
+    if ($result.Unmatched.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  GAME FOLDERS NOT RECOGNISED BY TEKNOPARROT" -ForegroundColor Yellow
+        Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
+        Write-Host "  These folders contained game files but none of their" -ForegroundColor DarkCyan
+        Write-Host "  executables matched any profile in TeknoParrot's library." -ForegroundColor DarkCyan
+        Write-Host "  They are likely games TeknoParrot does not yet support, or" -ForegroundColor DarkCyan
+        Write-Host "  utilities / launchers that live alongside your games." -ForegroundColor DarkCyan
+        Write-Host "  No action is required -- this is informational only." -ForegroundColor DarkCyan
+        Write-Host ""
+        $lineLen = 70; $line = "  "; $firstU = $true
+        foreach ($folder in $result.Unmatched) {
+            $add = if ($firstU) { $folder } else { ", $folder" }
+            if (($line + $add).Length -gt $lineLen) {
+                Write-Host $line -ForegroundColor DarkGray
+                $line = "  $folder"; $firstU = $false
+            } else { $line += $add; $firstU = $false }
+        }
+        if ($line.Trim()) { Write-Host $line -ForegroundColor DarkGray }
+        Write-Host ""
     }
 
     Write-Host "============================================" -ForegroundColor Yellow

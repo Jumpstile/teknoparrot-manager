@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.26 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.28 BETA  --  QUICK START
 ===============================================================================
 
   Registers your games with TeknoParrot and copies controls across games of
@@ -65,6 +65,39 @@
      copying those controls to every other game of the same type.
 
   3. Launch ONE updated game and test it before trusting the rest.
+
+
+  UNATTENDED MODE
+  ---------------
+  Run with -Unattended to skip all prompts and let the script handle
+  everything automatically -- extract new games, register, repair,
+  propagate, download thumbnails, and log results:
+
+      .\TeknoParrot-Manager.ps1 -Unattended
+
+  Requires saved settings (run once interactively first). Designed for
+  Windows Task Scheduler. Check TeknoParrot-Manager.log after each run.
+  Full scheduling instructions: TeknoParrot-Manager-README.txt.
+
+
+  THUMBNAIL DOWNLOAD (OPTIONAL)
+  -----------------------------
+  After registration the script offers to download game icons:
+
+      Download thumbnails for registered games missing an icon? (Y/N)
+
+  Answer Y and the script fetches a <ProfileCode>.png for every registered
+  game that does not already have one in <TeknoParrotRoot>\Icons\ -- the
+  folder TeknoParrotUI uses for game thumbnails. Icons are downloaded from:
+
+    https://github.com/teknogods/TeknoParrotUIThumbnails
+
+  Summary printed at the end:
+    Thumbnails: 47 fetched, 12 already present, 8 not in repo.
+
+  Not all games have a thumbnail in the repo. Missing ones are skipped
+  without error and counted as "not in repo". You can add custom icons
+  yourself by dropping a <ProfileCode>.png into the Icons folder.
 
 
   LAUNCHBOX EXPORT (OPTIONAL)
@@ -139,6 +172,10 @@
   At the end of every run the script prints an ACTION REQUIRED section
   listing everything that still needs your attention:
 
+    Not in TeknoParrot      Folders with game files that matched no
+                            TeknoParrot profile. Informational -- no
+                            action needed. Shows unsupported games.
+
     Register these games    Games whose executable is shared by multiple
                             TeknoParrot profiles and the folder name did not
                             match confidently enough to auto-register. Shows
@@ -181,6 +218,18 @@
     so they can differentiate titles with otherwise identical names.
   - Games already bound are left untouched.
   - Game-specific controls are left for you to set manually.
+  - After registration, game folders with no matching TeknoParrot profile
+    are listed in ACTION REQUIRED -- so you finally know which titles are
+    unsupported vs just failing to register.
+  - After every run, TeknoParrot-Manager-controls.txt is written next to
+    the script: every game, its family, propagation source, bound count,
+    and any buttons still manual. Open it when a game misbehaves weeks later.
+  - On first run, the script auto-detects TeknoParrot's install path before
+    prompting -- scans LaunchBox folders, drive roots, and Program Files.
+  - After registering, the script offers to download missing game thumbnails
+    from the TeknoParrotUIThumbnails repo into <TeknoParrotRoot>\Icons\.
+    Already-present icons are never overwritten; icons not in the repo are
+    skipped without error.
   - After registering, the script offers to repair any broken game paths.
   - On later runs the script remembers your settings -- press Y to reuse.
   - To fix a mis-classified game's control family (e.g. FamilyGuyBowling),
@@ -224,6 +273,9 @@
   TeknoParrot-Manager.log              Log of every run.
   TeknoParrot-Manager.syncstate.json   Tracks extracted ZIPs (in staging
                                        folder). Delete to re-extract all.
+  TeknoParrot-Manager-controls.txt     Controls state snapshot (written after
+                                       every run). Family, propagation source,
+                                       bound count, manual buttons per game.
   TeknoParrot-LaunchBox-Import.xml     Reference XML (written when you answer
                                        Y to the LaunchBox export prompt).
 
