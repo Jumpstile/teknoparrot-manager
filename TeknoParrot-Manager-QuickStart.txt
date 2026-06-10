@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.31 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.32 BETA  --  QUICK START
 ===============================================================================
 
   Registers your games with TeknoParrot and copies controls across games of

@@ -6,6 +6,34 @@
 
 
 -------------------------------------------------------------------------------
+  v0.32 BETA  (2026-06-10)
+-------------------------------------------------------------------------------
+
+  New features:
+
+  - HyperSpin 2 export. After each run the script now offers to add all
+    registered TeknoParrot games to HyperSpin 2's game list JSON. At the
+    end-of-run prompt ("Export registered games to HyperSpin 2? Y/N") the
+    script locates the HyperSpin 2 data folder (default
+    C:\ProgramData\HyperSpin\data), finds the TeknoParrot game list by
+    scanning data\games\ for the file whose ROM entries use .xml names,
+    and appends any games not already present. Games are added with title
+    only; use HyperSpin's Scrape feature to pull box art and metadata.
+    The games file is backed up before every write. The data path is saved
+    to config and reused on subsequent runs.
+
+  Bug fixes / improvements:
+
+  - RetroBat/Batocera folder suffix detection now recognises all three
+    extensions that RetroBat uses to identify TeknoParrot game folders:
+    .teknoparrot, .parrot, and .game. Previously only .teknoparrot was
+    stripped when matching or tracking folders; .parrot and .game folders
+    would appear as unrecognised. Extraction still creates .teknoparrot
+    folders (the most common format). The RetroBat prompt and config echo
+    updated to mention all three variants.
+
+
+-------------------------------------------------------------------------------
   v0.31 BETA  (2026-06-10)
 -------------------------------------------------------------------------------
 
