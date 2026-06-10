@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.30 BETA
+# TeknoParrot Manager  |  v0.31 BETA
 # =============================================================================
 #
 # Registers your extracted games with TeknoParrot so they appear and launch
@@ -59,7 +59,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.30 BETA       " -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.31 BETA       " -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -563,7 +563,7 @@ function Invoke-AutoSync {
     $syncState = @{}
     if (Test-Path $syncStatePath) {
         try {
-            $loaded = Get-Content $syncStatePath -Raw | ConvertFrom-Json
+            $loaded = Get-Content -LiteralPath $syncStatePath -Raw | ConvertFrom-Json
             foreach ($prop in $loaded.PSObject.Properties) { $syncState[$prop.Name] = $prop.Value }
         } catch { Write-Log "AutoSync: could not read sync state -- starting fresh." }
     }
@@ -1560,7 +1560,7 @@ function Export-LaunchBoxXml {
             [void]$sb.AppendLine("    <Completed>false</Completed>")
             [void]$sb.AppendLine("    <Hidden>false</Hidden>")
             [void]$sb.AppendLine("    <Enabled>true</Enabled>")
-            [void]$sb.AppendLine("    <Notes>Exported by TeknoParrot Manager v0.30</Notes>")
+            [void]$sb.AppendLine("    <Notes>Exported by TeknoParrot Manager v0.31</Notes>")
             [void]$sb.AppendLine('  </Game>')
             $count++
         } catch {
@@ -1789,7 +1789,7 @@ function Write-ControlsStatus {
     }
 }
 
-Write-Log "Script started (v0.30$(if ($Unattended) { ' [Unattended]' }))."
+Write-Log "Script started (v0.31$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
 # SECTION 1 — Load or prompt for configuration
@@ -2028,8 +2028,13 @@ if ($mode -eq "AutoSync") {
         Write-Log "ERROR: staging folder overlaps ZIP source."; exit 1
     }
     if (-not (Test-Path $gamesInstallFolder)) {
-        New-Item -ItemType Directory -Path $gamesInstallFolder -Force | Out-Null
-        Write-Host "Created staging folder: $gamesInstallFolder" -ForegroundColor Green
+        try {
+            New-Item -ItemType Directory -Path $gamesInstallFolder -Force -ErrorAction Stop | Out-Null
+            Write-Host "Created staging folder: $gamesInstallFolder" -ForegroundColor Green
+        } catch {
+            Write-Host ""; Write-Host "ERROR: Could not create staging folder: $_" -ForegroundColor Red
+            Write-Log "ERROR: Could not create staging folder -- $_"; exit 1
+        }
     }
     # Free-space check: extracted games are usually larger than their ZIPs, so
     # warn if the staging drive has less than ~1.5x the total ZIP size free.
