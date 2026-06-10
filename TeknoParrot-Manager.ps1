@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.31 BETA
+# TeknoParrot Manager  |  v0.32 BETA
 # =============================================================================
 #
 # Registers your extracted games with TeknoParrot so they appear and launch
@@ -59,7 +59,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.31 BETA       " -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.32 BETA       " -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -383,7 +383,7 @@ function Select-GamesInteractive {
     # destination, using the same convention-agnostic logic as AutoSync.
     $normalizedFolderMap = @{}
     foreach ($dir in (Get-ChildItem -LiteralPath $installFolder -Directory -ErrorAction SilentlyContinue)) {
-        $norm = ($dir.Name -replace '\.teknoparrot$', '') -replace ' (?=[\[\(])', ''
+        $norm = ($dir.Name -replace '\.(teknoparrot|parrot|game)$', '') -replace ' (?=[\[\(])', ''
         if (-not $normalizedFolderMap.ContainsKey($norm)) {
             $normalizedFolderMap[$norm] = $dir.FullName
         }
@@ -588,7 +588,7 @@ function Invoke-AutoSync {
     # extracted under the old naming convention and the ZIP now uses the new one.
     $normalizedFolderMap = @{}
     foreach ($dir in (Get-ChildItem -LiteralPath $installFolder -Directory -ErrorAction SilentlyContinue)) {
-        $norm = ($dir.Name -replace '\.teknoparrot$', '') -replace ' (?=[\[\(])', ''
+        $norm = ($dir.Name -replace '\.(teknoparrot|parrot|game)$', '') -replace ' (?=[\[\(])', ''
         if (-not $normalizedFolderMap.ContainsKey($norm)) {
             $normalizedFolderMap[$norm] = $dir.FullName
         }
@@ -775,7 +775,7 @@ function Register-Games {
     foreach ($exe in $exeFiles) {
         $relPath    = $exe.FullName.Substring($installBase.Length).TrimStart('\')
         $folderName = ($relPath -split '\\')[0]
-        $folderKey  = $folderName -replace '\.teknoparrot$', ''   # strip suffix for matching/tracking
+        $folderKey  = $folderName -replace '\.(teknoparrot|parrot|game)$', ''   # strip suffix for matching/tracking
         $allExeFolders[$folderKey] = $true
 
         $key = $exe.Name.ToLower()
@@ -787,7 +787,7 @@ function Register-Games {
         # Same executable name maps to more than one profile.
         # Attempt folder-name fuzzy matching before giving up.
         if ($matchList.Count -gt 1) {
-            # $folderKey has the .teknoparrot suffix stripped, ready to normalise.
+            # $folderKey has the RetroBat suffix stripped, ready to normalise.
             $normFolder  = Get-NormalizedGameKey $folderKey
 
             $bestFuzzy      = $null
@@ -1560,7 +1560,7 @@ function Export-LaunchBoxXml {
             [void]$sb.AppendLine("    <Completed>false</Completed>")
             [void]$sb.AppendLine("    <Hidden>false</Hidden>")
             [void]$sb.AppendLine("    <Enabled>true</Enabled>")
-            [void]$sb.AppendLine("    <Notes>Exported by TeknoParrot Manager v0.31</Notes>")
+            [void]$sb.AppendLine("    <Notes>Exported by TeknoParrot Manager v0.32</Notes>")
             [void]$sb.AppendLine('  </Game>')
             $count++
         } catch {
@@ -1577,6 +1577,208 @@ function Export-LaunchBoxXml {
         Write-Log "LaunchBox export: FAILED to write file -- $_"
         return -1
     }
+}
+
+# =============================================================================
+# HYPERSPIN 2 JSON EXPORT  (optional)
+# =============================================================================
+# Adds registered TeknoParrot games to HyperSpin 2's game list JSON.
+# HyperSpin 2 stores one JSON file per system under <dataPath>\games\.
+# The TeknoParrot file is identified by looking for one whose games have
+# .xml ROM entries (the format TeknoParrot uses for its profile files).
+# Games already present (matched by fileName) are never duplicated.
+# The existing file is backed up before any write.
+function Export-HyperSpinJson {
+    param([string]$userProfilesDir, [string]$hsDataPath)
+
+    # Locate and parse emulators.json
+    $emuPath = Join-Path $hsDataPath "emulators.json"
+    if (-not (Test-Path -LiteralPath $emuPath)) {
+        Write-Host "  ERROR: emulators.json not found: $emuPath" -ForegroundColor Red
+        Write-Log "HyperSpin export: emulators.json not found at $emuPath"
+        return -1
+    }
+    try {
+        $emuList = Get-Content -LiteralPath $emuPath -Raw | ConvertFrom-Json
+    } catch {
+        Write-Host "  ERROR: Could not parse emulators.json: $_" -ForegroundColor Red
+        Write-Log "HyperSpin export: failed to parse emulators.json -- $_"
+        return -1
+    }
+
+    # Find TeknoParrot entry by title
+    $tpEmu = $emuList | Where-Object { $_.title -ieq "TeknoParrot" } | Select-Object -First 1
+    if (-not $tpEmu) {
+        Write-Host "  ERROR: TeknoParrot emulator not found in emulators.json." -ForegroundColor Red
+        Write-Log "HyperSpin export: TeknoParrot not found in emulators.json"
+        return -1
+    }
+
+    # Find TeknoParrot games file: the one whose first game has .xml ROM entries
+    $gamesDir = Join-Path $hsDataPath "games"
+    if (-not (Test-Path -LiteralPath $gamesDir)) {
+        Write-Host "  ERROR: HyperSpin games folder not found: $gamesDir" -ForegroundColor Red
+        Write-Log "HyperSpin export: games folder not found at $gamesDir"
+        return -1
+    }
+
+    $tpGamesPath  = $null
+    $tpSystemGuid = $null
+    foreach ($gf in (Get-ChildItem -LiteralPath $gamesDir -Filter "*.json" -File -ErrorAction SilentlyContinue)) {
+        try {
+            $sample    = Get-Content -LiteralPath $gf.FullName -Raw | ConvertFrom-Json
+            $firstGame = if ($sample -is [array]) { $sample[0] } else { $sample }
+            if ($firstGame -and $firstGame.roms -and $firstGame.roms.Count -gt 0 -and
+                $firstGame.roms[0].name -like "*.xml") {
+                $tpGamesPath  = $gf.FullName
+                $tpSystemGuid = $firstGame.gameSystemId
+                break
+            }
+        } catch { continue }
+    }
+
+    if (-not $tpGamesPath) {
+        Write-Host "  ERROR: Could not find a TeknoParrot game list in $gamesDir." -ForegroundColor Red
+        Write-Log "HyperSpin export: no TeknoParrot games file found in $gamesDir"
+        return -1
+    }
+
+    # Load existing game list
+    try {
+        $existing = New-Object System.Collections.ArrayList
+        foreach ($g in (Get-Content -LiteralPath $tpGamesPath -Raw | ConvertFrom-Json)) {
+            [void]$existing.Add($g)
+        }
+    } catch {
+        Write-Host "  ERROR: Could not read games file: $_" -ForegroundColor Red
+        Write-Log "HyperSpin export: failed to read games file -- $_"
+        return -1
+    }
+
+    # Build set of already-known profile codes (case-insensitive)
+    $known = @{}
+    foreach ($g in $existing) {
+        if ($g.fileName) { $known[$g.fileName.ToLower()] = $true }
+    }
+
+    # Iterate UserProfiles; add each game not already in HyperSpin
+    $added   = 0
+    $now     = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ss.fffffff")
+    $xmlFiles = Get-ChildItem -LiteralPath $userProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Directory.Name -ne "FullBackup" }
+
+    foreach ($pf in $xmlFiles) {
+        $code = $pf.BaseName
+        if ($known.ContainsKey($code.ToLower())) { continue }
+
+        try {
+            $doc    = Read-Xml $pf.FullName
+            if ($null -eq $doc.GameProfile) { continue }
+            $gpNode = $doc.GameProfile.SelectSingleNode("GamePath")
+            if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { continue }
+            if (-not (Test-Path -LiteralPath $gpNode.InnerText.Trim())) { continue }
+
+            $descNode = $doc.GameProfile.SelectSingleNode("Description")
+            $title = if ($descNode -and -not [string]::IsNullOrWhiteSpace($descNode.InnerText)) {
+                $descNode.InnerText.Trim()
+            } else {
+                [regex]::Replace($code, '(?<=[a-z])(?=[A-Z])', ' ')
+            }
+        } catch { continue }
+
+        $gameId = [System.Guid]::NewGuid().ToString()
+        $romId  = [System.Guid]::NewGuid().ToString()
+
+        $romObj = [ordered]@{
+            id              = $romId
+            name            = "$code.xml"
+            size            = $null
+            crc             = $null
+            md5             = $null
+            sha1            = $null
+            relatedGameId   = $gameId
+            relatedSystemId = $tpSystemGuid
+            active          = $true
+            createdDate     = $now
+            modifiedDate    = $now
+        }
+
+        $gameObj = [ordered]@{
+            id                            = $gameId
+            name                          = $title
+            description                   = $title
+            releaseYear                   = $null
+            releaseDate                   = $null
+            cooperative                   = $false
+            players                       = 1
+            videoUrl                      = ""
+            developer                     = ""
+            publisher                     = ""
+            esrb                          = "Not Rated"
+            genres                        = ""
+            gameSystemId                  = $tpSystemGuid
+            fileName                      = $code
+            releaseType                   = "Released"
+            communityRating               = $null
+            communityRatingCount          = $null
+            wikipediaURL                  = ""
+            cloneOf                       = $null
+            referenceId                   = $null
+            datFileId                     = $null
+            metadataEnrichmentProvider    = $null
+            metadataEnrichmentCandidateId = $null
+            metadataEnrichmentAppliedDate = $null
+            titleId                       = $null
+            createdDate                   = $now
+            modifiedDate                  = $now
+            platform                      = $null
+            maxPlayers                    = $null
+            overview                      = $null
+            databaseID                    = $null
+            alternateNames                = $null
+            roms                          = @($romObj)
+            criticRatings                 = @()
+        }
+
+        [void]$existing.Add($gameObj)
+        $known[$code.ToLower()] = $true
+        $added++
+    }
+
+    if ($added -eq 0) {
+        Write-Log "HyperSpin export: no new games to add (all already present)"
+        return 0
+    }
+
+    # Refuse to write if HyperSpin is running
+    if (Get-Process -Name "HyperSpin" -ErrorAction SilentlyContinue) {
+        Write-Host "  ERROR: HyperSpin is running. Close it before updating the game list." -ForegroundColor Red
+        Write-Log "HyperSpin export: aborted -- HyperSpin is running"
+        return -1
+    }
+
+    # Backup then write
+    $backupPath = $tpGamesPath + ".bak_" + (Get-Date).ToString("yyyyMMdd_HHmmss")
+    try {
+        Copy-Item -LiteralPath $tpGamesPath -Destination $backupPath -ErrorAction Stop
+    } catch {
+        Write-Host "  ERROR: Could not back up games file: $_" -ForegroundColor Red
+        Write-Log "HyperSpin export: backup failed -- $_"
+        return -1
+    }
+
+    try {
+        $allGames = @($existing.ToArray())
+        $json = ConvertTo-Json -InputObject $allGames -Depth 10
+        [System.IO.File]::WriteAllText($tpGamesPath, $json, (New-Object System.Text.UTF8Encoding $false))
+    } catch {
+        Write-Host "  ERROR: Could not write games file: $_" -ForegroundColor Red
+        Write-Log "HyperSpin export: write failed -- $_"
+        return -1
+    }
+
+    Write-Log "HyperSpin export: added $added game(s) to $tpGamesPath (backup: $backupPath)"
+    return $added
 }
 
 # =============================================================================
@@ -1789,7 +1991,7 @@ function Write-ControlsStatus {
     }
 }
 
-Write-Log "Script started (v0.31$(if ($Unattended) { ' [Unattended]' }))."
+Write-Log "Script started (v0.32$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
 # SECTION 1 — Load or prompt for configuration
@@ -1801,6 +2003,7 @@ $mode               = $null   # "AutoSync", "RegisterOnly", or "Restore"
 $zipSource          = $null   # AutoSync only
 $gamesInstallFolder = $null   # always (the extracted-games root to register)
 $retroBat           = $false  # true = extracted folders named GameName.teknoparrot (RetroBat/Batocera)
+$hsDataPath         = $null   # HyperSpin 2 data folder (e.g. C:\ProgramData\HyperSpin\data)
 $configAccepted     = $false  # true when the user accepted a saved config this run
 
 if ($Unattended -and -not (Test-Path $configPath)) {
@@ -1818,7 +2021,8 @@ if (Test-Path $configPath) {
         Write-Host "  Mode                 : $($cfg.Mode)"
         if ($cfg.ZipSourceFolder)    { Write-Host "  ZIP source folder    : $($cfg.ZipSourceFolder)" }
         Write-Host "  Games install folder : $($cfg.GamesInstallFolder)"
-        if ($cfg.RetroBat) { Write-Host "  RetroBat mode        : Yes" }
+        if ($cfg.RetroBat)         { Write-Host "  RetroBat mode        : Yes" }
+        if ($cfg.HyperSpinDataPath){ Write-Host "  HyperSpin data path  : $($cfg.HyperSpinDataPath)" }
         Write-Host ""
         if ($Unattended) {
             Write-Host "  [Unattended] Using saved settings." -ForegroundColor DarkCyan
@@ -1844,6 +2048,7 @@ if (Test-Path $configPath) {
             $zipSource          = $cfg.ZipSourceFolder
             $gamesInstallFolder = $cfg.GamesInstallFolder
             if ($null -ne $cfg.RetroBat) { $retroBat = [bool]$cfg.RetroBat }
+            if ($cfg.HyperSpinDataPath)  { $hsDataPath = $cfg.HyperSpinDataPath }
             $configAccepted = $true
         }
         Write-Host ""
@@ -1936,7 +2141,8 @@ if (-not $gamesInstallFolder) {
 if (-not $configAccepted -and -not $Unattended -and $mode -ne "Restore") {
     Write-Host ""
     Write-Host "  Is this a RetroBat/Batocera installation?" -ForegroundColor Cyan
-    Write-Host "  (Y = game folders are named  GameName.teknoparrot  instead of  GameName)" -ForegroundColor DarkCyan
+    Write-Host "  (Y = game folders use a RetroBat suffix: .teknoparrot / .parrot / .game)" -ForegroundColor DarkCyan
+    Write-Host "  (extracted folders will be named  GameName.teknoparrot)" -ForegroundColor DarkCyan
     $rbChoice = (Read-Host "  Use RetroBat folder naming? (Y/N)").Trim().ToUpper()
     $retroBat = ($rbChoice -eq "Y")
     if ($retroBat) { Write-Log "RetroBat mode enabled by user." }
@@ -2100,6 +2306,7 @@ $cfgOut = [ordered]@{
     ZipSourceFolder    = $zipSource
     GamesInstallFolder = $gamesInstallFolder
     RetroBat           = $retroBat
+    HyperSpinDataPath  = $hsDataPath
 }
 try {
     [System.IO.File]::WriteAllText($configPath, ($cfgOut | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
@@ -2114,7 +2321,7 @@ Write-Host "  TeknoParrot root     : $tpRoot"
 Write-Host "  Mode                 : $mode"
 if ($zipSource)      { Write-Host "  ZIP source folder    : $zipSource" }
 Write-Host "  Games install folder : $gamesInstallFolder"
-if ($retroBat) { Write-Host "  RetroBat mode        : Yes (folders named *.teknoparrot)" -ForegroundColor Cyan }
+if ($retroBat) { Write-Host "  RetroBat mode        : Yes (*.teknoparrot / *.parrot / *.game recognised)" -ForegroundColor Cyan }
 
 # =============================================================================
 # SECTION 4b — Per-game overrides  (TeknoParrot-Manager.overrides.json)
@@ -2575,6 +2782,57 @@ if ($doLB -eq "Y") {
         Write-Host "  is a reference showing all registered games, their profile codes," -ForegroundColor DarkCyan
         Write-Host "  and executable paths. You do not need to import it directly." -ForegroundColor DarkCyan
         Write-Log "LaunchBox: exported $lbCount games to $lbPath"
+    }
+}
+
+# =============================================================================
+# HYPERSPIN 2 EXPORT  (optional, runs after LaunchBox export)
+# =============================================================================
+
+Write-Host ""
+if ($Unattended) {
+    $doHS = "N"
+    Write-Log "Unattended: HyperSpin 2 export skipped."
+} else {
+    $doHS = (Read-Host "Export registered games to HyperSpin 2? (Y/N)").Trim().ToUpper()
+}
+if ($doHS -eq "Y") {
+    if (-not $hsDataPath) {
+        Write-Host ""
+        Write-Host "  Enter HyperSpin 2 data folder path." -ForegroundColor Cyan
+        $hsInput = (Read-Host "  Path (default: C:\ProgramData\HyperSpin\data)").Trim()
+        if ([string]::IsNullOrWhiteSpace($hsInput)) { $hsInput = "C:\ProgramData\HyperSpin\data" }
+        $hsDataPath = $hsInput
+
+        # Persist the new path alongside the existing config
+        $cfgUpdate = [ordered]@{
+            TeknoParrotRoot    = $tpRoot
+            Mode               = $mode
+            ZipSourceFolder    = $zipSource
+            GamesInstallFolder = $gamesInstallFolder
+            RetroBat           = $retroBat
+            HyperSpinDataPath  = $hsDataPath
+        }
+        try {
+            [System.IO.File]::WriteAllText($configPath, ($cfgUpdate | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
+            Write-Log "Config: saved HyperSpinDataPath = $hsDataPath"
+        } catch {
+            Write-Log "Config: could not save HyperSpinDataPath -- $_"
+        }
+    }
+
+    Write-Host ""
+    $hsCount = Export-HyperSpinJson -userProfilesDir $userProfilesDir -hsDataPath $hsDataPath
+    if ($hsCount -lt 0) {
+        Write-Host "  HyperSpin 2 export failed -- see TeknoParrot-Manager.log" -ForegroundColor Red
+    } elseif ($hsCount -eq 0) {
+        Write-Host "  HyperSpin 2 already up to date -- no new games to add." -ForegroundColor Green
+    } else {
+        Write-Host ("  Added : {0} game(s) to HyperSpin 2" -f $hsCount) -ForegroundColor Green
+        Write-Host ""
+        Write-Host "  Games are added with title only. Use HyperSpin's Scrape feature" -ForegroundColor DarkCyan
+        Write-Host "  to fetch box art, descriptions, and ratings for the new entries." -ForegroundColor DarkCyan
+        Write-Log "HyperSpin 2: exported $hsCount game(s)"
     }
 }
 

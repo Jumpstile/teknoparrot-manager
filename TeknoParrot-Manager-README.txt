@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.31 BETA
+  TeknoParrot Manager  |  v0.32 BETA
 ===============================================================================
 
   Registers your extracted games with TeknoParrot so they appear and launch
@@ -979,6 +979,6 @@
 
 
 ===============================================================================
-  v0.31 BETA -- Test one game after each run.
+  v0.32 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================
