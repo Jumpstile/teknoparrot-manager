@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.28 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.29 BETA  --  QUICK START
 ===============================================================================
 
   Registers your games with TeknoParrot and copies controls across games of
@@ -16,9 +16,10 @@
 
   RUN IT
   ------
-  1. Open PowerShell in your TeknoParrot folder:
+  1. Open PowerShell in the folder where TeknoParrot-Manager.ps1 is
+     (typically a Scripts subfolder inside your TeknoParrot install):
 
-       cd "C:\path\to\TeknoParrot"
+       cd "C:\path\to\TeknoParrot\Scripts"
 
   2. Start the script:
 
@@ -77,6 +78,11 @@
 
   Requires saved settings (run once interactively first). Designed for
   Windows Task Scheduler. Check TeknoParrot-Manager.log after each run.
+
+  Restore mode cannot run unattended -- it needs you to pick a backup.
+  If your saved mode is "Restore", change it to AutoSync or RegisterOnly
+  before scheduling.
+
   Full scheduling instructions: TeknoParrot-Manager-README.txt.
 
 
