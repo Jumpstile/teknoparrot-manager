@@ -6,6 +6,39 @@
 
 
 -------------------------------------------------------------------------------
+  v0.33 BETA  (2026-06-10)
+-------------------------------------------------------------------------------
+
+  Bug fixes:
+
+  - Export-HyperSpinJson: roms detection was not PS 5.1-safe. PS 5.1's
+    ConvertFrom-Json may return a single-element JSON array as a bare
+    PSCustomObject rather than a one-element array. The scan for the
+    TeknoParrot games file checked roms.Count, which is $null on a
+    PSCustomObject, making the condition $null -gt 0 = $false so the
+    file was never detected. Since every TeknoParrot profile has exactly
+    one ROM entry, this could prevent the HyperSpin 2 export from finding
+    the game list on any PS 5.1 installation. Fixed by normalising roms
+    to either roms[0] (if array) or roms itself (if bare object) before
+    the name check.
+
+  - Test-Path used without -LiteralPath in 19 locations. The script's
+    convention is -LiteralPath on all file-system cmdlets. Paths derived
+    from user input (tpRoot, zipSource, gamesInstallFolder, syncStatePath)
+    are the highest-risk cases: a path with literal [ ] * ? characters
+    would be misinterpreted as a wildcard pattern, causing Test-Path to
+    return the wrong result. All instances updated.
+
+  - New-Item used -Path instead of -LiteralPath in 5 directory-creation
+    calls (UserProfiles, staging folder, FullBackup, timestamped backup,
+    Icons). Same wildcard-expansion risk as above. All updated.
+
+  - Add-Content used -Path instead of -LiteralPath for the log file write
+    (low real-world risk since $logPath derives from $PSScriptRoot, but
+    inconsistent with the script's own convention).
+
+
+-------------------------------------------------------------------------------
   v0.32 BETA  (2026-06-10)
 -------------------------------------------------------------------------------
 

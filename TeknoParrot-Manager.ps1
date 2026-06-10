@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.32 BETA
+# TeknoParrot Manager  |  v0.33 BETA
 # =============================================================================
 #
 # Registers your extracted games with TeknoParrot so they appear and launch
@@ -59,7 +59,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.32 BETA       " -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.33 BETA       " -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -81,7 +81,7 @@ function Write-Log {
     param([string]$msg)
     $line = "[{0}] {1}" -f (Get-Date).ToString("yyyy-MM-dd HH:mm:ss"), $msg
     try {
-        Add-Content -Path $logPath -Value $line -ErrorAction Stop
+        Add-Content -LiteralPath $logPath -Value $line -ErrorAction Stop
     } catch {
         # First failure: surface a clear warning so the user knows their session
         # is not being archived and can investigate before the run continues.
@@ -204,7 +204,7 @@ function Find-TeknoParrotRoot {
         [void]$candidates.Add((Join-Path $up "AppData\Roaming\LaunchBox\Emulators\TeknoParrot"))
     }
     $drives = @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue |
-                Where-Object { $_.Root -and -not (Test-IsNetworkPath $_.Root) -and (Test-Path $_.Root) } |
+                Where-Object { $_.Root -and -not (Test-IsNetworkPath $_.Root) -and (Test-Path -LiteralPath $_.Root) } |
                 ForEach-Object { $_.Root.TrimEnd('\') })
     foreach ($d in $drives) {
         [void]$candidates.Add("$d\TeknoParrot")
@@ -561,7 +561,7 @@ function Invoke-AutoSync {
           $noSync = @(), $onlySync = @(), [bool]$retroBat = $false)
 
     $syncState = @{}
-    if (Test-Path $syncStatePath) {
+    if (Test-Path -LiteralPath $syncStatePath) {
         try {
             $loaded = Get-Content -LiteralPath $syncStatePath -Raw | ConvertFrom-Json
             foreach ($prop in $loaded.PSObject.Properties) { $syncState[$prop.Name] = $prop.Value }
@@ -803,7 +803,7 @@ function Register-Games {
                 $code = $bestFuzzy.Code
                 if ($seenCodes.ContainsKey($code)) { continue }
                 $userProfile = Join-Path $userProfilesDir ($code + ".xml")
-                if (Test-Path $userProfile) {
+                if (Test-Path -LiteralPath $userProfile) {
                     [void]$already.Add($code); $seenCodes[$code] = $true
                 } else {
                     # Mark seen before the file operation so that if Save throws,
@@ -848,7 +848,7 @@ function Register-Games {
         if ($seenCodes.ContainsKey($code)) { continue }
 
         $userProfile = Join-Path $userProfilesDir ($code + ".xml")
-        if (Test-Path $userProfile) {
+        if (Test-Path -LiteralPath $userProfile) {
             [void]$already.Add($code)
             $seenCodes[$code] = $true
             continue
@@ -1423,7 +1423,7 @@ function Invoke-RestoreBackup {
     param([string]$userProfilesDir)
 
     $backupRoot = Join-Path $userProfilesDir "FullBackup"
-    if (-not (Test-Path $backupRoot)) {
+    if (-not (Test-Path -LiteralPath $backupRoot)) {
         Write-Host "  No backups found in: $backupRoot" -ForegroundColor Yellow
         return
     }
@@ -1560,7 +1560,7 @@ function Export-LaunchBoxXml {
             [void]$sb.AppendLine("    <Completed>false</Completed>")
             [void]$sb.AppendLine("    <Hidden>false</Hidden>")
             [void]$sb.AppendLine("    <Enabled>true</Enabled>")
-            [void]$sb.AppendLine("    <Notes>Exported by TeknoParrot Manager v0.32</Notes>")
+            [void]$sb.AppendLine("    <Notes>Exported by TeknoParrot Manager v0.33</Notes>")
             [void]$sb.AppendLine('  </Game>')
             $count++
         } catch {
@@ -1628,8 +1628,10 @@ function Export-HyperSpinJson {
         try {
             $sample    = Get-Content -LiteralPath $gf.FullName -Raw | ConvertFrom-Json
             $firstGame = if ($sample -is [array]) { $sample[0] } else { $sample }
-            if ($firstGame -and $firstGame.roms -and $firstGame.roms.Count -gt 0 -and
-                $firstGame.roms[0].name -like "*.xml") {
+            # PS 5.1 may return a single-element JSON array as a bare PSCustomObject
+            # rather than a one-element array.  Normalise roms to an array either way.
+            $firstRom  = if ($firstGame -and $firstGame.roms -is [array]) { $firstGame.roms[0] } else { $firstGame.roms }
+            if ($firstGame -and $firstRom -and $firstRom.name -like "*.xml") {
                 $tpGamesPath  = $gf.FullName
                 $tpSystemGuid = $firstGame.gameSystemId
                 break
@@ -1792,9 +1794,9 @@ function Invoke-ThumbnailDownload {
     param([string]$userProfilesDir, [string]$tpRoot)
 
     $iconsDir = Join-Path $tpRoot "Icons"
-    if (-not (Test-Path $iconsDir)) {
+    if (-not (Test-Path -LiteralPath $iconsDir)) {
         try {
-            New-Item -ItemType Directory -Path $iconsDir -ErrorAction Stop | Out-Null
+            New-Item -ItemType Directory -LiteralPath $iconsDir -ErrorAction Stop | Out-Null
             Write-Log "Thumbnails: created Icons folder at $iconsDir"
         } catch {
             Write-Host "  ERROR: Could not create Icons folder: $_" -ForegroundColor Red
@@ -1991,7 +1993,7 @@ function Write-ControlsStatus {
     }
 }
 
-Write-Log "Script started (v0.32$(if ($Unattended) { ' [Unattended]' }))."
+Write-Log "Script started (v0.33$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
 # SECTION 1 — Load or prompt for configuration
@@ -2006,14 +2008,14 @@ $retroBat           = $false  # true = extracted folders named GameName.teknopar
 $hsDataPath         = $null   # HyperSpin 2 data folder (e.g. C:\ProgramData\HyperSpin\data)
 $configAccepted     = $false  # true when the user accepted a saved config this run
 
-if ($Unattended -and -not (Test-Path $configPath)) {
+if ($Unattended -and -not (Test-Path -LiteralPath $configPath)) {
     Write-Host ""
     Write-Host "ERROR: Unattended mode requires saved settings." -ForegroundColor Red
     Write-Host "Run the script once interactively to save your configuration, then retry with -Unattended." -ForegroundColor Yellow
     Write-Log "ERROR: Unattended mode -- no saved config at $configPath"; exit 1
 }
 
-if (Test-Path $configPath) {
+if (Test-Path -LiteralPath $configPath) {
     try {
         $cfg = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
         Write-Host "Saved configuration found:" -ForegroundColor Cyan
@@ -2157,7 +2159,7 @@ if ($mode -eq "Restore") {
         Write-Host "ERROR: Restore mode cannot run unattended (requires interactive selection)." -ForegroundColor Red
         Write-Log "ERROR: Unattended mode -- Restore requires user interaction."; exit 1
     }
-    if (-not (Test-Path $tpRoot)) {
+    if (-not (Test-Path -LiteralPath $tpRoot)) {
         Write-Host ""; Write-Host "ERROR: TeknoParrot root folder not found: $tpRoot" -ForegroundColor Red
         Write-Log "ERROR: TeknoParrot root not found (Restore mode)."; exit 1
     }
@@ -2179,7 +2181,7 @@ if ($mode -eq "Restore") {
 # SECTION 2 — Validate TeknoParrot root, locate GameProfiles and UserProfiles
 # =============================================================================
 
-if (-not (Test-Path $tpRoot)) {
+if (-not (Test-Path -LiteralPath $tpRoot)) {
     Write-Host ""; Write-Host "ERROR: TeknoParrot root folder not found: $tpRoot" -ForegroundColor Red
     Write-Log "ERROR: TeknoParrot root not found."; exit 1
 }
@@ -2187,14 +2189,14 @@ if (-not (Test-Path $tpRoot)) {
 # TeknoParrot's launcher is TeknoParrotUi.exe (Windows path checks are
 # case-insensitive, so this also matches TeknoParrotUI.exe).
 $tpExe = Join-Path $tpRoot "TeknoParrotUi.exe"
-if (-not (Test-Path $tpExe)) {
+if (-not (Test-Path -LiteralPath $tpExe)) {
     Write-Host ""; Write-Host "ERROR: TeknoParrotUi.exe not found in: $tpRoot" -ForegroundColor Red
     Write-Host "Make sure the path points to the TeknoParrot root folder." -ForegroundColor Yellow
     Write-Log "ERROR: TeknoParrotUi.exe not found."; exit 1
 }
 
 $gameProfilesDir = Join-Path $tpRoot "GameProfiles"
-if (-not (Test-Path $gameProfilesDir)) {
+if (-not (Test-Path -LiteralPath $gameProfilesDir)) {
     Write-Host ""; Write-Host "ERROR: GameProfiles folder not found in: $tpRoot" -ForegroundColor Red
     Write-Host "This folder ships with TeknoParrot and is required to register games." -ForegroundColor Yellow
     Write-Host "Run TeknoParrotUi.exe once and let it complete its updates, then retry." -ForegroundColor Yellow
@@ -2202,9 +2204,9 @@ if (-not (Test-Path $gameProfilesDir)) {
 }
 
 $userProfilesDir = Join-Path $tpRoot "UserProfiles"
-if (-not (Test-Path $userProfilesDir)) {
+if (-not (Test-Path -LiteralPath $userProfilesDir)) {
     try {
-        New-Item -ItemType Directory -Path $userProfilesDir -ErrorAction Stop | Out-Null
+        New-Item -ItemType Directory -LiteralPath $userProfilesDir -ErrorAction Stop | Out-Null
     } catch {
         Write-Host ""; Write-Host "ERROR: Could not create UserProfiles folder: $_" -ForegroundColor Red
         Write-Log "ERROR: Could not create UserProfiles folder -- $_"; exit 1
@@ -2212,7 +2214,7 @@ if (-not (Test-Path $userProfilesDir)) {
 }
 
 if ($mode -eq "AutoSync") {
-    if (-not (Test-Path $zipSource)) {
+    if (-not (Test-Path -LiteralPath $zipSource)) {
         Write-Host ""; Write-Host "ERROR: ZIP source folder not found: $zipSource" -ForegroundColor Red
         Write-Log "ERROR: ZIP source not found."; exit 1
     }
@@ -2233,9 +2235,9 @@ if ($mode -eq "AutoSync") {
         Write-Host "Keep them on separate paths so the original games folder stays clean." -ForegroundColor Yellow
         Write-Log "ERROR: staging folder overlaps ZIP source."; exit 1
     }
-    if (-not (Test-Path $gamesInstallFolder)) {
+    if (-not (Test-Path -LiteralPath $gamesInstallFolder)) {
         try {
-            New-Item -ItemType Directory -Path $gamesInstallFolder -Force -ErrorAction Stop | Out-Null
+            New-Item -ItemType Directory -LiteralPath $gamesInstallFolder -Force -ErrorAction Stop | Out-Null
             Write-Host "Created staging folder: $gamesInstallFolder" -ForegroundColor Green
         } catch {
             Write-Host ""; Write-Host "ERROR: Could not create staging folder: $_" -ForegroundColor Red
@@ -2265,7 +2267,7 @@ if ($mode -eq "AutoSync") {
         Write-Log "Space check: free=$([Math]::Round($freeBytes/1GB,1))GB zips=$([Math]::Round($zipBytes/1GB,1))GB"
     } catch { Write-Log "Space check skipped: $_" }
 } else {
-    if (-not (Test-Path $gamesInstallFolder)) {
+    if (-not (Test-Path -LiteralPath $gamesInstallFolder)) {
         Write-Host ""; Write-Host "ERROR: Games install folder not found: $gamesInstallFolder" -ForegroundColor Red
         Write-Log "ERROR: install folder not found."; exit 1
     }
@@ -2345,7 +2347,7 @@ $noPropagateList   = @()
 $forceArchetypeMap = @{}
 $familyOverrideMap = @{}
 
-if (-not (Test-Path $overridesPath)) {
+if (-not (Test-Path -LiteralPath $overridesPath)) {
     $ovTemplate = [ordered]@{
         _comment       = "noSync/onlySync/noPropagate: lists of ZIP base names (without .zip). onlySync acts as a whitelist -- only listed games are extracted. forceArchetype: { GameCode: ArchetypeCode } pins a game to a specific reference game. familyOverride: { GameCode: 'button'|'driving'|'lightgun'|'trackball'|'analog' } overrides the auto-detected control family (fixes mis-classified games like FamilyGuyBowling)."
         noSync         = @()
@@ -2358,7 +2360,7 @@ if (-not (Test-Path $overridesPath)) {
     catch { Write-Log "Overrides: could not create template -- $_" }
 }
 
-if (Test-Path $overridesPath) {
+if (Test-Path -LiteralPath $overridesPath) {
     try {
         $ov = Get-Content -LiteralPath $overridesPath -Raw | ConvertFrom-Json
         if ($ov.noSync)      { $noSyncList      = @($ov.noSync) }
@@ -2405,8 +2407,8 @@ Write-Host "Backing up UserProfiles..." -ForegroundColor Cyan
 # Guard: if the backup folder cannot be created the script exits here rather
 # than proceeding with modifications that have no restore point.
 try {
-    if (!(Test-Path $backupRoot)) { New-Item -ItemType Directory -Path $backupRoot -ErrorAction Stop | Out-Null }
-    New-Item -ItemType Directory -Path $backupPath -ErrorAction Stop | Out-Null
+    if (!(Test-Path -LiteralPath $backupRoot)) { New-Item -ItemType Directory -LiteralPath $backupRoot -ErrorAction Stop | Out-Null }
+    New-Item -ItemType Directory -LiteralPath $backupPath -ErrorAction Stop | Out-Null
 } catch {
     Write-Host "  ERROR: Could not create backup folder: $_" -ForegroundColor Red
     Write-Host "  The script will not continue without a successful backup." -ForegroundColor Red
