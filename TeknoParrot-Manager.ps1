@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.29 BETA
+# TeknoParrot Manager  |  v0.30 BETA
 # =============================================================================
 #
 # Registers your extracted games with TeknoParrot so they appear and launch
@@ -59,7 +59,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.29 BETA       " -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.30 BETA       " -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -383,7 +383,7 @@ function Select-GamesInteractive {
     # destination, using the same convention-agnostic logic as AutoSync.
     $normalizedFolderMap = @{}
     foreach ($dir in (Get-ChildItem -LiteralPath $installFolder -Directory -ErrorAction SilentlyContinue)) {
-        $norm = $dir.Name -replace ' (?=[\[\(])', ''
+        $norm = ($dir.Name -replace '\.teknoparrot$', '') -replace ' (?=[\[\(])', ''
         if (-not $normalizedFolderMap.ContainsKey($norm)) {
             $normalizedFolderMap[$norm] = $dir.FullName
         }
@@ -558,7 +558,7 @@ function Select-GamesInteractive {
 # If $onlySync is non-empty, only ZIPs whose base name is in the list are extracted.
 function Invoke-AutoSync {
     param([string]$zipSource, [string]$installFolder, [string]$syncStatePath,
-          $noSync = @(), $onlySync = @())
+          $noSync = @(), $onlySync = @(), [bool]$retroBat = $false)
 
     $syncState = @{}
     if (Test-Path $syncStatePath) {
@@ -588,7 +588,7 @@ function Invoke-AutoSync {
     # extracted under the old naming convention and the ZIP now uses the new one.
     $normalizedFolderMap = @{}
     foreach ($dir in (Get-ChildItem -LiteralPath $installFolder -Directory -ErrorAction SilentlyContinue)) {
-        $norm = $dir.Name -replace ' (?=[\[\(])', ''
+        $norm = ($dir.Name -replace '\.teknoparrot$', '') -replace ' (?=[\[\(])', ''
         if (-not $normalizedFolderMap.ContainsKey($norm)) {
             $normalizedFolderMap[$norm] = $dir.FullName
         }
@@ -614,12 +614,13 @@ function Invoke-AutoSync {
         # collection's naming convention exactly -- e.g.
         # "Game Name (ver) (date) [Platform] [TP]". This avoids garbled names
         # and prevents duplicate folders alongside manually-extracted games.
-        $extractDir = Join-Path $installFolder $rawName
+        $extractFolderName = if ($retroBat) { "$rawName.teknoparrot" } else { $rawName }
+        $extractDir = Join-Path $installFolder $extractFolderName
         # Sentinel lives next to the game folder (not inside it) so we do not
         # need to pre-create the game directory. Expand-Archive creates the
         # directory itself; pre-creating it caused PS 5.1 to throw "already
         # exists" even when -Force was supplied.
-        $sentinel   = Join-Path $installFolder "$rawName.extracting"
+        $sentinel   = Join-Path $installFolder "$extractFolderName.extracting"
         $nasModStr  = $zip.LastWriteTimeUtc.ToString("o")
         $stored     = $syncState[$rawName]
 
@@ -774,19 +775,20 @@ function Register-Games {
     foreach ($exe in $exeFiles) {
         $relPath    = $exe.FullName.Substring($installBase.Length).TrimStart('\')
         $folderName = ($relPath -split '\\')[0]
-        $allExeFolders[$folderName] = $true
+        $folderKey  = $folderName -replace '\.teknoparrot$', ''   # strip suffix for matching/tracking
+        $allExeFolders[$folderKey] = $true
 
         $key = $exe.Name.ToLower()
         if (-not $profileIndex.ContainsKey($key)) { continue }
-        $matchedFolders[$folderName] = $true
+        $matchedFolders[$folderKey] = $true
 
         $matchList = $profileIndex[$key]
 
         # Same executable name maps to more than one profile.
         # Attempt folder-name fuzzy matching before giving up.
         if ($matchList.Count -gt 1) {
-            # $folderName is already derived above; just normalise it here.
-            $normFolder  = Get-NormalizedGameKey $folderName
+            # $folderKey has the .teknoparrot suffix stripped, ready to normalise.
+            $normFolder  = Get-NormalizedGameKey $folderKey
 
             $bestFuzzy      = $null
             $bestFuzzyScore = 0.0
@@ -1558,7 +1560,7 @@ function Export-LaunchBoxXml {
             [void]$sb.AppendLine("    <Completed>false</Completed>")
             [void]$sb.AppendLine("    <Hidden>false</Hidden>")
             [void]$sb.AppendLine("    <Enabled>true</Enabled>")
-            [void]$sb.AppendLine("    <Notes>Exported by TeknoParrot Manager v0.29</Notes>")
+            [void]$sb.AppendLine("    <Notes>Exported by TeknoParrot Manager v0.30</Notes>")
             [void]$sb.AppendLine('  </Game>')
             $count++
         } catch {
@@ -1787,7 +1789,7 @@ function Write-ControlsStatus {
     }
 }
 
-Write-Log "Script started (v0.29$(if ($Unattended) { ' [Unattended]' }))."
+Write-Log "Script started (v0.30$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
 # SECTION 1 — Load or prompt for configuration
@@ -1798,6 +1800,8 @@ $tpRoot             = $null
 $mode               = $null   # "AutoSync", "RegisterOnly", or "Restore"
 $zipSource          = $null   # AutoSync only
 $gamesInstallFolder = $null   # always (the extracted-games root to register)
+$retroBat           = $false  # true = extracted folders named GameName.teknoparrot (RetroBat/Batocera)
+$configAccepted     = $false  # true when the user accepted a saved config this run
 
 if ($Unattended -and -not (Test-Path $configPath)) {
     Write-Host ""
@@ -1814,6 +1818,7 @@ if (Test-Path $configPath) {
         Write-Host "  Mode                 : $($cfg.Mode)"
         if ($cfg.ZipSourceFolder)    { Write-Host "  ZIP source folder    : $($cfg.ZipSourceFolder)" }
         Write-Host "  Games install folder : $($cfg.GamesInstallFolder)"
+        if ($cfg.RetroBat) { Write-Host "  RetroBat mode        : Yes" }
         Write-Host ""
         if ($Unattended) {
             Write-Host "  [Unattended] Using saved settings." -ForegroundColor DarkCyan
@@ -1838,6 +1843,8 @@ if (Test-Path $configPath) {
             }
             $zipSource          = $cfg.ZipSourceFolder
             $gamesInstallFolder = $cfg.GamesInstallFolder
+            if ($null -ne $cfg.RetroBat) { $retroBat = [bool]$cfg.RetroBat }
+            $configAccepted = $true
         }
         Write-Host ""
     } catch {
@@ -1924,6 +1931,15 @@ if (-not $gamesInstallFolder) {
     } elseif ($mode -ne "Restore") {
         $gamesInstallFolder = Read-Host "Enter folder containing your extracted games (e.g. C:\TeknoParrotGames)"
     }
+}
+
+if (-not $configAccepted -and -not $Unattended -and $mode -ne "Restore") {
+    Write-Host ""
+    Write-Host "  Is this a RetroBat/Batocera installation?" -ForegroundColor Cyan
+    Write-Host "  (Y = game folders are named  GameName.teknoparrot  instead of  GameName)" -ForegroundColor DarkCyan
+    $rbChoice = (Read-Host "  Use RetroBat folder naming? (Y/N)").Trim().ToUpper()
+    $retroBat = ($rbChoice -eq "Y")
+    if ($retroBat) { Write-Log "RetroBat mode enabled by user." }
 }
 
 # =============================================================================
@@ -2078,6 +2094,7 @@ $cfgOut = [ordered]@{
     Mode               = $mode
     ZipSourceFolder    = $zipSource
     GamesInstallFolder = $gamesInstallFolder
+    RetroBat           = $retroBat
 }
 try {
     [System.IO.File]::WriteAllText($configPath, ($cfgOut | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
@@ -2092,6 +2109,7 @@ Write-Host "  TeknoParrot root     : $tpRoot"
 Write-Host "  Mode                 : $mode"
 if ($zipSource)      { Write-Host "  ZIP source folder    : $zipSource" }
 Write-Host "  Games install folder : $gamesInstallFolder"
+if ($retroBat) { Write-Host "  RetroBat mode        : Yes (folders named *.teknoparrot)" -ForegroundColor Cyan }
 
 # =============================================================================
 # SECTION 4b — Per-game overrides  (TeknoParrot-Manager.overrides.json)
@@ -2221,6 +2239,7 @@ if ($mode -eq "AutoSync") {
     Write-Host "--------------------------------------------" -ForegroundColor Cyan
     Write-Host " New and changed games are extracted; unchanged games skipped." -ForegroundColor DarkCyan
     Write-Host " Local games are never deleted automatically." -ForegroundColor DarkCyan
+    if ($retroBat) { Write-Host " RetroBat mode: folders extracted as GameName.teknoparrot" -ForegroundColor Cyan }
     Write-Host ""
 
     # If onlySync is already populated from the overrides file, use it directly.
@@ -2241,7 +2260,7 @@ if ($mode -eq "AutoSync") {
     }
 
     $syncStatePath = Join-Path $gamesInstallFolder "TeknoParrot-Manager.syncstate.json"
-    $sync = Invoke-AutoSync -zipSource $zipSource -installFolder $gamesInstallFolder -syncStatePath $syncStatePath -noSync $noSyncList -onlySync $onlySyncList
+    $sync = Invoke-AutoSync -zipSource $zipSource -installFolder $gamesInstallFolder -syncStatePath $syncStatePath -noSync $noSyncList -onlySync $onlySyncList -retroBat $retroBat
     Write-Host ""
     Write-Host "Extraction summary:" -ForegroundColor Green
     Write-Host "  Extracted  : $($sync.Synced)"  -ForegroundColor Green

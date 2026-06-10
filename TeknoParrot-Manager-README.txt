@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.29 BETA
+  TeknoParrot Manager  |  v0.30 BETA
 ===============================================================================
 
   Registers your extracted games with TeknoParrot so they appear and launch
@@ -672,6 +672,60 @@
 
 
 -------------------------------------------------------------------------------
+  RETROBAT / BATOCERA SUPPORT
+-------------------------------------------------------------------------------
+
+  RetroBat and Batocera require TeknoParrot game folders to end with
+  .teknoparrot to be recognised as TeknoParrot titles. The script supports
+  this convention natively.
+
+  ENABLING RETROBAT MODE
+
+  On a fresh setup (no saved config, or when you decline to reuse saved
+  settings), the script asks:
+
+      Is this a RetroBat/Batocera installation?
+      (Y = game folders are named  GameName.teknoparrot  instead of  GameName)
+
+  Answer Y and the setting is saved. The question is never asked again.
+
+  To change the setting later: delete TeknoParrot-Manager.config.json and
+  re-run, or edit the JSON file directly and set "RetroBat": true.
+
+  WHAT CHANGES IN RETROBAT MODE
+
+  AutoSync extraction. Games are extracted into folders named
+  GameName.teknoparrot instead of GameName. For example:
+
+      Standard mode:   E:\TeknoParrotGames\Daytona Championship USA (2017)[Sega]
+      RetroBat mode:   E:\TeknoParrotGames\Daytona Championship USA (2017)[Sega].teknoparrot
+
+  Registration. The .teknoparrot suffix is stripped automatically before
+  folder names are compared against TeknoParrot profiles. Registration,
+  fuzzy matching, and the "Not in TeknoParrot" report all work identically
+  to standard mode.
+
+  Already-extracted detection. The script recognises existing folders with
+  or without the .teknoparrot suffix when deciding whether to re-extract a
+  game, so switching mode mid-library does not cause duplicate extractions.
+
+  UPGRADING AN EXISTING LIBRARY TO RETROBAT NAMING
+
+  If you have already extracted games without .teknoparrot suffixes and want
+  to switch to RetroBat naming:
+
+    1. Decline "Use these settings?" (press N) so the RetroBat prompt appears.
+    2. Answer Y to RetroBat mode.
+    3. Delete TeknoParrot-Manager.syncstate.json from your staging folder to
+       force re-extraction (otherwise the script sees the old folders as
+       already extracted and will not create the new .teknoparrot ones).
+    4. Re-run. Games will be re-extracted with .teknoparrot folder names.
+
+  Note: the old folders are never deleted automatically. You can remove them
+  manually once the new .teknoparrot folders are confirmed working.
+
+
+-------------------------------------------------------------------------------
   PER-GAME OVERRIDES
 -------------------------------------------------------------------------------
 
@@ -925,6 +979,6 @@
 
 
 ===============================================================================
-  v0.29 BETA -- Test one game after each run.
+  v0.30 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================

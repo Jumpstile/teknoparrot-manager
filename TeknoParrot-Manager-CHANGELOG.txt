@@ -6,6 +6,55 @@
 
 
 -------------------------------------------------------------------------------
+  v0.30 BETA  (2026-06-10)
+-------------------------------------------------------------------------------
+
+  New feature: RetroBat / Batocera folder naming support.
+
+  RetroBat and Batocera require game folders to end with .teknoparrot to
+  recognise them as TeknoParrot titles. This release adds full support for
+  that convention.
+
+  On a fresh setup (no saved config), the script asks once:
+
+      Is this a RetroBat/Batocera installation?
+      (Y = game folders are named  GameName.teknoparrot  instead of  GameName)
+
+  The answer is saved in config and never asked again.
+
+  What changes with RetroBat mode enabled:
+
+  - AutoSync extracts games into folders named GameName.teknoparrot instead
+    of GameName. Sentinel files and sync-state entries follow the same
+    naming, so interrupted extractions are detected and retried correctly.
+
+  - Registration works with .teknoparrot folders without any user action.
+    The suffix is stripped before fuzzy matching (so "AkaiKatanaShin.teknoparrot"
+    matches "AkaiKatanaShinNesica" just as well as "AkaiKatanaShin" does),
+    and stripped in the "Not in TeknoParrot" unmatched-folder report so the
+    display stays clean.
+
+  - Existing folder detection. The normalized folder map in both AutoSync
+    and the game picker strips the .teknoparrot suffix before comparing, so
+    old-convention folders (without the suffix) are recognised as already
+    extracted and are not re-extracted.
+
+  Existing installs upgrading to v0.30:
+
+  - If you say Y to "Use these settings?" your config is loaded as-is and
+    RetroBat defaults to off. The setting is saved on the next run that
+    accepts or re-prompts config.
+  - If you want to switch an existing library to .teknoparrot naming: say N
+    to "Use these settings?" so the prompt appears, answer Y, then delete
+    TeknoParrot-Manager.syncstate.json to trigger re-extraction into the new
+    folder names. Existing non-.teknoparrot folders will not be renamed
+    automatically.
+
+
+  Most recent version first.
+
+
+-------------------------------------------------------------------------------
   v0.29 BETA  (2026-06-10)
 -------------------------------------------------------------------------------
 

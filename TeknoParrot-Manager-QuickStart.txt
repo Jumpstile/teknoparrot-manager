@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.29 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.30 BETA  --  QUICK START
 ===============================================================================
 
   Registers your games with TeknoParrot and copies controls across games of
@@ -66,6 +66,22 @@
      copying those controls to every other game of the same type.
 
   3. Launch ONE updated game and test it before trusting the rest.
+
+
+  RETROBAT / BATOCERA
+  -------------------
+  On first run, the script asks:
+
+      Is this a RetroBat/Batocera installation? (Y/N)
+
+  Answer Y and game folders are extracted as  GameName.teknoparrot  instead
+  of  GameName  -- the format RetroBat requires. Registration and fuzzy
+  matching work the same way; the suffix is stripped automatically before
+  any profile comparison. The answer is saved and never asked again.
+
+  To switch later: delete config.json and re-run, or set "RetroBat": true
+  in the JSON. To re-extract with the new naming: also delete syncstate.json.
+  Full details: TeknoParrot-Manager-README.txt.
 
 
   UNATTENDED MODE
