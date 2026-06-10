@@ -16,6 +16,8 @@ Current version: v0.29 BETA
 
 \- TeknoParrot-Manager-QuickStart.txt
 
+\- TeknoParrot-Manager-CHANGELOG.txt — update on every version bump
+
 
 
 \## Key conventions
