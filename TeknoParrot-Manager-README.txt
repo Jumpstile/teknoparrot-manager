@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.28 BETA
+  TeknoParrot Manager  |  v0.29 BETA
 ===============================================================================
 
   Registers your extracted games with TeknoParrot so they appear and launch
@@ -137,9 +137,11 @@
   RUNNING THE SCRIPT
 -------------------------------------------------------------------------------
 
-  Step 1.  Open PowerShell and go to your TeknoParrot root folder:
+  Step 1.  Open PowerShell and navigate to the folder that contains
+           TeknoParrot-Manager.ps1 (typically a Scripts subfolder inside
+           your TeknoParrot install):
 
-      cd "C:\path\to\TeknoParrot"
+      cd "C:\path\to\TeknoParrot\Scripts"
 
   Step 2.  Run the script:
 
@@ -614,6 +616,8 @@
   What it does NOT do:
     - It will not proceed without saved settings (exits cleanly with an error).
     - It will not proceed without a valid TeknoParrot root (exits cleanly).
+    - It will not run Restore mode (exits with an error -- restore requires
+      you to pick a backup interactively; use interactive mode for this).
     - It continues through low disk space and backup warnings but logs them.
 
   SCHEDULING WITH WINDOWS TASK SCHEDULER
@@ -720,7 +724,7 @@
 -------------------------------------------------------------------------------
 
   At the end of every run, the script prints an ACTION REQUIRED section
-  listing everything that needs your attention. It has up to four parts:
+  listing everything that needs your attention. It has up to five parts:
 
     Not in TeknoParrot        Game folders whose executables did not match
                               any TeknoParrot profile. Informational -- no
@@ -921,6 +925,6 @@
 
 
 ===============================================================================
-  v0.28 BETA -- Test one game after each run.
+  v0.29 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================

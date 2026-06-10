@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.28 BETA
+# TeknoParrot Manager  |  v0.29 BETA
 # =============================================================================
 #
 # Registers your extracted games with TeknoParrot so they appear and launch
@@ -59,7 +59,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.28 BETA       " -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.29 BETA       " -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -144,7 +144,7 @@ function Test-IsNetworkPath {
     return $false
 }
 
-# Reads up to 50 MB from the largest ZIP in $path and returns MB/s, or $null.
+# Reads up to 100 MB from the largest ZIP in $path and returns MB/s, or $null.
 # The FileStream is always disposed via finally, even if an exception occurs
 # mid-read, preventing a file handle leak on the network share.
 function Measure-PathThroughput {
@@ -204,7 +204,7 @@ function Find-TeknoParrotRoot {
         [void]$candidates.Add((Join-Path $up "AppData\Roaming\LaunchBox\Emulators\TeknoParrot"))
     }
     $drives = @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue |
-                Where-Object { $_.Root -and (Test-Path $_.Root) } |
+                Where-Object { $_.Root -and -not (Test-IsNetworkPath $_.Root) -and (Test-Path $_.Root) } |
                 ForEach-Object { $_.Root.TrimEnd('\') })
     foreach ($d in $drives) {
         [void]$candidates.Add("$d\TeknoParrot")
@@ -1558,7 +1558,7 @@ function Export-LaunchBoxXml {
             [void]$sb.AppendLine("    <Completed>false</Completed>")
             [void]$sb.AppendLine("    <Hidden>false</Hidden>")
             [void]$sb.AppendLine("    <Enabled>true</Enabled>")
-            [void]$sb.AppendLine("    <Notes>Exported by TeknoParrot Manager v0.28</Notes>")
+            [void]$sb.AppendLine("    <Notes>Exported by TeknoParrot Manager v0.29</Notes>")
             [void]$sb.AppendLine('  </Game>')
             $count++
         } catch {
@@ -1736,6 +1736,7 @@ function Write-ControlsStatus {
                 "skipped-override" { $status = "skipped (override)" }
                 "no-archetype"     { $status = "no reference game" }
                 "save-failed"      { $status = "save failed" }
+                default            { $status = $r.Status }
             }
         }
         elseif ($bound -ge 5) { $status = "bound" }
@@ -1786,7 +1787,7 @@ function Write-ControlsStatus {
     }
 }
 
-Write-Log "Script started (v0.28$(if ($Unattended) { ' [Unattended]' }))."
+Write-Log "Script started (v0.29$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
 # SECTION 1 — Load or prompt for configuration
@@ -1807,7 +1808,7 @@ if ($Unattended -and -not (Test-Path $configPath)) {
 
 if (Test-Path $configPath) {
     try {
-        $cfg = Get-Content -Path $configPath -Raw | ConvertFrom-Json
+        $cfg = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
         Write-Host "Saved configuration found:" -ForegroundColor Cyan
         Write-Host "  TeknoParrot root     : $($cfg.TeknoParrotRoot)"
         Write-Host "  Mode                 : $($cfg.Mode)"
@@ -1930,6 +1931,10 @@ if (-not $gamesInstallFolder) {
 # =============================================================================
 
 if ($mode -eq "Restore") {
+    if ($Unattended) {
+        Write-Host "ERROR: Restore mode cannot run unattended (requires interactive selection)." -ForegroundColor Red
+        Write-Log "ERROR: Unattended mode -- Restore requires user interaction."; exit 1
+    }
     if (-not (Test-Path $tpRoot)) {
         Write-Host ""; Write-Host "ERROR: TeknoParrot root folder not found: $tpRoot" -ForegroundColor Red
         Write-Log "ERROR: TeknoParrot root not found (Restore mode)."; exit 1
@@ -2125,7 +2130,7 @@ if (-not (Test-Path $overridesPath)) {
 
 if (Test-Path $overridesPath) {
     try {
-        $ov = Get-Content -Path $overridesPath -Raw | ConvertFrom-Json
+        $ov = Get-Content -LiteralPath $overridesPath -Raw | ConvertFrom-Json
         if ($ov.noSync)      { $noSyncList      = @($ov.noSync) }
         if ($ov.onlySync)    { $onlySyncList    = @($ov.onlySync) }
         if ($ov.noPropagate) { $noPropagateList = @($ov.noPropagate) }
