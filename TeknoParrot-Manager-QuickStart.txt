@@ -284,6 +284,7 @@
                                        bound count, manual buttons per game.
   TeknoParrot-LaunchBox-Import.xml     Reference XML (written when you answer
                                        Y to the LaunchBox export prompt).
+  TeknoParrot-Manager-CHANGELOG.txt    Full version history.
 
 
 ===============================================================================

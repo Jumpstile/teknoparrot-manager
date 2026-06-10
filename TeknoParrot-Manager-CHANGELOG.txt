@@ -1,0 +1,136 @@
+===============================================================================
+  TeknoParrot Manager  --  CHANGELOG
+===============================================================================
+
+  Most recent version first.
+
+
+-------------------------------------------------------------------------------
+  v0.29 BETA  (2026-06-10)
+-------------------------------------------------------------------------------
+
+  Bug fixes:
+
+  - Unattended + Restore mode. If "Restore" was saved as the run mode and
+    -Unattended was passed, the script would hang waiting for the user to pick
+    a backup. It now exits immediately with a clear error. Restore requires
+    interactive use by design -- you must choose which backup to restore.
+
+  - Find-TeknoParrotRoot could hang on disconnected network drives. The drive
+    scan called Test-Path on every mounted drive including mapped network shares.
+    A disconnected share can block for 30+ seconds per drive. Network drives are
+    now filtered out before the path check using the existing Test-IsNetworkPath
+    helper.
+
+  - Write-ControlsStatus switch missing a default branch. An unrecognised
+    propagation status would silently produce an empty string in the controls
+    file. A default branch now passes the raw status value through as-is, so
+    the file stays readable even if a new status is added to propagation later.
+
+  - Get-Content now uses -LiteralPath in both config file reads, consistent
+    with the rest of the script (which always uses -LiteralPath on paths).
+
+  Documentation fixes:
+
+  - Measure-PathThroughput comment said "50 MB" but the code sampled 100 MB.
+
+  - README and QuickStart: the cd example now points to the Scripts subfolder
+    (where TeknoParrot-Manager.ps1 lives) rather than the TeknoParrot root.
+
+  - README: ACTION REQUIRED SUMMARY preamble said "four parts" but the section
+    lists five. Corrected.
+
+  - README and QuickStart: Unattended section now notes that Restore mode
+    cannot run unattended.
+
+
+-------------------------------------------------------------------------------
+  v0.28 BETA  (2026-06-10)
+-------------------------------------------------------------------------------
+
+  New features:
+
+  - "Not in TeknoParrot" report. After registration, game folders whose
+    executables did not match any TeknoParrot profile are collected and
+    surfaced in the Done summary and in a new ACTION REQUIRED section (section
+    5). Previously these folders disappeared silently; now you always know
+    which titles are unsupported vs failing to register.
+
+  - Controls status file. After every run, TeknoParrot-Manager-controls.txt
+    is written next to the script. It lists every registered game grouped by
+    control family, with its bound button count, propagation status, reference
+    game, and any buttons still left manual. Useful when a game misbehaves
+    weeks later and you need to know what state it was left in.
+
+  - Unattended mode (-Unattended switch). Skips all Y/N prompts, loads saved
+    settings automatically, extracts all new games, runs registration, repair,
+    thumbnail download, and control propagation without user input. Designed
+    for Windows Task Scheduler. Exits cleanly with an error if required
+    settings are missing rather than blocking on a prompt.
+
+  - Auto-detect TeknoParrot path. On first run (or any run with no saved
+    path), the script scans LaunchBox emulator folders, drive roots, and
+    Program Files for TeknoParrotUi.exe before asking you to type the path.
+    Exact match is offered for confirmation; multiple matches are listed
+    numbered so you can pick without typing.
+
+  Also in this release (v0.27 milestone, shipped together):
+
+  - Thumbnail download. After registration, offers to download missing game
+    icons from the TeknoParrotUIThumbnails GitHub repository into
+    <TeknoParrotRoot>\Icons\. Never overwrites existing icons. Reports a
+    summary of fetched / already present / not in repo counts.
+
+  - README and QuickStart updated with documentation for all new features,
+    including full Windows Task Scheduler scheduling instructions.
+
+
+-------------------------------------------------------------------------------
+  v0.26 BETA  (2026-06-10)
+-------------------------------------------------------------------------------
+
+  Initial release.
+
+  - Automatic registration. Scans extracted games, matches executables to
+    TeknoParrot GameProfiles templates, copies them to UserProfiles with the
+    GamePath set. Existing profiles are never overwritten.
+
+  - Fuzzy name matching. Games that share a single executable (NESiCAxLive,
+    etc.) are matched by folder-name similarity using a Sørensen-Dice bigram
+    score. Games above the 0.72 threshold are auto-registered; games below
+    appear in ACTION REQUIRED with a best-guess profile and full candidate
+    list.
+
+  - AutoSync extraction. Extracts game ZIPs from a NAS or local source into
+    a local staging folder, tracking sync state to skip unchanged games.
+    Interrupted extractions are detected and retried on the next run.
+
+  - Interactive game selection. Browse A-Z, search by keyword, or extract
+    all unextracted games. Paginated list with queue tracking.
+
+  - Control propagation. Bind one game of each type; the script copies those
+    controls to every other game of the same type by function match. Carries
+    aim-mode settings (relative input, sensitivity, hide-cursor) between
+    same-type games.
+
+  - Device survey. Asks which controls you have and prints a tailored plan
+    of which game to bind with which device.
+
+  - Game repair. Finds broken or empty GamePaths and re-points them to the
+    correct executable when the match is unambiguous.
+
+  - LaunchBox export. Writes a LaunchBox-compatible XML file listing every
+    registered game, ready for the LaunchBox import wizard.
+
+  - Restore from backup. Lists all timestamped UserProfiles backups with file
+    counts and restores the chosen one with a single YES confirmation.
+
+  - Per-game overrides. JSON file for noSync, onlySync, noPropagate,
+    forceArchetype, and familyOverride.
+
+  - Safe by design. Full UserProfiles backup before every run, sentinel-file
+    extraction tracking, free-space check, comprehensive log, [UNLOGGED]
+    console echo if log is inaccessible.
+
+
+===============================================================================
