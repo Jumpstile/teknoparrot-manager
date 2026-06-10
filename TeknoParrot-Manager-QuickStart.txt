@@ -1,0 +1,233 @@
+===============================================================================
+  TeknoParrot Manager  |  v0.26 BETA  --  QUICK START
+===============================================================================
+
+  Registers your games with TeknoParrot and copies controls across games of
+  the same type. Full details: TeknoParrot-Manager-README.txt.
+
+  BETA -- test one game after each run. Profiles are backed up automatically.
+
+
+  BEFORE YOU START
+  ----------------
+  - Run TeknoParrotUi.exe once so it downloads its game profiles.
+  - Have your games as ZIP files (for AutoSync) or already extracted.
+
+
+  RUN IT
+  ------
+  1. Open PowerShell in your TeknoParrot folder:
+
+       cd "C:\path\to\TeknoParrot"
+
+  2. Start the script:
+
+       .\TeknoParrot-Manager.ps1
+
+     Blocked? Allow it for this session only:
+
+       powershell -ExecutionPolicy Bypass -File .\TeknoParrot-Manager.ps1
+
+  3. Pick a mode:
+       1) AutoSync         -- extract ZIPs (e.g. from a NAS), then register.
+       2) Register only    -- games are already extracted; just register.
+       3) Restore backup   -- roll UserProfiles back to a previous backup.
+
+  4. Answer the folder prompts. For AutoSync, choose a LOCAL staging folder
+     with free space, OUTSIDE both TeknoParrot and your ZIP source.
+
+  5. Choose what to extract (AutoSync only):
+
+       A) All unextracted games    -- extract everything not yet on disk.
+       L) Browse and select        -- paginated A-Z list, pick by number.
+       S) Search by keyword        -- filter by name, pick by number.
+       D) Done                     -- proceed with your current selection.
+
+     Games already in your staging folder are automatically filtered out.
+     In Browse or Search, type numbers or ranges (e.g. 1,3,5-7) to add
+     games to your queue.
+
+  6. Launch TeknoParrotUi.exe -- your games now appear.
+
+
+  COPY YOUR CONTROLS (OPTIONAL BUT RECOMMENDED)
+  ---------------------------------------------
+  1. In TeknoParrot, fully bind ONE game of each control type you use.
+     Bind everything: buttons, axes, Test, Service, Coin, Start.
+
+     Good games to bind first:
+       Fighting / buttons  Street Fighter III, BlazBlue, Tekken 7
+       Driving             Daytona Championship USA, Initial D, OutRun 2 SP
+       Lightgun            House of the Dead 4, Aliens Extermination
+       Trackball           Golden Tee Live, Silver Strike Bowling
+
+  2. Re-run this script. After registration it runs propagation automatically,
+     copying those controls to every other game of the same type.
+
+  3. Launch ONE updated game and test it before trusting the rest.
+
+
+  LAUNCHBOX EXPORT (OPTIONAL)
+  ---------------------------
+  At the end of every run the script offers to export a LaunchBox XML file:
+
+      Export a LaunchBox import XML for all registered games? (Y/N)
+
+  Answer Y and the script writes TeknoParrot-LaunchBox-Import.xml next to
+  itself. This lists every registered game with its title, platform (Arcade),
+  the full path to TeknoParrotUi.exe, and the correct --profile= argument.
+  It is a reference file and a record of what was registered.
+
+  HOW TO ADD YOUR GAMES TO LAUNCHBOX
+
+  The safe way is LaunchBox's own import wizard -- it assigns metadata, box
+  art, and the correct internal emulator ID automatically.
+
+  Step 1.  If TeknoParrot is not yet in LaunchBox's emulator list:
+             a. Tools -> Manage -> Emulators -> Add.
+             b. Name: TeknoParrot
+             c. Emulator path: browse to TeknoParrotUi.exe.
+             d. Command-line parameters:  --profile="{rom}"
+             e. Save.
+
+  Step 2.  Tools -> Import -> Emulated Games.
+
+  Step 3.  Wizard screen 1:
+             - Emulator: TeknoParrot
+             - Import type: Import ROM files
+             - Folder: your games staging folder
+             - File types: *.exe  (or your games' file extension)
+
+  Step 4.  Click Next, review the matches, click Import. Done.
+           Re-run the wizard any time you add more games -- LaunchBox
+           skips games already in your library.
+
+
+  RESTORING A BACKUP
+  ------------------
+  1. Close TeknoParrot completely before restoring (the script checks and
+     will stop if it detects TeknoParrot is still running).
+  2. Re-run the script and choose mode 3) Restore backup.
+  3. The script lists all backups (most recent first) with file counts.
+  4. Pick one by number, type YES to confirm.
+  5. Done. Re-open TeknoParrot to use the restored profiles.
+
+
+  FUZZY MATCHING  (NESiCAxLive and other shared-exe platforms)
+  ------------------------------------------------------------
+  Games that share an executable name (all NESiCAxLive titles use game.exe)
+  are auto-registered by comparing the game folder name to every candidate
+  profile code using a similarity score. Three outcomes are possible:
+
+    Score >= 0.72   Auto-registered and shown in Cyan -- spot-check these.
+    Score >= 0.40   Listed in ACTION REQUIRED with a best-guess profile shown.
+                    One click in TeknoParrotUI to confirm the right one.
+    Score < 0.40    Listed in ACTION REQUIRED with the full candidate list.
+
+  Folder names are normalised before comparison: years like (2012), version
+  strings like (ver 1.1), and bracket metadata like [NESiCAxLive] are
+  stripped. Meaningful names like (Special Edition) are kept because they
+  may be the only thing distinguishing two titles.
+
+  If a game registers to the wrong profile: delete its .xml from UserProfiles
+  and add a forceArchetype entry in overrides.json to pin it on the next run.
+  Full details: README section HOW FUZZY MATCHING WORKS.
+
+
+  ACTION REQUIRED SUMMARY
+  -----------------------
+  At the end of every run the script prints an ACTION REQUIRED section
+  listing everything that still needs your attention:
+
+    Register these games    Games whose executable is shared by multiple
+                            TeknoParrot profiles and the folder name did not
+                            match confidently enough to auto-register. Shows
+                            the executable, a best-guess profile (where
+                            available), and the full candidate list to choose
+                            from in TeknoParrotUI.
+
+                            NESiCAxLive note: most NESiCAxLive games ARE
+                            auto-registered by fuzzy matching. Only those
+                            below the confidence threshold appear here, with
+                            the best-guess profile shown to make picking easy.
+
+    Fix these game paths    Profiles with a broken path that the script
+                            could not auto-fix. Open TeknoParrotUI and point
+                            each one to the correct game folder.
+
+    Extract first           Games not yet in your staging folder. Extract
+                            them, then re-run and choose Repair.
+
+    Set up controls         Control types with no reference game bound yet.
+                            Shows which games are waiting and suggests titles
+                            to bind in TeknoParrotUI for each type.
+
+
+  GOOD TO KNOW
+  ------------
+  - Profiles are backed up before every run:
+    UserProfiles\FullBackup\<date_time>\. Nothing is ever deleted.
+  - If backup folder creation fails, the script stops rather than proceeding
+    without a restore point.
+  - If the log file is inaccessible, a one-time warning is shown with the
+    path and error reason. Every entry that cannot be archived is then echoed
+    to the console prefixed with [UNLOGGED] so nothing is silently lost.
+  - If an extraction is interrupted (Ctrl+C, power loss, disk error), the
+    incomplete game folder is automatically detected and re-extracted on the
+    next run. The staging folder is always left in a clean state.
+  - Fuzzy name matching auto-registers most NESiCAxLive and other shared-exe
+    games. The similarity score is shown so you can spot-check each match.
+    Meaningful names like (Special Edition) are preserved during normalisation
+    so they can differentiate titles with otherwise identical names.
+  - Games already bound are left untouched.
+  - Game-specific controls are left for you to set manually.
+  - After registering, the script offers to repair any broken game paths.
+  - On later runs the script remembers your settings -- press Y to reuse.
+  - To fix a mis-classified game's control family (e.g. FamilyGuyBowling),
+    add it to the familyOverride section of the overrides file.
+
+
+  QUICK FIXES
+  -----------
+  Game won't launch          Open TeknoParrotUI, point the profile to the
+                             correct .exe. Re-run the script and choose Repair.
+
+  Game not in TeknoParrot    Check ACTION REQUIRED -- it may need manual
+                             registration or needs to be extracted first.
+
+  Extraction keeps failing   Check the log for the specific error. Verify
+                             free space and that the ZIP is not corrupted.
+
+  Controls wrong after       Restore from backup (mode 3), or delete the
+  propagation                game's .xml and re-run after fixing the
+                             reference game's bindings in TeknoParrotUI.
+
+  Wrong fuzzy match          Delete the game's .xml from UserProfiles and add
+                             a forceArchetype entry in overrides.json.
+
+  Game appears twice         Delete one of the duplicate .xml files from
+  in TeknoParrotUI           UserProfiles -- keep the one with correct path
+                             and any bindings you have already set.
+
+  [UNLOGGED] on console      Log file is inaccessible -- check that the
+                             TeknoParrot folder is not read-only.
+
+  Full troubleshooting: TeknoParrot-Manager-README.txt.
+
+
+  FILES THE SCRIPT KEEPS
+  ----------------------
+  TeknoParrot-Manager.config.json      Saved folders and mode.
+  TeknoParrot-Manager.overrides.json   Optional per-game tweaks (noSync,
+                                       onlySync, noPropagate, forceArchetype,
+                                       familyOverride).
+  TeknoParrot-Manager.log              Log of every run.
+  TeknoParrot-Manager.syncstate.json   Tracks extracted ZIPs (in staging
+                                       folder). Delete to re-extract all.
+  TeknoParrot-LaunchBox-Import.xml     Reference XML (written when you answer
+                                       Y to the LaunchBox export prompt).
+
+
+===============================================================================
+  Full documentation: TeknoParrot-Manager-README.txt
+===============================================================================
