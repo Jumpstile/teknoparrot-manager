@@ -6,6 +6,25 @@
 
 
 -------------------------------------------------------------------------------
+  v0.31 BETA  (2026-06-10)
+-------------------------------------------------------------------------------
+
+  Bug fixes:
+
+  - Get-Content in AutoSync sync-state load was missing -LiteralPath. All
+    other file reads in the script use -LiteralPath; this one was using the
+    positional parameter. No functional impact on paths without wildcard
+    characters, but inconsistent with the script's own convention.
+
+  - Staging folder creation (AutoSync) had no error handling. If New-Item
+    failed (permissions denied, disk full, etc.), the error was printed to
+    the console but the script continued and reported "Created staging folder"
+    before immediately failing on subsequent operations with misleading errors.
+    The call is now wrapped in a try/catch that exits cleanly with a clear
+    message, consistent with all other directory-creation calls in the script.
+
+
+-------------------------------------------------------------------------------
   v0.30 BETA  (2026-06-10)
 -------------------------------------------------------------------------------
 
