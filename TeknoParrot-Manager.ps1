@@ -459,14 +459,14 @@ function Select-GamesInteractive {
         Write-Host ""
         $choice = (Read-Host "  Enter A, L, S, or D").Trim().ToUpper()
 
-        # ── ALL GAMES ───────────────────────────────────────────────────────
+        # -- ALL GAMES -------------------------------------------------------
         if ($choice -eq 'A') {
             Write-Host ""
             Write-Host "  All $($all.Count) unextracted game(s) will be extracted." -ForegroundColor Green
             return @()   # empty = no whitelist = extract everything
         }
 
-        # ── BROWSE ──────────────────────────────────────────────────────────
+        # -- BROWSE ----------------------------------------------------------
         elseif ($choice -eq 'L') {
             $page       = 0
             $totalPages = [Math]::Ceiling($all.Count / $pageSize)
@@ -514,7 +514,7 @@ function Select-GamesInteractive {
             }
         }
 
-        # ── SEARCH ──────────────────────────────────────────────────────────
+        # -- SEARCH ----------------------------------------------------------
         elseif ($choice -eq 'S') {
             $searching = $true
             while ($searching) {
@@ -561,7 +561,7 @@ function Select-GamesInteractive {
             }
         }
 
-        # ── DONE ────────────────────────────────────────────────────────────
+        # -- DONE ------------------------------------------------------------
         elseif ($choice -eq 'D') {
             if ($queue.Count -eq 0) {
                 Write-Host "  Queue is empty. Use A to extract all games, or select some first." -ForegroundColor Yellow
@@ -1160,7 +1160,7 @@ function Invoke-GpuFixSetup {
         [string]$TpRoot
     )
 
-    # ── GPU detection ──────────────────────────────────────────────────────────
+    # -- GPU detection ----------------------------------------------------------
     Write-Host ""
     Write-Host "  Detecting GPU..." -ForegroundColor DarkGray
     $gpuVendor = $null
@@ -1203,7 +1203,7 @@ function Invoke-GpuFixSetup {
         Write-Log "GPU Fix: user-specified vendor = $gpuVendor"
     }
 
-    # ── Discover GPU fix field names from TeknoParrot GameProfiles ─────────────
+    # -- Discover GPU fix field names from TeknoParrot GameProfiles -------------
     # Scans at runtime so newly added games with new fix fields are covered
     # automatically without requiring a script update.
     $gpDir         = Join-Path $TpRoot "GameProfiles"
@@ -1245,7 +1245,7 @@ function Invoke-GpuFixSetup {
         Write-Log "GPU Fix: GameProfiles not found at $gpDir -- using fallback field list."
     }
 
-    # ── Walk UserProfiles ──────────────────────────────────────────────────────
+    # -- Walk UserProfiles ------------------------------------------------------
     Write-Host ""
     Write-Host "  Applying GPU fixes to registered profiles..." -ForegroundColor DarkGray
     $profiles  = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -ErrorAction SilentlyContinue)
@@ -4368,7 +4368,7 @@ if ($hasAnyAction) {
     Write-Host "   ACTION REQUIRED" -ForegroundColor Yellow
     Write-Host "============================================" -ForegroundColor Yellow
 
-    # ── 1. Games needing manual registration ─────────────────────────────────
+    # -- 1. Games needing manual registration ---------------------------------
     if ($manualRegData.Count -gt 0) {
         Write-Host ""
         Write-Host "  REGISTER THESE GAMES IN TEKNOPARROTUI" -ForegroundColor Yellow
@@ -4398,7 +4398,7 @@ if ($hasAnyAction) {
         }
     }
 
-    # ── 2. Repair: broken paths that could not be auto-fixed ─────────────────
+    # -- 2. Repair: broken paths that could not be auto-fixed -----------------
     if ($amb2.Count -gt 0) {
         $byExe = @{}
         foreach ($r in $amb2) {
@@ -4422,7 +4422,7 @@ if ($hasAnyAction) {
         }
     }
 
-    # ── 3. Games not yet extracted (informational) ───────────────────────────
+    # -- 3. Games not yet extracted (informational) ---------------------------
     if ($nf.Count -gt 0) {
         Write-Host "  EXTRACT THESE GAMES FIRST, THEN RE-RUN REPAIR" -ForegroundColor DarkCyan
         Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
@@ -4442,7 +4442,7 @@ if ($hasAnyAction) {
         Write-Host ""
     }
 
-    # ── 4. Control types with no reference game bound yet ────────────────────
+    # -- 4. Control types with no reference game bound yet --------------------
     if ($noArchetypeItems.Count -gt 0) {
         $byFamily = @{}
         foreach ($r in $noArchetypeItems) {
@@ -4476,7 +4476,7 @@ if ($hasAnyAction) {
         }
     }
 
-    # ── 5. Game folders not recognised by TeknoParrot ────────────────────────
+    # -- 5. Game folders not recognised by TeknoParrot ------------------------
     if ($result.Unmatched.Count -gt 0) {
         Write-Host ""
         Write-Host "  GAME FOLDERS NOT RECOGNISED BY TEKNOPARROT" -ForegroundColor Yellow
