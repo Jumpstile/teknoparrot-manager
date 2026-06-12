@@ -865,8 +865,9 @@
            https://dege.freeweb.hu/dgVoodoo2/dgVoodoo2/
       2. Open the ZIP. Create a folder called  dgVoodoo2\  next to this
          script and copy in these files:
-           From the  MS\x64\  subfolder : D3D8.dll  DDraw.dll  D3DImm.dll
-           From the root of the ZIP     : Glide2x.dll  Glide3x.dll  dgVoodoo.conf
+           From the  MS\x86\     subfolder : D3D8.dll  DDraw.dll  D3DImm.dll
+           From the  3Dfx\x86\  subfolder : Glide2x.dll  Glide3x.dll
+           From the root of the ZIP      : dgVoodoo.conf
       3. Run TeknoParrot Manager and choose mode 6 (dgVoodoo2 setup), or
          answer Y to the prompt at the end of a normal run.
 
