@@ -150,8 +150,9 @@
   To set it up:
     1. Download the dgVoodoo2 ZIP from https://dege.freeweb.hu/dgVoodoo2/dgVoodoo2/
     2. Create a  dgVoodoo2\  folder next to this script and copy in:
-         From  MS\x64\  : D3D8.dll, DDraw.dll, D3DImm.dll
-         From the root  : Glide2x.dll, Glide3x.dll, dgVoodoo.conf
+         From  MS\x86\      : D3D8.dll, DDraw.dll, D3DImm.dll
+         From  3Dfx\x86\   : Glide2x.dll, Glide3x.dll
+         From the root     : dgVoodoo.conf
     3. Run the script and choose mode 6, or answer Y at the end of any run.
        The wizard auto-detects which games need it and shows them first.
 

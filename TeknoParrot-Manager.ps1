@@ -3469,8 +3469,9 @@ while ($true) {
                 Write-Host "    1. Download the latest ZIP from  https://dege.freeweb.hu/dgVoodoo2/dgVoodoo2/" -ForegroundColor White
                 Write-Host "    2. Open the ZIP and copy these files into a new folder called  dgVoodoo2\" -ForegroundColor White
                 Write-Host "       next to this script:" -ForegroundColor White
-                Write-Host "         From the MS\x64\ subfolder : D3D8.dll  DDraw.dll  D3DImm.dll" -ForegroundColor White
-                Write-Host "         From the root of the ZIP  : Glide2x.dll  Glide3x.dll  dgVoodoo.conf" -ForegroundColor White
+                Write-Host "         From the MS\x86\ subfolder : D3D8.dll  DDraw.dll  D3DImm.dll" -ForegroundColor White
+                Write-Host "         From the 3Dfx\x86\ subfolder : Glide2x.dll  Glide3x.dll" -ForegroundColor White
+                Write-Host "         From the root of the ZIP   : dgVoodoo.conf" -ForegroundColor White
                 Write-Host "       Then re-run this script." -ForegroundColor White
                 Write-Host "    -- OR --" -ForegroundColor DarkCyan
                 Write-Host "    Enter the full path to a folder that already contains those files:" -ForegroundColor White
@@ -4220,8 +4221,9 @@ if ($doDgVoodoo -eq "Y") {
             Write-Host "    1. Download the latest ZIP from  https://dege.freeweb.hu/dgVoodoo2/dgVoodoo2/" -ForegroundColor White
             Write-Host "    2. Open the ZIP and copy these files into a new folder called  dgVoodoo2\" -ForegroundColor White
             Write-Host "       next to this script:" -ForegroundColor White
-            Write-Host "         From the MS\x64\ subfolder : D3D8.dll  DDraw.dll  D3DImm.dll" -ForegroundColor White
-            Write-Host "         From the root of the ZIP  : Glide2x.dll  Glide3x.dll  dgVoodoo.conf" -ForegroundColor White
+            Write-Host "         From the MS\x86\ subfolder : D3D8.dll  DDraw.dll  D3DImm.dll" -ForegroundColor White
+            Write-Host "         From the 3Dfx\x86\ subfolder : Glide2x.dll  Glide3x.dll" -ForegroundColor White
+            Write-Host "         From the root of the ZIP   : dgVoodoo.conf" -ForegroundColor White
             Write-Host "       Then re-run this script and choose option 6 from the menu." -ForegroundColor White
             Write-Host "    -- OR --" -ForegroundColor DarkCyan
             Write-Host "    Enter the full path to a folder that already contains those files:" -ForegroundColor White

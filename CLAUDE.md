@@ -76,7 +76,7 @@ Current version: v0.51 BETA
 
 \- Bundle DLLs at Scripts\\dgVoodoo2\\ (not included in repo; user provides)
 
-\- Required DLLs from dgVoodoo2 ZIP: MS\\x64\\D3D8.dll, DDraw.dll, D3DImm.dll + root Glide2x.dll, Glide3x.dll
+\- Required DLLs from dgVoodoo2 ZIP: MS\\x86\\D3D8.dll, DDraw.dll, D3DImm.dll + 3Dfx\\x86\\Glide2x.dll, Glide3x.dll + root dgVoodoo.conf
 
 \- dgVoodoo.conf (optional config) also copied if present
 
