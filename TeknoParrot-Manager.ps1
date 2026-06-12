@@ -3466,7 +3466,7 @@ while ($true) {
                 Write-Host ""
                 Write-Host "  dgVoodoo2 DLL folder not found." -ForegroundColor Yellow
                 Write-Host "  To get dgVoodoo2:" -ForegroundColor Cyan
-                Write-Host "    1. Download the latest ZIP from  http://dege.freeweb.hu/dgVoodoo2/dgVoodoo2.html" -ForegroundColor White
+                Write-Host "    1. Download the latest ZIP from  https://dege.freeweb.hu/dgVoodoo2/dgVoodoo2/" -ForegroundColor White
                 Write-Host "    2. Open the ZIP and copy these files into a new folder called  dgVoodoo2\" -ForegroundColor White
                 Write-Host "       next to this script:" -ForegroundColor White
                 Write-Host "         From the MS\x64\ subfolder : D3D8.dll  DDraw.dll  D3DImm.dll" -ForegroundColor White
@@ -4217,7 +4217,7 @@ if ($doDgVoodoo -eq "Y") {
             Write-Host ""
             Write-Host "  dgVoodoo2 DLL folder not found." -ForegroundColor Yellow
             Write-Host "  To get dgVoodoo2:" -ForegroundColor Cyan
-            Write-Host "    1. Download the latest ZIP from  http://dege.freeweb.hu/dgVoodoo2/dgVoodoo2.html" -ForegroundColor White
+            Write-Host "    1. Download the latest ZIP from  https://dege.freeweb.hu/dgVoodoo2/dgVoodoo2/" -ForegroundColor White
             Write-Host "    2. Open the ZIP and copy these files into a new folder called  dgVoodoo2\" -ForegroundColor White
             Write-Host "       next to this script:" -ForegroundColor White
             Write-Host "         From the MS\x64\ subfolder : D3D8.dll  DDraw.dll  D3DImm.dll" -ForegroundColor White
