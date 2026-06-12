@@ -862,7 +862,7 @@
 
     Method A -- Bundled folder (recommended):
       1. Download the latest dgVoodoo2 ZIP from:
-           http://dege.freeweb.hu/dgVoodoo2/dgVoodoo2.html
+           https://dege.freeweb.hu/dgVoodoo2/dgVoodoo2/
       2. Open the ZIP. Create a folder called  dgVoodoo2\  next to this
          script and copy in these files:
            From the  MS\x64\  subfolder : D3D8.dll  DDraw.dll  D3DImm.dll
