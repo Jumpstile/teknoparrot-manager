@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.50 BETA
+  TeknoParrot Manager  |  v0.51 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -216,6 +216,9 @@
   MODES
 -------------------------------------------------------------------------------
 
+  The main menu is a persistent loop -- after each mode finishes you are
+  returned to the menu to choose another mode or exit.
+
   1) AutoSync
        For games stored as ZIP files (for example on a NAS).
        You provide:  a ZIP source folder and a local staging folder.
@@ -232,7 +235,34 @@
        Rolls your UserProfiles back to a previous backup without touching
        File Explorer. The script lists all timestamped backup folders with
        file counts, you pick one by number, type YES to confirm, and the
-       restore runs. The script exits after restoring.
+       restore runs. Returns to the menu when done.
+
+  4) Crosshair setup
+       Deploys custom P1/P2 crosshair cursor images to all registered
+       lightgun games. Opens an HTML preview grid (321 included designs)
+       in your browser so you can browse before picking by number.
+       Returns to the menu when done.
+
+  5) ReShade setup
+       Installs ReShade post-processing into your game folders. Auto-detects
+       the correct DLL name and architecture (32-bit or 64-bit) for each
+       game. Optional -- see RESHADE VISUAL ENHANCEMENTS below.
+       Returns to the menu when done.
+
+  6) dgVoodoo2 setup
+       Deploys dgVoodoo2 compatibility DLLs for games that use DirectX 8,
+       DirectDraw, or the Glide API. Auto-detects which registered games
+       need it. Optional -- see DGVOODOO2 LEGACY COMPATIBILITY below.
+       Returns to the menu when done.
+
+  7) GPU fix setup
+       Detects your GPU vendor (AMD/NVIDIA/Intel) via WMI and applies the
+       correct fix flag to every registered game that has one. Scans
+       TeknoParrot's GameProfiles at runtime -- no update needed when new
+       games are added. Optional. Returns to the menu when done.
+
+  8) Exit
+       Exits the script.
 
 
 -------------------------------------------------------------------------------
@@ -1176,6 +1206,11 @@
                               been bound yet. Shows which games are waiting
                               and suggests specific titles to bind in
                               TeknoParrotUI for each type.
+
+  At the end of every registration run that has action items, the same list
+  is also saved to TeknoParrot-Manager-ActionItems.txt next to the script so
+  you can review it after closing the PowerShell window. The script tells you
+  the path when it writes the file.
 
 
 -------------------------------------------------------------------------------

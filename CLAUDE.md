@@ -4,7 +4,7 @@
 
 PowerShell 5.1 script for managing TeknoParrot arcade game libraries.
 
-Current version: v0.50 BETA
+Current version: v0.51 BETA
 
 
 
@@ -85,4 +85,10 @@ Current version: v0.50 BETA
 \- DLL mapping: D3D8→D3D8.dll+D3DImm, DDraw→DDraw.dll+D3DImm, Glide2x→Glide2x.dll, Glide3x→Glide3x.dll
 
 \- Bug/vulnerability sweep required before every version build
+
+\- Script must be pure ASCII (no Unicode characters anywhere). PS 5.1 reads
+&#x20; BOM-less UTF-8 as Windows-1252; the last byte of U+2014 (em dash, E2 80 94)
+&#x20; is 0x94 which Windows-1252 maps to U+201D (right double-quote, a string
+&#x20; delimiter), causing parse errors. Use -- for em dashes, -> for arrows.
+&#x20; Verify with: ($bytes=[System.IO.File]::ReadAllBytes($f); ($bytes | Where-Object { $_ -gt 127 }).Count)
 

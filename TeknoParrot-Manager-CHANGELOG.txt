@@ -7,6 +7,51 @@
 
 
 -------------------------------------------------------------------------------
+  v0.51 BETA  (2026-06-12)
+-------------------------------------------------------------------------------
+
+  Main menu loop, bug fixes, and config cleanup:
+
+  - Main menu loop: after utility modes (Restore, Crosshair, ReShade,
+    dgVoodoo2, GPU Fix) complete, the script now returns to the main menu
+    instead of exiting. A new option 8 (Exit) lets the user quit cleanly.
+
+  - Mode no longer saved to config: Mode is now always prompted at startup
+    so the user is never locked into a stale saved mode. Removing Mode from
+    the config also means GamesInstallFolder is always retained when the user
+    declines a saved config (the previous saved Mode was the reason users
+    declined and had to re-enter the folder each run).
+
+  - Select-RegisteredGamesInteractive: removed comma-wrapping from all return
+    statements to fix nested-array bug when callers used @(...).
+
+  - GPU Fix Setup: replaced [xml] casts with Read-Xml helper to match
+    project-wide convention and fix DTD resolution.
+
+  - Save-Xml: added try/catch fallback around File.Replace() for systems
+    where it throws "path not of legal form"; falls back to Delete + Move.
+
+  - Non-ASCII characters removed: all em dashes, right-arrows, ellipses, and
+    other Unicode chars in string literals and comments replaced with ASCII
+    equivalents (-- -> ...). PowerShell 5.1 reads BOM-less UTF-8 as
+    Windows-1252; byte 0x94 (last byte of UTF-8 em dash) is a right double-
+    quote in Windows-1252 and acts as a string delimiter, causing parse errors
+    on machines where the script had not been opened and re-saved. Script is
+    now verified 0 non-ASCII bytes.
+
+  - Action items export: after any registration run that has outstanding items,
+    the script now writes TeknoParrot-Manager-ActionItems.txt alongside itself
+    so the full list of manual-registration tasks, broken paths, and missing
+    extracts can be reviewed after the PowerShell window is closed.
+
+  - exit 1 inside main loop replaced with continue: three locations inside the
+    while ($true) menu loop called exit 1 (backup folder creation failure, user
+    declined incomplete backup, empty profile index). These now display an error
+    message, pause for Enter, and return to the menu instead of terminating the
+    script entirely.
+
+
+-------------------------------------------------------------------------------
   v0.50 BETA  (2026-06-12)
 -------------------------------------------------------------------------------
 
