@@ -266,13 +266,13 @@ function Find-TeknoParrotRoot {
 function Get-NormalizedGameKey {
     param([string]$s)
     # CamelCase split, two passes:
-    #  Pass 1 -- standard boundary: lowercase → uppercase ("AkaiKatana" → "Akai Katana")
+    #  Pass 1 -- standard boundary: lowercase -> uppercase ("AkaiKatana" -> "Akai Katana")
     $s = [regex]::Replace($s, '(?<=[a-z])(?=[A-Z])', ' ')
-    #  Pass 2 -- acronym boundary: uppercase → uppercase+lowercase ("NBANesica" → "NBA Nesica")
+    #  Pass 2 -- acronym boundary: uppercase -> uppercase+lowercase ("NBANesica" -> "NBA Nesica")
     #  This handles profile codes that begin with an acronym followed by a word.
     $s = [regex]::Replace($s, '(?<=[A-Z])(?=[A-Z][a-z])', ' ')
     #  Known edge case: brand names with non-standard capitalisation like "NESiCAxLive"
-    #  split as "NESi CAx Live" on pass 1 (i→C boundary). This does not affect match
+    #  split as "NESi CAx Live" on pass 1 (i->C boundary). This does not affect match
     #  accuracy because (a) both folder name and profile code go through the same
     #  normalisation so Dice scores converge symmetrically, and (b) "NESiCAxLive"
     #  appears in square-bracket metadata ([Taito NESiCAxLive]) which is stripped
@@ -287,15 +287,15 @@ function Get-NormalizedGameKey {
     $s = $s -replace '\((ver\.?|rev\.?|v)\s*[\d\.]+[a-z]?\)', ''
     # Remove parenthesised pure numbers like (2) (12) that carry no game-name info.
     $s = $s -replace '\(\d+\)', ''
-    # Strip everything non-alphanumeric (spaces, hyphens, apostrophes, colons…).
+    # Strip everything non-alphanumeric (spaces, hyphens, apostrophes, colons...).
     # \p{L} matches any Unicode letter so accented and non-Latin characters are
     # preserved instead of being silently dropped, keeping Dice scores valid.
     $s = $s -replace '[^\p{L}0-9]', ''
     return $s.ToLower()
 }
 
-# Sørensen-Dice coefficient on character bigrams for two pre-normalised strings.
-# Returns [0.0, 1.0]. Strings shorter than 2 chars cannot form bigrams → 0.0.
+# Sorensen-Dice coefficient on character bigrams for two pre-normalised strings.
+# Returns [0.0, 1.0]. Strings shorter than 2 chars cannot form bigrams -> 0.0.
 function Get-DiceSimilarity {
     param([string]$a, [string]$b)
     if ($a.Length -lt 2 -or $b.Length -lt 2) { return 0.0 }
@@ -1424,7 +1424,7 @@ function Invoke-CrosshairSetup {
             if ($etNode) { $emuType = $etNode.InnerText.Trim() }
 
             if ($emuType -eq "ElfLdr2") {
-                # All ElfLdr2 lightgun games share one folder — deploy once
+                # All ElfLdr2 lightgun games share one folder -- deploy once
                 if (-not $elfDeployed) {
                     $dest = if ($elfDir) { $elfDir } else { $TpRoot }
                     Copy-Item -LiteralPath $valid[$p1Idx] -Destination (Join-Path $dest "P1.png") -Force -ErrorAction Stop
@@ -2473,7 +2473,7 @@ function Invoke-RestoreBackup {
 }
 
 # =============================================================================
-# LAUNCHBOX XML EXPORT  (standalone file only — no direct LaunchBox writes)
+# LAUNCHBOX XML EXPORT  (standalone file only -- no direct LaunchBox writes)
 # =============================================================================
 # Reads every UserProfile that has a valid GamePath and builds a LaunchBox-
 # compatible XML file the user can inspect and import manually. Writing
@@ -3057,7 +3057,7 @@ function Write-ControlsStatus {
 Write-Log "Script started (v0.50$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
-# SECTION 1 — Load or prompt for configuration
+# SECTION 1 -- Load or prompt for configuration
 # =============================================================================
 
 $configPath         = Join-Path $PSScriptRoot "TeknoParrot-Manager.config.json"
@@ -3235,7 +3235,7 @@ if (-not $configAccepted -and -not $Unattended -and $mode -ne "Restore") {
 }
 
 # =============================================================================
-# RESTORE MODE — run restore then exit; skips all registration/propagation
+# RESTORE MODE -- run restore then exit; skips all registration/propagation
 # =============================================================================
 
 if ($mode -eq "Restore") {
@@ -3262,7 +3262,7 @@ if ($mode -eq "Restore") {
 }
 
 # =============================================================================
-# SECTION 2 — Validate TeknoParrot root, locate GameProfiles and UserProfiles
+# SECTION 2 -- Validate TeknoParrot root, locate GameProfiles and UserProfiles
 # =============================================================================
 
 if (-not (Test-Path -LiteralPath $tpRoot)) {
@@ -3360,7 +3360,7 @@ if ($mode -eq "AutoSync") {
 Write-Log "Validated. tpRoot=$tpRoot mode=$mode install=$gamesInstallFolder"
 
 # =============================================================================
-# SECTION 3 — NAS detection and throughput benchmark
+# SECTION 3 -- NAS detection and throughput benchmark
 # =============================================================================
 
 if ($mode -eq "AutoSync" -and (Test-IsNetworkPath $zipSource)) {
@@ -3383,7 +3383,7 @@ if ($mode -eq "AutoSync" -and (Test-IsNetworkPath $zipSource)) {
 }
 
 # =============================================================================
-# SECTION 4 — Save configuration
+# SECTION 4 -- Save configuration
 # =============================================================================
 
 $cfgOut = [ordered]@{
@@ -3413,7 +3413,7 @@ Write-Host "  Games install folder : $gamesInstallFolder"
 if ($retroBat) { Write-Host "  RetroBat mode        : Yes (*.teknoparrot / *.parrot / *.game recognised)" -ForegroundColor Cyan }
 
 # =============================================================================
-# SECTION 4b — Per-game overrides  (TeknoParrot-Manager.overrides.json)
+# SECTION 4b -- Per-game overrides  (TeknoParrot-Manager.overrides.json)
 # =============================================================================
 # Created empty on first run. Edit with any text editor to fine-tune behaviour:
 #   noSync         : ZIP base names to always skip during extraction.
@@ -3481,7 +3481,7 @@ if (Test-Path -LiteralPath $overridesPath) {
 }
 
 # =============================================================================
-# CROSSHAIR SETUP — short-circuit: skip backup / sync / registration entirely
+# CROSSHAIR SETUP -- short-circuit: skip backup / sync / registration entirely
 # =============================================================================
 
 if ($mode -eq "CrosshairSetup") {
@@ -3499,7 +3499,7 @@ if ($mode -eq "CrosshairSetup") {
 }
 
 # =============================================================================
-# RESHADE SETUP — short-circuit: skip backup / sync / registration entirely
+# RESHADE SETUP -- short-circuit: skip backup / sync / registration entirely
 # =============================================================================
 
 if ($mode -eq "ReShadeSetup") {
@@ -3636,7 +3636,7 @@ if ($mode -eq "DgVoodoo2Setup") {
 }
 
 # =============================================================================
-# GPU FIX SETUP — short-circuit: skip backup / sync / registration entirely
+# GPU FIX SETUP -- short-circuit: skip backup / sync / registration entirely
 # =============================================================================
 
 if ($mode -eq "GpuFixSetup") {
@@ -3658,7 +3658,7 @@ if ($mode -eq "GpuFixSetup") {
 }
 
 # =============================================================================
-# SECTION 5 — Back up UserProfiles
+# SECTION 5 -- Back up UserProfiles
 # =============================================================================
 
 $backupRoot = Join-Path $userProfilesDir "FullBackup"
@@ -3707,7 +3707,7 @@ Write-Host "Backup saved to: $backupPath" -ForegroundColor Green
 Write-Log "Backup created at $backupPath"
 
 # =============================================================================
-# SECTION 6 — AutoSync: game selection and extraction
+# SECTION 6 -- AutoSync: game selection and extraction
 # =============================================================================
 
 if ($mode -eq "AutoSync") {
@@ -3752,7 +3752,7 @@ if ($mode -eq "AutoSync") {
 }
 
 # =============================================================================
-# SECTION 7 — Build profile index from GameProfiles
+# SECTION 7 -- Build profile index from GameProfiles
 # =============================================================================
 
 Write-Host ""
@@ -3769,7 +3769,7 @@ if ($profileIndex.Keys.Count -eq 0) {
 }
 
 # =============================================================================
-# SECTION 8 — Register games
+# SECTION 8 -- Register games
 # =============================================================================
 
 Write-Host ""
@@ -3823,7 +3823,7 @@ if ($result.Unmatched.Count -gt 0) {
 }
 
 # =============================================================================
-# SECTION 8b — Download game thumbnails (optional)
+# SECTION 8b -- Download game thumbnails (optional)
 # =============================================================================
 
 Write-Host ""
@@ -3847,7 +3847,7 @@ if ($doThumb -eq "Y") {
 }
 
 # =============================================================================
-# SECTION 9  — Game repair: fix broken GamePaths
+# SECTION 9  -- Game repair: fix broken GamePaths
 # =============================================================================
 
 Write-Host ""
@@ -3889,7 +3889,7 @@ if ($doRepair.Trim().ToUpper() -eq "Y") {
 }
 
 # =============================================================================
-# SECTION 10 — Control propagation
+# SECTION 10 -- Control propagation
 # =============================================================================
 
 $MinBoundForArchetype = 5
@@ -4355,7 +4355,7 @@ if ($doGpuFix -eq "Y") {
 if (-not (Get-Variable gpuSetupDone -ErrorAction SilentlyContinue)) { $gpuSetupDone = $false }
 
 # =============================================================================
-# ACTION REQUIRED — collects everything the user must do manually
+# ACTION REQUIRED -- collects everything the user must do manually
 # =============================================================================
 
 $hasAnyAction = ($manualRegData.Count -gt 0) -or ($amb2.Count -gt 0) -or
