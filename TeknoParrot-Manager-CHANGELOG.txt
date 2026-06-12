@@ -1,9 +1,610 @@
 ===============================================================================
   TeknoParrot Manager  --  CHANGELOG
+  Author: Jumpstile
 ===============================================================================
 
   Most recent version first.
 
+
+-------------------------------------------------------------------------------
+  v0.50 BETA  (2026-06-12)
+-------------------------------------------------------------------------------
+
+  Critical fix and three additional fixes from deep static analysis:
+
+  - Save-Xml: File.Replace() requires the destination to already exist and
+    throws FileNotFoundException for new files. Register-Games calls Save-Xml
+    to CREATE new UserProfile XMLs that do not exist yet, so every first-time
+    profile registration silently failed with "FAILED to register" in v0.49.
+    Fixed: Save-Xml now uses File.Move for new paths and File.Replace only
+    when the destination already exists (updates).
+
+  - Restore backup integrity check: the restore function previously accepted
+    any timestamped folder in FullBackup as a valid source regardless of
+    whether it contained any profiles. An interrupted backup run would leave
+    an empty or partial folder that, if selected for restore, would delete all
+    live profiles and copy nothing back. Fixed: the selected backup must
+    contain at least one XML file; restore is aborted with an error otherwise.
+    The backup selection menu now shows the profile count.
+
+  - AutoSync stale sync-state after failed folder removal: when clearing an
+    existing game folder failed (files locked, access denied), the previous
+    sync-state entry for that game was preserved. On the next run the ZIP
+    appeared unchanged and the game was treated as up to date, permanently
+    skipping re-extraction of a corrupt or partial folder. Fixed: the
+    sync-state entry is now cleared on folder-removal failure so the next run
+    always re-attempts extraction.
+
+  - Thumbnail downloads: replaced WebClient.DownloadFile (no timeout, hangs
+    indefinitely on a stalled connection) with Invoke-WebRequest -OutFile
+    -TimeoutSec 30. 404 detection preserved via response status code.
+
+  - README footer version tag corrected from stale v0.45 to v0.50.
+
+
+-------------------------------------------------------------------------------
+  v0.49 BETA  (2026-06-12)
+-------------------------------------------------------------------------------
+
+  Security and reliability hardening (from full-script code review):
+
+  - Added Save-Xml helper: all XmlDocument writes are now atomic (write to
+    .tmp, commit via File.Replace) and BOM-less. Previously, $doc.Save() was
+    called directly in four places (Register-Games, Repair-GamePaths,
+    Invoke-ControlPropagation, Invoke-GpuFixSetup), each of which would
+    truncate the target file to 0 bytes before writing -- leaving a corrupt
+    profile on any interruption. All four sites now use Save-Xml.
+
+  - Fixed ConvertTo-XPathStringLiteral: the concat() separator was ",'''' ,"
+    (four adjacent single-quote chars in the XPath expression), which is two
+    juxtaposed empty-string literals -- a syntax error in XPath 1.0. Fixed to
+    use a double-quote-delimited apostrophe literal: concat('A',"'",'B').
+
+  - Replaced [xml] cast with Read-Xml in three deploy loops (ReShade setup,
+    dgVoodoo2 API detection, dgVoodoo2 deploy). The [xml] accelerator uses the
+    default XmlResolver which can process external DTD/entity references;
+    Read-Xml sets XmlResolver = $null (XXE prevention).
+
+  - Crosshair index picker: added $raw.Length <= 9 guard before [int] cast at
+    both the P1 and P2 prompts. Without it, a 10-digit number >= 2147483648
+    would throw PSInvalidCastException and terminate the setup wizard.
+
+  External review items addressed:
+
+  - All Remove-Item calls already use -LiteralPath (wildcard injection is not
+    possible). The Restore deletion is scoped to items inside $userProfilesDir
+    via Get-ChildItem -LiteralPath. No additional path guard needed.
+
+  - Measure-PathThroughput's File.OpenRead is already inside a try/catch that
+    returns $null on any exception (lines 160-172). No change needed.
+
+  - Expand-NumberList return value is correct: ,@($out) is the standard PS
+    idiom for returning arrays without pipeline enumeration. Callers receive
+    the inner array, not a 1-element wrapper.
+
+  - UNC path depth calculation is correct: Split('\') on both base and file
+    paths produces the same count of empty strings from \\, which cancel in
+    the subtraction. No change needed.
+
+  Style suggestions (comment blocks, #region markers) declined per project
+  convention (minimal comments, no multi-paragraph blocks).
+
+
+-------------------------------------------------------------------------------
+  v0.48 BETA  (2026-06-12)
+-------------------------------------------------------------------------------
+
+  Bug fixes:
+
+  - Search wildcard crash: game search used PowerShell's -like operator, which
+    treats square brackets as character-class wildcards. Searching for "[TP]"
+    or any term containing brackets (common in romset naming conventions such
+    as "Super Alpine Racer [Sega RingEdge 2] [TP]") would silently produce
+    wrong or empty results instead of a literal string match. Fixed by
+    switching to String.Contains(), which performs a plain substring search
+    with no metacharacter interpretation.
+
+  - Non-atomic GPU fix profile save: the XmlWriter used to write updated
+    UserProfile XMLs opened the target file for writing immediately, truncating
+    it to 0 bytes before any data was written. A Ctrl+C or power loss during
+    the write would permanently destroy the profile. Fixed by writing to a
+    .tmp file first, then committing via File.Replace() (atomic on NTFS).
+
+  - HTML injection in crosshair preview: crosshair filenames were embedded
+    unescaped into the generated HTML preview. A crafted filename containing
+    HTML tags would execute in the user's browser (local file zone). Fixed by
+    encoding all filename values via System.Net.WebUtility::HtmlEncode before
+    inserting into the HTML.
+
+  - Number-range overflow in game picker: Select-RegisteredGamesInteractive
+    duplicated the comma/range parsing logic from Expand-NumberList without
+    the overflow guards (max-digit checks for int32 overflow). Refactored to
+    call Expand-NumberList, removing the duplication and inheriting its
+    input validation.
+
+  False positives from external report (not fixed):
+
+  - [version] cast: Get-ReShadeLatestVersion already extracts only \d+\.\d+\.\d+
+    via regex; $bVer is built from FileVersionInfo integer parts. Both sides of
+    the comparison are pre-sanitized; no guard was missing.
+
+  - Script truncation: the script is complete at 4531 lines. The truncation was
+    an artifact of the reviewer receiving a partial copy.
+
+  - Missing features (Restore, LaunchBox export, device survey, execution loop):
+    all present in the full script.
+
+
+-------------------------------------------------------------------------------
+  v0.47 BETA  (2026-06-12)
+-------------------------------------------------------------------------------
+
+  Bug fixes from v0.46 code review (Invoke-GpuFixSetup):
+
+  - XPath injection: field names loaded from TeknoParrot GameProfile XMLs were
+    interpolated directly into XPath predicates. A field name containing an
+    apostrophe would crash the SelectSingleNode call with an XmlException, and
+    a crafted field name could inject arbitrary XPath into the predicate. Fixed
+    by adding ConvertTo-XPathStringLiteral, which wraps values in single-quoted
+    literals or concat() when the value contains an apostrophe.
+
+  - BOM written to saved UserProfile XMLs: $doc.Save(path) always prepends a
+    UTF-8 BOM. TeknoParrot profiles are BOM-less. Fixed by replacing the bare
+    $doc.Save() call with an XmlWriter round-trip using BOM-less UTF8Encoding,
+    matching the project-wide WriteAllText convention.
+
+  - Sort-Object AdapterRAM overflow: [uint32] cast in the GPU sort key throws
+    for drivers that surface AdapterRAM as a negative (wrapped) int32 or a
+    uint64 > 4 GB. The exception is silently swallowed by Sort-Object,
+    producing undefined sort order and potential wrong-GPU selection. Fixed by
+    casting through [double], which never overflows.
+
+  - Silent GameProfile parse failures: empty catch {} in the dynamic field
+    discovery loop dropped all XML parse errors without a log entry, making
+    incomplete field discovery undetectable. Fixed by logging a WARNING.
+
+  - Over-broad AMD Bool field match: pattern 'amd|radeon' would have added any
+    Bool field whose name contained those substrings as a substring, not just
+    known AMD fix fields. Tightened to word-boundary / exact-suffix patterns.
+
+
+-------------------------------------------------------------------------------
+  v0.46 BETA  (2026-06-12)
+-------------------------------------------------------------------------------
+
+  New feature: GPU compatibility fix setup (Mode 7):
+
+  - Added Invoke-GpuFixSetup. Detects the GPU vendor (AMD / NVIDIA / Intel)
+    via WMI and updates every registered UserProfile XML that contains a
+    per-vendor fix field. Four field types handled:
+
+      EnableAmdFix, AMDCrashFix, AMDFix (Bool) -- set to 1 for AMD, 0 otherwise.
+      GPU Fix (Dropdown) -- AMD users get "New AMD Driver" where available,
+        falling back to "AMD"; NVIDIA gets "NVIDIA"; Intel gets "INTEL";
+        all others get "None".
+
+  - TeknoParrot's GameProfiles folder is scanned at startup to discover fix
+    field names dynamically. New games added by future TeknoParrot updates
+    are automatically covered without requiring a script update. Falls back
+    to a built-in list if the GameProfiles folder is not accessible.
+
+  - Available as standalone Mode 7 from the main menu and as an optional
+    Y/N step at the end of every normal AutoSync/Register run, matching
+    the pattern of ReShade and dgVoodoo2 setup.
+
+  - If the GPU cannot be auto-detected (e.g. unknown adapter), the user is
+    prompted to enter the vendor manually.
+
+  Bug fixes carried over from v0.45 scan:
+
+  - cfgDg2 config save was missing ReShadeSourceDll32 key; fixed so the
+    32-bit ReShade DLL path is preserved when dgVoodoo2 runs last in a
+    post-run session.
+
+  - ReShade skip summary label was hardcoded to "path not found or no game
+    path set" even when games were skipped due to missing ReShade32.dll or
+    unsupported architecture; label updated to reflect all skip reasons.
+
+
+-------------------------------------------------------------------------------
+  v0.45 BETA  (2026-06-12)
+-------------------------------------------------------------------------------
+
+  32-bit ReShade support:
+
+  - ReShade setup now deploys ReShade32.dll to 32-bit (x86) games when the
+    file is present at Scripts\ReShade\ReShade32.dll. 64-bit games continue
+    to use ReShade64.dll as before. Architecture is detected from the exe PE
+    header; x86 games that have no ReShade32.dll available are skipped with
+    a clear message instead of silently receiving a 64-bit DLL.
+
+  - Version display updated: both 64-bit and 32-bit versions are shown at the
+    start of ReShade setup. If ReShade32.dll is absent a note is shown so
+    the user knows 32-bit games will be skipped.
+
+  - Config: ReShadeSourceDll32 field added. The 32-bit DLL path is saved
+    and restored alongside the 64-bit path. The bundled Scripts\ReShade\
+    ReShade32.dll is auto-detected at startup with no prompting required.
+
+  - HyperSpin config-save fix: the HyperSpin export config-save block was
+    missing DgVoodoo2SourceDir; that field is now preserved correctly on every
+    config write.
+
+-------------------------------------------------------------------------------
+  v0.44 BETA  (2026-06-12)
+-------------------------------------------------------------------------------
+
+  Bug-sweep fixes (internal code review of v0.42/v0.43 dgVoodoo2 and ReShade
+  changes):
+
+  - Critical: Get-GameLegacyApi return value fix. The function used
+    `return ,$found` (comma-wrap idiom). Because all callers wrap the result
+    in @(), the extra array layer caused -contains checks in the deploy loop
+    to always fail -- auto-detect mode appeared to work (games listed) but
+    deployed all available DLLs to every game instead of targeted DLLs.
+    Fixed by changing to `return $found`.
+
+  - ReShade arch guard broadened: the x86 check was `if ($arch -eq 'x86')`,
+    which allowed ARM64 or other non-x64 confirmed architectures through.
+    Changed to `if ($arch -ne $null -and $arch -ne 'x64')` so any confirmed
+    non-x64 exe is skipped, while unknown/unreadable headers still pass through.
+
+  - Get-ExeArchitecture short-read safety: the three Stream.Read() calls
+    discarded the return value with [void], leaving stale zero-bytes in the
+    buffer on short reads (possible on network paths). Each call is now in a
+    loop that retries until the requested byte count is satisfied.
+
+  - Get-GameLegacyApi logs scan failures: the bare catch{} silently treated
+    file-not-found, access-denied, and PathTooLong errors the same as
+    "no legacy APIs found". Errors are now written to the log file.
+
+  - dgVoodoo2 deploy: added warning when a game's detected API has no
+    matching DLL in the source folder (e.g. Glide2x detected but only D3D8.dll
+    present). Previously silently fell back to deploying all available DLLs.
+
+  - HyperSpin export: added warning when emulator entry has no 'id' field,
+    which would cause all exported game entries to have an empty gameSystemId.
+
+  - HyperSpin export: $safeName fallback -- if the emulator title reduces to
+    an empty string after sanitisation, the games file is now named
+    'TeknoParrot.json' instead of '.json'.
+
+-------------------------------------------------------------------------------
+  v0.43 BETA  (2026-06-12)
+-------------------------------------------------------------------------------
+
+  Bug fixes and robustness sweep:
+
+  - ReShade 32-bit safety: added Get-ExeArchitecture (PE header reader) to
+    detect 32-bit (x86) executables. ReShade64.dll cannot be loaded by a
+    32-bit process and causes an immediate crash. 32-bit games are now skipped
+    with a clear warning instead of being silently broken.
+
+  - Integer overflow guard in Expand-NumberList: the regex ^\d+$ permits
+    arbitrarily long digit strings; a value exceeding int32 max would throw
+    an unhandled OverflowException and crash the menu loop. A length guard
+    (> 9 digits = skip) is now applied before every [int] cast.
+
+  - International title matching: Get-NormalizedGameKey used [^a-zA-Z0-9]
+    which stripped all non-ASCII letters, collapsing e.g. "Pokémon" to
+    "pokmon" and erasing Japanese characters entirely. Changed to [^\p{L}0-9]
+    so Unicode letters are preserved and Dice scores remain valid.
+
+  - XML comment bypass in Get-PrimaryExecutableName: the fast regex path ran
+    against raw XML text, so a commented-out <ExecutableName> node earlier in
+    the file would be matched instead of the real one. XML comments are now
+    stripped ((?s)<!--.*?-->) before the regex runs.
+
+  - Array append overhead in Expand-NumberList: $out += $n rebuilt the entire
+    array on every iteration. Switched to List[int] with .Add() for O(1)
+    appends; converted back to array at return.
+
+  - README fix: HyperSpin 2 troubleshooting section incorrectly referred to
+    an ".xml ROM entry" (HyperSpin 1 terminology). Updated to describe the
+    actual HyperSpin 2 JSON game-list file.
+
+
+-------------------------------------------------------------------------------
+  v0.42 BETA  (2026-06-12)
+-------------------------------------------------------------------------------
+
+  New feature — dgVoodoo2 legacy compatibility setup:
+
+  - Mode 6 "dgVoodoo2 setup" added to the main menu. Runs as a standalone
+    wizard (skips backup, extraction, and registration) just like Mode 5.
+
+  - Auto-detection: scans the first 2 MB of every registered game exe for
+    D3D8, DDraw, Glide2x, and Glide3x import strings. Games using those
+    APIs are listed before the user confirms installation.
+
+  - DLL mapping: D3D8 games receive D3D8.dll (+ D3DImm.dll if available);
+    DDraw games receive DDraw.dll (+ D3DImm.dll); Glide2x/Glide3x games
+    receive the matching Glide DLL. Manually selected games with no
+    detectable legacy API receive all available DLLs from the bundle.
+
+  - dgVoodoo.conf is copied alongside the DLLs if it is present in the
+    bundle folder. Existing files in a game folder are never overwritten.
+
+  - The prompt also runs after every normal AutoSync / Register-only run
+    (like ReShade), with a plain-English explanation of what it does and
+    when to use it.
+
+  - Bundle DLLs at  Scripts\dgVoodoo2\  next to the script. Download the
+    dgVoodoo2 ZIP, copy  MS\x64\D3D8.dll,  DDraw.dll,  D3DImm.dll  and
+    root-folder  Glide2x.dll,  Glide3x.dll,  dgVoodoo.conf  into it.
+
+  - DgVoodoo2SourceDir added to the saved configuration JSON so the path
+    is remembered between runs.
+
+
+-------------------------------------------------------------------------------
+  v0.41 BETA  (2026-06-12)
+-------------------------------------------------------------------------------
+
+  New feature — Custom thumbnails folder:
+
+  - The script now checks for a  CustomThumbnails\  folder next to the script
+    at the start of every thumbnail download step.
+
+  - Any PNG files found there are copied into TeknoParrot's  Icons\  folder
+    before the GitHub download runs. Files must be named  ProfileCode.png
+    (e.g.  Daytona3.png) -- the same convention used by the Icons folder.
+
+  - Files already present in Icons\ are never overwritten. Copied count and
+    skipped count are shown in the thumbnail summary.
+
+  - Users can also place custom thumbnails directly in  <TeknoParrotRoot>\Icons\
+    and they will be respected (the script never overwrites existing icons).
+
+  - The thumbnail download prompt now shows a one-line tip about the
+    CustomThumbnails\ folder so users discover the feature.
+
+  - Name validation: filenames in CustomThumbnails\ are checked against
+    registered profile codes before copying. Unrecognised names print a
+    WRONG NAME: warning (in yellow) and are skipped -- nothing is silently
+    misapplied. Invalid count is shown in the thumbnail summary.
+
+  - README and QuickStart updated with full documentation of both methods.
+
+
+-------------------------------------------------------------------------------
+  v0.40 BETA  (2026-06-12)
+-------------------------------------------------------------------------------
+
+  New feature — ReShade visual enhancements:
+
+  - Mode 5 "ReShade setup" added to the main menu. Runs as a standalone
+    wizard that skips backup, extraction, and registration entirely.
+
+  - A "Set up ReShade visual enhancements?" prompt is also offered at the
+    end of every normal AutoSync / Register-only run, after crosshair setup.
+    The prompt includes a plain-English description of what ReShade does so
+    non-technical users can make an informed choice.
+
+  - The script looks for the bundled ReShade DLL at ReShade\ReShade64.dll
+    next to the script. If not found, it falls back to any previously
+    configured path, then prompts the user with step-by-step instructions.
+
+  - Version check: reads the DLL's FileVersionInfo and compares against the
+    current version on reshade.me. If a newer version is available the user
+    is informed with a download link.
+
+  - Graphics API auto-detection: scans the first 2 MB of each game's exe
+    for DirectX / OpenGL import strings and selects the correct DLL name
+    (d3d12.dll, dxgi.dll, d3d9.dll, or opengl32.dll).
+
+  - BudgieLoader games always use opengl32.dll regardless of what the exe
+    scan finds. OpenParrot games receive the DLL in their openparrot\
+    subfolder if that folder exists.
+
+  - Preset support: user can choose no preset (configure in-game via Home
+    key) or copy a global preset .ini to every selected game folder.
+
+  - Game selection mirrors the crosshair picker: choose all registered
+    games or browse a paginated list and select by number or range.
+
+  - ReShade DLL path is saved to config.json and reused on future runs.
+
+  - "Next steps" section at the end of a run includes ReShade instructions
+    if setup was completed, and always reminds users about the Crosshairs
+    folder and how to add their own PNG images.
+
+  - README and QuickStart updated with full ReShade documentation including
+    plain-language effect descriptions, setup instructions, update procedure,
+    removal procedure, and key-conflict note.
+
+
+-------------------------------------------------------------------------------
+  v0.39 BETA  (2026-06-12)
+-------------------------------------------------------------------------------
+
+  New feature — Custom crosshairs:
+
+  - Mode 4 "Crosshair setup" added to the main menu. Running the script in
+    this mode skips backup, extraction, and registration entirely; it just
+    picks and deploys crosshairs to all registered lightgun games.
+
+  - A "Configure custom crosshairs?" prompt is also offered at the end of
+    every normal AutoSync / Register-only run, after the HyperSpin export.
+
+  - The script scans the Crosshairs\ subfolder (distributed alongside it)
+    for any PNG file. Files are validated against the PNG magic-byte signature
+    (89 50 4E 47 0D 0A 1A 0A); anything that fails validation is reported and
+    skipped. Adding your own crosshair PNGs to the folder is fully supported.
+
+  - An HTML preview grid is generated (TeknoParrot-Crosshairs-Preview.html)
+    and opened in the default browser so you can browse all available designs
+    visually before entering an index number for P1 and P2.
+
+  - Deployment targets every registered lightgun game (GunGame=true in the
+    UserProfile XML). ElfLdr2 games receive a single shared pair of crosshairs
+    in the ElfLdr2 folder; all other games receive P1.png / P2.png copied into
+    their individual game executable directory.
+
+  - 321 crosshairs (000.png-320.png) are included in the Crosshairs\ folder.
+
+
+-------------------------------------------------------------------------------
+  v0.38 BETA  (2026-06-11)
+-------------------------------------------------------------------------------
+
+  Bug fixes / security:
+
+  - Expand-ZipFileSafe: GetFullPath was called on the combined base+entry path
+    before the \\?\ prefix was applied. On .NET 4.x (PS 5.1 runtime),
+    GetFullPath calls the Win32 API without extended-length-path support and
+    throws PathTooLongException for any path over 260 chars -- meaning the
+    function failed at exactly the case it was written to solve. Fixed by
+    switching to a component-level zip-slip guard (regex check for .. and
+    rooted paths) that never calls GetFullPath on a long string.
+
+  - Expand-ZipFileSafe: zip-slip guard used StartsWith without a trailing
+    backslash. A ZIP entry resolving to C:\games\FooBar\evil.exe would pass a
+    guard anchored on C:\games\Foo because the string is a prefix match. Fixed
+    by using the component-level guard above, which is not vulnerable to this
+    prefix-collision attack.
+
+  - Expand-ZipFileSafe: removed redundant Directory.Exists check before
+    CreateDirectory. CreateDirectory is idempotent and does not throw when the
+    directory already exists. The check introduced a TOCTOU race window (another
+    process could delete the directory between Exists and CreateDirectory).
+
+  - AutoSync: partial extraction folder was not cleaned up when
+    Expand-ZipFileSafe threw mid-extraction (e.g., disk full, I/O error). On
+    the next run, the sentinel file is gone and the folder has some content, so
+    the code incorrectly classified the game as already extracted and marked it
+    up-to-date in the sync state -- permanently skipping re-extraction of a
+    corrupt game. The inner catch now removes the partial folder before
+    recording the failure.
+
+  - All New-Item -ItemType Directory calls replaced with
+    [System.IO.Directory]::CreateDirectory(). PowerShell's New-Item -Path
+    interprets [ ] * ? as wildcard characters, so a path like
+    E:\Games\TeknoParrot [Staged] could resolve to the wrong location or fail
+    silently. The .NET method has no wildcard interpretation, is idempotent,
+    and works in PS 5.1 without requiring -LiteralPath.
+
+
+-------------------------------------------------------------------------------
+  v0.37 BETA  (2026-06-11)
+-------------------------------------------------------------------------------
+
+  Bug fixes:
+
+  - Backup creation: replaced New-Item -LiteralPath with New-Item -Path for
+    all directory-creation calls. New-Item does not support -LiteralPath in
+    PowerShell 5.1 (the parameter was added in PS 6.0), causing an immediate
+    "A parameter cannot be found that matches parameter name 'LiteralPath'"
+    error and hard exit before any work could begin. All six affected call
+    sites have been corrected; Get-ChildItem and Test-Path retain -LiteralPath
+    where they already worked correctly.
+
+  - AutoSync extraction: replaced ZipFile::ExtractToDirectory with a new
+    Expand-ZipFileSafe helper that prefixes every destination path with \\?\
+    (Windows extended-length path syntax), bypassing the 260-character MAX_PATH
+    limit. Games with deeply-nested internal paths (e.g. Chase Chase Joker)
+    previously failed with a path-too-long error; they now extract correctly.
+    A zip-slip guard ensures no entry can escape the destination folder.
+
+
+-------------------------------------------------------------------------------
+  v0.36 BETA  (2026-06-10)
+-------------------------------------------------------------------------------
+
+  Bug fixes:
+
+  - Export-HyperSpinJson: running-process check now fires at the very top of
+    the function, before any file I/O, so we fail fast with a clear message
+    instead of processing all games and then refusing to write.
+
+  - Export-HyperSpinJson: emulator title matching now strips spaces and
+    punctuation before comparing (e.g. "Tekno Parrot", "teknoparrot", and
+    "TeknoParrot" all match). Previously only an exact case-insensitive match
+    on "TeknoParrot" was accepted.
+
+  - Export-HyperSpinJson: the TeknoParrot system GUID is now taken from
+    emulators.json directly ($tpEmu.id) rather than being read from an
+    existing game entry. This removes the requirement for at least one game
+    to already be in HyperSpin 2 before the export can run.
+
+  - Export-HyperSpinJson: game list file is now located by matching
+    gameSystemId against the GUID from emulators.json (primary), with a
+    fallback scan for .xml ROM entries (for older HyperSpin 2 builds that
+    omit the id field). If neither scan finds a file, the script creates a
+    new empty one named after the emulator title. This eliminates the
+    "add one game manually first" prerequisite entirely.
+
+  - Export-HyperSpinJson: games folder is created if it does not yet exist
+    (HyperSpin 2 may not have created it before any games are added).
+
+  - Export-HyperSpinJson: backup is skipped when the games file was just
+    created this run (no point backing up an empty file).
+
+  - Read-Host calls: nine prompts were missing .Trim() -- "Use these
+    settings?", TeknoParrot root path, mode choice (1/2/3), ZIP source
+    folder, games install folder (both prompts), low-disk-space continue,
+    repair prompt, device survey prompt, and "Propagate controls?". Leading
+    or trailing whitespace in any of these answers would have silently
+    produced the wrong result (e.g. "Y " not matching "Y").
+
+  Documentation:
+
+  - README HyperSpin 2 section: updated "How it finds the game list" and
+    "Prerequisites" to reflect the no-game-required behaviour, flexible
+    title matching, and the games-folder creation.
+
+  - QuickStart HyperSpin 2 prerequisites updated to match.
+
+
+-------------------------------------------------------------------------------
+  v0.35 BETA  (2026-06-10)
+-------------------------------------------------------------------------------
+
+  Documentation:
+
+  - README reorganised. LaunchBox, HyperSpin 2, and RetroBat/Batocera are
+    now grouped together under a single FRONTEND LAUNCHER INTEGRATION section
+    with subsections. AUTO-DETECT TEKNOPARROT PATH moved earlier in the
+    document (immediately after RUNNING THE SCRIPT) where it belongs as a
+    first-run setup topic.
+
+  - HyperSpin 2 export fully documented in README and QuickStart for the
+    first time: how the game list is located, what it writes, prerequisites,
+    and two new troubleshooting entries for common failure modes.
+
+  - RetroBat/Batocera section in README and QuickStart updated to document
+    all three recognised suffixes (.teknoparrot, .parrot, .game). Previously
+    only .teknoparrot was mentioned, though .parrot and .game support was
+    added in v0.32.
+
+  - All version references updated throughout.
+
+-------------------------------------------------------------------------------
+  v0.34 BETA  (2026-06-10)
+-------------------------------------------------------------------------------
+
+  Bug fixes:
+
+  - Get-NormalizedGameKey: replaced lazy-quantifier bracket regex `\[.*?\]`
+    with character-class form `\[[^\]]*\]`. Both behave identically for
+    well-formed names, but the new form is explicit that the match must not
+    cross a `]` boundary, which is more correct for malformed names that
+    contain an unmatched `[`.
+
+  - Get-GameFiles: forward slashes in the caller-supplied $folder path (or in
+    a file's FullName) caused Split('\') to produce an incorrect base depth,
+    which could wrongly include or exclude extension-less Linux binaries.
+    Both the base path and each FullName are now normalised to backslashes
+    before the depth calculation.
+
+  - Select-GamesInteractive: added a defensive guard so that a
+    `$start > $end` paging edge case (e.g. after a future refactor) returns
+    an empty page rather than throwing a PowerShell slice error.
+
+  - Measure-PathThroughput: reduced the read-sample cap from 100 MB to 20 MB
+    to avoid large heap allocations on systems with constrained memory or very
+    large ZIPs. A 20 MB read is more than sufficient for an accurate MB/s
+    estimate.
 
 -------------------------------------------------------------------------------
   v0.33 BETA  (2026-06-10)

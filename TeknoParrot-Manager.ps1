@@ -1,5 +1,6 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.33 BETA
+# TeknoParrot Manager  |  v0.50 BETA
+# Author: Jumpstile
 # =============================================================================
 #
 # Registers your extracted games with TeknoParrot so they appear and launch
@@ -59,14 +60,14 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.33 BETA       " -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.50 BETA" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
-# Load the ZIP assembly once at startup. ZipFile.ExtractToDirectory is used in
-# place of Expand-Archive because PowerShell 5.1's Expand-Archive has known bugs:
-# it can throw "already exists" even with -Force, leave partial folders behind,
-# and fail silently on paths near the MAX_PATH limit.
+# Load the ZIP assembly once at startup. Expand-ZipFileSafe uses ZipArchive
+# instead of Expand-Archive (PS 5.1 bugs: "already exists" with -Force, partial
+# folders on failure) and instead of ZipFile::ExtractToDirectory (no long-path
+# support). Expand-ZipFileSafe uses \\?\ prefixes to bypass MAX_PATH.
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 # =============================================================================
@@ -110,6 +111,26 @@ function Read-Xml {
     return $doc
 }
 
+# Writes an XmlDocument atomically: saves to a .tmp file first, then commits
+# via File.Replace() so the original is never truncated before the write
+# completes. Uses BOM-less UTF-8 to match the project-wide convention.
+function Save-Xml {
+    param([System.Xml.XmlDocument]$doc, [string]$path)
+    $tmpPath      = $path + ".tmp"
+    $xws          = New-Object System.Xml.XmlWriterSettings
+    $xws.Encoding = New-Object System.Text.UTF8Encoding $false
+    $xws.Indent   = $true
+    $xw           = [System.Xml.XmlWriter]::Create($tmpPath, $xws)
+    try   { $doc.Save($xw) }
+    finally { $xw.Close() }
+    # File.Replace requires the destination to exist; use Move for new files.
+    if (Test-Path -LiteralPath $path) {
+        [System.IO.File]::Replace($tmpPath, $path, $null)
+    } else {
+        [System.IO.File]::Move($tmpPath, $path)
+    }
+}
+
 # Reads the primary ExecutableName from a profile XML using a fast regex pass,
 # avoiding a full DOM parse for every file during the index scan. The regex
 # matches <ExecutableName> exactly (not <ExecutableName2>). Falls back to a
@@ -118,6 +139,7 @@ function Get-PrimaryExecutableName {
     param([string]$path)
     try {
         $raw = [System.IO.File]::ReadAllText($path)
+        $raw = [regex]::Replace($raw, '(?s)<!--.*?-->', '')   # strip XML comments before matching
         $m = [regex]::Match($raw, '<ExecutableName>\s*([^<]+?)\s*</ExecutableName>')
         if ($m.Success) { return $m.Groups[1].Value }
     } catch { }
@@ -152,7 +174,7 @@ function Measure-PathThroughput {
     $testFile = Get-ChildItem -LiteralPath $path -Filter *.zip -ErrorAction SilentlyContinue |
                 Sort-Object Length -Descending | Select-Object -First 1
     if (-not $testFile -or $testFile.Length -eq 0) { return $null }
-    $sampleBytes = [Math]::Min($testFile.Length, 100MB)
+    $sampleBytes = [Math]::Min($testFile.Length, 20MB)
     $buffer      = New-Object byte[] $sampleBytes
     $fs          = $null
     try {
@@ -258,15 +280,17 @@ function Get-NormalizedGameKey {
     # Remove year-in-parens like (2012)
     $s = $s -replace '\(\d{4}\)', ''
     # Remove square-bracket metadata [Taito NESiCAxLive][TP]
-    $s = $s -replace '\[.*?\]', ''
+    $s = $s -replace '\[[^\]]*\]', ''
     # Remove version strings like (ver 1.1) (rev 2) (v3) (v1.2b).
     # Meaningful parenthesised names such as (Special Edition) are intentionally
     # preserved -- they may be the only differentiator between two game titles.
     $s = $s -replace '\((ver\.?|rev\.?|v)\s*[\d\.]+[a-z]?\)', ''
     # Remove parenthesised pure numbers like (2) (12) that carry no game-name info.
     $s = $s -replace '\(\d+\)', ''
-    # Strip everything non-alphanumeric (spaces, hyphens, apostrophes, colons…)
-    $s = $s -replace '[^a-zA-Z0-9]', ''
+    # Strip everything non-alphanumeric (spaces, hyphens, apostrophes, colons…).
+    # \p{L} matches any Unicode letter so accented and non-Latin characters are
+    # preserved instead of being silently dropped, keeping Dice scores valid.
+    $s = $s -replace '[^\p{L}0-9]', ''
     return $s.ToLower()
 }
 
@@ -309,8 +333,9 @@ $FuzzyAutoThreshold = 0.72
 # layout files like "tr") live 7-10 levels deep and are excluded by this limit.
 function Get-GameFiles {
     param([string]$folder)
-    $exts      = @('.exe', '.elf', '.iso', '.gcm', '.gcz', '.bin', '.e4', '.zip')
-    $baseDepth = $folder.TrimEnd('\').Split('\').Count
+    $exts       = @('.exe', '.elf', '.iso', '.gcm', '.gcz', '.bin', '.e4', '.zip')
+    $normalized = $folder -replace '/', '\'
+    $baseDepth  = $normalized.TrimEnd('\').Split('\').Count
     return @(Get-ChildItem -LiteralPath $folder -Recurse -File -ErrorAction SilentlyContinue |
                  Where-Object {
                      $ext = $_.Extension.ToLower()
@@ -320,7 +345,8 @@ function Get-GameFiles {
                          # games root. Some Lindbergh titles place executables 5-6 levels
                          # deep inside their filesystem image. System files (X11 layouts,
                          # shared libraries, etc.) live 7-10 levels deep and are excluded.
-                         return ($_.FullName.Split('\').Count - $baseDepth) -le 6
+                         $normFull = $_.FullName -replace '/', '\'
+                         return ($normFull.Split('\').Count - $baseDepth) -le 6
                      }
                      return $false
                  })
@@ -333,31 +359,34 @@ function Get-GameFiles {
 # commands (e.g. typing "N" where a number was expected).
 function Expand-NumberList {
     param([string]$str, [int]$max)   # $str avoids shadowing the $input automatic variable
-    $out = @()
+    $out = [System.Collections.Generic.List[int]]::new()
 
     # Short-circuit on empty or whitespace-only input -- nothing to parse.
-    if ([string]::IsNullOrWhiteSpace($str)) { return ,$out }
+    if ([string]::IsNullOrWhiteSpace($str)) { return ,@($out) }
 
     # Validate: anything other than digits, commas, hyphens, and whitespace is
     # not a valid number/range expression and almost certainly a typo.
     if ($str -match '[^0-9,\s\-]') {
         Write-Host ("  NOTE: '{0}' is not a valid selection -- use digits, commas, and hyphens only (e.g. 1,3,5-7)." -f $str) -ForegroundColor Yellow
-        return ,$out
+        return ,@($out)
     }
 
     foreach ($part in ($str -split ',')) {
         $part = $part.Trim()
         if ($part -match '^(\d+)-(\d+)$') {
+            # Guard against overflow: int32 max is 2,147,483,647 (10 digits).
+            if ($Matches[1].Length -gt 9 -or $Matches[2].Length -gt 9) { continue }
             $from = [int]$Matches[1]; $to = [int]$Matches[2]
             if ($from -gt $to) { $tmp = $from; $from = $to; $to = $tmp }   # handle "7-3"
             $to = [Math]::Min($to, $max)   # clamp upper bound before looping
-            for ($n = $from; $n -le $to; $n++) { if ($n -ge 1) { $out += $n } }
+            for ($n = $from; $n -le $to; $n++) { if ($n -ge 1) { [void]$out.Add($n) } }
         } elseif ($part -match '^\d+$') {
+            if ($part.Length -gt 9) { continue }   # overflow guard
             $n = [int]$part
-            if ($n -ge 1 -and $n -le $max) { $out += $n }
+            if ($n -ge 1 -and $n -le $max) { [void]$out.Add($n) }
         }
     }
-    return ,$out
+    return ,@($out)
 }
 
 # Interactive game picker. Shows a menu with four modes:
@@ -446,7 +475,7 @@ function Select-GamesInteractive {
             while ($browsing) {
                 $start     = $page * $pageSize
                 $end       = [Math]::Min($start + $pageSize - 1, $all.Count - 1)
-                $pageItems = @($all[$start..$end])
+                $pageItems = if ($start -gt $end) { @() } else { @($all[$start..$end]) }
 
                 Write-Host ""
                 Write-Host ("  Page {0} of {1}  ({2} games total)" -f ($page+1), $totalPages, $all.Count) -ForegroundColor Cyan
@@ -495,7 +524,7 @@ function Select-GamesInteractive {
                 if ($term -ieq 'done') { $searching = $false; $done = $true; continue }
                 if (-not $term) { continue }
 
-                $results = @($all | Where-Object { $_.BaseName -like "*$term*" })
+                $results = @($all | Where-Object { $_.BaseName.IndexOf($term, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 })
                 if ($results.Count -eq 0) {
                     Write-Host "  No matches for '$term'." -ForegroundColor Yellow
                     continue
@@ -551,6 +580,931 @@ function Select-GamesInteractive {
     }
 
     return ,$queue
+}
+
+# =============================================================================
+# CROSSHAIR MANAGEMENT
+# =============================================================================
+# Scans the Crosshairs subfolder (next to the script) for valid PNG files,
+# generates an HTML preview the user can browse in a browser, then lets them
+# pick P1 and P2 by index number before deploying to every registered lightgun
+# game. Lightgun games are identified by <GunGame>true</GunGame> in their
+# UserProfile XML. ElfLdr2 games share a single folder in the TeknoParrot root;
+# all others receive P1.png / P2.png in the individual game exe directory.
+
+# Returns true if $Path begins with the PNG magic bytes (89 50 4E 47 0D 0A 1A 0A).
+function Test-PngFile {
+    param([string]$Path)
+    try {
+        $bytes = New-Object byte[] 8
+        $fs    = [System.IO.File]::OpenRead($Path)
+        try { [void]$fs.Read($bytes, 0, 8) } finally { $fs.Dispose() }
+        return ($bytes[0] -eq 0x89 -and $bytes[1] -eq 0x50 -and
+                $bytes[2] -eq 0x4E -and $bytes[3] -eq 0x47 -and
+                $bytes[4] -eq 0x0D -and $bytes[5] -eq 0x0A -and
+                $bytes[6] -eq 0x1A -and $bytes[7] -eq 0x0A)
+    } catch { return $false }
+}
+
+# Writes an HTML grid preview of all crosshairs to $OutPath.
+# Images are referenced as relative paths so the file works anywhere on the
+# same machine without embedding base64.
+function Export-CrosshairPreview {
+    param([string[]]$CrosshairPaths, [string]$OutPath)
+
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.Append('<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">')
+    [void]$sb.Append('<title>TeknoParrot Crosshairs</title><style>')
+    [void]$sb.Append('body{background:#111;color:#eee;font-family:monospace;padding:16px;margin:0}')
+    [void]$sb.Append('h1{color:#4af;margin-bottom:4px}p{color:#888;margin-top:0;margin-bottom:16px}')
+    [void]$sb.Append('.grid{display:flex;flex-wrap:wrap;gap:8px}')
+    [void]$sb.Append('.cell{background:#222;border:1px solid #333;padding:6px;text-align:center;width:84px}')
+    [void]$sb.Append('.cell:hover{border-color:#4af;background:#1a2a3a}')
+    [void]$sb.Append('.cell img{width:64px;height:64px;image-rendering:pixelated;display:block;margin:0 auto 4px}')
+    [void]$sb.Append('.num{color:#4af;font-size:12px}.name{color:#888;font-size:10px;word-break:break-all}')
+    [void]$sb.Append('</style></head><body>')
+    [void]$sb.Append('<h1>TeknoParrot Crosshairs</h1>')
+    [void]$sb.Append('<p>Browse below, then enter the <span style="color:#4af">index number</span> in the script to select P1 and P2.</p>')
+    [void]$sb.Append('<div class="grid">')
+
+    $i = 0
+    foreach ($path in $CrosshairPaths) {
+        $fname    = [System.IO.Path]::GetFileName($path)
+        $stem     = [System.IO.Path]::GetFileNameWithoutExtension($path)
+        $rel      = 'Crosshairs/' + [System.Net.WebUtility]::HtmlEncode($fname)
+        $stemHtml = [System.Net.WebUtility]::HtmlEncode($stem)
+        [void]$sb.Append("<div class=`"cell`"><img src=`"$rel`" alt=`"$stemHtml`">")
+        [void]$sb.Append("<div class=`"num`">$i</div><div class=`"name`">$stemHtml</div></div>")
+        $i++
+    }
+
+    [void]$sb.Append('</div></body></html>')
+    [System.IO.File]::WriteAllText($OutPath, $sb.ToString(), (New-Object System.Text.UTF8Encoding $false))
+}
+
+# =============================================================================
+# RESHADE HELPER FUNCTIONS
+# =============================================================================
+
+function Get-GameApiDll {
+    # Scans the first 2 MB of a game exe for graphics API imports.
+    # Returns the ReShade DLL name to deploy (e.g. "dxgi.dll"), or $null.
+    param([string]$ExePath)
+    try {
+        $readLen = [int][Math]::Min((Get-Item -LiteralPath $ExePath).Length, 2097152)
+        $buf     = New-Object byte[] $readLen
+        $fs      = [System.IO.File]::OpenRead($ExePath)
+        try {
+            $pos = 0
+            while ($pos -lt $readLen) {
+                $n = $fs.Read($buf, $pos, $readLen - $pos)
+                if ($n -eq 0) { break }
+                $pos += $n
+            }
+        } finally { $fs.Dispose() }
+        $text = [System.Text.Encoding]::ASCII.GetString($buf, 0, $pos)
+        if ($text -match '(?i)d3d12\.dll')          { return 'd3d12.dll'    }
+        if ($text -match '(?i)(?:d3d11|dxgi)\.dll') { return 'dxgi.dll'     }
+        if ($text -match '(?i)d3d9\.dll')            { return 'd3d9.dll'     }
+        if ($text -match '(?i)opengl32\.dll')        { return 'opengl32.dll' }
+        return $null
+    } catch { return $null }
+}
+
+# Reads the PE Optional Header to determine whether an exe is 32-bit or 64-bit.
+# Returns 'x86', 'x64', or $null on error or unrecognised format.
+function Get-ExeArchitecture {
+    param([string]$ExePath)
+    try {
+        $fs  = [System.IO.File]::OpenRead($ExePath)
+        $buf = New-Object byte[] 4
+        try {
+            # Read 2-byte MZ signature; use a loop to guard against short reads.
+            $pos = 0
+            while ($pos -lt 2) {
+                $n = $fs.Read($buf, $pos, 2 - $pos)
+                if ($n -eq 0) { return $null }
+                $pos += $n
+            }
+            if ($buf[0] -ne 0x4D -or $buf[1] -ne 0x5A) { return $null }
+            # Read 4-byte PE header offset at 0x3C.
+            [void]$fs.Seek(0x3C, [System.IO.SeekOrigin]::Begin)
+            $pos = 0
+            while ($pos -lt 4) {
+                $n = $fs.Read($buf, $pos, 4 - $pos)
+                if ($n -eq 0) { return $null }
+                $pos += $n
+            }
+            $peOffset = [System.BitConverter]::ToInt32($buf, 0)
+            # Machine word sits 4 bytes into the PE header (after the 'PE\0\0' signature).
+            [void]$fs.Seek($peOffset + 4, [System.IO.SeekOrigin]::Begin)
+            $pos = 0
+            while ($pos -lt 2) {
+                $n = $fs.Read($buf, $pos, 2 - $pos)
+                if ($n -eq 0) { return $null }
+                $pos += $n
+            }
+            $machine = [System.BitConverter]::ToUInt16($buf, 0)
+            if ($machine -eq 0x014C) { return 'x86' }
+            if ($machine -eq 0x8664) { return 'x64' }
+            return $null
+        } finally { $fs.Dispose() }
+    } catch { return $null }
+}
+
+function Select-RegisteredGamesInteractive {
+    # Paginated picker over UserProfile XMLs.
+    # Returns an array of FileInfo objects for the user's selection.
+    param([string]$UserProfilesDir)
+    $fullBackupDir = Join-Path $UserProfilesDir "FullBackup"
+    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
+                  Where-Object { $_.DirectoryName -ne $fullBackupDir } |
+                  Sort-Object BaseName)
+    if ($profiles.Count -eq 0) {
+        Write-Host "  No registered games found in UserProfiles." -ForegroundColor Yellow
+        return ,@()
+    }
+    Write-Host ""
+    Write-Host "    A) All $($profiles.Count) registered game(s)" -ForegroundColor White
+    Write-Host "    L) Browse and select specific games" -ForegroundColor White
+    Write-Host ""
+    $pick = (Read-Host "    Enter A or L").Trim().ToUpper()
+    if ($pick -eq "A") { return ,$profiles }
+
+    $pageSize = 20
+    $pages    = [Math]::Ceiling($profiles.Count / $pageSize)
+    $page     = 0
+    $selected = [System.Collections.Generic.List[object]]::new()
+    while ($true) {
+        $start = $page * $pageSize
+        $end   = [Math]::Min($start + $pageSize - 1, $profiles.Count - 1)
+        Write-Host ""
+        Write-Host ("    Page {0}/{1}   (games {2}-{3} of {4})   * = selected" -f `
+            ($page + 1), $pages, ($start + 1), ($end + 1), $profiles.Count) -ForegroundColor Cyan
+        for ($i = $start; $i -le $end; $i++) {
+            $mark = if ($selected -contains $profiles[$i]) { '*' } else { ' ' }
+            Write-Host ("    {0,3}) {1} {2}" -f ($i + 1), $mark, $profiles[$i].BaseName)
+        }
+        Write-Host ""
+        Write-Host "    Enter number(s) to toggle (e.g. 1,3,5-7) | N=next | P=prev | A=all | D=done" -ForegroundColor DarkCyan
+        $inp = (Read-Host "    >").Trim().ToUpper()
+        if ($inp -eq "D") { break }
+        if ($inp -eq "A") { return ,$profiles }
+        if ($inp -eq "N" -and $page -lt ($pages - 1)) { $page++; continue }
+        if ($inp -eq "P" -and $page -gt 0)            { $page--; continue }
+        $nums = Expand-NumberList -str $inp -max $profiles.Count
+        foreach ($n in $nums) {
+            $item = $profiles[$n - 1]
+            if ($selected -contains $item) { [void]$selected.Remove($item) }
+            else { [void]$selected.Add($item) }
+        }
+    }
+    return ,@($selected)
+}
+
+function Get-ReShadeLatestVersion {
+    # Fetches the current ReShade version string from reshade.me.
+    # Returns e.g. "6.7.3", or $null if the site cannot be reached.
+    try {
+        $resp = Invoke-WebRequest -Uri "https://reshade.me" -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
+        if ($resp.Content -match 'ReShade_Setup_(\d+\.\d+\.\d+)') { return $Matches[1] }
+    } catch {}
+    return $null
+}
+
+function Invoke-ReShadeSetup {
+    # Full ReShade install wizard: version check, preset choice, game picker, deploy.
+    param(
+        [string]$UserProfilesDir,
+        [string]$SourceDll,      # 64-bit DLL path (caller guarantees it exists)
+        [string]$SourceDll32,    # 32-bit DLL path (optional; $null = skip x86 games)
+        [string]$ConfigPath,
+        [string]$TpRoot,
+        [string]$Mode,
+        [string]$ZipSource,
+        [string]$GamesInstallFolder,
+        [bool]$RetroBat,
+        [string]$HsDataPath
+    )
+
+    # Version check
+    $bVer = $null
+    try {
+        $vi   = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($SourceDll)
+        $bVer = "$($vi.FileMajorPart).$($vi.FileMinorPart).$($vi.FileBuildPart)"
+        Write-Host ("  ReShade (64-bit) : {0}" -f $bVer) -ForegroundColor DarkGray
+    } catch {}
+    if ($SourceDll32 -and (Test-Path -LiteralPath $SourceDll32)) {
+        try {
+            $vi32   = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($SourceDll32)
+            $bVer32 = "$($vi32.FileMajorPart).$($vi32.FileMinorPart).$($vi32.FileBuildPart)"
+            Write-Host ("  ReShade (32-bit) : {0}" -f $bVer32) -ForegroundColor DarkGray
+        } catch {}
+    } else {
+        Write-Host "  ReShade (32-bit) : not found -- 32-bit games will be skipped" -ForegroundColor DarkGray
+    }
+    if ($bVer) {
+        Write-Host "  Checking reshade.me for updates..." -ForegroundColor DarkGray
+        $latest = Get-ReShadeLatestVersion
+        if ($latest) {
+            if ([version]$latest -gt [version]$bVer) {
+                Write-Host ("  Newer version available: {0}  (you have {1})" -f $latest, $bVer) -ForegroundColor Yellow
+                Write-Host "  Get it at  https://reshade.me  and replace ReShade\ReShade64.dll (and ReShade32.dll for 32-bit games)." -ForegroundColor Cyan
+            } else {
+                Write-Host ("  Up to date ({0})." -f $bVer) -ForegroundColor Green
+            }
+        } else {
+            Write-Host "  (Could not reach reshade.me -- update check skipped.)" -ForegroundColor DarkGray
+        }
+    }
+
+    # Preset / shader options
+    Write-Host ""
+    Write-Host "  Preset / visual effects:" -ForegroundColor Cyan
+    Write-Host "    1) No preset -- just install the DLL."
+    Write-Host "       Once a game launches, press the  Home  key to open the"
+    Write-Host "       ReShade overlay and switch effects on or off."
+    Write-Host "    2) Use a preset file -- copy a ready-made .ini to every selected game."
+    Write-Host "       Useful if you already have settings you are happy with."
+    Write-Host ""
+    $presetChoice = (Read-Host "  Enter 1 or 2").Trim()
+    $presetPath   = $null
+    if ($presetChoice -eq "2") {
+        $pInp = (Read-Host "  Path to your ReShade preset (.ini) file").Trim()
+        if (Test-Path -LiteralPath $pInp) {
+            $presetPath = $pInp
+            Write-Host "  Preset: $pInp" -ForegroundColor DarkGray
+        } else {
+            Write-Host "  File not found -- continuing without preset." -ForegroundColor Yellow
+        }
+    }
+
+    # Game selection
+    Write-Host ""
+    Write-Host "  Which games should get ReShade?" -ForegroundColor Cyan
+    Write-Host "  You can run setup again later to add or change individual games." -ForegroundColor DarkCyan
+    $selectedGames = @(Select-RegisteredGamesInteractive -UserProfilesDir $UserProfilesDir)
+    if ($selectedGames.Count -eq 0) {
+        Write-Host "  No games selected. ReShade setup cancelled." -ForegroundColor Yellow
+        Write-Log "ReShade setup: cancelled -- no games selected."
+        return
+    }
+
+    # Deploy
+    Write-Host ""
+    Write-Host ("  Installing ReShade into {0} game folder(s)..." -f $selectedGames.Count) -ForegroundColor Cyan
+    $deployed = 0; $skipped = 0; $errors = 0
+
+    foreach ($pf in $selectedGames) {
+        try {
+            $doc = Read-Xml $pf.FullName
+            if (-not $doc.GameProfile) { $skipped++; continue }
+
+            $gpNode = $doc.GameProfile.SelectSingleNode("GamePath")
+            if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { $skipped++; continue }
+
+            $gamePath = $gpNode.InnerText.Trim()
+            if (-not (Test-Path -LiteralPath $gamePath)) {
+                Write-Host ("    {0}: game path not found -- skipped" -f $pf.BaseName) -ForegroundColor DarkGray
+                $skipped++; continue
+            }
+            $exeDir = [System.IO.Path]::GetDirectoryName($gamePath)
+            if ([string]::IsNullOrWhiteSpace($exeDir)) {
+                Write-Host ("    {0}: invalid game path (no directory component) -- skipped" -f $pf.BaseName) -ForegroundColor Yellow
+                $skipped++; continue
+            }
+
+            $emuType = ""
+            $etNode  = $doc.GameProfile.SelectSingleNode("EmulatorType")
+            if ($etNode) { $emuType = $etNode.InnerText.Trim() }
+
+            # Pick the right ReShade DLL based on detected exe architecture.
+            $arch      = Get-ExeArchitecture -ExePath $gamePath
+            $activeDll = $SourceDll   # default: 64-bit
+            if ($arch -eq 'x86') {
+                if ($SourceDll32 -and (Test-Path -LiteralPath $SourceDll32)) {
+                    $activeDll = $SourceDll32
+                } else {
+                    Write-Host ("    {0}: 32-bit game -- ReShade32.dll not found; skipped." -f $pf.BaseName) -ForegroundColor Yellow
+                    Write-Log "ReShade: skipped $($pf.BaseName) -- 32-bit game, no ReShade32.dll."
+                    $skipped++; continue
+                }
+            } elseif ($arch -ne $null -and $arch -ne 'x64') {
+                Write-Host ("    {0}: unsupported architecture ({1}); skipped." -f $pf.BaseName, $arch) -ForegroundColor Yellow
+                Write-Log "ReShade: skipped $($pf.BaseName) -- unsupported architecture ($arch)."
+                $skipped++; continue
+            }
+
+            # OpenParrot games: files go into the openparrot subfolder
+            $targetDir = $exeDir
+            if ($emuType -imatch 'openparrot') {
+                $opDir = Join-Path $exeDir "openparrot"
+                if (Test-Path -LiteralPath $opDir) { $targetDir = $opDir }
+            }
+
+            # BudgieLoader games always use opengl32.dll; others: detect from exe
+            if ($emuType -imatch 'budgieloader') {
+                $dllName = "opengl32.dll"
+            } else {
+                $detected = Get-GameApiDll -ExePath $gamePath
+                if ($detected) {
+                    $dllName = $detected
+                } else {
+                    $dllName = "dxgi.dll"
+                    Write-Host ("    {0}: graphics API not detected, defaulting to dxgi.dll" -f $pf.BaseName) -ForegroundColor Yellow
+                }
+            }
+
+            $destDll = Join-Path $targetDir $dllName
+            Copy-Item -LiteralPath $activeDll -Destination $destDll -Force -ErrorAction Stop
+            if ($presetPath) {
+                Copy-Item -LiteralPath $presetPath -Destination (Join-Path $targetDir "ReShade.ini") `
+                          -Force -ErrorAction Stop
+            }
+            Write-Host ("    {0}  [{1}]" -f $pf.BaseName, $dllName) -ForegroundColor Green
+            Write-Log "ReShade: $($pf.BaseName) -> $targetDir [$dllName]"
+            $deployed++
+        } catch {
+            Write-Host ("    FAILED {0}: {1}" -f $pf.BaseName, $_) -ForegroundColor Red
+            Write-Log "ReShade: FAILED $($pf.BaseName) -- $_"
+            $errors++
+        }
+    }
+
+    Write-Host ""
+    Write-Host ("  Installed : {0} game(s)" -f $deployed) -ForegroundColor Green
+    if ($skipped -gt 0) {
+        Write-Host ("  Skipped   : {0}  (path not found, 32-bit DLL missing, or unsupported architecture)" -f $skipped) -ForegroundColor DarkGray
+    }
+    if ($errors -gt 0) {
+        Write-Host ("  Errors    : {0}  -- see TeknoParrot-Manager.log for details" -f $errors) -ForegroundColor Red
+    }
+    Write-Host ""
+    Write-Host "  To turn effects on/off: launch a game and press the  Home  key." -ForegroundColor Cyan
+    Write-Host "  To uninstall ReShade: delete the DLL file (e.g. dxgi.dll, d3d9.dll)" -ForegroundColor DarkCyan
+    Write-Host "  from the game's folder. Your game files are never modified." -ForegroundColor DarkCyan
+    Write-Log ("ReShade setup: Installed={0} Skipped={1} Errors={2}" -f $deployed, $skipped, $errors)
+}
+
+# =============================================================================
+# Scans the first 2 MB of a game exe for legacy graphics API imports (DX8 /
+# DirectDraw / Glide). Returns an array from: 'D3D8', 'DDraw', 'Glide2x',
+# 'Glide3x'. Returns empty array if nothing is detected or on error.
+function Get-GameLegacyApi {
+    param([string]$ExePath)
+    $found = @()
+    try {
+        $readLen = [int][Math]::Min((Get-Item -LiteralPath $ExePath).Length, 2097152)
+        $buf     = New-Object byte[] $readLen
+        $fs      = [System.IO.File]::OpenRead($ExePath)
+        try {
+            $pos = 0
+            while ($pos -lt $readLen) {
+                $n = $fs.Read($buf, $pos, $readLen - $pos)
+                if ($n -eq 0) { break }
+                $pos += $n
+            }
+        } finally { $fs.Dispose() }
+        $text = [System.Text.Encoding]::ASCII.GetString($buf, 0, $pos)
+        if ($text -match '(?i)d3d8\.dll')              { $found += 'D3D8'    }
+        if ($text -match '(?i)ddraw\.dll')             { $found += 'DDraw'   }
+        if ($text -match '(?i)glide2x\.dll')           { $found += 'Glide2x' }
+        if ($text -match '(?i)(?:glide3x|glide)\.dll') { $found += 'Glide3x' }
+    } catch {
+        Write-Log "dgVoodoo2: scan failed for $ExePath -- $_"
+    }
+    return $found
+}
+
+# =============================================================================
+# dgVoodoo2 install wizard: auto-detect DX8/DDraw/Glide games, deploy DLLs.
+function Invoke-DgVoodoo2Setup {
+    param(
+        [string]$UserProfilesDir,
+        [string]$SourceDir,
+        [string]$TpRoot
+    )
+
+    # Validate at least one expected DLL is present in the source folder.
+    $allExpected = @('D3D8.dll', 'DDraw.dll', 'D3DImm.dll', 'Glide2x.dll', 'Glide3x.dll')
+    $available   = @($allExpected | Where-Object { Test-Path -LiteralPath (Join-Path $SourceDir $_) })
+    if ($available.Count -eq 0) {
+        Write-Host ("  ERROR: No dgVoodoo2 DLLs found in: {0}" -f $SourceDir) -ForegroundColor Red
+        Write-Host ("  Expected one or more of: {0}" -f ($allExpected -join ', ')) -ForegroundColor Yellow
+        Write-Log "dgVoodoo2 setup: aborted -- no DLLs in $SourceDir"
+        return
+    }
+    Write-Host ("  Available DLLs : {0}" -f ($available -join ', ')) -ForegroundColor DarkGray
+
+    # Scan all registered games for legacy API usage and build a detection map.
+    Write-Host ""
+    Write-Host "  Scanning registered games for old DirectX / Glide usage..." -ForegroundColor Cyan
+    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Directory.Name -ne "FullBackup" } |
+                  Sort-Object BaseName)
+    if ($profiles.Count -eq 0) {
+        Write-Host "  No registered games found." -ForegroundColor Yellow
+        Write-Log "dgVoodoo2 setup: aborted -- no registered profiles."
+        return
+    }
+
+    $detectedMap = @{}   # BaseName -> API array
+    foreach ($pf in $profiles) {
+        try {
+            $doc = Read-Xml $pf.FullName
+            if (-not $doc.GameProfile) { continue }
+            $gpNode   = $doc.GameProfile.SelectSingleNode("GamePath")
+            if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { continue }
+            $gamePath = $gpNode.InnerText.Trim()
+            if (-not (Test-Path -LiteralPath $gamePath)) { continue }
+            $apis = @(Get-GameLegacyApi -ExePath $gamePath)
+            if ($apis.Count -gt 0) { $detectedMap[$pf.BaseName] = $apis }
+        } catch {}
+    }
+
+    Write-Host ("  Scanned {0} game(s)." -f $profiles.Count) -ForegroundColor DarkGray
+    if ($detectedMap.Count -gt 0) {
+        Write-Host ("  Auto-detected {0} game(s) using legacy APIs:" -f $detectedMap.Count) -ForegroundColor Cyan
+        foreach ($name in ($detectedMap.Keys | Sort-Object)) {
+            Write-Host ("    {0}  [{1}]" -f $name, ($detectedMap[$name] -join ', '))
+        }
+    } else {
+        Write-Host "  No games were auto-detected as using legacy APIs." -ForegroundColor DarkGray
+    }
+
+    # Game selection.
+    Write-Host ""
+    Write-Host "  Which games should get dgVoodoo2?" -ForegroundColor Cyan
+    $selectionMode = ""
+    if ($detectedMap.Count -gt 0) {
+        Write-Host "  A) Auto-detected games only ($($detectedMap.Count) game(s) listed above)"
+        Write-Host "  M) Pick games manually from the full list"
+        Write-Host "  Q) Cancel"
+        $selectionMode = (Read-Host "  Enter A, M, or Q").Trim().ToUpper()
+    } else {
+        Write-Host "  M) Pick games manually from the full list"
+        Write-Host "  Q) Cancel"
+        $selectionMode = (Read-Host "  Enter M or Q").Trim().ToUpper()
+    }
+
+    $targetProfiles = @()
+    if ($selectionMode -eq 'A') {
+        $targetProfiles = @($profiles | Where-Object { $detectedMap.ContainsKey($_.BaseName) })
+    } elseif ($selectionMode -eq 'M') {
+        $targetProfiles = @(Select-RegisteredGamesInteractive -UserProfilesDir $UserProfilesDir)
+    } else {
+        Write-Host "  dgVoodoo2 setup cancelled." -ForegroundColor Yellow
+        Write-Log "dgVoodoo2 setup: cancelled."
+        return
+    }
+
+    if ($targetProfiles.Count -eq 0) {
+        Write-Host "  No games selected. dgVoodoo2 setup cancelled." -ForegroundColor Yellow
+        Write-Log "dgVoodoo2 setup: cancelled -- no games selected."
+        return
+    }
+
+    # Deploy DLLs to each selected game folder.
+    Write-Host ""
+    Write-Host ("  Installing dgVoodoo2 into {0} game folder(s)..." -f $targetProfiles.Count) -ForegroundColor Cyan
+    $deployed = 0; $skipped = 0; $errors = 0
+    $hasConf  = Test-Path -LiteralPath (Join-Path $SourceDir "dgVoodoo.conf")
+
+    foreach ($pf in $targetProfiles) {
+        try {
+            $doc = Read-Xml $pf.FullName
+            if (-not $doc.GameProfile) { $skipped++; continue }
+            $gpNode   = $doc.GameProfile.SelectSingleNode("GamePath")
+            if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { $skipped++; continue }
+            $gamePath = $gpNode.InnerText.Trim()
+            if (-not (Test-Path -LiteralPath $gamePath)) {
+                Write-Host ("  SKIP  {0} -- exe not found." -f $pf.BaseName) -ForegroundColor Yellow
+                $skipped++; continue
+            }
+            $exeDir = [System.IO.Path]::GetDirectoryName($gamePath)
+            if ([string]::IsNullOrWhiteSpace($exeDir)) { $skipped++; continue }
+
+            # Determine which DLLs this game needs based on detected API.
+            $apis = if ($detectedMap.ContainsKey($pf.BaseName)) `
+                        { @($detectedMap[$pf.BaseName]) } `
+                    else `
+                        { @(Get-GameLegacyApi -ExePath $gamePath) }
+
+            $toDeploy = @()
+            if ($apis.Count -eq 0) {
+                $toDeploy = $available   # manual pick with no detection: deploy all available
+            } else {
+                if ($apis -contains 'D3D8')    { $toDeploy += @($available | Where-Object { $_ -in @('D3D8.dll',   'D3DImm.dll') }) }
+                if ($apis -contains 'DDraw')   { $toDeploy += @($available | Where-Object { $_ -in @('DDraw.dll',  'D3DImm.dll') }) }
+                if ($apis -contains 'Glide2x') { $toDeploy += @($available | Where-Object { $_ -eq  'Glide2x.dll'               }) }
+                if ($apis -contains 'Glide3x') { $toDeploy += @($available | Where-Object { $_ -eq  'Glide3x.dll'               }) }
+                $toDeploy = @($toDeploy | Select-Object -Unique)
+                if ($toDeploy.Count -eq 0) {
+                    Write-Host ("  WARN  {0}: detected [{1}] but none of those DLLs are in the source folder; deploying all available." -f $pf.BaseName, ($apis -join ', ')) -ForegroundColor Yellow
+                    Write-Log "dgVoodoo2: $($pf.BaseName) -- detected [$($apis -join ', ')] but no matching DLLs found; deploying all available."
+                    $toDeploy = $available
+                }
+            }
+
+            foreach ($dllName in $toDeploy) {
+                $dstDll = Join-Path $exeDir $dllName
+                if (-not (Test-Path -LiteralPath $dstDll)) {
+                    Copy-Item -LiteralPath (Join-Path $SourceDir $dllName) -Destination $dstDll -ErrorAction Stop
+                }
+            }
+            if ($hasConf) {
+                $dstConf = Join-Path $exeDir "dgVoodoo.conf"
+                if (-not (Test-Path -LiteralPath $dstConf)) {
+                    Copy-Item -LiteralPath (Join-Path $SourceDir "dgVoodoo.conf") -Destination $dstConf -ErrorAction Stop
+                }
+            }
+            $apiStr = if ($apis.Count -gt 0) { "  [{0}]" -f ($apis -join ', ') } else { "" }
+            Write-Host ("  OK    {0}{1}" -f $pf.BaseName, $apiStr) -ForegroundColor Green
+            Write-Log ("dgVoodoo2: deployed {0} to {1}" -f ($toDeploy -join ', '), $exeDir)
+            $deployed++
+
+        } catch {
+            Write-Host ("  ERROR {0} -- {1}" -f $pf.BaseName, $_) -ForegroundColor Red
+            Write-Log "dgVoodoo2: error on $($pf.BaseName) -- $_"
+            $errors++
+        }
+    }
+
+    Write-Host ""
+    Write-Host ("  Deployed  : {0} game(s)" -f $deployed) -ForegroundColor Green
+    if ($skipped -gt 0) { Write-Host ("  Skipped   : {0}" -f $skipped) -ForegroundColor DarkGray }
+    if ($errors  -gt 0) { Write-Host ("  Errors    : {0}" -f $errors)  -ForegroundColor Red      }
+    Write-Host ""
+    Write-Host "  To uninstall: delete the deployed DLL file(s) from the game folder." -ForegroundColor DarkCyan
+    Write-Host "  Your original game files are never modified." -ForegroundColor DarkCyan
+    Write-Log ("dgVoodoo2 setup: deployed={0} skipped={1} errors={2}" -f $deployed, $skipped, $errors)
+}
+
+# =============================================================================
+# XPath 1.0 has no escape for apostrophes in string literals; use concat()
+# when the value contains one so the predicate always parses correctly.
+function ConvertTo-XPathStringLiteral {
+    param([string]$s)
+    if ($s -notmatch "'") { return "'$s'" }
+    $parts = $s.Split([char]39) | ForEach-Object { "'$_'" }
+    return 'concat(' + ($parts -join ",""'",") + ')'
+}
+
+# =============================================================================
+# GPU Fix Setup: detect GPU vendor, scan TeknoParrot GameProfiles for fix
+# fields (so newly added games are covered automatically), and apply the
+# appropriate values to every registered UserProfile XML.
+function Invoke-GpuFixSetup {
+    param(
+        [string]$UserProfilesDir,
+        [string]$TpRoot
+    )
+
+    # ── GPU detection ──────────────────────────────────────────────────────────
+    Write-Host ""
+    Write-Host "  Detecting GPU..." -ForegroundColor DarkGray
+    $gpuVendor = $null
+    $gpuName   = $null
+    try {
+        $adapters = @(Get-WmiObject Win32_VideoController -ErrorAction Stop |
+            Where-Object { $_.Name -notmatch '(?i)microsoft|virtual|remote' } |
+            Sort-Object { if ($_.AdapterRAM) { [double]$_.AdapterRAM } else { 0.0 } } -Descending)
+        if ($adapters.Count -gt 0) {
+            $gpuName = $adapters[0].Name
+            if     ($gpuName -imatch 'amd|radeon')                 { $gpuVendor = 'AMD'    }
+            elseif ($gpuName -imatch 'nvidia|geforce|rtx|gtx')     { $gpuVendor = 'NVIDIA' }
+            elseif ($gpuName -imatch 'intel')                      { $gpuVendor = 'Intel'  }
+        }
+    } catch {
+        Write-Host ("  WARNING: GPU detection failed -- {0}" -f $_) -ForegroundColor Yellow
+    }
+
+    if ($gpuVendor) {
+        Write-Host ("  Detected : {0} ({1})" -f $gpuVendor, $gpuName) -ForegroundColor DarkGray
+        Write-Log "GPU Fix: detected $gpuVendor ($gpuName)"
+    } else {
+        Write-Host "  Could not auto-detect GPU vendor." -ForegroundColor Yellow
+        if ($gpuName) { Write-Host ("  Adapter  : {0}" -f $gpuName) -ForegroundColor DarkGray }
+        $inp = (Read-Host "  Enter GPU vendor (AMD / NVIDIA / Intel) or press Enter to cancel").Trim()
+        if ([string]::IsNullOrWhiteSpace($inp)) {
+            Write-Host "  GPU fix setup cancelled." -ForegroundColor DarkGray
+            Write-Log "GPU Fix: cancelled -- vendor not detected and user did not enter one."
+            return
+        }
+        if     ($inp -imatch '^amd$|^radeon$')     { $gpuVendor = 'AMD'    }
+        elseif ($inp -imatch '^nvidia$|^geforce$')  { $gpuVendor = 'NVIDIA' }
+        elseif ($inp -imatch '^intel$')             { $gpuVendor = 'Intel'  }
+        else {
+            Write-Host ("  Unrecognised vendor '{0}'. Use AMD, NVIDIA, or Intel." -f $inp) -ForegroundColor Red
+            Write-Log "GPU Fix: cancelled -- unrecognised vendor '$inp'."
+            return
+        }
+        Write-Host ("  Using    : {0}" -f $gpuVendor) -ForegroundColor DarkGray
+        Write-Log "GPU Fix: user-specified vendor = $gpuVendor"
+    }
+
+    # ── Discover GPU fix field names from TeknoParrot GameProfiles ─────────────
+    # Scans at runtime so newly added games with new fix fields are covered
+    # automatically without requiring a script update.
+    $gpDir         = Join-Path $TpRoot "GameProfiles"
+    $boolAmdFields = [System.Collections.Generic.HashSet[string]]::new(
+                         [string[]]@('EnableAmdFix','AMDCrashFix','AMDFix'),
+                         [System.StringComparer]::OrdinalIgnoreCase)
+    $dropdownGpuFields = [System.Collections.Generic.HashSet[string]]::new(
+                             [string[]]@('GPU Fix'),
+                             [System.StringComparer]::OrdinalIgnoreCase)
+
+    if (Test-Path -LiteralPath $gpDir) {
+        Write-Host "  Scanning GameProfiles for GPU fix fields..." -ForegroundColor DarkGray
+        $gpFiles = @(Get-ChildItem -LiteralPath $gpDir -Filter "*.xml" -ErrorAction SilentlyContinue)
+        foreach ($gf in $gpFiles) {
+            try {
+                $gdoc  = [xml]([System.IO.File]::ReadAllText($gf.FullName))
+                $fnodes = $gdoc.SelectNodes("/GameProfile/ConfigValues/FieldInformation")
+                foreach ($n in $fnodes) {
+                    $fn = if ($n.FieldName) { $n.FieldName.Trim() } else { '' }
+                    $ft = if ($n.FieldType)  { $n.FieldType.Trim()  } else { '' }
+                    if (-not $fn) { continue }
+                    if ($ft -eq 'Bool' -and $fn -imatch '\bamd\b|\bradeon\b|AMDFix|AMDCrash') {
+                        [void]$boolAmdFields.Add($fn)
+                    } elseif ($ft -eq 'Dropdown') {
+                        $opts = @($n.SelectNodes("FieldOptions/string") | ForEach-Object { $_.InnerText.Trim() })
+                        if ($opts | Where-Object { $_ -imatch '^amd$|^nvidia$|^intel$|^new amd' }) {
+                            [void]$dropdownGpuFields.Add($fn)
+                        }
+                    }
+                }
+            } catch {
+                Write-Log ("GPU Fix: WARNING -- could not parse GameProfile '$($gf.BaseName)': $_")
+            }
+        }
+        Write-Log ("GPU Fix: discovered fields -- Bool AMD: [{0}]  Dropdown GPU: [{1}]" -f `
+            ($boolAmdFields -join ', '), ($dropdownGpuFields -join ', '))
+    } else {
+        Write-Host ("  GameProfiles folder not found at '{0}' -- using built-in field list." -f $gpDir) -ForegroundColor DarkGray
+        Write-Log "GPU Fix: GameProfiles not found at $gpDir -- using fallback field list."
+    }
+
+    # ── Walk UserProfiles ──────────────────────────────────────────────────────
+    Write-Host ""
+    Write-Host "  Applying GPU fixes to registered profiles..." -ForegroundColor DarkGray
+    $profiles  = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -ErrorAction SilentlyContinue)
+    $updated   = 0
+    $unchanged = 0
+    $errors    = 0
+
+    foreach ($pf in $profiles) {
+        try {
+            $doc     = [xml]([System.IO.File]::ReadAllText($pf.FullName))
+            $changed = $false
+
+            # Bool AMD fix fields: 1 for AMD users, 0 for everyone else.
+            foreach ($fieldName in $boolAmdFields) {
+                $xpLit = ConvertTo-XPathStringLiteral $fieldName
+                $fi = $doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$xpLit]")
+                if ($null -eq $fi) { continue }
+                $fvNode = $fi.SelectSingleNode("FieldValue")
+                if ($null -eq $fvNode) { continue }
+                $newVal = if ($gpuVendor -eq 'AMD') { '1' } else { '0' }
+                if ($fvNode.InnerText -ne $newVal) {
+                    $oldVal           = $fvNode.InnerText
+                    $fvNode.InnerText = $newVal
+                    $changed          = $true
+                    Write-Log "GPU Fix: $($pf.BaseName) :: $fieldName $oldVal -> $newVal"
+                }
+            }
+
+            # GPU Fix dropdown fields: pick best available option for the detected vendor.
+            foreach ($fieldName in $dropdownGpuFields) {
+                $xpLit = ConvertTo-XPathStringLiteral $fieldName
+                $fi = $doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$xpLit]")
+                if ($null -eq $fi) { continue }
+                $fvNode = $fi.SelectSingleNode("FieldValue")
+                $opts   = @($fi.SelectNodes("FieldOptions/string") | ForEach-Object { $_.InnerText.Trim() })
+                if ($null -eq $fvNode -or $opts.Count -eq 0) { continue }
+
+                $newVal = 'None'
+                if ($gpuVendor -eq 'AMD') {
+                    if     ($opts -contains 'New AMD Driver') { $newVal = 'New AMD Driver' }
+                    elseif ($opts -contains 'AMD')            { $newVal = 'AMD'            }
+                } elseif ($gpuVendor -eq 'NVIDIA') {
+                    if ($opts -contains 'NVIDIA') { $newVal = 'NVIDIA' }
+                } elseif ($gpuVendor -eq 'Intel') {
+                    if ($opts -contains 'INTEL') { $newVal = 'INTEL' }
+                }
+
+                if ($fvNode.InnerText -ne $newVal) {
+                    $oldVal           = $fvNode.InnerText
+                    $fvNode.InnerText = $newVal
+                    $changed          = $true
+                    Write-Log "GPU Fix: $($pf.BaseName) :: $fieldName $oldVal -> $newVal"
+                }
+            }
+
+            if ($changed) {
+                Save-Xml $doc $pf.FullName
+                $updated++
+                Write-Host ("    {0}" -f $pf.BaseName) -ForegroundColor Green
+            } else {
+                $unchanged++
+            }
+        } catch {
+            Write-Host ("    FAILED {0}: {1}" -f $pf.BaseName, $_) -ForegroundColor Red
+            Write-Log "GPU Fix: FAILED $($pf.BaseName) -- $_"
+            $errors++
+        }
+    }
+
+    Write-Host ""
+    Write-Host ("  Updated  : {0} profile(s)" -f $updated) -ForegroundColor Green
+    if ($unchanged -gt 0) {
+        Write-Host ("  No change: {0} (already correct or no GPU fix fields)" -f $unchanged) -ForegroundColor DarkGray
+    }
+    if ($errors -gt 0) {
+        Write-Host ("  Errors   : {0} -- see log for details" -f $errors) -ForegroundColor Red
+    }
+    Write-Log ("GPU Fix: complete. Vendor={0} Updated={1} Unchanged={2} Errors={3}" -f `
+        $gpuVendor, $updated, $unchanged, $errors)
+}
+
+# =============================================================================
+# Full crosshair setup flow: validate collection, preview, pick, deploy.
+function Invoke-CrosshairSetup {
+    param([string]$UserProfilesDir, [string]$GamesInstallFolder, [string]$TpRoot)
+
+    $crosshairsDir = Join-Path $PSScriptRoot "Crosshairs"
+    $previewPath   = Join-Path $PSScriptRoot "TeknoParrot-Crosshairs-Preview.html"
+
+    if (-not (Test-Path -LiteralPath $crosshairsDir)) {
+        Write-Host "  ERROR: Crosshairs folder not found: $crosshairsDir" -ForegroundColor Red
+        Write-Host "  Place PNG crosshair files in a 'Crosshairs' subfolder next to the script." -ForegroundColor Yellow
+        Write-Log "Crosshairs: Crosshairs folder not found"; return
+    }
+
+    # Scan and validate -- any PNG in the folder is a candidate
+    $allFiles = @(Get-ChildItem -LiteralPath $crosshairsDir -Filter "*.png" -File -ErrorAction SilentlyContinue |
+                     Sort-Object Name)
+    $valid   = [System.Collections.Generic.List[string]]::new()
+    $invalid = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($f in $allFiles) {
+        if (Test-PngFile -Path $f.FullName) { $valid.Add($f.FullName) }
+        else {
+            $invalid.Add($f.Name)
+            Write-Log "Crosshairs: rejected invalid PNG -- $($f.Name)"
+        }
+    }
+
+    if ($invalid.Count -gt 0) {
+        Write-Host ("  WARNING: {0} file(s) failed PNG validation and were skipped:" -f $invalid.Count) -ForegroundColor Yellow
+        foreach ($n in $invalid) { Write-Host "    $n" -ForegroundColor DarkGray }
+    }
+    if ($valid.Count -eq 0) {
+        Write-Host "  No valid PNG crosshairs found in: $crosshairsDir" -ForegroundColor Red
+        Write-Log "Crosshairs: no valid PNGs found"; return
+    }
+
+    Write-Host ("  Found {0} valid crosshair(s). Generating preview..." -f $valid.Count) -ForegroundColor Cyan
+    Export-CrosshairPreview -CrosshairPaths $valid.ToArray() -OutPath $previewPath
+    Write-Host "  Preview: $previewPath" -ForegroundColor Cyan
+    Write-Host "  Opening in browser -- browse the grid, then come back here." -ForegroundColor DarkCyan
+    Start-Process $previewPath
+    Write-Host ""
+
+    # Pick P1
+    $p1Idx = $null
+    while ($null -eq $p1Idx) {
+        $raw = (Read-Host ("  P1 crosshair index (0-{0})" -f ($valid.Count - 1))).Trim()
+        if ($raw -match '^\d+$' -and $raw.Length -le 9 -and [int]$raw -lt $valid.Count) { $p1Idx = [int]$raw }
+        else { Write-Host ("  Enter a number between 0 and {0}." -f ($valid.Count - 1)) -ForegroundColor Yellow }
+    }
+    # Pick P2
+    $p2Idx = $null
+    while ($null -eq $p2Idx) {
+        $raw = (Read-Host ("  P2 crosshair index (0-{0}, or same as P1)" -f ($valid.Count - 1))).Trim()
+        if ($raw -match '^\d+$' -and $raw.Length -le 9 -and [int]$raw -lt $valid.Count) { $p2Idx = [int]$raw }
+        else { Write-Host ("  Enter a number between 0 and {0}." -f ($valid.Count - 1)) -ForegroundColor Yellow }
+    }
+
+    $p1Name = [System.IO.Path]::GetFileNameWithoutExtension($valid[$p1Idx])
+    $p2Name = [System.IO.Path]::GetFileNameWithoutExtension($valid[$p2Idx])
+    Write-Host ""
+    Write-Host "  P1: $p1Name    P2: $p2Name" -ForegroundColor Green
+    Write-Log "Crosshairs: P1=$p1Name  P2=$p2Name"
+
+    # Locate ElfLdr2 folder -- search common names then any elf-named subfolder
+    $elfDir = $null
+    foreach ($candidate in @("ElfLdr2","ElfLoader2","elf","elf2","ElfLdr")) {
+        $try = Join-Path $TpRoot $candidate
+        if (Test-Path -LiteralPath $try) { $elfDir = $try; break }
+    }
+    if (-not $elfDir) {
+        $elfDir = Get-ChildItem -LiteralPath $TpRoot -Directory -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Name -imatch 'elf' } |
+                  Select-Object -First 1 -ExpandProperty FullName
+    }
+
+    # Deploy
+    Write-Host ""
+    Write-Host "  Deploying to lightgun games..." -ForegroundColor Cyan
+    $deployed = 0; $skipped = 0; $errors = 0; $elfDeployed = $false
+
+    $xmlFiles = Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Directory.Name -ne "FullBackup" }
+
+    foreach ($pf in $xmlFiles) {
+        try {
+            $doc     = Read-Xml $pf.FullName
+            if ($null -eq $doc.GameProfile) { continue }
+            $gunNode = $doc.GameProfile.SelectSingleNode("GunGame")
+            if (-not $gunNode -or $gunNode.InnerText -ne "true") { continue }
+
+            $emuType = ""
+            $etNode  = $doc.GameProfile.SelectSingleNode("EmulatorType")
+            if ($etNode) { $emuType = $etNode.InnerText.Trim() }
+
+            if ($emuType -eq "ElfLdr2") {
+                # All ElfLdr2 lightgun games share one folder — deploy once
+                if (-not $elfDeployed) {
+                    $dest = if ($elfDir) { $elfDir } else { $TpRoot }
+                    Copy-Item -LiteralPath $valid[$p1Idx] -Destination (Join-Path $dest "P1.png") -Force -ErrorAction Stop
+                    Copy-Item -LiteralPath $valid[$p2Idx] -Destination (Join-Path $dest "P2.png") -Force -ErrorAction Stop
+                    Write-Host ("    ElfLdr2 -> {0}" -f $dest) -ForegroundColor Green
+                    Write-Log "Crosshairs: deployed to ElfLdr2 folder $dest"
+                    $elfDeployed = $true
+                }
+                $deployed++; continue
+            }
+
+            # Standard game: copy to the game exe directory
+            $gpNode = $doc.GameProfile.SelectSingleNode("GamePath")
+            if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { $skipped++; continue }
+            $exeDir = [System.IO.Path]::GetDirectoryName($gpNode.InnerText.Trim())
+            if (-not (Test-Path -LiteralPath $exeDir)) { $skipped++; continue }
+
+            Copy-Item -LiteralPath $valid[$p1Idx] -Destination (Join-Path $exeDir "P1.png") -Force -ErrorAction Stop
+            Copy-Item -LiteralPath $valid[$p2Idx] -Destination (Join-Path $exeDir "P2.png") -Force -ErrorAction Stop
+            Write-Host ("    {0} -> {1}" -f $pf.BaseName, $exeDir) -ForegroundColor Green
+            Write-Log "Crosshairs: deployed $($pf.BaseName) -> $exeDir"
+            $deployed++
+        } catch {
+            Write-Host ("    FAILED {0}: {1}" -f $pf.BaseName, $_) -ForegroundColor Red
+            Write-Log "Crosshairs: error on $($pf.BaseName) -- $_"
+            $errors++
+        }
+    }
+
+    Write-Host ""
+    Write-Host ("  Deployed : {0} lightgun game(s)" -f $deployed) -ForegroundColor Green
+    if ($skipped -gt 0) { Write-Host ("  Skipped  : {0} (no path or folder not found)" -f $skipped) -ForegroundColor DarkGray }
+    if ($errors  -gt 0) { Write-Host ("  Errors   : {0}" -f $errors) -ForegroundColor Red }
+    Write-Log ("Crosshairs: done. Deployed={0} Skipped={1} Errors={2}" -f $deployed, $skipped, $errors)
+}
+
+# =============================================================================
+# Extracts a ZIP to a destination directory using \\?\ extended-length paths on
+# every file write, bypassing Windows' 260-character MAX_PATH limit. Replaces
+# ZipFile::ExtractToDirectory which throws PathTooLongException for games with
+# deeply-nested internal paths. Includes a zip-slip guard.
+function Expand-ZipFileSafe {
+    param([string]$ZipPath, [string]$DestDir)
+
+    # GetFullPath on the (short) base is safe. We deliberately avoid calling
+    # GetFullPath on the combined base+entry path: on .NET 4.x (PS 5.1) that
+    # throws PathTooLongException before \\?\ is ever applied, defeating the
+    # whole purpose of this function.
+    $destFull = [System.IO.Path]::GetFullPath($DestDir).TrimEnd('\')
+    $archive  = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+    try {
+        foreach ($entry in $archive.Entries) {
+            $rel = $entry.FullName.Replace('/', '\').TrimStart('\')
+
+            # Zip-slip guard: reject traversal (..) and absolute paths.
+            # String-level check avoids the 260-char limit of GetFullPath on
+            # .NET 4.x. Rooted check blocks entries like C:\evil\path.exe.
+            if ($rel -match '(^|\\)\.\.($|\\)' -or [System.IO.Path]::IsPathRooted($rel)) {
+                throw "ZIP entry escapes destination folder: $($entry.FullName)"
+            }
+
+            # Directory entry: Name is empty string when FullName ends with /
+            if ($entry.Name -eq '' -or $rel.EndsWith('\')) {
+                [void][System.IO.Directory]::CreateDirectory('\\?\' + $destFull + '\' + $rel.TrimEnd('\'))
+                continue
+            }
+
+            $longTarget = '\\?\' + $destFull + '\' + $rel
+            # CreateDirectory is idempotent; no Exists check needed (also avoids TOCTOU).
+            [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($longTarget))
+
+            $src = $entry.Open()
+            try {
+                $dst = [System.IO.File]::Open($longTarget, [System.IO.FileMode]::Create,
+                           [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+                try   { $src.CopyTo($dst) }
+                finally { $dst.Dispose() }
+            } finally { $src.Dispose() }
+        }
+    } finally { $archive.Dispose() }
 }
 
 # Extracts NAS ZIPs to a local folder. Tracks state to skip unchanged games.
@@ -688,18 +1642,17 @@ function Invoke-AutoSync {
                         Write-Host "    FAILED (could not clear existing folder -- files may be in use):" -ForegroundColor Red
                         Write-Host "    $($removeErrs[0])" -ForegroundColor Red
                         Write-Log "AutoSync: FAILED $rawName -- could not clear $extractDir : $($removeErrs[0])"
+                        # Remove the sync-state entry so next run re-attempts rather
+                        # than treating a corrupt/partial folder as up to date.
+                        [void]$syncState.Remove($rawName)
                         $failed++
                         continue   # outer finally fires before the loop advances
                     }
                 }
-                # Extract using ZipFile instead of Expand-Archive. PowerShell 5.1's
-                # Expand-Archive has known bugs: it can throw "already exists" even
-                # with -Force, leave partial folders behind on failures, and behave
-                # unpredictably near the MAX_PATH limit. ZipFile is faster, more
-                # reliable, and handles the same ZIP formats.
-                # The destination folder was removed above, so it does not exist yet;
-                # ExtractToDirectory will create it and extract into it cleanly.
-                [System.IO.Compression.ZipFile]::ExtractToDirectory($zip.FullName, $extractDir)
+                # Expand-ZipFileSafe uses \\?\ extended-length paths for every file
+                # write, bypassing MAX_PATH. The destination folder does not exist
+                # yet (cleared above); the function creates it during extraction.
+                Expand-ZipFileSafe -ZipPath $zip.FullName -DestDir $extractDir
                 $syncState[$rawName] = [ordered]@{
                     NasSize = $zip.Length; NasLastModified = $nasModStr
                     LocalPath = $extractDir; SyncedAt = (Get-Date).ToUniversalTime().ToString("o")
@@ -710,6 +1663,10 @@ function Invoke-AutoSync {
             } catch {
                 Write-Host "    FAILED : $_" -ForegroundColor Red
                 Write-Log "AutoSync: FAILED $rawName -- $_"
+                # Remove the partial folder so the next run does not misclassify
+                # a half-extracted game as already complete (sentinel gone + some
+                # files present = indistinguishable from a successful extraction).
+                Remove-Item -LiteralPath $extractDir -Recurse -Force -ErrorAction SilentlyContinue
                 $failed++
             }
         } catch {
@@ -818,7 +1775,7 @@ function Register-Games {
                             [void]$tpl.GameProfile.PrependChild($gp)
                         }
                         $gp.InnerText = $exe.FullName
-                        $tpl.Save($userProfile)
+                        Save-Xml $tpl $userProfile
                         [void]$registered.Add([pscustomobject]@{
                             Code        = $code
                             GamePath    = $exe.FullName
@@ -868,7 +1825,7 @@ function Register-Games {
                 [void]$tpl.GameProfile.PrependChild($gp)
             }
             $gp.InnerText = $exe.FullName
-            $tpl.Save($userProfile)
+            Save-Xml $tpl $userProfile
             [void]$registered.Add([pscustomobject]@{ Code = $code; GamePath = $exe.FullName })
             Write-Log "Registered $code -> $($exe.FullName)"
         } catch {
@@ -954,7 +1911,7 @@ function Repair-GamePaths {
                 [void]$doc.GameProfile.PrependChild($gpNode)
             }
             $gpNode.InnerText = $newPath
-            $doc.Save($f.FullName)
+            Save-Xml $doc $f.FullName
             [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "fixed"; NewPath = $newPath })
             Write-Log "Repair: fixed $($f.BaseName) -> $newPath"
         } catch {
@@ -1307,7 +2264,7 @@ function Invoke-ControlPropagation {
         }
 
         try {
-            $doc.Save($f.FullName)
+            Save-Xml $doc $f.FullName
             [void]$reports.Add([pscustomobject]@{
                 Code = $f.BaseName; Status = "bound"; Family = $targetFamily
                 Archetype = $best.Code; ArchetypeApi = $best.InputApi; ApiSet = $apiSet
@@ -1456,8 +2413,16 @@ function Invoke-RestoreBackup {
     }
     $selected = $backups[[int]$choice - 1]
 
+    $backupXmls = @(Get-ChildItem -LiteralPath $selected.FullName -Filter "*.xml" -File `
+                        -ErrorAction SilentlyContinue)
+    if ($backupXmls.Count -eq 0) {
+        Write-Host ("  ERROR: Selected backup '{0}' contains no XML profiles -- restore aborted." -f $selected.Name) -ForegroundColor Red
+        Write-Log "Restore: aborted -- backup '$($selected.Name)' contains no XML files."
+        return
+    }
+
     Write-Host ""
-    Write-Host ("  Selected : {0}" -f $selected.Name) -ForegroundColor Yellow
+    Write-Host ("  Selected : {0}  ({1} profile(s))" -f $selected.Name, $backupXmls.Count) -ForegroundColor Yellow
     Write-Host "  WARNING  : This will OVERWRITE all current UserProfiles with the backup." -ForegroundColor Yellow
     $confirm = (Read-Host "  Type YES to confirm").Trim()
     if ($confirm.ToUpper() -ne "YES") {
@@ -1560,7 +2525,7 @@ function Export-LaunchBoxXml {
             [void]$sb.AppendLine("    <Completed>false</Completed>")
             [void]$sb.AppendLine("    <Hidden>false</Hidden>")
             [void]$sb.AppendLine("    <Enabled>true</Enabled>")
-            [void]$sb.AppendLine("    <Notes>Exported by TeknoParrot Manager v0.33</Notes>")
+            [void]$sb.AppendLine("    <Notes>Exported by TeknoParrot Manager v0.50</Notes>")
             [void]$sb.AppendLine('  </Game>')
             $count++
         } catch {
@@ -1591,6 +2556,14 @@ function Export-LaunchBoxXml {
 function Export-HyperSpinJson {
     param([string]$userProfilesDir, [string]$hsDataPath)
 
+    # Refuse to write if HyperSpin is running -- check first so we fail fast
+    # before doing any file I/O rather than processing everything and then failing.
+    if (Get-Process -Name "HyperSpin" -ErrorAction SilentlyContinue) {
+        Write-Host "  ERROR: HyperSpin is running. Close it before updating the game list." -ForegroundColor Red
+        Write-Log "HyperSpin export: aborted -- HyperSpin is running"
+        return -1
+    }
+
     # Locate and parse emulators.json
     $emuPath = Join-Path $hsDataPath "emulators.json"
     if (-not (Test-Path -LiteralPath $emuPath)) {
@@ -1606,43 +2579,93 @@ function Export-HyperSpinJson {
         return -1
     }
 
-    # Find TeknoParrot entry by title
-    $tpEmu = $emuList | Where-Object { $_.title -ieq "TeknoParrot" } | Select-Object -First 1
+    # Find TeknoParrot entry by title. Strip spaces and punctuation before
+    # comparing so "Tekno Parrot", "TeknoParrot", "teknoparrot" all match.
+    $tpEmu = $emuList | Where-Object {
+        $_.title -and ($_.title -replace '[^a-zA-Z0-9]', '') -ieq 'TeknoParrot'
+    } | Select-Object -First 1
     if (-not $tpEmu) {
         Write-Host "  ERROR: TeknoParrot emulator not found in emulators.json." -ForegroundColor Red
+        Write-Host "  (Searched for any emulator whose title is 'TeknoParrot' after removing spaces/punctuation.)" -ForegroundColor DarkGray
         Write-Log "HyperSpin export: TeknoParrot not found in emulators.json"
         return -1
     }
 
-    # Find TeknoParrot games file: the one whose first game has .xml ROM entries
+    # Get the system GUID from the emulator entry directly. This means the export
+    # works even when no TeknoParrot games have been added to HyperSpin 2 yet,
+    # eliminating the "add one game manually first" prerequisite.
+    $tpSystemGuid = [string]$tpEmu.id
+    if ([string]::IsNullOrEmpty($tpSystemGuid)) {
+        Write-Host "  WARNING: TeknoParrot emulator entry has no 'id' field in emulators.json." -ForegroundColor Yellow
+        Write-Host "  Game entries will be written with an empty systemId; HyperSpin 2 may not" -ForegroundColor Yellow
+        Write-Host "  associate them with the TeknoParrot system until the emulator is re-added." -ForegroundColor Yellow
+        Write-Log "HyperSpin export: WARNING -- emulator entry has no id; systemId will be empty."
+    }
+
+    # Locate the games folder; create it if HyperSpin 2 has not yet made it.
     $gamesDir = Join-Path $hsDataPath "games"
     if (-not (Test-Path -LiteralPath $gamesDir)) {
-        Write-Host "  ERROR: HyperSpin games folder not found: $gamesDir" -ForegroundColor Red
-        Write-Log "HyperSpin export: games folder not found at $gamesDir"
-        return -1
-    }
-
-    $tpGamesPath  = $null
-    $tpSystemGuid = $null
-    foreach ($gf in (Get-ChildItem -LiteralPath $gamesDir -Filter "*.json" -File -ErrorAction SilentlyContinue)) {
         try {
-            $sample    = Get-Content -LiteralPath $gf.FullName -Raw | ConvertFrom-Json
-            $firstGame = if ($sample -is [array]) { $sample[0] } else { $sample }
-            # PS 5.1 may return a single-element JSON array as a bare PSCustomObject
-            # rather than a one-element array.  Normalise roms to an array either way.
-            $firstRom  = if ($firstGame -and $firstGame.roms -is [array]) { $firstGame.roms[0] } else { $firstGame.roms }
-            if ($firstGame -and $firstRom -and $firstRom.name -like "*.xml") {
-                $tpGamesPath  = $gf.FullName
-                $tpSystemGuid = $firstGame.gameSystemId
-                break
-            }
-        } catch { continue }
+            [void][System.IO.Directory]::CreateDirectory($gamesDir)
+            Write-Log "HyperSpin export: created games folder at $gamesDir"
+        } catch {
+            Write-Host "  ERROR: HyperSpin games folder not found and could not be created: $_" -ForegroundColor Red
+            Write-Log "HyperSpin export: games folder missing and creation failed -- $_"
+            return -1
+        }
     }
 
+    $tpGamesPath = $null
+    $newFile     = $false   # true when we create the games file from scratch this run
+
+    # Primary scan: match games files by system GUID. Works with 0 or more existing
+    # games and is reliable regardless of the file's name.
+    if ($tpSystemGuid) {
+        foreach ($gf in (Get-ChildItem -LiteralPath $gamesDir -Filter "*.json" -File -ErrorAction SilentlyContinue)) {
+            try {
+                $sample    = Get-Content -LiteralPath $gf.FullName -Raw | ConvertFrom-Json
+                $firstGame = if ($sample -is [array]) { $sample[0] } else { $sample }
+                if ($firstGame -and [string]$firstGame.gameSystemId -eq $tpSystemGuid) {
+                    $tpGamesPath = $gf.FullName; break
+                }
+            } catch { continue }
+        }
+    }
+
+    # Fallback scan: match by .xml ROM entries (for installs where the emulator
+    # entry has no id field, or the system GUID could not be determined).
     if (-not $tpGamesPath) {
-        Write-Host "  ERROR: Could not find a TeknoParrot game list in $gamesDir." -ForegroundColor Red
-        Write-Log "HyperSpin export: no TeknoParrot games file found in $gamesDir"
-        return -1
+        foreach ($gf in (Get-ChildItem -LiteralPath $gamesDir -Filter "*.json" -File -ErrorAction SilentlyContinue)) {
+            try {
+                $sample    = Get-Content -LiteralPath $gf.FullName -Raw | ConvertFrom-Json
+                $firstGame = if ($sample -is [array]) { $sample[0] } else { $sample }
+                # PS 5.1 may return a single-element JSON array as a bare PSCustomObject
+                # rather than a one-element array.  Normalise roms to an array either way.
+                $firstRom  = if ($firstGame -and $firstGame.roms -is [array]) { $firstGame.roms[0] } else { $firstGame.roms }
+                if ($firstGame -and $firstRom -and $firstRom.name -like "*.xml") {
+                    $tpGamesPath = $gf.FullName
+                    if (-not $tpSystemGuid) { $tpSystemGuid = [string]$firstGame.gameSystemId }
+                    break
+                }
+            } catch { continue }
+        }
+    }
+
+    # No games file found -- create a new empty one named after the emulator title.
+    # This eliminates the prerequisite of adding one game manually first.
+    if (-not $tpGamesPath) {
+        $safeName = ($tpEmu.title -replace '[^\w\-\.]', '_').Trim('_')
+        if ([string]::IsNullOrEmpty($safeName)) { $safeName = 'TeknoParrot' }
+        $tpGamesPath = Join-Path $gamesDir "$safeName.json"
+        try {
+            [System.IO.File]::WriteAllText($tpGamesPath, '[]', (New-Object System.Text.UTF8Encoding $false))
+            Write-Log "HyperSpin export: created new games file at $tpGamesPath"
+            $newFile = $true
+        } catch {
+            Write-Host "  ERROR: Could not create TeknoParrot games file: $_" -ForegroundColor Red
+            Write-Log "HyperSpin export: could not create games file -- $_"
+            return -1
+        }
     }
 
     # Load existing game list
@@ -1752,21 +2775,18 @@ function Export-HyperSpinJson {
         return 0
     }
 
-    # Refuse to write if HyperSpin is running
-    if (Get-Process -Name "HyperSpin" -ErrorAction SilentlyContinue) {
-        Write-Host "  ERROR: HyperSpin is running. Close it before updating the game list." -ForegroundColor Red
-        Write-Log "HyperSpin export: aborted -- HyperSpin is running"
-        return -1
-    }
-
-    # Backup then write
-    $backupPath = $tpGamesPath + ".bak_" + (Get-Date).ToString("yyyyMMdd_HHmmss")
-    try {
-        Copy-Item -LiteralPath $tpGamesPath -Destination $backupPath -ErrorAction Stop
-    } catch {
-        Write-Host "  ERROR: Could not back up games file: $_" -ForegroundColor Red
-        Write-Log "HyperSpin export: backup failed -- $_"
-        return -1
+    # Back up the games file before writing, but only when it pre-existed.
+    # A freshly-created empty file needs no backup.
+    $backupPath = $null
+    if (-not $newFile) {
+        $backupPath = $tpGamesPath + ".bak_" + (Get-Date).ToString("yyyyMMdd_HHmmss")
+        try {
+            Copy-Item -LiteralPath $tpGamesPath -Destination $backupPath -ErrorAction Stop
+        } catch {
+            Write-Host "  ERROR: Could not back up games file: $_" -ForegroundColor Red
+            Write-Log "HyperSpin export: backup failed -- $_"
+            return -1
+        }
     }
 
     try {
@@ -1779,7 +2799,8 @@ function Export-HyperSpinJson {
         return -1
     }
 
-    Write-Log "HyperSpin export: added $added game(s) to $tpGamesPath (backup: $backupPath)"
+    $backupNote = if ($backupPath) { " (backup: $backupPath)" } else { "" }
+    Write-Log "HyperSpin export: added $added game(s) to $tpGamesPath$backupNote"
     return $added
 }
 
@@ -1796,7 +2817,7 @@ function Invoke-ThumbnailDownload {
     $iconsDir = Join-Path $tpRoot "Icons"
     if (-not (Test-Path -LiteralPath $iconsDir)) {
         try {
-            New-Item -ItemType Directory -LiteralPath $iconsDir -ErrorAction Stop | Out-Null
+            [void][System.IO.Directory]::CreateDirectory($iconsDir)
             Write-Log "Thumbnails: created Icons folder at $iconsDir"
         } catch {
             Write-Host "  ERROR: Could not create Icons folder: $_" -ForegroundColor Red
@@ -1805,12 +2826,62 @@ function Invoke-ThumbnailDownload {
         }
     }
 
+    # Load registered profiles first -- needed for custom thumbnail validation below.
     $profiles = @(Get-ChildItem -LiteralPath $userProfilesDir -Filter *.xml -File -ErrorAction SilentlyContinue |
                   Where-Object { $_.Directory.Name -ne "FullBackup" })
 
     if ($profiles.Count -eq 0) {
         Write-Host "  No registered profiles found." -ForegroundColor DarkGray
+        if (Test-Path -LiteralPath (Join-Path $PSScriptRoot "CustomThumbnails")) {
+            Write-Host "  (Custom thumbnails in CustomThumbnails\ will be processed once games are registered.)" -ForegroundColor DarkGray
+        }
+        Write-Log "Thumbnails: no registered profiles -- custom copy and download skipped."
         return
+    }
+
+    # Build a case-insensitive lookup of all registered profile codes.
+    $knownCodes = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($p in $profiles) { [void]$knownCodes.Add($p.BaseName) }
+
+    # Copy custom thumbnails from Scripts\CustomThumbnails\ into the Icons folder.
+    # Each file is validated against the registered profile codes first.
+    $customThumbDir = Join-Path $PSScriptRoot "CustomThumbnails"
+    if (Test-Path -LiteralPath $customThumbDir) {
+        $customFiles = @(Get-ChildItem -LiteralPath $customThumbDir -Filter "*.png" -File -ErrorAction SilentlyContinue)
+        if ($customFiles.Count -gt 0) {
+            Write-Host ("  Custom thumbnails folder: {0} PNG file(s) found." -f $customFiles.Count) -ForegroundColor Cyan
+            $custCopied = 0; $custSkipped = 0; $custBadName = 0
+            foreach ($cf in $customFiles) {
+                $code = [System.IO.Path]::GetFileNameWithoutExtension($cf.Name)
+                if (-not $knownCodes.Contains($code)) {
+                    Write-Host ("  WRONG NAME: CustomThumbnails\{0}" -f $cf.Name) -ForegroundColor Yellow
+                    Write-Host ("             '{0}' does not match any registered game profile code." -f $code) -ForegroundColor Yellow
+                    Write-Host "             Check TeknoParrot-Manager-controls.txt for the correct" -ForegroundColor Yellow
+                    Write-Host "             name, rename the file, then re-run. File was not copied." -ForegroundColor Yellow
+                    Write-Log "Thumbnails: custom $($cf.Name) -- no matching profile code, skipped."
+                    $custBadName++
+                    continue
+                }
+                $dest = Join-Path $iconsDir $cf.Name
+                if (Test-Path -LiteralPath $dest) {
+                    $custSkipped++
+                } else {
+                    try {
+                        Copy-Item -LiteralPath $cf.FullName -Destination $dest -ErrorAction Stop
+                        Write-Log "Thumbnails: copied custom $($cf.Name)"
+                        $custCopied++
+                    } catch {
+                        Write-Host ("  WARNING: Could not copy {0} -- {1}" -f $cf.Name, $_) -ForegroundColor Yellow
+                        Write-Log "Thumbnails: failed to copy custom $($cf.Name) -- $_"
+                    }
+                }
+            }
+            if ($custCopied   -gt 0) { Write-Host ("  Copied  : {0} custom thumbnail(s) to Icons folder." -f $custCopied)   -ForegroundColor Green   }
+            if ($custSkipped  -gt 0) { Write-Host ("  Skipped : {0} -- icon already present."             -f $custSkipped)  -ForegroundColor DarkGray }
+            if ($custBadName  -gt 0) { Write-Host ("  Invalid : {0} -- wrong filename (see above)."       -f $custBadName)  -ForegroundColor Yellow   }
+            Write-Log ("Thumbnails: custom copied={0} skipped={1} badName={2}" -f $custCopied, $custSkipped, $custBadName)
+        }
     }
 
     $missing      = New-Object System.Collections.ArrayList
@@ -1842,44 +2913,34 @@ function Invoke-ThumbnailDownload {
     $i        = 0
     $total    = $missing.Count
 
-    $wc = New-Object System.Net.WebClient
-    try {
-        foreach ($code in $missing) {
-            $i++
-            $destPath = Join-Path $iconsDir ($code + ".png")
-            $url      = $baseUrl + [Uri]::EscapeDataString($code + ".png")
-            Write-Host ("  [{0,3}/{1}] {2}" -f $i, $total, $code) -ForegroundColor DarkCyan -NoNewline
-            try {
-                $wc.DownloadFile($url, $destPath)
-                Write-Host "  OK" -ForegroundColor Green
-                Write-Log "Thumbnails: downloaded $code"
-                $fetched++
-            } catch [System.Net.WebException] {
-                $resp       = $_.Exception.Response
-                $statusCode = if ($null -ne $resp) { [int]$resp.StatusCode } else { 0 }
-                if ($statusCode -eq 404) {
-                    Write-Host "  not in repo" -ForegroundColor DarkGray
-                    $notAvail++
-                } else {
-                    Write-Host ("  FAILED ({0})" -f $_.Exception.Message) -ForegroundColor Red
-                    Write-Log "Thumbnails: FAILED $code -- $($_.Exception.Message)"
-                    $failed++
-                }
-                # Remove any partial file left by a failed download.
-                if (Test-Path -LiteralPath $destPath) {
-                    Remove-Item -LiteralPath $destPath -Force -ErrorAction SilentlyContinue
-                }
-            } catch {
-                Write-Host ("  FAILED ({0})" -f $_) -ForegroundColor Red
-                Write-Log "Thumbnails: FAILED $code -- $_"
-                if (Test-Path -LiteralPath $destPath) {
-                    Remove-Item -LiteralPath $destPath -Force -ErrorAction SilentlyContinue
-                }
+    foreach ($code in $missing) {
+        $i++
+        $destPath = Join-Path $iconsDir ($code + ".png")
+        $url      = $baseUrl + [Uri]::EscapeDataString($code + ".png")
+        Write-Host ("  [{0,3}/{1}] {2}" -f $i, $total, $code) -ForegroundColor DarkCyan -NoNewline
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $destPath -UseBasicParsing `
+                              -TimeoutSec 30 -ErrorAction Stop
+            Write-Host "  OK" -ForegroundColor Green
+            Write-Log "Thumbnails: downloaded $code"
+            $fetched++
+        } catch {
+            $statusCode = 0
+            if ($_.Exception.Response) {
+                try { $statusCode = [int]$_.Exception.Response.StatusCode } catch {}
+            }
+            if ($statusCode -eq 404) {
+                Write-Host "  not in repo" -ForegroundColor DarkGray
+                $notAvail++
+            } else {
+                Write-Host ("  FAILED ({0})" -f $_.Exception.Message) -ForegroundColor Red
+                Write-Log "Thumbnails: FAILED $code -- $($_.Exception.Message)"
                 $failed++
             }
+            if (Test-Path -LiteralPath $destPath) {
+                Remove-Item -LiteralPath $destPath -Force -ErrorAction SilentlyContinue
+            }
         }
-    } finally {
-        $wc.Dispose()
     }
 
     Write-Host ""
@@ -1993,7 +3054,7 @@ function Write-ControlsStatus {
     }
 }
 
-Write-Log "Script started (v0.33$(if ($Unattended) { ' [Unattended]' }))."
+Write-Log "Script started (v0.50$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
 # SECTION 1 — Load or prompt for configuration
@@ -2001,11 +3062,14 @@ Write-Log "Script started (v0.33$(if ($Unattended) { ' [Unattended]' }))."
 
 $configPath         = Join-Path $PSScriptRoot "TeknoParrot-Manager.config.json"
 $tpRoot             = $null
-$mode               = $null   # "AutoSync", "RegisterOnly", or "Restore"
+$mode               = $null   # "AutoSync", "RegisterOnly", "Restore", "CrosshairSetup", or "ReShadeSetup"
 $zipSource          = $null   # AutoSync only
 $gamesInstallFolder = $null   # always (the extracted-games root to register)
 $retroBat           = $false  # true = extracted folders named GameName.teknoparrot (RetroBat/Batocera)
 $hsDataPath         = $null   # HyperSpin 2 data folder (e.g. C:\ProgramData\HyperSpin\data)
+$rsSourceDll        = $null   # ReShade 64-bit DLL (bundled at ReShade\ReShade64.dll or user-provided)
+$rsSourceDll32      = $null   # ReShade 32-bit DLL (bundled at ReShade\ReShade32.dll or user-provided)
+$dgSourceDir        = $null   # dgVoodoo2 DLL folder (bundled at dgVoodoo2\ or user-provided)
 $configAccepted     = $false  # true when the user accepted a saved config this run
 
 if ($Unattended -and -not (Test-Path -LiteralPath $configPath)) {
@@ -2025,18 +3089,21 @@ if (Test-Path -LiteralPath $configPath) {
         Write-Host "  Games install folder : $($cfg.GamesInstallFolder)"
         if ($cfg.RetroBat)         { Write-Host "  RetroBat mode        : Yes" }
         if ($cfg.HyperSpinDataPath){ Write-Host "  HyperSpin data path  : $($cfg.HyperSpinDataPath)" }
+        if ($cfg.ReShadeSourceDll)   { Write-Host "  ReShade DLL (64-bit) : $($cfg.ReShadeSourceDll)" }
+        if ($cfg.ReShadeSourceDll32) { Write-Host "  ReShade DLL (32-bit) : $($cfg.ReShadeSourceDll32)" }
+        if ($cfg.DgVoodoo2SourceDir) { Write-Host "  dgVoodoo2 folder     : $($cfg.DgVoodoo2SourceDir)" }
         Write-Host ""
         if ($Unattended) {
             Write-Host "  [Unattended] Using saved settings." -ForegroundColor DarkCyan
             Write-Log "Unattended: auto-accepted saved settings."
             $use = "Y"
         } else {
-            $use = Read-Host "Use these settings? (Y/N)"
+            $use = (Read-Host "Use these settings? (Y/N)").Trim()
         }
         if ($use.ToUpper() -eq "Y") {
             $tpRoot             = $cfg.TeknoParrotRoot
             # Validate mode before accepting it; an unknown value falls through to the prompt.
-            $knownModes = @("AutoSync", "RegisterOnly", "Restore")
+            $knownModes = @("AutoSync", "RegisterOnly", "Restore", "CrosshairSetup", "ReShadeSetup", "DgVoodoo2Setup", "GpuFixSetup")
             if ($cfg.Mode -and $knownModes -contains $cfg.Mode) {
                 $mode = $cfg.Mode
             } else {
@@ -2050,7 +3117,10 @@ if (Test-Path -LiteralPath $configPath) {
             $zipSource          = $cfg.ZipSourceFolder
             $gamesInstallFolder = $cfg.GamesInstallFolder
             if ($null -ne $cfg.RetroBat) { $retroBat = [bool]$cfg.RetroBat }
-            if ($cfg.HyperSpinDataPath)  { $hsDataPath = $cfg.HyperSpinDataPath }
+            if ($cfg.HyperSpinDataPath)  { $hsDataPath  = $cfg.HyperSpinDataPath  }
+            if ($cfg.ReShadeSourceDll)   { $rsSourceDll   = $cfg.ReShadeSourceDll   }
+            if ($cfg.ReShadeSourceDll32) { $rsSourceDll32 = $cfg.ReShadeSourceDll32 }
+            if ($cfg.DgVoodoo2SourceDir) { $dgSourceDir   = $cfg.DgVoodoo2SourceDir }
             $configAccepted = $true
         }
         Write-Host ""
@@ -2091,7 +3161,7 @@ if (-not $tpRoot) {
         }
     }
     if (-not $tpRoot) {
-        $tpRoot = Read-Host "Enter TeknoParrot root folder (containing TeknoParrotUi.exe)"
+        $tpRoot = (Read-Host "Enter TeknoParrot root folder (containing TeknoParrotUi.exe)").Trim()
     }
 }
 
@@ -2104,16 +3174,30 @@ if (-not $mode) {
     Write-Host "--------------------------------------------" -ForegroundColor Cyan
     Write-Host " Mode" -ForegroundColor Cyan
     Write-Host "--------------------------------------------" -ForegroundColor Cyan
-    Write-Host "  1) AutoSync     -- Extract ZIPs (NAS or local) to a local"
-    Write-Host "                     folder, then register the games."
-    Write-Host "  2) Register only -- Games are already extracted; just register."
-    Write-Host "  3) Restore from backup -- Roll UserProfiles back to a previous backup."
+    Write-Host "  1) AutoSync        -- Extract ZIPs (NAS or local) to a local"
+    Write-Host "                        folder, then register the games."
+    Write-Host "  2) Register only   -- Games are already extracted; just register."
+    Write-Host "  3) Restore backup  -- Roll UserProfiles back to a previous backup."
+    Write-Host "  4) Crosshair setup -- Pick and deploy custom crosshairs to all"
+    Write-Host "                        registered lightgun games."
+    Write-Host "  5) ReShade setup   -- Add visual enhancements (sharper image, better"
+    Write-Host "                        colours, scanlines, borders). Optional -- games"
+    Write-Host "                        work perfectly without this."
+    Write-Host "  6) dgVoodoo2 setup -- Fix old DX8, DirectDraw, and Glide games that"
+    Write-Host "                        crash or show black screens. Optional."
+    Write-Host "  7) GPU fix setup   -- Auto-detect your GPU (AMD / NVIDIA / Intel) and"
+    Write-Host "                        apply the matching compatibility fix to every"
+    Write-Host "                        registered game that has one. Optional."
     Write-Host ""
-    $modeChoice = Read-Host "Enter 1, 2, or 3"
+    $modeChoice = (Read-Host "Enter 1, 2, 3, 4, 5, 6, or 7").Trim()
     switch ($modeChoice) {
-        "1"     { $mode = "AutoSync"      }
-        "2"     { $mode = "RegisterOnly"  }
-        "3"     { $mode = "Restore"       }
+        "1"     { $mode = "AutoSync"       }
+        "2"     { $mode = "RegisterOnly"   }
+        "3"     { $mode = "Restore"        }
+        "4"     { $mode = "CrosshairSetup" }
+        "5"     { $mode = "ReShadeSetup"   }
+        "6"     { $mode = "DgVoodoo2Setup" }
+        "7"     { $mode = "GpuFixSetup"    }
         default {
             Write-Host "Unrecognised input. Defaulting to Register only." -ForegroundColor Yellow
             $mode = "RegisterOnly"
@@ -2126,7 +3210,7 @@ if ($mode -eq "AutoSync" -and -not $zipSource) {
         Write-Host "ERROR: Unattended mode -- ZIP source folder not in saved settings." -ForegroundColor Red
         Write-Log "ERROR: Unattended mode -- zipSource not set."; exit 1
     }
-    $zipSource = Read-Host "Enter ZIP source folder (NAS or local, containing .zip files)"
+    $zipSource = (Read-Host "Enter ZIP source folder (NAS or local, containing .zip files)").Trim()
 }
 if (-not $gamesInstallFolder) {
     if ($Unattended) {
@@ -2134,9 +3218,9 @@ if (-not $gamesInstallFolder) {
         Write-Log "ERROR: Unattended mode -- gamesInstallFolder not set."; exit 1
     }
     if ($mode -eq "AutoSync") {
-        $gamesInstallFolder = Read-Host "Enter LOCAL staging folder to extract games into, on a drive with free space and OUTSIDE the TeknoParrot and source folders (e.g. D:\TeknoParrotGames)"
+        $gamesInstallFolder = (Read-Host "Enter LOCAL staging folder to extract games into, on a drive with free space and OUTSIDE the TeknoParrot and source folders (e.g. D:\TeknoParrotGames)").Trim()
     } elseif ($mode -ne "Restore") {
-        $gamesInstallFolder = Read-Host "Enter folder containing your extracted games (e.g. C:\TeknoParrotGames)"
+        $gamesInstallFolder = (Read-Host "Enter folder containing your extracted games (e.g. C:\TeknoParrotGames)").Trim()
     }
 }
 
@@ -2206,7 +3290,7 @@ if (-not (Test-Path -LiteralPath $gameProfilesDir)) {
 $userProfilesDir = Join-Path $tpRoot "UserProfiles"
 if (-not (Test-Path -LiteralPath $userProfilesDir)) {
     try {
-        New-Item -ItemType Directory -LiteralPath $userProfilesDir -ErrorAction Stop | Out-Null
+        [void][System.IO.Directory]::CreateDirectory($userProfilesDir)
     } catch {
         Write-Host ""; Write-Host "ERROR: Could not create UserProfiles folder: $_" -ForegroundColor Red
         Write-Log "ERROR: Could not create UserProfiles folder -- $_"; exit 1
@@ -2237,7 +3321,7 @@ if ($mode -eq "AutoSync") {
     }
     if (-not (Test-Path -LiteralPath $gamesInstallFolder)) {
         try {
-            New-Item -ItemType Directory -LiteralPath $gamesInstallFolder -Force -ErrorAction Stop | Out-Null
+            [void][System.IO.Directory]::CreateDirectory($gamesInstallFolder)
             Write-Host "Created staging folder: $gamesInstallFolder" -ForegroundColor Green
         } catch {
             Write-Host ""; Write-Host "ERROR: Could not create staging folder: $_" -ForegroundColor Red
@@ -2260,7 +3344,7 @@ if ($mode -eq "AutoSync") {
                 Write-Host "  [Unattended] Continuing despite low free space." -ForegroundColor Yellow
                 Write-Log "Unattended: low disk space warning -- continuing."
             } else {
-                $cont = Read-Host "  Continue anyway? (Y/N)"
+                $cont = (Read-Host "  Continue anyway? (Y/N)").Trim()
                 if ($cont.ToUpper() -ne "Y") { Write-Host "Aborted." -ForegroundColor Yellow; Write-Log "Aborted: low staging-drive space."; exit 1 }
             }
         }
@@ -2309,6 +3393,9 @@ $cfgOut = [ordered]@{
     GamesInstallFolder = $gamesInstallFolder
     RetroBat           = $retroBat
     HyperSpinDataPath  = $hsDataPath
+    ReShadeSourceDll   = $rsSourceDll
+    ReShadeSourceDll32 = $rsSourceDll32
+    DgVoodoo2SourceDir = $dgSourceDir
 }
 try {
     [System.IO.File]::WriteAllText($configPath, ($cfgOut | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
@@ -2394,6 +3481,183 @@ if (Test-Path -LiteralPath $overridesPath) {
 }
 
 # =============================================================================
+# CROSSHAIR SETUP — short-circuit: skip backup / sync / registration entirely
+# =============================================================================
+
+if ($mode -eq "CrosshairSetup") {
+    Write-Host ""
+    Write-Host "--------------------------------------------" -ForegroundColor Cyan
+    Write-Host " Crosshair Setup" -ForegroundColor Cyan
+    Write-Host "--------------------------------------------" -ForegroundColor Cyan
+    Invoke-CrosshairSetup -UserProfilesDir $userProfilesDir `
+                          -GamesInstallFolder $gamesInstallFolder `
+                          -TpRoot $tpRoot
+    Write-Host ""
+    Write-Host "Done." -ForegroundColor Green
+    Write-Log "Crosshair setup complete."
+    exit 0
+}
+
+# =============================================================================
+# RESHADE SETUP — short-circuit: skip backup / sync / registration entirely
+# =============================================================================
+
+if ($mode -eq "ReShadeSetup") {
+    Write-Host ""
+    Write-Host "--------------------------------------------" -ForegroundColor Cyan
+    Write-Host " ReShade Visual Enhancements Setup" -ForegroundColor Cyan
+    Write-Host "--------------------------------------------" -ForegroundColor Cyan
+
+    # Locate 64-bit DLL: bundled copy first, then config, then prompt
+    $bundledDll   = Join-Path $PSScriptRoot "ReShade\ReShade64.dll"
+    $bundledDll32 = Join-Path $PSScriptRoot "ReShade\ReShade32.dll"
+    if (-not $rsSourceDll -or -not (Test-Path -LiteralPath $rsSourceDll)) {
+        if (Test-Path -LiteralPath $bundledDll) {
+            $rsSourceDll = $bundledDll
+        } else {
+            Write-Host ""
+            Write-Host "  ReShade 64-bit DLL not found." -ForegroundColor Yellow
+            Write-Host "  To get it:" -ForegroundColor Cyan
+            Write-Host "    1. Download the installer from  https://reshade.me" -ForegroundColor White
+            Write-Host "    2. Run it and point it at any TeknoParrot game exe." -ForegroundColor White
+            Write-Host "       It creates a DLL (e.g. dxgi.dll) in that game folder." -ForegroundColor White
+            Write-Host "    3. Copy that DLL to  $PSScriptRoot\ReShade\  and name it  ReShade64.dll" -ForegroundColor White
+            Write-Host "       Then re-run this script." -ForegroundColor White
+            Write-Host "    -- OR --" -ForegroundColor DarkCyan
+            Write-Host "    Enter the full path to the DLL file now:" -ForegroundColor White
+            Write-Host ""
+            $inp = (Read-Host "  Path to ReShade 64-bit DLL (or press Enter to cancel)").Trim()
+            if ([string]::IsNullOrWhiteSpace($inp) -or -not (Test-Path -LiteralPath $inp)) {
+                Write-Host "  File not found. ReShade setup cancelled." -ForegroundColor Red
+                Write-Log "ReShade setup (mode 5): aborted -- DLL not found."
+                exit 1
+            }
+            if ([System.IO.Path]::GetExtension($inp).ToLower() -ne '.dll') {
+                Write-Host "  That file does not appear to be a DLL (.dll extension required). Cancelled." -ForegroundColor Red
+                Write-Log "ReShade setup (mode 5): aborted -- file is not a .dll."
+                exit 1
+            }
+            $rsSourceDll = $inp
+        }
+        # Persist updated path
+        $cfgRS = [ordered]@{
+            TeknoParrotRoot    = $tpRoot
+            Mode               = $mode
+            ZipSourceFolder    = $zipSource
+            GamesInstallFolder = $gamesInstallFolder
+            RetroBat           = $retroBat
+            HyperSpinDataPath  = $hsDataPath
+            ReShadeSourceDll   = $rsSourceDll
+            ReShadeSourceDll32 = $rsSourceDll32
+            DgVoodoo2SourceDir = $dgSourceDir
+        }
+        try {
+            [System.IO.File]::WriteAllText($configPath, ($cfgRS | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
+            Write-Log "Config: saved ReShadeSourceDll = $rsSourceDll"
+        } catch { Write-Log "Config: could not save ReShadeSourceDll -- $_" }
+    }
+    # Auto-detect bundled 32-bit DLL; no error if absent (32-bit games simply get skipped).
+    if (-not $rsSourceDll32 -or -not (Test-Path -LiteralPath $rsSourceDll32)) {
+        if (Test-Path -LiteralPath $bundledDll32) { $rsSourceDll32 = $bundledDll32 }
+    }
+
+    Invoke-ReShadeSetup -UserProfilesDir $userProfilesDir `
+                        -SourceDll $rsSourceDll `
+                        -SourceDll32 $rsSourceDll32 `
+                        -ConfigPath $configPath `
+                        -TpRoot $tpRoot `
+                        -Mode $mode `
+                        -ZipSource $zipSource `
+                        -GamesInstallFolder $gamesInstallFolder `
+                        -RetroBat $retroBat `
+                        -HsDataPath $hsDataPath
+    Write-Host ""
+    Write-Host "Done." -ForegroundColor Green
+    Write-Log "ReShade setup complete."
+    exit 0
+}
+
+if ($mode -eq "DgVoodoo2Setup") {
+    Write-Host ""
+    Write-Host "--------------------------------------------" -ForegroundColor Cyan
+    Write-Host " dgVoodoo2 Legacy Compatibility Setup" -ForegroundColor Cyan
+    Write-Host "--------------------------------------------" -ForegroundColor Cyan
+
+    # Locate DLL folder: bundled copy first, then config, then prompt.
+    $bundledDg = Join-Path $PSScriptRoot "dgVoodoo2"
+    if (-not $dgSourceDir -or -not (Test-Path -LiteralPath $dgSourceDir)) {
+        if (Test-Path -LiteralPath $bundledDg) {
+            $dgSourceDir = $bundledDg
+        } else {
+            Write-Host ""
+            Write-Host "  dgVoodoo2 DLL folder not found." -ForegroundColor Yellow
+            Write-Host "  To get dgVoodoo2:" -ForegroundColor Cyan
+            Write-Host "    1. Download the latest ZIP from  http://dege.freeweb.hu/dgVoodoo2/dgVoodoo2.html" -ForegroundColor White
+            Write-Host "    2. Open the ZIP and copy these files into a new folder called  dgVoodoo2\" -ForegroundColor White
+            Write-Host "       next to this script:" -ForegroundColor White
+            Write-Host "         From the MS\x64\ subfolder : D3D8.dll  DDraw.dll  D3DImm.dll" -ForegroundColor White
+            Write-Host "         From the root of the ZIP  : Glide2x.dll  Glide3x.dll  dgVoodoo.conf" -ForegroundColor White
+            Write-Host "       Then re-run this script." -ForegroundColor White
+            Write-Host "    -- OR --" -ForegroundColor DarkCyan
+            Write-Host "    Enter the full path to a folder that already contains those files:" -ForegroundColor White
+            Write-Host ""
+            $inp = (Read-Host "  Path to dgVoodoo2 folder (or press Enter to cancel)").Trim()
+            if ([string]::IsNullOrWhiteSpace($inp) -or -not (Test-Path -LiteralPath $inp)) {
+                Write-Host "  Folder not found. dgVoodoo2 setup cancelled." -ForegroundColor Red
+                Write-Log "dgVoodoo2 setup (mode 6): aborted -- folder not found."
+                exit 1
+            }
+            $dgSourceDir = $inp
+        }
+        $cfgDg = [ordered]@{
+            TeknoParrotRoot    = $tpRoot
+            Mode               = $mode
+            ZipSourceFolder    = $zipSource
+            GamesInstallFolder = $gamesInstallFolder
+            RetroBat           = $retroBat
+            HyperSpinDataPath  = $hsDataPath
+            ReShadeSourceDll   = $rsSourceDll
+            ReShadeSourceDll32 = $rsSourceDll32
+            DgVoodoo2SourceDir = $dgSourceDir
+        }
+        try {
+            [System.IO.File]::WriteAllText($configPath, ($cfgDg | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
+            Write-Log "Config: saved DgVoodoo2SourceDir = $dgSourceDir"
+        } catch { Write-Log "Config: could not save DgVoodoo2SourceDir -- $_" }
+    }
+
+    Invoke-DgVoodoo2Setup -UserProfilesDir $userProfilesDir `
+                          -SourceDir $dgSourceDir `
+                          -TpRoot $tpRoot
+    Write-Host ""
+    Write-Host "Done." -ForegroundColor Green
+    Write-Log "dgVoodoo2 setup complete."
+    exit 0
+}
+
+# =============================================================================
+# GPU FIX SETUP — short-circuit: skip backup / sync / registration entirely
+# =============================================================================
+
+if ($mode -eq "GpuFixSetup") {
+    Write-Host ""
+    Write-Host "--------------------------------------------" -ForegroundColor Cyan
+    Write-Host " GPU Compatibility Fix Setup" -ForegroundColor Cyan
+    Write-Host "--------------------------------------------" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  This scans your registered games and applies the correct GPU"
+    Write-Host "  compatibility fix for your graphics card to each profile that"
+    Write-Host "  supports one. It is safe to re-run any time you update your GPU"
+    Write-Host "  drivers or switch to a new card."
+    Invoke-GpuFixSetup -UserProfilesDir $userProfilesDir `
+                       -TpRoot $tpRoot
+    Write-Host ""
+    Write-Host "Done." -ForegroundColor Green
+    Write-Log "GPU fix setup complete."
+    exit 0
+}
+
+# =============================================================================
 # SECTION 5 — Back up UserProfiles
 # =============================================================================
 
@@ -2407,8 +3671,8 @@ Write-Host "Backing up UserProfiles..." -ForegroundColor Cyan
 # Guard: if the backup folder cannot be created the script exits here rather
 # than proceeding with modifications that have no restore point.
 try {
-    if (!(Test-Path -LiteralPath $backupRoot)) { New-Item -ItemType Directory -LiteralPath $backupRoot -ErrorAction Stop | Out-Null }
-    New-Item -ItemType Directory -LiteralPath $backupPath -ErrorAction Stop | Out-Null
+    [void][System.IO.Directory]::CreateDirectory($backupRoot)
+    [void][System.IO.Directory]::CreateDirectory($backupPath)
 } catch {
     Write-Host "  ERROR: Could not create backup folder: $_" -ForegroundColor Red
     Write-Host "  The script will not continue without a successful backup." -ForegroundColor Red
@@ -2568,6 +3832,10 @@ if ($Unattended) {
     Write-Log "Unattended: thumbnail download = Y."
     $doThumb = "Y"
 } else {
+    Write-Host "  Tip: to add your own thumbnails, create a  CustomThumbnails\  folder next to" -ForegroundColor DarkCyan
+    Write-Host "  this script and drop  ProfileCode.png  files in it. The profile code is" -ForegroundColor DarkCyan
+    Write-Host "  the game's filename in UserProfiles\ (without .xml), or check the" -ForegroundColor DarkCyan
+    Write-Host "  TeknoParrot-Manager-controls.txt file for a full list of registered codes." -ForegroundColor DarkCyan
     $doThumb = (Read-Host "Download thumbnails for registered games missing an icon? (Y/N)").Trim().ToUpper()
 }
 if ($doThumb -eq "Y") {
@@ -2588,7 +3856,7 @@ if ($Unattended) {
     Write-Log "Unattended: repair = Y."
     $doRepair = "Y"
 } else {
-    $doRepair = Read-Host "Check for and repair broken game paths now? (Y/N)"
+    $doRepair = (Read-Host "Check for and repair broken game paths now? (Y/N)").Trim()
 }
 $nf   = @(); $amb2 = @()   # initialise so the final summary can reference them safely
 if ($doRepair.Trim().ToUpper() -eq "Y") {
@@ -2655,7 +3923,7 @@ if ($pool.Count -eq 0) {
     Write-Host " game-specific controls (gear shifts, special buttons) unbound for" -ForegroundColor DarkCyan
     Write-Host " you to set. Your UserProfiles were backed up at the start of this run." -ForegroundColor DarkCyan
     Write-Host ""
-    if (-not $Unattended -and (Read-Host " Want a recommended binding plan for more control types first? (Y/N)").ToUpper() -eq "Y") {
+    if (-not $Unattended -and (Read-Host " Want a recommended binding plan for more control types first? (Y/N)").Trim().ToUpper() -eq "Y") {
         Invoke-DeviceSurvey
         Write-Host ""
     }
@@ -2664,7 +3932,7 @@ if ($pool.Count -eq 0) {
         Write-Log "Unattended: propagation = Y."
         $goCtl = "Y"
     } else {
-        $goCtl = Read-Host " Propagate controls now? (Y/N)"
+        $goCtl = (Read-Host " Propagate controls now? (Y/N)").Trim()
     }
     if ($goCtl.ToUpper() -eq "Y") {
         $reports = Invoke-ControlPropagation -userProfilesDir $userProfilesDir -pool $pool -minBound $MinBoundForArchetype -noPropagate $noPropagateList -forceArchetype $forceArchetypeMap -familyOverride $familyOverrideMap
@@ -2814,6 +4082,9 @@ if ($doHS -eq "Y") {
             GamesInstallFolder = $gamesInstallFolder
             RetroBat           = $retroBat
             HyperSpinDataPath  = $hsDataPath
+            ReShadeSourceDll   = $rsSourceDll
+            ReShadeSourceDll32 = $rsSourceDll32
+            DgVoodoo2SourceDir = $dgSourceDir
         }
         try {
             [System.IO.File]::WriteAllText($configPath, ($cfgUpdate | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
@@ -2837,6 +4108,251 @@ if ($doHS -eq "Y") {
         Write-Log "HyperSpin 2: exported $hsCount game(s)"
     }
 }
+
+# =============================================================================
+# CROSSHAIR SETUP  (optional, runs after HyperSpin export)
+# =============================================================================
+
+Write-Host ""
+if ($Unattended) {
+    $doCrosshairs = "N"
+    Write-Log "Unattended: crosshair setup skipped."
+} else {
+    $doCrosshairs = (Read-Host "Configure custom crosshairs for lightgun games? (Y/N)").Trim().ToUpper()
+}
+if ($doCrosshairs -eq "Y") {
+    Write-Host ""
+    Write-Host "Crosshair Setup" -ForegroundColor Cyan
+    Write-Host "--------------------------------------------" -ForegroundColor Cyan
+    Invoke-CrosshairSetup -UserProfilesDir $userProfilesDir `
+                          -GamesInstallFolder $gamesInstallFolder `
+                          -TpRoot $tpRoot
+}
+
+# =============================================================================
+# RESHADE SETUP  (optional, runs after crosshair setup)
+# =============================================================================
+
+Write-Host ""
+Write-Host "============================================" -ForegroundColor DarkCyan
+Write-Host "   OPTIONAL: ReShade Visual Enhancements" -ForegroundColor DarkCyan
+Write-Host "============================================" -ForegroundColor DarkCyan
+Write-Host ""
+Write-Host "  ReShade is a free tool that can make your arcade games look better"
+Write-Host "  on modern screens. It works by applying real-time visual effects"
+Write-Host "  on top of the game -- your game files are never touched."
+Write-Host ""
+Write-Host "  Popular effects:"
+Write-Host "    Sharpening   -- removes the blurry look of upscaled games"
+Write-Host "    CRT scanlines -- makes games look like an authentic arcade monitor"
+Write-Host "    Colour boost  -- makes older games more vivid and punchy"
+Write-Host "    Borders       -- adds decorative bezel artwork around the game"
+Write-Host ""
+Write-Host "  Your games work perfectly WITHOUT ReShade -- this is 100% optional."
+Write-Host "  It can be removed at any time by deleting one file from a game folder."
+Write-Host "  Press Home while in-game to open the ReShade overlay and pick effects."
+Write-Host ""
+if ($Unattended) {
+    $doReShade = "N"
+    Write-Log "Unattended: ReShade setup skipped."
+} else {
+    $doReShade = (Read-Host "Set up ReShade visual enhancements for your games? (Y/N)").Trim().ToUpper()
+}
+if ($doReShade -eq "Y") {
+    # Locate 64-bit DLL: bundled copy first, then config, then prompt
+    $bundledDll2   = Join-Path $PSScriptRoot "ReShade\ReShade64.dll"
+    $bundledDll2_32 = Join-Path $PSScriptRoot "ReShade\ReShade32.dll"
+    if (-not $rsSourceDll -or -not (Test-Path -LiteralPath $rsSourceDll)) {
+        if (Test-Path -LiteralPath $bundledDll2) {
+            $rsSourceDll = $bundledDll2
+        } else {
+            Write-Host ""
+            Write-Host "  ReShade 64-bit DLL not found." -ForegroundColor Yellow
+            Write-Host "  To get it:" -ForegroundColor Cyan
+            Write-Host "    1. Download the installer from  https://reshade.me" -ForegroundColor White
+            Write-Host "    2. Run it and point it at any TeknoParrot game exe." -ForegroundColor White
+            Write-Host "       It will create a DLL file (e.g. dxgi.dll) in that game folder." -ForegroundColor White
+            Write-Host "    3. Copy that DLL to  $PSScriptRoot\ReShade\  and rename it  ReShade64.dll" -ForegroundColor White
+            Write-Host "       Then re-run this script and choose option 5 from the menu." -ForegroundColor White
+            Write-Host "    -- OR --" -ForegroundColor DarkCyan
+            Write-Host "    Enter the full path to the DLL file now:" -ForegroundColor White
+            Write-Host ""
+            $rsInp = (Read-Host "  Path to ReShade 64-bit DLL (or press Enter to skip)").Trim()
+            if (-not [string]::IsNullOrWhiteSpace($rsInp) -and (Test-Path -LiteralPath $rsInp) -and
+                ([System.IO.Path]::GetExtension($rsInp).ToLower() -eq '.dll')) {
+                $rsSourceDll = $rsInp
+            } else {
+                if (-not [string]::IsNullOrWhiteSpace($rsInp)) {
+                    Write-Host "  File not found or is not a .dll -- ReShade setup skipped." -ForegroundColor DarkGray
+                } else {
+                    Write-Host "  ReShade setup skipped." -ForegroundColor DarkGray
+                }
+                Write-Log "ReShade post-run: skipped -- DLL not found or invalid."
+                $doReShade = "N"
+            }
+        }
+        if ($doReShade -eq "Y") {
+            # Persist updated DLL path
+            $cfgRS2 = [ordered]@{
+                TeknoParrotRoot    = $tpRoot
+                Mode               = $mode
+                ZipSourceFolder    = $zipSource
+                GamesInstallFolder = $gamesInstallFolder
+                RetroBat           = $retroBat
+                HyperSpinDataPath  = $hsDataPath
+                ReShadeSourceDll   = $rsSourceDll
+                ReShadeSourceDll32 = $rsSourceDll32
+                DgVoodoo2SourceDir = $dgSourceDir
+            }
+            try {
+                [System.IO.File]::WriteAllText($configPath, ($cfgRS2 | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
+                Write-Log "Config: saved ReShadeSourceDll = $rsSourceDll"
+            } catch { Write-Log "Config: could not save ReShadeSourceDll -- $_" }
+        }
+    }
+    # Auto-detect bundled 32-bit DLL; no error if absent.
+    if (-not $rsSourceDll32 -or -not (Test-Path -LiteralPath $rsSourceDll32)) {
+        if (Test-Path -LiteralPath $bundledDll2_32) { $rsSourceDll32 = $bundledDll2_32 }
+    }
+    if ($doReShade -eq "Y") {
+        Write-Host ""
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        Write-Host " ReShade Visual Enhancements Setup" -ForegroundColor Cyan
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        $rsSetupDone = $true
+        Invoke-ReShadeSetup -UserProfilesDir $userProfilesDir `
+                            -SourceDll $rsSourceDll `
+                            -SourceDll32 $rsSourceDll32 `
+                            -ConfigPath $configPath `
+                            -TpRoot $tpRoot `
+                            -Mode $mode `
+                            -ZipSource $zipSource `
+                            -GamesInstallFolder $gamesInstallFolder `
+                            -RetroBat $retroBat `
+                            -HsDataPath $hsDataPath
+    }
+}
+if (-not (Get-Variable rsSetupDone -ErrorAction SilentlyContinue)) { $rsSetupDone = $false }
+
+# =============================================================================
+# DGVOODOO2 SETUP  (optional, runs after ReShade setup)
+# =============================================================================
+
+Write-Host ""
+Write-Host "============================================" -ForegroundColor DarkCyan
+Write-Host "   OPTIONAL: dgVoodoo2 Legacy Compatibility" -ForegroundColor DarkCyan
+Write-Host "============================================" -ForegroundColor DarkCyan
+Write-Host ""
+Write-Host "  Some older arcade games use DirectX 8, DirectDraw, or the Glide API"
+Write-Host "  from 3dfx. On modern PCs these can cause crashes, black screens, or"
+Write-Host "  missing graphics."
+Write-Host ""
+Write-Host "  dgVoodoo2 is a free compatibility layer that translates those old"
+Write-Host "  graphics calls into modern DirectX 11/12. It works by placing small"
+Write-Host "  DLL files in the game folder -- your original game files are never changed."
+Write-Host ""
+Write-Host "  Only run this for games that crash or show black screens on first launch."
+Write-Host "  Games that run fine do not need it."
+Write-Host ""
+if ($Unattended) {
+    $doDgVoodoo = "N"
+    Write-Log "Unattended: dgVoodoo2 setup skipped."
+} else {
+    $doDgVoodoo = (Read-Host "Set up dgVoodoo2 for old DX8/Glide games? (Y/N)").Trim().ToUpper()
+}
+if ($doDgVoodoo -eq "Y") {
+    $bundledDg2 = Join-Path $PSScriptRoot "dgVoodoo2"
+    if (-not $dgSourceDir -or -not (Test-Path -LiteralPath $dgSourceDir)) {
+        if (Test-Path -LiteralPath $bundledDg2) {
+            $dgSourceDir = $bundledDg2
+        } else {
+            Write-Host ""
+            Write-Host "  dgVoodoo2 DLL folder not found." -ForegroundColor Yellow
+            Write-Host "  To get dgVoodoo2:" -ForegroundColor Cyan
+            Write-Host "    1. Download the latest ZIP from  http://dege.freeweb.hu/dgVoodoo2/dgVoodoo2.html" -ForegroundColor White
+            Write-Host "    2. Open the ZIP and copy these files into a new folder called  dgVoodoo2\" -ForegroundColor White
+            Write-Host "       next to this script:" -ForegroundColor White
+            Write-Host "         From the MS\x64\ subfolder : D3D8.dll  DDraw.dll  D3DImm.dll" -ForegroundColor White
+            Write-Host "         From the root of the ZIP  : Glide2x.dll  Glide3x.dll  dgVoodoo.conf" -ForegroundColor White
+            Write-Host "       Then re-run this script and choose option 6 from the menu." -ForegroundColor White
+            Write-Host "    -- OR --" -ForegroundColor DarkCyan
+            Write-Host "    Enter the full path to a folder that already contains those files:" -ForegroundColor White
+            Write-Host ""
+            $dgInp = (Read-Host "  Path to dgVoodoo2 folder (or press Enter to skip)").Trim()
+            if (-not [string]::IsNullOrWhiteSpace($dgInp) -and (Test-Path -LiteralPath $dgInp)) {
+                $dgSourceDir = $dgInp
+            } else {
+                if (-not [string]::IsNullOrWhiteSpace($dgInp)) {
+                    Write-Host "  Folder not found -- dgVoodoo2 setup skipped." -ForegroundColor DarkGray
+                } else {
+                    Write-Host "  dgVoodoo2 setup skipped." -ForegroundColor DarkGray
+                }
+                Write-Log "dgVoodoo2 post-run: skipped -- folder not found."
+                $doDgVoodoo = "N"
+            }
+        }
+        if ($doDgVoodoo -eq "Y") {
+            $cfgDg2 = [ordered]@{
+                TeknoParrotRoot    = $tpRoot
+                Mode               = $mode
+                ZipSourceFolder    = $zipSource
+                GamesInstallFolder = $gamesInstallFolder
+                RetroBat           = $retroBat
+                HyperSpinDataPath  = $hsDataPath
+                ReShadeSourceDll   = $rsSourceDll
+                ReShadeSourceDll32 = $rsSourceDll32
+                DgVoodoo2SourceDir = $dgSourceDir
+            }
+            try {
+                [System.IO.File]::WriteAllText($configPath, ($cfgDg2 | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
+                Write-Log "Config: saved DgVoodoo2SourceDir = $dgSourceDir"
+            } catch { Write-Log "Config: could not save DgVoodoo2SourceDir -- $_" }
+        }
+    }
+}
+if ($doDgVoodoo -eq "Y") {
+    Write-Host ""
+    Write-Host "--------------------------------------------" -ForegroundColor Cyan
+    Write-Host " dgVoodoo2 Legacy Compatibility Setup" -ForegroundColor Cyan
+    Write-Host "--------------------------------------------" -ForegroundColor Cyan
+    $dgSetupDone = $true
+    Invoke-DgVoodoo2Setup -UserProfilesDir $userProfilesDir `
+                          -SourceDir $dgSourceDir `
+                          -TpRoot $tpRoot
+}
+if (-not (Get-Variable dgSetupDone -ErrorAction SilentlyContinue)) { $dgSetupDone = $false }
+
+# =============================================================================
+# GPU FIX SETUP  (optional, runs after dgVoodoo2 setup)
+# =============================================================================
+
+Write-Host ""
+Write-Host "============================================" -ForegroundColor DarkCyan
+Write-Host "   OPTIONAL: GPU Compatibility Fixes" -ForegroundColor DarkCyan
+Write-Host "============================================" -ForegroundColor DarkCyan
+Write-Host ""
+Write-Host "  Some games include settings that fix graphical issues specific to"
+Write-Host "  AMD, NVIDIA, or Intel graphics cards. This step auto-detects your"
+Write-Host "  GPU and applies the right fix to every registered game that has one."
+Write-Host ""
+Write-Host "  Safe to run any time -- re-run if you change or update your GPU."
+Write-Host ""
+if ($Unattended) {
+    $doGpuFix = "N"
+    Write-Log "Unattended: GPU fix setup skipped."
+} else {
+    $doGpuFix = (Read-Host "Apply GPU compatibility fixes for your games? (Y/N)").Trim().ToUpper()
+}
+if ($doGpuFix -eq "Y") {
+    Write-Host ""
+    Write-Host "--------------------------------------------" -ForegroundColor Cyan
+    Write-Host " GPU Compatibility Fix Setup" -ForegroundColor Cyan
+    Write-Host "--------------------------------------------" -ForegroundColor Cyan
+    $gpuSetupDone = $true
+    Invoke-GpuFixSetup -UserProfilesDir $userProfilesDir `
+                       -TpRoot $tpRoot
+}
+if (-not (Get-Variable gpuSetupDone -ErrorAction SilentlyContinue)) { $gpuSetupDone = $false }
 
 # =============================================================================
 # ACTION REQUIRED — collects everything the user must do manually
@@ -2992,4 +4508,27 @@ Write-Host "   1. Launch TeknoParrotUi.exe -- registered games now appear."
 Write-Host "   2. Work through the ACTION REQUIRED items above."
 Write-Host "   3. Bind one game of each control type, then re-run and propagate."
 Write-Host "   4. Test one propagated game before trusting the rest."
+if ($rsSetupDone) {
+    Write-Host ""
+    Write-Host "  ReShade:" -ForegroundColor Cyan
+    Write-Host "   - Launch any game that had ReShade installed."
+    Write-Host "   - Press the  Home  key to open the effects overlay."
+    Write-Host "   - Tick the effects you want and adjust with the sliders."
+    Write-Host "   - Settings save automatically -- you only need to do this once per game."
+    Write-Host "   - To remove ReShade from a game: delete dxgi.dll / d3d9.dll /"
+    Write-Host "     opengl32.dll from that game's folder. Nothing else is affected."
+}
+if ($dgSetupDone) {
+    Write-Host ""
+    Write-Host "  dgVoodoo2:" -ForegroundColor Cyan
+    Write-Host "   - Launch each game that had dgVoodoo2 installed and test it."
+    Write-Host "   - If a game now crashes that worked before, the DLL may conflict --"
+    Write-Host "     delete D3D8.dll / DDraw.dll / Glide2x.dll / Glide3x.dll from that"
+    Write-Host "     game's folder to revert. Your game files are not affected."
+}
+Write-Host ""
+Write-Host "  Crosshairs:" -ForegroundColor Cyan
+Write-Host ("   - Custom crosshair images are in:  {0}" -f (Join-Path $PSScriptRoot "Crosshairs\"))
+Write-Host "   - You can add your own PNG images to that folder at any time."
+Write-Host "   - Run mode 4 (Crosshair setup) to preview and deploy them to lightgun games."
 Write-Host ""

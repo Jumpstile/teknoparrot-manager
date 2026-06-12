@@ -1,5 +1,6 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.33 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.50 BETA  --  QUICK START
+  Author: Jumpstile
 ===============================================================================
 
   Registers your games with TeknoParrot and copies controls across games of
@@ -33,6 +34,11 @@
        1) AutoSync         -- extract ZIPs (e.g. from a NAS), then register.
        2) Register only    -- games are already extracted; just register.
        3) Restore backup   -- roll UserProfiles back to a previous backup.
+       4) Crosshair setup  -- deploy custom cursor images to lightgun games.
+       5) ReShade setup    -- add visual enhancements (optional, see below).
+       6) dgVoodoo2 setup  -- fix old DX8/Glide games (optional, see below).
+       7) GPU fix setup    -- apply GPU vendor fixes to registered games
+                             (AMD / NVIDIA / Intel, optional, see below).
 
   4. Answer the folder prompts. For AutoSync, choose a LOCAL staging folder
      with free space, OUTSIDE both TeknoParrot and your ZIP source.
@@ -68,6 +74,109 @@
   3. Launch ONE updated game and test it before trusting the rest.
 
 
+  CROSSHAIR SETUP (OPTIONAL)
+  --------------------------
+  Mode 4 deploys custom crosshair images to all registered lightgun games
+  (House of the Dead, Aliens Extermination, Terminator Salvation, etc.).
+
+  321 crosshair designs are included in the  Crosshairs\  folder next to
+  this script. You can add your own PNG images to that folder at any time
+  and the script will pick them up automatically on the next run.
+
+  When you run mode 4:
+    1. A preview page opens in your browser showing all available designs.
+    2. Enter the number of your chosen design for Player 1 and Player 2.
+    3. The script copies those images to every registered lightgun game.
+
+  Run mode 4 again any time to change the crosshair design.
+
+
+  RESHADE VISUAL ENHANCEMENTS (OPTIONAL)
+  ----------------------------------------
+  ReShade is a free tool that can make your arcade games look better on
+  modern screens. It sits between the game and your screen, applying
+  real-time visual improvements. Your game files are never modified.
+
+  Popular effects:
+    Sharpening    -- removes the blurry look of upscaled games.
+    CRT scanlines -- makes games look like they are running on a real
+                     arcade monitor with the classic scanline effect.
+    Colour boost  -- makes older games look more vivid and punchy.
+    Borders/bezel -- adds decorative arcade cabinet artwork around the game.
+
+  Your games work perfectly WITHOUT ReShade. It is 100% optional and can
+  be removed at any time by deleting one DLL file from a game folder.
+  No game files are ever changed.
+
+  HOW TO SET IT UP
+
+  Option A (easiest, if included in your package):
+    ReShade64.dll (and ReShade32.dll for 32-bit games) are included in
+    the  ReShade\  folder next to this script. The script picks the right
+    one for each game automatically. Just run the script and answer Y when
+    asked about ReShade, or choose mode 5 from the main menu.
+
+  Option B (if the DLLs are not included):
+    1. Go to  https://reshade.me  and download the installer.
+    2. Run the installer. When it asks which game, point it at any
+       TeknoParrot game exe. Let it finish -- it creates a DLL in
+       that game folder (named d3d9.dll, dxgi.dll, or similar).
+    3. Copy that DLL into the  ReShade\  folder next to this script
+       and rename it to  ReShade64.dll.  (If you have 32-bit games too,
+       repeat with a 32-bit game exe and rename to  ReShade32.dll.)
+    4. Run TeknoParrot Manager and choose mode 5, or answer Y at the
+       end of a normal run when it asks about ReShade.
+
+  Once installed, press the  Home  key while in-game to open the
+  ReShade overlay and switch effects on or off.
+
+  To remove ReShade from a game: delete the DLL (e.g. dxgi.dll,
+  d3d9.dll, or opengl32.dll) from that game's folder. Nothing else
+  needs to be changed.
+
+  Full details, effect descriptions, and update instructions:
+  TeknoParrot-Manager-README.txt -- RESHADE VISUAL ENHANCEMENTS section.
+
+
+  DGVOODOO2 LEGACY COMPATIBILITY (OPTIONAL)
+  ------------------------------------------
+  Some older arcade games use DirectX 8, DirectDraw, or the Glide API from
+  3dfx. On modern PCs these can cause crashes or black screens. dgVoodoo2
+  translates those old calls into modern DirectX -- no game files are changed.
+
+  Only use this for games that crash or show black screens on first launch.
+
+  To set it up:
+    1. Download the dgVoodoo2 ZIP from dege.freeweb.hu/dgVoodoo2.
+    2. Create a  dgVoodoo2\  folder next to this script and copy in:
+         From  MS\x64\  : D3D8.dll, DDraw.dll, D3DImm.dll
+         From the root  : Glide2x.dll, Glide3x.dll, dgVoodoo.conf
+    3. Run the script and choose mode 6, or answer Y at the end of any run.
+       The wizard auto-detects which games need it and shows them first.
+
+  To remove: delete the deployed DLL file(s) from the game folder.
+
+  Full details: TeknoParrot-Manager-README.txt -- DGVOODOO2 section.
+
+
+  GPU COMPATIBILITY FIXES (OPTIONAL)
+  ------------------------------------
+  Many TeknoParrot games include optional fix settings for specific GPU
+  vendors (AMD, NVIDIA, Intel). This step auto-detects your GPU and applies
+  the right setting to every registered game that supports one.
+
+  TeknoParrot's GameProfiles folder is scanned at runtime, so newly added
+  games are always covered automatically -- no script update needed.
+
+  To run:
+    Choose mode 7 from the main menu, or answer Y when prompted at the end
+    of any normal run.
+
+  Safe to re-run any time you change your GPU or update its drivers.
+
+  Full details: TeknoParrot-Manager-README.txt -- GPU COMPATIBILITY FIXES section.
+
+
   RETROBAT / BATOCERA
   -------------------
   On first run, the script asks:
@@ -75,9 +184,10 @@
       Is this a RetroBat/Batocera installation? (Y/N)
 
   Answer Y and game folders are extracted as  GameName.teknoparrot  instead
-  of  GameName  -- the format RetroBat requires. Registration and fuzzy
-  matching work the same way; the suffix is stripped automatically before
-  any profile comparison. The answer is saved and never asked again.
+  of  GameName. Registration and fuzzy matching work the same way; the suffix
+  is stripped automatically before any profile comparison. The script also
+  recognises .parrot and .game suffixes for any existing folders extracted by
+  other tools. The answer is saved and never asked again.
 
   To switch later: delete config.json and re-run, or set "RetroBat": true
   in the JSON. To re-extract with the new naming: also delete syncstate.json.
@@ -118,8 +228,28 @@
     Thumbnails: 47 fetched, 12 already present, 8 not in repo.
 
   Not all games have a thumbnail in the repo. Missing ones are skipped
-  without error and counted as "not in repo". You can add custom icons
-  yourself by dropping a <ProfileCode>.png into the Icons folder.
+  without error and counted as "not in repo".
+
+  CUSTOM THUMBNAILS
+
+  You can add your own PNG icons for any game:
+
+    1. Create a  CustomThumbnails\  folder in the same folder as this script.
+    2. Name each image  ProfileCode.png  -- for example:
+         Daytona3.png   HouseOfDead4.png   AliensArmageddon.png
+    3. Run the script and answer Y to the thumbnail prompt.
+       Your images are copied to TeknoParrot's Icons folder automatically.
+       Files already in Icons are never overwritten.
+       If a filename doesn't match any registered game, the script warns
+       you and skips that file so nothing is silently misapplied.
+
+  FINDING THE PROFILE CODE FOR A GAME
+
+  Easiest way: run TeknoParrot Manager once (any mode). It writes
+  TeknoParrot-Manager-controls.txt next to the script, listing every
+  registered game and its exact profile code. Use those names for your
+  thumbnail files. For a full explanation with examples, see the README
+  under CUSTOM THUMBNAILS.
 
 
   LAUNCHBOX EXPORT (OPTIONAL)
@@ -156,6 +286,29 @@
   Step 4.  Click Next, review the matches, click Import. Done.
            Re-run the wizard any time you add more games -- LaunchBox
            skips games already in your library.
+
+
+  HYPERSPIN 2 EXPORT (OPTIONAL)
+  -----------------------------
+  At the end of every run the script offers to add your registered games to
+  HyperSpin 2's game list:
+
+      Export registered games to HyperSpin 2? (Y/N)
+
+  Answer Y and the script locates TeknoParrot's game list in your HyperSpin 2
+  data folder (default: C:\ProgramData\HyperSpin\data) and merges in every
+  registered game not already present. Your path is saved and reused on
+  future runs.
+
+  Prerequisites: TeknoParrot must already be set up as an emulator in
+  HyperSpin 2 (the emulator title must contain "TeknoParrot" -- exact
+  spelling and spacing do not matter). No games need to be added to
+  HyperSpin 2 first; the script creates the game list file if it does
+  not yet exist.
+
+  Games are added with title only. Use HyperSpin 2's Scrape feature for
+  box art and metadata. HyperSpin 2 must not be running when you answer Y.
+  Full details: TeknoParrot-Manager-README.txt.
 
 
   RESTORING A BACKUP
@@ -301,6 +454,16 @@
   TeknoParrot-LaunchBox-Import.xml     Reference XML (written when you answer
                                        Y to the LaunchBox export prompt).
   TeknoParrot-Manager-CHANGELOG.txt    Full version history.
+  ReShade\ReShade64.dll                Bundled ReShade DLL (64-bit games).
+  ReShade\ReShade32.dll                Bundled ReShade DLL (32-bit games,
+                                       optional). See RESHADE section above.
+  dgVoodoo2\*.dll + dgVoodoo.conf      (Create yourself) dgVoodoo2 DLLs for
+                                       old DX8/Glide games. See DGVOODOO2 above.
+  Crosshairs\*.png                     Custom crosshair images for lightgun
+                                       games (321 images included).
+  CustomThumbnails\*.png               (Optional, create yourself) Your own
+                                       game icons. Named ProfileCode.png --
+                                       copied to Icons\ on the thumbnail step.
 
 
 ===============================================================================
