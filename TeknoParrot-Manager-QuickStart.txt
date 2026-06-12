@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.50 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.51 BETA  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -30,7 +30,7 @@
 
        powershell -ExecutionPolicy Bypass -File .\TeknoParrot-Manager.ps1
 
-  3. Pick a mode:
+  3. Pick a mode (after each mode completes, you return to this menu):
        1) AutoSync         -- extract ZIPs (e.g. from a NAS), then register.
        2) Register only    -- games are already extracted; just register.
        3) Restore backup   -- roll UserProfiles back to a previous backup.
@@ -39,6 +39,7 @@
        6) dgVoodoo2 setup  -- fix old DX8/Glide games (optional, see below).
        7) GPU fix setup    -- apply GPU vendor fixes to registered games
                              (AMD / NVIDIA / Intel, optional, see below).
+       8) Exit             -- quit the script.
 
   4. Answer the folder prompts. For AutoSync, choose a LOCAL staging folder
      with free space, OUTSIDE both TeknoParrot and your ZIP source.
@@ -206,8 +207,8 @@
   Windows Task Scheduler. Check TeknoParrot-Manager.log after each run.
 
   Restore mode cannot run unattended -- it needs you to pick a backup.
-  If your saved mode is "Restore", change it to AutoSync or RegisterOnly
-  before scheduling.
+  The -Unattended switch always runs AutoSync or RegisterOnly depending on
+  whether a ZIP source folder is configured.
 
   Full scheduling instructions: TeknoParrot-Manager-README.txt.
 
@@ -441,7 +442,7 @@
 
   FILES THE SCRIPT KEEPS
   ----------------------
-  TeknoParrot-Manager.config.json      Saved folders and mode.
+  TeknoParrot-Manager.config.json      Saved folders and settings.
   TeknoParrot-Manager.overrides.json   Optional per-game tweaks (noSync,
                                        onlySync, noPropagate, forceArchetype,
                                        familyOverride).
@@ -453,6 +454,10 @@
                                        bound count, manual buttons per game.
   TeknoParrot-LaunchBox-Import.xml     Reference XML (written when you answer
                                        Y to the LaunchBox export prompt).
+  TeknoParrot-Manager-ActionItems.txt  Action items from the last run
+                                       (manual registration, broken paths,
+                                       etc.). Written after registration runs
+                                       that have outstanding items.
   TeknoParrot-Manager-CHANGELOG.txt    Full version history.
   ReShade\ReShade64.dll                Bundled ReShade DLL (64-bit games).
   ReShade\ReShade32.dll                Bundled ReShade DLL (32-bit games,
