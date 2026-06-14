@@ -4172,6 +4172,19 @@ if ($eggmanDatZip) {
                 Write-Log "SuppIndex: file not found at $supplementaryDatPath -- skipping."
             }
         }
+        # Look for a notes text file alongside the dat (e.g. extracted from the ZIP)
+        $notesCandidate = Get-ChildItem -LiteralPath ([System.IO.Path]::GetDirectoryName($datFilePath)) `
+                              -Filter '*.txt' -File -ErrorAction SilentlyContinue |
+                          Where-Object { $_.Name -ilike '*note*' } |
+                          Select-Object -First 1 -ExpandProperty FullName
+        if ($notesCandidate) {
+            Write-Host "  Loading game notes..." -ForegroundColor DarkGray
+            $notesIndex = Build-GameNotesIndex $notesCandidate
+            if ($notesIndex.Count -gt 0) {
+                Write-Host ("  Game notes: {0} entries indexed." -f $notesIndex.Count) -ForegroundColor DarkGray
+                Write-Log "NotesIndex: $($notesIndex.Count) entries from $notesCandidate"
+            }
+        }
     } else {
         Write-Host ("  WARNING: Collection dat not found at: {0}" -f $datFilePath) -ForegroundColor Yellow
         Write-Log "DatIndex: file not found at $datFilePath -- skipping."

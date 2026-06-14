@@ -845,14 +845,21 @@
 
   HOW TO SET IT UP
 
-    The easiest way is to use the included ReShade DLLs (in the ReShade\
-    folder next to this script). The script finds them automatically and
-    deploys the right one for each game's architecture:
-      ReShade64.dll -- for 64-bit games (required)
+    The script looks for ReShade DLLs in the  ReShade\  folder next to the
+    script and deploys the right one for each game's architecture:
+      ReShade64.dll -- for 64-bit games (required for Mode 5 to work)
       ReShade32.dll -- for 32-bit games (optional; 32-bit games are skipped
                        if this file is absent)
 
-    If the DLLs are not included, or if you want to update to a newer version:
+    WHERE TO GET THE DLLS
+
+    If you downloaded TeknoParrot Manager as a ZIP release: the DLLs are
+    already included in the  ReShade\  folder. No extra steps needed -- go
+    straight to Step 4 below.
+
+    If you cloned from GitHub or the ReShade\ folder is empty: the DLLs are
+    not included in the source repository (ReShade is free software but its
+    DLLs are not redistributable via git). Obtain them as follows:
 
     Step 1.  Go to  https://reshade.me  and download the free installer.
              Choose the standard version (not the add-on version) unless you
@@ -863,8 +870,8 @@
              that game folder (e.g. dxgi.dll, d3d9.dll). Let the installation
              complete -- you do not need to select any shaders at this stage.
 
-    Step 3.  Copy that DLL file into the  ReShade\  folder next to this
-             script and rename it to  ReShade64.dll.
+    Step 3.  Copy that DLL into the  ReShade\  folder next to this script
+             and rename it to  ReShade64.dll.
              If you also have 32-bit games: repeat with a 32-bit game exe and
              rename the resulting DLL to  ReShade32.dll.
 
