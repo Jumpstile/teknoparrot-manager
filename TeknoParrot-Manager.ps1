@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.59 BETA
+# TeknoParrot Manager  |  v0.60 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -60,7 +60,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.59 BETA" -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.60 BETA" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -4217,6 +4217,7 @@ if ($datIndex.Count -gt 0 -and $gameProfilesDir) {
 # =============================================================================
 # MAIN MENU LOOP
 # =============================================================================
+try {
 while ($true) {
     $mode = $null
     Write-Host ""
@@ -5496,3 +5497,17 @@ Write-Host ""
 
     [void](Read-Host "  Press Enter to return to menu")
 } # end while ($true)
+} catch {
+    $errMsg  = $_.Exception.Message
+    $errFull = "FATAL ERROR (unhandled): $($_.Exception)`nStack: $($_.ScriptStackTrace)"
+    Write-Host ""
+    Write-Host "============================================" -ForegroundColor Red
+    Write-Host "  FATAL ERROR -- script aborted" -ForegroundColor Red
+    Write-Host "============================================" -ForegroundColor Red
+    Write-Host ("  {0}" -f $errMsg) -ForegroundColor Red
+    Write-Host "  Full details have been written to:" -ForegroundColor Yellow
+    Write-Host ("  {0}" -f (Join-Path $PSScriptRoot "TeknoParrot-Manager.log")) -ForegroundColor Yellow
+    try { Write-Log $errFull } catch {}
+    [void](Read-Host "  Press Enter to exit")
+    exit 1
+}

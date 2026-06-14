@@ -7,6 +7,19 @@
 
 
 -------------------------------------------------------------------------------
+  v0.60 BETA  (2026-06-14)
+-------------------------------------------------------------------------------
+
+  Global error handler:
+
+  - The main menu loop is now wrapped in a top-level try/catch. Any unhandled
+    exception that escapes existing per-operation error handling is caught,
+    logged in full (exception message + PowerShell stack trace) to
+    TeknoParrot-Manager.log, and shown on screen with a clear "FATAL ERROR"
+    banner and a prompt before the script exits. Previously such exceptions
+    would produce a raw PowerShell red-text dump with no log entry.
+
+-------------------------------------------------------------------------------
   v0.59 BETA  (2026-06-14)
 -------------------------------------------------------------------------------
 
