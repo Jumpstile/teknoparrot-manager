@@ -20,7 +20,11 @@
 
   - Automatic registration. Scans your extracted games, matches each to the
     correct TeknoParrot profile, and makes it appear and launch in
-    TeknoParrotUI. Existing registrations are never overwritten.
+    TeknoParrotUI. Scans all common executable types: .exe, .elf, .iso,
+    .xbe (Sega Chihiro/cxbxr games such as Virtua Cop 3 and OutRun 2),
+    .dll (Konami PC arcade games such as DanceDanceRevolution 2013, Steel
+    Chronicle, Metal Gear Arcade), and more. Existing registrations are
+    never overwritten.
 
   - Fuzzy name matching. For platforms that share a single executable file
     (most notably NESiCAxLive, where 80+ games all use game.exe), the script
@@ -41,7 +45,16 @@
     titles) -- a second pass looks them up in the dat by normalized folder name;
     (3) slightly misnamed folders -- a fuzzy scan of all dat entries finds the
     best match above the auto-register threshold. Games registered via the dat
-    are shown as "Registered (dat/exact)" or "Registered (dat/fuzzy)". The
+    are shown as "Registered (dat/exact)" or "Registered (dat/fuzzy)".
+
+    A third registration pass (independent of the dat) Dice-matches normalised
+    folder names against normalised GameProfile code names. This resolves games
+    whose GameProfile has an empty ExecutableName -- they never enter the exe-name
+    index and may not appear in the dat either. Examples: BladeStrangers,
+    LuigisMansion, MaiMaiGreen, PokkenTournament, ProjectDiva, SonicDashExtreme,
+    HydroThunder. These appear as "Registered (code/fuzzy)".
+
+    The
     The supplementary dat can be indexed to show alternate versions of your
     games (different regions, revisions, bonus content). After registration
     completes, a "Game Info" block shows alternate versions and game notes (from
@@ -402,6 +415,14 @@
                           misnamed folders (fuzzy dat scan). Configure the
                           dat path during setup or via datFile in
                           overrides.json -- see PER-GAME OVERRIDES.
+
+    Registered          Folder name matched a TeknoParrot profile code
+    (code/fuzzy)          directly by Dice similarity. Used for games whose
+                          GameProfile has an empty ExecutableName (examples:
+                          BladeStrangers, LuigisMansion, MaiMaiGreen,
+                          PokkenTournament, SonicDashExtreme, HydroThunder).
+                          The best available executable in the folder is
+                          selected automatically.
 
     Already set          A profile for this game already exists and is left
                           exactly as it is. The script never overwrites

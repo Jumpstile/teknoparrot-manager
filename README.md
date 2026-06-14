@@ -43,9 +43,10 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 
 ## Features
 
-- **Auto-registration** — scans your extracted games and copies the matching TeknoParrot profile with the correct game path. Existing registrations are never overwritten.
+- **Auto-registration** — scans your extracted games and copies the matching TeknoParrot profile with the correct game path. Scans `.exe`, `.elf`, `.iso`, `.xbe` (Sega Chihiro/cxbxr games such as Virtua Cop 3 and OutRun 2), `.dll` (Konami PC arcade games such as DanceDanceRevolution 2013 and Steel Chronicle), and more. Existing registrations are never overwritten.
 - **Fuzzy name matching** — handles shared-executable platforms (NESiCAxLive, etc.) by comparing folder names to profile codes and auto-registering the best match above a confidence threshold.
 - **Dat file integration** — downloads or reads the Eggman/RomVault dat ZIP to resolve shared executables, register games with no known exe (pcsx2x6, ELF-based Lindbergh titles), and handle misnamed folders.
+- **Profile code matching** — a third registration pass Dice-matches folder names directly against TeknoParrot profile code names, resolving games whose profile has an empty `ExecutableName` (BladeStrangers, LuigisMansion, MaiMaiGreen, PokkenTournament, and others) without needing a dat entry.
 - **GitHub profile resolution** — fetches the full GameProfile list from the TeknoParrot repo on each launch to resolve dat codes that don't exactly match a local template.
 - **Control propagation** — bind one game of each control type once; the script copies those settings to every other game of the same type.
 - **AutoSync extraction** — copies and extracts game ZIPs from a NAS or local source, skipping unchanged games.
@@ -178,6 +179,7 @@ For each game folder, there are four possible outcomes:
 | **Registered** | A matching profile was found and the game now appears in TeknoParrot. |
 | **Registered (fuzzy)** | The exe name is shared by multiple games (e.g. `game.exe` for 80+ NESiCAxLive titles) but the folder name matched a specific profile with high confidence. Profile code and score shown — spot-check these. |
 | **Registered (dat)** | The folder name matched a dat file entry. The dat's authoritative profile code and executable path are used. Covers shared-exe games, exe-less-matched folders (pcsx2x6, ELF-based), and slightly misnamed folders. |
+| **Registered (code/fuzzy)** | Folder name matched a TeknoParrot profile code by Dice similarity. Used for games whose profile has an empty `ExecutableName` (BladeStrangers, LuigisMansion, etc.) — the best available executable in the folder is selected. |
 | **Already set** | A profile for this game already exists and is left exactly as-is. |
 | **Register manually** | Shared exe, folder name below confidence threshold. The ACTION REQUIRED section shows the exe to browse to, a best-guess profile, and the full candidate list. |
 
@@ -231,6 +233,8 @@ The dat resolves three registration scenarios that would otherwise require manua
 1. **Shared-executable games** (NESiCAxLive, etc.) — dat disambiguates instantly using the folder name
 2. **Games with no profile match** (pcsx2x6, ELF-based Lindbergh) — a second pass looks them up by normalised folder name
 3. **Slightly misnamed folders** — fuzzy scan of all dat entries
+
+A third registration pass (independent of the dat) Dice-matches normalised folder names against normalised profile code names. This resolves games whose GameProfile has an empty `<ExecutableName>` — they never enter the exe-name index and may not be in the dat either. Examples: BladeStrangers, LuigisMansion, MaiMaiGreen, PokkenTournament, ProjectDiva, SonicDashExtreme, HydroThunder.
 
 The script also fetches the full list of `GameProfile` filenames from the `teknogods/TeknoParrotUI` GitHub repo at launch to resolve dat codes that don't exactly match a local template filename (e.g. `BladeArcusFromShining` → `BladeArcus.xml`). Falls back to scanning your local `GameProfiles` folder if offline.
 
