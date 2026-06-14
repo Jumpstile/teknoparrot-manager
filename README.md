@@ -1,35 +1,75 @@
 # TeknoParrot Manager
 
-A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arcade game library on Windows.
+A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arcade game library on Windows — registration, control propagation, crosshairs, ReShade, dgVoodoo2, GPU fixes, and more.
 
 > **Beta** — test one game after each run. Profiles are backed up automatically before every run.
 
-## Contents
+---
+
+## Table of Contents
 
 - [Features](#features)
+- [How It Works](#how-it-works)
 - [Requirements](#requirements)
 - [Installation](#installation)
+- [Running the Script](#running-the-script)
 - [Modes](#modes)
-- [Full Documentation](#full-documentation)
+- [Game Selection (AutoSync)](#game-selection-autosync)
+- [The Staging Folder](#the-staging-folder)
+- [Registration](#registration)
+- [How Fuzzy Matching Works](#how-fuzzy-matching-works)
+- [Dat File Integration](#dat-file-integration)
+- [Control Propagation](#control-propagation)
+- [Device Survey](#device-survey)
+- [Crosshair Setup](#crosshair-setup)
+- [ReShade Visual Enhancements](#reshade-visual-enhancements)
+- [dgVoodoo2 Legacy Compatibility](#dgvoodoo2-legacy-compatibility)
+- [GPU Compatibility Fixes](#gpu-compatibility-fixes)
+- [LaunchBox Export](#launchbox-export)
+- [HyperSpin 2 Export](#hyperspin-2-export)
+- [RetroBat / Batocera](#retrobat--batocera)
+- [Thumbnail Download](#thumbnail-download)
+- [Controls Status File](#controls-status-file)
+- [Per-Game Overrides](#per-game-overrides)
+- [Action Required Summary](#action-required-summary)
+- [Unattended / Scheduled Mode](#unattended--scheduled-mode)
+- [Game Repair](#game-repair)
+- [Safety, Backup and Log](#safety-backup-and-log)
+- [Resetting](#resetting)
+- [Troubleshooting](#troubleshooting)
+- [What It Does Not Do](#what-it-does-not-do)
 
 ---
 
 ## Features
 
-- **Auto-registration** — scans your extracted games and copies the matching TeknoParrot profile with the correct game path filled in. Existing registrations are never overwritten.
-- **Fuzzy name matching** — handles shared-executable platforms (NESiCAxLive, etc.) by comparing folder names to profile codes and auto-registering the best match.
-- **Dat file integration** — optionally downloads the Eggman/RomVault dat ZIP and uses it to resolve shared executables, register games with no known exe (pcsx2x6, ELF-based Lindbergh titles), and handle misnamed folders.
+- **Auto-registration** — scans your extracted games and copies the matching TeknoParrot profile with the correct game path. Existing registrations are never overwritten.
+- **Fuzzy name matching** — handles shared-executable platforms (NESiCAxLive, etc.) by comparing folder names to profile codes and auto-registering the best match above a confidence threshold.
+- **Dat file integration** — downloads or reads the Eggman/RomVault dat ZIP to resolve shared executables, register games with no known exe (pcsx2x6, ELF-based Lindbergh titles), and handle misnamed folders.
 - **GitHub profile resolution** — fetches the full GameProfile list from the TeknoParrot repo on each launch to resolve dat codes that don't exactly match a local template.
 - **Control propagation** — bind one game of each control type once; the script copies those settings to every other game of the same type.
 - **AutoSync extraction** — copies and extracts game ZIPs from a NAS or local source, skipping unchanged games.
 - **Game repair** — finds broken or empty game paths and re-points them automatically.
 - **Crosshair setup** — deploys custom P1/P2 cursor images to all lightgun games with an HTML preview of 321 included designs.
-- **ReShade** — installs post-processing into game folders, auto-detecting 32-bit vs 64-bit and the correct DLL name per game.
+- **ReShade** — installs post-processing into game folders, auto-detecting the correct DLL name and 32/64-bit architecture per game.
 - **dgVoodoo2** — fixes older games that crash on DirectX 8, DirectDraw, or Glide by deploying the correct compatibility DLLs.
-- **GPU fix** — detects your GPU (AMD / NVIDIA / Intel) and applies the matching vendor fix to every registered game that has one.
+- **GPU fixes** — detects your GPU (AMD / NVIDIA / Intel) and applies the matching vendor fix to every registered game that has one.
 - **LaunchBox / HyperSpin 2 export** — builds import files for both frontends after each run.
-- **Unattended mode** — `-Unattended` flag skips all prompts for scheduled overnight runs.
+- **Unattended mode** — `-Unattended` flag for scheduled overnight runs.
 - **Safe by design** — timestamped backups before every run, free-space check, full log, one-click restore.
+
+---
+
+## How It Works
+
+TeknoParrot keeps two profile folders in its root:
+
+| Folder | Purpose |
+|--------|---------|
+| `GameProfiles` | Templates that ship with TeknoParrot, one per supported game. Each names the executable it expects and carries that game's settings and controls. |
+| `UserProfiles` | Your games. A game appears and launches once its template is copied here with the path to your executable filled in. |
+
+This script automates the copy-and-fill step: it scans your games, matches each executable to the right template, copies it to `UserProfiles`, and sets the path. TeknoParrot picks the games up on its next launch.
 
 ---
 
@@ -37,38 +77,552 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 
 - Windows 10 or 11
 - PowerShell 5.1 (built into Windows — no install needed)
-- TeknoParrot installed
+- TeknoParrot installed with `TeknoParrotUi.exe` run at least once (so it downloads its `GameProfiles` folder)
+- Your games as ZIP files (for AutoSync) or already extracted into subfolders
 
 ---
 
 ## Installation
 
 1. Download `TeknoParrot Manager vX.XX BETA.zip` from [Releases](../../releases/latest)
-2. Extract to any folder (e.g. alongside your TeknoParrot install)
+2. Extract to any folder (e.g. a `Scripts` subfolder alongside your TeknoParrot install)
 3. Double-click **`TeknoParrot-Manager.bat`**
 
-No additional software required.
+No additional software required to get started. Optional tools (ReShade, dgVoodoo2) are configured separately — see their sections below.
+
+---
+
+## Running the Script
+
+**Option A — Double-click launcher (easiest):**
+```
+TeknoParrot-Manager.bat
+```
+
+**Option B — PowerShell directly:**
+```powershell
+cd "C:\path\to\TeknoParrot\Scripts"
+.\TeknoParrot-Manager.ps1
+```
+
+**Blocked by execution policy?**
+```powershell
+powershell -ExecutionPolicy Bypass -File .\TeknoParrot-Manager.ps1
+```
+
+On first run the script scans common install locations for `TeknoParrotUi.exe` automatically before asking you to type a path. If multiple installs are found they are listed numbered for easy picking.
+
+On later runs it offers to reuse your saved settings — press **Y** to continue, **N** to reconfigure.
 
 ---
 
 ## Modes
 
+The main menu is a persistent loop — after each mode finishes you return to the menu.
+
 | # | Mode | What it does |
 |---|------|-------------|
-| 1 | AutoSync | Extract ZIPs from NAS or local source, then register |
-| 2 | Register only | Games already extracted — just register |
-| 3 | Restore backup | Roll profiles back to a previous backup |
-| 4 | Crosshair setup | Pick and deploy custom crosshairs to lightgun games |
-| 5 | ReShade setup | Install post-processing shaders |
-| 6 | dgVoodoo2 setup | Fix DirectX 8 / DirectDraw / Glide compatibility |
-| 7 | GPU fix setup | Apply AMD / NVIDIA / Intel vendor fix to all games |
+| 1 | **AutoSync** | Extract ZIPs from NAS or local source, then register |
+| 2 | **Register only** | Games already extracted — just register |
+| 3 | **Restore backup** | Roll profiles back to a previous backup |
+| 4 | **Crosshair setup** | Pick and deploy custom crosshairs to lightgun games |
+| 5 | **ReShade setup** | Install post-processing shaders |
+| 6 | **dgVoodoo2 setup** | Fix DirectX 8 / DirectDraw / Glide compatibility |
+| 7 | **GPU fix setup** | Apply AMD / NVIDIA / Intel vendor fix to all games |
+| 8 | **Exit** | Quit the script |
 
 ---
 
-## Full Documentation
+## Game Selection (AutoSync)
 
-The release ZIP includes:
+After entering your folders, the script filters out games already on disk and shows:
 
-- **`TeknoParrot-Manager-QuickStart.txt`** — one-page setup guide, start here
-- **`TeknoParrot-Manager-README.txt`** — full reference documentation
-- **`TeknoParrot-Manager-CHANGELOG.txt`** — version history
+```
+347 game(s) already extracted -- not shown.
+136 game(s) available to extract.
+
+A) All unextracted games (136)
+L) Browse and select from list (136 games, A-Z)
+S) Search by keyword
+D) Done -- proceed with current queue
+```
+
+- **A** — extract everything not already on disk. Fastest option for a full library.
+- **L** — paginated A-Z list, 20 at a time. Type numbers or ranges (`1,3,5-7`) to add games. Commands: `N` next page, `P` previous, `B` back, `D` done.
+- **S** — search by keyword. Type numbers or ranges to add matches. Type `back` to return or `done` to finish.
+- **D** — proceed with the current queue. You can mix Browse and Search sessions to build a queue before pressing D.
+
+Games already in your queue are marked with `*` in the list.
+
+---
+
+## The Staging Folder
+
+AutoSync extracts games into a local staging folder you choose. Rules:
+
+- Must be on a **local drive** (network extraction is too slow)
+- Must **not** be inside the TeknoParrot folder
+- Must **not** overlap the ZIP source folder
+- The script warns if the drive has less than ~1.5x the total ZIP size free
+
+Interrupted extractions are handled automatically: a `.extracting` sentinel file is placed next to the game folder at the start and removed only on success. If the sentinel is found on the next run, the incomplete folder is detected and the game is re-extracted from scratch.
+
+---
+
+## Registration
+
+For each game folder, there are four possible outcomes:
+
+| Result | Meaning |
+|--------|---------|
+| **Registered** | A matching profile was found and the game now appears in TeknoParrot. |
+| **Registered (fuzzy)** | The exe name is shared by multiple games (e.g. `game.exe` for 80+ NESiCAxLive titles) but the folder name matched a specific profile with high confidence. Profile code and score shown — spot-check these. |
+| **Registered (dat)** | The folder name matched a dat file entry. The dat's authoritative profile code and executable path are used. Covers shared-exe games, exe-less-matched folders (pcsx2x6, ELF-based), and slightly misnamed folders. |
+| **Already set** | A profile for this game already exists and is left exactly as-is. |
+| **Register manually** | Shared exe, folder name below confidence threshold. The ACTION REQUIRED section shows the exe to browse to, a best-guess profile, and the full candidate list. |
+
+---
+
+## How Fuzzy Matching Works
+
+Many platforms share a single executable across all their titles — on NESiCAxLive every game uses `game.exe`. The script compares the **folder name** of each game to every candidate profile code using a Sørensen–Dice bigram similarity score.
+
+**Example:**
+
+```
+Folder:  "Akai Katana Shin (2012)[Taito NESiCAxLive][TP]"
+Profile: "AkaiKatanaShinNesica"
+
+After normalisation:
+  Folder:  "akaikatanashin"
+  Profile: "akaikatanashinnesica"
+
+Dice score: ~0.85  -->  auto-registered
+```
+
+**Thresholds:**
+
+| Score | Action |
+|-------|--------|
+| >= 0.72 | Auto-registered. Shown in cyan with score — spot-check. |
+| >= 0.40 | Flagged in ACTION REQUIRED with best-guess profile shown. One click in TeknoParrotUI to confirm. |
+| < 0.40 | Flagged in ACTION REQUIRED with full candidate list only. |
+
+**What is stripped during normalisation:** square-bracket metadata, bare 4-digit years, ISO dates, decimal versions, region codes (JPN/USA/EUR/etc.), version strings with prefix (ver/rev/v). Meaningful names like `(Special Edition)` are kept intentionally.
+
+**Wrong match?** Delete the game's `.xml` from `UserProfiles` and add a `forceArchetype` entry in `overrides.json` to pin it on the next run.
+
+---
+
+## Dat File Integration
+
+During initial setup the script offers to configure the Eggman/RomVault dat:
+
+```
+D) Download from GitHub now  (~145 MB)
+Z) I have the ZIP already -- enter path
+F) I have separate dat files -- enter paths
+N) Skip
+```
+
+Both the collection dat and supplementary dat are read directly from inside the ZIP — no extraction needed. The supplementary dat takes priority for any game that appears in both (alternate versions that replace the collection version).
+
+The dat resolves three registration scenarios that would otherwise require manual intervention:
+1. **Shared-executable games** (NESiCAxLive, etc.) — dat disambiguates instantly using the folder name
+2. **Games with no profile match** (pcsx2x6, ELF-based Lindbergh) — a second pass looks them up by normalised folder name
+3. **Slightly misnamed folders** — fuzzy scan of all dat entries
+
+The script also fetches the full list of `GameProfile` filenames from the `teknogods/TeknoParrotUI` GitHub repo at launch to resolve dat codes that don't exactly match a local template filename (e.g. `BladeArcusFromShining` → `BladeArcus.xml`). Falls back to scanning your local `GameProfiles` folder if offline.
+
+Games registered via the dat are shown as `Registered (dat/exact)` or `Registered (dat/fuzzy)`.
+
+---
+
+## Control Propagation
+
+Bind ONE game of each control type in TeknoParrotUI; the script copies those controls to every other game of the same type.
+
+**Good reference games to bind first:**
+
+| Type | Suggestions |
+|------|------------|
+| Fighting / buttons | Street Fighter III, BlazBlue, Tekken 7, Dead or Alive 5 |
+| Driving | Daytona Championship USA, Initial D, OutRun 2 SP, F-Zero AX |
+| Lightgun | House of the Dead 4, Aliens Extermination, Point Blank |
+| Trackball | Golden Tee Live, Silver Strike Bowling, Target Toss Pro |
+
+**How to use it:**
+1. In TeknoParrotUI, fully bind one game of each type — buttons, axes, Test, Service, Coin, Start
+2. Re-run this script. Propagation runs automatically after registration
+3. Launch ONE updated game and test it before trusting the rest
+
+**How matching works:** each control is matched by function so a steering axis is never copied onto a gun axis. Mixed device setups (e.g. Xbox stick + arcade buttons) copy across intact.
+
+**What stays manual:** game-specific controls that don't exist in the reference game, and any type for which no reference has been bound yet. Both are reported in ACTION REQUIRED.
+
+If anything goes wrong, restore from the backup made at the start of the run.
+
+---
+
+## Device Survey
+
+On first run (or on request), the script asks which controls you have — Xbox pad, arcade stick, trackball, spinner, wheel, lightgun, keyboard — and prints a tailored plan of which game to bind with which device. Reads nothing and changes nothing.
+
+---
+
+## Crosshair Setup
+
+Mode 4 deploys custom P1/P2 crosshair cursor images to all registered lightgun games. Can also be run standalone at any time from the main menu.
+
+**How TeknoParrot uses crosshairs:**
+- **Standard games** — `P1.png` + `P2.png` in the game's executable folder
+- **ElfLdr2 games** — shared pair in the ElfLdr2 loader folder (auto-detected)
+- **Pcsx2x6 games** — shared pair in the pcsx2x6 emulator folder; `inis\PCSX2.ini` is also updated with `cursor_path` under `[USB Port 1 guncon2]` and `[USB Port 2 guncon2]`
+
+**How to use it:**
+1. An HTML preview grid opens in your browser showing all 321 included designs
+2. Enter the index number for your P1 and P2 crosshairs (can be the same)
+3. The script copies the images to every registered lightgun game
+4. Optionally set cursor-hide for all gun games (backs up profiles first)
+
+**Adding your own crosshairs:** drop any PNG into the `Crosshairs\` folder next to the script. No naming convention required, though numbering helps. The script validates against the PNG magic-byte signature before including any file.
+
+321 crosshair designs (000.png–320.png) are included. Source: [emuline.org](https://www.emuline.org/topic/3080-custom-crosshairs-emulators-loaders/)
+
+---
+
+## ReShade Visual Enhancements
+
+ReShade adds post-processing effects to games without modifying any game files. Remove it by deleting one DLL per game folder — the game is completely unchanged.
+
+**Popular effects for arcade games:**
+
+| Effect | What it does |
+|--------|-------------|
+| LumaSharpen / CAS | Removes the blurry look of upscaled games |
+| CRT_Royale / CRT_Lottes | Adds classic CRT scanlines and curvature |
+| Levels / Vibrance | Restores vivid colours on modern monitors |
+| Border | Adds decorative arcade cabinet artwork in black bar areas |
+
+**Setup:**
+
+The script looks for DLLs in a `ReShade\` folder next to the script:
+- `ReShade64.dll` — for 64-bit games (required)
+- `ReShade32.dll` — for 32-bit games (optional)
+
+**If you downloaded the ZIP release:** DLLs are already included. Skip to running mode 5.
+
+**If you cloned from GitHub (DLLs not in repo):**
+1. Download the free installer from [reshade.me](https://reshade.me)
+2. Run it — point it at any 64-bit TeknoParrot game exe. It creates a DLL in that folder.
+3. Copy that DLL to `ReShade\ReShade64.dll` next to the script
+4. (Optional) Repeat with a 32-bit exe and save as `ReShade32.dll`
+5. Run mode 5 or answer Y when prompted after a normal run
+
+**In-game:** press **Home** to open the ReShade overlay. Toggle effects with tick-boxes, adjust with sliders. Settings save automatically to `ReShade.ini` in the game folder.
+
+**Updating:** the script checks reshade.me for newer versions each run. To update: download the new installer, extract the DLL, replace `ReShade64.dll`, re-run mode 5.
+
+**Removing:** delete the DLL (`dxgi.dll`, `d3d9.dll`, `d3d12.dll`, or `opengl32.dll`) from the game folder. Optionally delete `ReShade.ini` as well.
+
+---
+
+## dgVoodoo2 Legacy Compatibility
+
+Some older arcade games use DirectX 8, DirectDraw, or the 3dfx Glide API. On modern PCs these cause crashes, black screens, or missing geometry. dgVoodoo2 intercepts those old calls and re-issues them as DirectX 11/12 commands.
+
+**Only use this if a game crashes or shows a black screen on first launch.** Games that run correctly do not need it.
+
+**What it fixes:**
+
+| Import | DLLs deployed |
+|--------|--------------|
+| `d3d8.dll` | `D3D8.dll` + `D3DImm.dll` |
+| `ddraw.dll` | `DDraw.dll` + `D3DImm.dll` |
+| `glide2x.dll` | `Glide2x.dll` |
+| `glide3x.dll` | `Glide3x.dll` |
+
+**Setup:**
+1. Download dgVoodoo2 from [dege.freeweb.hu](https://dege.freeweb.hu/dgVoodoo2/dgVoodoo2/)
+2. Create a `dgVoodoo2\` folder next to this script and copy in:
+   - From `MS\x86\`: `D3D8.dll`, `DDraw.dll`, `D3DImm.dll`
+   - From `3Dfx\x86\`: `Glide2x.dll`, `Glide3x.dll`
+   - From the ZIP root: `dgVoodoo.conf`
+3. Run mode 6 or answer Y when prompted after a normal run
+
+The wizard scans every registered game exe for legacy API imports and shows auto-detected games first. You can install to all at once or pick individually.
+
+**Removing:** delete the deployed DLLs from the game folder. Nothing else is changed.
+
+---
+
+## GPU Compatibility Fixes
+
+Many TeknoParrot games include optional per-vendor fix settings (AMD, NVIDIA, Intel). Mode 7 auto-detects your GPU via WMI and applies the correct fix to every registered game that has one. Scans `GameProfiles` at runtime — no update needed when new games are added. Safe to re-run any time you change your GPU.
+
+---
+
+## LaunchBox Export
+
+At the end of each run the script offers to export a LaunchBox-compatible XML file:
+
+```
+Export a LaunchBox import XML for all registered games? (Y/N)
+```
+
+Answering Y writes `TeknoParrot-LaunchBox-Import.xml` next to the script with every registered game's title, platform, TeknoParrotUI path, and `--profile=` argument.
+
+**How to add your games to LaunchBox:**
+
+1. If TeknoParrot is not yet in LaunchBox: go to **Tools → Manage → Emulators → Add**. Name it `TeknoParrot`, set the emulator path to `TeknoParrotUi.exe`, set command-line parameters to `--profile="{rom}"`, and save.
+2. Go to **Tools → Import → Emulated Games**
+3. Set emulator to TeknoParrot, import type to `Import ROM files`, folder to your games staging folder, file types to `*.exe`
+4. Click Next, review matches, click Import
+
+Re-run the wizard any time you add more games — LaunchBox skips games already in your library.
+
+---
+
+## HyperSpin 2 Export
+
+At the end of each run the script offers to add your registered games to HyperSpin 2:
+
+```
+Export registered games to HyperSpin 2? (Y/N)
+```
+
+Answering Y locates the TeknoParrot game list in your HyperSpin 2 data folder (default: `C:\ProgramData\HyperSpin\data`) and merges in every registered game not already present. Your path is saved for future runs.
+
+**Prerequisites:** TeknoParrot must be set up as an emulator in HyperSpin 2 with a title containing "TeknoParrot" (variations like "Tekno Parrot" are fine). No games need to be added first — the script creates the game list file if it doesn't exist.
+
+Games are added with title only. Use HyperSpin 2's Scrape feature for box art and metadata. HyperSpin 2 must not be running when you answer Y.
+
+---
+
+## RetroBat / Batocera
+
+RetroBat and Batocera require TeknoParrot game folders to end with a suffix (`.teknoparrot`, `.parrot`, or `.game`).
+
+On first run the script asks:
+```
+Is this a RetroBat/Batocera installation? (Y/N)
+```
+
+Answer Y and game folders are extracted as `GameName.teknoparrot` instead of `GameName`. Registration and fuzzy matching work identically — the suffix is stripped before any profile comparison. The answer is saved and never asked again.
+
+**Switching an existing library to RetroBat naming:**
+1. Press N at "Use these settings?" so the RetroBat prompt appears
+2. Answer Y
+3. Delete `TeknoParrot-Manager.syncstate.json` from your staging folder to force re-extraction
+4. Re-run — games are re-extracted with `.teknoparrot` folder names
+
+Old folders are never deleted automatically. Remove them manually once the new ones are confirmed working.
+
+---
+
+## Thumbnail Download
+
+After registration the script offers to download game icons:
+
+```
+Download thumbnails for registered games missing an icon? (Y/N)
+```
+
+Answering Y downloads `ProfileCode.png` for every registered game that doesn't already have one in `<TeknoParrotRoot>\Icons\` — the folder TeknoParrotUI uses for thumbnails. Source: [TeknoParrotUIThumbnails](https://github.com/teknogods/TeknoParrotUIThumbnails). Not all games have a thumbnail there; missing ones are skipped without error.
+
+**Custom thumbnails:** create a `CustomThumbnails\` folder next to the script and drop your PNGs there named `ProfileCode.png` (e.g. `Daytona3.png`). The script copies them to TeknoParrot's Icons folder on the thumbnail step. Files already in Icons are never overwritten.
+
+**Finding a game's profile code:** after any run, open `TeknoParrot-Manager-controls.txt` — every registered game is listed with its exact profile code.
+
+---
+
+## Controls Status File
+
+After every run the script writes `TeknoParrot-Manager-controls.txt` next to itself. Example:
+
+```
+[button]
+  BlazBlueContinuumShift   52/52 bound   REFERENCE
+  AkaiKatanaShinNesica     47/52 bound   propagated  <- BlazBlueContinuumShift
+    manual: SpeedChange1, SpeedChange2
+
+[driving]
+  Daytona3                 31/31 bound   REFERENCE
+  InitialD8                29/31 bound   propagated  <- Daytona3
+    manual: GearUp, GearDown
+
+[lightgun]
+  SomeNewGame               0/52 bound   no controls
+```
+
+Each entry shows: control family, how many buttons are bound, status (REFERENCE / propagated / already bound / no controls), which reference game controls came from, and any buttons still set manually.
+
+The file is overwritten on every run. It's most useful when a game misbehaves days later — you can immediately see whether controls were propagated and from which reference, without re-running the script.
+
+---
+
+## Per-Game Overrides
+
+Edit `TeknoParrot-Manager.overrides.json` (created empty on first run) to fine-tune individual games:
+
+```json
+{
+  "noSync":         ["ZipBaseName1", "ZipBaseName2"],
+  "onlySync":       ["ZipBaseName1", "ZipBaseName2"],
+  "noPropagate":    ["ProfileCode1", "ProfileCode2"],
+  "forceArchetype": { "ProfileCode": "ReferenceProfileCode" },
+  "familyOverride": { "ProfileCode": "trackball" },
+  "datFile":        "C:\\full\\path\\to\\collection.dat"
+}
+```
+
+| Key | Effect |
+|-----|--------|
+| `noSync` | ZIP base names to always skip during extraction |
+| `onlySync` | Whitelist — if non-empty, ONLY these ZIPs are extracted |
+| `noPropagate` | Profile codes to leave untouched during control propagation |
+| `forceArchetype` | Pin a game to copy controls from a specific reference game |
+| `familyOverride` | Override the auto-detected control family (`button`, `driving`, `lightgun`, `trackball`, `analog`, `spinner`) |
+| `datFile` | Full path to a dat file — overrides the path from setup |
+
+All keys are optional. Leave any key empty or omit it entirely.
+
+---
+
+## Action Required Summary
+
+At the end of every run the script prints — and saves to `TeknoParrot-Manager-ActionItems.txt` — everything that needs your attention:
+
+| Section | Meaning |
+|---------|---------|
+| **Not in TeknoParrot** | Folders with executables that matched no profile. Informational — likely unsupported games or utilities. |
+| **Register these games** | Shared-exe games below the auto-register threshold. Shows the exe, a best-guess profile, and the full candidate list. |
+| **Fix these game paths** | Profiles with a broken path that couldn't be auto-repaired (shared exe, multiple candidates). Open TeknoParrotUI and point each to the correct folder. |
+| **Extract first** | Profiles with a broken path because the game isn't extracted yet. Extract then re-run Repair. |
+| **Set up controls** | Control types with no reference game bound yet. Shows which games are waiting and suggests titles to bind. |
+
+---
+
+## Unattended / Scheduled Mode
+
+Run with `-Unattended` to skip all prompts:
+
+```powershell
+.\TeknoParrot-Manager.ps1 -Unattended
+```
+
+Automatically: loads saved settings, extracts all new games, registers, repairs, propagates controls, downloads thumbnails, and logs everything. Requires saved settings from a previous interactive run.
+
+Does NOT run: Restore mode (requires interactive backup selection), LaunchBox/HyperSpin 2 export.
+
+**Scheduling with Windows Task Scheduler:**
+
+1. Run interactively once to save your settings
+2. Open Task Scheduler (`taskschd.msc`)
+3. Create Task → General tab: name it, set "Run whether user is logged on or not", "Run with highest privileges"
+4. Triggers: set your preferred schedule
+5. Action: Start a program
+   - Program: `powershell.exe`
+   - Arguments: `-ExecutionPolicy Bypass -NonInteractive -File "C:\path\to\Scripts\TeknoParrot-Manager.ps1" -Unattended`
+6. (Optional) Conditions: "Start only if network connection available" → select your NAS
+
+After each run, check `TeknoParrot-Manager.log` and `TeknoParrot-Manager-controls.txt`.
+
+---
+
+## Game Repair
+
+After registration the script offers to repair broken game paths — paths that are empty or point to a file that no longer exists (e.g. after moving games).
+
+| Result | Meaning |
+|--------|---------|
+| **Fixed** | Path re-pointed to the correct executable |
+| **Not yet extracted** | Game not in the staging folder — extract it and re-run Repair |
+| **Register manually** | Shared executable — can't safely auto-assign. Use TeknoParrotUI. |
+
+---
+
+## Safety, Backup and Log
+
+**Backup:** before any change the script copies your entire `UserProfiles` folder to:
+```
+<TeknoParrot>\UserProfiles\FullBackup\<date_time>\
+```
+If backup folder creation fails, the script exits rather than proceeding without a restore point.
+
+**Restore:** choose mode 3 from the menu. The script lists all timestamped backups with file counts, you pick one by number, type `YES` to confirm.
+
+**Manual restore:** close TeknoParrot, copy `.xml` files from a backup folder back into `UserProfiles`, overwriting the current ones.
+
+**Log:** every run appends to `TeknoParrot-Manager.log`. If the log file is inaccessible, a one-time warning shows the path and error. Every entry that can't be written is echoed to the console prefixed with `[UNLOGGED]` so nothing is lost.
+
+---
+
+## Resetting
+
+| What to reset | How |
+|---------------|-----|
+| Saved settings | Delete `TeknoParrot-Manager.config.json` |
+| Re-extract all ZIPs | Delete `TeknoParrot-Manager.syncstate.json` from your staging folder |
+| Re-register one game | Delete that game's `.xml` from `UserProfiles`, then re-run |
+
+---
+
+## Troubleshooting
+
+**A game appears in TeknoParrotUI but won't launch.**
+Its GamePath is wrong or the game wasn't fully extracted. In TeknoParrotUI, find the game and point it to the correct `.exe`. Re-run the script and choose Repair.
+
+**A game does not appear in TeknoParrotUI.**
+Check the ACTION REQUIRED section — it may need manual registration (shared exe) or hasn't been extracted yet. If neither applies, check the log for a registration error for that game.
+
+**A game keeps re-extracting after an interrupted extraction.**
+The `.extracting` sentinel wasn't cleaned up. Delete `<GameName>.extracting` from your staging folder and re-run.
+
+**Controls are not being copied to a game.**
+Either no reference game for that control type has been bound yet (see "Set up controls" in ACTION REQUIRED), the game is in `noPropagate` in `overrides.json`, or it already has enough bound controls to be treated as a reference itself.
+
+**A fuzzy-matched game was registered against the wrong profile.**
+Delete that game's `.xml` from `UserProfiles` and add a `forceArchetype` entry in `overrides.json`: `{ "WrongCode": "CorrectCode" }`. Re-run.
+
+**A game's controls are wrong after propagation.**
+Use mode 3 to restore the backup made at the start of that run, or delete the affected game's `.xml` and re-run propagation after correcting the reference game's bindings in TeknoParrotUI.
+
+**A game appears twice in TeknoParrotUI.**
+Delete one of the duplicate `.xml` files from `UserProfiles`. Keep the one with the correct GamePath and any bindings already set.
+
+**`[UNLOGGED]` entries on console.**
+`TeknoParrot-Manager.log` can't be written. Check that the folder is not read-only and you have write permission.
+
+**HyperSpin 2 export fails with "TeknoParrot not found in emulators.json".**
+TeknoParrot must be set up as an emulator in HyperSpin 2 first. The title must contain "TeknoParrot" (spacing and capitalisation variations are fine).
+
+---
+
+## What It Does Not Do
+
+- It does not invent control bindings. A control is set only when a reference game you have already bound has it. Everything else is left for you and reported in ACTION REQUIRED.
+- It does not provide game files. You supply your own legally obtained games; the script only registers and configures them.
+
+---
+
+## Files Reference
+
+| File | Location | Purpose |
+|------|----------|---------|
+| `TeknoParrot-Manager.config.json` | Scripts folder | Saved folders and settings |
+| `TeknoParrot-Manager.overrides.json` | Scripts folder | Per-game tweaks |
+| `TeknoParrot-Manager.log` | Scripts folder | Log of every run |
+| `TeknoParrot-Manager.syncstate.json` | Staging folder | Tracks extracted ZIPs |
+| `TeknoParrot-Manager-controls.txt` | Scripts folder | Controls state after every run |
+| `TeknoParrot-Manager-ActionItems.txt` | Scripts folder | Action items from last run |
+| `TeknoParrot-LaunchBox-Import.xml` | Scripts folder | LaunchBox reference XML |
+| `ReShade\ReShade64.dll` | Scripts folder | Bundled ReShade DLL (64-bit) |
+| `ReShade\ReShade32.dll` | Scripts folder | Bundled ReShade DLL (32-bit, optional) |
+| `dgVoodoo2\*.dll` + `dgVoodoo.conf` | Scripts folder | dgVoodoo2 DLLs (you provide) |
+| `Crosshairs\*.png` | Scripts folder | Crosshair images (321 included) |
+| `CustomThumbnails\*.png` | Scripts folder | Your own game icons (optional, you create) |
+
+---
+
+> v0.60 BETA — test one game after each run. Profiles are backed up automatically at the start of every run.
