@@ -7,6 +7,19 @@
 
 
 -------------------------------------------------------------------------------
+  v0.62 BETA  (2026-06-14)
+-------------------------------------------------------------------------------
+
+  Supplementary game library support in AutoSync:
+
+  - AutoSync now supports a second optional ZIP source folder for the
+    TeknoParrot Supplementary game library. When configured, AutoSync runs
+    a separate game picker and extraction pass for the supplementary source
+    after the main collection, extracting both into the same staging folder.
+    The supplementary ZIP source is saved to config alongside the main
+    collection path so subsequent runs use it automatically.
+
+-------------------------------------------------------------------------------
   v0.61 BETA  (2026-06-14)
 -------------------------------------------------------------------------------
 

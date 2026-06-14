@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.61 BETA
+# TeknoParrot Manager  |  v0.62 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -60,7 +60,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.61 BETA" -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.62 BETA" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -2077,7 +2077,7 @@ function Get-TeknoParrotProfileSet {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         $apiUri = 'https://api.github.com/repos/teknogods/TeknoParrotUI/git/trees/master?recursive=1'
         $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
-                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.61' }
+                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.62' }
         $tree   = ($resp.Content | ConvertFrom-Json).tree
         $prefix = 'TeknoParrotUi.Common/GameProfiles/'
         foreach ($node in $tree) {
@@ -2140,7 +2140,7 @@ function Get-EggmanDatRelease {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         $apiUri = 'https://api.github.com/repos/Eggmansworld/Datfiles/releases/tags/teknoparrot'
         $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
-                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.61' }
+                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.62' }
         $rel    = $resp.Content | ConvertFrom-Json
         $asset  = @($rel.assets) | Where-Object { $_.name -like 'TeknoParrot*Collection*RomVault*.zip' } |
                       Select-Object -First 1
@@ -3730,7 +3730,7 @@ function Write-ControlsStatus {
     }
 }
 
-Write-Log "Script started (v0.61$(if ($Unattended) { ' [Unattended]' }))."
+Write-Log "Script started (v0.62$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
 # SECTION 1 -- Load or prompt for configuration
@@ -3739,7 +3739,8 @@ Write-Log "Script started (v0.61$(if ($Unattended) { ' [Unattended]' }))."
 $configPath         = Join-Path $PSScriptRoot "TeknoParrot-Manager.config.json"
 $tpRoot             = $null
 $mode               = $null   # "AutoSync", "RegisterOnly", "Restore", "CrosshairSetup", or "ReShadeSetup"
-$zipSource          = $null   # AutoSync only
+$zipSource               = $null   # AutoSync only (main collection)
+$zipSourceSupplementary  = ''      # AutoSync supplementary source (optional, separate library)
 $gamesInstallFolder = $null   # always (the extracted-games root to register)
 $retroBat           = $false  # true = extracted folders named GameName.teknoparrot (RetroBat/Batocera)
 $hsDataPath         = $null   # HyperSpin 2 data folder (e.g. C:\ProgramData\HyperSpin\data)
@@ -3764,7 +3765,8 @@ if (Test-Path -LiteralPath $configPath) {
         $cfg = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
         Write-Host "Saved configuration found:" -ForegroundColor Cyan
         Write-Host "  TeknoParrot root     : $($cfg.TeknoParrotRoot)"
-        if ($cfg.ZipSourceFolder)    { Write-Host "  ZIP source folder    : $($cfg.ZipSourceFolder)" }
+        if ($cfg.ZipSourceFolder)              { Write-Host "  ZIP source folder    : $($cfg.ZipSourceFolder)" }
+        if ($cfg.ZipSourceSupplementaryFolder) { Write-Host "  ZIP supplementary    : $($cfg.ZipSourceSupplementaryFolder)" }
         Write-Host "  Games install folder : $($cfg.GamesInstallFolder)"
         if ($cfg.RetroBat)         { Write-Host "  RetroBat mode        : Yes" }
         if ($cfg.HyperSpinDataPath){ Write-Host "  HyperSpin data path  : $($cfg.HyperSpinDataPath)" }
@@ -3786,6 +3788,7 @@ if (Test-Path -LiteralPath $configPath) {
         if ($use.ToUpper() -eq "Y") {
             $tpRoot             = $cfg.TeknoParrotRoot
             $zipSource          = $cfg.ZipSourceFolder
+            if ($cfg.ZipSourceSupplementaryFolder) { $zipSourceSupplementary = $cfg.ZipSourceSupplementaryFolder }
             $gamesInstallFolder = $cfg.GamesInstallFolder
             if ($null -ne $cfg.RetroBat) { $retroBat = [bool]$cfg.RetroBat }
             if ($cfg.HyperSpinDataPath)  { $hsDataPath  = $cfg.HyperSpinDataPath  }
@@ -3993,9 +3996,10 @@ Write-Log "Validated. tpRoot=$tpRoot install=$gamesInstallFolder"
 # =============================================================================
 
 $cfgOut = [ordered]@{
-    TeknoParrotRoot    = $tpRoot
-    ZipSourceFolder    = $zipSource
-    GamesInstallFolder = $gamesInstallFolder
+    TeknoParrotRoot              = $tpRoot
+    ZipSourceFolder              = $zipSource
+    ZipSourceSupplementaryFolder = $zipSourceSupplementary
+    GamesInstallFolder           = $gamesInstallFolder
     RetroBat           = $retroBat
     HyperSpinDataPath  = $hsDataPath
     ReShadeSourceDll   = $rsSourceDll
@@ -4016,7 +4020,8 @@ try {
 Write-Host ""
 Write-Host "Configuration:" -ForegroundColor Green
 Write-Host "  TeknoParrot root     : $tpRoot"
-if ($zipSource)      { Write-Host "  ZIP source folder    : $zipSource" }
+if ($zipSource)               { Write-Host "  ZIP source folder    : $zipSource" }
+if ($zipSourceSupplementary)  { Write-Host "  ZIP supplementary    : $zipSourceSupplementary" }
 Write-Host "  Games install folder : $gamesInstallFolder"
 if ($retroBat)             { Write-Host "  RetroBat mode        : Yes (*.teknoparrot / *.parrot / *.game recognised)" -ForegroundColor Cyan }
 if ($eggmanDatZip)         { Write-Host "  Eggman dat ZIP       : $eggmanDatZip" }
@@ -4326,14 +4331,15 @@ while ($true) {
                 $rsSourceDll = $inp
             }
             $cfgRS = [ordered]@{
-                TeknoParrotRoot    = $tpRoot
-                ZipSourceFolder    = $zipSource
-                GamesInstallFolder = $gamesInstallFolder
-                RetroBat           = $retroBat
-                HyperSpinDataPath  = $hsDataPath
-                ReShadeSourceDll   = $rsSourceDll
-                ReShadeSourceDll32 = $rsSourceDll32
-                DgVoodoo2SourceDir = $dgSourceDir
+                TeknoParrotRoot              = $tpRoot
+                ZipSourceFolder              = $zipSource
+                ZipSourceSupplementaryFolder = $zipSourceSupplementary
+                GamesInstallFolder           = $gamesInstallFolder
+                RetroBat                     = $retroBat
+                HyperSpinDataPath            = $hsDataPath
+                ReShadeSourceDll             = $rsSourceDll
+                ReShadeSourceDll32           = $rsSourceDll32
+                DgVoodoo2SourceDir           = $dgSourceDir
             }
             try {
                 [System.IO.File]::WriteAllText($configPath, ($cfgRS | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
@@ -4393,14 +4399,15 @@ while ($true) {
                 $dgSourceDir = $inp
             }
             $cfgDg = [ordered]@{
-                TeknoParrotRoot    = $tpRoot
-                ZipSourceFolder    = $zipSource
-                GamesInstallFolder = $gamesInstallFolder
-                RetroBat           = $retroBat
-                HyperSpinDataPath  = $hsDataPath
-                ReShadeSourceDll   = $rsSourceDll
-                ReShadeSourceDll32 = $rsSourceDll32
-                DgVoodoo2SourceDir = $dgSourceDir
+                TeknoParrotRoot              = $tpRoot
+                ZipSourceFolder              = $zipSource
+                ZipSourceSupplementaryFolder = $zipSourceSupplementary
+                GamesInstallFolder           = $gamesInstallFolder
+                RetroBat                     = $retroBat
+                HyperSpinDataPath            = $hsDataPath
+                ReShadeSourceDll             = $rsSourceDll
+                ReShadeSourceDll32           = $rsSourceDll32
+                DgVoodoo2SourceDir           = $dgSourceDir
             }
             try {
                 [System.IO.File]::WriteAllText($configPath, ($cfgDg | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
@@ -4438,6 +4445,19 @@ while ($true) {
 
     if ($mode -eq "AutoSync" -and -not $zipSource) {
         $zipSource = (Read-Host "Enter ZIP source folder (NAS or local, containing .zip files)").Trim()
+    }
+    if ($mode -eq "AutoSync" -and -not $zipSourceSupplementary -and -not $configAccepted) {
+        Write-Host ""
+        Write-Host "  Supplementary games folder (optional)" -ForegroundColor Cyan
+        Write-Host "  Path to the TeknoParrot Supplementary ZIP folder, if you have it." -ForegroundColor DarkCyan
+        $rawSupp = (Read-Host "  Path (or press Enter to skip)").Trim()
+        if ($rawSupp -and (Test-Path -LiteralPath $rawSupp)) {
+            $zipSourceSupplementary = $rawSupp
+            Write-Log "Config: supplementary ZIP source set to $rawSupp"
+        } elseif ($rawSupp) {
+            Write-Host "  Folder not found -- supplementary source skipped." -ForegroundColor Yellow
+            Write-Log "Config: supplementary ZIP source not found at $rawSupp -- skipped."
+        }
     }
 
     if ($mode -eq "AutoSync") {
@@ -4597,15 +4617,45 @@ if ($mode -eq "AutoSync") {
 
     $syncStatePath = Join-Path $gamesInstallFolder "TeknoParrot-Manager.syncstate.json"
     $sync = Invoke-AutoSync -zipSource $zipSource -installFolder $gamesInstallFolder -syncStatePath $syncStatePath -noSync $noSyncList -onlySync $onlySyncList -retroBat $retroBat
+
+    # Supplementary source: separate picker and separate sync pass, same staging folder.
+    $syncSupp = $null
+    if ($zipSourceSupplementary -and (Test-Path -LiteralPath $zipSourceSupplementary)) {
+        Write-Host ""
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        Write-Host " AutoSync: Supplementary Games" -ForegroundColor Cyan
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        Write-Host " Supplementary source: $zipSourceSupplementary" -ForegroundColor DarkCyan
+        Write-Host ""
+        $onlySyncListSupp = @()
+        if ($Unattended) {
+            Write-Host "  [Unattended] Game selection: all unextracted supplementary games." -ForegroundColor DarkCyan
+            Write-Log "Unattended: supplementary game selection = all."
+        } else {
+            $onlySyncListSupp = Select-GamesInteractive -zipSource $zipSourceSupplementary -installFolder $gamesInstallFolder
+            if ($null -eq $onlySyncListSupp -or $onlySyncListSupp.Count -eq 0) {
+                $onlySyncListSupp = @()
+            }
+        }
+        $syncSupp = Invoke-AutoSync -zipSource $zipSourceSupplementary -installFolder $gamesInstallFolder -syncStatePath $syncStatePath -noSync $noSyncList -onlySync $onlySyncListSupp -retroBat $retroBat
+    } elseif ($zipSourceSupplementary) {
+        Write-Host "  WARNING: Supplementary ZIP folder not found: $zipSourceSupplementary" -ForegroundColor Yellow
+        Write-Log "AutoSync: supplementary ZIP source not found at $zipSourceSupplementary -- skipped."
+    }
+
     Write-Host ""
     Write-Host "Extraction summary:" -ForegroundColor Green
-    Write-Host "  Extracted  : $($sync.Synced)"  -ForegroundColor Green
-    Write-Host "  Up to date : $($sync.UpToDate)" -ForegroundColor DarkGray
-    if ($sync.Skipped -gt 0) {
-        Write-Host "  Skipped    : $($sync.Skipped)  (per-game override)" -ForegroundColor DarkGray
-    }
-    if ($sync.Failed -gt 0) {
-        Write-Host "  Failed     : $($sync.Failed)  (see TeknoParrot-Manager.log)" -ForegroundColor Red
+    if ($syncSupp) { Write-Host "  Collection:" -ForegroundColor Cyan }
+    Write-Host "  Extracted  : $($sync.Synced)"   -ForegroundColor Green
+    Write-Host "  Up to date : $($sync.UpToDate)"  -ForegroundColor DarkGray
+    if ($sync.Skipped -gt 0) { Write-Host "  Skipped    : $($sync.Skipped)  (per-game override)" -ForegroundColor DarkGray }
+    if ($sync.Failed  -gt 0) { Write-Host "  Failed     : $($sync.Failed)  (see TeknoParrot-Manager.log)" -ForegroundColor Red }
+    if ($syncSupp) {
+        Write-Host "  Supplementary:" -ForegroundColor Cyan
+        Write-Host "  Extracted  : $($syncSupp.Synced)"   -ForegroundColor Green
+        Write-Host "  Up to date : $($syncSupp.UpToDate)"  -ForegroundColor DarkGray
+        if ($syncSupp.Skipped -gt 0) { Write-Host "  Skipped    : $($syncSupp.Skipped)  (per-game override)" -ForegroundColor DarkGray }
+        if ($syncSupp.Failed  -gt 0) { Write-Host "  Failed     : $($syncSupp.Failed)  (see TeknoParrot-Manager.log)" -ForegroundColor Red }
     }
 }
 
@@ -5083,14 +5133,15 @@ if ($doReShade -eq "Y") {
         }
         if ($doReShade -eq "Y") {
             $cfgRS2 = [ordered]@{
-                TeknoParrotRoot    = $tpRoot
-                ZipSourceFolder    = $zipSource
-                GamesInstallFolder = $gamesInstallFolder
-                RetroBat           = $retroBat
-                HyperSpinDataPath  = $hsDataPath
-                ReShadeSourceDll   = $rsSourceDll
-                ReShadeSourceDll32 = $rsSourceDll32
-                DgVoodoo2SourceDir = $dgSourceDir
+                TeknoParrotRoot              = $tpRoot
+                ZipSourceFolder              = $zipSource
+                ZipSourceSupplementaryFolder = $zipSourceSupplementary
+                GamesInstallFolder           = $gamesInstallFolder
+                RetroBat                     = $retroBat
+                HyperSpinDataPath            = $hsDataPath
+                ReShadeSourceDll             = $rsSourceDll
+                ReShadeSourceDll32           = $rsSourceDll32
+                DgVoodoo2SourceDir           = $dgSourceDir
             }
             try {
                 [System.IO.File]::WriteAllText($configPath, ($cfgRS2 | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
@@ -5182,14 +5233,15 @@ if ($doDgVoodoo -eq "Y") {
         }
         if ($doDgVoodoo -eq "Y") {
             $cfgDg2 = [ordered]@{
-                TeknoParrotRoot    = $tpRoot
-                ZipSourceFolder    = $zipSource
-                GamesInstallFolder = $gamesInstallFolder
-                RetroBat           = $retroBat
-                HyperSpinDataPath  = $hsDataPath
-                ReShadeSourceDll   = $rsSourceDll
-                ReShadeSourceDll32 = $rsSourceDll32
-                DgVoodoo2SourceDir = $dgSourceDir
+                TeknoParrotRoot              = $tpRoot
+                ZipSourceFolder              = $zipSource
+                ZipSourceSupplementaryFolder = $zipSourceSupplementary
+                GamesInstallFolder           = $gamesInstallFolder
+                RetroBat                     = $retroBat
+                HyperSpinDataPath            = $hsDataPath
+                ReShadeSourceDll             = $rsSourceDll
+                ReShadeSourceDll32           = $rsSourceDll32
+                DgVoodoo2SourceDir           = $dgSourceDir
             }
             try {
                 [System.IO.File]::WriteAllText($configPath, ($cfgDg2 | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
