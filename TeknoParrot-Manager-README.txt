@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.57 BETA
+  TeknoParrot Manager  |  v0.58 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -79,9 +79,11 @@
     (3) slightly misnamed folders -- a fuzzy scan of all dat entries finds the
     best match above the auto-register threshold. Games registered via the dat
     are shown as "Registered (dat/exact)" or "Registered (dat/fuzzy)". The
-    supplementary dat can be indexed to track alternate versions of your games
-    (different regions, revisions, bonus content). The dat path can also be set
-    in overrides.json (datFile key); overrides.json takes precedence.
+    The supplementary dat can be indexed to show alternate versions of your
+    games (different regions, revisions, bonus content). After registration
+    completes, a "Game Info" block shows alternate versions and game notes (from
+    the notes text file in the ZIP) for each newly registered game. The dat path
+    can also be set in overrides.json (datFile key); that takes precedence.
 
   - Already-registered detection. Before flagging a shared-executable folder
     as needing manual registration, the script checks whether any candidate
@@ -740,9 +742,19 @@
   HOW CROSSHAIRS WORK IN TEKNOPARROT
 
     TeknoParrot supports custom cursor images placed as P1.png and P2.png in
-    the game's executable directory. For ElfLdr2-type games a single shared
-    pair is placed in the ElfLdr2 loader folder (searched dynamically at
-    runtime since its exact name varies across installs).
+    the game's executable directory.
+
+    ElfLdr2 games: a single shared pair is placed in the ElfLdr2 loader folder
+    (searched dynamically since its exact name varies across installs).
+
+    Pcsx2x6 games: P1.png and P2.png are placed in the pcsx2x6 emulator folder
+    (searched as pcsx2x6, PCSX2x6, pcsx2, PCSX2, or any pcsx2-prefixed
+    subfolder). If inis\PCSX2.ini exists, cursor_path is set automatically
+    under [USB Port 1 guncon2] and [USB Port 2 guncon2]. Existing keys are
+    replaced; missing keys are inserted; absent sections are appended.
+
+    Standard games: each game receives its own P1.png and P2.png in the folder
+    containing the game's executable.
 
   USING THE CROSSHAIR PICKER
 
@@ -1559,6 +1571,6 @@
 
 
 ===============================================================================
-  v0.57 BETA -- Test one game after each run.
+  v0.58 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================

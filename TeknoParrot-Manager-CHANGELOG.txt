@@ -7,6 +7,41 @@
 
 
 -------------------------------------------------------------------------------
+  v0.58 BETA  (2026-06-14)
+-------------------------------------------------------------------------------
+
+  Supplementary dat display, game notes, PCSX2x6 crosshairs, and .bat launcher:
+
+  - After registration completes, any newly registered game that has entries in
+    the supplementary index now shows a "Game Info" block listing the alternate
+    versions available (different regions, revisions, or bonus content). If the
+    Eggman ZIP contains a game-notes text file, notes for each newly registered
+    game are also displayed (first four non-empty lines). Both are shown between
+    the "Done" summary and the LaunchBox export prompt.
+
+  - Game notes are read directly from the Eggman ZIP if a *.txt file with
+    "note" in the name is present. Notes are indexed by ProfileCode using the
+    same section format as the main dat: sections separated by 60+ '=' chars,
+    game name with ProfileCode in parens on the first line of each section.
+
+  - Mode 4 (crosshair setup) now handles Pcsx2x6 lightgun games. When a
+    UserProfile with EmulatorType=Pcsx2x6 is detected, the script finds the
+    pcsx2x6 emulator folder in the TeknoParrot root (searches common names:
+    pcsx2x6, PCSX2x6, pcsx2, PCSX2; falls back to any pcsx2-prefixed subfolder)
+    and copies P1.png and P2.png there. If inis\PCSX2.ini is present it is also
+    updated: cursor_path is set under [USB Port 1 guncon2] and [USB Port 2
+    guncon2]. Existing cursor_path lines are replaced; missing keys are inserted
+    at the end of the relevant section; sections absent from the file are
+    appended. All Pcsx2x6 lightgun games share one emulator folder so the copy
+    runs once regardless of how many games are registered.
+
+  - TeknoParrot-Manager.bat: double-click launcher that runs the script with
+    -ExecutionPolicy Bypass so users who have not changed their PowerShell
+    execution policy can run the tool without manual steps. Passes all arguments
+    through (%*) so -Unattended still works from the command line. Shows an
+    error message and pauses only if the script exits with a non-zero code.
+
+-------------------------------------------------------------------------------
   v0.57 BETA  (2026-06-14)
 -------------------------------------------------------------------------------
 
