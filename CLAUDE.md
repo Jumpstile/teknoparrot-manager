@@ -4,7 +4,7 @@
 
 PowerShell 5.1 script for managing TeknoParrot arcade game libraries.
 
-Current version: v0.59 BETA
+Current version: v0.60 BETA
 
 
 
