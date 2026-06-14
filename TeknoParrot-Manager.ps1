@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.68 BETA
+# TeknoParrot Manager  |  v0.69 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -60,7 +60,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.68 BETA" -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.69 BETA" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -4057,7 +4057,7 @@ function Write-ControlsStatus {
     }
 }
 
-Write-Log "Script started (v0.68$(if ($Unattended) { ' [Unattended]' }))."
+Write-Log "Script started (v0.69$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
 # SECTION 1 -- Load or prompt for configuration
@@ -4067,7 +4067,7 @@ $configPath         = Join-Path $PSScriptRoot "TeknoParrot-Manager.config.json"
 $tpRoot             = $null
 $mode               = $null   # "AutoSync", "RegisterOnly", "Restore", "CrosshairSetup", or "ReShadeSetup"
 $zipSource               = $null   # AutoSync only (main collection)
-$zipSourceSupplementary  = $null   # AutoSync supplementary source (optional, separate library); $null=never asked, ''=user skipped
+$zipSourceSupplementary  = $null   # AutoSync supplementary source (optional, separate library); $null or ''=not configured
 $gamesInstallFolder = $null   # always (the extracted-games root to register)
 $retroBat           = $false  # true = extracted folders named GameName.teknoparrot (RetroBat/Batocera)
 $hsDataPath         = $null   # HyperSpin 2 data folder (e.g. C:\ProgramData\HyperSpin\data)
@@ -4779,7 +4779,7 @@ while ($true) {
         $zipSource = (Read-Host "  Path").Trim()
         $zipPathsJustCaptured = $true
     }
-    if ($mode -eq "AutoSync" -and $null -eq $zipSourceSupplementary -and -not $Unattended) {
+    if ($mode -eq "AutoSync" -and ($null -eq $zipSourceSupplementary -or $zipSourceSupplementary -eq '') -and -not $Unattended) {
         Write-Host ""
         Write-Host "  Supplementary games folder (optional)" -ForegroundColor Cyan
         Write-Host "  Point directly at the folder containing the Supplementary .zip files, not a parent folder." -ForegroundColor DarkCyan

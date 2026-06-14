@@ -7,6 +7,20 @@
 
 
 -------------------------------------------------------------------------------
+  v0.69 BETA  (2026-06-14)
+-------------------------------------------------------------------------------
+
+  Bug fix -- supplementary ZIP source prompt not shown on repeat AutoSync runs:
+
+  - Fixed the supplementary source prompt being silently skipped when the user
+    had previously pressed Enter to skip it. The v0.68 fix saved '' (empty) to
+    distinguish "user said no" from $null ("never asked"), but this left users
+    with no way to add a supplementary source on a later run without editing the
+    config JSON manually. The prompt now fires whenever the supplementary path
+    is not configured (null or empty), regardless of prior skips.
+
+
+-------------------------------------------------------------------------------
   v0.68 BETA  (2026-06-14)
 -------------------------------------------------------------------------------
 
