@@ -128,22 +128,20 @@
 
   HOW TO SET IT UP
 
-  Option A (easiest, if included in your package):
-    ReShade64.dll (and ReShade32.dll for 32-bit games) are included in
-    the  ReShade\  folder next to this script. The script picks the right
-    one for each game automatically. Just run the script and answer Y when
-    asked about ReShade, or choose mode 5 from the main menu.
+  If you downloaded TeknoParrot Manager as a ZIP release:
+    ReShade64.dll is already in the  ReShade\  folder -- no setup needed.
+    Just run the script and choose mode 5, or answer Y when prompted.
 
-  Option B (if the DLLs are not included):
+  If you cloned from GitHub (or the ReShade\ folder is empty):
+    The DLLs are not in the git repository. Get them yourself:
     1. Go to  https://reshade.me  and download the installer.
-    2. Run the installer. When it asks which game, point it at any
-       TeknoParrot game exe. Let it finish -- it creates a DLL in
-       that game folder (named d3d9.dll, dxgi.dll, or similar).
+    2. Run it -- when it asks which game, point it at any 64-bit
+       TeknoParrot game exe. It creates a DLL in that folder.
     3. Copy that DLL into the  ReShade\  folder next to this script
-       and rename it to  ReShade64.dll.  (If you have 32-bit games too,
-       repeat with a 32-bit game exe and rename to  ReShade32.dll.)
-    4. Run TeknoParrot Manager and choose mode 5, or answer Y at the
-       end of a normal run when it asks about ReShade.
+       and rename it to  ReShade64.dll.  (Repeat with a 32-bit game
+       exe and rename to  ReShade32.dll  if you have 32-bit games.)
+    4. Run TeknoParrot Manager and choose mode 5, or answer Y when
+       prompted at the end of a normal run.
 
   Once installed, press the  Home  key while in-game to open the
   ReShade overlay and switch effects on or off.
