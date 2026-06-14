@@ -625,4 +625,4 @@ TeknoParrot must be set up as an emulator in HyperSpin 2 first. The title must c
 
 ---
 
-> v0.63 BETA — test one game after each run. Profiles are backed up automatically at the start of every run.
+> v0.64 BETA — test one game after each run. Profiles are backed up automatically at the start of every run.

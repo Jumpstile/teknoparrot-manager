@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.63 BETA
+# TeknoParrot Manager  |  v0.64 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -60,7 +60,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.63 BETA" -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.64 BETA" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -70,10 +70,10 @@ Write-Host ""
 # support). Expand-ZipFileSafe uses \\?\ prefixes to bypass MAX_PATH.
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-# PS 5.1 on older Windows 10 builds defaults to TLS 1.0. Set TLS 1.2 globally
-# so every web request (ReShade version check, thumbnail download, etc.) works
-# without having to re-apply this per function.
-[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+# PS 5.1 on older Windows 10 builds defaults to TLS 1.0. Ensure TLS 1.2 is
+# included without removing protocols already enabled on this machine.
+[System.Net.ServicePointManager]::SecurityProtocol =
+    [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
 
 # =============================================================================
 # HELPER FUNCTIONS
@@ -342,16 +342,19 @@ $FuzzyAutoThreshold = 0.72
 
 # Scans $folder recursively for files that TeknoParrot profiles use as their
 # primary executable. This includes Windows EXE, Linux ELF, disc images (.iso,
-# .gcm, .gcz), binary containers (.bin, .zip, .e4), and extension-less Linux
+# .gcm, .gcz), binary containers (.bin, .zip, .e4), Xbox binaries (.xbe for
+# Sega Chihiro via cxbxr), Konami game DLLs (.dll), and extension-less Linux
 # binaries (e.g. "game", "armyops-bin", "abc").
 #
-# Extension-less files are limited to 4 directory levels below $folder.
+# Extension-less files are limited to 6 directory levels below $folder.
 # Linux game executables are always at that depth or shallower; system files
 # buried inside Lindbergh / Chihiro Linux filesystem images (e.g. X11 keyboard
 # layout files like "tr") live 7-10 levels deep and are excluded by this limit.
+# .dll files are included because some Konami arcade games (DDR, Steel Chronicle,
+# Silent Scope, etc.) specify a game-specific DLL as their ExecutableName.
 function Get-GameFiles {
     param([string]$folder)
-    $exts       = @('.exe', '.elf', '.iso', '.gcm', '.gcz', '.bin', '.e4', '.zip')
+    $exts       = @('.exe', '.elf', '.iso', '.gcm', '.gcz', '.bin', '.e4', '.zip', '.xbe', '.dll')
     $normalized = $folder -replace '/', '\'
     $baseDepth  = $normalized.TrimEnd('\').Split('\').Count
     return @(Get-ChildItem -LiteralPath $folder -Recurse -File -ErrorAction SilentlyContinue |
@@ -1047,7 +1050,9 @@ function Invoke-DgVoodoo2Setup {
             if (-not (Test-Path -LiteralPath $gamePath)) { continue }
             $apis = @(Get-GameLegacyApi -ExePath $gamePath)
             if ($apis.Count -gt 0) { $detectedMap[$pf.BaseName] = $apis }
-        } catch {}
+        } catch {
+            Write-Log "dgVoodoo2 scan: error reading $($pf.BaseName) -- $_"
+        }
     }
 
     Write-Host ("  Scanned {0} game(s)." -f $profiles.Count) -ForegroundColor DarkGray
@@ -2094,10 +2099,9 @@ function Get-TeknoParrotProfileSet {
     $result = New-Object 'System.Collections.Generic.HashSet[string]'([StringComparer]::OrdinalIgnoreCase)
     $loaded = $false
     try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         $apiUri = 'https://api.github.com/repos/teknogods/TeknoParrotUI/git/trees/master?recursive=1'
         $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
-                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.62' }
+                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.64' }
         $tree   = ($resp.Content | ConvertFrom-Json).tree
         $prefix = 'TeknoParrotUi.Common/GameProfiles/'
         foreach ($node in $tree) {
@@ -2157,10 +2161,9 @@ function Resolve-ProfileCode {
 # Returns [pscustomobject]@{DownloadUrl; FileName; SizeMB} or $null on failure.
 function Get-EggmanDatRelease {
     try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         $apiUri = 'https://api.github.com/repos/Eggmansworld/Datfiles/releases/tags/teknoparrot'
         $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
-                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.62' }
+                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.64' }
         $rel    = $resp.Content | ConvertFrom-Json
         $asset  = @($rel.assets) | Where-Object { $_.name -like 'TeknoParrot*Collection*RomVault*.zip' } |
                       Select-Object -First 1
@@ -2180,12 +2183,11 @@ function Get-EggmanDatRelease {
     }
 }
 
-# Downloads the Eggman dat ZIP. Uses BITS (shows a progress bar) with a
-# WebClient fallback. Cleans up any partial file on failure.
+# Downloads the Eggman dat ZIP. Uses BITS (shows a progress bar) with an
+# Invoke-WebRequest fallback. Cleans up any partial file on failure.
 function Invoke-EggmanDatDownload {
     param([string]$downloadUrl, [string]$savePath)
     try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         $bitsOk = $false
         try {
             Start-BitsTransfer -Source $downloadUrl -Destination $savePath `
@@ -2194,11 +2196,10 @@ function Invoke-EggmanDatDownload {
                 -ErrorAction Stop
             $bitsOk = $true
         } catch {
-            Write-Log "EggmanDat: BITS transfer failed (${_}), trying WebClient."
+            Write-Log "EggmanDat: BITS transfer failed (${_}), trying Invoke-WebRequest."
         }
         if (-not $bitsOk) {
-            $wc = New-Object System.Net.WebClient
-            $wc.DownloadFile($downloadUrl, $savePath)
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $savePath -UseBasicParsing -ErrorAction Stop
         }
         return $true
     } catch {
@@ -2529,6 +2530,88 @@ function Register-Games {
             } catch {
                 Write-Host "  FAILED to register $datCode : $_" -ForegroundColor Red
                 Write-Log "Register (dat pass2) FAILED $datCode -- $_"
+            }
+        }
+    }
+
+    # Third pass: folders still unmatched -- Dice-compare normalised folder name
+    # against normalised profile code names. Targets games whose GameProfile has
+    # an empty <ExecutableName> (BladeStrangers, LuigisMansion, PokkenTournament,
+    # etc.) that never entered $profileIndex and have no dat entry.
+    if ($gameProfilesDir -and $profileSet -and $profileSet.Count -gt 0) {
+        $normCodeList = @(foreach ($code in $profileSet) {
+            $n = Get-NormalizedGameKey $code
+            if ($n) { [pscustomobject]@{ Code = $code; Norm = $n } }
+        })
+
+        foreach ($folderKey in @($allExeFolders.Keys | Where-Object { -not $matchedFolders.ContainsKey($_) })) {
+            $origName   = $allExeFolders[$folderKey]
+            $normFolder = Get-NormalizedGameKey $folderKey
+            if (-not $normFolder) { continue }
+
+            $bestScore = 0.0
+            $bestCode  = $null
+            foreach ($nc in $normCodeList) {
+                $score = Get-DiceSimilarity $normFolder $nc.Norm
+                if ($score -gt $bestScore) { $bestScore = $score; $bestCode = $nc.Code }
+            }
+            if ($bestScore -lt $FuzzyAutoThreshold -or -not $bestCode) { continue }
+
+            $matchedFolders[$folderKey] = $true
+
+            if ($seenCodes.ContainsKey($bestCode)) { continue }
+            $seenCodes[$bestCode] = $true
+
+            $userProfile = Join-Path $userProfilesDir ($bestCode + ".xml")
+            if (Test-Path -LiteralPath $userProfile) {
+                [void]$already.Add($bestCode)
+                continue
+            }
+
+            $templatePath = Join-Path $gameProfilesDir ($bestCode + ".xml")
+            if (-not (Test-Path -LiteralPath $templatePath)) {
+                Write-Log ("ProfileCode (pass3): no template for '{0}' -- skipping {1}" -f $bestCode, $folderKey)
+                continue
+            }
+
+            # Prefer .exe > .elf > extension-less > .xbe > .dll when GameProfile
+            # has no ExecutableName to guide us.
+            $folderFull = Join-Path $installBase $origName
+            $candidates = @($exeFiles | Where-Object {
+                $_.FullName.Length -gt $folderFull.Length -and
+                $_.FullName.StartsWith($folderFull + '\')
+            })
+            $exeToUse = $null
+            foreach ($prio in @('.exe', '.elf', '', '.xbe', '.dll')) {
+                $hit = @($candidates | Where-Object { $_.Extension.ToLower() -eq $prio })[0]
+                if ($hit) { $exeToUse = $hit.FullName; break }
+            }
+            if (-not $exeToUse -and $candidates.Count -gt 0) { $exeToUse = $candidates[0].FullName }
+            if (-not $exeToUse) {
+                Write-Log ("ProfileCode (pass3): no exe found for '{0}' in folder {1}" -f $bestCode, $folderKey)
+                continue
+            }
+
+            try {
+                $tpl = Read-Xml $templatePath
+                $gp  = $tpl.GameProfile.SelectSingleNode("GamePath")
+                if ($null -eq $gp) {
+                    $gp = $tpl.CreateElement("GamePath")
+                    [void]$tpl.GameProfile.PrependChild($gp)
+                }
+                $gp.InnerText = $exeToUse
+                Save-Xml $tpl $userProfile
+                [void]$registered.Add([pscustomobject]@{
+                    Code        = $bestCode
+                    GamePath    = $exeToUse
+                    DatMatch    = $false
+                    FuzzyScore  = [Math]::Round($bestScore, 2)
+                    FuzzyFolder = $origName
+                })
+                Write-Log ("Registered (code/fuzzy {0}) {1} -> {2}" -f [Math]::Round($bestScore,2), $bestCode, $exeToUse)
+            } catch {
+                Write-Host "  FAILED to register $bestCode : $_" -ForegroundColor Red
+                Write-Log "Register (pass3) FAILED $bestCode -- $_"
             }
         }
     }
@@ -3750,7 +3833,7 @@ function Write-ControlsStatus {
     }
 }
 
-Write-Log "Script started (v0.62$(if ($Unattended) { ' [Unattended]' }))."
+Write-Log "Script started (v0.64$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
 # SECTION 1 -- Load or prompt for configuration

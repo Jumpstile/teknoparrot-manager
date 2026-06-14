@@ -7,6 +7,37 @@
 
 
 -------------------------------------------------------------------------------
+  v0.64 BETA  (2026-06-14)
+-------------------------------------------------------------------------------
+
+  Registration improvements: .xbe/.dll executables + profile code fuzzy pass:
+
+  - Get-GameFiles now includes .xbe (Sega Chihiro games emulated via cxbxr)
+    and .dll (Konami PC arcade games such as DanceDanceRevolution2013, Steel
+    Chronicle, Silent Scope Bone Eater, Metal Gear Arcade, Love Plus Arcade).
+    These were previously invisible to the scanner, causing those games to
+    appear in the "GAME FOLDERS NOT RECOGNISED" action list even when the
+    correct game files were present.
+
+  - Register-Games now has a third registration pass that compares the
+    normalised folder name against normalised GameProfile code names using
+    Dice similarity. This resolves games whose GameProfile has an empty
+    <ExecutableName> (BladeStrangers, LuigisMansion, MaiMaiGreen,
+    PokkenTournament, ProjectDiva, SonicDashExtreme, etc.) which were
+    previously missed by both the exe-index pass and the dat pass.
+
+  Security / reliability fixes (from sweep):
+
+  - TLS protocol setting changed from assignment to bitwise OR so that
+    protocols already enabled on the machine (e.g. TLS 1.3 on Windows 11)
+    are preserved rather than replaced. Redundant per-function TLS lines
+    removed (global setting at startup already covers all requests).
+  - WebClient.DownloadFile fallback in Invoke-EggmanDatDownload replaced
+    with Invoke-WebRequest (WebClient is deprecated in .NET).
+  - dgVoodoo2 API scanner now logs profile parse errors rather than
+    silently discarding them.
+
+-------------------------------------------------------------------------------
   v0.63 BETA  (2026-06-14)
 -------------------------------------------------------------------------------
 
