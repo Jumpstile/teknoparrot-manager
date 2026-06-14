@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.58 BETA
+# TeknoParrot Manager  |  v0.59 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -60,7 +60,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.58 BETA" -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.59 BETA" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -1982,84 +1982,6 @@ function Build-DatIndexFromZip {
     }
 }
 
-# Builds the supplementary index: ProfileCode.ToLower() -> ArrayList of alternate
-# game names. Used to alert the user that a different version exists (e.g. a
-# different region, bonus content, or updated revision for a registered game).
-function Build-SupplementaryIndexFromStream {
-    param([System.IO.Stream]$stream)
-    $index    = @{}
-    $settings = New-Object System.Xml.XmlReaderSettings
-    $settings.IgnoreWhitespace = $true
-    $settings.DtdProcessing    = [System.Xml.DtdProcessing]::Prohibit
-    $reader = [System.Xml.XmlReader]::Create($stream, $settings)
-    try {
-        $gameName    = ''
-        $profCode    = ''
-        $insideGame  = $false
-        $currentElem = ''
-        while ($reader.Read()) {
-            if ($reader.NodeType -eq [System.Xml.XmlNodeType]::Element) {
-                $currentElem = $reader.Name
-                if ($currentElem -eq 'game') {
-                    $gameName   = $reader.GetAttribute('name')
-                    $profCode   = ''
-                    $insideGame = $true
-                } elseif ($currentElem -eq 'rom' -and $insideGame) {
-                    $reader.Skip(); $currentElem = ''
-                }
-            } elseif ($reader.NodeType -eq [System.Xml.XmlNodeType]::Text -and $insideGame) {
-                if ($currentElem -eq 'GameProfile') { $profCode = $reader.Value }
-            } elseif ($reader.NodeType -eq [System.Xml.XmlNodeType]::EndElement -and $reader.Name -eq 'game') {
-                $insideGame = $false
-                if ($profCode -and $gameName) {
-                    $key = $profCode.Trim().ToLower()
-                    if (-not $index.ContainsKey($key)) { $index[$key] = New-Object System.Collections.ArrayList }
-                    [void]$index[$key].Add($gameName.Trim())
-                }
-            }
-        }
-    } finally {
-        $reader.Close()
-    }
-    return $index
-}
-
-function Build-SupplementaryIndex {
-    param([string]$datPath)
-    try {
-        $fs = [System.IO.File]::OpenRead($datPath)
-        try   { return Build-SupplementaryIndexFromStream $fs }
-        finally { if ($fs) { $fs.Close() } }
-    } catch {
-        Write-Host ("  WARNING: Could not parse supplementary dat -- {0}" -f $_) -ForegroundColor Yellow
-        Write-Log "SuppIndex: parse failed -- $_"
-        return @{}
-    }
-}
-
-function Build-SupplementaryIndexFromZip {
-    param([string]$zipPath, [string]$entryPattern = '*Supplementary*_RomVault*.dat')
-    $za = $null
-    try {
-        $za    = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
-        $entry = @($za.Entries | Where-Object { $_.FullName -like $entryPattern })[0]
-        if (-not $entry) {
-            Write-Host ("  WARNING: No supplementary entry matching '{0}' in ZIP." -f $entryPattern) -ForegroundColor Yellow
-            Write-Log ("SuppIndex (ZIP): no entry matching '{0}'." -f $entryPattern)
-            return @{}
-        }
-        Write-Host ("    Reading: {0}" -f $entry.Name) -ForegroundColor DarkGray
-        $stream = $entry.Open()
-        try   { return Build-SupplementaryIndexFromStream $stream }
-        finally { if ($stream) { $stream.Close() } }
-    } catch {
-        Write-Host ("  WARNING: Could not read supplementary from ZIP -- {0}" -f $_) -ForegroundColor Yellow
-        Write-Log "SuppIndex (ZIP): parse failed -- $_"
-        return @{}
-    } finally {
-        if ($za) { $za.Dispose() }
-    }
-}
 
 # Parses a No-Intro style TeknoParrot dat file from disk using streaming XmlReader.
 # Replaces the old DOM-based approach which could not handle the 584 MB collection dat.
@@ -2144,6 +2066,72 @@ function Build-GameNotesIndexFromZip {
     finally  { if ($za) { $za.Dispose() } }
 }
 
+# Queries the teknogods/TeknoParrotUI GitHub repo tree for all GameProfile XML
+# filenames. Falls back to scanning the local GameProfiles folder if GitHub is
+# unreachable. Returns a HashSet[string] of profile code stems (e.g. "BladeArcus").
+function Get-TeknoParrotProfileSet {
+    param([string]$localGameProfilesDir = '')
+    $result = New-Object 'System.Collections.Generic.HashSet[string]'([StringComparer]::OrdinalIgnoreCase)
+    $loaded = $false
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $apiUri = 'https://api.github.com/repos/teknogods/TeknoParrotUI/git/trees/master?recursive=1'
+        $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
+                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.59' }
+        $tree   = ($resp.Content | ConvertFrom-Json).tree
+        $prefix = 'TeknoParrotUi.Common/GameProfiles/'
+        foreach ($node in $tree) {
+            if ($node.type -eq 'blob' -and $node.path -like ($prefix + '*.xml')) {
+                $stem = [System.IO.Path]::GetFileNameWithoutExtension($node.path.Substring($prefix.Length))
+                if ($stem -match '^[\w]+$') { [void]$result.Add($stem) }
+            }
+        }
+        if ($result.Count -gt 0) {
+            Write-Log "ProfileSet (GitHub): $($result.Count) profiles from teknogods/TeknoParrotUI."
+            $loaded = $true
+        } else {
+            Write-Log "ProfileSet (GitHub): 0 profiles returned -- API may have changed."
+        }
+    } catch {
+        Write-Log "ProfileSet (GitHub): query failed -- $_"
+    }
+    if (-not $loaded -and $localGameProfilesDir -and (Test-Path -LiteralPath $localGameProfilesDir)) {
+        Get-ChildItem -LiteralPath $localGameProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                $s = [System.IO.Path]::GetFileNameWithoutExtension($_.Name)
+                if ($s -match '^[\w]+$') { [void]$result.Add($s) }
+            }
+        Write-Log "ProfileSet (local fallback): $($result.Count) profiles from $localGameProfilesDir"
+    }
+    return $result
+}
+
+# Resolves a dat ProfileCode to the correct template filename stem.
+# Priority: (1) exact local template; (2) code in GitHub profileSet; (3) fuzzy
+# match against profileSet above $FuzzyAutoThreshold; (4) return original.
+function Resolve-ProfileCode {
+    param([string]$code, [string]$gameProfilesDir,
+          [System.Collections.Generic.HashSet[string]]$profileSet = $null)
+    if (-not $code) { return $code }
+    if ($gameProfilesDir -and (Test-Path -LiteralPath (Join-Path $gameProfilesDir ($code + ".xml")))) {
+        return $code
+    }
+    if ($null -eq $profileSet -or $profileSet.Count -eq 0) { return $code }
+    if ($profileSet.Contains($code)) { return $code }
+    $normCode  = Get-NormalizedGameKey $code
+    $bestScore = 0.0
+    $bestMatch = $null
+    foreach ($candidate in $profileSet) {
+        $score = Get-DiceSimilarity $normCode (Get-NormalizedGameKey $candidate)
+        if ($score -gt $bestScore) { $bestScore = $score; $bestMatch = $candidate }
+    }
+    if ($bestScore -ge $FuzzyAutoThreshold -and $null -ne $bestMatch -and $bestMatch -match '^[\w]+$') {
+        Write-Log ("Resolve-ProfileCode: '{0}' -> '{1}' (score {2})" -f $code, $bestMatch, [Math]::Round($bestScore,2))
+        return $bestMatch
+    }
+    return $code
+}
+
 # Queries the GitHub API for the latest Eggman dat release asset.
 # Uses the "teknoparrot" tag which Eggmansworld updates with each release.
 # Returns [pscustomobject]@{DownloadUrl; FileName; SizeMB} or $null on failure.
@@ -2152,7 +2140,7 @@ function Get-EggmanDatRelease {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         $apiUri = 'https://api.github.com/repos/Eggmansworld/Datfiles/releases/tags/teknoparrot'
         $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
-                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.58' }
+                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.59' }
         $rel    = $resp.Content | ConvertFrom-Json
         $asset  = @($rel.assets) | Where-Object { $_.name -like 'TeknoParrot*Collection*RomVault*.zip' } |
                       Select-Object -First 1
@@ -2206,7 +2194,8 @@ function Invoke-EggmanDatDownload {
 # are left untouched (never overwritten).
 function Register-Games {
     param([string]$userProfilesDir, [string]$installFolder, [hashtable]$profileIndex,
-          [string]$gameProfilesDir = '', [hashtable]$datIndex = $null)
+          [string]$gameProfilesDir = '', [hashtable]$datIndex = $null,
+          [System.Collections.Generic.HashSet[string]]$profileSet = $null)
 
     if ($null -eq $datIndex) { $datIndex = @{} }
 
@@ -2303,6 +2292,9 @@ function Register-Games {
                         # Profile codes are purely alphanumeric; reject anything else to
                         # prevent path traversal via a crafted dat file.
                         if ($datCode -match '^[\w]+$') {
+                            if ($gameProfilesDir) {
+                                $datCode = Resolve-ProfileCode $datCode $gameProfilesDir $profileSet
+                            }
                             $userProfile = Join-Path $userProfilesDir ($datCode + ".xml")
                             if (-not $seenCodes.ContainsKey($datCode)) {
                                 $seenCodes[$datCode] = $true
@@ -2447,6 +2439,9 @@ function Register-Games {
             if ($datCode -notmatch '^[\w]+$') {
                 Write-Log ("DatIndex (pass2): invalid ProfileCode '{0}' -- skipped folder {1}" -f $datCode, $folderKey)
                 continue
+            }
+            if ($gameProfilesDir) {
+                $datCode = Resolve-ProfileCode $datCode $gameProfilesDir $profileSet
             }
 
             $matchedFolders[$folderKey] = $true   # prevents folder appearing in $unmatched
@@ -3735,7 +3730,7 @@ function Write-ControlsStatus {
     }
 }
 
-Write-Log "Script started (v0.58$(if ($Unattended) { ' [Unattended]' }))."
+Write-Log "Script started (v0.59$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
 # SECTION 1 -- Load or prompt for configuration
@@ -4107,9 +4102,10 @@ if (Test-Path -LiteralPath $overridesPath) {
 # Priority: EggmanDatZip (ZIP mode) > DatFilePath (direct file mode)
 # =============================================================================
 
-$datIndex  = @{}
-$suppIndex = @{}   # supplementary index: ProfileCode.ToLower() -> ArrayList of alternate names
-$notesIndex = @{}  # game notes index: ProfileCode.ToLower() -> notes text string
+$datIndex   = @{}
+$suppIndex  = @{}   # supplementary dat index: normalizedName -> {ProfileCode, Executable}
+$suppCodes  = New-Object 'System.Collections.Generic.HashSet[string]'([StringComparer]::OrdinalIgnoreCase)
+$notesIndex = @{}   # game notes index: ProfileCode.ToLower() -> notes text string
 
 if ($eggmanDatZip) {
     if (Test-Path -LiteralPath $eggmanDatZip) {
@@ -4125,9 +4121,9 @@ if ($eggmanDatZip) {
         }
         if ($includeSupplementary) {
             Write-Host "  Loading supplementary dat from ZIP..." -ForegroundColor DarkGray
-            $suppIndex = Build-SupplementaryIndexFromZip $eggmanDatZip
+            $suppIndex = Build-DatIndexFromZip $eggmanDatZip '*Supplementary*_RomVault*.dat'
             if ($suppIndex.Count -gt 0) {
-                Write-Host ("  Supplementary dat: {0} alternate entries indexed." -f $suppIndex.Count) -ForegroundColor DarkGray
+                Write-Host ("  Supplementary dat: {0} entries indexed (override collection)." -f $suppIndex.Count) -ForegroundColor DarkGray
                 Write-Log "SuppIndex (ZIP): $($suppIndex.Count) entries from $eggmanDatZip"
             } else {
                 Write-Host "  Supplementary dat: no entries found." -ForegroundColor Yellow
@@ -4159,9 +4155,9 @@ if ($eggmanDatZip) {
         if ($supplementaryDatPath) {
             if (Test-Path -LiteralPath $supplementaryDatPath) {
                 Write-Host "  Loading supplementary dat..." -ForegroundColor DarkGray
-                $suppIndex = Build-SupplementaryIndex $supplementaryDatPath
+                $suppIndex = Build-DatIndex $supplementaryDatPath
                 if ($suppIndex.Count -gt 0) {
-                    Write-Host ("  Supplementary dat: {0} alternate entries indexed." -f $suppIndex.Count) -ForegroundColor DarkGray
+                    Write-Host ("  Supplementary dat: {0} entries indexed (override collection)." -f $suppIndex.Count) -ForegroundColor DarkGray
                     Write-Log "SuppIndex: $($suppIndex.Count) entries from $supplementaryDatPath"
                 } else {
                     Write-Host "  Supplementary dat: no entries found." -ForegroundColor Yellow
@@ -4188,6 +4184,33 @@ if ($eggmanDatZip) {
     } else {
         Write-Host ("  WARNING: Collection dat not found at: {0}" -f $datFilePath) -ForegroundColor Yellow
         Write-Log "DatIndex: file not found at $datFilePath -- skipping."
+    }
+}
+
+# Merge supplementary overrides into the collection index.
+# Supplementary entries take precedence for the same normalised game name,
+# so the alternate version from the supplementary dat is used instead of
+# the collection version (only one version can be installed at a time).
+if ($suppIndex.Count -gt 0) {
+    foreach ($k in $suppIndex.Keys) {
+        $datIndex[$k] = $suppIndex[$k]
+        [void]$suppCodes.Add($suppIndex[$k].ProfileCode)
+    }
+    Write-Log "DatIndex: merged $($suppIndex.Count) supplementary overrides ($($suppCodes.Count) profile codes)."
+}
+
+# =============================================================================
+# PROFILE SET  (fetched once; used by Resolve-ProfileCode during registration)
+# =============================================================================
+$profileSet = $null
+if ($datIndex.Count -gt 0 -and $gameProfilesDir) {
+    Write-Host ""
+    Write-Host "Loading TeknoParrot GameProfiles list..." -ForegroundColor DarkGray
+    $profileSet = Get-TeknoParrotProfileSet $gameProfilesDir
+    if ($profileSet.Count -gt 0) {
+        Write-Host ("  Profile set: {0} profiles (used for dat code resolution)." -f $profileSet.Count) -ForegroundColor DarkGray
+    } else {
+        Write-Host "  Profile set: could not load (GitHub unreachable and GameProfiles folder empty)." -ForegroundColor Yellow
     }
 }
 
@@ -4615,7 +4638,7 @@ Write-Host "--------------------------------------------" -ForegroundColor Cyan
 Write-Host " Scanning: $gamesInstallFolder" -ForegroundColor DarkCyan
 Write-Host ""
 
-$result = Register-Games -userProfilesDir $userProfilesDir -installFolder $gamesInstallFolder -profileIndex $profileIndex -gameProfilesDir $gameProfilesDir -datIndex $datIndex
+$result = Register-Games -userProfilesDir $userProfilesDir -installFolder $gamesInstallFolder -profileIndex $profileIndex -gameProfilesDir $gameProfilesDir -datIndex $datIndex -profileSet $profileSet
 
 foreach ($r in $result.Registered) {
     if ($r.DatMatch) {
@@ -4845,13 +4868,11 @@ if ($csCount -ge 0) {
 Write-Log "Completed. Registered=$($result.Registered.Count) Already=$($result.Already.Count) ManualReg=$($result.Ambiguous.Count) Unmatched=$($result.Unmatched.Count)"
 
 # =============================================================================
-# GAME INFO -- supplementary versions and notes for newly registered games
+# GAME INFO -- source tag and notes for newly registered games
 # =============================================================================
 
-if ($result.Registered.Count -gt 0 -and ($suppIndex.Count -gt 0 -or $notesIndex.Count -gt 0)) {
-    $infoItems = @($result.Registered | Where-Object {
-        $suppIndex.ContainsKey($_.Code.ToLower()) -or $notesIndex.ContainsKey($_.Code.ToLower())
-    })
+if ($result.Registered.Count -gt 0 -and $notesIndex.Count -gt 0) {
+    $infoItems = @($result.Registered | Where-Object { $notesIndex.ContainsKey($_.Code.ToLower()) })
     if ($infoItems.Count -gt 0) {
         Write-Host ""
         Write-Host "============================================" -ForegroundColor Cyan
@@ -4861,11 +4882,8 @@ if ($result.Registered.Count -gt 0 -and ($suppIndex.Count -gt 0 -or $notesIndex.
             $key = $r.Code.ToLower()
             Write-Host ""
             Write-Host ("  {0}" -f $r.Code) -ForegroundColor Yellow
-            if ($suppIndex.ContainsKey($key)) {
-                Write-Host "  Alternate versions in supplementary dat:" -ForegroundColor Cyan
-                foreach ($alt in $suppIndex[$key]) {
-                    Write-Host ("    {0}" -f $alt) -ForegroundColor DarkGray
-                }
+            if ($suppCodes.Contains($r.Code)) {
+                Write-Host "  Source: supplementary dat (alternate version used instead of collection)" -ForegroundColor DarkCyan
             }
             if ($notesIndex.ContainsKey($key)) {
                 Write-Host "  Notes:" -ForegroundColor Cyan
