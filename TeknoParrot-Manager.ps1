@@ -2077,7 +2077,7 @@ function Get-TeknoParrotProfileSet {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         $apiUri = 'https://api.github.com/repos/teknogods/TeknoParrotUI/git/trees/master?recursive=1'
         $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
-                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.59' }
+                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.61' }
         $tree   = ($resp.Content | ConvertFrom-Json).tree
         $prefix = 'TeknoParrotUi.Common/GameProfiles/'
         foreach ($node in $tree) {
@@ -2140,12 +2140,12 @@ function Get-EggmanDatRelease {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         $apiUri = 'https://api.github.com/repos/Eggmansworld/Datfiles/releases/tags/teknoparrot'
         $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
-                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.59' }
+                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.61' }
         $rel    = $resp.Content | ConvertFrom-Json
         $asset  = @($rel.assets) | Where-Object { $_.name -like 'TeknoParrot*Collection*RomVault*.zip' } |
                       Select-Object -First 1
         if (-not $asset) { return $null }
-        if ($asset.browser_download_url -notmatch '^https://[a-zA-Z0-9._-]+(github\.com|githubusercontent\.com)/') {
+        if ($asset.browser_download_url -notmatch '^https://[a-zA-Z0-9._-]*(github\.com|githubusercontent\.com)/') {
             Write-Log "EggmanDat: unexpected download URL format -- skipping."
             return $null
         }
@@ -3730,7 +3730,7 @@ function Write-ControlsStatus {
     }
 }
 
-Write-Log "Script started (v0.59$(if ($Unattended) { ' [Unattended]' }))."
+Write-Log "Script started (v0.61$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
 # SECTION 1 -- Load or prompt for configuration

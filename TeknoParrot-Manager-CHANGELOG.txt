@@ -7,6 +7,19 @@
 
 
 -------------------------------------------------------------------------------
+  v0.61 BETA  (2026-06-14)
+-------------------------------------------------------------------------------
+
+  EggmanDat URL validation fix:
+
+  - Fixed a regex bug in Get-EggmanDatRelease that caused every automatic
+    Eggman dat download attempt to fail with "unexpected download URL format".
+    The pattern required at least one character before "github.com", so
+    standard GitHub release URLs (https://github.com/...) were rejected.
+    Changed quantifier from + to * so bare github.com and subdomain URLs
+    (e.g. objects.githubusercontent.com) are both accepted.
+
+-------------------------------------------------------------------------------
   v0.60 BETA  (2026-06-14)
 -------------------------------------------------------------------------------
 
