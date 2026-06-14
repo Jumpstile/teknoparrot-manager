@@ -7,6 +7,37 @@
 
 
 -------------------------------------------------------------------------------
+  v0.59 BETA  (2026-06-14)
+-------------------------------------------------------------------------------
+
+  GitHub profile set resolution, supplementary dat as priority overrides:
+
+  - The script now fetches the full list of GameProfile XML filenames from the
+    teknogods/TeknoParrotUI GitHub repository before every registration run
+    (GET /repos/teknogods/TeknoParrotUI/git/trees/master?recursive=1). This
+    profile set is used to resolve dat ProfileCodes that do not exactly match
+    any local template: a fuzzy (Sorensen-Dice) match against the set is tried
+    and, if above the auto-register confidence threshold, the matched template
+    name is used instead. This fixes games like BladeArcusFromShining in the
+    dat that must map to BladeArcus.xml in GameProfiles. If GitHub is
+    unreachable, the script falls back to scanning the local GameProfiles folder.
+    Fetched stems are validated [\w]+ before being added to the set; fuzzy
+    matches are re-validated before being returned as path components.
+
+  - Supplementary dat entries are now treated as priority overrides for the
+    collection dat (alternate versions that replace the collection version on a
+    game-by-game basis -- only one version can be installed at a time in
+    TeknoParrot). When both dats are loaded, supplementary entries are merged
+    over the collection index so the supplementary version is used for any
+    game present in both. The "alternate versions" display in the post-
+    registration Game Info block is replaced with a "Source: supplementary dat"
+    tag for games registered via a supplementary override. The Build-Supplementary*
+    family of functions is removed; the supplementary dat is now parsed with
+    Build-DatIndexFromZip / Build-DatIndex using a '*Supplementary*_RomVault*.dat'
+    entry pattern, producing the same normalizedName -> {ProfileCode, Executable}
+    format as the collection index.
+
+-------------------------------------------------------------------------------
   v0.58 BETA  (2026-06-14)
 -------------------------------------------------------------------------------
 
