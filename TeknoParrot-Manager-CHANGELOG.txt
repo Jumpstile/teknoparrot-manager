@@ -7,6 +7,27 @@
 
 
 -------------------------------------------------------------------------------
+  v0.68 BETA  (2026-06-14)
+-------------------------------------------------------------------------------
+
+  Bug fixes -- AutoSync crash and ZIP source paths not saved between runs:
+
+  - Fixed a crash at startup of AutoSync: the queue header rendered an inline
+    (if ...) expression which PowerShell 5.1 does not support as a cmdlet
+    argument. Changed to $(if ...) subexpression syntax.
+
+  - Fixed the main collection ZIP folder and supplementary ZIP folder not being
+    remembered between runs. Both paths are prompted inside the main menu loop
+    after the initial config save, so they were written as null/empty on every
+    run. A config re-save now fires immediately after the paths are captured.
+
+  - Fixed the supplementary folder prompt re-appearing every run when the user
+    had explicitly skipped it (pressed Enter). The empty response is now saved
+    and the prompt condition distinguishes "never asked" ($null) from "user
+    said no" ('') so it does not repeat.
+
+
+-------------------------------------------------------------------------------
   v0.67 BETA  (2026-06-14)
 -------------------------------------------------------------------------------
 

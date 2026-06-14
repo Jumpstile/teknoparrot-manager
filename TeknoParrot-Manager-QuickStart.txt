@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.67 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.68 BETA  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 

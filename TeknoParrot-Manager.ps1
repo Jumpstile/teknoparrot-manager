@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.67 BETA
+# TeknoParrot Manager  |  v0.68 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -60,7 +60,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.67 BETA" -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.68 BETA" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -704,7 +704,7 @@ function Select-GamesInteractiveCombined {
     while (-not $done) {
         Write-Host ""
         Write-Host "  ============================================" -ForegroundColor Cyan
-        Write-Host (if ($queue.Count -gt 0) { "  Queue: $($queue.Count) game(s) selected" } else { "  Queue: empty" }) -ForegroundColor Cyan
+        Write-Host $(if ($queue.Count -gt 0) { "  Queue: $($queue.Count) game(s) selected" } else { "  Queue: empty" }) -ForegroundColor Cyan
         Write-Host "  ============================================" -ForegroundColor Cyan
         Write-Host "    A) All unextracted games ($($all.Count))"
         Write-Host "    L) Browse and select from list ($($all.Count) games, A-Z)"
@@ -4057,7 +4057,7 @@ function Write-ControlsStatus {
     }
 }
 
-Write-Log "Script started (v0.67$(if ($Unattended) { ' [Unattended]' }))."
+Write-Log "Script started (v0.68$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
 # SECTION 1 -- Load or prompt for configuration
@@ -4067,7 +4067,7 @@ $configPath         = Join-Path $PSScriptRoot "TeknoParrot-Manager.config.json"
 $tpRoot             = $null
 $mode               = $null   # "AutoSync", "RegisterOnly", "Restore", "CrosshairSetup", or "ReShadeSetup"
 $zipSource               = $null   # AutoSync only (main collection)
-$zipSourceSupplementary  = ''      # AutoSync supplementary source (optional, separate library)
+$zipSourceSupplementary  = $null   # AutoSync supplementary source (optional, separate library); $null=never asked, ''=user skipped
 $gamesInstallFolder = $null   # always (the extracted-games root to register)
 $retroBat           = $false  # true = extracted folders named GameName.teknoparrot (RetroBat/Batocera)
 $hsDataPath         = $null   # HyperSpin 2 data folder (e.g. C:\ProgramData\HyperSpin\data)
@@ -4115,7 +4115,7 @@ if (Test-Path -LiteralPath $configPath) {
         if ($use.ToUpper() -eq "Y") {
             $tpRoot             = $cfg.TeknoParrotRoot
             $zipSource          = $cfg.ZipSourceFolder
-            if ($cfg.ZipSourceSupplementaryFolder) { $zipSourceSupplementary = $cfg.ZipSourceSupplementaryFolder }
+            if ($null -ne $cfg.ZipSourceSupplementaryFolder) { $zipSourceSupplementary = "$($cfg.ZipSourceSupplementaryFolder)" }
             $gamesInstallFolder = $cfg.GamesInstallFolder
             if ($null -ne $cfg.RetroBat) { $retroBat = [bool]$cfg.RetroBat }
             if ($cfg.HyperSpinDataPath)  { $hsDataPath  = $cfg.HyperSpinDataPath  }
@@ -4770,14 +4770,16 @@ while ($true) {
         continue
     }
 
+    $zipPathsJustCaptured = $false
     if ($mode -eq "AutoSync" -and -not $zipSource) {
         Write-Host ""
         Write-Host "  Main collection ZIP folder" -ForegroundColor Cyan
         Write-Host "  Point directly at the folder containing the .zip files, not a parent folder." -ForegroundColor DarkCyan
         Write-Host "  Example: W:\ROMS\TeknoParrot Collection" -ForegroundColor DarkCyan
         $zipSource = (Read-Host "  Path").Trim()
+        $zipPathsJustCaptured = $true
     }
-    if ($mode -eq "AutoSync" -and -not $zipSourceSupplementary -and -not $Unattended) {
+    if ($mode -eq "AutoSync" -and $null -eq $zipSourceSupplementary -and -not $Unattended) {
         Write-Host ""
         Write-Host "  Supplementary games folder (optional)" -ForegroundColor Cyan
         Write-Host "  Point directly at the folder containing the Supplementary .zip files, not a parent folder." -ForegroundColor DarkCyan
@@ -4789,6 +4791,32 @@ while ($true) {
         } elseif ($rawSupp) {
             Write-Host "  Folder not found -- supplementary source skipped." -ForegroundColor Yellow
             Write-Log "Config: supplementary ZIP source not found at $rawSupp -- skipped."
+        } else {
+            $zipSourceSupplementary = ''
+            Write-Log "Config: supplementary ZIP source skipped by user."
+        }
+        $zipPathsJustCaptured = $true
+    }
+    if ($zipPathsJustCaptured) {
+        try {
+            [System.IO.File]::WriteAllText($configPath, ([ordered]@{
+                TeknoParrotRoot              = $tpRoot
+                ZipSourceFolder              = $zipSource
+                ZipSourceSupplementaryFolder = $zipSourceSupplementary
+                GamesInstallFolder           = $gamesInstallFolder
+                RetroBat             = $retroBat
+                HyperSpinDataPath    = $hsDataPath
+                ReShadeSourceDll     = $rsSourceDll
+                ReShadeSourceDll32   = $rsSourceDll32
+                DgVoodoo2SourceDir   = $dgSourceDir
+                EggmanDatZip         = $eggmanDatZip
+                DatFilePath          = $datFilePath
+                SupplementaryDatPath = $supplementaryDatPath
+                IncludeSupplementary = $includeSupplementary
+            } | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
+            Write-Log "Config: saved ZIP source path(s)."
+        } catch {
+            Write-Log "Config: could not re-save after ZIP source prompt -- $_"
         }
     }
 
