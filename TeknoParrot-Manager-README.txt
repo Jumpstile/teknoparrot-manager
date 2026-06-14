@@ -13,43 +13,6 @@
   For a one-page version, see TeknoParrot-Manager-QuickStart.txt.
 
 
--------------------------------------------------------------------------------
-  CONTENTS
--------------------------------------------------------------------------------
-
-  FEATURES ................................................... (this page, below)
-  HOW IT WORKS
-  REQUIREMENTS
-  RUNNING THE SCRIPT
-  AUTO-DETECT TEKNOPARROT PATH
-  MODES
-  GAME SELECTION (AutoSync mode)
-  THE STAGING FOLDER
-  REGISTRATION
-  HOW FUZZY MATCHING WORKS
-  CONTROL PROPAGATION
-  DEVICE SURVEY
-  FRONTEND LAUNCHER INTEGRATION
-    LAUNCHBOX
-    HYPERSPIN 2
-    CROSSHAIR SETUP
-    RESHADE VISUAL ENHANCEMENTS
-    DGVOODOO2 LEGACY COMPATIBILITY
-    RETROBAT / BATOCERA
-  THUMBNAIL DOWNLOAD
-  "NOT IN TEKNOPARROT" REPORT
-  CONTROLS STATUS FILE
-  PER-GAME OVERRIDES
-  ACTION REQUIRED SUMMARY
-  UNATTENDED / SCHEDULED MODE
-  GAME REPAIR
-  CONTROLLERS AND INPUT NOTES
-  SAFETY, BACKUP AND LOG
-  RE-RUNNING
-  RESETTING
-  TROUBLESHOOTING
-  WHAT IT DOES NOT DO
-
 
 -------------------------------------------------------------------------------
   FEATURES
