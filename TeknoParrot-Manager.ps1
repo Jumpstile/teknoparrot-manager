@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.65 BETA
+# TeknoParrot Manager  |  v0.66 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -60,7 +60,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.65 BETA" -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.66 BETA" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -200,6 +200,37 @@ function Measure-PathThroughput {
         return [Math]::Round(($total / 1MB) / $sw.Elapsed.TotalSeconds, 1)
     } catch { return $null }
     finally   { if ($null -ne $fs) { $fs.Dispose() } }
+}
+
+# Measures write throughput to $path by writing 10 MB of zeros to a temp file.
+# Returns MB/s, or $null if $path does not exist or the write fails.
+# The temp file is always removed in the finally block.
+function Measure-PathWriteThroughput {
+    param([string]$path)
+    if (-not (Test-Path -LiteralPath $path)) { return $null }
+    $testFile = Join-Path $path "._tp_write_test_tmp"
+    $fs = $null
+    try {
+        $sampleBytes = 10MB
+        $buffer      = New-Object byte[] 65536
+        $sw          = [System.Diagnostics.Stopwatch]::StartNew()
+        $fs          = [System.IO.File]::Open($testFile, [System.IO.FileMode]::Create,
+                           [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        $written = 0
+        while ($written -lt $sampleBytes) {
+            $chunk = [Math]::Min(65536, $sampleBytes - $written)
+            $fs.Write($buffer, 0, $chunk)
+            $written += $chunk
+        }
+        $fs.Flush()
+        $sw.Stop()
+        if ($sw.Elapsed.TotalSeconds -lt 0.01 -or $written -eq 0) { return $null }
+        return [Math]::Round(($written / 1MB) / $sw.Elapsed.TotalSeconds, 1)
+    } catch { return $null }
+    finally {
+        if ($null -ne $fs) { $fs.Dispose() }
+        Remove-Item -LiteralPath $testFile -Force -ErrorAction SilentlyContinue
+    }
 }
 
 # True if $child is the same folder as, or inside, $parent. Paths are fully
@@ -611,6 +642,177 @@ function Select-GamesInteractive {
     }
 
     return ,$queue
+}
+
+# Combined game picker for AutoSync when both main and supplementary sources are configured.
+# Scans both ZIP sources, merges the unextracted lists into one sorted display, and lets the
+# user select from either library in a single A/L/S/D session. Supplementary entries are
+# marked [+] so the user can tell the two libraries apart at a glance.
+# Returns a PSCustomObject { Main; Supp } where each value is an array of ZIP BaseName strings.
+# An empty array means "no filter -- extract all from that source."
+function Select-GamesInteractiveCombined {
+    param([string]$zipSourceMain, [string]$zipSourceSupp, [string]$installFolder)
+
+    $allMain = @(Get-ChildItem -LiteralPath $zipSourceMain -Filter *.zip -ErrorAction SilentlyContinue |
+                     Where-Object { $_.BaseName -notlike '!TeknoParrot Collection*' } |
+                     Sort-Object BaseName)
+    $allSupp = @(Get-ChildItem -LiteralPath $zipSourceSupp -Filter *.zip -ErrorAction SilentlyContinue |
+                     Where-Object { $_.BaseName -notlike '!TeknoParrot Collection*' } |
+                     Sort-Object BaseName)
+
+    $normalizedFolderMap = @{}
+    foreach ($dir in (Get-ChildItem -LiteralPath $installFolder -Directory -ErrorAction SilentlyContinue)) {
+        $norm = ($dir.Name -replace '\.(teknoparrot|parrot|game)$', '') -replace ' (?=[\[\(])', ''
+        if (-not $normalizedFolderMap.ContainsKey($norm)) {
+            $normalizedFolderMap[$norm] = $dir.FullName
+        }
+    }
+
+    # Split each source into already-extracted and available. Track which source owns each entry.
+    $sourceMap   = @{}
+    $alreadyMain = 0; $alreadySupp = 0
+    $toExtractMain = @(); $toExtractSupp = @()
+
+    foreach ($zip in $allMain) {
+        $norm       = $zip.BaseName -replace ' (?=[\[\(])', ''
+        $existing   = $normalizedFolderMap[$norm]
+        $hasContent = $existing -and (Get-ChildItem -LiteralPath $existing -Force -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0
+        if ($hasContent) { $alreadyMain++ } else { $toExtractMain += $zip; $sourceMap[$zip.BaseName] = 'Main' }
+    }
+    foreach ($zip in $allSupp) {
+        $norm       = $zip.BaseName -replace ' (?=[\[\(])', ''
+        $existing   = $normalizedFolderMap[$norm]
+        $hasContent = $existing -and (Get-ChildItem -LiteralPath $existing -Force -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0
+        if ($hasContent) { $alreadySupp++ } else { $toExtractSupp += $zip; $sourceMap[$zip.BaseName] = 'Supp' }
+    }
+
+    $all = @($toExtractMain + $toExtractSupp | Sort-Object BaseName)
+
+    Write-Host ""
+    if (($alreadyMain + $alreadySupp) -gt 0) {
+        Write-Host ("  {0} game(s) already extracted -- not shown." -f ($alreadyMain + $alreadySupp)) -ForegroundColor DarkGray
+    }
+    if ($all.Count -eq 0) {
+        Write-Host "  All games are already extracted. Nothing left to do." -ForegroundColor Green
+        return [PSCustomObject]@{ Main = @(); Supp = @() }
+    }
+    Write-Host ("  {0} game(s) available to extract ({1} collection, {2} supplementary [+])." -f $all.Count, $toExtractMain.Count, $toExtractSupp.Count) -ForegroundColor Cyan
+
+    $queue    = @()
+    $pageSize = 20
+    $done     = $false
+
+    while (-not $done) {
+        Write-Host ""
+        Write-Host "  ============================================" -ForegroundColor Cyan
+        Write-Host (if ($queue.Count -gt 0) { "  Queue: $($queue.Count) game(s) selected" } else { "  Queue: empty" }) -ForegroundColor Cyan
+        Write-Host "  ============================================" -ForegroundColor Cyan
+        Write-Host "    A) All unextracted games ($($all.Count))"
+        Write-Host "    L) Browse and select from list ($($all.Count) games, A-Z)"
+        Write-Host "    S) Search by keyword"
+        Write-Host "    D) Done -- proceed with current queue"
+        Write-Host ""
+        $choice = (Read-Host "  Enter A, L, S, or D").Trim().ToUpper()
+
+        if ($choice -eq 'A') {
+            Write-Host ""
+            Write-Host "  All $($all.Count) unextracted game(s) will be extracted." -ForegroundColor Green
+            return [PSCustomObject]@{ Main = @(); Supp = @() }
+        }
+        elseif ($choice -eq 'L') {
+            $page       = 0
+            $totalPages = [Math]::Ceiling($all.Count / $pageSize)
+            $browsing   = $true
+            while ($browsing) {
+                $start     = $page * $pageSize
+                $end       = [Math]::Min($start + $pageSize - 1, $all.Count - 1)
+                $pageItems = if ($start -gt $end) { @() } else { @($all[$start..$end]) }
+                Write-Host ""
+                Write-Host ("  Page {0} of {1}  ({2} games total)" -f ($page+1), $totalPages, $all.Count) -ForegroundColor Cyan
+                Write-Host "  (* = in queue | [+] = supplementary)" -ForegroundColor DarkCyan
+                Write-Host ""
+                for ($i = 0; $i -lt $pageItems.Count; $i++) {
+                    $inQ = if ($queue -contains $pageItems[$i].BaseName) { "*" } else { " " }
+                    $src = if ($sourceMap[$pageItems[$i].BaseName] -eq 'Supp') { "[+]" } else { "   " }
+                    Write-Host ("  [{0}{1}] {2} {3}" -f $inQ, ($i+1).ToString().PadLeft(3), $src, $pageItems[$i].BaseName)
+                }
+                Write-Host ""
+                Write-Host "  Numbers (e.g. 1,3,5-7)  |  N=next  P=prev  B=back  D=done" -ForegroundColor DarkCyan
+                Write-Host ""
+                $cmd = (Read-Host "  >").Trim().ToUpper()
+                if     ($cmd -eq 'B') { $browsing = $false }
+                elseif ($cmd -eq 'D') { $browsing = $false; $done = $true }
+                elseif ($cmd -eq 'N') { if ($page -lt $totalPages-1) { $page++ } else { Write-Host "  Already on last page." -ForegroundColor DarkCyan } }
+                elseif ($cmd -eq 'P') { if ($page -gt 0) { $page-- } else { Write-Host "  Already on first page." -ForegroundColor DarkCyan } }
+                elseif ($cmd -ne '') {
+                    $nums = Expand-NumberList -str $cmd -max $pageItems.Count
+                    $added = 0
+                    foreach ($n in $nums) {
+                        $name = $pageItems[$n-1].BaseName
+                        if ($queue -notcontains $name) { $queue += $name; $added++ }
+                    }
+                    if ($nums.Count -gt 0) { Write-Host ("  Added {0} game(s). Queue: {1} total." -f $added, $queue.Count) -ForegroundColor Cyan }
+                }
+            }
+        }
+        elseif ($choice -eq 'S') {
+            $searching = $true
+            while ($searching) {
+                Write-Host ""
+                $term = (Read-Host "  Search keyword (or 'back' / 'done')").Trim()
+                if ($term -ieq 'back') { $searching = $false; continue }
+                if ($term -ieq 'done') { $searching = $false; $done = $true; continue }
+                if (-not $term) { continue }
+                $results = @($all | Where-Object { $_.BaseName.IndexOf($term, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 })
+                if ($results.Count -eq 0) { Write-Host "  No matches for '$term'." -ForegroundColor Yellow; continue }
+                $maxShow = 40
+                $shown   = [Math]::Min($results.Count, $maxShow)
+                Write-Host ""
+                Write-Host ("  {0} match(es) for '{1}'{2}:" -f $results.Count, $term,
+                    $(if ($results.Count -gt $maxShow) { " (showing first $maxShow)" } else { "" })) -ForegroundColor Cyan
+                Write-Host "  (* = in queue | [+] = supplementary)" -ForegroundColor DarkCyan
+                Write-Host ""
+                for ($i = 0; $i -lt $shown; $i++) {
+                    $inQ = if ($queue -contains $results[$i].BaseName) { "*" } else { " " }
+                    $src = if ($sourceMap[$results[$i].BaseName] -eq 'Supp') { "[+]" } else { "   " }
+                    Write-Host ("  [{0}{1}] {2} {3}" -f $inQ, ($i+1).ToString().PadLeft(3), $src, $results[$i].BaseName)
+                }
+                if ($results.Count -gt $maxShow) { Write-Host "  ... narrow your search to see more." -ForegroundColor DarkCyan }
+                Write-Host ""
+                $pick = (Read-Host "  Numbers to select (or Enter to search again)").Trim()
+                if (-not $pick) { continue }
+                $nums  = Expand-NumberList -str $pick -max $shown
+                $added = 0
+                foreach ($n in $nums) {
+                    $name = $results[$n-1].BaseName
+                    if ($queue -notcontains $name) { $queue += $name; $added++ }
+                }
+                if ($nums.Count -gt 0) { Write-Host ("  Added {0} game(s). Queue: {1} total." -f $added, $queue.Count) -ForegroundColor Cyan }
+            }
+        }
+        elseif ($choice -eq 'D') {
+            if ($queue.Count -eq 0) {
+                Write-Host "  Queue is empty. Use A to extract all games, or select some first." -ForegroundColor Yellow
+            } else {
+                $done = $true
+            }
+        }
+    }
+
+    if ($queue.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  Final queue ($($queue.Count) game(s)):" -ForegroundColor Green
+        foreach ($g in $queue) {
+            $tag = if ($sourceMap[$g] -eq 'Supp') { "[+] " } else { "" }
+            Write-Host "    + $tag$g" -ForegroundColor Green
+        }
+    } else {
+        Write-Host "  No games selected." -ForegroundColor Yellow
+    }
+
+    $qMain = @($queue | Where-Object { $sourceMap[$_] -ne 'Supp' })
+    $qSupp = @($queue | Where-Object { $sourceMap[$_] -eq  'Supp' })
+    return [PSCustomObject]@{ Main = $qMain; Supp = $qSupp }
 }
 
 # =============================================================================
@@ -1675,14 +1877,17 @@ function Invoke-CursorHideSetup {
 # ZipFile::ExtractToDirectory which throws PathTooLongException for games with
 # deeply-nested internal paths. Includes a zip-slip guard.
 function Expand-ZipFileSafe {
-    param([string]$ZipPath, [string]$DestDir)
+    param([string]$ZipPath, [string]$DestDir, [string]$GameName = '')
 
     # GetFullPath on the (short) base is safe. We deliberately avoid calling
     # GetFullPath on the combined base+entry path: on .NET 4.x (PS 5.1) that
     # throws PathTooLongException before \\?\ is ever applied, defeating the
     # whole purpose of this function.
-    $destFull = [System.IO.Path]::GetFullPath($DestDir).TrimEnd('\')
-    $archive  = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+    $destFull  = [System.IO.Path]::GetFullPath($DestDir).TrimEnd('\')
+    $archive   = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+    $label     = if ($GameName) { $GameName } else { [System.IO.Path]::GetFileNameWithoutExtension($ZipPath) }
+    $fileCount = ($archive.Entries | Where-Object { $_.Name -ne '' }).Count
+    $current   = 0
     try {
         foreach ($entry in $archive.Entries) {
             $rel = $entry.FullName.Replace('/', '\').TrimStart('\')
@@ -1700,6 +1905,14 @@ function Expand-ZipFileSafe {
                 continue
             }
 
+            $current++
+            if ($fileCount -gt 0) {
+                $pct = [Math]::Min(100, [int](($current / $fileCount) * 100))
+                Write-Progress -Activity "Extracting: $label" `
+                               -Status ("File {0} of {1}" -f $current, $fileCount) `
+                               -PercentComplete $pct
+            }
+
             $longTarget = '\\?\' + $destFull + '\' + $rel
             # CreateDirectory is idempotent; no Exists check needed (also avoids TOCTOU).
             [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($longTarget))
@@ -1712,7 +1925,10 @@ function Expand-ZipFileSafe {
                 finally { $dst.Dispose() }
             } finally { $src.Dispose() }
         }
-    } finally { $archive.Dispose() }
+    } finally {
+        $archive.Dispose()
+        Write-Progress -Activity "Extracting: $label" -Completed
+    }
 }
 
 # Extracts NAS ZIPs to a local folder. Tracks state to skip unchanged games.
@@ -1870,7 +2086,7 @@ function Invoke-AutoSync {
                 # Expand-ZipFileSafe uses \\?\ extended-length paths for every file
                 # write, bypassing MAX_PATH. The destination folder does not exist
                 # yet (cleared above); the function creates it during extraction.
-                Expand-ZipFileSafe -ZipPath $zip.FullName -DestDir $extractDir
+                Expand-ZipFileSafe -ZipPath $zip.FullName -DestDir $extractDir -GameName $rawName
                 $syncState[$rawName] = [ordered]@{
                     NasSize = $zip.Length; NasLastModified = $nasModStr
                     LocalPath = $extractDir; SyncedAt = (Get-Date).ToUniversalTime().ToString("o")
@@ -2105,7 +2321,7 @@ function Get-TeknoParrotProfileSet {
     try {
         $apiUri = 'https://api.github.com/repos/teknogods/TeknoParrotUI/git/trees/master?recursive=1'
         $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
-                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.65' }
+                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.66' }
         $tree   = ($resp.Content | ConvertFrom-Json).tree
         $prefix = 'TeknoParrotUi.Common/GameProfiles/'
         foreach ($node in $tree) {
@@ -2167,7 +2383,7 @@ function Get-EggmanDatRelease {
     try {
         $apiUri = 'https://api.github.com/repos/Eggmansworld/Datfiles/releases/tags/teknoparrot'
         $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
-                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.65' }
+                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.66' }
         $rel    = $resp.Content | ConvertFrom-Json
         $asset  = @($rel.assets) | Where-Object { $_.name -like 'TeknoParrot*Collection*RomVault*.zip' } |
                       Select-Object -First 1
@@ -4582,9 +4798,37 @@ while ($true) {
             Write-Log "ERROR: ZIP source not found."; [void](Read-Host "  Press Enter to return to menu"); continue
         }
         if (Test-IsNetworkPath $gamesInstallFolder) {
-            Write-Host ""; Write-Host "ERROR: The staging folder must be on a local drive." -ForegroundColor Red
-            Write-Host "AutoSync extracts games locally for performance. Use e.g. D:\TeknoParrotGames." -ForegroundColor Yellow
-            Write-Log "ERROR: staging folder is a network path."; [void](Read-Host "  Press Enter to return to menu"); continue
+            Write-Host ""
+            Write-Host "  WARNING: The staging folder is on a network path." -ForegroundColor Yellow
+            Write-Host "  Games will be extracted to -- and played from -- the network drive." -ForegroundColor Yellow
+            Write-Host "  A local drive (e.g. D:\TeknoParrotGames) is faster and recommended." -ForegroundColor Yellow
+            Write-Host "  Measuring write speed to the staging drive..." -ForegroundColor Cyan
+            $stagingMbps = Measure-PathWriteThroughput $gamesInstallFolder
+            if ($stagingMbps) {
+                if ($stagingMbps -ge 500) {
+                    Write-Host ("  Write speed: {0} MB/s -- fast enough for smooth extraction and gameplay." -f $stagingMbps) -ForegroundColor Green
+                } elseif ($stagingMbps -ge 150) {
+                    Write-Host ("  Write speed: {0} MB/s -- extraction will work but games may stutter during play." -f $stagingMbps) -ForegroundColor Yellow
+                } else {
+                    Write-Host ("  Write speed: {0} MB/s -- too slow for reliable extraction or play. Local drive strongly recommended." -f $stagingMbps) -ForegroundColor Red
+                }
+                Write-Log "Network staging benchmark: $stagingMbps MB/s"
+            } else {
+                Write-Host "  Write speed could not be measured (staging folder may not exist yet or is read-only)." -ForegroundColor DarkCyan
+                Write-Log "Network staging benchmark: skipped (folder not found or write failed)"
+            }
+            if ($Unattended) {
+                Write-Host "  [Unattended] Continuing with network staging folder." -ForegroundColor Yellow
+                Write-Log "Unattended: network staging folder -- continuing."
+            } else {
+                $contNet = (Read-Host "  Continue with network staging folder? (Y/N)").Trim()
+                if ($contNet.ToUpper() -ne "Y") {
+                    Write-Host "Aborted." -ForegroundColor Yellow
+                    Write-Log "Aborted: user declined network staging folder."
+                    [void](Read-Host "  Press Enter to return to menu"); continue
+                }
+            }
+            Write-Log "Network staging folder accepted: $gamesInstallFolder"
         }
         if (Test-PathInside $gamesInstallFolder $tpRoot) {
             Write-Host ""; Write-Host "ERROR: The staging folder is inside the TeknoParrot folder." -ForegroundColor Red
@@ -4714,57 +4958,70 @@ if ($mode -eq "AutoSync") {
     if ($retroBat) { Write-Host " RetroBat mode: folders extracted as GameName.teknoparrot" -ForegroundColor Cyan }
     Write-Host ""
 
+    # Pre-validate the supplementary source now so we can decide whether to use the
+    # combined picker. If invalid, errors are shown here before the picker runs.
+    $onlySyncListSupp = $null
+    $suppValid        = $false
+    if ($zipSourceSupplementary) {
+        if (-not (Test-Path -LiteralPath $zipSourceSupplementary)) {
+            Write-Host "  WARNING: Supplementary ZIP folder not found: $zipSourceSupplementary -- skipped." -ForegroundColor Yellow
+            Write-Log "AutoSync: supplementary ZIP source not found -- skipped."
+        } elseif ((Test-PathInside $gamesInstallFolder $zipSourceSupplementary) -or
+                  (Test-PathInside $zipSourceSupplementary $gamesInstallFolder)) {
+            Write-Host "  ERROR: Supplementary ZIP folder overlaps the staging folder -- skipped." -ForegroundColor Red
+            Write-Log "AutoSync: supplementary ZIP source overlaps staging folder -- skipped."
+        } elseif (Test-PathInside $zipSourceSupplementary $tpRoot) {
+            Write-Host "  ERROR: Supplementary ZIP folder is inside the TeknoParrot folder -- skipped." -ForegroundColor Red
+            Write-Log "AutoSync: supplementary ZIP source is inside TeknoParrot root -- skipped."
+        } else {
+            $suppValid = $true
+        }
+    }
+
     # If onlySync is already populated from the overrides file, use it directly.
-    # Otherwise drop straight into the interactive picker (which includes All/Browse/Search).
+    # Otherwise use the interactive picker. When the supplementary source is valid,
+    # both libraries are presented in a single combined list (Select-GamesInteractiveCombined).
     if ($onlySyncList.Count -eq 0) {
         if ($Unattended) {
             Write-Host "  [Unattended] Game selection: all unextracted games." -ForegroundColor DarkCyan
             Write-Log "Unattended: game selection = all."
-            # $onlySyncList stays empty -- Invoke-AutoSync treats empty as no filter (all games).
+            # Empty list = no filter; Invoke-AutoSync extracts all unsynced games.
+        } elseif ($suppValid) {
+            # Combined picker: both collection and supplementary shown in one sorted list.
+            $combined         = Select-GamesInteractiveCombined -zipSourceMain $zipSource `
+                                    -zipSourceSupp $zipSourceSupplementary -installFolder $gamesInstallFolder
+            $onlySyncList     = $combined.Main
+            $onlySyncListSupp = $combined.Supp
         } else {
             $onlySyncList = Select-GamesInteractive -zipSource $zipSource -installFolder $gamesInstallFolder
             if ($null -eq $onlySyncList -or $onlySyncList.Count -eq 0) {
-                # Empty return means "All games" was chosen or nothing is left to extract.
-                # Either way, pass an empty list to Invoke-AutoSync (= no filter).
+                # Empty return = "All games" chosen or nothing left to extract; no filter.
                 $onlySyncList = @()
             }
         }
     }
+    # In unattended mode and when overrides pre-set the main list, supplementary
+    # defaults to all unextracted games (empty = no filter).
+    if ($suppValid -and $null -eq $onlySyncListSupp) { $onlySyncListSupp = @() }
 
     $syncStatePath = Join-Path $gamesInstallFolder "TeknoParrot-Manager.syncstate.json"
     $sync = Invoke-AutoSync -zipSource $zipSource -installFolder $gamesInstallFolder -syncStatePath $syncStatePath -noSync $noSyncList -onlySync $onlySyncList -retroBat $retroBat
 
-    # Supplementary source: separate picker and separate sync pass, same staging folder.
+    # Supplementary extraction pass -- selection was already resolved above.
     $syncSupp = $null
-    if ($zipSourceSupplementary -and -not (Test-Path -LiteralPath $zipSourceSupplementary)) {
-        Write-Host "  WARNING: Supplementary ZIP folder not found: $zipSourceSupplementary" -ForegroundColor Yellow
-        Write-Log "AutoSync: supplementary ZIP source not found at $zipSourceSupplementary -- skipped."
-    } elseif ($zipSourceSupplementary -and (
-                  (Test-PathInside $gamesInstallFolder $zipSourceSupplementary) -or
-                  (Test-PathInside $zipSourceSupplementary $gamesInstallFolder))) {
-        Write-Host "  ERROR: Supplementary ZIP folder overlaps the staging folder -- skipped." -ForegroundColor Red
-        Write-Log "AutoSync: supplementary ZIP source overlaps staging folder -- skipped."
-    } elseif ($zipSourceSupplementary -and (Test-PathInside $zipSourceSupplementary $tpRoot)) {
-        Write-Host "  ERROR: Supplementary ZIP folder is inside the TeknoParrot folder -- skipped." -ForegroundColor Red
-        Write-Log "AutoSync: supplementary ZIP source is inside TeknoParrot root -- skipped."
-    } elseif ($zipSourceSupplementary) {
+    if ($suppValid) {
         Write-Host ""
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
-        Write-Host " AutoSync: Supplementary Games" -ForegroundColor Cyan
+        Write-Host " AutoSync: Extracting Supplementary Games" -ForegroundColor Cyan
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         Write-Host " Supplementary source: $zipSourceSupplementary" -ForegroundColor DarkCyan
         Write-Host ""
-        $onlySyncListSupp = @()
         if ($Unattended) {
             Write-Host "  [Unattended] Game selection: all unextracted supplementary games." -ForegroundColor DarkCyan
             Write-Log "Unattended: supplementary game selection = all."
-        } else {
-            $onlySyncListSupp = Select-GamesInteractive -zipSource $zipSourceSupplementary -installFolder $gamesInstallFolder
-            if ($null -eq $onlySyncListSupp -or $onlySyncListSupp.Count -eq 0) {
-                $onlySyncListSupp = @()
-            }
         }
-        $syncSupp = Invoke-AutoSync -zipSource $zipSourceSupplementary -installFolder $gamesInstallFolder -syncStatePath $syncStatePath -noSync $noSyncList -onlySync $onlySyncListSupp -retroBat $retroBat
+        $syncSupp = Invoke-AutoSync -zipSource $zipSourceSupplementary -installFolder $gamesInstallFolder `
+                        -syncStatePath $syncStatePath -noSync $noSyncList -onlySync $onlySyncListSupp -retroBat $retroBat
     }
 
     Write-Host ""

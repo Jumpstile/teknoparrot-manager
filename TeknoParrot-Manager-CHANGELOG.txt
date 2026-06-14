@@ -7,6 +7,32 @@
 
 
 -------------------------------------------------------------------------------
+  v0.66 BETA  (2026-06-14)
+-------------------------------------------------------------------------------
+
+  AutoSync: combined game picker, extraction progress bar, network staging:
+
+  - Game selection for AutoSync now combines the main collection and the
+    supplementary library into a single A-Z picker. Supplementary entries
+    are marked [+] and the header shows per-source counts so you always
+    know the breakdown (e.g. "104 collection, 32 supplementary"). No more
+    two separate menus back to back.
+
+  - A real-time progress bar now shows during every game extraction (file N
+    of total, percentage). Previously the screen showed a blinking cursor with
+    no feedback while large ZIPs were being extracted.
+
+  - The staging folder can now be on a network drive. The previous hard error
+    ("staging folder must be on a local drive") is replaced by a write-speed
+    benchmark: the script measures actual throughput to the staging path, rates
+    it (fast / adequate / too slow), and asks Y/N whether to proceed. Unattended
+    mode continues with a warning. A local drive is still recommended.
+
+  - Supplementary source validation (folder not found, overlaps staging, inside
+    TeknoParrot root) now runs before the picker so errors appear before the
+    user is asked to make a selection, not after.
+
+-------------------------------------------------------------------------------
   v0.65 BETA  (2026-06-14)
 -------------------------------------------------------------------------------
 

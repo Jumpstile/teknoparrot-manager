@@ -136,11 +136,11 @@ The main menu is a persistent loop — after each mode finishes you return to th
 
 ## Game Selection (AutoSync)
 
-After entering your folders, the script filters out games already on disk and shows:
+After entering your folders, the script filters out games already on disk and shows a combined list from all configured sources. When a supplementary library is configured, both collections are merged into one picker and supplementary entries are marked `[+]`:
 
 ```
 347 game(s) already extracted -- not shown.
-136 game(s) available to extract.
+136 game(s) available to extract (104 collection, 32 supplementary [+]).
 
 A) All unextracted games (136)
 L) Browse and select from list (136 games, A-Z)
@@ -149,19 +149,19 @@ D) Done -- proceed with current queue
 ```
 
 - **A** — extract everything not already on disk. Fastest option for a full library.
-- **L** — paginated A-Z list, 20 at a time. Type numbers or ranges (`1,3,5-7`) to add games. Commands: `N` next page, `P` previous, `B` back, `D` done.
+- **L** — paginated A-Z list, 20 at a time. Type numbers or ranges (`1,3,5-7`) to add games. `[+]` marks supplementary titles. Commands: `N` next page, `P` previous, `B` back, `D` done.
 - **S** — search by keyword. Type numbers or ranges to add matches. Type `back` to return or `done` to finish.
 - **D** — proceed with the current queue. You can mix Browse and Search sessions to build a queue before pressing D.
 
-Games already in your queue are marked with `*` in the list.
+Games already in your queue are marked with `*`. A real-time progress bar shows file count and percentage during each extraction.
 
 ---
 
 ## The Staging Folder
 
-AutoSync extracts games into a local staging folder you choose. Rules:
+AutoSync extracts games into a staging folder you choose. Rules:
 
-- Must be on a **local drive** (network extraction is too slow)
+- **Recommended: local drive** for best performance. Network drives are allowed but the script measures write speed and warns if throughput is insufficient for smooth extraction or gameplay.
 - Must **not** be inside the TeknoParrot folder
 - Must **not** overlap the ZIP source folder
 - The script warns if the drive has less than ~1.5x the total ZIP size free
@@ -629,4 +629,4 @@ TeknoParrot must be set up as an emulator in HyperSpin 2 first. The title must c
 
 ---
 
-> v0.65 BETA — test one game after each run. Profiles are backed up automatically at the start of every run.
+> v0.66 BETA — test one game after each run. Profiles are backed up automatically at the start of every run.

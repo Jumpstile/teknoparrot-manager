@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.65 BETA
+  TeknoParrot Manager  |  v0.66 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -54,7 +54,6 @@
     LuigisMansion, MaiMaiGreen, PokkenTournament, ProjectDiva, SonicDashExtreme,
     HydroThunder. These appear as "Registered (code/fuzzy)".
 
-    The
     The supplementary dat can be indexed to show alternate versions of your
     games (different regions, revisions, bonus content). After registration
     completes, a "Game Info" block shows alternate versions and game notes (from
@@ -71,10 +70,19 @@
   - AutoSync extraction. Copies and extracts game ZIPs from a NAS or local
     source into a staging folder you choose, skipping unchanged games. Tracks
     what has been extracted so future runs only touch new or changed ZIPs.
+    A supplementary source (separate optional library) can be configured and
+    is scanned alongside the main collection in the same pick session.
+    The staging folder can be on a network drive; the script measures write
+    speed and warns if throughput is too low for reliable extraction or play.
 
-  - Game selection. When extracting, choose to extract everything, browse an
-    A-Z paginated list, or search by keyword. Games already on disk are
-    filtered from the list automatically.
+  - Game selection. When extracting, all sources are presented in one combined
+    A-Z list. Supplementary-library entries are marked [+] and counts are shown
+    per source so you always know the breakdown. Choose to extract everything,
+    browse an A-Z paginated list, or search by keyword. Games already on disk
+    are filtered from the list automatically.
+
+  - Extraction progress. A real-time progress bar shows file count and
+    percentage during each game's extraction -- no more blinking cursor.
 
   - Smart folder matching. Extraction folders use the same naming convention
     as the ZIP files. If a game was previously extracted under an older naming
@@ -1562,6 +1570,6 @@
 
 
 ===============================================================================
-  v0.65 BETA -- Test one game after each run.
+  v0.66 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================
