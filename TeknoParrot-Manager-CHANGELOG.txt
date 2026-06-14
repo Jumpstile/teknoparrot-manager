@@ -7,6 +7,20 @@
 
 
 -------------------------------------------------------------------------------
+  v0.65 BETA  (2026-06-14)
+-------------------------------------------------------------------------------
+
+  Bug fix -- AutoSync supplementary source prompt now shown correctly:
+
+  - The supplementary ZIP folder prompt was being suppressed whenever the user
+    accepted their saved configuration (answered Y to "Use these settings?").
+    This meant users who set up before the supplementary feature was added
+    could never be prompted to configure it, even though their saved config
+    had no value for it. Fixed so the prompt fires whenever the supplementary
+    source is not yet configured, matching the behaviour of the main
+    collection ZIP source prompt.
+
+-------------------------------------------------------------------------------
   v0.64 BETA  (2026-06-14)
 -------------------------------------------------------------------------------
 

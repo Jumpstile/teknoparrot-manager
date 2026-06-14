@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.64 BETA
+# TeknoParrot Manager  |  v0.65 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -60,7 +60,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.64 BETA" -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.65 BETA" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -2105,7 +2105,7 @@ function Get-TeknoParrotProfileSet {
     try {
         $apiUri = 'https://api.github.com/repos/teknogods/TeknoParrotUI/git/trees/master?recursive=1'
         $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
-                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.64' }
+                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.65' }
         $tree   = ($resp.Content | ConvertFrom-Json).tree
         $prefix = 'TeknoParrotUi.Common/GameProfiles/'
         foreach ($node in $tree) {
@@ -2167,7 +2167,7 @@ function Get-EggmanDatRelease {
     try {
         $apiUri = 'https://api.github.com/repos/Eggmansworld/Datfiles/releases/tags/teknoparrot'
         $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
-                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.64' }
+                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.65' }
         $rel    = $resp.Content | ConvertFrom-Json
         $asset  = @($rel.assets) | Where-Object { $_.name -like 'TeknoParrot*Collection*RomVault*.zip' } |
                       Select-Object -First 1
@@ -3841,7 +3841,7 @@ function Write-ControlsStatus {
     }
 }
 
-Write-Log "Script started (v0.64$(if ($Unattended) { ' [Unattended]' }))."
+Write-Log "Script started (v0.65$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
 # SECTION 1 -- Load or prompt for configuration
@@ -4561,7 +4561,7 @@ while ($true) {
         Write-Host "  Example: W:\ROMS\TeknoParrot Collection" -ForegroundColor DarkCyan
         $zipSource = (Read-Host "  Path").Trim()
     }
-    if ($mode -eq "AutoSync" -and -not $zipSourceSupplementary -and -not $configAccepted) {
+    if ($mode -eq "AutoSync" -and -not $zipSourceSupplementary -and -not $Unattended) {
         Write-Host ""
         Write-Host "  Supplementary games folder (optional)" -ForegroundColor Cyan
         Write-Host "  Point directly at the folder containing the Supplementary .zip files, not a parent folder." -ForegroundColor DarkCyan
