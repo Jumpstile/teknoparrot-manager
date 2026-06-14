@@ -1,0 +1,11 @@
+# Distribution ZIPs -- these go to GitHub Releases, not git history
+TeknoParrot Manager*.zip
+
+# Third-party DLLs -- proprietary, user provides; see CLAUDE.md bundling notes
+ReShade/
+dgVoodoo2/
+
+# User-specific generated files
+config.json
+TeknoParrot-Manager-ActionItems.txt
+*.log

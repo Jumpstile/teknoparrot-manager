@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.51 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.57 BETA  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -7,6 +7,15 @@
   the same type. Full details: TeknoParrot-Manager-README.txt.
 
   BETA -- test one game after each run. Profiles are backed up automatically.
+
+
+  REQUIREMENTS
+  ------------
+  - Windows 10 or 11
+  - PowerShell 5.1 or later (built in to Windows -- no install needed)
+  - TeknoParrot installed with TeknoParrotUi.exe run at least once
+    (so it has downloaded its GameProfiles folder)
+  - Your games as ZIP files on a NAS/drive (for AutoSync) or already extracted
 
 
   BEFORE YOU START
@@ -34,7 +43,8 @@
        1) AutoSync         -- extract ZIPs (e.g. from a NAS), then register.
        2) Register only    -- games are already extracted; just register.
        3) Restore backup   -- roll UserProfiles back to a previous backup.
-       4) Crosshair setup  -- deploy custom cursor images to lightgun games.
+       4) Crosshair setup  -- deploy custom cursor images to lightgun games,
+                             optionally hide the Windows cursor for all guns.
        5) ReShade setup    -- add visual enhancements (optional, see below).
        6) dgVoodoo2 setup  -- fix old DX8/Glide games (optional, see below).
        7) GPU fix setup    -- apply GPU vendor fixes to registered games
@@ -88,6 +98,9 @@
     1. A preview page opens in your browser showing all available designs.
     2. Enter the number of your chosen design for Player 1 and Player 2.
     3. The script copies those images to every registered lightgun game.
+    4. You are asked whether to also hide the Windows cursor for all
+       lightgun games. Answer Y to set the cursor-hide field in each
+       gun game's UserProfile XML (a backup is taken automatically first).
 
   Run mode 4 again any time to change the crosshair design.
 
@@ -334,14 +347,51 @@
                     One click in TeknoParrotUI to confirm the right one.
     Score < 0.40    Listed in ACTION REQUIRED with the full candidate list.
 
-  Folder names are normalised before comparison: years like (2012), version
-  strings like (ver 1.1), and bracket metadata like [NESiCAxLive] are
-  stripped. Meaningful names like (Special Edition) are kept because they
+  Folder names are normalised before comparison: years like (2012), ISO dates
+  like (2015-12-28), decimal versions like (2.10.00), region codes like (JPN),
+  version strings like (ver 1.1), and bracket metadata like [NESiCAxLive] are
+  all stripped. Meaningful names like (Special Edition) are kept because they
   may be the only thing distinguishing two titles.
 
   If a game registers to the wrong profile: delete its .xml from UserProfiles
   and add a forceArchetype entry in overrides.json to pin it on the next run.
   Full details: README section HOW FUZZY MATCHING WORKS.
+
+  DAT FILE INTEGRATION
+
+  During initial setup, the script asks whether you want to configure the
+  Eggman/RomVault dat files:
+
+    D) Download from GitHub now  (~145 MB, one-time)
+       The script queries the GitHub API for the latest release asset, shows
+       the file name and size, asks where to save it, and downloads with a
+       progress bar. If GitHub is unreachable or the download fails, it falls
+       through to a manual path prompt.
+
+    Z) I have the ZIP already -- enter path
+       Point to the TeknoParrot.Collection.*_RomVault.zip on disk. Both the
+       collection dat and supplementary dat are read directly from inside the
+       ZIP -- no extraction needed.
+
+    F) I have separate dat files -- enter paths
+       Enter the collection .dat path, then optionally the supplementary .dat.
+
+    N) Skip (you can always re-run setup later to configure it).
+
+  The script uses the dat's <GameProfile> codes to register three types of
+  games that would otherwise appear in ACTION REQUIRED:
+    - Shared-executable games (NESiCAxLive, etc.) -- dat disambiguates instantly.
+    - Games with no profileIndex match (pcsx2x6, ELF-based games) -- a second
+      pass looks them up by normalized folder name.
+    - Slightly misnamed folders -- fuzzy scan of all dat entries.
+
+  If you enable supplementary dat indexing, the script tracks how many
+  alternate versions of your games exist (different regions, revisions, bonus
+  content). Details will be shown per-game in a future release.
+
+  Games registered via the dat are shown as "Registered (dat/exact)" or
+  "Registered (dat/fuzzy)". The datFile key in overrides.json takes precedence
+  over the setup-configured path. See README -- PER-GAME OVERRIDES.
 
 
   ACTION REQUIRED SUMMARY
@@ -446,7 +496,8 @@
   TeknoParrot-Manager.config.json      Saved folders and settings.
   TeknoParrot-Manager.overrides.json   Optional per-game tweaks (noSync,
                                        onlySync, noPropagate, forceArchetype,
-                                       familyOverride).
+                                       familyOverride, datFile). See README
+                                       section PER-GAME OVERRIDES.
   TeknoParrot-Manager.log              Log of every run.
   TeknoParrot-Manager.syncstate.json   Tracks extracted ZIPs (in staging
                                        folder). Delete to re-extract all.

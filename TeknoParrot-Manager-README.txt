@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.51 BETA
+  TeknoParrot Manager  |  v0.57 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -11,6 +11,44 @@
   backed up automatically at the start of every run.
 
   For a one-page version, see TeknoParrot-Manager-QuickStart.txt.
+
+
+-------------------------------------------------------------------------------
+  CONTENTS
+-------------------------------------------------------------------------------
+
+  FEATURES ................................................... (this page, below)
+  HOW IT WORKS
+  REQUIREMENTS
+  RUNNING THE SCRIPT
+  AUTO-DETECT TEKNOPARROT PATH
+  MODES
+  GAME SELECTION (AutoSync mode)
+  THE STAGING FOLDER
+  REGISTRATION
+  HOW FUZZY MATCHING WORKS
+  CONTROL PROPAGATION
+  DEVICE SURVEY
+  FRONTEND LAUNCHER INTEGRATION
+    LAUNCHBOX
+    HYPERSPIN 2
+    CROSSHAIR SETUP
+    RESHADE VISUAL ENHANCEMENTS
+    DGVOODOO2 LEGACY COMPATIBILITY
+    RETROBAT / BATOCERA
+  THUMBNAIL DOWNLOAD
+  "NOT IN TEKNOPARROT" REPORT
+  CONTROLS STATUS FILE
+  PER-GAME OVERRIDES
+  ACTION REQUIRED SUMMARY
+  UNATTENDED / SCHEDULED MODE
+  GAME REPAIR
+  CONTROLLERS AND INPUT NOTES
+  SAFETY, BACKUP AND LOG
+  RE-RUNNING
+  RESETTING
+  TROUBLESHOOTING
+  WHAT IT DOES NOT DO
 
 
 -------------------------------------------------------------------------------
@@ -28,6 +66,29 @@
     Games below the confidence threshold are flagged with their best-guess
     profile shown, so even manual registration takes one click instead of
     hunting through a long list.
+
+  - Dat file integration (optional). During initial setup, the script offers
+    to download the Eggman/RomVault dat ZIP directly from GitHub (~145 MB) or
+    accept a path to a local copy. The ZIP contains both the collection dat and
+    the supplementary dat; both are read directly from inside the archive with
+    no extraction step. The dat's <GameProfile> code is used as the authoritative
+    source for three registration scenarios: (1) shared-executable games where
+    multiple profiles match the same exe name; (2) games whose exe name does not
+    appear in any GameProfile at all (e.g. pcsx2x6 ELF games, ELF-based Lindbergh
+    titles) -- a second pass looks them up in the dat by normalized folder name;
+    (3) slightly misnamed folders -- a fuzzy scan of all dat entries finds the
+    best match above the auto-register threshold. Games registered via the dat
+    are shown as "Registered (dat/exact)" or "Registered (dat/fuzzy)". The
+    supplementary dat can be indexed to track alternate versions of your games
+    (different regions, revisions, bonus content). The dat path can also be set
+    in overrides.json (datFile key); overrides.json takes precedence.
+
+  - Already-registered detection. Before flagging a shared-executable folder
+    as needing manual registration, the script checks whether any candidate
+    profile already has a UserProfile XML (i.e. was registered via
+    TeknoParrotUI or a previous run). If so, it is marked "already set" and
+    removed from ACTION REQUIRED. Games set up outside the script no longer
+    reappear on every run.
 
   - AutoSync extraction. Copies and extracts game ZIPs from a NAS or local
     source into a staging folder you choose, skipping unchanged games. Tracks
@@ -104,6 +165,8 @@
   - Crosshair setup. Deploys custom P1/P2 crosshair cursor images to all
     registered lightgun games. An HTML preview grid lets you browse 321
     included designs (or your own PNGs) visually before picking by index.
+    Optionally also hides the Windows mouse cursor for all lightgun games
+    by setting the cursor-hide field in each UserProfile XML.
 
   - ReShade visual enhancements. Installs ReShade post-processing into your
     game folders, auto-detecting the correct DLL name from each game's
@@ -241,6 +304,7 @@
        Deploys custom P1/P2 crosshair cursor images to all registered
        lightgun games. Opens an HTML preview grid (321 included designs)
        in your browser so you can browse before picking by number.
+       Optionally hides the Windows cursor for all lightgun games.
        Returns to the menu when done.
 
   5) ReShade setup
@@ -363,6 +427,17 @@
                           These registrations are correct the vast majority
                           of the time; test the game to confirm.
 
+    Registered (dat)    The game folder name matched an entry in the
+                          configured dat file. The dat's authoritative
+                          profile code is used directly, and if the dat
+                          includes an Executable path, that exact binary is
+                          used. This covers three cases: shared-executable
+                          games, games whose exe is not in any GameProfile
+                          (e.g. pcsx2x6 / ELF-based titles), and slightly
+                          misnamed folders (fuzzy dat scan). Configure the
+                          dat path during setup or via datFile in
+                          overrides.json -- see PER-GAME OVERRIDES.
+
     Already set          A profile for this game already exists and is left
                           exactly as it is. The script never overwrites
                           existing work.
@@ -421,11 +496,17 @@
 
   WHAT IS PRESERVED DURING NORMALISATION
 
-  Years like (2012) and version strings like (ver 1.1) or (rev 2) are
-  stripped because they appear in folder names but not in profile codes.
+  The following are always stripped before comparison:
+    - Square-bracket metadata: [Sega NESiCAxLive][TP]
+    - Bare 4-digit years: (2012)
+    - Full ISO date strings: (2015-12-28) -- common in Eggman dat names
+    - Decimal version strings without a ver/v prefix: (2.10.00), (1.00.48)
+    - Known region/territory codes: (JPN), (USA), (EUR), (EXP), and others
+    - Version strings with prefix: (ver 1.1), (rev 2), (v3), (v1.2b)
+    - Parenthesised pure numbers: (2), (12)
+
   Meaningful parenthesised names like (Special Edition) are intentionally
   kept -- they may be the only thing distinguishing two game titles.
-  Square-bracket metadata [Platform][TP] is always stripped.
 
   WHEN FUZZY MATCHING GETS IT WRONG
 
@@ -678,6 +759,14 @@
 
     4. The script copies the chosen images to every registered lightgun game
        folder, reporting the count of games deployed, skipped, and errored.
+
+    5. After deploying, the script asks whether to also hide the Windows
+       mouse cursor for all lightgun games. If you answer Y, it sets the
+       cursor-hide field (HideCursor, "Hide Cursor", or DisableCursor
+       depending on the game) to enabled in each gun game's UserProfile XML.
+       A timestamped backup is taken automatically before any XML is changed.
+       This step is independent -- you can answer N and run mode 4 again
+       later if you change your mind.
 
   ADDING YOUR OWN CROSSHAIRS
 
@@ -1081,7 +1170,10 @@
     - A game not yet extracted -- those appear in "Extract first".
 
   The "not in TeknoParrot" report is specifically for folders where no
-  executable matched any profile at all.
+  executable matched any profile at all. If you have a dat file configured,
+  these folders are also tried against the dat by normalized name (and by
+  fuzzy scan if needed) before they reach this report -- so the list is
+  shorter when a dat is configured.
 
 
 -------------------------------------------------------------------------------
@@ -1137,7 +1229,8 @@
       "onlySync":       ["ZipBaseName1", "ZipBaseName2"],
       "noPropagate":    ["ProfileCode1", "ProfileCode2"],
       "forceArchetype": { "ProfileCode": "ReferenceProfileCode" },
-      "familyOverride": { "ProfileCode": "trackball" }
+      "familyOverride": { "ProfileCode": "trackball" },
+      "datFile":        "C:\\full\\path\\to\\collection.dat"
     }
 
     noSync          ZIP base names (file name without .zip) to always skip
@@ -1164,6 +1257,18 @@
                     Valid values: "button", "driving", "lightgun",
                                   "trackball", "analog", "spinner"
                     Format: { "GameProfileCode": "trackball" }
+
+    datFile         Full path to a No-Intro TeknoParrot dat file (for example
+                    the Eggman/RomVault collection dat). Overrides the dat path
+                    entered during initial setup. When set, the script reads
+                    the dat's <GameProfile> and <Executable> fields and uses
+                    them to auto-register games across three scenarios: shared
+                    executables, exe-less-matched folders, and slightly misnamed
+                    folders (fuzzy fallback). The dat is loaded once before the
+                    main menu loop and reused each run.
+                    Leave this key empty or omit it entirely to use the path
+                    from setup (config.json), or if you do not have a dat file.
+                    Format: "C:\\path\\to\\TeknoParrot Collection.dat"
 
   Leave any key empty or omit it if you do not need it. Bad or missing
   entries are ignored safely.
@@ -1433,10 +1538,12 @@
     are fine), then re-run the export.
 
   HyperSpin 2 export fails with "Could not find a TeknoParrot game list".
-    HyperSpin 2 must have at least one TeknoParrot game already in its library
-    before the script can locate the correct JSON game-list file under the
-    HyperSpin 2 games folder. Add one game manually in HyperSpin 2 first,
-    then re-run.
+    This can happen if the TeknoParrot emulator entry in HyperSpin 2's
+    emulators.json has no GUID and the games folder contains no JSON file
+    whose ROM entries use the .xml extension. Verify that TeknoParrot is
+    fully set up as an emulator in HyperSpin 2 (not just listed but
+    properly configured with its executable path), then try the export
+    again. Check TeknoParrot-Manager.log for the exact failure detail.
 
 
 -------------------------------------------------------------------------------
@@ -1452,6 +1559,6 @@
 
 
 ===============================================================================
-  v0.50 BETA -- Test one game after each run.
+  v0.57 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================

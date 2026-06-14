@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.51 BETA
+# TeknoParrot Manager  |  v0.57 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -60,7 +60,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.51 BETA" -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.57 BETA" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -69,6 +69,11 @@ Write-Host ""
 # folders on failure) and instead of ZipFile::ExtractToDirectory (no long-path
 # support). Expand-ZipFileSafe uses \\?\ prefixes to bypass MAX_PATH.
 Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+# PS 5.1 on older Windows 10 builds defaults to TLS 1.0. Set TLS 1.2 globally
+# so every web request (ReShade version check, thumbnail download, etc.) works
+# without having to re-apply this per function.
+[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
 
 # =============================================================================
 # HELPER FUNCTIONS
@@ -285,6 +290,15 @@ function Get-NormalizedGameKey {
     $s = $s -replace '\(\d{4}\)', ''
     # Remove square-bracket metadata [Taito NESiCAxLive][TP]
     $s = $s -replace '\[[^\]]*\]', ''
+    # Remove full ISO date strings like (2015-12-28) (2007-02-15) used in Eggman dat names.
+    # Must run before the decimal-version strip so (2015-12-28) is removed as a whole.
+    $s = $s -replace '\(\d{4}-\d{2}-\d{2}\)', ''
+    # Remove decimal version strings without ver/v prefix: (2.10.00) (1.00.48)
+    $s = $s -replace '\(\d+\.\d[\d\.]*\)', ''
+    # Remove known region/territory codes used in Eggman dat names.
+    # Explicit list avoids accidentally stripping Roman numerals (II, III) or
+    # meaningful abbreviations (SE) that could appear in game titles.
+    $s = $s -replace '\((JPN|USA|EUR|EXP|JP|US|KOR|AUS|ASI|INTL|ARC|UNK)\)', ''
     # Remove version strings like (ver 1.1) (rev 2) (v3) (v1.2b).
     # Meaningful parenthesised names such as (Special Edition) are intentionally
     # preserved -- they may be the only differentiator between two game titles.
@@ -1170,7 +1184,7 @@ function Invoke-GpuFixSetup {
     $gpuVendor = $null
     $gpuName   = $null
     try {
-        $adapters = @(Get-WmiObject Win32_VideoController -ErrorAction Stop |
+        $adapters = @(Get-CimInstance -ClassName Win32_VideoController -ErrorAction Stop |
             Where-Object { $_.Name -notmatch '(?i)microsoft|virtual|remote' } |
             Sort-Object { if ($_.AdapterRAM) { [double]$_.AdapterRAM } else { 0.0 } } -Descending)
         if ($adapters.Count -gt 0) {
@@ -1463,6 +1477,92 @@ function Invoke-CrosshairSetup {
     if ($skipped -gt 0) { Write-Host ("  Skipped  : {0} (no path or folder not found)" -f $skipped) -ForegroundColor DarkGray }
     if ($errors  -gt 0) { Write-Host ("  Errors   : {0}" -f $errors) -ForegroundColor Red }
     Write-Log ("Crosshairs: done. Deployed={0} Skipped={1} Errors={2}" -f $deployed, $skipped, $errors)
+
+    Write-Host ""
+    $hideCursor = (Read-Host "  Also hide the Windows cursor for all lightgun games? (Y/N)").Trim().ToUpper()
+    if ($hideCursor -eq "Y") {
+        Write-Host ""
+        Invoke-CursorHideSetup -UserProfilesDir $UserProfilesDir
+    }
+}
+
+# =============================================================================
+# Sets the cursor-hide field (HideCursor / "Hide Cursor" / DisableCursor) to 1
+# in every registered lightgun UserProfile. Backs up UserProfiles first since
+# it modifies XMLs. Skips profiles that have no cursor field or are already set.
+function Invoke-CursorHideSetup {
+    param([string]$UserProfilesDir)
+
+    $cursorFields = @("HideCursor", "Hide Cursor", "DisableCursor")
+
+    $backupRoot = Join-Path $UserProfilesDir "FullBackup"
+    $timestamp  = (Get-Date).ToString("yyyy-MM-dd_HH-mm-ss")
+    $backupPath = Join-Path $backupRoot ("CursorHide_" + $timestamp)
+    try {
+        [void][System.IO.Directory]::CreateDirectory($backupRoot)
+        [void][System.IO.Directory]::CreateDirectory($backupPath)
+    } catch {
+        Write-Host "  ERROR: Could not create backup folder: $_" -ForegroundColor Red
+        Write-Log "CursorHide: backup failed -- $_"
+        return
+    }
+    $backupCopyErrs = $null
+    Get-ChildItem -LiteralPath $UserProfilesDir | Where-Object { $_.Name -ne "FullBackup" } |
+        Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable backupCopyErrs
+    if ($backupCopyErrs.Count -gt 0) {
+        Write-Host ("  WARNING: {0} file(s) could not be backed up." -f $backupCopyErrs.Count) -ForegroundColor Yellow
+        Write-Log "CursorHide: backup had $($backupCopyErrs.Count) error(s)"
+    }
+    Write-Host ("  Backup: {0}" -f $backupPath) -ForegroundColor DarkGray
+    Write-Log "CursorHide: backup at $backupPath"
+
+    $updated = 0; $alreadySet = 0; $noField = 0; $errors = 0
+
+    $xmlFiles = Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Directory.Name -ne "FullBackup" }
+
+    foreach ($pf in $xmlFiles) {
+        try {
+            $doc = Read-Xml $pf.FullName
+            if ($null -eq $doc.GameProfile) { continue }
+            $gunNode = $doc.GameProfile.SelectSingleNode("GunGame")
+            if (-not $gunNode -or $gunNode.InnerText -ne "true") { continue }
+
+            $changed = $false
+            $wasSet  = $false
+            foreach ($fieldName in $cursorFields) {
+                $fi = $doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName='$fieldName']")
+                if ($null -eq $fi) { continue }
+                $fv = $fi.SelectSingleNode("FieldValue")
+                if ($null -eq $fv) { continue }
+                if ($fv.InnerText -eq "1") { $wasSet = $true; continue }
+                $fv.InnerText = "1"
+                $changed = $true
+            }
+
+            if ($changed) {
+                Save-Xml $doc $pf.FullName
+                Write-Host ("    Updated : {0}" -f $pf.BaseName) -ForegroundColor Green
+                Write-Log "CursorHide: updated $($pf.BaseName)"
+                $updated++
+            } elseif ($wasSet) {
+                $alreadySet++
+            } else {
+                $noField++
+            }
+        } catch {
+            Write-Host ("    FAILED  {0}: {1}" -f $pf.BaseName, $_) -ForegroundColor Red
+            Write-Log "CursorHide: error on $($pf.BaseName) -- $_"
+            $errors++
+        }
+    }
+
+    Write-Host ""
+    Write-Host ("  Updated  : {0} lightgun game(s)" -f $updated) -ForegroundColor Green
+    if ($alreadySet -gt 0) { Write-Host ("  Already  : {0} (cursor already hidden)" -f $alreadySet) -ForegroundColor DarkGray }
+    if ($noField   -gt 0) { Write-Host ("  No field : {0} (profile has no cursor field)" -f $noField) -ForegroundColor DarkGray }
+    if ($errors    -gt 0) { Write-Host ("  Errors   : {0}" -f $errors) -ForegroundColor Red }
+    Write-Log ("CursorHide: done. Updated={0} AlreadySet={1} NoField={2} Errors={3}" -f $updated, $alreadySet, $noField, $errors)
 }
 
 # =============================================================================
@@ -1718,11 +1818,245 @@ function Build-ProfileIndex {
     return $index
 }
 
+# Streaming XmlReader parser for No-Intro Logiqx XML dat files.
+# Reads <game name="..."><GameProfile>...<Executable>... without loading the
+# entire document into memory -- required for the 584 MB collection dat.
+# Skips <rom> nodes (hash tables) to stay fast.
+# Returns normalised-name -> { ProfileCode, Executable } hashtable.
+function Build-DatIndexFromStream {
+    param([System.IO.Stream]$stream)
+    $index    = @{}
+    $settings = New-Object System.Xml.XmlReaderSettings
+    $settings.IgnoreWhitespace = $true
+    $settings.DtdProcessing    = [System.Xml.DtdProcessing]::Prohibit
+    $reader = [System.Xml.XmlReader]::Create($stream, $settings)
+    try {
+        $gameName    = ''
+        $profCode    = ''
+        $exePath     = ''
+        $insideGame  = $false
+        $currentElem = ''
+        while ($reader.Read()) {
+            if ($reader.NodeType -eq [System.Xml.XmlNodeType]::Element) {
+                $currentElem = $reader.Name
+                if ($currentElem -eq 'game') {
+                    $gameName    = $reader.GetAttribute('name')
+                    $profCode    = ''
+                    $exePath     = ''
+                    $insideGame  = $true
+                } elseif ($currentElem -eq 'rom' -and $insideGame) {
+                    $reader.Skip()   # skip hundreds of hash entries per game
+                    $currentElem = ''
+                }
+            } elseif ($reader.NodeType -eq [System.Xml.XmlNodeType]::Text -and $insideGame) {
+                if     ($currentElem -eq 'GameProfile')                           { $profCode = $reader.Value }
+                elseif ($currentElem -eq 'Executable' -and -not $exePath) { $exePath  = $reader.Value }
+            } elseif ($reader.NodeType -eq [System.Xml.XmlNodeType]::EndElement -and $reader.Name -eq 'game') {
+                $insideGame = $false
+                if ($profCode -and $gameName) {
+                    $normName = Get-NormalizedGameKey $gameName
+                    if ($normName -and -not $index.ContainsKey($normName)) {
+                        $index[$normName] = [pscustomobject]@{
+                            ProfileCode = $profCode.Trim()
+                            Executable  = $exePath.Trim()
+                        }
+                    }
+                }
+            }
+        }
+    } finally {
+        $reader.Close()
+    }
+    return $index
+}
+
+# Reads the collection dat directly from inside the Eggman ZIP without extracting.
+# ZipArchive is opened, the matching entry stream is passed to Build-DatIndexFromStream,
+# and the archive is disposed in the finally block regardless of outcome.
+function Build-DatIndexFromZip {
+    param([string]$zipPath, [string]$entryPattern = '*Collection*_RomVault*.dat')
+    $za = $null
+    try {
+        $za    = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+        $entry = @($za.Entries | Where-Object { $_.FullName -like $entryPattern })[0]
+        if (-not $entry) {
+            Write-Host ("  WARNING: No dat entry matching '{0}' in ZIP." -f $entryPattern) -ForegroundColor Yellow
+            Write-Log ("DatIndex (ZIP): no entry matching '{0}'." -f $entryPattern)
+            return @{}
+        }
+        Write-Host ("    Reading: {0}" -f $entry.Name) -ForegroundColor DarkGray
+        $stream = $entry.Open()
+        try   { return Build-DatIndexFromStream $stream }
+        finally { if ($stream) { $stream.Close() } }
+    } catch {
+        Write-Host ("  WARNING: Could not read dat from ZIP -- {0}" -f $_) -ForegroundColor Yellow
+        Write-Log "DatIndex (ZIP): parse failed -- $_"
+        return @{}
+    } finally {
+        if ($za) { $za.Dispose() }
+    }
+}
+
+# Builds the supplementary index: ProfileCode.ToLower() -> ArrayList of alternate
+# game names. Used to alert the user that a different version exists (e.g. a
+# different region, bonus content, or updated revision for a registered game).
+function Build-SupplementaryIndexFromStream {
+    param([System.IO.Stream]$stream)
+    $index    = @{}
+    $settings = New-Object System.Xml.XmlReaderSettings
+    $settings.IgnoreWhitespace = $true
+    $settings.DtdProcessing    = [System.Xml.DtdProcessing]::Prohibit
+    $reader = [System.Xml.XmlReader]::Create($stream, $settings)
+    try {
+        $gameName    = ''
+        $profCode    = ''
+        $insideGame  = $false
+        $currentElem = ''
+        while ($reader.Read()) {
+            if ($reader.NodeType -eq [System.Xml.XmlNodeType]::Element) {
+                $currentElem = $reader.Name
+                if ($currentElem -eq 'game') {
+                    $gameName   = $reader.GetAttribute('name')
+                    $profCode   = ''
+                    $insideGame = $true
+                } elseif ($currentElem -eq 'rom' -and $insideGame) {
+                    $reader.Skip(); $currentElem = ''
+                }
+            } elseif ($reader.NodeType -eq [System.Xml.XmlNodeType]::Text -and $insideGame) {
+                if ($currentElem -eq 'GameProfile') { $profCode = $reader.Value }
+            } elseif ($reader.NodeType -eq [System.Xml.XmlNodeType]::EndElement -and $reader.Name -eq 'game') {
+                $insideGame = $false
+                if ($profCode -and $gameName) {
+                    $key = $profCode.Trim().ToLower()
+                    if (-not $index.ContainsKey($key)) { $index[$key] = New-Object System.Collections.ArrayList }
+                    [void]$index[$key].Add($gameName.Trim())
+                }
+            }
+        }
+    } finally {
+        $reader.Close()
+    }
+    return $index
+}
+
+function Build-SupplementaryIndex {
+    param([string]$datPath)
+    try {
+        $fs = [System.IO.File]::OpenRead($datPath)
+        try   { return Build-SupplementaryIndexFromStream $fs }
+        finally { if ($fs) { $fs.Close() } }
+    } catch {
+        Write-Host ("  WARNING: Could not parse supplementary dat -- {0}" -f $_) -ForegroundColor Yellow
+        Write-Log "SuppIndex: parse failed -- $_"
+        return @{}
+    }
+}
+
+function Build-SupplementaryIndexFromZip {
+    param([string]$zipPath, [string]$entryPattern = '*Supplementary*_RomVault*.dat')
+    $za = $null
+    try {
+        $za    = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+        $entry = @($za.Entries | Where-Object { $_.FullName -like $entryPattern })[0]
+        if (-not $entry) {
+            Write-Host ("  WARNING: No supplementary entry matching '{0}' in ZIP." -f $entryPattern) -ForegroundColor Yellow
+            Write-Log ("SuppIndex (ZIP): no entry matching '{0}'." -f $entryPattern)
+            return @{}
+        }
+        Write-Host ("    Reading: {0}" -f $entry.Name) -ForegroundColor DarkGray
+        $stream = $entry.Open()
+        try   { return Build-SupplementaryIndexFromStream $stream }
+        finally { if ($stream) { $stream.Close() } }
+    } catch {
+        Write-Host ("  WARNING: Could not read supplementary from ZIP -- {0}" -f $_) -ForegroundColor Yellow
+        Write-Log "SuppIndex (ZIP): parse failed -- $_"
+        return @{}
+    } finally {
+        if ($za) { $za.Dispose() }
+    }
+}
+
+# Parses a No-Intro style TeknoParrot dat file from disk using streaming XmlReader.
+# Replaces the old DOM-based approach which could not handle the 584 MB collection dat.
+# Returns normalised-name -> { ProfileCode, Executable } hashtable.
+function Build-DatIndex {
+    param([string]$datPath)
+    try {
+        $fs = [System.IO.File]::OpenRead($datPath)
+        try   { return Build-DatIndexFromStream $fs }
+        finally { if ($fs) { $fs.Close() } }
+    } catch {
+        Write-Host ("  WARNING: Could not parse dat file -- {0}" -f $_) -ForegroundColor Yellow
+        Write-Log "DatIndex: parse failed -- $_"
+        return @{}
+    }
+}
+
+# Queries the GitHub API for the latest Eggman dat release asset.
+# Uses the "teknoparrot" tag which Eggmansworld updates with each release.
+# Returns [pscustomobject]@{DownloadUrl; FileName; SizeMB} or $null on failure.
+function Get-EggmanDatRelease {
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $apiUri = 'https://api.github.com/repos/Eggmansworld/Datfiles/releases/tags/teknoparrot'
+        $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
+                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.57' }
+        $rel    = $resp.Content | ConvertFrom-Json
+        $asset  = @($rel.assets) | Where-Object { $_.name -like 'TeknoParrot*Collection*RomVault*.zip' } |
+                      Select-Object -First 1
+        if (-not $asset) { return $null }
+        if ($asset.browser_download_url -notmatch '^https://[a-zA-Z0-9._-]+(github\.com|githubusercontent\.com)/') {
+            Write-Log "EggmanDat: unexpected download URL format -- skipping."
+            return $null
+        }
+        return [pscustomobject]@{
+            DownloadUrl = $asset.browser_download_url
+            FileName    = $asset.name
+            SizeMB      = [Math]::Round($asset.size / 1MB, 1)
+        }
+    } catch {
+        Write-Log "EggmanDat: GitHub release query failed -- $_"
+        return $null
+    }
+}
+
+# Downloads the Eggman dat ZIP. Uses BITS (shows a progress bar) with a
+# WebClient fallback. Cleans up any partial file on failure.
+function Invoke-EggmanDatDownload {
+    param([string]$downloadUrl, [string]$savePath)
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $bitsOk = $false
+        try {
+            Start-BitsTransfer -Source $downloadUrl -Destination $savePath `
+                -Description "TeknoParrot Eggman dat" `
+                -DisplayName "Downloading dat ZIP..." `
+                -ErrorAction Stop
+            $bitsOk = $true
+        } catch {
+            Write-Log "EggmanDat: BITS transfer failed (${_}), trying WebClient."
+        }
+        if (-not $bitsOk) {
+            $wc = New-Object System.Net.WebClient
+            $wc.DownloadFile($downloadUrl, $savePath)
+        }
+        return $true
+    } catch {
+        Write-Host ("  Download failed: {0}" -f $_) -ForegroundColor Red
+        Write-Log "EggmanDat: download failed -- $_"
+        try { if (Test-Path -LiteralPath $savePath) { [System.IO.File]::Delete($savePath) } } catch {}
+        return $false
+    }
+}
+
 # Scans the install folder for executables, matches them to profiles, copies
 # matched templates to UserProfiles, and sets GamePath. Existing UserProfiles
 # are left untouched (never overwritten).
 function Register-Games {
-    param([string]$userProfilesDir, [string]$installFolder, [hashtable]$profileIndex)
+    param([string]$userProfilesDir, [string]$installFolder, [hashtable]$profileIndex,
+          [string]$gameProfilesDir = '', [hashtable]$datIndex = $null)
+
+    if ($null -eq $datIndex) { $datIndex = @{} }
 
     $exeFiles       = Get-GameFiles $installFolder
     $registered     = New-Object System.Collections.ArrayList
@@ -1737,7 +2071,7 @@ function Register-Games {
         $relPath    = $exe.FullName.Substring($installBase.Length).TrimStart('\')
         $folderName = ($relPath -split '\\')[0]
         $folderKey  = $folderName -replace '\.(teknoparrot|parrot|game)$', ''   # strip suffix for matching/tracking
-        $allExeFolders[$folderKey] = $true
+        $allExeFolders[$folderKey] = $folderName   # store original name (with any suffix) for path resolution
 
         $key = $exe.Name.ToLower()
         if (-not $profileIndex.ContainsKey($key)) { continue }
@@ -1793,13 +2127,104 @@ function Register-Games {
                     }
                 }
             } else {
-                # Below threshold: flag for manual registration but include best-guess hint.
-                [void]$ambiguous.Add([pscustomobject]@{
-                    Exe       = $exe.FullName
-                    Codes     = ($matchList | ForEach-Object { $_.Code }) -join ", "
-                    BestGuess = if ($null -ne $bestFuzzy) { $bestFuzzy.Code } else { $null }
-                    BestScore = [Math]::Round($bestFuzzyScore, 2)
+                # Bug fix: check if any candidate is already registered (UserProfile
+                # exists) before flagging as ACTION REQUIRED. A game registered via
+                # TeknoParrotUI would have a .xml file even though the fuzzy score is
+                # below the auto-register threshold.
+                $alreadyReg = @($matchList | Where-Object {
+                    Test-Path -LiteralPath (Join-Path $userProfilesDir ($_.Code + ".xml"))
                 })
+                if ($alreadyReg.Count -gt 0) {
+                    foreach ($ar in $alreadyReg) {
+                        if (-not $seenCodes.ContainsKey($ar.Code)) {
+                            [void]$already.Add($ar.Code)
+                            $seenCodes[$ar.Code] = $true
+                        }
+                    }
+                } else {
+                    # Dat-based disambiguation: look up the normalised folder name in the
+                    # dat index. The dat's <GameProfile> is authoritative, so if a match is
+                    # found we use it directly instead of falling through to ambiguous.
+                    $datEntry = if ($datIndex.Count -gt 0) { $datIndex[$normFolder] } else { $null }
+                    if ($null -ne $datEntry) {
+                        $datCode = $datEntry.ProfileCode
+                        # Profile codes are purely alphanumeric; reject anything else to
+                        # prevent path traversal via a crafted dat file.
+                        if ($datCode -match '^[\w]+$') {
+                            $userProfile = Join-Path $userProfilesDir ($datCode + ".xml")
+                            if (-not $seenCodes.ContainsKey($datCode)) {
+                                $seenCodes[$datCode] = $true
+                                if (Test-Path -LiteralPath $userProfile) {
+                                    [void]$already.Add($datCode)
+                                } else {
+                                    $templatePath = Join-Path $gameProfilesDir ($datCode + ".xml")
+                                    $exeToUse     = $exe.FullName
+                                    if (-not [string]::IsNullOrWhiteSpace($datEntry.Executable)) {
+                                        $relExe     = $datEntry.Executable.TrimStart('\', '/')
+                                        # Guard: a bare backslash/slash normalises to an empty
+                                        # string; using it as a path component would match the
+                                        # game folder itself rather than an executable.
+                                        if ($relExe) {
+                                            $folderFull = Join-Path $installBase $folderName
+                                            $datExe     = Join-Path $folderFull $relExe
+                                            # Security: dat-supplied path must stay inside the game folder.
+                                            if (Test-PathInside $datExe $folderFull) {
+                                                if     (Test-Path -LiteralPath $datExe -PathType Leaf) { $exeToUse = $datExe }
+                                                elseif (Test-Path -LiteralPath ($datExe + ".exe")) { $exeToUse = $datExe + ".exe" }
+                                                elseif (Test-Path -LiteralPath ($datExe + ".elf")) { $exeToUse = $datExe + ".elf" }
+                                            }
+                                        }
+                                    }
+                                    if (Test-Path -LiteralPath $templatePath) {
+                                        try {
+                                            $tpl = Read-Xml $templatePath
+                                            $gp  = $tpl.GameProfile.SelectSingleNode("GamePath")
+                                            if ($null -eq $gp) {
+                                                $gp = $tpl.CreateElement("GamePath")
+                                                [void]$tpl.GameProfile.PrependChild($gp)
+                                            }
+                                            $gp.InnerText = $exeToUse
+                                            Save-Xml $tpl $userProfile
+                                            [void]$registered.Add([pscustomobject]@{
+                                                Code     = $datCode
+                                                GamePath = $exeToUse
+                                                DatMatch = $true
+                                            })
+                                            Write-Log "Registered (dat) $datCode -> $exeToUse"
+                                        } catch {
+                                            Write-Host "  FAILED to register $datCode : $_" -ForegroundColor Red
+                                            Write-Log "Register (dat) FAILED $datCode -- $_"
+                                        }
+                                    } else {
+                                        Write-Log ("DatIndex: template '{0}.xml' not in GameProfiles -- flagging as ambiguous." -f $datCode)
+                                        [void]$ambiguous.Add([pscustomobject]@{
+                                            Exe       = $exe.FullName
+                                            Codes     = ($matchList | ForEach-Object { $_.Code }) -join ", "
+                                            BestGuess = $datCode
+                                            BestScore = 1.0
+                                        })
+                                    }
+                                }
+                            }
+                        } else {
+                            Write-Log ("DatIndex: invalid ProfileCode '{0}' -- skipped." -f $datCode)
+                            [void]$ambiguous.Add([pscustomobject]@{
+                                Exe       = $exe.FullName
+                                Codes     = ($matchList | ForEach-Object { $_.Code }) -join ", "
+                                BestGuess = if ($null -ne $bestFuzzy) { $bestFuzzy.Code } else { $null }
+                                BestScore = [Math]::Round($bestFuzzyScore, 2)
+                            })
+                        }
+                    } else {
+                        # Below threshold with no dat entry: flag for manual registration.
+                        [void]$ambiguous.Add([pscustomobject]@{
+                            Exe       = $exe.FullName
+                            Codes     = ($matchList | ForEach-Object { $_.Code }) -join ", "
+                            BestGuess = if ($null -ne $bestFuzzy) { $bestFuzzy.Code } else { $null }
+                            BestScore = [Math]::Round($bestFuzzyScore, 2)
+                        })
+                    }
+                }
             }
             continue
         }
@@ -1835,6 +2260,109 @@ function Register-Games {
         } catch {
             Write-Host "  FAILED to register $code : $_" -ForegroundColor Red
             Write-Log "Register FAILED $code -- $_"
+        }
+    }
+
+    # Second pass: folders that had recognisable executables but none of them were
+    # in $profileIndex (no exe->profile mapping). These are typically games whose
+    # executable name is not listed in any GameProfile XML -- common with pcsx2x6,
+    # ELF-based Lindbergh games, or custom loaders. Try the dat index: first an
+    # exact normalised-name lookup, then a fuzzy scan of all dat keys.
+    if ($datIndex.Count -gt 0 -and $gameProfilesDir) {
+        foreach ($folderKey in @($allExeFolders.Keys | Where-Object { -not $matchedFolders.ContainsKey($_) })) {
+            $origName   = $allExeFolders[$folderKey]
+            $normFolder = Get-NormalizedGameKey $folderKey
+            $datEntry   = $datIndex[$normFolder]
+            $datScore   = 1.0
+
+            # Fuzzy dat scan when no exact name match (handles slightly misnamed folders)
+            if ($null -eq $datEntry) {
+                $bestScore = 0.0
+                $bestKey   = $null
+                foreach ($dk in $datIndex.Keys) {
+                    $score = Get-DiceSimilarity $normFolder $dk
+                    if ($score -gt $bestScore) { $bestScore = $score; $bestKey = $dk }
+                }
+                if ($bestScore -ge $FuzzyAutoThreshold -and $null -ne $bestKey) {
+                    $datEntry = $datIndex[$bestKey]
+                    $datScore = $bestScore
+                }
+            }
+
+            if ($null -eq $datEntry) { continue }
+
+            $datCode = $datEntry.ProfileCode
+            if ($datCode -notmatch '^[\w]+$') {
+                Write-Log ("DatIndex (pass2): invalid ProfileCode '{0}' -- skipped folder {1}" -f $datCode, $folderKey)
+                continue
+            }
+
+            $matchedFolders[$folderKey] = $true   # prevents folder appearing in $unmatched
+
+            if ($seenCodes.ContainsKey($datCode)) { continue }
+            $seenCodes[$datCode] = $true
+
+            $userProfile = Join-Path $userProfilesDir ($datCode + ".xml")
+            if (Test-Path -LiteralPath $userProfile) {
+                [void]$already.Add($datCode)
+                continue
+            }
+
+            $templatePath = Join-Path $gameProfilesDir ($datCode + ".xml")
+            if (-not (Test-Path -LiteralPath $templatePath)) {
+                Write-Log ("DatIndex (pass2): no GameProfiles template for '{0}' -- skipping {1}" -f $datCode, $folderKey)
+                continue
+            }
+
+            # Resolve the exe: dat's Executable path first, then any file in the folder.
+            $folderFull = Join-Path $installBase $origName
+            $exeToUse   = $null
+            if (-not [string]::IsNullOrWhiteSpace($datEntry.Executable)) {
+                $relExe = $datEntry.Executable.TrimStart('\', '/')
+                if ($relExe) {
+                    $datExe = Join-Path $folderFull $relExe
+                    if (Test-PathInside $datExe $folderFull) {
+                        if     (Test-Path -LiteralPath $datExe              -PathType Leaf) { $exeToUse = $datExe }
+                        elseif (Test-Path -LiteralPath ($datExe + ".exe") -PathType Leaf) { $exeToUse = $datExe + ".exe" }
+                        elseif (Test-Path -LiteralPath ($datExe + ".elf") -PathType Leaf) { $exeToUse = $datExe + ".elf" }
+                    }
+                }
+            }
+            if (-not $exeToUse) {
+                # Fallback: pick the first matching file already found for this folder
+                $first = @($exeFiles | Where-Object {
+                    $_.FullName.Length -gt $folderFull.Length -and
+                    $_.FullName.StartsWith($folderFull + '\')
+                })[0]
+                if ($first) { $exeToUse = $first.FullName }
+            }
+            if (-not $exeToUse) {
+                Write-Log ("DatIndex (pass2): no exe found for '{0}' in folder {1}" -f $datCode, $folderKey)
+                continue
+            }
+
+            try {
+                $tpl = Read-Xml $templatePath
+                $gp  = $tpl.GameProfile.SelectSingleNode("GamePath")
+                if ($null -eq $gp) {
+                    $gp = $tpl.CreateElement("GamePath")
+                    [void]$tpl.GameProfile.PrependChild($gp)
+                }
+                $gp.InnerText = $exeToUse
+                Save-Xml $tpl $userProfile
+                $label = if ($datScore -lt 1.0) { "dat/fuzzy $([Math]::Round($datScore,2))" } else { "dat/exact" }
+                [void]$registered.Add([pscustomobject]@{
+                    Code        = $datCode
+                    GamePath    = $exeToUse
+                    DatMatch    = $true
+                    FuzzyScore  = if ($datScore -lt 1.0) { [Math]::Round($datScore, 2) } else { $null }
+                    FuzzyFolder = if ($datScore -lt 1.0) { $origName } else { $null }
+                })
+                Write-Log "Registered ($label) $datCode -> $exeToUse"
+            } catch {
+                Write-Host "  FAILED to register $datCode : $_" -ForegroundColor Red
+                Write-Log "Register (dat pass2) FAILED $datCode -- $_"
+            }
         }
     }
 
@@ -2529,7 +3057,7 @@ function Export-LaunchBoxXml {
             [void]$sb.AppendLine("    <Completed>false</Completed>")
             [void]$sb.AppendLine("    <Hidden>false</Hidden>")
             [void]$sb.AppendLine("    <Enabled>true</Enabled>")
-            [void]$sb.AppendLine("    <Notes>Exported by TeknoParrot Manager v0.51</Notes>")
+            [void]$sb.AppendLine("    <Notes>Exported by TeknoParrot Manager v0.54</Notes>")
             [void]$sb.AppendLine('  </Game>')
             $count++
         } catch {
@@ -2795,7 +3323,7 @@ function Export-HyperSpinJson {
 
     try {
         $allGames = @($existing.ToArray())
-        $json = ConvertTo-Json -InputObject $allGames -Depth 10
+        $json = ConvertTo-Json -InputObject @($allGames) -Depth 10
         [System.IO.File]::WriteAllText($tpGamesPath, $json, (New-Object System.Text.UTF8Encoding $false))
     } catch {
         Write-Host "  ERROR: Could not write games file: $_" -ForegroundColor Red
@@ -2906,9 +3434,6 @@ function Invoke-ThumbnailDownload {
         Write-Log "Thumbnails: all $alreadyCount icons already present."
         return
     }
-
-    # GitHub requires TLS 1.2; PS 5.1 may negotiate an older version by default.
-    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
 
     $baseUrl = "https://raw.githubusercontent.com/teknogods/TeknoParrotUIThumbnails/master/Icons/"
     $fetched  = 0
@@ -3058,7 +3583,7 @@ function Write-ControlsStatus {
     }
 }
 
-Write-Log "Script started (v0.51$(if ($Unattended) { ' [Unattended]' }))."
+Write-Log "Script started (v0.54$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
 # SECTION 1 -- Load or prompt for configuration
@@ -3074,7 +3599,11 @@ $hsDataPath         = $null   # HyperSpin 2 data folder (e.g. C:\ProgramData\Hyp
 $rsSourceDll        = $null   # ReShade 64-bit DLL (bundled at ReShade\ReShade64.dll or user-provided)
 $rsSourceDll32      = $null   # ReShade 32-bit DLL (bundled at ReShade\ReShade32.dll or user-provided)
 $dgSourceDir        = $null   # dgVoodoo2 DLL folder (bundled at dgVoodoo2\ or user-provided)
-$configAccepted     = $false  # true when the user accepted a saved config this run
+$datFilePath          = ''      # optional collection .dat file path (overrides ZIP)
+$eggmanDatZip         = ''      # path to Eggman ZIP (contains both dats + notes)
+$supplementaryDatPath = ''      # supplementary .dat path (when using separate files)
+$includeSupplementary = $false  # whether to build the supplementary index
+$configAccepted       = $false  # true when the user accepted a saved config this run
 
 if ($Unattended -and -not (Test-Path -LiteralPath $configPath)) {
     Write-Host ""
@@ -3095,6 +3624,10 @@ if (Test-Path -LiteralPath $configPath) {
         if ($cfg.ReShadeSourceDll)   { Write-Host "  ReShade DLL (64-bit) : $($cfg.ReShadeSourceDll)" }
         if ($cfg.ReShadeSourceDll32) { Write-Host "  ReShade DLL (32-bit) : $($cfg.ReShadeSourceDll32)" }
         if ($cfg.DgVoodoo2SourceDir) { Write-Host "  dgVoodoo2 folder     : $($cfg.DgVoodoo2SourceDir)" }
+        if ($cfg.EggmanDatZip)          { Write-Host "  Eggman dat ZIP       : $($cfg.EggmanDatZip)" }
+        if ($cfg.DatFilePath)           { Write-Host "  Collection dat       : $($cfg.DatFilePath)" }
+        if ($cfg.SupplementaryDatPath)  { Write-Host "  Supplementary dat    : $($cfg.SupplementaryDatPath)" }
+        if ($cfg.IncludeSupplementary)  { Write-Host "  Supplementary index  : Yes" }
         Write-Host ""
         if ($Unattended) {
             Write-Host "  [Unattended] Using saved settings." -ForegroundColor DarkCyan
@@ -3112,6 +3645,10 @@ if (Test-Path -LiteralPath $configPath) {
             if ($cfg.ReShadeSourceDll)   { $rsSourceDll   = $cfg.ReShadeSourceDll   }
             if ($cfg.ReShadeSourceDll32) { $rsSourceDll32 = $cfg.ReShadeSourceDll32 }
             if ($cfg.DgVoodoo2SourceDir) { $dgSourceDir   = $cfg.DgVoodoo2SourceDir }
+            if ($cfg.EggmanDatZip)         { $eggmanDatZip         = $cfg.EggmanDatZip         }
+            if ($cfg.DatFilePath)          { $datFilePath           = $cfg.DatFilePath           }
+            if ($cfg.SupplementaryDatPath) { $supplementaryDatPath  = $cfg.SupplementaryDatPath  }
+            if ($null -ne $cfg.IncludeSupplementary) { $includeSupplementary = [bool]$cfg.IncludeSupplementary }
             $configAccepted = $true
         }
         Write-Host ""
@@ -3174,6 +3711,98 @@ if (-not $configAccepted -and -not $Unattended) {
     if ($retroBat) { Write-Log "RetroBat mode enabled by user." }
 }
 
+if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
+    Write-Host ""
+    Write-Host "  Eggman dat files (optional)" -ForegroundColor Cyan
+    Write-Host "  Used to accurately register shared-exe games, ELF-based games," -ForegroundColor DarkCyan
+    Write-Host "  and slightly misnamed folders. The ZIP (~145 MB) contains both dats." -ForegroundColor DarkCyan
+    Write-Host "    D) Download from GitHub now  (~145 MB)"
+    Write-Host "    Z) I have the ZIP already -- enter path"
+    Write-Host "    F) I have separate dat files -- enter paths"
+    Write-Host "    N) Skip"
+    $datChoice = (Read-Host "  Choice (D/Z/F/N)").Trim().ToUpper()
+    $raw = ''   # shared path variable for Z and fallback paths
+
+    if ($datChoice -eq 'D') {
+        Write-Host "  Checking GitHub for latest Eggman dat release..." -ForegroundColor Cyan
+        $rel = Get-EggmanDatRelease
+        if ($null -ne $rel) {
+            Write-Host ("  Found: {0}  ({1} MB)" -f $rel.FileName, $rel.SizeMB) -ForegroundColor Cyan
+            $defaultSavePath = Join-Path $PSScriptRoot $rel.FileName
+            $rawSave = (Read-Host "  Save to (Enter for default: $defaultSavePath)").Trim()
+            if (-not $rawSave) { $rawSave = $defaultSavePath }
+            Write-Host "  Downloading -- this may take a few minutes..." -ForegroundColor Cyan
+            $dlOk = Invoke-EggmanDatDownload $rel.DownloadUrl $rawSave
+            if ($dlOk) {
+                $eggmanDatZip = $rawSave
+                Write-Host "  Saved: $rawSave" -ForegroundColor Green
+                Write-Log "EggmanDat: downloaded to $rawSave"
+                $askSupp = (Read-Host "  Also index supplementary dat for alternate version info? (Y/N)").Trim().ToUpper()
+                $includeSupplementary = ($askSupp -eq 'Y')
+                if ($includeSupplementary) { Write-Log "EggmanDat: supplementary indexing enabled." }
+            } else {
+                Write-Host "  Enter path to existing ZIP or .dat file, or press Enter to skip:" -ForegroundColor Yellow
+                $raw      = (Read-Host "  Path").Trim()
+                $datChoice = 'FALLBACK'
+            }
+        } else {
+            Write-Host "  Could not reach GitHub. Enter path to existing ZIP or .dat file, or press Enter to skip:" -ForegroundColor Yellow
+            $raw      = (Read-Host "  Path").Trim()
+            $datChoice = 'FALLBACK'
+        }
+    }
+
+    if ($datChoice -eq 'Z' -or $datChoice -eq 'FALLBACK') {
+        if ($datChoice -eq 'Z') { $raw = (Read-Host "  Path to Eggman dat ZIP").Trim() }
+        if ($raw) {
+            if (Test-Path -LiteralPath $raw) {
+                $ext = [System.IO.Path]::GetExtension($raw).ToLower()
+                if ($ext -eq '.zip') {
+                    $eggmanDatZip = $raw
+                    Write-Log "EggmanDat: ZIP configured at $raw"
+                    $askSupp = (Read-Host "  Also index supplementary dat for alternate version info? (Y/N)").Trim().ToUpper()
+                    $includeSupplementary = ($askSupp -eq 'Y')
+                    if ($includeSupplementary) { Write-Log "EggmanDat: supplementary indexing enabled." }
+                } elseif ($ext -eq '.dat') {
+                    $datFilePath = $raw
+                    Write-Log "Config: datFilePath set to $raw"
+                } else {
+                    Write-Host "  WARNING: Expected .zip or .dat file -- dat skipped." -ForegroundColor Yellow
+                    Write-Log ("EggmanDat: unrecognised file type '{0}' at {1} -- skipped." -f $ext, $raw)
+                }
+            } else {
+                Write-Host "  WARNING: File not found -- dat skipped." -ForegroundColor Yellow
+                Write-Log "EggmanDat: file not found at $raw -- skipped."
+            }
+        }
+    }
+
+    if ($datChoice -eq 'F') {
+        $rawColl = (Read-Host "  Path to collection dat file").Trim()
+        if ($rawColl) {
+            if (Test-Path -LiteralPath $rawColl) {
+                $datFilePath = $rawColl
+                Write-Log "Config: datFilePath (collection) set to $rawColl"
+                Write-Host "  Supplementary dat (press Enter to skip):" -ForegroundColor DarkCyan
+                $rawSupp = (Read-Host "  Path to supplementary dat file").Trim()
+                if ($rawSupp) {
+                    if (Test-Path -LiteralPath $rawSupp) {
+                        $supplementaryDatPath = $rawSupp
+                        $includeSupplementary = $true
+                        Write-Log "Config: supplementaryDatPath set to $rawSupp"
+                    } else {
+                        Write-Host "  WARNING: Supplementary dat not found -- skipped." -ForegroundColor Yellow
+                        Write-Log "Config: supplementary dat not found at $rawSupp -- skipped."
+                    }
+                }
+            } else {
+                Write-Host "  WARNING: Collection dat not found -- dat skipped." -ForegroundColor Yellow
+                Write-Log "Config: collection dat not found at $rawColl -- skipped."
+            }
+        }
+    }
+}
+
 # =============================================================================
 # SECTION 2 -- Validate TeknoParrot root, locate GameProfiles and UserProfiles
 # =============================================================================
@@ -3224,7 +3853,11 @@ $cfgOut = [ordered]@{
     HyperSpinDataPath  = $hsDataPath
     ReShadeSourceDll   = $rsSourceDll
     ReShadeSourceDll32 = $rsSourceDll32
-    DgVoodoo2SourceDir = $dgSourceDir
+    DgVoodoo2SourceDir   = $dgSourceDir
+    EggmanDatZip         = $eggmanDatZip
+    DatFilePath          = $datFilePath
+    SupplementaryDatPath = $supplementaryDatPath
+    IncludeSupplementary = $includeSupplementary
 }
 try {
     [System.IO.File]::WriteAllText($configPath, ($cfgOut | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
@@ -3238,7 +3871,11 @@ Write-Host "Configuration:" -ForegroundColor Green
 Write-Host "  TeknoParrot root     : $tpRoot"
 if ($zipSource)      { Write-Host "  ZIP source folder    : $zipSource" }
 Write-Host "  Games install folder : $gamesInstallFolder"
-if ($retroBat) { Write-Host "  RetroBat mode        : Yes (*.teknoparrot / *.parrot / *.game recognised)" -ForegroundColor Cyan }
+if ($retroBat)             { Write-Host "  RetroBat mode        : Yes (*.teknoparrot / *.parrot / *.game recognised)" -ForegroundColor Cyan }
+if ($eggmanDatZip)         { Write-Host "  Eggman dat ZIP       : $eggmanDatZip" }
+elseif ($datFilePath)      { Write-Host "  Collection dat       : $datFilePath" }
+if ($supplementaryDatPath) { Write-Host "  Supplementary dat    : $supplementaryDatPath" }
+elseif ($includeSupplementary -and $eggmanDatZip) { Write-Host "  Supplementary index  : Yes (from ZIP)" }
 
 # =============================================================================
 # SECTION 4b -- Per-game overrides  (TeknoParrot-Manager.overrides.json)
@@ -3264,12 +3901,13 @@ $familyOverrideMap = @{}
 
 if (-not (Test-Path -LiteralPath $overridesPath)) {
     $ovTemplate = [ordered]@{
-        _comment       = "noSync/onlySync/noPropagate: lists of ZIP base names (without .zip). onlySync acts as a whitelist -- only listed games are extracted. forceArchetype: { GameCode: ArchetypeCode } pins a game to a specific reference game. familyOverride: { GameCode: 'button'|'driving'|'lightgun'|'trackball'|'analog' } overrides the auto-detected control family (fixes mis-classified games like FamilyGuyBowling)."
+        _comment       = "noSync/onlySync/noPropagate: lists of ZIP base names (without .zip). onlySync acts as a whitelist -- only listed games are extracted. forceArchetype: { GameCode: ArchetypeCode } pins a game to a specific reference game. familyOverride: { GameCode: 'button'|'driving'|'lightgun'|'trackball'|'analog' } overrides the auto-detected control family (fixes mis-classified games like FamilyGuyBowling). datFile: full path to a No-Intro TeknoParrot dat file; when set the script uses it to auto-register games with shared executable names (like game.exe) without needing fuzzy matching."
         noSync         = @()
         onlySync       = @()
         noPropagate    = @()
         forceArchetype = [ordered]@{}
         familyOverride = [ordered]@{}
+        datFile        = ""
     }
     try { [System.IO.File]::WriteAllText($overridesPath, ($ovTemplate | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false)) }
     catch { Write-Log "Overrides: could not create template -- $_" }
@@ -3296,15 +3934,88 @@ if (Test-Path -LiteralPath $overridesPath) {
                 }
             }
         }
-        $ovCount = $noSyncList.Count + $onlySyncList.Count + $noPropagateList.Count + $forceArchetypeMap.Count + $familyOverrideMap.Count
-        if ($ovCount -gt 0) {
-            Write-Host ""
-            Write-Host "Overrides: noSync=$($noSyncList.Count), onlySync=$($onlySyncList.Count), noPropagate=$($noPropagateList.Count), pinned=$($forceArchetypeMap.Count), familyOverride=$($familyOverrideMap.Count)" -ForegroundColor DarkCyan
+        if ($ov.datFile -and -not [string]::IsNullOrWhiteSpace([string]$ov.datFile)) {
+            $datFilePath = [string]$ov.datFile
         }
-        Write-Log "Overrides: noSync=$($noSyncList.Count) onlySync=$($onlySyncList.Count) noPropagate=$($noPropagateList.Count) pinned=$($forceArchetypeMap.Count) familyOverride=$($familyOverrideMap.Count)"
+        $ovCount = $noSyncList.Count + $onlySyncList.Count + $noPropagateList.Count + $forceArchetypeMap.Count + $familyOverrideMap.Count
+        if ($ovCount -gt 0 -or $datFilePath) {
+            Write-Host ""
+            $datLabel = if ($datFilePath) { ", datFile=yes" } else { "" }
+            Write-Host "Overrides: noSync=$($noSyncList.Count), onlySync=$($onlySyncList.Count), noPropagate=$($noPropagateList.Count), pinned=$($forceArchetypeMap.Count), familyOverride=$($familyOverrideMap.Count)$datLabel" -ForegroundColor DarkCyan
+        }
+        Write-Log "Overrides: noSync=$($noSyncList.Count) onlySync=$($onlySyncList.Count) noPropagate=$($noPropagateList.Count) pinned=$($forceArchetypeMap.Count) familyOverride=$($familyOverrideMap.Count) datFile=$datFilePath"
     } catch {
         Write-Host "WARNING: could not read TeknoParrot-Manager.overrides.json; ignoring overrides." -ForegroundColor Yellow
         Write-Log "Overrides: parse error -- ignoring."
+    }
+}
+
+# =============================================================================
+# DAT FILE INDEX  (loaded once before the menu loop; reused each run)
+# Priority: EggmanDatZip (ZIP mode) > DatFilePath (direct file mode)
+# =============================================================================
+
+$datIndex  = @{}
+$suppIndex = @{}   # supplementary index: ProfileCode.ToLower() -> ArrayList of alternate names
+
+if ($eggmanDatZip) {
+    if (Test-Path -LiteralPath $eggmanDatZip) {
+        Write-Host ""
+        Write-Host "Loading collection dat from ZIP..." -ForegroundColor DarkGray
+        $datIndex = Build-DatIndexFromZip $eggmanDatZip
+        if ($datIndex.Count -gt 0) {
+            Write-Host ("  Collection dat: {0} games indexed." -f $datIndex.Count) -ForegroundColor DarkGray
+            Write-Log "DatIndex (ZIP): $($datIndex.Count) entries from $eggmanDatZip"
+        } else {
+            Write-Host "  Collection dat: no entries found -- check ZIP contains a *Collection*_RomVault*.dat entry." -ForegroundColor Yellow
+            Write-Log "DatIndex (ZIP): 0 entries from $eggmanDatZip."
+        }
+        if ($includeSupplementary) {
+            Write-Host "  Loading supplementary dat from ZIP..." -ForegroundColor DarkGray
+            $suppIndex = Build-SupplementaryIndexFromZip $eggmanDatZip
+            if ($suppIndex.Count -gt 0) {
+                Write-Host ("  Supplementary dat: {0} alternate entries indexed." -f $suppIndex.Count) -ForegroundColor DarkGray
+                Write-Log "SuppIndex (ZIP): $($suppIndex.Count) entries from $eggmanDatZip"
+            } else {
+                Write-Host "  Supplementary dat: no entries found." -ForegroundColor Yellow
+                Write-Log "SuppIndex (ZIP): 0 entries from $eggmanDatZip."
+            }
+        }
+    } else {
+        Write-Host ("  WARNING: Eggman dat ZIP not found at: {0}" -f $eggmanDatZip) -ForegroundColor Yellow
+        Write-Log "DatIndex (ZIP): file not found at $eggmanDatZip -- skipping."
+    }
+} elseif ($datFilePath) {
+    if (Test-Path -LiteralPath $datFilePath) {
+        Write-Host ""
+        Write-Host "Loading collection dat..." -ForegroundColor DarkGray
+        $datIndex = Build-DatIndex $datFilePath
+        if ($datIndex.Count -gt 0) {
+            Write-Host ("  Collection dat: {0} games indexed." -f $datIndex.Count) -ForegroundColor DarkGray
+            Write-Log "DatIndex: $($datIndex.Count) entries from $datFilePath"
+        } else {
+            Write-Host "  Collection dat: no entries found -- check that the file has <GameProfile> elements." -ForegroundColor Yellow
+            Write-Log "DatIndex: 0 entries from $datFilePath -- file parsed but no valid game entries found."
+        }
+        if ($supplementaryDatPath) {
+            if (Test-Path -LiteralPath $supplementaryDatPath) {
+                Write-Host "  Loading supplementary dat..." -ForegroundColor DarkGray
+                $suppIndex = Build-SupplementaryIndex $supplementaryDatPath
+                if ($suppIndex.Count -gt 0) {
+                    Write-Host ("  Supplementary dat: {0} alternate entries indexed." -f $suppIndex.Count) -ForegroundColor DarkGray
+                    Write-Log "SuppIndex: $($suppIndex.Count) entries from $supplementaryDatPath"
+                } else {
+                    Write-Host "  Supplementary dat: no entries found." -ForegroundColor Yellow
+                    Write-Log "SuppIndex: 0 entries from $supplementaryDatPath."
+                }
+            } else {
+                Write-Host ("  WARNING: Supplementary dat not found at: {0}" -f $supplementaryDatPath) -ForegroundColor Yellow
+                Write-Log "SuppIndex: file not found at $supplementaryDatPath -- skipping."
+            }
+        }
+    } else {
+        Write-Host ("  WARNING: Collection dat not found at: {0}" -f $datFilePath) -ForegroundColor Yellow
+        Write-Log "DatIndex: file not found at $datFilePath -- skipping."
     }
 }
 
@@ -3732,14 +4443,16 @@ Write-Host "--------------------------------------------" -ForegroundColor Cyan
 Write-Host " Scanning: $gamesInstallFolder" -ForegroundColor DarkCyan
 Write-Host ""
 
-$result = Register-Games -userProfilesDir $userProfilesDir -installFolder $gamesInstallFolder -profileIndex $profileIndex
+$result = Register-Games -userProfilesDir $userProfilesDir -installFolder $gamesInstallFolder -profileIndex $profileIndex -gameProfilesDir $gameProfilesDir -datIndex $datIndex
 
 foreach ($r in $result.Registered) {
-    if ($r.FuzzyScore) {
+    if ($r.DatMatch) {
+        Write-Host ("  Registered (dat)       : {0}" -f $r.Code) -ForegroundColor Green
+    } elseif ($r.FuzzyScore) {
         Write-Host ("  Registered (fuzzy {0}) : {1}" -f $r.FuzzyScore, $r.Code) -ForegroundColor Cyan
         Write-Host ("               folder  : {0}" -f $r.FuzzyFolder) -ForegroundColor DarkGray
     } else {
-        Write-Host "  Registered : $($r.Code)" -ForegroundColor Green
+        Write-Host ("  Registered             : {0}" -f $r.Code) -ForegroundColor Green
     }
     Write-Host "               $($r.GamePath)" -ForegroundColor DarkGray
 }
