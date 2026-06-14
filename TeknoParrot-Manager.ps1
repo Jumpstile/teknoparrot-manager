@@ -677,9 +677,9 @@ function Export-CrosshairPreview {
 # RESHADE HELPER FUNCTIONS
 # =============================================================================
 
+# Scans the first 2 MB of a game exe for graphics API imports.
+# Returns the ReShade DLL name to deploy (e.g. "dxgi.dll"), or $null.
 function Get-GameApiDll {
-    # Scans the first 2 MB of a game exe for graphics API imports.
-    # Returns the ReShade DLL name to deploy (e.g. "dxgi.dll"), or $null.
     param([string]$ExePath)
     try {
         $readLen = [int][Math]::Min((Get-Item -LiteralPath $ExePath).Length, 2097152)
@@ -743,9 +743,9 @@ function Get-ExeArchitecture {
     } catch { return $null }
 }
 
+# Paginated picker over registered UserProfile XMLs.
+# Returns an array of FileInfo objects for the user's selection.
 function Select-RegisteredGamesInteractive {
-    # Paginated picker over UserProfile XMLs.
-    # Returns an array of FileInfo objects for the user's selection.
     param([string]$UserProfilesDir)
     $fullBackupDir = Join-Path $UserProfilesDir "FullBackup"
     $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
@@ -793,9 +793,9 @@ function Select-RegisteredGamesInteractive {
     return @($selected)
 }
 
+# Fetches the current ReShade version string from reshade.me.
+# Returns e.g. "6.7.3", or $null if the site cannot be reached.
 function Get-ReShadeLatestVersion {
-    # Fetches the current ReShade version string from reshade.me.
-    # Returns e.g. "6.7.3", or $null if the site cannot be reached.
     try {
         $resp = Invoke-WebRequest -Uri "https://reshade.me" -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
         if ($resp.Content -match 'ReShade_Setup_(\d+\.\d+\.\d+)') { return $Matches[1] }
@@ -803,8 +803,8 @@ function Get-ReShadeLatestVersion {
     return $null
 }
 
+# Full ReShade install wizard: version check, preset choice, game picker, deploy.
 function Invoke-ReShadeSetup {
-    # Full ReShade install wizard: version check, preset choice, game picker, deploy.
     param(
         [string]$UserProfilesDir,
         [string]$SourceDll,      # 64-bit DLL path (caller guarantees it exists)
@@ -1408,6 +1408,10 @@ function Set-Pcsx2CursorPaths {
     }
 }
 
+# Crosshair setup wizard: HTML preview of all crosshair PNGs, P1/P2 picker,
+# deploy selected images to all registered lightgun game folders. Optionally
+# hides the hardware cursor by setting HideCursor/DisableCursor=1 in every
+# lightgun UserProfile (backs up profiles first).
 function Invoke-CrosshairSetup {
     param([string]$UserProfilesDir, [string]$GamesInstallFolder, [string]$TpRoot)
 
@@ -2210,9 +2214,13 @@ function Invoke-EggmanDatDownload {
     }
 }
 
-# Scans the install folder for executables, matches them to profiles, copies
-# matched templates to UserProfiles, and sets GamePath. Existing UserProfiles
-# are left untouched (never overwritten).
+# Scans the install folder for executables and registers matching TeknoParrot
+# profiles by setting <GamePath> in a copy written to UserProfiles. Three passes:
+#   1 -- exe filename -> profile index (built from <ExecutableName> in GameProfile XMLs)
+#   2 -- dat lookup for folders whose exe name is not in any profile
+#   3 -- Dice-match normalised folder name against profile code names, resolving
+#        games with empty <ExecutableName> (BladeStrangers, LuigisMansion, etc.)
+# Existing UserProfiles are never overwritten.
 function Register-Games {
     param([string]$userProfilesDir, [string]$installFolder, [hashtable]$profileIndex,
           [string]$gameProfilesDir = '', [hashtable]$datIndex = $null,
@@ -2632,8 +2640,8 @@ function Repair-GamePaths {
     param([string]$userProfilesDir, [string]$installFolder, [hashtable]$profileIndex)
 
     # Map filename (lowercased) -> list of full paths found on disk.
-    # Uses Get-GameFiles so Linux ELF, disc images, and extension-less binaries
-    # are included alongside Windows EXE files.
+    # Uses Get-GameFiles so .xbe, .dll, ELF, disc images, and extension-less
+    # binaries are all included alongside Windows EXE files.
     $exeMap = @{}
     foreach ($file in (Get-GameFiles $installFolder)) {
         $k = $file.Name.ToLower()
