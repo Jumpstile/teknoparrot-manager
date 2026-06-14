@@ -7,6 +7,22 @@
 
 
 -------------------------------------------------------------------------------
+  v0.67 BETA  (2026-06-14)
+-------------------------------------------------------------------------------
+
+  Bug fix -- D (Done) now accepted with an empty queue in game pickers:
+
+  - Pressing D with no games in the queue now proceeds correctly instead of
+    blocking with "Queue is empty." D always means "proceed with whatever I
+    selected"; an empty queue means zero games are extracted. Use A to
+    extract everything.
+
+  - In the combined picker (main + supplementary), D with no supplementary
+    games in the queue correctly skips supplementary extraction. Previously
+    the only way to skip supplementary was to not configure a supplementary
+    source at all.
+
+-------------------------------------------------------------------------------
   v0.66 BETA  (2026-06-14)
 -------------------------------------------------------------------------------
 

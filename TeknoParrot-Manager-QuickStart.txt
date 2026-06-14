@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.66 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.67 BETA  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -59,7 +59,7 @@
        A) All unextracted games    -- extract everything not yet on disk.
        L) Browse and select        -- paginated A-Z list, pick by number.
        S) Search by keyword        -- filter by name, pick by number.
-       D) Done                     -- proceed with your current selection.
+       D) Done                     -- proceed with your selection (empty queue = skip).
 
      Games already in your staging folder are automatically filtered out.
      In Browse or Search, type numbers or ranges (e.g. 1,3,5-7) to add

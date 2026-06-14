@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.66 BETA
+# TeknoParrot Manager  |  v0.67 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -60,7 +60,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.66 BETA" -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.67 BETA" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -446,8 +446,10 @@ function Expand-NumberList {
 #   L (Browse) -- paginated A-Z list, N/P to page, pick by number
 #   S (Search) -- keyword filter, pick by number from results
 #   D (Done)   -- finish and proceed with the current queue
-# Browse and Search both feed into the same queue. Returns array of base names,
-# or an empty array to mean "all games".
+# Browse and Search both feed into the same queue. Returns:
+#   $null   -- D pressed with no games selected (skip extraction)
+#   @()     -- A pressed; no filter (extract all)
+#   @(...)  -- explicit whitelist of ZIP BaseName strings
 function Select-GamesInteractive {
     param([string]$zipSource, [string]$installFolder)
 
@@ -625,11 +627,7 @@ function Select-GamesInteractive {
 
         # -- DONE ------------------------------------------------------------
         elseif ($choice -eq 'D') {
-            if ($queue.Count -eq 0) {
-                Write-Host "  Queue is empty. Use A to extract all games, or select some first." -ForegroundColor Yellow
-            } else {
-                $done = $true
-            }
+            $done = $true
         }
     }
 
@@ -637,19 +635,20 @@ function Select-GamesInteractive {
         Write-Host ""
         Write-Host "  Final queue ($($queue.Count) game(s)):" -ForegroundColor Green
         foreach ($g in $queue) { Write-Host "    + $g" -ForegroundColor Green }
-    } else {
-        Write-Host "  No games selected." -ForegroundColor Yellow
+        return ,$queue
     }
-
-    return ,$queue
+    Write-Host "  No games selected." -ForegroundColor Yellow
+    return $null   # $null = skip this source; @() (from A) = no filter = extract all
 }
 
 # Combined game picker for AutoSync when both main and supplementary sources are configured.
 # Scans both ZIP sources, merges the unextracted lists into one sorted display, and lets the
 # user select from either library in a single A/L/S/D session. Supplementary entries are
 # marked [+] so the user can tell the two libraries apart at a glance.
-# Returns a PSCustomObject { Main; Supp } where each value is an array of ZIP BaseName strings.
-# An empty array means "no filter -- extract all from that source."
+# Returns a PSCustomObject { Main; Supp }. Each property is:
+#   $null   -- skip that source (D pressed with nothing selected for it)
+#   @()     -- no filter; extract all (A pressed)
+#   @(...)  -- explicit whitelist of ZIP BaseName strings to extract
 function Select-GamesInteractiveCombined {
     param([string]$zipSourceMain, [string]$zipSourceSupp, [string]$installFolder)
 
@@ -791,11 +790,7 @@ function Select-GamesInteractiveCombined {
             }
         }
         elseif ($choice -eq 'D') {
-            if ($queue.Count -eq 0) {
-                Write-Host "  Queue is empty. Use A to extract all games, or select some first." -ForegroundColor Yellow
-            } else {
-                $done = $true
-            }
+            $done = $true
         }
     }
 
@@ -812,7 +807,11 @@ function Select-GamesInteractiveCombined {
 
     $qMain = @($queue | Where-Object { $sourceMap[$_] -ne 'Supp' })
     $qSupp = @($queue | Where-Object { $sourceMap[$_] -eq  'Supp' })
-    return [PSCustomObject]@{ Main = $qMain; Supp = $qSupp }
+    # $null = skip that source (D with no selection); @() = no filter = all (from A only).
+    return [PSCustomObject]@{
+        Main = if ($qMain.Count -gt 0) { $qMain } else { $null }
+        Supp = if ($qSupp.Count -gt 0) { $qSupp } else { $null }
+    }
 }
 
 # =============================================================================
@@ -1884,11 +1883,12 @@ function Expand-ZipFileSafe {
     # throws PathTooLongException before \\?\ is ever applied, defeating the
     # whole purpose of this function.
     $destFull  = [System.IO.Path]::GetFullPath($DestDir).TrimEnd('\')
-    $archive   = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
     $label     = if ($GameName) { $GameName } else { [System.IO.Path]::GetFileNameWithoutExtension($ZipPath) }
-    $fileCount = ($archive.Entries | Where-Object { $_.Name -ne '' }).Count
-    $current   = 0
+    $archive   = $null
     try {
+        $archive   = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+        $fileCount = ($archive.Entries | Where-Object { $_.Name -ne '' }).Count
+        $current   = 0
         foreach ($entry in $archive.Entries) {
             $rel = $entry.FullName.Replace('/', '\').TrimStart('\')
 
@@ -1926,7 +1926,7 @@ function Expand-ZipFileSafe {
             } finally { $src.Dispose() }
         }
     } finally {
-        $archive.Dispose()
+        if ($archive) { $archive.Dispose() }
         Write-Progress -Activity "Extracting: $label" -Completed
     }
 }
@@ -2321,7 +2321,7 @@ function Get-TeknoParrotProfileSet {
     try {
         $apiUri = 'https://api.github.com/repos/teknogods/TeknoParrotUI/git/trees/master?recursive=1'
         $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
-                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.66' }
+                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.67' }
         $tree   = ($resp.Content | ConvertFrom-Json).tree
         $prefix = 'TeknoParrotUi.Common/GameProfiles/'
         foreach ($node in $tree) {
@@ -2383,7 +2383,7 @@ function Get-EggmanDatRelease {
     try {
         $apiUri = 'https://api.github.com/repos/Eggmansworld/Datfiles/releases/tags/teknoparrot'
         $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
-                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.66' }
+                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.67' }
         $rel    = $resp.Content | ConvertFrom-Json
         $asset  = @($rel.assets) | Where-Object { $_.name -like 'TeknoParrot*Collection*RomVault*.zip' } |
                       Select-Object -First 1
@@ -4057,7 +4057,7 @@ function Write-ControlsStatus {
     }
 }
 
-Write-Log "Script started (v0.65$(if ($Unattended) { ' [Unattended]' }))."
+Write-Log "Script started (v0.67$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
 # SECTION 1 -- Load or prompt for configuration
@@ -4978,65 +4978,91 @@ if ($mode -eq "AutoSync") {
         }
     }
 
+    # Picker return conventions (also used by overrides and unattended paths):
+    #   $null   = skip this source entirely (user pressed D with nothing selected)
+    #   @()     = no filter; extract all unextracted games (A was pressed, or unattended)
+    #   @(...)  = whitelist; extract only the named games
+    #
     # If onlySync is already populated from the overrides file, use it directly.
-    # Otherwise use the interactive picker. When the supplementary source is valid,
+    # Otherwise run the interactive picker. When the supplementary source is valid,
     # both libraries are presented in a single combined list (Select-GamesInteractiveCombined).
+    $combinedPickerRan = $false
     if ($onlySyncList.Count -eq 0) {
         if ($Unattended) {
             Write-Host "  [Unattended] Game selection: all unextracted games." -ForegroundColor DarkCyan
             Write-Log "Unattended: game selection = all."
-            # Empty list = no filter; Invoke-AutoSync extracts all unsynced games.
         } elseif ($suppValid) {
             # Combined picker: both collection and supplementary shown in one sorted list.
-            $combined         = Select-GamesInteractiveCombined -zipSourceMain $zipSource `
-                                    -zipSourceSupp $zipSourceSupplementary -installFolder $gamesInstallFolder
-            $onlySyncList     = $combined.Main
-            $onlySyncListSupp = $combined.Supp
+            $combined          = Select-GamesInteractiveCombined -zipSourceMain $zipSource `
+                                     -zipSourceSupp $zipSourceSupplementary -installFolder $gamesInstallFolder
+            $onlySyncList      = $combined.Main
+            $onlySyncListSupp  = $combined.Supp
+            $combinedPickerRan = $true
         } else {
             $onlySyncList = Select-GamesInteractive -zipSource $zipSource -installFolder $gamesInstallFolder
-            if ($null -eq $onlySyncList -or $onlySyncList.Count -eq 0) {
-                # Empty return = "All games" chosen or nothing left to extract; no filter.
-                $onlySyncList = @()
-            }
+            # $null means user pressed D with nothing selected -- leave as $null (skip).
+            # @() means A was pressed (no filter). Other values are explicit selections.
         }
     }
-    # In unattended mode and when overrides pre-set the main list, supplementary
-    # defaults to all unextracted games (empty = no filter).
-    if ($suppValid -and $null -eq $onlySyncListSupp) { $onlySyncListSupp = @() }
+    # When the combined picker did not run (unattended, or overrides pre-set the main list),
+    # default supplementary to all unextracted games. When the picker ran, $onlySyncListSupp
+    # is already set by the picker ($null = skip, @() = all, @(...) = specific).
+    if ($suppValid -and -not $combinedPickerRan -and $null -eq $onlySyncListSupp) {
+        $onlySyncListSupp = @()
+    }
 
     $syncStatePath = Join-Path $gamesInstallFolder "TeknoParrot-Manager.syncstate.json"
-    $sync = Invoke-AutoSync -zipSource $zipSource -installFolder $gamesInstallFolder -syncStatePath $syncStatePath -noSync $noSyncList -onlySync $onlySyncList -retroBat $retroBat
+
+    $sync = $null
+    if ($null -ne $onlySyncList) {
+        $sync = Invoke-AutoSync -zipSource $zipSource -installFolder $gamesInstallFolder `
+                    -syncStatePath $syncStatePath -noSync $noSyncList -onlySync $onlySyncList -retroBat $retroBat
+    } else {
+        Write-Host "  No games selected -- skipping main extraction." -ForegroundColor Yellow
+        Write-Log "AutoSync: main extraction skipped -- no games selected."
+    }
 
     # Supplementary extraction pass -- selection was already resolved above.
     $syncSupp = $null
     if ($suppValid) {
         Write-Host ""
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
-        Write-Host " AutoSync: Extracting Supplementary Games" -ForegroundColor Cyan
+        Write-Host " AutoSync: Supplementary Games" -ForegroundColor Cyan
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         Write-Host " Supplementary source: $zipSourceSupplementary" -ForegroundColor DarkCyan
         Write-Host ""
-        if ($Unattended) {
-            Write-Host "  [Unattended] Game selection: all unextracted supplementary games." -ForegroundColor DarkCyan
-            Write-Log "Unattended: supplementary game selection = all."
+        if ($null -ne $onlySyncListSupp) {
+            if ($Unattended) {
+                Write-Host "  [Unattended] Game selection: all unextracted supplementary games." -ForegroundColor DarkCyan
+                Write-Log "Unattended: supplementary game selection = all."
+            }
+            $syncSupp = Invoke-AutoSync -zipSource $zipSourceSupplementary -installFolder $gamesInstallFolder `
+                            -syncStatePath $syncStatePath -noSync $noSyncList -onlySync $onlySyncListSupp -retroBat $retroBat
+        } else {
+            Write-Host "  No supplementary games selected -- skipping." -ForegroundColor Yellow
+            Write-Log "AutoSync: supplementary extraction skipped -- no games selected."
         }
-        $syncSupp = Invoke-AutoSync -zipSource $zipSourceSupplementary -installFolder $gamesInstallFolder `
-                        -syncStatePath $syncStatePath -noSync $noSyncList -onlySync $onlySyncListSupp -retroBat $retroBat
     }
 
     Write-Host ""
     Write-Host "Extraction summary:" -ForegroundColor Green
-    if ($syncSupp) { Write-Host "  Collection:" -ForegroundColor Cyan }
-    Write-Host "  Extracted  : $($sync.Synced)"   -ForegroundColor Green
-    Write-Host "  Up to date : $($sync.UpToDate)"  -ForegroundColor DarkGray
-    if ($sync.Skipped -gt 0) { Write-Host "  Skipped    : $($sync.Skipped)  (per-game override)" -ForegroundColor DarkGray }
-    if ($sync.Failed  -gt 0) { Write-Host "  Failed     : $($sync.Failed)  (see TeknoParrot-Manager.log)" -ForegroundColor Red }
+    if ($sync -and $syncSupp) { Write-Host "  Collection:" -ForegroundColor Cyan }
+    if ($sync) {
+        Write-Host "  Extracted  : $($sync.Synced)"   -ForegroundColor Green
+        Write-Host "  Up to date : $($sync.UpToDate)"  -ForegroundColor DarkGray
+        if ($sync.Skipped -gt 0) { Write-Host "  Skipped    : $($sync.Skipped)  (per-game override)" -ForegroundColor DarkGray }
+        if ($sync.Failed  -gt 0) { Write-Host "  Failed     : $($sync.Failed)  (see TeknoParrot-Manager.log)" -ForegroundColor Red }
+    } else {
+        Write-Host "  Collection : skipped (no games selected)" -ForegroundColor DarkGray
+    }
     if ($syncSupp) {
         Write-Host "  Supplementary:" -ForegroundColor Cyan
         Write-Host "  Extracted  : $($syncSupp.Synced)"   -ForegroundColor Green
         Write-Host "  Up to date : $($syncSupp.UpToDate)"  -ForegroundColor DarkGray
         if ($syncSupp.Skipped -gt 0) { Write-Host "  Skipped    : $($syncSupp.Skipped)  (per-game override)" -ForegroundColor DarkGray }
         if ($syncSupp.Failed  -gt 0) { Write-Host "  Failed     : $($syncSupp.Failed)  (see TeknoParrot-Manager.log)" -ForegroundColor Red }
+    } elseif ($suppValid) {
+        Write-Host "  Supplementary: skipped (no games selected)" -ForegroundColor DarkGray
     }
 }
 

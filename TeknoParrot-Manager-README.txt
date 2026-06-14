@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.66 BETA
+  TeknoParrot Manager  |  v0.67 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -354,7 +354,8 @@
   D -- Done (from the main menu)
        Proceeds with whatever is in the queue. You can freely switch between
        Browse and Search to build up a queue across multiple searches before
-       pressing D.
+       pressing D. If the queue is empty, D exits with no games selected --
+       extraction is skipped for that source. Use A to extract all games.
 
   At any point the header shows how many games are in the queue. After
   pressing D, the full queue is listed before extraction starts.
@@ -1570,6 +1571,6 @@
 
 
 ===============================================================================
-  v0.66 BETA -- Test one game after each run.
+  v0.67 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================
