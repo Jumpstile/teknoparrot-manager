@@ -7,6 +7,21 @@
 
 
 -------------------------------------------------------------------------------
+  v0.63 BETA  (2026-06-14)
+-------------------------------------------------------------------------------
+
+  AutoSync ZIP source: subdirectory hint and clearer prompts:
+
+  - When a ZIP source folder contains zero ZIP files, the script now scans
+    one level of subdirectories. If any subdirectory contains ZIPs, a hint
+    is printed listing those subdirectories with their ZIP counts. This catches
+    the common case where a user points at a parent folder (e.g. "ROMS") rather
+    than the specific subfolder (e.g. "ROMS\TeknoParrot Collection").
+  - The ZIP source path prompts now include a one-line note that the path must
+    point directly at the folder containing the ZIP files, plus an example path.
+    Applies to both the main collection prompt and the supplementary source prompt.
+
+-------------------------------------------------------------------------------
   v0.62 BETA  (2026-06-14)
 -------------------------------------------------------------------------------
 

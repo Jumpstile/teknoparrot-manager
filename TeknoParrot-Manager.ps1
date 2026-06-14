@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.62 BETA
+# TeknoParrot Manager  |  v0.63 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -60,7 +60,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.62 BETA" -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.63 BETA" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -423,6 +423,16 @@ function Select-GamesInteractive {
 
     if ($all.Count -eq 0) {
         Write-Host "  No game ZIPs found in source folder." -ForegroundColor Yellow
+        $subdirHits = @(Get-ChildItem -LiteralPath $zipSource -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            $c = (Get-ChildItem -LiteralPath $_.FullName -Filter *.zip -ErrorAction SilentlyContinue | Measure-Object).Count
+            if ($c -gt 0) { [PSCustomObject]@{ Path = $_.FullName; Count = $c } }
+        })
+        if ($subdirHits.Count -gt 0) {
+            Write-Host "  Tip: ZIPs found one level down -- point the source path at one of these directly:" -ForegroundColor Cyan
+            foreach ($sd in $subdirHits) {
+                Write-Host "    $($sd.Path)  ($($sd.Count) ZIPs)" -ForegroundColor DarkCyan
+            }
+        }
         return @()
     }
 
@@ -1714,6 +1724,16 @@ function Invoke-AutoSync {
     $zipFiles = Get-ChildItem -LiteralPath $zipSource -Filter *.zip -ErrorAction SilentlyContinue
     if (-not $zipFiles -or $zipFiles.Count -eq 0) {
         Write-Host "  No ZIP files found in source. Skipping extraction." -ForegroundColor Yellow
+        $subdirHits = @(Get-ChildItem -LiteralPath $zipSource -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            $c = (Get-ChildItem -LiteralPath $_.FullName -Filter *.zip -ErrorAction SilentlyContinue | Measure-Object).Count
+            if ($c -gt 0) { [PSCustomObject]@{ Path = $_.FullName; Count = $c } }
+        })
+        if ($subdirHits.Count -gt 0) {
+            Write-Host "  Tip: ZIPs found one level down -- point the source path at one of these directly:" -ForegroundColor Cyan
+            foreach ($sd in $subdirHits) {
+                Write-Host "    $($sd.Path)  ($($sd.Count) ZIPs)" -ForegroundColor DarkCyan
+            }
+        }
         return @{ Synced = 0; UpToDate = 0; Failed = 0; Skipped = 0 }
     }
 
@@ -4444,12 +4464,17 @@ while ($true) {
     }
 
     if ($mode -eq "AutoSync" -and -not $zipSource) {
-        $zipSource = (Read-Host "Enter ZIP source folder (NAS or local, containing .zip files)").Trim()
+        Write-Host ""
+        Write-Host "  Main collection ZIP folder" -ForegroundColor Cyan
+        Write-Host "  Point directly at the folder containing the .zip files, not a parent folder." -ForegroundColor DarkCyan
+        Write-Host "  Example: W:\ROMS\TeknoParrot Collection" -ForegroundColor DarkCyan
+        $zipSource = (Read-Host "  Path").Trim()
     }
     if ($mode -eq "AutoSync" -and -not $zipSourceSupplementary -and -not $configAccepted) {
         Write-Host ""
         Write-Host "  Supplementary games folder (optional)" -ForegroundColor Cyan
-        Write-Host "  Path to the TeknoParrot Supplementary ZIP folder, if you have it." -ForegroundColor DarkCyan
+        Write-Host "  Point directly at the folder containing the Supplementary .zip files, not a parent folder." -ForegroundColor DarkCyan
+        Write-Host "  Example: W:\ROMS\TeknoParrot Supplementary" -ForegroundColor DarkCyan
         $rawSupp = (Read-Host "  Path (or press Enter to skip)").Trim()
         if ($rawSupp -and (Test-Path -LiteralPath $rawSupp)) {
             $zipSourceSupplementary = $rawSupp
