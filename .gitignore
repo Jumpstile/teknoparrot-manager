@@ -5,6 +5,9 @@ TeknoParrot Manager*.zip
 ReShade/
 dgVoodoo2/
 
+# Claude Code instruction file -- contains local paths, not for public repos
+CLAUDE.md
+
 # User-specific generated files
 config.json
 TeknoParrot-Manager-ActionItems.txt
