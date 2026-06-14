@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.57 BETA
+# TeknoParrot Manager  |  v0.58 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -60,7 +60,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.57 BETA" -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.58 BETA" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -1347,6 +1347,52 @@ function Invoke-GpuFixSetup {
 
 # =============================================================================
 # Full crosshair setup flow: validate collection, preview, pick, deploy.
+# Updates cursor_path under [USB Port 1 guncon2] and [USB Port 2 guncon2] in PCSX2.ini.
+# Handles sections that already have cursor_path (replaces), sections that exist without
+# it (inserts before the next section header), and missing sections (appends at EOF).
+function Set-Pcsx2CursorPaths {
+    param([string]$IniPath, [string]$P1Path, [string]$P2Path)
+    try {
+        $lines   = [System.IO.File]::ReadAllLines($IniPath)
+        $out     = New-Object System.Collections.Generic.List[string]
+        $targets = @{ 'usb port 1 guncon2' = $P1Path; 'usb port 2 guncon2' = $P2Path }
+        $done    = @{ 'usb port 1 guncon2' = $false;  'usb port 2 guncon2' = $false  }
+        $sect    = ''
+
+        foreach ($ln in $lines) {
+            $t = $ln.Trim()
+            if ($t -match '^\[(.+)\]$') {
+                if ($targets.ContainsKey($sect) -and -not $done[$sect]) {
+                    $out.Add("cursor_path = $($targets[$sect])")
+                    $done[$sect] = $true
+                }
+                $sect = $matches[1].ToLower()
+                $out.Add($ln); continue
+            }
+            if ($t -match '^cursor_path\s*=' -and $targets.ContainsKey($sect)) {
+                $out.Add("cursor_path = $($targets[$sect])")
+                $done[$sect] = $true; continue
+            }
+            $out.Add($ln)
+        }
+        # Handle last section (no following header to trigger flush)
+        if ($targets.ContainsKey($sect) -and -not $done[$sect]) {
+            $out.Add("cursor_path = $($targets[$sect])")
+            $done[$sect] = $true
+        }
+        # Append sections that were never present in the file
+        foreach ($tgt in ($done.Keys | Where-Object { -not $done[$_] })) {
+            $hdr = if ($tgt -eq 'usb port 1 guncon2') { '[USB Port 1 guncon2]' } else { '[USB Port 2 guncon2]' }
+            $out.Add($hdr); $out.Add("cursor_path = $($targets[$tgt])")
+        }
+        [System.IO.File]::WriteAllLines($IniPath, $out.ToArray(), (New-Object System.Text.UTF8Encoding $false))
+        Write-Log "Crosshairs: updated PCSX2.ini at $IniPath"
+    } catch {
+        Write-Host ("    WARNING: Could not update PCSX2.ini -- {0}" -f $_) -ForegroundColor Yellow
+        Write-Log "Crosshairs: PCSX2.ini update failed -- $_"
+    }
+}
+
 function Invoke-CrosshairSetup {
     param([string]$UserProfilesDir, [string]$GamesInstallFolder, [string]$TpRoot)
 
@@ -1422,10 +1468,22 @@ function Invoke-CrosshairSetup {
                   Select-Object -First 1 -ExpandProperty FullName
     }
 
+    # Locate pcsx2x6 folder -- search common names then any pcsx2-prefixed subfolder
+    $pcsx2Dir = $null
+    foreach ($candidate in @("pcsx2x6","PCSX2x6","pcsx2","PCSX2")) {
+        $try = Join-Path $TpRoot $candidate
+        if (Test-Path -LiteralPath $try) { $pcsx2Dir = $try; break }
+    }
+    if (-not $pcsx2Dir) {
+        $pcsx2Dir = Get-ChildItem -LiteralPath $TpRoot -Directory -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Name -imatch '^pcsx2' } |
+                    Select-Object -First 1 -ExpandProperty FullName
+    }
+
     # Deploy
     Write-Host ""
     Write-Host "  Deploying to lightgun games..." -ForegroundColor Cyan
-    $deployed = 0; $skipped = 0; $errors = 0; $elfDeployed = $false
+    $deployed = 0; $skipped = 0; $errors = 0; $elfDeployed = $false; $pcsx2Deployed = $false
 
     $xmlFiles = Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
                 Where-Object { $_.Directory.Name -ne "FullBackup" }
@@ -1450,6 +1508,33 @@ function Invoke-CrosshairSetup {
                     Write-Host ("    ElfLdr2 -> {0}" -f $dest) -ForegroundColor Green
                     Write-Log "Crosshairs: deployed to ElfLdr2 folder $dest"
                     $elfDeployed = $true
+                }
+                $deployed++; continue
+            }
+
+            if ($emuType -eq "Pcsx2x6") {
+                # All Pcsx2x6 lightgun games share one emulator folder -- deploy once
+                # Also updates inis\PCSX2.ini with the cursor_path for each USB port.
+                if (-not $pcsx2Deployed) {
+                    if ($pcsx2Dir) {
+                        $p1Dest = Join-Path $pcsx2Dir "P1.png"
+                        $p2Dest = Join-Path $pcsx2Dir "P2.png"
+                        Copy-Item -LiteralPath $valid[$p1Idx] -Destination $p1Dest -Force -ErrorAction Stop
+                        Copy-Item -LiteralPath $valid[$p2Idx] -Destination $p2Dest -Force -ErrorAction Stop
+                        $iniPath = Join-Path $pcsx2Dir "inis\PCSX2.ini"
+                        if (Test-Path -LiteralPath $iniPath) {
+                            Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path $p1Dest -P2Path $p2Dest
+                            Write-Host ("    Pcsx2x6 -> {0}  (PCSX2.ini updated)" -f $pcsx2Dir) -ForegroundColor Green
+                        } else {
+                            Write-Host ("    Pcsx2x6 -> {0}  (PCSX2.ini not found; PNGs copied)" -f $pcsx2Dir) -ForegroundColor Green
+                            Write-Log "Crosshairs: Pcsx2x6 PCSX2.ini not found at $iniPath"
+                        }
+                        Write-Log "Crosshairs: deployed to Pcsx2x6 folder $pcsx2Dir"
+                        $pcsx2Deployed = $true
+                    } else {
+                        Write-Host "    Pcsx2x6: emulator folder not found in TeknoParrot root -- skipped" -ForegroundColor Yellow
+                        Write-Log "Crosshairs: Pcsx2x6 folder not found in $TpRoot"
+                    }
                 }
                 $deployed++; continue
             }
@@ -1992,6 +2077,73 @@ function Build-DatIndex {
     }
 }
 
+# Reads the plain-text game-notes file bundled in the Eggman ZIP.
+# Format: sections delimited by lines of 60+ '=' chars.
+# First non-blank line of each section: "Game Name (ProfileCode)"
+# Remaining lines: the note body.
+# Returns ProfileCode.ToLower() -> trimmed note text hashtable.
+function Build-GameNotesIndexFromStream {
+    param([System.IO.Stream]$stream)
+    $index   = @{}
+    $reader  = New-Object System.IO.StreamReader($stream, [System.Text.Encoding]::UTF8)
+    try {
+        $code       = ''
+        $noteLines  = New-Object System.Collections.Generic.List[string]
+        $inSection  = $false
+        $headerRead = $false
+
+        while (-not $reader.EndOfStream) {
+            $ln = $reader.ReadLine()
+            if ($ln -match '^={60,}') {
+                if ($code -and $noteLines.Count -gt 0) {
+                    $body = (($noteLines | Where-Object { $_.Trim() }) -join "`n").Trim()
+                    if ($body) { $index[$code] = $body }
+                }
+                $code = ''; $noteLines.Clear(); $inSection = $true; $headerRead = $false
+                continue
+            }
+            if (-not $inSection) { continue }
+            if (-not $headerRead) {
+                if ([string]::IsNullOrWhiteSpace($ln)) { continue }
+                $m = [regex]::Match($ln, '\(([A-Za-z0-9_]+)\)\s*$')
+                if ($m.Success) { $code = $m.Groups[1].Value.ToLower() }
+                $headerRead = $true
+            } else {
+                $noteLines.Add($ln)
+            }
+        }
+        if ($code -and $noteLines.Count -gt 0) {
+            $body = (($noteLines | Where-Object { $_.Trim() }) -join "`n").Trim()
+            if ($body) { $index[$code] = $body }
+        }
+    } finally { $reader.Close() }
+    return $index
+}
+
+function Build-GameNotesIndex {
+    param([string]$path)
+    try {
+        $fs = [System.IO.File]::OpenRead($path)
+        try   { return Build-GameNotesIndexFromStream $fs }
+        finally { if ($fs) { $fs.Close() } }
+    } catch { Write-Log "NotesIndex: parse failed -- $_"; return @{} }
+}
+
+function Build-GameNotesIndexFromZip {
+    param([string]$zipPath)
+    $za = $null
+    try {
+        $za    = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+        $entry = @($za.Entries | Where-Object { $_.Name -like '*.txt' -and $_.Name -ilike '*note*' })[0]
+        if (-not $entry) { return @{} }
+        Write-Host ("    Reading: {0}" -f $entry.Name) -ForegroundColor DarkGray
+        $stream = $entry.Open()
+        try   { return Build-GameNotesIndexFromStream $stream }
+        finally { if ($stream) { $stream.Close() } }
+    } catch { Write-Log "NotesIndex (ZIP): parse failed -- $_"; return @{} }
+    finally  { if ($za) { $za.Dispose() } }
+}
+
 # Queries the GitHub API for the latest Eggman dat release asset.
 # Uses the "teknoparrot" tag which Eggmansworld updates with each release.
 # Returns [pscustomobject]@{DownloadUrl; FileName; SizeMB} or $null on failure.
@@ -2000,7 +2152,7 @@ function Get-EggmanDatRelease {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         $apiUri = 'https://api.github.com/repos/Eggmansworld/Datfiles/releases/tags/teknoparrot'
         $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
-                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.57' }
+                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.58' }
         $rel    = $resp.Content | ConvertFrom-Json
         $asset  = @($rel.assets) | Where-Object { $_.name -like 'TeknoParrot*Collection*RomVault*.zip' } |
                       Select-Object -First 1
@@ -3583,7 +3735,7 @@ function Write-ControlsStatus {
     }
 }
 
-Write-Log "Script started (v0.54$(if ($Unattended) { ' [Unattended]' }))."
+Write-Log "Script started (v0.58$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
 # SECTION 1 -- Load or prompt for configuration
@@ -3957,6 +4109,7 @@ if (Test-Path -LiteralPath $overridesPath) {
 
 $datIndex  = @{}
 $suppIndex = @{}   # supplementary index: ProfileCode.ToLower() -> ArrayList of alternate names
+$notesIndex = @{}  # game notes index: ProfileCode.ToLower() -> notes text string
 
 if ($eggmanDatZip) {
     if (Test-Path -LiteralPath $eggmanDatZip) {
@@ -3980,6 +4133,12 @@ if ($eggmanDatZip) {
                 Write-Host "  Supplementary dat: no entries found." -ForegroundColor Yellow
                 Write-Log "SuppIndex (ZIP): 0 entries from $eggmanDatZip."
             }
+        }
+        Write-Host "  Loading game notes from ZIP..." -ForegroundColor DarkGray
+        $notesIndex = Build-GameNotesIndexFromZip $eggmanDatZip
+        if ($notesIndex.Count -gt 0) {
+            Write-Host ("  Game notes: {0} entries indexed." -f $notesIndex.Count) -ForegroundColor DarkGray
+            Write-Log "NotesIndex (ZIP): $($notesIndex.Count) entries from $eggmanDatZip"
         }
     } else {
         Write-Host ("  WARNING: Eggman dat ZIP not found at: {0}" -f $eggmanDatZip) -ForegroundColor Yellow
@@ -4671,6 +4830,41 @@ if ($csCount -ge 0) {
 }
 
 Write-Log "Completed. Registered=$($result.Registered.Count) Already=$($result.Already.Count) ManualReg=$($result.Ambiguous.Count) Unmatched=$($result.Unmatched.Count)"
+
+# =============================================================================
+# GAME INFO -- supplementary versions and notes for newly registered games
+# =============================================================================
+
+if ($result.Registered.Count -gt 0 -and ($suppIndex.Count -gt 0 -or $notesIndex.Count -gt 0)) {
+    $infoItems = @($result.Registered | Where-Object {
+        $suppIndex.ContainsKey($_.Code.ToLower()) -or $notesIndex.ContainsKey($_.Code.ToLower())
+    })
+    if ($infoItems.Count -gt 0) {
+        Write-Host ""
+        Write-Host "============================================" -ForegroundColor Cyan
+        Write-Host "   Game Info (from dat)" -ForegroundColor Cyan
+        Write-Host "============================================" -ForegroundColor Cyan
+        foreach ($r in $infoItems) {
+            $key = $r.Code.ToLower()
+            Write-Host ""
+            Write-Host ("  {0}" -f $r.Code) -ForegroundColor Yellow
+            if ($suppIndex.ContainsKey($key)) {
+                Write-Host "  Alternate versions in supplementary dat:" -ForegroundColor Cyan
+                foreach ($alt in $suppIndex[$key]) {
+                    Write-Host ("    {0}" -f $alt) -ForegroundColor DarkGray
+                }
+            }
+            if ($notesIndex.ContainsKey($key)) {
+                Write-Host "  Notes:" -ForegroundColor Cyan
+                $noteLines = ($notesIndex[$key] -split "`n") | Where-Object { $_.Trim() } | Select-Object -First 4
+                foreach ($nl in $noteLines) {
+                    Write-Host ("    {0}" -f $nl.Trim()) -ForegroundColor DarkGray
+                }
+            }
+        }
+        Write-Host ""
+    }
+}
 
 # =============================================================================
 # LAUNCHBOX XML EXPORT  (optional, runs before ACTION REQUIRED)

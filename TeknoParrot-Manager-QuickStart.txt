@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.57 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.58 BETA  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -97,7 +97,11 @@
   When you run mode 4:
     1. A preview page opens in your browser showing all available designs.
     2. Enter the number of your chosen design for Player 1 and Player 2.
-    3. The script copies those images to every registered lightgun game.
+    3. The script copies those images to every registered lightgun game:
+         - Standard games: P1.png + P2.png in the game's exe folder.
+         - ElfLdr2 games: shared pair in the ElfLdr2 emulator folder.
+         - Pcsx2x6 games: shared pair in the pcsx2x6 folder; inis\PCSX2.ini
+           is also updated with cursor_path for each USB guncon2 port.
     4. You are asked whether to also hide the Windows cursor for all
        lightgun games. Answer Y to set the cursor-hide field in each
        gun game's UserProfile XML (a backup is taken automatically first).
