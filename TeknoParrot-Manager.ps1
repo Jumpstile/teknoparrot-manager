@@ -1447,7 +1447,7 @@ function Invoke-CrosshairSetup {
     Export-CrosshairPreview -CrosshairPaths $valid.ToArray() -OutPath $previewPath
     Write-Host "  Preview: $previewPath" -ForegroundColor Cyan
     Write-Host "  Opening in browser -- browse the grid, then come back here." -ForegroundColor DarkCyan
-    Start-Process $previewPath
+    if (Test-Path -LiteralPath $previewPath -PathType Leaf) { Start-Process -FilePath $previewPath }
     Write-Host ""
 
     # Pick P1
