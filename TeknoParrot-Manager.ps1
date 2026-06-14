@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.60 BETA
+# TeknoParrot Manager  |  v0.61 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -60,7 +60,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.60 BETA" -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.61 BETA" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -3204,7 +3204,7 @@ function Export-LaunchBoxXml {
             [void]$sb.AppendLine("    <Completed>false</Completed>")
             [void]$sb.AppendLine("    <Hidden>false</Hidden>")
             [void]$sb.AppendLine("    <Enabled>true</Enabled>")
-            [void]$sb.AppendLine("    <Notes>Exported by TeknoParrot Manager v0.54</Notes>")
+            [void]$sb.AppendLine("    <Notes>Exported by TeknoParrot Manager</Notes>")
             [void]$sb.AppendLine('  </Game>')
             $count++
         } catch {
