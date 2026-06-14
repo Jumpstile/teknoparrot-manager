@@ -4620,7 +4620,18 @@ if ($mode -eq "AutoSync") {
 
     # Supplementary source: separate picker and separate sync pass, same staging folder.
     $syncSupp = $null
-    if ($zipSourceSupplementary -and (Test-Path -LiteralPath $zipSourceSupplementary)) {
+    if ($zipSourceSupplementary -and -not (Test-Path -LiteralPath $zipSourceSupplementary)) {
+        Write-Host "  WARNING: Supplementary ZIP folder not found: $zipSourceSupplementary" -ForegroundColor Yellow
+        Write-Log "AutoSync: supplementary ZIP source not found at $zipSourceSupplementary -- skipped."
+    } elseif ($zipSourceSupplementary -and (
+                  (Test-PathInside $gamesInstallFolder $zipSourceSupplementary) -or
+                  (Test-PathInside $zipSourceSupplementary $gamesInstallFolder))) {
+        Write-Host "  ERROR: Supplementary ZIP folder overlaps the staging folder -- skipped." -ForegroundColor Red
+        Write-Log "AutoSync: supplementary ZIP source overlaps staging folder -- skipped."
+    } elseif ($zipSourceSupplementary -and (Test-PathInside $zipSourceSupplementary $tpRoot)) {
+        Write-Host "  ERROR: Supplementary ZIP folder is inside the TeknoParrot folder -- skipped." -ForegroundColor Red
+        Write-Log "AutoSync: supplementary ZIP source is inside TeknoParrot root -- skipped."
+    } elseif ($zipSourceSupplementary) {
         Write-Host ""
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         Write-Host " AutoSync: Supplementary Games" -ForegroundColor Cyan
@@ -4638,9 +4649,6 @@ if ($mode -eq "AutoSync") {
             }
         }
         $syncSupp = Invoke-AutoSync -zipSource $zipSourceSupplementary -installFolder $gamesInstallFolder -syncStatePath $syncStatePath -noSync $noSyncList -onlySync $onlySyncListSupp -retroBat $retroBat
-    } elseif ($zipSourceSupplementary) {
-        Write-Host "  WARNING: Supplementary ZIP folder not found: $zipSourceSupplementary" -ForegroundColor Yellow
-        Write-Log "AutoSync: supplementary ZIP source not found at $zipSourceSupplementary -- skipped."
     }
 
     Write-Host ""
