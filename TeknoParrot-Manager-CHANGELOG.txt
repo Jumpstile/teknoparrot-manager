@@ -7,6 +7,21 @@
 
 
 -------------------------------------------------------------------------------
+  v0.74 BETA  (2026-06-16)
+-------------------------------------------------------------------------------
+
+  README restructure (no script changes):
+
+  - Added WHO IS THIS FOR? section near the top so readers can immediately
+    judge whether the script suits their setup before reading further.
+  - Condensed HOW FUZZY MATCHING WORKS to a plain decision table (score >=
+    0.72 auto-register / score >= 0.40 suggest profile / below 0.40 manual).
+    The Sorensen-Dice algorithm explanation, normalisation details, and
+    threshold discussion moved to a new APPENDIX: FUZZY MATCHING DETAILS at
+    the end for readers who want the technical depth.
+
+
+-------------------------------------------------------------------------------
   v0.73 BETA  (2026-06-16)
 -------------------------------------------------------------------------------
 

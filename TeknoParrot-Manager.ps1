@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.73 BETA
+# TeknoParrot Manager  |  v0.74 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -60,7 +60,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.73 BETA" -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.74 BETA" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
