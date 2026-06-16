@@ -15,6 +15,27 @@
 
 
 -------------------------------------------------------------------------------
+  WHO IS THIS FOR?
+-------------------------------------------------------------------------------
+
+  This script is for people with large TeknoParrot collections who want
+  registration, controls, and game management handled automatically.
+
+  You will get the most out of it if you:
+
+    -- have a large collection (dozens or hundreds of games)
+    -- store games as ZIPs on a NAS and want automated extraction
+    -- use LaunchBox, HyperSpin 2, RetroBat, or Batocera as a frontend
+    -- want crosshairs, ReShade, or dgVoodoo2 set up across all your games
+       at once rather than game by game
+
+  You may not need this script if:
+
+    -- you only have a handful of games
+    -- you prefer to register and configure games manually in TeknoParrotUI
+
+
+-------------------------------------------------------------------------------
   FEATURES
 -------------------------------------------------------------------------------
 
@@ -462,51 +483,17 @@
   NESiCAxLive, for example, every game uses game.exe. Without fuzzy matching,
   none of these games could be auto-registered.
 
-  The script compares the FOLDER NAME of each game to every candidate profile
-  code using a Sorensen-Dice bigram similarity score -- a standard string
-  similarity algorithm that counts how many two-character pairs the two
-  strings have in common.
+  The script compares the game folder name against candidate profile codes and
+  assigns a confidence score from 0.0 to 1.0:
 
-  Example:
-    Folder:  "Akai Katana Shin (2012)[Taito NESiCAxLive][TP]"
-    Profile: "AkaiKatanaShinNesica"
-
-  After normalisation (stripping years, version strings, bracket metadata,
-  splitting CamelCase, lowercasing):
-    Folder:  "akaikatanashin"
-    Profile: "akaikatanashinnesica"
-
-  Dice similarity: ~0.85  -- well above the auto-register threshold of 0.72.
-
-  THE THRESHOLD
-
-    Score >= 0.72   Auto-registered. Shown in Cyan with the score so you can
-                    spot-check the match.
+    Score >= 0.72   Auto-registered. Shown in Cyan with the score so you
+                    can spot-check the match.
 
     Score >= 0.40   Flagged in ACTION REQUIRED with a best-guess profile
-                    shown. One click in TeknoParrotUI to confirm and register.
+                    shown. One click in TeknoParrotUI to confirm.
 
     Score < 0.40    Flagged in ACTION REQUIRED with only the full candidate
                     list. No reliable guess could be made.
-
-  The threshold is the constant $FuzzyAutoThreshold near the top of the
-  helper functions block in the script. Raising it makes auto-registration
-  more conservative (fewer matches, less chance of a wrong one); lowering
-  it is more aggressive (more matches, higher chance of error).
-
-  WHAT IS PRESERVED DURING NORMALISATION
-
-  The following are always stripped before comparison:
-    - Square-bracket metadata: [Sega NESiCAxLive][TP]
-    - Bare 4-digit years: (2012)
-    - Full ISO date strings: (2015-12-28) -- common in Eggman dat names
-    - Decimal version strings without a ver/v prefix: (2.10.00), (1.00.48)
-    - Known region/territory codes: (JPN), (USA), (EUR), (EXP), and others
-    - Version strings with prefix: (ver 1.1), (rev 2), (v3), (v1.2b)
-    - Parenthesised pure numbers: (2), (12)
-
-  Meaningful parenthesised names like (Special Edition) are intentionally
-  kept -- they may be the only thing distinguishing two game titles.
 
   WHEN FUZZY MATCHING GETS IT WRONG
 
@@ -517,6 +504,9 @@
 
   If a game's control family is misdetected (e.g. a trackball game treated
   as lightgun), add a familyOverride entry in overrides.json.
+
+  For details on the scoring algorithm and what is stripped from folder
+  names before comparison, see APPENDIX: FUZZY MATCHING DETAILS.
 
 
 -------------------------------------------------------------------------------
@@ -1571,6 +1561,50 @@
 
   - It does not provide game files. You supply your own legally obtained
     games; the script only registers and configures them.
+
+
+-------------------------------------------------------------------------------
+  APPENDIX: FUZZY MATCHING DETAILS
+-------------------------------------------------------------------------------
+
+  THE ALGORITHM
+
+  The script uses a Sorensen-Dice bigram similarity score -- a standard string
+  similarity algorithm that counts how many two-character pairs the two
+  strings have in common. Scores range from 0.0 (no similarity) to 1.0
+  (identical).
+
+  Example:
+    Folder:  "Akai Katana Shin (2012)[Taito NESiCAxLive][TP]"
+    Profile: "AkaiKatanaShinNesica"
+
+  After normalisation (stripping years, version strings, bracket metadata,
+  splitting CamelCase, lowercasing):
+    Folder:  "akaikatanashin"
+    Profile: "akaikatanashinnesica"
+
+  Dice similarity: ~0.85 -- well above the auto-register threshold of 0.72.
+
+  THE THRESHOLD
+
+  The threshold is the constant $FuzzyAutoThreshold near the top of the
+  helper functions block in the script. Raising it makes auto-registration
+  more conservative (fewer matches, less chance of a wrong one); lowering
+  it is more aggressive (more matches, higher chance of error).
+
+  WHAT IS STRIPPED DURING NORMALISATION
+
+  The following are always removed before comparison:
+    - Square-bracket metadata: [Sega NESiCAxLive][TP]
+    - Bare 4-digit years: (2012)
+    - Full ISO date strings: (2015-12-28) -- common in Eggman dat names
+    - Decimal version strings without a ver/v prefix: (2.10.00), (1.00.48)
+    - Known region/territory codes: (JPN), (USA), (EUR), (EXP), and others
+    - Version strings with prefix: (ver 1.1), (rev 2), (v3), (v1.2b)
+    - Parenthesised pure numbers: (2), (12)
+
+  Meaningful parenthesised names like (Special Edition) are intentionally
+  kept -- they may be the only thing distinguishing two game titles.
 
 
 ===============================================================================
