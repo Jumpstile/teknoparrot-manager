@@ -7,6 +7,136 @@
 
 
 -------------------------------------------------------------------------------
+  v0.71 BETA  (2026-06-16)
+-------------------------------------------------------------------------------
+
+  Comment audit, bug fixes, and security hardening:
+
+  Bug fixes:
+  - Repair-GamePaths, Write-ControlsStatus: corrupt UserProfile XMLs were
+    silently skipped (catch { continue }) with no log entry. A broken profile
+    was invisible to the user and never surfaced in the controls-status report.
+    Both catches now write a Write-Log entry before continuing.
+  - Export-HyperSpinJson GUID scan and ROM scan: corrupted games JSON files
+    in the HyperSpin data folder were silently skipped with no log entry.
+    Both scan loops now log the filename and error before continuing.
+  - Ambiguous-game display: Substring($installBase.Length) had no guard against
+    the path being shorter than the base (which cannot happen in practice but
+    has no guard). Added length check to prevent ArgumentOutOfRangeException.
+
+  Security fixes:
+  - Select-GamesInteractive and Select-GamesInteractiveCombined: both functions
+    called Get-ChildItem -LiteralPath with no prior null/empty check. An empty
+    string causes a terminating ParameterArgumentValidationError rather than a
+    graceful "no ZIPs found" message. Added IsNullOrWhiteSpace guard at the
+    top of both functions.
+
+  Stale-comment / hygiene:
+  - User-Agent header in Get-TeknoParrotProfileSet and Get-EggmanDatRelease
+    read 'TeknoParrot-Manager/0.67'; updated to /0.71.
+  - Measure-PathThroughput docstring said "100 MB"; the code cap is 20 MB.
+    Updated to match.
+  - $mode variable comment listed only 5 valid mode values; added DgVoodoo2Setup
+    and GpuFixSetup which were missing from the list.
+
+  Comments added (WHY-focused, per project convention):
+  - Test-PathInside: added note that GetFullPath is used to collapse .. components,
+    preventing a crafted path from bypassing the prefix check.
+  - Get-DiceSimilarity: noted that -as [int] is used so a missing hashtable key
+    (first bigram occurrence) safely becomes 0 without throwing.
+  - Select-GamesInteractiveCombined: noted that the Supp loop runs after Main so
+    Supp wins the tie when the same BaseName appears in both sources.
+  - Get-GameApiDll: noted why D3D12 is checked first (UWP-wrapped titles that
+    import both d3d11 and d3d12 should be hooked at the DX12 layer).
+  - Resolve-ProfileCode: noted that the final return returns the original code
+    string (not $null) so callers always receive a usable value.
+  - Get-ProfileFamily: noted that TeknoParrot represents lightgun aim as analog
+    joystick axes, which is why AnalogJoystick maps to the "lightgun" family.
+  - Build-ArchetypePool: noted that previously-propagated profiles are included
+    intentionally so they can serve as archetypes on re-runs.
+
+
+-------------------------------------------------------------------------------
+  v0.70 BETA  (2026-06-16)
+-------------------------------------------------------------------------------
+
+  Full code review -- bug fixes, security fixes, and documentation corrections:
+
+  Critical bug fixes:
+  - Config saves in modes 5 (ReShade) and 6 (dgVoodoo2) were silently
+    dropping EggmanDatZip, DatFilePath, SupplementaryDatPath, and
+    IncludeSupplementary from the config file on every write. Running either
+    mode after initial setup permanently disabled dat-based registration on
+    the next run. All five config-save blocks (cfgRS, cfgRS2, cfgDg, cfgDg2,
+    cfgUpdate) now preserve all fields. The HyperSpin save (cfgUpdate) was
+    also dropping ZipSourceSupplementaryFolder.
+
+  Bug fixes:
+  - BITS download error logged on machines where BITS service is not running.
+    EggmanDat download now checks the BITS service status first and skips
+    straight to Invoke-WebRequest without logging a spurious error.
+  - Test-PngFile used a single fs.Read() call for the 8-byte PNG magic check.
+    Stream.Read() may legally return fewer bytes in one call; replaced with a
+    retry loop matching the pattern used elsewhere in the script.
+  - Invoke-RestoreBackup: [int] cast on user input had no length guard, so a
+    string longer than 10 digits threw OverflowException. Added .Length -gt 9
+    guard consistent with every other numeric input in the script.
+  - AutoSync NAS-size comparison: ConvertFrom-Json deserialises large integers
+    as Decimal/Int32 in PS 5.1, causing a type mismatch with Int64 zip.Length
+    for ZIPs over 2.1 GB. Cast to [long] before comparison.
+  - Set-Pcsx2CursorPaths used WriteAllLines (CRLF line endings). Changed to
+    WriteAllText with explicit line endings, consistent with project convention.
+  - Build-GameNotesIndexFromStream ProfileCode regex matched pure-digit groups
+    such as (1997), polluting the notes index. Regex now requires the code to
+    begin with a letter.
+
+  Security fixes:
+  - Invoke-CursorHideSetup and Set-ConfigField interpolated field names
+    directly into XPath predicates. Changed to ConvertTo-XPathStringLiteral
+    (already used by Invoke-GpuFixSetup for the same pattern).
+  - Export-HyperSpinJson filename sanitization used \w which matches Unicode
+    word characters in .NET regex. Changed to [A-Za-z0-9] for ASCII-only
+    output filenames.
+  - AutoSync extraction sentinel written with Set-Content -Encoding UTF8
+    (which uses Environment.NewLine and is inconsistent with project
+    convention). Changed to WriteAllText with BOM-less UTF-8.
+
+  Documentation:
+  - README and QuickStart version headers updated to v0.70.
+  - README incorrectly stated that ReShade DLLs are included in the release
+    ZIP. Corrected -- DLLs are never redistributed; users must obtain them
+    from reshade.me.
+  - QuickStart line 209 referred to config.json instead of the correct
+    filename TeknoParrot-Manager.config.json.
+  - CHANGELOG v0.42 entry listed MS\x64\D3D8.dll (wrong architecture);
+    corrected to MS\x86\D3D8.dll.
+  - README GAME SELECTION section now documents the combined picker behaviour
+    when a supplementary ZIP source is configured: [+] markers and per-source
+    count breakdown in the header.
+  - README familyOverride documentation now explicitly states that "spinner"
+    is never auto-detected and must always be assigned via familyOverride.
+  - Get-ProfileFamily: added comment noting spinner cannot be auto-detected.
+
+  Second-pass fixes (found after verifying first-round changes):
+  - Stale comment still said "Set-Content failed" after that line was changed
+    to WriteAllText; updated to match.
+  - Invoke-CrosshairSetup: GetDirectoryName on a bare filename (no directory
+    component) returns null/empty, causing Test-Path -LiteralPath "" to resolve
+    to the current directory. Added IsNullOrWhiteSpace guard before the
+    Test-Path call.
+  - TeknoParrot auto-detect folder picker: [int] cast had no length guard
+    (like similar pickers in the script). Added .Length -le 9 guard.
+  - Get-ProfileInputApi / Set-ProfileInputApi: 'Input API' XPath literal was
+    interpolated without ConvertTo-XPathStringLiteral, inconsistent with the
+    fix applied to Invoke-CursorHideSetup and Set-ConfigField.
+  - All ConvertTo-Json calls for config and overrides files now use -Depth 10
+    to prevent silent truncation if a value is ever nested beyond depth 2.
+  - Export-HyperSpinJson new-file creation now checks Test-Path before writing,
+    preventing accidental overwrite of an existing file that was not found by
+    the HyperSpin path scan.
+
+
+-------------------------------------------------------------------------------
   v0.69 BETA  (2026-06-14)
 -------------------------------------------------------------------------------
 
@@ -788,7 +918,7 @@
     when to use it.
 
   - Bundle DLLs at  Scripts\dgVoodoo2\  next to the script. Download the
-    dgVoodoo2 ZIP, copy  MS\x64\D3D8.dll,  DDraw.dll,  D3DImm.dll  and
+    dgVoodoo2 ZIP, copy  MS\x86\D3D8.dll,  DDraw.dll,  D3DImm.dll  and
     root-folder  Glide2x.dll,  Glide3x.dll,  dgVoodoo.conf  into it.
 
   - DgVoodoo2SourceDir added to the saved configuration JSON so the path

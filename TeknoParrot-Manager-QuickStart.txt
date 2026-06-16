@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.68 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.71 BETA  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -206,7 +206,7 @@
   recognises .parrot and .game suffixes for any existing folders extracted by
   other tools. The answer is saved and never asked again.
 
-  To switch later: delete config.json and re-run, or set "RetroBat": true
+  To switch later: delete TeknoParrot-Manager.config.json and re-run, or set "RetroBat": true
   in the JSON. To re-extract with the new naming: also delete syncstate.json.
   Full details: TeknoParrot-Manager-README.txt.
 

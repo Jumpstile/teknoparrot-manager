@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.69 BETA
+# TeknoParrot Manager  |  v0.71 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -60,7 +60,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.69 BETA" -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.71 BETA" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -175,7 +175,7 @@ function Test-IsNetworkPath {
     return $false
 }
 
-# Reads up to 100 MB from the largest ZIP in $path and returns MB/s, or $null.
+# Reads up to 20 MB from the largest ZIP in $path and returns MB/s, or $null.
 # The FileStream is always disposed via finally, even if an exception occurs
 # mid-read, preventing a file handle leak on the network share.
 function Measure-PathThroughput {
@@ -233,9 +233,10 @@ function Measure-PathWriteThroughput {
     }
 }
 
-# True if $child is the same folder as, or inside, $parent. Paths are fully
-# resolved and compared case-insensitively. Used to keep the staging folder out
-# of the emulator and source folders.
+# True if $child is the same folder as, or inside, $parent. Both paths are
+# resolved via GetFullPath (which collapses .. components) before comparison,
+# so a crafted path like "staging\..\Windows" cannot bypass the prefix check.
+# Used to enforce staging-folder boundaries and prevent ZIP slip.
 function Test-PathInside {
     param([string]$child, [string]$parent)
     try {
@@ -351,7 +352,7 @@ function Get-DiceSimilarity {
     $ba = @{}
     for ($i = 0; $i -lt $a.Length - 1; $i++) {
         $k = $a.Substring($i, 2)
-        $ba[$k] = ($ba[$k] -as [int]) + 1
+        $ba[$k] = ($ba[$k] -as [int]) + 1   # -as [int]: null (missing key) becomes 0
     }
     $bb = @{}
     for ($i = 0; $i -lt $b.Length - 1; $i++) {
@@ -453,6 +454,10 @@ function Expand-NumberList {
 function Select-GamesInteractive {
     param([string]$zipSource, [string]$installFolder)
 
+    if ([string]::IsNullOrWhiteSpace($zipSource) -or [string]::IsNullOrWhiteSpace($installFolder)) {
+        Write-Log "Select-GamesInteractive: called with empty path -- skipping"
+        return $null
+    }
     $all = @(Get-ChildItem -LiteralPath $zipSource -Filter *.zip -ErrorAction SilentlyContinue |
                  Where-Object { $_.BaseName -notlike '!TeknoParrot Collection*' } |
                  Sort-Object BaseName)
@@ -652,6 +657,10 @@ function Select-GamesInteractive {
 function Select-GamesInteractiveCombined {
     param([string]$zipSourceMain, [string]$zipSourceSupp, [string]$installFolder)
 
+    if ([string]::IsNullOrWhiteSpace($zipSourceMain) -or [string]::IsNullOrWhiteSpace($zipSourceSupp) -or [string]::IsNullOrWhiteSpace($installFolder)) {
+        Write-Log "Select-GamesInteractiveCombined: called with empty path -- skipping"
+        return [PSCustomObject]@{ Main = $null; Supp = $null }
+    }
     $allMain = @(Get-ChildItem -LiteralPath $zipSourceMain -Filter *.zip -ErrorAction SilentlyContinue |
                      Where-Object { $_.BaseName -notlike '!TeknoParrot Collection*' } |
                      Sort-Object BaseName)
@@ -678,6 +687,8 @@ function Select-GamesInteractiveCombined {
         $hasContent = $existing -and (Get-ChildItem -LiteralPath $existing -Force -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0
         if ($hasContent) { $alreadyMain++ } else { $toExtractMain += $zip; $sourceMap[$zip.BaseName] = 'Main' }
     }
+    # Supp iterates after Main -- if the same BaseName appears in both sources,
+    # 'Supp' overwrites 'Main' in $sourceMap (supplementary takes precedence).
     foreach ($zip in $allSupp) {
         $norm       = $zip.BaseName -replace ' (?=[\[\(])', ''
         $existing   = $normalizedFolderMap[$norm]
@@ -830,7 +841,14 @@ function Test-PngFile {
     try {
         $bytes = New-Object byte[] 8
         $fs    = [System.IO.File]::OpenRead($Path)
-        try { [void]$fs.Read($bytes, 0, 8) } finally { $fs.Dispose() }
+        try {
+            $pos = 0
+            while ($pos -lt 8) {
+                $n = $fs.Read($bytes, $pos, 8 - $pos)
+                if ($n -eq 0) { break }
+                $pos += $n
+            }
+        } finally { $fs.Dispose() }
         return ($bytes[0] -eq 0x89 -and $bytes[1] -eq 0x50 -and
                 $bytes[2] -eq 0x4E -and $bytes[3] -eq 0x47 -and
                 $bytes[4] -eq 0x0D -and $bytes[5] -eq 0x0A -and
@@ -895,6 +913,8 @@ function Get-GameApiDll {
             }
         } finally { $fs.Dispose() }
         $text = [System.Text.Encoding]::ASCII.GetString($buf, 0, $pos)
+        # D3D12 checked first: a title that imports both d3d11 and d3d12 (e.g. UWP-wrapped)
+        # should be hooked at the outer DX12 layer, not the inner DX11 layer.
         if ($text -match '(?i)d3d12\.dll')          { return 'd3d12.dll'    }
         if ($text -match '(?i)(?:d3d11|dxgi)\.dll') { return 'dxgi.dll'     }
         if ($text -match '(?i)d3d9\.dll')            { return 'd3d9.dll'     }
@@ -1601,7 +1621,7 @@ function Set-Pcsx2CursorPaths {
             $hdr = if ($tgt -eq 'usb port 1 guncon2') { '[USB Port 1 guncon2]' } else { '[USB Port 2 guncon2]' }
             $out.Add($hdr); $out.Add("cursor_path = $($targets[$tgt])")
         }
-        [System.IO.File]::WriteAllLines($IniPath, $out.ToArray(), (New-Object System.Text.UTF8Encoding $false))
+        [System.IO.File]::WriteAllText($IniPath, ($out -join "`r`n"), (New-Object System.Text.UTF8Encoding $false))
         Write-Log "Crosshairs: updated PCSX2.ini at $IniPath"
     } catch {
         Write-Host ("    WARNING: Could not update PCSX2.ini -- {0}" -f $_) -ForegroundColor Yellow
@@ -1763,7 +1783,7 @@ function Invoke-CrosshairSetup {
             $gpNode = $doc.GameProfile.SelectSingleNode("GamePath")
             if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { $skipped++; continue }
             $exeDir = [System.IO.Path]::GetDirectoryName($gpNode.InnerText.Trim())
-            if (-not (Test-Path -LiteralPath $exeDir)) { $skipped++; continue }
+            if ([string]::IsNullOrWhiteSpace($exeDir) -or -not (Test-Path -LiteralPath $exeDir)) { $skipped++; continue }
 
             Copy-Item -LiteralPath $valid[$p1Idx] -Destination (Join-Path $exeDir "P1.png") -Force -ErrorAction Stop
             Copy-Item -LiteralPath $valid[$p2Idx] -Destination (Join-Path $exeDir "P2.png") -Force -ErrorAction Stop
@@ -1836,7 +1856,7 @@ function Invoke-CursorHideSetup {
             $changed = $false
             $wasSet  = $false
             foreach ($fieldName in $cursorFields) {
-                $fi = $doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName='$fieldName']")
+                $fi = $doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$(ConvertTo-XPathStringLiteral $fieldName)]")
                 if ($null -eq $fi) { continue }
                 $fv = $fi.SelectSingleNode("FieldValue")
                 if ($null -eq $fv) { continue }
@@ -2035,7 +2055,7 @@ function Invoke-AutoSync {
                 $upToDate++; continue
             }
             $needsSync = $true; $reason = "new"
-        } elseif ($stored.NasSize -ne $zip.Length -or $stored.NasLastModified -ne $nasModStr) {
+        } elseif ([long]$stored.NasSize -ne $zip.Length -or $stored.NasLastModified -ne $nasModStr) {
             $needsSync = $true; $reason = "changed on NAS"
         } elseif (-not (($stored.LocalPath -and (Test-Path -LiteralPath $stored.LocalPath)) -or (Test-Path -LiteralPath $extractDir))) {
             $needsSync = $true; $reason = "not extracted"
@@ -2059,7 +2079,7 @@ function Invoke-AutoSync {
             # on the next run triggers a re-extraction, keeping state consistent.
             # If creation itself fails, the outer catch handles it and the
             # finally still runs (Remove-Item on a missing file is a no-op).
-            Set-Content -LiteralPath $sentinel -Value "" -Encoding UTF8 -ErrorAction Stop
+            [System.IO.File]::WriteAllText($sentinel, '', (New-Object System.Text.UTF8Encoding $false))
 
             # All extraction work is nested here so the sentinel's finally
             # always fires after it completes, regardless of how it exits.
@@ -2104,7 +2124,7 @@ function Invoke-AutoSync {
                 $failed++
             }
         } catch {
-            # Reached only when Set-Content failed (sentinel could not be created).
+            # Reached only when WriteAllText failed (sentinel could not be created).
             Write-Host "    FAILED (could not create extraction sentinel): $_" -ForegroundColor Red
             Write-Log "AutoSync: FAILED $rawName -- sentinel creation error: $_"
             $failed++
@@ -2272,7 +2292,7 @@ function Build-GameNotesIndexFromStream {
             if (-not $inSection) { continue }
             if (-not $headerRead) {
                 if ([string]::IsNullOrWhiteSpace($ln)) { continue }
-                $m = [regex]::Match($ln, '\(([A-Za-z0-9_]+)\)\s*$')
+                $m = [regex]::Match($ln, '\(([A-Za-z][A-Za-z0-9_]*)\)\s*$')
                 if ($m.Success) { $code = $m.Groups[1].Value.ToLower() }
                 $headerRead = $true
             } else {
@@ -2321,7 +2341,7 @@ function Get-TeknoParrotProfileSet {
     try {
         $apiUri = 'https://api.github.com/repos/teknogods/TeknoParrotUI/git/trees/master?recursive=1'
         $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
-                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.67' }
+                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.70' }
         $tree   = ($resp.Content | ConvertFrom-Json).tree
         $prefix = 'TeknoParrotUi.Common/GameProfiles/'
         foreach ($node in $tree) {
@@ -2373,6 +2393,8 @@ function Resolve-ProfileCode {
         Write-Log ("Resolve-ProfileCode: '{0}' -> '{1}' (score {2})" -f $code, $bestMatch, [Math]::Round($bestScore,2))
         return $bestMatch
     }
+    # Below threshold -- return the original code unchanged (not $null).
+    # Register-Games depends on receiving a usable string even when resolution fails.
     return $code
 }
 
@@ -2383,7 +2405,7 @@ function Get-EggmanDatRelease {
     try {
         $apiUri = 'https://api.github.com/repos/Eggmansworld/Datfiles/releases/tags/teknoparrot'
         $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
-                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.67' }
+                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.70' }
         $rel    = $resp.Content | ConvertFrom-Json
         $asset  = @($rel.assets) | Where-Object { $_.name -like 'TeknoParrot*Collection*RomVault*.zip' } |
                       Select-Object -First 1
@@ -2409,14 +2431,17 @@ function Invoke-EggmanDatDownload {
     param([string]$downloadUrl, [string]$savePath)
     try {
         $bitsOk = $false
-        try {
-            Start-BitsTransfer -Source $downloadUrl -Destination $savePath `
-                -Description "TeknoParrot Eggman dat" `
-                -DisplayName "Downloading dat ZIP..." `
-                -ErrorAction Stop
-            $bitsOk = $true
-        } catch {
-            Write-Log "EggmanDat: BITS transfer failed (${_}), trying Invoke-WebRequest."
+        $bitsSvc = try { Get-Service -Name BITS -ErrorAction Stop } catch { $null }
+        if ($bitsSvc -ne $null -and $bitsSvc.Status -eq 'Running') {
+            try {
+                Start-BitsTransfer -Source $downloadUrl -Destination $savePath `
+                    -Description "TeknoParrot Eggman dat" `
+                    -DisplayName "Downloading dat ZIP..." `
+                    -ErrorAction Stop
+                $bitsOk = $true
+            } catch {
+                Write-Log "EggmanDat: BITS transfer failed (${_}), trying Invoke-WebRequest."
+            }
         }
         if (-not $bitsOk) {
             Invoke-WebRequest -Uri $downloadUrl -OutFile $savePath -UseBasicParsing -ErrorAction Stop
@@ -2868,7 +2893,7 @@ function Repair-GamePaths {
     $reports = New-Object System.Collections.ArrayList
     $files = Get-ChildItem -LiteralPath $userProfilesDir -Filter *.xml -File -ErrorAction SilentlyContinue
     foreach ($f in $files) {
-        try { $doc = Read-Xml $f.FullName } catch { continue }
+        try { $doc = Read-Xml $f.FullName } catch { Write-Log "Repair-GamePaths: could not parse $($f.Name) -- $_"; continue }
         if ($null -eq $doc.GameProfile) { continue }
 
         $gpNode  = $doc.GameProfile.SelectSingleNode("GamePath")
@@ -2970,6 +2995,9 @@ function Get-ButtonKey {
 # Classifies a profile's control family from its button set. This is what
 # keeps bindings from crossing between game types (a wheel binding can never
 # land on a gun, because driving and lightgun are different classes).
+# Infers the control family from a profile's AnalogType values.
+# NOTE: "spinner" cannot be auto-detected from AnalogType alone -- spinner
+# games must be assigned via familyOverride in overrides.json.
 function Get-ProfileFamily {
     param($doc)
     $hasWheel = $false; $hasGun = $false; $hasTrackball = $false; $hasOtherAxis = $false
@@ -2983,7 +3011,7 @@ function Get-ProfileFamily {
             "Wheel"                 { $hasWheel = $true }
             "Gas"                   { $hasWheel = $true }
             "Brake"                 { $hasWheel = $true }
-            "AnalogJoystick"        { $hasGun = $true }
+            "AnalogJoystick"        { $hasGun = $true }   # TeknoParrot uses analog joystick axes to represent lightgun aim
             "AnalogJoystickReverse" { $hasGun = $true }
             "None"                  { }
             default                 { $hasOtherAxis = $true }
@@ -2999,7 +3027,7 @@ function Get-ProfileFamily {
 # Reads the "Input API" FieldValue, or $null if the profile has no such field.
 function Get-ProfileInputApi {
     param($doc)
-    $f = $doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName='Input API']")
+    $f = $doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$(ConvertTo-XPathStringLiteral 'Input API')]")
     if ($null -eq $f) { return $null }
     $v = $f.SelectSingleNode("FieldValue")
     if ($null -eq $v) { return $null }
@@ -3011,7 +3039,7 @@ function Get-ProfileInputApi {
 # because a RawInput binding will not work if the profile's API says XInput.
 function Set-ProfileInputApi {
     param($doc, [string]$api)
-    $f = $doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName='Input API']")
+    $f = $doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$(ConvertTo-XPathStringLiteral 'Input API')]")
     if ($null -eq $f) { return $false }
     $opts = @($f.SelectNodes("FieldOptions/string") | ForEach-Object { $_.InnerText.Trim() })
     if ($opts -notcontains $api) { return $false }
@@ -3128,7 +3156,7 @@ function Get-ConfigFieldMap {
 # so the XPath literal below is not built from external input.)
 function Set-ConfigField {
     param($doc, [string]$name, [string]$value)
-    $fi = $doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName='$name']")
+    $fi = $doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$(ConvertTo-XPathStringLiteral $name)]")
     if ($null -eq $fi) { return $false }
     $fv = $fi.SelectSingleNode("FieldValue")
     if ($null -eq $fv) { return $false }
@@ -3139,7 +3167,8 @@ function Set-ConfigField {
 # Scans UserProfiles and returns the bound-game pool: every profile that the
 # user has bound to a meaningful degree (>= $minBound bound buttons). Each
 # entry carries its family, Input API, and a map of (key -> bound button node)
-# used as the source of truth for copying.
+# used as the source of truth for copying. Includes previously-propagated profiles
+# intentionally: on re-runs they act as archetypes for any newly registered games.
 function Build-ArchetypePool {
     param([string]$userProfilesDir, [int]$minBound)
     $pool  = New-Object System.Collections.ArrayList
@@ -3412,7 +3441,7 @@ function Invoke-RestoreBackup {
         Write-Log "Restore: cancelled by user."
         return
     }
-    if ($choice -notmatch '^\d+$' -or [int]$choice -lt 1 -or [int]$choice -gt $backups.Count) {
+    if ($choice -notmatch '^\d+$' -or $choice.Length -gt 9 -or [int]$choice -lt 1 -or [int]$choice -gt $backups.Count) {
         Write-Host "  Invalid selection. Restore cancelled." -ForegroundColor Yellow
         Write-Log "Restore: invalid selection '$choice'."
         return
@@ -3634,7 +3663,7 @@ function Export-HyperSpinJson {
                 if ($firstGame -and [string]$firstGame.gameSystemId -eq $tpSystemGuid) {
                     $tpGamesPath = $gf.FullName; break
                 }
-            } catch { continue }
+            } catch { Write-Log "HyperSpin export: GUID scan skipped $($gf.Name) -- $_"; continue }
         }
     }
 
@@ -3653,24 +3682,30 @@ function Export-HyperSpinJson {
                     if (-not $tpSystemGuid) { $tpSystemGuid = [string]$firstGame.gameSystemId }
                     break
                 }
-            } catch { continue }
+            } catch { Write-Log "HyperSpin export: ROM scan skipped $($gf.Name) -- $_"; continue }
         }
     }
 
     # No games file found -- create a new empty one named after the emulator title.
     # This eliminates the prerequisite of adding one game manually first.
+    # Guard: only write when no file with that name already exists on disk -- a file
+    # could exist outside the scanned paths (manual creation, alternate HS install).
     if (-not $tpGamesPath) {
-        $safeName = ($tpEmu.title -replace '[^\w\-\.]', '_').Trim('_')
+        $safeName = ($tpEmu.title -replace '[^A-Za-z0-9\-\.]', '_').Trim('_')
         if ([string]::IsNullOrEmpty($safeName)) { $safeName = 'TeknoParrot' }
         $tpGamesPath = Join-Path $gamesDir "$safeName.json"
-        try {
-            [System.IO.File]::WriteAllText($tpGamesPath, '[]', (New-Object System.Text.UTF8Encoding $false))
-            Write-Log "HyperSpin export: created new games file at $tpGamesPath"
-            $newFile = $true
-        } catch {
-            Write-Host "  ERROR: Could not create TeknoParrot games file: $_" -ForegroundColor Red
-            Write-Log "HyperSpin export: could not create games file -- $_"
-            return -1
+        if (-not (Test-Path -LiteralPath $tpGamesPath)) {
+            try {
+                [System.IO.File]::WriteAllText($tpGamesPath, '[]', (New-Object System.Text.UTF8Encoding $false))
+                Write-Log "HyperSpin export: created new games file at $tpGamesPath"
+                $newFile = $true
+            } catch {
+                Write-Host "  ERROR: Could not create TeknoParrot games file: $_" -ForegroundColor Red
+                Write-Log "HyperSpin export: could not create games file -- $_"
+                return -1
+            }
+        } else {
+            Write-Log "HyperSpin export: using existing file at $tpGamesPath (found outside scanned paths)"
         }
     }
 
@@ -3978,7 +4013,7 @@ function Write-ControlsStatus {
 
     $rows = New-Object System.Collections.ArrayList
     foreach ($f in $files) {
-        try { $doc = Read-Xml $f.FullName } catch { continue }
+        try { $doc = Read-Xml $f.FullName } catch { Write-Log "Write-ControlsStatus: could not parse $($f.Name) -- $_"; continue }
         if ($null -eq $doc.GameProfile) { continue }
 
         $family = Get-ProfileFamily $doc
@@ -4057,7 +4092,7 @@ function Write-ControlsStatus {
     }
 }
 
-Write-Log "Script started (v0.69$(if ($Unattended) { ' [Unattended]' }))."
+Write-Log "Script started (v0.71$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
 # SECTION 1 -- Load or prompt for configuration
@@ -4065,7 +4100,7 @@ Write-Log "Script started (v0.69$(if ($Unattended) { ' [Unattended]' }))."
 
 $configPath         = Join-Path $PSScriptRoot "TeknoParrot-Manager.config.json"
 $tpRoot             = $null
-$mode               = $null   # "AutoSync", "RegisterOnly", "Restore", "CrosshairSetup", or "ReShadeSetup"
+$mode               = $null   # "AutoSync", "RegisterOnly", "Restore", "CrosshairSetup", "ReShadeSetup", "DgVoodoo2Setup", or "GpuFixSetup"
 $zipSource               = $null   # AutoSync only (main collection)
 $zipSourceSupplementary  = $null   # AutoSync supplementary source (optional, separate library); $null or ''=not configured
 $gamesInstallFolder = $null   # always (the extracted-games root to register)
@@ -4160,7 +4195,7 @@ if (-not $tpRoot) {
             Write-Host ("    {0}) {1}" -f ($i + 1), $detected[$i])
         }
         $pick = (Read-Host "  Enter number to use one, or N to type the path manually").Trim()
-        if ($pick -match '^\d+$') {
+        if ($pick -match '^\d+$' -and $pick.Length -le 9) {
             $idx = [int]$pick - 1
             if ($idx -ge 0 -and $idx -lt $detected.Count) { $tpRoot = $detected[$idx] }
         }
@@ -4338,7 +4373,7 @@ $cfgOut = [ordered]@{
     IncludeSupplementary = $includeSupplementary
 }
 try {
-    [System.IO.File]::WriteAllText($configPath, ($cfgOut | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
+    [System.IO.File]::WriteAllText($configPath, ($cfgOut | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
 } catch {
     Write-Host "  WARNING: Could not save configuration -- settings will not be remembered." -ForegroundColor Yellow
     Write-Log "Config: could not save -- $_"
@@ -4388,7 +4423,7 @@ if (-not (Test-Path -LiteralPath $overridesPath)) {
         familyOverride = [ordered]@{}
         datFile        = ""
     }
-    try { [System.IO.File]::WriteAllText($overridesPath, ($ovTemplate | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false)) }
+    try { [System.IO.File]::WriteAllText($overridesPath, ($ovTemplate | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false)) }
     catch { Write-Log "Overrides: could not create template -- $_" }
 }
 
@@ -4667,9 +4702,13 @@ while ($true) {
                 ReShadeSourceDll             = $rsSourceDll
                 ReShadeSourceDll32           = $rsSourceDll32
                 DgVoodoo2SourceDir           = $dgSourceDir
+                EggmanDatZip                 = $eggmanDatZip
+                DatFilePath                  = $datFilePath
+                SupplementaryDatPath         = $supplementaryDatPath
+                IncludeSupplementary         = $includeSupplementary
             }
             try {
-                [System.IO.File]::WriteAllText($configPath, ($cfgRS | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
+                [System.IO.File]::WriteAllText($configPath, ($cfgRS | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
                 Write-Log "Config: saved ReShadeSourceDll = $rsSourceDll"
             } catch { Write-Log "Config: could not save ReShadeSourceDll -- $_" }
         }
@@ -4735,9 +4774,13 @@ while ($true) {
                 ReShadeSourceDll             = $rsSourceDll
                 ReShadeSourceDll32           = $rsSourceDll32
                 DgVoodoo2SourceDir           = $dgSourceDir
+                EggmanDatZip                 = $eggmanDatZip
+                DatFilePath                  = $datFilePath
+                SupplementaryDatPath         = $supplementaryDatPath
+                IncludeSupplementary         = $includeSupplementary
             }
             try {
-                [System.IO.File]::WriteAllText($configPath, ($cfgDg | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
+                [System.IO.File]::WriteAllText($configPath, ($cfgDg | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
                 Write-Log "Config: saved DgVoodoo2SourceDir = $dgSourceDir"
             } catch { Write-Log "Config: could not save DgVoodoo2SourceDir -- $_" }
         }
@@ -4813,7 +4856,7 @@ while ($true) {
                 DatFilePath          = $datFilePath
                 SupplementaryDatPath = $supplementaryDatPath
                 IncludeSupplementary = $includeSupplementary
-            } | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
+            } | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
             Write-Log "Config: saved ZIP source path(s)."
         } catch {
             Write-Log "Config: could not re-save after ZIP source prompt -- $_"
@@ -5148,7 +5191,7 @@ $manualRegData = @{}   # folderName -> @{ ExeName; ProfileCount; Profiles }
 if ($result.Ambiguous.Count -gt 0) {
     $installBase = $gamesInstallFolder.TrimEnd('\')
     foreach ($amb in $result.Ambiguous) {
-        $rel        = $amb.Exe.Substring($installBase.Length).TrimStart('\')
+        $rel        = if ($amb.Exe.Length -gt $installBase.Length) { $amb.Exe.Substring($installBase.Length).TrimStart('\') } else { $amb.Exe }
         $folderName = $rel.Split('\')[0]
         $exeName    = [System.IO.Path]::GetFileName($amb.Exe)
         $count      = @($amb.Codes.Split(',')).Count
@@ -5452,17 +5495,22 @@ if ($doHS -eq "Y") {
         $hsDataPath = $hsInput
 
         $cfgUpdate = [ordered]@{
-            TeknoParrotRoot    = $tpRoot
-            ZipSourceFolder    = $zipSource
-            GamesInstallFolder = $gamesInstallFolder
-            RetroBat           = $retroBat
-            HyperSpinDataPath  = $hsDataPath
-            ReShadeSourceDll   = $rsSourceDll
-            ReShadeSourceDll32 = $rsSourceDll32
-            DgVoodoo2SourceDir = $dgSourceDir
+            TeknoParrotRoot              = $tpRoot
+            ZipSourceFolder              = $zipSource
+            ZipSourceSupplementaryFolder = $zipSourceSupplementary
+            GamesInstallFolder           = $gamesInstallFolder
+            RetroBat                     = $retroBat
+            HyperSpinDataPath            = $hsDataPath
+            ReShadeSourceDll             = $rsSourceDll
+            ReShadeSourceDll32           = $rsSourceDll32
+            DgVoodoo2SourceDir           = $dgSourceDir
+            EggmanDatZip                 = $eggmanDatZip
+            DatFilePath                  = $datFilePath
+            SupplementaryDatPath         = $supplementaryDatPath
+            IncludeSupplementary         = $includeSupplementary
         }
         try {
-            [System.IO.File]::WriteAllText($configPath, ($cfgUpdate | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
+            [System.IO.File]::WriteAllText($configPath, ($cfgUpdate | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
             Write-Log "Config: saved HyperSpinDataPath = $hsDataPath"
         } catch {
             Write-Log "Config: could not save HyperSpinDataPath -- $_"
@@ -5577,9 +5625,13 @@ if ($doReShade -eq "Y") {
                 ReShadeSourceDll             = $rsSourceDll
                 ReShadeSourceDll32           = $rsSourceDll32
                 DgVoodoo2SourceDir           = $dgSourceDir
+                EggmanDatZip                 = $eggmanDatZip
+                DatFilePath                  = $datFilePath
+                SupplementaryDatPath         = $supplementaryDatPath
+                IncludeSupplementary         = $includeSupplementary
             }
             try {
-                [System.IO.File]::WriteAllText($configPath, ($cfgRS2 | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
+                [System.IO.File]::WriteAllText($configPath, ($cfgRS2 | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
                 Write-Log "Config: saved ReShadeSourceDll = $rsSourceDll"
             } catch { Write-Log "Config: could not save ReShadeSourceDll -- $_" }
         }
@@ -5677,9 +5729,13 @@ if ($doDgVoodoo -eq "Y") {
                 ReShadeSourceDll             = $rsSourceDll
                 ReShadeSourceDll32           = $rsSourceDll32
                 DgVoodoo2SourceDir           = $dgSourceDir
+                EggmanDatZip                 = $eggmanDatZip
+                DatFilePath                  = $datFilePath
+                SupplementaryDatPath         = $supplementaryDatPath
+                IncludeSupplementary         = $includeSupplementary
             }
             try {
-                [System.IO.File]::WriteAllText($configPath, ($cfgDg2 | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
+                [System.IO.File]::WriteAllText($configPath, ($cfgDg2 | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
                 Write-Log "Config: saved DgVoodoo2SourceDir = $dgSourceDir"
             } catch { Write-Log "Config: could not save DgVoodoo2SourceDir -- $_" }
         }

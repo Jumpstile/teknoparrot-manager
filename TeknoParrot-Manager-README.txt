@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.68 BETA
+  TeknoParrot Manager  |  v0.71 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -320,10 +320,15 @@
 -------------------------------------------------------------------------------
 
   After entering your folders, the script scans the staging folder and filters
-  out games already extracted there. It then shows:
+  out games already extracted there. When a supplementary ZIP source is
+  configured, both libraries are merged into one combined list. Games from the
+  supplementary source are marked with [+] in the list, and the header shows
+  a per-source count breakdown so you always know the origin of each title.
+
+  The script then shows:
 
       347 game(s) already extracted -- not shown.
-      136 game(s) available to extract.
+      136 game(s) available to extract.  (main: 120  supplementary: 16)
 
   Followed by the selection menu:
 
@@ -846,13 +851,9 @@
 
     WHERE TO GET THE DLLS
 
-    If you downloaded TeknoParrot Manager as a ZIP release: the DLLs are
-    already included in the  ReShade\  folder. No extra steps needed -- go
-    straight to Step 4 below.
-
-    If you cloned from GitHub or the ReShade\ folder is empty: the DLLs are
-    not included in the source repository (ReShade is free software but its
-    DLLs are not redistributable via git). Obtain them as follows:
+    The DLLs are NOT included in the release ZIP or the source repository
+    (ReShade is free software but its DLLs are not redistributable).
+    Obtain them as follows:
 
     Step 1.  Go to  https://reshade.me  and download the free installer.
              Choose the standard version (not the add-on version) unless you
@@ -1268,6 +1269,8 @@
                     from the trackball pool).
                     Valid values: "button", "driving", "lightgun",
                                   "trackball", "analog", "spinner"
+                    NOTE: "spinner" is never auto-detected. Spinner games
+                    must always be assigned explicitly via familyOverride.
                     Format: { "GameProfileCode": "trackball" }
 
     datFile         Full path to a No-Intro TeknoParrot dat file (for example
@@ -1571,6 +1574,6 @@
 
 
 ===============================================================================
-  v0.68 BETA -- Test one game after each run.
+  v0.71 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================
