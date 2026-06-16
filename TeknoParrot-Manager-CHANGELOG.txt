@@ -7,6 +7,57 @@
 
 
 -------------------------------------------------------------------------------
+  v0.72 BETA  (2026-06-16)
+-------------------------------------------------------------------------------
+
+  Second comment audit pass + additional bug/security hardening:
+
+  Bug fixes:
+  - Write-Log used Add-Content without an -Encoding parameter, which writes with
+    the system default encoding (Windows-1252). Game names and paths from dat
+    files can contain non-ASCII characters; log entries containing them were
+    silently corrupted. Changed to File.AppendAllText with BOM-less UTF-8,
+    consistent with all other file writes in the script.
+  - ReShade, dgVoodoo2, and GPU Fix setup-done flags ($rsSetupDone,
+    $dgSetupDone, $gpuSetupDone) were initialised using a Get-Variable existence
+    check idiom. Replaced with straightforward $flag = $false before each
+    conditional block for clarity. The old idiom was correct but non-obvious
+    and flagged by analysis tools as potentially unsafe.
+  - HyperSpin export: foreach over (ConvertFrom-Json) result not wrapped in
+    @(). In PS 5.1, ConvertFrom-Json on an empty "[]" returns $null, not an
+    empty array. foreach over $null iterates zero times (safe), but adding @()
+    makes the intent explicit and protects against future $null propagation.
+  - Config load: if TeknoParrot-Manager.config.json exists but is empty,
+    ConvertFrom-Json returns $null and all $cfg.xxx accesses return $null
+    silently. The script then re-prompts as if no config exists, but does not
+    display the "file may be corrupt" warning or log the issue. Added explicit
+    null check that throws into the existing catch block, so the warning fires.
+  - AutoSync failure-path cleanup: Remove-Item on the partial extraction folder
+    had no IsNullOrWhiteSpace guard on $extractDir. Added guard consistent with
+    the defensive pattern used elsewhere in the script.
+
+  Stale comments:
+  - User-Agent header in Get-TeknoParrotProfileSet and Get-EggmanDatRelease
+    still read 'TeknoParrot-Manager/0.70' after the v0.71 bump (the prior
+    replace-all used "v0.70" with a prefix and missed the bare "/0.70" form).
+    Updated to /0.72.
+
+  Comments added (WHY-focused, per project convention):
+  - Get-PrimaryExecutableName: added note that XML comments are stripped before
+    the regex because some profiles have a commented-out <ExecutableName>
+    alternative above the real one, which would otherwise match first.
+  - Find-TeknoParrotRoot: added note that the leading comma in "return ,$found"
+    prevents PS 5.1 from unwrapping the ArrayList into individual strings.
+  - Build-DatIndexFromStream: clarified that $currentElem is reset to "" after
+    Skip() because Skip() leaves the reader on the NEXT element, so a stale
+    "rom" value would misassign the following Text node to the wrong field.
+  - Get-TeknoParrotProfileSet: added note that the '^[\w]+$' stem filter is a
+    security guard that rejects stems containing path separators or dots,
+    preventing a malicious API response from injecting traversal strings into
+    subsequent Join-Path calls.
+
+
+-------------------------------------------------------------------------------
   v0.71 BETA  (2026-06-16)
 -------------------------------------------------------------------------------
 

@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.71 BETA
+# TeknoParrot Manager  |  v0.72 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -60,7 +60,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.71 BETA" -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.72 BETA" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -87,7 +87,9 @@ function Write-Log {
     param([string]$msg)
     $line = "[{0}] {1}" -f (Get-Date).ToString("yyyy-MM-dd HH:mm:ss"), $msg
     try {
-        Add-Content -LiteralPath $logPath -Value $line -ErrorAction Stop
+        # AppendAllText with BOM-less UTF-8: preserves prior entries and handles
+        # non-ASCII characters in paths/game names without log corruption.
+        [System.IO.File]::AppendAllText($logPath, $line + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding $false))
     } catch {
         # First failure: surface a clear warning so the user knows their session
         # is not being archived and can investigate before the run continues.
@@ -148,7 +150,9 @@ function Get-PrimaryExecutableName {
     param([string]$path)
     try {
         $raw = [System.IO.File]::ReadAllText($path)
-        $raw = [regex]::Replace($raw, '(?s)<!--.*?-->', '')   # strip XML comments before matching
+        # Strip XML comments before matching: some profiles have a commented-out
+        # <ExecutableName> alternative above the real one, which would otherwise match first.
+        $raw = [regex]::Replace($raw, '(?s)<!--.*?-->', '')
         $m = [regex]::Match($raw, '<ExecutableName>\s*([^<]+?)\s*</ExecutableName>')
         if ($m.Success) { return $m.Groups[1].Value }
     } catch { }
@@ -283,7 +287,7 @@ function Find-TeknoParrotRoot {
             [void]$found.Add($path)
         }
     }
-    return ,$found
+    return ,$found   # comma prevents PS 5.1 from unwrapping the ArrayList into individual strings
 }
 
 # =============================================================================
@@ -2120,7 +2124,9 @@ function Invoke-AutoSync {
                 # Remove the partial folder so the next run does not misclassify
                 # a half-extracted game as already complete (sentinel gone + some
                 # files present = indistinguishable from a successful extraction).
-                Remove-Item -LiteralPath $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+                if (-not [string]::IsNullOrWhiteSpace($extractDir)) {
+                    Remove-Item -LiteralPath $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+                }
                 $failed++
             }
         } catch {
@@ -2195,8 +2201,9 @@ function Build-DatIndexFromStream {
                     $exePath     = ''
                     $insideGame  = $true
                 } elseif ($currentElem -eq 'rom' -and $insideGame) {
-                    $reader.Skip()   # skip hundreds of hash entries per game
-                    $currentElem = ''
+                    $reader.Skip()   # each <game> has hundreds of <rom> hash entries; skip for perf
+                    $currentElem = ''   # Skip() leaves the reader on the next element -- clear so
+                                        # a stale 'rom' value doesn't misassign the following Text node
                 }
             } elseif ($reader.NodeType -eq [System.Xml.XmlNodeType]::Text -and $insideGame) {
                 if     ($currentElem -eq 'GameProfile')                           { $profCode = $reader.Value }
@@ -2341,13 +2348,13 @@ function Get-TeknoParrotProfileSet {
     try {
         $apiUri = 'https://api.github.com/repos/teknogods/TeknoParrotUI/git/trees/master?recursive=1'
         $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
-                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.70' }
+                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.71' }
         $tree   = ($resp.Content | ConvertFrom-Json).tree
         $prefix = 'TeknoParrotUi.Common/GameProfiles/'
         foreach ($node in $tree) {
             if ($node.type -eq 'blob' -and $node.path -like ($prefix + '*.xml')) {
                 $stem = [System.IO.Path]::GetFileNameWithoutExtension($node.path.Substring($prefix.Length))
-                if ($stem -match '^[\w]+$') { [void]$result.Add($stem) }
+                if ($stem -match '^[\w]+$') { [void]$result.Add($stem) }   # security: reject stems with path separators or dots
             }
         }
         if ($result.Count -gt 0) {
@@ -2405,7 +2412,7 @@ function Get-EggmanDatRelease {
     try {
         $apiUri = 'https://api.github.com/repos/Eggmansworld/Datfiles/releases/tags/teknoparrot'
         $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
-                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.70' }
+                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.71' }
         $rel    = $resp.Content | ConvertFrom-Json
         $asset  = @($rel.assets) | Where-Object { $_.name -like 'TeknoParrot*Collection*RomVault*.zip' } |
                       Select-Object -First 1
@@ -3712,7 +3719,8 @@ function Export-HyperSpinJson {
     # Load existing game list
     try {
         $existing = New-Object System.Collections.ArrayList
-        foreach ($g in (Get-Content -LiteralPath $tpGamesPath -Raw | ConvertFrom-Json)) {
+        # @() guard: ConvertFrom-Json returns $null for an empty "[]" in PS 5.1, not an empty array.
+        foreach ($g in @(Get-Content -LiteralPath $tpGamesPath -Raw | ConvertFrom-Json)) {
             [void]$existing.Add($g)
         }
     } catch {
@@ -4092,7 +4100,7 @@ function Write-ControlsStatus {
     }
 }
 
-Write-Log "Script started (v0.71$(if ($Unattended) { ' [Unattended]' }))."
+Write-Log "Script started (v0.72$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
 # SECTION 1 -- Load or prompt for configuration
@@ -4125,6 +4133,7 @@ if ($Unattended -and -not (Test-Path -LiteralPath $configPath)) {
 if (Test-Path -LiteralPath $configPath) {
     try {
         $cfg = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+        if ($null -eq $cfg) { throw "Config file parsed as null -- file may be empty or corrupt." }
         Write-Host "Saved configuration found:" -ForegroundColor Cyan
         Write-Host "  TeknoParrot root     : $($cfg.TeknoParrotRoot)"
         if ($cfg.ZipSourceFolder)              { Write-Host "  ZIP source folder    : $($cfg.ZipSourceFolder)" }
@@ -5581,6 +5590,7 @@ if ($Unattended) {
 } else {
     $doReShade = (Read-Host "Set up ReShade visual enhancements for your games? (Y/N)").Trim().ToUpper()
 }
+$rsSetupDone = $false
 if ($doReShade -eq "Y") {
     # Locate 64-bit DLL: bundled copy first, then config, then prompt
     $bundledDll2   = Join-Path $PSScriptRoot "ReShade\ReShade64.dll"
@@ -5658,8 +5668,6 @@ if ($doReShade -eq "Y") {
                             -HsDataPath $hsDataPath
     }
 }
-if (-not (Get-Variable rsSetupDone -ErrorAction SilentlyContinue)) { $rsSetupDone = $false }
-
 # =============================================================================
 # DGVOODOO2 SETUP  (optional, runs after ReShade setup)
 # =============================================================================
@@ -5741,6 +5749,7 @@ if ($doDgVoodoo -eq "Y") {
         }
     }
 }
+$dgSetupDone = $false
 if ($doDgVoodoo -eq "Y") {
     Write-Host ""
     Write-Host "--------------------------------------------" -ForegroundColor Cyan
@@ -5751,8 +5760,6 @@ if ($doDgVoodoo -eq "Y") {
                           -SourceDir $dgSourceDir `
                           -TpRoot $tpRoot
 }
-if (-not (Get-Variable dgSetupDone -ErrorAction SilentlyContinue)) { $dgSetupDone = $false }
-
 # =============================================================================
 # GPU FIX SETUP  (optional, runs after dgVoodoo2 setup)
 # =============================================================================
@@ -5774,6 +5781,7 @@ if ($Unattended) {
 } else {
     $doGpuFix = (Read-Host "Apply GPU compatibility fixes for your games? (Y/N)").Trim().ToUpper()
 }
+$gpuSetupDone = $false
 if ($doGpuFix -eq "Y") {
     Write-Host ""
     Write-Host "--------------------------------------------" -ForegroundColor Cyan
@@ -5783,8 +5791,6 @@ if ($doGpuFix -eq "Y") {
     Invoke-GpuFixSetup -UserProfilesDir $userProfilesDir `
                        -TpRoot $tpRoot
 }
-if (-not (Get-Variable gpuSetupDone -ErrorAction SilentlyContinue)) { $gpuSetupDone = $false }
-
 # =============================================================================
 # ACTION REQUIRED -- collects everything the user must do manually
 # =============================================================================
