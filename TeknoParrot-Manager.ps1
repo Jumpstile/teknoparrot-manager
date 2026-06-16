@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.72 BETA
+# TeknoParrot Manager  |  v0.73 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -60,7 +60,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.72 BETA" -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.73 BETA" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -2345,26 +2345,35 @@ function Get-TeknoParrotProfileSet {
     param([string]$localGameProfilesDir = '')
     $result = New-Object 'System.Collections.Generic.HashSet[string]'([StringComparer]::OrdinalIgnoreCase)
     $loaded = $false
-    try {
-        $apiUri = 'https://api.github.com/repos/teknogods/TeknoParrotUI/git/trees/master?recursive=1'
-        $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
-                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.71' }
-        $tree   = ($resp.Content | ConvertFrom-Json).tree
-        $prefix = 'TeknoParrotUi.Common/GameProfiles/'
-        foreach ($node in $tree) {
-            if ($node.type -eq 'blob' -and $node.path -like ($prefix + '*.xml')) {
-                $stem = [System.IO.Path]::GetFileNameWithoutExtension($node.path.Substring($prefix.Length))
-                if ($stem -match '^[\w]+$') { [void]$result.Add($stem) }   # security: reject stems with path separators or dots
+    $apiUri = 'https://api.github.com/repos/teknogods/TeknoParrotUI/git/trees/master?recursive=1'
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try {
+            $resp = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
+                        -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.72' }
+            $tree   = ($resp.Content | ConvertFrom-Json).tree
+            $prefix = 'TeknoParrotUi.Common/GameProfiles/'
+            foreach ($node in $tree) {
+                if ($node.type -eq 'blob' -and $node.path -like ($prefix + '*.xml')) {
+                    $stem = [System.IO.Path]::GetFileNameWithoutExtension($node.path.Substring($prefix.Length))
+                    if ($stem -match '^[\w]+$') { [void]$result.Add($stem) }   # security: reject stems with path separators or dots
+                }
             }
+            if ($result.Count -gt 0) {
+                Write-Log "ProfileSet (GitHub): $($result.Count) profiles from teknogods/TeknoParrotUI."
+                $loaded = $true
+            } else {
+                Write-Log "ProfileSet (GitHub): 0 profiles returned -- API may have changed."
+            }
+            break
+        } catch {
+            $status = 0
+            if ($_.Exception.Response) { try { $status = [int]$_.Exception.Response.StatusCode } catch {} }
+            if ($attempt -ge 3 -or ($status -ge 400 -and $status -lt 500)) {
+                Write-Log "ProfileSet (GitHub): query failed -- $_"; break
+            }
+            Write-Log "ProfileSet (GitHub): attempt $attempt failed, retrying in 5s -- $_"
+            Start-Sleep -Seconds 5
         }
-        if ($result.Count -gt 0) {
-            Write-Log "ProfileSet (GitHub): $($result.Count) profiles from teknogods/TeknoParrotUI."
-            $loaded = $true
-        } else {
-            Write-Log "ProfileSet (GitHub): 0 profiles returned -- API may have changed."
-        }
-    } catch {
-        Write-Log "ProfileSet (GitHub): query failed -- $_"
     }
     if (-not $loaded -and $localGameProfilesDir -and (Test-Path -LiteralPath $localGameProfilesDir)) {
         Get-ChildItem -LiteralPath $localGameProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue |
@@ -2409,26 +2418,35 @@ function Resolve-ProfileCode {
 # Uses the "teknoparrot" tag which Eggmansworld updates with each release.
 # Returns [pscustomobject]@{DownloadUrl; FileName; SizeMB} or $null on failure.
 function Get-EggmanDatRelease {
-    try {
-        $apiUri = 'https://api.github.com/repos/Eggmansworld/Datfiles/releases/tags/teknoparrot'
-        $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
-                      -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.71' }
-        $rel    = $resp.Content | ConvertFrom-Json
-        $asset  = @($rel.assets) | Where-Object { $_.name -like 'TeknoParrot*Collection*RomVault*.zip' } |
-                      Select-Object -First 1
-        if (-not $asset) { return $null }
-        if ($asset.browser_download_url -notmatch '^https://[a-zA-Z0-9._-]*(github\.com|githubusercontent\.com)/') {
-            Write-Log "EggmanDat: unexpected download URL format -- skipping."
-            return $null
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try {
+            $apiUri = 'https://api.github.com/repos/Eggmansworld/Datfiles/releases/tags/teknoparrot'
+            $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
+                          -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.72' }
+            $rel    = $resp.Content | ConvertFrom-Json
+            $asset  = @($rel.assets) | Where-Object { $_.name -like 'TeknoParrot*Collection*RomVault*.zip' } |
+                          Select-Object -First 1
+            if (-not $asset) { return $null }
+            if ($asset.browser_download_url -notmatch '^https://[a-zA-Z0-9._-]*(github\.com|githubusercontent\.com)/') {
+                Write-Log "EggmanDat: unexpected download URL format -- skipping."
+                return $null
+            }
+            return [pscustomobject]@{
+                DownloadUrl = $asset.browser_download_url
+                FileName    = $asset.name
+                SizeMB      = [Math]::Round($asset.size / 1MB, 1)
+            }
+        } catch {
+            $status = 0
+            if ($_.Exception.Response) { try { $status = [int]$_.Exception.Response.StatusCode } catch {} }
+            if ($attempt -ge 3 -or ($status -ge 400 -and $status -lt 500)) {
+                Write-Log "EggmanDat: GitHub release query failed -- $_"; return $null
+            }
+            Write-Log "EggmanDat: attempt $attempt failed, retrying in 5s -- $_"
+            Start-Sleep -Seconds 5
         }
-        return [pscustomobject]@{
-            DownloadUrl = $asset.browser_download_url
-            FileName    = $asset.name
-            SizeMB      = [Math]::Round($asset.size / 1MB, 1)
-        }
-    } catch {
-        Write-Log "EggmanDat: GitHub release query failed -- $_"
-        return $null
+    }
+    return $null
     }
 }
 
@@ -2451,7 +2469,20 @@ function Invoke-EggmanDatDownload {
             }
         }
         if (-not $bitsOk) {
-            Invoke-WebRequest -Uri $downloadUrl -OutFile $savePath -UseBasicParsing -ErrorAction Stop
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+                try {
+                    Invoke-WebRequest -Uri $downloadUrl -OutFile $savePath -UseBasicParsing -ErrorAction Stop
+                    break
+                } catch {
+                    $status = 0
+                    if ($_.Exception.Response) { try { $status = [int]$_.Exception.Response.StatusCode } catch {} }
+                    try { if (Test-Path -LiteralPath $savePath) { [System.IO.File]::Delete($savePath) } } catch {}
+                    if ($attempt -ge 3 -or ($status -ge 400 -and $status -lt 500)) { throw }
+                    Write-Host ("  Attempt $attempt failed -- retrying in 10s...") -ForegroundColor Yellow
+                    Write-Log "EggmanDat: download attempt $attempt failed -- retrying"
+                    Start-Sleep -Seconds 10
+                }
+            }
         }
         return $true
     } catch {
@@ -3964,27 +3995,37 @@ function Invoke-ThumbnailDownload {
         $destPath = Join-Path $iconsDir ($code + ".png")
         $url      = $baseUrl + [Uri]::EscapeDataString($code + ".png")
         Write-Host ("  [{0,3}/{1}] {2}" -f $i, $total, $code) -ForegroundColor DarkCyan -NoNewline
-        try {
-            Invoke-WebRequest -Uri $url -OutFile $destPath -UseBasicParsing `
-                              -TimeoutSec 30 -ErrorAction Stop
-            Write-Host "  OK" -ForegroundColor Green
-            Write-Log "Thumbnails: downloaded $code"
-            $fetched++
-        } catch {
-            $statusCode = 0
-            if ($_.Exception.Response) {
-                try { $statusCode = [int]$_.Exception.Response.StatusCode } catch {}
-            }
-            if ($statusCode -eq 404) {
-                Write-Host "  not in repo" -ForegroundColor DarkGray
-                $notAvail++
-            } else {
-                Write-Host ("  FAILED ({0})" -f $_.Exception.Message) -ForegroundColor Red
-                Write-Log "Thumbnails: FAILED $code -- $($_.Exception.Message)"
-                $failed++
-            }
-            if (Test-Path -LiteralPath $destPath) {
-                Remove-Item -LiteralPath $destPath -Force -ErrorAction SilentlyContinue
+        $dlOk = $false
+        for ($attempt = 1; $attempt -le 3 -and -not $dlOk; $attempt++) {
+            try {
+                Invoke-WebRequest -Uri $url -OutFile $destPath -UseBasicParsing `
+                                  -TimeoutSec 30 -ErrorAction Stop
+                Write-Host "  OK" -ForegroundColor Green
+                Write-Log "Thumbnails: downloaded $code"
+                $fetched++
+                $dlOk = $true
+            } catch {
+                $statusCode = 0
+                if ($_.Exception.Response) {
+                    try { $statusCode = [int]$_.Exception.Response.StatusCode } catch {}
+                }
+                if (Test-Path -LiteralPath $destPath) {
+                    Remove-Item -LiteralPath $destPath -Force -ErrorAction SilentlyContinue
+                }
+                if ($statusCode -eq 404) {
+                    Write-Host "  not in repo" -ForegroundColor DarkGray
+                    $notAvail++
+                    break   # 404 is definitive -- no point retrying
+                }
+                if ($attempt -lt 3) {
+                    Write-Host ("  attempt $attempt failed, retrying..." ) -ForegroundColor Yellow
+                    Write-Log "Thumbnails: attempt $attempt FAILED $code -- $($_.Exception.Message)"
+                    Start-Sleep -Seconds 5
+                } else {
+                    Write-Host ("  FAILED ({0})" -f $_.Exception.Message) -ForegroundColor Red
+                    Write-Log "Thumbnails: FAILED $code -- $($_.Exception.Message)"
+                    $failed++
+                }
             }
         }
     }
@@ -4100,7 +4141,7 @@ function Write-ControlsStatus {
     }
 }
 
-Write-Log "Script started (v0.72$(if ($Unattended) { ' [Unattended]' }))."
+Write-Log "Script started (v0.73$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
 # SECTION 1 -- Load or prompt for configuration

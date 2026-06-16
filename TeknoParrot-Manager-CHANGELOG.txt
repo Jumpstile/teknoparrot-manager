@@ -7,6 +7,32 @@
 
 
 -------------------------------------------------------------------------------
+  v0.73 BETA  (2026-06-16)
+-------------------------------------------------------------------------------
+
+  Download retry logic:
+
+  Three of the four network calls in the script had no retry logic; a transient
+  502/503 or connection reset from GitHub caused immediate failure with no
+  recovery. Added retry loops (up to 3 attempts) to all four download sites:
+
+  - Get-TeknoParrotProfileSet: GitHub API query for profile list. Retries on
+    5xx / connection errors with a 5-second delay; 4xx (e.g. 403 rate-limit)
+    falls through immediately to the local folder fallback.
+  - Get-EggmanDatRelease: GitHub API query for latest dat release asset. Same
+    retry policy (3 attempts, 5-second delay, no retry on 4xx).
+  - Invoke-EggmanDatDownload (WebRequest fallback): large file download via
+    Invoke-WebRequest. Retries twice (10-second delay) on 5xx / connection
+    errors; 4xx re-throws immediately. Partial file is deleted between retries.
+    BITS path is unchanged (BITS already has built-in retry / resume logic).
+  - Thumbnail download loop: each icon fetch retries twice (5-second delay) on
+    non-404 errors. 404 is treated as definitive (icon not in repo) and never
+    retried. Partial files are deleted between attempts as before.
+
+  User-Agent header updated to /0.73 in both GitHub API callers.
+
+
+-------------------------------------------------------------------------------
   v0.72 BETA  (2026-06-16)
 -------------------------------------------------------------------------------
 
