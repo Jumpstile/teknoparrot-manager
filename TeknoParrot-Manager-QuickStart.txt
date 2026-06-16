@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.73 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.74 BETA  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -22,6 +22,16 @@
   ----------------
   - Run TeknoParrotUi.exe once so it downloads its game profiles.
   - Have your games as ZIP files (for AutoSync) or already extracted.
+
+
+  TYPICAL FIRST RUN
+  -----------------
+  1. Run TeknoParrotUi.exe once.
+  2. Run TeknoParrot Manager and choose AutoSync or Register only.
+  3. Launch TeknoParrotUI and verify your games appear.
+  4. In TeknoParrotUI, bind one game of each controller type you use.
+  5. Re-run the script -- it copies those controls to all similar games.
+  6. Launch one updated game and test it.
 
 
   RUN IT
@@ -85,6 +95,41 @@
   3. Launch ONE updated game and test it before trusting the rest.
 
 
+  IMPORTANT
+  ---------
+  After running propagation or any optional fix (Crosshairs, ReShade,
+  dgVoodoo2, GPU fix), launch one game and confirm it works before
+  assuming everything succeeded.
+
+
+  QUICK FIXES
+  -----------
+  Game won't launch          Open TeknoParrotUI, point the profile to the
+                             correct .exe. Re-run the script and choose Repair.
+
+  Game not in TeknoParrot    Check ACTION REQUIRED -- it may need manual
+                             registration or needs to be extracted first.
+
+  Extraction keeps failing   Check the log for the specific error. Verify
+                             free space and that the ZIP is not corrupted.
+
+  Controls wrong after       Restore from backup (mode 3), or delete the
+  propagation                game's .xml and re-run after fixing the
+                             reference game's bindings in TeknoParrotUI.
+
+  Wrong fuzzy match          Delete the game's .xml from UserProfiles and add
+                             a forceArchetype entry in overrides.json.
+
+  Game appears twice         Delete one of the duplicate .xml files from
+  in TeknoParrotUI           UserProfiles -- keep the one with correct path
+                             and any bindings you have already set.
+
+  [UNLOGGED] on console      Log file is inaccessible -- check that the
+                             TeknoParrot folder is not read-only.
+
+  Full troubleshooting: TeknoParrot-Manager-README.txt.
+
+
   CROSSHAIR SETUP (OPTIONAL)
   --------------------------
   Mode 4 deploys custom crosshair images to all registered lightgun games
@@ -115,12 +160,7 @@
   modern screens. It sits between the game and your screen, applying
   real-time visual improvements. Your game files are never modified.
 
-  Popular effects:
-    Sharpening    -- removes the blurry look of upscaled games.
-    CRT scanlines -- makes games look like they are running on a real
-                     arcade monitor with the classic scanline effect.
-    Colour boost  -- makes older games look more vivid and punchy.
-    Borders/bezel -- adds decorative arcade cabinet artwork around the game.
+  Common uses include sharpening, scanlines, colour enhancement, and decorative bezels.
 
   Your games work perfectly WITHOUT ReShade. It is 100% optional and can
   be removed at any time by deleting one DLL file from a game folder.
@@ -203,7 +243,7 @@
   Answer Y and game folders are extracted as  GameName.teknoparrot  instead
   of  GameName. Registration and fuzzy matching work the same way; the suffix
   is stripped automatically before any profile comparison. The script also
-  recognises .parrot and .game suffixes for any existing folders extracted by
+  recognises folders ending in .parrot or .game if they were extracted by
   other tools. The answer is saved and never asked again.
 
   To switch later: delete TeknoParrot-Manager.config.json and re-run, or set "RetroBat": true
@@ -463,34 +503,6 @@
   - On later runs the script remembers your settings -- press Y to reuse.
   - To fix a mis-classified game's control family (e.g. FamilyGuyBowling),
     add it to the familyOverride section of the overrides file.
-
-
-  QUICK FIXES
-  -----------
-  Game won't launch          Open TeknoParrotUI, point the profile to the
-                             correct .exe. Re-run the script and choose Repair.
-
-  Game not in TeknoParrot    Check ACTION REQUIRED -- it may need manual
-                             registration or needs to be extracted first.
-
-  Extraction keeps failing   Check the log for the specific error. Verify
-                             free space and that the ZIP is not corrupted.
-
-  Controls wrong after       Restore from backup (mode 3), or delete the
-  propagation                game's .xml and re-run after fixing the
-                             reference game's bindings in TeknoParrotUI.
-
-  Wrong fuzzy match          Delete the game's .xml from UserProfiles and add
-                             a forceArchetype entry in overrides.json.
-
-  Game appears twice         Delete one of the duplicate .xml files from
-  in TeknoParrotUI           UserProfiles -- keep the one with correct path
-                             and any bindings you have already set.
-
-  [UNLOGGED] on console      Log file is inaccessible -- check that the
-                             TeknoParrot folder is not read-only.
-
-  Full troubleshooting: TeknoParrot-Manager-README.txt.
 
 
   FILES THE SCRIPT KEEPS
