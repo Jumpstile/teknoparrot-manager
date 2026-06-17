@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.77 BETA
+# TeknoParrot Manager  |  v0.78 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -63,7 +63,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.77 BETA" -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.78 BETA" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -1523,6 +1523,10 @@ function Invoke-GpuFixSetup {
         return
     }
     $backupCopyErrs = $null
+    # Copy-Item receives FileInfo/DirectoryInfo objects from the pipeline
+    # (not path strings), so pipeline binding already bypasses wildcard
+    # expansion -- safe even with [, ], $ in game folder names. If this
+    # source is ever changed to raw path strings, add -LiteralPath there.
     Get-ChildItem -LiteralPath $UserProfilesDir | Where-Object { $_.Name -ne "FullBackup" } |
         Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable backupCopyErrs
     if ($backupCopyErrs.Count -gt 0) {
@@ -1654,8 +1658,13 @@ function Set-Pcsx2CursorPaths {
             $hdr = if ($tgt -eq 'usb port 1 guncon2') { '[USB Port 1 guncon2]' } else { '[USB Port 2 guncon2]' }
             $out.Add($hdr); $out.Add("cursor_path = $($targets[$tgt])")
         }
+        # Back up before overwriting -- this is the user's PCSX2 emulator
+        # config, not a file this script created, so a bad parse should
+        # never leave them without their original settings.
+        $iniBackup = $IniPath + ".bak_" + (Get-Date).ToString("yyyyMMdd_HHmmss")
+        Copy-Item -LiteralPath $IniPath -Destination $iniBackup -ErrorAction Stop
         [System.IO.File]::WriteAllText($IniPath, ($out -join "`r`n"), (New-Object System.Text.UTF8Encoding $false))
-        Write-Log "Crosshairs: updated PCSX2.ini at $IniPath"
+        Write-Log "Crosshairs: updated PCSX2.ini at $IniPath (backup: $iniBackup)"
     } catch {
         Write-Host ("    WARNING: Could not update PCSX2.ini -- {0}" -f $_) -ForegroundColor Yellow
         Write-Log "Crosshairs: PCSX2.ini update failed -- $_"
@@ -1865,6 +1874,10 @@ function Invoke-CursorHideSetup {
         return
     }
     $backupCopyErrs = $null
+    # Copy-Item receives FileInfo/DirectoryInfo objects from the pipeline
+    # (not path strings), so pipeline binding already bypasses wildcard
+    # expansion -- safe even with [, ], $ in game folder names. If this
+    # source is ever changed to raw path strings, add -LiteralPath there.
     Get-ChildItem -LiteralPath $UserProfilesDir | Where-Object { $_.Name -ne "FullBackup" } |
         Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable backupCopyErrs
     if ($backupCopyErrs.Count -gt 0) {
@@ -3585,6 +3598,10 @@ function Invoke-RestoreBackup {
     # Treat any deletion failures as fatal: a partial delete followed by a
     # partial copy would leave UserProfiles in an undefined mixed state.
     $deleteErrs = @()
+    # Remove-Item receives FileInfo/DirectoryInfo objects from the pipeline
+    # (not path strings), so pipeline binding already bypasses wildcard
+    # expansion -- safe even with [, ], $ in game folder names. If this
+    # source is ever changed to raw path strings, add -LiteralPath there.
     Get-ChildItem -LiteralPath $userProfilesDir | Where-Object { $_.Name -ne "FullBackup" } |
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable deleteErrs
     if ($deleteErrs.Count -gt 0) {
@@ -3594,7 +3611,11 @@ function Invoke-RestoreBackup {
         return
     }
 
-    # Copy backup into UserProfiles
+    # Copy backup into UserProfiles. Copy-Item receives FileInfo/DirectoryInfo
+    # objects from the pipeline (not path strings), so pipeline binding
+    # already bypasses wildcard expansion -- safe even with [, ], $ in game
+    # folder names. If this source is ever changed to raw path strings, add
+    # -LiteralPath there.
     $restoreErrs = @()
     Get-ChildItem -LiteralPath $selected.FullName |
         Copy-Item -Destination $userProfilesDir -Recurse -Force `
@@ -3939,10 +3960,18 @@ function Export-HyperSpinJson {
         $json = ConvertTo-Json -InputObject @($allGames) -Depth 10
         # Atomic write: a crash mid-write must never leave $tpGamesPath
         # truncated, since on a pre-existing file there is no automatic
-        # restore from the .bak_ copy above -- same pattern as Save-Xml.
+        # restore from the .bak_ copy above -- same pattern as Save-Xml,
+        # including its Delete+Move fallback (File.Replace's 3-arg overload
+        # throws "The path is empty" on some .NET builds even with a real
+        # source/destination, so it cannot be relied on alone).
         $tmpPath = $tpGamesPath + ".tmp"
         [System.IO.File]::WriteAllText($tmpPath, $json, (New-Object System.Text.UTF8Encoding $false))
-        [System.IO.File]::Replace($tmpPath, $tpGamesPath, $null)
+        try {
+            [System.IO.File]::Replace($tmpPath, $tpGamesPath, $null)
+        } catch {
+            [System.IO.File]::Delete($tpGamesPath)
+            [System.IO.File]::Move($tmpPath, $tpGamesPath)
+        }
     } catch {
         Write-Host "  ERROR: Could not write games file: $_" -ForegroundColor Red
         Write-Log "HyperSpin export: write failed -- $_"
@@ -4211,7 +4240,7 @@ function Write-ControlsStatus {
     }
 }
 
-Write-Log "Script started (v0.77$(if ($Unattended) { ' [Unattended]' }))."
+Write-Log "Script started (v0.78$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
 # SECTION 1 -- Load or prompt for configuration
@@ -5110,6 +5139,10 @@ try {
 
 # Use Where-Object instead of -Exclude so FullBackup is reliably excluded
 # across all PowerShell 5.1 versions (-Exclude has known edge-case behaviour).
+# Copy-Item below receives FileInfo/DirectoryInfo objects from the pipeline
+# (not path strings), so pipeline binding already bypasses wildcard
+# expansion -- safe even with [, ], $ in game folder names. If this source
+# is ever changed to raw path strings, add -LiteralPath there.
 $backupErrors = 0
 Get-ChildItem -LiteralPath $userProfilesDir | Where-Object { $_.Name -ne "FullBackup" } |
     Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable copyErrs

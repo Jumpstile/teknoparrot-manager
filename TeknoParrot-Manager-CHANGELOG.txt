@@ -7,6 +7,23 @@
 
 
 -------------------------------------------------------------------------------
+  v0.78 BETA  (2026-06-16)
+-------------------------------------------------------------------------------
+
+  Bug sweep follow-up (low-severity nits):
+
+  - PCSX2.ini is now backed up (.bak_<timestamp>) before Crosshair setup
+    rewrites its cursor_path entries, same as other config/profile writes.
+
+  - Added guard comments above every Get-ChildItem | Copy-Item/Remove-Item
+    backup and restore pipeline explaining why -LiteralPath is unnecessary
+    there (the pipeline already passes resolved FileInfo/DirectoryInfo
+    objects, bypassing wildcard expansion) and flagging that -LiteralPath
+    must be added if a future refactor swaps the source for raw path
+    strings.
+
+
+-------------------------------------------------------------------------------
   v0.77 BETA  (2026-06-16)
 -------------------------------------------------------------------------------
 
