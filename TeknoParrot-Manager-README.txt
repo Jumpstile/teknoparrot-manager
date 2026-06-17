@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.83 BETA
+  TeknoParrot Manager  |  v0.84 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -904,6 +904,23 @@
          specific selection from a list).
       d. Copy the DLL with the correct name into each selected game folder.
 
+  PER-GAME PRESETS
+
+    The preset chosen in step (b) above applies to every selected game. To
+    give one specific game a different preset (or a preset while leaving
+    every other game on "no preset"), create a  ReShadePresets\  folder next
+    to this script and drop a file named  ProfileCode.ini  in it -- for
+    example  ReShadePresets\Daytona3.ini.
+
+    A per-game file always overrides the global choice for that one game
+    only; every other selected game still gets whatever was chosen in
+    step (b). Find a game's profile code in
+    TeknoParrot-Manager-controls.txt (written after every run).
+
+    A file whose name does not match any registered profile code is reported
+    as WRONG NAME and ignored, the same way CustomThumbnails handles a
+    mismatched icon filename.
+
   USING RESHADE IN-GAME
 
     Once installed, launch any game that has ReShade and press the  Home  key.
@@ -1646,6 +1663,6 @@
 
 
 ===============================================================================
-  v0.83 BETA -- Test one game after each run.
+  v0.84 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================

@@ -7,6 +7,27 @@
 
 
 -------------------------------------------------------------------------------
+  v0.84 BETA  (2026-06-17)
+-------------------------------------------------------------------------------
+
+  New feature: per-game ReShade presets
+
+  - Mode 5 (ReShade setup) previously applied one preset choice to every
+    selected game in a run. Added ReShadePresets\<ProfileCode>.ini: a file
+    named by profile code in this folder next to the script now overrides
+    the global preset choice for that one game only, while every other
+    selected game still gets whatever was chosen in the menu. Same
+    convention as the existing CustomThumbnails\<ProfileCode>.png feature --
+    file names are validated against registered profiles, with a WRONG NAME
+    warning (not a silent no-op) for names that do not match any profile.
+  - The per-game deploy line and log now show which preset source was used
+    (per-game / global / none), and the end-of-run summary reports how many
+    games received a per-game override.
+  - Inspired by AtomFry/LaunchBoxReShadeManager's emulator/platform/game
+    override hierarchy; scoped down to just the per-game tier since every
+    TeknoParrot title is already "one platform" from this script's view.
+
+-------------------------------------------------------------------------------
   v0.83 BETA  (2026-06-17)
 -------------------------------------------------------------------------------
 

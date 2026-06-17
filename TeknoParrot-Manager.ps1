@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.83 BETA
+# TeknoParrot Manager  |  v0.84 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -65,7 +65,7 @@ param([switch]$Unattended)
 # GitHub API User-Agent headers. Previously hardcoded in each of those spots
 # independently, which let the User-Agent strings drift out of sync with the
 # banner (caught stale at 0.70 during the v0.71 bump, and again at 0.76 here).
-$ScriptVersion = "0.83"
+$ScriptVersion = "0.84"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -1098,6 +1098,11 @@ function Invoke-ReShadeSetup {
     Write-Host "    2) Use a preset file -- copy a ready-made .ini to every selected game."
     Write-Host "       Useful if you already have settings you are happy with."
     Write-Host ""
+    Write-Host "  Tip: drop ProfileCode.ini files into a ReShadePresets\ folder next to" -ForegroundColor DarkCyan
+    Write-Host "  this script to pin a specific preset to one game -- it overrides the" -ForegroundColor DarkCyan
+    Write-Host "  choice above for that game only. Profile codes are listed in" -ForegroundColor DarkCyan
+    Write-Host "  TeknoParrot-Manager-controls.txt." -ForegroundColor DarkCyan
+    Write-Host ""
     $presetChoice = (Read-Host "  Enter 1 or 2").Trim()
     $presetPath   = $null
     if ($presetChoice -eq "2") {
@@ -1107,6 +1112,32 @@ function Invoke-ReShadeSetup {
             Write-Host "  Preset: $pInp" -ForegroundColor DarkGray
         } else {
             Write-Host "  File not found -- continuing without preset." -ForegroundColor Yellow
+        }
+    }
+
+    # Per-game preset overrides: ReShadePresets\<ProfileCode>.ini always wins
+    # over the global choice above for that one game. Same convention as
+    # CustomThumbnails\<ProfileCode>.png (Invoke-ThumbnailDownload) -- file
+    # name is the profile code, validated against registered profiles, with
+    # a WRONG NAME warning for typos instead of a silent no-op.
+    $reShadePresetsDir = Join-Path $PSScriptRoot "ReShadePresets"
+    if (Test-Path -LiteralPath $reShadePresetsDir) {
+        $presetFiles = @(Get-ChildItem -LiteralPath $reShadePresetsDir -Filter "*.ini" -File -ErrorAction SilentlyContinue)
+        if ($presetFiles.Count -gt 0) {
+            $knownPresetCodes = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Directory.Name -ne "FullBackup" } |
+                ForEach-Object { [void]$knownPresetCodes.Add($_.BaseName) }
+            foreach ($pfile in $presetFiles) {
+                $code = [System.IO.Path]::GetFileNameWithoutExtension($pfile.Name)
+                if (-not $knownPresetCodes.Contains($code)) {
+                    Write-Host ("  WRONG NAME: ReShadePresets\{0}" -f $pfile.Name) -ForegroundColor Yellow
+                    Write-Host ("             '{0}' does not match any registered game profile code." -f $code) -ForegroundColor Yellow
+                    Write-Host "             Check TeknoParrot-Manager-controls.txt for the correct" -ForegroundColor Yellow
+                    Write-Host "             name, rename the file, then re-run. File will be ignored." -ForegroundColor Yellow
+                    Write-Log "ReShade: per-game preset $($pfile.Name) -- no matching profile code, ignored."
+                }
+            }
         }
     }
 
@@ -1124,7 +1155,7 @@ function Invoke-ReShadeSetup {
     # Deploy
     Write-Host ""
     Write-Host ("  Installing ReShade into {0} game folder(s)..." -f $selectedGames.Count) -ForegroundColor Cyan
-    $deployed = 0; $skipped = 0; $errors = 0
+    $deployed = 0; $skipped = 0; $errors = 0; $presetOverrides = 0
 
     foreach ($pf in $selectedGames) {
         try {
@@ -1188,12 +1219,25 @@ function Invoke-ReShadeSetup {
 
             $destDll = Join-Path $targetDir $dllName
             Copy-Item -LiteralPath $activeDll -Destination $destDll -Force -ErrorAction Stop
-            if ($presetPath) {
-                Copy-Item -LiteralPath $presetPath -Destination (Join-Path $targetDir "ReShade.ini") `
-                          -Force -ErrorAction Stop
+
+            # Per-game preset (ReShadePresets\<ProfileCode>.ini) always wins
+            # over the global choice for this one game.
+            $perGamePreset   = Join-Path $reShadePresetsDir ($pf.BaseName + ".ini")
+            $effectivePreset = $null; $presetSource = $null
+            if (Test-Path -LiteralPath $perGamePreset) {
+                $effectivePreset = $perGamePreset; $presetSource = "per-game"
+            } elseif ($presetPath) {
+                $effectivePreset = $presetPath; $presetSource = "global"
             }
-            Write-Host ("    {0}  [{1}]" -f $pf.BaseName, $dllName) -ForegroundColor Green
-            Write-Log "ReShade: $($pf.BaseName) -> $targetDir [$dllName]"
+            if ($effectivePreset) {
+                Copy-Item -LiteralPath $effectivePreset -Destination (Join-Path $targetDir "ReShade.ini") `
+                          -Force -ErrorAction Stop
+                if ($presetSource -eq "per-game") { $presetOverrides++ }
+            }
+
+            $presetNote = if ($presetSource) { "  (preset: $presetSource)" } else { "" }
+            Write-Host ("    {0}  [{1}]{2}" -f $pf.BaseName, $dllName, $presetNote) -ForegroundColor Green
+            Write-Log "ReShade: $($pf.BaseName) -> $targetDir [$dllName]$presetNote"
             $deployed++
         } catch {
             Write-Host ("    FAILED {0}: {1}" -f $pf.BaseName, $_) -ForegroundColor Red
@@ -1204,6 +1248,9 @@ function Invoke-ReShadeSetup {
 
     Write-Host ""
     Write-Host ("  Installed : {0} game(s)" -f $deployed) -ForegroundColor Green
+    if ($presetOverrides -gt 0) {
+        Write-Host ("  Per-game presets applied : {0}" -f $presetOverrides) -ForegroundColor Cyan
+    }
     if ($skipped -gt 0) {
         Write-Host ("  Skipped   : {0}  (path not found, 32-bit DLL missing, or unsupported architecture)" -f $skipped) -ForegroundColor DarkGray
     }
@@ -1214,7 +1261,7 @@ function Invoke-ReShadeSetup {
     Write-Host "  To turn effects on/off: launch a game and press the  Home  key." -ForegroundColor Cyan
     Write-Host "  To uninstall ReShade: delete the DLL file (e.g. dxgi.dll, d3d9.dll)" -ForegroundColor DarkCyan
     Write-Host "  from the game's folder. Your game files are never modified." -ForegroundColor DarkCyan
-    Write-Log ("ReShade setup: Installed={0} Skipped={1} Errors={2}" -f $deployed, $skipped, $errors)
+    Write-Log ("ReShade setup: Installed={0} Skipped={1} Errors={2} PresetOverrides={3}" -f $deployed, $skipped, $errors, $presetOverrides)
 }
 
 # =============================================================================
