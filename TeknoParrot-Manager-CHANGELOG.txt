@@ -7,6 +7,38 @@
 
 
 -------------------------------------------------------------------------------
+  v0.81 BETA  (2026-06-17)
+-------------------------------------------------------------------------------
+
+  External security review follow-up:
+
+  - Fixed recurring version drift: the GitHub API User-Agent header in
+    Get-TeknoParrotProfileSet and Get-EggmanDatRelease was still hardcoded to
+    "TeknoParrot-Manager/0.76" (last updated several versions ago, the same
+    class of bug fixed once before at v0.71 for a stale "0.70" string). All
+    three GitHub API call sites and the startup banner/log line now read from
+    a single $ScriptVersion variable, so this cannot drift out of sync again.
+  - Hardened profile discovery against the upstream teknogods/TeknoParrotUI
+    repository ever renaming its default branch: the script now queries the
+    repo's actual default_branch via the GitHub API before building the
+    profile-tree URL, instead of hardcoding "master". Falls back to "master"
+    if that lookup fails, so a transient API error does not block discovery.
+  - Reviewed and confirmed as non-issues (already handled correctly):
+    crosshair preview HTML generation already HTML-encodes filenames and
+    titles via [System.Net.WebUtility]::HtmlEncode; config/overrides JSON
+    parsing already tolerates missing properties (PowerShell property access
+    on a parsed object returns $null rather than throwing) and the two
+    required config fields are explicitly validated as not-blank.
+  - Noted but not actioned (low severity, disproportionate effort for a
+    single-user tool): SHA256 verification of downloaded ReShade DLLs / dat
+    archives, since both come over HTTPS with no upstream hash registry to
+    check against; standardizing all retry loops into one shared
+    Invoke-WebRequestWithRetry helper, since the existing inconsistency
+    (3 retries for collection/profile downloads, single-shot for the
+    informational ReShade update check) reflects an intentional stakes
+    difference rather than an oversight.
+
+-------------------------------------------------------------------------------
   v0.80 BETA  (2026-06-17)
 -------------------------------------------------------------------------------
 

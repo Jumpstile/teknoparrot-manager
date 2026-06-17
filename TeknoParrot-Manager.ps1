@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.80 BETA
+# TeknoParrot Manager  |  v0.81 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -61,9 +61,15 @@
 
 param([switch]$Unattended)
 
+# Single source of truth for the version string used in the banner, log, and
+# GitHub API User-Agent headers. Previously hardcoded in each of those spots
+# independently, which let the User-Agent strings drift out of sync with the
+# banner (caught stale at 0.70 during the v0.71 bump, and again at 0.76 here).
+$ScriptVersion = "0.81"
+
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.80 BETA" -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v$ScriptVersion BETA" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -2397,11 +2403,25 @@ function Get-TeknoParrotProfileSet {
     param([string]$localGameProfilesDir = '')
     $result = New-Object 'System.Collections.Generic.HashSet[string]'([StringComparer]::OrdinalIgnoreCase)
     $loaded = $false
-    $apiUri = 'https://api.github.com/repos/teknogods/TeknoParrotUI/git/trees/master?recursive=1'
+    # Resolve the repo's actual default branch instead of hardcoding "master" --
+    # if teknogods/TeknoParrotUI ever renames its default branch, this still
+    # finds it. Falls back to "master" (today's known default) on any failure
+    # so a transient API error doesn't block profile discovery entirely.
+    $branch = 'master'
+    try {
+        $repoResp = Invoke-WebRequest -Uri 'https://api.github.com/repos/teknogods/TeknoParrotUI' `
+                        -UseBasicParsing -TimeoutSec 10 -Headers @{ 'User-Agent' = "TeknoParrot-Manager/$ScriptVersion" }
+        $defaultBranch = ($repoResp.Content | ConvertFrom-Json).default_branch
+        if (-not [string]::IsNullOrWhiteSpace($defaultBranch)) { $branch = $defaultBranch }
+    } catch {
+        Write-Log "ProfileSet (GitHub): could not resolve default branch, falling back to 'master' -- $_"
+    }
+    $branchEncoded = [System.Uri]::EscapeDataString($branch)
+    $apiUri = "https://api.github.com/repos/teknogods/TeknoParrotUI/git/trees/$branchEncoded?recursive=1"
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         try {
             $resp = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
-                        -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.76' }
+                        -Headers @{ 'User-Agent' = "TeknoParrot-Manager/$ScriptVersion" }
             $tree   = ($resp.Content | ConvertFrom-Json).tree
             $prefix = 'TeknoParrotUi.Common/GameProfiles/'
             foreach ($node in $tree) {
@@ -2474,7 +2494,7 @@ function Get-EggmanDatRelease {
         try {
             $apiUri = 'https://api.github.com/repos/Eggmansworld/Datfiles/releases/tags/teknoparrot'
             $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
-                          -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.76' }
+                          -Headers @{ 'User-Agent' = "TeknoParrot-Manager/$ScriptVersion" }
             $rel    = $resp.Content | ConvertFrom-Json
             $asset  = @($rel.assets) | Where-Object { $_.name -like 'TeknoParrot*Collection*RomVault*.zip' } |
                           Select-Object -First 1
@@ -4333,7 +4353,7 @@ function Write-ControlsStatus {
     }
 }
 
-Write-Log "Script started (v0.80$(if ($Unattended) { ' [Unattended]' }))."
+Write-Log "Script started (v$ScriptVersion$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
 # SECTION 1 -- Load or prompt for configuration
