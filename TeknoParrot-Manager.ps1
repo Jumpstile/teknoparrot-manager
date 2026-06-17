@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.82 BETA
+# TeknoParrot Manager  |  v0.83 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -65,7 +65,7 @@ param([switch]$Unattended)
 # GitHub API User-Agent headers. Previously hardcoded in each of those spots
 # independently, which let the User-Agent strings drift out of sync with the
 # banner (caught stale at 0.70 during the v0.71 bump, and again at 0.76 here).
-$ScriptVersion = "0.82"
+$ScriptVersion = "0.83"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -179,10 +179,16 @@ function Test-IsNetworkPath {
     $path = $path.TrimEnd('\', '/')   # normalise trailing separators before matching
     if ($path -match '^\\\\') { return $true }
     if ($path -match '^([A-Za-z]):') {
-        $letter = $Matches[1] + ':'
+        $letter = $Matches[1].ToUpper() + ':\'
         try {
-            $disk = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='$letter'" -ErrorAction Stop
-            if ($disk.DriveType -eq 4) { return $true }   # 4 = Network Drive
+            # [System.IO.DriveInfo] resolves drive type via the local Win32
+            # GetDriveType() call, which reads the drive-letter mapping type
+            # without contacting the remote server. Get-CimInstance's WMI
+            # provider can hang 20-30s if a mapped network drive (e.g. an
+            # OpenMediaVault share) has dropped off the network or gone to
+            # sleep, which would stall the script at startup.
+            $drive = [System.IO.DriveInfo]::GetDrives() | Where-Object { $_.Name -eq $letter }
+            if ($drive -and $drive.DriveType -eq [System.IO.DriveType]::Network) { return $true }
         } catch {}
     }
     return $false

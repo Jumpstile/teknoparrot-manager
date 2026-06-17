@@ -7,6 +7,28 @@
 
 
 -------------------------------------------------------------------------------
+  v0.83 BETA  (2026-06-17)
+-------------------------------------------------------------------------------
+
+  External code review follow-up (third pass):
+
+  - Test-IsNetworkPath used Get-CimInstance -ClassName Win32_LogicalDisk to
+    classify drive letters. WMI queries against a mapped network drive that
+    has dropped off the network or gone to sleep (e.g. an OpenMediaVault
+    share) can hang 20-30 seconds before timing out, which stalls the script
+    at startup during Find-TeknoParrotRoot's drive scan. Replaced with
+    [System.IO.DriveInfo]::GetDrives(), which resolves drive type via the
+    local Win32 GetDriveType() call -- reads the drive-letter mapping type
+    without contacting the remote server. Verified against this machine's
+    real network drives, a UNC path, an empty string, and a nonexistent
+    drive letter -- all classify correctly with no hang.
+  - Confirmed as a false positive: a report that the changelog/README/
+    QuickStart still showed v0.81 after the v0.82 bump. Diffed local against
+    origin/main (zero differences) and verified the v0.82 GitHub release's
+    uploaded ZIP is byte-identical to the local build -- all docs were
+    already correctly at v0.82.
+
+-------------------------------------------------------------------------------
   v0.82 BETA  (2026-06-17)
 -------------------------------------------------------------------------------
 
