@@ -4274,6 +4274,10 @@ if (Test-Path -LiteralPath $configPath) {
     try {
         $cfg = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
         if ($null -eq $cfg) { throw "Config file parsed as null -- file may be empty or corrupt." }
+        if ([string]::IsNullOrWhiteSpace($cfg.TeknoParrotRoot) -or
+            [string]::IsNullOrWhiteSpace($cfg.GamesInstallFolder)) {
+            throw "Config is missing TeknoParrotRoot or GamesInstallFolder -- treating as corrupt."
+        }
         Write-Host "Saved configuration found:" -ForegroundColor Cyan
         Write-Host "  TeknoParrot root     : $($cfg.TeknoParrotRoot)"
         if ($cfg.ZipSourceFolder)              { Write-Host "  ZIP source folder    : $($cfg.ZipSourceFolder)" }
