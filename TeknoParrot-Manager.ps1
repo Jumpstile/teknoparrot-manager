@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.81 BETA
+# TeknoParrot Manager  |  v0.82 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -65,7 +65,7 @@ param([switch]$Unattended)
 # GitHub API User-Agent headers. Previously hardcoded in each of those spots
 # independently, which let the User-Agent strings drift out of sync with the
 # banner (caught stale at 0.70 during the v0.71 bump, and again at 0.76 here).
-$ScriptVersion = "0.81"
+$ScriptVersion = "0.82"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -1032,7 +1032,7 @@ function Select-RegisteredGamesInteractive {
 function Get-ReShadeLatestVersion {
     try {
         $resp = Invoke-WebRequest -Uri "https://reshade.me" -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
-        if ($resp.Content -match 'ReShade_Setup_(\d+\.\d+\.\d+)') { return $Matches[1] }
+        if ($resp.Content -match 'ReShade_Setup_(\d+\.\d+\.\d+(?:\.\d+)?)') { return $Matches[1] }
     } catch {}
     return $null
 }

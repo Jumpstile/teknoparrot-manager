@@ -7,6 +7,27 @@
 
 
 -------------------------------------------------------------------------------
+  v0.82 BETA  (2026-06-17)
+-------------------------------------------------------------------------------
+
+  External code review follow-up (second pass):
+
+  - Get-ReShadeLatestVersion's regex required exactly three dot-separated
+    version components (e.g. "6.7.3"). Verified live against reshade.me --
+    it currently serves a 3-part version, so today's behavior was correct --
+    but the regex would have silently truncated a future 4-part release
+    (e.g. "6.7.3.1" captured as "6.7.3") instead of erroring, which could
+    have caused an "up to date" false negative on a patch release. The
+    capture group now accepts an optional fourth segment. Confirmed the
+    downstream [version] comparison still orders mixed 3-part/4-part
+    strings correctly.
+  - Reviewed and confirmed as already correct: XXE prevention in Read-Xml,
+    zip-slip guards in Expand-ZipFileSafe, XPath literal escaping via
+    ConvertTo-XPathStringLiteral, atomic writes in Save-Xml, HTML encoding
+    in Export-CrosshairPreview, List[T] usage avoiding O(n) array rebuilds,
+    and the HyperSpin single-element-array unwrap handling.
+
+-------------------------------------------------------------------------------
   v0.81 BETA  (2026-06-17)
 -------------------------------------------------------------------------------
 
