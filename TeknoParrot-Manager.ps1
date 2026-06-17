@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.74 BETA
+# TeknoParrot Manager  |  v0.75 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -60,7 +60,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.74 BETA" -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.75 BETA" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -2447,7 +2447,6 @@ function Get-EggmanDatRelease {
         }
     }
     return $null
-    }
 }
 
 # Downloads the Eggman dat ZIP. Uses BITS (shows a progress bar) with an

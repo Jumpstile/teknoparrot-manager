@@ -7,6 +7,18 @@
 
 
 -------------------------------------------------------------------------------
+  v0.75 BETA  (2026-06-16)
+-------------------------------------------------------------------------------
+
+  Critical fix:
+
+  - Fixed a stray extra closing brace in Get-EggmanDatRelease that closed the
+    function early, leaving a dangling "}" the parser choked on. This broke
+    every launch of the script with "Unexpected token '}' in expression or
+    statement." Show-stopping bug introduced in v0.73's retry-logic pass.
+
+
+-------------------------------------------------------------------------------
   v0.74 BETA  (2026-06-16)
 -------------------------------------------------------------------------------
 
