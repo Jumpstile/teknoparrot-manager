@@ -7,6 +7,25 @@
 
 
 -------------------------------------------------------------------------------
+  v0.80 BETA  (2026-06-17)
+-------------------------------------------------------------------------------
+
+  - Fixed a registration bug where games whose executable name (or dat/folder
+    match) resolves to a TeknoParrot profile code already claimed by another
+    folder in the same run were silently dropped -- no entry in Registered,
+    Already, Ambiguous, or Unmatched, and no trace in the log. This hit any
+    game with several on-disk variants sharing one generic exe name and one
+    TeknoParrot profile (e.g. multiple Virtua Fighter 5 Lindbergh ROM
+    revisions, multiple Taiko no Tatsujin versions, multiple Star Wars Battle
+    Pod releases) -- only the first variant processed ever got registered or
+    reported; the rest vanished from every action-item list even though
+    TeknoParrot itself still listed them as unregistered.
+  - These "duplicate profile code" conflicts now appear in the existing
+    REGISTER THESE GAMES IN TEKNOPARROTUI action item section (console and
+    TeknoParrot-Manager-ActionItems.txt), naming which folder already holds
+    the profile so the user can decide which copy to use.
+
+-------------------------------------------------------------------------------
   v0.79 BETA  (2026-06-17)
 -------------------------------------------------------------------------------
 

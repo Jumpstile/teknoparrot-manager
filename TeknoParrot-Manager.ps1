@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.79 BETA
+# TeknoParrot Manager  |  v0.80 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -63,7 +63,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.79 BETA" -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.80 BETA" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -2551,6 +2551,11 @@ function Invoke-EggmanDatDownload {
 #   3 -- Dice-match normalised folder name against profile code names, resolving
 #        games with empty <ExecutableName> (BladeStrangers, LuigisMansion, etc.)
 # Existing UserProfiles are never overwritten.
+# A profile code can only be claimed once per run (TeknoParrot allows exactly
+# one GamePath per profile). Folders that resolve to a code already claimed by
+# an earlier folder (e.g. several ROM revisions sharing one generic exe name
+# and one profile, like multiple Virtua Fighter 5 Lindbergh dumps) are added to
+# $ambiguous with Reason="duplicate" instead of being silently dropped.
 function Register-Games {
     param([string]$userProfilesDir, [string]$installFolder, [hashtable]$profileIndex,
           [string]$gameProfilesDir = '', [hashtable]$datIndex = $null,
@@ -2563,6 +2568,7 @@ function Register-Games {
     $already        = New-Object System.Collections.ArrayList
     $ambiguous      = New-Object System.Collections.ArrayList
     $seenCodes      = @{}
+    $codeClaimedBy  = @{}   # profile code -> folder name that already claimed it this run
     $installBase    = $installFolder.TrimEnd('\')
     $matchedFolders = @{}   # folders that matched at least one profile key
     $allExeFolders  = @{}   # folders containing any recognisable executable
@@ -2596,15 +2602,29 @@ function Register-Games {
             if ($bestFuzzyScore -ge $FuzzyAutoThreshold -and $null -ne $bestFuzzy) {
                 # High-confidence fuzzy match: register automatically.
                 $code = $bestFuzzy.Code
-                if ($seenCodes.ContainsKey($code)) { continue }
+                if ($seenCodes.ContainsKey($code)) {
+                    # Another folder already claimed this profile code this run --
+                    # TeknoParrot can only point one profile at one executable, so
+                    # this is a real conflict, not a silent duplicate to drop.
+                    [void]$ambiguous.Add([pscustomobject]@{
+                        Exe        = $exe.FullName
+                        Codes      = $code
+                        BestGuess  = $code
+                        BestScore  = 1.0
+                        Reason     = "duplicate"
+                        ClaimedBy  = $codeClaimedBy[$code]
+                    })
+                    continue
+                }
                 $userProfile = Join-Path $userProfilesDir ($code + ".xml")
                 if (Test-Path -LiteralPath $userProfile) {
-                    [void]$already.Add($code); $seenCodes[$code] = $true
+                    [void]$already.Add($code); $seenCodes[$code] = $true; $codeClaimedBy[$code] = $folderName
                 } else {
                     # Mark seen before the file operation so that if Save throws,
                     # a second exe match for the same code doesn't cause a duplicate
                     # attempt (and duplicate error output) within the same run.
                     $seenCodes[$code] = $true
+                    $codeClaimedBy[$code] = $folderName
                     try {
                         $tpl = Read-Xml $bestFuzzy.TemplatePath
                         $gp  = $tpl.GameProfile.SelectSingleNode("GamePath")
@@ -2639,6 +2659,7 @@ function Register-Games {
                         if (-not $seenCodes.ContainsKey($ar.Code)) {
                             [void]$already.Add($ar.Code)
                             $seenCodes[$ar.Code] = $true
+                            $codeClaimedBy[$ar.Code] = "(already registered in TeknoParrotUI)"
                         }
                     }
                 } else {
@@ -2655,8 +2676,18 @@ function Register-Games {
                                 $datCode = Resolve-ProfileCode $datCode $gameProfilesDir $profileSet
                             }
                             $userProfile = Join-Path $userProfilesDir ($datCode + ".xml")
-                            if (-not $seenCodes.ContainsKey($datCode)) {
+                            if ($seenCodes.ContainsKey($datCode)) {
+                                [void]$ambiguous.Add([pscustomobject]@{
+                                    Exe        = $exe.FullName
+                                    Codes      = $datCode
+                                    BestGuess  = $datCode
+                                    BestScore  = 1.0
+                                    Reason     = "duplicate"
+                                    ClaimedBy  = $codeClaimedBy[$datCode]
+                                })
+                            } else {
                                 $seenCodes[$datCode] = $true
+                                $codeClaimedBy[$datCode] = $folderName
                                 if (Test-Path -LiteralPath $userProfile) {
                                     [void]$already.Add($datCode)
                                 } else {
@@ -2705,6 +2736,7 @@ function Register-Games {
                                             Codes     = ($matchList | ForEach-Object { $_.Code }) -join ", "
                                             BestGuess = $datCode
                                             BestScore = 1.0
+                                            Reason    = "shared"
                                         })
                                     }
                                 }
@@ -2716,6 +2748,7 @@ function Register-Games {
                                 Codes     = ($matchList | ForEach-Object { $_.Code }) -join ", "
                                 BestGuess = if ($null -ne $bestFuzzy) { $bestFuzzy.Code } else { $null }
                                 BestScore = [Math]::Round($bestFuzzyScore, 2)
+                                Reason    = "shared"
                             })
                         }
                     } else {
@@ -2725,6 +2758,7 @@ function Register-Games {
                             Codes     = ($matchList | ForEach-Object { $_.Code }) -join ", "
                             BestGuess = if ($null -ne $bestFuzzy) { $bestFuzzy.Code } else { $null }
                             BestScore = [Math]::Round($bestFuzzyScore, 2)
+                            Reason    = "shared"
                         })
                     }
                 }
@@ -2734,18 +2768,35 @@ function Register-Games {
 
         $match = $matchList[0]
         $code  = $match.Code
-        if ($seenCodes.ContainsKey($code)) { continue }
+        if ($seenCodes.ContainsKey($code)) {
+            # Another folder already claimed this profile code this run. Most
+            # often this is multiple ROM revisions of the same game sharing one
+            # generic exe name and one TeknoParrot profile (e.g. several Virtua
+            # Fighter 5 Lindbergh revisions). TeknoParrot can only point that
+            # profile at one executable, so surface it instead of dropping it.
+            [void]$ambiguous.Add([pscustomobject]@{
+                Exe        = $exe.FullName
+                Codes      = $code
+                BestGuess  = $code
+                BestScore  = 1.0
+                Reason     = "duplicate"
+                ClaimedBy  = $codeClaimedBy[$code]
+            })
+            continue
+        }
 
         $userProfile = Join-Path $userProfilesDir ($code + ".xml")
         if (Test-Path -LiteralPath $userProfile) {
             [void]$already.Add($code)
             $seenCodes[$code] = $true
+            $codeClaimedBy[$code] = $folderName
             continue
         }
 
         # Mark seen before the file operation for the same reason as the fuzzy
         # path: prevents a duplicate attempt if a second matching exe is found.
         $seenCodes[$code] = $true
+        $codeClaimedBy[$code] = $folderName
         try {
             $tpl = Read-Xml $match.TemplatePath
             # SelectSingleNode returns the node if it exists (even when empty)
@@ -2805,8 +2856,24 @@ function Register-Games {
 
             $matchedFolders[$folderKey] = $true   # prevents folder appearing in $unmatched
 
-            if ($seenCodes.ContainsKey($datCode)) { continue }
+            if ($seenCodes.ContainsKey($datCode)) {
+                $dupFolderFull = Join-Path $installBase $origName
+                $dupExe = @($exeFiles | Where-Object {
+                    $_.FullName.Length -gt $dupFolderFull.Length -and
+                    $_.FullName.StartsWith($dupFolderFull + '\')
+                })[0]
+                [void]$ambiguous.Add([pscustomobject]@{
+                    Exe        = if ($dupExe) { $dupExe.FullName } else { $dupFolderFull }
+                    Codes      = $datCode
+                    BestGuess  = $datCode
+                    BestScore  = 1.0
+                    Reason     = "duplicate"
+                    ClaimedBy  = $codeClaimedBy[$datCode]
+                })
+                continue
+            }
             $seenCodes[$datCode] = $true
+            $codeClaimedBy[$datCode] = $origName
 
             $userProfile = Join-Path $userProfilesDir ($datCode + ".xml")
             if (Test-Path -LiteralPath $userProfile) {
@@ -2897,8 +2964,24 @@ function Register-Games {
 
             $matchedFolders[$folderKey] = $true
 
-            if ($seenCodes.ContainsKey($bestCode)) { continue }
+            if ($seenCodes.ContainsKey($bestCode)) {
+                $dupFolderFull = Join-Path $installBase $origName
+                $dupExe = @($exeFiles | Where-Object {
+                    $_.FullName.Length -gt $dupFolderFull.Length -and
+                    $_.FullName.StartsWith($dupFolderFull + '\')
+                })[0]
+                [void]$ambiguous.Add([pscustomobject]@{
+                    Exe        = if ($dupExe) { $dupExe.FullName } else { $dupFolderFull }
+                    Codes      = $bestCode
+                    BestGuess  = $bestCode
+                    BestScore  = 1.0
+                    Reason     = "duplicate"
+                    ClaimedBy  = $codeClaimedBy[$bestCode]
+                })
+                continue
+            }
             $seenCodes[$bestCode] = $true
+            $codeClaimedBy[$bestCode] = $origName
 
             $userProfile = Join-Path $userProfilesDir ($bestCode + ".xml")
             if (Test-Path -LiteralPath $userProfile) {
@@ -4250,7 +4333,7 @@ function Write-ControlsStatus {
     }
 }
 
-Write-Log "Script started (v0.79$(if ($Unattended) { ' [Unattended]' }))."
+Write-Log "Script started (v0.80$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
 # SECTION 1 -- Load or prompt for configuration
@@ -5369,6 +5452,8 @@ if ($result.Ambiguous.Count -gt 0) {
                 Profiles   = $amb.Codes
                 BestGuess  = $amb.BestGuess
                 BestScore  = $amb.BestScore
+                Reason     = $amb.Reason
+                ClaimedBy  = $amb.ClaimedBy
             }
         }
     }
@@ -5983,8 +6068,9 @@ if ($hasAnyAction) {
         Write-Host "  REGISTER THESE GAMES IN TEKNOPARROTUI" -ForegroundColor Yellow
         Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
         Write-Host "  The script found these games on disk but cannot register them" -ForegroundColor DarkCyan
-        Write-Host "  automatically because the name of each executable file is shared" -ForegroundColor DarkCyan
-        Write-Host "  by multiple TeknoParrot profiles. You must pick the right profile." -ForegroundColor DarkCyan
+        Write-Host "  automatically. Either the name of the executable file is shared" -ForegroundColor DarkCyan
+        Write-Host "  by multiple TeknoParrot profiles, or the one profile it matches" -ForegroundColor DarkCyan
+        Write-Host "  is already pointed at a different copy of this game." -ForegroundColor DarkCyan
         Write-Host "  Open TeknoParrotUI -> Add Game -> select the profile -> browse" -ForegroundColor DarkCyan
         Write-Host "  to the executable shown below." -ForegroundColor DarkCyan
         Write-Host ""
@@ -5994,6 +6080,14 @@ if ($hasAnyAction) {
             $exeName = $info.ExeName
             Write-Host "  Game   : $folderName" -ForegroundColor Yellow
             Write-Host "  Run    : $exeName" -ForegroundColor DarkGray
+            if ($info.Reason -eq "duplicate") {
+                $claimedBy = if ($info.ClaimedBy) { $info.ClaimedBy } else { "another folder" }
+                Write-Host ("  Note   : profile '{0}' is already used by: {1}" -f $info.Profiles, $claimedBy) -ForegroundColor Cyan
+                Write-Host "           TeknoParrot can only point one profile at one executable -- this" -ForegroundColor DarkCyan
+                Write-Host "           copy needs its own profile, or you must choose which copy to use." -ForegroundColor DarkCyan
+                Write-Host ""
+                continue
+            }
             if ($info.BestGuess -and $info.BestScore -ge 0.40) {
                 Write-Host ("  Best guess : {0}  (similarity {1} -- below auto-register threshold {2})" -f `
                     $info.BestGuess, $info.BestScore, $FuzzyAutoThreshold) -ForegroundColor Cyan
@@ -6124,6 +6218,13 @@ if ($hasAnyAction) {
             [void]$asb.AppendLine("")
             [void]$asb.AppendLine("  Game     : $fn")
             [void]$asb.AppendLine("  Run      : $($ai.ExeName)")
+            if ($ai.Reason -eq "duplicate") {
+                $claimedBy = if ($ai.ClaimedBy) { $ai.ClaimedBy } else { "another folder" }
+                [void]$asb.AppendLine("  Note     : profile '$($ai.Profiles)' is already used by: $claimedBy")
+                [void]$asb.AppendLine("             TeknoParrot can only point one profile at one executable -- this copy")
+                [void]$asb.AppendLine("             needs its own profile, or you must choose which copy to use.")
+                continue
+            }
             if ($ai.BestGuess -and $ai.BestScore -ge 0.40) {
                 [void]$asb.AppendLine(("  Best guess: {0}  (similarity {1})" -f $ai.BestGuess, $ai.BestScore))
             }

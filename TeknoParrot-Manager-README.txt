@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.79 BETA
+  TeknoParrot Manager  |  v0.80 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -470,6 +470,18 @@
                           name (where the similarity score was still
                           meaningful), and the full list of candidates to
                           choose from in TeknoParrotUI.
+
+    Register manually    A TeknoParrot profile allows only one GamePath. If
+    (duplicate)            this folder resolves to a profile code another
+                          folder already claimed earlier in the same run
+                          (common with multiple ROM revisions of one game
+                          that share a generic exe name, e.g. several Virtua
+                          Fighter 5 Lindbergh dumps, or multiple Taiko no
+                          Tatsujin versions), it cannot be auto-registered
+                          too. The ACTION REQUIRED section names which
+                          folder already holds the profile so you can decide
+                          which copy to use, or register the extra copy
+                          under a different profile if one exists.
 
   At the end of the run the ACTION REQUIRED section lists every game that
   needs manual registration.
@@ -1316,13 +1328,16 @@
                               action is needed. See the full section above.
 
     Register these games      Games found on disk that could not be
-                              auto-registered because their executable name
-                              is shared by multiple TeknoParrot profiles and
-                              the folder-name similarity score was below the
-                              auto-register threshold. Shows the executable to
+                              auto-registered because either their executable
+                              name is shared by multiple TeknoParrot profiles
+                              and the folder-name similarity score was below
+                              the auto-register threshold, or the one profile
+                              they match was already claimed by another folder
+                              earlier in the same run. Shows the executable to
                               browse to, a best-guess profile where the score
-                              was still meaningful, and the full candidate
-                              list.
+                              was still meaningful (or which folder already
+                              holds the profile, for the duplicate case), and
+                              the full candidate list.
 
     Fix these game paths      Profiles with a broken path that could not be
                               auto-repaired because the executable is shared
@@ -1515,7 +1530,8 @@
 
   A game does not appear in TeknoParrotUI after running the script.
     Check the ACTION REQUIRED section printed at the end of the run. The game
-    may need manual registration (shared executable -- see "Register these
+    may need manual registration (shared executable, or its profile was
+    already claimed by another copy of the game -- see "Register these
     games") or may not yet be extracted ("Extract first"). If neither applies,
     check TeknoParrot-Manager.log for a registration error for that game.
 
@@ -1630,6 +1646,6 @@
 
 
 ===============================================================================
-  v0.79 BETA -- Test one game after each run.
+  v0.80 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================
