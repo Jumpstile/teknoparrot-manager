@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.75 BETA
+# TeknoParrot Manager  |  v0.77 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -30,6 +30,9 @@
 #                  the script copies those controls to all other games of the
 #                  same type, matched by function so a wheel value never lands
 #                  on a gun. Carries aim-mode settings between same-type games.
+#                  Before applying, it lists each reference game's carried
+#                  settings so a bad value (e.g. an axis mode left over from
+#                  testing) can be caught before it spreads to every game.
 #
 #   Repair         Finds UserProfiles with broken or missing GamePaths and
 #                  re-points them to the correct executable.
@@ -60,7 +63,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.75 BETA" -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.77 BETA" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -1503,6 +1506,32 @@ function Invoke-GpuFixSetup {
         Write-Log "GPU Fix: GameProfiles not found at $gpDir -- using fallback field list."
     }
 
+    # -- Backup UserProfiles before any write ------------------------------------
+    # This setup writes vendor-fix fields into every registered profile, so it
+    # needs the same backup-before-destructive-operation safety net as
+    # Invoke-CursorHideSetup -- without it, a bad GPU detection or a corrupted
+    # GameProfiles scan would overwrite every UserProfile XML with no way back.
+    $backupRoot = Join-Path $UserProfilesDir "FullBackup"
+    $timestamp  = (Get-Date).ToString("yyyy-MM-dd_HH-mm-ss")
+    $backupPath = Join-Path $backupRoot ("GpuFix_" + $timestamp)
+    try {
+        [void][System.IO.Directory]::CreateDirectory($backupRoot)
+        [void][System.IO.Directory]::CreateDirectory($backupPath)
+    } catch {
+        Write-Host "  ERROR: Could not create backup folder: $_" -ForegroundColor Red
+        Write-Log "GPU Fix: backup failed -- $_"
+        return
+    }
+    $backupCopyErrs = $null
+    Get-ChildItem -LiteralPath $UserProfilesDir | Where-Object { $_.Name -ne "FullBackup" } |
+        Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable backupCopyErrs
+    if ($backupCopyErrs.Count -gt 0) {
+        Write-Host ("  WARNING: {0} file(s) could not be backed up." -f $backupCopyErrs.Count) -ForegroundColor Yellow
+        Write-Log "GPU Fix: backup had $($backupCopyErrs.Count) error(s)"
+    }
+    Write-Host ("  Backup: {0}" -f $backupPath) -ForegroundColor DarkGray
+    Write-Log "GPU Fix: backup at $backupPath"
+
     # -- Walk UserProfiles ------------------------------------------------------
     Write-Host ""
     Write-Host "  Applying GPU fixes to registered profiles..." -ForegroundColor DarkGray
@@ -2349,7 +2378,7 @@ function Get-TeknoParrotProfileSet {
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         try {
             $resp = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
-                        -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.72' }
+                        -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.76' }
             $tree   = ($resp.Content | ConvertFrom-Json).tree
             $prefix = 'TeknoParrotUi.Common/GameProfiles/'
             foreach ($node in $tree) {
@@ -2422,7 +2451,7 @@ function Get-EggmanDatRelease {
         try {
             $apiUri = 'https://api.github.com/repos/Eggmansworld/Datfiles/releases/tags/teknoparrot'
             $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
-                          -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.72' }
+                          -Headers @{ 'User-Agent' = 'TeknoParrot-Manager/0.76' }
             $rel    = $resp.Content | ConvertFrom-Json
             $asset  = @($rel.assets) | Where-Object { $_.name -like 'TeknoParrot*Collection*RomVault*.zip' } |
                           Select-Object -First 1
@@ -3159,6 +3188,11 @@ function Get-ProfileDevices {
 # game reproduces the reference game's feel. A field is copied only when the target
 # also defines it, so nothing is ever invented. Verified present in real
 # lightgun profiles (e.g. "Use Relative Input", relative sensitivity, cursor).
+# Copying is only as correct as the reference game's own values -- the
+# pre-propagation summary (Section 10) prints these before the user confirms,
+# so a wrong value on the reference (e.g. an axis mode left over from
+# testing with a keyboard instead of a real wheel) is caught before it
+# fans out to every other game of that type.
 $InputConfigFields = @(
     "Use Relative Input",
     "Player 1 Relative Sensitivity",
@@ -3170,6 +3204,38 @@ $InputConfigFields = @(
     "Keyboard/Button Axis X/Y Sensitivity",
     "Keyboard/Button Axis Throttle Sensitivity"
 )
+
+# Known carried-setting values that usually mean the reference game was bound
+# with a substitute device (keyboard, mouse) instead of its real hardware --
+# the same root cause as "Use Keyboard/Button For Axis" left True on a wheel
+# game. Each entry: the family this applies to, the carried field name, the
+# value that triggers the warning, and why it matters.
+$ConfigCarryWarnings = @(
+    @{ Family = "driving";  Field = "Use Keyboard/Button For Axis"; Value = "True"
+       Message = "wheel/pedal axes will be read as digital keyboard/button input, not analog -- should be False if you bind with a real wheel." },
+    @{ Family = "lightgun"; Field = "Use Relative Input"; Value = "True"
+       Message = "gun aim will be read as relative mouse-style movement, not absolute screen position -- should usually be False for a real lightgun that reports absolute coordinates." }
+)
+
+# Returns warning strings for a family's carried config values: known
+# device-mismatch combos (see $ConfigCarryWarnings) plus any "...Sensitivity"
+# field carried as literal 0, which would silently disable aiming/axis
+# response on every propagated game of that type.
+function Get-ConfigCarryFlags {
+    param([string]$family, $configCarry)
+    $flags = New-Object System.Collections.ArrayList
+    foreach ($rule in $ConfigCarryWarnings) {
+        if ($rule.Family -eq $family -and $configCarry.ContainsKey($rule.Field) -and $configCarry[$rule.Field] -eq $rule.Value) {
+            [void]$flags.Add("$($rule.Field)=$($rule.Value) -- $($rule.Message)")
+        }
+    }
+    foreach ($key in $configCarry.Keys) {
+        if ($key -match 'Sensitivity$' -and $configCarry[$key].Trim() -eq "0") {
+            [void]$flags.Add("$key=0 -- this disables aiming/axis response entirely.")
+        }
+    }
+    return $flags
+}
 
 # Returns a hashtable { FieldName = FieldValue } for those of $names that the
 # profile's ConfigValues actually contains.
@@ -3871,7 +3937,12 @@ function Export-HyperSpinJson {
     try {
         $allGames = @($existing.ToArray())
         $json = ConvertTo-Json -InputObject @($allGames) -Depth 10
-        [System.IO.File]::WriteAllText($tpGamesPath, $json, (New-Object System.Text.UTF8Encoding $false))
+        # Atomic write: a crash mid-write must never leave $tpGamesPath
+        # truncated, since on a pre-existing file there is no automatic
+        # restore from the .bak_ copy above -- same pattern as Save-Xml.
+        $tmpPath = $tpGamesPath + ".tmp"
+        [System.IO.File]::WriteAllText($tmpPath, $json, (New-Object System.Text.UTF8Encoding $false))
+        [System.IO.File]::Replace($tmpPath, $tpGamesPath, $null)
     } catch {
         Write-Host "  ERROR: Could not write games file: $_" -ForegroundColor Red
         Write-Log "HyperSpin export: write failed -- $_"
@@ -4140,7 +4211,7 @@ function Write-ControlsStatus {
     }
 }
 
-Write-Log "Script started (v0.73$(if ($Unattended) { ' [Unattended]' }))."
+Write-Log "Script started (v0.77$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
 # SECTION 1 -- Load or prompt for configuration
@@ -5355,12 +5426,26 @@ if ($pool.Count -eq 0) {
         $devLabel = if ($s.Devices.Count -gt 0) { ($s.Devices -join ", ") } else { "?" }
         Write-Host ("    {0,-26} [{1}]  {2} buttons" -f $s.Code, $s.Family, $s.BoundCount) -ForegroundColor DarkGray
         Write-Host ("        api={0}   device(s): {1}" -f $apiLabel, $devLabel) -ForegroundColor DarkGray
+        if ($s.ConfigCarry.Count -gt 0) {
+            $cfgLabel = ($s.ConfigCarry.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ", "
+            Write-Host ("        settings that will be copied: {0}" -f $cfgLabel) -ForegroundColor DarkGray
+            foreach ($flag in (Get-ConfigCarryFlags $s.Family $s.ConfigCarry)) {
+                Write-Host ("        WARNING: $flag") -ForegroundColor Red
+            }
+        }
     }
     Write-Host ""
     Write-Host " This copies each game's controls to your OTHER games of the SAME" -ForegroundColor DarkCyan
     Write-Host " type. It never changes a game you have already bound, and it leaves" -ForegroundColor DarkCyan
     Write-Host " game-specific controls (gear shifts, special buttons) unbound for" -ForegroundColor DarkCyan
     Write-Host " you to set. Your UserProfiles were backed up at the start of this run." -ForegroundColor DarkCyan
+    Write-Host ""
+    Write-Host " IMPORTANT: the 'settings that will be copied' lines above apply to" -ForegroundColor Yellow
+    Write-Host " EVERY other game of that type. Check them against your real hardware" -ForegroundColor Yellow
+    Write-Host " now -- for example 'Use Keyboard/Button For Axis' should be False if" -ForegroundColor Yellow
+    Write-Host " you bind with a real wheel, and 'Use Relative Input' should match how" -ForegroundColor Yellow
+    Write-Host " your lightgun reports position. If anything looks wrong, answer N," -ForegroundColor Yellow
+    Write-Host " fix the game above in TeknoParrotUI, then re-run." -ForegroundColor Yellow
     Write-Host ""
     if (-not $Unattended -and (Read-Host " Want a recommended binding plan for more control types first? (Y/N)").Trim().ToUpper() -eq "Y") {
         Invoke-DeviceSurvey

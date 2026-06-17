@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.75 BETA
+  TeknoParrot Manager  |  v0.77 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -553,6 +553,28 @@
     - The games you bind are read only and never modified.
     - A game you have already bound is detected and left unchanged.
     - Everything is reported so you can see exactly what changed.
+
+  Before it asks "Propagate controls now?", the script lists each reference
+  game along with the aim-mode settings it will copy (relative input,
+  sensitivity, hide-cursor, "Use Keyboard/Button For Axis"). Check these
+  against your real hardware before answering Y -- they apply to every other
+  game of that type. For example, if you bind a driving game with a real
+  wheel, "Use Keyboard/Button For Axis" should read False; if it reads True,
+  answer N, fix the reference game in TeknoParrotUI, then re-run.
+
+  The script also auto-flags a few known device-mismatch patterns with a red
+  WARNING line, since they usually mean the reference game was bound with a
+  substitute device instead of its real hardware:
+
+    - Driving: "Use Keyboard/Button For Axis" = True (wheel/pedal axes would
+      be read as digital keyboard input, not analog).
+    - Lightgun: "Use Relative Input" = True (gun aim would be read as
+      relative mouse movement, not absolute screen position).
+    - Any sensitivity setting carried as 0 (silently disables aiming/axis
+      response on every propagated game).
+
+  A WARNING does not block propagation -- it is a prompt to double-check the
+  reference game in TeknoParrotUI before answering Y.
 
   What stays manual (and is reported):
 
@@ -1608,6 +1630,6 @@
 
 
 ===============================================================================
-  v0.75 BETA -- Test one game after each run.
+  v0.77 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================

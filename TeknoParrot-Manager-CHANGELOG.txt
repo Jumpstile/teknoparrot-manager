@@ -7,6 +7,52 @@
 
 
 -------------------------------------------------------------------------------
+  v0.77 BETA  (2026-06-16)
+-------------------------------------------------------------------------------
+
+  Bug/vulnerability sweep fixes:
+
+  - Invoke-GpuFixSetup (Mode 7) now backs up UserProfiles to
+    FullBackup\GpuFix_<timestamp> before writing vendor-fix fields, matching
+    the backup-before-destructive-operation pattern already used by cursor
+    hide setup. Previously this mode had no backup step at all when reached
+    directly from the main menu, so a bad GPU detection or a corrupted
+    GameProfiles scan could overwrite every registered profile with no way
+    to revert.
+
+  - Export-HyperSpinJson's final write is now atomic (.tmp + File.Replace),
+    matching Save-Xml's pattern. Previously a crash mid-write could leave
+    the HyperSpin games JSON truncated with no automatic recovery from the
+    .bak_ copy already made.
+
+  - Fixed a stale "TeknoParrot-Manager/0.72" User-Agent literal sent with
+    GitHub API requests in Get-EggmanDatRelease; now matches the current
+    version.
+
+
+-------------------------------------------------------------------------------
+  v0.76 BETA  (2026-06-16)
+-------------------------------------------------------------------------------
+
+  Control propagation safety:
+
+  - Before the "Propagate controls now?" prompt, the script now lists each
+    reference game's carried aim-mode settings (relative input, sensitivity,
+    hide-cursor, "Use Keyboard/Button For Axis") alongside its bound count
+    and device. These settings copy to every other game of that type, so a
+    bad value on the reference game (e.g. an axis setting left over from
+    testing with a keyboard instead of a real wheel) is now visible before
+    it fans out, not just afterward in the log.
+
+  - Added automatic red WARNING flags for known device-mismatch patterns in
+    carried settings: "Use Keyboard/Button For Axis" = True on a driving
+    reference, "Use Relative Input" = True on a lightgun reference, and any
+    carried sensitivity value of 0. All three usually mean the reference
+    game was bound with a substitute device (keyboard/mouse) rather than its
+    real hardware.
+
+
+-------------------------------------------------------------------------------
   v0.75 BETA  (2026-06-16)
 -------------------------------------------------------------------------------
 
