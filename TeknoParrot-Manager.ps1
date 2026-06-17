@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.78 BETA
+# TeknoParrot Manager  |  v0.79 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -63,7 +63,7 @@ param([switch]$Unattended)
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v0.78 BETA" -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  v0.79 BETA" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -2070,6 +2070,16 @@ function Invoke-AutoSync {
         # and prevents duplicate folders alongside manually-extracted games.
         $extractFolderName = if ($retroBat) { "$rawName.teknoparrot" } else { $rawName }
         $extractDir = Join-Path $installFolder $extractFolderName
+        # Defence in depth: confirm the resolved folder still lands inside
+        # $installFolder before any destructive use below. A ZIP base name
+        # cannot legally contain \ or / on Windows, so this should never
+        # trip, but every other site that joins a script folder with an
+        # externally-influenced name carries this same guard.
+        if (-not (Test-PathInside $extractDir $installFolder)) {
+            Write-Host "  Skipped (unsafe path) : $rawName" -ForegroundColor Red
+            Write-Log "AutoSync: skipped '$rawName' -- resolved extract path '$extractDir' is outside install folder '$installFolder'"
+            $skipped++; continue
+        }
         # Sentinel lives next to the game folder (not inside it) so we do not
         # need to pre-create the game directory. Expand-Archive creates the
         # directory itself; pre-creating it caused PS 5.1 to throw "already
@@ -4240,7 +4250,7 @@ function Write-ControlsStatus {
     }
 }
 
-Write-Log "Script started (v0.78$(if ($Unattended) { ' [Unattended]' }))."
+Write-Log "Script started (v0.79$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
 # SECTION 1 -- Load or prompt for configuration

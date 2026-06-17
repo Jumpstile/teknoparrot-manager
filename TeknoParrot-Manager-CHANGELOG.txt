@@ -7,6 +7,33 @@
 
 
 -------------------------------------------------------------------------------
+  v0.79 BETA  (2026-06-17)
+-------------------------------------------------------------------------------
+
+  Full bug/vulnerability sweep + documentation accuracy pass:
+
+  - Saved configuration with a blank TeknoParrotRoot or GamesInstallFolder is
+    now treated as corrupt and triggers the existing "could not be read"
+    fallback to manual prompts, instead of silently reusing empty values and
+    causing a cascade of Test-Path/Join-Path null-argument errors later.
+  - AutoSync: added a Test-PathInside guard on the resolved extraction folder
+    before it is used in Remove-Item -Recurse -Force or Expand-ZipFileSafe,
+    matching the same defense-in-depth check already used at every other site
+    that joins a script-controlled folder with an externally-influenced name
+    (e.g. dat-supplied executable paths). A ZIP base name cannot legally
+    contain a path separator on Windows, so this should never trip in
+    practice, but it closes the one path-construction site that lacked the
+    guard the rest of the file enforces.
+  - Verified every other CLAUDE.md convention (BOM-less UTF8 writes,
+    -LiteralPath usage, backup-before-destructive-operation, no silently
+    swallowed errors) holds with zero exceptions across the full script.
+  - Fixed stale version numbers found during the doc accuracy pass:
+    CLAUDE.md and README.md's footer were several versions behind the
+    script and the shipped .txt docs.
+  - Wiki Changelog page was missing standalone entries for v0.70-v0.73.
+
+
+-------------------------------------------------------------------------------
   v0.78 BETA  (2026-06-16)
 -------------------------------------------------------------------------------
 
