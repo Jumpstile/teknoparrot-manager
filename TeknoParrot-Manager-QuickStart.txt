@@ -135,14 +135,14 @@
 
   CROSSHAIR SETUP (OPTIONAL)
   --------------------------
-  Mode 4 deploys custom crosshair images to all registered lightgun games
+  Mode 3 deploys custom crosshair images to all registered lightgun games
   (House of the Dead, Aliens Extermination, Terminator Salvation, etc.).
 
   321 crosshair designs are included in the  Crosshairs\  folder next to
   this script. You can add your own PNG images to that folder at any time
   and the script will pick them up automatically on the next run.
 
-  When you run mode 4:
+  When you run mode 3:
     1. A preview page opens in your browser showing all available designs.
     2. Enter the number of your chosen design for Player 1 and Player 2.
     3. The script copies those images to every registered lightgun game:

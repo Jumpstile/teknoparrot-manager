@@ -56,6 +56,7 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 - **ReShade** — installs post-processing into game folders, auto-detecting the correct DLL name and 32/64-bit architecture per game.
 - **dgVoodoo2** — fixes older games that crash on DirectX 8, DirectDraw, or Glide by deploying the correct compatibility DLLs.
 - **GPU fixes** — detects your GPU (AMD / NVIDIA / Intel) and applies the matching vendor fix to every registered game that has one.
+- **Force feedback (FFB)** — native FFB Blaster (needs a paid TeknoParrot membership) and a free third-party plugin (fetched live, no subscription needed), covering different games. If a game is covered by both, you're asked once which to use for all such games.
 - **LaunchBox / HyperSpin 2 export** — builds import files for both frontends after each run.
 - **Unattended mode** — `-Unattended` flag for scheduled overnight runs.
 - **Safe by design** — timestamped backups before every run, free-space check, full log, one-click restore.

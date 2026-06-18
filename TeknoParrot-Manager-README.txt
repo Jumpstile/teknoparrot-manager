@@ -55,12 +55,16 @@
     profile shown, so even manual registration takes one click instead of
     hunting through a long list.
 
-  - Dat file integration (optional). During initial setup, the script offers
-    to download the Eggman/RomVault dat ZIP directly from GitHub (~145 MB) or
-    accept a path to a local copy. The ZIP contains both the collection dat and
-    the supplementary dat; both are read directly from inside the archive with
-    no extraction step. The dat's <GameProfile> code is used as the authoritative
-    source for three registration scenarios: (1) shared-executable games where
+  - Dat file integration (optional). A "dat file" is a community-maintained
+    lookup file that maps game files to their correct titles and metadata --
+    think of it as an answer key the script can check against when a game's
+    own files don't make its identity obvious. During initial setup, the
+    script offers to download the Eggman/RomVault dat ZIP directly from
+    GitHub (~145 MB) or accept a path to a local copy. The ZIP contains both
+    the collection dat and the supplementary dat; both are read directly from
+    inside the archive with no extraction step. The dat's <GameProfile> code
+    is used as the authoritative source for three registration scenarios:
+    (1) shared-executable games where
     multiple profiles match the same exe name; (2) games whose exe name does not
     appear in any GameProfile at all (e.g. pcsx2x6 ELF games, ELF-based Lindbergh
     titles) -- a second pass looks them up in the dat by normalized folder name;
@@ -192,7 +196,15 @@
     your GPU and applies the correct fix to every registered game that has one.
     TeknoParrot's GameProfiles folder is scanned at runtime so newly added games
     are always covered. Safe to re-run any time you change or update your GPU.
-    Available as menu option 7 or as an optional step at the end of a normal run.
+    Available as menu option 6 or as an optional step at the end of a normal run.
+
+  - Force feedback (FFB). Two independent ways to get wheel/stick rumble and
+    force feedback -- TeknoParrot's own built-in FFB Blaster (needs a paid
+    TeknoParrot membership) and a free third-party plugin (no subscription
+    needed, fetched live from GitHub each run). Both can be set up at once
+    since they cover different games; if a game is covered by both, you are
+    asked once which to use for all such games. See FORCE FEEDBACK (FFB)
+    SETUP below for full details. Available as menu option 7.
 
   - Per-game overrides. A JSON file lets you exclude games from sync or
     propagation, whitelist specific games for extraction, pin a game to a
@@ -406,7 +418,9 @@
   AutoSync extracts games into a staging folder that YOU choose. The script
   enforces these rules to keep everything healthy:
 
-    - It must be on a LOCAL drive (network extraction is too slow).
+    - It can be on a network drive, but the script measures write speed
+      first and warns if throughput looks too low for reliable extraction
+      or play -- a local drive is recommended when possible for speed.
     - It must NOT be inside the TeknoParrot folder.
     - It must NOT overlap the ZIP source folder.
     - There must be room. The script warns if the drive has less than ~1.5x
@@ -770,7 +784,7 @@
   CROSSHAIR SETUP
   ---------------
 
-  Mode 4 deploys custom crosshair cursor images to all registered lightgun
+  Mode 3 deploys custom crosshair cursor images to all registered lightgun
   games. It can also be run as a standalone mode at any time from the main
   menu without triggering a full AutoSync or registration pass.
 
@@ -816,7 +830,7 @@
        cursor-hide field (HideCursor, "Hide Cursor", or DisableCursor
        depending on the game) to enabled in each gun game's UserProfile XML.
        A timestamped backup is taken automatically before any XML is changed.
-       This step is independent -- you can answer N and run mode 4 again
+       This step is independent -- you can answer N and run mode 3 again
        later if you change your mind.
 
   ADDING YOUR OWN CROSSHAIRS
@@ -1129,10 +1143,10 @@
 
   Removing FFB
 
-    FFB Blaster: re-run the script's FFB Blaster GameProfiles scan is not
-    reversible from the menu -- manually set the field back to 0 in the
-    affected UserProfiles\*.xml files, or restore from a pre-FFB backup
-    (mode 8) if you ran this before enabling FFB Blaster.
+    FFB Blaster: there is no "undo" button in the menu -- manually set the
+    field back to 0 in the affected UserProfiles\*.xml files, or restore
+    from a pre-FFB backup (mode 8) if you ran this before enabling FFB
+    Blaster.
     Third-party plugin: delete the deployed DLL file from the game's folder.
 
 
@@ -1587,7 +1601,7 @@
   the script exits rather than proceeding without a restore point. If any
   files fail to copy during the backup, the script asks before continuing.
 
-  To restore from inside the script, choose mode 3) Restore from backup at
+  To restore from inside the script, choose mode 8) Restore from backup at
   the startup menu. The script checks that TeknoParrot is fully closed first,
   lists all available backups with file counts, and asks you to type YES to
   confirm before changing anything.
@@ -1676,7 +1690,7 @@
     and the correct profile will be used.
 
   A game's controls are wrong after propagation.
-    Use mode 3) Restore from backup to roll back to the backup made at the
+    Use mode 8) Restore from backup to roll back to the backup made at the
     start of that run, or delete the affected game's .xml from UserProfiles
     and re-run propagation after correcting the reference game's bindings in
     TeknoParrotUI.
