@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.85 BETA
+# TeknoParrot Manager  |  v0.86 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -65,7 +65,7 @@ param([switch]$Unattended)
 # GitHub API User-Agent headers. Previously hardcoded in each of those spots
 # independently, which let the User-Agent strings drift out of sync with the
 # banner (caught stale at 0.70 during the v0.71 bump, and again at 0.76 here).
-$ScriptVersion = "0.85"
+$ScriptVersion = "0.86"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -2796,15 +2796,26 @@ function Register-Games {
                 $alreadyReg = @($matchList | Where-Object {
                     Test-Path -LiteralPath (Join-Path $userProfilesDir ($_.Code + ".xml"))
                 })
-                if ($alreadyReg.Count -gt 0) {
-                    foreach ($ar in $alreadyReg) {
-                        if (-not $seenCodes.ContainsKey($ar.Code)) {
-                            [void]$already.Add($ar.Code)
-                            $seenCodes[$ar.Code] = $true
-                            $codeClaimedBy[$ar.Code] = "(already registered in TeknoParrotUI)"
-                        }
+                foreach ($ar in $alreadyReg) {
+                    if (-not $seenCodes.ContainsKey($ar.Code)) {
+                        if ($already -notcontains $ar.Code) { [void]$already.Add($ar.Code) }
+                        $seenCodes[$ar.Code] = $true
+                        $codeClaimedBy[$ar.Code] = "(already registered in TeknoParrotUI)"
                     }
-                } else {
+                }
+
+                # A sibling sharing this exe name being already registered does NOT
+                # mean THIS folder's own game is handled -- e.g. H2Overdrive already
+                # having a profile says nothing about whether X-Games Snowboarder
+                # (a different game sharing the same generic sdaemon.exe loader)
+                # does. Only skip this folder if its OWN best-guess candidate
+                # specifically is among the already-registered set; otherwise it
+                # still needs the dat lookup / manual-registration fallback below,
+                # even though some unrelated sibling is already fine.
+                $ownAlreadyRegistered = ($null -ne $bestFuzzy) -and
+                    (@($alreadyReg | Where-Object { $_.Code -eq $bestFuzzy.Code }).Count -gt 0)
+
+                if (-not $ownAlreadyRegistered) {
                     # Dat-based disambiguation: look up the normalised folder name in the
                     # dat index. The dat's <GameProfile> is authoritative, so if a match is
                     # found we use it directly instead of falling through to ambiguous.

@@ -7,6 +7,32 @@
 
 
 -------------------------------------------------------------------------------
+  v0.86 BETA  (2026-06-17)
+-------------------------------------------------------------------------------
+
+  Bug fix (a second issue found from the same real run as v0.85, reported
+  as "X-Games Snowboarder and Winter X Games didn't show as manual or
+  missed -- they just weren't anywhere"):
+
+  - For shared-executable games (Raw Thrills' sdaemon.exe and similar),
+    when a folder's name didn't fuzzy-match any candidate well, the script
+    checked "is ANY candidate sharing this exe already registered?" -- and
+    if so (e.g. H2Overdrive already had a profile), it skipped the
+    dat-lookup/manual-registration fallback ENTIRELY for that folder, even
+    though the folder's own game (a different title sharing the same
+    generic loader) was never actually registered. The folder vanished
+    completely: not registered, not flagged ambiguous, not even logged.
+    Fixed: a sibling being already registered no longer short-circuits the
+    fallback. Only the folder's own best-guess candidate specifically
+    being already registered counts as "this folder is handled" -- so an
+    unrelated sibling's registration no longer hides a folder that still
+    needs attention.
+    Verified with a control test against the pre-fix code (reproduced the
+    exact disappearance) and a fix-confirmation test, plus re-ran the
+    v0.85 false-positive and genuine-duplicate regression scenarios to
+    confirm this change doesn't reintroduce either of those.
+
+-------------------------------------------------------------------------------
   v0.85 BETA  (2026-06-17)
 -------------------------------------------------------------------------------
 

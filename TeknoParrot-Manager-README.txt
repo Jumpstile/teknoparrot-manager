@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.85 BETA
+  TeknoParrot Manager  |  v0.86 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -1691,6 +1691,6 @@
 
 
 ===============================================================================
-  v0.85 BETA -- Test one game after each run.
+  v0.86 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================
