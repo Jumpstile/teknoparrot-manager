@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.93 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.94 BETA  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -166,7 +166,8 @@
 
   When you run mode 3:
     1. A preview page opens in your browser showing all available designs.
-    2. Enter the number of your chosen design for Player 1 and Player 2.
+    2. Enter the number of your chosen design for Player 1 and Player 2
+       (press Enter to reuse your last choice -- no need to re-find it).
     3. The script copies those images to every registered lightgun game:
          - Standard games: P1.png + P2.png in the game's exe folder.
          - ElfLdr2 games: shared pair in the ElfLdr2 emulator folder.

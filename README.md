@@ -141,7 +141,7 @@ Choosing mode 1 or 2 offers a preview/dry-run option first — see [Preview / Dr
 | 7 | **Force feedback (FFB) setup** | FFB Blaster (membership) + free third-party plugin |
 | 8 | **BepInEx update check** | Update an existing BepInEx install to the latest stable 64-bit release |
 | 9 | **Restore backup** | Roll profiles back to a previous backup |
-| 10 | **Library health check** | Read-only registered/broken/empty status report |
+| 10 | **Library health check** | Read-only registered/broken/empty status, plus GPU fix / FFB Blaster coverage |
 | 11 | **Exit** | Quit the script |
 
 ---
@@ -297,7 +297,7 @@ Mode 3 deploys custom P1/P2 crosshair cursor images to all registered lightgun g
 
 **How to use it:**
 1. An HTML preview grid opens in your browser showing all 321 included designs
-2. Enter the index number for your P1 and P2 crosshairs (can be the same)
+2. Enter the index number for your P1 and P2 crosshairs (can be the same) — the script remembers your last choice by filename and offers it as a default, so a re-run is just pressing Enter twice
 3. The script copies the images to every registered lightgun game
 4. Optionally set cursor-hide for all gun games (backs up profiles first)
 
@@ -376,6 +376,8 @@ The wizard scans every registered game exe for legacy API imports and shows auto
 
 Many TeknoParrot games include optional per-vendor fix settings (AMD, NVIDIA, Intel). Mode 6 auto-detects your GPU via WMI and applies the correct fix to every registered game that has one. Scans `GameProfiles` at runtime — no update needed when new games are added. Safe to re-run any time you change your GPU.
 
+Not sure if you're missing any? Mode 10 (Library health check) reports which registered games are eligible for a GPU fix but don't have it applied yet, without changing anything.
+
 ---
 
 ## Force Feedback (FFB) Setup
@@ -387,6 +389,8 @@ Force feedback makes a wheel or stick push back / rumble to match what's happeni
 TeknoParrot's own built-in force feedback feature. Well-integrated, but it **only works with an active, paid TeknoParrot membership** ([teknoparrot.com/en/Home/Subscription](https://teknoparrot.com/en/Home/Subscription)). The script can't check your subscription status, so it asks directly before changing anything — answering N skips it entirely.
 
 If you answer Y, the script scans your TeknoParrot install's `GameProfiles` for the FFB Blaster field (detected at runtime, never hardcoded) and enables it on every registered profile that has it. `UserProfiles` are backed up first.
+
+Mode 10 (Library health check) also reports which registered games are eligible for FFB Blaster but don't have it enabled yet (read-only, no network access). Third-party plugin coverage isn't included there since checking it needs a live lookup -- use mode 7 for that.
 
 **Mechanism 2 — Third-party FFB plugin (free, no subscription needed)**
 
@@ -708,4 +712,4 @@ TeknoParrot must be set up as an emulator in HyperSpin 2 first. The title must c
 
 ---
 
-> v0.93 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v0.94 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.

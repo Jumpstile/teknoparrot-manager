@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.93 BETA
+# TeknoParrot Manager  |  v0.94 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -65,7 +65,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # GitHub API User-Agent headers. Previously hardcoded in each of those spots
 # independently, which let the User-Agent strings drift out of sync with the
 # banner (caught stale at 0.70 during the v0.71 bump, and again at 0.76 here).
-$ScriptVersion = "0.93"
+$ScriptVersion = "0.94"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -1550,6 +1550,102 @@ function Get-DetectedGpuVendor {
     return [pscustomobject]@{ Vendor = $gpuVendor; Name = $gpuName }
 }
 
+# Discovers GPU fix field names by scanning TeknoParrot GameProfiles at
+# runtime, so newly added games with new fix fields are covered
+# automatically without a script update. Shared (read-only) between
+# Invoke-GpuFixSetup and the Library health check's coverage report --
+# extracting this avoids the two ever silently drifting apart.
+function Get-GpuFixFieldNames {
+    param([string]$TpRoot)
+
+    $gpDir         = Join-Path $TpRoot "GameProfiles"
+    $boolAmdFields = [System.Collections.Generic.HashSet[string]]::new(
+                         [string[]]@('EnableAmdFix','AMDCrashFix','AMDFix'),
+                         [System.StringComparer]::OrdinalIgnoreCase)
+    $dropdownGpuFields = [System.Collections.Generic.HashSet[string]]::new(
+                             [string[]]@('GPU Fix'),
+                             [System.StringComparer]::OrdinalIgnoreCase)
+
+    if (Test-Path -LiteralPath $gpDir) {
+        $gpFiles = @(Get-ChildItem -LiteralPath $gpDir -Filter "*.xml" -ErrorAction SilentlyContinue)
+        foreach ($gf in $gpFiles) {
+            try {
+                $gdoc = Read-Xml $gf.FullName
+                $fnodes = $gdoc.SelectNodes("/GameProfile/ConfigValues/FieldInformation")
+                foreach ($n in $fnodes) {
+                    $fn = if ($n.FieldName) { $n.FieldName.Trim() } else { '' }
+                    $ft = if ($n.FieldType)  { $n.FieldType.Trim()  } else { '' }
+                    if (-not $fn) { continue }
+                    if ($ft -eq 'Bool' -and $fn -imatch '\bamd\b|\bradeon\b|AMDFix|AMDCrash') {
+                        [void]$boolAmdFields.Add($fn)
+                    } elseif ($ft -eq 'Dropdown') {
+                        $opts = @($n.SelectNodes("FieldOptions/string") | ForEach-Object { $_.InnerText.Trim() })
+                        if ($opts | Where-Object { $_ -imatch '^amd$|^nvidia$|^intel$|^new amd' }) {
+                            [void]$dropdownGpuFields.Add($fn)
+                        }
+                    }
+                }
+            } catch {
+                Write-Log ("GPU Fix: WARNING -- could not parse GameProfile '$($gf.BaseName)': $_")
+            }
+        }
+    }
+    return [pscustomobject]@{ BoolFields = $boolAmdFields; DropdownFields = $dropdownGpuFields; GameProfilesFound = (Test-Path -LiteralPath $gpDir) }
+}
+
+# Pure decision function: for a given UserProfile XML and the field names
+# discovered by Get-GpuFixFieldNames, determines whether the profile has
+# any GPU fix field at all (Eligible) and, if so, whether every such
+# field already matches the value expected for $Vendor (UpToDate). Also
+# returns the exact node + new value for each field that needs changing,
+# so Invoke-GpuFixSetup can apply them without re-deriving the same
+# vendor-specific value logic a second time.
+function Test-GpuFixUpToDate {
+    param([System.Xml.XmlDocument]$Doc, $BoolFields, $DropdownFields, [string]$Vendor)
+
+    $eligible = $false
+    $changes  = New-Object System.Collections.Generic.List[object]
+
+    foreach ($fieldName in $BoolFields) {
+        $xpLit = ConvertTo-XPathStringLiteral $fieldName
+        $fi = $Doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$xpLit]")
+        if ($null -eq $fi) { continue }
+        $fvNode = $fi.SelectSingleNode("FieldValue")
+        if ($null -eq $fvNode) { continue }
+        $eligible = $true
+        $newVal = if ($Vendor -eq 'AMD') { '1' } else { '0' }
+        if ($fvNode.InnerText -ne $newVal) {
+            [void]$changes.Add([pscustomobject]@{ FieldName = $fieldName; Node = $fvNode; OldValue = $fvNode.InnerText; NewValue = $newVal })
+        }
+    }
+
+    foreach ($fieldName in $DropdownFields) {
+        $xpLit = ConvertTo-XPathStringLiteral $fieldName
+        $fi = $Doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$xpLit]")
+        if ($null -eq $fi) { continue }
+        $fvNode = $fi.SelectSingleNode("FieldValue")
+        $opts   = @($fi.SelectNodes("FieldOptions/string") | ForEach-Object { $_.InnerText.Trim() })
+        if ($null -eq $fvNode -or $opts.Count -eq 0) { continue }
+        $eligible = $true
+
+        $newVal = 'None'
+        if ($Vendor -eq 'AMD') {
+            if     ($opts -contains 'New AMD Driver') { $newVal = 'New AMD Driver' }
+            elseif ($opts -contains 'AMD')            { $newVal = 'AMD'            }
+        } elseif ($Vendor -eq 'NVIDIA') {
+            if ($opts -contains 'NVIDIA') { $newVal = 'NVIDIA' }
+        } elseif ($Vendor -eq 'Intel') {
+            if ($opts -contains 'INTEL') { $newVal = 'INTEL' }
+        }
+
+        if ($fvNode.InnerText -ne $newVal) {
+            [void]$changes.Add([pscustomobject]@{ FieldName = $fieldName; Node = $fvNode; OldValue = $fvNode.InnerText; NewValue = $newVal })
+        }
+    }
+
+    return [pscustomobject]@{ Eligible = $eligible; UpToDate = ($eligible -and $changes.Count -eq 0); Changes = $changes }
+}
+
 # =============================================================================
 # GPU Fix Setup: detect GPU vendor, scan TeknoParrot GameProfiles for fix
 # fields (so newly added games are covered automatically), and apply the
@@ -1594,43 +1690,16 @@ function Invoke-GpuFixSetup {
     # -- Discover GPU fix field names from TeknoParrot GameProfiles -------------
     # Scans at runtime so newly added games with new fix fields are covered
     # automatically without requiring a script update.
-    $gpDir         = Join-Path $TpRoot "GameProfiles"
-    $boolAmdFields = [System.Collections.Generic.HashSet[string]]::new(
-                         [string[]]@('EnableAmdFix','AMDCrashFix','AMDFix'),
-                         [System.StringComparer]::OrdinalIgnoreCase)
-    $dropdownGpuFields = [System.Collections.Generic.HashSet[string]]::new(
-                             [string[]]@('GPU Fix'),
-                             [System.StringComparer]::OrdinalIgnoreCase)
-
-    if (Test-Path -LiteralPath $gpDir) {
-        Write-Host "  Scanning GameProfiles for GPU fix fields..." -ForegroundColor DarkGray
-        $gpFiles = @(Get-ChildItem -LiteralPath $gpDir -Filter "*.xml" -ErrorAction SilentlyContinue)
-        foreach ($gf in $gpFiles) {
-            try {
-                $gdoc = Read-Xml $gf.FullName
-                $fnodes = $gdoc.SelectNodes("/GameProfile/ConfigValues/FieldInformation")
-                foreach ($n in $fnodes) {
-                    $fn = if ($n.FieldName) { $n.FieldName.Trim() } else { '' }
-                    $ft = if ($n.FieldType)  { $n.FieldType.Trim()  } else { '' }
-                    if (-not $fn) { continue }
-                    if ($ft -eq 'Bool' -and $fn -imatch '\bamd\b|\bradeon\b|AMDFix|AMDCrash') {
-                        [void]$boolAmdFields.Add($fn)
-                    } elseif ($ft -eq 'Dropdown') {
-                        $opts = @($n.SelectNodes("FieldOptions/string") | ForEach-Object { $_.InnerText.Trim() })
-                        if ($opts | Where-Object { $_ -imatch '^amd$|^nvidia$|^intel$|^new amd' }) {
-                            [void]$dropdownGpuFields.Add($fn)
-                        }
-                    }
-                }
-            } catch {
-                Write-Log ("GPU Fix: WARNING -- could not parse GameProfile '$($gf.BaseName)': $_")
-            }
-        }
+    Write-Host "  Scanning GameProfiles for GPU fix fields..." -ForegroundColor DarkGray
+    $gpuFields         = Get-GpuFixFieldNames -TpRoot $TpRoot
+    $boolAmdFields     = $gpuFields.BoolFields
+    $dropdownGpuFields = $gpuFields.DropdownFields
+    if ($gpuFields.GameProfilesFound) {
         Write-Log ("GPU Fix: discovered fields -- Bool AMD: [{0}]  Dropdown GPU: [{1}]" -f `
             ($boolAmdFields -join ', '), ($dropdownGpuFields -join ', '))
     } else {
-        Write-Host ("  GameProfiles folder not found at '{0}' -- using built-in field list." -f $gpDir) -ForegroundColor DarkGray
-        Write-Log "GPU Fix: GameProfiles not found at $gpDir -- using fallback field list."
+        Write-Host ("  GameProfiles folder not found -- using built-in field list.") -ForegroundColor DarkGray
+        Write-Log "GPU Fix: GameProfiles not found -- using fallback field list."
     }
 
     # -- Backup UserProfiles before any write ------------------------------------
@@ -1673,53 +1742,14 @@ function Invoke-GpuFixSetup {
 
     foreach ($pf in $profiles) {
         try {
-            $doc = Read-Xml $pf.FullName
-            $changed = $false
+            $doc    = Read-Xml $pf.FullName
+            $result = Test-GpuFixUpToDate -Doc $doc -BoolFields $boolAmdFields -DropdownFields $dropdownGpuFields -Vendor $gpuVendor
 
-            # Bool AMD fix fields: 1 for AMD users, 0 for everyone else.
-            foreach ($fieldName in $boolAmdFields) {
-                $xpLit = ConvertTo-XPathStringLiteral $fieldName
-                $fi = $doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$xpLit]")
-                if ($null -eq $fi) { continue }
-                $fvNode = $fi.SelectSingleNode("FieldValue")
-                if ($null -eq $fvNode) { continue }
-                $newVal = if ($gpuVendor -eq 'AMD') { '1' } else { '0' }
-                if ($fvNode.InnerText -ne $newVal) {
-                    $oldVal           = $fvNode.InnerText
-                    $fvNode.InnerText = $newVal
-                    $changed          = $true
-                    Write-Log "GPU Fix: $($pf.BaseName) :: $fieldName $oldVal -> $newVal"
+            if ($result.Changes.Count -gt 0) {
+                foreach ($c in $result.Changes) {
+                    $c.Node.InnerText = $c.NewValue
+                    Write-Log "GPU Fix: $($pf.BaseName) :: $($c.FieldName) $($c.OldValue) -> $($c.NewValue)"
                 }
-            }
-
-            # GPU Fix dropdown fields: pick best available option for the detected vendor.
-            foreach ($fieldName in $dropdownGpuFields) {
-                $xpLit = ConvertTo-XPathStringLiteral $fieldName
-                $fi = $doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$xpLit]")
-                if ($null -eq $fi) { continue }
-                $fvNode = $fi.SelectSingleNode("FieldValue")
-                $opts   = @($fi.SelectNodes("FieldOptions/string") | ForEach-Object { $_.InnerText.Trim() })
-                if ($null -eq $fvNode -or $opts.Count -eq 0) { continue }
-
-                $newVal = 'None'
-                if ($gpuVendor -eq 'AMD') {
-                    if     ($opts -contains 'New AMD Driver') { $newVal = 'New AMD Driver' }
-                    elseif ($opts -contains 'AMD')            { $newVal = 'AMD'            }
-                } elseif ($gpuVendor -eq 'NVIDIA') {
-                    if ($opts -contains 'NVIDIA') { $newVal = 'NVIDIA' }
-                } elseif ($gpuVendor -eq 'Intel') {
-                    if ($opts -contains 'INTEL') { $newVal = 'INTEL' }
-                }
-
-                if ($fvNode.InnerText -ne $newVal) {
-                    $oldVal           = $fvNode.InnerText
-                    $fvNode.InnerText = $newVal
-                    $changed          = $true
-                    Write-Log "GPU Fix: $($pf.BaseName) :: $fieldName $oldVal -> $newVal"
-                }
-            }
-
-            if ($changed) {
                 Save-Xml $doc $pf.FullName
                 $updated++
                 Write-Host ("    {0}" -f $pf.BaseName) -ForegroundColor Green
@@ -1844,18 +1874,46 @@ function Invoke-CrosshairSetup {
     if (Test-Path -LiteralPath $previewPath -PathType Leaf) { Start-Process -FilePath $previewPath }
     Write-Host ""
 
+    # Remembers the last P1/P2 choice (by filename, not index -- indices shift
+    # if PNGs are added/removed from the Crosshairs folder between runs) so a
+    # re-run doesn't require re-finding/re-entering the same numbers. A saved
+    # name that no longer exists in $valid is silently ignored.
+    $crosshairStatePath = Join-Path $PSScriptRoot "TeknoParrot-Manager-crosshairs.json"
+    $lastP1Idx = $null; $lastP2Idx = $null
+    if (Test-Path -LiteralPath $crosshairStatePath) {
+        try {
+            $crosshairState = Get-Content -LiteralPath $crosshairStatePath -Raw | ConvertFrom-Json
+            if ($crosshairState.P1) {
+                $hit = for ($i = 0; $i -lt $valid.Count; $i++) { if ([System.IO.Path]::GetFileNameWithoutExtension($valid[$i]) -eq $crosshairState.P1) { $i; break } }
+                if ($null -ne $hit) { $lastP1Idx = $hit }
+            }
+            if ($crosshairState.P2) {
+                $hit = for ($i = 0; $i -lt $valid.Count; $i++) { if ([System.IO.Path]::GetFileNameWithoutExtension($valid[$i]) -eq $crosshairState.P2) { $i; break } }
+                if ($null -ne $hit) { $lastP2Idx = $hit }
+            }
+        } catch { Write-Log "Crosshairs: could not read last-used state -- $_" }
+    }
+
     # Pick P1
     $p1Idx = $null
     while ($null -eq $p1Idx) {
-        $raw = (Read-Host ("  P1 crosshair index (0-{0})" -f ($valid.Count - 1))).Trim()
-        if ($raw -match '^\d+$' -and $raw.Length -le 9 -and [int]$raw -lt $valid.Count) { $p1Idx = [int]$raw }
+        $promptText = if ($null -ne $lastP1Idx) {
+            "  P1 crosshair index (0-{0}, Enter for last used: {1} {2})" -f ($valid.Count - 1), $lastP1Idx, [System.IO.Path]::GetFileNameWithoutExtension($valid[$lastP1Idx])
+        } else { "  P1 crosshair index (0-{0})" -f ($valid.Count - 1) }
+        $raw = (Read-Host $promptText).Trim()
+        if ($raw -eq '' -and $null -ne $lastP1Idx) { $p1Idx = $lastP1Idx }
+        elseif ($raw -match '^\d+$' -and $raw.Length -le 9 -and [int]$raw -lt $valid.Count) { $p1Idx = [int]$raw }
         else { Write-Host ("  Enter a number between 0 and {0}." -f ($valid.Count - 1)) -ForegroundColor Yellow }
     }
     # Pick P2
     $p2Idx = $null
     while ($null -eq $p2Idx) {
-        $raw = (Read-Host ("  P2 crosshair index (0-{0}, or same as P1)" -f ($valid.Count - 1))).Trim()
-        if ($raw -match '^\d+$' -and $raw.Length -le 9 -and [int]$raw -lt $valid.Count) { $p2Idx = [int]$raw }
+        $promptText = if ($null -ne $lastP2Idx) {
+            "  P2 crosshair index (0-{0}, or same as P1, Enter for last used: {1} {2})" -f ($valid.Count - 1), $lastP2Idx, [System.IO.Path]::GetFileNameWithoutExtension($valid[$lastP2Idx])
+        } else { "  P2 crosshair index (0-{0}, or same as P1)" -f ($valid.Count - 1) }
+        $raw = (Read-Host $promptText).Trim()
+        if ($raw -eq '' -and $null -ne $lastP2Idx) { $p2Idx = $lastP2Idx }
+        elseif ($raw -match '^\d+$' -and $raw.Length -le 9 -and [int]$raw -lt $valid.Count) { $p2Idx = [int]$raw }
         else { Write-Host ("  Enter a number between 0 and {0}." -f ($valid.Count - 1)) -ForegroundColor Yellow }
     }
 
@@ -1864,6 +1922,10 @@ function Invoke-CrosshairSetup {
     Write-Host ""
     Write-Host "  P1: $p1Name    P2: $p2Name" -ForegroundColor Green
     Write-Log "Crosshairs: P1=$p1Name  P2=$p2Name"
+
+    try {
+        [System.IO.File]::WriteAllText($crosshairStatePath, ([ordered]@{ P1 = $p1Name; P2 = $p2Name } | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
+    } catch { Write-Log "Crosshairs: could not save last-used state -- $_" }
 
     # Locate ElfLdr2 folder -- search common names then any elf-named subfolder
     $elfDir = $null
@@ -2963,6 +3025,61 @@ function Invoke-FFBPluginSetup {
     Write-Log ("FFBPlugin setup: deployed={0} skippedNative={1} skippedCollision={2} skippedNoMatch={3} errors={4}" -f $deployed, $skippedNative, $skippedCollision, $skippedNoMatch, $errors)
 }
 
+# Discovers the FFB Blaster Bool field name by scanning TeknoParrot
+# GameProfiles at runtime -- never hardcoded. Shared (read-only) between
+# Invoke-FFBBlasterSetup and the Library health check's coverage report.
+function Get-FFBBlasterFieldNames {
+    param([string]$GameProfilesDir)
+
+    $ffbFields = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if (Test-Path -LiteralPath $GameProfilesDir) {
+        $gpFiles = @(Get-ChildItem -LiteralPath $GameProfilesDir -Filter "*.xml" -ErrorAction SilentlyContinue)
+        foreach ($gf in $gpFiles) {
+            try {
+                $gdoc = Read-Xml $gf.FullName
+                $fnodes = $gdoc.SelectNodes("/GameProfile/ConfigValues/FieldInformation")
+                foreach ($n in $fnodes) {
+                    $fn = if ($n.FieldName) { $n.FieldName.Trim() } else { '' }
+                    $ft = if ($n.FieldType)  { $n.FieldType.Trim()  } else { '' }
+                    if (-not $fn) { continue }
+                    if ($ft -eq 'Bool' -and $fn -imatch 'ffb.*blaster|blaster.*ffb') {
+                        [void]$ffbFields.Add($fn)
+                    }
+                }
+            } catch {
+                Write-Log ("FFBBlaster: WARNING -- could not parse GameProfile '$($gf.BaseName)': $_")
+            }
+        }
+    }
+    return $ffbFields
+}
+
+# Pure decision function: for a given UserProfile XML and the field
+# names discovered by Get-FFBBlasterFieldNames, determines whether the
+# profile has an FFB Blaster field at all (Eligible) and whether it is
+# already set to '1' (UpToDate). Returns the exact node + target value
+# for any field that needs changing, mirroring Test-GpuFixUpToDate.
+function Test-FFBBlasterUpToDate {
+    param([System.Xml.XmlDocument]$Doc, $Fields)
+
+    $eligible = $false
+    $changes  = New-Object System.Collections.Generic.List[object]
+
+    foreach ($fieldName in $Fields) {
+        $xpLit = ConvertTo-XPathStringLiteral $fieldName
+        $fi = $Doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$xpLit]")
+        if ($null -eq $fi) { continue }
+        $fvNode = $fi.SelectSingleNode("FieldValue")
+        if ($null -eq $fvNode) { continue }
+        $eligible = $true
+        if ($fvNode.InnerText -ne '1') {
+            [void]$changes.Add([pscustomobject]@{ FieldName = $fieldName; Node = $fvNode; OldValue = $fvNode.InnerText; NewValue = '1' })
+        }
+    }
+
+    return [pscustomobject]@{ Eligible = $eligible; UpToDate = ($eligible -and $changes.Count -eq 0); Changes = $changes }
+}
+
 # Sets up TeknoParrot's own built-in "FFB Blaster" force feedback, a
 # per-game Bool field in GameProfiles -- paywalled (any paid TeknoParrot
 # membership). The script cannot check subscription status, so it must
@@ -2991,28 +3108,9 @@ function Invoke-FFBBlasterSetup {
 
     # Discover the field name dynamically -- never hardcoded, same pattern
     # as Invoke-GpuFixSetup's $boolAmdFields discovery.
-    $gpDir = Join-Path $TpRoot "GameProfiles"
-    $ffbFields = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    if (Test-Path -LiteralPath $gpDir) {
-        Write-Host "  Scanning GameProfiles for FFB Blaster fields..." -ForegroundColor DarkGray
-        $gpFiles = @(Get-ChildItem -LiteralPath $gpDir -Filter "*.xml" -ErrorAction SilentlyContinue)
-        foreach ($gf in $gpFiles) {
-            try {
-                $gdoc = Read-Xml $gf.FullName
-                $fnodes = $gdoc.SelectNodes("/GameProfile/ConfigValues/FieldInformation")
-                foreach ($n in $fnodes) {
-                    $fn = if ($n.FieldName) { $n.FieldName.Trim() } else { '' }
-                    $ft = if ($n.FieldType)  { $n.FieldType.Trim()  } else { '' }
-                    if (-not $fn) { continue }
-                    if ($ft -eq 'Bool' -and $fn -imatch 'ffb.*blaster|blaster.*ffb') {
-                        [void]$ffbFields.Add($fn)
-                    }
-                }
-            } catch {
-                Write-Log ("FFBBlaster: WARNING -- could not parse GameProfile '$($gf.BaseName)': $_")
-            }
-        }
-    }
+    Write-Host "  Scanning GameProfiles for FFB Blaster fields..." -ForegroundColor DarkGray
+    $gpDir     = Join-Path $TpRoot "GameProfiles"
+    $ffbFields = Get-FFBBlasterFieldNames -GameProfilesDir $gpDir
     if ($ffbFields.Count -eq 0) {
         Write-Host "  No FFB Blaster field found in any GameProfile -- this TeknoParrot" -ForegroundColor Yellow
         Write-Host "  install may not support it yet." -ForegroundColor Yellow
@@ -3051,25 +3149,15 @@ function Invoke-FFBBlasterSetup {
 
     foreach ($pf in $profiles) {
         try {
-            $doc = Read-Xml $pf.FullName
-            $changed = $false
-            $hasField = $false
-            foreach ($fieldName in $ffbFields) {
-                $xpLit = ConvertTo-XPathStringLiteral $fieldName
-                $fi = $doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$xpLit]")
-                if ($null -eq $fi) { continue }
-                $fvNode = $fi.SelectSingleNode("FieldValue")
-                if ($null -eq $fvNode) { continue }
-                $hasField = $true
-                if ($fvNode.InnerText -ne '1') {
-                    $fvNode.InnerText = '1'
-                    $changed = $true
-                    Write-Log "FFBBlaster: $($pf.BaseName) :: $fieldName -> 1"
-                }
-            }
-            if (-not $hasField) { $noField++; continue }
+            $doc    = Read-Xml $pf.FullName
+            $result = Test-FFBBlasterUpToDate -Doc $doc -Fields $ffbFields
+            if (-not $result.Eligible) { $noField++; continue }
             [void]$enabledCodes.Add($pf.BaseName)
-            if ($changed) {
+            if ($result.Changes.Count -gt 0) {
+                foreach ($c in $result.Changes) {
+                    $c.Node.InnerText = $c.NewValue
+                    Write-Log "FFBBlaster: $($pf.BaseName) :: $($c.FieldName) -> $($c.NewValue)"
+                }
                 Save-Xml $doc $pf.FullName
                 $updated++
                 Write-Host ("    {0}" -f $pf.BaseName) -ForegroundColor Green
@@ -3987,7 +4075,7 @@ function Repair-GamePaths {
 # the install folder, never touches the network. Safe to run any time as a
 # fast health check between full AutoSync/Register runs.
 function Invoke-LibraryHealthCheck {
-    param([string]$UserProfilesDir, [string]$LogPath)
+    param([string]$UserProfilesDir, [string]$LogPath, [string]$TpRoot)
 
     $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
                   Where-Object { $_.Directory.Name -ne "FullBackup" } | Sort-Object BaseName)
@@ -4036,6 +4124,58 @@ function Invoke-LibraryHealthCheck {
         Write-Host "  to fix broken paths automatically where possible." -ForegroundColor DarkCyan
     }
 
+    # -- Optional-setup coverage: GPU fix + FFB Blaster -------------------------
+    # Read-only, local-only (no network) -- mirrors Invoke-GpuFixSetup and
+    # Invoke-FFBBlasterSetup's detection via the shared Get-*FieldNames /
+    # Test-*UpToDate helpers, but never writes anything. Third-party FFB
+    # plugin coverage is deliberately NOT checked here -- it requires a
+    # live fetch of the AutoSetup.cmd table, which would break this mode's
+    # "no network access" guarantee; run mode 7 to check that instead.
+    $gpuFixNeeded     = New-Object System.Collections.ArrayList
+    $ffbBlasterNeeded = New-Object System.Collections.ArrayList
+    $detected         = Get-DetectedGpuVendor
+    $gpuFields        = Get-GpuFixFieldNames -TpRoot $TpRoot
+    $ffbFields        = Get-FFBBlasterFieldNames -GameProfilesDir (Join-Path $TpRoot "GameProfiles")
+
+    foreach ($pf in $profiles) {
+        try {
+            $doc = Read-Xml $pf.FullName
+            if (-not $doc.GameProfile) { continue }
+            if ($detected.Vendor) {
+                $gpuResult = Test-GpuFixUpToDate -Doc $doc -BoolFields $gpuFields.BoolFields -DropdownFields $gpuFields.DropdownFields -Vendor $detected.Vendor
+                if ($gpuResult.Eligible -and -not $gpuResult.UpToDate) { [void]$gpuFixNeeded.Add($pf.BaseName) }
+            }
+            $ffbResult = Test-FFBBlasterUpToDate -Doc $doc -Fields $ffbFields
+            if ($ffbResult.Eligible -and -not $ffbResult.UpToDate) { [void]$ffbBlasterNeeded.Add($pf.BaseName) }
+        } catch {
+            Write-Log "HealthCheck: coverage check could not parse $($pf.Name) -- $_"
+        }
+    }
+
+    Write-Host ""
+    Write-Host "  Optional setup coverage:" -ForegroundColor Cyan
+    if ($detected.Vendor) {
+        if ($gpuFixNeeded.Count -gt 0) {
+            Write-Host ("  GPU fix not applied : {0}  (detected: {1})" -f $gpuFixNeeded.Count, $detected.Vendor) -ForegroundColor Yellow
+            Write-Host ("    {0}" -f ($gpuFixNeeded -join ', ')) -ForegroundColor DarkGray
+        } else {
+            Write-Host ("  GPU fix not applied : 0  (detected: {0})" -f $detected.Vendor) -ForegroundColor Green
+        }
+    } else {
+        Write-Host "  GPU fix coverage    : skipped (could not auto-detect GPU vendor)" -ForegroundColor DarkGray
+    }
+    if ($ffbBlasterNeeded.Count -gt 0) {
+        Write-Host ("  FFB Blaster not on  : {0}" -f $ffbBlasterNeeded.Count) -ForegroundColor Yellow
+        Write-Host ("    {0}" -f ($ffbBlasterNeeded -join ', ')) -ForegroundColor DarkGray
+    } else {
+        Write-Host "  FFB Blaster not on  : 0" -ForegroundColor Green
+    }
+    Write-Host "  FFB plugin coverage : not checked here (needs network access -- run mode 7)" -ForegroundColor DarkGray
+    if ($gpuFixNeeded.Count -gt 0 -or $ffbBlasterNeeded.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  Run mode 6 (GPU fix setup) or mode 7 (FFB setup) to apply these." -ForegroundColor DarkCyan
+    }
+
     if ($LogPath -and (Test-Path -LiteralPath $LogPath)) {
         try {
             $lastRun = Get-Content -LiteralPath $LogPath -ErrorAction Stop | Select-String "^\[.*\] Completed\. " | Select-Object -Last 1
@@ -4046,7 +4186,8 @@ function Invoke-LibraryHealthCheck {
         } catch {}
     }
 
-    Write-Log ("HealthCheck: total={0} valid={1} broken={2} empty={3}" -f $profiles.Count, $valid.Count, $broken.Count, $empty.Count)
+    Write-Log ("HealthCheck: total={0} valid={1} broken={2} empty={3} gpuFixNeeded={4} ffbBlasterNeeded={5}" -f `
+        $profiles.Count, $valid.Count, $broken.Count, $empty.Count, $gpuFixNeeded.Count, $ffbBlasterNeeded.Count)
 }
 
 # =============================================================================
@@ -5993,8 +6134,9 @@ while ($true) {
     Write-Host "                        update (64-bit only). Never installs it fresh."
     Write-Host "  9) Restore backup  -- Roll UserProfiles back to a previous backup."
     Write-Host "  10) Library health check -- Read-only: reports registered/broken/"
-    Write-Host "                        unregistered counts. No extraction, registration,"
-    Write-Host "                        repair, or network access -- just a fast status check."
+    Write-Host "                        unregistered counts plus GPU fix / FFB Blaster"
+    Write-Host "                        coverage. No extraction, registration, repair, or"
+    Write-Host "                        network access -- just a fast status check."
     Write-Host "  11) Exit"
     Write-Host ""
     if ($Unattended) {
@@ -6039,7 +6181,7 @@ while ($true) {
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         Write-Host " Library Health Check (read-only)" -ForegroundColor Cyan
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
-        Invoke-LibraryHealthCheck -UserProfilesDir $userProfilesDir -LogPath $logPath
+        Invoke-LibraryHealthCheck -UserProfilesDir $userProfilesDir -LogPath $logPath -TpRoot $tpRoot
         Write-Host ""
         Write-Host "============================================" -ForegroundColor Cyan
         Write-Host "   Done." -ForegroundColor Cyan
@@ -6640,6 +6782,7 @@ if ($mode -eq "AutoSync") {
     if ($sync) {
         Write-Host "  Extracted  : $($sync.Synced)"   -ForegroundColor Green
         Write-Host "  Up to date : $($sync.UpToDate)"  -ForegroundColor DarkGray
+        if ($sync.WouldSync -gt 0) { Write-Host "  Would extract : $($sync.WouldSync)  (preview -- nothing written yet)" -ForegroundColor Yellow }
         if ($sync.Skipped -gt 0) { Write-Host "  Skipped    : $($sync.Skipped)  (per-game override)" -ForegroundColor DarkGray }
         if ($sync.Failed  -gt 0) { Write-Host "  Failed     : $($sync.Failed)  (see TeknoParrot-Manager.log)" -ForegroundColor Red }
     } else {
@@ -6649,6 +6792,7 @@ if ($mode -eq "AutoSync") {
         Write-Host "  Supplementary:" -ForegroundColor Cyan
         Write-Host "  Extracted  : $($syncSupp.Synced)"   -ForegroundColor Green
         Write-Host "  Up to date : $($syncSupp.UpToDate)"  -ForegroundColor DarkGray
+        if ($syncSupp.WouldSync -gt 0) { Write-Host "  Would extract : $($syncSupp.WouldSync)  (preview -- nothing written yet)" -ForegroundColor Yellow }
         if ($syncSupp.Skipped -gt 0) { Write-Host "  Skipped    : $($syncSupp.Skipped)  (per-game override)" -ForegroundColor DarkGray }
         if ($syncSupp.Failed  -gt 0) { Write-Host "  Failed     : $($syncSupp.Failed)  (see TeknoParrot-Manager.log)" -ForegroundColor Red }
     } elseif ($suppValid) {

@@ -7,6 +7,32 @@
 
 
 -------------------------------------------------------------------------------
+  v0.94 BETA  (2026-06-18)
+-------------------------------------------------------------------------------
+
+  New: the extraction summary now shows how many games a preview run
+  would extract (this count was already computed during preview mode
+  but was never displayed).
+
+  New: Library health check (mode 10) now also reports GPU fix and FFB
+  Blaster coverage -- which registered games are eligible for either but
+  don't have it applied yet, checked entirely locally with no network
+  access. Third-party FFB plugin coverage isn't included (it needs a
+  live lookup) -- run mode 7 to check that instead.
+
+  New: Crosshair setup (mode 3) now remembers your last P1/P2 choice
+  (by filename, so it survives adding/removing PNGs from the Crosshairs
+  folder) and offers it as a default -- press Enter to reuse it instead
+  of re-finding the same numbers every run.
+
+  Internal: extracted the GPU fix and FFB Blaster field-detection/
+  decision logic into shared helper functions, reused by both the real
+  setup modes and the new health check report, so the two can never
+  silently disagree about whether a fix is already applied. Verified
+  against the pre-refactor code with before/after fixture comparisons --
+  byte-identical output.
+
+-------------------------------------------------------------------------------
   v0.93 BETA  (2026-06-18)
 -------------------------------------------------------------------------------
 

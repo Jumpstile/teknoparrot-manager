@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.93 BETA
+  TeknoParrot Manager  |  v0.94 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -397,9 +397,14 @@
   10) Library health check
        Read-only. Reports how many registered profiles have a valid,
        broken, or empty GamePath, lists the affected profile codes, and
-       shows the summary line from your last full run. Does not extract,
-       register, repair, propagate, or touch the network -- safe to run
-       any time for a quick status check. Returns to the menu when done.
+       shows the summary line from your last full run. Also reports
+       optional-setup coverage: how many registered games are eligible
+       for a GPU fix or FFB Blaster but don't have it applied yet (both
+       checked locally, no network access -- third-party FFB plugin
+       coverage needs a live lookup, so check that via mode 7 instead).
+       Does not extract, register, repair, propagate, or touch the
+       network -- safe to run any time for a quick status check. Returns
+       to the menu when done.
 
   11) Exit
        Exits the script.
@@ -865,7 +870,10 @@
        available designs visually before picking.
 
     3. Enter the index number for your Player 1 crosshair and Player 2
-       crosshair. The two can be the same or different.
+       crosshair. The two can be the same or different. The script
+       remembers your last choice (by filename, so it still works if you
+       add or remove PNGs from the folder) and offers it as a default --
+       just press Enter to reuse it on your next run.
 
     4. The script copies the chosen images to every registered lightgun game
        folder, reporting the count of games deployed, skipped, and errored.
@@ -1891,6 +1899,6 @@
 
 
 ===============================================================================
-  v0.93 BETA -- Test one game after each run.
+  v0.94 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================
