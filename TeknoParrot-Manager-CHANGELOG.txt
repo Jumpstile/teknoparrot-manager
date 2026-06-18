@@ -7,6 +7,53 @@
 
 
 -------------------------------------------------------------------------------
+  v0.88 BETA  (2026-06-18)
+-------------------------------------------------------------------------------
+
+  New feature: BepInEx update check (mode 8).
+
+  - BepInEx is a third-party Unity plugin/modding framework some games
+    need (Family Guy Bowling, Mars Sortie, NERF Arcade, Rainbow
+    BomberGirl, Super Bikes 3, TMNT, and others). This checks every
+    registered game that already has BepInEx installed against the
+    latest stable release on GitHub and offers a single batched update.
+  - Never installs BepInEx into a game that doesn't already have it.
+    Only the latest STABLE 64-bit build is ever used -- never 32-bit,
+    never a pre-release. A 32-bit install is left alone and reported
+    separately, never silently touched or downloaded for.
+  - Existing BepInEx files are backed up (to BepInEx_Backup_<timestamp>
+    inside the game's own folder) before any update is applied.
+
+  Baked into the script: two automatic compatibility warnings that used
+  to live only in a separate, soon-to-be-unavailable game notes
+  document. Both run automatically on every AutoSync/Register run as
+  new ACTION REQUIRED items, with step-by-step fix instructions -- no
+  separate mode needed:
+
+  - Raw Thrills path-length limits: specific older Raw Thrills titles
+    have hard-coded limits on how long their full install path can be
+    (roughly 64 or 96 characters depending on engine era). Exceeding it
+    means the game won't launch. The script now checks the known
+    affected titles automatically and tells you the exact short folder
+    name the community has settled on for each one.
+  - iDmacDrv32.dll version pins: five BlazBlue-series games
+    (BBCF, BBCP, BlazBlue Continuum Shift, Continuum Shift II, Cross Tag
+    Battle) need a SPECIFIC OLDER version of iDmacDrv32.dll -- a newer
+    version causes a coin error. The script checks the file's CRC32
+    against the known-required value and flags a mismatch with the
+    required CRC32 and where to get the correct file. Never auto-fixed
+    (the usual "let TeknoParrot redeploy its current copy" fix would
+    make this specific case worse, not better).
+
+  Bug fix found during this version's documentation sweep: README.md
+  (the GitHub homepage) was missing the entire Force Feedback section
+  added in v0.87 -- it only had a mode-table row, never a fix that's
+  now mandatory for every future release. Also fixed a factual error in
+  the staging-folder rules (network drives ARE supported, an older
+  sentence said they were not) and several more stale mode-number
+  references left over from the v0.87 menu reorder.
+
+-------------------------------------------------------------------------------
   v0.87 BETA  (2026-06-17)
 -------------------------------------------------------------------------------
 

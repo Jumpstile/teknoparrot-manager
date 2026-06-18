@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.87 BETA
+# TeknoParrot Manager  |  v0.88 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -65,7 +65,7 @@ param([switch]$Unattended)
 # GitHub API User-Agent headers. Previously hardcoded in each of those spots
 # independently, which let the User-Agent strings drift out of sync with the
 # banner (caught stale at 0.70 during the v0.71 bump, and again at 0.76 here).
-$ScriptVersion = "0.87"
+$ScriptVersion = "0.88"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -3039,6 +3039,219 @@ function Invoke-FFBBlasterSetup {
     return @($enabledCodes)
 }
 
+# =============================================================================
+# BEPINEX UPDATE CHECKER  (Unity modding/plugin framework some games need)
+# =============================================================================
+# BepInEx is a third-party Unity plugin/modding framework. Several
+# TeknoParrot games (Family Guy Bowling, Mars Sortie, NERF Arcade, Rainbow
+# BomberGirl, Super Bikes 3, TMNT, among others) require a community
+# BepInEx plugin to get controls or fixes working. This script never
+# installs BepInEx fresh into a game -- only checks/updates EXISTING
+# installs, and only the x64 stable line (never x86, never a pre-release),
+# per explicit project policy.
+
+# Fetches the latest STABLE x64 BepInEx release info, fetch-with-retry
+# shape identical to Get-EggmanDatRelease/Get-FFBPluginGameMap.
+# Returns [pscustomobject]@{ Version; DownloadUrl; FileName } or $null.
+function Get-BepInExLatestRelease {
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try {
+            $apiUri = 'https://api.github.com/repos/BepInEx/BepInEx/releases'
+            $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
+                          -Headers @{ 'User-Agent' = "TeknoParrot-Manager/$ScriptVersion" }
+            $releases = $resp.Content | ConvertFrom-Json
+            # Releases are returned newest-first; prerelease=false reliably
+            # distinguishes the v5-lts stable line from v6-bleeding-edge
+            # pre-releases -- no tag-name parsing needed.
+            $stable = @($releases | Where-Object { -not $_.prerelease }) | Select-Object -First 1
+            if (-not $stable) { return $null }
+            $x64Asset = @($stable.assets | Where-Object { $_.name -like 'BepInEx_win_x64_*.zip' }) | Select-Object -First 1
+            if (-not $x64Asset) { return $null }
+            if ($x64Asset.browser_download_url -notmatch '^https://[a-zA-Z0-9._-]*(github\.com|githubusercontent\.com)/') {
+                Write-Log "BepInEx: unexpected download URL format -- skipping."
+                return $null
+            }
+            $verStr = $stable.tag_name.TrimStart('v')
+            return [pscustomobject]@{
+                Version = $verStr; DownloadUrl = $x64Asset.browser_download_url; FileName = $x64Asset.name
+            }
+        } catch {
+            $status = 0
+            if ($_.Exception.Response) { try { $status = [int]$_.Exception.Response.StatusCode } catch {} }
+            if ($attempt -ge 3 -or ($status -ge 400 -and $status -lt 500)) {
+                Write-Log "BepInEx: release query failed -- $_"; return $null
+            }
+            Write-Log "BepInEx: attempt $attempt failed, retrying in 5s -- $_"
+            Start-Sleep -Seconds 5
+        }
+    }
+    return $null
+}
+
+# Returns the installed BepInEx version string for a game's exe folder, or
+# $null if BepInEx is not installed there. BepInEx\core\BepInEx.dll's own
+# FileVersion is the only reliable version source -- .doorstop_version is
+# the unrelated Doorstop bootstrap version, not BepInEx's.
+function Get-BepInExInstalledVersion {
+    param([string]$ExeDir)
+    $dllPath = Join-Path $ExeDir 'BepInEx\core\BepInEx.dll'
+    if (-not (Test-Path -LiteralPath $dllPath)) { return $null }
+    try {
+        $vi = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($dllPath)
+        if ([string]::IsNullOrWhiteSpace($vi.FileVersion)) { return $null }
+        return $vi.FileVersion
+    } catch { return $null }
+}
+
+# Returns 'x64', 'x86', or $null for an installed BepInEx's architecture.
+# BepInEx's own managed DLLs are AnyCPU/MSIL in BOTH the win_x64 and win_x86
+# zips, so they cannot reveal which build is installed -- only the native
+# Doorstop winhttp.dll shim's PE machine type can.
+function Get-BepInExInstalledArch {
+    param([string]$ExeDir)
+    $whPath = Join-Path $ExeDir 'winhttp.dll'
+    if (-not (Test-Path -LiteralPath $whPath)) { return $null }
+    return Get-ExeArchitecture -ExePath $whPath
+}
+
+# Walks every registered profile with an existing BepInEx install, checks
+# each against the latest stable x64 release, and offers a single batched
+# update for everything outdated. Never touches a game without BepInEx
+# already installed, and never touches an x86 install (policy: x64 only).
+function Invoke-BepInExUpdateCheck {
+    param([string]$UserProfilesDir, [string]$CacheDir)
+
+    Write-Host ""
+    Write-Host "  Checking the latest stable BepInEx release..." -ForegroundColor DarkGray
+    $latest = Get-BepInExLatestRelease
+    if (-not $latest) {
+        Write-Host "  Could not reach GitHub to check the latest BepInEx version -- try again later." -ForegroundColor Red
+        Write-Log "BepInEx update check: aborted -- release query failed."
+        return
+    }
+    Write-Host ("  Latest stable: {0}" -f $latest.Version) -ForegroundColor DarkGray
+
+    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Directory.Name -ne "FullBackup" })
+    if ($profiles.Count -eq 0) {
+        Write-Host "  No registered games found." -ForegroundColor Yellow
+        Write-Log "BepInEx update check: aborted -- no registered profiles."
+        return
+    }
+
+    $outdated = @(); $upToDate = 0; $skippedX86 = 0; $errors = 0
+
+    foreach ($pf in $profiles) {
+        try {
+            $doc = Read-Xml $pf.FullName
+            if (-not $doc.GameProfile) { continue }
+            $gpNode = $doc.GameProfile.SelectSingleNode("GamePath")
+            if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { continue }
+            $gamePath = $gpNode.InnerText.Trim()
+            if (-not (Test-Path -LiteralPath $gamePath)) { continue }
+            $exeDir = [System.IO.Path]::GetDirectoryName($gamePath)
+
+            $installedVer = Get-BepInExInstalledVersion -ExeDir $exeDir
+            if (-not $installedVer) { continue }   # BepInEx not installed here -- not relevant to this feature
+
+            $arch = Get-BepInExInstalledArch -ExeDir $exeDir
+            if ($arch -eq 'x86') {
+                $skippedX86++
+                continue
+            }
+            if ($arch -ne 'x64') { continue }   # could not determine arch -- skip rather than guess
+
+            $instParsed = $null; $latestParsed = $null
+            if (-not [version]::TryParse($installedVer, [ref]$instParsed)) { continue }
+            if (-not [version]::TryParse($latest.Version, [ref]$latestParsed)) { continue }
+
+            if ($instParsed -lt $latestParsed) {
+                $outdated += [pscustomobject]@{ Code = $pf.BaseName; ExeDir = $exeDir; Installed = $installedVer }
+            } else {
+                $upToDate++
+            }
+        } catch {
+            Write-Log "BepInEx update check: error reading $($pf.BaseName) -- $_"
+            $errors++
+        }
+    }
+
+    if ($outdated.Count -eq 0) {
+        Write-Host ""
+        Write-Host ("  Up to date  : {0} game(s)" -f $upToDate) -ForegroundColor Green
+        if ($skippedX86 -gt 0) {
+            Write-Host ("  32-bit (skipped): {0}  (this script only manages 64-bit installs)" -f $skippedX86) -ForegroundColor DarkGray
+        }
+        if ($errors -gt 0) { Write-Host ("  Errors      : {0}" -f $errors) -ForegroundColor Red }
+        Write-Log ("BepInEx update check: complete. UpToDate={0} 32bitSkipped={1} Errors={2}" -f $upToDate, $skippedX86, $errors)
+        return
+    }
+
+    Write-Host ""
+    Write-Host ("  {0} game(s) have an outdated BepInEx install:" -f $outdated.Count) -ForegroundColor Cyan
+    foreach ($o in ($outdated | Sort-Object Code)) {
+        Write-Host ("    - {0}: {1} -> {2}" -f $o.Code, $o.Installed, $latest.Version) -ForegroundColor DarkGray
+    }
+    $ans = (Read-Host ("  Update BepInEx to {0} for these {1} game(s)? (Y/N)" -f $latest.Version, $outdated.Count)).Trim().ToUpper()
+    if ($ans -ne "Y") {
+        Write-Host "  Skipped -- no changes made." -ForegroundColor DarkGray
+        Write-Log "BepInEx update check: user declined the batched update."
+        return
+    }
+
+    Write-Host "  Downloading BepInEx $($latest.Version) (x64)..." -ForegroundColor DarkGray
+    [void][System.IO.Directory]::CreateDirectory($CacheDir)
+    $zipPath = Join-Path $CacheDir $latest.FileName
+    $downloaded = $false
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try {
+            Invoke-WebRequest -Uri $latest.DownloadUrl -OutFile $zipPath -UseBasicParsing -ErrorAction Stop `
+                -Headers @{ 'User-Agent' = "TeknoParrot-Manager/$ScriptVersion" }
+            $downloaded = $true
+            break
+        } catch {
+            try { if (Test-Path -LiteralPath $zipPath) { [System.IO.File]::Delete($zipPath) } } catch {}
+            if ($attempt -ge 3) { break }
+            Start-Sleep -Seconds 5
+        }
+    }
+    if (-not $downloaded) {
+        Write-Host "  Could not download the BepInEx ZIP -- try again later." -ForegroundColor Red
+        Write-Log "BepInEx update check: aborted -- ZIP download failed."
+        return
+    }
+
+    $updated = 0; $updateErrors = 0
+    foreach ($o in $outdated) {
+        try {
+            $timestamp  = (Get-Date).ToString("yyyy-MM-dd_HH-mm-ss")
+            $backupPath = Join-Path $o.ExeDir ("BepInEx_Backup_" + $timestamp)
+            [void][System.IO.Directory]::CreateDirectory($backupPath)
+            foreach ($item in @('BepInEx', 'doorstop_config.ini', 'winhttp.dll', '.doorstop_version', 'changelog.txt')) {
+                $srcItem = Join-Path $o.ExeDir $item
+                if (Test-Path -LiteralPath $srcItem) {
+                    Copy-Item -LiteralPath $srcItem -Destination $backupPath -Recurse -Force -ErrorAction Stop
+                }
+            }
+            Expand-ZipFileSafe -ZipPath $zipPath -DestDir $o.ExeDir -GameName $o.Code
+            Write-Host ("    OK    {0}  ({1} -> {2})" -f $o.Code, $o.Installed, $latest.Version) -ForegroundColor Green
+            Write-Log "BepInEx: updated $($o.Code) from $($o.Installed) to $($latest.Version) (backup: $backupPath)"
+            $updated++
+        } catch {
+            Write-Host ("    ERROR {0} -- {1}" -f $o.Code, $_) -ForegroundColor Red
+            Write-Log "BepInEx: error updating $($o.Code) -- $_"
+            $updateErrors++
+        }
+    }
+
+    Write-Host ""
+    Write-Host ("  Updated     : {0} game(s)" -f $updated) -ForegroundColor Green
+    if ($upToDate -gt 0) { Write-Host ("  Up to date  : {0}" -f $upToDate) -ForegroundColor DarkGray }
+    if ($skippedX86 -gt 0) { Write-Host ("  32-bit (skipped): {0}" -f $skippedX86) -ForegroundColor DarkGray }
+    if ($updateErrors -gt 0) { Write-Host ("  Errors      : {0} -- see log for details" -f $updateErrors) -ForegroundColor Red }
+    Write-Log ("BepInEx update check: complete. Updated={0} UpToDate={1} 32bitSkipped={2} Errors={3}" -f $updated, $upToDate, $skippedX86, $updateErrors)
+}
+
 # Scans the install folder for executables and registers matching TeknoParrot
 # profiles by setting <GamePath> in a copy written to UserProfiles. Three passes:
 #   1 -- exe filename -> profile index (built from <ExecutableName> in GameProfile XMLs)
@@ -3737,6 +3950,137 @@ function Invoke-LibraryHealthCheck {
     }
 
     Write-Log ("HealthCheck: total={0} valid={1} broken={2} empty={3}" -f $profiles.Count, $valid.Count, $broken.Count, $empty.Count)
+}
+
+# =============================================================================
+# COMPATIBILITY WARNINGS  (Raw Thrills path-length + iDmacDrv32 version pins)
+# =============================================================================
+# Static, empirically-documented facts about specific old game builds --
+# not something that changes upstream, so hardcoded here rather than
+# live-fetched (unlike the FFB table, which tracks a live upstream project).
+
+# Standard CRC-32 (IEEE 802.3 polynomial), table-driven. .NET has no
+# built-in CRC32 type, so this is a small self-contained implementation.
+function Get-Crc32 {
+    param([string]$Path)
+    # PowerShell parses 0xFFFFFFFF / 0xEDB88320 as negative Int32 literals
+    # (they exceed Int32.MaxValue), which breaks casting/bxor against
+    # [uint32] values -- use the decimal equivalents instead so they
+    # promote to Int64 and cast to UInt32 cleanly.
+    $poly    = 3988292384  # 0xEDB88320
+    $allOnes = 4294967295  # 0xFFFFFFFF
+    $crcTable = New-Object 'System.UInt32[]' 256
+    for ($i = 0; $i -lt 256; $i++) {
+        $c = [uint32]$i
+        for ($j = 0; $j -lt 8; $j++) {
+            if (($c -band 1) -ne 0) { $c = [uint32]($poly -bxor ($c -shr 1)) }
+            else { $c = [uint32]($c -shr 1) }
+        }
+        $crcTable[$i] = $c
+    }
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $crc = [uint32]$allOnes
+    foreach ($b in $bytes) {
+        $crc = [uint32]($crcTable[($crc -bxor $b) -band 0xFF] -bxor ($crc -shr 8))
+    }
+    return ('{0:X8}' -f [uint32]($crc -bxor $allOnes))
+}
+
+# Raw Thrills used three engine generations with different hard-coded
+# install-path length limits. Exceeding the limit causes the game to fail
+# to launch. Value = @{ Limit; Suggested } -- Suggested is the short
+# folder rename the community has settled on for that title.
+$RawThrillsPathLimits = @{
+    # ~64-char limit (old engine, strictest)
+    'BBHPro'           = @{ Limit = 64; Suggested = 'BBHP'   }
+    'BBHHome'          = @{ Limit = 64; Suggested = 'BBHPH'  }
+    'FNF'              = @{ Limit = 64; Suggested = 'FNF'    }
+    'FNFSB'            = @{ Limit = 64; Suggested = 'FNFSB'  }
+    'GHA'              = @{ Limit = 64; Suggested = 'GHA'    }
+    'NicktoonsNitro'   = @{ Limit = 64; Suggested = 'NTN'    }
+    'Terminator'       = @{ Limit = 64; Suggested = 'TERM'   }
+    'TargetTerrorGold' = @{ Limit = 64; Suggested = 'TTG'    }
+    # ~96-char limit (mid-era engine)
+    'AliensArmageddon' = @{ Limit = 96; Suggested = 'ALIENS' }
+    'BBHWorld'         = @{ Limit = 96; Suggested = 'BBHW'   }
+    'Cars'             = @{ Limit = 96; Suggested = 'CARS'   }
+    'DirtyDrivin'      = @{ Limit = 96; Suggested = 'DRTYDR' }
+    'FNFSB2'           = @{ Limit = 96; Suggested = 'FNFSB2' }
+    'Frogger'          = @{ Limit = 96; Suggested = 'FROGGR' }
+    'H2Overdrive'      = @{ Limit = 96; Suggested = 'H2OVER' }
+    'JurassicPark'     = @{ Limit = 96; Suggested = 'JURASS' }
+    'SnoCross'         = @{ Limit = 96; Suggested = 'WXGSNO' }
+}
+
+# Five BlazBlue-series games need a SPECIFIC OLD CRC of iDmacDrv32.dll --
+# a newer version causes a coin error. This is the opposite of the usual
+# "stale dll" case TPUI already self-heals (deploying its own current
+# copy), so it is never auto-fixed here -- only flagged, since "fixing"
+# it in the wrong direction breaks the game.
+$IDmacDrv32Pins = @{
+    'BBCF'                    = 'F1FF8CC9'
+    'BBCP'                    = 'F1FF8CC9'
+    'BlazBlueContinuumShift'  = 'BCB0E7FE'
+    'BlazBlueContinuumShift2' = 'BCB0E7FE'
+    'BlazBlueCrossTagBattle'  = 'BCB0E7FE'
+}
+
+# Read-only scan for both checks above. Returns
+# [pscustomobject]@{ PathTooLong = @(...); DllMismatch = @(...) }.
+# Each PathTooLong entry: @{ Code; Length; Limit; Suggested }.
+# Each DllMismatch entry: @{ Code; Found; Required }.
+function Get-CompatibilityWarnings {
+    param([string]$UserProfilesDir)
+
+    $pathTooLong  = @()
+    $dllMismatch  = @()
+    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Directory.Name -ne "FullBackup" })
+
+    foreach ($pf in $profiles) {
+        $code = $pf.BaseName
+        if (-not ($RawThrillsPathLimits.ContainsKey($code) -or $IDmacDrv32Pins.ContainsKey($code))) { continue }
+        try {
+            $doc = Read-Xml $pf.FullName
+            if (-not $doc.GameProfile) { continue }
+            $gpNode = $doc.GameProfile.SelectSingleNode("GamePath")
+            if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { continue }
+            $curPath = $gpNode.InnerText.Trim()
+            if (-not (Test-Path -LiteralPath $curPath)) { continue }
+
+            if ($RawThrillsPathLimits.ContainsKey($code)) {
+                $info = $RawThrillsPathLimits[$code]
+                if ($curPath.Length -gt $info.Limit) {
+                    $pathTooLong += [pscustomobject]@{
+                        Code = $code; Length = $curPath.Length
+                        Limit = $info.Limit; Suggested = $info.Suggested
+                    }
+                }
+            }
+
+            if ($IDmacDrv32Pins.ContainsKey($code)) {
+                $exeDir  = [System.IO.Path]::GetDirectoryName($curPath)
+                $dllPath = Join-Path $exeDir "iDmacDrv32.dll"
+                if (Test-Path -LiteralPath $dllPath) {
+                    try {
+                        $foundCrc = Get-Crc32 -Path $dllPath
+                        $required = $IDmacDrv32Pins[$code]
+                        if ($foundCrc -ne $required) {
+                            $dllMismatch += [pscustomobject]@{ Code = $code; Found = $foundCrc; Required = $required }
+                        }
+                    } catch {
+                        Write-Log "CompatibilityWarnings: could not CRC iDmacDrv32.dll for $code -- $_"
+                    }
+                }
+                # File simply missing: not flagged. TPUI deploys its own
+                # current copy at first launch -- nothing to warn about yet.
+            }
+        } catch {
+            Write-Log "CompatibilityWarnings: could not parse $($pf.Name) -- $_"
+        }
+    }
+
+    return [pscustomobject]@{ PathTooLong = $pathTooLong; DllMismatch = $dllMismatch }
 }
 
 # =============================================================================
@@ -4955,7 +5299,7 @@ Write-Log "Script started (v$ScriptVersion$(if ($Unattended) { ' [Unattended]' }
 
 $configPath         = Join-Path $PSScriptRoot "TeknoParrot-Manager.config.json"
 $tpRoot             = $null
-$mode               = $null   # "AutoSync", "RegisterOnly", "CrosshairSetup", "ReShadeSetup", "DgVoodoo2Setup", "GpuFixSetup", "FFBSetup", "Restore", or "HealthCheck"
+$mode               = $null   # "AutoSync", "RegisterOnly", "CrosshairSetup", "ReShadeSetup", "DgVoodoo2Setup", "GpuFixSetup", "FFBSetup", "BepInExUpdate", "Restore", or "HealthCheck"
 $zipSource               = $null   # AutoSync only (main collection)
 $zipSourceSupplementary  = $null   # AutoSync supplementary source (optional, separate library); $null or ''=not configured
 $gamesInstallFolder = $null   # always (the extracted-games root to register)
@@ -5467,17 +5811,20 @@ while ($true) {
     Write-Host "  7) Force feedback (FFB) setup -- Wheel/stick rumble and force feedback."
     Write-Host "                        Covers TeknoParrot's built-in FFB Blaster (needs a"
     Write-Host "                        paid membership) and a free third-party plugin."
-    Write-Host "  8) Restore backup  -- Roll UserProfiles back to a previous backup."
-    Write-Host "  9) Library health check -- Read-only: reports registered/broken/"
+    Write-Host "  8) BepInEx update check -- Checks games with BepInEx already installed"
+    Write-Host "                        against the latest stable release and offers to"
+    Write-Host "                        update (64-bit only). Never installs it fresh."
+    Write-Host "  9) Restore backup  -- Roll UserProfiles back to a previous backup."
+    Write-Host "  10) Library health check -- Read-only: reports registered/broken/"
     Write-Host "                        unregistered counts. No extraction, registration,"
     Write-Host "                        repair, or network access -- just a fast status check."
-    Write-Host "  10) Exit"
+    Write-Host "  11) Exit"
     Write-Host ""
     if ($Unattended) {
         Write-Host "  [Unattended] Mode must be set before starting." -ForegroundColor Red
         Write-Log "ERROR: Unattended mode -- reached menu loop."; exit 1
     }
-    $modeChoice = (Read-Host "Enter 1-10").Trim()
+    $modeChoice = (Read-Host "Enter 1-11").Trim()
     switch ($modeChoice) {
         "1"     { $mode = "AutoSync"       }
         "2"     { $mode = "RegisterOnly"   }
@@ -5486,12 +5833,13 @@ while ($true) {
         "5"     { $mode = "DgVoodoo2Setup" }
         "6"     { $mode = "GpuFixSetup"    }
         "7"     { $mode = "FFBSetup"       }
-        "8"     { $mode = "Restore"        }
-        "9"     { $mode = "HealthCheck"    }
-        "10"    { break }
-        default { Write-Host "  Invalid choice. Enter 1-10." -ForegroundColor Yellow; continue }
+        "8"     { $mode = "BepInExUpdate"  }
+        "9"     { $mode = "Restore"        }
+        "10"    { $mode = "HealthCheck"    }
+        "11"    { break }
+        default { Write-Host "  Invalid choice. Enter 1-11." -ForegroundColor Yellow; continue }
     }
-    if ($modeChoice -eq "10") { break }
+    if ($modeChoice -eq "11") { break }
 
     if ($mode -eq "Restore") {
         Write-Host ""
@@ -5730,6 +6078,37 @@ while ($true) {
         Write-Host ""
         Write-Host "Done." -ForegroundColor Green
         Write-Log "FFB setup complete."
+        [void](Read-Host "  Press Enter to return to menu")
+        continue
+    }
+
+    if ($mode -eq "BepInExUpdate") {
+        Write-Host ""
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        Write-Host " BepInEx Update Check" -ForegroundColor Cyan
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  BepInEx is a third-party Unity plugin/modding framework. A few"
+        Write-Host "  TeknoParrot games (Family Guy Bowling, Mars Sortie, NERF Arcade,"
+        Write-Host "  Rainbow BomberGirl, Super Bikes 3, TMNT, and others) need it for"
+        Write-Host "  controls or fixes to work via a community plugin."
+        Write-Host ""
+        Write-Host "  This ONLY checks/updates games that already have BepInEx installed --"
+        Write-Host "  it never installs BepInEx into a game that doesn't have it. Only the"
+        Write-Host "  latest STABLE 64-bit release is ever used; 32-bit installs are left"
+        Write-Host "  alone (update those manually), and pre-release builds are never used."
+        Write-Host ""
+        Write-Host "  Troubleshooting: https://docs.bepinex.dev/articles/user_guide/troubleshooting.html"
+        Write-Host "  Clean manual reset: delete doorstop_config.ini, winhttp.dll,"
+        Write-Host "  .doorstop_version, changelog.txt, and the BepInEx folder from the"
+        Write-Host "  game's folder, then reinstall."
+
+        $bepInExCacheDir = Join-Path $PSScriptRoot "BepInExCache"
+        Invoke-BepInExUpdateCheck -UserProfilesDir $userProfilesDir -CacheDir $bepInExCacheDir
+
+        Write-Host ""
+        Write-Host "Done." -ForegroundColor Green
+        Write-Log "BepInEx update check complete."
         [void](Read-Host "  Press Enter to return to menu")
         continue
     }
@@ -6786,9 +7165,13 @@ if ($doGpuFix -eq "Y") {
 # ACTION REQUIRED -- collects everything the user must do manually
 # =============================================================================
 
+$compatWarnings = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir
+
 $hasAnyAction = ($manualRegData.Count -gt 0) -or ($amb2.Count -gt 0) -or
                 ($nf.Count -gt 0) -or ($noArchetypeItems.Count -gt 0) -or
-                ($result.Unmatched.Count -gt 0)
+                ($result.Unmatched.Count -gt 0) -or
+                ($compatWarnings.PathTooLong.Count -gt 0) -or
+                ($compatWarnings.DllMismatch.Count -gt 0)
 
 if ($hasAnyAction) {
     Write-Host ""
@@ -6936,6 +7319,52 @@ if ($hasAnyAction) {
         Write-Host ""
     }
 
+    # -- 6. Raw Thrills games whose install path is too long ------------------
+    if ($compatWarnings.PathTooLong.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  PATH TOO LONG -- THESE GAMES MAY FAIL TO LAUNCH" -ForegroundColor Yellow
+        Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
+        Write-Host "  These specific games have a hard-coded limit on how long their" -ForegroundColor DarkCyan
+        Write-Host "  full install path can be. Past that limit, the game will not start." -ForegroundColor DarkCyan
+        Write-Host ""
+        Write-Host "  HOW TO FIX:" -ForegroundColor DarkCyan
+        Write-Host "    1. Close TeknoParrot if it is open." -ForegroundColor DarkCyan
+        Write-Host "    2. Move/rename the game's folder to the short name shown below," -ForegroundColor DarkCyan
+        Write-Host "       placed as close to a drive root as possible (e.g. D:\TPGames\<name>)." -ForegroundColor DarkCyan
+        Write-Host "    3. Re-run this script (mode 1 or 2) and choose Repair when offered." -ForegroundColor DarkCyan
+        Write-Host ""
+        foreach ($w in ($compatWarnings.PathTooLong | Sort-Object Code)) {
+            Write-Host ("  Game        : {0}" -f $w.Code) -ForegroundColor Yellow
+            Write-Host ("  Current path: {0} characters (limit ~{1})" -f $w.Length, $w.Limit) -ForegroundColor DarkGray
+            Write-Host ("  Rename to   : {0}" -f $w.Suggested) -ForegroundColor Cyan
+            Write-Host ""
+        }
+    }
+
+    # -- 7. iDmacDrv32.dll version pins (BlazBlue-series) ----------------------
+    if ($compatWarnings.DllMismatch.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  IDMACDRV32.DLL VERSION MISMATCH -- THESE GAMES NEED AN OLDER DLL" -ForegroundColor Yellow
+        Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
+        Write-Host "  These games require a SPECIFIC OLDER version of iDmacDrv32.dll." -ForegroundColor DarkCyan
+        Write-Host "  A newer version causes a coin error and the game will not start." -ForegroundColor DarkCyan
+        Write-Host "  This is the opposite of the usual fix -- do NOT let TeknoParrot" -ForegroundColor DarkCyan
+        Write-Host "  redeploy its current copy here, that makes it worse." -ForegroundColor DarkCyan
+        Write-Host ""
+        Write-Host "  HOW TO FIX:" -ForegroundColor DarkCyan
+        Write-Host "    1. Join the TeknoParrot Discord (linked from teknoparrot.com)." -ForegroundColor DarkCyan
+        Write-Host "    2. In the #fixes channel, ask for or search for iDmacDrv32.dll" -ForegroundColor DarkCyan
+        Write-Host "       matching the CRC32 shown below for your game." -ForegroundColor DarkCyan
+        Write-Host "    3. Replace iDmacDrv32.dll in the game's own folder with that file." -ForegroundColor DarkCyan
+        Write-Host ""
+        foreach ($w in ($compatWarnings.DllMismatch | Sort-Object Code)) {
+            Write-Host ("  Game           : {0}" -f $w.Code) -ForegroundColor Yellow
+            Write-Host ("  Current CRC32  : {0}" -f $w.Found) -ForegroundColor DarkGray
+            Write-Host ("  Required CRC32 : {0}" -f $w.Required) -ForegroundColor Cyan
+            Write-Host ""
+        }
+    }
+
     Write-Host "============================================" -ForegroundColor Yellow
 
     $actionPath = Join-Path $PSScriptRoot "TeknoParrot-Manager-ActionItems.txt"
@@ -7007,6 +7436,33 @@ if ($hasAnyAction) {
         [void]$asb.AppendLine(""); [void]$asb.AppendLine("GAME FOLDERS NOT RECOGNISED BY TEKNOPARROT (informational)")
         [void]$asb.AppendLine("----------------------------------------------------------")
         foreach ($folder in ($result.Unmatched | Sort-Object)) { [void]$asb.AppendLine("  $folder") }
+    }
+    if ($compatWarnings.PathTooLong.Count -gt 0) {
+        [void]$asb.AppendLine(""); [void]$asb.AppendLine("PATH TOO LONG -- THESE GAMES MAY FAIL TO LAUNCH")
+        [void]$asb.AppendLine("----------------------------------------------------------")
+        [void]$asb.AppendLine("How to fix: close TeknoParrot, move/rename the folder to the short name")
+        [void]$asb.AppendLine("shown below (placed near a drive root, e.g. D:\TPGames\<name>), then")
+        [void]$asb.AppendLine("re-run this script and choose Repair when offered.")
+        foreach ($w in ($compatWarnings.PathTooLong | Sort-Object Code)) {
+            [void]$asb.AppendLine("")
+            [void]$asb.AppendLine("  Game        : $($w.Code)")
+            [void]$asb.AppendLine("  Current path: $($w.Length) characters (limit ~$($w.Limit))")
+            [void]$asb.AppendLine("  Rename to   : $($w.Suggested)")
+        }
+    }
+    if ($compatWarnings.DllMismatch.Count -gt 0) {
+        [void]$asb.AppendLine(""); [void]$asb.AppendLine("IDMACDRV32.DLL VERSION MISMATCH -- THESE GAMES NEED AN OLDER DLL")
+        [void]$asb.AppendLine("----------------------------------------------------------")
+        [void]$asb.AppendLine("How to fix: join the TeknoParrot Discord (linked from teknoparrot.com),")
+        [void]$asb.AppendLine("ask in #fixes for iDmacDrv32.dll matching the required CRC32 below, and")
+        [void]$asb.AppendLine("replace the file in the game's own folder. Do NOT let TeknoParrot")
+        [void]$asb.AppendLine("redeploy its current copy here -- that makes it worse, not better.")
+        foreach ($w in ($compatWarnings.DllMismatch | Sort-Object Code)) {
+            [void]$asb.AppendLine("")
+            [void]$asb.AppendLine("  Game           : $($w.Code)")
+            [void]$asb.AppendLine("  Current CRC32  : $($w.Found)")
+            [void]$asb.AppendLine("  Required CRC32 : $($w.Required)")
+        }
     }
     try {
         [System.IO.File]::WriteAllText($actionPath, $asb.ToString(), (New-Object System.Text.UTF8Encoding $false))

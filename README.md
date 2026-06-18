@@ -26,6 +26,7 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 - [dgVoodoo2 Legacy Compatibility](#dgvoodoo2-legacy-compatibility)
 - [GPU Compatibility Fixes](#gpu-compatibility-fixes)
 - [Force Feedback (FFB) Setup](#force-feedback-ffb-setup)
+- [BepInEx Update Check](#bepinex-update-check)
 - [LaunchBox Export](#launchbox-export)
 - [HyperSpin 2 Export](#hyperspin-2-export)
 - [RetroBat / Batocera](#retrobat--batocera)
@@ -57,6 +58,8 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 - **dgVoodoo2** — fixes older games that crash on DirectX 8, DirectDraw, or Glide by deploying the correct compatibility DLLs.
 - **GPU fixes** — detects your GPU (AMD / NVIDIA / Intel) and applies the matching vendor fix to every registered game that has one.
 - **Force feedback (FFB)** — native FFB Blaster (needs a paid TeknoParrot membership) and a free third-party plugin (fetched live, no subscription needed), covering different games. If a game is covered by both, you're asked once which to use for all such games.
+- **BepInEx update check** — checks games that already have BepInEx installed against the latest stable 64-bit release and offers a batched update. Never installs BepInEx fresh.
+- **Automatic compatibility warnings** — every run checks for known Raw Thrills path-length limits and BlazBlue iDmacDrv32.dll version pins, with step-by-step fix instructions in ACTION REQUIRED.
 - **LaunchBox / HyperSpin 2 export** — builds import files for both frontends after each run.
 - **Unattended mode** — `-Unattended` flag for scheduled overnight runs.
 - **Safe by design** — timestamped backups before every run, free-space check, full log, one-click restore.
@@ -132,9 +135,10 @@ The main menu is a persistent loop — after each mode finishes you return to th
 | 5 | **dgVoodoo2 setup** | Fix DirectX 8 / DirectDraw / Glide compatibility |
 | 6 | **GPU fix setup** | Apply AMD / NVIDIA / Intel vendor fix to all games |
 | 7 | **Force feedback (FFB) setup** | FFB Blaster (membership) + free third-party plugin |
-| 8 | **Restore backup** | Roll profiles back to a previous backup |
-| 9 | **Library health check** | Read-only registered/broken/empty status report |
-| 10 | **Exit** | Quit the script |
+| 8 | **BepInEx update check** | Update an existing BepInEx install to the latest stable 64-bit release |
+| 9 | **Restore backup** | Roll profiles back to a previous backup |
+| 10 | **Library health check** | Read-only registered/broken/empty status report |
+| 11 | **Exit** | Quit the script |
 
 ---
 
@@ -390,7 +394,19 @@ Controller support (per the plugin's own docs): true force feedback on FFB-capab
 
 **If a game is covered by both:** the script lists every such game once and asks a single question — keep FFB Blaster (native) for all of them, or use the third-party plugin for all of them. Your answer applies to the whole list for that run; it never silently picks a side.
 
-**Removing FFB:** FFB Blaster — manually set the field back to `0` in the affected `UserProfiles\*.xml` files, or restore from a pre-FFB backup (mode 8). Third-party plugin — delete the deployed DLL from the game's folder.
+**Removing FFB:** FFB Blaster — manually set the field back to `0` in the affected `UserProfiles\*.xml` files, or restore from a pre-FFB backup (mode 9). Third-party plugin — delete the deployed DLL from the game's folder.
+
+---
+
+## BepInEx Update Check
+
+[BepInEx](https://docs.bepinex.dev) is a third-party Unity plugin/modding framework — not part of TeknoParrot itself. A handful of games (Family Guy Bowling, Mars Sortie, NERF Arcade, Rainbow BomberGirl, Super Bikes 3, TMNT, and others) need a community plugin running on top of it to get controls or fixes working.
+
+**Mode 8 only checks/updates games that already have BepInEx installed** — it never installs BepInEx into a game that doesn't have it. Only the latest **stable 64-bit** release is ever used; never a 32-bit build, never a pre-release. A 32-bit install is left alone and reported separately.
+
+If anything is outdated, the script lists every such game once and asks a single question: update all of them? Answering Y backs up the existing `BepInEx` folder and related files (to `BepInEx_Backup_<timestamp>` inside that game's own folder) before overwriting anything.
+
+**Troubleshooting:** [official guide](https://docs.bepinex.dev/articles/user_guide/troubleshooting.html). **Manual clean reset:** delete `doorstop_config.ini`, `winhttp.dll`, `.doorstop_version`, `changelog.txt`, and the `BepInEx` folder from the game's folder — this fully reverts to vanilla.
 
 ---
 
@@ -532,6 +548,8 @@ At the end of every run the script prints — and saves to `TeknoParrot-Manager-
 | **Fix these game paths** | Profiles with a broken path that couldn't be auto-repaired (shared exe, multiple candidates). Open TeknoParrotUI and point each to the correct folder. |
 | **Extract first** | Profiles with a broken path because the game isn't extracted yet. Extract then re-run Repair. |
 | **Set up controls** | Control types with no reference game bound yet. Shows which games are waiting and suggests titles to bind. |
+| **Path too long** | Specific Raw Thrills games whose install path exceeds that title's engine-specific limit. Shows the exact short folder name to rename to. Checked automatically every run. |
+| **iDmacDrv32.dll mismatch** | Specific BlazBlue-series games needing an OLDER pinned `iDmacDrv32.dll`. Shows the current/required CRC32 and where to get the right file. Checked automatically every run. |
 
 ---
 
@@ -582,7 +600,7 @@ After registration the script offers to repair broken game paths — paths that 
 ```
 If backup folder creation fails, the script exits rather than proceeding without a restore point.
 
-**Restore:** choose mode 8 from the menu. The script lists all timestamped backups with file counts, you pick one by number, type `YES` to confirm.
+**Restore:** choose mode 9 from the menu. The script lists all timestamped backups with file counts, you pick one by number, type `YES` to confirm.
 
 **Manual restore:** close TeknoParrot, copy `.xml` files from a backup folder back into `UserProfiles`, overwriting the current ones.
 
@@ -618,7 +636,7 @@ Either no reference game for that control type has been bound yet (see "Set up c
 Delete that game's `.xml` from `UserProfiles` and add a `forceArchetype` entry in `overrides.json`: `{ "WrongCode": "CorrectCode" }`. Re-run.
 
 **A game's controls are wrong after propagation.**
-Use mode 8 to restore the backup made at the start of that run, or delete the affected game's `.xml` and re-run propagation after correcting the reference game's bindings in TeknoParrotUI.
+Use mode 9 to restore the backup made at the start of that run, or delete the affected game's `.xml` and re-run propagation after correcting the reference game's bindings in TeknoParrotUI.
 
 **A game appears twice in TeknoParrotUI.**
 Delete one of the duplicate `.xml` files from `UserProfiles`. Keep the one with the correct GamePath and any bindings already set.
@@ -657,4 +675,4 @@ TeknoParrot must be set up as an emulator in HyperSpin 2 first. The title must c
 
 ---
 
-> v0.87 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v0.88 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.

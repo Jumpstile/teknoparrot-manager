@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.87 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.88 BETA  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -60,9 +60,11 @@
                              (AMD / NVIDIA / Intel, optional, see below).
        7) FFB setup        -- wheel/stick rumble and force feedback
                              (optional, see below).
-       8) Restore backup   -- roll UserProfiles back to a previous backup.
-       9) Health check     -- read-only library status, safe to run any time.
-       10) Exit            -- quit the script.
+       8) BepInEx update   -- update an already-installed BepInEx to the
+                             latest stable 64-bit release (optional, see below).
+       9) Restore backup   -- roll UserProfiles back to a previous backup.
+       10) Health check    -- read-only library status, safe to run any time.
+       11) Exit            -- quit the script.
 
   4. Answer the folder prompts. For AutoSync, choose a LOCAL staging folder
      with free space, OUTSIDE both TeknoParrot and your ZIP source.
@@ -116,9 +118,18 @@
   Extraction keeps failing   Check the log for the specific error. Verify
                              free space and that the ZIP is not corrupted.
 
-  Controls wrong after       Restore from backup (mode 8), or delete the
+  Controls wrong after       Restore from backup (mode 9), or delete the
   propagation                game's .xml and re-run after fixing the
                              reference game's bindings in TeknoParrotUI.
+
+  Game won't launch (Raw     Check ACTION REQUIRED -- the script auto-detects
+  Thrills, e.g. H2Overdrive) if that game's install path is too long for its
+                             engine and tells you the exact short name to
+                             rename the folder to.
+
+  Game shows a coin error    Check ACTION REQUIRED -- a few BlazBlue games
+  (BlazBlue series)          need a specific OLDER iDmacDrv32.dll. The script
+                             tells you the required version and where to get it.
 
   Wrong fuzzy match          Delete the game's .xml from UserProfiles and add
                              a forceArchetype entry in overrides.json.
@@ -255,6 +266,24 @@
     Choose mode 7 from the main menu.
 
   Full details: TeknoParrot-Manager-README.txt -- FORCE FEEDBACK (FFB) SETUP section.
+
+
+  BEPINEX UPDATE CHECK (OPTIONAL)
+  ----------------------------------
+  BepInEx is a third-party Unity plugin/modding framework some games need
+  (Family Guy Bowling, Mars Sortie, NERF Arcade, Rainbow BomberGirl,
+  Super Bikes 3, TMNT, and others) to get controls or fixes working.
+
+  This ONLY updates games that already have BepInEx installed -- it never
+  installs BepInEx into a game that doesn't have it. Only the latest
+  STABLE 64-bit release is ever used (never 32-bit, never a pre-release).
+  If anything is outdated, you're asked once to update everything at once;
+  the old install is backed up first.
+
+  To run:
+    Choose mode 8 from the main menu.
+
+  Full details: TeknoParrot-Manager-README.txt -- BEPINEX UPDATE CHECK section.
 
 
   RETROBAT / BATOCERA
@@ -395,7 +424,7 @@
   ------------------
   1. Close TeknoParrot completely before restoring (the script checks and
      will stop if it detects TeknoParrot is still running).
-  2. Re-run the script and choose mode 8) Restore backup.
+  2. Re-run the script and choose mode 9) Restore backup.
   3. The script lists all backups (most recent first) with file counts.
   4. Pick one by number, type YES to confirm.
   5. Done. Re-open TeknoParrot to use the restored profiles.

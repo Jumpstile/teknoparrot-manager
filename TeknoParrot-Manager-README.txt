@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.87 BETA
+  TeknoParrot Manager  |  v0.88 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -206,6 +206,22 @@
     asked once which to use for all such games. See FORCE FEEDBACK (FFB)
     SETUP below for full details. Available as menu option 7.
 
+  - BepInEx update check. BepInEx is a third-party Unity plugin/modding
+    framework some games need (Family Guy Bowling, Mars Sortie, NERF Arcade,
+    Rainbow BomberGirl, Super Bikes 3, TMNT, and others). This checks every
+    game that already has BepInEx installed against the latest stable
+    release and offers one batched update. Never installs BepInEx into a
+    game that doesn't have it, and only the 64-bit stable line is ever
+    used. See BEPINEX UPDATE CHECK below. Available as menu option 8.
+
+  - Path-length and DLL-version warnings (automatic). Every AutoSync/
+    Register run automatically checks for two known compatibility traps
+    and adds them to the ACTION REQUIRED summary with step-by-step fix
+    instructions: Raw Thrills games whose install path exceeds that
+    game's engine-specific length limit, and BlazBlue-series games whose
+    iDmacDrv32.dll is the wrong version (needs an older, specifically
+    pinned build, not the latest one). No action needed unless flagged.
+
   - Per-game overrides. A JSON file lets you exclude games from sync or
     propagation, whitelist specific games for extraction, pin a game to a
     specific reference game for control copying, or override the auto-detected
@@ -343,20 +359,27 @@
        Covers two independent mechanisms -- see FORCE FEEDBACK (FFB) SETUP
        below. Optional. Returns to the menu when done.
 
-  8) Restore from backup
+  8) BepInEx update check
+       Checks every registered game that already has BepInEx installed
+       against the latest stable release and offers a single batched
+       update. Never installs BepInEx fresh into a game that doesn't have
+       it, and only ever uses the latest stable 64-bit build -- see
+       BEPINEX UPDATE CHECK below. Optional. Returns to the menu when done.
+
+  9) Restore from backup
        Rolls your UserProfiles back to a previous backup without touching
        File Explorer. The script lists all timestamped backup folders with
        file counts, you pick one by number, type YES to confirm, and the
        restore runs. Returns to the menu when done.
 
-  9) Library health check
+  10) Library health check
        Read-only. Reports how many registered profiles have a valid,
        broken, or empty GamePath, lists the affected profile codes, and
        shows the summary line from your last full run. Does not extract,
        register, repair, propagate, or touch the network -- safe to run
        any time for a quick status check. Returns to the menu when done.
 
-  10) Exit
+  11) Exit
        Exits the script.
 
 
@@ -1145,9 +1168,55 @@
 
     FFB Blaster: there is no "undo" button in the menu -- manually set the
     field back to 0 in the affected UserProfiles\*.xml files, or restore
-    from a pre-FFB backup (mode 8) if you ran this before enabling FFB
+    from a pre-FFB backup (mode 9) if you ran this before enabling FFB
     Blaster.
     Third-party plugin: delete the deployed DLL file from the game's folder.
+
+
+  BEPINEX UPDATE CHECK
+  ----------------------
+
+  What is BepInEx?
+
+    BepInEx is a third-party Unity plugin/modding framework -- not part of
+    TeknoParrot itself. A handful of TeknoParrot games (Family Guy Bowling,
+    Mars Sortie, NERF Arcade, Rainbow BomberGirl, Super Bikes 3, TMNT, and
+    others) need a community plugin running on top of BepInEx to get
+    controls or fixes working.
+
+  What mode 8 does (and does not do)
+
+    This mode ONLY checks and updates games that ALREADY have BepInEx
+    installed. It never installs BepInEx into a game that doesn't have it
+    -- if a game above isn't working and you suspect it needs BepInEx,
+    that initial install is still a manual step (see the official BepInEx
+    docs: https://docs.bepinex.dev).
+
+    For every game with an existing BepInEx install, the script compares
+    it against the latest STABLE release on GitHub. Only the 64-bit
+    ("x64") build is ever used -- never a 32-bit build, and never a
+    pre-release/beta build. If a game's existing install is 32-bit, it is
+    left alone and reported separately; update that one manually.
+
+    If anything is outdated, the script lists every such game once and
+    asks a single question: update all of them to the latest version?
+    Answering Y backs up the existing BepInEx folder and related files
+    (to BepInEx_Backup_<timestamp> inside that game's own folder) before
+    overwriting anything.
+
+  Troubleshooting and manual reset
+
+    Official troubleshooting guide:
+      https://docs.bepinex.dev/articles/user_guide/troubleshooting.html
+
+    To cleanly uninstall BepInEx from a game folder by hand (for example
+    to start over after a problem), delete these from the game's folder:
+      doorstop_config.ini
+      winhttp.dll
+      .doorstop_version
+      changelog.txt
+      the BepInEx folder
+    This fully reverts the game to vanilla -- nothing else is touched.
 
 
   RETROBAT / BATOCERA
@@ -1448,7 +1517,7 @@
 -------------------------------------------------------------------------------
 
   At the end of every run, the script prints an ACTION REQUIRED section
-  listing everything that needs your attention. It has up to five parts:
+  listing everything that needs your attention. It has up to seven parts:
 
     Not in TeknoParrot        Game folders whose executables did not match
                               any TeknoParrot profile. Informational -- no
@@ -1481,6 +1550,20 @@
                               been bound yet. Shows which games are waiting
                               and suggests specific titles to bind in
                               TeknoParrotUI for each type.
+
+    Path too long             Specific Raw Thrills games whose install path
+                              exceeds that title's engine-specific length
+                              limit and may fail to launch. Shows the exact
+                              short folder name to rename to.
+
+    iDmacDrv32.dll mismatch   Specific BlazBlue-series games whose
+                              iDmacDrv32.dll is not the required pinned
+                              version (these need an OLDER version, not the
+                              newest one). Shows the current and required
+                              CRC32 and where to get the right file.
+
+  These last two checks run automatically on every AutoSync/Register run --
+  no separate mode needed.
 
   At the end of every registration run that has action items, the same list
   is also saved to TeknoParrot-Manager-ActionItems.txt next to the script so
@@ -1601,7 +1684,7 @@
   the script exits rather than proceeding without a restore point. If any
   files fail to copy during the backup, the script asks before continuing.
 
-  To restore from inside the script, choose mode 8) Restore from backup at
+  To restore from inside the script, choose mode 9) Restore from backup at
   the startup menu. The script checks that TeknoParrot is fully closed first,
   lists all available backups with file counts, and asks you to type YES to
   confirm before changing anything.
@@ -1690,7 +1773,7 @@
     and the correct profile will be used.
 
   A game's controls are wrong after propagation.
-    Use mode 8) Restore from backup to roll back to the backup made at the
+    Use mode 9) Restore from backup to roll back to the backup made at the
     start of that run, or delete the affected game's .xml from UserProfiles
     and re-run propagation after correcting the reference game's bindings in
     TeknoParrotUI.
@@ -1773,6 +1856,6 @@
 
 
 ===============================================================================
-  v0.87 BETA -- Test one game after each run.
+  v0.88 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================
