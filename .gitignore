@@ -5,6 +5,9 @@ TeknoParrot Manager*.zip
 ReShade/
 dgVoodoo2/
 
+# FFB plugin DLL cache -- auto-downloaded live from GitHub each run, never bundled
+FFBPlugin/
+
 # Claude Code instruction file -- contains local paths, not for public repos
 CLAUDE.md
 

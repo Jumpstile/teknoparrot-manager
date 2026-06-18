@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.86 BETA
+# TeknoParrot Manager  |  v0.87 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -65,7 +65,7 @@ param([switch]$Unattended)
 # GitHub API User-Agent headers. Previously hardcoded in each of those spots
 # independently, which let the User-Agent strings drift out of sync with the
 # banner (caught stale at 0.70 during the v0.71 bump, and again at 0.76 here).
-$ScriptVersion = "0.86"
+$ScriptVersion = "0.87"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -2585,12 +2585,17 @@ function Resolve-ProfileCode {
 }
 
 # Queries the GitHub API for the latest Eggman dat release asset.
-# Uses the "teknoparrot" tag which Eggmansworld updates with each release.
+# Eggmansworld/Datfiles posted its final release ("LAST UPDATE FROM THIS
+# REPO!!") and moved the TeknoParrot dats to Eggmansworld/TeknoParrot.
+# The new repo also switched from a fixed "teknoparrot" release tag to a
+# date-based tag per release (e.g. "2026-06-17"), so a fixed-tag lookup
+# can no longer work -- query "latest" instead. Asset naming is unchanged
+# (still matches 'TeknoParrot*Collection*RomVault*.zip').
 # Returns [pscustomobject]@{DownloadUrl; FileName; SizeMB} or $null on failure.
 function Get-EggmanDatRelease {
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         try {
-            $apiUri = 'https://api.github.com/repos/Eggmansworld/Datfiles/releases/tags/teknoparrot'
+            $apiUri = 'https://api.github.com/repos/Eggmansworld/TeknoParrot/releases/latest'
             $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
                           -Headers @{ 'User-Agent' = "TeknoParrot-Manager/$ScriptVersion" }
             $rel    = $resp.Content | ConvertFrom-Json
@@ -2660,6 +2665,378 @@ function Invoke-EggmanDatDownload {
         try { if (Test-Path -LiteralPath $savePath) { [System.IO.File]::Delete($savePath) } } catch {}
         return $false
     }
+}
+
+# =============================================================================
+# FFB ARCADE PLUGIN  (force feedback / rumble for arcade racers and shooters)
+# =============================================================================
+# Source: mightymikem/FFBArcadePlugin, an actively-maintained fork of
+# Boomslangnz/FFBArcadePlugin. Deploys one compiled DLL (MAME32.dll x86 /
+# MAME64.dll x64) into a game's folder, renamed to whatever DLL that
+# specific game expects to load (d3d9.dll, d3d11.dll, opengl32.dll,
+# xinput1_3.dll, or winmm.dll). The per-game destination filename is a
+# fixed lookup tied to specific titles, not auto-detected from the exe --
+# so unlike ReShade it cannot be guessed at runtime; it is fetched live
+# from the upstream AutoSetup.cmd build script instead of hardcoded here,
+# so this automatically tracks whatever the fork currently supports.
+
+# Fetches and parses the upstream AutoSetup.cmd to build a folder-name ->
+# destination-DLL-filename map. The file has a very regular shape:
+#   cd <FolderName>
+#   rename dinput8.dll <destination>.dll
+#   cd..
+# (folder names are quoted only when they contain special characters, e.g.
+# `cd "Sega Race TV"` vs `cd Afterburner Climax` -- the regex handles both).
+# Returns an empty hashtable (not a hardcoded fallback list) if the fetch
+# fails after retries -- there is nothing meaningful to fall back to since
+# the table only exists upstream.
+function Get-FFBPluginGameMap {
+    $map = @{}
+    $uri = 'https://raw.githubusercontent.com/mightymikem/FFBArcadePlugin/master/AutoSetup.cmd'
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try {
+            $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 20 `
+                        -Headers @{ 'User-Agent' = "TeknoParrot-Manager/$ScriptVersion" }
+            $ms = [regex]::Matches($resp.Content, '(?m)^cd\s+"?([^"\r\n]+?)"?\s*\r?\nrename\s+dinput8\.dll\s+(\S+)\s*\r?\ncd\.\.')
+            foreach ($m in $ms) {
+                $folderName = $m.Groups[1].Value.Trim()
+                $destDll    = $m.Groups[2].Value.Trim()
+                if ($folderName -and $destDll) { $map[$folderName] = $destDll }
+            }
+            if ($map.Count -gt 0) {
+                Write-Log "FFBPlugin: $($map.Count) game(s) in the live AutoSetup.cmd table."
+            } else {
+                Write-Log "FFBPlugin: 0 entries parsed from AutoSetup.cmd -- format may have changed."
+            }
+            return $map
+        } catch {
+            $status = 0
+            if ($_.Exception.Response) { try { $status = [int]$_.Exception.Response.StatusCode } catch {} }
+            if ($attempt -ge 3 -or ($status -ge 400 -and $status -lt 500)) {
+                Write-Log "FFBPlugin: AutoSetup.cmd fetch failed -- $_"
+                return $map
+            }
+            Write-Log "FFBPlugin: attempt $attempt failed, retrying in 5s -- $_"
+            Start-Sleep -Seconds 5
+        }
+    }
+    return $map
+}
+
+# Downloads MAME32.dll / MAME64.dll directly from the repo root (plain
+# files, not inside the release ZIP -- no extraction step needed).
+# Returns $true if at least one architecture's DLL was downloaded.
+function Invoke-FFBPluginDownload {
+    param([string]$destDir)
+    [void][System.IO.Directory]::CreateDirectory($destDir)
+    $got = $false
+    foreach ($dllName in @('MAME32.dll', 'MAME64.dll')) {
+        $uri      = "https://raw.githubusercontent.com/mightymikem/FFBArcadePlugin/master/$dllName"
+        $destPath = Join-Path $destDir $dllName
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            try {
+                Invoke-WebRequest -Uri $uri -OutFile $destPath -UseBasicParsing -ErrorAction Stop `
+                    -Headers @{ 'User-Agent' = "TeknoParrot-Manager/$ScriptVersion" }
+                $got = $true
+                Write-Log "FFBPlugin: downloaded $dllName"
+                break
+            } catch {
+                $status = 0
+                if ($_.Exception.Response) { try { $status = [int]$_.Exception.Response.StatusCode } catch {} }
+                try { if (Test-Path -LiteralPath $destPath) { [System.IO.File]::Delete($destPath) } } catch {}
+                if ($attempt -ge 3 -or ($status -ge 400 -and $status -lt 500)) {
+                    Write-Log "FFBPlugin: $dllName download failed -- $_"
+                    break
+                }
+                Start-Sleep -Seconds 5
+            }
+        }
+    }
+    return $got
+}
+
+# Deploys FFB plugin DLLs to registered games matched against the live
+# AutoSetup.cmd table by fuzzy folder-name similarity. Never overwrites an
+# existing file at the destination filename (ReShade or anything else
+# already occupying that hook point) -- skips and reports instead.
+function Invoke-FFBPluginSetup {
+    param([string]$UserProfilesDir, [string]$CacheDir, [string[]]$NativeEnabledCodes = @())
+
+    $nativeEnabledSet = [System.Collections.Generic.HashSet[string]]::new(
+        [string[]]$NativeEnabledCodes, [System.StringComparer]::OrdinalIgnoreCase)
+
+    Write-Host ""
+    Write-Host "  Fetching the current supported-games list..." -ForegroundColor DarkGray
+    $gameMap = Get-FFBPluginGameMap
+    if ($gameMap.Count -eq 0) {
+        Write-Host "  Could not reach GitHub to fetch the FFB plugin game list -- try again later." -ForegroundColor Red
+        Write-Log "FFBPlugin setup: aborted -- game map fetch failed."
+        return
+    }
+    Write-Host ("  {0} game(s) in the upstream table." -f $gameMap.Count) -ForegroundColor DarkGray
+
+    Write-Host "  Downloading the FFB plugin DLLs..." -ForegroundColor DarkGray
+    if (-not (Invoke-FFBPluginDownload -destDir $CacheDir)) {
+        Write-Host "  Could not download the FFB plugin DLLs -- try again later." -ForegroundColor Red
+        Write-Log "FFBPlugin setup: aborted -- DLL download failed."
+        return
+    }
+    $srcDll32 = Join-Path $CacheDir "MAME32.dll"
+    $srcDll64 = Join-Path $CacheDir "MAME64.dll"
+
+    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Directory.Name -ne "FullBackup" })
+    if ($profiles.Count -eq 0) {
+        Write-Host "  No registered games found." -ForegroundColor Yellow
+        Write-Log "FFBPlugin setup: aborted -- no registered profiles."
+        return
+    }
+
+    # Pre-normalise the FFB table once for fuzzy matching.
+    $normFfbList = @(foreach ($name in $gameMap.Keys) {
+        [pscustomobject]@{ Name = $name; Norm = (Get-NormalizedGameKey $name); Dest = $gameMap[$name] }
+    })
+
+    Write-Host ""
+    Write-Host ("  Matching {0} registered game(s) against the FFB table..." -f $profiles.Count) -ForegroundColor Cyan
+
+    # First pass: resolve a candidate match for every profile (regardless of
+    # native status) so overlaps -- games covered by BOTH mechanisms -- can be
+    # surfaced and decided on once, rather than silently defaulting to native.
+    $candidates = @()
+    $matchErrors = 0
+    foreach ($pf in $profiles) {
+        try {
+            $doc = Read-Xml $pf.FullName
+            if (-not $doc.GameProfile) { continue }
+            $gpNode = $doc.GameProfile.SelectSingleNode("GamePath")
+            if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { continue }
+            $gamePath = $gpNode.InnerText.Trim()
+            if (-not (Test-Path -LiteralPath $gamePath)) { continue }
+            $exeDir     = [System.IO.Path]::GetDirectoryName($gamePath)
+            $folderName = Split-Path -Path $exeDir -Leaf
+            $normFolder = Get-NormalizedGameKey $folderName
+
+            $best = $null; $bestScore = 0.0
+            foreach ($cand in $normFfbList) {
+                $score = Get-DiceSimilarity $normFolder $cand.Norm
+                if ($score -gt $bestScore) { $bestScore = $score; $best = $cand }
+            }
+            if ($null -eq $best -or $bestScore -lt $FuzzyAutoThreshold) { continue }
+
+            $candidates += [pscustomobject]@{
+                Profile = $pf; GamePath = $gamePath; ExeDir = $exeDir
+                Match = $best; Score = $bestScore
+            }
+        } catch {
+            Write-Host ("    ERROR {0} -- {1}" -f $pf.BaseName, $_) -ForegroundColor Red
+            Write-Log "FFBPlugin: error reading $($pf.BaseName) -- $_"
+            $matchErrors++
+        }
+    }
+
+    # Overlaps: profiles with a confident third-party match that are ALSO
+    # already covered by native FFB Blaster. Ask once, covering all of them,
+    # instead of silently preferring native or prompting per game.
+    $overlaps = @($candidates | Where-Object { $nativeEnabledSet.Contains($_.Profile.BaseName) })
+    $useNativeForOverlaps = $true
+    if ($overlaps.Count -gt 0) {
+        Write-Host ""
+        Write-Host ("  {0} game(s) are covered by BOTH FFB Blaster and the third-party plugin:" -f $overlaps.Count) -ForegroundColor Cyan
+        foreach ($ov in $overlaps) { Write-Host ("    - {0}" -f $ov.Profile.BaseName) -ForegroundColor DarkGray }
+        $ans = (Read-Host "  Use FFB Blaster (native) for these games instead of the third-party plugin? (Y/N)").Trim().ToUpper()
+        $useNativeForOverlaps = ($ans -eq "Y")
+        Write-Log ("FFBPlugin: {0} overlapping game(s) with native FFB Blaster -- user chose {1}" -f $overlaps.Count, $(if ($useNativeForOverlaps) {"native"} else {"third-party plugin"}))
+    }
+
+    $deployed = 0; $skippedNative = 0; $skippedCollision = 0; $skippedNoMatch = 0; $errors = $matchErrors
+    $noMatchCount = $profiles.Count - $candidates.Count - $matchErrors
+    $skippedNoMatch += $noMatchCount
+
+    foreach ($c in $candidates) {
+        $pf = $c.Profile
+        try {
+            if ($nativeEnabledSet.Contains($pf.BaseName) -and $useNativeForOverlaps) {
+                # Native FFB Blaster covers this game and the user chose to
+                # keep native for overlaps -- don't deploy the third-party DLL.
+                $skippedNative++
+                continue
+            }
+
+            $exeDir   = $c.ExeDir
+            $destDll  = $c.Match.Dest
+            $destPath = Join-Path $exeDir $destDll
+            if (Test-Path -LiteralPath $destPath) {
+                Write-Host ("    SKIP  {0}: {1} already exists (ReShade or another hook) -- not overwritten." -f $pf.BaseName, $destDll) -ForegroundColor Yellow
+                Write-Log "FFBPlugin: skipped $($pf.BaseName) -- $destDll already occupied at $destPath"
+                $skippedCollision++
+                continue
+            }
+
+            $arch   = Get-ExeArchitecture -ExePath $c.GamePath
+            $srcDll = if ($arch -eq 'x86') { $srcDll32 } else { $srcDll64 }
+            if (-not (Test-Path -LiteralPath $srcDll)) {
+                Write-Host ("    SKIP  {0}: {1}-bit DLL not available." -f $pf.BaseName, $(if ($arch -eq 'x86') {'32'} else {'64'})) -ForegroundColor Yellow
+                $skippedNoMatch++; continue
+            }
+
+            Copy-Item -LiteralPath $srcDll -Destination $destPath -ErrorAction Stop
+            Write-Host ("    OK    {0}  [{1}]  (matched '{2}', {3})" -f $pf.BaseName, $destDll, $c.Match.Name, [Math]::Round($c.Score,2)) -ForegroundColor Green
+            Write-Log "FFBPlugin: deployed $destDll to $exeDir (matched '$($c.Match.Name)', score $([Math]::Round($c.Score,2)))"
+            $deployed++
+        } catch {
+            Write-Host ("    ERROR {0} -- {1}" -f $pf.BaseName, $_) -ForegroundColor Red
+            Write-Log "FFBPlugin: error on $($pf.BaseName) -- $_"
+            $errors++
+        }
+    }
+
+    Write-Host ""
+    Write-Host ("  Deployed           : {0} game(s)" -f $deployed) -ForegroundColor Green
+    if ($skippedNative -gt 0) {
+        Write-Host ("  Skipped (native)   : {0}  (FFB Blaster already covers these -- preferred over the plugin)" -f $skippedNative) -ForegroundColor DarkGray
+    }
+    if ($skippedCollision -gt 0) {
+        Write-Host ("  Skipped (collision): {0}  (a hook DLL already exists -- not overwritten)" -f $skippedCollision) -ForegroundColor Yellow
+    }
+    if ($skippedNoMatch -gt 0) {
+        Write-Host ("  Skipped (no match) : {0}" -f $skippedNoMatch) -ForegroundColor DarkGray
+    }
+    if ($errors -gt 0) {
+        Write-Host ("  Errors             : {0}  -- see TeknoParrot-Manager.log for details" -f $errors) -ForegroundColor Red
+    }
+    Write-Host ""
+    Write-Host "  To uninstall: delete the deployed DLL file from the game's folder." -ForegroundColor DarkCyan
+    Write-Log ("FFBPlugin setup: deployed={0} skippedNative={1} skippedCollision={2} skippedNoMatch={3} errors={4}" -f $deployed, $skippedNative, $skippedCollision, $skippedNoMatch, $errors)
+}
+
+# Sets up TeknoParrot's own built-in "FFB Blaster" force feedback, a
+# per-game Bool field in GameProfiles -- paywalled (any paid TeknoParrot
+# membership). The script cannot check subscription status, so it must
+# ask before touching anything: enabling the field has no effect at all
+# without a membership, so there is no point doing it on spec.
+# Returns the list of profile codes successfully enabled or already
+# enabled, so the third-party plugin setup can ask the user whether to
+# keep native or switch to the plugin for any game covered by both.
+function Invoke-FFBBlasterSetup {
+    param([string]$UserProfilesDir, [string]$TpRoot)
+
+    Write-Host ""
+    Write-Host "  FFB Blaster is TeknoParrot's own built-in force feedback." -ForegroundColor Cyan
+    Write-Host "  It is included with any paid TeknoParrot membership" -ForegroundColor Cyan
+    Write-Host "  (teknoparrot.com/en/Home/Subscription)." -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  Do you have an active, paid TeknoParrot membership? (Y/N)" -ForegroundColor Yellow
+    Write-Host "  If you answer N, FFB Blaster will NOT be set up -- it does not work" -ForegroundColor Yellow
+    Write-Host "  without one, and there is no point enabling a field that has no effect." -ForegroundColor Yellow
+    $hasSub = (Read-Host "  Answer").Trim().ToUpper()
+    if ($hasSub -ne "Y") {
+        Write-Host "  Skipped -- no membership." -ForegroundColor DarkGray
+        Write-Log "FFBBlaster setup: skipped -- user has no TeknoParrot membership."
+        return @()
+    }
+
+    # Discover the field name dynamically -- never hardcoded, same pattern
+    # as Invoke-GpuFixSetup's $boolAmdFields discovery.
+    $gpDir = Join-Path $TpRoot "GameProfiles"
+    $ffbFields = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if (Test-Path -LiteralPath $gpDir) {
+        Write-Host "  Scanning GameProfiles for FFB Blaster fields..." -ForegroundColor DarkGray
+        $gpFiles = @(Get-ChildItem -LiteralPath $gpDir -Filter "*.xml" -ErrorAction SilentlyContinue)
+        foreach ($gf in $gpFiles) {
+            try {
+                $gdoc = Read-Xml $gf.FullName
+                $fnodes = $gdoc.SelectNodes("/GameProfile/ConfigValues/FieldInformation")
+                foreach ($n in $fnodes) {
+                    $fn = if ($n.FieldName) { $n.FieldName.Trim() } else { '' }
+                    $ft = if ($n.FieldType)  { $n.FieldType.Trim()  } else { '' }
+                    if (-not $fn) { continue }
+                    if ($ft -eq 'Bool' -and $fn -imatch 'ffb.*blaster|blaster.*ffb') {
+                        [void]$ffbFields.Add($fn)
+                    }
+                }
+            } catch {
+                Write-Log ("FFBBlaster: WARNING -- could not parse GameProfile '$($gf.BaseName)': $_")
+            }
+        }
+    }
+    if ($ffbFields.Count -eq 0) {
+        Write-Host "  No FFB Blaster field found in any GameProfile -- this TeknoParrot" -ForegroundColor Yellow
+        Write-Host "  install may not support it yet." -ForegroundColor Yellow
+        Write-Log "FFBBlaster setup: aborted -- no FFB Blaster field discovered."
+        return @()
+    }
+    Write-Log ("FFBBlaster: discovered fields -- [{0}]" -f ($ffbFields -join ', '))
+
+    # Backup before writing -- this touches every matching UserProfile.
+    $backupRoot = Join-Path $UserProfilesDir "FullBackup"
+    $timestamp  = (Get-Date).ToString("yyyy-MM-dd_HH-mm-ss")
+    $backupPath = Join-Path $backupRoot ("FFBBlaster_" + $timestamp)
+    try {
+        [void][System.IO.Directory]::CreateDirectory($backupRoot)
+        [void][System.IO.Directory]::CreateDirectory($backupPath)
+    } catch {
+        Write-Host "  ERROR: Could not create backup folder: $_" -ForegroundColor Red
+        Write-Log "FFBBlaster: backup failed -- $_"
+        return @()
+    }
+    $backupCopyErrs = $null
+    Get-ChildItem -LiteralPath $UserProfilesDir | Where-Object { $_.Name -ne "FullBackup" } |
+        Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable backupCopyErrs
+    if ($backupCopyErrs.Count -gt 0) {
+        Write-Host ("  WARNING: {0} file(s) could not be backed up." -f $backupCopyErrs.Count) -ForegroundColor Yellow
+    }
+    Write-Host ("  Backup: {0}" -f $backupPath) -ForegroundColor DarkGray
+    Write-Log "FFBBlaster: backup at $backupPath"
+
+    Write-Host ""
+    Write-Host "  Enabling FFB Blaster on registered profiles..." -ForegroundColor DarkGray
+    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Directory.Name -ne "FullBackup" })
+    $enabledCodes = New-Object System.Collections.Generic.List[string]
+    $updated = 0; $unchanged = 0; $noField = 0; $errors = 0
+
+    foreach ($pf in $profiles) {
+        try {
+            $doc = Read-Xml $pf.FullName
+            $changed = $false
+            $hasField = $false
+            foreach ($fieldName in $ffbFields) {
+                $xpLit = ConvertTo-XPathStringLiteral $fieldName
+                $fi = $doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$xpLit]")
+                if ($null -eq $fi) { continue }
+                $fvNode = $fi.SelectSingleNode("FieldValue")
+                if ($null -eq $fvNode) { continue }
+                $hasField = $true
+                if ($fvNode.InnerText -ne '1') {
+                    $fvNode.InnerText = '1'
+                    $changed = $true
+                    Write-Log "FFBBlaster: $($pf.BaseName) :: $fieldName -> 1"
+                }
+            }
+            if (-not $hasField) { $noField++; continue }
+            [void]$enabledCodes.Add($pf.BaseName)
+            if ($changed) {
+                Save-Xml $doc $pf.FullName
+                $updated++
+                Write-Host ("    {0}" -f $pf.BaseName) -ForegroundColor Green
+            } else {
+                $unchanged++
+            }
+        } catch {
+            Write-Host ("    FAILED {0}: {1}" -f $pf.BaseName, $_) -ForegroundColor Red
+            Write-Log "FFBBlaster: FAILED $($pf.BaseName) -- $_"
+            $errors++
+        }
+    }
+
+    Write-Host ""
+    Write-Host ("  Updated  : {0} profile(s)" -f $updated) -ForegroundColor Green
+    if ($unchanged -gt 0) { Write-Host ("  No change: {0} (already enabled)" -f $unchanged) -ForegroundColor DarkGray }
+    if ($noField -gt 0)   { Write-Host ("  No field : {0} (this game has no FFB Blaster field)" -f $noField) -ForegroundColor DarkGray }
+    if ($errors -gt 0)    { Write-Host ("  Errors   : {0} -- see log for details" -f $errors) -ForegroundColor Red }
+    Write-Log ("FFBBlaster setup: complete. Updated={0} Unchanged={1} NoField={2} Errors={3}" -f $updated, $unchanged, $noField, $errors)
+    return @($enabledCodes)
 }
 
 # Scans the install folder for executables and registers matching TeknoParrot
@@ -4578,7 +4955,7 @@ Write-Log "Script started (v$ScriptVersion$(if ($Unattended) { ' [Unattended]' }
 
 $configPath         = Join-Path $PSScriptRoot "TeknoParrot-Manager.config.json"
 $tpRoot             = $null
-$mode               = $null   # "AutoSync", "RegisterOnly", "Restore", "CrosshairSetup", "ReShadeSetup", "DgVoodoo2Setup", "GpuFixSetup", or "HealthCheck"
+$mode               = $null   # "AutoSync", "RegisterOnly", "CrosshairSetup", "ReShadeSetup", "DgVoodoo2Setup", "GpuFixSetup", "FFBSetup", "Restore", or "HealthCheck"
 $zipSource               = $null   # AutoSync only (main collection)
 $zipSourceSupplementary  = $null   # AutoSync supplementary source (optional, separate library); $null or ''=not configured
 $gamesInstallFolder = $null   # always (the extracted-games root to register)
@@ -5077,40 +5454,44 @@ while ($true) {
     Write-Host "  1) AutoSync        -- Extract ZIPs (NAS or local) to a local"
     Write-Host "                        folder, then register the games."
     Write-Host "  2) Register only   -- Games are already extracted; just register."
-    Write-Host "  3) Restore backup  -- Roll UserProfiles back to a previous backup."
-    Write-Host "  4) Crosshair setup -- Pick and deploy custom crosshairs to all"
+    Write-Host "  3) Crosshair setup -- Pick and deploy custom crosshairs to all"
     Write-Host "                        registered lightgun games."
-    Write-Host "  5) ReShade setup   -- Add visual enhancements (sharper image, better"
+    Write-Host "  4) ReShade setup   -- Add visual enhancements (sharper image, better"
     Write-Host "                        colours, scanlines, borders). Optional -- games"
     Write-Host "                        work perfectly without this."
-    Write-Host "  6) dgVoodoo2 setup -- Fix old DX8, DirectDraw, and Glide games that"
+    Write-Host "  5) dgVoodoo2 setup -- Fix old DX8, DirectDraw, and Glide games that"
     Write-Host "                        crash or show black screens. Optional."
-    Write-Host "  7) GPU fix setup   -- Auto-detect your GPU (AMD / NVIDIA / Intel) and"
+    Write-Host "  6) GPU fix setup   -- Auto-detect your GPU (AMD / NVIDIA / Intel) and"
     Write-Host "                        apply the matching compatibility fix to every"
     Write-Host "                        registered game that has one. Optional."
-    Write-Host "  8) Library health check -- Read-only: reports registered/broken/"
+    Write-Host "  7) Force feedback (FFB) setup -- Wheel/stick rumble and force feedback."
+    Write-Host "                        Covers TeknoParrot's built-in FFB Blaster (needs a"
+    Write-Host "                        paid membership) and a free third-party plugin."
+    Write-Host "  8) Restore backup  -- Roll UserProfiles back to a previous backup."
+    Write-Host "  9) Library health check -- Read-only: reports registered/broken/"
     Write-Host "                        unregistered counts. No extraction, registration,"
     Write-Host "                        repair, or network access -- just a fast status check."
-    Write-Host "  9) Exit"
+    Write-Host "  10) Exit"
     Write-Host ""
     if ($Unattended) {
         Write-Host "  [Unattended] Mode must be set before starting." -ForegroundColor Red
         Write-Log "ERROR: Unattended mode -- reached menu loop."; exit 1
     }
-    $modeChoice = (Read-Host "Enter 1, 2, 3, 4, 5, 6, 7, 8, or 9").Trim()
+    $modeChoice = (Read-Host "Enter 1-10").Trim()
     switch ($modeChoice) {
         "1"     { $mode = "AutoSync"       }
         "2"     { $mode = "RegisterOnly"   }
-        "3"     { $mode = "Restore"        }
-        "4"     { $mode = "CrosshairSetup" }
-        "5"     { $mode = "ReShadeSetup"   }
-        "6"     { $mode = "DgVoodoo2Setup" }
-        "7"     { $mode = "GpuFixSetup"    }
-        "8"     { $mode = "HealthCheck"    }
-        "9"     { break }
-        default { Write-Host "  Invalid choice. Enter 1-9." -ForegroundColor Yellow; continue }
+        "3"     { $mode = "CrosshairSetup" }
+        "4"     { $mode = "ReShadeSetup"   }
+        "5"     { $mode = "DgVoodoo2Setup" }
+        "6"     { $mode = "GpuFixSetup"    }
+        "7"     { $mode = "FFBSetup"       }
+        "8"     { $mode = "Restore"        }
+        "9"     { $mode = "HealthCheck"    }
+        "10"    { break }
+        default { Write-Host "  Invalid choice. Enter 1-10." -ForegroundColor Yellow; continue }
     }
-    if ($modeChoice -eq "9") { break }
+    if ($modeChoice -eq "10") { break }
 
     if ($mode -eq "Restore") {
         Write-Host ""
@@ -5311,6 +5692,44 @@ while ($true) {
         Write-Host ""
         Write-Host "Done." -ForegroundColor Green
         Write-Log "GPU fix setup complete."
+        [void](Read-Host "  Press Enter to return to menu")
+        continue
+    }
+
+    if ($mode -eq "FFBSetup") {
+        Write-Host ""
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        Write-Host " Force Feedback (FFB) Setup" -ForegroundColor Cyan
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  Force feedback makes a wheel or stick push back / rumble to match"
+        Write-Host "  what's happening on screen (e.g. road vibration, recoil, collisions)."
+        Write-Host "  Two independent ways to get it, covering different games -- both can"
+        Write-Host "  be set up, neither requires the other:"
+        Write-Host ""
+        Write-Host "    1) FFB Blaster -- TeknoParrot's own built-in force feedback."
+        Write-Host "       Native and well-integrated, but requires an active paid"
+        Write-Host "       TeknoParrot membership (teknoparrot.com/en/Home/Subscription)."
+        Write-Host "    2) Third-party FFB plugin -- a free, separately-maintained DLL"
+        Write-Host "       (mightymikem/FFBArcadePlugin) that adds force feedback to a"
+        Write-Host "       different set of arcade titles. No subscription needed."
+        Write-Host ""
+        Write-Host "  If a game is covered by both, you'll be asked which one to use for it."
+
+        $nativeEnabledCodes = Invoke-FFBBlasterSetup -UserProfilesDir $userProfilesDir -TpRoot $tpRoot
+
+        Write-Host ""
+        $doFfbPlugin = (Read-Host "  Also set up the free third-party FFB plugin (covers additional games)? (Y/N)").Trim().ToUpper()
+        if ($doFfbPlugin -eq "Y") {
+            $ffbCacheDir = Join-Path $PSScriptRoot "FFBPlugin"
+            Invoke-FFBPluginSetup -UserProfilesDir $userProfilesDir -CacheDir $ffbCacheDir -NativeEnabledCodes $nativeEnabledCodes
+        } else {
+            Write-Log "FFBPlugin setup: skipped by user choice."
+        }
+
+        Write-Host ""
+        Write-Host "Done." -ForegroundColor Green
+        Write-Log "FFB setup complete."
         [void](Read-Host "  Press Enter to return to menu")
         continue
     }

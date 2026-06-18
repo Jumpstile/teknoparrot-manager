@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.86 BETA
+  TeknoParrot Manager  |  v0.87 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -301,45 +301,50 @@
        You provide:  the folder that contains your extracted games.
        The script:   scans it and registers everything it recognises.
 
-  3) Restore from backup
-       Rolls your UserProfiles back to a previous backup without touching
-       File Explorer. The script lists all timestamped backup folders with
-       file counts, you pick one by number, type YES to confirm, and the
-       restore runs. Returns to the menu when done.
-
-  4) Crosshair setup
+  3) Crosshair setup
        Deploys custom P1/P2 crosshair cursor images to all registered
        lightgun games. Opens an HTML preview grid (321 included designs)
        in your browser so you can browse before picking by number.
        Optionally hides the Windows cursor for all lightgun games.
        Returns to the menu when done.
 
-  5) ReShade setup
+  4) ReShade setup
        Installs ReShade post-processing into your game folders. Auto-detects
        the correct DLL name and architecture (32-bit or 64-bit) for each
        game. Optional -- see RESHADE VISUAL ENHANCEMENTS below.
        Returns to the menu when done.
 
-  6) dgVoodoo2 setup
+  5) dgVoodoo2 setup
        Deploys dgVoodoo2 compatibility DLLs for games that use DirectX 8,
        DirectDraw, or the Glide API. Auto-detects which registered games
        need it. Optional -- see DGVOODOO2 LEGACY COMPATIBILITY below.
        Returns to the menu when done.
 
-  7) GPU fix setup
+  6) GPU fix setup
        Detects your GPU vendor (AMD/NVIDIA/Intel) via WMI and applies the
        correct fix flag to every registered game that has one. Scans
        TeknoParrot's GameProfiles at runtime -- no update needed when new
        games are added. Optional. Returns to the menu when done.
 
-  8) Library health check
+  7) Force feedback (FFB) setup
+       Sets up wheel/stick rumble and force feedback for supported games.
+       Covers two independent mechanisms -- see FORCE FEEDBACK (FFB) SETUP
+       below. Optional. Returns to the menu when done.
+
+  8) Restore from backup
+       Rolls your UserProfiles back to a previous backup without touching
+       File Explorer. The script lists all timestamped backup folders with
+       file counts, you pick one by number, type YES to confirm, and the
+       restore runs. Returns to the menu when done.
+
+  9) Library health check
        Read-only. Reports how many registered profiles have a valid,
        broken, or empty GamePath, lists the affected profile codes, and
        shows the summary line from your last full run. Does not extract,
        register, repair, propagate, or touch the network -- safe to run
        any time for a quick status check. Returns to the menu when done.
 
-  9) Exit
+  10) Exit
        Exits the script.
 
 
@@ -1068,6 +1073,64 @@
     changed.
 
 
+  FORCE FEEDBACK (FFB) SETUP
+  ---------------------------
+
+  What is force feedback?
+
+    Force feedback makes a wheel or stick push back / rumble to match what
+    is happening on screen (road vibration, recoil, collisions). Mode 7
+    covers two completely independent mechanisms. Neither requires the
+    other, and both can be set up at once -- they cover different games.
+
+  Mechanism 1 -- FFB Blaster (native, requires a paid membership)
+
+    FFB Blaster is TeknoParrot's own built-in force feedback feature. It is
+    well-integrated and is automatically preferred over the third-party
+    plugin for any game it covers, but it ONLY works with an active, paid
+    TeknoParrot membership:
+      https://teknoparrot.com/en/Home/Subscription
+
+    The script cannot check your subscription status, so it asks directly
+    before changing anything. If you answer N, FFB Blaster is skipped --
+    enabling the field without a membership has no effect.
+
+    If you answer Y, the script scans your TeknoParrot install's
+    GameProfiles for the FFB Blaster field (this is detected at runtime,
+    not hardcoded, so it keeps working as TeknoParrot adds support for more
+    games) and enables it on every registered profile that has it. Your
+    UserProfiles are backed up first, same as every other destructive
+    operation in this script.
+
+  Mechanism 2 -- Third-party FFB plugin (free, no subscription needed)
+
+    A free, separately-maintained plugin (mightymikem/FFBArcadePlugin) that
+    adds force feedback to a different set of arcade racers and shooters.
+    The script always fetches the current supported-games list and DLLs
+    live from that project's GitHub repository -- nothing is bundled with
+    this script, so the list of supported games can grow over time without
+    needing a script update.
+
+    If a game is covered by BOTH mechanisms, the script lists every such
+    game once and asks a single question: keep FFB Blaster (native) for
+    all of them, or use the third-party plugin for all of them instead.
+    Your answer applies to every game in that overlap list for this run.
+
+    Plugin DLL collisions: a few games need the same destination DLL name
+    for both ReShade and this plugin (for example H2Overdrive needs
+    d3d9.dll for both). If ReShade already occupies that filename in a
+    game's folder, FFB plugin setup skips that game with a warning rather
+    than overwriting it.
+
+  Removing FFB
+
+    FFB Blaster: re-run the script's FFB Blaster GameProfiles scan is not
+    reversible from the menu -- manually set the field back to 0 in the
+    affected UserProfiles\*.xml files, or restore from a pre-FFB backup
+    (mode 8) if you ran this before enabling FFB Blaster.
+    Third-party plugin: delete the deployed DLL file from the game's folder.
+
+
   RETROBAT / BATOCERA
   -------------------
 
@@ -1691,6 +1754,6 @@
 
 
 ===============================================================================
-  v0.86 BETA -- Test one game after each run.
+  v0.87 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================

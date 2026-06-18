@@ -7,6 +7,47 @@
 
 
 -------------------------------------------------------------------------------
+  v0.87 BETA  (2026-06-17)
+-------------------------------------------------------------------------------
+
+  New feature: Force feedback (FFB) setup (mode 7).
+
+  - Two independent mechanisms, both optional, neither requires the other:
+    - FFB Blaster: TeknoParrot's own built-in force feedback. Paywalled --
+      requires an active, paid TeknoParrot membership or it has no effect.
+      The script asks plainly before touching anything; the field name is
+      discovered dynamically by scanning GameProfiles at runtime, never
+      hardcoded. Your UserProfiles are backed up first, same as every
+      other destructive operation in this script.
+    - Third-party plugin (mightymikem/FFBArcadePlugin): free, no
+      subscription needed. The per-game destination-DLL table and the DLLs
+      themselves are fetched live from GitHub every run -- nothing is
+      bundled or hardcoded, so newly supported games are picked up
+      automatically with no script update.
+    - Real overlap between the two is substantial -- roughly half the
+      third-party table also has a native FFB Blaster field, confirmed
+      by cross-referencing the live data, not assumed. Too many for a
+      per-game prompt, so the script resolves matches first, then asks
+      ONE question covering every overlapping game at once: keep native
+      for all of them, or use the third-party plugin for all of them.
+      Never silently defaults to either side.
+    - If the third-party plugin's destination DLL filename is already
+      occupied (e.g. ReShade using d3d9.dll for the same game), that game
+      is skipped with a warning -- never overwritten.
+
+  Menu reorder: modes renumbered so related features sit together --
+  AutoSync/Register first, then Crosshair/ReShade/dgVoodoo2/GPU fix/FFB as
+  a group, then Restore backup/Library health check, then Exit. See the
+  updated MODES section in the README for the new numbering.
+
+  Bug fix: the Eggman dat collection's source repository
+  (Eggmansworld/Datfiles) posted its final release and moved to
+  Eggmansworld/TeknoParrot, which uses date-based release tags instead of
+  a fixed tag. Get-EggmanDatRelease now queries that repo's "latest"
+  release instead of a fixed tag -- dat downloads would otherwise have
+  silently stopped working once the old repo's last release aged out.
+
+-------------------------------------------------------------------------------
   v0.86 BETA  (2026-06-17)
 -------------------------------------------------------------------------------
 

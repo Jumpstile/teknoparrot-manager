@@ -125,12 +125,14 @@ The main menu is a persistent loop — after each mode finishes you return to th
 |---|------|-------------|
 | 1 | **AutoSync** | Extract ZIPs from NAS or local source, then register |
 | 2 | **Register only** | Games already extracted — just register |
-| 3 | **Restore backup** | Roll profiles back to a previous backup |
-| 4 | **Crosshair setup** | Pick and deploy custom crosshairs to lightgun games |
-| 5 | **ReShade setup** | Install post-processing shaders |
-| 6 | **dgVoodoo2 setup** | Fix DirectX 8 / DirectDraw / Glide compatibility |
-| 7 | **GPU fix setup** | Apply AMD / NVIDIA / Intel vendor fix to all games |
-| 8 | **Exit** | Quit the script |
+| 3 | **Crosshair setup** | Pick and deploy custom crosshairs to lightgun games |
+| 4 | **ReShade setup** | Install post-processing shaders |
+| 5 | **dgVoodoo2 setup** | Fix DirectX 8 / DirectDraw / Glide compatibility |
+| 6 | **GPU fix setup** | Apply AMD / NVIDIA / Intel vendor fix to all games |
+| 7 | **Force feedback (FFB) setup** | FFB Blaster (membership) + free third-party plugin |
+| 8 | **Restore backup** | Roll profiles back to a previous backup |
+| 9 | **Library health check** | Read-only registered/broken/empty status report |
+| 10 | **Exit** | Quit the script |
 
 ---
 
@@ -314,18 +316,18 @@ The script looks for DLLs in a `ReShade\` folder next to the script:
 - `ReShade64.dll` — for 64-bit games (required)
 - `ReShade32.dll` — for 32-bit games (optional)
 
-**If you downloaded the ZIP release:** DLLs are already included. Skip to running mode 5.
+**If you downloaded the ZIP release:** DLLs are already included. Skip to running mode 4.
 
 **If you cloned from GitHub (DLLs not in repo):**
 1. Download the free installer from [reshade.me](https://reshade.me)
 2. Run it — point it at any 64-bit TeknoParrot game exe. It creates a DLL in that folder.
 3. Copy that DLL to `ReShade\ReShade64.dll` next to the script
 4. (Optional) Repeat with a 32-bit exe and save as `ReShade32.dll`
-5. Run mode 5 or answer Y when prompted after a normal run
+5. Run mode 4 or answer Y when prompted after a normal run
 
 **In-game:** press **Home** to open the ReShade overlay. Toggle effects with tick-boxes, adjust with sliders. Settings save automatically to `ReShade.ini` in the game folder.
 
-**Updating:** the script checks reshade.me for newer versions each run. To update: download the new installer, extract the DLL, replace `ReShade64.dll`, re-run mode 5.
+**Updating:** the script checks reshade.me for newer versions each run. To update: download the new installer, extract the DLL, replace `ReShade64.dll`, re-run mode 4.
 
 **Removing:** delete the DLL (`dxgi.dll`, `d3d9.dll`, `d3d12.dll`, or `opengl32.dll`) from the game folder. Optionally delete `ReShade.ini` as well.
 
@@ -352,7 +354,7 @@ Some older arcade games use DirectX 8, DirectDraw, or the 3dfx Glide API. On mod
    - From `MS\x86\`: `D3D8.dll`, `DDraw.dll`, `D3DImm.dll`
    - From `3Dfx\x86\`: `Glide2x.dll`, `Glide3x.dll`
    - From the ZIP root: `dgVoodoo.conf`
-3. Run mode 6 or answer Y when prompted after a normal run
+3. Run mode 5 or answer Y when prompted after a normal run
 
 The wizard scans every registered game exe for legacy API imports and shows auto-detected games first. You can install to all at once or pick individually.
 
@@ -554,7 +556,7 @@ After registration the script offers to repair broken game paths — paths that 
 ```
 If backup folder creation fails, the script exits rather than proceeding without a restore point.
 
-**Restore:** choose mode 3 from the menu. The script lists all timestamped backups with file counts, you pick one by number, type `YES` to confirm.
+**Restore:** choose mode 8 from the menu. The script lists all timestamped backups with file counts, you pick one by number, type `YES` to confirm.
 
 **Manual restore:** close TeknoParrot, copy `.xml` files from a backup folder back into `UserProfiles`, overwriting the current ones.
 
@@ -590,7 +592,7 @@ Either no reference game for that control type has been bound yet (see "Set up c
 Delete that game's `.xml` from `UserProfiles` and add a `forceArchetype` entry in `overrides.json`: `{ "WrongCode": "CorrectCode" }`. Re-run.
 
 **A game's controls are wrong after propagation.**
-Use mode 3 to restore the backup made at the start of that run, or delete the affected game's `.xml` and re-run propagation after correcting the reference game's bindings in TeknoParrotUI.
+Use mode 8 to restore the backup made at the start of that run, or delete the affected game's `.xml` and re-run propagation after correcting the reference game's bindings in TeknoParrotUI.
 
 **A game appears twice in TeknoParrotUI.**
 Delete one of the duplicate `.xml` files from `UserProfiles`. Keep the one with the correct GamePath and any bindings already set.
@@ -629,4 +631,4 @@ TeknoParrot must be set up as an emulator in HyperSpin 2 first. The title must c
 
 ---
 
-> v0.86 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v0.87 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
