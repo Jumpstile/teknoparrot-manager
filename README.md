@@ -141,7 +141,7 @@ Choosing mode 1 or 2 offers a preview/dry-run option first — see [Preview / Dr
 | 7 | **Force feedback (FFB) setup** | FFB Blaster (membership) + free third-party plugin |
 | 8 | **BepInEx update check** | Update an existing BepInEx install to the latest stable 64-bit release |
 | 9 | **Restore backup** | Roll profiles back to a previous backup |
-| 10 | **Library health check** | Read-only registered/broken/empty status, plus GPU fix / FFB Blaster coverage |
+| 10 | **Library health check** | Read-only registered/broken/empty status, plus GPU fix / FFB Blaster / dgVoodoo2 coverage and ReShade/BepInEx install counts |
 | 11 | **Exit** | Quit the script |
 
 ---
@@ -341,6 +341,8 @@ The script looks for DLLs in a `ReShade\` folder next to the script:
 
 **Removing:** delete the DLL (`dxgi.dll`, `d3d9.dll`, `d3d12.dll`, or `opengl32.dll`) from the game folder. Optionally delete `ReShade.ini` as well.
 
+Mode 10 (Library health check) reports, purely informationally, how many registered games have ReShade installed -- not flagged as something to fix, since it's a per-game cosmetic choice rather than a clear right answer.
+
 ---
 
 ## dgVoodoo2 Legacy Compatibility
@@ -369,6 +371,8 @@ Some older arcade games use DirectX 8, DirectDraw, or the 3dfx Glide API. On mod
 The wizard scans every registered game exe for legacy API imports and shows auto-detected games first. You can install to all at once or pick individually.
 
 **Removing:** delete the deployed DLLs from the game folder. Nothing else is changed.
+
+Mode 10 (Library health check) reports which registered games import a legacy API but don't have the matching DLL deployed yet, read-only and without changing anything.
 
 ---
 
@@ -712,4 +716,4 @@ TeknoParrot must be set up as an emulator in HyperSpin 2 first. The title must c
 
 ---
 
-> v0.94 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v0.95 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.

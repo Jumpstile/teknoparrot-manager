@@ -7,6 +7,33 @@
 
 
 -------------------------------------------------------------------------------
+  v0.95 BETA  (2026-06-18)
+-------------------------------------------------------------------------------
+
+  New: Library health check (mode 10) now also reports dgVoodoo2
+  coverage -- which registered games import a legacy DirectX 8 /
+  DirectDraw / Glide API but don't have the matching DLL deployed yet,
+  checked entirely locally with no network access, same as the GPU fix
+  and FFB Blaster coverage added in v0.94.
+
+  New: Library health check now also shows, purely informationally, how
+  many registered games have ReShade or BepInEx installed. Unlike GPU
+  fix/FFB Blaster/dgVoodoo2, these are not flagged as something to fix --
+  they are open-ended per-game choices with no clear right answer, so
+  they are reported as a plain count, not a coverage gap.
+
+  Fix: TeknoParrot-Manager-README.txt's dgVoodoo2 section told users to
+  choose "mode 6" for dgVoodoo2 setup -- a pre-existing stale reference
+  from before an earlier menu reorder. It is mode 5. Fixed.
+
+  Internal: extracted ReShade's destination-resolution logic (which
+  folder and DLL name a game would get) into a shared helper, reused by
+  both the real setup and the new health-check coverage stat. Verified
+  against the pre-refactor logic across 7 scenarios (standard/
+  OpenParrot/BudgieLoader games, with and without a detected graphics
+  API) -- identical output in every case.
+
+-------------------------------------------------------------------------------
   v0.94 BETA  (2026-06-18)
 -------------------------------------------------------------------------------
 

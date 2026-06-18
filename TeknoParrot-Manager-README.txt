@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.94 BETA
+  TeknoParrot Manager  |  v0.95 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -399,12 +399,15 @@
        broken, or empty GamePath, lists the affected profile codes, and
        shows the summary line from your last full run. Also reports
        optional-setup coverage: how many registered games are eligible
-       for a GPU fix or FFB Blaster but don't have it applied yet (both
-       checked locally, no network access -- third-party FFB plugin
-       coverage needs a live lookup, so check that via mode 7 instead).
-       Does not extract, register, repair, propagate, or touch the
-       network -- safe to run any time for a quick status check. Returns
-       to the menu when done.
+       for a GPU fix, FFB Blaster, or dgVoodoo2 but don't have it applied
+       yet (all checked locally, no network access -- third-party FFB
+       plugin coverage needs a live lookup, so check that via mode 7
+       instead). Also shows, purely informationally, how many registered
+       games have ReShade or BepInEx installed -- these two are per-game
+       choices rather than a clear right answer, so they are not flagged
+       as something to fix, just reported as a count. Does not extract,
+       register, repair, propagate, or touch the network -- safe to run
+       any time for a quick status check. Returns to the menu when done.
 
   11) Exit
        Exits the script.
@@ -1055,6 +1058,11 @@
       https://reshade.me
       https://github.com/crosire/reshade
 
+  Mode 10 (Library health check) reports, purely informationally, how
+  many of your registered games have ReShade installed. This is not
+  flagged as something to fix -- ReShade is a per-game cosmetic choice,
+  not a clear right-or-wrong answer like a GPU fix.
+
 
   DGVOODOO2 LEGACY COMPATIBILITY
   --------------------------------
@@ -1095,7 +1103,7 @@
            From the  MS\x86\     subfolder : D3D8.dll  DDraw.dll  D3DImm.dll
            From the  3Dfx\x86\  subfolder : Glide2x.dll  Glide3x.dll
            From the root of the ZIP      : dgVoodoo.conf
-      3. Run TeknoParrot Manager and choose mode 6 (dgVoodoo2 setup), or
+      3. Run TeknoParrot Manager and choose mode 5 (dgVoodoo2 setup), or
          answer Y to the prompt at the end of a normal run.
 
     Method B -- Custom folder:
@@ -1138,6 +1146,10 @@
     Delete the deployed DLL files (D3D8.dll / DDraw.dll / Glide2x.dll /
     Glide3x.dll) and dgVoodoo.conf from the game's folder. Nothing else is
     changed.
+
+  Mode 10 (Library health check) reports which registered games are
+  eligible for dgVoodoo2 (import D3D8/DDraw/Glide) but don't have the
+  matching DLL deployed yet, read-only and without changing anything.
 
 
   FORCE FEEDBACK (FFB) SETUP
@@ -1899,6 +1911,6 @@
 
 
 ===============================================================================
-  v0.94 BETA -- Test one game after each run.
+  v0.95 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================

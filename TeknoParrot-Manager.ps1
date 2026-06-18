@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.94 BETA
+# TeknoParrot Manager  |  v0.95 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -65,7 +65,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # GitHub API User-Agent headers. Previously hardcoded in each of those spots
 # independently, which let the User-Agent strings drift out of sync with the
 # banner (caught stale at 0.70 during the v0.71 bump, and again at 0.76 here).
-$ScriptVersion = "0.94"
+$ScriptVersion = "0.95"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -1054,6 +1054,35 @@ function Get-ReShadeLatestVersion {
 }
 
 # Full ReShade install wizard: version check, preset choice, game picker, deploy.
+# Resolves where ReShade would deploy for a given registered game (target
+# folder + DLL name), without touching anything. Shared (read-only)
+# between Invoke-ReShadeSetup and the Library health check's coverage
+# stat, so the two can never disagree about where the DLL would land.
+function Get-ReShadeTargetInfo {
+    param([System.Xml.XmlDocument]$Doc, [string]$GamePath, [string]$ExeDir)
+
+    $emuType = ""
+    $etNode  = $Doc.GameProfile.SelectSingleNode("EmulatorType")
+    if ($etNode) { $emuType = $etNode.InnerText.Trim() }
+
+    # OpenParrot games: files go into the openparrot subfolder
+    $targetDir = $ExeDir
+    if ($emuType -imatch 'openparrot') {
+        $opDir = Join-Path $ExeDir "openparrot"
+        if (Test-Path -LiteralPath $opDir) { $targetDir = $opDir }
+    }
+
+    # BudgieLoader games always use opengl32.dll; others: detect from exe
+    $apiDetected = $true
+    if ($emuType -imatch 'budgieloader') {
+        $dllName = "opengl32.dll"
+    } else {
+        $detected = Get-GameApiDll -ExePath $GamePath
+        if ($detected) { $dllName = $detected } else { $dllName = "dxgi.dll"; $apiDetected = $false }
+    }
+    return [pscustomobject]@{ TargetDir = $targetDir; DllName = $dllName; ApiDetected = $apiDetected }
+}
+
 function Invoke-ReShadeSetup {
     param(
         [string]$UserProfilesDir,
@@ -1186,10 +1215,6 @@ function Invoke-ReShadeSetup {
                 $skipped++; continue
             }
 
-            $emuType = ""
-            $etNode  = $doc.GameProfile.SelectSingleNode("EmulatorType")
-            if ($etNode) { $emuType = $etNode.InnerText.Trim() }
-
             # Pick the right ReShade DLL based on detected exe architecture.
             $arch      = Get-ExeArchitecture -ExePath $gamePath
             $activeDll = $SourceDll   # default: 64-bit
@@ -1207,24 +1232,11 @@ function Invoke-ReShadeSetup {
                 $skipped++; continue
             }
 
-            # OpenParrot games: files go into the openparrot subfolder
-            $targetDir = $exeDir
-            if ($emuType -imatch 'openparrot') {
-                $opDir = Join-Path $exeDir "openparrot"
-                if (Test-Path -LiteralPath $opDir) { $targetDir = $opDir }
-            }
-
-            # BudgieLoader games always use opengl32.dll; others: detect from exe
-            if ($emuType -imatch 'budgieloader') {
-                $dllName = "opengl32.dll"
-            } else {
-                $detected = Get-GameApiDll -ExePath $gamePath
-                if ($detected) {
-                    $dllName = $detected
-                } else {
-                    $dllName = "dxgi.dll"
-                    Write-Host ("    {0}: graphics API not detected, defaulting to dxgi.dll" -f $pf.BaseName) -ForegroundColor Yellow
-                }
+            $targetInfo = Get-ReShadeTargetInfo -Doc $doc -GamePath $gamePath -ExeDir $exeDir
+            $targetDir  = $targetInfo.TargetDir
+            $dllName    = $targetInfo.DllName
+            if (-not $targetInfo.ApiDetected) {
+                Write-Host ("    {0}: graphics API not detected, defaulting to dxgi.dll" -f $pf.BaseName) -ForegroundColor Yellow
             }
 
             $destDll = Join-Path $targetDir $dllName
@@ -1302,6 +1314,28 @@ function Get-GameLegacyApi {
         Write-Log "dgVoodoo2: scan failed for $ExePath -- $_"
     }
     return $found
+}
+
+# Pure, read-only check used by the Library health check's coverage
+# report: given the legacy APIs an exe imports (from Get-GameLegacyApi)
+# and its folder, decides whether dgVoodoo2 is already deployed there.
+# Deliberately NOT shared with Invoke-DgVoodoo2Setup's own deploy logic --
+# that logic also depends on which DLLs the user has actually bundled in
+# their dgVoodoo2 source folder (falls back to deploying everything
+# available if the ideal DLL is missing), which is a real, intentional
+# difference from "does this game need dgVoodoo2 at all" -- a coverage
+# report should answer the latter, independent of what's bundled.
+function Test-DgVoodoo2UpToDate {
+    param($Apis, [string]$ExeDir)
+
+    if ($Apis.Count -eq 0) { return [pscustomobject]@{ Eligible = $false; UpToDate = $true } }
+    $requiredDlls = @()
+    if ($Apis -contains 'D3D8')    { $requiredDlls += 'D3D8.dll'    }
+    if ($Apis -contains 'DDraw')   { $requiredDlls += 'DDraw.dll'   }
+    if ($Apis -contains 'Glide2x') { $requiredDlls += 'Glide2x.dll' }
+    if ($Apis -contains 'Glide3x') { $requiredDlls += 'Glide3x.dll' }
+    $missing = @($requiredDlls | Where-Object { -not (Test-Path -LiteralPath (Join-Path $ExeDir $_)) })
+    return [pscustomobject]@{ Eligible = $true; UpToDate = ($missing.Count -eq 0) }
 }
 
 # =============================================================================
@@ -4133,6 +4167,9 @@ function Invoke-LibraryHealthCheck {
     # "no network access" guarantee; run mode 7 to check that instead.
     $gpuFixNeeded     = New-Object System.Collections.ArrayList
     $ffbBlasterNeeded = New-Object System.Collections.ArrayList
+    $dgVoodoo2Needed  = New-Object System.Collections.ArrayList
+    $reShadeCount     = 0
+    $bepInExCount     = 0
     $detected         = Get-DetectedGpuVendor
     $gpuFields        = Get-GpuFixFieldNames -TpRoot $TpRoot
     $ffbFields        = Get-FFBBlasterFieldNames -GameProfilesDir (Join-Path $TpRoot "GameProfiles")
@@ -4147,6 +4184,24 @@ function Invoke-LibraryHealthCheck {
             }
             $ffbResult = Test-FFBBlasterUpToDate -Doc $doc -Fields $ffbFields
             if ($ffbResult.Eligible -and -not $ffbResult.UpToDate) { [void]$ffbBlasterNeeded.Add($pf.BaseName) }
+
+            # dgVoodoo2 / ReShade / BepInEx all need a resolved, existing exe
+            # path -- skip silently for broken/empty profiles (already
+            # reported above).
+            $gpNode   = $doc.GameProfile.SelectSingleNode("GamePath")
+            $gamePath = if ($gpNode) { $gpNode.InnerText.Trim() } else { "" }
+            if ([string]::IsNullOrWhiteSpace($gamePath) -or -not (Test-Path -LiteralPath $gamePath)) { continue }
+            $exeDir = [System.IO.Path]::GetDirectoryName($gamePath)
+            if ([string]::IsNullOrWhiteSpace($exeDir)) { continue }
+
+            $apis = @(Get-GameLegacyApi -ExePath $gamePath)
+            $dgResult = Test-DgVoodoo2UpToDate -Apis $apis -ExeDir $exeDir
+            if ($dgResult.Eligible -and -not $dgResult.UpToDate) { [void]$dgVoodoo2Needed.Add($pf.BaseName) }
+
+            $rsInfo = Get-ReShadeTargetInfo -Doc $doc -GamePath $gamePath -ExeDir $exeDir
+            if (Test-Path -LiteralPath (Join-Path $rsInfo.TargetDir $rsInfo.DllName)) { $reShadeCount++ }
+
+            if (Get-BepInExInstalledVersion -ExeDir $exeDir) { $bepInExCount++ }
         } catch {
             Write-Log "HealthCheck: coverage check could not parse $($pf.Name) -- $_"
         }
@@ -4171,10 +4226,22 @@ function Invoke-LibraryHealthCheck {
         Write-Host "  FFB Blaster not on  : 0" -ForegroundColor Green
     }
     Write-Host "  FFB plugin coverage : not checked here (needs network access -- run mode 7)" -ForegroundColor DarkGray
-    if ($gpuFixNeeded.Count -gt 0 -or $ffbBlasterNeeded.Count -gt 0) {
-        Write-Host ""
-        Write-Host "  Run mode 6 (GPU fix setup) or mode 7 (FFB setup) to apply these." -ForegroundColor DarkCyan
+    if ($dgVoodoo2Needed.Count -gt 0) {
+        Write-Host ("  dgVoodoo2 not applied : {0}  (legacy DX8/DDraw/Glide games)" -f $dgVoodoo2Needed.Count) -ForegroundColor Yellow
+        Write-Host ("    {0}" -f ($dgVoodoo2Needed -join ', ')) -ForegroundColor DarkGray
+    } else {
+        Write-Host "  dgVoodoo2 not applied : 0  (legacy DX8/DDraw/Glide games)" -ForegroundColor Green
     }
+    if ($gpuFixNeeded.Count -gt 0 -or $ffbBlasterNeeded.Count -gt 0 -or $dgVoodoo2Needed.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  Run mode 4 (ReShade), 5 (dgVoodoo2), 6 (GPU fix), or 7 (FFB) to apply these." -ForegroundColor DarkCyan
+    }
+
+    Write-Host ""
+    Write-Host "  Informational (not flagged as needing attention -- ReShade and BepInEx" -ForegroundColor DarkGray
+    Write-Host "  are per-game choices, not a hardware/membership-driven yes-or-no):" -ForegroundColor DarkGray
+    Write-Host ("    ReShade installed  : {0} of {1} registered games" -f $reShadeCount, $valid.Count) -ForegroundColor DarkGray
+    Write-Host ("    BepInEx installed  : {0} of {1} registered games" -f $bepInExCount, $valid.Count) -ForegroundColor DarkGray
 
     if ($LogPath -and (Test-Path -LiteralPath $LogPath)) {
         try {
@@ -4186,8 +4253,8 @@ function Invoke-LibraryHealthCheck {
         } catch {}
     }
 
-    Write-Log ("HealthCheck: total={0} valid={1} broken={2} empty={3} gpuFixNeeded={4} ffbBlasterNeeded={5}" -f `
-        $profiles.Count, $valid.Count, $broken.Count, $empty.Count, $gpuFixNeeded.Count, $ffbBlasterNeeded.Count)
+    Write-Log ("HealthCheck: total={0} valid={1} broken={2} empty={3} gpuFixNeeded={4} ffbBlasterNeeded={5} dgVoodoo2Needed={6} reShadeCount={7} bepInExCount={8}" -f `
+        $profiles.Count, $valid.Count, $broken.Count, $empty.Count, $gpuFixNeeded.Count, $ffbBlasterNeeded.Count, $dgVoodoo2Needed.Count, $reShadeCount, $bepInExCount)
 }
 
 # =============================================================================
@@ -6134,8 +6201,9 @@ while ($true) {
     Write-Host "                        update (64-bit only). Never installs it fresh."
     Write-Host "  9) Restore backup  -- Roll UserProfiles back to a previous backup."
     Write-Host "  10) Library health check -- Read-only: reports registered/broken/"
-    Write-Host "                        unregistered counts plus GPU fix / FFB Blaster"
-    Write-Host "                        coverage. No extraction, registration, repair, or"
+    Write-Host "                        unregistered counts plus GPU fix / FFB Blaster /"
+    Write-Host "                        dgVoodoo2 coverage and ReShade/BepInEx install"
+    Write-Host "                        counts. No extraction, registration, repair, or"
     Write-Host "                        network access -- just a fast status check."
     Write-Host "  11) Exit"
     Write-Host ""
