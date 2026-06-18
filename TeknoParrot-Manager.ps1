@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.90 BETA
+# TeknoParrot Manager  |  v0.91 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -65,7 +65,7 @@ param([switch]$Unattended)
 # GitHub API User-Agent headers. Previously hardcoded in each of those spots
 # independently, which let the User-Agent strings drift out of sync with the
 # banner (caught stale at 0.70 during the v0.71 bump, and again at 0.76 here).
-$ScriptVersion = "0.90"
+$ScriptVersion = "0.91"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -2066,6 +2066,16 @@ function Expand-ZipFileSafe {
     # throws PathTooLongException before \\?\ is ever applied, defeating the
     # whole purpose of this function.
     $destFull  = [System.IO.Path]::GetFullPath($DestDir).TrimEnd('\')
+    # The \\?\ long-path prefix has a different form for UNC paths
+    # (\\server\share\...) than for drive-letter paths -- a naive
+    # '\\?\' + $destFull concatenation produces an invalid
+    # '\\?\\\server\share\...' for UNC destinations. Build the correct
+    # prefix once so every long-path target below uses the right form.
+    $longPrefixBase = if ($destFull -match '^\\\\[^\?]') {
+        '\\?\UNC\' + $destFull.Substring(2)
+    } else {
+        '\\?\' + $destFull
+    }
     $label     = if ($GameName) { $GameName } else { [System.IO.Path]::GetFileNameWithoutExtension($ZipPath) }
     $archive   = $null
     try {
@@ -2084,7 +2094,7 @@ function Expand-ZipFileSafe {
 
             # Directory entry: Name is empty string when FullName ends with /
             if ($entry.Name -eq '' -or $rel.EndsWith('\')) {
-                [void][System.IO.Directory]::CreateDirectory('\\?\' + $destFull + '\' + $rel.TrimEnd('\'))
+                [void][System.IO.Directory]::CreateDirectory($longPrefixBase + '\' + $rel.TrimEnd('\'))
                 continue
             }
 
@@ -2096,7 +2106,7 @@ function Expand-ZipFileSafe {
                                -PercentComplete $pct
             }
 
-            $longTarget = '\\?\' + $destFull + '\' + $rel
+            $longTarget = $longPrefixBase + '\' + $rel
             # CreateDirectory is idempotent; no Exists check needed (also avoids TOCTOU).
             [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($longTarget))
 
@@ -2879,6 +2889,17 @@ function Invoke-FFBPluginSetup {
             $exeDir   = $c.ExeDir
             $destDll  = $c.Match.Dest
             $destPath = Join-Path $exeDir $destDll
+            # Security: $destDll comes from the live AutoSetup.cmd fetched from
+            # GitHub (untrusted input) -- verify the resolved path still lands
+            # inside the game's own folder before writing anything. A crafted
+            # rename line (e.g. "..\..\evil.dll") would otherwise escape the
+            # intended destination folder.
+            if (-not (Test-PathInside $destPath $exeDir)) {
+                Write-Host ("    SKIP  {0}: destination filename '{1}' is unsafe -- not deploying." -f $pf.BaseName, $destDll) -ForegroundColor Red
+                Write-Log "FFBPlugin: SECURITY -- skipped $($pf.BaseName), destDll '$destDll' resolves outside $exeDir"
+                $errors++
+                continue
+            }
             if (Test-Path -LiteralPath $destPath) {
                 Write-Host ("    SKIP  {0}: {1} already exists (ReShade or another hook) -- not overwritten." -f $pf.BaseName, $destDll) -ForegroundColor Yellow
                 Write-Log "FFBPlugin: skipped $($pf.BaseName) -- $destDll already occupied at $destPath"
@@ -3214,7 +3235,16 @@ function Invoke-BepInExUpdateCheck {
 
     Write-Host "  Downloading BepInEx $($latest.Version) (x64)..." -ForegroundColor DarkGray
     [void][System.IO.Directory]::CreateDirectory($CacheDir)
-    $zipPath = Join-Path $CacheDir $latest.FileName
+    # Security: $latest.FileName comes from the GitHub Releases API (untrusted
+    # input) -- strip to a bare filename and verify containment before using
+    # it as a download destination, same pattern as the FFB plugin fix.
+    $safeFileName = [System.IO.Path]::GetFileName($latest.FileName)
+    $zipPath = Join-Path $CacheDir $safeFileName
+    if ([string]::IsNullOrWhiteSpace($safeFileName) -or -not (Test-PathInside $zipPath $CacheDir)) {
+        Write-Host "  Could not reach GitHub to check the latest BepInEx version -- try again later." -ForegroundColor Red
+        Write-Log "BepInEx update check: SECURITY -- aborted, unsafe release filename '$($latest.FileName)'"
+        return
+    }
     $downloaded = $false
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         try {
@@ -5507,11 +5537,24 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
         $rel = Get-EggmanDatRelease
         if ($null -ne $rel) {
             Write-Host ("  Found: {0}  ({1} MB)" -f $rel.FileName, $rel.SizeMB) -ForegroundColor Cyan
-            $defaultSavePath = Join-Path $PSScriptRoot $rel.FileName
-            $rawSave = (Read-Host "  Save to (Enter for default: $defaultSavePath)").Trim()
-            if (-not $rawSave) { $rawSave = $defaultSavePath }
-            Write-Host "  Downloading -- this may take a few minutes..." -ForegroundColor Cyan
-            $dlOk = Invoke-EggmanDatDownload $rel.DownloadUrl $rawSave
+            # Security: $rel.FileName comes from the GitHub Releases API
+            # (untrusted input) -- strip to a bare filename and verify
+            # containment before offering it as a default save path. If
+            # it somehow fails this check, treat it exactly like a failed
+            # download (fall back to manual path entry) rather than using
+            # an unsafe path.
+            $safeDatFileName = [System.IO.Path]::GetFileName($rel.FileName)
+            $defaultSavePath = Join-Path $PSScriptRoot $safeDatFileName
+            $unsafeFileName  = [string]::IsNullOrWhiteSpace($safeDatFileName) -or -not (Test-PathInside $defaultSavePath $PSScriptRoot)
+            if ($unsafeFileName) {
+                Write-Log "EggmanDat: SECURITY -- unsafe release filename '$($rel.FileName)', falling back to manual path entry"
+                $dlOk = $false
+            } else {
+                $rawSave = (Read-Host "  Save to (Enter for default: $defaultSavePath)").Trim()
+                if (-not $rawSave) { $rawSave = $defaultSavePath }
+                Write-Host "  Downloading -- this may take a few minutes..." -ForegroundColor Cyan
+                $dlOk = Invoke-EggmanDatDownload $rel.DownloadUrl $rawSave
+            }
             if ($dlOk) {
                 $eggmanDatZip = $rawSave
                 Write-Host "  Saved: $rawSave" -ForegroundColor Green

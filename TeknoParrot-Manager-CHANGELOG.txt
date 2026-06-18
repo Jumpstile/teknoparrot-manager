@@ -7,6 +7,40 @@
 
 
 -------------------------------------------------------------------------------
+  v0.91 BETA  (2026-06-18)
+-------------------------------------------------------------------------------
+
+  Security hardening -- a deep manual review (covering the whole script,
+  not just recently-added code) plus PSScriptAnalyzer and Microsoft
+  InjectionHunter found and fixed four real issues. None were known to
+  be exploited; this closes the gaps proactively.
+
+  - Path traversal (Medium): Invoke-FFBPluginSetup deployed a DLL using a
+    destination filename parsed from the live-fetched AutoSetup.cmd file
+    (untrusted, fetched from GitHub every run) without checking it stayed
+    inside the game's own folder. A crafted rename line (e.g. containing
+    "..\..\") could have written outside the intended folder. Fixed with
+    a containment check before the file copy.
+  - Path traversal (Medium): Invoke-BepInExUpdateCheck built its download
+    path from the GitHub Releases API's asset filename (also untrusted)
+    without sanitizing it the same way. Fixed by stripping to a bare
+    filename and verifying containment before downloading.
+  - Path traversal (Low-Medium): the Eggman dat downloader's default save
+    path had the same gap (asset filename from the GitHub API, used
+    unsanitized as the default path offered to the user). Fixed the same
+    way; if the filename is ever unsafe, the script now falls back to its
+    existing manual-path-entry flow instead of using an unsafe default.
+  - Long-path bug (Low): Expand-ZipFileSafe's "\\?\" long-path prefix
+    (used to bypass the 260-character MAX_PATH limit during extraction)
+    was malformed for UNC destination paths (\\server\share\...) -- only
+    matters if a staging or game folder is a literal UNC path rather than
+    a mapped drive letter. Fixed with the correct "\\?\UNC\server\share\..."
+    form for that case; drive-letter paths (the common case) are unaffected.
+
+  All four fixes verified with synthetic tests (malicious filename input
+  confirmed blocked; normal/legitimate input confirmed still works).
+
+-------------------------------------------------------------------------------
   v0.90 BETA  (2026-06-18)
 -------------------------------------------------------------------------------
 
