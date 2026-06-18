@@ -607,6 +607,8 @@ In preview mode:
 - The optional follow-up offers (LaunchBox/HyperSpin 2 export, thumbnail download, GPU fix) are skipped, since they only make sense after real changes
 - The summary and ACTION REQUIRED sections still print normally, based on the games that would have been registered
 
+After a preview finishes, the script asks **"Apply these changes for real now?"** — answer **Y** to immediately re-run the same mode for real (no menu, no preview prompt shown again), or **N** to return to the menu without changing anything.
+
 This is most useful the first time you point the script at a new library, or after changing settings, to build confidence before letting it touch your files.
 
 ---
@@ -706,4 +708,4 @@ TeknoParrot must be set up as an emulator in HyperSpin 2 first. The title must c
 
 ---
 
-> v0.92 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v0.93 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.

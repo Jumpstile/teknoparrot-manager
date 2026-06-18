@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.92 BETA
+  TeknoParrot Manager  |  v0.93 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -174,7 +174,10 @@
     time you point the script at a new library, or after changing settings,
     to build confidence before committing. Answer Y to the prompt, or pass
     -DryRun on the command line to always preview (combine with -Unattended
-    to preview a scheduled run without any prompts).
+    to preview a scheduled run without any prompts). After a preview
+    finishes, the script asks "Apply these changes for real now?" -- answer
+    Y to immediately re-run the same mode for real with no further prompts,
+    or N to return to the menu without changing anything.
 
   - Auto-detect TeknoParrot path. On first run, instead of asking for the
     root folder immediately, the script scans common install locations
@@ -1888,6 +1891,6 @@
 
 
 ===============================================================================
-  v0.92 BETA -- Test one game after each run.
+  v0.93 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================

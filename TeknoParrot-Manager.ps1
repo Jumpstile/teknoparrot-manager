@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.92 BETA
+# TeknoParrot Manager  |  v0.93 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -65,7 +65,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # GitHub API User-Agent headers. Previously hardcoded in each of those spots
 # independently, which let the User-Agent strings drift out of sync with the
 # banner (caught stale at 0.70 during the v0.71 bump, and again at 0.76 here).
-$ScriptVersion = "0.92"
+$ScriptVersion = "0.93"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -5447,6 +5447,11 @@ Write-Log "Script started (v$ScriptVersion$(if ($Unattended) { ' [Unattended]' }
 $configPath         = Join-Path $PSScriptRoot "TeknoParrot-Manager.config.json"
 $tpRoot             = $null
 $mode               = $null   # "AutoSync", "RegisterOnly", "CrosshairSetup", "ReShadeSetup", "DgVoodoo2Setup", "GpuFixSetup", "FFBSetup", "BepInExUpdate", "Restore", or "HealthCheck"
+$pendingApplyMode   = $null   # set when a preview run's "Apply for real now?" prompt is answered Y -- tells the
+                               # next loop iteration to silently re-enter the same mode and run it for real,
+                               # instead of showing the menu again.
+$forceRealApply     = $false  # consumed once, right after $pendingApplyMode triggers a re-entry, to force
+                               # $dryRunActive = $false without re-asking the preview question.
 $zipSource               = $null   # AutoSync only (main collection)
 $zipSourceSupplementary  = $null   # AutoSync supplementary source (optional, separate library); $null or ''=not configured
 $gamesInstallFolder = $null   # always (the extracted-games root to register)
@@ -5951,6 +5956,18 @@ if ($datIndex.Count -gt 0 -and $gameProfilesDir) {
 try {
 while ($true) {
     $mode = $null
+
+    # A just-finished preview run's "Apply for real now?" prompt was
+    # answered Y -- silently re-enter the same mode instead of showing
+    # the menu again, and force a real (non-preview) pass this time.
+    if ($pendingApplyMode) {
+        $mode = $pendingApplyMode
+        $pendingApplyMode = $null
+        $forceRealApply = $true
+    }
+    if ($mode) {
+        # Skip straight past the menu -- fall through to the mode body below.
+    } else {
     Write-Host ""
     Write-Host "--------------------------------------------" -ForegroundColor Cyan
     Write-Host " Mode" -ForegroundColor Cyan
@@ -6000,6 +6017,7 @@ while ($true) {
         default { Write-Host "  Invalid choice. Enter 1-11." -ForegroundColor Yellow; continue }
     }
     if ($modeChoice -eq "11") { break }
+    }
 
     if ($mode -eq "Restore") {
         Write-Host ""
@@ -6446,11 +6464,18 @@ while ($true) {
     # ask once per AutoSync/Register run (skipped entirely when -Unattended,
     # which by definition never prompts -- pass -DryRun alongside
     # -Unattended to preview a scheduled run instead).
-    $dryRunActive = [bool]$DryRun
-    if (-not $Unattended -and -not $dryRunActive) {
-        Write-Host ""
-        $previewAns = (Read-Host "  Run in PREVIEW mode first? No changes will be written -- this just shows what AutoSync/Register would do. (Y/N)").Trim().ToUpper()
-        $dryRunActive = ($previewAns -eq "Y")
+    if ($forceRealApply) {
+        # Re-entering right after a preview run's "Apply for real now?" was
+        # answered Y -- skip the prompt entirely and force a real pass.
+        $dryRunActive   = $false
+        $forceRealApply = $false
+    } else {
+        $dryRunActive = [bool]$DryRun
+        if (-not $Unattended -and -not $dryRunActive) {
+            Write-Host ""
+            $previewAns = (Read-Host "  Run in PREVIEW mode first? No changes will be written -- this just shows what AutoSync/Register would do. (Y/N)").Trim().ToUpper()
+            $dryRunActive = ($previewAns -eq "Y")
+        }
     }
     if ($dryRunActive) { Write-Log "PREVIEW MODE active for this run -- no changes will be written." }
 
@@ -6948,7 +6973,7 @@ if ($dryRunActive) {
     Write-Host "   PREVIEW MODE -- no changes were written." -ForegroundColor Yellow
     Write-Host "============================================" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  Re-run without preview to apply these changes." -ForegroundColor Yellow
+    Write-Host "  You'll be asked below whether to apply these changes for real." -ForegroundColor Yellow
 } else {
     Write-Host "   Done." -ForegroundColor Cyan
     Write-Host "============================================" -ForegroundColor Cyan
@@ -7748,6 +7773,15 @@ Write-Host ("   - Custom crosshair images are in:  {0}" -f (Join-Path $PSScriptR
 Write-Host "   - You can add your own PNG images to that folder at any time."
 Write-Host "   - Run mode 4 (Crosshair setup) to preview and deploy them to lightgun games."
 Write-Host ""
+
+    if ($dryRunActive -and -not $Unattended) {
+        $applyNow = (Read-Host "  Apply these changes for real now? (Y/N)").Trim().ToUpper()
+        if ($applyNow -eq "Y") {
+            $pendingApplyMode = $mode
+            Write-Log "PreviewMode: user chose to apply for real -- re-entering $mode."
+            continue
+        }
+    }
 
     [void](Read-Host "  Press Enter to return to menu")
 } # end while ($true)

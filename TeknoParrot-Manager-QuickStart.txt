@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.92 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.93 BETA  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -70,8 +70,9 @@
      with free space, OUTSIDE both TeknoParrot and your ZIP source.
 
      Not sure yet? Answer Y to "Run in PREVIEW mode first?" to see what
-     AutoSync/Register would do with zero files written, then re-run for
-     real once you're happy with the result.
+     AutoSync/Register would do with zero files written. When it finishes,
+     answer Y to "Apply these changes for real now?" to commit them right
+     away -- no need to re-run the script from scratch.
 
   5. Choose what to extract (AutoSync only):
 

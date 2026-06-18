@@ -7,6 +7,16 @@
 
 
 -------------------------------------------------------------------------------
+  v0.93 BETA  (2026-06-18)
+-------------------------------------------------------------------------------
+
+  New: after a preview/dry-run finishes, the script now asks "Apply these
+  changes for real now?" -- answer Y to immediately re-run the same mode
+  for real (no menu, no preview prompt shown again), or N to return to
+  the menu without changing anything. Previously you had to manually
+  re-run the script and answer N to the preview question to apply.
+
+-------------------------------------------------------------------------------
   v0.92 BETA  (2026-06-18)
 -------------------------------------------------------------------------------
 
