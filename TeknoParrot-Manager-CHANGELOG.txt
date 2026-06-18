@@ -7,6 +7,29 @@
 
 
 -------------------------------------------------------------------------------
+  v0.89 BETA  (2026-06-18)
+-------------------------------------------------------------------------------
+
+  Extends the automatic compatibility checks added in v0.88, sourced from
+  the new structured replacement for the old game notes document
+  (eggmansworld.github.io/TeknoParrot):
+
+  - Path-length check generalized beyond Raw Thrills: added Yu-Gi-Oh!
+    Duel Terminal 6 (YugiohDT6U), which has its own hard-coded 64-character
+    install-path limit (TeknoParrotUI shows its own warning for this one
+    too, independently confirming the limit is real).
+  - File-version-pin check generalized from "iDmacDrv32.dll only" to any
+    file: added Tekken Tag Tournament 2 (ttt2), which needs EBOOT.BIN at
+    CRC32 3DD05100, not the commonly-seen 919F19EC. ACTION REQUIRED and
+    the saved action-items file now show which file is affected for each
+    flagged game, not just the CRC values.
+  - Checked the new source for other CRC/version facts -- found several
+    more CRC mentions (Block King Ball Shooter, Deathsmiles II, Lost Land
+    Adventure, Luigi's Mansion Arcade) but those describe known-valid
+    alternate file versions or antivirus false-positive identifiers, not
+    "this version is broken" cases, so they were not added as warnings.
+
+-------------------------------------------------------------------------------
   v0.88 BETA  (2026-06-18)
 -------------------------------------------------------------------------------
 

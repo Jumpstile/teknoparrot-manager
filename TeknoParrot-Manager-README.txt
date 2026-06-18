@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.88 BETA
+  TeknoParrot Manager  |  v0.89 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -214,13 +214,15 @@
     game that doesn't have it, and only the 64-bit stable line is ever
     used. See BEPINEX UPDATE CHECK below. Available as menu option 8.
 
-  - Path-length and DLL-version warnings (automatic). Every AutoSync/
+  - Path-length and file-version warnings (automatic). Every AutoSync/
     Register run automatically checks for two known compatibility traps
     and adds them to the ACTION REQUIRED summary with step-by-step fix
-    instructions: Raw Thrills games whose install path exceeds that
-    game's engine-specific length limit, and BlazBlue-series games whose
-    iDmacDrv32.dll is the wrong version (needs an older, specifically
-    pinned build, not the latest one). No action needed unless flagged.
+    instructions: specific games whose install path exceeds a hard-coded
+    engine-specific length limit (Raw Thrills titles, Yu-Gi-Oh! Duel
+    Terminal 6), and specific games needing an older, specifically
+    pinned version of a particular file rather than the latest one
+    (BlazBlue-series games and iDmacDrv32.dll; Tekken Tag Tournament 2
+    and EBOOT.BIN). No action needed unless flagged.
 
   - Per-game overrides. A JSON file lets you exclude games from sync or
     propagation, whitelist specific games for extraction, pin a game to a
@@ -1551,16 +1553,19 @@
                               and suggests specific titles to bind in
                               TeknoParrotUI for each type.
 
-    Path too long             Specific Raw Thrills games whose install path
-                              exceeds that title's engine-specific length
-                              limit and may fail to launch. Shows the exact
-                              short folder name to rename to.
+    Path too long             Specific games (Raw Thrills titles, Yu-Gi-Oh!
+                              Duel Terminal 6) whose install path exceeds a
+                              hard-coded engine-specific length limit and
+                              may fail to launch. Shows the exact short
+                              folder name to rename to.
 
-    iDmacDrv32.dll mismatch   Specific BlazBlue-series games whose
-                              iDmacDrv32.dll is not the required pinned
-                              version (these need an OLDER version, not the
-                              newest one). Shows the current and required
-                              CRC32 and where to get the right file.
+    File version mismatch     Specific games needing an OLDER, specifically
+                              pinned version of a particular file rather
+                              than the latest one (BlazBlue-series games and
+                              iDmacDrv32.dll; Tekken Tag Tournament 2 and
+                              EBOOT.BIN). Shows the file name, current and
+                              required CRC32, and where to get the right
+                              version.
 
   These last two checks run automatically on every AutoSync/Register run --
   no separate mode needed.
@@ -1856,6 +1861,6 @@
 
 
 ===============================================================================
-  v0.88 BETA -- Test one game after each run.
+  v0.89 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================

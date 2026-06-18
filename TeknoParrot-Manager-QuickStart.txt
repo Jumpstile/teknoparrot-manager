@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.88 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.89 BETA  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -123,13 +123,14 @@
                              reference game's bindings in TeknoParrotUI.
 
   Game won't launch (Raw     Check ACTION REQUIRED -- the script auto-detects
-  Thrills, e.g. H2Overdrive) if that game's install path is too long for its
-                             engine and tells you the exact short name to
+  Thrills, e.g. H2Overdrive, if that game's install path is too long for its
+  or Yu-Gi-Oh! DT6)          engine and tells you the exact short name to
                              rename the folder to.
 
-  Game shows a coin error    Check ACTION REQUIRED -- a few BlazBlue games
-  (BlazBlue series)          need a specific OLDER iDmacDrv32.dll. The script
-                             tells you the required version and where to get it.
+  Game shows a coin error    Check ACTION REQUIRED -- a few games (BlazBlue
+  or similar version-        series, Tekken Tag Tournament 2) need a specific
+  related failure            OLDER version of a particular file. The script
+                             tells you the required CRC32 and where to get it.
 
   Wrong fuzzy match          Delete the game's .xml from UserProfiles and add
                              a forceArchetype entry in overrides.json.

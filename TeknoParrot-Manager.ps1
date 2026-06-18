@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.88 BETA
+# TeknoParrot Manager  |  v0.89 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -65,7 +65,7 @@ param([switch]$Unattended)
 # GitHub API User-Agent headers. Previously hardcoded in each of those spots
 # independently, which let the User-Agent strings drift out of sync with the
 # banner (caught stale at 0.70 during the v0.71 bump, and again at 0.76 here).
-$ScriptVersion = "0.88"
+$ScriptVersion = "0.89"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -4010,25 +4010,29 @@ $RawThrillsPathLimits = @{
     'H2Overdrive'      = @{ Limit = 96; Suggested = 'H2OVER' }
     'JurassicPark'     = @{ Limit = 96; Suggested = 'JURASS' }
     'SnoCross'         = @{ Limit = 96; Suggested = 'WXGSNO' }
+    # Standalone case, not a Raw Thrills title but the same kind of
+    # hard-coded limit -- TPUI itself shows a warning dialog for this one.
+    'YugiohDT6U'       = @{ Limit = 64; Suggested = 'YUGIOH' }
 }
 
-# Five BlazBlue-series games need a SPECIFIC OLD CRC of iDmacDrv32.dll --
-# a newer version causes a coin error. This is the opposite of the usual
-# "stale dll" case TPUI already self-heals (deploying its own current
-# copy), so it is never auto-fixed here -- only flagged, since "fixing"
-# it in the wrong direction breaks the game.
-$IDmacDrv32Pins = @{
-    'BBCF'                    = 'F1FF8CC9'
-    'BBCP'                    = 'F1FF8CC9'
-    'BlazBlueContinuumShift'  = 'BCB0E7FE'
-    'BlazBlueContinuumShift2' = 'BCB0E7FE'
-    'BlazBlueCrossTagBattle'  = 'BCB0E7FE'
+# Specific games need a SPECIFIC OLD CRC of a specific file -- a newer
+# version causes a coin error or other failure. This is the opposite of
+# the usual "stale dll" case TPUI already self-heals (deploying its own
+# current copy), so it is never auto-fixed here -- only flagged, since
+# "fixing" it in the wrong direction breaks the game.
+$FileVersionPins = @{
+    'BBCF'                    = @{ FileName = 'iDmacDrv32.dll'; RequiredCrc = 'F1FF8CC9' }
+    'BBCP'                    = @{ FileName = 'iDmacDrv32.dll'; RequiredCrc = 'F1FF8CC9' }
+    'BlazBlueContinuumShift'  = @{ FileName = 'iDmacDrv32.dll'; RequiredCrc = 'BCB0E7FE' }
+    'BlazBlueContinuumShift2' = @{ FileName = 'iDmacDrv32.dll'; RequiredCrc = 'BCB0E7FE' }
+    'BlazBlueCrossTagBattle'  = @{ FileName = 'iDmacDrv32.dll'; RequiredCrc = 'BCB0E7FE' }
+    'ttt2'                    = @{ FileName = 'EBOOT.BIN';      RequiredCrc = '3DD05100' }
 }
 
 # Read-only scan for both checks above. Returns
 # [pscustomobject]@{ PathTooLong = @(...); DllMismatch = @(...) }.
 # Each PathTooLong entry: @{ Code; Length; Limit; Suggested }.
-# Each DllMismatch entry: @{ Code; Found; Required }.
+# Each DllMismatch entry: @{ Code; FileName; Found; Required }.
 function Get-CompatibilityWarnings {
     param([string]$UserProfilesDir)
 
@@ -4039,7 +4043,7 @@ function Get-CompatibilityWarnings {
 
     foreach ($pf in $profiles) {
         $code = $pf.BaseName
-        if (-not ($RawThrillsPathLimits.ContainsKey($code) -or $IDmacDrv32Pins.ContainsKey($code))) { continue }
+        if (-not ($RawThrillsPathLimits.ContainsKey($code) -or $FileVersionPins.ContainsKey($code))) { continue }
         try {
             $doc = Read-Xml $pf.FullName
             if (-not $doc.GameProfile) { continue }
@@ -4058,18 +4062,21 @@ function Get-CompatibilityWarnings {
                 }
             }
 
-            if ($IDmacDrv32Pins.ContainsKey($code)) {
+            if ($FileVersionPins.ContainsKey($code)) {
+                $pin     = $FileVersionPins[$code]
                 $exeDir  = [System.IO.Path]::GetDirectoryName($curPath)
-                $dllPath = Join-Path $exeDir "iDmacDrv32.dll"
+                $dllPath = Join-Path $exeDir $pin.FileName
                 if (Test-Path -LiteralPath $dllPath) {
                     try {
                         $foundCrc = Get-Crc32 -Path $dllPath
-                        $required = $IDmacDrv32Pins[$code]
-                        if ($foundCrc -ne $required) {
-                            $dllMismatch += [pscustomobject]@{ Code = $code; Found = $foundCrc; Required = $required }
+                        if ($foundCrc -ne $pin.RequiredCrc) {
+                            $dllMismatch += [pscustomobject]@{
+                                Code = $code; FileName = $pin.FileName
+                                Found = $foundCrc; Required = $pin.RequiredCrc
+                            }
                         }
                     } catch {
-                        Write-Log "CompatibilityWarnings: could not CRC iDmacDrv32.dll for $code -- $_"
+                        Write-Log "CompatibilityWarnings: could not CRC $($pin.FileName) for $code -- $_"
                     }
                 }
                 # File simply missing: not flagged. TPUI deploys its own
@@ -7344,21 +7351,22 @@ if ($hasAnyAction) {
     # -- 7. iDmacDrv32.dll version pins (BlazBlue-series) ----------------------
     if ($compatWarnings.DllMismatch.Count -gt 0) {
         Write-Host ""
-        Write-Host "  IDMACDRV32.DLL VERSION MISMATCH -- THESE GAMES NEED AN OLDER DLL" -ForegroundColor Yellow
+        Write-Host "  FILE VERSION MISMATCH -- THESE GAMES NEED A SPECIFIC OLDER FILE" -ForegroundColor Yellow
         Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
-        Write-Host "  These games require a SPECIFIC OLDER version of iDmacDrv32.dll." -ForegroundColor DarkCyan
-        Write-Host "  A newer version causes a coin error and the game will not start." -ForegroundColor DarkCyan
-        Write-Host "  This is the opposite of the usual fix -- do NOT let TeknoParrot" -ForegroundColor DarkCyan
-        Write-Host "  redeploy its current copy here, that makes it worse." -ForegroundColor DarkCyan
+        Write-Host "  These games require a SPECIFIC OLDER version of a particular file." -ForegroundColor DarkCyan
+        Write-Host "  A newer version causes errors (e.g. a coin error) and the game will" -ForegroundColor DarkCyan
+        Write-Host "  not start correctly. This is the opposite of the usual fix -- do NOT" -ForegroundColor DarkCyan
+        Write-Host "  let TeknoParrot redeploy its current copy here, that makes it worse." -ForegroundColor DarkCyan
         Write-Host ""
         Write-Host "  HOW TO FIX:" -ForegroundColor DarkCyan
         Write-Host "    1. Join the TeknoParrot Discord (linked from teknoparrot.com)." -ForegroundColor DarkCyan
-        Write-Host "    2. In the #fixes channel, ask for or search for iDmacDrv32.dll" -ForegroundColor DarkCyan
-        Write-Host "       matching the CRC32 shown below for your game." -ForegroundColor DarkCyan
-        Write-Host "    3. Replace iDmacDrv32.dll in the game's own folder with that file." -ForegroundColor DarkCyan
+        Write-Host "    2. In the #fixes channel, ask for or search for the file named" -ForegroundColor DarkCyan
+        Write-Host "       below, matching the required CRC32 shown for your game." -ForegroundColor DarkCyan
+        Write-Host "    3. Replace that file in the game's own folder with the one you got." -ForegroundColor DarkCyan
         Write-Host ""
         foreach ($w in ($compatWarnings.DllMismatch | Sort-Object Code)) {
             Write-Host ("  Game           : {0}" -f $w.Code) -ForegroundColor Yellow
+            Write-Host ("  File           : {0}" -f $w.FileName) -ForegroundColor DarkGray
             Write-Host ("  Current CRC32  : {0}" -f $w.Found) -ForegroundColor DarkGray
             Write-Host ("  Required CRC32 : {0}" -f $w.Required) -ForegroundColor Cyan
             Write-Host ""
@@ -7451,15 +7459,16 @@ if ($hasAnyAction) {
         }
     }
     if ($compatWarnings.DllMismatch.Count -gt 0) {
-        [void]$asb.AppendLine(""); [void]$asb.AppendLine("IDMACDRV32.DLL VERSION MISMATCH -- THESE GAMES NEED AN OLDER DLL")
+        [void]$asb.AppendLine(""); [void]$asb.AppendLine("FILE VERSION MISMATCH -- THESE GAMES NEED A SPECIFIC OLDER FILE")
         [void]$asb.AppendLine("----------------------------------------------------------")
         [void]$asb.AppendLine("How to fix: join the TeknoParrot Discord (linked from teknoparrot.com),")
-        [void]$asb.AppendLine("ask in #fixes for iDmacDrv32.dll matching the required CRC32 below, and")
-        [void]$asb.AppendLine("replace the file in the game's own folder. Do NOT let TeknoParrot")
+        [void]$asb.AppendLine("ask in #fixes for the file named below matching the required CRC32, and")
+        [void]$asb.AppendLine("replace that file in the game's own folder. Do NOT let TeknoParrot")
         [void]$asb.AppendLine("redeploy its current copy here -- that makes it worse, not better.")
         foreach ($w in ($compatWarnings.DllMismatch | Sort-Object Code)) {
             [void]$asb.AppendLine("")
             [void]$asb.AppendLine("  Game           : $($w.Code)")
+            [void]$asb.AppendLine("  File           : $($w.FileName)")
             [void]$asb.AppendLine("  Current CRC32  : $($w.Found)")
             [void]$asb.AppendLine("  Required CRC32 : $($w.Required)")
         }
