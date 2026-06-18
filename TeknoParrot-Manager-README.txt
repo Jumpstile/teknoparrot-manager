@@ -1111,6 +1111,12 @@
     this script, so the list of supported games can grow over time without
     needing a script update.
 
+    Controller support (per the plugin's own documentation): true force
+    feedback on FFB-capable wheels (Thrustmaster and similar), and rumble
+    on Xbox/XInput-style controllers and similar rumble-capable pads. The
+    plugin's own GUI (FFBPluginGUI.exe, not part of this script) has a
+    "Reverse Rumble" option if a controller's motors feel backwards.
+
     If a game is covered by BOTH mechanisms, the script lists every such
     game once and asks a single question: keep FFB Blaster (native) for
     all of them, or use the third-party plugin for all of them instead.

@@ -245,7 +245,9 @@
        TeknoParrot membership (teknoparrot.com/en/Home/Subscription) or it
        has no effect.
     2) Third-party plugin (mightymikem/FFBArcadePlugin) -- free, no
-       subscription needed, fetched live from GitHub every run.
+       subscription needed, fetched live from GitHub every run. Supports
+       true force feedback on FFB-capable wheels (Thrustmaster and
+       similar) and rumble on Xbox/XInput-style controllers.
   If a game is covered by both, you are asked once which to use for all
   such games -- it never silently picks one for you.
 
