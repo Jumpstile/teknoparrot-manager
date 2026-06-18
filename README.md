@@ -25,6 +25,7 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 - [ReShade Visual Enhancements](#reshade-visual-enhancements)
 - [dgVoodoo2 Legacy Compatibility](#dgvoodoo2-legacy-compatibility)
 - [GPU Compatibility Fixes](#gpu-compatibility-fixes)
+- [Force Feedback (FFB) Setup](#force-feedback-ffb-setup)
 - [LaunchBox Export](#launchbox-export)
 - [HyperSpin 2 Export](#hyperspin-2-export)
 - [RetroBat / Batocera](#retrobat--batocera)
