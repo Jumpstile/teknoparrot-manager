@@ -7,6 +7,27 @@
 
 
 -------------------------------------------------------------------------------
+  v0.90 BETA  (2026-06-18)
+-------------------------------------------------------------------------------
+
+  New automatic check: known GPU-vendor incompatibilities.
+
+  - Went back through the structured gamenotes replacement site
+    (eggmansworld.github.io/TeknoParrot) looking at its per-vendor GPU
+    status fields (a clean NO_INFO/OK/WITH_FIX/HAS_ISSUES/NO enum, not
+    free text) rather than just CRC/version facts this time. Found 16
+    games confirmed not to work on AMD and 45 confirmed not to work on
+    Intel (NVIDIA has no known-broken titles in this data).
+  - Every AutoSync/Register run now silently auto-detects your GPU
+    vendor (same WMI detection GPU Fix setup already used -- extracted
+    into a shared, read-only, non-prompting Get-DetectedGpuVendor so the
+    automatic check never blocks on user input) and flags any registered
+    game confirmed broken on that vendor in ACTION REQUIRED. This is
+    informational only -- there's no fix to apply, just confirmation
+    that a problem you're hitting is a known limitation, not something
+    you set up wrong.
+
+-------------------------------------------------------------------------------
   v0.89 BETA  (2026-06-18)
 -------------------------------------------------------------------------------
 

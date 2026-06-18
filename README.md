@@ -59,7 +59,7 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 - **GPU fixes** — detects your GPU (AMD / NVIDIA / Intel) and applies the matching vendor fix to every registered game that has one.
 - **Force feedback (FFB)** — native FFB Blaster (needs a paid TeknoParrot membership) and a free third-party plugin (fetched live, no subscription needed), covering different games. If a game is covered by both, you're asked once which to use for all such games.
 - **BepInEx update check** — checks games that already have BepInEx installed against the latest stable 64-bit release and offers a batched update. Never installs BepInEx fresh.
-- **Automatic compatibility warnings** — every run checks for known install-path-length limits (Raw Thrills titles, Yu-Gi-Oh! Duel Terminal 6) and pinned-file-version requirements (BlazBlue/iDmacDrv32.dll, Tekken Tag Tournament 2/EBOOT.BIN), with step-by-step fix instructions in ACTION REQUIRED.
+- **Automatic compatibility warnings** — every run checks for known install-path-length limits (Raw Thrills titles, Yu-Gi-Oh! Duel Terminal 6), pinned-file-version requirements (BlazBlue/iDmacDrv32.dll, Tekken Tag Tournament 2/EBOOT.BIN), and known GPU-vendor incompatibilities (AMD/Intel), with details in ACTION REQUIRED.
 - **LaunchBox / HyperSpin 2 export** — builds import files for both frontends after each run.
 - **Unattended mode** — `-Unattended` flag for scheduled overnight runs.
 - **Safe by design** — timestamped backups before every run, free-space check, full log, one-click restore.
@@ -550,6 +550,7 @@ At the end of every run the script prints — and saves to `TeknoParrot-Manager-
 | **Set up controls** | Control types with no reference game bound yet. Shows which games are waiting and suggests titles to bind. |
 | **Path too long** | Specific games (Raw Thrills titles, Yu-Gi-Oh! Duel Terminal 6) whose install path exceeds a hard-coded engine-specific limit. Shows the exact short folder name to rename to. Checked automatically every run. |
 | **File version mismatch** | Specific games needing an OLDER pinned version of a particular file rather than the latest (BlazBlue-series/`iDmacDrv32.dll`, Tekken Tag Tournament 2/`EBOOT.BIN`). Shows the file name, current/required CRC32, and where to get the right version. Checked automatically every run. |
+| **GPU incompatibility** | Specific registered games confirmed not to work on your detected GPU vendor (AMD or Intel). Informational only — no fix exists. Checked automatically every run; silently skipped if the vendor can't be auto-detected. |
 
 ---
 
@@ -675,4 +676,4 @@ TeknoParrot must be set up as an emulator in HyperSpin 2 first. The title must c
 
 ---
 
-> v0.89 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v0.90 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.

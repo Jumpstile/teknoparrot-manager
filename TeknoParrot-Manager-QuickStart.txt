@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.89 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.90 BETA  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -131,6 +131,11 @@
   or similar version-        series, Tekken Tag Tournament 2) need a specific
   related failure            OLDER version of a particular file. The script
                              tells you the required CRC32 and where to get it.
+
+  Game just won't work       Check ACTION REQUIRED -- a few specific games
+  no matter what you try     are confirmed not to work on AMD or Intel GPUs.
+                             If yours is listed there, it's a known
+                             limitation, not something you're doing wrong.
 
   Wrong fuzzy match          Delete the game's .xml from UserProfiles and add
                              a forceArchetype entry in overrides.json.

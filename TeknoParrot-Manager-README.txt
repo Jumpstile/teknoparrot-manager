@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.89 BETA
+  TeknoParrot Manager  |  v0.90 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -214,15 +214,20 @@
     game that doesn't have it, and only the 64-bit stable line is ever
     used. See BEPINEX UPDATE CHECK below. Available as menu option 8.
 
-  - Path-length and file-version warnings (automatic). Every AutoSync/
-    Register run automatically checks for two known compatibility traps
-    and adds them to the ACTION REQUIRED summary with step-by-step fix
-    instructions: specific games whose install path exceeds a hard-coded
-    engine-specific length limit (Raw Thrills titles, Yu-Gi-Oh! Duel
-    Terminal 6), and specific games needing an older, specifically
-    pinned version of a particular file rather than the latest one
-    (BlazBlue-series games and iDmacDrv32.dll; Tekken Tag Tournament 2
-    and EBOOT.BIN). No action needed unless flagged.
+  - Path-length, file-version, and GPU compatibility warnings (automatic).
+    Every AutoSync/Register run automatically checks for known
+    compatibility traps and adds them to the ACTION REQUIRED summary:
+      (1) specific games whose install path exceeds a hard-coded
+          engine-specific length limit (Raw Thrills titles, Yu-Gi-Oh!
+          Duel Terminal 6) -- shows the exact short folder name to use.
+      (2) specific games needing an older, specifically pinned version
+          of a particular file rather than the latest one (BlazBlue-
+          series games and iDmacDrv32.dll; Tekken Tag Tournament 2 and
+          EBOOT.BIN) -- shows the required CRC32 and where to get it.
+      (3) specific games confirmed NOT to work on your detected GPU
+          vendor (AMD or Intel) -- informational only, no fix exists,
+          but lets you know before you spend time troubleshooting blind.
+    No action needed unless flagged.
 
   - Per-game overrides. A JSON file lets you exclude games from sync or
     propagation, whitelist specific games for extraction, pin a game to a
@@ -1519,7 +1524,7 @@
 -------------------------------------------------------------------------------
 
   At the end of every run, the script prints an ACTION REQUIRED section
-  listing everything that needs your attention. It has up to seven parts:
+  listing everything that needs your attention. It has up to eight parts:
 
     Not in TeknoParrot        Game folders whose executables did not match
                               any TeknoParrot profile. Informational -- no
@@ -1567,8 +1572,16 @@
                               required CRC32, and where to get the right
                               version.
 
-  These last two checks run automatically on every AutoSync/Register run --
-  no separate mode needed.
+    GPU incompatibility       Specific registered games confirmed NOT to
+                              work on your detected GPU vendor (AMD or
+                              Intel -- NVIDIA has no known-broken titles
+                              in this data). Informational only -- no fix
+                              exists, this just saves you troubleshooting
+                              time on something that was never going to work.
+
+  These last three checks run automatically on every AutoSync/Register
+  run -- no separate mode needed. The GPU check silently skips if your
+  GPU vendor cannot be auto-detected -- it never prompts mid-run.
 
   At the end of every registration run that has action items, the same list
   is also saved to TeknoParrot-Manager-ActionItems.txt next to the script so
@@ -1861,6 +1874,6 @@
 
 
 ===============================================================================
-  v0.89 BETA -- Test one game after each run.
+  v0.90 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================

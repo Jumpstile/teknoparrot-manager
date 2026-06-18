@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.89 BETA
+# TeknoParrot Manager  |  v0.90 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -65,7 +65,7 @@ param([switch]$Unattended)
 # GitHub API User-Agent headers. Previously hardcoded in each of those spots
 # independently, which let the User-Agent strings drift out of sync with the
 # banner (caught stale at 0.70 during the v0.71 bump, and again at 0.76 here).
-$ScriptVersion = "0.89"
+$ScriptVersion = "0.90"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -1510,19 +1510,13 @@ function ConvertTo-XPathStringLiteral {
     return 'concat(' + ($parts -join ',"''",') + ')'
 }
 
-# =============================================================================
-# GPU Fix Setup: detect GPU vendor, scan TeknoParrot GameProfiles for fix
-# fields (so newly added games are covered automatically), and apply the
-# appropriate values to every registered UserProfile XML.
-function Invoke-GpuFixSetup {
-    param(
-        [string]$UserProfilesDir,
-        [string]$TpRoot
-    )
-
-    # -- GPU detection ----------------------------------------------------------
-    Write-Host ""
-    Write-Host "  Detecting GPU..." -ForegroundColor DarkGray
+# Read-only, best-effort GPU vendor auto-detect via WMI -- no prompting.
+# Returns [pscustomobject]@{ Vendor; Name } (Vendor may be $null if
+# undetected). Shared by Invoke-GpuFixSetup (which falls back to an
+# interactive prompt on failure) and the automatic compatibility check
+# (which silently skips on failure, since it must not block an
+# unattended-style run with a prompt).
+function Get-DetectedGpuVendor {
     $gpuVendor = $null
     $gpuName   = $null
     try {
@@ -1541,8 +1535,27 @@ function Invoke-GpuFixSetup {
             elseif ($gpuName -imatch 'intel')                      { $gpuVendor = 'Intel'  }
         }
     } catch {
-        Write-Host ("  WARNING: GPU detection failed -- {0}" -f $_) -ForegroundColor Yellow
+        Write-Log "Get-DetectedGpuVendor: WMI detection failed -- $_"
     }
+    return [pscustomobject]@{ Vendor = $gpuVendor; Name = $gpuName }
+}
+
+# =============================================================================
+# GPU Fix Setup: detect GPU vendor, scan TeknoParrot GameProfiles for fix
+# fields (so newly added games are covered automatically), and apply the
+# appropriate values to every registered UserProfile XML.
+function Invoke-GpuFixSetup {
+    param(
+        [string]$UserProfilesDir,
+        [string]$TpRoot
+    )
+
+    # -- GPU detection ----------------------------------------------------------
+    Write-Host ""
+    Write-Host "  Detecting GPU..." -ForegroundColor DarkGray
+    $detected  = Get-DetectedGpuVendor
+    $gpuVendor = $detected.Vendor
+    $gpuName   = $detected.Name
 
     if ($gpuVendor) {
         Write-Host ("  Detected : {0} ({1})" -f $gpuVendor, $gpuName) -ForegroundColor DarkGray
@@ -4029,21 +4042,60 @@ $FileVersionPins = @{
     'ttt2'                    = @{ FileName = 'EBOOT.BIN';      RequiredCrc = '3DD05100' }
 }
 
-# Read-only scan for both checks above. Returns
-# [pscustomobject]@{ PathTooLong = @(...); DllMismatch = @(...) }.
+# Specific games are confirmed NOT to work on specific GPU vendors -- not
+# a setup mistake, no fix exists, so this is informational only (unlike
+# the other two checks, there's nothing to do except know about it before
+# troubleshooting blind). NVIDIA has no known-broken titles in this data.
+$GpuIncompatibleGames = @{
+    'AMD' = @(
+        'BorderBreakScramble', 'GoldenTeeLive2011', 'GoldenTeeLive2012', 'GoldenTeeLive2013',
+        'GoldenTeeLive2014', 'GoldenTeeLive2015', 'GoldenTeeLive2016', 'GoldenTeeLive2017',
+        'GoldenTeeLive2018', 'OCCPinball', 'PowerPuttLive2012', 'PowerPuttLive2013',
+        'ProjectDiva', 'SonicDashExtreme', 'TargetTossProLawndarts', 'WonderlandWars'
+    )
+    'Intel' = @(
+        'abc', 'abcELF2', 'BorderBreakScramble', 'ChronoRegalia', 'Drakons', 'FrenzyExpress',
+        'GoldenTeeLive2011', 'GoldenTeeLive2012', 'GoldenTeeLive2013', 'GoldenTeeLive2014',
+        'GoldenTeeLive2015', 'GoldenTeeLive2016', 'GoldenTeeLive2017', 'GoldenTeeLive2018',
+        'GoldenTeeLive2019', 'HydroThunder', 'IDZTP', 'IDZv2TP', 'LGJS', 'LGJSElf2', 'LGJ',
+        'SegaOlympic2016', 'SegaOlympic2020', 'MIB', 'OffroadThunder', 'OCCPinball',
+        'PowerPuttLive2012', 'PowerPuttLive2013', 'ProjectDiva', 'PullTheTrigger',
+        'ShiningForceCross', 'ShiningForceCrossElysion', 'ShiningForceCrossRaid',
+        'ShiningForceCrossExlesia', 'SkyCurser', 'SonicBlastHeroes', 'SonicDashExtreme',
+        'SpaceWarp66', 'TargetTossProLawndarts', 'TempleRun', 'TokyoCop', '2Spicy',
+        '2SpicyElf2', 'WildWestShootout', 'WonderlandWars'
+    )
+}
+
+# Read-only scan for all three checks above. Returns
+# [pscustomobject]@{ PathTooLong = @(...); DllMismatch = @(...); GpuIncompatible = @(...) }.
 # Each PathTooLong entry: @{ Code; Length; Limit; Suggested }.
 # Each DllMismatch entry: @{ Code; FileName; Found; Required }.
+# Each GpuIncompatible entry: @{ Code; Vendor }.
 function Get-CompatibilityWarnings {
     param([string]$UserProfilesDir)
 
     $pathTooLong  = @()
     $dllMismatch  = @()
+    $gpuIncompatible = @()
+
+    # Best-effort, silent GPU detection -- never prompts. If undetected
+    # (or vendor is NVIDIA, which has no known-broken titles here), the
+    # GPU-incompatibility check is simply skipped for this run.
+    $detectedVendor = (Get-DetectedGpuVendor).Vendor
+    $gpuList = if ($detectedVendor -and $GpuIncompatibleGames.ContainsKey($detectedVendor)) {
+        [System.Collections.Generic.HashSet[string]]::new(
+            [string[]]$GpuIncompatibleGames[$detectedVendor], [System.StringComparer]::OrdinalIgnoreCase)
+    } else { $null }
+
     $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
                   Where-Object { $_.Directory.Name -ne "FullBackup" })
 
     foreach ($pf in $profiles) {
         $code = $pf.BaseName
-        if (-not ($RawThrillsPathLimits.ContainsKey($code) -or $FileVersionPins.ContainsKey($code))) { continue }
+        $relevant = $RawThrillsPathLimits.ContainsKey($code) -or $FileVersionPins.ContainsKey($code) -or
+                    ($gpuList -and $gpuList.Contains($code))
+        if (-not $relevant) { continue }
         try {
             $doc = Read-Xml $pf.FullName
             if (-not $doc.GameProfile) { continue }
@@ -4082,12 +4134,16 @@ function Get-CompatibilityWarnings {
                 # File simply missing: not flagged. TPUI deploys its own
                 # current copy at first launch -- nothing to warn about yet.
             }
+
+            if ($gpuList -and $gpuList.Contains($code)) {
+                $gpuIncompatible += [pscustomobject]@{ Code = $code; Vendor = $detectedVendor }
+            }
         } catch {
             Write-Log "CompatibilityWarnings: could not parse $($pf.Name) -- $_"
         }
     }
 
-    return [pscustomobject]@{ PathTooLong = $pathTooLong; DllMismatch = $dllMismatch }
+    return [pscustomobject]@{ PathTooLong = $pathTooLong; DllMismatch = $dllMismatch; GpuIncompatible = $gpuIncompatible }
 }
 
 # =============================================================================
@@ -7178,7 +7234,8 @@ $hasAnyAction = ($manualRegData.Count -gt 0) -or ($amb2.Count -gt 0) -or
                 ($nf.Count -gt 0) -or ($noArchetypeItems.Count -gt 0) -or
                 ($result.Unmatched.Count -gt 0) -or
                 ($compatWarnings.PathTooLong.Count -gt 0) -or
-                ($compatWarnings.DllMismatch.Count -gt 0)
+                ($compatWarnings.DllMismatch.Count -gt 0) -or
+                ($compatWarnings.GpuIncompatible.Count -gt 0)
 
 if ($hasAnyAction) {
     Write-Host ""
@@ -7373,6 +7430,28 @@ if ($hasAnyAction) {
         }
     }
 
+    # -- 8. Games known not to work on the detected GPU vendor (informational) -
+    if ($compatWarnings.GpuIncompatible.Count -gt 0) {
+        $gpuVendorSeen = $compatWarnings.GpuIncompatible[0].Vendor
+        Write-Host ""
+        Write-Host ("  KNOWN {0} GPU INCOMPATIBILITY -- NO FIX AVAILABLE" -f $gpuVendorSeen.ToUpper()) -ForegroundColor Yellow
+        Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
+        Write-Host ("  These registered games are confirmed NOT to work on {0} GPUs." -f $gpuVendorSeen) -ForegroundColor DarkCyan
+        Write-Host "  This is a known limitation of the game/emulation layer, not a setup" -ForegroundColor DarkCyan
+        Write-Host "  mistake on your end -- there is no fix to apply. Informational only." -ForegroundColor DarkCyan
+        Write-Host ""
+        $lineLen = 70; $line = "  "; $firstG = $true
+        foreach ($w in ($compatWarnings.GpuIncompatible | Sort-Object Code | ForEach-Object { $_.Code })) {
+            $add = if ($firstG) { $w } else { ", $w" }
+            if (($line + $add).Length -gt $lineLen) {
+                Write-Host $line -ForegroundColor DarkGray
+                $line = "  $w"; $firstG = $false
+            } else { $line += $add; $firstG = $false }
+        }
+        if ($line.Trim()) { Write-Host $line -ForegroundColor DarkGray }
+        Write-Host ""
+    }
+
     Write-Host "============================================" -ForegroundColor Yellow
 
     $actionPath = Join-Path $PSScriptRoot "TeknoParrot-Manager-ActionItems.txt"
@@ -7472,6 +7551,14 @@ if ($hasAnyAction) {
             [void]$asb.AppendLine("  Current CRC32  : $($w.Found)")
             [void]$asb.AppendLine("  Required CRC32 : $($w.Required)")
         }
+    }
+    if ($compatWarnings.GpuIncompatible.Count -gt 0) {
+        $gpuVendorSeen = $compatWarnings.GpuIncompatible[0].Vendor
+        [void]$asb.AppendLine(""); [void]$asb.AppendLine("KNOWN $($gpuVendorSeen.ToUpper()) GPU INCOMPATIBILITY -- NO FIX AVAILABLE (informational)")
+        [void]$asb.AppendLine("----------------------------------------------------------")
+        [void]$asb.AppendLine("These games are confirmed not to work on $gpuVendorSeen GPUs. Known")
+        [void]$asb.AppendLine("limitation, not a setup mistake -- there is no fix to apply.")
+        foreach ($w in ($compatWarnings.GpuIncompatible | Sort-Object Code)) { [void]$asb.AppendLine("  $($w.Code)") }
     }
     try {
         [System.IO.File]::WriteAllText($actionPath, $asb.ToString(), (New-Object System.Text.UTF8Encoding $false))
