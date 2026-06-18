@@ -7,6 +7,27 @@
 
 
 -------------------------------------------------------------------------------
+  v0.92 BETA  (2026-06-18)
+-------------------------------------------------------------------------------
+
+  New: Preview / dry-run mode. Before AutoSync or Register only does
+  anything, you can now preview what it would do -- which games would
+  extract, which would register and to which profile, which broken paths
+  would be repaired, which controls would propagate -- with zero files
+  written. Answer Y to "Run in PREVIEW mode first?" when prompted, or pass
+  -DryRun on the command line (combine with -Unattended to preview a
+  scheduled run with no prompts). No backup is created in preview mode
+  (nothing needs restoring), and the LaunchBox/HyperSpin 2 export,
+  thumbnail download, and GPU fix follow-up offers are skipped since
+  there's nothing yet to act on.
+
+  New: the BepInEx Update Check menu (mode 8) now shows a live-fetched
+  example list of games known to require BepInEx, checked against the
+  eggmansworld.github.io compatibility data each time the mode is opened,
+  instead of a hardcoded list that could go stale as new games gain
+  BepInEx support.
+
+-------------------------------------------------------------------------------
   v0.91 BETA  (2026-06-18)
 -------------------------------------------------------------------------------
 

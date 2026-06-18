@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.91 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.92 BETA  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -68,6 +68,10 @@
 
   4. Answer the folder prompts. For AutoSync, choose a LOCAL staging folder
      with free space, OUTSIDE both TeknoParrot and your ZIP source.
+
+     Not sure yet? Answer Y to "Run in PREVIEW mode first?" to see what
+     AutoSync/Register would do with zero files written, then re-run for
+     real once you're happy with the result.
 
   5. Choose what to extract (AutoSync only):
 
@@ -323,6 +327,10 @@
   Restore mode cannot run unattended -- it needs you to pick a backup.
   The -Unattended switch always runs AutoSync or RegisterOnly depending on
   whether a ZIP source folder is configured.
+
+  Add -DryRun to preview a scheduled run with zero files written:
+
+      .\TeknoParrot-Manager.ps1 -Unattended -DryRun
 
   Full scheduling instructions: TeknoParrot-Manager-README.txt.
 

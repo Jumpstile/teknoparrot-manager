@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.91 BETA
+  TeknoParrot Manager  |  v0.92 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -164,6 +164,18 @@
     propagation automatically, and logs everything. Designed for scheduling
     as a Windows Task to run overnight when new ZIPs appear on the NAS.
 
+  - Preview / dry-run mode. Before AutoSync or Register only does anything,
+    you can choose to preview what it would do -- which games would extract,
+    which would register and to which profile, which broken paths would be
+    repaired, which controls would propagate -- without writing a single
+    file. No backup is created (nothing needs restoring), and the optional
+    follow-up offers (LaunchBox/HyperSpin export, thumbnail download, GPU
+    fix) are skipped since there is nothing yet to act on. Useful the first
+    time you point the script at a new library, or after changing settings,
+    to build confidence before committing. Answer Y to the prompt, or pass
+    -DryRun on the command line to always preview (combine with -Unattended
+    to preview a scheduled run without any prompts).
+
   - Auto-detect TeknoParrot path. On first run, instead of asking for the
     root folder immediately, the script scans common install locations
     (LaunchBox emulators folder, drive roots, Program Files) for
@@ -207,12 +219,12 @@
     SETUP below for full details. Available as menu option 7.
 
   - BepInEx update check. BepInEx is a third-party Unity plugin/modding
-    framework some games need (Family Guy Bowling, Mars Sortie, NERF Arcade,
-    Rainbow BomberGirl, Super Bikes 3, TMNT, and others). This checks every
-    game that already has BepInEx installed against the latest stable
-    release and offers one batched update. Never installs BepInEx into a
-    game that doesn't have it, and only the 64-bit stable line is ever
-    used. See BEPINEX UPDATE CHECK below. Available as menu option 8.
+    framework some games need (a live-fetched example list is shown in the
+    menu). This checks every game that already has BepInEx installed
+    against the latest stable release and offers one batched update. Never
+    installs BepInEx into a game that doesn't have it, and only the 64-bit
+    stable line is ever used. See BEPINEX UPDATE CHECK below. Available as
+    menu option 8.
 
   - Path-length, file-version, and GPU compatibility warnings (automatic).
     Every AutoSync/Register run automatically checks for known
@@ -1186,10 +1198,12 @@
   What is BepInEx?
 
     BepInEx is a third-party Unity plugin/modding framework -- not part of
-    TeknoParrot itself. A handful of TeknoParrot games (Family Guy Bowling,
-    Mars Sortie, NERF Arcade, Rainbow BomberGirl, Super Bikes 3, TMNT, and
-    others) need a community plugin running on top of BepInEx to get
-    controls or fixes working.
+    TeknoParrot itself. A handful of TeknoParrot games need a community
+    plugin running on top of BepInEx to get controls or fixes working.
+    Mode 8 shows a live-fetched list of known examples (checked against
+    the eggmansworld.github.io compatibility data each time you open this
+    mode, so it keeps tracking new games as they're added upstream rather
+    than going stale).
 
   What mode 8 does (and does not do)
 
@@ -1874,6 +1888,6 @@
 
 
 ===============================================================================
-  v0.91 BETA -- Test one game after each run.
+  v0.92 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================

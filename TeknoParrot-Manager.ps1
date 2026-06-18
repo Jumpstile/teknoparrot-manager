@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.91 BETA
+# TeknoParrot Manager  |  v0.92 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -59,13 +59,13 @@
 #   - Games extracted into per-game subfolders (AutoSync can do this).
 # =============================================================================
 
-param([switch]$Unattended)
+param([switch]$Unattended, [switch]$DryRun)
 
 # Single source of truth for the version string used in the banner, log, and
 # GitHub API User-Agent headers. Previously hardcoded in each of those spots
 # independently, which let the User-Agent strings drift out of sync with the
 # banner (caught stale at 0.70 during the v0.71 bump, and again at 0.76 here).
-$ScriptVersion = "0.91"
+$ScriptVersion = "0.92"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -149,6 +149,16 @@ function Save-Xml {
     } else {
         [System.IO.File]::Move($tmpPath, $path)
     }
+}
+
+# Dry-run-aware wrapper around Save-Xml, used by every write site that
+# participates in the AutoSync/Register preview mode (-DryRun). Centralizing
+# the gate here means every call site converts with a one-line change and
+# there is exactly one place that can accidentally write during a preview.
+function Save-XmlMaybe {
+    param([System.Xml.XmlDocument]$doc, [string]$path, [bool]$DryRun)
+    if ($DryRun) { Write-Log "DryRun: would save $path"; return }
+    Save-Xml $doc $path
 }
 
 # Reads the primary ExecutableName from a profile XML using a fast regex pass,
@@ -2129,7 +2139,7 @@ function Expand-ZipFileSafe {
 # If $onlySync is non-empty, only ZIPs whose base name is in the list are extracted.
 function Invoke-AutoSync {
     param([string]$zipSource, [string]$installFolder, [string]$syncStatePath,
-          $noSync = @(), $onlySync = @(), [bool]$retroBat = $false)
+          $noSync = @(), $onlySync = @(), [bool]$retroBat = $false, [bool]$DryRun = $false)
 
     $syncState = @{}
     if (Test-Path -LiteralPath $syncStatePath) {
@@ -2152,10 +2162,10 @@ function Invoke-AutoSync {
                 Write-Host "    $($sd.Path)  ($($sd.Count) ZIPs)" -ForegroundColor DarkCyan
             }
         }
-        return @{ Synced = 0; UpToDate = 0; Failed = 0; Skipped = 0 }
+        return @{ Synced = 0; UpToDate = 0; Failed = 0; Skipped = 0; WouldSync = 0 }
     }
 
-    $synced = 0; $upToDate = 0; $failed = 0; $skipped = 0
+    $synced = 0; $upToDate = 0; $failed = 0; $skipped = 0; $wouldSync = 0
 
     if ($onlySync.Count -gt 0) {
         Write-Host "  Whitelist active: only extracting $($onlySync.Count) game(s) listed in onlySync." -ForegroundColor Cyan
@@ -2248,6 +2258,13 @@ function Invoke-AutoSync {
 
         if (-not $needsSync) { Write-Host "  Up to date : $rawName" -ForegroundColor DarkGray; $upToDate++; continue }
 
+        if ($DryRun) {
+            Write-Host "  Would extract ($reason) : $rawName" -ForegroundColor Yellow
+            Write-Log "AutoSync DryRun: would extract $rawName ($reason)"
+            $wouldSync++
+            continue
+        }
+
         Write-Host "  Extracting ($reason) : $rawName" -ForegroundColor Yellow
         Write-Log "AutoSync: extracting $rawName ($reason)"
 
@@ -2322,10 +2339,12 @@ function Invoke-AutoSync {
         }
     }
 
-    try { [System.IO.File]::WriteAllText($syncStatePath, ($syncState | ConvertTo-Json -Depth 3), (New-Object System.Text.UTF8Encoding $false)) }
-    catch { Write-Log "AutoSync: WARNING -- could not save sync state: $_" }
+    if (-not $DryRun) {
+        try { [System.IO.File]::WriteAllText($syncStatePath, ($syncState | ConvertTo-Json -Depth 3), (New-Object System.Text.UTF8Encoding $false)) }
+        catch { Write-Log "AutoSync: WARNING -- could not save sync state: $_" }
+    }
 
-    return @{ Synced = $synced; UpToDate = $upToDate; Failed = $failed; Skipped = $skipped }
+    return @{ Synced = $synced; UpToDate = $upToDate; Failed = $failed; Skipped = $skipped; WouldSync = $wouldSync }
 }
 
 # Builds a lookup of TeknoParrot profiles keyed by their executable name(s)
@@ -3077,12 +3096,46 @@ function Invoke-FFBBlasterSetup {
 # BEPINEX UPDATE CHECKER  (Unity modding/plugin framework some games need)
 # =============================================================================
 # BepInEx is a third-party Unity plugin/modding framework. Several
-# TeknoParrot games (Family Guy Bowling, Mars Sortie, NERF Arcade, Rainbow
-# BomberGirl, Super Bikes 3, TMNT, among others) require a community
-# BepInEx plugin to get controls or fixes working. This script never
-# installs BepInEx fresh into a game -- only checks/updates EXISTING
-# installs, and only the x64 stable line (never x86, never a pre-release),
-# per explicit project policy.
+# TeknoParrot games require a community BepInEx plugin to get controls or
+# fixes working (the live-fetched example list is shown in the menu --
+# see Get-BepInExRequiredGames below). This script never installs BepInEx
+# fresh into a game -- only checks/updates EXISTING installs, and only
+# the x64 stable line (never x86, never a pre-release), per explicit
+# project policy.
+
+# Fetches the live list of games known to require BepInEx, for display
+# only (menu text, not used to gate any actual logic -- the update check
+# itself only ever acts on games that already have BepInEx installed).
+# Source: eggmansworld.github.io/TeknoParrot, the structured replacement
+# for the old plain-text gamenotes doc, already used for the v0.88-v0.90
+# compatibility tables. That site has no clean "requires BepInEx" tag, so
+# this matches a tight phrase pattern against the free-text notes field
+# instead -- verified against the live data to reproduce the same games
+# this script used to hardcode here, so it tracks new additions without
+# becoming stale. Returns an empty array (never a hardcoded fallback list)
+# if the fetch fails -- the caller falls back to generic wording.
+function Get-BepInExRequiredGames {
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try {
+            $resp = Invoke-WebRequest -Uri 'https://eggmansworld.github.io/TeknoParrot/' `
+                        -UseBasicParsing -TimeoutSec 20 -Headers @{ 'User-Agent' = "TeknoParrot-Manager/$ScriptVersion" }
+            $m = [regex]::Match($resp.Content, '(?s)<script type="application/json" id="game-data">(.*?)</script>')
+            if (-not $m.Success) { return @() }
+            $games = $m.Groups[1].Value | ConvertFrom-Json
+            $pattern = '(?i)requires?\s+(the\s+)?(latest\s+)?BepInEx|must\s+use\s+(the\s+)?(latest\s+)?BepInEx'
+            return @($games | Where-Object { $_.notes -and $_.notes -match $pattern } |
+                      Select-Object -ExpandProperty game_name)
+        } catch {
+            $status = 0
+            if ($_.Exception.Response) { try { $status = [int]$_.Exception.Response.StatusCode } catch {} }
+            if ($attempt -ge 3 -or ($status -ge 400 -and $status -lt 500)) {
+                Write-Log "BepInExRequiredGames: fetch failed -- $_"; return @()
+            }
+            Start-Sleep -Seconds 5
+        }
+    }
+    return @()
+}
 
 # Fetches the latest STABLE x64 BepInEx release info, fetch-with-retry
 # shape identical to Get-EggmanDatRelease/Get-FFBPluginGameMap.
@@ -3310,7 +3363,8 @@ function Invoke-BepInExUpdateCheck {
 function Register-Games {
     param([string]$userProfilesDir, [string]$installFolder, [hashtable]$profileIndex,
           [string]$gameProfilesDir = '', [hashtable]$datIndex = $null,
-          [System.Collections.Generic.HashSet[string]]$profileSet = $null)
+          [System.Collections.Generic.HashSet[string]]$profileSet = $null,
+          [bool]$DryRun = $false)
 
     if ($null -eq $datIndex) { $datIndex = @{} }
 
@@ -3408,7 +3462,7 @@ function Register-Games {
                             [void]$tpl.GameProfile.PrependChild($gp)
                         }
                         $gp.InnerText = $exe.FullName
-                        Save-Xml $tpl $userProfile
+                        Save-XmlMaybe $tpl $userProfile $DryRun
                         [void]$registered.Add([pscustomobject]@{
                             Code        = $code
                             GamePath    = $exe.FullName
@@ -3508,7 +3562,7 @@ function Register-Games {
                                                 [void]$tpl.GameProfile.PrependChild($gp)
                                             }
                                             $gp.InnerText = $exeToUse
-                                            Save-Xml $tpl $userProfile
+                                            Save-XmlMaybe $tpl $userProfile $DryRun
                                             [void]$registered.Add([pscustomobject]@{
                                                 Code     = $datCode
                                                 GamePath = $exeToUse
@@ -3602,7 +3656,7 @@ function Register-Games {
                 [void]$tpl.GameProfile.PrependChild($gp)
             }
             $gp.InnerText = $exe.FullName
-            Save-Xml $tpl $userProfile
+            Save-XmlMaybe $tpl $userProfile $DryRun
             [void]$registered.Add([pscustomobject]@{ Code = $code; GamePath = $exe.FullName })
             Write-Log "Registered $code -> $($exe.FullName)"
         } catch {
@@ -3720,7 +3774,7 @@ function Register-Games {
                     [void]$tpl.GameProfile.PrependChild($gp)
                 }
                 $gp.InnerText = $exeToUse
-                Save-Xml $tpl $userProfile
+                Save-XmlMaybe $tpl $userProfile $DryRun
                 $label = if ($datScore -lt 1.0) { "dat/fuzzy $([Math]::Round($datScore,2))" } else { "dat/exact" }
                 [void]$registered.Add([pscustomobject]@{
                     Code        = $datCode
@@ -3823,7 +3877,7 @@ function Register-Games {
                     [void]$tpl.GameProfile.PrependChild($gp)
                 }
                 $gp.InnerText = $exeToUse
-                Save-Xml $tpl $userProfile
+                Save-XmlMaybe $tpl $userProfile $DryRun
                 [void]$registered.Add([pscustomobject]@{
                     Code        = $bestCode
                     GamePath    = $exeToUse
@@ -3852,7 +3906,7 @@ function Register-Games {
 # because there is no safe way to know which game the file belongs to.
 # Profiles with a valid, working path are left untouched.
 function Repair-GamePaths {
-    param([string]$userProfilesDir, [string]$installFolder, [hashtable]$profileIndex)
+    param([string]$userProfilesDir, [string]$installFolder, [hashtable]$profileIndex, [bool]$DryRun = $false)
 
     # Map filename (lowercased) -> list of full paths found on disk.
     # Uses Get-GameFiles so .xbe, .dll, ELF, disc images, and extension-less
@@ -3916,7 +3970,7 @@ function Repair-GamePaths {
                 [void]$doc.GameProfile.PrependChild($gpNode)
             }
             $gpNode.InnerText = $newPath
-            Save-Xml $doc $f.FullName
+            Save-XmlMaybe $doc $f.FullName $DryRun
             [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "fixed"; NewPath = $newPath })
             Write-Log "Repair: fixed $($f.BaseName) -> $newPath"
         } catch {
@@ -4465,7 +4519,7 @@ function Build-ArchetypePool {
 # buttons, carry its Input API, and record what was bound vs left manual.
 # Reference games are never modified. Returns a list of per-game report objects.
 function Invoke-ControlPropagation {
-    param([string]$userProfilesDir, $pool, [int]$minBound, $noPropagate = @(), $forceArchetype = @{}, $familyOverride = @{})
+    param([string]$userProfilesDir, $pool, [int]$minBound, $noPropagate = @(), $forceArchetype = @{}, $familyOverride = @{}, [bool]$DryRun = $false)
 
     $reports     = New-Object System.Collections.ArrayList
     $files       = Get-ChildItem -LiteralPath $userProfilesDir -Filter *.xml -File -ErrorAction SilentlyContinue
@@ -4559,7 +4613,7 @@ function Invoke-ControlPropagation {
         }
 
         try {
-            Save-Xml $doc $f.FullName
+            Save-XmlMaybe $doc $f.FullName $DryRun
             [void]$reports.Add([pscustomobject]@{
                 Code = $f.BaseName; Status = "bound"; Family = $targetFamily
                 Archetype = $best.Code; ArchetypeApi = $best.InputApi; ApiSet = $apiSet
@@ -6194,10 +6248,24 @@ while ($true) {
         Write-Host " BepInEx Update Check" -ForegroundColor Cyan
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host "  BepInEx is a third-party Unity plugin/modding framework. A few"
-        Write-Host "  TeknoParrot games (Family Guy Bowling, Mars Sortie, NERF Arcade,"
-        Write-Host "  Rainbow BomberGirl, Super Bikes 3, TMNT, and others) need it for"
-        Write-Host "  controls or fixes to work via a community plugin."
+        Write-Host "  BepInEx is a third-party Unity plugin/modding framework. Some"
+        Write-Host "  TeknoParrot games need it for controls or fixes to work via a"
+        Write-Host "  community plugin." -NoNewline
+        $requiredGames = Get-BepInExRequiredGames
+        if ($requiredGames.Count -gt 0) {
+            Write-Host " Known examples:"
+            $lineLen = 70; $line = "    "; $firstR = $true
+            foreach ($g in $requiredGames) {
+                $add = if ($firstR) { $g } else { ", $g" }
+                if (($line + $add).Length -gt $lineLen) {
+                    Write-Host $line -ForegroundColor White
+                    $line = "    $g"; $firstR = $false
+                } else { $line += $add; $firstR = $false }
+            }
+            if ($line.Trim()) { Write-Host $line -ForegroundColor White }
+        } else {
+            Write-Host ""
+        }
         Write-Host ""
         Write-Host "  This ONLY checks/updates games that already have BepInEx installed --"
         Write-Host "  it never installs BepInEx into a game that doesn't have it. Only the"
@@ -6374,11 +6442,26 @@ while ($true) {
 
     Write-Log "Mode=$mode install=$gamesInstallFolder"
 
+    # Preview mode: -DryRun on the command line always applies; otherwise
+    # ask once per AutoSync/Register run (skipped entirely when -Unattended,
+    # which by definition never prompts -- pass -DryRun alongside
+    # -Unattended to preview a scheduled run instead).
+    $dryRunActive = [bool]$DryRun
+    if (-not $Unattended -and -not $dryRunActive) {
+        Write-Host ""
+        $previewAns = (Read-Host "  Run in PREVIEW mode first? No changes will be written -- this just shows what AutoSync/Register would do. (Y/N)").Trim().ToUpper()
+        $dryRunActive = ($previewAns -eq "Y")
+    }
+    if ($dryRunActive) { Write-Log "PREVIEW MODE active for this run -- no changes will be written." }
+
     $backupRoot = Join-Path $userProfilesDir "FullBackup"
     $timestamp  = (Get-Date).ToString("yyyy-MM-dd_HH-mm-ss")
     $backupPath = Join-Path $backupRoot $timestamp
 
 Write-Host ""
+if ($dryRunActive) {
+    Write-Host "PREVIEW MODE -- skipping backup (nothing will be changed)." -ForegroundColor Yellow
+} else {
 Write-Host "Backing up UserProfiles..." -ForegroundColor Cyan
 
 # Guard: if the backup folder cannot be created the script exits here rather
@@ -6424,6 +6507,7 @@ if ($backupErrors -gt 0) {
 }
 Write-Host "Backup saved to: $backupPath" -ForegroundColor Green
 Write-Log "Backup created at $backupPath"
+}
 
 # =============================================================================
 # SECTION 6 -- AutoSync: game selection and extraction
@@ -6497,7 +6581,7 @@ if ($mode -eq "AutoSync") {
     $sync = $null
     if ($null -ne $onlySyncList) {
         $sync = Invoke-AutoSync -zipSource $zipSource -installFolder $gamesInstallFolder `
-                    -syncStatePath $syncStatePath -noSync $noSyncList -onlySync $onlySyncList -retroBat $retroBat
+                    -syncStatePath $syncStatePath -noSync $noSyncList -onlySync $onlySyncList -retroBat $retroBat -DryRun $dryRunActive
     } else {
         Write-Host "  No games selected -- skipping main extraction." -ForegroundColor Yellow
         Write-Log "AutoSync: main extraction skipped -- no games selected."
@@ -6518,7 +6602,7 @@ if ($mode -eq "AutoSync") {
                 Write-Log "Unattended: supplementary game selection = all."
             }
             $syncSupp = Invoke-AutoSync -zipSource $zipSourceSupplementary -installFolder $gamesInstallFolder `
-                            -syncStatePath $syncStatePath -noSync $noSyncList -onlySync $onlySyncListSupp -retroBat $retroBat
+                            -syncStatePath $syncStatePath -noSync $noSyncList -onlySync $onlySyncListSupp -retroBat $retroBat -DryRun $dryRunActive
         } else {
             Write-Host "  No supplementary games selected -- skipping." -ForegroundColor Yellow
             Write-Log "AutoSync: supplementary extraction skipped -- no games selected."
@@ -6577,7 +6661,7 @@ Write-Host "--------------------------------------------" -ForegroundColor Cyan
 Write-Host " Scanning: $gamesInstallFolder" -ForegroundColor DarkCyan
 Write-Host ""
 
-$result = Register-Games -userProfilesDir $userProfilesDir -installFolder $gamesInstallFolder -profileIndex $profileIndex -gameProfilesDir $gameProfilesDir -datIndex $datIndex -profileSet $profileSet
+$result = Register-Games -userProfilesDir $userProfilesDir -installFolder $gamesInstallFolder -profileIndex $profileIndex -gameProfilesDir $gameProfilesDir -datIndex $datIndex -profileSet $profileSet -DryRun $dryRunActive
 
 foreach ($r in $result.Registered) {
     if ($r.DatMatch) {
@@ -6688,7 +6772,10 @@ if ($result.Unmatched.Count -gt 0) {
 # =============================================================================
 
 Write-Host ""
-if ($Unattended) {
+if ($dryRunActive) {
+    Write-Log "PreviewMode: thumbnail download skipped."
+    $doThumb = "N"
+} elseif ($Unattended) {
     Write-Host "  [Unattended] Downloading missing thumbnails." -ForegroundColor DarkCyan
     Write-Log "Unattended: thumbnail download = Y."
     $doThumb = "Y"
@@ -6723,7 +6810,7 @@ $nf   = @(); $amb2 = @()   # initialise so the final summary can reference them 
 if ($doRepair.Trim().ToUpper() -eq "Y") {
     Write-Host ""
     Write-Host "Repairing game paths..." -ForegroundColor Cyan
-    $repair = Repair-GamePaths -userProfilesDir $userProfilesDir -installFolder $gamesInstallFolder -profileIndex $profileIndex
+    $repair = Repair-GamePaths -userProfilesDir $userProfilesDir -installFolder $gamesInstallFolder -profileIndex $profileIndex -DryRun $dryRunActive
     $fixed = @($repair | Where-Object { $_.Status -eq "fixed" })
     $nf    = @($repair | Where-Object { $_.Status -eq "not-found" })
     $amb2  = @($repair | Where-Object { $_.Status -eq "ambiguous" })
@@ -6810,7 +6897,7 @@ if ($pool.Count -eq 0) {
         $goCtl = (Read-Host " Propagate controls now? (Y/N)").Trim()
     }
     if ($goCtl.ToUpper() -eq "Y") {
-        $reports = Invoke-ControlPropagation -userProfilesDir $userProfilesDir -pool $pool -minBound $MinBoundForArchetype -noPropagate $noPropagateList -forceArchetype $forceArchetypeMap -familyOverride $familyOverrideMap
+        $reports = Invoke-ControlPropagation -userProfilesDir $userProfilesDir -pool $pool -minBound $MinBoundForArchetype -noPropagate $noPropagateList -forceArchetype $forceArchetypeMap -familyOverride $familyOverrideMap -DryRun $dryRunActive
         Write-Host ""
         Write-Host " Results:" -ForegroundColor Green
         foreach ($r in $reports) {
@@ -6857,8 +6944,15 @@ if ($pool.Count -eq 0) {
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "   Done." -ForegroundColor Cyan
-Write-Host "============================================" -ForegroundColor Cyan
+if ($dryRunActive) {
+    Write-Host "   PREVIEW MODE -- no changes were written." -ForegroundColor Yellow
+    Write-Host "============================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  Re-run without preview to apply these changes." -ForegroundColor Yellow
+} else {
+    Write-Host "   Done." -ForegroundColor Cyan
+    Write-Host "============================================" -ForegroundColor Cyan
+}
 Write-Host ""
 Write-Host "  Newly registered : $($result.Registered.Count)" -ForegroundColor Green
 Write-Host "  Already present  : $($result.Already.Count)"    -ForegroundColor DarkGray
@@ -6869,7 +6963,7 @@ if ($result.Unmatched.Count -gt 0) {
     Write-Host ("  Not in TeknoParrot : {0} folder(s)  (see ACTION REQUIRED below)" -f $result.Unmatched.Count) -ForegroundColor Yellow
 }
 Write-Host ""
-Write-Host "  Backup : $backupPath" -ForegroundColor DarkCyan
+if (-not $dryRunActive) { Write-Host "  Backup : $backupPath" -ForegroundColor DarkCyan }
 Write-Host "  Log    : $logPath"    -ForegroundColor DarkCyan
 
 $csStatusPath = Join-Path $PSScriptRoot "TeknoParrot-Manager-controls.txt"
@@ -6916,7 +7010,10 @@ if ($result.Registered.Count -gt 0 -and $notesIndex.Count -gt 0) {
 # =============================================================================
 
 Write-Host ""
-if ($Unattended) {
+if ($dryRunActive) {
+    $doLB = "N"
+    Write-Log "PreviewMode: LaunchBox export skipped."
+} elseif ($Unattended) {
     $doLB = "N"
     Write-Log "Unattended: LaunchBox export skipped."
 } else {
@@ -6965,7 +7062,10 @@ if ($doLB -eq "Y") {
 # =============================================================================
 
 Write-Host ""
-if ($Unattended) {
+if ($dryRunActive) {
+    $doHS = "N"
+    Write-Log "PreviewMode: HyperSpin 2 export skipped."
+} elseif ($Unattended) {
     $doHS = "N"
     Write-Log "Unattended: HyperSpin 2 export skipped."
 } else {
@@ -7251,7 +7351,10 @@ Write-Host "  GPU and applies the right fix to every registered game that has on
 Write-Host ""
 Write-Host "  Safe to run any time -- re-run if you change or update your GPU."
 Write-Host ""
-if ($Unattended) {
+if ($dryRunActive) {
+    $doGpuFix = "N"
+    Write-Log "PreviewMode: GPU fix setup offer skipped."
+} elseif ($Unattended) {
     $doGpuFix = "N"
     Write-Log "Unattended: GPU fix setup skipped."
 } else {

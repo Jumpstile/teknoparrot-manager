@@ -35,6 +35,7 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 - [Per-Game Overrides](#per-game-overrides)
 - [Action Required Summary](#action-required-summary)
 - [Unattended / Scheduled Mode](#unattended--scheduled-mode)
+- [Preview / Dry-Run Mode](#preview--dry-run-mode)
 - [Game Repair](#game-repair)
 - [Safety, Backup and Log](#safety-backup-and-log)
 - [Resetting](#resetting)
@@ -62,6 +63,7 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 - **Automatic compatibility warnings** — every run checks for known install-path-length limits (Raw Thrills titles, Yu-Gi-Oh! Duel Terminal 6), pinned-file-version requirements (BlazBlue/iDmacDrv32.dll, Tekken Tag Tournament 2/EBOOT.BIN), and known GPU-vendor incompatibilities (AMD/Intel), with details in ACTION REQUIRED.
 - **LaunchBox / HyperSpin 2 export** — builds import files for both frontends after each run.
 - **Unattended mode** — `-Unattended` flag for scheduled overnight runs.
+- **Preview / dry-run mode** — see what AutoSync/Register would do (extract, register, repair, propagate) with zero files written, then decide whether to apply it for real.
 - **Safe by design** — timestamped backups before every run, free-space check, full log, one-click restore.
 
 ---
@@ -125,6 +127,8 @@ On later runs it offers to reuse your saved settings — press **Y** to continue
 ## Modes
 
 The main menu is a persistent loop — after each mode finishes you return to the menu.
+
+Choosing mode 1 or 2 offers a preview/dry-run option first — see [Preview / Dry-Run Mode](#preview--dry-run-mode).
 
 | # | Mode | What it does |
 |---|------|-------------|
@@ -400,7 +404,7 @@ Controller support (per the plugin's own docs): true force feedback on FFB-capab
 
 ## BepInEx Update Check
 
-[BepInEx](https://docs.bepinex.dev) is a third-party Unity plugin/modding framework — not part of TeknoParrot itself. A handful of games (Family Guy Bowling, Mars Sortie, NERF Arcade, Rainbow BomberGirl, Super Bikes 3, TMNT, and others) need a community plugin running on top of it to get controls or fixes working.
+[BepInEx](https://docs.bepinex.dev) is a third-party Unity plugin/modding framework — not part of TeknoParrot itself. A handful of games need a community plugin running on top of it to get controls or fixes working. Mode 8 shows a live-fetched list of known examples each time you open it, checked against the eggmansworld.github.io compatibility data, so it keeps tracking new games as they get added upstream instead of going stale.
 
 **Mode 8 only checks/updates games that already have BepInEx installed** — it never installs BepInEx into a game that doesn't have it. Only the latest **stable 64-bit** release is ever used; never a 32-bit build, never a pre-release. A 32-bit install is left alone and reported separately.
 
@@ -581,6 +585,32 @@ After each run, check `TeknoParrot-Manager.log` and `TeknoParrot-Manager-control
 
 ---
 
+## Preview / Dry-Run Mode
+
+Before AutoSync or Register only does anything, you can preview what it would do without writing a single file:
+
+- Which games would extract (and why -- new, changed on NAS, etc.)
+- Which games would register, and to which TeknoParrot profile
+- Which broken paths would get repaired
+- Which controls would propagate, from which archetype game
+
+To preview, answer **Y** when prompted ("Run in PREVIEW mode first?") after choosing AutoSync or Register only. To always preview without being asked, pass `-DryRun` on the command line:
+
+```powershell
+.\TeknoParrot-Manager.ps1 -DryRun
+```
+
+Combine with `-Unattended` to preview a scheduled run with no prompts at all.
+
+In preview mode:
+- No backup is created (there is nothing yet to restore)
+- The optional follow-up offers (LaunchBox/HyperSpin 2 export, thumbnail download, GPU fix) are skipped, since they only make sense after real changes
+- The summary and ACTION REQUIRED sections still print normally, based on the games that would have been registered
+
+This is most useful the first time you point the script at a new library, or after changing settings, to build confidence before letting it touch your files.
+
+---
+
 ## Game Repair
 
 After registration the script offers to repair broken game paths — paths that are empty or point to a file that no longer exists (e.g. after moving games).
@@ -676,4 +706,4 @@ TeknoParrot must be set up as an emulator in HyperSpin 2 first. The title must c
 
 ---
 
-> v0.91 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v0.92 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
