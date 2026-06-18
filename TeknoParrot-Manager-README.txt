@@ -1086,9 +1086,8 @@
   Mechanism 1 -- FFB Blaster (native, requires a paid membership)
 
     FFB Blaster is TeknoParrot's own built-in force feedback feature. It is
-    well-integrated and is automatically preferred over the third-party
-    plugin for any game it covers, but it ONLY works with an active, paid
-    TeknoParrot membership:
+    well-integrated, but it ONLY works with an active, paid TeknoParrot
+    membership:
       https://teknoparrot.com/en/Home/Subscription
 
     The script cannot check your subscription status, so it asks directly

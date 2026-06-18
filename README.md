@@ -278,7 +278,7 @@ On first run (or on request), the script asks which controls you have — Xbox p
 
 ## Crosshair Setup
 
-Mode 4 deploys custom P1/P2 crosshair cursor images to all registered lightgun games. Can also be run standalone at any time from the main menu.
+Mode 3 deploys custom P1/P2 crosshair cursor images to all registered lightgun games. Can also be run standalone at any time from the main menu.
 
 **How TeknoParrot uses crosshairs:**
 - **Standard games** — `P1.png` + `P2.png` in the game's executable folder
@@ -364,7 +364,31 @@ The wizard scans every registered game exe for legacy API imports and shows auto
 
 ## GPU Compatibility Fixes
 
-Many TeknoParrot games include optional per-vendor fix settings (AMD, NVIDIA, Intel). Mode 7 auto-detects your GPU via WMI and applies the correct fix to every registered game that has one. Scans `GameProfiles` at runtime — no update needed when new games are added. Safe to re-run any time you change your GPU.
+Many TeknoParrot games include optional per-vendor fix settings (AMD, NVIDIA, Intel). Mode 6 auto-detects your GPU via WMI and applies the correct fix to every registered game that has one. Scans `GameProfiles` at runtime — no update needed when new games are added. Safe to re-run any time you change your GPU.
+
+---
+
+## Force Feedback (FFB) Setup
+
+Force feedback makes a wheel or stick push back / rumble to match what's happening on screen (road vibration, recoil, collisions). Mode 7 covers two completely independent mechanisms — neither requires the other, and both can be set up at once since they cover different games.
+
+**Mechanism 1 — FFB Blaster (native, requires a paid membership)**
+
+TeknoParrot's own built-in force feedback feature. Well-integrated, but it **only works with an active, paid TeknoParrot membership** ([teknoparrot.com/en/Home/Subscription](https://teknoparrot.com/en/Home/Subscription)). The script can't check your subscription status, so it asks directly before changing anything — answering N skips it entirely.
+
+If you answer Y, the script scans your TeknoParrot install's `GameProfiles` for the FFB Blaster field (detected at runtime, never hardcoded) and enables it on every registered profile that has it. `UserProfiles` are backed up first.
+
+**Mechanism 2 — Third-party FFB plugin (free, no subscription needed)**
+
+A free, separately-maintained plugin ([mightymikem/FFBArcadePlugin](https://github.com/mightymikem/FFBArcadePlugin)) covering a different set of arcade racers and shooters. The supported-games list and DLLs are always fetched live from GitHub — nothing is bundled, so the list grows over time with no script update needed.
+
+Controller support (per the plugin's own docs): true force feedback on FFB-capable wheels (Thrustmaster and similar), and rumble on Xbox/XInput-style controllers.
+
+**Plugin DLL collisions:** a few games need the same destination DLL name for both ReShade and this plugin (e.g. H2Overdrive needs `d3d9.dll` for both). If ReShade already occupies that filename, FFB setup skips that game with a warning rather than overwriting it.
+
+**If a game is covered by both:** the script lists every such game once and asks a single question — keep FFB Blaster (native) for all of them, or use the third-party plugin for all of them. Your answer applies to the whole list for that run; it never silently picks a side.
+
+**Removing FFB:** FFB Blaster — manually set the field back to `0` in the affected `UserProfiles\*.xml` files, or restore from a pre-FFB backup (mode 8). Third-party plugin — delete the deployed DLL from the game's folder.
 
 ---
 
