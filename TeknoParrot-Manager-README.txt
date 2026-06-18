@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.84 BETA
+  TeknoParrot Manager  |  v0.85 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -332,7 +332,14 @@
        TeknoParrot's GameProfiles at runtime -- no update needed when new
        games are added. Optional. Returns to the menu when done.
 
-  8) Exit
+  8) Library health check
+       Read-only. Reports how many registered profiles have a valid,
+       broken, or empty GamePath, lists the affected profile codes, and
+       shows the summary line from your last full run. Does not extract,
+       register, repair, propagate, or touch the network -- safe to run
+       any time for a quick status check. Returns to the menu when done.
+
+  9) Exit
        Exits the script.
 
 
@@ -478,10 +485,15 @@
                           that share a generic exe name, e.g. several Virtua
                           Fighter 5 Lindbergh dumps, or multiple Taiko no
                           Tatsujin versions), it cannot be auto-registered
-                          too. The ACTION REQUIRED section names which
-                          folder already holds the profile so you can decide
-                          which copy to use, or register the extra copy
-                          under a different profile if one exists.
+                          too. Right after registration, if any of these
+                          are found, the script offers to resolve them on
+                          the spot: for each one it shows which folder
+                          currently holds the profile and which folder is
+                          contesting it, then lets you choose [K]eep the
+                          current copy, [S]witch the profile to the other
+                          copy, or [Q]uit and leave the rest for manual
+                          handling in TeknoParrotUI. Anything you don't
+                          resolve still appears in ACTION REQUIRED.
 
   At the end of the run the ACTION REQUIRED section lists every game that
   needs manual registration.
@@ -1032,6 +1044,22 @@
 
     If  dgVoodoo.conf  is present in your dgVoodoo2 folder, it is copied
     alongside the DLLs (once per game -- never overwritten on re-runs).
+
+  Per-game config overrides
+
+    The global  dgVoodoo.conf  above applies to every selected game. To
+    give one specific game a different config, create a
+    dgVoodoo2Presets\  folder next to this script and drop a file named
+    ProfileCode.conf  in it -- for example  dgVoodoo2Presets\VF5.conf.
+
+    Unlike the global conf, a per-game file always overwrites the
+    destination on every run (it is an explicit per-game choice), so it
+    takes effect even if a previous run already deployed a config to that
+    game. Every other selected game is unaffected and still follows the
+    "never overwrite" rule for the global conf. A filename that does not
+    match any registered profile code is reported as WRONG NAME and
+    ignored, the same way ReShadePresets and CustomThumbnails handle a
+    mismatched filename.
 
   Removing dgVoodoo2
 
@@ -1663,6 +1691,6 @@
 
 
 ===============================================================================
-  v0.84 BETA -- Test one game after each run.
+  v0.85 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================

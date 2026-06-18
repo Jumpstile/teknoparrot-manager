@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.84 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.85 BETA  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -59,7 +59,8 @@
        6) dgVoodoo2 setup  -- fix old DX8/Glide games (optional, see below).
        7) GPU fix setup    -- apply GPU vendor fixes to registered games
                              (AMD / NVIDIA / Intel, optional, see below).
-       8) Exit             -- quit the script.
+       8) Health check     -- read-only library status, safe to run any time.
+       9) Exit             -- quit the script.
 
   4. Answer the folder prompts. For AutoSync, choose a LOCAL staging folder
      with free space, OUTSIDE both TeknoParrot and your ZIP source.

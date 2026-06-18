@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.84 BETA
+# TeknoParrot Manager  |  v0.85 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -65,7 +65,7 @@ param([switch]$Unattended)
 # GitHub API User-Agent headers. Previously hardcoded in each of those spots
 # independently, which let the User-Agent strings drift out of sync with the
 # banner (caught stale at 0.70 during the v0.71 bump, and again at 0.76 here).
-$ScriptVersion = "0.84"
+$ScriptVersion = "0.85"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -1314,6 +1314,31 @@ function Invoke-DgVoodoo2Setup {
     }
     Write-Host ("  Available DLLs : {0}" -f ($available -join ', ')) -ForegroundColor DarkGray
 
+    # Per-game config overrides: dgVoodoo2Presets\<ProfileCode>.conf always
+    # wins over the global dgVoodoo.conf in $SourceDir for that one game.
+    # Same convention as ReShadePresets\<ProfileCode>.ini (Invoke-ReShadeSetup)
+    # and CustomThumbnails\<ProfileCode>.png (Invoke-ThumbnailDownload).
+    $dgVoodoo2PresetsDir = Join-Path $PSScriptRoot "dgVoodoo2Presets"
+    if (Test-Path -LiteralPath $dgVoodoo2PresetsDir) {
+        $confFiles = @(Get-ChildItem -LiteralPath $dgVoodoo2PresetsDir -Filter "*.conf" -File -ErrorAction SilentlyContinue)
+        if ($confFiles.Count -gt 0) {
+            $knownConfCodes = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Directory.Name -ne "FullBackup" } |
+                ForEach-Object { [void]$knownConfCodes.Add($_.BaseName) }
+            foreach ($cfile in $confFiles) {
+                $code = [System.IO.Path]::GetFileNameWithoutExtension($cfile.Name)
+                if (-not $knownConfCodes.Contains($code)) {
+                    Write-Host ("  WRONG NAME: dgVoodoo2Presets\{0}" -f $cfile.Name) -ForegroundColor Yellow
+                    Write-Host ("             '{0}' does not match any registered game profile code." -f $code) -ForegroundColor Yellow
+                    Write-Host "             Check TeknoParrot-Manager-controls.txt for the correct" -ForegroundColor Yellow
+                    Write-Host "             name, rename the file, then re-run. File will be ignored." -ForegroundColor Yellow
+                    Write-Log "dgVoodoo2: per-game config $($cfile.Name) -- no matching profile code, ignored."
+                }
+            }
+        }
+    }
+
     # Scan all registered games for legacy API usage and build a detection map.
     Write-Host ""
     Write-Host "  Scanning registered games for old DirectX / Glide usage..." -ForegroundColor Cyan
@@ -1387,7 +1412,7 @@ function Invoke-DgVoodoo2Setup {
     # Deploy DLLs to each selected game folder.
     Write-Host ""
     Write-Host ("  Installing dgVoodoo2 into {0} game folder(s)..." -f $targetProfiles.Count) -ForegroundColor Cyan
-    $deployed = 0; $skipped = 0; $errors = 0
+    $deployed = 0; $skipped = 0; $errors = 0; $presetOverrides = 0
     $hasConf  = Test-Path -LiteralPath (Join-Path $SourceDir "dgVoodoo.conf")
 
     foreach ($pf in $targetProfiles) {
@@ -1432,15 +1457,27 @@ function Invoke-DgVoodoo2Setup {
                     Copy-Item -LiteralPath (Join-Path $SourceDir $dllName) -Destination $dstDll -ErrorAction Stop
                 }
             }
-            if ($hasConf) {
+            # Per-game config (dgVoodoo2Presets\<ProfileCode>.conf) always wins
+            # over the global dgVoodoo.conf for this one game, and -- unlike
+            # the global conf -- always overwrites: it's an explicit per-game
+            # action, so "never overwrite" would silently defeat it on any
+            # game that already has a conf deployed from a prior run.
+            $perGameConf = Join-Path $dgVoodoo2PresetsDir ($pf.BaseName + ".conf")
+            $confNote    = ""
+            if (Test-Path -LiteralPath $perGameConf) {
+                $dstConf = Join-Path $exeDir "dgVoodoo.conf"
+                Copy-Item -LiteralPath $perGameConf -Destination $dstConf -Force -ErrorAction Stop
+                $presetOverrides++
+                $confNote = "  (config: per-game)"
+            } elseif ($hasConf) {
                 $dstConf = Join-Path $exeDir "dgVoodoo.conf"
                 if (-not (Test-Path -LiteralPath $dstConf)) {
                     Copy-Item -LiteralPath (Join-Path $SourceDir "dgVoodoo.conf") -Destination $dstConf -ErrorAction Stop
                 }
             }
             $apiStr = if ($apis.Count -gt 0) { "  [{0}]" -f ($apis -join ', ') } else { "" }
-            Write-Host ("  OK    {0}{1}" -f $pf.BaseName, $apiStr) -ForegroundColor Green
-            Write-Log ("dgVoodoo2: deployed {0} to {1}" -f ($toDeploy -join ', '), $exeDir)
+            Write-Host ("  OK    {0}{1}{2}" -f $pf.BaseName, $apiStr, $confNote) -ForegroundColor Green
+            Write-Log ("dgVoodoo2: deployed {0} to {1}{2}" -f ($toDeploy -join ', '), $exeDir, $confNote)
             $deployed++
 
         } catch {
@@ -1452,12 +1489,15 @@ function Invoke-DgVoodoo2Setup {
 
     Write-Host ""
     Write-Host ("  Deployed  : {0} game(s)" -f $deployed) -ForegroundColor Green
+    if ($presetOverrides -gt 0) {
+        Write-Host ("  Per-game configs applied : {0}" -f $presetOverrides) -ForegroundColor Cyan
+    }
     if ($skipped -gt 0) { Write-Host ("  Skipped   : {0}" -f $skipped) -ForegroundColor DarkGray }
     if ($errors  -gt 0) { Write-Host ("  Errors    : {0}" -f $errors)  -ForegroundColor Red      }
     Write-Host ""
     Write-Host "  To uninstall: delete the deployed DLL file(s) from the game folder." -ForegroundColor DarkCyan
     Write-Host "  Your original game files are never modified." -ForegroundColor DarkCyan
-    Write-Log ("dgVoodoo2 setup: deployed={0} skipped={1} errors={2}" -f $deployed, $skipped, $errors)
+    Write-Log ("dgVoodoo2 setup: deployed={0} skipped={1} errors={2} presetOverrides={3}" -f $deployed, $skipped, $errors, $presetOverrides)
 }
 
 # =============================================================================
@@ -1486,7 +1526,12 @@ function Invoke-GpuFixSetup {
     $gpuVendor = $null
     $gpuName   = $null
     try {
-        $adapters = @(Get-CimInstance -ClassName Win32_VideoController -ErrorAction Stop |
+        # Bounded wait: a WMI service hiccup should fall through to the manual
+        # vendor prompt below rather than hang the script indefinitely. Local
+        # GPU enumeration doesn't have the network-round-trip hang risk that
+        # Test-IsNetworkPath's drive check had, but the WMI service itself can
+        # still misbehave, so this is bounded defensively rather than removed.
+        $adapters = @(Get-CimInstance -ClassName Win32_VideoController -ErrorAction Stop -OperationTimeoutSec 10 |
             Where-Object { $_.Name -notmatch '(?i)microsoft|virtual|remote' } |
             Sort-Object { if ($_.AdapterRAM) { [double]$_.AdapterRAM } else { 0.0 } } -Descending)
         if ($adapters.Count -gt 0) {
@@ -2642,6 +2687,21 @@ function Register-Games {
     $ambiguous      = New-Object System.Collections.ArrayList
     $seenCodes      = @{}
     $codeClaimedBy  = @{}   # profile code -> folder name that already claimed it this run
+    # Snapshot of codes that already had a UserProfile BEFORE this run started.
+    # Needed to tell apart two genuinely different situations that both make
+    # $seenCodes.ContainsKey($code) true: (1) the code was already registered
+    # (by TeknoParrotUI or an earlier run) before this run touched anything --
+    # not a conflict, just report "Already"; vs (2) two folders THIS run both
+    # resolved to the SAME unclaimed code -- a real conflict between two
+    # fresh candidates. Without this distinction, a folder whose own exe
+    # happens to share a name with dozens of other titles (e.g. NESiCAxLive's
+    # game.exe) gets falsely flagged as "duplicate" every time an unrelated
+    # already-registered sibling from that same shared-exe pool is scanned
+    # first and incidentally marks this folder's own code as "seen".
+    $preExistingCodes = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    Get-ChildItem -LiteralPath $userProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Directory.Name -ne "FullBackup" } |
+        ForEach-Object { [void]$preExistingCodes.Add($_.BaseName) }
     $installBase    = $installFolder.TrimEnd('\')
     $matchedFolders = @{}   # folders that matched at least one profile key
     $allExeFolders  = @{}   # folders containing any recognisable executable
@@ -2676,17 +2736,26 @@ function Register-Games {
                 # High-confidence fuzzy match: register automatically.
                 $code = $bestFuzzy.Code
                 if ($seenCodes.ContainsKey($code)) {
-                    # Another folder already claimed this profile code this run --
-                    # TeknoParrot can only point one profile at one executable, so
-                    # this is a real conflict, not a silent duplicate to drop.
-                    [void]$ambiguous.Add([pscustomobject]@{
-                        Exe        = $exe.FullName
-                        Codes      = $code
-                        BestGuess  = $code
-                        BestScore  = 1.0
-                        Reason     = "duplicate"
-                        ClaimedBy  = $codeClaimedBy[$code]
-                    })
+                    if ($preExistingCodes.Contains($code)) {
+                        # Already registered before this run started (TeknoParrotUI
+                        # or an earlier run) -- not a conflict from this run's
+                        # perspective, just confirm it's set and move on. (Guard
+                        # against a duplicate "Already" entry: an earlier folder's
+                        # alreadyReg scan may have already recorded this same code.)
+                        if ($already -notcontains $code) { [void]$already.Add($code) }
+                    } else {
+                        # Another folder already claimed this profile code THIS run --
+                        # TeknoParrot can only point one profile at one executable, so
+                        # this is a real conflict, not a silent duplicate to drop.
+                        [void]$ambiguous.Add([pscustomobject]@{
+                            Exe        = $exe.FullName
+                            Codes      = $code
+                            BestGuess  = $code
+                            BestScore  = 1.0
+                            Reason     = "duplicate"
+                            ClaimedBy  = $codeClaimedBy[$code]
+                        })
+                    }
                     continue
                 }
                 $userProfile = Join-Path $userProfilesDir ($code + ".xml")
@@ -2750,14 +2819,18 @@ function Register-Games {
                             }
                             $userProfile = Join-Path $userProfilesDir ($datCode + ".xml")
                             if ($seenCodes.ContainsKey($datCode)) {
-                                [void]$ambiguous.Add([pscustomobject]@{
-                                    Exe        = $exe.FullName
-                                    Codes      = $datCode
-                                    BestGuess  = $datCode
-                                    BestScore  = 1.0
-                                    Reason     = "duplicate"
-                                    ClaimedBy  = $codeClaimedBy[$datCode]
-                                })
+                                if ($preExistingCodes.Contains($datCode)) {
+                                    if ($already -notcontains $datCode) { [void]$already.Add($datCode) }
+                                } else {
+                                    [void]$ambiguous.Add([pscustomobject]@{
+                                        Exe        = $exe.FullName
+                                        Codes      = $datCode
+                                        BestGuess  = $datCode
+                                        BestScore  = 1.0
+                                        Reason     = "duplicate"
+                                        ClaimedBy  = $codeClaimedBy[$datCode]
+                                    })
+                                }
                             } else {
                                 $seenCodes[$datCode] = $true
                                 $codeClaimedBy[$datCode] = $folderName
@@ -2842,19 +2915,23 @@ function Register-Games {
         $match = $matchList[0]
         $code  = $match.Code
         if ($seenCodes.ContainsKey($code)) {
-            # Another folder already claimed this profile code this run. Most
-            # often this is multiple ROM revisions of the same game sharing one
-            # generic exe name and one TeknoParrot profile (e.g. several Virtua
-            # Fighter 5 Lindbergh revisions). TeknoParrot can only point that
-            # profile at one executable, so surface it instead of dropping it.
-            [void]$ambiguous.Add([pscustomobject]@{
-                Exe        = $exe.FullName
-                Codes      = $code
-                BestGuess  = $code
-                BestScore  = 1.0
-                Reason     = "duplicate"
-                ClaimedBy  = $codeClaimedBy[$code]
-            })
+            if ($preExistingCodes.Contains($code)) {
+                if ($already -notcontains $code) { [void]$already.Add($code) }
+            } else {
+                # Another folder already claimed this profile code THIS run. Most
+                # often this is multiple ROM revisions of the same game sharing one
+                # generic exe name and one TeknoParrot profile (e.g. several Virtua
+                # Fighter 5 Lindbergh revisions). TeknoParrot can only point that
+                # profile at one executable, so surface it instead of dropping it.
+                [void]$ambiguous.Add([pscustomobject]@{
+                    Exe        = $exe.FullName
+                    Codes      = $code
+                    BestGuess  = $code
+                    BestScore  = 1.0
+                    Reason     = "duplicate"
+                    ClaimedBy  = $codeClaimedBy[$code]
+                })
+            }
             continue
         }
 
@@ -2930,19 +3007,23 @@ function Register-Games {
             $matchedFolders[$folderKey] = $true   # prevents folder appearing in $unmatched
 
             if ($seenCodes.ContainsKey($datCode)) {
-                $dupFolderFull = Join-Path $installBase $origName
-                $dupExe = @($exeFiles | Where-Object {
-                    $_.FullName.Length -gt $dupFolderFull.Length -and
-                    $_.FullName.StartsWith($dupFolderFull + '\')
-                })[0]
-                [void]$ambiguous.Add([pscustomobject]@{
-                    Exe        = if ($dupExe) { $dupExe.FullName } else { $dupFolderFull }
-                    Codes      = $datCode
-                    BestGuess  = $datCode
-                    BestScore  = 1.0
-                    Reason     = "duplicate"
-                    ClaimedBy  = $codeClaimedBy[$datCode]
-                })
+                if ($preExistingCodes.Contains($datCode)) {
+                    if ($already -notcontains $datCode) { [void]$already.Add($datCode) }
+                } else {
+                    $dupFolderFull = Join-Path $installBase $origName
+                    $dupExe = @($exeFiles | Where-Object {
+                        $_.FullName.Length -gt $dupFolderFull.Length -and
+                        $_.FullName.StartsWith($dupFolderFull + '\')
+                    })[0]
+                    [void]$ambiguous.Add([pscustomobject]@{
+                        Exe        = if ($dupExe) { $dupExe.FullName } else { $dupFolderFull }
+                        Codes      = $datCode
+                        BestGuess  = $datCode
+                        BestScore  = 1.0
+                        Reason     = "duplicate"
+                        ClaimedBy  = $codeClaimedBy[$datCode]
+                    })
+                }
                 continue
             }
             $seenCodes[$datCode] = $true
@@ -3038,19 +3119,23 @@ function Register-Games {
             $matchedFolders[$folderKey] = $true
 
             if ($seenCodes.ContainsKey($bestCode)) {
-                $dupFolderFull = Join-Path $installBase $origName
-                $dupExe = @($exeFiles | Where-Object {
-                    $_.FullName.Length -gt $dupFolderFull.Length -and
-                    $_.FullName.StartsWith($dupFolderFull + '\')
-                })[0]
-                [void]$ambiguous.Add([pscustomobject]@{
-                    Exe        = if ($dupExe) { $dupExe.FullName } else { $dupFolderFull }
-                    Codes      = $bestCode
-                    BestGuess  = $bestCode
-                    BestScore  = 1.0
-                    Reason     = "duplicate"
-                    ClaimedBy  = $codeClaimedBy[$bestCode]
-                })
+                if ($preExistingCodes.Contains($bestCode)) {
+                    if ($already -notcontains $bestCode) { [void]$already.Add($bestCode) }
+                } else {
+                    $dupFolderFull = Join-Path $installBase $origName
+                    $dupExe = @($exeFiles | Where-Object {
+                        $_.FullName.Length -gt $dupFolderFull.Length -and
+                        $_.FullName.StartsWith($dupFolderFull + '\')
+                    })[0]
+                    [void]$ambiguous.Add([pscustomobject]@{
+                        Exe        = if ($dupExe) { $dupExe.FullName } else { $dupFolderFull }
+                        Codes      = $bestCode
+                        BestGuess  = $bestCode
+                        BestScore  = 1.0
+                        Reason     = "duplicate"
+                        ClaimedBy  = $codeClaimedBy[$bestCode]
+                    })
+                }
                 continue
             }
             $seenCodes[$bestCode] = $true
@@ -3196,6 +3281,74 @@ function Repair-GamePaths {
         }
     }
     return $reports
+}
+
+# Read-only library status: classifies every UserProfile's GamePath as
+# valid / broken / empty, the same check Repair-GamePaths already does
+# (Test-Path on $curPath), but reports only -- never writes, never scans
+# the install folder, never touches the network. Safe to run any time as a
+# fast health check between full AutoSync/Register runs.
+function Invoke-LibraryHealthCheck {
+    param([string]$UserProfilesDir, [string]$LogPath)
+
+    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Directory.Name -ne "FullBackup" } | Sort-Object BaseName)
+
+    $valid = New-Object System.Collections.ArrayList
+    $broken = New-Object System.Collections.ArrayList
+    $empty = New-Object System.Collections.ArrayList
+
+    foreach ($pf in $profiles) {
+        try {
+            $doc = Read-Xml $pf.FullName
+            if (-not $doc.GameProfile) { [void]$broken.Add($pf.BaseName); continue }
+            $gpNode  = $doc.GameProfile.SelectSingleNode("GamePath")
+            $curPath = if ($gpNode) { $gpNode.InnerText.Trim() } else { "" }
+            if ([string]::IsNullOrWhiteSpace($curPath)) {
+                [void]$empty.Add($pf.BaseName)
+            } elseif (Test-Path -LiteralPath $curPath) {
+                [void]$valid.Add($pf.BaseName)
+            } else {
+                [void]$broken.Add($pf.BaseName)
+            }
+        } catch {
+            [void]$broken.Add($pf.BaseName)
+            Write-Log "HealthCheck: could not parse $($pf.Name) -- $_"
+        }
+    }
+
+    Write-Host ""
+    Write-Host ("  Registered profiles : {0}" -f $profiles.Count) -ForegroundColor Cyan
+    Write-Host ("  Valid GamePath      : {0}" -f $valid.Count) -ForegroundColor Green
+    if ($broken.Count -gt 0) {
+        Write-Host ("  Broken GamePath     : {0}" -f $broken.Count) -ForegroundColor Red
+        Write-Host ("    {0}" -f ($broken -join ', ')) -ForegroundColor DarkGray
+    } else {
+        Write-Host "  Broken GamePath     : 0" -ForegroundColor Green
+    }
+    if ($empty.Count -gt 0) {
+        Write-Host ("  Empty GamePath      : {0}" -f $empty.Count) -ForegroundColor Yellow
+        Write-Host ("    {0}" -f ($empty -join ', ')) -ForegroundColor DarkGray
+    } else {
+        Write-Host "  Empty GamePath      : 0" -ForegroundColor Green
+    }
+    if ($broken.Count -gt 0 -or $empty.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  Run Register only (mode 2) or AutoSync (mode 1) and choose Repair" -ForegroundColor DarkCyan
+        Write-Host "  to fix broken paths automatically where possible." -ForegroundColor DarkCyan
+    }
+
+    if ($LogPath -and (Test-Path -LiteralPath $LogPath)) {
+        try {
+            $lastRun = Get-Content -LiteralPath $LogPath -ErrorAction Stop | Select-String "^\[.*\] Completed\. " | Select-Object -Last 1
+            if ($lastRun) {
+                Write-Host ""
+                Write-Host ("  Last full run : {0}" -f $lastRun.Line) -ForegroundColor DarkGray
+            }
+        } catch {}
+    }
+
+    Write-Log ("HealthCheck: total={0} valid={1} broken={2} empty={3}" -f $profiles.Count, $valid.Count, $broken.Count, $empty.Count)
 }
 
 # =============================================================================
@@ -4414,7 +4567,7 @@ Write-Log "Script started (v$ScriptVersion$(if ($Unattended) { ' [Unattended]' }
 
 $configPath         = Join-Path $PSScriptRoot "TeknoParrot-Manager.config.json"
 $tpRoot             = $null
-$mode               = $null   # "AutoSync", "RegisterOnly", "Restore", "CrosshairSetup", "ReShadeSetup", "DgVoodoo2Setup", or "GpuFixSetup"
+$mode               = $null   # "AutoSync", "RegisterOnly", "Restore", "CrosshairSetup", "ReShadeSetup", "DgVoodoo2Setup", "GpuFixSetup", or "HealthCheck"
 $zipSource               = $null   # AutoSync only (main collection)
 $zipSourceSupplementary  = $null   # AutoSync supplementary source (optional, separate library); $null or ''=not configured
 $gamesInstallFolder = $null   # always (the extracted-games root to register)
@@ -4924,13 +5077,16 @@ while ($true) {
     Write-Host "  7) GPU fix setup   -- Auto-detect your GPU (AMD / NVIDIA / Intel) and"
     Write-Host "                        apply the matching compatibility fix to every"
     Write-Host "                        registered game that has one. Optional."
-    Write-Host "  8) Exit"
+    Write-Host "  8) Library health check -- Read-only: reports registered/broken/"
+    Write-Host "                        unregistered counts. No extraction, registration,"
+    Write-Host "                        repair, or network access -- just a fast status check."
+    Write-Host "  9) Exit"
     Write-Host ""
     if ($Unattended) {
         Write-Host "  [Unattended] Mode must be set before starting." -ForegroundColor Red
         Write-Log "ERROR: Unattended mode -- reached menu loop."; exit 1
     }
-    $modeChoice = (Read-Host "Enter 1, 2, 3, 4, 5, 6, 7, or 8").Trim()
+    $modeChoice = (Read-Host "Enter 1, 2, 3, 4, 5, 6, 7, 8, or 9").Trim()
     switch ($modeChoice) {
         "1"     { $mode = "AutoSync"       }
         "2"     { $mode = "RegisterOnly"   }
@@ -4939,10 +5095,11 @@ while ($true) {
         "5"     { $mode = "ReShadeSetup"   }
         "6"     { $mode = "DgVoodoo2Setup" }
         "7"     { $mode = "GpuFixSetup"    }
-        "8"     { break }
-        default { Write-Host "  Invalid choice. Enter 1-8." -ForegroundColor Yellow; continue }
+        "8"     { $mode = "HealthCheck"    }
+        "9"     { break }
+        default { Write-Host "  Invalid choice. Enter 1-9." -ForegroundColor Yellow; continue }
     }
-    if ($modeChoice -eq "8") { break }
+    if ($modeChoice -eq "9") { break }
 
     if ($mode -eq "Restore") {
         Write-Host ""
@@ -4955,6 +5112,21 @@ while ($true) {
         Write-Host "   Done." -ForegroundColor Cyan
         Write-Host "============================================" -ForegroundColor Cyan
         Write-Log "Restore complete."
+        [void](Read-Host "  Press Enter to return to menu")
+        continue
+    }
+
+    if ($mode -eq "HealthCheck") {
+        Write-Host ""
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        Write-Host " Library Health Check (read-only)" -ForegroundColor Cyan
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        Invoke-LibraryHealthCheck -UserProfilesDir $userProfilesDir -LogPath $logPath
+        Write-Host ""
+        Write-Host "============================================" -ForegroundColor Cyan
+        Write-Host "   Done." -ForegroundColor Cyan
+        Write-Host "============================================" -ForegroundColor Cyan
+        Write-Log "Health check complete."
         [void](Read-Host "  Press Enter to return to menu")
         continue
     }
@@ -5520,16 +5692,75 @@ if ($result.Ambiguous.Count -gt 0) {
         $count      = @($amb.Codes.Split(',')).Count
         if (-not $manualRegData.ContainsKey($folderName) -or $count -lt $manualRegData[$folderName].ProfileCount) {
             $manualRegData[$folderName] = @{
-                ExeName    = $exeName
+                Exe          = $amb.Exe
+                ExeName      = $exeName
                 ProfileCount = $count
-                Profiles   = $amb.Codes
-                BestGuess  = $amb.BestGuess
-                BestScore  = $amb.BestScore
-                Reason     = $amb.Reason
-                ClaimedBy  = $amb.ClaimedBy
+                Profiles     = $amb.Codes
+                BestGuess    = $amb.BestGuess
+                BestScore    = $amb.BestScore
+                Reason       = $amb.Reason
+                ClaimedBy    = $amb.ClaimedBy
             }
         }
     }
+}
+
+# Duplicate profile codes (Reason="duplicate": exactly one profile code,
+# contested by exactly one other folder) are resolvable in-script -- unlike
+# "shared" conflicts (one exe name maps to several different games' profile
+# codes), there's no ambiguity about WHICH profile is in play, only which
+# folder it should point at. Offer to fix these now instead of sending the
+# user to TeknoParrotUI for something this script can do directly.
+$duplicateConflicts = @($manualRegData.GetEnumerator() | Where-Object { $_.Value.Reason -eq "duplicate" })
+if ($duplicateConflicts.Count -gt 0 -and -not $Unattended) {
+    Write-Host ""
+    Write-Host ("  {0} duplicate profile conflict(s) found (one profile code claimed by two folders)." -f $duplicateConflicts.Count) -ForegroundColor Yellow
+    $resolveChoice = (Read-Host "  Resolve them now by picking which folder keeps the profile? (Y/N)").Trim().ToUpper()
+    if ($resolveChoice -eq "Y") {
+        foreach ($entry in $duplicateConflicts) {
+            $folderName = $entry.Key
+            $info       = $entry.Value
+            $code       = $info.Profiles   # single code for a "duplicate" entry
+            $userProfilePath = Join-Path $userProfilesDir ($code + ".xml")
+            $currentExe = $null
+            try {
+                $curDoc = Read-Xml $userProfilePath
+                $curGp  = $curDoc.GameProfile.SelectSingleNode("GamePath")
+                if ($curGp) { $currentExe = $curGp.InnerText.Trim() }
+            } catch {
+                Write-Log "Duplicate resolution: could not read current GamePath for $code -- $_"
+            }
+            Write-Host ""
+            Write-Host ("  Profile          : {0}" -f $code) -ForegroundColor Yellow
+            Write-Host ("  Currently set to : {0}" -f $currentExe) -ForegroundColor DarkGray
+            Write-Host ("  Conflicting copy : {0}" -f $info.Exe) -ForegroundColor DarkGray
+            $pick = (Read-Host "  [K]eep current / [S]witch to conflicting copy / [Q]uit resolving").Trim().ToUpper()
+            if ($pick -eq "Q") { break }
+            if ($pick -eq "S") {
+                try {
+                    $swDoc = Read-Xml $userProfilePath
+                    $swGp  = $swDoc.GameProfile.SelectSingleNode("GamePath")
+                    if ($null -eq $swGp) {
+                        $swGp = $swDoc.CreateElement("GamePath")
+                        [void]$swDoc.GameProfile.PrependChild($swGp)
+                    }
+                    $swGp.InnerText = $info.Exe
+                    Save-Xml $swDoc $userProfilePath
+                    Write-Host "  Switched." -ForegroundColor Green
+                    Write-Log "Duplicate resolution: $code switched to $($info.Exe) (was $currentExe)"
+                    $manualRegData.Remove($folderName)
+                } catch {
+                    Write-Host "  FAILED to switch: $_" -ForegroundColor Red
+                    Write-Log "Duplicate resolution FAILED for $code -- $_"
+                }
+            } else {
+                Write-Host "  Kept current. Still listed in ACTION REQUIRED." -ForegroundColor DarkGray
+            }
+        }
+    }
+}
+
+if ($manualRegData.Count -gt 0) {
     Write-Host ""
     Write-Host ("  {0} game(s) need manual registration -- see ACTION REQUIRED at the end of this run." -f $manualRegData.Count) -ForegroundColor Yellow
 }
