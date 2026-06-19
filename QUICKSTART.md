@@ -163,6 +163,8 @@ ReShade adds post-processing effects without modifying any game files. Remove it
 
 **To remove:** delete the DLL (`dxgi.dll`, `d3d9.dll`, `d3d12.dll`, or `opengl32.dll`) from the game folder.
 
+**Note:** before deploying, the script checks your ReShade DLL's Authenticode signature (ReShade's installer is code-signed) and warns -- without blocking -- if it isn't validly signed.
+
 ---
 
 ## dgVoodoo2 Legacy Compatibility
@@ -392,7 +394,7 @@ At the end of every run the script prints — and saves to a text file (default 
 |------|----------|---------|
 | `TeknoParrot-Manager.config.json` | Scripts folder | Saved folders and settings |
 | `TeknoParrot-Manager.overrides.json` | Scripts folder | Per-game tweaks (noSync, onlySync, noPropagate, forceArchetype, familyOverride, datFile) |
-| `TeknoParrot-Manager.log` | Scripts folder | Log of every run |
+| `TeknoParrot-Manager.log` | Scripts folder | Log of every run (includes a download audit trail: source/filename/version/SHA256 for fetched binaries) |
 | `TeknoParrot-Manager.syncstate.json` | Staging folder | Tracks extracted ZIPs — delete to re-extract all |
 | `TeknoParrot-Manager-controls.txt` | Scripts folder | Controls state after every run |
 | `TeknoParrot-Manager-ActionItems.txt` | Scripts folder (default; Save dialog can pick elsewhere) | Action items from last run |

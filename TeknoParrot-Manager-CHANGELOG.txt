@@ -7,6 +7,25 @@
 
 
 -------------------------------------------------------------------------------
+  v0.97 BETA  (2026-06-18)
+-------------------------------------------------------------------------------
+
+  New: every binary the script downloads from a third party (Eggman dat
+  ZIP, BepInEx release ZIP, both FFBArcadePlugin DLLs) now has its source
+  URL, filename, version (where known), and SHA256 logged to
+  TeknoParrot-Manager.log -- an audit trail so you can verify what was
+  actually fetched, or diagnose a corrupted download later. This does not
+  block or validate anything; none of these sources publish checksums to
+  check against.
+
+  New: ReShade setup now checks the Authenticode signature on your
+  ReShade64.dll/ReShade32.dll before deploying them to any game, since
+  ReShade's own installer is code-signed (the one source in the script
+  with an actual signature to check). An invalid or missing signature is
+  shown with a plain-English explanation plus the raw status, but does
+  not block setup -- you supplied the file yourself.
+
+-------------------------------------------------------------------------------
   v0.96 BETA  (2026-06-18)
 -------------------------------------------------------------------------------
 

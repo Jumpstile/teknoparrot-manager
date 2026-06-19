@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.96 BETA
+# TeknoParrot Manager  |  v0.97 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -65,7 +65,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # GitHub API User-Agent headers. Previously hardcoded in each of those spots
 # independently, which let the User-Agent strings drift out of sync with the
 # banner (caught stale at 0.70 during the v0.71 bump, and again at 0.76 here).
-$ScriptVersion = "0.96"
+$ScriptVersion = "0.97"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -274,6 +274,26 @@ function Test-PathInside {
     } catch { return $false }
     if ($c -eq $p) { return $true }
     return $c.StartsWith($p + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+# Logs a SHA256 audit trail for a binary downloaded from a third-party
+# source (GitHub Releases, a raw repo file, etc). None of the sources this
+# script pulls from publish checksums to verify against, and most of the
+# binaries are unsigned community builds, so there is no real trust anchor
+# to enforce a pass/fail check against -- this does not block or validate
+# anything. It exists so a user who wants to verify what was actually
+# fetched (or diagnose a corrupted/tampered download after the fact) has a
+# source URL + filename + hash + timestamp on record without having to
+# reproduce the download themselves.
+function Write-DownloadAudit {
+    param([string]$Source, [string]$FileName, [string]$Path, [string]$Version = "")
+    try {
+        $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+        $verPart = if ($Version) { " Version=$Version" } else { "" }
+        Write-Log "DownloadAudit: File=$FileName$verPart SHA256=$hash Source=$Source"
+    } catch {
+        Write-Log "DownloadAudit: could not hash $FileName -- $_"
+    }
 }
 
 # Splits a TeknoParrot <ExecutableName> value into its alternatives.
@@ -1043,6 +1063,48 @@ function Select-RegisteredGamesInteractive {
     return @($selected)
 }
 
+# Checks the Authenticode signature on a user-provided ReShade DLL. Unlike
+# the BepInEx/FFBPlugin/Eggman-dat downloads (unsigned community builds with
+# no published checksum to verify against), ReShade's own installer IS
+# code-signed -- and that signature is embedded in the PE itself, so it
+# survives extracting/renaming the DLL out of the installer into
+# Scripts\ReShade\. This gives an actual trust anchor worth checking before
+# deploying the file into every selected game's folder. Informational, not
+# a hard gate -- an invalid/missing signature is surfaced loudly but does
+# not block setup, since the user supplied this file themselves and a
+# revocation-check failure on an offline machine looks identical to a
+# tampered file.
+function Test-ReShadeDllSignature {
+    param([string]$Path)
+    try {
+        $sig    = Get-AuthenticodeSignature -LiteralPath $Path
+        $signer = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { "(none)" }
+        return [pscustomobject]@{ Status = $sig.Status.ToString(); Signer = $signer }
+    } catch {
+        return [pscustomobject]@{ Status = "Error"; Signer = "(none)" }
+    }
+}
+
+# Translates a [System.Management.Automation.SignatureStatus] value (or the
+# "Error" sentinel Test-ReShadeDllSignature returns on an exception) into a
+# plain-English explanation for the console. The raw enum name alone (e.g.
+# "UnknownError") means nothing to someone who isn't a PowerShell developer
+# -- this is purely a display concern, Write-Log still records the raw
+# status untranslated for anyone diagnosing it later.
+function Get-SignatureStatusText {
+    param([string]$Status)
+    switch ($Status) {
+        'NotSigned'              { return "this file has no digital signature at all" }
+        'HashMismatch'           { return "the file's contents don't match its signature -- it was modified after signing" }
+        'NotTrusted'             { return "signed, but not by a certificate Windows trusts" }
+        'NotSupportedFileFormat' { return "this isn't a file type Windows can check a signature on" }
+        'Incompatible'           { return "the signature uses a format this version of Windows can't validate" }
+        'UnknownError'           { return "Windows could not determine whether this file is genuinely signed (often means it isn't a valid DLL, or the signature check itself failed)" }
+        'Error'                  { return "the signature check itself failed unexpectedly" }
+        default                  { return "signature could not be confirmed ($Status)" }
+    }
+}
+
 # Fetches the current ReShade version string from reshade.me.
 # Returns e.g. "6.7.3", or $null if the site cannot be reached.
 function Get-ReShadeLatestVersion {
@@ -1113,6 +1175,27 @@ function Invoke-ReShadeSetup {
     } else {
         Write-Host "  ReShade (32-bit) : not found -- 32-bit games will be skipped" -ForegroundColor DarkGray
     }
+
+    # Authenticode check on the DLL(s) before deploying them anywhere.
+    foreach ($dllCheck in @(
+        @{ Path = $SourceDll;   Label = "64-bit" },
+        @{ Path = $SourceDll32; Label = "32-bit" }
+    )) {
+        if (-not $dllCheck.Path -or -not (Test-Path -LiteralPath $dllCheck.Path)) { continue }
+        $sigResult = Test-ReShadeDllSignature -Path $dllCheck.Path
+        $sha256    = $null
+        try { $sha256 = (Get-FileHash -LiteralPath $dllCheck.Path -Algorithm SHA256).Hash } catch {}
+        Write-Log ("ReShade ({0}): signature={1} signer='{2}' sha256={3}" -f $dllCheck.Label, $sigResult.Status, $sigResult.Signer, $sha256)
+        if ($sigResult.Status -eq 'Valid') {
+            Write-Host ("  ReShade ($($dllCheck.Label)) signature : Valid -- $($sigResult.Signer)") -ForegroundColor DarkGray
+        } else {
+            $statusText = Get-SignatureStatusText -Status $sigResult.Status
+            Write-Host ("  ReShade ($($dllCheck.Label)) signature : not validly signed -- $statusText. (raw status: $($sigResult.Status))") -ForegroundColor Yellow
+            Write-Host "  Continuing anyway since you supplied this file yourself -- just make sure" -ForegroundColor Yellow
+            Write-Host "  it actually came from https://reshade.me and wasn't substituted." -ForegroundColor Yellow
+        }
+    }
+
     if ($bVer) {
         Write-Host "  Checking reshade.me for updates..." -ForegroundColor DarkGray
         $latest = Get-ReShadeLatestVersion
@@ -2796,6 +2879,7 @@ function Invoke-EggmanDatDownload {
                 }
             }
         }
+        Write-DownloadAudit -Source $downloadUrl -FileName ([System.IO.Path]::GetFileName($savePath)) -Path $savePath
         return $true
     } catch {
         Write-Host ("  Download failed: {0}" -f $_) -ForegroundColor Red
@@ -2877,6 +2961,7 @@ function Invoke-FFBPluginDownload {
                     -Headers @{ 'User-Agent' = "TeknoParrot-Manager/$ScriptVersion" }
                 $got = $true
                 Write-Log "FFBPlugin: downloaded $dllName"
+                Write-DownloadAudit -Source $uri -FileName $dllName -Path $destPath
                 break
             } catch {
                 $status = 0
@@ -3437,6 +3522,7 @@ function Invoke-BepInExUpdateCheck {
             Invoke-WebRequest -Uri $latest.DownloadUrl -OutFile $zipPath -UseBasicParsing -ErrorAction Stop `
                 -Headers @{ 'User-Agent' = "TeknoParrot-Manager/$ScriptVersion" }
             $downloaded = $true
+            Write-DownloadAudit -Source $latest.DownloadUrl -FileName $safeFileName -Path $zipPath -Version $latest.Version
             break
         } catch {
             try { if (Test-Path -LiteralPath $zipPath) { [System.IO.File]::Delete($zipPath) } } catch {}

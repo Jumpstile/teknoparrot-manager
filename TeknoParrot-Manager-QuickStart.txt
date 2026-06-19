@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.96 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.97 BETA  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -208,6 +208,10 @@
        exe and rename to  ReShade32.dll  if you have 32-bit games.)
     4. Run TeknoParrot Manager and choose mode 5, or answer Y when
        prompted at the end of a normal run.
+
+  Before deploying, the script checks the Authenticode signature on your
+  ReShade DLL(s) -- ReShade's own installer is code-signed. An invalid or
+  missing signature is shown as a warning but does not block setup.
 
   Once installed, press the  Home  key while in-game to open the
   ReShade overlay and switch effects on or off.
@@ -589,7 +593,9 @@
                                        onlySync, noPropagate, forceArchetype,
                                        familyOverride, datFile). See README
                                        section PER-GAME OVERRIDES.
-  TeknoParrot-Manager.log              Log of every run.
+  TeknoParrot-Manager.log              Log of every run. Includes a download
+                                       audit trail (source/filename/version/
+                                       SHA256) for fetched binaries.
   TeknoParrot-Manager.syncstate.json   Tracks extracted ZIPs (in staging
                                        folder). Delete to re-extract all.
   TeknoParrot-Manager-controls.txt     Controls state snapshot (written after

@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.96 BETA
+  TeknoParrot Manager  |  v0.97 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -985,11 +985,17 @@
 
     The script will:
       a. Show the version of the bundled DLL and check reshade.me for updates.
-      b. Ask whether you want to use a preset file (a ready-made set of
+      b. Check the Authenticode signature on the DLL(s) -- ReShade's own
+         installer is code-signed, and that signature survives extracting
+         and renaming the DLL. An invalid or missing signature is shown as
+         a warning with the reason in plain English, but does NOT block
+         setup -- you supplied this file yourself, just make sure it
+         actually came from reshade.me.
+      c. Ask whether you want to use a preset file (a ready-made set of
          effects), or just install the DLL and configure effects yourself.
-      c. Let you pick which games to install ReShade on (all games, or a
+      d. Let you pick which games to install ReShade on (all games, or a
          specific selection from a list).
-      d. Copy the DLL with the correct name into each selected game folder.
+      e. Copy the DLL with the correct name into each selected game folder.
 
   PER-GAME PRESETS
 
@@ -1764,6 +1770,11 @@
 
   Log. Every run appends to TeknoParrot-Manager.log next to the script:
   what was extracted, registered, repaired and propagated, and any errors.
+  It also records a download audit trail -- source URL, filename, version
+  (where known), and SHA256 -- for every third-party binary the script
+  fetches (the Eggman dat ZIP, the BepInEx release, and the FFBArcadePlugin
+  DLLs). This does not verify or block anything; it is a record you can
+  check later if you want to confirm what was actually downloaded.
 
   If the log file is inaccessible (permissions, disk full, or path issue),
   the script does not fail silently:
@@ -1926,6 +1937,6 @@
 
 
 ===============================================================================
-  v0.96 BETA -- Test one game after each run.
+  v0.97 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================

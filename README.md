@@ -55,7 +55,7 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 - **AutoSync extraction** — copies and extracts game ZIPs from a NAS or local source, skipping unchanged games.
 - **Game repair** — finds broken or empty game paths and re-points them automatically.
 - **Crosshair setup** — deploys custom P1/P2 cursor images to all lightgun games with an HTML preview of 321 included designs.
-- **ReShade** — installs post-processing into game folders, auto-detecting the correct DLL name and 32/64-bit architecture per game.
+- **ReShade** — installs post-processing into game folders, auto-detecting the correct DLL name and 32/64-bit architecture per game. Checks the Authenticode signature on your ReShade DLL(s) before deploying, since ReShade's own installer is code-signed.
 - **dgVoodoo2** — fixes older games that crash on DirectX 8, DirectDraw, or Glide by deploying the correct compatibility DLLs.
 - **GPU fixes** — detects your GPU (AMD / NVIDIA / Intel) and applies the matching vendor fix to every registered game that has one.
 - **Force feedback (FFB)** — native FFB Blaster (needs a paid TeknoParrot membership) and a free third-party plugin (fetched live, no subscription needed), covering different games. If a game is covered by both, you're asked once which to use for all such games.
@@ -65,6 +65,7 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 - **LaunchBox / HyperSpin 2 export** — builds import files for both frontends after each run.
 - **Unattended mode** — `-Unattended` flag for scheduled overnight runs.
 - **Preview / dry-run mode** — see what AutoSync/Register would do (extract, register, repair, propagate) with zero files written, then decide whether to apply it for real.
+- **Download audit logging** — every binary fetched from a third party (Eggman dat ZIP, BepInEx release, FFBArcadePlugin DLLs) has its source URL, filename, version, and SHA256 logged for later verification or troubleshooting.
 - **Safe by design** — timestamped backups before every run, free-space check, full log, one-click restore.
 
 ---
@@ -339,6 +340,8 @@ The script looks for DLLs in a `ReShade\` folder next to the script:
 **In-game:** press **Home** to open the ReShade overlay. Toggle effects with tick-boxes, adjust with sliders. Settings save automatically to `ReShade.ini` in the game folder.
 
 **Updating:** the script checks reshade.me for newer versions each run. To update: download the new installer, extract the DLL, replace `ReShade64.dll`, re-run mode 4.
+
+**Signature check:** before deploying, the script checks the Authenticode signature on your ReShade DLL(s) — ReShade's own installer is code-signed, and that signature survives extracting/renaming the DLL. An invalid or missing signature is shown as a warning (with a plain-English reason) but doesn't block setup, since you supplied the file yourself; just make sure it actually came from reshade.me.
 
 **Removing:** delete the DLL (`dxgi.dll`, `d3d9.dll`, `d3d12.dll`, or `opengl32.dll`) from the game folder. Optionally delete `ReShade.ini` as well.
 
@@ -647,7 +650,7 @@ If backup folder creation fails, the script exits rather than proceeding without
 
 **Manual restore:** close TeknoParrot, copy `.xml` files from a backup folder back into `UserProfiles`, overwriting the current ones.
 
-**Log:** every run appends to `TeknoParrot-Manager.log`. If the log file is inaccessible, a one-time warning shows the path and error. Every entry that can't be written is echoed to the console prefixed with `[UNLOGGED]` so nothing is lost.
+**Log:** every run appends to `TeknoParrot-Manager.log`. If the log file is inaccessible, a one-time warning shows the path and error. Every entry that can't be written is echoed to the console prefixed with `[UNLOGGED]` so nothing is lost. This log also records a download audit trail (source URL, filename, version, SHA256) for every third-party binary the script fetches — the Eggman dat ZIP, the BepInEx release, and the FFBArcadePlugin DLLs.
 
 ---
 
@@ -718,4 +721,4 @@ TeknoParrot must be set up as an emulator in HyperSpin 2 first. The title must c
 
 ---
 
-> v0.96 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v0.97 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
