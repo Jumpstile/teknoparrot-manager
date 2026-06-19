@@ -7,6 +7,41 @@
 
 
 -------------------------------------------------------------------------------
+  v0.98 BETA  (2026-06-19)
+-------------------------------------------------------------------------------
+
+  New: direct LaunchBox integration. After a run, the script can now write
+  your registered games straight into LaunchBox's own library files --
+  no import wizard needed. Checks LaunchBox/BigBox are closed first, backs
+  up every file it is about to change into Scripts\LaunchBoxBackups\, and
+  never duplicates a game already present. The first time you use it, you
+  choose how TeknoParrot games should appear: mixed into your existing
+  Arcade platform, a separate "TeknoParrot" platform, a platform with a
+  name you choose, or both Arcade and a dedicated platform at once. The
+  choice is remembered for next time. New games have no box art/metadata
+  yet -- use LaunchBox's own Search per game to fetch it, same as for any
+  manually-imported game.
+
+  New: a "LaunchBox library backup" option under menu 9 (Restore backup)
+  restores the exact LaunchBox files the direct integration last changed,
+  the same way the existing UserProfiles restore already worked.
+
+  Fix: the LaunchBox manual-import reference file (TeknoParrot-LaunchBox-
+  Import.xml, still available if you prefer not to let the script touch
+  LaunchBox directly) had its ApplicationPath field pointing at the game's
+  executable. Confirmed against a real working LaunchBox installation that
+  this is wrong -- LaunchBox's own TeknoParrot emulator entry launches by
+  profile (--profile=%romfile%.xml), so the path it actually needs is the
+  GameProfile XML itself. Also fixed the printed import-wizard instructions,
+  which told users to import *.exe files from the staging folder; the
+  correct target is the UserProfiles\*.xml profile files.
+
+  Internal: extracted the seven near-duplicate config-save blocks scattered
+  across the script into a single Save-Config function, since adding new
+  settings (the four LaunchBox fields above) to seven copies by hand would
+  have been a real risk of missing one.
+
+-------------------------------------------------------------------------------
   v0.97 BETA  (2026-06-18)
 -------------------------------------------------------------------------------
 

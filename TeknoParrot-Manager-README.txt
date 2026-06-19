@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.97 BETA
+  TeknoParrot Manager  |  v0.98 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -125,11 +125,15 @@
   - Game repair. Finds broken or empty game paths and re-points them to the
     correct executable in your staging folder.
 
-  - LaunchBox export. Builds a LaunchBox-compatible XML file listing every
-    registered game (title, platform, emulator path, profile argument). Export
-    at any time and use LaunchBox's own import wizard to add games in one pass.
-    The wizard assigns metadata, box art, and the correct internal emulator ID
-    automatically.
+  - LaunchBox integration. Adds your registered games directly into
+    LaunchBox's own library -- no import wizard needed. Checks LaunchBox is
+    closed, backs up the files it is about to change, and never duplicates a
+    game already there. Choose to mix TeknoParrot games into your existing
+    Arcade platform, a dedicated "TeknoParrot" platform, a platform with a
+    name you choose, or both Arcade and a dedicated platform at once; your
+    choice is remembered for next time. A manual-import reference file (for
+    LaunchBox's own Import wizard) remains available if you prefer not to
+    let the script touch LaunchBox's files directly.
 
   - HyperSpin 2 export. After each run the script offers to add all registered
     games to HyperSpin 2's game list. Locates the TeknoParrot system in your
@@ -389,10 +393,13 @@
        BEPINEX UPDATE CHECK below. Optional. Returns to the menu when done.
 
   9) Restore from backup
-       Rolls your UserProfiles back to a previous backup without touching
-       File Explorer. The script lists all timestamped backup folders with
-       file counts, you pick one by number, type YES to confirm, and the
-       restore runs. Returns to the menu when done.
+       Choose which backup to restore: (1) your UserProfiles -- rolls back
+       to a previous backup without touching File Explorer, lists all
+       timestamped backup folders with file counts, you pick one by number,
+       type YES to confirm; or (2) LaunchBox's library files -- only
+       relevant if you have used the direct LaunchBox integration, restores
+       Emulators.xml/Platforms.xml/platform file(s) to their state before
+       the script last wrote to them. Returns to the menu when done.
 
   10) Library health check
        Read-only. Reports how many registered profiles have a valid,
@@ -711,69 +718,63 @@
   LAUNCHBOX
   ---------
 
-  At the end of each run the script offers to export your games to a
-  LaunchBox-compatible XML file:
+  At the end of each run the script offers to add your registered games
+  directly into LaunchBox:
 
-      Export a LaunchBox import XML for all registered games? (Y/N)
+      Add your registered games to LaunchBox now? (Y/N)
 
-  Answering Y writes TeknoParrot-LaunchBox-Import.xml next to the script,
-  containing one entry per registered game with its title, platform (Arcade),
-  the full path to TeknoParrotUi.exe, and the correct --profile= argument.
+  Answering Y writes straight into LaunchBox's own Data\ files -- no import
+  wizard step required. Before writing anything, the script:
 
-  Why there is no automatic write to LaunchBox's database:
+      - Checks that LaunchBox and BigBox are both closed (refuses to write
+        while either is running, since LaunchBox can overwrite external
+        changes when it next saves).
+      - Backs up every file it is about to change into
+        Scripts\LaunchBoxBackups\<timestamp>\, preserving the same relative
+        layout as your LaunchBox install. If the backup fails for any
+        reason, nothing is written.
+      - Creates the TeknoParrot emulator entry in LaunchBox if one does not
+        already exist (or reuses your existing one by name, so re-running
+        this never creates a duplicate).
+      - Skips any game that already has an entry in the target platform, so
+        re-runs never duplicate games or touch favorites/play counts you
+        have already set in LaunchBox.
 
-    LaunchBox stores its game library in Data\Platforms\Arcade.xml and
-    several related files. Writing to these files directly from an external
-    script is not safe because:
+  The first time you use this, you are asked how TeknoParrot games should
+  appear in LaunchBox:
 
-      - LaunchBox must be completely closed before any of its database files
-        are modified. If it is open, it overwrites external changes when it
-        shuts down.
-      - LaunchBox's XML format has changed across versions. Missing or
-        unexpected fields can cause import errors or broken metadata.
-      - Each game entry must reference a specific internal emulator ID that
-        only LaunchBox itself assigns when you add the emulator through its
-        own UI. Writing entries without the correct ID means games may not
-        launch from the LaunchBox interface even if they appear in the list.
+      1) Mixed into your existing Arcade platform
+      2) A separate "TeknoParrot" platform
+      3) A separate platform with a name you choose
+      4) Both -- mixed into Arcade AND a separate TeknoParrot platform
 
-    The safe approach is LaunchBox's own import wizard, which handles all of
-    this correctly and takes about 30 seconds.
+  Your choice is remembered and offered again (with the option to change it)
+  on future runs. Choosing "Both" creates two separate game records (one per
+  platform) pointing at the same TeknoParrot profile -- LaunchBox has no
+  concept of one game belonging to two platforms at once, so favorites and
+  play counts are tracked separately between the two views.
 
-  HOW TO IMPORT YOUR GAMES INTO LAUNCHBOX
-  ----------------------------------------
+  New games have no box art or metadata yet, since this script has no way to
+  populate LaunchBox's own scraped database fields. In LaunchBox, right-click
+  a newly added game and use Edit... -> Search to fetch metadata and box art,
+  the same way you would for any manually-imported game.
 
-  Step 1.  Make sure TeknoParrot is set up as an emulator in LaunchBox.
-           If you have not done this yet:
-             a. Go to  Tools -> Manage -> Emulators -> Add.
-             b. Name: TeknoParrot
-             c. Emulator path: browse to TeknoParrotUi.exe in your
-                TeknoParrot root folder.
-             d. Command-line parameters:  --profile="{rom}"
-             e. Save.
+  If anything looks wrong afterward, use menu option 9 (Restore backup) and
+  choose "LaunchBox library backup" to restore the exact files the script
+  changed, from before it changed them.
 
-  Step 2.  Go to  Tools -> Import -> Emulated Games.
+  PREFER THE MANUAL IMPORT WIZARD INSTEAD?
 
-  Step 3.  On the first screen of the wizard:
-             - Emulator: select TeknoParrot from the drop-down.
-             - Import type: Import ROM files.
-             - Folder: browse to your games staging folder (the folder
-               containing all your extracted game subfolders).
-             - File types: *.exe  (or whatever extension your games use).
-
-  Step 4.  Click Next. LaunchBox scans the folder and lists every game it
-           finds. It will attempt to match each one to its database for
-           metadata and box art automatically.
-
-  Step 5.  Review the matches, adjust any that look wrong, and click Import.
-           LaunchBox adds the games to your library.
-
-  The exported XML file (TeknoParrot-LaunchBox-Import.xml) is a reference
-  showing every registered game, its profile code, and its executable path.
-  Use it to verify the list or as a record of what was registered. You do
-  not need to import it directly into LaunchBox.
-
-  Note: if you re-run the import wizard after adding more games, LaunchBox
-  will skip games already in your library and only add new ones.
+  Answer N to the direct-integration question, then Y to the follow-up
+  question, to get a reference file and step-by-step instructions for
+  LaunchBox's own Import wizard instead -- useful if you would rather not
+  let the script touch LaunchBox's files directly. This writes
+  TeknoParrot-LaunchBox-Import.xml next to the script and prints the exact
+  wizard steps, including the emulator command line
+  (--profile=%romfile%.xml) and where to point the wizard (your
+  UserProfiles folder, importing the profile *.xml files themselves --
+  TeknoParrot launches games by profile, so the profile XML is what
+  LaunchBox treats as the "rom" for each game, not the game's executable).
 
 
   HYPERSPIN 2
@@ -1937,6 +1938,6 @@
 
 
 ===============================================================================
-  v0.97 BETA -- Test one game after each run.
+  v0.98 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================

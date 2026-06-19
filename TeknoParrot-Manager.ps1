@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.97 BETA
+# TeknoParrot Manager  |  v0.98 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -159,6 +159,40 @@ function Save-XmlMaybe {
     param([System.Xml.XmlDocument]$doc, [string]$path, [bool]$DryRun)
     if ($DryRun) { Write-Log "DryRun: would save $path"; return }
     Save-Xml $doc $path
+}
+
+# Writes TeknoParrot-Manager.config.json from the current script-scope
+# settings variables. Single source of truth for the config schema --
+# every call site that needs to persist a settings change after this run
+# calls this instead of building its own copy of the field list, so adding
+# a new setting only ever means editing one place.
+function Save-Config {
+    $cfg = [ordered]@{
+        TeknoParrotRoot              = $tpRoot
+        ZipSourceFolder              = $zipSource
+        ZipSourceSupplementaryFolder = $zipSourceSupplementary
+        GamesInstallFolder           = $gamesInstallFolder
+        RetroBat                     = $retroBat
+        HyperSpinDataPath            = $hsDataPath
+        ReShadeSourceDll             = $rsSourceDll
+        ReShadeSourceDll32           = $rsSourceDll32
+        DgVoodoo2SourceDir           = $dgSourceDir
+        EggmanDatZip                 = $eggmanDatZip
+        DatFilePath                  = $datFilePath
+        SupplementaryDatPath         = $supplementaryDatPath
+        IncludeSupplementary         = $includeSupplementary
+        LaunchBoxRoot                = $lbRoot
+        LaunchBoxPlatformMode        = $lbPlatformMode
+        LaunchBoxCustomPlatformName  = $lbCustomPlatformName
+        LaunchBoxEmulatorId          = $lbEmulatorId
+    }
+    try {
+        [System.IO.File]::WriteAllText($configPath, ($cfg | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
+        return $true
+    } catch {
+        Write-Log "Config: could not save -- $_"
+        return $false
+    }
 }
 
 # Reads the primary ExecutableName from a profile XML using a fast regex pass,
@@ -333,6 +367,59 @@ function Find-TeknoParrotRoot {
         }
     }
     return ,$found   # comma prevents PS 5.1 from unwrapping the ArrayList into individual strings
+}
+
+# Same strategy as Find-TeknoParrotRoot, but looking for LaunchBox.exe
+# itself (the LaunchBox installation root, not the TeknoParrot emulator
+# folder underneath it) -- used by the direct LaunchBox integration to
+# locate Data\ without asking the user to type the path from memory.
+function Find-LaunchBoxRoot {
+    $candidates = New-Object System.Collections.ArrayList
+    $up = $env:USERPROFILE
+    if ($up) {
+        [void]$candidates.Add((Join-Path $up "LaunchBox"))
+        [void]$candidates.Add((Join-Path $up "AppData\Roaming\LaunchBox"))
+    }
+    $drives = @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue |
+                Where-Object { $_.Root -and -not (Test-IsNetworkPath $_.Root) -and (Test-Path -LiteralPath $_.Root) } |
+                ForEach-Object { $_.Root.TrimEnd('\') })
+    foreach ($d in $drives) {
+        [void]$candidates.Add("$d\LaunchBox")
+        [void]$candidates.Add("$d\Games\LaunchBox")
+        [void]$candidates.Add("$d\Program Files\LaunchBox")
+        [void]$candidates.Add("$d\Program Files (x86)\LaunchBox")
+    }
+    $found = New-Object System.Collections.ArrayList
+    foreach ($path in $candidates) {
+        if ((Test-Path -LiteralPath (Join-Path $path "LaunchBox.exe")) -and
+            $found -notcontains $path) {
+            [void]$found.Add($path)
+        }
+    }
+    return ,$found
+}
+
+# True if LaunchBox or BigBox is currently running. The direct LaunchBox
+# integration must never write to Data\ files while LaunchBox has them
+# open -- that's the same risk Export-LaunchBoxXml's header comment has
+# always called out for the manual-import path, just enforced here instead
+# of left to the user to remember.
+function Test-LaunchBoxRunning {
+    $proc = Get-Process -Name "LaunchBox", "BigBox" -ErrorAction SilentlyContinue
+    return ($null -ne $proc)
+}
+
+# PowerShell 5.1 runs on .NET Framework, which has no [Path]::GetRelativePath
+# (that's .NET Core-only) -- this is the standard Uri-based equivalent.
+# Both inputs must be absolute; returns a backslash-separated relative path.
+function Get-RelativePath {
+    param([string]$basePath, [string]$targetPath)
+    $baseFull = [System.IO.Path]::GetFullPath($basePath).TrimEnd('\', '/') + '\'
+    $targetFull = [System.IO.Path]::GetFullPath($targetPath)
+    $baseUri = New-Object System.Uri($baseFull)
+    $targetUri = New-Object System.Uri($targetFull)
+    $relUri = $baseUri.MakeRelativeUri($targetUri)
+    return [System.Uri]::UnescapeDataString($relUri.ToString()).Replace('/', '\')
 }
 
 # =============================================================================
@@ -5197,10 +5284,18 @@ function Invoke-RestoreBackup {
 # Manual import takes about 30 seconds and avoids every one of those risks.
 #
 # Returns the count of games written, or -1 on a fatal write error.
+#
+# NOTE: <ApplicationPath> below is deliberately the GameProfile XML's own
+# path relative to the LaunchBox root, NOT the game's executable. This was
+# confirmed against a real, working LaunchBox installation's live
+# Data\Platforms\TeknoParrot.xml: LaunchBox's TeknoParrot emulator entry
+# uses CommandLine "--profile=%romfile%.xml" with FileNameWithoutExtensionAndPath
+# enabled, so the "rom" LaunchBox launches against IS the profile XML --
+# %romfile% resolves to the bare profile filename, and the literal ".xml"
+# is appended by the emulator's own command-line template.
 function Export-LaunchBoxXml {
-    param([string]$userProfilesDir, [string]$tpRoot, [string]$outputPath)
+    param([string]$userProfilesDir, [string]$lbRoot, [string]$outputPath)
 
-    $tpExe = Join-Path $tpRoot "TeknoParrotUi.exe"
     $files = Get-ChildItem -LiteralPath $userProfilesDir -Filter *.xml -File -ErrorAction SilentlyContinue |
                  Where-Object { $_.Directory.Name -ne "FullBackup" }
 
@@ -5227,12 +5322,14 @@ function Export-LaunchBoxXml {
                 $title = [regex]::Replace($f.BaseName, '(?<=[a-z])(?=[A-Z])', ' ')
             }
 
+            $appPath = if ($lbRoot) { Get-RelativePath $lbRoot $f.FullName } else { $f.FullName }
+
             $esc = [System.Security.SecurityElement]
             [void]$sb.AppendLine('  <Game>')
             [void]$sb.AppendLine("    <Title>$($esc::Escape($title))</Title>")
             [void]$sb.AppendLine("    <Platform>Arcade</Platform>")
-            [void]$sb.AppendLine("    <ApplicationPath>$($esc::Escape($tpExe))</ApplicationPath>")
-            [void]$sb.AppendLine("    <CommandLine>$($esc::Escape("--profile=$($f.Name)"))</CommandLine>")
+            [void]$sb.AppendLine("    <ApplicationPath>$($esc::Escape($appPath))</ApplicationPath>")
+            [void]$sb.AppendLine("    <CommandLine />")
             [void]$sb.AppendLine("    <RomPath>$($esc::Escape($gamePath))</RomPath>")
             [void]$sb.AppendLine("    <Favorite>false</Favorite>")
             [void]$sb.AppendLine("    <Completed>false</Completed>")
@@ -5255,6 +5352,573 @@ function Export-LaunchBoxXml {
         Write-Log "LaunchBox export: FAILED to write file -- $_"
         return -1
     }
+}
+
+# =============================================================================
+# LAUNCHBOX DIRECT INTEGRATION  (writes straight into LaunchBox's Data\ files)
+# =============================================================================
+# Real-world schema below (Emulator/Platform/Game field names and values) was
+# captured from a working LaunchBox installation's live Data\Emulators.xml and
+# Data\Platforms\TeknoParrot.xml -- not guessed. Confirmed via a LaunchBox
+# forum admin post that TeknoParrot's profile structure is not understood by
+# LaunchBox's own auto-import, which is why ScrapeAs=Arcade and
+# DisableAutoImport=true matter for any platform this script creates.
+
+# Strips characters that are invalid in a Windows filename from a
+# user-typed custom platform name, since the name doubles as the
+# Data\Platforms\<name>.xml filename. Falls back to "TeknoParrot" if
+# nothing valid remains.
+function Get-SafeLaunchBoxPlatformFileName {
+    param([string]$platformName)
+    $clean = [regex]::Replace($platformName, '[\\/:*?"<>|]', '').Trim()
+    if ([string]::IsNullOrWhiteSpace($clean)) { $clean = "TeknoParrot" }
+    return $clean
+}
+
+# Backs up only the specific Data\ files about to be modified -- never the
+# whole Data\ folder, since some platform files (Arcade.xml) run 20+ MB and
+# copying everything on every run would be slow for no benefit. Files are
+# copied into Scripts\LaunchBoxBackups\<timestamp>\ preserving their path
+# relative to the LaunchBox root, so a restore is a straight copy back
+# (see Invoke-RestoreLaunchBoxBackup). Returns the backup folder path, or
+# $null on failure -- writing to LaunchBox's live files without a
+# successful backup first is never acceptable.
+function Backup-LaunchBoxFiles {
+    param([string]$lbRoot, [string[]]$relativeFiles)
+
+    $timestamp  = (Get-Date).ToString("yyyy-MM-dd_HH-mm-ss")
+    $backupPath = Join-Path (Join-Path $PSScriptRoot "LaunchBoxBackups") $timestamp
+
+    try {
+        foreach ($rel in $relativeFiles) {
+            $srcFull = Join-Path $lbRoot $rel
+            if (-not (Test-Path -LiteralPath $srcFull)) { continue }   # nothing to back up yet (new platform file)
+            $dstFull = Join-Path $backupPath $rel
+            if (-not (Test-PathInside $dstFull $backupPath)) {
+                Write-Log "LaunchBox backup: FAILED -- '$rel' would escape the backup folder"
+                return $null
+            }
+            [void][System.IO.Directory]::CreateDirectory((Split-Path -Parent $dstFull))
+            Copy-Item -LiteralPath $srcFull -Destination $dstFull -Force
+        }
+    } catch {
+        Write-Log "LaunchBox backup: FAILED -- $_"
+        return $null
+    }
+    Write-Log "LaunchBox backup: saved to $backupPath"
+    return $backupPath
+}
+
+# Restores a previous LaunchBox backup by copying each backed-up file back
+# to its original relative location under the LaunchBox root. Mirrors
+# Invoke-RestoreBackup's UX (list by timestamp, confirm with YES, refuse
+# while the target app is running) so both restore flows feel like the
+# same feature.
+function Invoke-RestoreLaunchBoxBackup {
+    param([string]$lbRoot)
+
+    $backupRoot = Join-Path $PSScriptRoot "LaunchBoxBackups"
+    if (-not (Test-Path -LiteralPath $backupRoot)) {
+        Write-Host "  No LaunchBox backups found in: $backupRoot" -ForegroundColor Yellow
+        return
+    }
+
+    $backups = @(Get-ChildItem -LiteralPath $backupRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending)
+    if ($backups.Count -eq 0) {
+        Write-Host "  No LaunchBox backup folders found." -ForegroundColor Yellow
+        return
+    }
+
+    Write-Host ""
+    Write-Host "  Available LaunchBox backups (most recent first):" -ForegroundColor Cyan
+    for ($i = 0; $i -lt $backups.Count; $i++) {
+        $b         = $backups[$i]
+        $fileCount = (Get-ChildItem -LiteralPath $b.FullName -Recurse -File -ErrorAction SilentlyContinue).Count
+        Write-Host ("    {0,3})  {1}   ({2} file(s))" -f ($i + 1), $b.Name, $fileCount)
+    }
+    Write-Host ""
+    $choice = (Read-Host "  Enter number to restore, or Enter to cancel").Trim()
+    if ([string]::IsNullOrWhiteSpace($choice)) {
+        Write-Host "  Restore cancelled." -ForegroundColor DarkGray
+        Write-Log "LaunchBox restore: cancelled by user."
+        return
+    }
+    if ($choice -notmatch '^\d+$' -or $choice.Length -gt 9 -or [int]$choice -lt 1 -or [int]$choice -gt $backups.Count) {
+        Write-Host "  Invalid selection. Restore cancelled." -ForegroundColor Yellow
+        Write-Log "LaunchBox restore: invalid selection '$choice'."
+        return
+    }
+    $selected = $backups[[int]$choice - 1]
+
+    Write-Host ""
+    Write-Host ("  Selected : {0}" -f $selected.Name) -ForegroundColor Yellow
+    Write-Host "  WARNING  : This will OVERWRITE the current LaunchBox Emulators.xml," -ForegroundColor Yellow
+    Write-Host "             Platforms.xml, and any platform file(s) in this backup." -ForegroundColor Yellow
+    $confirm = (Read-Host "  Type YES to confirm").Trim()
+    if ($confirm.ToUpper() -ne "YES") {
+        Write-Host "  Restore cancelled." -ForegroundColor DarkGray
+        Write-Log "LaunchBox restore: user did not confirm."
+        return
+    }
+
+    if (Test-LaunchBoxRunning) {
+        Write-Host "  ERROR: LaunchBox or BigBox is currently running." -ForegroundColor Red
+        Write-Host "  Close it completely and then re-run the restore." -ForegroundColor Yellow
+        Write-Log "LaunchBox restore: aborted -- LaunchBox/BigBox is running."
+        return
+    }
+
+    $backupFiles = @(Get-ChildItem -LiteralPath $selected.FullName -Recurse -File -ErrorAction SilentlyContinue)
+    $errCount = 0
+    foreach ($bf in $backupFiles) {
+        try {
+            $rel = Get-RelativePath $selected.FullName $bf.FullName
+            $dst = Join-Path $lbRoot $rel
+            if (-not (Test-PathInside $dst $lbRoot)) { $errCount++; continue }
+            [void][System.IO.Directory]::CreateDirectory((Split-Path -Parent $dst))
+            Copy-Item -LiteralPath $bf.FullName -Destination $dst -Force
+        } catch {
+            $errCount++
+            Write-Log "LaunchBox restore: failed to restore $($bf.FullName) -- $_"
+        }
+    }
+
+    if ($errCount -gt 0) {
+        Write-Host ("  WARNING: {0} file(s) could not be restored -- check TeknoParrot-Manager.log." -f $errCount) -ForegroundColor Yellow
+        Write-Log "LaunchBox restore: completed with $errCount error(s) from $($selected.Name)"
+    } else {
+        Write-Host "  Restore complete." -ForegroundColor Green
+        Write-Log "LaunchBox restore: completed from $($selected.Name), no errors."
+    }
+}
+
+# Finds the existing TeknoParrot <Emulator> entry in Emulators.xml by
+# Title (so re-runs, and machines that already configured this by hand,
+# Returns the InnerText of a named child element, or "" if the child is
+# absent -- guards against malformed/legacy LaunchBox XML entries that may
+# be missing a field this script expects, rather than crashing the whole
+# run on one unexpected node.
+function Get-XmlChildText {
+    param([System.Xml.XmlNode]$node, [string]$childName)
+    $child = $node.SelectSingleNode($childName)
+    if ($null -eq $child) { return "" }
+    return $child.InnerText
+}
+
+# Sets a child element's text, creating the child first if it is
+# unexpectedly missing (e.g. a cloned template from an older LaunchBox
+# schema) -- a live write to LaunchBox's own database should never crash
+# over one missing field.
+function Set-XmlChildText {
+    param([System.Xml.XmlNode]$node, [string]$childName, [string]$value)
+    $child = $node.SelectSingleNode($childName)
+    if ($null -eq $child) {
+        $child = $node.OwnerDocument.CreateElement($childName)
+        [void]$node.AppendChild($child)
+    }
+    $child.InnerText = $value
+}
+
+# never get a duplicate), or creates one using field values verified
+# against a real, working LaunchBox installation. $emulatorsDoc is modified
+# in place but not saved -- the caller saves once after all changes for
+# this run are made. Returns the Emulator's ID (GUID string).
+function Get-OrCreateLaunchBoxEmulator {
+    param([System.Xml.XmlDocument]$emulatorsDoc, [string]$tpRoot, [string]$lbRoot)
+
+    $emulatorNodes = @($emulatorsDoc.SelectNodes("/LaunchBox/Emulator"))
+    $existing = $emulatorNodes | Where-Object { (Get-XmlChildText $_ "Title") -eq "TeknoParrot" } | Select-Object -First 1
+    if ($existing) {
+        $existingId = Get-XmlChildText $existing "ID"
+        if ($existingId) { return $existingId }
+        # Matched by title but missing an ID -- treat as malformed and fall
+        # through to creating a fresh, well-formed entry instead of
+        # returning an empty emulator ID that would break every downstream
+        # Game/EmulatorPlatform link.
+    }
+
+    $relAppPath = Get-RelativePath $lbRoot (Join-Path $tpRoot "TeknoParrotUi.exe")
+    $newId = [guid]::NewGuid().ToString()
+
+    $fields = [ordered]@{
+        ApplicationPath                      = $relAppPath
+        CommandLine                          = "--profile=%romfile%.xml"
+        DefaultPlatform                      = ""
+        ID                                   = $newId
+        Title                                = "TeknoParrot"
+        NoQuotes                             = "true"
+        NoSpace                              = "true"
+        HideConsole                          = "true"
+        FileNameWithoutExtensionAndPath      = "true"
+        AutoHotkeyScript                     = ""
+        AutoExtract                          = "false"
+        UseStartupScreen                     = "true"
+        HideAllNonExclusiveFullscreenWindows = "false"
+        StartupLoadDelay                     = "25000"
+        HideMouseCursorInGame                = "true"
+        DisableShutdownScreen                = "false"
+        AggressiveWindowHiding                = "false"
+        UsePauseScreen                       = "false"
+        PauseAutoHotkeyScript                = ""
+        ResumeAutoHotkeyScript               = ""
+        DefaultPauseSettingsPushed           = "true"
+        SuspendProcessOnPause                = "true"
+        ForcefulPauseScreenActivation        = "true"
+        LoadStateAutoHotkeyScript            = ""
+        SaveStateAutoHotkeyScript            = ""
+        ResetAutoHotkeyScript                = ""
+        SwapDiscsAutoHotkeyScript            = ""
+        ExitAutoHotkeyScript                 = ""
+        SkipVersionCheck                     = "false"
+        LoginToCheevoOnGameLaunch            = "true"
+        EnableHardcoreAchievements           = "true"
+    }
+
+    $emulatorNode = $emulatorsDoc.CreateElement("Emulator")
+    foreach ($key in $fields.Keys) {
+        $child = $emulatorsDoc.CreateElement($key)
+        $child.InnerText = $fields[$key]
+        [void]$emulatorNode.AppendChild($child)
+    }
+    [void]$emulatorsDoc.DocumentElement.AppendChild($emulatorNode)
+    Write-Log "LaunchBox: created new Emulator entry for TeknoParrot (ID=$newId)"
+    return $newId
+}
+
+# Finds an existing <Platform> definition in Platforms.xml by name (Arcade
+# always exists already; "TeknoParrot" or a custom name might not), or
+# creates a minimal one. ScrapeAs=Arcade and DisableAutoImport=true are not
+# arbitrary -- TeknoParrot is not a real platform as far as LaunchBox's own
+# auto-import is concerned (confirmed via a LaunchBox forum admin post:
+# "the platform is Arcade ... TeknoParrot ... won't work via the
+# auto-import system right now ... a limitation by design"), so any
+# platform this script manages must scrape as Arcade and stay excluded
+# from LaunchBox's own auto-import sweeps. No other metadata (notes,
+# release date, BigBox theme, etc.) is fabricated -- left blank for the
+# user to fill in via LaunchBox's own platform editor if they want to.
+# Returns $true if a new platform was created, $false if one already existed.
+function Get-OrCreateLaunchBoxPlatform {
+    param([System.Xml.XmlDocument]$platformsListDoc, [string]$platformName, [string]$tpRoot, [string]$lbRoot)
+
+    $platformNodes = @($platformsListDoc.SelectNodes("/LaunchBox/Platform"))
+    $existing = $platformNodes | Where-Object { (Get-XmlChildText $_ "Name") -eq $platformName } | Select-Object -First 1
+    if ($existing) { return $false }
+
+    $relFolder = Get-RelativePath $lbRoot (Join-Path $tpRoot "GameProfiles")
+
+    $fields = [ordered]@{
+        Category                = ""
+        LocalDbParsed           = "true"
+        Name                    = $platformName
+        LastSelectedChild       = ""
+        ReleaseDate             = ""
+        Developer               = ""
+        Manufacturer            = ""
+        Cpu                     = ""
+        Memory                  = ""
+        Graphics                = ""
+        Sound                   = ""
+        Display                 = ""
+        Media                   = ""
+        MaxControllers          = ""
+        Folder                  = $relFolder
+        Notes                   = ""
+        VideosFolder            = ""
+        FrontImagesFolder       = ""
+        BackImagesFolder        = ""
+        ClearLogoImagesFolder   = ""
+        FanartImagesFolder      = ""
+        ScreenshotImagesFolder  = ""
+        BannerImagesFolder      = ""
+        SteamBannerImagesFolder = ""
+        ManualsFolder           = ""
+        MusicFolder             = ""
+        ScrapeAs                = "Arcade"
+        VideoPath               = ""
+        ImageType               = ""
+        SortTitle                = ""
+        LastGameId              = ""
+        BigBoxView              = ""
+        BigBoxTheme             = ""
+        AndroidThemeVideoPath   = ""
+        HideInBigBox            = "false"
+        DisableAutoImport       = "true"
+    }
+
+    $platformNode = $platformsListDoc.CreateElement("Platform")
+    foreach ($key in $fields.Keys) {
+        $child = $platformsListDoc.CreateElement($key)
+        $child.InnerText = $fields[$key]
+        [void]$platformNode.AppendChild($child)
+    }
+    [void]$platformsListDoc.DocumentElement.AppendChild($platformNode)
+    Write-Log "LaunchBox: created new Platform '$platformName'"
+    return $true
+}
+
+# Ensures an <EmulatorPlatform> link exists between the TeknoParrot
+# emulator and a platform. $isNewPlatform controls Default -- true only
+# when the platform itself was just created (nothing else could already
+# depend on its default emulator); false when linking into an existing
+# platform like Arcade, so an existing default emulator there is never
+# silently overridden.
+function Add-LaunchBoxEmulatorPlatformLink {
+    param([System.Xml.XmlDocument]$emulatorsDoc, [string]$emulatorId, [string]$platformName, [bool]$isNewPlatform)
+
+    $linkNodes = @($emulatorsDoc.SelectNodes("/LaunchBox/EmulatorPlatform"))
+    $existing = $linkNodes | Where-Object {
+        (Get-XmlChildText $_ "Emulator") -eq $emulatorId -and
+        (Get-XmlChildText $_ "Platform") -eq $platformName
+    } | Select-Object -First 1
+    if ($existing) { return }
+
+    $fields = [ordered]@{
+        Emulator           = $emulatorId
+        Platform           = $platformName
+        CommandLine        = ""
+        Default            = if ($isNewPlatform) { "true" } else { "false" }
+        M3uDiscLoadEnabled = "false"
+        AutoExtract        = "false"
+    }
+    $linkNode = $emulatorsDoc.CreateElement("EmulatorPlatform")
+    foreach ($key in $fields.Keys) {
+        $child = $emulatorsDoc.CreateElement($key)
+        $child.InnerText = $fields[$key]
+        [void]$linkNode.AppendChild($child)
+    }
+    [void]$emulatorsDoc.DocumentElement.AppendChild($linkNode)
+    Write-Log "LaunchBox: linked TeknoParrot emulator to platform '$platformName'"
+}
+
+# Hardcoded skeleton used only when the target platform file has zero
+# existing <Game> entries to clone a template from (e.g. a platform this
+# script just created). Field values match a real entry captured from a
+# working LaunchBox installation, with every scraped/stateful field
+# blanked -- see New-LaunchBoxGameEntry's generic reset logic for why most
+# fields here are intentionally empty/false/0: this script has no way to
+# populate real box art, genre, developer, etc. for an arbitrary game, so
+# new entries are left for the user to fill in later via LaunchBox's own
+# "search for metadata" feature.
+$script:LaunchBoxGameSkeletonFields = [ordered]@{
+    GogAppId = ""; OriginAppId = ""; OriginInstallPath = ""; VideoPath = ""; ThemeVideoPath = "";
+    ApplicationPath = ""; CommandLine = ""; Completed = "false"; ConfigurationCommandLine = "";
+    ConfigurationPath = ""; DateAdded = ""; DateModified = ""; Developer = ""; DosBoxConfigurationPath = "";
+    Emulator = ""; Favorite = "false"; ID = ""; ManualPath = ""; MusicPath = ""; Notes = ""; Platform = "";
+    Publisher = ""; Rating = ""; ReleaseDate = ""; RootFolder = ""; ScummVMAspectCorrection = "false";
+    ScummVMFullscreen = "false"; ScummVMGameDataFolderPath = ""; ScummVMGameType = ""; SortTitle = "";
+    Source = ""; StarRatingFloat = "0"; StarRating = "0"; CommunityStarRating = "0";
+    CommunityStarRatingTotalVotes = "0"; Status = ""; DatabaseID = ""; WikipediaURL = ""; Title = "";
+    UseDosBox = "false"; UseScummVM = "false"; Version = ""; Series = ""; PlayMode = ""; Region = "";
+    PlayCount = "0"; PlayTime = "0"; Portable = "false"; Hide = "false"; Broken = "false"; CloneOf = "";
+    Genre = ""; MissingVideo = "true"; MissingBoxFrontImage = "true"; MissingScreenshotImage = "true";
+    MissingMarqueeImage = "true"; MissingClearLogoImage = "true"; MissingBackgroundImage = "true";
+    MissingBox3dImage = "true"; MissingCartImage = "true"; MissingCart3dImage = "true"; MissingManual = "true";
+    MissingBannerImage = "true"; MissingMusic = "true"; UseStartupScreen = "false";
+    HideAllNonExclusiveFullscreenWindows = "false"; StartupLoadDelay = "0"; HideMouseCursorInGame = "false";
+    DisableShutdownScreen = "false"; AggressiveWindowHiding = "false";
+    OverrideDefaultStartupScreenSettings = "false"; UsePauseScreen = "false"; PauseAutoHotkeyScript = "";
+    ResumeAutoHotkeyScript = ""; OverrideDefaultPauseScreenSettings = "false"; SuspendProcessOnPause = "false";
+    ForcefulPauseScreenActivation = "false"; LoadStateAutoHotkeyScript = ""; SaveStateAutoHotkeyScript = "";
+    ResetAutoHotkeyScript = ""; SwapDiscsAutoHotkeyScript = ""; CustomDosBoxVersionPath = "";
+    ReleaseType = ""; MaxPlayers = "0"; VideoUrl = ""; RetroAchievementsBeatenSoftcore = "false";
+    RetroAchievementsBeatenHardcore = "false"; HasCloudSynced = "false"; Progress = "Not Started / Unplayed";
+}
+
+# Identity fields every new entry sets explicitly -- everything else is
+# either a generic type-pattern reset (cloned-template path) or already
+# blank/neutral (hardcoded-skeleton path).
+$script:LaunchBoxGameIdentityFields = @('ID', 'Title', 'Platform', 'Emulator', 'ApplicationPath', 'CommandLine', 'DateAdded', 'DateModified')
+
+# Builds one <Game> XML element for a TeknoParrot profile and appends it to
+# $platformGamesDoc. If the platform file already has an existing <Game>
+# entry, clones it as a template and generically resets every non-identity
+# field by type (Missing* -> true; true/false -> false; numeric -> 0;
+# anything else non-empty -> blank) rather than hand-maintaining a list of
+# ~80 field names -- this adapts automatically to whatever LaunchBox
+# version/schema the user actually has, since it is their own real data.
+# Falls back to the hardcoded skeleton above only when there is no
+# existing entry to clone from. Returns $true if a new entry was created,
+# $false if one already exists for this profile (matched by
+# ApplicationPath) -- re-runs never duplicate or touch a user's existing
+# favorites/playtime for a game they already have.
+function New-LaunchBoxGameEntry {
+    param(
+        [System.Xml.XmlDocument]$platformGamesDoc,
+        [string]$relProfilePath,
+        [string]$title,
+        [string]$platformName,
+        [string]$emulatorId
+    )
+
+    $gameNodes = @($platformGamesDoc.SelectNodes("/LaunchBox/Game"))
+    $already = $gameNodes | Where-Object { (Get-XmlChildText $_ "ApplicationPath") -eq $relProfilePath } | Select-Object -First 1
+    if ($already) { return $false }
+
+    $now = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ss.fffffffzzz")
+
+    if ($gameNodes.Count -gt 0) {
+        $template = $gameNodes[0]
+        $newNode  = $template.CloneNode($true)
+        foreach ($child in @($newNode.ChildNodes)) {
+            $name = $child.Name
+            if ($script:LaunchBoxGameIdentityFields -contains $name) { continue }
+            if ($name -like 'Missing*') { $child.InnerText = 'true'; continue }
+            if ([string]::IsNullOrEmpty($child.InnerText)) { continue }
+            if ($child.InnerText -eq 'true' -or $child.InnerText -eq 'false') { $child.InnerText = 'false'; continue }
+            if ($child.InnerText -match '^-?\d+(\.\d+)?$') { $child.InnerText = '0'; continue }
+            $child.InnerText = ''
+        }
+    } else {
+        $newNode = $platformGamesDoc.CreateElement("Game")
+        foreach ($key in $script:LaunchBoxGameSkeletonFields.Keys) {
+            $child = $platformGamesDoc.CreateElement($key)
+            $child.InnerText = $script:LaunchBoxGameSkeletonFields[$key]
+            [void]$newNode.AppendChild($child)
+        }
+    }
+
+    Set-XmlChildText $newNode "ID"              ([guid]::NewGuid().ToString())
+    Set-XmlChildText $newNode "Title"           $title
+    Set-XmlChildText $newNode "Platform"        $platformName
+    Set-XmlChildText $newNode "Emulator"        $emulatorId
+    Set-XmlChildText $newNode "ApplicationPath" $relProfilePath
+    Set-XmlChildText $newNode "CommandLine"     ""
+    Set-XmlChildText $newNode "DateAdded"       $now
+    Set-XmlChildText $newNode "DateModified"    $now
+
+    [void]$platformGamesDoc.DocumentElement.AppendChild($newNode)
+    return $true
+}
+
+# Orchestrates a full direct-write pass: backs up the files about to
+# change, creates/reuses the TeknoParrot Emulator entry, creates/reuses
+# each target Platform, links them, and adds a <Game> entry for every
+# registered TeknoParrot profile that doesn't already have one in that
+# platform file. $platformNames is one or two platform display names (two
+# only for the "Both Arcade and a dedicated platform" choice). All targets
+# either succeed together or nothing is saved -- never a half-written state
+# where some platform files reflect new games and Emulators.xml/
+# Platforms.xml do not. Returns @{ Results = <name->count>; BackupPath =
+# <path> } on success, or $null if refused/failed before anything changed.
+function Invoke-LaunchBoxDirectWrite {
+    param([string]$userProfilesDir, [string]$tpRoot, [string]$lbRoot, [string[]]$platformNames)
+
+    if (Test-LaunchBoxRunning) {
+        Write-Host "  ERROR: LaunchBox or BigBox is currently running." -ForegroundColor Red
+        Write-Host "  Close it completely, then try again." -ForegroundColor Yellow
+        Write-Log "LaunchBox direct-write: aborted -- LaunchBox/BigBox is running."
+        return $null
+    }
+
+    $dataDir          = Join-Path $lbRoot "Data"
+    $platformsDir     = Join-Path $dataDir "Platforms"
+    $emulatorsXmlPath = Join-Path $dataDir "Emulators.xml"
+    $platformsXmlPath = Join-Path $dataDir "Platforms.xml"
+
+    if (-not (Test-Path -LiteralPath $emulatorsXmlPath) -or -not (Test-Path -LiteralPath $platformsXmlPath)) {
+        Write-Host "  ERROR: Could not find Emulators.xml / Platforms.xml under $dataDir" -ForegroundColor Red
+        Write-Log "LaunchBox direct-write: aborted -- Data files not found under $dataDir"
+        return $null
+    }
+
+    # Resolve and sanitize the platform file path for every target up
+    # front, refusing the whole operation if any name is unsafe -- never
+    # partially write some platforms and refuse others.
+    $platformFiles = [ordered]@{}
+    foreach ($name in $platformNames) {
+        $safeName = Get-SafeLaunchBoxPlatformFileName $name
+        $filePath = Join-Path $platformsDir "$safeName.xml"
+        if (-not (Test-PathInside $filePath $platformsDir)) {
+            Write-Host "  ERROR: '$name' is not a valid platform name." -ForegroundColor Red
+            Write-Log "LaunchBox direct-write: aborted -- unsafe platform name '$name'"
+            return $null
+        }
+        $platformFiles[$name] = $filePath
+    }
+
+    $relBackupFiles = New-Object System.Collections.ArrayList
+    [void]$relBackupFiles.Add("Data\Emulators.xml")
+    [void]$relBackupFiles.Add("Data\Platforms.xml")
+    foreach ($name in $platformFiles.Keys) {
+        [void]$relBackupFiles.Add((Get-RelativePath $lbRoot $platformFiles[$name]))
+    }
+    $backupPath = Backup-LaunchBoxFiles -lbRoot $lbRoot -relativeFiles $relBackupFiles
+    if (-not $backupPath) {
+        Write-Host "  ERROR: Could not back up LaunchBox files -- aborting without making changes." -ForegroundColor Red
+        Write-Host "  The script will not write to LaunchBox without a successful backup first." -ForegroundColor Red
+        return $null
+    }
+
+    $emulatorsDoc     = Read-Xml $emulatorsXmlPath
+    $platformsListDoc = Read-Xml $platformsXmlPath
+    $emulatorId       = Get-OrCreateLaunchBoxEmulator -emulatorsDoc $emulatorsDoc -tpRoot $tpRoot -lbRoot $lbRoot
+
+    $files = Get-ChildItem -LiteralPath $userProfilesDir -Filter *.xml -File -ErrorAction SilentlyContinue |
+                 Where-Object { $_.Directory.Name -ne "FullBackup" }
+
+    $results      = [ordered]@{}
+    $platformDocs = [ordered]@{}
+
+    foreach ($name in $platformFiles.Keys) {
+        $filePath = $platformFiles[$name]
+        $isNewFile = -not (Test-Path -LiteralPath $filePath)
+
+        $platformGamesDoc = if ($isNewFile) {
+            $doc = New-Object System.Xml.XmlDocument
+            [void]$doc.AppendChild($doc.CreateXmlDeclaration("1.0", $null, "yes"))
+            [void]$doc.AppendChild($doc.CreateElement("LaunchBox"))
+            $doc
+        } else {
+            Read-Xml $filePath
+        }
+
+        $platformCreated = Get-OrCreateLaunchBoxPlatform -platformsListDoc $platformsListDoc -platformName $name -tpRoot $tpRoot -lbRoot $lbRoot
+        Add-LaunchBoxEmulatorPlatformLink -emulatorsDoc $emulatorsDoc -emulatorId $emulatorId -platformName $name -isNewPlatform $platformCreated
+
+        $added = 0
+        foreach ($f in $files) {
+            try {
+                $profileDoc = Read-Xml $f.FullName
+                if ($null -eq $profileDoc.GameProfile) { continue }
+                $gpNode   = $profileDoc.GameProfile.SelectSingleNode("GamePath")
+                $gamePath = if ($gpNode) { $gpNode.InnerText } else { "" }
+                if (-not $gamePath -or -not (Test-Path -LiteralPath $gamePath)) { continue }
+
+                $descNode = $profileDoc.GameProfile.SelectSingleNode("Description")
+                if ($descNode -and -not [string]::IsNullOrWhiteSpace($descNode.InnerText)) {
+                    $title = $descNode.InnerText.Trim()
+                } else {
+                    $title = [regex]::Replace($f.BaseName, '(?<=[a-z])(?=[A-Z])', ' ')
+                }
+
+                $relProfilePath = Get-RelativePath $lbRoot $f.FullName
+                $createdGame = New-LaunchBoxGameEntry -platformGamesDoc $platformGamesDoc -relProfilePath $relProfilePath `
+                                   -title $title -platformName $name -emulatorId $emulatorId
+                if ($createdGame) { $added++ }
+            } catch {
+                Write-Log "LaunchBox direct-write: skipped $($f.Name) for platform '$name' -- $_"
+            }
+        }
+
+        $platformDocs[$name] = @{ Doc = $platformGamesDoc; Path = $filePath }
+        $results[$name] = $added
+    }
+
+    try {
+        Save-Xml $emulatorsDoc $emulatorsXmlPath
+        Save-Xml $platformsListDoc $platformsXmlPath
+        foreach ($name in $platformDocs.Keys) {
+            Save-Xml $platformDocs[$name].Doc $platformDocs[$name].Path
+        }
+    } catch {
+        Write-Host "  ERROR: Failed while saving LaunchBox files -- $_" -ForegroundColor Red
+        Write-Host "  A backup from before any changes is at: $backupPath" -ForegroundColor Yellow
+        Write-Log "LaunchBox direct-write: FAILED during save -- $_"
+        return $null
+    }
+
+    Write-Log "LaunchBox direct-write: complete. Backup at $backupPath"
+    return @{ Results = $results; BackupPath = $backupPath }
 }
 
 # =============================================================================
@@ -5820,6 +6484,10 @@ $datFilePath          = ''      # optional collection .dat file path (overrides 
 $eggmanDatZip         = ''      # path to Eggman ZIP (contains both dats + notes)
 $supplementaryDatPath = ''      # supplementary .dat path (when using separate files)
 $includeSupplementary = $false  # whether to build the supplementary index
+$lbRoot                     = $null   # LaunchBox install root (containing LaunchBox.exe), if found/entered
+$lbPlatformMode             = $null   # "Arcade" / "TeknoParrot" / "Custom" / "Both"
+$lbCustomPlatformName       = $null   # only set when $lbPlatformMode is "Custom"
+$lbEmulatorId               = $null   # cached GUID of the TeknoParrot Emulator entry in LaunchBox's Emulators.xml
 $configAccepted       = $false  # true when the user accepted a saved config this run
 
 if ($Unattended -and -not (Test-Path -LiteralPath $configPath)) {
@@ -5851,6 +6519,8 @@ if (Test-Path -LiteralPath $configPath) {
         if ($cfg.DatFilePath)           { Write-Host "  Collection dat       : $($cfg.DatFilePath)" }
         if ($cfg.SupplementaryDatPath)  { Write-Host "  Supplementary dat    : $($cfg.SupplementaryDatPath)" }
         if ($cfg.IncludeSupplementary)  { Write-Host "  Supplementary index  : Yes" }
+        if ($cfg.LaunchBoxRoot)         { Write-Host "  LaunchBox root       : $($cfg.LaunchBoxRoot)" }
+        if ($cfg.LaunchBoxPlatformMode) { Write-Host "  LaunchBox platform   : $($cfg.LaunchBoxPlatformMode)" }
         Write-Host ""
         if ($Unattended) {
             Write-Host "  [Unattended] Using saved settings." -ForegroundColor DarkCyan
@@ -5873,6 +6543,17 @@ if (Test-Path -LiteralPath $configPath) {
             if ($cfg.DatFilePath)          { $datFilePath           = $cfg.DatFilePath           }
             if ($cfg.SupplementaryDatPath) { $supplementaryDatPath  = $cfg.SupplementaryDatPath  }
             if ($null -ne $cfg.IncludeSupplementary) { $includeSupplementary = [bool]$cfg.IncludeSupplementary }
+            if ($cfg.LaunchBoxRoot)               { $lbRoot               = $cfg.LaunchBoxRoot }
+            if ($cfg.LaunchBoxPlatformMode)        { $lbPlatformMode       = $cfg.LaunchBoxPlatformMode }
+            if ($cfg.LaunchBoxCustomPlatformName)  { $lbCustomPlatformName = $cfg.LaunchBoxCustomPlatformName }
+            if ($cfg.LaunchBoxEmulatorId)          { $lbEmulatorId         = $cfg.LaunchBoxEmulatorId }
+            # A saved "Custom" platform choice with no name is a corrupt/incomplete
+            # config (e.g. hand-edited or from an older version) -- silently
+            # falling back to a default name would be a confusing surprise, so
+            # clear the saved mode and let the platform-choice menu re-ask instead.
+            if ($lbPlatformMode -eq "Custom" -and [string]::IsNullOrWhiteSpace($lbCustomPlatformName)) {
+                $lbPlatformMode = $null
+            }
             $configAccepted = $true
         }
         Write-Host ""
@@ -6082,26 +6763,8 @@ Write-Log "Validated. tpRoot=$tpRoot install=$gamesInstallFolder"
 # SECTION 4 -- Save configuration
 # =============================================================================
 
-$cfgOut = [ordered]@{
-    TeknoParrotRoot              = $tpRoot
-    ZipSourceFolder              = $zipSource
-    ZipSourceSupplementaryFolder = $zipSourceSupplementary
-    GamesInstallFolder           = $gamesInstallFolder
-    RetroBat           = $retroBat
-    HyperSpinDataPath  = $hsDataPath
-    ReShadeSourceDll   = $rsSourceDll
-    ReShadeSourceDll32 = $rsSourceDll32
-    DgVoodoo2SourceDir   = $dgSourceDir
-    EggmanDatZip         = $eggmanDatZip
-    DatFilePath          = $datFilePath
-    SupplementaryDatPath = $supplementaryDatPath
-    IncludeSupplementary = $includeSupplementary
-}
-try {
-    [System.IO.File]::WriteAllText($configPath, ($cfgOut | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
-} catch {
+if (-not (Save-Config)) {
     Write-Host "  WARNING: Could not save configuration -- settings will not be remembered." -ForegroundColor Yellow
-    Write-Log "Config: could not save -- $_"
 }
 
 Write-Host ""
@@ -6382,7 +7045,19 @@ while ($true) {
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         Write-Host " Restore from Backup" -ForegroundColor Cyan
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
-        Invoke-RestoreBackup -userProfilesDir $userProfilesDir
+        Write-Host "  1) TeknoParrot UserProfiles backup"
+        Write-Host "  2) LaunchBox library backup (only relevant if you've used the"
+        Write-Host "     direct LaunchBox integration)"
+        $restoreChoice = (Read-Host "  Enter 1-2").Trim()
+        if ($restoreChoice -eq "2") {
+            if (-not $lbRoot) {
+                Write-Host "  No LaunchBox root is configured yet -- nothing to restore." -ForegroundColor Yellow
+            } else {
+                Invoke-RestoreLaunchBoxBackup -lbRoot $lbRoot
+            }
+        } else {
+            Invoke-RestoreBackup -userProfilesDir $userProfilesDir
+        }
         Write-Host ""
         Write-Host "============================================" -ForegroundColor Cyan
         Write-Host "   Done." -ForegroundColor Cyan
@@ -6459,25 +7134,11 @@ while ($true) {
                 }
                 $rsSourceDll = $inp
             }
-            $cfgRS = [ordered]@{
-                TeknoParrotRoot              = $tpRoot
-                ZipSourceFolder              = $zipSource
-                ZipSourceSupplementaryFolder = $zipSourceSupplementary
-                GamesInstallFolder           = $gamesInstallFolder
-                RetroBat                     = $retroBat
-                HyperSpinDataPath            = $hsDataPath
-                ReShadeSourceDll             = $rsSourceDll
-                ReShadeSourceDll32           = $rsSourceDll32
-                DgVoodoo2SourceDir           = $dgSourceDir
-                EggmanDatZip                 = $eggmanDatZip
-                DatFilePath                  = $datFilePath
-                SupplementaryDatPath         = $supplementaryDatPath
-                IncludeSupplementary         = $includeSupplementary
-            }
-            try {
-                [System.IO.File]::WriteAllText($configPath, ($cfgRS | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
+            if (Save-Config) {
                 Write-Log "Config: saved ReShadeSourceDll = $rsSourceDll"
-            } catch { Write-Log "Config: could not save ReShadeSourceDll -- $_" }
+            } else {
+                Write-Log "Config: could not save ReShadeSourceDll"
+            }
         }
         if (-not $rsSourceDll32 -or -not (Test-Path -LiteralPath $rsSourceDll32)) {
             if (Test-Path -LiteralPath $bundledDll32) { $rsSourceDll32 = $bundledDll32 }
@@ -6531,25 +7192,11 @@ while ($true) {
                 }
                 $dgSourceDir = $inp
             }
-            $cfgDg = [ordered]@{
-                TeknoParrotRoot              = $tpRoot
-                ZipSourceFolder              = $zipSource
-                ZipSourceSupplementaryFolder = $zipSourceSupplementary
-                GamesInstallFolder           = $gamesInstallFolder
-                RetroBat                     = $retroBat
-                HyperSpinDataPath            = $hsDataPath
-                ReShadeSourceDll             = $rsSourceDll
-                ReShadeSourceDll32           = $rsSourceDll32
-                DgVoodoo2SourceDir           = $dgSourceDir
-                EggmanDatZip                 = $eggmanDatZip
-                DatFilePath                  = $datFilePath
-                SupplementaryDatPath         = $supplementaryDatPath
-                IncludeSupplementary         = $includeSupplementary
-            }
-            try {
-                [System.IO.File]::WriteAllText($configPath, ($cfgDg | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
+            if (Save-Config) {
                 Write-Log "Config: saved DgVoodoo2SourceDir = $dgSourceDir"
-            } catch { Write-Log "Config: could not save DgVoodoo2SourceDir -- $_" }
+            } else {
+                Write-Log "Config: could not save DgVoodoo2SourceDir"
+            }
         }
         Invoke-DgVoodoo2Setup -UserProfilesDir $userProfilesDir `
                               -SourceDir $dgSourceDir `
@@ -6691,25 +7338,10 @@ while ($true) {
         $zipPathsJustCaptured = $true
     }
     if ($zipPathsJustCaptured) {
-        try {
-            [System.IO.File]::WriteAllText($configPath, ([ordered]@{
-                TeknoParrotRoot              = $tpRoot
-                ZipSourceFolder              = $zipSource
-                ZipSourceSupplementaryFolder = $zipSourceSupplementary
-                GamesInstallFolder           = $gamesInstallFolder
-                RetroBat             = $retroBat
-                HyperSpinDataPath    = $hsDataPath
-                ReShadeSourceDll     = $rsSourceDll
-                ReShadeSourceDll32   = $rsSourceDll32
-                DgVoodoo2SourceDir   = $dgSourceDir
-                EggmanDatZip         = $eggmanDatZip
-                DatFilePath          = $datFilePath
-                SupplementaryDatPath = $supplementaryDatPath
-                IncludeSupplementary = $includeSupplementary
-            } | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
+        if (Save-Config) {
             Write-Log "Config: saved ZIP source path(s)."
-        } catch {
-            Write-Log "Config: could not re-save after ZIP source prompt -- $_"
+        } else {
+            Write-Log "Config: could not re-save after ZIP source prompt."
         }
     }
 
@@ -7396,17 +8028,128 @@ if ($result.Registered.Count -gt 0 -and $notesIndex.Count -gt 0) {
 
 Write-Host ""
 if ($dryRunActive) {
-    $doLB = "N"
-    Write-Log "PreviewMode: LaunchBox export skipped."
+    $doLBSetup = "N"
+    Write-Log "PreviewMode: LaunchBox setup skipped."
 } elseif ($Unattended) {
-    $doLB = "N"
-    Write-Log "Unattended: LaunchBox export skipped."
+    $doLBSetup = "N"
+    Write-Log "Unattended: LaunchBox setup skipped."
 } else {
-    $doLB = (Read-Host "Export a LaunchBox import XML for all registered games? (Y/N)").Trim().ToUpper()
+    Write-Host "  Add your registered games to LaunchBox now? (Y/N)" -ForegroundColor Cyan
+    Write-Host "    This writes directly into LaunchBox's library -- no import wizard" -ForegroundColor DarkGray
+    Write-Host "    needed. LaunchBox must be closed first; the script checks for you." -ForegroundColor DarkGray
+    Write-Host "    (Prefer the old manual-import reference file instead? Answer N here," -ForegroundColor DarkGray
+    Write-Host "     then Y to the next question.)" -ForegroundColor DarkGray
+    $doLBSetup = (Read-Host "  Y/N").Trim().ToUpper()
 }
+
+if ($doLBSetup -eq "Y" -and -not $lbRoot) {
+    $lbDetected = @(Find-LaunchBoxRoot)
+    if ($lbDetected.Count -eq 1) {
+        Write-Host ""
+        Write-Host "  Auto-detected LaunchBox at: $($lbDetected[0])" -ForegroundColor Cyan
+        $useLbIt = (Read-Host "  Use this path? (Y/N)").Trim().ToUpper()
+        if ($useLbIt -eq "Y") { $lbRoot = $lbDetected[0] }
+    } elseif ($lbDetected.Count -gt 1) {
+        Write-Host ""
+        Write-Host "  Found LaunchBox in multiple locations:" -ForegroundColor Cyan
+        for ($i = 0; $i -lt $lbDetected.Count; $i++) {
+            Write-Host ("    {0}) {1}" -f ($i + 1), $lbDetected[$i])
+        }
+        $lbPick = (Read-Host "  Enter number to use one, or N to type the path manually").Trim()
+        if ($lbPick -match '^\d+$' -and $lbPick.Length -le 9) {
+            $lbIdx = [int]$lbPick - 1
+            if ($lbIdx -ge 0 -and $lbIdx -lt $lbDetected.Count) { $lbRoot = $lbDetected[$lbIdx] }
+        }
+    }
+    if (-not $lbRoot) {
+        $lbInput = (Read-Host "  Enter LaunchBox root folder (containing LaunchBox.exe), or press Enter to skip").Trim()
+        if ($lbInput -and (Test-Path -LiteralPath (Join-Path $lbInput "LaunchBox.exe"))) {
+            $lbRoot = $lbInput
+        } elseif ($lbInput) {
+            Write-Host "  LaunchBox.exe not found at that path -- direct LaunchBox setup skipped." -ForegroundColor Yellow
+        }
+    }
+    if ($lbRoot) { [void](Save-Config) }
+}
+
+if ($doLBSetup -eq "Y" -and $lbRoot -and (Test-LaunchBoxRunning)) {
+    Write-Host "  LaunchBox or BigBox is currently running -- close it and re-run this step." -ForegroundColor Yellow
+    Write-Host "  Falling back to the manual-import reference file instead." -ForegroundColor DarkCyan
+    $doLBSetup = "N"
+    $doLB = "Y"
+} elseif ($doLBSetup -eq "Y" -and -not $lbRoot) {
+    Write-Host "  LaunchBox path not available -- falling back to the manual-import reference file." -ForegroundColor Yellow
+    $doLBSetup = "N"
+    $doLB = "Y"
+} elseif ($doLBSetup -ne "Y" -and -not $dryRunActive -and -not $Unattended) {
+    $doLB = (Read-Host "  Export a LaunchBox manual-import reference file instead? (Y/N)").Trim().ToUpper()
+} else {
+    $doLB = "N"
+}
+
+if ($doLBSetup -eq "Y") {
+    $usesSavedChoice = $false
+    if ($lbPlatformMode -and -not $Unattended) {
+        $savedLabel = if ($lbPlatformMode -eq "Custom") { $lbCustomPlatformName } else { $lbPlatformMode }
+        $useSaved = (Read-Host "  Use saved LaunchBox platform choice ($savedLabel)? (Y/N)").Trim().ToUpper()
+        $usesSavedChoice = ($useSaved -eq "Y")
+    }
+    if (-not $usesSavedChoice) {
+        Write-Host ""
+        Write-Host "  How should TeknoParrot games appear in LaunchBox?" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "    1) Mixed into your existing Arcade platform"
+        Write-Host "       (recommended if you browse all arcade games together)"
+        Write-Host "    2) A separate `"TeknoParrot`" platform"
+        Write-Host "       (recommended if you want them grouped on their own)"
+        Write-Host "    3) A separate platform with a name you choose"
+        Write-Host "    4) Both -- mixed into Arcade AND a separate TeknoParrot platform"
+        Write-Host ""
+        $platChoice = (Read-Host "  Enter 1-4").Trim()
+        switch ($platChoice) {
+            "1" { $lbPlatformMode = "Arcade" }
+            "2" { $lbPlatformMode = "TeknoParrot" }
+            "3" {
+                $lbPlatformMode = "Custom"
+                $lbCustomPlatformName = (Read-Host "  Enter a platform name").Trim()
+                if ([string]::IsNullOrWhiteSpace($lbCustomPlatformName)) { $lbCustomPlatformName = "TeknoParrot" }
+            }
+            "4" { $lbPlatformMode = "Both" }
+            default { $lbPlatformMode = "TeknoParrot" }
+        }
+        [void](Save-Config)
+    }
+
+    $lbTargetPlatforms = switch ($lbPlatformMode) {
+        "Arcade" { @("Arcade") }
+        "Custom" { @($lbCustomPlatformName) }
+        "Both"   { @("Arcade", "TeknoParrot") }
+        default  { @("TeknoParrot") }
+    }
+
+    $lbWriteResult = Invoke-LaunchBoxDirectWrite -userProfilesDir $userProfilesDir -tpRoot $tpRoot -lbRoot $lbRoot -platformNames $lbTargetPlatforms
+    if ($null -eq $lbWriteResult) {
+        Write-Host "  LaunchBox setup did not complete -- see TeknoParrot-Manager.log. No changes were made." -ForegroundColor Red
+    } else {
+        Write-Host ""
+        Write-Host "  LaunchBox setup complete." -ForegroundColor Green
+        foreach ($name in $lbWriteResult.Results.Keys) {
+            Write-Host ("    {0,-12} : {1} game(s) added" -f $name, $lbWriteResult.Results[$name]) -ForegroundColor Green
+        }
+        Write-Host ("  Backup saved : {0}" -f $lbWriteResult.BackupPath) -ForegroundColor DarkCyan
+        Write-Host "  If anything looks wrong in LaunchBox, use menu option 9 (Restore" -ForegroundColor DarkCyan
+        Write-Host "  backup) -> LaunchBox library backup to undo this." -ForegroundColor DarkCyan
+        Write-Host ""
+        Write-Host "  New games have no box art/metadata yet -- in LaunchBox, right-click a" -ForegroundColor DarkCyan
+        Write-Host "  game and use 'Edit... -> Search' to fetch it, the same way you would" -ForegroundColor DarkCyan
+        Write-Host "  for any manually-imported game." -ForegroundColor DarkCyan
+        Write-Log ("LaunchBox direct-write: " + (($lbWriteResult.Results.Keys | ForEach-Object { "$_=$($lbWriteResult.Results[$_])" }) -join ", "))
+    }
+}
+
 if ($doLB -eq "Y") {
     $lbPath  = Join-Path $PSScriptRoot "TeknoParrot-LaunchBox-Import.xml"
-    $lbCount = Export-LaunchBoxXml -userProfilesDir $userProfilesDir -tpRoot $tpRoot -outputPath $lbPath
+    $lbCount = Export-LaunchBoxXml -userProfilesDir $userProfilesDir -lbRoot $lbRoot -outputPath $lbPath
     if ($lbCount -lt 0) {
         Write-Host "  LaunchBox export failed -- see TeknoParrot-Manager.log" -ForegroundColor Red
     } else {
@@ -7423,8 +8166,11 @@ if ($doLB -eq "Y") {
         Write-Host "  Step 4.  On the first screen:" -ForegroundColor White
         Write-Host "             - Emulator: select TeknoParrot (or add it first -- see below)." -ForegroundColor DarkGray
         Write-Host "             - Import type: 'Import ROM files'." -ForegroundColor DarkGray
-        Write-Host "             - Folder: browse to your games staging folder." -ForegroundColor DarkGray
-        Write-Host "             - File types: *.exe  (or the file type your games use)." -ForegroundColor DarkGray
+        Write-Host ("             - Folder: {0}" -f (Join-Path $tpRoot "UserProfiles")) -ForegroundColor DarkGray
+        Write-Host "             - File types: *.xml  (import the profile files themselves," -ForegroundColor DarkGray
+        Write-Host "               not the game executables -- TeknoParrot launches games" -ForegroundColor DarkGray
+        Write-Host "               by profile, so the profile XML is what LaunchBox treats" -ForegroundColor DarkGray
+        Write-Host "               as the 'rom' for each game)." -ForegroundColor DarkGray
         Write-Host "  Step 5.  Follow the wizard. LaunchBox will assign game names," -ForegroundColor White
         Write-Host "             metadata, and box art automatically." -ForegroundColor DarkGray
         Write-Host ""
@@ -7432,13 +8178,20 @@ if ($doLB -eq "Y") {
         Write-Host "    a. Go to  Tools -> Manage -> Emulators -> Add." -ForegroundColor DarkGray
         Write-Host "    b. Name: TeknoParrot" -ForegroundColor DarkGray
         Write-Host ("    c. Emulator path: {0}" -f (Join-Path $tpRoot "TeknoParrotUi.exe")) -ForegroundColor DarkGray
-        Write-Host "    d. Command-line parameters: --profile=`"{rom}`"" -ForegroundColor DarkGray
-        Write-Host "    e. Save, then re-run the import wizard." -ForegroundColor DarkGray
+        Write-Host "    d. Command-line parameters: --profile=%romfile%.xml" -ForegroundColor DarkGray
+        Write-Host "    e. Exit Script tab: add a script so Escape cleanly quits" -ForegroundColor DarkGray
+        Write-Host "       TeknoParrot back to LaunchBox (without one, Escape may not" -ForegroundColor DarkGray
+        Write-Host "       exit the game properly)." -ForegroundColor DarkGray
+        Write-Host "    f. Save, then re-run the import wizard." -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "  Seeing full-screen issues only when launching through LaunchBox?" -ForegroundColor Cyan
+        Write-Host "    Go to  Tools -> Manage -> Emulators -> TeknoParrot -> Edit ->" -ForegroundColor DarkGray
+        Write-Host "    Startup Screen tab, and disable 'Enable Game Startup Screen'." -ForegroundColor DarkGray
         Write-Host ""
         Write-Host "  The exported XML file ($lbPath)" -ForegroundColor DarkCyan
         Write-Host "  is a reference showing all registered games, their profile codes," -ForegroundColor DarkCyan
         Write-Host "  and executable paths. You do not need to import it directly." -ForegroundColor DarkCyan
-        Write-Log "LaunchBox: exported $lbCount games to $lbPath"
+        Write-Log "LaunchBox export: exported $lbCount games to $lbPath"
     }
 }
 
@@ -7464,26 +8217,10 @@ if ($doHS -eq "Y") {
         if ([string]::IsNullOrWhiteSpace($hsInput)) { $hsInput = "C:\ProgramData\HyperSpin\data" }
         $hsDataPath = $hsInput
 
-        $cfgUpdate = [ordered]@{
-            TeknoParrotRoot              = $tpRoot
-            ZipSourceFolder              = $zipSource
-            ZipSourceSupplementaryFolder = $zipSourceSupplementary
-            GamesInstallFolder           = $gamesInstallFolder
-            RetroBat                     = $retroBat
-            HyperSpinDataPath            = $hsDataPath
-            ReShadeSourceDll             = $rsSourceDll
-            ReShadeSourceDll32           = $rsSourceDll32
-            DgVoodoo2SourceDir           = $dgSourceDir
-            EggmanDatZip                 = $eggmanDatZip
-            DatFilePath                  = $datFilePath
-            SupplementaryDatPath         = $supplementaryDatPath
-            IncludeSupplementary         = $includeSupplementary
-        }
-        try {
-            [System.IO.File]::WriteAllText($configPath, ($cfgUpdate | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
+        if (Save-Config) {
             Write-Log "Config: saved HyperSpinDataPath = $hsDataPath"
-        } catch {
-            Write-Log "Config: could not save HyperSpinDataPath -- $_"
+        } else {
+            Write-Log "Config: could not save HyperSpinDataPath"
         }
     }
 
@@ -7586,25 +8323,11 @@ if ($doReShade -eq "Y") {
             }
         }
         if ($doReShade -eq "Y") {
-            $cfgRS2 = [ordered]@{
-                TeknoParrotRoot              = $tpRoot
-                ZipSourceFolder              = $zipSource
-                ZipSourceSupplementaryFolder = $zipSourceSupplementary
-                GamesInstallFolder           = $gamesInstallFolder
-                RetroBat                     = $retroBat
-                HyperSpinDataPath            = $hsDataPath
-                ReShadeSourceDll             = $rsSourceDll
-                ReShadeSourceDll32           = $rsSourceDll32
-                DgVoodoo2SourceDir           = $dgSourceDir
-                EggmanDatZip                 = $eggmanDatZip
-                DatFilePath                  = $datFilePath
-                SupplementaryDatPath         = $supplementaryDatPath
-                IncludeSupplementary         = $includeSupplementary
-            }
-            try {
-                [System.IO.File]::WriteAllText($configPath, ($cfgRS2 | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
+            if (Save-Config) {
                 Write-Log "Config: saved ReShadeSourceDll = $rsSourceDll"
-            } catch { Write-Log "Config: could not save ReShadeSourceDll -- $_" }
+            } else {
+                Write-Log "Config: could not save ReShadeSourceDll"
+            }
         }
     }
     # Auto-detect bundled 32-bit DLL; no error if absent.
@@ -7688,25 +8411,11 @@ if ($doDgVoodoo -eq "Y") {
             }
         }
         if ($doDgVoodoo -eq "Y") {
-            $cfgDg2 = [ordered]@{
-                TeknoParrotRoot              = $tpRoot
-                ZipSourceFolder              = $zipSource
-                ZipSourceSupplementaryFolder = $zipSourceSupplementary
-                GamesInstallFolder           = $gamesInstallFolder
-                RetroBat                     = $retroBat
-                HyperSpinDataPath            = $hsDataPath
-                ReShadeSourceDll             = $rsSourceDll
-                ReShadeSourceDll32           = $rsSourceDll32
-                DgVoodoo2SourceDir           = $dgSourceDir
-                EggmanDatZip                 = $eggmanDatZip
-                DatFilePath                  = $datFilePath
-                SupplementaryDatPath         = $supplementaryDatPath
-                IncludeSupplementary         = $includeSupplementary
-            }
-            try {
-                [System.IO.File]::WriteAllText($configPath, ($cfgDg2 | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
+            if (Save-Config) {
                 Write-Log "Config: saved DgVoodoo2SourceDir = $dgSourceDir"
-            } catch { Write-Log "Config: could not save DgVoodoo2SourceDir -- $_" }
+            } else {
+                Write-Log "Config: could not save DgVoodoo2SourceDir"
+            }
         }
     }
 }

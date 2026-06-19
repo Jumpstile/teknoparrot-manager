@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.97 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.98 BETA  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -381,40 +381,35 @@
   under CUSTOM THUMBNAILS.
 
 
-  LAUNCHBOX EXPORT (OPTIONAL)
-  ---------------------------
-  At the end of every run the script offers to export a LaunchBox XML file:
+  LAUNCHBOX INTEGRATION (OPTIONAL)
+  ---------------------------------
+  At the end of every run the script offers to add your registered games
+  straight into LaunchBox:
 
-      Export a LaunchBox import XML for all registered games? (Y/N)
+      Add your registered games to LaunchBox now? (Y/N)
 
-  Answer Y and the script writes TeknoParrot-LaunchBox-Import.xml next to
-  itself. This lists every registered game with its title, platform (Arcade),
-  the full path to TeknoParrotUi.exe, and the correct --profile= argument.
-  It is a reference file and a record of what was registered.
+  Answer Y and the script writes directly into LaunchBox's own library
+  files (no import wizard needed). It checks LaunchBox is closed first,
+  backs up the files it is about to change, and never duplicates a game
+  that is already there. The first time you use this, it asks how you
+  want TeknoParrot games organised:
 
-  HOW TO ADD YOUR GAMES TO LAUNCHBOX
+      1) Mixed into your existing Arcade platform
+      2) A separate "TeknoParrot" platform
+      3) A separate platform with a name you choose
+      4) Both -- Arcade AND a separate TeknoParrot platform
 
-  The safe way is LaunchBox's own import wizard -- it assigns metadata, box
-  art, and the correct internal emulator ID automatically.
+  Your choice is remembered for next time. New games have no box art or
+  metadata yet -- in LaunchBox, right-click a game and use Edit -> Search
+  to fetch it, same as for any manually-imported game.
 
-  Step 1.  If TeknoParrot is not yet in LaunchBox's emulator list:
-             a. Tools -> Manage -> Emulators -> Add.
-             b. Name: TeknoParrot
-             c. Emulator path: browse to TeknoParrotUi.exe.
-             d. Command-line parameters:  --profile="{rom}"
-             e. Save.
+  If anything looks wrong afterward, use menu option 9 (Restore backup) ->
+  LaunchBox library backup to undo it -- this restores the exact files the
+  script changed, from before it changed them.
 
-  Step 2.  Tools -> Import -> Emulated Games.
-
-  Step 3.  Wizard screen 1:
-             - Emulator: TeknoParrot
-             - Import type: Import ROM files
-             - Folder: your games staging folder
-             - File types: *.exe  (or your games' file extension)
-
-  Step 4.  Click Next, review the matches, click Import. Done.
-           Re-run the wizard any time you add more games -- LaunchBox
-           skips games already in your library.
+  Prefer not to let the script touch LaunchBox directly? Answer N, then Y
+  to the next question instead, to get a manual-import reference file and
+  step-by-step instructions for LaunchBox's own Import wizard.
 
 
   HYPERSPIN 2 EXPORT (OPTIONAL)
@@ -601,8 +596,13 @@
   TeknoParrot-Manager-controls.txt     Controls state snapshot (written after
                                        every run). Family, propagation source,
                                        bound count, manual buttons per game.
-  TeknoParrot-LaunchBox-Import.xml     Reference XML (written when you answer
-                                       Y to the LaunchBox export prompt).
+  TeknoParrot-LaunchBox-Import.xml     Manual-import reference XML (only
+                                       written if you skip direct LaunchBox
+                                       integration and use the old manual
+                                       import wizard flow instead).
+  LaunchBoxBackups\                    Timestamped backups of LaunchBox's
+                                       own files, made before each direct
+                                       LaunchBox write. Restore via menu 9.
   TeknoParrot-Manager-ActionItems.txt  Action items from the last run
                                        (manual registration, broken paths,
                                        etc.). Written after registration runs

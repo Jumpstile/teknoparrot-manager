@@ -27,7 +27,7 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 - [GPU Compatibility Fixes](#gpu-compatibility-fixes)
 - [Force Feedback (FFB) Setup](#force-feedback-ffb-setup)
 - [BepInEx Update Check](#bepinex-update-check)
-- [LaunchBox Export](#launchbox-export)
+- [LaunchBox Integration](#launchbox-integration)
 - [HyperSpin 2 Export](#hyperspin-2-export)
 - [RetroBat / Batocera](#retrobat--batocera)
 - [Thumbnail Download](#thumbnail-download)
@@ -62,7 +62,7 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 - **BepInEx update check** — checks games that already have BepInEx installed against the latest stable 64-bit release and offers a batched update. Never installs BepInEx fresh.
 - **Automatic compatibility warnings** — every run checks for known install-path-length limits (Raw Thrills titles, Yu-Gi-Oh! Duel Terminal 6), pinned-file-version requirements (BlazBlue/iDmacDrv32.dll, Tekken Tag Tournament 2/EBOOT.BIN), and known GPU-vendor incompatibilities (AMD/Intel), with details in ACTION REQUIRED.
 - **Game-specific setup notes** — every run checks the community compatibility database (eggmansworld.github.io/TeknoParrot) for any registered game with special setup notes — workarounds, known quirks, the expected executable name — and lists them in ACTION REQUIRED.
-- **LaunchBox / HyperSpin 2 export** — builds import files for both frontends after each run.
+- **LaunchBox direct integration / HyperSpin 2 export** — writes games straight into LaunchBox's own library, or builds an import file for HyperSpin 2, after each run.
 - **Unattended mode** — `-Unattended` flag for scheduled overnight runs.
 - **Preview / dry-run mode** — see what AutoSync/Register would do (extract, register, repair, propagate) with zero files written, then decide whether to apply it for real.
 - **Download audit logging** — every binary fetched from a third party (Eggman dat ZIP, BepInEx release, FFBArcadePlugin DLLs) has its source URL, filename, version, and SHA256 logged for later verification or troubleshooting.
@@ -142,7 +142,7 @@ Choosing mode 1 or 2 offers a preview/dry-run option first — see [Preview / Dr
 | 6 | **GPU fix setup** | Apply AMD / NVIDIA / Intel vendor fix to all games |
 | 7 | **Force feedback (FFB) setup** | FFB Blaster (membership) + free third-party plugin |
 | 8 | **BepInEx update check** | Update an existing BepInEx install to the latest stable 64-bit release |
-| 9 | **Restore backup** | Roll profiles back to a previous backup |
+| 9 | **Restore backup** | Roll TeknoParrot profiles or LaunchBox's library files back to a previous backup |
 | 10 | **Library health check** | Read-only registered/broken/empty status, plus GPU fix / FFB Blaster / dgVoodoo2 coverage and ReShade/BepInEx install counts |
 | 11 | **Exit** | Quit the script |
 
@@ -426,24 +426,35 @@ If anything is outdated, the script lists every such game once and asks a single
 
 ---
 
-## LaunchBox Export
+## LaunchBox Integration
 
-At the end of each run the script offers to export a LaunchBox-compatible XML file:
+At the end of each run the script offers to add your registered games directly into LaunchBox:
 
 ```
-Export a LaunchBox import XML for all registered games? (Y/N)
+Add your registered games to LaunchBox now? (Y/N)
 ```
 
-Answering Y writes `TeknoParrot-LaunchBox-Import.xml` next to the script with every registered game's title, platform, TeknoParrotUI path, and `--profile=` argument.
+Answering Y writes straight into LaunchBox's own `Data\` files — no import wizard step required. Before writing anything, the script:
 
-**How to add your games to LaunchBox:**
+- Checks LaunchBox and BigBox are both closed (refuses to write while either is running).
+- Backs up every file it is about to change into `Scripts\LaunchBoxBackups\<timestamp>\`. If the backup fails, nothing is written.
+- Creates the TeknoParrot emulator entry if one doesn't already exist, or reuses your existing one by name (never duplicates it on re-runs).
+- Skips any game that already has an entry in the target platform, so re-runs never duplicate games or touch favorites/play counts you've already set.
 
-1. If TeknoParrot is not yet in LaunchBox: go to **Tools → Manage → Emulators → Add**. Name it `TeknoParrot`, set the emulator path to `TeknoParrotUi.exe`, set command-line parameters to `--profile="{rom}"`, and save.
-2. Go to **Tools → Import → Emulated Games**
-3. Set emulator to TeknoParrot, import type to `Import ROM files`, folder to your games staging folder, file types to `*.exe`
-4. Click Next, review matches, click Import
+The first time you use this, you're asked how TeknoParrot games should appear in LaunchBox:
 
-Re-run the wizard any time you add more games — LaunchBox skips games already in your library.
+1. Mixed into your existing Arcade platform
+2. A separate "TeknoParrot" platform
+3. A separate platform with a name you choose
+4. Both — mixed into Arcade AND a separate TeknoParrot platform
+
+Your choice is remembered for next time (with the option to change it). Choosing "Both" creates two separate game records (one per platform) pointing at the same TeknoParrot profile, since LaunchBox has no concept of one game belonging to two platforms at once — favorites and play counts are tracked separately between the two views.
+
+New games have no box art or metadata yet. In LaunchBox, right-click a newly added game and use **Edit... → Search** to fetch it, the same way you would for any manually-imported game.
+
+If anything looks wrong afterward, use menu option 9 (**Restore backup**) and choose **LaunchBox library backup** to restore the exact files the script changed.
+
+**Prefer the manual import wizard instead?** Answer N to the direct-integration question, then Y to the follow-up, to get a reference file (`TeknoParrot-LaunchBox-Import.xml`) and step-by-step wizard instructions — useful if you'd rather not let the script touch LaunchBox's files directly. The wizard command line is `--profile=%romfile%.xml`, and you point it at your `UserProfiles` folder importing the profile `*.xml` files themselves (not the game executables — TeknoParrot launches by profile, so the profile XML is what LaunchBox treats as the "rom").
 
 ---
 
@@ -581,7 +592,7 @@ Run with `-Unattended` to skip all prompts:
 
 Automatically: loads saved settings, extracts all new games, registers, repairs, propagates controls, downloads thumbnails, and logs everything. Requires saved settings from a previous interactive run.
 
-Does NOT run: Restore mode (requires interactive backup selection), LaunchBox/HyperSpin 2 export.
+Does NOT run: Restore mode (requires interactive backup selection), LaunchBox direct integration/HyperSpin 2 export.
 
 **Scheduling with Windows Task Scheduler:**
 
@@ -617,7 +628,7 @@ Combine with `-Unattended` to preview a scheduled run with no prompts at all.
 
 In preview mode:
 - No backup is created (there is nothing yet to restore)
-- The optional follow-up offers (LaunchBox/HyperSpin 2 export, thumbnail download, GPU fix) are skipped, since they only make sense after real changes
+- The optional follow-up offers (LaunchBox direct integration/HyperSpin 2 export, thumbnail download, GPU fix) are skipped, since they only make sense after real changes
 - The summary and ACTION REQUIRED sections still print normally, based on the games that would have been registered
 
 After a preview finishes, the script asks **"Apply these changes for real now?"** — answer **Y** to immediately re-run the same mode for real (no menu, no preview prompt shown again), or **N** to return to the menu without changing anything.
@@ -646,9 +657,11 @@ After registration the script offers to repair broken game paths — paths that 
 ```
 If backup folder creation fails, the script exits rather than proceeding without a restore point.
 
-**Restore:** choose mode 9 from the menu. The script lists all timestamped backups with file counts, you pick one by number, type `YES` to confirm.
+**Restore:** choose mode 9 from the menu, then pick which backup to restore:
+1. **TeknoParrot UserProfiles backup** — lists all timestamped backups with file counts, you pick one by number, type `YES` to confirm.
+2. **LaunchBox library backup** — only relevant if you've used the direct LaunchBox integration. Lists timestamped backups from `Scripts\LaunchBoxBackups\`, restoring `Emulators.xml`/`Platforms.xml`/platform file(s) to their state before the script last wrote to them. Also refuses to run while LaunchBox/BigBox is open.
 
-**Manual restore:** close TeknoParrot, copy `.xml` files from a backup folder back into `UserProfiles`, overwriting the current ones.
+**Manual restore:** close TeknoParrot, copy `.xml` files from a backup folder back into `UserProfiles`, overwriting the current ones. For LaunchBox, close LaunchBox and copy the backed-up files from `Scripts\LaunchBoxBackups\<timestamp>\` back into LaunchBox's `Data\` folder at the matching relative path.
 
 **Log:** every run appends to `TeknoParrot-Manager.log`. If the log file is inaccessible, a one-time warning shows the path and error. Every entry that can't be written is echoed to the console prefixed with `[UNLOGGED]` so nothing is lost. This log also records a download audit trail (source URL, filename, version, SHA256) for every third-party binary the script fetches — the Eggman dat ZIP, the BepInEx release, and the FFBArcadePlugin DLLs.
 
@@ -712,7 +725,8 @@ TeknoParrot must be set up as an emulator in HyperSpin 2 first. The title must c
 | `TeknoParrot-Manager.syncstate.json` | Staging folder | Tracks extracted ZIPs |
 | `TeknoParrot-Manager-controls.txt` | Scripts folder | Controls state after every run |
 | `TeknoParrot-Manager-ActionItems.txt` | Scripts folder (default; Save dialog can pick elsewhere) | Action items from last run |
-| `TeknoParrot-LaunchBox-Import.xml` | Scripts folder | LaunchBox reference XML |
+| `TeknoParrot-LaunchBox-Import.xml` | Scripts folder | LaunchBox manual-import reference XML (only if you skip direct integration) |
+| `LaunchBoxBackups\` | Scripts folder | Timestamped backups of LaunchBox's own files, made before each direct write |
 | `ReShade\ReShade64.dll` | Scripts folder | Bundled ReShade DLL (64-bit) |
 | `ReShade\ReShade32.dll` | Scripts folder | Bundled ReShade DLL (32-bit, optional) |
 | `dgVoodoo2\*.dll` + `dgVoodoo.conf` | Scripts folder | dgVoodoo2 DLLs (you provide) |
@@ -721,4 +735,4 @@ TeknoParrot must be set up as an emulator in HyperSpin 2 first. The title must c
 
 ---
 
-> v0.97 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v0.98 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
