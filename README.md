@@ -61,6 +61,7 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 - **Force feedback (FFB)** — native FFB Blaster (needs a paid TeknoParrot membership) and a free third-party plugin (fetched live, no subscription needed), covering different games. If a game is covered by both, you're asked once which to use for all such games.
 - **BepInEx update check** — checks games that already have BepInEx installed against the latest stable 64-bit release and offers a batched update. Never installs BepInEx fresh.
 - **Automatic compatibility warnings** — every run checks for known install-path-length limits (Raw Thrills titles, Yu-Gi-Oh! Duel Terminal 6), pinned-file-version requirements (BlazBlue/iDmacDrv32.dll, Tekken Tag Tournament 2/EBOOT.BIN), and known GPU-vendor incompatibilities (AMD/Intel), with details in ACTION REQUIRED.
+- **Game-specific setup notes** — every run checks the community compatibility database (eggmansworld.github.io/TeknoParrot) for any registered game with special setup notes — workarounds, known quirks, the expected executable name — and lists them in ACTION REQUIRED.
 - **LaunchBox / HyperSpin 2 export** — builds import files for both frontends after each run.
 - **Unattended mode** — `-Unattended` flag for scheduled overnight runs.
 - **Preview / dry-run mode** — see what AutoSync/Register would do (extract, register, repair, propagate) with zero files written, then decide whether to apply it for real.
@@ -551,7 +552,7 @@ All keys are optional. Leave any key empty or omit it entirely.
 
 ## Action Required Summary
 
-At the end of every run the script prints — and saves to `TeknoParrot-Manager-ActionItems.txt` — everything that needs your attention:
+At the end of every run the script prints — and saves to a text file — everything that needs your attention. By default that file is `TeknoParrot-Manager-ActionItems.txt` next to the script, but a Save dialog lets you pick a different location or file name (skipped automatically during unattended runs and preview/dry-run mode, both of which save to the default path with no prompt).
 
 | Section | Meaning |
 |---------|---------|
@@ -563,6 +564,7 @@ At the end of every run the script prints — and saves to `TeknoParrot-Manager-
 | **Path too long** | Specific games (Raw Thrills titles, Yu-Gi-Oh! Duel Terminal 6) whose install path exceeds a hard-coded engine-specific limit. Shows the exact short folder name to rename to. Checked automatically every run. |
 | **File version mismatch** | Specific games needing an OLDER pinned version of a particular file rather than the latest (BlazBlue-series/`iDmacDrv32.dll`, Tekken Tag Tournament 2/`EBOOT.BIN`). Shows the file name, current/required CRC32, and where to get the right version. Checked automatically every run. |
 | **GPU incompatibility** | Specific registered games confirmed not to work on your detected GPU vendor (AMD or Intel). Informational only — no fix exists. Checked automatically every run; silently skipped if the vendor can't be auto-detected. |
+| **Setup notes** | Any registered game with special setup notes in the community compatibility database (eggmansworld.github.io/TeknoParrot) — workarounds, known quirks, etc. Shows the expected executable name and the full notes text, word-wrapped and separated game-by-game. Informational only; skipped silently if the live fetch fails. |
 
 ---
 
@@ -706,7 +708,7 @@ TeknoParrot must be set up as an emulator in HyperSpin 2 first. The title must c
 | `TeknoParrot-Manager.log` | Scripts folder | Log of every run |
 | `TeknoParrot-Manager.syncstate.json` | Staging folder | Tracks extracted ZIPs |
 | `TeknoParrot-Manager-controls.txt` | Scripts folder | Controls state after every run |
-| `TeknoParrot-Manager-ActionItems.txt` | Scripts folder | Action items from last run |
+| `TeknoParrot-Manager-ActionItems.txt` | Scripts folder (default; Save dialog can pick elsewhere) | Action items from last run |
 | `TeknoParrot-LaunchBox-Import.xml` | Scripts folder | LaunchBox reference XML |
 | `ReShade\ReShade64.dll` | Scripts folder | Bundled ReShade DLL (64-bit) |
 | `ReShade\ReShade32.dll` | Scripts folder | Bundled ReShade DLL (32-bit, optional) |
@@ -716,4 +718,4 @@ TeknoParrot must be set up as an emulator in HyperSpin 2 first. The title must c
 
 ---
 
-> v0.95 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v0.96 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.

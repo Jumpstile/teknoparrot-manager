@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.95 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.96 BETA  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -536,6 +536,15 @@
                             Shows which games are waiting and suggests titles
                             to bind in TeknoParrotUI for each type.
 
+    Setup notes             Registered games with special setup notes in the
+                            community compatibility database (eggmansworld.
+                            github.io/TeknoParrot). Shows the expected
+                            executable name and the full notes text.
+
+  By default the summary is saved to TeknoParrot-Manager-ActionItems.txt next
+  to the script -- a Save dialog lets you pick a different location instead,
+  skipped automatically during unattended runs and preview/dry-run mode.
+
 
   GOOD TO KNOW
   ------------
@@ -591,7 +600,9 @@
   TeknoParrot-Manager-ActionItems.txt  Action items from the last run
                                        (manual registration, broken paths,
                                        etc.). Written after registration runs
-                                       that have outstanding items.
+                                       that have outstanding items. Default
+                                       location -- a Save dialog lets you
+                                       pick somewhere else when prompted.
   TeknoParrot-Manager-CHANGELOG.txt    Full version history.
   ReShade\ReShade64.dll                Bundled ReShade DLL (64-bit games).
   ReShade\ReShade32.dll                Bundled ReShade DLL (32-bit games,

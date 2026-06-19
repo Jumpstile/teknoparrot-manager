@@ -7,6 +7,27 @@
 
 
 -------------------------------------------------------------------------------
+  v0.96 BETA  (2026-06-18)
+-------------------------------------------------------------------------------
+
+  New: ACTION REQUIRED now includes a "GAME-SPECIFIC SETUP NOTES" section
+  for any registered game with special setup notes in the community
+  compatibility database (eggmansworld.github.io/TeknoParrot) -- shows
+  the expected executable name and the full notes text, word-wrapped and
+  separated game-by-game for readability.
+
+  New: saving the ACTION REQUIRED summary now opens a Save dialog (so
+  you can browse to wherever you want it) instead of always writing
+  silently to TeknoParrot-Manager-ActionItems.txt next to the script.
+  Skipped automatically in unattended runs and preview/dry-run mode,
+  which still save to the default path with no prompt.
+
+  Internal: extracted the eggmansworld.github.io fetch-and-parse logic
+  (used for the BepInEx required-games list since v0.92) into a shared
+  Get-EggmanGameData helper, now also used by the new setup-notes
+  lookup -- one copy of the fetch-with-retry logic instead of two.
+
+-------------------------------------------------------------------------------
   v0.95 BETA  (2026-06-18)
 -------------------------------------------------------------------------------
 

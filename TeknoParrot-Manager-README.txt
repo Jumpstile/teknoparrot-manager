@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.95 BETA
+  TeknoParrot Manager  |  v0.96 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -1561,7 +1561,7 @@
 -------------------------------------------------------------------------------
 
   At the end of every run, the script prints an ACTION REQUIRED section
-  listing everything that needs your attention. It has up to eight parts:
+  listing everything that needs your attention. It has up to nine parts:
 
     Not in TeknoParrot        Game folders whose executables did not match
                               any TeknoParrot profile. Informational -- no
@@ -1616,14 +1616,29 @@
                               exists, this just saves you troubleshooting
                               time on something that was never going to work.
 
-  These last three checks run automatically on every AutoSync/Register
+    Setup notes               Any currently registered game that has special
+                              setup notes in the community compatibility
+                              database (eggmansworld.github.io/TeknoParrot) --
+                              workarounds, known quirks, anything else that
+                              site's maintainer has written up for that game.
+                              Shows the executable TeknoParrot expects to run
+                              and the full notes text, word-wrapped and
+                              separated game-by-game so long entries stay
+                              readable. Informational only.
+
+  These last four checks run automatically on every AutoSync/Register
   run -- no separate mode needed. The GPU check silently skips if your
-  GPU vendor cannot be auto-detected -- it never prompts mid-run.
+  GPU vendor cannot be auto-detected -- it never prompts mid-run. The
+  setup notes check needs a live fetch of that site's data and is skipped
+  (with nothing shown) if the fetch fails -- it never blocks the rest of
+  the run.
 
   At the end of every registration run that has action items, the same list
-  is also saved to TeknoParrot-Manager-ActionItems.txt next to the script so
-  you can review it after closing the PowerShell window. The script tells you
-  the path when it writes the file.
+  is also saved to a text file -- TeknoParrot-Manager-ActionItems.txt next to
+  the script by default. A Save dialog lets you pick a different location or
+  file name; it's skipped automatically during unattended runs and preview/
+  dry-run mode, both of which just save to the default path with no prompt.
+  The script tells you the path when it writes the file.
 
 
 -------------------------------------------------------------------------------
@@ -1911,6 +1926,6 @@
 
 
 ===============================================================================
-  v0.95 BETA -- Test one game after each run.
+  v0.96 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================

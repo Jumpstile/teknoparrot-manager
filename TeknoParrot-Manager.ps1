@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.95 BETA
+# TeknoParrot Manager  |  v0.96 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -65,7 +65,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # GitHub API User-Agent headers. Previously hardcoded in each of those spots
 # independently, which let the User-Agent strings drift out of sync with the
 # banner (caught stale at 0.70 during the v0.71 bump, and again at 0.76 here).
-$ScriptVersion = "0.95"
+$ScriptVersion = "0.96"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -3237,26 +3237,37 @@ function Invoke-FFBBlasterSetup {
 # becoming stale. Returns an empty array (never a hardcoded fallback list)
 # if the fetch fails -- the caller falls back to generic wording.
 function Get-BepInExRequiredGames {
+    $games = Get-EggmanGameData
+    if (-not $games) { return @() }
+    $pattern = '(?i)requires?\s+(the\s+)?(latest\s+)?BepInEx|must\s+use\s+(the\s+)?(latest\s+)?BepInEx'
+    return @($games | Where-Object { $_.notes -and $_.notes -match $pattern } |
+              Select-Object -ExpandProperty game_name)
+}
+
+# Shared fetch+parse for the eggmansworld.github.io structured compatibility
+# data (the <script type="application/json" id="game-data"> block). Returns
+# the full deserialized array, or $null if the fetch/parse fails. Both
+# Get-BepInExRequiredGames and Get-GameSetupNotes hit the same endpoint --
+# centralizing the fetch-with-retry + regex-extract logic here means there's
+# only one copy that can drift out of sync with the page's actual markup.
+function Get-EggmanGameData {
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         try {
             $resp = Invoke-WebRequest -Uri 'https://eggmansworld.github.io/TeknoParrot/' `
                         -UseBasicParsing -TimeoutSec 20 -Headers @{ 'User-Agent' = "TeknoParrot-Manager/$ScriptVersion" }
             $m = [regex]::Match($resp.Content, '(?s)<script type="application/json" id="game-data">(.*?)</script>')
-            if (-not $m.Success) { return @() }
-            $games = $m.Groups[1].Value | ConvertFrom-Json
-            $pattern = '(?i)requires?\s+(the\s+)?(latest\s+)?BepInEx|must\s+use\s+(the\s+)?(latest\s+)?BepInEx'
-            return @($games | Where-Object { $_.notes -and $_.notes -match $pattern } |
-                      Select-Object -ExpandProperty game_name)
+            if (-not $m.Success) { return $null }
+            return @($m.Groups[1].Value | ConvertFrom-Json)
         } catch {
             $status = 0
             if ($_.Exception.Response) { try { $status = [int]$_.Exception.Response.StatusCode } catch {} }
             if ($attempt -ge 3 -or ($status -ge 400 -and $status -lt 500)) {
-                Write-Log "BepInExRequiredGames: fetch failed -- $_"; return @()
+                Write-Log "EggmanGameData: fetch failed -- $_"; return $null
             }
             Start-Sleep -Seconds 5
         }
     }
-    return @()
+    return $null
 }
 
 # Fetches the latest STABLE x64 BepInEx release info, fetch-with-retry
@@ -4357,6 +4368,57 @@ $GpuIncompatibleGames = @{
         'SpaceWarp66', 'TargetTossProLawndarts', 'TempleRun', 'TokyoCop', '2Spicy',
         '2SpicyElf2', 'WildWestShootout', 'WonderlandWars'
     )
+}
+
+# Word-wraps free text (e.g. a community notes field) to a fixed width,
+# returning one string per output line, each pre-fixed with Indent. Existing
+# line breaks in the input (paragraph breaks, blank separator lines) are
+# preserved as their own wrap groups rather than being collapsed -- notes
+# pulled from eggmansworld.github.io are often multi-paragraph and lose all
+# readability if reflowed into one block.
+function Format-NoteLines {
+    param([string]$Text, [int]$Width = 74, [string]$Indent = "    ")
+    $out = [System.Collections.Generic.List[string]]::new()
+    foreach ($rawLine in ($Text -split "`r?`n")) {
+        if ([string]::IsNullOrWhiteSpace($rawLine)) { $out.Add(""); continue }
+        $cur = ""
+        foreach ($word in ($rawLine -split '\s+')) {
+            if ($cur -eq "") { $cur = $word }
+            elseif (($cur.Length + 1 + $word.Length) -le $Width) { $cur += " $word" }
+            else { $out.Add("$Indent$cur"); $cur = $word }
+        }
+        if ($cur -ne "") { $out.Add("$Indent$cur") }
+    }
+    return $out
+}
+
+# Returns per-game special setup notes + the executable TeknoParrot expects,
+# for every CURRENTLY REGISTERED profile whose eggmansworld.github.io entry
+# has a non-empty notes field. Joined on profile_name == ProfileCode (the
+# profile XML's own basename) -- the same key already used to drive the
+# hardcoded compatibility tables above. Network fetch, same convention as
+# Get-BepInExRequiredGames: returns an empty array (never a hardcoded
+# fallback) if the fetch fails, caller just sees nothing to report.
+function Get-GameSetupNotes {
+    param([string]$UserProfilesDir)
+
+    $games = Get-EggmanGameData
+    if (-not $games) { return @() }
+
+    $registeredCodes = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Directory.Name -ne "FullBackup" } |
+        ForEach-Object { [void]$registeredCodes.Add($_.BaseName) }
+
+    return @($games | Where-Object { $_.notes -and $registeredCodes.Contains($_.profile_name) } |
+              ForEach-Object {
+                  [pscustomobject]@{
+                      Code     = $_.profile_name
+                      GameName = $_.game_name
+                      SetupExe = $_.setup_exe
+                      Notes    = $_.notes
+                  }
+              })
 }
 
 # Read-only scan for all three checks above. Returns
@@ -7612,13 +7674,15 @@ if ($doGpuFix -eq "Y") {
 # =============================================================================
 
 $compatWarnings = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir
+$setupNotes     = Get-GameSetupNotes -UserProfilesDir $userProfilesDir
 
 $hasAnyAction = ($manualRegData.Count -gt 0) -or ($amb2.Count -gt 0) -or
                 ($nf.Count -gt 0) -or ($noArchetypeItems.Count -gt 0) -or
                 ($result.Unmatched.Count -gt 0) -or
                 ($compatWarnings.PathTooLong.Count -gt 0) -or
                 ($compatWarnings.DllMismatch.Count -gt 0) -or
-                ($compatWarnings.GpuIncompatible.Count -gt 0)
+                ($compatWarnings.GpuIncompatible.Count -gt 0) -or
+                ($setupNotes.Count -gt 0)
 
 if ($hasAnyAction) {
     Write-Host ""
@@ -7835,9 +7899,51 @@ if ($hasAnyAction) {
         Write-Host ""
     }
 
+    # -- 9. Game-specific setup notes (informational) -------------------------
+    if ($setupNotes.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  GAME-SPECIFIC SETUP NOTES" -ForegroundColor Yellow
+        Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
+        Write-Host "  These registered games have special setup notes from the community" -ForegroundColor DarkCyan
+        Write-Host "  compatibility database. Read them before troubleshooting blind." -ForegroundColor DarkCyan
+        Write-Host ""
+        $sortedNotes = @($setupNotes | Sort-Object Code)
+        for ($i = 0; $i -lt $sortedNotes.Count; $i++) {
+            $sn = $sortedNotes[$i]
+            Write-Host ("  Game : {0} ({1})" -f $sn.Code, $sn.GameName) -ForegroundColor Yellow
+            if ($sn.SetupExe) { Write-Host ("  Run  : {0}" -f $sn.SetupExe) -ForegroundColor DarkGray }
+            Write-Host "  Notes:" -ForegroundColor Cyan
+            foreach ($line in (Format-NoteLines -Text $sn.Notes)) { Write-Host $line -ForegroundColor DarkCyan }
+            Write-Host ""
+            if ($i -lt ($sortedNotes.Count - 1)) {
+                Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
+                Write-Host ""
+            }
+        }
+    }
+
     Write-Host "============================================" -ForegroundColor Yellow
 
-    $actionPath = Join-Path $PSScriptRoot "TeknoParrot-Manager-ActionItems.txt"
+    $defaultActionPath = Join-Path $PSScriptRoot "TeknoParrot-Manager-ActionItems.txt"
+    $actionPath = $defaultActionPath
+    if (-not $Unattended -and -not $dryRunActive) {
+        try {
+            Add-Type -AssemblyName System.Windows.Forms
+            $saveDialog = New-Object System.Windows.Forms.SaveFileDialog
+            $saveDialog.Title            = "Save Action Required summary"
+            $saveDialog.InitialDirectory = $PSScriptRoot
+            $saveDialog.FileName         = "TeknoParrot-Manager-ActionItems.txt"
+            $saveDialog.Filter           = "Text files (*.txt)|*.txt|All files (*.*)|*.*"
+            $saveDialog.OverwritePrompt  = $true
+            if ($saveDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+                $actionPath = $saveDialog.FileName
+            } else {
+                Write-Log "Action items: save dialog cancelled, using default path."
+            }
+        } catch {
+            Write-Log "Action items: save dialog failed, using default path -- $_"
+        }
+    }
     $asb = New-Object System.Text.StringBuilder
     [void]$asb.AppendLine("TeknoParrot Manager - Action Required")
     [void]$asb.AppendLine("Generated: $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))")
@@ -7942,6 +8048,22 @@ if ($hasAnyAction) {
         [void]$asb.AppendLine("These games are confirmed not to work on $gpuVendorSeen GPUs. Known")
         [void]$asb.AppendLine("limitation, not a setup mistake -- there is no fix to apply.")
         foreach ($w in ($compatWarnings.GpuIncompatible | Sort-Object Code)) { [void]$asb.AppendLine("  $($w.Code)") }
+    }
+    if ($setupNotes.Count -gt 0) {
+        [void]$asb.AppendLine(""); [void]$asb.AppendLine("GAME-SPECIFIC SETUP NOTES (informational)")
+        [void]$asb.AppendLine("----------------------------------------------------------")
+        $sortedNotesFile = @($setupNotes | Sort-Object Code)
+        for ($i = 0; $i -lt $sortedNotesFile.Count; $i++) {
+            $sn = $sortedNotesFile[$i]
+            [void]$asb.AppendLine("")
+            [void]$asb.AppendLine("  Game : $($sn.Code) ($($sn.GameName))")
+            if ($sn.SetupExe) { [void]$asb.AppendLine("  Run  : $($sn.SetupExe)") }
+            [void]$asb.AppendLine("  Notes:")
+            foreach ($line in (Format-NoteLines -Text $sn.Notes)) { [void]$asb.AppendLine($line) }
+            if ($i -lt ($sortedNotesFile.Count - 1)) {
+                [void]$asb.AppendLine(""); [void]$asb.AppendLine("----------------------------------------------------------")
+            }
+        }
     }
     try {
         [System.IO.File]::WriteAllText($actionPath, $asb.ToString(), (New-Object System.Text.UTF8Encoding $false))

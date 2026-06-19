@@ -343,7 +343,7 @@ Games registered via dat are shown as `Registered (dat/exact)` or `Registered (d
 
 ## Action Required Summary
 
-At the end of every run the script prints — and saves to `TeknoParrot-Manager-ActionItems.txt` — everything still needing attention:
+At the end of every run the script prints — and saves to a text file (default `TeknoParrot-Manager-ActionItems.txt` next to the script; a Save dialog lets you pick somewhere else) — everything still needing attention:
 
 | Section | Meaning |
 |---------|---------|
@@ -352,6 +352,7 @@ At the end of every run the script prints — and saves to `TeknoParrot-Manager-
 | **Fix these game paths** | Profiles with broken paths that couldn't be auto-repaired — open TeknoParrotUI and point each to the correct folder |
 | **Extract first** | Profiles pointing at unextracted games — extract and re-run Repair |
 | **Set up controls** | Control types with no reference game bound yet — shows which games are waiting and suggests what to bind |
+| **Setup notes** | Registered games with special setup notes from the community compatibility database — shows the expected executable name and the full notes text |
 
 ---
 
@@ -394,7 +395,7 @@ At the end of every run the script prints — and saves to `TeknoParrot-Manager-
 | `TeknoParrot-Manager.log` | Scripts folder | Log of every run |
 | `TeknoParrot-Manager.syncstate.json` | Staging folder | Tracks extracted ZIPs — delete to re-extract all |
 | `TeknoParrot-Manager-controls.txt` | Scripts folder | Controls state after every run |
-| `TeknoParrot-Manager-ActionItems.txt` | Scripts folder | Action items from last run |
+| `TeknoParrot-Manager-ActionItems.txt` | Scripts folder (default; Save dialog can pick elsewhere) | Action items from last run |
 | `TeknoParrot-LaunchBox-Import.xml` | Scripts folder | LaunchBox reference XML |
 | `ReShade\ReShade64.dll` | Scripts folder | Bundled ReShade DLL (64-bit) |
 | `ReShade\ReShade32.dll` | Scripts folder | Bundled ReShade DLL (32-bit, optional) |
