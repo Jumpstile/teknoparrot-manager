@@ -1804,6 +1804,64 @@ function Get-GpuFixFieldNames {
     return [pscustomobject]@{ BoolFields = $boolAmdFields; DropdownFields = $dropdownGpuFields; GameProfilesFound = (Test-Path -LiteralPath $gpDir) }
 }
 
+# Combines Get-GpuFixFieldNames and Get-FFBBlasterFieldNames into a single
+# pass over GameProfiles. The Library health check needs both sets of
+# fields in the same run, and calling the two functions separately means
+# every GameProfile XML in the folder (TeknoParrot ships profiles for its
+# entire supported-game catalog, not just the user's library, so this can
+# be 1000+ files) gets parsed twice for no reason. Returns
+# [pscustomobject]@{ Gpu = <same shape as Get-GpuFixFieldNames>; Ffb = <same shape as Get-FFBBlasterFieldNames> }
+# -- the matching logic for each is identical to the two standalone
+# functions, just evaluated in the same loop iteration. Invoke-GpuFixSetup
+# and Invoke-FFBBlasterSetup keep calling their own standalone functions
+# unchanged (they only ever need one or the other, never both at once), so
+# this is purely additive -- only the health check's combined-need call
+# site switches to use it.
+function Get-GpuAndFfbFieldNames {
+    param([string]$TpRoot)
+
+    $gpDir             = Join-Path $TpRoot "GameProfiles"
+    $boolAmdFields     = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $dropdownGpuFields = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $ffbFields         = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $gpDirExists       = Test-Path -LiteralPath $gpDir
+
+    if ($gpDirExists) {
+        $gpFiles = @(Get-ChildItem -LiteralPath $gpDir -Filter "*.xml" -ErrorAction SilentlyContinue)
+        foreach ($gf in $gpFiles) {
+            try {
+                $gdoc = Read-Xml $gf.FullName
+                $fnodes = $gdoc.SelectNodes("/GameProfile/ConfigValues/FieldInformation")
+                foreach ($n in $fnodes) {
+                    $fn = if ($n.FieldName) { $n.FieldName.Trim() } else { '' }
+                    $ft = if ($n.FieldType)  { $n.FieldType.Trim()  } else { '' }
+                    if (-not $fn) { continue }
+                    if ($ft -eq 'Bool') {
+                        if ($fn -imatch '\bamd\b|\bradeon\b|AMDFix|AMDCrash') {
+                            [void]$boolAmdFields.Add($fn)
+                        }
+                        if ($fn -imatch 'ffb.*blaster|blaster.*ffb') {
+                            [void]$ffbFields.Add($fn)
+                        }
+                    } elseif ($ft -eq 'Dropdown') {
+                        $opts = @($n.SelectNodes("FieldOptions/string") | ForEach-Object { $_.InnerText.Trim() })
+                        if ($opts | Where-Object { $_ -imatch '^amd$|^nvidia$|^intel$|^new amd' }) {
+                            [void]$dropdownGpuFields.Add($fn)
+                        }
+                    }
+                }
+            } catch {
+                Write-Log ("GpuAndFfbFieldScan: WARNING -- could not parse GameProfile '$($gf.BaseName)': $_")
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        Gpu = [pscustomobject]@{ BoolFields = $boolAmdFields; DropdownFields = $dropdownGpuFields; GameProfilesFound = $gpDirExists }
+        Ffb = $ffbFields
+    }
+}
+
 # Pure decision function: for a given UserProfile XML and the field names
 # discovered by Get-GpuFixFieldNames, determines whether the profile has
 # any GPU fix field at all (Eligible) and, if so, whether every such
@@ -5067,8 +5125,9 @@ function Invoke-LibraryHealthCheck {
     $reShadeCount     = 0
     $bepInExCount     = 0
     $detected         = Get-DetectedGpuVendor
-    $gpuFields        = Get-GpuFixFieldNames -TpRoot $TpRoot
-    $ffbFields        = Get-FFBBlasterFieldNames -GameProfilesDir (Join-Path $TpRoot "GameProfiles")
+    $combinedFields    = Get-GpuAndFfbFieldNames -TpRoot $TpRoot
+    $gpuFields        = $combinedFields.Gpu
+    $ffbFields        = $combinedFields.Ffb
 
     foreach ($pf in $profiles) {
         try {
