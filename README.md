@@ -725,6 +725,10 @@ Delete one of the duplicate `.xml` files from `UserProfiles`. Keep the one with 
 **HyperSpin 2 export fails with "TeknoParrot not found in emulators.json".**
 TeknoParrot must be set up as an emulator in HyperSpin 2 first. The title must contain "TeknoParrot" (spacing and capitalisation variations are fine).
 
+**Known issues being investigated** (not yet confirmed bugs — tracked on GitHub so you can follow progress or add your own findings):
+- [Control propagation may not be setting Input API for some games](https://github.com/Jumpstile/teknoparrot-manager/issues/1) — fighting/shooter-family propagation may not be setting `MergedInput` the way trackball-family propagation does. Possibly expected behavior (not every game's Input API dropdown lists that option), still being confirmed.
+- [FFB Blaster field not found despite a paid membership](https://github.com/Jumpstile/teknoparrot-manager/issues/2) — the field-discovery scan found nothing on at least one real install; root cause not yet confirmed (could be expected if that field isn't shipped locally, or a detection gap).
+
 ---
 
 ## What It Does Not Do
@@ -755,4 +759,4 @@ TeknoParrot must be set up as an emulator in HyperSpin 2 first. The title must c
 
 ---
 
-> v0.99 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v0.99.1 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.

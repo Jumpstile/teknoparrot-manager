@@ -7,6 +7,30 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.1 BETA  (2026-06-20)
+-------------------------------------------------------------------------------
+
+  Fix: the third-party FFB plugin setup (mode 7) could crash with an
+  unhandled "Value cannot be null" error right after FFB Blaster setup
+  aborted (e.g. when no FFB Blaster field was found, or no membership).
+  Root cause was a PowerShell pipeline quirk where an empty-array return
+  value gets silently turned into $null by the time a plain variable
+  assignment captures it -- fixed at every affected return point, plus a
+  defensive null-guard added at the actual crash site.
+
+  Fix: the exact same quirk meant pressing "A) All unextracted games" in
+  the AutoSync game picker silently extracted nothing instead of
+  extracting everything. Fixed the same way.
+
+  Fix: Remove-PostgresPartialInstall (used before a fresh PostgreSQL
+  install attempt) now verifies a matched registry entry's install
+  location before ever uninstalling it, and only ever stops/removes a
+  service with the exact expected name -- closes a theoretical gap where
+  an unrelated standalone PostgreSQL 8.3 install (for other dev work)
+  could have been caught by the cleanup. Found via external security
+  review; no evidence this was ever actually triggered.
+
+-------------------------------------------------------------------------------
   v0.99 BETA  (2026-06-19)
 -------------------------------------------------------------------------------
 
