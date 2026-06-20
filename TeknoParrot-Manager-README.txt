@@ -1360,6 +1360,16 @@
     Full manual setup guide (if you'd rather not automate this):
       https://github.com/Eggmansworld/tp-it-guides
 
+  A note on trust
+
+    The PostgreSQL 8.3 installer is distributed via Eggmansworld/tp-it-guides's
+    GitHub release bundle. The installer itself is not Authenticode-signed,
+    so the script records SHA256/source audit information for every download
+    but cannot independently verify publisher authenticity the way it does
+    for ReShade (whose installer genuinely is signed). This is a limitation
+    of the installer itself, not something a stronger check in this script
+    could fix.
+
 
   RETROBAT / BATOCERA
   -------------------

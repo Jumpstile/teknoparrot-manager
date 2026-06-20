@@ -442,6 +442,8 @@ Several Incredible Technologies games — Golden Tee Live (2006–2019), Power P
 
 You don't need to run this mode at all if none of your registered games need Postgres — it detects that and tells you so without installing anything.
 
+**A note on trust:** the PostgreSQL 8.3 installer is distributed via Eggmansworld/tp-it-guides's GitHub release bundle. The installer itself is not Authenticode-signed, so the script records SHA256/source audit information for every download but cannot independently verify publisher authenticity the way it does for ReShade (whose installer genuinely is signed). This is a limitation of the installer itself, not something a stronger check in this script could fix.
+
 ---
 
 ## LaunchBox Integration
