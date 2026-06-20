@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.98 BETA
+  TeknoParrot Manager  |  v0.99 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -233,6 +233,16 @@
     stable line is ever used. See BEPINEX UPDATE CHECK below. Available as
     menu option 8.
 
+  - Postgres setup. Installs and configures the local PostgreSQL 8.3
+    database that some Incredible Technologies games need (Golden Tee
+    Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro,
+    Orange County Choppers Pinball). Detects which of your registered
+    games need it automatically. Never reinstalls or modifies an existing
+    PostgreSQL install, and never recreates or restores over a database
+    that already exists. Installing PostgreSQL itself requires running
+    this script as Administrator. See POSTGRES SETUP below. Available as
+    menu option 11.
+
   - Path-length, file-version, and GPU compatibility warnings (automatic).
     Every AutoSync/Register run automatically checks for known
     compatibility traps and adds them to the ACTION REQUIRED summary:
@@ -396,27 +406,41 @@
        Choose which backup to restore: (1) your UserProfiles -- rolls back
        to a previous backup without touching File Explorer, lists all
        timestamped backup folders with file counts, you pick one by number,
-       type YES to confirm; or (2) LaunchBox's library files -- only
-       relevant if you have used the direct LaunchBox integration, restores
+       type YES to confirm; (2) LaunchBox's library files -- only relevant
+       if you have used the direct LaunchBox integration, restores
        Emulators.xml/Platforms.xml/platform file(s) to their state before
-       the script last wrote to them. Returns to the menu when done.
+       the script last wrote to them; or (3) Postgres databases -- only
+       relevant if you have used Postgres setup (mode 11), restores each
+       database from its pg_dump backup. Returns to the menu when done.
 
   10) Library health check
        Read-only. Reports how many registered profiles have a valid,
        broken, or empty GamePath, lists the affected profile codes, and
        shows the summary line from your last full run. Also reports
        optional-setup coverage: how many registered games are eligible
-       for a GPU fix, FFB Blaster, or dgVoodoo2 but don't have it applied
-       yet (all checked locally, no network access -- third-party FFB
-       plugin coverage needs a live lookup, so check that via mode 7
-       instead). Also shows, purely informationally, how many registered
-       games have ReShade or BepInEx installed -- these two are per-game
-       choices rather than a clear right answer, so they are not flagged
-       as something to fix, just reported as a count. Does not extract,
-       register, repair, propagate, or touch the network -- safe to run
-       any time for a quick status check. Returns to the menu when done.
+       for a GPU fix, FFB Blaster, dgVoodoo2, or Postgres setup but don't
+       have it applied yet (all checked locally, no network access --
+       third-party FFB plugin coverage needs a live lookup, so check that
+       via mode 7 instead). Also shows, purely informationally, how many
+       registered games have ReShade or BepInEx installed -- these two are
+       per-game choices rather than a clear right answer, so they are not
+       flagged as something to fix, just reported as a count. Does not
+       extract, register, repair, propagate, or touch the network -- safe
+       to run any time for a quick status check. Returns to the menu when
+       done.
 
-  11) Exit
+  11) Postgres setup
+       Installs and configures the local PostgreSQL 8.3 database that some
+       Incredible Technologies games need (Golden Tee Live, Power Putt
+       Live, Silver Strike Bowling Live, Target Toss Pro, Orange County
+       Choppers Pinball). Detects which of your registered games need it
+       automatically. If PostgreSQL is already installed, it is never
+       reinstalled or modified; if a game's database already exists, it
+       is never recreated or restored over. Installing PostgreSQL itself
+       requires running this script as Administrator. See POSTGRES SETUP
+       below for full details.
+
+  12) Exit
        Exits the script.
 
 
@@ -1270,6 +1294,73 @@
     This fully reverts the game to vanilla -- nothing else is touched.
 
 
+  POSTGRES SETUP
+  --------------
+
+  Which games need this?
+
+    Several Incredible Technologies games need a small local PostgreSQL
+    8.3 database to store game data: Golden Tee Live (2006-2019), Power
+    Putt Live (2012/2013), Silver Strike Bowling Live, Target Toss Pro
+    (Bags / Lawn Darts), and Orange County Choppers Pinball. Mode 11
+    detects which of your registered games need this automatically -- no
+    hardcoded list to keep up to date, so a newly added game is covered
+    the moment you register it.
+
+    If none of your registered games need it, mode 11 says so and exits
+    immediately -- it never installs anything you don't need.
+
+  What mode 11 does
+
+    If PostgreSQL isn't installed yet, the script downloads and installs
+    it silently. This is the ONLY feature in this script that requires
+    running as Administrator, since it creates a real Windows service and
+    a local "postgres" Windows user account. You'll be asked for two
+    passwords:
+      1. A SERVICE ACCOUNT password -- for the Windows account that runs
+         PostgreSQL in the background. You'll almost never need it again.
+      2. A DATABASE password -- the important one. It's saved (encrypted)
+         so every Postgres game can be configured automatically, and
+         you'll need it again if you ever connect with pgAdmin yourself.
+
+    If PostgreSQL is already installed, it is NEVER reinstalled or
+    modified -- the script just uses it as-is.
+
+    For each Postgres-needing game:
+      - A database that already exists is NEVER recreated or restored
+        over.
+      - A "Pass" field that's already filled in is NEVER overwritten --
+        you may have already configured it correctly, by hand or on an
+        earlier run.
+      - If the game's profile already has TeknoParrot's own "Automatically
+        create Database" feature (Golden Tee Live 2018 and newer), the
+        script only fills in the connection fields (address, port,
+        username) -- TeknoParrot creates the database itself and asks for
+        the backup location on first launch.
+      - For older profiles that predate that feature, the script creates
+        the database and restores that game's own bundled backup itself
+        (found automatically inside that game's pg_backup folder -- the
+        newest dated subfolder, or the highest-numbered file, matching
+        how the game ships its own backups).
+
+    Every time mode 11 runs, it backs up every existing Postgres database
+    first, before touching anything -- restore them via mode 9) Restore
+    from backup if anything looks wrong.
+
+  Password storage
+
+    The database password is encrypted using Windows DPAPI (tied to your
+    Windows account and this PC) before being saved to
+    TeknoParrot-Manager.config.json -- the first secret this script has
+    ever needed to store. The service account password is never saved at
+    all, encrypted or not; it's only needed once, during install.
+
+  Where this comes from
+
+    Full manual setup guide (if you'd rather not automate this):
+      https://github.com/Eggmansworld/tp-it-guides
+
+
   RETROBAT / BATOCERA
   -------------------
 
@@ -1938,6 +2029,6 @@
 
 
 ===============================================================================
-  v0.98 BETA -- Test one game after each run.
+  v0.99 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================

@@ -7,6 +7,35 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99 BETA  (2026-06-19)
+-------------------------------------------------------------------------------
+
+  New: Postgres setup (mode 11). Installs and configures the local
+  PostgreSQL 8.3 database that some Incredible Technologies games need
+  (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target
+  Toss Pro, Orange County Choppers Pinball). Detects which of your
+  registered games need it automatically -- no manual list to maintain.
+  If PostgreSQL is already installed, it is never reinstalled or
+  modified; if a game's database already exists, it is never recreated
+  or restored over. For games whose profile predates TeknoParrot's own
+  "Automatically create Database" feature, this mode creates the
+  database and restores that game's bundled backup itself; for newer
+  profiles, it just fills in the connection settings and lets TeknoParrot
+  handle the rest on first launch. The database password is encrypted
+  (Windows DPAPI) before being saved -- the first secret this script has
+  ever stored.
+
+  New: Postgres database backups. Every time mode 11 runs, it backs up
+  every existing Postgres database first, before touching anything.
+  Restore them via menu 9 (Restore backup), alongside the existing
+  TeknoParrot UserProfiles and LaunchBox library backup choices.
+
+  Note: installing PostgreSQL requires running this script as
+  Administrator (the first feature in this script that does). Setting up
+  connection fields and backing up/restoring databases for an
+  already-installed PostgreSQL does not require elevation.
+
+-------------------------------------------------------------------------------
   v0.98 BETA  (2026-06-19)
 -------------------------------------------------------------------------------
 

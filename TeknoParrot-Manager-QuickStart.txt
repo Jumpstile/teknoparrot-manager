@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.98 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.99 BETA  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -62,9 +62,12 @@
                              (optional, see below).
        8) BepInEx update   -- update an already-installed BepInEx to the
                              latest stable 64-bit release (optional, see below).
-       9) Restore backup   -- roll UserProfiles back to a previous backup.
+       9) Restore backup   -- roll UserProfiles, LaunchBox files, or Postgres
+                             databases back to a previous backup.
        10) Health check    -- read-only library status, safe to run any time.
-       11) Exit            -- quit the script.
+       11) Postgres setup  -- install/configure PostgreSQL for games that
+                             need it (Golden Tee Live, Power Putt Live, etc).
+       12) Exit            -- quit the script.
 
   4. Answer the folder prompts. For AutoSync, choose a LOCAL staging folder
      with free space, OUTSIDE both TeknoParrot and your ZIP source.
@@ -603,6 +606,9 @@
   LaunchBoxBackups\                    Timestamped backups of LaunchBox's
                                        own files, made before each direct
                                        LaunchBox write. Restore via menu 9.
+  PostgresBackups\                     Timestamped pg_dump backups of
+                                       Postgres databases, made before each
+                                       Postgres setup run. Restore via menu 9.
   TeknoParrot-Manager-ActionItems.txt  Action items from the last run
                                        (manual registration, broken paths,
                                        etc.). Written after registration runs

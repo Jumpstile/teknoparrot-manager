@@ -27,6 +27,7 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 - [GPU Compatibility Fixes](#gpu-compatibility-fixes)
 - [Force Feedback (FFB) Setup](#force-feedback-ffb-setup)
 - [BepInEx Update Check](#bepinex-update-check)
+- [Postgres Setup](#postgres-setup)
 - [LaunchBox Integration](#launchbox-integration)
 - [HyperSpin 2 Export](#hyperspin-2-export)
 - [RetroBat / Batocera](#retrobat--batocera)
@@ -60,6 +61,7 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 - **GPU fixes** — detects your GPU (AMD / NVIDIA / Intel) and applies the matching vendor fix to every registered game that has one.
 - **Force feedback (FFB)** — native FFB Blaster (needs a paid TeknoParrot membership) and a free third-party plugin (fetched live, no subscription needed), covering different games. If a game is covered by both, you're asked once which to use for all such games.
 - **BepInEx update check** — checks games that already have BepInEx installed against the latest stable 64-bit release and offers a batched update. Never installs BepInEx fresh.
+- **Postgres setup** — installs and configures the local PostgreSQL 8.3 database some Incredible Technologies games need (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball). Detects which registered games need it automatically; never reinstalls Postgres or recreates an existing database.
 - **Automatic compatibility warnings** — every run checks for known install-path-length limits (Raw Thrills titles, Yu-Gi-Oh! Duel Terminal 6), pinned-file-version requirements (BlazBlue/iDmacDrv32.dll, Tekken Tag Tournament 2/EBOOT.BIN), and known GPU-vendor incompatibilities (AMD/Intel), with details in ACTION REQUIRED.
 - **Game-specific setup notes** — every run checks the community compatibility database (eggmansworld.github.io/TeknoParrot) for any registered game with special setup notes — workarounds, known quirks, the expected executable name — and lists them in ACTION REQUIRED.
 - **LaunchBox direct integration / HyperSpin 2 export** — writes games straight into LaunchBox's own library, or builds an import file for HyperSpin 2, after each run.
@@ -142,9 +144,10 @@ Choosing mode 1 or 2 offers a preview/dry-run option first — see [Preview / Dr
 | 6 | **GPU fix setup** | Apply AMD / NVIDIA / Intel vendor fix to all games |
 | 7 | **Force feedback (FFB) setup** | FFB Blaster (membership) + free third-party plugin |
 | 8 | **BepInEx update check** | Update an existing BepInEx install to the latest stable 64-bit release |
-| 9 | **Restore backup** | Roll TeknoParrot profiles or LaunchBox's library files back to a previous backup |
-| 10 | **Library health check** | Read-only registered/broken/empty status, plus GPU fix / FFB Blaster / dgVoodoo2 coverage and ReShade/BepInEx install counts |
-| 11 | **Exit** | Quit the script |
+| 9 | **Restore backup** | Roll TeknoParrot profiles, LaunchBox's library files, or Postgres databases back to a previous backup |
+| 10 | **Library health check** | Read-only registered/broken/empty status, plus GPU fix / FFB Blaster / dgVoodoo2 / Postgres coverage and ReShade/BepInEx install counts |
+| 11 | **Postgres setup** | Installs/configures the local PostgreSQL database some Incredible Technologies games need (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball) |
+| 12 | **Exit** | Quit the script |
 
 ---
 
@@ -426,6 +429,21 @@ If anything is outdated, the script lists every such game once and asks a single
 
 ---
 
+## Postgres Setup
+
+Several Incredible Technologies games — Golden Tee Live (2006–2019), Power Putt Live (2012/2013), Silver Strike Bowling Live, Target Toss Pro (Bags / Lawn Darts), and Orange County Choppers Pinball — need a small local PostgreSQL 8.3 database to store game data. Mode 11 detects which of your registered games need it automatically (no hardcoded list to keep up to date) and handles the rest:
+
+- **If PostgreSQL isn't installed yet**, it downloads and installs PostgreSQL 8.3 silently. This requires running the script as **Administrator** — the only feature in this script that does, since it creates a real Windows service and a local `postgres` user account. You'll be asked for two passwords: a service-account password (Windows uses it to run PostgreSQL in the background — you'll rarely need it again) and a database password (the important one — every Postgres game's settings need it).
+- **If PostgreSQL is already installed, it is never reinstalled or modified.** The script just uses it as-is.
+- **For each Postgres-needing game, a database that already exists is never recreated or restored over.** Likewise, a `Pass` field that's already filled in is left completely untouched.
+- For games whose profile already has TeknoParrot's own "Automatically create Database" feature (Golden Tee Live 2018 and newer), the script only fills in the connection fields (server address, port, username) — TeknoParrot creates the database itself and asks for the backup location on first launch. For older profiles that predate that feature, this script creates the database and restores that game's bundled backup itself.
+- Every time this mode runs, it backs up every existing Postgres database first, before touching anything — restore them via mode 9 if anything looks wrong.
+- The database password is encrypted (Windows DPAPI, tied to your Windows account and this PC) before being saved to the config file — the first secret this script has ever needed to store.
+
+You don't need to run this mode at all if none of your registered games need Postgres — it detects that and tells you so without installing anything.
+
+---
+
 ## LaunchBox Integration
 
 At the end of each run the script offers to add your registered games directly into LaunchBox:
@@ -660,6 +678,7 @@ If backup folder creation fails, the script exits rather than proceeding without
 **Restore:** choose mode 9 from the menu, then pick which backup to restore:
 1. **TeknoParrot UserProfiles backup** — lists all timestamped backups with file counts, you pick one by number, type `YES` to confirm.
 2. **LaunchBox library backup** — only relevant if you've used the direct LaunchBox integration. Lists timestamped backups from `Scripts\LaunchBoxBackups\`, restoring `Emulators.xml`/`Platforms.xml`/platform file(s) to their state before the script last wrote to them. Also refuses to run while LaunchBox/BigBox is open.
+3. **Postgres database backup** — only relevant if you've used Postgres setup (mode 11). Lists timestamped backups from `Scripts\PostgresBackups\`, restoring each database from its `pg_dump` snapshot. This replaces the *current* content of each database restored — confirmed with a `YES` prompt first.
 
 **Manual restore:** close TeknoParrot, copy `.xml` files from a backup folder back into `UserProfiles`, overwriting the current ones. For LaunchBox, close LaunchBox and copy the backed-up files from `Scripts\LaunchBoxBackups\<timestamp>\` back into LaunchBox's `Data\` folder at the matching relative path.
 
@@ -727,6 +746,7 @@ TeknoParrot must be set up as an emulator in HyperSpin 2 first. The title must c
 | `TeknoParrot-Manager-ActionItems.txt` | Scripts folder (default; Save dialog can pick elsewhere) | Action items from last run |
 | `TeknoParrot-LaunchBox-Import.xml` | Scripts folder | LaunchBox manual-import reference XML (only if you skip direct integration) |
 | `LaunchBoxBackups\` | Scripts folder | Timestamped backups of LaunchBox's own files, made before each direct write |
+| `PostgresBackups\` | Scripts folder | Timestamped `pg_dump` backups of Postgres databases, made before each Postgres setup run |
 | `ReShade\ReShade64.dll` | Scripts folder | Bundled ReShade DLL (64-bit) |
 | `ReShade\ReShade32.dll` | Scripts folder | Bundled ReShade DLL (32-bit, optional) |
 | `dgVoodoo2\*.dll` + `dgVoodoo.conf` | Scripts folder | dgVoodoo2 DLLs (you provide) |
@@ -735,4 +755,4 @@ TeknoParrot must be set up as an emulator in HyperSpin 2 first. The title must c
 
 ---
 
-> v0.98 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v0.99 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.

@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.98 BETA
+# TeknoParrot Manager  |  v0.99 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -64,8 +64,10 @@ param([switch]$Unattended, [switch]$DryRun)
 # Single source of truth for the version string used in the banner, log, and
 # GitHub API User-Agent headers. Previously hardcoded in each of those spots
 # independently, which let the User-Agent strings drift out of sync with the
-# banner (caught stale at 0.70 during the v0.71 bump, and again at 0.76 here).
-$ScriptVersion = "0.97"
+# banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
+# again at 0.98 -- this line is easy to miss because it's far from the
+# header comment block at the top of the file. Check it every version bump.)
+$ScriptVersion = "0.99"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -185,6 +187,7 @@ function Save-Config {
         LaunchBoxPlatformMode        = $lbPlatformMode
         LaunchBoxCustomPlatformName  = $lbCustomPlatformName
         LaunchBoxEmulatorId          = $lbEmulatorId
+        PostgresSuperPasswordEncrypted = $postgresSuperPasswordEncrypted
     }
     try {
         [System.IO.File]::WriteAllText($configPath, ($cfg | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
@@ -1851,6 +1854,135 @@ function Test-GpuFixUpToDate {
 }
 
 # =============================================================================
+# POSTGRESQL DETECTION  (read-only helpers, shared by Postgres setup mode
+# and the Library health check's coverage report)
+# =============================================================================
+# Several Incredible Technologies games (Golden Tee Live, Power Putt Live,
+# Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers
+# Pinball) need a local PostgreSQL 8.3 database. Their Postgres settings
+# live inside ConfigValues/FieldInformation under CategoryName=Postgres --
+# the same generic per-game-setting structure GPU Fix/FFB Blaster above
+# already use -- confirmed against a real Golden Tee Live 2019 GameProfile.
+# Field names are standardized across every such game (it's the same
+# settings panel design), so unlike GPU Fix this never needs per-game
+# field-name variant matching -- just the category existence check below.
+
+$script:PostgresInstallDir  = "C:\Program Files (x86)\PostgreSQL\8.3"
+$script:PostgresBinDir      = Join-Path $script:PostgresInstallDir "bin"
+$script:PostgresServiceName = "pgsql-8.3"
+
+# Returns $true if this profile has any Postgres-category field at all.
+function Test-GameNeedsPostgres {
+    param([System.Xml.XmlDocument]$Doc)
+    $node = $Doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[CategoryName='Postgres']")
+    return ($null -ne $node)
+}
+
+# Reads one named field's current value from the Postgres category, or
+# $null if the field is missing entirely (distinct from an empty string,
+# which means the field exists but is blank -- callers care about this
+# distinction: "Automatically create Database" being absent means an older
+# GameProfileRevision that predates the feature, not that it's off).
+function Get-PostgresFieldValue {
+    param([System.Xml.XmlDocument]$Doc, [string]$FieldName)
+    $xpLit = ConvertTo-XPathStringLiteral $FieldName
+    $fi = $Doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[CategoryName='Postgres' and FieldName=$xpLit]")
+    if ($null -eq $fi) { return $null }
+    $fvNode = $fi.SelectSingleNode("FieldValue")
+    if ($null -eq $fvNode) { return $null }
+    return $fvNode.InnerText
+}
+
+# Sets one named field's value in the Postgres category. No-op (returns
+# $false) if the field doesn't exist on this profile -- never creates a
+# new field, since the schema is owned by TeknoParrot's own GameProfile
+# definitions, not by this script.
+function Set-PostgresFieldValue {
+    param([System.Xml.XmlDocument]$Doc, [string]$FieldName, [string]$Value)
+    $xpLit = ConvertTo-XPathStringLiteral $FieldName
+    $fi = $Doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[CategoryName='Postgres' and FieldName=$xpLit]")
+    if ($null -eq $fi) { return $false }
+    $fvNode = $fi.SelectSingleNode("FieldValue")
+    if ($null -eq $fvNode) { return $false }
+    $fvNode.InnerText = $Value
+    return $true
+}
+
+# Validates a database name is safe to interpolate into a SQL string/CLI
+# argument before any Postgres operation touches it. DbName ultimately
+# comes from a GameProfile XML field -- shipped by TeknoParrot, but this
+# script treats it as semi-trusted rather than blindly safe in a SQL
+# context, matching the project's "external-ish input into a command must
+# be validated" convention used elsewhere (e.g. Test-PathInside for
+# filesystem paths). Every real DbName observed (GameDB19, GAMEDBPP12,
+# GameDBSSB, GameDBBags, etc.) is plain alphanumeric, so this is not a
+# practical restriction -- just a guard against the unexpected.
+function Test-SafePostgresDbName {
+    param([string]$DbName)
+    return ($DbName -match '^[A-Za-z0-9_]+$')
+}
+
+# Read-only: true if PostgreSQL 8.3 is already installed (service exists
+# and psql.exe is present). Never reinstalls or modifies an existing
+# install -- callers use this to skip straight to per-game configuration
+# when it's already true, per the explicit "never touch an existing
+# install" requirement.
+function Test-PostgresInstalled {
+    $svc = Get-Service -Name $script:PostgresServiceName -ErrorAction SilentlyContinue
+    $psqlExists = Test-Path -LiteralPath (Join-Path $script:PostgresBinDir "psql.exe")
+    return (($null -ne $svc) -and $psqlExists)
+}
+
+# Read-only: true if a database with this exact name already exists on
+# the local Postgres server. This is the check that gates every
+# database-creation/restore step in the setup mode -- a database that
+# already exists for an already-configured game is never touched,
+# recreated, or restored over.
+function Test-PostgresDatabaseExists {
+    param([string]$DbName, [string]$SuperPasswordPlain)
+    if (-not (Test-SafePostgresDbName $DbName)) {
+        Write-Log "Postgres: refusing unsafe database name '$DbName'"
+        return $false
+    }
+    $psqlExe = Join-Path $script:PostgresBinDir "psql.exe"
+    if (-not (Test-Path -LiteralPath $psqlExe)) { return $false }
+    $env:PGPASSWORD = $SuperPasswordPlain
+    try {
+        $result = & $psqlExe -U postgres -h 127.0.0.1 -p 5432 -tAc "SELECT 1 FROM pg_database WHERE datname='$DbName'" 2>$null
+        return ($result -match '1')
+    } catch {
+        Write-Log "Postgres: could not check database '$DbName' -- $_"
+        return $false
+    } finally {
+        $env:PGPASSWORD = $null
+    }
+}
+
+# Verifies a password actually authenticates against the running Postgres
+# server (a trivial SELECT 1) -- called right after obtaining a password
+# (decrypted from saved config, or freshly typed) so a wrong/stale
+# password produces one clear error immediately, instead of a confusing
+# wall of per-game failures that would otherwise all silently degrade to
+# "treat as nonexistent" further downstream (every Postgres helper here
+# returns $false on any connection error, including a bad password, so a
+# wrong password fails safe -- nothing gets corrupted -- but it would
+# otherwise look like 20 separate unrelated failures instead of one).
+function Test-PostgresPassword {
+    param([string]$SuperPasswordPlain)
+    $psqlExe = Join-Path $script:PostgresBinDir "psql.exe"
+    if (-not (Test-Path -LiteralPath $psqlExe)) { return $false }
+    $env:PGPASSWORD = $SuperPasswordPlain
+    try {
+        & $psqlExe -U postgres -h 127.0.0.1 -p 5432 -tAc "SELECT 1" 2>$null | Out-Null
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    } finally {
+        $env:PGPASSWORD = $null
+    }
+}
+
+# =============================================================================
 # GPU Fix Setup: detect GPU vendor, scan TeknoParrot GameProfiles for fix
 # fields (so newly added games are covered automatically), and apply the
 # appropriate values to every registered UserProfile XML.
@@ -2974,6 +3106,575 @@ function Invoke-EggmanDatDownload {
         try { if (Test-Path -LiteralPath $savePath) { [System.IO.File]::Delete($savePath) } } catch {}
         return $false
     }
+}
+
+# Shared interactive download step for a resolved Eggman dat release: checks
+# the release's filename is safe to use as a save path (defense against a
+# crafted GitHub Releases response -- same convention as every other
+# live-fetched filename in this script), prompts for a save location
+# (defaulting next to the script), and downloads. Used by both the
+# first-time dat setup prompt and the "check for a newer release" prompt on
+# later runs, so there is exactly one place that does this safety check.
+# Returns the saved path on success, or $null on failure/abort.
+function Invoke-EggmanDatDownloadInteractive {
+    param([pscustomobject]$rel)
+
+    $safeDatFileName = [System.IO.Path]::GetFileName($rel.FileName)
+    $defaultSavePath = Join-Path $PSScriptRoot $safeDatFileName
+    $unsafeFileName  = [string]::IsNullOrWhiteSpace($safeDatFileName) -or -not (Test-PathInside $defaultSavePath $PSScriptRoot)
+    if ($unsafeFileName) {
+        Write-Log "EggmanDat: SECURITY -- unsafe release filename '$($rel.FileName)'"
+        Write-Host "  Unexpected filename from GitHub -- skipped for safety." -ForegroundColor Red
+        return $null
+    }
+    $rawSave = (Read-Host "  Save to (Enter for default: $defaultSavePath)").Trim()
+    if (-not $rawSave) { $rawSave = $defaultSavePath }
+    Write-Host "  Downloading -- this may take a few minutes..." -ForegroundColor Cyan
+    if (Invoke-EggmanDatDownload $rel.DownloadUrl $rawSave) { return $rawSave }
+    return $null
+}
+
+# =============================================================================
+# POSTGRESQL INSTALL ORCHESTRATION
+# =============================================================================
+# Confirmed working via multiple real install attempts on a real machine
+# this session (several genuine failures along the way, each root-caused
+# via verbose MSI logs -- see the CLAUDE.md Postgres notes for the full
+# story). Key facts baked into the property list below:
+#   - Targets postgresql-8.3-int.msi directly, NOT the postgresql-8.3.msi
+#     wrapper -- the wrapper is a near-empty UI shell with no real
+#     Feature/Component data of its own; under /qn it has nothing to do
+#     and fails.
+#   - INTERNALLAUNCH=1 satisfies the internal MSI's own LaunchCondition
+#     ("INTERNALLAUNCH=1 OR Installed"), bypassing the wrapper entirely.
+#   - ROOTDRIVE=C:\ is required -- without it, MSI's default drive-
+#     selection heuristic can pick whatever local drive has the most free
+#     space, which would not match the hardcoded
+#     C:\Program Files (x86)\PostgreSQL\8.3\ path baked into every
+#     GameProfile's Path field.
+#   - SERVICEDOMAIN must be the real computer name, NOT the Win32 "local
+#     machine" literal "." -- this custom action does its own domain\
+#     username string handling and does not resolve "." correctly, which
+#     manifests as "No mapping between account names and security IDs
+#     was done".
+
+# Queries the GitHub API for the Eggmansworld/tp-it-guides "universal-guide"
+# release, which bundles both the PDF setup guide and the actual
+# PostgreSQL 8.3 installer files. Unlike the Eggman dat repo, this repo
+# hosts several distinct release tags for different purposes (a
+# customization guide, a score-submission pack, an obsolete-guides
+# archive) -- "latest" would return whichever was most recently published,
+# not necessarily this one, so this fetches by the specific known tag.
+# Returns [pscustomobject]@{DownloadUrl; FileName; SizeMB} or $null on failure.
+function Get-PostgresGuideRelease {
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try {
+            $apiUri = 'https://api.github.com/repos/Eggmansworld/tp-it-guides/releases/tags/universal-guide'
+            $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
+                          -Headers @{ 'User-Agent' = "TeknoParrot-Manager/$ScriptVersion" }
+            $rel    = $resp.Content | ConvertFrom-Json
+            $asset  = @($rel.assets) | Where-Object { $_.name -like '*.zip' } | Select-Object -First 1
+            if (-not $asset) { return $null }
+            if ($asset.browser_download_url -notmatch '^https://[a-zA-Z0-9._-]*(github\.com|githubusercontent\.com)/') {
+                Write-Log "PostgresGuide: unexpected download URL format -- skipping."
+                return $null
+            }
+            return [pscustomobject]@{
+                DownloadUrl = $asset.browser_download_url
+                FileName    = $asset.name
+                SizeMB      = [Math]::Round($asset.size / 1MB, 1)
+            }
+        } catch {
+            $status = 0
+            if ($_.Exception.Response) { try { $status = [int]$_.Exception.Response.StatusCode } catch {} }
+            if ($attempt -ge 3 -or ($status -ge 400 -and $status -lt 500)) {
+                Write-Log "PostgresGuide: GitHub release query failed -- $_"; return $null
+            }
+            Write-Log "PostgresGuide: attempt $attempt failed, retrying in 5s -- $_"
+            Start-Sleep -Seconds 5
+        }
+    }
+    return $null
+}
+
+# Downloads the guide ZIP. Same BITS-with-fallback shape as Invoke-EggmanDatDownload.
+function Invoke-PostgresGuideDownload {
+    param([string]$downloadUrl, [string]$savePath)
+    try {
+        $bitsOk = $false
+        $bitsSvc = try { Get-Service -Name BITS -ErrorAction Stop } catch { $null }
+        if ($bitsSvc -ne $null -and $bitsSvc.Status -eq 'Running') {
+            try {
+                Start-BitsTransfer -Source $downloadUrl -Destination $savePath `
+                    -Description "PostgreSQL setup guide" `
+                    -DisplayName "Downloading installer..." `
+                    -ErrorAction Stop
+                $bitsOk = $true
+            } catch {
+                Write-Log "PostgresGuide: BITS transfer failed (${_}), trying Invoke-WebRequest."
+            }
+        }
+        if (-not $bitsOk) {
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+                try {
+                    Invoke-WebRequest -Uri $downloadUrl -OutFile $savePath -UseBasicParsing -ErrorAction Stop
+                    break
+                } catch {
+                    $status = 0
+                    if ($_.Exception.Response) { try { $status = [int]$_.Exception.Response.StatusCode } catch {} }
+                    try { if (Test-Path -LiteralPath $savePath) { [System.IO.File]::Delete($savePath) } } catch {}
+                    if ($attempt -ge 3 -or ($status -ge 400 -and $status -lt 500)) { throw }
+                    Write-Host ("  Attempt $attempt failed -- retrying in 10s...") -ForegroundColor Yellow
+                    Write-Log "PostgresGuide: download attempt $attempt failed -- retrying"
+                    Start-Sleep -Seconds 10
+                }
+            }
+        }
+        Write-DownloadAudit -Source $downloadUrl -FileName ([System.IO.Path]::GetFileName($savePath)) -Path $savePath
+        return $true
+    } catch {
+        Write-Host ("  Download failed: {0}" -f $_) -ForegroundColor Red
+        Write-Log "PostgresGuide: download failed -- $_"
+        try { if (Test-Path -LiteralPath $savePath) { [System.IO.File]::Delete($savePath) } } catch {}
+        return $false
+    }
+}
+
+# True if the current process has Administrator privileges. Installing
+# PostgreSQL as a Windows service requires this -- the first such check in
+# this script, since every other write this script makes is to ordinary
+# user-writable folders or files this script's own process already has
+# rights to.
+function Test-RunningAsAdministrator {
+    $identity  = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# Decrypts a SecureString to plaintext only as long as needed, then
+# explicitly zeroes and frees the unmanaged memory holding it -- letting GC
+# eventually collect a managed string isn't the same as zeroing the bytes,
+# and a password is worth being careful about even briefly. Also used by
+# the DPAPI-encrypted config storage below to decrypt back to plaintext
+# only at the point of use.
+function ConvertFrom-SecureStringPlain {
+    param([System.Security.SecureString]$Secure)
+    $ptr = [Runtime.InteropServices.Marshal]::SecureStringToGlobalAllocUnicode($Secure)
+    try {
+        return [Runtime.InteropServices.Marshal]::PtrToStringUni($ptr)
+    } finally {
+        [Runtime.InteropServices.Marshal]::ZeroFreeGlobalAllocUnicode($ptr)
+    }
+}
+
+# Encrypts a plaintext password for storage in config.json via Windows
+# DPAPI (ConvertFrom-SecureString with no -Key ties the result to the
+# current Windows user + machine) -- the inverse of
+# ConvertFrom-SecureStringPlain. Used to persist the Postgres superuser
+# password after a successful install; nothing else in this script has
+# ever needed to store a secret before this feature.
+function ConvertTo-PostgresEncryptedPassword {
+    param([string]$PlainText)
+    $secure = ConvertTo-SecureString -String $PlainText -AsPlainText -Force
+    return ($secure | ConvertFrom-SecureString)
+}
+
+# Prompts twice and requires both entries to match, so a typo doesn't
+# silently set a password the user didn't intend. Returns plaintext (the
+# caller is responsible for clearing it once consumed).
+function Read-ConfirmedPostgresPassword {
+    param([string]$WhatFor)
+    while ($true) {
+        $first  = Read-Host "  Enter $WhatFor" -AsSecureString
+        $second = Read-Host "  Re-enter the same password to confirm" -AsSecureString
+        $firstPlain  = ConvertFrom-SecureStringPlain $first
+        $secondPlain = ConvertFrom-SecureStringPlain $second
+        if ($firstPlain -eq $secondPlain) {
+            $secondPlain = $null
+            return $firstPlain
+        }
+        $firstPlain = $null
+        Write-Host "  Those two didn't match -- let's try again." -ForegroundColor Yellow
+    }
+}
+
+# Cleans up a half-installed/stale PostgreSQL 8.3 before a fresh install
+# attempt. A failed install can leave a real Windows account, an orphaned
+# user profile, and a ProfileList registry SID entry behind even when the
+# installer itself reports failure -- confirmed empirically this session.
+# Safe to call even when nothing is present -- every step checks first and
+# skips cleanly. Never called when Test-PostgresInstalled is already true.
+function Remove-PostgresPartialInstall {
+    Write-Log "Postgres: checking for partial/stale install before fresh attempt..."
+
+    $uninstallKeys = @(
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+    )
+    $expectedInstallDir = $script:PostgresInstallDir.TrimEnd('\')
+    $pgEntries = Get-ItemProperty -Path $uninstallKeys -ErrorAction SilentlyContinue |
+                     Where-Object { $_.DisplayName -like "PostgreSQL*8.3*" }
+    foreach ($entry in $pgEntries) {
+        # Only ever uninstall an entry confirmed to be OUR install location --
+        # someone could have an unrelated standalone PostgreSQL 8.3 for
+        # legacy dev work at a different path, and a DisplayName match alone
+        # is not enough to assume it's safe to remove.
+        $installLoc = if ($entry.InstallLocation) { $entry.InstallLocation.TrimEnd('\') } else { '' }
+        if ($installLoc -notlike $expectedInstallDir) {
+            Write-Log "Postgres: skipping uninstall of '$($entry.DisplayName)' -- InstallLocation '$installLoc' does not match our expected path, not touching it."
+            continue
+        }
+        $productCode = $entry.PSChildName
+        if ($productCode -notmatch '^\{[0-9A-Fa-f]{8}-([0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}\}$') { continue }
+        $uninstallLog = Join-Path $env:TEMP ("pg83-uninstall-" + [guid]::NewGuid().ToString("N") + ".log")
+        try {
+            Start-Process -FilePath "msiexec.exe" -ArgumentList @("/x", $productCode, "/qn", "/l*v", "`"$uninstallLog`"") -Wait -PassThru | Out-Null
+            Write-Log "Postgres: uninstalled stale entry $productCode"
+        } finally {
+            Remove-Item -LiteralPath $uninstallLog -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    # Only the exact service name our own install recipe creates -- not a
+    # wildcard match, since an unrelated Postgres install (a different
+    # version, or a hand-named service) must never be stopped or deleted
+    # by this cleanup.
+    $pgServices = @(Get-Service -Name $script:PostgresServiceName -ErrorAction SilentlyContinue)
+    foreach ($svc in $pgServices) {
+        if ($svc.Status -eq 'Running') { Stop-Service -Name $svc.Name -Force -ErrorAction SilentlyContinue }
+        & sc.exe delete $svc.Name | Out-Null
+        Write-Log "Postgres: removed leftover service $($svc.Name)"
+    }
+
+    if (Test-Path -LiteralPath $script:PostgresInstallDir) {
+        Remove-Item -LiteralPath $script:PostgresInstallDir -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Log "Postgres: removed leftover $script:PostgresInstallDir"
+    }
+
+    $pgUser = Get-LocalUser -Name "postgres" -ErrorAction SilentlyContinue
+    if ($pgUser) {
+        Remove-LocalUser -Name "postgres" -ErrorAction SilentlyContinue
+        Write-Log "Postgres: removed leftover local user 'postgres'"
+    }
+
+    # Remove-LocalUser does not clean up the profile folder or its
+    # ProfileList registry SID mapping -- a stale entry here produces "No
+    # mapping between account names and security IDs was done" on the next
+    # install attempt (confirmed empirically this session).
+    $profileListPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList"
+    $staleProfiles = Get-ChildItem -Path $profileListPath -ErrorAction SilentlyContinue | Where-Object {
+        $imagePath = (Get-ItemProperty -Path $_.PSPath -Name ProfileImagePath -ErrorAction SilentlyContinue).ProfileImagePath
+        $imagePath -and ($imagePath -like "*\postgres")
+    }
+    foreach ($sidKey in $staleProfiles) {
+        $imagePath = (Get-ItemProperty -Path $sidKey.PSPath -Name ProfileImagePath).ProfileImagePath
+        Remove-Item -Path $sidKey.PSPath -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $imagePath) {
+            Remove-Item -LiteralPath $imagePath -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        Write-Log "Postgres: removed orphaned profile registration for $imagePath"
+    }
+    if (Test-Path -LiteralPath "C:\Users\postgres") {
+        Remove-Item -LiteralPath "C:\Users\postgres" -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# Installs PostgreSQL 8.3 silently using the confirmed-working property set
+# above. Requires Administrator (creates a Windows service + a local user
+# account) -- prints a clear message and returns $false rather than failing
+# unhelpfully if not elevated. Returns $true on confirmed success
+# (Test-PostgresInstalled checked afterward, not just msiexec's exit code,
+# since a misleading "success" with no real service was observed during
+# this session's testing). The superuser password is returned via
+# $OutSuperPasswordPlain so the caller can DPAPI-encrypt and save it --
+# this function never persists anything itself, and always deletes its
+# working folder (including the verbose install log, which logs connection
+# passwords in plaintext in deferred custom-action data even though the
+# command-line echo masks them) in a `finally` block regardless of outcome.
+function Install-Postgres83 {
+    param([ref]$OutSuperPasswordPlain)
+
+    if (-not (Test-RunningAsAdministrator)) {
+        Write-Host "  ERROR: Installing PostgreSQL requires Administrator privileges." -ForegroundColor Red
+        Write-Host "  Close this window and re-run TeknoParrot Manager as Administrator." -ForegroundColor Yellow
+        Write-Log "Postgres install: aborted -- not running as Administrator."
+        return $false
+    }
+
+    Write-Host ""
+    Write-Host "  PostgreSQL 8.3 is required by one or more of your registered games." -ForegroundColor Cyan
+    Write-Host "  It's a small local database program that runs quietly in the" -ForegroundColor DarkGray
+    Write-Host "  background and only talks to TeknoParrot -- nothing is sent over" -ForegroundColor DarkGray
+    Write-Host "  the internet, and it won't interfere with anything else on your PC." -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  You'll be asked for two different passwords:" -ForegroundColor White
+    Write-Host "    1) A SERVICE ACCOUNT password -- for a Windows account Windows uses" -ForegroundColor DarkGray
+    Write-Host "       to run PostgreSQL in the background. You'll almost never need it again." -ForegroundColor DarkGray
+    Write-Host "    2) A DATABASE password -- this is the important one. It gets saved" -ForegroundColor DarkGray
+    Write-Host "       (encrypted) so every Postgres game can be configured automatically." -ForegroundColor DarkGray
+    Write-Host ""
+
+    $svcPwPlain   = Read-ConfirmedPostgresPassword "the SERVICE ACCOUNT password"
+    Write-Host ""
+    $superPwPlain = Read-ConfirmedPostgresPassword "the DATABASE password"
+    Write-Host ""
+
+    Write-Host "  Checking for the PostgreSQL installer..." -ForegroundColor Cyan
+    $rel = Get-PostgresGuideRelease
+    if ($null -eq $rel) {
+        Write-Host "  ERROR: Could not reach GitHub to download the installer." -ForegroundColor Red
+        Write-Log "Postgres install: aborted -- could not fetch release info."
+        $svcPwPlain = $null; $superPwPlain = $null
+        return $false
+    }
+
+    $workDir = Join-Path $env:TEMP ("pg83-install-" + [guid]::NewGuid().ToString("N"))
+    [void][System.IO.Directory]::CreateDirectory($workDir)
+    $zipPath = Join-Path $workDir "guide.zip"
+
+    try {
+        Write-Host "  Downloading installer ($($rel.SizeMB) MB, this may take a minute)..." -ForegroundColor Cyan
+        if (-not (Invoke-PostgresGuideDownload $rel.DownloadUrl $zipPath)) {
+            Write-Host "  ERROR: Download failed." -ForegroundColor Red
+            return $false
+        }
+        Expand-ZipFileSafe -ZipPath $zipPath -DestDir $workDir -GameName "PostgreSQL installer"
+        $msiFile = Get-ChildItem -LiteralPath $workDir -Filter "postgresql-8.3-int.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $msiFile) {
+            Write-Host "  ERROR: Installer file not found inside the downloaded ZIP." -ForegroundColor Red
+            Write-Log "Postgres install: aborted -- postgresql-8.3-int.msi not found after extraction."
+            return $false
+        }
+
+        Remove-PostgresPartialInstall
+
+        Write-Host "  Installing PostgreSQL 8.3 -- this can take a minute or two..." -ForegroundColor Cyan
+        $logPath = Join-Path $workDir "pg83-install.log"
+        $msiArgs = @(
+            "/i", "`"$($msiFile.FullName)`"",
+            "/qn",
+            "/l*v", "`"$logPath`"",
+            "INTERNALLAUNCH=1",
+            "ROOTDRIVE=C:\",
+            "SERVICEACCOUNT=postgres",
+            "SERVICEDOMAIN=$env:COMPUTERNAME",
+            "SERVICEPASSWORD=`"$svcPwPlain`"",
+            "SERVICEPASSWORDV=`"$svcPwPlain`"",
+            "CREATESERVICEUSER=1",
+            "SUPERUSER=postgres",
+            "SUPERPASSWORD=`"$superPwPlain`"",
+            "LISTENPORT=5432",
+            "LOCALE=C",
+            "ENCODING=UTF8",
+            "CLENCODE=UTF8",
+            "PERMITREMOTE=0",
+            "RUNSTACKBUILDER=0",
+            "DOSERVICE=1",
+            "DOINITDB=1"
+        )
+        # Known, accepted limitation: passing SERVICEPASSWORD/SUPERPASSWORD
+        # as msiexec command-line properties means they are briefly visible
+        # to anything that can inspect this process's command line (Task
+        # Manager's command-line column, Process Explorer, a WMI
+        # Win32_Process query) for the duration of this one call. MSI's own
+        # SecureCustomProperties marking (confirmed present for both
+        # properties when the MSI's tables were inspected this session)
+        # only redacts them from msiexec's *own* verbose log -- it does not
+        # hide them from the OS-level process command line. There is no
+        # msiexec mechanism that avoids this for a silent property-driven
+        # install; it is an inherent trade-off of this approach, not
+        # something this script can route around. The exposure window is
+        # already minimized (synchronous call, passwords cleared from this
+        # script's own memory immediately after).
+        $proc = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -PassThru
+        $svcPwPlain = $null
+        [GC]::Collect()
+
+        if ($proc.ExitCode -ne 0 -or -not (Test-PostgresInstalled)) {
+            Write-Host "  ERROR: PostgreSQL install did not complete successfully." -ForegroundColor Red
+            Write-Log "Postgres install: FAILED -- msiexec exit code $($proc.ExitCode)"
+            $superPwPlain = $null
+            return $false
+        }
+
+        Write-Host "  PostgreSQL 8.3 installed and running." -ForegroundColor Green
+        Write-Log "Postgres install: succeeded."
+        $OutSuperPasswordPlain.Value = $superPwPlain
+        return $true
+    } finally {
+        Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# =============================================================================
+# POSTGRESQL PER-GAME SETUP  (field configuration + database creation/restore)
+# =============================================================================
+
+# Locates the right backup file inside a game's own pg_backup folder. Per
+# the guide: backups may sit directly inside pg_backup\, or inside a
+# YYYY-MM-DD-named subfolder; when subfolders exist, the most recent one
+# (by name -- they're ISO-formatted and sort correctly as strings) is used.
+# The right file within is the one with the highest leading 4-digit
+# number. Hardcoding the exact filename per the guide's Appendix A was
+# deliberately avoided -- the guide itself says these drift as games get
+# updated. Returns the full file path, or $null if pg_backup doesn't exist
+# or contains nothing recognizable.
+function Get-PostgresBackupFile {
+    param([string]$GameFolder)
+
+    $pgBackupDir = Join-Path $GameFolder "pg_backup"
+    if (-not (Test-Path -LiteralPath $pgBackupDir)) { return $null }
+
+    $dateSubfolders = @(Get-ChildItem -LiteralPath $pgBackupDir -Directory -ErrorAction SilentlyContinue |
+                            Where-Object { $_.Name -match '^\d{4}-\d{2}-\d{2}$' } | Sort-Object Name -Descending)
+    $searchDir = if ($dateSubfolders.Count -gt 0) { $dateSubfolders[0].FullName } else { $pgBackupDir }
+
+    $candidates = @(Get-ChildItem -LiteralPath $searchDir -File -ErrorAction SilentlyContinue)
+    if ($candidates.Count -eq 0) { return $null }
+
+    $best = $candidates | Sort-Object -Descending -Property {
+        if ($_.Name -match '^(\d{4})') { [int]$Matches[1] } else { -1 }
+    } | Select-Object -First 1
+    return $best.FullName
+}
+
+# Creates a database and restores a game's bundled backup into it. Only
+# ever called for a database confirmed NOT to already exist
+# (Test-PostgresDatabaseExists gates every call site in
+# Invoke-PostgresGameSetup below) -- never recreates or overwrites an
+# existing database. $Encoding should be "UTF8" only for the Golden Tee
+# Live 2006 database (GameDB06); "SQL_ASCII" for every other game, per the
+# guide's Appendix A -- this is a static, empirically-confirmed exception
+# (same category as the project's existing hardcoded
+# $RawThrillsPathLimits/$FileVersionPins lists), not something derived at
+# runtime. pg_restore warnings on stderr are expected and ignored per the
+# guide ("IGNORE the warning about errors on restore") -- only a database
+# that doesn't exist afterward is treated as a real failure.
+function New-PostgresDatabaseFromBackup {
+    param([string]$DbName, [string]$Encoding, [string]$BackupFile, [string]$SuperPasswordPlain)
+
+    if (-not (Test-SafePostgresDbName $DbName)) {
+        Write-Log "Postgres: refusing unsafe database name '$DbName'"
+        return $false
+    }
+
+    $createdbExe  = Join-Path $script:PostgresBinDir "createdb.exe"
+    $psqlExe      = Join-Path $script:PostgresBinDir "psql.exe"
+    $pgRestoreExe = Join-Path $script:PostgresBinDir "pg_restore.exe"
+
+    $env:PGPASSWORD = $SuperPasswordPlain
+    try {
+        & $createdbExe -U postgres -h 127.0.0.1 -p 5432 -E $Encoding -T template0 $DbName 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Log "Postgres: createdb failed for '$DbName' (exit $LASTEXITCODE)"
+            return $false
+        }
+
+        & $psqlExe -U postgres -h 127.0.0.1 -p 5432 -d $DbName -c "ALTER DATABASE `"$DbName`" SET standard_conforming_strings = on;" 2>&1 | Out-Null
+
+        & $pgRestoreExe -U postgres -h 127.0.0.1 -p 5432 -d $DbName $BackupFile 2>&1 | Out-Null
+        return (Test-PostgresDatabaseExists -DbName $DbName -SuperPasswordPlain $SuperPasswordPlain)
+    } catch {
+        Write-Log "Postgres: database creation failed for '$DbName' -- $_"
+        return $false
+    } finally {
+        $env:PGPASSWORD = $null
+    }
+}
+
+# Main per-game Postgres setup pass: for every registered profile that
+# needs Postgres, fills in connection fields (Path/Address/Port/User only
+# when currently empty -- in practice TeknoParrot ships these already
+# correctly pre-filled, so this is normally a no-op; Pass only when
+# currently empty, NEVER overwriting an existing value, since the user may
+# have already configured it correctly and silently overwriting it is
+# exactly what this script's "never overwrite existing config" convention
+# exists to prevent) and, for profiles whose GameProfile predates the
+# "Automatically create Database" feature, creates and restores that
+# game's database -- but only when Test-PostgresDatabaseExists first
+# confirms it doesn't already exist. Returns
+# [pscustomobject]@{ Configured; DbCreated; AlreadyConfigured; Errors }
+# counts. Caller is responsible for the backup pass
+# (Backup-PostgresDatabases) before calling this.
+function Invoke-PostgresGameSetup {
+    param([string]$UserProfilesDir, [string]$SuperPasswordPlain)
+
+    $relBinPath = $script:PostgresBinDir.TrimEnd('\') + '\'
+    $results = [ordered]@{ Configured = 0; DbCreated = 0; AlreadyConfigured = 0; Errors = 0 }
+
+    $profiles = Get-ChildItem -LiteralPath $UserProfilesDir -Filter *.xml -File -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Directory.Name -ne "FullBackup" }
+
+    foreach ($pf in $profiles) {
+        try {
+            $doc = Read-Xml $pf.FullName
+            if (-not $doc.GameProfile) { continue }
+            if (-not (Test-GameNeedsPostgres $doc)) { continue }
+
+            $gpNode   = $doc.GameProfile.SelectSingleNode("GamePath")
+            $gamePath = if ($gpNode) { $gpNode.InnerText } else { "" }
+            if (-not $gamePath -or -not (Test-Path -LiteralPath $gamePath)) { continue }
+            $gameFolder = Split-Path -Parent $gamePath
+
+            $dbName = Get-PostgresFieldValue $doc "DbName"
+            if ([string]::IsNullOrWhiteSpace($dbName) -or -not (Test-SafePostgresDbName $dbName)) {
+                Write-Log "Postgres: $($pf.BaseName) has no usable DbName -- skipped."
+                $results.Errors++
+                continue
+            }
+
+            $changed = $false
+            if ([string]::IsNullOrWhiteSpace((Get-PostgresFieldValue $doc "Path")))    { if (Set-PostgresFieldValue $doc "Path" $relBinPath)    { $changed = $true } }
+            if ([string]::IsNullOrWhiteSpace((Get-PostgresFieldValue $doc "Address"))) { if (Set-PostgresFieldValue $doc "Address" "127.0.0.1") { $changed = $true } }
+            if ([string]::IsNullOrWhiteSpace((Get-PostgresFieldValue $doc "Port")))    { if (Set-PostgresFieldValue $doc "Port" "5432")          { $changed = $true } }
+            if ([string]::IsNullOrWhiteSpace((Get-PostgresFieldValue $doc "User")))    { if (Set-PostgresFieldValue $doc "User" "postgres")      { $changed = $true } }
+            if ([string]::IsNullOrWhiteSpace((Get-PostgresFieldValue $doc "Pass"))) {
+                if (Set-PostgresFieldValue $doc "Pass" $SuperPasswordPlain) { $changed = $true }
+            }
+
+            if (Test-PostgresDatabaseExists -DbName $dbName -SuperPasswordPlain $SuperPasswordPlain) {
+                if ($changed) { Save-Xml $doc $pf.FullName; $results.Configured++ }
+                else { $results.AlreadyConfigured++ }
+                Write-Log "Postgres: $($pf.BaseName) -- database '$dbName' already exists, left untouched."
+                continue
+            }
+
+            $autoCreate = Get-PostgresFieldValue $doc "Automatically create Database"
+            if ($autoCreate -eq "1") {
+                # TPUI's own first-launch flow creates the database itself --
+                # nothing more for this script to do beyond the field updates above.
+                if ($changed) { Save-Xml $doc $pf.FullName; $results.Configured++ }
+                Write-Log "Postgres: $($pf.BaseName) -- deferring database creation to TPUI's own Express install."
+                continue
+            }
+
+            # Older GameProfileRevision predating that feature -- create
+            # and restore the database ourselves.
+            $backupFile = Get-PostgresBackupFile $gameFolder
+            if (-not $backupFile) {
+                Write-Log "Postgres: $($pf.BaseName) -- no pg_backup file found, database not created."
+                if ($changed) { Save-Xml $doc $pf.FullName; $results.Configured++ }
+                $results.Errors++
+                continue
+            }
+
+            $encoding = if ($dbName -eq 'GameDB06') { 'UTF8' } else { 'SQL_ASCII' }
+            if (New-PostgresDatabaseFromBackup -DbName $dbName -Encoding $encoding -BackupFile $backupFile -SuperPasswordPlain $SuperPasswordPlain) {
+                $results.DbCreated++
+                Write-Log "Postgres: $($pf.BaseName) -- created and restored database '$dbName'."
+            } else {
+                $results.Errors++
+                Write-Log "Postgres: $($pf.BaseName) -- FAILED to create/restore database '$dbName'."
+            }
+
+            if ($changed) { Save-Xml $doc $pf.FullName; $results.Configured++ }
+        } catch {
+            Write-Log "Postgres: error processing $($pf.Name) -- $_"
+            $results.Errors++
+        }
+    }
+
+    return [pscustomobject]$results
 }
 
 # =============================================================================
@@ -4352,6 +5053,8 @@ function Invoke-LibraryHealthCheck {
     $gpuFixNeeded     = New-Object System.Collections.ArrayList
     $ffbBlasterNeeded = New-Object System.Collections.ArrayList
     $dgVoodoo2Needed  = New-Object System.Collections.ArrayList
+    $postgresNeeded   = New-Object System.Collections.ArrayList
+    $postgresConfigured = 0
     $reShadeCount     = 0
     $bepInExCount     = 0
     $detected         = Get-DetectedGpuVendor
@@ -4368,6 +5071,14 @@ function Invoke-LibraryHealthCheck {
             }
             $ffbResult = Test-FFBBlasterUpToDate -Doc $doc -Fields $ffbFields
             if ($ffbResult.Eligible -and -not $ffbResult.UpToDate) { [void]$ffbBlasterNeeded.Add($pf.BaseName) }
+
+            if (Test-GameNeedsPostgres $doc) {
+                if ([string]::IsNullOrWhiteSpace((Get-PostgresFieldValue $doc "Pass"))) {
+                    [void]$postgresNeeded.Add($pf.BaseName)
+                } else {
+                    $postgresConfigured++
+                }
+            }
 
             # dgVoodoo2 / ReShade / BepInEx all need a resolved, existing exe
             # path -- skip silently for broken/empty profiles (already
@@ -4419,6 +5130,25 @@ function Invoke-LibraryHealthCheck {
     if ($gpuFixNeeded.Count -gt 0 -or $ffbBlasterNeeded.Count -gt 0 -or $dgVoodoo2Needed.Count -gt 0) {
         Write-Host ""
         Write-Host "  Run mode 4 (ReShade), 5 (dgVoodoo2), 6 (GPU fix), or 7 (FFB) to apply these." -ForegroundColor DarkCyan
+    }
+
+    # Postgres coverage is entirely read-only here -- never calls
+    # Install-Postgres83 or Invoke-PostgresGameSetup, same separation of
+    # concerns as the other coverage sections above.
+    $postgresInstalled = Test-PostgresInstalled
+    Write-Host ""
+    Write-Host ("  PostgreSQL service  : {0}" -f $(if ($postgresInstalled) { "installed and running" } else { "not installed" })) -ForegroundColor $(if ($postgresInstalled) { "Green" } else { "DarkGray" })
+    if ($postgresNeeded.Count -gt 0) {
+        Write-Host ("  Postgres not configured : {0}  (needs a database password set)" -f $postgresNeeded.Count) -ForegroundColor Yellow
+        Write-Host ("    {0}" -f ($postgresNeeded -join ', ')) -ForegroundColor DarkGray
+    } elseif ($postgresConfigured -gt 0) {
+        Write-Host "  Postgres not configured : 0" -ForegroundColor Green
+    }
+    if ($postgresConfigured -gt 0) {
+        Write-Host ("  Postgres configured : {0}" -f $postgresConfigured) -ForegroundColor DarkGray
+    }
+    if ($postgresNeeded.Count -gt 0) {
+        Write-Host "  Run mode 11 (Postgres setup) to apply these." -ForegroundColor DarkCyan
     }
 
     Write-Host ""
@@ -5519,6 +6249,191 @@ function Set-XmlChildText {
     $child.InnerText = $value
 }
 
+# =============================================================================
+# POSTGRESQL DATABASE BACKUP/RESTORE
+# =============================================================================
+
+# Backs up every Postgres database belonging to a registered, Postgres-
+# needing game that currently exists, into
+# Scripts\PostgresBackups\<timestamp>\<dbname>.backup (pg_dump custom
+# format, matching what pg_restore expects). Runs unconditionally at the
+# start of the Postgres setup mode, before any install/create/restore work
+# -- same "always back up first, regardless of whether this run changes
+# anything" convention already used at the start of every AutoSync/
+# Register run. Skipped (logged, not an error) if PostgreSQL isn't
+# installed yet or no Postgres databases exist -- nothing to back up on a
+# first run. Returns the backup folder path, or $null if nothing was
+# backed up.
+function Backup-PostgresDatabases {
+    param([string]$UserProfilesDir, [string]$SuperPasswordPlain)
+
+    if (-not (Test-PostgresInstalled)) { return $null }
+
+    $dbNames = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::OrdinalIgnoreCase)
+    $profiles = Get-ChildItem -LiteralPath $UserProfilesDir -Filter *.xml -File -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Directory.Name -ne "FullBackup" }
+    foreach ($pf in $profiles) {
+        try {
+            $doc = Read-Xml $pf.FullName
+            if (-not $doc.GameProfile) { continue }
+            if (-not (Test-GameNeedsPostgres $doc)) { continue }
+            $dbName = Get-PostgresFieldValue $doc "DbName"
+            if (-not [string]::IsNullOrWhiteSpace($dbName) -and (Test-SafePostgresDbName $dbName)) {
+                if (Test-PostgresDatabaseExists -DbName $dbName -SuperPasswordPlain $SuperPasswordPlain) {
+                    [void]$dbNames.Add($dbName)
+                }
+            }
+        } catch {
+            Write-Log "Postgres backup: could not check $($pf.Name) -- $_"
+        }
+    }
+
+    if ($dbNames.Count -eq 0) {
+        Write-Log "Postgres backup: no existing databases to back up."
+        return $null
+    }
+
+    $timestamp  = (Get-Date).ToString("yyyy-MM-dd_HH-mm-ss")
+    $backupPath = Join-Path (Join-Path $PSScriptRoot "PostgresBackups") $timestamp
+    [void][System.IO.Directory]::CreateDirectory($backupPath)
+
+    $pgDumpExe = Join-Path $script:PostgresBinDir "pg_dump.exe"
+    $env:PGPASSWORD = $SuperPasswordPlain
+    try {
+        foreach ($dbName in $dbNames) {
+            $destFile = Join-Path $backupPath "$dbName.backup"
+            & $pgDumpExe -U postgres -h 127.0.0.1 -p 5432 -F c -f $destFile $dbName 2>&1 | Out-Null
+            if (Test-Path -LiteralPath $destFile) {
+                Write-Log "Postgres backup: dumped $dbName -> $destFile"
+            } else {
+                Write-Log "Postgres backup: FAILED to dump $dbName"
+            }
+        }
+    } finally {
+        $env:PGPASSWORD = $null
+    }
+
+    return $backupPath
+}
+
+# Restores a previous Postgres database backup. Mirrors
+# Invoke-RestoreLaunchBoxBackup's UX (list by timestamp, confirm with YES)
+# so all three restore flows under menu 9 feel like the same feature.
+# Necessarily destructive to each restored database's CURRENT content --
+# warned clearly before proceeding. Requires PostgreSQL to already be
+# installed and running (it always will be if there's anything to
+# restore).
+function Invoke-RestorePostgresBackup {
+    $backupRoot = Join-Path $PSScriptRoot "PostgresBackups"
+    if (-not (Test-Path -LiteralPath $backupRoot)) {
+        Write-Host "  No Postgres database backups found in: $backupRoot" -ForegroundColor Yellow
+        return
+    }
+
+    $backups = @(Get-ChildItem -LiteralPath $backupRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending)
+    if ($backups.Count -eq 0) {
+        Write-Host "  No Postgres backup folders found." -ForegroundColor Yellow
+        return
+    }
+
+    Write-Host ""
+    Write-Host "  Available Postgres database backups (most recent first):" -ForegroundColor Cyan
+    for ($i = 0; $i -lt $backups.Count; $i++) {
+        $b = $backups[$i]
+        $dbFiles = @(Get-ChildItem -LiteralPath $b.FullName -Filter "*.backup" -File -ErrorAction SilentlyContinue)
+        $names = ($dbFiles | ForEach-Object { $_.BaseName }) -join ', '
+        Write-Host ("    {0,3})  {1}   ({2} database(s): {3})" -f ($i + 1), $b.Name, $dbFiles.Count, $names)
+    }
+    Write-Host ""
+    $choice = (Read-Host "  Enter number to restore, or Enter to cancel").Trim()
+    if ([string]::IsNullOrWhiteSpace($choice)) {
+        Write-Host "  Restore cancelled." -ForegroundColor DarkGray
+        Write-Log "Postgres restore: cancelled by user."
+        return
+    }
+    if ($choice -notmatch '^\d+$' -or $choice.Length -gt 9 -or [int]$choice -lt 1 -or [int]$choice -gt $backups.Count) {
+        Write-Host "  Invalid selection. Restore cancelled." -ForegroundColor Yellow
+        Write-Log "Postgres restore: invalid selection '$choice'."
+        return
+    }
+    $selected = $backups[[int]$choice - 1]
+    $backupFiles = @(Get-ChildItem -LiteralPath $selected.FullName -Filter "*.backup" -File -ErrorAction SilentlyContinue)
+    if ($backupFiles.Count -eq 0) {
+        Write-Host "  ERROR: Selected backup contains no .backup files -- restore aborted." -ForegroundColor Red
+        return
+    }
+
+    Write-Host ""
+    Write-Host ("  Selected : {0}  ({1} database(s))" -f $selected.Name, $backupFiles.Count) -ForegroundColor Yellow
+    Write-Host "  WARNING  : This will REPLACE the current content of each database" -ForegroundColor Yellow
+    Write-Host "             listed above with this backup's snapshot." -ForegroundColor Yellow
+    $confirm = (Read-Host "  Type YES to confirm").Trim()
+    if ($confirm.ToUpper() -ne "YES") {
+        Write-Host "  Restore cancelled." -ForegroundColor DarkGray
+        Write-Log "Postgres restore: user did not confirm."
+        return
+    }
+
+    if (-not (Test-PostgresInstalled)) {
+        Write-Host "  ERROR: PostgreSQL is not installed -- nothing to restore into." -ForegroundColor Red
+        Write-Log "Postgres restore: aborted -- PostgreSQL not installed."
+        return
+    }
+
+    $superPwPlain = $null
+    if ($postgresSuperPasswordEncrypted) {
+        try {
+            $secure = ConvertTo-SecureString -String $postgresSuperPasswordEncrypted
+            $savedPwPlain = ConvertFrom-SecureStringPlain $secure
+            if (Test-PostgresPassword $savedPwPlain) { $superPwPlain = $savedPwPlain }
+        } catch {
+            Write-Log "Postgres restore: could not decrypt saved password -- $_"
+        }
+    }
+    if (-not $superPwPlain) {
+        $superPwSecure = Read-Host "  Enter your PostgreSQL database password" -AsSecureString
+        $typedPwPlain  = ConvertFrom-SecureStringPlain $superPwSecure
+        if (-not (Test-PostgresPassword $typedPwPlain)) {
+            Write-Host "  ERROR: That password did not work against your PostgreSQL server." -ForegroundColor Red
+            Write-Log "Postgres restore: aborted -- password verification failed."
+            return
+        }
+        $superPwPlain = $typedPwPlain
+    }
+
+    $dropdbExe = Join-Path $script:PostgresBinDir "dropdb.exe"
+    $errCount = 0
+    try {
+        foreach ($bf in $backupFiles) {
+            $dbName = $bf.BaseName
+            if (-not (Test-SafePostgresDbName $dbName)) { $errCount++; continue }
+            $env:PGPASSWORD = $superPwPlain
+            try {
+                & $dropdbExe -U postgres -h 127.0.0.1 -p 5432 --if-exists $dbName 2>&1 | Out-Null
+            } finally {
+                $env:PGPASSWORD = $null
+            }
+            $encoding = if ($dbName -eq 'GameDB06') { 'UTF8' } else { 'SQL_ASCII' }
+            if (New-PostgresDatabaseFromBackup -DbName $dbName -Encoding $encoding -BackupFile $bf.FullName -SuperPasswordPlain $superPwPlain) {
+                Write-Host ("    Restored: {0}" -f $dbName) -ForegroundColor Green
+                Write-Log "Postgres restore: restored $dbName from $($bf.FullName)"
+            } else {
+                Write-Host ("    FAILED  : {0}" -f $dbName) -ForegroundColor Red
+                Write-Log "Postgres restore: FAILED to restore $dbName"
+                $errCount++
+            }
+        }
+    } finally {
+        $superPwPlain = $null
+    }
+
+    if ($errCount -gt 0) {
+        Write-Host ("  WARNING: {0} database(s) could not be restored -- check TeknoParrot-Manager.log." -f $errCount) -ForegroundColor Yellow
+    } else {
+        Write-Host "  Restore complete." -ForegroundColor Green
+    }
+}
+
 # never get a duplicate), or creates one using field values verified
 # against a real, working LaunchBox installation. $emulatorsDoc is modified
 # in place but not saved -- the caller saves once after all changes for
@@ -6488,6 +7403,7 @@ $lbRoot                     = $null   # LaunchBox install root (containing Launc
 $lbPlatformMode             = $null   # "Arcade" / "TeknoParrot" / "Custom" / "Both"
 $lbCustomPlatformName       = $null   # only set when $lbPlatformMode is "Custom"
 $lbEmulatorId               = $null   # cached GUID of the TeknoParrot Emulator entry in LaunchBox's Emulators.xml
+$postgresSuperPasswordEncrypted = $null   # DPAPI-encrypted (ConvertFrom-SecureString, current user+machine) Postgres superuser password
 $configAccepted       = $false  # true when the user accepted a saved config this run
 
 if ($Unattended -and -not (Test-Path -LiteralPath $configPath)) {
@@ -6547,6 +7463,7 @@ if (Test-Path -LiteralPath $configPath) {
             if ($cfg.LaunchBoxPlatformMode)        { $lbPlatformMode       = $cfg.LaunchBoxPlatformMode }
             if ($cfg.LaunchBoxCustomPlatformName)  { $lbCustomPlatformName = $cfg.LaunchBoxCustomPlatformName }
             if ($cfg.LaunchBoxEmulatorId)          { $lbEmulatorId         = $cfg.LaunchBoxEmulatorId }
+            if ($cfg.PostgresSuperPasswordEncrypted) { $postgresSuperPasswordEncrypted = $cfg.PostgresSuperPasswordEncrypted }
             # A saved "Custom" platform choice with no name is a corrupt/incomplete
             # config (e.g. hand-edited or from an older version) -- silently
             # falling back to a default name would be a confusing surprise, so
@@ -6633,28 +7550,11 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
         $rel = Get-EggmanDatRelease
         if ($null -ne $rel) {
             Write-Host ("  Found: {0}  ({1} MB)" -f $rel.FileName, $rel.SizeMB) -ForegroundColor Cyan
-            # Security: $rel.FileName comes from the GitHub Releases API
-            # (untrusted input) -- strip to a bare filename and verify
-            # containment before offering it as a default save path. If
-            # it somehow fails this check, treat it exactly like a failed
-            # download (fall back to manual path entry) rather than using
-            # an unsafe path.
-            $safeDatFileName = [System.IO.Path]::GetFileName($rel.FileName)
-            $defaultSavePath = Join-Path $PSScriptRoot $safeDatFileName
-            $unsafeFileName  = [string]::IsNullOrWhiteSpace($safeDatFileName) -or -not (Test-PathInside $defaultSavePath $PSScriptRoot)
-            if ($unsafeFileName) {
-                Write-Log "EggmanDat: SECURITY -- unsafe release filename '$($rel.FileName)', falling back to manual path entry"
-                $dlOk = $false
-            } else {
-                $rawSave = (Read-Host "  Save to (Enter for default: $defaultSavePath)").Trim()
-                if (-not $rawSave) { $rawSave = $defaultSavePath }
-                Write-Host "  Downloading -- this may take a few minutes..." -ForegroundColor Cyan
-                $dlOk = Invoke-EggmanDatDownload $rel.DownloadUrl $rawSave
-            }
-            if ($dlOk) {
-                $eggmanDatZip = $rawSave
-                Write-Host "  Saved: $rawSave" -ForegroundColor Green
-                Write-Log "EggmanDat: downloaded to $rawSave"
+            $savedPath = Invoke-EggmanDatDownloadInteractive $rel
+            if ($savedPath) {
+                $eggmanDatZip = $savedPath
+                Write-Host "  Saved: $savedPath" -ForegroundColor Green
+                Write-Log "EggmanDat: downloaded to $savedPath"
                 $askSupp = (Read-Host "  Also index supplementary dat for alternate version info? (Y/N)").Trim().ToUpper()
                 $includeSupplementary = ($askSupp -eq 'Y')
                 if ($includeSupplementary) { Write-Log "EggmanDat: supplementary indexing enabled." }
@@ -6716,6 +7616,36 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
             } else {
                 Write-Host "  WARNING: Collection dat not found -- dat skipped." -ForegroundColor Yellow
                 Write-Log "Config: collection dat not found at $rawColl -- skipped."
+            }
+        }
+    }
+} elseif ($eggmanDatZip -and -not $Unattended) {
+    # A dat ZIP is already configured -- offer a lightweight check for a
+    # newer release instead of silently reusing the same file forever.
+    # Direct .dat file mode ($datFilePath) has no GitHub release counterpart
+    # to check against, so this only applies to ZIP mode.
+    Write-Host ""
+    $checkUpdate = (Read-Host "Check for a newer Eggman dat release? (Y/N)").Trim().ToUpper()
+    if ($checkUpdate -eq 'Y') {
+        Write-Host "  Checking GitHub for latest Eggman dat release..." -ForegroundColor Cyan
+        $rel = Get-EggmanDatRelease
+        if ($null -eq $rel) {
+            Write-Host "  Could not reach GitHub -- keeping your current dat file." -ForegroundColor Yellow
+        } else {
+            $currentSizeMB = if (Test-Path -LiteralPath $eggmanDatZip) { [Math]::Round((Get-Item -LiteralPath $eggmanDatZip).Length / 1MB, 1) } else { 0 }
+            Write-Host ("  Latest available : {0}  ({1} MB)" -f $rel.FileName, $rel.SizeMB) -ForegroundColor Cyan
+            Write-Host ("  Currently using  : {0}  ({1} MB)" -f (Split-Path -Leaf $eggmanDatZip), $currentSizeMB) -ForegroundColor Cyan
+            $doUpdate = (Read-Host "  Download and switch to the latest release? (Y/N)").Trim().ToUpper()
+            if ($doUpdate -eq 'Y') {
+                $savedPath = Invoke-EggmanDatDownloadInteractive $rel
+                if ($savedPath) {
+                    $eggmanDatZip = $savedPath
+                    Write-Host "  Updated: $savedPath" -ForegroundColor Green
+                    Write-Log "EggmanDat: updated to $savedPath"
+                    [void](Save-Config)
+                } else {
+                    Write-Host "  Download failed -- keeping your current dat file." -ForegroundColor Yellow
+                }
             }
         }
     }
@@ -7016,13 +7946,19 @@ while ($true) {
     Write-Host "                        dgVoodoo2 coverage and ReShade/BepInEx install"
     Write-Host "                        counts. No extraction, registration, repair, or"
     Write-Host "                        network access -- just a fast status check."
-    Write-Host "  11) Exit"
+    Write-Host "  11) Postgres setup -- Installs/configures the local PostgreSQL"
+    Write-Host "                        database that some Incredible Technologies"
+    Write-Host "                        games need (Golden Tee Live, Power Putt Live,"
+    Write-Host "                        Silver Strike Bowling Live, Target Toss Pro)."
+    Write-Host "                        Requires running this script as Administrator"
+    Write-Host "                        if PostgreSQL isn't installed yet."
+    Write-Host "  12) Exit"
     Write-Host ""
     if ($Unattended) {
         Write-Host "  [Unattended] Mode must be set before starting." -ForegroundColor Red
         Write-Log "ERROR: Unattended mode -- reached menu loop."; exit 1
     }
-    $modeChoice = (Read-Host "Enter 1-11").Trim()
+    $modeChoice = (Read-Host "Enter 1-12").Trim()
     switch ($modeChoice) {
         "1"     { $mode = "AutoSync"       }
         "2"     { $mode = "RegisterOnly"   }
@@ -7034,10 +7970,11 @@ while ($true) {
         "8"     { $mode = "BepInExUpdate"  }
         "9"     { $mode = "Restore"        }
         "10"    { $mode = "HealthCheck"    }
-        "11"    { break }
-        default { Write-Host "  Invalid choice. Enter 1-11." -ForegroundColor Yellow; continue }
+        "11"    { $mode = "PostgresSetup"  }
+        "12"    { break }
+        default { Write-Host "  Invalid choice. Enter 1-12." -ForegroundColor Yellow; continue }
     }
-    if ($modeChoice -eq "11") { break }
+    if ($modeChoice -eq "12") { break }
     }
 
     if ($mode -eq "Restore") {
@@ -7048,13 +7985,17 @@ while ($true) {
         Write-Host "  1) TeknoParrot UserProfiles backup"
         Write-Host "  2) LaunchBox library backup (only relevant if you've used the"
         Write-Host "     direct LaunchBox integration)"
-        $restoreChoice = (Read-Host "  Enter 1-2").Trim()
+        Write-Host "  3) Postgres database backup (only relevant if you've used the"
+        Write-Host "     Postgres setup mode)"
+        $restoreChoice = (Read-Host "  Enter 1-3").Trim()
         if ($restoreChoice -eq "2") {
             if (-not $lbRoot) {
                 Write-Host "  No LaunchBox root is configured yet -- nothing to restore." -ForegroundColor Yellow
             } else {
                 Invoke-RestoreLaunchBoxBackup -lbRoot $lbRoot
             }
+        } elseif ($restoreChoice -eq "3") {
+            Invoke-RestorePostgresBackup
         } else {
             Invoke-RestoreBackup -userProfilesDir $userProfilesDir
         }
@@ -7078,6 +8019,119 @@ while ($true) {
         Write-Host "   Done." -ForegroundColor Cyan
         Write-Host "============================================" -ForegroundColor Cyan
         Write-Log "Health check complete."
+        [void](Read-Host "  Press Enter to return to menu")
+        continue
+    }
+
+    if ($mode -eq "PostgresSetup") {
+        Write-Host ""
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        Write-Host " PostgreSQL Setup (Incredible Technologies games)" -ForegroundColor Cyan
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+
+        Write-Host "  Scanning registered games for Postgres requirements..." -ForegroundColor DarkGray
+        $needCount = 0
+        $pgProfiles = Get-ChildItem -LiteralPath $userProfilesDir -Filter *.xml -File -ErrorAction SilentlyContinue |
+                          Where-Object { $_.Directory.Name -ne "FullBackup" }
+        foreach ($pf in $pgProfiles) {
+            try {
+                $doc = Read-Xml $pf.FullName
+                if ($doc.GameProfile -and (Test-GameNeedsPostgres $doc)) { $needCount++ }
+            } catch {}
+        }
+
+        if ($needCount -eq 0) {
+            Write-Host "  No registered games need PostgreSQL -- nothing to do." -ForegroundColor Green
+            Write-Log "Postgres setup: no Postgres-needing games registered."
+            [void](Read-Host "  Press Enter to return to menu")
+            continue
+        }
+
+        Write-Host ("  {0} registered game(s) need PostgreSQL." -f $needCount) -ForegroundColor Cyan
+
+        if (-not (Test-PostgresInstalled) -and -not (Test-RunningAsAdministrator)) {
+            Write-Host ""
+            Write-Host "  PostgreSQL is not installed yet, and installing it requires" -ForegroundColor Red
+            Write-Host "  Administrator privileges (it creates a Windows service and a" -ForegroundColor Red
+            Write-Host "  Windows user account)." -ForegroundColor Red
+            Write-Host ""
+            Write-Host "  Close this window and re-run TeknoParrot Manager as Administrator" -ForegroundColor Yellow
+            Write-Host "  (right-click TeknoParrot-Manager.bat -> Run as administrator), then" -ForegroundColor Yellow
+            Write-Host "  choose this mode again." -ForegroundColor Yellow
+            Write-Log "Postgres setup: aborted -- PostgreSQL not installed and not running as Administrator."
+            [void](Read-Host "  Press Enter to return to menu")
+            continue
+        }
+
+        $superPwPlain = $null
+        if (Test-PostgresInstalled) {
+            Write-Host "  PostgreSQL is already installed -- it will not be reinstalled or modified." -ForegroundColor Green
+            if ($postgresSuperPasswordEncrypted) {
+                try {
+                    $secure = ConvertTo-SecureString -String $postgresSuperPasswordEncrypted
+                    $savedPwPlain = ConvertFrom-SecureStringPlain $secure
+                    if (Test-PostgresPassword $savedPwPlain) {
+                        $superPwPlain = $savedPwPlain
+                    } else {
+                        Write-Log "Postgres setup: saved password no longer works -- will re-prompt."
+                    }
+                } catch {
+                    Write-Log "Postgres setup: could not decrypt saved password -- $_"
+                }
+            }
+            if (-not $superPwPlain) {
+                Write-Host "  Enter your existing PostgreSQL database password to continue:" -ForegroundColor Cyan
+                $superPwSecure  = Read-Host "  Password" -AsSecureString
+                $typedPwPlain   = ConvertFrom-SecureStringPlain $superPwSecure
+                if (-not (Test-PostgresPassword $typedPwPlain)) {
+                    Write-Host "  ERROR: That password did not work against your PostgreSQL server." -ForegroundColor Red
+                    Write-Log "Postgres setup: aborted -- password verification failed."
+                    [void](Read-Host "  Press Enter to return to menu")
+                    continue
+                }
+                $superPwPlain = $typedPwPlain
+                $postgresSuperPasswordEncrypted = ConvertTo-PostgresEncryptedPassword $superPwPlain
+                if (Save-Config) { Write-Log "Postgres setup: saved (encrypted) password for future runs." }
+            }
+        } else {
+            $outPw = [ref]$null
+            if (-not (Install-Postgres83 -OutSuperPasswordPlain $outPw)) {
+                Write-Host "  PostgreSQL setup did not complete -- see TeknoParrot-Manager.log." -ForegroundColor Red
+                [void](Read-Host "  Press Enter to return to menu")
+                continue
+            }
+            $superPwPlain = $outPw.Value
+            $postgresSuperPasswordEncrypted = ConvertTo-PostgresEncryptedPassword $superPwPlain
+            if (Save-Config) { Write-Log "Postgres setup: saved (encrypted) database password." }
+        }
+
+        Write-Host ""
+        Write-Host "  Backing up existing Postgres databases..." -ForegroundColor Cyan
+        $pgBackupPath = Backup-PostgresDatabases -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain
+        if ($pgBackupPath) {
+            Write-Host ("  Backup saved : {0}" -f $pgBackupPath) -ForegroundColor DarkCyan
+        } else {
+            Write-Host "  No existing databases to back up yet." -ForegroundColor DarkGray
+        }
+
+        Write-Host ""
+        Write-Host "  Configuring games and creating any missing databases..." -ForegroundColor Cyan
+        $pgResults = Invoke-PostgresGameSetup -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain
+        $superPwPlain = $null
+        [GC]::Collect()
+
+        Write-Host ""
+        Write-Host "  Results:" -ForegroundColor Cyan
+        Write-Host ("    Fields updated         : {0}" -f $pgResults.Configured) -ForegroundColor Green
+        Write-Host ("    Databases created      : {0}" -f $pgResults.DbCreated) -ForegroundColor Green
+        Write-Host ("    Already configured     : {0}" -f $pgResults.AlreadyConfigured) -ForegroundColor DarkGray
+        if ($pgResults.Errors -gt 0) {
+            Write-Host ("    Errors                 : {0}  (see TeknoParrot-Manager.log)" -f $pgResults.Errors) -ForegroundColor Red
+        }
+        Write-Host ""
+        Write-Host "  If anything looks wrong, use menu option 9 (Restore backup) ->" -ForegroundColor DarkCyan
+        Write-Host "  Postgres database backup to undo database changes." -ForegroundColor DarkCyan
+        Write-Log ("Postgres setup: complete. Configured={0} DbCreated={1} AlreadyConfigured={2} Errors={3}" -f $pgResults.Configured, $pgResults.DbCreated, $pgResults.AlreadyConfigured, $pgResults.Errors)
         [void](Read-Host "  Press Enter to return to menu")
         continue
     }
