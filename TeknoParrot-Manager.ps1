@@ -613,7 +613,9 @@ function Select-GamesInteractive {
                 Write-Host "    $($sd.Path)  ($($sd.Count) ZIPs)" -ForegroundColor DarkCyan
             }
         }
-        return @()
+        return ,@()   # comma forces real array semantics -- a bare "return @()" is
+                      # unwrapped to $null by the pipeline, which the caller cannot
+                      # then distinguish from its own "user skipped" $null case
     }
 
     # Build a normalised folder map of what is already extracted in the
@@ -645,7 +647,7 @@ function Select-GamesInteractive {
     }
     if ($toExtract.Count -eq 0) {
         Write-Host "  All games are already extracted. Nothing left to do." -ForegroundColor Green
-        return @()
+        return ,@()
     }
     Write-Host ("  {0} game(s) available to extract." -f $toExtract.Count) -ForegroundColor Cyan
 
@@ -671,7 +673,9 @@ function Select-GamesInteractive {
         if ($choice -eq 'A') {
             Write-Host ""
             Write-Host "  All $($all.Count) unextracted game(s) will be extracted." -ForegroundColor Green
-            return @()   # empty = no whitelist = extract everything
+            return ,@()   # empty = no whitelist = extract everything; comma forces
+                          # real array semantics so the caller's $null-vs-empty
+                          # check doesn't see this as "nothing selected"
         }
 
         # -- BROWSE ----------------------------------------------------------
@@ -1113,7 +1117,7 @@ function Select-RegisteredGamesInteractive {
                   Sort-Object BaseName)
     if ($profiles.Count -eq 0) {
         Write-Host "  No registered games found in UserProfiles." -ForegroundColor Yellow
-        return @()
+        return ,@()
     }
     Write-Host ""
     Write-Host "    A) All $($profiles.Count) registered game(s)" -ForegroundColor White
@@ -3773,6 +3777,10 @@ function Invoke-FFBPluginDownload {
 function Invoke-FFBPluginSetup {
     param([string]$UserProfilesDir, [string]$CacheDir, [string[]]$NativeEnabledCodes = @())
 
+    # A caller passing an explicit $null overrides the default above (PowerShell
+    # does not apply a parameter default when $null is passed deliberately) --
+    # guard here too, since HashSet's constructor throws on a null collection.
+    if ($null -eq $NativeEnabledCodes) { $NativeEnabledCodes = @() }
     $nativeEnabledSet = [System.Collections.Generic.HashSet[string]]::new(
         [string[]]$NativeEnabledCodes, [System.StringComparer]::OrdinalIgnoreCase)
 
@@ -4010,7 +4018,8 @@ function Invoke-FFBBlasterSetup {
     if ($hasSub -ne "Y") {
         Write-Host "  Skipped -- no membership." -ForegroundColor DarkGray
         Write-Log "FFBBlaster setup: skipped -- user has no TeknoParrot membership."
-        return @()
+        return ,@()   # comma forces real array semantics, not $null -- see
+                      # Invoke-FFBPluginSetup's -NativeEnabledCodes param
     }
 
     # Discover the field name dynamically -- never hardcoded, same pattern
@@ -4022,7 +4031,7 @@ function Invoke-FFBBlasterSetup {
         Write-Host "  No FFB Blaster field found in any GameProfile -- this TeknoParrot" -ForegroundColor Yellow
         Write-Host "  install may not support it yet." -ForegroundColor Yellow
         Write-Log "FFBBlaster setup: aborted -- no FFB Blaster field discovered."
-        return @()
+        return ,@()
     }
     Write-Log ("FFBBlaster: discovered fields -- [{0}]" -f ($ffbFields -join ', '))
 
@@ -4036,7 +4045,7 @@ function Invoke-FFBBlasterSetup {
     } catch {
         Write-Host "  ERROR: Could not create backup folder: $_" -ForegroundColor Red
         Write-Log "FFBBlaster: backup failed -- $_"
-        return @()
+        return ,@()
     }
     $backupCopyErrs = $null
     Get-ChildItem -LiteralPath $UserProfilesDir | Where-Object { $_.Name -ne "FullBackup" } |
@@ -4111,7 +4120,7 @@ function Invoke-FFBBlasterSetup {
 # if the fetch fails -- the caller falls back to generic wording.
 function Get-BepInExRequiredGames {
     $games = Get-EggmanGameData
-    if (-not $games) { return @() }
+    if (-not $games) { return ,@() }
     $pattern = '(?i)requires?\s+(the\s+)?(latest\s+)?BepInEx|must\s+use\s+(the\s+)?(latest\s+)?BepInEx'
     return @($games | Where-Object { $_.notes -and $_.notes -match $pattern } |
               Select-Object -ExpandProperty game_name)
@@ -5306,7 +5315,7 @@ function Get-GameSetupNotes {
     param([string]$UserProfilesDir)
 
     $games = Get-EggmanGameData
-    if (-not $games) { return @() }
+    if (-not $games) { return ,@() }
 
     $registeredCodes = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
