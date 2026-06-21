@@ -11,7 +11,7 @@ FFBPlugin/
 # BepInEx update cache -- auto-downloaded live from GitHub each run, never bundled
 BepInExCache/
 
-# Claude Code instruction file -- contains local paths, not for public repos
+# Local instruction file -- contains local paths, not for public repos
 CLAUDE.md
 
 # User-specific generated files
