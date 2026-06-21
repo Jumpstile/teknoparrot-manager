@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.6 BETA
+# TeknoParrot Manager  |  v0.99.7 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.6"
+$ScriptVersion = "0.99.7"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -4533,7 +4533,12 @@ function Register-Games {
                 $existingDoc = Read-Xml $_.FullName
                 $gpNode = $existingDoc.GameProfile.SelectSingleNode("GamePath")
                 if ($null -ne $gpNode -and $gpNode.InnerText) {
-                    $gamePathIndex[$gpNode.InnerText.TrimEnd('\')] = $_.BaseName
+                    # Trim() first: a GamePath written by a tool other than this
+                    # script's own Save-Xml could carry incidental leading/trailing
+                    # whitespace, which would otherwise make this key never match
+                    # $exe.FullName (a clean FileInfo path) even when they refer to
+                    # the same file. See issue #9.
+                    $gamePathIndex[$gpNode.InnerText.Trim().TrimEnd('\')] = $_.BaseName
                 }
             } catch {
                 Write-Log ("Register-Games: WARNING -- could not parse existing UserProfile '$($_.BaseName)' while building GamePath index: $_")

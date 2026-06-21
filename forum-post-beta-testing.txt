@@ -1,0 +1,57 @@
+TeknoParrot Manager v0.99.7 BETA -- looking for testers
+
+Hey everyone,
+
+I've been building a PowerShell tool that automates the tedious parts of running a large TeknoParrot collection -- registering games, copying controls between games, deploying ReShade/dgVoodoo2/crosshairs, GPU and force-feedback fixes, and more. It's heading toward a 1.0 release and I'd really appreciate some extra hands testing it on libraries and setups different from my own before then.
+
+Who this is for: anyone with a sizeable TeknoParrot collection (dozens to hundreds of games), especially if you store games as ZIPs on a NAS, use LaunchBox/HyperSpin 2/RetroBat/Batocera as a frontend, or want crosshairs/ReShade/dgVoodoo2 set up across many games at once instead of one by one.
+
+What it does:
+- Automatic registration -- scans extracted games, matches them to the correct TeknoParrot profile, and registers them (never overwrites existing registrations)
+- Fuzzy matching for shared-executable platforms (NESiCAxLive and similar) using profile codes and an optional community dat file
+- AutoSync -- extracts game ZIPs from a NAS/local source into a staging folder, skipping anything already extracted
+- Control propagation -- bind one game per control type, the script copies those controls to every other game of that type
+- Crosshair setup (321 included designs, visual preview grid) for lightgun games
+- ReShade and dgVoodoo2 deployment, auto-detected per game
+- GPU compatibility fixes (AMD/NVIDIA/Intel) and force feedback setup (native FFB Blaster + free third-party plugin)
+- Postgres setup -- installs and configures the local PostgreSQL database some Incredible Technologies games need
+- Frontend setup -- writes registered games directly into LaunchBox's own library, exports to HyperSpin 2, and a RetroBat/Batocera naming mode switches extraction to the folder convention those frontends expect
+- BepInEx update checks, game repair, restore-from-backup, and a read-only library health check
+- Preview/dry-run mode -- see exactly what a run would do before anything is written
+- Unattended mode for scheduled/overnight runs
+
+New since the last post: a round of bugfix patches (v0.99.2-v0.99.7) found during active beta testing -- FFB Blaster setup/health-check discovery now works on newer TeknoParrot builds (the identifying field moved), control propagation no longer leaves a correctly-copied binding invisible in the TeknoParrot UI, registration matching is meaningfully more accurate (it now also matches by exact executable path and no longer lets one unrelated file in a game folder block matching for the real launcher sitting next to it, and that exact-path match is now also resilient to incidental whitespace in an existing profile's saved path), the download-audit log (the SHA256 record kept for every third-party file this script downloads) no longer silently swallows a missing/locked source file as a blank entry, and two-executable games (Initial D Arcade Stage Zero and similar, which launch a companion process alongside the main exe) now get that second executable's path configured too instead of being left half-set-up. Full details in the changelog.
+
+Previous version: Postgres setup. Several Incredible Technologies games (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball) need a local PostgreSQL 8.3 database, which used to be a fully manual setup process. The script now detects which of your registered games need it and handles the rest: installs PostgreSQL if it isn't already there (requires running as Administrator, the only feature that does), never reinstalls it or touches an existing database if one's already set up, and either fills in the connection settings (for newer game profiles that use TeknoParrot's own database-creation flow) or creates the database and restores that game's backup itself (for older profiles). It also backs up your Postgres databases before touching anything, restorable from the same menu as the other backups, and the database password is encrypted before being saved.
+
+Previous version: direct LaunchBox integration. The script can add your registered games straight into LaunchBox's own library -- no import wizard needed. It checks LaunchBox is closed first, backs up the files it's about to change, and never duplicates a game already there. The first time you use it, you choose how TeknoParrot games should appear: mixed into your existing Arcade platform, a separate "TeknoParrot" platform, a platform with a name you pick, or both Arcade and a dedicated platform at once. Your choice is remembered for next time. If anything looks wrong afterward, there's a one-step restore for the LaunchBox files too, separate from the existing TeknoParrot backup. If you'd rather not let the script touch LaunchBox directly, the old manual-import reference file and wizard instructions are still there as a fallback.
+
+Full feature list and setup instructions are in the README included with the download.
+
+Specific things I'd love help testing:
+- AutoSync against your own NAS/ZIP library -- especially large libraries (100+ games) and supplementary/secondary source folders
+- Less common platforms: NESiCAxLive fuzzy matching, Konami PC arcade (.dll-based games), Sega Chihiro/cxbxr (.xbe), pcsx2x6/Lindbergh (.elf)
+- RetroBat / Batocera folder-naming mode, if that's your frontend
+- Control propagation across mixed control types (wheel, gun, trackball, twin-stick) -- make sure nothing crosses wires
+- ReShade/dgVoodoo2 deployment on games with OpenParrot or BudgieLoader (these get special-cased destination handling)
+- GPU fix and FFB setup on AMD and Intel GPUs specifically (most of my own testing has been NVIDIA)
+- Preview/dry-run mode -- confirm it matches what actually happens when you apply for real
+- The new direct LaunchBox integration specifically -- try all four platform choices, confirm games actually launch from LaunchBox afterward, and try the restore option to make sure it cleanly undoes things
+- The new Postgres setup specifically, if you own any of the games that need it -- both a from-scratch install and a run against a PostgreSQL install you already had configured (confirm it leaves your existing setup alone)
+- HyperSpin 2 export against an existing frontend library
+- Restore-from-backup, to make sure a bad run is always recoverable
+- Auto-detect of your TeknoParrot and LaunchBox install paths on a fresh machine/profile
+
+Before you run it: this is a beta. It backs up your UserProfiles automatically at the start of every run, backs up LaunchBox's files before touching those, and backs up your Postgres databases before touching those too, but please test on one game after each run rather than assuming a full library pass worked. Preview mode (mode 1 or 2 will offer it, or pass -DryRun) lets you see what would happen with zero files written -- great for a first run against a library you haven't tried this on before.
+
+How to report bugs or give feedback:
+- Best: open an issue on GitHub -- https://github.com/Jumpstile/teknoparrot-manager/issues -- include your TeknoParrot-Manager.log, what mode you ran, and what you expected vs. what happened
+- Or reply in this thread if you'd rather not use GitHub -- I'll pick it up either way
+- If something writes data wrong or a registration looks broken, the restore option under menu 9 will get you back to a known-good state immediately, for TeknoParrot's own profiles, LaunchBox's library files, or Postgres databases
+
+Got ideas for LaunchBox/BigBox-specific additions?
+Now that it writes directly into LaunchBox rather than just producing a reference file, I'd like to hear what else would help on the frontend side -- BigBox-specific behavior, playlist/theme interactions, or anything about how registered games look or launch in Big Box mode that feels rough. I haven't automated the exit script or startup-screen settings some people configure by hand in LaunchBox's emulator setup, since I don't have a verified script to inject automatically -- if you've got a known-good one you use, I'd be curious to hear about it. I can't promise everything will make it in before 1.0 (feature work is mostly paused while I stabilize for release), but it's exactly the kind of input I want to start collecting now.
+
+Download, README, and changelog: https://github.com/Jumpstile/teknoparrot-manager/releases
+
+Thanks in advance to anyone willing to kick the tires -- the more setups this gets tested against before 1.0, the better.

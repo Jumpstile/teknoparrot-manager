@@ -7,6 +7,19 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.7 BETA  (2026-06-21)
+-------------------------------------------------------------------------------
+
+  Fix: hardened the registration check that's supposed to recognize a
+  game whose UserProfile is already correctly configured, even when the
+  folder's executable name is shared by several profiles. The check
+  compares the profile's saved game path against the file actually found
+  on disk, but only stripped a trailing backslash from the saved value,
+  not other incidental whitespace -- so a saved path with any extra
+  whitespace would never match and the game would be wrongly flagged as
+  still needing registration. (issue #9)
+
+-------------------------------------------------------------------------------
   v0.99.6 BETA  (2026-06-21)
 -------------------------------------------------------------------------------
 
