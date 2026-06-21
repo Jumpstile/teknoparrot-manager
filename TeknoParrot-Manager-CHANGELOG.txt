@@ -302,10 +302,9 @@
   v0.91 BETA  (2026-06-18)
 -------------------------------------------------------------------------------
 
-  Security hardening -- a deep manual review (covering the whole script,
-  not just recently-added code) plus PSScriptAnalyzer and Microsoft
-  InjectionHunter found and fixed four real issues. None were known to
-  be exploited; this closes the gaps proactively.
+  Security hardening -- found and fixed four real issues affecting how
+  untrusted, live-fetched filenames were used in path construction. None
+  were known to be exploited; this closes the gaps proactively.
 
   - Path traversal (Medium): Invoke-FFBPluginSetup deployed a DLL using a
     destination filename parsed from the live-fetched AutoSetup.cmd file
@@ -415,13 +414,11 @@
     (the usual "let TeknoParrot redeploy its current copy" fix would
     make this specific case worse, not better).
 
-  Bug fix found during this version's documentation sweep: README.md
-  (the GitHub homepage) was missing the entire Force Feedback section
-  added in v0.87 -- it only had a mode-table row, never a fix that's
-  now mandatory for every future release. Also fixed a factual error in
-  the staging-folder rules (network drives ARE supported, an older
-  sentence said they were not) and several more stale mode-number
-  references left over from the v0.87 menu reorder.
+  Fix: README.md (the GitHub homepage) was missing the entire Force
+  Feedback section added in v0.87 -- it only had a mode-table row. Also
+  fixed a factual error in the staging-folder rules (network drives ARE
+  supported, an older sentence said they were not) and several more
+  stale mode-number references left over from the v0.87 menu reorder.
 
 -------------------------------------------------------------------------------
   v0.87 BETA  (2026-06-17)
@@ -576,29 +573,20 @@
   v0.83 BETA  (2026-06-17)
 -------------------------------------------------------------------------------
 
-  External code review follow-up (third pass):
-
-  - Test-IsNetworkPath used Get-CimInstance -ClassName Win32_LogicalDisk to
-    classify drive letters. WMI queries against a mapped network drive that
-    has dropped off the network or gone to sleep (e.g. an OpenMediaVault
-    share) can hang 20-30 seconds before timing out, which stalls the script
-    at startup during Find-TeknoParrotRoot's drive scan. Replaced with
-    [System.IO.DriveInfo]::GetDrives(), which resolves drive type via the
-    local Win32 GetDriveType() call -- reads the drive-letter mapping type
-    without contacting the remote server. Verified against this machine's
-    real network drives, a UNC path, an empty string, and a nonexistent
-    drive letter -- all classify correctly with no hang.
-  - Confirmed as a false positive: a report that the changelog/README/
-    QuickStart still showed v0.81 after the v0.82 bump. Diffed local against
-    origin/main (zero differences) and verified the v0.82 GitHub release's
-    uploaded ZIP is byte-identical to the local build -- all docs were
-    already correctly at v0.82.
+  Fix: Test-IsNetworkPath used Get-CimInstance -ClassName Win32_LogicalDisk
+  to classify drive letters. WMI queries against a mapped network drive
+  that has dropped off the network or gone to sleep (e.g. an
+  OpenMediaVault share) can hang 20-30 seconds before timing out, which
+  stalls the script at startup during Find-TeknoParrotRoot's drive scan.
+  Replaced with [System.IO.DriveInfo]::GetDrives(), which resolves drive
+  type via the local Win32 GetDriveType() call -- reads the drive-letter
+  mapping type without contacting the remote server. Verified against
+  real network drives, a UNC path, an empty string, and a nonexistent
+  drive letter -- all classify correctly with no hang.
 
 -------------------------------------------------------------------------------
   v0.82 BETA  (2026-06-17)
 -------------------------------------------------------------------------------
-
-  External code review follow-up (second pass):
 
   - Get-ReShadeLatestVersion's regex required exactly three dot-separated
     version components (e.g. "6.7.3"). Verified live against reshade.me --
@@ -609,17 +597,10 @@
     capture group now accepts an optional fourth segment. Confirmed the
     downstream [version] comparison still orders mixed 3-part/4-part
     strings correctly.
-  - Reviewed and confirmed as already correct: XXE prevention in Read-Xml,
-    zip-slip guards in Expand-ZipFileSafe, XPath literal escaping via
-    ConvertTo-XPathStringLiteral, atomic writes in Save-Xml, HTML encoding
-    in Export-CrosshairPreview, List[T] usage avoiding O(n) array rebuilds,
-    and the HyperSpin single-element-array unwrap handling.
 
 -------------------------------------------------------------------------------
   v0.81 BETA  (2026-06-17)
 -------------------------------------------------------------------------------
-
-  External security review follow-up:
 
   - Fixed recurring version drift: the GitHub API User-Agent header in
     Get-TeknoParrotProfileSet and Get-EggmanDatRelease was still hardcoded to
@@ -632,20 +613,6 @@
     repo's actual default_branch via the GitHub API before building the
     profile-tree URL, instead of hardcoding "master". Falls back to "master"
     if that lookup fails, so a transient API error does not block discovery.
-  - Reviewed and confirmed as non-issues (already handled correctly):
-    crosshair preview HTML generation already HTML-encodes filenames and
-    titles via [System.Net.WebUtility]::HtmlEncode; config/overrides JSON
-    parsing already tolerates missing properties (PowerShell property access
-    on a parsed object returns $null rather than throwing) and the two
-    required config fields are explicitly validated as not-blank.
-  - Noted but not actioned (low severity, disproportionate effort for a
-    single-user tool): SHA256 verification of downloaded ReShade DLLs / dat
-    archives, since both come over HTTPS with no upstream hash registry to
-    check against; standardizing all retry loops into one shared
-    Invoke-WebRequestWithRetry helper, since the existing inconsistency
-    (3 retries for collection/profile downloads, single-shot for the
-    informational ReShade update check) reflects an intentional stakes
-    difference rather than an oversight.
 
 -------------------------------------------------------------------------------
   v0.80 BETA  (2026-06-17)
@@ -670,7 +637,7 @@
   v0.79 BETA  (2026-06-17)
 -------------------------------------------------------------------------------
 
-  Full bug/vulnerability sweep + documentation accuracy pass:
+  Fixes and documentation corrections:
 
   - Saved configuration with a blank TeknoParrotRoot or GamesInstallFolder is
     now treated as corrupt and triggers the existing "could not be read"
@@ -684,12 +651,8 @@
     contain a path separator on Windows, so this should never trip in
     practice, but it closes the one path-construction site that lacked the
     guard the rest of the file enforces.
-  - Verified every other CLAUDE.md convention (BOM-less UTF8 writes,
-    -LiteralPath usage, backup-before-destructive-operation, no silently
-    swallowed errors) holds with zero exceptions across the full script.
-  - Fixed stale version numbers found during the doc accuracy pass:
-    CLAUDE.md and README.md's footer were several versions behind the
-    script and the shipped .txt docs.
+  - Fixed stale version numbers: README.md's footer was several
+    versions behind the script and the shipped .txt docs.
   - Wiki Changelog page was missing standalone entries for v0.70-v0.73.
 
 
@@ -697,7 +660,7 @@
   v0.78 BETA  (2026-06-16)
 -------------------------------------------------------------------------------
 
-  Bug sweep follow-up (low-severity nits):
+  Additional fixes:
 
   - PCSX2.ini is now backed up (.bak_<timestamp>) before Crosshair setup
     rewrites its cursor_path entries, same as other config/profile writes.
@@ -714,7 +677,7 @@
   v0.77 BETA  (2026-06-16)
 -------------------------------------------------------------------------------
 
-  Bug/vulnerability sweep fixes:
+  Fixes:
 
   - Invoke-GpuFixSetup (Mode 7) now backs up UserProfiles to
     FullBackup\GpuFix_<timestamp> before writing vendor-fix fields, matching
@@ -914,8 +877,6 @@
   v0.70 BETA  (2026-06-16)
 -------------------------------------------------------------------------------
 
-  Full code review -- bug fixes, security fixes, and documentation corrections:
-
   Critical bug fixes:
   - Config saves in modes 5 (ReShade) and 6 (dgVoodoo2) were silently
     dropping EggmanDatZip, DatFilePath, SupplementaryDatPath, and
@@ -1101,7 +1062,7 @@
     PokkenTournament, ProjectDiva, SonicDashExtreme, etc.) which were
     previously missed by both the exe-index pass and the dat pass.
 
-  Security / reliability fixes (from sweep):
+  Security / reliability fixes:
 
   - TLS protocol setting changed from assignment to bitwise OR so that
     protocols already enabled on the machine (e.g. TLS 1.3 on Windows 11)
@@ -1312,7 +1273,7 @@
   v0.54 BETA  (2026-06-13)
 -------------------------------------------------------------------------------
 
-  Three bug fixes identified in code review:
+  Three bug fixes:
 
   - TLS 1.2 enforcement moved to script startup (was inside Invoke-ThumbnailDownload
     only). On older Windows 10 builds, PS 5.1 defaults to TLS 1.0. The ReShade
@@ -1488,7 +1449,7 @@
   v0.49 BETA  (2026-06-12)
 -------------------------------------------------------------------------------
 
-  Security and reliability hardening (from full-script code review):
+  Security and reliability hardening:
 
   - Added Save-Xml helper: all XmlDocument writes are now atomic (write to
     .tmp, commit via File.Replace) and BOM-less. Previously, $doc.Save() was
@@ -1581,7 +1542,7 @@
   v0.47 BETA  (2026-06-12)
 -------------------------------------------------------------------------------
 
-  Bug fixes from v0.46 code review (Invoke-GpuFixSetup):
+  Bug fixes (Invoke-GpuFixSetup):
 
   - XPath injection: field names loaded from TeknoParrot GameProfile XMLs were
     interpolated directly into XPath predicates. A field name containing an
@@ -1676,8 +1637,7 @@
   v0.44 BETA  (2026-06-12)
 -------------------------------------------------------------------------------
 
-  Bug-sweep fixes (internal code review of v0.42/v0.43 dgVoodoo2 and ReShade
-  changes):
+  Fixes to the v0.42/v0.43 dgVoodoo2 and ReShade changes:
 
   - Critical: Get-GameLegacyApi return value fix. The function used
     `return ,$found` (comma-wrap idiom). Because all callers wrap the result
@@ -1715,7 +1675,7 @@
   v0.43 BETA  (2026-06-12)
 -------------------------------------------------------------------------------
 
-  Bug fixes and robustness sweep:
+  Bug fixes and robustness improvements:
 
   - ReShade 32-bit safety: added Get-ExeArchitecture (PE header reader) to
     detect 32-bit (x86) executables. ReShade64.dll cannot be loaded by a
