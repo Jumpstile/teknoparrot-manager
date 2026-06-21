@@ -22,13 +22,6 @@
   on failure. Fixed by adding -ErrorAction Stop so the catch behaves as
   documented.
 
-  Added a Pester regression suite (Tests\TeknoParrot-Manager.Tests.ps1,
-  dev-only, not part of the release ZIP) covering pure/read-only helper
-  functions: path containment, XPath literal escaping, GPU Fix/FFB
-  Blaster/dgVoodoo2/ReShade up-to-date checks, fuzzy-match scoring, the
-  zip-slip extraction guard, and Write-DownloadAudit's success/failure
-  paths. Now run as a required step in the pre-commit/build sweep.
-
 -------------------------------------------------------------------------------
   v0.99.4 BETA  (2026-06-21)
 -------------------------------------------------------------------------------
