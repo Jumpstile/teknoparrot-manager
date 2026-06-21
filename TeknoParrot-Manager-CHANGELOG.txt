@@ -7,6 +7,25 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.8 BETA  (2026-06-21)
+-------------------------------------------------------------------------------
+
+  Fix: a game folder could still be wrongly listed as needing manual
+  registration even though its real executable was already correctly
+  registered, if that same folder also contained a second, unrelated
+  exe-like file (a generic/shared launcher stub) whose name happened to
+  collide with other profiles. The list of games still needing
+  registration never excluded a folder once a DIFFERENT file in that
+  same folder had already matched cleanly elsewhere in the same run --
+  only the separate "completely unrecognized" list did that check.
+  Confirmed against a real tester log: Nosferatu Lilinor's folder
+  contains both its real launcher (NLAM.exe, already registered under
+  the correct profile) and a generic "main" stub that collides with two
+  unrelated racing-game profiles -- the stub alone was enough to put the
+  already-fully-configured game back on the action-required list every
+  run. (issue #9)
+
+-------------------------------------------------------------------------------
   v0.99.7 BETA  (2026-06-21)
 -------------------------------------------------------------------------------
 

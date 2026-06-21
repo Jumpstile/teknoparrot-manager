@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.7 BETA
+# TeknoParrot Manager  |  v0.99.8 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.7"
+$ScriptVersion = "0.99.8"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -5099,6 +5099,28 @@ function Register-Games {
             }
         }
     }
+
+    # A folder can contain more than one exe-like file -- e.g. a dedicated
+    # launcher (already cleanly matched to its own profile elsewhere in this
+    # loop) sitting alongside an unrelated generic/shared stub (which only
+    # collided with OTHER profiles' ExecutableName and was reported above as
+    # "shared"/ambiguous). $matchedFolders already tracks every folder that
+    # got a conclusive match from ANY of its exes; $unmatched below already
+    # filters against it, but $ambiguous never did, so a folder whose real
+    # game was already correctly registered via one exe could still show up
+    # in the "needs manual registration" report because of a second,
+    # unrelated exe in the same folder. Drop any ambiguous entry whose
+    # folder is in $matchedFolders by now -- the folder is accounted for
+    # regardless of what this particular exe resolved to. See issue #9
+    # (Nosferatu Lilinor: NLAM.exe cleanly registers the real profile, but a
+    # generic "main" stub in the same folder collides with WMMT3/WMMT3DXP
+    # and was being reported as still needing registration).
+    $ambiguous = @($ambiguous | Where-Object {
+        $rel        = if ($_.Exe.Length -gt $installBase.Length) { $_.Exe.Substring($installBase.Length).TrimStart('\') } else { $_.Exe }
+        $folderName = ($rel -split '\\')[0]
+        $folderKey  = $folderName -replace '\.(teknoparrot|parrot|game)$', ''
+        -not $matchedFolders.ContainsKey($folderKey)
+    })
 
     $unmatched = @($allExeFolders.Keys | Where-Object { -not $matchedFolders.ContainsKey($_) } | Sort-Object)
     return [pscustomobject]@{ Registered = $registered; Already = $already; Ambiguous = $ambiguous; Unmatched = $unmatched }
