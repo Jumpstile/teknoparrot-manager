@@ -68,6 +68,80 @@ Describe "Get-SafeLaunchBoxPlatformFileName" {
     }
 }
 
+Describe "Set-SecondaryExecutablePath" {
+    BeforeAll {
+        function New-TwoExeDoc([string]$exe2Name = "amdaemon.exe", [string]$gamePath2 = "") {
+            return [xml]@"
+<GameProfile>
+  <ExecutableName>InitialD0_DX11_Nu.exe</ExecutableName>
+  <ExecutableName2>$exe2Name</ExecutableName2>
+  <HasTwoExecutables>true</HasTwoExecutables>
+  <GamePath2>$gamePath2</GamePath2>
+</GameProfile>
+"@
+        }
+    }
+
+    It "sets GamePath2 when the companion exe sits alongside the primary exe" {
+        $dir = Join-Path $TestDrive "idz"
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        $primary = Join-Path $dir "InitialD0_DX11_Nu.exe"
+        [System.IO.File]::WriteAllBytes($primary, [byte[]]@(0))
+        [System.IO.File]::WriteAllBytes((Join-Path $dir "amdaemon.exe"), [byte[]]@(0))
+
+        $doc = New-TwoExeDoc
+        Set-SecondaryExecutablePath $doc $primary
+
+        $doc.GameProfile.GamePath2 | Should -Be (Join-Path $dir "amdaemon.exe")
+    }
+    It "leaves GamePath2 unset when the companion exe is not found alongside the primary exe" {
+        $dir = Join-Path $TestDrive "idz-missing"
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        $primary = Join-Path $dir "InitialD0_DX11_Nu.exe"
+        [System.IO.File]::WriteAllBytes($primary, [byte[]]@(0))
+
+        $doc = New-TwoExeDoc
+        Set-SecondaryExecutablePath $doc $primary
+
+        $doc.GameProfile.GamePath2 | Should -BeNullOrEmpty
+    }
+    It "does nothing when HasTwoExecutables is not true" {
+        $dir = Join-Path $TestDrive "single-exe"
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        $primary = Join-Path $dir "game.exe"
+        [System.IO.File]::WriteAllBytes($primary, [byte[]]@(0))
+        [System.IO.File]::WriteAllBytes((Join-Path $dir "amdaemon.exe"), [byte[]]@(0))
+
+        $doc = [xml]"<GameProfile><ExecutableName2>amdaemon.exe</ExecutableName2><HasTwoExecutables>false</HasTwoExecutables></GameProfile>"
+        Set-SecondaryExecutablePath $doc $primary
+
+        $doc.GameProfile.SelectSingleNode("GamePath2") | Should -BeNullOrEmpty
+    }
+    It "never overwrites an already-set GamePath2" {
+        $dir = Join-Path $TestDrive "idz-already"
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        $primary = Join-Path $dir "InitialD0_DX11_Nu.exe"
+        [System.IO.File]::WriteAllBytes($primary, [byte[]]@(0))
+        [System.IO.File]::WriteAllBytes((Join-Path $dir "amdaemon.exe"), [byte[]]@(0))
+
+        $doc = New-TwoExeDoc -gamePath2 "C:\already\set\amdaemon.exe"
+        Set-SecondaryExecutablePath $doc $primary
+
+        $doc.GameProfile.GamePath2 | Should -Be "C:\already\set\amdaemon.exe"
+    }
+    It "does nothing when ExecutableName2 is blank" {
+        $dir = Join-Path $TestDrive "no-exe2-name"
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        $primary = Join-Path $dir "game.exe"
+        [System.IO.File]::WriteAllBytes($primary, [byte[]]@(0))
+
+        $doc = [xml]"<GameProfile><ExecutableName2></ExecutableName2><HasTwoExecutables>true</HasTwoExecutables></GameProfile>"
+        Set-SecondaryExecutablePath $doc $primary
+
+        $doc.GameProfile.SelectSingleNode("GamePath2") | Should -BeNullOrEmpty
+    }
+}
+
 Describe "Get-ButtonKey / Test-ButtonIsBound" {
     BeforeAll {
         function New-ButtonNode([string]$xml) {

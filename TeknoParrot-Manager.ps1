@@ -219,6 +219,40 @@ function Get-PrimaryExecutableName {
     return $null
 }
 
+# Some TeknoParrot profiles (HasTwoExecutables=true -- e.g. the Initial D
+# Arcade Stage series, which launches a companion amdaemon.exe alongside the
+# real game exe) need a second GamePath2 field set in addition to GamePath.
+# Confirmed against the real teknogods/TeknoParrotUI GameProfile schema
+# (GameProfile.cs): there is no separate dat/folder hint for the second exe's
+# location, so this assumes the standard layout -- both exes sit in the same
+# folder, since LaunchSecondExecutableFirst implies TeknoParrot itself runs
+# the second exe from that same working directory. If ExecutableName2 isn't
+# found there, GamePath2 is left unset rather than guessed -- registration of
+# the primary exe still succeeds either way. Never overwrites an already-set
+# GamePath2 (mirrors this function's "never recreate a working setup" stance
+# elsewhere in Register-Games). See issue #8.
+function Set-SecondaryExecutablePath {
+    param([System.Xml.XmlDocument]$Doc, [string]$PrimaryExePath)
+
+    $hasTwoNode = $Doc.GameProfile.SelectSingleNode("HasTwoExecutables")
+    if ($null -eq $hasTwoNode -or $hasTwoNode.InnerText -ne 'true') { return }
+
+    $exe2Name = [string]$Doc.GameProfile.ExecutableName2
+    if ([string]::IsNullOrWhiteSpace($exe2Name)) { return }
+
+    $gp2 = $Doc.GameProfile.SelectSingleNode("GamePath2")
+    if ($null -ne $gp2 -and -not [string]::IsNullOrWhiteSpace($gp2.InnerText)) { return }
+
+    $exe2Path = Join-Path ([System.IO.Path]::GetDirectoryName($PrimaryExePath)) $exe2Name.Trim()
+    if (-not (Test-Path -LiteralPath $exe2Path -PathType Leaf)) { return }
+
+    if ($null -eq $gp2) {
+        $gp2 = $Doc.CreateElement("GamePath2")
+        [void]$Doc.GameProfile.AppendChild($gp2)
+    }
+    $gp2.InnerText = $exe2Path
+}
+
 # Returns $true when $path resolves to a network location (UNC or mapped drive).
 function Test-IsNetworkPath {
     param([string]$path)
@@ -4608,6 +4642,7 @@ function Register-Games {
                             [void]$tpl.GameProfile.PrependChild($gp)
                         }
                         $gp.InnerText = $exe.FullName
+                        Set-SecondaryExecutablePath $tpl $exe.FullName
                         Save-XmlMaybe $tpl $userProfile $DryRun
                         [void]$registered.Add([pscustomobject]@{
                             Code        = $code
@@ -4708,6 +4743,7 @@ function Register-Games {
                                                 [void]$tpl.GameProfile.PrependChild($gp)
                                             }
                                             $gp.InnerText = $exeToUse
+                                            Set-SecondaryExecutablePath $tpl $exeToUse
                                             Save-XmlMaybe $tpl $userProfile $DryRun
                                             [void]$registered.Add([pscustomobject]@{
                                                 Code     = $datCode
@@ -4819,6 +4855,7 @@ function Register-Games {
                 [void]$tpl.GameProfile.PrependChild($gp)
             }
             $gp.InnerText = $exe.FullName
+            Set-SecondaryExecutablePath $tpl $exe.FullName
             Save-XmlMaybe $tpl $userProfile $DryRun
             [void]$registered.Add([pscustomobject]@{ Code = $code; GamePath = $exe.FullName })
             Write-Log "Registered $code -> $($exe.FullName)"
@@ -4937,6 +4974,7 @@ function Register-Games {
                     [void]$tpl.GameProfile.PrependChild($gp)
                 }
                 $gp.InnerText = $exeToUse
+                Set-SecondaryExecutablePath $tpl $exeToUse
                 Save-XmlMaybe $tpl $userProfile $DryRun
                 $label = if ($datScore -lt 1.0) { "dat/fuzzy $([Math]::Round($datScore,2))" } else { "dat/exact" }
                 [void]$registered.Add([pscustomobject]@{
@@ -5040,6 +5078,7 @@ function Register-Games {
                     [void]$tpl.GameProfile.PrependChild($gp)
                 }
                 $gp.InnerText = $exeToUse
+                Set-SecondaryExecutablePath $tpl $exeToUse
                 Save-XmlMaybe $tpl $userProfile $DryRun
                 [void]$registered.Add([pscustomobject]@{
                     Code        = $bestCode
