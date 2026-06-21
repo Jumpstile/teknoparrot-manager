@@ -7,6 +7,20 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.10 BETA  (2026-06-21)
+-------------------------------------------------------------------------------
+
+  Fix: control propagation's Input API correction (added in v0.99.2 for
+  "button"-family games whose archetype uses MergedInput) only ever ran
+  as part of the same pass that copies button bindings. A game that was
+  already fully bound from an earlier run -- including every game bound
+  before v0.99.2 shipped -- is treated as "already configured, nothing
+  to do" and skips that whole pass, so it could never have its Input API
+  retroactively corrected even after upgrading. Propagation now checks
+  and fixes the Input API on an already-bound profile too, without
+  touching any of its button bindings. (issue #1)
+
+-------------------------------------------------------------------------------
   v0.99.9 BETA  (2026-06-21)
 -------------------------------------------------------------------------------
 

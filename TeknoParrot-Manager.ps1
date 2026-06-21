@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.9 BETA
+# TeknoParrot Manager  |  v0.99.10 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.9"
+$ScriptVersion = "0.99.10"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -5989,10 +5989,7 @@ function Invoke-ControlPropagation {
 
         $alreadyBound = 0
         foreach ($b in $btns) { if (Test-ButtonIsBound $b) { $alreadyBound++ } }
-        if ($alreadyBound -ge $minBound) {
-            [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "skipped-bound" })
-            continue
-        }
+        $buttonsAlreadyBound = ($alreadyBound -ge $minBound)
 
         $targetFamily = if ($familyOverride.ContainsKey($f.BaseName)) {
             $familyOverride[$f.BaseName]
@@ -6013,6 +6010,9 @@ function Invoke-ControlPropagation {
 
         # Otherwise pick the best same-family archetype by how many of this
         # game's keys it can supply. Ties go to the more completely-bound one.
+        # Computed even when this profile's buttons are already bound (below)
+        # -- needed there too, to check whether the archetype's Input API can
+        # be retroactively applied without touching any button binding.
         if ($null -eq $best) {
             foreach ($s in $pool) {
                 if ($s.Family -ne $targetFamily) { continue }
@@ -6023,9 +6023,45 @@ function Invoke-ControlPropagation {
                 }
             }
             if ($null -eq $best -or $bestOverlap -eq 0) {
-                [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "no-archetype"; Family = $targetFamily })
+                if ($buttonsAlreadyBound) {
+                    [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "skipped-bound" })
+                } else {
+                    [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "no-archetype"; Family = $targetFamily })
+                }
                 continue
             }
+        }
+
+        # A profile whose buttons are already configured is never re-bound
+        # (this loop never touches a working binding), but the Input API
+        # fix from issue #1 only runs from inside this same per-profile pass
+        # -- without this branch it could never reach an already-bound
+        # profile on any later run, even after the fix shipped, since this
+        # function would always continue past it above. Checking and
+        # correcting just the Input API field here, independent of button
+        # binding, lets that fix apply retroactively. See issue #1.
+        if ($buttonsAlreadyBound) {
+            $currentApi = Get-ProfileInputApi $doc
+            $apiSet = $false
+            if ($best.InputApi -and $best.InputApi -ne $currentApi) {
+                $apiSet = Set-ProfileInputApi $doc $best.InputApi
+            }
+            if ($apiSet) {
+                try {
+                    Save-XmlMaybe $doc $f.FullName $DryRun
+                    [void]$reports.Add([pscustomobject]@{
+                        Code = $f.BaseName; Status = "api-fixed"
+                        Archetype = $best.Code; ArchetypeApi = $best.InputApi
+                    })
+                    Write-Log "Propagation: $($f.BaseName) already bound -- updated Input API to $($best.InputApi) to match archetype $($best.Code)"
+                } catch {
+                    Write-Log "Propagation: FAILED to save Input API fix for $($f.Name) -- $_"
+                    [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "save-failed"; Archetype = $best.Code })
+                }
+            } else {
+                [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "skipped-bound" })
+            }
+            continue
         }
 
         $boundNow = 0
@@ -7592,6 +7628,7 @@ function Write-ControlsStatus {
             $r = $reportMap[$f.BaseName]
             switch ($r.Status) {
                 "bound"            { $status = "propagated"; $reference = $r.Archetype }
+                "api-fixed"        { $status = "already bound (Input API corrected)"; $reference = $r.Archetype }
                 "skipped-bound"    { $status = "already bound" }
                 "skipped-override" { $status = "skipped (override)" }
                 "no-archetype"     { $status = "no reference game" }
@@ -9262,12 +9299,13 @@ if ($pool.Count -eq 0) {
                     }
                 }
                 "no-archetype"     { Write-Host ("    {0}  -- no '{1}' example game bound yet; controls will be set once you bind one (see ACTION REQUIRED)" -f $r.Code, $r.Family) -ForegroundColor Yellow }
+                "api-fixed"        { Write-Host ("    {0}  -- already bound; Input API corrected to '{1}' (matched from {2})" -f $r.Code, $r.ArchetypeApi, $r.Archetype) -ForegroundColor Green }
                 "skipped-bound"    { Write-Host ("    {0}  -- already bound, left unchanged" -f $r.Code) -ForegroundColor DarkGray }
                 "skipped-override" { Write-Host ("    {0}  -- skipped (per-game override)" -f $r.Code) -ForegroundColor DarkGray }
                 "save-failed"      { Write-Host ("    {0}  -- ERROR saving (see TeknoParrot-Manager.log)" -f $r.Code) -ForegroundColor Red }
             }
         }
-        $nb               = @($reports | Where-Object { $_.Status -eq "bound" }).Count
+        $nb               = @($reports | Where-Object { $_.Status -eq "bound" -or $_.Status -eq "api-fixed" }).Count
         $noArchetypeItems = @($reports | Where-Object { $_.Status -eq "no-archetype" })
         Write-Host ""
         Write-Host (" Games updated: {0}" -f $nb) -ForegroundColor Green
