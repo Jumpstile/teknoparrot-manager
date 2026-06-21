@@ -7,6 +7,32 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.2 BETA  (2026-06-21)
+-------------------------------------------------------------------------------
+
+  Fix: on newer TeknoParrot builds, FFB Blaster setup (mode 7) and the
+  Library health check's FFB Blaster coverage report could find zero
+  eligible games even with a paid membership. The identifying text moved
+  from the field's name to its category label in newer GameProfile XML
+  (CategoryName "FFB Blaster" with a generic FieldName of "Enable",
+  instead of the field name itself containing "blaster"). Discovery now
+  checks the category label first, falling back to the old field-name
+  check for older profiles. Confirmed against real GameProfile XML from
+  a tester's clean TeknoParrot install (issue #2).
+
+  Fix: control propagation (mode 6) could copy a real, correct button
+  binding into a target profile but leave its buttons appearing empty in
+  the TeknoParrot UI. The propagated archetype's Input API (e.g.
+  MergedInput) was being silently rejected when the target profile's
+  on-disk FieldOptions hadn't listed it yet -- TeknoParrot's own UI
+  dynamically adds that option to a profile's XML the first time it is
+  selected there, so an absent entry doesn't mean the profile can't use
+  it. Set-ProfileInputApi now mirrors that behavior for MergedInput
+  specifically; other API values still require the option to already be
+  listed. Confirmed against tester diagnostics across several rounds
+  (issue #1).
+
+-------------------------------------------------------------------------------
   v0.99.1 BETA  (2026-06-20)
 -------------------------------------------------------------------------------
 

@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.1 BETA
+# TeknoParrot Manager  |  v0.99.2 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.1"
+$ScriptVersion = "0.99.2"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -1833,14 +1833,16 @@ function Get-GpuAndFfbFieldNames {
                 $gdoc = Read-Xml $gf.FullName
                 $fnodes = $gdoc.SelectNodes("/GameProfile/ConfigValues/FieldInformation")
                 foreach ($n in $fnodes) {
-                    $fn = if ($n.FieldName) { $n.FieldName.Trim() } else { '' }
-                    $ft = if ($n.FieldType)  { $n.FieldType.Trim()  } else { '' }
-                    if (-not $fn) { continue }
+                    $cn = if ($n.CategoryName) { $n.CategoryName.Trim() } else { '' }
+                    $fn = if ($n.FieldName)     { $n.FieldName.Trim()     } else { '' }
+                    $ft = if ($n.FieldType)     { $n.FieldType.Trim()     } else { '' }
                     if ($ft -eq 'Bool') {
-                        if ($fn -imatch '\bamd\b|\bradeon\b|AMDFix|AMDCrash') {
+                        if ($fn -and $fn -imatch '\bamd\b|\bradeon\b|AMDFix|AMDCrash') {
                             [void]$boolAmdFields.Add($fn)
                         }
-                        if ($fn -imatch 'ffb.*blaster|blaster.*ffb') {
+                        if ($cn -imatch 'ffb.*blaster|blaster.*ffb') {
+                            [void]$ffbFields.Add($cn)
+                        } elseif ($fn -and $fn -imatch 'ffb.*blaster|blaster.*ffb') {
                             [void]$ffbFields.Add($fn)
                         }
                     } elseif ($ft -eq 'Dropdown') {
@@ -4012,10 +4014,16 @@ function Get-FFBBlasterFieldNames {
                 $gdoc = Read-Xml $gf.FullName
                 $fnodes = $gdoc.SelectNodes("/GameProfile/ConfigValues/FieldInformation")
                 foreach ($n in $fnodes) {
-                    $fn = if ($n.FieldName) { $n.FieldName.Trim() } else { '' }
-                    $ft = if ($n.FieldType)  { $n.FieldType.Trim()  } else { '' }
-                    if (-not $fn) { continue }
-                    if ($ft -eq 'Bool' -and $fn -imatch 'ffb.*blaster|blaster.*ffb') {
+                    $cn = if ($n.CategoryName) { $n.CategoryName.Trim() } else { '' }
+                    $fn = if ($n.FieldName)     { $n.FieldName.Trim()     } else { '' }
+                    $ft = if ($n.FieldType)     { $n.FieldType.Trim()     } else { '' }
+                    if ($ft -ne 'Bool') { continue }
+                    if ($cn -imatch 'ffb.*blaster|blaster.*ffb') {
+                        [void]$ffbFields.Add($cn)
+                    } elseif ($fn -and $fn -imatch 'ffb.*blaster|blaster.*ffb') {
+                        # Older TP builds that put the identifying text on
+                        # FieldName instead of CategoryName -- fall back to
+                        # treating the field name itself as the category key.
                         [void]$ffbFields.Add($fn)
                     }
                 }
@@ -4027,26 +4035,36 @@ function Get-FFBBlasterFieldNames {
     return $ffbFields
 }
 
-# Pure decision function: for a given UserProfile XML and the field
-# names discovered by Get-FFBBlasterFieldNames, determines whether the
-# profile has an FFB Blaster field at all (Eligible) and whether it is
-# already set to '1' (UpToDate). Returns the exact node + target value
-# for any field that needs changing, mirroring Test-GpuFixUpToDate.
+# Pure decision function: for a given UserProfile XML and the category
+# keys discovered by Get-FFBBlasterFieldNames (a CategoryName on newer TP
+# builds, or a literal FieldName on older ones -- see that function's
+# fallback), determines whether the profile has an FFB Blaster field at
+# all (Eligible) and whether it is already set to '1' (UpToDate). Returns
+# the exact node + target value for any field that needs changing,
+# mirroring Test-GpuFixUpToDate.
 function Test-FFBBlasterUpToDate {
-    param([System.Xml.XmlDocument]$Doc, $Fields)
+    param([System.Xml.XmlDocument]$Doc, $Categories)
 
     $eligible = $false
     $changes  = New-Object System.Collections.Generic.List[object]
 
-    foreach ($fieldName in $Fields) {
-        $xpLit = ConvertTo-XPathStringLiteral $fieldName
-        $fi = $Doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$xpLit]")
-        if ($null -eq $fi) { continue }
-        $fvNode = $fi.SelectSingleNode("FieldValue")
-        if ($null -eq $fvNode) { continue }
-        $eligible = $true
-        if ($fvNode.InnerText -ne '1') {
-            [void]$changes.Add([pscustomobject]@{ FieldName = $fieldName; Node = $fvNode; OldValue = $fvNode.InnerText; NewValue = '1' })
+    foreach ($key in $Categories) {
+        $xpLit = ConvertTo-XPathStringLiteral $key
+        $fis = @($Doc.SelectNodes("/GameProfile/ConfigValues/FieldInformation[CategoryName=$xpLit]"))
+        if ($fis.Count -eq 0) {
+            # Fallback for older-build profiles where $key is a literal FieldName.
+            $fis = @($Doc.SelectNodes("/GameProfile/ConfigValues/FieldInformation[FieldName=$xpLit]"))
+        }
+        foreach ($fi in $fis) {
+            $ft = if ($fi.FieldType) { $fi.FieldType.Trim() } else { '' }
+            if ($ft -ne 'Bool') { continue }
+            $fvNode = $fi.SelectSingleNode("FieldValue")
+            if ($null -eq $fvNode) { continue }
+            $eligible = $true
+            $fieldName = if ($fi.FieldName) { $fi.FieldName.Trim() } else { '' }
+            if ($fvNode.InnerText -ne '1') {
+                [void]$changes.Add([pscustomobject]@{ FieldName = $fieldName; Node = $fvNode; OldValue = $fvNode.InnerText; NewValue = '1' })
+            }
         }
     }
 
@@ -4124,7 +4142,7 @@ function Invoke-FFBBlasterSetup {
     foreach ($pf in $profiles) {
         try {
             $doc    = Read-Xml $pf.FullName
-            $result = Test-FFBBlasterUpToDate -Doc $doc -Fields $ffbFields
+            $result = Test-FFBBlasterUpToDate -Doc $doc -Categories $ffbFields
             if (-not $result.Eligible) { $noField++; continue }
             [void]$enabledCodes.Add($pf.BaseName)
             if ($result.Changes.Count -gt 0) {
@@ -5137,7 +5155,7 @@ function Invoke-LibraryHealthCheck {
                 $gpuResult = Test-GpuFixUpToDate -Doc $doc -BoolFields $gpuFields.BoolFields -DropdownFields $gpuFields.DropdownFields -Vendor $detected.Vendor
                 if ($gpuResult.Eligible -and -not $gpuResult.UpToDate) { [void]$gpuFixNeeded.Add($pf.BaseName) }
             }
-            $ffbResult = Test-FFBBlasterUpToDate -Doc $doc -Fields $ffbFields
+            $ffbResult = Test-FFBBlasterUpToDate -Doc $doc -Categories $ffbFields
             if ($ffbResult.Eligible -and -not $ffbResult.UpToDate) { [void]$ffbBlasterNeeded.Add($pf.BaseName) }
 
             if (Test-GameNeedsPostgres $doc) {
@@ -5555,12 +5573,29 @@ function Get-ProfileInputApi {
 # Sets the "Input API" FieldValue, but only if the field exists AND lists the
 # requested API among its options. Returns $true on success. This matters
 # because a RawInput binding will not work if the profile's API says XInput.
+# Sets the "Input API" FieldValue. Normally only succeeds if the profile's
+# FieldOptions already lists the requested API -- this matters because a
+# RawInput binding will not work if the profile's API says XInput. The one
+# exception is "MergedInput": TeknoParrot's own UI has been confirmed
+# (issue #1) to dynamically materialize "MergedInput" into a legacy
+# profile's on-disk FieldOptions the first time it's selected there, so an
+# absent FieldOptions entry for that specific value does not mean the
+# profile can't actually use it -- it just hasn't been touched in the TP
+# UI yet. Mirror that behavior here so a propagated XInput-style binding
+# is actually visible/usable without requiring the user to manually
+# re-toggle every target game in the TeknoParrot UI first.
 function Set-ProfileInputApi {
     param($doc, [string]$api)
     $f = $doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$(ConvertTo-XPathStringLiteral 'Input API')]")
     if ($null -eq $f) { return $false }
-    $opts = @($f.SelectNodes("FieldOptions/string") | ForEach-Object { $_.InnerText.Trim() })
-    if ($opts -notcontains $api) { return $false }
+    $optsNode = $f.SelectSingleNode("FieldOptions")
+    $opts = if ($optsNode) { @($optsNode.SelectNodes("string") | ForEach-Object { $_.InnerText.Trim() }) } else { @() }
+    if ($opts -notcontains $api) {
+        if ($api -ne 'MergedInput' -or $null -eq $optsNode) { return $false }
+        $newOpt = $doc.CreateElement("string")
+        $newOpt.InnerText = $api
+        [void]$optsNode.AppendChild($newOpt)
+    }
     $v = $f.SelectSingleNode("FieldValue")
     if ($null -eq $v) { return $false }
     $v.InnerText = $api
