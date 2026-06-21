@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.3 BETA
+# TeknoParrot Manager  |  v0.99.4 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.3"
+$ScriptVersion = "0.99.4"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -4517,13 +4517,27 @@ function Register-Games {
 
         $key = $exe.Name.ToLower()
         if (-not $profileIndex.ContainsKey($key)) { continue }
-        $matchedFolders[$folderKey] = $true
 
         $matchList = $profileIndex[$key]
 
         # Same executable name maps to more than one profile.
         # Attempt folder-name fuzzy matching before giving up.
         if ($matchList.Count -gt 1) {
+            # $matchedFolders is set per conclusive outcome below, NOT
+            # unconditionally just because this exe's filename happened to
+            # appear in $profileIndex. A folder can contain more than one
+            # exe-like file (an installer, an uninstaller, a redistributable
+            # stub, the real launcher); if an unrelated one of those happens
+            # to collide with some other profile's <ExecutableName>, marking
+            # the whole folder "matched" on that collision alone would
+            # permanently block Pass 2/3 below from ever getting a chance to
+            # resolve the folder's REAL exe via the dat -- even though this
+            # specific exe was never actually identified. $resolved tracks
+            # whether THIS exe's own outcome was conclusive; it defaults true
+            # and is only flipped false at the genuinely-unresolved "shared"
+            # ambiguous outcomes further down. See issue #10.
+            $resolved = $true
+
             # Exact-path check first, ahead of any fuzzy-name matching: if an
             # existing UserProfile already points its GamePath at this exact
             # exe, this folder is fully handled regardless of whether that
@@ -4536,6 +4550,7 @@ function Register-Games {
                     $seenCodes[$existingCode] = $true
                     $codeClaimedBy[$existingCode] = "(already registered in TeknoParrotUI)"
                 }
+                $matchedFolders[$folderKey] = $true
                 continue
             }
 
@@ -4713,6 +4728,7 @@ function Register-Games {
                                             BestScore = 1.0
                                             Reason    = "shared"
                                         })
+                                        $resolved = $false
                                     }
                                 }
                             }
@@ -4725,6 +4741,7 @@ function Register-Games {
                                 BestScore = [Math]::Round($bestFuzzyScore, 2)
                                 Reason    = "shared"
                             })
+                            $resolved = $false
                         }
                     } else {
                         # Below threshold with no dat entry: flag for manual registration.
@@ -4735,11 +4752,26 @@ function Register-Games {
                             BestScore = [Math]::Round($bestFuzzyScore, 2)
                             Reason    = "shared"
                         })
+                        $resolved = $false
                     }
                 }
             }
+            # Only mark the folder as accounted for if this exe's own outcome
+            # was conclusive (registered/already/duplicate-conflict) -- not
+            # when it fell through to a genuinely-unresolved "shared"
+            # ambiguous entry. An unresolved exe leaves the folder eligible
+            # for Pass 2/3 below, in case a DIFFERENT exe in this same folder
+            # (or the folder's name itself) resolves cleanly via the dat or a
+            # profile-code fuzzy match. See issue #10.
+            if ($resolved) { $matchedFolders[$folderKey] = $true }
             continue
         }
+
+        # A single candidate for this exe name is always a confident,
+        # unambiguous identification (unlike the $matchList.Count -gt 1
+        # branch above, this never falls through to an unresolved "shared"
+        # outcome) -- safe to mark the folder accounted for unconditionally.
+        $matchedFolders[$folderKey] = $true
 
         $match = $matchList[0]
         $code  = $match.Code

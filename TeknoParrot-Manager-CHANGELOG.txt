@@ -7,6 +7,25 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.4 BETA  (2026-06-21)
+-------------------------------------------------------------------------------
+
+  Fix: registration could mark an entire game folder as "accounted for"
+  the moment any exe-like file inside it (an installer, uninstaller,
+  redistributable stub, or other non-launcher file) happened to share a
+  filename with an unrelated profile's executable name -- even when that
+  collision itself only produced an unresolved "needs manual
+  registration" result. This permanently blocked the dat-lookup and
+  profile-code fuzzy-match passes from ever getting a chance to resolve
+  the folder's real launcher via a different exe in the same folder.
+  Registration now only marks a folder accounted for when an exe's own
+  outcome was conclusive (registered, already registered, or a genuine
+  profile-code conflict) -- a "shared, below threshold, no dat match"
+  result no longer blocks the later passes from still trying. Suspected
+  root cause for several "folder exists, profile exists, never
+  connected" reports (issue #10).
+
+-------------------------------------------------------------------------------
   v0.99.3 BETA  (2026-06-21)
 -------------------------------------------------------------------------------
 
