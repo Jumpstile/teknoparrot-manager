@@ -325,7 +325,7 @@ function Test-PathInside {
 function Write-DownloadAudit {
     param([string]$Source, [string]$FileName, [string]$Path, [string]$Version = "")
     try {
-        $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+        $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash
         $verPart = if ($Version) { " Version=$Version" } else { "" }
         Write-Log "DownloadAudit: File=$FileName$verPart SHA256=$hash Source=$Source"
     } catch {

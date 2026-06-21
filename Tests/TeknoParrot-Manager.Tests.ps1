@@ -397,3 +397,55 @@ Describe "Test-DgVoodoo2UpToDate" {
         $result.UpToDate | Should -BeFalse
     }
 }
+
+Describe "Write-DownloadAudit" {
+    BeforeAll {
+        Mock Write-Log {}
+    }
+
+    It "logs the actual SHA256 of the downloaded file" {
+        $path = Join-Path $TestDrive "audit1.bin"
+        [System.IO.File]::WriteAllBytes($path, [System.Text.Encoding]::ASCII.GetBytes("some download content"))
+        $expectedHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+
+        Write-DownloadAudit -Source "https://example.com/file.bin" -FileName "audit1.bin" -Path $path
+
+        Should -Invoke Write-Log -Times 1 -ParameterFilter {
+            $msg -like "*SHA256=$expectedHash*" -and $msg -like "*File=audit1.bin*" -and $msg -like "*Source=https://example.com/file.bin*"
+        }
+    }
+    It "omits the Version segment when no version is supplied" {
+        $path = Join-Path $TestDrive "audit2.bin"
+        [System.IO.File]::WriteAllBytes($path, [byte[]]@(1, 2, 3))
+
+        Write-DownloadAudit -Source "src" -FileName "audit2.bin" -Path $path
+
+        Should -Invoke Write-Log -Times 1 -ParameterFilter { $msg -notlike "*Version=*" }
+    }
+    It "includes the Version segment when a version is supplied" {
+        $path = Join-Path $TestDrive "audit3.bin"
+        [System.IO.File]::WriteAllBytes($path, [byte[]]@(1, 2, 3))
+
+        Write-DownloadAudit -Source "src" -FileName "audit3.bin" -Path $path -Version "1.2.3"
+
+        Should -Invoke Write-Log -Times 1 -ParameterFilter { $msg -like "*Version=1.2.3*" }
+    }
+    It "fails closed (logs, does not throw) when the file does not exist" {
+        $missingPath = Join-Path $TestDrive "does-not-exist.bin"
+
+        { Write-DownloadAudit -Source "src" -FileName "missing.bin" -Path $missingPath } | Should -Not -Throw
+
+        Should -Invoke Write-Log -Times 1 -ParameterFilter { $msg -like "*could not hash*missing.bin*" }
+    }
+    It "fails closed (logs, does not throw) when the file is locked by another process" {
+        $path = Join-Path $TestDrive "locked.bin"
+        [System.IO.File]::WriteAllBytes($path, [byte[]]@(1, 2, 3))
+        $handle = [System.IO.File]::Open($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
+        try {
+            { Write-DownloadAudit -Source "src" -FileName "locked.bin" -Path $path } | Should -Not -Throw
+            Should -Invoke Write-Log -Times 1 -ParameterFilter { $msg -like "*could not hash*locked.bin*" }
+        } finally {
+            $handle.Dispose()
+        }
+    }
+}
