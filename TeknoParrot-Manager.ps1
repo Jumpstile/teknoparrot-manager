@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.8 BETA
+# TeknoParrot Manager  |  v0.99.9 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.8"
+$ScriptVersion = "0.99.9"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -235,22 +235,49 @@ function Set-SecondaryExecutablePath {
     param([System.Xml.XmlDocument]$Doc, [string]$PrimaryExePath)
 
     $hasTwoNode = $Doc.GameProfile.SelectSingleNode("HasTwoExecutables")
-    if ($null -eq $hasTwoNode -or $hasTwoNode.InnerText -ne 'true') { return }
+    if ($null -eq $hasTwoNode -or $hasTwoNode.InnerText -ne 'true') { return $false }
 
     $exe2Name = [string]$Doc.GameProfile.ExecutableName2
-    if ([string]::IsNullOrWhiteSpace($exe2Name)) { return }
+    if ([string]::IsNullOrWhiteSpace($exe2Name)) { return $false }
 
     $gp2 = $Doc.GameProfile.SelectSingleNode("GamePath2")
-    if ($null -ne $gp2 -and -not [string]::IsNullOrWhiteSpace($gp2.InnerText)) { return }
+    if ($null -ne $gp2 -and -not [string]::IsNullOrWhiteSpace($gp2.InnerText)) { return $false }
 
     $exe2Path = Join-Path ([System.IO.Path]::GetDirectoryName($PrimaryExePath)) $exe2Name.Trim()
-    if (-not (Test-Path -LiteralPath $exe2Path -PathType Leaf)) { return }
+    if (-not (Test-Path -LiteralPath $exe2Path -PathType Leaf)) { return $false }
 
     if ($null -eq $gp2) {
         $gp2 = $Doc.CreateElement("GamePath2")
         [void]$Doc.GameProfile.AppendChild($gp2)
     }
     $gp2.InnerText = $exe2Path
+    return $true
+}
+
+# Register-Games marks a folder "already registered" the moment a matching
+# UserProfile file exists, without ever opening it -- correct for the common
+# case (nothing to do), but it means a profile that was registered before
+# Set-SecondaryExecutablePath existed (or registered directly in
+# TeknoParrotUI) never gets GamePath2 backfilled, even on a v0.99.6+ run.
+# Called from every "already registered, skip" branch in Register-Games
+# instead of duplicating the read/check/save sequence at each site. Reads the
+# EXISTING profile's own GamePath as the primary exe (not the exe currently
+# being iterated) since a dat-resolved sub-path can legitimately differ from
+# it. Only writes back if Set-SecondaryExecutablePath actually set a new
+# value -- never touches a file that needed no change. See issue #8.
+function Backfill-SecondaryExecutablePath {
+    param([string]$UserProfilePath, [bool]$DryRun)
+    try {
+        $existingDoc = Read-Xml $UserProfilePath
+        $gpNode = $existingDoc.GameProfile.SelectSingleNode("GamePath")
+        if ($null -eq $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { return }
+        if (Set-SecondaryExecutablePath $existingDoc $gpNode.InnerText) {
+            Save-XmlMaybe $existingDoc $UserProfilePath $DryRun
+            Write-Log "Backfilled GamePath2 on existing profile: $UserProfilePath"
+        }
+    } catch {
+        Write-Log "Backfill-SecondaryExecutablePath: could not check/update '$UserProfilePath' -- $_"
+    }
 }
 
 # Returns $true when $path resolves to a network location (UNC or mapped drive).
@@ -4588,6 +4615,7 @@ function Register-Games {
                     if ($already -notcontains $existingCode) { [void]$already.Add($existingCode) }
                     $seenCodes[$existingCode] = $true
                     $codeClaimedBy[$existingCode] = "(already registered in TeknoParrotUI)"
+                    Backfill-SecondaryExecutablePath (Join-Path $userProfilesDir ($existingCode + ".xml")) $DryRun
                 }
                 $matchedFolders[$folderKey] = $true
                 continue
@@ -4633,6 +4661,7 @@ function Register-Games {
                 $userProfile = Join-Path $userProfilesDir ($code + ".xml")
                 if (Test-Path -LiteralPath $userProfile) {
                     [void]$already.Add($code); $seenCodes[$code] = $true; $codeClaimedBy[$code] = $folderName
+                    Backfill-SecondaryExecutablePath $userProfile $DryRun
                 } else {
                     # Mark seen before the file operation so that if Save throws,
                     # a second exe match for the same code doesn't cause a duplicate
@@ -4674,6 +4703,7 @@ function Register-Games {
                         if ($already -notcontains $ar.Code) { [void]$already.Add($ar.Code) }
                         $seenCodes[$ar.Code] = $true
                         $codeClaimedBy[$ar.Code] = "(already registered in TeknoParrotUI)"
+                        Backfill-SecondaryExecutablePath (Join-Path $userProfilesDir ($ar.Code + ".xml")) $DryRun
                     }
                 }
 
@@ -4720,6 +4750,7 @@ function Register-Games {
                                 $codeClaimedBy[$datCode] = $folderName
                                 if (Test-Path -LiteralPath $userProfile) {
                                     [void]$already.Add($datCode)
+                                    Backfill-SecondaryExecutablePath $userProfile $DryRun
                                 } else {
                                     $templatePath = Join-Path $gameProfilesDir ($datCode + ".xml")
                                     $exeToUse     = $exe.FullName
@@ -4842,6 +4873,7 @@ function Register-Games {
             [void]$already.Add($code)
             $seenCodes[$code] = $true
             $codeClaimedBy[$code] = $folderName
+            Backfill-SecondaryExecutablePath $userProfile $DryRun
             continue
         }
 
@@ -4935,6 +4967,7 @@ function Register-Games {
             $userProfile = Join-Path $userProfilesDir ($datCode + ".xml")
             if (Test-Path -LiteralPath $userProfile) {
                 [void]$already.Add($datCode)
+                Backfill-SecondaryExecutablePath $userProfile $DryRun
                 continue
             }
 
@@ -5048,6 +5081,7 @@ function Register-Games {
             $userProfile = Join-Path $userProfilesDir ($bestCode + ".xml")
             if (Test-Path -LiteralPath $userProfile) {
                 [void]$already.Add($bestCode)
+                Backfill-SecondaryExecutablePath $userProfile $DryRun
                 continue
             }
 
