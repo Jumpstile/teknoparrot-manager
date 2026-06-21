@@ -7,6 +7,24 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.11 BETA  (2026-06-21)
+-------------------------------------------------------------------------------
+
+  Fix: the Eggman collection dat parser silently dropped roughly half of
+  all games from its lookup index, regardless of whether they were
+  otherwise fully supported. The parser skips over each game's (often
+  hundreds of) checksum entries for performance; after skipping, it was
+  also advancing to the next entry a second time, and once that drift
+  happened to land exactly on a game's closing tag, that whole game was
+  never indexed at all. Confirmed against a real collection dat: of 493
+  games, only 236 were being indexed before this fix; 476 are indexed
+  after it. This was the real cause behind several previously-reported
+  "game not recognized" cases (including OutRun 2 and Time Crisis 5,
+  both of which have perfectly valid catalog entries) being unable to
+  auto-register even though nothing was actually wrong with their entry
+  or profile.
+
+-------------------------------------------------------------------------------
   v0.99.10 BETA  (2026-06-21)
 -------------------------------------------------------------------------------
 

@@ -523,3 +523,49 @@ Describe "Write-DownloadAudit" {
         }
     }
 }
+
+Describe "Build-DatIndexFromStream" {
+    # Real collection dats have dozens to hundreds of <rom> hash entries per
+    # <game>, skipped via reader.Skip() for performance. A real regression
+    # (issue #12) had the surrounding loop call Read() again right after
+    # Skip() already advanced the reader, silently discarding whatever node
+    # Skip() had landed on -- on a real 506-game dat this dropped roughly
+    # half of all games (493 opened, only 236 closed) regardless of whether
+    # they had a valid GameProfile. These games deliberately carry varying
+    # <rom> counts (0, 1, 3) so a regression of that exact shape fails here
+    # instead of only on a multi-hundred-entry real dat.
+    BeforeAll {
+        function New-DatStream {
+            param([int[]]$RomCounts)
+            $sb = [System.Text.StringBuilder]::new()
+            [void]$sb.Append('<?xml version="1.0"?><datafile>')
+            for ($i = 0; $i -lt $RomCounts.Count; $i++) {
+                [void]$sb.Append("<game name=`"Game$i`"><GameProfile>code$i</GameProfile><Executable>game$i.exe</Executable>")
+                for ($r = 0; $r -lt $RomCounts[$i]; $r++) {
+                    [void]$sb.Append("<rom name=`"file$r`" size=`"1`" crc=`"0`" />")
+                }
+                [void]$sb.Append('</game>')
+            }
+            [void]$sb.Append('</datafile>')
+            return [System.IO.MemoryStream]::new([System.Text.Encoding]::UTF8.GetBytes($sb.ToString()))
+        }
+    }
+
+    It "indexes every game regardless of how many <rom> entries precede its closing tag" {
+        $stream = New-DatStream -RomCounts @(0, 1, 3, 2, 0)
+        $index = Build-DatIndexFromStream -stream $stream
+        $index.Count | Should -Be 5
+        foreach ($i in 0..4) {
+            $index["game$i"].ProfileCode | Should -Be "code$i"
+            $index["game$i"].Executable  | Should -Be "game$i.exe"
+        }
+    }
+
+    It "indexes a game with many <rom> entries followed by another game" {
+        $stream = New-DatStream -RomCounts @(137, 4)
+        $index = Build-DatIndexFromStream -stream $stream
+        $index.Count | Should -Be 2
+        $index["game0"].ProfileCode | Should -Be "code0"
+        $index["game1"].ProfileCode | Should -Be "code1"
+    }
+}

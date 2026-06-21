@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.10 BETA
+# TeknoParrot Manager  |  v0.99.11 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.10"
+$ScriptVersion = "0.99.11"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -2913,7 +2913,23 @@ function Build-DatIndexFromStream {
         $exePath     = ''
         $insideGame  = $false
         $currentElem = ''
-        while ($reader.Read()) {
+        # Skip() already advances the reader onto the next sibling node (the
+        # following <rom>, or the </game> EndElement if that was the last
+        # one) -- it does NOT need (or want) a further Read() to get there.
+        # The loop used to call Read() unconditionally every iteration, so
+        # after every Skip() it silently consumed and discarded whatever
+        # node Skip() had just landed on. With dozens to hundreds of <rom>
+        # entries per game, that discarded one real node per skip, and once
+        # the cumulative drift landed exactly on a game's own </game> node,
+        # that game's EndElement (and its ProfileCode/Executable capture)
+        # never fired at all. Confirmed empirically against a real
+        # collection dat: this silently dropped roughly half of all <game>
+        # entries (493 opened, only 236 closed) before this fix, regardless
+        # of whether the game had a valid ProfileCode. See issue #12.
+        $advance = $true
+        while ($true) {
+            if ($advance) { if (-not $reader.Read()) { break } }
+            $advance = $true
             if ($reader.NodeType -eq [System.Xml.XmlNodeType]::Element) {
                 $currentElem = $reader.Name
                 if ($currentElem -eq 'game') {
@@ -2923,8 +2939,8 @@ function Build-DatIndexFromStream {
                     $insideGame  = $true
                 } elseif ($currentElem -eq 'rom' -and $insideGame) {
                     $reader.Skip()   # each <game> has hundreds of <rom> hash entries; skip for perf
-                    $currentElem = ''   # Skip() leaves the reader on the next element -- clear so
-                                        # a stale 'rom' value doesn't misassign the following Text node
+                    $currentElem = ''
+                    $advance     = $false   # already positioned on the next node -- don't double-advance
                 }
             } elseif ($reader.NodeType -eq [System.Xml.XmlNodeType]::Text -and $insideGame) {
                 if     ($currentElem -eq 'GameProfile')                           { $profCode = $reader.Value }
