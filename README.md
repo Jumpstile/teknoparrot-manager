@@ -1,5 +1,7 @@
 # TeknoParrot Manager
 
+![TeknoParrot Manager](images/banner.png)
+
 A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arcade game library on Windows — registration, control propagation, crosshairs, ReShade, dgVoodoo2, GPU fixes, and more.
 
 > **Beta** — test one game after each run. Profiles are backed up automatically before every run.
