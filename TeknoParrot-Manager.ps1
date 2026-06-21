@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.4 BETA
+# TeknoParrot Manager  |  v0.99.5 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.4"
+$ScriptVersion = "0.99.5"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan

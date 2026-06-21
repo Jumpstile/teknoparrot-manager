@@ -7,6 +7,29 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.5 BETA  (2026-06-21)
+-------------------------------------------------------------------------------
+
+  Fix: Write-DownloadAudit (the SHA256 logging done for every third-party
+  binary this script downloads -- the Eggman dat ZIP, the BepInEx release
+  ZIP, and the FFBArcadePlugin DLLs) silently swallowed a missing or
+  locked source file instead of logging it as a hashing failure.
+  Get-FileHash raises a non-terminating error by default, so the
+  existing try/catch never actually caught it -- the audit log ended up
+  with a malformed entry showing an empty hash instead of the intended
+  "could not hash" message. No security impact (this logging never
+  gated or blocked anything), but the audit trail itself was misleading
+  on failure. Fixed by adding -ErrorAction Stop so the catch behaves as
+  documented.
+
+  Added a Pester regression suite (Tests\TeknoParrot-Manager.Tests.ps1,
+  dev-only, not part of the release ZIP) covering pure/read-only helper
+  functions: path containment, XPath literal escaping, GPU Fix/FFB
+  Blaster/dgVoodoo2/ReShade up-to-date checks, fuzzy-match scoring, the
+  zip-slip extraction guard, and Write-DownloadAudit's success/failure
+  paths. Now run as a required step in the pre-commit/build sweep.
+
+-------------------------------------------------------------------------------
   v0.99.4 BETA  (2026-06-21)
 -------------------------------------------------------------------------------
 
