@@ -7,6 +7,25 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.3 BETA  (2026-06-21)
+-------------------------------------------------------------------------------
+
+  Fix: a folder whose game was already correctly registered in
+  TeknoParrotUI could still be wrongly flagged as needing manual
+  registration, when that folder's executable name is shared by several
+  TeknoParrot profiles (e.g. a generic Lindbergh/Sega ALLS loader name).
+  The existing-registration check only looked at the profile codes the
+  script itself considered as fuzzy-match candidates for the folder
+  name -- if the real, already-configured profile's code didn't fuzzy-
+  match the folder name closely enough (or wasn't a candidate at all,
+  because its own template uses a different executable name), the
+  folder was flagged anyway even though nothing needed to be done.
+  Registration now also checks, before any fuzzy-name matching, whether
+  any existing UserProfile already points its GamePath at this exact
+  executable -- a name-independent signal that catches both cases.
+  Confirmed against two real tester examples (issue #9).
+
+-------------------------------------------------------------------------------
   v0.99.2 BETA  (2026-06-21)
 -------------------------------------------------------------------------------
 

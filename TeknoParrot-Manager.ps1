@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.2 BETA
+# TeknoParrot Manager  |  v0.99.3 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.2"
+$ScriptVersion = "0.99.3"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -4481,6 +4481,30 @@ function Register-Games {
     Get-ChildItem -LiteralPath $userProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
         Where-Object { $_.Directory.Name -ne "FullBackup" } |
         ForEach-Object { [void]$preExistingCodes.Add($_.BaseName) }
+    # Maps an exe's exact full path to the profile code already pointing at it
+    # (if any). This is a stronger, name-independent signal than fuzzy-matching
+    # the folder name against candidate profile codes: it catches a folder
+    # whose correct profile is already configured even when that profile's own
+    # code never scores high enough against the folder name to be picked
+    # automatically (e.g. a generic/typo'd code like "Primevil" for "Primeval
+    # Hunt"), and even when the correct profile was never a fuzzy-match
+    # candidate at all because its own ExecutableName differs from this exe's
+    # filename (e.g. "Nosferatu" not appearing among the "main.exe" candidates
+    # for Nosferatu Lilinor). See issue #9.
+    $gamePathIndex = [System.Collections.Generic.Dictionary[string,string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    Get-ChildItem -LiteralPath $userProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Directory.Name -ne "FullBackup" } |
+        ForEach-Object {
+            try {
+                $existingDoc = Read-Xml $_.FullName
+                $gpNode = $existingDoc.GameProfile.SelectSingleNode("GamePath")
+                if ($null -ne $gpNode -and $gpNode.InnerText) {
+                    $gamePathIndex[$gpNode.InnerText.TrimEnd('\')] = $_.BaseName
+                }
+            } catch {
+                Write-Log ("Register-Games: WARNING -- could not parse existing UserProfile '$($_.BaseName)' while building GamePath index: $_")
+            }
+        }
     $installBase    = $installFolder.TrimEnd('\')
     $matchedFolders = @{}   # folders that matched at least one profile key
     $allExeFolders  = @{}   # folders containing any recognisable executable
@@ -4500,6 +4524,21 @@ function Register-Games {
         # Same executable name maps to more than one profile.
         # Attempt folder-name fuzzy matching before giving up.
         if ($matchList.Count -gt 1) {
+            # Exact-path check first, ahead of any fuzzy-name matching: if an
+            # existing UserProfile already points its GamePath at this exact
+            # exe, this folder is fully handled regardless of whether that
+            # profile's own code name fuzzy-matches the folder name at all, or
+            # was even among $matchList's candidates. See issue #9.
+            if ($gamePathIndex.ContainsKey($exe.FullName)) {
+                $existingCode = $gamePathIndex[$exe.FullName]
+                if (-not $seenCodes.ContainsKey($existingCode)) {
+                    if ($already -notcontains $existingCode) { [void]$already.Add($existingCode) }
+                    $seenCodes[$existingCode] = $true
+                    $codeClaimedBy[$existingCode] = "(already registered in TeknoParrotUI)"
+                }
+                continue
+            }
+
             # $folderKey has the RetroBat suffix stripped, ready to normalise.
             $normFolder  = Get-NormalizedGameKey $folderKey
 
