@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.11 BETA
+# TeknoParrot Manager  |  v0.99.15 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.14"
+$ScriptVersion = "0.99.15"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -690,13 +690,7 @@ function Select-GamesInteractive {
 
     # Build a normalised folder map of what is already extracted in the
     # destination, using the same convention-agnostic logic as AutoSync.
-    $normalizedFolderMap = @{}
-    foreach ($dir in (Get-ChildItem -LiteralPath $installFolder -Directory -ErrorAction SilentlyContinue)) {
-        $norm = ($dir.Name -replace '\.(teknoparrot|parrot|game)$', '') -replace ' (?=[\[\(])', ''
-        if (-not $normalizedFolderMap.ContainsKey($norm)) {
-            $normalizedFolderMap[$norm] = $dir.FullName
-        }
-    }
+    $normalizedFolderMap = Get-StagingFolderMap $installFolder
 
     # Split the ZIP list into already-extracted (non-empty folder exists) and
     # not-yet-extracted. The picker only shows the not-yet-extracted ones.
@@ -881,13 +875,7 @@ function Select-GamesInteractiveCombined {
                      Where-Object { $_.BaseName -notlike '!TeknoParrot Collection*' } |
                      Sort-Object BaseName)
 
-    $normalizedFolderMap = @{}
-    foreach ($dir in (Get-ChildItem -LiteralPath $installFolder -Directory -ErrorAction SilentlyContinue)) {
-        $norm = ($dir.Name -replace '\.(teknoparrot|parrot|game)$', '') -replace ' (?=[\[\(])', ''
-        if (-not $normalizedFolderMap.ContainsKey($norm)) {
-            $normalizedFolderMap[$norm] = $dir.FullName
-        }
-    }
+    $normalizedFolderMap = Get-StagingFolderMap $installFolder
 
     # Split each source into already-extracted and available. Track which source owns each entry.
     $sourceMap   = @{}
@@ -2709,13 +2697,7 @@ function Invoke-AutoSync {
     # "Game(ver)[Platform][TP]" (new convention) map to the same key.
     # This prevents AutoSync from creating duplicate folders when a game was
     # extracted under the old naming convention and the ZIP now uses the new one.
-    $normalizedFolderMap = @{}
-    foreach ($dir in (Get-ChildItem -LiteralPath $installFolder -Directory -ErrorAction SilentlyContinue)) {
-        $norm = ($dir.Name -replace '\.(teknoparrot|parrot|game)$', '') -replace ' (?=[\[\(])', ''
-        if (-not $normalizedFolderMap.ContainsKey($norm)) {
-            $normalizedFolderMap[$norm] = $dir.FullName
-        }
-    }
+    $normalizedFolderMap = Get-StagingFolderMap $installFolder
 
     foreach ($zip in $zipFiles) {
         $rawName    = [System.IO.Path]::GetFileNameWithoutExtension($zip.Name)
@@ -2783,7 +2765,15 @@ function Invoke-AutoSync {
         } elseif ([long]$stored.NasSize -ne $zip.Length -or $stored.NasLastModified -ne $nasModStr) {
             $needsSync = $true; $reason = "changed on NAS"
         } elseif (-not (($stored.LocalPath -and (Test-Path -LiteralPath $stored.LocalPath)) -or (Test-Path -LiteralPath $extractDir))) {
-            $needsSync = $true; $reason = "not extracted"
+            if ($matchedFolder -and (Test-Path -LiteralPath $matchedFolder)) {
+                # Folder was renamed since the last sync (e.g. a manual PATH
+                # TOO LONG short-name rename per ACTION REQUIRED, issue #13)
+                # -- found via the normalised map. Heal the stored path so
+                # future runs hit the Test-Path fast path above directly.
+                $stored.LocalPath = $matchedFolder
+            } else {
+                $needsSync = $true; $reason = "not extracted"
+            }
         } elseif (Test-Path -LiteralPath $sentinel) {
             $needsSync = $true; $reason = "incomplete previous extraction"
         }
@@ -5514,6 +5504,35 @@ $RawThrillsPathLimits = @{
     # Standalone case, not a Raw Thrills title but the same kind of
     # hard-coded limit -- TPUI itself shows a warning dialog for this one.
     'YugiohDT6U'       = @{ Limit = 64; Suggested = 'YUGIOH' }
+}
+
+# Builds the normalised folder-name -> path map used by the extraction
+# pickers (Select-GamesInteractive, Select-GamesInteractiveCombined) and
+# Invoke-AutoSync to decide whether a ZIP's game is already extracted.
+# Normalisation strips the .teknoparrot/.parrot/.game suffix and removes a
+# space immediately before ( or [ so old- and new-convention folder names
+# for the same game map to the same key (see callers' original comments).
+#
+# Also registers each PATH TOO LONG entry's original Code under its
+# Suggested short name's existing folder (issue #13): a folder manually
+# renamed to the short name this script itself recommended in ACTION
+# REQUIRED (e.g. "AliensArmageddon" -> "ALIENS") no longer normalises to
+# match the ZIP's original name, so without this it gets reported as
+# "available to extract" even though it is already there.
+function Get-StagingFolderMap {
+    param([string]$installFolder)
+    $map = @{}
+    foreach ($dir in (Get-ChildItem -LiteralPath $installFolder -Directory -ErrorAction SilentlyContinue)) {
+        $norm = ($dir.Name -replace '\.(teknoparrot|parrot|game)$', '') -replace ' (?=[\[\(])', ''
+        if (-not $map.ContainsKey($norm)) { $map[$norm] = $dir.FullName }
+    }
+    foreach ($code in $RawThrillsPathLimits.Keys) {
+        $suggested = $RawThrillsPathLimits[$code].Suggested
+        if ($map.ContainsKey($suggested) -and -not $map.ContainsKey($code)) {
+            $map[$code] = $map[$suggested]
+        }
+    }
+    return $map
 }
 
 # Specific games need a SPECIFIC OLD CRC of a specific file -- a newer

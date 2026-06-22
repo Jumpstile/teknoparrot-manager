@@ -7,6 +7,19 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.15 BETA  (2026-06-22)
+-------------------------------------------------------------------------------
+
+  Fix: AutoSync and the extraction pickers (modes 1/2) could report a game
+  as "available to extract" even though it was already extracted, if its
+  staging folder had been manually renamed to the short name recommended
+  by a PATH TOO LONG warning in ACTION REQUIRED (e.g. AliensArmageddon ->
+  ALIENS). The folder-matching logic only compared normalised names, and a
+  renamed folder no longer matched the ZIP's original name. Already-synced
+  games are now also self-healed: AutoSync recognises the renamed folder
+  and updates its stored path automatically.
+
+-------------------------------------------------------------------------------
   v0.99.14 BETA  (2026-06-22)
 -------------------------------------------------------------------------------
 
