@@ -7,6 +7,20 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.12 BETA  (2026-06-22)
+-------------------------------------------------------------------------------
+
+  Fix: control propagation's retroactive Input API correction (added in
+  v0.99.10) could never actually reach the games it was meant to fix.
+  Any profile bound well enough to qualify for the API check also
+  qualified, at the same threshold, to become a reference archetype for
+  its control family -- and an archetype was always skipped outright, so
+  the API check never ran on it. The fix now still never copies button
+  bindings into an archetype, but its own Input API is checked and
+  corrected against the best-matching other archetype just like any
+  other already-bound profile.
+
+-------------------------------------------------------------------------------
   v0.99.11 BETA  (2026-06-21)
 -------------------------------------------------------------------------------
 
