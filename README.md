@@ -564,12 +564,13 @@ Edit `TeknoParrot-Manager.overrides.json` (created empty on first run) to fine-t
 
 ```json
 {
-  "noSync":         ["ZipBaseName1", "ZipBaseName2"],
-  "onlySync":       ["ZipBaseName1", "ZipBaseName2"],
-  "noPropagate":    ["ProfileCode1", "ProfileCode2"],
-  "forceArchetype": { "ProfileCode": "ReferenceProfileCode" },
-  "familyOverride": { "ProfileCode": "trackball" },
-  "datFile":        "C:\\full\\path\\to\\collection.dat"
+  "noSync":             ["ZipBaseName1", "ZipBaseName2"],
+  "onlySync":           ["ZipBaseName1", "ZipBaseName2"],
+  "noPropagate":        ["ProfileCode1", "ProfileCode2"],
+  "forceArchetype":     { "ProfileCode": "ReferenceProfileCode" },
+  "familyOverride":     { "ProfileCode": "trackball" },
+  "canonicalArchetype": { "button": "ReferenceProfileCode" },
+  "datFile":            "C:\\full\\path\\to\\collection.dat"
 }
 ```
 
@@ -580,9 +581,16 @@ Edit `TeknoParrot-Manager.overrides.json` (created empty on first run) to fine-t
 | `noPropagate` | Profile codes to leave untouched during control propagation |
 | `forceArchetype` | Pin a game to copy controls from a specific reference game |
 | `familyOverride` | Override the auto-detected control family (`button`, `driving`, `lightgun`, `trackball`, `analog`, `spinner`) |
+| `canonicalArchetype` | The one reference game per control family whose Input API is treated as correct — every other reference game in that family gets its Input API corrected to match it. See "Reference game Input API mismatches" below. |
 | `datFile` | Full path to a dat file — overrides the path from setup |
 
 All keys are optional. Leave any key empty or omit it entirely.
+
+### Reference game Input API mismatches
+
+A "reference game" (a profile with enough controls already bound to copy from) is normally never modified by this script — not its bindings, and not its Input API. If two reference games in the same control family end up on different Input APIs (e.g. one set up with an XInput pad, another with an arcade encoder), the script has no reliable way to tell which one is actually correct, so by default it leaves both alone.
+
+If you know which one is right, set it as the `canonicalArchetype` for that family. On the next control-propagation run, every OTHER reference game in that family gets its Input API corrected to match — its bindings are still never touched, only the Input API field. Leave a family unset to keep the old behavior (no reference game in that family is ever modified).
 
 ---
 
@@ -763,4 +771,4 @@ TeknoParrot must be set up as an emulator in HyperSpin 2 first. The title must c
 
 ---
 
-> v0.99.16 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v0.99.17 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.

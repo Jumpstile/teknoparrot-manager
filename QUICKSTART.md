@@ -477,7 +477,7 @@ Not yet confirmed bugs — tracked on GitHub so you can follow progress or add y
 | File | Location | Purpose |
 |------|----------|---------|
 | `TeknoParrot-Manager.config.json` | Scripts folder | Saved folders and settings (Postgres password stored DPAPI-encrypted) |
-| `TeknoParrot-Manager.overrides.json` | Scripts folder | Per-game tweaks (noSync, onlySync, noPropagate, forceArchetype, familyOverride, datFile) |
+| `TeknoParrot-Manager.overrides.json` | Scripts folder | Per-game tweaks (noSync, onlySync, noPropagate, forceArchetype, familyOverride, canonicalArchetype, datFile) |
 | `TeknoParrot-Manager.log` | Scripts folder | Log of every run (includes a download audit trail: source/filename/version/SHA256 for fetched binaries) |
 | `TeknoParrot-Manager.syncstate.json` | Staging folder | Tracks extracted ZIPs — delete to re-extract all |
 | `TeknoParrot-Manager-controls.txt` | Scripts folder | Controls state after every run |

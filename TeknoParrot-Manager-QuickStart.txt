@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.99.16 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.99.17 BETA  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -589,8 +589,9 @@
   TeknoParrot-Manager.config.json      Saved folders and settings.
   TeknoParrot-Manager.overrides.json   Optional per-game tweaks (noSync,
                                        onlySync, noPropagate, forceArchetype,
-                                       familyOverride, datFile). See README
-                                       section PER-GAME OVERRIDES.
+                                       familyOverride, canonicalArchetype,
+                                       datFile). See README section
+                                       PER-GAME OVERRIDES.
   TeknoParrot-Manager.log              Log of every run. Includes a download
                                        audit trail (source/filename/version/
                                        SHA256) for fetched binaries.

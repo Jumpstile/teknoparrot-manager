@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.16 BETA
+# TeknoParrot Manager  |  v0.99.17 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.16"
+$ScriptVersion = "0.99.17"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -6023,7 +6023,7 @@ function Build-ArchetypePool {
 # buttons, carry its Input API, and record what was bound vs left manual.
 # Reference games are never modified. Returns a list of per-game report objects.
 function Invoke-ControlPropagation {
-    param([string]$userProfilesDir, $pool, [int]$minBound, $noPropagate = @(), $forceArchetype = @{}, $familyOverride = @{}, [bool]$DryRun = $false)
+    param([string]$userProfilesDir, $pool, [int]$minBound, $noPropagate = @(), $forceArchetype = @{}, $familyOverride = @{}, $canonicalArchetype = @{}, [bool]$DryRun = $false)
 
     $reports     = New-Object System.Collections.ArrayList
     $files       = Get-ChildItem -LiteralPath $userProfilesDir -Filter *.xml -File -ErrorAction SilentlyContinue
@@ -6031,12 +6031,13 @@ function Invoke-ControlPropagation {
     foreach ($s in $pool) { $sourcePaths[$s.Path] = $true }
 
     foreach ($f in $files) {
-        # An archetype is never modified -- not its bindings, and (after a
-        # v0.99.12 regression, see issue #1) not its Input API either.
-        # v0.99.12 tried letting an archetype's own Input API be "corrected"
-        # against the best non-self overlap match, reasoning that an
-        # archetype can itself be sitting on a stale API. In practice this
-        # actively broke a real tester's library: almost every well-bound
+        # An archetype's BINDINGS are never modified, full stop. Its own
+        # Input API may only be corrected against a family's user-
+        # designated canonical archetype (canonicalArchetype in
+        # overrides.json) -- never a heuristic guess. v0.99.12 tried
+        # guessing via best non-self button overlap, reasoning that an
+        # archetype can itself be sitting on a stale API, and actively
+        # broke a real tester's library: almost every well-bound
         # button-family profile is simultaneously a pool member (the same
         # $minBound threshold drives both), so the "best overlap" heuristic
         # -- which is fine for deciding what bindings to COPY -- ended up
@@ -6045,12 +6046,40 @@ function Invoke-ControlPropagation {
         # Confirmed in a real run: StreetFighterIII3rdStrike, the tester's
         # own deliberately-configured MergedInput reference, got silently
         # flipped to DirectInput because a different archetype (BBCF) won
-        # the overlap comparison. Reverted to the original, safe behavior:
-        # an archetype's Input API is left alone, full stop, even though
-        # that means the "already bound" branch below can in practice only
-        # ever be reached by a non-archetype profile (none currently exist
-        # at this threshold) -- a known limitation, not solved this round.
-        if ($sourcePaths.ContainsKey($f.FullName)) { continue }
+        # the overlap comparison. Reverted in v0.99.14. canonicalArchetype
+        # (v0.99.17) sidesteps that exact problem: correction only ever
+        # runs when the user has explicitly named the one correct archetype
+        # for that family, and only ever pulls from that one designated
+        # source -- never a guess. See issue #1.
+        if ($sourcePaths.ContainsKey($f.FullName)) {
+            $selfEntry = $null
+            foreach ($s in $pool) { if ($s.Path -eq $f.FullName) { $selfEntry = $s; break } }
+            if ($selfEntry -and $canonicalArchetype.ContainsKey($selfEntry.Family)) {
+                $canonCode = [string]$canonicalArchetype[$selfEntry.Family]
+                if ($selfEntry.Code -ne $canonCode) {
+                    $canon = $null
+                    foreach ($s in $pool) { if ($s.Code -eq $canonCode) { $canon = $s; break } }
+                    if ($canon -and $canon.InputApi -and $canon.InputApi -ne $selfEntry.InputApi) {
+                        try { $canonDoc = Read-Xml $f.FullName }
+                        catch { Write-Log "Propagation: could not parse $($f.Name) for canonical Input API check"; continue }
+                        if ($null -ne $canonDoc.GameProfile -and (Set-ProfileInputApi $canonDoc $canon.InputApi)) {
+                            try {
+                                Save-XmlMaybe $canonDoc $f.FullName $DryRun
+                                [void]$reports.Add([pscustomobject]@{
+                                    Code = $f.BaseName; Status = "api-fixed-canonical"
+                                    Archetype = $canon.Code; ArchetypeApi = $canon.InputApi
+                                })
+                                Write-Log "Propagation: $($f.BaseName) (archetype) Input API corrected to $($canon.InputApi) to match user-designated canonical archetype $($canon.Code) for family $($selfEntry.Family)"
+                            } catch {
+                                Write-Log "Propagation: FAILED to save canonical Input API fix for $($f.Name) -- $_"
+                                [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "save-failed"; Archetype = $canon.Code })
+                            }
+                        }
+                    }
+                }
+            }
+            continue
+        }
         if ($noPropagate -contains $f.BaseName) {
             [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "skipped-override" })
             continue
@@ -7699,7 +7728,13 @@ function Write-ControlsStatus {
         }
 
         $status = ""; $reference = ""
-        if     ($poolCodes.ContainsKey($f.BaseName))  { $status = "REFERENCE" }
+        if ($poolCodes.ContainsKey($f.BaseName)) {
+            $status = "REFERENCE"
+            if ($reportMap.ContainsKey($f.BaseName) -and $reportMap[$f.BaseName].Status -eq "api-fixed-canonical") {
+                $r = $reportMap[$f.BaseName]
+                $status = "REFERENCE (Input API corrected)"; $reference = $r.Archetype
+            }
+        }
         elseif ($reportMap.ContainsKey($f.BaseName)) {
             $r = $reportMap[$f.BaseName]
             switch ($r.Status) {
@@ -8110,23 +8145,38 @@ elseif ($includeSupplementary -and $eggmanDatZip) { Write-Host "  Supplementary 
 #                    control family. Valid values: button, driving, lightgun,
 #                    trackball, analog, spinner. Fixes mis-classified titles
 #                    (e.g. FamilyGuyBowling detected as lightgun; set "trackball").
+#   canonicalArchetype : { "family": "ProfileCode" } -- the one archetype in
+#                    that family whose Input API is treated as correct. An
+#                    archetype is otherwise never modified (see issue #1);
+#                    this is the one explicit, user-chosen exception -- every
+#                    OTHER archetype in that same family gets its own Input
+#                    API corrected to match the designated one, if different.
+#                    Deliberately NOT a heuristic guess (v0.99.12 tried
+#                    guessing via best button-overlap and broke a real
+#                    tester's library by cross-correcting independently
+#                    correct archetypes against each other -- reverted in
+#                    v0.99.14). Leave unset for a family to never correct
+#                    any archetype in it.
 
-$overridesPath     = Join-Path $PSScriptRoot "TeknoParrot-Manager.overrides.json"
-$noSyncList        = @()
-$onlySyncList      = @()
-$noPropagateList   = @()
-$forceArchetypeMap = @{}
-$familyOverrideMap = @{}
+$overridesPath         = Join-Path $PSScriptRoot "TeknoParrot-Manager.overrides.json"
+$noSyncList            = @()
+$onlySyncList          = @()
+$noPropagateList       = @()
+$forceArchetypeMap     = @{}
+$familyOverrideMap     = @{}
+$canonicalArchetypeMap = @{}
+$validFamilies         = @('button','driving','lightgun','trackball','analog','spinner')
 
 if (-not (Test-Path -LiteralPath $overridesPath)) {
     $ovTemplate = [ordered]@{
-        _comment       = "noSync/onlySync/noPropagate: lists of ZIP base names (without .zip). onlySync acts as a whitelist -- only listed games are extracted. forceArchetype: { GameCode: ArchetypeCode } pins a game to a specific reference game. familyOverride: { GameCode: 'button'|'driving'|'lightgun'|'trackball'|'analog' } overrides the auto-detected control family (fixes mis-classified games like FamilyGuyBowling). datFile: full path to a No-Intro TeknoParrot dat file; when set the script uses it to auto-register games with shared executable names (like game.exe) without needing fuzzy matching."
-        noSync         = @()
-        onlySync       = @()
-        noPropagate    = @()
-        forceArchetype = [ordered]@{}
-        familyOverride = [ordered]@{}
-        datFile        = ""
+        _comment           = "noSync/onlySync/noPropagate: lists of ZIP base names (without .zip). onlySync acts as a whitelist -- only listed games are extracted. forceArchetype: { GameCode: ArchetypeCode } pins a game to a specific reference game. familyOverride: { GameCode: 'button'|'driving'|'lightgun'|'trackball'|'analog' } overrides the auto-detected control family (fixes mis-classified games like FamilyGuyBowling). canonicalArchetype: { family: ArchetypeCode } the one archetype per family whose Input API is treated as correct -- every other archetype in that family gets its Input API corrected to match it. datFile: full path to a No-Intro TeknoParrot dat file; when set the script uses it to auto-register games with shared executable names (like game.exe) without needing fuzzy matching."
+        noSync             = @()
+        onlySync           = @()
+        noPropagate        = @()
+        forceArchetype     = [ordered]@{}
+        familyOverride     = [ordered]@{}
+        canonicalArchetype = [ordered]@{}
+        datFile            = ""
     }
     try { [System.IO.File]::WriteAllText($overridesPath, ($ovTemplate | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false)) }
     catch { Write-Log "Overrides: could not create template -- $_" }
@@ -8142,7 +8192,6 @@ if (Test-Path -LiteralPath $overridesPath) {
             foreach ($p in $ov.forceArchetype.PSObject.Properties) { $forceArchetypeMap[$p.Name] = [string]$p.Value }
         }
         if ($ov.familyOverride) {
-            $validFamilies = @('button','driving','lightgun','trackball','analog','spinner')
             foreach ($p in $ov.familyOverride.PSObject.Properties) {
                 $fv = [string]$p.Value
                 if ($validFamilies -contains $fv) {
@@ -8153,16 +8202,27 @@ if (Test-Path -LiteralPath $overridesPath) {
                 }
             }
         }
+        if ($ov.canonicalArchetype) {
+            foreach ($p in $ov.canonicalArchetype.PSObject.Properties) {
+                $fam = $p.Name
+                if ($validFamilies -contains $fam) {
+                    $canonicalArchetypeMap[$fam] = [string]$p.Value
+                } else {
+                    Write-Host ("  WARNING: canonicalArchetype has unknown family '{0}' -- ignored." -f $fam) -ForegroundColor Yellow
+                    Write-Log "Overrides: canonicalArchetype has unknown family '$fam' -- ignored."
+                }
+            }
+        }
         if ($ov.datFile -and -not [string]::IsNullOrWhiteSpace([string]$ov.datFile)) {
             $datFilePath = [string]$ov.datFile
         }
-        $ovCount = $noSyncList.Count + $onlySyncList.Count + $noPropagateList.Count + $forceArchetypeMap.Count + $familyOverrideMap.Count
+        $ovCount = $noSyncList.Count + $onlySyncList.Count + $noPropagateList.Count + $forceArchetypeMap.Count + $familyOverrideMap.Count + $canonicalArchetypeMap.Count
         if ($ovCount -gt 0 -or $datFilePath) {
             Write-Host ""
             $datLabel = if ($datFilePath) { ", datFile=yes" } else { "" }
-            Write-Host "Overrides: noSync=$($noSyncList.Count), onlySync=$($onlySyncList.Count), noPropagate=$($noPropagateList.Count), pinned=$($forceArchetypeMap.Count), familyOverride=$($familyOverrideMap.Count)$datLabel" -ForegroundColor DarkCyan
+            Write-Host "Overrides: noSync=$($noSyncList.Count), onlySync=$($onlySyncList.Count), noPropagate=$($noPropagateList.Count), pinned=$($forceArchetypeMap.Count), familyOverride=$($familyOverrideMap.Count), canonicalArchetype=$($canonicalArchetypeMap.Count)$datLabel" -ForegroundColor DarkCyan
         }
-        Write-Log "Overrides: noSync=$($noSyncList.Count) onlySync=$($onlySyncList.Count) noPropagate=$($noPropagateList.Count) pinned=$($forceArchetypeMap.Count) familyOverride=$($familyOverrideMap.Count) datFile=$datFilePath"
+        Write-Log "Overrides: noSync=$($noSyncList.Count) onlySync=$($onlySyncList.Count) noPropagate=$($noPropagateList.Count) pinned=$($forceArchetypeMap.Count) familyOverride=$($familyOverrideMap.Count) canonicalArchetype=$($canonicalArchetypeMap.Count) datFile=$datFilePath"
     } catch {
         Write-Host "WARNING: could not read TeknoParrot-Manager.overrides.json; ignoring overrides." -ForegroundColor Yellow
         Write-Log "Overrides: parse error -- ignoring."
@@ -9355,7 +9415,7 @@ if ($pool.Count -eq 0) {
         $goCtl = (Read-Host " Propagate controls now? (Y/N)").Trim()
     }
     if ($goCtl.ToUpper() -eq "Y") {
-        $reports = Invoke-ControlPropagation -userProfilesDir $userProfilesDir -pool $pool -minBound $MinBoundForArchetype -noPropagate $noPropagateList -forceArchetype $forceArchetypeMap -familyOverride $familyOverrideMap -DryRun $dryRunActive
+        $reports = Invoke-ControlPropagation -userProfilesDir $userProfilesDir -pool $pool -minBound $MinBoundForArchetype -noPropagate $noPropagateList -forceArchetype $forceArchetypeMap -familyOverride $familyOverrideMap -canonicalArchetype $canonicalArchetypeMap -DryRun $dryRunActive
         Write-Host ""
         Write-Host " Results:" -ForegroundColor Green
         foreach ($r in $reports) {
@@ -9376,12 +9436,13 @@ if ($pool.Count -eq 0) {
                 }
                 "no-archetype"     { Write-Host ("    {0}  -- no '{1}' example game bound yet; controls will be set once you bind one (see ACTION REQUIRED)" -f $r.Code, $r.Family) -ForegroundColor Yellow }
                 "api-fixed"        { Write-Host ("    {0}  -- already bound; Input API corrected to '{1}' (matched from {2})" -f $r.Code, $r.ArchetypeApi, $r.Archetype) -ForegroundColor Green }
+                "api-fixed-canonical" { Write-Host ("    {0}  -- archetype; Input API corrected to '{1}' (matched from canonical archetype {2})" -f $r.Code, $r.ArchetypeApi, $r.Archetype) -ForegroundColor Green }
                 "skipped-bound"    { Write-Host ("    {0}  -- already bound, left unchanged" -f $r.Code) -ForegroundColor DarkGray }
                 "skipped-override" { Write-Host ("    {0}  -- skipped (per-game override)" -f $r.Code) -ForegroundColor DarkGray }
                 "save-failed"      { Write-Host ("    {0}  -- ERROR saving (see TeknoParrot-Manager.log)" -f $r.Code) -ForegroundColor Red }
             }
         }
-        $nb               = @($reports | Where-Object { $_.Status -eq "bound" -or $_.Status -eq "api-fixed" }).Count
+        $nb               = @($reports | Where-Object { $_.Status -eq "bound" -or $_.Status -eq "api-fixed" -or $_.Status -eq "api-fixed-canonical" }).Count
         $noArchetypeItems = @($reports | Where-Object { $_.Status -eq "no-archetype" })
         Write-Host ""
         Write-Host (" Games updated: {0}" -f $nb) -ForegroundColor Green

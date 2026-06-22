@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.99.16 BETA
+  TeknoParrot Manager  |  v0.99.17 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -1610,12 +1610,13 @@
   any text editor. All keys are optional:
 
     {
-      "noSync":         ["ZipBaseName1", "ZipBaseName2"],
-      "onlySync":       ["ZipBaseName1", "ZipBaseName2"],
-      "noPropagate":    ["ProfileCode1", "ProfileCode2"],
-      "forceArchetype": { "ProfileCode": "ReferenceProfileCode" },
-      "familyOverride": { "ProfileCode": "trackball" },
-      "datFile":        "C:\\full\\path\\to\\collection.dat"
+      "noSync":             ["ZipBaseName1", "ZipBaseName2"],
+      "onlySync":           ["ZipBaseName1", "ZipBaseName2"],
+      "noPropagate":        ["ProfileCode1", "ProfileCode2"],
+      "forceArchetype":     { "ProfileCode": "ReferenceProfileCode" },
+      "familyOverride":     { "ProfileCode": "trackball" },
+      "canonicalArchetype": { "button": "ReferenceProfileCode" },
+      "datFile":            "C:\\full\\path\\to\\collection.dat"
     }
 
     noSync          ZIP base names (file name without .zip) to always skip
@@ -1644,6 +1645,23 @@
                     NOTE: "spinner" is never auto-detected. Spinner games
                     must always be assigned explicitly via familyOverride.
                     Format: { "GameProfileCode": "trackball" }
+
+    canonicalArchetype  A reference game (one with enough controls already
+                    bound to copy from) is normally never modified -- not its
+                    bindings, and not its Input API. If two reference games in
+                    the same control family end up on different Input APIs
+                    (for example one set up with an XInput pad, another with
+                    an arcade encoder), the script has no reliable signal for
+                    which one is actually correct, so by default both are left
+                    alone. If you know which one is right, name it here as the
+                    canonical archetype for that family. On the next control
+                    propagation run, every OTHER reference game in that family
+                    gets its Input API corrected to match -- bindings are
+                    still never touched, only the Input API field. Leave a
+                    family unset to keep the old behaviour (no reference game
+                    in that family is ever modified).
+                    Format: { "button": "ReferenceProfileCode" }
+                    Valid family names: same six as familyOverride above.
 
     datFile         Full path to a No-Intro TeknoParrot dat file (for example
                     the Eggman/RomVault collection dat). Overrides the dat path
@@ -2052,6 +2070,6 @@
 
 
 ===============================================================================
-  v0.99.16 BETA -- Test one game after each run.
+  v0.99.17 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================
