@@ -7,6 +7,21 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.14 BETA  (2026-06-22)
+-------------------------------------------------------------------------------
+
+  Fix: reverts a regression introduced in v0.99.12. That release let an
+  archetype's own Input API be retroactively "corrected" against the
+  best-overlap match from other archetypes, but in practice almost every
+  well-bound button-family profile is itself an archetype, so this
+  ended up cross-correcting independently-correct profiles against each
+  other with no real signal for which one was right -- confirmed on a
+  real library, where it flipped a manually-configured MergedInput
+  reference profile to DirectInput because an unrelated profile won an
+  overlap comparison. An archetype's Input API (and bindings) are once
+  again never modified, full stop.
+
+-------------------------------------------------------------------------------
   v0.99.13 BETA  (2026-06-22)
 -------------------------------------------------------------------------------
 

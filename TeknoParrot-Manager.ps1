@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.13"
+$ScriptVersion = "0.99.14"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -5999,21 +5999,26 @@ function Invoke-ControlPropagation {
     foreach ($s in $pool) { $sourcePaths[$s.Path] = $true }
 
     foreach ($f in $files) {
-        # An archetype's own buttons are the literal source of truth for
-        # everyone else and are never rebound from another profile -- but an
-        # archetype can ALSO be sitting on the wrong Input API itself (e.g. it
-        # got fully bound before the MergedInput materialization fix existed),
-        # and since Build-ArchetypePool uses the same $minBound threshold as
-        # the "already bound" check below, almost every well-bound profile of
-        # a given family is simultaneously a pool member -- meaning the old
-        # unconditional "never touch an archetype" skip here also silently
-        # blocked the Input API retroactive fix from ever reaching the exact
-        # profiles it was added for (issue #1: StreetFighterZero3 was pulled
-        # into the pool once its buttons got bound, so it could never reach
-        # the buttonsAlreadyBound branch below on any later run). Treating an
-        # archetype as "already bound" for API-check purposes only -- never
-        # for button copying -- lets the same retroactive fix reach it too.
-        $isArchetype = $sourcePaths.ContainsKey($f.FullName)
+        # An archetype is never modified -- not its bindings, and (after a
+        # v0.99.12 regression, see issue #1) not its Input API either.
+        # v0.99.12 tried letting an archetype's own Input API be "corrected"
+        # against the best non-self overlap match, reasoning that an
+        # archetype can itself be sitting on a stale API. In practice this
+        # actively broke a real tester's library: almost every well-bound
+        # button-family profile is simultaneously a pool member (the same
+        # $minBound threshold drives both), so the "best overlap" heuristic
+        # -- which is fine for deciding what bindings to COPY -- ended up
+        # cross-correcting unrelated, independently-correct archetypes
+        # against each other with no actual signal for which one is right.
+        # Confirmed in a real run: StreetFighterIII3rdStrike, the tester's
+        # own deliberately-configured MergedInput reference, got silently
+        # flipped to DirectInput because a different archetype (BBCF) won
+        # the overlap comparison. Reverted to the original, safe behavior:
+        # an archetype's Input API is left alone, full stop, even though
+        # that means the "already bound" branch below can in practice only
+        # ever be reached by a non-archetype profile (none currently exist
+        # at this threshold) -- a known limitation, not solved this round.
+        if ($sourcePaths.ContainsKey($f.FullName)) { continue }
         if ($noPropagate -contains $f.BaseName) {
             [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "skipped-override" })
             continue
@@ -6028,7 +6033,7 @@ function Invoke-ControlPropagation {
 
         $alreadyBound = 0
         foreach ($b in $btns) { if (Test-ButtonIsBound $b) { $alreadyBound++ } }
-        $buttonsAlreadyBound = $isArchetype -or ($alreadyBound -ge $minBound)
+        $buttonsAlreadyBound = ($alreadyBound -ge $minBound)
 
         $targetFamily = if ($familyOverride.ContainsKey($f.BaseName)) {
             $familyOverride[$f.BaseName]
@@ -6039,7 +6044,7 @@ function Invoke-ControlPropagation {
         # If this game is pinned to a specific archetype via overrides, use it
         # (this is an explicit user choice, so family is not enforced here).
         $best = $null; $bestOverlap = 0; $forced = $false
-        if (-not $isArchetype -and $forceArchetype.ContainsKey($f.BaseName)) {
+        if ($forceArchetype.ContainsKey($f.BaseName)) {
             $wantCode = [string]$forceArchetype[$f.BaseName]
             foreach ($s in $pool) { if ($s.Code -eq $wantCode) { $best = $s; $forced = $true; break } }
             if ($null -eq $best) {
@@ -6052,12 +6057,8 @@ function Invoke-ControlPropagation {
         # Computed even when this profile's buttons are already bound (below)
         # -- needed there too, to check whether the archetype's Input API can
         # be retroactively applied without touching any button binding.
-        # Excludes itself (relevant only when $f is itself a pool member) --
-        # otherwise an archetype would trivially "best match" itself with
-        # perfect overlap and never get compared against anything else.
         if ($null -eq $best) {
             foreach ($s in $pool) {
-                if ($s.Path -eq $f.FullName) { continue }
                 if ($s.Family -ne $targetFamily) { continue }
                 $ov = 0
                 foreach ($b in $btns) { $k = Get-ButtonKey $b; if ($k -and $s.Map.ContainsKey($k)) { $ov++ } }
