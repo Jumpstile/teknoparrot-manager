@@ -19,3 +19,6 @@ config.json
 TeknoParrot-Manager-ActionItems.txt
 TeknoParrot-Manager-crosshairs.json
 *.log
+
+# Local forum-post draft -- not part of the project, never meant to be public
+forum-post-beta-testing.txt
