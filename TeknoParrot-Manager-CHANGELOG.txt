@@ -7,6 +7,20 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.16 BETA  (2026-06-22)
+-------------------------------------------------------------------------------
+
+  Fix: Register-Games could fail to auto-register a game whose executable
+  name is shared by several profiles (e.g. sdaemon.exe across multiple Raw
+  Thrills titles) if its staging folder had been renamed to the short name
+  recommended by a PATH TOO LONG warning in ACTION REQUIRED (e.g.
+  NicktoonsNitro -> NTN). The folder-vs-profile-code fuzzy match never knew
+  about that rename, so the renamed folder no longer resembled its actual
+  profile code closely enough to clear the auto-match threshold and was
+  reported as needing manual registration instead. The fuzzy match now also
+  tries the recommended short name as an alias for each candidate profile.
+
+-------------------------------------------------------------------------------
   v0.99.15 BETA  (2026-06-22)
 -------------------------------------------------------------------------------
 

@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.15 BETA
+# TeknoParrot Manager  |  v0.99.16 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.15"
+$ScriptVersion = "0.99.16"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -4645,6 +4645,19 @@ function Register-Games {
                 $normCode = Get-NormalizedGameKey $cand.Code
                 $score    = Get-DiceSimilarity $normFolder $normCode
                 if ($score -gt $bestFuzzyScore) { $bestFuzzyScore = $score; $bestFuzzy = $cand }
+
+                # A folder renamed to the short name this script itself suggested
+                # for a PATH TOO LONG warning (e.g. NicktoonsNitro -> NTN) no
+                # longer resembles the full profile code at all, so also try the
+                # $RawThrillsPathLimits alias when this candidate has one. Same
+                # rename-alias concept as Get-StagingFolderMap, applied here
+                # because this is a separate fuzzy-match call site it never
+                # touched. See issue #13.
+                if ($RawThrillsPathLimits.ContainsKey($cand.Code)) {
+                    $normAlias  = Get-NormalizedGameKey $RawThrillsPathLimits[$cand.Code].Suggested
+                    $aliasScore = Get-DiceSimilarity $normFolder $normAlias
+                    if ($aliasScore -gt $bestFuzzyScore) { $bestFuzzyScore = $aliasScore; $bestFuzzy = $cand }
+                }
             }
 
             if ($bestFuzzyScore -ge $FuzzyAutoThreshold -and $null -ne $bestFuzzy) {
