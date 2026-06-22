@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.12"
+$ScriptVersion = "0.99.13"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -228,9 +228,17 @@ function Get-PrimaryExecutableName {
 # folder, since LaunchSecondExecutableFirst implies TeknoParrot itself runs
 # the second exe from that same working directory. If ExecutableName2 isn't
 # found there, GamePath2 is left unset rather than guessed -- registration of
-# the primary exe still succeeds either way. Never overwrites an already-set
-# GamePath2 (mirrors this function's "never recreate a working setup" stance
-# elsewhere in Register-Games). See issue #8.
+# the primary exe still succeeds either way.
+# Only ever skipped (left alone) when GamePath2 ALREADY points at that exact
+# expected location -- not merely "non-empty". A real tester case (issue #8)
+# had GamePath2 pointing at a totally different, stale folder left over from
+# before a library migration: GamePath itself had since been repaired to the
+# new location (Repair-GamePaths only ever touches GamePath, never
+# GamePath2), but the old "never overwrite a non-empty GamePath2" rule then
+# preserved that stale value forever. Comparing against the expected path
+# (rather than just checking IsNullOrWhiteSpace) lets a stale GamePath2 get
+# corrected the same way a stale GamePath already does, while still never
+# touching one a user has deliberately pointed somewhere else for a reason.
 function Set-SecondaryExecutablePath {
     param([System.Xml.XmlDocument]$Doc, [string]$PrimaryExePath)
 
@@ -240,10 +248,11 @@ function Set-SecondaryExecutablePath {
     $exe2Name = [string]$Doc.GameProfile.ExecutableName2
     if ([string]::IsNullOrWhiteSpace($exe2Name)) { return $false }
 
-    $gp2 = $Doc.GameProfile.SelectSingleNode("GamePath2")
-    if ($null -ne $gp2 -and -not [string]::IsNullOrWhiteSpace($gp2.InnerText)) { return $false }
-
     $exe2Path = Join-Path ([System.IO.Path]::GetDirectoryName($PrimaryExePath)) $exe2Name.Trim()
+
+    $gp2 = $Doc.GameProfile.SelectSingleNode("GamePath2")
+    if ($null -ne $gp2 -and $gp2.InnerText.Trim() -eq $exe2Path) { return $false }
+
     if (-not (Test-Path -LiteralPath $exe2Path -PathType Leaf)) { return $false }
 
     if ($null -eq $gp2) {

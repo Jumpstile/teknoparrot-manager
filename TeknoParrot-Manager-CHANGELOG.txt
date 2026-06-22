@@ -7,6 +7,18 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.13 BETA  (2026-06-22)
+-------------------------------------------------------------------------------
+
+  Fix: GamePath2 backfill for two-executable profiles (Initial D Arcade
+  Stage Zero/Ver. 2 and similar) refused to touch a GamePath2 that was
+  already non-empty, even if it was stale -- e.g. left pointing at a
+  pre-migration folder after GamePath itself had since been repaired to
+  a new location. GamePath2 is now only left alone when it already
+  points at the correct companion exe; a stale value gets corrected the
+  same way a stale GamePath already does.
+
+-------------------------------------------------------------------------------
   v0.99.12 BETA  (2026-06-22)
 -------------------------------------------------------------------------------
 

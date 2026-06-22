@@ -117,17 +117,32 @@ Describe "Set-SecondaryExecutablePath" {
 
         $doc.GameProfile.SelectSingleNode("GamePath2") | Should -BeNullOrEmpty
     }
-    It "never overwrites an already-set GamePath2" {
+    It "never overwrites a GamePath2 that already points at the correct companion exe" {
         $dir = Join-Path $TestDrive "idz-already"
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        $primary = Join-Path $dir "InitialD0_DX11_Nu.exe"
+        [System.IO.File]::WriteAllBytes($primary, [byte[]]@(0))
+        $correctGp2 = Join-Path $dir "amdaemon.exe"
+        [System.IO.File]::WriteAllBytes($correctGp2, [byte[]]@(0))
+
+        $doc = New-TwoExeDoc -gamePath2 $correctGp2
+        Set-SecondaryExecutablePath $doc $primary
+
+        $doc.GameProfile.GamePath2 | Should -Be $correctGp2
+    }
+    It "corrects a stale GamePath2 left pointing at a folder the primary exe no longer lives in" {
+        $dir = Join-Path $TestDrive "idz-stale"
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
         $primary = Join-Path $dir "InitialD0_DX11_Nu.exe"
         [System.IO.File]::WriteAllBytes($primary, [byte[]]@(0))
         [System.IO.File]::WriteAllBytes((Join-Path $dir "amdaemon.exe"), [byte[]]@(0))
 
-        $doc = New-TwoExeDoc -gamePath2 "C:\already\set\amdaemon.exe"
+        # Simulates GamePath having been migrated/repaired to $dir while
+        # GamePath2 was left behind pointing at the old pre-migration location.
+        $doc = New-TwoExeDoc -gamePath2 "F:\old\stale\location\amdaemon.exe"
         Set-SecondaryExecutablePath $doc $primary
 
-        $doc.GameProfile.GamePath2 | Should -Be "C:\already\set\amdaemon.exe"
+        $doc.GameProfile.GamePath2 | Should -Be (Join-Path $dir "amdaemon.exe")
     }
     It "does nothing when ExecutableName2 is blank" {
         $dir = Join-Path $TestDrive "no-exe2-name"
