@@ -22,6 +22,14 @@ BeforeAll {
     foreach ($fn in $functionAsts) {
         . ([scriptblock]::Create($fn.Extent.Text))
     }
+
+    # $FuzzyAutoThreshold/$FuzzyTieMargin are top-level script-scope constants (not
+    # function bodies), so the AST extraction above never picks them up. Functions
+    # like Resolve-BestFuzzyMatch read them as unqualified script-scope variables,
+    # so without this they'd silently read as $null here -- mirror the production
+    # values from TeknoParrot-Manager.ps1 (~line 582/589) explicitly.
+    $FuzzyAutoThreshold = 0.72
+    $FuzzyTieMargin     = 0.1
 }
 
 Describe "Test-PathInside" {
@@ -655,6 +663,56 @@ Describe "Get-DiceSimilarity near-threshold / tie behavior" {
         $score = Get-DiceSimilarity (Get-NormalizedGameKey "InitialDArcadeStageZero") (Get-NormalizedGameKey "InitialDArcadeStageZer0")
         $score | Should -BeGreaterThan 0.6
         $score | Should -BeLessThan 1.0
+    }
+}
+
+Describe "Resolve-BestFuzzyMatch" {
+    # Fix for issue #15: the old inline loop in Register-Games had no tie-break --
+    # whichever candidate scored highest (with ties broken purely by iteration order)
+    # was trusted as an auto-register decision with no signal that a second candidate
+    # was just as plausible. These tests cover the new top-2 tracking and tie margin.
+    It "auto-trusts a clear winner with no close runner-up" {
+        $matchList = @(
+            [pscustomobject]@{ Code = "StreetFighterIII3rdStrike" }
+            [pscustomobject]@{ Code = "MarioKartArcadeGP" }
+        )
+        $result = Resolve-BestFuzzyMatch -NormFolder (Get-NormalizedGameKey "StreetFighterIII3rdStrike") -MatchList $matchList -RawThrillsAliases @{}
+        $result.Best.Code | Should -Be "StreetFighterIII3rdStrike"
+        $result.IsConfidentMatch | Should -BeTrue
+    }
+    It "does not trust a match below the auto-register threshold" {
+        $matchList = @(
+            [pscustomobject]@{ Code = "CompletelyUnrelatedTitle" }
+        )
+        $result = Resolve-BestFuzzyMatch -NormFolder (Get-NormalizedGameKey "SomeOtherGame") -MatchList $matchList -RawThrillsAliases @{}
+        $result.IsConfidentMatch | Should -BeFalse
+    }
+    It "refuses to auto-trust an exact tie between two different candidates" {
+        $matchList = @(
+            [pscustomobject]@{ Code = "VirtuaFighter4" }
+            [pscustomobject]@{ Code = "VirtuaFighter5" }
+        )
+        # A folder name equidistant from both candidates -- same score for each.
+        $result = Resolve-BestFuzzyMatch -NormFolder (Get-NormalizedGameKey "VirtuaFighter") -MatchList $matchList -RawThrillsAliases @{}
+        $result.SecondScore | Should -Be $result.BestScore
+        $result.IsConfidentMatch | Should -BeFalse
+    }
+    It "refuses to auto-trust a near-tie even when the best score clears the threshold" {
+        $matchList = @(
+            [pscustomobject]@{ Code = "NicktoonNitro" }    # one char short of the real title
+            [pscustomobject]@{ Code = "NicktoonsNitros" }  # one char long of the real title
+        )
+        $result = Resolve-BestFuzzyMatch -NormFolder (Get-NormalizedGameKey "NicktoonsNitro") -MatchList $matchList -RawThrillsAliases @{}
+        $result.BestScore | Should -BeGreaterThan $FuzzyAutoThreshold
+        ($result.BestScore - $result.SecondScore) | Should -BeLessThan $FuzzyTieMargin
+        $result.IsConfidentMatch | Should -BeFalse
+    }
+    It "still applies the RawThrillsAliases short-name fallback for a single unambiguous candidate" {
+        $matchList = @( [pscustomobject]@{ Code = "NicktoonsNitro" } )
+        $aliases   = @{ NicktoonsNitro = [pscustomobject]@{ Suggested = "NTN" } }
+        $result = Resolve-BestFuzzyMatch -NormFolder (Get-NormalizedGameKey "NTN") -MatchList $matchList -RawThrillsAliases $aliases
+        $result.Best.Code | Should -Be "NicktoonsNitro"
+        $result.IsConfidentMatch | Should -BeTrue
     }
 }
 

@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.18 BETA
+# TeknoParrot Manager  |  v0.99.19 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.18"
+$ScriptVersion = "0.99.19"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -580,6 +580,54 @@ function Get-DiceSimilarity {
 # or above this score is registered automatically; anything below appears in
 # ACTION REQUIRED with the best-guess profile name shown.
 $FuzzyAutoThreshold = 0.72
+
+# Minimum score gap required between the best and runner-up candidate for the
+# best one to be trusted as an auto-register decision. Without this, two
+# different profiles that both happen to score at or above
+# $FuzzyAutoThreshold against the same folder name were resolved purely by
+# which one the candidate loop iterated to last -- no actual signal preferred
+# one over the other. Set to 0.1 (not a tighter value like 0.05) because the
+# audit's own real near-miss example -- a folder one character off from the
+# real title vs. one character over -- produced a gap of ~0.083, which a
+# tighter margin would not have caught. See issue #15.
+$FuzzyTieMargin = 0.1
+
+# Resolves the best fuzzy-match candidate for $NormFolder among $MatchList
+# (profiles that share one generic executable name, e.g. "game.exe"),
+# applying the $RawThrillsAliases short-name fallback the same way the
+# original inline Register-Games loop did. Tracks the runner-up score too, so
+# a near-tie at/above $FuzzyAutoThreshold can be told apart from a clear,
+# unambiguous winner -- IsConfidentMatch is false for both "below threshold"
+# and "too close to call", and the caller already has a safe fallback path
+# (dat lookup, then manual-registration ACTION REQUIRED) for both. See
+# issue #15.
+function Resolve-BestFuzzyMatch {
+    param([string]$NormFolder, [array]$MatchList, [hashtable]$RawThrillsAliases)
+    $best = $null; $bestScore = 0.0; $secondScore = 0.0
+    foreach ($cand in $MatchList) {
+        $normCode = Get-NormalizedGameKey $cand.Code
+        $score    = Get-DiceSimilarity $NormFolder $normCode
+        if ($RawThrillsAliases.ContainsKey($cand.Code)) {
+            $normAlias  = Get-NormalizedGameKey $RawThrillsAliases[$cand.Code].Suggested
+            $aliasScore = Get-DiceSimilarity $NormFolder $normAlias
+            if ($aliasScore -gt $score) { $score = $aliasScore }
+        }
+        if ($score -gt $bestScore) {
+            $secondScore = $bestScore
+            $bestScore   = $score
+            $best        = $cand
+        } elseif ($score -gt $secondScore) {
+            $secondScore = $score
+        }
+    }
+    $isTie = ($secondScore -gt 0) -and (($bestScore - $secondScore) -lt $FuzzyTieMargin)
+    return [pscustomobject]@{
+        Best             = $best
+        BestScore        = $bestScore
+        SecondScore      = $secondScore
+        IsConfidentMatch = ($null -ne $best) -and ($bestScore -ge $FuzzyAutoThreshold) -and -not $isTie
+    }
+}
 
 # Scans $folder recursively for files that TeknoParrot profiles use as their
 # primary executable. This includes Windows EXE, Linux ELF, disc images (.iso,
@@ -4645,30 +4693,16 @@ function Register-Games {
             }
 
             # $folderKey has the RetroBat suffix stripped, ready to normalise.
+            # The $RawThrillsPathLimits alias fallback (e.g. NicktoonsNitro -> NTN,
+            # for a folder renamed to this script's own PATH TOO LONG suggestion --
+            # see issue #13) is handled inside Resolve-BestFuzzyMatch.
             $normFolder  = Get-NormalizedGameKey $folderKey
 
-            $bestFuzzy      = $null
-            $bestFuzzyScore = 0.0
-            foreach ($cand in $matchList) {
-                $normCode = Get-NormalizedGameKey $cand.Code
-                $score    = Get-DiceSimilarity $normFolder $normCode
-                if ($score -gt $bestFuzzyScore) { $bestFuzzyScore = $score; $bestFuzzy = $cand }
+            $fuzzyResult    = Resolve-BestFuzzyMatch -NormFolder $normFolder -MatchList $matchList -RawThrillsAliases $RawThrillsPathLimits
+            $bestFuzzy      = $fuzzyResult.Best
+            $bestFuzzyScore = $fuzzyResult.BestScore
 
-                # A folder renamed to the short name this script itself suggested
-                # for a PATH TOO LONG warning (e.g. NicktoonsNitro -> NTN) no
-                # longer resembles the full profile code at all, so also try the
-                # $RawThrillsPathLimits alias when this candidate has one. Same
-                # rename-alias concept as Get-StagingFolderMap, applied here
-                # because this is a separate fuzzy-match call site it never
-                # touched. See issue #13.
-                if ($RawThrillsPathLimits.ContainsKey($cand.Code)) {
-                    $normAlias  = Get-NormalizedGameKey $RawThrillsPathLimits[$cand.Code].Suggested
-                    $aliasScore = Get-DiceSimilarity $normFolder $normAlias
-                    if ($aliasScore -gt $bestFuzzyScore) { $bestFuzzyScore = $aliasScore; $bestFuzzy = $cand }
-                }
-            }
-
-            if ($bestFuzzyScore -ge $FuzzyAutoThreshold -and $null -ne $bestFuzzy) {
+            if ($fuzzyResult.IsConfidentMatch) {
                 # High-confidence fuzzy match: register automatically.
                 $code = $bestFuzzy.Code
                 if ($seenCodes.ContainsKey($code)) {

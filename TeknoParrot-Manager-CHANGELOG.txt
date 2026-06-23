@@ -7,6 +7,23 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.19 BETA  (2026-06-23)
+-------------------------------------------------------------------------------
+
+  Fix: the shared-executable-name disambiguation pass (used when several
+  profiles use a generic exe name like "game.exe") had no tie-break between
+  candidates. If two different profiles both scored at or above the
+  auto-register threshold against the same folder name, whichever one the
+  internal candidate list happened to be iterated to last would silently win
+  -- with no actual signal that it was the better match. A folder name that's
+  a near-miss of two different real profile codes (typo, truncation, etc.)
+  could previously have been auto-registered to the wrong one with no
+  warning. Now requires a clear score gap between the best and runner-up
+  candidate before trusting an automatic match; anything too close to call
+  falls through to the existing dat lookup / manual ACTION REQUIRED review
+  instead, the same as a low-confidence match always has. See issue #15.
+
+-------------------------------------------------------------------------------
   v0.99.18 BETA  (2026-06-22)
 -------------------------------------------------------------------------------
 
