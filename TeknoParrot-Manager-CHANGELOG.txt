@@ -7,6 +7,22 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.18 BETA  (2026-06-22)
+-------------------------------------------------------------------------------
+
+  Fix: AutoSync and the extraction pickers (modes 1/2) could still report a
+  game as "available to extract" even though it was already extracted and
+  fully registered, if its folder had been renamed to something the
+  folder-name-matching logic could not predict. The v0.99.15 fix for this
+  only ever helped a narrow case (a ZIP whose own filename, with no version/
+  date metadata, happens to equal its profile code) and did nothing for the
+  common case of this collection's descriptive ZIP names. Extraction
+  availability is now also cross-checked against the game's own registered
+  GamePath (via the collection dat), so an already-registered game is never
+  reported as missing again regardless of what its folder is named. See
+  issue #13.
+
+-------------------------------------------------------------------------------
   v0.99.17 BETA  (2026-06-22)
 -------------------------------------------------------------------------------
 

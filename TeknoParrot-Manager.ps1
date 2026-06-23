@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.17 BETA
+# TeknoParrot Manager  |  v0.99.18 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.17"
+$ScriptVersion = "0.99.18"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -661,7 +661,7 @@ function Expand-NumberList {
 #   @()     -- A pressed; no filter (extract all)
 #   @(...)  -- explicit whitelist of ZIP BaseName strings
 function Select-GamesInteractive {
-    param([string]$zipSource, [string]$installFolder)
+    param([string]$zipSource, [string]$installFolder, [hashtable]$datIndex = $null, [string]$userProfilesDir = '')
 
     if ([string]::IsNullOrWhiteSpace($zipSource) -or [string]::IsNullOrWhiteSpace($installFolder)) {
         Write-Log "Select-GamesInteractive: called with empty path -- skipping"
@@ -699,6 +699,7 @@ function Select-GamesInteractive {
     foreach ($zip in $all) {
         $norm         = $zip.BaseName -replace ' (?=[\[\(])', ''
         $existingPath = $normalizedFolderMap[$norm]
+        if (-not $existingPath) { $existingPath = Resolve-RegisteredGameFolder $zip.BaseName $datIndex $userProfilesDir }
         $hasContent   = $existingPath -and
                         (Get-ChildItem -LiteralPath $existingPath -Force -ErrorAction SilentlyContinue |
                          Measure-Object).Count -gt 0
@@ -862,7 +863,7 @@ function Select-GamesInteractive {
 #   @()     -- no filter; extract all (A pressed)
 #   @(...)  -- explicit whitelist of ZIP BaseName strings to extract
 function Select-GamesInteractiveCombined {
-    param([string]$zipSourceMain, [string]$zipSourceSupp, [string]$installFolder)
+    param([string]$zipSourceMain, [string]$zipSourceSupp, [string]$installFolder, [hashtable]$datIndex = $null, [string]$userProfilesDir = '')
 
     if ([string]::IsNullOrWhiteSpace($zipSourceMain) -or [string]::IsNullOrWhiteSpace($zipSourceSupp) -or [string]::IsNullOrWhiteSpace($installFolder)) {
         Write-Log "Select-GamesInteractiveCombined: called with empty path -- skipping"
@@ -885,6 +886,7 @@ function Select-GamesInteractiveCombined {
     foreach ($zip in $allMain) {
         $norm       = $zip.BaseName -replace ' (?=[\[\(])', ''
         $existing   = $normalizedFolderMap[$norm]
+        if (-not $existing) { $existing = Resolve-RegisteredGameFolder $zip.BaseName $datIndex $userProfilesDir }
         $hasContent = $existing -and (Get-ChildItem -LiteralPath $existing -Force -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0
         if ($hasContent) { $alreadyMain++ } else { $toExtractMain += $zip; $sourceMap[$zip.BaseName] = 'Main' }
     }
@@ -893,6 +895,7 @@ function Select-GamesInteractiveCombined {
     foreach ($zip in $allSupp) {
         $norm       = $zip.BaseName -replace ' (?=[\[\(])', ''
         $existing   = $normalizedFolderMap[$norm]
+        if (-not $existing) { $existing = Resolve-RegisteredGameFolder $zip.BaseName $datIndex $userProfilesDir }
         $hasContent = $existing -and (Get-ChildItem -LiteralPath $existing -Force -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0
         if ($hasContent) { $alreadySupp++ } else { $toExtractSupp += $zip; $sourceMap[$zip.BaseName] = 'Supp' }
     }
@@ -2659,7 +2662,8 @@ function Expand-ZipFileSafe {
 # If $onlySync is non-empty, only ZIPs whose base name is in the list are extracted.
 function Invoke-AutoSync {
     param([string]$zipSource, [string]$installFolder, [string]$syncStatePath,
-          $noSync = @(), $onlySync = @(), [bool]$retroBat = $false, [bool]$DryRun = $false)
+          $noSync = @(), $onlySync = @(), [bool]$retroBat = $false, [bool]$DryRun = $false,
+          [hashtable]$datIndex = $null, [string]$userProfilesDir = '')
 
     $syncState = @{}
     if (Test-Path -LiteralPath $syncStatePath) {
@@ -2740,9 +2744,13 @@ function Invoke-AutoSync {
         $stored     = $syncState[$rawName]
 
         # Resolve an existing folder using the normalised map, which matches
-        # both exact names and old-convention names for the same game.
+        # both exact names and old-convention names for the same game. If
+        # that fails (e.g. a folder renamed to something the name-matching
+        # logic can't predict), fall back to the game's own registered
+        # GamePath, if any -- see Resolve-RegisteredGameFolder, issue #13.
         $normZip       = $rawName -replace ' (?=[\[\(])', ''
         $matchedFolder = if ($normalizedFolderMap.ContainsKey($normZip)) { $normalizedFolderMap[$normZip] } else { $null }
+        if (-not $matchedFolder) { $matchedFolder = Resolve-RegisteredGameFolder $rawName $datIndex $userProfilesDir }
 
         $needsSync = $false; $reason = ""
         if ($null -eq $stored) {
@@ -5532,6 +5540,21 @@ $RawThrillsPathLimits = @{
 # REQUIRED (e.g. "AliensArmageddon" -> "ALIENS") no longer normalises to
 # match the ZIP's original name, so without this it gets reported as
 # "available to extract" even though it is already there.
+#
+# NOTE on this backfill's actual reach (found while investigating a
+# follow-up report on issue #13): $RawThrillsPathLimits's keys are PROFILE
+# CODES (e.g. "Cars", "DirtyDrivin"), the same short identifiers used for
+# UserProfiles\<Code>.xml -- NOT the ZIP's own filename. A ZIP in this
+# collection is named with the full descriptive RomVault/Eggman convention
+# (e.g. "Cars (1.42)(2013-08-28)[Raw Thrills PC][TP].zip"), and AutoSync
+# extracts it into a folder of that same full name. So this backfill only
+# actually helps the (apparently rare) case where a ZIP's bare base name
+# happens to equal its own profile code with no version/date metadata --
+# for the common case it registers a map key ($code) that the caller never
+# queries (callers look up the ZIP's full base name, not the profile
+# code), so it silently does nothing. Left in place since it's harmless
+# and still correct for that narrow case; Resolve-RegisteredGameFolder
+# below is the real, general-purpose fix for the rest.
 function Get-StagingFolderMap {
     param([string]$installFolder)
     $map = @{}
@@ -5546,6 +5569,39 @@ function Get-StagingFolderMap {
         }
     }
     return $map
+}
+
+# Folder-name matching (Get-StagingFolderMap above) cannot recognise a
+# folder that was renamed to anything other than a name the script itself
+# would derive from the ZIP -- a hand-picked short name, a reorganised
+# subfolder, anything. But if the game is already fully registered with a
+# working GamePath, its real folder location is sitting right there in the
+# UserProfile XML, independent of what the folder happens to be named.
+# This resolves a ZIP to that real folder via the collection dat (ZIP base
+# name -> ProfileCode -> UserProfiles\<ProfileCode>.xml -> GamePath's
+# containing folder), so a registered game is never reported as "available
+# to extract" again regardless of how its folder is named. Returns $null
+# if the dat has no entry, no matching profile is registered, or the
+# registered GamePath does not actually exist on disk. See issue #13.
+function Resolve-RegisteredGameFolder {
+    param([string]$rawZipName, [hashtable]$datIndex, [string]$userProfilesDir)
+    if (-not $datIndex -or $datIndex.Count -eq 0 -or -not $userProfilesDir) { return $null }
+    $datEntry = $datIndex[(Get-NormalizedGameKey $rawZipName)]
+    if (-not $datEntry -or -not $datEntry.ProfileCode) { return $null }
+    # Profile codes are purely alphanumeric; reject anything else before joining
+    # into a path -- the dat is externally-sourced, untrusted input, same as the
+    # ProfileCode check in Register-Games (see CLAUDE.md security notes).
+    if ($datEntry.ProfileCode -notmatch '^[\w]+$') { return $null }
+    $profilePath = Join-Path $userProfilesDir "$($datEntry.ProfileCode).xml"
+    if (-not (Test-Path -LiteralPath $profilePath)) { return $null }
+    try {
+        $doc    = Read-Xml $profilePath
+        $gpNode = $doc.GameProfile.SelectSingleNode("GamePath")
+        if ($null -eq $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { return $null }
+        $gamePath = $gpNode.InnerText.Trim().TrimEnd('\')
+        if (-not (Test-Path -LiteralPath $gamePath)) { return $null }
+        return [System.IO.Path]::GetDirectoryName($gamePath)
+    } catch { return $null }
 }
 
 # Specific games need a SPECIFIC OLD CRC of a specific file -- a newer
@@ -9075,12 +9131,13 @@ if ($mode -eq "AutoSync") {
         } elseif ($suppValid) {
             # Combined picker: both collection and supplementary shown in one sorted list.
             $combined          = Select-GamesInteractiveCombined -zipSourceMain $zipSource `
-                                     -zipSourceSupp $zipSourceSupplementary -installFolder $gamesInstallFolder
+                                     -zipSourceSupp $zipSourceSupplementary -installFolder $gamesInstallFolder `
+                                     -datIndex $datIndex -userProfilesDir $userProfilesDir
             $onlySyncList      = $combined.Main
             $onlySyncListSupp  = $combined.Supp
             $combinedPickerRan = $true
         } else {
-            $onlySyncList = Select-GamesInteractive -zipSource $zipSource -installFolder $gamesInstallFolder
+            $onlySyncList = Select-GamesInteractive -zipSource $zipSource -installFolder $gamesInstallFolder -datIndex $datIndex -userProfilesDir $userProfilesDir
             # $null means user pressed D with nothing selected -- leave as $null (skip).
             # @() means A was pressed (no filter). Other values are explicit selections.
         }
@@ -9097,7 +9154,8 @@ if ($mode -eq "AutoSync") {
     $sync = $null
     if ($null -ne $onlySyncList) {
         $sync = Invoke-AutoSync -zipSource $zipSource -installFolder $gamesInstallFolder `
-                    -syncStatePath $syncStatePath -noSync $noSyncList -onlySync $onlySyncList -retroBat $retroBat -DryRun $dryRunActive
+                    -syncStatePath $syncStatePath -noSync $noSyncList -onlySync $onlySyncList -retroBat $retroBat -DryRun $dryRunActive `
+                    -datIndex $datIndex -userProfilesDir $userProfilesDir
     } else {
         Write-Host "  No games selected -- skipping main extraction." -ForegroundColor Yellow
         Write-Log "AutoSync: main extraction skipped -- no games selected."
@@ -9118,7 +9176,8 @@ if ($mode -eq "AutoSync") {
                 Write-Log "Unattended: supplementary game selection = all."
             }
             $syncSupp = Invoke-AutoSync -zipSource $zipSourceSupplementary -installFolder $gamesInstallFolder `
-                            -syncStatePath $syncStatePath -noSync $noSyncList -onlySync $onlySyncListSupp -retroBat $retroBat -DryRun $dryRunActive
+                            -syncStatePath $syncStatePath -noSync $noSyncList -onlySync $onlySyncListSupp -retroBat $retroBat -DryRun $dryRunActive `
+                            -datIndex $datIndex -userProfilesDir $userProfilesDir
         } else {
             Write-Host "  No supplementary games selected -- skipping." -ForegroundColor Yellow
             Write-Log "AutoSync: supplementary extraction skipped -- no games selected."
