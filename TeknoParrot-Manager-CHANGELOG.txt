@@ -7,6 +7,20 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.20 BETA  (2026-06-23)
+-------------------------------------------------------------------------------
+
+  Fix: a reference game whose Input API was corrected via the
+  canonicalArchetype override (v0.99.17) had that correction written to
+  disk, but other games that propagate their controls from that same
+  reference game later in the same run still picked up the old, pre-
+  correction Input API value instead of the new one. The fix itself was
+  never applying to anything it propagated to within that same run -- it
+  only took effect starting on the NEXT run. Both the reference game's
+  correction and every other game's propagation from it now use the
+  corrected value within a single run. See issue #1.
+
+-------------------------------------------------------------------------------
   v0.99.19 BETA  (2026-06-23)
 -------------------------------------------------------------------------------
 

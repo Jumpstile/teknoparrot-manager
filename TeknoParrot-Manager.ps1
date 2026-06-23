@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.19 BETA
+# TeknoParrot Manager  |  v0.99.20 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.19"
+$ScriptVersion = "0.99.20"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -6155,6 +6155,17 @@ function Invoke-ControlPropagation {
                         if ($null -ne $canonDoc.GameProfile -and (Set-ProfileInputApi $canonDoc $canon.InputApi)) {
                             try {
                                 Save-XmlMaybe $canonDoc $f.FullName $DryRun
+                                # Update the in-memory pool entry too, not just the file on disk --
+                                # $selfEntry is the same object instance referenced by $pool, so this
+                                # is visible to every later iteration of this same loop. Without this,
+                                # a non-archetype profile that propagates from $selfEntry later in this
+                                # very run (e.g. a target alphabetically after this archetype) would
+                                # still copy the now-stale pre-correction InputApi, since $best.InputApi
+                                # below is read from this same pool snapshot. Confirmed on a real
+                                # tester's log: BBCF's correction and ChronoRegalia/dbzenkai/
+                                # PokkenTournament/PPQ propagating FROM BBCF with the old DirectInput
+                                # value happened in the same second of the same run. See issue #1.
+                                $selfEntry.InputApi = $canon.InputApi
                                 [void]$reports.Add([pscustomobject]@{
                                     Code = $f.BaseName; Status = "api-fixed-canonical"
                                     Archetype = $canon.Code; ArchetypeApi = $canon.InputApi
