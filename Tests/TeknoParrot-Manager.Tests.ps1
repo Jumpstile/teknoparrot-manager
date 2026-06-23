@@ -584,3 +584,131 @@ Describe "Build-DatIndexFromStream" {
         $index["game1"].ProfileCode | Should -Be "code1"
     }
 }
+
+Describe "Read-Xml" {
+    It "loads a well-formed file successfully" {
+        $path = Join-Path $TestDrive "good.xml"
+        [System.IO.File]::WriteAllText($path, "<Root><Child>value</Child></Root>")
+        $doc = Read-Xml $path
+        $doc.Root.Child | Should -Be "value"
+    }
+    It "throws on a corrupt (non-well-formed) file rather than returning a partial document" {
+        $path = Join-Path $TestDrive "corrupt.xml"
+        [System.IO.File]::WriteAllText($path, "<Root><Unclosed>")
+        { Read-Xml $path } | Should -Throw
+    }
+    It "throws on a missing file rather than returning null" {
+        $path = Join-Path $TestDrive "doesnotexist.xml"
+        { Read-Xml $path } | Should -Throw
+    }
+}
+
+Describe "Get-NormalizedGameKey naming edge cases" {
+    It "preserves digits, so sequel numbers stay distinct after normalization" {
+        Get-NormalizedGameKey "VirtuaFighter4" | Should -Not -Be (Get-NormalizedGameKey "VirtuaFighter5")
+    }
+    It "known collision risk: bracketed tags are stripped entirely, so titles differing only by tag content normalize identically" {
+        # Documents a real risk identified in the fuzzy-matching audit: a dat/folder-name
+        # pair like "Game [Demo]" vs "Game [Arcade]" collapses to the same normalized key
+        # because square-bracket metadata is removed wholesale, not inspected. This is
+        # locked in as a characterization test (not asserted as "correct") so a future
+        # change to this collision behavior is deliberate, not silent.
+        $demo   = Get-NormalizedGameKey "Game [Demo]"
+        $arcade = Get-NormalizedGameKey "Game [Arcade]"
+        $demo | Should -Be $arcade
+    }
+    It "strips region codes but does not strip meaningful parenthesized names like (Special Edition)" {
+        $withRegion = Get-NormalizedGameKey "Some Game (USA)"
+        $plain      = Get-NormalizedGameKey "Some Game"
+        $withRegion | Should -Be $plain
+
+        Get-NormalizedGameKey "Some Game (Special Edition)" | Should -Not -Be $plain
+    }
+    It "normalizes Eggman-dat-style version/date suffixes to the same key as the bare title" {
+        $full = Get-NormalizedGameKey "Cars (1.42)(2013-08-28)[Raw Thrills PC][TP]"
+        $bare = Get-NormalizedGameKey "Cars"
+        $full | Should -Be $bare
+    }
+}
+
+Describe "Get-DiceSimilarity near-threshold / tie behavior" {
+    # These document a real gap from the fuzzy-matching audit: Get-DiceSimilarity itself
+    # has no concept of a threshold or a tie-break -- that logic lives in each caller's
+    # "track the best score seen so far" loop (e.g. Register-Games ~line 4650-4668), which
+    # only keeps a single best candidate and silently lets iteration order decide ties.
+    # These tests pin down the scoring behavior the caller relies on, so a change to
+    # Get-DiceSimilarity that quietly shifts near-threshold scores doesn't go unnoticed.
+    It "can produce two distinct candidates scoring within a hair of each other, with no signal to prefer one" {
+        $target = Get-NormalizedGameKey "NicktoonsNitro"
+        $a = Get-DiceSimilarity $target (Get-NormalizedGameKey "NicktoonNitro")
+        $b = Get-DiceSimilarity $target (Get-NormalizedGameKey "NicktoonsNitros")
+        # Both are near-misses of the real title by one character; the function returns
+        # a bare score for each with no indication of which (if either) is the real match.
+        $a | Should -BeGreaterThan 0.85
+        $b | Should -BeGreaterThan 0.85
+        [Math]::Abs($a - $b) | Should -BeLessThan 0.1
+    }
+    It "a one-character difference near the auto-register threshold can land on either side of it" {
+        # FuzzyAutoThreshold is 0.72 (TeknoParrot-Manager.ps1:582). A single transposed
+        # or substituted character close to the threshold means whether a game gets
+        # auto-registered or falls through to manual review is sensitive to exact spelling.
+        $score = Get-DiceSimilarity (Get-NormalizedGameKey "InitialDArcadeStageZero") (Get-NormalizedGameKey "InitialDArcadeStageZer0")
+        $score | Should -BeGreaterThan 0.6
+        $score | Should -BeLessThan 1.0
+    }
+}
+
+Describe "Get-ReShadeLatestVersion retry behavior" {
+    BeforeAll {
+        Mock Invoke-WebRequest {}
+    }
+
+    It "makes only a single attempt and returns null on failure -- no retry, unlike the Eggman/FFB/BepInEx fetchers" {
+        Mock Invoke-WebRequest { throw "site unreachable" }
+        $result = Get-ReShadeLatestVersion
+        $result | Should -BeNullOrEmpty
+        Should -Invoke Invoke-WebRequest -Times 1
+    }
+    It "parses the version out of a successful response" {
+        Mock Invoke-WebRequest { [pscustomobject]@{ Content = "...ReShade_Setup_6.7.3.exe..." } }
+        Get-ReShadeLatestVersion | Should -Be "6.7.3"
+    }
+}
+
+Describe "Invoke-EggmanDatDownload retry and partial-file cleanup" {
+    BeforeAll {
+        Mock Get-Service { $null }   # BITS unavailable -> exercises the Invoke-WebRequest fallback path
+        Mock Start-Sleep {}
+        Mock Write-Log {}
+    }
+    BeforeEach {
+        $script:attemptCount = 0
+    }
+
+    It "retries a transient failure and succeeds on a later attempt" {
+        Mock Invoke-WebRequest {
+            $script:attemptCount++
+            if ($script:attemptCount -lt 2) { throw "transient network error" }
+            Set-Content -LiteralPath $OutFile -Value "fake zip content"
+        }
+        $savePath = Join-Path $TestDrive "retry-success.zip"
+
+        $result = Invoke-EggmanDatDownload "https://example.com/file.zip" $savePath
+
+        $result | Should -BeTrue
+        $script:attemptCount | Should -Be 2
+        Test-Path -LiteralPath $savePath | Should -BeTrue
+    }
+    It "deletes any partial file and returns false once all retry attempts are exhausted" {
+        Mock Invoke-WebRequest { throw "still failing" }
+        $savePath = Join-Path $TestDrive "retry-exhausted.zip"
+        # Simulate a partial file left behind by a prior failed attempt.
+        Set-Content -LiteralPath $savePath -Value "partial garbage"
+
+        $result = Invoke-EggmanDatDownload "https://example.com/file.zip" $savePath
+
+        $result | Should -BeFalse
+        Test-Path -LiteralPath $savePath | Should -BeFalse
+        Should -Invoke Invoke-WebRequest -Times 3
+    }
+}
