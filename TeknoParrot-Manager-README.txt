@@ -15,6 +15,54 @@
 
 
 -------------------------------------------------------------------------------
+  CONTENTS
+-------------------------------------------------------------------------------
+
+  This is a plain-text file, so these aren't clickable -- search (Ctrl+F /
+  Find) for the exact heading text shown below (in capitals) and it will
+  jump straight to that section.
+
+    WHO IS THIS FOR?
+    FEATURES
+    GLOSSARY                       -- unfamiliar terms used throughout this file
+    HOW IT WORKS
+    REQUIREMENTS
+    RUNNING THE SCRIPT
+    AUTO-DETECT TEKNOPARROT PATH
+    MODES                          -- the main menu, one entry per mode
+    GAME SELECTION (AutoSync mode)
+    THE STAGING FOLDER
+    REGISTRATION
+    HOW FUZZY MATCHING WORKS
+    CONTROL PROPAGATION
+    DEVICE SURVEY
+    FRONTEND LAUNCHER INTEGRATION
+      LAUNCHBOX
+      HYPERSPIN 2
+      RETROBAT / BATOCERA
+    CROSSHAIR SETUP                -- mode 3
+    RESHADE VISUAL ENHANCEMENTS    -- mode 4
+    DGVOODOO2 LEGACY COMPATIBILITY -- mode 5
+    FORCE FEEDBACK (FFB) SETUP     -- mode 7
+    BEPINEX UPDATE CHECK           -- mode 8
+    POSTGRES SETUP                 -- mode 11
+    THUMBNAIL DOWNLOAD
+    "NOT IN TEKNOPARROT" REPORT
+    CONTROLS STATUS FILE
+    PER-GAME OVERRIDES
+    ACTION REQUIRED SUMMARY
+    UNATTENDED / SCHEDULED MODE
+    GAME REPAIR
+    CONTROLLERS AND INPUT NOTES
+    SAFETY, BACKUP AND LOG
+    RE-RUNNING
+    RESETTING
+    TROUBLESHOOTING
+    WHAT IT DOES NOT DO
+    APPENDIX: FUZZY MATCHING DETAILS
+
+
+-------------------------------------------------------------------------------
   WHO IS THIS FOR?
 -------------------------------------------------------------------------------
 
@@ -271,6 +319,104 @@
   - Safe by design. Backs up all profiles before every run, never deletes
     your games, guards the staging folder against the emulator and source
     folders, checks free space, and logs everything.
+
+
+-------------------------------------------------------------------------------
+  GLOSSARY
+-------------------------------------------------------------------------------
+
+  Terms used throughout this file, in the order you're likely to need them.
+
+  GameProfile         The template TeknoParrot ships for one specific game
+                       (e.g. StreetFighterIII3rdStrike.xml). Lives in
+                       TeknoParrot's GameProfiles\ folder. Defines what
+                       fields/buttons that game has, but is not itself
+                       pointed at your copy of the game.
+
+  UserProfile          Your own copy of a GameProfile, created when a game
+                       is registered. Lives in TeknoParrot's UserProfiles\
+                       folder, one file per registered game. This is the
+                       file that actually has your GamePath, your control
+                       bindings, and your per-game settings.
+
+  Profile Code         The filename (without .xml) shared by a GameProfile
+                       and its UserProfile, e.g. "StreetFighterIII3rdStrike".
+                       Used throughout this script and its logs to refer to
+                       one specific game profile.
+
+  GamePath             The field inside a UserProfile pointing at that
+                       game's actual executable on your disk. Registration
+                       is, at its core, finding the right exe and writing
+                       it into this field. GamePath2 is the same idea for
+                       games that need a second executable launched
+                       alongside the first (see HasTwoExecutables below).
+
+  Registration         The act of matching an extracted game folder to the
+                       correct GameProfile and creating/updating its
+                       UserProfile with the right GamePath. See REGISTRATION
+                       below for how this script automates it.
+
+  AutoSync             This script's combined "extract + register" mode
+                       (mode 1) -- pulls ZIPs from your NAS/local source
+                       into a staging folder, then registers whatever it
+                       extracted. See MODES and GAME SELECTION below.
+
+  Staging folder       The local folder AutoSync extracts ZIPs into before
+                       registration. See THE STAGING FOLDER below.
+
+  Fuzzy matching        How this script figures out which GameProfile an
+                       extracted folder belongs to when the executable
+                       name alone is ambiguous (shared by several games).
+                       Compares the folder name against each candidate
+                       profile's code. See HOW FUZZY MATCHING WORKS below.
+
+  Dat file             An optional community-maintained index (from the
+                       Eggmansworld TeknoParrot collection) mapping exact
+                       ZIP names to the right profile code. When available,
+                       this is used instead of fuzzy matching for ambiguous
+                       games, since it's exact rather than a best guess.
+
+  Control propagation   This script's way of avoiding rebinding every game
+                       in a control family by hand: bind ONE game per type
+                       (button, driving, lightgun, trackball, analog) in
+                       TeknoParrot's own UI, and this script copies those
+                       same bindings to every other unbound game of that
+                       type. See CONTROL PROPAGATION below.
+
+  Archetype / reference game
+                       A game with enough buttons already bound (manually,
+                       by you, in TeknoParrot's own UI) to be used as the
+                       source for control propagation into other games of
+                       the same family. Never modified by propagation
+                       itself -- only ever a source, never a target.
+
+  Family               Which kind of controls a game uses --
+                       button / driving / lightgun / trackball / analog.
+                       Auto-detected per game; can be overridden per game
+                       in overrides.json if this script guesses wrong.
+
+  ACTION REQUIRED       The end-of-run summary listing everything that
+                       still needs your attention in TeknoParrotUI itself --
+                       games needing manual registration, paths to fix,
+                       missing control bindings. See ACTION REQUIRED SUMMARY
+                       below.
+
+  Dry-run / preview mode
+                       Runs AutoSync or Registration showing exactly what
+                       WOULD happen, without writing anything. Offered
+                       automatically before a real run in modes 1/2.
+
+  Overrides (overrides.json)
+                       An optional file next to this script letting you
+                       override its automatic choices for specific games --
+                       skip syncing one, pin a game to a specific archetype,
+                       override its detected family, and a few other
+                       per-game exceptions. See PER-GAME OVERRIDES below.
+
+  HasTwoExecutables     A property some GameProfiles have (e.g. Initial D:
+                       Arcade Stage games) meaning the game needs a second
+                       companion executable launched alongside the main
+                       one. Handled automatically via GamePath2 above.
 
 
 -------------------------------------------------------------------------------

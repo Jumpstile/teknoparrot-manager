@@ -11,6 +11,7 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 ## Table of Contents
 
 - [Features](#features)
+- [Glossary](#glossary)
 - [How It Works](#how-it-works)
 - [Requirements](#requirements)
 - [Installation](#installation)
@@ -71,6 +72,31 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 - **Preview / dry-run mode** — see what AutoSync/Register would do (extract, register, repair, propagate) with zero files written, then decide whether to apply it for real.
 - **Download audit logging** — every binary fetched from a third party (Eggman dat ZIP, BepInEx release, FFBArcadePlugin DLLs) has its source URL, filename, version, and SHA256 logged for later verification or troubleshooting.
 - **Safe by design** — timestamped backups before every run, free-space check, full log, one-click restore.
+
+---
+
+## Glossary
+
+Terms used throughout this README, in the order you're likely to need them.
+
+| Term | Meaning |
+|---|---|
+| **GameProfile** | The template TeknoParrot ships for one specific game (e.g. `StreetFighterIII3rdStrike.xml`). Lives in TeknoParrot's `GameProfiles\` folder. Defines what fields/buttons that game has, but isn't itself pointed at your copy of the game. |
+| **UserProfile** | Your own copy of a GameProfile, created when a game is registered. Lives in `UserProfiles\`, one file per registered game — this is the file with your actual `GamePath`, control bindings, and per-game settings. |
+| **Profile Code** | The filename (without `.xml`) shared by a GameProfile and its UserProfile, e.g. `StreetFighterIII3rdStrike`. Used throughout this script and its logs to refer to one specific game profile. |
+| **GamePath** | The field inside a UserProfile pointing at that game's actual executable on disk. Registration is, at its core, finding the right exe and writing it into this field. `GamePath2` is the same idea for games needing a second executable (see `HasTwoExecutables`). |
+| **Registration** | Matching an extracted game folder to the correct GameProfile and creating/updating its UserProfile with the right GamePath. See [Registration](#registration). |
+| **AutoSync** | This script's combined extract-and-register mode (mode 1) — pulls ZIPs from your NAS/local source into a staging folder, then registers whatever it extracted. See [Game Selection (AutoSync)](#game-selection-autosync). |
+| **Staging folder** | The local folder AutoSync extracts ZIPs into before registration. See [The Staging Folder](#the-staging-folder). |
+| **Fuzzy matching** | How this script figures out which GameProfile an extracted folder belongs to when the executable name alone is ambiguous. Compares the folder name against each candidate profile's code. See [How Fuzzy Matching Works](#how-fuzzy-matching-works). |
+| **Dat file** | An optional community-maintained index (Eggmansworld TeknoParrot collection) mapping exact ZIP names to the right profile code — used instead of fuzzy matching for ambiguous games when available, since it's exact rather than a best guess. |
+| **Control propagation** | Bind ONE game per control type (button/driving/lightgun/trackball/analog) in TeknoParrot's own UI, and this script copies those bindings to every other unbound game of that type. See [Control Propagation](#control-propagation). |
+| **Archetype / reference game** | A game with enough buttons already bound (by you) to be used as the propagation source for its control family. Never modified by propagation itself — only ever a source, never a target. |
+| **Family** | Which kind of controls a game uses — button / driving / lightgun / trackball / analog. Auto-detected per game; overridable in `overrides.json`. |
+| **ACTION REQUIRED** | The end-of-run summary listing everything still needing your attention in TeknoParrotUI — games needing manual registration, paths to fix, missing bindings. See [Action Required Summary](#action-required-summary). |
+| **Dry-run / preview mode** | Runs AutoSync or Registration showing exactly what would happen, without writing anything. Offered automatically before a real run in modes 1/2. |
+| **Overrides (`overrides.json`)** | An optional file next to this script for overriding automatic choices per game — skip syncing one, pin a game to a specific archetype, override its detected family, and a few other exceptions. See [Per-Game Overrides](#per-game-overrides). |
+| **HasTwoExecutables** | A GameProfile property (e.g. Initial D: Arcade Stage games) meaning the game needs a second companion executable launched alongside the main one. Handled automatically via `GamePath2`. |
 
 ---
 

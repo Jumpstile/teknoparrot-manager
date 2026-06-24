@@ -6,6 +6,9 @@
   Registers your games with TeknoParrot and copies controls across games of
   the same type. Full details: TeknoParrot-Manager-README.txt.
 
+  Unfamiliar term (GamePath, UserProfile, archetype, etc.)? See the
+  GLOSSARY section near the top of TeknoParrot-Manager-README.txt.
+
   BETA -- test one game after each run. Profiles are backed up automatically.
 
 
