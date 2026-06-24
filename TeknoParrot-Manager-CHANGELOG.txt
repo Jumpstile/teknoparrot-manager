@@ -7,6 +7,17 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.24 BETA  (2026-06-24)
+-------------------------------------------------------------------------------
+
+  Hardening: two Postgres install-path comparisons used -like/-notlike
+  (wildcard pattern matching) where exact equality was actually intended.
+  Harmless in practice since the compared path is a fixed constant with
+  no wildcard characters, but switched to the correct case-insensitive
+  exact-equality operators found during a full code scan. No change to
+  normal operation.
+
+-------------------------------------------------------------------------------
   v0.99.23 BETA  (2026-06-24)
 -------------------------------------------------------------------------------
 
