@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.21 BETA
+# TeknoParrot Manager  |  v0.99.22 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.21"
+$ScriptVersion = "0.99.22"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -3549,6 +3549,46 @@ function Read-ConfirmedPostgresPassword {
     }
 }
 
+# Cross-checks PostgreSQL's own installation registry record -- written by
+# the EnterpriseDB-based installer under \Installations\<install-id>,
+# independent of the generic Windows Installer Uninstall key already
+# checked in Remove-PostgresPartialInstall below -- against the expected
+# install directory. Issue #4 (v1.0 roadmap): a second, independent
+# registry source agreeing before any destructive msiexec /x call.
+#
+# Deliberately supplementary, not a new blocking gate: a PARTIAL/failed
+# install -- the exact case Remove-PostgresPartialInstall exists to clean
+# up -- may never have reached the install stage that writes this key at
+# all, so its absence here is "no additional information," never a reason
+# to skip cleanup. Only an explicit MISMATCH (the key exists, has an entry,
+# and that entry's install directory points somewhere other than expected)
+# is a red flag worth refusing to act on.
+#
+# The exact install-id subkey name under \Installations\ (the issue
+# suggests "postgresql-8.3") is NOT assumed -- this dev machine has no real
+# PostgreSQL install to verify that against (same constraint as the
+# project's "no game data on this machine" note), so every existing
+# install-id subkey is checked rather than guessing one exact name. "Base
+# Directory" is the documented value name EnterpriseDB's installer writes
+# there; if that's ever wrong on a real system, Get-ItemProperty simply
+# returns nothing for it, which still degrades safely to "no additional
+# information" rather than a false positive.
+function Test-PostgresInstallationsRegistry {
+    param([string]$ExpectedInstallDir)
+    $expected = $ExpectedInstallDir.TrimEnd('\')
+    $roots = @(
+        "HKLM:\SOFTWARE\PostgreSQL\Installations\*",
+        "HKLM:\SOFTWARE\WOW6432Node\PostgreSQL\Installations\*"
+    )
+    $entries = @(Get-ItemProperty -Path $roots -ErrorAction SilentlyContinue |
+                     Where-Object { $_.'Base Directory' })
+    if ($entries.Count -eq 0) {
+        return [pscustomobject]@{ HasRecord = $false; Mismatch = $false }
+    }
+    $matching = @($entries | Where-Object { $_.'Base Directory'.TrimEnd('\') -like $expected })
+    return [pscustomobject]@{ HasRecord = $true; Mismatch = ($matching.Count -eq 0) }
+}
+
 # Cleans up a half-installed/stale PostgreSQL 8.3 before a fresh install
 # attempt. A failed install can leave a real Windows account, an orphaned
 # user profile, and a ProfileList registry SID entry behind even when the
@@ -3563,6 +3603,7 @@ function Remove-PostgresPartialInstall {
         "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
     )
     $expectedInstallDir = $script:PostgresInstallDir.TrimEnd('\')
+    $pgInstallationsCheck = Test-PostgresInstallationsRegistry -ExpectedInstallDir $expectedInstallDir
     $pgEntries = Get-ItemProperty -Path $uninstallKeys -ErrorAction SilentlyContinue |
                      Where-Object { $_.DisplayName -like "PostgreSQL*8.3*" }
     foreach ($entry in $pgEntries) {
@@ -3573,6 +3614,10 @@ function Remove-PostgresPartialInstall {
         $installLoc = if ($entry.InstallLocation) { $entry.InstallLocation.TrimEnd('\') } else { '' }
         if ($installLoc -notlike $expectedInstallDir) {
             Write-Log "Postgres: skipping uninstall of '$($entry.DisplayName)' -- InstallLocation '$installLoc' does not match our expected path, not touching it."
+            continue
+        }
+        if ($pgInstallationsCheck.HasRecord -and $pgInstallationsCheck.Mismatch) {
+            Write-Log "Postgres: skipping uninstall of '$($entry.DisplayName)' -- PostgreSQL's own Installations registry record disagrees with the matched InstallLocation, not touching it."
             continue
         }
         $productCode = $entry.PSChildName

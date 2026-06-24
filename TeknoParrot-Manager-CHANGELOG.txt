@@ -7,6 +7,20 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.22 BETA  (2026-06-24)
+-------------------------------------------------------------------------------
+
+  Security hardening: before uninstalling a stale/partial PostgreSQL
+  install (only ever done when its registered InstallLocation already
+  matches this script's expected install path), it now also cross-checks
+  PostgreSQL's own installer-written registry record as a second,
+  independent confirmation before proceeding. If that record exists and
+  disagrees with the match, the uninstall is skipped and logged rather
+  than proceeding on a single registry source alone. No change to normal
+  operation -- this only affects the rare partial-install cleanup path.
+  See issue #4.
+
+-------------------------------------------------------------------------------
   v0.99.21 BETA  (2026-06-23)
 -------------------------------------------------------------------------------
 
