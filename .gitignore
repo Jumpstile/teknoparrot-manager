@@ -22,3 +22,6 @@ TeknoParrot-Manager-crosshairs.json
 
 # Local forum-post draft -- not part of the project, never meant to be public
 forum-post-beta-testing.txt
+
+# clawpatch local tool state -- not part of the project, machine-local cache
+.clawpatch/
