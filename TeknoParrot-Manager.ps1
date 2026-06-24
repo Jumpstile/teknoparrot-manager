@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.24 BETA
+# TeknoParrot Manager  |  v0.99.25 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.24"
+$ScriptVersion = "0.99.25"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -4221,7 +4221,16 @@ function Invoke-FFBPluginSetup {
         Write-Log ("FFBPlugin: {0} overlapping game(s) with native FFB Blaster -- user chose {1}" -f $overlaps.Count, $(if ($useNativeForOverlaps) {"native"} else {"third-party plugin"}))
     }
 
-    $deployed = 0; $skippedNative = 0; $skippedCollision = 0; $skippedNoMatch = 0; $errors = $matchErrors
+    # Two distinct reasons get tracked separately, not combined into one
+    # "no match" bucket: $skippedNoMatch is a game the live AutoSetup.cmd
+    # table doesn't know about at all (nothing this script can do); a game
+    # the table DOES match but whose 32-bit/64-bit MAME DLL isn't present
+    # locally is a different, user-fixable situation (go get that DLL) and
+    # gets its own $skippedDllMissing counter instead -- conflating the two
+    # under one label would make "no match" misleadingly look like every
+    # one of those games is simply unsupported.
+    $deployed = 0; $skippedNative = 0; $skippedCollision = 0
+    $skippedNoMatch = 0; $skippedDllMissing = 0; $errors = $matchErrors
     $noMatchCount = $profiles.Count - $candidates.Count - $matchErrors
     $skippedNoMatch += $noMatchCount
 
@@ -4260,7 +4269,7 @@ function Invoke-FFBPluginSetup {
             $srcDll = if ($arch -eq 'x86') { $srcDll32 } else { $srcDll64 }
             if (-not (Test-Path -LiteralPath $srcDll)) {
                 Write-Host ("    SKIP  {0}: {1}-bit DLL not available." -f $pf.BaseName, $(if ($arch -eq 'x86') {'32'} else {'64'})) -ForegroundColor Yellow
-                $skippedNoMatch++; continue
+                $skippedDllMissing++; continue
             }
 
             Copy-Item -LiteralPath $srcDll -Destination $destPath -ErrorAction Stop
@@ -4283,14 +4292,17 @@ function Invoke-FFBPluginSetup {
         Write-Host ("  Skipped (collision): {0}  (a hook DLL already exists -- not overwritten)" -f $skippedCollision) -ForegroundColor Yellow
     }
     if ($skippedNoMatch -gt 0) {
-        Write-Host ("  Skipped (no match) : {0}" -f $skippedNoMatch) -ForegroundColor DarkGray
+        Write-Host ("  Skipped (no match) : {0}  (not in the plugin's supported-games list)" -f $skippedNoMatch) -ForegroundColor DarkGray
+    }
+    if ($skippedDllMissing -gt 0) {
+        Write-Host ("  Skipped (no DLL)   : {0}  (matched, but the 32-bit or 64-bit plugin DLL isn't downloaded)" -f $skippedDllMissing) -ForegroundColor Yellow
     }
     if ($errors -gt 0) {
         Write-Host ("  Errors             : {0}  -- see TeknoParrot-Manager.log for details" -f $errors) -ForegroundColor Red
     }
     Write-Host ""
     Write-Host "  To uninstall: delete the deployed DLL file from the game's folder." -ForegroundColor DarkCyan
-    Write-Log ("FFBPlugin setup: deployed={0} skippedNative={1} skippedCollision={2} skippedNoMatch={3} errors={4}" -f $deployed, $skippedNative, $skippedCollision, $skippedNoMatch, $errors)
+    Write-Log ("FFBPlugin setup: deployed={0} skippedNative={1} skippedCollision={2} skippedNoMatch={3} skippedDllMissing={4} errors={5}" -f $deployed, $skippedNative, $skippedCollision, $skippedNoMatch, $skippedDllMissing, $errors)
 }
 
 # Discovers the FFB Blaster Bool field name by scanning TeknoParrot

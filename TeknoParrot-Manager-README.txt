@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.99.24 BETA
+  TeknoParrot Manager  |  v0.99.25 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -981,7 +981,7 @@
 
     The script looks for ReShade DLLs in the  ReShade\  folder next to the
     script and deploys the right one for each game's architecture:
-      ReShade64.dll -- for 64-bit games (required for Mode 5 to work)
+      ReShade64.dll -- for 64-bit games (required for Mode 4 to work)
       ReShade32.dll -- for 32-bit games (optional; 32-bit games are skipped
                        if this file is absent)
 
@@ -1005,7 +1005,7 @@
              If you also have 32-bit games: repeat with a 32-bit game exe and
              rename the resulting DLL to  ReShade32.dll.
 
-    Step 4.  Run TeknoParrot Manager and choose mode 5 (ReShade setup), or
+    Step 4.  Run TeknoParrot Manager and choose mode 4 (ReShade setup), or
              answer Y when prompted at the end of a normal run.
 
     The script will:
@@ -1062,7 +1062,7 @@
     2. Run it on any game exe (or extract the DLL manually with 7-Zip).
     3. Copy the new DLL to  ReShade\ReShade64.dll, replacing the old one.
        If you use ReShade32.dll for 32-bit games, update that file too.
-    4. Re-run ReShade setup (mode 5) to redeploy the updated DLLs.
+    4. Re-run ReShade setup (mode 4) to redeploy the updated DLLs.
 
   REMOVING RESHADE
 
@@ -2070,6 +2070,6 @@
 
 
 ===============================================================================
-  v0.99.24 BETA -- Test one game after each run.
+  v0.99.25 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================
