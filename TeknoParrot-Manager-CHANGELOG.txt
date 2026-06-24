@@ -7,6 +7,22 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.21 BETA  (2026-06-23)
+-------------------------------------------------------------------------------
+
+  Security hardening: every Postgres database helper that shells out to
+  psql.exe/pg_dump.exe/pg_restore.exe/createdb.exe/dropdb.exe used to pass
+  the database password via the PGPASSWORD environment variable for the
+  duration of that call -- briefly visible in that child process's own
+  environment block to anything else on the system that could inspect it.
+  These now use a temporary PostgreSQL .pgpass credential file instead
+  (locked down to the current user, deleted immediately after use), which
+  every one of those tools picks up automatically without ever putting the
+  password on the command line or in its own environment. No behavior
+  change from your perspective -- this only affects how the password is
+  handed to those tools internally. See issue #3.
+
+-------------------------------------------------------------------------------
   v0.99.20 BETA  (2026-06-23)
 -------------------------------------------------------------------------------
 

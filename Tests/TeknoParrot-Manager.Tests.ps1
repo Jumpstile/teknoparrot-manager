@@ -716,6 +716,46 @@ Describe "Resolve-BestFuzzyMatch" {
     }
 }
 
+Describe "New-PostgresPgPassFile / Remove-PostgresPgPassFile" {
+    # Issue #3 (v1.0 roadmap): migrated Postgres credential passing from
+    # $env:PGPASSWORD to a temporary .pgpass-format file, so the password is
+    # never visible in psql.exe/etc.'s own process environment block. These
+    # tests cover the file format (libpq's documented
+    # hostname:port:database:username:password syntax) and escaping rules,
+    # plus cleanup -- not the icacls lockdown, which is best-effort hardening
+    # on top and not load-bearing for correctness.
+    It "writes a single line in the documented hostname:port:database:username:password format" {
+        $path = New-PostgresPgPassFile -Password "hunter2"
+        try {
+            (Get-Content -LiteralPath $path -Raw).Trim() | Should -Be "127.0.0.1:5432:*:postgres:hunter2"
+        } finally {
+            Remove-PostgresPgPassFile -Path $path
+        }
+    }
+    It "escapes a backslash and a colon in the password per the pgpass format" {
+        $path = New-PostgresPgPassFile -Password 'p:a\ss'
+        try {
+            (Get-Content -LiteralPath $path -Raw).Trim() | Should -Be '127.0.0.1:5432:*:postgres:p\:a\\ss'
+        } finally {
+            Remove-PostgresPgPassFile -Path $path
+        }
+    }
+    It "creates a real file that Remove-PostgresPgPassFile then deletes" {
+        $path = New-PostgresPgPassFile -Password "anything"
+        Test-Path -LiteralPath $path | Should -BeTrue
+        Remove-PostgresPgPassFile -Path $path
+        Test-Path -LiteralPath $path | Should -BeFalse
+    }
+    It "does not throw when asked to remove a path that doesn't exist" {
+        $missing = Join-Path $TestDrive "does-not-exist.conf"
+        { Remove-PostgresPgPassFile -Path $missing } | Should -Not -Throw
+    }
+    It "does not throw when asked to remove a null/empty path" {
+        { Remove-PostgresPgPassFile -Path $null } | Should -Not -Throw
+        { Remove-PostgresPgPassFile -Path "" } | Should -Not -Throw
+    }
+}
+
 Describe "Get-ReShadeLatestVersion retry behavior" {
     BeforeAll {
         Mock Invoke-WebRequest {}

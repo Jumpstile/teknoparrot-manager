@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.20 BETA
+# TeknoParrot Manager  |  v0.99.21 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.20"
+$ScriptVersion = "0.99.21"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -2095,6 +2095,57 @@ function Test-SafePostgresDbName {
     return ($DbName -match '^[A-Za-z0-9_]+$')
 }
 
+# Issue #3 (v1.0 roadmap): every Postgres helper used to set $env:PGPASSWORD
+# for the duration of a psql.exe/pg_dump.exe/etc. call. For the few
+# milliseconds that child process runs, the password is visible in its own
+# environment block to anything else on the system that can inspect a
+# process's environment (Task Manager, Process Explorer, a WMI query) --
+# flagged by an external review as acceptable for this project's actual
+# use case (a single local arcade machine) but worth closing for v1.0.
+# libpq-based tools (psql/pg_dump/pg_restore/createdb/dropdb all are)
+# automatically pick up a PGPASSFILE env var pointing at a standard
+# ".pgpass" credential file instead, never putting the password in their
+# own environment or command line. This writes one, locked down to the
+# current user via icacls, for the caller to point PGPASSFILE at and
+# delete via Remove-PostgresPgPassFile when done.
+#
+# Single line with "*" for the database field covers every call site here --
+# they all use a fixed -h 127.0.0.1 -p 5432 -U postgres and only the
+# database name (or no -d at all) varies. Per the .pgpass format
+# (https://www.postgresql.org/docs/current/libpq-pgpass.html), only "\" and
+# ":" need escaping in a field, and only the password field here can
+# realistically contain either.
+function New-PostgresPgPassFile {
+    param([string]$Password)
+    $path = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-pgpass-" + [guid]::NewGuid().ToString("N") + ".conf")
+    $escaped = $Password -replace '\\', '\\' -replace ':', '\:'
+    $line = "127.0.0.1:5432:*:postgres:$escaped"
+    [System.IO.File]::WriteAllText($path, $line + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding $false))
+    # Best-effort hardening, not load-bearing: the temp folder itself is
+    # already restricted to the current user by default NTFS inheritance,
+    # so a failure here (e.g. icacls unavailable) does not block the
+    # credential-file approach from working -- it just loses the extra
+    # explicit lockdown.
+    try {
+        $owner = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+        & icacls $path /inheritance:r /grant:r "${owner}:(R)" 2>&1 | Out-Null
+    } catch {
+        Write-Log "Postgres: could not lock down pgpass file ACL -- $_"
+    }
+    return $path
+}
+
+# Deletes a temporary pgpass file created by New-PostgresPgPassFile. Never
+# throws -- this always runs from a `finally` block, and a failure to
+# delete a temp file (e.g. AV briefly holding a handle) should never mask
+# whatever the real result of the Postgres operation was.
+function Remove-PostgresPgPassFile {
+    param([string]$Path)
+    if ($Path -and (Test-Path -LiteralPath $Path)) {
+        try { [System.IO.File]::Delete($Path) } catch {}
+    }
+}
+
 # Read-only: true if PostgreSQL 8.3 is already installed (service exists
 # and psql.exe is present). Never reinstalls or modifies an existing
 # install -- callers use this to skip straight to per-game configuration
@@ -2119,7 +2170,8 @@ function Test-PostgresDatabaseExists {
     }
     $psqlExe = Join-Path $script:PostgresBinDir "psql.exe"
     if (-not (Test-Path -LiteralPath $psqlExe)) { return $false }
-    $env:PGPASSWORD = $SuperPasswordPlain
+    $pgpassFile = New-PostgresPgPassFile -Password $SuperPasswordPlain
+    $env:PGPASSFILE = $pgpassFile
     try {
         $result = & $psqlExe -U postgres -h 127.0.0.1 -p 5432 -tAc "SELECT 1 FROM pg_database WHERE datname='$DbName'" 2>$null
         return ($result -match '1')
@@ -2127,7 +2179,8 @@ function Test-PostgresDatabaseExists {
         Write-Log "Postgres: could not check database '$DbName' -- $_"
         return $false
     } finally {
-        $env:PGPASSWORD = $null
+        $env:PGPASSFILE = $null
+        Remove-PostgresPgPassFile -Path $pgpassFile
     }
 }
 
@@ -2144,14 +2197,16 @@ function Test-PostgresPassword {
     param([string]$SuperPasswordPlain)
     $psqlExe = Join-Path $script:PostgresBinDir "psql.exe"
     if (-not (Test-Path -LiteralPath $psqlExe)) { return $false }
-    $env:PGPASSWORD = $SuperPasswordPlain
+    $pgpassFile = New-PostgresPgPassFile -Password $SuperPasswordPlain
+    $env:PGPASSFILE = $pgpassFile
     try {
         & $psqlExe -U postgres -h 127.0.0.1 -p 5432 -tAc "SELECT 1" 2>$null | Out-Null
         return ($LASTEXITCODE -eq 0)
     } catch {
         return $false
     } finally {
-        $env:PGPASSWORD = $null
+        $env:PGPASSFILE = $null
+        Remove-PostgresPgPassFile -Path $pgpassFile
     }
 }
 
@@ -3758,7 +3813,8 @@ function New-PostgresDatabaseFromBackup {
     $psqlExe      = Join-Path $script:PostgresBinDir "psql.exe"
     $pgRestoreExe = Join-Path $script:PostgresBinDir "pg_restore.exe"
 
-    $env:PGPASSWORD = $SuperPasswordPlain
+    $pgpassFile = New-PostgresPgPassFile -Password $SuperPasswordPlain
+    $env:PGPASSFILE = $pgpassFile
     try {
         & $createdbExe -U postgres -h 127.0.0.1 -p 5432 -E $Encoding -T template0 $DbName 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) {
@@ -3774,7 +3830,8 @@ function New-PostgresDatabaseFromBackup {
         Write-Log "Postgres: database creation failed for '$DbName' -- $_"
         return $false
     } finally {
-        $env:PGPASSWORD = $null
+        $env:PGPASSFILE = $null
+        Remove-PostgresPgPassFile -Path $pgpassFile
     }
 }
 
@@ -6814,7 +6871,8 @@ function Backup-PostgresDatabases {
     [void][System.IO.Directory]::CreateDirectory($backupPath)
 
     $pgDumpExe = Join-Path $script:PostgresBinDir "pg_dump.exe"
-    $env:PGPASSWORD = $SuperPasswordPlain
+    $pgpassFile = New-PostgresPgPassFile -Password $SuperPasswordPlain
+    $env:PGPASSFILE = $pgpassFile
     try {
         foreach ($dbName in $dbNames) {
             $destFile = Join-Path $backupPath "$dbName.backup"
@@ -6826,7 +6884,8 @@ function Backup-PostgresDatabases {
             }
         }
     } finally {
-        $env:PGPASSWORD = $null
+        $env:PGPASSFILE = $null
+        Remove-PostgresPgPassFile -Path $pgpassFile
     }
 
     return $backupPath
@@ -6923,11 +6982,13 @@ function Invoke-RestorePostgresBackup {
         foreach ($bf in $backupFiles) {
             $dbName = $bf.BaseName
             if (-not (Test-SafePostgresDbName $dbName)) { $errCount++; continue }
-            $env:PGPASSWORD = $superPwPlain
+            $pgpassFile = New-PostgresPgPassFile -Password $superPwPlain
+            $env:PGPASSFILE = $pgpassFile
             try {
                 & $dropdbExe -U postgres -h 127.0.0.1 -p 5432 --if-exists $dbName 2>&1 | Out-Null
             } finally {
-                $env:PGPASSWORD = $null
+                $env:PGPASSFILE = $null
+                Remove-PostgresPgPassFile -Path $pgpassFile
             }
             $encoding = if ($dbName -eq 'GameDB06') { 'UTF8' } else { 'SQL_ASCII' }
             if (New-PostgresDatabaseFromBackup -DbName $dbName -Encoding $encoding -BackupFile $bf.FullName -SuperPasswordPlain $superPwPlain) {
