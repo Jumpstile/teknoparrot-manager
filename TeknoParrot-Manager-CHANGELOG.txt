@@ -7,6 +7,19 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.23 BETA  (2026-06-24)
+-------------------------------------------------------------------------------
+
+  Hardening: the network-vs-local drive detection used when suggesting your
+  TeknoParrot/LaunchBox folder and warning about a network staging/source
+  path is now wrapped in a hard timeout, so a deeply unresponsive network
+  share can never block the script indefinitely -- it falls through to
+  "could not determine, skip this candidate" instead. This closes a
+  residual, never-actually-observed theoretical gap on top of the v0.83
+  fix for a real 20-30s hang this same check used to have. No change to
+  normal operation. See issue #5.
+
+-------------------------------------------------------------------------------
   v0.99.22 BETA  (2026-06-24)
 -------------------------------------------------------------------------------
 

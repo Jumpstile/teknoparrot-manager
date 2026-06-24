@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.22 BETA
+# TeknoParrot Manager  |  v0.99.23 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.22"
+$ScriptVersion = "0.99.23"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -289,9 +289,52 @@ function Backfill-SecondaryExecutablePath {
     }
 }
 
-# Returns $true when $path resolves to a network location (UNC or mapped drive).
+# Runs $ScriptBlock in a background job and waits up to $TimeoutSeconds for
+# it to finish, returning its output -- or $null on timeout/error. Issue #5
+# (v1.0 roadmap): a residual, never-actually-reproduced theoretical risk
+# that a local Win32 call could itself still block on a deeply wedged
+# network share. Uses Start-Job (a separate process), not a runspace/
+# thread -- PS 5.1 has no safe way to abort a thread stuck inside a native
+# blocking call, so only killing the whole process actually frees it if the
+# theoretical deeper hang ever turns out to be real. Generic on purpose so
+# any future "local call that could theoretically still block" concern can
+# reuse it rather than hand-rolling another job/timeout dance.
+function Invoke-WithHardTimeout {
+    param([scriptblock]$ScriptBlock, [int]$TimeoutSeconds = 5)
+    $job = Start-Job -ScriptBlock $ScriptBlock
+    try {
+        if (Wait-Job -Job $job -Timeout $TimeoutSeconds) {
+            return Receive-Job -Job $job -ErrorAction SilentlyContinue
+        }
+        Write-Log "Invoke-WithHardTimeout: scriptblock did not complete within ${TimeoutSeconds}s -- abandoning."
+        return $null
+    } catch {
+        Write-Log "Invoke-WithHardTimeout: failed -- $_"
+        return $null
+    } finally {
+        Stop-Job -Job $job -ErrorAction SilentlyContinue
+        Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# Fetches every local drive's type info in one [System.IO.DriveInfo]::GetDrives()
+# call, hard-timeout-wrapped per issue #5 above. Returns $null on timeout/
+# error -- callers MUST treat that as "could not determine drive types" and
+# fail safe (never block, never crash, never claim a path is or isn't a
+# network path it couldn't actually check).
+function Get-LocalDriveInfoSafe {
+    return (Invoke-WithHardTimeout -ScriptBlock { [System.IO.DriveInfo]::GetDrives() } -TimeoutSeconds 5)
+}
+
+# Returns $true when $path resolves to a network location (UNC or mapped
+# drive). $Drives lets a caller checking many paths in one pass (e.g.
+# Find-TeknoParrotRoot enumerating every PSDrive) fetch drive info ONCE via
+# Get-LocalDriveInfoSafe and reuse it, rather than this function re-running
+# the hard-timeout-wrapped GetDrives() call (and paying its job-spawn cost)
+# once per candidate path -- when omitted, this fetches it itself for a
+# single one-off check.
 function Test-IsNetworkPath {
-    param([string]$path)
+    param([string]$path, [System.IO.DriveInfo[]]$Drives = $null)
     if ([string]::IsNullOrWhiteSpace($path)) { return $false }
     $path = $path.TrimEnd('\', '/')   # normalise trailing separators before matching
     if ($path -match '^\\\\') { return $true }
@@ -304,7 +347,9 @@ function Test-IsNetworkPath {
             # provider can hang 20-30s if a mapped network drive (e.g. an
             # OpenMediaVault share) has dropped off the network or gone to
             # sleep, which would stall the script at startup.
-            $drive = [System.IO.DriveInfo]::GetDrives() | Where-Object { $_.Name -eq $letter }
+            $allDrives = if ($null -ne $Drives) { $Drives } else { Get-LocalDriveInfoSafe }
+            if ($null -eq $allDrives) { return $false }   # could not determine -- fail safe
+            $drive = $allDrives | Where-Object { $_.Name -eq $letter }
             if ($drive -and $drive.DriveType -eq [System.IO.DriveType]::Network) { return $true }
         } catch {}
     }
@@ -422,8 +467,12 @@ function Find-TeknoParrotRoot {
         [void]$candidates.Add((Join-Path $up "LaunchBox\Emulators\TeknoParrot"))
         [void]$candidates.Add((Join-Path $up "AppData\Roaming\LaunchBox\Emulators\TeknoParrot"))
     }
+    # Fetch drive type info ONCE for this whole scan (issue #5) -- both for
+    # the hard-timeout job-spawn cost and to avoid the pre-existing
+    # inefficiency of re-running GetDrives() once per candidate drive letter.
+    $localDriveInfo = Get-LocalDriveInfoSafe
     $drives = @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue |
-                Where-Object { $_.Root -and -not (Test-IsNetworkPath $_.Root) -and (Test-Path -LiteralPath $_.Root) } |
+                Where-Object { $_.Root -and -not (Test-IsNetworkPath $_.Root -Drives $localDriveInfo) -and (Test-Path -LiteralPath $_.Root) } |
                 ForEach-Object { $_.Root.TrimEnd('\') })
     foreach ($d in $drives) {
         [void]$candidates.Add("$d\TeknoParrot")
@@ -453,8 +502,9 @@ function Find-LaunchBoxRoot {
         [void]$candidates.Add((Join-Path $up "LaunchBox"))
         [void]$candidates.Add((Join-Path $up "AppData\Roaming\LaunchBox"))
     }
+    $localDriveInfo = Get-LocalDriveInfoSafe
     $drives = @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue |
-                Where-Object { $_.Root -and -not (Test-IsNetworkPath $_.Root) -and (Test-Path -LiteralPath $_.Root) } |
+                Where-Object { $_.Root -and -not (Test-IsNetworkPath $_.Root -Drives $localDriveInfo) -and (Test-Path -LiteralPath $_.Root) } |
                 ForEach-Object { $_.Root.TrimEnd('\') })
     foreach ($d in $drives) {
         [void]$candidates.Add("$d\LaunchBox")

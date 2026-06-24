@@ -50,6 +50,61 @@ Describe "Test-PathInside" {
     }
 }
 
+Describe "Invoke-WithHardTimeout" {
+    # Issue #5 (v1.0 roadmap): a generic hard-timeout wrapper for a local call
+    # that could theoretically still block. Uses a real background job (not
+    # mocked) since the whole point is genuine process-level isolation -- these
+    # tests use short, deterministic scriptblocks so they stay fast.
+    It "returns the scriptblock's output when it completes well within the timeout" {
+        Invoke-WithHardTimeout -ScriptBlock { 1 + 1 } -TimeoutSeconds 5 | Should -Be 2
+    }
+    It "returns null and does not throw when the scriptblock exceeds the timeout" {
+        $result = $null
+        { $result = Invoke-WithHardTimeout -ScriptBlock { Start-Sleep -Seconds 10 } -TimeoutSeconds 1 } | Should -Not -Throw
+        $result | Should -BeNullOrEmpty
+    }
+    It "returns null and does not throw when the scriptblock itself throws" {
+        { Invoke-WithHardTimeout -ScriptBlock { throw "boom" } -TimeoutSeconds 5 } | Should -Not -Throw
+        Invoke-WithHardTimeout -ScriptBlock { throw "boom" } -TimeoutSeconds 5 | Should -BeNullOrEmpty
+    }
+}
+
+Describe "Test-IsNetworkPath" {
+    # DriveInfo.DriveType is a read-only OS-derived property with no public
+    # constructor for a synthetic "Network" instance, so these tests cover
+    # the reachable surface without needing a real mapped network drive:
+    # the UNC short-circuit (no drive lookup at all), the explicit -Drives
+    # override against this machine's real (non-network) drives, and the
+    # fail-safe path when drive info genuinely could not be determined
+    # (mocking Get-LocalDriveInfoSafe rather than passing -Drives $null,
+    # since that default is indistinguishable from "not supplied" and would
+    # otherwise just spawn the real job and exercise the success path).
+    It "treats a UNC path as a network path without needing drive info at all" {
+        Test-IsNetworkPath '\\nas\share\folder' | Should -BeTrue
+    }
+    It "returns false for an empty or whitespace path" {
+        Test-IsNetworkPath '' | Should -BeFalse
+        Test-IsNetworkPath '   ' | Should -BeFalse
+    }
+    It "uses the real local C: drive (non-network) when -Drives is supplied explicitly" {
+        $realDrives = [System.IO.DriveInfo]::GetDrives()
+        Test-IsNetworkPath 'C:\Windows' -Drives $realDrives | Should -BeFalse
+    }
+    It "fails safe (returns false, never throws) when drive info could not be determined" {
+        Mock Get-LocalDriveInfoSafe { $null }
+        { Test-IsNetworkPath 'Z:\Games' } | Should -Not -Throw
+        Test-IsNetworkPath 'Z:\Games' | Should -BeFalse
+    }
+}
+
+Describe "Get-LocalDriveInfoSafe" {
+    It "returns real drive info (including the system drive) within the timeout in the normal case" {
+        $result = Get-LocalDriveInfoSafe
+        $result | Should -Not -BeNullOrEmpty
+        ($result | Where-Object { $_.Name -eq "$($env:SystemDrive)\" }) | Should -Not -BeNullOrEmpty
+    }
+}
+
 Describe "ConvertTo-XPathStringLiteral" {
     It "wraps a plain string in single quotes" {
         ConvertTo-XPathStringLiteral "GPU Fix" | Should -Be "'GPU Fix'"
