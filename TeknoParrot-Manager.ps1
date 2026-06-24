@@ -3635,7 +3635,10 @@ function Test-PostgresInstallationsRegistry {
     if ($entries.Count -eq 0) {
         return [pscustomobject]@{ HasRecord = $false; Mismatch = $false }
     }
-    $matching = @($entries | Where-Object { $_.'Base Directory'.TrimEnd('\') -like $expected })
+    # -ieq (case-insensitive EXACT equality), not -like -- this is a literal
+    # path comparison, not a wildcard pattern match. Using -like here would
+    # treat any `[`, `]`, or `*` in either path as wildcard syntax.
+    $matching = @($entries | Where-Object { $_.'Base Directory'.TrimEnd('\') -ieq $expected })
     return [pscustomobject]@{ HasRecord = $true; Mismatch = ($matching.Count -eq 0) }
 }
 
@@ -3660,9 +3663,15 @@ function Remove-PostgresPartialInstall {
         # Only ever uninstall an entry confirmed to be OUR install location --
         # someone could have an unrelated standalone PostgreSQL 8.3 for
         # legacy dev work at a different path, and a DisplayName match alone
-        # is not enough to assume it's safe to remove.
+        # is not enough to assume it's safe to remove. Case-insensitive EXACT
+        # equality (-ine), not -notlike -- this was previously -notlike, which
+        # treats the path as a wildcard pattern; a real path containing `[`,
+        # `]`, or `*` could have matched/missed unintentionally. Caught in a
+        # full deep-scan review; harmless today since the path is a hardcoded
+        # constant with no wildcard metacharacters, but -ine is the correct
+        # operator for what this comparison actually means.
         $installLoc = if ($entry.InstallLocation) { $entry.InstallLocation.TrimEnd('\') } else { '' }
-        if ($installLoc -notlike $expectedInstallDir) {
+        if ($installLoc -ine $expectedInstallDir) {
             Write-Log "Postgres: skipping uninstall of '$($entry.DisplayName)' -- InstallLocation '$installLoc' does not match our expected path, not touching it."
             continue
         }
