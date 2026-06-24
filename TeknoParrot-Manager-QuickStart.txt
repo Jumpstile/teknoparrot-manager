@@ -35,6 +35,9 @@
   4. In TeknoParrotUI, bind one game of each controller type you use.
   5. Re-run the script -- it copies those controls to all similar games.
   6. Launch one updated game and test it.
+  7. Everything else (crosshairs, ReShade, dgVoodoo2, GPU fix, FFB, BepInEx,
+     Postgres -- modes 3-8 and 11) is optional and can be run any time after
+     this, in any order, as many times as you like.
 
 
   RUN IT
@@ -249,7 +252,8 @@
 
   To remove: delete the deployed DLL file(s) from the game folder.
 
-  Full details: TeknoParrot-Manager-README.txt -- DGVOODOO2 section.
+  Full details: TeknoParrot-Manager-README.txt -- DGVOODOO2 LEGACY
+  COMPATIBILITY section.
 
 
   GPU COMPATIBILITY FIXES (OPTIONAL)
@@ -622,9 +626,11 @@
   TeknoParrot-Manager-CHANGELOG.txt    Full version history.
   ReShade\ReShade64.dll                Bundled ReShade DLL (64-bit games).
   ReShade\ReShade32.dll                Bundled ReShade DLL (32-bit games,
-                                       optional). See RESHADE section above.
+                                       optional). See RESHADE VISUAL
+                                       ENHANCEMENTS section above.
   dgVoodoo2\*.dll + dgVoodoo.conf      (Create yourself) dgVoodoo2 DLLs for
-                                       old DX8/Glide games. See DGVOODOO2 above.
+                                       old DX8/Glide games. See DGVOODOO2
+                                       LEGACY COMPATIBILITY section above.
   Crosshairs\*.png                     Custom crosshair images for lightgun
                                        games (321 images included).
   CustomThumbnails\*.png               (Optional, create yourself) Your own

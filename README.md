@@ -45,6 +45,8 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 - [Resetting](#resetting)
 - [Troubleshooting](#troubleshooting)
 - [What It Does Not Do](#what-it-does-not-do)
+- [Files Reference](#files-reference)
+- [Support / Contributing](#support--contributing)
 
 ---
 
@@ -794,6 +796,14 @@ TeknoParrot must be set up as an emulator in HyperSpin 2 first. The title must c
 | `dgVoodoo2\*.dll` + `dgVoodoo.conf` | Scripts folder | dgVoodoo2 DLLs (you provide) |
 | `Crosshairs\*.png` | Scripts folder | Crosshair images (321 included) |
 | `CustomThumbnails\*.png` | Scripts folder | Your own game icons (optional, you create) |
+
+---
+
+## Support / Contributing
+
+Found a bug, or something not working as described here? [Open an issue](https://github.com/Jumpstile/teknoparrot-manager/issues) — please include your `TeknoParrot-Manager.log` and (if relevant) `TeknoParrot-Manager-controls.txt`, most reports get resolved faster with these attached.
+
+Pull requests are welcome too. Full source and version history: [github.com/Jumpstile/teknoparrot-manager](https://github.com/Jumpstile/teknoparrot-manager).
 
 ---
 

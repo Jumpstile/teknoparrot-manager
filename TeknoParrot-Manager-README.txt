@@ -43,6 +43,7 @@
     CROSSHAIR SETUP                -- mode 3
     RESHADE VISUAL ENHANCEMENTS    -- mode 4
     DGVOODOO2 LEGACY COMPATIBILITY -- mode 5
+    GPU COMPATIBILITY FIXES        -- mode 6
     FORCE FEEDBACK (FFB) SETUP     -- mode 7
     BEPINEX UPDATE CHECK           -- mode 8
     POSTGRES SETUP                 -- mode 11
@@ -59,6 +60,7 @@
     RESETTING
     TROUBLESHOOTING
     WHAT IT DOES NOT DO
+    SUPPORT / CONTRIBUTING
     APPENDIX: FUZZY MATCHING DETAILS
 
 
@@ -1329,6 +1331,32 @@
   matching DLL deployed yet, read-only and without changing anything.
 
 
+  GPU COMPATIBILITY FIXES
+  ------------------------
+
+  Many TeknoParrot games include optional per-vendor fix settings (AMD,
+  NVIDIA, Intel) in their profiles. Mode 6 auto-detects your GPU and applies
+  the correct fix to every registered game that has one. TeknoParrot's
+  GameProfiles folder is scanned at runtime, so newly added games are always
+  covered automatically -- no script update needed.
+
+  To run:
+
+    Choose mode 6 from the main menu, or answer Y when prompted at the end
+    of a normal run.
+
+  Safe to re-run any time you change your GPU or update its drivers.
+
+  A small number of older games are known to be GPU-incompatible outright
+  (confirmed broken on a specific vendor, not just "no fix available") --
+  these are flagged automatically during every run's compatibility check,
+  separate from this setup step.
+
+  Mode 10 (Library health check) reports which registered games are
+  eligible for a GPU fix but don't have it applied yet, read-only and
+  without changing anything.
+
+
   FORCE FEEDBACK (FFB) SETUP
   ---------------------------
 
@@ -2169,6 +2197,24 @@
 
   - It does not provide game files. You supply your own legally obtained
     games; the script only registers and configures them.
+
+
+-------------------------------------------------------------------------------
+  SUPPORT / CONTRIBUTING
+-------------------------------------------------------------------------------
+
+  Found a bug, or something not working as described here? Open an issue:
+
+    https://github.com/Jumpstile/teknoparrot-manager/issues
+
+  Please include your TeknoParrot-Manager.log and (if relevant)
+  TeknoParrot-Manager-controls.txt -- most reports get resolved faster with
+  these attached than without.
+
+  Pull requests are welcome too. The repository, full source, and version
+  history all live at:
+
+    https://github.com/Jumpstile/teknoparrot-manager
 
 
 -------------------------------------------------------------------------------
