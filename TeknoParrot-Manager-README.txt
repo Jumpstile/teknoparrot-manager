@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.99.27 BETA
+  TeknoParrot Manager  |  v0.99.28 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -470,6 +470,10 @@
 
   Step 3.  Choose a mode (see below). On later runs the script remembers your
            settings and offers to reuse them -- press Y to continue.
+
+  Any time you're asked to type a file or folder path, you can type B
+  instead to open a native Windows browse dialog and pick it visually.
+  Typing the path directly still works exactly the same as before.
 
 
 -------------------------------------------------------------------------------
@@ -2262,6 +2266,6 @@
 
 
 ===============================================================================
-  v0.99.27 BETA -- Test one game after each run.
+  v0.99.28 BETA -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================

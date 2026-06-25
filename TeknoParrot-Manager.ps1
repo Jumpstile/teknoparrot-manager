@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.27 BETA
+# TeknoParrot Manager  |  v0.99.28 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.27"
+$ScriptVersion = "0.99.28"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -114,6 +114,67 @@ function Write-Log {
         # The [UNLOGGED] prefix distinguishes these from normal script output.
         Write-Host ("  [UNLOGGED] {0}" -f $msg) -ForegroundColor DarkGray
         $script:logFailedCount++
+    }
+}
+
+# Prompts for a file/folder path with an option to browse for it using a
+# native Windows dialog instead of typing it. Typing "B" (case-insensitive)
+# opens the dialog; anything else is returned exactly as before (typing the
+# path manually is unchanged for anyone who never uses this). Uses
+# System.Windows.Forms (ships with every Windows PowerShell 5.1 install,
+# no new dependency) -- loaded lazily, only the first time this is called.
+#
+# Requires the STA apartment Windows PowerShell (powershell.exe) launches in
+# by default -- WinForms dialogs need it. If launched under a host that
+# doesn't have it (or the dialog otherwise fails to open, e.g. no desktop
+# session), this fails closed to the plain manual-entry prompt rather than
+# crashing the run -- browsing is a convenience layered on top of typing,
+# never a replacement that could block someone who can't use it.
+#
+# -Mode 'Folder' shows a folder picker; 'File' shows an open-file picker
+# (-FileFilter customizes the file-type list); 'SaveFile' shows a save-file
+# picker (for choosing a download destination, not an existing file).
+function Read-PathWithBrowse {
+    param(
+        [string]$Prompt,
+        [ValidateSet('Folder', 'File', 'SaveFile')] [string]$Mode = 'Folder',
+        [string]$FileFilter = "All files (*.*)|*.*",
+        [string]$DefaultFileName = '',
+        [string]$InitialDirectory = ''
+    )
+    $raw = (Read-Host "$Prompt (or type B to browse)").Trim()
+    if ($raw.ToUpper() -ne 'B') { return $raw }
+    try {
+        Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+        $initialDir = if ($InitialDirectory -and (Test-Path -LiteralPath $InitialDirectory)) { $InitialDirectory } else { '' }
+        switch ($Mode) {
+            'Folder' {
+                $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
+                $dlg.Description = $Prompt
+                if ($initialDir) { $dlg.SelectedPath = $initialDir }
+                if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { return $dlg.SelectedPath }
+                return ''
+            }
+            'File' {
+                $dlg = New-Object System.Windows.Forms.OpenFileDialog
+                $dlg.Filter = $FileFilter
+                if ($initialDir) { $dlg.InitialDirectory = $initialDir }
+                if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { return $dlg.FileName }
+                return ''
+            }
+            'SaveFile' {
+                $dlg = New-Object System.Windows.Forms.SaveFileDialog
+                $dlg.Filter   = $FileFilter
+                $dlg.FileName = $DefaultFileName
+                if ($initialDir) { $dlg.InitialDirectory = $initialDir }
+                if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { return $dlg.FileName }
+                return ''
+            }
+        }
+    } catch {
+        Write-Log "Read-PathWithBrowse: dialog failed -- $_"
+        Write-Host "  Could not open the file browser -- type the path instead." -ForegroundColor Yellow
+        return (Read-Host "  Path").Trim()
     }
 }
 
@@ -1501,7 +1562,7 @@ function Invoke-ReShadeSetup {
     $presetChoice = (Read-Host "  Enter 1 or 2").Trim()
     $presetPath   = $null
     if ($presetChoice -eq "2") {
-        $pInp = (Read-Host "  Path to your ReShade preset (.ini) file").Trim()
+        $pInp = Read-PathWithBrowse "  Path to your ReShade preset (.ini) file" -Mode File -FileFilter "ReShade preset (*.ini)|*.ini|All files (*.*)|*.*"
         if (Test-Path -LiteralPath $pInp) {
             $presetPath = $pInp
             Write-Host "  Preset: $pInp" -ForegroundColor DarkGray
@@ -3448,7 +3509,8 @@ function Invoke-EggmanDatDownloadInteractive {
         Write-Host "  Unexpected filename from GitHub -- skipped for safety." -ForegroundColor Red
         return $null
     }
-    $rawSave = (Read-Host "  Save to (Enter for default: $defaultSavePath)").Trim()
+    $rawSave = Read-PathWithBrowse "  Save to (Enter for default: $defaultSavePath)" -Mode SaveFile `
+                   -FileFilter "ZIP files (*.zip)|*.zip|All files (*.*)|*.*" -DefaultFileName $safeDatFileName -InitialDirectory $PSScriptRoot
     if (-not $rawSave) { $rawSave = $defaultSavePath }
     Write-Host "  Downloading -- this may take a few minutes..." -ForegroundColor Cyan
     if (Invoke-EggmanDatDownload $rel.DownloadUrl $rawSave) { return $rawSave }
@@ -8238,7 +8300,7 @@ if (-not $tpRoot) {
         }
     }
     if (-not $tpRoot) {
-        $tpRoot = (Read-Host "Enter TeknoParrot root folder (containing TeknoParrotUi.exe)").Trim()
+        $tpRoot = Read-PathWithBrowse "Enter TeknoParrot root folder (containing TeknoParrotUi.exe)"
     }
 }
 
@@ -8247,7 +8309,7 @@ if (-not $gamesInstallFolder) {
         Write-Host "ERROR: Unattended mode -- games install folder not in saved settings." -ForegroundColor Red
         Write-Log "ERROR: Unattended mode -- gamesInstallFolder not set."; exit 1
     }
-    $gamesInstallFolder = (Read-Host "Enter folder containing your extracted games (e.g. E:\TeknoParrotGames)").Trim()
+    $gamesInstallFolder = Read-PathWithBrowse "Enter folder containing your extracted games (e.g. E:\TeknoParrotGames)"
 }
 
 if (-not $configAccepted -and -not $Unattended) {
@@ -8287,18 +8349,18 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
                 if ($includeSupplementary) { Write-Log "EggmanDat: supplementary indexing enabled." }
             } else {
                 Write-Host "  Enter path to existing ZIP or .dat file, or press Enter to skip:" -ForegroundColor Yellow
-                $raw      = (Read-Host "  Path").Trim()
+                $raw      = Read-PathWithBrowse "  Path" -Mode File -FileFilter "ZIP/dat files (*.zip;*.dat)|*.zip;*.dat|All files (*.*)|*.*"
                 $datChoice = 'FALLBACK'
             }
         } else {
             Write-Host "  Could not reach GitHub. Enter path to existing ZIP or .dat file, or press Enter to skip:" -ForegroundColor Yellow
-            $raw      = (Read-Host "  Path").Trim()
+            $raw      = Read-PathWithBrowse "  Path" -Mode File -FileFilter "ZIP/dat files (*.zip;*.dat)|*.zip;*.dat|All files (*.*)|*.*"
             $datChoice = 'FALLBACK'
         }
     }
 
     if ($datChoice -eq 'Z' -or $datChoice -eq 'FALLBACK') {
-        if ($datChoice -eq 'Z') { $raw = (Read-Host "  Path to Eggman dat ZIP").Trim() }
+        if ($datChoice -eq 'Z') { $raw = Read-PathWithBrowse "  Path to Eggman dat ZIP" -Mode File -FileFilter "ZIP files (*.zip)|*.zip|All files (*.*)|*.*" }
         if ($raw) {
             if (Test-Path -LiteralPath $raw) {
                 $ext = [System.IO.Path]::GetExtension($raw).ToLower()
@@ -8323,13 +8385,13 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
     }
 
     if ($datChoice -eq 'F') {
-        $rawColl = (Read-Host "  Path to collection dat file").Trim()
+        $rawColl = Read-PathWithBrowse "  Path to collection dat file" -Mode File -FileFilter "dat files (*.dat)|*.dat|All files (*.*)|*.*"
         if ($rawColl) {
             if (Test-Path -LiteralPath $rawColl) {
                 $datFilePath = $rawColl
                 Write-Log "Config: datFilePath (collection) set to $rawColl"
                 Write-Host "  Supplementary dat (press Enter to skip):" -ForegroundColor DarkCyan
-                $rawSupp = (Read-Host "  Path to supplementary dat file").Trim()
+                $rawSupp = Read-PathWithBrowse "  Path to supplementary dat file" -Mode File -FileFilter "dat files (*.dat)|*.dat|All files (*.*)|*.*"
                 if ($rawSupp) {
                     if (Test-Path -LiteralPath $rawSupp) {
                         $supplementaryDatPath = $rawSupp
@@ -8925,7 +8987,7 @@ while ($true) {
                 Write-Host "    -- OR --" -ForegroundColor DarkCyan
                 Write-Host "    Enter the full path to the DLL file now:" -ForegroundColor White
                 Write-Host ""
-                $inp = (Read-Host "  Path to ReShade 64-bit DLL (or press Enter to cancel)").Trim()
+                $inp = Read-PathWithBrowse "  Path to ReShade 64-bit DLL (or press Enter to cancel)" -Mode File -FileFilter "DLL files (*.dll)|*.dll|All files (*.*)|*.*"
                 if ([string]::IsNullOrWhiteSpace($inp) -or -not (Test-Path -LiteralPath $inp)) {
                     Write-Host "  File not found. ReShade setup cancelled." -ForegroundColor Red
                     Write-Log "ReShade setup: aborted -- DLL not found."
@@ -8989,7 +9051,7 @@ while ($true) {
                 Write-Host "    -- OR --" -ForegroundColor DarkCyan
                 Write-Host "    Enter the full path to a folder that already contains those files:" -ForegroundColor White
                 Write-Host ""
-                $inp = (Read-Host "  Path to dgVoodoo2 folder (or press Enter to cancel)").Trim()
+                $inp = Read-PathWithBrowse "  Path to dgVoodoo2 folder (or press Enter to cancel)"
                 if ([string]::IsNullOrWhiteSpace($inp) -or -not (Test-Path -LiteralPath $inp)) {
                     Write-Host "  Folder not found. dgVoodoo2 setup cancelled." -ForegroundColor Red
                     Write-Log "dgVoodoo2 setup: aborted -- folder not found."
@@ -9122,7 +9184,7 @@ while ($true) {
         Write-Host "  Main collection ZIP folder" -ForegroundColor Cyan
         Write-Host "  Point directly at the folder containing the .zip files, not a parent folder." -ForegroundColor DarkCyan
         Write-Host "  Example: W:\ROMS\TeknoParrot Collection" -ForegroundColor DarkCyan
-        $zipSource = (Read-Host "  Path").Trim()
+        $zipSource = Read-PathWithBrowse "  Path"
         $zipPathsJustCaptured = $true
     }
     if ($mode -eq "AutoSync" -and ($null -eq $zipSourceSupplementary -or $zipSourceSupplementary -eq '') -and -not $Unattended) {
@@ -9130,7 +9192,7 @@ while ($true) {
         Write-Host "  Supplementary games folder (optional)" -ForegroundColor Cyan
         Write-Host "  Point directly at the folder containing the Supplementary .zip files, not a parent folder." -ForegroundColor DarkCyan
         Write-Host "  Example: W:\ROMS\TeknoParrot Supplementary" -ForegroundColor DarkCyan
-        $rawSupp = (Read-Host "  Path (or press Enter to skip)").Trim()
+        $rawSupp = Read-PathWithBrowse "  Path (or press Enter to skip)"
         if ($rawSupp -and (Test-Path -LiteralPath $rawSupp)) {
             $zipSourceSupplementary = $rawSupp
             Write-Log "Config: supplementary ZIP source set to $rawSupp"
@@ -9873,7 +9935,7 @@ if ($doLBSetup -eq "Y" -and -not $lbRoot) {
         }
     }
     if (-not $lbRoot) {
-        $lbInput = (Read-Host "  Enter LaunchBox root folder (containing LaunchBox.exe), or press Enter to skip").Trim()
+        $lbInput = Read-PathWithBrowse "  Enter LaunchBox root folder (containing LaunchBox.exe), or press Enter to skip"
         if ($lbInput -and (Test-Path -LiteralPath (Join-Path $lbInput "LaunchBox.exe"))) {
             $lbRoot = $lbInput
         } elseif ($lbInput) {
@@ -10024,7 +10086,7 @@ if ($doHS -eq "Y") {
     if (-not $hsDataPath) {
         Write-Host ""
         Write-Host "  Enter HyperSpin 2 data folder path." -ForegroundColor Cyan
-        $hsInput = (Read-Host "  Path (default: C:\ProgramData\HyperSpin\data)").Trim()
+        $hsInput = Read-PathWithBrowse "  Path (default: C:\ProgramData\HyperSpin\data)" -InitialDirectory "C:\ProgramData\HyperSpin"
         if ([string]::IsNullOrWhiteSpace($hsInput)) { $hsInput = "C:\ProgramData\HyperSpin\data" }
         $hsDataPath = $hsInput
 
@@ -10115,11 +10177,11 @@ if ($doReShade -eq "Y") {
             Write-Host "    2. Run it and point it at any TeknoParrot game exe." -ForegroundColor White
             Write-Host "       It will create a DLL file (e.g. dxgi.dll) in that game folder." -ForegroundColor White
             Write-Host "    3. Copy that DLL to  $PSScriptRoot\ReShade\  and rename it  ReShade64.dll" -ForegroundColor White
-            Write-Host "       Then re-run this script and choose option 5 from the menu." -ForegroundColor White
+            Write-Host "       Then re-run this script and choose option 4 from the menu." -ForegroundColor White
             Write-Host "    -- OR --" -ForegroundColor DarkCyan
             Write-Host "    Enter the full path to the DLL file now:" -ForegroundColor White
             Write-Host ""
-            $rsInp = (Read-Host "  Path to ReShade 64-bit DLL (or press Enter to skip)").Trim()
+            $rsInp = Read-PathWithBrowse "  Path to ReShade 64-bit DLL (or press Enter to skip)" -Mode File -FileFilter "DLL files (*.dll)|*.dll|All files (*.*)|*.*"
             if (-not [string]::IsNullOrWhiteSpace($rsInp) -and (Test-Path -LiteralPath $rsInp) -and
                 ([System.IO.Path]::GetExtension($rsInp).ToLower() -eq '.dll')) {
                 $rsSourceDll = $rsInp
@@ -10204,11 +10266,11 @@ if ($doDgVoodoo -eq "Y") {
             Write-Host "         From the MS\x86\ subfolder : D3D8.dll  DDraw.dll  D3DImm.dll" -ForegroundColor White
             Write-Host "         From the 3Dfx\x86\ subfolder : Glide2x.dll  Glide3x.dll" -ForegroundColor White
             Write-Host "         From the root of the ZIP   : dgVoodoo.conf" -ForegroundColor White
-            Write-Host "       Then re-run this script and choose option 6 from the menu." -ForegroundColor White
+            Write-Host "       Then re-run this script and choose option 5 from the menu." -ForegroundColor White
             Write-Host "    -- OR --" -ForegroundColor DarkCyan
             Write-Host "    Enter the full path to a folder that already contains those files:" -ForegroundColor White
             Write-Host ""
-            $dgInp = (Read-Host "  Path to dgVoodoo2 folder (or press Enter to skip)").Trim()
+            $dgInp = Read-PathWithBrowse "  Path to dgVoodoo2 folder (or press Enter to skip)"
             if (-not [string]::IsNullOrWhiteSpace($dgInp) -and (Test-Path -LiteralPath $dgInp)) {
                 $dgSourceDir = $dgInp
             } else {

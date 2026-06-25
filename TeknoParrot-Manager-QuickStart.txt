@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.99.27 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.99.28 BETA  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -589,6 +589,8 @@
   - On later runs the script remembers your settings -- press Y to reuse.
   - To fix a mis-classified game's control family (e.g. FamilyGuyBowling),
     add it to the familyOverride section of the overrides file.
+  - Any time you're asked to type a file or folder path, you can type B
+    instead to open a native Windows browse dialog and pick it.
 
 
   FILES THE SCRIPT KEEPS

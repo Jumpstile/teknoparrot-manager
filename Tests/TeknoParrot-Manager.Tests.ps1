@@ -844,6 +844,29 @@ Describe "New-PostgresPgPassFile / Remove-PostgresPgPassFile" {
     }
 }
 
+Describe "Read-PathWithBrowse" {
+    # This is UI code (it can launch a real WinForms file/folder picker), which
+    # is outside this project's stated Pester scope the same way other menu/UI
+    # code already is -- these tests only cover the manual-entry passthrough
+    # (mocking Read-Host, the one real cmdlet involved), never the actual
+    # dialog-showing branch, which has no practical way to assert against in an
+    # automated run without clicking through a real modal window.
+    It "returns whatever was typed, unchanged, when the user does not type B" {
+        Mock Read-Host { "C:\Some\Typed\Path" }
+        Read-PathWithBrowse "Enter a path" | Should -Be "C:\Some\Typed\Path"
+    }
+    It "is case-insensitive when checking for the browse trigger (only 'b'/'B' triggers it, not a path that happens to start with B)" {
+        Mock Read-Host { "B:\SomeDrive" }
+        # A typed path literally starting with the letter B must NOT be misread as
+        # the browse trigger -- only an exact "B" (after Trim) should be.
+        Read-PathWithBrowse "Enter a path" | Should -Be "B:\SomeDrive"
+    }
+    It "returns an empty string passthrough when the user presses Enter with nothing typed" {
+        Mock Read-Host { "" }
+        Read-PathWithBrowse "Enter a path" | Should -Be ""
+    }
+}
+
 Describe "Get-ReShadeLatestVersion retry behavior" {
     BeforeAll {
         Mock Invoke-WebRequest {}

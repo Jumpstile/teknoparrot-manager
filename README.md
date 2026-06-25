@@ -155,6 +155,8 @@ powershell -ExecutionPolicy Bypass -File .\TeknoParrot-Manager.ps1
 
 On first run the script scans common install locations for `TeknoParrotUi.exe` automatically before asking you to type a path. If multiple installs are found they are listed numbered for easy picking.
 
+Any time you're asked to type a file or folder path, type `B` instead to open a native Windows browse dialog and pick it visually — typing the path directly still works exactly as before.
+
 On later runs it offers to reuse your saved settings — press **Y** to continue, **N** to reconfigure.
 
 ---
@@ -814,4 +816,4 @@ Pull requests are welcome too. Full source and version history: [github.com/Jump
 
 ---
 
-> v0.99.27 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v0.99.28 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.

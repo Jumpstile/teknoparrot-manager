@@ -7,6 +7,23 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.28 BETA  (2026-06-25)
+-------------------------------------------------------------------------------
+
+  New: every prompt that asks you to type a file or folder path -- the
+  TeknoParrot root, games install folder, ZIP source and supplementary ZIP
+  source folders, Eggman dat files, ReShade preset/DLL, dgVoodoo2 folder,
+  LaunchBox root, HyperSpin 2 data path, and the Eggman ZIP download save
+  location -- now also accepts typing "B" to open a native Windows folder/
+  file browser instead of typing the path by hand. Typing the path
+  directly still works exactly as before.
+
+  Fix: two prompts (ReShade and dgVoodoo2 "DLL/folder not found") told you
+  to choose the wrong menu option number for getting back to that setup
+  step. Corrected to match the real menu (ReShade is mode 4, dgVoodoo2 is
+  mode 5).
+
+-------------------------------------------------------------------------------
   v0.99.27 BETA  (2026-06-25)
 -------------------------------------------------------------------------------
 
