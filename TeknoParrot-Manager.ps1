@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.28 BETA
+# TeknoParrot Manager  |  v0.99.29 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.28"
+$ScriptVersion = "0.99.29"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -6085,6 +6085,28 @@ function Get-ButtonNodes {
 }
 
 # Composite match key for a button: "InputMapping|AnalogType".
+# Returns $true if a JoystickButtons ButtonName refers to a pure directional
+# control (Up/Down/Left/Right joystick axis) rather than an action button.
+# After stripping a leading player-number prefix (P1/P2/Player 1/Player 2),
+# the remaining label must consist ONLY of direction words. Any additional
+# qualifier (Punch, Kick, Shoulder, Fire, etc.) means the slot is an action
+# button that happens to use a direction word as a positional modifier (e.g.
+# "Left Punch", "Left Shoulder") -- not a joystick axis.
+# Used by Invoke-ControlPropagation to guard against copying e.g. SF3's D-pad
+# Up binding into a target game's "Left Punch" slot when both share the same
+# InputMapping key (P1ButtonUp) but mean completely different physical controls.
+function Test-ButtonNameDirectional {
+    param([string]$name)
+    $n = $name.Trim() -replace '(?i)^\s*(player\s*[12]|p[12])\s+', ''
+    $words = ($n -split '\s+') | Where-Object { $_ -ne '' }
+    if ($words.Count -eq 0) { return $false }
+    $dirWords = @('up','down','left','right','north','south','east','west')
+    foreach ($w in $words) {
+        if ($dirWords -notcontains $w.ToLower()) { return $false }
+    }
+    return $true
+}
+
 # AnalogType is absent on many template buttons; it defaults to None on both
 # sides so a minimal template button still matches a bound archetype button.
 function Get-ButtonKey {
@@ -6533,6 +6555,25 @@ function Invoke-ControlPropagation {
             $nameNode = $b.SelectSingleNode("ButtonName")
             $btnName  = if ($nameNode) { $nameNode.InnerText } else { "" }
             if ($k -and $best.Map.ContainsKey($k)) {
+                # Guard: skip the copy if source and target disagree on whether
+                # this slot is a joystick direction vs an action button. Some
+                # game profiles reuse the same InputMapping enum value (e.g.
+                # P1ButtonUp, P1Button1) for completely different physical
+                # controls across titles. Example: P1ButtonUp is the Up
+                # direction in SF3 but "Left Punch" in Tekken 6; P1Button1 is
+                # LP in SF3 but the UP direction in Rampage. Copying across
+                # that semantic boundary bakes in wrong, non-fixable bindings
+                # (the profile then counts as REFERENCE and is never revisited).
+                # Test-ButtonNameDirectional classifies a slot as directional
+                # only when its label, after stripping the player-number prefix,
+                # consists exclusively of direction words. A mismatch (one side
+                # directional, other side not) is treated as manual. See #17.
+                $srcNameNode = $best.Map[$k].SelectSingleNode("ButtonName")
+                $srcName = if ($srcNameNode) { $srcNameNode.InnerText } else { "" }
+                if ((Test-ButtonNameDirectional $srcName) -ne (Test-ButtonNameDirectional $btnName)) {
+                    if ($btnName) { [void]$manual.Add($btnName) }
+                    continue
+                }
                 # Clone the archetype's whole bound node (preserving the exact
                 # element order TeknoParrot writes), then restore THIS game's
                 # own display name. The clone carries the real device + key.

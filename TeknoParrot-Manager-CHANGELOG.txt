@@ -7,6 +7,21 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.29 BETA  (2026-06-25)
+-------------------------------------------------------------------------------
+
+  Fix: control propagation could copy the wrong physical input into a game's
+  directional slots (Up/Down/Left/Right movement) when two games share an
+  InputMapping key but use it for different purposes. For example, SF3 uses
+  P1ButtonUp for the joystick Up direction; Tekken 6 uses the same key for
+  "Left Punch". The propagation system now checks that source and target slots
+  agree on whether they are directional controls (pure Up/Down/Left/Right
+  labels) before copying a binding; a mismatch leaves the slot in the manual
+  ACTION REQUIRED list instead of writing a semantically wrong input. Games
+  already configured with incorrect directional bindings from a prior run need
+  to have those specific buttons rebound manually in TeknoParrot's UI.
+
+-------------------------------------------------------------------------------
   v0.99.28 BETA  (2026-06-25)
 -------------------------------------------------------------------------------
 

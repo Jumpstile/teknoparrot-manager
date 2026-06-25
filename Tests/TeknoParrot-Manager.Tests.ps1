@@ -921,3 +921,44 @@ Describe "Invoke-EggmanDatDownload retry and partial-file cleanup" {
         Should -Invoke Invoke-WebRequest -Times 3
     }
 }
+
+Describe "Test-ButtonNameDirectional" {
+    # Pure up/down/left/right labels (with various player-prefix formats) are directional.
+    It "classifies plain 'Up' as directional" {
+        Test-ButtonNameDirectional "Up" | Should -BeTrue
+    }
+    It "classifies 'Player 1 Up' as directional" {
+        Test-ButtonNameDirectional "Player 1 Up" | Should -BeTrue
+    }
+    It "classifies 'P1 UP' as directional (case-insensitive, P1 prefix)" {
+        Test-ButtonNameDirectional "P1 UP" | Should -BeTrue
+    }
+    It "classifies 'Player 2 Down' as directional" {
+        Test-ButtonNameDirectional "Player 2 Down" | Should -BeTrue
+    }
+    It "classifies diagonal 'Up Right' as directional" {
+        Test-ButtonNameDirectional "Up Right" | Should -BeTrue
+    }
+
+    # Names that contain direction words but also have non-direction qualifiers are NOT directional.
+    It "classifies 'Player 1 Left Punch' as NOT directional (attack qualifier)" {
+        Test-ButtonNameDirectional "Player 1 Left Punch" | Should -BeFalse
+    }
+    It "classifies 'Player 1 Right Kick' as NOT directional (attack qualifier)" {
+        Test-ButtonNameDirectional "Player 1 Right Kick" | Should -BeFalse
+    }
+    It "classifies 'Player 1 Left Shoulder' as NOT directional (non-direction qualifier)" {
+        Test-ButtonNameDirectional "Player 1 Left Shoulder" | Should -BeFalse
+    }
+
+    # Pure attack/action labels with no direction words are NOT directional.
+    It "classifies 'Player 1 LP' as NOT directional" {
+        Test-ButtonNameDirectional "Player 1 LP" | Should -BeFalse
+    }
+    It "classifies 'P1 ATTACK' as NOT directional" {
+        Test-ButtonNameDirectional "P1 ATTACK" | Should -BeFalse
+    }
+    It "classifies empty string as NOT directional" {
+        Test-ButtonNameDirectional "" | Should -BeFalse
+    }
+}
