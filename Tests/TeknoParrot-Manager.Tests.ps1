@@ -86,14 +86,34 @@ Describe "Test-IsNetworkPath" {
         Test-IsNetworkPath '' | Should -BeFalse
         Test-IsNetworkPath '   ' | Should -BeFalse
     }
-    It "uses the real local C: drive (non-network) when -Drives is supplied explicitly" {
-        $realDrives = [System.IO.DriveInfo]::GetDrives()
-        Test-IsNetworkPath 'C:\Windows' -Drives $realDrives | Should -BeFalse
+    It "uses the Name/IsNetwork shape (not a real DriveInfo) when -Drives is supplied explicitly" {
+        # -Drives is deliberately untyped (see Test-IsNetworkPath's own comment) -- a real
+        # [System.IO.DriveInfo[]] is NOT what gets passed in production. Get-LocalDriveInfoSafe
+        # runs in a background job, and a real DriveInfo crossing that job boundary comes back
+        # as an undeserializable stand-in (confirmed from a real tester's crash, issue #5
+        # follow-up) -- this is the actual shape real callers use.
+        $drives = @([pscustomobject]@{ Name = 'C:\'; IsNetwork = $false })
+        Test-IsNetworkPath 'C:\Windows' -Drives $drives | Should -BeFalse
+    }
+    It "detects a network drive via the Name/IsNetwork shape" {
+        $drives = @([pscustomobject]@{ Name = 'Z:\'; IsNetwork = $true })
+        Test-IsNetworkPath 'Z:\Games' -Drives $drives | Should -BeTrue
     }
     It "fails safe (returns false, never throws) when drive info could not be determined" {
         Mock Get-LocalDriveInfoSafe { $null }
         { Test-IsNetworkPath 'Z:\Games' } | Should -Not -Throw
         Test-IsNetworkPath 'Z:\Games' | Should -BeFalse
+    }
+    It "end-to-end: works through the real job-backed Get-LocalDriveInfoSafe without throwing" {
+        # Regression test for the actual bug a tester hit: this is the exact call shape
+        # Find-TeknoParrotRoot/Find-LaunchBoxRoot use, going through the real background
+        # job rather than a mocked or directly-constructed -Drives value. Before the fix,
+        # this threw "Cannot convert ... Deserialized.System.IO.DriveInfo ... to type
+        # System.IO.DriveInfo" because Get-LocalDriveInfoSafe used to return real DriveInfo
+        # objects across the job boundary.
+        $localDriveInfo = Get-LocalDriveInfoSafe
+        { Test-IsNetworkPath "$($env:SystemDrive)\Windows" -Drives $localDriveInfo } | Should -Not -Throw
+        Test-IsNetworkPath "$($env:SystemDrive)\Windows" -Drives $localDriveInfo | Should -BeFalse
     }
 }
 
@@ -102,6 +122,19 @@ Describe "Get-LocalDriveInfoSafe" {
         $result = Get-LocalDriveInfoSafe
         $result | Should -Not -BeNullOrEmpty
         ($result | Where-Object { $_.Name -eq "$($env:SystemDrive)\" }) | Should -Not -BeNullOrEmpty
+    }
+    It "returns plain pscustomobjects, never real DriveInfo instances (the actual bug this guards against)" {
+        # Get-LocalDriveInfoSafe runs across a background-job boundary (Invoke-WithHardTimeout);
+        # Receive-Job deserializes a real [System.IO.DriveInfo] into an undeserializable
+        # "Deserialized.System.IO.DriveInfo" stand-in that fails any strongly-typed
+        # [System.IO.DriveInfo[]] parameter bind downstream. Returning plain Name/IsNetwork
+        # data instead is the actual fix -- this test locks that shape in.
+        $result = Get-LocalDriveInfoSafe
+        foreach ($d in $result) {
+            $d | Should -BeOfType [System.Management.Automation.PSCustomObject]
+            $d.PSObject.Properties.Name | Should -Contain 'Name'
+            $d.PSObject.Properties.Name | Should -Contain 'IsNetwork'
+        }
     }
 }
 

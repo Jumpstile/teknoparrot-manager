@@ -16,9 +16,14 @@ CLAUDE.md
 
 # User-specific generated files
 config.json
+TeknoParrot-Manager.config.json
+TeknoParrot-Manager.overrides.json
 TeknoParrot-Manager-ActionItems.txt
 TeknoParrot-Manager-crosshairs.json
 *.log
+
+# Downloaded Eggman dat ZIP -- fetched live each run, never bundled/tracked
+TeknoParrot.Collection*.zip
 
 # Local forum-post draft -- not part of the project, never meant to be public
 forum-post-beta-testing.txt

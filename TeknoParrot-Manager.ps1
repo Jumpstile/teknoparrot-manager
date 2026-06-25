@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.26 BETA
+# TeknoParrot Manager  |  v0.99.27 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.26"
+$ScriptVersion = "0.99.27"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -317,13 +317,30 @@ function Invoke-WithHardTimeout {
     }
 }
 
-# Fetches every local drive's type info in one [System.IO.DriveInfo]::GetDrives()
-# call, hard-timeout-wrapped per issue #5 above. Returns $null on timeout/
-# error -- callers MUST treat that as "could not determine drive types" and
-# fail safe (never block, never crash, never claim a path is or isn't a
-# network path it couldn't actually check).
+# Fetches every local drive's network-or-not status, hard-timeout-wrapped
+# per issue #5 above. Returns $null on timeout/error -- callers MUST treat
+# that as "could not determine drive types" and fail safe (never block,
+# never crash, never claim a path is or isn't a network path it couldn't
+# actually check).
+#
+# Deliberately returns plain [pscustomobject]s (Name/IsNetwork), NOT real
+# [System.IO.DriveInfo] objects -- a real bug, confirmed from a tester's
+# actual error output (issue #5 follow-up): Invoke-WithHardTimeout runs this
+# in a background job (Start-Job), and PowerShell's job-result deserialization
+# (Receive-Job) does not reconstruct arbitrary .NET types -- a DriveInfo that
+# crosses that boundary comes back as a `Deserialized.System.IO.DriveInfo`
+# PSObject stand-in, which then fails a strictly-typed [DriveInfo[]] parameter
+# bind downstream with "Cannot convert ... to type System.IO.DriveInfo." The
+# fix is computing the actual DriveType comparison INSIDE the job (where the
+# real, live DriveInfo instances are still valid) and only ever returning
+# plain string/bool data across the job boundary, which survives
+# Receive-Job's deserialization intact.
 function Get-LocalDriveInfoSafe {
-    return (Invoke-WithHardTimeout -ScriptBlock { [System.IO.DriveInfo]::GetDrives() } -TimeoutSeconds 5)
+    return (Invoke-WithHardTimeout -ScriptBlock {
+        [System.IO.DriveInfo]::GetDrives() | ForEach-Object {
+            [pscustomobject]@{ Name = $_.Name; IsNetwork = ($_.DriveType -eq [System.IO.DriveType]::Network) }
+        }
+    } -TimeoutSeconds 5)
 }
 
 # Returns $true when $path resolves to a network location (UNC or mapped
@@ -332,9 +349,12 @@ function Get-LocalDriveInfoSafe {
 # Get-LocalDriveInfoSafe and reuse it, rather than this function re-running
 # the hard-timeout-wrapped GetDrives() call (and paying its job-spawn cost)
 # once per candidate path -- when omitted, this fetches it itself for a
-# single one-off check.
+# single one-off check. $Drives must be the Name/IsNetwork shape
+# Get-LocalDriveInfoSafe returns (see that function's comment for why a real
+# [System.IO.DriveInfo[]] can't be used here) -- deliberately untyped rather
+# than re-introducing the type constraint that caused this bug.
 function Test-IsNetworkPath {
-    param([string]$path, [System.IO.DriveInfo[]]$Drives = $null)
+    param([string]$path, $Drives = $null)
     if ([string]::IsNullOrWhiteSpace($path)) { return $false }
     $path = $path.TrimEnd('\', '/')   # normalise trailing separators before matching
     if ($path -match '^\\\\') { return $true }
@@ -350,7 +370,7 @@ function Test-IsNetworkPath {
             $allDrives = if ($null -ne $Drives) { $Drives } else { Get-LocalDriveInfoSafe }
             if ($null -eq $allDrives) { return $false }   # could not determine -- fail safe
             $drive = $allDrives | Where-Object { $_.Name -eq $letter }
-            if ($drive -and $drive.DriveType -eq [System.IO.DriveType]::Network) { return $true }
+            if ($drive -and $drive.IsNetwork) { return $true }
         } catch {}
     }
     return $false
@@ -8146,7 +8166,14 @@ if (Test-Path -LiteralPath $configPath) {
             $use = (Read-Host "Use these settings? (Y/N)").Trim()
         }
         if ($use.ToUpper() -eq "Y") {
-            $tpRoot             = $cfg.TeknoParrotRoot
+            # A config saved by an older script version could have
+            # TeknoParrotRoot stored as a JSON array instead of a plain
+            # string (confirmed from a real tester's config.json) --
+            # coerce to a scalar defensively so a stale file from before
+            # this fix doesn't keep propagating the wrong type forever
+            # (Save-Config below would otherwise just re-save whatever
+            # type $tpRoot currently holds).
+            $tpRoot             = if ($cfg.TeknoParrotRoot -is [array]) { [string]$cfg.TeknoParrotRoot[0] } else { [string]$cfg.TeknoParrotRoot }
             $zipSource          = $cfg.ZipSourceFolder
             if ($null -ne $cfg.ZipSourceSupplementaryFolder) { $zipSourceSupplementary = "$($cfg.ZipSourceSupplementaryFolder)" }
             $gamesInstallFolder = $cfg.GamesInstallFolder

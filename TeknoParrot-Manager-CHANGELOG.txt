@@ -7,6 +7,23 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.27 BETA  (2026-06-25)
+-------------------------------------------------------------------------------
+
+  Fix: a regression from v0.99.23's network-drive-detection hard timeout.
+  Declining "Use these settings? (Y/N)" (or running for the first time, or
+  anything else that triggers auto-detecting your TeknoParrot folder) threw
+  a wall of "Test-IsNetworkPath : Cannot process argument transformation on
+  parameter 'Drives'" errors. Root cause: the background-job mechanism used
+  for the hard timeout doesn't preserve .NET object types across the job
+  boundary, and the drive-detection code was passing one through as if it
+  would. Fixed by only ever passing plain data across that boundary. Also
+  hardened the saved-settings loader against a stale config file with the
+  TeknoParrot root stored in the wrong internal format, so an old config
+  self-heals on the next run instead of staying broken. Thanks to the
+  tester who reported this.
+
+-------------------------------------------------------------------------------
   v0.99.26 BETA  (2026-06-24)
 -------------------------------------------------------------------------------
 
