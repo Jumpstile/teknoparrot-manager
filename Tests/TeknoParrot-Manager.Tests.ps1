@@ -27,9 +27,18 @@ BeforeAll {
     # function bodies), so the AST extraction above never picks them up. Functions
     # like Resolve-BestFuzzyMatch read them as unqualified script-scope variables,
     # so without this they'd silently read as $null here -- mirror the production
-    # values from TeknoParrot-Manager.ps1 (~line 582/589) explicitly.
+    # values from TeknoParrot-Manager.ps1 explicitly.
     $FuzzyAutoThreshold = 0.72
     $FuzzyTieMargin     = 0.1
+
+    # $script:LocalDriveInfoCache/$LocalDriveInfoCachePopulated are top-level
+    # script-scope variables (not function bodies) initialised before
+    # Get-LocalDriveInfoSafe / Clear-LocalDriveInfoCache in the production
+    # script. Initialise them here so those functions behave correctly in the
+    # test scope (an uninitialised $null is falsy, so the first call would still
+    # spawn the job, but the explicit init is cleaner and avoids surprises).
+    $script:LocalDriveInfoCache          = $null
+    $script:LocalDriveInfoCachePopulated = $false
 }
 
 Describe "Test-PathInside" {
@@ -118,6 +127,10 @@ Describe "Test-IsNetworkPath" {
 }
 
 Describe "Get-LocalDriveInfoSafe" {
+    BeforeEach {
+        # Reset the cache before every test so each one starts from a clean slate.
+        Clear-LocalDriveInfoCache
+    }
     It "returns real drive info (including the system drive) within the timeout in the normal case" {
         $result = Get-LocalDriveInfoSafe
         $result | Should -Not -BeNullOrEmpty
@@ -135,6 +148,19 @@ Describe "Get-LocalDriveInfoSafe" {
             $d.PSObject.Properties.Name | Should -Contain 'Name'
             $d.PSObject.Properties.Name | Should -Contain 'IsNetwork'
         }
+    }
+    It "populates the cache after the first call so subsequent calls skip the background job" {
+        $script:LocalDriveInfoCachePopulated | Should -BeFalse
+        Get-LocalDriveInfoSafe | Out-Null
+        $script:LocalDriveInfoCachePopulated | Should -BeTrue
+        $script:LocalDriveInfoCache | Should -Not -BeNullOrEmpty
+    }
+    It "Clear-LocalDriveInfoCache resets the populated flag so the next call re-fetches" {
+        Get-LocalDriveInfoSafe | Out-Null
+        $script:LocalDriveInfoCachePopulated | Should -BeTrue
+        Clear-LocalDriveInfoCache
+        $script:LocalDriveInfoCachePopulated | Should -BeFalse
+        $script:LocalDriveInfoCache | Should -BeNullOrEmpty
     }
 }
 

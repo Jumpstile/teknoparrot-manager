@@ -7,6 +7,35 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.30 BETA  (2026-06-25)
+-------------------------------------------------------------------------------
+
+  Fix: control propagation now detects directional/action slot mismatches on
+  already-bound (REFERENCE) profiles and flags them in the ACTION REQUIRED
+  output so you know which buttons to rebind manually in TeknoParrot's UI.
+  Previously you had to dump raw XML to discover a frozen mismatch; now it
+  surfaces automatically without ever rewriting a binding. (#17 follow-up)
+
+  Fix: reading GameProfile XML in the profile-index scan now explicitly uses
+  UTF-8 encoding instead of the system default codepage, preventing silent
+  character corruption on machines whose codepage is not UTF-8. (#24)
+
+  Fix: the "switch to conflicting copy" choice during duplicate-path resolution
+  now respects dry-run mode instead of always writing to disk. (#34)
+
+  Fix: drive-info lookup (used to detect network paths at AutoSync entry and
+  in the TeknoParrot/LaunchBox root auto-detect) now caches its result for the
+  duration of each menu pass instead of spawning a new background job for every
+  path check. Clear-LocalDriveInfoCache resets the cache at the top of each
+  menu-loop iteration so stale drive mappings are never carried across mode
+  runs. (#19)
+
+  Fix: the GameProfile XML parser used to run a regex pass to strip comments
+  before extracting the ExecutableName -- replaced by the DOM parser alone,
+  which ignores comments by design and is the correct, robust approach.
+  Removes fragility with no change to behaviour. (#22, #25)
+
+-------------------------------------------------------------------------------
   v0.99.29 BETA  (2026-06-25)
 -------------------------------------------------------------------------------
 

@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.29 BETA
+# TeknoParrot Manager  |  v0.99.30 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.29"
+$ScriptVersion = "0.99.30"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -265,14 +265,12 @@ function Save-Config {
 # full parse if the quick read finds nothing.
 function Get-PrimaryExecutableName {
     param([string]$path)
-    try {
-        $raw = [System.IO.File]::ReadAllText($path)
-        # Strip XML comments before matching: some profiles have a commented-out
-        # <ExecutableName> alternative above the real one, which would otherwise match first.
-        $raw = [regex]::Replace($raw, '(?s)<!--.*?-->', '')
-        $m = [regex]::Match($raw, '<ExecutableName>\s*([^<]+?)\s*</ExecutableName>')
-        if ($m.Success) { return $m.Groups[1].Value }
-    } catch { }
+    # Uses the DOM parser directly: XmlDocument ignores XML comments by design,
+    # so a commented-out <ExecutableName> alternative above the real one is
+    # invisible to $x.GameProfile.ExecutableName. The previous regex fast path
+    # (ReadAllText + comment-strip regex + regex match) added fragility with no
+    # practical benefit -- the DOM parse handles all edge cases correctly. See
+    # issues #22 and #25.
     try {
         $x = Read-Xml $path
         if ($x.GameProfile) { return [string]$x.GameProfile.ExecutableName }
@@ -350,6 +348,13 @@ function Backfill-SecondaryExecutablePath {
     }
 }
 
+# Drive-info cache for Get-LocalDriveInfoSafe. Populated on first call within
+# each menu-loop iteration; Clear-LocalDriveInfoCache resets it so the next
+# call re-fetches live data (drive letter mappings can change between operations
+# -- a USB drive ejected, a network share reconnecting to a different letter).
+$script:LocalDriveInfoCache          = $null
+$script:LocalDriveInfoCachePopulated = $false
+
 # Runs $ScriptBlock in a background job and waits up to $TimeoutSeconds for
 # it to finish, returning its output -- or $null on timeout/error. Issue #5
 # (v1.0 roadmap): a residual, never-actually-reproduced theoretical risk
@@ -397,11 +402,23 @@ function Invoke-WithHardTimeout {
 # plain string/bool data across the job boundary, which survives
 # Receive-Job's deserialization intact.
 function Get-LocalDriveInfoSafe {
-    return (Invoke-WithHardTimeout -ScriptBlock {
-        [System.IO.DriveInfo]::GetDrives() | ForEach-Object {
-            [pscustomobject]@{ Name = $_.Name; IsNetwork = ($_.DriveType -eq [System.IO.DriveType]::Network) }
-        }
-    } -TimeoutSeconds 5)
+    if (-not $script:LocalDriveInfoCachePopulated) {
+        $script:LocalDriveInfoCache = Invoke-WithHardTimeout -ScriptBlock {
+            [System.IO.DriveInfo]::GetDrives() | ForEach-Object {
+                [pscustomobject]@{ Name = $_.Name; IsNetwork = ($_.DriveType -eq [System.IO.DriveType]::Network) }
+            }
+        } -TimeoutSeconds 5
+        $script:LocalDriveInfoCachePopulated = $true
+    }
+    return $script:LocalDriveInfoCache
+}
+
+# Invalidates the drive-info cache so the next Get-LocalDriveInfoSafe call
+# re-fetches live data. Called at the top of each main-menu-loop iteration
+# so each mode entry always starts with a fresh snapshot.
+function Clear-LocalDriveInfoCache {
+    $script:LocalDriveInfoCache          = $null
+    $script:LocalDriveInfoCachePopulated = $false
 }
 
 # Returns $true when $path resolves to a network location (UNC or mapped
@@ -6529,12 +6546,35 @@ function Invoke-ControlPropagation {
             if ($best.InputApi -and $best.InputApi -ne $currentApi) {
                 $apiSet = Set-ProfileInputApi $doc $best.InputApi
             }
+
+            # Report-only: scan bound slots for directional/action classification
+            # mismatch vs the archetype. Never rewrites -- only flags for ACTION
+            # REQUIRED output so the user knows which slots need a manual rebind
+            # in TeknoParrot's own UI. Same Test-ButtonNameDirectional logic the
+            # non-bound copy path uses to PREVENT these mismatches going forward.
+            # See issue #17.
+            $mismatchSlots = New-Object System.Collections.ArrayList
+            foreach ($b in $btns) {
+                if (-not (Test-ButtonIsBound $b)) { continue }
+                $k = Get-ButtonKey $b
+                if (-not $k -or -not $best.Map.ContainsKey($k)) { continue }
+                $srcNameNode = $best.Map[$k].SelectSingleNode("ButtonName")
+                $srcName = if ($srcNameNode) { $srcNameNode.InnerText } else { "" }
+                $nameNode = $b.SelectSingleNode("ButtonName")
+                $btnName = if ($nameNode) { $nameNode.InnerText } else { "" }
+                if ((Test-ButtonNameDirectional $srcName) -ne (Test-ButtonNameDirectional $btnName)) {
+                    [void]$mismatchSlots.Add($btnName)
+                }
+            }
+            $mismatchStr = if ($mismatchSlots.Count -gt 0) { $mismatchSlots -join ', ' } else { $null }
+
             if ($apiSet) {
                 try {
                     Save-XmlMaybe $doc $f.FullName $DryRun
                     [void]$reports.Add([pscustomobject]@{
                         Code = $f.BaseName; Status = "api-fixed"
                         Archetype = $best.Code; ArchetypeApi = $best.InputApi
+                        MismatchSlots = $mismatchStr
                     })
                     Write-Log "Propagation: $($f.BaseName) already bound -- updated Input API to $($best.InputApi) to match archetype $($best.Code)"
                 } catch {
@@ -6542,7 +6582,10 @@ function Invoke-ControlPropagation {
                     [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "save-failed"; Archetype = $best.Code })
                 }
             } else {
-                [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "skipped-bound" })
+                [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "skipped-bound"; MismatchSlots = $mismatchStr })
+            }
+            if ($mismatchStr) {
+                Write-Log "Propagation: $($f.BaseName) already bound -- $($mismatchSlots.Count) slot(s) have directional/action mismatch vs archetype $($best.Code): $mismatchStr -- rebind in TeknoParrot UI"
             }
             continue
         }
@@ -8152,10 +8195,21 @@ function Write-ControlsStatus {
         elseif ($bound -gt 0) { $status = "partial" }
         else                  { $status = "no controls" }
 
+        # If the propagation run flagged directionally-mismatched slots on this
+        # already-bound profile, surface them distinctly so they appear in the
+        # controls-status output. The profile's bindings were never changed --
+        # these slots need manual attention in TeknoParrot's own UI. See #17.
+        $mismatch = New-Object System.Collections.ArrayList
+        if ($reportMap.ContainsKey($f.BaseName) -and $reportMap[$f.BaseName].MismatchSlots) {
+            foreach ($slot in ($reportMap[$f.BaseName].MismatchSlots -split ', ')) {
+                [void]$mismatch.Add($slot)
+            }
+        }
+
         [void]$rows.Add([pscustomobject]@{
             Code = $f.BaseName; Family = $family
             Bound = $bound; Total = $btns.Count
-            Manual = $manual; Status = $status; Reference = $reference
+            Manual = $manual; Mismatch = $mismatch; Status = $status; Reference = $reference
         })
     }
 
@@ -8181,6 +8235,9 @@ function Write-ControlsStatus {
             [void]$sb.AppendLine(("  {0,-44} {1,-12}  {2}{3}" -f $row.Code, $boundLabel, $row.Status, $refPart))
             if ($row.Manual.Count -gt 0) {
                 [void]$sb.AppendLine("    manual: $($row.Manual -join ', ')")
+            }
+            if ($row.Mismatch.Count -gt 0) {
+                [void]$sb.AppendLine("    mismatch (rebind in TeknoParrot UI): $($row.Mismatch -join ', ')")
             }
         }
     }
@@ -8759,6 +8816,11 @@ if ($datIndex.Count -gt 0 -and $gameProfilesDir) {
 # =============================================================================
 try {
 while ($true) {
+    # Refresh the drive-info snapshot at the start of each menu iteration so
+    # any drive changes since the last pass (USB ejected, network share
+    # reconnected to a different letter) are picked up rather than using
+    # stale cached data from the previous mode's run.
+    Clear-LocalDriveInfoCache
     $mode = $null
 
     # A just-finished preview run's "Apply for real now?" prompt was
@@ -9259,7 +9321,8 @@ while ($true) {
             Write-Host ""; Write-Host "ERROR: ZIP source folder not found: $zipSource" -ForegroundColor Red
             Write-Log "ERROR: ZIP source not found."; [void](Read-Host "  Press Enter to return to menu"); continue
         }
-        if (Test-IsNetworkPath $gamesInstallFolder) {
+        $autoSyncDriveInfo = Get-LocalDriveInfoSafe
+        if (Test-IsNetworkPath $gamesInstallFolder -Drives $autoSyncDriveInfo) {
             Write-Host ""
             Write-Host "  WARNING: The staging folder is on a network path." -ForegroundColor Yellow
             Write-Host "  Games will be extracted to -- and played from -- the network drive." -ForegroundColor Yellow
@@ -9332,7 +9395,7 @@ while ($true) {
             Write-Log "Space check: free=$([Math]::Round($freeBytes/1GB,1))GB zips=$([Math]::Round($zipBytes/1GB,1))GB"
         } catch { Write-Log "Space check skipped: $_" }
 
-        if (Test-IsNetworkPath $zipSource) {
+        if (Test-IsNetworkPath $zipSource -Drives $autoSyncDriveInfo) {
             Write-Host ""
             Write-Host "Network ZIP source detected: $zipSource" -ForegroundColor Yellow
             Write-Host "Running throughput benchmark..." -ForegroundColor Cyan
@@ -9673,8 +9736,9 @@ if ($duplicateConflicts.Count -gt 0 -and -not $Unattended) {
                         [void]$swDoc.GameProfile.PrependChild($swGp)
                     }
                     $swGp.InnerText = $info.Exe
-                    Save-Xml $swDoc $userProfilePath
-                    Write-Host "  Switched." -ForegroundColor Green
+                    Save-XmlMaybe $swDoc $userProfilePath $dryRunActive
+                    $switchMsg = if ($dryRunActive) { "[Preview] Would switch." } else { "Switched." }
+                    Write-Host "  $switchMsg" -ForegroundColor (if ($dryRunActive) { "DarkCyan" } else { "Green" })
                     Write-Log "Duplicate resolution: $code switched to $($info.Exe) (was $currentExe)"
                     $manualRegData.Remove($folderName)
                 } catch {
@@ -9851,6 +9915,10 @@ if ($pool.Count -eq 0) {
                 "skipped-bound"    { Write-Host ("    {0}  -- already bound, left unchanged" -f $r.Code) -ForegroundColor DarkGray }
                 "skipped-override" { Write-Host ("    {0}  -- skipped (per-game override)" -f $r.Code) -ForegroundColor DarkGray }
                 "save-failed"      { Write-Host ("    {0}  -- ERROR saving (see TeknoParrot-Manager.log)" -f $r.Code) -ForegroundColor Red }
+            }
+            if ($r.MismatchSlots) {
+                Write-Host ("       ACTION REQUIRED -- directional/action mismatch: {0}" -f $r.MismatchSlots) -ForegroundColor Yellow
+                Write-Host ("       Rebind these slots manually in TeknoParrot's own UI (see issue #17)" ) -ForegroundColor Yellow
             }
         }
         $nb               = @($reports | Where-Object { $_.Status -eq "bound" -or $_.Status -eq "api-fixed" -or $_.Status -eq "api-fixed-canonical" }).Count
