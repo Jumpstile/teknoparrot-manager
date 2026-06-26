@@ -7,6 +7,42 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.31 BETA  (2026-06-26)
+-------------------------------------------------------------------------------
+
+  New: Register mode now shows a live progress bar (Scanning game library
+  X/Y) while scanning your game library, so it is clear the script has not
+  frozen on large collections. (#21)
+
+  New: subFolderMap override in overrides.json. For games whose TeknoParrot
+  profile requires the executable to live inside a subfolder of the
+  TeknoParrot root itself rather than in your staging folder (e.g. Crediar
+  Dolphin titles like Tatsunoko vs. Capcom), add:
+    { "subFolderMap": { "TatsunokoCap": "CrediarDolphin\\User\\Wii" } }
+  The script will find and register the exe at that specific path
+  automatically. (#11)
+
+  Docs: added Uninstalling / Removing the Manager section (what files the
+  script creates, how to roll back or remove it completely). (#35)
+
+  Docs: expanded Troubleshooting with common error messages (access denied,
+  path too long, network timeouts, Postgres password, LaunchBox open, frozen
+  appearance during scan). (#33)
+
+  Closed as not-applicable:
+  - #28: path safety validation -- TeknoParrot root already requires both
+    TeknoParrotUi.exe and GameProfiles\ to be present (exits immediately if
+    either is missing); a hardcoded system-directory blocklist would be the
+    wrong approach and is not needed.
+  - #26: ErrorAction SilentlyContinue audit -- all 102 usages reviewed;
+    every one falls into a legitimate category (optional directory scans,
+    cleanup operations, check-if-exists patterns). None silences errors on
+    critical write paths.
+  - #27: DPAPI clarification -- already documented in the Postgres Setup
+    section of the README: "encrypted (Windows DPAPI, tied to your Windows
+    account and this PC)".
+
+-------------------------------------------------------------------------------
   v0.99.30 BETA  (2026-06-25)
 -------------------------------------------------------------------------------
 

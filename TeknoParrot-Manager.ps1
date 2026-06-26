@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.30 BETA
+# TeknoParrot Manager  |  v0.99.31 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -4860,7 +4860,8 @@ function Register-Games {
     param([string]$userProfilesDir, [string]$installFolder, [hashtable]$profileIndex,
           [string]$gameProfilesDir = '', [hashtable]$datIndex = $null,
           [System.Collections.Generic.HashSet[string]]$profileSet = $null,
-          [bool]$DryRun = $false)
+          [bool]$DryRun = $false,
+          [string]$tpRootDir = '', [hashtable]$subFolderMap = $null)
 
     if ($null -eq $datIndex) { $datIndex = @{} }
 
@@ -4917,8 +4918,16 @@ function Register-Games {
     $installBase    = $installFolder.TrimEnd('\')
     $matchedFolders = @{}   # folders that matched at least one profile key
     $allExeFolders  = @{}   # folders containing any recognisable executable
+    $_regTotal = $exeFiles.Count
+    $_regI     = 0
 
     foreach ($exe in $exeFiles) {
+        $_regI++
+        if ($_regTotal -gt 0) {
+            Write-Progress -Activity "Scanning game library" `
+                           -Status ("({0}/{1}) {2}" -f $_regI, $_regTotal, $exe.Directory.Name) `
+                           -PercentComplete ([int]($_regI / $_regTotal * 100))
+        }
         $relPath    = $exe.FullName.Substring($installBase.Length).TrimStart('\')
         $folderName = ($relPath -split '\\')[0]
         $folderKey  = $folderName -replace '\.(teknoparrot|parrot|game)$', ''   # strip suffix for matching/tracking
@@ -5243,6 +5252,7 @@ function Register-Games {
             Write-Log "Register FAILED $code -- $_"
         }
     }
+    Write-Progress -Activity "Scanning game library" -Completed
 
     # Second pass: folders that had recognisable executables but none of them were
     # in $profileIndex (no exe->profile mapping). These are typically games whose
@@ -5487,6 +5497,56 @@ function Register-Games {
     # in the "needs manual registration" report because of a second,
     # unrelated exe in the same folder. Drop any ambiguous entry whose
     # folder is in $matchedFolders by now -- the folder is accounted for
+    # Pass 4: subFolderMap -- profile codes whose executable lives in a known
+    # subfolder of the TeknoParrot root rather than in the staging folder.
+    # Example: CrediarDolphin titles whose game files must live at
+    # TeknoParrot\CrediarDolphin\User\Wii\. Configured in overrides.json:
+    # { "subFolderMap": { "TatsunokoCap": "CrediarDolphin\\User\\Wii" } }
+    if ($subFolderMap -and $subFolderMap.Count -gt 0 -and $gameProfilesDir -and
+        $tpRootDir -and (Test-Path -LiteralPath $tpRootDir)) {
+        foreach ($sfCode in @($subFolderMap.Keys)) {
+            $sfCode = [string]$sfCode
+            if ($sfCode -notmatch '^[\w]+$') {
+                Write-Log "Register-Games: subFolderMap key '$sfCode' contains invalid characters -- skipped."
+                continue
+            }
+            if ($preExistingCodes.Contains($sfCode) -or $seenCodes.ContainsKey($sfCode)) { continue }
+            $sfSubPath = [string]$subFolderMap[$sfCode]
+            $sfScanDir = Join-Path $tpRootDir $sfSubPath
+            if (-not (Test-Path -LiteralPath $sfScanDir)) { continue }
+            $sfTplPath = Join-Path $gameProfilesDir "$sfCode.xml"
+            if (-not (Test-Path -LiteralPath $sfTplPath)) { continue }
+            $sfExeName = Get-PrimaryExecutableName $sfTplPath
+            if (-not $sfExeName) { continue }
+            $sfExePath = Join-Path $sfScanDir $sfExeName
+            if (-not (Test-Path -LiteralPath $sfExePath -PathType Leaf)) { continue }
+            $sfUserProfile = Join-Path $userProfilesDir "$sfCode.xml"
+            if (Test-Path -LiteralPath $sfUserProfile) {
+                [void]$already.Add($sfCode)
+                $seenCodes[$sfCode] = $true
+                Backfill-SecondaryExecutablePath $sfUserProfile $DryRun
+                continue
+            }
+            $seenCodes[$sfCode] = $true
+            try {
+                $sfTpl = Read-Xml $sfTplPath
+                $sfGp  = $sfTpl.GameProfile.SelectSingleNode("GamePath")
+                if ($null -eq $sfGp) {
+                    $sfGp = $sfTpl.CreateElement("GamePath")
+                    [void]$sfTpl.GameProfile.PrependChild($sfGp)
+                }
+                $sfGp.InnerText = $sfExePath
+                Set-SecondaryExecutablePath $sfTpl $sfExePath
+                Save-XmlMaybe $sfTpl $sfUserProfile $DryRun
+                [void]$registered.Add([pscustomobject]@{ Code = $sfCode; GamePath = $sfExePath; SubFolderMatch = $true })
+                Write-Log "Registered (subFolderMap) $sfCode -> $sfExePath"
+            } catch {
+                Write-Host "  FAILED to register $sfCode (subFolderMap) : $_" -ForegroundColor Red
+                Write-Log "Register FAILED $sfCode (subFolderMap) -- $_"
+            }
+        }
+    }
+
     # regardless of what this particular exe resolved to. See issue #9
     # (Nosferatu Lilinor: NLAM.exe cleanly registers the real profile, but a
     # generic "main" stub in the same folder collides with WMMT3/WMMT3DXP
@@ -8630,17 +8690,19 @@ $noPropagateList       = @()
 $forceArchetypeMap     = @{}
 $familyOverrideMap     = @{}
 $canonicalArchetypeMap = @{}
+$subFolderMap          = @{}
 $validFamilies         = @('button','driving','lightgun','trackball','analog','spinner')
 
 if (-not (Test-Path -LiteralPath $overridesPath)) {
     $ovTemplate = [ordered]@{
-        _comment           = "noSync/onlySync/noPropagate: lists of ZIP base names (without .zip). onlySync acts as a whitelist -- only listed games are extracted. forceArchetype: { GameCode: ArchetypeCode } pins a game to a specific reference game. familyOverride: { GameCode: 'button'|'driving'|'lightgun'|'trackball'|'analog' } overrides the auto-detected control family (fixes mis-classified games like FamilyGuyBowling). canonicalArchetype: { family: ArchetypeCode } the one archetype per family whose Input API is treated as correct -- every other archetype in that family gets its Input API corrected to match it. datFile: full path to a No-Intro TeknoParrot dat file; when set the script uses it to auto-register games with shared executable names (like game.exe) without needing fuzzy matching."
+        _comment           = "noSync/onlySync/noPropagate: lists of ZIP base names (without .zip). onlySync acts as a whitelist -- only listed games are extracted. forceArchetype: { GameCode: ArchetypeCode } pins a game to a specific reference game. familyOverride: { GameCode: 'button'|'driving'|'lightgun'|'trackball'|'analog' } overrides the auto-detected control family (fixes mis-classified games like FamilyGuyBowling). canonicalArchetype: { family: ArchetypeCode } the one archetype per family whose Input API is treated as correct -- every other archetype in that family gets its Input API corrected to match it. subFolderMap: { ProfileCode: 'relative\\subpath' } for games whose executable lives in a specific subfolder of the TeknoParrot root rather than in the staging folder (e.g. CrediarDolphin titles). datFile: full path to a No-Intro TeknoParrot dat file; when set the script uses it to auto-register games with shared executable names (like game.exe) without needing fuzzy matching."
         noSync             = @()
         onlySync           = @()
         noPropagate        = @()
         forceArchetype     = [ordered]@{}
         familyOverride     = [ordered]@{}
         canonicalArchetype = [ordered]@{}
+        subFolderMap       = [ordered]@{}
         datFile            = ""
     }
     try { [System.IO.File]::WriteAllText($overridesPath, ($ovTemplate | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false)) }
@@ -8678,16 +8740,20 @@ if (Test-Path -LiteralPath $overridesPath) {
                 }
             }
         }
+        if ($ov.subFolderMap) {
+            foreach ($p in $ov.subFolderMap.PSObject.Properties) { $subFolderMap[$p.Name] = [string]$p.Value }
+        }
         if ($ov.datFile -and -not [string]::IsNullOrWhiteSpace([string]$ov.datFile)) {
             $datFilePath = [string]$ov.datFile
         }
-        $ovCount = $noSyncList.Count + $onlySyncList.Count + $noPropagateList.Count + $forceArchetypeMap.Count + $familyOverrideMap.Count + $canonicalArchetypeMap.Count
+        $ovCount = $noSyncList.Count + $onlySyncList.Count + $noPropagateList.Count + $forceArchetypeMap.Count + $familyOverrideMap.Count + $canonicalArchetypeMap.Count + $subFolderMap.Count
         if ($ovCount -gt 0 -or $datFilePath) {
             Write-Host ""
             $datLabel = if ($datFilePath) { ", datFile=yes" } else { "" }
-            Write-Host "Overrides: noSync=$($noSyncList.Count), onlySync=$($onlySyncList.Count), noPropagate=$($noPropagateList.Count), pinned=$($forceArchetypeMap.Count), familyOverride=$($familyOverrideMap.Count), canonicalArchetype=$($canonicalArchetypeMap.Count)$datLabel" -ForegroundColor DarkCyan
+            $sfmLabel = if ($subFolderMap.Count -gt 0) { ", subFolderMap=$($subFolderMap.Count)" } else { "" }
+            Write-Host "Overrides: noSync=$($noSyncList.Count), onlySync=$($onlySyncList.Count), noPropagate=$($noPropagateList.Count), pinned=$($forceArchetypeMap.Count), familyOverride=$($familyOverrideMap.Count), canonicalArchetype=$($canonicalArchetypeMap.Count)$sfmLabel$datLabel" -ForegroundColor DarkCyan
         }
-        Write-Log "Overrides: noSync=$($noSyncList.Count) onlySync=$($onlySyncList.Count) noPropagate=$($noPropagateList.Count) pinned=$($forceArchetypeMap.Count) familyOverride=$($familyOverrideMap.Count) canonicalArchetype=$($canonicalArchetypeMap.Count) datFile=$datFilePath"
+        Write-Log "Overrides: noSync=$($noSyncList.Count) onlySync=$($onlySyncList.Count) noPropagate=$($noPropagateList.Count) pinned=$($forceArchetypeMap.Count) familyOverride=$($familyOverrideMap.Count) canonicalArchetype=$($canonicalArchetypeMap.Count) subFolderMap=$($subFolderMap.Count) datFile=$datFilePath"
     } catch {
         Write-Host "WARNING: could not read TeknoParrot-Manager.overrides.json; ignoring overrides." -ForegroundColor Yellow
         Write-Log "Overrides: parse error -- ignoring."
@@ -9653,7 +9719,7 @@ Write-Host "--------------------------------------------" -ForegroundColor Cyan
 Write-Host " Scanning: $gamesInstallFolder" -ForegroundColor DarkCyan
 Write-Host ""
 
-$result = Register-Games -userProfilesDir $userProfilesDir -installFolder $gamesInstallFolder -profileIndex $profileIndex -gameProfilesDir $gameProfilesDir -datIndex $datIndex -profileSet $profileSet -DryRun $dryRunActive
+$result = Register-Games -userProfilesDir $userProfilesDir -installFolder $gamesInstallFolder -profileIndex $profileIndex -gameProfilesDir $gameProfilesDir -datIndex $datIndex -profileSet $profileSet -DryRun $dryRunActive -tpRootDir $tpRoot -subFolderMap $subFolderMap
 
 foreach ($r in $result.Registered) {
     if ($r.DatMatch) {
@@ -9661,6 +9727,8 @@ foreach ($r in $result.Registered) {
     } elseif ($r.FuzzyScore) {
         Write-Host ("  Registered (fuzzy {0}) : {1}" -f $r.FuzzyScore, $r.Code) -ForegroundColor Cyan
         Write-Host ("               folder  : {0}" -f $r.FuzzyFolder) -ForegroundColor DarkGray
+    } elseif ($r.SubFolderMatch) {
+        Write-Host ("  Registered (tp-root)   : {0}" -f $r.Code) -ForegroundColor Green
     } else {
         Write-Host ("  Registered             : {0}" -f $r.Code) -ForegroundColor Green
     }

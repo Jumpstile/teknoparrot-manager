@@ -739,6 +739,35 @@ If backup folder creation fails, the script exits rather than proceeding without
 
 ---
 
+## Uninstalling / Removing the Manager
+
+The manager only adds files to the `Scripts\` folder it lives in and to TeknoParrot's own `UserProfiles\` folder. It does not install anything system-wide (except optionally PostgreSQL via mode 11, which has its own cleanup path).
+
+**To remove the manager entirely:**
+1. Restore your UserProfiles to any pre-script state using mode 9 (Restore backup) if you want to undo all changes, or simply leave them as-is if they are working correctly.
+2. Stop and uninstall PostgreSQL 8.3 if you installed it via mode 11 — open mode 11 and choose "Uninstall" — before deleting the Scripts folder.
+3. If you used the direct LaunchBox integration, restore your LaunchBox files first via mode 9 > LaunchBox library backup, then close LaunchBox so it re-reads its files.
+4. Delete the `Scripts\` folder.
+
+**Files the manager creates (can be individually removed):**
+
+| File | Safe to delete? |
+|------|----------------|
+| `TeknoParrot-Manager.config.json` | Yes -- script re-prompts for settings on next run |
+| `TeknoParrot-Manager.overrides.json` | Yes -- recreated as empty template; you lose your overrides |
+| `TeknoParrot-Manager.log` | Yes -- fresh log created on next run |
+| `TeknoParrot-Manager.syncstate.json` (in staging folder) | Yes -- script re-syncs all ZIPs on next run |
+| `TeknoParrot-Manager-controls.txt` | Yes -- recreated on next run |
+| `TeknoParrot-Manager-ActionItems.txt` | Yes -- recreated on next run |
+| `TeknoParrot-Manager-crosshairs.json` | Yes -- crosshair preference reset to defaults |
+| `LaunchBoxBackups\` | Yes -- only needed to undo direct LaunchBox writes |
+| `PostgresBackups\` | Yes -- only needed to restore Postgres databases |
+| `TeknoParrot-LaunchBox-Import.xml` | Yes -- recreated if you re-run LaunchBox export |
+
+**Rollback without full removal:** Use mode 9 (Restore backup) at any time to revert your TeknoParrot UserProfiles, LaunchBox library files, or Postgres databases to any previous state. This is the intended rollback path for a bad run, not a full uninstall.
+
+---
+
 ## Troubleshooting
 
 **A game appears in TeknoParrotUI but won't launch.**
@@ -767,6 +796,24 @@ Delete one of the duplicate `.xml` files from `UserProfiles`. Keep the one with 
 
 **HyperSpin 2 export fails with "TeknoParrot not found in emulators.json".**
 TeknoParrot must be set up as an emulator in HyperSpin 2 first. The title must contain "TeknoParrot" (spacing and capitalisation variations are fine).
+
+**Script appears to hang or freeze during registration.**
+The scan is still running — large game libraries can take a minute. A progress bar (`Scanning game library`) shows current folder/total exe count. If the console is truly frozen (no progress bar, no output for several minutes), check that your staging folder is reachable and not on a disconnected network drive.
+
+**"Access denied" or "you do not have permission" errors.**
+Most features run as a normal user. The only exception: Postgres installation (mode 11) requires Administrator — right-click the `.bat` launcher and choose "Run as administrator" for that run only. All other modes do not require elevated rights.
+
+**"Path too long" errors during extraction.**
+TeknoParrot's own folder structure adds path length on top of already-long staging paths. Shorten your staging folder's path (e.g. `E:\TP Games\` instead of `E:\My Arcade Games Collection\TeknoParrot Games 2024\`) and re-run. The ACTION REQUIRED section also flags specific games that TeknoParrot itself requires to be at a short path.
+
+**Network drive timeouts at startup.**
+The script detects mapped network drives to avoid scanning them during game discovery. If a previously mapped drive is now unreachable, startup may take a few seconds before timing out gracefully — this is expected and the drive is skipped.
+
+**Postgres connection fails / "password authentication failed".**
+The database password is saved encrypted in `config.json`. If you changed it externally (via pgAdmin or similar), delete `PostgresSuperPasswordEncrypted` from `config.json` and re-run mode 11 — the script will ask for the correct password and save it again.
+
+**"LaunchBox is currently open" error.**
+The direct LaunchBox integration refuses to write while LaunchBox or BigBox is running. Close both, then re-run.
 
 **Known issues being investigated** (not yet confirmed bugs — tracked on GitHub so you can follow progress or add your own findings):
 - [Control propagation may not be setting Input API for some games](https://github.com/Jumpstile/teknoparrot-manager/issues/1) — fighting/shooter-family propagation may not be setting `MergedInput` the way trackball-family propagation does. Possibly expected behavior (not every game's Input API dropdown lists that option), still being confirmed.
@@ -816,4 +863,4 @@ Pull requests are welcome too. Full source and version history: [github.com/Jump
 
 ---
 
-> v0.99.30 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v0.99.31 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
