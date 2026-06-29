@@ -7,6 +7,17 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.35 BETA  (2026-06-29)
+  ------------------------------------------------------------
+  Packaging fix: release ZIP now preserves the Crosshairs\ folder so all
+  321 bundled crosshair PNGs are installed under Crosshairs\000.png through
+  Crosshairs\320.png, matching runtime expectations and documentation.
+
+  Release safety: added a repeatable release-package validation script and
+  checklist gate to reject flattened root-level crosshair PNGs before a
+  GitHub release is published.
+
+-------------------------------------------------------------------------------
   v0.99.34 BETA  (2026-06-29)
 -------------------------------------------------------------------------------
 

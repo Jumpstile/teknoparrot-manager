@@ -119,6 +119,14 @@ writes profiles, verify the following properties are still intact.
     `BepInExCache\` (auto-downloaded live from GitHub each run, never
     bundled), `README.md`, `QUICKSTART.md`, `SECURITY.md`,
     `LESSONS_LEARNED.md`, `*.zip`, `*.log`, `*.config.json`.
+- [ ] Validate the local ZIP structure before creating a release:
+  ```powershell
+  .\Tests\Test-ReleasePackage.ps1 -ZipPath "TeknoParrot Manager vX.YY BETA.zip"
+  ```
+  Expected: `CrosshairPngCount = 321`, `RootCrosshairPngs = 0`, and
+  `ForbiddenEntryCount = 0`. A release ZIP with root-level `000.png`--`320.png`
+  is invalid even if all files are present, because the runtime expects the
+  `Crosshairs\` folder next to `TeknoParrot-Manager.ps1`.
 - [ ] GitHub release created as a DRAFT with the ZIP attached in one step:
   ```
   gh release create vX.YY.ZZ "TeknoParrot Manager vX.YY BETA.zip" --title "..." --notes "..." --draft
@@ -137,6 +145,8 @@ writes profiles, verify the following properties are still intact.
 
 ## 5. Post-release verification
 
+- [ ] Before publishing the draft, download or inspect the uploaded ZIP asset
+  and run the same `Tests\Test-ReleasePackage.ps1` validation against it.
 - [ ] After the release is published, spot-check the ZIP: confirm the
   Crosshairs\ folder is present and the excluded folders
   (ReShade\, dgVoodoo2\, FFBPlugin\, BepInExCache\) are absent.
