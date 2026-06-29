@@ -107,6 +107,7 @@ writes profiles, verify the following properties are still intact.
 ## 4. Release mechanics
 
 - [ ] `git tag -a vX.YY.ZZ -m "vX.YY.ZZ"` -- tag created AFTER all docs pass.
+- [ ] `git push origin vX.YY.ZZ` -- push the tag before creating the release.
 - [ ] Release ZIP built from Scripts\ (not a temp folder), following this
   include/exclude list (ZIP name: "TeknoParrot Manager vX.YY BETA.zip",
   always versioned):
@@ -118,7 +119,17 @@ writes profiles, verify the following properties are still intact.
     `BepInExCache\` (auto-downloaded live from GitHub each run, never
     bundled), `README.md`, `QUICKSTART.md`, `SECURITY.md`,
     `LESSONS_LEARNED.md`, `*.zip`, `*.log`, `*.config.json`.
-- [ ] GitHub release created against the new tag; ZIP uploaded as the asset.
+- [ ] GitHub release created as a DRAFT with the ZIP attached in one step:
+  ```
+  gh release create vX.YY.ZZ "TeknoParrot Manager vX.YY BETA.zip" --title "..." --notes "..." --draft
+  ```
+  Creating without `--draft` marks the release immutable immediately, which
+  blocks asset uploads and permanently tombstones the tag name even after the
+  release is deleted -- a version bump is then required to recover.
+- [ ] Verify the ZIP is attached and notes are correct, then publish:
+  ```
+  gh release edit vX.YY.ZZ --draft=false
+  ```
 - [ ] Releases pruned to the most recent 5 (delete oldest if count exceeds 5).
 - [ ] Tag is permanent once it backs a release -- never force-push or retag.
 
