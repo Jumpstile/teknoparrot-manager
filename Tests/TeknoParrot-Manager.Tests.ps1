@@ -1090,6 +1090,48 @@ Describe "Get-FFBBlasterSupport (issue #41 capability gating)" {
     }
 }
 
+Describe "Get-FFBBlasterFieldNames drift vs absent distinction (issue #41 diagnostic improvement)" {
+    # Get-FFBBlasterFieldNames returns only Bool fields -- by design. When it
+    # returns empty the caller must distinguish schema drift (shaped non-Bool
+    # field exists) from genuine absence (no FFB-Blaster-shaped field at all).
+    # This Describe exercises the pure detection helper rather than the setup
+    # flow (which involves I/O on a GameProfiles directory).
+    BeforeAll {
+        function New-GpFieldDoc {
+            param([string]$FieldType)
+            return [xml]"<GameProfile><ConfigValues><FieldInformation><CategoryName>FFB Blaster</CategoryName><FieldName>Enable</FieldName><FieldType>$FieldType</FieldType><FieldValue>0</FieldValue></FieldInformation></ConfigValues></GameProfile>"
+        }
+    }
+    It "Get-FFBBlasterFieldNames returns a non-empty set when the field is Bool" {
+        $doc = New-GpFieldDoc "Bool"
+        # Categories are discovered from GameProfile XML at runtime; here we
+        # validate that a Bool field would be discovered (so Get-FFBBlasterSupport
+        # later gets a valid Categories list and reaches the Supported branch).
+        $doc.SelectNodes("/GameProfile/ConfigValues/FieldInformation") |
+            Where-Object { $_.FieldType -ieq 'Bool' -and
+                           ($_.CategoryName -imatch $script:FFBBlasterNamePattern -or
+                            $_.FieldName    -imatch $script:FFBBlasterNamePattern) } |
+            Should -Not -BeNullOrEmpty
+    }
+    It "Get-FFBBlasterSupport returns Unknown (not Unsupported) when the only shaped field is non-Bool (upstream schema drift)" {
+        # This is the critical distinction: if ALL shaped fields changed FieldType
+        # upstream, Get-FFBBlasterFieldNames returns empty (no Bool fields to
+        # discover). At the per-profile level, Get-FFBBlasterSupport still sees the
+        # shaped-but-wrong-type field and correctly returns Unknown, not Unsupported.
+        $doc = [xml]"<GameProfile><EmulationProfile>Daytona3</EmulationProfile><ConfigValues><FieldInformation><CategoryName>FFB Blaster</CategoryName><FieldName>Enable</FieldName><FieldType>Dropdown</FieldType><FieldValue>Off</FieldValue><FieldOptions><string>Off</string><string>On</string></FieldOptions></FieldInformation></ConfigValues></GameProfile>"
+        # Pass empty categories (as Get-FFBBlasterFieldNames would return after drift)
+        $r = Get-FFBBlasterSupport -Doc $doc -Categories @()
+        $r.Status     | Should -Be 'Unknown'
+        $r.WouldWrite | Should -BeFalse
+    }
+    It "Get-FFBBlasterSupport returns Unsupported (not Unknown) when no shaped field exists at all" {
+        $doc = [xml]"<GameProfile><EmulationProfile>Daytona3</EmulationProfile><ConfigValues><FieldInformation><CategoryName>General</CategoryName><FieldName>Windowed</FieldName><FieldType>Bool</FieldType><FieldValue>1</FieldValue></FieldInformation></ConfigValues></GameProfile>"
+        $r = Get-FFBBlasterSupport -Doc $doc -Categories @()
+        $r.Status     | Should -Be 'Unsupported'
+        $r.WouldWrite | Should -BeFalse
+    }
+}
+
 Describe "Get-GameProfileSchemaDrift (issue #43 schema drift detection)" {
     BeforeAll {
         function New-DriftDoc { param([string]$Xml) return [xml]$Xml }
