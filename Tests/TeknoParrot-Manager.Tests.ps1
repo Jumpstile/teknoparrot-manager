@@ -39,6 +39,28 @@ BeforeAll {
     # spawn the job, but the explicit init is cleaner and avoids surprises).
     $script:LocalDriveInfoCache          = $null
     $script:LocalDriveInfoCachePopulated = $false
+
+    # Same situation for the FFB Blaster gating (issue #41) and schema-drift
+    # (issue #43) constants -- they are top-level script-scope variables in
+    # the production script, not function bodies, so the AST extraction above
+    # never picks them up. Get-FFBBlasterSupport reads the first two directly,
+    # and Get-GameProfileSchemaDrift uses the rest as parameter defaults
+    # (which evaluate to $null in test scope without these). Mirror the
+    # production values explicitly.
+    $script:FFBBlasterUnsupportedPlatforms = @('pcsx2x6')
+    $script:FFBBlasterNamePattern          = 'ffb.*blaster|blaster.*ffb'
+    $script:KnownGameProfileTopLevel = @(
+        'GamePath','GamePath2','TestMenuParameter','TestMenuIsExecutable',
+        'ExtraParameters','TestMenuExtraParameters','EmulationProfile',
+        'GameProfileRevision','HasSeparateTestMode','ExecutableName',
+        'ExecutableName2','HasTwoExecutables','LaunchSecondExecutableFirst',
+        'HasTpoSupport','EmulatorType','Is64Bit','ValidMd5','ConfigValues',
+        'GameName','GameGenreInternal','IconName','HasModeForSquare',
+        'RequiresAdmin','InvokeFullscreenOnStartup','LaunchedFromUsb',
+        'CamberWindowState'
+    )
+    $script:RequiredGameProfileTopLevel = @('EmulationProfile','ConfigValues')
+    $script:KnownFieldTypes = @('Bool','Dropdown','Text','Slider')
 }
 
 Describe "Test-PathInside" {
@@ -986,5 +1008,207 @@ Describe "Test-ButtonNameDirectional" {
     }
     It "classifies empty string as NOT directional" {
         Test-ButtonNameDirectional "" | Should -BeFalse
+    }
+}
+
+# =============================================================================
+# COMPATIBILITY REGRESSION SUITE (issues #41 / #43 / #46)
+# These contexts protect the compatibility-sensitive setup decisions against
+# upstream TeknoParrot schema/platform drift. The cardinal invariant under
+# test throughout: an unsupported or unknown outcome must report WouldWrite =
+# $false, i.e. never causes the setup flow to write a profile.
+# =============================================================================
+
+Describe "Get-FFBBlasterSupport (issue #41 capability gating)" {
+    BeforeAll {
+        # Builds a full <GameProfile> with an EmulationProfile and arbitrary
+        # ConfigValues inner XML, so the platform deny-list and field gate are
+        # both exercised the way the real per-profile loop sees them.
+        function New-FfbProfileDoc {
+            param([string]$Platform, [string]$Inner)
+            return [xml]"<GameProfile><EmulationProfile>$Platform</EmulationProfile><ConfigValues>$Inner</ConfigValues></GameProfile>"
+        }
+        $script:FfbField = "<FieldInformation><CategoryName>FFB Blaster</CategoryName><FieldName>Enable</FieldName><FieldType>Bool</FieldType><FieldValue>0</FieldValue></FieldInformation>"
+    }
+
+    It "Supported: a profile with an FFB Blaster Bool field is offered setup and WouldWrite when not yet enabled" {
+        $doc = New-FfbProfileDoc -Platform "EuropaRFordRacing" -Inner $script:FfbField
+        $r = Get-FFBBlasterSupport -Doc $doc -Categories @('FFB Blaster')
+        $r.Status     | Should -Be 'Supported'
+        $r.WouldWrite | Should -BeTrue
+        $r.Changes[0].NewValue | Should -Be '1'
+    }
+    It "Supported but no write needed: an already-enabled field reports WouldWrite=false" {
+        $inner = "<FieldInformation><CategoryName>FFB Blaster</CategoryName><FieldName>Enable</FieldName><FieldType>Bool</FieldType><FieldValue>1</FieldValue></FieldInformation>"
+        $doc = New-FfbProfileDoc -Platform "Daytona3" -Inner $inner
+        $r = Get-FFBBlasterSupport -Doc $doc -Categories @('FFB Blaster')
+        $r.Status     | Should -Be 'Supported'
+        $r.UpToDate   | Should -BeTrue
+        $r.WouldWrite | Should -BeFalse
+    }
+    It "Unsupported (no field): a profile without an FFB Blaster field is skipped and never written" {
+        $inner = "<FieldInformation><CategoryName>General</CategoryName><FieldName>Windowed</FieldName><FieldType>Bool</FieldType><FieldValue>0</FieldValue></FieldInformation>"
+        $doc = New-FfbProfileDoc -Platform "EuropaRFordRacing" -Inner $inner
+        $r = Get-FFBBlasterSupport -Doc $doc -Categories @('FFB Blaster')
+        $r.Status     | Should -Be 'Unsupported'
+        $r.WouldWrite | Should -BeFalse
+    }
+    It "Unsupported (PCSX2x6): a pcsx2x6 profile is skipped EVEN when an FFB Blaster field is present" {
+        # Deny-list must win over field presence -- this is the core safety
+        # property: a future upstream field on an unsupported platform must
+        # never trigger a write.
+        $doc = New-FfbProfileDoc -Platform "pcsx2x6" -Inner $script:FfbField
+        $r = Get-FFBBlasterSupport -Doc $doc -Categories @('FFB Blaster')
+        $r.Status     | Should -Be 'Unsupported'
+        $r.WouldWrite | Should -BeFalse
+        $r.Reason     | Should -Match 'pcsx2x6'
+    }
+    It "Unsupported (PCSX2x6 via EmulatorType fallback): deny-list also matches when only EmulatorType carries the platform" {
+        $doc = [xml]"<GameProfile><EmulatorType>pcsx2x6</EmulatorType><ConfigValues>$script:FfbField</ConfigValues></GameProfile>"
+        $r = Get-FFBBlasterSupport -Doc $doc -Categories @('FFB Blaster')
+        $r.Status     | Should -Be 'Unsupported'
+        $r.WouldWrite | Should -BeFalse
+    }
+    It "Unsupported (PCSX2x6 case-insensitive): 'PCSX2X6' is matched regardless of case" {
+        $doc = New-FfbProfileDoc -Platform "PCSX2X6" -Inner $script:FfbField
+        (Get-FFBBlasterSupport -Doc $doc -Categories @('FFB Blaster')).Status | Should -Be 'Unsupported'
+    }
+    It "Unknown: an FFB Blaster-shaped field that is NOT a writable Bool is flagged for review, never written" {
+        # FieldType is Dropdown, not Bool -> schema drift -> Unknown, no write.
+        $inner = "<FieldInformation><CategoryName>FFB Blaster</CategoryName><FieldName>Mode</FieldName><FieldType>Dropdown</FieldType><FieldValue>Off</FieldValue><FieldOptions><string>Off</string><string>On</string></FieldOptions></FieldInformation>"
+        $doc = New-FfbProfileDoc -Platform "Daytona3" -Inner $inner
+        $r = Get-FFBBlasterSupport -Doc $doc -Categories @('FFB Blaster')
+        $r.Status     | Should -Be 'Unknown'
+        $r.WouldWrite | Should -BeFalse
+    }
+    It "paid-membership confirmation alone does not make an unsupported profile writable (gate is structural, not membership-based)" {
+        # The function takes no membership flag -- membership is asked once at
+        # the top of Invoke-FFBBlasterSetup and never feeds this decision. A
+        # pcsx2x6 profile is Unsupported no matter what the user answered.
+        $doc = New-FfbProfileDoc -Platform "pcsx2x6" -Inner $script:FfbField
+        (Get-FFBBlasterSupport -Doc $doc -Categories @('FFB Blaster')).WouldWrite | Should -BeFalse
+    }
+}
+
+Describe "Get-GameProfileSchemaDrift (issue #43 schema drift detection)" {
+    BeforeAll {
+        function New-DriftDoc { param([string]$Xml) return [xml]$Xml }
+        $script:GoodProfile = @"
+<GameProfile>
+  <EmulationProfile>EuropaRFordRacing</EmulationProfile>
+  <GameProfileRevision>22</GameProfileRevision>
+  <ExecutableName>fordracing.exe</ExecutableName>
+  <EmulatorType>TeknoParrot</EmulatorType>
+  <ConfigValues>
+    <FieldInformation><CategoryName>General</CategoryName><FieldName>Windowed</FieldName><FieldType>Bool</FieldType><FieldValue>1</FieldValue></FieldInformation>
+    <FieldInformation><CategoryName>General</CategoryName><FieldName>Input API</FieldName><FieldType>Dropdown</FieldType><FieldValue>DirectInput</FieldValue></FieldInformation>
+  </ConfigValues>
+</GameProfile>
+"@
+    }
+
+    It "reports no drift for a known, well-formed profile" {
+        $r = Get-GameProfileSchemaDrift -Doc (New-DriftDoc $script:GoodProfile)
+        $r.HasDrift          | Should -BeFalse
+        $r.UnknownNodes.Count    | Should -Be 0
+        $r.MissingRequired.Count | Should -Be 0
+        $r.WouldWrite        | Should -BeFalse
+    }
+    It "tolerates a known optional node (GamePath2) without flagging drift" {
+        $xml = $script:GoodProfile -replace '</ConfigValues>', '</ConfigValues><GamePath2>C:\game\amdaemon.exe</GamePath2>'
+        (Get-GameProfileSchemaDrift -Doc (New-DriftDoc $xml)).HasDrift | Should -BeFalse
+    }
+    It "reports an unknown NEW top-level node but never proposes a write" {
+        # Simulates an upstream addition like a CXBXR/Lindbergh-ELF2 marker.
+        $xml = $script:GoodProfile -replace '</ConfigValues>', '</ConfigValues><Cxbxr_SomeNewMarker>true</Cxbxr_SomeNewMarker>'
+        $r = Get-GameProfileSchemaDrift -Doc (New-DriftDoc $xml)
+        $r.HasDrift     | Should -BeTrue
+        $r.UnknownNodes | Should -Contain 'Cxbxr_SomeNewMarker'
+        $r.WouldWrite   | Should -BeFalse
+    }
+    It "reports a removed REQUIRED node as drift" {
+        $xml = $script:GoodProfile -replace '<EmulationProfile>EuropaRFordRacing</EmulationProfile>', ''
+        $r = Get-GameProfileSchemaDrift -Doc (New-DriftDoc $xml)
+        $r.HasDrift         | Should -BeTrue
+        $r.MissingRequired  | Should -Contain 'EmulationProfile'
+    }
+    It "reports an unknown FieldType as drift but never proposes a write" {
+        $xml = $script:GoodProfile -replace '<FieldType>Bool</FieldType>', '<FieldType>FutureRangeSliderV2</FieldType>'
+        $r = Get-GameProfileSchemaDrift -Doc (New-DriftDoc $xml)
+        $r.HasDrift           | Should -BeTrue
+        $r.UnknownFieldTypes  | Should -Contain 'FutureRangeSliderV2'
+        $r.WouldWrite         | Should -BeFalse
+    }
+    It "treats a missing <GameProfile> root as maximal drift, never a write" {
+        $r = Get-GameProfileSchemaDrift -Doc ([xml]"<NotAGameProfile><Foo/></NotAGameProfile>")
+        $r.HasRoot    | Should -BeFalse
+        $r.HasDrift   | Should -BeTrue
+        $r.WouldWrite | Should -BeFalse
+    }
+}
+
+Describe "Third-party FFB plugin destination safety (issue #46)" {
+    # The plugin flow resolves a destination DLL filename from the live
+    # AutoSetup.cmd table (untrusted) and guards it with Test-PathInside
+    # before any copy. These assert that guard's contract directly.
+    It "accepts a destination DLL inside the game's own folder" {
+        Test-PathInside (Join-Path "C:\Games\MyGame" "d3d9.dll") "C:\Games\MyGame" | Should -BeTrue
+    }
+    It "rejects a traversal destination that escapes the game folder" {
+        Test-PathInside (Join-Path "C:\Games\MyGame" "..\..\Windows\System32\evil.dll") "C:\Games\MyGame" | Should -BeFalse
+    }
+    It "rejects a sibling folder that only shares a name prefix" {
+        Test-PathInside "C:\Games\MyGameOther\x.dll" "C:\Games\MyGame" | Should -BeFalse
+    }
+}
+
+Describe "RawInput / RawInputTrackball field handling (issue #46)" {
+    BeforeAll {
+        function New-Btn { param([string]$Inner) return ([xml]"<JoystickButtons>$Inner</JoystickButtons>").JoystickButtons }
+    }
+    It "treats a present RawInputButton binding as bound (supported field present)" {
+        Test-ButtonIsBound (New-Btn "<RawInputButton>MOUSE_LEFT</RawInputButton>") | Should -BeTrue
+    }
+    It "treats a button with no binding field as not bound (field absent)" {
+        Test-ButtonIsBound (New-Btn "<InputMapping>P1Trackball</InputMapping>") | Should -BeFalse
+    }
+    It "does NOT treat an unknown future binding field as bound (unknown field is not acted on)" {
+        # A hypothetical future field name must not be mistaken for a real
+        # binding -- the safe default is 'not bound', matching the project's
+        # 'unknown fields are never acted on' rule.
+        Test-ButtonIsBound (New-Btn "<RawInputTrackballButtonV2>MOUSE_X</RawInputTrackballButtonV2>") | Should -BeFalse
+    }
+}
+
+Describe "GPU fix vendor matrix + safe re-run (issue #46)" {
+    BeforeAll {
+        function New-GpuDoc {
+            param([string]$Inner)
+            return [xml]"<GameProfile><ConfigValues>$Inner</ConfigValues></GameProfile>"
+        }
+        $script:GpuDropdown = "<FieldInformation><FieldName>GPU Fix</FieldName><FieldType>Dropdown</FieldType><FieldValue>None</FieldValue><FieldOptions><string>None</string><string>NVIDIA</string><string>AMD</string><string>INTEL</string></FieldOptions></FieldInformation>"
+    }
+    It "AMD: selects the AMD dropdown option" {
+        $r = Test-GpuFixUpToDate -Doc (New-GpuDoc $script:GpuDropdown) -BoolFields @() -DropdownFields @('GPU Fix') -Vendor 'AMD'
+        $r.Eligible | Should -BeTrue
+        $r.Changes[0].NewValue | Should -Be 'AMD'
+    }
+    It "NVIDIA: selects the NVIDIA dropdown option" {
+        $r = Test-GpuFixUpToDate -Doc (New-GpuDoc $script:GpuDropdown) -BoolFields @() -DropdownFields @('GPU Fix') -Vendor 'NVIDIA'
+        $r.Changes[0].NewValue | Should -Be 'NVIDIA'
+    }
+    It "Intel: selects the INTEL dropdown option" {
+        $r = Test-GpuFixUpToDate -Doc (New-GpuDoc $script:GpuDropdown) -BoolFields @() -DropdownFields @('GPU Fix') -Vendor 'Intel'
+        $r.Changes[0].NewValue | Should -Be 'INTEL'
+    }
+    It "safe re-run after a GPU change: an already-correct value is up to date and needs no write" {
+        $inner = "<FieldInformation><FieldName>GPU Fix</FieldName><FieldType>Dropdown</FieldType><FieldValue>NVIDIA</FieldValue><FieldOptions><string>None</string><string>NVIDIA</string><string>AMD</string><string>INTEL</string></FieldOptions></FieldInformation>"
+        $r = Test-GpuFixUpToDate -Doc (New-GpuDoc $inner) -BoolFields @() -DropdownFields @('GPU Fix') -Vendor 'NVIDIA'
+        $r.UpToDate | Should -BeTrue
+        $r.Changes.Count | Should -Be 0
+    }
+    It "not eligible (no GPU field) means nothing to write" {
+        $inner = "<FieldInformation><FieldName>Windowed</FieldName><FieldType>Bool</FieldType><FieldValue>1</FieldValue></FieldInformation>"
+        (Test-GpuFixUpToDate -Doc (New-GpuDoc $inner) -BoolFields @() -DropdownFields @('GPU Fix') -Vendor 'AMD').Eligible | Should -BeFalse
     }
 }

@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.32 BETA
+# TeknoParrot Manager  |  v0.99.33 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.32"
+$ScriptVersion = "0.99.33"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -222,6 +222,110 @@ function Save-XmlMaybe {
     param([System.Xml.XmlDocument]$doc, [string]$path, [bool]$DryRun)
     if ($DryRun) { Write-Log "DryRun: would save $path"; return }
     Save-Xml $doc $path
+}
+
+# =============================================================================
+# PROFILE / SCHEMA DRIFT DETECTION  (issue #43 -- pure, read-only, never writes)
+# =============================================================================
+# TeknoParrot's GameProfile XML schema evolves upstream (recent examples:
+# CXBXR platform prep, BudgieLoader path/version fixes, VF5 profile tag
+# fixes, Chihiro region options, Lindbergh ELF2 port changes). This script
+# reads those profiles to drive setup; a silent schema change can make a
+# correct script look broken, or -- worse -- tempt a write based on a field
+# it does not actually understand. Get-GameProfileSchemaDrift classifies a
+# single profile's structure against a known baseline and returns a
+# structured, actionable report. It NEVER mutates the document and NEVER
+# returns anything a caller is meant to write -- it is a diagnostic only.
+# The cardinal safety rule it encodes: an unknown field is REPORTED, never
+# acted on.
+
+# Baseline of top-level <GameProfile> child elements this script recognizes,
+# captured from live teknogods/TeknoParrotUI GameProfiles. New optional
+# elements appearing upstream are surfaced as 'unknown' (informational, not
+# a failure); the absence of a REQUIRED element is a hard drift finding.
+$script:KnownGameProfileTopLevel = @(
+    'GamePath','GamePath2','TestMenuParameter','TestMenuIsExecutable',
+    'ExtraParameters','TestMenuExtraParameters','EmulationProfile',
+    'GameProfileRevision','HasSeparateTestMode','ExecutableName',
+    'ExecutableName2','HasTwoExecutables','LaunchSecondExecutableFirst',
+    'HasTpoSupport','EmulatorType','Is64Bit','ValidMd5','ConfigValues',
+    'GameName','GameGenreInternal','IconName','HasModeForSquare',
+    'RequiresAdmin','InvokeFullscreenOnStartup','LaunchedFromUsb',
+    'CamberWindowState'
+)
+
+# Top-level elements that must be present for this script to reason about a
+# profile at all. A profile missing these is genuinely malformed/renamed
+# upstream, not merely extended -- worth a hard finding.
+$script:RequiredGameProfileTopLevel = @('EmulationProfile','ConfigValues')
+
+# FieldType values this script understands inside ConfigValues. An unknown
+# FieldType is reported (so a new control type is noticed) but, again, never
+# acted on.
+$script:KnownFieldTypes = @('Bool','Dropdown','Text','Slider')
+
+function Get-GameProfileSchemaDrift {
+    param(
+        [System.Xml.XmlDocument]$Doc,
+        [string[]]$KnownTopLevel    = $script:KnownGameProfileTopLevel,
+        [string[]]$RequiredTopLevel = $script:RequiredGameProfileTopLevel,
+        [string[]]$KnownFieldTypes  = $script:KnownFieldTypes
+    )
+
+    $unknownNodes      = New-Object System.Collections.Generic.List[string]
+    $missingRequired   = New-Object System.Collections.Generic.List[string]
+    $unknownFieldTypes = New-Object System.Collections.Generic.List[string]
+    $present           = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+    $root = if ($Doc) { $Doc.SelectSingleNode("/GameProfile") } else { $null }
+    if ($null -eq $root) {
+        # No <GameProfile> root at all -- the strongest possible drift signal
+        # (renamed root, wrong document, or corrupt). Report, never act.
+        foreach ($r in $RequiredTopLevel) { [void]$missingRequired.Add($r) }
+        return [pscustomobject]@{
+            HasRoot           = $false
+            UnknownNodes      = $unknownNodes
+            MissingRequired   = $missingRequired
+            UnknownFieldTypes = $unknownFieldTypes
+            HasDrift          = $true
+            # Cardinal invariant: drift detection is diagnostic only.
+            WouldWrite        = $false
+        }
+    }
+
+    $knownSet = [System.Collections.Generic.HashSet[string]]::new([string[]]$KnownTopLevel, [System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($child in $root.ChildNodes) {
+        if ($child.NodeType -ne [System.Xml.XmlNodeType]::Element) { continue }
+        [void]$present.Add($child.Name)
+        if (-not $knownSet.Contains($child.Name)) {
+            if (-not $unknownNodes.Contains($child.Name)) { [void]$unknownNodes.Add($child.Name) }
+        }
+    }
+
+    foreach ($r in $RequiredTopLevel) {
+        if (-not $present.Contains($r)) { [void]$missingRequired.Add($r) }
+    }
+
+    $ftSet = [System.Collections.Generic.HashSet[string]]::new([string[]]$KnownFieldTypes, [System.StringComparer]::OrdinalIgnoreCase)
+    $fnodes = $Doc.SelectNodes("/GameProfile/ConfigValues/FieldInformation")
+    foreach ($n in $fnodes) {
+        $ftNode = $n.SelectSingleNode("FieldType")
+        if ($null -eq $ftNode) { continue }
+        $ft = if ($ftNode.InnerText) { $ftNode.InnerText.Trim() } else { '' }
+        if ($ft -and -not $ftSet.Contains($ft)) {
+            if (-not $unknownFieldTypes.Contains($ft)) { [void]$unknownFieldTypes.Add($ft) }
+        }
+    }
+
+    $hasDrift = ($unknownNodes.Count -gt 0) -or ($missingRequired.Count -gt 0) -or ($unknownFieldTypes.Count -gt 0)
+    return [pscustomobject]@{
+        HasRoot           = $true
+        UnknownNodes      = $unknownNodes
+        MissingRequired   = $missingRequired
+        UnknownFieldTypes = $unknownFieldTypes
+        HasDrift          = $hasDrift
+        WouldWrite        = $false
+    }
 }
 
 # Writes TeknoParrot-Manager.config.json from the current script-scope
@@ -4475,6 +4579,142 @@ function Test-FFBBlasterUpToDate {
     return [pscustomobject]@{ Eligible = $eligible; UpToDate = ($eligible -and $changes.Count -eq 0); Changes = $changes }
 }
 
+# Platforms/emulation paths on which TeknoParrot's native FFB Blaster is
+# NOT currently supported, keyed by the GameProfile's own EmulationProfile
+# (or EmulatorType) value -- compared case-insensitively. This is an
+# explicit deny-list, not an allow-list: the script does NOT maintain a
+# positive roster of every supported platform (that would go stale on every
+# upstream addition and wrongly mark brand-new platforms as unsupported).
+# Instead, only platforms POSITIVELY known not to support FFB Blaster are
+# listed here, so a write is blocked for them even if a profile somehow
+# carries an FFB-Blaster-shaped field. 'pcsx2x6' is the confirmed case
+# (issue #41): TeknoParrot's PCSX2 fork does not implement FFB Blaster, and
+# its profiles legitimately have no such field today -- but a future
+# upstream change must never cause this script to enable it there. Add a
+# platform here only after positively confirming FFB Blaster does not work
+# on it; never the reverse.
+$script:FFBBlasterUnsupportedPlatforms = @('pcsx2x6')
+
+# Regex identifying any FieldInformation node (by CategoryName or FieldName)
+# that LOOKS like an FFB Blaster control, regardless of whether it is a
+# well-formed Bool field. Used to distinguish "this game genuinely has no
+# FFB Blaster control" (Unsupported) from "something FFB-Blaster-shaped is
+# here but does not match the schema we know how to write" (Unknown).
+$script:FFBBlasterNamePattern = 'ffb.*blaster|blaster.*ffb'
+
+# Pure capability/safety gate for native FFB Blaster on a single profile.
+# Supersedes a bare Test-FFBBlasterUpToDate call at every decision point
+# (Invoke-FFBBlasterSetup and the Library health check) so the platform
+# deny-list and the unknown-field safety state are enforced in exactly one
+# place. Returns a structured outcome -- this is the canonical shape the
+# whole FFB Blaster feature reasons about (issue #41):
+#   Status     : 'Supported' | 'Unsupported' | 'Unknown'
+#   Reason     : human-readable explanation (for logs + the user summary)
+#   WouldWrite : $true ONLY when Status='Supported' AND a field actually
+#                needs changing -- the single signal a caller may write on.
+#   Eligible   : a well-formed Bool FFB Blaster field is present
+#   UpToDate   : that field is already enabled
+#   Changes    : the exact node(s)+value(s) to write (from
+#                Test-FFBBlasterUpToDate), empty unless Status='Supported'
+#   Platform   : the EmulationProfile/EmulatorType value examined
+# Decision order (deny-list first, so an unsupported platform can never be
+# written even if it carries a matching field):
+#   1. Platform in $FFBBlasterUnsupportedPlatforms        -> Unsupported
+#   2. Well-formed Bool FFB Blaster field present         -> Supported
+#   3. FFB-Blaster-shaped field present but malformed     -> Unknown
+#      (drift: wrong FieldType, no FieldValue, etc.)
+#   4. No FFB-Blaster-shaped field at all                 -> Unsupported
+# Only case 2 ever permits a write; cases 1/3/4 always set WouldWrite=$false.
+function Get-FFBBlasterSupport {
+    param([System.Xml.XmlDocument]$Doc, $Categories)
+
+    # Platform identity: prefer EmulationProfile, fall back to EmulatorType
+    # (both carry 'pcsx2x6' on a real PCSX2 fork profile -- confirmed against
+    # live teknogods/TeknoParrotUI GameProfiles).
+    $platform = ''
+    if ($Doc.GameProfile) {
+        $epNode = $Doc.GameProfile.SelectSingleNode("EmulationProfile")
+        if ($epNode -and $epNode.InnerText) { $platform = $epNode.InnerText.Trim() }
+        if ([string]::IsNullOrWhiteSpace($platform)) {
+            $etNode = $Doc.GameProfile.SelectSingleNode("EmulatorType")
+            if ($etNode -and $etNode.InnerText) { $platform = $etNode.InnerText.Trim() }
+        }
+    }
+
+    $emptyChanges = New-Object System.Collections.Generic.List[object]
+
+    # 1. Deny-list gate -- always first, never overridden by field presence.
+    foreach ($bad in $script:FFBBlasterUnsupportedPlatforms) {
+        if ($platform -and ($platform -ieq $bad)) {
+            return [pscustomobject]@{
+                Status     = 'Unsupported'
+                Reason     = "FFB Blaster is not supported on the '$platform' platform"
+                WouldWrite = $false
+                Eligible   = $false
+                UpToDate   = $false
+                Changes    = $emptyChanges
+                Platform   = $platform
+            }
+        }
+    }
+
+    # 2. Well-formed Bool field present?
+    $result = Test-FFBBlasterUpToDate -Doc $Doc -Categories $Categories
+    if ($result.Eligible) {
+        $would = ($result.Changes.Count -gt 0)
+        $reason = if ($would) { "FFB Blaster field present and not yet enabled" }
+                  else        { "FFB Blaster field present and already enabled" }
+        return [pscustomobject]@{
+            Status     = 'Supported'
+            Reason     = $reason
+            WouldWrite = $would
+            Eligible   = $true
+            UpToDate   = $result.UpToDate
+            Changes    = $result.Changes
+            Platform   = $platform
+        }
+    }
+
+    # 3. Anything FFB-Blaster-shaped present that we could NOT treat as a
+    #    writable Bool field? That is schema drift -- never write, flag for
+    #    manual review.
+    $shaped = $false
+    if ($Doc.GameProfile) {
+        $fnodes = $Doc.SelectNodes("/GameProfile/ConfigValues/FieldInformation")
+        foreach ($n in $fnodes) {
+            $cn = if ($n.CategoryName) { $n.CategoryName.Trim() } else { '' }
+            $fn = if ($n.FieldName)     { $n.FieldName.Trim()     } else { '' }
+            if (($cn -and $cn -imatch $script:FFBBlasterNamePattern) -or
+                ($fn -and $fn -imatch $script:FFBBlasterNamePattern)) {
+                $shaped = $true; break
+            }
+        }
+    }
+    if ($shaped) {
+        return [pscustomobject]@{
+            Status     = 'Unknown'
+            Reason     = "An FFB Blaster-like field was found but does not match the known Bool schema -- skipped for manual review"
+            WouldWrite = $false
+            Eligible   = $false
+            UpToDate   = $false
+            Changes    = $emptyChanges
+            Platform   = $platform
+        }
+    }
+
+    # 4. No FFB Blaster control of any shape -- this game simply does not
+    #    have the feature.
+    return [pscustomobject]@{
+        Status     = 'Unsupported'
+        Reason     = "This game has no FFB Blaster field"
+        WouldWrite = $false
+        Eligible   = $false
+        UpToDate   = $false
+        Changes    = $emptyChanges
+        Platform   = $platform
+    }
+}
+
 # Sets up TeknoParrot's own built-in "FFB Blaster" force feedback, a
 # per-game Bool field in GameProfiles -- paywalled (any paid TeknoParrot
 # membership). The script cannot check subscription status, so it must
@@ -4541,16 +4781,39 @@ function Invoke-FFBBlasterSetup {
     $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
                   Where-Object { $_.Directory.Name -ne "FullBackup" })
     $enabledCodes = New-Object System.Collections.Generic.List[string]
-    $updated = 0; $unchanged = 0; $noField = 0; $errors = 0
+    $updated = 0; $unchanged = 0; $unsupported = 0; $unknown = 0; $errors = 0
+    $unknownNames = New-Object System.Collections.Generic.List[string]
+    $skippedPlatforms = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 
     foreach ($pf in $profiles) {
         try {
             $doc    = Read-Xml $pf.FullName
-            $result = Test-FFBBlasterUpToDate -Doc $doc -Categories $ffbFields
-            if (-not $result.Eligible) { $noField++; continue }
+            # Single structured capability+safety gate (issue #41). Only a
+            # 'Supported' outcome with WouldWrite/Changes ever causes a write;
+            # 'Unsupported' (no field, or an unsupported platform such as
+            # pcsx2x6) and 'Unknown' (drifted/unrecognized field shape) are
+            # both skipped without touching the profile.
+            $support = Get-FFBBlasterSupport -Doc $doc -Categories $ffbFields
+            switch ($support.Status) {
+                'Unsupported' {
+                    $unsupported++
+                    if ($support.Platform -and ($script:FFBBlasterUnsupportedPlatforms -icontains $support.Platform)) {
+                        [void]$skippedPlatforms.Add($support.Platform)
+                    }
+                    Write-Log "FFBBlaster: $($pf.BaseName) :: unsupported -- $($support.Reason)"
+                    continue
+                }
+                'Unknown' {
+                    $unknown++
+                    [void]$unknownNames.Add($pf.BaseName)
+                    Write-Log "FFBBlaster: $($pf.BaseName) :: unknown -- $($support.Reason) (NOT written)"
+                    continue
+                }
+            }
+            # Supported from here on.
             [void]$enabledCodes.Add($pf.BaseName)
-            if ($result.Changes.Count -gt 0) {
-                foreach ($c in $result.Changes) {
+            if ($support.WouldWrite) {
+                foreach ($c in $support.Changes) {
                     $c.Node.InnerText = $c.NewValue
                     Write-Log "FFBBlaster: $($pf.BaseName) :: $($c.FieldName) -> $($c.NewValue)"
                 }
@@ -4567,12 +4830,24 @@ function Invoke-FFBBlasterSetup {
         }
     }
 
+    $supportedTotal = $updated + $unchanged
+    Write-Host ""
+    Write-Host "  FFB Blaster support check:" -ForegroundColor Cyan
+    Write-Host ("    Supported profiles  : {0}" -f $supportedTotal) -ForegroundColor Green
+    Write-Host ("    Unsupported profiles: {0}" -f $unsupported) -ForegroundColor DarkGray
+    Write-Host ("    Unknown profiles    : {0}" -f $unknown) -ForegroundColor $(if ($unknown -gt 0) {'Yellow'} else {'DarkGray'})
     Write-Host ""
     Write-Host ("  Updated  : {0} profile(s)" -f $updated) -ForegroundColor Green
     if ($unchanged -gt 0) { Write-Host ("  No change: {0} (already enabled)" -f $unchanged) -ForegroundColor DarkGray }
-    if ($noField -gt 0)   { Write-Host ("  No field : {0} (this game has no FFB Blaster field)" -f $noField) -ForegroundColor DarkGray }
+    foreach ($plat in $skippedPlatforms) {
+        Write-Host ("  Skipped {0} profiles because FFB Blaster is not currently supported there." -f $plat) -ForegroundColor DarkGray
+    }
+    if ($unknown -gt 0) {
+        Write-Host ("  Unknown  : {0} profile(s) had an unrecognized FFB Blaster field and were NOT changed -- review manually:" -f $unknown) -ForegroundColor Yellow
+        Write-Host ("    {0}" -f ($unknownNames -join ', ')) -ForegroundColor DarkGray
+    }
     if ($errors -gt 0)    { Write-Host ("  Errors   : {0} -- see log for details" -f $errors) -ForegroundColor Red }
-    Write-Log ("FFBBlaster setup: complete. Updated={0} Unchanged={1} NoField={2} Errors={3}" -f $updated, $unchanged, $noField, $errors)
+    Write-Log ("FFBBlaster setup: complete. Supported={0} Updated={1} Unchanged={2} Unsupported={3} Unknown={4} Errors={5}" -f $supportedTotal, $updated, $unchanged, $unsupported, $unknown, $errors)
     return @($enabledCodes)
 }
 
@@ -5728,8 +6003,14 @@ function Invoke-LibraryHealthCheck {
                 $gpuResult = Test-GpuFixUpToDate -Doc $doc -BoolFields $gpuFields.BoolFields -DropdownFields $gpuFields.DropdownFields -Vendor $detected.Vendor
                 if ($gpuResult.Eligible -and -not $gpuResult.UpToDate) { [void]$gpuFixNeeded.Add($pf.BaseName) }
             }
-            $ffbResult = Test-FFBBlasterUpToDate -Doc $doc -Categories $ffbFields
-            if ($ffbResult.Eligible -and -not $ffbResult.UpToDate) { [void]$ffbBlasterNeeded.Add($pf.BaseName) }
+            # Use the same structured gate the setup flow uses (issue #41) so
+            # the health check agrees exactly with what Invoke-FFBBlasterSetup
+            # would actually do: only a 'Supported' profile that still needs a
+            # write is reported as needing the fix. An unsupported platform
+            # (e.g. pcsx2x6) or an unrecognized/drifted field is never flagged
+            # here as "not applied" -- it cannot and should not be applied.
+            $ffbSupport = Get-FFBBlasterSupport -Doc $doc -Categories $ffbFields
+            if ($ffbSupport.Status -eq 'Supported' -and $ffbSupport.WouldWrite) { [void]$ffbBlasterNeeded.Add($pf.BaseName) }
 
             if (Test-GameNeedsPostgres $doc) {
                 if ([string]::IsNullOrWhiteSpace((Get-PostgresFieldValue $doc "Pass"))) {
