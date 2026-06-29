@@ -3643,8 +3643,8 @@ function Invoke-EggmanDatDownloadInteractive {
 # =============================================================================
 # Confirmed working via multiple real install attempts on a real machine
 # this session (several genuine failures along the way, each root-caused
-# via verbose MSI logs -- see the CLAUDE.md Postgres notes for the full
-# story). Key facts baked into the property list below:
+# via verbose MSI logs -- see LESSONS_LEARNED.md's PostgreSQL install notes
+# for the full story). Key facts baked into the property list below:
 #   - Targets postgresql-8.3-int.msi directly, NOT the postgresql-8.3.msi
 #     wrapper -- the wrapper is a near-empty UI shell with no real
 #     Feature/Component data of its own; under /qn it has nothing to do
@@ -4748,9 +4748,41 @@ function Invoke-FFBBlasterSetup {
     $gpDir     = Join-Path $TpRoot "GameProfiles"
     $ffbFields = Get-FFBBlasterFieldNames -GameProfilesDir $gpDir
     if ($ffbFields.Count -eq 0) {
-        Write-Host "  No FFB Blaster field found in any GameProfile -- this TeknoParrot" -ForegroundColor Yellow
-        Write-Host "  install may not support it yet." -ForegroundColor Yellow
-        Write-Log "FFBBlaster setup: aborted -- no FFB Blaster field discovered."
+        # Before giving up, check whether there ARE any FFB-Blaster-shaped
+        # fields in the GameProfiles at all, just not of type Bool. If so,
+        # this is a schema drift situation (upstream changed the FieldType),
+        # not simply "TeknoParrot does not support FFB Blaster here yet" --
+        # and the two cases deserve different user-facing messages.
+        $shapedNonBoolCount = 0
+        if (Test-Path -LiteralPath $gpDir) {
+            foreach ($gf in @(Get-ChildItem -LiteralPath $gpDir -Filter "*.xml" -ErrorAction SilentlyContinue)) {
+                try {
+                    $gdoc = Read-Xml $gf.FullName
+                    $fnodes = $gdoc.SelectNodes("/GameProfile/ConfigValues/FieldInformation")
+                    foreach ($n in $fnodes) {
+                        $cn = if ($n.CategoryName) { $n.CategoryName.Trim() } else { '' }
+                        $fn = if ($n.FieldName)     { $n.FieldName.Trim()     } else { '' }
+                        $ft = if ($n.FieldType)     { $n.FieldType.Trim()     } else { '' }
+                        if ($ft -ieq 'Bool') { continue }   # Already caught by Get-FFBBlasterFieldNames
+                        if (($cn -and $cn -imatch $script:FFBBlasterNamePattern) -or
+                            ($fn -and $fn -imatch $script:FFBBlasterNamePattern)) {
+                            $shapedNonBoolCount++
+                        }
+                    }
+                } catch { }
+            }
+        }
+        if ($shapedNonBoolCount -gt 0) {
+            Write-Host "  WARNING: FFB Blaster-shaped fields were found in GameProfiles, but" -ForegroundColor Yellow
+            Write-Host "  none have the expected Bool type -- this may indicate an upstream" -ForegroundColor Yellow
+            Write-Host ("  schema change ({0} field(s) affected). Skipped for manual review." -f $shapedNonBoolCount) -ForegroundColor Yellow
+            Write-Host "  Run Get-GameProfileSchemaDrift against a sample profile to confirm." -ForegroundColor DarkGray
+            Write-Log ("FFBBlaster setup: aborted -- {0} FFB-Blaster-shaped non-Bool field(s) detected (schema drift)." -f $shapedNonBoolCount)
+        } else {
+            Write-Host "  No FFB Blaster field found in any GameProfile -- this TeknoParrot" -ForegroundColor Yellow
+            Write-Host "  install may not support it yet." -ForegroundColor Yellow
+            Write-Log "FFBBlaster setup: aborted -- no FFB Blaster field discovered."
+        }
         return ,@()
     }
     Write-Log ("FFBBlaster: discovered fields -- [{0}]" -f ($ffbFields -join ', '))
@@ -6237,7 +6269,7 @@ function Resolve-RegisteredGameFolder {
     if (-not $datEntry -or -not $datEntry.ProfileCode) { return $null }
     # Profile codes are purely alphanumeric; reject anything else before joining
     # into a path -- the dat is externally-sourced, untrusted input, same as the
-    # ProfileCode check in Register-Games (see CLAUDE.md security notes).
+    # ProfileCode check in Register-Games (see SECURITY.md).
     if ($datEntry.ProfileCode -notmatch '^[\w]+$') { return $null }
     $profilePath = Join-Path $userProfilesDir "$($datEntry.ProfileCode).xml"
     if (-not (Test-Path -LiteralPath $profilePath)) { return $null }

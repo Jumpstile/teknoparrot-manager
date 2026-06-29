@@ -107,8 +107,17 @@ writes profiles, verify the following properties are still intact.
 ## 4. Release mechanics
 
 - [ ] `git tag -a vX.YY.ZZ -m "vX.YY.ZZ"` -- tag created AFTER all docs pass.
-- [ ] Release ZIP built from Scripts\ (not a temp folder), following the
-  include/exclude list in CLAUDE.md.
+- [ ] Release ZIP built from Scripts\ (not a temp folder), following this
+  include/exclude list (ZIP name: "TeknoParrot Manager vX.YY BETA.zip",
+  always versioned):
+  - Include: `TeknoParrot-Manager.ps1`, `TeknoParrot-Manager.bat`,
+    `TeknoParrot-Manager-README.txt`, `TeknoParrot-Manager-QuickStart.txt`,
+    `TeknoParrot-Manager-CHANGELOG.txt`, `LICENSE`, `Crosshairs\` (all 321 PNGs).
+  - Exclude: `ReShade\` (DLLs not redistributable; user obtains from
+    reshade.me), `dgVoodoo2\` (user provides), `FFBPlugin\` and
+    `BepInExCache\` (auto-downloaded live from GitHub each run, never
+    bundled), `README.md`, `QUICKSTART.md`, `SECURITY.md`,
+    `LESSONS_LEARNED.md`, `*.zip`, `*.log`, `*.config.json`.
 - [ ] GitHub release created against the new tag; ZIP uploaded as the asset.
 - [ ] Releases pruned to the most recent 5 (delete oldest if count exceeds 5).
 - [ ] Tag is permanent once it backs a release -- never force-push or retag.
@@ -127,4 +136,4 @@ writes profiles, verify the following properties are still intact.
 
 ---
 
-_For the engineering rationale behind each item, see CLAUDE.md and LESSONS_LEARNED.md._
+_For the engineering rationale behind each item, see SECURITY.md and LESSONS_LEARNED.md._

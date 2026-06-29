@@ -31,8 +31,8 @@
   Release safety checklist and lessons learned (#47): RELEASE-SAFETY-
   CHECKLIST.md documents the complete pre-release gate sequence in one place.
   LESSONS_LEARNED.md captures post-mortems from real bugs across this
-  project's development history. Both are referenced from CLAUDE.md's sweep
-  section.
+  project's development history. Both are referenced from the standing
+  pre-commit/pre-release sweep requirements.
 
   Pester coverage expanded (#46): 36 new tests covering the FFB Blaster
   capability gate (supported/unsupported/unknown/pcsx2x6 deny-list/EmulatorType

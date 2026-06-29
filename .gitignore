@@ -1,7 +1,8 @@
 # Distribution ZIPs -- these go to GitHub Releases, not git history
 TeknoParrot Manager*.zip
 
-# Third-party DLLs -- proprietary, user provides; see CLAUDE.md bundling notes
+# Third-party DLLs -- proprietary, user provides; see README.md's ReShade
+# Visual Enhancements / dgVoodoo2 Legacy Compatibility sections for bundling notes
 ReShade/
 dgVoodoo2/
 
@@ -19,8 +20,15 @@ config.json
 TeknoParrot-Manager.config.json
 TeknoParrot-Manager.overrides.json
 TeknoParrot-Manager-ActionItems.txt
+TeknoParrot-Manager-controls.txt
 TeknoParrot-Manager-crosshairs.json
 *.log
+
+# LaunchBox backup folder -- user data, written at runtime, never tracked
+LaunchBoxBackups/
+
+# Local HTML crosshair preview -- generated artifact, not a repo doc
+TeknoParrot-Crosshairs-Preview.html
 
 # Downloaded Eggman dat ZIP -- fetched live each run, never bundled/tracked
 TeknoParrot.Collection*.zip

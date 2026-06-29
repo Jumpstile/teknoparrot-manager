@@ -131,3 +131,53 @@ Every test session must mirror all relevant script-scope constants in `BeforeAll
 (see the existing mirroring for `$FuzzyAutoThreshold`, `$FuzzyTieMargin`,
 `$script:FFBBlasterUnsupportedPlatforms`, etc.). When a new constant is added to
 the production script, add the matching mirror to `BeforeAll` in the same commit.
+
+---
+
+## v0.99: PostgreSQL 8.3 silent-install recipe for Incredible Technologies games
+
+**What happened.** Several games (Golden Tee Live, Power Putt Live, Silver
+Strike Bowling Live, Target Toss Pro Bags/Lawn Darts, Orange County Choppers
+Pinball) need a local PostgreSQL 8.3 database. Getting a fully silent,
+unattended install working took several genuine failed attempts on a real
+machine, each root-caused via verbose MSI logs rather than guessed.
+
+**Key facts, confirmed the hard way:**
+- Target `postgresql-8.3-int.msi` directly, NOT `postgresql-8.3.msi` -- the
+  latter is a near-empty UI wrapper with no real Feature/Component data of
+  its own; under `/qn` it has nothing to do and fails, since its only job is
+  to drive the internal MSI through dialogs in the InstallUISequence, which
+  silent mode skips.
+- `INTERNALLAUNCH=1` is required to satisfy the internal MSI's own
+  `LaunchCondition` (`INTERNALLAUNCH=1 OR Installed`), bypassing the wrapper
+  entirely -- found by reading the MSI's LaunchCondition table directly via
+  the WindowsInstaller COM API.
+- `ROOTDRIVE=C:\` is required -- without it, MSI's drive-selection heuristic
+  can pick whatever local drive has the most free space, which would not
+  match the hardcoded `C:\Program Files (x86)\PostgreSQL\8.3\` path baked
+  into every GameProfile's `Path` field.
+- `SERVICEDOMAIN` must be the real computer name, NOT the Win32 "local
+  machine" literal `.` -- the install's custom action does its own
+  domain\username string handling and does not resolve `.` correctly,
+  which manifests as "No mapping between account names and security IDs
+  was done."
+- The real installed service name is `pgsql-8.3` (DisplayName "PostgreSQL
+  Database Server 8.3") -- it does not contain the substring "postgres",
+  so detection/cleanup must check for `pgsql-8.3` specifically, not a
+  `*postgres*` wildcard. A real bug shipped from checking the wrong name
+  and silently never finding the real service.
+- A failed/partial install leaves a real local Windows account (`postgres`)
+  and an orphaned profile + `ProfileList` registry SID entry behind even
+  when the installer itself reports failure -- removing the user alone does
+  not clean up the profile folder or registry entry, and a leftover entry
+  reproduces the same mapping error on the next attempt.
+- The MSI's deferred custom actions log connection passwords in **plaintext**
+  in the verbose install log even though the command-line echo masks them --
+  the install routine always deletes its entire working folder (ZIP,
+  extracted MSI, verbose log) in a `finally` block, success or failure.
+
+**Rule.** For any future MSI-driven silent install: read the MSI's own
+LaunchCondition/Property tables directly rather than guessing property
+names from documentation, verify the real installed service/display name
+empirically rather than assuming it matches the product name, and always
+clean up verbose logs that may contain plaintext secrets.
