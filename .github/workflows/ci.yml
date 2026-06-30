@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  quality-gates:
+    name: Quality gates
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: ASCII purity check
+        shell: powershell
+        run: |
+          $bytes = [System.IO.File]::ReadAllBytes("$PWD\TeknoParrot-Manager.ps1")
+          $count = ($bytes | Where-Object { $_ -gt 127 }).Count
+          if ($count -gt 0) {
+            Write-Error "ASCII check FAILED: $count non-ASCII byte(s) found. PS 5.1 reads BOM-less UTF-8 as Windows-1252; non-ASCII bytes cause parse errors."
+            exit 1
+          }
+          Write-Host "ASCII check passed: 0 non-ASCII bytes."
+
+      - name: Parse check
+        shell: powershell
+        run: |
+          $errs = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            "$PWD\TeknoParrot-Manager.ps1", [ref]$null, [ref]$errs) | Out-Null
+          if ($errs.Count -gt 0) {
+            $errs | ForEach-Object { Write-Host $_.Message -ForegroundColor Red }
+            Write-Error "Parse check FAILED: $($errs.Count) parse error(s)."
+            exit 1
+          }
+          Write-Host "Parse check passed: 0 errors."
+
+      - name: Install PSScriptAnalyzer
+        shell: powershell
+        run: Install-Module PSScriptAnalyzer -Scope CurrentUser -Force -SkipPublisherCheck -MinimumVersion 1.21
+
+      - name: PSScriptAnalyzer
+        shell: powershell
+        run: |
+          $findings = Invoke-ScriptAnalyzer -Path "$PWD\TeknoParrot-Manager.ps1" `
+                        -Severity Error,Warning `
+                        -Settings "$PWD\PSScriptAnalyzerSettings.psd1"
+          if ($findings.Count -gt 0) {
+            $findings | ForEach-Object {
+              Write-Host "[$($_.Severity)] $($_.RuleName) (line $($_.Line)): $($_.Message)"
+            }
+            Write-Error "PSScriptAnalyzer FAILED: $($findings.Count) finding(s). See PSScriptAnalyzerSettings.psd1 for approved exclusions."
+            exit 1
+          }
+          Write-Host "PSScriptAnalyzer passed: 0 findings."
+
+      - name: Install Pester
+        shell: powershell
+        run: Install-Module Pester -Scope CurrentUser -Force -SkipPublisherCheck -MinimumVersion 5.0
+
+      - name: Pester regression suite
+        shell: powershell
+        run: |
+          Import-Module Pester -MinimumVersion 5.0
+          $config = New-PesterConfiguration
+          $config.Run.Path = "$PWD\Tests\TeknoParrot-Manager.Tests.ps1"
+          $config.Run.Exit = $true
+          $config.Output.Verbosity = 'Detailed'
+          $config.TestResult.Enabled = $true
+          $config.TestResult.OutputPath = "$PWD\pester-results.xml"
+          $config.TestResult.OutputFormat = 'NUnitXml'
+          Invoke-Pester -Configuration $config
+
+      - name: Upload Pester results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pester-results
+          path: pester-results.xml

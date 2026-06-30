@@ -18,12 +18,14 @@ It is intentionally redundant: each gate catches a different failure class.
   $errs=$null; [System.Management.Automation.Language.Parser]::ParseFile('TeknoParrot-Manager.ps1',[ref]$null,[ref]$errs) | Out-Null; $errs.Count
   ```
 
-- [ ] PSScriptAnalyzer (Severity Error,Warning):
+- [ ] PSScriptAnalyzer (Severity Error,Warning) -- use the project settings file:
   ```powershell
-  Invoke-ScriptAnalyzer -Path TeknoParrot-Manager.ps1 -Severity Error,Warning
+  Invoke-ScriptAnalyzer -Path TeknoParrot-Manager.ps1 -Severity Error,Warning -Settings PSScriptAnalyzerSettings.psd1
   ```
-  PSAvoidUsingWriteHost is expected and ignorable (interactive CLI). All other
-  findings must be reviewed and either fixed or explicitly noted as false positives.
+  `PSScriptAnalyzerSettings.psd1` codifies all approved exclusions with rationale.
+  Any finding that survives the settings file must be fixed or the settings file
+  updated with a documented rationale before committing. This is the same rule set
+  enforced by the CI workflow (`.github\workflows\ci.yml`).
 
 - [ ] InjectionHunter (custom rule path):
   ```powershell
@@ -119,7 +121,8 @@ writes profiles, verify the following properties are still intact.
     `BepInExCache\` (auto-downloaded live from GitHub each run, never
     bundled), `README.md`, `QUICKSTART.md`, `SECURITY.md`,
     `LESSONS_LEARNED.md`, `ARCHITECTURE.md`, `RELEASE-SAFETY-CHECKLIST.md`,
-    `CLAUDE.md`, `*.zip`, `*.log`, `*.config.json`.
+    `CLAUDE.md`, `PSScriptAnalyzerSettings.psd1`, `.github\`,
+    `*.zip`, `*.log`, `*.config.json`.
 - [ ] Validate the local ZIP structure before creating a release:
   ```powershell
   .\Tests\Test-ReleasePackage.ps1 -ZipPath "TeknoParrot Manager vX.YY BETA.zip"
