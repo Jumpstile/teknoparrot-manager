@@ -7,6 +7,66 @@ outcome -- the ones most likely to repeat.
 
 ---
 
+## v0.99.38: Local success does not equal release readiness
+
+**What happened.** The CI pipeline (added in v0.99.36) immediately caught a
+Pester failure that local test runs had been silently hiding.
+`Describe "Expand-ZipFileSafe"` uses a helper `New-TestZip` that calls
+`[System.IO.Compression.ZipArchive]::new(...)`. On the GitHub Actions
+runner -- a fresh `powershell.EXE` process with no prior session state --
+this threw `RuntimeException: Unable to find type [System.IO.Compression.ZipArchive]`
+for all four tests that called the helper.
+
+The first attempted fix (v0.99.37) loaded `System.IO.Compression.FileSystem`
+in the top-level `BeforeAll`. This did not fix the failure. The root cause was
+an assembly name confusion: `System.IO.Compression.FileSystem.dll` contains
+`ZipFile` and `ZipFileExtensions`; `ZipArchive` and `ZipArchiveMode` live in
+the SEPARATE assembly `System.IO.Compression.dll`. Loading the FileSystem
+assembly does not make `ZipArchive` available, even though the two assemblies
+are shipped together and .NET may load `System.IO.Compression.dll` as a
+transitive dependency.
+
+Local Pester runs had always passed because interactive development sessions
+had previously loaded `System.IO.Compression.dll` -- by building a ZIP,
+running the production script, or any other earlier activity in the same
+terminal. The assembly stays loaded for the lifetime of the process, so any
+later Pester invocation in that session inherited the type for free. The CI
+runner starts a pristine process every run; no prior activity loads anything.
+
+**Why independent verification mattered.** The CI failure was caught via an
+independent audit (Codex) against the committed code, not via local
+re-running. The Codex review surfaced the failures at a point where local
+tests showed all-green, providing objective evidence that the code in
+the repository was broken even though the development machine was not
+reporting it.
+
+**Fix.** The `Describe "Expand-ZipFileSafe"` `BeforeAll` now loads both
+assemblies explicitly before `New-TestZip` is defined:
+```powershell
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+```
+Both calls are idempotent -- if the assembly is already loaded, `Add-Type`
+does nothing and returns silently. The Describe is now self-contained
+regardless of how the surrounding session arrived at that point.
+
+**Rule.** A change is not considered complete until: (1) local quality gates
+pass, (2) the CI pipeline passes on the committed code, and (3) any
+independent review findings are resolved. Local success is a necessary
+condition, not a sufficient one. The CI runner is the canonical quality gate
+because it starts from a known-clean state; local sessions accumulate
+in-process state that can mask environmental dependencies.
+
+When writing test helpers that use .NET types, load the assembly that
+contains the type explicitly in the same `BeforeAll` that defines the helper
+-- do not rely on the production script's own `Add-Type` (top-level script
+code, never captured by AST extraction) or on prior session activity. Two
+assemblies that appear together in a framework bundle can still have separate
+names: confirm the assembly name matches the namespace prefix of the type
+you are actually using.
+
+---
+
 ## v0.99.33 (issues #41 / #43 / #46 / #47): Capability gating and schema drift
 
 **What happened.** The FFB Blaster setup flow used `Test-FFBBlasterUpToDate` to
