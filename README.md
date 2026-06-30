@@ -815,10 +815,6 @@ The database password is saved encrypted in `config.json`. If you changed it ext
 **"LaunchBox is currently open" error.**
 The direct LaunchBox integration refuses to write while LaunchBox or BigBox is running. Close both, then re-run.
 
-**Known issues being investigated** (not yet confirmed bugs — tracked on GitHub so you can follow progress or add your own findings):
-- [Control propagation may not be setting Input API for some games](https://github.com/Jumpstile/teknoparrot-manager/issues/1) — fighting/shooter-family propagation may not be setting `MergedInput` the way trackball-family propagation does. Possibly expected behavior (not every game's Input API dropdown lists that option), still being confirmed.
-- [FFB Blaster field not found despite a paid membership](https://github.com/Jumpstile/teknoparrot-manager/issues/2) — the field-discovery scan found nothing on at least one real install; root cause not yet confirmed (could be expected if that field isn't shipped locally, or a detection gap).
-
 ---
 
 ## What It Does Not Do
@@ -863,4 +859,4 @@ Pull requests are welcome too. Full source and version history: [github.com/Jump
 
 ---
 
-> v0.99.36 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v0.99.37 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.

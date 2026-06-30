@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.99.36 BETA
+  TeknoParrot Manager  |  v0.99.37 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -2168,19 +2168,6 @@
     export can add games. Open HyperSpin 2, add TeknoParrot as an emulator
     (the title must contain "TeknoParrot" -- variations like "Tekno Parrot"
     are fine), then re-run the export.
-
-  Known issues being investigated (not yet confirmed bugs -- tracked on
-  GitHub so you can follow progress or add your own findings):
-    - Control propagation may not be setting Input API for some games --
-      https://github.com/Jumpstile/teknoparrot-manager/issues/1
-      Fighting/shooter-family propagation may not be setting MergedInput
-      the way trackball-family propagation does. Possibly expected (not
-      every game's Input API dropdown lists that option) -- still being
-      confirmed.
-    - FFB Blaster field not found despite a paid membership --
-      https://github.com/Jumpstile/teknoparrot-manager/issues/2
-      The field-discovery scan found nothing on at least one real install.
-      Root cause not yet confirmed.
 
   HyperSpin 2 export fails with "Could not find a TeknoParrot game list".
     This can happen if the TeknoParrot emulator entry in HyperSpin 2's

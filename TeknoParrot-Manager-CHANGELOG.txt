@@ -7,6 +7,20 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.37 BETA  (2026-06-30)
+  ------------------------------------------------------------
+  Bug fix: Pester suite now explicitly loads System.IO.Compression.FileSystem
+  before the Expand-ZipFileSafe tests run. The production script does this at
+  startup (top-level code, not captured by AST extraction), causing the
+  Expand-ZipFileSafe tests to fail in any fresh PowerShell session that has
+  not already loaded the assembly -- including the CI runner.
+
+  Docs: removed stale "Known issues being investigated" entry for issues #1
+  and #2 from README.md and TeknoParrot-Manager-README.txt. Both issues are
+  closed; #1 resolved via the canonicalArchetype override (v0.99.17), #2
+  confirmed expected behavior.
+
+-------------------------------------------------------------------------------
   v0.99.36 BETA  (2026-06-30)
   ------------------------------------------------------------
   GitHub Actions CI pipeline added (.github\workflows\ci.yml). Every push

@@ -61,6 +61,14 @@ BeforeAll {
     )
     $script:RequiredGameProfileTopLevel = @('EmulationProfile','ConfigValues')
     $script:KnownFieldTypes = @('Bool','Dropdown','Text','Slider')
+
+    # The production script loads System.IO.Compression.FileSystem at startup
+    # (top-level code, line ~82 -- not in a function body, so AST extraction
+    # above never captures it). Expand-ZipFileSafe and the New-TestZip helper
+    # below both use ZipArchive / ZipFile types from this assembly. Without
+    # this load, the Expand-ZipFileSafe tests fail in any fresh PS session
+    # (including the CI runner) that hasn't already loaded the assembly.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
 }
 
 Describe "Test-PathInside" {
