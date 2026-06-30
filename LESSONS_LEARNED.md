@@ -132,6 +132,12 @@ Every test session must mirror all relevant script-scope constants in `BeforeAll
 `$script:FFBBlasterUnsupportedPlatforms`, etc.). When a new constant is added to
 the production script, add the matching mirror to `BeforeAll` in the same commit.
 
+**Extension (v0.99.19).** A constant reading as `$null` causes numeric comparisons
+to silently pass rather than fail -- PowerShell coerces `$null` to `0` in numeric
+context, so every "greater than threshold" check becomes trivially true. When a test
+suite produces suspiciously easy "all pass" results for threshold logic, check
+whether the threshold constants are actually loaded in test scope.
+
 ---
 
 ## v0.99: PostgreSQL 8.3 silent-install recipe for Incredible Technologies games
@@ -181,3 +187,108 @@ LaunchCondition/Property tables directly rather than guessing property
 names from documentation, verify the real installed service/display name
 empirically rather than assuming it matches the product name, and always
 clean up verbose logs that may contain plaintext secrets.
+
+---
+
+## v0.99.6: Split-Path -LiteralPath -Parent throws in PS 5.1
+
+**What happened.** `Split-Path -LiteralPath $x -Parent` throws "Parameter set
+cannot be resolved" in PowerShell 5.1. The `-Parent` switch only exists in the
+parameter set keyed on `-Path`, not `-LiteralPath`. This is a real PS 5.1
+limitation that does not apply to newer PS versions.
+
+**Fix.** Use `[System.IO.Path]::GetDirectoryName()` instead. This is consistent
+with how the rest of the script already avoids provider-cmdlet path quirks.
+
+**Rule.** When combining `-LiteralPath` with any of `-Parent`/`-Leaf`/`-Extension`,
+check the cmdlet's actual parameter sets first -- not all switches are available
+with all path parameter variants.
+
+---
+
+## v0.99.18: Lookup table backfill keyed on the wrong string format (issue #13)
+
+**What happened.** The v0.99.15 fix added a `$RawThrillsPathLimits` backfill to
+`Get-StagingFolderMap`, keyed by bare profile code (e.g. `"Cars"`,
+`"AliensArmageddon"`). Every caller looks the map up by the ZIP's full base name
+(e.g. `"Cars (1.42)(2013-08-28)[Raw Thrills PC][TP]"`). These are completely
+different strings. The backfill was never queried by anything -- it silently did
+nothing for the real-world case where ZIP filenames include version and date suffixes.
+The v0.99.16 follow-up fixed a separate call site but the same root cause: 18 games
+in rgecko's collection (the exact size of `$RawThrillsPathLimits`) still showed as
+"available to extract" on v0.99.16 despite all 18 being already registered and bound.
+
+**Fix.** `Resolve-RegisteredGameFolder` resolves a ZIP to its real folder via the
+collection dat: dat maps the ZIP's normalised name -> `ProfileCode` ->
+`UserProfiles\<Code>.xml` -> `GamePath` -> containing folder. Independent of folder
+name -- correct as long as the game is already registered.
+
+**Rule.** When adding a lookup table backfill, confirm the EXACT key format callers
+use to query it. A backfill keyed on one string format and queried on another is a
+silent no-op, not an error. When a supposed fix has no measurable effect on the
+reported symptom, re-read the lookup path end-to-end rather than adding another
+layer on top of the broken one.
+
+---
+
+## v0.99.20: Write to disk did not update the in-memory cache (issue #1)
+
+**What happened.** `Invoke-ControlPropagation` corrected an archetype's Input API
+and wrote it to disk via `Save-XmlMaybe`, but never updated that profile's entry in
+the in-memory `$pool` array (built once at function start via `Build-ArchetypePool`).
+Every later non-archetype target in the same loop that resolved `$best` to that
+archetype read `$best.InputApi` from the stale snapshot. The disk was correct; the
+cache was not. Confirmed from tester log timestamps: the canonical correction and the
+downstream propagations using the old value landed in the same second of the same run.
+
+**Fix.** One line -- `$selfEntry.InputApi = $canon.InputApi` -- immediately after the
+canonical correction's `Save-XmlMaybe` succeeds. `$selfEntry` is the same object
+instance held in `$pool` (PowerShell pscustomobjects are reference types), so the
+update is visible to every later iteration without restructuring anything.
+
+**Rule.** Whenever a write to disk updates a value that is also cached in a data
+structure built before the write, update the in-memory copy immediately after the
+write succeeds. The disk and the in-process cache must agree for the remainder of the
+same function call.
+
+---
+
+## General: `return @()` unwraps to `$null`; use `return ,@()` when empty vs. null must differ
+
+**What happened (twice).** A function returning `@()` (an empty array) to a caller
+that assigned the result to a plain variable received `$null` instead of an empty
+array. PowerShell's pipeline unwraps a single-element or empty collection on
+assignment. Two separate bugs were traced to this root cause: in both cases,
+downstream code that checked `if ($result -eq $null)` took the wrong branch because
+a real "found nothing" empty result was indistinguishable from a genuine null/error.
+
+**Fix.** `return ,@()` wraps the empty array in a single-element outer array so
+the pipeline delivers it intact as an array. The comma operator is the only guard;
+there is no other PS 5.1 mechanism that reliably preserves an empty-array return
+through a pipeline assignment.
+
+**Rule.** Whenever a function must distinguish "found nothing (empty result)" from
+"did not run / errored ($null)", use `return ,@()` for the empty case. A bare
+`return @()` is only safe when the caller always treats `$null` and `@()` identically.
+
+---
+
+## v0.99.28: Doc-sweep grep must include the production script itself
+
+**What happened.** Two stale mode-number references inside the script's own
+`Write-Host` prompt strings were never caught by the doc-sweep grep, because that
+sweep only targeted `*.md` and `*.txt` files, not `TeknoParrot-Manager.ps1` itself.
+The ReShade DLL-not-found prompt said "choose option 5 from the menu" (should be 4)
+and the dgVoodoo2 DLL-not-found prompt said "choose option 6" (should be 5) -- the
+same off-by-one pattern as the README/QuickStart bug fixed in v0.99.25, but in a
+source no one was grepping.
+
+**Fix.** The mode-number grep in `RELEASE-SAFETY-CHECKLIST.md` now explicitly
+includes `TeknoParrot-Manager.ps1`:
+```powershell
+Select-String -Path "*.md","*.txt","TeknoParrot-Manager.ps1" -Pattern 'mode\s+\d+|option\s+\d+' -CaseSensitive:$false
+```
+
+**Rule.** After any menu reorder, grep the production script's own embedded strings
+with the same pattern used for the external docs. Prompt text in `Write-Host` calls
+can contain stale mode numbers just as easily as any .txt or .md file.

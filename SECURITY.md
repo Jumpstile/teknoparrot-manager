@@ -32,7 +32,19 @@ in a v0.91 security sweep: `Invoke-FFBPluginSetup`'s `destDll` (from
 `AutoSetup.cmd`), and the BepInEx release `FileName` / Eggman dat release
 `FileName` (both from GitHub Releases API responses). None were exploited,
 but a crafted upstream response could otherwise have written outside the
-intended folder. See `LESSONS_LEARNED.md` for the full post-mortems.
+intended folder. See LESSONS_LEARNED.md for the full post-mortems.
+
+## Rule: XML reads must disable the XmlResolver (XXE prevention)
+
+All XML reads use a helper (`Read-Xml`) that sets `XmlDocument.XmlResolver = $null`
+before any load. Without this, a crafted GameProfile XML could trigger an XML
+External Entity (XXE) expansion -- loading a file URI or UNC path chosen by the
+document author. Every call site that parses untrusted XML must go through this
+helper, never a raw `[xml]` cast or `XmlDocument.Load()` directly.
+
+XML writes use `Save-Xml`/`Save-XmlMaybe` (atomic `.tmp` + `File.Replace`), not a
+direct `XmlDocument.Save()` to the live path. The atomic pattern prevents a partial
+write from leaving a corrupt file if the process is interrupted mid-save.
 
 ## Rule: long-path UNC prefixes must use the UNC form
 
@@ -45,7 +57,7 @@ v0.91.
 
 ## Required sweep before every commit/build
 
-See `RELEASE-SAFETY-CHECKLIST.md` section 1 for the full pre-commit gate
+See RELEASE-SAFETY-CHECKLIST.md section 1 for the full pre-commit gate
 sequence (ASCII/parse check, PSScriptAnalyzer, InjectionHunter, Pester).
 InjectionHunter findings in particular must be traced to confirm whether
 the flagged input is actually attacker-controlled before being dismissed

@@ -118,7 +118,8 @@ writes profiles, verify the following properties are still intact.
     reshade.me), `dgVoodoo2\` (user provides), `FFBPlugin\` and
     `BepInExCache\` (auto-downloaded live from GitHub each run, never
     bundled), `README.md`, `QUICKSTART.md`, `SECURITY.md`,
-    `LESSONS_LEARNED.md`, `*.zip`, `*.log`, `*.config.json`.
+    `LESSONS_LEARNED.md`, `ARCHITECTURE.md`, `RELEASE-SAFETY-CHECKLIST.md`,
+    `CLAUDE.md`, `*.zip`, `*.log`, `*.config.json`.
 - [ ] Validate the local ZIP structure before creating a release:
   ```powershell
   .\Tests\Test-ReleasePackage.ps1 -ZipPath "TeknoParrot Manager vX.YY BETA.zip"
@@ -157,4 +158,4 @@ writes profiles, verify the following properties are still intact.
 
 ---
 
-_For the engineering rationale behind each item, see SECURITY.md and LESSONS_LEARNED.md._
+_For the engineering rationale behind each item, see SECURITY.md, LESSONS_LEARNED.md, and ARCHITECTURE.md._
