@@ -7,14 +7,18 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.38 BETA  (2026-06-30)
+  ------------------------------------------------------------
+  Bug fix: CI Pester failures in Expand-ZipFileSafe tests on a fresh Windows
+  PowerShell session. New-TestZip uses [System.IO.Compression.ZipArchive],
+  which lives in System.IO.Compression.dll -- a separate assembly from
+  System.IO.Compression.FileSystem.dll. The Describe "Expand-ZipFileSafe"
+  BeforeAll now explicitly loads both assemblies before New-TestZip is
+  defined, making the tests self-contained regardless of session state.
+
+-------------------------------------------------------------------------------
   v0.99.37 BETA  (2026-06-30)
   ------------------------------------------------------------
-  Bug fix: Pester suite now explicitly loads System.IO.Compression.FileSystem
-  before the Expand-ZipFileSafe tests run. The production script does this at
-  startup (top-level code, not captured by AST extraction), causing the
-  Expand-ZipFileSafe tests to fail in any fresh PowerShell session that has
-  not already loaded the assembly -- including the CI runner.
-
   Docs: removed stale "Known issues being investigated" entry for issues #1
   and #2 from README.md and TeknoParrot-Manager-README.txt. Both issues are
   closed; #1 resolved via the canonicalArchetype override (v0.99.17), #2

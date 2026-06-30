@@ -64,10 +64,10 @@ BeforeAll {
 
     # The production script loads System.IO.Compression.FileSystem at startup
     # (top-level code, line ~82 -- not in a function body, so AST extraction
-    # above never captures it). Expand-ZipFileSafe and the New-TestZip helper
-    # below both use ZipArchive / ZipFile types from this assembly. Without
-    # this load, the Expand-ZipFileSafe tests fail in any fresh PS session
-    # (including the CI runner) that hasn't already loaded the assembly.
+    # above never captures it). Expand-ZipFileSafe uses ZipFile (from
+    # System.IO.Compression.FileSystem.dll). New-TestZip uses ZipArchive (from
+    # System.IO.Compression.dll -- a separate assembly). Both are loaded in
+    # the Describe "Expand-ZipFileSafe" BeforeAll below.
     Add-Type -AssemblyName System.IO.Compression.FileSystem
 }
 
@@ -561,6 +561,13 @@ Describe "Get-DiceSimilarity" {
 
 Describe "Expand-ZipFileSafe" {
     BeforeAll {
+        # ZipArchive is in System.IO.Compression.dll; ZipFile is in the separate
+        # System.IO.Compression.FileSystem.dll. Load both explicitly because the
+        # production script's Add-Type (top-level, not in a function body) is
+        # never captured by the AST extraction above.
+        Add-Type -AssemblyName System.IO.Compression
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+
         function New-TestZip([string]$zipPath, [hashtable]$entries) {
             if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
             $fs = [System.IO.File]::Open($zipPath, [System.IO.FileMode]::CreateNew)
