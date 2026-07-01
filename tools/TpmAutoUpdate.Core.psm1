@@ -150,6 +150,28 @@ function Select-TpmUpdateAsset {
     return $asset
 }
 
+function Assert-TpmWritableTarget {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    # Move-Item -Force (and Copy-Item -Force) silently clear the ReadOnly
+    # attribute and replace the file anyway rather than failing (verified
+    # empirically during destructive-path testing). A read-only target is
+    # never overridden here -- the update is refused with an actionable
+    # message so the user can decide whether to unlock it.
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return
+    }
+
+    $item = Get-Item -LiteralPath $Path -Force
+    if ($item.IsReadOnly) {
+        throw "Refusing to update: '$Path' is marked read-only. Remove the read-only attribute (e.g. Set-ItemProperty -LiteralPath '$Path' -Name IsReadOnly -Value `$false) and re-run the update; this updater will not silently clear it."
+    }
+}
+
 function New-TpmUpdateBackup {
     [CmdletBinding()]
     param(
@@ -288,6 +310,7 @@ Export-ModuleMember -Function @(
     'Invoke-GitHubJsonRequest',
     'Get-LatestRelease',
     'Select-TpmUpdateAsset',
+    'Assert-TpmWritableTarget',
     'New-TpmUpdateBackup',
     'Save-TpmReleaseAsset',
     'Expand-TpmReleaseZipEntry',

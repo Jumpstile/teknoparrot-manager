@@ -68,6 +68,8 @@ if ($Apply) {
         return
     }
 
+    Assert-TpmWritableTarget -Path $ScriptPath
+
     $downloadedZipPath = $null
     $extractedScriptPath = $null
     try {

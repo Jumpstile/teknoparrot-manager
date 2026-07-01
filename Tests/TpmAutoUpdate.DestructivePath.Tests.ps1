@@ -293,18 +293,15 @@ Describe '4. Download interrupted / partial file' {
 }
 
 Describe '5. Read-only destination' {
-    It 'DOCUMENTED FINDING: Move-Item -Force silently clears the ReadOnly attribute and replaces the file anyway' {
-        # Empirically verified in isolation (not just this test): PowerShell's
-        # Move-Item -Force clears the destination's ReadOnly attribute before
-        # replacing it, rather than failing. So marking TeknoParrot-Manager.ps1
-        # read-only provides no actual protection against this updater -- the
-        # update still succeeds. This test documents that real, current
-        # behavior; it is not asserting it is desirable. See the destructive
-        # path validation report for the recommendation (fail closed on a
-        # read-only target instead of silently clearing the attribute).
+    It 'refuses the update with a clear error instead of letting Move-Item -Force clear ReadOnly' {
+        # Assert-TpmWritableTarget checks the target explicitly before any
+        # backup/download work happens, rather than relying on Move-Item
+        # -Force -- which was previously found (empirically) to silently
+        # clear the ReadOnly attribute and replace the file anyway.
         $root = New-DestructiveTestRoot
         try {
             $scriptPath = New-OldScript -Root $root
+            $originalContent = Get-Content -LiteralPath $scriptPath -Raw
             $validBytes = New-ValidFixtureZipBytes
 
             Set-ItemProperty -LiteralPath $scriptPath -Name IsReadOnly -Value $true
@@ -314,17 +311,21 @@ Describe '5. Read-only destination' {
                     [System.IO.File]::WriteAllBytes($OutFile, $validBytes)
                 }.GetNewClosure()
 
-                $result.Error | Should -BeNullOrEmpty
-                (Get-Content -LiteralPath $scriptPath -Raw) | Should -Match 'ScriptVersion = "0\.99\.99"'
+                $result.Error | Should -BeOfType ([System.Management.Automation.ErrorRecord])
+                $result.Error.Exception.Message | Should -Match 'read-only'
+                $result.Error.Exception.Message | Should -Match ([regex]::Escape($scriptPath))
+
+                (Get-Content -LiteralPath $scriptPath -Raw) | Should -Be $originalContent
             } finally {
                 Set-ItemProperty -LiteralPath $scriptPath -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
             }
 
-            $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'UpdateBackups') -Recurse -Filter 'TeknoParrot-Manager.ps1' -ErrorAction SilentlyContinue)
-            $backupFiles.Count | Should -Be 1
+            # The check happens before backup/download, so neither should
+            # have been attempted at all.
+            Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeFalse
+            Assert-MockCalled -ModuleName TpmAutoUpdate.Core Invoke-WebRequest -Times 0
 
-            # Even though this path succeeds, temp artifacts must still be
-            # cleaned up like any successful run.
+            @(Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter 'tpm-update-*.zip' -ErrorAction SilentlyContinue).Count | Should -Be 0
             @(Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter 'tpm-update-extracted-*.ps1' -ErrorAction SilentlyContinue).Count | Should -Be 0
         } finally {
             Set-ItemProperty -LiteralPath $scriptPath -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue

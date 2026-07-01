@@ -155,6 +155,35 @@ Describe 'Select-TpmUpdateAsset' {
     }
 }
 
+Describe 'Assert-TpmWritableTarget' {
+    It 'throws a clear, actionable error when the target is read-only' {
+        $path = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-ro-" + [guid]::NewGuid().ToString('N') + '.ps1')
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.99.38"' -Encoding ascii
+        Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $true
+        try {
+            { Assert-TpmWritableTarget -Path $path } | Should -Throw '*read-only*'
+            { Assert-TpmWritableTarget -Path $path } | Should -Throw "*$path*"
+        } finally {
+            Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'does not throw when the target is writable' {
+        $path = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-rw-" + [guid]::NewGuid().ToString('N') + '.ps1')
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.99.38"' -Encoding ascii
+        try {
+            { Assert-TpmWritableTarget -Path $path } | Should -Not -Throw
+        } finally {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'does not throw when the target does not exist yet' {
+        { Assert-TpmWritableTarget -Path (Join-Path ([System.IO.Path]::GetTempPath()) 'does-not-exist.ps1') } | Should -Not -Throw
+    }
+}
+
 Describe 'New-TpmUpdateBackup' {
     It 'creates a timestamped backup of the target file' {
         $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-backup-" + [guid]::NewGuid().ToString('N'))
