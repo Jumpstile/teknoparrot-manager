@@ -27,6 +27,9 @@ TeknoParrot-Manager-crosshairs.json
 # LaunchBox backup folder -- user data, written at runtime, never tracked
 LaunchBoxBackups/
 
+# Check for Updates backup folder -- written at runtime, never tracked
+UpdateBackups/
+
 # Local HTML crosshair preview -- generated artifact, not a repo doc
 TeknoParrot-Crosshairs-Preview.html
 

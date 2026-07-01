@@ -241,6 +241,12 @@ If none of your registered games need Postgres, mode 11 says so and exits immedi
 
 ---
 
+## Check for Updates
+
+Mode 12 manually checks the latest GitHub release against the version you're running — nothing is downloaded or changed without your explicit Y/N confirmation. If an update exists, it backs up the current script, downloads and validates the update, replaces the script, then exits so you can restart cleanly. A read-only script is refused with a clear error rather than silently overridden, and any failure tells you exactly what went wrong and whether a backup was made.
+
+---
+
 ## LaunchBox Integration
 
 At the end of most runs:

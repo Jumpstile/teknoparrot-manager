@@ -33,6 +33,12 @@
         # families. Reviewed; none are dead paths in current code.
         'PSReviewUnusedParameter',
 
+        # Interactive script internals use short positional helper calls heavily
+        # (Save-XmlMaybe, Resolve-RegisteredGameFolder, Set-XmlChildText, etc.).
+        # This is a style rule, not a release safety rule, and mass-renaming those
+        # call sites during feature freeze would create unnecessary churn.
+        'PSAvoidUsingPositionalParameters',
+
         # Write-Log is an internal helper. PSScriptAnalyzer flags it as overwriting a
         # PowerShell Core (6+) built-in, but this script targets Windows PowerShell 5.1
         # where no Write-Log cmdlet exists. False positive for the target runtime.

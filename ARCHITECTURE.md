@@ -643,6 +643,67 @@ Y/N confirmations and "press Enter to continue" prompts untouched).
 
 ---
 
+## Check for Updates (Mode 12, v0.99.39)
+
+Feature-freeze exception, explicitly requested by the user as the planned follow-up to the
+standalone `tools/Invoke-TpmAutoUpdate.ps1` helper (PR #51, merged) -- see
+`docs/AUTO_UPDATE.md` for the full design and safety model shared by both.
+
+The interactive checker is implemented as plain functions inside `TeknoParrot-Manager.ps1`
+itself (`Get-ManagerUpdateRelease`, `Assert-ManagerUpdateTargetWritable`,
+`New-ManagerUpdateBackup`, `Expand-ManagerUpdateAsset`, `Test-ManagerUpdateExtractedScript`,
+`ConvertTo-ManagerComparableVersion`, `Invoke-CheckForUpdates`) rather than by importing
+`tools/TpmAutoUpdate.Core.psm1` -- this script has no external module dependency anywhere
+else, and this feature deliberately keeps that single-file, self-contained architecture. The
+tradeoff is duplicated logic between the two; both are kept in lockstep deliberately (same
+asset name pattern, same content-validation checks, same read-only pre-check) rather than
+introducing a shared dependency.
+
+Key invariants, each verified empirically while building the standalone tool this mirrors:
+
+- **Never trust `Move-Item -Force` to protect a read-only target.** It silently clears the
+  `ReadOnly` attribute and replaces the file anyway. `Assert-ManagerUpdateTargetWritable`
+  checks explicitly, before any backup or download work begins, and refuses with an
+  actionable error instead.
+- **Never install unvalidated content.** `Test-ManagerUpdateExtractedScript` rejects an
+  empty file, a file that is itself raw zip bytes (`PK` signature -- would happen if
+  extraction were ever skipped or broken upstream), a file missing the `TeknoParrot
+  Manager` marker, or one missing a `$ScriptVersion` assignment, before it ever replaces
+  the live script.
+- **`Invoke-CheckForUpdates` never calls `exit`.** It returns `$true` only when a new
+  script was actually installed; the menu dispatch block (untestable inline code, same as
+  every other mode) is the only place that decides whether to `exit` (successful update --
+  the in-memory code is now stale and must not keep running) or `continue` back to the
+  menu (every other outcome: already current, declined, read-only, or failed). Putting
+  `exit` inside the function would also kill the Pester test process that calls it.
+- **URL validation is `System.Uri`-parsed, not `-like`/regex prefix matching** -- rejects
+  userinfo tricks (`https://github.com@evil.example.com/...`) and lookalike hosts
+  (`https://github.com.evil.example.com/...`) that a naive prefix check would miss.
+- Backups go to `UpdateBackups\TeknoParrotManager_<timestamp>\`, matching this script's own
+  `<Type>_<timestamp>` naming convention (see `GpuFix_`, `CursorHide_`, `FFBBlaster_`
+  backups) rather than the standalone tool's `UpdateBackups\<timestamp>\` layout.
+- `New-ManagerUpdateBackup` derives its backup root from `Split-Path -Parent $Path`, not
+  `$PSScriptRoot`. `$PSScriptRoot` is an automatic variable PowerShell resets per function
+  invocation (based on the function's own defining file/scriptblock), not an ordinary
+  dynamically-scoped one -- a caller cannot override it by setting a same-named variable in
+  its own scope. Found while writing the Pester tests for this function.
+
+Startup update check (v0.99.39, same commit): `Invoke-StartupUpdateCheck`, wired in near the
+top of the config-loading section (SECTION 1), gated on a new `CheckForUpdatesOnStartup`
+config.json setting (default `true`) and never run under `-Unattended`. Shares
+`Get-ManagerUpdateRelease`/`ConvertTo-ManagerComparableVersion`/`Invoke-ManagerUpdateInstall`
+with the menu option -- the only new shared extraction was pulling the actual
+backup/download/extract/validate/replace steps out of `Invoke-CheckForUpdates` into
+`Invoke-ManagerUpdateInstall` so neither caller duplicates them or their confirmation
+prompts (which differ: numbered "what will happen" list for the menu vs. a Y/N/V prompt
+with a one-line release summary for the quiet startup notice). `Get-ManagerUpdateRelease`
+gained `-MaxAttempts`/`-TimeoutSec` parameters so the startup path can use a single
+short-timeout attempt (no retries) instead of the menu option's patient 3x/20s retry --
+required so an unreachable GitHub cannot meaningfully delay every future launch of the
+script for a check nobody explicitly asked for this time.
+
+---
+
 ## Versioning
 
 - Whole-number bumps: feature releases (v0.94, v0.95, ..., v0.99).

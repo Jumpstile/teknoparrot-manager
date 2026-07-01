@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.99.38 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.99.40 BETA  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -107,7 +107,10 @@
        10) Health check    -- read-only library status, safe to run any time.
        11) Postgres setup  -- install/configure PostgreSQL for games that
                              need it (Golden Tee Live, Power Putt Live, etc).
-       12) Exit            -- quit the script.
+       12) Check updates   -- manually check the latest GitHub release.
+                             Nothing is downloaded or changed without your
+                             explicit Y/N confirmation.
+       13) Exit            -- quit the script.
 
   4. Answer the folder prompts. For AutoSync, choose a LOCAL staging folder
      with free space, OUTSIDE both TeknoParrot and your ZIP source.
