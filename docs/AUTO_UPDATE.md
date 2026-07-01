@@ -1,10 +1,31 @@
 # Auto-Update System
 
-Status: pre-1.0 implementation branch
+Status: blocked pending review fixes
 
 TeknoParrot Manager uses a **manual, backup-first auto-update model**.
 
 The updater must never silently replace files. It checks GitHub Releases, explains what it found, creates a local backup, downloads the selected release asset, validates the downloaded file, and only then replaces the local script.
+
+## Current review status
+
+Independent Claude and Codex reviews found real blockers. Do not merge this branch or wire the updater into the menu until these are fixed and retested.
+
+Required fixes:
+
+1. **Release packaging mismatch**
+   - Current real releases use assets such as `TeknoParrot.Manager.v0.99.38.BETA.zip`.
+   - The first helper expected a bare `TeknoParrot-Manager.ps1` asset.
+   - The helper must either require a real `.ps1` release asset or become zip-aware.
+
+2. **Content validation before replacement**
+   - The updater must never move raw zip bytes over `TeknoParrot-Manager.ps1`.
+   - If using zip assets, it must extract `TeknoParrot-Manager.ps1`, validate that it is a script, validate that it contains the expected `$ScriptVersion` assignment, and only then replace the target.
+
+3. **PowerShell 5.1 TLS hardening**
+   - Add TLS 1.2 before GitHub API/download calls, matching the main script's compatibility pattern.
+
+4. **Testability**
+   - Pure helper logic should be split into a no-side-effect module before adding Pester tests, or the entry script must provide a safe way to load functions without making network calls.
 
 ## Safety rules
 
@@ -22,11 +43,12 @@ The updater must never silently replace files. It checks GitHub Releases, explai
    - Update assets must come from GitHub release asset URLs.
    - Arbitrary URLs are never accepted.
 
-4. **Atomic-ish local replacement**
-   - The new file is downloaded to a temporary path first.
+4. **Validated local replacement**
+   - The asset is downloaded to a temporary path first.
    - The downloaded file must exist and have non-zero length.
+   - If the asset is a zip, the updater must extract and validate `TeknoParrot-Manager.ps1` before replacement.
    - The current script is copied to backup before replacement.
-   - Replacement uses `Move-Item -Force` only after the backup and download both succeed.
+   - Replacement happens only after the backup, download, extraction, and content validation all succeed.
 
 5. **Version-aware**
    - Local version is read from the script's `$ScriptVersion` value.
@@ -51,11 +73,7 @@ This keeps the first cut reviewable before wiring it into the main menu.
 
 ## Pre-1.0 integration target
 
-Before 1.0, wire this helper into the main menu as:
-
-```text
-Check for TeknoParrot Manager update
-```
+Before 1.0, wire this helper into the main menu only after Claude/Codex re-review confirms the blockers are resolved.
 
 Expected flow:
 
@@ -66,8 +84,9 @@ Expected flow:
 5. Ask for explicit confirmation.
 6. Backup current script.
 7. Download replacement.
-8. Replace script.
-9. Tell the user to restart TeknoParrot Manager.
+8. Validate replacement content.
+9. Replace script.
+10. Tell the user to restart TeknoParrot Manager.
 
 ## Non-goals for 1.0
 
