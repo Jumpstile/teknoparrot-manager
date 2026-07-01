@@ -1607,6 +1607,19 @@
     See docs/AUTO_UPDATE.md (in the source repository) for the full
     design of this standalone helper.
 
+  Automatic check at startup
+
+    The script also quietly checks for updates once, right when it
+    launches (CheckForUpdatesOnStartup in
+    TeknoParrot-Manager.config.json, default true). If you're current,
+    nothing is shown. If a newer version exists, you'll see the version
+    and a brief release summary, then a choice: Y to update now (same
+    backup-first process as mode 12), N to continue to the menu and be
+    asked again next time, or V to read the full release notes first.
+    Set CheckForUpdatesOnStartup to false in the config file to disable
+    this and only check manually via mode 12. Never runs in -Unattended
+    mode.
+
 
   RETROBAT / BATOCERA
   -------------------

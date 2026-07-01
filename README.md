@@ -491,6 +491,8 @@ Mode 12 manually checks the latest TeknoParrot Manager release on GitHub against
 
 You can also run the update check outside the menu via `tools\Invoke-TpmAutoUpdate.ps1 -CheckOnly` (or `-Apply`) — see `docs/AUTO_UPDATE.md` for that standalone helper.
 
+**Automatic check at startup:** the script also quietly checks for updates once, right when it launches (`CheckForUpdatesOnStartup` in `TeknoParrot-Manager.config.json`, default `true`). If you're current, nothing is shown. If a newer version exists, you'll see the version and a brief release summary, then a choice: **Y** to update now (same backup-first process as mode 12), **N** to continue to the menu and be asked again next time, or **V** to read the full release notes first. Set `CheckForUpdatesOnStartup` to `false` in the config file to disable this and only check manually via mode 12. Never runs in `-Unattended` mode.
+
 ---
 
 ## LaunchBox Integration

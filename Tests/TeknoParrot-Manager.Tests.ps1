@@ -1495,3 +1495,163 @@ Describe "Invoke-CheckForUpdates" {
         }
     }
 }
+
+Describe "Get-ManagerUpdateReleaseSummary" {
+    It "returns the first non-blank line, trimmed of heading/bullet markdown" {
+        Get-ManagerUpdateReleaseSummary -Body "## What's new`n`nFixes a startup crash." | Should -Be "What's new"
+    }
+    It "strips a leading bullet marker" {
+        Get-ManagerUpdateReleaseSummary -Body "- Fixes a startup crash." | Should -Be "Fixes a startup crash."
+    }
+    It "truncates a long first line to 150 chars plus an ellipsis" {
+        $long = "X" * 200
+        $summary = Get-ManagerUpdateReleaseSummary -Body $long
+        $summary.Length | Should -Be 153
+        $summary | Should -Match '\.\.\.$'
+    }
+    It "returns null for an empty or whitespace-only body" {
+        Get-ManagerUpdateReleaseSummary -Body "" | Should -BeNullOrEmpty
+        Get-ManagerUpdateReleaseSummary -Body "   " | Should -BeNullOrEmpty
+        Get-ManagerUpdateReleaseSummary -Body $null | Should -BeNullOrEmpty
+    }
+}
+
+Describe "Get-ManagerUpdateRelease -MaxAttempts" {
+    It "makes exactly one request and does not sleep when MaxAttempts is 1" {
+        Mock Invoke-WebRequest { throw [System.Net.WebException]::new('transient') }
+        Mock Start-Sleep {}
+        Get-ManagerUpdateRelease -MaxAttempts 1 -TimeoutSec 5 | Should -BeNullOrEmpty
+        Should -Invoke Invoke-WebRequest -Times 1
+        Should -Invoke Start-Sleep -Times 0
+    }
+}
+
+Describe "Invoke-ManagerUpdateInstall" {
+    BeforeAll {
+        function New-StartupCheckFixtureZipBytes {
+            param(
+                [string]$EntryName = 'TeknoParrot-Manager.ps1',
+                [string]$EntryContent = "# TeknoParrot Manager`n`$ScriptVersion = `"0.99.99`"`n"
+            )
+            $zipPath = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-startup-fixture-" + [guid]::NewGuid().ToString('N') + '.zip')
+            $stagingDir = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-startup-staging-" + [guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
+            try {
+                Set-Content -LiteralPath (Join-Path $stagingDir $EntryName) -Value $EntryContent -Encoding ascii -NoNewline
+                [System.IO.Compression.ZipFile]::CreateFromDirectory($stagingDir, $zipPath)
+                return , ([System.IO.File]::ReadAllBytes($zipPath))
+            } finally {
+                Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction SilentlyContinue
+                Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        function New-StartupCheckRelease {
+            [pscustomobject]@{
+                TagName     = 'v0.99.99'
+                Name        = 'v0.99.99 BETA'
+                Body        = 'Test release notes.'
+                AssetName   = 'TeknoParrot.Manager.v0.99.99.BETA.zip'
+                DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.99/TeknoParrot.Manager.v0.99.99.BETA.zip'
+            }
+        }
+    }
+
+    It "installs successfully and returns true" {
+        $zipBytes = New-StartupCheckFixtureZipBytes
+        Mock Invoke-WebRequest { param($Uri, $OutFile, $UseBasicParsing) [System.IO.File]::WriteAllBytes($OutFile, $zipBytes) }.GetNewClosure()
+
+        $path = Join-Path $TestDrive 'install-target.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
+
+        Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeTrue
+        (Get-Content -LiteralPath $path -Raw) | Should -Match 'ScriptVersion = "0.99.99"'
+    }
+
+    It "returns false and leaves the original untouched when the target is read-only" {
+        $path = Join-Path $TestDrive 'readonly-install-target.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii -NoNewline
+        Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $true
+        try {
+            Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+            (Get-Content -LiteralPath $path -Raw) | Should -Be '$ScriptVersion = "0.0.1"'
+        } finally {
+            Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+Describe "Invoke-StartupUpdateCheck" {
+    It "returns false and does not prompt when already current" {
+        Mock Get-ManagerUpdateRelease { [pscustomobject]@{ TagName = "v$ScriptVersion"; Name = $null; Body = $null; AssetName = 'x'; DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.39/x' } }
+        Mock Read-Host { throw "Read-Host should not be called when already current" }
+
+        $path = Join-Path $TestDrive 'startup-current.ps1'
+        Set-Content -LiteralPath $path -Value "`$ScriptVersion = `"$ScriptVersion`"" -Encoding ascii
+
+        Invoke-StartupUpdateCheck -ScriptPath $path | Should -BeFalse
+    }
+
+    It "returns false without prompting again when the release check fails (e.g. offline)" {
+        Mock Get-ManagerUpdateRelease { $null }
+        Mock Read-Host { throw "Read-Host should not be called when the release check fails" }
+
+        $path = Join-Path $TestDrive 'startup-offline.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
+
+        Invoke-StartupUpdateCheck -ScriptPath $path | Should -BeFalse
+    }
+
+    It "returns false and makes no changes when the user chooses N (remind me later)" {
+        Mock Get-ManagerUpdateRelease {
+            [pscustomobject]@{ TagName = 'v0.99.99'; Name = 'v0.99.99'; Body = 'Notes.'; AssetName = 'x.zip'; DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.99/x.zip' }
+        }
+        Mock Read-Host { "N" }
+
+        $path = Join-Path $TestDrive 'startup-decline.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
+        $originalContent = Get-Content -LiteralPath $path -Raw
+
+        Invoke-StartupUpdateCheck -ScriptPath $path | Should -BeFalse
+        (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
+    }
+
+    It "shows release notes on V and then still lets the user decline with N" {
+        Mock Get-ManagerUpdateRelease {
+            [pscustomobject]@{ TagName = 'v0.99.99'; Name = 'v0.99.99'; Body = 'Detailed notes here.'; AssetName = 'x.zip'; DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.99/x.zip' }
+        }
+        $script:readHostCallCount = 0
+        Mock Read-Host {
+            $script:readHostCallCount++
+            if ($script:readHostCallCount -eq 1) { return "V" }
+            return "N"
+        }
+
+        $path = Join-Path $TestDrive 'startup-view-notes.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
+
+        Invoke-StartupUpdateCheck -ScriptPath $path | Should -BeFalse
+        Should -Invoke Read-Host -Times 2
+    }
+
+    It "returns false without downloading when Y is chosen but the target is read-only" {
+        Mock Get-ManagerUpdateRelease {
+            [pscustomobject]@{ TagName = 'v0.99.99'; Name = 'v0.99.99'; Body = 'Notes.'; AssetName = 'x.zip'; DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.99/x.zip' }
+        }
+        Mock Read-Host { "Y" }
+        Mock Invoke-WebRequest { throw "Invoke-WebRequest should not be called when the target is read-only" }
+
+        $root = Join-Path $TestDrive ("startup-readonly-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $path = Join-Path $root 'TeknoParrot-Manager.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
+        Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $true
+
+        try {
+            Invoke-StartupUpdateCheck -ScriptPath $path | Should -BeFalse
+            Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeFalse
+        } finally {
+            Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
+        }
+    }
+}

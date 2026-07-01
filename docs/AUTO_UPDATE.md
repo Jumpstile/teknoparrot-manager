@@ -104,6 +104,21 @@ Actual flow:
 
 Any failure at any step displays the exact error, states whether a backup was created, and returns safely to the main menu without exiting.
 
+## Startup update check (v0.99.39)
+
+In addition to the menu option, `TeknoParrot-Manager.ps1` also offers a quiet, opt-out check at launch, controlled by `CheckForUpdatesOnStartup` in `TeknoParrot-Manager.config.json` (default `true`). Implemented as `Invoke-StartupUpdateCheck`, sharing `Get-ManagerUpdateRelease`, `ConvertTo-ManagerComparableVersion`, and the same install path (`Invoke-ManagerUpdateInstall`, extracted from `Invoke-CheckForUpdates` so both callers use it without duplicating the backup/download/extract/validate/replace logic or its confirmation prompts).
+
+Flow:
+
+1. Runs once, right after config is loaded, before any TeknoParrot-root prompts. Never runs in `-Unattended` mode -- there is no way to show an interactive prompt there, and Unattended is meant to be fast and non-interactive.
+2. Queries the latest release with a single short-timeout attempt (`-MaxAttempts 1 -TimeoutSec 5`, vs. the menu option's patient 3x/20s retry) so an unreachable GitHub cannot meaningfully delay startup. A failed or timed-out check is logged and the script continues straight to the menu -- no error is shown to the user for what is, from their perspective, an unrequested background check.
+3. If already current: nothing is shown, continues directly to the menu (optionally logged).
+4. If a newer version exists: shows current/latest version, the release name if present, and a one-line summary (`Get-ManagerUpdateReleaseSummary` -- the first non-blank line of the release body, markdown heading/bullet markers stripped, clamped to 150 characters), then prompts:
+   - **Y** -- shows the same "what updating will do" explanation as the menu option, asks for a second explicit confirmation, then calls `Invoke-ManagerUpdateInstall`. A successful install still requires the caller (top-level script code, not the function) to exit -- same reasoning as the menu option: the function itself never calls `exit`, both for testability and so the "declined at the second confirmation" path can return normally.
+   - **N** (or anything else) -- continues straight to the menu; logged as "remind me later."
+   - **V** -- prints the full release body, then re-prompts (Y/N/V again) rather than exiting the loop.
+5. A read-only target is refused the same way as the menu option -- before any backup/download work, with the same actionable error.
+
 ## Non-goals for 1.0
 
 - No silent updating.

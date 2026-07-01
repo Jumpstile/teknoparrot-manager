@@ -682,6 +682,25 @@ Key invariants, each verified empirically while building the standalone tool thi
 - Backups go to `UpdateBackups\TeknoParrotManager_<timestamp>\`, matching this script's own
   `<Type>_<timestamp>` naming convention (see `GpuFix_`, `CursorHide_`, `FFBBlaster_`
   backups) rather than the standalone tool's `UpdateBackups\<timestamp>\` layout.
+- `New-ManagerUpdateBackup` derives its backup root from `Split-Path -Parent $Path`, not
+  `$PSScriptRoot`. `$PSScriptRoot` is an automatic variable PowerShell resets per function
+  invocation (based on the function's own defining file/scriptblock), not an ordinary
+  dynamically-scoped one -- a caller cannot override it by setting a same-named variable in
+  its own scope. Found while writing the Pester tests for this function.
+
+Startup update check (v0.99.39, same commit): `Invoke-StartupUpdateCheck`, wired in near the
+top of the config-loading section (SECTION 1), gated on a new `CheckForUpdatesOnStartup`
+config.json setting (default `true`) and never run under `-Unattended`. Shares
+`Get-ManagerUpdateRelease`/`ConvertTo-ManagerComparableVersion`/`Invoke-ManagerUpdateInstall`
+with the menu option -- the only new shared extraction was pulling the actual
+backup/download/extract/validate/replace steps out of `Invoke-CheckForUpdates` into
+`Invoke-ManagerUpdateInstall` so neither caller duplicates them or their confirmation
+prompts (which differ: numbered "what will happen" list for the menu vs. a Y/N/V prompt
+with a one-line release summary for the quiet startup notice). `Get-ManagerUpdateRelease`
+gained `-MaxAttempts`/`-TimeoutSec` parameters so the startup path can use a single
+short-timeout attempt (no retries) instead of the menu option's patient 3x/20s retry --
+required so an unreachable GitHub cannot meaningfully delay every future launch of the
+script for a check nobody explicitly asked for this time.
 
 ---
 
