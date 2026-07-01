@@ -21,7 +21,13 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
-Import-Module (Join-Path $PSScriptRoot 'TpmAutoUpdate.Core.psm1') -Force
+# No -Force: this must not clobber an already-loaded instance of the module.
+# A future caller (e.g. the main menu, once this is wired in) may import the
+# module once for a long-running session; reloading it here on every
+# invocation would also defeat that caller's ability to mock or otherwise
+# control it (observed directly: an earlier version of this line broke
+# Pester's -ModuleName mocking of the destructive-path test suite).
+Import-Module (Join-Path $PSScriptRoot 'TpmAutoUpdate.Core.psm1')
 
 function Write-UpdaterInfo {
     param([string]$Message)

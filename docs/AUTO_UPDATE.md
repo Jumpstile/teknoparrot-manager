@@ -26,6 +26,20 @@ Independent Claude and Codex reviews found real blockers on the first pass. All 
    - All logic besides argument parsing and top-level orchestration now lives in `tools/TpmAutoUpdate.Core.psm1`, a side-effect-free module. `tools/Invoke-TpmAutoUpdate.ps1` is a thin orchestrator that imports it.
    - `Tests/TpmAutoUpdate.Core.Tests.ps1` covers version parsing, asset selection, URL validation (URI-parsed, not `-like`), backup creation, zip extraction, content-validation failure modes, and an `-Apply -WhatIf` case asserting zero backup/download/replacement occurs.
 
+## Destructive-path validation (`Tests/TpmAutoUpdate.DestructivePath.Tests.ps1`)
+
+Ten tests, all passing, deliberately induce failure conditions and verify the original installation survives, no raw zip bytes ever land in the `.ps1` target, backups are preserved, temp files do not leak, and errors are actionable:
+
+1. Corrupt zip download -- rejected, original and backup intact.
+2. Zip missing `TeknoParrot-Manager.ps1` -- rejected with a specific "does not contain expected entry" error.
+3. Content-validation failures -- both a missing `$ScriptVersion` and an extracted file that is itself raw zip bytes are rejected before replacement.
+4. Truncated/partial download -- treated as corrupt, rejected.
+5. Read-only destination -- **documented finding, not a defect**: `Move-Item -Force` clears the `ReadOnly` attribute and replaces the file rather than failing closed. Verified in isolation, not just in this test. Marking the script read-only is not a safety mechanism against this updater; if that protection is wanted, `Install-DownloadedUpdate` would need an explicit `ReadOnly` check before `-Force`.
+6. Backup creation failure -- aborts before any download; original untouched.
+7. Extraction failure (valid zip, corrupted entry payload) -- rejected, original and backup intact.
+8. Replacement failure after a successful backup (destination locked by another handle) -- `Move-Item` fails, original file is provably unchanged (not partially written), backup and temp cleanup both hold.
+9. Module-scope error-action regression guard -- a real bug found while writing this suite: a module's `$ErrorActionPreference` is snapshotted from the caller at *import* time, and the orchestrator intentionally imports without `-Force` (to stay mockable). An already-loaded module instance would silently keep whatever preference was active at its original import, meaning a non-terminating cmdlet error inside the module could be silently swallowed. Fixed by setting `$ErrorActionPreference = 'Stop'` explicitly at the top of `TpmAutoUpdate.Core.psm1` itself, independent of import history.
+
 ## Safety rules
 
 1. **Manual by default**

@@ -5,6 +5,20 @@
 # can import and exercise it without triggering the orchestrator's top-level
 # network calls. Importing this module has no side effects.
 
+# A module's $ErrorActionPreference is snapshotted from the caller's scope at
+# *import* time, not read live from the current caller on every call. If this
+# module is already loaded (e.g. by a test harness, or a future long-running
+# host) with a looser preference, a plain `Import-Module` (without -Force, as
+# the orchestrator intentionally uses -- see its own comment) is a no-op and
+# never re-snapshots it. Cmdlet calls in this module (Copy-Item, New-Item,
+# etc.) must fail closed on error regardless of that history, so set it
+# explicitly here rather than depending on inheritance. (Found via destructive
+# -path testing on the ChannelForge sibling module: a locked destination file
+# during a Copy-Item call silently produced a non-terminating error and
+# reported "success" until this was added there; applied here defensively for
+# the same reason, since New-TpmUpdateBackup's Copy-Item has the same shape.)
+$ErrorActionPreference = 'Stop'
+
 function Get-TpmLocalVersion {
     [CmdletBinding()]
     param(
