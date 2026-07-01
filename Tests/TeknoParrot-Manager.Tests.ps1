@@ -61,6 +61,7 @@ BeforeAll {
     )
     $script:RequiredGameProfileTopLevel = @('EmulationProfile','ConfigValues')
     $script:KnownFieldTypes = @('Bool','Dropdown','Text','Slider')
+    $script:InputConfigFields = @()
 
     # The production script loads System.IO.Compression.FileSystem at startup
     # (top-level code, line ~82 -- not in a function body, so AST extraction
@@ -1032,6 +1033,86 @@ Describe "Test-ButtonNameDirectional" {
     }
     It "classifies empty string as NOT directional" {
         Test-ButtonNameDirectional "" | Should -BeFalse
+    }
+}
+
+Describe "Invoke-ControlPropagation duplicate-key handling (issue #53)" {
+    BeforeAll {
+        function New-ControlProfileXml {
+            param(
+                [string]$Name,
+                [string]$Buttons
+            )
+
+            return @"
+<GameProfile>
+  <GameName>$Name</GameName>
+  <JoystickButtons>
+$Buttons
+  </JoystickButtons>
+  <ConfigValues />
+</GameProfile>
+"@
+        }
+
+        function New-WheelButtonXml {
+            param(
+                [string]$Name,
+                [string]$Mapping = 'P1Wheel',
+                [switch]$Bound
+            )
+
+            $binding = if ($Bound) {
+                @"
+      <RawInputButton>
+        <DevicePath>test-wheel</DevicePath>
+        <ButtonName>X+</ButtonName>
+      </RawInputButton>
+"@
+            } else {
+                ''
+            }
+
+            return @"
+    <JoystickButtons>
+      <ButtonName>$Name</ButtonName>
+      <InputMapping>$Mapping</InputMapping>
+      <AnalogType>Wheel</AnalogType>
+$binding
+    </JoystickButtons>
+"@
+        }
+    }
+
+    It "uses an archetype match key only once per target profile" {
+        $profiles = Join-Path $TestDrive 'UserProfiles'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+
+        $archetypeButtons = @(
+            New-WheelButtonXml -Name 'Wheel Right' -Bound
+            New-WheelButtonXml -Name 'Gas' -Mapping 'P1Gas' -Bound
+            New-WheelButtonXml -Name 'Brake' -Mapping 'P1Brake' -Bound
+        ) -join "`n"
+        New-ControlProfileXml -Name 'Reference Driver' -Buttons $archetypeButtons |
+            Set-Content -LiteralPath (Join-Path $profiles 'ReferenceDriver.xml') -Encoding UTF8
+
+        $targetButtons = @(
+            New-WheelButtonXml -Name 'Wheel Left'
+            New-WheelButtonXml -Name 'Wheel Right'
+        ) -join "`n"
+        New-ControlProfileXml -Name 'Duplicate Wheel Target' -Buttons $targetButtons |
+            Set-Content -LiteralPath (Join-Path $profiles 'DuplicateWheelTarget.xml') -Encoding UTF8
+
+        $pool = Build-ArchetypePool $profiles 3
+        $reports = Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 3 -DryRun:$false
+        [xml]$updated = Get-Content -LiteralPath (Join-Path $profiles 'DuplicateWheelTarget.xml') -Raw
+        $targetSlots = @($updated.SelectNodes('/GameProfile/JoystickButtons/JoystickButtons'))
+        $boundSlots = @($targetSlots | Where-Object { Test-ButtonIsBound $_ })
+        $manualReport = @($reports | Where-Object { $_.Code -eq 'DuplicateWheelTarget' } | Select-Object -First 1)
+
+        $boundSlots.Count | Should -Be 1
+        $manualReport.Status | Should -Be 'bound'
+        $manualReport.Manual | Should -Contain 'Wheel Right'
     }
 }
 
