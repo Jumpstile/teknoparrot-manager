@@ -6965,12 +6965,18 @@ function Invoke-ControlPropagation {
 
         $boundNow = 0
         $manual   = New-Object System.Collections.ArrayList
+        $usedKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
         foreach ($b in @($btns)) {                     # @() snapshots before tree edits
             if (Test-ButtonIsBound $b) { continue }
             $k        = Get-ButtonKey $b
             $nameNode = $b.SelectSingleNode("ButtonName")
             $btnName  = if ($nameNode) { $nameNode.InnerText } else { "" }
             if ($k -and $best.Map.ContainsKey($k)) {
+                if ($usedKeys.Contains($k)) {
+                    if ($btnName) { [void]$manual.Add($btnName) }
+                    continue
+                }
+
                 # Guard: skip the copy if source and target disagree on whether
                 # this slot is a joystick direction vs an action button. Some
                 # game profiles reuse the same InputMapping enum value (e.g.
@@ -6997,6 +7003,7 @@ function Invoke-ControlPropagation {
                 $impName  = $imported.SelectSingleNode("ButtonName")
                 if ($impName -and $nameNode) { $impName.InnerText = $btnName }
                 [void]$b.ParentNode.ReplaceChild($imported, $b)
+                [void]$usedKeys.Add($k)
                 $boundNow++
             } elseif ($btnName) {
                 [void]$manual.Add($btnName)
