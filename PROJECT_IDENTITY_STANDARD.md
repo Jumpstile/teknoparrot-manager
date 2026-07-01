@@ -94,6 +94,11 @@ regression suite was run) rather than *what tool performed it*.
   public branch, fix it before pushing. If it is found after reaching a
   public branch, treat it as a Section 12 compliance gap and remediate per
   that section's guidance on rewrite risk vs. benefit.
+- Each project should provide a tracked prevention guard, not rely on
+  memory alone. TeknoParrot Manager's is `.githooks/pre-commit`; enable it
+  once per clone with `git config core.hooksPath .githooks`. A new
+  Jumpstile project should carry the same hook, adjusted only for its own
+  expected identity if it differs from the one in Section 1.
 
 ## 6. PR identity policy
 

@@ -7,6 +7,13 @@ It is intentionally redundant: each gate catches a different failure class.
 
 ## 1. Pre-commit checks (every commit, not just releases)
 
+- [ ] Git identity guard -- enable once per clone:
+  ```
+  git config core.hooksPath .githooks
+  ```
+  Enforces PROJECT_IDENTITY_STANDARD.md Section 5: refuses a commit unless
+  `git config user.name`/`user.email` match the required Jumpstile identity.
+
 - [ ] ASCII check -- zero non-ASCII bytes in the production script:
   ```powershell
   ($bytes=[System.IO.File]::ReadAllBytes('TeknoParrot-Manager.ps1'); ($bytes | Where-Object { $_ -gt 127 }).Count)
