@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.38 BETA
+# TeknoParrot Manager  |  v0.99.39 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.38"
+$ScriptVersion = "0.99.39"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -353,6 +353,7 @@ function Save-Config {
         LaunchBoxCustomPlatformName  = $lbCustomPlatformName
         LaunchBoxEmulatorId          = $lbEmulatorId
         PostgresSuperPasswordEncrypted = $postgresSuperPasswordEncrypted
+        CheckForUpdatesOnStartup     = $checkForUpdatesOnStartup
     }
     try {
         [System.IO.File]::WriteAllText($configPath, ($cfg | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
@@ -5151,6 +5152,434 @@ function Invoke-BepInExUpdateCheck {
     Write-Log ("BepInEx update check: complete. Updated={0} UpToDate={1} 32bitSkipped={2} Errors={3}" -f $updated, $upToDate, $skippedX86, $updateErrors)
 }
 
+# =============================================================================
+# CHECK FOR UPDATES -- manual, backup-first self-update for this script
+# =============================================================================
+# See docs/AUTO_UPDATE.md for the full design. This mirrors the standalone
+# tools/Invoke-TpmAutoUpdate.ps1 helper's logic (same release asset pattern,
+# same content-validation checks, same read-only pre-check) but inlined here
+# as plain functions -- consistent with this script's single-file, no-
+# external-module architecture -- and driven by the interactive Y/N
+# confirmation flow the menu requires instead of -CheckOnly/-Apply switches.
+# TLS 1.2 is already forced globally near the top of this script, so no
+# separate per-call TLS setup is needed here.
+
+function ConvertTo-ManagerComparableVersion {
+    param([Parameter(Mandatory)][string]$VersionText)
+    $normalized = ($VersionText -replace '^v', '').Trim()
+    try {
+        return [version]$normalized
+    } catch {
+        throw "Version '$VersionText' is not a valid version number after normalization."
+    }
+}
+
+function Get-ManagerUpdateRelease {
+    # Same retry/backoff shape as Get-BepInExLatestRelease / Get-EggmanDatRelease,
+    # but MaxAttempts/TimeoutSec are tunable: the menu-triggered check can afford
+    # to retry patiently since the user explicitly asked, but the quiet startup
+    # check (Invoke-StartupUpdateCheck) uses a single short-timeout attempt so an
+    # unreachable GitHub cannot noticeably delay launching the script.
+    param(
+        [int]$MaxAttempts = 3,
+        [int]$TimeoutSec = 20
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            $apiUri = 'https://api.github.com/repos/Jumpstile/teknoparrot-manager/releases/latest'
+            $resp    = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec $TimeoutSec `
+                           -Headers @{ 'User-Agent' = "TeknoParrot-Manager/$ScriptVersion" }
+            $release = $resp.Content | ConvertFrom-Json
+            $asset   = @($release.assets | Where-Object { $_.name -match '^TeknoParrot\.Manager\.v.*\.zip$' }) | Select-Object -First 1
+            if (-not $asset) {
+                Write-Log "CheckForUpdates: latest release $($release.tag_name) has no matching asset."
+                return $null
+            }
+            # URI-parsed validation (not -like/regex prefix matching) so the
+            # host check inspects the actual parsed authority -- rejects
+            # userinfo tricks and lookalike hosts a naive prefix check could
+            # be fooled by. Same approach as the standalone updater tool.
+            $parsedUri = $null
+            $urlOk = [System.Uri]::TryCreate($asset.browser_download_url, [System.UriKind]::Absolute, [ref]$parsedUri) -and
+                     $parsedUri.Scheme -eq 'https' -and
+                     $parsedUri.Host -eq 'github.com' -and
+                     [string]::IsNullOrEmpty($parsedUri.UserInfo) -and
+                     $parsedUri.AbsolutePath.StartsWith('/Jumpstile/teknoparrot-manager/releases/download/', [System.StringComparison]::Ordinal)
+            if (-not $urlOk) {
+                Write-Log "CheckForUpdates: refusing non-release GitHub asset URL: $($asset.browser_download_url)"
+                return $null
+            }
+            return [pscustomobject]@{
+                TagName     = $release.tag_name
+                Name        = $release.name
+                Body        = $release.body
+                AssetName   = $asset.name
+                DownloadUrl = $asset.browser_download_url
+            }
+        } catch {
+            $status = 0
+            if ($_.Exception.Response) { try { $status = [int]$_.Exception.Response.StatusCode } catch {} }
+            if ($attempt -ge $MaxAttempts -or ($status -ge 400 -and $status -lt 500)) {
+                Write-Log "CheckForUpdates: release query failed -- $_"; return $null
+            }
+            Write-Log "CheckForUpdates: attempt $attempt failed, retrying in 5s -- $_"
+            Start-Sleep -Seconds 5
+        }
+    }
+    return $null
+}
+
+# First non-blank line of a release's markdown body, trimmed of the most
+# common markdown decoration and clamped to a short length -- a "brief
+# summary" for the startup notice, not a full changelog rendering.
+function Get-ManagerUpdateReleaseSummary {
+    param([string]$Body)
+
+    if ([string]::IsNullOrWhiteSpace($Body)) { return $null }
+
+    $firstLine = ($Body -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
+    if (-not $firstLine) { return $null }
+
+    $firstLine = $firstLine.Trim() -replace '^#+\s*', '' -replace '^[-*]\s*', ''
+    if ($firstLine.Length -gt 150) {
+        $firstLine = $firstLine.Substring(0, 150).TrimEnd() + "..."
+    }
+    return $firstLine
+}
+
+function Assert-ManagerUpdateTargetWritable {
+    param([Parameter(Mandatory)][string]$Path)
+
+    # Move-Item -Force silently clears the ReadOnly attribute and replaces
+    # the file anyway rather than failing (verified empirically while
+    # building the standalone updater tool). A read-only target is never
+    # overridden here -- the update is refused with an actionable message.
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return }
+    $item = Get-Item -LiteralPath $Path -Force
+    if ($item.IsReadOnly) {
+        throw "'$Path' is marked read-only. Remove the read-only attribute (e.g. Set-ItemProperty -LiteralPath '$Path' -Name IsReadOnly -Value `$false) and re-run the update; it will not be silently cleared."
+    }
+}
+
+function New-ManagerUpdateBackup {
+    param([Parameter(Mandatory)][string]$Path)
+
+    # Derived from $Path itself (not $PSScriptRoot) so the backup always
+    # lands next to the actual target file regardless of caller context --
+    # matches the standalone tools/TpmAutoUpdate.Core.psm1 module's
+    # New-TpmUpdateBackup, and avoids relying on $PSScriptRoot, which is an
+    # automatic variable reset per function invocation rather than an
+    # ordinary dynamically-scoped one (a caller cannot override it).
+    $repoRoot   = Split-Path -Parent $Path
+    $backupRoot = Join-Path $repoRoot "UpdateBackups"
+    $timestamp  = (Get-Date).ToString("yyyy-MM-dd_HH-mm-ss")
+    $backupDir  = Join-Path $backupRoot ("TeknoParrotManager_" + $timestamp)
+    New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+
+    $backupPath = Join-Path $backupDir (Split-Path -Leaf $Path)
+    Copy-Item -LiteralPath $Path -Destination $backupPath -Force
+
+    if (-not (Test-Path -LiteralPath $backupPath -PathType Leaf)) {
+        throw "Backup creation failed: $backupPath"
+    }
+    return $backupPath
+}
+
+function Expand-ManagerUpdateAsset {
+    param(
+        [Parameter(Mandatory)][string]$ZipPath,
+        [Parameter(Mandatory)][string]$EntryName,
+        [Parameter(Mandatory)][string]$DestinationPath
+    )
+
+    if (-not (Test-Path -LiteralPath $ZipPath -PathType Leaf)) {
+        throw "Downloaded release asset not found: $ZipPath"
+    }
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+    try {
+        $entry = $zip.Entries | Where-Object { $_.FullName -eq $EntryName } | Select-Object -First 1
+        if (-not $entry) {
+            throw "Release asset does not contain the expected entry '$EntryName'."
+        }
+        [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $DestinationPath, $true)
+    } finally {
+        $zip.Dispose()
+    }
+    return $DestinationPath
+}
+
+function Test-ManagerUpdateExtractedScript {
+    param([Parameter(Mandatory)][string]$Path)
+
+    # Defense-in-depth before the extracted file ever replaces the live
+    # script: exists, non-empty, is not the raw zip container (would happen
+    # if extraction were ever skipped or broken upstream), and looks like
+    # TeknoParrot-Manager.ps1 rather than an unrelated or truncated file.
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Extracted script not found: $Path"
+    }
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -eq 0) {
+        throw "Extracted script is empty: $Path"
+    }
+    if ($bytes.Length -ge 2 -and $bytes[0] -eq 0x50 -and $bytes[1] -eq 0x4B) {
+        throw "Extracted script begins with a zip signature (PK) -- refusing to install: $Path"
+    }
+    $content = [System.Text.Encoding]::UTF8.GetString($bytes)
+    if ($content -notmatch 'TeknoParrot Manager') {
+        throw "Extracted script does not contain the expected 'TeknoParrot Manager' marker: $Path"
+    }
+    if ($content -notmatch '\$ScriptVersion\s*=\s*"[^"]+"') {
+        throw "Extracted script does not contain a `$ScriptVersion assignment: $Path"
+    }
+    return $true
+}
+
+# Does the check, confirmation, and (if accepted) the actual update. Returns
+# $true only if a new script was installed -- callers must not keep running
+# after that (the in-memory code is now stale) and should exit rather than
+# continue the menu loop. Returns $false for every other outcome (already
+# current, declined, or failed), all of which are safe to fall through to
+# "press Enter to return to menu".
+# Shared backup/download/extract/validate/replace path used by both the menu
+# option and the startup checker, once each has already obtained its own
+# explicit confirmation (their prompts differ, so that step stays in each
+# caller). Never prompts itself. Returns $true only if a new script was
+# actually installed.
+function Invoke-ManagerUpdateInstall {
+    param(
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [Parameter(Mandatory)][pscustomobject]$Release
+    )
+
+    try {
+        Assert-ManagerUpdateTargetWritable -Path $ScriptPath
+    } catch {
+        Write-Host ""
+        Write-Host "  ERROR: $_" -ForegroundColor Red
+        Write-Host "  Backup created: No" -ForegroundColor Yellow
+        Write-Log "CheckForUpdates: read-only check failed -- $_"
+        return $false
+    }
+
+    $downloadedZipPath = $null
+    $extractedScriptPath = $null
+    $backupPath = $null
+    try {
+        Write-Host ""
+        Write-Host "  Backing up current script..." -ForegroundColor DarkGray
+        $backupPath = New-ManagerUpdateBackup -Path $ScriptPath
+        Write-Host "  Backup created: $backupPath" -ForegroundColor Green
+        Write-Log "CheckForUpdates: backup created at $backupPath"
+
+        Write-Host "  Downloading $($Release.AssetName)..." -ForegroundColor DarkGray
+        $downloadedZipPath = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-update-" + [guid]::NewGuid().ToString('N') + '.zip')
+        Invoke-WebRequest -Uri $Release.DownloadUrl -OutFile $downloadedZipPath -UseBasicParsing
+        $downloaded = Get-Item -LiteralPath $downloadedZipPath -ErrorAction Stop
+        if ($downloaded.Length -le 0) {
+            throw "Downloaded update asset is empty: $downloadedZipPath"
+        }
+
+        Write-Host "  Extracting and validating..." -ForegroundColor DarkGray
+        $extractedScriptPath = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-update-extracted-" + [guid]::NewGuid().ToString('N') + '.ps1')
+        Expand-ManagerUpdateAsset -ZipPath $downloadedZipPath -EntryName "TeknoParrot-Manager.ps1" -DestinationPath $extractedScriptPath | Out-Null
+        Test-ManagerUpdateExtractedScript -Path $extractedScriptPath | Out-Null
+
+        Write-Host "  Installing update..." -ForegroundColor DarkGray
+        Move-Item -LiteralPath $extractedScriptPath -Destination $ScriptPath -Force
+        $extractedScriptPath = $null
+
+        Write-Host ""
+        Write-Host "============================================" -ForegroundColor Cyan
+        Write-Host "  Update installed: $($Release.TagName)" -ForegroundColor Green
+        Write-Host "============================================" -ForegroundColor Cyan
+        Write-Log "CheckForUpdates: update to $($Release.TagName) installed successfully. Backup: $backupPath"
+        return $true
+    } catch {
+        Write-Host ""
+        Write-Host "  ERROR: update failed -- $_" -ForegroundColor Red
+        if ($backupPath) {
+            Write-Host "  Backup created: Yes ($backupPath)" -ForegroundColor Yellow
+        } else {
+            Write-Host "  Backup created: No" -ForegroundColor Yellow
+        }
+        Write-Log "CheckForUpdates: update failed -- $_. Backup: $(if ($backupPath) { $backupPath } else { 'none' })"
+        return $false
+    } finally {
+        if ($downloadedZipPath -and (Test-Path -LiteralPath $downloadedZipPath -PathType Leaf)) {
+            Remove-Item -LiteralPath $downloadedZipPath -Force -ErrorAction SilentlyContinue
+        }
+        if ($extractedScriptPath -and (Test-Path -LiteralPath $extractedScriptPath -PathType Leaf)) {
+            Remove-Item -LiteralPath $extractedScriptPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+# Compares $ScriptVersion against the latest GitHub release and, if a newer
+# one exists, prints it and (unless -SkipConfirmationMessage) explains what
+# updating will do before asking for explicit Y/N confirmation. Returns
+# $true only if a new script was actually installed -- see
+# Invoke-ManagerUpdateInstall's comment for why this never calls exit itself.
+function Invoke-CheckForUpdates {
+    param([Parameter(Mandatory)][string]$ScriptPath)
+
+    Write-Host ""
+    Write-Host "  Checking for updates..." -ForegroundColor DarkGray
+    Write-Log "CheckForUpdates: checking current v$ScriptVersion against latest GitHub release."
+
+    try {
+        $localVersion = ConvertTo-ManagerComparableVersion -VersionText $ScriptVersion
+    } catch {
+        Write-Host "  ERROR: could not parse the current version ($ScriptVersion) -- $_" -ForegroundColor Red
+        Write-Log "CheckForUpdates: could not parse current version -- $_"
+        return $false
+    }
+
+    $release = Get-ManagerUpdateRelease
+    if (-not $release) {
+        Write-Host "  Could not reach GitHub to check for updates. Check your connection and try again." -ForegroundColor Yellow
+        Write-Log "CheckForUpdates: release check failed or found no usable asset."
+        return $false
+    }
+
+    try {
+        $latestVersion = ConvertTo-ManagerComparableVersion -VersionText $release.TagName
+    } catch {
+        Write-Host "  ERROR: could not parse the latest release version ($($release.TagName)) -- $_" -ForegroundColor Red
+        Write-Log "CheckForUpdates: could not parse latest release version -- $_"
+        return $false
+    }
+
+    Write-Host ""
+    Write-Host ("  Current version : v{0}" -f $ScriptVersion) -ForegroundColor Cyan
+    Write-Host ("  Latest version  : {0}" -f $release.TagName) -ForegroundColor Cyan
+
+    if ($latestVersion -le $localVersion) {
+        Write-Host ""
+        Write-Host "  You're already running the latest version. No update needed." -ForegroundColor Green
+        Write-Log "CheckForUpdates: already current (v$ScriptVersion)."
+        return $false
+    }
+
+    Write-Host ""
+    Write-Host "  An update is available: v$ScriptVersion -> $($release.TagName)" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  Updating will:" -ForegroundColor Cyan
+    Write-Host "    1) Back up the current script to UpdateBackups\<timestamp>\"
+    Write-Host "    2) Download the update ($($release.AssetName))"
+    Write-Host "    3) Validate the downloaded script before installing it"
+    Write-Host "    4) Replace TeknoParrot-Manager.ps1 with the new version"
+    Write-Host "    5) Require you to restart TeknoParrot Manager afterward --"
+    Write-Host "       this session will exit rather than keep running the old code."
+    Write-Host ""
+
+    $ans = (Read-Host "  Update to $($release.TagName) now? (Y/N)").Trim().ToUpper()
+    if ($ans -ne "Y") {
+        Write-Host "  Skipped -- no changes made." -ForegroundColor DarkGray
+        Write-Log "CheckForUpdates: user declined the update to $($release.TagName)."
+        return $false
+    }
+
+    return Invoke-ManagerUpdateInstall -ScriptPath $ScriptPath -Release $release
+}
+
+# Quiet, opt-in (CheckForUpdatesOnStartup, default true) startup update
+# check. Uses a single short-timeout attempt (Get-ManagerUpdateRelease
+# -MaxAttempts 1 -TimeoutSec 5) so an unreachable GitHub cannot noticeably
+# delay launching the script -- unlike the menu option, nobody explicitly
+# asked for this check, so it must not be allowed to hang. Never prompts,
+# logs, or writes anything when already current. When a newer release
+# exists, shows current/latest/a one-line release summary and offers
+# Y (update now) / N (remind me later) / V (view full release notes, then
+# re-prompt). Shares Invoke-ManagerUpdateInstall with the menu option for
+# the actual backup-first install; never calls exit itself for the same
+# testability reason documented there -- the caller (top-level script code)
+# decides whether to exit after a successful install.
+function Invoke-StartupUpdateCheck {
+    param([Parameter(Mandatory)][string]$ScriptPath)
+
+    try {
+        $localVersion = ConvertTo-ManagerComparableVersion -VersionText $ScriptVersion
+    } catch {
+        Write-Log "StartupUpdateCheck: could not parse current version -- $_"
+        return $false
+    }
+
+    $release = Get-ManagerUpdateRelease -MaxAttempts 1 -TimeoutSec 5
+    if (-not $release) {
+        Write-Log "StartupUpdateCheck: release check failed, found no usable asset, or GitHub was unreachable -- continuing to menu."
+        return $false
+    }
+
+    try {
+        $latestVersion = ConvertTo-ManagerComparableVersion -VersionText $release.TagName
+    } catch {
+        Write-Log "StartupUpdateCheck: could not parse latest release version -- $_"
+        return $false
+    }
+
+    if ($latestVersion -le $localVersion) {
+        Write-Log "StartupUpdateCheck: already current (v$ScriptVersion)."
+        return $false
+    }
+
+    Write-Host ""
+    Write-Host "--------------------------------------------" -ForegroundColor Cyan
+    Write-Host " Update Available" -ForegroundColor Cyan
+    Write-Host "--------------------------------------------" -ForegroundColor Cyan
+    Write-Host ("  Current version : v{0}" -f $ScriptVersion) -ForegroundColor Cyan
+    Write-Host ("  Latest version  : {0}" -f $release.TagName) -ForegroundColor Cyan
+    if ($release.Name) { Write-Host ("  Release         : {0}" -f $release.Name) -ForegroundColor Cyan }
+    $summary = Get-ManagerUpdateReleaseSummary -Body $release.Body
+    if ($summary) {
+        Write-Host ""
+        Write-Host "  $summary" -ForegroundColor DarkGray
+    }
+    Write-Log "StartupUpdateCheck: update available (v$ScriptVersion -> $($release.TagName))."
+
+    while ($true) {
+        $ans = (Read-Host "  Update now, remind me later, or view release notes? (Y/N/V)").Trim().ToUpper()
+
+        if ($ans -eq "V") {
+            Write-Host ""
+            if ($release.Body) {
+                Write-Host $release.Body -ForegroundColor DarkGray
+            } else {
+                Write-Host "  No release notes were provided for this release." -ForegroundColor DarkGray
+            }
+            Write-Host ""
+            continue
+        }
+
+        if ($ans -eq "Y") {
+            Write-Host ""
+            Write-Host "  Updating will:" -ForegroundColor Cyan
+            Write-Host "    1) Back up the current script to UpdateBackups\<timestamp>\"
+            Write-Host "    2) Download the update ($($release.AssetName))"
+            Write-Host "    3) Validate the downloaded script before installing it"
+            Write-Host "    4) Replace TeknoParrot-Manager.ps1 with the new version"
+            Write-Host "    5) Require you to restart TeknoParrot Manager afterward --"
+            Write-Host "       this session will exit rather than keep running the old code."
+            Write-Host ""
+            $confirm = (Read-Host "  Proceed? (Y/N)").Trim().ToUpper()
+            if ($confirm -ne "Y") {
+                Write-Host "  Skipped -- no changes made." -ForegroundColor DarkGray
+                Write-Log "StartupUpdateCheck: user backed out of the update to $($release.TagName)."
+                return $false
+            }
+            return Invoke-ManagerUpdateInstall -ScriptPath $ScriptPath -Release $release
+        }
+
+        # N, or anything else -- remind me later.
+        Write-Host "  Continuing -- you can check again any time from menu option 12." -ForegroundColor DarkGray
+        Write-Log "StartupUpdateCheck: user chose to be reminded later."
+        return $false
+    }
+}
+
 # Scans the install folder for executables and registers matching TeknoParrot
 # profiles by setting <GamePath> in a copy written to UserProfiles. Three passes:
 #   1 -- exe filename -> profile index (built from <ExecutableName> in GameProfile XMLs)
@@ -8657,6 +9086,8 @@ $lbPlatformMode             = $null   # "Arcade" / "TeknoParrot" / "Custom" / "B
 $lbCustomPlatformName       = $null   # only set when $lbPlatformMode is "Custom"
 $lbEmulatorId               = $null   # cached GUID of the TeknoParrot Emulator entry in LaunchBox's Emulators.xml
 $postgresSuperPasswordEncrypted = $null   # DPAPI-encrypted (ConvertFrom-SecureString, current user+machine) Postgres superuser password
+$checkForUpdatesOnStartup = $true   # default true; independent of $configAccepted below -- read even if the
+                                     # rest of a saved config is otherwise treated as corrupt/incomplete
 $configAccepted       = $false  # true when the user accepted a saved config this run
 
 if ($Unattended -and -not (Test-Path -LiteralPath $configPath)) {
@@ -8670,6 +9101,11 @@ if (Test-Path -LiteralPath $configPath) {
     try {
         $cfg = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
         if ($null -eq $cfg) { throw "Config file parsed as null -- file may be empty or corrupt." }
+        # Read before the corrupt-config check below: this is an independent
+        # preference, not tied to TeknoParrotRoot/GamesInstallFolder, so it
+        # should still apply even if the rest of the saved config is
+        # otherwise treated as corrupt/incomplete.
+        if ($null -ne $cfg.CheckForUpdatesOnStartup) { $checkForUpdatesOnStartup = [bool]$cfg.CheckForUpdatesOnStartup }
         if ([string]::IsNullOrWhiteSpace($cfg.TeknoParrotRoot) -or
             [string]::IsNullOrWhiteSpace($cfg.GamesInstallFolder)) {
             throw "Config is missing TeknoParrotRoot or GamesInstallFolder -- treating as corrupt."
@@ -8690,6 +9126,9 @@ if (Test-Path -LiteralPath $configPath) {
         if ($cfg.IncludeSupplementary)  { Write-Host "  Supplementary index  : Yes" }
         if ($cfg.LaunchBoxRoot)         { Write-Host "  LaunchBox root       : $($cfg.LaunchBoxRoot)" }
         if ($cfg.LaunchBoxPlatformMode) { Write-Host "  LaunchBox platform   : $($cfg.LaunchBoxPlatformMode)" }
+        if ($null -ne $cfg.CheckForUpdatesOnStartup -and -not $cfg.CheckForUpdatesOnStartup) {
+            Write-Host "  Check for updates on startup: Disabled"
+        }
         Write-Host ""
         if ($Unattended) {
             Write-Host "  [Unattended] Using saved settings." -ForegroundColor DarkCyan
@@ -8739,6 +9178,23 @@ if (Test-Path -LiteralPath $configPath) {
         Write-Host "         Falling through to manual prompts." -ForegroundColor DarkCyan
         Write-Log "Config: could not parse config.json -- $_"
         Write-Host ""
+    }
+}
+
+# Quiet, opt-out startup update check (CheckForUpdatesOnStartup, default
+# true). Never runs in -Unattended mode -- there is no way to show an
+# interactive Y/N/V prompt there, and Unattended is meant to be fast and
+# non-interactive. See Invoke-StartupUpdateCheck's own comment for how it
+# stays from meaningfully delaying startup when GitHub is unreachable.
+if ($checkForUpdatesOnStartup -and -not $Unattended) {
+    $scriptSelfPathForStartupCheck = Join-Path $PSScriptRoot "TeknoParrot-Manager.ps1"
+    $startupUpdateInstalled = Invoke-StartupUpdateCheck -ScriptPath $scriptSelfPathForStartupCheck
+    if ($startupUpdateInstalled) {
+        Write-Host ""
+        Write-Host "  Restart TeknoParrot Manager now to run the new version." -ForegroundColor Yellow
+        [void](Read-Host "  Press Enter to exit")
+        Write-Log "StartupUpdateCheck: exiting after successful update -- not continuing in this session."
+        exit 0
     }
 }
 
@@ -9248,13 +9704,16 @@ while ($true) {
     Write-Host "                        Silver Strike Bowling Live, Target Toss Pro)."
     Write-Host "                        Requires running this script as Administrator"
     Write-Host "                        if PostgreSQL isn't installed yet."
-    Write-Host "  12) Exit"
+    Write-Host "  12) Check for Updates -- Manual, backup-first check against the latest"
+    Write-Host "                        GitHub release. Nothing is downloaded or changed"
+    Write-Host "                        without your explicit confirmation."
+    Write-Host "  13) Exit"
     Write-Host ""
     if ($Unattended) {
         Write-Host "  [Unattended] Mode must be set before starting." -ForegroundColor Red
         Write-Log "ERROR: Unattended mode -- reached menu loop."; exit 1
     }
-    $modeChoice = (Read-Host "Enter 1-12").Trim()
+    $modeChoice = (Read-Host "Enter 1-13").Trim()
     switch ($modeChoice) {
         "1"     { $mode = "AutoSync"       }
         "2"     { $mode = "RegisterOnly"   }
@@ -9267,10 +9726,11 @@ while ($true) {
         "9"     { $mode = "Restore"        }
         "10"    { $mode = "HealthCheck"    }
         "11"    { $mode = "PostgresSetup"  }
-        "12"    { break }
-        default { Write-Host "  Invalid choice. Enter 1-12." -ForegroundColor Yellow; continue }
+        "12"    { $mode = "CheckForUpdates" }
+        "13"    { break }
+        default { Write-Host "  Invalid choice. Enter 1-13." -ForegroundColor Yellow; continue }
     }
-    if ($modeChoice -eq "12") { break }
+    if ($modeChoice -eq "13") { break }
     }
 
     if ($mode -eq "Restore") {
@@ -9428,6 +9888,25 @@ while ($true) {
         Write-Host "  If anything looks wrong, use menu option 9 (Restore backup) ->" -ForegroundColor DarkCyan
         Write-Host "  Postgres database backup to undo database changes." -ForegroundColor DarkCyan
         Write-Log ("Postgres setup: complete. Configured={0} DbCreated={1} AlreadyConfigured={2} Errors={3}" -f $pgResults.Configured, $pgResults.DbCreated, $pgResults.AlreadyConfigured, $pgResults.Errors)
+        [void](Read-Host "  Press Enter to return to menu")
+        continue
+    }
+
+    if ($mode -eq "CheckForUpdates") {
+        Write-Host ""
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        Write-Host " Check for Updates" -ForegroundColor Cyan
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        $scriptSelfPath = Join-Path $PSScriptRoot "TeknoParrot-Manager.ps1"
+        $updateInstalled = Invoke-CheckForUpdates -ScriptPath $scriptSelfPath
+        if ($updateInstalled) {
+            Write-Host ""
+            Write-Host "  Restart TeknoParrot Manager now to run the new version." -ForegroundColor Yellow
+            [void](Read-Host "  Press Enter to exit")
+            Write-Log "CheckForUpdates: exiting after successful update -- not continuing in this session."
+            exit 0
+        }
+        Write-Log "CheckForUpdates: complete, no restart needed."
         [void](Read-Host "  Press Enter to return to menu")
         continue
     }
