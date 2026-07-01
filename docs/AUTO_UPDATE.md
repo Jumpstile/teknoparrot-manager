@@ -1,6 +1,6 @@
 # Auto-Update System
 
-Status: review blockers fixed, pending re-review before merge
+Status: standalone helper merged; menu integration (v0.99.39) pending independent review before merge
 
 TeknoParrot Manager uses a **manual, backup-first auto-update model**.
 
@@ -84,22 +84,25 @@ The first implementation is a standalone helper:
 
 This keeps the first cut reviewable before wiring it into the main menu.
 
-## Pre-1.0 integration target
+## Menu integration (v0.99.39)
 
-Before 1.0, wire this helper into the main menu only after independent verification confirms the blockers are resolved.
+TeknoParrot-Manager.ps1 now has a "Check for Updates" main menu option (12) that follows the flow originally planned here. The interactive checker is implemented as plain functions inside TeknoParrot-Manager.ps1 itself (`Get-ManagerUpdateRelease`, `Assert-ManagerUpdateTargetWritable`, `New-ManagerUpdateBackup`, `Expand-ManagerUpdateAsset`, `Test-ManagerUpdateExtractedScript`, `Invoke-CheckForUpdates`) rather than by importing `tools/TpmAutoUpdate.Core.psm1` -- this script has no external module dependencies anywhere else, and introducing one just for this would be inconsistent with its single-file, self-contained architecture. The logic (asset pattern, content validation, read-only pre-check) is deliberately kept in lockstep with the standalone module; `tools/Invoke-TpmAutoUpdate.ps1` remains available separately for scripted/manual use outside the interactive menu.
 
-Expected flow:
+Actual flow:
 
 1. Show local version.
 2. Query latest GitHub Release.
-3. If no newer version exists, report that the user is current.
+3. If no newer version exists, report that the user is current and return to the menu.
 4. If a newer version exists, show release tag/name and asset selected.
-5. Ask for explicit confirmation.
-6. Backup current script.
-7. Download replacement.
-8. Validate replacement content.
-9. Replace script.
-10. Tell the user to restart TeknoParrot Manager.
+5. Explain exactly what updating will do (backup, download, validate, replace, restart) and ask for explicit Y/N confirmation.
+6. If read-only, refuse before any backup/download work with an actionable error.
+7. Backup current script.
+8. Download replacement.
+9. Validate replacement content.
+10. Replace script.
+11. Tell the user to restart TeknoParrot Manager, then exit this session -- it never continues running the replaced script in the current process.
+
+Any failure at any step displays the exact error, states whether a backup was created, and returns safely to the main menu without exiting.
 
 ## Non-goals for 1.0
 

@@ -7,6 +7,18 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.39 BETA  (2026-07-01)
+  ------------------------------------------------------------
+  New: "Check for Updates" menu option (12). Manually checks the latest
+  GitHub release against the running version, shows exactly what an update
+  will do (backup, download, validation, replace, restart) before asking
+  for explicit Y/N confirmation, and never runs the replaced script in the
+  current session -- the script exits after a successful update so you can
+  restart cleanly. A failed update always leaves the original script in
+  place and tells you whether a backup was created. See docs/AUTO_UPDATE.md
+  for the full design.
+
+-------------------------------------------------------------------------------
   v0.99.38 BETA  (2026-06-30)
   ------------------------------------------------------------
   Bug fix: CI Pester failures in Expand-ZipFileSafe tests on a fresh Windows

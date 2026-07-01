@@ -643,6 +643,48 @@ Y/N confirmations and "press Enter to continue" prompts untouched).
 
 ---
 
+## Check for Updates (Mode 12, v0.99.39)
+
+Feature-freeze exception, explicitly requested by the user as the planned follow-up to the
+standalone `tools/Invoke-TpmAutoUpdate.ps1` helper (PR #51, merged) -- see
+`docs/AUTO_UPDATE.md` for the full design and safety model shared by both.
+
+The interactive checker is implemented as plain functions inside `TeknoParrot-Manager.ps1`
+itself (`Get-ManagerUpdateRelease`, `Assert-ManagerUpdateTargetWritable`,
+`New-ManagerUpdateBackup`, `Expand-ManagerUpdateAsset`, `Test-ManagerUpdateExtractedScript`,
+`ConvertTo-ManagerComparableVersion`, `Invoke-CheckForUpdates`) rather than by importing
+`tools/TpmAutoUpdate.Core.psm1` -- this script has no external module dependency anywhere
+else, and this feature deliberately keeps that single-file, self-contained architecture. The
+tradeoff is duplicated logic between the two; both are kept in lockstep deliberately (same
+asset name pattern, same content-validation checks, same read-only pre-check) rather than
+introducing a shared dependency.
+
+Key invariants, each verified empirically while building the standalone tool this mirrors:
+
+- **Never trust `Move-Item -Force` to protect a read-only target.** It silently clears the
+  `ReadOnly` attribute and replaces the file anyway. `Assert-ManagerUpdateTargetWritable`
+  checks explicitly, before any backup or download work begins, and refuses with an
+  actionable error instead.
+- **Never install unvalidated content.** `Test-ManagerUpdateExtractedScript` rejects an
+  empty file, a file that is itself raw zip bytes (`PK` signature -- would happen if
+  extraction were ever skipped or broken upstream), a file missing the `TeknoParrot
+  Manager` marker, or one missing a `$ScriptVersion` assignment, before it ever replaces
+  the live script.
+- **`Invoke-CheckForUpdates` never calls `exit`.** It returns `$true` only when a new
+  script was actually installed; the menu dispatch block (untestable inline code, same as
+  every other mode) is the only place that decides whether to `exit` (successful update --
+  the in-memory code is now stale and must not keep running) or `continue` back to the
+  menu (every other outcome: already current, declined, read-only, or failed). Putting
+  `exit` inside the function would also kill the Pester test process that calls it.
+- **URL validation is `System.Uri`-parsed, not `-like`/regex prefix matching** -- rejects
+  userinfo tricks (`https://github.com@evil.example.com/...`) and lookalike hosts
+  (`https://github.com.evil.example.com/...`) that a naive prefix check would miss.
+- Backups go to `UpdateBackups\TeknoParrotManager_<timestamp>\`, matching this script's own
+  `<Type>_<timestamp>` naming convention (see `GpuFix_`, `CursorHide_`, `FFBBlaster_`
+  backups) rather than the standalone tool's `UpdateBackups\<timestamp>\` layout.
+
+---
+
 ## Versioning
 
 - Whole-number bumps: feature releases (v0.94, v0.95, ..., v0.99).

@@ -69,6 +69,15 @@ BeforeAll {
     # System.IO.Compression.dll -- a separate assembly). Both are loaded in
     # the Describe "Expand-ZipFileSafe" BeforeAll below.
     Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+    # $ScriptVersion is a top-level script-scope constant (not a function
+    # body), so the AST extraction above never picks it up. Get-ManagerUpdateRelease
+    # and Invoke-CheckForUpdates read it directly (User-Agent header, current-version
+    # display/comparison) -- mirror the production value explicitly. Deliberately
+    # not hardcoded to match TeknoParrot-Manager.ps1's own version exactly; tests
+    # below use their own controlled version strings/mocks instead of relying on
+    # this value's specific number, so drift here would not silently break them.
+    $ScriptVersion = "0.99.39"
 }
 
 Describe "Test-PathInside" {
@@ -1267,5 +1276,222 @@ Describe "GPU fix vendor matrix + safe re-run (issue #46)" {
     It "not eligible (no GPU field) means nothing to write" {
         $inner = "<FieldInformation><FieldName>Windowed</FieldName><FieldType>Bool</FieldType><FieldValue>1</FieldValue></FieldInformation>"
         (Test-GpuFixUpToDate -Doc (New-GpuDoc $inner) -BoolFields @() -DropdownFields @('GPU Fix') -Vendor 'AMD').Eligible | Should -BeFalse
+    }
+}
+
+Describe "ConvertTo-ManagerComparableVersion" {
+    It "strips a leading v and parses a normal version" {
+        ConvertTo-ManagerComparableVersion -VersionText 'v0.99.39' | Should -Be ([version]'0.99.39')
+    }
+    It "parses a version with no leading v" {
+        ConvertTo-ManagerComparableVersion -VersionText '0.99.39' | Should -Be ([version]'0.99.39')
+    }
+    It "throws on a non-numeric version string" {
+        { ConvertTo-ManagerComparableVersion -VersionText 'latest' } | Should -Throw
+    }
+}
+
+Describe "Get-ManagerUpdateRelease" {
+    It "returns the matching asset for a well-formed release" {
+        Mock Invoke-WebRequest {
+            [pscustomobject]@{
+                Content = (@{
+                    tag_name = 'v0.99.99'
+                    assets   = @(@{
+                        name                  = 'TeknoParrot.Manager.v0.99.99.BETA.zip'
+                        browser_download_url = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.99/TeknoParrot.Manager.v0.99.99.BETA.zip'
+                    })
+                } | ConvertTo-Json -Depth 5)
+            }
+        }
+        $release = Get-ManagerUpdateRelease
+        $release.TagName | Should -Be 'v0.99.99'
+        $release.AssetName | Should -Be 'TeknoParrot.Manager.v0.99.99.BETA.zip'
+    }
+
+    It "returns null when no asset matches the expected name pattern" {
+        Mock Invoke-WebRequest {
+            [pscustomobject]@{
+                Content = (@{
+                    tag_name = 'v0.99.99'
+                    assets   = @(@{ name = 'unrelated.txt'; browser_download_url = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.99/unrelated.txt' })
+                } | ConvertTo-Json -Depth 5)
+            }
+        }
+        Get-ManagerUpdateRelease | Should -BeNullOrEmpty
+    }
+
+    It "returns null and does not retry when the matching asset URL is not a real GitHub release URL" {
+        Mock Invoke-WebRequest {
+            [pscustomobject]@{
+                Content = (@{
+                    tag_name = 'v0.99.99'
+                    assets   = @(@{ name = 'TeknoParrot.Manager.v0.99.99.BETA.zip'; browser_download_url = 'https://evil.example.com/TeknoParrot.Manager.v0.99.99.BETA.zip' })
+                } | ConvertTo-Json -Depth 5)
+            }
+        }
+        Get-ManagerUpdateRelease | Should -BeNullOrEmpty
+        Should -Invoke Invoke-WebRequest -Times 1
+    }
+
+    It "retries on a transient (5xx-shaped) failure and gives up after 3 attempts" {
+        Mock Invoke-WebRequest { throw [System.Net.WebException]::new('transient') }
+        Mock Start-Sleep {}
+        Get-ManagerUpdateRelease | Should -BeNullOrEmpty
+        Should -Invoke Invoke-WebRequest -Times 3
+        Should -Invoke Start-Sleep -Times 2
+    }
+}
+
+Describe "Assert-ManagerUpdateTargetWritable" {
+    It "throws a clear, actionable error when the target is read-only" {
+        $path = Join-Path $TestDrive 'readonly.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.99.39"' -Encoding ascii
+        Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $true
+        try {
+            { Assert-ManagerUpdateTargetWritable -Path $path } | Should -Throw '*read-only*'
+            { Assert-ManagerUpdateTargetWritable -Path $path } | Should -Throw "*$path*"
+        } finally {
+            Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
+        }
+    }
+    It "does not throw when the target is writable" {
+        $path = Join-Path $TestDrive 'writable.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.99.39"' -Encoding ascii
+        { Assert-ManagerUpdateTargetWritable -Path $path } | Should -Not -Throw
+    }
+    It "does not throw when the target does not exist yet" {
+        { Assert-ManagerUpdateTargetWritable -Path (Join-Path $TestDrive 'does-not-exist.ps1') } | Should -Not -Throw
+    }
+}
+
+Describe "New-ManagerUpdateBackup" {
+    It "creates a timestamped backup of the target file under UpdateBackups" {
+        $root = Join-Path $TestDrive ("backuproot-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $scriptPath = Join-Path $root 'TeknoParrot-Manager.ps1'
+        Set-Content -LiteralPath $scriptPath -Value '$ScriptVersion = "0.99.39"' -Encoding ascii
+
+        $backupPath = New-ManagerUpdateBackup -Path $scriptPath
+
+        $backupPath | Should -Match ([regex]::Escape((Join-Path $root 'UpdateBackups')))
+        Test-Path -LiteralPath $backupPath -PathType Leaf | Should -BeTrue
+        (Get-Content -LiteralPath $backupPath -Raw) | Should -Match 'ScriptVersion'
+    }
+}
+
+Describe "Expand-ManagerUpdateAsset and Test-ManagerUpdateExtractedScript" {
+    BeforeAll {
+        function New-CheckForUpdatesFixtureZip {
+            param(
+                [string]$EntryName = 'TeknoParrot-Manager.ps1',
+                [string]$EntryContent = "# TeknoParrot Manager`n`$ScriptVersion = `"0.99.99`"`n"
+            )
+            $zipPath = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-menu-fixture-" + [guid]::NewGuid().ToString('N') + '.zip')
+            $stagingDir = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-menu-staging-" + [guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
+            try {
+                Set-Content -LiteralPath (Join-Path $stagingDir $EntryName) -Value $EntryContent -Encoding ascii -NoNewline
+                [System.IO.Compression.ZipFile]::CreateFromDirectory($stagingDir, $zipPath)
+            } finally {
+                Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+            return $zipPath
+        }
+    }
+
+    It "extracts the named entry and it passes content validation" {
+        $zipPath = New-CheckForUpdatesFixtureZip
+        $destPath = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-menu-extracted-" + [guid]::NewGuid().ToString('N') + '.ps1')
+        try {
+            Expand-ManagerUpdateAsset -ZipPath $zipPath -EntryName 'TeknoParrot-Manager.ps1' -DestinationPath $destPath
+            Test-ManagerUpdateExtractedScript -Path $destPath | Should -BeTrue
+        } finally {
+            Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $destPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It "throws when the zip does not contain the expected entry" {
+        $zipPath = New-CheckForUpdatesFixtureZip -EntryName 'SomethingElse.ps1'
+        $destPath = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-menu-extracted-" + [guid]::NewGuid().ToString('N') + '.ps1')
+        try {
+            { Expand-ManagerUpdateAsset -ZipPath $zipPath -EntryName 'TeknoParrot-Manager.ps1' -DestinationPath $destPath } | Should -Throw
+        } finally {
+            Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It "rejects an extracted file that begins with a raw zip (PK) signature" {
+        $path = Join-Path $TestDrive 'zipbytes.ps1'
+        [System.IO.File]::WriteAllBytes($path, [byte[]](0x50, 0x4B, 0x03, 0x04, 0x00, 0x00))
+        { Test-ManagerUpdateExtractedScript -Path $path } | Should -Throw '*zip signature*'
+    }
+
+    It "rejects an extracted file missing the TeknoParrot Manager marker" {
+        $path = Join-Path $TestDrive 'nomarker.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.99.99"' -Encoding ascii
+        { Test-ManagerUpdateExtractedScript -Path $path } | Should -Throw '*TeknoParrot Manager*'
+    }
+
+    It "rejects an extracted file with no ScriptVersion assignment" {
+        $path = Join-Path $TestDrive 'noversion.ps1'
+        Set-Content -LiteralPath $path -Value '# TeknoParrot Manager' -Encoding ascii
+        { Test-ManagerUpdateExtractedScript -Path $path } | Should -Throw '*ScriptVersion*'
+    }
+}
+
+Describe "Invoke-CheckForUpdates" {
+    BeforeAll {
+        function New-CheckForUpdatesReleaseJson {
+            param([string]$TagName = 'v0.99.99', [string]$AssetName = 'TeknoParrot.Manager.v0.99.99.BETA.zip')
+            return (@{
+                tag_name = $TagName
+                assets   = @(@{
+                    name                  = $AssetName
+                    browser_download_url = "https://github.com/Jumpstile/teknoparrot-manager/releases/download/$TagName/$AssetName"
+                })
+            } | ConvertTo-Json -Depth 5)
+        }
+    }
+
+    It "reports already current and returns false without prompting when there is no newer release" {
+        Mock Invoke-WebRequest { [pscustomobject]@{ Content = (New-CheckForUpdatesReleaseJson -TagName $ScriptVersion) } }
+        Mock Read-Host { throw "Read-Host should not be called when already current" }
+
+        $path = Join-Path $TestDrive 'current.ps1'
+        Set-Content -LiteralPath $path -Value "`$ScriptVersion = `"$ScriptVersion`"" -Encoding ascii
+
+        Invoke-CheckForUpdates -ScriptPath $path | Should -BeFalse
+    }
+
+    It "returns false and makes no changes when the user declines the update" {
+        Mock Invoke-WebRequest { [pscustomobject]@{ Content = (New-CheckForUpdatesReleaseJson) } }
+        Mock Read-Host { "N" }
+
+        $path = Join-Path $TestDrive 'decline.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
+        $originalContent = Get-Content -LiteralPath $path -Raw
+
+        Invoke-CheckForUpdates -ScriptPath $path | Should -BeFalse
+        (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
+    }
+
+    It "returns false without downloading when the target is read-only" {
+        Mock Invoke-WebRequest { [pscustomobject]@{ Content = (New-CheckForUpdatesReleaseJson) } }
+        Mock Read-Host { "Y" }
+
+        $root = Join-Path $TestDrive ("readonlyroot-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $path = Join-Path $root 'TeknoParrot-Manager.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
+        Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $true
+
+        try {
+            Invoke-CheckForUpdates -ScriptPath $path | Should -BeFalse
+            Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeFalse
+        } finally {
+            Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
+        }
     }
 }

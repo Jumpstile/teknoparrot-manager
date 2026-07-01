@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.99.38 BETA
+  TeknoParrot Manager  |  v0.99.39 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -47,6 +47,7 @@
     FORCE FEEDBACK (FFB) SETUP     -- mode 7
     BEPINEX UPDATE CHECK           -- mode 8
     POSTGRES SETUP                 -- mode 11
+    CHECK FOR UPDATES              -- mode 12
     THUMBNAIL DOWNLOAD
     "NOT IN TEKNOPARROT" REPORT
     CONTROLS STATUS FILE
@@ -292,6 +293,12 @@
     that already exists. Installing PostgreSQL itself requires running
     this script as Administrator. See POSTGRES SETUP below. Available as
     menu option 11.
+
+  - Check for Updates. Manually checks the latest GitHub release against
+    the version you're running. Nothing is downloaded or changed without
+    your explicit Y/N confirmation, and a read-only script is refused
+    rather than silently overridden. See CHECK FOR UPDATES below.
+    Available as menu option 12.
 
   - Path-length, file-version, and GPU compatibility warnings (automatic).
     Every AutoSync/Register run automatically checks for known
@@ -592,7 +599,13 @@
        requires running this script as Administrator. See POSTGRES SETUP
        below for full details.
 
-  12) Exit
+  12) Check for Updates
+       Manually checks the latest GitHub release against the version
+       you're running. Nothing is downloaded or changed without your
+       explicit Y/N confirmation. See CHECK FOR UPDATES below for full
+       details.
+
+  13) Exit
        Exits the script.
 
 
@@ -1547,6 +1560,52 @@
     for ReShade (whose installer genuinely is signed). This is a limitation
     of the installer itself, not something a stronger check in this script
     could fix.
+
+
+  CHECK FOR UPDATES
+  -----------------
+
+  What mode 12 does
+
+    Manually checks the latest TeknoParrot Manager release on GitHub
+    against the version you're running. This is entirely opt-in --
+    nothing is downloaded or changed without your explicit confirmation,
+    and the script never checks for updates on its own.
+
+    If you're already current, it says so and returns you to the menu.
+
+    If a newer version is available, it explains exactly what updating
+    will do before asking a single Y/N question:
+      1. Back up the current script to
+         UpdateBackups\TeknoParrotManager_<timestamp>\
+      2. Download the update
+      3. Validate the downloaded script before installing it
+      4. Replace TeknoParrot-Manager.ps1 with the new version
+      5. Require you to restart TeknoParrot Manager afterward
+
+  Read-only targets
+
+    If TeknoParrot-Manager.ps1 is marked read-only, the update is
+    refused with an actionable error explaining how to remove the
+    read-only attribute -- it is never silently overridden.
+
+  After a successful update
+
+    The script exits so you can restart it cleanly. It never keeps
+    running the old, now-replaced code in the same session.
+
+  If anything fails
+
+    The exact error is shown, you're told whether a backup was created,
+    and the script returns safely to the main menu without exiting.
+
+  Standalone use outside the menu
+
+    tools\Invoke-TpmAutoUpdate.ps1 -CheckOnly
+    tools\Invoke-TpmAutoUpdate.ps1 -Apply
+
+    See docs/AUTO_UPDATE.md (in the source repository) for the full
+    design of this standalone helper.
 
 
   RETROBAT / BATOCERA

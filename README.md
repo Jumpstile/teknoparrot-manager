@@ -479,6 +479,20 @@ You don't need to run this mode at all if none of your registered games need Pos
 
 ---
 
+## Check for Updates
+
+Mode 12 manually checks the latest TeknoParrot Manager release on GitHub against the version you're running. Nothing is downloaded or changed without your explicit confirmation.
+
+- If you're already current, it says so and returns you to the menu.
+- If a newer version exists, it explains exactly what updating will do — back up the current script, download the update, validate it, replace the script, and require a restart — before asking a single Y/N question.
+- The current script is backed up to `UpdateBackups\TeknoParrotManager_<timestamp>\` before anything is replaced. If the target is marked read-only, the update is refused with an actionable error instead of silently clearing that attribute.
+- After a successful update, the script exits so you can restart it cleanly — it never keeps running the old, now-stale code in the same session.
+- If anything fails partway through, the exact error is shown, you're told whether a backup was created, and the script returns safely to the main menu without exiting.
+
+You can also run the update check outside the menu via `tools\Invoke-TpmAutoUpdate.ps1 -CheckOnly` (or `-Apply`) — see `docs/AUTO_UPDATE.md` for that standalone helper.
+
+---
+
 ## LaunchBox Integration
 
 At the end of each run the script offers to add your registered games directly into LaunchBox:
@@ -859,4 +873,4 @@ Pull requests are welcome too. Full source and version history: [github.com/Jump
 
 ---
 
-> v0.99.38 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v0.99.39 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
