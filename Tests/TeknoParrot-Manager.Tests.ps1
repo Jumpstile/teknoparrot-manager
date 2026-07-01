@@ -1153,6 +1153,56 @@ Describe "Write-ControlPropagationResults (issue #59: standalone Propagate Contr
     }
 }
 
+Describe "New-PropagationBackup (P1 fix: standalone Propagate Controls must abort on incomplete backup)" {
+    # Independent engineering review finding on PR #62: a backup-copy error in the standalone
+    # Propagate Controls menu option only warned and allowed the caller to
+    # continue -- including automatically in -Unattended mode -- so
+    # Invoke-ControlPropagation could run against an incomplete backup. This
+    # directly proves the gating condition every caller relies on: ErrorCount
+    # is greater than zero whenever any source file could not be copied, with
+    # no path that reports success/zero on a partial failure.
+    It "reports zero errors and the correct path when every file copies successfully" {
+        $profiles = Join-Path $TestDrive ("propback-ok-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $profiles 'Game.xml') -Value '<GameProfile/>' -Encoding UTF8
+
+        $result = New-PropagationBackup -UserProfilesDir $profiles
+
+        $result.ErrorCount | Should -Be 0
+        Test-Path -LiteralPath (Join-Path $result.Path 'Game.xml') | Should -BeTrue
+    }
+
+    It "signals an abort-worthy failure when a source file is locked and cannot be copied" {
+        # A sharing-violation on Copy-Item can surface either as a
+        # non-terminating error (caught into ErrorCount via -ErrorAction
+        # SilentlyContinue) or, depending on exactly how the underlying I/O
+        # call fails, as a terminating exception that -ErrorAction alone
+        # does not suppress. Both are safe: the real caller in the
+        # "PropagateControls" menu block wraps this call in try/catch AND
+        # checks ErrorCount, so either outcome correctly prevents
+        # Invoke-ControlPropagation from running. This test accepts either,
+        # since the point is proving no path silently reports success.
+        $profiles = Join-Path $TestDrive ("propback-locked-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        $lockedPath = Join-Path $profiles 'Locked.xml'
+        Set-Content -LiteralPath $lockedPath -Value '<GameProfile/>' -Encoding UTF8
+
+        $handle = [System.IO.File]::Open($lockedPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
+        try {
+            $threw = $false
+            $result = $null
+            try {
+                $result = New-PropagationBackup -UserProfilesDir $profiles
+            } catch {
+                $threw = $true
+            }
+            ($threw -or $result.ErrorCount -gt 0) | Should -BeTrue
+        } finally {
+            $handle.Dispose()
+        }
+    }
+}
+
 # =============================================================================
 # COMPATIBILITY REGRESSION SUITE (issues #41 / #43 / #46)
 # These contexts protect the compatibility-sensitive setup decisions against

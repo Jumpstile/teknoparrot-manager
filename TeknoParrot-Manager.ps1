@@ -7465,6 +7465,37 @@ function Invoke-ControlPropagation {
     return $reports
 }
 
+# Backup-before-write for the standalone "Propagate Controls" menu option.
+# Extracted specifically so backup-copy-failure handling is unit-testable:
+# a caller must abort before calling Invoke-ControlPropagation whenever
+# ErrorCount is greater than zero, in every mode (interactive or
+# -Unattended) -- there is no safe "continue anyway" for an incomplete
+# backup, since this mode's own promised safety net (and the README's) is
+# that UserProfiles is backed up before anything is written.
+function New-PropagationBackup {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$UserProfilesDir
+    )
+
+    $backupRoot = Join-Path $UserProfilesDir "FullBackup"
+    $timestamp  = (Get-Date).ToString("yyyy-MM-dd_HH-mm-ss")
+    $backupPath = Join-Path $backupRoot ("PropagateControls_" + $timestamp)
+
+    [void][System.IO.Directory]::CreateDirectory($backupRoot)
+    [void][System.IO.Directory]::CreateDirectory($backupPath)
+
+    $backupCopyErrs = $null
+    Get-ChildItem -LiteralPath $UserProfilesDir | Where-Object { $_.Name -ne "FullBackup" } |
+        Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable backupCopyErrs
+
+    return [pscustomobject]@{
+        Path       = $backupPath
+        ErrorCount = $backupCopyErrs.Count
+    }
+}
+
 # Prints Invoke-ControlPropagation's $reports in the same format used by both
 # the AutoSync/Register-only flow and the standalone "Propagate Controls" menu
 # option, so the two entry points never drift out of sync with each other.
@@ -9995,12 +10026,8 @@ while ($true) {
         # this option is a thin wrapper around the existing pipeline
         # (Build-ArchetypePool / Invoke-ControlPropagation /
         # Write-ControlPropagationResults), not a new implementation of it.
-        $backupRoot = Join-Path $userProfilesDir "FullBackup"
-        $timestamp  = (Get-Date).ToString("yyyy-MM-dd_HH-mm-ss")
-        $backupPath = Join-Path $backupRoot ("PropagateControls_" + $timestamp)
         try {
-            [void][System.IO.Directory]::CreateDirectory($backupRoot)
-            [void][System.IO.Directory]::CreateDirectory($backupPath)
+            $propagationBackup = New-PropagationBackup -UserProfilesDir $userProfilesDir
         } catch {
             Write-Host "  ERROR: Could not create backup folder: $_" -ForegroundColor Red
             Write-Host "  The script will not continue without a successful backup." -ForegroundColor Red
@@ -10008,21 +10035,19 @@ while ($true) {
             [void](Read-Host "  Press Enter to return to menu")
             continue
         }
-        $backupCopyErrs = $null
-        Get-ChildItem -LiteralPath $userProfilesDir | Where-Object { $_.Name -ne "FullBackup" } |
-            Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable backupCopyErrs
-        if ($backupCopyErrs.Count -gt 0) {
-            Write-Host ("  WARNING: {0} file(s) could not be backed up." -f $backupCopyErrs.Count) -ForegroundColor Yellow
-            Write-Log "PropagateControls: backup had $($backupCopyErrs.Count) error(s)"
-            if (-not $Unattended) {
-                $contBackup = (Read-Host "  Continue anyway? (Y/N)").Trim().ToUpper()
-                if ($contBackup -ne "Y") {
-                    Write-Host "Aborted." -ForegroundColor Yellow
-                    Write-Log "PropagateControls: user declined to continue with incomplete backup."
-                    [void](Read-Host "  Press Enter to return to menu")
-                    continue
-                }
-            }
+        $backupPath = $propagationBackup.Path
+        if ($propagationBackup.ErrorCount -gt 0) {
+            # Fatal, no override, no exception for -Unattended: this mode's
+            # own doc text and the README both promise UserProfiles are
+            # backed up before it writes anything. An incomplete backup
+            # means that promise is already broken, so propagation must not
+            # proceed regardless of interactive confirmation or unattended
+            # mode -- there is no safe "continue anyway" here.
+            Write-Host ("  ERROR: {0} file(s) could not be backed up." -f $propagationBackup.ErrorCount) -ForegroundColor Red
+            Write-Host "  The script will not continue without a complete backup." -ForegroundColor Red
+            Write-Log "PropagateControls: backup FAILED -- $($propagationBackup.ErrorCount) file(s) could not be copied."
+            [void](Read-Host "  Press Enter to return to menu")
+            continue
         }
         Write-Host ("  Backup: {0}" -f $backupPath) -ForegroundColor DarkGray
         Write-Log "PropagateControls: backup at $backupPath"
