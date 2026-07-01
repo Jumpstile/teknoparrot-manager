@@ -115,7 +115,11 @@ writes profiles, verify the following properties are still intact.
   always versioned):
   - Include: `TeknoParrot-Manager.ps1`, `TeknoParrot-Manager.bat`,
     `TeknoParrot-Manager-README.txt`, `TeknoParrot-Manager-QuickStart.txt`,
-    `TeknoParrot-Manager-CHANGELOG.txt`, `LICENSE`, `Crosshairs\` (all 321 PNGs).
+    `TeknoParrot-Manager-CHANGELOG.txt`, `LICENSE`, `Crosshairs\` (all 321 PNGs),
+    `tools\` (the standalone `Invoke-TpmAutoUpdate.ps1` / `TpmAutoUpdate.Core.psm1`
+    helper documented in `docs/AUTO_UPDATE.md` -- omitting this folder was a
+    real pre-1.0 packaging gap; the menu-integrated "Check for Updates" option
+    does not itself depend on it, but the documented standalone helper does).
   - Exclude: `ReShade\` (DLLs not redistributable; user obtains from
     reshade.me), `dgVoodoo2\` (user provides), `FFBPlugin\` and
     `BepInExCache\` (auto-downloaded live from GitHub each run, never

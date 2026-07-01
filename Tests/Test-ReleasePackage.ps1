@@ -21,7 +21,9 @@ try {
         'TeknoParrot-Manager-README.txt',
         'TeknoParrot-Manager-QuickStart.txt',
         'TeknoParrot-Manager-CHANGELOG.txt',
-        'LICENSE'
+        'LICENSE',
+        'tools/Invoke-TpmAutoUpdate.ps1',
+        'tools/TpmAutoUpdate.Core.psm1'
     )
 
     foreach ($entry in $required) {
