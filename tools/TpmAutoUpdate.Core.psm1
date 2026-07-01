@@ -150,6 +150,53 @@ function Select-TpmUpdateAsset {
     return $asset
 }
 
+function Get-TpmTrustedAssetDigest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        $Asset
+    )
+
+    # GitHub computes and serves a SHA-256 digest for every release asset
+    # server-side, at upload time (Releases API `assets[].digest`, format
+    # "sha256:<64 lowercase hex chars>") -- already present in the same
+    # response Select-TpmUpdateAsset already parsed, so no extra download,
+    # sidecar file, or release-process step is needed to publish or consume
+    # it. See docs/AUTO_UPDATE.md for why this was chosen over a separate
+    # .sha256/checksums.txt release asset. Treated as mandatory: an asset
+    # with a missing or malformed digest is refused rather than silently
+    # skipping this verification layer.
+    if ([string]::IsNullOrWhiteSpace($Asset.digest)) {
+        throw "Release asset '$($Asset.name)' has no GitHub-provided checksum (digest) -- refusing to install without independent integrity verification."
+    }
+
+    if ($Asset.digest -notmatch '^sha256:([0-9a-fA-F]{64})$') {
+        throw "Release asset '$($Asset.name)' has a malformed checksum ('$($Asset.digest)') -- refusing to install."
+    }
+
+    return $Matches[1].ToLowerInvariant()
+}
+
+function Assert-TpmDownloadIntegrity {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedHash
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Cannot verify checksum: downloaded file not found: $Path"
+    }
+
+    $actualHash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualHash -ne $ExpectedHash.ToLowerInvariant()) {
+        throw "Checksum verification failed for '$Path': expected $ExpectedHash but computed $actualHash. The download may be corrupted or tampered with -- refusing to extract or install it."
+    }
+}
+
 function Assert-TpmWritableTarget {
     [CmdletBinding()]
     param(
@@ -310,6 +357,8 @@ Export-ModuleMember -Function @(
     'Invoke-GitHubJsonRequest',
     'Get-LatestRelease',
     'Select-TpmUpdateAsset',
+    'Get-TpmTrustedAssetDigest',
+    'Assert-TpmDownloadIntegrity',
     'Assert-TpmWritableTarget',
     'New-TpmUpdateBackup',
     'Save-TpmReleaseAsset',

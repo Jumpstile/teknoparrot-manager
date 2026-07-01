@@ -97,22 +97,50 @@ BeforeAll {
         return , $bytes
     }
 
+    function Get-Sha256HexString {
+        param([Parameter(Mandatory)][byte[]]$Bytes)
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $hashBytes = $sha256.ComputeHash($Bytes)
+            return -join ($hashBytes | ForEach-Object { $_.ToString('x2') })
+        } finally {
+            $sha256.Dispose()
+        }
+    }
+
     function Invoke-TpmApplyWithMockedRelease {
         param(
             [Parameter(Mandatory)][string]$ScriptPath,
             [Parameter(Mandatory)][scriptblock]$WebRequestMock,
+            # $null (the default) omits the digest field entirely, exercising
+            # the "missing checksum" fail-closed path. Pass a real
+            # "sha256:<hex>" string (Get-Sha256HexString) matching the bytes
+            # the mock actually serves so a test can reach past the checksum
+            # gate and exercise a later step, or a deliberately mismatched
+            # one to exercise "incorrect checksum".
+            [string]$AssetDigest = $null,
             [switch]$WhatIf
         )
 
-        Mock -ModuleName TpmAutoUpdate.Core Get-LatestRelease {
+        # Mock -ModuleName only intercepts calls made *from code running
+        # inside the module*. Get-LatestRelease is called directly by the
+        # orchestrator script (external to the module), so mocking it
+        # directly has no effect (verified empirically -- earlier tests in
+        # this file passed anyway because only the Invoke-WebRequest mock
+        # actually mattered to them; adding a check that reads real asset
+        # data exposed this). Mock the internal dependency it calls instead
+        # (Invoke-GitHubJsonRequest), which runs inside Get-LatestRelease's
+        # own module-scoped function body and so is reachable.
+        Mock -ModuleName TpmAutoUpdate.Core Invoke-GitHubJsonRequest {
             [pscustomobject]@{
                 tag_name = 'v0.99.99'
                 assets   = @([pscustomobject]@{
                     name                 = 'TeknoParrot.Manager.v0.99.99.BETA.zip'
                     browser_download_url = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.99/TeknoParrot.Manager.v0.99.99.BETA.zip'
+                    digest               = $AssetDigest
                 })
             }
-        }
+        }.GetNewClosure()
         Mock -ModuleName TpmAutoUpdate.Core Invoke-WebRequest $WebRequestMock
 
         $params = @{
@@ -140,15 +168,25 @@ BeforeAll {
 
 Describe '1. Corrupt ZIP download' {
     It 'leaves the original script intact, preserves the backup, and reports a clear error' {
+        # Deterministic (not random) garbage bytes with a digest that
+        # matches those exact bytes -- checksum verification passes (it can
+        # only ever catch a download that does not match what the release
+        # actually published; it cannot know the publisher uploaded garbage
+        # in the first place), so this specifically exercises the existing
+        # content-validation layer catching a checksum-valid but not-a-zip
+        # file. See "Incorrect checksum" below for the checksum layer itself
+        # catching a mismatch.
         $root = New-DestructiveTestRoot
         try {
             $scriptPath = New-OldScript -Root $root
             $originalContent = Get-Content -LiteralPath $scriptPath -Raw
+            $garbageBytes = [byte[]](0..63 | ForEach-Object { [byte](($_ * 37 + 11) % 256) })
+            $garbageDigest = "sha256:$(Get-Sha256HexString -Bytes $garbageBytes)"
 
-            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -WebRequestMock {
+            $result = Invoke-TpmApplyWithMockedRelease -AssetDigest $garbageDigest -ScriptPath $scriptPath -WebRequestMock {
                 param($Uri, $Headers, $OutFile, $UseBasicParsing)
-                [System.IO.File]::WriteAllBytes($OutFile, [byte[]](1..64 | ForEach-Object { Get-Random -Maximum 255 }))
-            }
+                [System.IO.File]::WriteAllBytes($OutFile, $garbageBytes)
+            }.GetNewClosure()
 
             $result.Error | Should -BeOfType ([System.Management.Automation.ErrorRecord])
             $result.Error.Exception.Message | Should -Match 'zip|central|end of'
@@ -176,8 +214,9 @@ Describe '2. ZIP missing TeknoParrot-Manager.ps1' {
             $scriptPath = New-OldScript -Root $root
             $originalContent = Get-Content -LiteralPath $scriptPath -Raw
             $wrongEntryBytes = New-ValidFixtureZipBytes -EntryName 'SomethingElse.ps1'
+            $wrongEntryDigest = "sha256:$(Get-Sha256HexString -Bytes $wrongEntryBytes)"
 
-            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -WebRequestMock {
+            $result = Invoke-TpmApplyWithMockedRelease -AssetDigest $wrongEntryDigest -ScriptPath $scriptPath -WebRequestMock {
                 param($Uri, $Headers, $OutFile, $UseBasicParsing)
                 [System.IO.File]::WriteAllBytes($OutFile, $wrongEntryBytes)
             }.GetNewClosure()
@@ -204,8 +243,9 @@ Describe '3. Script fails content validation' {
             $scriptPath = New-OldScript -Root $root
             $originalContent = Get-Content -LiteralPath $scriptPath -Raw
             $badContentBytes = New-ValidFixtureZipBytes -EntryContent "# TeknoParrot Manager`nsome unrelated content, no version here`n"
+            $badContentDigest = "sha256:$(Get-Sha256HexString -Bytes $badContentBytes)"
 
-            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -WebRequestMock {
+            $result = Invoke-TpmApplyWithMockedRelease -AssetDigest $badContentDigest -ScriptPath $scriptPath -WebRequestMock {
                 param($Uri, $Headers, $OutFile, $UseBasicParsing)
                 [System.IO.File]::WriteAllBytes($OutFile, $badContentBytes)
             }.GetNewClosure()
@@ -248,7 +288,8 @@ Describe '3. Script fails content validation' {
                 Remove-Item -LiteralPath $outerZipPath -Force -ErrorAction SilentlyContinue
             }
 
-            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -WebRequestMock {
+            $outerDigest = "sha256:$(Get-Sha256HexString -Bytes $outerBytes)"
+            $result = Invoke-TpmApplyWithMockedRelease -AssetDigest $outerDigest -ScriptPath $scriptPath -WebRequestMock {
                 param($Uri, $Headers, $OutFile, $UseBasicParsing)
                 [System.IO.File]::WriteAllBytes($OutFile, $outerBytes)
             }.GetNewClosure()
@@ -265,20 +306,28 @@ Describe '3. Script fails content validation' {
 }
 
 Describe '4. Download interrupted / partial file' {
-    It 'treats a truncated zip as corrupt, leaves the original intact, and cleans up' {
+    It 'the checksum layer catches a truncated download before any zip parsing is attempted' {
+        # A real partial download naturally produces a hash that does not
+        # match the complete file's published digest -- checksum
+        # verification catches this before ever attempting to open the
+        # (incomplete, likely still zip-structured-enough-to-partially-
+        # parse) file, giving a specific "checksum verification failed"
+        # error instead of a less clear zip-parsing error.
         $root = New-DestructiveTestRoot
         try {
             $scriptPath = New-OldScript -Root $root
             $originalContent = Get-Content -LiteralPath $scriptPath -Raw
             $fullBytes = New-ValidFixtureZipBytes
+            $fullDigest = "sha256:$(Get-Sha256HexString -Bytes $fullBytes)"
             $truncatedBytes = $fullBytes[0..([int]($fullBytes.Length / 2))]
 
-            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -WebRequestMock {
+            $result = Invoke-TpmApplyWithMockedRelease -AssetDigest $fullDigest -ScriptPath $scriptPath -WebRequestMock {
                 param($Uri, $Headers, $OutFile, $UseBasicParsing)
                 [System.IO.File]::WriteAllBytes($OutFile, $truncatedBytes)
             }.GetNewClosure()
 
             $result.Error | Should -BeOfType ([System.Management.Automation.ErrorRecord])
+            $result.Error.Exception.Message | Should -Match 'Checksum verification failed'
 
             (Get-Content -LiteralPath $scriptPath -Raw) | Should -Be $originalContent
 
@@ -371,8 +420,9 @@ Describe '7. Extraction failure (corrupted entry payload, valid central director
             $scriptPath = New-OldScript -Root $root
             $originalContent = Get-Content -LiteralPath $scriptPath -Raw
             $corruptedEntryBytes = Get-CorruptedEntryZipBytes
+            $corruptedEntryDigest = "sha256:$(Get-Sha256HexString -Bytes $corruptedEntryBytes)"
 
-            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -WebRequestMock {
+            $result = Invoke-TpmApplyWithMockedRelease -AssetDigest $corruptedEntryDigest -ScriptPath $scriptPath -WebRequestMock {
                 param($Uri, $Headers, $OutFile, $UseBasicParsing)
                 [System.IO.File]::WriteAllBytes($OutFile, $corruptedEntryBytes)
             }.GetNewClosure()
@@ -399,6 +449,7 @@ Describe '8. Replacement failure after successful backup (locked destination)' {
             $scriptPath = New-OldScript -Root $root
             $originalContent = Get-Content -LiteralPath $scriptPath -Raw
             $validBytes = New-ValidFixtureZipBytes
+            $validDigest = "sha256:$(Get-Sha256HexString -Bytes $validBytes)"
 
             # Hold an exclusive lock on the target for the duration of the run
             # so backup/download/extract/validate all succeed and only the
@@ -406,7 +457,7 @@ Describe '8. Replacement failure after successful backup (locked destination)' {
             # process holding the file open would look like in practice.
             $lockHandle = [System.IO.File]::Open($scriptPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
 
-            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -WebRequestMock {
+            $result = Invoke-TpmApplyWithMockedRelease -AssetDigest $validDigest -ScriptPath $scriptPath -WebRequestMock {
                 param($Uri, $Headers, $OutFile, $UseBasicParsing)
                 [System.IO.File]::WriteAllBytes($OutFile, $validBytes)
             }.GetNewClosure()
@@ -435,7 +486,102 @@ Describe '8. Replacement failure after successful backup (locked destination)' {
     }
 }
 
-Describe '9. Module-scope error-action regression guard' {
+Describe '9. Missing checksum' {
+    It 'refuses to install when the release asset has no GitHub-provided digest' {
+        $root = New-DestructiveTestRoot
+        try {
+            $scriptPath = New-OldScript -Root $root
+            $originalContent = Get-Content -LiteralPath $scriptPath -Raw
+            $validBytes = New-ValidFixtureZipBytes
+
+            # AssetDigest omitted (defaults to $null) -- simulates an older
+            # release, or one where GitHub did not populate the digest field.
+            $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -WebRequestMock {
+                param($Uri, $Headers, $OutFile, $UseBasicParsing)
+                [System.IO.File]::WriteAllBytes($OutFile, $validBytes)
+            }.GetNewClosure()
+
+            $result.Error | Should -BeOfType ([System.Management.Automation.ErrorRecord])
+            $result.Error.Exception.Message | Should -Match 'no GitHub-provided checksum'
+
+            (Get-Content -LiteralPath $scriptPath -Raw) | Should -Be $originalContent
+
+            $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'UpdateBackups') -Recurse -Filter 'TeknoParrot-Manager.ps1' -ErrorAction SilentlyContinue)
+            $backupFiles.Count | Should -Be 1
+
+            # Refused before extraction was ever attempted.
+            @(Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter 'tpm-update-extracted-*.ps1' -ErrorAction SilentlyContinue).Count | Should -Be 0
+        } finally {
+            Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+Describe '10. Corrupted checksum (malformed digest format)' {
+    It 'refuses to install when the digest field is not a well-formed sha256 plus 64 hex characters' {
+        $root = New-DestructiveTestRoot
+        try {
+            $scriptPath = New-OldScript -Root $root
+            $originalContent = Get-Content -LiteralPath $scriptPath -Raw
+            $validBytes = New-ValidFixtureZipBytes
+
+            $result = Invoke-TpmApplyWithMockedRelease -AssetDigest 'sha256:not-actually-hex' -ScriptPath $scriptPath -WebRequestMock {
+                param($Uri, $Headers, $OutFile, $UseBasicParsing)
+                [System.IO.File]::WriteAllBytes($OutFile, $validBytes)
+            }.GetNewClosure()
+
+            $result.Error | Should -BeOfType ([System.Management.Automation.ErrorRecord])
+            $result.Error.Exception.Message | Should -Match 'malformed checksum'
+
+            (Get-Content -LiteralPath $scriptPath -Raw) | Should -Be $originalContent
+
+            $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'UpdateBackups') -Recurse -Filter 'TeknoParrot-Manager.ps1' -ErrorAction SilentlyContinue)
+            $backupFiles.Count | Should -Be 1
+
+            @(Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter 'tpm-update-extracted-*.ps1' -ErrorAction SilentlyContinue).Count | Should -Be 0
+        } finally {
+            Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+Describe '11. Checksum unavailable because the release query itself failed' {
+    It 'aborts cleanly before any backup/download when the GitHub API call fails' {
+        # There is no separate checksum download with this design -- the
+        # digest travels in the same release-metadata response as the asset
+        # list and download URL (see docs/AUTO_UPDATE.md). A "checksum
+        # download failure" is therefore the same failure mode as the
+        # release query itself failing, already exercised by
+        # Get-LatestRelease's own retry/failure tests in
+        # TpmAutoUpdate.Core.Tests.ps1 -- this test confirms that failure
+        # aborts the -Apply flow cleanly, before any backup or download is
+        # attempted, with the original script untouched.
+        $root = New-DestructiveTestRoot
+        try {
+            $scriptPath = New-OldScript -Root $root
+            $originalContent = Get-Content -LiteralPath $scriptPath -Raw
+
+            Mock -ModuleName TpmAutoUpdate.Core Invoke-GitHubJsonRequest { throw [System.Net.WebException]::new('simulated GitHub API failure') }
+            Mock -ModuleName TpmAutoUpdate.Core Invoke-WebRequest { throw 'Invoke-WebRequest should never be called when the release query fails.' }
+
+            $errorOutput = $null
+            try {
+                & $script:OrchestratorPath -Apply -ScriptPath $scriptPath -Owner 'Jumpstile' -Repository 'teknoparrot-manager' 2>&1 | Out-Null
+            } catch {
+                $errorOutput = $_
+            }
+
+            $errorOutput | Should -BeOfType ([System.Management.Automation.ErrorRecord])
+
+            (Get-Content -LiteralPath $scriptPath -Raw) | Should -Be $originalContent
+            Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeFalse
+        } finally {
+            Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+Describe '12. Module-scope error-action regression guard' {
     It 'sets its own $ErrorActionPreference to Stop regardless of import history' {
         # Regression guard for a real bug found while writing this suite: a
         # module's $ErrorActionPreference is snapshotted from the caller at

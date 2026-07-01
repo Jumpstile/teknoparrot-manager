@@ -155,6 +155,76 @@ Describe 'Select-TpmUpdateAsset' {
     }
 }
 
+Describe 'Get-TpmTrustedAssetDigest' {
+    It 'returns the lowercase hex hash from a well-formed digest' {
+        $asset = [pscustomobject]@{ name = 'x.zip'; digest = ('sha256:' + ('AB' * 32)) }
+        Get-TpmTrustedAssetDigest -Asset $asset | Should -Be ('ab' * 32)
+    }
+
+    It 'throws when the digest field is missing' {
+        $asset = [pscustomobject]@{ name = 'x.zip'; digest = $null }
+        { Get-TpmTrustedAssetDigest -Asset $asset } | Should -Throw '*no GitHub-provided checksum*'
+    }
+
+    It 'throws when the digest field is empty' {
+        $asset = [pscustomobject]@{ name = 'x.zip'; digest = '' }
+        { Get-TpmTrustedAssetDigest -Asset $asset } | Should -Throw '*no GitHub-provided checksum*'
+    }
+
+    It 'throws when the digest is not sha256' {
+        $asset = [pscustomobject]@{ name = 'x.zip'; digest = 'md5:d41d8cd98f00b204e9800998ecf8427e' }
+        { Get-TpmTrustedAssetDigest -Asset $asset } | Should -Throw '*malformed checksum*'
+    }
+
+    It 'throws when the digest hex portion is the wrong length' {
+        $asset = [pscustomobject]@{ name = 'x.zip'; digest = 'sha256:abcd' }
+        { Get-TpmTrustedAssetDigest -Asset $asset } | Should -Throw '*malformed checksum*'
+    }
+
+    It 'throws when the digest contains non-hex characters' {
+        $asset = [pscustomobject]@{ name = 'x.zip'; digest = ('sha256:' + ('g' * 64)) }
+        { Get-TpmTrustedAssetDigest -Asset $asset } | Should -Throw '*malformed checksum*'
+    }
+}
+
+Describe 'Assert-TpmDownloadIntegrity' {
+    It 'does not throw when the computed hash matches' {
+        $path = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-hash-ok-" + [guid]::NewGuid().ToString('N') + '.bin')
+        Set-Content -LiteralPath $path -Value 'known content' -NoNewline -Encoding ascii
+        try {
+            $expected = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            { Assert-TpmDownloadIntegrity -Path $path -ExpectedHash $expected } | Should -Not -Throw
+        } finally {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'is case-insensitive when comparing hashes' {
+        $path = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-hash-case-" + [guid]::NewGuid().ToString('N') + '.bin')
+        Set-Content -LiteralPath $path -Value 'known content' -NoNewline -Encoding ascii
+        try {
+            $expected = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToUpperInvariant()
+            { Assert-TpmDownloadIntegrity -Path $path -ExpectedHash $expected } | Should -Not -Throw
+        } finally {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'throws a specific checksum-mismatch error when the hash does not match' {
+        $path = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-hash-bad-" + [guid]::NewGuid().ToString('N') + '.bin')
+        Set-Content -LiteralPath $path -Value 'tampered or corrupted content' -NoNewline -Encoding ascii
+        try {
+            { Assert-TpmDownloadIntegrity -Path $path -ExpectedHash ('0' * 64) } | Should -Throw '*Checksum verification failed*'
+        } finally {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'throws when the file to verify does not exist' {
+        { Assert-TpmDownloadIntegrity -Path (Join-Path ([System.IO.Path]::GetTempPath()) 'does-not-exist.zip') -ExpectedHash ('0' * 64) } | Should -Throw
+    }
+}
+
 Describe 'Assert-TpmWritableTarget' {
     It 'throws a clear, actionable error when the target is read-only' {
         $path = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-ro-" + [guid]::NewGuid().ToString('N') + '.ps1')
