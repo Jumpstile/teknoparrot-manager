@@ -7,6 +7,43 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.43 BETA  (2026-07-01)  -- tester validation build
+  ------------------------------------------------------------
+  This is a tester validation build. Please validate: the Propagate
+  Controls menu option, the new menu organization and section headers,
+  and the backup-abort behavior described below in addition to your
+  usual regression testing.
+
+  New: standalone "Propagate Controls" menu option (issue #59, approved
+  as a one-time feature freeze exception). Re-copies control bindings
+  from reference games to other compatible games without going through
+  AutoSync/Register first. Thin wrapper around the existing
+  Build-ArchetypePool / Invoke-ControlPropagation pipeline -- no new
+  propagation logic.
+
+  Changed: the main menu is permanently reorganized into four logical
+  groups -- Library Management, Game Enhancements, Maintenance and
+  Recovery, Application -- with bordered section headers for each,
+  using the same visual style this script already uses for section
+  headers elsewhere. See ARCHITECTURE.md for the full old-to-new mode
+  number mapping if you have a saved -Unattended invocation or bookmark
+  referencing an old mode number.
+
+  Fixed (P1): the standalone Propagate Controls option could continue
+  past an incomplete UserProfiles backup -- a backup-copy error only
+  warned and allowed continuation, including automatically in
+  -Unattended mode. Any backup-copy error is now unconditionally fatal
+  for this mode: no "Continue anyway?" override, no -Unattended
+  exception, and propagation never runs against an incomplete backup.
+
+  Docs: full synchronization sweep across README.md (Modes table,
+  table of contents, every inline mode-number reference), both .txt
+  docs, CHANGELOG, ARCHITECTURE.md, and the wiki. Added a permanent
+  Pester test that fails CI if the displayed menu numbers and the
+  underlying switch statement ever drift apart again.
+
+
+-------------------------------------------------------------------------------
   v0.99.42 BETA  (2026-07-01)  -- release-hardening menu reorganization
   ------------------------------------------------------------
   Changed: the main menu is renumbered into four logical groups --
