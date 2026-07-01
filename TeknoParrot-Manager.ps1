@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.41 BETA
+# TeknoParrot Manager  |  v0.99.42 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.41"
+$ScriptVersion = "0.99.42"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -5574,7 +5574,7 @@ function Invoke-StartupUpdateCheck {
         }
 
         # N, or anything else -- remind me later.
-        Write-Host "  Continuing -- you can check again any time from menu option 12." -ForegroundColor DarkGray
+        Write-Host "  Continuing -- you can check again any time from menu option 13." -ForegroundColor DarkGray
         Write-Log "StartupUpdateCheck: user chose to be reminded later."
         return $false
     }
@@ -6443,7 +6443,7 @@ function Invoke-LibraryHealthCheck {
     # Test-*UpToDate helpers, but never writes anything. Third-party FFB
     # plugin coverage is deliberately NOT checked here -- it requires a
     # live fetch of the AutoSetup.cmd table, which would break this mode's
-    # "no network access" guarantee; run mode 7 to check that instead.
+    # "no network access" guarantee; run mode 8 to check that instead.
     $gpuFixNeeded     = New-Object System.Collections.ArrayList
     $ffbBlasterNeeded = New-Object System.Collections.ArrayList
     $dgVoodoo2Needed  = New-Object System.Collections.ArrayList
@@ -6521,7 +6521,7 @@ function Invoke-LibraryHealthCheck {
     } else {
         Write-Host "  FFB Blaster not on  : 0" -ForegroundColor Green
     }
-    Write-Host "  FFB plugin coverage : not checked here (needs network access -- run mode 7)" -ForegroundColor DarkGray
+    Write-Host "  FFB plugin coverage : not checked here (needs network access -- run mode 8)" -ForegroundColor DarkGray
     if ($dgVoodoo2Needed.Count -gt 0) {
         Write-Host ("  dgVoodoo2 not applied : {0}  (legacy DX8/DDraw/Glide games)" -f $dgVoodoo2Needed.Count) -ForegroundColor Yellow
         Write-Host ("    {0}" -f ($dgVoodoo2Needed -join ', ')) -ForegroundColor DarkGray
@@ -6530,7 +6530,7 @@ function Invoke-LibraryHealthCheck {
     }
     if ($gpuFixNeeded.Count -gt 0 -or $ffbBlasterNeeded.Count -gt 0 -or $dgVoodoo2Needed.Count -gt 0) {
         Write-Host ""
-        Write-Host "  Run mode 4 (ReShade), 5 (dgVoodoo2), 6 (GPU fix), or 7 (FFB) to apply these." -ForegroundColor DarkCyan
+        Write-Host "  Run mode 5 (ReShade), 6 (dgVoodoo2), 7 (GPU fix), or 8 (FFB) to apply these." -ForegroundColor DarkCyan
     }
 
     # Postgres coverage is entirely read-only here -- never calls
@@ -6549,7 +6549,7 @@ function Invoke-LibraryHealthCheck {
         Write-Host ("  Postgres configured : {0}" -f $postgresConfigured) -ForegroundColor DarkGray
     }
     if ($postgresNeeded.Count -gt 0) {
-        Write-Host "  Run mode 11 (Postgres setup) to apply these." -ForegroundColor DarkCyan
+        Write-Host "  Run mode 12 (Postgres setup) to apply these." -ForegroundColor DarkCyan
     }
 
     Write-Host ""
@@ -9726,44 +9726,50 @@ while ($true) {
     Write-Host "--------------------------------------------" -ForegroundColor Cyan
     Write-Host " Mode" -ForegroundColor Cyan
     Write-Host "--------------------------------------------" -ForegroundColor Cyan
+    Write-Host " Library Management" -ForegroundColor DarkCyan
     Write-Host "  1) AutoSync        -- Extract ZIPs (NAS or local) to a local"
     Write-Host "                        folder, then register the games."
     Write-Host "  2) Register only   -- Games are already extracted; just register."
-    Write-Host "  3) Crosshair setup -- Pick and deploy custom crosshairs to all"
+    Write-Host "  3) Propagate Controls -- Re-copy control bindings from reference"
+    Write-Host "                        games to other compatible games, without"
+    Write-Host "                        going through AutoSync/Register first."
+    Write-Host ""
+    Write-Host " Game Enhancements (all optional -- games work without these)" -ForegroundColor DarkCyan
+    Write-Host "  4) Crosshair setup -- Pick and deploy custom crosshairs to all"
     Write-Host "                        registered lightgun games."
-    Write-Host "  4) ReShade setup   -- Add visual enhancements (sharper image, better"
-    Write-Host "                        colours, scanlines, borders). Optional -- games"
-    Write-Host "                        work perfectly without this."
-    Write-Host "  5) dgVoodoo2 setup -- Fix old DX8, DirectDraw, and Glide games that"
-    Write-Host "                        crash or show black screens. Optional."
-    Write-Host "  6) GPU fix setup   -- Auto-detect your GPU (AMD / NVIDIA / Intel) and"
+    Write-Host "  5) ReShade setup   -- Add visual enhancements (sharper image, better"
+    Write-Host "                        colours, scanlines, borders)."
+    Write-Host "  6) dgVoodoo2 setup -- Fix old DX8, DirectDraw, and Glide games that"
+    Write-Host "                        crash or show black screens."
+    Write-Host "  7) GPU fix setup   -- Auto-detect your GPU (AMD / NVIDIA / Intel) and"
     Write-Host "                        apply the matching compatibility fix to every"
-    Write-Host "                        registered game that has one. Optional."
-    Write-Host "  7) Force feedback (FFB) setup -- Wheel/stick rumble and force feedback."
+    Write-Host "                        registered game that has one."
+    Write-Host "  8) Force feedback (FFB) setup -- Wheel/stick rumble and force feedback."
     Write-Host "                        Covers TeknoParrot's built-in FFB Blaster (needs a"
     Write-Host "                        paid membership) and a free third-party plugin."
-    Write-Host "  8) BepInEx update check -- Checks games with BepInEx already installed"
+    Write-Host "  9) BepInEx update check -- Checks games with BepInEx already installed"
     Write-Host "                        against the latest stable release and offers to"
     Write-Host "                        update (64-bit only). Never installs it fresh."
-    Write-Host "  9) Restore backup  -- Roll UserProfiles back to a previous backup."
+    Write-Host ""
+    Write-Host " Maintenance and Recovery" -ForegroundColor DarkCyan
     Write-Host "  10) Library health check -- Read-only: reports registered/broken/"
     Write-Host "                        unregistered counts plus GPU fix / FFB Blaster /"
     Write-Host "                        dgVoodoo2 coverage and ReShade/BepInEx install"
     Write-Host "                        counts. No extraction, registration, repair, or"
     Write-Host "                        network access -- just a fast status check."
-    Write-Host "  11) Postgres setup -- Installs/configures the local PostgreSQL"
+    Write-Host "  11) Restore backup  -- Roll UserProfiles, LaunchBox files, or Postgres"
+    Write-Host "                        databases back to a previous backup."
+    Write-Host "  12) Postgres setup -- Installs/configures the local PostgreSQL"
     Write-Host "                        database that some Incredible Technologies"
     Write-Host "                        games need (Golden Tee Live, Power Putt Live,"
     Write-Host "                        Silver Strike Bowling Live, Target Toss Pro)."
     Write-Host "                        Requires running this script as Administrator"
     Write-Host "                        if PostgreSQL isn't installed yet."
-    Write-Host "  12) Check for Updates -- Manual, backup-first check against the latest"
+    Write-Host ""
+    Write-Host " Application" -ForegroundColor DarkCyan
+    Write-Host "  13) Check for Updates -- Manual, backup-first check against the latest"
     Write-Host "                        GitHub release. Nothing is downloaded or changed"
     Write-Host "                        without your explicit confirmation."
-    Write-Host "  13) Propagate Controls -- This copies your current TeknoParrot control"
-    Write-Host "                        bindings from configured reference games to"
-    Write-Host "                        other compatible games. No games will be"
-    Write-Host "                        registered or extracted."
     Write-Host "  14) Exit"
     Write-Host ""
     if ($Unattended) {
@@ -9774,17 +9780,17 @@ while ($true) {
     switch ($modeChoice) {
         "1"     { $mode = "AutoSync"       }
         "2"     { $mode = "RegisterOnly"   }
-        "3"     { $mode = "CrosshairSetup" }
-        "4"     { $mode = "ReShadeSetup"   }
-        "5"     { $mode = "DgVoodoo2Setup" }
-        "6"     { $mode = "GpuFixSetup"    }
-        "7"     { $mode = "FFBSetup"       }
-        "8"     { $mode = "BepInExUpdate"  }
-        "9"     { $mode = "Restore"        }
+        "3"     { $mode = "PropagateControls" }
+        "4"     { $mode = "CrosshairSetup" }
+        "5"     { $mode = "ReShadeSetup"   }
+        "6"     { $mode = "DgVoodoo2Setup" }
+        "7"     { $mode = "GpuFixSetup"    }
+        "8"     { $mode = "FFBSetup"       }
+        "9"     { $mode = "BepInExUpdate"  }
         "10"    { $mode = "HealthCheck"    }
-        "11"    { $mode = "PostgresSetup"  }
-        "12"    { $mode = "CheckForUpdates" }
-        "13"    { $mode = "PropagateControls" }
+        "11"    { $mode = "Restore"        }
+        "12"    { $mode = "PostgresSetup"  }
+        "13"    { $mode = "CheckForUpdates" }
         "14"    { break }
         default { Write-Host "  Invalid choice. Enter 1-14." -ForegroundColor Yellow; continue }
     }
@@ -9943,7 +9949,7 @@ while ($true) {
             Write-Host ("    Errors                 : {0}  (see TeknoParrot-Manager.log)" -f $pgResults.Errors) -ForegroundColor Red
         }
         Write-Host ""
-        Write-Host "  If anything looks wrong, use menu option 9 (Restore backup) ->" -ForegroundColor DarkCyan
+        Write-Host "  If anything looks wrong, use menu option 11 (Restore backup) ->" -ForegroundColor DarkCyan
         Write-Host "  Postgres database backup to undo database changes." -ForegroundColor DarkCyan
         Write-Log ("Postgres setup: complete. Configured={0} DbCreated={1} AlreadyConfigured={2} Errors={3}" -f $pgResults.Configured, $pgResults.DbCreated, $pgResults.AlreadyConfigured, $pgResults.Errors)
         [void](Read-Host "  Press Enter to return to menu")
@@ -11118,7 +11124,7 @@ if ($doLBSetup -eq "Y") {
             Write-Host ("    {0,-12} : {1} game(s) added" -f $name, $lbWriteResult.Results[$name]) -ForegroundColor Green
         }
         Write-Host ("  Backup saved : {0}" -f $lbWriteResult.BackupPath) -ForegroundColor DarkCyan
-        Write-Host "  If anything looks wrong in LaunchBox, use menu option 9 (Restore" -ForegroundColor DarkCyan
+        Write-Host "  If anything looks wrong in LaunchBox, use menu option 11 (Restore" -ForegroundColor DarkCyan
         Write-Host "  backup) -> LaunchBox library backup to undo this." -ForegroundColor DarkCyan
         Write-Host ""
         Write-Host "  New games have no box art/metadata yet -- in LaunchBox, right-click a" -ForegroundColor DarkCyan
@@ -11285,7 +11291,7 @@ if ($doReShade -eq "Y") {
             Write-Host "    2. Run it and point it at any TeknoParrot game exe." -ForegroundColor White
             Write-Host "       It will create a DLL file (e.g. dxgi.dll) in that game folder." -ForegroundColor White
             Write-Host "    3. Copy that DLL to  $PSScriptRoot\ReShade\  and rename it  ReShade64.dll" -ForegroundColor White
-            Write-Host "       Then re-run this script and choose option 4 from the menu." -ForegroundColor White
+            Write-Host "       Then re-run this script and choose option 5 from the menu." -ForegroundColor White
             Write-Host "    -- OR --" -ForegroundColor DarkCyan
             Write-Host "    Enter the full path to the DLL file now:" -ForegroundColor White
             Write-Host ""
@@ -11374,7 +11380,7 @@ if ($doDgVoodoo -eq "Y") {
             Write-Host "         From the MS\x86\ subfolder : D3D8.dll  DDraw.dll  D3DImm.dll" -ForegroundColor White
             Write-Host "         From the 3Dfx\x86\ subfolder : Glide2x.dll  Glide3x.dll" -ForegroundColor White
             Write-Host "         From the root of the ZIP   : dgVoodoo.conf" -ForegroundColor White
-            Write-Host "       Then re-run this script and choose option 5 from the menu." -ForegroundColor White
+            Write-Host "       Then re-run this script and choose option 6 from the menu." -ForegroundColor White
             Write-Host "    -- OR --" -ForegroundColor DarkCyan
             Write-Host "    Enter the full path to a folder that already contains those files:" -ForegroundColor White
             Write-Host ""

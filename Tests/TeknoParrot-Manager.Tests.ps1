@@ -1773,3 +1773,66 @@ Describe "Invoke-StartupUpdateCheck" {
         }
     }
 }
+
+Describe "Main menu source-level drift check" {
+    # The main menu loop is top-level executable code (not a function), so it
+    # is never picked up by the AST function-extraction in the top-level
+    # BeforeAll and can't be exercised directly. Instead, this reads the raw
+    # script source and cross-checks the displayed menu option numbers
+    # against the switch statement's case labels, so a future edit to one
+    # without the other (the exact drift class documented in
+    # LESSONS_LEARNED.md for v0.99.25/v0.99.28) fails CI instead of shipping.
+    BeforeAll {
+        $script:mainScriptContent = Get-Content -LiteralPath $scriptPath -Raw
+    }
+
+    It "has a switch case for every displayed menu option number, 1 through the Exit option, with no gaps" {
+        $menuLineMatches = [regex]::Matches($script:mainScriptContent, 'Write-Host\s+"\s*(\d+)\)\s')
+        $displayedNumbers = $menuLineMatches | ForEach-Object { [int]$_.Groups[1].Value } | Sort-Object -Unique
+
+        # The menu block is the first place these numbers appear in the file;
+        # take the first N matches in file order rather than every numeric
+        # "N)" that could coincidentally appear elsewhere (e.g. inside the
+        # Restore-from-Backup sub-menu, which also uses "1)"/"2)"/"3)").
+        $menuBlockStart = $script:mainScriptContent.IndexOf('Write-Host " Library Management"')
+        $menuBlockEnd    = $script:mainScriptContent.IndexOf('Enter 1-')
+        $menuBlockStart | Should -BeGreaterThan 0
+        $menuBlockEnd | Should -BeGreaterThan $menuBlockStart
+
+        $menuBlockText = $script:mainScriptContent.Substring($menuBlockStart, $menuBlockEnd - $menuBlockStart)
+        $displayedNumbers = [regex]::Matches($menuBlockText, 'Write-Host\s+"\s*(\d+)\)\s') |
+            ForEach-Object { [int]$_.Groups[1].Value } | Sort-Object -Unique
+
+        $switchBlockStart = $script:mainScriptContent.IndexOf('switch ($modeChoice) {')
+        # The switch block's own cases each have their own "{ ... }" (e.g.
+        # "1" { $mode = "AutoSync" }), so IndexOf('}', ...) would only find
+        # the first case's closing brace. "if ($modeChoice -eq" reliably
+        # appears immediately after the whole switch statement closes.
+        $switchBlockEnd   = $script:mainScriptContent.IndexOf('if ($modeChoice -eq', $switchBlockStart)
+        $switchBlockText  = $script:mainScriptContent.Substring($switchBlockStart, $switchBlockEnd - $switchBlockStart)
+        $switchNumbers    = [regex]::Matches($switchBlockText, '"(\d+)"\s*\{') |
+            ForEach-Object { [int]$_.Groups[1].Value } | Sort-Object -Unique
+
+        $displayedNumbers.Count | Should -BeGreaterThan 0
+        # Join to strings for comparison -- piping an array directly into
+        # Should -Be iterates it element-by-element against the whole
+        # right-hand side instead of comparing the collections as a whole.
+        ($displayedNumbers -join ',') | Should -Be ($switchNumbers -join ',')
+
+        $expectedSequence = 1..($displayedNumbers[-1])
+        ($displayedNumbers -join ',') | Should -Be ($expectedSequence -join ',')
+    }
+
+    It "shows Enter 1-N matching the highest displayed menu option" {
+        $menuBlockStart = $script:mainScriptContent.IndexOf('Write-Host " Library Management"')
+        $enterMatch = [regex]::Match($script:mainScriptContent.Substring($menuBlockStart), 'Enter 1-(\d+)')
+        $enterMatch.Success | Should -BeTrue
+
+        $menuBlockEnd = $script:mainScriptContent.IndexOf('Enter 1-', $menuBlockStart)
+        $menuBlockText = $script:mainScriptContent.Substring($menuBlockStart, $menuBlockEnd - $menuBlockStart)
+        $displayedNumbers = [regex]::Matches($menuBlockText, 'Write-Host\s+"\s*(\d+)\)\s') |
+            ForEach-Object { [int]$_.Groups[1].Value } | Sort-Object -Unique
+
+        [int]$enterMatch.Groups[1].Value | Should -Be $displayedNumbers[-1]
+    }
+}

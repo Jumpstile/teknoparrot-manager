@@ -7,6 +7,36 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.42 BETA  (2026-07-01)  -- release-hardening menu reorganization
+  ------------------------------------------------------------
+  Changed: the main menu is renumbered into four logical groups --
+  Library Management (1-3: AutoSync, Register only, Propagate Controls),
+  Game Enhancements (4-9: Crosshair, ReShade, dgVoodoo2, GPU fix, FFB,
+  BepInEx), Maintenance and Recovery (10-12: Library health check,
+  Restore backup, Postgres setup), and Application (13-14: Check for
+  Updates, Exit). This is a text/ordering change only -- no mode's
+  underlying logic changed. If you have a saved -Unattended invocation
+  or a bookmark referencing an old mode number, see the old-to-new
+  mapping in ARCHITECTURE.md's "Menu reorganization" section.
+
+  Old -> new: 1->1, 2->2, 3 Crosshair->4, 4 ReShade->5, 5 dgVoodoo2->6,
+  6 GPU fix->7, 7 FFB->8, 8 BepInEx->9, 9 Restore backup->11,
+  10 Health check->10 (unchanged), 11 Postgres->12,
+  12 Check for Updates->13, 13 Propagate Controls->3, 14 Exit->14.
+
+  Added: a source-level Pester test asserting the displayed menu option
+  numbers and the switch statement's case labels always match, 1
+  through Exit, with no gaps -- catches the exact drift class that
+  previously required a manual grep sweep to find.
+
+  Docs: full sweep across README.md, both .txt docs, ARCHITECTURE.md,
+  and the wiki for every mode-number cross-reference (a script-internal
+  cross-reference and two README.md Table of Contents gaps -- Check for
+  Updates and Uninstalling -- were also found stale during this pass and
+  fixed, independent of the renumbering itself).
+
+
+-------------------------------------------------------------------------------
   v0.99.41 BETA  (2026-07-01)
   ------------------------------------------------------------
   New: "Propagate Controls" menu option (13, Exit moved to 14). Runs the

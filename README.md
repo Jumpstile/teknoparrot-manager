@@ -172,19 +172,23 @@ Choosing mode 1 or 2 offers a preview/dry-run option first — see [Preview / Dr
 
 | # | Mode | What it does |
 |---|------|-------------|
+| **Library Management** | | |
 | 1 | **AutoSync** | Extract ZIPs from NAS or local source, then register |
 | 2 | **Register only** | Games already extracted — just register |
-| 3 | **Crosshair setup** | Pick and deploy custom crosshairs to lightgun games |
-| 4 | **ReShade setup** | Install post-processing shaders |
-| 5 | **dgVoodoo2 setup** | Fix DirectX 8 / DirectDraw / Glide compatibility |
-| 6 | **GPU fix setup** | Apply AMD / NVIDIA / Intel vendor fix to all games |
-| 7 | **Force feedback (FFB) setup** | FFB Blaster (membership) + free third-party plugin |
-| 8 | **BepInEx update check** | Update an existing BepInEx install to the latest stable 64-bit release |
-| 9 | **Restore backup** | Roll TeknoParrot profiles, LaunchBox's library files, or Postgres databases back to a previous backup |
+| 3 | **Propagate Controls** | Re-copy control bindings from reference games to other compatible games, without going through AutoSync/Register first |
+| **Game Enhancements** (all optional — games work without these) | | |
+| 4 | **Crosshair setup** | Pick and deploy custom crosshairs to lightgun games |
+| 5 | **ReShade setup** | Install post-processing shaders |
+| 6 | **dgVoodoo2 setup** | Fix DirectX 8 / DirectDraw / Glide compatibility |
+| 7 | **GPU fix setup** | Apply AMD / NVIDIA / Intel vendor fix to all games |
+| 8 | **Force feedback (FFB) setup** | FFB Blaster (membership) + free third-party plugin |
+| 9 | **BepInEx update check** | Update an existing BepInEx install to the latest stable 64-bit release |
+| **Maintenance and Recovery** | | |
 | 10 | **Library health check** | Read-only registered/broken/empty status, plus GPU fix / FFB Blaster / dgVoodoo2 / Postgres coverage and ReShade/BepInEx install counts |
-| 11 | **Postgres setup** | Installs/configures the local PostgreSQL database some Incredible Technologies games need (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball) |
-| 12 | **Check for Updates** | Manual, backup-first check against the latest GitHub release |
-| 13 | **Propagate Controls** | Re-copy control bindings from reference games to other compatible games, without going through AutoSync/Register first |
+| 11 | **Restore backup** | Roll TeknoParrot profiles, LaunchBox's library files, or Postgres databases back to a previous backup |
+| 12 | **Postgres setup** | Installs/configures the local PostgreSQL database some Incredible Technologies games need (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball) |
+| **Application** | | |
+| 13 | **Check for Updates** | Manual, backup-first check against the latest GitHub release |
 | 14 | **Exit** | Quit the script |
 
 ---
@@ -325,7 +329,7 @@ If anything goes wrong, restore from the backup made at the start of the run.
 
 ## Propagate Controls (standalone menu option)
 
-Mode 13 runs the exact same propagation step described above, without going through AutoSync or Register first, and without extracting or registering any games. Useful when you've already registered your library and just bound a new or updated reference game in TeknoParrotUI — re-run propagation immediately instead of sitting through a full AutoSync/Register pass first.
+Mode 3 runs the exact same propagation step described above, without going through AutoSync or Register first, and without extracting or registering any games. Useful when you've already registered your library and just bound a new or updated reference game in TeknoParrotUI — re-run propagation immediately instead of sitting through a full AutoSync/Register pass first.
 
 Behavior is identical to the propagation step at the end of AutoSync/Register: the same reference-game pool, the same per-game confirmation and hardware-check warnings, the same backup-before-write safety net (UserProfiles are backed up before anything is changed), and the same results reporting. This option is a thin entry point into that existing pipeline, not a different implementation of it.
 
@@ -339,7 +343,7 @@ On first run (or on request), the script asks which controls you have — Xbox p
 
 ## Crosshair Setup
 
-Mode 3 deploys custom P1/P2 crosshair cursor images to all registered lightgun games. Can also be run standalone at any time from the main menu.
+Mode 4 deploys custom P1/P2 crosshair cursor images to all registered lightgun games. Can also be run standalone at any time from the main menu.
 
 **How TeknoParrot uses crosshairs:**
 - **Standard games** — `P1.png` + `P2.png` in the game's executable folder
@@ -377,18 +381,18 @@ The script looks for DLLs in a `ReShade\` folder next to the script:
 - `ReShade64.dll` — for 64-bit games (required)
 - `ReShade32.dll` — for 32-bit games (optional)
 
-**If you downloaded the ZIP release:** DLLs are already included. Skip to running mode 4.
+**If you downloaded the ZIP release:** DLLs are already included. Skip to running mode 5.
 
 **If you cloned from GitHub (DLLs not in repo):**
 1. Download the free installer from [reshade.me](https://reshade.me)
 2. Run it — point it at any 64-bit TeknoParrot game exe. It creates a DLL in that folder.
 3. Copy that DLL to `ReShade\ReShade64.dll` next to the script
 4. (Optional) Repeat with a 32-bit exe and save as `ReShade32.dll`
-5. Run mode 4 or answer Y when prompted after a normal run
+5. Run mode 5 or answer Y when prompted after a normal run
 
 **In-game:** press **Home** to open the ReShade overlay. Toggle effects with tick-boxes, adjust with sliders. Settings save automatically to `ReShade.ini` in the game folder.
 
-**Updating:** the script checks reshade.me for newer versions each run. To update: download the new installer, extract the DLL, replace `ReShade64.dll`, re-run mode 4.
+**Updating:** the script checks reshade.me for newer versions each run. To update: download the new installer, extract the DLL, replace `ReShade64.dll`, re-run mode 5.
 
 **Signature check:** before deploying, the script checks the Authenticode signature on your ReShade DLL(s) — ReShade's own installer is code-signed, and that signature survives extracting/renaming the DLL. An invalid or missing signature is shown as a warning (with a plain-English reason) but doesn't block setup, since you supplied the file yourself; just make sure it actually came from reshade.me.
 
@@ -419,7 +423,7 @@ Some older arcade games use DirectX 8, DirectDraw, or the 3dfx Glide API. On mod
    - From `MS\x86\`: `D3D8.dll`, `DDraw.dll`, `D3DImm.dll`
    - From `3Dfx\x86\`: `Glide2x.dll`, `Glide3x.dll`
    - From the ZIP root: `dgVoodoo.conf`
-3. Run mode 5 or answer Y when prompted after a normal run
+3. Run mode 6 or answer Y when prompted after a normal run
 
 The wizard scans every registered game exe for legacy API imports and shows auto-detected games first. You can install to all at once or pick individually.
 
@@ -431,7 +435,7 @@ Mode 10 (Library health check) reports which registered games import a legacy AP
 
 ## GPU Compatibility Fixes
 
-Many TeknoParrot games include optional per-vendor fix settings (AMD, NVIDIA, Intel). Mode 6 auto-detects your GPU via WMI and applies the correct fix to every registered game that has one. Scans `GameProfiles` at runtime — no update needed when new games are added. Safe to re-run any time you change your GPU.
+Many TeknoParrot games include optional per-vendor fix settings (AMD, NVIDIA, Intel). Mode 7 auto-detects your GPU via WMI and applies the correct fix to every registered game that has one. Scans `GameProfiles` at runtime — no update needed when new games are added. Safe to re-run any time you change your GPU.
 
 Not sure if you're missing any? Mode 10 (Library health check) reports which registered games are eligible for a GPU fix but don't have it applied yet, without changing anything.
 
@@ -439,7 +443,7 @@ Not sure if you're missing any? Mode 10 (Library health check) reports which reg
 
 ## Force Feedback (FFB) Setup
 
-Force feedback makes a wheel or stick push back / rumble to match what's happening on screen (road vibration, recoil, collisions). Mode 7 covers two completely independent mechanisms — neither requires the other, and both can be set up at once since they cover different games.
+Force feedback makes a wheel or stick push back / rumble to match what's happening on screen (road vibration, recoil, collisions). Mode 8 covers two completely independent mechanisms — neither requires the other, and both can be set up at once since they cover different games.
 
 **Mechanism 1 — FFB Blaster (native, requires a paid membership)**
 
@@ -447,7 +451,7 @@ TeknoParrot's own built-in force feedback feature. Well-integrated, but it **onl
 
 If you answer Y, the script scans your TeknoParrot install's `GameProfiles` for the FFB Blaster field (detected at runtime, never hardcoded) and enables it on every registered profile that has it. `UserProfiles` are backed up first.
 
-Mode 10 (Library health check) also reports which registered games are eligible for FFB Blaster but don't have it enabled yet (read-only, no network access). Third-party plugin coverage isn't included there since checking it needs a live lookup -- use mode 7 for that.
+Mode 10 (Library health check) also reports which registered games are eligible for FFB Blaster but don't have it enabled yet (read-only, no network access). Third-party plugin coverage isn't included there since checking it needs a live lookup -- use mode 8 for that.
 
 **Mechanism 2 — Third-party FFB plugin (free, no subscription needed)**
 
@@ -459,15 +463,15 @@ Controller support (per the plugin's own docs): true force feedback on FFB-capab
 
 **If a game is covered by both:** the script lists every such game once and asks a single question — keep FFB Blaster (native) for all of them, or use the third-party plugin for all of them. Your answer applies to the whole list for that run; it never silently picks a side.
 
-**Removing FFB:** FFB Blaster — manually set the field back to `0` in the affected `UserProfiles\*.xml` files, or restore from a pre-FFB backup (mode 9). Third-party plugin — delete the deployed DLL from the game's folder.
+**Removing FFB:** FFB Blaster — manually set the field back to `0` in the affected `UserProfiles\*.xml` files, or restore from a pre-FFB backup (mode 11). Third-party plugin — delete the deployed DLL from the game's folder.
 
 ---
 
 ## BepInEx Update Check
 
-[BepInEx](https://docs.bepinex.dev) is a third-party Unity plugin/modding framework — not part of TeknoParrot itself. A handful of games need a community plugin running on top of it to get controls or fixes working. Mode 8 shows a live-fetched list of known examples each time you open it, checked against the eggmansworld.github.io compatibility data, so it keeps tracking new games as they get added upstream instead of going stale.
+[BepInEx](https://docs.bepinex.dev) is a third-party Unity plugin/modding framework — not part of TeknoParrot itself. A handful of games need a community plugin running on top of it to get controls or fixes working. Mode 9 shows a live-fetched list of known examples each time you open it, checked against the eggmansworld.github.io compatibility data, so it keeps tracking new games as they get added upstream instead of going stale.
 
-**Mode 8 only checks/updates games that already have BepInEx installed** — it never installs BepInEx into a game that doesn't have it. Only the latest **stable 64-bit** release is ever used; never a 32-bit build, never a pre-release. A 32-bit install is left alone and reported separately.
+**Mode 9 only checks/updates games that already have BepInEx installed** — it never installs BepInEx into a game that doesn't have it. Only the latest **stable 64-bit** release is ever used; never a 32-bit build, never a pre-release. A 32-bit install is left alone and reported separately.
 
 If anything is outdated, the script lists every such game once and asks a single question: update all of them? Answering Y backs up the existing `BepInEx` folder and related files (to `BepInEx_Backup_<timestamp>` inside that game's own folder) before overwriting anything.
 
@@ -477,13 +481,13 @@ If anything is outdated, the script lists every such game once and asks a single
 
 ## Postgres Setup
 
-Several Incredible Technologies games — Golden Tee Live (2006–2019), Power Putt Live (2012/2013), Silver Strike Bowling Live, Target Toss Pro (Bags / Lawn Darts), and Orange County Choppers Pinball — need a small local PostgreSQL 8.3 database to store game data. Mode 11 detects which of your registered games need it automatically (no hardcoded list to keep up to date) and handles the rest:
+Several Incredible Technologies games — Golden Tee Live (2006–2019), Power Putt Live (2012/2013), Silver Strike Bowling Live, Target Toss Pro (Bags / Lawn Darts), and Orange County Choppers Pinball — need a small local PostgreSQL 8.3 database to store game data. Mode 12 detects which of your registered games need it automatically (no hardcoded list to keep up to date) and handles the rest:
 
 - **If PostgreSQL isn't installed yet**, it downloads and installs PostgreSQL 8.3 silently. This requires running the script as **Administrator** — the only feature in this script that does, since it creates a real Windows service and a local `postgres` user account. You'll be asked for two passwords: a service-account password (Windows uses it to run PostgreSQL in the background — you'll rarely need it again) and a database password (the important one — every Postgres game's settings need it).
 - **If PostgreSQL is already installed, it is never reinstalled or modified.** The script just uses it as-is.
 - **For each Postgres-needing game, a database that already exists is never recreated or restored over.** Likewise, a `Pass` field that's already filled in is left completely untouched.
 - For games whose profile already has TeknoParrot's own "Automatically create Database" feature (Golden Tee Live 2018 and newer), the script only fills in the connection fields (server address, port, username) — TeknoParrot creates the database itself and asks for the backup location on first launch. For older profiles that predate that feature, this script creates the database and restores that game's bundled backup itself.
-- Every time this mode runs, it backs up every existing Postgres database first, before touching anything — restore them via mode 9 if anything looks wrong.
+- Every time this mode runs, it backs up every existing Postgres database first, before touching anything — restore them via mode 11 if anything looks wrong.
 - The database password is encrypted (Windows DPAPI, tied to your Windows account and this PC) before being saved to the config file — the first secret this script has ever needed to store.
 
 You don't need to run this mode at all if none of your registered games need Postgres — it detects that and tells you so without installing anything.
@@ -494,7 +498,7 @@ You don't need to run this mode at all if none of your registered games need Pos
 
 ## Check for Updates
 
-Mode 12 manually checks the latest TeknoParrot Manager release on GitHub against the version you're running. Nothing is downloaded or changed without your explicit confirmation.
+Mode 13 manually checks the latest TeknoParrot Manager release on GitHub against the version you're running. Nothing is downloaded or changed without your explicit confirmation.
 
 - If you're already current, it says so and returns you to the menu.
 - If a newer version exists, it explains exactly what updating will do — back up the current script, download the update, validate it, replace the script, and require a restart — before asking a single Y/N question.
@@ -504,7 +508,7 @@ Mode 12 manually checks the latest TeknoParrot Manager release on GitHub against
 
 You can also run the update check outside the menu via `tools\Invoke-TpmAutoUpdate.ps1 -CheckOnly` (or `-Apply`) — see `docs/AUTO_UPDATE.md` for that standalone helper.
 
-**Automatic check at startup:** the script also quietly checks for updates once, right when it launches (`CheckForUpdatesOnStartup` in `TeknoParrot-Manager.config.json`, default `true`). If you're current, nothing is shown. If a newer version exists, you'll see the version and a brief release summary, then a choice: **Y** to update now (same backup-first process as mode 12), **N** to continue to the menu and be asked again next time, or **V** to read the full release notes first. Set `CheckForUpdatesOnStartup` to `false` in the config file to disable this and only check manually via mode 12. Never runs in `-Unattended` mode.
+**Automatic check at startup:** the script also quietly checks for updates once, right when it launches (`CheckForUpdatesOnStartup` in `TeknoParrot-Manager.config.json`, default `true`). If you're current, nothing is shown. If a newer version exists, you'll see the version and a brief release summary, then a choice: **Y** to update now (same backup-first process as mode 13), **N** to continue to the menu and be asked again next time, or **V** to read the full release notes first. Set `CheckForUpdatesOnStartup` to `false` in the config file to disable this and only check manually via mode 13. Never runs in `-Unattended` mode.
 
 See `docs/Compatibility.md` for the pre-1.0 compatibility checklist and known tester watchlist.
 
@@ -749,10 +753,10 @@ After registration the script offers to repair broken game paths — paths that 
 ```
 If backup folder creation fails, the script exits rather than proceeding without a restore point.
 
-**Restore:** choose mode 9 from the menu, then pick which backup to restore:
+**Restore:** choose mode 11 from the menu, then pick which backup to restore:
 1. **TeknoParrot UserProfiles backup** — lists all timestamped backups with file counts, you pick one by number, type `YES` to confirm.
 2. **LaunchBox library backup** — only relevant if you've used the direct LaunchBox integration. Lists timestamped backups from `Scripts\LaunchBoxBackups\`, restoring `Emulators.xml`/`Platforms.xml`/platform file(s) to their state before the script last wrote to them. Also refuses to run while LaunchBox/BigBox is open.
-3. **Postgres database backup** — only relevant if you've used Postgres setup (mode 11). Lists timestamped backups from `Scripts\PostgresBackups\`, restoring each database from its `pg_dump` snapshot. This replaces the *current* content of each database restored — confirmed with a `YES` prompt first.
+3. **Postgres database backup** — only relevant if you've used Postgres setup (mode 12). Lists timestamped backups from `Scripts\PostgresBackups\`, restoring each database from its `pg_dump` snapshot. This replaces the *current* content of each database restored — confirmed with a `YES` prompt first.
 
 **Manual restore:** close TeknoParrot, copy `.xml` files from a backup folder back into `UserProfiles`, overwriting the current ones. For LaunchBox, close LaunchBox and copy the backed-up files from `Scripts\LaunchBoxBackups\<timestamp>\` back into LaunchBox's `Data\` folder at the matching relative path.
 
@@ -772,12 +776,12 @@ If backup folder creation fails, the script exits rather than proceeding without
 
 ## Uninstalling / Removing the Manager
 
-The manager only adds files to the `Scripts\` folder it lives in and to TeknoParrot's own `UserProfiles\` folder. It does not install anything system-wide (except optionally PostgreSQL via mode 11, which has its own cleanup path).
+The manager only adds files to the `Scripts\` folder it lives in and to TeknoParrot's own `UserProfiles\` folder. It does not install anything system-wide (except optionally PostgreSQL via mode 12, which has its own cleanup path).
 
 **To remove the manager entirely:**
-1. Restore your UserProfiles to any pre-script state using mode 9 (Restore backup) if you want to undo all changes, or simply leave them as-is if they are working correctly.
-2. Stop and uninstall PostgreSQL 8.3 if you installed it via mode 11 — open mode 11 and choose "Uninstall" — before deleting the Scripts folder.
-3. If you used the direct LaunchBox integration, restore your LaunchBox files first via mode 9 > LaunchBox library backup, then close LaunchBox so it re-reads its files.
+1. Restore your UserProfiles to any pre-script state using mode 11 (Restore backup) if you want to undo all changes, or simply leave them as-is if they are working correctly.
+2. Stop and uninstall PostgreSQL 8.3 if you installed it via mode 12 — open mode 12 and choose "Uninstall" — before deleting the Scripts folder.
+3. If you used the direct LaunchBox integration, restore your LaunchBox files first via mode 11 > LaunchBox library backup, then close LaunchBox so it re-reads its files.
 4. Delete the `Scripts\` folder.
 
 **Files the manager creates (can be individually removed):**
@@ -795,7 +799,7 @@ The manager only adds files to the `Scripts\` folder it lives in and to TeknoPar
 | `PostgresBackups\` | Yes -- only needed to restore Postgres databases |
 | `TeknoParrot-LaunchBox-Import.xml` | Yes -- recreated if you re-run LaunchBox export |
 
-**Rollback without full removal:** Use mode 9 (Restore backup) at any time to revert your TeknoParrot UserProfiles, LaunchBox library files, or Postgres databases to any previous state. This is the intended rollback path for a bad run, not a full uninstall.
+**Rollback without full removal:** Use mode 11 (Restore backup) at any time to revert your TeknoParrot UserProfiles, LaunchBox library files, or Postgres databases to any previous state. This is the intended rollback path for a bad run, not a full uninstall.
 
 ---
 
@@ -817,7 +821,7 @@ Either no reference game for that control type has been bound yet (see "Set up c
 Delete that game's `.xml` from `UserProfiles` and add a `forceArchetype` entry in `overrides.json`: `{ "WrongCode": "CorrectCode" }`. Re-run.
 
 **A game's controls are wrong after propagation.**
-Use mode 9 to restore the backup made at the start of that run, or delete the affected game's `.xml` and re-run propagation after correcting the reference game's bindings in TeknoParrotUI.
+Use mode 11 to restore the backup made at the start of that run, or delete the affected game's `.xml` and re-run propagation after correcting the reference game's bindings in TeknoParrotUI.
 
 **A game appears twice in TeknoParrotUI.**
 Delete one of the duplicate `.xml` files from `UserProfiles`. Keep the one with the correct GamePath and any bindings already set.
@@ -832,7 +836,7 @@ TeknoParrot must be set up as an emulator in HyperSpin 2 first. The title must c
 The scan is still running — large game libraries can take a minute. A progress bar (`Scanning game library`) shows current folder/total exe count. If the console is truly frozen (no progress bar, no output for several minutes), check that your staging folder is reachable and not on a disconnected network drive.
 
 **"Access denied" or "you do not have permission" errors.**
-Most features run as a normal user. The only exception: Postgres installation (mode 11) requires Administrator — right-click the `.bat` launcher and choose "Run as administrator" for that run only. All other modes do not require elevated rights.
+Most features run as a normal user. The only exception: Postgres installation (mode 12) requires Administrator — right-click the `.bat` launcher and choose "Run as administrator" for that run only. All other modes do not require elevated rights.
 
 **"Path too long" errors during extraction.**
 TeknoParrot's own folder structure adds path length on top of already-long staging paths. Shorten your staging folder's path (e.g. `E:\TP Games\` instead of `E:\My Arcade Games Collection\TeknoParrot Games 2024\`) and re-run. The ACTION REQUIRED section also flags specific games that TeknoParrot itself requires to be at a short path.
@@ -841,7 +845,7 @@ TeknoParrot's own folder structure adds path length on top of already-long stagi
 The script detects mapped network drives to avoid scanning them during game discovery. If a previously mapped drive is now unreachable, startup may take a few seconds before timing out gracefully — this is expected and the drive is skipped.
 
 **Postgres connection fails / "password authentication failed".**
-The database password is saved encrypted in `config.json`. If you changed it externally (via pgAdmin or similar), delete `PostgresSuperPasswordEncrypted` from `config.json` and re-run mode 11 — the script will ask for the correct password and save it again.
+The database password is saved encrypted in `config.json`. If you changed it externally (via pgAdmin or similar), delete `PostgresSuperPasswordEncrypted` from `config.json` and re-run mode 12 — the script will ask for the correct password and save it again.
 
 **"LaunchBox is currently open" error.**
 The direct LaunchBox integration refuses to write while LaunchBox or BigBox is running. Close both, then re-run.
@@ -890,4 +894,4 @@ Pull requests are welcome too. Full source and version history: [github.com/Jump
 
 ---
 
-> v0.99.41 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v0.99.42 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.

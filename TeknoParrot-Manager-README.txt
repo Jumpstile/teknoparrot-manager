@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.99.41 BETA
+  TeknoParrot Manager  |  v0.99.42 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -35,20 +35,20 @@
     REGISTRATION
     HOW FUZZY MATCHING WORKS
     CONTROL PROPAGATION
-    PROPAGATE CONTROLS              -- mode 13
+    PROPAGATE CONTROLS              -- mode 3
     DEVICE SURVEY
     FRONTEND LAUNCHER INTEGRATION
       LAUNCHBOX
       HYPERSPIN 2
       RETROBAT / BATOCERA
-    CROSSHAIR SETUP                -- mode 3
-    RESHADE VISUAL ENHANCEMENTS    -- mode 4
-    DGVOODOO2 LEGACY COMPATIBILITY -- mode 5
-    GPU COMPATIBILITY FIXES        -- mode 6
-    FORCE FEEDBACK (FFB) SETUP     -- mode 7
-    BEPINEX UPDATE CHECK           -- mode 8
-    POSTGRES SETUP                 -- mode 11
-    CHECK FOR UPDATES              -- mode 12
+    CROSSHAIR SETUP                -- mode 4
+    RESHADE VISUAL ENHANCEMENTS    -- mode 5
+    DGVOODOO2 LEGACY COMPATIBILITY -- mode 6
+    GPU COMPATIBILITY FIXES        -- mode 7
+    FORCE FEEDBACK (FFB) SETUP     -- mode 8
+    BEPINEX UPDATE CHECK           -- mode 9
+    POSTGRES SETUP                 -- mode 12
+    CHECK FOR UPDATES              -- mode 13
     THUMBNAIL DOWNLOAD
     "NOT IN TEKNOPARROT" REPORT
     CONTROLS STATUS FILE
@@ -267,7 +267,7 @@
     your GPU and applies the correct fix to every registered game that has one.
     TeknoParrot's GameProfiles folder is scanned at runtime so newly added games
     are always covered. Safe to re-run any time you change or update your GPU.
-    Available as menu option 6 or as an optional step at the end of a normal run.
+    Available as menu option 7 or as an optional step at the end of a normal run.
 
   - Force feedback (FFB). Two independent ways to get wheel/stick rumble and
     force feedback -- TeknoParrot's own built-in FFB Blaster (needs a paid
@@ -275,7 +275,7 @@
     needed, fetched live from GitHub each run). Both can be set up at once
     since they cover different games; if a game is covered by both, you are
     asked once which to use for all such games. See FORCE FEEDBACK (FFB)
-    SETUP below for full details. Available as menu option 7.
+    SETUP below for full details. Available as menu option 8.
 
   - BepInEx update check. BepInEx is a third-party Unity plugin/modding
     framework some games need (a live-fetched example list is shown in the
@@ -283,7 +283,7 @@
     against the latest stable release and offers one batched update. Never
     installs BepInEx into a game that doesn't have it, and only the 64-bit
     stable line is ever used. See BEPINEX UPDATE CHECK below. Available as
-    menu option 8.
+    menu option 9.
 
   - Postgres setup. Installs and configures the local PostgreSQL 8.3
     database that some Incredible Technologies games need (Golden Tee
@@ -293,13 +293,13 @@
     PostgreSQL install, and never recreates or restores over a database
     that already exists. Installing PostgreSQL itself requires running
     this script as Administrator. See POSTGRES SETUP below. Available as
-    menu option 11.
+    menu option 12.
 
   - Check for Updates. Manually checks the latest GitHub release against
     the version you're running. Nothing is downloaded or changed without
     your explicit Y/N confirmation, and a read-only script is refused
     rather than silently overridden. See CHECK FOR UPDATES below.
-    Available as menu option 12.
+    Available as menu option 13.
 
   - Path-length, file-version, and GPU compatibility warnings (automatic).
     Every AutoSync/Register run automatically checks for known
@@ -513,6 +513,9 @@
   The main menu is a persistent loop -- after each mode finishes you are
   returned to the menu to choose another mode or exit.
 
+  LIBRARY MANAGEMENT
+  ------------------
+
   1) AutoSync
        For games stored as ZIP files (for example on a NAS).
        You provide:  a ZIP source folder and a local staging folder.
@@ -525,53 +528,56 @@
        You provide:  the folder that contains your extracted games.
        The script:   scans it and registers everything it recognises.
 
-  3) Crosshair setup
+  3) Propagate Controls
+       Copies your current TeknoParrot control bindings from configured
+       reference games to other compatible games. No games are registered
+       or extracted -- this is the same propagation step offered at the
+       end of AutoSync/Register, exposed as its own menu option so you can
+       re-run it any time without going through extraction/registration
+       first. See CONTROL PROPAGATION below for full details.
+
+  GAME ENHANCEMENTS (all optional -- games work without these)
+  --------------------------------------------------------------
+
+  4) Crosshair setup
        Deploys custom P1/P2 crosshair cursor images to all registered
        lightgun games. Opens an HTML preview grid (321 included designs)
        in your browser so you can browse before picking by number.
        Optionally hides the Windows cursor for all lightgun games.
        Returns to the menu when done.
 
-  4) ReShade setup
+  5) ReShade setup
        Installs ReShade post-processing into your game folders. Auto-detects
        the correct DLL name and architecture (32-bit or 64-bit) for each
-       game. Optional -- see RESHADE VISUAL ENHANCEMENTS below.
+       game. See RESHADE VISUAL ENHANCEMENTS below.
        Returns to the menu when done.
 
-  5) dgVoodoo2 setup
+  6) dgVoodoo2 setup
        Deploys dgVoodoo2 compatibility DLLs for games that use DirectX 8,
        DirectDraw, or the Glide API. Auto-detects which registered games
-       need it. Optional -- see DGVOODOO2 LEGACY COMPATIBILITY below.
+       need it. See DGVOODOO2 LEGACY COMPATIBILITY below.
        Returns to the menu when done.
 
-  6) GPU fix setup
+  7) GPU fix setup
        Detects your GPU vendor (AMD/NVIDIA/Intel) via WMI and applies the
        correct fix flag to every registered game that has one. Scans
        TeknoParrot's GameProfiles at runtime -- no update needed when new
-       games are added. Optional. Returns to the menu when done.
+       games are added. Returns to the menu when done.
 
-  7) Force feedback (FFB) setup
+  8) Force feedback (FFB) setup
        Sets up wheel/stick rumble and force feedback for supported games.
        Covers two independent mechanisms -- see FORCE FEEDBACK (FFB) SETUP
-       below. Optional. Returns to the menu when done.
+       below. Returns to the menu when done.
 
-  8) BepInEx update check
+  9) BepInEx update check
        Checks every registered game that already has BepInEx installed
        against the latest stable release and offers a single batched
        update. Never installs BepInEx fresh into a game that doesn't have
        it, and only ever uses the latest stable 64-bit build -- see
-       BEPINEX UPDATE CHECK below. Optional. Returns to the menu when done.
+       BEPINEX UPDATE CHECK below. Returns to the menu when done.
 
-  9) Restore from backup
-       Choose which backup to restore: (1) your UserProfiles -- rolls back
-       to a previous backup without touching File Explorer, lists all
-       timestamped backup folders with file counts, you pick one by number,
-       type YES to confirm; (2) LaunchBox's library files -- only relevant
-       if you have used the direct LaunchBox integration, restores
-       Emulators.xml/Platforms.xml/platform file(s) to their state before
-       the script last wrote to them; or (3) Postgres databases -- only
-       relevant if you have used Postgres setup (mode 11), restores each
-       database from its pg_dump backup. Returns to the menu when done.
+  MAINTENANCE AND RECOVERY
+  ------------------------
 
   10) Library health check
        Read-only. Reports how many registered profiles have a valid,
@@ -581,7 +587,7 @@
        for a GPU fix, FFB Blaster, dgVoodoo2, or Postgres setup but don't
        have it applied yet (all checked locally, no network access --
        third-party FFB plugin coverage needs a live lookup, so check that
-       via mode 7 instead). Also shows, purely informationally, how many
+       via mode 8 instead). Also shows, purely informationally, how many
        registered games have ReShade or BepInEx installed -- these two are
        per-game choices rather than a clear right answer, so they are not
        flagged as something to fix, just reported as a count. Does not
@@ -589,7 +595,18 @@
        to run any time for a quick status check. Returns to the menu when
        done.
 
-  11) Postgres setup
+  11) Restore from backup
+       Choose which backup to restore: (1) your UserProfiles -- rolls back
+       to a previous backup without touching File Explorer, lists all
+       timestamped backup folders with file counts, you pick one by number,
+       type YES to confirm; (2) LaunchBox's library files -- only relevant
+       if you have used the direct LaunchBox integration, restores
+       Emulators.xml/Platforms.xml/platform file(s) to their state before
+       the script last wrote to them; or (3) Postgres databases -- only
+       relevant if you have used Postgres setup (mode 12), restores each
+       database from its pg_dump backup. Returns to the menu when done.
+
+  12) Postgres setup
        Installs and configures the local PostgreSQL 8.3 database that some
        Incredible Technologies games need (Golden Tee Live, Power Putt
        Live, Silver Strike Bowling Live, Target Toss Pro, Orange County
@@ -600,19 +617,14 @@
        requires running this script as Administrator. See POSTGRES SETUP
        below for full details.
 
-  12) Check for Updates
+  APPLICATION
+  -----------
+
+  13) Check for Updates
        Manually checks the latest GitHub release against the version
        you're running. Nothing is downloaded or changed without your
        explicit Y/N confirmation. See CHECK FOR UPDATES below for full
        details.
-
-  13) Propagate Controls
-       Copies your current TeknoParrot control bindings from configured
-       reference games to other compatible games. No games are registered
-       or extracted -- this is the same propagation step offered at the
-       end of AutoSync/Register, exposed as its own menu option so you can
-       re-run it any time without going through extraction/registration
-       first. See CONTROL PROPAGATION below for full details.
 
   14) Exit
        Exits the script.
@@ -890,10 +902,10 @@
 
 
 -------------------------------------------------------------------------------
-  PROPAGATE CONTROLS                -- mode 13
+  PROPAGATE CONTROLS                -- mode 3
 -------------------------------------------------------------------------------
 
-  Mode 13 runs the exact same propagation step described above (same pool,
+  Mode 3 runs the exact same propagation step described above (same pool,
   same confirmation and hardware-check warnings, same backup-before-write
   safety net, same results reporting), without going through AutoSync or
   Register first, and without extracting or registering any games.
@@ -971,7 +983,7 @@
   a newly added game and use Edit... -> Search to fetch metadata and box art,
   the same way you would for any manually-imported game.
 
-  If anything looks wrong afterward, use menu option 9 (Restore backup) and
+  If anything looks wrong afterward, use menu option 11 (Restore backup) and
   choose "LaunchBox library backup" to restore the exact files the script
   changed, from before it changed them.
 
@@ -1050,7 +1062,7 @@
   CROSSHAIR SETUP
   ---------------
 
-  Mode 3 deploys custom crosshair cursor images to all registered lightgun
+  Mode 4 deploys custom crosshair cursor images to all registered lightgun
   games. It can also be run as a standalone mode at any time from the main
   menu without triggering a full AutoSync or registration pass.
 
@@ -1099,7 +1111,7 @@
        cursor-hide field (HideCursor, "Hide Cursor", or DisableCursor
        depending on the game) to enabled in each gun game's UserProfile XML.
        A timestamped backup is taken automatically before any XML is changed.
-       This step is independent -- you can answer N and run mode 3 again
+       This step is independent -- you can answer N and run mode 4 again
        later if you change your mind.
 
   ADDING YOUR OWN CROSSHAIRS
@@ -1169,7 +1181,7 @@
 
     The script looks for ReShade DLLs in the  ReShade\  folder next to the
     script and deploys the right one for each game's architecture:
-      ReShade64.dll -- for 64-bit games (required for Mode 4 to work)
+      ReShade64.dll -- for 64-bit games (required for Mode 5 to work)
       ReShade32.dll -- for 32-bit games (optional; 32-bit games are skipped
                        if this file is absent)
 
@@ -1193,7 +1205,7 @@
              If you also have 32-bit games: repeat with a 32-bit game exe and
              rename the resulting DLL to  ReShade32.dll.
 
-    Step 4.  Run TeknoParrot Manager and choose mode 4 (ReShade setup), or
+    Step 4.  Run TeknoParrot Manager and choose mode 5 (ReShade setup), or
              answer Y when prompted at the end of a normal run.
 
     The script will:
@@ -1250,7 +1262,7 @@
     2. Run it on any game exe (or extract the DLL manually with 7-Zip).
     3. Copy the new DLL to  ReShade\ReShade64.dll, replacing the old one.
        If you use ReShade32.dll for 32-bit games, update that file too.
-    4. Re-run ReShade setup (mode 4) to redeploy the updated DLLs.
+    4. Re-run ReShade setup (mode 5) to redeploy the updated DLLs.
 
   REMOVING RESHADE
 
@@ -1322,7 +1334,7 @@
            From the  MS\x86\     subfolder : D3D8.dll  DDraw.dll  D3DImm.dll
            From the  3Dfx\x86\  subfolder : Glide2x.dll  Glide3x.dll
            From the root of the ZIP      : dgVoodoo.conf
-      3. Run TeknoParrot Manager and choose mode 5 (dgVoodoo2 setup), or
+      3. Run TeknoParrot Manager and choose mode 6 (dgVoodoo2 setup), or
          answer Y to the prompt at the end of a normal run.
 
     Method B -- Custom folder:
@@ -1375,14 +1387,14 @@
   ------------------------
 
   Many TeknoParrot games include optional per-vendor fix settings (AMD,
-  NVIDIA, Intel) in their profiles. Mode 6 auto-detects your GPU and applies
+  NVIDIA, Intel) in their profiles. Mode 7 auto-detects your GPU and applies
   the correct fix to every registered game that has one. TeknoParrot's
   GameProfiles folder is scanned at runtime, so newly added games are always
   covered automatically -- no script update needed.
 
   To run:
 
-    Choose mode 6 from the main menu, or answer Y when prompted at the end
+    Choose mode 7 from the main menu, or answer Y when prompted at the end
     of a normal run.
 
   Safe to re-run any time you change your GPU or update its drivers.
@@ -1403,7 +1415,7 @@
   What is force feedback?
 
     Force feedback makes a wheel or stick push back / rumble to match what
-    is happening on screen (road vibration, recoil, collisions). Mode 7
+    is happening on screen (road vibration, recoil, collisions). Mode 8
     covers two completely independent mechanisms. Neither requires the
     other, and both can be set up at once -- they cover different games.
 
@@ -1455,7 +1467,7 @@
 
     FFB Blaster: there is no "undo" button in the menu -- manually set the
     field back to 0 in the affected UserProfiles\*.xml files, or restore
-    from a pre-FFB backup (mode 9) if you ran this before enabling FFB
+    from a pre-FFB backup (mode 11) if you ran this before enabling FFB
     Blaster.
     Third-party plugin: delete the deployed DLL file from the game's folder.
 
@@ -1468,12 +1480,12 @@
     BepInEx is a third-party Unity plugin/modding framework -- not part of
     TeknoParrot itself. A handful of TeknoParrot games need a community
     plugin running on top of BepInEx to get controls or fixes working.
-    Mode 8 shows a live-fetched list of known examples (checked against
+    Mode 9 shows a live-fetched list of known examples (checked against
     the eggmansworld.github.io compatibility data each time you open this
     mode, so it keeps tracking new games as they're added upstream rather
     than going stale).
 
-  What mode 8 does (and does not do)
+  What mode 9 does (and does not do)
 
     This mode ONLY checks and updates games that ALREADY have BepInEx
     installed. It never installs BepInEx into a game that doesn't have it
@@ -1516,15 +1528,15 @@
     Several Incredible Technologies games need a small local PostgreSQL
     8.3 database to store game data: Golden Tee Live (2006-2019), Power
     Putt Live (2012/2013), Silver Strike Bowling Live, Target Toss Pro
-    (Bags / Lawn Darts), and Orange County Choppers Pinball. Mode 11
+    (Bags / Lawn Darts), and Orange County Choppers Pinball. Mode 12
     detects which of your registered games need this automatically -- no
     hardcoded list to keep up to date, so a newly added game is covered
     the moment you register it.
 
-    If none of your registered games need it, mode 11 says so and exits
+    If none of your registered games need it, mode 12 says so and exits
     immediately -- it never installs anything you don't need.
 
-  What mode 11 does
+  What mode 12 does
 
     If PostgreSQL isn't installed yet, the script downloads and installs
     it silently. This is the ONLY feature in this script that requires
@@ -1557,8 +1569,8 @@
         newest dated subfolder, or the highest-numbered file, matching
         how the game ships its own backups).
 
-    Every time mode 11 runs, it backs up every existing Postgres database
-    first, before touching anything -- restore them via mode 9) Restore
+    Every time mode 12 runs, it backs up every existing Postgres database
+    first, before touching anything -- restore them via mode 11) Restore
     from backup if anything looks wrong.
 
   Password storage
@@ -1588,7 +1600,7 @@
   CHECK FOR UPDATES
   -----------------
 
-  What mode 12 does
+  What mode 13 does
 
     Manually checks the latest TeknoParrot Manager release on GitHub
     against the version you're running. This is entirely opt-in --
@@ -1637,10 +1649,10 @@
     TeknoParrot-Manager.config.json, default true). If you're current,
     nothing is shown. If a newer version exists, you'll see the version
     and a brief release summary, then a choice: Y to update now (same
-    backup-first process as mode 12), N to continue to the menu and be
+    backup-first process as mode 13), N to continue to the menu and be
     asked again next time, or V to read the full release notes first.
     Set CheckForUpdatesOnStartup to false in the config file to disable
-    this and only check manually via mode 12. Never runs in -Unattended
+    this and only check manually via mode 13. Never runs in -Unattended
     mode.
 
 
@@ -2153,7 +2165,7 @@
   the script exits rather than proceeding without a restore point. If any
   files fail to copy during the backup, the script asks before continuing.
 
-  To restore from inside the script, choose mode 9) Restore from backup at
+  To restore from inside the script, choose mode 11) Restore from backup at
   the startup menu. The script checks that TeknoParrot is fully closed first,
   lists all available backups with file counts, and asks you to type YES to
   confirm before changing anything.
@@ -2247,7 +2259,7 @@
     and the correct profile will be used.
 
   A game's controls are wrong after propagation.
-    Use mode 9) Restore from backup to roll back to the backup made at the
+    Use mode 11) Restore from backup to roll back to the backup made at the
     start of that run, or delete the affected game's .xml from UserProfiles
     and re-run propagation after correcting the reference game's bindings in
     TeknoParrotUI.
