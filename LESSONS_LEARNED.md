@@ -3,7 +3,24 @@
 Engineering retrospective notes from real bugs, near-misses, and design decisions
 made during this project's development. Each entry links to the relevant version
 and issue. These are the cases where the actual outcome differed from the expected
-outcome -- the ones most likely to repeat.
+outcome -- the ones most likely to repeat. See PROJECT_IDENTITY_STANDARD.md for
+the permanent identity/attribution policy that grew out of one such incident.
+
+## v0.99.40: identity contamination from an unverified environment git config
+
+A working environment's git identity resolved to a non-Jumpstile personal
+identity for several commits before being noticed, and a separate,
+independently-authored PR reused the same underlying email as its genuine
+GitHub account identity -- both landed on public branches (one via a
+squash-merge's auto-generated `Co-authored-by:` trailer on `main` itself)
+before being caught by a dedicated audit. Root cause: commit identity was
+never verified against the expected value before committing; it was assumed
+correct because it usually had been. Fixed by rewriting the affected public
+history (main and open PR branches, with mirror backups taken first) and by
+writing PROJECT_IDENTITY_STANDARD.md, which makes identity verification a
+named, required step (Section 5) rather than an assumption. See that
+document for the full policy and the compliance checklist now required
+before every release.
 
 ---
 

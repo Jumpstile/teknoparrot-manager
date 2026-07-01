@@ -159,6 +159,15 @@ writes profiles, verify the following properties are still intact.
 - [ ] Post a fix/analysis comment to any open issue this release addresses,
   immediately after tagging (not deferred to next session).
 
+## Identity and attribution gate
+
+Before tagging or publishing any release, run the PROJECT_IDENTITY_STANDARD.md
+verification gates (section 11) and compliance checklist (section 12):
+public commit/committer identity is Jumpstile only, no `Co-authored-by:`
+trailers or AI-tool mentions on any published surface (commits, PRs,
+releases, wiki, tracked docs). This is a required gate, not an optional
+pass -- treat a failure here the same as a failing Pester run.
+
 ---
 
-_For the engineering rationale behind each item, see SECURITY.md, LESSONS_LEARNED.md, and ARCHITECTURE.md._
+_For the engineering rationale behind each item, see SECURITY.md, LESSONS_LEARNED.md, and ARCHITECTURE.md. For identity and attribution policy, see PROJECT_IDENTITY_STANDARD.md._
