@@ -1,6 +1,6 @@
 # Auto-Update System
 
-Status: blocked pending review fixes
+Status: review blockers fixed, pending re-review before merge
 
 TeknoParrot Manager uses a **manual, backup-first auto-update model**.
 
@@ -8,24 +8,23 @@ The updater must never silently replace files. It checks GitHub Releases, explai
 
 ## Current review status
 
-Independent Claude and Codex reviews found real blockers. Do not merge this branch or wire the updater into the menu until these are fixed and retested.
+Independent Claude and Codex reviews found real blockers on the first pass. All four have been fixed and retested against the live `Jumpstile/teknoparrot-manager` releases (both under Windows PowerShell 5.1). Do not merge or wire this into the menu until a re-review confirms the fixes.
 
-Required fixes:
+1. **Release packaging mismatch -- fixed**
+   - `-AssetNamePattern` now defaults to `^TeknoParrot\.Manager\.v.*\.zip$`, matching real release assets like `TeknoParrot.Manager.v0.99.38.BETA.zip`.
+   - Verified live: `-CheckOnly` now correctly finds and selects the real release asset instead of throwing.
 
-1. **Release packaging mismatch**
-   - Current real releases use assets such as `TeknoParrot.Manager.v0.99.38.BETA.zip`.
-   - The first helper expected a bare `TeknoParrot-Manager.ps1` asset.
-   - The helper must either require a real `.ps1` release asset or become zip-aware.
+2. **Content validation before replacement -- fixed**
+   - The updater extracts only the `TeknoParrot-Manager.ps1` entry from the downloaded zip (via `Expand-TpmReleaseZipEntry`), never the whole archive.
+   - Before replacing the live script, `Test-TpmExtractedScript` verifies: the file exists, is non-empty, does not begin with a zip signature (`PK`), contains the `TeknoParrot Manager` marker, and contains a `$ScriptVersion = "..."` assignment.
+   - Verified live: a full `-Apply` against the real `v0.99.38` release downloads, extracts, validates, and installs the genuine script (confirmed by reading back `$ScriptVersion` after replacement).
 
-2. **Content validation before replacement**
-   - The updater must never move raw zip bytes over `TeknoParrot-Manager.ps1`.
-   - If using zip assets, it must extract `TeknoParrot-Manager.ps1`, validate that it is a script, validate that it contains the expected `$ScriptVersion` assignment, and only then replace the target.
+3. **PowerShell 5.1 TLS hardening -- fixed**
+   - `Enable-TpmTls12` forces `Tls12` into `[Net.ServicePointManager]::SecurityProtocol` before any GitHub API/download call, guarded to skip on PowerShell 6+ where it is unnecessary.
 
-3. **PowerShell 5.1 TLS hardening**
-   - Add TLS 1.2 before GitHub API/download calls, matching the main script's compatibility pattern.
-
-4. **Testability**
-   - Pure helper logic should be split into a no-side-effect module before adding Pester tests, or the entry script must provide a safe way to load functions without making network calls.
+4. **Testability -- fixed**
+   - All logic besides argument parsing and top-level orchestration now lives in `tools/TpmAutoUpdate.Core.psm1`, a side-effect-free module. `tools/Invoke-TpmAutoUpdate.ps1` is a thin orchestrator that imports it.
+   - `Tests/TpmAutoUpdate.Core.Tests.ps1` covers version parsing, asset selection, URL validation (URI-parsed, not `-like`), backup creation, zip extraction, content-validation failure modes, and an `-Apply -WhatIf` case asserting zero backup/download/replacement occurs.
 
 ## Safety rules
 
