@@ -174,6 +174,12 @@ Use this checklist for any identity/attribution audit or cleanup pass:
 - [ ] A prevention mechanism (documented guard, hook, or equivalent) exists
       and is referenced from this repository's contributor-facing setup
       instructions.
+- [ ] Where a proposed reference is uncertain rather than clearly required,
+      the privacy-first default (Section 14) was applied or the reference
+      was confirmed with the project owner before publishing.
+- [ ] Any conflict found between this document and an existing artifact was
+      reported, with a compliant resolution recommended, per the governance
+      hierarchy (Section 15) -- not silently resolved in either direction.
 
 ## 13. Exceptions
 
@@ -188,6 +194,41 @@ The only exceptions to this policy are legal or licensing requirements:
   detail" is not an exception for anything that ships as part of the public
   project (Section 9 already carves out non-shipped internal documents
   separately, on narrower grounds).
+
+## 14. Privacy-first default
+
+If there is any uncertainty about whether a public-facing artifact should
+contain a personal identity, a work identity, an email address, an AI
+assistant name, an AI product name, a development tool name, or branding
+that is not Jumpstile, default to the privacy-preserving option: use
+neutral engineering language (Section 4) instead. If uncertainty remains
+even after choosing neutral language, stop and ask before introducing the
+reference at all. This default applies everywhere this document applies --
+it is not a separate, lower-priority preference.
+
+## 15. Project governance hierarchy
+
+When applicable, Jumpstile project governance is followed in this order:
+
+1. `CONSTITUTION.md` / Engineering Canon (if present in a given project).
+2. This document (`PROJECT_IDENTITY_STANDARD.md`).
+3. Architecture Decision Records (ADRs).
+4. Repository-specific engineering standards (e.g. `SECURITY.md`,
+   `RELEASE-SAFETY-CHECKLIST.md`, `ARCHITECTURE.md`).
+5. Task-specific instructions.
+
+If an existing file, issue, PR, release note, wiki page, or other public
+artifact conflicts with this document, this document is authoritative.
+The conflict must be reported and a compliant resolution recommended before
+proceeding with the task that surfaced it -- silently picking one side of
+the conflict is not an acceptable resolution.
+
+Once this document is created and integrated into a project's governance
+hierarchy, it applies automatically: every significant PR, merge
+recommendation, and release is audited against it without needing to be
+asked each time. A believed-necessary change to the standard itself is
+proposed through the normal governance process (a PR against this
+document), not bypassed in the moment it's inconvenient.
 
 ---
 
