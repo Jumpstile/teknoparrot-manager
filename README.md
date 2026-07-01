@@ -493,6 +493,8 @@ You can also run the update check outside the menu via `tools\Invoke-TpmAutoUpda
 
 **Automatic check at startup:** the script also quietly checks for updates once, right when it launches (`CheckForUpdatesOnStartup` in `TeknoParrot-Manager.config.json`, default `true`). If you're current, nothing is shown. If a newer version exists, you'll see the version and a brief release summary, then a choice: **Y** to update now (same backup-first process as mode 12), **N** to continue to the menu and be asked again next time, or **V** to read the full release notes first. Set `CheckForUpdatesOnStartup` to `false` in the config file to disable this and only check manually via mode 12. Never runs in `-Unattended` mode.
 
+See `docs/Compatibility.md` for the pre-1.0 compatibility checklist and known tester watchlist.
+
 ---
 
 ## LaunchBox Integration
