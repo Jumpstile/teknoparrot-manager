@@ -79,6 +79,10 @@ if ($Apply) {
         $downloadedZipPath = Save-TpmReleaseAsset -Asset $asset
         Write-UpdaterInfo "Downloaded     : $downloadedZipPath"
 
+        $expectedHash = Get-TpmTrustedAssetDigest -Asset $asset
+        Assert-TpmDownloadIntegrity -Path $downloadedZipPath -ExpectedHash $expectedHash
+        Write-UpdaterInfo "Checksum verified (SHA256): $expectedHash"
+
         $extractedScriptPath = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-update-extracted-" + [guid]::NewGuid().ToString('N') + '.ps1')
         Expand-TpmReleaseZipEntry -ZipPath $downloadedZipPath -EntryName $ScriptEntryName -DestinationPath $extractedScriptPath | Out-Null
         Write-UpdaterInfo "Extracted      : $extractedScriptPath"
