@@ -9723,10 +9723,9 @@ while ($true) {
         # Skip straight past the menu -- fall through to the mode body below.
     } else {
     Write-Host ""
-    Write-Host "--------------------------------------------" -ForegroundColor Cyan
-    Write-Host " Mode" -ForegroundColor Cyan
-    Write-Host "--------------------------------------------" -ForegroundColor Cyan
+    Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
     Write-Host " Library Management" -ForegroundColor DarkCyan
+    Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
     Write-Host "  1) AutoSync        -- Extract ZIPs (NAS or local) to a local"
     Write-Host "                        folder, then register the games."
     Write-Host "  2) Register only   -- Games are already extracted; just register."
@@ -9734,7 +9733,9 @@ while ($true) {
     Write-Host "                        games to other compatible games, without"
     Write-Host "                        going through AutoSync/Register first."
     Write-Host ""
+    Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
     Write-Host " Game Enhancements (all optional -- games work without these)" -ForegroundColor DarkCyan
+    Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
     Write-Host "  4) Crosshair setup -- Pick and deploy custom crosshairs to all"
     Write-Host "                        registered lightgun games."
     Write-Host "  5) ReShade setup   -- Add visual enhancements (sharper image, better"
@@ -9751,7 +9752,9 @@ while ($true) {
     Write-Host "                        against the latest stable release and offers to"
     Write-Host "                        update (64-bit only). Never installs it fresh."
     Write-Host ""
+    Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
     Write-Host " Maintenance and Recovery" -ForegroundColor DarkCyan
+    Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
     Write-Host "  10) Library health check -- Read-only: reports registered/broken/"
     Write-Host "                        unregistered counts plus GPU fix / FFB Blaster /"
     Write-Host "                        dgVoodoo2 coverage and ReShade/BepInEx install"
@@ -9766,7 +9769,9 @@ while ($true) {
     Write-Host "                        Requires running this script as Administrator"
     Write-Host "                        if PostgreSQL isn't installed yet."
     Write-Host ""
+    Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
     Write-Host " Application" -ForegroundColor DarkCyan
+    Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
     Write-Host "  13) Check for Updates -- Manual, backup-first check against the latest"
     Write-Host "                        GitHub release. Nothing is downloaded or changed"
     Write-Host "                        without your explicit confirmation."
