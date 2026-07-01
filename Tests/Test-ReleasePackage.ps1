@@ -13,7 +13,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 $archive = [System.IO.Compression.ZipFile]::OpenRead($resolvedZip)
 try {
-    $entries = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\\', '/') })
+    $entries = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
 
     $required = @(
         'TeknoParrot-Manager.ps1',
