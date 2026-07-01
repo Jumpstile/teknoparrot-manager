@@ -177,4 +177,4 @@ pass -- treat a failure here the same as a failing Pester run.
 
 ---
 
-_For the engineering rationale behind each item, see SECURITY.md, LESSONS_LEARNED.md, and ARCHITECTURE.md. For identity and attribution policy, see PROJECT_IDENTITY_STANDARD.md._
+_For the engineering rationale behind each item, see SECURITY.md, LESSONS_LEARNED.md, and ARCHITECTURE.md. For identity and attribution policy, see PROJECT_IDENTITY_STANDARD.md. For the overall governance hierarchy these all sit within, see CONSTITUTION.md._

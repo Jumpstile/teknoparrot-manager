@@ -5,11 +5,10 @@ Status: permanent engineering governance. This is not TPM-specific instruction
 referenced, unmodified in substance, wherever a new Jumpstile project needs
 the same policy.
 
-There is no existing "Engineering Canon" or "Constitution" document in this
-repository to fold this into. This file is the canonical source for identity
-and attribution policy until/unless a higher-level cross-project governance
-document exists, at which point this file should be replaced with a pointer
-to it rather than duplicated.
+Governed by `CONSTITUTION.md` (the top-level Engineering Canon, which
+defines the full governance hierarchy). This document remains the canonical
+source for identity and attribution policy specifically; the governance
+hierarchy itself lives in `CONSTITUTION.md`, not here, to avoid duplication.
 
 ---
 
@@ -213,20 +212,14 @@ it is not a separate, lower-priority preference.
 
 ## 15. Project governance hierarchy
 
-When applicable, Jumpstile project governance is followed in this order:
-
-1. `CONSTITUTION.md` / Engineering Canon (if present in a given project).
-2. This document (`PROJECT_IDENTITY_STANDARD.md`).
-3. Architecture Decision Records (ADRs).
-4. Repository-specific engineering standards (e.g. `SECURITY.md`,
-   `RELEASE-SAFETY-CHECKLIST.md`, `ARCHITECTURE.md`).
-5. Task-specific instructions.
-
-If an existing file, issue, PR, release note, wiki page, or other public
-artifact conflicts with this document, this document is authoritative.
-The conflict must be reported and a compliant resolution recommended before
-proceeding with the task that surfaced it -- silently picking one side of
-the conflict is not an acceptable resolution.
+The full governance hierarchy is defined in `CONSTITUTION.md`, not
+duplicated here -- this document is second in that hierarchy, subordinate
+only to `CONSTITUTION.md` itself. If an existing file, issue, PR, release
+note, wiki page, or other public artifact conflicts with this document,
+this document is authoritative over anything below it in that hierarchy.
+The conflict must be reported and a compliant resolution recommended
+before proceeding with the task that surfaced it -- silently picking one
+side of the conflict is not an acceptable resolution.
 
 Once this document is created and integrated into a project's governance
 hierarchy, it applies automatically: every significant PR, merge
