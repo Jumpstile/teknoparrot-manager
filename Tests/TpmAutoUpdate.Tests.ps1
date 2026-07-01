@@ -153,16 +153,97 @@ Describe 'TpmAutoUpdate WhatIf behavior' {
         Mock New-TpmUpdateBackup -ModuleName TpmAutoUpdate { throw 'backup should not run during WhatIf' }
         Mock Save-TpmReleaseAsset -ModuleName TpmAutoUpdate { throw 'download should not run during WhatIf' }
 
-        Invoke-TpmAutoUpdate `
+        $result = Invoke-TpmAutoUpdate `
             -ScriptPath $scriptPath `
             -Owner 'Jumpstile' `
             -Repository 'teknoparrot-manager' `
             -AssetNamePattern '^TeknoParrot\.Manager\.v?\d+\.\d+\.\d+\.BETA\.zip$' `
             -Apply `
-            -WhatIf
+            -WhatIf `
+            -PassThru
 
+        $result.Status | Should -Be 'Skipped'
+        $result.Updated | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeFalse
         Should -Invoke New-TpmUpdateBackup -ModuleName TpmAutoUpdate -Times 0
         Should -Invoke Save-TpmReleaseAsset -ModuleName TpmAutoUpdate -Times 0
+    }
+}
+
+Describe 'TpmAutoUpdate PassThru status' {
+    It 'reports UpdateAvailable for CheckOnly without downloading' {
+        $root = Join-Path $TestDrive 'checkonly-status'
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $scriptPath = Join-Path $root 'TeknoParrot-Manager.ps1'
+        New-TestTpmScript -Path $scriptPath -Version '0.1.0'
+
+        Mock Get-LatestTpmRelease -ModuleName TpmAutoUpdate {
+            [pscustomobject]@{
+                tag_name = 'v9.9.9'
+                assets = @(
+                    [pscustomobject]@{
+                        name = 'TeknoParrot.Manager.v9.9.9.BETA.zip'
+                        browser_download_url = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v9.9.9/TeknoParrot.Manager.v9.9.9.BETA.zip'
+                    }
+                )
+            }
+        }
+        Mock Save-TpmReleaseAsset -ModuleName TpmAutoUpdate { throw 'download should not run during CheckOnly' }
+
+        $result = Invoke-TpmAutoUpdate `
+            -ScriptPath $scriptPath `
+            -Owner 'Jumpstile' `
+            -Repository 'teknoparrot-manager' `
+            -AssetNamePattern '^TeknoParrot\.Manager\.v?\d+\.\d+\.\d+\.BETA\.zip$' `
+            -CheckOnly `
+            -PassThru
+
+        $result.Status | Should -Be 'UpdateAvailable'
+        $result.Updated | Should -BeFalse
+        $result.AssetName | Should -Be 'TeknoParrot.Manager.v9.9.9.BETA.zip'
+        Should -Invoke Save-TpmReleaseAsset -ModuleName TpmAutoUpdate -Times 0
+    }
+
+    It 'reports Updated after backup-first replacement succeeds' {
+        $root = Join-Path $TestDrive 'apply-status'
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $scriptPath = Join-Path $root 'TeknoParrot-Manager.ps1'
+        New-TestTpmScript -Path $scriptPath -Version '0.1.0'
+
+        $downloadedPath = Join-Path $TestDrive 'downloaded.zip'
+        'downloaded' | Set-Content -LiteralPath $downloadedPath -Encoding UTF8
+        $validatedPath = Join-Path $TestDrive 'validated.ps1'
+        New-TestTpmScript -Path $validatedPath -Version '9.9.9'
+        $backupPath = Join-Path $root 'backup.ps1'
+
+        Mock Get-LatestTpmRelease -ModuleName TpmAutoUpdate {
+            [pscustomobject]@{
+                tag_name = 'v9.9.9'
+                assets = @(
+                    [pscustomobject]@{
+                        name = 'TeknoParrot.Manager.v9.9.9.BETA.zip'
+                        browser_download_url = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v9.9.9/TeknoParrot.Manager.v9.9.9.BETA.zip'
+                    }
+                )
+            }
+        }
+        Mock New-TpmUpdateBackup -ModuleName TpmAutoUpdate { return $backupPath }
+        Mock Save-TpmReleaseAsset -ModuleName TpmAutoUpdate { return $downloadedPath }
+        Mock Get-TpmValidatedUpdateScript -ModuleName TpmAutoUpdate { return $validatedPath }
+        Mock Install-TpmDownloadedUpdate -ModuleName TpmAutoUpdate {}
+
+        $result = Invoke-TpmAutoUpdate `
+            -ScriptPath $scriptPath `
+            -Owner 'Jumpstile' `
+            -Repository 'teknoparrot-manager' `
+            -AssetNamePattern '^TeknoParrot\.Manager\.v?\d+\.\d+\.\d+\.BETA\.zip$' `
+            -Apply `
+            -PassThru
+
+        $result.Status | Should -Be 'Updated'
+        $result.Updated | Should -BeTrue
+        $result.BackupPath | Should -Be $backupPath
+        Should -Invoke New-TpmUpdateBackup -ModuleName TpmAutoUpdate -Times 1
+        Should -Invoke Install-TpmDownloadedUpdate -ModuleName TpmAutoUpdate -Times 1
     }
 }

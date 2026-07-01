@@ -40,24 +40,22 @@ The updater must never silently replace files. It checks GitHub Releases, explai
 
 ## Current implementation
 
-The first implementation is a standalone helper:
+The hardened updater lives in `tools\TpmAutoUpdate.psm1` and is exposed both through the main menu and a thin command-line helper:
+
+Main menu:
+
+```text
+12) Check for Updates
+```
+
+Command line:
 
 ```powershell
 .\tools\Invoke-TpmAutoUpdate.ps1 -CheckOnly
 .\tools\Invoke-TpmAutoUpdate.ps1 -Apply
 ```
 
-This keeps the first cut reviewable before wiring it into the main menu.
-
-## Pre-1.0 integration target
-
-Before 1.0, wire this helper into the main menu as:
-
-```text
-Check for TeknoParrot Manager update
-```
-
-Expected flow:
+Menu flow:
 
 1. Show local version.
 2. Query latest GitHub Release.
@@ -67,7 +65,7 @@ Expected flow:
 6. Backup current script.
 7. Download replacement.
 8. Replace script.
-9. Tell the user to restart TeknoParrot Manager.
+9. Tell the user to restart TeknoParrot Manager and exit the current session.
 
 ## Non-goals for 1.0
 

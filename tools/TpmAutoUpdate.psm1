@@ -203,6 +203,28 @@ function Install-TpmDownloadedUpdate {
     Move-Item -LiteralPath $UpdateScriptPath -Destination $TargetPath -Force
 }
 
+function New-TpmAutoUpdateResult {
+    param(
+        [string]$Status,
+        [bool]$Updated,
+        [string]$LocalVersion,
+        [string]$LatestVersion,
+        [string]$AssetName,
+        [string]$AssetUrl,
+        [string]$BackupPath
+    )
+
+    return [pscustomobject]@{
+        Status        = $Status
+        Updated       = $Updated
+        LocalVersion  = $LocalVersion
+        LatestVersion = $LatestVersion
+        AssetName     = $AssetName
+        AssetUrl      = $AssetUrl
+        BackupPath    = $BackupPath
+    }
+}
+
 function Invoke-TpmAutoUpdate {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
@@ -211,7 +233,8 @@ function Invoke-TpmAutoUpdate {
         [string]$ScriptPath,
         [string]$Owner,
         [string]$Repository,
-        [string]$AssetNamePattern
+        [string]$AssetNamePattern,
+        [switch]$PassThru
     )
 
     if (-not $CheckOnly -and -not $Apply) {
@@ -229,6 +252,15 @@ function Invoke-TpmAutoUpdate {
 
     if ($latestVersion -le $localVersion) {
         Write-TpmUpdaterInfo 'Already current. No update needed.'
+        if ($PassThru) {
+            return New-TpmAutoUpdateResult -Status 'Current' `
+                                           -Updated $false `
+                                           -LocalVersion $localVersionText `
+                                           -LatestVersion $release.tag_name `
+                                           -AssetName $null `
+                                           -AssetUrl $null `
+                                           -BackupPath $null
+        }
         return
     }
 
@@ -238,16 +270,35 @@ function Invoke-TpmAutoUpdate {
 
     if ($CheckOnly -and -not $Apply) {
         Write-TpmUpdaterInfo 'Check only. Re-run with -Apply to update.'
+        if ($PassThru) {
+            return New-TpmAutoUpdateResult -Status 'UpdateAvailable' `
+                                           -Updated $false `
+                                           -LocalVersion $localVersionText `
+                                           -LatestVersion $release.tag_name `
+                                           -AssetName $asset.name `
+                                           -AssetUrl $asset.browser_download_url `
+                                           -BackupPath $null
+        }
         return
     }
 
     if ($Apply) {
         if (-not $PSCmdlet.ShouldProcess($ScriptPath, "replace with $($release.tag_name)")) {
+            if ($PassThru) {
+                return New-TpmAutoUpdateResult -Status 'Skipped' `
+                                               -Updated $false `
+                                               -LocalVersion $localVersionText `
+                                               -LatestVersion $release.tag_name `
+                                               -AssetName $asset.name `
+                                               -AssetUrl $asset.browser_download_url `
+                                               -BackupPath $null
+            }
             return
         }
 
         $downloadedPath = $null
         $validatedScriptPath = $null
+        $backupPath = $null
         try {
             $backupPath = New-TpmUpdateBackup -Path $ScriptPath
             Write-TpmUpdaterInfo "Backup created : $backupPath"
@@ -261,6 +312,15 @@ function Invoke-TpmAutoUpdate {
 
             Write-TpmUpdaterInfo 'Update installed successfully.'
             Write-TpmUpdaterInfo 'Restart TeknoParrot Manager to run the new version.'
+            if ($PassThru) {
+                return New-TpmAutoUpdateResult -Status 'Updated' `
+                                               -Updated $true `
+                                               -LocalVersion $localVersionText `
+                                               -LatestVersion $release.tag_name `
+                                               -AssetName $asset.name `
+                                               -AssetUrl $asset.browser_download_url `
+                                               -BackupPath $backupPath
+            }
         } finally {
             if ($downloadedPath -and (Test-Path -LiteralPath $downloadedPath -PathType Leaf)) {
                 Remove-Item -LiteralPath $downloadedPath -Force -ErrorAction SilentlyContinue

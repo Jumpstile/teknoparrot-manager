@@ -30,6 +30,7 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 - [GPU Compatibility Fixes](#gpu-compatibility-fixes)
 - [Force Feedback (FFB) Setup](#force-feedback-ffb-setup)
 - [BepInEx Update Check](#bepinex-update-check)
+- [TeknoParrot Manager Updates](#teknoparrot-manager-updates)
 - [Postgres Setup](#postgres-setup)
 - [LaunchBox Integration](#launchbox-integration)
 - [HyperSpin 2 Export](#hyperspin-2-export)
@@ -42,6 +43,7 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 - [Preview / Dry-Run Mode](#preview--dry-run-mode)
 - [Game Repair](#game-repair)
 - [Safety, Backup and Log](#safety-backup-and-log)
+- [Compatibility Checklist](#compatibility-checklist)
 - [Resetting](#resetting)
 - [Troubleshooting](#troubleshooting)
 - [What It Does Not Do](#what-it-does-not-do)
@@ -180,7 +182,8 @@ Choosing mode 1 or 2 offers a preview/dry-run option first — see [Preview / Dr
 | 9 | **Restore backup** | Roll TeknoParrot profiles, LaunchBox's library files, or Postgres databases back to a previous backup |
 | 10 | **Library health check** | Read-only registered/broken/empty status, plus GPU fix / FFB Blaster / dgVoodoo2 / Postgres coverage and ReShade/BepInEx install counts |
 | 11 | **Postgres setup** | Installs/configures the local PostgreSQL database some Incredible Technologies games need (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball) |
-| 12 | **Exit** | Quit the script |
+| 12 | **Check for Updates** | Manual, backup-first TeknoParrot Manager update check via GitHub Releases |
+| 13 | **Exit** | Quit the script |
 
 ---
 
@@ -462,6 +465,14 @@ If anything is outdated, the script lists every such game once and asks a single
 
 ---
 
+## TeknoParrot Manager Updates
+
+Mode 12 checks GitHub Releases for a newer TeknoParrot Manager package. Updates are manual and backup-first: the script shows what it found, asks before applying, creates an `UpdateBackups\<timestamp>\` copy, extracts `TeknoParrot-Manager.ps1` from the release ZIP, validates it, and then replaces the local script.
+
+After an update is installed, TeknoParrot Manager exits and asks you to restart. Downloaded code is not executed in the same session. More details live in [docs/AUTO_UPDATE.md](docs/AUTO_UPDATE.md).
+
+---
+
 ## Postgres Setup
 
 Several Incredible Technologies games — Golden Tee Live (2006–2019), Power Putt Live (2012/2013), Silver Strike Bowling Live, Target Toss Pro (Bags / Lawn Darts), and Orange County Choppers Pinball — need a small local PostgreSQL 8.3 database to store game data. Mode 11 detects which of your registered games need it automatically (no hardcoded list to keep up to date) and handles the rest:
@@ -726,6 +737,12 @@ If backup folder creation fails, the script exits rather than proceeding without
 **Manual restore:** close TeknoParrot, copy `.xml` files from a backup folder back into `UserProfiles`, overwriting the current ones. For LaunchBox, close LaunchBox and copy the backed-up files from `Scripts\LaunchBoxBackups\<timestamp>\` back into LaunchBox's `Data\` folder at the matching relative path.
 
 **Log:** every run appends to `TeknoParrot-Manager.log`. If the log file is inaccessible, a one-time warning shows the path and error. Every entry that can't be written is echoed to the console prefixed with `[UNLOGGED]` so nothing is lost. This log also records a download audit trail (source URL, filename, version, SHA256) for every third-party binary the script fetches — the Eggman dat ZIP, the BepInEx release, and the FFBArcadePlugin DLLs.
+
+---
+
+## Compatibility Checklist
+
+A lightweight pre-1.0 compatibility checklist lives in [docs/Compatibility.md](docs/Compatibility.md). Use it to track tester-confirmed games, known edge cases, and release-blocking compatibility notes without expanding the main README.
 
 ---
 

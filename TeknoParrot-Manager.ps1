@@ -9197,6 +9197,89 @@ if ($datIndex.Count -gt 0 -and $gameProfilesDir) {
     }
 }
 
+function Invoke-TpmUpdateMenu {
+    [CmdletBinding()]
+    param(
+        [string]$ScriptRoot = $PSScriptRoot,
+        [string]$ScriptPath = (Join-Path -Path $PSScriptRoot -ChildPath 'TeknoParrot-Manager.ps1'),
+        [string]$Owner = 'Jumpstile',
+        [string]$Repository = 'teknoparrot-manager',
+        [string]$AssetNamePattern = '^TeknoParrot\.Manager\.v?\d+\.\d+\.\d+\.BETA\.zip$'
+    )
+
+    $modulePath = Join-Path -Path (Join-Path -Path $ScriptRoot -ChildPath 'tools') -ChildPath 'TpmAutoUpdate.psm1'
+    if (-not (Test-Path -LiteralPath $modulePath -PathType Leaf)) {
+        Write-Host "  Updater helper not found: $modulePath" -ForegroundColor Red
+        Write-Log "Updater: helper not found at $modulePath"
+        return $false
+    }
+
+    try {
+        Import-Module -Name $modulePath -Force -ErrorAction Stop
+    } catch {
+        Write-Host "  Could not load updater helper. See TeknoParrot-Manager.log." -ForegroundColor Red
+        Write-Log "Updater: failed to import helper at $modulePath -- $_"
+        return $false
+    }
+
+    Write-Host ""
+    Write-Host "  Checking GitHub Releases for TeknoParrot Manager updates..." -ForegroundColor Cyan
+    try {
+        $checkResult = Invoke-TpmAutoUpdate -CheckOnly `
+                                           -ScriptPath $ScriptPath `
+                                           -Owner $Owner `
+                                           -Repository $Repository `
+                                           -AssetNamePattern $AssetNamePattern `
+                                           -PassThru `
+                                           -ErrorAction Stop
+    } catch {
+        Write-Host "  Update check failed. See TeknoParrot-Manager.log." -ForegroundColor Red
+        Write-Log "Updater: check failed -- $_"
+        return $false
+    }
+
+    if (-not $checkResult -or $checkResult.Status -ne 'UpdateAvailable') {
+        Write-Log "Updater: no update available."
+        return $false
+    }
+
+    Write-Host ""
+    Write-Host "  Updates are manual and backup-first. The downloaded script will not" -ForegroundColor Yellow
+    Write-Host "  run in this session." -ForegroundColor Yellow
+    $apply = (Read-Host "  Apply this update now? (Y/N)").Trim().ToUpperInvariant()
+    if ($apply -ne 'Y') {
+        Write-Host "  Update skipped." -ForegroundColor DarkGray
+        Write-Log "Updater: user skipped available update."
+        return $false
+    }
+
+    try {
+        $applyResult = Invoke-TpmAutoUpdate -Apply `
+                                           -ScriptPath $ScriptPath `
+                                           -Owner $Owner `
+                                           -Repository $Repository `
+                                           -AssetNamePattern $AssetNamePattern `
+                                           -PassThru `
+                                           -ErrorAction Stop
+    } catch {
+        Write-Host "  Update failed. Your backup, if created, is listed in the log." -ForegroundColor Red
+        Write-Log "Updater: apply failed -- $_"
+        return $false
+    }
+
+    if ($applyResult -and $applyResult.Updated) {
+        Write-Host ""
+        Write-Host "  Update installed. Restart TeknoParrot Manager to run the new version." -ForegroundColor Yellow
+        Write-Host "  This session will exit now so updated code is not executed immediately." -ForegroundColor Yellow
+        Write-Log "Updater: update installed; exiting current session for restart."
+        return $true
+    }
+
+    Write-Host "  No update was installed." -ForegroundColor DarkGray
+    Write-Log "Updater: apply completed without installing an update."
+    return $false
+}
+
 # =============================================================================
 # MAIN MENU LOOP
 # =============================================================================
@@ -9255,13 +9338,14 @@ while ($true) {
     Write-Host "                        Silver Strike Bowling Live, Target Toss Pro)."
     Write-Host "                        Requires running this script as Administrator"
     Write-Host "                        if PostgreSQL isn't installed yet."
-    Write-Host "  12) Exit"
+    Write-Host "  12) Check for Updates -- Manual, backup-first GitHub Releases update."
+    Write-Host "  13) Exit"
     Write-Host ""
     if ($Unattended) {
         Write-Host "  [Unattended] Mode must be set before starting." -ForegroundColor Red
         Write-Log "ERROR: Unattended mode -- reached menu loop."; exit 1
     }
-    $modeChoice = (Read-Host "Enter 1-12").Trim()
+    $modeChoice = (Read-Host "Enter 1-13").Trim()
     switch ($modeChoice) {
         "1"     { $mode = "AutoSync"       }
         "2"     { $mode = "RegisterOnly"   }
@@ -9274,10 +9358,26 @@ while ($true) {
         "9"     { $mode = "Restore"        }
         "10"    { $mode = "HealthCheck"    }
         "11"    { $mode = "PostgresSetup"  }
-        "12"    { break }
-        default { Write-Host "  Invalid choice. Enter 1-12." -ForegroundColor Yellow; continue }
+        "12"    { $mode = "UpdateCheck"    }
+        "13"    { break }
+        default { Write-Host "  Invalid choice. Enter 1-13." -ForegroundColor Yellow; continue }
     }
-    if ($modeChoice -eq "12") { break }
+    if ($modeChoice -eq "13") { break }
+    }
+
+    if ($mode -eq "UpdateCheck") {
+        Write-Host ""
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        Write-Host " Check for Updates" -ForegroundColor Cyan
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        $updated = Invoke-TpmUpdateMenu
+        if ($updated) {
+            [void](Read-Host "  Press Enter to exit")
+            exit 0
+        }
+
+        [void](Read-Host "  Press Enter to return to menu")
+        continue
     }
 
     if ($mode -eq "Restore") {

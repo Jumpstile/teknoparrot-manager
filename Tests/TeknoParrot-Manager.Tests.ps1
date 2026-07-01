@@ -1107,6 +1107,96 @@ $binding
     }
 }
 
+Describe "Invoke-TpmUpdateMenu" {
+    BeforeEach {
+        $script:UpdateMenuCalls = @()
+        $script:UpdateMenuPromptCount = 0
+
+        function Invoke-TpmAutoUpdate {
+            [CmdletBinding()]
+            param(
+                [switch]$CheckOnly,
+                [switch]$Apply,
+                [string]$ScriptPath,
+                [string]$Owner,
+                [string]$Repository,
+                [string]$AssetNamePattern,
+                [switch]$PassThru
+            )
+
+            $script:UpdateMenuCalls += [pscustomobject]@{
+                CheckOnly = [bool]$CheckOnly
+                Apply     = [bool]$Apply
+                ScriptPath = $ScriptPath
+                Owner      = $Owner
+                Repository = $Repository
+                PassThru   = [bool]$PassThru
+            }
+
+            if ($CheckOnly) {
+                return [pscustomobject]@{
+                    Status        = 'UpdateAvailable'
+                    Updated       = $false
+                    LocalVersion  = '0.1.0'
+                    LatestVersion = 'v9.9.9'
+                    AssetName     = 'TeknoParrot.Manager.v9.9.9.BETA.zip'
+                    AssetUrl      = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v9.9.9/TeknoParrot.Manager.v9.9.9.BETA.zip'
+                    BackupPath    = $null
+                }
+            }
+
+            return [pscustomobject]@{
+                Status        = 'Updated'
+                Updated       = $true
+                LocalVersion  = '0.1.0'
+                LatestVersion = 'v9.9.9'
+                AssetName     = 'TeknoParrot.Manager.v9.9.9.BETA.zip'
+                AssetUrl      = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v9.9.9/TeknoParrot.Manager.v9.9.9.BETA.zip'
+                BackupPath    = 'C:\Backup\TeknoParrot-Manager.ps1'
+            }
+        }
+
+        Mock Import-Module {}
+        Mock Read-Host {
+            $script:UpdateMenuPromptCount++
+            return 'Y'
+        }
+        Mock Write-Log {}
+    }
+
+    It "delegates check and apply to the updater helper and signals restart on successful update" {
+        $root = Join-Path $TestDrive 'menu-update'
+        New-Item -ItemType Directory -Path (Join-Path $root 'tools') -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $root 'tools\TpmAutoUpdate.psm1') -Force | Out-Null
+        $scriptPath = Join-Path $root 'TeknoParrot-Manager.ps1'
+
+        $result = Invoke-TpmUpdateMenu -ScriptRoot $root -ScriptPath $scriptPath
+
+        $result | Should -BeTrue
+        $script:UpdateMenuCalls.Count | Should -Be 2
+        $script:UpdateMenuCalls[0].CheckOnly | Should -BeTrue
+        $script:UpdateMenuCalls[1].Apply | Should -BeTrue
+        $script:UpdateMenuCalls[0].PassThru | Should -BeTrue
+        $script:UpdateMenuCalls[1].PassThru | Should -BeTrue
+        $script:UpdateMenuPromptCount | Should -Be 1
+        Should -Invoke Import-Module -Times 1
+    }
+
+    It "does not apply when the manual confirmation is declined" {
+        Mock Read-Host { return 'N' }
+        $root = Join-Path $TestDrive 'menu-decline'
+        New-Item -ItemType Directory -Path (Join-Path $root 'tools') -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $root 'tools\TpmAutoUpdate.psm1') -Force | Out-Null
+        $scriptPath = Join-Path $root 'TeknoParrot-Manager.ps1'
+
+        $result = Invoke-TpmUpdateMenu -ScriptRoot $root -ScriptPath $scriptPath
+
+        $result | Should -BeFalse
+        $script:UpdateMenuCalls.Count | Should -Be 1
+        $script:UpdateMenuCalls[0].CheckOnly | Should -BeTrue
+    }
+}
+
 # =============================================================================
 # COMPATIBILITY REGRESSION SUITE (issues #41 / #43 / #46)
 # These contexts protect the compatibility-sensitive setup decisions against

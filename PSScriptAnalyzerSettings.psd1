@@ -39,6 +39,11 @@
         # call sites during feature freeze would create unnecessary churn.
         'PSAvoidUsingPositionalParameters',
 
+        # Internal helper functions in the single-file script and updater module are
+        # covered by README/docs plus focused Pester tests. Comment-based help on
+        # every private helper would add noise without improving release safety.
+        'PSProvideCommentHelp',
+
         # Write-Log is an internal helper. PSScriptAnalyzer flags it as overwriting a
         # PowerShell Core (6+) built-in, but this script targets Windows PowerShell 5.1
         # where no Write-Log cmdlet exists. False positive for the target runtime.
