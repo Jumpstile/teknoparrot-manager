@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.40 BETA
+# TeknoParrot Manager  |  v0.99.42 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.40"
+$ScriptVersion = "0.99.42"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -5574,7 +5574,7 @@ function Invoke-StartupUpdateCheck {
         }
 
         # N, or anything else -- remind me later.
-        Write-Host "  Continuing -- you can check again any time from menu option 12." -ForegroundColor DarkGray
+        Write-Host "  Continuing -- you can check again any time from menu option 13." -ForegroundColor DarkGray
         Write-Log "StartupUpdateCheck: user chose to be reminded later."
         return $false
     }
@@ -6443,7 +6443,7 @@ function Invoke-LibraryHealthCheck {
     # Test-*UpToDate helpers, but never writes anything. Third-party FFB
     # plugin coverage is deliberately NOT checked here -- it requires a
     # live fetch of the AutoSetup.cmd table, which would break this mode's
-    # "no network access" guarantee; run mode 7 to check that instead.
+    # "no network access" guarantee; run mode 8 to check that instead.
     $gpuFixNeeded     = New-Object System.Collections.ArrayList
     $ffbBlasterNeeded = New-Object System.Collections.ArrayList
     $dgVoodoo2Needed  = New-Object System.Collections.ArrayList
@@ -6521,7 +6521,7 @@ function Invoke-LibraryHealthCheck {
     } else {
         Write-Host "  FFB Blaster not on  : 0" -ForegroundColor Green
     }
-    Write-Host "  FFB plugin coverage : not checked here (needs network access -- run mode 7)" -ForegroundColor DarkGray
+    Write-Host "  FFB plugin coverage : not checked here (needs network access -- run mode 8)" -ForegroundColor DarkGray
     if ($dgVoodoo2Needed.Count -gt 0) {
         Write-Host ("  dgVoodoo2 not applied : {0}  (legacy DX8/DDraw/Glide games)" -f $dgVoodoo2Needed.Count) -ForegroundColor Yellow
         Write-Host ("    {0}" -f ($dgVoodoo2Needed -join ', ')) -ForegroundColor DarkGray
@@ -6530,7 +6530,7 @@ function Invoke-LibraryHealthCheck {
     }
     if ($gpuFixNeeded.Count -gt 0 -or $ffbBlasterNeeded.Count -gt 0 -or $dgVoodoo2Needed.Count -gt 0) {
         Write-Host ""
-        Write-Host "  Run mode 4 (ReShade), 5 (dgVoodoo2), 6 (GPU fix), or 7 (FFB) to apply these." -ForegroundColor DarkCyan
+        Write-Host "  Run mode 5 (ReShade), 6 (dgVoodoo2), 7 (GPU fix), or 8 (FFB) to apply these." -ForegroundColor DarkCyan
     }
 
     # Postgres coverage is entirely read-only here -- never calls
@@ -6549,7 +6549,7 @@ function Invoke-LibraryHealthCheck {
         Write-Host ("  Postgres configured : {0}" -f $postgresConfigured) -ForegroundColor DarkGray
     }
     if ($postgresNeeded.Count -gt 0) {
-        Write-Host "  Run mode 11 (Postgres setup) to apply these." -ForegroundColor DarkCyan
+        Write-Host "  Run mode 12 (Postgres setup) to apply these." -ForegroundColor DarkCyan
     }
 
     Write-Host ""
@@ -7463,6 +7463,83 @@ function Invoke-ControlPropagation {
         }
     }
     return $reports
+}
+
+# Backup-before-write for the standalone "Propagate Controls" menu option.
+# Extracted specifically so backup-copy-failure handling is unit-testable:
+# a caller must abort before calling Invoke-ControlPropagation whenever
+# ErrorCount is greater than zero, in every mode (interactive or
+# -Unattended) -- there is no safe "continue anyway" for an incomplete
+# backup, since this mode's own promised safety net (and the README's) is
+# that UserProfiles is backed up before anything is written.
+function New-PropagationBackup {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$UserProfilesDir
+    )
+
+    $backupRoot = Join-Path $UserProfilesDir "FullBackup"
+    $timestamp  = (Get-Date).ToString("yyyy-MM-dd_HH-mm-ss")
+    $backupPath = Join-Path $backupRoot ("PropagateControls_" + $timestamp)
+
+    [void][System.IO.Directory]::CreateDirectory($backupRoot)
+    [void][System.IO.Directory]::CreateDirectory($backupPath)
+
+    $backupCopyErrs = $null
+    Get-ChildItem -LiteralPath $UserProfilesDir | Where-Object { $_.Name -ne "FullBackup" } |
+        Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable backupCopyErrs
+
+    return [pscustomobject]@{
+        Path       = $backupPath
+        ErrorCount = $backupCopyErrs.Count
+    }
+}
+
+# Prints Invoke-ControlPropagation's $reports in the same format used by both
+# the AutoSync/Register-only flow and the standalone "Propagate Controls" menu
+# option, so the two entry points never drift out of sync with each other.
+# Returns the count of games actually updated (bound/api-fixed/api-fixed-
+# canonical) and the no-archetype subset, both needed by callers for their own
+# later summary/ACTION REQUIRED sections.
+function Write-ControlPropagationResults {
+    param($Reports)
+
+    Write-Host ""
+    Write-Host " Results:" -ForegroundColor Green
+    foreach ($r in $Reports) {
+        switch ($r.Status) {
+            "bound" {
+                $pin = if ($r.Forced) { "  (pinned)" } else { "" }
+                Write-Host ("    {0}{1}" -f $r.Code, $pin) -ForegroundColor Green
+                Write-Host ("       copied from {0} [{1}] -- bound {2} control(s)" -f $r.Archetype, $r.Family, $r.Bound) -ForegroundColor DarkGray
+                if ($r.ConfigCarried.Count -gt 0) {
+                    Write-Host ("       carried settings: {0}" -f ($r.ConfigCarried -join ", ")) -ForegroundColor DarkGray
+                }
+                if (-not $r.ApiSet -and $r.ArchetypeApi) {
+                    Write-Host ("       NOTE: left Input API unchanged ('{0}' not offered by this game)" -f $r.ArchetypeApi) -ForegroundColor Yellow
+                }
+                if ($r.Manual.Count -gt 0) {
+                    Write-Host ("       still manual: {0}" -f ($r.Manual -join ", ")) -ForegroundColor Yellow
+                }
+            }
+            "no-archetype"     { Write-Host ("    {0}  -- no '{1}' example game bound yet; controls will be set once you bind one (see ACTION REQUIRED)" -f $r.Code, $r.Family) -ForegroundColor Yellow }
+            "api-fixed"        { Write-Host ("    {0}  -- already bound; Input API corrected to '{1}' (matched from {2})" -f $r.Code, $r.ArchetypeApi, $r.Archetype) -ForegroundColor Green }
+            "api-fixed-canonical" { Write-Host ("    {0}  -- archetype; Input API corrected to '{1}' (matched from canonical archetype {2})" -f $r.Code, $r.ArchetypeApi, $r.Archetype) -ForegroundColor Green }
+            "skipped-bound"    { Write-Host ("    {0}  -- already bound, left unchanged" -f $r.Code) -ForegroundColor DarkGray }
+            "skipped-override" { Write-Host ("    {0}  -- skipped (per-game override)" -f $r.Code) -ForegroundColor DarkGray }
+            "save-failed"      { Write-Host ("    {0}  -- ERROR saving (see TeknoParrot-Manager.log)" -f $r.Code) -ForegroundColor Red }
+        }
+        if ($r.MismatchSlots) {
+            Write-Host ("       ACTION REQUIRED -- directional/action mismatch: {0}" -f $r.MismatchSlots) -ForegroundColor Yellow
+            Write-Host ("       Rebind these slots manually in TeknoParrot's own UI (see issue #17)" ) -ForegroundColor Yellow
+        }
+    }
+    $boundCount = @($Reports | Where-Object { $_.Status -eq "bound" -or $_.Status -eq "api-fixed" -or $_.Status -eq "api-fixed-canonical" }).Count
+    $noArchetype = @($Reports | Where-Object { $_.Status -eq "no-archetype" })
+    Write-Host ""
+    Write-Host (" Games updated: {0}" -f $boundCount) -ForegroundColor Green
+    return [pscustomobject]@{ BoundCount = $boundCount; NoArchetypeItems = $noArchetype }
 }
 
 # Asks the user which control devices they have and want to use, then prints a
@@ -9677,67 +9754,83 @@ while ($true) {
         # Skip straight past the menu -- fall through to the mode body below.
     } else {
     Write-Host ""
-    Write-Host "--------------------------------------------" -ForegroundColor Cyan
-    Write-Host " Mode" -ForegroundColor Cyan
-    Write-Host "--------------------------------------------" -ForegroundColor Cyan
+    Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
+    Write-Host " Library Management" -ForegroundColor DarkCyan
+    Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
     Write-Host "  1) AutoSync        -- Extract ZIPs (NAS or local) to a local"
     Write-Host "                        folder, then register the games."
     Write-Host "  2) Register only   -- Games are already extracted; just register."
-    Write-Host "  3) Crosshair setup -- Pick and deploy custom crosshairs to all"
+    Write-Host "  3) Propagate Controls -- Re-copy control bindings from reference"
+    Write-Host "                        games to other compatible games, without"
+    Write-Host "                        going through AutoSync/Register first."
+    Write-Host ""
+    Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
+    Write-Host " Game Enhancements (all optional -- games work without these)" -ForegroundColor DarkCyan
+    Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
+    Write-Host "  4) Crosshair setup -- Pick and deploy custom crosshairs to all"
     Write-Host "                        registered lightgun games."
-    Write-Host "  4) ReShade setup   -- Add visual enhancements (sharper image, better"
-    Write-Host "                        colours, scanlines, borders). Optional -- games"
-    Write-Host "                        work perfectly without this."
-    Write-Host "  5) dgVoodoo2 setup -- Fix old DX8, DirectDraw, and Glide games that"
-    Write-Host "                        crash or show black screens. Optional."
-    Write-Host "  6) GPU fix setup   -- Auto-detect your GPU (AMD / NVIDIA / Intel) and"
+    Write-Host "  5) ReShade setup   -- Add visual enhancements (sharper image, better"
+    Write-Host "                        colours, scanlines, borders)."
+    Write-Host "  6) dgVoodoo2 setup -- Fix old DX8, DirectDraw, and Glide games that"
+    Write-Host "                        crash or show black screens."
+    Write-Host "  7) GPU fix setup   -- Auto-detect your GPU (AMD / NVIDIA / Intel) and"
     Write-Host "                        apply the matching compatibility fix to every"
-    Write-Host "                        registered game that has one. Optional."
-    Write-Host "  7) Force feedback (FFB) setup -- Wheel/stick rumble and force feedback."
+    Write-Host "                        registered game that has one."
+    Write-Host "  8) Force feedback (FFB) setup -- Wheel/stick rumble and force feedback."
     Write-Host "                        Covers TeknoParrot's built-in FFB Blaster (needs a"
     Write-Host "                        paid membership) and a free third-party plugin."
-    Write-Host "  8) BepInEx update check -- Checks games with BepInEx already installed"
+    Write-Host "  9) BepInEx update check -- Checks games with BepInEx already installed"
     Write-Host "                        against the latest stable release and offers to"
     Write-Host "                        update (64-bit only). Never installs it fresh."
-    Write-Host "  9) Restore backup  -- Roll UserProfiles back to a previous backup."
+    Write-Host ""
+    Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
+    Write-Host " Maintenance and Recovery" -ForegroundColor DarkCyan
+    Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
     Write-Host "  10) Library health check -- Read-only: reports registered/broken/"
     Write-Host "                        unregistered counts plus GPU fix / FFB Blaster /"
     Write-Host "                        dgVoodoo2 coverage and ReShade/BepInEx install"
     Write-Host "                        counts. No extraction, registration, repair, or"
     Write-Host "                        network access -- just a fast status check."
-    Write-Host "  11) Postgres setup -- Installs/configures the local PostgreSQL"
+    Write-Host "  11) Restore backup  -- Roll UserProfiles, LaunchBox files, or Postgres"
+    Write-Host "                        databases back to a previous backup."
+    Write-Host "  12) Postgres setup -- Installs/configures the local PostgreSQL"
     Write-Host "                        database that some Incredible Technologies"
     Write-Host "                        games need (Golden Tee Live, Power Putt Live,"
     Write-Host "                        Silver Strike Bowling Live, Target Toss Pro)."
     Write-Host "                        Requires running this script as Administrator"
     Write-Host "                        if PostgreSQL isn't installed yet."
-    Write-Host "  12) Check for Updates -- Manual, backup-first check against the latest"
+    Write-Host ""
+    Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
+    Write-Host " Application" -ForegroundColor DarkCyan
+    Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
+    Write-Host "  13) Check for Updates -- Manual, backup-first check against the latest"
     Write-Host "                        GitHub release. Nothing is downloaded or changed"
     Write-Host "                        without your explicit confirmation."
-    Write-Host "  13) Exit"
+    Write-Host "  14) Exit"
     Write-Host ""
     if ($Unattended) {
         Write-Host "  [Unattended] Mode must be set before starting." -ForegroundColor Red
         Write-Log "ERROR: Unattended mode -- reached menu loop."; exit 1
     }
-    $modeChoice = (Read-Host "Enter 1-13").Trim()
+    $modeChoice = (Read-Host "Enter 1-14").Trim()
     switch ($modeChoice) {
         "1"     { $mode = "AutoSync"       }
         "2"     { $mode = "RegisterOnly"   }
-        "3"     { $mode = "CrosshairSetup" }
-        "4"     { $mode = "ReShadeSetup"   }
-        "5"     { $mode = "DgVoodoo2Setup" }
-        "6"     { $mode = "GpuFixSetup"    }
-        "7"     { $mode = "FFBSetup"       }
-        "8"     { $mode = "BepInExUpdate"  }
-        "9"     { $mode = "Restore"        }
+        "3"     { $mode = "PropagateControls" }
+        "4"     { $mode = "CrosshairSetup" }
+        "5"     { $mode = "ReShadeSetup"   }
+        "6"     { $mode = "DgVoodoo2Setup" }
+        "7"     { $mode = "GpuFixSetup"    }
+        "8"     { $mode = "FFBSetup"       }
+        "9"     { $mode = "BepInExUpdate"  }
         "10"    { $mode = "HealthCheck"    }
-        "11"    { $mode = "PostgresSetup"  }
-        "12"    { $mode = "CheckForUpdates" }
-        "13"    { break }
-        default { Write-Host "  Invalid choice. Enter 1-13." -ForegroundColor Yellow; continue }
+        "11"    { $mode = "Restore"        }
+        "12"    { $mode = "PostgresSetup"  }
+        "13"    { $mode = "CheckForUpdates" }
+        "14"    { break }
+        default { Write-Host "  Invalid choice. Enter 1-14." -ForegroundColor Yellow; continue }
     }
-    if ($modeChoice -eq "13") { break }
+    if ($modeChoice -eq "14") { break }
     }
 
     if ($mode -eq "Restore") {
@@ -9892,7 +9985,7 @@ while ($true) {
             Write-Host ("    Errors                 : {0}  (see TeknoParrot-Manager.log)" -f $pgResults.Errors) -ForegroundColor Red
         }
         Write-Host ""
-        Write-Host "  If anything looks wrong, use menu option 9 (Restore backup) ->" -ForegroundColor DarkCyan
+        Write-Host "  If anything looks wrong, use menu option 11 (Restore backup) ->" -ForegroundColor DarkCyan
         Write-Host "  Postgres database backup to undo database changes." -ForegroundColor DarkCyan
         Write-Log ("Postgres setup: complete. Configured={0} DbCreated={1} AlreadyConfigured={2} Errors={3}" -f $pgResults.Configured, $pgResults.DbCreated, $pgResults.AlreadyConfigured, $pgResults.Errors)
         [void](Read-Host "  Press Enter to return to menu")
@@ -9914,6 +10007,112 @@ while ($true) {
             exit 0
         }
         Write-Log "CheckForUpdates: complete, no restart needed."
+        [void](Read-Host "  Press Enter to return to menu")
+        continue
+    }
+
+    if ($mode -eq "PropagateControls") {
+        Write-Host ""
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        Write-Host " Propagate Controls" -ForegroundColor Cyan
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        Write-Host " This copies your current TeknoParrot control bindings from" -ForegroundColor DarkCyan
+        Write-Host " configured reference games to other compatible games. No games" -ForegroundColor DarkCyan
+        Write-Host " will be registered or extracted." -ForegroundColor DarkCyan
+
+        # Backup UserProfiles before any write, same safety net as every other
+        # standalone flow that writes into UserProfile XMLs (GPU fix, cursor
+        # hide, FFB Blaster). Invoke-ControlPropagation itself is unchanged --
+        # this option is a thin wrapper around the existing pipeline
+        # (Build-ArchetypePool / Invoke-ControlPropagation /
+        # Write-ControlPropagationResults), not a new implementation of it.
+        try {
+            $propagationBackup = New-PropagationBackup -UserProfilesDir $userProfilesDir
+        } catch {
+            Write-Host "  ERROR: Could not create backup folder: $_" -ForegroundColor Red
+            Write-Host "  The script will not continue without a successful backup." -ForegroundColor Red
+            Write-Log "PropagateControls: backup FAILED -- $_"
+            [void](Read-Host "  Press Enter to return to menu")
+            continue
+        }
+        $backupPath = $propagationBackup.Path
+        if ($propagationBackup.ErrorCount -gt 0) {
+            # Fatal, no override, no exception for -Unattended: this mode's
+            # own doc text and the README both promise UserProfiles are
+            # backed up before it writes anything. An incomplete backup
+            # means that promise is already broken, so propagation must not
+            # proceed regardless of interactive confirmation or unattended
+            # mode -- there is no safe "continue anyway" here.
+            Write-Host ("  ERROR: {0} file(s) could not be backed up." -f $propagationBackup.ErrorCount) -ForegroundColor Red
+            Write-Host "  The script will not continue without a complete backup." -ForegroundColor Red
+            Write-Log "PropagateControls: backup FAILED -- $($propagationBackup.ErrorCount) file(s) could not be copied."
+            [void](Read-Host "  Press Enter to return to menu")
+            continue
+        }
+        Write-Host ("  Backup: {0}" -f $backupPath) -ForegroundColor DarkGray
+        Write-Log "PropagateControls: backup at $backupPath"
+
+        Write-Host ""
+        $pool = Build-ArchetypePool -userProfilesDir $userProfilesDir -minBound $MinBoundForArchetype
+        if ($pool.Count -eq 0) {
+            Write-Host " No fully-bound example games found yet, so there is nothing" -ForegroundColor Yellow
+            Write-Host " to copy controls from yet. Bind at least one game of each" -ForegroundColor Yellow
+            Write-Host " control type in TeknoParrot's own UI, then re-run this option." -ForegroundColor Yellow
+            Write-Log "PropagateControls: no reference games found (>= $MinBoundForArchetype bound buttons)."
+            [void](Read-Host "  Press Enter to return to menu")
+            continue
+        }
+
+        Write-Host " Found these bound games to copy controls FROM:" -ForegroundColor Green
+        foreach ($s in $pool) {
+            $apiLabel = if ($s.InputApi) { $s.InputApi } else { "n/a" }
+            $devLabel = if ($s.Devices.Count -gt 0) { ($s.Devices -join ", ") } else { "?" }
+            Write-Host ("    {0,-26} [{1}]  {2} buttons" -f $s.Code, $s.Family, $s.BoundCount) -ForegroundColor DarkGray
+            Write-Host ("        api={0}   device(s): {1}" -f $apiLabel, $devLabel) -ForegroundColor DarkGray
+            if ($s.ConfigCarry.Count -gt 0) {
+                $cfgLabel = ($s.ConfigCarry.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ", "
+                Write-Host ("        settings that will be copied: {0}" -f $cfgLabel) -ForegroundColor DarkGray
+                foreach ($flag in (Get-ConfigCarryFlags $s.Family $s.ConfigCarry)) {
+                    Write-Host ("        WARNING: $flag") -ForegroundColor Red
+                }
+            }
+        }
+        Write-Host ""
+        Write-Host " This copies each game's controls to your OTHER games of the SAME" -ForegroundColor DarkCyan
+        Write-Host " type. It never changes a game you have already bound, and it leaves" -ForegroundColor DarkCyan
+        Write-Host " game-specific controls (gear shifts, special buttons) unbound for" -ForegroundColor DarkCyan
+        Write-Host " you to set. Your UserProfiles were backed up at the start of this run." -ForegroundColor DarkCyan
+        Write-Host ""
+        Write-Host " IMPORTANT: the 'settings that will be copied' lines above apply to" -ForegroundColor Yellow
+        Write-Host " EVERY other game of that type. Check them against your real hardware" -ForegroundColor Yellow
+        Write-Host " now -- for example 'Use Keyboard/Button For Axis' should be False if" -ForegroundColor Yellow
+        Write-Host " you bind with a real wheel, and 'Use Relative Input' should match how" -ForegroundColor Yellow
+        Write-Host " your lightgun reports position. If anything looks wrong, answer N," -ForegroundColor Yellow
+        Write-Host " fix the game above in TeknoParrotUI, then re-run." -ForegroundColor Yellow
+        Write-Host ""
+
+        if ($Unattended) {
+            Write-Host "  [Unattended] Propagating controls." -ForegroundColor DarkCyan
+            Write-Log "PropagateControls: unattended -- propagation = Y."
+            $goCtl = "Y"
+        } else {
+            $goCtl = (Read-Host " Propagate controls now? (Y/N)").Trim()
+        }
+
+        if ($goCtl.ToUpper() -eq "Y") {
+            $reports = Invoke-ControlPropagation -userProfilesDir $userProfilesDir -pool $pool -minBound $MinBoundForArchetype -noPropagate $noPropagateList -forceArchetype $forceArchetypeMap -familyOverride $familyOverrideMap -canonicalArchetype $canonicalArchetypeMap -DryRun $false
+            $propResult = Write-ControlPropagationResults -Reports $reports
+            Write-Host ""
+            Write-Host " IMPORTANT: launch ONE updated game in TeknoParrot and test its" -ForegroundColor Cyan
+            Write-Host " controls before trusting the rest. If anything is wrong, restore" -ForegroundColor Cyan
+            Write-Host (" from the backup made at the start of this run:" ) -ForegroundColor Cyan
+            Write-Host ("    {0}" -f $backupPath) -ForegroundColor Cyan
+            Write-Log "PropagateControls: completed. Games updated=$($propResult.BoundCount)"
+        } else {
+            Write-Host " Skipped control propagation." -ForegroundColor DarkGray
+            Write-Log "PropagateControls: user declined."
+        }
+
         [void](Read-Host "  Press Enter to return to menu")
         continue
     }
@@ -10758,40 +10957,9 @@ if ($pool.Count -eq 0) {
     }
     if ($goCtl.ToUpper() -eq "Y") {
         $reports = Invoke-ControlPropagation -userProfilesDir $userProfilesDir -pool $pool -minBound $MinBoundForArchetype -noPropagate $noPropagateList -forceArchetype $forceArchetypeMap -familyOverride $familyOverrideMap -canonicalArchetype $canonicalArchetypeMap -DryRun $dryRunActive
-        Write-Host ""
-        Write-Host " Results:" -ForegroundColor Green
-        foreach ($r in $reports) {
-            switch ($r.Status) {
-                "bound" {
-                    $pin = if ($r.Forced) { "  (pinned)" } else { "" }
-                    Write-Host ("    {0}{1}" -f $r.Code, $pin) -ForegroundColor Green
-                    Write-Host ("       copied from {0} [{1}] -- bound {2} control(s)" -f $r.Archetype, $r.Family, $r.Bound) -ForegroundColor DarkGray
-                    if ($r.ConfigCarried.Count -gt 0) {
-                        Write-Host ("       carried settings: {0}" -f ($r.ConfigCarried -join ", ")) -ForegroundColor DarkGray
-                    }
-                    if (-not $r.ApiSet -and $r.ArchetypeApi) {
-                        Write-Host ("       NOTE: left Input API unchanged ('{0}' not offered by this game)" -f $r.ArchetypeApi) -ForegroundColor Yellow
-                    }
-                    if ($r.Manual.Count -gt 0) {
-                        Write-Host ("       still manual: {0}" -f ($r.Manual -join ", ")) -ForegroundColor Yellow
-                    }
-                }
-                "no-archetype"     { Write-Host ("    {0}  -- no '{1}' example game bound yet; controls will be set once you bind one (see ACTION REQUIRED)" -f $r.Code, $r.Family) -ForegroundColor Yellow }
-                "api-fixed"        { Write-Host ("    {0}  -- already bound; Input API corrected to '{1}' (matched from {2})" -f $r.Code, $r.ArchetypeApi, $r.Archetype) -ForegroundColor Green }
-                "api-fixed-canonical" { Write-Host ("    {0}  -- archetype; Input API corrected to '{1}' (matched from canonical archetype {2})" -f $r.Code, $r.ArchetypeApi, $r.Archetype) -ForegroundColor Green }
-                "skipped-bound"    { Write-Host ("    {0}  -- already bound, left unchanged" -f $r.Code) -ForegroundColor DarkGray }
-                "skipped-override" { Write-Host ("    {0}  -- skipped (per-game override)" -f $r.Code) -ForegroundColor DarkGray }
-                "save-failed"      { Write-Host ("    {0}  -- ERROR saving (see TeknoParrot-Manager.log)" -f $r.Code) -ForegroundColor Red }
-            }
-            if ($r.MismatchSlots) {
-                Write-Host ("       ACTION REQUIRED -- directional/action mismatch: {0}" -f $r.MismatchSlots) -ForegroundColor Yellow
-                Write-Host ("       Rebind these slots manually in TeknoParrot's own UI (see issue #17)" ) -ForegroundColor Yellow
-            }
-        }
-        $nb               = @($reports | Where-Object { $_.Status -eq "bound" -or $_.Status -eq "api-fixed" -or $_.Status -eq "api-fixed-canonical" }).Count
-        $noArchetypeItems = @($reports | Where-Object { $_.Status -eq "no-archetype" })
-        Write-Host ""
-        Write-Host (" Games updated: {0}" -f $nb) -ForegroundColor Green
+        $propResult       = Write-ControlPropagationResults -Reports $reports
+        $nb               = $propResult.BoundCount
+        $noArchetypeItems = $propResult.NoArchetypeItems
         Write-Host ""
         Write-Host " IMPORTANT: launch ONE updated game in TeknoParrot and test its" -ForegroundColor Cyan
         Write-Host " controls before trusting the rest. If anything is wrong, restore" -ForegroundColor Cyan
@@ -10986,7 +11154,7 @@ if ($doLBSetup -eq "Y") {
             Write-Host ("    {0,-12} : {1} game(s) added" -f $name, $lbWriteResult.Results[$name]) -ForegroundColor Green
         }
         Write-Host ("  Backup saved : {0}" -f $lbWriteResult.BackupPath) -ForegroundColor DarkCyan
-        Write-Host "  If anything looks wrong in LaunchBox, use menu option 9 (Restore" -ForegroundColor DarkCyan
+        Write-Host "  If anything looks wrong in LaunchBox, use menu option 11 (Restore" -ForegroundColor DarkCyan
         Write-Host "  backup) -> LaunchBox library backup to undo this." -ForegroundColor DarkCyan
         Write-Host ""
         Write-Host "  New games have no box art/metadata yet -- in LaunchBox, right-click a" -ForegroundColor DarkCyan
@@ -11153,7 +11321,7 @@ if ($doReShade -eq "Y") {
             Write-Host "    2. Run it and point it at any TeknoParrot game exe." -ForegroundColor White
             Write-Host "       It will create a DLL file (e.g. dxgi.dll) in that game folder." -ForegroundColor White
             Write-Host "    3. Copy that DLL to  $PSScriptRoot\ReShade\  and rename it  ReShade64.dll" -ForegroundColor White
-            Write-Host "       Then re-run this script and choose option 4 from the menu." -ForegroundColor White
+            Write-Host "       Then re-run this script and choose option 5 from the menu." -ForegroundColor White
             Write-Host "    -- OR --" -ForegroundColor DarkCyan
             Write-Host "    Enter the full path to the DLL file now:" -ForegroundColor White
             Write-Host ""
@@ -11242,7 +11410,7 @@ if ($doDgVoodoo -eq "Y") {
             Write-Host "         From the MS\x86\ subfolder : D3D8.dll  DDraw.dll  D3DImm.dll" -ForegroundColor White
             Write-Host "         From the 3Dfx\x86\ subfolder : Glide2x.dll  Glide3x.dll" -ForegroundColor White
             Write-Host "         From the root of the ZIP   : dgVoodoo.conf" -ForegroundColor White
-            Write-Host "       Then re-run this script and choose option 5 from the menu." -ForegroundColor White
+            Write-Host "       Then re-run this script and choose option 6 from the menu." -ForegroundColor White
             Write-Host "    -- OR --" -ForegroundColor DarkCyan
             Write-Host "    Enter the full path to a folder that already contains those files:" -ForegroundColor White
             Write-Host ""

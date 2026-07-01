@@ -1116,6 +1116,93 @@ $binding
     }
 }
 
+Describe "Write-ControlPropagationResults (issue #59: standalone Propagate Controls)" {
+    # This function is the shared reporting step behind both the AutoSync/
+    # Register-only flow and the standalone "Propagate Controls" menu option
+    # (issue #59) -- the same $reports shape Invoke-ControlPropagation always
+    # returns, in, count out. Exercising it directly protects both call sites
+    # from drifting out of sync with each other.
+    It "counts bound/api-fixed/api-fixed-canonical as updated and returns the no-archetype subset" {
+        $reports = @(
+            [pscustomobject]@{ Code = 'GameA'; Status = 'bound'; Family = 'driving'; Archetype = 'RefDriver'; Bound = 3; Manual = @(); ConfigCarried = @(); ApiSet = $true; ArchetypeApi = 'RawInput'; Forced = $false; MismatchSlots = $null }
+            [pscustomobject]@{ Code = 'GameB'; Status = 'api-fixed'; ArchetypeApi = 'RawInput'; Archetype = 'RefDriver'; MismatchSlots = $null }
+            [pscustomobject]@{ Code = 'GameC'; Status = 'api-fixed-canonical'; ArchetypeApi = 'RawInput'; Archetype = 'RefDriver'; MismatchSlots = $null }
+            [pscustomobject]@{ Code = 'GameD'; Status = 'no-archetype'; Family = 'lightgun'; MismatchSlots = $null }
+            [pscustomobject]@{ Code = 'GameE'; Status = 'skipped-bound'; MismatchSlots = $null }
+            [pscustomobject]@{ Code = 'GameF'; Status = 'skipped-override'; MismatchSlots = $null }
+            [pscustomobject]@{ Code = 'GameG'; Status = 'save-failed'; Archetype = 'RefDriver'; MismatchSlots = $null }
+        )
+
+        $result = Write-ControlPropagationResults -Reports $reports
+
+        $result.BoundCount | Should -Be 3
+        $result.NoArchetypeItems.Count | Should -Be 1
+        $result.NoArchetypeItems[0].Code | Should -Be 'GameD'
+    }
+
+    It "returns zero updated and an empty no-archetype list for an all-skipped report set" {
+        $reports = @(
+            [pscustomobject]@{ Code = 'GameH'; Status = 'skipped-bound'; MismatchSlots = $null }
+            [pscustomobject]@{ Code = 'GameI'; Status = 'skipped-override'; MismatchSlots = $null }
+        )
+
+        $result = Write-ControlPropagationResults -Reports $reports
+
+        $result.BoundCount | Should -Be 0
+        $result.NoArchetypeItems.Count | Should -Be 0
+    }
+}
+
+Describe "New-PropagationBackup (P1 fix: standalone Propagate Controls must abort on incomplete backup)" {
+    # Independent engineering review finding on PR #62: a backup-copy error in the standalone
+    # Propagate Controls menu option only warned and allowed the caller to
+    # continue -- including automatically in -Unattended mode -- so
+    # Invoke-ControlPropagation could run against an incomplete backup. This
+    # directly proves the gating condition every caller relies on: ErrorCount
+    # is greater than zero whenever any source file could not be copied, with
+    # no path that reports success/zero on a partial failure.
+    It "reports zero errors and the correct path when every file copies successfully" {
+        $profiles = Join-Path $TestDrive ("propback-ok-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $profiles 'Game.xml') -Value '<GameProfile/>' -Encoding UTF8
+
+        $result = New-PropagationBackup -UserProfilesDir $profiles
+
+        $result.ErrorCount | Should -Be 0
+        Test-Path -LiteralPath (Join-Path $result.Path 'Game.xml') | Should -BeTrue
+    }
+
+    It "signals an abort-worthy failure when a source file is locked and cannot be copied" {
+        # A sharing-violation on Copy-Item can surface either as a
+        # non-terminating error (caught into ErrorCount via -ErrorAction
+        # SilentlyContinue) or, depending on exactly how the underlying I/O
+        # call fails, as a terminating exception that -ErrorAction alone
+        # does not suppress. Both are safe: the real caller in the
+        # "PropagateControls" menu block wraps this call in try/catch AND
+        # checks ErrorCount, so either outcome correctly prevents
+        # Invoke-ControlPropagation from running. This test accepts either,
+        # since the point is proving no path silently reports success.
+        $profiles = Join-Path $TestDrive ("propback-locked-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        $lockedPath = Join-Path $profiles 'Locked.xml'
+        Set-Content -LiteralPath $lockedPath -Value '<GameProfile/>' -Encoding UTF8
+
+        $handle = [System.IO.File]::Open($lockedPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
+        try {
+            $threw = $false
+            $result = $null
+            try {
+                $result = New-PropagationBackup -UserProfilesDir $profiles
+            } catch {
+                $threw = $true
+            }
+            ($threw -or $result.ErrorCount -gt 0) | Should -BeTrue
+        } finally {
+            $handle.Dispose()
+        }
+    }
+}
+
 # =============================================================================
 # COMPATIBILITY REGRESSION SUITE (issues #41 / #43 / #46)
 # These contexts protect the compatibility-sensitive setup decisions against
@@ -1734,5 +1821,68 @@ Describe "Invoke-StartupUpdateCheck" {
         } finally {
             Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
         }
+    }
+}
+
+Describe "Main menu source-level drift check" {
+    # The main menu loop is top-level executable code (not a function), so it
+    # is never picked up by the AST function-extraction in the top-level
+    # BeforeAll and can't be exercised directly. Instead, this reads the raw
+    # script source and cross-checks the displayed menu option numbers
+    # against the switch statement's case labels, so a future edit to one
+    # without the other (the exact drift class documented in
+    # LESSONS_LEARNED.md for v0.99.25/v0.99.28) fails CI instead of shipping.
+    BeforeAll {
+        $script:mainScriptContent = Get-Content -LiteralPath $scriptPath -Raw
+    }
+
+    It "has a switch case for every displayed menu option number, 1 through the Exit option, with no gaps" {
+        $menuLineMatches = [regex]::Matches($script:mainScriptContent, 'Write-Host\s+"\s*(\d+)\)\s')
+        $displayedNumbers = $menuLineMatches | ForEach-Object { [int]$_.Groups[1].Value } | Sort-Object -Unique
+
+        # The menu block is the first place these numbers appear in the file;
+        # take the first N matches in file order rather than every numeric
+        # "N)" that could coincidentally appear elsewhere (e.g. inside the
+        # Restore-from-Backup sub-menu, which also uses "1)"/"2)"/"3)").
+        $menuBlockStart = $script:mainScriptContent.IndexOf('Write-Host " Library Management"')
+        $menuBlockEnd    = $script:mainScriptContent.IndexOf('Enter 1-')
+        $menuBlockStart | Should -BeGreaterThan 0
+        $menuBlockEnd | Should -BeGreaterThan $menuBlockStart
+
+        $menuBlockText = $script:mainScriptContent.Substring($menuBlockStart, $menuBlockEnd - $menuBlockStart)
+        $displayedNumbers = [regex]::Matches($menuBlockText, 'Write-Host\s+"\s*(\d+)\)\s') |
+            ForEach-Object { [int]$_.Groups[1].Value } | Sort-Object -Unique
+
+        $switchBlockStart = $script:mainScriptContent.IndexOf('switch ($modeChoice) {')
+        # The switch block's own cases each have their own "{ ... }" (e.g.
+        # "1" { $mode = "AutoSync" }), so IndexOf('}', ...) would only find
+        # the first case's closing brace. "if ($modeChoice -eq" reliably
+        # appears immediately after the whole switch statement closes.
+        $switchBlockEnd   = $script:mainScriptContent.IndexOf('if ($modeChoice -eq', $switchBlockStart)
+        $switchBlockText  = $script:mainScriptContent.Substring($switchBlockStart, $switchBlockEnd - $switchBlockStart)
+        $switchNumbers    = [regex]::Matches($switchBlockText, '"(\d+)"\s*\{') |
+            ForEach-Object { [int]$_.Groups[1].Value } | Sort-Object -Unique
+
+        $displayedNumbers.Count | Should -BeGreaterThan 0
+        # Join to strings for comparison -- piping an array directly into
+        # Should -Be iterates it element-by-element against the whole
+        # right-hand side instead of comparing the collections as a whole.
+        ($displayedNumbers -join ',') | Should -Be ($switchNumbers -join ',')
+
+        $expectedSequence = 1..($displayedNumbers[-1])
+        ($displayedNumbers -join ',') | Should -Be ($expectedSequence -join ',')
+    }
+
+    It "shows Enter 1-N matching the highest displayed menu option" {
+        $menuBlockStart = $script:mainScriptContent.IndexOf('Write-Host " Library Management"')
+        $enterMatch = [regex]::Match($script:mainScriptContent.Substring($menuBlockStart), 'Enter 1-(\d+)')
+        $enterMatch.Success | Should -BeTrue
+
+        $menuBlockEnd = $script:mainScriptContent.IndexOf('Enter 1-', $menuBlockStart)
+        $menuBlockText = $script:mainScriptContent.Substring($menuBlockStart, $menuBlockEnd - $menuBlockStart)
+        $displayedNumbers = [regex]::Matches($menuBlockText, 'Write-Host\s+"\s*(\d+)\)\s') |
+            ForEach-Object { [int]$_.Groups[1].Value } | Sort-Object -Unique
+
+        [int]$enterMatch.Groups[1].Value | Should -Be $displayedNumbers[-1]
     }
 }

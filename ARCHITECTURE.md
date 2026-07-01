@@ -50,7 +50,7 @@ is silently skipped, not silently accepted.
 
 ---
 
-## ReShade deployment (Mode 4)
+## ReShade deployment (Mode 5)
 
 **Source DLLs.** Not bundled in the release ZIP (not redistributable). The user
 obtains from reshade.me and places at `Scripts\ReShade\ReShade64.dll` (x64) and
@@ -88,7 +88,7 @@ registered profiles (WRONG NAME warning for typos), never required. Same
 
 ---
 
-## dgVoodoo2 deployment (Mode 5)
+## dgVoodoo2 deployment (Mode 6)
 
 **Source DLLs.** Bundled at `Scripts\dgVoodoo2\` (not in repo; user provides). Required
 DLLs from the dgVoodoo2 ZIP: `MS\x86\D3D8.dll`, `DDraw.dll`, `D3DImm.dll`;
@@ -114,7 +114,7 @@ NAME validation convention as ReShadePresets.
 
 ---
 
-## Force feedback (FFB) setup (Mode 7)
+## Force feedback (FFB) setup (Mode 8)
 
 Two independent mechanisms, both optional.
 
@@ -255,7 +255,7 @@ It never calls `Invoke-GpuFixSetup`/`Invoke-FFBBlasterSetup` (which prompt, back
 write), only the shared detection helpers. Third-party FFB plugin coverage is NOT included
 -- checking it needs a live fetch of `AutoSetup.cmd` (`Get-FFBPluginGameMap`), which
 would break the health check's documented "no network access" contract. The check prints a
-one-line note pointing at mode 7 instead.
+one-line note pointing at mode 8 instead.
 
 **Crosshair last-used state.** `TeknoParrot-Manager-crosshairs.json` (gitignored, like
 `config.json`) remembers last-used P1/P2 crosshair filenames (not indices -- indices shift
@@ -333,7 +333,7 @@ LaunchBox/frontend ideas without asking again.
 - `Backup-LaunchBoxFiles`: backs up every file about to change before any write, aborts
   the whole operation if backup fails. Scoped to the specific files changing only (not the
   whole Data\ folder -- platform files like Arcade.xml run 20+ MB).
-- `Invoke-RestoreLaunchBoxBackup`: surfaced as a sub-choice under mode 9 (Restore Backup),
+- `Invoke-RestoreLaunchBoxBackup`: surfaced as a sub-choice under mode 11 (Restore Backup),
   not a new top-level mode. Mirrors `Invoke-RestoreBackup`'s existing UX (list by
   timestamp, confirm with YES).
 
@@ -355,7 +355,7 @@ persistent settings go into `Save-Config` once, not at each call site.
 
 ---
 
-## PostgreSQL setup for Incredible Technologies games (Mode 11, v0.99)
+## PostgreSQL setup for Incredible Technologies games (Mode 12, v0.99)
 
 Feature-freeze exception, explicitly granted by the user.
 
@@ -643,7 +643,7 @@ Y/N confirmations and "press Enter to continue" prompts untouched).
 
 ---
 
-## Check for Updates (Mode 12, v0.99.39)
+## Check for Updates (Mode 13, v0.99.39)
 
 Feature-freeze exception, explicitly requested by the user as the planned follow-up to the
 standalone `tools/Invoke-TpmAutoUpdate.ps1` helper (PR #51, merged) -- see
@@ -701,6 +701,74 @@ gained `-MaxAttempts`/`-TimeoutSec` parameters so the startup path can use a sin
 short-timeout attempt (no retries) instead of the menu option's patient 3x/20s retry --
 required so an unreachable GitHub cannot meaningfully delay every future launch of the
 script for a check nobody explicitly asked for this time.
+
+---
+
+## Propagate Controls (Mode 3, v0.99.41)
+
+Feature-freeze exception (issue #59), approved on the rationale that this introduces no
+new propagation logic -- it exposes the existing, already-proven propagation pipeline
+through a dedicated top-level menu entry, instead of only being reachable as the last
+step of AutoSync/Register.
+
+Implementation is a thin wrapper: the new `"PropagateControls"` mode block takes its own
+UserProfiles backup (same pattern as GPU fix/cursor hide/FFB Blaster -- each standalone
+destructive flow backs up independently rather than sharing one backup call), then calls
+the same `Build-ArchetypePool` / `Invoke-ControlPropagation` functions the AutoSync/
+Register flow already uses. No propagation algorithm code is duplicated.
+
+**`Write-ControlPropagationResults`** (next to `Invoke-ControlPropagation`) is a new
+extraction: the results-display block (per-status messaging, games-updated count,
+no-archetype subset) was pulled out of the AutoSync/Register inline flow into a shared
+function, specifically so this new entry point could reuse it verbatim instead of
+duplicating ~35 lines of reporting logic. Both call sites now render identical output by
+construction; a future change to how results are displayed only has one place to change.
+
+Explicitly out of scope for this exception (per the approved rationale): no GamePath
+repair step, no redesign of propagation behavior, no expansion beyond direct access to
+the existing pipeline. The confirmation flow, hardware-mismatch warnings, and results
+reporting are unchanged from what AutoSync/Register already show.
+
+---
+
+## Menu reorganization (v0.99.42)
+
+Release-hardening pass, approved explicitly as menu/documentation architecture work, not
+feature work: the menu had drifted into an order that reflected the sequence features were
+added in, not how a user or maintainer would group them. Postgres setup (an occasional,
+one-time system dependency install) sat after two maintenance-flavored modes; Library
+health check sat between Restore backup and Postgres setup rather than next to Restore
+backup where a "check status, then recover" reading flows naturally; Propagate Controls
+(added the same release, before this reorg) landed at the end of the menu despite being a
+core library-management action, not an app-level one.
+
+**Final grouping**, applied to the menu display text and the `switch` statement only --
+no `if ($mode -eq "X")` block was moved in the file, so every mode's implementation stays
+exactly where it physically was and carries zero logic-change risk:
+
+- **Library Management** (1-3): AutoSync, Register only, Propagate Controls -- the actions
+  that build or update what's registered.
+- **Game Enhancements** (4-9): Crosshair, ReShade, dgVoodoo2, GPU fix, FFB, BepInEx --
+  all optional per-game visual/compatibility add-ons, contiguous for the first time.
+- **Maintenance and Recovery** (10-12): Library health check, Restore backup, Postgres
+  setup -- status-check first, then the recovery action it would inform, with Postgres
+  setup last as the narrowest-scope item in the group (and the one whose own backups are
+  restored via the same Restore backup flow, at mode 11, one position earlier).
+- **Application** (13-14): Check for Updates, Exit.
+
+**Old -> new mapping** (for anyone cross-referencing an older screenshot, forum post, or
+saved `-Unattended` invocation): 1->1, 2->2, 3 Crosshair->4, 4 ReShade->5, 5 dgVoodoo2->6,
+6 GPU fix->7, 7 FFB->8, 8 BepInEx->9, 9 Restore backup->11, 10 Health check->10 (unchanged),
+11 Postgres->12, 12 Check for Updates->13, 13 Propagate Controls->3, 14 Exit->14.
+
+**Drift prevention.** `Tests/TeknoParrot-Manager.Tests.ps1`'s "Main menu source-level
+drift check" reads the raw script source (the menu loop is top-level code, not a function,
+so it isn't reachable through the AST function-extraction the rest of the suite uses) and
+cross-checks the displayed option numbers against the `switch` statement's case labels,
+asserting a contiguous 1..N sequence with no gaps and no mismatch. This is the same drift
+class documented in `LESSONS_LEARNED.md` for v0.99.25/v0.99.28 (stale mode-number
+references surviving a menu change); the new test makes it a CI failure instead of a
+manually-run grep sweep's responsibility to catch.
 
 ---
 

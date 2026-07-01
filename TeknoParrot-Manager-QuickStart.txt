@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.99.40 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.99.42 BETA  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -70,7 +70,7 @@
   5. Re-run the script -- it copies those controls to all similar games.
   6. Launch one updated game and test it.
   7. Everything else (crosshairs, ReShade, dgVoodoo2, GPU fix, FFB, BepInEx,
-     Postgres -- modes 3-8 and 11) is optional and can be run any time after
+     Postgres -- modes 4-9 and 12) is optional and can be run any time after
      this, in any order, as many times as you like.
 
 
@@ -90,27 +90,38 @@
        powershell -ExecutionPolicy Bypass -File .\TeknoParrot-Manager.ps1
 
   3. Pick a mode (after each mode completes, you return to this menu):
+
+     Library Management
        1) AutoSync         -- extract ZIPs (e.g. from a NAS), then register.
        2) Register only    -- games are already extracted; just register.
-       3) Crosshair setup  -- deploy custom cursor images to lightgun games,
+       3) Propagate Controls -- re-copy control bindings from reference
+                             games to other compatible games, without
+                             going through AutoSync/Register first.
+
+     Game Enhancements (all optional -- games work without these)
+       4) Crosshair setup  -- deploy custom cursor images to lightgun games,
                              optionally hide the Windows cursor for all guns.
-       4) ReShade setup    -- add visual enhancements (optional, see below).
-       5) dgVoodoo2 setup  -- fix old DX8/Glide games (optional, see below).
-       6) GPU fix setup    -- apply GPU vendor fixes to registered games
-                             (AMD / NVIDIA / Intel, optional, see below).
-       7) FFB setup        -- wheel/stick rumble and force feedback
-                             (optional, see below).
-       8) BepInEx update   -- update an already-installed BepInEx to the
-                             latest stable 64-bit release (optional, see below).
-       9) Restore backup   -- roll UserProfiles, LaunchBox files, or Postgres
-                             databases back to a previous backup.
+       5) ReShade setup    -- add visual enhancements (see below).
+       6) dgVoodoo2 setup  -- fix old DX8/Glide games (see below).
+       7) GPU fix setup    -- apply GPU vendor fixes to registered games
+                             (AMD / NVIDIA / Intel, see below).
+       8) FFB setup        -- wheel/stick rumble and force feedback
+                             (see below).
+       9) BepInEx update   -- update an already-installed BepInEx to the
+                             latest stable 64-bit release (see below).
+
+     Maintenance and Recovery
        10) Health check    -- read-only library status, safe to run any time.
-       11) Postgres setup  -- install/configure PostgreSQL for games that
+       11) Restore backup  -- roll UserProfiles, LaunchBox files, or Postgres
+                             databases back to a previous backup.
+       12) Postgres setup  -- install/configure PostgreSQL for games that
                              need it (Golden Tee Live, Power Putt Live, etc).
-       12) Check updates   -- manually check the latest GitHub release.
+
+     Application
+       13) Check updates   -- manually check the latest GitHub release.
                              Nothing is downloaded or changed without your
                              explicit Y/N confirmation.
-       13) Exit            -- quit the script.
+       14) Exit            -- quit the script.
 
   4. Answer the folder prompts. For AutoSync, choose a LOCAL staging folder
      with free space, OUTSIDE both TeknoParrot and your ZIP source.
@@ -169,7 +180,7 @@
   Extraction keeps failing   Check the log for the specific error. Verify
                              free space and that the ZIP is not corrupted.
 
-  Controls wrong after       Restore from backup (mode 9), or delete the
+  Controls wrong after       Restore from backup (mode 11), or delete the
   propagation                game's .xml and re-run after fixing the
                              reference game's bindings in TeknoParrotUI.
 
@@ -203,14 +214,14 @@
 
   CROSSHAIR SETUP (OPTIONAL)
   --------------------------
-  Mode 3 deploys custom crosshair images to all registered lightgun games
+  Mode 4 deploys custom crosshair images to all registered lightgun games
   (House of the Dead, Aliens Extermination, Terminator Salvation, etc.).
 
   321 crosshair designs are included in the  Crosshairs\  folder next to
   this script. You can add your own PNG images to that folder at any time
   and the script will pick them up automatically on the next run.
 
-  When you run mode 3:
+  When you run mode 4:
     1. A preview page opens in your browser showing all available designs.
     2. Enter the number of your chosen design for Player 1 and Player 2
        (press Enter to reuse your last choice -- no need to re-find it).
@@ -223,7 +234,7 @@
        lightgun games. Answer Y to set the cursor-hide field in each
        gun game's UserProfile XML (a backup is taken automatically first).
 
-  Run mode 3 again any time to change the crosshair design.
+  Run mode 4 again any time to change the crosshair design.
 
 
   RESHADE VISUAL ENHANCEMENTS (OPTIONAL)
@@ -242,7 +253,7 @@
 
   If you downloaded TeknoParrot Manager as a ZIP release:
     ReShade64.dll is already in the  ReShade\  folder -- no setup needed.
-    Just run the script and choose mode 4, or answer Y when prompted.
+    Just run the script and choose mode 5, or answer Y when prompted.
 
   If you cloned from GitHub (or the ReShade\ folder is empty):
     The DLLs are not in the git repository. Get them yourself:
@@ -252,7 +263,7 @@
     3. Copy that DLL into the  ReShade\  folder next to this script
        and rename it to  ReShade64.dll.  (Repeat with a 32-bit game
        exe and rename to  ReShade32.dll  if you have 32-bit games.)
-    4. Run TeknoParrot Manager and choose mode 4, or answer Y when
+    4. Run TeknoParrot Manager and choose mode 5, or answer Y when
        prompted at the end of a normal run.
 
   Before deploying, the script checks the Authenticode signature on your
@@ -284,7 +295,7 @@
          From  MS\x86\      : D3D8.dll, DDraw.dll, D3DImm.dll
          From  3Dfx\x86\   : Glide2x.dll, Glide3x.dll
          From the root     : dgVoodoo.conf
-    3. Run the script and choose mode 5, or answer Y at the end of any run.
+    3. Run the script and choose mode 6, or answer Y at the end of any run.
        The wizard auto-detects which games need it and shows them first.
 
   To remove: delete the deployed DLL file(s) from the game folder.
@@ -303,7 +314,7 @@
   games are always covered automatically -- no script update needed.
 
   To run:
-    Choose mode 6 from the main menu, or answer Y when prompted at the end
+    Choose mode 7 from the main menu, or answer Y when prompted at the end
     of any normal run.
 
   Safe to re-run any time you change your GPU or update its drivers.
@@ -326,7 +337,7 @@
   such games -- it never silently picks one for you.
 
   To run:
-    Choose mode 7 from the main menu.
+    Choose mode 8 from the main menu.
 
   Full details: TeknoParrot-Manager-README.txt -- FORCE FEEDBACK (FFB) SETUP section.
 
@@ -344,7 +355,7 @@
   the old install is backed up first.
 
   To run:
-    Choose mode 8 from the main menu.
+    Choose mode 9 from the main menu.
 
   Full details: TeknoParrot-Manager-README.txt -- BEPINEX UPDATE CHECK section.
 
@@ -450,7 +461,7 @@
   metadata yet -- in LaunchBox, right-click a game and use Edit -> Search
   to fetch it, same as for any manually-imported game.
 
-  If anything looks wrong afterward, use menu option 9 (Restore backup) ->
+  If anything looks wrong afterward, use menu option 11 (Restore backup) ->
   LaunchBox library backup to undo it -- this restores the exact files the
   script changed, from before it changed them.
 
@@ -486,7 +497,7 @@
   ------------------
   1. Close TeknoParrot completely before restoring (the script checks and
      will stop if it detects TeknoParrot is still running).
-  2. Re-run the script and choose mode 9) Restore backup.
+  2. Re-run the script and choose mode 11) Restore backup.
   3. The script lists all backups (most recent first) with file counts.
   4. Pick one by number, type YES to confirm.
   5. Done. Re-open TeknoParrot to use the restored profiles.

@@ -87,6 +87,15 @@ writes profiles, verify the following properties are still intact.
 
 ## 3. Documentation sweep (mandatory every version bump)
 
+**No code or release commit is complete until related documentation has
+been updated and verified.** Documentation updates land in the same PR/
+commit as the code change that requires them, not as a follow-up -- this
+is a hard gate, the same tier as a failing Pester run. A menu change is
+never considered done until every place the menu is documented (README
+table of contents and body, both `.txt` docs, the script's own menu
+`Write-Host` strings, and the wiki) has been checked for drift, not just
+the file that happened to be open.
+
 - [ ] `$ScriptVersion` and the header comment in the script updated.
 - [ ] CHANGELOG entry written (script behavior changes only -- no debugging
   tooling, sweep process, or internal iteration noise).
