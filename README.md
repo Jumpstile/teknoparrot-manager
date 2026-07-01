@@ -23,6 +23,7 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 - [How Fuzzy Matching Works](#how-fuzzy-matching-works)
 - [Dat File Integration](#dat-file-integration)
 - [Control Propagation](#control-propagation)
+- [Propagate Controls (standalone menu option)](#propagate-controls-standalone-menu-option)
 - [Device Survey](#device-survey)
 - [Crosshair Setup](#crosshair-setup)
 - [ReShade Visual Enhancements](#reshade-visual-enhancements)
@@ -31,6 +32,7 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 - [Force Feedback (FFB) Setup](#force-feedback-ffb-setup)
 - [BepInEx Update Check](#bepinex-update-check)
 - [Postgres Setup](#postgres-setup)
+- [Check for Updates](#check-for-updates)
 - [LaunchBox Integration](#launchbox-integration)
 - [HyperSpin 2 Export](#hyperspin-2-export)
 - [RetroBat / Batocera](#retrobat--batocera)
@@ -43,6 +45,7 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 - [Game Repair](#game-repair)
 - [Safety, Backup and Log](#safety-backup-and-log)
 - [Resetting](#resetting)
+- [Uninstalling / Removing the Manager](#uninstalling--removing-the-manager)
 - [Troubleshooting](#troubleshooting)
 - [What It Does Not Do](#what-it-does-not-do)
 - [Files Reference](#files-reference)
@@ -180,7 +183,9 @@ Choosing mode 1 or 2 offers a preview/dry-run option first — see [Preview / Dr
 | 9 | **Restore backup** | Roll TeknoParrot profiles, LaunchBox's library files, or Postgres databases back to a previous backup |
 | 10 | **Library health check** | Read-only registered/broken/empty status, plus GPU fix / FFB Blaster / dgVoodoo2 / Postgres coverage and ReShade/BepInEx install counts |
 | 11 | **Postgres setup** | Installs/configures the local PostgreSQL database some Incredible Technologies games need (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball) |
-| 12 | **Exit** | Quit the script |
+| 12 | **Check for Updates** | Manual, backup-first check against the latest GitHub release |
+| 13 | **Propagate Controls** | Re-copy control bindings from reference games to other compatible games, without going through AutoSync/Register first |
+| 14 | **Exit** | Quit the script |
 
 ---
 
@@ -315,6 +320,14 @@ Bind ONE game of each control type in TeknoParrotUI; the script copies those con
 **What stays manual:** game-specific controls that don't exist in the reference game, and any type for which no reference has been bound yet. Both are reported in ACTION REQUIRED.
 
 If anything goes wrong, restore from the backup made at the start of the run.
+
+---
+
+## Propagate Controls (standalone menu option)
+
+Mode 13 runs the exact same propagation step described above, without going through AutoSync or Register first, and without extracting or registering any games. Useful when you've already registered your library and just bound a new or updated reference game in TeknoParrotUI — re-run propagation immediately instead of sitting through a full AutoSync/Register pass first.
+
+Behavior is identical to the propagation step at the end of AutoSync/Register: the same reference-game pool, the same per-game confirmation and hardware-check warnings, the same backup-before-write safety net (UserProfiles are backed up before anything is changed), and the same results reporting. This option is a thin entry point into that existing pipeline, not a different implementation of it.
 
 ---
 
@@ -877,4 +890,4 @@ Pull requests are welcome too. Full source and version history: [github.com/Jump
 
 ---
 
-> v0.99.40 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v0.99.41 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.

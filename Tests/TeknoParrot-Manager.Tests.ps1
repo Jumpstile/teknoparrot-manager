@@ -1116,6 +1116,43 @@ $binding
     }
 }
 
+Describe "Write-ControlPropagationResults (issue #59: standalone Propagate Controls)" {
+    # This function is the shared reporting step behind both the AutoSync/
+    # Register-only flow and the standalone "Propagate Controls" menu option
+    # (issue #59) -- the same $reports shape Invoke-ControlPropagation always
+    # returns, in, count out. Exercising it directly protects both call sites
+    # from drifting out of sync with each other.
+    It "counts bound/api-fixed/api-fixed-canonical as updated and returns the no-archetype subset" {
+        $reports = @(
+            [pscustomobject]@{ Code = 'GameA'; Status = 'bound'; Family = 'driving'; Archetype = 'RefDriver'; Bound = 3; Manual = @(); ConfigCarried = @(); ApiSet = $true; ArchetypeApi = 'RawInput'; Forced = $false; MismatchSlots = $null }
+            [pscustomobject]@{ Code = 'GameB'; Status = 'api-fixed'; ArchetypeApi = 'RawInput'; Archetype = 'RefDriver'; MismatchSlots = $null }
+            [pscustomobject]@{ Code = 'GameC'; Status = 'api-fixed-canonical'; ArchetypeApi = 'RawInput'; Archetype = 'RefDriver'; MismatchSlots = $null }
+            [pscustomobject]@{ Code = 'GameD'; Status = 'no-archetype'; Family = 'lightgun'; MismatchSlots = $null }
+            [pscustomobject]@{ Code = 'GameE'; Status = 'skipped-bound'; MismatchSlots = $null }
+            [pscustomobject]@{ Code = 'GameF'; Status = 'skipped-override'; MismatchSlots = $null }
+            [pscustomobject]@{ Code = 'GameG'; Status = 'save-failed'; Archetype = 'RefDriver'; MismatchSlots = $null }
+        )
+
+        $result = Write-ControlPropagationResults -Reports $reports
+
+        $result.BoundCount | Should -Be 3
+        $result.NoArchetypeItems.Count | Should -Be 1
+        $result.NoArchetypeItems[0].Code | Should -Be 'GameD'
+    }
+
+    It "returns zero updated and an empty no-archetype list for an all-skipped report set" {
+        $reports = @(
+            [pscustomobject]@{ Code = 'GameH'; Status = 'skipped-bound'; MismatchSlots = $null }
+            [pscustomobject]@{ Code = 'GameI'; Status = 'skipped-override'; MismatchSlots = $null }
+        )
+
+        $result = Write-ControlPropagationResults -Reports $reports
+
+        $result.BoundCount | Should -Be 0
+        $result.NoArchetypeItems.Count | Should -Be 0
+    }
+}
+
 # =============================================================================
 # COMPATIBILITY REGRESSION SUITE (issues #41 / #43 / #46)
 # These contexts protect the compatibility-sensitive setup decisions against

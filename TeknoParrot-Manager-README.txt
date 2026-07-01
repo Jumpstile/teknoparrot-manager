@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.99.40 BETA
+  TeknoParrot Manager  |  v0.99.41 BETA
   Author: Jumpstile
 ===============================================================================
 
@@ -35,6 +35,7 @@
     REGISTRATION
     HOW FUZZY MATCHING WORKS
     CONTROL PROPAGATION
+    PROPAGATE CONTROLS              -- mode 13
     DEVICE SURVEY
     FRONTEND LAUNCHER INTEGRATION
       LAUNCHBOX
@@ -605,7 +606,15 @@
        explicit Y/N confirmation. See CHECK FOR UPDATES below for full
        details.
 
-  13) Exit
+  13) Propagate Controls
+       Copies your current TeknoParrot control bindings from configured
+       reference games to other compatible games. No games are registered
+       or extracted -- this is the same propagation step offered at the
+       end of AutoSync/Register, exposed as its own menu option so you can
+       re-run it any time without going through extraction/registration
+       first. See CONTROL PROPAGATION below for full details.
+
+  14) Exit
        Exits the script.
 
 
@@ -878,6 +887,20 @@
   After propagation, launch ONE updated game and test it before trusting the
   rest. If anything is wrong, restore from the backup made at the start of
   the run.
+
+
+-------------------------------------------------------------------------------
+  PROPAGATE CONTROLS                -- mode 13
+-------------------------------------------------------------------------------
+
+  Mode 13 runs the exact same propagation step described above (same pool,
+  same confirmation and hardware-check warnings, same backup-before-write
+  safety net, same results reporting), without going through AutoSync or
+  Register first, and without extracting or registering any games.
+
+  Use this when your library is already registered and you have just bound
+  a new or updated reference game in TeknoParrotUi.exe -- re-run propagation
+  immediately instead of sitting through a full AutoSync/Register pass.
 
 
 -------------------------------------------------------------------------------

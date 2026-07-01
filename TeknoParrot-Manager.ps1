@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.40 BETA
+# TeknoParrot Manager  |  v0.99.41 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.40"
+$ScriptVersion = "0.99.41"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -7465,6 +7465,52 @@ function Invoke-ControlPropagation {
     return $reports
 }
 
+# Prints Invoke-ControlPropagation's $reports in the same format used by both
+# the AutoSync/Register-only flow and the standalone "Propagate Controls" menu
+# option, so the two entry points never drift out of sync with each other.
+# Returns the count of games actually updated (bound/api-fixed/api-fixed-
+# canonical) and the no-archetype subset, both needed by callers for their own
+# later summary/ACTION REQUIRED sections.
+function Write-ControlPropagationResults {
+    param($Reports)
+
+    Write-Host ""
+    Write-Host " Results:" -ForegroundColor Green
+    foreach ($r in $Reports) {
+        switch ($r.Status) {
+            "bound" {
+                $pin = if ($r.Forced) { "  (pinned)" } else { "" }
+                Write-Host ("    {0}{1}" -f $r.Code, $pin) -ForegroundColor Green
+                Write-Host ("       copied from {0} [{1}] -- bound {2} control(s)" -f $r.Archetype, $r.Family, $r.Bound) -ForegroundColor DarkGray
+                if ($r.ConfigCarried.Count -gt 0) {
+                    Write-Host ("       carried settings: {0}" -f ($r.ConfigCarried -join ", ")) -ForegroundColor DarkGray
+                }
+                if (-not $r.ApiSet -and $r.ArchetypeApi) {
+                    Write-Host ("       NOTE: left Input API unchanged ('{0}' not offered by this game)" -f $r.ArchetypeApi) -ForegroundColor Yellow
+                }
+                if ($r.Manual.Count -gt 0) {
+                    Write-Host ("       still manual: {0}" -f ($r.Manual -join ", ")) -ForegroundColor Yellow
+                }
+            }
+            "no-archetype"     { Write-Host ("    {0}  -- no '{1}' example game bound yet; controls will be set once you bind one (see ACTION REQUIRED)" -f $r.Code, $r.Family) -ForegroundColor Yellow }
+            "api-fixed"        { Write-Host ("    {0}  -- already bound; Input API corrected to '{1}' (matched from {2})" -f $r.Code, $r.ArchetypeApi, $r.Archetype) -ForegroundColor Green }
+            "api-fixed-canonical" { Write-Host ("    {0}  -- archetype; Input API corrected to '{1}' (matched from canonical archetype {2})" -f $r.Code, $r.ArchetypeApi, $r.Archetype) -ForegroundColor Green }
+            "skipped-bound"    { Write-Host ("    {0}  -- already bound, left unchanged" -f $r.Code) -ForegroundColor DarkGray }
+            "skipped-override" { Write-Host ("    {0}  -- skipped (per-game override)" -f $r.Code) -ForegroundColor DarkGray }
+            "save-failed"      { Write-Host ("    {0}  -- ERROR saving (see TeknoParrot-Manager.log)" -f $r.Code) -ForegroundColor Red }
+        }
+        if ($r.MismatchSlots) {
+            Write-Host ("       ACTION REQUIRED -- directional/action mismatch: {0}" -f $r.MismatchSlots) -ForegroundColor Yellow
+            Write-Host ("       Rebind these slots manually in TeknoParrot's own UI (see issue #17)" ) -ForegroundColor Yellow
+        }
+    }
+    $boundCount = @($Reports | Where-Object { $_.Status -eq "bound" -or $_.Status -eq "api-fixed" -or $_.Status -eq "api-fixed-canonical" }).Count
+    $noArchetype = @($Reports | Where-Object { $_.Status -eq "no-archetype" })
+    Write-Host ""
+    Write-Host (" Games updated: {0}" -f $boundCount) -ForegroundColor Green
+    return [pscustomobject]@{ BoundCount = $boundCount; NoArchetypeItems = $noArchetype }
+}
+
 # Asks the user which control devices they have and want to use, then prints a
 # tailored plan of which game to bind with which device. This is guidance
 # only: it reads no files and changes nothing. The actual copying happens
@@ -9714,13 +9760,17 @@ while ($true) {
     Write-Host "  12) Check for Updates -- Manual, backup-first check against the latest"
     Write-Host "                        GitHub release. Nothing is downloaded or changed"
     Write-Host "                        without your explicit confirmation."
-    Write-Host "  13) Exit"
+    Write-Host "  13) Propagate Controls -- This copies your current TeknoParrot control"
+    Write-Host "                        bindings from configured reference games to"
+    Write-Host "                        other compatible games. No games will be"
+    Write-Host "                        registered or extracted."
+    Write-Host "  14) Exit"
     Write-Host ""
     if ($Unattended) {
         Write-Host "  [Unattended] Mode must be set before starting." -ForegroundColor Red
         Write-Log "ERROR: Unattended mode -- reached menu loop."; exit 1
     }
-    $modeChoice = (Read-Host "Enter 1-13").Trim()
+    $modeChoice = (Read-Host "Enter 1-14").Trim()
     switch ($modeChoice) {
         "1"     { $mode = "AutoSync"       }
         "2"     { $mode = "RegisterOnly"   }
@@ -9734,10 +9784,11 @@ while ($true) {
         "10"    { $mode = "HealthCheck"    }
         "11"    { $mode = "PostgresSetup"  }
         "12"    { $mode = "CheckForUpdates" }
-        "13"    { break }
-        default { Write-Host "  Invalid choice. Enter 1-13." -ForegroundColor Yellow; continue }
+        "13"    { $mode = "PropagateControls" }
+        "14"    { break }
+        default { Write-Host "  Invalid choice. Enter 1-14." -ForegroundColor Yellow; continue }
     }
-    if ($modeChoice -eq "13") { break }
+    if ($modeChoice -eq "14") { break }
     }
 
     if ($mode -eq "Restore") {
@@ -9914,6 +9965,118 @@ while ($true) {
             exit 0
         }
         Write-Log "CheckForUpdates: complete, no restart needed."
+        [void](Read-Host "  Press Enter to return to menu")
+        continue
+    }
+
+    if ($mode -eq "PropagateControls") {
+        Write-Host ""
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        Write-Host " Propagate Controls" -ForegroundColor Cyan
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        Write-Host " This copies your current TeknoParrot control bindings from" -ForegroundColor DarkCyan
+        Write-Host " configured reference games to other compatible games. No games" -ForegroundColor DarkCyan
+        Write-Host " will be registered or extracted." -ForegroundColor DarkCyan
+
+        # Backup UserProfiles before any write, same safety net as every other
+        # standalone flow that writes into UserProfile XMLs (GPU fix, cursor
+        # hide, FFB Blaster). Invoke-ControlPropagation itself is unchanged --
+        # this option is a thin wrapper around the existing pipeline
+        # (Build-ArchetypePool / Invoke-ControlPropagation /
+        # Write-ControlPropagationResults), not a new implementation of it.
+        $backupRoot = Join-Path $userProfilesDir "FullBackup"
+        $timestamp  = (Get-Date).ToString("yyyy-MM-dd_HH-mm-ss")
+        $backupPath = Join-Path $backupRoot ("PropagateControls_" + $timestamp)
+        try {
+            [void][System.IO.Directory]::CreateDirectory($backupRoot)
+            [void][System.IO.Directory]::CreateDirectory($backupPath)
+        } catch {
+            Write-Host "  ERROR: Could not create backup folder: $_" -ForegroundColor Red
+            Write-Host "  The script will not continue without a successful backup." -ForegroundColor Red
+            Write-Log "PropagateControls: backup FAILED -- $_"
+            [void](Read-Host "  Press Enter to return to menu")
+            continue
+        }
+        $backupCopyErrs = $null
+        Get-ChildItem -LiteralPath $userProfilesDir | Where-Object { $_.Name -ne "FullBackup" } |
+            Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable backupCopyErrs
+        if ($backupCopyErrs.Count -gt 0) {
+            Write-Host ("  WARNING: {0} file(s) could not be backed up." -f $backupCopyErrs.Count) -ForegroundColor Yellow
+            Write-Log "PropagateControls: backup had $($backupCopyErrs.Count) error(s)"
+            if (-not $Unattended) {
+                $contBackup = (Read-Host "  Continue anyway? (Y/N)").Trim().ToUpper()
+                if ($contBackup -ne "Y") {
+                    Write-Host "Aborted." -ForegroundColor Yellow
+                    Write-Log "PropagateControls: user declined to continue with incomplete backup."
+                    [void](Read-Host "  Press Enter to return to menu")
+                    continue
+                }
+            }
+        }
+        Write-Host ("  Backup: {0}" -f $backupPath) -ForegroundColor DarkGray
+        Write-Log "PropagateControls: backup at $backupPath"
+
+        Write-Host ""
+        $pool = Build-ArchetypePool -userProfilesDir $userProfilesDir -minBound $MinBoundForArchetype
+        if ($pool.Count -eq 0) {
+            Write-Host " No fully-bound example games found yet, so there is nothing" -ForegroundColor Yellow
+            Write-Host " to copy controls from yet. Bind at least one game of each" -ForegroundColor Yellow
+            Write-Host " control type in TeknoParrot's own UI, then re-run this option." -ForegroundColor Yellow
+            Write-Log "PropagateControls: no reference games found (>= $MinBoundForArchetype bound buttons)."
+            [void](Read-Host "  Press Enter to return to menu")
+            continue
+        }
+
+        Write-Host " Found these bound games to copy controls FROM:" -ForegroundColor Green
+        foreach ($s in $pool) {
+            $apiLabel = if ($s.InputApi) { $s.InputApi } else { "n/a" }
+            $devLabel = if ($s.Devices.Count -gt 0) { ($s.Devices -join ", ") } else { "?" }
+            Write-Host ("    {0,-26} [{1}]  {2} buttons" -f $s.Code, $s.Family, $s.BoundCount) -ForegroundColor DarkGray
+            Write-Host ("        api={0}   device(s): {1}" -f $apiLabel, $devLabel) -ForegroundColor DarkGray
+            if ($s.ConfigCarry.Count -gt 0) {
+                $cfgLabel = ($s.ConfigCarry.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ", "
+                Write-Host ("        settings that will be copied: {0}" -f $cfgLabel) -ForegroundColor DarkGray
+                foreach ($flag in (Get-ConfigCarryFlags $s.Family $s.ConfigCarry)) {
+                    Write-Host ("        WARNING: $flag") -ForegroundColor Red
+                }
+            }
+        }
+        Write-Host ""
+        Write-Host " This copies each game's controls to your OTHER games of the SAME" -ForegroundColor DarkCyan
+        Write-Host " type. It never changes a game you have already bound, and it leaves" -ForegroundColor DarkCyan
+        Write-Host " game-specific controls (gear shifts, special buttons) unbound for" -ForegroundColor DarkCyan
+        Write-Host " you to set. Your UserProfiles were backed up at the start of this run." -ForegroundColor DarkCyan
+        Write-Host ""
+        Write-Host " IMPORTANT: the 'settings that will be copied' lines above apply to" -ForegroundColor Yellow
+        Write-Host " EVERY other game of that type. Check them against your real hardware" -ForegroundColor Yellow
+        Write-Host " now -- for example 'Use Keyboard/Button For Axis' should be False if" -ForegroundColor Yellow
+        Write-Host " you bind with a real wheel, and 'Use Relative Input' should match how" -ForegroundColor Yellow
+        Write-Host " your lightgun reports position. If anything looks wrong, answer N," -ForegroundColor Yellow
+        Write-Host " fix the game above in TeknoParrotUI, then re-run." -ForegroundColor Yellow
+        Write-Host ""
+
+        if ($Unattended) {
+            Write-Host "  [Unattended] Propagating controls." -ForegroundColor DarkCyan
+            Write-Log "PropagateControls: unattended -- propagation = Y."
+            $goCtl = "Y"
+        } else {
+            $goCtl = (Read-Host " Propagate controls now? (Y/N)").Trim()
+        }
+
+        if ($goCtl.ToUpper() -eq "Y") {
+            $reports = Invoke-ControlPropagation -userProfilesDir $userProfilesDir -pool $pool -minBound $MinBoundForArchetype -noPropagate $noPropagateList -forceArchetype $forceArchetypeMap -familyOverride $familyOverrideMap -canonicalArchetype $canonicalArchetypeMap -DryRun $false
+            $propResult = Write-ControlPropagationResults -Reports $reports
+            Write-Host ""
+            Write-Host " IMPORTANT: launch ONE updated game in TeknoParrot and test its" -ForegroundColor Cyan
+            Write-Host " controls before trusting the rest. If anything is wrong, restore" -ForegroundColor Cyan
+            Write-Host (" from the backup made at the start of this run:" ) -ForegroundColor Cyan
+            Write-Host ("    {0}" -f $backupPath) -ForegroundColor Cyan
+            Write-Log "PropagateControls: completed. Games updated=$($propResult.BoundCount)"
+        } else {
+            Write-Host " Skipped control propagation." -ForegroundColor DarkGray
+            Write-Log "PropagateControls: user declined."
+        }
+
         [void](Read-Host "  Press Enter to return to menu")
         continue
     }
@@ -10758,40 +10921,9 @@ if ($pool.Count -eq 0) {
     }
     if ($goCtl.ToUpper() -eq "Y") {
         $reports = Invoke-ControlPropagation -userProfilesDir $userProfilesDir -pool $pool -minBound $MinBoundForArchetype -noPropagate $noPropagateList -forceArchetype $forceArchetypeMap -familyOverride $familyOverrideMap -canonicalArchetype $canonicalArchetypeMap -DryRun $dryRunActive
-        Write-Host ""
-        Write-Host " Results:" -ForegroundColor Green
-        foreach ($r in $reports) {
-            switch ($r.Status) {
-                "bound" {
-                    $pin = if ($r.Forced) { "  (pinned)" } else { "" }
-                    Write-Host ("    {0}{1}" -f $r.Code, $pin) -ForegroundColor Green
-                    Write-Host ("       copied from {0} [{1}] -- bound {2} control(s)" -f $r.Archetype, $r.Family, $r.Bound) -ForegroundColor DarkGray
-                    if ($r.ConfigCarried.Count -gt 0) {
-                        Write-Host ("       carried settings: {0}" -f ($r.ConfigCarried -join ", ")) -ForegroundColor DarkGray
-                    }
-                    if (-not $r.ApiSet -and $r.ArchetypeApi) {
-                        Write-Host ("       NOTE: left Input API unchanged ('{0}' not offered by this game)" -f $r.ArchetypeApi) -ForegroundColor Yellow
-                    }
-                    if ($r.Manual.Count -gt 0) {
-                        Write-Host ("       still manual: {0}" -f ($r.Manual -join ", ")) -ForegroundColor Yellow
-                    }
-                }
-                "no-archetype"     { Write-Host ("    {0}  -- no '{1}' example game bound yet; controls will be set once you bind one (see ACTION REQUIRED)" -f $r.Code, $r.Family) -ForegroundColor Yellow }
-                "api-fixed"        { Write-Host ("    {0}  -- already bound; Input API corrected to '{1}' (matched from {2})" -f $r.Code, $r.ArchetypeApi, $r.Archetype) -ForegroundColor Green }
-                "api-fixed-canonical" { Write-Host ("    {0}  -- archetype; Input API corrected to '{1}' (matched from canonical archetype {2})" -f $r.Code, $r.ArchetypeApi, $r.Archetype) -ForegroundColor Green }
-                "skipped-bound"    { Write-Host ("    {0}  -- already bound, left unchanged" -f $r.Code) -ForegroundColor DarkGray }
-                "skipped-override" { Write-Host ("    {0}  -- skipped (per-game override)" -f $r.Code) -ForegroundColor DarkGray }
-                "save-failed"      { Write-Host ("    {0}  -- ERROR saving (see TeknoParrot-Manager.log)" -f $r.Code) -ForegroundColor Red }
-            }
-            if ($r.MismatchSlots) {
-                Write-Host ("       ACTION REQUIRED -- directional/action mismatch: {0}" -f $r.MismatchSlots) -ForegroundColor Yellow
-                Write-Host ("       Rebind these slots manually in TeknoParrot's own UI (see issue #17)" ) -ForegroundColor Yellow
-            }
-        }
-        $nb               = @($reports | Where-Object { $_.Status -eq "bound" -or $_.Status -eq "api-fixed" -or $_.Status -eq "api-fixed-canonical" }).Count
-        $noArchetypeItems = @($reports | Where-Object { $_.Status -eq "no-archetype" })
-        Write-Host ""
-        Write-Host (" Games updated: {0}" -f $nb) -ForegroundColor Green
+        $propResult       = Write-ControlPropagationResults -Reports $reports
+        $nb               = $propResult.BoundCount
+        $noArchetypeItems = $propResult.NoArchetypeItems
         Write-Host ""
         Write-Host " IMPORTANT: launch ONE updated game in TeknoParrot and test its" -ForegroundColor Cyan
         Write-Host " controls before trusting the rest. If anything is wrong, restore" -ForegroundColor Cyan

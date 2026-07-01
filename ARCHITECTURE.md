@@ -704,6 +704,33 @@ script for a check nobody explicitly asked for this time.
 
 ---
 
+## Propagate Controls (Mode 13, v0.99.41)
+
+Feature-freeze exception (issue #59), approved on the rationale that this introduces no
+new propagation logic -- it exposes the existing, already-proven propagation pipeline
+through a dedicated top-level menu entry, instead of only being reachable as the last
+step of AutoSync/Register.
+
+Implementation is a thin wrapper: the new `"PropagateControls"` mode block takes its own
+UserProfiles backup (same pattern as GPU fix/cursor hide/FFB Blaster -- each standalone
+destructive flow backs up independently rather than sharing one backup call), then calls
+the same `Build-ArchetypePool` / `Invoke-ControlPropagation` functions the AutoSync/
+Register flow already uses. No propagation algorithm code is duplicated.
+
+**`Write-ControlPropagationResults`** (next to `Invoke-ControlPropagation`) is a new
+extraction: the results-display block (per-status messaging, games-updated count,
+no-archetype subset) was pulled out of the AutoSync/Register inline flow into a shared
+function, specifically so this new entry point could reuse it verbatim instead of
+duplicating ~35 lines of reporting logic. Both call sites now render identical output by
+construction; a future change to how results are displayed only has one place to change.
+
+Explicitly out of scope for this exception (per the approved rationale): no GamePath
+repair step, no redesign of propagation behavior, no expansion beyond direct access to
+the existing pipeline. The confirmation flow, hardware-mismatch warnings, and results
+reporting are unchanged from what AutoSync/Register already show.
+
+---
+
 ## Versioning
 
 - Whole-number bumps: feature releases (v0.94, v0.95, ..., v0.99).

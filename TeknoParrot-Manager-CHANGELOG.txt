@@ -7,6 +7,23 @@
 
 
 -------------------------------------------------------------------------------
+  v0.99.41 BETA  (2026-07-01)
+  ------------------------------------------------------------
+  New: "Propagate Controls" menu option (13, Exit moved to 14). Runs the
+  same control-propagation step offered at the end of AutoSync/Register --
+  same reference-game pool, same per-game confirmation and hardware-check
+  warnings, same backup-before-write safety net, same results reporting --
+  without going through extraction/registration first. Approved as a
+  one-time feature freeze exception (issue #59): exposes existing, proven
+  functionality through a dedicated menu entry rather than introducing new
+  propagation logic. Implemented as a thin wrapper around the existing
+  Build-ArchetypePool / Invoke-ControlPropagation pipeline; the results-
+  reporting step was extracted into a shared function
+  (Write-ControlPropagationResults) so both entry points can never drift
+  out of sync with each other.
+
+
+-------------------------------------------------------------------------------
   v0.99.40 BETA  (2026-07-01)  -- tester validation build
   ------------------------------------------------------------
   This is a tester validation build, not the 1.0 release. Please validate:
