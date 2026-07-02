@@ -80,6 +80,33 @@ needs to be described:
 The goal is always to describe *what happened* (a review found blockers, a
 regression suite was run) rather than *what tool performed it*.
 
+### GitHub UI attribution (Apps/connectors)
+
+Comments created through a GitHub App or connector (e.g. a ChatGPT/Codex
+GitHub connector) can carry GitHub's own UI-level attribution -- something
+like "with ChatGPT Codex Connector" rendered by GitHub itself alongside the
+comment. This is not part of the comment body, is not authored/editable
+text, and cannot be removed by editing the comment.
+
+- Do not treat GitHub's own UI-level attribution as a violation of this
+  policy. This policy governs text inside comment bodies, PR bodies,
+  commit messages, documentation, and generated files (the opening list
+  above) -- not chrome GitHub itself renders around a comment.
+- The ban on attribution text *inside* comment bodies, PR bodies, commit
+  messages, docs, and generated files is unaffected and still applies in
+  full. This carve-out is only for GitHub's own immutable UI chrome, never
+  for anything an author actually writes into the content itself.
+- Official, polished, public-facing reviewer comments -- the kind meant to
+  stand as the durable record of a review outcome -- should be posted
+  through the designated reviewer path, i.e. whichever posting path does
+  not attach unwanted connector UI attribution, so the public issue/PR
+  history reads as clean project engineering communication.
+- A ChatGPT/Codex connector-posted comment is acceptable for internal
+  coordination or a low-risk, working-notes-style review comment, where the
+  UI attribution is a minor cosmetic artifact. It should not be the
+  preferred path when clean presentation of official public-facing issue
+  history matters -- use the designated reviewer path for those instead.
+
 ## 5. Commit identity policy
 
 - Author and committer on every commit reaching a public branch must be
@@ -188,13 +215,19 @@ Use this checklist for any identity/attribution audit or cleanup pass:
 
 ## 13. Exceptions
 
-The only exceptions to this policy are legal or licensing requirements:
+There are two exceptions to this policy:
 
 - A third-party license that explicitly requires attribution (e.g. an
   open-source library's license text) must be honored exactly as that
   license requires, in the location it requires (e.g. a `LICENSE` or
   `THIRD_PARTY_NOTICES` file). This is not a branding statement about the
   Jumpstile project; it is compliance with someone else's license.
+- GitHub's own UI-level attribution on comments posted through a GitHub
+  App/connector (see Section 4, "GitHub UI attribution") is not a policy
+  violation -- it is platform chrome rendered by GitHub itself, not
+  authored content, and cannot be edited away. This is listed here (rather
+  than only in Section 4) because it is the other case where attribution
+  can be visibly present on a public artifact without being a violation.
 - No other exception exists. In particular, "it's just internal engineering
   detail" is not an exception for anything that ships as part of the public
   project (Section 9 already carves out non-shipped internal documents
