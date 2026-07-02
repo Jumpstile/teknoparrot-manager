@@ -257,7 +257,7 @@ function Invoke-TpmDownloadBitTransfer {
             -DisplayName "Downloading $Label..." `
             -Asynchronous `
             -ErrorAction Stop
-        while ($job.JobState -in @('Connecting', 'Transferring', 'Queued')) {
+        while ($job.JobState -in @('Connecting', 'Transferring', 'Queued', 'TransientError')) {
             Write-TpmDownloadProgress -Label $Label -Method 'BITS' -DownloadedBytes ([int64]$job.BytesTransferred) -TotalBytes ([int64]$job.BytesTotal) -Elapsed $progressWatch.Elapsed
             Start-Sleep -Milliseconds 500
             $job = Get-BitsTransfer -JobId $job.JobId -ErrorAction Stop
@@ -349,6 +349,21 @@ function Test-TpmDownloadedFile {
     return $true
 }
 
+function Get-TpmHttpStatusCodeFromError {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        $ErrorRecord
+    )
+
+    if ($ErrorRecord.Exception.Response -and $ErrorRecord.Exception.Response.StatusCode) {
+        try { return [int]$ErrorRecord.Exception.Response.StatusCode } catch {}
+    }
+    if ($ErrorRecord.Exception.Message -match '\((\d{3})\)') { return [int]$Matches[1] }
+    if ($ErrorRecord.Exception.Message -match ':\s*(\d{3})\s') { return [int]$Matches[1] }
+    return 0
+}
+
 function Invoke-TpmDownload {
     [CmdletBinding()]
     param(
@@ -385,18 +400,47 @@ function Invoke-TpmDownload {
         }
 
         if (-not $bitsSucceeded) {
-            try {
-                Invoke-TpmDownloadHttpClient -DownloadUrl $DownloadUrl -TempPath $tempPath -Label $Label
-                $methodUsed = 'HttpClient'
-            } catch {
-                Write-Verbose "${Label}: HttpClient download failed (${_}), trying Invoke-WebRequest."
+            $httpClientSucceeded = $false
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
                 try {
-                    if (Test-Path -LiteralPath $tempPath) { [System.IO.File]::Delete($tempPath) }
+                    Invoke-TpmDownloadHttpClient -DownloadUrl $DownloadUrl -TempPath $tempPath -Label $Label
+                    $methodUsed = 'HttpClient'
+                    $httpClientSucceeded = $true
+                    break
                 } catch {
-                    Write-Verbose "Partial cleanup after HttpClient failure failed: $_"
+                    $statusCode = Get-TpmHttpStatusCodeFromError -ErrorRecord $_
+                    Write-Verbose "${Label}: HttpClient attempt $attempt failed: $_"
+                    try {
+                        if (Test-Path -LiteralPath $tempPath) { [System.IO.File]::Delete($tempPath) }
+                    } catch {
+                        Write-Verbose "Partial cleanup after HttpClient failure failed: $_"
+                    }
+                    if ($attempt -ge 3 -or ($statusCode -ge 400 -and $statusCode -lt 500)) {
+                        Write-Verbose "${Label}: HttpClient download failed, trying Invoke-WebRequest."
+                        break
+                    }
+                    Start-Sleep -Seconds 2
                 }
-                Invoke-TpmDownloadWebRequest -DownloadUrl $DownloadUrl -TempPath $tempPath -Label $Label
-                $methodUsed = 'Invoke-WebRequest'
+            }
+
+            if (-not $httpClientSucceeded) {
+                for ($attempt = 1; $attempt -le 3; $attempt++) {
+                    try {
+                        Invoke-TpmDownloadWebRequest -DownloadUrl $DownloadUrl -TempPath $tempPath -Label $Label
+                        $methodUsed = 'Invoke-WebRequest'
+                        break
+                    } catch {
+                        $statusCode = Get-TpmHttpStatusCodeFromError -ErrorRecord $_
+                        Write-Verbose "${Label}: Invoke-WebRequest attempt $attempt failed: $_"
+                        try {
+                            if (Test-Path -LiteralPath $tempPath) { [System.IO.File]::Delete($tempPath) }
+                        } catch {
+                            Write-Verbose "Partial cleanup after Invoke-WebRequest failure failed: $_"
+                        }
+                        if ($attempt -ge 3 -or ($statusCode -ge 400 -and $statusCode -lt 500)) { throw }
+                        Start-Sleep -Seconds 2
+                    }
+                }
             }
         }
 
