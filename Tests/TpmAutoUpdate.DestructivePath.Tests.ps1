@@ -113,7 +113,10 @@ BeforeAll {
                 })
             }
         }
-        Mock -ModuleName TpmAutoUpdate.Core Invoke-WebRequest $WebRequestMock
+        Mock -ModuleName TpmAutoUpdate.Core Invoke-TpmDownload {
+            param($DownloadUrl, $DestinationPath, $ExpectedBytes, $Label)
+            & $WebRequestMock -Uri $DownloadUrl -OutFile $DestinationPath
+        }.GetNewClosure()
 
         $params = @{
             Apply      = $true
@@ -323,7 +326,7 @@ Describe '5. Read-only destination' {
             # The check happens before backup/download, so neither should
             # have been attempted at all.
             Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeFalse
-            Assert-MockCalled -ModuleName TpmAutoUpdate.Core Invoke-WebRequest -Times 0
+            Assert-MockCalled -ModuleName TpmAutoUpdate.Core Invoke-TpmDownload -Times 0
 
             @(Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter 'tpm-update-*.zip' -ErrorAction SilentlyContinue).Count | Should -Be 0
             @(Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter 'tpm-update-extracted-*.ps1' -ErrorAction SilentlyContinue).Count | Should -Be 0
@@ -345,11 +348,9 @@ Describe '6. Backup creation failure' {
                 throw 'Access to the path is denied (simulated backup failure).'
             } -ParameterFilter { $ItemType -eq 'Directory' }
 
-            $webRequestCalled = $false
             $result = Invoke-TpmApplyWithMockedRelease -ScriptPath $scriptPath -WebRequestMock {
                 param($Uri, $Headers, $OutFile, $UseBasicParsing)
-                $script:webRequestCalled = $true
-                throw 'Invoke-WebRequest should never be called when backup fails first.'
+                throw 'download should never be called when backup fails first.'
             }
 
             $result.Error | Should -BeOfType ([System.Management.Automation.ErrorRecord])

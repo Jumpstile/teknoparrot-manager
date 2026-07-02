@@ -204,6 +204,67 @@ Describe 'New-TpmUpdateBackup' {
     }
 }
 
+Describe 'Invoke-TpmDownload module-local retry behavior' {
+    It 'keeps TransientError in the BITS polling state list' {
+        $moduleSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\tools\TpmAutoUpdate.Core.psm1') -Raw
+        $moduleSource | Should -Match "'Connecting',\s*'Transferring',\s*'Queued',\s*'TransientError'"
+    }
+
+    It 'retries transient HttpClient failures before the emergency fallback' {
+        InModuleScope TpmAutoUpdate.Core {
+            Mock Test-TpmDownloadBitsAvailable { $false }
+            Mock Start-Sleep {}
+            Mock Invoke-TpmDownloadWebRequest { throw 'Invoke-WebRequest should not run when HttpClient eventually succeeds' }
+            $script:httpAttempt = 0
+            Mock Invoke-TpmDownloadHttpClient {
+                $script:httpAttempt++
+                if ($script:httpAttempt -lt 2) { throw 'transient network error' }
+                Set-Content -LiteralPath $TempPath -Value 'zip content' -NoNewline
+            }
+
+            $path = Join-Path $TestDrive 'http-retry.zip'
+            Invoke-TpmDownload -DownloadUrl 'https://example.com/file.zip' -DestinationPath $path | Should -BeTrue
+
+            $script:httpAttempt | Should -Be 2
+            Should -Invoke Invoke-TpmDownloadWebRequest -Times 0
+        }
+    }
+
+    It 'retries transient emergency fallback failures before succeeding' {
+        InModuleScope TpmAutoUpdate.Core {
+            Mock Test-TpmDownloadBitsAvailable { $false }
+            Mock Start-Sleep {}
+            Mock Invoke-TpmDownloadHttpClient { throw 'transient http failure' }
+            $script:webAttempt = 0
+            Mock Invoke-TpmDownloadWebRequest {
+                $script:webAttempt++
+                if ($script:webAttempt -lt 2) { throw 'transient web failure' }
+                Set-Content -LiteralPath $TempPath -Value 'zip content' -NoNewline
+            }
+
+            $path = Join-Path $TestDrive 'web-retry.zip'
+            Invoke-TpmDownload -DownloadUrl 'https://example.com/file.zip' -DestinationPath $path | Should -BeTrue
+
+            $script:webAttempt | Should -Be 2
+        }
+    }
+
+    It 'does not retry a definitive HttpClient 404 before the emergency fallback' {
+        InModuleScope TpmAutoUpdate.Core {
+            Mock Test-TpmDownloadBitsAvailable { $false }
+            Mock Start-Sleep {}
+            Mock Invoke-TpmDownloadHttpClient { throw 'Response status code does not indicate success: 404 (Not Found).' }
+            Mock Invoke-TpmDownloadWebRequest { Set-Content -LiteralPath $TempPath -Value 'zip content' -NoNewline }
+
+            $path = Join-Path $TestDrive 'http-404.zip'
+            Invoke-TpmDownload -DownloadUrl 'https://example.com/missing.zip' -DestinationPath $path | Should -BeTrue
+
+            Should -Invoke Invoke-TpmDownloadHttpClient -Times 1
+            Should -Invoke Invoke-TpmDownloadWebRequest -Times 1
+        }
+    }
+}
+
 Describe 'Expand-TpmReleaseZipEntry' {
     It 'extracts the named entry to the destination path' {
         $zipPath = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-zip-" + [guid]::NewGuid().ToString('N') + '.zip')
@@ -305,7 +366,7 @@ Describe 'Invoke-TpmAutoUpdate -Apply -WhatIf' {
                     })
                 }
             }
-            Mock -ModuleName TpmAutoUpdate.Core Invoke-WebRequest { throw 'Invoke-WebRequest should not be called during -WhatIf' }
+            Mock -ModuleName TpmAutoUpdate.Core Invoke-TpmDownload { throw 'download should not be called during -WhatIf' }
 
             & $orchestratorPath -Apply -WhatIf -ScriptPath $scriptPath -Owner 'Jumpstile' -Repository 'teknoparrot-manager' *> $null
 

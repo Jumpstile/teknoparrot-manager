@@ -7,6 +7,7 @@
 #
 # Orchestration only -- the testable logic lives in TpmAutoUpdate.Core.psm1.
 
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Console updater helper intentionally writes concise status lines to the interactive host.')]
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [switch]$CheckOnly,
