@@ -898,4 +898,4 @@ Pull requests are welcome too. Full source and version history: [github.com/Jump
 
 ---
 
-> v0.99.43 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v0.99.44 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.

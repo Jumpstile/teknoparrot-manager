@@ -43,7 +43,7 @@ Full documentation: [README.md](README.md)
 - PowerShell 5.1 (built into Windows — no install needed)
 - TeknoParrot installed with `TeknoParrotUi.exe` run at least once so it has downloaded its `GameProfiles` folder
 - Your games as ZIP files (for AutoSync) or already extracted into subfolders
-- Administrator privileges, but **only** if you use Postgres setup (mode 11) to install PostgreSQL for the first time — everything else runs as a normal user
+- Administrator privileges, but **only** if you use Postgres setup (mode 12) to install PostgreSQL for the first time — everything else runs as a normal user
 
 ---
 
@@ -229,21 +229,21 @@ If anything is outdated, the script asks once: update all of them? Answering Y b
 
 ## Postgres Setup
 
-Several Incredible Technologies games — Golden Tee Live (2006–2019), Power Putt Live (2012/2013), Silver Strike Bowling Live, Target Toss Pro (Bags / Lawn Darts), and Orange County Choppers Pinball — need a small local PostgreSQL 8.3 database. Mode 11 detects which of your registered games need this automatically and handles the rest:
+Several Incredible Technologies games — Golden Tee Live (2006–2019), Power Putt Live (2012/2013), Silver Strike Bowling Live, Target Toss Pro (Bags / Lawn Darts), and Orange County Choppers Pinball — need a small local PostgreSQL 8.3 database. Mode 12 detects which of your registered games need this automatically and handles the rest:
 
-- **If PostgreSQL isn't installed yet**, the script installs it silently. This is the **only** feature in this script requiring Administrator — close the window, right-click `TeknoParrot-Manager.bat` → **Run as administrator**, and re-run mode 11. You'll be asked for two passwords: a service-account password (rarely needed again) and a database password (saved, encrypted, for future runs).
+- **If PostgreSQL isn't installed yet**, the script installs it silently. This is the **only** feature in this script requiring Administrator — close the window, right-click `TeknoParrot-Manager.bat` → **Run as administrator**, and re-run mode 12. You'll be asked for two passwords: a service-account password (rarely needed again) and a database password (saved, encrypted, for future runs).
 - **If PostgreSQL is already installed, it's never reinstalled or modified.**
 - **A database that already exists is never recreated or restored over.** A `Pass` field that's already filled in is never overwritten.
 - For newer game profiles (Golden Tee Live 2018+) with TeknoParrot's own "Automatically create Database" feature, the script only fills in connection settings — TeknoParrot creates the database itself on first launch. For older profiles, the script creates the database and restores that game's bundled backup itself.
 - Every run backs up every existing Postgres database first — restore via mode 9 if anything looks wrong.
 
-If none of your registered games need Postgres, mode 11 says so and exits immediately without installing anything.
+If none of your registered games need Postgres, mode 12 says so and exits immediately without installing anything.
 
 ---
 
 ## Check for Updates
 
-Mode 12 manually checks the latest GitHub release against the version you're running — nothing is downloaded or changed without your explicit Y/N confirmation. If an update exists, it backs up the current script, downloads and validates the update, replaces the script, then exits so you can restart cleanly. A read-only script is refused with a clear error rather than silently overridden, and any failure tells you exactly what went wrong and whether a backup was made.
+Mode 13 manually checks the latest GitHub release against the version you're running — nothing is downloaded or changed without your explicit Y/N confirmation. If an update exists, it backs up the current script, downloads and validates the update, replaces the script, then exits so you can restart cleanly. A read-only script is refused with a clear error rather than silently overridden, and any failure tells you exactly what went wrong and whether a backup was made.
 
 ---
 
@@ -363,7 +363,7 @@ Answer Y to fetch `ProfileCode.png` for every registered game not already in `<T
 3. Pick which kind to restore:
    - **TeknoParrot UserProfiles backup**
    - **LaunchBox library backup** — only relevant if you've used direct LaunchBox integration
-   - **Postgres database backup** — only relevant if you've used Postgres setup (mode 11); this replaces the *current* content of each database restored
+   - **Postgres database backup** — only relevant if you've used Postgres setup (mode 12); this replaces the *current* content of each database restored
 4. The script lists all available backups of that kind (most recent first), pick one by number, type `YES` to confirm
 5. Re-open TeknoParrot (or LaunchBox) to use the restored data
 
@@ -465,7 +465,7 @@ At the end of every run the script prints — and saves to a text file (default 
 | Game appears twice in TeknoParrotUI | Delete one of the duplicate `.xml` files from `UserProfiles` — keep the one with the correct path and any bindings already set. |
 | `[UNLOGGED]` on console | Log file is inaccessible — check that the TeknoParrot folder is not read-only and you have write permission. |
 | HyperSpin 2 export fails | TeknoParrot must be set up as an emulator in HyperSpin 2 first — the title must contain "TeknoParrot". |
-| Postgres setup says it needs Administrator | Close the window and re-run `TeknoParrot-Manager.bat` via right-click → Run as administrator, then choose mode 11 again. Only needed the first time PostgreSQL itself is installed. |
+| Postgres setup says it needs Administrator | Close the window and re-run `TeknoParrot-Manager.bat` via right-click → Run as administrator, then choose mode 12 again. Only needed the first time PostgreSQL itself is installed. |
 
 ---
 
