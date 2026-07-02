@@ -1,14 +1,14 @@
 # Auto-Update System
 
-Status: standalone helper merged; menu integration (v0.99.39) pending independent review before merge
+Status: standalone helper merged; menu integration shipped in v0.99.39; shared hardened download transport documented below.
 
 TeknoParrot Manager uses a **manual, backup-first auto-update model**.
 
 The updater must never silently replace files. It checks GitHub Releases, explains what it found, creates a local backup, downloads the selected release asset, validates the downloaded file, and only then replaces the local script.
 
-## Current review status
+## Current implementation status
 
-An independent engineering review found real blockers on the first pass. All four have been fixed and retested against the live `Jumpstile/teknoparrot-manager` releases (both under Windows PowerShell 5.1). Do not merge or wire this into the menu until a re-review confirms the fixes.
+An independent engineering review found real blockers on the first pass. The packaging, validation, TLS, and testability blockers were fixed and retested against live `Jumpstile/teknoparrot-manager` releases under Windows PowerShell 5.1 before the menu integration was added.
 
 1. **Release packaging mismatch -- fixed**
    - `-AssetNamePattern` now defaults to `^TeknoParrot\.Manager\.v.*\.zip$`, matching real release assets like `TeknoParrot.Manager.v0.99.38.BETA.zip`.
@@ -34,7 +34,7 @@ Ten tests, all passing, deliberately induce failure conditions and verify the or
 2. Zip missing `TeknoParrot-Manager.ps1` -- rejected with a specific "does not contain expected entry" error.
 3. Content-validation failures -- both a missing `$ScriptVersion` and an extracted file that is itself raw zip bytes are rejected before replacement.
 4. Truncated/partial download -- treated as corrupt, rejected.
-5. Read-only destination -- **documented finding, not a defect**: `Move-Item -Force` clears the `ReadOnly` attribute and replaces the file rather than failing closed. Verified in isolation, not just in this test. Marking the script read-only is not a safety mechanism against this updater; if that protection is wanted, `Install-DownloadedUpdate` would need an explicit `ReadOnly` check before `-Force`.
+5. Read-only destination -- refused before backup/download/replacement. This explicitly avoids relying on `Move-Item -Force`, which can clear the `ReadOnly` attribute and replace a file rather than failing closed.
 6. Backup creation failure -- aborts before any download; original untouched.
 7. Extraction failure (valid zip, corrupted entry payload) -- rejected, original and backup intact.
 8. Replacement failure after a successful backup (destination locked by another handle) -- `Move-Item` fails, original file is provably unchanged (not partially written), backup and temp cleanup both hold.
@@ -83,6 +83,29 @@ The first implementation is a standalone helper:
 ```
 
 This keeps the first cut reviewable before wiring it into the main menu.
+
+## Download transport
+
+The updater uses the same hardened transport order as the main script's shared
+`Invoke-TpmDownload` pipeline:
+
+1. `Start-BitsTransfer` when BITS is available and running.
+2. `System.Net.Http.HttpClient` streamed download.
+3. `Invoke-WebRequest` only as an emergency fallback after BITS and HttpClient fail.
+
+Downloads are written to a temporary/partial path first, verified to exist and be
+non-empty, and size-checked when the GitHub asset metadata includes a byte count. Only
+after validation is the file moved into the path used by extraction. Partial files are
+cleaned up on failure. Progress uses a single updating progress activity: percent,
+downloaded MB / total MB, MB/s, and ETA when total size is known, with an indeterminate
+downloaded-MB/MB/s message when it is not. Final metrics record the method used, file
+size, elapsed time, and average MB/s.
+
+The standalone module has a module-local copy of this transport helper rather than
+importing the main script. This preserves the no-side-effect, Pester-testable module used
+by `tools\Invoke-TpmAutoUpdate.ps1` and preserves the main script's single-file runtime
+architecture. Keep the two implementations behaviorally aligned until a future
+consolidation can preserve both constraints.
 
 ## Menu integration (v0.99.39)
 

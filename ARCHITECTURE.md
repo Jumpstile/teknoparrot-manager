@@ -306,6 +306,46 @@ are unsigned. A hard verification gate would have nothing legitimate to check ag
 3 of the 4 sources. Authenticode enforcement was only added for ReShade specifically,
 since it is the one source that is actually signed.
 
+### Shared download pipeline (v0.99.40)
+
+Live file downloads now go through `Invoke-TpmDownload` in `TeknoParrot-Manager.ps1`
+instead of hand-rolled `Invoke-WebRequest -OutFile` loops at each call site. The helper
+keeps caller-specific URL validation and allowlist checks outside the transport layer:
+each feature still validates its own GitHub owner/repo/release pattern or raw content
+source before handing the URL to the downloader.
+
+Transport order is:
+
+1. `Start-BitsTransfer`, when BITS is available and running.
+2. `System.Net.Http.HttpClient`, streamed with `ResponseHeadersRead`.
+3. `Invoke-WebRequest`, retained only as an emergency fallback after BITS and HttpClient
+   fail.
+
+All methods write to a sibling `.partial` file first. The helper validates that the
+download is non-empty, and validates exact size when the release/API response supplies an
+expected byte count, before moving the partial file into the final cache/destination path.
+Failed attempts delete the partial file and leave the final path untouched whenever
+possible. Progress is reported through a single `Write-Progress` activity: percent,
+downloaded MB / total MB, MB/s, and ETA when `Content-Length`/BITS total size is known;
+otherwise an indeterminate downloaded-MB/MB/s message is shown. Completion logs the method,
+file size, elapsed time, and average MB/s, and still writes the SHA256 download audit.
+
+Current main-script call sites using the helper:
+
+- Eggman/RomVault DAT ZIP (`Invoke-EggmanDatDownload`)
+- PostgreSQL guide bundle
+- FFBArcadePlugin DLLs
+- BepInEx release ZIP
+- TPM menu self-update package
+- TeknoParrotUIThumbnails icon downloads (quiet final metrics to avoid per-icon line spam)
+
+The standalone updater module (`tools/TpmAutoUpdate.Core.psm1`) has a module-local copy of
+the same transport pipeline. This is deliberate for now: the main script remains a
+self-contained single-file runtime, while the standalone updater stays importable and
+Pester-testable as a no-side-effect module. The two implementations are kept behaviorally
+aligned by tests. A future consolidation should preserve both constraints before removing
+the duplication.
+
 ---
 
 ## LaunchBox direct integration (v0.98)

@@ -116,6 +116,17 @@
   pre-1.0 review where this helper was documented and tested but never
   actually shipped in the release ZIP.
 
+  Hardening: live file downloads now share a hardened download pipeline
+  instead of repeated Invoke-WebRequest -OutFile loops. The helper tries
+  BITS first, then streamed HttpClient, then Invoke-WebRequest only as an
+  emergency fallback. Downloads are written to partial/temp files first,
+  validated before being moved into place, cleaned up on failure, and now
+  show readable progress with downloaded MB, total MB when known, MB/s,
+  and ETA when calculable. Final metrics log the method used, size,
+  elapsed time, and average MB/s. Current call sites include the
+  Eggman/RomVault DAT ZIP, PostgreSQL guide bundle, FFBArcadePlugin DLLs,
+  BepInEx release ZIP, TPM update package, and TeknoParrotUI thumbnails.
+
 
 -------------------------------------------------------------------------------
   v0.99.39 BETA  (2026-07-01)
