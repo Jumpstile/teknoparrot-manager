@@ -6657,26 +6657,20 @@ function Test-ExtractedFolderHasContent {
     return ((Get-ChildItem -LiteralPath $Path -Force -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0)
 }
 
+# Exact-key lookup only (no fuzzy/Dice fallback): the dat's own game names
+# already normalise identically to well-formed ZIP names in practice (both
+# follow the same RomVault/Eggman convention), which is why
+# Resolve-RegisteredGameFolder's original exact-match design already worked
+# for issue #13. A Dice-similarity fallback here was found to add no
+# matching power for any confirmed case while being unable to distinguish
+# two different profile codes whose normalised names happen to score high
+# against the same ZIP name -- removed rather than tuned. See issue #66
+# review notes.
 function Get-DatEntryForZipName {
     param([string]$RawZipName, [hashtable]$DatIndex)
     if (-not $DatIndex -or $DatIndex.Count -eq 0) { return $null }
     $normZip = Get-NormalizedGameKey $RawZipName
     if ($DatIndex.ContainsKey($normZip)) { return $DatIndex[$normZip] }
-
-    $bestKey = $null; $bestScore = 0.0; $secondScore = 0.0
-    foreach ($key in $DatIndex.Keys) {
-        $score = Get-DiceSimilarity $normZip $key
-        if ($score -gt $bestScore) {
-            $secondScore = $bestScore
-            $bestScore = $score
-            $bestKey = $key
-        } elseif ($score -gt $secondScore) {
-            $secondScore = $score
-        }
-    }
-    if ($bestKey -and $bestScore -ge 0.95 -and ($bestScore - $secondScore) -ge $FuzzyTieMargin) {
-        return $DatIndex[$bestKey]
-    }
     return $null
 }
 
@@ -6726,24 +6720,20 @@ function Resolve-ExtractedGameFolder {
     $registeredFolder = Resolve-RegisteredGameFolder $RawZipName $DatIndex $UserProfilesDir
     if (Test-ExtractedFolderHasContent $registeredFolder) { return $registeredFolder }
 
-    $normZip = Get-NormalizedGameKey $baseName
-    $bestPath = $null; $bestScore = 0.0; $secondScore = 0.0
-    foreach ($dir in (Get-ChildItem -LiteralPath $InstallFolder -Directory -ErrorAction SilentlyContinue)) {
-        if (-not (Test-ExtractedFolderHasContent $dir.FullName)) { continue }
-        $normDir = Get-NormalizedGameKey ($dir.Name -replace '\.(teknoparrot|parrot|game)$', '')
-        $score = Get-DiceSimilarity $normZip $normDir
-        if ($score -gt $bestScore) {
-            $secondScore = $bestScore
-            $bestScore = $score
-            $bestPath = $dir.FullName
-        } elseif ($score -gt $secondScore) {
-            $secondScore = $score
-        }
-    }
-    if ($bestPath -and $bestScore -ge 0.95 -and ($bestScore - $secondScore) -ge $FuzzyTieMargin) {
-        return $bestPath
-    }
-
+    # No Dice-similarity folder scan here (removed -- see issue #66 review
+    # notes). The date/version/region-stripped normalised key
+    # (Get-NormalizedGameKey) is already one of $candidateKeys checked
+    # against $FolderMap above -- $FolderMap is keyed by that same
+    # normalised form for every on-disk folder (Get-StagingFolderMap), so
+    # the "harmless metadata difference" case (e.g. Battle Gear 3's
+    # differing release date) is already resolved via that O(1) lookup
+    # without ever reaching this point. A similarity-scored scan added no
+    # matching power beyond that exact-key tier for any confirmed case,
+    # while being unable to reliably distinguish two different games with a
+    # long shared title prefix (e.g. numbered sequels): a real ZIP for one
+    # game was found to resolve to a different, similarly-named game's
+    # folder at the 0.95 threshold this used, which would have silently
+    # skipped extracting the correct game. Removed rather than re-tuned.
     return $null
 }
 
