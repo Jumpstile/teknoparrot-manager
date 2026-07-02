@@ -9486,7 +9486,7 @@ if ($checkForUpdatesOnStartup -and -not $Unattended) {
 }
 
 if (-not $tpRoot) {
-    $detected = @(Find-TeknoParrotRoot)
+    $detected = Find-TeknoParrotRoot
     if ($Unattended) {
         if ($detected.Count -ge 1) {
             $tpRoot = $detected[0]
@@ -11263,7 +11263,7 @@ if ($dryRunActive) {
 }
 
 if ($doLBSetup -eq "Y" -and -not $lbRoot) {
-    $lbDetected = @(Find-LaunchBoxRoot)
+    $lbDetected = Find-LaunchBoxRoot
     if ($lbDetected.Count -eq 1) {
         Write-Host ""
         Write-Host "  Auto-detected LaunchBox at: $($lbDetected[0])" -ForegroundColor Cyan
