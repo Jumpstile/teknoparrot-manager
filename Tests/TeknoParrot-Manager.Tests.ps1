@@ -877,6 +877,71 @@ Describe "Resolve-BestFuzzyMatch" {
     }
 }
 
+Describe "Resolve-ExtractedGameFolder (issue #66 extraction prompt correctness)" {
+    BeforeAll {
+        $script:OriginalRawThrillsPathLimits = $script:RawThrillsPathLimits
+    }
+
+    BeforeEach {
+        $script:installRoot = Join-Path $TestDrive "Games"
+        Remove-Item -LiteralPath $script:installRoot -Recurse -Force -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Path $script:installRoot -Force | Out-Null
+        $script:RawThrillsPathLimits = @{
+            AliensArmageddon = @{ Limit = 96; Suggested = 'ALIENS' }
+        }
+    }
+
+    AfterEach {
+        $script:RawThrillsPathLimits = $script:OriginalRawThrillsPathLimits
+    }
+
+    It "recognizes a RetroBat-suffixed Raw Thrills short-name folder for Aliens Armageddon" {
+        $existing = Join-Path $script:installRoot "ALIENS.teknoparrot"
+        New-Item -ItemType Directory -Path $existing -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $existing "game.exe") -Value "content"
+        $zipName = "Aliens Armageddon (1.04)(2014-11-17)[Raw Thrills PC][TP]"
+        $datIndex = @{
+            (Get-NormalizedGameKey $zipName) = [pscustomobject]@{
+                ProfileCode = "AliensArmageddon"
+                Executable  = "game.exe"
+            }
+        }
+
+        Resolve-ExtractedGameFolder -RawZipName $zipName -InstallFolder $script:installRoot -DatIndex $datIndex | Should -Be $existing
+    }
+
+    It "matches Battle Gear 3 despite harmless DAT year/date metadata differences" {
+        $existingName = "Battle Gear 3 (2.08J)(2003-04-11)[Namco System 246][TP]"
+        $existing = Join-Path $script:installRoot $existingName
+        New-Item -ItemType Directory -Path $existing -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $existing "game.elf") -Value "content"
+        $zipName = "Battle Gear 3 (2.08J)(2002)[Namco System 246][TP]"
+        $datIndex = @{
+            (Get-NormalizedGameKey $zipName) = [pscustomobject]@{
+                ProfileCode = "BattleGear3"
+                Executable  = "game.elf"
+            }
+        }
+
+        Resolve-ExtractedGameFolder -RawZipName $zipName -InstallFolder $script:installRoot -DatIndex $datIndex | Should -Be $existing
+    }
+
+    It "does not confuse similarly named sequels" {
+        $existing = Join-Path $script:installRoot "Virtua Fighter 4"
+        New-Item -ItemType Directory -Path $existing -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $existing "vf4.exe") -Value "content"
+
+        Resolve-ExtractedGameFolder -RawZipName "Virtua Fighter 5" -InstallFolder $script:installRoot | Should -BeNullOrEmpty
+    }
+
+    It "does not treat an empty matching folder as already extracted" {
+        $existing = Join-Path $script:installRoot "Battle Gear 3 (2.08J)(2003-04-11)[Namco System 246][TP]"
+        New-Item -ItemType Directory -Path $existing -Force | Out-Null
+
+        Resolve-ExtractedGameFolder -RawZipName "Battle Gear 3 (2.08J)(2002)[Namco System 246][TP]" -InstallFolder $script:installRoot | Should -BeNullOrEmpty
+    }
+}
+
 Describe "New-PostgresPgPassFile / Remove-PostgresPgPassFile" {
     # Issue #3 (v1.0 roadmap): migrated Postgres credential passing from
     # $env:PGPASSWORD to a temporary .pgpass-format file, so the password is

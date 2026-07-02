@@ -989,8 +989,8 @@ function Select-GamesInteractive {
                       # then distinguish from its own "user skipped" $null case
     }
 
-    # Build a normalised folder map of what is already extracted in the
-    # destination, using the same convention-agnostic logic as AutoSync.
+    # Build a folder map of what is already extracted in the destination,
+    # using the same resolver as AutoSync.
     $normalizedFolderMap = Get-StagingFolderMap $installFolder
 
     # Split the ZIP list into already-extracted (non-empty folder exists) and
@@ -998,13 +998,8 @@ function Select-GamesInteractive {
     $alreadyExtracted = @()
     $toExtract        = @()
     foreach ($zip in $all) {
-        $norm         = $zip.BaseName -replace ' (?=[\[\(])', ''
-        $existingPath = $normalizedFolderMap[$norm]
-        if (-not $existingPath) { $existingPath = Resolve-RegisteredGameFolder $zip.BaseName $datIndex $userProfilesDir }
-        $hasContent   = $existingPath -and
-                        (Get-ChildItem -LiteralPath $existingPath -Force -ErrorAction SilentlyContinue |
-                         Measure-Object).Count -gt 0
-        if ($hasContent) { $alreadyExtracted += $zip } else { $toExtract += $zip }
+        $existingPath = Resolve-ExtractedGameFolder -RawZipName $zip.BaseName -InstallFolder $installFolder -FolderMap $normalizedFolderMap -DatIndex $datIndex -UserProfilesDir $userProfilesDir
+        if ($existingPath) { $alreadyExtracted += $zip } else { $toExtract += $zip }
     }
 
     Write-Host ""
@@ -1185,20 +1180,14 @@ function Select-GamesInteractiveCombined {
     $toExtractMain = @(); $toExtractSupp = @()
 
     foreach ($zip in $allMain) {
-        $norm       = $zip.BaseName -replace ' (?=[\[\(])', ''
-        $existing   = $normalizedFolderMap[$norm]
-        if (-not $existing) { $existing = Resolve-RegisteredGameFolder $zip.BaseName $datIndex $userProfilesDir }
-        $hasContent = $existing -and (Get-ChildItem -LiteralPath $existing -Force -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0
-        if ($hasContent) { $alreadyMain++ } else { $toExtractMain += $zip; $sourceMap[$zip.BaseName] = 'Main' }
+        $existing = Resolve-ExtractedGameFolder -RawZipName $zip.BaseName -InstallFolder $installFolder -FolderMap $normalizedFolderMap -DatIndex $datIndex -UserProfilesDir $userProfilesDir
+        if ($existing) { $alreadyMain++ } else { $toExtractMain += $zip; $sourceMap[$zip.BaseName] = 'Main' }
     }
     # Supp iterates after Main -- if the same BaseName appears in both sources,
     # 'Supp' overwrites 'Main' in $sourceMap (supplementary takes precedence).
     foreach ($zip in $allSupp) {
-        $norm       = $zip.BaseName -replace ' (?=[\[\(])', ''
-        $existing   = $normalizedFolderMap[$norm]
-        if (-not $existing) { $existing = Resolve-RegisteredGameFolder $zip.BaseName $datIndex $userProfilesDir }
-        $hasContent = $existing -and (Get-ChildItem -LiteralPath $existing -Force -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0
-        if ($hasContent) { $alreadySupp++ } else { $toExtractSupp += $zip; $sourceMap[$zip.BaseName] = 'Supp' }
+        $existing = Resolve-ExtractedGameFolder -RawZipName $zip.BaseName -InstallFolder $installFolder -FolderMap $normalizedFolderMap -DatIndex $datIndex -UserProfilesDir $userProfilesDir
+        if ($existing) { $alreadySupp++ } else { $toExtractSupp += $zip; $sourceMap[$zip.BaseName] = 'Supp' }
     }
 
     $all = @($toExtractMain + $toExtractSupp | Sort-Object BaseName)
@@ -3051,12 +3040,8 @@ function Invoke-AutoSync {
         Write-Host "  Whitelist active: only extracting $($onlySync.Count) game(s) listed in onlySync." -ForegroundColor Cyan
     }
 
-    # Build a normalised-name map of every folder already in the staging
-    # directory. Normalisation removes spaces immediately before ( or [ so that
-    # "Game (ver) [Platform] [TP]" (old convention) and
-    # "Game(ver)[Platform][TP]" (new convention) map to the same key.
-    # This prevents AutoSync from creating duplicate folders when a game was
-    # extracted under the old naming convention and the ZIP now uses the new one.
+    # Build the shared extracted-folder resolver map so AutoSync and the
+    # interactive picker agree on which ZIPs are already present.
     $normalizedFolderMap = Get-StagingFolderMap $installFolder
 
     foreach ($zip in $zipFiles) {
@@ -3099,23 +3084,17 @@ function Invoke-AutoSync {
         $nasModStr  = $zip.LastWriteTimeUtc.ToString("o")
         $stored     = $syncState[$rawName]
 
-        # Resolve an existing folder using the normalised map, which matches
-        # both exact names and old-convention names for the same game. If
-        # that fails (e.g. a folder renamed to something the name-matching
-        # logic can't predict), fall back to the game's own registered
-        # GamePath, if any -- see Resolve-RegisteredGameFolder, issue #13.
-        $normZip       = $rawName -replace ' (?=[\[\(])', ''
-        $matchedFolder = if ($normalizedFolderMap.ContainsKey($normZip)) { $normalizedFolderMap[$normZip] } else { $null }
-        if (-not $matchedFolder) { $matchedFolder = Resolve-RegisteredGameFolder $rawName $datIndex $userProfilesDir }
+        # Resolve an existing, non-empty folder using exact naming,
+        # RetroBat suffixes, path-limit aliases, dat/profile identity, and a
+        # conservative fuzzy metadata match. See issue #66.
+        $matchedFolder = Resolve-ExtractedGameFolder -RawZipName $rawName -InstallFolder $installFolder -FolderMap $normalizedFolderMap -DatIndex $datIndex -UserProfilesDir $userProfilesDir
 
         $needsSync = $false; $reason = ""
         if ($null -eq $stored) {
             # Game not yet tracked. Only treat the folder as "already extracted"
             # if the matched folder (exact or old-convention) has content --
             # empty folders are failed extractions that should be retried.
-            $hasContent = $matchedFolder -and
-                          (-not (Test-Path -LiteralPath $sentinel)) -and
-                          ((Get-ChildItem -LiteralPath $matchedFolder -Force -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0)
+            $hasContent = $matchedFolder -and (-not (Test-Path -LiteralPath $sentinel))
             if ($hasContent) {
                 $syncState[$rawName] = [ordered]@{
                     NasSize = $zip.Length; NasLastModified = $nasModStr
@@ -6642,41 +6621,130 @@ $RawThrillsPathLimits = @{
 # space immediately before ( or [ so old- and new-convention folder names
 # for the same game map to the same key (see callers' original comments).
 #
-# Also registers each PATH TOO LONG entry's original Code under its
-# Suggested short name's existing folder (issue #13): a folder manually
-# renamed to the short name this script itself recommended in ACTION
-# REQUIRED (e.g. "AliensArmageddon" -> "ALIENS") no longer normalises to
-# match the ZIP's original name, so without this it gets reported as
-# "available to extract" even though it is already there.
-#
-# NOTE on this backfill's actual reach (found while investigating a
-# follow-up report on issue #13): $RawThrillsPathLimits's keys are PROFILE
-# CODES (e.g. "Cars", "DirtyDrivin"), the same short identifiers used for
-# UserProfiles\<Code>.xml -- NOT the ZIP's own filename. A ZIP in this
-# collection is named with the full descriptive RomVault/Eggman convention
-# (e.g. "Cars (1.42)(2013-08-28)[Raw Thrills PC][TP].zip"), and AutoSync
-# extracts it into a folder of that same full name. So this backfill only
-# actually helps the (apparently rare) case where a ZIP's bare base name
-# happens to equal its own profile code with no version/date metadata --
-# for the common case it registers a map key ($code) that the caller never
-# queries (callers look up the ZIP's full base name, not the profile
-# code), so it silently does nothing. Left in place since it's harmless
-# and still correct for that narrow case; Resolve-RegisteredGameFolder
-# below is the real, general-purpose fix for the rest.
+# Also registers each PATH TOO LONG entry's profile Code under its Suggested
+# short name's existing folder. The shared resolver can then use the DAT
+# ProfileCode to recognize short-name folders such as ALIENS.teknoparrot.
 function Get-StagingFolderMap {
     param([string]$installFolder)
     $map = @{}
     foreach ($dir in (Get-ChildItem -LiteralPath $installFolder -Directory -ErrorAction SilentlyContinue)) {
-        $norm = ($dir.Name -replace '\.(teknoparrot|parrot|game)$', '') -replace ' (?=[\[\(])', ''
-        if (-not $map.ContainsKey($norm)) { $map[$norm] = $dir.FullName }
+        $baseName = $dir.Name -replace '\.(teknoparrot|parrot|game)$', ''
+        $keys = @(
+            $dir.Name,
+            $baseName,
+            ($baseName -replace ' (?=[\[\(])', ''),
+            (Get-NormalizedGameKey $baseName)
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        foreach ($key in $keys) {
+            if (-not $map.ContainsKey($key)) { $map[$key] = $dir.FullName }
+        }
     }
-    foreach ($code in $RawThrillsPathLimits.Keys) {
-        $suggested = $RawThrillsPathLimits[$code].Suggested
-        if ($map.ContainsKey($suggested) -and -not $map.ContainsKey($code)) {
-            $map[$code] = $map[$suggested]
+    if ($RawThrillsPathLimits) {
+        foreach ($code in $RawThrillsPathLimits.Keys) {
+            $suggested = $RawThrillsPathLimits[$code].Suggested
+            if ($map.ContainsKey($suggested) -and -not $map.ContainsKey($code)) {
+                $map[$code] = $map[$suggested]
+            }
         }
     }
     return $map
+}
+
+function Test-ExtractedFolderHasContent {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return $false }
+    return ((Get-ChildItem -LiteralPath $Path -Force -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0)
+}
+
+function Get-DatEntryForZipName {
+    param([string]$RawZipName, [hashtable]$DatIndex)
+    if (-not $DatIndex -or $DatIndex.Count -eq 0) { return $null }
+    $normZip = Get-NormalizedGameKey $RawZipName
+    if ($DatIndex.ContainsKey($normZip)) { return $DatIndex[$normZip] }
+
+    $bestKey = $null; $bestScore = 0.0; $secondScore = 0.0
+    foreach ($key in $DatIndex.Keys) {
+        $score = Get-DiceSimilarity $normZip $key
+        if ($score -gt $bestScore) {
+            $secondScore = $bestScore
+            $bestScore = $score
+            $bestKey = $key
+        } elseif ($score -gt $secondScore) {
+            $secondScore = $score
+        }
+    }
+    if ($bestKey -and $bestScore -ge 0.95 -and ($bestScore - $secondScore) -ge $FuzzyTieMargin) {
+        return $DatIndex[$bestKey]
+    }
+    return $null
+}
+
+function Resolve-ExtractedGameFolder {
+    param(
+        [string]$RawZipName,
+        [string]$InstallFolder,
+        [hashtable]$FolderMap = $null,
+        [hashtable]$DatIndex = $null,
+        [string]$UserProfilesDir = ''
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RawZipName) -or [string]::IsNullOrWhiteSpace($InstallFolder)) { return $null }
+    if (-not $FolderMap) { $FolderMap = Get-StagingFolderMap $InstallFolder }
+
+    $baseName = $RawZipName -replace '\.(teknoparrot|parrot|game)$', ''
+    $candidateKeys = New-Object System.Collections.Generic.List[string]
+    foreach ($key in @(
+        $RawZipName,
+        $baseName,
+        ($baseName -replace ' (?=[\[\(])', ''),
+        (Get-NormalizedGameKey $baseName)
+    )) {
+        if (-not [string]::IsNullOrWhiteSpace($key) -and -not $candidateKeys.Contains($key)) { [void]$candidateKeys.Add($key) }
+    }
+
+    $datEntry = Get-DatEntryForZipName -RawZipName $RawZipName -DatIndex $DatIndex
+    if ($datEntry -and $datEntry.ProfileCode -and $datEntry.ProfileCode -match '^[\w]+$') {
+        $profileCode = [string]$datEntry.ProfileCode
+        foreach ($key in @($profileCode, (Get-NormalizedGameKey $profileCode))) {
+            if (-not [string]::IsNullOrWhiteSpace($key) -and -not $candidateKeys.Contains($key)) { [void]$candidateKeys.Add($key) }
+        }
+        if ($RawThrillsPathLimits -and $RawThrillsPathLimits.ContainsKey($profileCode)) {
+            $suggested = [string]$RawThrillsPathLimits[$profileCode].Suggested
+            foreach ($key in @($suggested, (Get-NormalizedGameKey $suggested))) {
+                if (-not [string]::IsNullOrWhiteSpace($key) -and -not $candidateKeys.Contains($key)) { [void]$candidateKeys.Add($key) }
+            }
+        }
+    }
+
+    foreach ($key in $candidateKeys) {
+        if ($FolderMap.ContainsKey($key) -and (Test-ExtractedFolderHasContent $FolderMap[$key])) {
+            return $FolderMap[$key]
+        }
+    }
+
+    $registeredFolder = Resolve-RegisteredGameFolder $RawZipName $DatIndex $UserProfilesDir
+    if (Test-ExtractedFolderHasContent $registeredFolder) { return $registeredFolder }
+
+    $normZip = Get-NormalizedGameKey $baseName
+    $bestPath = $null; $bestScore = 0.0; $secondScore = 0.0
+    foreach ($dir in (Get-ChildItem -LiteralPath $InstallFolder -Directory -ErrorAction SilentlyContinue)) {
+        if (-not (Test-ExtractedFolderHasContent $dir.FullName)) { continue }
+        $normDir = Get-NormalizedGameKey ($dir.Name -replace '\.(teknoparrot|parrot|game)$', '')
+        $score = Get-DiceSimilarity $normZip $normDir
+        if ($score -gt $bestScore) {
+            $secondScore = $bestScore
+            $bestScore = $score
+            $bestPath = $dir.FullName
+        } elseif ($score -gt $secondScore) {
+            $secondScore = $score
+        }
+    }
+    if ($bestPath -and $bestScore -ge 0.95 -and ($bestScore - $secondScore) -ge $FuzzyTieMargin) {
+        return $bestPath
+    }
+
+    return $null
 }
 
 # Folder-name matching (Get-StagingFolderMap above) cannot recognise a
@@ -6694,7 +6762,7 @@ function Get-StagingFolderMap {
 function Resolve-RegisteredGameFolder {
     param([string]$rawZipName, [hashtable]$datIndex, [string]$userProfilesDir)
     if (-not $datIndex -or $datIndex.Count -eq 0 -or -not $userProfilesDir) { return $null }
-    $datEntry = $datIndex[(Get-NormalizedGameKey $rawZipName)]
+    $datEntry = Get-DatEntryForZipName -RawZipName $rawZipName -DatIndex $datIndex
     if (-not $datEntry -or -not $datEntry.ProfileCode) { return $null }
     # Profile codes are purely alphanumeric; reject anything else before joining
     # into a path -- the dat is externally-sourced, untrusted input, same as the
