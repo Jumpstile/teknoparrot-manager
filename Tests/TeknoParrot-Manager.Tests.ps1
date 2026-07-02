@@ -957,41 +957,142 @@ Describe "Get-ReShadeLatestVersion retry behavior" {
     }
 }
 
-Describe "Invoke-EggmanDatDownload retry and partial-file cleanup" {
+Describe "Test-EggmanDatReleaseUrl" {
+    It "accepts the expected Eggmansworld TeknoParrot GitHub release URL" {
+        Test-EggmanDatReleaseUrl "https://github.com/Eggmansworld/TeknoParrot/releases/download/2026-06-17/TeknoParrot.Collection.RomVault.zip" | Should -BeTrue
+    }
+    It "rejects lookalike or non-release URLs" {
+        Test-EggmanDatReleaseUrl "https://github.com.evil.example.com/Eggmansworld/TeknoParrot/releases/download/2026-06-17/file.zip" | Should -BeFalse
+        Test-EggmanDatReleaseUrl "https://github.com/OtherOwner/TeknoParrot/releases/download/2026-06-17/file.zip" | Should -BeFalse
+        Test-EggmanDatReleaseUrl "http://github.com/Eggmansworld/TeknoParrot/releases/download/2026-06-17/file.zip" | Should -BeFalse
+    }
+}
+
+Describe "Invoke-TpmDownload method selection and partial-file cleanup" {
     BeforeAll {
-        Mock Get-Service { $null }   # BITS unavailable -> exercises the Invoke-WebRequest fallback path
-        Mock Start-Sleep {}
         Mock Write-Log {}
+        Mock Write-Host {}
+        Mock Write-DownloadAudit {}
+        Mock Write-TpmDownloadMetrics {}
+        Mock Invoke-TpmDownloadBits { Set-Content -LiteralPath $TempPath -Value "fake zip content" -NoNewline }
+        Mock Invoke-TpmDownloadHttpClient { Set-Content -LiteralPath $TempPath -Value "fake zip content" -NoNewline }
+        Mock Invoke-TpmDownloadWebRequest { Set-Content -LiteralPath $TempPath -Value "fake zip content" -NoNewline }
     }
     BeforeEach {
-        $script:attemptCount = 0
+        Mock Test-TpmDownloadBitsAvailable { $true }
     }
 
-    It "retries a transient failure and succeeds on a later attempt" {
-        Mock Invoke-WebRequest {
-            $script:attemptCount++
-            if ($script:attemptCount -lt 2) { throw "transient network error" }
-            Set-Content -LiteralPath $OutFile -Value "fake zip content"
-        }
-        $savePath = Join-Path $TestDrive "retry-success.zip"
+    It "uses BITS first when it is available" {
+        $savePath = Join-Path $TestDrive "bits-success.zip"
 
-        $result = Invoke-EggmanDatDownload "https://example.com/file.zip" $savePath
+        $result = Invoke-TpmDownload -DownloadUrl "https://example.com/file.zip" -DestinationPath $savePath
 
         $result | Should -BeTrue
-        $script:attemptCount | Should -Be 2
         Test-Path -LiteralPath $savePath | Should -BeTrue
+        Should -Invoke Invoke-TpmDownloadBits -Times 1
+        Should -Invoke Invoke-TpmDownloadHttpClient -Times 0
+        Should -Invoke Invoke-TpmDownloadWebRequest -Times 0
     }
-    It "deletes any partial file and returns false once all retry attempts are exhausted" {
-        Mock Invoke-WebRequest { throw "still failing" }
-        $savePath = Join-Path $TestDrive "retry-exhausted.zip"
-        # Simulate a partial file left behind by a prior failed attempt.
-        Set-Content -LiteralPath $savePath -Value "partial garbage"
 
-        $result = Invoke-EggmanDatDownload "https://example.com/file.zip" $savePath
+    It "falls back to HttpClient when BITS is unavailable" {
+        Mock Test-TpmDownloadBitsAvailable { $false }
+        $savePath = Join-Path $TestDrive "httpclient-success.zip"
+
+        $result = Invoke-TpmDownload -DownloadUrl "https://example.com/file.zip" -DestinationPath $savePath
+
+        $result | Should -BeTrue
+        Test-Path -LiteralPath $savePath | Should -BeTrue
+        Should -Invoke Invoke-TpmDownloadBits -Times 0
+        Should -Invoke Invoke-TpmDownloadHttpClient -Times 1
+        Should -Invoke Invoke-TpmDownloadWebRequest -Times 0
+    }
+
+    It "uses Invoke-WebRequest only after BITS and HttpClient fail" {
+        Mock Invoke-TpmDownloadBits { throw "bits failed" }
+        Mock Invoke-TpmDownloadHttpClient { throw "http failed" }
+        $savePath = Join-Path $TestDrive "webrequest-success.zip"
+
+        $result = Invoke-TpmDownload -DownloadUrl "https://example.com/file.zip" -DestinationPath $savePath
+
+        $result | Should -BeTrue
+        Test-Path -LiteralPath $savePath | Should -BeTrue
+        Should -Invoke Invoke-TpmDownloadBits -Times 1
+        Should -Invoke Invoke-TpmDownloadHttpClient -Times 1
+        Should -Invoke Invoke-TpmDownloadWebRequest -Times 1
+    }
+
+    It "deletes any partial file and leaves the final path untouched when all methods fail" {
+        Mock Invoke-TpmDownloadBits { param($DownloadUrl, $TempPath) Set-Content -LiteralPath $TempPath -Value "partial"; throw "bits failed" }
+        Mock Invoke-TpmDownloadHttpClient { param($DownloadUrl, $TempPath) Set-Content -LiteralPath $TempPath -Value "partial"; throw "http failed" }
+        Mock Invoke-TpmDownloadWebRequest { param($DownloadUrl, $TempPath) Set-Content -LiteralPath $TempPath -Value "partial"; throw "web failed" }
+        $savePath = Join-Path $TestDrive "failed.zip"
+
+        $result = Invoke-TpmDownload -DownloadUrl "https://example.com/file.zip" -DestinationPath $savePath
 
         $result | Should -BeFalse
         Test-Path -LiteralPath $savePath | Should -BeFalse
-        Should -Invoke Invoke-WebRequest -Times 3
+        @(Get-ChildItem -LiteralPath $TestDrive -Filter "*.partial" -Force).Count | Should -Be 0
+    }
+
+    It "rejects an incomplete file when an expected size is provided" {
+        Mock Test-TpmDownloadBitsAvailable { $false }
+        Mock Invoke-TpmDownloadHttpClient { Set-Content -LiteralPath $TempPath -Value "short" -NoNewline }
+        $savePath = Join-Path $TestDrive "too-small.zip"
+
+        $result = Invoke-TpmDownload -DownloadUrl "https://example.com/file.zip" -DestinationPath $savePath -ExpectedBytes 100
+
+        $result | Should -BeFalse
+        Test-Path -LiteralPath $savePath | Should -BeFalse
+        @(Get-ChildItem -LiteralPath $TestDrive -Filter "*.partial" -Force).Count | Should -Be 0
+    }
+}
+
+Describe "Write-TpmDownloadProgress" {
+    BeforeAll {
+        Mock Write-Progress {}
+    }
+
+    It "shows percent complete when total size is known" {
+        Write-TpmDownloadProgress -Method 'HttpClient' -DownloadedBytes 5242880 -TotalBytes 10485760 -Elapsed ([TimeSpan]::FromSeconds(2))
+
+        Should -Invoke Write-Progress -Times 1 -ParameterFilter {
+            $PercentComplete -eq 50 -and $Status -like '*5/10 MB*' -and $Status -like '*MB/s*' -and $Status -like '*ETA*'
+        }
+    }
+
+    It "uses an indeterminate status when total size is unknown" {
+        Write-TpmDownloadProgress -Method 'HttpClient' -DownloadedBytes 5242880 -TotalBytes 0 -Elapsed ([TimeSpan]::FromSeconds(2))
+
+        Should -Invoke Write-Progress -Times 1 -ParameterFilter {
+            $Status -like '*5 MB downloaded*' -and -not $PSBoundParameters.ContainsKey('PercentComplete')
+        }
+    }
+}
+
+Describe "Invoke-EggmanDatDownloadInteractive cache reuse" {
+    BeforeAll {
+        Mock Write-Log {}
+        Mock Write-Host {}
+        Mock Read-PathWithBrowse { "" }
+        Mock Invoke-EggmanDatDownload { throw "download should be skipped when the cached file matches the expected size" }
+    }
+
+    It "does not re-download when the target file already matches the release size" {
+        $fileName = "TeknoParrot.Collection.RomVault.zip"
+        $defaultPath = Join-Path (Get-Location).Path $fileName
+        try {
+            Set-Content -LiteralPath $defaultPath -Value "12345" -NoNewline
+            $rel = [pscustomobject]@{
+                DownloadUrl = "https://github.com/Eggmansworld/TeknoParrot/releases/download/2026-06-17/$fileName"
+                FileName    = $fileName
+                SizeBytes   = 5
+            }
+
+            Invoke-EggmanDatDownloadInteractive $rel | Should -Be $defaultPath
+            Should -Invoke Invoke-EggmanDatDownload -Times 0
+        } finally {
+            Remove-Item -LiteralPath $defaultPath -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
@@ -1727,7 +1828,7 @@ Describe "Invoke-ManagerUpdateInstall" {
 
     It "installs successfully and returns true" {
         $zipBytes = New-StartupCheckFixtureZipBytes
-        Mock Invoke-WebRequest { param($Uri, $OutFile, $UseBasicParsing) [System.IO.File]::WriteAllBytes($OutFile, $zipBytes) }.GetNewClosure()
+        Mock Invoke-TpmDownload { param($DownloadUrl, $DestinationPath, $ExpectedBytes, $Label, $Version) [System.IO.File]::WriteAllBytes($DestinationPath, $zipBytes); return $true }.GetNewClosure()
 
         $path = Join-Path $TestDrive 'install-target.ps1'
         Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
@@ -1741,6 +1842,7 @@ Describe "Invoke-ManagerUpdateInstall" {
         Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii -NoNewline
         Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $true
         try {
+            Mock Invoke-TpmDownload { throw "download should not be called when the target is read-only" }
             Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
             (Get-Content -LiteralPath $path -Raw) | Should -Be '$ScriptVersion = "0.0.1"'
         } finally {

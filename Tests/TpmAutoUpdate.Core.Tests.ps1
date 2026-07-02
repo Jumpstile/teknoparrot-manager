@@ -305,7 +305,7 @@ Describe 'Invoke-TpmAutoUpdate -Apply -WhatIf' {
                     })
                 }
             }
-            Mock -ModuleName TpmAutoUpdate.Core Invoke-WebRequest { throw 'Invoke-WebRequest should not be called during -WhatIf' }
+            Mock -ModuleName TpmAutoUpdate.Core Invoke-TpmDownload { throw 'download should not be called during -WhatIf' }
 
             & $orchestratorPath -Apply -WhatIf -ScriptPath $scriptPath -Owner 'Jumpstile' -Repository 'teknoparrot-manager' *> $null
 

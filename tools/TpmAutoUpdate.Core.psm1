@@ -173,6 +173,7 @@ function Assert-TpmWritableTarget {
 }
 
 function New-TpmUpdateBackup {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Helper is called from the updater apply path after the orchestrator has already made the user-facing confirmation decision.')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -194,6 +195,234 @@ function New-TpmUpdateBackup {
     return $backupPath
 }
 
+function Write-TpmDownloadProgress {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Label,
+        [Parameter(Mandatory)][string]$Method,
+        [Parameter(Mandatory)][Int64]$DownloadedBytes,
+        [Int64]$TotalBytes = 0,
+        [Parameter(Mandatory)][TimeSpan]$Elapsed,
+        [switch]$Complete
+    )
+
+    $activity = "Downloading $Label"
+    if ($Complete) {
+        Write-Progress -Id 42 -Activity $activity -Completed
+        return
+    }
+
+    $downloadedMb = [Math]::Round($DownloadedBytes / 1MB, 1)
+    $seconds = [Math]::Max($Elapsed.TotalSeconds, 0.001)
+    $mbps = [Math]::Round(($DownloadedBytes / 1MB) / $seconds, 2)
+    if ($TotalBytes -gt 0) {
+        $totalMb = [Math]::Round($TotalBytes / 1MB, 1)
+        $percent = [Math]::Min(100, [Math]::Max(0, [Math]::Round(($DownloadedBytes / $TotalBytes) * 100, 0)))
+        $etaText = ''
+        if ($DownloadedBytes -gt 0 -and $mbps -gt 0) {
+            $remainingSeconds = (($TotalBytes - $DownloadedBytes) / 1MB) / $mbps
+            if ($remainingSeconds -ge 0) {
+                $etaText = " ETA {0}" -f ([TimeSpan]::FromSeconds($remainingSeconds).ToString("mm\:ss"))
+            }
+        }
+        Write-Progress -Id 42 -Activity $activity -Status ("{0}: {1}%  {2}/{3} MB  {4} MB/s{5}" -f $Method, $percent, $downloadedMb, $totalMb, $mbps, $etaText) -PercentComplete $percent
+    } else {
+        Write-Progress -Id 42 -Activity $activity -Status ("{0}: {1} MB downloaded  {2} MB/s" -f $Method, $downloadedMb, $mbps)
+    }
+}
+
+function Test-TpmDownloadBitsAvailable {
+    [CmdletBinding()]
+    param()
+
+    $bitsCommand = Get-Command Start-BitsTransfer -ErrorAction SilentlyContinue
+    if (-not $bitsCommand) { return $false }
+    $bitsService = try { Get-Service -Name BITS -ErrorAction Stop } catch { $null }
+    return ($null -ne $bitsService -and $bitsService.Status -eq 'Running')
+}
+
+function Invoke-TpmDownloadBitTransfer {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$DownloadUrl,
+        [Parameter(Mandatory)][string]$TempPath,
+        [Parameter(Mandatory)][string]$Label
+    )
+
+    $job = $null
+    $progressWatch = [System.Diagnostics.Stopwatch]::StartNew()
+    try {
+        $job = Start-BitsTransfer -Source $DownloadUrl -Destination $TempPath `
+            -Description "TeknoParrot Manager $Label" `
+            -DisplayName "Downloading $Label..." `
+            -Asynchronous `
+            -ErrorAction Stop
+        while ($job.JobState -in @('Connecting', 'Transferring', 'Queued')) {
+            Write-TpmDownloadProgress -Label $Label -Method 'BITS' -DownloadedBytes ([int64]$job.BytesTransferred) -TotalBytes ([int64]$job.BytesTotal) -Elapsed $progressWatch.Elapsed
+            Start-Sleep -Milliseconds 500
+            $job = Get-BitsTransfer -JobId $job.JobId -ErrorAction Stop
+        }
+        if ($job.JobState -ne 'Transferred') {
+            throw "BITS transfer ended with state $($job.JobState)."
+        }
+        Complete-BitsTransfer -BitsJob $job -ErrorAction Stop
+        $bytes = (Get-Item -LiteralPath $TempPath -ErrorAction Stop).Length
+        Write-TpmDownloadProgress -Label $Label -Method 'BITS' -DownloadedBytes $bytes -TotalBytes $bytes -Elapsed $progressWatch.Elapsed -Complete
+    } catch {
+        if ($job) {
+            try {
+                Remove-BitsTransfer -BitsJob $job -Confirm:$false -ErrorAction SilentlyContinue
+            } catch {
+                Write-Verbose "BITS cleanup failed: $_"
+            }
+        }
+        throw
+    }
+}
+
+function Invoke-TpmDownloadHttpClient {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$DownloadUrl,
+        [Parameter(Mandatory)][string]$TempPath,
+        [Parameter(Mandatory)][string]$Label
+    )
+
+    if (-not ('System.Net.Http.HttpClient' -as [type])) {
+        Add-Type -AssemblyName System.Net.Http
+    }
+
+    $client = $null
+    $response = $null
+    $inputStream = $null
+    $outputStream = $null
+    try {
+        $client = New-Object System.Net.Http.HttpClient
+        $client.Timeout = [TimeSpan]::FromMinutes(30)
+        $response = $client.GetAsync($DownloadUrl, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+        [void]$response.EnsureSuccessStatusCode()
+        $totalBytes = if ($response.Content.Headers.ContentLength.HasValue) { [int64]$response.Content.Headers.ContentLength.Value } else { [int64]0 }
+        $inputStream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+        $outputStream = [System.IO.File]::Create($TempPath)
+        $buffer = New-Object byte[] 1048576
+        $downloadedBytes = [int64]0
+        $progressWatch = [System.Diagnostics.Stopwatch]::StartNew()
+        while (($read = $inputStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            $outputStream.Write($buffer, 0, $read)
+            $downloadedBytes += $read
+            Write-TpmDownloadProgress -Label $Label -Method 'HttpClient' -DownloadedBytes $downloadedBytes -TotalBytes $totalBytes -Elapsed $progressWatch.Elapsed
+        }
+        Write-TpmDownloadProgress -Label $Label -Method 'HttpClient' -DownloadedBytes $downloadedBytes -TotalBytes $totalBytes -Elapsed $progressWatch.Elapsed -Complete
+    } finally {
+        if ($outputStream) { $outputStream.Dispose() }
+        if ($inputStream) { $inputStream.Dispose() }
+        if ($response) { $response.Dispose() }
+        if ($client) { $client.Dispose() }
+    }
+}
+
+function Invoke-TpmDownloadWebRequest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$DownloadUrl,
+        [Parameter(Mandatory)][string]$TempPath,
+        [Parameter(Mandatory)][string]$Label
+    )
+
+    Write-TpmDownloadProgress -Label $Label -Method 'Invoke-WebRequest' -DownloadedBytes 0 -TotalBytes 0 -Elapsed ([TimeSpan]::Zero)
+    Invoke-WebRequest -Uri $DownloadUrl -OutFile $TempPath -UseBasicParsing -ErrorAction Stop
+    $bytes = (Get-Item -LiteralPath $TempPath -ErrorAction Stop).Length
+    Write-TpmDownloadProgress -Label $Label -Method 'Invoke-WebRequest' -DownloadedBytes $bytes -TotalBytes $bytes -Elapsed ([TimeSpan]::Zero) -Complete
+}
+
+function Test-TpmDownloadedFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Int64]$ExpectedBytes = 0
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    $item = Get-Item -LiteralPath $Path -ErrorAction Stop
+    if ($item.Length -le 0) { return $false }
+    if ($ExpectedBytes -gt 0 -and $item.Length -ne $ExpectedBytes) { return $false }
+    return $true
+}
+
+function Invoke-TpmDownload {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$DownloadUrl,
+        [Parameter(Mandatory)][string]$DestinationPath,
+        [Int64]$ExpectedBytes = 0,
+        [string]$Label = 'download'
+    )
+
+    $saveDir = Split-Path -Parent $DestinationPath
+    if ([string]::IsNullOrWhiteSpace($saveDir)) { $saveDir = (Get-Location).Path }
+    if (-not (Test-Path -LiteralPath $saveDir -PathType Container)) {
+        New-Item -ItemType Directory -Path $saveDir -Force | Out-Null
+    }
+
+    $tempPath = Join-Path $saveDir ('.{0}.{1}.partial' -f ([System.IO.Path]::GetFileName($DestinationPath)), ([guid]::NewGuid().ToString('N')))
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $methodUsed = $null
+    try {
+        $bitsSucceeded = $false
+        if (Test-TpmDownloadBitsAvailable) {
+            try {
+                Invoke-TpmDownloadBitTransfer -DownloadUrl $DownloadUrl -TempPath $tempPath -Label $Label
+                $bitsSucceeded = $true
+                $methodUsed = 'BITS'
+            } catch {
+                Write-Verbose "${Label}: BITS transfer failed (${_}), trying HttpClient."
+                try {
+                    if (Test-Path -LiteralPath $tempPath) { [System.IO.File]::Delete($tempPath) }
+                } catch {
+                    Write-Verbose "Partial cleanup after BITS failure failed: $_"
+                }
+            }
+        }
+
+        if (-not $bitsSucceeded) {
+            try {
+                Invoke-TpmDownloadHttpClient -DownloadUrl $DownloadUrl -TempPath $tempPath -Label $Label
+                $methodUsed = 'HttpClient'
+            } catch {
+                Write-Verbose "${Label}: HttpClient download failed (${_}), trying Invoke-WebRequest."
+                try {
+                    if (Test-Path -LiteralPath $tempPath) { [System.IO.File]::Delete($tempPath) }
+                } catch {
+                    Write-Verbose "Partial cleanup after HttpClient failure failed: $_"
+                }
+                Invoke-TpmDownloadWebRequest -DownloadUrl $DownloadUrl -TempPath $tempPath -Label $Label
+                $methodUsed = 'Invoke-WebRequest'
+            }
+        }
+
+        if (-not (Test-TpmDownloadedFile -Path $tempPath -ExpectedBytes $ExpectedBytes)) {
+            throw "Downloaded file is incomplete or empty."
+        }
+
+        Move-Item -LiteralPath $tempPath -Destination $DestinationPath -Force -ErrorAction Stop
+        $stopwatch.Stop()
+        $bytes = (Get-Item -LiteralPath $DestinationPath -ErrorAction Stop).Length
+        $mb = [Math]::Round($bytes / 1MB, 2)
+        $seconds = [Math]::Max($stopwatch.Elapsed.TotalSeconds, 0.001)
+        $mbps = [Math]::Round(($bytes / 1MB) / $seconds, 2)
+        Write-Verbose ("{0}: download method={1} size={2}MB elapsed={3:n1}s speed={4}MB/s" -f $Label, $methodUsed, $mb, $stopwatch.Elapsed.TotalSeconds, $mbps)
+        return $true
+    } catch {
+        $stopwatch.Stop()
+        try {
+            if (Test-Path -LiteralPath $tempPath) { [System.IO.File]::Delete($tempPath) }
+        } catch {
+            Write-Verbose "Partial cleanup after download failure failed: $_"
+        }
+        throw
+    }
+}
+
 function Save-TpmReleaseAsset {
     [CmdletBinding()]
     param(
@@ -202,7 +431,11 @@ function Save-TpmReleaseAsset {
     )
 
     $tempPath = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-update-" + [guid]::NewGuid().ToString('N') + '.zip')
-    Invoke-WebRequest -Uri $Asset.browser_download_url -OutFile $tempPath -UseBasicParsing
+    $expectedBytes = 0
+    if ($Asset.PSObject.Properties.Name -contains 'size') {
+        $expectedBytes = [int64]$Asset.size
+    }
+    [void](Invoke-TpmDownload -DownloadUrl $Asset.browser_download_url -DestinationPath $tempPath -ExpectedBytes $expectedBytes -Label 'TPM update package')
 
     $downloaded = Get-Item -LiteralPath $tempPath -ErrorAction Stop
     if ($downloaded.Length -le 0) {

@@ -3536,6 +3536,16 @@ function Resolve-ProfileCode {
 # can no longer work -- query "latest" instead. Asset naming is unchanged
 # (still matches 'TeknoParrot*Collection*RomVault*.zip').
 # Returns [pscustomobject]@{DownloadUrl; FileName; SizeMB} or $null on failure.
+function Test-EggmanDatReleaseUrl {
+    param([string]$Url)
+    $parsedUri = $null
+    if (-not [System.Uri]::TryCreate($Url, [System.UriKind]::Absolute, [ref]$parsedUri)) { return $false }
+    if ($parsedUri.Scheme -ne 'https') { return $false }
+
+    if ($parsedUri.Host -ine 'github.com') { return $false }
+    return $parsedUri.AbsolutePath.StartsWith('/Eggmansworld/TeknoParrot/releases/download/', [System.StringComparison]::Ordinal)
+}
+
 function Get-EggmanDatRelease {
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         try {
@@ -3546,7 +3556,7 @@ function Get-EggmanDatRelease {
             $asset  = @($rel.assets) | Where-Object { $_.name -like 'TeknoParrot*Collection*RomVault*.zip' } |
                           Select-Object -First 1
             if (-not $asset) { return $null }
-            if ($asset.browser_download_url -notmatch '^https://[a-zA-Z0-9._-]*(github\.com|githubusercontent\.com)/') {
+            if (-not (Test-EggmanDatReleaseUrl -Url $asset.browser_download_url)) {
                 Write-Log "EggmanDat: unexpected download URL format -- skipping."
                 return $null
             }
@@ -3554,6 +3564,7 @@ function Get-EggmanDatRelease {
                 DownloadUrl = $asset.browser_download_url
                 FileName    = $asset.name
                 SizeMB      = [Math]::Round($asset.size / 1MB, 1)
+                SizeBytes   = [int64]$asset.size
             }
         } catch {
             $status = 0
@@ -3568,48 +3579,201 @@ function Get-EggmanDatRelease {
     return $null
 }
 
-# Downloads the Eggman dat ZIP. Uses BITS (shows a progress bar) with an
-# Invoke-WebRequest fallback. Cleans up any partial file on failure.
-function Invoke-EggmanDatDownload {
-    param([string]$downloadUrl, [string]$savePath)
+function Invoke-TpmDownloadHttpClient {
+    param([string]$DownloadUrl, [string]$TempPath, [string]$Label = 'download')
+    if (-not ('System.Net.Http.HttpClient' -as [type])) {
+        Add-Type -AssemblyName System.Net.Http
+    }
+    $client = $null
+    $response = $null
+    $inputStream = $null
+    $outputStream = $null
     try {
-        $bitsOk = $false
-        $bitsSvc = try { Get-Service -Name BITS -ErrorAction Stop } catch { $null }
-        if ($bitsSvc -ne $null -and $bitsSvc.Status -eq 'Running') {
+        $client = New-Object System.Net.Http.HttpClient
+        $client.Timeout = [TimeSpan]::FromMinutes(30)
+        $response = $client.GetAsync($DownloadUrl, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+        [void]$response.EnsureSuccessStatusCode()
+        $totalBytes = if ($response.Content.Headers.ContentLength.HasValue) { [int64]$response.Content.Headers.ContentLength.Value } else { [int64]0 }
+        $inputStream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+        $outputStream = [System.IO.File]::Create($TempPath)
+        $buffer = New-Object byte[] 1048576
+        $downloadedBytes = [int64]0
+        $progressWatch = [System.Diagnostics.Stopwatch]::StartNew()
+        while (($read = $inputStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            $outputStream.Write($buffer, 0, $read)
+            $downloadedBytes += $read
+            Write-TpmDownloadProgress -Label $Label -Method 'HttpClient' -DownloadedBytes $downloadedBytes -TotalBytes $totalBytes -Elapsed $progressWatch.Elapsed
+        }
+        Write-TpmDownloadProgress -Label $Label -Method 'HttpClient' -DownloadedBytes $downloadedBytes -TotalBytes $totalBytes -Elapsed $progressWatch.Elapsed -Complete
+    } finally {
+        if ($outputStream) { $outputStream.Dispose() }
+        if ($inputStream) { $inputStream.Dispose() }
+        if ($response) { $response.Dispose() }
+        if ($client) { $client.Dispose() }
+    }
+}
+
+function Invoke-TpmDownloadWebRequest {
+    param([string]$DownloadUrl, [string]$TempPath, [string]$Label = 'download')
+    Write-TpmDownloadProgress -Label $Label -Method 'Invoke-WebRequest' -DownloadedBytes 0 -TotalBytes 0 -Elapsed ([TimeSpan]::Zero)
+    Invoke-WebRequest -Uri $DownloadUrl -OutFile $TempPath -UseBasicParsing -ErrorAction Stop
+    $bytes = (Get-Item -LiteralPath $TempPath -ErrorAction Stop).Length
+    Write-TpmDownloadProgress -Label $Label -Method 'Invoke-WebRequest' -DownloadedBytes $bytes -TotalBytes $bytes -Elapsed ([TimeSpan]::Zero) -Complete
+}
+
+function Test-TpmDownloadBitsAvailable {
+    $bitsCommand = Get-Command Start-BitsTransfer -ErrorAction SilentlyContinue
+    if (-not $bitsCommand) { return $false }
+    $bitsSvc = try { Get-Service -Name BITS -ErrorAction Stop } catch { $null }
+    return ($bitsSvc -ne $null -and $bitsSvc.Status -eq 'Running')
+}
+
+function Invoke-TpmDownloadBits {
+    param([string]$DownloadUrl, [string]$TempPath, [string]$Label = 'download')
+    $job = $null
+    $progressWatch = [System.Diagnostics.Stopwatch]::StartNew()
+    try {
+        $job = Start-BitsTransfer -Source $DownloadUrl -Destination $TempPath `
+            -Description "TeknoParrot Manager $Label" `
+            -DisplayName "Downloading $Label..." `
+            -Asynchronous `
+            -ErrorAction Stop
+        while ($job.JobState -in @('Connecting', 'Transferring', 'Queued')) {
+            Write-TpmDownloadProgress -Label $Label -Method 'BITS' -DownloadedBytes ([int64]$job.BytesTransferred) -TotalBytes ([int64]$job.BytesTotal) -Elapsed $progressWatch.Elapsed
+            Start-Sleep -Milliseconds 500
+            $job = Get-BitsTransfer -JobId $job.JobId -ErrorAction Stop
+        }
+        if ($job.JobState -ne 'Transferred') {
+            throw "BITS transfer ended with state $($job.JobState)."
+        }
+        Complete-BitsTransfer -BitsJob $job -ErrorAction Stop
+        $bytes = (Get-Item -LiteralPath $TempPath -ErrorAction Stop).Length
+        Write-TpmDownloadProgress -Label $Label -Method 'BITS' -DownloadedBytes $bytes -TotalBytes $bytes -Elapsed $progressWatch.Elapsed -Complete
+    } catch {
+        if ($job) {
+            try { Remove-BitsTransfer -BitsJob $job -Confirm:$false -ErrorAction SilentlyContinue } catch {}
+        }
+        throw
+    }
+}
+
+function Test-TpmDownloadedFile {
+    param([string]$Path, [Int64]$ExpectedBytes = 0)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    $item = Get-Item -LiteralPath $Path -ErrorAction Stop
+    if ($item.Length -le 0) { return $false }
+    if ($ExpectedBytes -gt 0 -and $item.Length -ne $ExpectedBytes) { return $false }
+    return $true
+}
+
+function Write-TpmDownloadProgress {
+    param(
+        [string]$Label = 'download',
+        [string]$Method,
+        [Int64]$DownloadedBytes,
+        [Int64]$TotalBytes = 0,
+        [TimeSpan]$Elapsed,
+        [switch]$Complete
+    )
+
+    $activity = "Downloading $Label"
+    if ($Complete) {
+        Write-Progress -Id 42 -Activity $activity -Completed
+        return
+    }
+
+    $downloadedMb = [Math]::Round($DownloadedBytes / 1MB, 1)
+    $seconds = [Math]::Max($Elapsed.TotalSeconds, 0.001)
+    $mbps = [Math]::Round(($DownloadedBytes / 1MB) / $seconds, 2)
+    if ($TotalBytes -gt 0) {
+        $totalMb = [Math]::Round($TotalBytes / 1MB, 1)
+        $percent = [Math]::Min(100, [Math]::Max(0, [Math]::Round(($DownloadedBytes / $TotalBytes) * 100, 0)))
+        $etaText = ''
+        if ($DownloadedBytes -gt 0 -and $mbps -gt 0) {
+            $remainingSeconds = (($TotalBytes - $DownloadedBytes) / 1MB) / $mbps
+            if ($remainingSeconds -ge 0) {
+                $etaText = " ETA {0}" -f ([TimeSpan]::FromSeconds($remainingSeconds).ToString("mm\:ss"))
+            }
+        }
+        Write-Progress -Id 42 -Activity $activity -Status ("{0}: {1}%  {2}/{3} MB  {4} MB/s{5}" -f $Method, $percent, $downloadedMb, $totalMb, $mbps, $etaText) -PercentComplete $percent
+    } else {
+        Write-Progress -Id 42 -Activity $activity -Status ("{0}: {1} MB downloaded  {2} MB/s" -f $Method, $downloadedMb, $mbps)
+    }
+}
+
+function Write-TpmDownloadMetrics {
+    param([string]$Label, [string]$Method, [string]$Path, [TimeSpan]$Elapsed, [switch]$Quiet)
+    $bytes = (Get-Item -LiteralPath $Path -ErrorAction Stop).Length
+    $mb = [Math]::Round($bytes / 1MB, 2)
+    $seconds = [Math]::Max($Elapsed.TotalSeconds, 0.001)
+    $mbps = [Math]::Round(($bytes / 1MB) / $seconds, 2)
+    $message = "${Label}: download method=$Method size=${mb}MB elapsed=$([Math]::Round($Elapsed.TotalSeconds, 1))s speed=${mbps}MB/s"
+    Write-Log $message
+    if (-not $Quiet) {
+        Write-Host ("  Downloaded with {0}: {1} MB in {2:n1}s ({3} MB/s)" -f $Method, $mb, $Elapsed.TotalSeconds, $mbps) -ForegroundColor DarkGray
+    }
+}
+
+# Downloads a live asset to a sibling partial file first, then moves it
+# into place only after completion validation. Preferred order is BITS,
+# HttpClient, then Invoke-WebRequest as an emergency fallback.
+function Invoke-TpmDownload {
+    param([string]$DownloadUrl, [string]$DestinationPath, [Int64]$ExpectedBytes = 0, [string]$Label = 'Download', [string]$Version = '', [switch]$Quiet)
+    $saveDir = Split-Path -Parent $DestinationPath
+    if ([string]::IsNullOrWhiteSpace($saveDir)) { $saveDir = (Get-Location).Path }
+    if (-not (Test-Path -LiteralPath $saveDir -PathType Container)) {
+        New-Item -ItemType Directory -Path $saveDir -Force | Out-Null
+    }
+    $tempName = '.{0}.{1}.partial' -f ([System.IO.Path]::GetFileName($DestinationPath)), ([guid]::NewGuid().ToString('N'))
+    $tempPath = Join-Path $saveDir $tempName
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $methodUsed = $null
+    try {
+        $bitsSucceeded = $false
+        if (Test-TpmDownloadBitsAvailable) {
             try {
-                Start-BitsTransfer -Source $downloadUrl -Destination $savePath `
-                    -Description "TeknoParrot Eggman dat" `
-                    -DisplayName "Downloading dat ZIP..." `
-                    -ErrorAction Stop
-                $bitsOk = $true
+                Invoke-TpmDownloadBits -DownloadUrl $DownloadUrl -TempPath $tempPath -Label $Label
+                $bitsSucceeded = $true
+                $methodUsed = 'BITS'
             } catch {
-                Write-Log "EggmanDat: BITS transfer failed (${_}), trying Invoke-WebRequest."
+                Write-Log "${Label}: BITS transfer failed (${_}), trying HttpClient."
+                try { if (Test-Path -LiteralPath $tempPath) { [System.IO.File]::Delete($tempPath) } } catch {}
             }
         }
-        if (-not $bitsOk) {
-            for ($attempt = 1; $attempt -le 3; $attempt++) {
-                try {
-                    Invoke-WebRequest -Uri $downloadUrl -OutFile $savePath -UseBasicParsing -ErrorAction Stop
-                    break
-                } catch {
-                    $status = 0
-                    if ($_.Exception.Response) { try { $status = [int]$_.Exception.Response.StatusCode } catch {} }
-                    try { if (Test-Path -LiteralPath $savePath) { [System.IO.File]::Delete($savePath) } } catch {}
-                    if ($attempt -ge 3 -or ($status -ge 400 -and $status -lt 500)) { throw }
-                    Write-Host ("  Attempt $attempt failed -- retrying in 10s...") -ForegroundColor Yellow
-                    Write-Log "EggmanDat: download attempt $attempt failed -- retrying"
-                    Start-Sleep -Seconds 10
-                }
+        if (-not $bitsSucceeded) {
+            try {
+                Invoke-TpmDownloadHttpClient -DownloadUrl $DownloadUrl -TempPath $tempPath -Label $Label
+                $methodUsed = 'HttpClient'
+            } catch {
+                Write-Log "${Label}: HttpClient download failed (${_}), trying Invoke-WebRequest."
+                try { if (Test-Path -LiteralPath $tempPath) { [System.IO.File]::Delete($tempPath) } } catch {}
+                Invoke-TpmDownloadWebRequest -DownloadUrl $DownloadUrl -TempPath $tempPath -Label $Label
+                $methodUsed = 'Invoke-WebRequest'
             }
         }
-        Write-DownloadAudit -Source $downloadUrl -FileName ([System.IO.Path]::GetFileName($savePath)) -Path $savePath
+        if (-not (Test-TpmDownloadedFile -Path $tempPath -ExpectedBytes $ExpectedBytes)) {
+            throw "Downloaded file is incomplete or empty."
+        }
+        if (Test-Path -LiteralPath $DestinationPath -PathType Leaf) {
+            Remove-Item -LiteralPath $DestinationPath -Force -ErrorAction Stop
+        }
+        Move-Item -LiteralPath $tempPath -Destination $DestinationPath -Force -ErrorAction Stop
+        $stopwatch.Stop()
+        Write-TpmDownloadMetrics -Label $Label -Method $methodUsed -Path $DestinationPath -Elapsed $stopwatch.Elapsed -Quiet:$Quiet
+        Write-DownloadAudit -Source $DownloadUrl -FileName ([System.IO.Path]::GetFileName($DestinationPath)) -Path $DestinationPath -Version $Version
         return $true
     } catch {
+        $stopwatch.Stop()
         Write-Host ("  Download failed: {0}" -f $_) -ForegroundColor Red
-        Write-Log "EggmanDat: download failed -- $_"
-        try { if (Test-Path -LiteralPath $savePath) { [System.IO.File]::Delete($savePath) } } catch {}
+        Write-Log "${Label}: download failed -- $_"
+        try { if (Test-Path -LiteralPath $tempPath) { [System.IO.File]::Delete($tempPath) } } catch {}
         return $false
     }
+}
+
+function Invoke-EggmanDatDownload {
+    param([string]$downloadUrl, [string]$savePath, [Int64]$ExpectedBytes = 0)
+    return (Invoke-TpmDownload -DownloadUrl $downloadUrl -DestinationPath $savePath -ExpectedBytes $ExpectedBytes -Label 'EggmanDat')
 }
 
 # Shared interactive download step for a resolved Eggman dat release: checks
@@ -3624,18 +3788,24 @@ function Invoke-EggmanDatDownloadInteractive {
     param([pscustomobject]$rel)
 
     $safeDatFileName = [System.IO.Path]::GetFileName($rel.FileName)
-    $defaultSavePath = Join-Path $PSScriptRoot $safeDatFileName
-    $unsafeFileName  = [string]::IsNullOrWhiteSpace($safeDatFileName) -or -not (Test-PathInside $defaultSavePath $PSScriptRoot)
+    $scriptRootForDat = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { (Get-Location).Path } else { $PSScriptRoot }
+    $defaultSavePath = Join-Path $scriptRootForDat $safeDatFileName
+    $unsafeFileName  = [string]::IsNullOrWhiteSpace($safeDatFileName) -or -not (Test-PathInside $defaultSavePath $scriptRootForDat)
     if ($unsafeFileName) {
         Write-Log "EggmanDat: SECURITY -- unsafe release filename '$($rel.FileName)'"
         Write-Host "  Unexpected filename from GitHub -- skipped for safety." -ForegroundColor Red
         return $null
     }
     $rawSave = Read-PathWithBrowse "  Save to (Enter for default: $defaultSavePath)" -Mode SaveFile `
-                   -FileFilter "ZIP files (*.zip)|*.zip|All files (*.*)|*.*" -DefaultFileName $safeDatFileName -InitialDirectory $PSScriptRoot
+                   -FileFilter "ZIP files (*.zip)|*.zip|All files (*.*)|*.*" -DefaultFileName $safeDatFileName -InitialDirectory $scriptRootForDat
     if (-not $rawSave) { $rawSave = $defaultSavePath }
+    if ($rel.SizeBytes -gt 0 -and (Test-TpmDownloadedFile -Path $rawSave -ExpectedBytes $rel.SizeBytes)) {
+        Write-Host "  Existing Eggman dat ZIP already matches the release size. Reusing it." -ForegroundColor Green
+        Write-Log "EggmanDat: existing ZIP matches release size; download skipped."
+        return $rawSave
+    }
     Write-Host "  Downloading -- this may take a few minutes..." -ForegroundColor Cyan
-    if (Invoke-EggmanDatDownload $rel.DownloadUrl $rawSave) { return $rawSave }
+    if (Invoke-EggmanDatDownload $rel.DownloadUrl $rawSave -ExpectedBytes $rel.SizeBytes) { return $rawSave }
     return $null
 }
 
@@ -3688,6 +3858,7 @@ function Get-PostgresGuideRelease {
                 DownloadUrl = $asset.browser_download_url
                 FileName    = $asset.name
                 SizeMB      = [Math]::Round($asset.size / 1MB, 1)
+                SizeBytes   = [int64]$asset.size
             }
         } catch {
             $status = 0
@@ -3702,47 +3873,10 @@ function Get-PostgresGuideRelease {
     return $null
 }
 
-# Downloads the guide ZIP. Same BITS-with-fallback shape as Invoke-EggmanDatDownload.
+# Downloads the guide ZIP through the shared hardened download pipeline.
 function Invoke-PostgresGuideDownload {
-    param([string]$downloadUrl, [string]$savePath)
-    try {
-        $bitsOk = $false
-        $bitsSvc = try { Get-Service -Name BITS -ErrorAction Stop } catch { $null }
-        if ($bitsSvc -ne $null -and $bitsSvc.Status -eq 'Running') {
-            try {
-                Start-BitsTransfer -Source $downloadUrl -Destination $savePath `
-                    -Description "PostgreSQL setup guide" `
-                    -DisplayName "Downloading installer..." `
-                    -ErrorAction Stop
-                $bitsOk = $true
-            } catch {
-                Write-Log "PostgresGuide: BITS transfer failed (${_}), trying Invoke-WebRequest."
-            }
-        }
-        if (-not $bitsOk) {
-            for ($attempt = 1; $attempt -le 3; $attempt++) {
-                try {
-                    Invoke-WebRequest -Uri $downloadUrl -OutFile $savePath -UseBasicParsing -ErrorAction Stop
-                    break
-                } catch {
-                    $status = 0
-                    if ($_.Exception.Response) { try { $status = [int]$_.Exception.Response.StatusCode } catch {} }
-                    try { if (Test-Path -LiteralPath $savePath) { [System.IO.File]::Delete($savePath) } } catch {}
-                    if ($attempt -ge 3 -or ($status -ge 400 -and $status -lt 500)) { throw }
-                    Write-Host ("  Attempt $attempt failed -- retrying in 10s...") -ForegroundColor Yellow
-                    Write-Log "PostgresGuide: download attempt $attempt failed -- retrying"
-                    Start-Sleep -Seconds 10
-                }
-            }
-        }
-        Write-DownloadAudit -Source $downloadUrl -FileName ([System.IO.Path]::GetFileName($savePath)) -Path $savePath
-        return $true
-    } catch {
-        Write-Host ("  Download failed: {0}" -f $_) -ForegroundColor Red
-        Write-Log "PostgresGuide: download failed -- $_"
-        try { if (Test-Path -LiteralPath $savePath) { [System.IO.File]::Delete($savePath) } } catch {}
-        return $false
-    }
+    param([string]$downloadUrl, [string]$savePath, [Int64]$ExpectedBytes = 0)
+    return (Invoke-TpmDownload -DownloadUrl $downloadUrl -DestinationPath $savePath -ExpectedBytes $ExpectedBytes -Label 'PostgresGuide')
 }
 
 # True if the current process has Administrator privileges. Installing
@@ -3993,7 +4127,7 @@ function Install-Postgres83 {
 
     try {
         Write-Host "  Downloading installer ($($rel.SizeMB) MB, this may take a minute)..." -ForegroundColor Cyan
-        if (-not (Invoke-PostgresGuideDownload $rel.DownloadUrl $zipPath)) {
+        if (-not (Invoke-PostgresGuideDownload $rel.DownloadUrl $zipPath -ExpectedBytes $rel.SizeBytes)) {
             Write-Host "  ERROR: Download failed." -ForegroundColor Red
             return $false
         }
@@ -4304,24 +4438,11 @@ function Invoke-FFBPluginDownload {
     foreach ($dllName in @('MAME32.dll', 'MAME64.dll')) {
         $uri      = "https://raw.githubusercontent.com/mightymikem/FFBArcadePlugin/master/$dllName"
         $destPath = Join-Path $destDir $dllName
-        for ($attempt = 1; $attempt -le 3; $attempt++) {
-            try {
-                Invoke-WebRequest -Uri $uri -OutFile $destPath -UseBasicParsing -ErrorAction Stop `
-                    -Headers @{ 'User-Agent' = "TeknoParrot-Manager/$ScriptVersion" }
-                $got = $true
-                Write-Log "FFBPlugin: downloaded $dllName"
-                Write-DownloadAudit -Source $uri -FileName $dllName -Path $destPath
-                break
-            } catch {
-                $status = 0
-                if ($_.Exception.Response) { try { $status = [int]$_.Exception.Response.StatusCode } catch {} }
-                try { if (Test-Path -LiteralPath $destPath) { [System.IO.File]::Delete($destPath) } } catch {}
-                if ($attempt -ge 3 -or ($status -ge 400 -and $status -lt 500)) {
-                    Write-Log "FFBPlugin: $dllName download failed -- $_"
-                    break
-                }
-                Start-Sleep -Seconds 5
-            }
+        if (Invoke-TpmDownload -DownloadUrl $uri -DestinationPath $destPath -Label 'FFBPlugin') {
+            $got = $true
+            Write-Log "FFBPlugin: downloaded $dllName"
+        } else {
+            Write-Log "FFBPlugin: $dllName download failed."
         }
     }
     return $got
@@ -4957,13 +5078,19 @@ function Get-BepInExLatestRelease {
             if (-not $stable) { return $null }
             $x64Asset = @($stable.assets | Where-Object { $_.name -like 'BepInEx_win_x64_*.zip' }) | Select-Object -First 1
             if (-not $x64Asset) { return $null }
-            if ($x64Asset.browser_download_url -notmatch '^https://[a-zA-Z0-9._-]*(github\.com|githubusercontent\.com)/') {
+            $parsedUri = $null
+            $urlOk = [System.Uri]::TryCreate($x64Asset.browser_download_url, [System.UriKind]::Absolute, [ref]$parsedUri) -and
+                     $parsedUri.Scheme -eq 'https' -and
+                     $parsedUri.Host -eq 'github.com' -and
+                     [string]::IsNullOrEmpty($parsedUri.UserInfo) -and
+                     $parsedUri.AbsolutePath.StartsWith('/BepInEx/BepInEx/releases/download/', [System.StringComparison]::Ordinal)
+            if (-not $urlOk) {
                 Write-Log "BepInEx: unexpected download URL format -- skipping."
                 return $null
             }
             $verStr = $stable.tag_name.TrimStart('v')
             return [pscustomobject]@{
-                Version = $verStr; DownloadUrl = $x64Asset.browser_download_url; FileName = $x64Asset.name
+                Version = $verStr; DownloadUrl = $x64Asset.browser_download_url; FileName = $x64Asset.name; SizeBytes = [int64]$x64Asset.size
             }
         } catch {
             $status = 0
@@ -5101,20 +5228,7 @@ function Invoke-BepInExUpdateCheck {
         Write-Log "BepInEx update check: SECURITY -- aborted, unsafe release filename '$($latest.FileName)'"
         return
     }
-    $downloaded = $false
-    for ($attempt = 1; $attempt -le 3; $attempt++) {
-        try {
-            Invoke-WebRequest -Uri $latest.DownloadUrl -OutFile $zipPath -UseBasicParsing -ErrorAction Stop `
-                -Headers @{ 'User-Agent' = "TeknoParrot-Manager/$ScriptVersion" }
-            $downloaded = $true
-            Write-DownloadAudit -Source $latest.DownloadUrl -FileName $safeFileName -Path $zipPath -Version $latest.Version
-            break
-        } catch {
-            try { if (Test-Path -LiteralPath $zipPath) { [System.IO.File]::Delete($zipPath) } } catch {}
-            if ($attempt -ge 3) { break }
-            Start-Sleep -Seconds 5
-        }
-    }
+    $downloaded = Invoke-TpmDownload -DownloadUrl $latest.DownloadUrl -DestinationPath $zipPath -ExpectedBytes $latest.SizeBytes -Label 'BepInEx' -Version $latest.Version
     if (-not $downloaded) {
         Write-Host "  Could not download the BepInEx ZIP -- try again later." -ForegroundColor Red
         Write-Log "BepInEx update check: aborted -- ZIP download failed."
@@ -5216,6 +5330,7 @@ function Get-ManagerUpdateRelease {
                 Body        = $release.body
                 AssetName   = $asset.name
                 DownloadUrl = $asset.browser_download_url
+                SizeBytes   = [int64]$asset.size
             }
         } catch {
             $status = 0
@@ -5377,10 +5492,8 @@ function Invoke-ManagerUpdateInstall {
 
         Write-Host "  Downloading $($Release.AssetName)..." -ForegroundColor DarkGray
         $downloadedZipPath = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-update-" + [guid]::NewGuid().ToString('N') + '.zip')
-        Invoke-WebRequest -Uri $Release.DownloadUrl -OutFile $downloadedZipPath -UseBasicParsing
-        $downloaded = Get-Item -LiteralPath $downloadedZipPath -ErrorAction Stop
-        if ($downloaded.Length -le 0) {
-            throw "Downloaded update asset is empty: $downloadedZipPath"
+        if (-not (Invoke-TpmDownload -DownloadUrl $Release.DownloadUrl -DestinationPath $downloadedZipPath -ExpectedBytes $Release.SizeBytes -Label 'CheckForUpdates' -Version $Release.TagName)) {
+            throw "Downloaded update asset is missing, empty, or incomplete: $downloadedZipPath"
         }
 
         Write-Host "  Extracting and validating..." -ForegroundColor DarkGray
@@ -8972,38 +9085,14 @@ function Invoke-ThumbnailDownload {
         $destPath = Join-Path $iconsDir ($code + ".png")
         $url      = $baseUrl + [Uri]::EscapeDataString($code + ".png")
         Write-Host ("  [{0,3}/{1}] {2}" -f $i, $total, $code) -ForegroundColor DarkCyan -NoNewline
-        $dlOk = $false
-        for ($attempt = 1; $attempt -le 3 -and -not $dlOk; $attempt++) {
-            try {
-                Invoke-WebRequest -Uri $url -OutFile $destPath -UseBasicParsing `
-                                  -TimeoutSec 30 -ErrorAction Stop
-                Write-Host "  OK" -ForegroundColor Green
-                Write-Log "Thumbnails: downloaded $code"
-                $fetched++
-                $dlOk = $true
-            } catch {
-                $statusCode = 0
-                if ($_.Exception.Response) {
-                    try { $statusCode = [int]$_.Exception.Response.StatusCode } catch {}
-                }
-                if (Test-Path -LiteralPath $destPath) {
-                    Remove-Item -LiteralPath $destPath -Force -ErrorAction SilentlyContinue
-                }
-                if ($statusCode -eq 404) {
-                    Write-Host "  not in repo" -ForegroundColor DarkGray
-                    $notAvail++
-                    break   # 404 is definitive -- no point retrying
-                }
-                if ($attempt -lt 3) {
-                    Write-Host ("  attempt $attempt failed, retrying..." ) -ForegroundColor Yellow
-                    Write-Log "Thumbnails: attempt $attempt FAILED $code -- $($_.Exception.Message)"
-                    Start-Sleep -Seconds 5
-                } else {
-                    Write-Host ("  FAILED ({0})" -f $_.Exception.Message) -ForegroundColor Red
-                    Write-Log "Thumbnails: FAILED $code -- $($_.Exception.Message)"
-                    $failed++
-                }
-            }
+        if (Invoke-TpmDownload -DownloadUrl $url -DestinationPath $destPath -Label 'Thumbnails' -Quiet) {
+            Write-Host "  OK" -ForegroundColor Green
+            Write-Log "Thumbnails: downloaded $code"
+            $fetched++
+        } else {
+            Write-Host "  not in repo or failed" -ForegroundColor DarkGray
+            Write-Log "Thumbnails: not downloaded $code"
+            $notAvail++
         }
     }
 

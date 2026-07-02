@@ -531,9 +531,9 @@
 
     D) Download from GitHub now  (~145 MB, one-time)
        The script queries the GitHub API for the latest release asset, shows
-       the file name and size, asks where to save it, and downloads with a
-       progress bar. If GitHub is unreachable or the download fails, it falls
-       through to a manual path prompt.
+       the file name and size, asks where to save it, and downloads it. If
+       GitHub is unreachable or the download fails, it falls through to a
+       manual path prompt.
 
     Z) I have the ZIP already -- enter path
        Point to the TeknoParrot.Collection.*_RomVault.zip on disk. Both the
