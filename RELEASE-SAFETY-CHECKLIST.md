@@ -164,6 +164,30 @@ the file that happened to be open.
 
 - [ ] Before publishing the draft, download or inspect the uploaded ZIP asset
   and run the same `Tests\Test-ReleasePackage.ps1` validation against it.
+- [ ] After publishing, copy the exact release ZIP into `Scripts\` as the
+  local current-release mirror. This is not optional: `Scripts\` must always
+  contain a ZIP identical to the published GitHub release asset.
+- [ ] Prune local distribution ZIPs so `Scripts\` contains exactly one
+  `TeknoParrot Manager*.zip` file: the current published release only.
+- [ ] Verify the `Scripts\` mirror using the dedicated guard:
+  ```powershell
+  .\Tests\Test-ScriptsReleaseZip.ps1 `
+    -ScriptsPath .\Scripts `
+    -ExpectedZipPath "TeknoParrot Manager vX.YY BETA.zip"
+  ```
+  Expected: `ZipCount = 1`, `NameMatchesExpected = True`, and
+  `HashMatchesExpected = True`. A mismatch, missing ZIP, or extra stale ZIP
+  fails the release.
+  **Filename caveat:** GitHub replaces spaces with dots in uploaded release
+  asset names (e.g. `TeknoParrot Manager v0.99.44 BETA.zip` is stored as
+  `TeknoParrot.Manager.v0.99.44.BETA.zip`) -- this is consistent platform
+  behavior, confirmed across every past release, not an upload error. Never
+  pass the raw downloaded GitHub asset as `-ExpectedZipPath` directly; its
+  filename will always fail the exact-name check even when content is
+  identical. Instead, keep or create a canonically-named local reference
+  copy (matching the `TeknoParrot Manager vX.YY BETA.zip` convention) and
+  pass that -- the script compares filenames exactly, so the reference
+  copy's name must already match the convention before the check can pass.
 - [ ] After the release is published, spot-check the ZIP: confirm the
   Crosshairs\ folder is present and the excluded folders
   (ReShade\, dgVoodoo2\, FFBPlugin\, BepInExCache\) are absent.
@@ -171,6 +195,39 @@ the file that happened to be open.
   and was tester-confirmed working (do not ask first -- see memory entry).
 - [ ] Post a fix/analysis comment to any open issue this release addresses,
   immediately after tagging (not deferred to next session).
+
+## 6. Post-Release Housekeeping (mandatory, every release)
+
+A release is not complete until this phase runs. It is local-workspace
+cleanup only -- it never touches GitHub releases/tags and never changes
+production code.
+
+- [ ] Verify the GitHub release: published (not draft), correct tag, correct
+  target commit.
+- [ ] Verify the release asset: exists, correct file, matches
+  `Tests\Test-ReleasePackage.ps1` validation (re-run against the actual
+  downloaded asset, not just the local build, to rule out upload corruption).
+- [ ] Confirm `Scripts\` holds exactly one release ZIP -- the current
+  published release, identical by SHA256 to the GitHub release asset -- via
+  `Tests\Test-ScriptsReleaseZip.ps1` (see section 5). This mirror ZIP is a
+  required, current file, not clutter: do not archive or remove it while it
+  is still the current release.
+- [ ] Archive every *other* local release ZIP (prior versions, or a stale
+  build copy that predates the current mirror) into a timestamped folder
+  under `_archive\` (e.g. `_archive\<YYYYMMDD-HHMMSS>-post-release-housekeeping\`).
+  Never delete permanently -- move only. Archived copies are kept for
+  traceability, comparison, or rollback investigation, not discarded.
+- [ ] Confirm the Scripts\ folder contains only files needed to operate or
+  develop TPM, except: log files, JSON files from previous runs, and the one
+  current-release ZIP mirror above (all three are legitimate and must be
+  left in place, not archived).
+- [ ] Confirm the local git working tree is clean (`git status`) after
+  packaging, publication, mirror validation, and issue updates, and that the
+  housekeeping pass itself made no unintended tracked-file changes or commits.
+- [ ] Report a concise release summary: tag, release ZIP name, published
+  asset SHA256, `Scripts\` mirror SHA256, validation commands and results,
+  files moved, archive path, issue updates, working tree status, and any
+  remaining tester follow-up.
 
 ---
 
