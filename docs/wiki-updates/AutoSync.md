@@ -10,10 +10,10 @@ Match order:
 
 1. Exact and normalized folder name.
 2. RetroBat suffix-aware matches: `.teknoparrot`, `.parrot`, `.game`.
-3. Known short-name aliases for Raw Thrills and path-length-sensitive games.
-4. DAT/profile-code identity when available.
+3. DAT/profile-code identity when available.
+4. Known short-name aliases for Raw Thrills and path-length-sensitive games.
 5. Already registered profile paths.
-6. Conservative fuzzy metadata matching for harmless title, date, and version differences.
+6. Date/version/region-normalized exact match using the same normalized-key mechanism, not a separate fuzzy similarity tier.
 
 ## Safety Rules
 
