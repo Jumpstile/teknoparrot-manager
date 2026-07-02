@@ -540,35 +540,48 @@ There is no separate dat/folder hint for the second exe's location -- the schema
 it sits in the same folder as the primary exe, consistent with `LaunchSecondExecutableFirst`
 implying TeknoParrot itself launches it from that same working directory.
 
-### Renamed-folder resolution (v0.99.15/16/18)
+### Extracted-folder resolution (v0.99.15/16/18/40)
 
 Games renamed to the short names `$RawThrillsPathLimits` recommends (PATH TOO LONG
 warning in ACTION REQUIRED) no longer normalise to match their original ZIP filenames,
 causing false "needs extraction" reports.
 
 **`Get-StagingFolderMap`** (next to `$RawThrillsPathLimits`) builds the normalised folder
-map and also registers each `$RawThrillsPathLimits` key under the folder matching its own
-`Suggested` short name. Used by `Select-GamesInteractive`,
-`Select-GamesInteractiveCombined`, and `Invoke-AutoSync`.
+map and registers multiple keys for each existing folder: the literal folder name, the
+folder name without RetroBat-style suffixes (`.teknoparrot`, `.parrot`, `.game`), the
+old/new convention key with spaces before metadata removed, and the full
+`Get-NormalizedGameKey` value. It also maps each `$RawThrillsPathLimits` profile code to
+its `Suggested` short-name folder when that folder exists.
 
-**Important:** `$RawThrillsPathLimits` keys are PROFILE CODES, not ZIP filenames. The
-backfill registers `$map[$code]` keyed by the bare profile code; callers look the map up
-by the ZIP's full base name. These are completely different strings. The backfill is
-correct for the narrow case where a ZIP's bare filename happens to equal its profile code,
-but silently does nothing for ZIPs with version/date suffixes (the common case). See
-LESSONS_LEARNED.md (v0.99.18) for the full root-cause analysis of why v0.99.15 did not
-work for rgecko's collection.
+**`Resolve-ExtractedGameFolder`** is the shared "is this ZIP already extracted?" resolver
+used by `Select-GamesInteractive`, `Select-GamesInteractiveCombined`, and
+`Invoke-AutoSync`. The resolver checks in conservative order:
 
-**`Resolve-RegisteredGameFolder`** (next to `Get-StagingFolderMap`) is the real fix for
-the common case. Resolves a ZIP to its real folder via the collection dat: dat maps the
-ZIP's normalised name to `ProfileCode`, which is used to read
-`UserProfiles\<ProfileCode>.xml`'s own `GamePath` and return that file's containing
-folder. Independent of what the folder is actually named -- works as long as the game is
-already registered with a working `GamePath`. `$datEntry.ProfileCode` is validated against
-`^[\w]+$` before being joined into a path (dat is untrusted external input, see
-SECURITY.md). `Select-GamesInteractive`, `Select-GamesInteractiveCombined`, and
-`Invoke-AutoSync` all fall back to this helper when the folder-name map comes up empty,
-before concluding a game needs extraction.
+1. Exact and normalized folder-name keys from `Get-StagingFolderMap`.
+2. RetroBat suffix-aware matches (`.teknoparrot`, `.parrot`, `.game` stripped before
+   comparison).
+3. Known Raw Thrills/path-limit aliases from `$RawThrillsPathLimits`, using the DAT
+   `ProfileCode` to connect a descriptive ZIP name to a short folder such as `ALIENS`.
+4. DAT/profile identity, including profile-code keys and the registered profile fallback.
+5. The registered profile path from `UserProfiles\<ProfileCode>.xml` via
+   `Resolve-RegisteredGameFolder`.
+6. A conservative fuzzy metadata match for harmless naming drift, such as date/year
+   differences. This uses a high score threshold and runner-up gap before it suppresses
+   extraction.
+
+The resolver is intentionally read-only. It never deletes, renames, moves, or rewrites
+existing game folders; it only prevents duplicate extraction prompts when an existing
+candidate folder is present and non-empty. Empty folders are treated as incomplete failed
+extractions and are still eligible to retry. DAT `ProfileCode` values remain validated
+against `^[\w]+$` before being joined into a path (dat is untrusted external input, see
+SECURITY.md).
+
+Issue #66 added regression coverage for confirmed false positives:
+`ALIENS.teknoparrot` is recognized for Aliens Armageddon via the Raw Thrills alias path,
+and `Battle Gear 3 (2.08J)(2003-04-11)[Namco System 246][TP]` is recognized as the
+already-extracted folder for the DAT/list entry
+`Battle Gear 3 (2.08J)(2002)[Namco System 246][TP]`. The same tests cover a negative
+similarly-named sequel case and ensure empty matching folders do not suppress extraction.
 
 **Fuzzy-match alias.** The shared-executable fuzzy-match loop in `Register-Games` (~line
 4640) also tries each candidate's `$RawThrillsPathLimits[$cand.Code].Suggested` value as a

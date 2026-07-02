@@ -214,6 +214,8 @@ D) Done -- proceed with current queue
 
 Games already in your queue are marked with `*`. A real-time progress bar shows file count and percentage during each extraction.
 
+Already-extracted detection is intentionally conservative. AutoSync and the extraction pickers share the same resolver: exact and normalized folder names are checked first, then RetroBat suffixes (`.teknoparrot`, `.parrot`, `.game`), known Raw Thrills short-name aliases, dat/profile identity, registered profile paths, and finally a high-confidence fuzzy match for harmless metadata differences such as year/date drift. The resolver never deletes, renames, or moves folders; it only hides a game from the extraction prompt when the matching folder exists and is non-empty. Empty matching folders are treated as incomplete extractions and can be retried.
+
 ---
 
 ## The Staging Folder

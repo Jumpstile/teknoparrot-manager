@@ -116,6 +116,16 @@
   pre-1.0 review where this helper was documented and tested but never
   actually shipped in the release ZIP.
 
+  Fix: AutoSync and the extraction pickers now share a single extracted-
+  folder resolver before showing games as "available to extract." The
+  resolver checks exact and normalized names, RetroBat suffixes, known
+  Raw Thrills short-name aliases, dat/profile identity, registered profile
+  paths, and conservative fuzzy metadata differences. It never deletes,
+  renames, or moves folders; it only suppresses duplicate extraction
+  prompts when an existing candidate folder is present and non-empty.
+  Confirmed coverage includes ALIENS.teknoparrot for Aliens Armageddon
+  and the Battle Gear 3 date/year metadata mismatch. See issue #66.
+
 
 -------------------------------------------------------------------------------
   v0.99.39 BETA  (2026-07-01)
