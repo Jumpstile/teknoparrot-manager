@@ -3638,7 +3638,7 @@ function Invoke-TpmDownloadBits {
             -DisplayName "Downloading $Label..." `
             -Asynchronous `
             -ErrorAction Stop
-        while ($job.JobState -in @('Connecting', 'Transferring', 'Queued')) {
+        while ($job.JobState -in @('Connecting', 'Transferring', 'Queued', 'TransientError')) {
             Write-TpmDownloadProgress -Label $Label -Method 'BITS' -DownloadedBytes ([int64]$job.BytesTransferred) -TotalBytes ([int64]$job.BytesTotal) -Elapsed $progressWatch.Elapsed
             Start-Sleep -Milliseconds 500
             $job = Get-BitsTransfer -JobId $job.JobId -ErrorAction Stop
@@ -3714,11 +3714,36 @@ function Write-TpmDownloadMetrics {
     }
 }
 
+# Extracts an HTTP status code from a failed download attempt's error
+# record, if one is present -- a real WebException's .Response.StatusCode
+# when available, otherwise a best-effort parse of the exception message
+# (HttpClient's EnsureSuccessStatusCode() reports it as text, e.g.
+# "... does not indicate success: 404 (Not Found)."). Returns 0 (unknown)
+# rather than guessing when neither is present. Used to (a) short-circuit
+# the retry loop below on a definitive 4xx rather than retrying something
+# that will never succeed, and (b) let a caller like Invoke-ThumbnailDownload
+# distinguish "404, not in this repo" from a real transient failure.
+function Get-TpmHttpStatusCodeFromError {
+    param($ErrorRecord)
+    if ($ErrorRecord.Exception.Response -and $ErrorRecord.Exception.Response.StatusCode) {
+        try { return [int]$ErrorRecord.Exception.Response.StatusCode } catch {}
+    }
+    if ($ErrorRecord.Exception.Message -match '\((\d{3})\)') { return [int]$Matches[1] }
+    if ($ErrorRecord.Exception.Message -match ':\s*(\d{3})\s') { return [int]$Matches[1] }
+    return 0
+}
+
 # Downloads a live asset to a sibling partial file first, then moves it
 # into place only after completion validation. Preferred order is BITS,
-# HttpClient, then Invoke-WebRequest as an emergency fallback.
+# HttpClient, then Invoke-WebRequest as an emergency fallback. The
+# HttpClient and Invoke-WebRequest tiers each retry up to 3 times with a
+# short backoff on a transient failure; a definitive 4xx response is never
+# retried (retrying it cannot succeed) and falls straight through to the
+# next tier / final failure. Pass -LastStatusCode ([ref]$var) to read the
+# final HTTP status code (0 if unknown/not HTTP-related) after a failure.
 function Invoke-TpmDownload {
-    param([string]$DownloadUrl, [string]$DestinationPath, [Int64]$ExpectedBytes = 0, [string]$Label = 'Download', [string]$Version = '', [switch]$Quiet)
+    param([string]$DownloadUrl, [string]$DestinationPath, [Int64]$ExpectedBytes = 0, [string]$Label = 'Download', [string]$Version = '', [switch]$Quiet, [ref]$LastStatusCode)
+    if ($LastStatusCode) { $LastStatusCode.Value = 0 }
     $saveDir = Split-Path -Parent $DestinationPath
     if ([string]::IsNullOrWhiteSpace($saveDir)) { $saveDir = (Get-Location).Path }
     if (-not (Test-Path -LiteralPath $saveDir -PathType Container)) {
@@ -3728,6 +3753,7 @@ function Invoke-TpmDownload {
     $tempPath = Join-Path $saveDir $tempName
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     $methodUsed = $null
+    $detectedStatusCode = 0
     try {
         $bitsSucceeded = $false
         if (Test-TpmDownloadBitsAvailable) {
@@ -3741,14 +3767,38 @@ function Invoke-TpmDownload {
             }
         }
         if (-not $bitsSucceeded) {
-            try {
-                Invoke-TpmDownloadHttpClient -DownloadUrl $DownloadUrl -TempPath $tempPath -Label $Label
-                $methodUsed = 'HttpClient'
-            } catch {
-                Write-Log "${Label}: HttpClient download failed (${_}), trying Invoke-WebRequest."
-                try { if (Test-Path -LiteralPath $tempPath) { [System.IO.File]::Delete($tempPath) } } catch {}
-                Invoke-TpmDownloadWebRequest -DownloadUrl $DownloadUrl -TempPath $tempPath -Label $Label
-                $methodUsed = 'Invoke-WebRequest'
+            $httpClientSucceeded = $false
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+                try {
+                    Invoke-TpmDownloadHttpClient -DownloadUrl $DownloadUrl -TempPath $tempPath -Label $Label
+                    $methodUsed = 'HttpClient'
+                    $httpClientSucceeded = $true
+                    break
+                } catch {
+                    $detectedStatusCode = Get-TpmHttpStatusCodeFromError -ErrorRecord $_
+                    try { if (Test-Path -LiteralPath $tempPath) { [System.IO.File]::Delete($tempPath) } } catch {}
+                    if ($attempt -ge 3 -or ($detectedStatusCode -ge 400 -and $detectedStatusCode -lt 500)) {
+                        Write-Log "${Label}: HttpClient download failed (${_}), trying Invoke-WebRequest."
+                        break
+                    }
+                    Write-Log "${Label}: HttpClient attempt $attempt failed -- retrying"
+                    Start-Sleep -Seconds 2
+                }
+            }
+            if (-not $httpClientSucceeded) {
+                for ($attempt = 1; $attempt -le 3; $attempt++) {
+                    try {
+                        Invoke-TpmDownloadWebRequest -DownloadUrl $DownloadUrl -TempPath $tempPath -Label $Label
+                        $methodUsed = 'Invoke-WebRequest'
+                        break
+                    } catch {
+                        $detectedStatusCode = Get-TpmHttpStatusCodeFromError -ErrorRecord $_
+                        try { if (Test-Path -LiteralPath $tempPath) { [System.IO.File]::Delete($tempPath) } } catch {}
+                        if ($attempt -ge 3 -or ($detectedStatusCode -ge 400 -and $detectedStatusCode -lt 500)) { throw }
+                        Write-Log "${Label}: download attempt $attempt failed -- retrying"
+                        Start-Sleep -Seconds 2
+                    }
+                }
             }
         }
         if (-not (Test-TpmDownloadedFile -Path $tempPath -ExpectedBytes $ExpectedBytes)) {
@@ -3767,6 +3817,7 @@ function Invoke-TpmDownload {
         Write-Host ("  Download failed: {0}" -f $_) -ForegroundColor Red
         Write-Log "${Label}: download failed -- $_"
         try { if (Test-Path -LiteralPath $tempPath) { [System.IO.File]::Delete($tempPath) } } catch {}
+        if ($LastStatusCode) { $LastStatusCode.Value = $detectedStatusCode }
         return $false
     }
 }
@@ -9085,14 +9136,19 @@ function Invoke-ThumbnailDownload {
         $destPath = Join-Path $iconsDir ($code + ".png")
         $url      = $baseUrl + [Uri]::EscapeDataString($code + ".png")
         Write-Host ("  [{0,3}/{1}] {2}" -f $i, $total, $code) -ForegroundColor DarkCyan -NoNewline
-        if (Invoke-TpmDownload -DownloadUrl $url -DestinationPath $destPath -Label 'Thumbnails' -Quiet) {
+        $statusCode = 0
+        if (Invoke-TpmDownload -DownloadUrl $url -DestinationPath $destPath -Label 'Thumbnails' -Quiet -LastStatusCode ([ref]$statusCode)) {
             Write-Host "  OK" -ForegroundColor Green
             Write-Log "Thumbnails: downloaded $code"
             $fetched++
-        } else {
-            Write-Host "  not in repo or failed" -ForegroundColor DarkGray
-            Write-Log "Thumbnails: not downloaded $code"
+        } elseif ($statusCode -eq 404) {
+            Write-Host "  not in repo" -ForegroundColor DarkGray
+            Write-Log "Thumbnails: not in repo $code"
             $notAvail++
+        } else {
+            Write-Host "  FAILED" -ForegroundColor Red
+            Write-Log "Thumbnails: FAILED $code"
+            $failed++
         }
     }
 

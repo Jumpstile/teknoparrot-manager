@@ -945,7 +945,7 @@ Describe "Get-ReShadeLatestVersion retry behavior" {
         Mock Invoke-WebRequest {}
     }
 
-    It "makes only a single attempt and returns null on failure -- no retry, unlike the Eggman/FFB/BepInEx fetchers" {
+    It "makes only a single attempt and returns null on failure -- no retry, unlike Invoke-TpmDownload's HttpClient/Invoke-WebRequest tiers" {
         Mock Invoke-WebRequest { throw "site unreachable" }
         $result = Get-ReShadeLatestVersion
         $result | Should -BeNullOrEmpty
@@ -974,6 +974,7 @@ Describe "Invoke-TpmDownload method selection and partial-file cleanup" {
         Mock Write-Host {}
         Mock Write-DownloadAudit {}
         Mock Write-TpmDownloadMetrics {}
+        Mock Start-Sleep {}
         Mock Invoke-TpmDownloadBits { Set-Content -LiteralPath $TempPath -Value "fake zip content" -NoNewline }
         Mock Invoke-TpmDownloadHttpClient { Set-Content -LiteralPath $TempPath -Value "fake zip content" -NoNewline }
         Mock Invoke-TpmDownloadWebRequest { Set-Content -LiteralPath $TempPath -Value "fake zip content" -NoNewline }
@@ -1007,7 +1008,7 @@ Describe "Invoke-TpmDownload method selection and partial-file cleanup" {
         Should -Invoke Invoke-TpmDownloadWebRequest -Times 0
     }
 
-    It "uses Invoke-WebRequest only after BITS and HttpClient fail" {
+    It "uses Invoke-WebRequest only after BITS and HttpClient exhaust their retries" {
         Mock Invoke-TpmDownloadBits { throw "bits failed" }
         Mock Invoke-TpmDownloadHttpClient { throw "http failed" }
         $savePath = Join-Path $TestDrive "webrequest-success.zip"
@@ -1017,8 +1018,81 @@ Describe "Invoke-TpmDownload method selection and partial-file cleanup" {
         $result | Should -BeTrue
         Test-Path -LiteralPath $savePath | Should -BeTrue
         Should -Invoke Invoke-TpmDownloadBits -Times 1
+        # A generic (non-HTTP-status) failure retries up to 3 times before falling through.
+        Should -Invoke Invoke-TpmDownloadHttpClient -Times 3
+        Should -Invoke Invoke-TpmDownloadWebRequest -Times 1
+    }
+
+    It "retries a transient HttpClient failure and succeeds on a later attempt without falling through to Invoke-WebRequest" {
+        Mock Test-TpmDownloadBitsAvailable { $false }
+        $script:httpAttempt = 0
+        Mock Invoke-TpmDownloadHttpClient {
+            $script:httpAttempt++
+            if ($script:httpAttempt -lt 2) { throw "transient network error" }
+            Set-Content -LiteralPath $TempPath -Value "fake zip content" -NoNewline
+        }
+        $savePath = Join-Path $TestDrive "httpclient-retry-success.zip"
+
+        $result = Invoke-TpmDownload -DownloadUrl "https://example.com/file.zip" -DestinationPath $savePath
+
+        $result | Should -BeTrue
+        $script:httpAttempt | Should -Be 2
+        Should -Invoke Invoke-TpmDownloadWebRequest -Times 0
+    }
+
+    It "does not retry HttpClient on a definitive 404 before falling through to Invoke-WebRequest" {
+        Mock Test-TpmDownloadBitsAvailable { $false }
+        Mock Invoke-TpmDownloadHttpClient { throw "Response status code does not indicate success: 404 (Not Found)." }
+        $savePath = Join-Path $TestDrive "httpclient-404-no-retry.zip"
+
+        $result = Invoke-TpmDownload -DownloadUrl "https://example.com/missing.zip" -DestinationPath $savePath
+
+        $result | Should -BeTrue
         Should -Invoke Invoke-TpmDownloadHttpClient -Times 1
         Should -Invoke Invoke-TpmDownloadWebRequest -Times 1
+    }
+
+    It "retries a transient Invoke-WebRequest failure and succeeds on a later attempt" {
+        Mock Test-TpmDownloadBitsAvailable { $false }
+        Mock Invoke-TpmDownloadHttpClient { throw "http failed" }
+        $script:webAttempt = 0
+        Mock Invoke-TpmDownloadWebRequest {
+            $script:webAttempt++
+            if ($script:webAttempt -lt 2) { throw "transient network error" }
+            Set-Content -LiteralPath $TempPath -Value "fake zip content" -NoNewline
+        }
+        $savePath = Join-Path $TestDrive "webrequest-retry-success.zip"
+
+        $result = Invoke-TpmDownload -DownloadUrl "https://example.com/file.zip" -DestinationPath $savePath
+
+        $result | Should -BeTrue
+        $script:webAttempt | Should -Be 2
+    }
+
+    It "surfaces the final HTTP status code via -LastStatusCode when every method fails" {
+        Mock Test-TpmDownloadBitsAvailable { $false }
+        Mock Invoke-TpmDownloadHttpClient { throw "Response status code does not indicate success: 404 (Not Found)." }
+        Mock Invoke-TpmDownloadWebRequest { throw "Response status code does not indicate success: 404 (Not Found)." }
+        $savePath = Join-Path $TestDrive "status-code-404.zip"
+        $statusCode = 0
+
+        $result = Invoke-TpmDownload -DownloadUrl "https://example.com/missing.zip" -DestinationPath $savePath -LastStatusCode ([ref]$statusCode)
+
+        $result | Should -BeFalse
+        $statusCode | Should -Be 404
+    }
+
+    It "reports status code 0 via -LastStatusCode when the failure is not HTTP-status-related" {
+        Mock Test-TpmDownloadBitsAvailable { $false }
+        Mock Invoke-TpmDownloadHttpClient { throw "DNS resolution failed" }
+        Mock Invoke-TpmDownloadWebRequest { throw "DNS resolution failed" }
+        $savePath = Join-Path $TestDrive "status-code-unknown.zip"
+        $statusCode = 999
+
+        $result = Invoke-TpmDownload -DownloadUrl "https://example.com/file.zip" -DestinationPath $savePath -LastStatusCode ([ref]$statusCode)
+
+        $result | Should -BeFalse
+        $statusCode | Should -Be 0
     }
 
     It "deletes any partial file and leaves the final path untouched when all methods fail" {
@@ -1044,6 +1118,62 @@ Describe "Invoke-TpmDownload method selection and partial-file cleanup" {
         $result | Should -BeFalse
         Test-Path -LiteralPath $savePath | Should -BeFalse
         @(Get-ChildItem -LiteralPath $TestDrive -Filter "*.partial" -Force).Count | Should -Be 0
+    }
+}
+
+Describe "Invoke-TpmDownloadBits BITS polling states" {
+    It "the polling loop's continue-states list includes TransientError (a recoverable BITS state), not just Connecting/Transferring/Queued" {
+        $scriptContent = Get-Content -LiteralPath $scriptPath -Raw
+        $scriptContent | Should -Match "'Connecting',\s*'Transferring',\s*'Queued',\s*'TransientError'"
+    }
+}
+
+Describe "Invoke-ThumbnailDownload 404-vs-failure distinction" {
+    # Invoke-ThumbnailDownload cannot be exercised end-to-end in this suite:
+    # it reads $PSScriptRoot to locate CustomThumbnails\, which is empty
+    # because functions here are dot-sourced from an AST extract with no
+    # backing file (see the top-level BeforeAll). That makes the unrelated
+    # CustomThumbnails Join-Path call throw a parameter-binding error before
+    # the function ever reaches the download loop these tests target.
+    # Confirmed empirically that neither reassigning $ErrorActionPreference
+    # (BeforeEach or inline -- parameter-binding failures aren't governed by
+    # it) nor mocking Join-Path (Pester's mock proxy mirrors the real
+    # cmdlet's parameter validation, so the same binding failure recurs, and
+    # routing through the module-qualified name from inside the mock
+    # recurses back into the mock itself) can reach past this. This is a
+    # pre-existing characteristic of the function, unrelated to the 404-vs-
+    # failure fix -- not something to work around by changing production
+    # code under a "smallest safe fix" scope. Verifying the fix at the
+    # source level instead: these assert the exact code shape (StatusCode
+    # -eq 404 -> notAvail, else -> failed) is present, which still fails if
+    # the branching is ever accidentally reverted or merged wrong.
+    BeforeAll {
+        $fullSource = Get-Content -LiteralPath $scriptPath -Raw
+        $script:thumbSource = $null
+        $start = $fullSource.IndexOf('function Invoke-ThumbnailDownload')
+        if ($start -ge 0) {
+            $end = $fullSource.IndexOf("`nfunction ", $start + 10)
+            $script:thumbSource = $fullSource.Substring($start, $end - $start)
+        }
+    }
+
+    It "finds the Invoke-ThumbnailDownload function body to check" {
+        $script:thumbSource | Should -Not -BeNullOrEmpty
+    }
+
+    It "passes -LastStatusCode through to Invoke-TpmDownload so 404 can be distinguished" {
+        $script:thumbSource | Should -Match '-LastStatusCode\s*\(\[ref\]\$statusCode\)'
+    }
+
+    It "routes a 404 status code to the not-in-repo branch, not the failed branch" {
+        $script:thumbSource | Should -Match '\$statusCode\s+-eq\s+404'
+    }
+
+    It "increments the failed counter (not the not-in-repo counter) for a non-404 failure" {
+        # The elseif branch must handle the 404 case; whatever comes after
+        # it (the plain else) is the non-404/generic-failure branch and
+        # must increment $failed, not $notAvail.
+        $script:thumbSource | Should -Match '\$statusCode\s+-eq\s+404[\s\S]*?\}\s*else\s*\{[\s\S]*?\$failed\+\+'
     }
 }
 
