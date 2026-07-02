@@ -14,6 +14,42 @@ controllable, even though in practice it usually comes from a trusted
 maintainer's repo. The script never assumes a well-formed value just
 because the source is normally trustworthy.
 
+## Download pipeline protections
+
+Live downloads use the shared `Invoke-TpmDownload` pipeline where practical.
+That pipeline:
+
+- accepts only URLs that passed the call site's allowlist/validation rules,
+- writes to a temporary `.partial` file first,
+- validates the completed file size when an expected size is available,
+- moves the completed file into place only after validation,
+- removes partial files on failure, and
+- records method, file size, elapsed time, and average transfer rate in the log.
+
+The preferred transport order is BITS, then streamed `HttpClient`, then
+`Invoke-WebRequest` as an emergency fallback. This is a reliability and
+integrity-hardening measure; it is not a cryptographic authenticity guarantee.
+
+## Auto-update threat model
+
+The updater is intentionally manual, backup-first, and GitHub-Releases-only.
+It must not silently replace files, and it must not execute downloaded code in
+the same session. The menu and startup update paths show the proposed version,
+ask for confirmation before applying, back up the current script before
+replacement, validate the extracted script, then instruct the user to restart.
+
+Update release assets are limited to the Jumpstile TeknoParrot Manager GitHub
+release path. The downloaded ZIP is extracted to a temporary location, and the
+candidate script is rejected if it is missing, empty, begins with raw ZIP bytes,
+does not contain the TeknoParrot Manager marker, or does not contain a
+`$ScriptVersion = "..."` assignment.
+
+Current limitation: SHA-256 verification against GitHub release-asset digests is
+not merged yet. Release ZIPs may include sidecar `.sha256` files and GitHub may
+publish asset digests, but this release line still relies on HTTPS, release URL
+allowlisting, ZIP/script content validation, backup-before-replace behavior, and
+manual confirmation rather than a merged checksum enforcement step.
+
 ## Rule: sanitize before joining into a filesystem path
 
 Any externally-sourced value that is joined into a filesystem path for a

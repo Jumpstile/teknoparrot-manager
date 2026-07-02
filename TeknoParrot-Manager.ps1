@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.43 BETA
+# TeknoParrot Manager  |  v0.99.44 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -67,7 +67,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # banner (caught stale at 0.70 during the v0.71 bump, again at 0.76, and
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
-$ScriptVersion = "0.99.43"
+$ScriptVersion = "0.99.44"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -8283,7 +8283,7 @@ function Backup-PostgresDatabases {
 
 # Restores a previous Postgres database backup. Mirrors
 # Invoke-RestoreLaunchBoxBackup's UX (list by timestamp, confirm with YES)
-# so all three restore flows under menu 9 feel like the same feature.
+# so all three restore flows under the Restore backup menu feel like the same feature.
 # Necessarily destructive to each restored database's CURRENT content --
 # warned clearly before proceeding. Requires PostgreSQL to already be
 # installed and running (it always will be if there's anything to
