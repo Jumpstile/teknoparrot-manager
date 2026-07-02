@@ -1410,9 +1410,15 @@ Describe "Thumbnail download regression guards" {
         $script:thumbnailFunctionSource | Should -Match '\[void\]\$missing\.Add\(\$f\.BaseName\)'
     }
 
-    It "cleans up a failed or partial thumbnail download before retrying or reporting failure" {
-        $script:thumbnailFunctionSource | Should -Match 'Test-Path\s+-LiteralPath\s+\$destPath'
-        $script:thumbnailFunctionSource | Should -Match 'Remove-Item\s+-LiteralPath\s+\$destPath\s+-Force'
+    It "delegates thumbnail downloads (and their failure/partial-file cleanup) to the shared download helper" {
+        # Cleanup used to be reimplemented per-call-site here (Test-Path /
+        # Remove-Item directly on $destPath). After the download-pipeline
+        # hardening (issue #67), Invoke-TpmDownload owns partial-file
+        # staging and cleanup centrally (see "Invoke-TpmDownload method
+        # selection and partial-file cleanup" below) -- this function must
+        # call it rather than reimplement cleanup itself.
+        $script:thumbnailFunctionSource | Should -Match 'Invoke-TpmDownload\s+-DownloadUrl\s+\$url\s+-DestinationPath\s+\$destPath'
+        $script:thumbnailFunctionSource | Should -Match '-LastStatusCode\s*\(\[ref\]\$statusCode\)'
     }
 }
 
