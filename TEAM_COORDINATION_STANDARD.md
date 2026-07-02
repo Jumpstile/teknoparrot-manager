@@ -161,17 +161,35 @@ merge status, CI status, previously-reported blockers, a previously-given
 recommendation, or a previously-made observation. This is the Section 5
 no-ping-pong rule applied specifically to scheduled/recurring review.
 
-**Review memory.** The reviewer's own last comment on a given issue/PR --
-not a separate tracking store -- is the durable record of what the
-reviewer last knew (last reviewed commit, last CI state, last mergeability
-state, last recommendation). Each review pass reads that comment (if one
-exists), compares it against the issue/PR's current live state, and posts
-a new comment only if that comparison surfaces one of the changes listed
-above. If no prior comment exists, the first substantive finding is itself
-the baseline for future comparisons. This keeps review state where the
-Durable Artifact Rule (Section 6) already says it belongs -- in the
-issue/PR history itself, not in a side channel that could drift out of
-sync with what's actually been said publicly.
+**Review memory.** The record of what has already been reviewed and said
+about a given issue/PR -- not a separate tracking store -- is the full
+comment history on that issue/PR, from every Team Jumpstile reviewer (any
+role: primary reviewer, secondary reviewer, a connector-posted comment, a
+human contributor), not only the current reviewer's own prior comment.
+Each review pass reads that history (if any exists), compares it against
+the issue/PR's current live state, and posts a new comment only if that
+comparison surfaces one of the changes listed above. If no prior comment
+exists from anyone, the first substantive finding is itself the baseline
+for future comparisons. This keeps review state where the Durable Artifact
+Rule (Section 6) already says it belongs -- in the issue/PR history
+itself, not in a side channel that could drift out of sync with what's
+actually been said publicly.
+
+**Cross-reviewer duplicate check.** Before posting, check whether another
+Team Jumpstile reviewer has already reported the same finding. If the
+finding is already documented on the issue/PR and nothing material has
+changed since it was posted, do not post -- a second reviewer independently
+reaching the same conclusion is not new information the record needs.
+Post only if at least one of the following holds:
+
+- new evidence the existing comment(s) do not already cover,
+- a different conclusion than what is already on record,
+- or a correction to an existing review comment (including one posted by
+  a different reviewer).
+
+This applies regardless of which reviewer or posting path produced the
+earlier comment -- the test is whether the finding is already documented
+and current, not who documented it.
 
 ## 9. Acceptance criteria
 
