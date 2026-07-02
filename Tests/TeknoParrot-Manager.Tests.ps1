@@ -204,6 +204,98 @@ Describe "Get-LocalDriveInfoSafe" {
     }
 }
 
+Describe "Auto-detect root return contract (issue #65)" {
+    BeforeEach {
+        $script:OriginalUserProfile = $env:USERPROFILE
+        $env:USERPROFILE = Join-Path $TestDrive "UserProfile"
+        New-Item -ItemType Directory -Path $env:USERPROFILE -Force | Out-Null
+        Clear-LocalDriveInfoCache
+        Mock Get-LocalDriveInfoSafe { @([pscustomobject]@{ Name = "$TestDrive\"; IsNetwork = $false }) }
+        Mock Get-PSDrive {
+            [pscustomobject]@{
+                Root = "$TestDrive\"
+            }
+        } -ParameterFilter { $PSProvider -eq 'FileSystem' }
+    }
+
+    AfterEach {
+        $env:USERPROFILE = $script:OriginalUserProfile
+    }
+
+    It "Find-TeknoParrotRoot returns zero matches with Count 0 for caller-side branching" {
+        $detected = Find-TeknoParrotRoot
+
+        $detected | Should -BeNullOrEmpty
+        $detected.Count | Should -Be 0
+    }
+
+    It "Find-TeknoParrotRoot returns one match with Count 1 for caller-side branching" {
+        $rootA = Join-Path $env:USERPROFILE "LaunchBox\Emulators\TeknoParrot"
+        New-Item -ItemType Directory -Path $rootA -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $rootA "TeknoParrotUi.exe") -Value "stub" -NoNewline
+
+        $detected = Find-TeknoParrotRoot
+
+        $detected.Count | Should -Be 1
+        $detected[0] | Should -Be $rootA
+    }
+
+    It "Find-TeknoParrotRoot returns multiple matches with Count equal to the number of roots" {
+        $rootA = Join-Path $env:USERPROFILE "LaunchBox\Emulators\TeknoParrot"
+        $rootB = Join-Path $TestDrive "Games\TeknoParrot"
+        New-Item -ItemType Directory -Path $rootA, $rootB -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $rootA "TeknoParrotUi.exe") -Value "stub" -NoNewline
+        Set-Content -LiteralPath (Join-Path $rootB "TeknoParrotUi.exe") -Value "stub" -NoNewline
+
+        $detected = Find-TeknoParrotRoot
+
+        $detected.Count | Should -Be 2
+        @($detected) | Should -Contain $rootA
+        @($detected) | Should -Contain $rootB
+    }
+
+    It "Find-LaunchBoxRoot returns zero matches with Count 0 for caller-side branching" {
+        $detected = Find-LaunchBoxRoot
+
+        $detected | Should -BeNullOrEmpty
+        $detected.Count | Should -Be 0
+    }
+
+    It "Find-LaunchBoxRoot returns one match with Count 1 for caller-side branching" {
+        $rootA = Join-Path $env:USERPROFILE "LaunchBox"
+        New-Item -ItemType Directory -Path $rootA -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $rootA "LaunchBox.exe") -Value "stub" -NoNewline
+
+        $detected = Find-LaunchBoxRoot
+
+        $detected.Count | Should -Be 1
+        $detected[0] | Should -Be $rootA
+    }
+
+    It "Find-LaunchBoxRoot returns multiple matches with Count equal to the number of roots" {
+        $rootA = Join-Path $env:USERPROFILE "LaunchBox"
+        $rootB = Join-Path $TestDrive "Games\LaunchBox"
+        New-Item -ItemType Directory -Path $rootA, $rootB -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $rootA "LaunchBox.exe") -Value "stub" -NoNewline
+        Set-Content -LiteralPath (Join-Path $rootB "LaunchBox.exe") -Value "stub" -NoNewline
+
+        $detected = Find-LaunchBoxRoot
+
+        $detected.Count | Should -Be 2
+        @($detected) | Should -Contain $rootA
+        @($detected) | Should -Contain $rootB
+    }
+
+    It "keeps caller-side auto-detect assignments from re-wrapping the returned ArrayList" {
+        $source = Get-Content -Raw -LiteralPath $scriptPath
+
+        $source | Should -Match '\$detected\s*=\s*Find-TeknoParrotRoot'
+        $source | Should -Not -Match '\$detected\s*=\s*@\(\s*Find-TeknoParrotRoot\s*\)'
+        $source | Should -Match '\$lbDetected\s*=\s*Find-LaunchBoxRoot'
+        $source | Should -Not -Match '\$lbDetected\s*=\s*@\(\s*Find-LaunchBoxRoot\s*\)'
+    }
+}
+
 Describe "ConvertTo-XPathStringLiteral" {
     It "wraps a plain string in single quotes" {
         ConvertTo-XPathStringLiteral "GPU Fix" | Should -Be "'GPU Fix'"
