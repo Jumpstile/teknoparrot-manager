@@ -7,6 +7,13 @@ It is intentionally redundant: each gate catches a different failure class.
 
 ## 1. Pre-commit checks (every commit, not just releases)
 
+- [ ] Git identity guard -- enable once per clone:
+  ```
+  git config core.hooksPath .githooks
+  ```
+  Enforces PROJECT_IDENTITY_STANDARD.md Section 5: refuses a commit unless
+  `git config user.name`/`user.email` match the required Jumpstile identity.
+
 - [ ] ASCII check -- zero non-ASCII bytes in the production script:
   ```powershell
   ($bytes=[System.IO.File]::ReadAllBytes('TeknoParrot-Manager.ps1'); ($bytes | Where-Object { $_ -gt 127 }).Count)
@@ -172,6 +179,15 @@ the file that happened to be open.
 - [ ] Post a fix/analysis comment to any open issue this release addresses,
   immediately after tagging (not deferred to next session).
 
+## Identity and attribution gate
+
+Before tagging or publishing any release, run the PROJECT_IDENTITY_STANDARD.md
+verification gates (section 11) and compliance checklist (section 12):
+public commit/committer identity is Jumpstile only, no `Co-authored-by:`
+trailers or AI-tool mentions on any published surface (commits, PRs,
+releases, wiki, tracked docs). This is a required gate, not an optional
+pass -- treat a failure here the same as a failing Pester run.
+
 ---
 
-_For the engineering rationale behind each item, see SECURITY.md, LESSONS_LEARNED.md, and ARCHITECTURE.md._
+_For the engineering rationale behind each item, see SECURITY.md, LESSONS_LEARNED.md, and ARCHITECTURE.md. For identity and attribution policy, see PROJECT_IDENTITY_STANDARD.md. For the overall governance hierarchy these all sit within, see CONSTITUTION.md._

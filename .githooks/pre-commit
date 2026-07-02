@@ -1,0 +1,19 @@
+#!/bin/sh
+# Enforces PROJECT_IDENTITY_STANDARD.md Section 5 (commit identity policy).
+# Enable once per clone with: git config core.hooksPath .githooks
+
+expected_name="Jumpstile"
+expected_email="29765787+Jumpstile@users.noreply.github.com"
+
+actual_name=$(git config user.name)
+actual_email=$(git config user.email)
+
+if [ "$actual_name" != "$expected_name" ] || [ "$actual_email" != "$expected_email" ]; then
+    echo "Refusing commit: git identity does not match the required public identity." >&2
+    echo "  Expected: $expected_name <$expected_email>" >&2
+    echo "  Found:    $actual_name <$actual_email>" >&2
+    echo "See PROJECT_IDENTITY_STANDARD.md Section 5. Fix with:" >&2
+    echo "  git config user.name \"$expected_name\"" >&2
+    echo "  git config user.email \"$expected_email\"" >&2
+    exit 1
+fi
