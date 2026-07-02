@@ -62,3 +62,12 @@ sequence (ASCII/parse check, PSScriptAnalyzer, InjectionHunter, Pester).
 InjectionHunter findings in particular must be traced to confirm whether
 the flagged input is actually attacker-controlled before being dismissed
 as a false positive -- a finding is never dismissed by label alone.
+
+## Identity and attribution
+
+PROJECT_IDENTITY_STANDARD.md governs public identity, branding, and
+attribution for this project (commit/PR/release identity, AI-tool
+attribution policy, and the verification gates and compliance checklist
+required before any release or publication). It is a permanent engineering
+standard, not TPM-specific policy -- treat it the same as this file's
+threat model when reviewing anything that will be published.

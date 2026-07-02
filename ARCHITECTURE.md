@@ -3,7 +3,8 @@
 Implementation details, design decisions, and key invariants for the major
 features. This is the authoritative reference for how things are built and why
 particular design choices were made. For what went wrong and the lessons drawn,
-see LESSONS_LEARNED.md.
+see LESSONS_LEARNED.md. For public identity, branding, and attribution policy
+governing everything in this document, see PROJECT_IDENTITY_STANDARD.md.
 
 ---
 
