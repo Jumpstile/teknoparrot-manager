@@ -136,6 +136,43 @@ working-notes-style comment, but should not be the preferred path when
 clean presentation of official public-facing issue history matters. See
 `PROJECT_IDENTITY_STANDARD.md` Section 4 for the full policy.
 
+### Review cadence and evidence-gated commenting
+
+A scheduled review pass (e.g. run on an hourly cadence) checks every open
+issue/PR in scope, but posts a comment only when there is new engineering
+evidence. Checking on schedule is not itself a reason to post -- a review
+pass that finds nothing new completes silently.
+
+A comment is warranted only if one or more of the following changed since
+the reviewer's previous look at that issue/PR:
+
+- a new commit
+- a new issue/PR comment that changes the engineering picture
+- CI status
+- mergeability
+- a blocker resolved
+- a new blocker discovered
+- new evidence that changes a recommendation
+- correction of a previous factual error
+
+Do not post a comment merely because a scheduled interval elapsed. Do not
+restate, in a new comment, anything already on the record and unchanged --
+merge status, CI status, previously-reported blockers, a previously-given
+recommendation, or a previously-made observation. This is the Section 5
+no-ping-pong rule applied specifically to scheduled/recurring review.
+
+**Review memory.** The reviewer's own last comment on a given issue/PR --
+not a separate tracking store -- is the durable record of what the
+reviewer last knew (last reviewed commit, last CI state, last mergeability
+state, last recommendation). Each review pass reads that comment (if one
+exists), compares it against the issue/PR's current live state, and posts
+a new comment only if that comparison surfaces one of the changes listed
+above. If no prior comment exists, the first substantive finding is itself
+the baseline for future comparisons. This keeps review state where the
+Durable Artifact Rule (Section 6) already says it belongs -- in the
+issue/PR history itself, not in a side channel that could drift out of
+sync with what's actually been said publicly.
+
 ## 9. Acceptance criteria
 
 - Team Jumpstile uses GitHub issues as the coordination hub.
@@ -149,3 +186,5 @@ clean presentation of official public-facing issue history matters. See
   above); a violation found after the fact is corrected, and if it recurs
   from the same source, the root configuration producing it is flagged
   directly rather than only patching the individual comment.
+- A scheduled review pass that finds no new evidence completes without
+  posting -- silence is a valid, expected outcome, not a gap to fill.
