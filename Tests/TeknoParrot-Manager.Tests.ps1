@@ -934,6 +934,14 @@ Describe "Resolve-ExtractedGameFolder (issue #66 extraction prompt correctness)"
         Resolve-ExtractedGameFolder -RawZipName "Virtua Fighter 5" -InstallFolder $script:installRoot | Should -BeNullOrEmpty
     }
 
+    It "does not confuse Mario Kart Arcade GP with Mario Kart Arcade GP 2 (regression -- a similarity-scored fuzzy tier previously matched these two different games at 0.97 against a 0.95 threshold)" {
+        $existing = Join-Path $script:installRoot "Mario Kart Arcade GP 2 (1.02)[Namco][TP]"
+        New-Item -ItemType Directory -Path $existing -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $existing "game.exe") -Value "content"
+
+        Resolve-ExtractedGameFolder -RawZipName "Mario Kart Arcade GP (1.10)[Namco][TP]" -InstallFolder $script:installRoot | Should -BeNullOrEmpty
+    }
+
     It "does not treat an empty matching folder as already extracted" {
         $existing = Join-Path $script:installRoot "Battle Gear 3 (2.08J)(2003-04-11)[Namco System 246][TP]"
         New-Item -ItemType Directory -Path $existing -Force | Out-Null
