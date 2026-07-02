@@ -112,6 +112,32 @@ correction into an attribution cleanup pass -- lives in
 `RELEASE-SAFETY-CHECKLIST.md` section 7. That is the operational detail;
 this is the standing cross-project rule it implements.)
 
+## Historical evidence in investigations
+
+Historical evidence should always be considered during investigations.
+Previous logs, artifacts, issues, releases, tester reports, configurations,
+and source history may provide valuable clues about regressions,
+environmental changes, and historical behavior. Do not ignore historical
+artifacts simply because they are old.
+
+However, historical evidence must never be presented as proof of the
+current state unless confirmed by current evidence. Do not treat
+historical artifacts as current truth without verification.
+
+Use historical evidence to answer questions such as:
+
+- Has this ever worked?
+- When did behavior change?
+- What changed?
+- Is this a regression?
+- What evidence supports or contradicts the current observations?
+
+Clearly distinguish, in both reasoning and in what gets published:
+
+- Historical observations
+- Current observations
+- Inferred trends
+
 ## Team Jumpstile motto
 
 Evidence over assumption.
