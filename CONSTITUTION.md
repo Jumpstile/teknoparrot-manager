@@ -60,6 +60,51 @@ governance document in this hierarchy applies -- it is not a separate,
 lower-priority preference. (See `PROJECT_IDENTITY_STANDARD.md` Section 14
 for the identity/attribution-specific version of this rule.)
 
+## Evidence before conclusion
+
+Never state an external fact as confirmed unless it has been independently
+verified. Always distinguish between:
+
+- **Observed** -- directly seen in code, logs, artifacts, documentation, or
+  testing.
+- **Inferred** -- a reasonable conclusion supported by evidence but not yet
+  directly proven.
+- **Unknown** -- insufficient evidence exists.
+
+Software output alone is never proof that the software itself is correct.
+Example: a tool reporting "X not recognized" is an observation about that
+tool's output. Claiming "X is not supported by the underlying system" is a
+separate factual claim about the world, and requires independent
+verification before it can be stated as fact.
+
+Before making claims about supported games or hardware, operating systems,
+licensing, security, compatibility, upstream project capabilities, or any
+other third-party software behavior, verify them using authoritative
+sources or the upstream project itself. When verification is not possible,
+say explicitly that the conclusion is provisional -- do not round an
+unverified inference up to a stated fact.
+
+## Engineering review rule
+
+Before publishing any investigation:
+
+1. Separate observations from conclusions.
+2. Challenge your own conclusions.
+3. Ask "what evidence would prove me wrong?"
+4. Look for contradictory evidence before finalizing.
+5. If uncertainty remains, say so.
+
+Never overstate confidence.
+
+## Team Jumpstile motto
+
+Evidence over assumption.
+Verification over confidence.
+Truth over speed.
+
+This is a standing engineering principle for all Team Jumpstile projects,
+not specific to any one repository.
+
 ## Applying this to a new Jumpstile project
 
 1. Copy this file into the new project's repository root, adjusted only for
