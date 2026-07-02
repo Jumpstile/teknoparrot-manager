@@ -164,6 +164,20 @@ the file that happened to be open.
 
 - [ ] Before publishing the draft, download or inspect the uploaded ZIP asset
   and run the same `Tests\Test-ReleasePackage.ps1` validation against it.
+- [ ] After publishing, copy the exact release ZIP into `Scripts\` as the
+  local current-release mirror. This is not optional: `Scripts\` must always
+  contain a ZIP identical to the published GitHub release asset.
+- [ ] Prune local distribution ZIPs so `Scripts\` contains exactly one
+  `TeknoParrot Manager*.zip` file: the current published release only.
+- [ ] Verify the `Scripts\` mirror using the dedicated guard:
+  ```powershell
+  .\Tests\Test-ScriptsReleaseZip.ps1 `
+    -ScriptsPath .\Scripts `
+    -ExpectedZipPath "TeknoParrot Manager vX.YY BETA.zip"
+  ```
+  Expected: `ZipCount = 1`, `NameMatchesExpected = True`, and
+  `HashMatchesExpected = True`. A mismatch, missing ZIP, or extra stale ZIP
+  fails the release.
 - [ ] After the release is published, spot-check the ZIP: confirm the
   Crosshairs\ folder is present and the excluded folders
   (ReShade\, dgVoodoo2\, FFBPlugin\, BepInExCache\) are absent.
