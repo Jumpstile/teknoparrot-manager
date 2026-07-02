@@ -910,6 +910,19 @@ Describe "Resolve-ExtractedGameFolder (issue #66 extraction prompt correctness)"
         Resolve-ExtractedGameFolder -RawZipName $zipName -InstallFolder $script:installRoot -DatIndex $datIndex | Should -Be $existing
     }
 
+    It "recognizes every supported RetroBat suffix for an already extracted folder" -ForEach @(
+        @{ Suffix = '.teknoparrot' }
+        @{ Suffix = '.parrot' }
+        @{ Suffix = '.game' }
+    ) {
+        $zipName = "Daytona Championship USA (3.59)[Sega PC][TP]"
+        $existing = Join-Path $script:installRoot ($zipName + $Suffix)
+        New-Item -ItemType Directory -Path $existing -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $existing "game.exe") -Value "content"
+
+        Resolve-ExtractedGameFolder -RawZipName $zipName -InstallFolder $script:installRoot | Should -Be $existing
+    }
+
     It "matches Battle Gear 3 despite harmless DAT year/date metadata differences" {
         $existingName = "Battle Gear 3 (2.08J)(2003-04-11)[Namco System 246][TP]"
         $existing = Join-Path $script:installRoot $existingName
@@ -947,6 +960,93 @@ Describe "Resolve-ExtractedGameFolder (issue #66 extraction prompt correctness)"
         New-Item -ItemType Directory -Path $existing -Force | Out-Null
 
         Resolve-ExtractedGameFolder -RawZipName "Battle Gear 3 (2.08J)(2002)[Namco System 246][TP]" -InstallFolder $script:installRoot | Should -BeNullOrEmpty
+    }
+
+    It "uses registered GamePath identity when a valid profile points at a renamed existing folder" {
+        $renamed = Join-Path $script:installRoot "My Hand Picked Folder"
+        New-Item -ItemType Directory -Path $renamed -Force | Out-Null
+        $exePath = Join-Path $renamed "launcher.exe"
+        Set-Content -LiteralPath $exePath -Value "content"
+
+        $profiles = Join-Path $TestDrive "UserProfiles"
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $profiles "CustomCode.xml") -Value @"
+<GameProfile>
+  <GamePath>$exePath</GamePath>
+</GameProfile>
+"@
+        $zipName = "Some Collection Name (2024)[Platform][TP]"
+        $datIndex = @{
+            (Get-NormalizedGameKey $zipName) = [pscustomobject]@{
+                ProfileCode = "CustomCode"
+                Executable  = "launcher.exe"
+            }
+        }
+
+        Resolve-ExtractedGameFolder -RawZipName $zipName -InstallFolder $script:installRoot -DatIndex $datIndex -UserProfilesDir $profiles | Should -Be $renamed
+    }
+
+    It "ignores registered identity when the dat profile code is not path-safe" {
+        $renamed = Join-Path $script:installRoot "Unsafe Profile Code Folder"
+        New-Item -ItemType Directory -Path $renamed -Force | Out-Null
+        $exePath = Join-Path $renamed "launcher.exe"
+        Set-Content -LiteralPath $exePath -Value "content"
+
+        $profiles = Join-Path $TestDrive "UnsafeProfiles"
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $profiles "Unsafe.xml") -Value "<GameProfile><GamePath>$exePath</GamePath></GameProfile>"
+        $zipName = "Unsafe Profile Code Test"
+        $datIndex = @{
+            (Get-NormalizedGameKey $zipName) = [pscustomobject]@{
+                ProfileCode = "..\Unsafe"
+                Executable  = "launcher.exe"
+            }
+        }
+
+        Resolve-ExtractedGameFolder -RawZipName $zipName -InstallFolder $script:installRoot -DatIndex $datIndex -UserProfilesDir $profiles | Should -BeNullOrEmpty
+    }
+}
+
+Describe "Invoke-AutoSync extracted-folder regression guards" {
+    BeforeAll {
+        $script:OriginalAutoSyncRawThrillsPathLimits = $script:RawThrillsPathLimits
+    }
+
+    BeforeEach {
+        $script:autoSyncZipSource = Join-Path $TestDrive "ZipSource"
+        $script:autoSyncInstallRoot = Join-Path $TestDrive "AutoSyncGames"
+        New-Item -ItemType Directory -Path $script:autoSyncZipSource, $script:autoSyncInstallRoot -Force | Out-Null
+        Mock Write-Log {}
+    }
+
+    AfterEach {
+        $script:RawThrillsPathLimits = $script:OriginalAutoSyncRawThrillsPathLimits
+    }
+
+    It "does not extract when issue #66 resolver finds an existing RetroBat short-name folder" {
+        $zipName = "Aliens Armageddon (1.04)(2014-11-17)[Raw Thrills PC][TP]"
+        $zipPath = Join-Path $script:autoSyncZipSource ($zipName + ".zip")
+        Set-Content -LiteralPath $zipPath -Value "placeholder zip bytes"
+
+        $existing = Join-Path $script:autoSyncInstallRoot "ALIENS.teknoparrot"
+        New-Item -ItemType Directory -Path $existing -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $existing "game.exe") -Value "content"
+        $script:RawThrillsPathLimits = @{
+            AliensArmageddon = @{ Limit = 96; Suggested = 'ALIENS' }
+        }
+        $datIndex = @{
+            (Get-NormalizedGameKey $zipName) = [pscustomobject]@{
+                ProfileCode = "AliensArmageddon"
+                Executable  = "game.exe"
+            }
+        }
+        Mock Expand-ZipFileSafe { throw "AutoSync should not extract already-present games" }
+
+        $result = Invoke-AutoSync -zipSource $script:autoSyncZipSource -installFolder $script:autoSyncInstallRoot -syncStatePath (Join-Path $TestDrive "sync.json") -retroBat $true -datIndex $datIndex
+
+        $result.UpToDate | Should -Be 1
+        $result.Synced | Should -Be 0
+        Should -Invoke Expand-ZipFileSafe -Times 0
     }
 }
 
@@ -1065,6 +1165,40 @@ Describe "Invoke-EggmanDatDownload retry and partial-file cleanup" {
         $result | Should -BeFalse
         Test-Path -LiteralPath $savePath | Should -BeFalse
         Should -Invoke Invoke-WebRequest -Times 3
+    }
+}
+
+Describe "Thumbnail download regression guards" {
+    BeforeAll {
+        $script:thumbnailFunctionSource = ${function:Invoke-ThumbnailDownload}.ToString()
+    }
+
+    It "keeps the already-present icon fast path before building the download list" {
+        $script:thumbnailFunctionSource | Should -Match 'Test-Path\s+-LiteralPath\s+\(Join-Path\s+\$iconsDir\s+\(\$f\.BaseName\s+\+\s+"\.png"\)\)'
+        $script:thumbnailFunctionSource | Should -Match '\$alreadyCount\+\+'
+        $script:thumbnailFunctionSource | Should -Match '\[void\]\$missing\.Add\(\$f\.BaseName\)'
+    }
+
+    It "cleans up a failed or partial thumbnail download before retrying or reporting failure" {
+        $script:thumbnailFunctionSource | Should -Match 'Test-Path\s+-LiteralPath\s+\$destPath'
+        $script:thumbnailFunctionSource | Should -Match 'Remove-Item\s+-LiteralPath\s+\$destPath\s+-Force'
+    }
+}
+
+Describe "Crosshair setup regression guards" {
+    It "backs up PCSX2.ini before rewriting cursor paths" {
+        $iniDir = Join-Path $TestDrive "inis"
+        New-Item -ItemType Directory -Path $iniDir -Force | Out-Null
+        $iniPath = Join-Path $iniDir "PCSX2.ini"
+        Set-Content -LiteralPath $iniPath -Value "[USB Port 1 guncon2]`ncursor_path = old1`n[USB Port 2 guncon2]`ncursor_path = old2"
+        Mock Write-Log {}
+
+        Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path "C:\Crosshairs\P1.png" -P2Path "C:\Crosshairs\P2.png"
+
+        $updated = Get-Content -LiteralPath $iniPath -Raw
+        $updated | Should -Match ([regex]::Escape("cursor_path = C:\Crosshairs\P1.png"))
+        $updated | Should -Match ([regex]::Escape("cursor_path = C:\Crosshairs\P2.png"))
+        @(Get-ChildItem -LiteralPath $iniDir -Filter "PCSX2.ini.bak_*" -File).Count | Should -Be 1
     }
 }
 
