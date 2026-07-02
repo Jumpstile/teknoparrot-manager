@@ -42,6 +42,12 @@ Every comment or update posted under this protocol must comply with
   name is not -- use their GitHub handle or a role like "tester").
 - This applies retroactively: a past comment found violating the above is
   corrected the next time that issue is touched, not left standing.
+- GitHub's own UI-level attribution on a comment posted through a GitHub
+  App/connector (e.g. "with ChatGPT Codex Connector") is not a violation of
+  this requirement -- it is platform chrome, not authored content, and
+  cannot be removed by editing the comment. See
+  `PROJECT_IDENTITY_STANDARD.md` Section 4 ("GitHub UI attribution") for
+  the full policy and Section 8 below for which posting path to use.
 
 ## 3. Required issue update format
 
@@ -120,6 +126,15 @@ primary reviewer.
 
 If an issue update asks for primary-reviewer investigation, it should
 investigate and post findings in the required format.
+
+Official, polished, public-facing reviewer comments -- the kind meant to
+stand as the durable record of a review outcome -- should be posted through
+the designated reviewer path, i.e. whichever posting path does not attach
+unwanted GitHub App/connector UI attribution. A ChatGPT/Codex connector
+posting path is acceptable for internal coordination or a low-risk,
+working-notes-style comment, but should not be the preferred path when
+clean presentation of official public-facing issue history matters. See
+`PROJECT_IDENTITY_STANDARD.md` Section 4 for the full policy.
 
 ## 9. Acceptance criteria
 
