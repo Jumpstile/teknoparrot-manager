@@ -47,6 +47,30 @@ the issue is updated to point to that document rather than continuing to
 serve as the source of truth. This document's own governance hierarchy
 should always answer "where does a given piece of policy actually live."
 
+## Direct pushes to main are the exception, not the default
+
+Normal engineering work -- code, tests, documentation, governance
+changes, and release engineering -- goes through the standard workflow:
+review branch -> pull request -> review -> merge. This applies
+regardless of who or what is doing the work, including AI contributors
+acting with a human's general authorization to proceed.
+
+Direct pushes to `main` (or a project's equivalent trunk branch) are
+reserved for:
+
+- repository infrastructure (e.g. `.gitignore`, CI/workflow files not
+  themselves under active review),
+- GitHub configuration,
+- branch protection changes,
+- workflow repair,
+- emergency hotfixes.
+
+A specific instruction to make a specific change is not, by itself,
+authorization to push that change directly to the trunk branch -- it is
+authorization for the change; the workflow it lands through still
+follows this rule unless the change itself falls into one of the
+categories above, or the human explicitly says to push directly.
+
 ## Privacy-first default
 
 If there is any uncertainty about whether a public-facing artifact should
