@@ -330,7 +330,16 @@ try {
     Add-CheckResult 'Pester tests' ($pesterSummary.Failed -eq 0) "total=$($pesterSummary.Total) passed=$($pesterSummary.Passed) failed=$($pesterSummary.Failed)"
 
     # Never hidden by -VerbosityLevel Summary: if anything actually failed,
-    # print exactly what, regardless of console verbosity.
+    # print exactly what, regardless of console verbosity. Also persisted to
+    # a file, not just printed -- at Summary level, Pester's own
+    # Output.Verbosity is 'None', so Pester-output.txt never gets per-test
+    # [-]/[+] lines written to it either. Before this fix, a failure at
+    # Summary level was visible only in the live console: once that session
+    # was gone, there was no way to see which tests failed from the saved
+    # report files at all (confirmed directly -- Pester-summary.json only
+    # ever stored the failure count, and Pester-output.txt was empty of
+    # detail at 'None' verbosity).
+    $failuresText = Join-Path $reportDir 'Pester-Failures.txt'
     if ($pesterSummary.Failed -gt 0) {
         Write-Host ""
         Write-Host "Pester failures ($($pesterSummary.Failed)):" -ForegroundColor Red
@@ -338,10 +347,22 @@ try {
         if ($failedTests.Count -eq 0 -and $pesterResult -is [array]) {
             $failedTests = @($pesterResult | Where-Object { $_.PSObject.Properties.Name -contains 'Failed' } | Select-Object -ExpandProperty Failed)
         }
+        $failureLines = @()
         foreach ($failedTest in $failedTests) {
             $testPath = if ($failedTest.PSObject.Properties.Name -contains 'ExpandedPath') { $failedTest.ExpandedPath } else { $failedTest.Name }
             Write-Host "  - $testPath" -ForegroundColor Red
+            $failureLines += "- $testPath"
+            $errorRecord = $null
+            if ($failedTest.PSObject.Properties.Name -contains 'ErrorRecord' -and $failedTest.ErrorRecord) {
+                $errorRecord = @($failedTest.ErrorRecord) | Select-Object -First 1
+            }
+            if ($errorRecord) {
+                $failureLines += "    $($errorRecord.ToString())"
+            }
         }
+        $failureLines | Out-File -FilePath $failuresText -Encoding utf8
+    } else {
+        "(no failures)" | Out-File -FilePath $failuresText -Encoding utf8
     }
 
     $analyzerCommand = Get-Command Invoke-ScriptAnalyzer -ErrorAction SilentlyContinue
@@ -592,6 +613,7 @@ finally {
     Add-Report ("- JSON report: {0}" -f $json)
     Add-Report ("- Pester summary: {0}" -f (Join-Path $reportDir 'Pester-summary.json'))
     Add-Report ("- Pester output: {0}" -f (Join-Path $reportDir 'Pester-output.txt'))
+    Add-Report ("- Pester failures (names + errors): {0}" -f (Join-Path $reportDir 'Pester-Failures.txt'))
     Add-Report ("- PSScriptAnalyzer: {0}" -f (Join-Path $reportDir 'PSScriptAnalyzer.json'))
     if ($results.InstallHealthReport) {
         Add-Report ("- Install health: {0}" -f $results.InstallHealthReport)
