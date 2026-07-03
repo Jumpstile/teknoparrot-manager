@@ -54,6 +54,21 @@ Every certification run should produce:
 - Performance metrics
 - Failure diagnostics
 
+## Running Certification
+
+The easiest way to run a certification pass on the arcade machine is to
+double-click `scripts\Run-TPM-Certification-Suite.bat`. It can be copied
+anywhere (Desktop, a USB stick) and still finds the repo -- it does not
+need to be run from inside the repo folder, and does not require
+administrator privileges. It prompts for the TeknoParrot root (with a
+default), runs `scripts\Run-TPM-Tests.ps1`, and keeps the window open at
+the end so you can read the CERTIFIED / NOT CERTIFIED result and the
+report folder location before it closes.
+
+For scripted or CI-style use, call `scripts\Run-TPM-Tests.ps1` directly
+with `-TeknoParrotRoot` (see that script's parameters for `-RepoPath`,
+`-HarnessRoot`, and `-VerbosityLevel`).
+
 ## Guiding Principle
 
 Passing tests does not automatically certify a build. Certification requires all applicable quality gates to pass.
