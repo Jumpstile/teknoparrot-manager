@@ -117,6 +117,21 @@ BeforeAll {
         New-Item -ItemType File -Path (Join-Path $canonicalCrosshairDir 'P1.png') -Force | Out-Null
         New-Item -ItemType File -Path (Join-Path $canonicalCrosshairDir 'P2.png') -Force | Out-Null
 
+        # Empty folder -- a placeholder a user created, or a partial ZIP
+        # extraction that was interrupted before any file landed. Real
+        # extraction failures on a slow/flaky NAS produce exactly this.
+        $emptyFolder = Join-Path $installFolder 'Zoids Infinity EX Plus (empty)'
+        New-Item -ItemType Directory -Path $emptyFolder -Force | Out-Null
+
+        # RetroBat/Batocera naming convention -- extracted folders suffixed
+        # ".teknoparrot" (Invoke-AutoSync's own $extractFolderName format when
+        # -retroBat is set). A mixed library with some games extracted before
+        # RetroBat mode was enabled and some after is a real, likely scenario,
+        # not a hypothetical one.
+        $retroBatFolder = Join-Path $installFolder 'Time Crisis 3.teknoparrot'
+        New-Item -ItemType Directory -Path $retroBatFolder -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $retroBatFolder 'TIMECRS3.exe') -Force | Out-Null
+
         return [pscustomobject]@{
             Root              = $root
             InstallFolder     = $installFolder
@@ -124,6 +139,8 @@ BeforeAll {
             CompleteXmlPath   = Join-Path $gameProfilesDir 'ALIENS.xml'
             IncompleteXmlPath = Join-Path $gameProfilesDir 'TIMECRS4.xml'
             Pcsx2Dir          = $pcsx2Dir
+            EmptyFolder       = $emptyFolder
+            RetroBatFolder    = $retroBatFolder
         }
     }
 }
@@ -138,6 +155,19 @@ Describe "Virtual Beta Tester: real-world messy environment simulation (issue #8
         $exeNames = @($script:foundFiles | ForEach-Object { $_.Name })
         ($exeNames | Where-Object { $_ -eq 'ALIENS.exe' }).Count | Should -Be 2 -Because "both the clean folder and the duplicate/oddly-named copy have a real ALIENS.exe"
         $exeNames | Should -Not -Contain 'readme.txt' -Because "the incomplete extraction has no recognized game file, only a stray text file"
+        $exeNames | Should -Contain 'TIMECRS3.exe' -Because "a RetroBat-suffixed (.teknoparrot) folder must scan the same as any other -- the suffix lives on the folder, not the exe"
+    }
+
+    It "an empty placeholder folder produces zero results, not an error, and does not affect scanning the rest of the library" {
+        $fixture = New-MessyTeknoParrotFixture
+
+        { $script:emptyResult = Get-GameFiles -folder $fixture.EmptyFolder } | Should -Not -Throw
+        @($script:emptyResult).Count | Should -Be 0
+
+        # The empty folder existing elsewhere in the tree must not make the
+        # whole-library scan skip or crash on real games sitting alongside it.
+        $wholeLibraryResult = Get-GameFiles -folder $fixture.InstallFolder
+        ($wholeLibraryResult | Where-Object { $_.Name -eq 'ALIENS.exe' }).Count | Should -Be 2
     }
 
     It "flags the incomplete GameProfile's missing required elements without crashing, and does not flag the complete one" {

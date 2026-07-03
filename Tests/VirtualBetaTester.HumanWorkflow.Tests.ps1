@@ -238,4 +238,138 @@ $($menuIfAst.Extent.Text)
         $text = ($captured | ForEach-Object { $_.ToString() }) -join "`n"
         $text.Contains('Invalid choice') | Should -Be $false
     }
+
+    It "recovers from several consecutive invalid choices before a valid one succeeds" {
+        # Phase 1.5 priority 1: "repeated invalid choices before success" -- a
+        # real tester fat-fingering the prompt more than once, not just a
+        # single typo. Replaces the assumption that recovery only needs to
+        # work on the FIRST retry.
+        $captured = Invoke-MainMenuHarness -AnswerQueue @('abc', '99', '-1', '2') 6>&1
+        $text = ($captured | ForEach-Object { $_.ToString() }) -join "`n"
+        (@(([regex]::Matches($text, 'Invalid choice')) | ForEach-Object { $_ }).Count) | Should -Be 3 -Because "three invalid answers were given before the valid one, so the recovery message must appear exactly three times, not stop early or loop forever"
+        $text.Contains('Exception') | Should -Be $false
+    }
+}
+
+Describe "Virtual Beta Tester: startup update-check decision paths (issue #88 phase 1.5)" {
+    BeforeAll {
+        $script:installCalls = 0
+        function New-StartupCheckReleaseJson {
+            param([string]$Body = "Fixes a thing.")
+            return (@{
+                tag_name = 'v0.99.99'
+                name     = 'v0.99.99'
+                body     = $Body
+                assets   = @(@{
+                    name                  = 'TeknoParrot.Manager.v0.99.99.BETA.zip'
+                    browser_download_url = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.99/TeknoParrot.Manager.v0.99.99.BETA.zip'
+                })
+            } | ConvertTo-Json -Depth 5)
+        }
+
+        # PS 5.1's method-overload resolution for
+        # [Queue[string]]::new(@(...)) is unreliable from an array literal --
+        # a plain index-based queue avoids it and is equally deterministic.
+        function New-ScriptedAnswerQueue {
+            param([string[]]$Answers)
+            [pscustomobject]@{ Answers = $Answers; Index = 0 }
+        }
+        function Get-NextScriptedAnswer {
+            param($Queue)
+            if ($Queue.Index -ge $Queue.Answers.Count) {
+                throw "Scripted answer queue exhausted after $($Queue.Index) answers."
+            }
+            $value = $Queue.Answers[$Queue.Index]
+            $Queue.Index++
+            return $value
+        }
+    }
+
+    BeforeEach {
+        $script:installCalls = 0
+        Mock Invoke-WebRequest { [pscustomobject]@{ Content = (New-StartupCheckReleaseJson) } }
+        # Behavioral invariant, not wording: the ONLY signal that a destructive
+        # install started is this function being called. Mocking it isolates
+        # the decision-path behavior under test from the install machinery
+        # already covered by Tests/TpmAutoUpdate.DestructivePath.Tests.ps1 and
+        # the existing Invoke-CheckForUpdates scenarios above.
+        Mock Invoke-ManagerUpdateInstall { $script:installCalls++; $true }
+    }
+
+    It "View notes, then decline: notes are shown and no install is ever attempted" {
+        $answers = New-ScriptedAnswerQueue -Answers @('V', 'N')
+        Mock Read-Host { Get-NextScriptedAnswer -Queue $answers }
+
+        $fixturePath = Join-Path $TestDrive 'startup-view-decline.ps1'
+        Set-Content -LiteralPath $fixturePath -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
+
+        $captured = & { Invoke-StartupUpdateCheck -ScriptPath $fixturePath | Out-Null } 6>&1
+        $text = ($captured | ForEach-Object { $_.ToString() }) -join "`n"
+
+        $text.Contains('Fixes a thing.') | Should -Be $true -Because "choosing V must actually show the release notes body"
+        $script:installCalls | Should -Be 0 -Because "declining after viewing notes must never reach the install step -- confirmation required before any destructive action"
+    }
+
+    It "Accept, then confirm: reaches the install step exactly once (backup begins there, mocked)" {
+        $answers = New-ScriptedAnswerQueue -Answers @('Y', 'Y')
+        Mock Read-Host { Get-NextScriptedAnswer -Queue $answers }
+
+        $fixturePath = Join-Path $TestDrive 'startup-accept-confirm.ps1'
+        Set-Content -LiteralPath $fixturePath -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
+
+        Invoke-StartupUpdateCheck -ScriptPath $fixturePath | Out-Null
+        $script:installCalls | Should -Be 1 -Because "accepting and confirming must reach the backup-first install step exactly once"
+    }
+
+    It "Accept, then decline the second confirmation: no install is attempted (double confirmation required)" {
+        $answers = New-ScriptedAnswerQueue -Answers @('Y', 'N')
+        Mock Read-Host { Get-NextScriptedAnswer -Queue $answers }
+
+        $fixturePath = Join-Path $TestDrive 'startup-accept-then-decline.ps1'
+        Set-Content -LiteralPath $fixturePath -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
+        $originalContent = Get-Content -LiteralPath $fixturePath -Raw
+
+        Invoke-StartupUpdateCheck -ScriptPath $fixturePath | Out-Null
+        $script:installCalls | Should -Be 0 -Because "the first Y only offers the update -- a second explicit confirmation is required before anything destructive happens"
+        (Get-Content -LiteralPath $fixturePath -Raw) | Should -Be $originalContent
+    }
+
+    It "Empty input (pressing Enter) is treated as a safe decline, not an error or a crash" {
+        Mock Read-Host { "" }
+        $fixturePath = Join-Path $TestDrive 'startup-empty-input.ps1'
+        Set-Content -LiteralPath $fixturePath -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
+
+        { Invoke-StartupUpdateCheck -ScriptPath $fixturePath | Out-Null } | Should -Not -Throw
+        $script:installCalls | Should -Be 0 -Because "an unrecognized/empty answer must default to the safe path (remind later), never to an install"
+    }
+
+    It "Mixed-case 'y' is accepted the same as 'Y' (case-insensitive yes)" {
+        $answers = New-ScriptedAnswerQueue -Answers @('y', 'y')
+        Mock Read-Host { Get-NextScriptedAnswer -Queue $answers }
+        $fixturePath = Join-Path $TestDrive 'startup-lowercase-yes.ps1'
+        Set-Content -LiteralPath $fixturePath -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
+
+        Invoke-StartupUpdateCheck -ScriptPath $fixturePath | Out-Null
+        $script:installCalls | Should -Be 1 -Because "a human typing lowercase y expects the same result as uppercase Y"
+    }
+
+    It "Whitespace-padded input ('  Y  ') is trimmed and accepted" {
+        $answers = New-ScriptedAnswerQueue -Answers @('  Y  ', '  Y  ')
+        Mock Read-Host { Get-NextScriptedAnswer -Queue $answers }
+        $fixturePath = Join-Path $TestDrive 'startup-padded-yes.ps1'
+        Set-Content -LiteralPath $fixturePath -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
+
+        Invoke-StartupUpdateCheck -ScriptPath $fixturePath | Out-Null
+        $script:installCalls | Should -Be 1 -Because "a human's stray leading/trailing space when typing Y must not be treated as an invalid answer"
+    }
+
+    It "Repeated 'view notes' answers before declining never gets stuck or attempts an install" {
+        $answers = New-ScriptedAnswerQueue -Answers @('V', 'V', 'V', 'N')
+        Mock Read-Host { Get-NextScriptedAnswer -Queue $answers }
+        $fixturePath = Join-Path $TestDrive 'startup-repeated-view.ps1'
+        Set-Content -LiteralPath $fixturePath -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
+
+        { Invoke-StartupUpdateCheck -ScriptPath $fixturePath | Out-Null } | Should -Not -Throw
+        $script:installCalls | Should -Be 0
+    }
 }

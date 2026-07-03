@@ -78,7 +78,10 @@ BeforeAll {
                 [pscustomobject]@{ Name = 'pcsx2x6 crosshair path (issue #79)'; Passed = $true }
             )
             Pcsx2x6 = $pcsx2x6
-            VirtualBetaTester = [pscustomobject]@{ Total = 20; Passed = 20; Failed = 0 }
+            VirtualBetaTester = [pscustomobject]@{
+                Total = 20; Passed = 20; Failed = 0
+                HumanBehaviors = 10; IdempotencyChecks = 6; RecoveryBehaviors = 2; EnvironmentVariations = 2
+            }
             Timestamp = '2026-07-03_00-00-00'
         }
     }

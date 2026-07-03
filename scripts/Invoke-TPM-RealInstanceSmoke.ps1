@@ -209,7 +209,10 @@ function New-CertificationScorecard {
     }
 
     $vbtDetails = if ($Results.VirtualBetaTester) {
-        "total=$($Results.VirtualBetaTester.Total) passed=$($Results.VirtualBetaTester.Passed) failed=$($Results.VirtualBetaTester.Failed)"
+        ("total={0} passed={1} failed={2} | human-behaviors={3} idempotency={4} recovery={5} environment-variations={6}" -f `
+            $Results.VirtualBetaTester.Total, $Results.VirtualBetaTester.Passed, $Results.VirtualBetaTester.Failed, `
+            $Results.VirtualBetaTester.HumanBehaviors, $Results.VirtualBetaTester.IdempotencyChecks, `
+            $Results.VirtualBetaTester.RecoveryBehaviors, $Results.VirtualBetaTester.EnvironmentVariations)
     } else {
         'not collected'
     }
@@ -223,7 +226,7 @@ function New-CertificationScorecard {
         [pscustomobject]@{Area='Smoke File Safety'; Passed=$snapshotClean; Details='no unexpected changes in smoke mode'},
         [pscustomobject]@{Area='Artifacts'; Passed=((Test-Path -LiteralPath $json -PathType Leaf) -and (Test-Path -LiteralPath $md -PathType Leaf)); Details=$reportDir},
         [pscustomobject]@{Area='pcsx2x6 crosshair path (issue #79)'; Passed=[bool]$checkMap['pcsx2x6 crosshair path (issue #79)']; Details=$pcsx2x6Details},
-        [pscustomobject]@{Area='Virtual Beta Tester coverage (issue #88 phase 1)'; Passed=($Results.VirtualBetaTester -and $Results.VirtualBetaTester.Total -gt 0 -and $Results.VirtualBetaTester.Failed -eq 0); Details=$vbtDetails}
+        [pscustomobject]@{Area='Behavioral Certification (Virtual Beta Tester)'; Passed=($Results.VirtualBetaTester -and $Results.VirtualBetaTester.Total -gt 0 -and $Results.VirtualBetaTester.Failed -eq 0); Details=$vbtDetails}
     )
 
     $passedCount = @($scoreItems | Where-Object { $_.Passed }).Count
@@ -336,12 +339,13 @@ try {
     $results.Pester = $pesterSummary
     Add-CheckResult 'Pester tests' ($pesterSummary.Failed -eq 0) "total=$($pesterSummary.Total) passed=$($pesterSummary.Passed) failed=$($pesterSummary.Failed)"
 
-    # Issue #88 Phase 1: report Virtual Beta Tester coverage as its own
-    # visible line, not folded anonymously into the overall Pester count --
-    # a scorecard reader should be able to see this coverage exists without
-    # opening individual test files. Derived from the same PassThru result
-    # already collected above, filtered to Tests/VirtualBetaTester*.Tests.ps1
-    # by source file, not by name pattern (robust to Describe/It renames).
+    # Issue #88 Phase 1/1.5: report Behavioral Certification (Virtual Beta
+    # Tester) coverage as its own visible line, not folded anonymously into
+    # the overall Pester count -- a scorecard reader should be able to see
+    # this coverage exists, and its shape by category, without opening
+    # individual test files. Derived from the same PassThru result already
+    # collected above, filtered to Tests/VirtualBetaTester*.Tests.ps1 by
+    # source file, not by name pattern (robust to Describe/It renames).
     $vbtCandidate = $pesterResult
     if ($pesterResult -is [array]) {
         $vbtCandidate = @($pesterResult) | Where-Object {
@@ -356,12 +360,36 @@ try {
     }
     $vbtPassed = @($vbtTests | Where-Object { $_.Result -eq 'Passed' }).Count
     $vbtFailed = @($vbtTests | Where-Object { $_.Result -eq 'Failed' }).Count
-    $results.VirtualBetaTester = [pscustomobject]@{
-        Total  = $vbtTests.Count
-        Passed = $vbtPassed
-        Failed = $vbtFailed
+
+    # Category breakdown by Describe-block name, not a separate tagging
+    # system -- each category below maps to one or more Describe blocks
+    # already named distinctly enough to classify by simple keyword match.
+    function Get-VbtCategoryCount {
+        param($Tests, [string[]]$Keywords)
+        return @($Tests | Where-Object {
+            $blockName = ($_.Block.Name)
+            $matched = $false
+            foreach ($kw in $Keywords) { if ($blockName -like "*$kw*") { $matched = $true; break } }
+            $matched
+        }).Count
     }
-    Add-CheckResult 'Virtual Beta Tester coverage (issue #88 phase 1)' ($vbtTests.Count -gt 0 -and $vbtFailed -eq 0) "total=$($vbtTests.Count) passed=$vbtPassed failed=$vbtFailed"
+    $vbtHumanBehaviors  = Get-VbtCategoryCount -Tests $vbtTests -Keywords @('human workflow', 'main menu', 'decision paths')
+    $vbtIdempotency     = Get-VbtCategoryCount -Tests $vbtTests -Keywords @('idempotency', 'repeat-run', 'AutoSync repeat-run', 'preview')
+    $vbtRecoveryChecks  = Get-VbtCategoryCount -Tests $vbtTests -Keywords @('backup safety', 'read-only')
+    $vbtEnvironmentVars = Get-VbtCategoryCount -Tests $vbtTests -Keywords @('messy environment')
+
+    $results.VirtualBetaTester = [pscustomobject]@{
+        Total               = $vbtTests.Count
+        Passed              = $vbtPassed
+        Failed              = $vbtFailed
+        HumanBehaviors      = $vbtHumanBehaviors
+        IdempotencyChecks   = $vbtIdempotency
+        RecoveryBehaviors   = $vbtRecoveryChecks
+        EnvironmentVariations = $vbtEnvironmentVars
+    }
+    Add-CheckResult 'Behavioral Certification (Virtual Beta Tester)' ($vbtTests.Count -gt 0 -and $vbtFailed -eq 0) `
+        ("total={0} passed={1} failed={2} | human-behaviors={3} idempotency={4} recovery={5} environment-variations={6}" -f `
+            $vbtTests.Count, $vbtPassed, $vbtFailed, $vbtHumanBehaviors, $vbtIdempotency, $vbtRecoveryChecks, $vbtEnvironmentVars)
 
     # Never hidden by -VerbosityLevel Summary: if anything actually failed,
     # print exactly what, regardless of console verbosity. Also persisted to
