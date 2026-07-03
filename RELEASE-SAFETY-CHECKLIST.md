@@ -266,6 +266,54 @@ pre-commit gates in section 1.
   in addition to, not instead of, the full repo-wide sweep already required
   by CLAUDE.md after any GitHub-touching round.
 
+## 8. Release governance exceptions
+
+Normal PR review remains the standing rule for release-critical changes. Admin
+override merges are exceptions, not precedent; when one is used, record the
+affected PRs, why review was bypassed, what automated evidence was green at
+merge time, and what later certification evidence closed the release risk.
+
+### 2026-07-03 -- v0.99.45 release-candidate exception
+
+PR #87 (`Issue #79 pcsx2x6 fix, in-script auto-update hardening, TPM
+Certification Suite fixes`) and PR #89 (`Fix ScriptVersion/header version
+mismatch (0.99.44 vs 0.99.45)`) were merged by admin override while GitHub
+still reported review required. The override was used to unblock a
+release-candidate fix chain after the code was already constrained by green CI
+and the remaining risk had narrowed to final real-machine certification.
+
+CI was green for both PRs at merge time. After merge, the outstanding
+arcade-machine certification was rerun against exact merged `main` commit
+`a85aa26942b46132bba252dcf24edc42c214f6e6` and passed 8/8 (100%): repository
+clean, Pester 321/321, static analysis 0 findings, real install health,
+backups, smoke file safety, artifacts, and the issue #79 pcsx2x6 gate all
+passed; the BAT launcher was also confirmed working and opened the report
+folder.
+
+Treat this as governance debt / exception-log material only, not a technical
+release blocker for the certified commit. Future release-critical PRs should
+return to normal review approval before merge unless an explicit release-manager
+exception is recorded with equivalent evidence.
+
+### 2026-07-03 -- PR #91 (Issue #88 phase 1) exception, third instance
+
+PR #91 (`Issue #88 phase 1: Virtual Beta Tester -- real executable coverage`)
+was also merged by admin override, the third instance in this same session.
+The repository owner was explicitly asked whether to review it directly or
+repeat the override, and chose the override with the tradeoff stated plainly
+(see `LESSONS_LEARNED.md` for the full record).
+
+CI was green at merge time. Real-arcade-machine certification was rerun
+afterward against exact merged `main` commit
+`aa99b9459058ce0a62b7b5ff1a8dfc787f233bfa` and passed 9/9 (100%), including
+the new Virtual Beta Tester coverage gate (`total=14 passed=14 failed=0`); the
+BAT launcher was confirmed working and the report folder opened automatically.
+
+Three instances in one session is the point at which this stops being a
+reasonable one-off exception. A genuine second reviewer (human or a separate
+AI reviewer account distinct from the PR author) should be configured before
+a fourth instance occurs.
+
 ---
 
 _For the engineering rationale behind each item, see SECURITY.md, LESSONS_LEARNED.md, and ARCHITECTURE.md._

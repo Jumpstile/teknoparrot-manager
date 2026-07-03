@@ -7,6 +7,59 @@ outcome -- the ones most likely to repeat.
 
 ---
 
+## Governance exception: PR #87, #89, #91 merged by admin override (branch protection required 1 review)
+
+**What happened.** `main`'s branch protection requires 1 approving review before
+merge. PR #87 (pcsx2x6 fix, in-script auto-update hardening, TPM Certification
+Suite fixes), PR #89 (a follow-up `$ScriptVersion` correction), and PR #91
+(Issue #88 phase 1 Virtual Beta Tester coverage) were all authored and merged
+by the same AI assistant session across one conversation. GitHub blocks
+self-approval outright (`Can not approve your own pull request`), and no
+separate Independent Reviewer account was configured for this repository at
+the time. All three PRs were merged via `gh pr merge --admin`, bypassing the
+required-review check, after explicit repository-owner authorization to
+proceed with each specific merge -- for PR #91, the owner was explicitly
+presented with the choice between reviewing it themselves or repeating the
+admin override, and chose the override with the tradeoff stated plainly.
+
+**Why this was judged acceptable in the moment.** CI (ASCII/parse/PSScriptAnalyzer/
+Pester via `.github/workflows/ci.yml`) was green on all three PRs before merge.
+This work is normal engineering (bug fixes, a version-string correction, and
+new test coverage), not a production-release action under the Release
+Governance Standard, so it did not require Release Manager sign-off on *what*
+to merge -- only the *mechanism* (admin override instead of a genuine
+independent review) was an exception to the standing workflow.
+Real-arcade-machine certification was run after each merge against the exact
+merged commit and returned CERTIFIED every time: 8/8 (100%) for PR #87/#89's
+commit (`a85aa269`), 9/9 (100%) for PR #91's commit (`aa99b945`, including the
+new Virtual Beta Tester gate) -- strong evidence the bypassed review didn't let
+anything broken through in any of the three instances.
+
+**Why this is still recorded as an exception, not a pattern -- and why three
+instances is a stronger signal than one.** "CI was green" and "certification
+passed afterward" are both evidence the change was *probably* safe -- they are
+not a substitute for an actual second set of eyes before merge, which is the
+entire point of requiring a review. Getting away with it three times in a row
+is not the same as the practice being sound; if anything, three consecutive
+instances without a single genuine review is exactly the pattern this entry
+originally warned against becoming. Per `CONSTITUTION.md`'s Release Governance
+Standard ("Any engineering role may recommend release readiness. Only the
+Release Manager may authorize a production release" -- and, by the same logic,
+only an actual reviewer authorizes bypassing a review requirement), normal PR
+review remains the standing rule. This entry exists so a future session
+doesn't read "admin override was used successfully, repeatedly" in the git
+history and conclude it's a normal or preferred path.
+
+**What should happen instead going forward.** Either configure a genuine
+second reviewer (a human, or an independent AI reviewer account distinct from
+the one authoring the PR) so self-approval is never the blocker, or route
+merge decisions through the repository owner directly rather than an
+AI-invoked admin override, even when the owner has authorized the specific
+change being merged. Three instances in one session is the point at which
+this stops being a reasonable one-off exception and starts being a real gap
+in the review pipeline that should be fixed before a fourth instance, not
+documented again.
+
 ## TPM Certification Suite (commit bb2a160): [scriptblock]::Create() dot-sourcing breaks cross-file Pester module mocking
 
 **What happened.** A real arcade-machine certification run reported 10 Pester
