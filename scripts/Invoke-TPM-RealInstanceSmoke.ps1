@@ -5,15 +5,28 @@ param(
     [Parameter(Mandatory=$true)]
     [string]$TeknoParrotRoot,
 
+    [string]$HarnessRoot,
+
     [switch]$RunUnattendedTPM
 )
 
 $ErrorActionPreference = "Stop"
 
+$RepoPath = (Resolve-Path -LiteralPath $RepoPath).Path
+
+if (!(Test-Path -LiteralPath $TeknoParrotRoot -PathType Container)) {
+    throw "TeknoParrot root not found: $TeknoParrotRoot"
+}
+$TeknoParrotRoot = (Resolve-Path -LiteralPath $TeknoParrotRoot).Path
+
+if ([string]::IsNullOrWhiteSpace($HarnessRoot)) {
+    $repoParent = Split-Path -Parent $RepoPath
+    $HarnessRoot = Join-Path $repoParent "TPM-TestHarness"
+}
+
 $stamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
-$root = "C:\TPM-TestHarness"
-$reportDir = Join-Path $root "Reports\$stamp"
-$backupDir = Join-Path $root "Backups\$stamp"
+$reportDir = Join-Path $HarnessRoot "Reports\$stamp"
+$backupDir = Join-Path $HarnessRoot "Backups\$stamp"
 
 New-Item -ItemType Directory -Force -Path $reportDir, $backupDir | Out-Null
 
@@ -54,6 +67,7 @@ $results = [ordered]@{
     Timestamp = $stamp
     RepoPath = $RepoPath
     TeknoParrotRoot = $TeknoParrotRoot
+    HarnessRoot = $HarnessRoot
     Checks = @()
 }
 
@@ -62,6 +76,7 @@ Add-Report ""
 Add-Report "Timestamp: $stamp"
 Add-Report "Repo: $RepoPath"
 Add-Report "TeknoParrot Root: $TeknoParrotRoot"
+Add-Report "Harness Root: $HarnessRoot"
 Add-Report ""
 
 Push-Location $RepoPath
