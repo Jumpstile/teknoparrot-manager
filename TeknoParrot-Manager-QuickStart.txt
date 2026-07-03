@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.99.45 BETA  --  QUICK START
+  TeknoParrot Manager  |  v1.0 RC1  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -9,7 +9,7 @@
   Unfamiliar term (GamePath, UserProfile, archetype, etc.)? See the
   GLOSSARY section near the top of TeknoParrot-Manager-README.txt.
 
-  BETA -- test one game after each run. Profiles are backed up automatically.
+  RELEASE CANDIDATE -- test one game after each run. Profiles are backed up automatically.
 
 
   NEW TO TEKNOPARROT?

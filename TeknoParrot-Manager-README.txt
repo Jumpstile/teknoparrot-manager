@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.99.45 BETA
+  TeknoParrot Manager  |  v1.0 RC1
   Author: Jumpstile
 ===============================================================================
 
@@ -7,7 +7,7 @@
   automatically, copies your controls between games of the same type, and
   keeps your game library organised. Windows / PowerShell 5.1+.
 
-  This is a beta release. Test one game after each run. Your profiles are
+  This is a release candidate. Test one game after each run. Your profiles are
   backed up automatically at the start of every run.
 
   For a one-page version, see TeknoParrot-Manager-QuickStart.txt.
@@ -2370,6 +2370,6 @@
 
 
 ===============================================================================
-  v0.99.45 BETA -- Test one game after each run.
+  v1.0 RC1 -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================

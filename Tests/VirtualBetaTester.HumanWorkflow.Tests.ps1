@@ -39,7 +39,7 @@ BeforeAll {
 
     # Top-level script-scope values the extracted functions read directly
     # (not captured by function-body extraction) -- mirrors production.
-    $ScriptVersion = "0.99.45"
+    $ScriptVersion = "1.0"
     $script:logPath = Join-Path $TestDrive "vbt-human-workflow.log"
 
     # Shared scenario dataset -- the same file a certification run and a
@@ -79,7 +79,7 @@ BeforeAll {
     }
 
     function New-UpdateCheckReleaseJson {
-        param([string]$TagName = 'v0.99.99', [string]$AssetName = 'TeknoParrot.Manager.v0.99.99.BETA.zip')
+        param([string]$TagName = 'v1.1', [string]$AssetName = 'TeknoParrot.Manager.v1.1.zip')
         return (@{
             tag_name = $TagName
             assets   = @(@{
@@ -257,12 +257,12 @@ Describe "Virtual Beta Tester: startup update-check decision paths (issue #88 ph
         function New-StartupCheckReleaseJson {
             param([string]$Body = "Fixes a thing.")
             return (@{
-                tag_name = 'v0.99.99'
-                name     = 'v0.99.99'
+                tag_name = 'v1.1'
+                name     = 'v1.1'
                 body     = $Body
                 assets   = @(@{
-                    name                  = 'TeknoParrot.Manager.v0.99.99.BETA.zip'
-                    browser_download_url = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.99/TeknoParrot.Manager.v0.99.99.BETA.zip'
+                    name                  = 'TeknoParrot.Manager.v1.1.zip'
+                    browser_download_url = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v1.1/TeknoParrot.Manager.v1.1.zip'
                 })
             } | ConvertTo-Json -Depth 5)
         }

@@ -130,7 +130,7 @@ the file that happened to be open.
 - [ ] `git tag -a vX.YY.ZZ -m "vX.YY.ZZ"` -- tag created AFTER all docs pass.
 - [ ] `git push origin vX.YY.ZZ` -- push the tag before creating the release.
 - [ ] Release ZIP built from Scripts\ (not a temp folder), following this
-  include/exclude list (ZIP name: "TeknoParrot Manager vX.YY BETA.zip",
+  include/exclude list (ZIP name: "TeknoParrot Manager vX.Y RCn.zip",
   always versioned):
   - Include: `TeknoParrot-Manager.ps1`, `TeknoParrot-Manager.bat`,
     `TeknoParrot-Manager-README.txt`, `TeknoParrot-Manager-QuickStart.txt`,
@@ -148,7 +148,7 @@ the file that happened to be open.
     `*.zip`, `*.log`, `*.config.json`.
 - [ ] Validate the local ZIP structure before creating a release:
   ```powershell
-  .\Tests\Test-ReleasePackage.ps1 -ZipPath "TeknoParrot Manager vX.YY BETA.zip"
+  .\Tests\Test-ReleasePackage.ps1 -ZipPath "TeknoParrot Manager vX.Y RCn.zip"
   ```
   Expected: `CrosshairPngCount = 321`, `RootCrosshairPngs = 0`, and
   `ForbiddenEntryCount = 0`. A release ZIP with root-level `000.png`--`320.png`
@@ -156,7 +156,7 @@ the file that happened to be open.
   `Crosshairs\` folder next to `TeknoParrot-Manager.ps1`.
 - [ ] GitHub release created as a DRAFT with the ZIP attached in one step:
   ```
-  gh release create vX.YY.ZZ "TeknoParrot Manager vX.YY BETA.zip" --title "..." --notes "..." --draft
+  gh release create vX.YY.ZZ "TeknoParrot Manager vX.Y RCn.zip" --title "..." --notes "..." --draft
   ```
   Creating without `--draft` marks the release immutable immediately, which
   blocks asset uploads and permanently tombstones the tag name even after the
@@ -183,7 +183,7 @@ the file that happened to be open.
   ```powershell
   .\Tests\Test-ScriptsReleaseZip.ps1 `
     -ScriptsPath .\Scripts `
-    -ExpectedZipPath "TeknoParrot Manager vX.YY BETA.zip"
+    -ExpectedZipPath "TeknoParrot Manager vX.Y RCn.zip"
   ```
   Expected: `ZipCount = 1`, `NameMatchesExpected = True`, and
   `HashMatchesExpected = True`. A mismatch, missing ZIP, or extra stale ZIP
@@ -195,7 +195,7 @@ the file that happened to be open.
   pass the raw downloaded GitHub asset as `-ExpectedZipPath` directly; its
   filename will always fail the exact-name check even when content is
   identical. Instead, keep or create a canonically-named local reference
-  copy (matching the `TeknoParrot Manager vX.YY BETA.zip` convention) and
+  copy (matching the `TeknoParrot Manager vX.Y RCn.zip` convention) and
   pass that -- the script compares filenames exactly, so the reference
   copy's name must already match the convention before the check can pass.
 - [ ] After the release is published, spot-check the ZIP: confirm the

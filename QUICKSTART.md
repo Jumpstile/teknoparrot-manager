@@ -1,6 +1,6 @@
 # TeknoParrot Manager — Quick Start
 
-> **Beta** — test one game after each run. Profiles are backed up automatically before every run.
+> **Release Candidate** — test one game after each run. Profiles are backed up automatically before every run.
 
 Full documentation: [README.md](README.md)
 
