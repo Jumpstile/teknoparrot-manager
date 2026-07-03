@@ -2047,6 +2047,75 @@ Describe "Get-ManagerUpdateRelease" {
     }
 }
 
+Describe "Get-TeknoParrotProfileSet" {
+    BeforeAll {
+        Mock Write-Log {}
+    }
+
+    It "builds the git/trees URL with the branch placed before the query string, not swallowed by it" {
+        # Regression test for the reported #78 root cause: interpolating an
+        # unbraced variable immediately followed by a literal '?' inside a
+        # double-quoted string (e.g. "$branchEncoded?recursive=1") silently
+        # drops everything up to the next '=', producing ".../git/trees/=1"
+        # instead of ".../git/trees/master?recursive=1". GitHub then 404s on
+        # that malformed URL every single time -- this was not intermittent
+        # or network-related. The fix braces the variable: "${branchEncoded}?...".
+        Mock Invoke-WebRequest -ParameterFilter { $Uri -eq 'https://api.github.com/repos/teknogods/TeknoParrotUI' } {
+            [pscustomobject]@{ Content = (@{ default_branch = 'master' } | ConvertTo-Json) }
+        }
+        Mock Invoke-WebRequest -ParameterFilter { $Uri -like '*/git/trees/*' } {
+            [pscustomobject]@{ Content = (@{ tree = @(@{ type = 'blob'; path = 'TeknoParrotUi.Common/GameProfiles/Foo.xml' }) } | ConvertTo-Json -Depth 5) }
+        }
+
+        [void](Get-TeknoParrotProfileSet)
+
+        Should -Invoke Invoke-WebRequest -Times 1 -ParameterFilter {
+            $Uri -eq 'https://api.github.com/repos/teknogods/TeknoParrotUI/git/trees/master?recursive=1'
+        }
+    }
+
+    It "returns the profile stems parsed from the tree response" {
+        Mock Invoke-WebRequest -ParameterFilter { $Uri -eq 'https://api.github.com/repos/teknogods/TeknoParrotUI' } {
+            [pscustomobject]@{ Content = (@{ default_branch = 'master' } | ConvertTo-Json) }
+        }
+        Mock Invoke-WebRequest -ParameterFilter { $Uri -like '*/git/trees/*' } {
+            [pscustomobject]@{
+                Content = (@{
+                    tree = @(
+                        @{ type = 'blob'; path = 'TeknoParrotUi.Common/GameProfiles/BladeArcus.xml' },
+                        @{ type = 'blob'; path = 'TeknoParrotUi.Common/GameProfiles/Tekken7.xml' },
+                        @{ type = 'tree'; path = 'TeknoParrotUi.Common/GameProfiles' }
+                    )
+                } | ConvertTo-Json -Depth 5)
+            }
+        }
+
+        $result = Get-TeknoParrotProfileSet
+        $result | Should -Contain 'BladeArcus'
+        $result | Should -Contain 'Tekken7'
+    }
+
+    It "logs the HTTP status code when the tree request fails" {
+        Mock Invoke-WebRequest -ParameterFilter { $Uri -eq 'https://api.github.com/repos/teknogods/TeknoParrotUI' } {
+            [pscustomobject]@{ Content = (@{ default_branch = 'master' } | ConvertTo-Json) }
+        }
+        Mock Invoke-WebRequest -ParameterFilter { $Uri -like '*/git/trees/*' } {
+            # Mirror the shape production code actually reads --
+            # $_.Exception.Response.StatusCode -- rather than relying on a
+            # specific exception type, since PowerShell 5.1 (the script's
+            # target runtime) and later versions surface HTTP errors from
+            # Invoke-WebRequest differently.
+            $ex = [System.Exception]::new("Not Found")
+            $ex | Add-Member -NotePropertyName Response -NotePropertyValue ([pscustomobject]@{ StatusCode = 404 }) -Force
+            throw $ex
+        }
+
+        [void](Get-TeknoParrotProfileSet)
+
+        Should -Invoke Write-Log -Times 1 -ParameterFilter { $msg -like "*HTTP 404*" }
+    }
+}
+
 Describe "Assert-ManagerUpdateTargetWritable" {
     It "throws a clear, actionable error when the target is read-only" {
         $path = Join-Path $TestDrive 'readonly.ps1'

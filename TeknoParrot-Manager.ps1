@@ -3438,7 +3438,7 @@ function Get-TeknoParrotProfileSet {
         Write-Log "ProfileSet (GitHub): could not resolve default branch, falling back to 'master' -- $_"
     }
     $branchEncoded = [System.Uri]::EscapeDataString($branch)
-    $apiUri = "https://api.github.com/repos/teknogods/TeknoParrotUI/git/trees/$branchEncoded?recursive=1"
+    $apiUri = "https://api.github.com/repos/teknogods/TeknoParrotUI/git/trees/${branchEncoded}?recursive=1"
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         try {
             $resp = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
@@ -3462,7 +3462,7 @@ function Get-TeknoParrotProfileSet {
             $status = 0
             if ($_.Exception.Response) { try { $status = [int]$_.Exception.Response.StatusCode } catch {} }
             if ($attempt -ge 3 -or ($status -ge 400 -and $status -lt 500)) {
-                Write-Log "ProfileSet (GitHub): query failed -- $_"; break
+                Write-Log "ProfileSet (GitHub): query failed -- HTTP $status -- $_"; break
             }
             Write-Log "ProfileSet (GitHub): attempt $attempt failed, retrying in 5s -- $_"
             Start-Sleep -Seconds 5
