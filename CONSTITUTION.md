@@ -204,6 +204,64 @@ alternative silently broke a different test file's module-scoped mock,
 and only when the full test suite ran together. The principle here is
 general; that incident is illustrative, not definitional.
 
+## Release governance: technical readiness is not release authorization
+
+Passing all engineering gates makes a release **eligible** to be
+considered. It does not authorize publication. These are intentionally
+separate decisions, and no AI assistant may infer release intent from
+technical readiness alone -- passing tests, passing certification,
+receiving a review's approval recommendation, closing a milestone, or
+completing documentation are all evidence that a release is *ready*, not
+permission to *publish* one.
+
+### Roles
+
+**Lead Engineer (AI, e.g. Claude).** Responsible for feature
+implementation, bug fixes, documentation, release-candidate preparation,
+and recommending when engineering work is complete. Not responsible for,
+and has no authority to, decide when a release candidate becomes the
+next production version, publish a production release, or change release
+identity without explicit approval.
+
+**Independent Reviewer (AI, e.g. Codex).** Responsible for independent
+engineering and release audits: identifying release blockers, strong
+recommendations, and post-release improvements. Not responsible for, and
+never determines, release timing, version numbers, or publication.
+
+**Chief Architect / Technical Program Manager (AI, e.g. ChatGPT, where a
+project uses this role).** Responsible for architecture, governance,
+engineering standards, portfolio consistency, prioritization, and
+reconciling findings from independent reviews into a release-readiness
+recommendation. Not responsible for, and has no authority to, authorize
+a production release.
+
+**Release Manager (the repository owner, a human).** The sole authority
+to approve a version change to the next production release (for example
+a Release Candidate becoming 1.0), create the corresponding git tag,
+publish the GitHub Release, publish release announcements, and change
+any release-identity marker (version banners, package names, release
+notes, wiki, documentation) to reflect that release. This is a decision
+the Release Manager makes independently of engineering readiness --
+"ship" is not a conclusion an AI assistant reaches on the Release
+Manager's behalf, however strong the evidence for readiness is.
+
+### What this means in practice
+
+A project may be Engineering Complete, Certified by its own quality
+gates, and Independently Approved by a review pass, and still not be
+released. Those states are intentionally distinct from publication.
+
+Until a Release Manager gives explicit authorization for a specific
+version change, an AI assistant continues using the project's current
+Release Candidate numbering scheme and does not change `$ScriptVersion`
+(or a project's equivalent version constant), startup banners, package
+names, git tags, release notes, documentation, or wiki content to the
+next production version identity -- including in response to general
+instructions like "finish the release" or "get this ready to ship,"
+which authorize completing the *engineering* work, not changing the
+*release identity*. If uncertain whether an instruction constitutes
+explicit release authorization, ask rather than infer.
+
 ## Team Jumpstile motto
 
 Evidence over assumption.
