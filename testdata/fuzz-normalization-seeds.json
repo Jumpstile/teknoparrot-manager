@@ -1,0 +1,45 @@
+[
+  {
+    "id": "spacing-and-separators",
+    "baseTitle": "Tekken 5.1",
+    "variants": [
+      "Tekken 5.1",
+      "Tekken_5.1",
+      "Tekken-5.1",
+      "Tekken  5.1",
+      "TEKKEN 5.1"
+    ],
+    "expectedInvariant": "same-normalized-key"
+  },
+  {
+    "id": "roman-numerals",
+    "baseTitle": "Time Crisis 4",
+    "variants": [
+      "Time Crisis 4",
+      "Time Crisis IV",
+      "TIME CRISIS 4"
+    ],
+    "expectedInvariant": "tracked-for-review"
+  },
+  {
+    "id": "edition-preservation",
+    "baseTitle": "Some Game",
+    "variants": [
+      "Some Game",
+      "Some Game Special Edition",
+      "Some Game (Special Edition)",
+      "Some Game Deluxe Edition"
+    ],
+    "expectedInvariant": "meaningful-editions-distinct"
+  },
+  {
+    "id": "board-token-noise",
+    "baseTitle": "Time Crisis 4",
+    "variants": [
+      "Time Crisis 4 (TSF1002-NA-A)(2006)[Namco System 256][TP]",
+      "Time Crisis 4 (TSF1002-NA-B)(2006)[Namco System 256][TP]",
+      "Time Crisis 4 (TSF1002-EU-A)(2006)[Namco System 256][TP]"
+    ],
+    "expectedInvariant": "same-normalized-key"
+  }
+]
