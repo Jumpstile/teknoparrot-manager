@@ -514,6 +514,23 @@ finally {
     $results.PowerShellVersion = $PSVersionTable.PSVersion.ToString()
     $results | ConvertTo-Json -Depth 8 | Out-File $json -Encoding utf8
 
+    # The "Artifacts" gate below checks that both report files exist on
+    # disk. $md's real content can't be written until after $certification
+    # exists (the validation report shows the certification verdict inline),
+    # so without this stub the gate was checking for a file that structurally
+    # could not exist yet at this point in execution -- it failed on every
+    # run regardless of whether anything was actually wrong. Confirmed via
+    # two independent real-instance runs, both showing "[FAIL] Artifacts"
+    # with an otherwise fully passing run. Pre-creating an empty $md here
+    # (Add-Report below still builds its real content via -Append) makes the
+    # existence check honest without changing what it actually verifies.
+    if (-not (Test-Path -LiteralPath $md -PathType Leaf)) {
+        # New-Item, not Out-File -- a zero-byte file, so the real content
+        # Add-Report appends below doesn't end up with a stray leading
+        # blank line.
+        [void](New-Item -ItemType File -Path $md -Force)
+    }
+
     $certification = New-CertificationScorecard -Results $results
     $certification | ConvertTo-Json -Depth 8 | Out-File $certificationJson -Encoding utf8
 
