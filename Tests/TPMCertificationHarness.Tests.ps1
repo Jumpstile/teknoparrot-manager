@@ -30,9 +30,21 @@ BeforeAll {
         throw "Failed to parse Invoke-TPM-RealInstanceSmoke.ps1: $($parseErrors -join '; ')"
     }
     $functionAsts = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
-    foreach ($fn in $functionAsts) {
-        . ([scriptblock]::Create($fn.Extent.Text))
-    }
+    # Dot-source via a real temp file, not ". ([scriptblock]::Create($text))".
+    # Confirmed by direct bisection: a [scriptblock]::Create()-based scriptblock,
+    # once dot-sourced, is not lexically bound to this file's scope the way a
+    # literal {...} block is -- and when this file ran alongside
+    # Tests/TpmAutoUpdate.DestructivePath.Tests.ps1 in the same Pester
+    # invocation, that file's "Mock -ModuleName TpmAutoUpdate.Core
+    # Get-LatestRelease" stopped intercepting calls, hitting the real GitHub
+    # API and failing on rate limits (10 failures reproduced on a real
+    # arcade-machine certification run). Reproduced with a single trivial
+    # unrelated function -- not specific to anything this file's own functions
+    # do -- and confirmed the fix: extracting to an actual .ps1 file and
+    # dot-sourcing that file removes the interference entirely.
+    $extractedPath = Join-Path $TestDrive ("harness-functions-" + [guid]::NewGuid().ToString('N') + '.ps1')
+    ($functionAsts | ForEach-Object { $_.Extent.Text }) -join "`n`n" | Set-Content -LiteralPath $extractedPath -Encoding utf8
+    . $extractedPath
 
     # New-CertificationScorecard reads these as unqualified script-scope
     # variables rather than parameters (mirroring the harness's own top-level
