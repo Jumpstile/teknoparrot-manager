@@ -1,0 +1,83 @@
+[
+  {
+    "id": "issue80-tekken51-board-ver",
+    "source": "Tekken 5.1 (TE51 Ver B)(2005)[Namco System 246][TP]",
+    "expectedKey": "tekken51",
+    "caseType": "positive-normalization",
+    "status": "pending-fix",
+    "issue": "80",
+    "note": "Board plus Ver token should not block canonical title match."
+  },
+  {
+    "id": "issue80-timecrisis3-board-ver",
+    "source": "Time Crisis 3 (TST1 Ver A)(2003)[Namco System 246][TP]",
+    "expectedKey": "timecrisis3",
+    "caseType": "positive-normalization",
+    "status": "pending-fix",
+    "issue": "80",
+    "note": "Board plus Ver token should not block canonical title match."
+  },
+  {
+    "id": "issue80-timecrisis4-hyphen-board",
+    "source": "Time Crisis 4 (TSF1002-NA-A)(2006)[Namco System 256][TP]",
+    "expectedKey": "timecrisis4",
+    "caseType": "positive-normalization",
+    "status": "pending-fix",
+    "issue": "80",
+    "note": "Hyphenated code-shaped board token should not block canonical title match."
+  },
+  {
+    "id": "issue80-zoids-board-ver",
+    "source": "Zoids Infinity (B3900076A Ver 2.02J)(2004)[Namco System 246][TP]",
+    "expectedKey": "zoidsinfinity",
+    "caseType": "positive-normalization",
+    "status": "pending-fix",
+    "issue": "80",
+    "note": "Board plus Ver token should not block canonical title match."
+  },
+  {
+    "id": "issue80-zoids-explus-distinct",
+    "source": "Zoids Infinity EX Plus (2004)[Namco System 246][TP]",
+    "expectedKey": "zoidsinfinityexplus",
+    "caseType": "safety-guard",
+    "status": "covered",
+    "issue": "80",
+    "note": "EX Plus must stay distinct from plain Zoids Infinity."
+  },
+  {
+    "id": "issue80-special-edition-distinct",
+    "source": "Some Game (Special Edition)",
+    "expectedKey": "somegamespecialedition",
+    "caseType": "safety-guard",
+    "status": "covered",
+    "issue": "80",
+    "note": "Meaningful parenthetical title text must not be stripped."
+  },
+  {
+    "id": "issue80-rev-c-preserved",
+    "source": "Game (Rev C)",
+    "expectedKey": "gamerevc",
+    "caseType": "safety-guard",
+    "status": "covered",
+    "issue": "80",
+    "note": "Bare Rev-letter token remains preserved."
+  },
+  {
+    "id": "issue80-rev-dot-c-preserved",
+    "source": "Game (Rev. C)",
+    "expectedKey": "gamerevc",
+    "caseType": "safety-guard",
+    "status": "covered",
+    "issue": "80",
+    "note": "Bare Rev-letter token remains preserved."
+  },
+  {
+    "id": "issue80-rev-e-preserved",
+    "source": "Game (Rev E)",
+    "expectedKey": "gamereve",
+    "caseType": "safety-guard",
+    "status": "covered",
+    "issue": "80",
+    "note": "Bare Rev-letter token remains preserved."
+  }
+]
