@@ -49,13 +49,21 @@ function Copy-IfExists {
 function Get-TreeHash {
     param([string]$Path)
     if (!(Test-Path -LiteralPath $Path)) { return @() }
-    $base = $Path.TrimEnd('\')
-    Get-ChildItem -LiteralPath $Path -Recurse -File -ErrorAction SilentlyContinue |
+    $resolved = (Resolve-Path -LiteralPath $Path).Path
+    $base = $resolved.TrimEnd('\')
+    Get-ChildItem -LiteralPath $resolved -Recurse -File -ErrorAction SilentlyContinue |
         Sort-Object FullName |
         ForEach-Object {
+            $relative = $_.FullName
+            if ($_.FullName.Length -gt $base.Length) {
+                $relative = $_.FullName.Substring($base.Length).TrimStart('\')
+            }
+            if ([string]::IsNullOrWhiteSpace($relative)) {
+                $relative = $_.Name
+            }
             $h = Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256
             [pscustomobject]@{
-                RelativePath = $_.FullName.Substring($base.Length).TrimStart('\')
+                RelativePath = $relative
                 Path = $_.FullName
                 Hash = $h.Hash
                 Length = $_.Length
@@ -66,9 +74,17 @@ function Get-TreeHash {
 function Compare-TreeSnapshot {
     param([object[]]$Before, [object[]]$After)
     $beforeMap = @{}
-    foreach ($item in @($Before)) { $beforeMap[$item.RelativePath] = $item.Hash }
+    $beforeSkipped = 0
+    foreach ($item in @($Before)) {
+        if (-not $item -or [string]::IsNullOrWhiteSpace([string]$item.RelativePath)) { $beforeSkipped++; continue }
+        $beforeMap[[string]$item.RelativePath] = $item.Hash
+    }
     $afterMap = @{}
-    foreach ($item in @($After)) { $afterMap[$item.RelativePath] = $item.Hash }
+    $afterSkipped = 0
+    foreach ($item in @($After)) {
+        if (-not $item -or [string]::IsNullOrWhiteSpace([string]$item.RelativePath)) { $afterSkipped++; continue }
+        $afterMap[[string]$item.RelativePath] = $item.Hash
+    }
     $added = 0
     $removed = 0
     $changed = 0
@@ -85,6 +101,8 @@ function Compare-TreeSnapshot {
         Added = $added
         Removed = $removed
         Changed = $changed
+        BeforeSkipped = $beforeSkipped
+        AfterSkipped = $afterSkipped
     }
 }
 
@@ -257,7 +275,7 @@ try {
     if (-not $RunUnattendedTPM) {
         foreach ($name in $results.Snapshots.Keys) {
             $s = $results.Snapshots[$name]
-            Add-CheckResult "Smoke mode no change: $name" (($s.Added + $s.Removed + $s.Changed) -eq 0) "added=$($s.Added) removed=$($s.Removed) changed=$($s.Changed)"
+            Add-CheckResult "Smoke mode no change: $name" (($s.Added + $s.Removed + $s.Changed) -eq 0) "added=$($s.Added) removed=$($s.Removed) changed=$($s.Changed) skipped=$($s.BeforeSkipped + $s.AfterSkipped)"
         }
     }
 
