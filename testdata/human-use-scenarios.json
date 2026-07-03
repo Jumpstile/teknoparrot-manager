@@ -1,0 +1,75 @@
+[
+  {
+    "id": "startup-calm-current-version",
+    "journey": "update-check",
+    "goal": "User sees that TPM is current and understands no action is needed.",
+    "requiredPhrases": [
+      "You're already running the latest version",
+      "No update needed"
+    ],
+    "forbiddenPhrases": [
+      "ERROR",
+      "WARNING",
+      "failed"
+    ],
+    "expectedStateChange": false
+  },
+  {
+    "id": "update-available-explains-safety",
+    "journey": "update-check",
+    "goal": "User understands what update will do before agreeing.",
+    "requiredPhrases": [
+      "An update is available",
+      "Back up the current script",
+      "Download the update",
+      "Validate the downloaded script",
+      "Require you to restart"
+    ],
+    "forbiddenPhrases": [],
+    "expectedStateChange": false
+  },
+  {
+    "id": "read-only-update-failure-actionable",
+    "journey": "update-check",
+    "goal": "Read-only update failure tells the user exactly how to recover.",
+    "requiredPhrases": [
+      "is marked read-only",
+      "Remove the read-only attribute",
+      "re-run the update",
+      "will not be silently cleared"
+    ],
+    "forbiddenPhrases": [
+      "Update installed"
+    ],
+    "expectedStateChange": false
+  },
+  {
+    "id": "main-menu-invalid-option-recovers",
+    "journey": "main-menu",
+    "goal": "Invalid menu input does not crash or confuse the user.",
+    "requiredPhrases": [
+      "invalid",
+      "try again"
+    ],
+    "forbiddenPhrases": [
+      "Exception",
+      "stack trace"
+    ],
+    "expectedStateChange": false
+  },
+  {
+    "id": "cancel-path-no-change",
+    "journey": "general-cancel",
+    "goal": "Cancel or decline path leaves files unchanged and explains that no changes were made.",
+    "requiredPhrases": [
+      "Skipped",
+      "no changes made"
+    ],
+    "forbiddenPhrases": [
+      "Installing update",
+      "Restoring backup",
+      "Deleting"
+    ],
+    "expectedStateChange": false
+  }
+]
