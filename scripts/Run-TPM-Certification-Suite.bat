@@ -32,6 +32,40 @@ cd /d "%REPO_ROOT%"
 echo Repository:
 echo   %REPO_ROOT%
 echo.
+
+rem Auto-update to the latest pushed commit on whatever branch is currently
+rem checked out, before running. This intentionally discards any local
+rem changes in the repo (git reset --hard) -- this repo checkout is meant
+rem to be a pure pull-and-run copy for certification, not a place to keep
+rem uncommitted local edits. Never hard-fails the whole run over this: a
+rem network hiccup or detached HEAD just means the run proceeds with
+rem whatever is already on disk, with a clear warning printed either way.
+echo Updating repository to latest...
+set "CURRENT_BRANCH="
+for /f "delims=" %%B in ('git rev-parse --abbrev-ref HEAD 2^>nul') do set "CURRENT_BRANCH=%%B"
+
+if not defined CURRENT_BRANCH (
+    echo WARNING: Could not determine the current git branch -- skipping auto-update.
+    echo Running with whatever is currently checked out.
+    echo.
+) else (
+    git fetch origin
+    if errorlevel 1 (
+        echo WARNING: git fetch failed -- no network, or remote unreachable.
+        echo Running with whatever is currently checked out.
+        echo.
+    ) else (
+        git reset --hard origin/%CURRENT_BRANCH%
+        if errorlevel 1 (
+            echo WARNING: git reset failed -- running with whatever is currently checked out.
+            echo.
+        ) else (
+            echo Repository updated to latest origin/%CURRENT_BRANCH%.
+            echo.
+        )
+    )
+)
+
 echo Default TeknoParrot root:
 echo   %DEFAULT_TP_ROOT%
 echo.
