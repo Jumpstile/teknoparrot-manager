@@ -85,6 +85,15 @@ TPM can keep its current paths for now, but new code should avoid hardcoding Tek
 6. Every project should have a regression register.
 7. Every project should include human-use simulation, not only technical tests.
 8. Every project should support scale, fuzz, and chaos testing over time.
+9. A non-obvious implementation constraint in the certification suite
+   itself (non-obvious, easy to "simplify" incorrectly, and proven by a
+   real incident or regression -- not a routine implementation detail) is
+   documented in both the relevant architecture document and
+   `LESSONS_LEARNED.md` (see `CONSTITUTION.md`, "Documenting non-obvious
+   implementation constraints"). A single-project test run passing is not
+   sufficient evidence that a portability-sensitive refactor is safe;
+   verify against the full test suite before treating such a change as
+   validated.
 
 ## ChannelForge future certification lanes
 

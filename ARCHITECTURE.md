@@ -5,6 +5,12 @@ features. This is the authoritative reference for how things are built and why
 particular design choices were made. For what went wrong and the lessons drawn,
 see LESSONS_LEARNED.md.
 
+Implementation-specific constraints for a given subsystem may also be
+documented in that subsystem's own architecture document (e.g.
+`docs/TPM-CERTIFICATION-SUITE.md` for the certification suite) rather than
+here, with a matching entry in `LESSONS_LEARNED.md` -- see `CONSTITUTION.md`,
+"Documenting non-obvious implementation constraints," for when this applies.
+
 ---
 
 ## Startup: network-path detection and hard timeout (v0.99.23)

@@ -27,11 +27,20 @@ Describe "No AI/tool attribution in tracked files" {
             Pop-Location
         }
 
+        # Files that legitimately quote a banned pattern as documented text --
+        # a forbidden-example list, or the pattern definition an automated
+        # tool matches against -- not an actual attribution footer. Excluding
+        # a file here must be justified by exactly this reasoning, not used
+        # to silence a real hit.
+        $selfReferencingFiles = @(
+            "Tests/NoAIAttribution.Tests.ps1",
+            "RELEASE-SAFETY-CHECKLIST.md",
+            ".github/workflows/strip-ai-attribution.yml"
+        )
+
         $hits = @()
         foreach ($relPath in $trackedFiles) {
-            # This test file itself necessarily contains the banned strings
-            # as literal pattern text -- exclude it from the scan.
-            if ($relPath -eq "Tests/NoAIAttribution.Tests.ps1") { continue }
+            if ($selfReferencingFiles -contains $relPath) { continue }
             $fullPath = Join-Path $repoRoot $relPath
             if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) { continue }
             $bytes = [System.IO.File]::ReadAllBytes($fullPath)
