@@ -24,6 +24,40 @@ A build is only eligible for release when all required certification gates pass.
 - Security & Static Analysis
 - Release Certification
 - Certification Scorecard
+- Virtual Beta Tester (issue #88 phase 1)
+
+## Virtual Beta Tester (issue #88 phase 1)
+
+Mission: the certification suite should meaningfully replace scarce human
+beta testing, not just run tests. Phase 1 wires real, executable coverage
+against production behavior -- `Tests/VirtualBetaTester.*.Tests.ps1` -- and
+is reported as its own "Virtual Beta Tester coverage" gate in the
+certification scorecard, not folded anonymously into the overall Pester
+count.
+
+- **Human workflow simulation** (`VirtualBetaTester.HumanWorkflow.Tests.ps1`):
+  the 5 scenarios in `testdata/human-use-scenarios.json` drive real function
+  calls (`Invoke-CheckForUpdates`, and the main menu's choice-validation
+  block extracted via the safe temp-file AST pattern) with scripted
+  `Read-Host` answers, capture real console output, and assert the
+  scenario's required/forbidden phrases -- not just that the dataset is
+  well-formed JSON (that structural check is `Tests/HumanUseSimulation.Tests.ps1`,
+  and stays separate).
+- **Idempotency / repeat-run safety** (`VirtualBetaTester.Idempotency.Tests.ps1`):
+  runs a real state-writing function (`Set-Pcsx2CursorPaths`) twice with
+  identical inputs and asserts the result doesn't drift or duplicate --
+  replacing the specific human-tester habit of "run it again to make sure."
+- **Real-world messy environment simulation** (`VirtualBetaTester.MessyFixture.Tests.ps1`):
+  one combined fixture with several messy conditions at once (a duplicate/
+  oddly-named game folder, an incomplete extraction, a GameProfile missing
+  required elements, an alternate-cased PCSX2 folder name, legacy-root and
+  canonical-subfolder crosshairs coexisting) -- asserting the combination is
+  handled safely, not each condition only in isolation.
+
+Explicitly out of scope for phase 1 (tracked in issue #88 for later phases,
+not implemented yet): broad fuzzing, long soak testing, mutation testing,
+a full property-based framework, cross-project portability, a performance
+trend system.
 
 ## Certification Levels
 

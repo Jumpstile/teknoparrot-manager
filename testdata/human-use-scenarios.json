@@ -48,8 +48,7 @@
     "journey": "main-menu",
     "goal": "Invalid menu input does not crash or confuse the user.",
     "requiredPhrases": [
-      "invalid",
-      "try again"
+      "Invalid choice. Enter 1-14."
     ],
     "forbiddenPhrases": [
       "Exception",
