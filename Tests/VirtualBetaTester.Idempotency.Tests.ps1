@@ -40,7 +40,7 @@ BeforeAll {
         [System.StringComparer]::OrdinalIgnoreCase)
 }
 
-Describe "Virtual Beta Tester: idempotency / repeat-run safety (issue #88 phase 1)" {
+Describe "Virtual Beta Tester: idempotency / repeat-run safety (issue #88 phase 1)" -Tag 'TVD-High' {
 
     It "Set-Pcsx2CursorPaths produces byte-identical PCSX2.ini content on a second run with the same target paths" {
         $iniPath = Join-Path $TestDrive ("pcsx2-idempotent-" + [guid]::NewGuid().ToString('N') + '.ini')
@@ -88,7 +88,7 @@ Describe "Virtual Beta Tester: idempotency / repeat-run safety (issue #88 phase 
     }
 }
 
-Describe "Virtual Beta Tester: repeat-run backup safety (issue #88 phase 1.5 priority 2)" {
+Describe "Virtual Beta Tester: repeat-run backup safety (issue #88 phase 1.5 priority 2)" -Tag 'TVD-High' {
     # New-PropagationBackup: replaces the instinctive "run it again just to
     # be sure" a human tester does after Propagate Controls, plus the
     # specific defect class this catches -- a backup routine recursively
@@ -128,7 +128,7 @@ Describe "Virtual Beta Tester: repeat-run backup safety (issue #88 phase 1.5 pri
     }
 }
 
-Describe "Virtual Beta Tester: AutoSync repeat-run idempotency (issue #88 phase 1.5 priority 1)" {
+Describe "Virtual Beta Tester: AutoSync repeat-run idempotency (issue #88 phase 1.5 priority 1)" -Tag 'TVD-High' {
     # Human behavior replaced: running AutoSync a second time and confirming
     # it correctly recognizes already-extracted games instead of re-prompting
     # or re-flagging them as "available to extract" -- the single highest-
@@ -186,7 +186,7 @@ Describe "Virtual Beta Tester: AutoSync repeat-run idempotency (issue #88 phase 
     }
 }
 
-Describe "Virtual Beta Tester: preview / dry-run makes no changes (issue #88 phase 1.5 priority 2)" {
+Describe "Virtual Beta Tester: preview / dry-run makes no changes (issue #88 phase 1.5 priority 2)" -Tag 'TVD-Medium' {
     # Human behavior replaced: a user running Preview/dry-run mode, seeing
     # what WOULD happen, and trusting that declining to proceed for real
     # left nothing changed -- the "look before you leap" check every

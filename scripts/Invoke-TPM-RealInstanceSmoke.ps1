@@ -209,10 +209,11 @@ function New-CertificationScorecard {
     }
 
     $vbtDetails = if ($Results.VirtualBetaTester) {
-        ("total={0} passed={1} failed={2} | human-behaviors={3} idempotency={4} recovery={5} environment-variations={6}" -f `
+        ("total={0} passed={1} failed={2} | human-behaviors={3} idempotency={4} recovery={5} environment-variations={6} high-tvd-behaviors={7}" -f `
             $Results.VirtualBetaTester.Total, $Results.VirtualBetaTester.Passed, $Results.VirtualBetaTester.Failed, `
             $Results.VirtualBetaTester.HumanBehaviors, $Results.VirtualBetaTester.IdempotencyChecks, `
-            $Results.VirtualBetaTester.RecoveryBehaviors, $Results.VirtualBetaTester.EnvironmentVariations)
+            $Results.VirtualBetaTester.RecoveryBehaviors, $Results.VirtualBetaTester.EnvironmentVariations, `
+            $Results.VirtualBetaTester.HighTvdBehaviors)
     } else {
         'not collected'
     }
@@ -375,8 +376,19 @@ try {
     }
     $vbtHumanBehaviors  = Get-VbtCategoryCount -Tests $vbtTests -Keywords @('human workflow', 'main menu', 'decision paths')
     $vbtIdempotency     = Get-VbtCategoryCount -Tests $vbtTests -Keywords @('idempotency', 'repeat-run', 'AutoSync repeat-run', 'preview')
-    $vbtRecoveryChecks  = Get-VbtCategoryCount -Tests $vbtTests -Keywords @('backup safety', 'read-only')
+    $vbtRecoveryChecks  = Get-VbtCategoryCount -Tests $vbtTests -Keywords @('backup safety', 'read-only', 'recovery')
     $vbtEnvironmentVars = Get-VbtCategoryCount -Tests $vbtTests -Keywords @('messy environment')
+
+    # Issue #88 phase 1.6: Tester Value Density is recorded as a real Pester
+    # tag on each Describe block ('TVD-High'/'TVD-Medium'/'TVD-Low'), not
+    # just a code comment, specifically so this count is queryable evidence
+    # rather than a guess. Per CONSTITUTION.md ("Tester Value Density"),
+    # this is tracked as coverage evidence only -- never converted to a
+    # percentage or folded into the Pass/Fail decision for this gate.
+    # -Tag on a Describe block lands on the containing Block, not copied down
+    # to each individual test's own .Tag (confirmed empty on .Tests[].Tag) --
+    # check .Block.Tag instead.
+    $vbtHighTvd = @($vbtTests | Where-Object { $_.Block -and $_.Block.Tag -and ($_.Block.Tag -contains 'TVD-High') }).Count
 
     $results.VirtualBetaTester = [pscustomobject]@{
         Total               = $vbtTests.Count
@@ -386,10 +398,11 @@ try {
         IdempotencyChecks   = $vbtIdempotency
         RecoveryBehaviors   = $vbtRecoveryChecks
         EnvironmentVariations = $vbtEnvironmentVars
+        HighTvdBehaviors    = $vbtHighTvd
     }
     Add-CheckResult 'Behavioral Certification (Virtual Beta Tester)' ($vbtTests.Count -gt 0 -and $vbtFailed -eq 0) `
-        ("total={0} passed={1} failed={2} | human-behaviors={3} idempotency={4} recovery={5} environment-variations={6}" -f `
-            $vbtTests.Count, $vbtPassed, $vbtFailed, $vbtHumanBehaviors, $vbtIdempotency, $vbtRecoveryChecks, $vbtEnvironmentVars)
+        ("total={0} passed={1} failed={2} | human-behaviors={3} idempotency={4} recovery={5} environment-variations={6} high-tvd-behaviors={7}" -f `
+            $vbtTests.Count, $vbtPassed, $vbtFailed, $vbtHumanBehaviors, $vbtIdempotency, $vbtRecoveryChecks, $vbtEnvironmentVars, $vbtHighTvd)
 
     # Never hidden by -VerbosityLevel Summary: if anything actually failed,
     # print exactly what, regardless of console verbosity. Also persisted to
