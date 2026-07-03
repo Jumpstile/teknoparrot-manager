@@ -151,6 +151,37 @@ substitute for running full certification before a release; do not treat
 a CI job in isolation as sufficient coverage for a change to the test
 suite's own cross-file behavior.
 
+## Roadmap / Future Capabilities (not 1.0 milestones)
+
+### Manual Verification Replacement Index (MVRI)
+
+**Status: roadmap item only. Not part of the Version 1.0 release criteria.**
+
+A future portfolio-level metric measuring how much manual beta testing
+has been replaced by deterministic, evidence-based certification. MVRI
+is not a correctness score or a release gate -- it is a planning and
+maturity metric, answering: "How much of our release confidence comes
+from repeatable automation instead of scarce human testing?"
+
+Relationship to TVD (see `CONSTITUTION.md`, "Tester Value Density"):
+Tester Value Density evaluates the value of an individual behavioral
+test; MVRI would evaluate the overall maturity of the certification
+suite as a whole.
+
+Example dimensions such a metric might track coverage across: human
+workflows automated, recovery scenarios automated, repeat-run/
+idempotency behaviors automated, messy real-world environment scenarios
+automated, startup/update decision paths automated, cancel/decline
+safety behaviors automated -- reported as coverage counts or maturity
+indicators, never as a percentage of software quality.
+
+Guiding principle for if/when this is built: MVRI must encourage
+replacing meaningful manual verification with deterministic, maintainable
+automation, and must never incentivize adding low-value or brittle tests
+simply to increase the metric. Future work on this item should be driven
+by engineering evidence and real reductions in manual testing effort, not
+by this roadmap entry's presence here.
+
 ## Guiding Principle
 
 Passing tests does not automatically certify a build. Certification requires all applicable quality gates to pass.
