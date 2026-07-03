@@ -7,7 +7,19 @@ param(
 
     [string]$HarnessRoot,
 
-    [switch]$RunUnattendedTPM
+    [switch]$RunUnattendedTPM,
+
+    # Summary (default): only the final certification scorecard and any real
+    # test failures reach the console -- the underlying Pester run (which
+    # includes noisy Write-Host output from mocked production-code scenarios,
+    # e.g. auto-update destructive-path tests) is captured to file only.
+    # Detailed: Pester's own per-file/per-test progress, as before this
+    # parameter existed. Diagnostic: Pester's own Diagnostic verbosity (full
+    # mock/trace output) on top of Detailed. All three levels always write
+    # the same full report files -- this only controls what streams to the
+    # console during the run.
+    [ValidateSet('Summary', 'Detailed', 'Diagnostic')]
+    [string]$VerbosityLevel = 'Summary'
 )
 
 $ErrorActionPreference = "Stop"
@@ -182,6 +194,18 @@ function New-CertificationScorecard {
         }
     }
 
+    # PowerShell parses hashtable-literal (@{...}) values in command mode, not
+    # expression mode -- an inline "if (...) {...} else {...}" as a value,
+    # even parenthesized, fails at runtime with "The term 'if' is not
+    # recognized..." (confirmed by direct repro; this crashed the harness
+    # after Pester/install-health completed, on every real run). Precompute
+    # into a variable first and reference the variable as the value instead.
+    $pcsx2x6Details = if ($Results.Pcsx2x6.Present) {
+        "canonicalDeployed=$($Results.Pcsx2x6.CanonicalFilesDeployed) cursorPathCanonical=$($Results.Pcsx2x6.CursorPathPointsCanonical)"
+    } else {
+        'not applicable -- no pcsx2x6 in this install'
+    }
+
     $scoreItems = @(
         [pscustomobject]@{Area='Repository'; Passed=($checkMap['Repository available'] -and $checkMap['Repository clean']); Details=$Results.GitStatus},
         [pscustomobject]@{Area='Pester'; Passed=($Results.Pester -and $Results.Pester.Failed -eq 0); Details=("total={0} passed={1} failed={2}" -f $Results.Pester.Total, $Results.Pester.Passed, $Results.Pester.Failed)},
@@ -190,7 +214,7 @@ function New-CertificationScorecard {
         [pscustomobject]@{Area='Backups'; Passed=($Results.Backup.UserProfiles -or $Results.Backup.GameProfiles); Details=("UserProfiles={0} GameProfiles={1}" -f $Results.Backup.UserProfiles, $Results.Backup.GameProfiles)},
         [pscustomobject]@{Area='Smoke File Safety'; Passed=$snapshotClean; Details='no unexpected changes in smoke mode'},
         [pscustomobject]@{Area='Artifacts'; Passed=((Test-Path -LiteralPath $json -PathType Leaf) -and (Test-Path -LiteralPath $md -PathType Leaf)); Details=$reportDir},
-        [pscustomobject]@{Area='pcsx2x6 crosshair path (issue #79)'; Passed=[bool]$checkMap['pcsx2x6 crosshair path (issue #79)']; Details=(if ($Results.Pcsx2x6.Present) { "canonicalDeployed=$($Results.Pcsx2x6.CanonicalFilesDeployed) cursorPathCanonical=$($Results.Pcsx2x6.CursorPathPointsCanonical)" } else { 'not applicable -- no pcsx2x6 in this install' })}
+        [pscustomobject]@{Area='pcsx2x6 crosshair path (issue #79)'; Passed=[bool]$checkMap['pcsx2x6 crosshair path (issue #79)']; Details=$pcsx2x6Details}
     )
 
     $passedCount = @($scoreItems | Where-Object { $_.Passed }).Count
@@ -268,11 +292,46 @@ try {
     $pesterModule = Get-Module Pester -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1
     if ($pesterModule) { $results.PesterVersion = $pesterModule.Version.ToString() }
     $pesterOutputText = Join-Path $reportDir 'Pester-output.txt'
-    $pesterResult = Invoke-Pester -Path $RepoPath -PassThru 2>&1 | Tee-Object -FilePath $pesterOutputText
+
+    # The report files always get the same full detail regardless of
+    # -VerbosityLevel -- this only controls how much Pester's own per-file/
+    # per-test progress reporting streams to the console during the run.
+    # Pester's native Output.Verbosity setting is used directly rather than
+    # any custom stream redirection: redirecting the success stream to
+    # suppress console noise risks swallowing the PassThru result object
+    # along with it, which would silently break -Failed detection below.
+    # Real failures are never hidden regardless of level: printed explicitly
+    # below every time, independent of Output.Verbosity.
+    $pesterOutputVerbosity = switch ($VerbosityLevel) {
+        'Summary'    { 'None' }
+        'Detailed'   { 'Normal' }
+        'Diagnostic' { 'Diagnostic' }
+    }
+    $pesterConfig = New-PesterConfiguration
+    $pesterConfig.Run.Path = $RepoPath
+    $pesterConfig.Run.PassThru = $true
+    $pesterConfig.Output.Verbosity = $pesterOutputVerbosity
+
+    $pesterResult = Invoke-Pester -Configuration $pesterConfig 2>&1 | Tee-Object -FilePath $pesterOutputText
     $pesterSummary = Get-PesterSummary -PesterResult $pesterResult
     $pesterSummary | ConvertTo-Json -Depth 4 | Out-File (Join-Path $reportDir 'Pester-summary.json') -Encoding utf8
     $results.Pester = $pesterSummary
     Add-CheckResult 'Pester tests' ($pesterSummary.Failed -eq 0) "total=$($pesterSummary.Total) passed=$($pesterSummary.Passed) failed=$($pesterSummary.Failed)"
+
+    # Never hidden by -VerbosityLevel Summary: if anything actually failed,
+    # print exactly what, regardless of console verbosity.
+    if ($pesterSummary.Failed -gt 0) {
+        Write-Host ""
+        Write-Host "Pester failures ($($pesterSummary.Failed)):" -ForegroundColor Red
+        $failedTests = @($pesterResult.Failed)
+        if ($failedTests.Count -eq 0 -and $pesterResult -is [array]) {
+            $failedTests = @($pesterResult | Where-Object { $_.PSObject.Properties.Name -contains 'Failed' } | Select-Object -ExpandProperty Failed)
+        }
+        foreach ($failedTest in $failedTests) {
+            $testPath = if ($failedTest.PSObject.Properties.Name -contains 'ExpandedPath') { $failedTest.ExpandedPath } else { $failedTest.Name }
+            Write-Host "  - $testPath" -ForegroundColor Red
+        }
+    }
 
     $analyzerCommand = Get-Command Invoke-ScriptAnalyzer -ErrorAction SilentlyContinue
     if (-not $analyzerCommand) { throw 'Invoke-ScriptAnalyzer not found. Install it with: Install-Module PSScriptAnalyzer -Scope CurrentUser -Force' }

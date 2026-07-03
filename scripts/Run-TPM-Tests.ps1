@@ -11,7 +11,10 @@ param(
     [string]$TeknoParrotRoot,
     [string]$HarnessRoot,
     [switch]$RunUnattendedTPM,
-    [switch]$NoPwshRelaunch
+    [switch]$NoPwshRelaunch,
+
+    [ValidateSet('Summary', 'Detailed', 'Diagnostic')]
+    [string]$VerbosityLevel = 'Summary'
 )
 
 $ErrorActionPreference = "Stop"
@@ -41,6 +44,7 @@ if (-not $NoPwshRelaunch -and $PSVersionTable.PSEdition -ne 'Core') {
     if ($RunUnattendedTPM) {
         $argsList += '-RunUnattendedTPM'
     }
+    $argsList += @('-VerbosityLevel', $VerbosityLevel)
 
     & $pwshCommand.Source @argsList
     exit $LASTEXITCODE
@@ -68,5 +72,6 @@ if (![string]::IsNullOrWhiteSpace($HarnessRoot)) {
 if ($RunUnattendedTPM) {
     $params.RunUnattendedTPM = $true
 }
+$params.VerbosityLevel = $VerbosityLevel
 
 & $harness @params
