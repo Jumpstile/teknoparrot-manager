@@ -214,6 +214,43 @@ receiving a review's approval recommendation, closing a milestone, or
 completing documentation are all evidence that a release is *ready*, not
 permission to *publish* one.
 
+> **Engineering produces evidence.**
+> **Independent review evaluates evidence.**
+> **Architecture governs the system.**
+> **The Release Manager decides when to ship.**
+
+This is a standing portfolio principle across every Jumpstile project,
+not specific to any one repository.
+
+### Evidence hierarchy
+
+Engineering artifacts -- including tests, certification, CI results,
+code review, documentation, and release validation -- constitute
+**release evidence**. They provide technical justification for a release
+recommendation but do not themselves authorize a production release.
+
+### Recommendation authority
+
+Any engineering role may recommend release readiness. Only the Release
+Manager may authorize a production release.
+
+### Scope
+
+This policy governs **production releases only**. It does not restrict
+feature branches, pull requests, experiments, prototypes, beta releases,
+release candidates, or internal testing -- normal engineering work
+proceeds through the standard review-branch-to-merge workflow without
+Release Manager involvement. The intent is to protect production
+releases without slowing normal engineering.
+
+### Emergency releases
+
+Emergency production releases remain subject to Release Manager
+authorization. Review and certification may be abbreviated when
+operational urgency requires it, but should stay proportional to the
+risk involved and be followed by retrospective validation once the
+emergency has passed.
+
 ### Roles
 
 **Lead Engineer (AI, e.g. Claude).** Responsible for feature
@@ -232,8 +269,10 @@ never determines, release timing, version numbers, or publication.
 project uses this role).** Responsible for architecture, governance,
 engineering standards, portfolio consistency, prioritization, and
 reconciling findings from independent reviews into a release-readiness
-recommendation. Not responsible for, and has no authority to, authorize
-a production release.
+recommendation. Provides architectural governance and standards, not a
+substitute for implementation review or independent verification -- this
+role does not replace the Independent Reviewer's audit. Not responsible
+for, and has no authority to, authorize a production release.
 
 **Release Manager (the repository owner, a human).** The sole authority
 to approve a version change to the next production release (for example
