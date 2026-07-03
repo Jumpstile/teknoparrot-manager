@@ -1,0 +1,42 @@
+project: TeknoParrot Manager
+
+certification:
+  suite: TPM Certification Suite
+  mission: >
+    Do the human tester's job better and faster while also performing
+    exhaustive, large-scale, and adversarial testing that only a computer
+    can realistically do.
+
+  levels:
+    development:
+      - regression
+      - static-analysis
+
+    beta:
+      - human-use-simulation
+      - real-install-validation
+
+    release-candidate:
+      - adversarial
+      - mutation
+      - fuzz
+      - property
+      - chaos
+      - performance
+
+    gold:
+      - long-duration
+      - stress
+      - scale
+      - certification-scorecard
+
+  adapters:
+    - teknoparrot
+
+  artifacts:
+    - TPM-Certification-Scorecard.md
+    - TPM-Certification-Scorecard.json
+    - TPM-Validation-Report.md
+    - TPM-Validation-Report.json
+    - InstallHealth.md
+    - logs/
