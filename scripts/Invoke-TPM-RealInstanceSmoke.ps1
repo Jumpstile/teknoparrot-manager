@@ -31,10 +31,17 @@ New-Item -ItemType Directory -Force -Path $reportDir, $backupDir | Out-Null
 
 $md = Join-Path $reportDir "TPM-Validation-Report.md"
 $json = Join-Path $reportDir "TPM-Validation-Report.json"
+$certificationMd = Join-Path $reportDir "TPM-Certification-Scorecard.md"
+$certificationJson = Join-Path $reportDir "TPM-Certification-Scorecard.json"
 
 function Add-Report {
     param([string]$Text)
     $Text | Out-File -FilePath $md -Append -Encoding utf8
+}
+
+function Add-CertificationReport {
+    param([string]$Text)
+    $Text | Out-File -FilePath $certificationMd -Append -Encoding utf8
 }
 
 function Copy-IfExists {
@@ -157,6 +164,49 @@ function Get-PesterSummary {
     }
     if ($summary.Result -eq 'Unknown' -and $summary.Failed -eq 0) { $summary.Result = 'Passed' }
     [pscustomobject]$summary
+}
+
+function New-CertificationScorecard {
+    param([hashtable]$Results)
+
+    $checkMap = @{}
+    foreach ($check in @($Results.Checks)) {
+        $checkMap[$check.Name] = [bool]$check.Passed
+    }
+
+    $snapshotClean = $true
+    if ($Results.Snapshots) {
+        foreach ($name in $Results.Snapshots.Keys) {
+            $s = $Results.Snapshots[$name]
+            if (($s.Added + $s.Removed + $s.Changed) -ne 0) { $snapshotClean = $false }
+        }
+    }
+
+    $scoreItems = @(
+        [pscustomobject]@{Area='Repository'; Passed=($checkMap['Repository available'] -and $checkMap['Repository clean']); Details=$Results.GitStatus},
+        [pscustomobject]@{Area='Pester'; Passed=($Results.Pester -and $Results.Pester.Failed -eq 0); Details=("total={0} passed={1} failed={2}" -f $Results.Pester.Total, $Results.Pester.Passed, $Results.Pester.Failed)},
+        [pscustomobject]@{Area='Static Analysis'; Passed=($Results.PSScriptAnalyzerFindings -eq 0); Details=("findings={0}" -f $Results.PSScriptAnalyzerFindings)},
+        [pscustomobject]@{Area='Real Install Health'; Passed=[bool]$checkMap['Real install health check collected']; Details=$Results.InstallHealthReport},
+        [pscustomobject]@{Area='Backups'; Passed=($Results.Backup.UserProfiles -or $Results.Backup.GameProfiles); Details=("UserProfiles={0} GameProfiles={1}" -f $Results.Backup.UserProfiles, $Results.Backup.GameProfiles)},
+        [pscustomobject]@{Area='Smoke File Safety'; Passed=$snapshotClean; Details='no unexpected changes in smoke mode'},
+        [pscustomobject]@{Area='Artifacts'; Passed=((Test-Path -LiteralPath $json -PathType Leaf) -and (Test-Path -LiteralPath $md -PathType Leaf)); Details=$reportDir}
+    )
+
+    $passedCount = @($scoreItems | Where-Object { $_.Passed }).Count
+    $totalCount = @($scoreItems).Count
+    $overall = if ($passedCount -eq $totalCount) { 'CERTIFIED' } else { 'NOT CERTIFIED' }
+
+    [pscustomobject]@{
+        Timestamp = $Results.Timestamp
+        Overall = $overall
+        Passed = $passedCount
+        Total = $totalCount
+        ScorePercent = [math]::Round(($passedCount / [double]$totalCount) * 100, 2)
+        Items = $scoreItems
+        ReportDir = $reportDir
+        ValidationReport = $md
+        ValidationJson = $json
+    }
 }
 
 $results = [ordered]@{
@@ -309,11 +359,30 @@ finally {
     $results.PowerShellVersion = $PSVersionTable.PSVersion.ToString()
     $results | ConvertTo-Json -Depth 8 | Out-File $json -Encoding utf8
 
+    $certification = New-CertificationScorecard -Results $results
+    $certification | ConvertTo-Json -Depth 8 | Out-File $certificationJson -Encoding utf8
+
+    Add-CertificationReport "# TPM Certification Scorecard"
+    Add-CertificationReport ""
+    Add-CertificationReport ("Overall: **{0}**" -f $certification.Overall)
+    Add-CertificationReport ("Score: {0}/{1} ({2}%)" -f $certification.Passed, $certification.Total, $certification.ScorePercent)
+    Add-CertificationReport ("Elapsed: {0}" -f $results.Elapsed)
+    Add-CertificationReport ""
+    Add-CertificationReport "## Gates"
+    foreach ($item in $certification.Items) {
+        $mark = if ($item.Passed) { 'PASS' } else { 'FAIL' }
+        Add-CertificationReport ("- [{0}] {1}: {2}" -f $mark, $item.Area, $item.Details)
+    }
+    Add-CertificationReport ""
+    Add-CertificationReport "## Artifact folder"
+    Add-CertificationReport $reportDir
+
     Add-Report "# TPM Validation Report"
     Add-Report ""
     Add-Report "## Summary"
     Add-Report ""
     Add-Report "Status: **$($results.Status)**"
+    Add-Report ("Certification: **{0}**" -f $certification.Overall)
     Add-Report "Elapsed: $($results.Elapsed)"
     Add-Report ("Report folder: {0}" -f $reportDir)
     Add-Report ("Backup folder: {0}" -f $backupDir)
@@ -345,6 +414,8 @@ finally {
     Add-Report ""
     Add-Report "## Artifacts"
     Add-Report ""
+    Add-Report ("- Certification scorecard: {0}" -f $certificationMd)
+    Add-Report ("- Certification JSON: {0}" -f $certificationJson)
     Add-Report ("- JSON report: {0}" -f $json)
     Add-Report ("- Pester summary: {0}" -f (Join-Path $reportDir 'Pester-summary.json'))
     Add-Report ("- Pester output: {0}" -f (Join-Path $reportDir 'Pester-output.txt'))
@@ -352,4 +423,13 @@ finally {
     if ($results.InstallHealthReport) {
         Add-Report ("- Install health: {0}" -f $results.InstallHealthReport)
     }
+
+    Write-Host ""
+    Write-Host "============================================"
+    Write-Host " TPM CERTIFICATION SCORECARD"
+    Write-Host "============================================"
+    Write-Host (" Overall : {0}" -f $certification.Overall)
+    Write-Host (" Score   : {0}/{1} ({2}%)" -f $certification.Passed, $certification.Total, $certification.ScorePercent)
+    Write-Host (" Report  : {0}" -f $certificationMd)
+    Write-Host "============================================"
 }
