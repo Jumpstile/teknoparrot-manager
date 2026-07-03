@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v0.99.44 BETA  --  QUICK START
+  TeknoParrot Manager  |  v0.99.45 BETA  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -228,8 +228,9 @@
     3. The script copies those images to every registered lightgun game:
          - Standard games: P1.png + P2.png in the game's exe folder.
          - ElfLdr2 games: shared pair in the ElfLdr2 emulator folder.
-         - Pcsx2x6 games: shared pair in the pcsx2x6 folder; inis\PCSX2.ini
-           is also updated with cursor_path for each USB guncon2 port.
+         - Pcsx2x6 games: shared pair in pcsx2x6\TeknoParrot\crosshairs\
+           (the official upstream location); inis\PCSX2.ini is also updated
+           with cursor_path for each USB guncon2 port.
     4. You are asked whether to also hide the Windows cursor for all
        lightgun games. Answer Y to set the cursor-hide field in each
        gun game's UserProfile XML (a backup is taken automatically first).

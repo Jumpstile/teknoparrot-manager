@@ -9,6 +9,8 @@ $ErrorActionPreference = 'Stop'
 $started = Get-Date
 $runId = [guid]::NewGuid().ToString('N')
 
+. (Join-Path $PSScriptRoot 'Resolve-Pcsx2Directory.ps1')
+
 if (!(Test-Path -LiteralPath $TeknoParrotRoot -PathType Container)) {
     throw "TeknoParrot root not found: $TeknoParrotRoot"
 }
@@ -87,12 +89,25 @@ Write-HealthLog 'INFO' 'Start' "RunId=$runId Root=$TeknoParrotRoot"
 
 $gameProfilesPath = Join-Path $TeknoParrotRoot 'GameProfiles'
 $userProfilesPath = Join-Path $TeknoParrotRoot 'UserProfiles'
-$crosshairPath = Join-Path $TeknoParrotRoot 'pcsx2x6\TeknoParrot\crosshairs'
 
 Add-Check 'TeknoParrotUi.exe exists' (Test-Path -LiteralPath (Join-Path $TeknoParrotRoot 'TeknoParrotUi.exe') -PathType Leaf) (Join-Path $TeknoParrotRoot 'TeknoParrotUi.exe')
 Add-Check 'GameProfiles folder exists' (Test-Path -LiteralPath $gameProfilesPath -PathType Container) $gameProfilesPath
 Add-Check 'UserProfiles folder exists' (Test-Path -LiteralPath $userProfilesPath -PathType Container) $userProfilesPath
-Add-Check 'pcsx2x6 crosshair folder exists' (Test-Path -LiteralPath $crosshairPath -PathType Container) $crosshairPath
+
+# pcsx2x6 is specific to a handful of lightgun titles -- not every install has
+# it, so this must be conditional, not an unconditional hard-check.
+# Resolve-Pcsx2Directory (dot-sourced above) is the single shared
+# implementation Invoke-TPM-RealInstanceSmoke.ps1 also uses, so both harness
+# scripts agree on what counts as "present" from one place, not two
+# independently-maintained copies of the same candidate search.
+$pcsx2Dir = Resolve-Pcsx2Directory -TeknoParrotRoot $TeknoParrotRoot
+
+if (-not $pcsx2Dir) {
+    Add-Check 'pcsx2x6 crosshair folder exists' $true 'not applicable -- no pcsx2x6 folder in this install'
+} else {
+    $crosshairPath = Join-Path $pcsx2Dir 'TeknoParrot\crosshairs'
+    Add-Check 'pcsx2x6 crosshair folder exists' (Test-Path -LiteralPath $crosshairPath -PathType Container) $crosshairPath
+}
 
 $gameXml = Test-XmlFolder 'GameProfiles XML' $gameProfilesPath
 $userXml = Test-XmlFolder 'UserProfiles XML' $userProfilesPath

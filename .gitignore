@@ -30,6 +30,15 @@ LaunchBoxBackups/
 # Check for Updates backup folder -- written at runtime, never tracked
 UpdateBackups/
 
+# TPM Certification Suite output -- scripts/Run-TPM-Tests.ps1 places this as a
+# sibling of the repo by default (Join-Path $repoParent "TPM-TestHarness"), so
+# it should never normally land here. Ignored defensively anyway: a run with a
+# mistaken -HarnessRoot could otherwise leave real report/backup output as
+# untracked noise, which is exactly what happened once during early manual
+# testing (empty leftover TPM-TestHarness/Reports/ folder, confirmed harmless
+# and unrelated to any code path, cleaned up after investigation).
+TPM-TestHarness/
+
 # Local HTML crosshair preview -- generated artifact, not a repo doc
 TeknoParrot-Crosshairs-Preview.html
 

@@ -1731,6 +1731,19 @@ Describe "Crosshair setup regression guards" {
         $updated | Should -Match ([regex]::Escape("cursor_path = C:\Crosshairs\P2.png"))
         @(Get-ChildItem -LiteralPath $iniDir -Filter "PCSX2.ini.bak_*" -File).Count | Should -Be 1
     }
+
+    # Invoke-CrosshairSetup itself is an interactive wizard (Read-Host prompts,
+    # browser preview launch) excluded from direct unit testing per this file's
+    # policy -- source-level check instead, same pattern as "Main menu
+    # source-level drift check" below for other hard-to-unit-test interactive code.
+    It "deploys pcsx2x6 crosshairs to the canonical TeknoParrot\crosshairs subfolder, not the emulator folder root (issue #79)" {
+        $source = Get-Content -LiteralPath $scriptPath -Raw
+        $source | Should -Match ([regex]::Escape('Join-Path $pcsx2Dir "TeknoParrot\crosshairs"'))
+        # Regression guard: the pre-#79-fix deployment target (folder root) must
+        # not reappear as the pcsx2x6 P1/P2 destination.
+        $source | Should -Not -Match ([regex]::Escape('Join-Path $pcsx2Dir "P1.png"'))
+        $source | Should -Not -Match ([regex]::Escape('Join-Path $pcsx2Dir "P2.png"'))
+    }
 }
 
 Describe "Test-ButtonNameDirectional" {
@@ -2530,6 +2543,42 @@ Describe "Invoke-ManagerUpdateInstall" {
                 DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.99/TeknoParrot.Manager.v0.99.99.BETA.zip'
             }
         }
+
+        # Destructive-path fixture helpers -- mirrors
+        # Tests/TpmAutoUpdate.DestructivePath.Tests.ps1's fixtures for the
+        # standalone tools/TpmAutoUpdate.Core.psm1 module, so the in-script
+        # Invoke-ManagerUpdateInstall gets the same failure-mode coverage as
+        # that module already has (release-certification gap closed).
+        function Get-DestructiveCorruptedEntryZipBytes {
+            # Same technique as the standalone suite: a large, repetitive
+            # (compressible) entry so Deflate is actually used, then flip bits
+            # only within the compressed payload region so the central
+            # directory / EOCD stay intact and only decompression fails.
+            $entryContent = "# TeknoParrot Manager`n`$ScriptVersion = `"0.99.99`"`n" + (("X" * 200 + "`n") * 300)
+            $zipBytes = New-StartupCheckFixtureZipBytes -EntryContent $entryContent
+            $bytes = [byte[]]$zipBytes.Clone()
+
+            $probeZipPath = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-destructive-probe-" + [guid]::NewGuid().ToString('N') + '.zip')
+            [System.IO.File]::WriteAllBytes($probeZipPath, $bytes)
+            try {
+                $zip = [System.IO.Compression.ZipFile]::OpenRead($probeZipPath)
+                $compressedLength = $zip.Entries[0].CompressedLength
+                $zip.Dispose()
+            } finally {
+                Remove-Item -LiteralPath $probeZipPath -Force -ErrorAction SilentlyContinue
+            }
+            if ($compressedLength -eq $entryContent.Length) {
+                throw 'Test fixture error: entry was stored rather than deflated -- corruption offsets would be wrong.'
+            }
+
+            $filenameLen = [System.BitConverter]::ToUInt16($bytes, 26)
+            $extraLen = [System.BitConverter]::ToUInt16($bytes, 28)
+            $dataStart = 30 + $filenameLen + $extraLen
+            for ($i = $dataStart; $i -lt ($dataStart + $compressedLength); $i++) {
+                $bytes[$i] = $bytes[$i] -bxor 0xFF
+            }
+            return , $bytes
+        }
     }
 
     It "installs successfully and returns true" {
@@ -2554,6 +2603,207 @@ Describe "Invoke-ManagerUpdateInstall" {
         } finally {
             Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
         }
+    }
+
+    # Destructive-path parity with Tests/TpmAutoUpdate.DestructivePath.Tests.ps1
+    # (issue: in-script Invoke-ManagerUpdateInstall had only success/read-only
+    # coverage versus the standalone module's 9 dedicated failure scenarios --
+    # release-certification gap, see release-readiness review). Each of these
+    # deliberately induces a failure and asserts the original installation
+    # survives untouched, a completed backup is preserved, and no temp
+    # artifacts leak -- "never leave the user with a broken installation."
+    It "corrupt ZIP download: leaves the original intact and preserves the backup" {
+        $root = Join-Path $TestDrive ("destructive-corrupt-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $path = Join-Path $root 'TeknoParrot-Manager.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii -NoNewline
+        $originalContent = Get-Content -LiteralPath $path -Raw
+
+        Mock Invoke-TpmDownload {
+            param($DownloadUrl, $DestinationPath, $ExpectedBytes, $Label, $Version)
+            [System.IO.File]::WriteAllBytes($DestinationPath, [byte[]](1..64 | ForEach-Object { Get-Random -Maximum 255 }))
+            return $true
+        }
+
+        Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+        (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
+
+        $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'UpdateBackups') -Recurse -Filter 'TeknoParrot-Manager.ps1' -ErrorAction SilentlyContinue)
+        $backupFiles.Count | Should -Be 1
+        (Get-Content -LiteralPath $backupFiles[0].FullName -Raw) | Should -Be $originalContent
+    }
+
+    It "ZIP missing TeknoParrot-Manager.ps1: leaves the original intact and preserves the backup" {
+        $root = Join-Path $TestDrive ("destructive-missing-entry-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $path = Join-Path $root 'TeknoParrot-Manager.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii -NoNewline
+        $originalContent = Get-Content -LiteralPath $path -Raw
+        $wrongEntryBytes = New-StartupCheckFixtureZipBytes -EntryName 'SomethingElse.ps1'
+
+        Mock Invoke-TpmDownload {
+            param($DownloadUrl, $DestinationPath, $ExpectedBytes, $Label, $Version)
+            [System.IO.File]::WriteAllBytes($DestinationPath, $wrongEntryBytes)
+            return $true
+        }.GetNewClosure()
+
+        Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+        (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
+
+        $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'UpdateBackups') -Recurse -Filter 'TeknoParrot-Manager.ps1' -ErrorAction SilentlyContinue)
+        $backupFiles.Count | Should -Be 1
+    }
+
+    It "content validation failure (missing ScriptVersion): leaves the original intact and preserves the backup" {
+        $root = Join-Path $TestDrive ("destructive-noversion-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $path = Join-Path $root 'TeknoParrot-Manager.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii -NoNewline
+        $originalContent = Get-Content -LiteralPath $path -Raw
+        $badContentBytes = New-StartupCheckFixtureZipBytes -EntryContent "# TeknoParrot Manager`nsome unrelated content, no version here`n"
+
+        Mock Invoke-TpmDownload {
+            param($DownloadUrl, $DestinationPath, $ExpectedBytes, $Label, $Version)
+            [System.IO.File]::WriteAllBytes($DestinationPath, $badContentBytes)
+            return $true
+        }.GetNewClosure()
+
+        Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+        (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
+
+        $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'UpdateBackups') -Recurse -Filter 'TeknoParrot-Manager.ps1' -ErrorAction SilentlyContinue)
+        $backupFiles.Count | Should -Be 1
+        @(Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter 'tpm-update-extracted-*.ps1' -ErrorAction SilentlyContinue).Count | Should -Be 0
+    }
+
+    It "content validation failure (extracted file is itself raw zip bytes): leaves the original intact" {
+        $root = Join-Path $TestDrive ("destructive-nestedzip-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $path = Join-Path $root 'TeknoParrot-Manager.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii -NoNewline
+        $originalContent = Get-Content -LiteralPath $path -Raw
+
+        # A zip whose single entry's *content* is itself zip bytes -- a
+        # packaging mistake where the wrong artifact landed inside the
+        # expected entry name.
+        $innerZipBytes = New-StartupCheckFixtureZipBytes
+        $stagingDir = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-nested-staging-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
+        $outerZipPath = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-nested-" + [guid]::NewGuid().ToString('N') + '.zip')
+        try {
+            [System.IO.File]::WriteAllBytes((Join-Path $stagingDir 'TeknoParrot-Manager.ps1'), $innerZipBytes)
+            [System.IO.Compression.ZipFile]::CreateFromDirectory($stagingDir, $outerZipPath)
+            $outerBytes = [System.IO.File]::ReadAllBytes($outerZipPath)
+        } finally {
+            Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $outerZipPath -Force -ErrorAction SilentlyContinue
+        }
+
+        Mock Invoke-TpmDownload {
+            param($DownloadUrl, $DestinationPath, $ExpectedBytes, $Label, $Version)
+            [System.IO.File]::WriteAllBytes($DestinationPath, $outerBytes)
+            return $true
+        }.GetNewClosure()
+
+        Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+        (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
+        (Get-Content -LiteralPath $path -Raw).StartsWith('PK') | Should -BeFalse
+    }
+
+    It "truncated/partial download: treated as corrupt, leaves the original intact" {
+        $root = Join-Path $TestDrive ("destructive-truncated-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $path = Join-Path $root 'TeknoParrot-Manager.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii -NoNewline
+        $originalContent = Get-Content -LiteralPath $path -Raw
+        $fullBytes = New-StartupCheckFixtureZipBytes
+        $truncatedBytes = $fullBytes[0..([int]($fullBytes.Length / 2))]
+
+        Mock Invoke-TpmDownload {
+            param($DownloadUrl, $DestinationPath, $ExpectedBytes, $Label, $Version)
+            [System.IO.File]::WriteAllBytes($DestinationPath, $truncatedBytes)
+            return $true
+        }.GetNewClosure()
+
+        Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+        (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
+
+        $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'UpdateBackups') -Recurse -Filter 'TeknoParrot-Manager.ps1' -ErrorAction SilentlyContinue)
+        $backupFiles.Count | Should -Be 1
+    }
+
+    It "backup creation failure: aborts before any download, original untouched, no backup folder" {
+        $root = Join-Path $TestDrive ("destructive-backupfail-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $path = Join-Path $root 'TeknoParrot-Manager.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii -NoNewline
+        $originalContent = Get-Content -LiteralPath $path -Raw
+
+        Mock New-ManagerUpdateBackup { throw "Access to the path is denied (simulated backup failure)." }
+        Mock Invoke-TpmDownload { throw "download should never be called when backup fails first." }
+
+        Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+        (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
+        Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeFalse
+        Should -Invoke Invoke-TpmDownload -Times 0
+    }
+
+    It "extraction failure (valid ZIP, corrupted entry payload): leaves the original intact and preserves the backup" {
+        $root = Join-Path $TestDrive ("destructive-extractfail-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $path = Join-Path $root 'TeknoParrot-Manager.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii -NoNewline
+        $originalContent = Get-Content -LiteralPath $path -Raw
+        $corruptedEntryBytes = Get-DestructiveCorruptedEntryZipBytes
+
+        Mock Invoke-TpmDownload {
+            param($DownloadUrl, $DestinationPath, $ExpectedBytes, $Label, $Version)
+            [System.IO.File]::WriteAllBytes($DestinationPath, $corruptedEntryBytes)
+            return $true
+        }.GetNewClosure()
+
+        Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+        (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
+
+        $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'UpdateBackups') -Recurse -Filter 'TeknoParrot-Manager.ps1' -ErrorAction SilentlyContinue)
+        $backupFiles.Count | Should -Be 1
+        @(Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter 'tpm-update-extracted-*.ps1' -ErrorAction SilentlyContinue).Count | Should -Be 0
+    }
+
+    It "replacement failure after successful backup (locked destination): preserves backup and the locked, unmodified original" {
+        # This is the literal "never leave the user with a broken
+        # installation" case: backup/download/extract/validate all succeed
+        # and only the final Move-Item fails -- what an AV scanner or another
+        # process holding the file open looks like in practice.
+        $root = Join-Path $TestDrive ("destructive-locked-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $path = Join-Path $root 'TeknoParrot-Manager.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii -NoNewline
+        $originalContent = Get-Content -LiteralPath $path -Raw
+        $validBytes = New-StartupCheckFixtureZipBytes
+
+        Mock Invoke-TpmDownload {
+            param($DownloadUrl, $DestinationPath, $ExpectedBytes, $Label, $Version)
+            [System.IO.File]::WriteAllBytes($DestinationPath, $validBytes)
+            return $true
+        }.GetNewClosure()
+
+        $lockHandle = [System.IO.File]::Open($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+        try {
+            Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeFalse
+        } finally {
+            $lockHandle.Dispose()
+        }
+
+        # Original must be exactly what it was -- no partial/truncated write.
+        (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
+
+        $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'UpdateBackups') -Recurse -Filter 'TeknoParrot-Manager.ps1' -ErrorAction SilentlyContinue)
+        $backupFiles.Count | Should -Be 1
+        (Get-Content -LiteralPath $backupFiles[0].FullName -Raw) | Should -Be $originalContent
+
+        @(Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter 'tpm-update-extracted-*.ps1' -ErrorAction SilentlyContinue).Count | Should -Be 0
+        @(Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter 'tpm-update-*.zip' -ErrorAction SilentlyContinue).Count | Should -Be 0
     }
 }
 

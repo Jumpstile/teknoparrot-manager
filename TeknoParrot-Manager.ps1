@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v0.99.44 BETA
+# TeknoParrot Manager  |  v0.99.45 BETA
 # Author: Jumpstile
 # =============================================================================
 #
@@ -2862,8 +2862,20 @@ function Invoke-CrosshairSetup {
                 # Also updates inis\PCSX2.ini with the cursor_path for each USB port.
                 if (-not $pcsx2Deployed) {
                     if ($pcsx2Dir) {
-                        $p1Dest = Join-Path $pcsx2Dir "P1.png"
-                        $p2Dest = Join-Path $pcsx2Dir "P2.png"
+                        # Deploy to the canonical upstream location
+                        # (pcsx2x6\TeknoParrot\crosshairs\), not the folder root --
+                        # see issue #79. Official pcsx2x6 crosshair support reads
+                        # from this subfolder; the folder-root location was this
+                        # script's own pre-existing convention before that upstream
+                        # change and is no longer where the emulator looks.
+                        # Set-Pcsx2CursorPaths below still writes cursor_path as an
+                        # explicit override, which stays correct either way.
+                        $crosshairSubDir = Join-Path $pcsx2Dir "TeknoParrot\crosshairs"
+                        if (-not (Test-Path -LiteralPath $crosshairSubDir)) {
+                            [void](New-Item -ItemType Directory -LiteralPath $crosshairSubDir -Force -ErrorAction Stop)
+                        }
+                        $p1Dest = Join-Path $crosshairSubDir "P1.png"
+                        $p2Dest = Join-Path $crosshairSubDir "P2.png"
                         Copy-Item -LiteralPath $valid[$p1Idx] -Destination $p1Dest -Force -ErrorAction Stop
                         Copy-Item -LiteralPath $valid[$p2Idx] -Destination $p2Dest -Force -ErrorAction Stop
                         $iniPath = Join-Path $pcsx2Dir "inis\PCSX2.ini"
@@ -5604,7 +5616,22 @@ function Invoke-ManagerUpdateInstall {
         Test-ManagerUpdateExtractedScript -Path $extractedScriptPath | Out-Null
 
         Write-Host "  Installing update..." -ForegroundColor DarkGray
-        Move-Item -LiteralPath $extractedScriptPath -Destination $ScriptPath -Force
+        # -ErrorAction Stop is required here, not optional: $ErrorActionPreference
+        # is never set anywhere in this script (defaults to 'Continue'), so a
+        # sharing-violation failure (e.g. AV briefly holding the file open) would
+        # otherwise print a red error and silently fall through as if the move had
+        # succeeded -- reporting "Update installed" and returning $true while the
+        # live script was never actually replaced. Confirmed empirically: this
+        # was a real, reproducible bug, not a theoretical one -- caught by a
+        # destructive-path test that locks the destination file during the move.
+        Move-Item -LiteralPath $extractedScriptPath -Destination $ScriptPath -Force -ErrorAction Stop
+        # Defense-in-depth, matching New-ManagerUpdateBackup's own post-copy
+        # verification pattern: confirm the replacement actually landed before
+        # declaring success, rather than trusting Move-Item's absence of an
+        # exception alone.
+        if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) {
+            throw "Update replacement did not complete: $ScriptPath not found after Move-Item."
+        }
         $extractedScriptPath = $null
 
         Write-Host ""
