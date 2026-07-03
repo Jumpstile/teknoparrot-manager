@@ -31,6 +31,8 @@ BeforeAll {
 
     $script:logPath = Join-Path $TestDrive "vbt-recovery.log"
     $script:RawThrillsPathLimits = @{}
+    $script:FileVersionPins = @{}
+    $script:GpuIncompatibleGames = @{}
     $script:FuzzyAutoThreshold = 0.72
     $script:FuzzyTieMargin = 0.1
     $script:TitleTokenStopWords = [System.Collections.Generic.HashSet[string]]::new(
@@ -139,6 +141,55 @@ Describe "Virtual Beta Tester: missing-dependency recovery (issue #88 phase 1.6)
         $result = $null
         { $result = Resolve-Pcsx2Directory -TeknoParrotRoot $root } | Should -Not -Throw
         $result | Should -BeNullOrEmpty -Because "an install with no pcsx2x6-shaped folder must resolve to a clean null, not throw or guess"
+    }
+}
+
+Describe "Virtual Beta Tester: missing emulator firmware/BIOS recovery (issue #85 tier 1 / issue #88 phase 1.6)" -Tag 'TVD-High' {
+    # Human behavior replaced: a tester who registered a pcsx2x6 lightgun
+    # game (successfully, per issue #79's own fix), launches it, and only
+    # then discovers the emulator's own firmware was never installed --
+    # exactly the real-world sequence documented in issue #85: a real
+    # install showed Bloody Roar 3 registered and launchable, then failing
+    # at launch with "PCSX2x64 Firmware is not installed." This test
+    # verifies TPM catches that gap earlier, read-only, during a normal run
+    # rather than leaving the user to discover it at launch.
+    # Defect class detectable: a detection check that never fires (silently
+    # missing games with real firmware gaps), or one that incorrectly reads/
+    # modifies the firmware files themselves rather than just checking they
+    # exist.
+    # Why existing certification wouldn't already catch it: no existing
+    # test (phase 1/1.5/1.6, or Tests/TeknoParrot-Manager.Tests.ps1 before
+    # this round) exercised Get-CompatibilityWarnings' BiosMissing category
+    # at all -- it did not exist before issue #85 tier 1.
+
+    BeforeAll {
+        $script:EmulatorBiosRequirements = @{
+            'Pcsx2x6' = @{ RelativeDir = 'TeknoParrot\bios'; RequiredFiles = @('27v1602T.d', '27v1602F.bg') }
+        }
+    }
+
+    It "detects missing pcsx2x6 firmware for a registered game without reading or modifying any file content" {
+        $root = Join-Path $TestDrive ("bios-recovery-" + [guid]::NewGuid().ToString('N'))
+        $userProfilesDir = Join-Path $root 'UserProfiles'
+        New-Item -ItemType Directory -Path $userProfilesDir -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $root 'pcsx2x6') -Force | Out-Null
+        [xml]@'
+<?xml version="1.0" encoding="utf-8"?>
+<GameProfile>
+  <EmulatorType>Pcsx2x6</EmulatorType>
+  <GamePath>C:\Games\BloodyRoar3\br3.exe</GamePath>
+</GameProfile>
+'@ | ForEach-Object { $_.Save((Join-Path $userProfilesDir 'BLOODYROAR3.xml')) }
+
+        $before = Get-ChildItem -LiteralPath $root -Recurse | Select-Object -ExpandProperty FullName | Sort-Object
+
+        $result = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $root
+
+        $after = Get-ChildItem -LiteralPath $root -Recurse | Select-Object -ExpandProperty FullName | Sort-Object
+        Compare-Object $before $after | Should -BeNullOrEmpty -Because "detecting missing firmware must never itself write anything -- existence-only, read-only"
+
+        @($result.BiosMissing).Count | Should -Be 1
+        @($result.BiosMissing[0].AffectedGames) | Should -Contain 'BLOODYROAR3' -Because "the affected game must be identifiable so the user knows which registration triggered the warning"
     }
 }
 
