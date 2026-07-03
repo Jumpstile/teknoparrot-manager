@@ -140,15 +140,28 @@ Clearly distinguish, in both reasoning and in what gets published:
 
 ## Documenting non-obvious implementation constraints
 
-A non-obvious implementation constraint -- code that must be written a
-specific way for a reason that is not visible from reading the code
-itself -- is documented in two places, not one:
+Non-obvious implementation constraints must be documented twice, but only
+when justified by evidence.
 
-1. **An architecture/design document**, stating the constraint as a
-   current rule: what must (or must not) be done.
+A constraint qualifies when it is:
+
+- Non-obvious -- not visible from reading the code itself.
+- Easy for a future maintainer to "simplify" incorrectly.
+- Proven by a real incident, debugging session, regression, certification
+  failure, production defect, or architectural investigation.
+
+This does not apply to routine implementation details, normal code
+comments, or ordinary design decisions -- only to constraints that meet
+all three criteria above.
+
+When a constraint qualifies, document it in two places:
+
+1. **An architecture/design document.** Explain the current constraint
+   and what future maintainers must preserve. Do not include lengthy
+   historical narrative here -- that belongs in LESSONS_LEARNED.md.
 2. **`LESSONS_LEARNED.md`** (or the project's equivalent retrospective
-   log), recording why the constraint exists: what broke, how it was
-   discovered, and how to safely validate a future change without
+   log). Explain what failed, how it was diagnosed, why the final
+   solution exists, and how to safely validate future changes without
    reintroducing the same failure.
 
 A constraint documented only in the architecture doc reads as an
@@ -158,18 +171,14 @@ easy to miss when actually working in the affected code, since nobody
 rereads the full retrospective history before every change. Both are
 required; each references the other.
 
-(TPM's concrete instance of this rule: `docs/TPM-CERTIFICATION-SUITE.md`'s
-"Known Implementation Constraints" section states that
-`Tests/TPMCertificationHarness.Tests.ps1` must dot-source AST-extracted
-functions from a real temporary `.ps1` file under `$TestDrive`, not a
-runtime-created `[scriptblock]::Create()` result. `LESSONS_LEARNED.md`'s
-corresponding entry (commit `bb2a160`) records why: dot-sourcing a
-`[scriptblock]::Create()` result broke a different test file's
-module-scoped Pester mock, letting a real GitHub API call through and
-failing on rate limits -- but only when the full `Tests/` folder ran
-together. A single-file test run passed cleanly and did not surface the
-regression. Any future change to that dot-sourcing pattern must rerun the
-full test folder, not just the file being edited, before being accepted.)
+Example, not the rule itself: TPM's `[scriptblock]::Create()` / Pester
+mock-isolation incident (`docs/TPM-CERTIFICATION-SUITE.md`'s "Known
+Implementation Constraints" section, with the full diagnosis in
+`LESSONS_LEARNED.md`, commit `bb2a160`) is one instance where this
+applied -- a dot-sourcing pattern that looked equivalent to a safer
+alternative silently broke a different test file's module-scoped mock,
+and only when the full test suite ran together. The principle here is
+general; that incident is illustrative, not definitional.
 
 ## Team Jumpstile motto
 
