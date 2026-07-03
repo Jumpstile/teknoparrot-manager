@@ -31,6 +31,14 @@ BeforeAll {
     $FuzzyAutoThreshold = 0.72
     $FuzzyTieMargin     = 0.1
 
+    # $script:TitleTokenStopWords is a top-level script-scope constant (not a
+    # function body), so the AST extraction above never picks it up.
+    # Get-MeaningfulTitleTokens reads it as an unqualified script-scope variable
+    # (issue #84) -- mirror the production value explicitly.
+    $script:TitleTokenStopWords = [System.Collections.Generic.HashSet[string]]::new(
+        [string[]]@('the', 'of', 'a', 'an', 'and', 'vs', 'vs.', 'in', 'for', 'to'),
+        [System.StringComparer]::OrdinalIgnoreCase)
+
     # $script:LocalDriveInfoCache/$LocalDriveInfoCachePopulated are top-level
     # script-scope variables (not function bodies) initialised before
     # Get-LocalDriveInfoSafe / Clear-LocalDriveInfoCache in the production
@@ -968,6 +976,110 @@ Describe "Get-DiceSimilarity Zoids Infinity / Zoids Infinity EX Plus (issue #80 
         $zoidsKey  = Get-NormalizedGameKey "Zoids Infinity (2004)[Namco System 246][TP]"
         $explusKey = Get-NormalizedGameKey "Zoids Infinity EX Plus (B3900107A Ver 2.10J)(2006)[Namco System 256][TP]"
         (Get-DiceSimilarity $zoidsKey $explusKey) | Should -Be 0.8
+    }
+}
+
+Describe "Get-MeaningfulTitleTokens" {
+    It "strips parenthetical and bracket content wholesale" {
+        $tokens = Get-MeaningfulTitleTokens "Zoids Infinity (B3900076A Ver 2.02J)(2004)[Namco System 246][TP]"
+        $tokens | Should -Be @('zoids', 'infinity')
+    }
+    It "excludes pure-digit tokens (sequel numbers, years -- handled elsewhere)" {
+        $tokens = Get-MeaningfulTitleTokens "Time Crisis 3 2003"
+        $tokens | Should -Not -Contain '3'
+        $tokens | Should -Not -Contain '2003'
+        $tokens | Should -Contain 'time'
+        $tokens | Should -Contain 'crisis'
+    }
+    It "excludes roman numerals I-X" {
+        $tokens = Get-MeaningfulTitleTokens "Street Fighter III 3rd Strike"
+        $tokens | Should -Not -Contain 'iii'
+    }
+    It "excludes the closed stop-word list" {
+        $tokens = Get-MeaningfulTitleTokens "The House of the Dead"
+        $tokens | Should -Not -Contain 'the'
+        $tokens | Should -Not -Contain 'of'
+        $tokens | Should -Contain 'house'
+        $tokens | Should -Contain 'dead'
+    }
+    It "does NOT exclude single-character meaningful tokens like R (issue #84 design requirement)" {
+        # "Virtua Fighter 5" vs "Virtua Fighter 5 R" are two separate real DAT
+        # entries -- the trailing "R" is a real differentiator and must survive.
+        $tokens = Get-MeaningfulTitleTokens "Virtua Fighter 5 R"
+        $tokens | Should -Contain 'r'
+    }
+}
+
+Describe "Issue #84: Pass-2 dat-name fuzzy fallback rejects candidates with extra meaningful title tokens" {
+    # Replicates the exact extra-token computation Register-Games' Pass-2 fuzzy
+    # fallback performs (TeknoParrot-Manager.ps1, "DatIndex (pass2)" block) against
+    # real title pairs -- Register-Games itself is excluded from this suite (see
+    # file header: covers pure/read-only helpers only, not live install logic), so
+    # this tests the actual decision-determining function directly with the real
+    # strings that matter, the same way the existing Get-DiceSimilarity tests
+    # document scoring behavior without invoking Register-Games as a black box.
+    BeforeAll {
+        function Get-ExtraCandidateTokens {
+            param([string]$FolderName, [string]$CandidateName)
+            $candidateTokens = Get-MeaningfulTitleTokens $CandidateName
+            $folderTokens    = Get-MeaningfulTitleTokens $FolderName
+            return @($candidateTokens | Where-Object { -not $folderTokens.Contains($_) })
+        }
+    }
+
+    It "blocks Zoids Infinity matching Zoids Infinity EX (real DAT entries, Dice 0.923)" {
+        $extra = Get-ExtraCandidateTokens -FolderName "Zoids Infinity (2004)[Namco System 246][TP]" `
+                                           -CandidateName "Zoids Infinity EX (2.10)(2006)[Namco System 246][TP]"
+        $extra.Count | Should -BeGreaterThan 0
+        $extra | Should -Contain 'ex'
+    }
+    It "blocks Zoids Infinity matching Zoids Infinity EX Plus (real DAT entries, Dice 0.800)" {
+        $extra = Get-ExtraCandidateTokens -FolderName "Zoids Infinity (2004)[Namco System 246][TP]" `
+                                           -CandidateName "Zoids Infinity EX Plus (B3900107A Ver 2.10J)(2006)[Namco System 256][TP]"
+        $extra.Count | Should -BeGreaterThan 0
+        $extra | Should -Contain 'ex'
+        $extra | Should -Contain 'plus'
+    }
+    It "blocks Street Fighter IV matching Super Street Fighter IV Arcade Edition (prefix-modifier case)" {
+        $extra = Get-ExtraCandidateTokens -FolderName "Street Fighter IV (2008)[PC][TP]" `
+                                           -CandidateName "Super Street Fighter IV Arcade Edition (2010-11-04)(EXP,Standalone)[Taito Type X2][TP]"
+        $extra.Count | Should -BeGreaterThan 0
+        $extra | Should -Contain 'super'
+        $extra | Should -Contain 'arcade'
+        $extra | Should -Contain 'edition'
+    }
+    It "blocks Battle Gear 4 matching Battle Gear 4 Tuned (real DAT entries)" {
+        $extra = Get-ExtraCandidateTokens -FolderName "Battle Gear 4 (2005)[Taito Type X+][TP]" `
+                                           -CandidateName "Battle Gear 4 Tuned (2.08)(2007-06-18)[Taito Type X+][TP]"
+        $extra.Count | Should -BeGreaterThan 0
+        $extra | Should -Contain 'tuned'
+    }
+    It "positive control: allows a legitimate near-miss that differs only by metadata, not title words" {
+        # This is the dominant real-world Pass-2 fuzzy-fallback case (confirmed by
+        # scanning the actual DAT: most near-misses are date/version/region
+        # metadata differences, not title-word differences) -- same pair already
+        # covered by Resolve-ExtractedGameFolder's "matches Battle Gear 3 despite
+        # harmless DAT year/date metadata differences" test, confirming this new
+        # #84 rule does not introduce a new block for the case Pass-2 primarily
+        # exists to handle.
+        $extra = Get-ExtraCandidateTokens -FolderName "Battle Gear 3 (2.08J)(2002)[Namco System 246][TP]" `
+                                           -CandidateName "Battle Gear 3 (2.08J)(2003-04-11)[Namco System 246][TP]"
+        $extra.Count | Should -Be 0
+    }
+    It "known scope boundary: does not extend typo tolerance to whole-word differences within a title (documented, not a regression)" {
+        # This rule compares whole meaningful WORDS, not per-word bigram similarity
+        # -- unlike Get-DiceSimilarity's existing typo tolerance (see the separate
+        # "NicktoonsNitro"/"NicktoonNitro" characterization test, which exercises
+        # Resolve-BestFuzzyMatch's Pass-3 PROFILE-CODE fuzzy matching, a different
+        # code path this issue does not touch). A single-character typo inside one
+        # word of a multi-word Pass-2 DAT title would still be treated as an
+        # "extra" token here. Real near-misses in this codebase's actual DAT are
+        # overwhelmingly metadata differences (see the positive-control test
+        # above), not within-title typos, so this is an accepted, documented scope
+        # boundary of the minimal #84 design, not a silent gap.
+        $extra = Get-ExtraCandidateTokens -FolderName "Nicktoons Nitro (2009)[Raw Thrills PC][TP]" `
+                                           -CandidateName "Nicktoon Nitro (2009)[Raw Thrills PC][TP]"
+        $extra.Count | Should -BeGreaterThan 0
     }
 }
 

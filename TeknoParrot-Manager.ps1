@@ -832,6 +832,44 @@ function Get-NormalizedGameKey {
     return $s.ToLower()
 }
 
+# Closed, stable set of English function words -- grammar, not game-naming
+# convention, so unlike an edition-marker vocabulary this does not need
+# ongoing curation as new titles/re-releases appear. See issue #84.
+$script:TitleTokenStopWords = [System.Collections.Generic.HashSet[string]]::new(
+    [string[]]@('the', 'of', 'a', 'an', 'and', 'vs', 'vs.', 'in', 'for', 'to'),
+    [System.StringComparer]::OrdinalIgnoreCase)
+
+# Extracts the "meaningful" words from a game title for Register-Games' Pass-2
+# dat-name fuzzy-fallback guard (issue #84) -- a separate extraction path from
+# Get-NormalizedGameKey, not a reuse of it: that function intentionally keeps
+# some parenthetical content (e.g. "(Special Edition)") for its own bigram-key
+# purposes, while this needs real word boundaries to do a word-SET comparison.
+# Strips all parenthetical/bracket content wholesale rather than trying to
+# classify "meaningful vs. noise" parenthetical text -- every confirmed real
+# edition/variant marker (EX, Plus, Tuned, R, DX, Special, SIGN, Rev2, Climax,
+# Dark Resurrection, Fated Retribution) appears as plain title text, never
+# inside parens, so this scope is sufficient without solving that harder,
+# separate problem. Excludes pure digits and roman numerals I-X (sequel
+# numbering, already handled elsewhere by digit-preserving normalization) and
+# the stop-word list above. Deliberately does NOT exclude short tokens --
+# single-character markers like "R" are real, confirmed differentiators
+# (e.g. "Virtua Fighter 5" vs "Virtua Fighter 5 R", both real dat entries).
+function Get-MeaningfulTitleTokens {
+    param([string]$title)
+    $result = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if (-not $title) { return $result }
+    $stripped = $title -replace '\[[^\]]*\]', '' -replace '\([^\)]*\)', ''
+    $romanNumerals = 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x'
+    foreach ($m in [regex]::Matches($stripped, '[\p{L}0-9]+')) {
+        $w = $m.Value.ToLower()
+        if ($w -match '^\d+$') { continue }
+        if ($romanNumerals -contains $w) { continue }
+        if ($script:TitleTokenStopWords.Contains($w)) { continue }
+        [void]$result.Add($w)
+    }
+    return $result
+}
+
 # Sorensen-Dice coefficient on character bigrams for two pre-normalised strings.
 # Returns [0.0, 1.0]. Strings shorter than 2 chars cannot form bigrams -> 0.0.
 function Get-DiceSimilarity {
@@ -3319,8 +3357,12 @@ function Build-DatIndexFromStream {
                     $normName = Get-NormalizedGameKey $gameName
                     if ($normName -and -not $index.ContainsKey($normName)) {
                         $index[$normName] = [pscustomobject]@{
-                            ProfileCode = $profCode.Trim()
-                            Executable  = $exePath.Trim()
+                            ProfileCode  = $profCode.Trim()
+                            Executable   = $exePath.Trim()
+                            # Retained (not just the normalized key) so Register-Games'
+                            # Pass-2 fuzzy fallback can compare meaningful title words
+                            # against the folder's own name -- see issue #84.
+                            OriginalName = $gameName.Trim()
                         }
                     }
                 }
@@ -6180,8 +6222,23 @@ function Register-Games {
                     if ($score -gt $bestScore) { $bestScore = $score; $bestKey = $dk }
                 }
                 if ($bestScore -ge $FuzzyAutoThreshold -and $null -ne $bestKey) {
-                    $datEntry = $datIndex[$bestKey]
-                    $datScore = $bestScore
+                    # Issue #84: reject a fuzzy dat-name candidate that introduces
+                    # extra meaningful title words the folder doesn't have -- e.g.
+                    # a "Zoids Infinity" folder must not silently register against
+                    # "Zoids Infinity EX Plus" just because the bigram score alone
+                    # clears $FuzzyAutoThreshold. A hard block (folder stays
+                    # unmatched, same as "no dat entry found"), not a score
+                    # penalty or a higher threshold -- see #84's design.
+                    $candidateName   = $datIndex[$bestKey].OriginalName
+                    $candidateTokens = Get-MeaningfulTitleTokens $candidateName
+                    $folderTokens    = Get-MeaningfulTitleTokens $origName
+                    $extraTokens     = @($candidateTokens | Where-Object { -not $folderTokens.Contains($_) })
+                    if ($extraTokens.Count -gt 0) {
+                        Write-Log ("DatIndex (pass2): rejected fuzzy candidate '{0}' for folder '{1}' -- extra title token(s): {2} (score {3:F2})" -f $candidateName, $origName, ($extraTokens -join ', '), $bestScore)
+                    } else {
+                        $datEntry = $datIndex[$bestKey]
+                        $datScore = $bestScore
+                    }
                 }
             }
 
