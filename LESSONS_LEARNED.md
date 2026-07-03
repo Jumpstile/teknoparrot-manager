@@ -7,6 +7,46 @@ outcome -- the ones most likely to repeat.
 
 ---
 
+## Governance exception: PR #87 and #89 merged by admin override (branch protection required 1 review)
+
+**What happened.** `main`'s branch protection requires 1 approving review before
+merge. PR #87 (pcsx2x6 fix, in-script auto-update hardening, TPM Certification
+Suite fixes) and PR #89 (a follow-up `$ScriptVersion` correction) were both
+authored and merged by the same AI assistant session in the same conversation.
+GitHub blocks self-approval outright (`Can not approve your own pull request`),
+and no separate Independent Reviewer account was configured for this repository
+at the time. Both PRs were merged via `gh pr merge --admin`, bypassing the
+required-review check, after explicit repository-owner authorization to proceed
+with each specific merge.
+
+**Why this was judged acceptable in the moment.** CI (ASCII/parse/PSScriptAnalyzer/
+Pester via `.github/workflows/ci.yml`) was green on both PRs before merge. This
+work is normal engineering (bug fixes and a version-string correction), not a
+production-release action under the Release Governance Standard, so it did not
+require Release Manager sign-off on *what* to merge -- only the *mechanism*
+(admin override instead of a genuine independent review) was an exception to the
+standing workflow. Real-arcade-machine certification was run afterward against
+the exact merged commit (`a85aa269`) and returned CERTIFIED 8/8 (100%), which is
+strong evidence the bypassed review didn't let anything broken through this time.
+
+**Why this is still recorded as an exception, not a pattern.** "CI was green" and
+"certification passed afterward" are both evidence the change was *probably*
+safe -- they are not a substitute for an actual second set of eyes before merge,
+which is the entire point of requiring a review. Getting away with it once is not
+the same as the practice being sound. Per `CONSTITUTION.md`'s Release Governance
+Standard ("Any engineering role may recommend release readiness. Only the Release
+Manager may authorize a production release" -- and, by the same logic, only an
+actual reviewer authorizes bypassing a review requirement), normal PR review
+remains the standing rule. This entry exists so a future session doesn't read
+"admin override was used successfully" in the git history and conclude it's a
+normal or preferred path.
+
+**What should happen instead going forward.** Either configure a genuine second
+reviewer (a human, or an independent AI reviewer account distinct from the one
+authoring the PR) so self-approval is never the blocker, or route merge decisions
+through the repository owner directly rather than an AI-invoked admin override,
+even when the owner has authorized the specific change being merged.
+
 ## TPM Certification Suite (commit bb2a160): [scriptblock]::Create() dot-sourcing breaks cross-file Pester module mocking
 
 **What happened.** A real arcade-machine certification run reported 10 Pester
