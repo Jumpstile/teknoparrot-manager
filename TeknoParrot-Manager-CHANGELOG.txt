@@ -7,6 +7,25 @@
 
 
 -------------------------------------------------------------------------------
+  v1.0  (2026-07-03)  -- pcsx2x6 crosshair path fix, auto-update reliability
+  ------------------------------------------------------------
+  Fix (issue #79): pcsx2x6 crosshair deployment now writes P1.png/P2.png
+  to the official upstream location, pcsx2x6\TeknoParrot\crosshairs\,
+  instead of the emulator folder root. Files already deployed at the old
+  location are left in place, not deleted; cursor_path in PCSX2.ini is
+  still written as an explicit override either way.
+
+  Fix (issue #86): the in-script Check for Updates flow could report
+  "Update installed successfully" without actually replacing the script,
+  if the destination file was briefly locked (for example by antivirus)
+  at the moment of replacement. The update now correctly reports failure
+  and leaves the original script and its backup untouched in that case.
+
+  Clarity: the standalone updater helper's console output now reads
+  "Installed TPM version" / "Latest TPM release" instead of the more
+  ambiguous "Local version" / "Latest release".
+
+-------------------------------------------------------------------------------
   v0.99.44 BETA  (2026-07-02)  -- release hygiene and regression hardening
   ------------------------------------------------------------
   Hardening: live file downloads now share a hardened download pipeline

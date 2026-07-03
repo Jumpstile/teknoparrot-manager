@@ -86,6 +86,37 @@ full bisection. Do not revert this to `[scriptblock]::Create()` without
 re-running the full `Tests/` folder to confirm the destructive-path suite
 still passes -- a single-file test run will not catch the regression.
 
+## CI vs. Full Release Certification
+
+These are deliberately different in scope, and neither substitutes for the
+other.
+
+**CI (`.github/workflows/ci.yml`)** runs on every push and pull request
+against `main`. It is intentionally narrow and fast: ASCII/parse checks on
+`TeknoParrot-Manager.ps1`, PSScriptAnalyzer against that same file, and
+`Tests/TeknoParrot-Manager.Tests.ps1` only -- not the rest of the `Tests/`
+folder. Its job is to catch an obviously broken commit before it lands,
+in minutes, without needing a real TeknoParrot install.
+
+**Full release certification** (`scripts/Run-TPM-Tests.ps1`, or
+`scripts\Run-TPM-Certification-Suite.bat` for a double-click run) is
+broader and slower: the entire `Tests/` folder together (not file by
+file), PSScriptAnalyzer, a real-install health check, pcsx2x6-specific
+verification, backup-before-touch safety checks, and a certification
+scorecard, run against an actual TeknoParrot installation.
+
+This difference is not incidental. The cross-file Pester mock
+interference documented above (`Tests/TPMCertificationHarness.Tests.ps1`
+vs. `Tests/TpmAutoUpdate.DestructivePath.Tests.ps1`) could **only** be
+caught by running the full `Tests/` folder together -- CI's narrower,
+single-file scope would never have surfaced it, since CI does not run
+those two files in the same Pester invocation. A green CI run is
+necessary before merging, but it is not evidence that a change is safe
+at the level full certification checks. Do not treat CI passing as a
+substitute for running full certification before a release; do not treat
+a CI job in isolation as sufficient coverage for a change to the test
+suite's own cross-file behavior.
+
 ## Guiding Principle
 
 Passing tests does not automatically certify a build. Certification requires all applicable quality gates to pass.
