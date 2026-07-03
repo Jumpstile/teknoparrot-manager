@@ -208,6 +208,12 @@ function New-CertificationScorecard {
         'not applicable -- no pcsx2x6 in this install'
     }
 
+    $vbtDetails = if ($Results.VirtualBetaTester) {
+        "total=$($Results.VirtualBetaTester.Total) passed=$($Results.VirtualBetaTester.Passed) failed=$($Results.VirtualBetaTester.Failed)"
+    } else {
+        'not collected'
+    }
+
     $scoreItems = @(
         [pscustomobject]@{Area='Repository'; Passed=($checkMap['Repository available'] -and $checkMap['Repository clean']); Details=$Results.GitStatus},
         [pscustomobject]@{Area='Pester'; Passed=($Results.Pester -and $Results.Pester.Failed -eq 0); Details=("total={0} passed={1} failed={2}" -f $Results.Pester.Total, $Results.Pester.Passed, $Results.Pester.Failed)},
@@ -216,7 +222,8 @@ function New-CertificationScorecard {
         [pscustomobject]@{Area='Backups'; Passed=($Results.Backup.UserProfiles -or $Results.Backup.GameProfiles); Details=("UserProfiles={0} GameProfiles={1}" -f $Results.Backup.UserProfiles, $Results.Backup.GameProfiles)},
         [pscustomobject]@{Area='Smoke File Safety'; Passed=$snapshotClean; Details='no unexpected changes in smoke mode'},
         [pscustomobject]@{Area='Artifacts'; Passed=((Test-Path -LiteralPath $json -PathType Leaf) -and (Test-Path -LiteralPath $md -PathType Leaf)); Details=$reportDir},
-        [pscustomobject]@{Area='pcsx2x6 crosshair path (issue #79)'; Passed=[bool]$checkMap['pcsx2x6 crosshair path (issue #79)']; Details=$pcsx2x6Details}
+        [pscustomobject]@{Area='pcsx2x6 crosshair path (issue #79)'; Passed=[bool]$checkMap['pcsx2x6 crosshair path (issue #79)']; Details=$pcsx2x6Details},
+        [pscustomobject]@{Area='Virtual Beta Tester coverage (issue #88 phase 1)'; Passed=($Results.VirtualBetaTester -and $Results.VirtualBetaTester.Total -gt 0 -and $Results.VirtualBetaTester.Failed -eq 0); Details=$vbtDetails}
     )
 
     $passedCount = @($scoreItems | Where-Object { $_.Passed }).Count
@@ -328,6 +335,33 @@ try {
     $pesterSummary | ConvertTo-Json -Depth 4 | Out-File (Join-Path $reportDir 'Pester-summary.json') -Encoding utf8
     $results.Pester = $pesterSummary
     Add-CheckResult 'Pester tests' ($pesterSummary.Failed -eq 0) "total=$($pesterSummary.Total) passed=$($pesterSummary.Passed) failed=$($pesterSummary.Failed)"
+
+    # Issue #88 Phase 1: report Virtual Beta Tester coverage as its own
+    # visible line, not folded anonymously into the overall Pester count --
+    # a scorecard reader should be able to see this coverage exists without
+    # opening individual test files. Derived from the same PassThru result
+    # already collected above, filtered to Tests/VirtualBetaTester*.Tests.ps1
+    # by source file, not by name pattern (robust to Describe/It renames).
+    $vbtCandidate = $pesterResult
+    if ($pesterResult -is [array]) {
+        $vbtCandidate = @($pesterResult) | Where-Object {
+            $_ -and ($_.PSObject.Properties.Name -contains 'Tests')
+        } | Select-Object -Last 1
+    }
+    $vbtTests = @()
+    if ($vbtCandidate -and $vbtCandidate.PSObject.Properties.Name -contains 'Tests') {
+        $vbtTests = @($vbtCandidate.Tests | Where-Object {
+            $_.ScriptBlock -and $_.ScriptBlock.File -and ([System.IO.Path]::GetFileName($_.ScriptBlock.File) -like 'VirtualBetaTester.*.Tests.ps1')
+        })
+    }
+    $vbtPassed = @($vbtTests | Where-Object { $_.Result -eq 'Passed' }).Count
+    $vbtFailed = @($vbtTests | Where-Object { $_.Result -eq 'Failed' }).Count
+    $results.VirtualBetaTester = [pscustomobject]@{
+        Total  = $vbtTests.Count
+        Passed = $vbtPassed
+        Failed = $vbtFailed
+    }
+    Add-CheckResult 'Virtual Beta Tester coverage (issue #88 phase 1)' ($vbtTests.Count -gt 0 -and $vbtFailed -eq 0) "total=$($vbtTests.Count) passed=$vbtPassed failed=$vbtFailed"
 
     # Never hidden by -VerbosityLevel Summary: if anything actually failed,
     # print exactly what, regardless of console verbosity. Also persisted to
