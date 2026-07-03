@@ -1,6 +1,14 @@
 param(
     [string]$RepoPath,
-    [string]$TeknoParrotRoot = "W:\Emulators\TeknoParrot",
+    # No default -- a prior default of "W:\Emulators\TeknoParrot" pointed at a
+    # location that is not actually a TeknoParrot install on any machine this
+    # has been run from (confirmed against a real run). A wrong silent default
+    # here would make every downstream check -- pcsx2x6 verification, install
+    # health, GameProfiles/UserProfiles backups -- run against nothing, and
+    # certify a real install that was never actually checked. Always pass the
+    # real path explicitly.
+    [Parameter(Mandatory = $true)]
+    [string]$TeknoParrotRoot,
     [string]$HarnessRoot,
     [switch]$RunUnattendedTPM,
     [switch]$NoPwshRelaunch

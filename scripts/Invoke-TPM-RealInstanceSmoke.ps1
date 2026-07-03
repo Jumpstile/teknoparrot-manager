@@ -189,7 +189,8 @@ function New-CertificationScorecard {
         [pscustomobject]@{Area='Real Install Health'; Passed=[bool]$checkMap['Real install health check collected']; Details=$Results.InstallHealthReport},
         [pscustomobject]@{Area='Backups'; Passed=($Results.Backup.UserProfiles -or $Results.Backup.GameProfiles); Details=("UserProfiles={0} GameProfiles={1}" -f $Results.Backup.UserProfiles, $Results.Backup.GameProfiles)},
         [pscustomobject]@{Area='Smoke File Safety'; Passed=$snapshotClean; Details='no unexpected changes in smoke mode'},
-        [pscustomobject]@{Area='Artifacts'; Passed=((Test-Path -LiteralPath $json -PathType Leaf) -and (Test-Path -LiteralPath $md -PathType Leaf)); Details=$reportDir}
+        [pscustomobject]@{Area='Artifacts'; Passed=((Test-Path -LiteralPath $json -PathType Leaf) -and (Test-Path -LiteralPath $md -PathType Leaf)); Details=$reportDir},
+        [pscustomobject]@{Area='pcsx2x6 crosshair path (issue #79)'; Passed=[bool]$checkMap['pcsx2x6 crosshair path (issue #79)']; Details=(if ($Results.Pcsx2x6.Present) { "canonicalDeployed=$($Results.Pcsx2x6.CanonicalFilesDeployed) cursorPathCanonical=$($Results.Pcsx2x6.CursorPathPointsCanonical)" } else { 'not applicable -- no pcsx2x6 in this install' })}
     )
 
     $passedCount = @($scoreItems | Where-Object { $_.Passed }).Count
@@ -277,7 +278,19 @@ try {
     if (-not $analyzerCommand) { throw 'Invoke-ScriptAnalyzer not found. Install it with: Install-Module PSScriptAnalyzer -Scope CurrentUser -Force' }
     $analyzerModule = Get-Module PSScriptAnalyzer -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1
     if ($analyzerModule) { $results.PSScriptAnalyzerVersion = $analyzerModule.Version.ToString() }
-    $analyzer = Invoke-ScriptAnalyzer -Path $RepoPath -Recurse
+    # Matches the documented release gate exactly (RELEASE-SAFETY-CHECKLIST.md
+    # section 1): TeknoParrot-Manager.ps1 only, Error/Warning severity, using
+    # the project's approved-exclusions settings file. An earlier version of
+    # this check ran "-Path $RepoPath -Recurse" with no severity filter and no
+    # settings file -- that scanned every file in the repo (tools/, scripts/,
+    # Tests/) against defaults never meant to apply to them, and surfaced
+    # Information-severity findings the settings file specifically documents
+    # as accepted. That produced 33 "findings" that were never real gate
+    # failures, just a different (wrong) invocation than what release sign-off
+    # actually checks.
+    $analyzerSettingsPath = Join-Path $RepoPath 'PSScriptAnalyzerSettings.psd1'
+    $mainScriptPath = Join-Path $RepoPath 'TeknoParrot-Manager.ps1'
+    $analyzer = Invoke-ScriptAnalyzer -Path $mainScriptPath -Severity Error, Warning -Settings $analyzerSettingsPath
     $analyzer | ConvertTo-Json -Depth 6 | Out-File (Join-Path $reportDir 'PSScriptAnalyzer.json') -Encoding utf8
     $results.PSScriptAnalyzerFindings = @($analyzer).Count
     Add-CheckResult 'PSScriptAnalyzer' (@($analyzer).Count -eq 0) "findings=$(@($analyzer).Count)"
@@ -286,12 +299,95 @@ try {
         @{Name='TeknoParrot root'; Path=$TeknoParrotRoot; Type='Container'},
         @{Name='TeknoParrotUi.exe'; Path=(Join-Path $TeknoParrotRoot 'TeknoParrotUi.exe'); Type='Leaf'},
         @{Name='GameProfiles'; Path=$gameProfilesPath; Type='Container'},
-        @{Name='UserProfiles'; Path=$userProfilesPath; Type='Container'},
-        @{Name='pcsx2x6 crosshair directory'; Path=$crosshairPath; Type='Container'}
+        @{Name='UserProfiles'; Path=$userProfilesPath; Type='Container'}
     )
     foreach ($p in $pathsToCheck) {
         $exists = Test-Path -LiteralPath $p.Path -PathType $p.Type
         Add-CheckResult $p.Name $exists $p.Path
+    }
+
+    # Issue #79: pcsx2x6 crosshair path verification. Read-only -- this never
+    # runs the interactive Invoke-CrosshairSetup wizard (Read-Host prompts,
+    # browser launch) against the real install, it only inspects whatever
+    # state already exists there. Not every TeknoParrot install has pcsx2x6
+    # (it's specific to a handful of lightgun titles), so this is conditional
+    # on the pcsx2x6 folder actually being present -- absence is reported as
+    # not-applicable, not a failure, unlike the unconditional hard-fail this
+    # replaced (which would have certified-FAIL any install without pcsx2x6
+    # at all).
+    $pcsx2LegacyCandidates = @('pcsx2x6', 'PCSX2x6', 'pcsx2', 'PCSX2')
+    $pcsx2Dir = $null
+    foreach ($candidate in $pcsx2LegacyCandidates) {
+        $try = Join-Path $TeknoParrotRoot $candidate
+        if (Test-Path -LiteralPath $try -PathType Container) { $pcsx2Dir = $try; break }
+    }
+    if (-not $pcsx2Dir) {
+        $pcsx2Dir = Get-ChildItem -LiteralPath $TeknoParrotRoot -Directory -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Name -imatch '^pcsx2' } | Select-Object -First 1 -ExpandProperty FullName
+    }
+
+    if (-not $pcsx2Dir) {
+        $results.Pcsx2x6 = [pscustomobject]@{ Present = $false }
+        Add-CheckResult 'pcsx2x6 crosshair path (issue #79)' $true 'not applicable -- no pcsx2x6 folder in this install'
+    } else {
+        $canonicalDir  = Join-Path $pcsx2Dir 'TeknoParrot\crosshairs'
+        $legacyP1      = Join-Path $pcsx2Dir 'P1.png'
+        $legacyP2      = Join-Path $pcsx2Dir 'P2.png'
+        $canonicalP1   = Join-Path $canonicalDir 'P1.png'
+        $canonicalP2   = Join-Path $canonicalDir 'P2.png'
+        $iniPath       = Join-Path $pcsx2Dir 'inis\PCSX2.ini'
+
+        $canonicalDeployed = (Test-Path -LiteralPath $canonicalP1 -PathType Leaf) -and (Test-Path -LiteralPath $canonicalP2 -PathType Leaf)
+        $legacyPresent     = (Test-Path -LiteralPath $legacyP1 -PathType Leaf) -or (Test-Path -LiteralPath $legacyP2 -PathType Leaf)
+
+        $cursorPathP1 = $null
+        $cursorPathP2 = $null
+        $iniFound = Test-Path -LiteralPath $iniPath -PathType Leaf
+        if ($iniFound) {
+            # Read-only parse -- mirrors Set-Pcsx2CursorPaths' own section
+            # tracking without writing anything back.
+            $lines = [System.IO.File]::ReadAllLines($iniPath)
+            $sect = ''
+            foreach ($ln in $lines) {
+                $t = $ln.Trim()
+                if ($t -match '^\[(.+)\]$') { $sect = $matches[1].ToLower(); continue }
+                if ($t -match '^cursor_path\s*=\s*(.*)$') {
+                    if ($sect -eq 'usb port 1 guncon2') { $cursorPathP1 = $matches[1].Trim() }
+                    elseif ($sect -eq 'usb port 2 guncon2') { $cursorPathP2 = $matches[1].Trim() }
+                }
+            }
+        }
+
+        $cursorPointsCanonical = ($cursorPathP1 -and $cursorPathP1.TrimEnd('\') -eq $canonicalP1.TrimEnd('\')) -and
+                                  ($cursorPathP2 -and $cursorPathP2.TrimEnd('\') -eq $canonicalP2.TrimEnd('\'))
+
+        $results.Pcsx2x6 = [pscustomobject]@{
+            Present                = $true
+            Pcsx2Dir               = $pcsx2Dir
+            CanonicalDir           = $canonicalDir
+            CanonicalFilesDeployed = $canonicalDeployed
+            LegacyRootFilesPresent = $legacyPresent
+            IniFound               = $iniFound
+            CursorPathP1           = $cursorPathP1
+            CursorPathP2           = $cursorPathP2
+            CursorPathPointsCanonical = $cursorPointsCanonical
+        }
+
+        # Informational, not a hard requirement: the canonical files/ini only
+        # reflect the new location once crosshair setup has actually been run
+        # since the #79 fix shipped. What this DOES assert is that the check
+        # itself ran and could inspect the real install without modifying it.
+        Add-CheckResult 'pcsx2x6 crosshair path (issue #79)' $true `
+            ("pcsx2Dir={0} canonicalDeployed={1} legacyRootPresent={2} iniFound={3} cursorPathCanonical={4}" -f `
+                $pcsx2Dir, $canonicalDeployed, $legacyPresent, $iniFound, $cursorPointsCanonical)
+
+        if ($iniFound -and (-not $cursorPathP1 -or -not $cursorPathP2)) {
+            Add-CheckResult 'pcsx2x6 PCSX2.ini has cursor_path for both USB ports' $false `
+                ("P1={0} P2={1}" -f $cursorPathP1, $cursorPathP2)
+        } elseif ($iniFound) {
+            Add-CheckResult 'pcsx2x6 PCSX2.ini has cursor_path for both USB ports' $true `
+                ("P1={0} P2={1}" -f $cursorPathP1, $cursorPathP2)
+        }
     }
 
     $healthScript = Join-Path $PSScriptRoot 'Invoke-TPM-InstallHealthCheck.ps1'

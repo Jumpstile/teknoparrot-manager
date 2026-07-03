@@ -47,8 +47,8 @@ $release = Get-LatestRelease -Owner $Owner -Repository $Repository
 $latestVersionText = ($release.tag_name -replace '^v', '').Trim()
 $latestVersion = ConvertTo-TpmVersion -VersionText $latestVersionText
 
-Write-UpdaterInfo "Local version : $localVersionText"
-Write-UpdaterInfo "Latest release: $($release.tag_name)"
+Write-UpdaterInfo "Installed TPM version: $localVersionText"
+Write-UpdaterInfo "Latest TPM release   : $($release.tag_name)"
 
 if ($latestVersion -le $localVersion) {
     Write-UpdaterInfo 'Already current. No update needed.'
