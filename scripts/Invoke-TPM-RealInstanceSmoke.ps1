@@ -68,6 +68,7 @@ $results = [ordered]@{
     RepoPath = $RepoPath
     TeknoParrotRoot = $TeknoParrotRoot
     HarnessRoot = $HarnessRoot
+    PowerShellVersion = $PSVersionTable.PSVersion.ToString()
     Checks = @()
 }
 
@@ -77,18 +78,25 @@ Add-Report "Timestamp: $stamp"
 Add-Report "Repo: $RepoPath"
 Add-Report "TeknoParrot Root: $TeknoParrotRoot"
 Add-Report "Harness Root: $HarnessRoot"
+Add-Report "PowerShell version: $($PSVersionTable.PSVersion)"
 Add-Report ""
 
 Push-Location $RepoPath
 
 try {
     Add-Report "## Git Status"
+    $gitVersion = git --version
     $gitStatus = git status --short
     if ($LASTEXITCODE -ne 0) { throw "git status failed" }
     if (-not $gitStatus) { $gitStatus = "(clean)" }
+    $gitCommit = git rev-parse HEAD
+    Add-Report "Git version: $gitVersion"
+    Add-Report "Commit: $gitCommit"
     Add-Report '```'
     Add-Report ($gitStatus | Out-String)
     Add-Report '```'
+    $results.GitVersion = $gitVersion
+    $results.Commit = $gitCommit
 
     Add-Report "## Backup"
     $backupItems = [ordered]@{}
@@ -110,13 +118,38 @@ try {
     Add-Report ""
 
     Add-Report "## Pester"
-    Invoke-Pester -Path $RepoPath -Output Detailed -PassThru |
-        ConvertTo-Json -Depth 8 |
-        Out-File (Join-Path $reportDir "Pester.json") -Encoding utf8
-    Add-Report "Pester completed. See Pester.json."
+    $pesterCommand = Get-Command Invoke-Pester -ErrorAction SilentlyContinue
+    if (-not $pesterCommand) {
+        throw "Invoke-Pester not found. Install it with: Install-Module Pester -Scope CurrentUser -Force"
+    }
+
+    $pesterModule = Get-Module Pester -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1
+    if ($pesterModule) {
+        Add-Report "Pester module version: $($pesterModule.Version)"
+        $results.PesterVersion = $pesterModule.Version.ToString()
+    }
+
+    $pesterResultPath = Join-Path $reportDir "Pester.json"
+    $pesterOutputText = Join-Path $reportDir "Pester-output.txt"
+
+    $pesterResult = Invoke-Pester -Path $RepoPath -PassThru 2>&1 | Tee-Object -FilePath $pesterOutputText
+    $pesterResult | ConvertTo-Json -Depth 8 | Out-File $pesterResultPath -Encoding utf8
+
+    Add-Report "Pester completed. See Pester.json and Pester-output.txt."
     Add-Report ""
 
     Add-Report "## PSScriptAnalyzer"
+    $analyzerCommand = Get-Command Invoke-ScriptAnalyzer -ErrorAction SilentlyContinue
+    if (-not $analyzerCommand) {
+        throw "Invoke-ScriptAnalyzer not found. Install it with: Install-Module PSScriptAnalyzer -Scope CurrentUser -Force"
+    }
+
+    $analyzerModule = Get-Module PSScriptAnalyzer -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1
+    if ($analyzerModule) {
+        Add-Report "PSScriptAnalyzer module version: $($analyzerModule.Version)"
+        $results.PSScriptAnalyzerVersion = $analyzerModule.Version.ToString()
+    }
+
     $analyzer = Invoke-ScriptAnalyzer -Path $RepoPath -Recurse
     $analyzer | ConvertTo-Json -Depth 6 | Out-File (Join-Path $reportDir "PSScriptAnalyzer.json") -Encoding utf8
 
