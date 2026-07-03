@@ -5616,7 +5616,22 @@ function Invoke-ManagerUpdateInstall {
         Test-ManagerUpdateExtractedScript -Path $extractedScriptPath | Out-Null
 
         Write-Host "  Installing update..." -ForegroundColor DarkGray
-        Move-Item -LiteralPath $extractedScriptPath -Destination $ScriptPath -Force
+        # -ErrorAction Stop is required here, not optional: $ErrorActionPreference
+        # is never set anywhere in this script (defaults to 'Continue'), so a
+        # sharing-violation failure (e.g. AV briefly holding the file open) would
+        # otherwise print a red error and silently fall through as if the move had
+        # succeeded -- reporting "Update installed" and returning $true while the
+        # live script was never actually replaced. Confirmed empirically: this
+        # was a real, reproducible bug, not a theoretical one -- caught by a
+        # destructive-path test that locks the destination file during the move.
+        Move-Item -LiteralPath $extractedScriptPath -Destination $ScriptPath -Force -ErrorAction Stop
+        # Defense-in-depth, matching New-ManagerUpdateBackup's own post-copy
+        # verification pattern: confirm the replacement actually landed before
+        # declaring success, rather than trusting Move-Item's absence of an
+        # exception alone.
+        if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) {
+            throw "Update replacement did not complete: $ScriptPath not found after Move-Item."
+        }
         $extractedScriptPath = $null
 
         Write-Host ""
