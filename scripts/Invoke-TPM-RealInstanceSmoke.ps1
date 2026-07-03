@@ -25,6 +25,8 @@ param(
 $ErrorActionPreference = "Stop"
 $runTimer = [System.Diagnostics.Stopwatch]::StartNew()
 
+. (Join-Path $PSScriptRoot 'Resolve-Pcsx2Directory.ps1')
+
 $RepoPath = (Resolve-Path -LiteralPath $RepoPath).Path
 if (!(Test-Path -LiteralPath $TeknoParrotRoot -PathType Container)) {
     throw "TeknoParrot root not found: $TeknoParrotRoot"
@@ -273,19 +275,28 @@ try {
     Add-CheckResult 'Repository available' $true "branch=$gitBranch commit=$gitCommit"
     Add-CheckResult 'Repository clean' $repoClean $gitStatusText
 
+    # Resolved once, here, and reused for every pcsx2x6-related check below
+    # (backup, snapshot, issue #79 verification, scorecard) -- previously
+    # backup and snapshot both hardcoded the literal folder name "pcsx2x6"
+    # while the #79 block below did a proper candidate search, so an install
+    # where the real folder wasn't literally named "pcsx2x6" would silently
+    # skip backup/snapshot coverage while the #79 check still found it
+    # correctly. Flagged by Codex review as a required-before-1.0 fix.
+    $pcsx2Dir = Resolve-Pcsx2Directory -TeknoParrotRoot $TeknoParrotRoot
+    $crosshairPath = if ($pcsx2Dir) { Join-Path $pcsx2Dir 'TeknoParrot\crosshairs' } else { '' }
+
     $backupItems = [ordered]@{}
     $backupItems.UserProfiles = Copy-IfExists (Join-Path $TeknoParrotRoot 'UserProfiles') 'UserProfiles'
     $backupItems.GameProfiles = Copy-IfExists (Join-Path $TeknoParrotRoot 'GameProfiles') 'GameProfiles'
-    $backupItems.Pcsx2x6Crosshairs = Copy-IfExists (Join-Path $TeknoParrotRoot 'pcsx2x6\TeknoParrot\crosshairs') 'pcsx2x6-crosshairs'
+    $backupItems.Pcsx2x6Crosshairs = if ($crosshairPath) { Copy-IfExists $crosshairPath 'pcsx2x6-crosshairs' } else { $false }
     $backupItems.Config = Copy-IfExists (Join-Path $RepoPath 'TeknoParrot-Manager.config.json') 'TeknoParrot-Manager.config.json'
     $results.Backup = $backupItems
 
     $userProfilesPath = Join-Path $TeknoParrotRoot 'UserProfiles'
     $gameProfilesPath = Join-Path $TeknoParrotRoot 'GameProfiles'
-    $crosshairPath = Join-Path $TeknoParrotRoot 'pcsx2x6\TeknoParrot\crosshairs'
     $preUserProfiles = Get-TreeHash $userProfilesPath
     $preGameProfiles = Get-TreeHash $gameProfilesPath
-    $preCrosshairs = Get-TreeHash $crosshairPath
+    $preCrosshairs = if ($crosshairPath) { Get-TreeHash $crosshairPath } else { @() }
 
     $pesterCommand = Get-Command Invoke-Pester -ErrorAction SilentlyContinue
     if (-not $pesterCommand) { throw 'Invoke-Pester not found. Install it with: Install-Module Pester -Scope CurrentUser -Force' }
@@ -373,18 +384,8 @@ try {
     # on the pcsx2x6 folder actually being present -- absence is reported as
     # not-applicable, not a failure, unlike the unconditional hard-fail this
     # replaced (which would have certified-FAIL any install without pcsx2x6
-    # at all).
-    $pcsx2LegacyCandidates = @('pcsx2x6', 'PCSX2x6', 'pcsx2', 'PCSX2')
-    $pcsx2Dir = $null
-    foreach ($candidate in $pcsx2LegacyCandidates) {
-        $try = Join-Path $TeknoParrotRoot $candidate
-        if (Test-Path -LiteralPath $try -PathType Container) { $pcsx2Dir = $try; break }
-    }
-    if (-not $pcsx2Dir) {
-        $pcsx2Dir = Get-ChildItem -LiteralPath $TeknoParrotRoot -Directory -ErrorAction SilentlyContinue |
-                    Where-Object { $_.Name -imatch '^pcsx2' } | Select-Object -First 1 -ExpandProperty FullName
-    }
-
+    # at all). $pcsx2Dir was already resolved once, above, and is reused here
+    # rather than searched for again.
     if (-not $pcsx2Dir) {
         $results.Pcsx2x6 = [pscustomobject]@{ Present = $false }
         Add-CheckResult 'pcsx2x6 crosshair path (issue #79)' $true 'not applicable -- no pcsx2x6 folder in this install'
@@ -486,7 +487,7 @@ try {
 
     $postUserProfiles = Get-TreeHash $userProfilesPath
     $postGameProfiles = Get-TreeHash $gameProfilesPath
-    $postCrosshairs = Get-TreeHash $crosshairPath
+    $postCrosshairs = if ($crosshairPath) { Get-TreeHash $crosshairPath } else { @() }
     $results.Snapshots = [ordered]@{
         UserProfiles = Compare-TreeSnapshot $preUserProfiles $postUserProfiles
         GameProfiles = Compare-TreeSnapshot $preGameProfiles $postGameProfiles

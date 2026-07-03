@@ -9,6 +9,8 @@ $ErrorActionPreference = 'Stop'
 $started = Get-Date
 $runId = [guid]::NewGuid().ToString('N')
 
+. (Join-Path $PSScriptRoot 'Resolve-Pcsx2Directory.ps1')
+
 if (!(Test-Path -LiteralPath $TeknoParrotRoot -PathType Container)) {
     throw "TeknoParrot root not found: $TeknoParrotRoot"
 }
@@ -93,19 +95,12 @@ Add-Check 'GameProfiles folder exists' (Test-Path -LiteralPath $gameProfilesPath
 Add-Check 'UserProfiles folder exists' (Test-Path -LiteralPath $userProfilesPath -PathType Container) $userProfilesPath
 
 # pcsx2x6 is specific to a handful of lightgun titles -- not every install has
-# it, so this must be conditional, not an unconditional hard-check. Folder
-# discovery mirrors Invoke-TPM-RealInstanceSmoke.ps1's pcsx2x6 check exactly
-# (issue #79) so both harness scripts agree on what counts as "present."
-$pcsx2LegacyCandidates = @('pcsx2x6', 'PCSX2x6', 'pcsx2', 'PCSX2')
-$pcsx2Dir = $null
-foreach ($candidate in $pcsx2LegacyCandidates) {
-    $try = Join-Path $TeknoParrotRoot $candidate
-    if (Test-Path -LiteralPath $try -PathType Container) { $pcsx2Dir = $try; break }
-}
-if (-not $pcsx2Dir) {
-    $pcsx2Dir = Get-ChildItem -LiteralPath $TeknoParrotRoot -Directory -ErrorAction SilentlyContinue |
-                Where-Object { $_.Name -imatch '^pcsx2' } | Select-Object -First 1 -ExpandProperty FullName
-}
+# it, so this must be conditional, not an unconditional hard-check.
+# Resolve-Pcsx2Directory (dot-sourced above) is the single shared
+# implementation Invoke-TPM-RealInstanceSmoke.ps1 also uses, so both harness
+# scripts agree on what counts as "present" from one place, not two
+# independently-maintained copies of the same candidate search.
+$pcsx2Dir = Resolve-Pcsx2Directory -TeknoParrotRoot $TeknoParrotRoot
 
 if (-not $pcsx2Dir) {
     Add-Check 'pcsx2x6 crosshair folder exists' $true 'not applicable -- no pcsx2x6 folder in this install'
