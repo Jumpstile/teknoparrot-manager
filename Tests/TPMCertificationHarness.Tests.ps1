@@ -81,6 +81,7 @@ BeforeAll {
             VirtualBetaTester = [pscustomobject]@{
                 Total = 20; Passed = 20; Failed = 0
                 HumanBehaviors = 10; IdempotencyChecks = 6; RecoveryBehaviors = 2; EnvironmentVariations = 2
+                HighTvdBehaviors = 12
             }
             Timestamp = '2026-07-03_00-00-00'
         }

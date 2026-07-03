@@ -26,14 +26,20 @@ A build is only eligible for release when all required certification gates pass.
 - Certification Scorecard
 - Virtual Beta Tester (issue #88 phase 1)
 
-## Virtual Beta Tester (issue #88 phase 1)
+## Behavioral Certification (Virtual Beta Tester) -- issue #88
 
 Mission: the certification suite should meaningfully replace scarce human
-beta testing, not just run tests. Phase 1 wires real, executable coverage
-against production behavior -- `Tests/VirtualBetaTester.*.Tests.ps1` -- and
-is reported as its own "Virtual Beta Tester coverage" gate in the
-certification scorecard, not folded anonymously into the overall Pester
-count.
+beta testing, not just run tests. Real, executable coverage against
+production behavior lives in `Tests/VirtualBetaTester.*.Tests.ps1` and is
+reported as its own "Behavioral Certification (Virtual Beta Tester)" gate
+in the certification scorecard, not folded anonymously into the overall
+Pester count. The gate reports a category breakdown (human behaviors,
+idempotency, recovery, environment variations) plus a count of High-TVD
+behaviors covered (see `CONSTITUTION.md`, "Tester Value Density" -- this
+count is coverage evidence only, never converted to a percentage or used
+in the gate's pass/fail decision).
+
+### Phase 1 -- foundational coverage
 
 - **Human workflow simulation** (`VirtualBetaTester.HumanWorkflow.Tests.ps1`):
   the 5 scenarios in `testdata/human-use-scenarios.json` drive real function
@@ -54,10 +60,44 @@ count.
   canonical-subfolder crosshairs coexisting) -- asserting the combination is
   handled safely, not each condition only in isolation.
 
-Explicitly out of scope for phase 1 (tracked in issue #88 for later phases,
-not implemented yet): broad fuzzing, long soak testing, mutation testing,
-a full property-based framework, cross-project portability, a performance
-trend system.
+### Phase 1.5 -- expanded decision paths, AutoSync idempotency, preview safety
+
+- `Invoke-StartupUpdateCheck`'s full Y/N/V decision tree: view-then-decline,
+  accept-then-confirm, accept-then-decline (proves double confirmation is
+  required before install), empty input, mixed-case yes, whitespace-padded
+  input, repeated view-notes.
+- `Resolve-ExtractedGameFolder` (the shared resolver AutoSync itself calls)
+  gives an identical answer across two simulated passes with zero
+  filesystem changes -- deliberately narrower than the full `Register-Games`
+  matching pipeline, which stays excluded from black-box testing.
+- `Register-Games -DryRun` reports what it would register but writes zero
+  UserProfile files -- proves the preview/dry-run safety invariant holds.
+
+### Phase 1.6 -- Recovery Behavioral Certification (`VirtualBetaTester.Recovery.Tests.ps1`)
+
+Recovery-focused verification a careful human beta tester naturally
+performs before trusting a release -- not "does the happy path work," but
+"what happens when the state isn't clean":
+
+- **Existing backup already present**: a new `New-PropagationBackup` run
+  coexists safely alongside an older, pre-existing backup without
+  disturbing it.
+- **Partial/malformed state**: `Set-Pcsx2CursorPaths` recovers correctly
+  when a PCSX2.ini is missing one or both guncon2 sections entirely (a
+  realistic fresh-install condition, not a contrived edge case).
+- **Missing dependency**: `Resolve-Pcsx2Directory` returns a clean null,
+  never a throw or a guess, when no pcsx2-shaped folder exists at all --
+  the common case for most real installs.
+- **Existing registration / safe no-op**: re-running `Register-Games`
+  against a game that already has a real, user-customized UserProfile
+  correctly reports it as `Already`, never re-writes it, and leaves the
+  user's existing customization byte-identical.
+
+Explicitly out of scope through phase 1.6 (tracked in issue #88 for later
+phases, not implemented yet): broad fuzzing, long soak testing, mutation
+testing, a full property-based framework, randomized menu walking, large
+synthetic libraries, GUI/browser automation, performance timing, soak
+testing, cross-project portability.
 
 ## Certification Levels
 
