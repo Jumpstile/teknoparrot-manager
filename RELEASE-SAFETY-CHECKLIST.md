@@ -295,6 +295,25 @@ release blocker for the certified commit. Future release-critical PRs should
 return to normal review approval before merge unless an explicit release-manager
 exception is recorded with equivalent evidence.
 
+### 2026-07-03 -- PR #91 (Issue #88 phase 1) exception, third instance
+
+PR #91 (`Issue #88 phase 1: Virtual Beta Tester -- real executable coverage`)
+was also merged by admin override, the third instance in this same session.
+The repository owner was explicitly asked whether to review it directly or
+repeat the override, and chose the override with the tradeoff stated plainly
+(see `LESSONS_LEARNED.md` for the full record).
+
+CI was green at merge time. Real-arcade-machine certification was rerun
+afterward against exact merged `main` commit
+`aa99b9459058ce0a62b7b5ff1a8dfc787f233bfa` and passed 9/9 (100%), including
+the new Virtual Beta Tester coverage gate (`total=14 passed=14 failed=0`); the
+BAT launcher was confirmed working and the report folder opened automatically.
+
+Three instances in one session is the point at which this stops being a
+reasonable one-off exception. A genuine second reviewer (human or a separate
+AI reviewer account distinct from the PR author) should be configured before
+a fourth instance occurs.
+
 ---
 
 _For the engineering rationale behind each item, see SECURITY.md, LESSONS_LEARNED.md, and ARCHITECTURE.md._
