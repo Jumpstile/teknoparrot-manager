@@ -32,7 +32,10 @@ New-Item -ItemType Directory -Force -Path $reportDir, $backupDir | Out-Null
 $md = Join-Path $reportDir "TPM-Validation-Report.md"
 $json = Join-Path $reportDir "TPM-Validation-Report.json"
 
-function Add-Report { param([string]$Text) $Text | Out-File -FilePath $md -Append -Encoding utf8 }
+function Add-Report {
+    param([string]$Text)
+    $Text | Out-File -FilePath $md -Append -Encoding utf8
+}
 
 function Copy-IfExists {
     param([string]$Path, [string]$DestName)
@@ -66,13 +69,23 @@ function Compare-TreeSnapshot {
     foreach ($item in @($Before)) { $beforeMap[$item.RelativePath] = $item.Hash }
     $afterMap = @{}
     foreach ($item in @($After)) { $afterMap[$item.RelativePath] = $item.Hash }
-    $added = 0; $removed = 0; $changed = 0
+    $added = 0
+    $removed = 0
+    $changed = 0
     foreach ($key in $afterMap.Keys) {
         if (-not $beforeMap.ContainsKey($key)) { $added++ }
         elseif ($beforeMap[$key] -ne $afterMap[$key]) { $changed++ }
     }
-    foreach ($key in $beforeMap.Keys) { if (-not $afterMap.ContainsKey($key)) { $removed++ } }
-    [pscustomobject]@{ BeforeCount=@($Before).Count; AfterCount=@($After).Count; Added=$added; Removed=$removed; Changed=$changed }
+    foreach ($key in $beforeMap.Keys) {
+        if (-not $afterMap.ContainsKey($key)) { $removed++ }
+    }
+    [pscustomobject]@{
+        BeforeCount = @($Before).Count
+        AfterCount = @($After).Count
+        Added = $added
+        Removed = $removed
+        Changed = $changed
+    }
 }
 
 function Get-PesterSummary {
@@ -83,15 +96,46 @@ function Get-PesterSummary {
             $_ -and ($_.PSObject.Properties.Name -contains 'PassedCount' -or $_.PSObject.Properties.Name -contains 'Passed') -and ($_.PSObject.Properties.Name -contains 'FailedCount' -or $_.PSObject.Properties.Name -contains 'Failed')
         } | Select-Object -Last 1
     }
-    $summary = [ordered]@{ Passed=$null; Failed=$null; Skipped=$null; Inconclusive=$null; NotRun=$null; Total=$null; Duration=$null; Result='Unknown' }
-    if (-not $candidate) { return [pscustomobject]$summary }
-    foreach ($pair in @(@('Passed','PassedCount','Passed'),@('Failed','FailedCount','Failed'),@('Skipped','SkippedCount','Skipped'),@('Inconclusive','InconclusiveCount','Inconclusive'),@('NotRun','NotRunCount','NotRun'),@('Total','TotalCount','Total'))) {
-        foreach ($name in $pair[1..($pair.Count-1)]) { if ($candidate.PSObject.Properties.Name -contains $name) { $summary[$pair[0]] = $candidate.$name; break } }
+    $summary = [ordered]@{
+        Passed = $null
+        Failed = $null
+        Skipped = $null
+        Inconclusive = $null
+        NotRun = $null
+        Total = $null
+        Duration = $null
+        Result = 'Unknown'
     }
-    foreach ($name in @('Duration','Time')) { if ($candidate.PSObject.Properties.Name -contains $name) { $summary.Duration = [string]$candidate.$name; break } }
+    if (-not $candidate) { return [pscustomobject]$summary }
+    $fields = @(
+        @('Passed','PassedCount','Passed'),
+        @('Failed','FailedCount','Failed'),
+        @('Skipped','SkippedCount','Skipped'),
+        @('Inconclusive','InconclusiveCount','Inconclusive'),
+        @('NotRun','NotRunCount','NotRun'),
+        @('Total','TotalCount','Total')
+    )
+    foreach ($pair in $fields) {
+        foreach ($name in $pair[1..($pair.Count-1)]) {
+            if ($candidate.PSObject.Properties.Name -contains $name) {
+                $summary[$pair[0]] = $candidate.$name
+                break
+            }
+        }
+    }
+    foreach ($name in @('Duration','Time')) {
+        if ($candidate.PSObject.Properties.Name -contains $name) {
+            $summary.Duration = [string]$candidate.$name
+            break
+        }
+    }
     if ($candidate.PSObject.Properties.Name -contains 'Result') { $summary.Result = [string]$candidate.Result }
     if ($null -eq $summary.Total -and $null -ne $summary.Passed -and $null -ne $summary.Failed) {
-        $total = 0; foreach ($key in @('Passed','Failed','Skipped','Inconclusive','NotRun')) { if ($null -ne $summary[$key]) { $total += [int]$summary[$key] } }; $summary.Total = $total
+        $total = 0
+        foreach ($key in @('Passed','Failed','Skipped','Inconclusive','NotRun')) {
+            if ($null -ne $summary[$key]) { $total += [int]$summary[$key] }
+        }
+        $summary.Total = $total
     }
     if ($summary.Result -eq 'Unknown' -and $summary.Failed -eq 0) { $summary.Result = 'Passed' }
     [pscustomobject]$summary
@@ -110,7 +154,11 @@ $results = [ordered]@{
 
 function Add-CheckResult {
     param([string]$Name, [bool]$Passed, [string]$Details)
-    $script:results.Checks += [pscustomobject]@{ Name=$Name; Passed=$Passed; Details=$Details }
+    $script:results.Checks += [pscustomobject]@{
+        Name = $Name
+        Passed = $Passed
+        Details = $Details
+    }
 }
 
 Push-Location $RepoPath
@@ -120,7 +168,10 @@ try {
     $gitCommit = git rev-parse HEAD
     $gitStatus = git status --short
     if (-not $gitStatus) { $gitStatus = '(clean)' }
-    $results.GitVersion = $gitVersion; $results.GitBranch = $gitBranch; $results.Commit = $gitCommit; $results.GitStatus = $gitStatus
+    $results.GitVersion = $gitVersion
+    $results.GitBranch = $gitBranch
+    $results.Commit = $gitCommit
+    $results.GitStatus = $gitStatus
     Add-CheckResult 'Repository available' $true "branch=$gitBranch commit=$gitCommit"
     Add-CheckResult 'Repository clean' ($gitStatus -eq '(clean)') ($gitStatus | Out-String).Trim()
 
@@ -180,7 +231,12 @@ try {
     $results.CentipedeChaosCandidates = @($centipede | Select-Object -ExpandProperty Name)
     Add-CheckResult 'GameProfiles count' ($profiles.Count -gt 0) "count=$($profiles.Count)"
     Add-CheckResult 'UserProfiles count' ($userProfiles.Count -ge 0) "count=$($userProfiles.Count)"
-    Add-CheckResult 'Centipede Chaos profile scan' $true (if ($centipede.Count -gt 0) { ($centipede.Name -join ', ') } else { 'none found' })
+    if ($centipede.Count -gt 0) {
+        $centipedeDetails = $centipede.Name -join ', '
+    } else {
+        $centipedeDetails = 'none found'
+    }
+    Add-CheckResult 'Centipede Chaos profile scan' $true $centipedeDetails
 
     if ($RunUnattendedTPM) {
         $scriptPath = Join-Path $RepoPath 'TeknoParrot-Manager.ps1'
