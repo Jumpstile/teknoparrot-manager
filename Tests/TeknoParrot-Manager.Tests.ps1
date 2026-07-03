@@ -890,6 +890,50 @@ Describe "Get-NormalizedGameKey naming edge cases" {
         $bare = Get-NormalizedGameKey "Cars"
         $full | Should -Be $bare
     }
+
+    # Issue #80: older RomVault-derived folder names carry Namco board/revision-code
+    # tokens that the current Eggman dat's canonical names have dropped. Each of these
+    # is anchored to a real, tester-reported unmatched folder from issue #75.
+    It "converges Tekken 5.1's revision-tagged folder to the bare-title key (issue #80)" {
+        (Get-NormalizedGameKey "Tekken 5.1 (TE51 Ver B)(2005)[Namco System 246][TP]") |
+            Should -Be (Get-NormalizedGameKey "Tekken 5.1 (2005)[Namco System 246][TP]")
+    }
+    It "converges Time Crisis 3's revision-tagged folder to its already-matched folder's key (issue #80)" {
+        (Get-NormalizedGameKey "Time Crisis 3 (TST1 Ver A)(2003)[Namco System 246][TP]") |
+            Should -Be (Get-NormalizedGameKey "Time Crisis 3 (2003)[Namco System 246][TP]")
+    }
+    It "converges Time Crisis 4's revision-tagged folder to its already-matched folder's key (issue #80)" {
+        (Get-NormalizedGameKey "Time Crisis 4 (TSF1002-NA-A)(World)(2006)[Namco System 256][TP]") |
+            Should -Be (Get-NormalizedGameKey "Time Crisis 4 (2006)[Namco System 246][TP]")
+    }
+    It "converges Zoids Infinity's revision-tagged folder to the bare-title key confirmed present in the current dat (issue #80)" {
+        (Get-NormalizedGameKey "Zoids Infinity (B3900076A Ver 2.02J)(2004)[Namco System 246][TP]") |
+            Should -Be (Get-NormalizedGameKey "Zoids Infinity (2004)[Namco System 246][TP]")
+    }
+    It "does not strip loosely-formatted revision text that doesn't match the board-code shape (issue #80 guard)" {
+        # Characterization guard: titles like this already match successfully today
+        # without stripping (their dat entries carry the identical token) -- the new
+        # rules must not start stripping them, which would risk diverging from a dat
+        # entry that still includes the same text.
+        Get-NormalizedGameKey "Hummer (1.0 Rev A)(2009)[Sega Lindbergh Yellow][TP]" |
+            Should -Not -Be (Get-NormalizedGameKey "Hummer (2009)[Sega Lindbergh Yellow][TP]")
+    }
+    It "does not strip short all-caps codes with no qualifying digit run (issue #80 guard)" {
+        Get-NormalizedGameKey "F-Zero AX (SBGG)(2003)[Sega Triforce][TP]" |
+            Should -Not -Be (Get-NormalizedGameKey "F-Zero AX (2003)[Sega Triforce][TP]")
+    }
+}
+
+Describe "Get-DiceSimilarity Zoids Infinity / Zoids Infinity EX Plus non-collision (issue #80)" {
+    It "keeps the two titles below the fuzzy-match threshold -- they are different games and must never auto-map" {
+        # Zoids Infinity (2004) and Zoids Infinity EX Plus (2006) are a distinct
+        # original/sequel pair, not a revision of the same game. The normalization
+        # fix above only cleans the folder's own key -- it must not bring these two
+        # close enough to cross the 0.72 fuzzy threshold and mis-register one as the
+        # other.
+        $score = Get-DiceSimilarity (Get-NormalizedGameKey "Zoids Infinity (2004)[Namco System 246][TP]") "zoidiexp"
+        $score | Should -BeLessThan 0.72
+    }
 }
 
 Describe "Get-DiceSimilarity near-threshold / tie behavior" {

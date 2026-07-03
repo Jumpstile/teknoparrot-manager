@@ -792,11 +792,31 @@ function Get-NormalizedGameKey {
     # Remove known region/territory codes used in Eggman dat names.
     # Explicit list avoids accidentally stripping Roman numerals (II, III) or
     # meaningful abbreviations (SE) that could appear in game titles.
-    $s = $s -replace '\((JPN|USA|EUR|EXP|JP|US|KOR|AUS|ASI|INTL|ARC|UNK)\)', ''
+    # "World" is included here (not just JPN/USA/EUR/...) since it is also a
+    # bare release-region descriptor in Eggman dat names, e.g. (World) -- see
+    # issue #80 (Time Crisis 4). Anchored the same way as the rest of this
+    # list, so it only strips a parenthetical that is exactly "(World)", never
+    # compound title text like "(World Tour)".
+    $s = $s -replace '\((JPN|USA|EUR|EXP|JP|US|KOR|AUS|ASI|INTL|ARC|UNK|World)\)', ''
     # Remove version strings like (ver 1.1) (rev 2) (v3) (v1.2b).
     # Meaningful parenthesised names such as (Special Edition) are intentionally
     # preserved -- they may be the only differentiator between two game titles.
     $s = $s -replace '\((ver\.?|rev\.?|v)\s*[\d\.]+[a-z]?\)', ''
+    # Remove Namco-style board/revision-code tokens that precede a ver/rev/v
+    # keyword, e.g. (TE51 Ver B), (TST1 Ver A), (B3900076A Ver 2.02J) -- see
+    # issue #80. These carry no title information; older RomVault-derived
+    # folder names include them while the current Eggman dat's canonical
+    # names do not, so they block exact-match/fuzzy-match convergence.
+    # Requires the ver/rev/v keyword and either a digit-based or a bare
+    # single-uppercase-letter revision, so plain English text (which lacks
+    # the keyword) is never matched -- (Special Edition) stays untouched.
+    $s = $s -replace '\((?:[A-Za-z0-9]{1,10}\s+)?(?:ver\.?|rev\.?|v)\s*(?:[\d\.]+[a-z]?|[A-Z])\)', ''
+    # Remove Namco-style hyphenated board-code tokens with no ver/rev/v
+    # keyword, e.g. (TSF1002-NA-A) -- see issue #80 (Time Crisis 4). Anchored
+    # to require the entire parenthetical to be uppercase letters, digits,
+    # and hyphens only, with no spaces or lowercase -- natural-language title
+    # or edition text essentially never matches this shape.
+    $s = $s -replace '\([A-Z]{1,4}\d{2,6}(-[A-Z0-9]{1,4}){1,3}\)', ''
     # Remove parenthesised pure numbers like (2) (12) that carry no game-name info.
     $s = $s -replace '\(\d+\)', ''
     # Strip everything non-alphanumeric (spaces, hyphens, apostrophes, colons...).
