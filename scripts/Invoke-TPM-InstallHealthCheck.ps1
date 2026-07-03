@@ -127,9 +127,9 @@ $result | ConvertTo-Json -Depth 8 | Out-File -FilePath $jsonPath -Encoding utf8
 
 '# TPM Real Install Health Check' | Out-File -FilePath $mdPath -Encoding utf8
 '' | Out-File -FilePath $mdPath -Append -Encoding utf8
-"Run ID: $runId" | Out-File -FilePath $mdPath -Append -Encoding utf8
-"Status: **$($result.Status)**" | Out-File -FilePath $mdPath -Append -Encoding utf8
-"TeknoParrot root: `$TeknoParrotRoot`" | Out-File -FilePath $mdPath -Append -Encoding utf8
+("Run ID: {0}" -f $runId) | Out-File -FilePath $mdPath -Append -Encoding utf8
+("Status: **{0}**" -f $result.Status) | Out-File -FilePath $mdPath -Append -Encoding utf8
+("TeknoParrot root: {0}" -f $TeknoParrotRoot) | Out-File -FilePath $mdPath -Append -Encoding utf8
 '' | Out-File -FilePath $mdPath -Append -Encoding utf8
 '## Checks' | Out-File -FilePath $mdPath -Append -Encoding utf8
 foreach ($check in $checks) {
@@ -138,7 +138,7 @@ foreach ($check in $checks) {
 }
 '' | Out-File -FilePath $mdPath -Append -Encoding utf8
 '## Artifacts' | Out-File -FilePath $mdPath -Append -Encoding utf8
-('- JSON: `{0}`' -f $jsonPath) | Out-File -FilePath $mdPath -Append -Encoding utf8
-('- Log: `{0}`' -f $logPath) | Out-File -FilePath $mdPath -Append -Encoding utf8
+('- JSON: {0}' -f $jsonPath) | Out-File -FilePath $mdPath -Append -Encoding utf8
+('- Log: {0}' -f $logPath) | Out-File -FilePath $mdPath -Append -Encoding utf8
 
-Write-Host "Install health report: $mdPath"
+Write-Host ("Install health report: {0}" -f $mdPath)
