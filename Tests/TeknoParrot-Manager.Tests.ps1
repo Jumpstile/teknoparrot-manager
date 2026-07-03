@@ -995,6 +995,17 @@ Describe "Get-MeaningfulTitleTokens" {
         $tokens = Get-MeaningfulTitleTokens "Street Fighter III 3rd Strike"
         $tokens | Should -Not -Contain 'iii'
     }
+    It "excludes standalone roman numeral I, not just II-X (issue #84 review)" {
+        # No standalone "I" appears anywhere in the real Eggman collection dat
+        # (confirmed by direct search) -- excluded for consistency with the
+        # rest of the I-X range, on the same basis as II/III/etc: sequel
+        # numbering, already handled elsewhere by digit-preserving
+        # normalization, not a title differentiator this rule needs to see.
+        $tokens = Get-MeaningfulTitleTokens "Some Game I"
+        $tokens | Should -Not -Contain 'i'
+        $tokens | Should -Contain 'some'
+        $tokens | Should -Contain 'game'
+    }
     It "excludes the closed stop-word list" {
         $tokens = Get-MeaningfulTitleTokens "The House of the Dead"
         $tokens | Should -Not -Contain 'the'

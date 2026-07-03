@@ -859,7 +859,11 @@ function Get-MeaningfulTitleTokens {
     $result = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     if (-not $title) { return $result }
     $stripped = $title -replace '\[[^\]]*\]', '' -replace '\([^\)]*\)', ''
-    $romanNumerals = 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x'
+    # I-X, not just II-X: no standalone "I" appears anywhere in the real
+    # Eggman collection dat (confirmed by direct search, issue #84 review),
+    # and roman-numeral sequel numbering is symmetrical -- there is no
+    # evidence "I" specifically needs different treatment from "II"/"III"/etc.
+    $romanNumerals = 'i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x'
     foreach ($m in [regex]::Matches($stripped, '[\p{L}0-9]+')) {
         $w = $m.Value.ToLower()
         if ($w -match '^\d+$') { continue }
