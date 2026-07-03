@@ -2029,6 +2029,14 @@
                               exists, this just saves you troubleshooting
                               time on something that was never going to work.
 
+    Firmware not installed    Registered games whose emulator (currently
+                              pcsx2x6 only) needs firmware/BIOS files
+                              TeknoParrot itself doesn't provide. Shows the
+                              exact files needed and the folder to place
+                              them in. TeknoParrot Manager never downloads,
+                              links, or redistributes these files -- this
+                              is an existence check only.
+
     Setup notes               Any currently registered game that has special
                               setup notes in the community compatibility
                               database (eggmansworld.github.io/TeknoParrot) --
@@ -2039,7 +2047,7 @@
                               separated game-by-game so long entries stay
                               readable. Informational only.
 
-  These last four checks run automatically on every AutoSync/Register
+  These last five checks run automatically on every AutoSync/Register
   run -- no separate mode needed. The GPU check silently skips if your
   GPU vendor cannot be auto-detected -- it never prompts mid-run. The
   setup notes check needs a live fetch of that site's data and is skipped

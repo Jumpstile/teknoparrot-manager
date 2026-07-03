@@ -195,6 +195,22 @@ display-only example-games list via regex against free-text notes:
 No hardcoded fallback -- returns empty on any fetch failure; caller falls back to generic
 wording.
 
+**Missing emulator firmware/BIOS (issue #85 tier 1).** `$EmulatorBiosRequirements` is a
+static, per-`EmulatorType` table (`@{ RelativeDir; RequiredFiles }`) of firmware files
+TeknoParrot itself never bundles or downloads -- the user must obtain and place these
+themselves. Currently one entry (`Pcsx2x6`), confirmed by a real install where a
+correctly-registered game (per issue #79's fix) failed at launch with "PCSX2x64 Firmware
+is not installed." `Get-CompatibilityWarnings` scans registered profiles' `EmulatorType`,
+resolves the emulator folder via the shared `Resolve-Pcsx2Directory` helper (also used by
+`Invoke-CrosshairSetup`, extracted from that function's own inline duplicate so both agree
+on what counts as "present"), and reports one `BiosMissing` entry per (emulator, missing-
+file-set) -- not one per affected game, since every game sharing that emulator would
+otherwise produce an identical duplicate warning. Existence-only (`Test-Path`), never reads
+or modifies file content: TPM does not provide, download, link, or redistribute these
+files at any point. Detection is skipped entirely (not an error) when `-TeknoParrotRoot`
+isn't supplied, or when the emulator's own folder isn't present yet -- nothing to check.
+Read-only, informational only; never blocks or gates registration.
+
 ---
 
 ## Dry-run / preview mode (-DryRun, v0.92)

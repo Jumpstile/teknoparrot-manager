@@ -2702,6 +2702,23 @@ function Set-Pcsx2CursorPaths {
     }
 }
 
+# Locates the pcsx2x6 emulator folder under a TeknoParrot root: common
+# names first, then any pcsx2-prefixed subfolder as a fallback. Returns
+# $null if none is found (most installs don't have one -- it's specific to
+# a handful of lightgun titles). Shared by Invoke-CrosshairSetup (issue #79
+# crosshair deployment) and Get-CompatibilityWarnings (issue #85 BIOS
+# detection) so both agree on what counts as "present" from one place, not
+# two independently-maintained copies of the same candidate search.
+function Resolve-Pcsx2Directory {
+    param([Parameter(Mandatory)][string]$TeknoParrotRoot)
+    foreach ($candidate in @("pcsx2x6","PCSX2x6","pcsx2","PCSX2")) {
+        $try = Join-Path $TeknoParrotRoot $candidate
+        if (Test-Path -LiteralPath $try) { return $try }
+    }
+    return Get-ChildItem -LiteralPath $TeknoParrotRoot -Directory -ErrorAction SilentlyContinue |
+           Where-Object { $_.Name -imatch '^pcsx2' } | Select-Object -First 1 -ExpandProperty FullName
+}
+
 # Crosshair setup wizard: HTML preview of all crosshair PNGs, P1/P2 picker,
 # deploy selected images to all registered lightgun game folders. Optionally
 # hides the hardware cursor by setting HideCursor/DisableCursor=1 in every
@@ -2813,17 +2830,8 @@ function Invoke-CrosshairSetup {
                   Select-Object -First 1 -ExpandProperty FullName
     }
 
-    # Locate pcsx2x6 folder -- search common names then any pcsx2-prefixed subfolder
-    $pcsx2Dir = $null
-    foreach ($candidate in @("pcsx2x6","PCSX2x6","pcsx2","PCSX2")) {
-        $try = Join-Path $TpRoot $candidate
-        if (Test-Path -LiteralPath $try) { $pcsx2Dir = $try; break }
-    }
-    if (-not $pcsx2Dir) {
-        $pcsx2Dir = Get-ChildItem -LiteralPath $TpRoot -Directory -ErrorAction SilentlyContinue |
-                    Where-Object { $_.Name -imatch '^pcsx2' } |
-                    Select-Object -First 1 -ExpandProperty FullName
-    }
+    # Locate pcsx2x6 folder -- shared resolver, see Resolve-Pcsx2Directory.
+    $pcsx2Dir = Resolve-Pcsx2Directory -TeknoParrotRoot $TpRoot
 
     # Deploy
     Write-Host ""
@@ -7087,6 +7095,23 @@ $GpuIncompatibleGames = @{
     )
 }
 
+# Issue #85 Tier 1: known per-emulator firmware/BIOS prerequisites that
+# TeknoParrot itself never bundles or downloads -- the user must obtain and
+# place these files themselves. Keyed by <EmulatorType>, one entry per
+# emulator that has a confirmed real-world requirement (only Pcsx2x6 has
+# one currently; a real install showed Bloody Roar 3 registered correctly
+# but failing to launch with "PCSX2x64 Firmware is not installed"). Adding
+# a second emulator's requirement later is a one-line table addition, not
+# new detection logic -- Get-CompatibilityWarnings' BiosMissing check reads
+# this table generically. TPM never downloads, links, or redistributes any
+# of these files; the check is existence-only (Test-Path), never content.
+$EmulatorBiosRequirements = @{
+    'Pcsx2x6' = @{
+        RelativeDir   = 'TeknoParrot\bios'
+        RequiredFiles = @('27v1602T.d', '27v1602F.bg')
+    }
+}
+
 # Word-wraps free text (e.g. a community notes field) to a fixed width,
 # returning one string per output line, each pre-fixed with Indent. Existing
 # line breaks in the input (paragraph breaks, blank separator lines) are
@@ -7138,17 +7163,19 @@ function Get-GameSetupNotes {
               })
 }
 
-# Read-only scan for all three checks above. Returns
-# [pscustomobject]@{ PathTooLong = @(...); DllMismatch = @(...); GpuIncompatible = @(...) }.
+# Read-only scan for all four checks above. Returns
+# [pscustomobject]@{ PathTooLong = @(...); DllMismatch = @(...); GpuIncompatible = @(...); BiosMissing = @(...) }.
 # Each PathTooLong entry: @{ Code; Length; Limit; Suggested }.
 # Each DllMismatch entry: @{ Code; FileName; Found; Required }.
 # Each GpuIncompatible entry: @{ Code; Vendor }.
+# Each BiosMissing entry: @{ EmulatorType; ExpectedDir; MissingFiles; AffectedGames }.
 function Get-CompatibilityWarnings {
-    param([string]$UserProfilesDir)
+    param([string]$UserProfilesDir, [string]$TeknoParrotRoot = '')
 
     $pathTooLong  = @()
     $dllMismatch  = @()
     $gpuIncompatible = @()
+    $biosMissing  = @()
 
     # Best-effort, silent GPU detection -- never prompts. If undetected
     # (or vendor is NVIDIA, which has no known-broken titles here), the
@@ -7214,7 +7241,50 @@ function Get-CompatibilityWarnings {
         }
     }
 
-    return [pscustomobject]@{ PathTooLong = $pathTooLong; DllMismatch = $dllMismatch; GpuIncompatible = $gpuIncompatible }
+    # Issue #85 Tier 1: known per-emulator firmware/BIOS prerequisites.
+    # Existence-only check (Test-Path), never reads file content -- TPM
+    # never downloads, links, or redistributes these files. Skipped
+    # entirely if -TeknoParrotRoot wasn't supplied (backward compatible
+    # with existing callers) or no emulator has a confirmed requirement.
+    # One entry per (EmulatorType, missing-file-set), not per game -- every
+    # game sharing that emulator would otherwise produce an identical
+    # duplicate warning.
+    if ($TeknoParrotRoot -and $EmulatorBiosRequirements -and $EmulatorBiosRequirements.Count -gt 0) {
+        $emulatorGames = @{}
+        foreach ($pf in $profiles) {
+            try {
+                $doc = Read-Xml $pf.FullName
+                if (-not $doc.GameProfile) { continue }
+                $etNode = $doc.GameProfile.SelectSingleNode("EmulatorType")
+                if (-not $etNode) { continue }
+                $emuType = $etNode.InnerText.Trim()
+                if (-not $EmulatorBiosRequirements.ContainsKey($emuType)) { continue }
+                if (-not $emulatorGames.ContainsKey($emuType)) { $emulatorGames[$emuType] = [System.Collections.Generic.List[string]]::new() }
+                $emulatorGames[$emuType].Add($pf.BaseName)
+            } catch {
+                Write-Log "CompatibilityWarnings: could not parse $($pf.Name) for BIOS check -- $_"
+            }
+        }
+
+        foreach ($emuType in $emulatorGames.Keys) {
+            $req = $EmulatorBiosRequirements[$emuType]
+            $emuDir = if ($emuType -eq 'Pcsx2x6') { Resolve-Pcsx2Directory -TeknoParrotRoot $TeknoParrotRoot } else { $null }
+            if (-not $emuDir) { continue }  # emulator folder itself not present -- nothing to check yet
+
+            $biosDir = Join-Path $emuDir $req.RelativeDir
+            $missing = @($req.RequiredFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path $biosDir $_) -PathType Leaf) })
+            if ($missing.Count -gt 0) {
+                $biosMissing += [pscustomobject]@{
+                    EmulatorType   = $emuType
+                    ExpectedDir    = $biosDir
+                    MissingFiles   = $missing
+                    AffectedGames  = @($emulatorGames[$emuType] | Sort-Object)
+                }
+            }
+        }
+    }
+
+    return [pscustomobject]@{ PathTooLong = $pathTooLong; DllMismatch = $dllMismatch; GpuIncompatible = $gpuIncompatible; BiosMissing = $biosMissing }
 }
 
 # =============================================================================
@@ -11800,7 +11870,7 @@ if ($doGpuFix -eq "Y") {
 # ACTION REQUIRED -- collects everything the user must do manually
 # =============================================================================
 
-$compatWarnings = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir
+$compatWarnings = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $tpRoot
 $setupNotes     = Get-GameSetupNotes -UserProfilesDir $userProfilesDir
 
 $hasAnyAction = ($manualRegData.Count -gt 0) -or ($amb2.Count -gt 0) -or
@@ -11809,6 +11879,7 @@ $hasAnyAction = ($manualRegData.Count -gt 0) -or ($amb2.Count -gt 0) -or
                 ($compatWarnings.PathTooLong.Count -gt 0) -or
                 ($compatWarnings.DllMismatch.Count -gt 0) -or
                 ($compatWarnings.GpuIncompatible.Count -gt 0) -or
+                ($compatWarnings.BiosMissing.Count -gt 0) -or
                 ($setupNotes.Count -gt 0)
 
 if ($hasAnyAction) {
@@ -12026,6 +12097,24 @@ if ($hasAnyAction) {
         Write-Host ""
     }
 
+    # -- 8b. Missing emulator firmware/BIOS prerequisites (issue #85) ---------
+    if ($compatWarnings.BiosMissing.Count -gt 0) {
+        foreach ($b in $compatWarnings.BiosMissing) {
+            Write-Host ""
+            Write-Host ("  {0} FIRMWARE NOT INSTALLED" -f $b.EmulatorType.ToUpper()) -ForegroundColor Yellow
+            Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
+            Write-Host "  These games are registered and will show as launchable, but will" -ForegroundColor DarkCyan
+            Write-Host "  fail at launch until the required firmware files are in place." -ForegroundColor DarkCyan
+            Write-Host "  TPM does not provide, download, or link these files -- obtain them" -ForegroundColor DarkCyan
+            Write-Host "  yourself and place them in the folder shown below." -ForegroundColor DarkCyan
+            Write-Host ""
+            Write-Host ("  Place in : {0}" -f $b.ExpectedDir) -ForegroundColor Cyan
+            Write-Host ("  Missing  : {0}" -f ($b.MissingFiles -join ', ')) -ForegroundColor Yellow
+            Write-Host ("  Affected : {0}" -f ($b.AffectedGames -join ', ')) -ForegroundColor DarkGray
+            Write-Host ""
+        }
+    }
+
     # -- 9. Game-specific setup notes (informational) -------------------------
     if ($setupNotes.Count -gt 0) {
         Write-Host ""
@@ -12175,6 +12264,19 @@ if ($hasAnyAction) {
         [void]$asb.AppendLine("These games are confirmed not to work on $gpuVendorSeen GPUs. Known")
         [void]$asb.AppendLine("limitation, not a setup mistake -- there is no fix to apply.")
         foreach ($w in ($compatWarnings.GpuIncompatible | Sort-Object Code)) { [void]$asb.AppendLine("  $($w.Code)") }
+    }
+    if ($compatWarnings.BiosMissing.Count -gt 0) {
+        foreach ($b in $compatWarnings.BiosMissing) {
+            [void]$asb.AppendLine(""); [void]$asb.AppendLine("$($b.EmulatorType.ToUpper()) FIRMWARE NOT INSTALLED")
+            [void]$asb.AppendLine("----------------------------------------------------------")
+            [void]$asb.AppendLine("These games are registered and will show as launchable, but will fail")
+            [void]$asb.AppendLine("at launch until the required firmware files are in place. TPM does not")
+            [void]$asb.AppendLine("provide, download, or link these files -- obtain them yourself and")
+            [void]$asb.AppendLine("place them in the folder shown below.")
+            [void]$asb.AppendLine("  Place in : $($b.ExpectedDir)")
+            [void]$asb.AppendLine("  Missing  : $($b.MissingFiles -join ', ')")
+            [void]$asb.AppendLine("  Affected : $($b.AffectedGames -join ', ')")
+        }
     }
     if ($setupNotes.Count -gt 0) {
         [void]$asb.AppendLine(""); [void]$asb.AppendLine("GAME-SPECIFIC SETUP NOTES (informational)")

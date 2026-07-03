@@ -25,6 +25,13 @@
   "Installed TPM version" / "Latest TPM release" instead of the more
   ambiguous "Local version" / "Latest release".
 
+  New (issue #85, tier 1): TPM now detects missing pcsx2x6 emulator
+  firmware/BIOS files for registered games and reports it under ACTION
+  REQUIRED, before you discover it at launch time. Read-only, existence
+  check only -- TPM never provides, downloads, links, or redistributes
+  these files, and never modifies your installation. Informational only;
+  does not block or change registration.
+
 -------------------------------------------------------------------------------
   v0.99.44 BETA  (2026-07-02)  -- release hygiene and regression hardening
   ------------------------------------------------------------

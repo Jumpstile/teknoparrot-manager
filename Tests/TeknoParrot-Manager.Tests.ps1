@@ -2944,3 +2944,139 @@ Describe "Main menu source-level drift check" {
         [int]$enterMatch.Groups[1].Value | Should -Be $displayedNumbers[-1]
     }
 }
+
+Describe "Resolve-Pcsx2Directory" {
+    It "finds the exact-name pcsx2x6 folder" {
+        $root = Join-Path $TestDrive ("resolve-exact-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $root 'pcsx2x6') -Force | Out-Null
+        Resolve-Pcsx2Directory -TeknoParrotRoot $root | Should -Be (Join-Path $root 'pcsx2x6')
+    }
+
+    It "finds an alternate-cased PCSX2x6 folder" {
+        $root = Join-Path $TestDrive ("resolve-altcase-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $root 'PCSX2x6') -Force | Out-Null
+        Resolve-Pcsx2Directory -TeknoParrotRoot $root | Should -Be (Join-Path $root 'PCSX2x6')
+    }
+
+    It "returns null when no pcsx2-shaped folder exists" {
+        $root = Join-Path $TestDrive ("resolve-none-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $root 'GameProfiles') -Force | Out-Null
+        Resolve-Pcsx2Directory -TeknoParrotRoot $root | Should -BeNullOrEmpty
+    }
+}
+
+Describe "Get-CompatibilityWarnings -- BiosMissing (issue #85 tier 1)" {
+    BeforeAll {
+        $script:RawThrillsPathLimits = @{}
+        $script:FileVersionPins = @{}
+        $script:GpuIncompatibleGames = @{}
+        $script:EmulatorBiosRequirements = @{
+            'Pcsx2x6' = @{
+                RelativeDir   = 'TeknoParrot\bios'
+                RequiredFiles = @('27v1602T.d', '27v1602F.bg')
+            }
+        }
+
+        function New-Pcsx2UserProfile {
+            param([string]$Path)
+            [xml]@'
+<?xml version="1.0" encoding="utf-8"?>
+<GameProfile>
+  <EmulatorType>Pcsx2x6</EmulatorType>
+  <GamePath>C:\Games\game.exe</GamePath>
+</GameProfile>
+'@ | ForEach-Object { $_.Save($Path) }
+        }
+    }
+
+    It "reports nothing when -TeknoParrotRoot is not supplied (backward compatible)" {
+        $userProfilesDir = Join-Path $TestDrive ("bios-no-root-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $userProfilesDir -Force | Out-Null
+        New-Pcsx2UserProfile -Path (Join-Path $userProfilesDir 'BLOODYROAR3.xml')
+
+        $result = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir
+        @($result.BiosMissing) | Should -BeNullOrEmpty
+    }
+
+    It "reports nothing when the pcsx2x6 folder itself does not exist yet" {
+        $root = Join-Path $TestDrive ("bios-noemudir-" + [guid]::NewGuid().ToString('N'))
+        $userProfilesDir = Join-Path $root 'UserProfiles'
+        New-Item -ItemType Directory -Path $userProfilesDir -Force | Out-Null
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        New-Pcsx2UserProfile -Path (Join-Path $userProfilesDir 'BLOODYROAR3.xml')
+
+        $result = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $root
+        @($result.BiosMissing) | Should -BeNullOrEmpty -Because "nothing to check yet -- the emulator itself isn't installed"
+    }
+
+    It "reports nothing when both required BIOS files are present" {
+        $root = Join-Path $TestDrive ("bios-present-" + [guid]::NewGuid().ToString('N'))
+        $userProfilesDir = Join-Path $root 'UserProfiles'
+        $biosDir = Join-Path $root 'pcsx2x6\TeknoParrot\bios'
+        New-Item -ItemType Directory -Path $userProfilesDir, $biosDir -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $biosDir '27v1602T.d') -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $biosDir '27v1602F.bg') -Force | Out-Null
+        New-Pcsx2UserProfile -Path (Join-Path $userProfilesDir 'BLOODYROAR3.xml')
+
+        $result = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $root
+        @($result.BiosMissing) | Should -BeNullOrEmpty
+    }
+
+    It "reports a BiosMissing entry with correct MissingFiles and AffectedGames when firmware is absent" {
+        $root = Join-Path $TestDrive ("bios-missing-" + [guid]::NewGuid().ToString('N'))
+        $userProfilesDir = Join-Path $root 'UserProfiles'
+        New-Item -ItemType Directory -Path $userProfilesDir -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $root 'pcsx2x6') -Force | Out-Null
+        New-Pcsx2UserProfile -Path (Join-Path $userProfilesDir 'BLOODYROAR3.xml')
+
+        $result = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $root
+        @($result.BiosMissing).Count | Should -Be 1
+        $entry = $result.BiosMissing[0]
+        $entry.EmulatorType | Should -Be 'Pcsx2x6'
+        @($entry.MissingFiles) | Should -Contain '27v1602T.d'
+        @($entry.MissingFiles) | Should -Contain '27v1602F.bg'
+        @($entry.AffectedGames) | Should -Contain 'BLOODYROAR3'
+    }
+
+    It "reports one entry (not duplicated) covering multiple registered pcsx2x6 games" {
+        $root = Join-Path $TestDrive ("bios-multi-" + [guid]::NewGuid().ToString('N'))
+        $userProfilesDir = Join-Path $root 'UserProfiles'
+        New-Item -ItemType Directory -Path $userProfilesDir -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $root 'pcsx2x6') -Force | Out-Null
+        New-Pcsx2UserProfile -Path (Join-Path $userProfilesDir 'BLOODYROAR3.xml')
+        New-Pcsx2UserProfile -Path (Join-Path $userProfilesDir 'BLOODYROAR4.xml')
+
+        $result = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $root
+        @($result.BiosMissing).Count | Should -Be 1 -Because "one shared emulator instance needs one warning, not one per affected game"
+        @($result.BiosMissing[0].AffectedGames).Count | Should -Be 2
+    }
+
+    It "reports only the still-missing file when one of the two required files is already present" {
+        $root = Join-Path $TestDrive ("bios-partial-" + [guid]::NewGuid().ToString('N'))
+        $userProfilesDir = Join-Path $root 'UserProfiles'
+        $biosDir = Join-Path $root 'pcsx2x6\TeknoParrot\bios'
+        New-Item -ItemType Directory -Path $userProfilesDir, $biosDir -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $biosDir '27v1602T.d') -Force | Out-Null
+        New-Pcsx2UserProfile -Path (Join-Path $userProfilesDir 'BLOODYROAR3.xml')
+
+        $result = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $root
+        @($result.BiosMissing).Count | Should -Be 1
+        @($result.BiosMissing[0].MissingFiles) | Should -Be @('27v1602F.bg')
+    }
+
+    It "never reads or modifies the placeholder BIOS files -- existence-only check" {
+        $root = Join-Path $TestDrive ("bios-readonly-check-" + [guid]::NewGuid().ToString('N'))
+        $userProfilesDir = Join-Path $root 'UserProfiles'
+        $biosDir = Join-Path $root 'pcsx2x6\TeknoParrot\bios'
+        New-Item -ItemType Directory -Path $userProfilesDir, $biosDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $biosDir '27v1602T.d') -Value 'not real firmware content' -Encoding ascii
+        Set-Content -LiteralPath (Join-Path $biosDir '27v1602F.bg') -Value 'not real firmware content' -Encoding ascii
+        $beforeT = Get-Content -LiteralPath (Join-Path $biosDir '27v1602T.d') -Raw
+        New-Pcsx2UserProfile -Path (Join-Path $userProfilesDir 'BLOODYROAR3.xml')
+
+        Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $root | Out-Null
+
+        (Get-Content -LiteralPath (Join-Path $biosDir '27v1602T.d') -Raw) | Should -Be $beforeT -Because "TPM must never read or modify BIOS file content, only check existence"
+    }
+}

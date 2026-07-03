@@ -678,6 +678,7 @@ At the end of every run the script prints — and saves to a text file — every
 | **Path too long** | Specific games (Raw Thrills titles, Yu-Gi-Oh! Duel Terminal 6) whose install path exceeds a hard-coded engine-specific limit. Shows the exact short folder name to rename to. Checked automatically every run. |
 | **File version mismatch** | Specific games needing an OLDER pinned version of a particular file rather than the latest (BlazBlue-series/`iDmacDrv32.dll`, Tekken Tag Tournament 2/`EBOOT.BIN`). Shows the file name, current/required CRC32, and where to get the right version. Checked automatically every run. |
 | **GPU incompatibility** | Specific registered games confirmed not to work on your detected GPU vendor (AMD or Intel). Informational only — no fix exists. Checked automatically every run; silently skipped if the vendor can't be auto-detected. |
+| **Firmware not installed** | Registered games whose emulator (currently pcsx2x6 only) needs firmware/BIOS files TeknoParrot itself doesn't provide. Shows the exact files and folder needed. TPM never downloads, links, or redistributes these — existence check only. Checked automatically every run when a pcsx2x6-based game is registered. |
 | **Setup notes** | Any registered game with special setup notes in the community compatibility database (eggmansworld.github.io/TeknoParrot) — workarounds, known quirks, etc. Shows the expected executable name and the full notes text, word-wrapped and separated game-by-game. Informational only; skipped silently if the live fetch fails. |
 
 ---
