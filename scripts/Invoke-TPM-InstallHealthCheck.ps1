@@ -134,11 +134,11 @@ $result | ConvertTo-Json -Depth 8 | Out-File -FilePath $jsonPath -Encoding utf8
 '## Checks' | Out-File -FilePath $mdPath -Append -Encoding utf8
 foreach ($check in $checks) {
     $mark = if ($check.Passed) { 'PASS' } else { 'WARN' }
-    "- [$mark] $($check.Name): $($check.Details)" | Out-File -FilePath $mdPath -Append -Encoding utf8
+    ('- [{0}] {1}: {2}' -f $mark, $check.Name, $check.Details) | Out-File -FilePath $mdPath -Append -Encoding utf8
 }
 '' | Out-File -FilePath $mdPath -Append -Encoding utf8
 '## Artifacts' | Out-File -FilePath $mdPath -Append -Encoding utf8
-"- JSON: `$jsonPath`" | Out-File -FilePath $mdPath -Append -Encoding utf8
-"- Log: `$logPath`" | Out-File -FilePath $mdPath -Append -Encoding utf8
+('- JSON: `{0}`' -f $jsonPath) | Out-File -FilePath $mdPath -Append -Encoding utf8
+('- Log: `{0}`' -f $logPath) | Out-File -FilePath $mdPath -Append -Encoding utf8
 
 Write-Host "Install health report: $mdPath"
