@@ -184,14 +184,19 @@ try {
     $gitVersion = git --version
     $gitBranch = git rev-parse --abbrev-ref HEAD
     $gitCommit = git rev-parse HEAD
-    $gitStatus = git status --short
-    if (-not $gitStatus) { $gitStatus = '(clean)' }
+    $gitStatusLines = @(git status --short)
+    $repoClean = ($gitStatusLines.Count -eq 0)
+    if ($repoClean) {
+        $gitStatusText = '(clean)'
+    } else {
+        $gitStatusText = ($gitStatusLines -join [Environment]::NewLine)
+    }
     $results.GitVersion = $gitVersion
     $results.GitBranch = $gitBranch
     $results.Commit = $gitCommit
-    $results.GitStatus = $gitStatus
+    $results.GitStatus = $gitStatusText
     Add-CheckResult 'Repository available' $true "branch=$gitBranch commit=$gitCommit"
-    Add-CheckResult 'Repository clean' ($gitStatus -eq '(clean)') ($gitStatus | Out-String).Trim()
+    Add-CheckResult 'Repository clean' $repoClean $gitStatusText
 
     $backupItems = [ordered]@{}
     $backupItems.UserProfiles = Copy-IfExists (Join-Path $TeknoParrotRoot 'UserProfiles') 'UserProfiles'
@@ -237,6 +242,16 @@ try {
     foreach ($p in $pathsToCheck) {
         $exists = Test-Path -LiteralPath $p.Path -PathType $p.Type
         Add-CheckResult $p.Name $exists $p.Path
+    }
+
+    $healthScript = Join-Path $PSScriptRoot 'Invoke-TPM-InstallHealthCheck.ps1'
+    if (Test-Path -LiteralPath $healthScript -PathType Leaf) {
+        $healthOutDir = Join-Path $reportDir 'InstallHealth'
+        & $healthScript -TeknoParrotRoot $TeknoParrotRoot -OutDir $healthOutDir | Out-File -FilePath (Join-Path $reportDir 'InstallHealth-console.txt') -Encoding utf8
+        $results.InstallHealthReport = Join-Path $healthOutDir 'InstallHealth.md'
+        Add-CheckResult 'Real install health check collected' $true $results.InstallHealthReport
+    } else {
+        Add-CheckResult 'Real install health check collected' $false "missing=$healthScript"
     }
 
     $profiles = @()
@@ -334,4 +349,7 @@ finally {
     Add-Report "- Pester summary: `$(Join-Path $reportDir 'Pester-summary.json')`"
     Add-Report "- Pester output: `$(Join-Path $reportDir 'Pester-output.txt')`"
     Add-Report "- PSScriptAnalyzer: `$(Join-Path $reportDir 'PSScriptAnalyzer.json')`"
+    if ($results.InstallHealthReport) {
+        Add-Report "- Install health: `$($results.InstallHealthReport)`"
+    }
 }
