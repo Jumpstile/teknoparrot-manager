@@ -4,8 +4,26 @@ This matrix tracks fixed defects and hardening work that should stay covered by
 Pester or other repeatable checks. It is intentionally focused on behavior that
 can regress silently during release-hardening work.
 
-| Bug / issue | Coverage | Risk covered | Remaining gap |
-| --- | --- | --- | --- |
+Rule: every confirmed bug fix needs a regression test and a row in this file.
+`docs/REGRESSION-REGISTER.md` covered this same ground under a separate table;
+its four normalization entries are folded in below (marked Covered) and that
+file now points here.
+
+## Status
+
+- Pending Fix: test exists and currently exposes the bug.
+- Covered: test passes and protects the fixed behavior.
+- Needs Test: bug is known but coverage has not been added yet.
+- Investigation: behavior still needs confirmation.
+
+## Entries
+
+| Bug / issue | Coverage | Risk covered | Remaining gap | Status |
+| --- | --- | --- | --- | --- |
+| Issue 80 normalization | `Tests/KnownBugRegression.Tests.ps1` | Board or revision tokens can remain in normalized game keys | -- | Covered |
+| Zoids title safety | `Tests/KnownBugRegression.Tests.ps1` | EX Plus could be collapsed into plain Zoids Infinity | -- | Covered |
+| Edition title safety | `Tests/KnownBugRegression.Tests.ps1` | Meaningful parenthetical title text could be stripped | -- | Covered |
+| Rev-letter safety | `Tests/KnownBugRegression.Tests.ps1` | Bare Rev-letter tokens could be stripped too broadly | -- | Covered |
 | Downloader pipeline hardening, issue #68 | `Invoke-TpmDownload` method-selection, retry, BITS `TransientError`, progress-display, partial-file cleanup, expected-size, cache-reuse, thumbnail 404-vs-failure, and updater module transport tests | Slow or unsafe repeated download paths, partial files promoted as complete downloads, noisy or misleading progress, thumbnail 404s reported as hard failures | Live network performance still depends on periodic field validation because tests mock transport behavior instead of downloading real upstream assets. |
 | Issue #66: already-extracted games still offered for extraction | `Resolve-ExtractedGameFolder` tests for Aliens Armageddon, Battle Gear 3 metadata differences, RetroBat suffixes, registered GamePath identity, empty-folder rejection, unsafe profile-code rejection, and sequel negative cases | Duplicate extraction prompts, unsafe DAT/profile identity use, false positives between similarly named games | Full reporter list still requires real collection data confirmation. |
 | Issue #66 AutoSync integration | `Invoke-AutoSync extracted-folder regression guards` proves AutoSync does not call extraction when the resolver finds an existing non-empty short-name RetroBat folder | Regression where the resolver works directly but AutoSync bypasses it and extracts anyway | Additional large real-world folder sets are still manual unless a fixture dataset is added. |
@@ -26,4 +44,7 @@ can regress silently during release-hardening work.
 | Crosshair setup | `Set-Pcsx2CursorPaths` backup-before-write test | PCSX2 cursor config rewrite without a backup | Full interactive picker and browser preview remain manual. |
 | Main menu architecture | Source-level main menu drift tests | Displayed option numbers diverging from switch cases | Console presentation still benefits from manual smoke testing. |
 | Auto-update safety | `TpmAutoUpdate.Core`, destructive-path tests, and manager-update tests | Raw ZIP replacement, bad release URLs, missing script in ZIP, backup failure, `-WhatIf` apply behavior | Standalone updater download transport should consolidate with the shared downloader helper after both branches converge. |
+| pcsx2x6 crosshair path, issue #79 | `Invoke-CrosshairSetup`/`Resolve-Pcsx2Directory` regression tests, `VirtualBetaTester.Recovery.Tests.ps1` (missing-dependency category) | Crosshairs deployed to the emulator folder root instead of the upstream-canonical `pcsx2x6\TeknoParrot\crosshairs\` subfolder | None -- real-instance certification confirmed correct behavior against an actual pcsx2x6 install. |
+| Auto-update locked-destination false success, issue #86 | `TpmAutoUpdate.DestructivePath.Tests.ps1` (`Replacement failure after successful backup`) | "Update installed successfully" reported without the file actually being replaced when the destination was briefly locked | None -- the fix and its test both landed together. |
+| Missing pcsx2x6 firmware/BIOS detection, issue #85 tier 1 | `Tests/TeknoParrot-Manager.Tests.ps1` (`Get-CompatibilityWarnings -- BiosMissing`, 10 tests), `VirtualBetaTester.Recovery.Tests.ps1` (missing-firmware recovery, TVD-High) | Games registered and launchable via TPM failing at launch with a real "firmware not installed" error, with no earlier warning | Tier 2 (remediation/acquisition assistance) is explicitly deferred post-1.0 -- detection-only is the certified scope for 1.0. |
 

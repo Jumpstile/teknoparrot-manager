@@ -32,7 +32,6 @@ Full documentation: [README.md](README.md)
 - [Action Required Summary](#action-required-summary)
 - [Good to Know](#good-to-know)
 - [Quick Fixes](#quick-fixes)
-- [Known Issues Being Investigated](#known-issues-being-investigated)
 - [Files the Script Keeps](#files-the-script-keeps)
 
 ---
@@ -80,16 +79,18 @@ Full documentation: [README.md](README.md)
 |---|------|-------------|
 | 1 | **AutoSync** | Extract ZIPs from NAS or local source, then register |
 | 2 | **Register only** | Games already extracted — just register |
-| 3 | **Crosshair setup** | Pick and deploy custom crosshairs to lightgun games |
-| 4 | **ReShade setup** | Add visual post-processing to game folders |
-| 5 | **dgVoodoo2 setup** | Fix old DX8 / DirectDraw / Glide games |
-| 6 | **GPU fix setup** | Apply AMD / NVIDIA / Intel vendor fix to registered games |
-| 7 | **Force feedback (FFB) setup** | Native FFB Blaster (membership) + free third-party plugin |
-| 8 | **BepInEx update check** | Update an existing BepInEx install to the latest stable 64-bit release |
-| 9 | **Restore backup** | Roll TeknoParrot profiles, LaunchBox's library files, or Postgres databases back to a previous backup |
+| 3 | **Propagate Controls** | Copy control bindings from a reference game to every other game of the same type, without a full AutoSync/Register pass |
+| 4 | **Crosshair setup** | Pick and deploy custom crosshairs to lightgun games |
+| 5 | **ReShade setup** | Add visual post-processing to game folders |
+| 6 | **dgVoodoo2 setup** | Fix old DX8 / DirectDraw / Glide games |
+| 7 | **GPU fix setup** | Apply AMD / NVIDIA / Intel vendor fix to registered games |
+| 8 | **Force feedback (FFB) setup** | Native FFB Blaster (membership) + free third-party plugin |
+| 9 | **BepInEx update check** | Update an existing BepInEx install to the latest stable 64-bit release |
 | 10 | **Library health check** | Read-only registered/broken/empty status, plus GPU fix / FFB Blaster / dgVoodoo2 / Postgres coverage and ReShade/BepInEx install counts |
-| 11 | **Postgres setup** | Installs/configures the local PostgreSQL database some Incredible Technologies games need |
-| 12 | **Exit** | Quit |
+| 11 | **Restore backup** | Roll TeknoParrot profiles, LaunchBox's library files, or Postgres databases back to a previous backup |
+| 12 | **Postgres setup** | Installs/configures the local PostgreSQL database some Incredible Technologies games need |
+| 13 | **Check for Updates** | Check GitHub for a newer TPM release and install it |
+| 14 | **Exit** | Quit |
 
 ---
 
@@ -130,7 +131,7 @@ Bind ONE game of each control type in TeknoParrotUI — then the script copies t
 
 ## Crosshair Setup
 
-Mode 3 deploys custom crosshair cursor images to all registered lightgun games.
+Mode 4 deploys custom crosshair cursor images to all registered lightgun games.
 
 **Steps:**
 1. An HTML preview page opens in your browser showing all 321 included designs
@@ -138,10 +139,10 @@ Mode 3 deploys custom crosshair cursor images to all registered lightgun games.
 3. The script copies the images to every registered lightgun game:
    - Standard games: `P1.png` + `P2.png` in the game's exe folder
    - ElfLdr2 games: shared pair in the ElfLdr2 emulator folder
-   - Pcsx2x6 games: shared pair in the pcsx2x6 emulator folder; `inis\PCSX2.ini` is also updated with `cursor_path` for each USB guncon2 port
+   - Pcsx2x6 games: shared pair in `pcsx2x6\TeknoParrot\crosshairs\` (the official upstream location); `inis\PCSX2.ini` is also updated with `cursor_path` for each USB guncon2 port
 4. Optionally choose to hide the Windows cursor in all gun game profiles (a backup is taken automatically first)
 
-Run mode 3 again any time to change designs. Add your own PNG files to the `Crosshairs\` folder and the script picks them up automatically.
+Run mode 4 again any time to change designs. Add your own PNG files to the `Crosshairs\` folder and the script picks them up automatically.
 
 ---
 
@@ -160,7 +161,7 @@ ReShade adds post-processing effects without modifying any game files. Remove it
 
 ### If you downloaded the ZIP release
 
-`ReShade64.dll` is already in the `ReShade\` folder. Just run mode 4 or answer Y when prompted at the end of any run.
+`ReShade64.dll` is already in the `ReShade\` folder. Just run mode 5 or answer Y when prompted at the end of any run.
 
 ### If you cloned from GitHub (DLLs not included in repo)
 
@@ -168,7 +169,7 @@ ReShade adds post-processing effects without modifying any game files. Remove it
 2. Run it — point it at any 64-bit TeknoParrot game exe. It creates a DLL in that folder.
 3. Copy that DLL to `ReShade\ReShade64.dll` next to the script
 4. (Optional) Repeat with a 32-bit game exe and save as `ReShade32.dll`
-5. Run mode 4 or answer Y when prompted
+5. Run mode 5 or answer Y when prompted
 
 **In-game:** press **Home** to open the ReShade overlay. Toggle effects, adjust sliders — settings save to `ReShade.ini` in the game folder.
 
@@ -190,7 +191,7 @@ Some older arcade games use DirectX 8, DirectDraw, or 3dfx Glide. On modern PCs 
    - From `MS\x86\`: `D3D8.dll`, `DDraw.dll`, `D3DImm.dll`
    - From `3Dfx\x86\`: `Glide2x.dll`, `Glide3x.dll`
    - From the ZIP root: `dgVoodoo.conf`
-3. Run mode 5 or answer Y at the end of any run. The wizard auto-detects which games need it and shows them first.
+3. Run mode 6 or answer Y at the end of any run. The wizard auto-detects which games need it and shows them first.
 
 **To remove:** delete the deployed DLL(s) from the game folder.
 
@@ -198,13 +199,13 @@ Some older arcade games use DirectX 8, DirectDraw, or 3dfx Glide. On modern PCs 
 
 ## GPU Compatibility Fixes
 
-Many TeknoParrot games include optional fix settings for AMD, NVIDIA, or Intel GPUs. Mode 6 auto-detects your GPU via WMI and applies the correct fix to every registered game that supports one. `GameProfiles` is scanned at runtime — newly added games are always covered without a script update. Safe to re-run any time you change GPU or update drivers.
+Many TeknoParrot games include optional fix settings for AMD, NVIDIA, or Intel GPUs. Mode 7 auto-detects your GPU via WMI and applies the correct fix to every registered game that supports one. `GameProfiles` is scanned at runtime — newly added games are always covered without a script update. Safe to re-run any time you change GPU or update drivers.
 
 ---
 
 ## Force Feedback (FFB) Setup
 
-Mode 7 covers two independent ways to get force feedback / rumble working, and they're not mutually exclusive:
+Mode 8 covers two independent ways to get force feedback / rumble working, and they're not mutually exclusive:
 
 - **Native FFB Blaster** — TeknoParrot's own built-in feature, but it requires an active paid TeknoParrot membership. The script asks if you have one; answer N and this part is skipped entirely (there's no point enabling a field that has no effect without a subscription). If you answer Y, the field is discovered dynamically by scanning your `GameProfiles` folder — never hardcoded.
 - **Third-party plugin** (mightymikem/FFBArcadePlugin) — free, no subscription needed. The per-game DLL table is fetched live from that project's GitHub repo every run, so it tracks new games automatically.
@@ -217,7 +218,7 @@ If a game is covered by both, the script asks **one** batched question — keep 
 
 ## BepInEx Update Check
 
-[BepInEx](https://docs.bepinex.dev) is a third-party Unity plugin/modding framework some games need for controls or fixes to work. Mode 8 shows a live-fetched example list each time you open it.
+[BepInEx](https://docs.bepinex.dev) is a third-party Unity plugin/modding framework some games need for controls or fixes to work. Mode 9 shows a live-fetched example list each time you open it.
 
 **This mode ONLY checks and updates games that already have BepInEx installed** — it never installs BepInEx into a game that doesn't have it yet (that first install is still a manual step). Only the latest **stable 64-bit** release is ever used — never 32-bit, never a pre-release. A 32-bit install is left alone and reported separately.
 
@@ -235,7 +236,7 @@ Several Incredible Technologies games — Golden Tee Live (2006–2019), Power P
 - **If PostgreSQL is already installed, it's never reinstalled or modified.**
 - **A database that already exists is never recreated or restored over.** A `Pass` field that's already filled in is never overwritten.
 - For newer game profiles (Golden Tee Live 2018+) with TeknoParrot's own "Automatically create Database" feature, the script only fills in connection settings — TeknoParrot creates the database itself on first launch. For older profiles, the script creates the database and restores that game's bundled backup itself.
-- Every run backs up every existing Postgres database first — restore via mode 9 if anything looks wrong.
+- Every run backs up every existing Postgres database first — restore via mode 11 if anything looks wrong.
 
 If none of your registered games need Postgres, mode 12 says so and exits immediately without installing anything.
 
@@ -359,7 +360,7 @@ Answer Y to fetch `ProfileCode.png` for every registered game not already in `<T
 ## Restoring a Backup
 
 1. Close TeknoParrot completely before restoring (and LaunchBox/BigBox too, if restoring a LaunchBox backup)
-2. Re-run the script and choose **mode 9 — Restore backup**
+2. Re-run the script and choose **mode 11 — Restore backup**
 3. Pick which kind to restore:
    - **TeknoParrot UserProfiles backup**
    - **LaunchBox library backup** — only relevant if you've used direct LaunchBox integration
@@ -377,7 +378,7 @@ Mode 10 is a **read-only** status check — it never extracts, registers, repair
 - GPU fix / FFB Blaster / dgVoodoo2 / Postgres coverage — which eligible games don't have each applied yet
 - ReShade / BepInEx install counts, informationally (these are cosmetic per-game choices, not flagged as something to fix)
 
-Third-party FFB plugin coverage isn't included here (checking it needs a live lookup) — use mode 7 for that instead.
+Third-party FFB plugin coverage isn't included here (checking it needs a live lookup) — use mode 8 for that instead.
 
 ---
 
@@ -434,6 +435,7 @@ At the end of every run the script prints — and saves to a text file (default 
 | **Set up controls** | Control types with no reference game bound yet — shows which games are waiting and suggests what to bind |
 | **Setup notes** | Registered games with special setup notes from the community compatibility database — shows the expected executable name and the full notes text |
 | **Compatibility warnings** | Known install-path-length limits, pinned-file-version requirements, and GPU-vendor incompatibilities for specific games |
+| **Firmware not installed** | Registered games whose emulator (currently pcsx2x6 only) needs firmware/BIOS files TeknoParrot itself doesn't provide — shows the exact files and folder needed. TPM never downloads, links, or redistributes these; existence check only |
 
 ---
 
@@ -460,21 +462,12 @@ At the end of every run the script prints — and saves to a text file (default 
 | Game won't launch | Open TeknoParrotUI, point the profile to the correct `.exe`. Re-run the script and choose Repair. |
 | Game not in TeknoParrot | Check ACTION REQUIRED — may need manual registration or needs to be extracted first. |
 | Extraction keeps failing | Check the log for the specific error. Verify free space and that the ZIP is not corrupted. |
-| Controls wrong after propagation | Restore from backup (mode 9), or delete the game's `.xml` and re-run after fixing the reference game's bindings in TeknoParrotUI. |
+| Controls wrong after propagation | Restore from backup (mode 11), or delete the game's `.xml` and re-run after fixing the reference game's bindings in TeknoParrotUI. |
 | Wrong fuzzy match | Delete the game's `.xml` from `UserProfiles` and add a `forceArchetype` entry in `overrides.json`. |
 | Game appears twice in TeknoParrotUI | Delete one of the duplicate `.xml` files from `UserProfiles` — keep the one with the correct path and any bindings already set. |
 | `[UNLOGGED]` on console | Log file is inaccessible — check that the TeknoParrot folder is not read-only and you have write permission. |
 | HyperSpin 2 export fails | TeknoParrot must be set up as an emulator in HyperSpin 2 first — the title must contain "TeknoParrot". |
 | Postgres setup says it needs Administrator | Close the window and re-run `TeknoParrot-Manager.bat` via right-click → Run as administrator, then choose mode 12 again. Only needed the first time PostgreSQL itself is installed. |
-
----
-
-## Known Issues Being Investigated
-
-Not yet confirmed bugs — tracked on GitHub so you can follow progress or add your own findings.
-
-- [**#1** — Control propagation may not be setting Input API for some games](https://github.com/Jumpstile/teknoparrot-manager/issues/1) — fighting/shooter-family propagation may not be setting `MergedInput` the way trackball-family propagation does. Possibly expected (not every game's Input API dropdown lists that option) — still being confirmed.
-- [**#2** — FFB Blaster field not found despite a paid membership](https://github.com/Jumpstile/teknoparrot-manager/issues/2) — the field-discovery scan found nothing on at least one real install. Root cause not yet confirmed.
 
 ---
 

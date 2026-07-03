@@ -109,7 +109,7 @@ consolidation can preserve both constraints.
 
 ## Menu integration (v0.99.39)
 
-TeknoParrot-Manager.ps1 now has a "Check for Updates" main menu option (12) that follows the flow originally planned here. The interactive checker is implemented as plain functions inside TeknoParrot-Manager.ps1 itself (`Get-ManagerUpdateRelease`, `Assert-ManagerUpdateTargetWritable`, `New-ManagerUpdateBackup`, `Expand-ManagerUpdateAsset`, `Test-ManagerUpdateExtractedScript`, `Invoke-CheckForUpdates`) rather than by importing `tools/TpmAutoUpdate.Core.psm1` -- this script has no external module dependencies anywhere else, and introducing one just for this would be inconsistent with its single-file, self-contained architecture. The logic (asset pattern, content validation, read-only pre-check) is deliberately kept in lockstep with the standalone module; `tools/Invoke-TpmAutoUpdate.ps1` remains available separately for scripted/manual use outside the interactive menu.
+TeknoParrot-Manager.ps1 now has a "Check for Updates" main menu option (13) that follows the flow originally planned here. The interactive checker is implemented as plain functions inside TeknoParrot-Manager.ps1 itself (`Get-ManagerUpdateRelease`, `Assert-ManagerUpdateTargetWritable`, `New-ManagerUpdateBackup`, `Expand-ManagerUpdateAsset`, `Test-ManagerUpdateExtractedScript`, `Invoke-CheckForUpdates`) rather than by importing `tools/TpmAutoUpdate.Core.psm1` -- this script has no external module dependencies anywhere else, and introducing one just for this would be inconsistent with its single-file, self-contained architecture. The logic (asset pattern, content validation, read-only pre-check) is deliberately kept in lockstep with the standalone module; `tools/Invoke-TpmAutoUpdate.ps1` remains available separately for scripted/manual use outside the interactive menu.
 
 Actual flow:
 
@@ -122,7 +122,7 @@ Actual flow:
 7. Backup current script.
 8. Download replacement.
 9. Validate replacement content.
-10. Replace script.
+10. Replace script. As of issue #86 (v0.99.45), the replace step itself is verified, not just assumed to succeed: `Move-Item` is called with `-ErrorAction Stop`, and a post-move `Test-Path` confirms the destination now actually holds the new content before reporting success. Previously, a briefly-locked destination (for example, antivirus scanning the new file) could let `Move-Item` silently no-op while the script still reported "Update installed successfully" -- the fix makes that failure surface as a real, actionable error instead, with the original script and its backup left untouched.
 11. Tell the user to restart TeknoParrot Manager, then exit this session -- it never continues running the replaced script in the current process.
 
 Any failure at any step displays the exact error, states whether a backup was created, and returns safely to the main menu without exiting.
