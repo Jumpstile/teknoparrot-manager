@@ -63,6 +63,54 @@ function Get-TreeHash {
         }
 }
 
+function Get-PesterSummary {
+    param([Parameter(Mandatory=$true)]$PesterResult)
+
+    $summary = [ordered]@{
+        Passed = $null
+        Failed = $null
+        Skipped = $null
+        Inconclusive = $null
+        NotRun = $null
+        Total = $null
+        Duration = $null
+        Result = $null
+    }
+
+    foreach ($name in @('PassedCount','Passed')) {
+        if ($PesterResult.PSObject.Properties.Name -contains $name) { $summary.Passed = $PesterResult.$name; break }
+    }
+    foreach ($name in @('FailedCount','Failed')) {
+        if ($PesterResult.PSObject.Properties.Name -contains $name) { $summary.Failed = $PesterResult.$name; break }
+    }
+    foreach ($name in @('SkippedCount','Skipped')) {
+        if ($PesterResult.PSObject.Properties.Name -contains $name) { $summary.Skipped = $PesterResult.$name; break }
+    }
+    foreach ($name in @('InconclusiveCount','Inconclusive')) {
+        if ($PesterResult.PSObject.Properties.Name -contains $name) { $summary.Inconclusive = $PesterResult.$name; break }
+    }
+    foreach ($name in @('NotRunCount','NotRun')) {
+        if ($PesterResult.PSObject.Properties.Name -contains $name) { $summary.NotRun = $PesterResult.$name; break }
+    }
+    foreach ($name in @('TotalCount','Total')) {
+        if ($PesterResult.PSObject.Properties.Name -contains $name) { $summary.Total = $PesterResult.$name; break }
+    }
+    foreach ($name in @('Duration','Time')) {
+        if ($PesterResult.PSObject.Properties.Name -contains $name) { $summary.Duration = [string]$PesterResult.$name; break }
+    }
+    if ($PesterResult.PSObject.Properties.Name -contains 'Result') { $summary.Result = [string]$PesterResult.Result }
+
+    if ($null -eq $summary.Total -and $null -ne $summary.Passed -and $null -ne $summary.Failed) {
+        $total = 0
+        foreach ($key in @('Passed','Failed','Skipped','Inconclusive','NotRun')) {
+            if ($null -ne $summary[$key]) { $total += [int]$summary[$key] }
+        }
+        $summary.Total = $total
+    }
+
+    [pscustomobject]$summary
+}
+
 $results = [ordered]@{
     Timestamp = $stamp
     RepoPath = $RepoPath
@@ -129,13 +177,16 @@ try {
         $results.PesterVersion = $pesterModule.Version.ToString()
     }
 
-    $pesterResultPath = Join-Path $reportDir "Pester.json"
+    $pesterSummaryPath = Join-Path $reportDir "Pester-summary.json"
     $pesterOutputText = Join-Path $reportDir "Pester-output.txt"
 
     $pesterResult = Invoke-Pester -Path $RepoPath -PassThru 2>&1 | Tee-Object -FilePath $pesterOutputText
-    $pesterResult | ConvertTo-Json -Depth 8 | Out-File $pesterResultPath -Encoding utf8
+    $pesterSummary = Get-PesterSummary -PesterResult $pesterResult
+    $pesterSummary | ConvertTo-Json -Depth 4 | Out-File $pesterSummaryPath -Encoding utf8
+    $results.Pester = $pesterSummary
 
-    Add-Report "Pester completed. See Pester.json and Pester-output.txt."
+    Add-Report "Pester completed. See Pester-summary.json and Pester-output.txt."
+    Add-Report "Pester summary: total=$($pesterSummary.Total), passed=$($pesterSummary.Passed), failed=$($pesterSummary.Failed), skipped=$($pesterSummary.Skipped)"
     Add-Report ""
 
     Add-Report "## PSScriptAnalyzer"
@@ -158,6 +209,7 @@ try {
     } else {
         Add-Report "PSScriptAnalyzer findings: $($analyzer.Count)"
     }
+    $results.PSScriptAnalyzerFindings = $analyzer.Count
     Add-Report ""
 
     Add-Report "## TeknoParrot Structure Checks"
@@ -238,7 +290,7 @@ catch {
 }
 finally {
     Pop-Location
-    $results | ConvertTo-Json -Depth 10 | Out-File $json -Encoding utf8
+    $results | ConvertTo-Json -Depth 8 | Out-File $json -Encoding utf8
     Add-Report ""
     Add-Report "JSON report: $json"
 }
