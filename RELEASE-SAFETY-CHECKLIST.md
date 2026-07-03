@@ -266,6 +266,35 @@ pre-commit gates in section 1.
   in addition to, not instead of, the full repo-wide sweep already required
   by CLAUDE.md after any GitHub-touching round.
 
+## 8. Release governance exceptions
+
+Normal PR review remains the standing rule for release-critical changes. Admin
+override merges are exceptions, not precedent; when one is used, record the
+affected PRs, why review was bypassed, what automated evidence was green at
+merge time, and what later certification evidence closed the release risk.
+
+### 2026-07-03 -- v0.99.45 release-candidate exception
+
+PR #87 (`Issue #79 pcsx2x6 fix, in-script auto-update hardening, TPM
+Certification Suite fixes`) and PR #89 (`Fix ScriptVersion/header version
+mismatch (0.99.44 vs 0.99.45)`) were merged by admin override while GitHub
+still reported review required. The override was used to unblock a
+release-candidate fix chain after the code was already constrained by green CI
+and the remaining risk had narrowed to final real-machine certification.
+
+CI was green for both PRs at merge time. After merge, the outstanding
+arcade-machine certification was rerun against exact merged `main` commit
+`a85aa26942b46132bba252dcf24edc42c214f6e6` and passed 8/8 (100%): repository
+clean, Pester 321/321, static analysis 0 findings, real install health,
+backups, smoke file safety, artifacts, and the issue #79 pcsx2x6 gate all
+passed; the BAT launcher was also confirmed working and opened the report
+folder.
+
+Treat this as governance debt / exception-log material only, not a technical
+release blocker for the certified commit. Future release-critical PRs should
+return to normal review approval before merge unless an explicit release-manager
+exception is recorded with equivalent evidence.
+
 ---
 
 _For the engineering rationale behind each item, see SECURITY.md, LESSONS_LEARNED.md, and ARCHITECTURE.md._
