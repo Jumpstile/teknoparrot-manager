@@ -4,7 +4,7 @@
 
 A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arcade game library on Windows — registration, control propagation, crosshairs, ReShade, dgVoodoo2, GPU fixes, and more.
 
-> **Beta** — test one game after each run. Profiles are backed up automatically before every run.
+> **Release Candidate** — test one game after each run. Profiles are backed up automatically before every run.
 
 ---
 
@@ -130,7 +130,7 @@ This script automates the copy-and-fill step: it scans your games, matches each 
 
 ## Installation
 
-1. Download `TeknoParrot Manager vX.XX BETA.zip` from [Releases](../../releases/latest)
+1. Download `TeknoParrot Manager v1.0 RC1.zip` from [Releases](../../releases/latest)
 2. Extract to any folder (e.g. a `Scripts` subfolder alongside your TeknoParrot install)
 3. Double-click **`TeknoParrot-Manager.bat`**
 
@@ -899,4 +899,4 @@ Pull requests are welcome too. Full source and version history: [github.com/Jump
 
 ---
 
-> v0.99.45 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v1.0 RC1 -- test one game after each run. Profiles are backed up automatically at the start of every run.

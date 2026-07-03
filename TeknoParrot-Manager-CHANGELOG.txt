@@ -7,8 +7,16 @@
 
 
 -------------------------------------------------------------------------------
-  v0.99.45 BETA  (2026-07-03)  -- pcsx2x6 crosshair path fix, auto-update reliability
+  v1.0 RC1  (2026-07-03)  -- pcsx2x6 crosshair path fix, auto-update reliability, BIOS/firmware detection
   ------------------------------------------------------------
+  Promoted to Release Candidate 1 for the upcoming 1.0 release. No new
+  functional changes beyond what's listed below -- this entry was
+  originally written as v0.99.45 BETA; the content is unchanged, only the
+  version identity was promoted following Documentation Certification,
+  a Human Trust Audit, and full Behavioral/Recovery Certification (388/388
+  Pester, 57 Behavioral Certification tests, 9/9 CERTIFIED on real
+  hardware).
+
   Fix (issue #79): pcsx2x6 crosshair deployment now writes P1.png/P2.png
   to the official upstream location, pcsx2x6\TeknoParrot\crosshairs\,
   instead of the emulator folder root. Files already deployed at the old
