@@ -204,6 +204,33 @@ alternative silently broke a different test file's module-scoped mock,
 and only when the full test suite ran together. The principle here is
 general; that incident is illustrative, not definitional.
 
+## Tester Value Density: prioritizing behavioral test investment
+
+Tester Value Density (TVD) measures how much meaningful manual beta
+testing is replaced relative to the engineering and maintenance cost of
+an automated behavioral test. It is a prioritization tool for deciding
+what behavioral/certification test work to write next -- it is **not** a
+release score, and it does not feed into release-readiness scoring or
+any certification gate's pass/fail computation.
+
+A test tends toward High TVD when it:
+
+- exercises realistic human behavior,
+- covers meaningful release risk,
+- catches a defect class not already covered by existing tests,
+- is deterministic,
+- uses local fixtures (no network, no GUI, no real external state),
+- asserts behavioral invariants rather than brittle exact-output checks,
+- has low maintenance cost, and
+- produces actionable failures.
+
+Classify each new behavioral test as Low, Medium, or High TVD, recorded
+as engineering metadata (e.g. a code comment near the test) at the time
+it's written. Do not compute a numeric TVD score -- the three-tier
+classification is deliberately coarse. Use it only to prioritize which
+behavioral tests are worth writing next, never as an input to whether a
+build is certified or a release is approved.
+
 ## Release governance: technical readiness is not release authorization
 
 Passing all engineering gates makes a release **eligible** to be
