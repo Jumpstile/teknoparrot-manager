@@ -7,6 +7,78 @@ outcome -- the ones most likely to repeat.
 
 ---
 
+## TPM Certification Suite (commit bb2a160): [scriptblock]::Create() dot-sourcing breaks cross-file Pester module mocking
+
+**What happened.** A real arcade-machine certification run reported 10 Pester
+failures, all in `Tests/TpmAutoUpdate.DestructivePath.Tests.ps1`, all with the
+same shape: `Response status code does not indicate success: 403 (rate limit
+exceeded)`. That file's `Mock -ModuleName TpmAutoUpdate.Core Get-LatestRelease`
+had stopped intercepting calls, letting the real (unmocked) call through to
+GitHub's API. Local reruns of that file alone, and in various smaller
+combinations with other test files, passed cleanly every time -- it only
+failed when the *full* `Tests/` folder ran together, which is exactly how
+`scripts/Invoke-TPM-RealInstanceSmoke.ps1` invokes Pester for a real
+certification run.
+
+**Root cause, isolated by bisection, not guessed.** `Tests/TPMCertificationHarness.Tests.ps1`
+extracts functions from `Invoke-TPM-RealInstanceSmoke.ps1` via AST (the same
+technique `Tests/TeknoParrot-Manager.Tests.ps1` uses for the main script,
+since neither file can be dot-sourced directly -- both have top-level
+executable code). The extraction dot-sourced each function with:
+```powershell
+. ([scriptblock]::Create($fn.Extent.Text))
+```
+When this file ran in the same Pester invocation as
+`Tests/TpmAutoUpdate.DestructivePath.Tests.ps1`, that file's module-scoped
+mock stopped working. Confirmed step by step:
+- Reproduced with a single trivial, unrelated function
+  (`function Get-TotallyUnrelatedThing { ... }`) dot-sourced the same way in
+  an otherwise-empty file -- not specific to anything `TPMCertificationHarness.Tests.ps1`'s
+  own functions do.
+- The same dot-source using a literal `{ function ... }` scriptblock instead
+  of `[scriptblock]::Create()` did **not** reproduce it.
+- `Tests/TeknoParrot-Manager.Tests.ps1` uses the identical
+  `[scriptblock]::Create()` extraction pattern and does **not** break the
+  same mock when paired with the same destructive-path file -- so this is
+  not a blanket "never use `[scriptblock]::Create()` in this repo" rule, it
+  is specific to this exact file combination and needs re-verification if
+  either file's extraction approach changes.
+
+The mechanism itself (why a *runtime-constructed-from-string* scriptblock's
+dot-sourcing behaves differently from a *literal* scriptblock's with respect
+to Pester's module-scoped mock session state) was not fully root-caused at
+the PowerShell-internals level -- confirming the reproducible trigger and a
+verified fix was judged sufficient given the cost of digging further into
+Pester/PowerShell scoping internals.
+
+**Fix.** `Tests/TPMCertificationHarness.Tests.ps1`'s `BeforeAll` now writes
+the extracted function text to a real temporary `.ps1` file (under
+`$TestDrive`, so Pester cleans it up automatically) and dot-sources that
+file instead of a runtime-created scriptblock:
+```powershell
+$extractedPath = Join-Path $TestDrive ("harness-functions-" + [guid]::NewGuid().ToString('N') + '.ps1')
+($functionAsts | ForEach-Object { $_.Extent.Text }) -join "`n`n" | Set-Content -LiteralPath $extractedPath -Encoding utf8
+. $extractedPath
+```
+Verified against the full `Tests/` folder: 321/321 passing, where it
+previously failed 311-312/321 on every run that included both files.
+
+**Rule.** When a test file needs to dot-source dynamically-extracted
+PowerShell source (AST-extracted functions, or any other runtime-assembled
+code), write it to a real temp file and dot-source the file -- do not
+dot-source a `[scriptblock]::Create()` result, even though it looks
+equivalent and is more convenient. This is not a stylistic preference: it is
+a verified fix for a real, reproduced cross-file Pester mock-isolation
+failure that only shows up when running the full test suite together, not
+any single file in isolation. Do not "simplify" this back to
+`[scriptblock]::Create()` without re-running the full `Tests/` folder (not
+just the file being changed) to confirm `Tests/TpmAutoUpdate.DestructivePath.Tests.ps1`
+and `Tests/TpmAutoUpdate.Core.Tests.ps1` still pass -- a local single-file
+test run will not catch this regression, since it only manifests in
+combination.
+
+---
+
 ## v0.99.38: Local success does not equal release readiness
 
 **What happened.** The CI pipeline (added in v0.99.36) immediately caught a
