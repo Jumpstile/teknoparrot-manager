@@ -315,13 +315,13 @@ finally {
     Add-Report ""
     Add-Report "Status: **$($results.Status)**"
     Add-Report "Elapsed: $($results.Elapsed)"
-    Add-Report "Report folder: `$reportDir`"
-    Add-Report "Backup folder: `$backupDir`"
+    Add-Report ("Report folder: {0}" -f $reportDir)
+    Add-Report ("Backup folder: {0}" -f $backupDir)
     Add-Report ""
     Add-Report "## Environment"
     Add-Report ""
-    Add-Report "- Repo: `$RepoPath`"
-    Add-Report "- TeknoParrot root: `$TeknoParrotRoot`"
+    Add-Report ("- Repo: {0}" -f $RepoPath)
+    Add-Report ("- TeknoParrot root: {0}" -f $TeknoParrotRoot)
     Add-Report "- Branch: $($results.GitBranch)"
     Add-Report "- Commit: $($results.Commit)"
     Add-Report "- Git: $($results.GitVersion)"
@@ -340,16 +340,16 @@ finally {
     Add-Report ""
     foreach ($check in $results.Checks) {
         $mark = if ($check.Passed) { 'PASS' } else { 'FAIL' }
-        Add-Report "- [$mark] $($check.Name): $($check.Details)"
+        Add-Report ("- [{0}] {1}: {2}" -f $mark, $check.Name, $check.Details)
     }
     Add-Report ""
     Add-Report "## Artifacts"
     Add-Report ""
-    Add-Report "- JSON report: `$json`"
-    Add-Report "- Pester summary: `$(Join-Path $reportDir 'Pester-summary.json')`"
-    Add-Report "- Pester output: `$(Join-Path $reportDir 'Pester-output.txt')`"
-    Add-Report "- PSScriptAnalyzer: `$(Join-Path $reportDir 'PSScriptAnalyzer.json')`"
+    Add-Report ("- JSON report: {0}" -f $json)
+    Add-Report ("- Pester summary: {0}" -f (Join-Path $reportDir 'Pester-summary.json'))
+    Add-Report ("- Pester output: {0}" -f (Join-Path $reportDir 'Pester-output.txt'))
+    Add-Report ("- PSScriptAnalyzer: {0}" -f (Join-Path $reportDir 'PSScriptAnalyzer.json'))
     if ($results.InstallHealthReport) {
-        Add-Report "- Install health: `$($results.InstallHealthReport)`"
+        Add-Report ("- Install health: {0}" -f $results.InstallHealthReport)
     }
 }
