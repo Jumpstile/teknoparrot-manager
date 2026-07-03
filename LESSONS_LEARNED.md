@@ -42,11 +42,13 @@ not a substitute for an actual second set of eyes before merge, which is the
 entire point of requiring a review. Getting away with it three times in a row
 is not the same as the practice being sound; if anything, three consecutive
 instances without a single genuine review is exactly the pattern this entry
-originally warned against becoming. Per `CONSTITUTION.md`'s Release Governance
-Standard ("Any engineering role may recommend release readiness. Only the
-Release Manager may authorize a production release" -- and, by the same logic,
-only an actual reviewer authorizes bypassing a review requirement), normal PR
-review remains the standing rule. This entry exists so a future session
+originally warned against becoming. Per `CONSTITUTION.md`'s "Release
+governance: technical readiness is not release authorization" section,
+"Recommendation authority" subsection ("Any engineering role may recommend
+release readiness. Only the Release Manager may authorize a production
+release" -- and, by the same logic, only an actual reviewer authorizes
+bypassing a review requirement), normal PR review remains the standing
+rule. This entry exists so a future session
 doesn't read "admin override was used successfully, repeatedly" in the git
 history and conclude it's a normal or preferred path.
 
