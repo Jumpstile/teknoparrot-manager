@@ -93,7 +93,54 @@ performs before trusting a release -- not "does the happy path work," but
   correctly reports it as `Already`, never re-writes it, and leaves the
   user's existing customization byte-identical.
 
-Explicitly out of scope through phase 1.6 (tracked in issue #88 for later
+### Phase 1.7 -- Interrupted-write, restore, conflict-resolution, and cancel/decline certification (issue #88, priorities A1-A4)
+
+Replaces the highest-risk human beta-testing activities identified in the
+post-Phase-1.6 roadmap review: what happens when a run gets interrupted,
+whether "restore from backup" (one of TPM's highest-value safety features)
+actually works, whether registration conflicts are resolved conservatively
+instead of guessed, and whether every state-changing workflow's cancel path
+genuinely makes zero changes.
+
+- **Interrupted write / partial output recovery** (`VirtualBetaTester.InterruptedWriteRecovery.Tests.ps1`):
+  a leftover `.xml.tmp` from a killed mid-write is structurally invisible
+  to every profile scan in the codebase (the same `*.xml` filter every
+  scan uses); `Save-Xml` recovers cleanly and produces correct final
+  content even when a stale `.tmp` from a prior interrupted run already
+  occupies its temp path, across repeated interrupted-then-recovered
+  cycles; a failed temp-file write never touches the existing good file
+  (the atomicity guarantee the write-to-temp-then-rename pattern exists
+  for); a fresh backup run is complete even when an earlier interrupted
+  backup left a partial folder behind; a truncated/malformed profile is
+  skipped without crashing the scan, and every other valid profile is
+  still processed.
+- **Restore Backup behavioral recovery** (`VirtualBetaTester.RestoreBackup.Tests.ps1`):
+  `Invoke-RestoreBackup` had zero prior test coverage despite being one of
+  TPM's highest-value safety features. Covers: enumeration and correct
+  most-recent-first selection across multiple backups; safe cancel at
+  either prompt (selection or confirmation) with zero changes and no
+  delete-before-confirm ordering bug; a malformed backup (zero XML
+  profiles) is rejected before any deletion happens; restoring one backup
+  never disturbs any sibling backup snapshot; refuses to run while
+  TeknoParrotUi.exe is open.
+- **AutoSync / registration conflict resolution** (`VirtualBetaTester.RegistrationConflictResolution.Tests.ps1`):
+  `Repair-GamePaths` (the "a game folder moved since it was registered"
+  handler) had zero prior test coverage. Covers: fixes a broken GamePath
+  when the exe now lives at a new, unambiguous location; reports
+  `ambiguous` (never guesses) when the same exe name exists at two
+  locations on disk, or maps to more than one profile in the library;
+  reports `not-found` (never fabricates a path) when the exe is genuinely
+  gone; a valid GamePath is never even reported, let alone rewritten;
+  DryRun reports what would be fixed without writing anything.
+- **Cancel / decline matrix** (`VirtualBetaTester.CancelDeclineMatrix.Tests.ps1`):
+  `Invoke-GpuFixSetup`'s cancel paths (pressing Enter, or typing an
+  unrecognized vendor, when GPU auto-detection fails) had zero prior
+  coverage -- both now proven to make zero changes and create no backup
+  folder before any work begins; a read-only compatibility scan is proven
+  to genuinely touch nothing on disk via a full before/after filesystem
+  diff, not just console wording.
+
+Explicitly out of scope through phase 1.7 (tracked in issue #88 for later
 phases, not implemented yet): broad fuzzing, long soak testing, mutation
 testing, a full property-based framework, randomized menu walking, large
 synthetic libraries, GUI/browser automation, performance timing, soak
