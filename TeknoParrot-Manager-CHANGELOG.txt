@@ -7,7 +7,7 @@
 
 
 -------------------------------------------------------------------------------
-  v1.0  (2026-07-03)  -- pcsx2x6 crosshair path fix, auto-update reliability
+  v0.99.45 BETA  (2026-07-03)  -- pcsx2x6 crosshair path fix, auto-update reliability
   ------------------------------------------------------------
   Fix (issue #79): pcsx2x6 crosshair deployment now writes P1.png/P2.png
   to the official upstream location, pcsx2x6\TeknoParrot\crosshairs\,

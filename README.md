@@ -4,7 +4,7 @@
 
 A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arcade game library on Windows — registration, control propagation, crosshairs, ReShade, dgVoodoo2, GPU fixes, and more.
 
-> **Tip** — test one game after each run. Profiles are backed up automatically before every run.
+> **Beta** — test one game after each run. Profiles are backed up automatically before every run.
 
 ---
 
@@ -898,4 +898,4 @@ Pull requests are welcome too. Full source and version history: [github.com/Jump
 
 ---
 
-> v1.0 -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v0.99.45 BETA -- test one game after each run. Profiles are backed up automatically at the start of every run.
