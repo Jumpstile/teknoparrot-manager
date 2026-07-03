@@ -807,10 +807,16 @@ function Get-NormalizedGameKey {
     # issue #80. These carry no title information; older RomVault-derived
     # folder names include them while the current Eggman dat's canonical
     # names do not, so they block exact-match/fuzzy-match convergence.
-    # Requires the ver/rev/v keyword and either a digit-based or a bare
-    # single-uppercase-letter revision, so plain English text (which lacks
-    # the keyword) is never matched -- (Special Edition) stays untouched.
-    $s = $s -replace '\((?:[A-Za-z0-9]{1,10}\s+)?(?:ver\.?|rev\.?|v)\s*(?:[\d\.]+[a-z]?|[A-Z])\)', ''
+    # The board-code prefix is REQUIRED (not optional): scope is deliberately
+    # limited to "alphanumeric code + ver/rev/v + revision", not to bare
+    # "(Rev C)" / "(Rev E)"-style tokens with no code prefix. A bare revision
+    # marker is a weaker signal that it's board-revision noise rather than a
+    # meaningful disambiguator, and real folder names in the wild (F-Zero AX
+    # "(Rev E)", Wangan Midnight Maximum Tune "(Rev B)") already match
+    # successfully today using that exact bare text -- stripping it would be
+    # unscoped beyond what issue #80's four target titles need and was not
+    # validated against those cases.
+    $s = $s -replace '\([A-Za-z0-9]{1,10}\s+(?:ver\.?|rev\.?|v)\s*(?:[\d\.]+[a-z]?|[A-Z])\)', ''
     # Remove Namco-style hyphenated board-code tokens with no ver/rev/v
     # keyword, e.g. (TSF1002-NA-A) -- see issue #80 (Time Crisis 4). Anchored
     # to require the entire parenthetical to be uppercase letters, digits,

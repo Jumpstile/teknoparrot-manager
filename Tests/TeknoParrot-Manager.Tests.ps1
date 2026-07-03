@@ -922,17 +922,52 @@ Describe "Get-NormalizedGameKey naming edge cases" {
         Get-NormalizedGameKey "F-Zero AX (SBGG)(2003)[Sega Triforce][TP]" |
             Should -Not -Be (Get-NormalizedGameKey "F-Zero AX (2003)[Sega Triforce][TP]")
     }
+    # Issue #80 code review: the board-code-token rule's alphanumeric prefix is
+    # REQUIRED, not optional -- these three guard a real risk found by scanning
+    # all 438 folder names in the tester's actual install (not a partial sample):
+    # an earlier draft of this rule made the prefix optional, which also matched
+    # bare "(Rev C)"/"(Rev E)"-style tokens with no board code at all. All three
+    # titles below already match successfully today using this exact bare text,
+    # so an optional-prefix rule would have been unscoped beyond what issue #80's
+    # four target titles actually need.
+    It "does not strip a bare (Rev E) token with no board-code prefix (issue #80 guard)" {
+        Get-NormalizedGameKey "F-Zero AX (Rev E)(SBGG)(2003)(JPN)[Sega Triforce][TP]" |
+            Should -Not -Be (Get-NormalizedGameKey "F-Zero AX (SBGG)(2003)(JPN)[Sega Triforce][TP]")
+    }
+    It "does not strip a bare (Rev. C) token with no board-code prefix (issue #80 guard)" {
+        Get-NormalizedGameKey "Netchuu! Pro Baseball 2002 (Rev. C)(2002)[Namco System 246][TP]" |
+            Should -Not -Be (Get-NormalizedGameKey "Netchuu! Pro Baseball 2002 (2002)[Namco System 246][TP]")
+    }
+    It "does not strip a bare (Rev B) token with no board-code prefix (issue #80 guard)" {
+        Get-NormalizedGameKey "Wangan Midnight Maximum Tune (3.07)(Rev B)(2004-06-10)(EXP)[Sega Chihiro][TP]" |
+            Should -Not -Be (Get-NormalizedGameKey "Wangan Midnight Maximum Tune (2004-06-10)(EXP)[Sega Chihiro][TP]")
+    }
 }
 
-Describe "Get-DiceSimilarity Zoids Infinity / Zoids Infinity EX Plus non-collision (issue #80)" {
-    It "keeps the two titles below the fuzzy-match threshold -- they are different games and must never auto-map" {
-        # Zoids Infinity (2004) and Zoids Infinity EX Plus (2006) are a distinct
-        # original/sequel pair, not a revision of the same game. The normalization
-        # fix above only cleans the folder's own key -- it must not bring these two
-        # close enough to cross the 0.72 fuzzy threshold and mis-register one as the
-        # other.
-        $score = Get-DiceSimilarity (Get-NormalizedGameKey "Zoids Infinity (2004)[Namco System 246][TP]") "zoidiexp"
-        $score | Should -BeLessThan 0.72
+Describe "Get-DiceSimilarity Zoids Infinity / Zoids Infinity EX Plus (issue #80 code review)" {
+    It "characterizes a real, pre-existing fuzzy-collision risk -- does NOT assert protection" {
+        # Issue #80 code review finding: an earlier version of this comment claimed
+        # this pair was "structurally protected" by the fuzzy threshold. That claim
+        # was WRONG and is retracted here. Dice("zoidsinfinity", "zoidsinfinityexplus")
+        # is 0.8, ABOVE the 0.72 fuzzy-match threshold used by Register-Games' Pass-2
+        # dat-name fallback scan (TeknoParrot-Manager.ps1 ~line 6161-6180). This is not
+        # new: the pre-#80 code already scored 0.677 for this pair (see git history),
+        # already close to threshold -- this change raises it further, to 0.8.
+        #
+        # What actually keeps Zoids Infinity from mis-matching to EX Plus today is
+        # NOT this Dice score -- it is that the current Eggman dat has an EXACT entry
+        # for "Zoids Infinity (2004)[Namco System 246][TP]" (confirmed directly
+        # against the dat before implementing issue #80), so Register-Games' exact
+        # dat-key lookup (line 6165) succeeds before the fuzzy fallback loop ever
+        # runs. If a future dat revision ever dropped that exact entry again, this
+        # score means the fuzzy fallback COULD wrongly match Zoids Infinity to EX
+        # Plus. That is a pre-existing latent risk in the fuzzy dat-name fallback
+        # itself (not introduced by issue #80, though this change makes the score
+        # for this specific pair worse) and is out of scope to fix here -- recorded
+        # so it isn't silently lost.
+        $zoidsKey  = Get-NormalizedGameKey "Zoids Infinity (2004)[Namco System 246][TP]"
+        $explusKey = Get-NormalizedGameKey "Zoids Infinity EX Plus (B3900107A Ver 2.10J)(2006)[Namco System 256][TP]"
+        (Get-DiceSimilarity $zoidsKey $explusKey) | Should -Be 0.8
     }
 }
 
