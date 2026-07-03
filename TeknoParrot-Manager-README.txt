@@ -1078,11 +1078,13 @@
     ElfLdr2 games: a single shared pair is placed in the ElfLdr2 loader folder
     (searched dynamically since its exact name varies across installs).
 
-    Pcsx2x6 games: P1.png and P2.png are placed in the pcsx2x6 emulator folder
-    (searched as pcsx2x6, PCSX2x6, pcsx2, PCSX2, or any pcsx2-prefixed
-    subfolder). If inis\PCSX2.ini exists, cursor_path is set automatically
-    under [USB Port 1 guncon2] and [USB Port 2 guncon2]. Existing keys are
-    replaced; missing keys are inserted; absent sections are appended.
+    Pcsx2x6 games: P1.png and P2.png are placed in
+    <pcsx2x6 folder>\TeknoParrot\crosshairs\, the official upstream location
+    (pcsx2x6 folder searched as pcsx2x6, PCSX2x6, pcsx2, PCSX2, or any
+    pcsx2-prefixed subfolder). If inis\PCSX2.ini exists, cursor_path is set
+    automatically under [USB Port 1 guncon2] and [USB Port 2 guncon2].
+    Existing keys are replaced; missing keys are inserted; absent sections
+    are appended.
 
     Standard games: each game receives its own P1.png and P2.png in the folder
     containing the game's executable.

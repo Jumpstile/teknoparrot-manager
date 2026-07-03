@@ -1731,6 +1731,19 @@ Describe "Crosshair setup regression guards" {
         $updated | Should -Match ([regex]::Escape("cursor_path = C:\Crosshairs\P2.png"))
         @(Get-ChildItem -LiteralPath $iniDir -Filter "PCSX2.ini.bak_*" -File).Count | Should -Be 1
     }
+
+    # Invoke-CrosshairSetup itself is an interactive wizard (Read-Host prompts,
+    # browser preview launch) excluded from direct unit testing per this file's
+    # policy -- source-level check instead, same pattern as "Main menu
+    # source-level drift check" below for other hard-to-unit-test interactive code.
+    It "deploys pcsx2x6 crosshairs to the canonical TeknoParrot\crosshairs subfolder, not the emulator folder root (issue #79)" {
+        $source = Get-Content -LiteralPath $scriptPath -Raw
+        $source | Should -Match ([regex]::Escape('Join-Path $pcsx2Dir "TeknoParrot\crosshairs"'))
+        # Regression guard: the pre-#79-fix deployment target (folder root) must
+        # not reappear as the pcsx2x6 P1/P2 destination.
+        $source | Should -Not -Match ([regex]::Escape('Join-Path $pcsx2Dir "P1.png"'))
+        $source | Should -Not -Match ([regex]::Escape('Join-Path $pcsx2Dir "P2.png"'))
+    }
 }
 
 Describe "Test-ButtonNameDirectional" {

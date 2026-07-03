@@ -352,7 +352,7 @@ Mode 4 deploys custom P1/P2 crosshair cursor images to all registered lightgun g
 **How TeknoParrot uses crosshairs:**
 - **Standard games** — `P1.png` + `P2.png` in the game's executable folder
 - **ElfLdr2 games** — shared pair in the ElfLdr2 loader folder (auto-detected)
-- **Pcsx2x6 games** — shared pair in the pcsx2x6 emulator folder; `inis\PCSX2.ini` is also updated with `cursor_path` under `[USB Port 1 guncon2]` and `[USB Port 2 guncon2]`
+- **Pcsx2x6 games** — shared pair in `pcsx2x6\TeknoParrot\crosshairs\` (the official upstream location); `inis\PCSX2.ini` is also updated with `cursor_path` under `[USB Port 1 guncon2]` and `[USB Port 2 guncon2]`
 
 **How to use it:**
 1. An HTML preview grid opens in your browser showing all 321 included designs

@@ -2862,8 +2862,20 @@ function Invoke-CrosshairSetup {
                 # Also updates inis\PCSX2.ini with the cursor_path for each USB port.
                 if (-not $pcsx2Deployed) {
                     if ($pcsx2Dir) {
-                        $p1Dest = Join-Path $pcsx2Dir "P1.png"
-                        $p2Dest = Join-Path $pcsx2Dir "P2.png"
+                        # Deploy to the canonical upstream location
+                        # (pcsx2x6\TeknoParrot\crosshairs\), not the folder root --
+                        # see issue #79. Official pcsx2x6 crosshair support reads
+                        # from this subfolder; the folder-root location was this
+                        # script's own pre-existing convention before that upstream
+                        # change and is no longer where the emulator looks.
+                        # Set-Pcsx2CursorPaths below still writes cursor_path as an
+                        # explicit override, which stays correct either way.
+                        $crosshairSubDir = Join-Path $pcsx2Dir "TeknoParrot\crosshairs"
+                        if (-not (Test-Path -LiteralPath $crosshairSubDir)) {
+                            [void](New-Item -ItemType Directory -LiteralPath $crosshairSubDir -Force -ErrorAction Stop)
+                        }
+                        $p1Dest = Join-Path $crosshairSubDir "P1.png"
+                        $p2Dest = Join-Path $crosshairSubDir "P2.png"
                         Copy-Item -LiteralPath $valid[$p1Idx] -Destination $p1Dest -Force -ErrorAction Stop
                         Copy-Item -LiteralPath $valid[$p2Idx] -Destination $p2Dest -Force -ErrorAction Stop
                         $iniPath = Join-Path $pcsx2Dir "inis\PCSX2.ini"
