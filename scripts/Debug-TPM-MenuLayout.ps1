@@ -35,11 +35,26 @@ $menuFunctions = @(
     'Get-ConsoleContentWidth',
     'Get-ConsoleContentHeight',
     'Get-MainMenuRenderMetrics',
+    'New-ConsoleRenderRow',
+    'New-ConsoleRenderSegmentRow',
+    'New-ConsoleRenderSegment',
+    'Get-MainMenuSectionColor',
+    'Get-MainMenuGeometry',
     'Split-TextForMenuWidth',
     'Format-MainMenuItemLines',
     'Format-MainMenuSectionLines',
+    'Get-PaddedMainMenuRows',
+    'Get-MainMenuBannerRows',
+    'Get-MainMenuFooterRows',
+    'Get-MainMenuSectionRows',
+    'Join-MainMenuRenderColumns',
+    'Get-MainMenuBodyRows',
+    'Render-MainMenuScreen',
+    'Write-ConsoleRenderRows',
+    'Clear-ConsoleForFreshRender',
     'Center-MainMenuLines',
     'Join-MainMenuColumns',
+    'Read-MainMenuChoiceResponsive',
     'Show-MainMenu'
 )
 
@@ -118,5 +133,6 @@ Write-Host ("Constrained by               : {0}" -f $metrics.ConstrainedBy)
 
 if ($Render) {
     Write-Host ""
-    Show-MainMenu -Tier $tier -Width $detectedWidth -Height $detectedHeight -UltraLayoutMode $UltraLayoutMode
+    $screen = Render-MainMenuScreen -Tier $tier -Width $detectedWidth -Height $detectedHeight -UltraLayoutMode $UltraLayoutMode
+    Write-ConsoleRenderRows -Rows $screen.Rows
 }

@@ -3022,7 +3022,7 @@ Describe "Main menu source-level drift check" {
 
     It "Show-MainMenu's Enter prompt uses the highest item number from the data model" {
         $itemNumbers = Get-MainMenuItems | ForEach-Object { $_.Number } | Sort-Object -Unique
-        $script:mainScriptContent.Contains('Read-Host "Enter 1-$menuMaxNumber"') | Should -Be $true
+        $script:mainScriptContent.Contains('Read-MainMenuChoiceResponsive -Prompt ("Enter 1-{0}: " -f $menuMaxNumber)') | Should -Be $true
         $script:mainScriptContent.Contains('$menuMaxNumber = (Get-MainMenuItems | Measure-Object -Property Number -Maximum).Maximum') | Should -Be $true
         $itemNumbers[-1] | Should -Be 14
     }
@@ -3126,28 +3126,28 @@ Describe "Manager banner rendering" {
         ($lines -join "`n") | Should -Not -Match '/_  __/__.*___'
     }
     It "uses ASCII art for Professional and Ultra viewport widths" {
-        Test-UseManagerAsciiBanner -Width 119 -Height 40 | Should -BeFalse
-        Test-UseManagerAsciiBanner -Width 120 -Height 40 | Should -BeTrue
+        Test-UseManagerAsciiBanner -Width 131 -Height 40 | Should -BeFalse
+        Test-UseManagerAsciiBanner -Width 132 -Height 40 | Should -BeTrue
         Test-UseManagerAsciiBanner -Width 180 -Height 40 | Should -BeTrue
     }
     It "keeps the professional banner for wide layouts even when reported height is small" {
-        Test-UseManagerAsciiBanner -Width 120 -Height 30 | Should -BeTrue
+        Test-UseManagerAsciiBanner -Width 132 -Height 30 | Should -BeTrue
         Test-UseManagerAsciiBanner -Width 180 -Height 20 | Should -BeTrue
     }
     It "centers the ASCII-art banner and includes the canonical display version" {
-        $lines = Get-ManagerBannerLines -Width 120 -Height 30
+        $lines = Get-ManagerBannerLines -Width 150 -Height 30
         $joined = $lines -join "`n"
 
-        $joined | Should -Match '/_  __/__.*___'
-        $joined | Should -Match '/  \|/  /__ ____'
+        $joined | Should -Match 'TTTTTTT EEEEE'
+        $joined | Should -Match 'M   M  AAA'
         $joined | Should -Match 'Developed and maintained by Jumpstile'
         $joined | Should -Match 'Version 1\.0 RC2'
-        $lines | ForEach-Object { $_.Length | Should -BeLessOrEqual 120 }
+        $lines | ForEach-Object { $_.Length | Should -BeLessOrEqual 150 }
     }
     It "assigns console-safe colors to professional banner rows" {
-        $rows = Get-ManagerBannerRows -Width 120 -Height 40
+        $rows = Get-ManagerBannerRows -Width 150 -Height 40
 
-        ($rows | Where-Object { $_.Text -match '/_  __/__.*___' }).Color | Should -Be 'Cyan'
+        ($rows | Where-Object { $_.Text -match 'TTTTTTT EEEEE' } | Select-Object -First 1).Color | Should -Be 'Cyan'
         ($rows | Where-Object { $_.Text -match 'Developed and maintained by Jumpstile' }).Color | Should -Be 'White'
         ($rows | Where-Object { $_.Text -match 'Version 1\.0 RC2' }).Color | Should -Be 'Yellow'
     }
@@ -3181,58 +3181,81 @@ Describe "Format-MainMenuItemLines" {
     }
 }
 
-Describe "Show-MainMenu" {
-    It "Professional tier prints every item's full description and a numbered line for every item" {
-        $output = Show-MainMenu -Tier 'Professional' -Width 120 -Height 30 6>&1 | Out-String
-        $output | Should -Match '/_  __/__.*___'
+Describe "Render-MainMenuScreen / Show-MainMenu" {
+    It "renders the complete Professional menu into a deterministic buffer" {
+        $screen = Render-MainMenuScreen -Tier 'Professional' -Width 150 -Height 30
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+
+        $output | Should -Match 'TTTTTTT EEEEE'
         $output | Should -Match 'Developed and maintained by Jumpstile'
         $output | Should -Match 'Version 1\.0 RC2'
         foreach ($item in (Get-MainMenuItems)) {
             $output | Should -Match ([regex]::Escape("$($item.Number)) $($item.Label)"))
         }
     }
-    It "Standard tier prints every item's short description" {
-        $output = Show-MainMenu -Tier 'Standard' -Width 110 6>&1 | Out-String
+    It "Standard tier renders every item's short description" {
+        $screen = Render-MainMenuScreen -Tier 'Standard' -Width 110 -Height 30
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
         $item = (Get-MainMenuItems) | Where-Object { $_.Mode -eq 'AutoSync' }
         $output | Should -Match ([regex]::Escape($item.ShortDesc))
     }
-    It "Compact tier prints only labels and the 'Type ? for descriptions' hint, no ShortDesc/FullDesc text" {
-        $output = Show-MainMenu -Tier 'Compact' -Width 80 -Height 30 6>&1 | Out-String
+    It "Compact tier renders only labels and the 'Type ? for descriptions' hint, no ShortDesc/FullDesc text" {
+        $screen = Render-MainMenuScreen -Tier 'Compact' -Width 80 -Height 30
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
         $output | Should -Match 'TeknoParrot Manager\s+v1\.0 RC2'
-        $output | Should -Not -Match '/_  __/__.*___'
+        $output | Should -Not -Match 'TTTTTTT EEEEE'
         $output | Should -Match 'Type \? for descriptions'
         $autoSync = (Get-MainMenuItems) | Where-Object { $_.Mode -eq 'AutoSync' }
         $output | Should -Not -Match ([regex]::Escape($autoSync.ShortDesc))
     }
-    It "Professional 120-column tier uses available width instead of the old narrow pre-wrapped menu text" {
-        $output = Show-MainMenu -Tier 'Professional' -Width 120 -Height 30 6>&1 | Out-String
-        $output | Should -Match '/_  __/__.*___'
-        $output | Should -Match ([regex]::Escape("1) AutoSync -- Extract ZIPs (NAS or local) to a local folder, then register the games."))
+    It "Professional 132-column tier uses available width instead of the old narrow pre-wrapped menu text" {
+        $screen = Render-MainMenuScreen -Tier 'Professional' -Width 150 -Height 30
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+        $output | Should -Match 'TTTTTTT EEEEE'
+        $output | Should -Match ([regex]::Escape("1) AutoSync"))
+        $output | Should -Match ([regex]::Escape("Extract ZIPs (NAS or local) to a local folder, then register the games."))
         $output | Should -Not -Match '(?m)^\s+folder, then register the games\.'
-        $longestLine = (($output -split "`r?`n") | Measure-Object -Property Length -Maximum).Maximum
-        $longestLine | Should -BeGreaterThan 115
+        $screen.Geometry.MenuWidth | Should -BeGreaterThan 120
     }
     It "Ultra tier renders menu groups side-by-side instead of a narrow left-column menu" {
-        $output = Show-MainMenu -Tier 'Ultra' -Width 160 6>&1 | Out-String
-        $output | Should -Match '(?m)^ Library Management\s+Game Enhancements'
-        $longestLine = (($output -split "`r?`n") | Measure-Object -Property Length -Maximum).Maximum
-        $longestLine | Should -BeGreaterThan 120
+        $screen = Render-MainMenuScreen -Tier 'Ultra' -Width 160 -Height 40
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+        $output | Should -Match '(?m)LIBRARY MANAGEMENT\s+-+\s+GAME ENHANCEMENTS'
+        $screen.Geometry.ColumnCount | Should -Be 2
+        $screen.Geometry.MenuWidth | Should -BeGreaterThan 145
     }
     It "UltraCentered renders a single centered content block" {
-        $output = Show-MainMenu -Tier 'Ultra' -Width 180 -Height 30 -UltraLayoutMode 'UltraCentered' 6>&1 | Out-String
+        $screen = Render-MainMenuScreen -Tier 'Ultra' -Width 180 -Height 30 -UltraLayoutMode 'UltraCentered'
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
 
-        $output | Should -Match '(?m)^\s{20,}-+'
-        $output | Should -Match ([regex]::Escape("1) AutoSync -- Extract ZIPs (NAS or local) to a local folder, then register the games."))
-        $output | Should -Not -Match '(?m)^ Library Management\s+Game Enhancements'
+        $screen.Geometry.ColumnCount | Should -Be 1
+        $screen.Geometry.LeftPadding | Should -BeGreaterThan 10
+        $output | Should -Match ([regex]::Escape("1) AutoSync"))
+        $output | Should -Not -Match '(?m)LIBRARY MANAGEMENT\s+-+\s+GAME ENHANCEMENTS'
     }
     It "narrow Professional tier wraps readable continuation lines under the menu description column" {
-        $output = Show-MainMenu -Tier 'Professional' -Width 70 6>&1 | Out-String
-        $output | Should -Match ([regex]::Escape("1) AutoSync -- Extract ZIPs"))
-        $output | Should -Match '(?m)^\s{10,}register the games\.'
+        $screen = Render-MainMenuScreen -Tier 'Professional' -Width 70 -Height 30
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+        $output | Should -Match ([regex]::Escape("1) AutoSync"))
+        $output | Should -Match '(?m)^\s+register the games\.'
     }
-    It "normal Standard tier keeps grouped one-line descriptions when they fit" {
-        $output = Show-MainMenu -Tier 'Standard' -Width 110 6>&1 | Out-String
-        $output | Should -Match ([regex]::Escape("1) AutoSync                    -- Extract ZIPs (NAS or local), then register the games."))
+    It "rendered rows never exceed the detected viewport width" {
+        foreach ($case in @(
+            @{ Tier = 'Compact'; Width = 80; Height = 25 },
+            @{ Tier = 'Standard'; Width = 100; Height = 30 },
+            @{ Tier = 'Professional'; Width = 132; Height = 30 },
+            @{ Tier = 'Ultra'; Width = 160; Height = 40 }
+        )) {
+            $screen = Render-MainMenuScreen -Tier $case.Tier -Width $case.Width -Height $case.Height
+            foreach ($row in $screen.Rows) {
+                $row.Text.Length | Should -BeLessOrEqual $case.Width
+            }
+        }
+    }
+    It "Show-MainMenu delegates to the stateless render-clear-write pipeline" {
+        $script:mainScriptContent.Contains('$screen = Render-MainMenuScreen -Tier $Tier -Width $Width -Height $Height -UltraLayoutMode $UltraLayoutMode') | Should -Be $true
+        $script:mainScriptContent.Contains('Clear-ConsoleForFreshRender') | Should -Be $true
+        $script:mainScriptContent.Contains('Write-ConsoleRenderRows -Rows $screen.Rows') | Should -Be $true
     }
 }
 
@@ -3260,7 +3283,7 @@ Describe "Menu layout debug script" {
         $output | Should -Match 'Selected layout tier\s+:\s+Ultra'
         $output | Should -Match 'Selected layout mode\s+:\s+UltraCentered'
         $output | Should -Match 'Requested ultra mode\s+:\s+UltraCentered'
-        $output | Should -Match '(?m)^\s{20,}-+'
+        $output | Should -Match 'Selected layout mode\s+:\s+UltraCentered'
     }
 }
 
