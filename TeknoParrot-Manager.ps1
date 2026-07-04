@@ -99,6 +99,11 @@ $script:logFailedCount = 0        # total entries that could not be written this
 function Write-Log {
     param([string]$msg)
     $line = "[{0}] {1}" -f (Get-Date).ToString("yyyy-MM-dd HH:mm:ss"), $msg
+    if ([string]::IsNullOrWhiteSpace($logPath)) {
+        Write-Host ("  [UNLOGGED] {0}" -f $msg) -ForegroundColor DarkGray
+        $script:logFailedCount++
+        return
+    }
     try {
         # AppendAllText with BOM-less UTF-8: preserves prior entries and handles
         # non-ASCII characters in paths/game names without log corruption.

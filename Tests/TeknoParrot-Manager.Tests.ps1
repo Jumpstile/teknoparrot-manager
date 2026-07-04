@@ -87,6 +87,47 @@ BeforeAll {
     # below use their own controlled version strings/mocks instead of relying on
     # this value's specific number, so drift here would not silently break them.
     $ScriptVersion = "0.99.39"
+
+    # Write-Log normally writes beside the production script via top-level
+    # initialisation that AST extraction intentionally skips. Give helper tests a
+    # real throwaway log target so certification output is not polluted with
+    # synthetic "[UNLOGGED]" messages.
+    $script:TestLogRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-tests-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $script:TestLogRoot -Force | Out-Null
+    $script:logPath = Join-Path $script:TestLogRoot "TeknoParrot-Manager.Tests.log"
+    $script:logWarnShown = $false
+    $script:logFailedCount = 0
+}
+
+AfterAll {
+    if ($script:TestLogRoot -and (Test-Path -LiteralPath $script:TestLogRoot)) {
+        Remove-Item -LiteralPath $script:TestLogRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Describe "Write-Log" {
+    It "does not print the archive warning when the log path is intentionally blank" {
+        $oldLogPath = $script:logPath
+        $oldWarnShown = $script:logWarnShown
+        $oldFailedCount = $script:logFailedCount
+        try {
+            $script:logPath = ''
+            $script:logWarnShown = $false
+            $script:logFailedCount = 0
+
+            Mock Write-Host {}
+
+            Write-Log "synthetic test message"
+
+            Should -Invoke Write-Host -Times 0 -ParameterFilter { $Object -like '*Cannot write to log file*' }
+            Should -Invoke Write-Host -Times 1 -ParameterFilter { $Object -like '*UNLOGGED*synthetic test message*' }
+            $script:logFailedCount | Should -Be 1
+        } finally {
+            $script:logPath = $oldLogPath
+            $script:logWarnShown = $oldWarnShown
+            $script:logFailedCount = $oldFailedCount
+        }
+    }
 }
 
 Describe "Test-PathInside" {

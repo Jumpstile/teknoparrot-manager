@@ -21,6 +21,11 @@
   with "?" available for details. Mode numbers and mode behavior are
   unchanged.
 
+  Certification UX: test-only empty log paths no longer print the scary
+  "Cannot write to log file" archive warning during the Pester gate, and
+  local release ZIP / assistant workspace artifacts are ignored so they do
+  not falsely fail the repository-clean certification gate.
+
 
 -------------------------------------------------------------------------------
   v1.0 RC1  (2026-07-03)  -- pcsx2x6 crosshair path fix, auto-update reliability, BIOS/firmware detection

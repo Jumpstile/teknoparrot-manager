@@ -1,5 +1,6 @@
 # Distribution ZIPs -- these go to GitHub Releases, not git history
 TeknoParrot Manager*.zip
+TeknoParrot.Manager*.zip
 
 # Third-party DLLs -- proprietary, user provides; see README.md's ReShade
 # Visual Enhancements / dgVoodoo2 Legacy Compatibility sections for bundling notes
@@ -50,3 +51,6 @@ forum-post-beta-testing.txt
 
 # clawpatch local tool state -- not part of the project, machine-local cache
 .clawpatch/
+
+# Local assistant workspace state -- not part of the project, machine-local cache
+.claude/
