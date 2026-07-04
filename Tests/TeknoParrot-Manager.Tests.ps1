@@ -3139,14 +3139,10 @@ Describe "Manager banner rendering" {
         $joined = $lines -join "`n"
 
         $joined | Should -Match '/_  __/__.*___'
-        $joined | Should -Match '/  \|/  /____ _ ____'
+        $joined | Should -Match '/  \|/  /__ ____'
         $joined | Should -Match 'Developed and maintained by Jumpstile'
         $joined | Should -Match 'Version 1\.0 RC2'
         $lines | ForEach-Object { $_.Length | Should -BeLessOrEqual 120 }
-    }
-    It "reports banner mode explicitly for responsive diagnostics" {
-        Get-ManagerBannerMode -Width 80 -Height 30 | Should -Be 'CompactText'
-        Get-ManagerBannerMode -Width 120 -Height 20 | Should -Be 'AsciiWordmark'
     }
     It "assigns console-safe colors to professional banner rows" {
         $rows = Get-ManagerBannerRows -Width 120 -Height 40
@@ -3191,7 +3187,6 @@ Describe "Show-MainMenu" {
         $output | Should -Match '/_  __/__.*___'
         $output | Should -Match 'Developed and maintained by Jumpstile'
         $output | Should -Match 'Version 1\.0 RC2'
-        $output | Should -Match 'Enter number and press Enter \| H = Help \| U = Unattended Mode \| L = View Log \| Q = Quit'
         foreach ($item in (Get-MainMenuItems)) {
             $output | Should -Match ([regex]::Escape("$($item.Number)) $($item.Label)"))
         }
@@ -3212,36 +3207,32 @@ Describe "Show-MainMenu" {
     It "Professional 120-column tier uses available width instead of the old narrow pre-wrapped menu text" {
         $output = Show-MainMenu -Tier 'Professional' -Width 120 -Height 30 6>&1 | Out-String
         $output | Should -Match '/_  __/__.*___'
-        $output | Should -Match ([regex]::Escape("1) AutoSync"))
-        $output | Should -Match ([regex]::Escape("Extract ZIPs (NAS or local) to a local folder, then register the games."))
+        $output | Should -Match ([regex]::Escape("1) AutoSync -- Extract ZIPs (NAS or local) to a local folder, then register the games."))
         $output | Should -Not -Match '(?m)^\s+folder, then register the games\.'
         $longestLine = (($output -split "`r?`n") | Measure-Object -Property Length -Maximum).Maximum
         $longestLine | Should -BeGreaterThan 115
     }
     It "Ultra tier renders menu groups side-by-side instead of a narrow left-column menu" {
         $output = Show-MainMenu -Tier 'Ultra' -Width 160 6>&1 | Out-String
-        $output | Should -Match '(?m)^ LIBRARY MANAGEMENT\s+-+\s+GAME ENHANCEMENTS'
+        $output | Should -Match '(?m)^ Library Management\s+Game Enhancements'
         $longestLine = (($output -split "`r?`n") | Measure-Object -Property Length -Maximum).Maximum
         $longestLine | Should -BeGreaterThan 120
     }
     It "UltraCentered renders a single centered content block" {
         $output = Show-MainMenu -Tier 'Ultra' -Width 180 -Height 30 -UltraLayoutMode 'UltraCentered' 6>&1 | Out-String
 
-        $output | Should -Match '(?m)^\s{20,} LIBRARY MANAGEMENT'
-        $output | Should -Match ([regex]::Escape("1) AutoSync"))
-        $output | Should -Match ([regex]::Escape("Extract ZIPs (NAS or local) to a local folder, then register the games."))
-        $output | Should -Not -Match '(?m)^ LIBRARY MANAGEMENT\s+-+\s+GAME ENHANCEMENTS'
+        $output | Should -Match '(?m)^\s{20,}-+'
+        $output | Should -Match ([regex]::Escape("1) AutoSync -- Extract ZIPs (NAS or local) to a local folder, then register the games."))
+        $output | Should -Not -Match '(?m)^ Library Management\s+Game Enhancements'
     }
     It "narrow Professional tier wraps readable continuation lines under the menu description column" {
         $output = Show-MainMenu -Tier 'Professional' -Width 70 6>&1 | Out-String
-        $output | Should -Match ([regex]::Escape("1) AutoSync"))
-        $output | Should -Match ([regex]::Escape("Extract ZIPs (NAS or local) to a local folder, then register"))
-        $output | Should -Match '(?m)^\s+the games\.'
+        $output | Should -Match ([regex]::Escape("1) AutoSync -- Extract ZIPs"))
+        $output | Should -Match '(?m)^\s{10,}register the games\.'
     }
     It "normal Standard tier keeps grouped one-line descriptions when they fit" {
         $output = Show-MainMenu -Tier 'Standard' -Width 110 6>&1 | Out-String
-        $output | Should -Match ([regex]::Escape("1) AutoSync"))
-        $output | Should -Match ([regex]::Escape("Extract ZIPs (NAS or local), then register the games."))
+        $output | Should -Match ([regex]::Escape("1) AutoSync                    -- Extract ZIPs (NAS or local), then register the games."))
     }
 }
 
@@ -3257,13 +3248,10 @@ Describe "Menu layout debug script" {
         $output | Should -Match 'Selected viewport height\s+:\s+30'
         $output | Should -Match 'Selected layout tier\s+:\s+Ultra'
         $output | Should -Match 'Selected layout mode\s+:\s+UltraTwoColumn'
-        $output | Should -Match 'Selected banner mode\s+:\s+AsciiWordmark'
         $output | Should -Match 'Requested ultra mode\s+:\s+Auto'
         $output | Should -Match 'Description width\s+:\s+79'
         $output | Should -Match 'Total render width\s+:\s+198'
-        $output | Should -Match 'Estimated render height\s+:\s+35'
         $output | Should -Match 'Constrained by\s+:\s+height'
-        $output | Should -Match 'Startup maximize attempted\s+:\s+False'
     }
     It "can render the experimental UltraCentered layout for comparison" {
         $debugScript = Join-Path $PSScriptRoot '..\scripts\Debug-TPM-MenuLayout.ps1'
@@ -3272,7 +3260,7 @@ Describe "Menu layout debug script" {
         $output | Should -Match 'Selected layout tier\s+:\s+Ultra'
         $output | Should -Match 'Selected layout mode\s+:\s+UltraCentered'
         $output | Should -Match 'Requested ultra mode\s+:\s+UltraCentered'
-        $output | Should -Match '(?m)^\s{20,} LIBRARY MANAGEMENT'
+        $output | Should -Match '(?m)^\s{20,}-+'
     }
 }
 

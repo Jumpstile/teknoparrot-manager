@@ -880,18 +880,10 @@ else.
 - `Show-MainMenu -Tier` -- pure display, never reads input. Full tier reproduces the
   original wording exactly; Standard prints one-line `ShortDesc` per item; Compact prints
   labels only plus "Type ? for descriptions."
-- `Set-ConsoleMaximizedIfSupported` -- best-effort console maximize, called once before
-  the startup banner is printed (not on every redraw). Wrapped in try/catch and silently
-  records skipped/failed status on hosts that don't support resizing (redirected output,
-  ISE, some CI/test runners) -- this is a cosmetic nicety, never allowed to block
-  startup, and it must not keep fighting the user after the first launch attempt.
-
-**RC2 professional console pass.** Professional and Ultra layouts use the full ASCII
-`TeknoParrot Manager` wordmark, Jumpstile attribution, canonical display version, section
-colors, and a footer/help bar. Compact and Standard layouts keep the simpler text header
-so the wordmark never wraps badly in narrow windows. Ultra defaults to the two-column
-fullscreen layout; `Debug-TPM-MenuLayout.ps1` can still render `UltraCentered` for
-comparison, but the production default follows the locked RC2 fullscreen target.
+- `Set-ConsoleMaximizedIfSupported` -- best-effort console maximize, called once at
+  startup (not on every redraw). Wrapped in try/catch and silently no-ops on hosts that
+  don't support resizing (redirected output, ISE, some CI/test runners) -- this is a
+  cosmetic nicety, never allowed to block startup.
 
 **Wiring.** The main menu loop's `if ($mode) { ... } else { ... }` block still lives inline
 (not moved into a function) so `break`/`continue` inside the `switch` statement keep

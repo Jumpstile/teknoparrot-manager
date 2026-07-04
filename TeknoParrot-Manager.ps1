@@ -77,62 +77,13 @@ function Get-ManagerDisplayVersion {
     return "v$ScriptVersion"
 }
 
-function Set-ConsoleMaximizedIfSupported {
-    $script:ConsoleMaximizeAttempted = $true
-    $script:ConsoleMaximizeSucceeded = $false
-    $script:ConsoleMaximizeSkipped = $false
-    $script:ConsoleMaximizeMessage = ''
-    try {
-        $rawUi = $Host.UI.RawUI
-        $maxSize = $rawUi.MaxPhysicalWindowSize
-        if (-not $maxSize -or $maxSize.Width -le 0 -or $maxSize.Height -le 0) {
-            $script:ConsoleMaximizeSkipped = $true
-            $script:ConsoleMaximizeMessage = 'MaxPhysicalWindowSize unavailable'
-            return
-        }
-
-        $bufferHeight = $rawUi.BufferSize.Height
-        $rawUi.BufferSize = [System.Management.Automation.Host.Size]::new(
-            [Math]::Max($rawUi.BufferSize.Width, $maxSize.Width),
-            [Math]::Max($bufferHeight, $maxSize.Height)
-        )
-        $rawUi.WindowSize = [System.Management.Automation.Host.Size]::new($maxSize.Width, $maxSize.Height)
-        $script:ConsoleMaximizeSucceeded = $true
-        $script:ConsoleMaximizeMessage = ("requested {0}x{1}" -f $maxSize.Width, $maxSize.Height)
-    } catch {
-        $script:ConsoleMaximizeSkipped = $true
-        $script:ConsoleMaximizeMessage = $_.Exception.Message
-    }
-}
-
-function Get-ConsoleMaximizeStatus {
-    $state = 'skipped'
-    if ($script:ConsoleMaximizeAttempted) {
-        if ($script:ConsoleMaximizeSucceeded) {
-            $state = 'succeeded'
-        } elseif ($script:ConsoleMaximizeSkipped) {
-            $state = 'skipped'
-        } else {
-            $state = 'attempted'
-        }
-    }
-    return [pscustomobject]@{
-        Attempted = [bool]$script:ConsoleMaximizeAttempted
-        Succeeded = [bool]$script:ConsoleMaximizeSucceeded
-        Skipped = [bool]$script:ConsoleMaximizeSkipped
-        State = $state
-        Message = [string]$script:ConsoleMaximizeMessage
-    }
-}
-
 function Get-ManagerAsciiBannerLines {
     return @(
-        ' _______     __             ____                       __     __  ___                                  '
-        '/_  __/__   / /__ ___  ___ / __ \____ _ ___________   / /_   /  |/  /____ _ ____  ____ _ ____ _ ___  _____'
-        ' / / / _ \ / //_// _ \/ _ \ /_/ / __ `// ___// ___/  / __/  / /|_/ // __ `// __ \/ __ `// __ `// _ \/ ___/'
-        '/ / /  __// ,<  /  __/  __/ ____/ /_/ // /   / /     / /_   / /  / // /_/ // / / / /_/ // /_/ //  __/ /    '
-        '/_/  \___//_/|_| \___/\___/_/    \__,_//_/   /_/      \__/  /_/  /_/ \__,_//_/ /_/\__,_/ \__, / \___/_/     '
-        '                                                                                         /____/             '
+        '  ______     __            ___                         __     __  ___'
+        ' /_  __/__  / /_____  ___ / _ \___ ___________  ___   / /_   /  |/  /__ ____  ___ ____ ____ ____'
+        '  / / / _ \/  ''_/ _ \/ _ \ ___/ _ `/ __/ __/ _ \ / __/  / /|_/ / _ `/ _ \/ _ `/ _ `/ -_) __/'
+        ' /_/  \___/_/\_\\___/\___/_/   \_,_/_/  \__/\___/ \__/  /_/  /_/\_,_/_//_/\_,_/\_, /\__/_/'
+        '                                                                              /___/'
     )
 }
 
@@ -147,15 +98,6 @@ function Test-UseManagerAsciiBanner {
         [int]$Height = 25
     )
     return ($Width -ge 120)
-}
-
-function Get-ManagerBannerMode {
-    param(
-        [int]$Width,
-        [int]$Height = 25
-    )
-    if (Test-UseManagerAsciiBanner -Width $Width -Height $Height) { return 'AsciiWordmark' }
-    return 'CompactText'
 }
 
 function Get-CenteredTextLine {
@@ -183,33 +125,27 @@ function Get-ManagerBannerRows {
     )
 
     $version = Get-ManagerDisplayVersion
-    if ((Get-ManagerBannerMode -Width $Width -Height $Height) -eq 'AsciiWordmark') {
+    if (Test-UseManagerAsciiBanner -Width $Width -Height $Height) {
         $lines = New-Object System.Collections.Generic.List[string]
-        $innerWidth = [Math]::Max(40, $Width - 4)
-        $borderWidth = [Math]::Min($Width - 1, [Math]::Max(80, $innerWidth + 2))
-        $topBorder = '+' + ('-' * ($borderWidth - 2)) + '+'
-        [void]$lines.Add($topBorder)
         foreach ($line in (Get-ManagerAsciiBannerLines)) {
             if ($line.Length -eq 0) {
                 [void]$lines.Add('')
             } else {
-                [void]$lines.Add('|' + (Get-CenteredTextLine -Text $line -Width ($borderWidth - 2)).PadRight($borderWidth - 2) + '|')
+                [void]$lines.Add((Get-CenteredTextLine -Text $line -Width $Width))
             }
         }
-        [void]$lines.Add('|' + (' ' * ($borderWidth - 2)) + '|')
-        [void]$lines.Add('|' + (Get-CenteredTextLine -Text 'Developed and maintained by Jumpstile' -Width ($borderWidth - 2)).PadRight($borderWidth - 2) + '|')
-        [void]$lines.Add('|' + (Get-CenteredTextLine -Text (Get-ManagerVersionLine) -Width ($borderWidth - 2)).PadRight($borderWidth - 2) + '|')
-        [void]$lines.Add($topBorder)
+        [void]$lines.Add('')
+        [void]$lines.Add((Get-CenteredTextLine -Text 'Developed and maintained by Jumpstile' -Width $Width))
+        [void]$lines.Add((Get-CenteredTextLine -Text (Get-ManagerVersionLine) -Width $Width))
 
-        $rows = New-Object System.Collections.Generic.List[object]
+        $rows = @()
         foreach ($line in $lines) {
             $color = 'Cyan'
-            if ($line -match '^\+') { $color = 'DarkCyan' }
             if ($line -match 'Developed and maintained by Jumpstile') { $color = 'White' }
             if ($line -match 'Version ') { $color = 'Yellow' }
-            [void]$rows.Add([pscustomobject]@{ Text = $line; Color = $color })
+            $rows += [pscustomobject]@{ Text = $line; Color = $color }
         }
-        return $rows.ToArray()
+        return ,@($rows)
     }
 
     $title = "TeknoParrot Manager  $DisplayVersion"
@@ -243,13 +179,13 @@ function Write-ManagerBanner {
         [int]$Width = 80,
         [int]$Height = 25
     )
+    Write-Host ""
     foreach ($row in (Get-ManagerBannerRows -Width $Width -Height $Height)) {
         Write-Host $row.Text -ForegroundColor $row.Color
     }
     Write-Host ""
 }
 
-Set-ConsoleMaximizedIfSupported
 $startupBannerSize = Get-ManagerBannerViewportSize
 Write-ManagerBanner -Width $startupBannerSize.Width -Height $startupBannerSize.Height
 
@@ -10561,41 +10497,14 @@ function Get-MainMenuRenderMetrics {
         $constrainedBy = 'height'
     }
 
-    $bannerMode = Get-ManagerBannerMode -Width $Width -Height $Height
-    $bannerLineCount = @(Get-ManagerBannerRows -Width $Width -Height $Height).Count + 1
-    $footerLineCount = 2
-    $menuLineCount = 0
-    $sections = @(Get-MainMenuSections)
-    if ($Tier -eq 'Compact') {
-        $menuLineCount = (@($sections | ForEach-Object { 1 + $_.Items.Count + 1 }) | Measure-Object -Sum).Sum + 2
-    } elseif ($layout -eq 'UltraTwoColumn') {
-        $gap = 4
-        $columnWidth = [Math]::Floor(($totalRenderWidth - $gap) / 2)
-        $leftCount = 0
-        $rightCount = 0
-        foreach ($section in @($sections[0], $sections[2])) {
-            $leftCount += @(Format-MainMenuSectionRows -Section $section -Tier 'Ultra' -Width $columnWidth).Count
-        }
-        foreach ($section in @($sections[1], $sections[3])) {
-            $rightCount += @(Format-MainMenuSectionRows -Section $section -Tier 'Ultra' -Width $columnWidth).Count
-        }
-        $menuLineCount = [Math]::Max($leftCount, $rightCount)
-    } else {
-        foreach ($section in $sections) {
-            $menuLineCount += @(Format-MainMenuSectionRows -Section $section -Tier $Tier -Width $totalRenderWidth).Count
-        }
-    }
-
     return [pscustomobject]@{
         DetectedWidth = $Width
         DetectedHeight = $Height
         SelectedTier = $Tier
         Layout = $layout
-        BannerMode = $bannerMode
         LabelWidth = $labelWidth
         DescriptionWidth = $descriptionWidth
         TotalRenderWidth = $totalRenderWidth
-        RenderHeight = ($bannerLineCount + $menuLineCount + $footerLineCount)
         HeightConstrained = $heightConstrained
         WidthConstrained = $widthConstrained
         ConstrainedBy = $constrainedBy
@@ -10725,57 +10634,6 @@ function Format-MainMenuSectionLines {
     return ,@($result)
 }
 
-function Get-MainMenuSectionColor {
-    param([string]$Header)
-
-    if ($Header -like 'Library Management*') { return 'Cyan' }
-    if ($Header -like 'Game Enhancements*') { return 'Green' }
-    if ($Header -like 'Maintenance and Recovery*') { return 'Magenta' }
-    if ($Header -like 'Application*') { return 'Yellow' }
-    return 'White'
-}
-
-function Format-MainMenuSectionRows {
-    param(
-        [object]$Section,
-        [ValidateSet('Ultra', 'Professional', 'Standard')][string]$Tier,
-        [int]$Width
-    )
-
-    $rows = New-Object System.Collections.Generic.List[object]
-    $color = Get-MainMenuSectionColor -Header $Section.Header
-    $header = (" {0} " -f ($Section.Header.ToUpperInvariant()))
-    $ruleWidth = [Math]::Max(24, $Width)
-    if ($header.Length -lt $ruleWidth) {
-        $header = $header + ('-' * ($ruleWidth - $header.Length))
-    }
-    [void]$rows.Add([pscustomobject]@{ Text = $header.Substring(0, [Math]::Min($header.Length, $ruleWidth)); Color = $color })
-
-    foreach ($item in $Section.Items) {
-        $itemLine = "  {0}) {1}" -f $item.Number, $item.Label
-        [void]$rows.Add([pscustomobject]@{ Text = $itemLine; Color = $color })
-
-        $descText = ''
-        if ($Tier -eq 'Standard' -and $item.ShortDesc) {
-            $descText = $item.ShortDesc
-        } elseif ($item.FullDesc.Count -gt 0) {
-            $descText = ($item.FullDesc -join ' ')
-        }
-
-        if ($descText) {
-            $descWidth = [Math]::Max(24, $Width - 6)
-            foreach ($descLine in (Split-TextForMenuWidth -Text $descText -Width $descWidth)) {
-                [void]$rows.Add([pscustomobject]@{ Text = ("      {0}" -f $descLine); Color = 'White' })
-            }
-        }
-        if ($Tier -ne 'Ultra') {
-            [void]$rows.Add([pscustomobject]@{ Text = ''; Color = 'White' })
-        }
-    }
-
-    return $rows.ToArray()
-}
-
 function Center-MainMenuLines {
     param(
         [string[]]$Lines,
@@ -10788,29 +10646,6 @@ function Center-MainMenuLines {
 
     $prefix = ' ' * $padding
     return ,@($Lines | ForEach-Object { $prefix + $_ })
-}
-
-function Center-MainMenuRows {
-    param(
-        [object[]]$Rows,
-        [int]$ContentWidth,
-        [int]$ViewportWidth
-    )
-
-    $padding = [Math]::Max(0, [Math]::Floor(($ViewportWidth - $ContentWidth) / 2))
-    if ($padding -le 0) { return ,@($Rows) }
-
-    $prefix = ' ' * $padding
-    return ,@($Rows | ForEach-Object {
-        [pscustomobject]@{ Text = ($prefix + $_.Text); Color = $_.Color }
-    })
-}
-
-function Write-MainMenuRow {
-    param([object]$Row)
-
-    $color = if ($Row.Color) { $Row.Color } else { 'White' }
-    Write-Host $Row.Text -ForegroundColor $color
 }
 
 function Join-MainMenuColumns {
@@ -10835,36 +10670,25 @@ function Join-MainMenuColumns {
     return ,@($result)
 }
 
-function Write-MainMenuTwoColumnRows {
-    param(
-        [object[]]$Left,
-        [object[]]$Right,
-        [int]$LeftWidth,
-        [int]$Gap = 4
-    )
-
-    $count = [Math]::Max($Left.Count, $Right.Count)
-    for ($i = 0; $i -lt $count; $i++) {
-        $leftRow = if ($i -lt $Left.Count) { $Left[$i] } else { [pscustomobject]@{ Text = ''; Color = 'White' } }
-        $rightRow = if ($i -lt $Right.Count) { $Right[$i] } else { [pscustomobject]@{ Text = ''; Color = 'White' } }
-        $leftText = $leftRow.Text.PadRight($LeftWidth)
-        if ($rightRow.Text.Length -gt 0) {
-            Write-Host $leftText -ForegroundColor $leftRow.Color -NoNewline
-            Write-Host (' ' * $Gap) -NoNewline
-            Write-Host $rightRow.Text -ForegroundColor $rightRow.Color
-        } else {
-            Write-Host $leftRow.Text -ForegroundColor $leftRow.Color
+# Best-effort console maximize -- many hosts (redirected output, ISE, some
+# CI/test runners) don't support resizing the window at all; this must never
+# throw or block startup over a cosmetic nicety. Called once, not on every
+# menu redraw -- unlike layout-tier detection, which does run every redraw
+# so a user resizing mid-session still gets the right tier next time the
+# menu draws.
+function Set-ConsoleMaximizedIfSupported {
+    try {
+        $rawUi = $Host.UI.RawUI
+        $maxSize = $rawUi.MaxPhysicalWindowSize
+        if ($maxSize.Width -gt 0 -and $maxSize.Height -gt 0) {
+            $rawUi.WindowSize = [System.Management.Automation.Host.Size]::new($maxSize.Width, $maxSize.Height)
+            if ($rawUi.BufferSize.Width -lt $maxSize.Width) {
+                $rawUi.BufferSize = [System.Management.Automation.Host.Size]::new($maxSize.Width, $rawUi.BufferSize.Height)
+            }
         }
+    } catch {
+        Write-Log "Set-ConsoleMaximizedIfSupported: could not resize console -- $_"
     }
-}
-
-function Write-MainMenuFooter {
-    param([int]$Width)
-
-    $text = 'Enter number and press Enter | H = Help | U = Unattended Mode | L = View Log | Q = Quit'
-    $ruleWidth = [Math]::Max(40, [Math]::Min($Width - 2, [Math]::Max($text.Length + 2, 80)))
-    Write-Host ('-' * $ruleWidth) -ForegroundColor DarkCyan
-    Write-Host (Get-CenteredTextLine -Text $text -Width $ruleWidth) -ForegroundColor White
 }
 
 # Renders the main menu at the given tier. Pure display -- never reads input,
@@ -10880,7 +10704,7 @@ function Show-MainMenu {
 
     $items = Get-MainMenuItems
     $maxNumber = ($items | Measure-Object -Property Number -Maximum).Maximum
-    $metrics = Get-MainMenuRenderMetrics -Tier $Tier -Width $Width -Height $Height -UltraLayoutMode $UltraLayoutMode
+    $metrics = Get-MainMenuRenderMetrics -Tier $Tier -Width $Width -UltraLayoutMode $UltraLayoutMode
     $contentWidth = $metrics.TotalRenderWidth
     $wideLayout = ($metrics.Layout -eq 'UltraTwoColumn')
     $centeredLayout = ($metrics.Layout -eq 'UltraCentered')
@@ -10888,7 +10712,7 @@ function Show-MainMenu {
     Write-ManagerBanner -Width $Width -Height $Height
     if ($Tier -eq 'Compact') {
         foreach ($section in Get-MainMenuSections) {
-            Write-Host ("  {0}" -f $section.Header) -ForegroundColor (Get-MainMenuSectionColor -Header $section.Header)
+            Write-Host ("  {0}" -f $section.Header)
             foreach ($item in $section.Items) {
                 Write-Host ("    {0,-2} {1}" -f $item.Number, $item.Label)
             }
@@ -10896,7 +10720,6 @@ function Show-MainMenu {
         }
         Write-Host "  Type ? for descriptions." -ForegroundColor DarkGray
         Write-Host ""
-        Write-MainMenuFooter -Width $Width
         return
     }
 
@@ -10904,45 +10727,46 @@ function Show-MainMenu {
     if ($wideLayout) {
         $gap = 4
         $columnWidth = [Math]::Floor(($metrics.TotalRenderWidth - $gap) / 2)
-        $leftRows = New-Object System.Collections.Generic.List[object]
-        $rightRows = New-Object System.Collections.Generic.List[object]
+        $leftLines = New-Object System.Collections.Generic.List[string]
+        $rightLines = New-Object System.Collections.Generic.List[string]
         foreach ($section in @($sections[0], $sections[2])) {
-            foreach ($row in (Format-MainMenuSectionRows -Section $section -Tier 'Ultra' -Width $columnWidth)) {
-                [void]$leftRows.Add($row)
+            foreach ($line in (Format-MainMenuSectionLines -Section $section -Tier 'Ultra' -Width $columnWidth)) {
+                [void]$leftLines.Add($line)
             }
         }
         foreach ($section in @($sections[1], $sections[3])) {
-            foreach ($row in (Format-MainMenuSectionRows -Section $section -Tier 'Ultra' -Width $columnWidth)) {
-                [void]$rightRows.Add($row)
+            foreach ($line in (Format-MainMenuSectionLines -Section $section -Tier 'Ultra' -Width $columnWidth)) {
+                [void]$rightLines.Add($line)
             }
         }
-        Write-MainMenuTwoColumnRows -Left $leftRows -Right $rightRows -LeftWidth $columnWidth -Gap $gap
-        Write-MainMenuFooter -Width $Width
+        foreach ($line in (Join-MainMenuColumns -Left $leftLines -Right $rightLines -LeftWidth $columnWidth -Gap $gap)) {
+            Write-Host $line
+        }
         return
     }
 
-    $singleColumnRows = New-Object System.Collections.Generic.List[object]
+    $singleColumnLines = New-Object System.Collections.Generic.List[string]
     foreach ($section in $sections) {
-        foreach ($row in (Format-MainMenuSectionRows -Section $section -Tier $Tier -Width $contentWidth)) {
-            [void]$singleColumnRows.Add($row)
+        foreach ($line in (Format-MainMenuSectionLines -Section $section -Tier $Tier -Width $contentWidth)) {
+            [void]$singleColumnLines.Add($line)
         }
     }
     if ($centeredLayout) {
-        foreach ($row in (Center-MainMenuRows -Rows $singleColumnRows -ContentWidth $contentWidth -ViewportWidth $Width)) {
-            Write-MainMenuRow -Row $row
+        foreach ($line in (Center-MainMenuLines -Lines $singleColumnLines -ContentWidth $contentWidth -ViewportWidth $Width)) {
+            Write-Host $line
         }
     } else {
-        foreach ($row in $singleColumnRows) {
-            Write-MainMenuRow -Row $row
+        foreach ($line in $singleColumnLines) {
+            Write-Host $line
         }
     }
-    Write-MainMenuFooter -Width $Width
 }
 
 # =============================================================================
 # MAIN MENU LOOP
 # =============================================================================
 try {
+Set-ConsoleMaximizedIfSupported
 while ($true) {
     # Refresh the drive-info snapshot at the start of each menu iteration so
     # any drive changes since the last pass (USB ejected, network share
@@ -10979,14 +10803,13 @@ while ($true) {
         Write-Log "ERROR: Unattended mode -- reached menu loop."; exit 1
     }
     $modeChoice = (Read-Host "Enter 1-$menuMaxNumber").Trim()
-    if ($modeChoice -in @('?', 'H', 'h')) {
+    if ($modeChoice -eq '?') {
         $helpWidth = Get-ConsoleContentWidth
         $helpTier = Get-ConsoleLayoutTier -Width $helpWidth -Height (Get-ConsoleContentHeight) -RequiredFullLines $fullTierLineCount
         if ($helpTier -eq 'Compact') { $helpTier = 'Professional' }
         Show-MainMenu -Tier $helpTier -Width $helpWidth -Height (Get-ConsoleContentHeight)
         continue
     }
-    if ($modeChoice -in @('Q', 'q')) { break }
     switch ($modeChoice) {
         "1"     { $mode = "AutoSync"       }
         "2"     { $mode = "RegisterOnly"   }
