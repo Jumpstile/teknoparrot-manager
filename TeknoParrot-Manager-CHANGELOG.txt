@@ -26,14 +26,16 @@
   local release ZIP / assistant workspace artifacts are ignored so they do
   not falsely fail the repository-clean certification gate.
 
-  Usability fix (issue #104): the adaptive menu now has an explicit
-  width-based contract. Narrow consoles use a readable wrapped single-column
-  layout, normal consoles use concise grouped single-column descriptions, and
-  wide consoles use a two-column grouped layout that meaningfully fills the
-  available horizontal space. The RC2 ZIP also includes
-  scripts\Debug-TPM-MenuLayout.ps1 so testers can print the real host width,
-  selected tier, description width, and total render width from the extracted
-  build before certification.
+  Usability fix (issue #104): the adaptive menu now has an explicit viewport
+  contract based on the current console size at each redraw. Consoles under
+  90 columns use a compact grouped layout, 90-119 columns use concise grouped
+  single-column descriptions, 120-149 columns use a professional wide
+  single-column layout, and 150+ columns use an ultra grouped layout that
+  fills the available horizontal space. The RC2 ZIP also includes
+  scripts\Debug-TPM-MenuLayout.ps1 so testers can print the real host type,
+  RawUI/console dimensions, selected viewport, selected tier/mode, description
+  width, render width, and width/height constraints from the extracted build
+  before certification.
 
 
 -------------------------------------------------------------------------------

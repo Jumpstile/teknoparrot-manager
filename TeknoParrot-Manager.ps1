@@ -10313,59 +10313,79 @@ function Get-MainMenuItems {
     return @(Get-MainMenuSections | ForEach-Object { $_.Items })
 }
 
-# Pure/testable: decides which of the three layout tiers fits the given
-# console dimensions. Width is authoritative for wide mode: a wide-but-short
-# terminal should use the two-column Full renderer because that is exactly the
-# layout that reduces height. Height still matters for non-wide terminals.
+# Pure/testable: decides which layout tier fits the current console viewport.
+# Width is the primary breakpoint because console menus render in columns, not
+# pixels. Height is tracked separately in the render metrics so diagnostics can
+# show whether the selected layout is still vertically constrained.
 function Get-ConsoleLayoutTier {
     param(
         [int]$Width,
         [int]$Height,
         [int]$RequiredFullLines
     )
-    if ($Width -ge 160) { return 'Full' }
-    if ($Width -ge 120) { return 'Standard' }
+    if ($Width -ge 150) { return 'Ultra' }
+    if ($Width -ge 120) { return 'Professional' }
+    if ($Width -ge 90) { return 'Standard' }
     return 'Compact'
 }
 
 function Get-MainMenuRenderMetrics {
     param(
-        [ValidateSet('Full', 'Standard', 'Compact')][string]$Tier,
-        [int]$Width
+        [ValidateSet('Ultra', 'Professional', 'Standard', 'Compact')][string]$Tier,
+        [int]$Width,
+        [int]$Height = 0,
+        [int]$RequiredFullLines = 0
     )
 
     $contentWidth = [Math]::Max(40, $Width - 2)
-    $wideLayout = ($Tier -eq 'Full' -and $Width -ge 160)
-    $labelWidth = if ($Tier -eq 'Standard') { 27 } else { $null }
+    $labelWidth = $null
     $descriptionWidth = 0
     $totalRenderWidth = $contentWidth
     $layout = $Tier
+    $heightConstrained = ($Height -gt 0 -and $RequiredFullLines -gt 0 -and $Height -lt $RequiredFullLines)
+    $widthConstrained = ($Tier -ne 'Ultra')
 
     if ($Tier -eq 'Compact') {
-        $layout = 'CompactSingleColumn'
+        $layout = 'CompactWrappedSingleColumn'
         $descriptionWidth = 0
-        $totalRenderWidth = [Math]::Min($contentWidth, 50)
-    } elseif ($wideLayout) {
-        $layout = 'WideTwoColumn'
-        $gap = 4
-        $columnWidth = [Math]::Floor(($contentWidth - $gap) / 2)
-        $descriptionWidth = $columnWidth
-        $totalRenderWidth = ($columnWidth * 2) + $gap
+        $totalRenderWidth = [Math]::Min($contentWidth, 88)
     } elseif ($Tier -eq 'Standard') {
         $layout = 'StandardSingleColumn'
+        $labelWidth = 27
         $descriptionWidth = [Math]::Max(24, $contentWidth - 36)
+    } elseif ($Tier -eq 'Professional') {
+        $layout = 'ProfessionalWideSingleColumn'
+        $labelWidth = 28
+        $descriptionWidth = [Math]::Max(52, $contentWidth - 34)
     } else {
-        $layout = 'FullSingleColumn'
-        $descriptionWidth = [Math]::Max(28, $contentWidth - 22)
+        $layout = 'UltraTwoColumn'
+        $gap = 4
+        $columnWidth = [Math]::Floor(($contentWidth - $gap) / 2)
+        $labelWidth = 22
+        $descriptionWidth = [Math]::Max(42, $columnWidth - 18)
+        $totalRenderWidth = ($columnWidth * 2) + $gap
+    }
+
+    $constrainedBy = 'none'
+    if ($widthConstrained -and $heightConstrained) {
+        $constrainedBy = 'width,height'
+    } elseif ($widthConstrained) {
+        $constrainedBy = 'width'
+    } elseif ($heightConstrained) {
+        $constrainedBy = 'height'
     }
 
     return [pscustomobject]@{
         DetectedWidth = $Width
+        DetectedHeight = $Height
         SelectedTier = $Tier
         Layout = $layout
         LabelWidth = $labelWidth
         DescriptionWidth = $descriptionWidth
         TotalRenderWidth = $totalRenderWidth
+        HeightConstrained = $heightConstrained
+        WidthConstrained = $widthConstrained
+        ConstrainedBy = $constrainedBy
     }
 }
 
@@ -10383,6 +10403,22 @@ function Get-ConsoleContentWidth {
         if ($width -gt 0) { return $width }
     } catch {}
     return 80
+}
+
+function Get-ConsoleContentHeight {
+    try {
+        $height = [int]$Host.UI.RawUI.WindowSize.Height
+        if ($height -gt 0) { return $height }
+    } catch {}
+    try {
+        $height = [int][Console]::WindowHeight
+        if ($height -gt 0) { return $height }
+    } catch {}
+    try {
+        $height = [int]$Host.UI.RawUI.BufferSize.Height
+        if ($height -gt 0) { return $height }
+    } catch {}
+    return 25
 }
 
 function Split-TextForMenuWidth {
@@ -10416,7 +10452,7 @@ function Split-TextForMenuWidth {
 function Format-MainMenuItemLines {
     param(
         [object]$Item,
-        [ValidateSet('Full', 'Standard')][string]$Tier,
+        [ValidateSet('Ultra', 'Professional', 'Standard')][string]$Tier,
         [int]$Width
     )
 
@@ -10457,12 +10493,12 @@ function Format-MainMenuItemLines {
 function Format-MainMenuSectionLines {
     param(
         [object]$Section,
-        [ValidateSet('Full', 'Standard')][string]$Tier,
+        [ValidateSet('Ultra', 'Professional', 'Standard')][string]$Tier,
         [int]$Width
     )
 
     $result = New-Object System.Collections.Generic.List[string]
-    $ruleWidth = [Math]::Min(44, [Math]::Max(24, $Width))
+    $ruleWidth = [Math]::Max(24, $Width)
     $rule = '-' * $ruleWidth
     [void]$result.Add($rule)
     [void]$result.Add(" $($Section.Header)")
@@ -10524,7 +10560,7 @@ function Set-ConsoleMaximizedIfSupported {
 # completely unchanged by this function or by which tier is chosen.
 function Show-MainMenu {
     param(
-        [ValidateSet('Full', 'Standard', 'Compact')][string]$Tier,
+        [ValidateSet('Ultra', 'Professional', 'Standard', 'Compact')][string]$Tier,
         [int]$Width = (Get-ConsoleContentWidth)
     )
 
@@ -10532,16 +10568,17 @@ function Show-MainMenu {
     $maxNumber = ($items | Measure-Object -Property Number -Maximum).Maximum
     $metrics = Get-MainMenuRenderMetrics -Tier $Tier -Width $Width
     $contentWidth = $metrics.TotalRenderWidth
-    $wideLayout = ($metrics.Layout -eq 'WideTwoColumn')
+    $wideLayout = ($metrics.Layout -eq 'UltraTwoColumn')
 
     Write-Host ""
     if ($Tier -eq 'Compact') {
         foreach ($section in Get-MainMenuSections) {
+            Write-Host ("  {0}" -f $section.Header)
             foreach ($item in $section.Items) {
-                Write-Host ("  {0,-2} {1}" -f $item.Number, $item.Label)
+                Write-Host ("    {0,-2} {1}" -f $item.Number, $item.Label)
             }
+            Write-Host ""
         }
-        Write-Host ""
         Write-Host "  Type ? for descriptions." -ForegroundColor DarkGray
         Write-Host ""
         return
@@ -10554,12 +10591,12 @@ function Show-MainMenu {
         $leftLines = New-Object System.Collections.Generic.List[string]
         $rightLines = New-Object System.Collections.Generic.List[string]
         foreach ($section in @($sections[0], $sections[2])) {
-            foreach ($line in (Format-MainMenuSectionLines -Section $section -Tier 'Full' -Width $columnWidth)) {
+            foreach ($line in (Format-MainMenuSectionLines -Section $section -Tier 'Ultra' -Width $columnWidth)) {
                 [void]$leftLines.Add($line)
             }
         }
         foreach ($section in @($sections[1], $sections[3])) {
-            foreach ($line in (Format-MainMenuSectionLines -Section $section -Tier 'Full' -Width $columnWidth)) {
+            foreach ($line in (Format-MainMenuSectionLines -Section $section -Tier 'Ultra' -Width $columnWidth)) {
                 [void]$rightLines.Add($line)
             }
         }
@@ -10609,7 +10646,7 @@ while ($true) {
         3 + ($_.Items | ForEach-Object { 1 + $_.FullDesc.Count } | Measure-Object -Sum).Sum
     }) | Measure-Object -Sum).Sum
     $consoleWidth  = Get-ConsoleContentWidth
-    $consoleHeight = try { $Host.UI.RawUI.WindowSize.Height } catch { 25 }
+    $consoleHeight = Get-ConsoleContentHeight
     $menuTier = Get-ConsoleLayoutTier -Width $consoleWidth -Height $consoleHeight -RequiredFullLines $fullTierLineCount
     Show-MainMenu -Tier $menuTier -Width $consoleWidth
     if ($Unattended) {
@@ -10618,7 +10655,10 @@ while ($true) {
     }
     $modeChoice = (Read-Host "Enter 1-$menuMaxNumber").Trim()
     if ($modeChoice -eq '?') {
-        Show-MainMenu -Tier 'Full'
+        $helpWidth = Get-ConsoleContentWidth
+        $helpTier = Get-ConsoleLayoutTier -Width $helpWidth -Height (Get-ConsoleContentHeight) -RequiredFullLines $fullTierLineCount
+        if ($helpTier -eq 'Compact') { $helpTier = 'Professional' }
+        Show-MainMenu -Tier $helpTier -Width $helpWidth
         continue
     }
     switch ($modeChoice) {

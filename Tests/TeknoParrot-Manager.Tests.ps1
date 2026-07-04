@@ -3046,42 +3046,58 @@ Describe "Get-MainMenuSections / Get-MainMenuItems" {
 }
 
 Describe "Get-ConsoleLayoutTier" {
-    It "chooses Full for a large window with enough height for the full menu" {
-        Get-ConsoleLayoutTier -Width 200 -Height 80 -RequiredFullLines 60 | Should -Be 'Full'
+    It "uses the RC2 viewport breakpoints" {
+        Get-ConsoleLayoutTier -Width 80 -Height 80 -RequiredFullLines 60 | Should -Be 'Compact'
+        Get-ConsoleLayoutTier -Width 89 -Height 80 -RequiredFullLines 60 | Should -Be 'Compact'
+        Get-ConsoleLayoutTier -Width 90 -Height 80 -RequiredFullLines 60 | Should -Be 'Standard'
+        Get-ConsoleLayoutTier -Width 119 -Height 80 -RequiredFullLines 60 | Should -Be 'Standard'
+        Get-ConsoleLayoutTier -Width 120 -Height 80 -RequiredFullLines 60 | Should -Be 'Professional'
+        Get-ConsoleLayoutTier -Width 149 -Height 80 -RequiredFullLines 60 | Should -Be 'Professional'
+        Get-ConsoleLayoutTier -Width 150 -Height 80 -RequiredFullLines 60 | Should -Be 'Ultra'
     }
-    It "chooses Full for a wide-but-short window because two columns reduce height" {
-        Get-ConsoleLayoutTier -Width 200 -Height 30 -RequiredFullLines 60 | Should -Be 'Full'
-    }
-    It "chooses Standard for a medium-width window" {
-        Get-ConsoleLayoutTier -Width 130 -Height 80 -RequiredFullLines 60 | Should -Be 'Standard'
-    }
-    It "chooses Compact for a narrow window" {
-        Get-ConsoleLayoutTier -Width 90 -Height 80 -RequiredFullLines 60 | Should -Be 'Compact'
+    It "does not demote a wide viewport solely because it is short" {
+        Get-ConsoleLayoutTier -Width 200 -Height 30 -RequiredFullLines 60 | Should -Be 'Ultra'
     }
 }
 
 Describe "Get-MainMenuRenderMetrics" {
     It "reports compact single-column metrics for narrow widths" {
         $metrics = Get-MainMenuRenderMetrics -Tier 'Compact' -Width 80
-        $metrics.Layout | Should -Be 'CompactSingleColumn'
+        $metrics.Layout | Should -Be 'CompactWrappedSingleColumn'
         $metrics.DescriptionWidth | Should -Be 0
         $metrics.TotalRenderWidth | Should -BeLessOrEqual 80
     }
     It "reports standard single-column metrics for normal widths" {
-        $metrics = Get-MainMenuRenderMetrics -Tier 'Standard' -Width 130
+        $metrics = Get-MainMenuRenderMetrics -Tier 'Standard' -Width 110
         $metrics.Layout | Should -Be 'StandardSingleColumn'
-        $metrics.DescriptionWidth | Should -BeGreaterThan 80
-        $metrics.TotalRenderWidth | Should -BeGreaterThan 120
+        $metrics.DescriptionWidth | Should -BeGreaterThan 60
+        $metrics.TotalRenderWidth | Should -BeGreaterThan 100
     }
-    It "reports wide two-column metrics that expand with terminal width" {
-        $wide160 = Get-MainMenuRenderMetrics -Tier 'Full' -Width 160
-        $wide200 = Get-MainMenuRenderMetrics -Tier 'Full' -Width 200
+    It "makes 120 columns a professional wide layout instead of compact-style output" {
+        $compact = Get-MainMenuRenderMetrics -Tier 'Compact' -Width 80
+        $professional = Get-MainMenuRenderMetrics -Tier 'Professional' -Width 120
 
-        $wide160.Layout | Should -Be 'WideTwoColumn'
-        $wide160.DescriptionWidth | Should -BeGreaterThan 70
-        $wide160.TotalRenderWidth | Should -BeGreaterThan 140
-        $wide200.TotalRenderWidth | Should -BeGreaterThan $wide160.TotalRenderWidth
-        $wide200.DescriptionWidth | Should -BeGreaterThan $wide160.DescriptionWidth
+        $professional.Layout | Should -Be 'ProfessionalWideSingleColumn'
+        $professional.TotalRenderWidth | Should -BeGreaterThan 115
+        $professional.DescriptionWidth | Should -BeGreaterThan 80
+        $professional.TotalRenderWidth | Should -BeGreaterThan $compact.TotalRenderWidth
+    }
+    It "reports ultra metrics that expand with terminal width" {
+        $wide150 = Get-MainMenuRenderMetrics -Tier 'Ultra' -Width 150
+        $wide200 = Get-MainMenuRenderMetrics -Tier 'Ultra' -Width 200
+
+        $wide150.Layout | Should -Be 'UltraTwoColumn'
+        $wide150.DescriptionWidth | Should -BeGreaterThan 50
+        $wide150.TotalRenderWidth | Should -BeGreaterThan 140
+        $wide200.TotalRenderWidth | Should -BeGreaterThan $wide150.TotalRenderWidth
+        $wide200.DescriptionWidth | Should -BeGreaterThan $wide150.DescriptionWidth
+    }
+    It "reports height and width constraints for diagnostics" {
+        $metrics = Get-MainMenuRenderMetrics -Tier 'Professional' -Width 120 -Height 20 -RequiredFullLines 60
+
+        $metrics.HeightConstrained | Should -BeTrue
+        $metrics.WidthConstrained | Should -BeTrue
+        $metrics.ConstrainedBy | Should -Be 'width,height'
     }
 }
 
@@ -3101,27 +3117,27 @@ Describe "Split-TextForMenuWidth" {
 Describe "Format-MainMenuItemLines" {
     It "uses a genuinely wide description column when the caller provides wide space" {
         $autoSync = (Get-MainMenuItems) | Where-Object { $_.Mode -eq 'AutoSync' }
-        $lines = Format-MainMenuItemLines -Item $autoSync -Tier 'Full' -Width 100
+        $lines = Format-MainMenuItemLines -Item $autoSync -Tier 'Professional' -Width 118
         $lines.Count | Should -Be 1
         $lines[0] | Should -Be '  1) AutoSync -- Extract ZIPs (NAS or local) to a local folder, then register the games.'
     }
     It "wraps under the description column when the caller provides narrow space" {
         $autoSync = (Get-MainMenuItems) | Where-Object { $_.Mode -eq 'AutoSync' }
-        $lines = Format-MainMenuItemLines -Item $autoSync -Tier 'Full' -Width 70
+        $lines = Format-MainMenuItemLines -Item $autoSync -Tier 'Professional' -Width 70
         $lines.Count | Should -BeGreaterThan 1
         $lines[1] | Should -Match '^\s{10,}register the games\.'
     }
 }
 
 Describe "Show-MainMenu" {
-    It "Full tier prints every item's full description and a numbered line for every item" {
-        $output = Show-MainMenu -Tier 'Full' -Width 160 6>&1 | Out-String
+    It "Professional tier prints every item's full description and a numbered line for every item" {
+        $output = Show-MainMenu -Tier 'Professional' -Width 120 6>&1 | Out-String
         foreach ($item in (Get-MainMenuItems)) {
             $output | Should -Match ([regex]::Escape("$($item.Number)) $($item.Label)"))
         }
     }
     It "Standard tier prints every item's short description" {
-        $output = Show-MainMenu -Tier 'Standard' -Width 120 6>&1 | Out-String
+        $output = Show-MainMenu -Tier 'Standard' -Width 110 6>&1 | Out-String
         $item = (Get-MainMenuItems) | Where-Object { $_.Mode -eq 'AutoSync' }
         $output | Should -Match ([regex]::Escape($item.ShortDesc))
     }
@@ -3131,24 +3147,26 @@ Describe "Show-MainMenu" {
         $autoSync = (Get-MainMenuItems) | Where-Object { $_.Mode -eq 'AutoSync' }
         $output | Should -Not -Match ([regex]::Escape($autoSync.ShortDesc))
     }
-    It "wide Full tier uses available width instead of the old narrow pre-wrapped menu text" {
-        $output = Show-MainMenu -Tier 'Full' -Width 200 6>&1 | Out-String
+    It "Professional 120-column tier uses available width instead of the old narrow pre-wrapped menu text" {
+        $output = Show-MainMenu -Tier 'Professional' -Width 120 6>&1 | Out-String
         $output | Should -Match ([regex]::Escape("1) AutoSync -- Extract ZIPs (NAS or local) to a local folder, then register the games."))
         $output | Should -Not -Match '(?m)^\s+folder, then register the games\.'
+        $longestLine = (($output -split "`r?`n") | Measure-Object -Property Length -Maximum).Maximum
+        $longestLine | Should -BeGreaterThan 115
     }
-    It "wide Full tier renders menu groups side-by-side instead of a narrow left-column menu" {
-        $output = Show-MainMenu -Tier 'Full' -Width 160 6>&1 | Out-String
+    It "Ultra tier renders menu groups side-by-side instead of a narrow left-column menu" {
+        $output = Show-MainMenu -Tier 'Ultra' -Width 160 6>&1 | Out-String
         $output | Should -Match '(?m)^ Library Management\s+Game Enhancements'
         $longestLine = (($output -split "`r?`n") | Measure-Object -Property Length -Maximum).Maximum
         $longestLine | Should -BeGreaterThan 120
     }
-    It "narrow Full tier wraps readable continuation lines under the menu description column" {
-        $output = Show-MainMenu -Tier 'Full' -Width 70 6>&1 | Out-String
+    It "narrow Professional tier wraps readable continuation lines under the menu description column" {
+        $output = Show-MainMenu -Tier 'Professional' -Width 70 6>&1 | Out-String
         $output | Should -Match ([regex]::Escape("1) AutoSync -- Extract ZIPs"))
         $output | Should -Match '(?m)^\s{10,}register the games\.'
     }
     It "normal Standard tier keeps grouped one-line descriptions when they fit" {
-        $output = Show-MainMenu -Tier 'Standard' -Width 130 6>&1 | Out-String
+        $output = Show-MainMenu -Tier 'Standard' -Width 110 6>&1 | Out-String
         $output | Should -Match ([regex]::Escape("1) AutoSync                    -- Extract ZIPs (NAS or local), then register the games."))
     }
 }
@@ -3158,11 +3176,16 @@ Describe "Menu layout debug script" {
         $debugScript = Join-Path $PSScriptRoot '..\scripts\Debug-TPM-MenuLayout.ps1'
         $output = & $debugScript -Width 200 -Height 30 6>&1 | Out-String
 
+        $output | Should -Match 'Host type'
         $output | Should -Match 'Host\.RawUI\.WindowSize\.Width'
-        $output | Should -Match 'Selected layout tier\s+:\s+Full'
-        $output | Should -Match 'Selected layout mode\s+:\s+WideTwoColumn'
-        $output | Should -Match 'Description width\s+:\s+97'
+        $output | Should -Match 'Host\.RawUI\.BufferSize\.Height'
+        $output | Should -Match 'Selected viewport width\s+:\s+200'
+        $output | Should -Match 'Selected viewport height\s+:\s+30'
+        $output | Should -Match 'Selected layout tier\s+:\s+Ultra'
+        $output | Should -Match 'Selected layout mode\s+:\s+UltraTwoColumn'
+        $output | Should -Match 'Description width\s+:\s+79'
         $output | Should -Match 'Total render width\s+:\s+198'
+        $output | Should -Match 'Constrained by\s+:\s+height'
     }
 }
 
