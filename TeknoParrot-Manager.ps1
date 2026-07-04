@@ -79,11 +79,12 @@ function Get-ManagerDisplayVersion {
 
 function Get-ManagerAsciiBannerLines {
     return @(
-        'TTTTTTT EEEEE K   K N   N  OOO  PPPP   AAA  RRRR  RRRR   OOO  TTTTTTT     M   M  AAA  N   N  AAA   GGG  EEEEE RRRR'
-        '   T    E     K  K  NN  N O   O P   P A   A R   R R   R O   O    T        MM MM A   A NN  N A   A G     E     R   R'
-        '   T    EEEE  KKK   N N N O   O PPPP  AAAAA RRRR  RRRR  O   O    T        M M M AAAAA N N N AAAAA G  GG EEEE  RRRR'
-        '   T    E     K  K  N  NN O   O P     A   A R  R  R  R  O   O    T        M   M A   A N  NN A   A G   G E     R  R'
-        '   T    EEEEE K   K N   N  OOO  P     A   A R   R R   R  OOO     T        M   M A   A N   N A   A  GGG  EEEEE R   R'
+        ' ________     __             ____                       __     __  ___                                  '
+        '/_  __/ /__  / /__  ____  __/ __ \____ _____________  _/ /_   /  |/  /___ _____  ____ _____ ____  _____'
+        ' / / / / _ \/ / _ \/ __ \/ / /_/ / __ `/ ___/ ___/ / / / __/  / /|_/ / __ `/ __ \/ __ `/ __ `/ _ \/ ___/'
+        '/ / / /  __/ /  __/ / / / / ____/ /_/ / /  / /  / /_/ / /_   / /  / / /_/ / / / / /_/ / /_/ /  __/ /    '
+        '/_/ /_/\___/_/\___/_/ /_/_/_/    \__,_/_/  /_/   \__,_/\__/  /_/  /_/\__,_/_/ /_/\__,_/\__, /\___/_/     '
+        '                                                                                       /____/            '
     )
 }
 
@@ -97,7 +98,7 @@ function Test-UseManagerAsciiBanner {
         [int]$Width,
         [int]$Height = 25
     )
-    return ($Width -ge 132)
+    return ($Width -ge 118)
 }
 
 function Get-CenteredTextLine {
@@ -107,6 +108,66 @@ function Get-CenteredTextLine {
     )
     $padding = [Math]::Max(0, [Math]::Floor(($Width - $Text.Length) / 2))
     return ((' ' * $padding) + $Text)
+}
+
+function New-ManagerBannerSegmentRow {
+    param([object[]]$Segments)
+    $text = (($Segments | ForEach-Object { $_.Text }) -join '')
+    return [pscustomobject]@{ Text = $text; Color = 'White'; Segments = $Segments }
+}
+
+function New-ManagerBannerTextRow {
+    param(
+        [string]$Text,
+        [string]$Color = 'White'
+    )
+    return [pscustomobject]@{ Text = $Text; Color = $Color; Segments = $null }
+}
+
+function New-ManagerBannerSegment {
+    param(
+        [string]$Text,
+        [string]$Color = 'White'
+    )
+    return [pscustomobject]@{ Text = $Text; Color = $Color }
+}
+
+function New-ManagerWordmarkRow {
+    param(
+        [string]$Text,
+        [int]$InnerWidth
+    )
+
+    $line = (Get-CenteredTextLine -Text $Text -Width $InnerWidth).PadRight($InnerWidth)
+    $first = [Math]::Floor($line.Length / 3)
+    $second = [Math]::Floor(($line.Length * 2) / 3)
+    return New-ManagerBannerSegmentRow -Segments @(
+        (New-ManagerBannerSegment -Text '|' -Color 'DarkCyan')
+        (New-ManagerBannerSegment -Text $line.Substring(0, $first) -Color 'Cyan')
+        (New-ManagerBannerSegment -Text $line.Substring($first, $second - $first) -Color 'Green')
+        (New-ManagerBannerSegment -Text $line.Substring($second) -Color 'Magenta')
+        (New-ManagerBannerSegment -Text '|' -Color 'DarkCyan')
+    )
+}
+
+function New-ManagerAttributionRow {
+    param([int]$InnerWidth)
+
+    $prefix = '* Developed and maintained by '
+    $brand = 'Jumpstile'
+    $suffix = ' *'
+    $lineLength = $prefix.Length + $brand.Length + $suffix.Length
+    $leftPad = [Math]::Max(0, [Math]::Floor(($InnerWidth - $lineLength) / 2))
+    $rightPad = [Math]::Max(0, $InnerWidth - $leftPad - $lineLength)
+    return New-ManagerBannerSegmentRow -Segments @(
+        (New-ManagerBannerSegment -Text '|' -Color 'DarkCyan')
+        (New-ManagerBannerSegment -Text (' ' * $leftPad) -Color 'White')
+        (New-ManagerBannerSegment -Text $prefix -Color 'White')
+        (New-ManagerBannerSegment -Text $brand -Color 'Yellow')
+        (New-ManagerBannerSegment -Text $suffix -Color 'White')
+        (New-ManagerBannerSegment -Text (' ' * $rightPad) -Color 'White')
+        (New-ManagerBannerSegment -Text '|' -Color 'DarkCyan')
+    )
 }
 
 function Get-ManagerBannerLines {
@@ -128,30 +189,18 @@ function Get-ManagerBannerRows {
     if (Test-UseManagerAsciiBanner -Width $Width -Height $Height) {
         $frameWidth = [Math]::Max(80, $Width)
         $innerWidth = $frameWidth - 2
-        $lines = New-Object System.Collections.Generic.List[string]
-        [void]$lines.Add('+' + ('=' * $innerWidth) + '+')
-        foreach ($line in (Get-ManagerAsciiBannerLines)) {
-            if ($line.Length -eq 0) {
-                [void]$lines.Add('|' + (' ' * $innerWidth) + '|')
-            } else {
-                $text = $line
-                if ($text.Length -gt $innerWidth) { $text = $text.Substring(0, $innerWidth) }
-                [void]$lines.Add('|' + (Get-CenteredTextLine -Text $text -Width $innerWidth).PadRight($innerWidth) + '|')
-            }
-        }
-        [void]$lines.Add('|' + (' ' * $innerWidth) + '|')
-        [void]$lines.Add('|' + (Get-CenteredTextLine -Text 'Developed and maintained by Jumpstile' -Width $innerWidth).PadRight($innerWidth) + '|')
-        [void]$lines.Add('|' + (Get-CenteredTextLine -Text (Get-ManagerVersionLine) -Width $innerWidth).PadRight($innerWidth) + '|')
-        [void]$lines.Add('+' + ('=' * $innerWidth) + '+')
-
         $rows = New-Object System.Collections.Generic.List[object]
-        foreach ($line in $lines) {
-            $color = 'Cyan'
-            if ($line -match '^\+') { $color = 'DarkCyan' }
-            if ($line -match 'Developed and maintained by Jumpstile') { $color = 'White' }
-            if ($line -match 'Version ') { $color = 'Yellow' }
-            [void]$rows.Add([pscustomobject]@{ Text = $line; Color = $color })
+        [void]$rows.Add((New-ManagerBannerTextRow -Text ('+' + ('-' * $innerWidth) + '+') -Color 'DarkCyan'))
+        [void]$rows.Add((New-ManagerBannerTextRow -Text ('|' + (' ' * $innerWidth) + '|') -Color 'DarkCyan'))
+        foreach ($line in (Get-ManagerAsciiBannerLines)) {
+            $text = $line
+            if ($text.Length -gt $innerWidth) { $text = $text.Substring(0, $innerWidth) }
+            [void]$rows.Add((New-ManagerWordmarkRow -Text $text -InnerWidth $innerWidth))
         }
+        [void]$rows.Add((New-ManagerBannerTextRow -Text ('|' + (' ' * $innerWidth) + '|') -Color 'DarkCyan'))
+        [void]$rows.Add((New-ManagerAttributionRow -InnerWidth $innerWidth))
+        [void]$rows.Add((New-ManagerBannerTextRow -Text ('|' + (Get-CenteredTextLine -Text (Get-ManagerVersionLine) -Width $innerWidth).PadRight($innerWidth) + '|') -Color 'Cyan'))
+        [void]$rows.Add((New-ManagerBannerTextRow -Text ('+' + ('-' * $innerWidth) + '+') -Color 'DarkCyan'))
         return $rows.ToArray()
     }
 
@@ -188,6 +237,14 @@ function Write-ManagerBanner {
     )
     Write-Host ""
     foreach ($row in (Get-ManagerBannerRows -Width $Width -Height $Height)) {
+        if ($row.Segments) {
+            foreach ($segment in $row.Segments) {
+                $segmentColor = if ($segment.Color) { $segment.Color } else { 'White' }
+                Write-Host $segment.Text -ForegroundColor $segmentColor -NoNewline
+            }
+            Write-Host ''
+            continue
+        }
         Write-Host $row.Text -ForegroundColor $row.Color
     }
     Write-Host ""
@@ -10565,20 +10622,24 @@ function Get-MainMenuGeometry {
     $gutterWidth = 0
     $menuWidth = [Math]::Min($contentWidth, 88)
     $columnWidth = $menuWidth
+    $rightColumnWidth = $columnWidth
     $bannerMode = 'Compact'
     $footerWidth = $menuWidth
     $wrapWidth = [Math]::Max(24, $columnWidth - 8)
+    $frameEnabled = $false
 
     if ($Tier -eq 'Standard') {
         $layout = 'Standard'
         $menuWidth = [Math]::Min($contentWidth, 116)
         $columnWidth = $menuWidth
+        $rightColumnWidth = $columnWidth
         $footerWidth = $menuWidth
         $wrapWidth = [Math]::Max(40, $columnWidth - 34)
     } elseif ($Tier -eq 'Professional') {
         $layout = 'Professional'
         $menuWidth = [Math]::Min($contentWidth, 132)
         $columnWidth = $menuWidth
+        $rightColumnWidth = $columnWidth
         $footerWidth = $menuWidth
         $wrapWidth = [Math]::Max(56, $columnWidth - 16)
         $bannerMode = 'Ascii'
@@ -10587,14 +10648,17 @@ function Get-MainMenuGeometry {
             $layout = 'UltraCentered'
             $menuWidth = [Math]::Min($contentWidth, 136)
             $columnWidth = $menuWidth
+            $rightColumnWidth = $columnWidth
             $footerWidth = $menuWidth
             $wrapWidth = [Math]::Max(72, $columnWidth - 16)
         } else {
             $layout = 'UltraTwoColumn'
             $columnCount = 2
-            $gutterWidth = 4
+            $gutterWidth = 3
             $menuWidth = [Math]::Min($contentWidth, [Math]::Max(148, $contentWidth))
-            $columnWidth = [Math]::Floor(($menuWidth - $gutterWidth) / 2)
+            $frameEnabled = $true
+            $columnWidth = [Math]::Floor(($menuWidth - 4 - $gutterWidth) / 2)
+            $rightColumnWidth = $menuWidth - 4 - $gutterWidth - $columnWidth
             $footerWidth = $menuWidth
             $wrapWidth = [Math]::Max(42, $columnWidth - 8)
         }
@@ -10611,11 +10675,13 @@ function Get-MainMenuGeometry {
         MenuWidth = $menuWidth
         ColumnCount = $columnCount
         ColumnWidth = $columnWidth
+        RightColumnWidth = $rightColumnWidth
         GutterWidth = $gutterWidth
         FooterWidth = $footerWidth
         WrapWidth = $wrapWidth
         LeftPadding = $leftPadding
         AvailableRows = $safeHeight
+        FrameEnabled = $frameEnabled
     }
 }
 
@@ -10749,7 +10815,13 @@ function Get-PaddedMainMenuRows {
     )
     if ($Padding -le 0) { return @($Rows) }
     $prefix = ' ' * $Padding
-    return @($Rows | ForEach-Object { New-ConsoleRenderRow -Text ($prefix + $_.Text) -Color $_.Color })
+    return @($Rows | ForEach-Object {
+        if ($_.Segments) {
+            New-ConsoleRenderSegmentRow -Segments (@((New-ConsoleRenderSegment -Text $prefix -Color 'White')) + $_.Segments)
+        } else {
+            New-ConsoleRenderRow -Text ($prefix + $_.Text) -Color $_.Color
+        }
+    })
 }
 
 function Get-MainMenuBannerRows {
@@ -10772,11 +10844,71 @@ function Get-MainMenuFooterRows {
     if ($footer.Length -gt $Geometry.FooterWidth) {
         $footer = 'Enter number | H=Help | Q=Quit'
     }
-    $rule = '-' * $Geometry.FooterWidth
-    [void]$rows.Add((New-ConsoleRenderRow -Text $rule -Color 'DarkCyan'))
+    if ($Geometry.FrameEnabled) {
+        $rule = '+' + ('-' * ($Geometry.FooterWidth - 2)) + '+'
+        $innerWidth = $Geometry.FooterWidth - 4
+        [void]$rows.Add((New-ConsoleRenderRow -Text $rule -Color 'DarkCyan'))
+        if ($footer -eq 'Enter number and press Enter | H = Help | U = Unattended Mode | L = View Log | Q = Quit') {
+            $pad = [Math]::Max(0, [Math]::Floor(($innerWidth - $footer.Length) / 2))
+            $rightPad = [Math]::Max(0, $innerWidth - $pad - $footer.Length)
+            [void]$rows.Add((New-ConsoleRenderSegmentRow -Segments @(
+                (New-ConsoleRenderSegment -Text '| ' -Color 'DarkCyan')
+                (New-ConsoleRenderSegment -Text (' ' * $pad) -Color 'White')
+                (New-ConsoleRenderSegment -Text 'Enter number and press ' -Color 'White')
+                (New-ConsoleRenderSegment -Text 'Enter' -Color 'Green')
+                (New-ConsoleRenderSegment -Text ' | ' -Color 'White')
+                (New-ConsoleRenderSegment -Text 'H' -Color 'Cyan')
+                (New-ConsoleRenderSegment -Text ' = Help | ' -Color 'White')
+                (New-ConsoleRenderSegment -Text 'U' -Color 'Magenta')
+                (New-ConsoleRenderSegment -Text ' = Unattended Mode | ' -Color 'White')
+                (New-ConsoleRenderSegment -Text 'L' -Color 'Yellow')
+                (New-ConsoleRenderSegment -Text ' = View Log | ' -Color 'White')
+                (New-ConsoleRenderSegment -Text 'Q' -Color 'Red')
+                (New-ConsoleRenderSegment -Text ' = Quit' -Color 'White')
+                (New-ConsoleRenderSegment -Text (' ' * $rightPad) -Color 'White')
+                (New-ConsoleRenderSegment -Text ' |' -Color 'DarkCyan')
+            )))
+            [void]$rows.Add((New-ConsoleRenderRow -Text $rule -Color 'DarkCyan'))
+            return @(Get-PaddedMainMenuRows -Rows $rows.ToArray() -Padding $Geometry.LeftPadding)
+        }
+    } else {
+        $rule = '-' * $Geometry.FooterWidth
+        [void]$rows.Add((New-ConsoleRenderRow -Text $rule -Color 'DarkCyan'))
+    }
+    if ($footer -eq 'Enter number and press Enter | H = Help | U = Unattended Mode | L = View Log | Q = Quit') {
+        $pad = [Math]::Max(0, [Math]::Floor(($Geometry.FooterWidth - $footer.Length) / 2))
+        [void]$rows.Add((New-ConsoleRenderSegmentRow -Segments @(
+            (New-ConsoleRenderSegment -Text (' ' * $pad) -Color 'White')
+            (New-ConsoleRenderSegment -Text 'Enter number and press ' -Color 'White')
+            (New-ConsoleRenderSegment -Text 'Enter' -Color 'Green')
+            (New-ConsoleRenderSegment -Text ' | ' -Color 'White')
+            (New-ConsoleRenderSegment -Text 'H' -Color 'Cyan')
+            (New-ConsoleRenderSegment -Text ' = Help | ' -Color 'White')
+            (New-ConsoleRenderSegment -Text 'U' -Color 'Magenta')
+            (New-ConsoleRenderSegment -Text ' = Unattended Mode | ' -Color 'White')
+            (New-ConsoleRenderSegment -Text 'L' -Color 'Yellow')
+            (New-ConsoleRenderSegment -Text ' = View Log | ' -Color 'White')
+            (New-ConsoleRenderSegment -Text 'Q' -Color 'Red')
+            (New-ConsoleRenderSegment -Text ' = Quit' -Color 'White')
+        )))
+        return @(Get-PaddedMainMenuRows -Rows $rows.ToArray() -Padding $Geometry.LeftPadding)
+    }
     foreach ($line in (Split-TextForMenuWidth -Text $footer -Width $Geometry.FooterWidth)) {
         $pad = [Math]::Max(0, [Math]::Floor(($Geometry.FooterWidth - $line.Length) / 2))
-        [void]$rows.Add((New-ConsoleRenderRow -Text ((' ' * $pad) + $line) -Color 'White'))
+        if ($Geometry.FrameEnabled) {
+            $innerWidth = $Geometry.FooterWidth - 4
+            $rightPad = [Math]::Max(0, $innerWidth - $pad - $line.Length)
+            [void]$rows.Add((New-ConsoleRenderSegmentRow -Segments @(
+                (New-ConsoleRenderSegment -Text '| ' -Color 'DarkCyan')
+                (New-ConsoleRenderSegment -Text (' ' * $pad) -Color 'White')
+                (New-ConsoleRenderSegment -Text $line -Color 'White')
+                (New-ConsoleRenderSegment -Text (' ' * $rightPad) -Color 'White')
+                (New-ConsoleRenderSegment -Text ' |' -Color 'DarkCyan')
+            )))
+            [void]$rows.Add((New-ConsoleRenderRow -Text $rule -Color 'DarkCyan'))
+        } else {
+            [void]$rows.Add((New-ConsoleRenderRow -Text ((' ' * $pad) + $line) -Color 'White'))
+        }
     }
     return @(Get-PaddedMainMenuRows -Rows $rows.ToArray() -Padding $Geometry.LeftPadding)
 }
@@ -10821,11 +10953,16 @@ function Join-MainMenuRenderColumns {
     for ($i = 0; $i -lt $count; $i++) {
         $left = if ($i -lt $LeftRows.Count) { $LeftRows[$i] } else { New-ConsoleRenderRow }
         $right = if ($i -lt $RightRows.Count) { $RightRows[$i] } else { New-ConsoleRenderRow }
-        $segments = @(
-            (New-ConsoleRenderSegment -Text ($left.Text.PadRight($Geometry.ColumnWidth)) -Color $left.Color),
-            (New-ConsoleRenderSegment -Text (' ' * $Geometry.GutterWidth) -Color 'White'),
-            (New-ConsoleRenderSegment -Text $right.Text -Color $right.Color)
-        )
+        $segments = @()
+        if ($Geometry.FrameEnabled) {
+            $segments += New-ConsoleRenderSegment -Text '| ' -Color 'DarkCyan'
+        }
+        $segments += New-ConsoleRenderSegment -Text ($left.Text.PadRight($Geometry.ColumnWidth)) -Color $left.Color
+        $segments += New-ConsoleRenderSegment -Text ((' ' * [Math]::Max(0, [Math]::Floor(($Geometry.GutterWidth - 1) / 2))) + '|' + (' ' * [Math]::Max(0, $Geometry.GutterWidth - 1 - [Math]::Floor(($Geometry.GutterWidth - 1) / 2)))) -Color 'DarkCyan'
+        $segments += New-ConsoleRenderSegment -Text ($right.Text.PadRight($Geometry.RightColumnWidth)) -Color $right.Color
+        if ($Geometry.FrameEnabled) {
+            $segments += New-ConsoleRenderSegment -Text ' |' -Color 'DarkCyan'
+        }
         [void]$rows.Add((New-ConsoleRenderSegmentRow -Segments $segments))
     }
     return @(Get-PaddedMainMenuRows -Rows $rows.ToArray() -Padding $Geometry.LeftPadding)
@@ -10840,6 +10977,7 @@ function Get-MainMenuBodyRows {
     $detail = 'Full'
     if ($Geometry.Tier -eq 'Compact') { $detail = 'Labels' }
     if ($Geometry.Tier -eq 'Standard') { $detail = 'Short' }
+    if ($Geometry.Layout -eq 'UltraTwoColumn') { $detail = 'Short' }
 
     if ($Geometry.Layout -eq 'UltraTwoColumn') {
         $leftRows = @()
