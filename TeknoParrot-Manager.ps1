@@ -9772,15 +9772,34 @@ if (-not $configAccepted -and -not $Unattended) {
     if ($retroBat) { Write-Log "RetroBat mode enabled by user." }
 }
 
+if ((($eggmanDatZip -and -not (Test-Path -LiteralPath $eggmanDatZip)) -or ($datFilePath -and -not (Test-Path -LiteralPath $datFilePath))) -and -not $Unattended) {
+    # The configured dat file/ZIP no longer exists on disk (moved, renamed,
+    # deleted, or replaced by an external tool like RomVault with a
+    # different filename convention) -- previously this fell straight
+    # through to the "already configured" branch below, which showed a
+    # confusing phantom "Currently using ... (0 MB)" entry for a file that
+    # was never actually there. Clearing both here lets this same if/elseif
+    # chain naturally re-run the first-run setup wizard instead of
+    # duplicating its D/Z/F/N logic a second time.
+    $missingPath = if ($eggmanDatZip -and -not (Test-Path -LiteralPath $eggmanDatZip)) { $eggmanDatZip } else { $datFilePath }
+    Write-Host ""
+    Write-Host "  WARNING: Your configured dat file no longer exists:" -ForegroundColor Yellow
+    Write-Host "    $missingPath" -ForegroundColor Yellow
+    Write-Log "EggmanDat: configured path no longer exists ($missingPath) -- re-prompting."
+    $eggmanDatZip = ''
+    $datFilePath = ''
+}
+
 if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
     Write-Host ""
-    Write-Host "  Eggman dat files (optional)" -ForegroundColor Cyan
+    Write-Host "  Eggman dat files (highly recommended)" -ForegroundColor Cyan
     Write-Host "  Used to accurately register shared-exe games, ELF-based games," -ForegroundColor DarkCyan
     Write-Host "  and slightly misnamed folders. The ZIP (~145 MB) contains both dats." -ForegroundColor DarkCyan
+    Write-Host "  Without one, some games may not register correctly." -ForegroundColor DarkCyan
     Write-Host "    D) Download from GitHub now  (~145 MB)"
     Write-Host "    Z) I have the ZIP already -- enter path"
     Write-Host "    F) I have separate dat files -- enter paths"
-    Write-Host "    N) Skip"
+    Write-Host "    N) Skip (not recommended)"
     $datChoice = (Read-Host "  Choice (D/Z/F/N)").Trim().ToUpper()
     $raw = ''   # shared path variable for Z and fallback paths
 
