@@ -84,6 +84,15 @@ BeforeAll {
                 HighTvdBehaviors = 12
             }
             Timestamp = '2026-07-03_00-00-00'
+            RepoPath = 'C:\fake\repo'
+            GitBranch = 'main'
+            Commit = 'abc123fullsha'
+            CommitShort = 'abc123'
+            OriginMainCommit = 'abc123fullsha'
+            SyncStatus = 'MATCHES origin/main'
+            GitVersion = 'git version 2.44.0'
+            PowerShellVersion = '7.4.0'
+            TpmScriptVersion = '1.0'
         }
     }
 }
@@ -113,6 +122,30 @@ Describe "New-CertificationScorecard" {
     It "computes Overall as CERTIFIED when every scored item passes" {
         $result = New-CertificationScorecard -Results (New-FakeResults -Pcsx2Present $true)
         $result.Overall | Should -Be 'CERTIFIED'
+    }
+
+    # Issue #111: certification provenance must be readable from the
+    # scorecard object itself (and therefore the JSON scorecard file it's
+    # serialized to), not only from a separate validation-report file.
+    It "carries git/version provenance fields onto the returned scorecard object" {
+        $result = New-CertificationScorecard -Results (New-FakeResults -Pcsx2Present $true)
+        $result.Repository        | Should -Be 'C:\fake\repo'
+        $result.Branch            | Should -Be 'main'
+        $result.Commit            | Should -Be 'abc123fullsha'
+        $result.CommitShort       | Should -Be 'abc123'
+        $result.OriginMainCommit  | Should -Be 'abc123fullsha'
+        $result.SyncStatus        | Should -Be 'MATCHES origin/main'
+        $result.WorkingTreeClean  | Should -Be $true
+        $result.GitVersion        | Should -Be 'git version 2.44.0'
+        $result.PowerShellVersion | Should -Be '7.4.0'
+        $result.TpmScriptVersion  | Should -Be '1.0'
+    }
+
+    It "reports WorkingTreeClean as false when GitStatus is not '(clean)'" {
+        $fake = New-FakeResults -Pcsx2Present $true
+        $fake.GitStatus = ' M TeknoParrot-Manager.ps1'
+        $result = New-CertificationScorecard -Results $fake
+        $result.WorkingTreeClean | Should -Be $false
     }
 }
 

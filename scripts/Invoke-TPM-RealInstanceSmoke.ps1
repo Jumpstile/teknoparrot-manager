@@ -244,6 +244,20 @@ function New-CertificationScorecard {
         ReportDir = $reportDir
         ValidationReport = $md
         ValidationJson = $json
+        # Issue #111: certification provenance, duplicated onto this object
+        # (not just $results/the validation JSON) so a reviewer can confirm
+        # the certified commit from the certification scorecard JSON alone,
+        # without needing to cross-reference a second file.
+        Repository = $Results.RepoPath
+        Branch = $Results.GitBranch
+        Commit = $Results.Commit
+        CommitShort = $Results.CommitShort
+        OriginMainCommit = $Results.OriginMainCommit
+        SyncStatus = $Results.SyncStatus
+        WorkingTreeClean = ($Results.GitStatus -eq '(clean)')
+        GitVersion = $Results.GitVersion
+        PowerShellVersion = $Results.PowerShellVersion
+        TpmScriptVersion = $Results.TpmScriptVersion
     }
 }
 
@@ -267,11 +281,27 @@ function Add-CheckResult {
     }
 }
 
+# Issue #122: prints a short, concise header before each gate so an operator
+# watching a long-running certification pass can see which gate is currently
+# running, why it exists, and what a good outcome looks like -- without
+# waiting for the final scorecard to find out anything failed. Deliberately
+# terse (one line each) per the issue's own "concise, not verbose narration"
+# requirement.
+function Write-TPMGateHeader {
+    param([string]$Gate, [string]$Purpose, [string]$Expected)
+    Write-Host ""
+    Write-Host ("--- Running: {0}" -f $Gate) -ForegroundColor Cyan
+    Write-Host ("    Purpose : {0}" -f $Purpose) -ForegroundColor DarkGray
+    Write-Host ("    Expected: {0}" -f $Expected) -ForegroundColor DarkGray
+}
+
 Push-Location $RepoPath
 try {
+    Write-TPMGateHeader -Gate 'Repository' -Purpose 'Confirms the certified commit and working-tree state' -Expected 'clean working tree, HEAD matches origin/main'
     $gitVersion = git --version
     $gitBranch = git rev-parse --abbrev-ref HEAD
     $gitCommit = git rev-parse HEAD
+    $gitCommitShort = git rev-parse --short HEAD
     $gitStatusLines = @(git status --short)
     $repoClean = ($gitStatusLines.Count -eq 0)
     if ($repoClean) {
@@ -279,10 +309,37 @@ try {
     } else {
         $gitStatusText = ($gitStatusLines -join [Environment]::NewLine)
     }
+
+    # Issue #111: origin/main comparison, so a reviewer can tell from the
+    # scorecard alone whether this run actually certified the latest pushed
+    # commit or a stale/local one. Never blocks the run over a failed
+    # fetch (no network is a real, non-fatal scenario) -- says so plainly
+    # instead of silently omitting the comparison.
+    $originMainCommit = $null
+    $fetchFailed = $false
+    try {
+        git fetch origin main --quiet 2>$null
+        if ($LASTEXITCODE -ne 0) { $fetchFailed = $true }
+        else { $originMainCommit = (git rev-parse origin/main 2>$null) }
+    } catch {
+        $fetchFailed = $true
+    }
+    $syncStatus = if ($fetchFailed -or -not $originMainCommit) {
+        'UNKNOWN -- could not fetch origin/main (offline or unreachable)'
+    } elseif ($gitCommit -eq $originMainCommit) {
+        'MATCHES origin/main'
+    } else {
+        "DIFFERS from origin/main ($originMainCommit) -- this run may not reflect the latest pushed commit"
+    }
+
     $results.GitVersion = $gitVersion
     $results.GitBranch = $gitBranch
     $results.Commit = $gitCommit
+    $results.CommitShort = $gitCommitShort
     $results.GitStatus = $gitStatusText
+    $results.OriginMainCommit = $originMainCommit
+    $results.SyncStatus = $syncStatus
+    $results.PowerShellVersion = $PSVersionTable.PSVersion.ToString()
     Add-CheckResult 'Repository available' $true "branch=$gitBranch commit=$gitCommit"
     Add-CheckResult 'Repository clean' $repoClean $gitStatusText
 
@@ -296,6 +353,7 @@ try {
     $pcsx2Dir = Resolve-Pcsx2Directory -TeknoParrotRoot $TeknoParrotRoot
     $crosshairPath = if ($pcsx2Dir) { Join-Path $pcsx2Dir 'TeknoParrot\crosshairs' } else { '' }
 
+    Write-TPMGateHeader -Gate 'Backups' -Purpose 'Snapshots UserProfiles/GameProfiles/config before any test runs' -Expected 'backup created for every folder present'
     $backupItems = [ordered]@{}
     $backupItems.UserProfiles = Copy-IfExists (Join-Path $TeknoParrotRoot 'UserProfiles') 'UserProfiles'
     $backupItems.GameProfiles = Copy-IfExists (Join-Path $TeknoParrotRoot 'GameProfiles') 'GameProfiles'
@@ -309,6 +367,7 @@ try {
     $preGameProfiles = Get-TreeHash $gameProfilesPath
     $preCrosshairs = if ($crosshairPath) { Get-TreeHash $crosshairPath } else { @() }
 
+    Write-TPMGateHeader -Gate 'Pester regression suite' -Purpose 'Runs every unit/regression test in the repo' -Expected 'zero failed tests'
     $pesterCommand = Get-Command Invoke-Pester -ErrorAction SilentlyContinue
     if (-not $pesterCommand) { throw 'Invoke-Pester not found. Install it with: Install-Module Pester -Scope CurrentUser -Force' }
     $pesterModule = Get-Module Pester -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1
@@ -440,6 +499,7 @@ try {
         "(no failures)" | Out-File -FilePath $failuresText -Encoding utf8
     }
 
+    Write-TPMGateHeader -Gate 'Static analysis (PSScriptAnalyzer)' -Purpose 'Scans TeknoParrot-Manager.ps1 for known-bad patterns' -Expected 'zero Error/Warning findings'
     $analyzerCommand = Get-Command Invoke-ScriptAnalyzer -ErrorAction SilentlyContinue
     if (-not $analyzerCommand) { throw 'Invoke-ScriptAnalyzer not found. Install it with: Install-Module PSScriptAnalyzer -Scope CurrentUser -Force' }
     $analyzerModule = Get-Module PSScriptAnalyzer -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1
@@ -472,6 +532,7 @@ try {
         Add-CheckResult $p.Name $exists $p.Path
     }
 
+    Write-TPMGateHeader -Gate 'pcsx2x6 crosshair path (issue #79)' -Purpose 'Confirms crosshair deployment path is correct for pcsx2x6 installs' -Expected 'pass, or not-applicable if no pcsx2x6 folder exists'
     # Issue #79: pcsx2x6 crosshair path verification. Read-only -- this never
     # runs the interactive Invoke-CrosshairSetup wizard (Read-Host prompts,
     # browser launch) against the real install, it only inspects whatever
@@ -546,6 +607,7 @@ try {
         }
     }
 
+    Write-TPMGateHeader -Gate 'Real install health check' -Purpose 'Read-only scan of the actual TeknoParrot install for registration gaps' -Expected 'report collected -- findings reviewed manually, not a pass/fail gate'
     $healthScript = Join-Path $PSScriptRoot 'Invoke-TPM-InstallHealthCheck.ps1'
     if (Test-Path -LiteralPath $healthScript -PathType Leaf) {
         $healthOutDir = Join-Path $reportDir 'InstallHealth'
@@ -581,6 +643,7 @@ try {
         Add-CheckResult 'TPM unattended run' $true "log=$tpmLog"
     }
 
+    Write-TPMGateHeader -Gate 'Smoke file safety' -Purpose 'Confirms nothing changed in UserProfiles/GameProfiles during this smoke run' -Expected 'no unexpected file changes'
     $postUserProfiles = Get-TreeHash $userProfilesPath
     $postGameProfiles = Get-TreeHash $gameProfilesPath
     $postCrosshairs = if ($crosshairPath) { Get-TreeHash $crosshairPath } else { @() }
@@ -628,6 +691,20 @@ finally {
         [void](New-Item -ItemType File -Path $md -Force)
     }
 
+    # Issue #111: TPM script version read via regex against the raw file
+    # text, never by executing TeknoParrot-Manager.ps1 -- this harness must
+    # never run arbitrary top-level script code as a side effect of
+    # generating a report. Computed before New-CertificationScorecard is
+    # called below, since that function reads $results.TpmScriptVersion.
+    $tpmScriptVersion = 'unknown'
+    try {
+        $versionMatch = Select-String -LiteralPath $mainScriptPath -Pattern '^\$ScriptVersion\s*=\s*"([^"]+)"' | Select-Object -First 1
+        if ($versionMatch) { $tpmScriptVersion = $versionMatch.Matches[0].Groups[1].Value }
+    } catch {
+        $tpmScriptVersion = 'unknown (could not read TeknoParrot-Manager.ps1)'
+    }
+    $results.TpmScriptVersion = $tpmScriptVersion
+
     $certification = New-CertificationScorecard -Results $results
     $certification | ConvertTo-Json -Depth 8 | Out-File $certificationJson -Encoding utf8
 
@@ -636,6 +713,19 @@ finally {
     Add-CertificationReport ("Overall: **{0}**" -f $certification.Overall)
     Add-CertificationReport ("Score: {0}/{1} ({2}%)" -f $certification.Passed, $certification.Total, $certification.ScorePercent)
     Add-CertificationReport ("Elapsed: {0}" -f $results.Elapsed)
+    Add-CertificationReport ""
+    Add-CertificationReport "## Certification Target"
+    Add-CertificationReport ""
+    Add-CertificationReport ("- Repository: {0}" -f $RepoPath)
+    Add-CertificationReport ("- Branch: {0}" -f $results.GitBranch)
+    Add-CertificationReport ("- Commit: {0} ({1})" -f $results.Commit, $results.CommitShort)
+    Add-CertificationReport ("- Origin/main: {0}" -f (if ($results.OriginMainCommit) { $results.OriginMainCommit } else { 'unavailable' }))
+    Add-CertificationReport ("- Sync status: {0}" -f $results.SyncStatus)
+    Add-CertificationReport ("- Working tree: {0}" -f (if ($repoClean) { 'clean' } else { 'dirty' }))
+    Add-CertificationReport ("- Git version: {0}" -f $results.GitVersion)
+    Add-CertificationReport ("- PowerShell version: {0}" -f $results.PowerShellVersion)
+    Add-CertificationReport ("- TPM script version: {0}" -f $tpmScriptVersion)
+    Add-CertificationReport ("- Certified at: {0}" -f $results.Timestamp)
     Add-CertificationReport ""
     Add-CertificationReport "## Gates"
     foreach ($item in $certification.Items) {
