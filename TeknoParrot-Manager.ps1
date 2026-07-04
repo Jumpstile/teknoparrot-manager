@@ -3820,8 +3820,26 @@ function Invoke-TpmDownload {
     if (-not (Test-Path -LiteralPath $saveDir -PathType Container)) {
         New-Item -ItemType Directory -Path $saveDir -Force | Out-Null
     }
+    # The temp/partial download lands on local disk, not next to the final
+    # destination -- $DestinationPath can be (and for several download
+    # targets in this script routinely is) a network-mapped drive. A large
+    # download sustained directly over that share, immediately followed by
+    # a same-share Move-Item, is exactly the kind of transient network
+    # flakiness this project has already hit and documented elsewhere (see
+    # ARCHITECTURE.md, "Startup: network-path detection and hard timeout").
+    # Move-Item works transparently across volumes (copy+delete under the
+    # hood when a simple rename isn't possible), so downloading locally
+    # first and moving into place at the end changes nothing about the
+    # final result -- it only shrinks the window where a flaky network
+    # path can make the in-progress file disappear out from under us.
+    # Falls back to $saveDir itself if the local temp directory isn't
+    # writable for some reason, matching the original behavior.
+    $tempDir = $env:TEMP
+    if ([string]::IsNullOrWhiteSpace($tempDir) -or -not (Test-Path -LiteralPath $tempDir -PathType Container)) {
+        $tempDir = $saveDir
+    }
     $tempName = '.{0}.{1}.partial' -f ([System.IO.Path]::GetFileName($DestinationPath)), ([guid]::NewGuid().ToString('N'))
-    $tempPath = Join-Path $saveDir $tempName
+    $tempPath = Join-Path $tempDir $tempName
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     $methodUsed = $null
     $detectedStatusCode = 0
