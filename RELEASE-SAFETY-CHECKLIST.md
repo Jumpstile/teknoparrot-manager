@@ -42,6 +42,30 @@ It is intentionally redundant: each gate catches a different failure class.
   Fix the regression before proceeding; do NOT adjust the test to match wrong behavior
   unless the behavior change was explicitly intended this round.
 
+### Cost-aware test selection (issue #109)
+
+Run the smallest test set that gives useful evidence for the change being made,
+not the broadest suite by default. Every full-suite run makes real, rate-limited
+network calls (GitHub API) on behalf of a handful of tests -- running it after
+every small edit exhausts that budget for no additional evidence.
+
+| Change type | Run this first |
+|---|---|
+| Documentation-only (no release/packaging/doc-gate impact) | No test run required |
+| Menu wording or layout | Parse check + targeted menu tests |
+| Version parser or updater logic | Targeted parser/updater regression tests |
+| Shared utility function | Affected-area tests, then one full suite before PR-ready |
+| Release-candidate or release changes | Full suite + release packaging checks, once, at sign-off |
+| Hardware/environment-dependent behavior | Validate locally when local execution is stronger evidence than simulation |
+
+- [ ] Full-suite evidence is still required before merge or release sign-off for
+  any change to shared/production code -- this policy narrows when it's run
+  mid-round, not whether it's required before merge.
+- [ ] Every real defect found during RC or local testing still gets a permanent,
+  focused regression test, regardless of which tier caught it.
+- [ ] State which test tier was run and why in the PR description (see the PR
+  template checklist item below).
+
 ---
 
 ## 2. Upstream compatibility safety review (issue #47)
