@@ -9846,6 +9846,14 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
     # Direct .dat file mode ($datFilePath) has no GitHub release counterpart
     # to check against, so this only applies to ZIP mode.
     Write-Host ""
+    # Show what's already configured before asking whether to check for a
+    # newer one -- this is local, immediate info (no network call), so it's
+    # shown regardless of whether the user says Y or N to the check itself.
+    # The "latest available" side of this can only be known after querying
+    # GitHub, which is exactly the network call this Y/N gate exists to make
+    # optional -- so only "currently using" appears here.
+    $currentSizeMBPreCheck = if (Test-Path -LiteralPath $eggmanDatZip) { [Math]::Round((Get-Item -LiteralPath $eggmanDatZip).Length / 1MB, 1) } else { 0 }
+    Write-Host ("  Currently using  : {0}  ({1} MB)" -f (Split-Path -Leaf $eggmanDatZip), $currentSizeMBPreCheck) -ForegroundColor Cyan
     $checkUpdate = (Read-Host "Check for a newer Eggman dat release? (Y/N)").Trim().ToUpper()
     if ($checkUpdate -eq 'Y') {
         Write-Host "  Checking GitHub for latest Eggman dat release..." -ForegroundColor Cyan
