@@ -8,13 +8,13 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 
 ---
 
-## Latest Release Candidate: TeknoParrot Manager v1.0 RC1
+## Latest Release Candidate: TeknoParrot Manager v1.0 RC2
 
-**[Download v1.0 RC1](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC1)** — this is the current recommended testing build.
+**[Download v1.0 RC2](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC2)** - this is the current recommended testing build.
 
-Final Version 1.0 has not been published yet. v1.0 RC1 is a release candidate: Engineering, Behavioral, Recovery, and Documentation Certification are all complete, and it's certified 9/9 on real arcade hardware — what's left is real-world validation across different cabinets, GPUs, and TeknoParrot installations before 1.0 ships.
+Final Version 1.0 has not been published yet. v1.0 RC2 is a release candidate: Engineering, Behavioral, Recovery, and Documentation Certification are all complete, and it's certified 9/9 on real arcade hardware - what's left is real-world validation across different cabinets, GPUs, and TeknoParrot installations before 1.0 ships.
 
-Found something? Report it on the **[v1.0 RC1 feedback tracking issue (#102)](https://github.com/Jumpstile/teknoparrot-manager/issues/102)**.
+Found something? Report it on the **[v1.0 RC2 feedback tracking issue (#102)](https://github.com/Jumpstile/teknoparrot-manager/issues/102)**.
 
 ---
 
@@ -140,7 +140,7 @@ This script automates the copy-and-fill step: it scans your games, matches each 
 
 ## Installation
 
-1. Download `TeknoParrot Manager v1.0 RC1.zip` from [Releases](../../releases/latest)
+1. Download `TeknoParrot Manager v1.0 RC2.zip` from [Releases](../../releases/latest)
 2. Extract to any folder (e.g. a `Scripts` subfolder alongside your TeknoParrot install)
 3. Double-click **`TeknoParrot-Manager.bat`**
 
@@ -919,4 +919,4 @@ Pull requests are welcome too. Full source and version history: [github.com/Jump
 
 ---
 
-> v1.0 RC1 -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v1.0 RC2 -- test one game after each run. Profiles are backed up automatically at the start of every run.

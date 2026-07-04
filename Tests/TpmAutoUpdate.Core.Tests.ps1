@@ -84,11 +84,12 @@ Describe 'ConvertTo-TpmVersion' {
     # with TeknoParrot-Manager.ps1's own ConvertTo-ManagerComparableVersion.
     It 'strips a release-candidate suffix and parses the numeric base' {
         ConvertTo-TpmVersion -VersionText 'v1.0-RC1' | Should -Be ([version]'1.0')
+        ConvertTo-TpmVersion -VersionText 'v1.0-RC2' | Should -Be ([version]'1.0')
     }
 
-    It 'a 0.99.x version compares as older than 1.0-RC1' {
+    It 'a 0.99.x version compares as older than 1.0-RC2' {
         $local  = ConvertTo-TpmVersion -VersionText '0.99.44'
-        $latest = ConvertTo-TpmVersion -VersionText 'v1.0-RC1'
+        $latest = ConvertTo-TpmVersion -VersionText 'v1.0-RC2'
         $latest -gt $local | Should -Be $true -Because "a release candidate for 1.0 must be recognized as newer than any 0.99.x release"
     }
 }

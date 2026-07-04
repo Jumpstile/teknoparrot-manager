@@ -29,6 +29,9 @@ These concepts should be project-agnostic:
 - Performance and scale tracking.
 - Structured logs and per-run artifact folders.
 - Release-readiness gates.
+- Release Integrity Audit: runtime identity, documentation, wiki, release
+  artifact, metadata, and regression-protection checks that prove the product
+  delivered to users matches the certified build.
 
 ## Project-specific adapters
 
@@ -85,7 +88,9 @@ TPM can keep its current paths for now, but new code should avoid hardcoding Tek
 6. Every project should have a regression register.
 7. Every project should include human-use simulation, not only technical tests.
 8. Every project should support scale, fuzz, and chaos testing over time.
-9. A non-obvious implementation constraint in the certification suite
+9. Every public release should pass both Certification and Release Integrity
+   before publication.
+10. A non-obvious implementation constraint in the certification suite
    itself (non-obvious, easy to "simplify" incorrectly, and proven by a
    real incident or regression -- not a routine implementation detail) is
    documented in both the relevant architecture document and

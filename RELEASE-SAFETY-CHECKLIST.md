@@ -170,7 +170,72 @@ the file that happened to be open.
 
 ---
 
-## 5. Post-release verification
+## 5. Release Integrity Audit (mandatory before every public release)
+
+Certification proves the software behavior is correct. Release Integrity proves
+the product delivered to users identifies and describes itself correctly. Every
+public release (RC, Beta, Final, Hotfix) must pass this audit in addition to
+Certification.
+
+### Phase 1 -- Runtime Identity Audit
+
+- [ ] TPM banner, startup banner, `$ScriptVersion`, and release-candidate label
+  identify the release being published.
+- [ ] Update dialogs and updater comparisons identify current/latest versions
+  correctly, including release-candidate tags.
+- [ ] Generated reports, certification scorecards, logs, release metadata, ZIP
+  filename, GitHub Release title, release tag, and asset name describe the same
+  release identity.
+- [ ] The packaged runtime identifies itself as the release being published
+  when extracted and launched.
+
+### Phase 2 -- Documentation Audit
+
+- [ ] Review every user-facing document, not only version strings: README,
+  Quick Start, CHANGELOG, release notes, this checklist, CONTRIBUTING if
+  present, PROJECT_OVERVIEW if present, CONSTITUTION, CLAUDE.md, AGENTS.md,
+  LESSONS_LEARNED, TPM-CERTIFICATION-SUITE, Compatibility, every file under
+  `docs\`, and any release-facing text files.
+- [ ] Verify menu options, workflow descriptions, certification process,
+  updater behavior, DAT workflow, behavioral certification, scorecards, backup
+  behavior, current capabilities, current limitations, test counts, links, and
+  terminology against the current product.
+
+### Phase 3 -- Wiki Audit
+
+- [ ] Review every wiki page for current screenshots, workflows, menu
+  structure, capabilities, certification process, updater documentation, DAT
+  documentation, troubleshooting, FAQ, installation, and release guidance.
+- [ ] Remove stale content, repair broken links, and update screenshots where
+  appropriate.
+
+### Phase 4 -- Release Artifact Audit
+
+- [ ] Verify the built and downloaded release ZIP match the repository,
+  runtime banner, packaged script, ZIP contents, release notes, changelog,
+  documentation, GitHub Release, and README.
+
+### Phase 5 -- Release Metadata Audit
+
+- [ ] Verify tag, commit, release title, asset name, asset size, published
+  asset, downloaded asset, and final tag target all match the intended release.
+
+### Phase 6 -- Regression Protection
+
+- [ ] Add automated validation where practical: packaged version matches the
+  release, runtime banner matches the release, script identity matches docs,
+  README latest tag matches the release, release ZIP identity validation
+  passes, and release metadata can be checked before publication.
+
+### Phase 7 -- Report
+
+- [ ] Produce a Release Integrity Report listing every file reviewed, every
+  document reviewed, every wiki page reviewed, every correction made, every
+  stale item found, and any remaining intentional discrepancies.
+
+---
+
+## 6. Post-release verification
 
 - [ ] Before publishing the draft, download or inspect the uploaded ZIP asset
   and run the same `Tests\Test-ReleasePackage.ps1` validation against it.
@@ -206,7 +271,7 @@ the file that happened to be open.
 - [ ] Post a fix/analysis comment to any open issue this release addresses,
   immediately after tagging (not deferred to next session).
 
-## 6. Post-Release Housekeeping (mandatory, every release)
+## 7. Post-Release Housekeeping (mandatory, every release)
 
 A release is not complete until this phase runs. It is local-workspace
 cleanup only -- it never touches GitHub releases/tags and never changes
@@ -239,7 +304,7 @@ production code.
   files moved, archive path, issue updates, working tree status, and any
   remaining tester follow-up.
 
-## 7. AI attribution sweep (every GitHub post)
+## 8. AI attribution sweep (every GitHub post)
 
 Before any GitHub issue, issue comment, PR description, PR review, release
 note, or wiki update is posted, it must be checked for AI attribution
@@ -266,7 +331,7 @@ pre-commit gates in section 1.
   in addition to, not instead of, the full repo-wide sweep already required
   by CLAUDE.md after any GitHub-touching round.
 
-## 8. Release governance exceptions
+## 9. Release governance exceptions
 
 Normal PR review remains the standing rule for release-critical changes. Admin
 override merges are exceptions, not precedent; when one is used, record the

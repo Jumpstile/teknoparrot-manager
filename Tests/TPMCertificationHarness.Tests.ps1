@@ -93,6 +93,7 @@ BeforeAll {
             GitVersion = 'git version 2.44.0'
             PowerShellVersion = '7.4.0'
             TpmScriptVersion = '1.0'
+            TpmDisplayVersion = 'v1.0 RC2'
         }
     }
 }
@@ -139,6 +140,7 @@ Describe "New-CertificationScorecard" {
         $result.GitVersion        | Should -Be 'git version 2.44.0'
         $result.PowerShellVersion | Should -Be '7.4.0'
         $result.TpmScriptVersion  | Should -Be '1.0'
+        $result.TpmDisplayVersion | Should -Be 'v1.0 RC2'
     }
 
     It "reports WorkingTreeClean as false when GitStatus is not '(clean)'" {

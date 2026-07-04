@@ -46,3 +46,52 @@ Describe "Quality engineering system metadata" {
         }
     }
 }
+
+Describe "Release Integrity source identity" {
+    BeforeAll {
+        $script:RepoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
+        $script:ExpectedDisplayVersion = 'v1.0 RC2'
+        $script:ExpectedTag = 'v1.0-RC2'
+    }
+
+    It "keeps the production script header, runtime label, and banner on the same release identity" {
+        $scriptPath = Join-Path $script:RepoRoot 'TeknoParrot-Manager.ps1'
+        $content = Get-Content -LiteralPath $scriptPath -Raw
+
+        $content | Should -Match ([regex]::Escape("# TeknoParrot Manager  |  $script:ExpectedDisplayVersion"))
+        $content | Should -Match '\$ScriptVersion\s*=\s*"1\.0"'
+        $content | Should -Match '\$ReleaseCandidateLabel\s*=\s*"RC2"'
+        $content | Should -Match 'TeknoParrot Manager\s+\$DisplayVersion'
+        $content | Should -Not -Match 'TeknoParrot Manager\s+v\$ScriptVersion RC1'
+    }
+
+    It "keeps latest-release documentation pointed at the current RC tag" {
+        $readme = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'README.md') -Raw
+        $topReadme = ($readme -split "`r?`n" | Select-Object -First 30) -join "`n"
+
+        $topReadme | Should -Match ([regex]::Escape($script:ExpectedDisplayVersion))
+        $topReadme | Should -Match ([regex]::Escape($script:ExpectedTag))
+        $topReadme | Should -Not -Match 'v1\.0 RC1|v1\.0-RC1|v1\.0\.RC1'
+    }
+
+    It "keeps release guidance files aligned with the current RC identity" {
+        $files = @(
+            'AGENTS.md',
+            'TeknoParrot-Manager-README.txt',
+            'TeknoParrot-Manager-QuickStart.txt'
+        )
+
+        foreach ($relative in $files) {
+            $content = Get-Content -LiteralPath (Join-Path $script:RepoRoot $relative) -Raw
+            $content | Should -Match ([regex]::Escape($script:ExpectedDisplayVersion))
+        }
+    }
+
+    It "documents Release Integrity Audit as a mandatory public-release gate" {
+        $checklist = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'RELEASE-SAFETY-CHECKLIST.md') -Raw
+
+        $checklist | Should -Match 'Release Integrity Audit'
+        $checklist | Should -Match 'Runtime Identity Audit'
+        $checklist | Should -Match 'Release Artifact Audit'
+    }
+}

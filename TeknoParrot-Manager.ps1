@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v1.0 RC1
+# TeknoParrot Manager  |  v1.0 RC2
 # Author: Jumpstile
 # =============================================================================
 #
@@ -68,10 +68,12 @@ param([switch]$Unattended, [switch]$DryRun)
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
 $ScriptVersion = "1.0"
+$ReleaseCandidateLabel = "RC2"
+$DisplayVersion = "v$ScriptVersion $ReleaseCandidateLabel"
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  v$ScriptVersion RC1" -ForegroundColor Cyan
+Write-Host "       TeknoParrot Manager  $DisplayVersion" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 

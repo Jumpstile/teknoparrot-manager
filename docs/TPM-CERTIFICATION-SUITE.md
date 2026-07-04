@@ -248,3 +248,23 @@ suite's own cross-file behavior.
 ## Guiding Principle
 
 Passing tests does not automatically certify a build. Certification requires all applicable quality gates to pass.
+
+## Release Integrity Audit
+
+Certification is necessary but no longer sufficient for a public release. Every
+RC, Beta, Final, and Hotfix must also pass the Release Integrity Audit in
+`RELEASE-SAFETY-CHECKLIST.md` before publication.
+
+The audit verifies that the delivered product matches the certified build:
+
+- runtime banner and display version,
+- `$ScriptVersion` and release-candidate label,
+- update dialogs and updater comparisons,
+- generated reports and certification scorecards,
+- README, Quick Start, changelog, release notes, docs, and wiki,
+- release ZIP filename and packaged `TeknoParrot-Manager.ps1`,
+- GitHub Release tag, title, asset name, asset size, and downloaded asset.
+
+The packaged runtime must identify itself as the release being published. A
+structurally valid ZIP is not release-ready if its banner, docs, release notes,
+or GitHub metadata identify a different release.

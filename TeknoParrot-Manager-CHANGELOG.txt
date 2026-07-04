@@ -7,6 +7,16 @@
 
 
 -------------------------------------------------------------------------------
+  v1.0 RC2  (2026-07-04)  -- RC2 release identity correction and package-version guard
+  ------------------------------------------------------------
+  Release blocker fix: the first published RC2 ZIP was structurally valid
+  but still displayed the runtime banner "TeknoParrot Manager v1.0 RC1".
+  The runtime banner now displays v1.0 RC2, and release package validation
+  now checks the packaged TeknoParrot-Manager.ps1 version/header/banner so
+  this drift cannot pass ZIP validation again.
+
+
+-------------------------------------------------------------------------------
   v1.0 RC1  (2026-07-03)  -- pcsx2x6 crosshair path fix, auto-update reliability, BIOS/firmware detection
   ------------------------------------------------------------
   Promoted to Release Candidate 1 for the upcoming 1.0 release. No new

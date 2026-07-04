@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.0 RC2
+
+Release-candidate package identity correction.
+
+- Fixed the runtime banner/header so the RC2 package displays `TeknoParrot Manager v1.0 RC2` instead of the stale RC1 label.
+- Added release-package validation for the packaged `TeknoParrot-Manager.ps1` version/header/banner, preventing structurally valid ZIPs with stale release identity from passing validation.
+
 ## v0.99.44 BETA
 
 Release-hygiene and regression-hardening build.

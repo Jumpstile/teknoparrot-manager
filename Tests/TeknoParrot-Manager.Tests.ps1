@@ -2241,21 +2241,22 @@ Describe "ConvertTo-ManagerComparableVersion" {
     # the quiet startup check) failed to recognize the RC1 release at all.
     It "strips a release-candidate suffix and parses the numeric base" {
         ConvertTo-ManagerComparableVersion -VersionText 'v1.0-RC1' | Should -Be ([version]'1.0')
+        ConvertTo-ManagerComparableVersion -VersionText 'v1.0-RC2' | Should -Be ([version]'1.0')
     }
-    It "a 0.99.x version compares as older than 1.0-RC1" {
+    It "a 0.99.x version compares as older than 1.0-RC2" {
         $local  = ConvertTo-ManagerComparableVersion -VersionText '0.99.44'
-        $latest = ConvertTo-ManagerComparableVersion -VersionText 'v1.0-RC1'
+        $latest = ConvertTo-ManagerComparableVersion -VersionText 'v1.0-RC2'
         $latest -gt $local | Should -Be $true -Because "a release candidate for 1.0 must be recognized as newer than any 0.99.x release"
     }
-    It "0.99.99 compares as older than 1.0-RC1 (not just a higher patch number in the same line)" {
+    It "0.99.99 compares as older than 1.0-RC2 (not just a higher patch number in the same line)" {
         $local  = ConvertTo-ManagerComparableVersion -VersionText '0.99.99'
-        $latest = ConvertTo-ManagerComparableVersion -VersionText 'v1.0-RC1'
+        $latest = ConvertTo-ManagerComparableVersion -VersionText 'v1.0-RC2'
         $latest -gt $local | Should -Be $true
     }
     It "a version equal to the current release candidate is not offered as an update" {
         $local  = ConvertTo-ManagerComparableVersion -VersionText '1.0'
-        $latest = ConvertTo-ManagerComparableVersion -VersionText 'v1.0-RC1'
-        $latest -gt $local | Should -Be $false -Because "already running v1.0-RC1 must not be offered v1.0-RC1 as a new update"
+        $latest = ConvertTo-ManagerComparableVersion -VersionText 'v1.0-RC2'
+        $latest -gt $local | Should -Be $false -Because "already running v1.0 RC2 must not be offered v1.0-RC2 as a new update"
     }
 }
 

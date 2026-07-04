@@ -45,7 +45,8 @@ Ten tests, all passing, deliberately induce failure conditions and verify the or
 1. **Manual by default**
    - Checking for updates is safe and read-only.
    - Applying an update requires an explicit user action.
-   - No background updater, scheduled task, startup updater, or silent self-replacement.
+   - Startup may perform a quiet read-only GitHub check, but it never installs silently: applying still requires an explicit user action and a second confirmation.
+   - No background updater service, scheduled update task, or silent self-replacement.
 
 2. **Backup before replacement**
    - The current script is copied to `UpdateBackups/<timestamp>/` before replacement.
@@ -73,9 +74,9 @@ Ten tests, all passing, deliberately induce failure conditions and verify the or
    - A failed update leaves the current script in place whenever possible.
    - Restore remains manual and transparent.
 
-## Current implementation
+## Standalone helper
 
-The first implementation is a standalone helper:
+The standalone helper remains available for scripted/manual use outside the interactive menu:
 
 ```powershell
 .\tools\Invoke-TpmAutoUpdate.ps1 -CheckOnly

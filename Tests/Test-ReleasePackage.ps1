@@ -2,7 +2,9 @@
 
 param(
     [Parameter(Mandatory = $true)]
-    [string]$ZipPath
+    [string]$ZipPath,
+
+    [string]$ExpectedDisplayVersion = 'v1.0 RC2'
 )
 
 Set-StrictMode -Version Latest
@@ -32,6 +34,36 @@ try {
         }
     }
 
+    $scriptEntry = $archive.GetEntry('TeknoParrot-Manager.ps1')
+    if (-not $scriptEntry) {
+        throw "Missing required ZIP entry: TeknoParrot-Manager.ps1"
+    }
+
+    $scriptStream = $scriptEntry.Open()
+    try {
+        $reader = New-Object System.IO.StreamReader($scriptStream, [System.Text.Encoding]::ASCII)
+        try {
+            $scriptContent = $reader.ReadToEnd()
+        } finally {
+            $reader.Dispose()
+        }
+    } finally {
+        $scriptStream.Dispose()
+    }
+
+    if ($scriptContent -notmatch [regex]::Escape("# TeknoParrot Manager  |  $ExpectedDisplayVersion")) {
+        throw "Packaged TeknoParrot-Manager.ps1 header does not contain expected version: $ExpectedDisplayVersion"
+    }
+    if ($scriptContent -notmatch '\$ReleaseCandidateLabel\s*=\s*"RC2"') {
+        throw "Packaged TeknoParrot-Manager.ps1 does not set ReleaseCandidateLabel to RC2."
+    }
+    if ($scriptContent -notmatch 'TeknoParrot Manager\s+\$DisplayVersion') {
+        throw "Packaged TeknoParrot-Manager.ps1 banner does not render the DisplayVersion source."
+    }
+    if ($scriptContent -match 'TeknoParrot Manager\s+v\$ScriptVersion RC1') {
+        throw "Packaged TeknoParrot-Manager.ps1 still contains the stale RC1 banner."
+    }
+
     $crosshairs = @($entries | Where-Object { $_ -match '^Crosshairs/\d{3}\.png$' })
     if ($crosshairs.Count -ne 321) {
         throw "Expected 321 Crosshairs/*.png files, found $($crosshairs.Count)."
@@ -57,6 +89,7 @@ try {
         CrosshairPngCount   = $crosshairs.Count
         RootCrosshairPngs   = $rootCrosshairs.Count
         ForbiddenEntryCount = $forbidden.Count
+        ExpectedVersion     = $ExpectedDisplayVersion
         Valid               = $true
     } | Format-List
 } finally {

@@ -1,7 +1,7 @@
 # TeknoParrot Manager
 
 PowerShell 5.1 script for managing TeknoParrot arcade game libraries.
-Current version: v1.0 RC1
+Current version: v1.0 RC2
 
 ---
 
@@ -61,7 +61,7 @@ cause/fix for the actual product bug -- never the iteration noise of fixing the
 tooling used to investigate it.
 
 This rule is also codified as a standing Team Jumpstile checklist item -- see
-RELEASE-SAFETY-CHECKLIST.md section 7 ("AI attribution sweep") for the
+RELEASE-SAFETY-CHECKLIST.md section 8 ("AI attribution sweep") for the
 procedural checklist form (forbidden examples, do-not-alter-technical-content
 guardrail, and the per-issue/PR sweep required after every cleanup).
 
@@ -118,7 +118,7 @@ Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1
 
 ## Release ZIP contents
 
-ZIP name: `TeknoParrot Manager v1.0 RC1.zip` (always versioned).
+ZIP name: `TeknoParrot Manager v1.0 RC2.zip` (always versioned).
 
 **Include:** `TeknoParrot-Manager.ps1`, `.bat`, `-README.txt`, `-QuickStart.txt`,
 `-CHANGELOG.txt`, `LICENSE`, `Crosshairs\` (all 321 PNGs).

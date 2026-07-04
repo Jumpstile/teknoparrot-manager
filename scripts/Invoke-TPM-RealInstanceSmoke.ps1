@@ -258,6 +258,7 @@ function New-CertificationScorecard {
         GitVersion = $Results.GitVersion
         PowerShellVersion = $Results.PowerShellVersion
         TpmScriptVersion = $Results.TpmScriptVersion
+        TpmDisplayVersion = $Results.TpmDisplayVersion
     }
 }
 
@@ -691,19 +692,31 @@ finally {
         [void](New-Item -ItemType File -Path $md -Force)
     }
 
-    # Issue #111: TPM script version read via regex against the raw file
-    # text, never by executing TeknoParrot-Manager.ps1 -- this harness must
-    # never run arbitrary top-level script code as a side effect of
-    # generating a report. Computed before New-CertificationScorecard is
-    # called below, since that function reads $results.TpmScriptVersion.
+    # Issue #111 / Release Integrity: TPM script version and display version
+    # are read via regex against the raw file text, never by executing
+    # TeknoParrot-Manager.ps1 -- this harness must never run arbitrary
+    # top-level script code as a side effect of generating a report. Computed
+    # before New-CertificationScorecard is called below, since that function
+    # reads these fields.
     $tpmScriptVersion = 'unknown'
+    $tpmDisplayVersion = 'unknown'
     try {
-        $versionMatch = Select-String -LiteralPath $mainScriptPath -Pattern '^\$ScriptVersion\s*=\s*"([^"]+)"' | Select-Object -First 1
-        if ($versionMatch) { $tpmScriptVersion = $versionMatch.Matches[0].Groups[1].Value }
+        $mainScriptContent = Get-Content -LiteralPath $mainScriptPath -Raw
+        $versionMatch = [regex]::Match($mainScriptContent, '(?m)^\$ScriptVersion\s*=\s*"([^"]+)"')
+        if ($versionMatch.Success) { $tpmScriptVersion = $versionMatch.Groups[1].Value }
+        $candidateMatch = [regex]::Match($mainScriptContent, '(?m)^\$ReleaseCandidateLabel\s*=\s*"([^"]+)"')
+        if ($candidateMatch.Success) {
+            $tpmDisplayVersion = "v$tpmScriptVersion $($candidateMatch.Groups[1].Value)"
+        } else {
+            $headerMatch = [regex]::Match($mainScriptContent, '(?m)^# TeknoParrot Manager\s+\|\s+(.+)$')
+            if ($headerMatch.Success) { $tpmDisplayVersion = $headerMatch.Groups[1].Value.Trim() }
+        }
     } catch {
         $tpmScriptVersion = 'unknown (could not read TeknoParrot-Manager.ps1)'
+        $tpmDisplayVersion = 'unknown (could not read TeknoParrot-Manager.ps1)'
     }
     $results.TpmScriptVersion = $tpmScriptVersion
+    $results.TpmDisplayVersion = $tpmDisplayVersion
 
     $certification = New-CertificationScorecard -Results $results
     $certification | ConvertTo-Json -Depth 8 | Out-File $certificationJson -Encoding utf8
@@ -727,6 +740,7 @@ finally {
     Add-CertificationReport ("- Git version: {0}" -f $results.GitVersion)
     Add-CertificationReport ("- PowerShell version: {0}" -f $results.PowerShellVersion)
     Add-CertificationReport ("- TPM script version: {0}" -f $tpmScriptVersion)
+    Add-CertificationReport ("- TPM display version: {0}" -f $tpmDisplayVersion)
     Add-CertificationReport ("- Certified at: {0}" -f $results.Timestamp)
     Add-CertificationReport ""
     Add-CertificationReport "## Gates"

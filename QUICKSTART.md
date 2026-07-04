@@ -161,7 +161,7 @@ ReShade adds post-processing effects without modifying any game files. Remove it
 
 ### If you downloaded the ZIP release
 
-`ReShade64.dll` is already in the `ReShade\` folder. Just run mode 5 or answer Y when prompted at the end of any run.
+ReShade DLLs are not bundled in the release ZIP because ReShade is not redistributed by TPM. Download the installer from [reshade.me](https://reshade.me), extract the DLL, then place it in the `ReShade\` folder as described below.
 
 ### If you cloned from GitHub (DLLs not included in repo)
 
