@@ -9798,7 +9798,7 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
     Write-Host "  Without one, some games may not register correctly." -ForegroundColor DarkCyan
     Write-Host "    D) Download from GitHub now  (~145 MB)"
     Write-Host "    Z) I have a ZIP or dat file already -- enter path"
-    Write-Host "    F) I have separate collection + supplementary dat files -- enter paths"
+    Write-Host "    F) I have two separate files -- a collection dat AND a supplementary dat -- enter both paths"
     Write-Host "    N) Skip (not recommended)"
     $datChoice = (Read-Host "  Choice (D/Z/F/N)").Trim().ToUpper()
     $raw = ''   # shared path variable for Z and fallback paths
