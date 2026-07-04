@@ -71,11 +71,106 @@ $ScriptVersion = "1.0"
 $ReleaseCandidateLabel = "RC2"
 $DisplayVersion = "v$ScriptVersion $ReleaseCandidateLabel"
 
-Write-Host ""
-Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "       TeknoParrot Manager  $DisplayVersion" -ForegroundColor Cyan
-Write-Host "============================================" -ForegroundColor Cyan
-Write-Host ""
+function Get-ManagerDisplayVersion {
+    if ($DisplayVersion) { return $DisplayVersion }
+    if ($ReleaseCandidateLabel) { return "v$ScriptVersion $ReleaseCandidateLabel" }
+    return "v$ScriptVersion"
+}
+
+function Get-ManagerAsciiBannerLines {
+    return @(
+        'TTTTT EEEEE K   K N   N  OOO  PPPP   AAAAA RRRR  RRRR   OOO  TTTTT'
+        '  T   E     K  K  NN  N O   O P   P A   A R   R R   R O   O   T'
+        '  T   EEEE  KKK   N N N O   O PPPP  AAAAA RRRR  RRRR  O   O   T'
+        '  T   E     K  K  N  NN O   O P     A   A R  R  R  R  O   O   T'
+        '  T   EEEEE K   K N   N  OOO  P     A   A R   R R   R  OOO    T'
+        ''
+        'M   M  AAAAA N   N  AAAAA  GGG  EEEEE RRRR'
+        'MM MM A   A NN  N A   A G     E     R   R'
+        'M M M AAAAA N N N AAAAA G  GG EEEE  RRRR'
+        'M   M A   A N  NN A   A G   G E     R  R'
+        'M   M A   A N   N A   A  GGG  EEEEE R   R'
+    )
+}
+
+function Test-UseManagerAsciiBanner {
+    param(
+        [int]$Width,
+        [int]$Height = 25
+    )
+    return ($Width -ge 120 -and $Height -ge 34)
+}
+
+function Get-CenteredTextLine {
+    param(
+        [string]$Text,
+        [int]$Width
+    )
+    $padding = [Math]::Max(0, [Math]::Floor(($Width - $Text.Length) / 2))
+    return ((' ' * $padding) + $Text)
+}
+
+function Get-ManagerBannerLines {
+    param(
+        [int]$Width,
+        [int]$Height = 25
+    )
+
+    $version = Get-ManagerDisplayVersion
+    if (Test-UseManagerAsciiBanner -Width $Width -Height $Height) {
+        $lines = New-Object System.Collections.Generic.List[string]
+        foreach ($line in (Get-ManagerAsciiBannerLines)) {
+            if ($line.Length -eq 0) {
+                [void]$lines.Add('')
+            } else {
+                [void]$lines.Add((Get-CenteredTextLine -Text $line -Width $Width))
+            }
+        }
+        [void]$lines.Add('')
+        [void]$lines.Add((Get-CenteredTextLine -Text $version -Width $Width))
+        return ,@($lines)
+    }
+
+    $title = "TeknoParrot Manager  $DisplayVersion"
+    if (-not $DisplayVersion) { $title = "TeknoParrot Manager  $version" }
+    $ruleWidth = [Math]::Min([Math]::Max($title.Length + 8, 44), [Math]::Max(44, $Width - 2))
+    $rule = '=' * $ruleWidth
+    return @(
+        $rule
+        (Get-CenteredTextLine -Text $title -Width $ruleWidth)
+        $rule
+    )
+}
+
+function Get-ManagerBannerViewportSize {
+    $width = 80
+    $height = 25
+    try {
+        $rawSize = $Host.UI.RawUI.WindowSize
+        if ($rawSize.Width -gt 0) { $width = [int]$rawSize.Width }
+        if ($rawSize.Height -gt 0) { $height = [int]$rawSize.Height }
+    } catch {}
+    try {
+        if ([Console]::WindowWidth -gt 0) { $width = [int][Console]::WindowWidth }
+        if ([Console]::WindowHeight -gt 0) { $height = [int][Console]::WindowHeight }
+    } catch {}
+    return [pscustomobject]@{ Width = $width; Height = $height }
+}
+
+function Write-ManagerBanner {
+    param(
+        [int]$Width = 80,
+        [int]$Height = 25
+    )
+    Write-Host ""
+    foreach ($line in (Get-ManagerBannerLines -Width $Width -Height $Height)) {
+        Write-Host $line -ForegroundColor Cyan
+    }
+    Write-Host ""
+}
+
+$startupBannerSize = Get-ManagerBannerViewportSize
+Write-ManagerBanner -Width $startupBannerSize.Width -Height $startupBannerSize.Height
 
 # Load the ZIP assembly once at startup. Expand-ZipFileSafe uses ZipArchive
 # instead of Expand-Archive (PS 5.1 bugs: "already exists" with -Force, partial
@@ -10334,7 +10429,8 @@ function Get-MainMenuRenderMetrics {
         [ValidateSet('Ultra', 'Professional', 'Standard', 'Compact')][string]$Tier,
         [int]$Width,
         [int]$Height = 0,
-        [int]$RequiredFullLines = 0
+        [int]$RequiredFullLines = 0,
+        [ValidateSet('Auto', 'UltraTwoColumn', 'UltraCentered')][string]$UltraLayoutMode = 'Auto'
     )
 
     $contentWidth = [Math]::Max(40, $Width - 2)
@@ -10358,12 +10454,21 @@ function Get-MainMenuRenderMetrics {
         $labelWidth = 28
         $descriptionWidth = [Math]::Max(52, $contentWidth - 34)
     } else {
-        $layout = 'UltraTwoColumn'
-        $gap = 4
-        $columnWidth = [Math]::Floor(($contentWidth - $gap) / 2)
-        $labelWidth = 22
-        $descriptionWidth = [Math]::Max(42, $columnWidth - 18)
-        $totalRenderWidth = ($columnWidth * 2) + $gap
+        if ($UltraLayoutMode -eq 'UltraCentered') {
+            $layout = 'UltraCentered'
+            $centeredWidth = [Math]::Min($contentWidth, 132)
+            if ($centeredWidth -lt 118) { $centeredWidth = $contentWidth }
+            $labelWidth = 30
+            $descriptionWidth = [Math]::Max(72, $centeredWidth - 34)
+            $totalRenderWidth = $centeredWidth
+        } else {
+            $layout = 'UltraTwoColumn'
+            $gap = 4
+            $columnWidth = [Math]::Floor(($contentWidth - $gap) / 2)
+            $labelWidth = 22
+            $descriptionWidth = [Math]::Max(42, $columnWidth - 18)
+            $totalRenderWidth = ($columnWidth * 2) + $gap
+        }
     }
 
     $constrainedBy = 'none'
@@ -10512,6 +10617,20 @@ function Format-MainMenuSectionLines {
     return ,@($result)
 }
 
+function Center-MainMenuLines {
+    param(
+        [string[]]$Lines,
+        [int]$ContentWidth,
+        [int]$ViewportWidth
+    )
+
+    $padding = [Math]::Max(0, [Math]::Floor(($ViewportWidth - $ContentWidth) / 2))
+    if ($padding -le 0) { return ,@($Lines) }
+
+    $prefix = ' ' * $padding
+    return ,@($Lines | ForEach-Object { $prefix + $_ })
+}
+
 function Join-MainMenuColumns {
     param(
         [string[]]$Left,
@@ -10561,16 +10680,19 @@ function Set-ConsoleMaximizedIfSupported {
 function Show-MainMenu {
     param(
         [ValidateSet('Ultra', 'Professional', 'Standard', 'Compact')][string]$Tier,
-        [int]$Width = (Get-ConsoleContentWidth)
+        [int]$Width = (Get-ConsoleContentWidth),
+        [int]$Height = (Get-ConsoleContentHeight),
+        [ValidateSet('Auto', 'UltraTwoColumn', 'UltraCentered')][string]$UltraLayoutMode = 'Auto'
     )
 
     $items = Get-MainMenuItems
     $maxNumber = ($items | Measure-Object -Property Number -Maximum).Maximum
-    $metrics = Get-MainMenuRenderMetrics -Tier $Tier -Width $Width
+    $metrics = Get-MainMenuRenderMetrics -Tier $Tier -Width $Width -UltraLayoutMode $UltraLayoutMode
     $contentWidth = $metrics.TotalRenderWidth
     $wideLayout = ($metrics.Layout -eq 'UltraTwoColumn')
+    $centeredLayout = ($metrics.Layout -eq 'UltraCentered')
 
-    Write-Host ""
+    Write-ManagerBanner -Width $Width -Height $Height
     if ($Tier -eq 'Compact') {
         foreach ($section in Get-MainMenuSections) {
             Write-Host ("  {0}" -f $section.Header)
@@ -10606,8 +10728,18 @@ function Show-MainMenu {
         return
     }
 
+    $singleColumnLines = New-Object System.Collections.Generic.List[string]
     foreach ($section in $sections) {
         foreach ($line in (Format-MainMenuSectionLines -Section $section -Tier $Tier -Width $contentWidth)) {
+            [void]$singleColumnLines.Add($line)
+        }
+    }
+    if ($centeredLayout) {
+        foreach ($line in (Center-MainMenuLines -Lines $singleColumnLines -ContentWidth $contentWidth -ViewportWidth $Width)) {
+            Write-Host $line
+        }
+    } else {
+        foreach ($line in $singleColumnLines) {
             Write-Host $line
         }
     }
@@ -10648,7 +10780,7 @@ while ($true) {
     $consoleWidth  = Get-ConsoleContentWidth
     $consoleHeight = Get-ConsoleContentHeight
     $menuTier = Get-ConsoleLayoutTier -Width $consoleWidth -Height $consoleHeight -RequiredFullLines $fullTierLineCount
-    Show-MainMenu -Tier $menuTier -Width $consoleWidth
+    Show-MainMenu -Tier $menuTier -Width $consoleWidth -Height $consoleHeight
     if ($Unattended) {
         Write-Host "  [Unattended] Mode must be set before starting." -ForegroundColor Red
         Write-Log "ERROR: Unattended mode -- reached menu loop."; exit 1
@@ -10658,7 +10790,7 @@ while ($true) {
         $helpWidth = Get-ConsoleContentWidth
         $helpTier = Get-ConsoleLayoutTier -Width $helpWidth -Height (Get-ConsoleContentHeight) -RequiredFullLines $fullTierLineCount
         if ($helpTier -eq 'Compact') { $helpTier = 'Professional' }
-        Show-MainMenu -Tier $helpTier -Width $helpWidth
+        Show-MainMenu -Tier $helpTier -Width $helpWidth -Height (Get-ConsoleContentHeight)
         continue
     }
     switch ($modeChoice) {

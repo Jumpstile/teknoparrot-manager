@@ -37,6 +37,11 @@
   width, render width, and width/height constraints from the extracted build
   before certification.
 
+  Visual polish: Professional/Ultra menu layouts can now show an ASCII-art
+  TeknoParrot Manager banner with the canonical display version underneath.
+  Narrow or short console windows keep the compact text banner so the title
+  never wraps awkwardly or consumes too much vertical space.
+
 
 -------------------------------------------------------------------------------
   v1.0 RC1  (2026-07-03)  -- pcsx2x6 crosshair path fix, auto-update reliability, BIOS/firmware detection

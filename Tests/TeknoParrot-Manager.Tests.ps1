@@ -87,6 +87,8 @@ BeforeAll {
     # below use their own controlled version strings/mocks instead of relying on
     # this value's specific number, so drift here would not silently break them.
     $ScriptVersion = "0.99.39"
+    $ReleaseCandidateLabel = "RC2"
+    $DisplayVersion = "v1.0 RC2"
 
     # Write-Log normally writes beside the production script via top-level
     # initialisation that AST extraction intentionally skips. Give helper tests a
@@ -3092,12 +3094,47 @@ Describe "Get-MainMenuRenderMetrics" {
         $wide200.TotalRenderWidth | Should -BeGreaterThan $wide150.TotalRenderWidth
         $wide200.DescriptionWidth | Should -BeGreaterThan $wide150.DescriptionWidth
     }
+    It "can report an experimental centered ultra layout without changing the default" {
+        $default = Get-MainMenuRenderMetrics -Tier 'Ultra' -Width 180
+        $centered = Get-MainMenuRenderMetrics -Tier 'Ultra' -Width 180 -UltraLayoutMode 'UltraCentered'
+
+        $default.Layout | Should -Be 'UltraTwoColumn'
+        $centered.Layout | Should -Be 'UltraCentered'
+        $centered.TotalRenderWidth | Should -BeLessThan $default.TotalRenderWidth
+        $centered.DescriptionWidth | Should -BeGreaterThan 90
+    }
     It "reports height and width constraints for diagnostics" {
         $metrics = Get-MainMenuRenderMetrics -Tier 'Professional' -Width 120 -Height 20 -RequiredFullLines 60
 
         $metrics.HeightConstrained | Should -BeTrue
         $metrics.WidthConstrained | Should -BeTrue
         $metrics.ConstrainedBy | Should -Be 'width,height'
+    }
+}
+
+Describe "Manager banner rendering" {
+    It "uses the compact text banner for narrow widths" {
+        $lines = Get-ManagerBannerLines -Width 80 -Height 30
+
+        ($lines -join "`n") | Should -Match 'TeknoParrot Manager\s+v1\.0 RC2'
+        ($lines -join "`n") | Should -Not -Match 'TTTTT EEEEE'
+    }
+    It "uses ASCII art for Professional and Ultra viewport widths" {
+        Test-UseManagerAsciiBanner -Width 119 -Height 40 | Should -BeFalse
+        Test-UseManagerAsciiBanner -Width 120 -Height 40 | Should -BeTrue
+        Test-UseManagerAsciiBanner -Width 180 -Height 40 | Should -BeTrue
+    }
+    It "falls back to the compact text banner when height is constrained" {
+        Test-UseManagerAsciiBanner -Width 180 -Height 30 | Should -BeFalse
+    }
+    It "centers the ASCII-art banner and includes the canonical display version" {
+        $lines = Get-ManagerBannerLines -Width 120 -Height 40
+        $joined = $lines -join "`n"
+
+        $joined | Should -Match 'TTTTT EEEEE K\s+K'
+        $joined | Should -Match 'M\s+M\s+A{5}\s+N\s+N'
+        $joined | Should -Match 'v1\.0 RC2'
+        $lines | ForEach-Object { $_.Length | Should -BeLessOrEqual 120 }
     }
 }
 
@@ -3131,7 +3168,9 @@ Describe "Format-MainMenuItemLines" {
 
 Describe "Show-MainMenu" {
     It "Professional tier prints every item's full description and a numbered line for every item" {
-        $output = Show-MainMenu -Tier 'Professional' -Width 120 6>&1 | Out-String
+        $output = Show-MainMenu -Tier 'Professional' -Width 120 -Height 40 6>&1 | Out-String
+        $output | Should -Match 'TTTTT EEEEE'
+        $output | Should -Match 'v1\.0 RC2'
         foreach ($item in (Get-MainMenuItems)) {
             $output | Should -Match ([regex]::Escape("$($item.Number)) $($item.Label)"))
         }
@@ -3142,7 +3181,9 @@ Describe "Show-MainMenu" {
         $output | Should -Match ([regex]::Escape($item.ShortDesc))
     }
     It "Compact tier prints only labels and the 'Type ? for descriptions' hint, no ShortDesc/FullDesc text" {
-        $output = Show-MainMenu -Tier 'Compact' -Width 80 6>&1 | Out-String
+        $output = Show-MainMenu -Tier 'Compact' -Width 80 -Height 30 6>&1 | Out-String
+        $output | Should -Match 'TeknoParrot Manager\s+v1\.0 RC2'
+        $output | Should -Not -Match 'TTTTT EEEEE'
         $output | Should -Match 'Type \? for descriptions'
         $autoSync = (Get-MainMenuItems) | Where-Object { $_.Mode -eq 'AutoSync' }
         $output | Should -Not -Match ([regex]::Escape($autoSync.ShortDesc))
@@ -3159,6 +3200,13 @@ Describe "Show-MainMenu" {
         $output | Should -Match '(?m)^ Library Management\s+Game Enhancements'
         $longestLine = (($output -split "`r?`n") | Measure-Object -Property Length -Maximum).Maximum
         $longestLine | Should -BeGreaterThan 120
+    }
+    It "UltraCentered renders a single centered content block" {
+        $output = Show-MainMenu -Tier 'Ultra' -Width 180 -Height 30 -UltraLayoutMode 'UltraCentered' 6>&1 | Out-String
+
+        $output | Should -Match '(?m)^\s{20,}-+'
+        $output | Should -Match ([regex]::Escape("1) AutoSync -- Extract ZIPs (NAS or local) to a local folder, then register the games."))
+        $output | Should -Not -Match '(?m)^ Library Management\s+Game Enhancements'
     }
     It "narrow Professional tier wraps readable continuation lines under the menu description column" {
         $output = Show-MainMenu -Tier 'Professional' -Width 70 6>&1 | Out-String
@@ -3183,9 +3231,19 @@ Describe "Menu layout debug script" {
         $output | Should -Match 'Selected viewport height\s+:\s+30'
         $output | Should -Match 'Selected layout tier\s+:\s+Ultra'
         $output | Should -Match 'Selected layout mode\s+:\s+UltraTwoColumn'
+        $output | Should -Match 'Requested ultra mode\s+:\s+Auto'
         $output | Should -Match 'Description width\s+:\s+79'
         $output | Should -Match 'Total render width\s+:\s+198'
         $output | Should -Match 'Constrained by\s+:\s+height'
+    }
+    It "can render the experimental UltraCentered layout for comparison" {
+        $debugScript = Join-Path $PSScriptRoot '..\scripts\Debug-TPM-MenuLayout.ps1'
+        $output = & $debugScript -Width 180 -Height 30 -UltraLayoutMode UltraCentered -Render 6>&1 | Out-String
+
+        $output | Should -Match 'Selected layout tier\s+:\s+Ultra'
+        $output | Should -Match 'Selected layout mode\s+:\s+UltraCentered'
+        $output | Should -Match 'Requested ultra mode\s+:\s+UltraCentered'
+        $output | Should -Match '(?m)^\s{20,}-+'
     }
 }
 

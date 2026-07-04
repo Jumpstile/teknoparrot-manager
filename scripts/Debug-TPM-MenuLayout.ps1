@@ -3,6 +3,7 @@
 param(
     [int]$Width = 0,
     [int]$Height = 0,
+    [ValidateSet('Auto', 'UltraTwoColumn', 'UltraCentered')][string]$UltraLayoutMode = 'Auto',
     [switch]$Render
 )
 
@@ -10,6 +11,7 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $mainScript = Join-Path $repoRoot 'TeknoParrot-Manager.ps1'
+$mainContent = Get-Content -LiteralPath $mainScript -Raw
 
 $tokens = $null
 $parseErrors = $null
@@ -19,6 +21,12 @@ if ($parseErrors.Count -gt 0) {
 }
 
 $menuFunctions = @(
+    'Get-ManagerDisplayVersion',
+    'Get-ManagerAsciiBannerLines',
+    'Test-UseManagerAsciiBanner',
+    'Get-CenteredTextLine',
+    'Get-ManagerBannerLines',
+    'Write-ManagerBanner',
     'Get-MainMenuSections',
     'Get-MainMenuItems',
     'Get-ConsoleLayoutTier',
@@ -28,6 +36,7 @@ $menuFunctions = @(
     'Split-TextForMenuWidth',
     'Format-MainMenuItemLines',
     'Format-MainMenuSectionLines',
+    'Center-MainMenuLines',
     'Join-MainMenuColumns',
     'Show-MainMenu'
 )
@@ -43,6 +52,14 @@ foreach ($functionName in $menuFunctions) {
     if (-not $fn) { throw "Menu function not found: $functionName" }
     . ([scriptblock]::Create($fn.Extent.Text))
 }
+
+if ($mainContent -match '\$ScriptVersion\s*=\s*"([^"]+)"') {
+    $ScriptVersion = $Matches[1]
+}
+if ($mainContent -match '\$ReleaseCandidateLabel\s*=\s*"([^"]+)"') {
+    $ReleaseCandidateLabel = $Matches[1]
+}
+$DisplayVersion = if ($ReleaseCandidateLabel) { "v$ScriptVersion $ReleaseCandidateLabel" } else { "v$ScriptVersion" }
 
 $rawWindowWidth = $null
 $rawWindowHeight = $null
@@ -74,7 +91,7 @@ $fullTierLineCount = 4 + (@(Get-MainMenuSections | ForEach-Object {
 }) | Measure-Object -Sum).Sum
 
 $tier = Get-ConsoleLayoutTier -Width $detectedWidth -Height $detectedHeight -RequiredFullLines $fullTierLineCount
-$metrics = Get-MainMenuRenderMetrics -Tier $tier -Width $detectedWidth -Height $detectedHeight -RequiredFullLines $fullTierLineCount
+$metrics = Get-MainMenuRenderMetrics -Tier $tier -Width $detectedWidth -Height $detectedHeight -RequiredFullLines $fullTierLineCount -UltraLayoutMode $UltraLayoutMode
 
 Write-Host "TPM menu layout debug"
 Write-Host "---------------------"
@@ -91,6 +108,7 @@ Write-Host ("Selected viewport height     : {0}" -f $detectedHeight)
 Write-Host ("Required full lines          : {0}" -f $fullTierLineCount)
 Write-Host ("Selected layout tier         : {0}" -f $metrics.SelectedTier)
 Write-Host ("Selected layout mode         : {0}" -f $metrics.Layout)
+Write-Host ("Requested ultra mode         : {0}" -f $UltraLayoutMode)
 Write-Host ("Label width                  : {0}" -f $metrics.LabelWidth)
 Write-Host ("Description width            : {0}" -f $metrics.DescriptionWidth)
 Write-Host ("Total render width           : {0}" -f $metrics.TotalRenderWidth)
@@ -98,5 +116,5 @@ Write-Host ("Constrained by               : {0}" -f $metrics.ConstrainedBy)
 
 if ($Render) {
     Write-Host ""
-    Show-MainMenu -Tier $tier -Width $detectedWidth
+    Show-MainMenu -Tier $tier -Width $detectedWidth -Height $detectedHeight -UltraLayoutMode $UltraLayoutMode
 }
