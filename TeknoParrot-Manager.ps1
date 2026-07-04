@@ -3893,6 +3893,28 @@ function Invoke-TpmDownload {
     }
 }
 
+# Compares the local Eggman dat ZIP against the latest GitHub release
+# using file size as an existence-and-identity proxy -- the Eggman/RomVault
+# release format exposes no separate version number or date, only a
+# filename and size, so an exact byte-size match is the only real signal
+# available that the local file already IS that release. See issue #106:
+# the "check for a newer release" prompt previously always asked to
+# download/switch regardless of whether the remote release had actually
+# changed. Pure/read-only -- never touches the filesystem beyond reading
+# the local file's size.
+function Test-EggmanDatUpToDate {
+    param(
+        [string]$LocalDatPath,
+        [Int64]$RemoteSizeBytes
+    )
+    if (-not (Test-Path -LiteralPath $LocalDatPath)) {
+        return [pscustomobject]@{ Status = 'Unknown'; LocalSizeBytes = $null }
+    }
+    $localSizeBytes = (Get-Item -LiteralPath $LocalDatPath).Length
+    $status = if ($localSizeBytes -eq $RemoteSizeBytes) { 'Current' } else { 'UpdateAvailable' }
+    return [pscustomobject]@{ Status = $status; LocalSizeBytes = $localSizeBytes }
+}
+
 function Invoke-EggmanDatDownload {
     param([string]$downloadUrl, [string]$savePath, [Int64]$ExpectedBytes = 0)
     return (Invoke-TpmDownload -DownloadUrl $downloadUrl -DestinationPath $savePath -ExpectedBytes $ExpectedBytes -Label 'EggmanDat')
@@ -9831,19 +9853,28 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
         if ($null -eq $rel) {
             Write-Host "  Could not reach GitHub -- keeping your current dat file." -ForegroundColor Yellow
         } else {
-            $currentSizeMB = if (Test-Path -LiteralPath $eggmanDatZip) { [Math]::Round((Get-Item -LiteralPath $eggmanDatZip).Length / 1MB, 1) } else { 0 }
+            $upToDate = Test-EggmanDatUpToDate -LocalDatPath $eggmanDatZip -RemoteSizeBytes $rel.SizeBytes
+            $currentSizeMB = if ($null -ne $upToDate.LocalSizeBytes) { [Math]::Round($upToDate.LocalSizeBytes / 1MB, 1) } else { 0 }
             Write-Host ("  Latest available : {0}  ({1} MB)" -f $rel.FileName, $rel.SizeMB) -ForegroundColor Cyan
             Write-Host ("  Currently using  : {0}  ({1} MB)" -f (Split-Path -Leaf $eggmanDatZip), $currentSizeMB) -ForegroundColor Cyan
-            $doUpdate = (Read-Host "  Download and switch to the latest release? (Y/N)").Trim().ToUpper()
-            if ($doUpdate -eq 'Y') {
-                $savedPath = Invoke-EggmanDatDownloadInteractive $rel
-                if ($savedPath) {
-                    $eggmanDatZip = $savedPath
-                    Write-Host "  Updated: $savedPath" -ForegroundColor Green
-                    Write-Log "EggmanDat: updated to $savedPath"
-                    [void](Save-Config)
-                } else {
-                    Write-Host "  Download failed -- keeping your current dat file." -ForegroundColor Yellow
+            if ($upToDate.Status -eq 'Current') {
+                Write-Host "  Your dat file is already current -- no download needed." -ForegroundColor Green
+                Write-Log "EggmanDat: local file already matches the latest release size -- skipped prompt."
+            } else {
+                if ($upToDate.Status -eq 'Unknown') {
+                    Write-Host "  Could not determine your current dat file's size -- offering the download anyway." -ForegroundColor Yellow
+                }
+                $doUpdate = (Read-Host "  Download and switch to the latest release? (Y/N)").Trim().ToUpper()
+                if ($doUpdate -eq 'Y') {
+                    $savedPath = Invoke-EggmanDatDownloadInteractive $rel
+                    if ($savedPath) {
+                        $eggmanDatZip = $savedPath
+                        Write-Host "  Updated: $savedPath" -ForegroundColor Green
+                        Write-Log "EggmanDat: updated to $savedPath"
+                        [void](Save-Config)
+                    } else {
+                        Write-Host "  Download failed -- keeping your current dat file." -ForegroundColor Yellow
+                    }
                 }
             }
         }
