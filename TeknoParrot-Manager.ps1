@@ -10866,6 +10866,17 @@ function Get-MainMenuBodyRows {
     return @(Get-PaddedMainMenuRows -Rows $rows.ToArray() -Padding $Geometry.LeftPadding)
 }
 
+function Limit-MainMenuRowsToViewport {
+    param(
+        [object[]]$Rows,
+        [int]$ViewportHeight
+    )
+
+    $maxRows = [Math]::Max(5, $ViewportHeight - 2)
+    if ($Rows.Count -le $maxRows) { return @($Rows) }
+    return @($Rows | Select-Object -First $maxRows)
+}
+
 function Render-MainMenuScreen {
     param(
         [ValidateSet('Ultra', 'Professional', 'Standard', 'Compact')][string]$Tier,
@@ -10880,7 +10891,7 @@ function Render-MainMenuScreen {
     foreach ($row in (Get-MainMenuBannerRows -Geometry $geometry)) { [void]$rows.Add($row) }
     foreach ($row in (Get-MainMenuBodyRows -Sections $sections -Geometry $geometry)) { [void]$rows.Add($row) }
     foreach ($row in (Get-MainMenuFooterRows -Geometry $geometry)) { [void]$rows.Add($row) }
-    return [pscustomobject]@{ Geometry = $geometry; Rows = $rows.ToArray() }
+    return [pscustomobject]@{ Geometry = $geometry; Rows = (Limit-MainMenuRowsToViewport -Rows $rows.ToArray() -ViewportHeight $geometry.ViewportHeight) }
 }
 
 function Write-ConsoleRenderRows {
@@ -10900,17 +10911,34 @@ function Write-ConsoleRenderRows {
 }
 
 function Clear-ConsoleForFreshRender {
+    Set-ConsoleRenderOrigin
     try {
         Clear-Host
+        Set-ConsoleRenderOrigin
         return
     } catch {}
 
     try {
         [Console]::Clear()
+        Set-ConsoleRenderOrigin
         return
     } catch {}
 
+    Set-ConsoleRenderOrigin
     Write-Host ''
+}
+
+function Set-ConsoleRenderOrigin {
+    try {
+        $rawUi = $Host.UI.RawUI
+        $zero = [System.Management.Automation.Host.Coordinates]::new(0, 0)
+        $rawUi.CursorPosition = $zero
+        $rawUi.WindowPosition = $zero
+    } catch {}
+
+    try {
+        [Console]::SetCursorPosition(0, 0)
+    } catch {}
 }
 
 function Center-MainMenuLines {

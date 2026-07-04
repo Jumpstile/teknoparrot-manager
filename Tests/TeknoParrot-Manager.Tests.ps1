@@ -3183,7 +3183,7 @@ Describe "Format-MainMenuItemLines" {
 
 Describe "Render-MainMenuScreen / Show-MainMenu" {
     It "renders the complete Professional menu into a deterministic buffer" {
-        $screen = Render-MainMenuScreen -Tier 'Professional' -Width 150 -Height 30
+        $screen = Render-MainMenuScreen -Tier 'Professional' -Width 150 -Height 80
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
 
         $screen.Rows.Count | Should -BeGreaterThan 20
@@ -3219,7 +3219,7 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         $output | Should -Match ([regex]::Escape($item.ShortDesc))
     }
     It "Compact tier renders only labels and the 'Type ? for descriptions' hint, no ShortDesc/FullDesc text" {
-        $screen = Render-MainMenuScreen -Tier 'Compact' -Width 80 -Height 30
+        $screen = Render-MainMenuScreen -Tier 'Compact' -Width 80 -Height 80
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
         $output | Should -Match 'TeknoParrot Manager\s+v1\.0 RC2'
         $output | Should -Not -Match 'TTTTTTT EEEEE'
@@ -3271,11 +3271,24 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
             }
         }
     }
+    It "small viewport renders only top-visible rows and leaves prompt space" {
+        $screen = Render-MainMenuScreen -Tier 'Compact' -Width 80 -Height 12
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+
+        $screen.Rows.Count | Should -BeLessOrEqual 10
+        $output | Should -Match 'TeknoParrot Manager\s+v1\.0 RC2'
+        $output | Should -Match 'LIBRARY MANAGEMENT'
+        $output | Should -Match 'AutoSync'
+        $output | Should -Not -Match 'APPLICATION'
+        $output | Should -Not -Match 'Exit'
+    }
     It "Show-MainMenu delegates to the stateless render-clear-write pipeline" {
         $mainScriptContent = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1') -Raw
 
         $mainScriptContent.Contains('$screen = Render-MainMenuScreen -Tier $Tier -Width $Width -Height $Height -UltraLayoutMode $UltraLayoutMode') | Should -Be $true
         $mainScriptContent.Contains('Clear-ConsoleForFreshRender') | Should -Be $true
+        $mainScriptContent.Contains('Set-ConsoleRenderOrigin') | Should -Be $true
+        $mainScriptContent.Contains('Limit-MainMenuRowsToViewport') | Should -Be $true
         $mainScriptContent.Contains('Write-ConsoleRenderRows -Rows $screen.Rows') | Should -Be $true
     }
     It "Show-MainMenu's actual output includes visible menu items" {
