@@ -10747,9 +10747,9 @@ function Get-PaddedMainMenuRows {
         [object[]]$Rows,
         [int]$Padding
     )
-    if ($Padding -le 0) { return ,@($Rows) }
+    if ($Padding -le 0) { return @($Rows) }
     $prefix = ' ' * $Padding
-    return ,@($Rows | ForEach-Object { New-ConsoleRenderRow -Text ($prefix + $_.Text) -Color $_.Color })
+    return @($Rows | ForEach-Object { New-ConsoleRenderRow -Text ($prefix + $_.Text) -Color $_.Color })
 }
 
 function Get-MainMenuBannerRows {
@@ -10759,18 +10759,24 @@ function Get-MainMenuBannerRows {
         [void]$rows.Add((New-ConsoleRenderRow -Text $row.Text -Color $row.Color))
     }
     [void]$rows.Add((New-ConsoleRenderRow))
-    return ,@(Get-PaddedMainMenuRows -Rows $rows.ToArray() -Padding $Geometry.LeftPadding)
+    return @(Get-PaddedMainMenuRows -Rows $rows.ToArray() -Padding $Geometry.LeftPadding)
 }
 
 function Get-MainMenuFooterRows {
     param([object]$Geometry)
     $rows = New-Object System.Collections.Generic.List[object]
     $footer = 'Enter number and press Enter | H = Help | U = Unattended Mode | L = View Log | Q = Quit'
+    if ($footer.Length -gt $Geometry.FooterWidth) {
+        $footer = 'Enter number | H=Help | U=Unattended | L=Log | Q=Quit'
+    }
+    if ($footer.Length -gt $Geometry.FooterWidth) {
+        $footer = 'Enter number | H=Help | Q=Quit'
+    }
     $rule = '-' * $Geometry.FooterWidth
     $pad = [Math]::Max(0, [Math]::Floor(($Geometry.FooterWidth - $footer.Length) / 2))
     [void]$rows.Add((New-ConsoleRenderRow -Text $rule -Color 'DarkCyan'))
     [void]$rows.Add((New-ConsoleRenderRow -Text ((' ' * $pad) + $footer) -Color 'White'))
-    return ,@(Get-PaddedMainMenuRows -Rows $rows.ToArray() -Padding $Geometry.LeftPadding)
+    return @(Get-PaddedMainMenuRows -Rows $rows.ToArray() -Padding $Geometry.LeftPadding)
 }
 
 function Get-MainMenuSectionRows {
@@ -10820,7 +10826,7 @@ function Join-MainMenuRenderColumns {
         )
         [void]$rows.Add((New-ConsoleRenderSegmentRow -Segments $segments))
     }
-    return ,@(Get-PaddedMainMenuRows -Rows $rows.ToArray() -Padding $Geometry.LeftPadding)
+    return @(Get-PaddedMainMenuRows -Rows $rows.ToArray() -Padding $Geometry.LeftPadding)
 }
 
 function Get-MainMenuBodyRows {
@@ -10842,7 +10848,7 @@ function Get-MainMenuBodyRows {
         foreach ($section in @($Sections[1], $Sections[3])) {
             $rightRows += Get-MainMenuSectionRows -Section $section -Geometry $Geometry -Detail $detail
         }
-        return ,@(Join-MainMenuRenderColumns -LeftRows $leftRows -RightRows $rightRows -Geometry $Geometry)
+        return @(Join-MainMenuRenderColumns -LeftRows $leftRows -RightRows $rightRows -Geometry $Geometry)
     }
 
     $rows = New-Object System.Collections.Generic.List[object]
@@ -10855,7 +10861,7 @@ function Get-MainMenuBodyRows {
         [void]$rows.Add((New-ConsoleRenderRow -Text '  Type ? for descriptions.' -Color 'DarkGray'))
         [void]$rows.Add((New-ConsoleRenderRow))
     }
-    return ,@(Get-PaddedMainMenuRows -Rows $rows.ToArray() -Padding $Geometry.LeftPadding)
+    return @(Get-PaddedMainMenuRows -Rows $rows.ToArray() -Padding $Geometry.LeftPadding)
 }
 
 function Render-MainMenuScreen {
@@ -10986,6 +10992,12 @@ function Read-MainMenuChoiceResponsive {
     )
 
     $value = ''
+    try {
+        if ([Console]::IsInputRedirected) {
+            $fallback = (Read-Host $Prompt).Trim()
+            return [pscustomobject]@{ Redraw = $false; Value = $fallback }
+        }
+    } catch {}
     Write-Host $Prompt -NoNewline
     while ($true) {
         $currentWidth = Get-ConsoleContentWidth

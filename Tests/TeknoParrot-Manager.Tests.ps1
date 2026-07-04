@@ -3186,12 +3186,21 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         $screen = Render-MainMenuScreen -Tier 'Professional' -Width 150 -Height 30
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
 
+        $screen.Rows.Count | Should -BeGreaterThan 20
         $output | Should -Match 'TTTTTTT EEEEE'
         $output | Should -Match 'Developed and maintained by Jumpstile'
         $output | Should -Match 'Version 1\.0 RC2'
         foreach ($item in (Get-MainMenuItems)) {
             $output | Should -Match ([regex]::Escape("$($item.Number)) $($item.Label)"))
         }
+    }
+    It "renders Ultra as separate bounded rows instead of one collapsed line" {
+        $screen = Render-MainMenuScreen -Tier 'Ultra' -Width 160 -Height 40
+
+        $screen.Rows.Count | Should -BeGreaterThan 25
+        (($screen.Rows | ForEach-Object { $_.Text.Length }) | Measure-Object -Maximum).Maximum | Should -BeLessOrEqual 160
+        ($screen.Rows | Where-Object { $_.Text -match 'AutoSync' }).Count | Should -BeGreaterThan 0
+        ($screen.Rows | Where-Object { $_.Text -match 'Crosshair setup' }).Count | Should -BeGreaterThan 0
     }
     It "Standard tier renders every item's short description" {
         $screen = Render-MainMenuScreen -Tier 'Standard' -Width 110 -Height 30
@@ -3253,9 +3262,25 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         }
     }
     It "Show-MainMenu delegates to the stateless render-clear-write pipeline" {
-        $script:mainScriptContent.Contains('$screen = Render-MainMenuScreen -Tier $Tier -Width $Width -Height $Height -UltraLayoutMode $UltraLayoutMode') | Should -Be $true
-        $script:mainScriptContent.Contains('Clear-ConsoleForFreshRender') | Should -Be $true
-        $script:mainScriptContent.Contains('Write-ConsoleRenderRows -Rows $screen.Rows') | Should -Be $true
+        $mainScriptContent = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1') -Raw
+
+        $mainScriptContent.Contains('$screen = Render-MainMenuScreen -Tier $Tier -Width $Width -Height $Height -UltraLayoutMode $UltraLayoutMode') | Should -Be $true
+        $mainScriptContent.Contains('Clear-ConsoleForFreshRender') | Should -Be $true
+        $mainScriptContent.Contains('Write-ConsoleRenderRows -Rows $screen.Rows') | Should -Be $true
+    }
+    It "Show-MainMenu's actual output includes visible menu items" {
+        $output = & { Show-MainMenu -Tier 'Ultra' -Width 160 -Height 40 } 6>&1 | Out-String
+
+        $output | Should -Match 'LIBRARY MANAGEMENT'
+        $output | Should -Match 'AutoSync'
+        $output | Should -Match 'GAME ENHANCEMENTS'
+        $output | Should -Match 'Exit'
+    }
+    It "responsive menu input falls back when stdin is redirected" {
+        $mainScriptContent = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1') -Raw
+
+        $mainScriptContent | Should -Match '\[Console\]::IsInputRedirected'
+        $mainScriptContent | Should -Match 'Read-Host \$Prompt'
     }
 }
 
