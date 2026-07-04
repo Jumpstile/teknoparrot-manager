@@ -2932,33 +2932,21 @@ Describe "Invoke-StartupUpdateCheck" {
 }
 
 Describe "Main menu source-level drift check" {
-    # The main menu loop is top-level executable code (not a function), so it
-    # is never picked up by the AST function-extraction in the top-level
-    # BeforeAll and can't be exercised directly. Instead, this reads the raw
-    # script source and cross-checks the displayed menu option numbers
-    # against the switch statement's case labels, so a future edit to one
-    # without the other (the exact drift class documented in
-    # LESSONS_LEARNED.md for v0.99.25/v0.99.28) fails CI instead of shipping.
+    # Issue #104: the menu display is now data-driven (Get-MainMenuSections /
+    # Get-MainMenuItems), but the switch statement dispatching $modeChoice to
+    # a $mode string is still hand-written top-level code, not extracted by
+    # the AST function-extraction. This cross-checks the data model's item
+    # numbers against the switch statement's case labels, preserving the
+    # original intent of this test (a future edit to one without the other --
+    # the exact drift class documented in LESSONS_LEARNED.md for
+    # v0.99.25/v0.99.28 -- fails CI instead of shipping) against the new
+    # architecture.
     BeforeAll {
         $script:mainScriptContent = Get-Content -LiteralPath $scriptPath -Raw
     }
 
-    It "has a switch case for every displayed menu option number, 1 through the Exit option, with no gaps" {
-        $menuLineMatches = [regex]::Matches($script:mainScriptContent, 'Write-Host\s+"\s*(\d+)\)\s')
-        $displayedNumbers = $menuLineMatches | ForEach-Object { [int]$_.Groups[1].Value } | Sort-Object -Unique
-
-        # The menu block is the first place these numbers appear in the file;
-        # take the first N matches in file order rather than every numeric
-        # "N)" that could coincidentally appear elsewhere (e.g. inside the
-        # Restore-from-Backup sub-menu, which also uses "1)"/"2)"/"3)").
-        $menuBlockStart = $script:mainScriptContent.IndexOf('Write-Host " Library Management"')
-        $menuBlockEnd    = $script:mainScriptContent.IndexOf('Enter 1-')
-        $menuBlockStart | Should -BeGreaterThan 0
-        $menuBlockEnd | Should -BeGreaterThan $menuBlockStart
-
-        $menuBlockText = $script:mainScriptContent.Substring($menuBlockStart, $menuBlockEnd - $menuBlockStart)
-        $displayedNumbers = [regex]::Matches($menuBlockText, 'Write-Host\s+"\s*(\d+)\)\s') |
-            ForEach-Object { [int]$_.Groups[1].Value } | Sort-Object -Unique
+    It "has a switch case for every menu item number in the data model, 1 through the Exit option, with no gaps" {
+        $itemNumbers = Get-MainMenuItems | ForEach-Object { $_.Number } | Sort-Object -Unique
 
         $switchBlockStart = $script:mainScriptContent.IndexOf('switch ($modeChoice) {')
         # The switch block's own cases each have their own "{ ... }" (e.g.
@@ -2970,27 +2958,83 @@ Describe "Main menu source-level drift check" {
         $switchNumbers    = [regex]::Matches($switchBlockText, '"(\d+)"\s*\{') |
             ForEach-Object { [int]$_.Groups[1].Value } | Sort-Object -Unique
 
-        $displayedNumbers.Count | Should -BeGreaterThan 0
+        $itemNumbers.Count | Should -BeGreaterThan 0
         # Join to strings for comparison -- piping an array directly into
         # Should -Be iterates it element-by-element against the whole
         # right-hand side instead of comparing the collections as a whole.
-        ($displayedNumbers -join ',') | Should -Be ($switchNumbers -join ',')
+        ($itemNumbers -join ',') | Should -Be ($switchNumbers -join ',')
 
-        $expectedSequence = 1..($displayedNumbers[-1])
-        ($displayedNumbers -join ',') | Should -Be ($expectedSequence -join ',')
+        $expectedSequence = 1..($itemNumbers[-1])
+        ($itemNumbers -join ',') | Should -Be ($expectedSequence -join ',')
     }
 
-    It "shows Enter 1-N matching the highest displayed menu option" {
-        $menuBlockStart = $script:mainScriptContent.IndexOf('Write-Host " Library Management"')
-        $enterMatch = [regex]::Match($script:mainScriptContent.Substring($menuBlockStart), 'Enter 1-(\d+)')
-        $enterMatch.Success | Should -BeTrue
+    It "every menu item has a distinct Mode string used by exactly one switch case" {
+        $items = Get-MainMenuItems
+        foreach ($item in $items) {
+            if ($item.Number -eq 14) { continue } # Exit has no $mode assignment
+            $script:mainScriptContent | Should -Match ([regex]::Escape('"{0}"' -f $item.Number) + '\s*\{\s*\$mode\s*=\s*"' + [regex]::Escape($item.Mode) + '"')
+        }
+    }
 
-        $menuBlockEnd = $script:mainScriptContent.IndexOf('Enter 1-', $menuBlockStart)
-        $menuBlockText = $script:mainScriptContent.Substring($menuBlockStart, $menuBlockEnd - $menuBlockStart)
-        $displayedNumbers = [regex]::Matches($menuBlockText, 'Write-Host\s+"\s*(\d+)\)\s') |
-            ForEach-Object { [int]$_.Groups[1].Value } | Sort-Object -Unique
+    It "Show-MainMenu's Enter prompt uses the highest item number from the data model" {
+        $itemNumbers = Get-MainMenuItems | ForEach-Object { $_.Number } | Sort-Object -Unique
+        $script:mainScriptContent.Contains('Read-Host "Enter 1-$menuMaxNumber"') | Should -Be $true
+        $script:mainScriptContent.Contains('$menuMaxNumber = (Get-MainMenuItems | Measure-Object -Property Number -Maximum).Maximum') | Should -Be $true
+        $itemNumbers[-1] | Should -Be 14
+    }
+}
 
-        [int]$enterMatch.Groups[1].Value | Should -Be $displayedNumbers[-1]
+Describe "Get-MainMenuSections / Get-MainMenuItems" {
+    It "every section has at least one item" {
+        Get-MainMenuSections | ForEach-Object { $_.Items.Count | Should -BeGreaterThan 0 }
+    }
+    It "flattens every section's items into one number-ordered list with no duplicate numbers" {
+        $items = Get-MainMenuItems
+        $numbers = $items | ForEach-Object { $_.Number }
+        ($numbers | Sort-Object -Unique).Count | Should -Be $numbers.Count
+    }
+    It "every non-Exit item has a non-empty Label, ShortDesc, and at least one FullDesc line" {
+        $items = Get-MainMenuItems | Where-Object { $_.Mode -ne 'Exit' }
+        foreach ($item in $items) {
+            $item.Label | Should -Not -BeNullOrEmpty
+            $item.ShortDesc | Should -Not -BeNullOrEmpty
+            $item.FullDesc.Count | Should -BeGreaterThan 0
+        }
+    }
+}
+
+Describe "Get-ConsoleLayoutTier" {
+    It "chooses Full for a large window with enough height for the full menu" {
+        Get-ConsoleLayoutTier -Width 200 -Height 80 -RequiredFullLines 60 | Should -Be 'Full'
+    }
+    It "falls back to Standard when width qualifies for Full but height does not" {
+        Get-ConsoleLayoutTier -Width 200 -Height 30 -RequiredFullLines 60 | Should -Be 'Standard'
+    }
+    It "chooses Standard for a medium-width window" {
+        Get-ConsoleLayoutTier -Width 130 -Height 80 -RequiredFullLines 60 | Should -Be 'Standard'
+    }
+    It "chooses Compact for a narrow window" {
+        Get-ConsoleLayoutTier -Width 90 -Height 80 -RequiredFullLines 60 | Should -Be 'Compact'
+    }
+}
+
+Describe "Show-MainMenu" {
+    It "Full tier prints every item's full description and a numbered line for every item" {
+        $output = Show-MainMenu -Tier 'Full' 6>&1 | Out-String
+        foreach ($item in (Get-MainMenuItems)) {
+            $output | Should -Match ([regex]::Escape("$($item.Number)) $($item.Label)"))
+        }
+    }
+    It "Standard tier prints every item's short description" {
+        $output = Show-MainMenu -Tier 'Standard' 6>&1 | Out-String
+        $item = (Get-MainMenuItems) | Where-Object { $_.Mode -eq 'AutoSync' }
+        $output | Should -Match ([regex]::Escape($item.ShortDesc))
+    }
+    It "Compact tier prints only labels and the 'Type ? for descriptions' hint, no ShortDesc/FullDesc text" {
+        $output = Show-MainMenu -Tier 'Compact' 6>&1 | Out-String
+        $output | Should -Match 'Type \? for descriptions'
+        $autoSync = (Get-MainMenuItems) | Where-Object { $_.Mode -eq 'AutoSync' }
+        $output | Should -Not -Match ([regex]::Escape($autoSync.ShortDesc))
     }
 }
 
