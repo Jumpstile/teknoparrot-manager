@@ -28,7 +28,13 @@ $ErrorActionPreference = 'Stop'
 # invocation would also defeat that caller's ability to mock or otherwise
 # control it (observed directly: an earlier version of this line broke
 # Pester's -ModuleName mocking of the destructive-path test suite).
-Import-Module (Join-Path $PSScriptRoot 'TpmAutoUpdate.Core.psm1')
+$modulePath = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot 'TpmAutoUpdate.Core.psm1')).ProviderPath
+$loadedModule = Get-Module TpmAutoUpdate.Core -All |
+    Where-Object { $_.Path -eq $modulePath } |
+    Select-Object -First 1
+if (-not $loadedModule) {
+    Import-Module $modulePath
+}
 
 function Write-UpdaterInfo {
     param([string]$Message)
@@ -87,7 +93,10 @@ if ($Apply) {
         Test-TpmExtractedScript -Path $extractedScriptPath | Out-Null
         Write-UpdaterInfo 'Extracted script passed content validation.'
 
-        Move-Item -LiteralPath $extractedScriptPath -Destination $ScriptPath -Force
+        Move-Item -LiteralPath $extractedScriptPath -Destination $ScriptPath -Force -ErrorAction Stop
+        if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) {
+            throw "Update replacement did not complete: $ScriptPath not found after Move-Item."
+        }
         $extractedScriptPath = $null
 
         Write-UpdaterInfo 'Update installed successfully.'

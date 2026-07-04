@@ -7,7 +7,8 @@
 # Run with: Invoke-Pester -Path .\Tests\TpmAutoUpdate.Core.Tests.ps1
 
 BeforeAll {
-    $modulePath = Join-Path $PSScriptRoot '..\tools\TpmAutoUpdate.Core.psm1'
+    $modulePath = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\tools\TpmAutoUpdate.Core.psm1')).ProviderPath
+    Get-Module TpmAutoUpdate.Core -All | Remove-Module -Force
     Import-Module $modulePath -Force
 
     function New-TpmTestRelease {
@@ -55,6 +56,10 @@ BeforeAll {
 
         return $DestinationPath
     }
+}
+
+AfterAll {
+    Get-Module TpmAutoUpdate.Core -All | Remove-Module -Force
 }
 
 Describe 'ConvertTo-TpmVersion' {

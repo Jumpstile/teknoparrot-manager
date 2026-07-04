@@ -9,37 +9,57 @@ echo  TeknoParrot Manager Certification Suite
 echo ============================================
 echo.
 
-rem This file is meant to be double-clicked from anywhere -- the Desktop, a
-rem USB stick, wherever -- not just from inside the repo's scripts\ folder.
-rem That means it can't rely on its own location (%~dp0) to find the repo;
-rem it needs the repo's real path hardcoded here instead. Edit REPO_ROOT if
-rem the repo ever moves.
-set "REPO_ROOT=E:\Development\teknoparrot-manager"
+rem Default to the checked-out repo that contains this scripts\ folder. If
+rem this .bat was copied elsewhere, pass the repo path as the first argument
+rem or set TPM_REPO_ROOT before running it.
+set "REPO_ROOT=%TPM_REPO_ROOT%"
+if not "%~1"=="" set "REPO_ROOT=%~1"
+if not defined REPO_ROOT (
+    pushd "%~dp0.." >nul 2>nul
+    if errorlevel 1 (
+        echo ERROR: Could not resolve the repository root from:
+        echo   %~dp0..
+        echo.
+        echo Run this launcher from scripts\ inside a TPM git checkout,
+        echo pass the repo path as the first argument, or set TPM_REPO_ROOT.
+        echo.
+        pause
+        exit /b 1
+    )
+    set "REPO_ROOT=!CD!"
+    popd >nul
+)
 set "DEFAULT_TP_ROOT=C:\Users\EliSi\LaunchBox\Emulators\TeknoParrot"
 
 if not exist "%REPO_ROOT%\scripts\Run-TPM-Tests.ps1" (
     echo ERROR: Repository not found at:
     echo   %REPO_ROOT%
     echo.
-    echo Edit REPO_ROOT near the top of this .bat file if the repo has moved.
+    echo Run this launcher from scripts\ inside a TPM git checkout,
+    echo pass the repo path as the first argument, or set TPM_REPO_ROOT.
     echo.
     pause
     exit /b 1
 )
 
-cd /d "%REPO_ROOT%"
+pushd "%REPO_ROOT%"
+if errorlevel 1 (
+    echo ERROR: Could not enter repository folder:
+    echo   %REPO_ROOT%
+    echo.
+    pause
+    exit /b 1
+)
 
 echo Repository:
 echo   %REPO_ROOT%
 echo.
 
 rem Auto-update to the latest pushed commit on whatever branch is currently
-rem checked out, before running. This intentionally discards any local
-rem changes in the repo (git reset --hard) -- this repo checkout is meant
-rem to be a pure pull-and-run copy for certification, not a place to keep
-rem uncommitted local edits. Never hard-fails the whole run over this: a
-rem network hiccup or detached HEAD just means the run proceeds with
-rem whatever is already on disk, with a clear warning printed either way.
+rem checked out, before running. This is fast-forward only: it never force
+rem resets or discards local work. A network hiccup or detached HEAD just
+rem means the run proceeds with whatever is already on disk, with a clear
+rem warning printed either way.
 echo Updating repository to latest...
 set "CURRENT_BRANCH="
 for /f "delims=" %%B in ('git rev-parse --abbrev-ref HEAD 2^>nul') do set "CURRENT_BRANCH=%%B"
@@ -52,26 +72,37 @@ if not defined CURRENT_BRANCH (
     echo Running with whatever is currently checked out.
     echo.
 ) else (
-    git fetch origin
-    if errorlevel 1 (
-        echo WARNING: git fetch failed -- no network, or remote unreachable.
+    set "DIRTY_TRACKED="
+    for /f "delims=" %%S in ('git status --porcelain --untracked-files=no 2^>nul') do set "DIRTY_TRACKED=1"
+    if defined DIRTY_TRACKED (
+        echo WARNING: Tracked files have local changes -- skipping auto-update.
+        echo Commit or stash tracked changes before using this as release evidence.
         echo Running with whatever is currently checked out ^(commit %COMMIT_BEFORE%^).
         echo.
     ) else (
-        git reset --hard origin/%CURRENT_BRANCH%
+        git fetch origin
         if errorlevel 1 (
-            echo WARNING: git reset failed -- running with whatever is currently checked out.
+            echo WARNING: git fetch failed -- no network, or remote unreachable.
+            echo Running with whatever is currently checked out ^(commit %COMMIT_BEFORE%^).
             echo.
         ) else (
-            set "COMMIT_AFTER="
-            for /f "delims=" %%D in ('git rev-parse --short HEAD 2^>nul') do set "COMMIT_AFTER=%%D"
-            echo Commit after sync:  %COMMIT_AFTER%
-            if "%COMMIT_BEFORE%"=="%COMMIT_AFTER%" (
-                echo Repository already at latest origin/%CURRENT_BRANCH% -- no new commits pulled.
+            git merge --ff-only origin/%CURRENT_BRANCH%
+            if errorlevel 1 (
+                echo WARNING: Repository could not fast-forward to origin/%CURRENT_BRANCH%.
+                echo Resolve this manually before using the run as release evidence.
+                echo Running with whatever is currently checked out.
+                echo.
             ) else (
-                echo Repository updated to latest origin/%CURRENT_BRANCH% -- %COMMIT_BEFORE% -^> %COMMIT_AFTER%.
+                set "COMMIT_AFTER="
+                for /f "delims=" %%D in ('git rev-parse --short HEAD 2^>nul') do set "COMMIT_AFTER=%%D"
+                echo Commit after sync:  !COMMIT_AFTER!
+                if "!COMMIT_BEFORE!"=="!COMMIT_AFTER!" (
+                    echo Repository already at latest origin/%CURRENT_BRANCH% -- no new commits pulled.
+                ) else (
+                    echo Repository updated to latest origin/%CURRENT_BRANCH% -- !COMMIT_BEFORE! -^> !COMMIT_AFTER!.
+                )
+                echo.
             )
-            echo.
         )
     )
 )
@@ -139,4 +170,5 @@ if defined LATEST_REPORT (
 echo Review the output above and the report files for full details.
 echo.
 pause
+popd >nul
 endlocal

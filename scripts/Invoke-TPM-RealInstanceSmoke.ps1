@@ -719,9 +719,11 @@ finally {
     Add-CertificationReport ("- Repository: {0}" -f $RepoPath)
     Add-CertificationReport ("- Branch: {0}" -f $results.GitBranch)
     Add-CertificationReport ("- Commit: {0} ({1})" -f $results.Commit, $results.CommitShort)
-    Add-CertificationReport ("- Origin/main: {0}" -f (if ($results.OriginMainCommit) { $results.OriginMainCommit } else { 'unavailable' }))
+    $originMainText = if ($results.OriginMainCommit) { $results.OriginMainCommit } else { 'unavailable' }
+    $workingTreeText = if ($repoClean) { 'clean' } else { 'dirty' }
+    Add-CertificationReport ("- Origin/main: {0}" -f $originMainText)
     Add-CertificationReport ("- Sync status: {0}" -f $results.SyncStatus)
-    Add-CertificationReport ("- Working tree: {0}" -f (if ($repoClean) { 'clean' } else { 'dirty' }))
+    Add-CertificationReport ("- Working tree: {0}" -f $workingTreeText)
     Add-CertificationReport ("- Git version: {0}" -f $results.GitVersion)
     Add-CertificationReport ("- PowerShell version: {0}" -f $results.PowerShellVersion)
     Add-CertificationReport ("- TPM script version: {0}" -f $tpmScriptVersion)

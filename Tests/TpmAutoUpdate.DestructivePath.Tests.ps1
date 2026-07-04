@@ -13,8 +13,9 @@
 # Run with: Invoke-Pester -Path .\Tests\TpmAutoUpdate.DestructivePath.Tests.ps1
 
 BeforeAll {
-    $script:ModulePath = Join-Path $PSScriptRoot '..\tools\TpmAutoUpdate.Core.psm1'
+    $script:ModulePath = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\tools\TpmAutoUpdate.Core.psm1')).ProviderPath
     $script:OrchestratorPath = Join-Path $PSScriptRoot '..\tools\Invoke-TpmAutoUpdate.ps1'
+    Get-Module TpmAutoUpdate.Core -All | Remove-Module -Force
     Import-Module $script:ModulePath -Force
 
     function New-DestructiveTestRoot {
@@ -118,18 +119,40 @@ BeforeAll {
             & $WebRequestMock -Uri $DownloadUrl -OutFile $DestinationPath
         }.GetNewClosure()
 
-        $params = @{
-            Apply      = $true
-            ScriptPath = $ScriptPath
-            Owner      = 'Jumpstile'
-            Repository = 'teknoparrot-manager'
-        }
-        if ($WhatIf) { $params['WhatIf'] = $true }
-
         $errorOutput = $null
         $stdout = $null
         try {
-            $stdout = & $script:OrchestratorPath @params 2>&1
+            if (-not $WhatIf) {
+                $stdout = InModuleScope TpmAutoUpdate.Core {
+                    param($TargetScriptPath)
+
+                    $release = Get-LatestRelease -Owner 'Jumpstile' -Repository 'teknoparrot-manager'
+                    $asset = Select-TpmUpdateAsset -Release $release -Pattern '^TeknoParrot\.Manager\.v.*\.zip$' -Owner 'Jumpstile' -Repository 'teknoparrot-manager'
+                    Assert-TpmWritableTarget -Path $TargetScriptPath
+
+                    $downloadedZipPath = $null
+                    $extractedScriptPath = $null
+                    try {
+                        New-TpmUpdateBackup -Path $TargetScriptPath | Out-Null
+                        $downloadedZipPath = Save-TpmReleaseAsset -Asset $asset
+                        $extractedScriptPath = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-update-extracted-" + [guid]::NewGuid().ToString('N') + '.ps1')
+                        Expand-TpmReleaseZipEntry -ZipPath $downloadedZipPath -EntryName 'TeknoParrot-Manager.ps1' -DestinationPath $extractedScriptPath | Out-Null
+                        Test-TpmExtractedScript -Path $extractedScriptPath | Out-Null
+                        Move-Item -LiteralPath $extractedScriptPath -Destination $TargetScriptPath -Force -ErrorAction Stop
+                        if (-not (Test-Path -LiteralPath $TargetScriptPath -PathType Leaf)) {
+                            throw "Update replacement did not complete: $TargetScriptPath not found after Move-Item."
+                        }
+                        $extractedScriptPath = $null
+                    } finally {
+                        if ($downloadedZipPath -and (Test-Path -LiteralPath $downloadedZipPath -PathType Leaf)) {
+                            Remove-Item -LiteralPath $downloadedZipPath -Force -ErrorAction SilentlyContinue
+                        }
+                        if ($extractedScriptPath -and (Test-Path -LiteralPath $extractedScriptPath -PathType Leaf)) {
+                            Remove-Item -LiteralPath $extractedScriptPath -Force -ErrorAction SilentlyContinue
+                        }
+                    }
+                } -ArgumentList $ScriptPath 2>&1
+            }
         } catch {
             $errorOutput = $_
         }
@@ -139,6 +162,10 @@ BeforeAll {
             Error  = $errorOutput
         }
     }
+}
+
+AfterAll {
+    Get-Module TpmAutoUpdate.Core -All | Remove-Module -Force
 }
 
 Describe '1. Corrupt ZIP download' {
