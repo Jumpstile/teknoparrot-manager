@@ -43,6 +43,9 @@ rem whatever is already on disk, with a clear warning printed either way.
 echo Updating repository to latest...
 set "CURRENT_BRANCH="
 for /f "delims=" %%B in ('git rev-parse --abbrev-ref HEAD 2^>nul') do set "CURRENT_BRANCH=%%B"
+set "COMMIT_BEFORE="
+for /f "delims=" %%C in ('git rev-parse --short HEAD 2^>nul') do set "COMMIT_BEFORE=%%C"
+echo Commit before sync: %COMMIT_BEFORE%
 
 if not defined CURRENT_BRANCH (
     echo WARNING: Could not determine the current git branch -- skipping auto-update.
@@ -52,7 +55,7 @@ if not defined CURRENT_BRANCH (
     git fetch origin
     if errorlevel 1 (
         echo WARNING: git fetch failed -- no network, or remote unreachable.
-        echo Running with whatever is currently checked out.
+        echo Running with whatever is currently checked out ^(commit %COMMIT_BEFORE%^).
         echo.
     ) else (
         git reset --hard origin/%CURRENT_BRANCH%
@@ -60,7 +63,14 @@ if not defined CURRENT_BRANCH (
             echo WARNING: git reset failed -- running with whatever is currently checked out.
             echo.
         ) else (
-            echo Repository updated to latest origin/%CURRENT_BRANCH%.
+            set "COMMIT_AFTER="
+            for /f "delims=" %%D in ('git rev-parse --short HEAD 2^>nul') do set "COMMIT_AFTER=%%D"
+            echo Commit after sync:  %COMMIT_AFTER%
+            if "%COMMIT_BEFORE%"=="%COMMIT_AFTER%" (
+                echo Repository already at latest origin/%CURRENT_BRANCH% -- no new commits pulled.
+            ) else (
+                echo Repository updated to latest origin/%CURRENT_BRANCH% -- %COMMIT_BEFORE% -^> %COMMIT_AFTER%.
+            )
             echo.
         )
     )
