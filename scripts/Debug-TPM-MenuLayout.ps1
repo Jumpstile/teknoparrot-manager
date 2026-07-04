@@ -22,9 +22,12 @@ if ($parseErrors.Count -gt 0) {
 
 $menuFunctions = @(
     'Get-ManagerDisplayVersion',
+    'Set-ConsoleMaximizedIfSupported',
+    'Get-ConsoleMaximizeStatus',
     'Get-ManagerAsciiBannerLines',
     'Get-ManagerVersionLine',
     'Test-UseManagerAsciiBanner',
+    'Get-ManagerBannerMode',
     'Get-CenteredTextLine',
     'Get-ManagerBannerLines',
     'Get-ManagerBannerRows',
@@ -38,8 +41,14 @@ $menuFunctions = @(
     'Split-TextForMenuWidth',
     'Format-MainMenuItemLines',
     'Format-MainMenuSectionLines',
+    'Get-MainMenuSectionColor',
+    'Format-MainMenuSectionRows',
     'Center-MainMenuLines',
+    'Center-MainMenuRows',
+    'Write-MainMenuRow',
     'Join-MainMenuColumns',
+    'Write-MainMenuTwoColumnRows',
+    'Write-MainMenuFooter',
     'Show-MainMenu'
 )
 
@@ -94,6 +103,7 @@ $fullTierLineCount = 4 + (@(Get-MainMenuSections | ForEach-Object {
 
 $tier = Get-ConsoleLayoutTier -Width $detectedWidth -Height $detectedHeight -RequiredFullLines $fullTierLineCount
 $metrics = Get-MainMenuRenderMetrics -Tier $tier -Width $detectedWidth -Height $detectedHeight -RequiredFullLines $fullTierLineCount -UltraLayoutMode $UltraLayoutMode
+$maximizeStatus = Get-ConsoleMaximizeStatus
 
 Write-Host "TPM menu layout debug"
 Write-Host "---------------------"
@@ -110,11 +120,18 @@ Write-Host ("Selected viewport height     : {0}" -f $detectedHeight)
 Write-Host ("Required full lines          : {0}" -f $fullTierLineCount)
 Write-Host ("Selected layout tier         : {0}" -f $metrics.SelectedTier)
 Write-Host ("Selected layout mode         : {0}" -f $metrics.Layout)
+Write-Host ("Selected banner mode         : {0}" -f $metrics.BannerMode)
 Write-Host ("Requested ultra mode         : {0}" -f $UltraLayoutMode)
 Write-Host ("Label width                  : {0}" -f $metrics.LabelWidth)
 Write-Host ("Description width            : {0}" -f $metrics.DescriptionWidth)
 Write-Host ("Total render width           : {0}" -f $metrics.TotalRenderWidth)
+Write-Host ("Estimated render height      : {0}" -f $metrics.RenderHeight)
 Write-Host ("Constrained by               : {0}" -f $metrics.ConstrainedBy)
+Write-Host ("Startup maximize attempted   : {0}" -f $maximizeStatus.Attempted)
+Write-Host ("Startup maximize succeeded   : {0}" -f $maximizeStatus.Succeeded)
+Write-Host ("Startup maximize skipped     : {0}" -f $maximizeStatus.Skipped)
+Write-Host ("Startup maximize state       : {0}" -f $maximizeStatus.State)
+Write-Host ("Startup maximize detail      : {0}" -f $maximizeStatus.Message)
 
 if ($Render) {
     Write-Host ""
