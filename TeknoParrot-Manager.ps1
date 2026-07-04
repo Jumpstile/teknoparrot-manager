@@ -79,12 +79,7 @@ function Get-ManagerDisplayVersion {
 
 function Get-ManagerAsciiBannerLines {
     return @(
-        ' ________     __             ____                       __     __  ___                                  '
-        '/_  __/ /__  / /__  ____  __/ __ \____ _____________  _/ /_   /  |/  /___ _____  ____ _____ ____  _____'
-        ' / / / / _ \/ / _ \/ __ \/ / /_/ / __ `/ ___/ ___/ / / / __/  / /|_/ / __ `/ __ \/ __ `/ __ `/ _ \/ ___/'
-        '/ / / /  __/ /  __/ / / / / ____/ /_/ / /  / /  / /_/ / /_   / /  / / /_/ / / / / /_/ / /_/ /  __/ /    '
-        '/_/ /_/\___/_/\___/_/ /_/_/_/    \__,_/_/  /_/   \__,_/\__/  /_/  /_/\__,_/_/ /_/\__,_/\__, /\___/_/     '
-        '                                                                                       /____/            '
+        'TeknoParrot Manager'
     )
 }
 
@@ -98,7 +93,7 @@ function Test-UseManagerAsciiBanner {
         [int]$Width,
         [int]$Height = 25
     )
-    return ($Width -ge 118)
+    return ($Width -ge 44)
 }
 
 function Get-CenteredTextLine {
@@ -132,20 +127,22 @@ function New-ManagerBannerSegment {
     return [pscustomobject]@{ Text = $Text; Color = $Color }
 }
 
-function New-ManagerWordmarkRow {
+function New-ManagerTitleRow {
     param(
-        [string]$Text,
         [int]$InnerWidth
     )
 
-    $line = (Get-CenteredTextLine -Text $Text -Width $InnerWidth).PadRight($InnerWidth)
-    $first = [Math]::Floor($line.Length / 3)
-    $second = [Math]::Floor(($line.Length * 2) / 3)
+    $first = 'TeknoParrot'
+    $second = ' Manager'
+    $titleLength = $first.Length + $second.Length
+    $leftPad = [Math]::Max(0, [Math]::Floor(($InnerWidth - $titleLength) / 2))
+    $rightPad = [Math]::Max(0, $InnerWidth - $leftPad - $titleLength)
     return New-ManagerBannerSegmentRow -Segments @(
         (New-ManagerBannerSegment -Text '|' -Color 'DarkCyan')
-        (New-ManagerBannerSegment -Text $line.Substring(0, $first) -Color 'Cyan')
-        (New-ManagerBannerSegment -Text $line.Substring($first, $second - $first) -Color 'Green')
-        (New-ManagerBannerSegment -Text $line.Substring($second) -Color 'Magenta')
+        (New-ManagerBannerSegment -Text (' ' * $leftPad) -Color 'White')
+        (New-ManagerBannerSegment -Text $first -Color 'Cyan')
+        (New-ManagerBannerSegment -Text $second -Color 'Yellow')
+        (New-ManagerBannerSegment -Text (' ' * $rightPad) -Color 'White')
         (New-ManagerBannerSegment -Text '|' -Color 'DarkCyan')
     )
 }
@@ -153,9 +150,12 @@ function New-ManagerWordmarkRow {
 function New-ManagerAttributionRow {
     param([int]$InnerWidth)
 
-    $prefix = '* Developed and maintained by '
+    $prefix = 'Developed and maintained by '
     $brand = 'Jumpstile'
-    $suffix = ' *'
+    $suffix = ''
+    if (($prefix.Length + $brand.Length) -gt $InnerWidth) {
+        $prefix = 'By '
+    }
     $lineLength = $prefix.Length + $brand.Length + $suffix.Length
     $leftPad = [Math]::Max(0, [Math]::Floor(($InnerWidth - $lineLength) / 2))
     $rightPad = [Math]::Max(0, $InnerWidth - $leftPad - $lineLength)
@@ -187,17 +187,11 @@ function Get-ManagerBannerRows {
 
     $version = Get-ManagerDisplayVersion
     if (Test-UseManagerAsciiBanner -Width $Width -Height $Height) {
-        $frameWidth = [Math]::Max(80, $Width)
+        $frameWidth = [Math]::Max(44, $Width)
         $innerWidth = $frameWidth - 2
         $rows = New-Object System.Collections.Generic.List[object]
         [void]$rows.Add((New-ManagerBannerTextRow -Text ('+' + ('-' * $innerWidth) + '+') -Color 'DarkCyan'))
-        [void]$rows.Add((New-ManagerBannerTextRow -Text ('|' + (' ' * $innerWidth) + '|') -Color 'DarkCyan'))
-        foreach ($line in (Get-ManagerAsciiBannerLines)) {
-            $text = $line
-            if ($text.Length -gt $innerWidth) { $text = $text.Substring(0, $innerWidth) }
-            [void]$rows.Add((New-ManagerWordmarkRow -Text $text -InnerWidth $innerWidth))
-        }
-        [void]$rows.Add((New-ManagerBannerTextRow -Text ('|' + (' ' * $innerWidth) + '|') -Color 'DarkCyan'))
+        [void]$rows.Add((New-ManagerTitleRow -InnerWidth $innerWidth))
         [void]$rows.Add((New-ManagerAttributionRow -InnerWidth $innerWidth))
         [void]$rows.Add((New-ManagerBannerTextRow -Text ('|' + (Get-CenteredTextLine -Text (Get-ManagerVersionLine) -Width $innerWidth).PadRight($innerWidth) + '|') -Color 'Cyan'))
         [void]$rows.Add((New-ManagerBannerTextRow -Text ('+' + ('-' * $innerWidth) + '+') -Color 'DarkCyan'))

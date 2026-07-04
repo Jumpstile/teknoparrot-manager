@@ -29,7 +29,7 @@ $menuFunctions = @(
     'New-ManagerBannerSegmentRow',
     'New-ManagerBannerTextRow',
     'New-ManagerBannerSegment',
-    'New-ManagerWordmarkRow',
+    'New-ManagerTitleRow',
     'New-ManagerAttributionRow',
     'Get-ManagerBannerLines',
     'Get-ManagerBannerRows',
