@@ -10773,9 +10773,11 @@ function Get-MainMenuFooterRows {
         $footer = 'Enter number | H=Help | Q=Quit'
     }
     $rule = '-' * $Geometry.FooterWidth
-    $pad = [Math]::Max(0, [Math]::Floor(($Geometry.FooterWidth - $footer.Length) / 2))
     [void]$rows.Add((New-ConsoleRenderRow -Text $rule -Color 'DarkCyan'))
-    [void]$rows.Add((New-ConsoleRenderRow -Text ((' ' * $pad) + $footer) -Color 'White'))
+    foreach ($line in (Split-TextForMenuWidth -Text $footer -Width $Geometry.FooterWidth)) {
+        $pad = [Math]::Max(0, [Math]::Floor(($Geometry.FooterWidth - $line.Length) / 2))
+        [void]$rows.Add((New-ConsoleRenderRow -Text ((' ' * $pad) + $line) -Color 'White'))
+    }
     return @(Get-PaddedMainMenuRows -Rows $rows.ToArray() -Padding $Geometry.LeftPadding)
 }
 
@@ -10991,13 +10993,21 @@ function Read-MainMenuChoiceResponsive {
         [int]$InitialHeight
     )
 
-    $value = ''
+    $readHostPrompt = $Prompt.TrimEnd()
+    if ($readHostPrompt.EndsWith(':')) {
+        $readHostPrompt = $readHostPrompt.Substring(0, $readHostPrompt.Length - 1)
+    }
+    if ([string]::IsNullOrWhiteSpace($readHostPrompt)) { $readHostPrompt = 'Enter choice' }
+
     try {
         if ([Console]::IsInputRedirected) {
-            $fallback = (Read-Host $Prompt).Trim()
+            $rawFallback = Read-Host $readHostPrompt
+            $fallback = if ($null -eq $rawFallback) { '' } else { $rawFallback.Trim() }
             return [pscustomobject]@{ Redraw = $false; Value = $fallback }
         }
     } catch {}
+
+    $value = ''
     Write-Host $Prompt -NoNewline
     while ($true) {
         $currentWidth = Get-ConsoleContentWidth
@@ -11027,7 +11037,9 @@ function Read-MainMenuChoiceResponsive {
                 Start-Sleep -Milliseconds 80
             }
         } catch {
-            $fallback = (Read-Host '').Trim()
+            Write-Host ''
+            $rawFallback = Read-Host $readHostPrompt
+            $fallback = if ($null -eq $rawFallback) { '' } else { $rawFallback.Trim() }
             return [pscustomobject]@{ Redraw = $false; Value = $fallback }
         }
     }

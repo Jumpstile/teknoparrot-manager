@@ -3202,6 +3202,16 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         ($screen.Rows | Where-Object { $_.Text -match 'AutoSync' }).Count | Should -BeGreaterThan 0
         ($screen.Rows | Where-Object { $_.Text -match 'Crosshair setup' }).Count | Should -BeGreaterThan 0
     }
+    It "returns a flat row buffer for the production writer" {
+        $screen = Render-MainMenuScreen -Tier 'Professional' -Width 150 -Height 30
+
+        $screen.Rows.Count | Should -BeGreaterThan 20
+        foreach ($row in $screen.Rows) {
+            $row | Should -Not -BeOfType ([object[]])
+            $row.PSObject.Properties.Name | Should -Contain 'Text'
+            $row.PSObject.Properties.Name | Should -Contain 'Color'
+        }
+    }
     It "Standard tier renders every item's short description" {
         $screen = Render-MainMenuScreen -Tier 'Standard' -Width 110 -Height 30
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
