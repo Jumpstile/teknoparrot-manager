@@ -10246,9 +10246,163 @@ if ($datIndex.Count -gt 0 -and $gameProfilesDir) {
 }
 
 # =============================================================================
+# ADAPTIVE MAIN MENU (issue #104) -- single data-driven model, rendered at one
+# of three layout tiers depending on the current console window size. Every
+# tier shows the same 14 numbered options with the same meaning; only how
+# much description text is shown changes. Numbering, the switch-statement
+# dispatch, and all mode behavior are completely unaffected by this -- only
+# Show-MainMenu's own rendering varies.
+# =============================================================================
+
+# Single source of truth for every menu item's number, mode string, section,
+# and description at three levels of detail (Full/Standard/Compact). Adding,
+# renumbering, or re-sectioning a menu item only ever needs to change this
+# array -- every rendering tier and the "Enter 1-N" prompt derive from it.
+# A function (not a plain script-scope variable) so it is picked up by the
+# test suite's AST-based function extraction like every other testable
+# helper in this script -- see the "Main menu source-level drift check"
+# Describe block in Tests/TeknoParrot-Manager.Tests.ps1.
+function Get-MainMenuSections {
+    return @(
+    [pscustomobject]@{
+        Header = 'Library Management'
+        Items  = @(
+            [pscustomobject]@{ Number = 1; Mode = 'AutoSync'; Label = 'AutoSync'; ShortDesc = 'Extract ZIPs (NAS or local), then register the games.'; FullDesc = @('Extract ZIPs (NAS or local) to a local', 'folder, then register the games.') }
+            [pscustomobject]@{ Number = 2; Mode = 'RegisterOnly'; Label = 'Register only'; ShortDesc = 'Games already extracted -- just register.'; FullDesc = @('Games are already extracted; just register.') }
+            [pscustomobject]@{ Number = 3; Mode = 'PropagateControls'; Label = 'Propagate Controls'; ShortDesc = 'Re-copy control bindings, without AutoSync/Register.'; FullDesc = @('Re-copy control bindings from reference', 'games to other compatible games, without', 'going through AutoSync/Register first.') }
+        )
+    }
+    [pscustomobject]@{
+        Header = 'Game Enhancements (all optional -- games work without these)'
+        Items  = @(
+            [pscustomobject]@{ Number = 4; Mode = 'CrosshairSetup'; Label = 'Crosshair setup'; ShortDesc = 'Deploy custom crosshairs to lightgun games.'; FullDesc = @('Pick and deploy custom crosshairs to all', 'registered lightgun games.') }
+            [pscustomobject]@{ Number = 5; Mode = 'ReShadeSetup'; Label = 'ReShade setup'; ShortDesc = 'Sharper image, better colours, scanlines, borders.'; FullDesc = @('Add visual enhancements (sharper image, better', 'colours, scanlines, borders).') }
+            [pscustomobject]@{ Number = 6; Mode = 'DgVoodoo2Setup'; Label = 'dgVoodoo2 setup'; ShortDesc = 'Fix old DX8/DirectDraw/Glide crashes.'; FullDesc = @('Fix old DX8, DirectDraw, and Glide games that', 'crash or show black screens.') }
+            [pscustomobject]@{ Number = 7; Mode = 'GpuFixSetup'; Label = 'GPU fix setup'; ShortDesc = 'Auto-detect GPU, apply matching compatibility fix.'; FullDesc = @('Auto-detect your GPU (AMD / NVIDIA / Intel) and', 'apply the matching compatibility fix to every', 'registered game that has one.') }
+            [pscustomobject]@{ Number = 8; Mode = 'FFBSetup'; Label = 'Force feedback (FFB) setup'; ShortDesc = 'Wheel/stick rumble and force feedback.'; FullDesc = @('Wheel/stick rumble and force feedback.', "Covers TeknoParrot's built-in FFB Blaster (needs a", 'paid membership) and a free third-party plugin.') }
+            [pscustomobject]@{ Number = 9; Mode = 'BepInExUpdate'; Label = 'BepInEx update check'; ShortDesc = 'Update games with BepInEx already installed.'; FullDesc = @('Checks games with BepInEx already installed', 'against the latest stable release and offers to', 'update (64-bit only). Never installs it fresh.') }
+        )
+    }
+    [pscustomobject]@{
+        Header = 'Maintenance and Recovery'
+        Items  = @(
+            [pscustomobject]@{ Number = 10; Mode = 'HealthCheck'; Label = 'Library health check'; ShortDesc = 'Read-only status: registered/broken/unregistered counts.'; FullDesc = @('Read-only: reports registered/broken/', 'unregistered counts plus GPU fix / FFB Blaster /', 'dgVoodoo2 coverage and ReShade/BepInEx install', 'counts. No extraction, registration, repair, or', 'network access -- just a fast status check.') }
+            [pscustomobject]@{ Number = 11; Mode = 'Restore'; Label = 'Restore backup'; ShortDesc = 'Roll UserProfiles/LaunchBox/Postgres back.'; FullDesc = @('Roll UserProfiles, LaunchBox files, or Postgres', 'databases back to a previous backup.') }
+            [pscustomobject]@{ Number = 12; Mode = 'PostgresSetup'; Label = 'Postgres setup'; ShortDesc = 'Local PostgreSQL for some Incredible Technologies games.'; FullDesc = @('Installs/configures the local PostgreSQL', 'database that some Incredible Technologies', 'games need (Golden Tee Live, Power Putt Live,', 'Silver Strike Bowling Live, Target Toss Pro).', 'Requires running this script as Administrator', "if PostgreSQL isn't installed yet.") }
+        )
+    }
+    [pscustomobject]@{
+        Header = 'Application'
+        Items  = @(
+            [pscustomobject]@{ Number = 13; Mode = 'CheckForUpdates'; Label = 'Check for Updates'; ShortDesc = 'Manual, backup-first check against the latest GitHub release.'; FullDesc = @('Manual, backup-first check against the latest', 'GitHub release. Nothing is downloaded or changed', 'without your explicit confirmation.') }
+            [pscustomobject]@{ Number = 14; Mode = 'Exit'; Label = 'Exit'; ShortDesc = ''; FullDesc = @() }
+        )
+    }
+    )
+}
+
+# Flat, number-ordered view of every item across all sections -- used to
+# derive the highest option number (the "Enter 1-N" prompt) and to look an
+# item up by number without every caller re-flattening the section list.
+function Get-MainMenuItems {
+    return @(Get-MainMenuSections | ForEach-Object { $_.Items })
+}
+
+# Pure/testable: decides which of the three layout tiers fits the given
+# console dimensions. Height matters as well as width -- a wide-but-short
+# window (many terminal splits/panes) should still fall back rather than
+# print a Full menu taller than the visible area. $RequiredFullLines is the
+# actual line count Show-MainMenu would print at Full tier for the current
+# menu content, so this stays correct if items are ever added without
+# hardcoding a line-count constant here.
+function Get-ConsoleLayoutTier {
+    param(
+        [int]$Width,
+        [int]$Height,
+        [int]$RequiredFullLines
+    )
+    if ($Width -ge 160 -and $Height -ge $RequiredFullLines) { return 'Full' }
+    if ($Width -ge 120) { return 'Standard' }
+    return 'Compact'
+}
+
+# Best-effort console maximize -- many hosts (redirected output, ISE, some
+# CI/test runners) don't support resizing the window at all; this must never
+# throw or block startup over a cosmetic nicety. Called once, not on every
+# menu redraw -- unlike layout-tier detection, which does run every redraw
+# so a user resizing mid-session still gets the right tier next time the
+# menu draws.
+function Set-ConsoleMaximizedIfSupported {
+    try {
+        $rawUi = $Host.UI.RawUI
+        $maxSize = $rawUi.MaxPhysicalWindowSize
+        if ($maxSize.Width -gt 0 -and $maxSize.Height -gt 0) {
+            $rawUi.WindowSize = [System.Management.Automation.Host.Size]::new($maxSize.Width, $maxSize.Height)
+            if ($rawUi.BufferSize.Width -lt $maxSize.Width) {
+                $rawUi.BufferSize = [System.Management.Automation.Host.Size]::new($maxSize.Width, $rawUi.BufferSize.Height)
+            }
+        }
+    } catch {
+        Write-Log "Set-ConsoleMaximizedIfSupported: could not resize console -- $_"
+    }
+}
+
+# Renders the main menu at the given tier. Pure display -- never reads input,
+# never touches $mode; the caller's existing Read-Host/switch dispatch is
+# completely unchanged by this function or by which tier is chosen.
+function Show-MainMenu {
+    param([ValidateSet('Full', 'Standard', 'Compact')][string]$Tier)
+
+    $items = Get-MainMenuItems
+    $maxNumber = ($items | Measure-Object -Property Number -Maximum).Maximum
+
+    Write-Host ""
+    if ($Tier -eq 'Compact') {
+        foreach ($section in Get-MainMenuSections) {
+            foreach ($item in $section.Items) {
+                Write-Host ("  {0,-2} {1}" -f $item.Number, $item.Label)
+            }
+        }
+        Write-Host ""
+        Write-Host "  Type ? for descriptions." -ForegroundColor DarkGray
+        Write-Host ""
+        return
+    }
+
+    foreach ($section in Get-MainMenuSections) {
+        Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
+        Write-Host " $($section.Header)" -ForegroundColor DarkCyan
+        Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
+        foreach ($item in $section.Items) {
+            if ($Tier -eq 'Standard') {
+                if ($item.ShortDesc) {
+                    Write-Host ("  {0}) {1,-27} -- {2}" -f $item.Number, $item.Label, $item.ShortDesc)
+                } else {
+                    Write-Host ("  {0}) {1}" -f $item.Number, $item.Label)
+                }
+            } else {
+                # Full tier: first FullDesc line joined onto the label line
+                # (matching the original hand-written menu's own wrapping),
+                # remaining lines indented to align underneath it.
+                if ($item.FullDesc.Count -gt 0) {
+                    Write-Host ("  {0}) {1} -- {2}" -f $item.Number, $item.Label, $item.FullDesc[0])
+                    for ($i = 1; $i -lt $item.FullDesc.Count; $i++) {
+                        Write-Host ("                        {0}" -f $item.FullDesc[$i])
+                    }
+                } else {
+                    Write-Host ("  {0}) {1}" -f $item.Number, $item.Label)
+                }
+            }
+        }
+        Write-Host ""
+    }
+}
+
+# =============================================================================
 # MAIN MENU LOOP
 # =============================================================================
 try {
+Set-ConsoleMaximizedIfSupported
 while ($true) {
     # Refresh the drive-info snapshot at the start of each menu iteration so
     # any drive changes since the last pass (USB ejected, network share
@@ -10268,66 +10422,27 @@ while ($true) {
     if ($mode) {
         # Skip straight past the menu -- fall through to the mode body below.
     } else {
-    Write-Host ""
-    Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
-    Write-Host " Library Management" -ForegroundColor DarkCyan
-    Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
-    Write-Host "  1) AutoSync        -- Extract ZIPs (NAS or local) to a local"
-    Write-Host "                        folder, then register the games."
-    Write-Host "  2) Register only   -- Games are already extracted; just register."
-    Write-Host "  3) Propagate Controls -- Re-copy control bindings from reference"
-    Write-Host "                        games to other compatible games, without"
-    Write-Host "                        going through AutoSync/Register first."
-    Write-Host ""
-    Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
-    Write-Host " Game Enhancements (all optional -- games work without these)" -ForegroundColor DarkCyan
-    Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
-    Write-Host "  4) Crosshair setup -- Pick and deploy custom crosshairs to all"
-    Write-Host "                        registered lightgun games."
-    Write-Host "  5) ReShade setup   -- Add visual enhancements (sharper image, better"
-    Write-Host "                        colours, scanlines, borders)."
-    Write-Host "  6) dgVoodoo2 setup -- Fix old DX8, DirectDraw, and Glide games that"
-    Write-Host "                        crash or show black screens."
-    Write-Host "  7) GPU fix setup   -- Auto-detect your GPU (AMD / NVIDIA / Intel) and"
-    Write-Host "                        apply the matching compatibility fix to every"
-    Write-Host "                        registered game that has one."
-    Write-Host "  8) Force feedback (FFB) setup -- Wheel/stick rumble and force feedback."
-    Write-Host "                        Covers TeknoParrot's built-in FFB Blaster (needs a"
-    Write-Host "                        paid membership) and a free third-party plugin."
-    Write-Host "  9) BepInEx update check -- Checks games with BepInEx already installed"
-    Write-Host "                        against the latest stable release and offers to"
-    Write-Host "                        update (64-bit only). Never installs it fresh."
-    Write-Host ""
-    Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
-    Write-Host " Maintenance and Recovery" -ForegroundColor DarkCyan
-    Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
-    Write-Host "  10) Library health check -- Read-only: reports registered/broken/"
-    Write-Host "                        unregistered counts plus GPU fix / FFB Blaster /"
-    Write-Host "                        dgVoodoo2 coverage and ReShade/BepInEx install"
-    Write-Host "                        counts. No extraction, registration, repair, or"
-    Write-Host "                        network access -- just a fast status check."
-    Write-Host "  11) Restore backup  -- Roll UserProfiles, LaunchBox files, or Postgres"
-    Write-Host "                        databases back to a previous backup."
-    Write-Host "  12) Postgres setup -- Installs/configures the local PostgreSQL"
-    Write-Host "                        database that some Incredible Technologies"
-    Write-Host "                        games need (Golden Tee Live, Power Putt Live,"
-    Write-Host "                        Silver Strike Bowling Live, Target Toss Pro)."
-    Write-Host "                        Requires running this script as Administrator"
-    Write-Host "                        if PostgreSQL isn't installed yet."
-    Write-Host ""
-    Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
-    Write-Host " Application" -ForegroundColor DarkCyan
-    Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
-    Write-Host "  13) Check for Updates -- Manual, backup-first check against the latest"
-    Write-Host "                        GitHub release. Nothing is downloaded or changed"
-    Write-Host "                        without your explicit confirmation."
-    Write-Host "  14) Exit"
-    Write-Host ""
+    # Show-MainMenu (issue #104): renders from Get-MainMenuSections at
+    # whichever layout tier fits the current console window. Detected fresh
+    # every redraw so a mid-session resize picks the right tier next time,
+    # not just at startup.
+    $menuMaxNumber = (Get-MainMenuItems | Measure-Object -Property Number -Maximum).Maximum
+    $fullTierLineCount = 4 + (@(Get-MainMenuSections | ForEach-Object {
+        3 + ($_.Items | ForEach-Object { 1 + $_.FullDesc.Count } | Measure-Object -Sum).Sum
+    }) | Measure-Object -Sum).Sum
+    $consoleWidth  = try { $Host.UI.RawUI.WindowSize.Width } catch { 80 }
+    $consoleHeight = try { $Host.UI.RawUI.WindowSize.Height } catch { 25 }
+    $menuTier = Get-ConsoleLayoutTier -Width $consoleWidth -Height $consoleHeight -RequiredFullLines $fullTierLineCount
+    Show-MainMenu -Tier $menuTier
     if ($Unattended) {
         Write-Host "  [Unattended] Mode must be set before starting." -ForegroundColor Red
         Write-Log "ERROR: Unattended mode -- reached menu loop."; exit 1
     }
-    $modeChoice = (Read-Host "Enter 1-14").Trim()
+    $modeChoice = (Read-Host "Enter 1-$menuMaxNumber").Trim()
+    if ($modeChoice -eq '?') {
+        Show-MainMenu -Tier 'Full'
+        continue
+    }
     switch ($modeChoice) {
         "1"     { $mode = "AutoSync"       }
         "2"     { $mode = "RegisterOnly"   }
@@ -10343,7 +10458,7 @@ while ($true) {
         "12"    { $mode = "PostgresSetup"  }
         "13"    { $mode = "CheckForUpdates" }
         "14"    { break }
-        default { Write-Host "  Invalid choice. Enter 1-14." -ForegroundColor Yellow; continue }
+        default { Write-Host "  Invalid choice. Enter 1-$menuMaxNumber." -ForegroundColor Yellow; continue }
     }
     if ($modeChoice -eq "14") { break }
     }

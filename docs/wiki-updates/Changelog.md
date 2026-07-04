@@ -2,9 +2,10 @@
 
 ## v1.0 RC2
 
-Release-candidate package identity correction.
+Release-candidate package identity correction and adaptive menu inclusion.
 
 - Fixed the runtime banner/header so the RC2 package displays `TeknoParrot Manager v1.0 RC2` instead of the stale RC1 label.
+- Included the adaptive responsive main menu from issue #104: full, standard, and compact layouts selected by console size, with unchanged mode numbers and behavior.
 - Added release-package validation for the packaged `TeknoParrot-Manager.ps1` version/header/banner, preventing structurally valid ZIPs with stale release identity from passing validation.
 
 ## v0.99.44 BETA

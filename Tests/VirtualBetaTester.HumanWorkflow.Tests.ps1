@@ -171,15 +171,19 @@ Describe "Virtual Beta Tester: main menu recovers from invalid input (issue #88 
         # not a function -- FunctionDefinitionAst extraction above never touches
         # it. Extract only the bounded if/else statement that prints the menu,
         # reads one choice, and validates it, identified structurally via the
-        # "Library Management" header text unique to that block (not by line
-        # number, which drifts). Wrapped in this test's own while loop so
-        # break/continue inside the extracted switch behave exactly as they do
-        # in production (both governed by an enclosing while loop) -- dot-sourced
-        # from a real temp file, never [scriptblock]::Create(), same as above.
+        # "Show-MainMenu" call unique to that block (issue #104 -- the menu
+        # display itself moved into a data-driven function, so the literal
+        # "Library Management" header text this marker used to look for no
+        # longer appears inline here at all; it lives in Get-MainMenuSections
+        # now) (not by line number, which drifts). Wrapped in this test's own
+        # while loop so break/continue inside the extracted switch behave
+        # exactly as they do in production (both governed by an enclosing
+        # while loop) -- dot-sourced from a real temp file, never
+        # [scriptblock]::Create(), same as above.
         $ifStatementAsts = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.IfStatementAst] }, $true)
-        $menuIfAst = $ifStatementAsts | Where-Object { $_.Extent.Text -like '*Library Management*' } | Select-Object -First 1
+        $menuIfAst = $ifStatementAsts | Where-Object { $_.Extent.Text -like '*Show-MainMenu*' } | Select-Object -First 1
         if (-not $menuIfAst) {
-            throw "Could not locate the main menu's if/else block in TeknoParrot-Manager.ps1 (looked for an if-statement containing 'Library Management'). The menu structure may have changed -- update this test's extraction marker to match."
+            throw "Could not locate the main menu's if/else block in TeknoParrot-Manager.ps1 (looked for an if-statement containing 'Show-MainMenu'). The menu structure may have changed -- update this test's extraction marker to match."
         }
 
         $menuHarnessPath = Join-Path $TestDrive ("vbt-main-menu-" + [guid]::NewGuid().ToString('N') + '.ps1')

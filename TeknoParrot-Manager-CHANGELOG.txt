@@ -7,13 +7,19 @@
 
 
 -------------------------------------------------------------------------------
-  v1.0 RC2  (2026-07-04)  -- RC2 release identity correction and package-version guard
+  v1.0 RC2  (2026-07-04)  -- adaptive menu, release identity correction, integrity guard
   ------------------------------------------------------------
   Release blocker fix: the first published RC2 ZIP was structurally valid
   but still displayed the runtime banner "TeknoParrot Manager v1.0 RC1".
   The runtime banner now displays v1.0 RC2, and release package validation
   now checks the packaged TeknoParrot-Manager.ps1 version/header/banner so
   this drift cannot pass ZIP validation again.
+
+  Usability (issue #104): the main menu is now adaptive and data-driven.
+  Large console windows keep the full descriptive layout; medium windows use
+  concise one-line descriptions; small or short windows use compact labels
+  with "?" available for details. Mode numbers and mode behavior are
+  unchanged.
 
 
 -------------------------------------------------------------------------------

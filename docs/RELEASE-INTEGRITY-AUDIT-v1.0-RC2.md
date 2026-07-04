@@ -2,16 +2,42 @@
 
 Date: 2026-07-04
 
-Status: NOT CLEAN YET. The release identity defects are fixed in the working
-tree, but production script and certification-harness code changed after the
-certified `15f3400e1f3d200c9df98a86605abff4fe419fe1` build. RC2 must be
-re-certified before any replacement public asset is published.
+Status: NOT CLEAN YET. The release identity defects are fixed and issue #104
+adaptive menu work has been ported into the corrected RC2 line, but production
+script and certification-harness code changed after the certified
+`15f3400e1f3d200c9df98a86605abff4fe419fe1` build. RC2 must be re-certified
+before any replacement public asset is published.
 
 ## Scope
 
 Audited runtime identity, release artifact identity, release metadata,
 repository documentation, live GitHub wiki pages, updater/version behavior,
 generated certification reports, and regression protection.
+
+## Open Branch / PR Inventory
+
+Open PR classification for corrected RC2:
+
+| PR | Branch | Classification | Reason |
+| --- | --- | --- | --- |
+| #112 | `feature/issue-104-adaptive-menu-1.1` | Include in RC2 | Release Manager explicitly expanded RC2 scope to include the adaptive/professional menu unless unsafe unrelated work was found. Reviewed implementation commit touches menu rendering and tests only; docs commit touches matching docs. Ported by cherry-picking commits, not by merging branch sync commits. |
+| #114 | `tooling/sync-and-run-launcher` | Abandon/close as stale | `Sync-And-Run.bat` already exists on `main` via commit `ef3fbda`. The open PR branch is stale/duplicative and not needed for RC2. |
+| #110 | `docs/issue-109-cost-aware-testing` | Needs review | Useful process improvement, but it adds a PR template and testing policy language that overlaps the newly mandatory Release Integrity gate. Do not blindly fold into RC2 without reconciling policy wording. |
+| #93 | `docs/mvri-roadmap-item` | Defer post-1.0 | Roadmap/planning item, not release-critical and not needed for RC2 external testing. |
+| #60 | `docs/constitution-and-coordination-standard` | Needs review / likely superseded | Main already contains `CONSTITUTION.md`; branch is old governance work that may conflict with current release-governance text. Review separately after 1.0 unless a concrete blocker is found. |
+| #58 | `docs/project-identity-standard` | Defer / needs review | Project identity standard was previously called out as needing intentional review before adoption. Not required for RC2 product testing. |
+| #57 | `docs/release-candidate-checklist` | Needs review / likely superseded | New Release Integrity Audit section in `RELEASE-SAFETY-CHECKLIST.md` covers the current gate. Old checklist branch should be reconciled later rather than merged blindly. |
+| #56 | `feature/updater-sha256-verification` | Defer post-1.0 | Valuable updater hardening, but PR itself says "Not a blocker for 1.0" and it adds new updater behavior. Keep out of RC2 unless separately authorized and re-certified. |
+
+Notable unmerged/non-PR branches:
+
+- `feature/issue-85-tier1-bios-detection`, issue #88 phase branches, DAT UX
+  branches, certification provenance branches, and updater RC-tag fixes have
+  already shipped to `main` through merged PRs in the current cycle.
+- `review/issue-80-normalization` has divergent local/remote history but issue
+  #80 golden cases are covered on `main`; do not merge blindly.
+- Older release/docs/governance branches are either already represented on
+  `main`, stale, or post-1.0 review material.
 
 ## Issue #104 Adaptive Menu Verification
 
@@ -20,15 +46,17 @@ generated certification reports, and regression protection.
 - PR #112 is open from `feature/issue-104-adaptive-menu-1.1` to `main` and is
   explicitly titled `[1.1, DO NOT MERGE YET]`.
 - PR #112 body and commit `b91af37f828f8f42511db59978908f049ab4ad39`
-  explicitly state the adaptive menu is real new-capability work deferred to
-  Version 1.1 by the feature freeze.
-- Commit `15f3400e1f3d200c9df98a86605abff4fe419fe1` is therefore expected to
-  contain the classic menu.
-- Missing adaptive menu behavior in RC2 is not an RC2 regression.
-- Stale metadata remains on issue #104 itself: labels/milestone still include
-  `release-blocker`, `rc2-required`, and `RC2`. That issue-tracker metadata
-  conflicts with PR #112's explicit 1.1 deferral and should be cleaned up
-  separately before final 1.0 governance review.
+  originally stated the adaptive menu was deferred to Version 1.1 by the
+  feature freeze.
+- The Release Manager later expanded/clarified RC2 scope: completed current
+  1.0 testing-cycle work should be included unless unsafe, unrelated,
+  incomplete, or explicitly post-1.0, and specifically directed that issue
+  #104 / PR #112 be included in RC2 unless unsafe unrelated work was found.
+- Commit `15f3400e1f3d200c9df98a86605abff4fe419fe1` was expected to contain
+  the classic menu at the time it was certified. Under the revised RC2 scope,
+  corrected RC2 must contain the adaptive/professional menu.
+- Missing adaptive menu behavior in the invalid `15f3400` RC2 asset was not a
+  packaging regression; it was a scope decision that has now been superseded.
 
 ## Runtime Version Discrepancy Root Cause
 
@@ -84,6 +112,11 @@ said RC1. That made the published RC2 asset invalid.
 - `docs/wiki-updates/Changelog.md`: added RC2 release-integrity entry.
 - Live wiki updated and pushed at wiki commit
   `c6fd2fb Update RC2 release integrity wiki pages`.
+- Issue #104 / PR #112 adaptive menu implementation was ported into the
+  corrected RC2 line by cherry-picking the reviewed implementation and docs
+  commits (`b91af37f828f8f42511db59978908f049ab4ad39` and
+  `c5a9f6a262d01219d4800852b7d96c0135556cb3`) without the branch merge
+  commits.
 
 ## Repository Files Reviewed
 
@@ -173,7 +206,7 @@ immutable release/tag, or publication under a new tag after re-certification.
 - GitHub release target: `15f3400e1f3d200c9df98a86605abff4fe419fe1`
 - GitHub latest endpoint: `v1.0-RC2`
 - Metadata result: GitHub metadata is internally RC2-consistent, but the
-  packaged runtime is not.
+  currently published packaged runtime is not.
 
 ## Remaining Intentional Discrepancies
 
@@ -186,8 +219,9 @@ immutable release/tag, or publication under a new tag after re-certification.
   regression history, not current release identity.
 - Historical changelog entries remain historical. The current release identity
   is represented by the new RC2 entry.
-- Issue #104 tracker labels/milestone still imply RC2-required, but branch and
-  PR evidence show adaptive menu work is intentionally deferred to 1.1.
+- Historical PR #112 text still records its original 1.1 deferral. That was
+  true when written, but has been superseded by the Release Manager's explicit
+  RC2 scope clarification.
 
 ## Required Before Replacement RC2 Publication
 
@@ -196,8 +230,9 @@ immutable release/tag, or publication under a new tag after re-certification.
 3. Validate local ZIP with `Tests/Test-ReleasePackage.ps1`.
 4. Extract the ZIP and confirm the startup banner displays `TeknoParrot Manager
    v1.0 RC2`.
-5. Run real-machine certification against the corrected commit because
+5. Confirm extracted ZIP includes the adaptive/professional menu.
+6. Run real-machine certification against the corrected commit because
    production script and certification harness changed.
-6. Publish only after downloaded GitHub asset validation passes.
-7. Resolve immutable-release handling: delete/recreate `v1.0-RC2` with explicit
+7. Publish only after downloaded GitHub asset validation passes.
+8. Resolve immutable-release handling: delete/recreate `v1.0-RC2` with explicit
    authorization, or use a new replacement tag/release.
