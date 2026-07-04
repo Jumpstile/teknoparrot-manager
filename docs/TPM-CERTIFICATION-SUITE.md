@@ -177,6 +177,13 @@ Every certification run should produce:
 
 ## Running Certification
 
+For manual tester validation of the latest merged TPM code (not a full
+certification pass), run `Sync-And-Run.bat` from the repository root on
+`main`. This file lives at the repo root because it depends on the checkout's
+`.git` directory: it fetches `origin/main`, fast-forwards only when safe,
+then launches `TeknoParrot-Manager.ps1`. It is a tester checkout launcher,
+not an installed runtime launcher and not a release ZIP entry point.
+
 The easiest way to run a certification pass on the arcade machine is to
 double-click `scripts\Run-TPM-Certification-Suite.bat`. It can be copied
 anywhere (Desktop, a USB stick) and still finds the repo -- it does not

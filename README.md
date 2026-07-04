@@ -150,6 +150,16 @@ No additional software required to get started. Optional tools (ReShade, dgVoodo
 
 ## Running the Script
 
+**Tester checkout entry point -- sync first, then run:**
+```
+Sync-And-Run.bat
+```
+
+Run this from the root of a git checkout on `main` when validating the
+latest merged code. It fetches `origin/main`, fast-forwards only when safe,
+then launches `TeknoParrot-Manager.ps1`. It is not part of the release ZIP;
+installed/runtime users should use `TeknoParrot-Manager.bat`.
+
 **Option A — Double-click launcher (easiest):**
 ```
 TeknoParrot-Manager.bat
