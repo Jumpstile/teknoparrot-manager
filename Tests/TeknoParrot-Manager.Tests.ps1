@@ -3060,23 +3060,50 @@ Describe "Get-ConsoleLayoutTier" {
     }
 }
 
+Describe "Split-TextForMenuWidth" {
+    It "keeps text on one line when the menu column is wide enough" {
+        $lines = Split-TextForMenuWidth -Text 'Alpha beta gamma delta' -Width 80
+        $lines.Count | Should -Be 1
+        $lines[0] | Should -Be 'Alpha beta gamma delta'
+    }
+    It "wraps text deterministically when the menu column is narrow" {
+        $lines = Split-TextForMenuWidth -Text 'Alpha beta gamma delta' -Width 12
+        $lines.Count | Should -BeGreaterThan 1
+        ($lines -join '|') | Should -Be 'Alpha beta gamma|delta'
+    }
+}
+
 Describe "Show-MainMenu" {
     It "Full tier prints every item's full description and a numbered line for every item" {
-        $output = Show-MainMenu -Tier 'Full' 6>&1 | Out-String
+        $output = Show-MainMenu -Tier 'Full' -Width 160 6>&1 | Out-String
         foreach ($item in (Get-MainMenuItems)) {
             $output | Should -Match ([regex]::Escape("$($item.Number)) $($item.Label)"))
         }
     }
     It "Standard tier prints every item's short description" {
-        $output = Show-MainMenu -Tier 'Standard' 6>&1 | Out-String
+        $output = Show-MainMenu -Tier 'Standard' -Width 120 6>&1 | Out-String
         $item = (Get-MainMenuItems) | Where-Object { $_.Mode -eq 'AutoSync' }
         $output | Should -Match ([regex]::Escape($item.ShortDesc))
     }
     It "Compact tier prints only labels and the 'Type ? for descriptions' hint, no ShortDesc/FullDesc text" {
-        $output = Show-MainMenu -Tier 'Compact' 6>&1 | Out-String
+        $output = Show-MainMenu -Tier 'Compact' -Width 80 6>&1 | Out-String
         $output | Should -Match 'Type \? for descriptions'
         $autoSync = (Get-MainMenuItems) | Where-Object { $_.Mode -eq 'AutoSync' }
         $output | Should -Not -Match ([regex]::Escape($autoSync.ShortDesc))
+    }
+    It "wide Full tier uses available width instead of the old narrow pre-wrapped menu text" {
+        $output = Show-MainMenu -Tier 'Full' -Width 200 6>&1 | Out-String
+        $output | Should -Match ([regex]::Escape("1) AutoSync -- Extract ZIPs (NAS or local) to a local folder, then register the games."))
+        $output | Should -Not -Match '(?m)^\s+folder, then register the games\.'
+    }
+    It "narrow Full tier wraps readable continuation lines under the menu description column" {
+        $output = Show-MainMenu -Tier 'Full' -Width 70 6>&1 | Out-String
+        $output | Should -Match ([regex]::Escape("1) AutoSync -- Extract ZIPs"))
+        $output | Should -Match '(?m)^\s{10,}register the games\.'
+    }
+    It "normal Standard tier keeps grouped one-line descriptions when they fit" {
+        $output = Show-MainMenu -Tier 'Standard' -Width 130 6>&1 | Out-String
+        $output | Should -Match ([regex]::Escape("1) AutoSync                    -- Extract ZIPs (NAS or local), then register the games."))
     }
 }
 

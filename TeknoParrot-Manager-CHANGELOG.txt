@@ -26,6 +26,11 @@
   local release ZIP / assistant workspace artifacts are ignored so they do
   not falsely fail the repository-clean certification gate.
 
+  Usability fix (issue #104): the adaptive menu now wraps descriptions to
+  the actual console width instead of reusing the old narrow hand-wrapped
+  text. Wide consoles use the available horizontal space; normal consoles
+  keep concise grouped descriptions; narrow consoles remain readable.
+
 
 -------------------------------------------------------------------------------
   v1.0 RC1  (2026-07-03)  -- pcsx2x6 crosshair path fix, auto-update reliability, BIOS/firmware detection

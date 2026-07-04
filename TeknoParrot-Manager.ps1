@@ -10331,6 +10331,50 @@ function Get-ConsoleLayoutTier {
     return 'Compact'
 }
 
+function Get-ConsoleContentWidth {
+    try {
+        $width = [int]$Host.UI.RawUI.WindowSize.Width
+        if ($width -gt 0) { return $width }
+    } catch {}
+    try {
+        $width = [int]$Host.UI.RawUI.BufferSize.Width
+        if ($width -gt 0) { return $width }
+    } catch {}
+    try {
+        $width = [int][Console]::WindowWidth
+        if ($width -gt 0) { return $width }
+    } catch {}
+    return 80
+}
+
+function Split-TextForMenuWidth {
+    param(
+        [string]$Text,
+        [int]$Width
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Text)) { return @() }
+    if ($Width -lt 20) { $Width = 20 }
+
+    $words = @($Text -split '\s+' | Where-Object { $_ })
+    $lines = New-Object System.Collections.Generic.List[string]
+    $current = ''
+    foreach ($word in $words) {
+        if ($current.Length -eq 0) {
+            $current = $word
+            continue
+        }
+        if (($current.Length + 1 + $word.Length) -le $Width) {
+            $current = "$current $word"
+        } else {
+            [void]$lines.Add($current)
+            $current = $word
+        }
+    }
+    if ($current.Length -gt 0) { [void]$lines.Add($current) }
+    return ,@($lines)
+}
+
 # Best-effort console maximize -- many hosts (redirected output, ISE, some
 # CI/test runners) don't support resizing the window at all; this must never
 # throw or block startup over a cosmetic nicety. Called once, not on every
@@ -10356,10 +10400,14 @@ function Set-ConsoleMaximizedIfSupported {
 # never touches $mode; the caller's existing Read-Host/switch dispatch is
 # completely unchanged by this function or by which tier is chosen.
 function Show-MainMenu {
-    param([ValidateSet('Full', 'Standard', 'Compact')][string]$Tier)
+    param(
+        [ValidateSet('Full', 'Standard', 'Compact')][string]$Tier,
+        [int]$Width = (Get-ConsoleContentWidth)
+    )
 
     $items = Get-MainMenuItems
     $maxNumber = ($items | Measure-Object -Property Number -Maximum).Maximum
+    $contentWidth = [Math]::Max(40, $Width - 2)
 
     Write-Host ""
     if ($Tier -eq 'Compact') {
@@ -10381,18 +10429,28 @@ function Show-MainMenu {
         foreach ($item in $section.Items) {
             if ($Tier -eq 'Standard') {
                 if ($item.ShortDesc) {
-                    Write-Host ("  {0}) {1,-27} -- {2}" -f $item.Number, $item.Label, $item.ShortDesc)
+                    $prefix = "  {0}) {1,-27} -- " -f $item.Number, $item.Label
+                    $descWidth = [Math]::Max(24, $contentWidth - $prefix.Length)
+                    $lines = Split-TextForMenuWidth -Text $item.ShortDesc -Width $descWidth
+                    Write-Host ($prefix + $lines[0])
+                    for ($i = 1; $i -lt $lines.Count; $i++) {
+                        Write-Host ((' ' * $prefix.Length) + $lines[$i])
+                    }
                 } else {
                     Write-Host ("  {0}) {1}" -f $item.Number, $item.Label)
                 }
             } else {
-                # Full tier: first FullDesc line joined onto the label line
-                # (matching the original hand-written menu's own wrapping),
-                # remaining lines indented to align underneath it.
+                # Full tier: join the semantic description fragments and wrap
+                # them to the actual console width so wide terminals are not
+                # stuck with the old narrow, hand-wrapped column layout.
                 if ($item.FullDesc.Count -gt 0) {
-                    Write-Host ("  {0}) {1} -- {2}" -f $item.Number, $item.Label, $item.FullDesc[0])
-                    for ($i = 1; $i -lt $item.FullDesc.Count; $i++) {
-                        Write-Host ("                        {0}" -f $item.FullDesc[$i])
+                    $prefix = "  {0}) {1} -- " -f $item.Number, $item.Label
+                    $descText = ($item.FullDesc -join ' ')
+                    $descWidth = [Math]::Max(28, $contentWidth - $prefix.Length)
+                    $lines = Split-TextForMenuWidth -Text $descText -Width $descWidth
+                    Write-Host ($prefix + $lines[0])
+                    for ($i = 1; $i -lt $lines.Count; $i++) {
+                        Write-Host ((' ' * $prefix.Length) + $lines[$i])
                     }
                 } else {
                     Write-Host ("  {0}) {1}" -f $item.Number, $item.Label)
@@ -10435,10 +10493,10 @@ while ($true) {
     $fullTierLineCount = 4 + (@(Get-MainMenuSections | ForEach-Object {
         3 + ($_.Items | ForEach-Object { 1 + $_.FullDesc.Count } | Measure-Object -Sum).Sum
     }) | Measure-Object -Sum).Sum
-    $consoleWidth  = try { $Host.UI.RawUI.WindowSize.Width } catch { 80 }
+    $consoleWidth  = Get-ConsoleContentWidth
     $consoleHeight = try { $Host.UI.RawUI.WindowSize.Height } catch { 25 }
     $menuTier = Get-ConsoleLayoutTier -Width $consoleWidth -Height $consoleHeight -RequiredFullLines $fullTierLineCount
-    Show-MainMenu -Tier $menuTier
+    Show-MainMenu -Tier $menuTier -Width $consoleWidth
     if ($Unattended) {
         Write-Host "  [Unattended] Mode must be set before starting." -ForegroundColor Red
         Write-Log "ERROR: Unattended mode -- reached menu loop."; exit 1
