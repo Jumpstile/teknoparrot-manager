@@ -5401,10 +5401,22 @@ function Invoke-BepInExUpdateCheck {
 # separate per-call TLS setup is needed here.
 
 function ConvertTo-ManagerComparableVersion {
+    # [version] can only hold numeric dot-separated segments -- it throws on
+    # any non-numeric suffix (e.g. "1.0-RC1"). Release tags carry a "-RC#"
+    # (or similar prerelease) suffix for display purposes, so the numeric
+    # base is extracted before parsing. This is sufficient for this script's
+    # only actual use of the result: comparing the single current
+    # $ScriptVersion against a single latest-release tag, never two
+    # prereleases of the same numeric base against each other, so a release
+    # candidate and its own eventual final release under the same numeric
+    # base (e.g. "1.0-RC1" and "1.0") compare as equal rather than the RC
+    # being "older" -- correct for "don't re-offer the version I'm already
+    # on," not a general semver-precedence implementation. See issue #105.
     param([Parameter(Mandatory)][string]$VersionText)
-    $normalized = ($VersionText -replace '^v', '').Trim()
+    $normalized  = ($VersionText -replace '^v', '').Trim()
+    $numericPart = ($normalized -split '-')[0].Trim()
     try {
-        return [version]$normalized
+        return [version]$numericPart
     } catch {
         throw "Version '$VersionText' is not a valid version number after normalization."
     }

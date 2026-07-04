@@ -39,15 +39,19 @@ function Get-TpmLocalVersion {
 }
 
 function ConvertTo-TpmVersion {
+    # Kept in lockstep with TeknoParrot-Manager.ps1's own
+    # ConvertTo-ManagerComparableVersion -- see that function's comment
+    # (issue #105) for why the "-RC#" suffix is stripped before parsing.
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
         [string]$VersionText
     )
 
-    $normalized = ($VersionText -replace '^v', '').Trim()
+    $normalized  = ($VersionText -replace '^v', '').Trim()
+    $numericPart = ($normalized -split '-')[0].Trim()
     try {
-        return [version]$normalized
+        return [version]$numericPart
     } catch {
         throw "Version '$VersionText' is not a valid System.Version value after normalization."
     }

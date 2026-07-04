@@ -2208,6 +2208,28 @@ Describe "ConvertTo-ManagerComparableVersion" {
     It "throws on a non-numeric version string" {
         { ConvertTo-ManagerComparableVersion -VersionText 'latest' } | Should -Throw
     }
+
+    # Issue #105: v1.0-RC1's own release tag broke this function -- [version]
+    # cannot hold a "-RC1" suffix, so every updater path (menu-triggered and
+    # the quiet startup check) failed to recognize the RC1 release at all.
+    It "strips a release-candidate suffix and parses the numeric base" {
+        ConvertTo-ManagerComparableVersion -VersionText 'v1.0-RC1' | Should -Be ([version]'1.0')
+    }
+    It "a 0.99.x version compares as older than 1.0-RC1" {
+        $local  = ConvertTo-ManagerComparableVersion -VersionText '0.99.44'
+        $latest = ConvertTo-ManagerComparableVersion -VersionText 'v1.0-RC1'
+        $latest -gt $local | Should -Be $true -Because "a release candidate for 1.0 must be recognized as newer than any 0.99.x release"
+    }
+    It "0.99.99 compares as older than 1.0-RC1 (not just a higher patch number in the same line)" {
+        $local  = ConvertTo-ManagerComparableVersion -VersionText '0.99.99'
+        $latest = ConvertTo-ManagerComparableVersion -VersionText 'v1.0-RC1'
+        $latest -gt $local | Should -Be $true
+    }
+    It "a version equal to the current release candidate is not offered as an update" {
+        $local  = ConvertTo-ManagerComparableVersion -VersionText '1.0'
+        $latest = ConvertTo-ManagerComparableVersion -VersionText 'v1.0-RC1'
+        $latest -gt $local | Should -Be $false -Because "already running v1.0-RC1 must not be offered v1.0-RC1 as a new update"
+    }
 }
 
 Describe "Get-ManagerUpdateRelease" {
