@@ -10375,6 +10375,91 @@ function Split-TextForMenuWidth {
     return ,@($lines)
 }
 
+function Format-MainMenuItemLines {
+    param(
+        [object]$Item,
+        [ValidateSet('Full', 'Standard')][string]$Tier,
+        [int]$Width
+    )
+
+    $result = New-Object System.Collections.Generic.List[string]
+    if ($Tier -eq 'Standard') {
+        if ($Item.ShortDesc) {
+            $prefix = "  {0}) {1,-27} -- " -f $Item.Number, $Item.Label
+            $descWidth = [Math]::Max(24, $Width - $prefix.Length)
+            $descLines = Split-TextForMenuWidth -Text $Item.ShortDesc -Width $descWidth
+            if ($descLines.Count -gt 0) {
+                [void]$result.Add($prefix + $descLines[0])
+                for ($i = 1; $i -lt $descLines.Count; $i++) {
+                    [void]$result.Add((' ' * $prefix.Length) + $descLines[$i])
+                }
+            }
+        } else {
+            [void]$result.Add(("  {0}) {1}" -f $Item.Number, $Item.Label))
+        }
+    } else {
+        if ($Item.FullDesc.Count -gt 0) {
+            $prefix = "  {0}) {1} -- " -f $Item.Number, $Item.Label
+            $descText = ($Item.FullDesc -join ' ')
+            $descWidth = [Math]::Max(28, $Width - $prefix.Length)
+            $descLines = Split-TextForMenuWidth -Text $descText -Width $descWidth
+            if ($descLines.Count -gt 0) {
+                [void]$result.Add($prefix + $descLines[0])
+                for ($i = 1; $i -lt $descLines.Count; $i++) {
+                    [void]$result.Add((' ' * $prefix.Length) + $descLines[$i])
+                }
+            }
+        } else {
+            [void]$result.Add(("  {0}) {1}" -f $Item.Number, $Item.Label))
+        }
+    }
+    return ,@($result)
+}
+
+function Format-MainMenuSectionLines {
+    param(
+        [object]$Section,
+        [ValidateSet('Full', 'Standard')][string]$Tier,
+        [int]$Width
+    )
+
+    $result = New-Object System.Collections.Generic.List[string]
+    $ruleWidth = [Math]::Min(44, [Math]::Max(24, $Width))
+    $rule = '-' * $ruleWidth
+    [void]$result.Add($rule)
+    [void]$result.Add(" $($Section.Header)")
+    [void]$result.Add($rule)
+    foreach ($item in $Section.Items) {
+        foreach ($line in (Format-MainMenuItemLines -Item $item -Tier $Tier -Width $Width)) {
+            [void]$result.Add($line)
+        }
+    }
+    [void]$result.Add('')
+    return ,@($result)
+}
+
+function Join-MainMenuColumns {
+    param(
+        [string[]]$Left,
+        [string[]]$Right,
+        [int]$LeftWidth,
+        [int]$Gap = 4
+    )
+
+    $result = New-Object System.Collections.Generic.List[string]
+    $count = [Math]::Max($Left.Count, $Right.Count)
+    for ($i = 0; $i -lt $count; $i++) {
+        $leftLine = if ($i -lt $Left.Count) { $Left[$i] } else { '' }
+        $rightLine = if ($i -lt $Right.Count) { $Right[$i] } else { '' }
+        if ($rightLine.Length -gt 0) {
+            [void]$result.Add($leftLine.PadRight($LeftWidth) + (' ' * $Gap) + $rightLine)
+        } else {
+            [void]$result.Add($leftLine)
+        }
+    }
+    return ,@($result)
+}
+
 # Best-effort console maximize -- many hosts (redirected output, ISE, some
 # CI/test runners) don't support resizing the window at all; this must never
 # throw or block startup over a cosmetic nicety. Called once, not on every
@@ -10408,6 +10493,7 @@ function Show-MainMenu {
     $items = Get-MainMenuItems
     $maxNumber = ($items | Measure-Object -Property Number -Maximum).Maximum
     $contentWidth = [Math]::Max(40, $Width - 2)
+    $wideLayout = ($Tier -eq 'Full' -and $Width -ge 160)
 
     Write-Host ""
     if ($Tier -eq 'Compact') {
@@ -10422,42 +10508,32 @@ function Show-MainMenu {
         return
     }
 
-    foreach ($section in Get-MainMenuSections) {
-        Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
-        Write-Host " $($section.Header)" -ForegroundColor DarkCyan
-        Write-Host "--------------------------------------------" -ForegroundColor DarkCyan
-        foreach ($item in $section.Items) {
-            if ($Tier -eq 'Standard') {
-                if ($item.ShortDesc) {
-                    $prefix = "  {0}) {1,-27} -- " -f $item.Number, $item.Label
-                    $descWidth = [Math]::Max(24, $contentWidth - $prefix.Length)
-                    $lines = Split-TextForMenuWidth -Text $item.ShortDesc -Width $descWidth
-                    Write-Host ($prefix + $lines[0])
-                    for ($i = 1; $i -lt $lines.Count; $i++) {
-                        Write-Host ((' ' * $prefix.Length) + $lines[$i])
-                    }
-                } else {
-                    Write-Host ("  {0}) {1}" -f $item.Number, $item.Label)
-                }
-            } else {
-                # Full tier: join the semantic description fragments and wrap
-                # them to the actual console width so wide terminals are not
-                # stuck with the old narrow, hand-wrapped column layout.
-                if ($item.FullDesc.Count -gt 0) {
-                    $prefix = "  {0}) {1} -- " -f $item.Number, $item.Label
-                    $descText = ($item.FullDesc -join ' ')
-                    $descWidth = [Math]::Max(28, $contentWidth - $prefix.Length)
-                    $lines = Split-TextForMenuWidth -Text $descText -Width $descWidth
-                    Write-Host ($prefix + $lines[0])
-                    for ($i = 1; $i -lt $lines.Count; $i++) {
-                        Write-Host ((' ' * $prefix.Length) + $lines[$i])
-                    }
-                } else {
-                    Write-Host ("  {0}) {1}" -f $item.Number, $item.Label)
-                }
+    $sections = @(Get-MainMenuSections)
+    if ($wideLayout) {
+        $gap = 4
+        $columnWidth = [Math]::Floor(($contentWidth - $gap) / 2)
+        $leftLines = New-Object System.Collections.Generic.List[string]
+        $rightLines = New-Object System.Collections.Generic.List[string]
+        foreach ($section in @($sections[0], $sections[2])) {
+            foreach ($line in (Format-MainMenuSectionLines -Section $section -Tier 'Full' -Width $columnWidth)) {
+                [void]$leftLines.Add($line)
             }
         }
-        Write-Host ""
+        foreach ($section in @($sections[1], $sections[3])) {
+            foreach ($line in (Format-MainMenuSectionLines -Section $section -Tier 'Full' -Width $columnWidth)) {
+                [void]$rightLines.Add($line)
+            }
+        }
+        foreach ($line in (Join-MainMenuColumns -Left $leftLines -Right $rightLines -LeftWidth $columnWidth -Gap $gap)) {
+            Write-Host $line
+        }
+        return
+    }
+
+    foreach ($section in $sections) {
+        foreach ($line in (Format-MainMenuSectionLines -Section $section -Tier $Tier -Width $contentWidth)) {
+            Write-Host $line
+        }
     }
 }
 

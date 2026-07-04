@@ -3073,6 +3073,21 @@ Describe "Split-TextForMenuWidth" {
     }
 }
 
+Describe "Format-MainMenuItemLines" {
+    It "uses a genuinely wide description column when the caller provides wide space" {
+        $autoSync = (Get-MainMenuItems) | Where-Object { $_.Mode -eq 'AutoSync' }
+        $lines = Format-MainMenuItemLines -Item $autoSync -Tier 'Full' -Width 100
+        $lines.Count | Should -Be 1
+        $lines[0] | Should -Be '  1) AutoSync -- Extract ZIPs (NAS or local) to a local folder, then register the games.'
+    }
+    It "wraps under the description column when the caller provides narrow space" {
+        $autoSync = (Get-MainMenuItems) | Where-Object { $_.Mode -eq 'AutoSync' }
+        $lines = Format-MainMenuItemLines -Item $autoSync -Tier 'Full' -Width 70
+        $lines.Count | Should -BeGreaterThan 1
+        $lines[1] | Should -Match '^\s{10,}register the games\.'
+    }
+}
+
 Describe "Show-MainMenu" {
     It "Full tier prints every item's full description and a numbered line for every item" {
         $output = Show-MainMenu -Tier 'Full' -Width 160 6>&1 | Out-String
@@ -3095,6 +3110,12 @@ Describe "Show-MainMenu" {
         $output = Show-MainMenu -Tier 'Full' -Width 200 6>&1 | Out-String
         $output | Should -Match ([regex]::Escape("1) AutoSync -- Extract ZIPs (NAS or local) to a local folder, then register the games."))
         $output | Should -Not -Match '(?m)^\s+folder, then register the games\.'
+    }
+    It "wide Full tier renders menu groups side-by-side instead of a narrow left-column menu" {
+        $output = Show-MainMenu -Tier 'Full' -Width 160 6>&1 | Out-String
+        $output | Should -Match '(?m)^ Library Management\s+Game Enhancements'
+        $longestLine = (($output -split "`r?`n") | Measure-Object -Property Length -Maximum).Maximum
+        $longestLine | Should -BeGreaterThan 120
     }
     It "narrow Full tier wraps readable continuation lines under the menu description column" {
         $output = Show-MainMenu -Tier 'Full' -Width 70 6>&1 | Out-String
