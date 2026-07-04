@@ -9846,6 +9846,40 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
         }
     }
 
+    # Issue #120: tell the user immediately what they selected and, when
+    # there's enough information to know, whether it's the latest available
+    # version -- rather than silently accepting the selection and leaving
+    # freshness unstated. ZIP mode can genuinely be compared (same file-size
+    # proxy as Test-EggmanDatUpToDate/#106); direct .dat mode has no release
+    # to compare against at all, so it says that plainly instead of staying
+    # silent or implying a check that can't happen.
+    if ($eggmanDatZip) {
+        Write-Host ""
+        Write-Host ("  Selected: {0}" -f (Split-Path -Leaf $eggmanDatZip)) -ForegroundColor Cyan
+        # Reuse $rel from the D) download branch above when it already ran
+        # (avoids a redundant second GitHub call right after downloading);
+        # falls back to a fresh lookup for the B) browse path, which never
+        # queried the release API at all.
+        $latestRel = if ($null -ne $rel) { $rel } else { Get-EggmanDatRelease }
+        if ($null -eq $latestRel) {
+            Write-Host "  Could not reach Eggman's Repository to check whether this is the latest version." -ForegroundColor Yellow
+        } else {
+            $freshness = Test-EggmanDatUpToDate -LocalDatPath $eggmanDatZip -RemoteSizeBytes $latestRel.SizeBytes
+            if ($freshness.Status -eq 'Current') {
+                Write-Host "  This is the latest available version." -ForegroundColor Green
+            } elseif ($freshness.Status -eq 'UpdateAvailable') {
+                Write-Host ("  A newer version is available: {0}  ({1} MB)" -f $latestRel.FileName, $latestRel.SizeMB) -ForegroundColor Yellow
+            } else {
+                Write-Host "  Could not determine whether this is the latest version." -ForegroundColor Yellow
+            }
+        }
+    } elseif ($datFilePath) {
+        Write-Host ""
+        Write-Host ("  Selected: {0}" -f (Split-Path -Leaf $datFilePath)) -ForegroundColor Cyan
+        Write-Host "  Cannot check whether this is the latest version -- a standalone dat" -ForegroundColor Yellow
+        Write-Host "  file has no release to compare it against." -ForegroundColor Yellow
+    }
+
     # One consistent supplementary-dat follow-up, asked exactly once
     # regardless of how the primary file was obtained (download or browse)
     # or which type it turned out to be (ZIP or standalone dat) --
@@ -10069,12 +10103,21 @@ if (Test-Path -LiteralPath $overridesPath) {
         if ($ov.datFile -and -not [string]::IsNullOrWhiteSpace([string]$ov.datFile)) {
             $datFilePath = [string]$ov.datFile
         }
+        # Issue #119: this used to also show whenever a dat file was
+        # configured ("datFile=yes"), even with every other count at zero --
+        # a dat file is a normal, common setting (already shown plainly in
+        # the Configuration summary above), not an advanced override, so
+        # showing this diagnostic-looking line just because one was
+        # configured made ordinary setups look like they had unexplained
+        # internal state. Now only shown when an actual override
+        # (noSync/onlySync/noPropagate/pinned/familyOverride/
+        # canonicalArchetype/subFolderMap) is configured in
+        # TeknoParrot-Manager.overrides.json.
         $ovCount = $noSyncList.Count + $onlySyncList.Count + $noPropagateList.Count + $forceArchetypeMap.Count + $familyOverrideMap.Count + $canonicalArchetypeMap.Count + $subFolderMap.Count
-        if ($ovCount -gt 0 -or $datFilePath) {
+        if ($ovCount -gt 0) {
             Write-Host ""
-            $datLabel = if ($datFilePath) { ", datFile=yes" } else { "" }
             $sfmLabel = if ($subFolderMap.Count -gt 0) { ", subFolderMap=$($subFolderMap.Count)" } else { "" }
-            Write-Host "Overrides: noSync=$($noSyncList.Count), onlySync=$($onlySyncList.Count), noPropagate=$($noPropagateList.Count), pinned=$($forceArchetypeMap.Count), familyOverride=$($familyOverrideMap.Count), canonicalArchetype=$($canonicalArchetypeMap.Count)$sfmLabel$datLabel" -ForegroundColor DarkCyan
+            Write-Host "Overrides: noSync=$($noSyncList.Count), onlySync=$($onlySyncList.Count), noPropagate=$($noPropagateList.Count), pinned=$($forceArchetypeMap.Count), familyOverride=$($familyOverrideMap.Count), canonicalArchetype=$($canonicalArchetypeMap.Count)$sfmLabel" -ForegroundColor DarkCyan
         }
         Write-Log "Overrides: noSync=$($noSyncList.Count) onlySync=$($onlySyncList.Count) noPropagate=$($noPropagateList.Count) pinned=$($forceArchetypeMap.Count) familyOverride=$($familyOverrideMap.Count) canonicalArchetype=$($canonicalArchetypeMap.Count) subFolderMap=$($subFolderMap.Count) datFile=$datFilePath"
     } catch {
