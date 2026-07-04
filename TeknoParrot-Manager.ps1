@@ -10314,21 +10314,59 @@ function Get-MainMenuItems {
 }
 
 # Pure/testable: decides which of the three layout tiers fits the given
-# console dimensions. Height matters as well as width -- a wide-but-short
-# window (many terminal splits/panes) should still fall back rather than
-# print a Full menu taller than the visible area. $RequiredFullLines is the
-# actual line count Show-MainMenu would print at Full tier for the current
-# menu content, so this stays correct if items are ever added without
-# hardcoding a line-count constant here.
+# console dimensions. Width is authoritative for wide mode: a wide-but-short
+# terminal should use the two-column Full renderer because that is exactly the
+# layout that reduces height. Height still matters for non-wide terminals.
 function Get-ConsoleLayoutTier {
     param(
         [int]$Width,
         [int]$Height,
         [int]$RequiredFullLines
     )
-    if ($Width -ge 160 -and $Height -ge $RequiredFullLines) { return 'Full' }
+    if ($Width -ge 160) { return 'Full' }
     if ($Width -ge 120) { return 'Standard' }
     return 'Compact'
+}
+
+function Get-MainMenuRenderMetrics {
+    param(
+        [ValidateSet('Full', 'Standard', 'Compact')][string]$Tier,
+        [int]$Width
+    )
+
+    $contentWidth = [Math]::Max(40, $Width - 2)
+    $wideLayout = ($Tier -eq 'Full' -and $Width -ge 160)
+    $labelWidth = if ($Tier -eq 'Standard') { 27 } else { $null }
+    $descriptionWidth = 0
+    $totalRenderWidth = $contentWidth
+    $layout = $Tier
+
+    if ($Tier -eq 'Compact') {
+        $layout = 'CompactSingleColumn'
+        $descriptionWidth = 0
+        $totalRenderWidth = [Math]::Min($contentWidth, 50)
+    } elseif ($wideLayout) {
+        $layout = 'WideTwoColumn'
+        $gap = 4
+        $columnWidth = [Math]::Floor(($contentWidth - $gap) / 2)
+        $descriptionWidth = $columnWidth
+        $totalRenderWidth = ($columnWidth * 2) + $gap
+    } elseif ($Tier -eq 'Standard') {
+        $layout = 'StandardSingleColumn'
+        $descriptionWidth = [Math]::Max(24, $contentWidth - 36)
+    } else {
+        $layout = 'FullSingleColumn'
+        $descriptionWidth = [Math]::Max(28, $contentWidth - 22)
+    }
+
+    return [pscustomobject]@{
+        DetectedWidth = $Width
+        SelectedTier = $Tier
+        Layout = $layout
+        LabelWidth = $labelWidth
+        DescriptionWidth = $descriptionWidth
+        TotalRenderWidth = $totalRenderWidth
+    }
 }
 
 function Get-ConsoleContentWidth {
@@ -10492,8 +10530,9 @@ function Show-MainMenu {
 
     $items = Get-MainMenuItems
     $maxNumber = ($items | Measure-Object -Property Number -Maximum).Maximum
-    $contentWidth = [Math]::Max(40, $Width - 2)
-    $wideLayout = ($Tier -eq 'Full' -and $Width -ge 160)
+    $metrics = Get-MainMenuRenderMetrics -Tier $Tier -Width $Width
+    $contentWidth = $metrics.TotalRenderWidth
+    $wideLayout = ($metrics.Layout -eq 'WideTwoColumn')
 
     Write-Host ""
     if ($Tier -eq 'Compact') {
@@ -10511,7 +10550,7 @@ function Show-MainMenu {
     $sections = @(Get-MainMenuSections)
     if ($wideLayout) {
         $gap = 4
-        $columnWidth = [Math]::Floor(($contentWidth - $gap) / 2)
+        $columnWidth = [Math]::Floor(($metrics.TotalRenderWidth - $gap) / 2)
         $leftLines = New-Object System.Collections.Generic.List[string]
         $rightLines = New-Object System.Collections.Generic.List[string]
         foreach ($section in @($sections[0], $sections[2])) {

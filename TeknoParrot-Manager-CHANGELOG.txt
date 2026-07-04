@@ -30,7 +30,10 @@
   width-based contract. Narrow consoles use a readable wrapped single-column
   layout, normal consoles use concise grouped single-column descriptions, and
   wide consoles use a two-column grouped layout that meaningfully fills the
-  available horizontal space.
+  available horizontal space. The RC2 ZIP also includes
+  scripts\Debug-TPM-MenuLayout.ps1 so testers can print the real host width,
+  selected tier, description width, and total render width from the extracted
+  build before certification.
 
 
 -------------------------------------------------------------------------------

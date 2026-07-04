@@ -24,6 +24,7 @@ try {
         'TeknoParrot-Manager-QuickStart.txt',
         'TeknoParrot-Manager-CHANGELOG.txt',
         'LICENSE',
+        'scripts/Debug-TPM-MenuLayout.ps1',
         'tools/Invoke-TpmAutoUpdate.ps1',
         'tools/TpmAutoUpdate.Core.psm1'
     )
@@ -62,6 +63,10 @@ try {
     }
     if ($scriptContent -match 'TeknoParrot Manager\s+v\$ScriptVersion RC1') {
         throw "Packaged TeknoParrot-Manager.ps1 still contains the stale RC1 banner."
+    }
+    if ($scriptContent -notmatch 'function Get-MainMenuRenderMetrics' -or
+        $scriptContent -notmatch 'function Join-MainMenuColumns') {
+        throw "Packaged TeknoParrot-Manager.ps1 does not contain the adaptive wide-menu renderer."
     }
 
     $crosshairs = @($entries | Where-Object { $_ -match '^Crosshairs/\d{3}\.png$' })

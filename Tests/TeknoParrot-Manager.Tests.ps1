@@ -3049,14 +3049,39 @@ Describe "Get-ConsoleLayoutTier" {
     It "chooses Full for a large window with enough height for the full menu" {
         Get-ConsoleLayoutTier -Width 200 -Height 80 -RequiredFullLines 60 | Should -Be 'Full'
     }
-    It "falls back to Standard when width qualifies for Full but height does not" {
-        Get-ConsoleLayoutTier -Width 200 -Height 30 -RequiredFullLines 60 | Should -Be 'Standard'
+    It "chooses Full for a wide-but-short window because two columns reduce height" {
+        Get-ConsoleLayoutTier -Width 200 -Height 30 -RequiredFullLines 60 | Should -Be 'Full'
     }
     It "chooses Standard for a medium-width window" {
         Get-ConsoleLayoutTier -Width 130 -Height 80 -RequiredFullLines 60 | Should -Be 'Standard'
     }
     It "chooses Compact for a narrow window" {
         Get-ConsoleLayoutTier -Width 90 -Height 80 -RequiredFullLines 60 | Should -Be 'Compact'
+    }
+}
+
+Describe "Get-MainMenuRenderMetrics" {
+    It "reports compact single-column metrics for narrow widths" {
+        $metrics = Get-MainMenuRenderMetrics -Tier 'Compact' -Width 80
+        $metrics.Layout | Should -Be 'CompactSingleColumn'
+        $metrics.DescriptionWidth | Should -Be 0
+        $metrics.TotalRenderWidth | Should -BeLessOrEqual 80
+    }
+    It "reports standard single-column metrics for normal widths" {
+        $metrics = Get-MainMenuRenderMetrics -Tier 'Standard' -Width 130
+        $metrics.Layout | Should -Be 'StandardSingleColumn'
+        $metrics.DescriptionWidth | Should -BeGreaterThan 80
+        $metrics.TotalRenderWidth | Should -BeGreaterThan 120
+    }
+    It "reports wide two-column metrics that expand with terminal width" {
+        $wide160 = Get-MainMenuRenderMetrics -Tier 'Full' -Width 160
+        $wide200 = Get-MainMenuRenderMetrics -Tier 'Full' -Width 200
+
+        $wide160.Layout | Should -Be 'WideTwoColumn'
+        $wide160.DescriptionWidth | Should -BeGreaterThan 70
+        $wide160.TotalRenderWidth | Should -BeGreaterThan 140
+        $wide200.TotalRenderWidth | Should -BeGreaterThan $wide160.TotalRenderWidth
+        $wide200.DescriptionWidth | Should -BeGreaterThan $wide160.DescriptionWidth
     }
 }
 
@@ -3125,6 +3150,19 @@ Describe "Show-MainMenu" {
     It "normal Standard tier keeps grouped one-line descriptions when they fit" {
         $output = Show-MainMenu -Tier 'Standard' -Width 130 6>&1 | Out-String
         $output | Should -Match ([regex]::Escape("1) AutoSync                    -- Extract ZIPs (NAS or local), then register the games."))
+    }
+}
+
+Describe "Menu layout debug script" {
+    It "prints host dimensions and renderer metrics without launching the interactive manager" {
+        $debugScript = Join-Path $PSScriptRoot '..\scripts\Debug-TPM-MenuLayout.ps1'
+        $output = & $debugScript -Width 200 -Height 30 6>&1 | Out-String
+
+        $output | Should -Match 'Host\.RawUI\.WindowSize\.Width'
+        $output | Should -Match 'Selected layout tier\s+:\s+Full'
+        $output | Should -Match 'Selected layout mode\s+:\s+WideTwoColumn'
+        $output | Should -Match 'Description width\s+:\s+97'
+        $output | Should -Match 'Total render width\s+:\s+198'
     }
 }
 

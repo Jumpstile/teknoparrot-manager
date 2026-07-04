@@ -121,7 +121,9 @@ Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1
 ZIP name: `TeknoParrot Manager v1.0 RC2.zip` (always versioned).
 
 **Include:** `TeknoParrot-Manager.ps1`, `.bat`, `-README.txt`, `-QuickStart.txt`,
-`-CHANGELOG.txt`, `LICENSE`, `Crosshairs\` (all 321 PNGs).
+`-CHANGELOG.txt`, `LICENSE`, `Crosshairs\` (all 321 PNGs),
+`tools\Invoke-TpmAutoUpdate.ps1`, `tools\TpmAutoUpdate.Core.psm1`,
+`scripts\Debug-TPM-MenuLayout.ps1`.
 
 **Exclude:** `ReShade\` (not redistributable; user obtains from reshade.me),
 `dgVoodoo2\` (user provides), `FFBPlugin\` and `BepInExCache\` (live-downloaded
