@@ -3117,7 +3117,7 @@ Describe "Manager banner rendering" {
         $lines = Get-ManagerBannerLines -Width 80 -Height 30
 
         ($lines -join "`n") | Should -Match 'TeknoParrot Manager\s+v1\.0 RC2'
-        ($lines -join "`n") | Should -Not -Match 'TTTTT EEEEE'
+        ($lines -join "`n") | Should -Not -Match '/_  __/__.*___'
     }
     It "uses ASCII art for Professional and Ultra viewport widths" {
         Test-UseManagerAsciiBanner -Width 119 -Height 40 | Should -BeFalse
@@ -3131,10 +3131,18 @@ Describe "Manager banner rendering" {
         $lines = Get-ManagerBannerLines -Width 120 -Height 40
         $joined = $lines -join "`n"
 
-        $joined | Should -Match 'TTTTT EEEEE K\s+K'
-        $joined | Should -Match 'M\s+M\s+A{5}\s+N\s+N'
-        $joined | Should -Match 'v1\.0 RC2'
+        $joined | Should -Match '/_  __/__.*___'
+        $joined | Should -Match '/  \|/  /__ ____'
+        $joined | Should -Match 'Developed and maintained by Jumpstile'
+        $joined | Should -Match 'Version 1\.0 RC2'
         $lines | ForEach-Object { $_.Length | Should -BeLessOrEqual 120 }
+    }
+    It "assigns console-safe colors to professional banner rows" {
+        $rows = Get-ManagerBannerRows -Width 120 -Height 40
+
+        ($rows | Where-Object { $_.Text -match '/_  __/__.*___' }).Color | Should -Be 'Cyan'
+        ($rows | Where-Object { $_.Text -match 'Developed and maintained by Jumpstile' }).Color | Should -Be 'White'
+        ($rows | Where-Object { $_.Text -match 'Version 1\.0 RC2' }).Color | Should -Be 'Yellow'
     }
 }
 
@@ -3169,8 +3177,9 @@ Describe "Format-MainMenuItemLines" {
 Describe "Show-MainMenu" {
     It "Professional tier prints every item's full description and a numbered line for every item" {
         $output = Show-MainMenu -Tier 'Professional' -Width 120 -Height 40 6>&1 | Out-String
-        $output | Should -Match 'TTTTT EEEEE'
-        $output | Should -Match 'v1\.0 RC2'
+        $output | Should -Match '/_  __/__.*___'
+        $output | Should -Match 'Developed and maintained by Jumpstile'
+        $output | Should -Match 'Version 1\.0 RC2'
         foreach ($item in (Get-MainMenuItems)) {
             $output | Should -Match ([regex]::Escape("$($item.Number)) $($item.Label)"))
         }
@@ -3183,7 +3192,7 @@ Describe "Show-MainMenu" {
     It "Compact tier prints only labels and the 'Type ? for descriptions' hint, no ShortDesc/FullDesc text" {
         $output = Show-MainMenu -Tier 'Compact' -Width 80 -Height 30 6>&1 | Out-String
         $output | Should -Match 'TeknoParrot Manager\s+v1\.0 RC2'
-        $output | Should -Not -Match 'TTTTT EEEEE'
+        $output | Should -Not -Match '/_  __/__.*___'
         $output | Should -Match 'Type \? for descriptions'
         $autoSync = (Get-MainMenuItems) | Where-Object { $_.Mode -eq 'AutoSync' }
         $output | Should -Not -Match ([regex]::Escape($autoSync.ShortDesc))

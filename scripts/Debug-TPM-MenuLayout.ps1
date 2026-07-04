@@ -23,9 +23,11 @@ if ($parseErrors.Count -gt 0) {
 $menuFunctions = @(
     'Get-ManagerDisplayVersion',
     'Get-ManagerAsciiBannerLines',
+    'Get-ManagerVersionLine',
     'Test-UseManagerAsciiBanner',
     'Get-CenteredTextLine',
     'Get-ManagerBannerLines',
+    'Get-ManagerBannerRows',
     'Write-ManagerBanner',
     'Get-MainMenuSections',
     'Get-MainMenuItems',

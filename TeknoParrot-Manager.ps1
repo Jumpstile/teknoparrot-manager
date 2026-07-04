@@ -79,18 +79,17 @@ function Get-ManagerDisplayVersion {
 
 function Get-ManagerAsciiBannerLines {
     return @(
-        'TTTTT EEEEE K   K N   N  OOO  PPPP   AAAAA RRRR  RRRR   OOO  TTTTT'
-        '  T   E     K  K  NN  N O   O P   P A   A R   R R   R O   O   T'
-        '  T   EEEE  KKK   N N N O   O PPPP  AAAAA RRRR  RRRR  O   O   T'
-        '  T   E     K  K  N  NN O   O P     A   A R  R  R  R  O   O   T'
-        '  T   EEEEE K   K N   N  OOO  P     A   A R   R R   R  OOO    T'
-        ''
-        'M   M  AAAAA N   N  AAAAA  GGG  EEEEE RRRR'
-        'MM MM A   A NN  N A   A G     E     R   R'
-        'M M M AAAAA N N N AAAAA G  GG EEEE  RRRR'
-        'M   M A   A N  NN A   A G   G E     R  R'
-        'M   M A   A N   N A   A  GGG  EEEEE R   R'
+        '  ______     __            ___                         __     __  ___'
+        ' /_  __/__  / /_____  ___ / _ \___ ___________  ___   / /_   /  |/  /__ ____  ___ ____ ____ ____'
+        '  / / / _ \/  ''_/ _ \/ _ \ ___/ _ `/ __/ __/ _ \ / __/  / /|_/ / _ `/ _ \/ _ `/ _ `/ -_) __/'
+        ' /_/  \___/_/\_\\___/\___/_/   \_,_/_/  \__/\___/ \__/  /_/  /_/\_,_/_//_/\_,_/\_, /\__/_/'
+        '                                                                              /___/'
     )
+}
+
+function Get-ManagerVersionLine {
+    $display = Get-ManagerDisplayVersion
+    return ("Version {0}" -f ($display -replace '^v', ''))
 }
 
 function Test-UseManagerAsciiBanner {
@@ -116,6 +115,15 @@ function Get-ManagerBannerLines {
         [int]$Height = 25
     )
 
+    return ,@((Get-ManagerBannerRows -Width $Width -Height $Height) | ForEach-Object { $_.Text })
+}
+
+function Get-ManagerBannerRows {
+    param(
+        [int]$Width,
+        [int]$Height = 25
+    )
+
     $version = Get-ManagerDisplayVersion
     if (Test-UseManagerAsciiBanner -Width $Width -Height $Height) {
         $lines = New-Object System.Collections.Generic.List[string]
@@ -127,8 +135,17 @@ function Get-ManagerBannerLines {
             }
         }
         [void]$lines.Add('')
-        [void]$lines.Add((Get-CenteredTextLine -Text $version -Width $Width))
-        return ,@($lines)
+        [void]$lines.Add((Get-CenteredTextLine -Text 'Developed and maintained by Jumpstile' -Width $Width))
+        [void]$lines.Add((Get-CenteredTextLine -Text (Get-ManagerVersionLine) -Width $Width))
+
+        $rows = @()
+        foreach ($line in $lines) {
+            $color = 'Cyan'
+            if ($line -match 'Developed and maintained by Jumpstile') { $color = 'White' }
+            if ($line -match 'Version ') { $color = 'Yellow' }
+            $rows += [pscustomobject]@{ Text = $line; Color = $color }
+        }
+        return ,@($rows)
     }
 
     $title = "TeknoParrot Manager  $DisplayVersion"
@@ -136,9 +153,9 @@ function Get-ManagerBannerLines {
     $ruleWidth = [Math]::Min([Math]::Max($title.Length + 8, 44), [Math]::Max(44, $Width - 2))
     $rule = '=' * $ruleWidth
     return @(
-        $rule
-        (Get-CenteredTextLine -Text $title -Width $ruleWidth)
-        $rule
+        [pscustomobject]@{ Text = $rule; Color = 'DarkCyan' }
+        [pscustomobject]@{ Text = (Get-CenteredTextLine -Text $title -Width $ruleWidth); Color = 'Cyan' }
+        [pscustomobject]@{ Text = $rule; Color = 'DarkCyan' }
     )
 }
 
@@ -163,8 +180,8 @@ function Write-ManagerBanner {
         [int]$Height = 25
     )
     Write-Host ""
-    foreach ($line in (Get-ManagerBannerLines -Width $Width -Height $Height)) {
-        Write-Host $line -ForegroundColor Cyan
+    foreach ($row in (Get-ManagerBannerRows -Width $Width -Height $Height)) {
+        Write-Host $row.Text -ForegroundColor $row.Color
     }
     Write-Host ""
 }
