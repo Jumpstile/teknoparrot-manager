@@ -4,7 +4,7 @@
     "source": "Tekken 5.1 (TE51 Ver B)(2005)[Namco System 246][TP]",
     "expectedKey": "tekken51",
     "caseType": "positive-normalization",
-    "status": "pending-fix",
+    "status": "covered",
     "issue": "80",
     "note": "Board plus Ver token should not block canonical title match."
   },
@@ -13,7 +13,7 @@
     "source": "Time Crisis 3 (TST1 Ver A)(2003)[Namco System 246][TP]",
     "expectedKey": "timecrisis3",
     "caseType": "positive-normalization",
-    "status": "pending-fix",
+    "status": "covered",
     "issue": "80",
     "note": "Board plus Ver token should not block canonical title match."
   },
@@ -22,7 +22,7 @@
     "source": "Time Crisis 4 (TSF1002-NA-A)(2006)[Namco System 256][TP]",
     "expectedKey": "timecrisis4",
     "caseType": "positive-normalization",
-    "status": "pending-fix",
+    "status": "covered",
     "issue": "80",
     "note": "Hyphenated code-shaped board token should not block canonical title match."
   },
@@ -31,7 +31,7 @@
     "source": "Zoids Infinity (B3900076A Ver 2.02J)(2004)[Namco System 246][TP]",
     "expectedKey": "zoidsinfinity",
     "caseType": "positive-normalization",
-    "status": "pending-fix",
+    "status": "covered",
     "issue": "80",
     "note": "Board plus Ver token should not block canonical title match."
   },
