@@ -3026,6 +3026,12 @@ Describe "Main menu source-level drift check" {
         $script:mainScriptContent.Contains('$menuMaxNumber = (Get-MainMenuItems | Measure-Object -Property Number -Maximum).Maximum') | Should -Be $true
         $itemNumbers[-1] | Should -Be 14
     }
+
+    It "actual menu loop passes current viewport dimensions into Show-MainMenu" {
+        $script:mainScriptContent.Contains('$consoleWidth  = Get-ConsoleContentWidth') | Should -Be $true
+        $script:mainScriptContent.Contains('$consoleHeight = Get-ConsoleContentHeight') | Should -Be $true
+        $script:mainScriptContent.Contains('Show-MainMenu -Tier $menuTier -Width $consoleWidth -Height $consoleHeight') | Should -Be $true
+    }
 }
 
 Describe "Get-MainMenuSections / Get-MainMenuItems" {
@@ -3124,11 +3130,12 @@ Describe "Manager banner rendering" {
         Test-UseManagerAsciiBanner -Width 120 -Height 40 | Should -BeTrue
         Test-UseManagerAsciiBanner -Width 180 -Height 40 | Should -BeTrue
     }
-    It "falls back to the compact text banner when height is constrained" {
-        Test-UseManagerAsciiBanner -Width 180 -Height 30 | Should -BeFalse
+    It "keeps the professional banner for wide layouts even when reported height is small" {
+        Test-UseManagerAsciiBanner -Width 120 -Height 30 | Should -BeTrue
+        Test-UseManagerAsciiBanner -Width 180 -Height 20 | Should -BeTrue
     }
     It "centers the ASCII-art banner and includes the canonical display version" {
-        $lines = Get-ManagerBannerLines -Width 120 -Height 40
+        $lines = Get-ManagerBannerLines -Width 120 -Height 30
         $joined = $lines -join "`n"
 
         $joined | Should -Match '/_  __/__.*___'
@@ -3176,7 +3183,7 @@ Describe "Format-MainMenuItemLines" {
 
 Describe "Show-MainMenu" {
     It "Professional tier prints every item's full description and a numbered line for every item" {
-        $output = Show-MainMenu -Tier 'Professional' -Width 120 -Height 40 6>&1 | Out-String
+        $output = Show-MainMenu -Tier 'Professional' -Width 120 -Height 30 6>&1 | Out-String
         $output | Should -Match '/_  __/__.*___'
         $output | Should -Match 'Developed and maintained by Jumpstile'
         $output | Should -Match 'Version 1\.0 RC2'
@@ -3198,7 +3205,8 @@ Describe "Show-MainMenu" {
         $output | Should -Not -Match ([regex]::Escape($autoSync.ShortDesc))
     }
     It "Professional 120-column tier uses available width instead of the old narrow pre-wrapped menu text" {
-        $output = Show-MainMenu -Tier 'Professional' -Width 120 6>&1 | Out-String
+        $output = Show-MainMenu -Tier 'Professional' -Width 120 -Height 30 6>&1 | Out-String
+        $output | Should -Match '/_  __/__.*___'
         $output | Should -Match ([regex]::Escape("1) AutoSync -- Extract ZIPs (NAS or local) to a local folder, then register the games."))
         $output | Should -Not -Match '(?m)^\s+folder, then register the games\.'
         $longestLine = (($output -split "`r?`n") | Measure-Object -Property Length -Maximum).Maximum

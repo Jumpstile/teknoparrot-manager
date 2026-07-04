@@ -97,7 +97,7 @@ function Test-UseManagerAsciiBanner {
         [int]$Width,
         [int]$Height = 25
     )
-    return ($Width -ge 120 -and $Height -ge 34)
+    return ($Width -ge 120)
 }
 
 function Get-CenteredTextLine {
