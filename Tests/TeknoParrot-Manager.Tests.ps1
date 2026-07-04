@@ -756,6 +756,33 @@ Describe "Test-DgVoodoo2UpToDate" {
     }
 }
 
+Describe "Test-EggmanDatUpToDate" {
+    # Issue #106: the "check for a newer Eggman dat release" prompt
+    # previously always asked to download/switch regardless of whether the
+    # remote release had actually changed. The Eggman/RomVault release
+    # format exposes no version number, only a filename and size, so exact
+    # byte-size match is the identity signal used.
+    It "reports Current when the local file's size exactly matches the remote release size" {
+        $path = Join-Path $TestDrive ("eggman-current-" + [guid]::NewGuid().ToString('N') + '.zip')
+        [System.IO.File]::WriteAllBytes($path, [byte[]]::new(1024))
+        $result = Test-EggmanDatUpToDate -LocalDatPath $path -RemoteSizeBytes 1024
+        $result.Status | Should -Be 'Current'
+        $result.LocalSizeBytes | Should -Be 1024
+    }
+    It "reports UpdateAvailable when the local file's size differs from the remote release size" {
+        $path = Join-Path $TestDrive ("eggman-stale-" + [guid]::NewGuid().ToString('N') + '.zip')
+        [System.IO.File]::WriteAllBytes($path, [byte[]]::new(1024))
+        $result = Test-EggmanDatUpToDate -LocalDatPath $path -RemoteSizeBytes 2048
+        $result.Status | Should -Be 'UpdateAvailable'
+    }
+    It "reports Unknown (not Current) when the local file does not exist" {
+        $path = Join-Path $TestDrive ("eggman-missing-" + [guid]::NewGuid().ToString('N') + '.zip')
+        $result = Test-EggmanDatUpToDate -LocalDatPath $path -RemoteSizeBytes 1024
+        $result.Status | Should -Be 'Unknown'
+        $result.LocalSizeBytes | Should -BeNullOrEmpty
+    }
+}
+
 Describe "Write-DownloadAudit" {
     BeforeAll {
         Mock Write-Log {}
