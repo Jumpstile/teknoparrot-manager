@@ -123,6 +123,11 @@
                              explicit Y/N confirmation.
        14) Exit            -- quit the script.
 
+     Upcoming in v1.1 (not in v1.0 RC1): this menu will automatically
+     shorten its descriptions, or show labels only with "?" for details,
+     depending on your console window size -- mode numbers and what each
+     one does stay the same.
+
   4. Answer the folder prompts. For AutoSync, choose a LOCAL staging folder
      with free space, OUTSIDE both TeknoParrot and your ZIP source.
 

@@ -629,6 +629,19 @@
   14) Exit
        Exits the script.
 
+  UPCOMING IN V1.1: ADAPTIVE RESPONSIVE MENU
+  -------------------------------------------
+  Not in v1.0 RC1 -- implemented ahead of time on its own branch, targeting
+  v1.1. The menu above will automatically adjust its level of detail to your
+  console window size instead of always showing the fully-detailed layout:
+  a large window shows the full descriptions above unchanged; a medium
+  window shows one-line descriptions per option; a narrow or short window
+  shows labels only, with "?" available at the prompt to see the full
+  descriptions on demand. The console is also maximized automatically on
+  startup where the terminal supports it. Mode numbers, what each option
+  does, and how to choose one are completely unchanged -- only how much
+  description text is shown adapts to your window size.
+
 
 -------------------------------------------------------------------------------
   GAME SELECTION (AutoSync mode)

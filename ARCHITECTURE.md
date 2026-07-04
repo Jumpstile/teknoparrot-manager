@@ -847,6 +847,76 @@ manually-run grep sweep's responsibility to catch.
 
 ---
 
+## Adaptive responsive main menu (issue #104, targeting v1.1 -- NOT in v1.0/RC1)
+
+**Status: implemented on branch `feature/issue-104-adaptive-menu-1.1` (PR #112), deliberately
+held unmerged.** This is new-capability work, out of scope for the v1.0/RC1 feature freeze;
+built ahead of the 1.1 cycle per explicit Release Manager direction so it's ready when 1.1
+development begins, without landing in the RC1/1.0 codebase. This section documents the
+design for whenever that PR is merged -- until then, the menu described in "Menu
+reorganization (v0.99.42)" above is what v1.0/RC1 actually ships.
+
+**Problem.** The v0.99.42 menu is a single, always-fully-detailed 14-item layout with
+multi-line descriptions per item. On a narrow or short console window (a stacked terminal
+pane, a small cabinet-mounted display, a low-resolution remote session) that layout can
+force scrolling or wrap awkwardly -- readable on a full-size window, cramped everywhere
+else.
+
+**Design: one data model, three rendering tiers.**
+
+- `Get-MainMenuSections` -- the single source of truth. Returns an ordered array of section
+  objects (`Header`, `Items`), each item carrying `Number`, `Mode` (the string the `switch`
+  statement dispatches on), `Label`, `ShortDesc` (one line), and `FullDesc` (an array of
+  lines, exactly the original v0.99.42 wording). A function, not a plain script-scope
+  variable, specifically so the test suite's AST-based function extraction can see it like
+  every other testable helper -- a top-level `$script:` assignment would be invisible to
+  the dot-sourced test harness.
+- `Get-MainMenuItems` -- flattens every section's items into one number-ordered list; used
+  to derive the highest option number (the `Enter 1-N` prompt) and to avoid every caller
+  re-flattening the section list itself.
+- `Get-ConsoleLayoutTier -Width -Height -RequiredFullLines` -- pure, testable. Returns
+  `'Full'` (>=160 columns, and the window is tall enough for the actual full-layout line
+  count -- computed from the live data model, not a hardcoded constant, so it stays correct
+  if items are ever added), `'Standard'` (>=120 columns), or `'Compact'` (narrower, or Full
+  doesn't fit vertically).
+- `Show-MainMenu -Tier` -- pure display, never reads input. Full tier reproduces the
+  original wording exactly; Standard prints one-line `ShortDesc` per item; Compact prints
+  labels only plus "Type ? for descriptions."
+- `Set-ConsoleMaximizedIfSupported` -- best-effort console maximize, called once at
+  startup (not on every redraw). Wrapped in try/catch and silently no-ops on hosts that
+  don't support resizing (redirected output, ISE, some CI/test runners) -- this is a
+  cosmetic nicety, never allowed to block startup.
+
+**Wiring.** The main menu loop's `if ($mode) { ... } else { ... }` block still lives inline
+(not moved into a function) so `break`/`continue` inside the `switch` statement keep
+working exactly as before, governed by the same enclosing `while ($true)` loop. Only the
+static `Write-Host` lines were replaced with a call to `Show-MainMenu -Tier $menuTier`,
+where `$menuTier` is recomputed fresh every redraw (via `Get-ConsoleLayoutTier`) -- so a
+user resizing the window mid-session gets the right tier next time the menu draws, not just
+at startup. The `Enter 1-N` prompt and the "Invalid choice" message both use
+`$menuMaxNumber` (derived from `Get-MainMenuItems`) instead of a hardcoded `14`. Typing `?`
+at the prompt shows the Full tier's descriptions once, then re-prompts, without disturbing
+`$mode` or the surrounding loop.
+
+**Unchanged by design:** menu numbering (1-14), the `switch` statement's dispatch, and
+every mode's own behavior. Only `Show-MainMenu`'s rendering varies by tier -- this is
+presentation-layer work, not a functional change, which is why it was judged safe to build
+now even though it can't ship until 1.1.
+
+**Test changes.** "Main menu source-level drift check" was rewritten to validate the data
+model (`Get-MainMenuItems`) against the `switch` statement's case labels, instead of the
+old raw-text `Write-Host "N)"` regex -- the menu is no longer hand-written display lines, so
+that approach no longer applies. Same intent as the original test (no numbering gaps, the
+`Enter` prompt matches the highest item), adapted to the new architecture. New Describe
+blocks cover `Get-MainMenuSections`/`Get-MainMenuItems`, `Get-ConsoleLayoutTier`, and
+`Show-MainMenu` directly. `Tests/VirtualBetaTester.HumanWorkflow.Tests.ps1`'s main-menu
+extraction marker (which locates the inline if/else block by a distinctive string in its
+own source text) was updated from the literal `"Library Management"` header -- which no
+longer appears inline in the if-block, since it now lives inside `Get-MainMenuSections`
+-- to `"Show-MainMenu"`.
+
+---
+
 ## Versioning
 
 - Whole-number bumps: feature releases (v0.94, v0.95, ..., v0.99).
