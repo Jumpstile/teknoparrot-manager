@@ -9793,18 +9793,17 @@ if ((($eggmanDatZip -and -not (Test-Path -LiteralPath $eggmanDatZip)) -or ($datF
 if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
     Write-Host ""
     Write-Host "  Eggman dat files (highly recommended)" -ForegroundColor Cyan
-    Write-Host "  Used to accurately register shared-exe games, ELF-based games," -ForegroundColor DarkCyan
-    Write-Host "  and slightly misnamed folders. The ZIP (~145 MB) contains both dats." -ForegroundColor DarkCyan
-    Write-Host "  Without one, some games may not register correctly." -ForegroundColor DarkCyan
-    Write-Host "    D) Download from GitHub now  (~145 MB)"
-    Write-Host "    Z) I have a ZIP or dat file already -- enter path"
-    Write-Host "    F) I have two separate files -- a collection dat AND a supplementary dat -- enter both paths"
+    Write-Host "  These help correctly register games that share an executable name," -ForegroundColor DarkCyan
+    Write-Host "  use an ELF instead of an .exe, or have a slightly misnamed folder." -ForegroundColor DarkCyan
+    Write-Host "  Without one, a few games may need registering by hand instead." -ForegroundColor DarkCyan
+    Write-Host "    D) Download the latest from Eggman's Repository  (~145 MB)"
+    Write-Host "    B) Browse for a ZIP or dat file I already have"
     Write-Host "    N) Skip (not recommended)"
-    $datChoice = (Read-Host "  Choice (D/Z/F/N)").Trim().ToUpper()
-    $raw = ''   # shared path variable for Z and fallback paths
+    $datChoice = (Read-Host "  Choice (D/B/N)").Trim().ToUpper()
+    $raw = ''   # shared path variable for B and the download-fallback path
 
     if ($datChoice -eq 'D') {
-        Write-Host "  Checking GitHub for latest Eggman dat release..." -ForegroundColor Cyan
+        Write-Host "  Checking Eggman's Repository for the latest dat release..." -ForegroundColor Cyan
         $rel = Get-EggmanDatRelease
         if ($null -ne $rel) {
             Write-Host ("  Found: {0}  ({1} MB)" -f $rel.FileName, $rel.SizeMB) -ForegroundColor Cyan
@@ -9813,32 +9812,26 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
                 $eggmanDatZip = $savedPath
                 Write-Host "  Saved: $savedPath" -ForegroundColor Green
                 Write-Log "EggmanDat: downloaded to $savedPath"
-                $askSupp = (Read-Host "  Also index supplementary dat for alternate version info? (Y/N)").Trim().ToUpper()
-                $includeSupplementary = ($askSupp -eq 'Y')
-                if ($includeSupplementary) { Write-Log "EggmanDat: supplementary indexing enabled." }
             } else {
                 Write-Host "  Enter path to existing ZIP or .dat file, or press Enter to skip:" -ForegroundColor Yellow
                 $raw      = Read-PathWithBrowse "  Path" -Mode File -FileFilter "ZIP/dat files (*.zip;*.dat)|*.zip;*.dat|All files (*.*)|*.*"
-                $datChoice = 'FALLBACK'
+                $datChoice = 'BROWSE'
             }
         } else {
-            Write-Host "  Could not reach GitHub. Enter path to existing ZIP or .dat file, or press Enter to skip:" -ForegroundColor Yellow
+            Write-Host "  Could not reach Eggman's Repository. Enter path to an existing ZIP or .dat file, or press Enter to skip:" -ForegroundColor Yellow
             $raw      = Read-PathWithBrowse "  Path" -Mode File -FileFilter "ZIP/dat files (*.zip;*.dat)|*.zip;*.dat|All files (*.*)|*.*"
-            $datChoice = 'FALLBACK'
+            $datChoice = 'BROWSE'
         }
     }
 
-    if ($datChoice -eq 'Z' -or $datChoice -eq 'FALLBACK') {
-        if ($datChoice -eq 'Z') { $raw = Read-PathWithBrowse "  Path to ZIP or dat file" -Mode File -FileFilter "ZIP/dat files (*.zip;*.dat)|*.zip;*.dat|All files (*.*)|*.*" }
+    if ($datChoice -eq 'B' -or $datChoice -eq 'BROWSE') {
+        if ($datChoice -eq 'B') { $raw = Read-PathWithBrowse "  Path to ZIP or dat file" -Mode File -FileFilter "ZIP/dat files (*.zip;*.dat)|*.zip;*.dat|All files (*.*)|*.*" }
         if ($raw) {
             if (Test-Path -LiteralPath $raw) {
                 $ext = [System.IO.Path]::GetExtension($raw).ToLower()
                 if ($ext -eq '.zip') {
                     $eggmanDatZip = $raw
                     Write-Log "EggmanDat: ZIP configured at $raw"
-                    $askSupp = (Read-Host "  Also index supplementary dat for alternate version info? (Y/N)").Trim().ToUpper()
-                    $includeSupplementary = ($askSupp -eq 'Y')
-                    if ($includeSupplementary) { Write-Log "EggmanDat: supplementary indexing enabled." }
                 } elseif ($ext -eq '.dat') {
                     $datFilePath = $raw
                     Write-Log "Config: datFilePath set to $raw"
@@ -9853,27 +9846,29 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
         }
     }
 
-    if ($datChoice -eq 'F') {
-        $rawColl = Read-PathWithBrowse "  Path to collection dat file" -Mode File -FileFilter "dat files (*.dat)|*.dat|All files (*.*)|*.*"
-        if ($rawColl) {
-            if (Test-Path -LiteralPath $rawColl) {
-                $datFilePath = $rawColl
-                Write-Log "Config: datFilePath (collection) set to $rawColl"
-                Write-Host "  Supplementary dat (press Enter to skip):" -ForegroundColor DarkCyan
-                $rawSupp = Read-PathWithBrowse "  Path to supplementary dat file" -Mode File -FileFilter "dat files (*.dat)|*.dat|All files (*.*)|*.*"
-                if ($rawSupp) {
-                    if (Test-Path -LiteralPath $rawSupp) {
-                        $supplementaryDatPath = $rawSupp
-                        $includeSupplementary = $true
-                        Write-Log "Config: supplementaryDatPath set to $rawSupp"
-                    } else {
-                        Write-Host "  WARNING: Supplementary dat not found -- skipped." -ForegroundColor Yellow
-                        Write-Log "Config: supplementary dat not found at $rawSupp -- skipped."
-                    }
+    # One consistent supplementary-dat follow-up, asked exactly once
+    # regardless of how the primary file was obtained (download or browse)
+    # or which type it turned out to be (ZIP or standalone dat) --
+    # previously this question had different wording, or wasn't asked at
+    # all, depending on which of three separate up-front menu choices
+    # (D/Z/F) the user happened to pick.
+    if ($eggmanDatZip) {
+        $askSupp = (Read-Host "  Also index supplementary dat for alternate version info? (Y/N)").Trim().ToUpper()
+        $includeSupplementary = ($askSupp -eq 'Y')
+        if ($includeSupplementary) { Write-Log "EggmanDat: supplementary indexing enabled." }
+    } elseif ($datFilePath) {
+        $askSupp = (Read-Host "  Do you also have a separate supplementary dat file? (Y/N)").Trim().ToUpper()
+        if ($askSupp -eq 'Y') {
+            $rawSupp = Read-PathWithBrowse "  Path to supplementary dat file" -Mode File -FileFilter "dat files (*.dat)|*.dat|All files (*.*)|*.*"
+            if ($rawSupp) {
+                if (Test-Path -LiteralPath $rawSupp) {
+                    $supplementaryDatPath = $rawSupp
+                    $includeSupplementary = $true
+                    Write-Log "Config: supplementaryDatPath set to $rawSupp"
+                } else {
+                    Write-Host "  WARNING: Supplementary dat not found -- skipped." -ForegroundColor Yellow
+                    Write-Log "Config: supplementary dat not found at $rawSupp -- skipped."
                 }
-            } else {
-                Write-Host "  WARNING: Collection dat not found -- dat skipped." -ForegroundColor Yellow
-                Write-Log "Config: collection dat not found at $rawColl -- skipped."
             }
         }
     }
