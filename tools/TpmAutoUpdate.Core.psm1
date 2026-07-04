@@ -383,7 +383,15 @@ function Invoke-TpmDownload {
         New-Item -ItemType Directory -Path $saveDir -Force | Out-Null
     }
 
-    $tempPath = Join-Path $saveDir ('.{0}.{1}.partial' -f ([System.IO.Path]::GetFileName($DestinationPath)), ([guid]::NewGuid().ToString('N')))
+    # Kept in lockstep with TeknoParrot-Manager.ps1's own Invoke-TpmDownload --
+    # see that function's comment for why the temp/partial file lands on local
+    # disk instead of next to $DestinationPath, which can be a network-mapped
+    # drive. Falls back to $saveDir if local temp isn't writable.
+    $tempDir = $env:TEMP
+    if ([string]::IsNullOrWhiteSpace($tempDir) -or -not (Test-Path -LiteralPath $tempDir -PathType Container)) {
+        $tempDir = $saveDir
+    }
+    $tempPath = Join-Path $tempDir ('.{0}.{1}.partial' -f ([System.IO.Path]::GetFileName($DestinationPath)), ([guid]::NewGuid().ToString('N')))
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     $methodUsed = $null
     try {
