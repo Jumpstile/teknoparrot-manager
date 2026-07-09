@@ -3085,9 +3085,9 @@ Describe "Get-MainMenuRenderMetrics" {
         $compact = Get-MainMenuRenderMetrics -Tier 'Compact' -Width 80
         $professional = Get-MainMenuRenderMetrics -Tier 'Professional' -Width 120
 
-        $professional.Layout | Should -Be 'ProfessionalWideSingleColumn'
+        $professional.Layout | Should -Be 'ProfessionalTwoColumn'
         $professional.TotalRenderWidth | Should -BeGreaterThan 115
-        $professional.DescriptionWidth | Should -BeGreaterThan 80
+        $professional.DescriptionWidth | Should -BeGreaterThan 40
         $professional.TotalRenderWidth | Should -BeGreaterThan $compact.TotalRenderWidth
     }
     It "reports ultra metrics that expand with terminal width" {
@@ -3128,14 +3128,15 @@ Describe "Manager banner rendering" {
     }
     It "selects responsive branding modes by viewport width" {
         Get-ManagerBannerMode -Width 80 -Height 40 | Should -Be 'PlainText'
-        Get-ManagerBannerMode -Width 120 -Height 40 | Should -Be 'SmallFiglet'
-        Get-ManagerBannerMode -Width 150 -Height 40 | Should -Be 'SmallFiglet'
+        Get-ManagerBannerMode -Width 120 -Height 40 | Should -Be 'PlainText'
+        Get-ManagerBannerMode -Width 150 -Height 40 | Should -Be 'PlainText'
         Get-ManagerBannerMode -Width 180 -Height 40 | Should -Be 'AnsiShadow'
     }
     It "does not force FIGlet branding into compact windows" {
         Test-UseManagerAsciiBanner -Width 89 -Height 40 | Should -BeFalse
-        Test-UseManagerAsciiBanner -Width 90 -Height 40 | Should -BeTrue
-        Test-UseManagerAsciiBanner -Width 150 -Height 20 | Should -BeTrue
+        Test-UseManagerAsciiBanner -Width 90 -Height 40 | Should -BeFalse
+        Test-UseManagerAsciiBanner -Width 150 -Height 20 | Should -BeFalse
+        Test-UseManagerAsciiBanner -Width 180 -Height 20 | Should -BeTrue
     }
     It "centers ANSI Shadow branding and includes the canonical display version" {
         $lines = Get-ManagerBannerLines -Width 180 -Height 30
@@ -3223,11 +3224,13 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
             $row.PSObject.Properties.Name | Should -Contain 'Color'
         }
     }
-    It "Standard tier renders every item's short description" {
+    It "Standard tier renders labels only so compact windows remain complete" {
         $screen = Render-MainMenuScreen -Tier 'Standard' -Width 110 -Height 30
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
         $item = (Get-MainMenuItems) | Where-Object { $_.Mode -eq 'AutoSync' }
-        $output | Should -Match ([regex]::Escape($item.ShortDesc))
+        $output | Should -Match ([regex]::Escape("1) AutoSync"))
+        $output | Should -Not -Match ([regex]::Escape($item.ShortDesc))
+        $output | Should -Match 'Enter number'
     }
     It "Compact tier renders only labels and the 'Type ? for descriptions' hint, no ShortDesc/FullDesc text" {
         $screen = Render-MainMenuScreen -Tier 'Compact' -Width 80 -Height 80
@@ -3239,14 +3242,16 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         $autoSync = (Get-MainMenuItems) | Where-Object { $_.Mode -eq 'AutoSync' }
         $output | Should -Not -Match ([regex]::Escape($autoSync.ShortDesc))
     }
-    It "Professional 132-column tier uses available width instead of the old narrow pre-wrapped menu text" {
+    It "Professional default tier uses a complete framed two-column menu" {
         $screen = Render-MainMenuScreen -Tier 'Professional' -Width 150 -Height 30
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
         $output | Should -Match 'Version 1\.0 RC2'
         $output | Should -Match ([regex]::Escape("1) AutoSync"))
-        $output | Should -Match ([regex]::Escape("Extract ZIPs (NAS or local) to a local folder, then register the games."))
-        $output | Should -Not -Match '(?m)^\s+folder, then register the games\.'
-        $screen.Geometry.MenuWidth | Should -BeGreaterThan 120
+        $output | Should -Match ([regex]::Escape("Extract and register ZIPs safely."))
+        $output | Should -Match 'GAME ENHANCEMENTS'
+        $output | Should -Match 'Enter number'
+        $screen.Geometry.ColumnCount | Should -Be 2
+        $screen.Geometry.MenuWidth | Should -BeGreaterThan 115
     }
     It "Ultra tier renders menu groups side-by-side instead of a narrow left-column menu" {
         $screen = Render-MainMenuScreen -Tier 'Ultra' -Width 160 -Height 40
@@ -3264,11 +3269,11 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         $output | Should -Match ([regex]::Escape("1) AutoSync"))
         $output | Should -Not -Match '(?m)LIBRARY MANAGEMENT\s+-+\s+GAME ENHANCEMENTS'
     }
-    It "narrow Professional tier wraps readable continuation lines under the menu description column" {
+    It "narrow Professional tier remains bounded and readable" {
         $screen = Render-MainMenuScreen -Tier 'Professional' -Width 70 -Height 30
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
         $output | Should -Match ([regex]::Escape("1) AutoSync"))
-        $output | Should -Match '(?m)^\s+register the games\.'
+        $output | Should -Match 'Enter number'
     }
     It "rendered rows never exceed the detected viewport width" {
         foreach ($case in @(

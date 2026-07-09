@@ -140,9 +140,6 @@ function Get-ManagerBannerMode {
     $ansiMax = ((Get-ManagerFigletBannerLines -Mode 'AnsiShadow') | Measure-Object -Property Length -Maximum).Maximum
     if ($Width -ge 150 -and $ansiMax -le $innerWidth) { return 'AnsiShadow' }
 
-    $smallMax = ((Get-ManagerFigletBannerLines -Mode 'SmallFiglet') | Measure-Object -Property Length -Maximum).Maximum
-    if ($Width -ge 90 -and $smallMax -le $innerWidth) { return 'SmallFiglet' }
-
     return 'PlainText'
 }
 
@@ -10585,9 +10582,12 @@ function Get-MainMenuRenderMetrics {
         $labelWidth = 27
         $descriptionWidth = [Math]::Max(24, $contentWidth - 36)
     } elseif ($Tier -eq 'Professional') {
-        $layout = 'ProfessionalWideSingleColumn'
-        $labelWidth = 28
-        $descriptionWidth = [Math]::Max(52, $contentWidth - 34)
+        $layout = 'ProfessionalTwoColumn'
+        $gap = 3
+        $columnWidth = [Math]::Floor(($contentWidth - 4 - $gap) / 2)
+        $labelWidth = 22
+        $descriptionWidth = [Math]::Max(36, $columnWidth - 8)
+        $totalRenderWidth = ($columnWidth * 2) + $gap + 4
     } else {
         if ($UltraLayoutMode -eq 'UltraCentered') {
             $layout = 'UltraCentered'
@@ -10660,6 +10660,27 @@ function Get-MainMenuSectionColor {
     return 'White'
 }
 
+function Get-MainMenuDefaultDescription {
+    param([object]$Item)
+
+    switch ($Item.Mode) {
+        'AutoSync' { return 'Extract and register ZIPs safely.' }
+        'RegisterOnly' { return 'Register already-extracted games.' }
+        'PropagateControls' { return 'Copy bindings from reference games.' }
+        'CrosshairSetup' { return 'Deploy lightgun crosshairs.' }
+        'ReShadeSetup' { return 'Apply visual enhancements.' }
+        'DgVoodoo2Setup' { return 'Fix older DirectX/Glide games.' }
+        'GpuFixSetup' { return 'Apply GPU compatibility fixes.' }
+        'FFBSetup' { return 'Configure wheel/stick feedback.' }
+        'BepInExUpdate' { return 'Update existing BepInEx installs.' }
+        'HealthCheck' { return 'Read-only library status.' }
+        'Restore' { return 'Restore UserProfiles or databases.' }
+        'PostgresSetup' { return 'Install local PostgreSQL support.' }
+        'CheckForUpdates' { return 'Manual backup-first update check.' }
+        default { return $Item.ShortDesc }
+    }
+}
+
 function Get-MainMenuGeometry {
     param(
         [ValidateSet('Ultra', 'Professional', 'Standard', 'Compact')][string]$Tier,
@@ -10690,12 +10711,15 @@ function Get-MainMenuGeometry {
         $footerWidth = $menuWidth
         $wrapWidth = [Math]::Max(40, $columnWidth - 34)
     } elseif ($Tier -eq 'Professional') {
-        $layout = 'Professional'
+        $layout = 'ProfessionalTwoColumn'
+        $columnCount = 2
+        $gutterWidth = 3
         $menuWidth = [Math]::Min($contentWidth, 132)
-        $columnWidth = $menuWidth
-        $rightColumnWidth = $columnWidth
+        $frameEnabled = $true
+        $columnWidth = [Math]::Floor(($menuWidth - 4 - $gutterWidth) / 2)
+        $rightColumnWidth = $menuWidth - 4 - $gutterWidth - $columnWidth
         $footerWidth = $menuWidth
-        $wrapWidth = [Math]::Max(56, $columnWidth - 16)
+        $wrapWidth = [Math]::Max(36, $columnWidth - 8)
         $bannerMode = 'Ascii'
     } elseif ($Tier -eq 'Ultra') {
         if ($UltraLayoutMode -eq 'UltraCentered') {
@@ -10981,19 +11005,27 @@ function Get-MainMenuSectionRows {
 
     $rows = New-Object System.Collections.Generic.List[object]
     $color = Get-MainMenuSectionColor -Header $Section.Header
-    $header = (' {0} ' -f $Section.Header.ToUpperInvariant())
+    $sectionHeader = $Section.Header
+    if ($Geometry.Layout -eq 'ProfessionalTwoColumn' -and $sectionHeader -like 'Game Enhancements*') {
+        $sectionHeader = 'Game Enhancements'
+    }
+    $header = (' {0} ' -f $sectionHeader.ToUpperInvariant())
     $ruleCount = [Math]::Max(4, $Geometry.ColumnWidth - $header.Length)
     [void]$rows.Add((New-ConsoleRenderRow -Text (($header + ('-' * $ruleCount)).Substring(0, [Math]::Min($Geometry.ColumnWidth, $header.Length + $ruleCount))) -Color $color))
 
     foreach ($item in $Section.Items) {
         [void]$rows.Add((New-ConsoleRenderRow -Text ('  {0}) {1}' -f $item.Number, $item.Label) -Color $color))
         if ($Detail -ne 'Labels') {
-            $descText = if ($Detail -eq 'Short') { $item.ShortDesc } else { ($item.FullDesc -join ' ') }
+            if ($Geometry.Layout -eq 'ProfessionalTwoColumn') {
+                $descText = Get-MainMenuDefaultDescription -Item $item
+            } else {
+                $descText = if ($Detail -eq 'Short') { $item.ShortDesc } else { ($item.FullDesc -join ' ') }
+            }
             foreach ($line in (Split-TextForMenuWidth -Text $descText -Width $Geometry.WrapWidth)) {
                 [void]$rows.Add((New-ConsoleRenderRow -Text ('      {0}' -f $line) -Color 'White'))
             }
         }
-        if ($Geometry.Layout -ne 'UltraTwoColumn') {
+        if ($Geometry.ColumnCount -ne 2 -and $Detail -ne 'Labels') {
             [void]$rows.Add((New-ConsoleRenderRow))
         }
     }
@@ -11035,10 +11067,10 @@ function Get-MainMenuBodyRows {
 
     $detail = 'Full'
     if ($Geometry.Tier -eq 'Compact') { $detail = 'Labels' }
-    if ($Geometry.Tier -eq 'Standard') { $detail = 'Short' }
-    if ($Geometry.Layout -eq 'UltraTwoColumn') { $detail = 'Short' }
+    if ($Geometry.Tier -eq 'Standard') { $detail = 'Labels' }
+    if ($Geometry.ColumnCount -eq 2) { $detail = 'Short' }
 
-    if ($Geometry.Layout -eq 'UltraTwoColumn') {
+    if ($Geometry.ColumnCount -eq 2) {
         $leftRows = @()
         $rightRows = @()
         foreach ($section in @($Sections[0], $Sections[2])) {

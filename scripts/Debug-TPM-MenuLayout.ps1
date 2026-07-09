@@ -48,6 +48,7 @@ $menuFunctions = @(
     'New-ConsoleRenderSegmentRow',
     'New-ConsoleRenderSegment',
     'Get-MainMenuSectionColor',
+    'Get-MainMenuDefaultDescription',
     'Get-MainMenuGeometry',
     'Split-TextForMenuWidth',
     'Format-MainMenuItemLines',
