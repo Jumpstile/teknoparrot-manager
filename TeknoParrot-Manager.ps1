@@ -78,9 +78,7 @@ function Get-ManagerDisplayVersion {
 }
 
 function Get-ManagerAsciiBannerLines {
-    return @(
-        'TeknoParrot Manager'
-    )
+    return Get-ManagerFigletBannerLines -Mode 'AnsiShadow'
 }
 
 function Get-ManagerVersionLine {
@@ -93,7 +91,59 @@ function Test-UseManagerAsciiBanner {
         [int]$Width,
         [int]$Height = 25
     )
-    return ($Width -ge 44)
+    return ((Get-ManagerBannerMode -Width $Width -Height $Height) -ne 'PlainText')
+}
+
+function Convert-ManagerFigletLine {
+    param([string]$Line)
+
+    $full = [string][char]0x2588
+    $topRight = [string][char]0x2557
+    $topLeft = [string][char]0x2554
+    $vertical = [string][char]0x2551
+    $bottomLeft = [string][char]0x255A
+    $bottomRight = [string][char]0x255D
+    $horizontal = [string][char]0x2550
+    return $Line.Replace('#', $full).Replace('R', $topRight).Replace('L', $topLeft).Replace('V', $vertical).Replace('C', $bottomLeft).Replace('D', $bottomRight).Replace('=', $horizontal)
+}
+
+function Get-ManagerFigletBannerLines {
+    param([ValidateSet('AnsiShadow', 'SmallFiglet')][string]$Mode)
+
+    if ($Mode -eq 'AnsiShadow') {
+        return @(
+            '########R#######R##R  ##R###R   ##R ######R ######R  #####R ######R ######R  ######R ########R    ###R   ###R #####R ###R   ##R #####R  ######R #######R######R '
+            'C==##L==D##L====D##V ##LD####R  ##V##L===##R##L==##R##L==##R##L==##R##L==##R##L===##RC==##L==D    ####R ####V##L==##R####R  ##V##L==##R##L====D ##L====D##L==##R'
+            '   ##V   #####R  #####LD ##L##R ##V##V   ##V######LD#######V######LD######LD##V   ##V   ##V       ##L####L##V#######V##L##R ##V#######V##V  ###R#####R  ######LD'
+            '   ##V   ##L==D  ##L=##R ##VC##R##V##V   ##V##L===D ##L==##V##L==##R##L==##R##V   ##V   ##V       ##VC##LD##V##L==##V##VC##R##V##L==##V##V   ##V##L==D  ##L==##R'
+            '   ##V   #######R##V  ##R##V C####VC######LD##V     ##V  ##V##V  ##V##V  ##VC######LD   ##V       ##V C=D ##V##V  ##V##V C####V##V  ##VC######LD#######R##V  ##V'
+            '   C=D   C======DC=D  C=DC=D  C===D C=====D C=D     C=D  C=DC=D  C=DC=D  C=D C=====D    C=D       C=D     C=DC=D  C=DC=D  C===DC=D  C=D C=====D C======DC=D  C=D'
+        ) | ForEach-Object { Convert-ManagerFigletLine -Line $_ }
+    }
+
+    return @(
+        ' _____    _          ___              _      __  __'
+        '|_   _|__| |__ _ _  | _ \__ _ _ _ _ _| |_   |  \/  |__ _ _ _  __ _ __ _ ___ _ _'
+        '  | |/ -_) / / '' \ |  _/ _` | ''_| ''_|  _|  | |\/| / _` | '' \/ _` / _` / -_) ''_|'
+        '  |_|\___|_\_\_||_| |_| \__,_|_| |_| \__|  |_|  |_\__,_|_||_\__,_\__, \___|_|'
+        '                                                                  |___/'
+    )
+}
+
+function Get-ManagerBannerMode {
+    param(
+        [int]$Width,
+        [int]$Height = 25
+    )
+
+    $innerWidth = [Math]::Max(1, $Width - 2)
+    $ansiMax = ((Get-ManagerFigletBannerLines -Mode 'AnsiShadow') | Measure-Object -Property Length -Maximum).Maximum
+    if ($Width -ge 150 -and $ansiMax -le $innerWidth) { return 'AnsiShadow' }
+
+    $smallMax = ((Get-ManagerFigletBannerLines -Mode 'SmallFiglet') | Measure-Object -Property Length -Maximum).Maximum
+    if ($Width -ge 90 -and $smallMax -le $innerWidth) { return 'SmallFiglet' }
+
+    return 'PlainText'
 }
 
 function Get-CenteredTextLine {
@@ -147,6 +197,21 @@ function New-ManagerTitleRow {
     )
 }
 
+function New-ManagerFigletRow {
+    param(
+        [string]$Text,
+        [int]$InnerWidth,
+        [string]$Color = 'Cyan'
+    )
+
+    $line = (Get-CenteredTextLine -Text $Text -Width $InnerWidth).PadRight($InnerWidth)
+    return New-ManagerBannerSegmentRow -Segments @(
+        (New-ManagerBannerSegment -Text '|' -Color 'DarkCyan')
+        (New-ManagerBannerSegment -Text $line -Color $Color)
+        (New-ManagerBannerSegment -Text '|' -Color 'DarkCyan')
+    )
+}
+
 function New-ManagerAttributionRow {
     param([int]$InnerWidth)
 
@@ -185,28 +250,23 @@ function Get-ManagerBannerRows {
         [int]$Height = 25
     )
 
-    $version = Get-ManagerDisplayVersion
-    if (Test-UseManagerAsciiBanner -Width $Width -Height $Height) {
-        $frameWidth = [Math]::Max(44, $Width)
-        $innerWidth = $frameWidth - 2
-        $rows = New-Object System.Collections.Generic.List[object]
-        [void]$rows.Add((New-ManagerBannerTextRow -Text ('+' + ('-' * $innerWidth) + '+') -Color 'DarkCyan'))
+    $mode = Get-ManagerBannerMode -Width $Width -Height $Height
+    $frameWidth = [Math]::Max(44, $Width)
+    $innerWidth = $frameWidth - 2
+    $rows = New-Object System.Collections.Generic.List[object]
+    [void]$rows.Add((New-ManagerBannerTextRow -Text ('+' + ('-' * $innerWidth) + '+') -Color 'DarkCyan'))
+    if ($mode -eq 'PlainText') {
         [void]$rows.Add((New-ManagerTitleRow -InnerWidth $innerWidth))
-        [void]$rows.Add((New-ManagerAttributionRow -InnerWidth $innerWidth))
-        [void]$rows.Add((New-ManagerBannerTextRow -Text ('|' + (Get-CenteredTextLine -Text (Get-ManagerVersionLine) -Width $innerWidth).PadRight($innerWidth) + '|') -Color 'Cyan'))
-        [void]$rows.Add((New-ManagerBannerTextRow -Text ('+' + ('-' * $innerWidth) + '+') -Color 'DarkCyan'))
-        return $rows.ToArray()
+    } else {
+        $bannerColor = if ($mode -eq 'AnsiShadow') { 'Cyan' } else { 'DarkCyan' }
+        foreach ($line in (Get-ManagerFigletBannerLines -Mode $mode)) {
+            [void]$rows.Add((New-ManagerFigletRow -Text $line -InnerWidth $innerWidth -Color $bannerColor))
+        }
     }
-
-    $title = "TeknoParrot Manager  $DisplayVersion"
-    if (-not $DisplayVersion) { $title = "TeknoParrot Manager  $version" }
-    $ruleWidth = [Math]::Min([Math]::Max($title.Length + 8, 44), [Math]::Max(44, $Width - 2))
-    $rule = '=' * $ruleWidth
-    return @(
-        [pscustomobject]@{ Text = $rule; Color = 'DarkCyan' }
-        [pscustomobject]@{ Text = (Get-CenteredTextLine -Text $title -Width $ruleWidth); Color = 'Cyan' }
-        [pscustomobject]@{ Text = $rule; Color = 'DarkCyan' }
-    )
+    [void]$rows.Add((New-ManagerAttributionRow -InnerWidth $innerWidth))
+    [void]$rows.Add((New-ManagerBannerTextRow -Text ('|' + (Get-CenteredTextLine -Text (Get-ManagerVersionLine) -Width $innerWidth).PadRight($innerWidth) + '|') -Color 'Cyan'))
+    [void]$rows.Add((New-ManagerBannerTextRow -Text ('+' + ('-' * $innerWidth) + '+') -Color 'DarkCyan'))
+    return $rows.ToArray()
 }
 
 function Get-ManagerBannerViewportSize {
@@ -10822,7 +10882,12 @@ function Get-MainMenuBannerRows {
     param([object]$Geometry)
     $rows = New-Object System.Collections.Generic.List[object]
     foreach ($row in (Get-ManagerBannerRows -Width $Geometry.MenuWidth -Height $Geometry.ViewportHeight)) {
-        [void]$rows.Add((New-ConsoleRenderRow -Text $row.Text -Color $row.Color))
+        if ($row.Segments) {
+            $segments = @($row.Segments | ForEach-Object { New-ConsoleRenderSegment -Text $_.Text -Color $_.Color })
+            [void]$rows.Add((New-ConsoleRenderSegmentRow -Segments $segments))
+        } else {
+            [void]$rows.Add((New-ConsoleRenderRow -Text $row.Text -Color $row.Color))
+        }
     }
     [void]$rows.Add((New-ConsoleRenderRow))
     return @(Get-PaddedMainMenuRows -Rows $rows.ToArray() -Padding $Geometry.LeftPadding)

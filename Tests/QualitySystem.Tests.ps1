@@ -61,7 +61,7 @@ Describe "Release Integrity source identity" {
         $content | Should -Match ([regex]::Escape("# TeknoParrot Manager  |  $script:ExpectedDisplayVersion"))
         $content | Should -Match '\$ScriptVersion\s*=\s*"1\.0"'
         $content | Should -Match '\$ReleaseCandidateLabel\s*=\s*"RC2"'
-        $content | Should -Match 'TeknoParrot Manager\s+\$DisplayVersion'
+        $content | Should -Match 'Get-ManagerVersionLine'
         $content | Should -Not -Match 'TeknoParrot Manager\s+v\$ScriptVersion RC1'
     }
 

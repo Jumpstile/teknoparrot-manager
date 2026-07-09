@@ -3119,37 +3119,47 @@ Describe "Get-MainMenuRenderMetrics" {
 }
 
 Describe "Manager banner rendering" {
-    It "uses the compact text banner for narrow widths" {
+    It "uses the compact plain-text banner for narrow widths" {
         $lines = Get-ManagerBannerLines -Width 80 -Height 30
 
         ($lines -join "`n") | Should -Match 'TeknoParrot Manager'
         ($lines -join "`n") | Should -Match 'Version 1\.0 RC2'
         ($lines -join "`n") | Should -Not -Match '/_  __/__.*___'
     }
-    It "uses the framed title block across compact, Professional, and Ultra widths" {
-        Test-UseManagerAsciiBanner -Width 43 -Height 40 | Should -BeFalse
-        Test-UseManagerAsciiBanner -Width 44 -Height 40 | Should -BeTrue
-        Test-UseManagerAsciiBanner -Width 180 -Height 40 | Should -BeTrue
+    It "selects responsive branding modes by viewport width" {
+        Get-ManagerBannerMode -Width 80 -Height 40 | Should -Be 'PlainText'
+        Get-ManagerBannerMode -Width 120 -Height 40 | Should -Be 'SmallFiglet'
+        Get-ManagerBannerMode -Width 150 -Height 40 | Should -Be 'SmallFiglet'
+        Get-ManagerBannerMode -Width 180 -Height 40 | Should -Be 'AnsiShadow'
     }
-    It "keeps the title block for wide layouts even when reported height is small" {
-        Test-UseManagerAsciiBanner -Width 44 -Height 30 | Should -BeTrue
-        Test-UseManagerAsciiBanner -Width 180 -Height 20 | Should -BeTrue
+    It "does not force FIGlet branding into compact windows" {
+        Test-UseManagerAsciiBanner -Width 89 -Height 40 | Should -BeFalse
+        Test-UseManagerAsciiBanner -Width 90 -Height 40 | Should -BeTrue
+        Test-UseManagerAsciiBanner -Width 150 -Height 20 | Should -BeTrue
     }
-    It "centers the professional title block and includes the canonical display version" {
-        $lines = Get-ManagerBannerLines -Width 150 -Height 30
+    It "centers ANSI Shadow branding and includes the canonical display version" {
+        $lines = Get-ManagerBannerLines -Width 180 -Height 30
         $joined = $lines -join "`n"
+        $block = [string][char]0x2588
 
-        $joined | Should -Match 'TeknoParrot Manager'
+        $joined.Contains($block) | Should -BeTrue
         $joined | Should -Match 'Developed and maintained by Jumpstile'
         $joined | Should -Match 'Version 1\.0 RC2'
-        $lines | ForEach-Object { $_.Length | Should -BeLessOrEqual 150 }
+        $lines | ForEach-Object { $_.Length | Should -BeLessOrEqual 180 }
     }
-    It "assigns console-safe colors to professional title block rows" {
-        $rows = Get-ManagerBannerRows -Width 150 -Height 40
+    It "keeps each branding mode inside its target width" {
+        foreach ($width in @(80, 120, 150, 180)) {
+            Get-ManagerBannerLines -Width $width -Height 40 | ForEach-Object {
+                $_.Length | Should -BeLessOrEqual $width
+            }
+        }
+    }
+    It "assigns console-safe colors to responsive banner rows" {
+        $rows = Get-ManagerBannerRows -Width 180 -Height 40
+        $block = [string][char]0x2588
 
-        $titleRow = $rows | Where-Object { $_.Text -match 'TeknoParrot Manager' } | Select-Object -First 1
-        ($titleRow.Segments | ForEach-Object { $_.Color }) | Should -Contain 'Cyan'
-        ($titleRow.Segments | ForEach-Object { $_.Color }) | Should -Contain 'Yellow'
+        $figletRow = $rows | Where-Object { $_.Text.Contains($block) } | Select-Object -First 1
+        ($figletRow.Segments | ForEach-Object { $_.Color }) | Should -Contain 'Cyan'
         ($rows | Where-Object { $_.Text -match 'Developed and maintained by Jumpstile' }).Segments.Color | Should -Contain 'Yellow'
         ($rows | Where-Object { $_.Text -match 'Version 1\.0 RC2' }).Color | Should -Be 'Cyan'
     }
@@ -3189,7 +3199,6 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
 
         $screen.Rows.Count | Should -BeGreaterThan 20
-        $output | Should -Match 'TeknoParrot Manager'
         $output | Should -Match 'Developed and maintained by Jumpstile'
         $output | Should -Match 'Version 1\.0 RC2'
         foreach ($item in (Get-MainMenuItems)) {
@@ -3233,7 +3242,7 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
     It "Professional 132-column tier uses available width instead of the old narrow pre-wrapped menu text" {
         $screen = Render-MainMenuScreen -Tier 'Professional' -Width 150 -Height 30
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
-        $output | Should -Match 'TeknoParrot Manager'
+        $output | Should -Match 'Version 1\.0 RC2'
         $output | Should -Match ([regex]::Escape("1) AutoSync"))
         $output | Should -Match ([regex]::Escape("Extract ZIPs (NAS or local) to a local folder, then register the games."))
         $output | Should -Not -Match '(?m)^\s+folder, then register the games\.'
