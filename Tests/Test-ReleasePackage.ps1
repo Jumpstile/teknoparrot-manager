@@ -58,7 +58,7 @@ try {
     if ($scriptContent -notmatch '\$ReleaseCandidateLabel\s*=\s*"RC2"') {
         throw "Packaged TeknoParrot-Manager.ps1 does not set ReleaseCandidateLabel to RC2."
     }
-    if ($scriptContent -notmatch 'TeknoParrot Manager\s+\$DisplayVersion') {
+    if ($scriptContent -notmatch 'Get-ManagerVersionLine') {
         throw "Packaged TeknoParrot-Manager.ps1 banner does not render the DisplayVersion source."
     }
     if ($scriptContent -match 'TeknoParrot Manager\s+v\$ScriptVersion RC1') {
