@@ -5,6 +5,107 @@ It is intentionally redundant: each gate catches a different failure class.
 
 ---
 
+## 0. The Jumpstile Release Standard
+
+Adopted as the permanent release process for this repository during the
+v1.0 RC2.1 cycle (see `docs/RELEASE-RETROSPECTIVE-v1.0-RC2.1.md` for the
+full retrospective this was drawn from). Recommended as the standard
+release order for every Jumpstile project, per `CONSTITUTION.md`'s
+"Release governance" section -- this document is the concrete TPM
+implementation of that portfolio-wide principle, not a competing policy.
+
+### Release order
+
+1. **Code Complete** -- the change set is finished, not "mostly done."
+2. **Automated Tests** -- targeted tests for the touched area at minimum
+   (see Section 1 below); full suite once before believed complete.
+3. **Manual Testing** -- a human exercises the actual behavior, not just
+   the test suite, for anything UX/visual/behavioral.
+4. **Independent Review** -- a second, independent pass (human or a second
+   AI agent) that did not write the fix reviews it before it's treated as
+   settled. Convergent independent diagnosis of the same root cause from
+   two separate reviewers is strong evidence a fix targets the real defect.
+5. **Real-Hardware Certification** (where applicable) -- the TPM
+   Certification Suite run on an actual arcade machine against an actual
+   TeknoParrot install, not simulated or run only in a dev environment.
+6. **Full Documentation Sweep** -- Section 3 below, and Section 3 of this
+   document's "Documentation Sweep Policy" -- mandatory every release, not
+   optional and not something a version bump can skip.
+7. **Release Retrospective** -- a permanent, dated document (see Section 3
+   policy below) capturing what shipped, why, root causes of significant
+   bugs, and lessons learned, written once per release cycle and never
+   rewritten to match a later release.
+8. **Package Build** -- Section 4 below.
+9. **Package Validation** -- `Tests\Test-ReleasePackage.ps1` against the
+   built ZIP, Section 4 below.
+10. **SHA256 Generation** -- computed on the validated local package before
+    upload, recorded in the release notes and/or retrospective.
+11. **Git Tag** -- created only after every prior step passes. Never reused,
+    never force-moved once it backs a published release (immutable, see
+    Section 7).
+12. **GitHub Release** -- created as a **draft** first, always -- a
+    non-draft release immediately and permanently locks the tag name and
+    any uploaded assets, even after the release is later deleted.
+13. **Asset Verification** -- the published asset is downloaded back and
+    SHA256-compared against the local validated package before the release
+    is left in its final published state. Trusting that an upload
+    "succeeded" without this comparison is not sufficient.
+14. **Post-Release Audit** -- Section 6/7 below: working tree clean,
+    `origin/main` matches local, tag correct, no lingering release
+    blockers, remaining open issues reclassified as post-release
+    enhancements where appropriate.
+
+### AI workflow
+
+The roles below are the concrete assignment of `CONSTITUTION.md`'s existing
+Roles taxonomy (Lead Engineer / Independent Reviewer / Chief Architect /
+Release Manager) to specific tools, as actually used during the RC2.1
+cycle. This is a recommended pattern for other Jumpstile projects, not a
+requirement that every project use every one of these tools -- the
+underlying roles (implementation, independent verification, architecture
+and governance, and the human Release Manager decision) are what matter;
+which specific AI tool fills which role is a project choice.
+
+- **Claude** -- Lead Engineer role. Primary implementation, documentation,
+  and release preparation. Writes the code, writes the docs, prepares (but
+  does not unilaterally authorize) the release.
+- **Codex** -- Independent Reviewer role. Independent verification, real-
+  hardware validation, regression verification, and certification
+  confirmation. Critically, works from a separate environment (the real
+  arcade machine) and does not simply re-read the same diff -- it re-derives
+  findings independently, which is what makes convergent findings between
+  Claude and Codex meaningful evidence rather than an echo of the same
+  analysis.
+- **ChatGPT** -- Chief Architect / Technical Program Manager role.
+  Architecture, governance, release review, and engineering standards --
+  reconciling findings from independent reviews into a release-readiness
+  recommendation, without itself authorizing publication.
+- **Release Manager (human, the repository owner)** -- unchanged from
+  `CONSTITUTION.md`: the sole authority to approve a version change,
+  create the tag, publish the release, and change any release-identity
+  marker. No AI role in this workflow substitutes for this decision.
+
+### Documentation Sweep Policy (permanent, every release)
+
+Documentation is part of the product, not an afterthought to it. Every
+release requires review of:
+
+- every `*.md` file in the repository
+- every `*.txt` file in the repository
+- `docs/`
+- the GitHub wiki
+- `README.md` / `TeknoParrot-Manager-README.txt`
+- `TeknoParrot-Manager-CHANGELOG.txt`
+- `TeknoParrot-Manager-QuickStart.txt` / `QUICKSTART.md`
+- user guides
+- engineering docs (`ARCHITECTURE.md`, `LESSONS_LEARNED.md`, etc.)
+- release docs (this file)
+- certification docs (`docs/TPM-CERTIFICATION-SUITE.md`)
+
+See Section 3 below for the mechanical checklist this policy implements.
+
+---
+
 ## 1. Pre-commit checks (every commit, not just releases)
 
 - [ ] ASCII check -- zero non-ASCII bytes in the production script:

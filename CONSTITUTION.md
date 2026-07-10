@@ -259,6 +259,20 @@ permission to *publish* one.
 This is a standing portfolio principle across every Jumpstile project,
 not specific to any one repository.
 
+### The Jumpstile Release Standard
+
+A concrete 14-step release order (Code Complete through Post-Release Audit)
+and AI-workflow role mapping (Lead Engineer / Independent Reviewer / Chief
+Architect / Release Manager, assigned to specific tools) was adopted during
+TeknoParrot Manager's v1.0 RC2.1 cycle -- see
+`RELEASE-SAFETY-CHECKLIST.md` section 0 in that repository for the full
+concrete implementation, and `docs/RELEASE-RETROSPECTIVE-v1.0-RC2.1.md` for
+the retrospective it was drawn from. Recommended as the standard release
+process for every Jumpstile project. As with everything else in this
+section, the process producing thorough release evidence is still not
+itself release authorization -- the Release Manager step in that process is
+this same principle, not an exception to it.
+
 ### Evidence hierarchy
 
 Engineering artifacts -- including tests, certification, CI results,
