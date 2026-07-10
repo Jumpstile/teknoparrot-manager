@@ -4142,6 +4142,17 @@ function Invoke-TpmDownload {
         try { if (Test-Path -LiteralPath $tempPath) { [System.IO.File]::Delete($tempPath) } } catch {}
         if ($LastStatusCode) { $LastStatusCode.Value = $detectedStatusCode }
         return $false
+    } finally {
+        # The BITS/HttpClient/Invoke-WebRequest tiers each raise the Id 42
+        # progress overlay as they start working, but only the success path
+        # in each of them clears it. Every failure/exception exit above used
+        # to leave whatever partial-progress text ("0 MB downloaded") was
+        # last written on screen permanently, since nothing after this point
+        # in the whole call chain ever touches Id 42 again. Clearing here
+        # unconditionally (success, per-tier failure, or an unexpected
+        # throw) guarantees the overlay never survives past this function
+        # regardless of how it exits -- see issue #132.
+        Write-Progress -Id 42 -Activity "Downloading $Label" -Completed
     }
 }
 
@@ -9599,15 +9610,15 @@ function Invoke-ThumbnailDownload {
     if (Test-Path -LiteralPath $customThumbDir) {
         $customFiles = @(Get-ChildItem -LiteralPath $customThumbDir -Filter "*.png" -File -ErrorAction SilentlyContinue)
         if ($customFiles.Count -gt 0) {
-            Write-Host ("  Custom thumbnails folder: {0} PNG file(s) found." -f $customFiles.Count) -ForegroundColor Cyan
+            Write-Host ("  Found {0} of your own icon(s) in CustomThumbnails\." -f $customFiles.Count) -ForegroundColor Cyan
             $custCopied = 0; $custSkipped = 0; $custBadName = 0
             foreach ($cf in $customFiles) {
                 $code = [System.IO.Path]::GetFileNameWithoutExtension($cf.Name)
                 if (-not $knownCodes.Contains($code)) {
-                    Write-Host ("  WRONG NAME: CustomThumbnails\{0}" -f $cf.Name) -ForegroundColor Yellow
-                    Write-Host ("             '{0}' does not match any registered game profile code." -f $code) -ForegroundColor Yellow
-                    Write-Host "             Check TeknoParrot-Manager-controls.txt for the correct" -ForegroundColor Yellow
-                    Write-Host "             name, rename the file, then re-run. File was not copied." -ForegroundColor Yellow
+                    Write-Host ("  SKIPPED: CustomThumbnails\{0}" -f $cf.Name) -ForegroundColor Yellow
+                    Write-Host ("           '{0}' doesn't match any of your registered games (profile code)." -f $code) -ForegroundColor Yellow
+                    Write-Host "           Check TeknoParrot-Manager-controls.txt for the exact file name" -ForegroundColor Yellow
+                    Write-Host "           to use, rename this PNG to match, then run this again." -ForegroundColor Yellow
                     Write-Log "Thumbnails: custom $($cf.Name) -- no matching profile code, skipped."
                     $custBadName++
                     continue
@@ -9626,9 +9637,9 @@ function Invoke-ThumbnailDownload {
                     }
                 }
             }
-            if ($custCopied   -gt 0) { Write-Host ("  Copied  : {0} custom thumbnail(s) to Icons folder." -f $custCopied)   -ForegroundColor Green   }
-            if ($custSkipped  -gt 0) { Write-Host ("  Skipped : {0} -- icon already present."             -f $custSkipped)  -ForegroundColor DarkGray }
-            if ($custBadName  -gt 0) { Write-Host ("  Invalid : {0} -- wrong filename (see above)."       -f $custBadName)  -ForegroundColor Yellow   }
+            if ($custCopied   -gt 0) { Write-Host ("  Added   : {0} of your own icon(s)."                  -f $custCopied)   -ForegroundColor Green   }
+            if ($custSkipped  -gt 0) { Write-Host ("  Skipped : {0} -- that game already has an icon."     -f $custSkipped)  -ForegroundColor DarkGray }
+            if ($custBadName  -gt 0) { Write-Host ("  Skipped : {0} -- file name didn't match a game (see above)." -f $custBadName)  -ForegroundColor Yellow   }
             Write-Log ("Thumbnails: custom copied={0} skipped={1} badName={2}" -f $custCopied, $custSkipped, $custBadName)
         }
     }
@@ -9670,7 +9681,7 @@ function Invoke-ThumbnailDownload {
             Write-Log "Thumbnails: downloaded $code"
             $fetched++
         } elseif ($statusCode -eq 404) {
-            Write-Host "  not in repo" -ForegroundColor DarkGray
+            Write-Host "  no icon online" -ForegroundColor DarkGray
             Write-Log "Thumbnails: not in repo $code"
             $notAvail++
         } else {
@@ -9682,9 +9693,18 @@ function Invoke-ThumbnailDownload {
 
     Write-Host ""
     $failSuffix = if ($failed -gt 0) { ", $failed failed" } else { "" }
-    Write-Host ("  Thumbnails: {0} fetched, {1} already present, {2} not in repo{3}." -f `
+    Write-Host ("  Thumbnails: {0} downloaded, {1} already had one, {2} have no icon online (not in the source repo){3}." -f `
         $fetched, $alreadyCount, $notAvail, $failSuffix) -ForegroundColor Green
     Write-Log ("Thumbnails: fetched=$fetched alreadyPresent=$alreadyCount notAvail=$notAvail failed=$failed")
+
+    if ($fetched -eq 0 -and $failed -eq 0 -and $notAvail -eq $total -and $total -gt 0) {
+        Write-Host "  None of your games had a matching icon available online." -ForegroundColor Yellow
+        Write-Host "  This is normal for less common or homebrew games -- the online icon pack" -ForegroundColor Yellow
+        Write-Host "  (repo) doesn't have everything. You can add your own: create a" -ForegroundColor Yellow
+        Write-Host "  CustomThumbnails\ folder next to this script and drop in a PNG per game," -ForegroundColor Yellow
+        Write-Host "  named to match its file in UserProfiles\ (see the tip above)." -ForegroundColor Yellow
+        Write-Log "Thumbnails: all $total missing icon(s) were 404 -- likely no upstream icon for these specific games, not a download failure."
+    }
 }
 
 # =============================================================================
@@ -12379,10 +12399,11 @@ if ($dryRunActive) {
     Write-Log "Unattended: thumbnail download = Y."
     $doThumb = "Y"
 } else {
-    Write-Host "  Tip: to add your own thumbnails, create a  CustomThumbnails\  folder next to" -ForegroundColor DarkCyan
-    Write-Host "  this script and drop  ProfileCode.png  files in it. The profile code is" -ForegroundColor DarkCyan
-    Write-Host "  the game's filename in UserProfiles\ (without .xml), or check the" -ForegroundColor DarkCyan
-    Write-Host "  TeknoParrot-Manager-controls.txt file for a full list of registered codes." -ForegroundColor DarkCyan
+    Write-Host "  Tip: want to use your own game icons instead? Create a  CustomThumbnails\" -ForegroundColor DarkCyan
+    Write-Host "  folder next to this script and drop PNG images in it. Name each PNG the" -ForegroundColor DarkCyan
+    Write-Host "  same as that game's file in the UserProfiles\ folder (called the profile" -ForegroundColor DarkCyan
+    Write-Host "  code), but ending in .png instead of .xml. TeknoParrot-Manager-controls.txt" -ForegroundColor DarkCyan
+    Write-Host "  lists every game's file name if you're not sure." -ForegroundColor DarkCyan
     $doThumb = (Read-Host "Download thumbnails for registered games missing an icon? (Y/N)").Trim().ToUpper()
 }
 if ($doThumb -eq "Y") {

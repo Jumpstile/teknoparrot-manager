@@ -1658,6 +1658,104 @@ Describe "Invoke-TpmDownload method selection and partial-file cleanup" {
     }
 }
 
+Describe "Invoke-TpmDownload progress overlay cleanup (issue #132)" {
+    # Regression coverage for the stale "Downloading Thumbnails" progress
+    # overlay that persisted over the TPM menu after a thumbnail 404. Root
+    # cause: every download tier raises the Id 42 Write-Progress overlay as
+    # it starts, but only each tier's own success path cleared it -- every
+    # failure/exception exit left whatever was last written on screen
+    # permanently. The fix wraps Invoke-TpmDownload in a finally that always
+    # completes Id 42, regardless of how the function exits.
+    BeforeAll {
+        Mock Write-Log {}
+        Mock Write-Host {}
+        Mock Write-DownloadAudit {}
+        Mock Write-TpmDownloadMetrics {}
+        Mock Start-Sleep {}
+        Mock Write-Progress {}
+    }
+    BeforeEach {
+        Mock Test-TpmDownloadBitsAvailable { $false }
+    }
+
+    It "completes the Id 42 overlay after a successful download" {
+        Mock Invoke-TpmDownloadHttpClient { Set-Content -LiteralPath $TempPath -Value "fake" -NoNewline }
+        $savePath = Join-Path $TestDrive "progress-success.png"
+
+        Invoke-TpmDownload -DownloadUrl "https://example.com/a.png" -DestinationPath $savePath -Label 'Thumbnails' | Should -BeTrue
+
+        Should -Invoke Write-Progress -Times 1 -ParameterFilter { $Id -eq 42 -and $Completed }
+    }
+
+    It "completes the Id 42 overlay after a single definitive 404 (one thumbnail missing upstream)" {
+        Mock Invoke-TpmDownloadHttpClient { throw "Response status code does not indicate success: 404 (Not Found)." }
+        Mock Invoke-TpmDownloadWebRequest { throw "Response status code does not indicate success: 404 (Not Found)." }
+        $savePath = Join-Path $TestDrive "progress-404.png"
+        $statusCode = 0
+
+        $result = Invoke-TpmDownload -DownloadUrl "https://example.com/missing.png" -DestinationPath $savePath -Label 'Thumbnails' -LastStatusCode ([ref]$statusCode)
+
+        $result | Should -BeFalse
+        $statusCode | Should -Be 404
+        Should -Invoke Write-Progress -Times 1 -ParameterFilter { $Id -eq 42 -and $Completed }
+    }
+
+    It "completes the Id 42 overlay after a non-404 failure (generic download error, all tiers exhausted)" {
+        Mock Invoke-TpmDownloadHttpClient { throw "DNS resolution failed" }
+        Mock Invoke-TpmDownloadWebRequest { throw "DNS resolution failed" }
+        $savePath = Join-Path $TestDrive "progress-generic-fail.png"
+
+        Invoke-TpmDownload -DownloadUrl "https://example.com/a.png" -DestinationPath $savePath -Label 'Thumbnails' | Should -BeFalse
+
+        Should -Invoke Write-Progress -Times 1 -ParameterFilter { $Id -eq 42 -and $Completed }
+    }
+
+    It "completes the Id 42 overlay even when an unexpected exception is thrown after a successful transfer" {
+        Mock Invoke-TpmDownloadHttpClient { Set-Content -LiteralPath $TempPath -Value "fake" -NoNewline }
+        Mock Write-DownloadAudit { throw "unexpected post-download failure" }
+        $savePath = Join-Path $TestDrive "progress-exception.png"
+
+        Invoke-TpmDownload -DownloadUrl "https://example.com/a.png" -DestinationPath $savePath -Label 'Thumbnails' | Should -BeFalse
+
+        Should -Invoke Write-Progress -Times 1 -ParameterFilter { $Id -eq 42 -and $Completed }
+    }
+
+    It "clears the overlay independently for each call in a mixed batch (404, then success, then generic failure)" {
+        $savePath1 = Join-Path $TestDrive "batch-1-404.png"
+        $savePath2 = Join-Path $TestDrive "batch-2-success.png"
+        $savePath3 = Join-Path $TestDrive "batch-3-failed.png"
+
+        Mock Invoke-TpmDownloadHttpClient { throw "Response status code does not indicate success: 404 (Not Found)." }
+        Mock Invoke-TpmDownloadWebRequest { throw "Response status code does not indicate success: 404 (Not Found)." }
+        $r1 = Invoke-TpmDownload -DownloadUrl "https://example.com/missing.png" -DestinationPath $savePath1 -Label 'Thumbnails'
+
+        Mock Invoke-TpmDownloadHttpClient { Set-Content -LiteralPath $TempPath -Value "fake" -NoNewline }
+        Mock Invoke-TpmDownloadWebRequest { throw "should not be reached" }
+        $r2 = Invoke-TpmDownload -DownloadUrl "https://example.com/found.png" -DestinationPath $savePath2 -Label 'Thumbnails'
+
+        Mock Invoke-TpmDownloadHttpClient { throw "DNS resolution failed" }
+        Mock Invoke-TpmDownloadWebRequest { throw "DNS resolution failed" }
+        $r3 = Invoke-TpmDownload -DownloadUrl "https://example.com/broken.png" -DestinationPath $savePath3 -Label 'Thumbnails'
+
+        $r1 | Should -BeFalse
+        $r2 | Should -BeTrue
+        $r3 | Should -BeFalse
+        Should -Invoke Write-Progress -Times 3 -ParameterFilter { $Id -eq 42 -and $Completed }
+    }
+
+    It "clears the overlay for every call across an all-404 batch (upstream has none of these icons)" {
+        Mock Invoke-TpmDownloadHttpClient { throw "Response status code does not indicate success: 404 (Not Found)." }
+        Mock Invoke-TpmDownloadWebRequest { throw "Response status code does not indicate success: 404 (Not Found)." }
+
+        1..3 | ForEach-Object {
+            $savePath = Join-Path $TestDrive "all-404-$_.png"
+            Invoke-TpmDownload -DownloadUrl "https://example.com/missing-$_.png" -DestinationPath $savePath -Label 'Thumbnails' | Should -BeFalse
+        }
+
+        Should -Invoke Write-Progress -Times 3 -ParameterFilter { $Id -eq 42 -and $Completed }
+    }
+}
+
 Describe "Invoke-TpmDownloadBits BITS polling states" {
     It "the polling loop's continue-states list includes TransientError (a recoverable BITS state), not just Connecting/Transferring/Queued" {
         $scriptContent = Get-Content -LiteralPath $scriptPath -Raw
@@ -1783,6 +1881,22 @@ Describe "Thumbnail download regression guards" {
         # call it rather than reimplement cleanup itself.
         $script:thumbnailFunctionSource | Should -Match 'Invoke-TpmDownload\s+-DownloadUrl\s+\$url\s+-DestinationPath\s+\$destPath'
         $script:thumbnailFunctionSource | Should -Match '-LastStatusCode\s*\(\[ref\]\$statusCode\)'
+    }
+
+    It "flags an all-404 batch distinctly from a real failure (issue #132 -- likely profile-code/upstream-name mismatch, not a broken download path)" {
+        $script:thumbnailFunctionSource | Should -Match '\$fetched\s+-eq\s+0\s+-and\s+\$failed\s+-eq\s+0\s+-and\s+\$notAvail\s+-eq\s+\$total\s+-and\s+\$total\s+-gt\s+0'
+    }
+}
+
+Describe "Invoke-TpmDownload finally block always clears the progress overlay (issue #132)" {
+    It "the finally block completes Id 42 unconditionally, not only on the success path" {
+        $fullSource = Get-Content -LiteralPath $scriptPath -Raw
+        $start = $fullSource.IndexOf('function Invoke-TpmDownload {')
+        $start | Should -BeGreaterThan -1
+        $end = $fullSource.IndexOf("`nfunction ", $start + 10)
+        $downloadFnSource = $fullSource.Substring($start, $end - $start)
+
+        $downloadFnSource | Should -Match '\}\s*finally\s*\{\s*[\s\S]*?Write-Progress\s+-Id\s+42\s+-Activity\s+"Downloading\s+\$Label"\s+-Completed'
     }
 }
 
