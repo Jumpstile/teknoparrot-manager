@@ -288,8 +288,38 @@ function Add-CheckResult {
 # waiting for the final scorecard to find out anything failed. Deliberately
 # terse (one line each) per the issue's own "concise, not verbose narration"
 # requirement.
+# Keep a persistent status signal visible even when the console body is
+# temporarily blank or Pester output is suppressed by Summary mode.
+function Set-TPMConsoleStatus {
+    param([string]$Gate, [string]$Purpose, [string]$Expected)
+
+    $title = if ([string]::IsNullOrWhiteSpace($Gate)) {
+        'TeknoParrot Manager Certification Suite'
+    } else {
+        "TPM Certification - $Gate"
+    }
+
+    try { [Console]::Title = $title } catch {}
+    try {
+        $status = if ([string]::IsNullOrWhiteSpace($Purpose)) {
+            $Expected
+        } elseif ([string]::IsNullOrWhiteSpace($Expected)) {
+            $Purpose
+        } else {
+            "$Purpose | $Expected"
+        }
+        Write-Progress -Id 42 -Activity 'TPM Certification Suite' -Status $status -PercentComplete 0
+    } catch {}
+}
+
+function Clear-TPMConsoleStatus {
+    try { Write-Progress -Id 42 -Activity 'TPM Certification Suite' -Completed } catch {}
+    try { [Console]::Title = 'TeknoParrot Manager Certification Suite' } catch {}
+}
+
 function Write-TPMGateHeader {
     param([string]$Gate, [string]$Purpose, [string]$Expected)
+    Set-TPMConsoleStatus -Gate $Gate -Purpose $Purpose -Expected $Expected
     Write-Host ""
     Write-Host ("--- Running: {0}" -f $Gate) -ForegroundColor Cyan
     Write-Host ("    Purpose : {0}" -f $Purpose) -ForegroundColor DarkGray
@@ -808,4 +838,5 @@ finally {
     Write-Host (" Score   : {0}/{1} ({2}%)" -f $certification.Passed, $certification.Total, $certification.ScorePercent)
     Write-Host (" Report  : {0}" -f $certificationMd)
     Write-Host "============================================"
+    Clear-TPMConsoleStatus
 }
