@@ -1111,20 +1111,20 @@ Describe "Issue #84: Pass-2 dat-name fuzzy fallback rejects candidates with extr
     It "blocks Zoids Infinity matching Zoids Infinity EX (real DAT entries, Dice 0.923)" {
         $extra = Get-ExtraCandidateTokens -FolderName "Zoids Infinity (2004)[Namco System 246][TP]" `
                                            -CandidateName "Zoids Infinity EX (2.10)(2006)[Namco System 246][TP]"
-        $extra.Count | Should -BeGreaterThan 0
+        @($extra).Count | Should -BeGreaterThan 0
         $extra | Should -Contain 'ex'
     }
     It "blocks Zoids Infinity matching Zoids Infinity EX Plus (real DAT entries, Dice 0.800)" {
         $extra = Get-ExtraCandidateTokens -FolderName "Zoids Infinity (2004)[Namco System 246][TP]" `
                                            -CandidateName "Zoids Infinity EX Plus (B3900107A Ver 2.10J)(2006)[Namco System 256][TP]"
-        $extra.Count | Should -BeGreaterThan 0
+        @($extra).Count | Should -BeGreaterThan 0
         $extra | Should -Contain 'ex'
         $extra | Should -Contain 'plus'
     }
     It "blocks Street Fighter IV matching Super Street Fighter IV Arcade Edition (prefix-modifier case)" {
         $extra = Get-ExtraCandidateTokens -FolderName "Street Fighter IV (2008)[PC][TP]" `
                                            -CandidateName "Super Street Fighter IV Arcade Edition (2010-11-04)(EXP,Standalone)[Taito Type X2][TP]"
-        $extra.Count | Should -BeGreaterThan 0
+        @($extra).Count | Should -BeGreaterThan 0
         $extra | Should -Contain 'super'
         $extra | Should -Contain 'arcade'
         $extra | Should -Contain 'edition'
@@ -1132,7 +1132,7 @@ Describe "Issue #84: Pass-2 dat-name fuzzy fallback rejects candidates with extr
     It "blocks Battle Gear 4 matching Battle Gear 4 Tuned (real DAT entries)" {
         $extra = Get-ExtraCandidateTokens -FolderName "Battle Gear 4 (2005)[Taito Type X+][TP]" `
                                            -CandidateName "Battle Gear 4 Tuned (2.08)(2007-06-18)[Taito Type X+][TP]"
-        $extra.Count | Should -BeGreaterThan 0
+        @($extra).Count | Should -BeGreaterThan 0
         $extra | Should -Contain 'tuned'
     }
     It "positive control: allows a legitimate near-miss that differs only by metadata, not title words" {
@@ -1145,7 +1145,7 @@ Describe "Issue #84: Pass-2 dat-name fuzzy fallback rejects candidates with extr
         # exists to handle.
         $extra = Get-ExtraCandidateTokens -FolderName "Battle Gear 3 (2.08J)(2002)[Namco System 246][TP]" `
                                            -CandidateName "Battle Gear 3 (2.08J)(2003-04-11)[Namco System 246][TP]"
-        $extra.Count | Should -Be 0
+        @($extra).Count | Should -Be 0
     }
     It "known scope boundary: does not extend typo tolerance to whole-word differences within a title (documented, not a regression)" {
         # This rule compares whole meaningful WORDS, not per-word bigram similarity
@@ -1160,7 +1160,7 @@ Describe "Issue #84: Pass-2 dat-name fuzzy fallback rejects candidates with extr
         # boundary of the minimal #84 design, not a silent gap.
         $extra = Get-ExtraCandidateTokens -FolderName "Nicktoons Nitro (2009)[Raw Thrills PC][TP]" `
                                            -CandidateName "Nicktoon Nitro (2009)[Raw Thrills PC][TP]"
-        $extra.Count | Should -BeGreaterThan 0
+        @($extra).Count | Should -BeGreaterThan 0
     }
 }
 
@@ -3146,7 +3146,12 @@ Describe "Main menu source-level drift check" {
         $switchNumbers    = [regex]::Matches($switchBlockText, '"(\d+)"\s*\{') |
             ForEach-Object { [int]$_.Groups[1].Value } | Sort-Object -Unique
 
-        $itemNumbers.Count | Should -BeGreaterThan 0
+        # @() wrap: not currently reachable with $null (14 menu items always
+        # collapse to more than one unique number), but the same unguarded
+        # .Count-on-a-possibly-scalar-pipeline-result pattern that broke the
+        # Ultra-tier banner test under PS 5.1 above -- fixed defensively for
+        # consistency with that lesson rather than waiting for it to fail.
+        @($itemNumbers).Count | Should -BeGreaterThan 0
         # Join to strings for comparison -- piping an array directly into
         # Should -Be iterates it element-by-element against the whole
         # right-hand side instead of comparing the collections as a whole.
@@ -3192,7 +3197,7 @@ Describe "Get-MainMenuSections / Get-MainMenuItems" {
         foreach ($item in $items) {
             $item.Label | Should -Not -BeNullOrEmpty
             $item.ShortDesc | Should -Not -BeNullOrEmpty
-            $item.FullDesc.Count | Should -BeGreaterThan 0
+            @($item.FullDesc).Count | Should -BeGreaterThan 0
         }
     }
 }
@@ -3355,8 +3360,18 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
 
         $screen.Rows.Count | Should -BeGreaterThan 25
         (($screen.Rows | ForEach-Object { $_.Text.Length }) | Measure-Object -Maximum).Maximum | Should -BeLessOrEqual 160
-        ($screen.Rows | Where-Object { $_.Text -match 'AutoSync' }).Count | Should -BeGreaterThan 0
-        ($screen.Rows | Where-Object { $_.Text -match 'Crosshair setup' }).Count | Should -BeGreaterThan 0
+        # @() wrap is required, not stylistic: PowerShell 7 added an intrinsic
+        # scalar .Count member (a lone PSCustomObject reports Count=1), but
+        # Windows PowerShell 5.1 -- this project's actual target runtime, and
+        # what CI's "shell: powershell" step actually runs -- does not have
+        # it, so .Count on a single (non-array) Where-Object match is $null
+        # there. Exactly one row matches each of these two filters, so this
+        # passed under PS7 (this dev environment's default) but failed on
+        # every real PS 5.1 run, including CI, even though the actual
+        # rendering was always correct on both. See LESSONS_LEARNED.md,
+        # "PowerShell return @() gotcha."
+        @($screen.Rows | Where-Object { $_.Text -match 'AutoSync' }).Count | Should -BeGreaterThan 0
+        @($screen.Rows | Where-Object { $_.Text -match 'Crosshair setup' }).Count | Should -BeGreaterThan 0
     }
     It "returns a flat row buffer for the production writer" {
         $screen = Render-MainMenuScreen -Tier 'Professional' -Width 150 -Height 30
