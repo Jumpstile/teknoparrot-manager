@@ -87,8 +87,8 @@ BeforeAll {
     # below use their own controlled version strings/mocks instead of relying on
     # this value's specific number, so drift here would not silently break them.
     $ScriptVersion = "0.99.39"
-    $ReleaseCandidateLabel = "RC2"
-    $DisplayVersion = "v1.0 RC2"
+    $ReleaseCandidateLabel = "RC2.1"
+    $DisplayVersion = "v1.0 RC2.1"
 
     # Write-Log normally writes beside the production script via top-level
     # initialisation that AST extraction intentionally skips. Give helper tests a
@@ -2439,10 +2439,10 @@ Describe "ConvertTo-ManagerDisplayVersionFromTag" {
     }
     It "renders the same release identically whether it arrives as the running script's own display version or as a raw release tag" {
         # This is the exact regression from issue #134: v1.0 (running as
-        # RC2) and the v1.0-RC2 release tag are the same release and must
-        # display identically, not as "v1.0" vs "v1.0-RC2".
-        $currentDisplay = "v1.0 RC2"   # Get-ManagerDisplayVersion's shape when $ScriptVersion=1.0, $ReleaseCandidateLabel=RC2
-        $latestDisplay  = ConvertTo-ManagerDisplayVersionFromTag -VersionText 'v1.0-RC2'
+        # RC2.1) and the v1.0-RC2.1 release tag are the same release and must
+        # display identically, not as "v1.0" vs "v1.0-RC2.1".
+        $currentDisplay = "v1.0 RC2.1"   # Get-ManagerDisplayVersion's shape when $ScriptVersion=1.0, $ReleaseCandidateLabel=RC2.1
+        $latestDisplay  = ConvertTo-ManagerDisplayVersionFromTag -VersionText 'v1.0-RC2.1'
         $latestDisplay | Should -Be $currentDisplay
     }
 }
@@ -3267,7 +3267,7 @@ Describe "Manager banner rendering" {
         $lines = Get-ManagerBannerLines -Width 80 -Height 30
 
         ($lines -join "`n") | Should -Match 'TeknoParrot Manager'
-        ($lines -join "`n") | Should -Match 'Version 1\.0 RC2'
+        ($lines -join "`n") | Should -Match 'Version 1.0 RC2.1'
         ($lines -join "`n") | Should -Not -Match '/_  __/__.*___'
     }
     It "selects responsive branding modes by viewport width" {
@@ -3289,7 +3289,7 @@ Describe "Manager banner rendering" {
 
         $joined.Contains($block) | Should -BeTrue
         $joined | Should -Match 'Developed and maintained by Jumpstile'
-        $joined | Should -Match 'Version 1\.0 RC2'
+        $joined | Should -Match 'Version 1.0 RC2.1'
         $lines | ForEach-Object { $_.Length | Should -BeLessOrEqual 180 }
     }
     It "keeps each branding mode inside its target width" {
@@ -3306,7 +3306,7 @@ Describe "Manager banner rendering" {
         $figletRow = $rows | Where-Object { $_.Text.Contains($block) } | Select-Object -First 1
         ($figletRow.Segments | ForEach-Object { $_.Color }) | Should -Contain 'Cyan'
         ($rows | Where-Object { $_.Text -match 'Developed and maintained by Jumpstile' }).Segments.Color | Should -Contain 'Yellow'
-        ($rows | Where-Object { $_.Text -match 'Version 1\.0 RC2' }).Color | Should -Be 'Cyan'
+        ($rows | Where-Object { $_.Text -match 'Version 1.0 RC2.1' }).Color | Should -Be 'Cyan'
     }
 }
 
@@ -3345,7 +3345,7 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
 
         $screen.Rows.Count | Should -BeGreaterThan 20
         $output | Should -Match 'Developed and maintained by Jumpstile'
-        $output | Should -Match 'Version 1\.0 RC2'
+        $output | Should -Match 'Version 1.0 RC2.1'
         foreach ($item in (Get-MainMenuItems)) {
             $output | Should -Match ([regex]::Escape("$($item.Number)) $($item.Label)"))
         }
@@ -3380,7 +3380,7 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         $screen = Render-MainMenuScreen -Tier 'Compact' -Width 80 -Height 80
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
         $output | Should -Match 'TeknoParrot Manager'
-        $output | Should -Match 'Version 1\.0 RC2'
+        $output | Should -Match 'Version 1.0 RC2.1'
         $output | Should -Not -Match '/_  __/'
         $output | Should -Match 'Type \? for descriptions'
         $autoSync = (Get-MainMenuItems) | Where-Object { $_.Mode -eq 'AutoSync' }
@@ -3389,7 +3389,7 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
     It "Professional default tier uses a complete framed two-column menu" {
         $screen = Render-MainMenuScreen -Tier 'Professional' -Width 150 -Height 30
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
-        $output | Should -Match 'Version 1\.0 RC2'
+        $output | Should -Match 'Version 1.0 RC2.1'
         $output | Should -Match ([regex]::Escape("1) AutoSync"))
         $output | Should -Match ([regex]::Escape("Extract and register ZIPs safely."))
         $output | Should -Match 'GAME ENHANCEMENTS'
@@ -3438,7 +3438,7 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
 
         $screen.Rows.Count | Should -BeLessOrEqual 10
         $output | Should -Match 'TeknoParrot Manager'
-        $output | Should -Match 'Version 1\.0 RC2'
+        $output | Should -Match 'Version 1.0 RC2.1'
         $output | Should -Match 'LIBRARY MANAGEMENT'
         $output | Should -Match 'AutoSync'
         $output | Should -Not -Match 'APPLICATION'

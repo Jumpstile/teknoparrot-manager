@@ -8,13 +8,13 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 
 ---
 
-## Latest Release Candidate: TeknoParrot Manager v1.0 RC2
+## Latest Release Candidate: TeknoParrot Manager v1.0 RC2.1
 
-**[Download v1.0 RC2](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC2)** - this is the current recommended testing build.
+**[Download v1.0 RC2.1](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC2.1)** - this is the current recommended testing build.
 
-Final Version 1.0 has not been published yet. v1.0 RC2 is a release candidate: Engineering, Behavioral, Recovery, and Documentation Certification are all complete, and it's certified 9/9 on real arcade hardware - what's left is real-world validation across different cabinets, GPUs, and TeknoParrot installations before 1.0 ships.
+Final Version 1.0 has not been published yet. v1.0 RC2.1 is a release-hardening follow-up to RC2 (thumbnail download reliability, update-check version display consistency, certification-suite reliability, adaptive-menu refinements): Engineering, Behavioral, and Documentation Certification are all complete, and it's certified 9/9 on real arcade hardware - what's left is real-world validation across different cabinets, GPUs, and TeknoParrot installations before 1.0 ships.
 
-Found something? Report it on the **[v1.0 RC2 feedback tracking issue (#102)](https://github.com/Jumpstile/teknoparrot-manager/issues/102)**.
+Found something? Report it on the **[v1.0 RC2.1 feedback tracking issue (#137)](https://github.com/Jumpstile/teknoparrot-manager/issues/137)**. (The prior RC1 feedback issue, #102, is scoped to RC1 only.)
 
 ---
 
@@ -140,7 +140,7 @@ This script automates the copy-and-fill step: it scans your games, matches each 
 
 ## Installation
 
-1. Download `TeknoParrot Manager v1.0 RC2.zip` from [Releases](../../releases/latest)
+1. Download `TeknoParrot Manager v1.0 RC2.1.zip` from [Releases](../../releases/latest)
 2. Extract to any folder (e.g. a `Scripts` subfolder alongside your TeknoParrot install)
 3. Double-click **`TeknoParrot-Manager.bat`**
 
@@ -762,7 +762,7 @@ In preview mode:
 - The optional follow-up offers (LaunchBox direct integration/HyperSpin 2 export, thumbnail download, GPU fix) are skipped, since they only make sense after real changes
 - The summary and ACTION REQUIRED sections still print normally, based on the games that would have been registered
 
-After a preview finishes, the script asks **"Apply these changes for real now?"** — answer **Y** to immediately re-run the same mode for real (no menu, no preview prompt shown again), or **N** to return to the menu without changing anything.
+After a preview finishes, the script confirms nothing was changed and asks whether you'd like to perform the operation for real — answer **Y** to immediately re-run the same mode for real (a fresh scan, not a replay of the preview, since anything could have changed since it ran; no menu, no preview prompt shown again), or **N** to return to the menu without changing anything.
 
 This is most useful the first time you point the script at a new library, or after changing settings, to build confidence before letting it touch your files.
 
@@ -929,4 +929,4 @@ Pull requests are welcome too. Full source and version history: [github.com/Jump
 
 ---
 
-> v1.0 RC2 -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v1.0 RC2.1 -- test one game after each run. Profiles are backed up automatically at the start of every run.

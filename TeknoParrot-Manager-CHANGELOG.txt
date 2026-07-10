@@ -7,6 +7,61 @@
 
 
 -------------------------------------------------------------------------------
+  v1.0 RC2.1  (2026-07-10)  -- release-hardening pass: thumbnails, update-check
+  display, certification reliability, menu polish
+  ------------------------------------------------------------
+  Fix (issue #132): thumbnail downloads no longer leave a stale "Downloading
+  Thumbnails" progress overlay on screen after a failure. A download that
+  failed partway through any tier (BITS, HttpClient, or Invoke-WebRequest)
+  used to leave whatever progress text was last written stuck on screen
+  indefinitely, since nothing after that point ever cleared it -- most
+  visible when every thumbnail in a batch came back 404. Also reworded the
+  thumbnail-download messaging into plain language and stopped describing
+  games with no online icon as "less common or homebrew" -- a missing icon
+  just means the online icon pack doesn't have artwork for that (fully
+  supported) game yet.
+
+  Fix (issue #134): the update checker's "Current version" and "Latest
+  version" lines could show the same release in two different formats side
+  by side (e.g. "v1.0" vs "v1.0-RC2"), even though the underlying comparison
+  was correct throughout. Both lines, the "update available" message, and the
+  update confirmation prompt now share one canonical display format.
+
+  Fix (issue #136): the TPM Certification Suite could hang indefinitely
+  during the Pester regression phase with no way to tell a genuine hang from
+  a merely slow run, and no diagnostic content in the saved report. Root
+  cause: the adaptive main menu's real input path only falls back to a
+  standard prompt when the console is redirected -- a real interactive
+  console (what a certification run has) took a different path that a
+  human tester's automated test coverage wasn't exercising, hanging while
+  waiting for a keystroke that would never come during an unattended run.
+  The certification suite now shows live heartbeat progress (elapsed time
+  and last completed test) while the regression suite runs, and enforces a
+  configurable timeout so a hang fails cleanly with a clear reason instead
+  of blocking the run forever.
+
+  Usability: the Overrides summary line (shown only when an advanced
+  override is actually configured in TeknoParrot-Manager.overrides.json) now
+  explains in plain language what it means and what action to take, instead
+  of showing bare internal setting names with no context.
+
+  Usability: after a Preview/Dry Run completes, the "apply for real" prompt
+  now explains that the preview made no changes and that applying for real
+  means a fresh scan rather than a replay of the preview, since anything
+  could have changed since it ran.
+
+  Visual polish: the Professional/Ultra menu banner now renders as a
+  responsive FIGlet/ANSI-Shadow wordmark that scales with console width,
+  with a plain-text fallback for narrower windows.
+
+  Certification/documentation: closed out the remaining RC2 release-gate
+  usability items (DAT selection feedback, DAT file-picker filter, one-click
+  certification launcher provenance, certification runtime UX) -- all were
+  already correctly implemented; this round added the regression coverage
+  needed to verify and close them formally.
+
+
+-------------------------------------------------------------------------------
   v1.0 RC2  (2026-07-04)  -- adaptive menu, release identity correction, integrity guard
   ------------------------------------------------------------
   Release blocker fix: the first published RC2 ZIP was structurally valid

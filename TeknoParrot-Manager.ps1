@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v1.0 RC2
+# TeknoParrot Manager  |  v1.0 RC2.1
 # Author: Jumpstile
 # =============================================================================
 #
@@ -68,7 +68,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
 $ScriptVersion = "1.0"
-$ReleaseCandidateLabel = "RC2"
+$ReleaseCandidateLabel = "RC2.1"
 $DisplayVersion = "v$ScriptVersion $ReleaseCandidateLabel"
 
 function Get-ManagerDisplayVersion {

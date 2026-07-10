@@ -195,7 +195,33 @@ report folder location before it closes.
 
 For scripted or CI-style use, call `scripts\Run-TPM-Tests.ps1` directly
 with `-TeknoParrotRoot` (see that script's parameters for `-RepoPath`,
-`-HarnessRoot`, and `-VerbosityLevel`).
+`-HarnessRoot`, `-VerbosityLevel`, and `-PesterRegressionTimeoutSeconds`).
+
+## Pester regression gate: hang detection and live progress (issue #136)
+
+The Pester regression gate runs on a dedicated in-process runspace, not a
+blocking call on the main thread and not a background Job (a Job crosses a
+process boundary via CliXml serialization, which would not preserve the deep
+result object the Virtual Beta Tester reporting reads several levels into).
+While it runs:
+
+- A heartbeat prints every 15 seconds to the console, the console
+  title/status, and `Pester-progress.txt` in the report folder -- elapsed
+  time plus the last captured line of live Pester output (current
+  file/Describe block/test), so a genuinely hung run and a merely slow one
+  are never indistinguishable.
+- A configurable hard timeout (`-PesterRegressionTimeoutSeconds`, default
+  1800s -- the whole suite takes well under a minute on typical hardware)
+  stops the run and throws a diagnostic error naming the elapsed time,
+  limit, and last known output if it's ever exceeded, rather than blocking
+  the certification run forever. The existing report-writing path still
+  produces a full certification scorecard on a timeout, showing this gate
+  FAILED with a clear reason.
+- `Pester-output.txt` always receives live per-test detail regardless of
+  `-VerbosityLevel` -- Pester's progress text is captured from the
+  Information stream, and Output.Verbosity is always at least `Detailed`
+  internally, even in the default `Summary` console mode (confirmed this
+  does not additionally echo to the live console).
 
 ## Known Implementation Constraints
 

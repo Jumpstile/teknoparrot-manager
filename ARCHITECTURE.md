@@ -235,13 +235,15 @@ download offer, and GPU fix offer are all skipped in preview mode. They are them
 writes/downloads that do not make sense after a run that changed nothing. ACTION REQUIRED
 and the controls-status file still print/write normally (reports, not mutations).
 
-**Apply immediately.** After a preview pass, an "Apply these changes for real now?" prompt
-lets the user commit without re-running the script. Implemented via `$pendingApplyMode`
-(the mode to silently re-enter) and `$forceRealApply` (consumed once to skip the preview
-question). Deliberately reuses the existing `while ($true)` menu loop with `continue`/
-`break` rather than a nested loop -- the loop body already has many unlabeled `continue`
-statements that abort to the menu on error; wrapping it in a new loop would silently
-redirect those into a retry instead.
+**Apply immediately.** After a preview pass, a "Preview completed successfully... Would you
+like to perform the operation for real?" prompt lets the user commit without re-running the
+script, explaining that applying performs a fresh scan rather than a replay of the preview
+(state could have changed since it ran). Implemented via `$pendingApplyMode` (the mode to
+silently re-enter) and `$forceRealApply` (consumed once to skip the preview question).
+Deliberately reuses the existing `while ($true)` menu loop with `continue`/`break` rather
+than a nested loop -- the loop body already has many unlabeled `continue` statements that
+abort to the menu on error; wrapping it in a new loop would silently redirect those into a
+retry instead.
 
 **Known limitation.** `Get-CompatibilityWarnings` reads current UserProfiles, so during a
 preview it reports the PRE-existing state, not what the previewed registrations would

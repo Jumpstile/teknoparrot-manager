@@ -50,8 +50,8 @@ Describe "Quality engineering system metadata" {
 Describe "Release Integrity source identity" {
     BeforeAll {
         $script:RepoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
-        $script:ExpectedDisplayVersion = 'v1.0 RC2'
-        $script:ExpectedTag = 'v1.0-RC2'
+        $script:ExpectedDisplayVersion = 'v1.0 RC2.1'
+        $script:ExpectedTag = 'v1.0-RC2.1'
     }
 
     It "keeps the production script header, runtime label, and banner on the same release identity" {
@@ -60,7 +60,7 @@ Describe "Release Integrity source identity" {
 
         $content | Should -Match ([regex]::Escape("# TeknoParrot Manager  |  $script:ExpectedDisplayVersion"))
         $content | Should -Match '\$ScriptVersion\s*=\s*"1\.0"'
-        $content | Should -Match '\$ReleaseCandidateLabel\s*=\s*"RC2"'
+        $content | Should -Match '\$ReleaseCandidateLabel\s*=\s*"RC2\.1"'
         $content | Should -Match 'Get-ManagerVersionLine'
         $content | Should -Not -Match 'TeknoParrot Manager\s+v\$ScriptVersion RC1'
     }

@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC2
+  TeknoParrot Manager  |  v1.0 RC2.1
   Author: Jumpstile
 ===============================================================================
 
@@ -231,9 +231,10 @@
     to build confidence before committing. Answer Y to the prompt, or pass
     -DryRun on the command line to always preview (combine with -Unattended
     to preview a scheduled run without any prompts). After a preview
-    finishes, the script asks "Apply these changes for real now?" -- answer
-    Y to immediately re-run the same mode for real with no further prompts,
-    or N to return to the menu without changing anything.
+    finishes, the script confirms nothing was changed and asks whether to
+    perform the operation for real -- answer Y to immediately re-run the
+    same mode for real (a fresh scan, not a replay of the preview), or N to
+    return to the menu without changing anything.
 
   - Auto-detect TeknoParrot path. On first run, instead of asking for the
     root folder immediately, the script scans common install locations
@@ -1756,13 +1757,15 @@
        already exists. If it does, that game is counted as "already present"
        and skipped -- nothing is overwritten.
     4. Downloads each missing icon from the repository.
-    5. Reports a summary: fetched / already present / not in repo / failed.
+    5. Reports a summary: downloaded / already had one / no icon in the
+       online pack / failed.
 
   The Icons folder is created automatically if it does not exist.
 
-  Note that not all TeknoParrot games have a thumbnail in the repository.
-  Games without a matching icon are counted as "not in repo" and skipped
-  without error.
+  Note that not all TeknoParrot games have an icon in the online pack yet --
+  this does not mean those games are unsupported, just that artwork hasn't
+  been added for them. Games without a matching icon are skipped without
+  error; you can add your own via CustomThumbnails\ (see below).
 
   The download uses TLS 1.2, which GitHub requires but which PS 5.1 may
   not negotiate by default. The script sets it automatically for this step.
@@ -2382,6 +2385,6 @@
 
 
 ===============================================================================
-  v1.0 RC2 -- Test one game after each run.
+  v1.0 RC2.1 -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================

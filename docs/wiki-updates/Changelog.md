@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.0 RC2.1
+
+Release-hardening pass on top of RC2: thumbnail downloads, update-check version display, certification-suite reliability, and menu polish.
+
+- Fixed (issue #132): thumbnail downloads no longer leave a stale "Downloading Thumbnails" progress overlay stuck on screen after a failure -- most visible when every thumbnail in a batch came back 404. Reworded thumbnail messaging into plain language and stopped implying a missing icon means the game is unsupported.
+- Fixed (issue #134): the update checker's "Current version" and "Latest version" now share one canonical display format instead of showing the same release two different ways.
+- Fixed (issue #136): the Certification Suite could hang indefinitely during the Pester regression phase with no diagnostics. It now shows live heartbeat progress and enforces a configurable timeout so a hang fails cleanly with a clear reason.
+- Usability: the Overrides summary line explains what it means and what action to take, in plain language. The Preview/Dry Run "apply for real" prompt explains that applying performs a fresh scan, not a replay of the preview.
+- Visual polish: the Professional/Ultra menu banner renders as a responsive FIGlet/ANSI-Shadow wordmark that scales with console width.
+- Closed out the remaining RC2 release-gate usability items (DAT selection feedback, DAT file-picker filter, one-click certification launcher provenance, certification runtime UX) with regression coverage.
+
 ## v1.0 RC2
 
 Release-candidate package identity correction and adaptive menu inclusion.

@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC2  --  QUICK START
+  TeknoParrot Manager  |  v1.0 RC2.1  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -132,8 +132,9 @@
 
      Not sure yet? Answer Y to "Run in PREVIEW mode first?" to see what
      AutoSync/Register would do with zero files written. When it finishes,
-     answer Y to "Apply these changes for real now?" to commit them right
-     away -- no need to re-run the script from scratch.
+     answer Y when asked whether to perform the operation for real -- this
+     runs a fresh scan and commits the changes right away, no need to
+     re-run the script from scratch.
 
   5. Choose what to extract (AutoSync only):
 
@@ -417,10 +418,12 @@
     https://github.com/teknogods/TeknoParrotUIThumbnails
 
   Summary printed at the end:
-    Thumbnails: 47 fetched, 12 already present, 8 not in repo.
+    Thumbnails: 47 downloaded, 12 already had one, 8 have no icon in the
+    online pack.
 
-  Not all games have a thumbnail in the repo. Missing ones are skipped
-  without error and counted as "not in repo".
+  Not all games have an icon in the online pack yet -- this does not mean
+  those games are unsupported. Missing ones are skipped without error. You
+  can add your own icons for them via CustomThumbnails\ (see below).
 
   CUSTOM THUMBNAILS
 

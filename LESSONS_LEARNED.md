@@ -479,3 +479,50 @@ Select-String -Path "*.md","*.txt","TeknoParrot-Manager.ps1" -Pattern 'mode\s+\d
 **Rule.** After any menu reorder, grep the production script's own embedded strings
 with the same pattern used for the external docs. Prompt text in `Write-Host` calls
 can contain stale mode numbers just as easily as any .txt or .md file.
+
+---
+
+## v1.0 RC2.1: a test harness's input fake can go stale silently when the real
+input mechanism changes underneath it (issue #136)
+
+**What happened.** The TPM Certification Suite could hang indefinitely during
+the Pester regression phase, with no diagnostics -- process alive, report
+folder created, nothing ever completing. It reproduced reliably on a real
+double-clicked certification run but never in this dev environment or in any
+prior CI run.
+
+Root cause: `Tests/VirtualBetaTester.HumanWorkflow.Tests.ps1`'s main-menu test
+harness faked `Read-Host` to drive scripted menu choices. That worked when the
+main menu read input via `Read-Host` directly. Once issue #104's responsive
+menu shipped, real input moved to `Read-MainMenuChoiceResponsive`, which only
+falls back to `Read-Host` when `[Console]::IsInputRedirected` is true. A real
+interactive console -- exactly what a double-clicked certification `.bat` has
+attached -- takes the other branch instead: a raw `[Console]::KeyAvailable`/
+`ReadKey` polling loop waiting for a keystroke that never comes during an
+unattended run. The harness's `Read-Host` fake never intercepted that branch,
+so the extracted menu code always executed the real polling loop and hung.
+This also explains the "works here, hangs there" split: any environment whose
+console happens to be redirected (this dev environment, most CI runners)
+takes the `Read-Host` fallback and never reproduces the bug at all.
+
+**Fix.** The harness now fakes `Read-MainMenuChoiceResponsive` directly (same
+nearest-scope-wins pattern as its existing `Read-Host` fake), plus a
+regression guard so removing that fake fails a fast, clear test instead of
+silently reintroducing the hang. Separately, the certification runner's
+Pester-output capture was fixed to actually receive live progress
+(`Output.Verbosity: 'None'` at the previous Summary default meant nothing was
+ever captured regardless of which stream was redirected; Pester's live text
+turned out to be on the Information stream, not the Error stream the code was
+redirecting) and gained a heartbeat/timeout so a real hang fails cleanly with
+a diagnosable reason instead of blocking the whole certification run forever.
+
+**Rule.** A test harness that fakes a production input function (`Read-Host`,
+or anything else standing in for real user input) is coupled to *how* input
+currently flows, not just *that* input is provided. When production code adds
+a new input path with its own fallback logic, the fake must be verified
+against the new path too -- a harness that "still passes" after a refactor is
+not proof the input seam is still intact, only that the code path it happens
+to exercise hasn't changed. Add a source-level regression guard asserting the
+fake actually exists for the specific function currently in use, so a future
+refactor away from it fails fast instead of reintroducing a silent, hard-to-
+reproduce hang.
