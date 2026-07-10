@@ -199,6 +199,29 @@ function Read-Host {
     `$script:answerIndex++
     return `$answer
 }
+# Issue #136: the main menu's actual input path is Read-MainMenuChoiceResponsive
+# (issue #104's responsive menu), not Read-Host directly -- it only falls back
+# to Read-Host when [Console]::IsInputRedirected is true. A real interactive
+# console (exactly what a double-clicked certification .bat has) takes its
+# other branch instead: a raw [Console]::KeyAvailable/ReadKey polling loop
+# waiting for an actual keystroke that never comes under automated
+# certification, hanging forever. This harness's Read-Host fake above never
+# intercepted that branch at all, so a certification run always hung here
+# once the responsive-menu code shipped, even though this same test suite
+# passed cleanly on any machine whose console happened to be redirected
+# (confirmed by direct reproduction -- see LESSONS_LEARNED.md). Faking
+# Read-MainMenuChoiceResponsive locally in this harness script, same
+# nearest-scope-wins pattern as the Read-Host fake above, makes the answer
+# queue drive the real input path instead of a coincidental fallback.
+function Read-MainMenuChoiceResponsive {
+    param([string]`$Prompt, [int]`$InitialWidth, [int]`$InitialHeight)
+    if (`$script:answerIndex -ge `$AnswerQueue.Count) {
+        throw "Main menu harness ran out of scripted answers (asked for answer #`$(`$script:answerIndex + 1), only `$(`$AnswerQueue.Count) provided)."
+    }
+    `$answer = `$AnswerQueue[`$script:answerIndex]
+    `$script:answerIndex++
+    return [pscustomobject]@{ Redraw = `$false; Value = `$answer }
+}
 `$pendingApplyMode = `$null
 `$forceRealApply = `$false
 `$Unattended = `$false
@@ -252,6 +275,23 @@ $($menuIfAst.Extent.Text)
         $text = ($captured | ForEach-Object { $_.ToString() }) -join "`n"
         (@(([regex]::Matches($text, 'Invalid choice')) | ForEach-Object { $_ }).Count) | Should -Be 3 -Because "three invalid answers were given before the valid one, so the recovery message must appear exactly three times, not stop early or loop forever"
         $text.Contains('Exception') | Should -Be $false
+    }
+
+    It "issue #136: the harness fakes Read-MainMenuChoiceResponsive, not just Read-Host" {
+        # Regression guard for the actual root cause of the certification
+        # hang: the real menu reads input via Read-MainMenuChoiceResponsive
+        # (issue #104's responsive menu), which only falls back to Read-Host
+        # when the console is redirected. A real interactive console (what a
+        # double-clicked certification .bat has) takes the other branch --
+        # a raw Console.KeyAvailable/ReadKey poll -- which the Read-Host fake
+        # alone never intercepted, hanging forever waiting for a keystroke.
+        # If this fake is ever removed (e.g. during a future refactor of this
+        # harness), the four tests above would silently start relying on the
+        # real function again -- this fails fast with a clear message instead
+        # of a multi-hour CI/certification hang.
+        $harnessSource = Get-Content -LiteralPath $menuHarnessPath -Raw
+        $harnessSource | Should -Match 'function\s+Read-MainMenuChoiceResponsive\s*\{'
+        $harnessSource | Should -Match 'Redraw\s*=\s*\$false;\s*Value\s*=\s*\$answer'
     }
 }
 

@@ -460,18 +460,18 @@ try {
     if ($pesterModule) { $results.PesterVersion = $pesterModule.Version.ToString() }
     $pesterOutputText = Join-Path $reportDir 'Pester-output.txt'
 
-    # The report files always get the same full detail regardless of
-    # -VerbosityLevel -- this only controls how much Pester's own per-file/
-    # per-test progress reporting streams to the console during the run.
-    # Pester's native Output.Verbosity setting is used directly rather than
-    # any custom stream redirection: redirecting the success stream to
-    # suppress console noise risks swallowing the PassThru result object
-    # along with it, which would silently break -Failed detection below.
-    # Real failures are never hidden regardless of level: printed explicitly
-    # below every time, independent of Output.Verbosity.
+    # Issue #136: Output.Verbosity 'None' (the previous Summary-mode setting)
+    # means Pester emits literally zero per-file/per-test text, to any
+    # stream -- there is nothing "quiet capture" could have captured. A real
+    # certification timeout came back with "Last known output: (no output
+    # captured)" because of this, not a capture-mechanism bug. Verbosity is
+    # now always at least 'Detailed' so a hang can always be diagnosed
+    # (which file, which Describe block, how many tests completed) -- see
+    # the stream choice below for how this stays console-quiet in Summary
+    # mode despite that.
     $pesterOutputVerbosity = switch ($VerbosityLevel) {
-        'Summary'    { 'None' }
-        'Detailed'   { 'Normal' }
+        'Summary'    { 'Detailed' }
+        'Detailed'   { 'Detailed' }
         'Diagnostic' { 'Diagnostic' }
     }
     $pesterConfig = New-PesterConfiguration
@@ -495,7 +495,18 @@ try {
     [void]$pesterPs.AddScript({
         param($Config, $OutputPath)
         Import-Module Pester -MinimumVersion 5.0 -ErrorAction Stop
-        Invoke-Pester -Configuration $Config 2>&1 | Tee-Object -FilePath $OutputPath
+        # Issue #136: Pester's own live per-Describe/per-test progress text
+        # is written to the Information stream (6), not the Error stream
+        # (2) -- confirmed by direct reproduction: with 2>&1, the file stayed
+        # completely empty for the whole run and only received the final
+        # PassThru result object's default-formatted text dump at the very
+        # end (useless during an actual hang, since that end is never
+        # reached). With 6>&1, the file receives each line live as Pester
+        # writes it. Also confirmed 6>&1 does not additionally echo to the
+        # live console (tested in a real foreground session, not just a
+        # background job) -- so Summary mode's "keep the console quiet"
+        # intent still holds even though Verbosity is no longer 'None'.
+        Invoke-Pester -Configuration $Config 6>&1 | Tee-Object -FilePath $OutputPath
     }).AddArgument($pesterConfig).AddArgument($pesterOutputText)
 
     $pesterStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
@@ -635,14 +646,11 @@ try {
 
     # Never hidden by -VerbosityLevel Summary: if anything actually failed,
     # print exactly what, regardless of console verbosity. Also persisted to
-    # a file, not just printed -- at Summary level, Pester's own
-    # Output.Verbosity is 'None', so Pester-output.txt never gets per-test
-    # [-]/[+] lines written to it either. Before this fix, a failure at
-    # Summary level was visible only in the live console: once that session
-    # was gone, there was no way to see which tests failed from the saved
-    # report files at all (confirmed directly -- Pester-summary.json only
-    # ever stored the failure count, and Pester-output.txt was empty of
-    # detail at 'None' verbosity).
+    # a file, not just printed. Independent of the issue #136 fix to
+    # Output.Verbosity/stream capture above (Pester-output.txt now gets live
+    # per-test detail at every -VerbosityLevel) -- this file exists because
+    # relying on parsing that text would be fragile; $pesterResult.Failed is
+    # read directly as an object instead.
     $failuresText = Join-Path $reportDir 'Pester-Failures.txt'
     if ($pesterSummary.Failed -gt 0) {
         Write-Host ""
