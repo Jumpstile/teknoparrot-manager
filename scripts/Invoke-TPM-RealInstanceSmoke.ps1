@@ -19,7 +19,16 @@ param(
     # the same full report files -- this only controls what streams to the
     # console during the run.
     [ValidateSet('Summary', 'Detailed', 'Diagnostic')]
-    [string]$VerbosityLevel = 'Summary'
+    [string]$VerbosityLevel = 'Summary',
+
+    # Issue #136: hard ceiling on the Pester regression gate. A full local
+    # run of the whole Tests\ folder takes well under a minute; 1800s (30
+    # minutes) is generous headroom for slower real-hardware I/O while still
+    # guaranteeing the certification run cannot hang forever. Exposed as a
+    # parameter (not a hardcoded constant) so a real slow-hardware run can
+    # raise it without a code change, and so tests can exercise a near-zero
+    # timeout without waiting.
+    [int]$PesterRegressionTimeoutSeconds = 1800
 )
 
 $ErrorActionPreference = "Stop"
@@ -125,6 +134,52 @@ function Compare-TreeSnapshot {
         BeforeSkipped = $beforeSkipped
         AfterSkipped = $afterSkipped
     }
+}
+
+# Issue #136: the Pester regression gate previously ran synchronously with
+# no visibility into progress and no way to distinguish "still running" from
+# "hung forever" -- both looked identical to an operator watching the
+# console (process alive, report folder created, nothing updating). These
+# two pure decision functions back the runspace-polling loop below; kept
+# separate and side-effect-free so they can be unit tested directly without
+# needing to run actual Pester-in-Pester or spin up a real runspace.
+function Test-TPMPesterHeartbeatDue {
+    param(
+        [double]$ElapsedSeconds,
+        [double]$LastHeartbeatSeconds,
+        [double]$HeartbeatIntervalSeconds
+    )
+    return (($ElapsedSeconds - $LastHeartbeatSeconds) -ge $HeartbeatIntervalSeconds)
+}
+
+function Test-TPMPesterTimedOut {
+    param(
+        [double]$ElapsedSeconds,
+        [double]$TimeoutSeconds
+    )
+    return ($ElapsedSeconds -ge $TimeoutSeconds)
+}
+
+function Get-TPMPesterHeartbeatMessage {
+    param(
+        [double]$ElapsedSeconds,
+        [string]$LastOutputLine
+    )
+    $suffix = if ([string]::IsNullOrWhiteSpace($LastOutputLine)) { '' } else { " -- last: $LastOutputLine" }
+    return ("  ... still running ({0:n0}s elapsed){1}" -f $ElapsedSeconds, $suffix)
+}
+
+function Get-TPMPesterTimeoutMessage {
+    param(
+        [double]$ElapsedSeconds,
+        [double]$TimeoutSeconds,
+        [string]$LastOutputLine,
+        [string]$OutputPath,
+        [string]$ProgressPath
+    )
+    $lastText = if ([string]::IsNullOrWhiteSpace($LastOutputLine)) { '(no output captured)' } else { $LastOutputLine }
+    return ("Pester regression suite timed out after {0}s (limit {1}s). Last known output: {2}. See {3} and {4} for details." -f `
+        [int]$ElapsedSeconds, [int]$TimeoutSeconds, $lastText, $OutputPath, $ProgressPath)
 }
 
 function Get-PesterSummary {
@@ -424,7 +479,91 @@ try {
     $pesterConfig.Run.PassThru = $true
     $pesterConfig.Output.Verbosity = $pesterOutputVerbosity
 
-    $pesterResult = Invoke-Pester -Configuration $pesterConfig 2>&1 | Tee-Object -FilePath $pesterOutputText
+    # Issue #136: runs on a dedicated in-process runspace, not a background
+    # Job -- a Job is a separate process, so its PassThru result would cross
+    # process boundaries via CliXml serialization, which does not preserve
+    # the deep object graph the Virtual Beta Tester reporting below actually
+    # reads (.Tests, .Block.Tag, .ScriptBlock.File several levels deep). A
+    # same-process runspace keeps $pesterResult a live, fully-populated
+    # object while still letting this loop poll for a hang/timeout.
+    $pesterProgressText = Join-Path $reportDir 'Pester-progress.txt'
+    $pesterHeartbeatIntervalSeconds = 15
+    $pesterRunspace = [runspacefactory]::CreateRunspace()
+    $pesterRunspace.Open()
+    $pesterPs = [powershell]::Create()
+    $pesterPs.Runspace = $pesterRunspace
+    [void]$pesterPs.AddScript({
+        param($Config, $OutputPath)
+        Import-Module Pester -MinimumVersion 5.0 -ErrorAction Stop
+        Invoke-Pester -Configuration $Config 2>&1 | Tee-Object -FilePath $OutputPath
+    }).AddArgument($pesterConfig).AddArgument($pesterOutputText)
+
+    $pesterStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $pesterAsyncResult = $pesterPs.BeginInvoke()
+    $lastHeartbeatSeconds = 0
+    $pesterTimedOut = $false
+    $pesterResult = $null
+
+    try {
+        while (-not $pesterAsyncResult.IsCompleted) {
+            Start-Sleep -Milliseconds 500
+            $elapsed = $pesterStopwatch.Elapsed.TotalSeconds
+
+            if (Test-TPMPesterHeartbeatDue -ElapsedSeconds $elapsed -LastHeartbeatSeconds $lastHeartbeatSeconds -HeartbeatIntervalSeconds $pesterHeartbeatIntervalSeconds) {
+                $lastHeartbeatSeconds = $elapsed
+                $lastLine = ''
+                try {
+                    if (Test-Path -LiteralPath $pesterOutputText) {
+                        $lastLine = [string](Get-Content -LiteralPath $pesterOutputText -Tail 1 -ErrorAction SilentlyContinue)
+                    }
+                } catch {}
+                $heartbeatMsg = Get-TPMPesterHeartbeatMessage -ElapsedSeconds $elapsed -LastOutputLine $lastLine
+                Write-Host $heartbeatMsg -ForegroundColor DarkGray
+                Add-Content -LiteralPath $pesterProgressText -Value ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $heartbeatMsg)
+                Set-TPMConsoleStatus -Gate 'Pester regression suite' -Purpose ("Running -- {0:n0}s elapsed" -f $elapsed) -Expected 'zero failed tests'
+            }
+
+            if (Test-TPMPesterTimedOut -ElapsedSeconds $elapsed -TimeoutSeconds $PesterRegressionTimeoutSeconds) {
+                $pesterTimedOut = $true
+                break
+            }
+        }
+
+        if ($pesterTimedOut) {
+            $lastLine = ''
+            try {
+                if (Test-Path -LiteralPath $pesterOutputText) {
+                    $lastLine = ((Get-Content -LiteralPath $pesterOutputText -Tail 5 -ErrorAction SilentlyContinue) -join ' | ')
+                }
+            } catch {}
+            try { $pesterPs.Stop() } catch {}
+            $timeoutMsg = Get-TPMPesterTimeoutMessage -ElapsedSeconds $pesterStopwatch.Elapsed.TotalSeconds -TimeoutSeconds $PesterRegressionTimeoutSeconds -LastOutputLine $lastLine -OutputPath $pesterOutputText -ProgressPath $pesterProgressText
+            Add-Content -LiteralPath $pesterProgressText -Value ("[{0}] TIMED OUT -- {1}" -f (Get-Date -Format 'HH:mm:ss'), $timeoutMsg)
+            $results.Pester = [pscustomobject]@{
+                Passed = $null; Failed = $null; Skipped = $null; Inconclusive = $null; NotRun = $null; Total = $null
+                Duration = $pesterStopwatch.Elapsed.ToString(); Result = 'TimedOut'
+            }
+            Add-CheckResult 'Pester tests' $false $timeoutMsg
+            throw $timeoutMsg
+        }
+
+        # EndInvoke returns a PSDataCollection[PSObject], not a bare array --
+        # "-is [array]" is false for it, so Get-PesterSummary and the VBT
+        # candidate-selection logic below (which both branch on
+        # "-is [array]" to unwrap a single-result collection) would silently
+        # treat the wrapper itself as the result object and find none of the
+        # expected properties. Confirmed directly: without this @() wrap,
+        # every field in $results.Pester comes back $null even on a normal
+        # passing run. Wrapping here makes it a real array, matching what a
+        # direct (non-runspace) Invoke-Pester call already produced before
+        # this fix.
+        $pesterResult = @($pesterPs.EndInvoke($pesterAsyncResult))
+    } finally {
+        try { $pesterPs.Dispose() } catch {}
+        try { $pesterRunspace.Close() } catch {}
+        try { $pesterRunspace.Dispose() } catch {}
+    }
+
     $pesterSummary = Get-PesterSummary -PesterResult $pesterResult
     $pesterSummary | ConvertTo-Json -Depth 4 | Out-File (Join-Path $reportDir 'Pester-summary.json') -Encoding utf8
     $results.Pester = $pesterSummary

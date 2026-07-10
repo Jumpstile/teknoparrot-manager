@@ -14,7 +14,9 @@ param(
     [switch]$NoPwshRelaunch,
 
     [ValidateSet('Summary', 'Detailed', 'Diagnostic')]
-    [string]$VerbosityLevel = 'Summary'
+    [string]$VerbosityLevel = 'Summary',
+
+    [int]$PesterRegressionTimeoutSeconds = 1800
 )
 
 $ErrorActionPreference = "Stop"
@@ -45,6 +47,7 @@ if (-not $NoPwshRelaunch -and $PSVersionTable.PSEdition -ne 'Core') {
         $argsList += '-RunUnattendedTPM'
     }
     $argsList += @('-VerbosityLevel', $VerbosityLevel)
+    $argsList += @('-PesterRegressionTimeoutSeconds', $PesterRegressionTimeoutSeconds)
 
     & $pwshCommand.Source @argsList
     exit $LASTEXITCODE
@@ -73,5 +76,6 @@ if ($RunUnattendedTPM) {
     $params.RunUnattendedTPM = $true
 }
 $params.VerbosityLevel = $VerbosityLevel
+$params.PesterRegressionTimeoutSeconds = $PesterRegressionTimeoutSeconds
 
 & $harness @params
