@@ -2417,6 +2417,36 @@ Describe "ConvertTo-ManagerComparableVersion" {
     }
 }
 
+Describe "ConvertTo-ManagerDisplayVersionFromTag" {
+    # Issue #134: "Current version" (built from $DisplayVersion, e.g.
+    # "v1.0 RC2") and "Latest version" (previously the raw git tag, e.g.
+    # "v1.0-RC2") showed the exact same release in two different formats --
+    # confusing even though ConvertTo-ManagerComparableVersion correctly
+    # treats them as equal. Every raw tag shown to the user must go through
+    # this formatter so both lines share one canonical "v<version> <LABEL>"
+    # shape.
+    It "converts a release-candidate tag's dash suffix into the canonical space-separated form" {
+        ConvertTo-ManagerDisplayVersionFromTag -VersionText 'v1.0-RC2' | Should -Be 'v1.0 RC2'
+        ConvertTo-ManagerDisplayVersionFromTag -VersionText 'v1.0-RC1' | Should -Be 'v1.0 RC1'
+    }
+    It "leaves a plain numeric tag with no suffix unchanged" {
+        ConvertTo-ManagerDisplayVersionFromTag -VersionText 'v0.99.44' | Should -Be 'v0.99.44'
+        ConvertTo-ManagerDisplayVersionFromTag -VersionText 'v1.0' | Should -Be 'v1.0'
+    }
+    It "adds a leading v when the tag doesn't already have one" {
+        ConvertTo-ManagerDisplayVersionFromTag -VersionText '1.0-RC2' | Should -Be 'v1.0 RC2'
+        ConvertTo-ManagerDisplayVersionFromTag -VersionText '0.99.44' | Should -Be 'v0.99.44'
+    }
+    It "renders the same release identically whether it arrives as the running script's own display version or as a raw release tag" {
+        # This is the exact regression from issue #134: v1.0 (running as
+        # RC2) and the v1.0-RC2 release tag are the same release and must
+        # display identically, not as "v1.0" vs "v1.0-RC2".
+        $currentDisplay = "v1.0 RC2"   # Get-ManagerDisplayVersion's shape when $ScriptVersion=1.0, $ReleaseCandidateLabel=RC2
+        $latestDisplay  = ConvertTo-ManagerDisplayVersionFromTag -VersionText 'v1.0-RC2'
+        $latestDisplay | Should -Be $currentDisplay
+    }
+}
+
 Describe "Get-ManagerUpdateRelease" {
     It "returns the matching asset for a well-formed release" {
         Mock Invoke-WebRequest {

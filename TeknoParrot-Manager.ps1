@@ -5707,6 +5707,25 @@ function ConvertTo-ManagerComparableVersion {
     }
 }
 
+# Converts a raw GitHub release tag (e.g. "v1.0-RC2", "v0.99.44") into this
+# script's own canonical display shape: "v<version> <LABEL>" with a space,
+# the same shape $DisplayVersion already uses for the running script
+# ("v1.0 RC2") -- never the dash-separated git tag form. Without this, the
+# "Current version" line (built from $DisplayVersion/$ScriptVersion) and
+# the "Latest version" line (previously the raw tag) could show the same
+# release two different ways side by side, e.g. "v1.0" vs "v1.0-RC2" --
+# correct per ConvertTo-ManagerComparableVersion's numeric-base comparison,
+# but confusing to read. See issue #134.
+function ConvertTo-ManagerDisplayVersionFromTag {
+    param([Parameter(Mandatory)][string]$VersionText)
+    $normalized = ($VersionText -replace '^v', '').Trim()
+    $parts = $normalized -split '-', 2
+    if ($parts.Count -gt 1 -and $parts[1]) {
+        return "v{0} {1}" -f $parts[0], $parts[1]
+    }
+    return "v$($parts[0])"
+}
+
 function Get-ManagerUpdateRelease {
     # Same retry/backoff shape as Get-BepInExLatestRelease / Get-EggmanDatRelease,
     # but MaxAttempts/TimeoutSec are tunable: the menu-triggered check can afford
@@ -5941,7 +5960,7 @@ function Invoke-ManagerUpdateInstall {
 
         Write-Host ""
         Write-Host "============================================" -ForegroundColor Cyan
-        Write-Host "  Update installed: $($Release.TagName)" -ForegroundColor Green
+        Write-Host "  Update installed: $(ConvertTo-ManagerDisplayVersionFromTag -VersionText $Release.TagName)" -ForegroundColor Green
         Write-Host "============================================" -ForegroundColor Cyan
         Write-Log "CheckForUpdates: update to $($Release.TagName) installed successfully. Backup: $backupPath"
         return $true
@@ -6000,9 +6019,11 @@ function Invoke-CheckForUpdates {
         return $false
     }
 
+    $latestDisplay = ConvertTo-ManagerDisplayVersionFromTag -VersionText $release.TagName
+
     Write-Host ""
-    Write-Host ("  Current version : v{0}" -f $ScriptVersion) -ForegroundColor Cyan
-    Write-Host ("  Latest version  : {0}" -f $release.TagName) -ForegroundColor Cyan
+    Write-Host ("  Current version : {0}" -f (Get-ManagerDisplayVersion)) -ForegroundColor Cyan
+    Write-Host ("  Latest version  : {0}" -f $latestDisplay) -ForegroundColor Cyan
 
     if ($latestVersion -le $localVersion) {
         Write-Host ""
@@ -6012,7 +6033,7 @@ function Invoke-CheckForUpdates {
     }
 
     Write-Host ""
-    Write-Host "  An update is available: v$ScriptVersion -> $($release.TagName)" -ForegroundColor Yellow
+    Write-Host "  An update is available: $(Get-ManagerDisplayVersion) -> $latestDisplay" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "  Updating will:" -ForegroundColor Cyan
     Write-Host "    1) Back up the current script to UpdateBackups\<timestamp>\"
@@ -6023,7 +6044,7 @@ function Invoke-CheckForUpdates {
     Write-Host "       this session will exit rather than keep running the old code."
     Write-Host ""
 
-    $ans = (Read-Host "  Update to $($release.TagName) now? (Y/N)").Trim().ToUpper()
+    $ans = (Read-Host "  Update to $latestDisplay now? (Y/N)").Trim().ToUpper()
     if ($ans -ne "Y") {
         Write-Host "  Skipped -- no changes made." -ForegroundColor DarkGray
         Write-Log "CheckForUpdates: user declined the update to $($release.TagName)."
@@ -6073,12 +6094,14 @@ function Invoke-StartupUpdateCheck {
         return $false
     }
 
+    $latestDisplay = ConvertTo-ManagerDisplayVersionFromTag -VersionText $release.TagName
+
     Write-Host ""
     Write-Host "--------------------------------------------" -ForegroundColor Cyan
     Write-Host " Update Available" -ForegroundColor Cyan
     Write-Host "--------------------------------------------" -ForegroundColor Cyan
-    Write-Host ("  Current version : v{0}" -f $ScriptVersion) -ForegroundColor Cyan
-    Write-Host ("  Latest version  : {0}" -f $release.TagName) -ForegroundColor Cyan
+    Write-Host ("  Current version : {0}" -f (Get-ManagerDisplayVersion)) -ForegroundColor Cyan
+    Write-Host ("  Latest version  : {0}" -f $latestDisplay) -ForegroundColor Cyan
     if ($release.Name) { Write-Host ("  Release         : {0}" -f $release.Name) -ForegroundColor Cyan }
     $summary = Get-ManagerUpdateReleaseSummary -Body $release.Body
     if ($summary) {
