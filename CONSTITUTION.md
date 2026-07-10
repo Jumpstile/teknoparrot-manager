@@ -14,9 +14,12 @@ When applicable, Jumpstile project governance is followed in this order:
 
 1. This document (`CONSTITUTION.md` / Engineering Canon).
 2. Architecture Decision Records (ADRs), where a project has them.
-3. Repository-specific engineering standards (e.g. `SECURITY.md`,
+3. `ENGINEERING_GOVERNANCE.md` -- the GitHub issue/label governance
+   standard (issue taxonomy, label taxonomy, milestone/cross-link/
+   acceptance-criteria policy, bug and feature lifecycle).
+4. Repository-specific engineering standards (e.g. `SECURITY.md`,
    `RELEASE-SAFETY-CHECKLIST.md`, `ARCHITECTURE.md`).
-4. Task-specific instructions.
+5. Task-specific instructions.
 
 `PROJECT_IDENTITY_STANDARD.md` (public identity, branding, and attribution
 policy) and `TEAM_COORDINATION_STANDARD.md` (issue-based coordination
@@ -374,3 +377,6 @@ not specific to any one repository.
 3. Add a reference to this document from the project's other governance
    documents (architecture notes, release checklists, contributing guide,
    security policy).
+4. Adopt `ENGINEERING_GOVERNANCE.md` (see that document's own "Adopting
+   this standard in a new Jumpstile project" section for the concrete
+   steps: labels, meta-issue, release-checklist integration).

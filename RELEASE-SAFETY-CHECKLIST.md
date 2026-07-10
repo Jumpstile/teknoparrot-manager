@@ -55,6 +55,31 @@ implementation of that portfolio-wide principle, not a competing policy.
     blockers, remaining open issues reclassified as post-release
     enhancements where appropriate.
 
+### Governance audit (mandatory, every release)
+
+Every release includes the following, per `ENGINEERING_GOVERNANCE.md` and
+issue #138 ("Engineering Governance and Project Health," the permanent
+tracking meta-issue reviewed at every release):
+
+- [ ] **Issue audit** -- every issue touched or discovered this cycle has
+      at least one Type, one Priority, and one Component label.
+- [ ] **Label audit** -- no duplicate or obsolete labels in active use;
+      the label set in the repository matches `ENGINEERING_GOVERNANCE.md`
+      Section B exactly.
+- [ ] **Milestone audit** -- milestones reflect current planning; a
+      milestone is only closed when the release it represents actually
+      ships, never merely because its issues are all closed.
+- [ ] **Cross-reference audit** -- release-gate issues list every issue
+      they're actually still waiting on; that list is current, not stale.
+- [ ] **Documentation audit** -- Section 3 below (the mandatory
+      documentation sweep).
+- [ ] **Certification audit** -- Section 5 below (Release Integrity
+      Audit) plus real-hardware certification evidence where applicable.
+- [ ] **Release retrospective** -- a permanent, dated
+      `docs/RELEASE-RETROSPECTIVE-<version>.md` written once per release
+      cycle (see `docs/RELEASE-RETROSPECTIVE-v1.0-RC2.1.md` for the
+      template this established).
+
 ### AI workflow
 
 The roles below are the concrete assignment of `CONSTITUTION.md`'s existing
