@@ -151,6 +151,41 @@ Describe "New-CertificationScorecard" {
     }
 }
 
+Describe "Write-TPMGateHeader / Set-TPMConsoleStatus (issue #122)" {
+    # #122 requires each certification gate to show, while it runs (not just
+    # in the final scorecard): which gate is currently running, why it
+    # exists, and what a good outcome looks like. These are real functions
+    # (not top-level flow), so they're exercised directly rather than via
+    # source-level text checks.
+    BeforeAll {
+        Mock Write-Host {}
+        Mock Write-Progress {}
+    }
+
+    It "prints the gate name, purpose, and expected outcome" {
+        Write-TPMGateHeader -Gate 'Pester regression suite' -Purpose 'Runs every unit/regression test in the repo' -Expected 'zero failed tests'
+
+        Should -Invoke Write-Host -ParameterFilter { $Object -like '*Running: Pester regression suite*' }
+        Should -Invoke Write-Host -ParameterFilter { $Object -like '*Purpose*Runs every unit/regression test in the repo*' }
+        Should -Invoke Write-Host -ParameterFilter { $Object -like '*Expected*zero failed tests*' }
+    }
+
+    It "sets a live Write-Progress status combining purpose and expected outcome" {
+        Write-TPMGateHeader -Gate 'Repository' -Purpose 'Confirms the certified commit and working-tree state' -Expected 'clean working tree, HEAD matches origin/main'
+
+        Should -Invoke Write-Progress -ParameterFilter {
+            $Activity -eq 'TPM Certification Suite' -and
+            $Status -like '*Confirms the certified commit and working-tree state*' -and
+            $Status -like '*clean working tree, HEAD matches origin/main*'
+        }
+    }
+
+    It "does not throw when Purpose or Expected is blank" {
+        { Set-TPMConsoleStatus -Gate 'X' -Purpose '' -Expected '' } | Should -Not -Throw
+        { Set-TPMConsoleStatus -Gate '' -Purpose 'Y' -Expected 'Z' } | Should -Not -Throw
+    }
+}
+
 Describe "Harness source-level guard against the hashtable-literal if/else defect class" {
     It "does not use an inline if/else expression as a hashtable-literal value in Invoke-TPM-RealInstanceSmoke.ps1" {
         # PowerShell parses @{...} values in command mode, not expression mode --

@@ -10395,6 +10395,15 @@ if (Test-Path -LiteralPath $overridesPath) {
             Write-Host ""
             $sfmLabel = if ($subFolderMap.Count -gt 0) { ", subFolderMap=$($subFolderMap.Count)" } else { "" }
             Write-Host "Overrides: noSync=$($noSyncList.Count), onlySync=$($onlySyncList.Count), noPropagate=$($noPropagateList.Count), pinned=$($forceArchetypeMap.Count), familyOverride=$($familyOverrideMap.Count), canonicalArchetype=$($canonicalArchetypeMap.Count)$sfmLabel" -ForegroundColor DarkCyan
+            # Issue #119: the counts above are internal config-key names, not
+            # self-explanatory to a normal user. This line only ever appears
+            # when at least one override is actually configured, so it's
+            # always actionable -- explain what it means and what to do
+            # rather than leaving it as an unexplained diagnostic-looking line.
+            Write-Host "  These come from TeknoParrot-Manager.overrides.json and change which games" -ForegroundColor DarkGray
+            Write-Host "  get synced/propagated, or how they're matched. If you didn't create that" -ForegroundColor DarkGray
+            Write-Host "  file yourself, there's nothing to do. If a count looks wrong, edit or" -ForegroundColor DarkGray
+            Write-Host "  remove the matching entry in that file and re-run." -ForegroundColor DarkGray
         }
         Write-Log "Overrides: noSync=$($noSyncList.Count) onlySync=$($onlySyncList.Count) noPropagate=$($noPropagateList.Count) pinned=$($forceArchetypeMap.Count) familyOverride=$($familyOverrideMap.Count) canonicalArchetype=$($canonicalArchetypeMap.Count) subFolderMap=$($subFolderMap.Count) datFile=$datFilePath"
     } catch {

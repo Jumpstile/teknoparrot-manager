@@ -3632,3 +3632,46 @@ Describe "Get-CompatibilityWarnings -- BiosMissing (issue #85 tier 1)" {
         (Get-Content -LiteralPath (Join-Path $biosDir '27v1602T.d') -Raw) | Should -Be $beforeT -Because "TPM must never read or modify BIOS file content, only check existence"
     }
 }
+
+Describe "RC2 DAT selection and override UX (issues #119, #120, #121)" {
+    # This is top-level interactive script flow (DAT selection during
+    # AutoSync/Register), not an extractable standalone function -- exercising
+    # it end-to-end would mean driving the full interactive menu harness for
+    # UX wording alone. Source-level checks are the proportionate choice here,
+    # matching the same convention already used for other top-level-flow
+    # wording guarantees elsewhere in this file (e.g. the Thumbnail download
+    # regression guards above).
+    BeforeAll {
+        $script:scriptContent = Get-Content -LiteralPath $scriptPath -Raw
+    }
+
+    It "issue #119: only shows the Overrides line when at least one override is actually configured" {
+        $script:scriptContent | Should -Match '\$ovCount\s*=\s*\$noSyncList\.Count\s*\+\s*\$onlySyncList\.Count'
+        $script:scriptContent | Should -Match 'if\s*\(\$ovCount\s*-gt\s*0\)\s*\{'
+    }
+
+    It "issue #119: explains what the Overrides line means and what action the user can take" {
+        # Must appear inside the same ovCount-gated block, not as an
+        # unconditional line elsewhere -- confirmed by requiring the
+        # explanation text to follow the "Overrides:" line within a bounded
+        # window rather than just existing anywhere in the file.
+        $script:scriptContent | Should -Match 'Overrides:\s*noSync[\s\S]{0,400}TeknoParrot-Manager\.overrides\.json'
+        $script:scriptContent | Should -Match "there's nothing to do"
+    }
+
+    It "issue #120: tells the user which dat/ZIP was selected" {
+        $script:scriptContent | Should -Match 'Write-Host\s*\(\s*"\s*\s*Selected:\s*\{0\}"'
+    }
+
+    It "issue #120: reports freshness (current / newer available / unknown) for a selected ZIP, and the no-comparison case for a standalone dat" {
+        $script:scriptContent | Should -Match 'This is the latest available version'
+        $script:scriptContent | Should -Match 'A newer version is available'
+        $script:scriptContent | Should -Match 'Could not determine whether this is the latest version'
+        $script:scriptContent | Should -Match 'Cannot check whether this is the latest version'
+    }
+
+    It "issue #121: the DAT browse file filter allows both .zip and .dat by default, not just .zip or All Files" {
+        $datFilterMatches = [regex]::Matches($script:scriptContent, 'ZIP/dat files \(\*\.zip;\*\.dat\)\|\*\.zip;\*\.dat')
+        $datFilterMatches.Count | Should -BeGreaterThan 0 -Because "every DAT browse call site (initial D/B choice, download-fallback, already-configured re-browse) must offer both extensions from the default filter"
+    }
+}
