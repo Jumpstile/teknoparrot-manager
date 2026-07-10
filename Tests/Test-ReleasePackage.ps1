@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ZipPath,
 
-    [string]$ExpectedDisplayVersion = 'v1.0 RC2'
+    [string]$ExpectedDisplayVersion = 'v1.0 RC2.1'
 )
 
 Set-StrictMode -Version Latest
@@ -55,8 +55,15 @@ try {
     if ($scriptContent -notmatch [regex]::Escape("# TeknoParrot Manager  |  $ExpectedDisplayVersion")) {
         throw "Packaged TeknoParrot-Manager.ps1 header does not contain expected version: $ExpectedDisplayVersion"
     }
-    if ($scriptContent -notmatch '\$ReleaseCandidateLabel\s*=\s*"RC2"') {
-        throw "Packaged TeknoParrot-Manager.ps1 does not set ReleaseCandidateLabel to RC2."
+    # Derived from -ExpectedDisplayVersion (e.g. "v1.0 RC2.1" -> "RC2.1")
+    # rather than hardcoded, so this check does not go stale on the next
+    # release the way it did for this one.
+    if ($ExpectedDisplayVersion -notmatch '^v[\d.]+\s+(\S+)$') {
+        throw "Could not derive expected ReleaseCandidateLabel from -ExpectedDisplayVersion: $ExpectedDisplayVersion"
+    }
+    $expectedRcLabel = $Matches[1]
+    if ($scriptContent -notmatch ('\$ReleaseCandidateLabel\s*=\s*"{0}"' -f [regex]::Escape($expectedRcLabel))) {
+        throw "Packaged TeknoParrot-Manager.ps1 does not set ReleaseCandidateLabel to $expectedRcLabel."
     }
     if ($scriptContent -notmatch 'Get-ManagerVersionLine') {
         throw "Packaged TeknoParrot-Manager.ps1 banner does not render the DisplayVersion source."
