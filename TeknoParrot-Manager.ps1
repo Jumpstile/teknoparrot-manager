@@ -13512,7 +13512,16 @@ Write-Host "   - Run mode 4 (Crosshair setup) to preview and deploy them to ligh
 Write-Host ""
 
     if ($dryRunActive -and -not $Unattended) {
-        $applyNow = (Read-Host "  Apply these changes for real now? (Y/N)").Trim().ToUpper()
+        Write-Host "  Preview completed successfully." -ForegroundColor DarkCyan
+        Write-Host "  No changes have been made." -ForegroundColor DarkCyan
+        Write-Host ""
+        Write-Host "  Would you like to perform the operation for real?" -ForegroundColor Cyan
+        Write-Host "  TPM will perform a fresh scan before making any changes, to ensure" -ForegroundColor DarkCyan
+        Write-Host "  nothing has changed since the preview." -ForegroundColor DarkCyan
+        Write-Host ""
+        Write-Host "  [Y] Apply changes" -ForegroundColor Cyan
+        Write-Host "  [N] Return to the main menu" -ForegroundColor Cyan
+        $applyNow = (Read-Host "  Your choice").Trim().ToUpper()
         if ($applyNow -eq "Y") {
             $pendingApplyMode = $mode
             Write-Log "PreviewMode: user chose to apply for real -- re-entering $mode."
