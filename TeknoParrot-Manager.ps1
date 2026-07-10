@@ -4137,7 +4137,7 @@ function Invoke-TpmDownload {
         return $true
     } catch {
         $stopwatch.Stop()
-        Write-Host ("  Download failed: {0}" -f $_) -ForegroundColor Red
+        if (-not $Quiet) { Write-Host ("  Download failed: {0}" -f $_) -ForegroundColor Red }
         Write-Log "${Label}: download failed -- $_"
         try { if (Test-Path -LiteralPath $tempPath) { [System.IO.File]::Delete($tempPath) } } catch {}
         if ($LastStatusCode) { $LastStatusCode.Value = $detectedStatusCode }
@@ -9681,7 +9681,7 @@ function Invoke-ThumbnailDownload {
             Write-Log "Thumbnails: downloaded $code"
             $fetched++
         } elseif ($statusCode -eq 404) {
-            Write-Host "  no icon online" -ForegroundColor DarkGray
+            Write-Host "  No icon in online pack" -ForegroundColor DarkGray
             Write-Log "Thumbnails: not in repo $code"
             $notAvail++
         } else {
@@ -9693,16 +9693,16 @@ function Invoke-ThumbnailDownload {
 
     Write-Host ""
     $failSuffix = if ($failed -gt 0) { ", $failed failed" } else { "" }
-    Write-Host ("  Thumbnails: {0} downloaded, {1} already had one, {2} have no icon online (not in the source repo){3}." -f `
+    Write-Host ("  Thumbnails: {0} downloaded, {1} already had one, {2} have no icon in the online pack{3}." -f `
         $fetched, $alreadyCount, $notAvail, $failSuffix) -ForegroundColor Green
     Write-Log ("Thumbnails: fetched=$fetched alreadyPresent=$alreadyCount notAvail=$notAvail failed=$failed")
 
     if ($fetched -eq 0 -and $failed -eq 0 -and $notAvail -eq $total -and $total -gt 0) {
-        Write-Host "  None of your games had a matching icon available online." -ForegroundColor Yellow
-        Write-Host "  This is normal for less common or homebrew games -- the online icon pack" -ForegroundColor Yellow
-        Write-Host "  (repo) doesn't have everything. You can add your own: create a" -ForegroundColor Yellow
-        Write-Host "  CustomThumbnails\ folder next to this script and drop in a PNG per game," -ForegroundColor Yellow
-        Write-Host "  named to match its file in UserProfiles\ (see the tip above)." -ForegroundColor Yellow
+        Write-Host "  Some games do not currently have artwork in the online icon pack." -ForegroundColor Yellow
+        Write-Host "  This does not mean the games are unsupported. You can add your own" -ForegroundColor Yellow
+        Write-Host "  icons: create a CustomThumbnails\ folder next to this script and drop" -ForegroundColor Yellow
+        Write-Host "  in a PNG per game, named to match its file in UserProfiles\ (see the" -ForegroundColor Yellow
+        Write-Host "  tip above)." -ForegroundColor Yellow
         Write-Log "Thumbnails: all $total missing icon(s) were 404 -- likely no upstream icon for these specific games, not a download failure."
     }
 }
