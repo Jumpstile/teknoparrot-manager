@@ -462,6 +462,91 @@ Describe "Set-SecondaryExecutablePath" {
     }
 }
 
+Describe "Read-HostSafe / Exit-TpmProcess (issue #135: non-interactive input)" {
+    # Read-Host returns $null when redirected stdin has run out of piped
+    # lines (or, more rarely, when Read-Host is unavailable in the current
+    # host). Read-HostSafe is the one centralized wrapper every interactive
+    # prompt in the script goes through so that failure mode has a single,
+    # tested implementation instead of ~65 individual unguarded .Trim()/
+    # .ToUpper() call sites. Exit-TpmProcess is mocked here so the exhausted-
+    # input path can be exercised without terminating the test runner.
+
+    It "returns the trimmed value for a normal (interactive-equivalent) answer" {
+        Mock Read-Host { return '  Y  ' }
+        Read-HostSafe -Prompt 'Continue?' | Should -Be 'Y'
+    }
+
+    It "returns an empty string for a blank answer (user pressed Enter with nothing typed)" {
+        Mock Read-Host { return '' }
+        Read-HostSafe -Prompt 'Continue?' | Should -Be ''
+    }
+
+    It "exits with code 1 and does not return a real answer when Read-Host returns null (exhausted redirected stdin)" {
+        Mock Read-Host { return $null }
+        Mock Exit-TpmProcess { }
+        Mock Write-Log { }
+
+        Read-HostSafe -Prompt 'Continue?' | Should -Be ''
+
+        Should -Invoke Exit-TpmProcess -Times 1 -ParameterFilter { $Code -eq 1 }
+        Should -Invoke Write-Log -Times 1
+    }
+
+    It "never lets a null Read-Host result crash a caller's .ToUpper() call" {
+        Mock Read-Host { return $null }
+        Mock Exit-TpmProcess { }
+        Mock Write-Log { }
+
+        { (Read-HostSafe -Prompt 'Continue?').ToUpper() } | Should -Not -Throw
+    }
+}
+
+Describe "Read-MainMenuChoiceResponsive redirected-input handling (issue #135)" {
+    # Confirms the main menu prompt never enters the [Console]::KeyAvailable
+    # polling loop when stdin is redirected (polling a keyboard that cannot
+    # receive piped input is the 40-second hang from issue #135), and that
+    # an exhausted redirected stream exits cleanly instead of looping.
+    #
+    # [Console]::IsInputRedirected is a static, unmockable property whose
+    # value depends on how THIS test process itself was launched -- true
+    # when run non-interactively (this repo's CI, or piped/redirected local
+    # runs), false when a developer runs Invoke-Pester directly in an
+    # interactive terminal window. These two It blocks are guarded to only
+    # run in whichever of those two states is actually live, rather than
+    # asserting a specific state or risking the interactive-terminal case
+    # falling into a real keyboard-polling wait inside a test run.
+    It "returns via Read-HostSafe without entering the keyboard-polling loop when input is redirected" -Skip:(-not [Console]::IsInputRedirected) {
+        Mock Read-Host { return 'AutoSync' }
+        $result = Read-MainMenuChoiceResponsive -Prompt 'Choice:' -InitialWidth 80 -InitialHeight 25
+        $result.Value | Should -Be 'AutoSync'
+        $result.Redraw | Should -BeFalse
+    }
+
+    It "exits cleanly via Exit-TpmProcess instead of looping when redirected stdin is exhausted" -Skip:(-not [Console]::IsInputRedirected) {
+        Mock Read-Host { return $null }
+        Mock Exit-TpmProcess { }
+        Mock Write-Log { }
+
+        $result = Read-MainMenuChoiceResponsive -Prompt 'Choice:' -InitialWidth 80 -InitialHeight 25
+
+        $result.Value | Should -Be ''
+        Should -Invoke Exit-TpmProcess -Times 1 -ParameterFilter { $Code -eq 1 }
+    }
+
+    It "logs (does not silently swallow) an [Console]::IsInputRedirected detection failure" {
+        # IsInputRedirected itself cannot be mocked (static .NET member), so
+        # this exercises the documented behavior directly: the function's
+        # catch block around that check must call Write-Log, never an empty
+        # `catch {}` (issue #135's "do not silently swallow" requirement).
+        # Confirmed by source inspection matching this test's expectation:
+        # see the comment immediately above the try/catch in
+        # Read-MainMenuChoiceResponsive.
+        $fnText = (Get-Command Read-MainMenuChoiceResponsive).Definition
+        $fnText | Should -Not -Match 'catch\s*\{\s*\}'
+        $fnText | Should -Match 'IsInputRedirected.*threw'
+    }
+}
+
 Describe "Get-ButtonKey / Test-ButtonIsBound" {
     BeforeAll {
         function New-ButtonNode([string]$xml) {
