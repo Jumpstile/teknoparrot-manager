@@ -1841,6 +1841,87 @@ Describe "Invoke-TpmDownload progress overlay cleanup (issue #132)" {
     }
 }
 
+Describe "Invoke-TpmDownload timeout / malformed content / cancellation (issue #132)" {
+    # Rounds out the issue #132 acceptance criteria (HTTP 200/404 and mixed-
+    # batch cleanup are already covered above): a network timeout, a
+    # corrupt/incomplete downloaded file, and a user-cancelled transfer are
+    # not special-cased anywhere in Invoke-TpmDownload -- they are ordinary
+    # exceptions that must still be caught by the outer try/catch/finally,
+    # never mis-reported as a 404 ("not in the online pack"), and must still
+    # clear the Id 42 progress overlay and remove the partial temp file.
+    BeforeAll {
+        Mock Write-Log {}
+        Mock Write-Host {}
+        Mock Write-DownloadAudit {}
+        Mock Write-TpmDownloadMetrics {}
+        Mock Start-Sleep {}
+        Mock Write-Progress {}
+    }
+    BeforeEach {
+        Mock Test-TpmDownloadBitsAvailable { $false }
+    }
+
+    It "treats an HttpClient timeout as a generic failure (not a 404), clears the overlay, and removes the partial file" {
+        Mock Invoke-TpmDownloadHttpClient {
+            Set-Content -LiteralPath $TempPath -Value "partial" -NoNewline
+            throw [System.Threading.Tasks.TaskCanceledException]::new("A task was canceled.")
+        }
+        Mock Invoke-TpmDownloadWebRequest { throw [System.Threading.Tasks.TaskCanceledException]::new("A task was canceled.") }
+        $savePath = Join-Path $TestDrive "timeout-fail.png"
+        $statusCode = 0
+
+        $result = Invoke-TpmDownload -DownloadUrl "https://example.com/slow.png" -DestinationPath $savePath -Label 'Thumbnails' -LastStatusCode ([ref]$statusCode)
+
+        $result | Should -BeFalse
+        $statusCode | Should -Not -Be 404
+        Test-Path -LiteralPath $savePath | Should -BeFalse
+        Should -Invoke Write-Progress -Times 1 -ParameterFilter { $Id -eq 42 -and $Completed }
+    }
+
+    It "rejects an incomplete/malformed download that doesn't match the expected size, clears the overlay, and leaves no partial file behind" {
+        Mock Invoke-TpmDownloadHttpClient {
+            # Simulates a truncated/corrupt transfer: succeeds without
+            # throwing, but writes fewer bytes than the caller expects.
+            Set-Content -LiteralPath $TempPath -Value "short" -NoNewline
+        }
+        $savePath = Join-Path $TestDrive "malformed.png"
+
+        $result = Invoke-TpmDownload -DownloadUrl "https://example.com/a.png" -DestinationPath $savePath -ExpectedBytes 999999 -Label 'Thumbnails'
+
+        $result | Should -BeFalse
+        Test-Path -LiteralPath $savePath | Should -BeFalse
+        Should -Invoke Write-Progress -Times 1 -ParameterFilter { $Id -eq 42 -and $Completed }
+    }
+
+    It "treats a cancelled transfer (OperationCanceledException) as a clean failure, not an unhandled crash" {
+        Mock Invoke-TpmDownloadHttpClient { throw [System.OperationCanceledException]::new("The operation was canceled.") }
+        Mock Invoke-TpmDownloadWebRequest { throw [System.OperationCanceledException]::new("The operation was canceled.") }
+        $savePath = Join-Path $TestDrive "cancelled.png"
+
+        { Invoke-TpmDownload -DownloadUrl "https://example.com/a.png" -DestinationPath $savePath -Label 'Thumbnails' } | Should -Not -Throw
+        $result = Invoke-TpmDownload -DownloadUrl "https://example.com/a.png" -DestinationPath $savePath -Label 'Thumbnails'
+
+        $result | Should -BeFalse
+        Should -Invoke Write-Progress -Times 2 -ParameterFilter { $Id -eq 42 -and $Completed }
+    }
+
+    It "clears the overlay for every call across a complete non-404 batch failure (e.g. upstream host unreachable)" {
+        Mock Invoke-TpmDownloadHttpClient { throw "The remote name could not be resolved." }
+        Mock Invoke-TpmDownloadWebRequest { throw "The remote name could not be resolved." }
+
+        $statusCodes = 1..3 | ForEach-Object {
+            $savePath = Join-Path $TestDrive "batch-fail-$_.png"
+            $sc = 0
+            $r = Invoke-TpmDownload -DownloadUrl "https://example.com/x-$_.png" -DestinationPath $savePath -Label 'Thumbnails' -LastStatusCode ([ref]$sc)
+            $r | Should -BeFalse
+            $sc
+        }
+
+        $statusCodes | Should -Not -Contain 404
+        Should -Invoke Write-Progress -Times 3 -ParameterFilter { $Id -eq 42 -and $Completed }
+    }
+}
+
 Describe "Invoke-TpmDownloadBits BITS polling states" {
     It "the polling loop's continue-states list includes TransientError (a recoverable BITS state), not just Connecting/Transferring/Queued" {
         $scriptContent = Get-Content -LiteralPath $scriptPath -Raw
