@@ -526,3 +526,41 @@ to exercise hasn't changed. Add a source-level regression guard asserting the
 fake actually exists for the specific function currently in use, so a future
 refactor away from it fails fast instead of reintroducing a silent, hard-to-
 reproduce hang.
+
+---
+
+## Short-viewport menu truncation dropped the footer and Exit, not the content that should give first (issue #104, RC3 correction)
+
+**What failed.** `Render-MainMenuScreen` built one flat list -- banner rows,
+then body rows, then footer rows -- and `Limit-MainMenuRowsToViewport`
+truncated that combined list to `Select-Object -First $maxRows` whenever it
+overflowed the viewport height. At a short console height this kept the
+*front* of the render (the banner and the earliest menu sections) and
+silently dropped whatever didn't fit off the *end* -- which, because the
+footer (Quit/Help controls) and the Application section (option 14, Exit)
+are built last, meant exactly the controls a user needs to actually operate
+the menu were the first things to disappear. A pre-existing Pester test even
+asserted this as intentional (`Should -Not -Match 'Exit'` on a short-viewport
+render), so the behavior passed its own regression suite while being wrong.
+Caught by an independent review of PR #145, not by the test suite, which had
+codified the bug as the expected result.
+
+**Fix.** Banner, body, and footer rows are now built and reserved
+separately. The footer is never truncated. If the body doesn't fit the
+remaining budget, `Limit-MainMenuBodyRowsToBudget` trims BODY rows only, and
+trims from the *front* (keeping the tail) specifically so the last real menu
+item survives -- the opposite truncation direction from before. The Compact
+tier's "Type ? for descriptions." hint (a purely decorative line) was also
+moved from the end of the body to the beginning, because it was winning the
+tail-preservation priority over the actual "14) Exit" line by virtue of
+render order alone, not by design.
+
+**Rule.** When a render pipeline has to drop content to fit a viewport,
+truncation direction is a product decision, not an implementation detail --
+"keep the front" and "keep the back" are both defensible defaults depending
+on what's most essential, but the essential content (here: the controls
+needed to operate the UI at all) must be identified explicitly and protected,
+never left to whichever end of a flat list happens to survive. A test that
+asserts truncation drops specific named content should be treated as a
+signal to double-check that dropping it is actually the intended behavior,
+not just documentation of whatever the code currently does.

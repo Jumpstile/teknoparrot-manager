@@ -1929,6 +1929,89 @@ Describe "Invoke-TpmDownloadBits BITS polling states" {
     }
 }
 
+Describe "Invoke-CrosshairSetup P1/P2 prompts use the safe input path (issue #135 RC3 correction)" {
+    # Invoke-CrosshairSetup cannot be exercised end-to-end in this suite for
+    # the same reason documented on "Invoke-ThumbnailDownload 404-vs-failure
+    # distinction" below: it reads $PSScriptRoot to locate the Crosshairs\
+    # folder, which is empty because functions here are dot-sourced from an
+    # AST extract with no backing file, so the function returns immediately
+    # ("Crosshairs folder not found") before ever reaching the P1/P2 prompts
+    # these tests target -- not something to route around by changing
+    # production code under a "smallest safe fix" scope.
+    #
+    # These two prompts were the two remaining unguarded
+    # `(Read-Host $promptText).Trim()` call sites missed by the original
+    # #135 migration (that migration's regex only matched a Read-Host
+    # argument that was a literal double-quoted string or a fully
+    # parenthesized expression -- $promptText is a bare variable, a third
+    # shape the regex never covered). Each site sits inside a
+    # `while ($null -eq $pXIdx) { ... }` retry loop with no bound: under the
+    # old unguarded code, once redirected stdin was exhausted, `Read-Host`
+    # would return $null forever and `$null.Trim()` would throw a
+    # NullReferenceException on the very first re-read after exhaustion --
+    # worse than the plain crash-once behavior elsewhere in the script,
+    # because Write-Host's "Enter a number..." retry message would print
+    # first, masking that the real cause was exhausted input, not a bad
+    # answer.
+    BeforeAll {
+        $fullSource = Get-Content -LiteralPath $scriptPath -Raw
+        $start = $fullSource.IndexOf('function Invoke-CrosshairSetup')
+        $end = $fullSource.IndexOf("`nfunction ", $start + 10)
+        $script:crosshairSource = $fullSource.Substring($start, $end - $start)
+    }
+
+    It "finds the Invoke-CrosshairSetup function body to check" {
+        $script:crosshairSource | Should -Not -BeNullOrEmpty
+    }
+
+    It "the P1 and P2 index prompts both go through Read-HostSafe" {
+        (@([regex]::Matches($script:crosshairSource, 'Read-HostSafe \$promptText')).Count) | Should -Be 2
+    }
+
+    It "no bare Read-Host call in this function has .Trim() or .ToUpper() chained directly onto it" {
+        $script:crosshairSource | Should -Not -Match '\(Read-Host\b[^)]*\)\.(Trim|ToUpper)\('
+    }
+
+    # Read-HostSafe's own null/exhausted-input behavior (never throws, exits
+    # cleanly via the mockable Exit-TpmProcess instead) is already covered
+    # exhaustively by "Read-HostSafe / Exit-TpmProcess (issue #135:
+    # non-interactive input)" above -- since both crosshair prompts now
+    # route through that exact same, already-tested function instead of a
+    # bare Read-Host, that coverage applies here directly. This test
+    # exercises the specific retry-loop SHAPE used in Invoke-CrosshairSetup
+    # (a `while ($null -eq $idx) { $raw = (Read-HostSafe ...); ... }` loop
+    # that never bounds its own retries) against a mocked exhausted stream,
+    # proving the loop cannot spin on a null dereference even though the
+    # real function isn't directly callable here.
+    It "the crosshair index retry-loop shape terminates via Exit-TpmProcess on exhausted input instead of dereferencing null" {
+        $script:readHostCallCount = 0
+        Mock Read-Host { $script:readHostCallCount++; return $null }
+        Mock Exit-TpmProcess { throw 'simulated-process-exit' }
+        Mock Write-Log { }
+
+        $validCount = 3
+        $lastIdx = $null
+        $idx = $null
+
+        {
+            while ($null -eq $idx) {
+                if ($script:readHostCallCount -gt 5) { throw 'test guard: loop did not stop on exhausted input' }
+                $promptText = if ($null -ne $lastIdx) {
+                    "  P1 crosshair index (0-{0}, Enter for last used: {1})" -f ($validCount - 1), $lastIdx
+                } else { "  P1 crosshair index (0-{0})" -f ($validCount - 1) }
+                $raw = (Read-HostSafe $promptText)
+                if ($raw -eq '' -and $null -ne $lastIdx) { $idx = $lastIdx }
+                elseif ($raw -match '^\d+$' -and $raw.Length -le 9 -and [int]$raw -lt $validCount) { $idx = [int]$raw }
+            }
+        } | Should -Throw 'simulated-process-exit'
+
+        # Exactly one Read-Host call before the mocked Exit-TpmProcess threw
+        # -- proves the loop did not spin re-reading the exhausted stream.
+        $script:readHostCallCount | Should -Be 1
+        Should -Invoke Exit-TpmProcess -Times 1 -ParameterFilter { $Code -eq 1 }
+    }
+}
+
 Describe "Invoke-ThumbnailDownload 404-vs-failure distinction" {
     # Invoke-ThumbnailDownload cannot be exercised end-to-end in this suite:
     # it reads $PSScriptRoot to locate CustomThumbnails\, which is empty
@@ -3753,12 +3836,20 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         $screen.Geometry.MenuWidth | Should -BeGreaterThan 145
     }
     It "UltraCentered renders a single centered content block" {
-        $screen = Render-MainMenuScreen -Tier 'Ultra' -Width 180 -Height 30 -UltraLayoutMode 'UltraCentered'
+        # Height 65 is tall enough for UltraCentered's full-description,
+        # single-column content to render in full without any body
+        # truncation (confirmed empirically: content needs 61 rows; a
+        # shorter height, e.g. 30, legitimately truncates the earliest
+        # sections first per Limit-MainMenuBodyRowsToBudget -- see the
+        # "issue #104 RC3 correction" tests below, which cover that case
+        # directly and assert Exit/footer survive instead of AutoSync).
+        $screen = Render-MainMenuScreen -Tier 'Ultra' -Width 180 -Height 65 -UltraLayoutMode 'UltraCentered'
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
 
         $screen.Geometry.ColumnCount | Should -Be 1
         $screen.Geometry.LeftPadding | Should -BeGreaterThan 10
         $output | Should -Match ([regex]::Escape("1) AutoSync"))
+        $output | Should -Match ([regex]::Escape("14) Exit"))
         $output | Should -Not -Match '(?m)LIBRARY MANAGEMENT\s+-+\s+GAME ENHANCEMENTS'
     }
     It "narrow Professional tier remains bounded and readable" {
@@ -3780,17 +3871,67 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
             }
         }
     }
-    It "small viewport renders only top-visible rows and leaves prompt space" {
+    It "small viewport keeps the footer and Exit visible without scrolling, even if it must drop earlier sections (issue #104 RC3 correction)" {
+        # Prior behavior flattened banner+body+footer and kept only the
+        # first N rows top-to-bottom -- at a short height that silently
+        # dropped the entire footer (Quit/Help controls) and the
+        # Application section (option 14, Exit), which a real user could
+        # never reach without resizing or scrolling. This asserted that
+        # loss as "expected" (`Should -Not -Match 'Exit'`); the corrected
+        # behavior below is the opposite: the footer and Exit must survive,
+        # and it is earlier body content that gets trimmed first if
+        # something has to give.
         $screen = Render-MainMenuScreen -Tier 'Compact' -Width 80 -Height 12
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
 
         $screen.Rows.Count | Should -BeLessOrEqual 10
         $output | Should -Match 'TeknoParrot Manager'
-        $output | Should -Match 'Version 1.0 RC2.1'
-        $output | Should -Match 'LIBRARY MANAGEMENT'
-        $output | Should -Match 'AutoSync'
-        $output | Should -Not -Match 'APPLICATION'
-        $output | Should -Not -Match 'Exit'
+        $output | Should -Match '14\) Exit'
+        $output | Should -Match 'Enter number'
+    }
+
+    It "reserves footer rows unconditionally so they are never truncated away, across every tier at a short height" {
+        foreach ($case in @(
+            @{ Tier = 'Compact'; Width = 80 },
+            @{ Tier = 'Standard'; Width = 100 },
+            @{ Tier = 'Professional'; Width = 132 },
+            @{ Tier = 'Ultra'; Width = 160 }
+        )) {
+            $screen = Render-MainMenuScreen -Tier $case.Tier -Width $case.Width -Height 12
+            $footerRows = @(Get-MainMenuFooterRows -Geometry $screen.Geometry)
+            $screen.Rows.Count | Should -BeGreaterOrEqual $footerRows.Count
+            $tail = $screen.Rows | Select-Object -Last $footerRows.Count
+            for ($i = 0; $i -lt $footerRows.Count; $i++) {
+                $tail[$i].Text | Should -Be $footerRows[$i].Text
+            }
+        }
+    }
+
+    It "keeps option 14 (Exit) visible at every tier when the viewport is short, single-column layouts" {
+        foreach ($case in @(
+            @{ Tier = 'Compact'; Width = 80 },
+            @{ Tier = 'Standard'; Width = 100 }
+        )) {
+            $screen = Render-MainMenuScreen -Tier $case.Tier -Width $case.Width -Height 12
+            $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+            $output | Should -Match '14\) Exit'
+        }
+    }
+
+    It "keeps option 14 (Exit) visible at Professional/Ultra two-column tiers when the viewport is short" {
+        # Two-column layouts interleave rows from all four sections per row
+        # index (Join-MainMenuRenderColumns), so Exit's row can appear
+        # earlier in the flat row list than in a single-column layout --
+        # confirms the front-trim-only-single-column-body assumption still
+        # leaves Exit visible where it actually lives in a 2-column render.
+        foreach ($case in @(
+            @{ Tier = 'Professional'; Width = 132 },
+            @{ Tier = 'Ultra'; Width = 160 }
+        )) {
+            $screen = Render-MainMenuScreen -Tier $case.Tier -Width $case.Width -Height 12
+            $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+            $output | Should -Match '14\) Exit'
+        }
     }
     It "Show-MainMenu delegates to the stateless render-clear-write pipeline" {
         $mainScriptContent = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1') -Raw
@@ -3814,6 +3955,87 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
 
         $mainScriptContent | Should -Match '\[Console\]::IsInputRedirected'
         $mainScriptContent | Should -Match 'Read-Host \$Prompt'
+    }
+}
+
+Describe "Issue #140 wording surfaces at every layout tier (issue #104/#140 RC3 correction)" {
+    # Confirmed gap: Get-MainMenuSectionRows has a Professional-tier-only
+    # special case (`if ($Geometry.Layout -eq 'ProfessionalTwoColumn')`)
+    # that always sources its description text from
+    # Get-MainMenuDefaultDescription instead of the shared ShortDesc/
+    # FullDesc fields on the item -- so the #140 wording improvements
+    # (ReShade/Postgres/BepInEx) landed only on ShortDesc/FullDesc and never
+    # reached that function, meaning Professional tier (and Compact tier's
+    # "?" detail view, which explicitly falls back to Professional -- see
+    # the `if ($helpTier -eq 'Compact') { $helpTier = 'Professional' }` line
+    # in the main menu loop) kept showing the OLD text, including the
+    # literal "Install local PostgreSQL support." wording this issue was
+    # filed to improve. Fixed by updating Get-MainMenuDefaultDescription's
+    # text directly, since the Professional-specific routing itself is
+    # deliberate (a shorter, single-line variant for a tighter column) and
+    # out of scope to change.
+    It "Professional tier (two-column) shows the improved wording, not the pre-#140 defaults" {
+        $screen = Render-MainMenuScreen -Tier 'Professional' -Width 150 -Height 40
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+
+        $output | Should -Match 'CRT'
+        $output | Should -Match 'Golden Tee'
+        $output | Should -Match 'modding framework'
+        $output | Should -Not -Match 'Install local PostgreSQL support\.'
+        $output | Should -Not -Match 'Apply visual enhancements\.'
+        $output | Should -Not -Match 'Update existing BepInEx installs\.'
+    }
+
+    It "Compact tier's '?' detail view (falls back to Professional) also shows the improved wording" {
+        # Reproduces the main loop's exact fallback: a Compact-tier console
+        # pressing '?' is shown the Professional layout, not Compact's own
+        # (label-only) layout. At this narrower two-column width the
+        # description text legitimately word-wraps across render rows AND
+        # across the column gutter/frame characters, so "modding" and
+        # "framework" can end up separated by more than plain whitespace --
+        # assert each word is present rather than requiring adjacency.
+        $screen = Render-MainMenuScreen -Tier 'Professional' -Width 80 -Height 40
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+
+        $output | Should -Match 'CRT'
+        $output | Should -Match 'Golden Tee'
+        $output | Should -Match 'modding'
+        $output | Should -Match 'framework'
+    }
+
+    It "Ultra two-column tier (the default 'largest layout') shows the improved ShortDesc wording" {
+        $screen = Render-MainMenuScreen -Tier 'Ultra' -Width 160 -Height 40
+        $screen.Geometry.Layout | Should -Be 'UltraTwoColumn'
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+
+        $output | Should -Match 'CRT'
+        $output | Should -Match 'Golden Tee'
+        $output | Should -Match 'modding framework'
+    }
+
+    It "UltraCentered (single-column, full descriptions) shows the improved FullDesc wording" {
+        $screen = Render-MainMenuScreen -Tier 'Ultra' -Width 180 -Height 65 -UltraLayoutMode 'UltraCentered'
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+
+        $output | Should -Match 'CRT'
+        $output | Should -Match 'Golden Tee'
+        $output | Should -Match 'modding framework'
+    }
+
+    It "Standard and Compact tiers' own (labels-only) render is unaffected -- no description text shown either way" {
+        # Documents existing, unchanged-by-this-fix behavior: Standard and
+        # Compact both render Labels-only detail with no per-item
+        # description at all (Compact's escape hatch is the '?' key, tested
+        # above, which is a SEPARATE render call, not part of this one).
+        foreach ($case in @(
+            @{ Tier = 'Compact'; Width = 80 }
+            @{ Tier = 'Standard'; Width = 100 }
+        )) {
+            $screen = Render-MainMenuScreen -Tier $case.Tier -Width $case.Width -Height 40
+            $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+            $output | Should -Not -Match 'CRT'
+            $output | Should -Not -Match 'Golden Tee'
+        }
     }
 }
 

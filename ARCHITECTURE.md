@@ -895,12 +895,46 @@ where `$menuTier` is recomputed fresh every redraw (via `Get-ConsoleLayoutTier`)
 user resizing the window mid-session gets the right tier next time the menu draws, not just
 at startup. The `Enter 1-N` prompt and the "Invalid choice" message both use
 `$menuMaxNumber` (derived from `Get-MainMenuItems`) instead of a hardcoded `14`. Typing `?`
-at the prompt shows the Full tier's descriptions once, then re-prompts, without disturbing
-`$mode` or the surrounding loop.
+at the prompt re-renders once at the Professional tier (`if ($helpTier -eq 'Compact')
+{ $helpTier = 'Professional' }`) regardless of the console's own detected tier, then
+re-prompts, without disturbing `$mode` or the surrounding loop -- this is how a Compact-tier
+console's "Type ? for descriptions." hint is actually fulfilled, since Compact's own render
+never shows per-item description text at all (see "Short-viewport truncation" below for why
+the description TEXT shown there has to stay in sync with every tier, not just the Full/
+UltraCentered one).
 
 **Unchanged by design:** menu numbering (1-14), the `switch` statement's dispatch, and
 every mode's own behavior. Only `Show-MainMenu`'s rendering varies by tier -- this is
 presentation-layer work, not a mode-behavior change.
+
+**Description text sourcing varies by tier -- a real gap found in review (RC3).**
+`Get-MainMenuSectionRows` does not use one shared description field for every tier:
+Standard and Compact tiers show no description at all (Detail `'Labels'`); UltraCentered
+(single-column) uses `$item.FullDesc`; Ultra-two-column and Compact's `?`-triggered
+Professional fallback route through *different* fields depending on `$Geometry.Layout` --
+Ultra-two-column uses `$item.ShortDesc`, but Professional-two-column has its own carve-out
+(`if ($Geometry.Layout -eq 'ProfessionalTwoColumn') { Get-MainMenuDefaultDescription -Item
+$item }`) that ignores ShortDesc/FullDesc entirely and always sources from the separate
+`Get-MainMenuDefaultDescription` switch statement. A wording update to `ShortDesc`/
+`FullDesc` on `Get-MainMenuSections` (issue #140) therefore does NOT automatically reach
+Professional tier or Compact's `?` fallback -- `Get-MainMenuDefaultDescription` must be
+updated too, as its own, separate copy of the same information. Any future menu-wording
+change must update both places and be verified at every tier (Compact via `?`, Standard has
+no description to update, Professional, Ultra-two-column, and UltraCentered), not just
+whichever tier happened to be open in a terminal at the time.
+
+**Short-viewport truncation keeps the footer and Exit, never the earliest content (RC3
+correction, see `LESSONS_LEARNED.md`).** `Render-MainMenuScreen` builds banner, body, and
+footer rows separately and reserves the banner and footer unconditionally -- they are never
+truncated. If the body doesn't fit the remaining row budget, `Limit-MainMenuBodyRowsToBudget`
+trims body rows from the FRONT, keeping the tail, specifically so the last real menu item
+(14, Exit) and the footer's Quit/Help controls always render without the terminal itself
+having to scroll. The Compact tier's decorative "Type ? for descriptions." hint is
+deliberately built into the body BEFORE the section rows (not after) for the same reason --
+placed after, it would out-rank the real "14) Exit" line for tail-preservation priority
+purely by virtue of render order, not because it's more important. Do not "simplify" this
+back to a single flat `banner + body + footer` list truncated from one end -- that was the
+actual regression this section documents.
 
 **Test changes.** "Main menu source-level drift check" was rewritten to validate the data
 model (`Get-MainMenuItems`) against the `switch` statement's case labels, instead of the

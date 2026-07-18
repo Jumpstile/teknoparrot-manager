@@ -3060,7 +3060,7 @@ function Invoke-CrosshairSetup {
         $promptText = if ($null -ne $lastP1Idx) {
             "  P1 crosshair index (0-{0}, Enter for last used: {1} {2})" -f ($valid.Count - 1), $lastP1Idx, [System.IO.Path]::GetFileNameWithoutExtension($valid[$lastP1Idx])
         } else { "  P1 crosshair index (0-{0})" -f ($valid.Count - 1) }
-        $raw = (Read-Host $promptText).Trim()
+        $raw = (Read-HostSafe $promptText)
         if ($raw -eq '' -and $null -ne $lastP1Idx) { $p1Idx = $lastP1Idx }
         elseif ($raw -match '^\d+$' -and $raw.Length -le 9 -and [int]$raw -lt $valid.Count) { $p1Idx = [int]$raw }
         else { Write-Host ("  Enter a number between 0 and {0}." -f ($valid.Count - 1)) -ForegroundColor Yellow }
@@ -3071,7 +3071,7 @@ function Invoke-CrosshairSetup {
         $promptText = if ($null -ne $lastP2Idx) {
             "  P2 crosshair index (0-{0}, or same as P1, Enter for last used: {1} {2})" -f ($valid.Count - 1), $lastP2Idx, [System.IO.Path]::GetFileNameWithoutExtension($valid[$lastP2Idx])
         } else { "  P2 crosshair index (0-{0}, or same as P1)" -f ($valid.Count - 1) }
-        $raw = (Read-Host $promptText).Trim()
+        $raw = (Read-HostSafe $promptText)
         if ($raw -eq '' -and $null -ne $lastP2Idx) { $p2Idx = $lastP2Idx }
         elseif ($raw -match '^\d+$' -and $raw.Length -le 9 -and [int]$raw -lt $valid.Count) { $p2Idx = [int]$raw }
         else { Write-Host ("  Enter a number between 0 and {0}." -f ($valid.Count - 1)) -ForegroundColor Yellow }
@@ -10755,14 +10755,14 @@ function Get-MainMenuDefaultDescription {
         'RegisterOnly' { return 'Register already-extracted games.' }
         'PropagateControls' { return 'Copy bindings from reference games.' }
         'CrosshairSetup' { return 'Deploy lightgun crosshairs.' }
-        'ReShadeSetup' { return 'Apply visual enhancements.' }
+        'ReShadeSetup' { return 'Visual filters: sharper image, CRT-style scanlines.' }
         'DgVoodoo2Setup' { return 'Fix older DirectX/Glide games.' }
         'GpuFixSetup' { return 'Apply GPU compatibility fixes.' }
         'FFBSetup' { return 'Configure wheel/stick feedback.' }
-        'BepInExUpdate' { return 'Update existing BepInEx installs.' }
+        'BepInExUpdate' { return 'Update BepInEx (a modding framework), if installed.' }
         'HealthCheck' { return 'Read-only library status.' }
         'Restore' { return 'Restore UserProfiles or databases.' }
-        'PostgresSetup' { return 'Install local PostgreSQL support.' }
+        'PostgresSetup' { return 'Local PostgreSQL for Golden Tee and other IT games.' }
         'CheckForUpdates' { return 'Manual backup-first update check.' }
         default { return $Item.ShortDesc }
     }
@@ -11170,14 +11170,20 @@ function Get-MainMenuBodyRows {
     }
 
     $rows = New-Object System.Collections.Generic.List[object]
+    if ($Geometry.Tier -eq 'Compact') {
+        # Deliberately placed BEFORE the section rows, not after: when a
+        # short viewport forces Limit-MainMenuBodyRowsToBudget to trim body
+        # rows, it keeps the TAIL of this list so the last real menu item
+        # (14, Exit) always survives. A purely decorative hint like this one
+        # must never out-rank that -- if it were last, it would win the
+        # tail-preservation over Exit itself at a short height.
+        [void]$rows.Add((New-ConsoleRenderRow -Text '  Type ? for descriptions.' -Color 'DarkGray'))
+        [void]$rows.Add((New-ConsoleRenderRow))
+    }
     foreach ($section in $Sections) {
         foreach ($row in (Get-MainMenuSectionRows -Section $section -Geometry $Geometry -Detail $detail)) {
             [void]$rows.Add($row)
         }
-    }
-    if ($Geometry.Tier -eq 'Compact') {
-        [void]$rows.Add((New-ConsoleRenderRow -Text '  Type ? for descriptions.' -Color 'DarkGray'))
-        [void]$rows.Add((New-ConsoleRenderRow))
     }
     return @(Get-PaddedMainMenuRows -Rows $rows.ToArray() -Padding $Geometry.LeftPadding)
 }
@@ -11193,6 +11199,30 @@ function Limit-MainMenuRowsToViewport {
     return @($Rows | Select-Object -First $maxRows)
 }
 
+# Truncates BODY rows only (never the banner or footer) so a short-height
+# console still shows the footer's Quit/Help controls and the menu's last
+# item (14, Exit) without the terminal itself having to scroll -- issue #104
+# RC3 correction. Earlier behavior flattened banner+body+footer into one
+# list and kept only the first N rows, which chopped off the Application
+# section (Check for Updates, Exit) and the entire footer at short heights;
+# a pre-existing test even asserted that as intentional ("small viewport...
+# leaves prompt space" previously asserted `Should -Not -Match 'Exit'`).
+# Trimming BODY from the front (keeping its tail) instead means whatever
+# gets dropped first is the earliest sections (Library Management, Game
+# Enhancements), not the footer or the last item -- the controls a user
+# needs to actually operate the menu (pick a number, quit, get help) always
+# render, even if some earlier item descriptions don't fit.
+function Limit-MainMenuBodyRowsToBudget {
+    param(
+        [object[]]$BodyRows,
+        [int]$BodyBudget
+    )
+
+    if ($BodyBudget -le 0) { return @() }
+    if ($BodyRows.Count -le $BodyBudget) { return @($BodyRows) }
+    return @($BodyRows | Select-Object -Last $BodyBudget)
+}
+
 function Render-MainMenuScreen {
     param(
         [ValidateSet('Ultra', 'Professional', 'Standard', 'Compact')][string]$Tier,
@@ -11203,10 +11233,19 @@ function Render-MainMenuScreen {
 
     $geometry = Get-MainMenuGeometry -Tier $Tier -ViewportWidth $Width -ViewportHeight $Height -UltraLayoutMode $UltraLayoutMode
     $sections = @(Get-MainMenuSections)
+    $bannerRows = @(Get-MainMenuBannerRows -Geometry $geometry)
+    $footerRows = @(Get-MainMenuFooterRows -Geometry $geometry)
+    $bodyRows = @(Get-MainMenuBodyRows -Sections $sections -Geometry $geometry)
+
+    $maxTotalRows = [Math]::Max(5, $geometry.ViewportHeight - 2)
+    $reserved = $bannerRows.Count + $footerRows.Count
+    $bodyBudget = [Math]::Max(0, $maxTotalRows - $reserved)
+    $bodyRows = Limit-MainMenuBodyRowsToBudget -BodyRows $bodyRows -BodyBudget $bodyBudget
+
     $rows = New-Object System.Collections.Generic.List[object]
-    foreach ($row in (Get-MainMenuBannerRows -Geometry $geometry)) { [void]$rows.Add($row) }
-    foreach ($row in (Get-MainMenuBodyRows -Sections $sections -Geometry $geometry)) { [void]$rows.Add($row) }
-    foreach ($row in (Get-MainMenuFooterRows -Geometry $geometry)) { [void]$rows.Add($row) }
+    foreach ($row in $bannerRows) { [void]$rows.Add($row) }
+    foreach ($row in $bodyRows) { [void]$rows.Add($row) }
+    foreach ($row in $footerRows) { [void]$rows.Add($row) }
     return [pscustomobject]@{ Geometry = $geometry; Rows = (Limit-MainMenuRowsToViewport -Rows $rows.ToArray() -ViewportHeight $geometry.ViewportHeight) }
 }
 
