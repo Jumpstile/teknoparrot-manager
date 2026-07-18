@@ -11357,6 +11357,17 @@ function Read-MainMenuChoiceResponsive {
 # =============================================================================
 # MAIN MENU LOOP
 # =============================================================================
+# $MinBoundForArchetype must be set before the loop starts, not only in
+# SECTION 10 below -- the standalone "Propagate Controls" menu handler
+# (PropagateControls mode) runs entirely inside this loop and returns via
+# `continue` without ever reaching SECTION 10. Before this fix, running
+# Propagate Controls as the first action of a session left the variable
+# $null, which [int]$minBound coerced to 0 in Build-ArchetypePool -- every
+# profile (including fully unbound ones) then qualified as an archetype,
+# every UserProfiles file was treated as a pool source, and propagation
+# silently produced "Games updated: 0" with no per-game report lines. See
+# issue #139 and LESSONS_LEARNED.md.
+$MinBoundForArchetype = 5
 try {
 Set-ConsoleMaximizedIfSupported
 while ($true) {

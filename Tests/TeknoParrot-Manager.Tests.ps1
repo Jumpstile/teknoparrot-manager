@@ -2051,6 +2051,173 @@ $binding
     }
 }
 
+Describe "Invoke-ControlPropagation canonicalArchetype Input API correction (issue #139)" {
+    # Fixtures modeled directly on the real diagnostic data posted to issue
+    # #139: StreetFighterIII3rdStrike (SF3) and fghtjam (Capcom Fighting Jam)
+    # were found to have byte-for-byte identical Coin1/Coin2/P1ButtonStart/
+    # P2ButtonStart bindings (button 54/54/55/55 on the same two joystick
+    # GUIDs) -- the reported "inconsistent mapping" was never a binding
+    # divergence between these two titles. The actual defect confirmed on
+    # this issue was that "Input API" can independently drift between two
+    # archetypes of the same family (fghtjam's on-disk FieldOptions lacked
+    # MergedInput entirely, unlike SF3's), and that canonicalArchetype
+    # correction only propagates whatever the canonical game's Input API
+    # happens to be in the live pool snapshot at the moment propagation
+    # runs -- so the canonical game must already be on the intended API
+    # before the fix is applied, or the "fix" just propagates the wrong
+    # value to every other archetype in the family.
+    BeforeAll {
+        function New-ButtonFamilyProfileXml {
+            param(
+                [string]$Name,
+                [string]$InputApiValue,
+                [string[]]$InputApiOptions
+            )
+            $optionsXml = ($InputApiOptions | ForEach-Object { "        <string>$_</string>" }) -join "`n"
+            $slots = @(
+                @{ Name = 'Test';               Mapping = 'Test';           Button = 92 }
+                @{ Name = 'Service 1';           Mapping = 'Service1';       Button = 93 }
+                @{ Name = 'Service 2';           Mapping = 'Service2';       Button = 94 }
+                @{ Name = 'Coin 1';              Mapping = 'Coin1';          Button = 54 }
+                @{ Name = 'Coin 2';              Mapping = 'Coin2';          Button = 54 }
+                @{ Name = 'Player 1 Start';      Mapping = 'P1ButtonStart';  Button = 55 }
+                @{ Name = 'Player 2 Start';      Mapping = 'P2ButtonStart';  Button = 55 }
+            )
+            $buttonsXml = ($slots | ForEach-Object {
+                @"
+    <JoystickButtons>
+      <ButtonName>$($_.Name)</ButtonName>
+      <InputMapping>$($_.Mapping)</InputMapping>
+      <DirectInputButton>
+        <Button>$($_.Button)</Button>
+      </DirectInputButton>
+    </JoystickButtons>
+"@
+            }) -join "`n"
+            return @"
+<GameProfile>
+  <GameName>$Name</GameName>
+  <JoystickButtons>
+$buttonsXml
+  </JoystickButtons>
+  <ConfigValues>
+    <FieldInformation>
+      <FieldName>Input API</FieldName>
+      <FieldValue>$InputApiValue</FieldValue>
+      <FieldOptions>
+$optionsXml
+      </FieldOptions>
+    </FieldInformation>
+  </ConfigValues>
+</GameProfile>
+"@
+        }
+    }
+
+    It "does not alter either archetype's own button bindings, even though both are independently bound and physically identical" {
+        $profiles = Join-Path $TestDrive ("issue139-bindings-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+
+        New-ButtonFamilyProfileXml -Name 'StreetFighterIII3rdStrike' -InputApiValue 'MergedInput' -InputApiOptions @('DirectInput', 'XInput', 'MergedInput') |
+            Set-Content -LiteralPath (Join-Path $profiles 'StreetFighterIII3rdStrike.xml') -Encoding UTF8
+        New-ButtonFamilyProfileXml -Name 'fghtjam' -InputApiValue 'DirectInput' -InputApiOptions @('DirectInput', 'XInput') |
+            Set-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Encoding UTF8
+
+        $before = Get-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Raw
+        $pool = Build-ArchetypePool $profiles 5
+        [void](Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 5 -DryRun:$false)
+        $after = Get-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Raw
+
+        ([xml]$after).SelectSingleNode("/GameProfile/JoystickButtons/JoystickButtons[InputMapping='Coin1']/DirectInputButton/Button").InnerText | Should -Be '54'
+        ([xml]$after).SelectSingleNode("/GameProfile/JoystickButtons/JoystickButtons[InputMapping='P1ButtonStart']/DirectInputButton/Button").InnerText | Should -Be '55'
+    }
+
+    It "corrects a non-canonical archetype's Input API to match the canonical archetype's CURRENT value, including injecting a missing MergedInput FieldOptions entry" {
+        $profiles = Join-Path $TestDrive ("issue139-api-fix-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+
+        New-ButtonFamilyProfileXml -Name 'StreetFighterIII3rdStrike' -InputApiValue 'MergedInput' -InputApiOptions @('DirectInput', 'XInput', 'MergedInput') |
+            Set-Content -LiteralPath (Join-Path $profiles 'StreetFighterIII3rdStrike.xml') -Encoding UTF8
+        New-ButtonFamilyProfileXml -Name 'fghtjam' -InputApiValue 'DirectInput' -InputApiOptions @('DirectInput', 'XInput') |
+            Set-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Encoding UTF8
+
+        $pool = Build-ArchetypePool $profiles 5
+        $canonicalArchetype = @{ button = 'StreetFighterIII3rdStrike' }
+        $reports = Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 5 -canonicalArchetype $canonicalArchetype -DryRun:$false
+
+        [xml]$fghtjamAfter = Get-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Raw
+        $apiField = $fghtjamAfter.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName='Input API']")
+        $apiField.FieldValue | Should -Be 'MergedInput'
+        @($apiField.SelectNodes('FieldOptions/string') | ForEach-Object { $_.InnerText }) | Should -Contain 'MergedInput'
+
+        $fixedReport = @($reports | Where-Object { $_.Code -eq 'fghtjam' } | Select-Object -First 1)
+        $fixedReport.Status | Should -Be 'api-fixed-canonical'
+    }
+
+    It "propagates the WRONG value if the canonical archetype itself is not yet on the intended API when correction runs (ordering hazard confirmed on issue #139)" {
+        # This documents the exact failure mode from the issue thread: writing
+        # canonicalArchetype to overrides.json before switching the canonical
+        # game's own Input API does not "fix forward" -- it corrects every
+        # other archetype in the family to match whatever the canonical
+        # game's CURRENT (possibly still-wrong) value is.
+        $profiles = Join-Path $TestDrive ("issue139-ordering-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+
+        New-ButtonFamilyProfileXml -Name 'StreetFighterIII3rdStrike' -InputApiValue 'DirectInput' -InputApiOptions @('DirectInput', 'XInput', 'MergedInput') |
+            Set-Content -LiteralPath (Join-Path $profiles 'StreetFighterIII3rdStrike.xml') -Encoding UTF8
+        New-ButtonFamilyProfileXml -Name 'fghtjam' -InputApiValue 'MergedInput' -InputApiOptions @('DirectInput', 'XInput', 'MergedInput') |
+            Set-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Encoding UTF8
+
+        $pool = Build-ArchetypePool $profiles 5
+        $canonicalArchetype = @{ button = 'StreetFighterIII3rdStrike' }
+        [void](Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 5 -canonicalArchetype $canonicalArchetype -DryRun:$false)
+
+        [xml]$fghtjamAfter = Get-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Raw
+        $fghtjamAfter.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName='Input API']/FieldValue").InnerText | Should -Be 'DirectInput'
+    }
+
+    It "does not touch a non-canonical archetype whose Input API already matches the canonical archetype" {
+        $profiles = Join-Path $TestDrive ("issue139-noop-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+
+        New-ButtonFamilyProfileXml -Name 'StreetFighterIII3rdStrike' -InputApiValue 'MergedInput' -InputApiOptions @('DirectInput', 'XInput', 'MergedInput') |
+            Set-Content -LiteralPath (Join-Path $profiles 'StreetFighterIII3rdStrike.xml') -Encoding UTF8
+        New-ButtonFamilyProfileXml -Name 'BBCF' -InputApiValue 'MergedInput' -InputApiOptions @('DirectInput', 'XInput', 'MergedInput') |
+            Set-Content -LiteralPath (Join-Path $profiles 'BBCF.xml') -Encoding UTF8
+
+        $pool = Build-ArchetypePool $profiles 5
+        $canonicalArchetype = @{ button = 'StreetFighterIII3rdStrike' }
+        $reports = Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 5 -canonicalArchetype $canonicalArchetype -DryRun:$false
+
+        @($reports | Where-Object { $_.Code -eq 'BBCF' }).Count | Should -Be 0
+    }
+}
+
+Describe "MinBoundForArchetype initialization order (issue #139)" {
+    # Confirmed root cause on issue #139: the standalone "Propagate Controls"
+    # menu handler runs entirely inside the MAIN MENU LOOP and returns via
+    # `continue` without ever reaching SECTION 10, where
+    # $MinBoundForArchetype was previously first assigned. Left unset on
+    # that path, [int]$minBound coerced $null to 0 in Build-ArchetypePool,
+    # so every profile (including fully unbound ones) qualified as an
+    # archetype and propagation silently produced "Games updated: 0" with no
+    # per-game report lines. This is a source-level regression guard (not a
+    # functional test) because the bug is about variable-initialization
+    # ordering in the interactive menu loop, not a pure function's behavior.
+    BeforeAll {
+        $script:rawScriptText = Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\TeknoParrot-Manager.ps1") -Raw
+    }
+
+    It "assigns `$MinBoundForArchetype before the standalone PropagateControls menu handler can read it" {
+        $handlerIndex = $script:rawScriptText.IndexOf('if ($mode -eq "PropagateControls")')
+        $handlerIndex | Should -BeGreaterThan 0
+
+        $assignmentIndex = $script:rawScriptText.IndexOf('$MinBoundForArchetype = 5')
+        $assignmentIndex | Should -BeGreaterThan 0
+        $assignmentIndex | Should -BeLessThan $handlerIndex
+    }
+}
+
 Describe "Write-ControlPropagationResults (issue #59: standalone Propagate Controls)" {
     # This function is the shared reporting step behind both the AutoSync/
     # Register-only flow and the standalone "Propagate Controls" menu option
