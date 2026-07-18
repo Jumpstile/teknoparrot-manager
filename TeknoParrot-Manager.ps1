@@ -10595,11 +10595,11 @@ function Get-MainMenuSections {
         Header = 'Game Enhancements (all optional -- games work without these)'
         Items  = @(
             [pscustomobject]@{ Number = 4; Mode = 'CrosshairSetup'; Label = 'Crosshair setup'; ShortDesc = 'Deploy custom crosshairs to lightgun games.'; FullDesc = @('Pick and deploy custom crosshairs to all', 'registered lightgun games.') }
-            [pscustomobject]@{ Number = 5; Mode = 'ReShadeSetup'; Label = 'ReShade setup'; ShortDesc = 'Sharper image, better colours, scanlines, borders.'; FullDesc = @('Add visual enhancements (sharper image, better', 'colours, scanlines, borders).') }
+            [pscustomobject]@{ Number = 5; Mode = 'ReShadeSetup'; Label = 'ReShade setup'; ShortDesc = 'Visual filters: sharper image, CRT-style scanlines, borders.'; FullDesc = @('ReShade adds post-processing filters on top of', 'the game -- sharper image, better colours,', 'CRT-style scanlines, and screen borders, for a', 'more authentic arcade-cabinet look.') }
             [pscustomobject]@{ Number = 6; Mode = 'DgVoodoo2Setup'; Label = 'dgVoodoo2 setup'; ShortDesc = 'Fix old DX8/DirectDraw/Glide crashes.'; FullDesc = @('Fix old DX8, DirectDraw, and Glide games that', 'crash or show black screens.') }
             [pscustomobject]@{ Number = 7; Mode = 'GpuFixSetup'; Label = 'GPU fix setup'; ShortDesc = 'Auto-detect GPU, apply matching compatibility fix.'; FullDesc = @('Auto-detect your GPU (AMD / NVIDIA / Intel) and', 'apply the matching compatibility fix to every', 'registered game that has one.') }
             [pscustomobject]@{ Number = 8; Mode = 'FFBSetup'; Label = 'Force feedback (FFB) setup'; ShortDesc = 'Wheel/stick rumble and force feedback.'; FullDesc = @('Wheel/stick rumble and force feedback.', "Covers TeknoParrot's built-in FFB Blaster (needs a", 'paid membership) and a free third-party plugin.') }
-            [pscustomobject]@{ Number = 9; Mode = 'BepInExUpdate'; Label = 'BepInEx update check'; ShortDesc = 'Update games with BepInEx already installed.'; FullDesc = @('Checks games with BepInEx already installed', 'against the latest stable release and offers to', 'update (64-bit only). Never installs it fresh.') }
+            [pscustomobject]@{ Number = 9; Mode = 'BepInExUpdate'; Label = 'BepInEx update check'; ShortDesc = 'Update BepInEx (a game modding framework), if already installed.'; FullDesc = @('BepInEx is a modding framework some TeknoParrot', 'games use for extra features and fixes. Checks', 'games that already have it installed against the', 'latest stable release and offers to update', '(64-bit only). Never installs it fresh.') }
         )
     }
     [pscustomobject]@{
@@ -10607,7 +10607,7 @@ function Get-MainMenuSections {
         Items  = @(
             [pscustomobject]@{ Number = 10; Mode = 'HealthCheck'; Label = 'Library health check'; ShortDesc = 'Read-only status: registered/broken/unregistered counts.'; FullDesc = @('Read-only: reports registered/broken/', 'unregistered counts plus GPU fix / FFB Blaster /', 'dgVoodoo2 coverage and ReShade/BepInEx install', 'counts. No extraction, registration, repair, or', 'network access -- just a fast status check.') }
             [pscustomobject]@{ Number = 11; Mode = 'Restore'; Label = 'Restore backup'; ShortDesc = 'Roll UserProfiles/LaunchBox/Postgres back.'; FullDesc = @('Roll UserProfiles, LaunchBox files, or Postgres', 'databases back to a previous backup.') }
-            [pscustomobject]@{ Number = 12; Mode = 'PostgresSetup'; Label = 'Postgres setup'; ShortDesc = 'Local PostgreSQL for some Incredible Technologies games.'; FullDesc = @('Installs/configures the local PostgreSQL', 'database that some Incredible Technologies', 'games need (Golden Tee Live, Power Putt Live,', 'Silver Strike Bowling Live, Target Toss Pro).', 'Requires running this script as Administrator', "if PostgreSQL isn't installed yet.") }
+            [pscustomobject]@{ Number = 12; Mode = 'PostgresSetup'; Label = 'Postgres setup'; ShortDesc = 'Local PostgreSQL database for Golden Tee and other IT games.'; FullDesc = @('Installs/configures the local PostgreSQL', 'database that some Incredible Technologies (IT)', 'games need to keep local scores/settings (Golden', 'Tee Live, Power Putt Live, Silver Strike Bowling', 'Live, Target Toss Pro). Requires running this', "script as Administrator if PostgreSQL isn't", 'installed yet.') }
         )
     }
     [pscustomobject]@{
