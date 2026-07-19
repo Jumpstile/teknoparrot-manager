@@ -862,7 +862,14 @@ pane, a small cabinet-mounted display, a low-resolution remote session) that lay
 force scrolling or wrap awkwardly -- readable on a full-size window, cramped everywhere
 else.
 
-**Design: one data model, three rendering tiers.**
+**Design: one data model, four rendering tiers.**
+
+The three-tier design (`Full` >=160 / `Standard` >=120 / `Compact` narrower) described in
+the original issue #104 proposal was superseded during implementation by four tiers with
+different breakpoints, refined through the RC2/RC2.1 cycle to cover real console width
+ranges better than the original illustrative spec. This is the current, shipped design --
+see `Get-ConsoleLayoutTier`'s actual thresholds below, not the three-tier numbers above,
+which are historical only.
 
 - `Get-MainMenuSections` -- the single source of truth. Returns an ordered array of section
   objects (`Header`, `Items`), each item carrying `Number`, `Mode` (the string the `switch`
@@ -874,14 +881,21 @@ else.
 - `Get-MainMenuItems` -- flattens every section's items into one number-ordered list; used
   to derive the highest option number (the `Enter 1-N` prompt) and to avoid every caller
   re-flattening the section list itself.
-- `Get-ConsoleLayoutTier -Width -Height -RequiredFullLines` -- pure, testable. Returns
-  `'Full'` (>=160 columns, and the window is tall enough for the actual full-layout line
-  count -- computed from the live data model, not a hardcoded constant, so it stays correct
-  if items are ever added), `'Standard'` (>=120 columns), or `'Compact'` (narrower, or Full
-  doesn't fit vertically).
-- `Show-MainMenu -Tier` -- pure display, never reads input. Full tier reproduces the
-  original wording exactly; Standard prints one-line `ShortDesc` per item; Compact prints
-  labels only plus "Type ? for descriptions."
+- `Get-ConsoleLayoutTier -Width -Height -RequiredFullLines` -- pure, testable, and
+  width-driven (console menus render in columns, not pixels; `-Height`/`-RequiredFullLines`
+  are accepted and tracked for diagnostic/metrics purposes -- see
+  `Get-MainMenuRenderMetrics`'s `HeightConstrained` output -- but do not themselves change
+  which tier is selected). Returns exactly one of:
+  - `Compact` -- width < 90
+  - `Standard` -- width 90-119
+  - `Professional` -- width 120-149
+  - `Ultra` -- width >= 150
+- `Show-MainMenu -Tier` -- pure display, never reads input. Ultra (`UltraCentered` layout
+  mode specifically) reproduces the original full wording (`FullDesc`) exactly; Ultra's
+  default `UltraTwoColumn` layout and Standard/Compact show progressively less detail;
+  Professional has its own single-line description source (see "Description text sourcing
+  varies by tier" below) rather than sharing Ultra-two-column's. Compact prints labels only
+  plus "Type ? for descriptions."
 - `Set-ConsoleMaximizedIfSupported` -- best-effort console maximize, called once at
   startup (not on every redraw). Wrapped in try/catch and silently no-ops on hosts that
   don't support resizing (redirected output, ISE, some CI/test runners) -- this is a
@@ -935,6 +949,27 @@ placed after, it would out-rank the real "14) Exit" line for tail-preservation p
 purely by virtue of render order, not because it's more important. Do not "simplify" this
 back to a single flat `banner + body + footer` list truncated from one end -- that was the
 actual regression this section documents.
+
+**Emergency compact presentation for the 60x10 minimum supported viewport and below (RC3-B
+correction, see `LESSONS_LEARNED.md`).** Reserving Exit and the footer is not, on its own,
+enough at very short heights: at the documented minimum supported 60x10 terminal, the normal
+Compact-tier body needs 18 rows at minimum (4 section headers + 14 item rows) even with every
+description stripped, and the normal framed banner (6 rows) plus footer (2 rows) alone
+already consume the entire available row budget there -- leaving zero rows for body content
+of any kind, Exit included. `Get-MainMenuEmergencyCompactRows` is the fallback:
+`Render-MainMenuScreen` switches to it whenever the body budget can't hold at least one row
+per item (`$bodyBudget -lt $totalItemCount`), and it replaces the framed banner and footer
+with single-line minimal versions (`Get-MainMenuMinimalBannerRows` /
+`Get-MainMenuMinimalFooterRows`) and flow-packs every item's `"N) Label"` token as densely as
+the width allows (`Get-MainMenuFlowPackedItemRows`) instead of one item per row. Tokens are
+packed whole -- a label is never split across two lines -- and if even the packed items don't
+fit the real row budget, item rows are trimmed from the front (same tail-preservation
+principle as above), so the minimal banner and footer are still never dropped, and the
+trailing item lines (ending in `14) Exit`) survive over the earliest ones. The row budget used
+here, and by the normal path above it, is the caller's real requested `-Height`, not
+`$geometry.ViewportHeight` -- `Get-MainMenuGeometry` internally clamps that to a floor of 10
+for its own column-width math, which would otherwise let more rows render than an actually
+8- or 9-row-tall real terminal can show without scrolling.
 
 **Test changes.** "Main menu source-level drift check" was rewritten to validate the data
 model (`Get-MainMenuItems`) against the `switch` statement's case labels, instead of the

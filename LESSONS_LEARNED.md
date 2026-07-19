@@ -564,3 +564,87 @@ never left to whichever end of a flat list happens to survive. A test that
 asserts truncation drops specific named content should be treated as a
 signal to double-check that dropping it is actually the intended behavior,
 not just documentation of whatever the code currently does.
+
+---
+
+## Reserving the footer wasn't enough at 60x10; a Pester closure gap made a real defect invisible (issue #104 RC3-B)
+
+**What failed, part 1: reserving the footer alone still dropped every option.**
+The RC3 fix above (reserve the footer, trim body from the front) assumed there
+would always be *some* row budget left for body content. At the documented
+minimum supported viewport, 60x10, that assumption was wrong: the framed
+banner (6 rows) and footer (2 rows) alone consumed the entire 8-row budget,
+leaving zero rows for ANY body content -- not just early items, everything,
+including option 14 (Exit). The packaged diagnostic (`scripts\Debug-TPM-
+MenuLayout.ps1`) made this directly visible once its own separate crash
+(below) was fixed: `-Width 60 -Height 10 -Render` rendered only a banner and
+a footer, with nothing in between.
+
+**Fix.** `Get-MainMenuEmergencyCompactRows` is a genuinely different
+presentation for viewports too short for one-item-per-row rendering, not a
+tighter version of the same layout: single-line banner and footer (no frame,
+no blank separator) free up several rows, and every option's `"N) Label"` is
+flow-packed as densely as the width allows instead of one per row. Tokens are
+packed whole (never split a number from its own label across two lines), and
+if even that doesn't fit, item rows trim from the front so the last item
+(ending in `14) Exit`) and the footer survive over the earliest options.
+
+**What failed, part 2: the packaged diagnostic script drifted from the
+render pipeline it exists to debug.** `scripts\Debug-TPM-MenuLayout.ps1`
+loaded only a hand-maintained list of "the menu functions this diagnostic
+needs" via AST extraction. The moment `Limit-MainMenuBodyRowsToBudget` was
+added (the RC3 fix above), the diagnostic was never updated to know about
+it, and crashed with `CommandNotFoundException` the instant `-Render`
+exercised the render pipeline. A pre-existing Pester test that ran the
+diagnostic (`& $debugScript ... -Render`) did not catch this: `&` runs in a
+child scope of the *current* Pester process, which already had every
+production function -- including the new one -- dot-sourced into it by this
+test file's own top-level `BeforeAll`, so the missing function was invisibly
+supplied by the test session itself, not the diagnostic script's own code.
+
+**Fix.** The diagnostic now loads every function definition from the
+production script via AST extraction (the same pattern the Pester suites
+already use), not a hand-maintained allowlist, so it cannot drift out of
+sync with new dependencies again. Regression coverage was added as a
+genuinely separate child PROCESS (`pwsh -File` / `powershell.exe -File`),
+not an in-process `&` call, specifically because the in-process form cannot
+detect this class of missing-dependency bug -- confirmed by running the new
+process-isolated tests against the pre-fix diagnostic and watching them fail
+with the real error, then pass after the fix.
+
+**What failed, part 3: a `foreach ($x in ...) { It ... { ...$x... } }` loop
+variable is invisible inside the `It` body when Pester actually runs it.**
+Discovered while writing regression tests for the 60x10 fix above, then
+found to already be silently broken in a test committed earlier in the same
+work (`Tests\InstallHealthCheck.Tests.ps1`'s six special-folder-name tests).
+Confirmed by isolated repro: a scriptblock's own `It` TITLE is built at
+Pester's Discovery phase and correctly shows the loop's per-iteration value
+(discovery re-executes the whole container script top to bottom), but the
+`It` BODY runs later in Pester's own scope chain, which does not inherit a
+loop variable from the surrounding `Describe`/`Context` body at all -- only
+`$script:` values assigned in an enclosing `BeforeAll`/`BeforeEach` are
+visible there. The practical effect: the folder-name tests' bodies all read
+an empty string for the loop variable, and because `Join-Path $TestDrive ''`
+harmlessly resolves to `$TestDrive` itself, all six tests "passed" while
+silently testing the exact same directory instead of six distinct
+special-character folder names -- a false negative with a passing test
+suite as the only visible signal that anything was wrong.
+
+**Fix.** Both cases (the 60x10 height boundaries and the folder-name tests)
+were rewritten to use Pester's `-TestCases` parameter, which passes each
+case's values into the `It` scriptblock as real bound parameters instead of
+relying on a closure. The folder-name rewrite also added an explicit
+assertion (`(Split-Path -Leaf $dir) | Should -Be $FolderName`) proving each
+iteration actually exercised its own distinct value, specifically so a
+future regression of this class fails loudly instead of silently passing
+again.
+
+**Rule.** Never write `foreach ($x in $cases) { It "..." { ...$x... } }` in
+this codebase's Pester suites -- it is silently broken in the Pester/
+PowerShell version combination this project uses, and a broken instance of
+it does not fail; it passes while testing the wrong thing. Use `It "..."
+-TestCases @(...) { param($x) ... }` for any parameterized test instead.
+When reviewing a loop-generated set of tests, check that each one asserts
+something which would actually be FALSE if every iteration were silently
+testing the same value -- a title alone (built at Discovery time, always
+correct) is not evidence the body executed correctly.

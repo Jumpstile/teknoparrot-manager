@@ -11223,6 +11223,115 @@ function Limit-MainMenuBodyRowsToBudget {
     return @($BodyRows | Select-Object -Last $BodyBudget)
 }
 
+# Single-line banner ("TeknoParrot Manager v1.0 RC2.1") with no frame and no
+# blank separator, for viewports too short for the normal framed banner (5-6
+# rows) to leave any room for menu content -- see
+# Get-MainMenuEmergencyCompactRows.
+function Get-MainMenuMinimalBannerRows {
+    param([object]$Geometry)
+    $text = "TeknoParrot Manager {0}" -f (Get-ManagerVersionLine)
+    $text = $text -replace '^TeknoParrot Manager Version ', 'TeknoParrot Manager v'
+    if ($text.Length -gt $Geometry.MenuWidth -and $Geometry.MenuWidth -gt 3) {
+        $text = $text.Substring(0, $Geometry.MenuWidth)
+    }
+    return @(Get-PaddedMainMenuRows -Rows @((New-ConsoleRenderRow -Text $text -Color 'Cyan')) -Padding $Geometry.LeftPadding)
+}
+
+# Single-line footer with no frame/rule, for the same reason as
+# Get-MainMenuMinimalBannerRows above.
+function Get-MainMenuMinimalFooterRows {
+    param([object]$Geometry)
+    $footer = 'Enter number | Q=Quit'
+    if ($footer.Length -gt $Geometry.FooterWidth) { $footer = 'N | Q' }
+    return @(Get-PaddedMainMenuRows -Rows @((New-ConsoleRenderRow -Text $footer -Color 'White')) -Padding $Geometry.LeftPadding)
+}
+
+# Packs every menu item's "N) Label" as densely as the viewport width
+# allows, word-wrapping only when a token would overflow the line, instead
+# of one item per row. This is the fallback for viewports too short to show
+# even the normal Compact tier's one-item-per-row Labels rendering (e.g. the
+# minimum supported 60x10 terminal) -- at that size, 4 section headers + 14
+# item rows (18 rows) cannot fit no matter how much else is trimmed, so
+# every option must share rows instead of some options being dropped
+# entirely. Section grouping is intentionally not preserved here (headers
+# are dropped) since the priority at this size is that every option NUMBER
+# is visible and reachable, not that they stay visually grouped.
+function Get-MainMenuFlowPackedItemRows {
+    param(
+        [int]$Width,
+        [object]$Geometry
+    )
+    $tokens = @((Get-MainMenuItems) | ForEach-Object { '{0}) {1}' -f $_.Number, $_.Label })
+    $wrapWidth = [Math]::Max(20, $Width)
+
+    # Packs whole "N) Label" tokens greedily, never splitting one across two
+    # lines -- unlike a generic word-wrap (e.g. Split-TextForMenuWidth),
+    # which treats "4)" and "Crosshair" as separate words and can break an
+    # option's number from its own label at a line boundary. A single
+    # option's number and name staying on one line matters more here than
+    # tight packing, since this is the presentation a very-short-viewport
+    # user reads to figure out what to type.
+    $lines = New-Object System.Collections.Generic.List[string]
+    $current = ''
+    foreach ($token in $tokens) {
+        if ($current.Length -eq 0) {
+            $current = $token
+        } elseif (($current.Length + 2 + $token.Length) -le $wrapWidth) {
+            $current = "$current  $token"
+        } else {
+            [void]$lines.Add($current)
+            $current = $token
+        }
+    }
+    if ($current.Length -gt 0) { [void]$lines.Add($current) }
+
+    $rows = @($lines | ForEach-Object { New-ConsoleRenderRow -Text $_ -Color 'White' })
+    return @(Get-PaddedMainMenuRows -Rows $rows -Padding $Geometry.LeftPadding)
+}
+
+# Emergency compact presentation for viewports too short to show all 14
+# options one per row even with every description stripped (issue #104
+# RC3-B correction: at the minimum supported 60x10 terminal, the normal
+# Compact-tier body -- 4 section headers + 14 item rows, 18 rows minimum --
+# cannot fit even after Limit-MainMenuBodyRowsToBudget trims it, so the
+# normal path was silently dropping every item including 14 (Exit), leaving
+# only the banner and footer visible. Reserving space for Exit and the
+# footer is not enough on its own if the fix only protects those two and
+# still drops every OTHER option -- this replaces the normal framed banner
+# and footer with single-line minimal versions (freeing several rows) and
+# flow-packs every item's "N) Label" as densely as the width allows, so
+# every option number stays visible and reachable without scrolling, rather
+# than choosing which options to silently omit.
+function Get-MainMenuEmergencyCompactRows {
+    param(
+        [object]$Geometry,
+        # Real terminal row budget (Max(5, real Height - 2)) -- when the
+        # flow-packed item rows don't all fit alongside the minimal banner
+        # and footer, those two are still NEVER dropped; item rows are
+        # trimmed from the front instead (keeping the tail), so the last
+        # item line -- which always ends with "14) Exit" -- and the footer
+        # both survive even at a viewport too short to show every earlier
+        # option. Below the documented 60x10 minimum this can still mean an
+        # early option's line goes missing, but the footer and Exit itself
+        # are the two guarantees that must never break.
+        [int]$MaxRows = 0
+    )
+    $bannerRows = @(Get-MainMenuMinimalBannerRows -Geometry $Geometry)
+    $footerRows = @(Get-MainMenuMinimalFooterRows -Geometry $Geometry)
+    $itemRows = @(Get-MainMenuFlowPackedItemRows -Width ([Math]::Max(20, $Geometry.MenuWidth - $Geometry.LeftPadding)) -Geometry $Geometry)
+
+    if ($MaxRows -gt 0) {
+        $itemBudget = [Math]::Max(0, $MaxRows - $bannerRows.Count - $footerRows.Count)
+        $itemRows = Limit-MainMenuBodyRowsToBudget -BodyRows $itemRows -BodyBudget $itemBudget
+    }
+
+    $rows = New-Object System.Collections.Generic.List[object]
+    foreach ($row in $bannerRows) { [void]$rows.Add($row) }
+    foreach ($row in $itemRows) { [void]$rows.Add($row) }
+    foreach ($row in $footerRows) { [void]$rows.Add($row) }
+    return @($rows.ToArray())
+}
+
 function Render-MainMenuScreen {
     param(
         [ValidateSet('Ultra', 'Professional', 'Standard', 'Compact')][string]$Tier,
@@ -11237,16 +11346,43 @@ function Render-MainMenuScreen {
     $footerRows = @(Get-MainMenuFooterRows -Geometry $geometry)
     $bodyRows = @(Get-MainMenuBodyRows -Sections $sections -Geometry $geometry)
 
-    $maxTotalRows = [Math]::Max(5, $geometry.ViewportHeight - 2)
+    # Uses the caller's real requested $Height here, NOT $geometry.ViewportHeight
+    # -- Get-MainMenuGeometry internally clamps ViewportHeight to a floor of 10
+    # for its own column/description-width math, which is correct for that
+    # purpose but would silently let more rows render than an actually-shorter
+    # real terminal (e.g. height 8 or 9) can show without scrolling if reused
+    # here for the row-count budget/cap.
+    $maxTotalRows = [Math]::Max(5, $Height - 2)
     $reserved = $bannerRows.Count + $footerRows.Count
     $bodyBudget = [Math]::Max(0, $maxTotalRows - $reserved)
+
+    # If the normal (one item per row) body can't fit every option even
+    # after trimming, switch to the emergency flow-packed presentation
+    # instead of silently dropping options -- see
+    # Get-MainMenuEmergencyCompactRows. $totalItemCount is the number of
+    # individual item rows the normal Labels-detail body needs at minimum
+    # (ignoring section headers/blank lines, which are the first things
+    # trimmed); if the budget can't even hold that many rows, some options
+    # would be dropped, not just descriptions.
+    $totalItemCount = (Get-MainMenuItems).Count
+    if ($bodyBudget -lt $totalItemCount) {
+        # $maxTotalRows (real Height - 2, not the geometry-clamped height)
+        # is passed straight through as the row budget -- NOT run back
+        # through Limit-MainMenuRowsToViewport's generic front-truncation,
+        # which would cut off the LAST rows (the footer) once content
+        # overflowed. Get-MainMenuEmergencyCompactRows reserves the banner
+        # and footer unconditionally and only trims item rows if needed.
+        $rows = Get-MainMenuEmergencyCompactRows -Geometry $geometry -MaxRows $maxTotalRows
+        return [pscustomobject]@{ Geometry = $geometry; Rows = $rows }
+    }
+
     $bodyRows = Limit-MainMenuBodyRowsToBudget -BodyRows $bodyRows -BodyBudget $bodyBudget
 
     $rows = New-Object System.Collections.Generic.List[object]
     foreach ($row in $bannerRows) { [void]$rows.Add($row) }
     foreach ($row in $bodyRows) { [void]$rows.Add($row) }
     foreach ($row in $footerRows) { [void]$rows.Add($row) }
-    return [pscustomobject]@{ Geometry = $geometry; Rows = (Limit-MainMenuRowsToViewport -Rows $rows.ToArray() -ViewportHeight $geometry.ViewportHeight) }
+    return [pscustomobject]@{ Geometry = $geometry; Rows = (Limit-MainMenuRowsToViewport -Rows $rows.ToArray() -ViewportHeight $Height) }
 }
 
 function Write-ConsoleRenderRows {

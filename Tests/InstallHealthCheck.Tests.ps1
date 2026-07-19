@@ -70,27 +70,41 @@ Describe "Test-XmlFolder -LiteralPath / encoding safety (issue #77)" {
     # Unicode, embedded spaces). Every one of these must validate correctly
     # since the health check walks real TeknoParrot install folders users
     # control the naming of.
-    $specialFolderNameFactories = @(
-        { 'Games [TeknoParrot]' }
-        { "O'Brien's Arcade" }
-        { 'Games & More' }
-        { $script:AccentedFolderName }
-        { 'Games With Spaces' }
-        { 'Games (RC2.1) [v1.0]' }
-    )
+    # Using -TestCases (Pester's own parameterized-test mechanism), not
+    # `foreach ($factory in ...) { It ... { ...$folderName... } }`: a plain
+    # PowerShell foreach-loop variable closed over by an It scriptblock is
+    # NOT visible inside that scriptblock's body when Pester actually runs
+    # it (confirmed by isolated repro against this exact pattern -- the
+    # value read as $null/empty at Run time in every iteration, even though
+    # each It's own TITLE showed the correct distinct name, since titles are
+    # built separately at Discovery time). A prior version of this file used
+    # that pattern; because Join-Path $TestDrive '' harmlessly resolves to
+    # $TestDrive itself, all six special-folder-name tests below were
+    # silently testing the SAME directory ($TestDrive) rather than six
+    # distinct special-character folder names, and still reported as
+    # passing. -TestCases passes each case's value in as a real bound
+    # parameter instead, which does not have this problem.
+    It "reports a real XML file inside a literal folder named '<FolderName>' as valid" -TestCases @(
+        @{ FolderName = 'Games [TeknoParrot]' }
+        @{ FolderName = "O'Brien's Arcade" }
+        @{ FolderName = 'Games & More' }
+        @{ FolderName = $script:AccentedFolderName }
+        @{ FolderName = 'Games With Spaces' }
+        @{ FolderName = 'Games (RC2.1) [v1.0]' }
+    ) {
+        param($FolderName)
+        $dir = Join-Path $TestDrive $FolderName
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $dir 'Game.xml') -Value '<GameProfile><GameName>Test</GameName></GameProfile>' -Encoding UTF8
 
-    foreach ($factory in $specialFolderNameFactories) {
-        $folderName = & $factory
-        It "reports a real XML file inside a literal folder named '$folderName' as valid" {
-            $dir = Join-Path $TestDrive $folderName
-            New-Item -ItemType Directory -Path $dir -Force | Out-Null
-            Set-Content -LiteralPath (Join-Path $dir 'Game.xml') -Value '<GameProfile><GameName>Test</GameName></GameProfile>' -Encoding UTF8
+        $result = Test-XmlFolder -Name 'Special' -Path $dir
 
-            $result = Test-XmlFolder -Name 'Special' -Path $dir
-
-            $result.FileCount | Should -Be 1
-            $result.InvalidCount | Should -Be 0
-        }
+        $result.FileCount | Should -Be 1
+        $result.InvalidCount | Should -Be 0
+        # Confirms this iteration actually created and scanned ITS OWN
+        # distinct folder, not a shared/fallback path -- the specific
+        # regression this rewrite fixes.
+        (Split-Path -Leaf $dir) | Should -Be $FolderName
     }
 
     It "returns FileCount 0 for a folder that does not exist, without throwing" {

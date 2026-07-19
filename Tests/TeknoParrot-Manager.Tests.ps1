@@ -3898,12 +3898,20 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
             @{ Tier = 'Ultra'; Width = 160 }
         )) {
             $screen = Render-MainMenuScreen -Tier $case.Tier -Width $case.Width -Height 12
-            $footerRows = @(Get-MainMenuFooterRows -Geometry $screen.Geometry)
-            $screen.Rows.Count | Should -BeGreaterOrEqual $footerRows.Count
-            $tail = $screen.Rows | Select-Object -Last $footerRows.Count
-            for ($i = 0; $i -lt $footerRows.Count; $i++) {
-                $tail[$i].Text | Should -Be $footerRows[$i].Text
-            }
+            $normalFooterRows = @(Get-MainMenuFooterRows -Geometry $screen.Geometry)
+            $minimalFooterRows = @(Get-MainMenuMinimalFooterRows -Geometry $screen.Geometry)
+
+            # At this height, a narrow-enough tier may now legitimately fall
+            # into the emergency compact presentation (issue #104 RC3-B),
+            # which uses a single-line minimal footer instead of the normal
+            # framed one -- either is acceptable here, since the point of
+            # this test is that the footer is never truncated away
+            # entirely, not that one specific footer variant is used.
+            $screen.Rows.Count | Should -BeGreaterOrEqual 1
+            $lastRowText = $screen.Rows[-1].Text
+            $matchesNormalTail = ($normalFooterRows.Count -gt 0) -and ($lastRowText -eq $normalFooterRows[-1].Text)
+            $matchesMinimalTail = ($minimalFooterRows.Count -gt 0) -and ($lastRowText -eq $minimalFooterRows[-1].Text)
+            ($matchesNormalTail -or $matchesMinimalTail) | Should -BeTrue
         }
     }
 
@@ -3955,6 +3963,121 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
 
         $mainScriptContent | Should -Match '\[Console\]::IsInputRedirected'
         $mainScriptContent | Should -Match 'Read-Host \$Prompt'
+    }
+}
+
+Describe "Minimum supported 60x10 viewport and nearby boundaries (issue #104 RC3-B correction)" {
+    # At 60x10, the normal per-item-per-row Compact body (4 section headers
+    # + 14 item rows = 18 rows minimum) cannot fit even after
+    # Limit-MainMenuBodyRowsToBudget trims it -- the framed banner (6 rows)
+    # and footer (2 rows) alone already consume the entire 8-row budget
+    # (ViewportHeight - 2), leaving zero rows for body content. Simply
+    # reserving Exit + the footer is not sufficient on its own: it still
+    # silently drops every OTHER option. Get-MainMenuEmergencyCompactRows
+    # replaces the framed banner/footer with single-line versions and
+    # flow-packs every "N) Label" as densely as the width allows, so every
+    # option stays visible.
+    # Using -TestCases (Pester's own parameterized-test mechanism) rather
+    # than `foreach ($height in ...) { It ... { ...$height... } }`: a plain
+    # PowerShell foreach-loop variable closed over by an It scriptblock is
+    # NOT visible inside that scriptblock's body when Pester actually runs
+    # it (confirmed by isolated repro -- the value reads as $null/empty at
+    # Run time even though it renders correctly in the It's own title,
+    # which is built separately at Discovery time). -TestCases passes each
+    # case's values in as real bound parameters instead, which does work.
+    It "at the supported 60x<Height> minimum and its immediate boundaries, every option 1-14 is visible, Exit and the footer are present, and nothing scrolls off the viewport" -TestCases @(
+        @{ Height = 9 }, @{ Height = 10 }, @{ Height = 11 }, @{ Height = 12 }
+    ) {
+        param($Height)
+        $screen = Render-MainMenuScreen -Tier (Get-ConsoleLayoutTier -Width 60 -Height $Height -RequiredFullLines 0) -Width 60 -Height $Height
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+
+        $screen.Rows.Count | Should -BeLessOrEqual ([Math]::Max(5, $Height - 2))
+        $allItemNumbers = @((Get-MainMenuItems) | ForEach-Object { $_.Number })
+        foreach ($n in $allItemNumbers) {
+            $output | Should -Match ([regex]::Escape("$n)"))
+        }
+        $output | Should -Match '14\) Exit'
+        $output | Should -Match 'Enter number'
+        $output | Should -Match 'Q=Quit'
+    }
+
+    It "below the documented 60x10 minimum (60x8), the footer and option 14 (Exit) are still never dropped, even though an earlier option's line may not fit" {
+        # 60x8 is below the documented supported floor, so unlike the exact
+        # cases above, this does not require every option to be visible --
+        # only that the two guarantees which must NEVER break (the footer's
+        # Quit control, and Exit specifically) still hold, and that nothing
+        # crashes or silently renders a blank/broken screen.
+        $screen = Render-MainMenuScreen -Tier (Get-ConsoleLayoutTier -Width 60 -Height 8 -RequiredFullLines 0) -Width 60 -Height 8
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+
+        $screen.Rows.Count | Should -BeLessOrEqual ([Math]::Max(5, 8 - 2))
+        $output | Should -Match '14\) Exit'
+        $output | Should -Match 'Enter number'
+        $output | Should -Match 'Q=Quit'
+    }
+
+    It "every flow-packed 'N) Label' token matches Get-MainMenuItems exactly (no drift between the emergency presentation and the real dispatch data)" {
+        $geometry = Get-MainMenuGeometry -Tier 'Compact' -ViewportWidth 60 -ViewportHeight 10
+        $rows = Get-MainMenuFlowPackedItemRows -Width 58 -Geometry $geometry
+        $flatText = ($rows | ForEach-Object { $_.Text }) -join ' '
+
+        foreach ($item in (Get-MainMenuItems)) {
+            $flatText | Should -Match ([regex]::Escape("$($item.Number)) $($item.Label)"))
+        }
+    }
+
+    It "representative wider short-height windows always keep Exit and the footer visible, without scrolling" {
+        foreach ($case in @(
+            @{ Width = 80;  Height = 8 }
+            @{ Width = 100; Height = 8 }
+            @{ Width = 150; Height = 8 }
+            @{ Width = 100; Height = 20 }
+        )) {
+            $tier = Get-ConsoleLayoutTier -Width $case.Width -Height $case.Height -RequiredFullLines 0
+            $screen = Render-MainMenuScreen -Tier $tier -Width $case.Width -Height $case.Height
+            $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+
+            $screen.Rows.Count | Should -BeLessOrEqual ([Math]::Max(5, $case.Height - 2))
+            $output | Should -Match '14\) Exit'
+            $output | Should -Match 'Q=Quit'
+        }
+    }
+
+    It "at a generous height (100x20), every option is visible, not just Exit and the footer" {
+        $tier = Get-ConsoleLayoutTier -Width 100 -Height 20 -RequiredFullLines 0
+        $screen = Render-MainMenuScreen -Tier $tier -Width 100 -Height 20
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+
+        foreach ($n in @((Get-MainMenuItems) | ForEach-Object { $_.Number })) {
+            $output | Should -Match ([regex]::Escape("$n)"))
+        }
+    }
+
+    It "a generously tall Compact-width window (60x30) still uses the normal framed presentation, not the emergency fallback" {
+        # Confirms the emergency mode is gated correctly -- it must not
+        # trigger just because the width is narrow, only when the height
+        # genuinely can't fit every option any other way.
+        $screen = Render-MainMenuScreen -Tier 'Compact' -Width 60 -Height 30
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+
+        $output | Should -Match 'LIBRARY MANAGEMENT'
+        $output | Should -Match 'APPLICATION'
+        $output | Should -Match '14\) Exit'
+    }
+
+    It "every numbered option in the emergency presentation still maps to the same Mode the live switch statement dispatches on" {
+        # Cross-checks against the same source-of-truth used by "Main menu
+        # source-level drift check" elsewhere in this file: the emergency
+        # presentation's numbers come directly from Get-MainMenuItems, the
+        # same data the switch statement's case labels are generated from,
+        # so there is no separate hand-maintained number-to-mode mapping
+        # that could drift.
+        $mainScriptContent = Get-Content -LiteralPath $scriptPath -Raw
+        foreach ($item in (Get-MainMenuItems)) {
+            if ($item.Mode -eq 'Exit') { continue }
+            $mainScriptContent | Should -Match ([regex]::Escape('"{0}"' -f $item.Number) + '\s*\{\s*\$mode\s*=\s*"' + [regex]::Escape($item.Mode) + '"')
+        }
     }
 }
 
@@ -4064,6 +4187,53 @@ Describe "Menu layout debug script" {
         $output | Should -Match 'Selected layout mode\s+:\s+UltraCentered'
         $output | Should -Match 'Requested ultra mode\s+:\s+UltraCentered'
         $output | Should -Match 'Selected layout mode\s+:\s+UltraCentered'
+    }
+
+    # The two tests above invoke the diagnostic via `& $debugScript` from
+    # INSIDE this same Pester process -- that call runs in a child scope of
+    # the current session, which already has every production function
+    # (including Limit-MainMenuBodyRowsToBudget) dot-sourced into it by this
+    # file's own top-level BeforeAll. That let a real regression pass
+    # invisibly: the packaged script itself only loaded a hand-maintained
+    # allowlist of function names and never defined
+    # Limit-MainMenuBodyRowsToBudget (added for the RC3 short-viewport
+    # truncation fix), so running the actual, unmodified .ps1 file as a
+    # user would -- a fresh process with nothing pre-loaded -- crashed with
+    # "the term 'Limit-MainMenuBodyRowsToBudget' is ... not recognized" the
+    # moment -Render exercised the render pipeline. `& $debugScript` here
+    # never caught it because the missing function was already present from
+    # this file's own BeforeAll, not from the diagnostic script itself.
+    # These tests launch a genuinely separate PROCESS instead, so nothing
+    # from this test session's scope can leak in and mask a missing
+    # dependency in the packaged script.
+    It "runs successfully as a genuinely isolated process (not just a child scope) under pwsh, with -Render exercising the full pipeline" {
+        $debugScript = Join-Path $PSScriptRoot '..\scripts\Debug-TPM-MenuLayout.ps1'
+        $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
+        if (-not $pwshCmd) { Set-ItResult -Skipped -Because 'pwsh is not available on this machine'; return }
+
+        $output = & $pwshCmd.Source -NoProfile -NonInteractive -File $debugScript -Width 150 -Height 40 -Render 2>&1 | Out-String
+        $exitCode = $LASTEXITCODE
+
+        $exitCode | Should -Be 0
+        $output | Should -Not -Match 'is not recognized as the name of a cmdlet'
+        $output | Should -Not -Match 'CommandNotFoundException'
+        $output | Should -Match '14\) Exit'
+        $output | Should -Match 'Enter number'
+    }
+
+    It "runs successfully as a genuinely isolated process under real Windows PowerShell 5.1, with -Render exercising the full pipeline" {
+        $debugScript = Join-Path $PSScriptRoot '..\scripts\Debug-TPM-MenuLayout.ps1'
+        $ps51Path = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        if (-not (Test-Path -LiteralPath $ps51Path)) { Set-ItResult -Skipped -Because 'Windows PowerShell 5.1 is not available on this machine'; return }
+
+        $output = & $ps51Path -NoProfile -File $debugScript -Width 150 -Height 40 -Render 2>&1 | Out-String
+        $exitCode = $LASTEXITCODE
+
+        $exitCode | Should -Be 0
+        $output | Should -Not -Match 'is not recognized as the name of a cmdlet'
+        $output | Should -Not -Match 'CommandNotFoundException'
+        $output | Should -Match '14\) Exit'
+        $output | Should -Match 'Enter number'
     }
 }
 
