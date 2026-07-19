@@ -17,21 +17,46 @@ When applicable, Jumpstile project governance is followed in this order:
 3. `ENGINEERING_GOVERNANCE.md` -- the GitHub issue/label governance
    standard (issue taxonomy, label taxonomy, milestone/cross-link/
    acceptance-criteria policy, bug and feature lifecycle).
-4. Repository-specific engineering standards (e.g. `SECURITY.md`,
-   `RELEASE-SAFETY-CHECKLIST.md`, `ARCHITECTURE.md`,
+4. **Engineering Standards** -- portfolio-wide, repository-agnostic
+   standards adopted across every Jumpstile project (e.g.
    `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`, `INVENTORY_STANDARDS.md`,
-   `ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md`).
-5. Task-specific instructions.
+   `ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md`, and, once
+   adopted, `PROJECT_IDENTITY_STANDARD.md` /
+   `TEAM_COORDINATION_STANDARD.md`). These documents govern *how*
+   engineering work is done, independent of which project it's done in.
+5. **Project Standards** -- this repository's own engineering standards
+   (e.g. `SECURITY.md`, `RELEASE-SAFETY-CHECKLIST.md`, `ARCHITECTURE.md`).
+   These apply this project's specific technical decisions and threat
+   model; they operate inside the boundaries tier 4's portfolio standards
+   set, but are not themselves portfolio-wide.
+6. **Project Documentation** -- user- and contributor-facing documentation
+   that is not itself a standard (e.g. `README.md`, the wiki, Quick Start
+   guides, `CONTRIBUTING.md`). Authoritative for what the project
+   currently does and how to use/contribute to it, but does not carry
+   engineering-standard authority over tiers 1-5.
+7. Task-specific instructions.
+
+Tiers 4 and 5 were a single, undifferentiated tier ("repository-specific
+engineering standards") before this document's Codex-reviewed governance
+round; splitting them makes explicit what was previously only implied by
+each standard's own "Status" line (several tier-4 documents already
+described themselves as "the template for every Jumpstile project," which
+is a portfolio-wide claim a project-specific document like `SECURITY.md`
+does not and should not make). When adopting a new standard, place it in
+tier 4 only if it is genuinely intended to be repository-agnostic and
+adopted unchanged (or near-unchanged) across projects; place it in tier 5
+if it encodes this project's own specific decisions, even if structured
+similarly to a tier-4 document.
 
 `PROJECT_IDENTITY_STANDARD.md` (public identity, branding, and attribution
 policy) and `TEAM_COORDINATION_STANDARD.md` (issue-based coordination
 protocol for human and AI contributors) are anticipated future additions to
-this hierarchy, not currently present in this repository. They are
-deliberately omitted from the numbered list above rather than referenced as
-if live -- a governance document should never point at something that
-doesn't exist. If and when either is adopted, it slots into this hierarchy
-immediately after this document, and this list is updated in the same
-change that adds it.
+tier 4, not currently present in this repository. They are deliberately
+omitted from the numbered list above rather than referenced as if live -- a
+governance document should never point at something that doesn't exist. If
+and when either is adopted, it slots into tier 4 alongside the other
+Engineering Standards, and this list is updated in the same change that
+adds it.
 
 If an existing file, issue, PR, release note, wiki page, or other public
 artifact conflicts with a document higher in this list, the higher document
@@ -45,6 +70,29 @@ recommendation, and release is audited against it without needing to be
 asked each time. A believed-necessary change to a standard is proposed
 through the normal governance process (a PR against that document), not
 bypassed in the moment it's inconvenient.
+
+### Legal, regulatory, and safety obligations sit outside and above this hierarchy
+
+The seven-tier hierarchy above resolves conflicts *between* this
+portfolio's own governance documents. It is not the full universe of
+obligations a project must satisfy, and none of its tiers -- including
+tier 4's Engineering Standards, and any artifact one of them requires (a
+Specification Inventory, a System Invariant Inventory, a velocity
+checklist, or any other engineering-scope document) -- may be read as
+permission to exclude, narrow, defer, or deprioritize a legal requirement,
+regulatory requirement, compliance obligation, safety requirement,
+security requirement, or organizational policy that applies to the work.
+Those obligations always take precedence over every tier of this
+hierarchy, in full, regardless of how any tier-4/5 standard scopes its own
+engineering requirements. A Specification Inventory's "Deliberately out of
+scope" section, for example, documents an *engineering* scoping decision
+about what a component itself is responsible for verifying -- it never
+documents a decision to skip a legal, regulatory, safety, or security
+obligation; if such an obligation applies, it applies regardless of what
+any inventory says, and should appear in the inventory (if at all) only as
+a cross-reference to the separate control that actually satisfies it (e.g.
+`SECURITY.md`, a compliance policy document, or an external audit), never
+as a reason the obligation itself was skipped.
 
 ## Long-lived policy does not live in an issue tracker
 

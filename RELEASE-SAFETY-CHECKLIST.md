@@ -283,8 +283,20 @@ the file that happened to be open.
     `BepInExCache\` (auto-downloaded live from GitHub each run, never
     bundled), `README.md`, `QUICKSTART.md`, `SECURITY.md`,
     `LESSONS_LEARNED.md`, `ARCHITECTURE.md`, `RELEASE-SAFETY-CHECKLIST.md`,
-    `CLAUDE.md`, `PSScriptAnalyzerSettings.psd1`, `.github\`,
+    `CLAUDE.md`, `AGENTS.md`, `CONSTITUTION.md`, `ENGINEERING_GOVERNANCE.md`,
+    `CONTRIBUTING.md`, `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`,
+    `INVENTORY_STANDARDS.md`,
+    `ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md`,
+    `PSScriptAnalyzerSettings.psd1`, `.github\`,
     `*.zip`, `*.log`, `*.config.json`.
+    This list must match `AGENTS.md`'s "Release ZIP contents" exclude
+    list exactly. This section is the authoritative source; if the two
+    are ever found to disagree, update `AGENTS.md` to match this section,
+    not the other way around -- a governance-doc list that omits a
+    tracked repository-root `.md` file (as this section previously did
+    for `AGENTS.md`, `CONSTITUTION.md`, `ENGINEERING_GOVERNANCE.md`,
+    `CONTRIBUTING.md`, and the three Engineering Standards documents) is
+    a real packaging-correctness gap, not a formatting nitpick.
 - [ ] Validate the local ZIP structure before creating a release:
   ```powershell
   .\Tests\Test-ReleasePackage.ps1 -ZipPath "TeknoParrot Manager vX.Y RCn.zip"
@@ -578,6 +590,12 @@ to reduce.
   quality for short-term speed" principles, a proposed velocity gain that
   requires this is not a velocity improvement under that standard and
   does not apply here.
+
+Any item above may be marked N/A only under
+`ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md`'s "Checklist N/A
+handling" rule -- a one-line reason recorded inline, proposed by the Lead
+Engineer role and subject to Independent Reviewer challenge, never a
+silently unchecked box.
 
 ---
 

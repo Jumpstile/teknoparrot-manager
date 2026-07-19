@@ -96,9 +96,13 @@ reason to ever encounter.
 
 A **Specification Inventory** (see `INVENTORY_STANDARDS.md`) is the
 concrete artifact that makes "the applicable family" a checkable list
-instead of a judgment call repeated from memory every round. Building one
-before implementing is strongly recommended whenever a finding's
-applicable family is non-trivial to enumerate from memory.
+instead of a judgment call repeated from memory every round. Building or
+updating one before implementing is **REQUIRED** whenever this section
+applies at all -- i.e. whenever a finding traces to a governing
+specification, full stop, not only when the applicable family happens to
+be "non-trivial to enumerate from memory." See `INVENTORY_STANDARDS.md`'s
+"Requirement levels" section for the authoritative REQUIRED/RECOMMENDED/
+OPTIONAL/NOT APPLICABLE rule this document defers to.
 
 ## 3. Mandatory governing-spec review
 
@@ -197,9 +201,10 @@ submission:
 2. The governing specification's relevant sections have been read or
    re-read for this round (Section 3).
 3. Every rule in the identified applicable family is implemented, not
-   only the originally reported one (Section 2) -- ideally checked
-   against a Specification Inventory (`INVENTORY_STANDARDS.md`) rather
-   than recalled from memory.
+   only the originally reported one (Section 2) -- checked against a
+   Specification Inventory (`INVENTORY_STANDARDS.md`, REQUIRED whenever
+   this standard applies -- see that document's "Requirement levels"),
+   not recalled from memory.
 4. A deliberate self-adversarial review was performed against the
    specification, and everything it found was fixed in this same round
    (Section 4).
@@ -211,9 +216,9 @@ submission:
 7. Prior layered defenses, tests, and behavior outside the current
    finding's scope are confirmed unchanged -- problem-class resolution
    work must not weaken what was already correct. Where the component
-   maintains internal invariants beyond the external specification, a
-   System Invariant Inventory (`INVENTORY_STANDARDS.md`) confirms those
-   are also unchanged.
+   meets a System Invariant Inventory REQUIRED trigger
+   (`INVENTORY_STANDARDS.md`'s "Requirement levels"), that inventory
+   confirms those invariants are also unchanged.
 8. Verification evidence (the actual commands run and their results --
    test totals, static analysis, linting, or whatever the project's
    standard verification set is) is reported alongside the submission,
@@ -299,9 +304,12 @@ angles: velocity and correctness.
 ## Adopting this standard in a new Jumpstile project
 
 1. Copy this file into the new project's repository root.
-2. Add it to that project's `CONSTITUTION.md` governance-hierarchy list
-   (the "Repository-specific engineering standards" tier, alongside
-   `SECURITY.md` / `RELEASE-SAFETY-CHECKLIST.md` / `ARCHITECTURE.md`).
+2. Add it to that project's `CONSTITUTION.md` governance-hierarchy list,
+   in the **Engineering Standards** tier (portfolio-wide, repository-
+   agnostic standards) -- not the Project Standards tier `SECURITY.md` /
+   `RELEASE-SAFETY-CHECKLIST.md` / `ARCHITECTURE.md` occupy, since this
+   document (unlike those) is meant to be adopted unchanged across
+   projects.
 3. Reference it from that project's `RELEASE-SAFETY-CHECKLIST.md` as a
    standing item to check on any PR that responds to a specification-
    governed review finding.

@@ -133,14 +133,17 @@ ZIP name: `TeknoParrot Manager v1.0 RC2.1.zip` (always versioned).
 
 **Exclude:** `ReShade\` (not redistributable; user obtains from reshade.me),
 `dgVoodoo2\` (user provides), `FFBPlugin\` and `BepInExCache\` (live-downloaded
-each run, never bundled), `AGENTS.md`, `README.md`, `QUICKSTART.md`,
+each run, never bundled), `AGENTS.md`, `CLAUDE.md`, `README.md`, `QUICKSTART.md`,
 `ARCHITECTURE.md`, `LESSONS_LEARNED.md`, `RELEASE-SAFETY-CHECKLIST.md`,
-`SECURITY.md`, `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`,
+`SECURITY.md`, `CONSTITUTION.md`, `ENGINEERING_GOVERNANCE.md`,
+`CONTRIBUTING.md`, `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`,
 `INVENTORY_STANDARDS.md`, `ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md`,
 `PSScriptAnalyzerSettings.psd1`, `.github\`,
 `*.zip`, `*.log`, `*.config.json`.
 
-Full mechanics: RELEASE-SAFETY-CHECKLIST.md section 4.
+Full mechanics and the authoritative version of this list:
+RELEASE-SAFETY-CHECKLIST.md section 4 -- if this list and that section
+are ever found to disagree, section 4 is correct and this list is stale.
 
 ---
 

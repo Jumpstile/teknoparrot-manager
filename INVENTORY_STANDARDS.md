@@ -53,33 +53,134 @@ handle locked, or still let a validation failure be silently reported as
 success). Neither inventory substitutes for the other; a Review Ready
 submission for a component with both kinds of requirement needs both.
 
-## When each is required
+## Requirement levels
 
-- **Specification Inventory**: required whenever
-  `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md` applies -- i.e., whenever a
-  review finding, or the area of work under review, traces to a governing
-  external specification. Build (or update) the inventory before
-  implementing further fixes, not after.
-- **System Invariant Inventory**: required for any component whose
-  correctness depends on internal guarantees that are not fully captured
-  by an external specification (or that has no external specification at
-  all, e.g. an internal state machine, a file-safety guarantee, a scoring
-  computation). Build one whenever a component reaches the point where
-  "does this still work correctly" can no longer be answered by rereading
-  the code once -- typically once a component has accumulated several
-  rounds of fixes, or before a significant refactor.
-- Many components need both, maintained side by side (see the worked
-  example below).
+This document, `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`, and every other
+document that references either inventory type use exactly these four
+terms, consistently, and no others, to describe whether an inventory (or
+an item within one) applies:
+
+- **REQUIRED** -- the inventory (or item) must exist and be current before
+  the work it governs is Review Ready (`SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`'s
+  Definition of Review Ready) or before a release that touches the
+  governed component (`RELEASE-SAFETY-CHECKLIST.md`). Absence is a gap,
+  not a judgment call.
+- **RECOMMENDED** -- strongly encouraged, produces real velocity and
+  quality benefit (see "How they reduce review cycles, risk, and improve
+  velocity" below), but its absence does not by itself block Review Ready
+  or a release. An Independent Reviewer may still ask for one if its
+  absence makes the review meaningfully harder.
+- **OPTIONAL** -- may be built if the implementer or reviewer judges it
+  useful; absence carries no review or release consequence and requires
+  no justification.
+- **NOT APPLICABLE** -- the trigger conditions for this inventory type
+  genuinely do not apply to this component. Recorded, not silently
+  assumed (see "Ownership and lifecycle" below for who records this and
+  how).
+
+Earlier drafts of this standard and `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`
+used softer, inconsistent language in places ("strongly recommended,"
+"ideally") for cases that are actually REQUIRED under the rule below. That
+inconsistency is resolved: wherever this document says REQUIRED, treat
+every softer phrasing elsewhere as an error in that document to be
+corrected on sight, not as a genuine exception.
+
+## When each requirement level applies
+
+### Specification Inventory
+
+**REQUIRED** whenever `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md` applies at
+all -- i.e., whenever a review finding, or the area of work under review,
+traces to a governing external specification (a file format, a protocol,
+a language grammar, an API contract, a regulatory rule). This is the
+*entire* trigger; there is no additional "is it worth it" judgment call
+once that condition is met. Build (or update) the inventory before
+implementing further fixes, not after. (`SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`
+Section 2's "strongly recommended... whenever non-trivial to enumerate
+from memory" and Definition of Review Ready item 3's "ideally checked" are
+both superseded by this REQUIRED rule -- see the note above.)
+
+There is no NOT APPLICABLE case for a Specification Inventory once
+`SPECIFICATION_DRIVEN_REVIEW_STANDARD.md` applies -- if the work is
+specification-governed at all, an inventory is required. Work that is not
+specification-governed (no external file format/protocol/grammar/contract
+involved) is simply outside this inventory type's scope entirely, which is
+a different statement than "not applicable": `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`
+itself doesn't apply, so this inventory type's requirement question never
+arises.
+
+### System Invariant Inventory
+
+**REQUIRED** when a component meets at least one of the following
+objective triggers:
+
+- It implements or governs **workflow orchestration** -- a sequence of
+  steps with an outcome that depends on their order, completeness, or
+  interdependency (e.g. a multi-phase setup process, a pipeline).
+- It implements or governs a **certification, gating, or scoring system**
+  -- any component whose output is a pass/fail or scored decision other
+  code or a human relies on as evidence of correctness.
+- It implements **transaction processing or a commit protocol** -- any
+  operation with an explicit "did this succeed as a whole, or not at all"
+  semantic (staged writes, atomic promotion, rollback).
+- It implements **synchronization or concurrency coordination** -- shared
+  mutable state accessed from more than one execution context, a lock, a
+  queue, or an ordering guarantee between concurrent operations.
+- It implements a **state machine** with more than two meaningfully
+  distinct states (a simple boolean flag does not trigger this on its
+  own).
+- It implements **replication or distributed coordination** -- state kept
+  consistent across more than one process, machine, or storage location.
+- It has already been the subject of **two or more independent review
+  rounds that each found a genuinely new defect class** (not a repeat or
+  variant of a previously-found class) -- this is the objective,
+  retrospective trigger for "does this still work correctly can no longer
+  be answered by rereading the code once," replacing the earlier
+  subjective "typically once a component has accumulated several rounds
+  of fixes" wording.
+- It is about to undergo a **significant refactor that changes its
+  internal state or object-ownership model** -- build (or update) the
+  inventory before the refactor, so the refactor has a checkable list of
+  properties to preserve.
+
+**RECOMMENDED** when a component has non-trivial internal state or
+multi-step behavior but meets none of the REQUIRED triggers above -- e.g.
+a moderately complex validator with several internal steps but no
+orchestration, transaction, or concurrency dimension.
+
+**NOT APPLICABLE**, explicit examples:
+
+- A pure function -- same input always produces the same output, no side
+  effects, no persisted state, no ordering dependency (e.g. a string
+  formatter, a unit converter, a simple predicate).
+- A component whose entire correctness surface is already covered by a
+  Specification Inventory, with no internal guarantee beyond conformance
+  to that external specification (rare in practice -- most real components
+  have at least one internal guarantee beyond the spec, such as "never
+  leaves a partially-written file behind," so this should be treated as
+  an exceptional case requiring explicit justification, not a default
+  assumption).
+- A read-only rendering/reporting function whose only job is to format
+  already-validated, already-decided data for display, with no decision
+  logic of its own (e.g. a Markdown report line generator that only
+  interpolates fields it did not compute).
+- Short-lived glue/wiring code with no state and no branching logic worth
+  independently verifying (e.g. a one-line parameter pass-through).
+
+Many components need both a Specification Inventory and a System
+Invariant Inventory, maintained side by side (see the worked example
+below).
 
 ## How they integrate into Review Ready
 
 `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`'s Definition of Review Ready,
-item 3, requires every rule in the applicable family to be implemented
-"ideally checked against a Specification Inventory rather than recalled
-from memory." Item 7 requires prior behavior to be confirmed unchanged,
-"where the component maintains internal invariants beyond the external
-specification, a System Invariant Inventory confirms those are also
-unchanged." Concretely:
+item 3, requires every rule in the applicable family to be implemented,
+"checked against a Specification Inventory... not recalled from memory"
+-- REQUIRED, per this document's "Requirement levels" above, not optional
+or "ideal." Item 7 requires prior behavior to be confirmed unchanged;
+"where the component meets a System Invariant Inventory REQUIRED
+trigger... that inventory confirms those invariants are also unchanged."
+Concretely:
 
 1. Build or update the relevant inventory (or inventories) before
    implementing.
@@ -152,14 +253,18 @@ answers, for a single component and a single governing specification:
    "structural success alone never produces a passing result; a
    downstream decode/format layer still has to succeed too").
 
-### Worked example
+### Worked example (TeknoParrot Manager, illustrative)
 
-`docs/PNG-EVIDENCE-VALIDATOR-SPECIFICATION-INVENTORY.md` in this
-repository is a real instance of this pattern, written for
-`Test-TPMPngStructure` (the certification screenshot evidence validator)
-against the W3C PNG specification. It is referenced here as the concrete
-template new inventories should follow, not duplicated -- read it
-directly for the worked example.
+`docs/PNG-EVIDENCE-VALIDATOR-SPECIFICATION-INVENTORY.md`, in the
+`Jumpstile/teknoparrot-manager` repository specifically, is a real
+instance of this pattern, written for `Test-TPMPngStructure` (that
+project's certification screenshot evidence validator) against the W3C
+PNG specification. It is referenced here as a concrete template new
+inventories can follow, not duplicated into this document -- read it
+directly (in that repository) for the worked example. A project adopting
+this standard will not have this specific file; build its own worked
+example under its own `docs/` (or equivalent) as its first
+specification-governed component reaches this point.
 
 ---
 
@@ -208,7 +313,9 @@ this component's behavior, independent of any external specification?"
 
 ## Status marking (both inventory types)
 
-Every item in either inventory type is marked one of:
+Every *item* within an inventory (not the inventory's own REQUIRED/
+RECOMMENDED/OPTIONAL/NOT APPLICABLE requirement level -- see "Requirement
+levels" above, a separate axis) is marked one of:
 
 - **Implemented** -- enforced/verified now, with a pointer to where
   (function name, test name).
@@ -216,10 +323,86 @@ Every item in either inventory type is marked one of:
   in-scope item is a to-do for the current round, per
   `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md` Section 2.
 - **Intentionally out of scope** -- a documented, reasoned decision per
-  `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md` Section 6, not silence.
+  `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md` Section 6, not silence. This
+  marks an *engineering* scoping decision only -- see "Inventories define
+  engineering scope only" below for what this status must never be used
+  to represent.
 
 A submission is not Review Ready while any in-scope item is marked
 `Missing`.
+
+### Inventories define engineering scope only
+
+An inventory -- either type, and every status an item within one can
+carry, including `Intentionally out of scope` -- defines what a component
+is engineered to verify. It is never authority to exclude, narrow, defer,
+or deprioritize a legal requirement, regulatory requirement, compliance
+obligation, safety requirement, security requirement, or organizational
+policy. Those always take precedence over anything an inventory says,
+per `CONSTITUTION.md`'s "Legal, regulatory, and safety obligations sit
+outside and above this hierarchy." If such an obligation applies to a
+component, it applies in full regardless of whether the inventory
+enumerates it; where it's useful to note the obligation in the inventory
+at all, note it as a cross-reference to the control that actually
+satisfies it (`SECURITY.md`, a compliance policy, an external audit --
+whatever governs it in this project), never mark it `Intentionally out of
+scope` as if the inventory itself were the authority that decided to skip
+it.
+
+---
+
+## Ownership and lifecycle
+
+Inventories are living engineering artifacts, not one-time deliverables
+filed away once a finding closes.
+
+- **Who creates one.** The Implementer, at the point a component first
+  meets a REQUIRED or RECOMMENDED trigger (see "When each requirement
+  level applies" above) -- typically while resolving the review finding
+  that revealed the need for one, per `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`
+  Section 2.
+- **Who updates one.** Whoever next touches the governed component in a
+  way that could change the inventory's accuracy -- a new rule from an
+  updated external specification, a newly discovered internal invariant,
+  a changed component boundary, or a refactor. Updating the inventory is
+  part of that round's work, in the same PR, not a follow-up task.
+  Letting an inventory go stale while continuing to change the component
+  it describes is equivalent to not having built one.
+- **When it must be reviewed.** At minimum: (1) whenever the Independent
+  Reviewer audits a submission that touches the governed component
+  (`SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`'s Responsibilities section);
+  (2) during the Documentation Sweep and Release Integrity Audit for any
+  release that includes a change to the governed component
+  (`RELEASE-SAFETY-CHECKLIST.md` sections 3 and 5, where adopted); (3)
+  before a significant refactor of the governed component begins.
+- **What events require revision**, explicitly: the governing external
+  specification is updated to a new version; a review finds a defect
+  class the inventory did not anticipate; the component's responsibility
+  or boundary with an adjacent component changes; a new internal
+  guarantee is deliberately added or removed; the component is
+  deprecated or retired.
+- **Relationship to PR review.** The inventory (or a link/reference to
+  it) is Review Ready evidence, audited by the Independent Reviewer as
+  part of the same review pass as the code change -- not a separate
+  approval gate, and not something the Independent Reviewer takes on
+  faith from the implementer's summary of it.
+- **Relationship to release certification.** Per `CONSTITUTION.md`'s
+  evidence hierarchy, a current, accurate inventory is release *evidence*
+  -- it demonstrates the governed component was verified against a
+  checkable list -- never release *authorization*. Where a project's
+  release process includes a Documentation Sweep or Release Integrity
+  Audit (`RELEASE-SAFETY-CHECKLIST.md` sections 3 and 5 in this
+  repository), confirming each REQUIRED inventory is current is part of
+  that audit.
+- **Archival.** An inventory for a retired or removed component is not
+  deleted -- it is moved to an archive location (e.g. `docs/retired/`, or
+  this project's existing archival convention) with a note recording why
+  the component was retired and when. This preserves the institutional
+  memory of what was verified and why, consistent with `CONSTITUTION.md`'s
+  "Historical evidence in investigations" principle -- a deleted inventory
+  looks identical to one that was never built, to a future engineer
+  trying to understand what used to be true about a now-removed
+  component.
 
 ---
 
@@ -230,12 +413,15 @@ Ownership of building, maintaining, and auditing inventories follows
 section (Implementer / Independent Reviewer / Chief Architect / Release
 Manager) -- this document does not define a separate set of roles. The
 Implementer builds and updates the inventory as part of problem-class
-resolution; the Independent Reviewer audits it for completeness against
-the actual governing specification or actual system behavior, not just
-against the implementer's own summary; the Chief Architect judges whether
-out-of-scope markings are architecturally sound; the Release Manager's
-role is unchanged (inventory completeness is release evidence, not
-release authorization).
+resolution (see "Ownership and lifecycle" above for the concrete
+create/update/review triggers); the Independent Reviewer audits it for
+completeness against the actual governing specification or actual system
+behavior, not just against the implementer's own summary; the Chief
+Architect judges whether out-of-scope markings are architecturally sound
+(and, per "Inventories define engineering scope only" above, confirms no
+out-of-scope marking is being used to sidestep a legal/regulatory/safety/
+security/policy obligation); the Release Manager's role is unchanged
+(inventory completeness is release evidence, not release authorization).
 
 ---
 

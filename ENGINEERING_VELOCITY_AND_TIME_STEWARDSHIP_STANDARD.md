@@ -167,6 +167,48 @@ problem-class batching as a velocity principle, not only a quality one.
 
 ---
 
+## Checklist N/A handling
+
+Any checklist built from this standard's principles (e.g.
+`RELEASE-SAFETY-CHECKLIST.md` section 11 in this repository, or an
+equivalent in a project that adopts this standard) will have items that
+genuinely do not apply to a given round or release. This section defines
+when N/A is a legitimate marking, who determines it, and what must be
+recorded -- the same discipline `INVENTORY_STANDARDS.md` requires for its
+own `Intentionally out of scope` item status, applied to velocity
+checklists specifically.
+
+**When an item may legitimately be marked N/A.** Only when the item's
+own triggering condition genuinely did not occur this round -- for
+example, "independent work streams proceeded in parallel where safe"
+is N/A for a round where no genuinely independent second work stream
+existed at all (not merely one nobody happened to start), and "a
+repeated manual step was flagged as an automation candidate" is N/A for
+a round where no step was performed identically across multiple recent
+cycles. N/A is never a legitimate marking for "we chose not to do this
+because it would have taken longer" -- that is exactly the tradeoff this
+standard's "never trade engineering quality for short-term speed"
+principle forbids marking as a routine skip.
+
+**Who determines N/A.** The person or role executing the checklist (the
+Lead Engineer role, in this repository's `RELEASE-SAFETY-CHECKLIST.md`
+AI-workflow mapping) proposes the N/A marking with its one-line reason at
+the time the checklist is completed. The Independent Reviewer may
+challenge any N/A marking during review the same way they would challenge
+a `Missing` inventory item marked `Intentionally out of scope` -- an N/A
+that doesn't survive that challenge is not N/A, it's a skipped item.
+
+**Documentation expectations.** An N/A marking is never a silently
+unchecked or skipped box. It carries a one-line reason inline, at the
+point of the checklist item itself (e.g. "N/A -- no second independent
+work stream existed this round"), the same evidentiary bar
+`INVENTORY_STANDARDS.md`'s Status marking section sets for
+`Intentionally out of scope`. A checklist with unexplained skipped items
+is not distinguishable, to a later auditor, from one where the work was
+simply never done.
+
+---
+
 ## Relationship to existing governance
 
 This standard does not introduce any new authority, override any
