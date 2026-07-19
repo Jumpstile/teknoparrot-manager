@@ -953,15 +953,133 @@ Describe "New-CertificationScorecard requested/effective root reporting (issue #
         $restoreItem.Passed | Should -Be $true
     }
 
-    It "marks config restoration explicitly not applicable (not silently passing) for a smoke-mode run" {
+    # Review round 4: smoke mode previously reported this item as
+    # Passed = $true, which the Markdown renderer then printed as
+    # "[PASS] ... not applicable" -- not-applicable is not the same claim
+    # as passed. The scorecard must carry an explicit tri-state
+    # (Pass/Fail/NotApplicable) so a gate that never ran can never be read
+    # as evidence of a pass, in either the structured object or the
+    # rendered Markdown, and N/A items must be excluded from scoring in
+    # both directions without forcing certification failure.
+    It "stores the smoke-mode restoration item as Status = 'NotApplicable', not Passed = \$true" {
         $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $true
+
+        $result = New-CertificationScorecard -Results $fake
+
+        $restoreItem = $result.Items | Where-Object { $_.Area -eq 'Unattended TPM config restoration' }
+        $restoreItem.Status | Should -Be 'NotApplicable'
+        $restoreItem.Passed | Should -Not -Be $true
+        $restoreItem.Details | Should -Match 'not applicable in smoke mode'
+    }
+
+    It "renders the smoke-mode restoration item as [N/A] in the Markdown gate list, never [PASS]" {
+        $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $true
+        $result = New-CertificationScorecard -Results $fake
+        $restoreItem = $result.Items | Where-Object { $_.Area -eq 'Unattended TPM config restoration' }
+
+        # Same mark-selection logic used by the harness's own Markdown
+        # renderer (Add-CertificationReport's "## Gates" loop) -- exercised
+        # directly here since that loop is inline top-level script code,
+        # not its own function.
+        $mark = if ($restoreItem.PSObject.Properties.Name -contains 'Status' -and $restoreItem.Status -eq 'NotApplicable') {
+            'N/A'
+        } elseif ($restoreItem.Passed) {
+            'PASS'
+        } else {
+            'FAIL'
+        }
+
+        $mark | Should -Be 'N/A'
+        $mark | Should -Not -Be 'PASS'
+    }
+
+    It "agrees between the structured scorecard and the Markdown mark for every item, in both smoke and non-smoke fixtures" {
+        foreach ($smoke in @($true, $false)) {
+            $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $smoke
+            if (-not $smoke) {
+                $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
+                $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
+                $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true; Details = 'config file restored to its pre-run state' }
+            }
+            $result = New-CertificationScorecard -Results $fake
+
+            foreach ($item in $result.Items) {
+                $mark = if ($item.PSObject.Properties.Name -contains 'Status' -and $item.Status -eq 'NotApplicable') {
+                    'N/A'
+                } elseif ($item.Passed) {
+                    'PASS'
+                } else {
+                    'FAIL'
+                }
+                if ($item.Area -eq 'Unattended TPM config restoration' -and $smoke) {
+                    $mark | Should -Be 'N/A'
+                } else {
+                    $mark | Should -BeIn @('PASS', 'FAIL')
+                }
+            }
+        }
+    }
+
+    It "excludes the N/A restoration item from both sides of the score (does not increase or decrease it)" {
+        $smokeFake = New-FakeResults -Pcsx2Present $true -SmokeMode $true
+        $smokeResult = New-CertificationScorecard -Results $smokeFake
+
+        # 11 score items exist in total (10 applicable + the 1 N/A
+        # restoration item in smoke mode); Total must reflect only the 10
+        # applicable ones -- if the N/A item were still counted (as it was
+        # before this fix, via Passed = $true), Total would be 11 instead.
+        $smokeResult.Items.Count | Should -Be 11
+        $smokeResult.Total | Should -Be 10
+
+        # Every other score item in the smoke-mode fixture passes, so with
+        # the restoration item correctly excluded (not counted as either
+        # passed or total), Passed must equal Total.
+        $smokeResult.Passed | Should -Be $smokeResult.Total
+        $smokeResult.Passed | Should -Be 10
+    }
+
+    It "still certifies (CERTIFIED) for a smoke-mode run -- the N/A item does not force NOT CERTIFIED" {
+        $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $true
+        $result = New-CertificationScorecard -Results $fake
+        $result.Overall | Should -Be 'CERTIFIED'
+    }
+
+    It "an applicable PASS for the restoration item still counts normally toward CERTIFIED" {
+        $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
+        $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true; Details = 'config file restored to its pre-run state' }
 
         $result = New-CertificationScorecard -Results $fake
 
         $result.Overall | Should -Be 'CERTIFIED'
         $restoreItem = $result.Items | Where-Object { $_.Area -eq 'Unattended TPM config restoration' }
+        $restoreItem.Status | Should -Be 'Pass'
         $restoreItem.Passed | Should -Be $true
-        $restoreItem.Details | Should -Match 'not applicable -- smoke mode'
+    }
+
+    It "an applicable FAIL for the restoration item still forces NOT CERTIFIED" {
+        $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
+        $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $false; Details = 'restore threw: Access to the path is denied' }
+
+        $result = New-CertificationScorecard -Results $fake
+
+        $result.Overall | Should -Be 'NOT CERTIFIED'
+        $restoreItem = $result.Items | Where-Object { $_.Area -eq 'Unattended TPM config restoration' }
+        $restoreItem.Status | Should -Be 'Fail'
+    }
+
+    It "leaves every other score item's PASS/FAIL rendering and scoring behavior unaffected by the new Status field" {
+        $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $true
+        $result = New-CertificationScorecard -Results $fake
+
+        $otherItems = $result.Items | Where-Object { $_.Area -ne 'Unattended TPM config restoration' }
+        foreach ($item in $otherItems) {
+            $item.PSObject.Properties.Name | Should -Not -Contain 'Status'
+            $item.Passed | Should -Be $true
+        }
     }
 }
 

@@ -642,12 +642,28 @@ function New-CertificationScorecard {
     # runs), so it is explicitly not applicable there, never silently
     # "passing" by coincidence of an absent key.
     $restoreDetails = if ($Results.SmokeMode) {
-        'not applicable -- smoke mode (no unattended TPM run, nothing to restore)'
+        'not applicable in smoke mode -- no unattended TPM run, nothing to restore'
     } else {
         $restoreCheck = @($Results.Checks) | Where-Object { $_.Name -eq 'Unattended TPM config restoration' } | Select-Object -Last 1
         if ($restoreCheck) { $restoreCheck.Details } else { 'no restoration check recorded' }
     }
-    $restorePassed = if ($Results.SmokeMode) { $true } else { [bool]$checkMap['Unattended TPM config restoration'] }
+    # Issue #146 review round 4: smoke mode previously reported this item as
+    # Passed = $true, which the Markdown renderer below then printed as
+    # "[PASS] ... not applicable" -- not-applicable is not the same claim as
+    # passed, and collapsing the two let a gate that never actually ran read
+    # as evidence the way a real pass does. $restoreStatus is the single
+    # source of truth for this item: 'Pass' / 'Fail' / 'NotApplicable'. Only
+    # this item carries a Status property -- every other score item is
+    # untouched and keeps deriving PASS/FAIL from Passed alone, both in the
+    # scoring loop and the Markdown renderer below.
+    $restorePassedRaw = [bool]$checkMap['Unattended TPM config restoration']
+    $restoreStatus = if ($Results.SmokeMode) { 'NotApplicable' } elseif ($restorePassedRaw) { 'Pass' } else { 'Fail' }
+    # Deliberately $null, not $true, in smoke mode -- an N/A item must never
+    # be representable as "Passed = $true" even internally, since any future
+    # code path that reads .Passed without also checking .Status (as the old
+    # scoring loop did) would otherwise silently miscount it as evidence of a
+    # pass.
+    $restorePassed = if ($Results.SmokeMode) { $null } else { $restorePassedRaw }
 
     $scoreItems = @(
         [pscustomobject]@{Area='Repository'; Passed=($checkMap['Repository available'] -and $checkMap['Repository clean']); Details=$Results.GitStatus},
@@ -660,11 +676,18 @@ function New-CertificationScorecard {
         [pscustomobject]@{Area='pcsx2x6 crosshair path (issue #79)'; Passed=[bool]$checkMap['pcsx2x6 crosshair path (issue #79)']; Details=$pcsx2x6Details},
         [pscustomobject]@{Area='Behavioral Certification (Virtual Beta Tester)'; Passed=($Results.VirtualBetaTester -and $Results.VirtualBetaTester.Total -gt 0 -and $Results.VirtualBetaTester.Failed -eq 0); Details=$vbtDetails},
         [pscustomobject]@{Area='Unattended TPM root binding'; Passed=$unattendedRootPassed; Details=$unattendedRootDetails},
-        [pscustomobject]@{Area='Unattended TPM config restoration'; Passed=$restorePassed; Details=$restoreDetails}
+        [pscustomobject]@{Area='Unattended TPM config restoration'; Passed=$restorePassed; Status=$restoreStatus; Details=$restoreDetails}
     )
 
-    $passedCount = @($scoreItems | Where-Object { $_.Passed }).Count
-    $totalCount = @($scoreItems).Count
+    # Issue #146 review round 4: N/A items (currently only the restoration
+    # item in smoke mode) are excluded from both sides of the score --
+    # they must not increase or decrease it, and must never by themselves
+    # force NOT CERTIFIED. Items without a Status property (every other
+    # score item) are unaffected -- this filter only ever excludes an item
+    # that explicitly opted in with Status = 'NotApplicable'.
+    $applicableItems = @($scoreItems | Where-Object { -not ($_.PSObject.Properties.Name -contains 'Status' -and $_.Status -eq 'NotApplicable') })
+    $passedCount = @($applicableItems | Where-Object { $_.Passed }).Count
+    $totalCount = @($applicableItems).Count
     $overall = if ($passedCount -eq $totalCount) { 'CERTIFIED' } else { 'NOT CERTIFIED' }
 
     [pscustomobject]@{
@@ -1413,7 +1436,18 @@ finally {
     Add-CertificationReport ""
     Add-CertificationReport "## Gates"
     foreach ($item in $certification.Items) {
-        $mark = if ($item.Passed) { 'PASS' } else { 'FAIL' }
+        # Issue #146 review round 4: an item explicitly marked
+        # Status = 'NotApplicable' must render as [N/A], never [PASS] --
+        # items without a Status property (everything except the
+        # restoration item) fall through to the original Passed-based
+        # PASS/FAIL rendering, unchanged.
+        if ($item.PSObject.Properties.Name -contains 'Status' -and $item.Status -eq 'NotApplicable') {
+            $mark = 'N/A'
+        } elseif ($item.Passed) {
+            $mark = 'PASS'
+        } else {
+            $mark = 'FAIL'
+        }
         Add-CertificationReport ("- [{0}] {1}: {2}" -f $mark, $item.Area, $item.Details)
     }
     Add-CertificationReport ""
