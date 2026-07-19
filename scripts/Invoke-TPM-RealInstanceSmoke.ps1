@@ -702,15 +702,39 @@ function New-TPMScreenshotReservedPath {
     }
 }
 
-# Issue #151 review round 1 (finding #5): a returned path is not proof of
-# a real screenshot -- verifies the file actually exists, is non-empty,
-# decodes as a valid image, and has positive dimensions. Reads the file's
-# bytes into memory and constructs the validation Image from that byte
-# array (System.Drawing.Image.FromStream), never Image.FromFile -- the
-# latter keeps an open handle on the source file tied to the Image's
-# lifetime even after dimensions are read, which would leave the just-
-# captured screenshot locked; validating from an in-memory copy guarantees
-# no file lock remains once this function returns.
+# Issue #151 review round 2 (the one remaining finding from round 1's
+# validation work): "successfully constructed an Image object" was not
+# strong enough proof of a real, complete PNG. GDI+ detects actual image
+# format from content, not the file extension, so JPEG bytes saved with a
+# .png name previously decoded without error and passed as 'Captured'.
+# GDI+ can also decode a materially truncated PNG far enough to report
+# valid-looking dimensions before ever touching the (incomplete) pixel
+# data, since Image.FromStream does not eagerly decode scanlines. Neither
+# case is real evidence, so validation now layers five independent checks
+# before any of them can report success -- filename, format guess, and
+# "it decoded to *something*" are each individually insufficient, so none
+# of them are relied on alone:
+#   1. file exists / is non-empty (unchanged from round 1)
+#   2. the file's first 8 bytes are the exact PNG signature (magic bytes)
+#      -- rejects non-PNG content outright, before any decoder sees it
+#   3. the chunk immediately after the signature is IHDR, and the file's
+#      final chunk is IEND -- the two structural markers every complete,
+#      spec-conformant PNG must have; a truncated file is missing IEND
+#      even when enough of the header/IDAT survived for a decoder to
+#      still produce a plausible-looking partial image
+#   4. GDI+ decodes it AND reports RawFormat = Png specifically (not just
+#      "some image") -- this is what actually catches a renamed JPEG,
+#      since GDI+ would decode it successfully but report RawFormat = Jpeg
+#   5. LockBits over the full frame forces GDI+ to materialize every
+#      scanline right now rather than lazily on first pixel access --
+#      throws on incomplete/corrupt compressed data that construction
+#      alone did not touch
+# Reads the file's bytes into memory and constructs the validation Image
+# from that byte array (System.Drawing.Image.FromStream), never
+# Image.FromFile -- the latter keeps an open handle on the source file
+# tied to the Image's lifetime even after pixel data is read, which would
+# leave the just-captured screenshot locked; validating from an in-memory
+# copy guarantees no file lock remains once this function returns.
 function Test-TPMScreenshotFileValid {
     param([string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
@@ -720,6 +744,33 @@ function Test-TPMScreenshotFileValid {
     if ($bytes.Length -eq 0) {
         return [pscustomobject]@{ Valid = $false; Reason = 'file is empty (zero length)' }
     }
+
+    $pngSignature = [byte[]](0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+    if ($bytes.Length -lt 8) {
+        return [pscustomobject]@{ Valid = $false; Reason = 'file is too short to contain a PNG signature' }
+    }
+    for ($i = 0; $i -lt 8; $i++) {
+        if ($bytes[$i] -ne $pngSignature[$i]) {
+            return [pscustomobject]@{ Valid = $false; Reason = 'file does not start with the PNG signature (magic bytes) -- not a real PNG regardless of its .png extension' }
+        }
+    }
+
+    if ($bytes.Length -lt 16 -or ([System.Text.Encoding]::ASCII.GetString($bytes, 12, 4)) -ne 'IHDR') {
+        return [pscustomobject]@{ Valid = $false; Reason = 'PNG is missing its required IHDR chunk immediately after the signature' }
+    }
+    # IEND is always a fixed 12-byte trailer: 4-byte length (always 0, since
+    # IEND carries no data) + 4-byte type "IEND" + 4-byte CRC. Checking the
+    # length field too, not just the "IEND" text, catches a truncated file
+    # that happens to still end in bytes that spell IEND by coincidence.
+    if ($bytes.Length -lt 12) {
+        return [pscustomobject]@{ Valid = $false; Reason = 'PNG is missing its required IEND trailer -- likely truncated' }
+    }
+    $iendType = [System.Text.Encoding]::ASCII.GetString($bytes, $bytes.Length - 8, 4)
+    $iendLength = ([int]$bytes[$bytes.Length - 12] -shl 24) -bor ([int]$bytes[$bytes.Length - 11] -shl 16) -bor ([int]$bytes[$bytes.Length - 10] -shl 8) -bor [int]$bytes[$bytes.Length - 9]
+    if ($iendType -ne 'IEND' -or $iendLength -ne 0) {
+        return [pscustomobject]@{ Valid = $false; Reason = 'PNG is missing its required IEND trailer -- likely truncated' }
+    }
+
     # Same hardcoded-literal false positive as the other Add-Type calls in
     # this file -- traced, no untrusted input reaches this call.
     Add-Type -AssemblyName System.Drawing
@@ -731,10 +782,21 @@ function Test-TPMScreenshotFileValid {
             return [pscustomobject]@{ Valid = $false; Reason = "file could not be decoded as a valid image: $($_.Exception.Message)" }
         }
         try {
+            if ($image.RawFormat.Guid -ne [System.Drawing.Imaging.ImageFormat]::Png.Guid) {
+                return [pscustomobject]@{ Valid = $false; Reason = "file decoded successfully but not as PNG (detected format: $($image.RawFormat)) -- likely a renamed image of a different format" }
+            }
             if ($image.Width -le 0 -or $image.Height -le 0) {
                 return [pscustomobject]@{ Valid = $false; Reason = "image has invalid dimensions ($($image.Width)x$($image.Height))" }
             }
-            return [pscustomobject]@{ Valid = $true; Reason = 'valid image' }
+            try {
+                $bitmap = [System.Drawing.Bitmap]$image
+                $rect = New-Object System.Drawing.Rectangle 0, 0, $bitmap.Width, $bitmap.Height
+                $bmpData = $bitmap.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly, $bitmap.PixelFormat)
+                $bitmap.UnlockBits($bmpData)
+            } catch {
+                return [pscustomobject]@{ Valid = $false; Reason = "PNG pixel data could not be fully decoded (likely truncated or corrupt): $($_.Exception.Message)" }
+            }
+            return [pscustomobject]@{ Valid = $true; Reason = 'valid PNG' }
         } finally {
             $image.Dispose()
         }

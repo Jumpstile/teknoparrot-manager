@@ -1439,6 +1439,21 @@ Describe "New-TPMCertificationScreenshot (issue #151)" {
         function New-ValidCaptureAction {
             { param($p) Save-TPMRenderedTextCapture -Path $p -Lines @('valid test image') }
         }
+
+        # Real, valid PNG bytes -- used as the base for constructing the
+        # JPEG-masquerade, truncated, and corrupted-signature regression
+        # cases below, so those tests exercise genuine byte-level defects
+        # against real GDI+ output, not a hand-rolled fake.
+        function New-RealPngBytes {
+            $p = Join-Path $TestDrive ("real-png-source-" + [guid]::NewGuid().ToString('N') + '.png')
+            # [void](...) -- Save-TPMRenderedTextCapture explicitly returns
+            # $null; left unsuppressed, that $null is emitted onto this
+            # function's own output stream ahead of the byte array below,
+            # corrupting it (same class of bug fixed in the production
+            # capture-scope tests earlier in this file).
+            [void](Save-TPMRenderedTextCapture -Path $p -Lines @('a somewhat longer line of real rendered content', 'second line', 'third line'))
+            return [System.IO.File]::ReadAllBytes($p)
+        }
     }
 
     # --- screenshot directory creation ---
@@ -1640,7 +1655,103 @@ Describe "New-TPMCertificationScreenshot (issue #151)" {
         $shot = New-TPMCertificationScreenshot -ScreenshotDir $dir -Name 'corrupt' -EvidenceType 'DeterministicRender' -CaptureAction { param($p) 'this is not a png' | Set-Content -LiteralPath $p -Encoding ascii }
 
         $shot.Status | Should -Be 'Failed'
-        $shot.Details | Should -Match 'could not be decoded'
+        $shot.Details | Should -Match 'PNG signature'
+    }
+
+    # --- review round 2: strengthened PNG validation (JPEG masquerade and
+    # truncation both previously passed validation) ---
+    It "fails validation (Status = 'Failed') when the output is a real JPEG merely saved with a .png extension" {
+        $dir = Join-Path $TestDrive ("shots-jpegmasq-" + [guid]::NewGuid().ToString('N'))
+
+        $shot = New-TPMCertificationScreenshot -ScreenshotDir $dir -Name 'jpeg-masquerade' -EvidenceType 'ScreenCapture' -CaptureAction {
+            param($p)
+            Add-Type -AssemblyName System.Drawing
+            $bmp = New-Object System.Drawing.Bitmap 50, 50
+            try { $bmp.Save($p, [System.Drawing.Imaging.ImageFormat]::Jpeg) } finally { $bmp.Dispose() }
+        }
+
+        $shot.Status | Should -Be 'Failed'
+        $shot.Details | Should -Match 'PNG signature'
+    }
+
+    It "Test-TPMScreenshotFileValid rejects real JPEG bytes saved with a .png extension, even when GDI+ can still decode them as *an* image" {
+        $dir = Join-Path $TestDrive ("shots-jpegmasq2-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        $jpegAsPngPath = Join-Path $dir 'fake.png'
+        Add-Type -AssemblyName System.Drawing
+        $bmp = New-Object System.Drawing.Bitmap 50, 50
+        try { $bmp.Save($jpegAsPngPath, [System.Drawing.Imaging.ImageFormat]::Jpeg) } finally { $bmp.Dispose() }
+
+        # Confirms GDI+ really would decode this successfully as *some*
+        # image (proving the old "did it construct an Image object"
+        # check alone was not sufficient) before confirming the
+        # strengthened validator still rejects it.
+        Add-Type -AssemblyName System.Drawing
+        $rawBytes = [System.IO.File]::ReadAllBytes($jpegAsPngPath)
+        $ms = New-Object System.IO.MemoryStream(,$rawBytes)
+        try {
+            $decodedAsImage = [System.Drawing.Image]::FromStream($ms)
+            try {
+                $decodedAsImage.RawFormat.Guid | Should -Not -Be ([System.Drawing.Imaging.ImageFormat]::Png.Guid) -Because "this is real proof GDI+ decodes it as JPEG, not PNG, despite the .png extension"
+            } finally { $decodedAsImage.Dispose() }
+        } finally { $ms.Dispose() }
+
+        $validation = Test-TPMScreenshotFileValid -Path $jpegAsPngPath
+        $validation.Valid | Should -Be $false
+        $validation.Reason | Should -Match 'PNG signature'
+    }
+
+    It "fails validation (Status = 'Failed') on a truncated PNG (IEND trailer cut off)" {
+        $dir = Join-Path $TestDrive ("shots-truncated-" + [guid]::NewGuid().ToString('N'))
+
+        $shot = New-TPMCertificationScreenshot -ScreenshotDir $dir -Name 'truncated' -EvidenceType 'DeterministicRender' -CaptureAction {
+            param($p)
+            $full = New-RealPngBytes
+            $short = $full[0..($full.Length - 20)]
+            [System.IO.File]::WriteAllBytes($p, $short)
+        }
+
+        $shot.Status | Should -Be 'Failed'
+        $shot.Details | Should -Match 'truncated'
+    }
+
+    It "Test-TPMScreenshotFileValid rejects a materially truncated PNG (over half the file cut off)" {
+        $dir = Join-Path $TestDrive ("shots-truncated2-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        $full = New-RealPngBytes
+        $truncPath = Join-Path $dir 'truncated.png'
+        $short = $full[0..([Math]::Floor($full.Length * 0.4))]
+        [System.IO.File]::WriteAllBytes($truncPath, $short)
+
+        $validation = Test-TPMScreenshotFileValid -Path $truncPath
+        $validation.Valid | Should -Be $false
+        $validation.Reason | Should -Match 'truncated'
+    }
+
+    It "Test-TPMScreenshotFileValid rejects a corrupted PNG signature" {
+        $dir = Join-Path $TestDrive ("shots-badsig-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        $full = New-RealPngBytes
+        $badBytes = [byte[]]$full.Clone()
+        $badBytes[0] = 0x00
+        $badBytes[3] = 0xFF
+        $badSigPath = Join-Path $dir 'badsig.png'
+        [System.IO.File]::WriteAllBytes($badSigPath, $badBytes)
+
+        $validation = Test-TPMScreenshotFileValid -Path $badSigPath
+        $validation.Valid | Should -Be $false
+        $validation.Reason | Should -Match 'PNG signature'
+    }
+
+    It "Test-TPMScreenshotFileValid accepts a real, complete PNG produced the same way real captures are (round-trip control)" {
+        $bytes = New-RealPngBytes
+        $dir = Join-Path $TestDrive ("shots-roundtrip-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        $p = Join-Path $dir 'roundtrip.png'
+        [System.IO.File]::WriteAllBytes($p, $bytes)
+
+        $validation = Test-TPMScreenshotFileValid -Path $p
+        $validation.Valid | Should -Be $true
     }
 
     It "fails validation (Status = 'Failed') when the capture action deletes the reserved file instead of writing to it" {
