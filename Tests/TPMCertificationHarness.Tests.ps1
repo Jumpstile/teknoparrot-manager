@@ -2590,9 +2590,16 @@ Describe "Issue #154 authoritative certification transaction invariants" {
             $script:tpmEvidenceWorkflowId = [guid]::NewGuid().ToString('N')
             $dir = Join-Path $TestDrive $script:tpmEvidenceWorkflowId
             New-Item -ItemType Directory -Force -Path $dir | Out-Null
+            # Production order: skips happen early, final-certification-result
+            # is always last -- the fixture mirrors that ordering because the
+            # capture-ordering invariant asserts final-certification-result
+            # has the highest Sequence of the whole manifest, the same way
+            # Add-Screenshot assigns it in the real certification flow.
             $spec = @(
                 @{Name='certification-suite-running';Type='ScreenCapture'}
                 @{Name='requested-effective-root-evidence';Type='ScreenCapture'}
+                @{Name='live-thumbnail-evidence';Skip=$true}
+                @{Name='live-controls-evidence';Skip=$true}
                 @{Name='adaptive-menu-normal';Type='DeterministicRender'}
                 @{Name='adaptive-menu-small';Type='DeterministicRender'}
                 @{Name='adaptive-menu-maximized';Type='DeterministicRender'}
@@ -2600,14 +2607,42 @@ Describe "Issue #154 authoritative certification transaction invariants" {
                 @{Name='final-certification-result';Type='ScreenCapture'}
             )
             $shots = @()
+            $seq = 0
             foreach ($item in $spec) {
-                $shots += New-TPMCertificationScreenshot -ScreenshotDir $dir -Name $item.Name -EvidenceType $item.Type -CaptureAction { param($p) Save-TPMRenderedTextCapture -Path $p -Lines @('valid transaction evidence') }
+                $seq++
+                if ($item.Skip) {
+                    $shot = New-TPMCertificationScreenshot -ScreenshotDir $dir -Name $item.Name -Skip -SkipReason 'not displayed'
+                } else {
+                    $shot = New-TPMCertificationScreenshot -ScreenshotDir $dir -Name $item.Name -EvidenceType $item.Type -CaptureAction { param($p) Save-TPMRenderedTextCapture -Path $p -Lines @('valid transaction evidence') }
+                }
+                $shot = $shot | Add-Member -NotePropertyName Sequence -NotePropertyValue $seq -Force -PassThru
+                $shots += $shot
             }
-            $shots += New-TPMCertificationScreenshot -ScreenshotDir $dir -Name 'live-thumbnail-evidence' -Skip -SkipReason 'not displayed'
-            $shots += New-TPMCertificationScreenshot -ScreenshotDir $dir -Name 'live-controls-evidence' -Skip -SkipReason 'not displayed'
+            # Continue the real evidence-append counter from where the fixture
+            # left off, so a test that goes on to call the real Add-Screenshot
+            # (e.g. to simulate a thrown final capture) gets a Sequence that
+            # is genuinely later than everything the fixture built, exactly
+            # as production's single monotonic counter would produce.
+            $script:tpmEvidenceSequence = $seq
+
+            # A realistic full-pass Items array, derived through the same
+            # Get-TPMCertificationScoreFromItems function production uses --
+            # this is what makes "does not let complete evidence override a
+            # failed numeric score" and "does not let passing numeric
+            # arithmetic override failed finalization" meaningful: the
+            # transaction now derives Overall/Passed/Total from Items itself,
+            # it does not trust whatever the fixture (or an attacker-
+            # controlled mutation) set directly on .Overall/.Passed/.Total.
+            $items = @(
+                [pscustomobject]@{Area='Repository'; Passed=$true; Details='clean'},
+                [pscustomobject]@{Area='Pester'; Passed=$true; Details='full pass'},
+                [pscustomobject]@{Area='Static Analysis'; Passed=$true; Details='0 findings'},
+                [pscustomobject]@{Area='Artifacts'; Passed=$true; Details='present'}
+            )
+            $score = Get-TPMCertificationScoreFromItems -Items $items
             [pscustomobject]@{
                 Results = [ordered]@{Screenshots=$shots;EvidenceWorkflowId=$script:tpmEvidenceWorkflowId;Status='PASS'}
-                Certification = [pscustomobject]@{Overall='CERTIFIED';Screenshots=@();Passed=10;Total=10;ScorePercent=100}
+                Certification = [pscustomobject]@{Overall=$score.Overall;Screenshots=@();Passed=$score.Passed;Total=$score.Total;ScorePercent=$score.ScorePercent;Items=$items}
             }
         }
 
@@ -2723,7 +2758,6 @@ Describe "Issue #154 authoritative certification transaction invariants" {
 
     It "does not let passing numeric arithmetic override failed finalization" {
         $f=New-CertificationTransactionFixture
-        $f.Certification.Passed=10;$f.Certification.Total=10;$f.Certification.ScorePercent=100
         $f.Results.Screenshots=@($f.Results.Screenshots|Where-Object Name -CNE 'final-certification-result')
         $x=Complete-TPMCertificationTransaction $f.Certification $f.Results
         $x.ScoreEligible|Should -BeTrue
@@ -2732,17 +2766,30 @@ Describe "Issue #154 authoritative certification transaction invariants" {
 
     It "does not let complete evidence override a failed numeric score" {
         $f=New-CertificationTransactionFixture
-        $f.Certification.Overall='NOT CERTIFIED'
+        ($f.Certification.Items | Where-Object Area -EQ 'Pester').Passed = $false
         $x=Complete-TPMCertificationTransaction $f.Certification $f.Results
         $x.ScoreEligible|Should -BeFalse
         Assert-FailedTransactionConsistency $f $x
+    }
+
+    It "derives the score decision from Items rather than trusting a stale or tampered Overall field" {
+        $f=New-CertificationTransactionFixture
+        # Items still say every gate passed, but .Overall itself (a field
+        # nothing else in this fixture recomputes) claims NOT CERTIFIED --
+        # the transaction must certify based on Items, ignoring the stale
+        # field entirely, proving Overall is never read for the decision.
+        $f.Certification.Overall = 'NOT CERTIFIED'
+        $x=Complete-TPMCertificationTransaction $f.Certification $f.Results
+        $x.ScoreEligible|Should -BeTrue
+        $x.Passed|Should -BeTrue
+        $x.Overall|Should -Be 'CERTIFIED'
     }
 
     It "rejects conflicting, malformed, and extra evidence metadata in one consolidated result" {
         $f=New-CertificationTransactionFixture
         $first=$f.Results.Screenshots[0]
         $first.Required=$false
-        $f.Results.Screenshots += [pscustomobject]@{Name='extra';Label='extra';Status='Captured';EvidenceType='ScreenCapture';Required=$true;WorkflowId=$f.Results.EvidenceWorkflowId;Path=$first.Path;Details='captured'}
+        $f.Results.Screenshots += [pscustomobject]@{Name='extra';Label='extra';Status='Captured';EvidenceType='ScreenCapture';Required=$true;WorkflowId=$f.Results.EvidenceWorkflowId;Path=$first.Path;Details='captured';Sequence=($f.Results.Screenshots.Count + 1)}
         $x=Complete-TPMCertificationTransaction $f.Certification $f.Results
         Assert-FailedTransactionConsistency $f $x
         $x.Evidence.Details|Should -Match 'invalid Required metadata'
@@ -2794,12 +2841,68 @@ Describe "Issue #154 authoritative certification transaction invariants" {
         $source=Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..\scripts\Invoke-TPM-RealInstanceSmoke.ps1')
         ([regex]::Matches($source,'Complete-TPMCertificationTransaction -Certification \$certification -Results \$results')).Count|Should -Be 1
         $source|Should -Match 'Get-TPMCertificationFinalConsoleLines -Finalization \$finalization'
-        ([regex]::Matches($source,'Get-TPMCertificationFinalReportLines -Finalization \$finalization')).Count|Should -Be 2
+        ([regex]::Matches($source,'Get-TPMCertificationFinalReportLines -Finalization \$Finalization')).Count|Should -Be 2
         $source|Should -Match 'exit \$finalization\.ExitCode'
         $source|Should -Not -Match 'exit 0'
         ([regex]::Matches($source,'\$Results\.Status = \$finalStatus')).Count|Should -Be 1
         ([regex]::Matches($source,'\$results\.Status\s*=')).Count|Should -Be 0
         $source|Should -Match 'Publish-TPMCertificationArtifacts -Artifacts \$artifacts'
         $source|Should -Match 'Remove-Item -LiteralPath \$path'
+        # System Invariant Inventory: publication as part of commit. Only
+        # Complete-TPMCertificationTransaction calls Publish-TPMCertificationArtifacts --
+        # there is no second, independent call site outside the transaction
+        # that could publish (or decide what publish-failure means) on its own.
+        ([regex]::Matches($source,'Publish-TPMCertificationArtifacts -Artifacts')).Count|Should -Be 1
+        # The transaction takes over as sole authority the moment BuildArtifacts
+        # runs -- outside the function, the only thing the main flow does with
+        # a publish failure is read $finalization.Published/.PublicationError,
+        # never re-derive FAIL/NOT CERTIFIED/exit-1 through its own logic.
+        $source|Should -Match 'if \(-not \$finalization\.Published\)'
+        $source|Should -Not -Match '\} catch \{\s*\$publicationError'
+    }
+
+    It "rejects an evidence record missing a valid capture-order sequence" {
+        $f=New-CertificationTransactionFixture
+        $final=@($f.Results.Screenshots|Where-Object Name -CEQ 'final-certification-result')[0]
+        $final.PSObject.Properties.Remove('Sequence')
+        $x=Complete-TPMCertificationTransaction $f.Certification $f.Results
+        Assert-FailedTransactionConsistency $f $x
+        $x.Evidence.Details|Should -Match 'no valid capture-order sequence'
+    }
+
+    It "rejects a final-certification-result that was not genuinely captured last" {
+        $f=New-CertificationTransactionFixture
+        $final=@($f.Results.Screenshots|Where-Object Name -CEQ 'final-certification-result')[0]
+        $earliest=@($f.Results.Screenshots|Where-Object Name -CEQ 'certification-suite-running')[0]
+        # Swap sequence numbers: final-certification-result now claims to
+        # have been captured before certification-suite-running, even
+        # though every other invariant (name, workflow, type, path, PNG
+        # validity) still passes -- only the capture-ordering invariant
+        # should catch this.
+        $swap = $final.Sequence
+        $final.Sequence = $earliest.Sequence
+        $earliest.Sequence = $swap
+        $x=Complete-TPMCertificationTransaction $f.Certification $f.Results
+        Assert-FailedTransactionConsistency $f $x
+        $x.Evidence.Details|Should -Match 'was not captured last'
+    }
+
+    It "publishing failure downgrades the same transaction object rather than being decided separately" {
+        $f=New-CertificationTransactionFixture
+        $build={ param($Finalization) throw 'simulated publication failure' }
+        $x=Complete-TPMCertificationTransaction $f.Certification $f.Results $build
+        $x.Published|Should -BeFalse
+        $x.PublicationError|Should -Match 'simulated publication failure'
+        Assert-FailedTransactionConsistency $f $x
+    }
+
+    It "publishing success is reflected on the returned transaction" {
+        $f=New-CertificationTransactionFixture
+        $dir=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $dir|Out-Null
+        $build={ param($Finalization) @([pscustomobject]@{Path=(Join-Path $dir 'report.txt');Content='ok'}) }
+        $x=Complete-TPMCertificationTransaction $f.Certification $f.Results $build
+        $x.Published|Should -BeTrue
+        $x.PublicationError|Should -BeNullOrEmpty
+        $x.Passed|Should -BeTrue
     }
 }

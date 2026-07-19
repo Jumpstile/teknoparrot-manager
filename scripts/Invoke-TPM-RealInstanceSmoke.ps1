@@ -737,6 +737,16 @@ function New-TPMCertificationScreenshot {
 # content overwrites it immediately afterward.
 $script:tpmScreenshotSequence = 0
 $script:tpmEvidenceWorkflowId = [guid]::NewGuid().ToString('N')
+
+# System Invariant Inventory: capture ordering. Every ledger entry (capture,
+# skip, or failure alike) receives a monotonic sequence number at the single
+# point it is appended to $results.Screenshots (Add-Screenshot below), not at
+# the point it is produced -- capture and append are not the same event, and
+# only append order is the order a reviewer or Complete-TPMCertificationTransaction
+# can trust. This lets the transaction assert that 'final-certification-result'
+# was genuinely the last evidence recorded, instead of relying on it being the
+# last call in source-code order, which nothing previously enforced.
+$script:tpmEvidenceSequence = 0
 function New-TPMScreenshotReservedPath {
     param([string]$ScreenshotDir, [string]$Name)
     $safeName = ($Name -replace '[^A-Za-z0-9_\-]', '-')
@@ -1288,6 +1298,30 @@ function Get-TPMGateMark {
     return 'FAIL'
 }
 
+# System Invariant Inventory: derived scorecard state. Overall/Passed/Total/
+# ScorePercent are always computed from $Items by this single pure function --
+# nothing that needs the true score ever reads a precomputed field off the
+# scorecard object instead. This exists specifically so
+# Complete-TPMCertificationTransaction can derive its own scoring decision
+# from $Certification.Items at commit time rather than trusting
+# $Certification.Overall, a mutable field nothing prevents another code path
+# from setting stale: the same arithmetic can never diverge between the
+# provisional scorecard display and the final commit decision, because both
+# call this and only this.
+function Get-TPMCertificationScoreFromItems {
+    param([object[]]$Items)
+    $applicableItems = @($Items | Where-Object { -not ($_.PSObject.Properties.Name -contains 'Status' -and $_.Status -eq 'NotApplicable') })
+    $passedCount = @($applicableItems | Where-Object { $_.Passed }).Count
+    $totalCount = @($applicableItems).Count
+    $overall = if ($totalCount -gt 0 -and $passedCount -eq $totalCount) { 'CERTIFIED' } else { 'NOT CERTIFIED' }
+    [pscustomobject]@{
+        Overall = $overall
+        Passed = $passedCount
+        Total = $totalCount
+        ScorePercent = if ($totalCount -gt 0) { [math]::Round(($passedCount / [double]$totalCount) * 100, 2) } else { 0 }
+    }
+}
+
 function New-CertificationScorecard {
     param([hashtable]$Results)
 
@@ -1418,17 +1452,14 @@ function New-CertificationScorecard {
     # force NOT CERTIFIED. Items without a Status property (every other
     # score item) are unaffected -- this filter only ever excludes an item
     # that explicitly opted in with Status = 'NotApplicable'.
-    $applicableItems = @($scoreItems | Where-Object { -not ($_.PSObject.Properties.Name -contains 'Status' -and $_.Status -eq 'NotApplicable') })
-    $passedCount = @($applicableItems | Where-Object { $_.Passed }).Count
-    $totalCount = @($applicableItems).Count
-    $overall = if ($passedCount -eq $totalCount) { 'CERTIFIED' } else { 'NOT CERTIFIED' }
+    $score = Get-TPMCertificationScoreFromItems -Items $scoreItems
 
     [pscustomobject]@{
         Timestamp = $Results.Timestamp
-        Overall = $overall
-        Passed = $passedCount
-        Total = $totalCount
-        ScorePercent = [math]::Round(($passedCount / [double]$totalCount) * 100, 2)
+        Overall = $score.Overall
+        Passed = $score.Passed
+        Total = $score.Total
+        ScorePercent = $score.ScorePercent
         Items = $scoreItems
         ReportDir = $reportDir
         ValidationReport = $md
@@ -1502,6 +1533,13 @@ function Add-Screenshot {
         $safeName=if([string]::IsNullOrWhiteSpace($Name)){'unnamed-evidence'}else{$Name}
         $shot=[pscustomobject]@{Name=$safeName;Label=$safeName;Path=$null;Status='Failed';EvidenceType='Failed';Required=(-not $Skip);WorkflowId=$script:tpmEvidenceWorkflowId;CaptureScope=$null;Details="evidence creation failed safely: $($_.Exception.Message)"}
     }
+    # Sequence is assigned here, at the single ledger-append point, not by
+    # the producer above -- append order is what Complete-TPMCertificationTransaction
+    # trusts for the capture-ordering invariant, and every record (capture,
+    # skip, or failure) must receive one so the invariant can distinguish
+    # "genuinely last" from "merely absent from the check."
+    $script:tpmEvidenceSequence++
+    $shot = $shot | Add-Member -NotePropertyName Sequence -NotePropertyValue $script:tpmEvidenceSequence -Force -PassThru
     $script:results.Screenshots += $shot
     $mark=switch($shot.Status){'Captured'{'[SHOT]'}'Skipped'{'[SKIP]'}default{'[FAIL]'}}
     $scopeSuffix=if($shot.CaptureScope){" ($($shot.CaptureScope))"}else{''}
@@ -1510,7 +1548,7 @@ function Add-Screenshot {
 }
 
 function Complete-TPMCertificationTransaction {
-    param($Certification, $Results)
+    param($Certification, $Results, [scriptblock]$BuildArtifacts)
 
     # System Invariant Inventory: this manifest is the authoritative production
     # evidence contract. Every expected identifier occurs exactly once; no
@@ -1561,6 +1599,10 @@ function Complete-TPMCertificationTransaction {
             $errors.Add("evidence '$name' did not originate from this certification evidence workflow")
             continue
         }
+        if ($properties -notcontains 'Sequence' -or $shot.Sequence -isnot [int] -or $shot.Sequence -le 0) {
+            $errors.Add("evidence '$name' has no valid capture-order sequence")
+            continue
+        }
         if ($properties -notcontains 'Required' -or $shot.Required -isnot [bool] -or $shot.Required -ne $expected.Required) {
             $errors.Add("evidence '$name' has invalid Required metadata")
             continue
@@ -1591,13 +1633,40 @@ function Complete-TPMCertificationTransaction {
         }
     }
 
+    # System Invariant Inventory: capture ordering. final-certification-result
+    # captures the provisional scorecard display -- it is only meaningful
+    # evidence if it genuinely happened after every other ledger entry, not
+    # merely because it is the last Add-Screenshot call in source order. This
+    # asserts that directly against the append-order Sequence values recorded
+    # by Add-Screenshot, rather than trusting call order.
+    $finalRecords = @($evidence | Where-Object { $_.Name -ceq 'final-certification-result' -and $_.PSObject.Properties.Name -contains 'Sequence' -and $_.Sequence -is [int] })
+    if ($finalRecords.Count -eq 1) {
+        $otherSequences = @($evidence | Where-Object { $_.Name -cne 'final-certification-result' -and $_.PSObject.Properties.Name -contains 'Sequence' -and $_.Sequence -is [int] } | ForEach-Object { $_.Sequence })
+        if ($otherSequences.Count -gt 0) {
+            $maxOtherSequence = ($otherSequences | Measure-Object -Maximum).Maximum
+            if ($finalRecords[0].Sequence -le $maxOtherSequence) {
+                $errors.Add("final-certification-result was not captured last (sequence $($finalRecords[0].Sequence) is not after $maxOtherSequence)")
+            }
+        }
+    }
+
     $evidencePassed = ($errors.Count -eq 0)
     $evidenceStatus = [pscustomobject]@{
         Passed = $evidencePassed
         Status = $(if ($evidencePassed) { 'Pass' } else { 'Fail' })
         Details = $(if ($evidencePassed) { 'complete evidence manifest validated, including exactly one final-certification-result' } else { $errors -join '; ' })
     }
-    $scoreEligible = ($Certification.Overall -ceq 'CERTIFIED')
+    # System Invariant Inventory: derived scorecard state. The numeric-score
+    # half of the decision is recomputed from $Certification.Items here, not
+    # read off $Certification.Overall -- that field is a snapshot the
+    # scorecard constructor happened to set earlier, and nothing prevents a
+    # future code path from mutating Items afterward without also updating
+    # it. Deriving fresh from the same immutable fact (Items) both call sites
+    # already share (via Get-TPMCertificationScoreFromItems) means the
+    # provisional display and the real commit decision can never silently
+    # diverge from each other or from a stale field.
+    $score = Get-TPMCertificationScoreFromItems -Items @($Certification.Items)
+    $scoreEligible = ($score.Overall -ceq 'CERTIFIED')
     $certified = ($scoreEligible -and $evidencePassed)
     $finalStatus = if ($certified) { 'PASS' } else { 'FAIL' }
     $finalOverall = if ($certified) { 'CERTIFIED' } else { 'NOT CERTIFIED' }
@@ -1609,6 +1678,8 @@ function Complete-TPMCertificationTransaction {
         ExitCode = $exitCode
         ScoreEligible = $scoreEligible
         Evidence = $evidenceStatus
+        Published = $false
+        PublicationError = $null
     }
 
     # This is the only assignment point for final authoritative outcome state.
@@ -1624,6 +1695,40 @@ function Complete-TPMCertificationTransaction {
     $Results.Finalization = $transaction
     $Results.CertificationOverall = $finalOverall
     $Results.ExitCode = $exitCode
+
+    # System Invariant Inventory: publication as part of commit. Writing the
+    # authoritative reports is not a step that happens after the transaction
+    # decides -- it is the last step of the transaction itself. A prior
+    # architecture called Publish-TPMCertificationArtifacts separately after
+    # this function returned, with the caller hardcoding its own duplicate
+    # FAIL/NOT CERTIFIED/exit-1 output on a publish failure -- two
+    # independent places asserting the same "publish failed means not
+    # certified" fact, which could drift out of sync. Folding publication in
+    # here means $transaction is the one and only object either path
+    # produces: on publish failure the same object this function already
+    # returns is downgraded in place, so there is exactly one authority for
+    # the final outcome regardless of which half failed.
+    if ($BuildArtifacts) {
+        try {
+            $artifacts = & $BuildArtifacts $transaction
+            Publish-TPMCertificationArtifacts -Artifacts $artifacts
+            $transaction.Published = $true
+        } catch {
+            $transaction.Published = $false
+            $transaction.PublicationError = $_.Exception.Message
+            $transaction.Passed = $false
+            $transaction.Status = 'FAIL'
+            $transaction.Overall = 'NOT CERTIFIED'
+            $transaction.ExitCode = 1
+            $Certification.Overall = $transaction.Overall
+            $Certification | Add-Member -NotePropertyName Status -NotePropertyValue $transaction.Status -Force
+            $Certification | Add-Member -NotePropertyName ExitCode -NotePropertyValue $transaction.ExitCode -Force
+            $Results.Status = $transaction.Status
+            $Results.CertificationOverall = $transaction.Overall
+            $Results.ExitCode = $transaction.ExitCode
+        }
+    }
+
     return $transaction
 }
 
@@ -2425,18 +2530,29 @@ finally {
     Write-Host (" Report  : {0}" -f $certificationMd)
     Write-Host "============================================"
     [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'final-certification-result' -EvidenceType 'ScreenCapture' -CaptureAction { param($p) Save-TPMScreenCapture -Path $p })
-    $finalization = Complete-TPMCertificationTransaction -Certification $certification -Results $results
-    Clear-TPMConsoleStatus
 
-    # $results.Screenshots now includes the final-certification-result
-    # entry -- refresh $certification.Screenshots (a snapshot array copy
-    # taken when New-CertificationScorecard was called above, before that
-    # entry existed) so both JSON artifacts reflect the complete list, not
-    # the incomplete one from before the final screenshot.
-    try {
+    # System Invariant Inventory: publication as part of commit. Report
+    # content depends on the transaction's decision (it renders Finalization
+    # into both reports), so it cannot be built before the transaction runs --
+    # but it must still be staged and promoted atomically as part of the same
+    # commit, not as a separate step the caller can get out of sync with. This
+    # scriptblock is handed to Complete-TPMCertificationTransaction, which
+    # invokes it with the provisional (pre-publish) decision once evidence and
+    # score validation both complete, then publishes whatever it returns
+    # itself -- there is no code outside the transaction that also knows how
+    # to decide FAIL/NOT CERTIFIED/exit-1 on a publication failure.
+    $buildCertificationArtifacts = {
+        param($Finalization)
+
+        # $results.Screenshots now includes the final-certification-result
+        # entry, and Complete-TPMCertificationTransaction has already
+        # refreshed $certification.Screenshots to match (a snapshot array
+        # copy taken when New-CertificationScorecard was called above, before
+        # that entry existed) -- so both JSON artifacts reflect the complete
+        # list, not the incomplete one from before the final screenshot.
         Add-CertificationReport "# TPM Certification Scorecard"
     Add-CertificationReport ""
-    foreach ($line in @(Get-TPMCertificationFinalReportLines -Finalization $finalization)) {
+    foreach ($line in @(Get-TPMCertificationFinalReportLines -Finalization $Finalization)) {
         Add-CertificationReport $line
     }
     Add-CertificationReport ("Score: {0}/{1} ({2}%)" -f $certification.Passed, $certification.Total, $certification.ScorePercent)
@@ -2502,7 +2618,7 @@ finally {
     Add-Report ""
     Add-Report "## Summary"
     Add-Report ""
-    foreach ($line in @(Get-TPMCertificationFinalReportLines -Finalization $finalization)) {
+    foreach ($line in @(Get-TPMCertificationFinalReportLines -Finalization $Finalization)) {
         Add-Report $line
     }
     Add-Report "Elapsed: $($results.Elapsed)"
@@ -2565,20 +2681,23 @@ finally {
     }
 
         $newline = [Environment]::NewLine
-        $artifacts = @(
+        @(
             [pscustomobject]@{Path=$certificationJson;Content=($certification | ConvertTo-Json -Depth 8)}
             [pscustomobject]@{Path=$json;Content=($results | ConvertTo-Json -Depth 8)}
             [pscustomobject]@{Path=$certificationMd;Content=(($script:tpmCertificationReportLines -join $newline) + $newline)}
             [pscustomobject]@{Path=$md;Content=(($script:tpmValidationReportLines -join $newline) + $newline)}
         )
-        Publish-TPMCertificationArtifacts -Artifacts $artifacts
-    } catch {
-        $publicationError = $_.Exception.Message
+    }
+
+    $finalization = Complete-TPMCertificationTransaction -Certification $certification -Results $results -BuildArtifacts $buildCertificationArtifacts
+    Clear-TPMConsoleStatus
+
+    if (-not $finalization.Published) {
         Write-Host (" FINAL STATUS : FAIL") -ForegroundColor Red
         Write-Host (" OVERALL      : NOT CERTIFIED") -ForegroundColor Red
         Write-Host (" EXIT CODE    : 1") -ForegroundColor Red
-        Write-Host (" REPORTS      : {0}" -f $publicationError) -ForegroundColor Red
-        exit 1
+        Write-Host (" REPORTS      : {0}" -f $finalization.PublicationError) -ForegroundColor Red
+        exit $finalization.ExitCode
     }
 
     $finalColor = if ($finalization.Passed) { 'Green' } else { 'Red' }
