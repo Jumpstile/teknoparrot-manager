@@ -4027,28 +4027,65 @@ Describe "Minimum supported 60x10 viewport and nearby boundaries (issue #104 RC3
         }
     }
 
-    It "representative wider short-height windows always keep Exit and the footer visible, without scrolling" {
-        foreach ($case in @(
-            @{ Width = 80;  Height = 8 }
-            @{ Width = 100; Height = 8 }
-            @{ Width = 150; Height = 8 }
-            @{ Width = 100; Height = 20 }
-        )) {
-            $tier = Get-ConsoleLayoutTier -Width $case.Width -Height $case.Height -RequiredFullLines 0
-            $screen = Render-MainMenuScreen -Tier $tier -Width $case.Width -Height $case.Height
-            $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+    # Using -TestCases (Pester's own parameterized-test mechanism), not a
+    # `foreach ($case in ...) { ... }` loop bundled inside a single `It`
+    # body: a bundled loop reports as exactly one pass/fail for all four
+    # cases combined, so a reviewer reading Pester's output cannot tell
+    # whether all four widths/heights actually ran, whether they ran with
+    # their own distinct values, or whether an early failure silently
+    # skipped the remaining cases (`Should` throws, which stops the loop).
+    # -TestCases gives each case its own named, independently-reported
+    # result instead. (Note: a bundled loop entirely INSIDE one It body is
+    # not the same closure defect as a loop that WRAPS separate `It` calls
+    # -- confirmed by isolated repro that the bundled form here did receive
+    # correct per-iteration values -- but it still doesn't prove independent
+    # per-case execution/reporting, which is what this rewrite is for.)
+    It "at <Width>x<Height>, Exit and the footer stay visible without scrolling, using this case's own dimensions" -TestCases @(
+        @{ Width = 80;  Height = 8;  ExpectedTier = 'Compact' }
+        @{ Width = 100; Height = 8;  ExpectedTier = 'Standard' }
+        @{ Width = 150; Height = 8;  ExpectedTier = 'Ultra' }
+        @{ Width = 100; Height = 20; ExpectedTier = 'Standard' }
+    ) {
+        param($Width, $Height, $ExpectedTier)
+        $tier = Get-ConsoleLayoutTier -Width $Width -Height $Height -RequiredFullLines 0
 
-            $screen.Rows.Count | Should -BeLessOrEqual ([Math]::Max(5, $case.Height - 2))
-            $output | Should -Match '14\) Exit'
-            $output | Should -Match 'Q=Quit'
-        }
-    }
+        # Proves the WIDTH bound into this case actually drove tier
+        # selection (Get-ConsoleLayoutTier is width-only, so this is a
+        # second, independent confirmation of the Width binding below, not
+        # a duplicate of it) -- a cross-case value swap between the 80/100/
+        # 150-wide cases would flip this and fail.
+        $tier | Should -Be $ExpectedTier
 
-    It "at a generous height (100x20), every option is visible, not just Exit and the footer" {
-        $tier = Get-ConsoleLayoutTier -Width 100 -Height 20 -RequiredFullLines 0
-        $screen = Render-MainMenuScreen -Tier $tier -Width 100 -Height 20
+        $screen = Render-MainMenuScreen -Tier $tier -Width $Width -Height $Height
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
 
+        # Proves this case actually ran with ITS OWN Width, not a value
+        # shared or duplicated from another case -- the specific
+        # "accidental duplicate binding" this rewrite guards against. The
+        # geometry object is threaded all the way through from the -Width
+        # parameter passed into Render-MainMenuScreen above, so a mismatch
+        # here would mean cross-case value bleed. (ViewportWidth, not
+        # Height, because Get-MainMenuGeometry internally clamps
+        # ViewportHeight to a floor of 10 for its own column-width math --
+        # see the real-height budgeting note in ARCHITECTURE.md -- so it
+        # would not reflect this case's own Height value for the two 8-row
+        # cases here even when everything is working correctly.)
+        $screen.Geometry.ViewportWidth | Should -Be $Width
+
+        # This case's own Height still matters even though the two
+        # Width=100 cases (100x8 and 100x20) share a tier: the row-count
+        # ceiling is derived from THIS case's real Height (Max(5,
+        # Height-2) = 6 for height 8, 18 for height 20), so a cross-case
+        # Height swap between those two would change which bound applies.
+        $screen.Rows.Count | Should -BeLessOrEqual ([Math]::Max(5, $Height - 2))
+        $output | Should -Match '14\) Exit'
+        $output | Should -Match 'Q=Quit'
+
+        # All four of these cases happen to be wide enough that the render
+        # pipeline shows every option even in its most space-constrained
+        # form (confirmed empirically, not assumed) -- verified per case
+        # rather than in a separate test, so this remains part of the same
+        # independently-reported, per-case proof.
         foreach ($n in @((Get-MainMenuItems) | ForEach-Object { $_.Number })) {
             $output | Should -Match ([regex]::Escape("$n)"))
         }

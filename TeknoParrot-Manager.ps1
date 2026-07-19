@@ -10566,21 +10566,31 @@ if ($datIndex.Count -gt 0 -and $gameProfilesDir) {
 
 # =============================================================================
 # ADAPTIVE MAIN MENU (issue #104) -- single data-driven model, rendered at one
-# of three layout tiers depending on the current console window size. Every
-# tier shows the same 14 numbered options with the same meaning; only how
-# much description text is shown changes. Numbering, the switch-statement
-# dispatch, and all mode behavior are completely unaffected by this -- only
-# Show-MainMenu's own rendering varies.
+# of four layout tiers depending on the current console window's width
+# (Get-ConsoleLayoutTier is width-driven; see that function for the exact
+# breakpoints): Compact (<90 columns), Standard (90-119), Professional
+# (120-149), or Ultra (>=150). Every tier shows the same 14 numbered options
+# with the same meaning; only how much description text is shown, and
+# whether the layout is one or two columns, changes. Numbering, the
+# switch-statement dispatch, and all mode behavior are completely unaffected
+# by this -- only Show-MainMenu's own rendering varies. At extremely short
+# heights (below the documented 60x10 minimum-supported viewport), an
+# emergency compact presentation takes over regardless of tier -- see
+# Get-MainMenuEmergencyCompactRows.
 # =============================================================================
 
 # Single source of truth for every menu item's number, mode string, section,
-# and description at three levels of detail (Full/Standard/Compact). Adding,
-# renumbering, or re-sectioning a menu item only ever needs to change this
-# array -- every rendering tier and the "Enter 1-N" prompt derive from it.
-# A function (not a plain script-scope variable) so it is picked up by the
-# test suite's AST-based function extraction like every other testable
-# helper in this script -- see the "Main menu source-level drift check"
-# Describe block in Tests/TeknoParrot-Manager.Tests.ps1.
+# and description -- ShortDesc (one line) and FullDesc (an array of lines).
+# Adding, renumbering, or re-sectioning a menu item only ever needs to change
+# this array -- every rendering tier and the "Enter 1-N" prompt derive from
+# it. Different tiers show different levels of detail derived from these two
+# fields (or neither, for Standard/Compact's labels-only rendering) -- see
+# "Description text sourcing varies by tier" in ARCHITECTURE.md for exactly
+# which tier uses which field. A function (not a plain script-scope
+# variable) so it is picked up by the test suite's AST-based function
+# extraction like every other testable helper in this script -- see the
+# "Main menu source-level drift check" Describe block in
+# Tests/TeknoParrot-Manager.Tests.ps1.
 function Get-MainMenuSections {
     return @(
     [pscustomobject]@{
