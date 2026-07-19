@@ -2453,7 +2453,7 @@ Describe "Test-TPMPngStructure PNG specification conformance (issue #151 review 
     # --- own adversarial review: additional gaps closed beyond the
     # explicitly required list ---
     It "allows an unknown ANCILLARY chunk (lowercase first letter) once its own bounds and CRC are valid" {
-        $unknownAncillary = New-TPMPngChunkBytes -Type 'fooB' -Data ([byte[]](1, 2))
+        $unknownAncillary = New-TPMPngChunkBytes -Type 'foOB' -Data ([byte[]](1, 2))
         $png = New-TPMTestPng -Chunks @($tpmIhdrTruecolor, $tpmIdat, $unknownAncillary, $tpmIend)
         $r = Test-TPMPngStructure -Bytes $png
         $r.Valid | Should -Be $true -Because "unknown ancillary chunks are legal PNG extension points, not corruption"
@@ -2471,7 +2471,7 @@ Describe "Test-TPMPngStructure PNG specification conformance (issue #151 review 
         $png = New-TPMTestPng -Chunks @($ihdrLower, $tpmIdat, $tpmIend)
         $r = Test-TPMPngStructure -Bytes $png
         $r.Valid | Should -Be $false
-        $r.Reason | Should -Match "first chunk must be IHDR"
+        $r.Reason | Should -Match "first chunk must be IHDR|reserved"
     }
 
     It "rejects a chunk whose declared length exceeds the PNG spec's maximum chunk length (2^31 - 1), independent of file size" {
@@ -2531,4 +2531,29 @@ Describe "Test-TPMPngStructure PNG specification conformance (issue #151 review 
         $shot.Status | Should -Be 'Failed'
         $shot.Details | Should -Match 'IHDR'
     }
+}
+
+
+Describe "Test-TPMPngStructure complete static PNG inventory coverage (issue #151 final review)" {
+    BeforeAll {
+        function New-InventoryChunk([string]$Type, [byte[]]$Data) {
+            if ($null -eq $Data) { $Data = [byte[]]@() }
+            $len=$Data.Length; $tb=[Text.Encoding]::ASCII.GetBytes($Type); $crc=Get-TPMCrc32 -Bytes ($tb+$Data) -Offset 0 -Count (4+$len)
+            [byte[]]((($len-shr 24)-band 255),(($len-shr 16)-band 255),(($len-shr 8)-band 255),($len-band 255))+$tb+$Data+[byte[]]((($crc-shr 24)-band 255),(($crc-shr 16)-band 255),(($crc-shr 8)-band 255),($crc-band 255))
+        }
+        function New-InventoryPng([byte[][]]$Chunks) { [byte[]](0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a)+($Chunks|ForEach-Object{$_}) }
+        function New-InventoryIhdr([byte[]]$Width,[byte[]]$Height) { New-InventoryChunk IHDR ($Width+$Height+[byte[]](8,2,0,0,0)) }
+        $script:invIhdr=New-InventoryIhdr ([byte[]](0,0,0,2)) ([byte[]](0,0,0,2));$script:invIdat=New-InventoryChunk IDAT ([byte[]](1));$script:invIend=New-InventoryChunk IEND @()
+    }
+    It "rejects invalid IHDR dimension <Name>" -TestCases @(
+        @{Name='zero width';W=[byte[]](0,0,0,0);H=[byte[]](0,0,0,1)},@{Name='zero height';W=[byte[]](0,0,0,1);H=[byte[]](0,0,0,0)},@{Name='width high bit';W=[byte[]](0x80,0,0,0);H=[byte[]](0,0,0,1)},@{Name='height high bit';W=[byte[]](0,0,0,1);H=[byte[]](0x80,0,0,0)}
+    ) { param($Name,$W,$H);(Test-TPMPngStructure (New-InventoryPng @((New-InventoryIhdr $W $H),$invIdat,$invIend))).Valid|Should -BeFalse }
+    It "rejects a reserved-bit chunk name" { $r=Test-TPMPngStructure (New-InventoryPng @($invIhdr,$invIdat,(New-InventoryChunk foob @()),$invIend));$r.Valid|Should -BeFalse;$r.Reason|Should -Match 'reserved' }
+    It "rejects duplicate singleton ancillary <Type>" -TestCases @('cHRM','cICP','gAMA','iCCP','mDCV','cLLI','sBIT','sRGB','bKGD','hIST','tRNS','eXIf','pHYs','tIME'|ForEach-Object{@{Type=$_}}) { param($Type);$c=New-InventoryChunk $Type @();$prefix=@($invIhdr);if($Type -eq 'hIST'){$prefix+=New-InventoryChunk PLTE ([byte[]](1,2,3))};$r=Test-TPMPngStructure (New-InventoryPng @($prefix+$c+$c+$invIdat+$invIend));$r.Valid|Should -BeFalse;$r.Reason|Should -Match 'more than one' }
+    It "rejects pre-PLTE/pre-IDAT chunk <Type> after IDAT" -TestCases @('cHRM','cICP','gAMA','iCCP','mDCV','cLLI','sBIT','sRGB'|ForEach-Object{@{Type=$_}}) { param($Type);(Test-TPMPngStructure (New-InventoryPng @($invIhdr,$invIdat,(New-InventoryChunk $Type @()),$invIend))).Valid|Should -BeFalse }
+    It "rejects pre-IDAT chunk <Type> after IDAT" -TestCases @('eXIf','pHYs','sPLT'|ForEach-Object{@{Type=$_}}) { param($Type);(Test-TPMPngStructure (New-InventoryPng @($invIhdr,$invIdat,(New-InventoryChunk $Type @()),$invIend))).Valid|Should -BeFalse }
+    It "rejects registered APNG chunk <Type> for static evidence" -TestCases @('acTL','fcTL','fdAT'|ForEach-Object{@{Type=$_}}) { param($Type);(Test-TPMPngStructure (New-InventoryPng @($invIhdr,(New-InventoryChunk $Type @()),$invIdat,$invIend))).Valid|Should -BeFalse }
+    It "allows a conforming unknown ancillary chunk" { (Test-TPMPngStructure (New-InventoryPng @($invIhdr,$invIdat,(New-InventoryChunk foOB @()),$invIend))).Valid|Should -BeTrue }
+    It "rejects PLTE after <Type> when an optional truecolor palette is present" -TestCases @(@{Type='bKGD'},@{Type='tRNS'}) { param($Type);$c=New-InventoryChunk $Type @();$plte=New-InventoryChunk PLTE ([byte[]](1,2,3));(Test-TPMPngStructure (New-InventoryPng @($invIhdr,$c,$plte,$invIdat,$invIend))).Valid|Should -BeFalse }
+
 }

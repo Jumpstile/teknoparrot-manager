@@ -799,8 +799,14 @@ function Test-TPMPngStructure {
     # of whether it would also overrun this particular file's bounds.
     [int64]$maxChunkLength = 0x7FFFFFFF
     $knownCriticalTypes = @('IHDR', 'PLTE', 'IDAT', 'IEND')
+    $staticUnsupportedTypes = @('acTL', 'fcTL', 'fdAT')
+    $singleAncillaryTypes = @('cHRM', 'cICP', 'gAMA', 'iCCP', 'mDCV', 'cLLI', 'sBIT', 'sRGB', 'bKGD', 'hIST', 'tRNS', 'eXIf', 'pHYs', 'tIME')
+    $beforePlteAndIdatTypes = @('cHRM', 'cICP', 'gAMA', 'iCCP', 'mDCV', 'cLLI', 'sBIT', 'sRGB')
+    $beforeIdatTypes = @('eXIf', 'pHYs', 'sPLT')
+    $afterPlteBeforeIdatTypes = @('bKGD', 'hIST', 'tRNS')
     $validColorTypes = @(0, 2, 3, 4, 6)
     $validBitDepthsByColorType = @{ 0 = @(1, 2, 4, 8, 16); 2 = @(8, 16); 3 = @(1, 2, 4, 8); 4 = @(8, 16); 6 = @(8, 16) }
+    $seenAncillary = New-Object 'System.Collections.Generic.Dictionary[string,int]' ([System.StringComparer]::Ordinal)
 
     [int64]$pos = 8
     [int64]$fileLength = $Bytes.Length
@@ -835,6 +841,7 @@ function Test-TPMPngStructure {
             }
         }
         $type = [System.Text.Encoding]::ASCII.GetString($Bytes, [int]($pos + 4), 4)
+        if (($Bytes[$pos + 6] -band 0x20) -ne 0) { return [pscustomobject]@{ Valid = $false; Reason = "PNG chunk '$type' sets the reserved third type bit" } }
 
         [int64]$length = ([uint32]$Bytes[$pos] -shl 24) -bor ([uint32]$Bytes[$pos + 1] -shl 16) -bor ([uint32]$Bytes[$pos + 2] -shl 8) -bor [uint32]$Bytes[$pos + 3]
         if ($length -gt $maxChunkLength) {
@@ -849,6 +856,19 @@ function Test-TPMPngStructure {
 
         if ($chunkIndex -eq 0 -and $type -cne 'IHDR') {
             return [pscustomobject]@{ Valid = $false; Reason = "PNG's first chunk must be IHDR, found '$type'" }
+        }
+
+        if ($staticUnsupportedTypes -ccontains $type) { return [pscustomobject]@{ Valid = $false; Reason = "PNG chunk '$type' is APNG animation data; certification evidence must be static" } }
+        if ($singleAncillaryTypes -ccontains $type) {
+            if ($seenAncillary.ContainsKey($type)) { return [pscustomobject]@{ Valid = $false; Reason = "PNG contains more than one $type chunk" } }
+            $seenAncillary.Add($type, 1)
+        }
+        if ($beforePlteAndIdatTypes -ccontains $type -and ($plteCount -gt 0 -or $idatStarted)) { return [pscustomobject]@{ Valid = $false; Reason = "PNG $type chunk must appear before PLTE and IDAT" } }
+        if ($beforeIdatTypes -ccontains $type -and $idatStarted) { return [pscustomobject]@{ Valid = $false; Reason = "PNG $type chunk must appear before IDAT" } }
+        if ($afterPlteBeforeIdatTypes -ccontains $type) {
+            if (($type -ceq 'bKGD' -or $type -ceq 'tRNS') -and $plteCount -eq 0 -and $colorType -ne 3) { $paletteDependentSeenBeforePlte = $true }
+            if ($idatStarted) { return [pscustomobject]@{ Valid = $false; Reason = "PNG $type chunk must appear before IDAT" } }
+            if (($type -ceq 'hIST' -or $colorType -eq 3) -and $plteCount -eq 0) { return [pscustomobject]@{ Valid = $false; Reason = "PNG $type chunk requires and must follow PLTE" } }
         }
 
         if ($type -ceq 'IHDR') {
@@ -870,6 +890,7 @@ function Test-TPMPngStructure {
             }
         }
         if ($type -ceq 'PLTE') {
+            if ($paletteDependentSeenBeforePlte) { return [pscustomobject]@{ Valid = $false; Reason = 'PNG PLTE must appear before any bKGD or tRNS chunk when a palette is present' } }
             $plteCount++
             if ($plteCount -gt 1) {
                 return [pscustomobject]@{ Valid = $false; Reason = 'PNG contains more than one PLTE chunk -- a PNG must have at most one' }
@@ -930,11 +951,16 @@ function Test-TPMPngStructure {
             # data/CRC bounds check already confirmed dataStart+13 (and
             # therefore dataStart+12, the last data byte) is within the
             # file.
+            [int64]$width = ([uint32]$Bytes[$dataStart] -shl 24) -bor ([uint32]$Bytes[$dataStart + 1] -shl 16) -bor ([uint32]$Bytes[$dataStart + 2] -shl 8) -bor [uint32]$Bytes[$dataStart + 3]
+            [int64]$height = ([uint32]$Bytes[$dataStart + 4] -shl 24) -bor ([uint32]$Bytes[$dataStart + 5] -shl 16) -bor ([uint32]$Bytes[$dataStart + 6] -shl 8) -bor [uint32]$Bytes[$dataStart + 7]
             $bitDepth = [int]$Bytes[$dataStart + 8]
             $colorType = [int]$Bytes[$dataStart + 9]
             $compressionMethod = [int]$Bytes[$dataStart + 10]
             $filterMethod = [int]$Bytes[$dataStart + 11]
             $interlaceMethod = [int]$Bytes[$dataStart + 12]
+
+            if ($width -lt 1 -or $width -gt $maxChunkLength) { return [pscustomobject]@{ Valid = $false; Reason = "PNG IHDR width ($width) must be 1 through 2^31 - 1" } }
+            if ($height -lt 1 -or $height -gt $maxChunkLength) { return [pscustomobject]@{ Valid = $false; Reason = "PNG IHDR height ($height) must be 1 through 2^31 - 1" } }
 
             if ($validColorTypes -notcontains $colorType) {
                 return [pscustomobject]@{ Valid = $false; Reason = "PNG IHDR declares an unknown color type ($colorType) -- valid values are 0, 2, 3, 4, 6" }
