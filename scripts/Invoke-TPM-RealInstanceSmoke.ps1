@@ -762,6 +762,23 @@ function Get-TPMCrc32 {
 # to its max value, and adding that directly to a 32-bit position/length
 # comparison risks silent integer overflow masking exactly the "chunk
 # claims to extend past the file" case this function exists to catch.
+# Issue #151 review round 4: CRC validation alone is not spec conformance
+# -- a CRC-valid PNG containing a second, CRC-valid IHDR chunk passed
+# round 3's validator, since nothing checked chunk ordering or uniqueness.
+# This is a deliberately scoped subset of the PNG specification: enough to
+# make a trustworthy certification-evidence validator (structure,
+# ordering, uniqueness, the handful of IHDR fields that determine whether
+# the rest of the file can even be interpreted, and enough content
+# validation on PLTE to catch a structurally-impossible palette), not a
+# full PNG decoder. All string comparisons against chunk type names use
+# the case-sensitive operators (-ceq/-cne/-ccontains) throughout --
+# PowerShell's default -eq/-ne/-contains are case-INSENSITIVE, and chunk
+# type case is semantically load-bearing in the PNG spec itself (bit 5 of
+# each of the 4 type bytes encodes critical/ancillary, public/private,
+# reserved, and safe-to-copy; a chunk named "ihdr" is a different,
+# unrecognized ancillary chunk, not a case-insensitive alias for "IHDR")
+# -- confirmed by direct repro that the case-insensitive default would
+# have treated them as the same chunk.
 function Test-TPMPngStructure {
     param([byte[]]$Bytes)
 
@@ -775,10 +792,28 @@ function Test-TPMPngStructure {
         }
     }
 
+    # PNG chunk length fields are 4-byte unsigned integers, but the spec
+    # itself restricts a chunk's actual length to fit in a signed 32-bit
+    # value (0 .. 2^31-1) -- rejected here as "allocation safety" before
+    # the declared length is used in any further arithmetic, independent
+    # of whether it would also overrun this particular file's bounds.
+    [int64]$maxChunkLength = 0x7FFFFFFF
+    $knownCriticalTypes = @('IHDR', 'PLTE', 'IDAT', 'IEND')
+    $validColorTypes = @(0, 2, 3, 4, 6)
+    $validBitDepthsByColorType = @{ 0 = @(1, 2, 4, 8, 16); 2 = @(8, 16); 3 = @(1, 2, 4, 8); 4 = @(8, 16); 6 = @(8, 16) }
+
     [int64]$pos = 8
     [int64]$fileLength = $Bytes.Length
     $chunkIndex = 0
     $sawIend = $false
+    $ihdrCount = 0
+    $iendCount = 0
+    $plteCount = 0
+    $idatCount = 0
+    $idatStarted = $false
+    $idatEnded = $false
+    $colorType = $null
+    $bitDepth = $null
 
     while ($pos -lt $fileLength) {
         if ($sawIend) {
@@ -787,23 +822,100 @@ function Test-TPMPngStructure {
         if ($pos + 8 -gt $fileLength) {
             return [pscustomobject]@{ Valid = $false; Reason = 'PNG chunk header runs past the end of the file -- truncated or malformed' }
         }
-        [int64]$length = ([uint32]$Bytes[$pos] -shl 24) -bor ([uint32]$Bytes[$pos + 1] -shl 16) -bor ([uint32]$Bytes[$pos + 2] -shl 8) -bor [uint32]$Bytes[$pos + 3]
+
+        # Chunk type validation: all four type bytes must be ASCII letters
+        # (0x41-0x5A / 0x61-0x7A) per spec -- checked on the raw bytes,
+        # not the decoded string, since ASCII-decoding arbitrary bytes
+        # never throws and would otherwise silently let a malformed type
+        # through as a weird-looking-but-technically-valid .NET string.
+        for ($tb = 0; $tb -lt 4; $tb++) {
+            $b = $Bytes[$pos + 4 + $tb]
+            if (-not (($b -ge 65 -and $b -le 90) -or ($b -ge 97 -and $b -le 122))) {
+                return [pscustomobject]@{ Valid = $false; Reason = 'PNG chunk type is not 4 ASCII letters -- malformed chunk name' }
+            }
+        }
         $type = [System.Text.Encoding]::ASCII.GetString($Bytes, [int]($pos + 4), 4)
+
+        [int64]$length = ([uint32]$Bytes[$pos] -shl 24) -bor ([uint32]$Bytes[$pos + 1] -shl 16) -bor ([uint32]$Bytes[$pos + 2] -shl 8) -bor [uint32]$Bytes[$pos + 3]
+        if ($length -gt $maxChunkLength) {
+            return [pscustomobject]@{ Valid = $false; Reason = "PNG '$type' chunk declares a length ($length) that exceeds the maximum a PNG chunk may have (2^31 - 1)" }
+        }
+
         [int64]$dataStart = $pos + 8
         [int64]$crcStart = $dataStart + $length
-
         if ($crcStart + 4 -gt $fileLength) {
             return [pscustomobject]@{ Valid = $false; Reason = "PNG '$type' chunk declares a length ($length) whose data/CRC overruns the end of the file" }
         }
 
-        if ($chunkIndex -eq 0 -and $type -ne 'IHDR') {
+        if ($chunkIndex -eq 0 -and $type -cne 'IHDR') {
             return [pscustomobject]@{ Valid = $false; Reason = "PNG's first chunk must be IHDR, found '$type'" }
         }
-        if ($type -eq 'IHDR' -and $length -ne 13) {
-            return [pscustomobject]@{ Valid = $false; Reason = "PNG IHDR chunk must be exactly 13 bytes, found $length" }
+
+        if ($type -ceq 'IHDR') {
+            $ihdrCount++
+            if ($ihdrCount -gt 1) {
+                return [pscustomobject]@{ Valid = $false; Reason = 'PNG contains more than one IHDR chunk -- a PNG must have exactly one, even if every copy is individually CRC-valid' }
+            }
+            if ($length -ne 13) {
+                return [pscustomobject]@{ Valid = $false; Reason = "PNG IHDR chunk must be exactly 13 bytes, found $length" }
+            }
         }
-        if ($type -eq 'IEND' -and $length -ne 0) {
-            return [pscustomobject]@{ Valid = $false; Reason = "PNG IEND chunk must have zero length, found $length" }
+        if ($type -ceq 'IEND') {
+            $iendCount++
+            if ($iendCount -gt 1) {
+                return [pscustomobject]@{ Valid = $false; Reason = 'PNG contains more than one IEND chunk' }
+            }
+            if ($length -ne 0) {
+                return [pscustomobject]@{ Valid = $false; Reason = "PNG IEND chunk must have zero length, found $length" }
+            }
+        }
+        if ($type -ceq 'PLTE') {
+            $plteCount++
+            if ($plteCount -gt 1) {
+                return [pscustomobject]@{ Valid = $false; Reason = 'PNG contains more than one PLTE chunk -- a PNG must have at most one' }
+            }
+            if ($idatStarted) {
+                return [pscustomobject]@{ Valid = $false; Reason = 'PNG PLTE chunk must appear before the first IDAT chunk' }
+            }
+            if ($length -eq 0 -or ($length % 3) -ne 0) {
+                return [pscustomobject]@{ Valid = $false; Reason = "PNG PLTE chunk length ($length) must be a nonzero multiple of 3 (one RGB triplet per palette entry)" }
+            }
+            if ($length -gt 768) {
+                return [pscustomobject]@{ Valid = $false; Reason = "PNG PLTE chunk length ($length) exceeds the maximum of 768 bytes (256 palette entries)" }
+            }
+            if ($null -ne $colorType -and ($colorType -eq 0 -or $colorType -eq 4)) {
+                return [pscustomobject]@{ Valid = $false; Reason = "PNG PLTE chunk is not permitted for color type $colorType (grayscale, with or without alpha)" }
+            }
+            if ($null -ne $colorType -and $colorType -eq 3 -and $null -ne $bitDepth) {
+                $paletteEntries = $length / 3
+                $maxEntries = [Math]::Pow(2, $bitDepth)
+                if ($paletteEntries -gt $maxEntries) {
+                    return [pscustomobject]@{ Valid = $false; Reason = "PNG PLTE chunk has $paletteEntries palette entries, more than IHDR's bit depth $bitDepth can index (max $([int]$maxEntries))" }
+                }
+            }
+        }
+        if ($type -ceq 'IDAT') {
+            if ($idatEnded) {
+                return [pscustomobject]@{ Valid = $false; Reason = 'PNG IDAT chunks must be consecutive -- another chunk already appeared after the IDAT sequence ended' }
+            }
+            $idatStarted = $true
+            $idatCount++
+        } elseif ($idatStarted -and -not $idatEnded) {
+            $idatEnded = $true
+        }
+
+        # Unknown critical chunk: bit 5 of the first type byte (0x20)
+        # clear means uppercase means critical per spec -- a decoder that
+        # does not recognize a critical chunk must not proceed, since it
+        # cannot know what that chunk means for interpreting the image.
+        # Unknown ANCILLARY chunks (lowercase first letter) are fine and
+        # intentionally allowed through once their own bounds/CRC checks
+        # (below, and above) pass -- this validator does not need to
+        # understand every possible ancillary chunk to trust the file.
+        $firstTypeByte = $Bytes[$pos + 4]
+        $isCritical = ($firstTypeByte -band 0x20) -eq 0
+        if ($isCritical -and ($knownCriticalTypes -cnotcontains $type)) {
+            return [pscustomobject]@{ Valid = $false; Reason = "PNG contains an unrecognized critical chunk '$type' -- an unknown critical chunk cannot be safely treated as valid evidence" }
         }
 
         $storedCrc = ([uint32]$Bytes[$crcStart] -shl 24) -bor ([uint32]$Bytes[$crcStart + 1] -shl 16) -bor ([uint32]$Bytes[$crcStart + 2] -shl 8) -bor [uint32]$Bytes[$crcStart + 3]
@@ -812,7 +924,37 @@ function Test-TPMPngStructure {
             return [pscustomobject]@{ Valid = $false; Reason = ("PNG '{0}' chunk failed CRC validation (stored=0x{1:X8} computed=0x{2:X8}) -- structurally corrupted" -f $type, $storedCrc, $computedCrc) }
         }
 
-        if ($type -eq 'IEND') { $sawIend = $true }
+        if ($type -ceq 'IHDR') {
+            # Safe to read data bytes 8-12 unconditionally here -- $length
+            # was already confirmed to be exactly 13 above, and the
+            # data/CRC bounds check already confirmed dataStart+13 (and
+            # therefore dataStart+12, the last data byte) is within the
+            # file.
+            $bitDepth = [int]$Bytes[$dataStart + 8]
+            $colorType = [int]$Bytes[$dataStart + 9]
+            $compressionMethod = [int]$Bytes[$dataStart + 10]
+            $filterMethod = [int]$Bytes[$dataStart + 11]
+            $interlaceMethod = [int]$Bytes[$dataStart + 12]
+
+            if ($validColorTypes -notcontains $colorType) {
+                return [pscustomobject]@{ Valid = $false; Reason = "PNG IHDR declares an unknown color type ($colorType) -- valid values are 0, 2, 3, 4, 6" }
+            }
+            if ($validBitDepthsByColorType[$colorType] -notcontains $bitDepth) {
+                $allowed = $validBitDepthsByColorType[$colorType] -join ', '
+                return [pscustomobject]@{ Valid = $false; Reason = "PNG IHDR declares bit depth $bitDepth for color type $colorType, which the PNG spec does not permit (allowed: $allowed)" }
+            }
+            if ($compressionMethod -ne 0) {
+                return [pscustomobject]@{ Valid = $false; Reason = "PNG IHDR declares an unknown compression method ($compressionMethod) -- only 0 is defined by the spec" }
+            }
+            if ($filterMethod -ne 0) {
+                return [pscustomobject]@{ Valid = $false; Reason = "PNG IHDR declares an unknown filter method ($filterMethod) -- only 0 is defined by the spec" }
+            }
+            if ($interlaceMethod -ne 0 -and $interlaceMethod -ne 1) {
+                return [pscustomobject]@{ Valid = $false; Reason = "PNG IHDR declares an unknown interlace method ($interlaceMethod) -- only 0 (none) and 1 (Adam7) are defined by the spec" }
+            }
+        }
+
+        if ($type -ceq 'IEND') { $sawIend = $true }
         $pos = $crcStart + 4
         $chunkIndex++
     }
@@ -820,7 +962,17 @@ function Test-TPMPngStructure {
     if (-not $sawIend) {
         return [pscustomobject]@{ Valid = $false; Reason = 'PNG does not end with an IEND chunk -- likely truncated' }
     }
-    return [pscustomobject]@{ Valid = $true; Reason = 'PNG chunk structure and CRC validation passed' }
+    if ($ihdrCount -eq 0) {
+        return [pscustomobject]@{ Valid = $false; Reason = 'PNG has no IHDR chunk' }
+    }
+    if ($idatCount -eq 0) {
+        return [pscustomobject]@{ Valid = $false; Reason = 'PNG has no IDAT chunk -- a PNG must contain image data' }
+    }
+    if ($colorType -eq 3 -and $plteCount -eq 0) {
+        return [pscustomobject]@{ Valid = $false; Reason = 'PNG uses indexed color (color type 3) but has no PLTE chunk -- PLTE is required for this color type' }
+    }
+
+    return [pscustomobject]@{ Valid = $true; Reason = 'PNG chunk structure, ordering, uniqueness, and CRC validation passed' }
 }
 
 # Issue #151 review round 2/3: "successfully constructed an Image object"

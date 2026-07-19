@@ -2174,3 +2174,361 @@ Describe "Screenshot privacy disclosure and capture-scope safeguard (issue #151 
         @($result.Screenshots | Where-Object { $_.EvidenceType -eq 'ScreenCapture' }).Count | Should -BeGreaterThan 0
     }
 }
+
+Describe "Test-TPMPngStructure PNG specification conformance (issue #151 review round 4)" {
+    # Codex found a CRC-valid PNG containing a duplicate IHDR chunk passed
+    # round 3's validator -- CRC validation alone is not spec conformance,
+    # since a byte-for-byte duplicate chunk is individually CRC-valid.
+    # This block hand-builds CRC-VALID PNG fixtures (every chunk's CRC is
+    # computed with the same Get-TPMCrc32 the production code uses) that
+    # are structurally invalid in one specific way each -- proving the
+    # parser's own ordering/uniqueness/semantic logic is what rejects
+    # them, not a CRC mismatch that would reject almost anything.
+    BeforeAll {
+        function New-TPMPngChunkBytes {
+            param([string]$Type, [byte[]]$Data)
+            if ($null -eq $Data) { $Data = [byte[]]@() }
+            $length = $Data.Length
+            $lengthBytes = [byte[]](
+                [byte](($length -shr 24) -band 0xFF), [byte](($length -shr 16) -band 0xFF),
+                [byte](($length -shr 8) -band 0xFF), [byte]($length -band 0xFF)
+            )
+            $typeBytes = [System.Text.Encoding]::ASCII.GetBytes($Type)
+            $crcInput = $typeBytes + $Data
+            $crc = Get-TPMCrc32 -Bytes $crcInput -Offset 0 -Count $crcInput.Length
+            $crcBytes = [byte[]](
+                [byte](($crc -shr 24) -band 0xFF), [byte](($crc -shr 16) -band 0xFF),
+                [byte](($crc -shr 8) -band 0xFF), [byte]($crc -band 0xFF)
+            )
+            return $lengthBytes + $typeBytes + $Data + $crcBytes
+        }
+
+        function New-TPMTestPng {
+            param([byte[][]]$Chunks)
+            $sig = [byte[]](0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+            $all = $sig
+            foreach ($c in $Chunks) { $all = $all + $c }
+            return $all
+        }
+
+        function New-TPMIhdrData {
+            param([int]$Width = 4, [int]$Height = 4, [byte]$BitDepth = 8, [byte]$ColorType = 2, [byte]$Compression = 0, [byte]$Filter = 0, [byte]$Interlace = 0)
+            $w = [byte[]]((($Width -shr 24) -band 0xFF), (($Width -shr 16) -band 0xFF), (($Width -shr 8) -band 0xFF), ($Width -band 0xFF))
+            $h = [byte[]]((($Height -shr 24) -band 0xFF), (($Height -shr 16) -band 0xFF), (($Height -shr 8) -band 0xFF), ($Height -band 0xFF))
+            return $w + $h + [byte[]]($BitDepth, $ColorType, $Compression, $Filter, $Interlace)
+        }
+
+        # Shared building blocks -- a minimal, CRC-valid truecolor
+        # (color type 2) IHDR/IDAT/IEND used as the baseline most fixtures
+        # below start from and modify in exactly one way. Test-
+        # TPMPngStructure never decodes IDAT's actual pixel data, so its
+        # content only has to be present and CRC-valid, not real deflate
+        # output -- these fixtures test the parser's structural logic,
+        # not GDI+ decodability (that is covered separately by the
+        # existing round-1/2/3 tests using real Save-TPMRenderedTextCapture
+        # output).
+        $script:tpmIhdrTruecolor = New-TPMPngChunkBytes -Type 'IHDR' -Data (New-TPMIhdrData -ColorType 2 -BitDepth 8)
+        $script:tpmIdat = New-TPMPngChunkBytes -Type 'IDAT' -Data ([byte[]](1, 2, 3, 4, 5, 6, 7, 8))
+        $script:tpmIend = New-TPMPngChunkBytes -Type 'IEND' -Data $null
+        $script:tpmPlte = New-TPMPngChunkBytes -Type 'PLTE' -Data ([byte[]](1, 2, 3))
+    }
+
+    It "accepts a minimal, well-formed truecolor PNG (baseline control -- every other fixture below is one deliberate deviation from this)" {
+        $png = New-TPMTestPng -Chunks @($tpmIhdrTruecolor, $tpmIdat, $tpmIend)
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $true
+    }
+
+    # --- required fixture 1: duplicate IHDR ---
+    It "rejects a duplicate IHDR chunk, even though both copies are individually CRC-valid" {
+        $png = New-TPMTestPng -Chunks @($tpmIhdrTruecolor, $tpmIhdrTruecolor, $tpmIdat, $tpmIend)
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $false
+        $r.Reason | Should -Match 'more than one IHDR'
+    }
+
+    # --- required fixture 2: missing IDAT ---
+    It "rejects a PNG with no IDAT chunk" {
+        $png = New-TPMTestPng -Chunks @($tpmIhdrTruecolor, $tpmIend)
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $false
+        $r.Reason | Should -Match 'no IDAT chunk'
+    }
+
+    # --- required fixture 3: nonconsecutive IDAT ---
+    It "rejects IDAT chunks that are not consecutive (another chunk appears between them)" {
+        $tExt = New-TPMPngChunkBytes -Type 'tEXt' -Data ([System.Text.Encoding]::ASCII.GetBytes('a'))
+        $png = New-TPMTestPng -Chunks @($tpmIhdrTruecolor, $tpmIdat, $tExt, $tpmIdat, $tpmIend)
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $false
+        $r.Reason | Should -Match 'consecutive'
+    }
+
+    # --- required fixture 4: duplicate PLTE ---
+    It "rejects a duplicate PLTE chunk" {
+        $png = New-TPMTestPng -Chunks @($tpmIhdrTruecolor, $tpmPlte, $tpmPlte, $tpmIdat, $tpmIend)
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $false
+        $r.Reason | Should -Match 'more than one PLTE'
+    }
+
+    # --- required fixture 5: PLTE after IDAT ---
+    It "rejects a PLTE chunk that appears after IDAT" {
+        $png = New-TPMTestPng -Chunks @($tpmIhdrTruecolor, $tpmIdat, $tpmPlte, $tpmIend)
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $false
+        $r.Reason | Should -Match 'before the first IDAT'
+    }
+
+    # --- required fixture 6: indexed-color image missing PLTE ---
+    It "rejects an indexed-color (color type 3) image with no PLTE chunk" {
+        $ihdrIndexed = New-TPMPngChunkBytes -Type 'IHDR' -Data (New-TPMIhdrData -ColorType 3 -BitDepth 8)
+        $png = New-TPMTestPng -Chunks @($ihdrIndexed, $tpmIdat, $tpmIend)
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $false
+        $r.Reason | Should -Match 'PLTE is required'
+    }
+
+    # --- required fixture 7: grayscale image containing PLTE ---
+    It "rejects a grayscale (color type 0) image that contains a PLTE chunk" {
+        $ihdrGray = New-TPMPngChunkBytes -Type 'IHDR' -Data (New-TPMIhdrData -ColorType 0 -BitDepth 8)
+        $png = New-TPMTestPng -Chunks @($ihdrGray, $tpmPlte, $tpmIdat, $tpmIend)
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $false
+        $r.Reason | Should -Match 'not permitted for color type 0'
+    }
+
+    # --- required fixture 8: grayscale+alpha image containing PLTE ---
+    It "rejects a grayscale+alpha (color type 4) image that contains a PLTE chunk" {
+        $ihdrGA = New-TPMPngChunkBytes -Type 'IHDR' -Data (New-TPMIhdrData -ColorType 4 -BitDepth 8)
+        $png = New-TPMTestPng -Chunks @($ihdrGA, $tpmPlte, $tpmIdat, $tpmIend)
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $false
+        $r.Reason | Should -Match 'not permitted for color type 4'
+    }
+
+    # --- required fixture 9: optional PLTE before IDAT (truecolor) ---
+    It "accepts an optional PLTE chunk placed before IDAT on a truecolor (color type 2) image" {
+        $png = New-TPMTestPng -Chunks @($tpmIhdrTruecolor, $tpmPlte, $tpmIdat, $tpmIend)
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $true
+    }
+
+    # --- required fixture 10: optional PLTE omitted (truecolor+alpha) ---
+    It "accepts a truecolor+alpha (color type 6) image with PLTE omitted" {
+        $ihdrRgba = New-TPMPngChunkBytes -Type 'IHDR' -Data (New-TPMIhdrData -ColorType 6 -BitDepth 8)
+        $png = New-TPMTestPng -Chunks @($ihdrRgba, $tpmIdat, $tpmIend)
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $true
+    }
+
+    # --- required fixture 11: duplicate IEND ---
+    It "rejects a duplicate IEND chunk" {
+        $png = New-TPMTestPng -Chunks @($tpmIhdrTruecolor, $tpmIdat, $tpmIend, $tpmIend)
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $false
+        # Caught as "extra data after the terminating IEND" -- the first
+        # IEND already sets the terminal flag, so a second IEND is
+        # detected by that check before the parser ever gets far enough
+        # to evaluate it as "a second IEND chunk" specifically. Both are
+        # the same defect (more than one IEND); this asserts on the
+        # reason the current loop structure actually produces.
+        $r.Reason | Should -Match 'extra data after'
+    }
+
+    # --- required fixture 12: unknown critical chunk ---
+    It "rejects an unrecognized critical chunk (uppercase first letter, not one of IHDR/PLTE/IDAT/IEND)" {
+        $unknownCritical = New-TPMPngChunkBytes -Type 'FOOB' -Data ([byte[]](1, 2))
+        $png = New-TPMTestPng -Chunks @($tpmIhdrTruecolor, $tpmIdat, $unknownCritical, $tpmIend)
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $false
+        $r.Reason | Should -Match 'unrecognized critical chunk'
+    }
+
+    # --- required fixture 13: malformed chunk type ---
+    It "rejects a chunk type that is not 4 ASCII letters" {
+        $sig = [byte[]](0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+        # A chunk with digits (0x31-0x34, "1234") in its type field --
+        # bytes outside both the A-Z and a-z ranges.
+        $badChunk = [byte[]](0, 0, 0, 2) + [byte[]](0x31, 0x32, 0x33, 0x34) + [byte[]](1, 2) + [byte[]](0, 0, 0, 0)
+        $png = $sig + $tpmIhdrTruecolor + $badChunk
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $false
+        $r.Reason | Should -Match 'not 4 ASCII letters'
+    }
+
+    # --- required fixture 14: invalid color-type ---
+    It "rejects an IHDR with an unknown color type" {
+        $ihdrBadColor = New-TPMPngChunkBytes -Type 'IHDR' -Data (New-TPMIhdrData -ColorType 5 -BitDepth 8)
+        $png = New-TPMTestPng -Chunks @($ihdrBadColor, $tpmIdat, $tpmIend)
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $false
+        $r.Reason | Should -Match 'unknown color type'
+    }
+
+    # --- required fixture 15: invalid bit-depth/color-type combination ---
+    It "rejects an IHDR whose bit depth is not legal for its color type (truecolor with bit depth 4)" {
+        $ihdrBadDepth = New-TPMPngChunkBytes -Type 'IHDR' -Data (New-TPMIhdrData -ColorType 2 -BitDepth 4)
+        $png = New-TPMTestPng -Chunks @($ihdrBadDepth, $tpmIdat, $tpmIend)
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $false
+        $r.Reason | Should -Match 'does not permit'
+    }
+
+    It "accepts every legal color-type/bit-depth combination defined by the PNG spec" -TestCases @(
+        @{ ColorType = 0; BitDepth = 1 }, @{ ColorType = 0; BitDepth = 2 }, @{ ColorType = 0; BitDepth = 4 }, @{ ColorType = 0; BitDepth = 8 }, @{ ColorType = 0; BitDepth = 16 }
+        @{ ColorType = 2; BitDepth = 8 }, @{ ColorType = 2; BitDepth = 16 }
+        @{ ColorType = 3; BitDepth = 1 }, @{ ColorType = 3; BitDepth = 2 }, @{ ColorType = 3; BitDepth = 4 }, @{ ColorType = 3; BitDepth = 8 }
+        @{ ColorType = 4; BitDepth = 8 }, @{ ColorType = 4; BitDepth = 16 }
+        @{ ColorType = 6; BitDepth = 8 }, @{ ColorType = 6; BitDepth = 16 }
+    ) {
+        param($ColorType, $BitDepth)
+        $ihdr = New-TPMPngChunkBytes -Type 'IHDR' -Data (New-TPMIhdrData -ColorType $ColorType -BitDepth $BitDepth)
+        $chunks = @($ihdr)
+        # Color type 3 (indexed) requires PLTE.
+        if ($ColorType -eq 3) {
+            $maxEntries = [Math]::Pow(2, $BitDepth)
+            $plteBytes = New-Object 'byte[]' ([Math]::Min(3, [int]($maxEntries * 3)))
+            $chunks += (New-TPMPngChunkBytes -Type 'PLTE' -Data $plteBytes)
+        }
+        $chunks += $tpmIdat
+        $chunks += $tpmIend
+        $png = New-TPMTestPng -Chunks $chunks
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $true -Because "ColorType=$ColorType BitDepth=$BitDepth is spec-legal: $($r.Reason)"
+    }
+
+    It "rejects every illegal color-type/bit-depth combination the PNG spec forbids" -TestCases @(
+        @{ ColorType = 0; BitDepth = 3 }
+        @{ ColorType = 2; BitDepth = 1 }; @{ ColorType = 2; BitDepth = 2 }; @{ ColorType = 2; BitDepth = 4 }
+        @{ ColorType = 3; BitDepth = 16 }
+        @{ ColorType = 4; BitDepth = 1 }; @{ ColorType = 4; BitDepth = 2 }; @{ ColorType = 4; BitDepth = 4 }
+        @{ ColorType = 6; BitDepth = 1 }; @{ ColorType = 6; BitDepth = 2 }; @{ ColorType = 6; BitDepth = 4 }
+    ) {
+        param($ColorType, $BitDepth)
+        $ihdr = New-TPMPngChunkBytes -Type 'IHDR' -Data (New-TPMIhdrData -ColorType $ColorType -BitDepth $BitDepth)
+        $png = New-TPMTestPng -Chunks @($ihdr, $tpmIdat, $tpmIend)
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $false -Because "ColorType=$ColorType BitDepth=$BitDepth is not permitted by the PNG spec"
+    }
+
+    # --- required fixture 16: indexed palette exceeding bit-depth capacity ---
+    It "rejects an indexed-color PLTE whose entry count exceeds what the IHDR bit depth can reference" {
+        $ihdrIdx1 = New-TPMPngChunkBytes -Type 'IHDR' -Data (New-TPMIhdrData -ColorType 3 -BitDepth 1)
+        # Bit depth 1 can reference at most 2 palette entries; this PLTE
+        # declares 4 (12 bytes / 3).
+        $plteTooBig = New-TPMPngChunkBytes -Type 'PLTE' -Data ([byte[]](1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12))
+        $png = New-TPMTestPng -Chunks @($ihdrIdx1, $plteTooBig, $tpmIdat, $tpmIend)
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $false
+        $r.Reason | Should -Match "more than IHDR's bit depth"
+    }
+
+    # --- PLTE content validation beyond palette-size-vs-bit-depth ---
+    It "rejects a PLTE chunk whose length is not a multiple of 3" {
+        $badPlte = New-TPMPngChunkBytes -Type 'PLTE' -Data ([byte[]](1, 2, 3, 4))
+        $png = New-TPMTestPng -Chunks @($tpmIhdrTruecolor, $badPlte, $tpmIdat, $tpmIend)
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $false
+        $r.Reason | Should -Match 'multiple of 3'
+    }
+
+    It "rejects a zero-length PLTE chunk" {
+        $emptyPlte = New-TPMPngChunkBytes -Type 'PLTE' -Data ([byte[]]@())
+        $png = New-TPMTestPng -Chunks @($tpmIhdrTruecolor, $emptyPlte, $tpmIdat, $tpmIend)
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $false
+        $r.Reason | Should -Match 'multiple of 3'
+    }
+
+    It "rejects a PLTE chunk longer than 768 bytes (more than 256 entries)" {
+        $tooManyEntries = New-Object 'byte[]' 771
+        $hugePlte = New-TPMPngChunkBytes -Type 'PLTE' -Data $tooManyEntries
+        $png = New-TPMTestPng -Chunks @($tpmIhdrTruecolor, $hugePlte, $tpmIdat, $tpmIend)
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $false
+        $r.Reason | Should -Match '768 bytes'
+    }
+
+    # --- own adversarial review: additional gaps closed beyond the
+    # explicitly required list ---
+    It "allows an unknown ANCILLARY chunk (lowercase first letter) once its own bounds and CRC are valid" {
+        $unknownAncillary = New-TPMPngChunkBytes -Type 'fooB' -Data ([byte[]](1, 2))
+        $png = New-TPMTestPng -Chunks @($tpmIhdrTruecolor, $tpmIdat, $unknownAncillary, $tpmIend)
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $true -Because "unknown ancillary chunks are legal PNG extension points, not corruption"
+    }
+
+    It "treats chunk type comparisons as case-sensitive -- a lowercase 'ihdr' first chunk is not accepted as IHDR" {
+        # PowerShell's default -eq/-ne/-contains are case-INSENSITIVE;
+        # chunk-type case is semantically load-bearing in the PNG spec
+        # (it encodes the critical/ancillary property bit), so a chunk
+        # literally named "ihdr" is a different, unrecognized ancillary
+        # chunk, not a case-different spelling of "IHDR". Confirmed by
+        # direct repro that the case-insensitive default would have let
+        # this through as if it were a real IHDR.
+        $ihdrLower = New-TPMPngChunkBytes -Type 'ihdr' -Data (New-TPMIhdrData -ColorType 2 -BitDepth 8)
+        $png = New-TPMTestPng -Chunks @($ihdrLower, $tpmIdat, $tpmIend)
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $false
+        $r.Reason | Should -Match "first chunk must be IHDR"
+    }
+
+    It "rejects a chunk whose declared length exceeds the PNG spec's maximum chunk length (2^31 - 1), independent of file size" {
+        # Length field bytes 0x7FFFFFFF + 1 = 0x80000000 -- exceeds the
+        # spec's signed-32-bit chunk length ceiling even though it still
+        # fits in the unsigned 32-bit length field itself.
+        $sig = [byte[]](0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+        $oversizedLengthChunk = [byte[]](0x80, 0x00, 0x00, 0x00) + [System.Text.Encoding]::ASCII.GetBytes('IDAT')
+        $png = $sig + $tpmIhdrTruecolor + $oversizedLengthChunk
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $false
+        $r.Reason | Should -Match 'exceeds the maximum'
+    }
+
+    It "rejects invalid IHDR compression, filter, and interlace method values" -TestCases @(
+        @{ Compression = 1; Filter = 0; Interlace = 0 }
+        @{ Compression = 0; Filter = 1; Interlace = 0 }
+        @{ Compression = 0; Filter = 0; Interlace = 2 }
+    ) {
+        param($Compression, $Filter, $Interlace)
+        $ihdr = New-TPMPngChunkBytes -Type 'IHDR' -Data (New-TPMIhdrData -ColorType 2 -BitDepth 8 -Compression $Compression -Filter $Filter -Interlace $Interlace)
+        $png = New-TPMTestPng -Chunks @($ihdr, $tpmIdat, $tpmIend)
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $false
+    }
+
+    It "accepts both defined interlace methods (0 = none, 1 = Adam7)" -TestCases @(
+        @{ Interlace = 0 }, @{ Interlace = 1 }
+    ) {
+        param($Interlace)
+        $ihdr = New-TPMPngChunkBytes -Type 'IHDR' -Data (New-TPMIhdrData -ColorType 2 -BitDepth 8 -Interlace $Interlace)
+        $png = New-TPMTestPng -Chunks @($ihdr, $tpmIdat, $tpmIend)
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $true
+    }
+
+    It "never accepts a chunk whose CRC is wrong, even when everything else about the fixture is spec-legal (no regression from round 3)" {
+        $corruptIdat = New-TPMPngChunkBytes -Type 'IDAT' -Data ([byte[]](1, 2, 3, 4, 5, 6, 7, 8))
+        # Flip the stored CRC's last byte without touching the data.
+        $corruptIdat[$corruptIdat.Length - 1] = $corruptIdat[$corruptIdat.Length - 1] -bxor 0xFF
+        $png = New-TPMTestPng -Chunks @($tpmIhdrTruecolor, $corruptIdat, $tpmIend)
+        $r = Test-TPMPngStructure -Bytes $png
+        $r.Valid | Should -Be $false
+        $r.Reason | Should -Match 'CRC'
+    }
+
+    # --- end-to-end: the exact regressed scenario Codex found, through the
+    # full New-TPMCertificationScreenshot flow, proving Status never
+    # becomes 'Captured' for it ---
+    It "New-TPMCertificationScreenshot never reports Status = 'Captured' for a CRC-valid PNG with a duplicate IHDR chunk" {
+        $dir = Join-Path $TestDrive ("shots-dupihdr-" + [guid]::NewGuid().ToString('N'))
+        $duplicateIhdrPng = New-TPMTestPng -Chunks @($tpmIhdrTruecolor, $tpmIhdrTruecolor, $tpmIdat, $tpmIend)
+
+        $shot = New-TPMCertificationScreenshot -ScreenshotDir $dir -Name 'duplicate-ihdr' -EvidenceType 'DeterministicRender' -CaptureAction { param($p) [System.IO.File]::WriteAllBytes($p, $duplicateIhdrPng) }
+
+        $shot.Status | Should -Not -Be 'Captured'
+        $shot.Status | Should -Be 'Failed'
+        $shot.Details | Should -Match 'IHDR'
+    }
+}
