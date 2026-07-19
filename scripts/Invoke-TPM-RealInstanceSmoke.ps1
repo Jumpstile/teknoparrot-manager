@@ -596,6 +596,31 @@ function New-CertificationScorecard {
         }
     }
 
+    # Issue #149: $Results.Snapshots is populated unconditionally by the
+    # harness (the pre/post tree-hash diffing runs regardless of
+    # -RunUnattendedTPM), but "no unexpected changes" is a smoke-mode-only
+    # invariant -- the per-check "Smoke mode no change: <area>" entries this
+    # scorecard reads via $checkMap are themselves only ever added when NOT
+    # running unattended (see the `if (-not $RunUnattendedTPM)` gate around
+    # those Add-CheckResult calls in the main flow below). A real RC3
+    # arcade certification run using -RunUnattendedTPM still scored this
+    # item [PASS] with the literal text "no unexpected changes in smoke
+    # mode" -- true in the sense that $snapshotClean happened to be true,
+    # but a materially misleading claim: the run was not smoke mode, and
+    # nothing in this harness actually asserts "no unexpected changes" as a
+    # pass/fail condition for a real unattended run (there is no defined
+    # baseline yet for which changes an unattended AutoSync/Register pass
+    # is expected to make). Same explicit-N/A pattern as the restoration
+    # item above: unattended mode marks this item Status = 'NotApplicable'
+    # rather than reusing smoke-mode wording as if it were evidence.
+    $smokeFileSafetyDetails = if ($Results.SmokeMode) {
+        'no unexpected changes in smoke mode'
+    } else {
+        'not applicable in unattended mode -- file-safety diffing is a smoke-mode-only invariant, not asserted against real unattended runs'
+    }
+    $smokeFileSafetyStatus = if ($Results.SmokeMode) { if ($snapshotClean) { 'Pass' } else { 'Fail' } } else { 'NotApplicable' }
+    $smokeFileSafetyPassed = if ($Results.SmokeMode) { $snapshotClean } else { $null }
+
     # PowerShell parses hashtable-literal (@{...}) values in command mode, not
     # expression mode -- an inline "if (...) {...} else {...}" as a value,
     # even parenthesized, fails at runtime with "The term 'if' is not
@@ -671,7 +696,7 @@ function New-CertificationScorecard {
         [pscustomobject]@{Area='Static Analysis'; Passed=($Results.PSScriptAnalyzerFindings -eq 0); Details=("findings={0}" -f $Results.PSScriptAnalyzerFindings)},
         [pscustomobject]@{Area='Real Install Health'; Passed=[bool]$checkMap['Real install health check']; Details=$Results.InstallHealthReport},
         [pscustomobject]@{Area='Backups'; Passed=($Results.Backup.UserProfiles -or $Results.Backup.GameProfiles); Details=("UserProfiles={0} GameProfiles={1}" -f $Results.Backup.UserProfiles, $Results.Backup.GameProfiles)},
-        [pscustomobject]@{Area='Smoke File Safety'; Passed=$snapshotClean; Details='no unexpected changes in smoke mode'},
+        [pscustomobject]@{Area='Smoke File Safety'; Passed=$smokeFileSafetyPassed; Status=$smokeFileSafetyStatus; Details=$smokeFileSafetyDetails},
         [pscustomobject]@{Area='Artifacts'; Passed=((Test-Path -LiteralPath $json -PathType Leaf) -and (Test-Path -LiteralPath $md -PathType Leaf)); Details=$reportDir},
         [pscustomobject]@{Area='pcsx2x6 crosshair path (issue #79)'; Passed=[bool]$checkMap['pcsx2x6 crosshair path (issue #79)']; Details=$pcsx2x6Details},
         [pscustomobject]@{Area='Behavioral Certification (Virtual Beta Tester)'; Passed=($Results.VirtualBetaTester -and $Results.VirtualBetaTester.Total -gt 0 -and $Results.VirtualBetaTester.Failed -eq 0); Details=$vbtDetails},

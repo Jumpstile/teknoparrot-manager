@@ -1013,6 +1013,8 @@ Describe "New-CertificationScorecard requested/effective root reporting (issue #
                 }
                 if ($item.Area -eq 'Unattended TPM config restoration' -and $smoke) {
                     $mark | Should -Be 'N/A'
+                } elseif ($item.Area -eq 'Smoke File Safety' -and -not $smoke) {
+                    $mark | Should -Be 'N/A'
                 } else {
                     $mark | Should -BeIn @('PASS', 'FAIL')
                 }
@@ -1075,11 +1077,180 @@ Describe "New-CertificationScorecard requested/effective root reporting (issue #
         $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $true
         $result = New-CertificationScorecard -Results $fake
 
-        $otherItems = $result.Items | Where-Object { $_.Area -ne 'Unattended TPM config restoration' }
+        # Unattended TPM config restoration (round 4) and Smoke File Safety
+        # (issue #149) are the two items that intentionally carry a Status
+        # property -- every item besides those two must remain exactly as
+        # it was before either fix.
+        $itemsWithStatus = @('Unattended TPM config restoration', 'Smoke File Safety')
+        $otherItems = $result.Items | Where-Object { $itemsWithStatus -notcontains $_.Area }
         foreach ($item in $otherItems) {
             $item.PSObject.Properties.Name | Should -Not -Contain 'Status'
             $item.Passed | Should -Be $true
         }
+    }
+}
+
+Describe "Smoke File Safety Not Applicable during unattended mode (issue #149)" {
+    # A real RC3 arcade certification run using -RunUnattendedTPM scored
+    # [PASS] Smoke File Safety with the literal wording "no unexpected
+    # changes in smoke mode" -- true only in the narrow sense that the
+    # (unconditionally-collected) pre/post diff happened to show no
+    # changes, but a materially misleading claim: the run was not smoke
+    # mode, and nothing in the harness actually asserts "no unexpected
+    # changes" as a pass/fail condition for a real unattended run. Same
+    # explicit-N/A pattern as the restoration item (round 4): unattended
+    # mode must mark this Status = 'NotApplicable', Passed = $null, never
+    # reuse smoke-mode wording as if it were evidence of a pass.
+    BeforeAll {
+        function New-FakeDirtySnapshots {
+            # A non-empty diff -- used to prove the smoke-mode Fail path
+            # still works correctly alongside the new N/A path.
+            [ordered]@{
+                UserProfiles      = [pscustomobject]@{ Added = 1; Removed = 0; Changed = 0; BeforeSkipped = 0; AfterSkipped = 0 }
+                GameProfiles      = [pscustomobject]@{ Added = 0; Removed = 0; Changed = 0; BeforeSkipped = 0; AfterSkipped = 0 }
+                Pcsx2x6Crosshairs = [pscustomobject]@{ Added = 0; Removed = 0; Changed = 0; BeforeSkipped = 0; AfterSkipped = 0 }
+            }
+        }
+    }
+
+    It "renders the Smoke File Safety item correctly in smoke mode: Status = 'Pass', Passed = \$true, smoke-mode wording" {
+        $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $true
+        # New-FakeResults leaves Snapshots = $null, which the scorecard
+        # treats as clean (no diff data to flag as dirty).
+
+        $result = New-CertificationScorecard -Results $fake
+
+        $item = $result.Items | Where-Object { $_.Area -eq 'Smoke File Safety' }
+        $item.Status | Should -Be 'Pass'
+        $item.Passed | Should -Be $true
+        $item.Details | Should -Match 'smoke mode'
+    }
+
+    It "still fails (Status = 'Fail') in smoke mode when the pre/post diff actually shows unexpected changes -- applicable PASS/FAIL behavior is unaffected" {
+        $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $true
+        $fake.Snapshots = New-FakeDirtySnapshots
+
+        $result = New-CertificationScorecard -Results $fake
+
+        $item = $result.Items | Where-Object { $_.Area -eq 'Smoke File Safety' }
+        $item.Status | Should -Be 'Fail'
+        $item.Passed | Should -Be $false
+        $result.Overall | Should -Be 'NOT CERTIFIED'
+    }
+
+    It "marks Smoke File Safety Status = 'NotApplicable' during unattended mode, even when the (unconditionally-collected) diff shows no changes" {
+        $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
+        $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true }
+        # Snapshots = $null (default) -- would read as "clean" under the old
+        # logic and score [PASS] with smoke-mode wording; this is exactly
+        # the real RC3 scenario the fix addresses.
+
+        $result = New-CertificationScorecard -Results $fake
+
+        $item = $result.Items | Where-Object { $_.Area -eq 'Smoke File Safety' }
+        $item.Status | Should -Be 'NotApplicable'
+    }
+
+    It "never stores Passed = \$true for Smoke File Safety during unattended mode -- uses \$null" {
+        $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
+        $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true }
+
+        $result = New-CertificationScorecard -Results $fake
+
+        $item = $result.Items | Where-Object { $_.Area -eq 'Smoke File Safety' }
+        $item.Passed | Should -Be $null
+        $item.Passed | Should -Not -Be $true
+    }
+
+    It "never reuses smoke-mode wording during unattended mode -- Details does not claim smoke mode" {
+        $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
+        $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true }
+
+        $result = New-CertificationScorecard -Results $fake
+
+        $item = $result.Items | Where-Object { $_.Area -eq 'Smoke File Safety' }
+        $item.Details | Should -Not -Match 'smoke mode'
+        $item.Details | Should -Match 'not applicable in unattended mode'
+    }
+
+    It "renders [N/A] in the Markdown gate list for Smoke File Safety during unattended mode, never [PASS]" {
+        $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
+        $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true }
+
+        $result = New-CertificationScorecard -Results $fake
+        $item = $result.Items | Where-Object { $_.Area -eq 'Smoke File Safety' }
+
+        # Same mark-selection logic used by the harness's own Markdown
+        # renderer (Add-CertificationReport's "## Gates" loop).
+        $mark = if ($item.PSObject.Properties.Name -contains 'Status' -and $item.Status -eq 'NotApplicable') {
+            'N/A'
+        } elseif ($item.Passed) {
+            'PASS'
+        } else {
+            'FAIL'
+        }
+
+        $mark | Should -Be 'N/A'
+        $mark | Should -Not -Be 'PASS'
+    }
+
+    It "excludes the unattended-mode N/A Smoke File Safety item from both Passed and Total (does not inflate or reduce the score)" {
+        $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
+        $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true }
+
+        $result = New-CertificationScorecard -Results $fake
+
+        # 11 raw score items; both Smoke File Safety and (in this
+        # non-smoke, fully-passing fixture) no other item are N/A, so
+        # exactly 10 are applicable, and since every applicable item
+        # passes, Passed must equal Total.
+        $result.Items.Count | Should -Be 11
+        $result.Total | Should -Be 10
+        $result.Passed | Should -Be 10
+    }
+
+    It "does not force NOT CERTIFIED by itself -- an unattended run with every other applicable item passing still certifies" {
+        $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
+        $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true }
+        $fake.Snapshots = New-FakeDirtySnapshots
+        # Even a "dirty" diff must not affect the outcome once the item is
+        # correctly excluded as not applicable -- it is never asserted
+        # against in unattended mode at all.
+
+        $result = New-CertificationScorecard -Results $fake
+
+        $result.Overall | Should -Be 'CERTIFIED'
+        $item = $result.Items | Where-Object { $_.Area -eq 'Smoke File Safety' }
+        $item.Status | Should -Be 'NotApplicable'
+    }
+
+    It "leaves the existing restoration-item N/A behavior (round 4) unchanged alongside the new Smoke File Safety N/A behavior" {
+        $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $true
+
+        $result = New-CertificationScorecard -Results $fake
+
+        $restoreItem = $result.Items | Where-Object { $_.Area -eq 'Unattended TPM config restoration' }
+        $restoreItem.Status | Should -Be 'NotApplicable'
+        $restoreItem.Passed | Should -Not -Be $true
+        $restoreItem.Details | Should -Match 'not applicable in smoke mode'
+
+        # In smoke mode, Smoke File Safety is the applicable one and
+        # restoration is the N/A one -- the two items are independent and
+        # neither's Status affects the other's.
+        $safetyItem = $result.Items | Where-Object { $_.Area -eq 'Smoke File Safety' }
+        $safetyItem.Status | Should -Be 'Pass'
     }
 }
 
