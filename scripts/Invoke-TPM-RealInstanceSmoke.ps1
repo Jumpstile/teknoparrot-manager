@@ -80,6 +80,10 @@ function Add-CertificationReport {
 function Publish-TPMCertificationArtifacts {
     param([object[]]$Artifacts)
 
+    if (@($Artifacts).Count -lt 1) {
+        throw 'no authoritative artifacts supplied'
+    }
+
     $encoding = New-Object System.Text.UTF8Encoding($false)
     $staged = New-Object System.Collections.Generic.List[object]
     $destinations = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
@@ -108,11 +112,37 @@ function Publish-TPMCertificationArtifacts {
             if (-not (Test-Path -LiteralPath $pending -PathType Leaf) -or (Get-Item -LiteralPath $pending).Length -le 0) {
                 throw "authoritative artifact staging failed: $destination"
             }
-            $staged.Add([pscustomobject]@{ Pending=$pending; Final=$destination; Promoted=$false })
+            $staged.Add([pscustomobject]@{ Pending=$pending; Final=$destination; Promoted=$false; Content=[string]$artifact.Content })
         }
-        foreach ($item in $staged) {
+        # System Invariant Inventory: durable complete-set verification and a
+        # real commit boundary. The last staged artifact is treated as the
+        # commit marker (Test-TPMArtifactManifest requires it and the
+        # -BuildArtifacts callback always appends it last): every other
+        # artifact is promoted and durably re-read back from disk first, and
+        # only once every one of them is confirmed to match what was staged
+        # is the marker itself promoted and verified. A concurrent reader,
+        # or a process that resumes after this run was interrupted, should
+        # treat the marker's absence as "not committed" regardless of what
+        # report files it can already see on disk -- partial output is never
+        # authoritative.
+        $markerIndex = $staged.Count - 1
+        $nonMarker = $staged.GetRange(0, $markerIndex)
+        $marker = $staged[$markerIndex]
+        foreach ($item in $nonMarker) {
             Move-Item -LiteralPath $item.Pending -Destination $item.Final -ErrorAction Stop
             $item.Promoted = $true
+        }
+        foreach ($item in $nonMarker) {
+            $onDisk = [System.IO.File]::ReadAllText($item.Final, $encoding)
+            if ($onDisk -cne $item.Content) {
+                throw "authoritative artifact durable verification failed (on-disk content does not match staged content): $($item.Final)"
+            }
+        }
+        Move-Item -LiteralPath $marker.Pending -Destination $marker.Final -ErrorAction Stop
+        $marker.Promoted = $true
+        $markerOnDisk = [System.IO.File]::ReadAllText($marker.Final, $encoding)
+        if ($markerOnDisk -cne $marker.Content) {
+            throw "authoritative commit marker durable verification failed: $($marker.Final)"
         }
     } catch {
         $failure = $_.Exception.Message
@@ -738,15 +768,190 @@ function New-TPMCertificationScreenshot {
 $script:tpmScreenshotSequence = 0
 $script:tpmEvidenceWorkflowId = [guid]::NewGuid().ToString('N')
 
-# System Invariant Inventory: capture ordering. Every ledger entry (capture,
-# skip, or failure alike) receives a monotonic sequence number at the single
-# point it is appended to $results.Screenshots (Add-Screenshot below), not at
-# the point it is produced -- capture and append are not the same event, and
-# only append order is the order a reviewer or Complete-TPMCertificationTransaction
-# can trust. This lets the transaction assert that 'final-certification-result'
-# was genuinely the last evidence recorded, instead of relying on it being the
-# last call in source-code order, which nothing previously enforced.
-$script:tpmEvidenceSequence = 0
+# System Invariant Inventory: authoritative evidence issuance ledger. This is
+# the workflow's own private record of what it actually issued, populated
+# only by Add-Screenshot in real append order -- not the public
+# $results.Screenshots array, which anything in this script's scope could in
+# principle splice a fabricated record into. Complete-TPMCertificationTransaction
+# validates the submitted evidence (the public array a caller passes in)
+# against this ledger by reference identity, not by re-checking field
+# values: constructing a brand-new object with every field copied from a
+# real record -- WorkflowId, Sequence, Path, whatever -- still produces a
+# different object, and [object]::ReferenceEquals against this ledger's
+# entries is false for it. Ordering is likewise never trusted off a mutable
+# Sequence property read back from an object; it is derived from the
+# record's actual position in this list.
+$script:tpmEvidenceLedger = New-Object System.Collections.Generic.List[object]
+# Sealed the instant 'final-certification-result' is issued (successfully,
+# skipped, or failed) -- no further evidence may be appended afterward.
+# This makes "the final record was genuinely issued last" and "no evidence
+# can be replayed in after finalization" true by construction: there is no
+# code path left that can grow the ledger once this is set, independent of
+# any check the transaction later performs.
+$script:tpmEvidenceLedgerSealed = $false
+
+function Reset-TPMEvidenceLedger {
+    # Real production flow never calls this (the script-scope initializers
+    # above already establish a fresh ledger once per run) -- it exists so
+    # Pester fixtures can start each It block with an empty, unsealed ledger
+    # and a fresh workflow identity, the same way the harness starts each
+    # real run, instead of accumulating state across tests.
+    $script:tpmEvidenceLedger = New-Object System.Collections.Generic.List[object]
+    $script:tpmEvidenceLedgerSealed = $false
+    $script:tpmEvidenceWorkflowId = [guid]::NewGuid().ToString('N')
+    $script:tpmScreenshotSequence = 0
+}
+
+# System Invariant Inventory: authoritative score-item manifest. The exact,
+# closed set of certification score-item identifiers this harness is allowed
+# to score against. Complete-TPMCertificationTransaction validates
+# $Certification.Items against this manifest before it is ever handed to
+# Get-TPMCertificationScoreFromItems, so a synthetic, partial, duplicated, or
+# malformed Items array -- including a hand-built single-item "100% passing"
+# scorecard -- is rejected before it can influence the score at all. Defined
+# as a function returning a fresh manifest each call (not a top-level
+# script-scope assignment) -- this repo's Pester harness extracts and
+# dot-sources only function definitions from this file (see
+# Tests/TPMCertificationHarness.Tests.ps1's header comment), so a bare
+# top-level statement would silently never execute under test.
+function Get-TPMExpectedScoreItemManifest {
+    [ordered]@{
+        'Repository' = [pscustomobject]@{ AllowsNotApplicable = $false }
+        'Pester' = [pscustomobject]@{ AllowsNotApplicable = $false }
+        'Static Analysis' = [pscustomobject]@{ AllowsNotApplicable = $false }
+        'Real Install Health' = [pscustomobject]@{ AllowsNotApplicable = $false }
+        'Backups' = [pscustomobject]@{ AllowsNotApplicable = $false }
+        'Smoke File Safety' = [pscustomobject]@{ AllowsNotApplicable = $true }
+        'Artifacts' = [pscustomobject]@{ AllowsNotApplicable = $false }
+        'pcsx2x6 crosshair path (issue #79)' = [pscustomobject]@{ AllowsNotApplicable = $false }
+        'Behavioral Certification (Virtual Beta Tester)' = [pscustomobject]@{ AllowsNotApplicable = $false }
+        'Unattended TPM root binding' = [pscustomobject]@{ AllowsNotApplicable = $false }
+        'Unattended TPM config restoration' = [pscustomobject]@{ AllowsNotApplicable = $true }
+    }
+}
+
+function Test-TPMScoreItemManifest {
+    param([object[]]$Items)
+    $errors = New-Object System.Collections.Generic.List[string]
+    $items = @($Items)
+    $expectedScoreItems = Get-TPMExpectedScoreItemManifest
+
+    foreach ($expectedArea in $expectedScoreItems.Keys) {
+        $itemsForArea = @($items | Where-Object { $_ -and (@($_.PSObject.Properties.Name) -contains 'Area') -and [string]$_.Area -ceq $expectedArea })
+        if ($itemsForArea.Count -ne 1) {
+            $errors.Add("expected exactly one '$expectedArea' score item; found $($itemsForArea.Count)")
+        }
+    }
+
+    foreach ($item in $items) {
+        if ($null -eq $item) { $errors.Add('null score item is not permitted'); continue }
+        $properties = @($item.PSObject.Properties.Name)
+        if ($properties -notcontains 'Area' -or [string]::IsNullOrWhiteSpace([string]$item.Area)) {
+            $errors.Add('score item has no valid Area')
+            continue
+        }
+        $area = [string]$item.Area
+        if (@($expectedScoreItems.Keys) -cnotcontains $area) {
+            $errors.Add("unexpected score item '$area'")
+            continue
+        }
+        $expected = $expectedScoreItems[$area]
+        $hasStatus = ($properties -contains 'Status')
+        $status = if ($hasStatus) { [string]$item.Status } else { $null }
+        if ($hasStatus -and $status -ceq 'NotApplicable') {
+            if (-not $expected.AllowsNotApplicable) {
+                $errors.Add("score item '$area' is not permitted to be NotApplicable")
+            }
+            if ($properties -notcontains 'Passed' -or $null -ne $item.Passed) {
+                $errors.Add("score item '$area' is NotApplicable but Passed is not `$null")
+            }
+        } else {
+            if ($properties -notcontains 'Passed' -or $item.Passed -isnot [bool]) {
+                $errors.Add("score item '$area' has a missing or non-Boolean Passed value")
+            }
+        }
+    }
+
+    [pscustomobject]@{
+        Valid = ($errors.Count -eq 0)
+        Details = $(if ($errors.Count -eq 0) { 'score-item manifest validated' } else { $errors -join '; ' })
+    }
+}
+
+# System Invariant Inventory: authoritative publication artifact manifest.
+# The exact, closed set of report identities a certification run must
+# publish -- four human/machine-readable reports plus the commit marker
+# (see Publish-TPMCertificationArtifacts). -BuildArtifacts is required to
+# tag each artifact it returns with one of these Ids; an arbitrary,
+# incomplete, duplicated, or wrongly-destined artifact set is rejected
+# before Publish-TPMCertificationArtifacts ever touches disk. Defined as a
+# function for the same reason as Get-TPMExpectedScoreItemManifest above --
+# a bare top-level assignment is invisible to the AST-extraction test
+# harness.
+function Get-TPMExpectedArtifactManifest {
+    [ordered]@{
+        'CertificationScorecardJson' = $true
+        'ValidationReportJson' = $true
+        'CertificationScorecardMarkdown' = $true
+        'ValidationReportMarkdown' = $true
+        'CommitMarker' = $true
+    }
+}
+
+function Test-TPMArtifactManifest {
+    param([object[]]$Artifacts, [string]$ReportDir)
+    $errors = New-Object System.Collections.Generic.List[string]
+    $artifacts = @($Artifacts)
+    $expectedArtifacts = Get-TPMExpectedArtifactManifest
+    $reportDirFull = [System.IO.Path]::GetFullPath($ReportDir)
+    $seenIds = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+    $seenPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+
+    foreach ($artifact in $artifacts) {
+        if ($null -eq $artifact) { $errors.Add('null artifact is not permitted'); continue }
+        $properties = @($artifact.PSObject.Properties.Name)
+        if ($properties -notcontains 'Id' -or [string]::IsNullOrWhiteSpace([string]$artifact.Id)) {
+            $errors.Add('artifact has no valid Id')
+            continue
+        }
+        $id = [string]$artifact.Id
+        if (@($expectedArtifacts.Keys) -cnotcontains $id) {
+            $errors.Add("unexpected artifact identity '$id'")
+            continue
+        }
+        if (-not $seenIds.Add($id)) {
+            $errors.Add("duplicate artifact identity '$id'")
+            continue
+        }
+        if ($properties -notcontains 'Path' -or [string]::IsNullOrWhiteSpace([string]$artifact.Path)) {
+            $errors.Add("artifact '$id' has no destination path")
+            continue
+        }
+        $fullPath = [System.IO.Path]::GetFullPath([string]$artifact.Path)
+        if (-not $fullPath.StartsWith($reportDirFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $errors.Add("artifact '$id' destination is not contained within this run's report directory: $($artifact.Path)")
+            continue
+        }
+        if (-not $seenPaths.Add($fullPath)) {
+            $errors.Add("artifact '$id' reuses a destination already claimed by another artifact: $($artifact.Path)")
+            continue
+        }
+        if ($properties -notcontains 'Content' -or $null -eq $artifact.Content) {
+            $errors.Add("artifact '$id' has no content")
+        }
+    }
+
+    foreach ($expectedId in $expectedArtifacts.Keys) {
+        if (-not $seenIds.Contains($expectedId)) {
+            $errors.Add("expected artifact identity '$expectedId' was not produced")
+        }
+    }
+
+    [pscustomobject]@{
+        Valid = ($errors.Count -eq 0)
+        Details = $(if ($errors.Count -eq 0) { 'artifact manifest validated' } else { $errors -join '; ' })
+    }
+}
 function New-TPMScreenshotReservedPath {
     param([string]$ScreenshotDir, [string]$Name)
     $safeName = ($Name -replace '[^A-Za-z0-9_\-]', '-')
@@ -1526,6 +1731,17 @@ $results = [ordered]@{
 # not a pass/fail check.
 function Add-Screenshot {
     param([string]$ScreenshotDir,[string]$Name,[string]$EvidenceType,[scriptblock]$CaptureAction,[switch]$Skip,[string]$SkipReason)
+
+    # System Invariant Inventory: replay prevention / final-record ordering.
+    # The ledger seals itself the instant 'final-certification-result' is
+    # issued -- fail loudly (throw) rather than silently accept evidence
+    # after finalization, since that would mean the certification workflow
+    # itself has a logic error, not something a structured Failed record
+    # should quietly absorb.
+    if ($script:tpmEvidenceLedgerSealed) {
+        throw "certification evidence ledger is sealed -- no further evidence may be issued after final-certification-result (attempted: '$Name')"
+    }
+
     try {
         if ($Skip) { $shot=New-TPMCertificationScreenshot -ScreenshotDir $ScreenshotDir -Name $Name -Skip -SkipReason $SkipReason }
         else { $shot=New-TPMCertificationScreenshot -ScreenshotDir $ScreenshotDir -Name $Name -EvidenceType $EvidenceType -CaptureAction $CaptureAction }
@@ -1533,13 +1749,29 @@ function Add-Screenshot {
         $safeName=if([string]::IsNullOrWhiteSpace($Name)){'unnamed-evidence'}else{$Name}
         $shot=[pscustomobject]@{Name=$safeName;Label=$safeName;Path=$null;Status='Failed';EvidenceType='Failed';Required=(-not $Skip);WorkflowId=$script:tpmEvidenceWorkflowId;CaptureScope=$null;Details="evidence creation failed safely: $($_.Exception.Message)"}
     }
-    # Sequence is assigned here, at the single ledger-append point, not by
-    # the producer above -- append order is what Complete-TPMCertificationTransaction
-    # trusts for the capture-ordering invariant, and every record (capture,
-    # skip, or failure) must receive one so the invariant can distinguish
-    # "genuinely last" from "merely absent from the check."
-    $script:tpmEvidenceSequence++
-    $shot = $shot | Add-Member -NotePropertyName Sequence -NotePropertyValue $script:tpmEvidenceSequence -Force -PassThru
+
+    # System Invariant Inventory: path ownership / containment, checked at
+    # issuance (fail closed, before the record can ever enter the ledger),
+    # not only re-checked later against the caller's copy of it.
+    if ($shot.Path) {
+        $fullPath = [System.IO.Path]::GetFullPath([string]$shot.Path)
+        $fullScreenshotDir = [System.IO.Path]::GetFullPath($ScreenshotDir)
+        if (-not $fullPath.StartsWith($fullScreenshotDir, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $shot = [pscustomobject]@{Name=$shot.Name;Label=$shot.Name;Path=$shot.Path;Status='Failed';EvidenceType='Failed';Required=$true;WorkflowId=$script:tpmEvidenceWorkflowId;CaptureScope=$null;Details="issued evidence path escapes this run's screenshot directory: $($shot.Path)"}
+        } elseif (@($script:tpmEvidenceLedger | Where-Object { $_.Path -and ([string]$_.Path -ceq [string]$shot.Path) }).Count -gt 0) {
+            $shot = [pscustomobject]@{Name=$shot.Name;Label=$shot.Name;Path=$shot.Path;Status='Failed';EvidenceType='Failed';Required=$true;WorkflowId=$script:tpmEvidenceWorkflowId;CaptureScope=$null;Details="issued evidence path is already owned by another ledger record: $($shot.Path)"}
+        }
+    }
+
+    # Sequence remains an informational/reporting field only -- it is never
+    # what Complete-TPMCertificationTransaction trusts for ordering (that is
+    # derived from the ledger's own append order, immune to a property being
+    # mutated on an already-issued object).
+    $shot = $shot | Add-Member -NotePropertyName Sequence -NotePropertyValue ($script:tpmEvidenceLedger.Count + 1) -Force -PassThru
+    $script:tpmEvidenceLedger.Add($shot)
+    if ([string]$shot.Name -ceq 'final-certification-result') {
+        $script:tpmEvidenceLedgerSealed = $true
+    }
     $script:results.Screenshots += $shot
     $mark=switch($shot.Status){'Captured'{'[SHOT]'}'Skipped'{'[SKIP]'}default{'[FAIL]'}}
     $scopeSuffix=if($shot.CaptureScope){" ($($shot.CaptureScope))"}else{''}
@@ -1548,7 +1780,13 @@ function Add-Screenshot {
 }
 
 function Complete-TPMCertificationTransaction {
-    param($Certification, $Results, [scriptblock]$BuildArtifacts)
+    param(
+        $Certification,
+        $Results,
+        [Parameter(Mandatory=$true)][scriptblock]$BuildArtifacts,
+        [Parameter(Mandatory=$true)][string]$ScreenshotDir,
+        [Parameter(Mandatory=$true)][string]$ReportDir
+    )
 
     # System Invariant Inventory: this manifest is the authoritative production
     # evidence contract. Every expected identifier occurs exactly once; no
@@ -1565,20 +1803,60 @@ function Complete-TPMCertificationTransaction {
         'final-certification-result' = [pscustomobject]@{ Required=$true; EvidenceType='ScreenCapture' }
     }
     $errors = New-Object System.Collections.Generic.List[string]
-    $evidence = @($Results.Screenshots)
+    # .ToArray(), not @(...) -- wrapping a List[object] directly in @(...)
+    # hits a PowerShell dynamic-binder edge case (PSEnumerableBinder /
+    # PSToObjectArrayBinder) that throws "Argument types do not match" for
+    # this exact generic-collection shape. Confirmed by direct repro before
+    # this fix; .ToArray() sidesteps the dynamic binder entirely.
+    $ledger = $script:tpmEvidenceLedger.ToArray()
+    $submitted = @($Results.Screenshots)
     $workflowId = [string]$Results.EvidenceWorkflowId
-    if ([string]::IsNullOrWhiteSpace($workflowId)) {
-        $errors.Add('certification evidence workflow identity is missing')
+
+    if ([string]::IsNullOrWhiteSpace($workflowId) -or $workflowId -cne $script:tpmEvidenceWorkflowId) {
+        $errors.Add('certification evidence workflow identity is missing or does not match the active workflow')
+    }
+
+    # System Invariant Inventory: unforgeable in-process record association.
+    # The submitted evidence (whatever a caller passes as $Results.Screenshots)
+    # is validated against the workflow's own private issuance ledger by
+    # reference identity, position for position -- not by re-checking field
+    # values. A completely synthetic record, or a real record's fields
+    # copied onto a new object, is never [object]::ReferenceEquals to what
+    # the ledger actually holds, so it fails here regardless of how
+    # convincing its Name/WorkflowId/Sequence/Path look.
+    if ($submitted.Count -ne $ledger.Count) {
+        $errors.Add("submitted evidence count ($($submitted.Count)) does not match the workflow's issued evidence ledger ($($ledger.Count))")
+    } else {
+        for ($i = 0; $i -lt $ledger.Count; $i++) {
+            if (-not [object]::ReferenceEquals($submitted[$i], $ledger[$i])) {
+                $errors.Add("submitted evidence at position $i is not the object the workflow actually issued at that position")
+            }
+        }
+    }
+
+    # System Invariant Inventory: final record genuinely issued last. The
+    # ledger seals itself the instant final-certification-result is issued
+    # (Add-Screenshot), so nothing can have been appended after it -- this
+    # merely confirms that actually happened this run (it is possible for
+    # the ledger to be empty or unsealed if the run never reached
+    # finalization at all).
+    if ($ledger.Count -eq 0 -or -not $script:tpmEvidenceLedgerSealed) {
+        $errors.Add('certification evidence ledger was never sealed by a final-certification-result issuance')
+    } elseif ([string]$ledger[$ledger.Count - 1].Name -cne 'final-certification-result') {
+        $errors.Add('the last evidence issued by the workflow was not final-certification-result')
     }
 
     foreach ($expectedName in $expectedEvidence.Keys) {
-        $recordsForName = @($evidence | Where-Object { $_.Name -ceq $expectedName })
+        $recordsForName = @($ledger | Where-Object { $_.Name -ceq $expectedName })
         if ($recordsForName.Count -ne 1) {
             $errors.Add("expected exactly one '$expectedName' evidence record; found $($recordsForName.Count)")
         }
     }
 
-    foreach ($shot in $evidence) {
+    $screenshotDirFull = [System.IO.Path]::GetFullPath($ScreenshotDir)
+    $seenPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+
+    foreach ($shot in $ledger) {
         if ($null -eq $shot) {
             $errors.Add('null evidence record is not permitted')
             continue
@@ -1599,13 +1877,35 @@ function Complete-TPMCertificationTransaction {
             $errors.Add("evidence '$name' did not originate from this certification evidence workflow")
             continue
         }
-        if ($properties -notcontains 'Sequence' -or $shot.Sequence -isnot [int] -or $shot.Sequence -le 0) {
-            $errors.Add("evidence '$name' has no valid capture-order sequence")
-            continue
-        }
         if ($properties -notcontains 'Required' -or $shot.Required -isnot [bool] -or $shot.Required -ne $expected.Required) {
             $errors.Add("evidence '$name' has invalid Required metadata")
             continue
+        }
+        # System Invariant Inventory: identifier-to-label consistency and
+        # path ownership/uniqueness/containment/identifier-to-filename
+        # consistency, re-verified here against the ledger's own copy of
+        # each field (not the caller's), even though Add-Screenshot already
+        # enforces path containment and uniqueness at issuance time.
+        if ($properties -notcontains 'Label' -or [string]$shot.Label -cne $name) {
+            $errors.Add("evidence '$name' has a Label that does not match its identifier")
+            continue
+        }
+        if ($shot.Path) {
+            $shotFullPath = [System.IO.Path]::GetFullPath([string]$shot.Path)
+            if (-not $shotFullPath.StartsWith($screenshotDirFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $errors.Add("evidence '$name' path is not contained within this run's screenshot directory: $($shot.Path)")
+                continue
+            }
+            if (-not $seenPaths.Add($shotFullPath)) {
+                $errors.Add("evidence '$name' reuses a path already claimed by another ledger record: $($shot.Path)")
+                continue
+            }
+            $safeNamePrefix = ($name -replace '[^A-Za-z0-9_\-]', '-') + '_'
+            $fileName = [System.IO.Path]::GetFileName($shotFullPath)
+            if (-not $fileName.StartsWith($safeNamePrefix, [System.StringComparison]::Ordinal)) {
+                $errors.Add("evidence '$name' filename does not match its issued identifier: $fileName")
+                continue
+            }
         }
         if ($expected.Required) {
             if ($shot.Status -cne 'Captured') {
@@ -1614,6 +1914,16 @@ function Complete-TPMCertificationTransaction {
             }
             if ([string]$shot.EvidenceType -cne $expected.EvidenceType) {
                 $errors.Add("required evidence '$name' has EvidenceType '$($shot.EvidenceType)', expected '$($expected.EvidenceType)'")
+                continue
+            }
+            # System Invariant Inventory: real capture provenance. A required
+            # ScreenCapture record must document which capture scope
+            # actually produced it (Window or FullDesktop -- see
+            # Save-TPMScreenCapture) -- a missing CaptureScope on an
+            # otherwise-Captured ScreenCapture record is a sign the evidence
+            # did not genuinely come through the real capture path.
+            if ($expected.EvidenceType -ceq 'ScreenCapture' -and [string]::IsNullOrWhiteSpace([string]$shot.CaptureScope)) {
+                $errors.Add("required evidence '$name' is missing its capture scope")
                 continue
             }
             if ([string]::IsNullOrWhiteSpace([string]$shot.Path)) {
@@ -1633,40 +1943,26 @@ function Complete-TPMCertificationTransaction {
         }
     }
 
-    # System Invariant Inventory: capture ordering. final-certification-result
-    # captures the provisional scorecard display -- it is only meaningful
-    # evidence if it genuinely happened after every other ledger entry, not
-    # merely because it is the last Add-Screenshot call in source order. This
-    # asserts that directly against the append-order Sequence values recorded
-    # by Add-Screenshot, rather than trusting call order.
-    $finalRecords = @($evidence | Where-Object { $_.Name -ceq 'final-certification-result' -and $_.PSObject.Properties.Name -contains 'Sequence' -and $_.Sequence -is [int] })
-    if ($finalRecords.Count -eq 1) {
-        $otherSequences = @($evidence | Where-Object { $_.Name -cne 'final-certification-result' -and $_.PSObject.Properties.Name -contains 'Sequence' -and $_.Sequence -is [int] } | ForEach-Object { $_.Sequence })
-        if ($otherSequences.Count -gt 0) {
-            $maxOtherSequence = ($otherSequences | Measure-Object -Maximum).Maximum
-            if ($finalRecords[0].Sequence -le $maxOtherSequence) {
-                $errors.Add("final-certification-result was not captured last (sequence $($finalRecords[0].Sequence) is not after $maxOtherSequence)")
-            }
-        }
-    }
-
     $evidencePassed = ($errors.Count -eq 0)
     $evidenceStatus = [pscustomobject]@{
         Passed = $evidencePassed
         Status = $(if ($evidencePassed) { 'Pass' } else { 'Fail' })
-        Details = $(if ($evidencePassed) { 'complete evidence manifest validated, including exactly one final-certification-result' } else { $errors -join '; ' })
+        Details = $(if ($evidencePassed) { 'complete evidence manifest validated against the workflow issuance ledger, including exactly one final-certification-result' } else { $errors -join '; ' })
     }
-    # System Invariant Inventory: derived scorecard state. The numeric-score
-    # half of the decision is recomputed from $Certification.Items here, not
-    # read off $Certification.Overall -- that field is a snapshot the
-    # scorecard constructor happened to set earlier, and nothing prevents a
-    # future code path from mutating Items afterward without also updating
-    # it. Deriving fresh from the same immutable fact (Items) both call sites
-    # already share (via Get-TPMCertificationScoreFromItems) means the
-    # provisional display and the real commit decision can never silently
-    # diverge from each other or from a stale field.
-    $score = Get-TPMCertificationScoreFromItems -Items @($Certification.Items)
-    $scoreEligible = ($score.Overall -ceq 'CERTIFIED')
+
+    # System Invariant Inventory: authoritative score-item manifest, derived
+    # scorecard state. $Certification.Items is validated against the exact
+    # expected identifier set (Test-TPMScoreItemManifest) before it is ever
+    # handed to Get-TPMCertificationScoreFromItems -- a synthetic, partial,
+    # or malformed Items array cannot reach the scoring arithmetic at all,
+    # let alone be trusted directly the way $Certification.Overall used to be.
+    $scoreManifest = Test-TPMScoreItemManifest -Items @($Certification.Items)
+    if ($scoreManifest.Valid) {
+        $score = Get-TPMCertificationScoreFromItems -Items @($Certification.Items)
+        $scoreEligible = ($score.Overall -ceq 'CERTIFIED')
+    } else {
+        $scoreEligible = $false
+    }
     $certified = ($scoreEligible -and $evidencePassed)
     $finalStatus = if ($certified) { 'PASS' } else { 'FAIL' }
     $finalOverall = if ($certified) { 'CERTIFIED' } else { 'NOT CERTIFIED' }
@@ -1678,55 +1974,78 @@ function Complete-TPMCertificationTransaction {
         ExitCode = $exitCode
         ScoreEligible = $scoreEligible
         Evidence = $evidenceStatus
+        ScoreManifest = $scoreManifest
         Published = $false
         PublicationError = $null
     }
 
+    # A decision snapshot deliberately excludes Published/PublicationError --
+    # this is what gets serialized into the certification/validation JSON
+    # and Markdown artifacts, and it is generated before publication is even
+    # attempted. Whether publication itself will succeed is not a fact this
+    # snapshot can know about itself; embedding a Published field here would
+    # always read $false (or a value fixed before the real outcome exists)
+    # in a report that later gets promoted successfully, which is exactly
+    # the stale-serialized-state failure mode this design avoids. The
+    # commit marker artifact (see Publish-TPMCertificationArtifacts) is the
+    # actual durable proof of a complete publish; its content never needs
+    # to describe an outcome that hadn't happened yet when it was written,
+    # because a failed publish never leaves it on disk at all.
+    $decisionSnapshot = [pscustomobject]@{
+        Passed = $certified
+        Status = $finalStatus
+        Overall = $finalOverall
+        ExitCode = $exitCode
+        ScoreEligible = $scoreEligible
+        Evidence = $evidenceStatus
+        ScoreManifest = $scoreManifest
+    }
+
     # This is the only assignment point for final authoritative outcome state.
     $Certification.Overall = $finalOverall
-    $Certification.Screenshots = $evidence
+    $Certification.Screenshots = $ledger
     $Certification | Add-Member -NotePropertyName Status -NotePropertyValue $finalStatus -Force
     $Certification | Add-Member -NotePropertyName ExitCode -NotePropertyValue $exitCode -Force
     $Certification | Add-Member -NotePropertyName ScoreEligible -NotePropertyValue $scoreEligible -Force
     $Certification | Add-Member -NotePropertyName EvidenceFinalization -NotePropertyValue $evidenceStatus -Force
-    $Certification | Add-Member -NotePropertyName Finalization -NotePropertyValue $transaction -Force
+    $Certification | Add-Member -NotePropertyName Finalization -NotePropertyValue $decisionSnapshot -Force
     $Results.Status = $finalStatus
     $Results.EvidenceFinalization = $evidenceStatus
-    $Results.Finalization = $transaction
+    $Results.Finalization = $decisionSnapshot
     $Results.CertificationOverall = $finalOverall
     $Results.ExitCode = $exitCode
 
-    # System Invariant Inventory: publication as part of commit. Writing the
-    # authoritative reports is not a step that happens after the transaction
-    # decides -- it is the last step of the transaction itself. A prior
-    # architecture called Publish-TPMCertificationArtifacts separately after
-    # this function returned, with the caller hardcoding its own duplicate
-    # FAIL/NOT CERTIFIED/exit-1 output on a publish failure -- two
-    # independent places asserting the same "publish failed means not
-    # certified" fact, which could drift out of sync. Folding publication in
-    # here means $transaction is the one and only object either path
-    # produces: on publish failure the same object this function already
-    # returns is downgraded in place, so there is exactly one authority for
-    # the final outcome regardless of which half failed.
-    if ($BuildArtifacts) {
-        try {
-            $artifacts = & $BuildArtifacts $transaction
-            Publish-TPMCertificationArtifacts -Artifacts $artifacts
-            $transaction.Published = $true
-        } catch {
-            $transaction.Published = $false
-            $transaction.PublicationError = $_.Exception.Message
-            $transaction.Passed = $false
-            $transaction.Status = 'FAIL'
-            $transaction.Overall = 'NOT CERTIFIED'
-            $transaction.ExitCode = 1
-            $Certification.Overall = $transaction.Overall
-            $Certification | Add-Member -NotePropertyName Status -NotePropertyValue $transaction.Status -Force
-            $Certification | Add-Member -NotePropertyName ExitCode -NotePropertyValue $transaction.ExitCode -Force
-            $Results.Status = $transaction.Status
-            $Results.CertificationOverall = $transaction.Overall
-            $Results.ExitCode = $transaction.ExitCode
+    # System Invariant Inventory: mandatory publication commit. -BuildArtifacts
+    # is a required parameter (PowerShell parameter binding itself rejects a
+    # missing/$null callback before this function body ever runs), and its
+    # returned artifact set is validated against the exact expected artifact
+    # identity manifest (Test-TPMArtifactManifest) before anything is
+    # written to disk. Publish-TPMCertificationArtifacts still performs the
+    # actual atomic stage/promote/durably-verify/commit-marker sequence; a
+    # failure anywhere in that chain downgrades this same transaction object
+    # in place, so there is exactly one authority for the outcome regardless
+    # of which half failed.
+    try {
+        $artifacts = @(& $BuildArtifacts $decisionSnapshot)
+        $artifactManifest = Test-TPMArtifactManifest -Artifacts $artifacts -ReportDir $ReportDir
+        if (-not $artifactManifest.Valid) {
+            throw "authoritative artifact manifest invalid: $($artifactManifest.Details)"
         }
+        Publish-TPMCertificationArtifacts -Artifacts $artifacts
+        $transaction.Published = $true
+    } catch {
+        $transaction.Published = $false
+        $transaction.PublicationError = $_.Exception.Message
+        $transaction.Passed = $false
+        $transaction.Status = 'FAIL'
+        $transaction.Overall = 'NOT CERTIFIED'
+        $transaction.ExitCode = 1
+        $Certification.Overall = $transaction.Overall
+        $Certification | Add-Member -NotePropertyName Status -NotePropertyValue $transaction.Status -Force
+        $Certification | Add-Member -NotePropertyName ExitCode -NotePropertyValue $transaction.ExitCode -Force
+        $Results.Status = $transaction.Status
+        $Results.CertificationOverall = $transaction.Overall
+        $Results.ExitCode = $transaction.ExitCode
     }
 
     return $transaction
@@ -2681,15 +3000,23 @@ finally {
     }
 
         $newline = [Environment]::NewLine
+        # The commit marker is always last -- Publish-TPMCertificationArtifacts
+        # treats the final array entry as the marker and only promotes it
+        # after every other artifact is durably verified on disk. Its
+        # content is static (never references Finalization), since a failed
+        # publish never leaves it on disk at all: the marker's mere presence
+        # is the proof, not anything it says about itself.
+        $commitMarkerPath = Join-Path $reportDir 'TPM-Certification-Commit.json'
         @(
-            [pscustomobject]@{Path=$certificationJson;Content=($certification | ConvertTo-Json -Depth 8)}
-            [pscustomobject]@{Path=$json;Content=($results | ConvertTo-Json -Depth 8)}
-            [pscustomobject]@{Path=$certificationMd;Content=(($script:tpmCertificationReportLines -join $newline) + $newline)}
-            [pscustomobject]@{Path=$md;Content=(($script:tpmValidationReportLines -join $newline) + $newline)}
+            [pscustomobject]@{Id='CertificationScorecardJson';Path=$certificationJson;Content=($certification | ConvertTo-Json -Depth 8)}
+            [pscustomobject]@{Id='ValidationReportJson';Path=$json;Content=($results | ConvertTo-Json -Depth 8)}
+            [pscustomobject]@{Id='CertificationScorecardMarkdown';Path=$certificationMd;Content=(($script:tpmCertificationReportLines -join $newline) + $newline)}
+            [pscustomobject]@{Id='ValidationReportMarkdown';Path=$md;Content=(($script:tpmValidationReportLines -join $newline) + $newline)}
+            [pscustomobject]@{Id='CommitMarker';Path=$commitMarkerPath;Content=(('{"schemaVersion":1,"committed":true,"artifactCount":5}') + $newline)}
         )
     }
 
-    $finalization = Complete-TPMCertificationTransaction -Certification $certification -Results $results -BuildArtifacts $buildCertificationArtifacts
+    $finalization = Complete-TPMCertificationTransaction -Certification $certification -Results $results -BuildArtifacts $buildCertificationArtifacts -ScreenshotDir $screenshotDir -ReportDir $reportDir
     Clear-TPMConsoleStatus
 
     if (-not $finalization.Published) {

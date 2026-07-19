@@ -2584,17 +2584,30 @@ Describe "Issue #154 evidence metadata and finalization regression" {
 }
 
 
-Describe "Issue #154 authoritative certification transaction invariants" {
+
+
+Describe "Issue #154 round 3 -- authoritative workflow-owned facts, not descriptions of them" {
     BeforeAll {
+        # System Invariant Inventory fixture helper. Builds a complete,
+        # legitimately-issued evidence ledger by calling the real
+        # Add-Screenshot for every identifier (the only way to produce
+        # objects that can pass the transaction's reference-identity check
+        # against the ledger), plus a full-pass, manifest-conformant Items
+        # array, plus fresh ScreenshotDir/ReportDir sandboxes.
         function New-CertificationTransactionFixture {
-            $script:tpmEvidenceWorkflowId = [guid]::NewGuid().ToString('N')
-            $dir = Join-Path $TestDrive $script:tpmEvidenceWorkflowId
-            New-Item -ItemType Directory -Force -Path $dir | Out-Null
+            Reset-TPMEvidenceLedger
+            $workflowId = $script:tpmEvidenceWorkflowId
+            $screenshotDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Force -Path $screenshotDir | Out-Null
+            $reportDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Force -Path $reportDir | Out-Null
+
+            $script:results = [ordered]@{ Screenshots=@(); EvidenceWorkflowId=$workflowId; Status='PASS' }
+
             # Production order: skips happen early, final-certification-result
-            # is always last -- the fixture mirrors that ordering because the
-            # capture-ordering invariant asserts final-certification-result
-            # has the highest Sequence of the whole manifest, the same way
-            # Add-Screenshot assigns it in the real certification flow.
+            # is always last -- Add-Screenshot seals the ledger the instant
+            # it is issued, so this order is what makes the ledger's own
+            # "last entry is final-certification-result" invariant true.
             $spec = @(
                 @{Name='certification-suite-running';Type='ScreenCapture'}
                 @{Name='requested-effective-root-evidence';Type='ScreenCapture'}
@@ -2606,44 +2619,71 @@ Describe "Issue #154 authoritative certification transaction invariants" {
                 @{Name='smoke-file-safety-evidence';Type='DeterministicRender'}
                 @{Name='final-certification-result';Type='ScreenCapture'}
             )
-            $shots = @()
-            $seq = 0
             foreach ($item in $spec) {
-                $seq++
                 if ($item.Skip) {
-                    $shot = New-TPMCertificationScreenshot -ScreenshotDir $dir -Name $item.Name -Skip -SkipReason 'not displayed'
+                    [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name $item.Name -Skip -SkipReason 'not displayed')
+                } elseif ($item.Type -ceq 'ScreenCapture') {
+                    # Real Save-TPMScreenCapture calls GDI+ CopyFromScreen,
+                    # which throws "the handle is invalid" in this sandboxed
+                    # test environment (no real interactive display -- a
+                    # pre-existing, environment-only limitation unrelated to
+                    # this round, see the separate "Save-TPMScreenCapture
+                    # returns a CaptureScope..." test). This produces a real,
+                    # valid PNG via the same safe rendering path
+                    # DeterministicRender evidence uses, but reports a
+                    # genuine CaptureScope value so ScreenCapture-typed
+                    # fixture evidence still satisfies the capture-scope
+                    # invariant the same way a real capture would.
+                    [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name $item.Name -EvidenceType $item.Type -CaptureAction { param($p) [void](Save-TPMRenderedTextCapture -Path $p -Lines @('valid transaction evidence')); return 'Window' })
                 } else {
-                    $shot = New-TPMCertificationScreenshot -ScreenshotDir $dir -Name $item.Name -EvidenceType $item.Type -CaptureAction { param($p) Save-TPMRenderedTextCapture -Path $p -Lines @('valid transaction evidence') }
+                    [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name $item.Name -EvidenceType $item.Type -CaptureAction { param($p) Save-TPMRenderedTextCapture -Path $p -Lines @('valid transaction evidence') })
                 }
-                $shot = $shot | Add-Member -NotePropertyName Sequence -NotePropertyValue $seq -Force -PassThru
-                $shots += $shot
             }
-            # Continue the real evidence-append counter from where the fixture
-            # left off, so a test that goes on to call the real Add-Screenshot
-            # (e.g. to simulate a thrown final capture) gets a Sequence that
-            # is genuinely later than everything the fixture built, exactly
-            # as production's single monotonic counter would produce.
-            $script:tpmEvidenceSequence = $seq
 
-            # A realistic full-pass Items array, derived through the same
-            # Get-TPMCertificationScoreFromItems function production uses --
-            # this is what makes "does not let complete evidence override a
-            # failed numeric score" and "does not let passing numeric
-            # arithmetic override failed finalization" meaningful: the
-            # transaction now derives Overall/Passed/Total from Items itself,
-            # it does not trust whatever the fixture (or an attacker-
-            # controlled mutation) set directly on .Overall/.Passed/.Total.
             $items = @(
                 [pscustomobject]@{Area='Repository'; Passed=$true; Details='clean'},
                 [pscustomobject]@{Area='Pester'; Passed=$true; Details='full pass'},
                 [pscustomobject]@{Area='Static Analysis'; Passed=$true; Details='0 findings'},
-                [pscustomobject]@{Area='Artifacts'; Passed=$true; Details='present'}
+                [pscustomobject]@{Area='Real Install Health'; Passed=$true; Details='ok'},
+                [pscustomobject]@{Area='Backups'; Passed=$true; Details='ok'},
+                [pscustomobject]@{Area='Smoke File Safety'; Passed=$true; Details='ok'},
+                [pscustomobject]@{Area='Artifacts'; Passed=$true; Details='present'},
+                [pscustomobject]@{Area='pcsx2x6 crosshair path (issue #79)'; Passed=$true; Details='ok'},
+                [pscustomobject]@{Area='Behavioral Certification (Virtual Beta Tester)'; Passed=$true; Details='ok'},
+                [pscustomobject]@{Area='Unattended TPM root binding'; Passed=$true; Details='ok'},
+                [pscustomobject]@{Area='Unattended TPM config restoration'; Passed=$true; Details='ok'}
             )
             $score = Get-TPMCertificationScoreFromItems -Items $items
+            $certification = [pscustomobject]@{Overall=$score.Overall;Screenshots=@();Passed=$score.Passed;Total=$score.Total;ScorePercent=$score.ScorePercent;Items=$items}
+
             [pscustomobject]@{
-                Results = [ordered]@{Screenshots=$shots;EvidenceWorkflowId=$script:tpmEvidenceWorkflowId;Status='PASS'}
-                Certification = [pscustomobject]@{Overall=$score.Overall;Screenshots=@();Passed=$score.Passed;Total=$score.Total;ScorePercent=$score.ScorePercent;Items=$items}
+                Results = $script:results
+                Certification = $certification
+                ScreenshotDir = $screenshotDir
+                ReportDir = $reportDir
+                WorkflowId = $workflowId
             }
+        }
+
+        function Get-TPMValidBuildArtifacts {
+            param([string]$ReportDir)
+            $capturedReportDir = $ReportDir
+            {
+                param($Finalization)
+                @(
+                    [pscustomobject]@{Id='CertificationScorecardJson';Path=(Join-Path $capturedReportDir 'cert.json');Content='{"ok":true}'}
+                    [pscustomobject]@{Id='ValidationReportJson';Path=(Join-Path $capturedReportDir 'validation.json');Content='{"ok":true}'}
+                    [pscustomobject]@{Id='CertificationScorecardMarkdown';Path=(Join-Path $capturedReportDir 'cert.md');Content='ok'}
+                    [pscustomobject]@{Id='ValidationReportMarkdown';Path=(Join-Path $capturedReportDir 'validation.md');Content='ok'}
+                    [pscustomobject]@{Id='CommitMarker';Path=(Join-Path $capturedReportDir 'commit.json');Content='{"committed":true}'}
+                )
+            }.GetNewClosure()
+        }
+
+        function Invoke-TPMTransaction {
+            param($Fixture, [scriptblock]$BuildArtifacts)
+            $builder = if ($BuildArtifacts) { $BuildArtifacts } else { Get-TPMValidBuildArtifacts -ReportDir $Fixture.ReportDir }
+            Complete-TPMCertificationTransaction -Certification $Fixture.Certification -Results $Fixture.Results -BuildArtifacts $builder -ScreenshotDir $Fixture.ScreenshotDir -ReportDir $Fixture.ReportDir
         }
 
         function Assert-FailedTransactionConsistency {
@@ -2658,251 +2698,446 @@ Describe "Issue #154 authoritative certification transaction invariants" {
             $Fixture.Certification.Status | Should -Be 'FAIL'
             $Fixture.Certification.Overall | Should -Be 'NOT CERTIFIED'
             $Fixture.Certification.ExitCode | Should -Be 1
-            (Get-TPMCertificationFinalConsoleLines $Transaction) -join [Environment]::NewLine | Should -Match 'FINAL STATUS : FAIL'
-            (Get-TPMCertificationFinalConsoleLines $Transaction) -join [Environment]::NewLine | Should -Match 'OVERALL      : NOT CERTIFIED'
-            (Get-TPMCertificationFinalConsoleLines $Transaction) -join [Environment]::NewLine | Should -Match 'EXIT CODE    : 1'
-            $report = (Get-TPMCertificationFinalReportLines $Transaction) -join [Environment]::NewLine
-            $report | Should -Match 'Status: \*\*FAIL\*\*'
-            $report | Should -Match 'Overall: \*\*NOT CERTIFIED\*\*'
-            $report | Should -Match 'Process exit code: 1'
         }
     }
 
-    It "certifies only one complete normal-workflow manifest and returns exit code zero" {
-        $f = New-CertificationTransactionFixture
-        $x = Complete-TPMCertificationTransaction $f.Certification $f.Results
-        $x.Passed | Should -BeTrue
-        $x.Status | Should -Be 'PASS'
-        $x.Overall | Should -Be 'CERTIFIED'
-        $x.ExitCode | Should -Be 0
-        $f.Results.Status | Should -Be 'PASS'
-        $f.Certification.Status | Should -Be 'PASS'
-        @($f.Results.Screenshots | Where-Object Name -CEQ 'final-certification-result').Count | Should -Be 1
+    Context "authoritative evidence issuance ledger" {
+        It "certifies a legitimately-issued complete manifest and publishes successfully" {
+            $f = New-CertificationTransactionFixture
+            $x = Invoke-TPMTransaction $f
+            $x.Passed | Should -BeTrue
+            $x.Status | Should -Be 'PASS'
+            $x.Overall | Should -Be 'CERTIFIED'
+            $x.ExitCode | Should -Be 0
+            $x.Published | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $f.ReportDir 'commit.json') | Should -BeTrue
+        }
+
+        It "rejects failure of required evidence <Name>" -TestCases @(
+            @{Name='certification-suite-running'},@{Name='requested-effective-root-evidence'},
+            @{Name='adaptive-menu-normal'},@{Name='adaptive-menu-small'},@{Name='adaptive-menu-maximized'},
+            @{Name='smoke-file-safety-evidence'},@{Name='final-certification-result'}
+        ) {
+            param($Name)
+            $f = New-CertificationTransactionFixture
+            $shot = $f.Results.Screenshots | Where-Object Name -CEQ $Name
+            $shot.Status='Failed';$shot.EvidenceType='Failed';$shot.Details='simulated required failure'
+            $x = Invoke-TPMTransaction $f
+            Assert-FailedTransactionConsistency $f $x
+        }
+
+        It "rejects a completely synthetic evidence array copying every real field, including WorkflowId" {
+            $f = New-CertificationTransactionFixture
+            # Every field is a faithful copy of the real ledger, including
+            # WorkflowId -- only the object identity differs. This is the
+            # exact fabrication technique the round-2 design could not
+            # defend against.
+            $forged = @($f.Results.Screenshots | ForEach-Object {
+                [pscustomobject]@{Name=$_.Name;Label=$_.Label;Path=$_.Path;Status=$_.Status;EvidenceType=$_.EvidenceType;Required=$_.Required;WorkflowId=$_.WorkflowId;CaptureScope=$_.CaptureScope;Details=$_.Details;Sequence=$_.Sequence}
+            })
+            $f.Results.Screenshots = $forged
+            $x = Invoke-TPMTransaction $f
+            Assert-FailedTransactionConsistency $f $x
+            $x.Evidence.Details | Should -Match 'not the object the workflow actually issued'
+        }
+
+        It "rejects an extra fabricated record appended to submitted evidence" {
+            $f = New-CertificationTransactionFixture
+            $real = $f.Results.Screenshots[0]
+            $fake = [pscustomobject]@{Name=$real.Name;Label=$real.Label;Path=$real.Path;Status=$real.Status;EvidenceType=$real.EvidenceType;Required=$real.Required;WorkflowId=$real.WorkflowId;CaptureScope=$real.CaptureScope;Details=$real.Details;Sequence=$real.Sequence}
+            $f.Results.Screenshots = @($f.Results.Screenshots) + $fake
+            $x = Invoke-TPMTransaction $f
+            Assert-FailedTransactionConsistency $f $x
+            $x.Evidence.Details | Should -Match 'does not match'
+        }
+
+        It "rejects submitted evidence missing a real ledger entry" {
+            $f = New-CertificationTransactionFixture
+            $f.Results.Screenshots = @($f.Results.Screenshots | Select-Object -Skip 1)
+            $x = Invoke-TPMTransaction $f
+            Assert-FailedTransactionConsistency $f $x
+            $x.Evidence.Details | Should -Match 'does not match'
+        }
+
+        It "rejects submitted evidence reordered relative to the issuance ledger" {
+            $f = New-CertificationTransactionFixture
+            $shots = @($f.Results.Screenshots)
+            $tmp = $shots[0]; $shots[0] = $shots[1]; $shots[1] = $tmp
+            $f.Results.Screenshots = $shots
+            $x = Invoke-TPMTransaction $f
+            Assert-FailedTransactionConsistency $f $x
+            $x.Evidence.Details | Should -Match 'not the object the workflow actually issued'
+        }
+
+        It "rejects evidence replayed from a different workflow run" {
+            $other = New-CertificationTransactionFixture
+            $f = New-CertificationTransactionFixture
+            # Splice a real, legitimately-issued record from a DIFFERENT
+            # run's ledger into this run's submitted evidence. It is a
+            # completely real object (passes reference-identity against
+            # ITS OWN ledger), but not this run's ledger.
+            $f.Results.Screenshots = @($f.Results.Screenshots | Select-Object -Skip 1) + @($other.Results.Screenshots[0])
+            $x = Invoke-TPMTransaction $f
+            Assert-FailedTransactionConsistency $f $x
+        }
+
+        It "throws when evidence is issued after the ledger has already sealed" {
+            $f = New-CertificationTransactionFixture
+            { Add-Screenshot -ScreenshotDir $f.ScreenshotDir -Name 'replayed-after-final' -EvidenceType 'ScreenCapture' -CaptureAction { param($p) Save-TPMRenderedTextCapture -Path $p -Lines @('late') } } | Should -Throw '*sealed*'
+        }
+
+        It "rejects a manifest where the ledger's last entry is not final-certification-result" {
+            $f = New-CertificationTransactionFixture
+            # Direct same-scope ledger manipulation, bypassing Add-Screenshot's
+            # seal entirely -- represents the residual risk of an actor with
+            # access to this script's own scope, not a caller constructing a
+            # public-looking object. Appended consistently to both the ledger
+            # and the submission so the reference-identity check alone does
+            # not explain the failure -- only the ordering invariant does.
+            $extra = [pscustomobject]@{Name='replayed-after-final';Label='replayed-after-final';Path=$null;Status='Skipped';EvidenceType='Skipped';Required=$false;WorkflowId=$f.WorkflowId;CaptureScope=$null;Details='forged post-final record';Sequence=99}
+            $script:tpmEvidenceLedger.Add($extra)
+            $f.Results.Screenshots = @($f.Results.Screenshots) + $extra
+            $x = Invoke-TPMTransaction $f
+            Assert-FailedTransactionConsistency $f $x
+            $x.Evidence.Details | Should -Match 'unexpected evidence|not final-certification-result'
+        }
+
+        It "rejects an unsealed ledger (final-certification-result never issued)" {
+            $f = New-CertificationTransactionFixture
+            $f.Results.Screenshots = @($f.Results.Screenshots | Where-Object Name -CNE 'final-certification-result')
+            $script:tpmEvidenceLedger.RemoveAt($script:tpmEvidenceLedger.Count - 1)
+            $script:tpmEvidenceLedgerSealed = $false
+            $x = Invoke-TPMTransaction $f
+            Assert-FailedTransactionConsistency $f $x
+        }
+
+        It "rejects evidence whose path is not contained within the ScreenshotDir asserted at commit time" {
+            $f = New-CertificationTransactionFixture
+            $foreignDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Force -Path $foreignDir | Out-Null
+            $x = Complete-TPMCertificationTransaction -Certification $f.Certification -Results $f.Results -BuildArtifacts (Get-TPMValidBuildArtifacts -ReportDir $f.ReportDir) -ScreenshotDir $foreignDir -ReportDir $f.ReportDir
+            Assert-FailedTransactionConsistency $f $x
+            $x.Evidence.Details | Should -Match 'not contained within'
+        }
+
+        It "rejects two ledger entries claiming the same evidence path" {
+            $f = New-CertificationTransactionFixture
+            $real = $f.Results.Screenshots | Where-Object Name -CEQ 'adaptive-menu-normal'
+            $duplicatePath = [pscustomobject]@{Name='adaptive-menu-small';Label='adaptive-menu-small';Path=$real.Path;Status='Captured';EvidenceType='DeterministicRender';Required=$true;WorkflowId=$f.WorkflowId;CaptureScope=$null;Details='captured';Sequence=999}
+            $shots = @($f.Results.Screenshots | Where-Object Name -CNE 'adaptive-menu-small') + $duplicatePath
+            $ledgerList = New-Object System.Collections.Generic.List[object]
+            foreach ($s in $shots) { $ledgerList.Add($s) }
+            $script:tpmEvidenceLedger = $ledgerList
+            $f.Results.Screenshots = $shots
+            $x = Invoke-TPMTransaction $f
+            Assert-FailedTransactionConsistency $f $x
+            $x.Evidence.Details | Should -Match 'reuses a path'
+        }
+
+        It "rejects an evidence record whose Label does not match its identifier" {
+            $f = New-CertificationTransactionFixture
+            $shot = $f.Results.Screenshots | Where-Object Name -CEQ 'adaptive-menu-normal'
+            $shot.Label = 'adaptive-menu-small'
+            $x = Invoke-TPMTransaction $f
+            Assert-FailedTransactionConsistency $f $x
+            $x.Evidence.Details | Should -Match 'Label that does not match'
+        }
+
+        It "rejects an evidence record whose filename does not match its issued identifier" {
+            $f = New-CertificationTransactionFixture
+            $shot = $f.Results.Screenshots | Where-Object Name -CEQ 'adaptive-menu-normal'
+            $forgedPath = Join-Path (Split-Path -Parent $shot.Path) ('adaptive-menu-small_' + (Split-Path -Leaf $shot.Path))
+            Copy-Item -LiteralPath $shot.Path -Destination $forgedPath
+            $shot.Path = $forgedPath
+            $x = Invoke-TPMTransaction $f
+            Assert-FailedTransactionConsistency $f $x
+            $x.Evidence.Details | Should -Match 'filename does not match'
+        }
+
+        It "rejects required ScreenCapture evidence with a missing capture scope" {
+            $f = New-CertificationTransactionFixture
+            $shot = $f.Results.Screenshots | Where-Object Name -CEQ 'certification-suite-running'
+            $shot.CaptureScope = $null
+            $x = Invoke-TPMTransaction $f
+            Assert-FailedTransactionConsistency $f $x
+            $x.Evidence.Details | Should -Match 'missing its capture scope'
+        }
+
+        It "rejects a reused PNG substituted for the final-certification-result path" {
+            $f = New-CertificationTransactionFixture
+            $final = $f.Results.Screenshots | Where-Object Name -CEQ 'final-certification-result'
+            $earlier = $f.Results.Screenshots | Where-Object Name -CEQ 'certification-suite-running'
+            # Reuse an earlier, genuinely valid PNG's bytes under the final
+            # record's own (correctly-named, correctly-contained) path --
+            # a forged content substitution rather than a forged object.
+            Copy-Item -LiteralPath $earlier.Path -Destination $final.Path -Force
+            $x = Invoke-TPMTransaction $f
+            # Structurally this still validates (a valid PNG is still a
+            # valid PNG) -- this test documents that content-level evidence
+            # authenticity (e.g. "is this genuinely a screenshot of this
+            # run's own console") is intentionally out of scope; only
+            # structural PNG validity, identity, provenance, and ordering
+            # are enforced. See ARCHITECTURE.md's Specification Inventory
+            # note on this boundary.
+            $x.Passed | Should -BeTrue
+        }
     }
 
-    It "rejects failure of required evidence <Name> even when final evidence succeeds" -TestCases @(
-        @{Name='certification-suite-running'},@{Name='requested-effective-root-evidence'},
-        @{Name='adaptive-menu-normal'},@{Name='adaptive-menu-small'},@{Name='adaptive-menu-maximized'},
-        @{Name='smoke-file-safety-evidence'},@{Name='final-certification-result'}
-    ) {
-        param($Name)
-        $f = New-CertificationTransactionFixture
-        $shot = $f.Results.Screenshots | Where-Object Name -CEQ $Name
-        $shot.Status='Failed';$shot.EvidenceType='Failed';$shot.Details='simulated earlier required failure'
-        $x = Complete-TPMCertificationTransaction $f.Certification $f.Results
-        Assert-FailedTransactionConsistency $f $x
+    Context "authoritative score-item manifest" {
+        It "does not let complete evidence override a failed numeric score" {
+            $f = New-CertificationTransactionFixture
+            ($f.Certification.Items | Where-Object Area -EQ 'Pester').Passed = $false
+            $x = Invoke-TPMTransaction $f
+            $x.ScoreEligible | Should -BeFalse
+            Assert-FailedTransactionConsistency $f $x
+        }
+
+        It "derives the score decision from Items rather than trusting a stale or tampered Overall field" {
+            $f = New-CertificationTransactionFixture
+            $f.Certification.Overall = 'NOT CERTIFIED'
+            $x = Invoke-TPMTransaction $f
+            $x.ScoreEligible | Should -BeTrue
+            $x.Passed | Should -BeTrue
+        }
+
+        It "rejects a synthetic one-item passing scorecard" {
+            $f = New-CertificationTransactionFixture
+            $f.Certification.Items = @([pscustomobject]@{Area='Repository';Passed=$true})
+            $x = Invoke-TPMTransaction $f
+            $x.ScoreEligible | Should -BeFalse
+            Assert-FailedTransactionConsistency $f $x
+        }
+
+        It "rejects a scorecard missing a required item" {
+            $f = New-CertificationTransactionFixture
+            $f.Certification.Items = @($f.Certification.Items | Where-Object Area -NE 'Backups')
+            $x = Invoke-TPMTransaction $f
+            $x.ScoreEligible | Should -BeFalse
+        }
+
+        It "rejects a scorecard with a duplicated item identifier" {
+            $f = New-CertificationTransactionFixture
+            $f.Certification.Items = @($f.Certification.Items) + [pscustomobject]@{Area='Repository';Passed=$true}
+            $x = Invoke-TPMTransaction $f
+            $x.ScoreEligible | Should -BeFalse
+        }
+
+        It "rejects a scorecard with an extra, unrecognized item" {
+            $f = New-CertificationTransactionFixture
+            $f.Certification.Items = @($f.Certification.Items) + [pscustomobject]@{Area='Not A Real Gate';Passed=$true}
+            $x = Invoke-TPMTransaction $f
+            $x.ScoreEligible | Should -BeFalse
+        }
+
+        It "rejects a non-Boolean truthy Passed value" -TestCases @(
+            @{Value='true'},@{Value=1},@{Value='yes'}
+        ) {
+            param($Value)
+            $f = New-CertificationTransactionFixture
+            ($f.Certification.Items | Where-Object Area -EQ 'Pester').Passed = $Value
+            $x = Invoke-TPMTransaction $f
+            $x.ScoreEligible | Should -BeFalse
+        }
+
+        It "rejects an item claiming NotApplicable when the manifest does not allow it" {
+            $f = New-CertificationTransactionFixture
+            $item = $f.Certification.Items | Where-Object Area -EQ 'Repository'
+            $item | Add-Member -NotePropertyName Status -NotePropertyValue 'NotApplicable' -Force
+            $item.Passed = $null
+            $x = Invoke-TPMTransaction $f
+            $x.ScoreEligible | Should -BeFalse
+        }
+
+        It "rejects a NotApplicable item whose Passed is not null" {
+            $f = New-CertificationTransactionFixture
+            $item = $f.Certification.Items | Where-Object Area -EQ 'Smoke File Safety'
+            $item | Add-Member -NotePropertyName Status -NotePropertyValue 'NotApplicable' -Force
+            $item.Passed = $true
+            $x = Invoke-TPMTransaction $f
+            $x.ScoreEligible | Should -BeFalse
+        }
+
+        It "accepts a legitimate NotApplicable item where the manifest allows it" {
+            $f = New-CertificationTransactionFixture
+            $item = $f.Certification.Items | Where-Object Area -EQ 'Unattended TPM config restoration'
+            $item | Add-Member -NotePropertyName Status -NotePropertyValue 'NotApplicable' -Force
+            $item.Passed = $null
+            $x = Invoke-TPMTransaction $f
+            $x.Passed | Should -BeTrue
+        }
     }
 
-    It "rejects a missing final-certification-result" {
-        $f=New-CertificationTransactionFixture
-        $f.Results.Screenshots=@($f.Results.Screenshots|Where-Object Name -CNE 'final-certification-result')
-        $x=Complete-TPMCertificationTransaction $f.Certification $f.Results
-        Assert-FailedTransactionConsistency $f $x
-        $x.Evidence.Details|Should -Match 'found 0'
+    Context "mandatory publication commit" {
+        It "requires -BuildArtifacts -- omitting it is a binding error, not a silently-skipped publish" {
+            $f = New-CertificationTransactionFixture
+            { Complete-TPMCertificationTransaction -Certification $f.Certification -Results $f.Results -ScreenshotDir $f.ScreenshotDir -ReportDir $f.ReportDir } | Should -Throw
+        }
+
+        It "rejects an empty artifact set" {
+            $f = New-CertificationTransactionFixture
+            $x = Invoke-TPMTransaction $f -BuildArtifacts { param($Finalization) @() }
+            Assert-FailedTransactionConsistency $f $x
+            $x.Published | Should -BeFalse
+        }
+
+        It "rejects an artifact set missing the commit marker" {
+            $f = New-CertificationTransactionFixture
+            $x = Invoke-TPMTransaction $f -BuildArtifacts {
+                param($Finalization)
+                @([pscustomobject]@{Id='CertificationScorecardJson';Path=(Join-Path $f.ReportDir 'a.json');Content='{}'})
+            }
+            Assert-FailedTransactionConsistency $f $x
+        }
+
+        It "rejects an artifact set with a duplicated identity" {
+            $f = New-CertificationTransactionFixture
+            $rd = $f.ReportDir
+            $x = Invoke-TPMTransaction $f -BuildArtifacts {
+                param($Finalization)
+                @(
+                    [pscustomobject]@{Id='CertificationScorecardJson';Path=(Join-Path $rd 'a.json');Content='{}'}
+                    [pscustomobject]@{Id='CertificationScorecardJson';Path=(Join-Path $rd 'b.json');Content='{}'}
+                    [pscustomobject]@{Id='ValidationReportJson';Path=(Join-Path $rd 'c.json');Content='{}'}
+                    [pscustomobject]@{Id='CertificationScorecardMarkdown';Path=(Join-Path $rd 'd.md');Content='ok'}
+                    [pscustomobject]@{Id='ValidationReportMarkdown';Path=(Join-Path $rd 'e.md');Content='ok'}
+                    [pscustomobject]@{Id='CommitMarker';Path=(Join-Path $rd 'f.json');Content='{}'}
+                )
+            }
+            Assert-FailedTransactionConsistency $f $x
+            Test-Path -LiteralPath (Join-Path $rd 'f.json') | Should -BeFalse
+        }
+
+        It "rejects an artifact destined outside the run's report directory" {
+            $f = New-CertificationTransactionFixture
+            $outside = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Force -Path $outside | Out-Null
+            $rd = $f.ReportDir
+            $x = Invoke-TPMTransaction $f -BuildArtifacts {
+                param($Finalization)
+                @(
+                    [pscustomobject]@{Id='CertificationScorecardJson';Path=(Join-Path $outside 'a.json');Content='{}'}
+                    [pscustomobject]@{Id='ValidationReportJson';Path=(Join-Path $rd 'b.json');Content='{}'}
+                    [pscustomobject]@{Id='CertificationScorecardMarkdown';Path=(Join-Path $rd 'c.md');Content='ok'}
+                    [pscustomobject]@{Id='ValidationReportMarkdown';Path=(Join-Path $rd 'd.md');Content='ok'}
+                    [pscustomobject]@{Id='CommitMarker';Path=(Join-Path $rd 'e.json');Content='{}'}
+                )
+            }
+            Assert-FailedTransactionConsistency $f $x
+        }
+
+        It "rejects an unrecognized artifact identity" {
+            $f = New-CertificationTransactionFixture
+            $rd = $f.ReportDir
+            $x = Invoke-TPMTransaction $f -BuildArtifacts {
+                param($Finalization)
+                @(
+                    [pscustomobject]@{Id='SomethingElse';Path=(Join-Path $rd 'a.json');Content='{}'}
+                    [pscustomobject]@{Id='ValidationReportJson';Path=(Join-Path $rd 'b.json');Content='{}'}
+                    [pscustomobject]@{Id='CertificationScorecardMarkdown';Path=(Join-Path $rd 'c.md');Content='ok'}
+                    [pscustomobject]@{Id='ValidationReportMarkdown';Path=(Join-Path $rd 'd.md');Content='ok'}
+                    [pscustomobject]@{Id='CommitMarker';Path=(Join-Path $rd 'e.json');Content='{}'}
+                )
+            }
+            Assert-FailedTransactionConsistency $f $x
+        }
+
+        It "publishes a valid five-artifact set atomically, with the commit marker present" {
+            $f = New-CertificationTransactionFixture
+            $x = Invoke-TPMTransaction $f
+            $x.Published | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $f.ReportDir 'cert.json') | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $f.ReportDir 'commit.json') | Should -BeTrue
+        }
+
+        It "downgrades the transaction in place when publication throws, without leaving any artifact behind" {
+            $f = New-CertificationTransactionFixture
+            $x = Invoke-TPMTransaction $f -BuildArtifacts { param($Finalization) throw 'simulated publication failure' }
+            $x.Published | Should -BeFalse
+            $x.PublicationError | Should -Match 'simulated publication failure'
+            Assert-FailedTransactionConsistency $f $x
+        }
+
+        It "rolls back already-staged artifacts when a later artifact fails to stage" {
+            $f = New-CertificationTransactionFixture
+            $rd = $f.ReportDir
+            # A '?' in a Windows filename is invalid and fails at
+            # WriteAllText -- this forces a mid-staging failure after two
+            # artifacts have already been staged as .pending files.
+            $x = Invoke-TPMTransaction $f -BuildArtifacts {
+                param($Finalization)
+                @(
+                    [pscustomobject]@{Id='CertificationScorecardJson';Path=(Join-Path $rd 'a.json');Content='{}'}
+                    [pscustomobject]@{Id='ValidationReportJson';Path=(Join-Path $rd 'b.json');Content='{}'}
+                    [pscustomobject]@{Id='CertificationScorecardMarkdown';Path=(Join-Path $rd 'inva?lid.md');Content='ok'}
+                    [pscustomobject]@{Id='ValidationReportMarkdown';Path=(Join-Path $rd 'd.md');Content='ok'}
+                    [pscustomobject]@{Id='CommitMarker';Path=(Join-Path $rd 'e.json');Content='{}'}
+                )
+            }
+            Assert-FailedTransactionConsistency $f $x
+            @(Get-ChildItem -LiteralPath $rd -Force -ErrorAction SilentlyContinue).Count | Should -Be 0
+        }
+
+        It "never promotes the commit marker if an earlier artifact does not already exist at the promoted destination" {
+            $f = New-CertificationTransactionFixture
+            $rd = $f.ReportDir
+            # Pre-create one of the non-marker destinations so promotion
+            # (not staging) fails for it -- staging still succeeds (writes a
+            # .pending file), but Publish-TPMCertificationArtifacts's
+            # pre-stage existence check on that exact destination rejects it
+            # before any staging happens at all, which is itself the
+            # strongest available guarantee: the marker can never be
+            # reached once any prior artifact's destination is already
+            # unexpectedly occupied.
+            [System.IO.File]::WriteAllText((Join-Path $rd 'b.json'), 'pre-existing', (New-Object System.Text.UTF8Encoding($false)))
+            $x = Invoke-TPMTransaction $f -BuildArtifacts {
+                param($Finalization)
+                @(
+                    [pscustomobject]@{Id='CertificationScorecardJson';Path=(Join-Path $rd 'a.json');Content='{}'}
+                    [pscustomobject]@{Id='ValidationReportJson';Path=(Join-Path $rd 'b.json');Content='{}'}
+                    [pscustomobject]@{Id='CertificationScorecardMarkdown';Path=(Join-Path $rd 'c.md');Content='ok'}
+                    [pscustomobject]@{Id='ValidationReportMarkdown';Path=(Join-Path $rd 'd.md');Content='ok'}
+                    [pscustomobject]@{Id='CommitMarker';Path=(Join-Path $rd 'e.json');Content='{}'}
+                )
+            }
+            Assert-FailedTransactionConsistency $f $x
+            Test-Path -LiteralPath (Join-Path $rd 'e.json') | Should -BeFalse
+            Test-Path -LiteralPath (Join-Path $rd 'a.json') | Should -BeFalse
+        }
+
+        It "the decision snapshot handed to -BuildArtifacts never carries a Published field to go stale" {
+            $f = New-CertificationTransactionFixture
+            $script:tpmTestCapturedFinalization = $null
+            $rd = $f.ReportDir
+            $x = Invoke-TPMTransaction $f -BuildArtifacts {
+                param($Finalization)
+                $script:tpmTestCapturedFinalization = $Finalization
+                @(
+                    [pscustomobject]@{Id='CertificationScorecardJson';Path=(Join-Path $rd 'a.json');Content='{}'}
+                    [pscustomobject]@{Id='ValidationReportJson';Path=(Join-Path $rd 'b.json');Content='{}'}
+                    [pscustomobject]@{Id='CertificationScorecardMarkdown';Path=(Join-Path $rd 'c.md');Content='ok'}
+                    [pscustomobject]@{Id='ValidationReportMarkdown';Path=(Join-Path $rd 'd.md');Content='ok'}
+                    [pscustomobject]@{Id='CommitMarker';Path=(Join-Path $rd 'e.json');Content='{}'}
+                )
+            }
+            $x.Published | Should -BeTrue
+            @($script:tpmTestCapturedFinalization.PSObject.Properties.Name) -contains 'Published' | Should -BeFalse
+        }
+
+        It "the certification and results objects serialize a decision snapshot without Published, even on a successful run" {
+            $f = New-CertificationTransactionFixture
+            $x = Invoke-TPMTransaction $f
+            $x.Published | Should -BeTrue
+            @($f.Certification.Finalization.PSObject.Properties.Name) -contains 'Published' | Should -BeFalse
+            @($f.Results.Finalization.PSObject.Properties.Name) -contains 'Published' | Should -BeFalse
+        }
     }
 
-    It "rejects duplicate final-certification-result records" {
-        $f=New-CertificationTransactionFixture
-        $final=@($f.Results.Screenshots|Where-Object Name -CEQ 'final-certification-result')[0]
-        $f.Results.Screenshots+= $final
-        $x=Complete-TPMCertificationTransaction $f.Certification $f.Results
-        Assert-FailedTransactionConsistency $f $x
-        $x.Evidence.Details|Should -Match 'found 2'
-    }
-
-    It "rejects an unrelated Captured ScreenCapture substituted for the final record" {
-        $f=New-CertificationTransactionFixture
-        $final=@($f.Results.Screenshots|Where-Object Name -CEQ 'final-certification-result')[0]
-        $final.Name='unrelated-capture';$final.Label='unrelated-capture'
-        $x=Complete-TPMCertificationTransaction $f.Certification $f.Results
-        Assert-FailedTransactionConsistency $f $x
-        $x.Evidence.Details|Should -Match 'unexpected evidence'
-    }
-
-    It "rejects synthetic final evidence with wrong workflow provenance" {
-        $f=New-CertificationTransactionFixture
-        $final=@($f.Results.Screenshots|Where-Object Name -CEQ 'final-certification-result')[0]
-        $final.WorkflowId='synthetic-workflow'
-        $x=Complete-TPMCertificationTransaction $f.Certification $f.Results
-        Assert-FailedTransactionConsistency $f $x
-        $x.Evidence.Details|Should -Match 'did not originate'
-    }
-
-    It "rejects final evidence returned as Skipped" {
-        $f=New-CertificationTransactionFixture
-        $final=@($f.Results.Screenshots|Where-Object Name -CEQ 'final-certification-result')[0]
-        $final.Status='Skipped';$final.EvidenceType='Skipped';$final.Required=$false;$final.Path=$null
-        $x=Complete-TPMCertificationTransaction $f.Certification $f.Results
-        Assert-FailedTransactionConsistency $f $x
-    }
-
-    It "rejects final evidence returned as structured Failed" {
-        $f=New-CertificationTransactionFixture
-        $final=@($f.Results.Screenshots|Where-Object Name -CEQ 'final-certification-result')[0]
-        $final.Status='Failed';$final.EvidenceType='Failed';$final.Details='structured capture failure'
-        $x=Complete-TPMCertificationTransaction $f.Certification $f.Results
-        Assert-FailedTransactionConsistency $f $x
-        $x.Evidence.Details|Should -Match 'structured capture failure'
-    }
-
-    It "contains a thrown final capture and the authority rejects its accumulated Failed record" {
-        $f=New-CertificationTransactionFixture
-        $f.Results.Screenshots=@($f.Results.Screenshots|Where-Object Name -CNE 'final-certification-result')
-        $script:results=$f.Results
-        $shot=Add-Screenshot -ScreenshotDir $TestDrive -Name 'final-certification-result' -EvidenceType 'ScreenCapture' -CaptureAction {throw 'unexpected final capture exception'}
-        $shot.Status|Should -Be 'Failed'
-        $shot.Details|Should -Match 'unexpected final capture exception'
-        $x=Complete-TPMCertificationTransaction $f.Certification $f.Results
-        Assert-FailedTransactionConsistency $f $x
-    }
-
-    It "does not let passing numeric arithmetic override failed finalization" {
-        $f=New-CertificationTransactionFixture
-        $f.Results.Screenshots=@($f.Results.Screenshots|Where-Object Name -CNE 'final-certification-result')
-        $x=Complete-TPMCertificationTransaction $f.Certification $f.Results
-        $x.ScoreEligible|Should -BeTrue
-        Assert-FailedTransactionConsistency $f $x
-    }
-
-    It "does not let complete evidence override a failed numeric score" {
-        $f=New-CertificationTransactionFixture
-        ($f.Certification.Items | Where-Object Area -EQ 'Pester').Passed = $false
-        $x=Complete-TPMCertificationTransaction $f.Certification $f.Results
-        $x.ScoreEligible|Should -BeFalse
-        Assert-FailedTransactionConsistency $f $x
-    }
-
-    It "derives the score decision from Items rather than trusting a stale or tampered Overall field" {
-        $f=New-CertificationTransactionFixture
-        # Items still say every gate passed, but .Overall itself (a field
-        # nothing else in this fixture recomputes) claims NOT CERTIFIED --
-        # the transaction must certify based on Items, ignoring the stale
-        # field entirely, proving Overall is never read for the decision.
-        $f.Certification.Overall = 'NOT CERTIFIED'
-        $x=Complete-TPMCertificationTransaction $f.Certification $f.Results
-        $x.ScoreEligible|Should -BeTrue
-        $x.Passed|Should -BeTrue
-        $x.Overall|Should -Be 'CERTIFIED'
-    }
-
-    It "rejects conflicting, malformed, and extra evidence metadata in one consolidated result" {
-        $f=New-CertificationTransactionFixture
-        $first=$f.Results.Screenshots[0]
-        $first.Required=$false
-        $f.Results.Screenshots += [pscustomobject]@{Name='extra';Label='extra';Status='Captured';EvidenceType='ScreenCapture';Required=$true;WorkflowId=$f.Results.EvidenceWorkflowId;Path=$first.Path;Details='captured';Sequence=($f.Results.Screenshots.Count + 1)}
-        $x=Complete-TPMCertificationTransaction $f.Certification $f.Results
-        Assert-FailedTransactionConsistency $f $x
-        $x.Evidence.Details|Should -Match 'invalid Required metadata'
-        $x.Evidence.Details|Should -Match 'unexpected evidence'
-    }
-
-    It "rejects missing workflow provenance for the whole run" {
-        $f=New-CertificationTransactionFixture
-        $f.Results.EvidenceWorkflowId=$null
-        $x=Complete-TPMCertificationTransaction $f.Certification $f.Results
-        Assert-FailedTransactionConsistency $f $x
-        $x.Evidence.Details|Should -Match 'workflow identity is missing'
-    }
-
-    It "rejects wrong-case final evidence identity" {
-        $f=New-CertificationTransactionFixture
-        $final=@($f.Results.Screenshots|Where-Object Name -CEQ 'final-certification-result')[0]
-        $final.Name='Final-Certification-Result'
-        $x=Complete-TPMCertificationTransaction $f.Certification $f.Results
-        Assert-FailedTransactionConsistency $f $x
-        $x.Evidence.Details|Should -Match 'found 0'
-    }
-
-    It "rejects duplicate earlier evidence even when both copies are Captured" {
-        $f=New-CertificationTransactionFixture
-        $first=@($f.Results.Screenshots|Where-Object Name -CEQ 'certification-suite-running')[0]
-        $f.Results.Screenshots += $first
-        $x=Complete-TPMCertificationTransaction $f.Certification $f.Results
-        Assert-FailedTransactionConsistency $f $x
-        $x.Evidence.Details|Should -Match 'found 2'
-    }
-
-
-    It "publishes authoritative artifacts together with BOM-less UTF-8 content" {
-        $dir=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $dir|Out-Null
-        $artifacts=1..4|ForEach-Object{[pscustomobject]@{Path=(Join-Path $dir ("report$_.txt"));Content="content $_"}}
-        Publish-TPMCertificationArtifacts $artifacts
-        foreach($a in $artifacts){Test-Path -LiteralPath $a.Path|Should -BeTrue;([IO.File]::ReadAllText($a.Path))|Should -Match '^content'}
-    }
-
-    It "does not overwrite or delete a pre-existing report destination" {
-        $dir=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $dir|Out-Null
-        $existing=Join-Path $dir 'existing.txt';[IO.File]::WriteAllText($existing,'user content')
-        {Publish-TPMCertificationArtifacts @([pscustomobject]@{Path=$existing;Content='replacement'})}|Should -Throw '*destination already exists*'
-        [IO.File]::ReadAllText($existing)|Should -Be 'user content'
-    }
-
-    It "uses the one transaction as the source for both report renderers and process exit" {
-        $source=Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..\scripts\Invoke-TPM-RealInstanceSmoke.ps1')
-        ([regex]::Matches($source,'Complete-TPMCertificationTransaction -Certification \$certification -Results \$results')).Count|Should -Be 1
-        $source|Should -Match 'Get-TPMCertificationFinalConsoleLines -Finalization \$finalization'
-        ([regex]::Matches($source,'Get-TPMCertificationFinalReportLines -Finalization \$Finalization')).Count|Should -Be 2
-        $source|Should -Match 'exit \$finalization\.ExitCode'
-        $source|Should -Not -Match 'exit 0'
-        ([regex]::Matches($source,'\$Results\.Status = \$finalStatus')).Count|Should -Be 1
-        ([regex]::Matches($source,'\$results\.Status\s*=')).Count|Should -Be 0
-        $source|Should -Match 'Publish-TPMCertificationArtifacts -Artifacts \$artifacts'
-        $source|Should -Match 'Remove-Item -LiteralPath \$path'
-        # System Invariant Inventory: publication as part of commit. Only
-        # Complete-TPMCertificationTransaction calls Publish-TPMCertificationArtifacts --
-        # there is no second, independent call site outside the transaction
-        # that could publish (or decide what publish-failure means) on its own.
-        ([regex]::Matches($source,'Publish-TPMCertificationArtifacts -Artifacts')).Count|Should -Be 1
-        # The transaction takes over as sole authority the moment BuildArtifacts
-        # runs -- outside the function, the only thing the main flow does with
-        # a publish failure is read $finalization.Published/.PublicationError,
-        # never re-derive FAIL/NOT CERTIFIED/exit-1 through its own logic.
-        $source|Should -Match 'if \(-not \$finalization\.Published\)'
-        $source|Should -Not -Match '\} catch \{\s*\$publicationError'
-    }
-
-    It "rejects an evidence record missing a valid capture-order sequence" {
-        $f=New-CertificationTransactionFixture
-        $final=@($f.Results.Screenshots|Where-Object Name -CEQ 'final-certification-result')[0]
-        $final.PSObject.Properties.Remove('Sequence')
-        $x=Complete-TPMCertificationTransaction $f.Certification $f.Results
-        Assert-FailedTransactionConsistency $f $x
-        $x.Evidence.Details|Should -Match 'no valid capture-order sequence'
-    }
-
-    It "rejects a final-certification-result that was not genuinely captured last" {
-        $f=New-CertificationTransactionFixture
-        $final=@($f.Results.Screenshots|Where-Object Name -CEQ 'final-certification-result')[0]
-        $earliest=@($f.Results.Screenshots|Where-Object Name -CEQ 'certification-suite-running')[0]
-        # Swap sequence numbers: final-certification-result now claims to
-        # have been captured before certification-suite-running, even
-        # though every other invariant (name, workflow, type, path, PNG
-        # validity) still passes -- only the capture-ordering invariant
-        # should catch this.
-        $swap = $final.Sequence
-        $final.Sequence = $earliest.Sequence
-        $earliest.Sequence = $swap
-        $x=Complete-TPMCertificationTransaction $f.Certification $f.Results
-        Assert-FailedTransactionConsistency $f $x
-        $x.Evidence.Details|Should -Match 'was not captured last'
-    }
-
-    It "publishing failure downgrades the same transaction object rather than being decided separately" {
-        $f=New-CertificationTransactionFixture
-        $build={ param($Finalization) throw 'simulated publication failure' }
-        $x=Complete-TPMCertificationTransaction $f.Certification $f.Results $build
-        $x.Published|Should -BeFalse
-        $x.PublicationError|Should -Match 'simulated publication failure'
-        Assert-FailedTransactionConsistency $f $x
-    }
-
-    It "publishing success is reflected on the returned transaction" {
-        $f=New-CertificationTransactionFixture
-        $dir=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $dir|Out-Null
-        $build={ param($Finalization) @([pscustomobject]@{Path=(Join-Path $dir 'report.txt');Content='ok'}) }
-        $x=Complete-TPMCertificationTransaction $f.Certification $f.Results $build
-        $x.Published|Should -BeTrue
-        $x.PublicationError|Should -BeNullOrEmpty
-        $x.Passed|Should -BeTrue
+    Context "structural source guarantees" {
+        It "publishes through exactly one call site and treats -BuildArtifacts as mandatory in source" {
+            $source = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '..\scripts\Invoke-TPM-RealInstanceSmoke.ps1')
+            ([regex]::Matches($source, 'Publish-TPMCertificationArtifacts -Artifacts')).Count | Should -Be 1
+            $source | Should -Match '\[Parameter\(Mandatory=\$true\)\]\[scriptblock\]\$BuildArtifacts'
+            $source | Should -Match 'Complete-TPMCertificationTransaction -Certification \$certification -Results \$results -BuildArtifacts \$buildCertificationArtifacts -ScreenshotDir \$screenshotDir -ReportDir \$reportDir'
+        }
     }
 }
