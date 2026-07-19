@@ -18,12 +18,12 @@ When applicable, Jumpstile project governance is followed in this order:
    standard (issue taxonomy, label taxonomy, milestone/cross-link/
    acceptance-criteria policy, bug and feature lifecycle).
 4. **Engineering Standards** -- portfolio-wide, repository-agnostic
-   standards adopted across every Jumpstile project (e.g.
+   standards adopted across every Jumpstile project (currently
    `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`, `INVENTORY_STANDARDS.md`,
-   `ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md`, and, once
-   adopted, `PROJECT_IDENTITY_STANDARD.md` /
-   `TEAM_COORDINATION_STANDARD.md`). These documents govern *how*
-   engineering work is done, independent of which project it's done in.
+   and `ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md`; see below
+   for anticipated future additions to this tier, not yet present). These
+   documents govern *how* engineering work is done, independent of which
+   project it's done in.
 5. **Project Standards** -- this repository's own engineering standards
    (e.g. `SECURITY.md`, `RELEASE-SAFETY-CHECKLIST.md`, `ARCHITECTURE.md`).
    These apply this project's specific technical decisions and threat
@@ -63,6 +63,36 @@ artifact conflicts with a document higher in this list, the higher document
 is authoritative. The conflict is reported and a compliant resolution
 recommended before proceeding with whatever task surfaced it -- silently
 picking one side of the conflict is not an acceptable resolution.
+
+### Resolving conflicts between two documents in the same tier
+
+The rule above resolves conflicts *between* tiers. Two documents *within*
+the same tier (e.g. two tier-4 Engineering Standards, or two tier-5
+Project Standards) can also conflict with each other -- the contradictory
+inventory-mandate wording that prompted this section's addition (one
+tier-4 document said REQUIRED, another said "strongly recommended," for
+the same situation) is a real instance of exactly this, not a
+hypothetical. When two same-tier documents conflict:
+
+1. The more specifically applicable document governs -- the one whose
+   scope more precisely matches the situation at hand wins over a more
+   general document that merely touches on it in passing.
+2. This does not apply, and the higher-tier resolution rule reasserts
+   itself, if the more-specific document's position would relax a safety,
+   security, regulatory, compliance, or legal obligation the more-general
+   document (or a higher tier) protects -- see "Legal, regulatory, and
+   safety obligations" below, which is never something a
+   more-specifically-applicable document can be used to narrow.
+3. If it is genuinely ambiguous which document is more specifically
+   applicable, or the conflict is substantive rather than merely a wording
+   inconsistency, this is escalated (reported, with a recommended
+   resolution) before proceeding, the same as a cross-tier conflict --
+   never silently resolved by picking whichever document was read first
+   or is more convenient for the task at hand.
+4. The resolution is then proposed as a fix to the losing document (or
+   both, if the conflict reveals both need clarifying), through the
+   normal governance process, so the same conflict does not have to be
+   re-resolved by judgment call the next time it's encountered.
 
 Once a document is created and integrated into a project's governance
 hierarchy, it applies automatically: every significant PR, merge
@@ -205,7 +235,7 @@ notes, or wiki content:
 (TPM's own procedural checklist form of this rule -- forbidden examples,
 the per-issue/PR sweep, and the guardrail against bundling a technical
 correction into an attribution cleanup pass -- lives in
-`RELEASE-SAFETY-CHECKLIST.md` section 7. That is the operational detail;
+`RELEASE-SAFETY-CHECKLIST.md` section 8. That is the operational detail;
 this is the standing cross-project rule it implements. A broader
 identity/branding policy beyond attribution footers specifically is
 expected to live in `PROJECT_IDENTITY_STANDARD.md` once that document is

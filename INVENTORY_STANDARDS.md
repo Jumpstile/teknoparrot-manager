@@ -331,6 +331,65 @@ levels" above, a separate axis) is marked one of:
 A submission is not Review Ready while any in-scope item is marked
 `Missing`.
 
+### Distinguishing intentional absence from a missing requirement
+
+The status markings above are for items *within* an inventory. A
+reviewer must also be able to tell, at a glance, why an entire inventory
+is absent for a given component -- "this inventory does not exist because
+it was never required" reads identically to "this inventory does not
+exist because it was required and nobody built it" unless the reason is
+stated explicitly. When a component's Specification Inventory or System
+Invariant Inventory does not exist, record which of these is true,
+alongside the component (in its own doc header, the governing PR/issue,
+or both):
+
+- **"NOT APPLICABLE -- \<trigger condition\> does not apply to this
+  component."** A deliberate, reasoned determination against the
+  objective triggers in "When each requirement level applies" above --
+  the same evidentiary bar as an item marked `Intentionally out of
+  scope`.
+- **"OPTIONAL -- not built."** The component meets no REQUIRED trigger
+  and a RECOMMENDED-or-lower inventory was judged not worth building this
+  round. Carries no review or release consequence, but is still stated,
+  not left to be inferred.
+- **A REQUIRED inventory that is simply absent is not a valid state to
+  report at all** -- it is a Review Ready blocker (per "Requirement
+  levels" above), reported as a gap to close, never phrased as though it
+  were a scoping decision.
+
+### Row-level traceability (both inventory types)
+
+Every item within either inventory type -- a rule family in a
+Specification Inventory's "In scope" list, an invariant in a System
+Invariant Inventory -- carries a **stable identifier** in addition to its
+status marking, so it can be referenced unambiguously by implementation
+code, tests, review comments, issues, and release certification evidence
+across revisions, without anyone having to re-describe the item in prose
+each time. Concretely, each item records:
+
+- **Stable identifier.** A short, namespaced ID (e.g. `PNG-CHUNK-ORDER-003`,
+  `SII-CERT-SCORE-002`) assigned when the item is first added and never
+  reassigned to a different item afterward, even if the item's wording is
+  later refined. If an item is removed, its identifier is retired, not
+  reused for something else -- a stale reference to a retired ID should
+  fail loudly (point at nothing), never silently point at an unrelated
+  later item.
+- **Governing-source citation** (Specification Inventory items) or
+  **invariant statement** (System Invariant Inventory items, per
+  "Building a System Invariant Inventory" below) -- what the item
+  actually requires, specific enough to check directly.
+- **Implementation pointer.** The function, module, or code location that
+  enforces the item, once `Implemented`.
+- **Verification pointer.** The specific test (by name) that verifies it,
+  once `Implemented` -- this is what "Write regression coverage keyed to
+  inventory items" (see "How they integrate into Review Ready" above)
+  concretely means: the test name and the item's stable identifier should
+  be cross-referenceable in both directions.
+
+A table is the natural format for this (columns: ID, description/
+citation, status, implementation pointer, verification pointer), but the
+requirement is the content, not a specific document format.
+
 ### Inventories define engineering scope only
 
 An inventory -- either type, and every status an item within one can
@@ -356,9 +415,16 @@ it.
 Inventories are living engineering artifacts, not one-time deliverables
 filed away once a finding closes.
 
-- **Who creates one.** The Implementer, at the point a component first
-  meets a REQUIRED or RECOMMENDED trigger (see "When each requirement
-  level applies" above) -- typically while resolving the review finding
+- **Who creates one.** For a **REQUIRED** trigger, the Implementer must
+  build the inventory -- this is not discretionary, per "Requirement
+  levels" above. For a **RECOMMENDED** trigger, building one is the
+  Implementer's judgment call, not an obligation; a RECOMMENDED inventory
+  that is never built carries no review or release consequence (again,
+  per "Requirement levels" -- RECOMMENDED absence is legitimate on its
+  own, and this lifecycle section does not silently upgrade it to
+  REQUIRED). If a RECOMMENDED inventory *is* built, the Implementer who
+  built it owns it going forward, the same as a REQUIRED one. Either way,
+  inventory work typically happens while resolving the review finding
   that revealed the need for one, per `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`
   Section 2.
 - **Who updates one.** Whoever next touches the governed component in a
