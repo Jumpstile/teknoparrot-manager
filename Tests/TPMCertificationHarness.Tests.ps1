@@ -74,6 +74,7 @@ BeforeAll {
             SmokeMode = $SmokeMode
             RequestedTeknoParrotRoot = 'C:\fake\TeknoParrot'
             EffectiveTeknoParrotRoot = $null
+            Screenshots = @()
             Checks = @(
                 [pscustomobject]@{ Name = 'Repository available'; Passed = $true }
                 [pscustomobject]@{ Name = 'Repository clean'; Passed = $true }
@@ -1419,5 +1420,189 @@ Describe "Invoke-TPMUnattendedRootBinding integration (issue #146 review round 3
         $reportText = Get-TPMEffectiveRootReportText -EffectiveRoot $binding.EffectiveTeknoParrotRoot -SmokeMode $false
         $reportText | Should -Not -Match 'smoke mode'
         $reportText | Should -Match 'could not be confirmed'
+    }
+}
+
+Describe "New-TPMCertificationScreenshot (issue #151)" {
+    # RC3 arcade certification of a fully-passing merged commit still
+    # returned ARCADE CERTIFICATION FAIL because the required screenshot
+    # evidence did not exist and had to be captured manually. This function
+    # is the core, independently testable piece of automatic capture --
+    # $CaptureAction is injectable specifically so these tests never touch
+    # a real screen or display session.
+
+    # --- screenshot directory creation ---
+    It "creates the screenshot directory when it does not already exist" {
+        $dir = Join-Path $TestDrive ("shots-new-" + [guid]::NewGuid().ToString('N'))
+        Test-Path -LiteralPath $dir | Should -Be $false
+
+        [void](New-TPMCertificationScreenshot -ScreenshotDir $dir -Name 'moment' -CaptureAction { param($p) 'x' | Set-Content -LiteralPath $p })
+
+        Test-Path -LiteralPath $dir -PathType Container | Should -Be $true
+    }
+
+    It "does not throw or fail when the screenshot directory already exists" {
+        $dir = Join-Path $TestDrive ("shots-existing-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+
+        $shot = New-TPMCertificationScreenshot -ScreenshotDir $dir -Name 'moment' -CaptureAction { param($p) 'x' | Set-Content -LiteralPath $p }
+
+        $shot.Status | Should -Be 'Captured'
+    }
+
+    It "does NOT create the screenshot directory for a -Skip call (no capture was attempted, so nothing needs a folder)" {
+        $dir = Join-Path $TestDrive ("shots-skip-nodir-" + [guid]::NewGuid().ToString('N'))
+
+        [void](New-TPMCertificationScreenshot -ScreenshotDir $dir -Name 'not-displayed' -Skip -SkipReason 'not applicable this run')
+
+        Test-Path -LiteralPath $dir | Should -Be $false
+    }
+
+    # --- screenshot naming ---
+    It "names the screenshot file using the sanitized name plus a timestamp, ending in .png" {
+        $dir = Join-Path $TestDrive ("shots-naming-" + [guid]::NewGuid().ToString('N'))
+
+        $shot = New-TPMCertificationScreenshot -ScreenshotDir $dir -Name 'final-certification-result' -CaptureAction { param($p) 'x' | Set-Content -LiteralPath $p }
+
+        (Split-Path -Leaf $shot.Path) | Should -Match '^final-certification-result_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{3}\.png$'
+        (Split-Path -Parent $shot.Path) | Should -Be $dir
+    }
+
+    It "sanitizes unsafe characters out of the Name when building the file name" {
+        $dir = Join-Path $TestDrive ("shots-sanitize-" + [guid]::NewGuid().ToString('N'))
+
+        $shot = New-TPMCertificationScreenshot -ScreenshotDir $dir -Name 'adaptive menu (small)!' -CaptureAction { param($p) 'x' | Set-Content -LiteralPath $p }
+
+        $fileName = Split-Path -Leaf $shot.Path
+        $fileName | Should -Not -Match '[\s\(\)!]'
+        $fileName | Should -Match '^adaptive-menu--small--_'
+    }
+
+    It "produces distinct file names for two captures of the same Name in the same run (no collision)" {
+        $dir = Join-Path $TestDrive ("shots-unique-" + [guid]::NewGuid().ToString('N'))
+
+        $first = New-TPMCertificationScreenshot -ScreenshotDir $dir -Name 'repeat' -CaptureAction { param($p) 'x' | Set-Content -LiteralPath $p }
+        $second = New-TPMCertificationScreenshot -ScreenshotDir $dir -Name 'repeat' -CaptureAction { param($p) 'x' | Set-Content -LiteralPath $p }
+
+        $first.Path | Should -Not -Be $second.Path
+        Test-Path -LiteralPath $first.Path | Should -Be $true
+        Test-Path -LiteralPath $second.Path | Should -Be $true
+    }
+
+    # --- captured / missing-screenshot failure path ---
+    It "returns Status = 'Captured' with the file path when the capture action succeeds" {
+        $dir = Join-Path $TestDrive ("shots-ok-" + [guid]::NewGuid().ToString('N'))
+
+        $shot = New-TPMCertificationScreenshot -ScreenshotDir $dir -Name 'ok' -CaptureAction { param($p) 'real png bytes' | Set-Content -LiteralPath $p }
+
+        $shot.Status | Should -Be 'Captured'
+        Test-Path -LiteralPath $shot.Path -PathType Leaf | Should -Be $true
+    }
+
+    It "returns Status = 'Failed' with the exception message when the capture action throws" {
+        $dir = Join-Path $TestDrive ("shots-throw-" + [guid]::NewGuid().ToString('N'))
+
+        $shot = New-TPMCertificationScreenshot -ScreenshotDir $dir -Name 'throws' -CaptureAction { param($p) throw "simulated screen-capture failure" }
+
+        $shot.Status | Should -Be 'Failed'
+        $shot.Details | Should -Match 'simulated screen-capture failure'
+    }
+
+    It "returns Status = 'Failed' when the capture action completes without producing a file (missing screenshot)" {
+        $dir = Join-Path $TestDrive ("shots-missing-" + [guid]::NewGuid().ToString('N'))
+
+        $shot = New-TPMCertificationScreenshot -ScreenshotDir $dir -Name 'missing' -CaptureAction { param($p) }
+
+        $shot.Status | Should -Be 'Failed'
+        $shot.Details | Should -Match 'without producing a file'
+    }
+
+    It "returns Status = 'Failed' when no CaptureAction is supplied and -Skip was not requested" {
+        $dir = Join-Path $TestDrive ("shots-noaction-" + [guid]::NewGuid().ToString('N'))
+
+        $shot = New-TPMCertificationScreenshot -ScreenshotDir $dir -Name 'no-action'
+
+        $shot.Status | Should -Be 'Failed'
+    }
+
+    It "returns Status = 'Skipped' with the given reason, and no Path, for a -Skip call" {
+        $dir = Join-Path $TestDrive ("shots-skip-" + [guid]::NewGuid().ToString('N'))
+
+        $shot = New-TPMCertificationScreenshot -ScreenshotDir $dir -Name 'live-thumbnail-evidence' -Skip -SkipReason 'not displayed this run'
+
+        $shot.Status | Should -Be 'Skipped'
+        $shot.Path | Should -Be $null
+        $shot.Details | Should -Be 'not displayed this run'
+    }
+}
+
+Describe "Certification evidence (screenshots) in the scorecard -- report inclusion and scoring isolation (issue #151)" {
+    It "New-CertificationScorecard carries Results.Screenshots onto the returned scorecard object" {
+        $fake = New-FakeResults -Pcsx2Present $true
+        $fake.Screenshots = @(
+            [pscustomobject]@{ Name = 'certification-suite-running'; Path = 'C:\fake\Screenshots\a.png'; Status = 'Captured'; Details = 'captured' }
+            [pscustomobject]@{ Name = 'final-certification-result'; Path = 'C:\fake\Screenshots\b.png'; Status = 'Captured'; Details = 'captured' }
+        )
+
+        $result = New-CertificationScorecard -Results $fake
+
+        $result.Screenshots.Count | Should -Be 2
+        ($result.Screenshots | Where-Object { $_.Name -eq 'certification-suite-running' }).Path | Should -Be 'C:\fake\Screenshots\a.png'
+    }
+
+    It "carries an empty Screenshots array (never null) when no screenshots were recorded" {
+        $fake = New-FakeResults -Pcsx2Present $true
+        $fake.Screenshots = @()
+
+        $result = New-CertificationScorecard -Results $fake
+
+        # Piping an empty array to Should sends zero pipeline objects, so
+        # the container itself is checked directly instead (avoids the
+        # empty-array pipeline-unrolling gotcha this codebase has hit
+        # before -- see LESSONS_LEARNED.md's "return @()" entries).
+        ($null -eq $result.Screenshots) | Should -Be $false
+        @($result.Screenshots).Count | Should -Be 0
+    }
+
+    # --- "do not modify certification scoring" ---
+    It "a Failed screenshot does not affect Overall, Passed, or Total -- screenshots are evidence, not a scored gate" {
+        $fake = New-FakeResults -Pcsx2Present $true
+        $baseline = New-CertificationScorecard -Results $fake
+
+        $fake.Screenshots = @(
+            [pscustomobject]@{ Name = 'adaptive-menu-small'; Path = $null; Status = 'Failed'; Details = 'simulated capture failure' }
+        )
+        $withFailedShot = New-CertificationScorecard -Results $fake
+
+        $withFailedShot.Overall | Should -Be $baseline.Overall
+        $withFailedShot.Overall | Should -Be 'CERTIFIED'
+        $withFailedShot.Passed | Should -Be $baseline.Passed
+        $withFailedShot.Total | Should -Be $baseline.Total
+    }
+
+    It "a Skipped screenshot does not affect Overall, Passed, or Total either" {
+        $fake = New-FakeResults -Pcsx2Present $true
+        $baseline = New-CertificationScorecard -Results $fake
+
+        $fake.Screenshots = @(
+            [pscustomobject]@{ Name = 'live-controls-evidence'; Path = $null; Status = 'Skipped'; Details = 'not displayed this run' }
+        )
+        $withSkippedShot = New-CertificationScorecard -Results $fake
+
+        $withSkippedShot.Overall | Should -Be $baseline.Overall
+        $withSkippedShot.Passed | Should -Be $baseline.Passed
+        $withSkippedShot.Total | Should -Be $baseline.Total
+    }
+
+    It "Screenshots never appear as an Area in the scored Items list" {
+        $fake = New-FakeResults -Pcsx2Present $true
+        $fake.Screenshots = @(
+            [pscustomobject]@{ Name = 'certification-suite-running'; Path = 'C:\fake\a.png'; Status = 'Captured'; Details = 'captured' }
+        )
+
+        $result = New-CertificationScorecard -Results $fake
+
+        $result.Items | Where-Object { $_.Area -like '*Screenshot*' } | Should -Be $null
+        $result.Items.Count | Should -Be 11
     }
 }

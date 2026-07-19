@@ -56,6 +56,13 @@ $md = Join-Path $reportDir "TPM-Validation-Report.md"
 $json = Join-Path $reportDir "TPM-Validation-Report.json"
 $certificationMd = Join-Path $reportDir "TPM-Certification-Scorecard.md"
 $certificationJson = Join-Path $reportDir "TPM-Certification-Scorecard.json"
+# Issue #151: certification evidence screenshots. Beneath $reportDir, not a
+# separate top-level folder -- keeps every artifact for one certification
+# run (reports, Pester output, screenshots) under the same timestamped
+# directory. Created lazily by New-TPMCertificationScreenshot itself, not
+# here, so "screenshot directory creation" is covered by that function's
+# own regression tests rather than assumed to already exist.
+$screenshotDir = Join-Path $reportDir "Screenshots"
 
 function Add-Report {
     param([string]$Text)
@@ -580,6 +587,142 @@ function Get-PesterSummary {
     [pscustomobject]$summary
 }
 
+# Issue #151: RC3 arcade certification of a fully-passing merged commit
+# still returned ARCADE CERTIFICATION FAIL because the required
+# certification evidence (screenshots of the run itself) did not exist and
+# had to be captured manually. This function is the core, independently
+# testable piece of automatic screenshot capture: it never touches the
+# screen itself -- $CaptureAction is an injectable scriptblock that
+# performs the real capture and is expected to write a file to the $Path
+# it receives as its own single positional argument. Real callers pass a
+# scriptblock backed by System.Drawing/System.Windows.Forms (see
+# Save-TPMFullScreenCapture / Save-TPMRenderedTextCapture below); tests
+# substitute a fake action that writes a dummy file or throws, so capture
+# behavior -- directory creation, naming, and the explicit failure path --
+# can be exercised without a live display session (this harness's own
+# regression suite runs headless in CI, where a real screen grab is not
+# reliably available).
+#
+# A capture is never silently skipped: every call returns a result object
+# with an explicit Status of 'Captured', 'Failed', or 'Skipped' (only ever
+# used when the caller passes -Skip for a genuinely not-applicable "when
+# displayed" evidence slot, e.g. live thumbnail/controls evidence that
+# this particular run never triggered) -- never just omitted from the
+# evidence list, so a reviewer always sees what was attempted and why an
+# item is missing if it is.
+function New-TPMCertificationScreenshot {
+    param(
+        [Parameter(Mandatory=$true)][string]$ScreenshotDir,
+        [Parameter(Mandatory=$true)][string]$Name,
+        [scriptblock]$CaptureAction,
+        [switch]$Skip,
+        [string]$SkipReason
+    )
+
+    if ($Skip) {
+        return [pscustomobject]@{ Name = $Name; Path = $null; Status = 'Skipped'; Details = $(if ($SkipReason) { $SkipReason } else { 'not applicable to this run' }) }
+    }
+
+    if (-not $CaptureAction) {
+        return [pscustomobject]@{ Name = $Name; Path = $null; Status = 'Failed'; Details = 'no CaptureAction supplied' }
+    }
+
+    if (-not (Test-Path -LiteralPath $ScreenshotDir -PathType Container)) {
+        New-Item -ItemType Directory -Force -Path $ScreenshotDir | Out-Null
+    }
+
+    # Filesystem-safe name plus a millisecond-precision timestamp -- the
+    # adaptive-menu tiers and any evidence slot that could reasonably be
+    # captured more than once per run (e.g. a retried gate) must never
+    # collide on the same file name within one certification pass.
+    $safeName = ($Name -replace '[^A-Za-z0-9_\-]', '-')
+    $screenshotStamp = Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff'
+    $fileName = "{0}_{1}.png" -f $safeName, $screenshotStamp
+    $path = Join-Path $ScreenshotDir $fileName
+
+    try {
+        & $CaptureAction $path
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            return [pscustomobject]@{ Name = $Name; Path = $path; Status = 'Failed'; Details = 'capture action completed without producing a file at the expected path' }
+        }
+        return [pscustomobject]@{ Name = $Name; Path = $path; Status = 'Captured'; Details = 'captured' }
+    } catch {
+        return [pscustomobject]@{ Name = $Name; Path = $path; Status = 'Failed'; Details = $_.Exception.Message }
+    }
+}
+
+# Real capture action for an on-screen console moment (certification suite
+# running, final result, requested/effective root evidence, live
+# thumbnail/controls evidence when displayed) -- grabs the full virtual
+# screen via GDI+. Never called from tests; production-only, since it
+# requires a live display session this harness's own CI run does not have.
+function Save-TPMFullScreenCapture {
+    param([string]$Path)
+    # InjectionHunter flags both Add-Type calls below (InjectionRisk.AddType).
+    # Traced per this project's "verify before dismissing" policy: both
+    # -AssemblyName arguments are fully hardcoded literal strings naming
+    # well-known .NET Framework GAC assemblies -- no external, untrusted, or
+    # caller-supplied input reaches either call. Same false-positive class
+    # as this file's already-documented static-literal AddScript finding.
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+    $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+    try {
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        try {
+            $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+        } finally {
+            $graphics.Dispose()
+        }
+        $bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+    } finally {
+        $bitmap.Dispose()
+    }
+}
+
+# Real capture action for the adaptive-menu evidence slots. Rasterizes
+# already-rendered console text (from Debug-TPM-MenuLayout.ps1 -Render,
+# invoked by the caller) directly into a PNG via GDI+ instead of opening,
+# resizing, and screen-grabbing a real console window -- deterministic and
+# does not depend on a live, focusable desktop session being available on
+# the certification machine, which a real windowed capture would.
+function Save-TPMRenderedTextCapture {
+    param([string]$Path, [string[]]$Lines)
+    # Same hardcoded-literal false positive as Save-TPMFullScreenCapture
+    # above -- no untrusted input reaches this Add-Type call.
+    Add-Type -AssemblyName System.Drawing
+    # [System.Drawing.Font]::new(...), not New-Object -- New-Object's
+    # comma-separated -ArgumentList left the (string, int, FontStyle)
+    # overload ambiguous under real PowerShell 5.1 ("Multiple ambiguous
+    # overloads found for 'Font' and the argument count: 3", confirmed by
+    # direct repro); the static ::new() call resolves it correctly.
+    $font = [System.Drawing.Font]::new('Consolas', 12.0, [System.Drawing.FontStyle]::Regular)
+    $lineHeight = [int]($font.GetHeight() * 1.15)
+    $longest = if ($Lines.Count -gt 0) { ($Lines | Measure-Object -Property Length -Maximum).Maximum } else { 40 }
+    $width = [Math]::Max(200, ($longest * 9) + 40)
+    $height = [Math]::Max(60, ($Lines.Count * $lineHeight) + 40)
+    $bitmap = New-Object System.Drawing.Bitmap $width, $height
+    try {
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        try {
+            $graphics.Clear([System.Drawing.Color]::Black)
+            $brush = [System.Drawing.Brushes]::LightGray
+            $y = 20
+            foreach ($line in $Lines) {
+                $graphics.DrawString($line, $font, $brush, 20, $y)
+                $y += $lineHeight
+            }
+        } finally {
+            $graphics.Dispose()
+        }
+        $bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+    } finally {
+        $bitmap.Dispose()
+        $font.Dispose()
+    }
+}
+
 function New-CertificationScorecard {
     param([hashtable]$Results)
 
@@ -746,6 +889,11 @@ function New-CertificationScorecard {
         # alone, without cross-referencing TPM-Unattended.log.
         RequestedTeknoParrotRoot = $Results.RequestedTeknoParrotRoot
         EffectiveTeknoParrotRoot = $Results.EffectiveTeknoParrotRoot
+        # Issue #151: certification evidence, duplicated onto the
+        # scorecard object for the same reason as the git/root provenance
+        # fields above. Deliberately NOT part of $scoreItems/scoring --
+        # see $applicableItems above, which never reads this property.
+        Screenshots = @($Results.Screenshots)
     }
 }
 
@@ -767,6 +915,27 @@ $results = [ordered]@{
     BackupDir = $backupDir
     SmokeMode = (-not $RunUnattendedTPM)
     Checks = @()
+    # Issue #151: certification evidence, not a scored gate -- deliberately
+    # never read by New-CertificationScorecard's $scoreItems/$applicableItems
+    # scoring computation. A screenshot failure is recorded explicitly (see
+    # New-TPMCertificationScreenshot) but must never itself flip Overall or
+    # change the score, per the issue's explicit "do not modify
+    # certification scoring" constraint.
+    Screenshots = @()
+}
+
+# Records one screenshot attempt (captured, failed, or skipped) onto
+# $results.Screenshots and echoes a short status line to the console --
+# the same "one accumulator, one console line" pattern Add-CheckResult
+# uses for check results, kept separate because screenshots are evidence,
+# not a pass/fail check.
+function Add-Screenshot {
+    param([string]$ScreenshotDir, [string]$Name, [scriptblock]$CaptureAction, [switch]$Skip, [string]$SkipReason)
+    $shot = New-TPMCertificationScreenshot -ScreenshotDir $ScreenshotDir -Name $Name -CaptureAction $CaptureAction -Skip:$Skip -SkipReason $SkipReason
+    $script:results.Screenshots += $shot
+    $mark = switch ($shot.Status) { 'Captured' { '[SHOT]' } 'Skipped' { '[SKIP]' } default { '[FAIL]' } }
+    Write-Host ("  {0} {1}: {2}" -f $mark, $Name, $(if ($shot.Path) { $shot.Path } else { $shot.Details }))
+    return $shot
 }
 
 function Add-CheckResult {
@@ -881,6 +1050,11 @@ if (-not $rootValidation.IsValid) {
 
 Push-Location $RepoPath
 try {
+    # Issue #151: first required evidence slot -- captured as early as
+    # possible in the real gate flow so the screenshot actually shows the
+    # certification suite mid-run, not an empty or pre-launch console.
+    [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'certification-suite-running' -CaptureAction { param($p) Save-TPMFullScreenCapture -Path $p })
+
     Write-TPMGateHeader -Gate 'Repository' -Purpose 'Confirms the certified commit and working-tree state' -Expected 'clean working tree, HEAD matches origin/main'
     $gitVersion = git --version
     $gitBranch = git rev-parse --abbrev-ref HEAD
@@ -1357,6 +1531,29 @@ try {
         }
     }
 
+    # Issue #151: requested/effective root evidence. Printed to the
+    # console (not just the report files) immediately before capture, so
+    # the screenshot itself actually shows the evidence a reviewer needs,
+    # rather than an unrelated console state that merely happened to be on
+    # screen at this point in the run.
+    Write-Host ""
+    Write-Host ("  Requested TeknoParrot root: {0}" -f $results.RequestedTeknoParrotRoot)
+    Write-Host ("  Effective TeknoParrot root: {0}" -f (Get-TPMEffectiveRootReportText -EffectiveRoot $results.EffectiveTeknoParrotRoot -SmokeMode $results.SmokeMode))
+    [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'requested-effective-root-evidence' -CaptureAction { param($p) Save-TPMFullScreenCapture -Path $p })
+
+    # Issue #151: "live thumbnail evidence" and "live controls evidence"
+    # are conditional, "(when displayed)" evidence slots -- this harness
+    # does not itself drive TeknoParrot-Manager.ps1's live thumbnail
+    # download (AutoSync) or Propagate Controls flows (both require
+    # interactive menu choices this read-only/-Unattended harness never
+    # makes), so neither is ever genuinely displayed by a certification
+    # run today. Recorded as explicitly Skipped, with the real reason, so
+    # a reviewer sees these evidence slots were considered and correctly
+    # not applicable to this harness's current scope, rather than silently
+    # missing from the evidence list.
+    [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'live-thumbnail-evidence' -Skip -SkipReason 'not displayed -- this harness does not drive TeknoParrot-Manager.ps1''s live thumbnail download flow')
+    [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'live-controls-evidence' -Skip -SkipReason 'not displayed -- this harness does not drive TeknoParrot-Manager.ps1''s live Propagate Controls flow')
+
     Write-TPMGateHeader -Gate 'Smoke file safety' -Purpose 'Confirms nothing changed in UserProfiles/GameProfiles during this smoke run' -Expected 'no unexpected file changes'
     $postUserProfiles = Get-TreeHash $userProfilesPath
     $postGameProfiles = Get-TreeHash $gameProfilesPath
@@ -1373,6 +1570,41 @@ try {
         }
     }
 
+    # Issue #151: adaptive-menu evidence (normal/small/maximized). Uses
+    # Debug-TPM-MenuLayout.ps1 -Render (already the harness's own
+    # deterministic diagnostic for the adaptive menu, issue #104) to get
+    # the actual rendered menu text for a given viewport, then rasterizes
+    # that text directly into a PNG -- deterministic evidence of the real
+    # render pipeline's output at each named tier, without needing to open,
+    # resize, and screen-grab a real console window (which would depend on
+    # a live, focusable desktop session the certification machine may not
+    # have). Width/height pairs land inside Get-ConsoleLayoutTier's actual
+    # tier boundaries: Compact (<90) for "small", Standard (90-119) for
+    # "normal", Ultra (>=150) for "maximized".
+    Write-TPMGateHeader -Gate 'Adaptive menu evidence' -Purpose 'Captures the real adaptive-menu render at three viewport tiers' -Expected 'one screenshot per tier, or an explicit failure if rendering could not be captured'
+    $debugMenuScript = Join-Path $PSScriptRoot 'Debug-TPM-MenuLayout.ps1'
+    $adaptiveMenuTiers = @(
+        [pscustomobject]@{ Name = 'adaptive-menu-normal';    Width = 100; Height = 32 }
+        [pscustomobject]@{ Name = 'adaptive-menu-small';     Width = 60;  Height = 22 }
+        [pscustomobject]@{ Name = 'adaptive-menu-maximized'; Width = 180; Height = 50 }
+    )
+    if (!(Test-Path -LiteralPath $debugMenuScript -PathType Leaf)) {
+        foreach ($tier in $adaptiveMenuTiers) {
+            [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name $tier.Name -CaptureAction { param($p) throw "Debug-TPM-MenuLayout.ps1 not found at $debugMenuScript (target screenshot: $p)" })
+        }
+    } else {
+        foreach ($tier in $adaptiveMenuTiers) {
+            $tierWidth = $tier.Width
+            $tierHeight = $tier.Height
+            [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name $tier.Name -CaptureAction {
+                param($p)
+                $renderedLines = @(& pwsh -NoProfile -File $debugMenuScript -Width $tierWidth -Height $tierHeight -Render)
+                if ($renderedLines.Count -eq 0) { throw "Debug-TPM-MenuLayout.ps1 -Width $tierWidth -Height $tierHeight -Render produced no output" }
+                Save-TPMRenderedTextCapture -Path $p -Lines $renderedLines
+            })
+        }
+    }
+
     $results.Status = if (@($results.Checks | Where-Object { -not $_.Passed }).Count -eq 0) { 'PASS' } else { 'FAIL' }
 }
 catch {
@@ -1386,7 +1618,6 @@ finally {
     $runTimer.Stop()
     $results.Elapsed = $runTimer.Elapsed.ToString()
     $results.PowerShellVersion = $PSVersionTable.PSVersion.ToString()
-    $results | ConvertTo-Json -Depth 8 | Out-File $json -Encoding utf8
 
     # The "Artifacts" gate below checks that both report files exist on
     # disk. $md's real content can't be written until after $certification
@@ -1403,6 +1634,15 @@ finally {
         # Add-Report appends below doesn't end up with a stray leading
         # blank line.
         [void](New-Item -ItemType File -Path $md -Force)
+    }
+    # Issue #151: same stub-then-real-content split as $md above, extended
+    # to $json -- the real, final $results (including the
+    # final-certification-result screenshot, captured further down, after
+    # the console summary it's evidence of) is written once, at the very
+    # end of this finally block, not here. A stub only needs to exist for
+    # the Artifacts gate's existence check.
+    if (-not (Test-Path -LiteralPath $json -PathType Leaf)) {
+        [void](New-Item -ItemType File -Path $json -Force)
     }
 
     # Issue #111 / Release Integrity: TPM script version and display version
@@ -1431,8 +1671,36 @@ finally {
     $results.TpmScriptVersion = $tpmScriptVersion
     $results.TpmDisplayVersion = $tpmDisplayVersion
 
+    # Issue #151: computed once here (Overall/Passed/Total/ScorePercent are
+    # needed for the final console summary below), but every file this run
+    # writes -- both certificationJson/certificationMd, both json/md -- is
+    # written further down, AFTER the final-certification-result screenshot
+    # is captured and appended to $results.Screenshots. A screenshot taken
+    # of the final console summary cannot, by construction, already be
+    # listed in a report written before that screenshot exists; writing
+    # every report only after capture is what makes the final entry appear
+    # in all of them, not just the console-only ones.
     $certification = New-CertificationScorecard -Results $results
+
+    Write-Host ""
+    Write-Host "============================================"
+    Write-Host " TPM CERTIFICATION SCORECARD"
+    Write-Host "============================================"
+    Write-Host (" Overall : {0}" -f $certification.Overall)
+    Write-Host (" Score   : {0}/{1} ({2}%)" -f $certification.Passed, $certification.Total, $certification.ScorePercent)
+    Write-Host (" Report  : {0}" -f $certificationMd)
+    Write-Host "============================================"
+    [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'final-certification-result' -CaptureAction { param($p) Save-TPMFullScreenCapture -Path $p })
+    Clear-TPMConsoleStatus
+
+    # $results.Screenshots now includes the final-certification-result
+    # entry -- refresh $certification.Screenshots (a snapshot array copy
+    # taken when New-CertificationScorecard was called above, before that
+    # entry existed) so both JSON artifacts reflect the complete list, not
+    # the incomplete one from before the final screenshot.
+    $certification.Screenshots = @($results.Screenshots)
     $certification | ConvertTo-Json -Depth 8 | Out-File $certificationJson -Encoding utf8
+    $results | ConvertTo-Json -Depth 8 | Out-File $json -Encoding utf8
 
     Add-CertificationReport "# TPM Certification Scorecard"
     Add-CertificationReport ""
@@ -1474,6 +1742,18 @@ finally {
             $mark = 'FAIL'
         }
         Add-CertificationReport ("- [{0}] {1}: {2}" -f $mark, $item.Area, $item.Details)
+    }
+    Add-CertificationReport ""
+    Add-CertificationReport "## Screenshots"
+    Add-CertificationReport ""
+    if (@($certification.Screenshots).Count -eq 0) {
+        Add-CertificationReport "(none captured)"
+    } else {
+        foreach ($shot in $certification.Screenshots) {
+            $shotMark = switch ($shot.Status) { 'Captured' { 'SHOT' } 'Skipped' { 'SKIP' } default { 'FAIL' } }
+            $shotLocation = if ($shot.Path) { $shot.Path } else { $shot.Details }
+            Add-CertificationReport ("- [{0}] {1}: {2}" -f $shotMark, $shot.Name, $shotLocation)
+        }
     }
     Add-CertificationReport ""
     Add-CertificationReport "## Artifact folder"
@@ -1526,14 +1806,16 @@ finally {
     if ($results.InstallHealthReport) {
         Add-Report ("- Install health: {0}" -f $results.InstallHealthReport)
     }
-
-    Write-Host ""
-    Write-Host "============================================"
-    Write-Host " TPM CERTIFICATION SCORECARD"
-    Write-Host "============================================"
-    Write-Host (" Overall : {0}" -f $certification.Overall)
-    Write-Host (" Score   : {0}/{1} ({2}%)" -f $certification.Passed, $certification.Total, $certification.ScorePercent)
-    Write-Host (" Report  : {0}" -f $certificationMd)
-    Write-Host "============================================"
-    Clear-TPMConsoleStatus
+    Add-Report ""
+    Add-Report "## Screenshots"
+    Add-Report ""
+    if (@($results.Screenshots).Count -eq 0) {
+        Add-Report "(none captured)"
+    } else {
+        foreach ($shot in $results.Screenshots) {
+            $shotMark = switch ($shot.Status) { 'Captured' { 'SHOT' } 'Skipped' { 'SKIP' } default { 'FAIL' } }
+            $shotLocation = if ($shot.Path) { $shot.Path } else { $shot.Details }
+            Add-Report ("- [{0}] {1}: {2}" -f $shotMark, $shot.Name, $shotLocation)
+        }
+    }
 }
