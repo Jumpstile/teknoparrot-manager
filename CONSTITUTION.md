@@ -18,7 +18,9 @@ When applicable, Jumpstile project governance is followed in this order:
    standard (issue taxonomy, label taxonomy, milestone/cross-link/
    acceptance-criteria policy, bug and feature lifecycle).
 4. Repository-specific engineering standards (e.g. `SECURITY.md`,
-   `RELEASE-SAFETY-CHECKLIST.md`, `ARCHITECTURE.md`).
+   `RELEASE-SAFETY-CHECKLIST.md`, `ARCHITECTURE.md`,
+   `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`, `INVENTORY_STANDARDS.md`,
+   `ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md`).
 5. Task-specific instructions.
 
 `PROJECT_IDENTITY_STANDARD.md` (public identity, branding, and attribution
@@ -129,6 +131,18 @@ Before publishing any investigation:
 5. If uncertainty remains, say so.
 
 Never overstate confidence.
+
+(For the specific, recurring case of a review finding that traces to a
+governing specification -- a file format, a protocol, a language grammar,
+an API contract -- see `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`. It
+operationalizes this rule for that situation: a specification-governed
+finding is evidence about the specification's coverage, not just about
+one bug, and "challenge your own conclusions" / "look for contradictory
+evidence" become a mandatory self-adversarial review against the
+specification before submission, not just a mindset.
+`INVENTORY_STANDARDS.md` defines the Specification Inventory and System
+Invariant Inventory artifacts that standard's problem-class resolution
+work produces.)
 
 ## Publishing rule
 
@@ -243,6 +257,15 @@ it's written. Do not compute a numeric TVD score -- the three-tier
 classification is deliberately coarse. Use it only to prioritize which
 behavioral tests are worth writing next, never as an input to whether a
 build is certified or a release is approved.
+
+TVD's "durable, prioritized investment over one-off effort" logic for
+behavioral tests specifically is generalized to engineering process as a
+whole in `ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md`. That
+standard governs how engineering velocity is optimized portfolio-wide --
+parallelizing independent work, automating repetitive tasks, batching
+problem-class resolutions -- always inside the quality gates this
+Constitution and its subordinate standards already require, never as a
+tradeoff against them.
 
 ## Release governance: technical readiness is not release authorization
 

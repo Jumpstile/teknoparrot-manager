@@ -25,6 +25,9 @@ implementation of that portfolio-wide principle, not a competing policy.
    AI agent) that did not write the fix reviews it before it's treated as
    settled. Convergent independent diagnosis of the same root cause from
    two separate reviewers is strong evidence a fix targets the real defect.
+   When the finding under review traces to a governing specification, see
+   Section 10 below -- work is not submitted for this step until it meets
+   `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`'s Definition of Review Ready.
 5. **Real-Hardware Certification** (where applicable) -- the TPM
    Certification Suite run on an actual arcade machine against an actual
    TeknoParrot install, not simulated or run only in a dev environment.
@@ -109,6 +112,15 @@ which specific AI tool fills which role is a project choice.
   `CONSTITUTION.md`: the sole authority to approve a version change,
   create the tag, publish the release, and change any release-identity
   marker. No AI role in this workflow substitutes for this decision.
+
+This multi-role structure is also what makes safe parallel work possible
+under `ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md`: the Lead
+Engineer role continuing implementation on genuinely independent work
+while the Independent Reviewer role audits an already-submitted,
+unrelated piece of work is the standard's "parallelize independent work
+whenever safe" principle in practice, not a deviation from this workflow
+-- provided the work streams are actually independent and the review in
+progress is never itself modified by the parallel work.
 
 ### Documentation Sweep Policy (permanent, every release)
 
@@ -505,6 +517,67 @@ Three instances in one session is the point at which this stops being a
 reasonable one-off exception. A genuine second reviewer (human or a separate
 AI reviewer account distinct from the PR author) should be configured before
 a fourth instance occurs.
+
+## 10. Specification-Driven Review Standard (specification-governed findings)
+
+Applies whenever a review finding, or the area of work under review,
+traces to a governing specification -- a file format, a protocol, a
+language grammar, an API contract, a regulatory rule -- rather than to a
+single isolated case. Full standard: `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`.
+Companion artifact standard (Specification Inventory / System Invariant
+Inventory): `INVENTORY_STANDARDS.md`.
+
+- [ ] The finding has been generalized to its problem class, not treated
+  as a single isolated case.
+- [ ] The governing specification's relevant sections were read (or
+  re-read) for this round before implementing.
+- [ ] A Specification Inventory (and, where the component has internal
+  guarantees beyond the external spec, a System Invariant Inventory) was
+  built or updated and used to drive implementation, rather than the
+  applicable rule family being recalled from memory.
+- [ ] Every rule in the identified applicable family is implemented, not
+  only the originally reported one.
+- [ ] A deliberate self-adversarial review was performed against the
+  specification before submission, and everything it found was fixed in
+  the same round.
+- [ ] New regression tests exercise the defect class, including
+  boundary/table coverage where the specification defines one -- not only
+  the exact reported case.
+- [ ] Anything from the governing specification deliberately left
+  unimplemented is documented with its rationale (in the code, in the
+  Specification Inventory's "Deliberately out of scope" section, or both).
+- [ ] Prior layered defenses and behavior outside the current finding's
+  scope are confirmed unchanged.
+- [ ] Verification evidence (commands run, results) is reported alongside
+  the submission.
+
+Work against a specification-governed finding is not submitted for
+Independent Review (release order step 4, Section 0 above) until every
+box above is honestly checked. This is the Section 1 pre-commit gates'
+sibling for specification-governed correctness, not a replacement for
+them -- both apply.
+
+## 11. Engineering Velocity and Time Stewardship
+
+Full standard: `ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md`.
+Applies continuously, not just at release time -- referenced here because
+release engineering (this document) is one of the areas most likely to
+accumulate exactly the kind of repeated manual work that standard exists
+to reduce.
+
+- [ ] Any release-checklist step performed identically, by hand, across
+  multiple recent releases is flagged as an automation candidate (see
+  `Tests\Test-ReleasePackage.ps1` for an existing instance of this
+  already done).
+- [ ] Independent work streams (e.g. governance/documentation work and an
+  in-flight, unrelated code review) proceeded in parallel where safe to
+  do so, rather than being serialized without a dependency reason.
+- [ ] No quality gate in this document (Sections 0-10 above) was skipped,
+  weakened, or deferred in the name of finishing faster -- per that
+  standard's "preserve all quality gates" and "never trade engineering
+  quality for short-term speed" principles, a proposed velocity gain that
+  requires this is not a velocity improvement under that standard and
+  does not apply here.
 
 ---
 
