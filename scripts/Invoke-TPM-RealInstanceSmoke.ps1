@@ -618,24 +618,23 @@ function Get-PesterSummary {
 # to infer capture method from free-text Details.
 function New-TPMCertificationScreenshot {
     param(
-        [Parameter(Mandatory=$true)][string]$ScreenshotDir,
-        [Parameter(Mandatory=$true)][string]$Name,
-        [ValidateSet('ScreenCapture', 'DeterministicRender')][string]$EvidenceType,
+        [AllowNull()][AllowEmptyString()][string]$ScreenshotDir,
+        [AllowNull()][AllowEmptyString()][string]$Name,
+        [AllowNull()][AllowEmptyString()][string]$EvidenceType,
         [scriptblock]$CaptureAction,
         [switch]$Skip,
         [string]$SkipReason
     )
 
-    if ($Skip) {
-        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $null; Status = 'Skipped'; EvidenceType = 'Skipped'; CaptureScope = $null; Details = $(if ($SkipReason) { $SkipReason } else { 'not applicable to this run' }) }
+    $recordName = if ([string]::IsNullOrWhiteSpace($Name)) { 'unnamed-evidence' } else { $Name }
+    if ([string]::IsNullOrWhiteSpace($Name)) { return [pscustomobject]@{ Name=$recordName; Label=$recordName; Path=$null; Status='Failed'; EvidenceType='Failed'; CaptureScope=$null; Details='invalid evidence metadata: Name is empty' } }
+    if ($Skip) { return [pscustomobject]@{ Name=$recordName; Label=$recordName; Path=$null; Status='Skipped'; EvidenceType='Skipped'; CaptureScope=$null; Details=$(if ($SkipReason) { $SkipReason } else { 'not applicable to this run' }) } }
+    if ([string]::IsNullOrWhiteSpace($ScreenshotDir)) { return [pscustomobject]@{ Name=$recordName; Label=$recordName; Path=$null; Status='Failed'; EvidenceType='Failed'; CaptureScope=$null; Details='invalid evidence metadata: ScreenshotDir is empty' } }
+    if (@('ScreenCapture','DeterministicRender') -cnotcontains $EvidenceType) {
+        $suppliedType = if ([string]::IsNullOrWhiteSpace($EvidenceType)) { '(empty)' } else { $EvidenceType }
+        return [pscustomobject]@{ Name=$recordName; Label=$recordName; Path=$null; Status='Failed'; EvidenceType='Failed'; CaptureScope=$null; Details="invalid evidence metadata: EvidenceType '$suppliedType' is not ScreenCapture or DeterministicRender" }
     }
-
-    if (-not $CaptureAction) {
-        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $null; Status = 'Failed'; EvidenceType = 'Failed'; CaptureScope = $null; Details = 'no CaptureAction supplied' }
-    }
-    if (-not $EvidenceType) {
-        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $null; Status = 'Failed'; EvidenceType = 'Failed'; CaptureScope = $null; Details = 'no EvidenceType supplied for a non-skipped capture' }
-    }
+    if (-not $CaptureAction) { return [pscustomobject]@{ Name=$recordName; Label=$recordName; Path=$null; Status='Failed'; EvidenceType='Failed'; CaptureScope=$null; Details='no CaptureAction supplied' } }
 
     if (-not (Test-Path -LiteralPath $ScreenshotDir -PathType Container)) {
         New-Item -ItemType Directory -Force -Path $ScreenshotDir | Out-Null
@@ -1437,13 +1436,30 @@ $results = [ordered]@{
 # uses for check results, kept separate because screenshots are evidence,
 # not a pass/fail check.
 function Add-Screenshot {
-    param([string]$ScreenshotDir, [string]$Name, [string]$EvidenceType, [scriptblock]$CaptureAction, [switch]$Skip, [string]$SkipReason)
-    $shot = New-TPMCertificationScreenshot -ScreenshotDir $ScreenshotDir -Name $Name -EvidenceType $EvidenceType -CaptureAction $CaptureAction -Skip:$Skip -SkipReason $SkipReason
+    param([string]$ScreenshotDir,[string]$Name,[string]$EvidenceType,[scriptblock]$CaptureAction,[switch]$Skip,[string]$SkipReason)
+    try {
+        if ($Skip) { $shot=New-TPMCertificationScreenshot -ScreenshotDir $ScreenshotDir -Name $Name -Skip -SkipReason $SkipReason }
+        else { $shot=New-TPMCertificationScreenshot -ScreenshotDir $ScreenshotDir -Name $Name -EvidenceType $EvidenceType -CaptureAction $CaptureAction }
+    } catch {
+        $safeName=if([string]::IsNullOrWhiteSpace($Name)){'unnamed-evidence'}else{$Name}
+        $shot=[pscustomobject]@{Name=$safeName;Label=$safeName;Path=$null;Status='Failed';EvidenceType='Failed';CaptureScope=$null;Details="evidence creation failed safely: $($_.Exception.Message)"}
+    }
     $script:results.Screenshots += $shot
-    $mark = switch ($shot.Status) { 'Captured' { '[SHOT]' } 'Skipped' { '[SKIP]' } default { '[FAIL]' } }
-    $scopeSuffix = if ($shot.CaptureScope) { " ($($shot.CaptureScope))" } else { '' }
-    Write-Host ("  {0} {1}{2}: {3}" -f $mark, $Name, $scopeSuffix, $(if ($shot.Path) { $shot.Path } else { $shot.Details }))
+    $mark=switch($shot.Status){'Captured'{'[SHOT]'}'Skipped'{'[SKIP]'}default{'[FAIL]'}}
+    $scopeSuffix=if($shot.CaptureScope){" ($($shot.CaptureScope))"}else{''}
+    Write-Host ("  {0} {1}{2}: {3}" -f $mark,$shot.Label,$scopeSuffix,$(if($shot.Path){$shot.Path}else{$shot.Details}))
     return $shot
+}
+
+function Set-TPMCertificationEvidenceFinalization {
+    param($Certification,$Results,$FinalEvidence)
+    $passed=($null -ne $FinalEvidence -and $FinalEvidence.Status -eq 'Captured' -and $FinalEvidence.EvidenceType -eq 'ScreenCapture')
+    $details=if($passed){'final certification evidence captured'}elseif($null -eq $FinalEvidence){'final certification evidence record is missing'}else{"final certification evidence failed: $($FinalEvidence.Details)"}
+    $status=[pscustomobject]@{Passed=$passed;Status=$(if($passed){'Pass'}else{'Fail'});Details=$details}
+    $Certification|Add-Member -NotePropertyName EvidenceFinalization -NotePropertyValue $status -Force
+    $Results.EvidenceFinalization=$status
+    if(-not $passed){$Certification.Overall='NOT CERTIFIED'}
+    return $status
 }
 
 function Add-CheckResult {
@@ -2223,7 +2239,9 @@ finally {
     Write-Host (" Score   : {0}/{1} ({2}%)" -f $certification.Passed, $certification.Total, $certification.ScorePercent)
     Write-Host (" Report  : {0}" -f $certificationMd)
     Write-Host "============================================"
-    [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'final-certification-result' -EvidenceType 'ScreenCapture' -CaptureAction { param($p) Save-TPMScreenCapture -Path $p })
+    $finalEvidence=Add-Screenshot -ScreenshotDir $screenshotDir -Name 'final-certification-result' -EvidenceType 'ScreenCapture' -CaptureAction { param($p) Save-TPMScreenCapture -Path $p }
+    $evidenceFinalization=Set-TPMCertificationEvidenceFinalization -Certification $certification -Results $results -FinalEvidence $finalEvidence
+    if(-not $evidenceFinalization.Passed){ Write-Host (" FINALIZATION FAILED: {0}" -f $evidenceFinalization.Details) -ForegroundColor Red; Write-Host ' Overall : NOT CERTIFIED' -ForegroundColor Red }
     Clear-TPMConsoleStatus
 
     # $results.Screenshots now includes the final-certification-result
@@ -2239,6 +2257,7 @@ finally {
     Add-CertificationReport ""
     Add-CertificationReport ("Overall: **{0}**" -f $certification.Overall)
     Add-CertificationReport ("Score: {0}/{1} ({2}%)" -f $certification.Passed, $certification.Total, $certification.ScorePercent)
+    Add-CertificationReport ("Evidence finalization: {0} -- {1}" -f $certification.EvidenceFinalization.Status, $certification.EvidenceFinalization.Details)
     Add-CertificationReport ("Elapsed: {0}" -f $results.Elapsed)
     Add-CertificationReport ""
     Add-CertificationReport "## Certification Target"

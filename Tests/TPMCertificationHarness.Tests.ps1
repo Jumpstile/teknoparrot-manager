@@ -2557,3 +2557,32 @@ Describe "Test-TPMPngStructure complete static PNG inventory coverage (issue #15
     It "rejects PLTE after <Type> when an optional truecolor palette is present" -TestCases @(@{Type='bKGD'},@{Type='tRNS'}) { param($Type);$c=New-InventoryChunk $Type @();$plte=New-InventoryChunk PLTE ([byte[]](1,2,3));(Test-TPMPngStructure (New-InventoryPng @($invIhdr,$c,$plte,$invIdat,$invIend))).Valid|Should -BeFalse }
 
 }
+
+
+Describe "Issue #154 evidence metadata and finalization regression" {
+    It "returns Skipped without binding or requiring EvidenceType" {
+        $r=New-TPMCertificationScreenshot -ScreenshotDir $TestDrive -Name 'skip' -Skip -SkipReason 'not shown'
+        $r.Status|Should -Be 'Skipped';$r.EvidenceType|Should -Be 'Skipped'
+    }
+    It "converts <Case> EvidenceType into controlled Failed evidence" -TestCases @(
+        @{Case='omitted';Value=$null},@{Case='null';Value=$null},@{Case='empty';Value=''},@{Case='whitespace';Value=' '},@{Case='unknown';Value='Other'}
+    ) { param($Case,$Value);$r=New-TPMCertificationScreenshot -ScreenshotDir $TestDrive -Name $Case -EvidenceType $Value -CaptureAction{};$r.Status|Should -Be 'Failed';$r.EvidenceType|Should -Be 'Failed';$r.Details|Should -Match 'invalid evidence metadata' }
+    It "converts empty Name and ScreenshotDir into controlled failures" {
+        (New-TPMCertificationScreenshot -ScreenshotDir $TestDrive -Name '' -EvidenceType ScreenCapture -CaptureAction{}).Status|Should -Be 'Failed'
+        (New-TPMCertificationScreenshot -ScreenshotDir '' -Name 'x' -EvidenceType ScreenCapture -CaptureAction{}).Status|Should -Be 'Failed'
+    }
+    It "preserves a successful final certification result" {
+        $c=[pscustomobject]@{Overall='CERTIFIED'};$r=@{};$e=[pscustomobject]@{Status='Captured';EvidenceType='ScreenCapture';Details='captured'}
+        $f=Set-TPMCertificationEvidenceFinalization $c $r $e
+        $f.Status|Should -Be 'Pass';$c.Overall|Should -Be 'CERTIFIED';$r.EvidenceFinalization.Status|Should -Be 'Pass'
+    }
+    It "forces NOT CERTIFIED for missing or failed final evidence and serializes consistently" -TestCases @(
+        @{Evidence=$null},@{Evidence=[pscustomobject]@{Status='Failed';EvidenceType='Failed';Details='capture failed'}}
+    ) { param($Evidence);$c=[pscustomobject]@{Overall='CERTIFIED'};$r=@{};$f=Set-TPMCertificationEvidenceFinalization $c $r $Evidence;$f.Status|Should -Be 'Fail';$c.Overall|Should -Be 'NOT CERTIFIED';($c|ConvertTo-Json)|Should -Match 'EvidenceFinalization';($r|ConvertTo-Json)|Should -Match '"Status":\s*"Fail"' }
+    It "gives every production Add-Screenshot call a valid literal type or explicit Skip" {
+        $source=[IO.File]::ReadAllLines((Join-Path $PSScriptRoot '..\scripts\Invoke-TPM-RealInstanceSmoke.ps1'))
+        $calls=@($source|Where-Object{$_ -match '^\s*(\[void\]\(|\$finalEvidence\s*=)?Add-Screenshot\s+-ScreenshotDir'})
+        $calls.Count|Should -Be 8
+        foreach($call in $calls){($call -match '-Skip(?:\s|\))' -or $call -match "-EvidenceType\s+'(?:ScreenCapture|DeterministicRender)'")|Should -BeTrue -Because $call}
+    }
+}

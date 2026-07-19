@@ -648,3 +648,8 @@ When reviewing a loop-generated set of tests, check that each one asserts
 something which would actually be FALSE if every iteration were silently
 testing the same value -- a title alone (built at Discovery time, always
 correct) is not evidence the body executed correctly.
+
+
+## Issue #154 -- parameter validation can bypass controlled failure paths
+
+A wrapper forwarded an omitted optional EvidenceType as an explicit empty string. ValidateSet rejected it before the callee body could return its intended Skipped/Failed record, aborting arcade certification during evidence finalization. For internal transaction metadata, validate inside the function and return structured failure evidence; wrappers must not forward capture-only parameters on skip paths. A required final artifact may remain outside numeric scoring, but failure must still force the overall certification outcome to NOT CERTIFIED.

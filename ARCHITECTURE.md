@@ -997,3 +997,8 @@ longer appears inline in the if-block, since it now lives inside `Get-MainMenuSe
   wiki entry, tag + ZIP + GitHub release + prune-to-5. It does NOT need a full doc-sweep
   for new features/mode numbers -- by definition nothing user-facing changed except
   behavior that was already supposed to work.
+
+
+## Certification evidence finalization (issue #154)
+
+Evidence metadata is validated inside `New-TPMCertificationScreenshot`, not by parameter-binding attributes, so null/empty internal metadata becomes a structured Failed record instead of terminating the harness. `Add-Screenshot` omits capture-only parameters on Skip paths and is the sole accumulator. Final certification evidence is a non-scored finalization invariant: failure leaves Passed/Total unchanged but forces Overall to NOT CERTIFIED and is serialized consistently in both result objects and Markdown.
