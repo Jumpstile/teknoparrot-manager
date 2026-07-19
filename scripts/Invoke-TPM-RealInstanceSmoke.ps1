@@ -56,6 +56,13 @@ $md = Join-Path $reportDir "TPM-Validation-Report.md"
 $json = Join-Path $reportDir "TPM-Validation-Report.json"
 $certificationMd = Join-Path $reportDir "TPM-Certification-Scorecard.md"
 $certificationJson = Join-Path $reportDir "TPM-Certification-Scorecard.json"
+# Issue #151: certification evidence screenshots. Beneath $reportDir, not a
+# separate top-level folder -- keeps every artifact for one certification
+# run (reports, Pester output, screenshots) under the same timestamped
+# directory. Created lazily by New-TPMCertificationScreenshot itself, not
+# here, so "screenshot directory creation" is covered by that function's
+# own regression tests rather than assumed to already exist.
+$screenshotDir = Join-Path $reportDir "Screenshots"
 
 function Add-Report {
     param([string]$Text)
@@ -580,6 +587,649 @@ function Get-PesterSummary {
     [pscustomobject]$summary
 }
 
+# Issue #151: RC3 arcade certification of a fully-passing merged commit
+# still returned ARCADE CERTIFICATION FAIL because the required
+# certification evidence (screenshots of the run itself) did not exist and
+# had to be captured manually. This function is the core, independently
+# testable piece of automatic screenshot capture: it never touches the
+# screen itself -- $CaptureAction is an injectable scriptblock that
+# performs the real capture and is expected to write a file to the $Path
+# it receives as its own single positional argument, optionally returning
+# a CaptureScope string ('Window'/'FullDesktop', meaningful only for
+# ScreenCapture evidence -- see Save-TPMScreenCapture below). Real callers
+# pass a scriptblock backed by System.Drawing/System.Windows.Forms; tests
+# substitute a fake action that writes a dummy file or throws, so capture
+# behavior -- directory creation, naming, validation, and the explicit
+# failure path -- can be exercised without a live display session (this
+# harness's own regression suite runs headless in CI, where a real screen
+# grab is not reliably available).
+#
+# A capture is never silently skipped: every call returns a result object
+# with an explicit Status of 'Captured', 'Failed', or 'Skipped' (only ever
+# used when the caller passes -Skip for a genuinely not-applicable "when
+# displayed" evidence slot, e.g. live thumbnail/controls evidence that
+# this particular run never triggered) -- never just omitted from the
+# evidence list, so a reviewer always sees what was attempted and why an
+# item is missing if it is. Review round 1 (finding #3): the record also
+# carries an explicit EvidenceType ('ScreenCapture'/'DeterministicRender'
+# for a successful capture, 'Skipped'/'Failed' otherwise) and a Label
+# (currently identical to Name, exposed under its own name because the
+# finding asked for it explicitly) -- callers and reports must never have
+# to infer capture method from free-text Details.
+function New-TPMCertificationScreenshot {
+    param(
+        [Parameter(Mandatory=$true)][string]$ScreenshotDir,
+        [Parameter(Mandatory=$true)][string]$Name,
+        [ValidateSet('ScreenCapture', 'DeterministicRender')][string]$EvidenceType,
+        [scriptblock]$CaptureAction,
+        [switch]$Skip,
+        [string]$SkipReason
+    )
+
+    if ($Skip) {
+        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $null; Status = 'Skipped'; EvidenceType = 'Skipped'; CaptureScope = $null; Details = $(if ($SkipReason) { $SkipReason } else { 'not applicable to this run' }) }
+    }
+
+    if (-not $CaptureAction) {
+        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $null; Status = 'Failed'; EvidenceType = 'Failed'; CaptureScope = $null; Details = 'no CaptureAction supplied' }
+    }
+    if (-not $EvidenceType) {
+        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $null; Status = 'Failed'; EvidenceType = 'Failed'; CaptureScope = $null; Details = 'no EvidenceType supplied for a non-skipped capture' }
+    }
+
+    if (-not (Test-Path -LiteralPath $ScreenshotDir -PathType Container)) {
+        New-Item -ItemType Directory -Force -Path $ScreenshotDir | Out-Null
+    }
+
+    try {
+        $path = New-TPMScreenshotReservedPath -ScreenshotDir $ScreenshotDir -Name $Name
+    } catch {
+        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $null; Status = 'Failed'; EvidenceType = 'Failed'; CaptureScope = $null; Details = "could not reserve a unique screenshot path: $($_.Exception.Message)" }
+    }
+
+    try {
+        $captureScope = & $CaptureAction $path
+        # Review round 1 (finding #5): a path being returned is not
+        # success -- verified against the real file on disk (exists,
+        # non-empty, decodes as a valid image with positive dimensions)
+        # before Status is ever set to 'Captured'. The invalid artifact
+        # (if any) is preserved, not deleted, so a reviewer can inspect
+        # exactly what went wrong -- consistent with never silently
+        # discarding evidence, even evidence of a failure.
+        $validation = Test-TPMScreenshotFileValid -Path $path
+        if (-not $validation.Valid) {
+            return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $path; Status = 'Failed'; EvidenceType = 'Failed'; CaptureScope = $null; Details = $validation.Reason }
+        }
+        $resolvedScope = if ($EvidenceType -eq 'ScreenCapture' -and $captureScope) { [string]$captureScope } else { $null }
+        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $path; Status = 'Captured'; EvidenceType = $EvidenceType; CaptureScope = $resolvedScope; Details = 'captured' }
+    } catch {
+        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $path; Status = 'Failed'; EvidenceType = 'Failed'; CaptureScope = $null; Details = $_.Exception.Message }
+    }
+}
+
+# Issue #151 review round 1 (finding #2): millisecond-precision timestamps
+# alone were not collision-safe -- two captures of the same evidence label
+# within the same millisecond (or two independent harness processes
+# sharing a report directory) could produce the same file name. This
+# combines a timestamp, a per-run monotonic counter, and a short random
+# suffix for a human-readable-but-unique candidate name, then reserves it
+# atomically via FileMode.CreateNew (which throws if the path already
+# exists, eliminating the check-then-write race a plain Test-Path guard
+# would still have), retrying with a new candidate on collision. The
+# reserved file is a zero-byte placeholder -- $CaptureAction's real
+# content overwrites it immediately afterward.
+$script:tpmScreenshotSequence = 0
+function New-TPMScreenshotReservedPath {
+    param([string]$ScreenshotDir, [string]$Name)
+    $safeName = ($Name -replace '[^A-Za-z0-9_\-]', '-')
+    $attempt = 0
+    while ($true) {
+        $attempt++
+        $script:tpmScreenshotSequence++
+        $screenshotStamp = Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff'
+        $randomSuffix = '{0:x6}' -f (Get-Random -Maximum 0xFFFFFF)
+        $fileName = "{0}_{1}_{2:D5}_{3}.png" -f $safeName, $screenshotStamp, $script:tpmScreenshotSequence, $randomSuffix
+        $candidatePath = Join-Path $ScreenshotDir $fileName
+        $handle = $null
+        try {
+            $handle = [System.IO.File]::Open($candidatePath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write)
+            return $candidatePath
+        } catch [System.IO.IOException] {
+            if ($attempt -ge 1000) { throw "could not reserve a unique screenshot path under $ScreenshotDir after 1000 attempts" }
+        } finally {
+            if ($handle) { $handle.Dispose() }
+        }
+    }
+}
+
+# Issue #151 review round 3: GDI+ decoding, even forced via LockBits, does
+# not validate PNG CRC integrity -- a valid PNG with one byte flipped
+# inside its IDAT payload (signature, chunk structure, and IEND all still
+# intact) decoded and locked-bits successfully, since GDI+'s deflate
+# decompressor tolerates plenty of bit-level corruption without raising an
+# error. CRC validation is the only way to actually detect this class of
+# corruption, and the PNG spec ties a CRC to each individual chunk, so it
+# has to be computed per-chunk, not over the whole file. Standard CRC-32
+# (polynomial 0xEDB88320, same variant zlib/PNG both use), table-based for
+# speed. $script:tpmCrc32Table is built once and reused -- this can run
+# per-chunk per-screenshot, and rebuilding a 256-entry table on every call
+# would be wasted work for no benefit.
+function Get-TPMCrc32 {
+    param([byte[]]$Bytes, [int]$Offset, [int]$Count)
+    if (-not $script:tpmCrc32Table) {
+        $table = New-Object 'uint32[]' 256
+        for ($n = 0; $n -lt 256; $n++) {
+            $c = [uint32]$n
+            for ($k = 0; $k -lt 8; $k++) {
+                if (($c -band 1) -ne 0) {
+                    $c = 0xEDB88320 -bxor ($c -shr 1)
+                } else {
+                    $c = $c -shr 1
+                }
+            }
+            $table[$n] = $c
+        }
+        $script:tpmCrc32Table = $table
+    }
+    # [uint32]::MaxValue, not [uint32]0xFFFFFFFF -- PowerShell parses the
+    # hex literal 0xFFFFFFFF as a signed Int32 (-1) first, and casting a
+    # negative value to [uint32] is a checked conversion that throws
+    # ("Value was either too large or too small for a UInt32") rather than
+    # wrapping the way C-style unchecked casts do. Confirmed by direct
+    # repro.
+    $crc = [uint32]::MaxValue
+    for ($i = 0; $i -lt $Count; $i++) {
+        $index = ($crc -bxor [uint32]$Bytes[$Offset + $i]) -band [uint32]0xFF
+        $crc = $script:tpmCrc32Table[$index] -bxor ($crc -shr 8)
+    }
+    return $crc -bxor [uint32]::MaxValue
+}
+
+# Issue #151 review round 3: parses the PNG chunk stream directly instead
+# of trusting a decoder's opinion of it -- "GDI+ decoded it" and "GDI+
+# decoded it losslessly" are different claims, and only chunk-level CRC
+# validation actually establishes the second one. Every chunk is walked
+# (4-byte big-endian length, 4-byte type, data, 4-byte CRC), each is
+# required to stay fully within the file's bounds, the first chunk must be
+# IHDR with exactly 13 bytes of data (both mandated by the spec), the
+# stream must end in a zero-length IEND with nothing after it, and every
+# chunk's stored CRC (not just the three critical ones -- ancillary chunks
+# too, since this is cheap enough on a screenshot-sized file to just do
+# for all of them rather than special-case which ones matter) is
+# recomputed and compared against what is actually in the file. Position
+# arithmetic uses [int64] throughout -- a chunk's declared length is a
+# 32-bit field an attacker-or-corruption-controlled file could set close
+# to its max value, and adding that directly to a 32-bit position/length
+# comparison risks silent integer overflow masking exactly the "chunk
+# claims to extend past the file" case this function exists to catch.
+# Issue #151 review round 4: CRC validation alone is not spec conformance
+# -- a CRC-valid PNG containing a second, CRC-valid IHDR chunk passed
+# round 3's validator, since nothing checked chunk ordering or uniqueness.
+# This is a deliberately scoped subset of the PNG specification: enough to
+# make a trustworthy certification-evidence validator (structure,
+# ordering, uniqueness, the handful of IHDR fields that determine whether
+# the rest of the file can even be interpreted, and enough content
+# validation on PLTE to catch a structurally-impossible palette), not a
+# full PNG decoder. All string comparisons against chunk type names use
+# the case-sensitive operators (-ceq/-cne/-ccontains) throughout --
+# PowerShell's default -eq/-ne/-contains are case-INSENSITIVE, and chunk
+# type case is semantically load-bearing in the PNG spec itself (bit 5 of
+# each of the 4 type bytes encodes critical/ancillary, public/private,
+# reserved, and safe-to-copy; a chunk named "ihdr" is a different,
+# unrecognized ancillary chunk, not a case-insensitive alias for "IHDR")
+# -- confirmed by direct repro that the case-insensitive default would
+# have treated them as the same chunk.
+function Test-TPMPngStructure {
+    param([byte[]]$Bytes)
+
+    $pngSignature = [byte[]](0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+    if ($Bytes.Length -lt 8) {
+        return [pscustomobject]@{ Valid = $false; Reason = 'file is too short to contain a PNG signature' }
+    }
+    for ($i = 0; $i -lt 8; $i++) {
+        if ($Bytes[$i] -ne $pngSignature[$i]) {
+            return [pscustomobject]@{ Valid = $false; Reason = 'file does not start with the PNG signature (magic bytes) -- not a real PNG regardless of its .png extension' }
+        }
+    }
+
+    # PNG chunk length fields are 4-byte unsigned integers, but the spec
+    # itself restricts a chunk's actual length to fit in a signed 32-bit
+    # value (0 .. 2^31-1) -- rejected here as "allocation safety" before
+    # the declared length is used in any further arithmetic, independent
+    # of whether it would also overrun this particular file's bounds.
+    [int64]$maxChunkLength = 0x7FFFFFFF
+    $knownCriticalTypes = @('IHDR', 'PLTE', 'IDAT', 'IEND')
+    $staticUnsupportedTypes = @('acTL', 'fcTL', 'fdAT')
+    $singleAncillaryTypes = @('cHRM', 'cICP', 'gAMA', 'iCCP', 'mDCV', 'cLLI', 'sBIT', 'sRGB', 'bKGD', 'hIST', 'tRNS', 'eXIf', 'pHYs', 'tIME')
+    $beforePlteAndIdatTypes = @('cHRM', 'cICP', 'gAMA', 'iCCP', 'mDCV', 'cLLI', 'sBIT', 'sRGB')
+    $beforeIdatTypes = @('eXIf', 'pHYs', 'sPLT')
+    $afterPlteBeforeIdatTypes = @('bKGD', 'hIST', 'tRNS')
+    $validColorTypes = @(0, 2, 3, 4, 6)
+    $validBitDepthsByColorType = @{ 0 = @(1, 2, 4, 8, 16); 2 = @(8, 16); 3 = @(1, 2, 4, 8); 4 = @(8, 16); 6 = @(8, 16) }
+    $seenAncillary = New-Object 'System.Collections.Generic.Dictionary[string,int]' ([System.StringComparer]::Ordinal)
+
+    [int64]$pos = 8
+    [int64]$fileLength = $Bytes.Length
+    $chunkIndex = 0
+    $sawIend = $false
+    $ihdrCount = 0
+    $iendCount = 0
+    $plteCount = 0
+    $idatCount = 0
+    $idatStarted = $false
+    $idatEnded = $false
+    $colorType = $null
+    $bitDepth = $null
+
+    while ($pos -lt $fileLength) {
+        if ($sawIend) {
+            return [pscustomobject]@{ Valid = $false; Reason = 'PNG contains extra data after its terminating IEND chunk' }
+        }
+        if ($pos + 8 -gt $fileLength) {
+            return [pscustomobject]@{ Valid = $false; Reason = 'PNG chunk header runs past the end of the file -- truncated or malformed' }
+        }
+
+        # Chunk type validation: all four type bytes must be ASCII letters
+        # (0x41-0x5A / 0x61-0x7A) per spec -- checked on the raw bytes,
+        # not the decoded string, since ASCII-decoding arbitrary bytes
+        # never throws and would otherwise silently let a malformed type
+        # through as a weird-looking-but-technically-valid .NET string.
+        for ($tb = 0; $tb -lt 4; $tb++) {
+            $b = $Bytes[$pos + 4 + $tb]
+            if (-not (($b -ge 65 -and $b -le 90) -or ($b -ge 97 -and $b -le 122))) {
+                return [pscustomobject]@{ Valid = $false; Reason = 'PNG chunk type is not 4 ASCII letters -- malformed chunk name' }
+            }
+        }
+        $type = [System.Text.Encoding]::ASCII.GetString($Bytes, [int]($pos + 4), 4)
+        if (($Bytes[$pos + 6] -band 0x20) -ne 0) { return [pscustomobject]@{ Valid = $false; Reason = "PNG chunk '$type' sets the reserved third type bit" } }
+
+        [int64]$length = ([uint32]$Bytes[$pos] -shl 24) -bor ([uint32]$Bytes[$pos + 1] -shl 16) -bor ([uint32]$Bytes[$pos + 2] -shl 8) -bor [uint32]$Bytes[$pos + 3]
+        if ($length -gt $maxChunkLength) {
+            return [pscustomobject]@{ Valid = $false; Reason = "PNG '$type' chunk declares a length ($length) that exceeds the maximum a PNG chunk may have (2^31 - 1)" }
+        }
+
+        [int64]$dataStart = $pos + 8
+        [int64]$crcStart = $dataStart + $length
+        if ($crcStart + 4 -gt $fileLength) {
+            return [pscustomobject]@{ Valid = $false; Reason = "PNG '$type' chunk declares a length ($length) whose data/CRC overruns the end of the file" }
+        }
+
+        if ($chunkIndex -eq 0 -and $type -cne 'IHDR') {
+            return [pscustomobject]@{ Valid = $false; Reason = "PNG's first chunk must be IHDR, found '$type'" }
+        }
+
+        if ($staticUnsupportedTypes -ccontains $type) { return [pscustomobject]@{ Valid = $false; Reason = "PNG chunk '$type' is APNG animation data; certification evidence must be static" } }
+        if ($singleAncillaryTypes -ccontains $type) {
+            if ($seenAncillary.ContainsKey($type)) { return [pscustomobject]@{ Valid = $false; Reason = "PNG contains more than one $type chunk" } }
+            $seenAncillary.Add($type, 1)
+        }
+        if ($beforePlteAndIdatTypes -ccontains $type -and ($plteCount -gt 0 -or $idatStarted)) { return [pscustomobject]@{ Valid = $false; Reason = "PNG $type chunk must appear before PLTE and IDAT" } }
+        if ($beforeIdatTypes -ccontains $type -and $idatStarted) { return [pscustomobject]@{ Valid = $false; Reason = "PNG $type chunk must appear before IDAT" } }
+        if ($afterPlteBeforeIdatTypes -ccontains $type) {
+            if (($type -ceq 'bKGD' -or $type -ceq 'tRNS') -and $plteCount -eq 0 -and $colorType -ne 3) { $paletteDependentSeenBeforePlte = $true }
+            if ($idatStarted) { return [pscustomobject]@{ Valid = $false; Reason = "PNG $type chunk must appear before IDAT" } }
+            if (($type -ceq 'hIST' -or $colorType -eq 3) -and $plteCount -eq 0) { return [pscustomobject]@{ Valid = $false; Reason = "PNG $type chunk requires and must follow PLTE" } }
+        }
+
+        if ($type -ceq 'IHDR') {
+            $ihdrCount++
+            if ($ihdrCount -gt 1) {
+                return [pscustomobject]@{ Valid = $false; Reason = 'PNG contains more than one IHDR chunk -- a PNG must have exactly one, even if every copy is individually CRC-valid' }
+            }
+            if ($length -ne 13) {
+                return [pscustomobject]@{ Valid = $false; Reason = "PNG IHDR chunk must be exactly 13 bytes, found $length" }
+            }
+        }
+        if ($type -ceq 'IEND') {
+            $iendCount++
+            if ($iendCount -gt 1) {
+                return [pscustomobject]@{ Valid = $false; Reason = 'PNG contains more than one IEND chunk' }
+            }
+            if ($length -ne 0) {
+                return [pscustomobject]@{ Valid = $false; Reason = "PNG IEND chunk must have zero length, found $length" }
+            }
+        }
+        if ($type -ceq 'PLTE') {
+            if ($paletteDependentSeenBeforePlte) { return [pscustomobject]@{ Valid = $false; Reason = 'PNG PLTE must appear before any bKGD or tRNS chunk when a palette is present' } }
+            $plteCount++
+            if ($plteCount -gt 1) {
+                return [pscustomobject]@{ Valid = $false; Reason = 'PNG contains more than one PLTE chunk -- a PNG must have at most one' }
+            }
+            if ($idatStarted) {
+                return [pscustomobject]@{ Valid = $false; Reason = 'PNG PLTE chunk must appear before the first IDAT chunk' }
+            }
+            if ($length -eq 0 -or ($length % 3) -ne 0) {
+                return [pscustomobject]@{ Valid = $false; Reason = "PNG PLTE chunk length ($length) must be a nonzero multiple of 3 (one RGB triplet per palette entry)" }
+            }
+            if ($length -gt 768) {
+                return [pscustomobject]@{ Valid = $false; Reason = "PNG PLTE chunk length ($length) exceeds the maximum of 768 bytes (256 palette entries)" }
+            }
+            if ($null -ne $colorType -and ($colorType -eq 0 -or $colorType -eq 4)) {
+                return [pscustomobject]@{ Valid = $false; Reason = "PNG PLTE chunk is not permitted for color type $colorType (grayscale, with or without alpha)" }
+            }
+            if ($null -ne $colorType -and $colorType -eq 3 -and $null -ne $bitDepth) {
+                $paletteEntries = $length / 3
+                $maxEntries = [Math]::Pow(2, $bitDepth)
+                if ($paletteEntries -gt $maxEntries) {
+                    return [pscustomobject]@{ Valid = $false; Reason = "PNG PLTE chunk has $paletteEntries palette entries, more than IHDR's bit depth $bitDepth can index (max $([int]$maxEntries))" }
+                }
+            }
+        }
+        if ($type -ceq 'IDAT') {
+            if ($idatEnded) {
+                return [pscustomobject]@{ Valid = $false; Reason = 'PNG IDAT chunks must be consecutive -- another chunk already appeared after the IDAT sequence ended' }
+            }
+            $idatStarted = $true
+            $idatCount++
+        } elseif ($idatStarted -and -not $idatEnded) {
+            $idatEnded = $true
+        }
+
+        # Unknown critical chunk: bit 5 of the first type byte (0x20)
+        # clear means uppercase means critical per spec -- a decoder that
+        # does not recognize a critical chunk must not proceed, since it
+        # cannot know what that chunk means for interpreting the image.
+        # Unknown ANCILLARY chunks (lowercase first letter) are fine and
+        # intentionally allowed through once their own bounds/CRC checks
+        # (below, and above) pass -- this validator does not need to
+        # understand every possible ancillary chunk to trust the file.
+        $firstTypeByte = $Bytes[$pos + 4]
+        $isCritical = ($firstTypeByte -band 0x20) -eq 0
+        if ($isCritical -and ($knownCriticalTypes -cnotcontains $type)) {
+            return [pscustomobject]@{ Valid = $false; Reason = "PNG contains an unrecognized critical chunk '$type' -- an unknown critical chunk cannot be safely treated as valid evidence" }
+        }
+
+        $storedCrc = ([uint32]$Bytes[$crcStart] -shl 24) -bor ([uint32]$Bytes[$crcStart + 1] -shl 16) -bor ([uint32]$Bytes[$crcStart + 2] -shl 8) -bor [uint32]$Bytes[$crcStart + 3]
+        $computedCrc = Get-TPMCrc32 -Bytes $Bytes -Offset ([int]($pos + 4)) -Count ([int](4 + $length))
+        if ($storedCrc -ne $computedCrc) {
+            return [pscustomobject]@{ Valid = $false; Reason = ("PNG '{0}' chunk failed CRC validation (stored=0x{1:X8} computed=0x{2:X8}) -- structurally corrupted" -f $type, $storedCrc, $computedCrc) }
+        }
+
+        if ($type -ceq 'IHDR') {
+            # Safe to read data bytes 8-12 unconditionally here -- $length
+            # was already confirmed to be exactly 13 above, and the
+            # data/CRC bounds check already confirmed dataStart+13 (and
+            # therefore dataStart+12, the last data byte) is within the
+            # file.
+            [int64]$width = ([uint32]$Bytes[$dataStart] -shl 24) -bor ([uint32]$Bytes[$dataStart + 1] -shl 16) -bor ([uint32]$Bytes[$dataStart + 2] -shl 8) -bor [uint32]$Bytes[$dataStart + 3]
+            [int64]$height = ([uint32]$Bytes[$dataStart + 4] -shl 24) -bor ([uint32]$Bytes[$dataStart + 5] -shl 16) -bor ([uint32]$Bytes[$dataStart + 6] -shl 8) -bor [uint32]$Bytes[$dataStart + 7]
+            $bitDepth = [int]$Bytes[$dataStart + 8]
+            $colorType = [int]$Bytes[$dataStart + 9]
+            $compressionMethod = [int]$Bytes[$dataStart + 10]
+            $filterMethod = [int]$Bytes[$dataStart + 11]
+            $interlaceMethod = [int]$Bytes[$dataStart + 12]
+
+            if ($width -lt 1 -or $width -gt $maxChunkLength) { return [pscustomobject]@{ Valid = $false; Reason = "PNG IHDR width ($width) must be 1 through 2^31 - 1" } }
+            if ($height -lt 1 -or $height -gt $maxChunkLength) { return [pscustomobject]@{ Valid = $false; Reason = "PNG IHDR height ($height) must be 1 through 2^31 - 1" } }
+
+            if ($validColorTypes -notcontains $colorType) {
+                return [pscustomobject]@{ Valid = $false; Reason = "PNG IHDR declares an unknown color type ($colorType) -- valid values are 0, 2, 3, 4, 6" }
+            }
+            if ($validBitDepthsByColorType[$colorType] -notcontains $bitDepth) {
+                $allowed = $validBitDepthsByColorType[$colorType] -join ', '
+                return [pscustomobject]@{ Valid = $false; Reason = "PNG IHDR declares bit depth $bitDepth for color type $colorType, which the PNG spec does not permit (allowed: $allowed)" }
+            }
+            if ($compressionMethod -ne 0) {
+                return [pscustomobject]@{ Valid = $false; Reason = "PNG IHDR declares an unknown compression method ($compressionMethod) -- only 0 is defined by the spec" }
+            }
+            if ($filterMethod -ne 0) {
+                return [pscustomobject]@{ Valid = $false; Reason = "PNG IHDR declares an unknown filter method ($filterMethod) -- only 0 is defined by the spec" }
+            }
+            if ($interlaceMethod -ne 0 -and $interlaceMethod -ne 1) {
+                return [pscustomobject]@{ Valid = $false; Reason = "PNG IHDR declares an unknown interlace method ($interlaceMethod) -- only 0 (none) and 1 (Adam7) are defined by the spec" }
+            }
+        }
+
+        if ($type -ceq 'IEND') { $sawIend = $true }
+        $pos = $crcStart + 4
+        $chunkIndex++
+    }
+
+    if (-not $sawIend) {
+        return [pscustomobject]@{ Valid = $false; Reason = 'PNG does not end with an IEND chunk -- likely truncated' }
+    }
+    if ($ihdrCount -eq 0) {
+        return [pscustomobject]@{ Valid = $false; Reason = 'PNG has no IHDR chunk' }
+    }
+    if ($idatCount -eq 0) {
+        return [pscustomobject]@{ Valid = $false; Reason = 'PNG has no IDAT chunk -- a PNG must contain image data' }
+    }
+    if ($colorType -eq 3 -and $plteCount -eq 0) {
+        return [pscustomobject]@{ Valid = $false; Reason = 'PNG uses indexed color (color type 3) but has no PLTE chunk -- PLTE is required for this color type' }
+    }
+
+    return [pscustomobject]@{ Valid = $true; Reason = 'PNG chunk structure, ordering, uniqueness, and CRC validation passed' }
+}
+
+# Issue #151 review round 2/3: "successfully constructed an Image object"
+# was not strong enough proof of a real, complete, uncorrupted PNG. GDI+
+# detects actual image format from content, not the file extension, so
+# JPEG bytes saved with a .png name previously decoded without error and
+# passed as 'Captured'. GDI+ can also decode a materially truncated PNG
+# far enough to report valid-looking dimensions before ever touching the
+# (incomplete) pixel data, since Image.FromStream does not eagerly decode
+# scanlines -- and even forced full-frame decoding (LockBits) does not
+# validate per-chunk CRC integrity, so a PNG with a single corrupted byte
+# inside IDAT (signature, structure, and IEND all otherwise intact) can
+# still decode losslessly-looking without ever raising an error. None of
+# "right filename", "GDI+ guessed a format", "GDI+ decoded *something*",
+# or "GDI+ decoded the full frame without throwing" is sufficient proof on
+# its own, so validation layers six independent checks before any of them
+# can report success:
+#   1. file exists / is non-empty
+#   2. Test-TPMPngStructure: signature, chunk-by-chunk bounds/structure
+#      (first chunk IHDR with exactly 13 bytes, terminal zero-length IEND,
+#      nothing after it), and CRC-32 validation of every chunk -- this is
+#      the only layer that actually detects payload-level corruption that
+#      preserves the file's overall shape
+#   3. GDI+ decodes it AND reports RawFormat = Png specifically (not just
+#      "some image") -- this is what actually catches a renamed JPEG,
+#      since GDI+ would decode it successfully but report RawFormat = Jpeg
+#   4. positive width/height
+#   5. LockBits over the full frame forces GDI+ to materialize every
+#      scanline right now rather than lazily on first pixel access --
+#      throws on incomplete/corrupt compressed data that construction
+#      alone did not touch
+#   6. no file lock remains afterward (verified by validating from an
+#      in-memory byte copy in the first place -- see below)
+# Reads the file's bytes into memory and constructs the validation Image
+# from that byte array (System.Drawing.Image.FromStream), never
+# Image.FromFile -- the latter keeps an open handle on the source file
+# tied to the Image's lifetime even after pixel data is read, which would
+# leave the just-captured screenshot locked; validating from an in-memory
+# copy guarantees no file lock remains once this function returns.
+function Test-TPMScreenshotFileValid {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return [pscustomobject]@{ Valid = $false; Reason = 'file does not exist' }
+    }
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -eq 0) {
+        return [pscustomobject]@{ Valid = $false; Reason = 'file is empty (zero length)' }
+    }
+
+    $structure = Test-TPMPngStructure -Bytes $bytes
+    if (-not $structure.Valid) {
+        return [pscustomobject]@{ Valid = $false; Reason = $structure.Reason }
+    }
+
+    # Same hardcoded-literal false positive as the other Add-Type calls in
+    # this file -- traced, no untrusted input reaches this call.
+    Add-Type -AssemblyName System.Drawing
+    $stream = New-Object System.IO.MemoryStream(,$bytes)
+    try {
+        try {
+            $image = [System.Drawing.Image]::FromStream($stream)
+        } catch {
+            return [pscustomobject]@{ Valid = $false; Reason = "file could not be decoded as a valid image: $($_.Exception.Message)" }
+        }
+        try {
+            if ($image.RawFormat.Guid -ne [System.Drawing.Imaging.ImageFormat]::Png.Guid) {
+                return [pscustomobject]@{ Valid = $false; Reason = "file decoded successfully but not as PNG (detected format: $($image.RawFormat)) -- likely a renamed image of a different format" }
+            }
+            if ($image.Width -le 0 -or $image.Height -le 0) {
+                return [pscustomobject]@{ Valid = $false; Reason = "image has invalid dimensions ($($image.Width)x$($image.Height))" }
+            }
+            try {
+                $bitmap = [System.Drawing.Bitmap]$image
+                $rect = New-Object System.Drawing.Rectangle 0, 0, $bitmap.Width, $bitmap.Height
+                $bmpData = $bitmap.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly, $bitmap.PixelFormat)
+                $bitmap.UnlockBits($bmpData)
+            } catch {
+                return [pscustomobject]@{ Valid = $false; Reason = "PNG pixel data could not be fully decoded (likely truncated or corrupt): $($_.Exception.Message)" }
+            }
+            return [pscustomobject]@{ Valid = $true; Reason = 'valid PNG' }
+        } finally {
+            $image.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+}
+
+# Issue #151 review round 1 (finding #4): privacy/containment safeguard --
+# GetConsoleWindow (kernel32) returns the console window handle actually
+# associated with this process, which GetWindowRect (user32) then bounds,
+# so the capture below can be narrowed to just that window instead of the
+# full virtual desktop whenever the host environment makes that handle
+# available. Returns $null (never throws) when it cannot be obtained
+# reliably -- some hosting environments (certain remote sessions, some
+# integrated terminals) never populate it -- so callers have an explicit
+# signal to fall back to a full-desktop capture rather than silently
+# guessing at a bad rectangle.
+$tpmWindowInteropSource = @'
+using System;
+using System.Runtime.InteropServices;
+public class TPMWindowInterop {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr GetConsoleWindow();
+    [DllImport("user32.dll")]
+    public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+}
+'@
+function Get-TPMConsoleWindowRect {
+    try {
+        if (-not ('TPMWindowInterop' -as [type])) {
+            # InjectionHunter flags this Add-Type call (InjectionRisk.AddType).
+            # Traced: $tpmWindowInteropSource is a fixed literal defined a few
+            # lines above in this same file, never built from external or
+            # caller-supplied input -- same hardcoded-literal false-positive
+            # class already documented on the other Add-Type calls in this
+            # file.
+            Add-Type -Language CSharp -TypeDefinition $tpmWindowInteropSource -ErrorAction Stop
+        }
+        $hwnd = [TPMWindowInterop]::GetConsoleWindow()
+        if ($hwnd -eq [IntPtr]::Zero) { return $null }
+        $rect = New-Object TPMWindowInterop+RECT
+        $ok = [TPMWindowInterop]::GetWindowRect($hwnd, [ref]$rect)
+        if (-not $ok) { return $null }
+        $width = $rect.Right - $rect.Left
+        $height = $rect.Bottom - $rect.Top
+        if ($width -le 0 -or $height -le 0) { return $null }
+        return [pscustomobject]@{ X = $rect.Left; Y = $rect.Top; Width = $width; Height = $height }
+    } catch {
+        return $null
+    }
+}
+
+# Real capture action for an on-screen console moment (certification suite
+# running, final result, requested/effective root evidence) -- grabs the
+# certification console's own window when Get-TPMConsoleWindowRect can
+# resolve it (CaptureScope = 'Window'); falls back to the full virtual
+# screen, explicitly classified as such, only when it cannot (CaptureScope
+# = 'FullDesktop'). Returns the scope string so New-TPMCertificationScreenshot
+# can record which one actually happened -- never silently reported as a
+# narrow capture when it was not. Never called from tests; production-only,
+# since it requires a live display session this harness's own CI run does
+# not have.
+function Save-TPMScreenCapture {
+    param([string]$Path)
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    $windowBounds = Get-TPMConsoleWindowRect
+    if ($windowBounds) {
+        $x = $windowBounds.X; $y = $windowBounds.Y; $w = $windowBounds.Width; $h = $windowBounds.Height
+        $scope = 'Window'
+    } else {
+        $full = [System.Windows.Forms.SystemInformation]::VirtualScreen
+        $x = $full.Location.X; $y = $full.Location.Y; $w = $full.Width; $h = $full.Height
+        $scope = 'FullDesktop'
+    }
+    $bitmap = New-Object System.Drawing.Bitmap $w, $h
+    try {
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        try {
+            $graphics.CopyFromScreen($x, $y, 0, 0, (New-Object System.Drawing.Size $w, $h))
+        } finally {
+            $graphics.Dispose()
+        }
+        $bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+    } finally {
+        $bitmap.Dispose()
+    }
+    return $scope
+}
+
+# Real capture action for the adaptive-menu and Smoke File Safety evidence
+# slots. Rasterizes already-rendered text (from Debug-TPM-MenuLayout.ps1
+# -Render, or the exact real Smoke File Safety gate line built from this
+# run's own $certification.Items) directly into a PNG via GDI+ instead of
+# opening, resizing, and screen-grabbing a real console window --
+# deterministic and does not depend on a live, focusable desktop session
+# being available on the certification machine, which a real windowed
+# capture would.
+function Save-TPMRenderedTextCapture {
+    param([string]$Path, [string[]]$Lines)
+    # Same hardcoded-literal false positive as Save-TPMScreenCapture
+    # above -- no untrusted input reaches this Add-Type call.
+    Add-Type -AssemblyName System.Drawing
+    # [System.Drawing.Font]::new(...), not New-Object -- New-Object's
+    # comma-separated -ArgumentList left the (string, int, FontStyle)
+    # overload ambiguous under real PowerShell 5.1 ("Multiple ambiguous
+    # overloads found for 'Font' and the argument count: 3", confirmed by
+    # direct repro); the static ::new() call resolves it correctly.
+    $font = [System.Drawing.Font]::new('Consolas', 12.0, [System.Drawing.FontStyle]::Regular)
+    $lineHeight = [int]($font.GetHeight() * 1.15)
+    $longest = if ($Lines.Count -gt 0) { ($Lines | Measure-Object -Property Length -Maximum).Maximum } else { 40 }
+    $width = [Math]::Max(200, ($longest * 9) + 40)
+    $height = [Math]::Max(60, ($Lines.Count * $lineHeight) + 40)
+    $bitmap = New-Object System.Drawing.Bitmap $width, $height
+    try {
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        try {
+            $graphics.Clear([System.Drawing.Color]::Black)
+            $brush = [System.Drawing.Brushes]::LightGray
+            $y = 20
+            foreach ($line in $Lines) {
+                $graphics.DrawString($line, $font, $brush, 20, $y)
+                $y += $lineHeight
+            }
+        } finally {
+            $graphics.Dispose()
+        }
+        $bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+    } finally {
+        $bitmap.Dispose()
+        $font.Dispose()
+    }
+    return $null
+}
+
+# Issue #151 review round 1 (finding #1): single source of truth for the
+# [PASS]/[FAIL]/[N/A] mark shown for a scorecard item, shared by the real
+# "## Gates" Markdown renderer below and the new Smoke File Safety
+# evidence capture -- both must agree on exactly what mark a given item's
+# real Status/Passed fields produce, since the evidence capture exists
+# specifically to prove the two never diverge.
+function Get-TPMGateMark {
+    param($Item)
+    if ($Item.PSObject.Properties.Name -contains 'Status' -and $Item.Status -eq 'NotApplicable') { return 'N/A' }
+    if ($Item.Passed) { return 'PASS' }
+    return 'FAIL'
+}
+
 function New-CertificationScorecard {
     param([hashtable]$Results)
 
@@ -746,6 +1396,11 @@ function New-CertificationScorecard {
         # alone, without cross-referencing TPM-Unattended.log.
         RequestedTeknoParrotRoot = $Results.RequestedTeknoParrotRoot
         EffectiveTeknoParrotRoot = $Results.EffectiveTeknoParrotRoot
+        # Issue #151: certification evidence, duplicated onto the
+        # scorecard object for the same reason as the git/root provenance
+        # fields above. Deliberately NOT part of $scoreItems/scoring --
+        # see $applicableItems above, which never reads this property.
+        Screenshots = @($Results.Screenshots)
     }
 }
 
@@ -767,6 +1422,28 @@ $results = [ordered]@{
     BackupDir = $backupDir
     SmokeMode = (-not $RunUnattendedTPM)
     Checks = @()
+    # Issue #151: certification evidence, not a scored gate -- deliberately
+    # never read by New-CertificationScorecard's $scoreItems/$applicableItems
+    # scoring computation. A screenshot failure is recorded explicitly (see
+    # New-TPMCertificationScreenshot) but must never itself flip Overall or
+    # change the score, per the issue's explicit "do not modify
+    # certification scoring" constraint.
+    Screenshots = @()
+}
+
+# Records one screenshot attempt (captured, failed, or skipped) onto
+# $results.Screenshots and echoes a short status line to the console --
+# the same "one accumulator, one console line" pattern Add-CheckResult
+# uses for check results, kept separate because screenshots are evidence,
+# not a pass/fail check.
+function Add-Screenshot {
+    param([string]$ScreenshotDir, [string]$Name, [string]$EvidenceType, [scriptblock]$CaptureAction, [switch]$Skip, [string]$SkipReason)
+    $shot = New-TPMCertificationScreenshot -ScreenshotDir $ScreenshotDir -Name $Name -EvidenceType $EvidenceType -CaptureAction $CaptureAction -Skip:$Skip -SkipReason $SkipReason
+    $script:results.Screenshots += $shot
+    $mark = switch ($shot.Status) { 'Captured' { '[SHOT]' } 'Skipped' { '[SKIP]' } default { '[FAIL]' } }
+    $scopeSuffix = if ($shot.CaptureScope) { " ($($shot.CaptureScope))" } else { '' }
+    Write-Host ("  {0} {1}{2}: {3}" -f $mark, $Name, $scopeSuffix, $(if ($shot.Path) { $shot.Path } else { $shot.Details }))
+    return $shot
 }
 
 function Add-CheckResult {
@@ -881,6 +1558,11 @@ if (-not $rootValidation.IsValid) {
 
 Push-Location $RepoPath
 try {
+    # Issue #151: first required evidence slot -- captured as early as
+    # possible in the real gate flow so the screenshot actually shows the
+    # certification suite mid-run, not an empty or pre-launch console.
+    [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'certification-suite-running' -EvidenceType 'ScreenCapture' -CaptureAction { param($p) Save-TPMScreenCapture -Path $p })
+
     Write-TPMGateHeader -Gate 'Repository' -Purpose 'Confirms the certified commit and working-tree state' -Expected 'clean working tree, HEAD matches origin/main'
     $gitVersion = git --version
     $gitBranch = git rev-parse --abbrev-ref HEAD
@@ -1357,6 +2039,29 @@ try {
         }
     }
 
+    # Issue #151: requested/effective root evidence. Printed to the
+    # console (not just the report files) immediately before capture, so
+    # the screenshot itself actually shows the evidence a reviewer needs,
+    # rather than an unrelated console state that merely happened to be on
+    # screen at this point in the run.
+    Write-Host ""
+    Write-Host ("  Requested TeknoParrot root: {0}" -f $results.RequestedTeknoParrotRoot)
+    Write-Host ("  Effective TeknoParrot root: {0}" -f (Get-TPMEffectiveRootReportText -EffectiveRoot $results.EffectiveTeknoParrotRoot -SmokeMode $results.SmokeMode))
+    [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'requested-effective-root-evidence' -EvidenceType 'ScreenCapture' -CaptureAction { param($p) Save-TPMScreenCapture -Path $p })
+
+    # Issue #151: "live thumbnail evidence" and "live controls evidence"
+    # are conditional, "(when displayed)" evidence slots -- this harness
+    # does not itself drive TeknoParrot-Manager.ps1's live thumbnail
+    # download (AutoSync) or Propagate Controls flows (both require
+    # interactive menu choices this read-only/-Unattended harness never
+    # makes), so neither is ever genuinely displayed by a certification
+    # run today. Recorded as explicitly Skipped, with the real reason, so
+    # a reviewer sees these evidence slots were considered and correctly
+    # not applicable to this harness's current scope, rather than silently
+    # missing from the evidence list.
+    [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'live-thumbnail-evidence' -Skip -SkipReason 'not displayed -- this harness does not drive TeknoParrot-Manager.ps1''s live thumbnail download flow')
+    [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'live-controls-evidence' -Skip -SkipReason 'not displayed -- this harness does not drive TeknoParrot-Manager.ps1''s live Propagate Controls flow')
+
     Write-TPMGateHeader -Gate 'Smoke file safety' -Purpose 'Confirms nothing changed in UserProfiles/GameProfiles during this smoke run' -Expected 'no unexpected file changes'
     $postUserProfiles = Get-TreeHash $userProfilesPath
     $postGameProfiles = Get-TreeHash $gameProfilesPath
@@ -1373,6 +2078,41 @@ try {
         }
     }
 
+    # Issue #151: adaptive-menu evidence (normal/small/maximized). Uses
+    # Debug-TPM-MenuLayout.ps1 -Render (already the harness's own
+    # deterministic diagnostic for the adaptive menu, issue #104) to get
+    # the actual rendered menu text for a given viewport, then rasterizes
+    # that text directly into a PNG -- deterministic evidence of the real
+    # render pipeline's output at each named tier, without needing to open,
+    # resize, and screen-grab a real console window (which would depend on
+    # a live, focusable desktop session the certification machine may not
+    # have). Width/height pairs land inside Get-ConsoleLayoutTier's actual
+    # tier boundaries: Compact (<90) for "small", Standard (90-119) for
+    # "normal", Ultra (>=150) for "maximized".
+    Write-TPMGateHeader -Gate 'Adaptive menu evidence' -Purpose 'Captures the real adaptive-menu render at three viewport tiers' -Expected 'one screenshot per tier, or an explicit failure if rendering could not be captured'
+    $debugMenuScript = Join-Path $PSScriptRoot 'Debug-TPM-MenuLayout.ps1'
+    $adaptiveMenuTiers = @(
+        [pscustomobject]@{ Name = 'adaptive-menu-normal';    Width = 100; Height = 32 }
+        [pscustomobject]@{ Name = 'adaptive-menu-small';     Width = 60;  Height = 22 }
+        [pscustomobject]@{ Name = 'adaptive-menu-maximized'; Width = 180; Height = 50 }
+    )
+    if (!(Test-Path -LiteralPath $debugMenuScript -PathType Leaf)) {
+        foreach ($tier in $adaptiveMenuTiers) {
+            [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name $tier.Name -EvidenceType 'DeterministicRender' -CaptureAction { param($p) throw "Debug-TPM-MenuLayout.ps1 not found at $debugMenuScript (target screenshot: $p)" })
+        }
+    } else {
+        foreach ($tier in $adaptiveMenuTiers) {
+            $tierWidth = $tier.Width
+            $tierHeight = $tier.Height
+            [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name $tier.Name -EvidenceType 'DeterministicRender' -CaptureAction {
+                param($p)
+                $renderedLines = @(& pwsh -NoProfile -File $debugMenuScript -Width $tierWidth -Height $tierHeight -Render)
+                if ($renderedLines.Count -eq 0) { throw "Debug-TPM-MenuLayout.ps1 -Width $tierWidth -Height $tierHeight -Render produced no output" }
+                Save-TPMRenderedTextCapture -Path $p -Lines $renderedLines
+            })
+        }
+    }
+
     $results.Status = if (@($results.Checks | Where-Object { -not $_.Passed }).Count -eq 0) { 'PASS' } else { 'FAIL' }
 }
 catch {
@@ -1386,7 +2126,6 @@ finally {
     $runTimer.Stop()
     $results.Elapsed = $runTimer.Elapsed.ToString()
     $results.PowerShellVersion = $PSVersionTable.PSVersion.ToString()
-    $results | ConvertTo-Json -Depth 8 | Out-File $json -Encoding utf8
 
     # The "Artifacts" gate below checks that both report files exist on
     # disk. $md's real content can't be written until after $certification
@@ -1403,6 +2142,15 @@ finally {
         # Add-Report appends below doesn't end up with a stray leading
         # blank line.
         [void](New-Item -ItemType File -Path $md -Force)
+    }
+    # Issue #151: same stub-then-real-content split as $md above, extended
+    # to $json -- the real, final $results (including the
+    # final-certification-result screenshot, captured further down, after
+    # the console summary it's evidence of) is written once, at the very
+    # end of this finally block, not here. A stub only needs to exist for
+    # the Artifacts gate's existence check.
+    if (-not (Test-Path -LiteralPath $json -PathType Leaf)) {
+        [void](New-Item -ItemType File -Path $json -Force)
     }
 
     # Issue #111 / Release Integrity: TPM script version and display version
@@ -1431,8 +2179,61 @@ finally {
     $results.TpmScriptVersion = $tpmScriptVersion
     $results.TpmDisplayVersion = $tpmDisplayVersion
 
+    # Issue #151: computed once here (Overall/Passed/Total/ScorePercent are
+    # needed for the final console summary below), but every file this run
+    # writes -- both certificationJson/certificationMd, both json/md -- is
+    # written further down, AFTER the final-certification-result screenshot
+    # is captured and appended to $results.Screenshots. A screenshot taken
+    # of the final console summary cannot, by construction, already be
+    # listed in a report written before that screenshot exists; writing
+    # every report only after capture is what makes the final entry appear
+    # in all of them, not just the console-only ones.
     $certification = New-CertificationScorecard -Results $results
+
+    # Issue #151 review round 1 (finding #1): a deterministic rendering of
+    # this run's ACTUAL Smoke File Safety gate line -- Area, mark (via
+    # Get-TPMGateMark, the exact same function the "## Gates" Markdown
+    # section below uses), and Details -- not a generic root or final-
+    # result screenshot. During an unattended run this item's real Status
+    # is 'NotApplicable' (issue #149), so the rendered evidence shows
+    # "[N/A] Smoke File Safety" with unattended-mode Details and no smoke-
+    # mode wording; during a smoke-mode run it shows the real Pass/Fail
+    # result instead. Either way this is the real scorecard content, not a
+    # fabrication -- confirmed by review-round tests that this rendered
+    # text always matches $certification.Items directly.
+    $smokeFileSafetyItem = $certification.Items | Where-Object { $_.Area -eq 'Smoke File Safety' } | Select-Object -First 1
+    $smokeFileSafetyLines = if ($smokeFileSafetyItem) {
+        @(
+            'Smoke File Safety Evidence'
+            '=========================='
+            ''
+            ("Certification mode : {0}" -f $(if ($results.SmokeMode) { 'Smoke' } else { 'Unattended' }))
+            ("[{0}] {1}: {2}" -f (Get-TPMGateMark -Item $smokeFileSafetyItem), $smokeFileSafetyItem.Area, $smokeFileSafetyItem.Details)
+        )
+    } else {
+        @('Smoke File Safety Evidence', '==========================', '', '(Smoke File Safety item not found in this run''s scorecard)')
+    }
+    [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'smoke-file-safety-evidence' -EvidenceType 'DeterministicRender' -CaptureAction { param($p) Save-TPMRenderedTextCapture -Path $p -Lines $smokeFileSafetyLines })
+
+    Write-Host ""
+    Write-Host "============================================"
+    Write-Host " TPM CERTIFICATION SCORECARD"
+    Write-Host "============================================"
+    Write-Host (" Overall : {0}" -f $certification.Overall)
+    Write-Host (" Score   : {0}/{1} ({2}%)" -f $certification.Passed, $certification.Total, $certification.ScorePercent)
+    Write-Host (" Report  : {0}" -f $certificationMd)
+    Write-Host "============================================"
+    [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'final-certification-result' -EvidenceType 'ScreenCapture' -CaptureAction { param($p) Save-TPMScreenCapture -Path $p })
+    Clear-TPMConsoleStatus
+
+    # $results.Screenshots now includes the final-certification-result
+    # entry -- refresh $certification.Screenshots (a snapshot array copy
+    # taken when New-CertificationScorecard was called above, before that
+    # entry existed) so both JSON artifacts reflect the complete list, not
+    # the incomplete one from before the final screenshot.
+    $certification.Screenshots = @($results.Screenshots)
     $certification | ConvertTo-Json -Depth 8 | Out-File $certificationJson -Encoding utf8
+    $results | ConvertTo-Json -Depth 8 | Out-File $json -Encoding utf8
 
     Add-CertificationReport "# TPM Certification Scorecard"
     Add-CertificationReport ""
@@ -1461,19 +2262,36 @@ finally {
     Add-CertificationReport ""
     Add-CertificationReport "## Gates"
     foreach ($item in $certification.Items) {
-        # Issue #146 review round 4: an item explicitly marked
-        # Status = 'NotApplicable' must render as [N/A], never [PASS] --
-        # items without a Status property (everything except the
-        # restoration item) fall through to the original Passed-based
-        # PASS/FAIL rendering, unchanged.
-        if ($item.PSObject.Properties.Name -contains 'Status' -and $item.Status -eq 'NotApplicable') {
-            $mark = 'N/A'
-        } elseif ($item.Passed) {
-            $mark = 'PASS'
-        } else {
-            $mark = 'FAIL'
-        }
+        # Issue #146 review round 4 / #151 review round 1: Get-TPMGateMark
+        # is the single source of truth for this mark -- the Smoke File
+        # Safety evidence screenshot above renders through the exact same
+        # function, so the two can never disagree about what a given
+        # item's real Status/Passed fields mean.
+        $mark = Get-TPMGateMark -Item $item
         Add-CertificationReport ("- [{0}] {1}: {2}" -f $mark, $item.Area, $item.Details)
+    }
+    Add-CertificationReport ""
+    Add-CertificationReport "## Screenshots"
+    Add-CertificationReport ""
+    # Issue #151 review round 1 (finding #4): standing disclosure,
+    # printed whenever at least one ScreenCapture-type entry exists,
+    # regardless of whether it actually fell back to a full-desktop
+    # capture this run -- a future run's console-window capture could
+    # fall back silently otherwise, and a reviewer should not have to
+    # infer the risk from an individual entry's CaptureScope.
+    if (@($certification.Screenshots | Where-Object { $_.EvidenceType -eq 'ScreenCapture' }).Count -gt 0) {
+        Add-CertificationReport "**Disclosure:** entries marked ScreenCapture below capture a real screen region and may include desktop content unrelated to this certification run beyond the certification console itself (see each entry's capture scope: Window = console-only, FullDesktop = full virtual desktop fallback). DeterministicRender entries never capture the screen -- they rasterize only this run's own rendered report/menu text."
+        Add-CertificationReport ""
+    }
+    if (@($certification.Screenshots).Count -eq 0) {
+        Add-CertificationReport "(none captured)"
+    } else {
+        foreach ($shot in $certification.Screenshots) {
+            $shotMark = switch ($shot.Status) { 'Captured' { 'SHOT' } 'Skipped' { 'SKIP' } default { 'FAIL' } }
+            $shotLocation = if ($shot.Path) { $shot.Path } else { $shot.Details }
+            $shotScopeText = if ($shot.CaptureScope) { " scope=$($shot.CaptureScope)" } else { '' }
+            Add-CertificationReport ("- [{0}] {1} (type={2}{3}): {4}" -f $shotMark, $shot.Label, $shot.EvidenceType, $shotScopeText, $shotLocation)
+        }
     }
     Add-CertificationReport ""
     Add-CertificationReport "## Artifact folder"
@@ -1526,14 +2344,21 @@ finally {
     if ($results.InstallHealthReport) {
         Add-Report ("- Install health: {0}" -f $results.InstallHealthReport)
     }
-
-    Write-Host ""
-    Write-Host "============================================"
-    Write-Host " TPM CERTIFICATION SCORECARD"
-    Write-Host "============================================"
-    Write-Host (" Overall : {0}" -f $certification.Overall)
-    Write-Host (" Score   : {0}/{1} ({2}%)" -f $certification.Passed, $certification.Total, $certification.ScorePercent)
-    Write-Host (" Report  : {0}" -f $certificationMd)
-    Write-Host "============================================"
-    Clear-TPMConsoleStatus
+    Add-Report ""
+    Add-Report "## Screenshots"
+    Add-Report ""
+    if (@($results.Screenshots | Where-Object { $_.EvidenceType -eq 'ScreenCapture' }).Count -gt 0) {
+        Add-Report "**Disclosure:** entries marked ScreenCapture below capture a real screen region and may include desktop content unrelated to this certification run beyond the certification console itself (see each entry's capture scope: Window = console-only, FullDesktop = full virtual desktop fallback). DeterministicRender entries never capture the screen -- they rasterize only this run's own rendered report/menu text."
+        Add-Report ""
+    }
+    if (@($results.Screenshots).Count -eq 0) {
+        Add-Report "(none captured)"
+    } else {
+        foreach ($shot in $results.Screenshots) {
+            $shotMark = switch ($shot.Status) { 'Captured' { 'SHOT' } 'Skipped' { 'SKIP' } default { 'FAIL' } }
+            $shotLocation = if ($shot.Path) { $shot.Path } else { $shot.Details }
+            $shotScopeText = if ($shot.CaptureScope) { " scope=$($shot.CaptureScope)" } else { '' }
+            Add-Report ("- [{0}] {1} (type={2}{3}): {4}" -f $shotMark, $shot.Label, $shot.EvidenceType, $shotScopeText, $shotLocation)
+        }
+    }
 }
