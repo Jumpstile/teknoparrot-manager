@@ -594,14 +594,15 @@ function Get-PesterSummary {
 # testable piece of automatic screenshot capture: it never touches the
 # screen itself -- $CaptureAction is an injectable scriptblock that
 # performs the real capture and is expected to write a file to the $Path
-# it receives as its own single positional argument. Real callers pass a
-# scriptblock backed by System.Drawing/System.Windows.Forms (see
-# Save-TPMFullScreenCapture / Save-TPMRenderedTextCapture below); tests
+# it receives as its own single positional argument, optionally returning
+# a CaptureScope string ('Window'/'FullDesktop', meaningful only for
+# ScreenCapture evidence -- see Save-TPMScreenCapture below). Real callers
+# pass a scriptblock backed by System.Drawing/System.Windows.Forms; tests
 # substitute a fake action that writes a dummy file or throws, so capture
-# behavior -- directory creation, naming, and the explicit failure path --
-# can be exercised without a live display session (this harness's own
-# regression suite runs headless in CI, where a real screen grab is not
-# reliably available).
+# behavior -- directory creation, naming, validation, and the explicit
+# failure path -- can be exercised without a live display session (this
+# harness's own regression suite runs headless in CI, where a real screen
+# grab is not reliably available).
 #
 # A capture is never silently skipped: every call returns a result object
 # with an explicit Status of 'Captured', 'Failed', or 'Skipped' (only ever
@@ -609,69 +610,214 @@ function Get-PesterSummary {
 # displayed" evidence slot, e.g. live thumbnail/controls evidence that
 # this particular run never triggered) -- never just omitted from the
 # evidence list, so a reviewer always sees what was attempted and why an
-# item is missing if it is.
+# item is missing if it is. Review round 1 (finding #3): the record also
+# carries an explicit EvidenceType ('ScreenCapture'/'DeterministicRender'
+# for a successful capture, 'Skipped'/'Failed' otherwise) and a Label
+# (currently identical to Name, exposed under its own name because the
+# finding asked for it explicitly) -- callers and reports must never have
+# to infer capture method from free-text Details.
 function New-TPMCertificationScreenshot {
     param(
         [Parameter(Mandatory=$true)][string]$ScreenshotDir,
         [Parameter(Mandatory=$true)][string]$Name,
+        [ValidateSet('ScreenCapture', 'DeterministicRender')][string]$EvidenceType,
         [scriptblock]$CaptureAction,
         [switch]$Skip,
         [string]$SkipReason
     )
 
     if ($Skip) {
-        return [pscustomobject]@{ Name = $Name; Path = $null; Status = 'Skipped'; Details = $(if ($SkipReason) { $SkipReason } else { 'not applicable to this run' }) }
+        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $null; Status = 'Skipped'; EvidenceType = 'Skipped'; CaptureScope = $null; Details = $(if ($SkipReason) { $SkipReason } else { 'not applicable to this run' }) }
     }
 
     if (-not $CaptureAction) {
-        return [pscustomobject]@{ Name = $Name; Path = $null; Status = 'Failed'; Details = 'no CaptureAction supplied' }
+        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $null; Status = 'Failed'; EvidenceType = 'Failed'; CaptureScope = $null; Details = 'no CaptureAction supplied' }
+    }
+    if (-not $EvidenceType) {
+        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $null; Status = 'Failed'; EvidenceType = 'Failed'; CaptureScope = $null; Details = 'no EvidenceType supplied for a non-skipped capture' }
     }
 
     if (-not (Test-Path -LiteralPath $ScreenshotDir -PathType Container)) {
         New-Item -ItemType Directory -Force -Path $ScreenshotDir | Out-Null
     }
 
-    # Filesystem-safe name plus a millisecond-precision timestamp -- the
-    # adaptive-menu tiers and any evidence slot that could reasonably be
-    # captured more than once per run (e.g. a retried gate) must never
-    # collide on the same file name within one certification pass.
-    $safeName = ($Name -replace '[^A-Za-z0-9_\-]', '-')
-    $screenshotStamp = Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff'
-    $fileName = "{0}_{1}.png" -f $safeName, $screenshotStamp
-    $path = Join-Path $ScreenshotDir $fileName
+    try {
+        $path = New-TPMScreenshotReservedPath -ScreenshotDir $ScreenshotDir -Name $Name
+    } catch {
+        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $null; Status = 'Failed'; EvidenceType = 'Failed'; CaptureScope = $null; Details = "could not reserve a unique screenshot path: $($_.Exception.Message)" }
+    }
 
     try {
-        & $CaptureAction $path
-        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-            return [pscustomobject]@{ Name = $Name; Path = $path; Status = 'Failed'; Details = 'capture action completed without producing a file at the expected path' }
+        $captureScope = & $CaptureAction $path
+        # Review round 1 (finding #5): a path being returned is not
+        # success -- verified against the real file on disk (exists,
+        # non-empty, decodes as a valid image with positive dimensions)
+        # before Status is ever set to 'Captured'. The invalid artifact
+        # (if any) is preserved, not deleted, so a reviewer can inspect
+        # exactly what went wrong -- consistent with never silently
+        # discarding evidence, even evidence of a failure.
+        $validation = Test-TPMScreenshotFileValid -Path $path
+        if (-not $validation.Valid) {
+            return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $path; Status = 'Failed'; EvidenceType = 'Failed'; CaptureScope = $null; Details = $validation.Reason }
         }
-        return [pscustomobject]@{ Name = $Name; Path = $path; Status = 'Captured'; Details = 'captured' }
+        $resolvedScope = if ($EvidenceType -eq 'ScreenCapture' -and $captureScope) { [string]$captureScope } else { $null }
+        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $path; Status = 'Captured'; EvidenceType = $EvidenceType; CaptureScope = $resolvedScope; Details = 'captured' }
     } catch {
-        return [pscustomobject]@{ Name = $Name; Path = $path; Status = 'Failed'; Details = $_.Exception.Message }
+        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $path; Status = 'Failed'; EvidenceType = 'Failed'; CaptureScope = $null; Details = $_.Exception.Message }
+    }
+}
+
+# Issue #151 review round 1 (finding #2): millisecond-precision timestamps
+# alone were not collision-safe -- two captures of the same evidence label
+# within the same millisecond (or two independent harness processes
+# sharing a report directory) could produce the same file name. This
+# combines a timestamp, a per-run monotonic counter, and a short random
+# suffix for a human-readable-but-unique candidate name, then reserves it
+# atomically via FileMode.CreateNew (which throws if the path already
+# exists, eliminating the check-then-write race a plain Test-Path guard
+# would still have), retrying with a new candidate on collision. The
+# reserved file is a zero-byte placeholder -- $CaptureAction's real
+# content overwrites it immediately afterward.
+$script:tpmScreenshotSequence = 0
+function New-TPMScreenshotReservedPath {
+    param([string]$ScreenshotDir, [string]$Name)
+    $safeName = ($Name -replace '[^A-Za-z0-9_\-]', '-')
+    $attempt = 0
+    while ($true) {
+        $attempt++
+        $script:tpmScreenshotSequence++
+        $screenshotStamp = Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff'
+        $randomSuffix = '{0:x6}' -f (Get-Random -Maximum 0xFFFFFF)
+        $fileName = "{0}_{1}_{2:D5}_{3}.png" -f $safeName, $screenshotStamp, $script:tpmScreenshotSequence, $randomSuffix
+        $candidatePath = Join-Path $ScreenshotDir $fileName
+        $handle = $null
+        try {
+            $handle = [System.IO.File]::Open($candidatePath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write)
+            return $candidatePath
+        } catch [System.IO.IOException] {
+            if ($attempt -ge 1000) { throw "could not reserve a unique screenshot path under $ScreenshotDir after 1000 attempts" }
+        } finally {
+            if ($handle) { $handle.Dispose() }
+        }
+    }
+}
+
+# Issue #151 review round 1 (finding #5): a returned path is not proof of
+# a real screenshot -- verifies the file actually exists, is non-empty,
+# decodes as a valid image, and has positive dimensions. Reads the file's
+# bytes into memory and constructs the validation Image from that byte
+# array (System.Drawing.Image.FromStream), never Image.FromFile -- the
+# latter keeps an open handle on the source file tied to the Image's
+# lifetime even after dimensions are read, which would leave the just-
+# captured screenshot locked; validating from an in-memory copy guarantees
+# no file lock remains once this function returns.
+function Test-TPMScreenshotFileValid {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return [pscustomobject]@{ Valid = $false; Reason = 'file does not exist' }
+    }
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -eq 0) {
+        return [pscustomobject]@{ Valid = $false; Reason = 'file is empty (zero length)' }
+    }
+    # Same hardcoded-literal false positive as the other Add-Type calls in
+    # this file -- traced, no untrusted input reaches this call.
+    Add-Type -AssemblyName System.Drawing
+    $stream = New-Object System.IO.MemoryStream(,$bytes)
+    try {
+        try {
+            $image = [System.Drawing.Image]::FromStream($stream)
+        } catch {
+            return [pscustomobject]@{ Valid = $false; Reason = "file could not be decoded as a valid image: $($_.Exception.Message)" }
+        }
+        try {
+            if ($image.Width -le 0 -or $image.Height -le 0) {
+                return [pscustomobject]@{ Valid = $false; Reason = "image has invalid dimensions ($($image.Width)x$($image.Height))" }
+            }
+            return [pscustomobject]@{ Valid = $true; Reason = 'valid image' }
+        } finally {
+            $image.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+}
+
+# Issue #151 review round 1 (finding #4): privacy/containment safeguard --
+# GetConsoleWindow (kernel32) returns the console window handle actually
+# associated with this process, which GetWindowRect (user32) then bounds,
+# so the capture below can be narrowed to just that window instead of the
+# full virtual desktop whenever the host environment makes that handle
+# available. Returns $null (never throws) when it cannot be obtained
+# reliably -- some hosting environments (certain remote sessions, some
+# integrated terminals) never populate it -- so callers have an explicit
+# signal to fall back to a full-desktop capture rather than silently
+# guessing at a bad rectangle.
+$tpmWindowInteropSource = @'
+using System;
+using System.Runtime.InteropServices;
+public class TPMWindowInterop {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr GetConsoleWindow();
+    [DllImport("user32.dll")]
+    public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+}
+'@
+function Get-TPMConsoleWindowRect {
+    try {
+        if (-not ('TPMWindowInterop' -as [type])) {
+            # InjectionHunter flags this Add-Type call (InjectionRisk.AddType).
+            # Traced: $tpmWindowInteropSource is a fixed literal defined a few
+            # lines above in this same file, never built from external or
+            # caller-supplied input -- same hardcoded-literal false-positive
+            # class already documented on the other Add-Type calls in this
+            # file.
+            Add-Type -Language CSharp -TypeDefinition $tpmWindowInteropSource -ErrorAction Stop
+        }
+        $hwnd = [TPMWindowInterop]::GetConsoleWindow()
+        if ($hwnd -eq [IntPtr]::Zero) { return $null }
+        $rect = New-Object TPMWindowInterop+RECT
+        $ok = [TPMWindowInterop]::GetWindowRect($hwnd, [ref]$rect)
+        if (-not $ok) { return $null }
+        $width = $rect.Right - $rect.Left
+        $height = $rect.Bottom - $rect.Top
+        if ($width -le 0 -or $height -le 0) { return $null }
+        return [pscustomobject]@{ X = $rect.Left; Y = $rect.Top; Width = $width; Height = $height }
+    } catch {
+        return $null
     }
 }
 
 # Real capture action for an on-screen console moment (certification suite
-# running, final result, requested/effective root evidence, live
-# thumbnail/controls evidence when displayed) -- grabs the full virtual
-# screen via GDI+. Never called from tests; production-only, since it
-# requires a live display session this harness's own CI run does not have.
-function Save-TPMFullScreenCapture {
+# running, final result, requested/effective root evidence) -- grabs the
+# certification console's own window when Get-TPMConsoleWindowRect can
+# resolve it (CaptureScope = 'Window'); falls back to the full virtual
+# screen, explicitly classified as such, only when it cannot (CaptureScope
+# = 'FullDesktop'). Returns the scope string so New-TPMCertificationScreenshot
+# can record which one actually happened -- never silently reported as a
+# narrow capture when it was not. Never called from tests; production-only,
+# since it requires a live display session this harness's own CI run does
+# not have.
+function Save-TPMScreenCapture {
     param([string]$Path)
-    # InjectionHunter flags both Add-Type calls below (InjectionRisk.AddType).
-    # Traced per this project's "verify before dismissing" policy: both
-    # -AssemblyName arguments are fully hardcoded literal strings naming
-    # well-known .NET Framework GAC assemblies -- no external, untrusted, or
-    # caller-supplied input reaches either call. Same false-positive class
-    # as this file's already-documented static-literal AddScript finding.
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
-    $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
-    $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+    $windowBounds = Get-TPMConsoleWindowRect
+    if ($windowBounds) {
+        $x = $windowBounds.X; $y = $windowBounds.Y; $w = $windowBounds.Width; $h = $windowBounds.Height
+        $scope = 'Window'
+    } else {
+        $full = [System.Windows.Forms.SystemInformation]::VirtualScreen
+        $x = $full.Location.X; $y = $full.Location.Y; $w = $full.Width; $h = $full.Height
+        $scope = 'FullDesktop'
+    }
+    $bitmap = New-Object System.Drawing.Bitmap $w, $h
     try {
         $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
         try {
-            $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+            $graphics.CopyFromScreen($x, $y, 0, 0, (New-Object System.Drawing.Size $w, $h))
         } finally {
             $graphics.Dispose()
         }
@@ -679,17 +825,20 @@ function Save-TPMFullScreenCapture {
     } finally {
         $bitmap.Dispose()
     }
+    return $scope
 }
 
-# Real capture action for the adaptive-menu evidence slots. Rasterizes
-# already-rendered console text (from Debug-TPM-MenuLayout.ps1 -Render,
-# invoked by the caller) directly into a PNG via GDI+ instead of opening,
-# resizing, and screen-grabbing a real console window -- deterministic and
-# does not depend on a live, focusable desktop session being available on
-# the certification machine, which a real windowed capture would.
+# Real capture action for the adaptive-menu and Smoke File Safety evidence
+# slots. Rasterizes already-rendered text (from Debug-TPM-MenuLayout.ps1
+# -Render, or the exact real Smoke File Safety gate line built from this
+# run's own $certification.Items) directly into a PNG via GDI+ instead of
+# opening, resizing, and screen-grabbing a real console window --
+# deterministic and does not depend on a live, focusable desktop session
+# being available on the certification machine, which a real windowed
+# capture would.
 function Save-TPMRenderedTextCapture {
     param([string]$Path, [string[]]$Lines)
-    # Same hardcoded-literal false positive as Save-TPMFullScreenCapture
+    # Same hardcoded-literal false positive as Save-TPMScreenCapture
     # above -- no untrusted input reaches this Add-Type call.
     Add-Type -AssemblyName System.Drawing
     # [System.Drawing.Font]::new(...), not New-Object -- New-Object's
@@ -721,6 +870,20 @@ function Save-TPMRenderedTextCapture {
         $bitmap.Dispose()
         $font.Dispose()
     }
+    return $null
+}
+
+# Issue #151 review round 1 (finding #1): single source of truth for the
+# [PASS]/[FAIL]/[N/A] mark shown for a scorecard item, shared by the real
+# "## Gates" Markdown renderer below and the new Smoke File Safety
+# evidence capture -- both must agree on exactly what mark a given item's
+# real Status/Passed fields produce, since the evidence capture exists
+# specifically to prove the two never diverge.
+function Get-TPMGateMark {
+    param($Item)
+    if ($Item.PSObject.Properties.Name -contains 'Status' -and $Item.Status -eq 'NotApplicable') { return 'N/A' }
+    if ($Item.Passed) { return 'PASS' }
+    return 'FAIL'
 }
 
 function New-CertificationScorecard {
@@ -930,11 +1093,12 @@ $results = [ordered]@{
 # uses for check results, kept separate because screenshots are evidence,
 # not a pass/fail check.
 function Add-Screenshot {
-    param([string]$ScreenshotDir, [string]$Name, [scriptblock]$CaptureAction, [switch]$Skip, [string]$SkipReason)
-    $shot = New-TPMCertificationScreenshot -ScreenshotDir $ScreenshotDir -Name $Name -CaptureAction $CaptureAction -Skip:$Skip -SkipReason $SkipReason
+    param([string]$ScreenshotDir, [string]$Name, [string]$EvidenceType, [scriptblock]$CaptureAction, [switch]$Skip, [string]$SkipReason)
+    $shot = New-TPMCertificationScreenshot -ScreenshotDir $ScreenshotDir -Name $Name -EvidenceType $EvidenceType -CaptureAction $CaptureAction -Skip:$Skip -SkipReason $SkipReason
     $script:results.Screenshots += $shot
     $mark = switch ($shot.Status) { 'Captured' { '[SHOT]' } 'Skipped' { '[SKIP]' } default { '[FAIL]' } }
-    Write-Host ("  {0} {1}: {2}" -f $mark, $Name, $(if ($shot.Path) { $shot.Path } else { $shot.Details }))
+    $scopeSuffix = if ($shot.CaptureScope) { " ($($shot.CaptureScope))" } else { '' }
+    Write-Host ("  {0} {1}{2}: {3}" -f $mark, $Name, $scopeSuffix, $(if ($shot.Path) { $shot.Path } else { $shot.Details }))
     return $shot
 }
 
@@ -1053,7 +1217,7 @@ try {
     # Issue #151: first required evidence slot -- captured as early as
     # possible in the real gate flow so the screenshot actually shows the
     # certification suite mid-run, not an empty or pre-launch console.
-    [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'certification-suite-running' -CaptureAction { param($p) Save-TPMFullScreenCapture -Path $p })
+    [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'certification-suite-running' -EvidenceType 'ScreenCapture' -CaptureAction { param($p) Save-TPMScreenCapture -Path $p })
 
     Write-TPMGateHeader -Gate 'Repository' -Purpose 'Confirms the certified commit and working-tree state' -Expected 'clean working tree, HEAD matches origin/main'
     $gitVersion = git --version
@@ -1539,7 +1703,7 @@ try {
     Write-Host ""
     Write-Host ("  Requested TeknoParrot root: {0}" -f $results.RequestedTeknoParrotRoot)
     Write-Host ("  Effective TeknoParrot root: {0}" -f (Get-TPMEffectiveRootReportText -EffectiveRoot $results.EffectiveTeknoParrotRoot -SmokeMode $results.SmokeMode))
-    [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'requested-effective-root-evidence' -CaptureAction { param($p) Save-TPMFullScreenCapture -Path $p })
+    [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'requested-effective-root-evidence' -EvidenceType 'ScreenCapture' -CaptureAction { param($p) Save-TPMScreenCapture -Path $p })
 
     # Issue #151: "live thumbnail evidence" and "live controls evidence"
     # are conditional, "(when displayed)" evidence slots -- this harness
@@ -1590,13 +1754,13 @@ try {
     )
     if (!(Test-Path -LiteralPath $debugMenuScript -PathType Leaf)) {
         foreach ($tier in $adaptiveMenuTiers) {
-            [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name $tier.Name -CaptureAction { param($p) throw "Debug-TPM-MenuLayout.ps1 not found at $debugMenuScript (target screenshot: $p)" })
+            [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name $tier.Name -EvidenceType 'DeterministicRender' -CaptureAction { param($p) throw "Debug-TPM-MenuLayout.ps1 not found at $debugMenuScript (target screenshot: $p)" })
         }
     } else {
         foreach ($tier in $adaptiveMenuTiers) {
             $tierWidth = $tier.Width
             $tierHeight = $tier.Height
-            [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name $tier.Name -CaptureAction {
+            [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name $tier.Name -EvidenceType 'DeterministicRender' -CaptureAction {
                 param($p)
                 $renderedLines = @(& pwsh -NoProfile -File $debugMenuScript -Width $tierWidth -Height $tierHeight -Render)
                 if ($renderedLines.Count -eq 0) { throw "Debug-TPM-MenuLayout.ps1 -Width $tierWidth -Height $tierHeight -Render produced no output" }
@@ -1682,6 +1846,31 @@ finally {
     # in all of them, not just the console-only ones.
     $certification = New-CertificationScorecard -Results $results
 
+    # Issue #151 review round 1 (finding #1): a deterministic rendering of
+    # this run's ACTUAL Smoke File Safety gate line -- Area, mark (via
+    # Get-TPMGateMark, the exact same function the "## Gates" Markdown
+    # section below uses), and Details -- not a generic root or final-
+    # result screenshot. During an unattended run this item's real Status
+    # is 'NotApplicable' (issue #149), so the rendered evidence shows
+    # "[N/A] Smoke File Safety" with unattended-mode Details and no smoke-
+    # mode wording; during a smoke-mode run it shows the real Pass/Fail
+    # result instead. Either way this is the real scorecard content, not a
+    # fabrication -- confirmed by review-round tests that this rendered
+    # text always matches $certification.Items directly.
+    $smokeFileSafetyItem = $certification.Items | Where-Object { $_.Area -eq 'Smoke File Safety' } | Select-Object -First 1
+    $smokeFileSafetyLines = if ($smokeFileSafetyItem) {
+        @(
+            'Smoke File Safety Evidence'
+            '=========================='
+            ''
+            ("Certification mode : {0}" -f $(if ($results.SmokeMode) { 'Smoke' } else { 'Unattended' }))
+            ("[{0}] {1}: {2}" -f (Get-TPMGateMark -Item $smokeFileSafetyItem), $smokeFileSafetyItem.Area, $smokeFileSafetyItem.Details)
+        )
+    } else {
+        @('Smoke File Safety Evidence', '==========================', '', '(Smoke File Safety item not found in this run''s scorecard)')
+    }
+    [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'smoke-file-safety-evidence' -EvidenceType 'DeterministicRender' -CaptureAction { param($p) Save-TPMRenderedTextCapture -Path $p -Lines $smokeFileSafetyLines })
+
     Write-Host ""
     Write-Host "============================================"
     Write-Host " TPM CERTIFICATION SCORECARD"
@@ -1690,7 +1879,7 @@ finally {
     Write-Host (" Score   : {0}/{1} ({2}%)" -f $certification.Passed, $certification.Total, $certification.ScorePercent)
     Write-Host (" Report  : {0}" -f $certificationMd)
     Write-Host "============================================"
-    [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'final-certification-result' -CaptureAction { param($p) Save-TPMFullScreenCapture -Path $p })
+    [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'final-certification-result' -EvidenceType 'ScreenCapture' -CaptureAction { param($p) Save-TPMScreenCapture -Path $p })
     Clear-TPMConsoleStatus
 
     # $results.Screenshots now includes the final-certification-result
@@ -1729,30 +1918,35 @@ finally {
     Add-CertificationReport ""
     Add-CertificationReport "## Gates"
     foreach ($item in $certification.Items) {
-        # Issue #146 review round 4: an item explicitly marked
-        # Status = 'NotApplicable' must render as [N/A], never [PASS] --
-        # items without a Status property (everything except the
-        # restoration item) fall through to the original Passed-based
-        # PASS/FAIL rendering, unchanged.
-        if ($item.PSObject.Properties.Name -contains 'Status' -and $item.Status -eq 'NotApplicable') {
-            $mark = 'N/A'
-        } elseif ($item.Passed) {
-            $mark = 'PASS'
-        } else {
-            $mark = 'FAIL'
-        }
+        # Issue #146 review round 4 / #151 review round 1: Get-TPMGateMark
+        # is the single source of truth for this mark -- the Smoke File
+        # Safety evidence screenshot above renders through the exact same
+        # function, so the two can never disagree about what a given
+        # item's real Status/Passed fields mean.
+        $mark = Get-TPMGateMark -Item $item
         Add-CertificationReport ("- [{0}] {1}: {2}" -f $mark, $item.Area, $item.Details)
     }
     Add-CertificationReport ""
     Add-CertificationReport "## Screenshots"
     Add-CertificationReport ""
+    # Issue #151 review round 1 (finding #4): standing disclosure,
+    # printed whenever at least one ScreenCapture-type entry exists,
+    # regardless of whether it actually fell back to a full-desktop
+    # capture this run -- a future run's console-window capture could
+    # fall back silently otherwise, and a reviewer should not have to
+    # infer the risk from an individual entry's CaptureScope.
+    if (@($certification.Screenshots | Where-Object { $_.EvidenceType -eq 'ScreenCapture' }).Count -gt 0) {
+        Add-CertificationReport "**Disclosure:** entries marked ScreenCapture below capture a real screen region and may include desktop content unrelated to this certification run beyond the certification console itself (see each entry's capture scope: Window = console-only, FullDesktop = full virtual desktop fallback). DeterministicRender entries never capture the screen -- they rasterize only this run's own rendered report/menu text."
+        Add-CertificationReport ""
+    }
     if (@($certification.Screenshots).Count -eq 0) {
         Add-CertificationReport "(none captured)"
     } else {
         foreach ($shot in $certification.Screenshots) {
             $shotMark = switch ($shot.Status) { 'Captured' { 'SHOT' } 'Skipped' { 'SKIP' } default { 'FAIL' } }
             $shotLocation = if ($shot.Path) { $shot.Path } else { $shot.Details }
-            Add-CertificationReport ("- [{0}] {1}: {2}" -f $shotMark, $shot.Name, $shotLocation)
+            $shotScopeText = if ($shot.CaptureScope) { " scope=$($shot.CaptureScope)" } else { '' }
+            Add-CertificationReport ("- [{0}] {1} (type={2}{3}): {4}" -f $shotMark, $shot.Label, $shot.EvidenceType, $shotScopeText, $shotLocation)
         }
     }
     Add-CertificationReport ""
@@ -1809,13 +2003,18 @@ finally {
     Add-Report ""
     Add-Report "## Screenshots"
     Add-Report ""
+    if (@($results.Screenshots | Where-Object { $_.EvidenceType -eq 'ScreenCapture' }).Count -gt 0) {
+        Add-Report "**Disclosure:** entries marked ScreenCapture below capture a real screen region and may include desktop content unrelated to this certification run beyond the certification console itself (see each entry's capture scope: Window = console-only, FullDesktop = full virtual desktop fallback). DeterministicRender entries never capture the screen -- they rasterize only this run's own rendered report/menu text."
+        Add-Report ""
+    }
     if (@($results.Screenshots).Count -eq 0) {
         Add-Report "(none captured)"
     } else {
         foreach ($shot in $results.Screenshots) {
             $shotMark = switch ($shot.Status) { 'Captured' { 'SHOT' } 'Skipped' { 'SKIP' } default { 'FAIL' } }
             $shotLocation = if ($shot.Path) { $shot.Path } else { $shot.Details }
-            Add-Report ("- [{0}] {1}: {2}" -f $shotMark, $shot.Name, $shotLocation)
+            $shotScopeText = if ($shot.CaptureScope) { " scope=$($shot.CaptureScope)" } else { '' }
+            Add-Report ("- [{0}] {1} (type={2}{3}): {4}" -f $shotMark, $shot.Label, $shot.EvidenceType, $shotScopeText, $shotLocation)
         }
     }
 }
