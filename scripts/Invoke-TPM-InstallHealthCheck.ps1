@@ -64,7 +64,14 @@ function Test-XmlFolder {
         $files = @(Get-ChildItem -LiteralPath $Path -File -Filter '*.xml' -ErrorAction SilentlyContinue)
         foreach ($file in $files) {
             try {
-                [xml](Get-Content -LiteralPath $file.FullName -Raw) | Out-Null
+                # XmlDocument.Load() reads bytes directly and resolves encoding
+                # from the BOM/XML declaration, matching production Read-Xml.
+                # [xml](Get-Content -Raw) instead hands the parser a string
+                # already decoded by PowerShell's own heuristics, which throws
+                # on BOM-less UserProfile XML that production reads fine --
+                # confirmed as a false-WARN source in issue #77.
+                $doc = [System.Xml.XmlDocument]::new()
+                $doc.Load($file.FullName)
             }
             catch {
                 $bad += [pscustomobject]@{

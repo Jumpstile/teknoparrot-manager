@@ -368,6 +368,41 @@ function Write-Log {
 # -Mode 'Folder' shows a folder picker; 'File' shows an open-file picker
 # (-FileFilter customizes the file-type list); 'SaveFile' shows a save-file
 # picker (for choosing a download destination, not an existing file).
+# Thin, mockable wrapper around the process-exit statement so Read-HostSafe's
+# exhausted-input behavior (below) can be unit tested without terminating the
+# test runner itself -- see issue #135.
+function Exit-TpmProcess {
+    param([int]$Code = 1)
+    exit $Code
+}
+
+# Centralized safe wrapper for every interactive prompt that needs a
+# non-null, trimmed answer. Read-Host returns $null when stdin is redirected
+# and has run out of piped lines, or (more rarely) when Read-Host itself is
+# unavailable in the current host -- calling .Trim()/.ToUpper() directly on
+# that $null throws an unhandled NullReferenceException (issue #135), and
+# looping back to ask again would spin forever re-reading an already-
+# exhausted stream instead of blocking. TeknoParrot Manager supports piped/
+# redirected input (the -Unattended scheduled-run workflow already relies on
+# it -- see ARCHITECTURE.md), so this does not reject redirected input
+# outright; it only fails closed, once, the moment there is genuinely no
+# more input to read, rather than crash or hang. Every prompt in this script
+# that needs a guaranteed string goes through here instead of a bare
+# Read-Host so this failure mode has exactly one implementation to test.
+function Read-HostSafe {
+    param([string]$Prompt)
+    $raw = Read-Host $Prompt
+    if ($null -eq $raw) {
+        Write-Log "Read-HostSafe: Read-Host returned null (redirected stdin exhausted, or Read-Host unavailable) at prompt '$Prompt' -- exiting."
+        Write-Host ""
+        Write-Host "  Input ended unexpectedly." -ForegroundColor Red
+        Write-Host "  TeknoParrot Manager needs an interactive console, or piped input with enough lines to answer every prompt this run reaches." -ForegroundColor Yellow
+        Exit-TpmProcess -Code 1
+        return ''
+    }
+    return $raw.Trim()
+}
+
 function Read-PathWithBrowse {
     param(
         [string]$Prompt,
@@ -376,7 +411,7 @@ function Read-PathWithBrowse {
         [string]$DefaultFileName = '',
         [string]$InitialDirectory = ''
     )
-    $raw = (Read-Host "$Prompt (or type B to browse)").Trim()
+    $raw = (Read-HostSafe "$Prompt (or type B to browse)")
     if ($raw.ToUpper() -ne 'B') { return $raw }
     try {
         Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
@@ -408,7 +443,7 @@ function Read-PathWithBrowse {
     } catch {
         Write-Log "Read-PathWithBrowse: dialog failed -- $_"
         Write-Host "  Could not open the file browser -- type the path instead." -ForegroundColor Yellow
-        return (Read-Host "  Path").Trim()
+        return (Read-HostSafe "  Path")
     }
 }
 
@@ -1330,7 +1365,7 @@ function Select-GamesInteractive {
         Write-Host "    S) Search by keyword"
         Write-Host "    D) Done -- proceed with current queue"
         Write-Host ""
-        $choice = (Read-Host "  Enter A, L, S, or D").Trim().ToUpper()
+        $choice = (Read-HostSafe "  Enter A, L, S, or D").ToUpper()
 
         # -- ALL GAMES -------------------------------------------------------
         if ($choice -eq 'A') {
@@ -1364,7 +1399,7 @@ function Select-GamesInteractive {
                 Write-Host ""
                 Write-Host "  Numbers (e.g. 1,3,5-7)  |  N = next  |  P = prev  |  B = back to menu  |  D = done" -ForegroundColor DarkCyan
                 Write-Host ""
-                $cmd = (Read-Host "  >").Trim().ToUpper()
+                $cmd = (Read-HostSafe "  >").ToUpper()
 
                 if ($cmd -eq 'B') {
                     $browsing = $false
@@ -1394,7 +1429,7 @@ function Select-GamesInteractive {
             $searching = $true
             while ($searching) {
                 Write-Host ""
-                $term = (Read-Host "  Search keyword (or 'back' / 'done')").Trim()
+                $term = (Read-HostSafe "  Search keyword (or 'back' / 'done')")
                 if ($term -ieq 'back') { $searching = $false; continue }
                 if ($term -ieq 'done') { $searching = $false; $done = $true; continue }
                 if (-not $term) { continue }
@@ -1421,7 +1456,7 @@ function Select-GamesInteractive {
                     Write-Host "  ... narrow your search to see more." -ForegroundColor DarkCyan
                 }
                 Write-Host ""
-                $pick = (Read-Host "  Numbers to select (or Enter to search again)").Trim()
+                $pick = (Read-HostSafe "  Numbers to select (or Enter to search again)")
                 if (-not $pick) { continue }
 
                 $nums  = Expand-NumberList -str $pick -max $shown
@@ -1518,7 +1553,7 @@ function Select-GamesInteractiveCombined {
         Write-Host "    S) Search by keyword"
         Write-Host "    D) Done -- proceed with current queue"
         Write-Host ""
-        $choice = (Read-Host "  Enter A, L, S, or D").Trim().ToUpper()
+        $choice = (Read-HostSafe "  Enter A, L, S, or D").ToUpper()
 
         if ($choice -eq 'A') {
             Write-Host ""
@@ -1545,7 +1580,7 @@ function Select-GamesInteractiveCombined {
                 Write-Host ""
                 Write-Host "  Numbers (e.g. 1,3,5-7)  |  N=next  P=prev  B=back  D=done" -ForegroundColor DarkCyan
                 Write-Host ""
-                $cmd = (Read-Host "  >").Trim().ToUpper()
+                $cmd = (Read-HostSafe "  >").ToUpper()
                 if     ($cmd -eq 'B') { $browsing = $false }
                 elseif ($cmd -eq 'D') { $browsing = $false; $done = $true }
                 elseif ($cmd -eq 'N') { if ($page -lt $totalPages-1) { $page++ } else { Write-Host "  Already on last page." -ForegroundColor DarkCyan } }
@@ -1565,7 +1600,7 @@ function Select-GamesInteractiveCombined {
             $searching = $true
             while ($searching) {
                 Write-Host ""
-                $term = (Read-Host "  Search keyword (or 'back' / 'done')").Trim()
+                $term = (Read-HostSafe "  Search keyword (or 'back' / 'done')")
                 if ($term -ieq 'back') { $searching = $false; continue }
                 if ($term -ieq 'done') { $searching = $false; $done = $true; continue }
                 if (-not $term) { continue }
@@ -1585,7 +1620,7 @@ function Select-GamesInteractiveCombined {
                 }
                 if ($results.Count -gt $maxShow) { Write-Host "  ... narrow your search to see more." -ForegroundColor DarkCyan }
                 Write-Host ""
-                $pick = (Read-Host "  Numbers to select (or Enter to search again)").Trim()
+                $pick = (Read-HostSafe "  Numbers to select (or Enter to search again)")
                 if (-not $pick) { continue }
                 $nums  = Expand-NumberList -str $pick -max $shown
                 $added = 0
@@ -1776,7 +1811,7 @@ function Select-RegisteredGamesInteractive {
     Write-Host "    A) All $($profiles.Count) registered game(s)" -ForegroundColor White
     Write-Host "    L) Browse and select specific games" -ForegroundColor White
     Write-Host ""
-    $pick = (Read-Host "    Enter A or L").Trim().ToUpper()
+    $pick = (Read-HostSafe "    Enter A or L").ToUpper()
     if ($pick -eq "A") { return $profiles }
 
     $pageSize = 20
@@ -1795,7 +1830,7 @@ function Select-RegisteredGamesInteractive {
         }
         Write-Host ""
         Write-Host "    Enter number(s) to toggle (e.g. 1,3,5-7) | N=next | P=prev | A=all | D=done" -ForegroundColor DarkCyan
-        $inp = (Read-Host "    >").Trim().ToUpper()
+        $inp = (Read-HostSafe "    >").ToUpper()
         if ($inp -eq "D") { break }
         if ($inp -eq "A") { return $profiles }
         if ($inp -eq "N" -and $page -lt ($pages - 1)) { $page++; continue }
@@ -1972,7 +2007,7 @@ function Invoke-ReShadeSetup {
     Write-Host "  choice above for that game only. Profile codes are listed in" -ForegroundColor DarkCyan
     Write-Host "  TeknoParrot-Manager-controls.txt." -ForegroundColor DarkCyan
     Write-Host ""
-    $presetChoice = (Read-Host "  Enter 1 or 2").Trim()
+    $presetChoice = (Read-HostSafe "  Enter 1 or 2")
     $presetPath   = $null
     if ($presetChoice -eq "2") {
         $pInp = Read-PathWithBrowse "  Path to your ReShade preset (.ini) file" -Mode File -FileFilter "ReShade preset (*.ini)|*.ini|All files (*.*)|*.*"
@@ -2259,11 +2294,11 @@ function Invoke-DgVoodoo2Setup {
         Write-Host "  A) Auto-detected games only ($($detectedMap.Count) game(s) listed above)"
         Write-Host "  M) Pick games manually from the full list"
         Write-Host "  Q) Cancel"
-        $selectionMode = (Read-Host "  Enter A, M, or Q").Trim().ToUpper()
+        $selectionMode = (Read-HostSafe "  Enter A, M, or Q").ToUpper()
     } else {
         Write-Host "  M) Pick games manually from the full list"
         Write-Host "  Q) Cancel"
-        $selectionMode = (Read-Host "  Enter M or Q").Trim().ToUpper()
+        $selectionMode = (Read-HostSafe "  Enter M or Q").ToUpper()
     }
 
     $targetProfiles = @()
@@ -2777,7 +2812,7 @@ function Invoke-GpuFixSetup {
     } else {
         Write-Host "  Could not auto-detect GPU vendor." -ForegroundColor Yellow
         if ($gpuName) { Write-Host ("  Adapter  : {0}" -f $gpuName) -ForegroundColor DarkGray }
-        $inp = (Read-Host "  Enter GPU vendor (AMD / NVIDIA / Intel) or press Enter to cancel").Trim()
+        $inp = (Read-HostSafe "  Enter GPU vendor (AMD / NVIDIA / Intel) or press Enter to cancel")
         if ([string]::IsNullOrWhiteSpace($inp)) {
             Write-Host "  GPU fix setup cancelled." -ForegroundColor DarkGray
             Write-Log "GPU Fix: cancelled -- vendor not detected and user did not enter one."
@@ -3025,7 +3060,7 @@ function Invoke-CrosshairSetup {
         $promptText = if ($null -ne $lastP1Idx) {
             "  P1 crosshair index (0-{0}, Enter for last used: {1} {2})" -f ($valid.Count - 1), $lastP1Idx, [System.IO.Path]::GetFileNameWithoutExtension($valid[$lastP1Idx])
         } else { "  P1 crosshair index (0-{0})" -f ($valid.Count - 1) }
-        $raw = (Read-Host $promptText).Trim()
+        $raw = (Read-HostSafe $promptText)
         if ($raw -eq '' -and $null -ne $lastP1Idx) { $p1Idx = $lastP1Idx }
         elseif ($raw -match '^\d+$' -and $raw.Length -le 9 -and [int]$raw -lt $valid.Count) { $p1Idx = [int]$raw }
         else { Write-Host ("  Enter a number between 0 and {0}." -f ($valid.Count - 1)) -ForegroundColor Yellow }
@@ -3036,7 +3071,7 @@ function Invoke-CrosshairSetup {
         $promptText = if ($null -ne $lastP2Idx) {
             "  P2 crosshair index (0-{0}, or same as P1, Enter for last used: {1} {2})" -f ($valid.Count - 1), $lastP2Idx, [System.IO.Path]::GetFileNameWithoutExtension($valid[$lastP2Idx])
         } else { "  P2 crosshair index (0-{0}, or same as P1)" -f ($valid.Count - 1) }
-        $raw = (Read-Host $promptText).Trim()
+        $raw = (Read-HostSafe $promptText)
         if ($raw -eq '' -and $null -ne $lastP2Idx) { $p2Idx = $lastP2Idx }
         elseif ($raw -match '^\d+$' -and $raw.Length -le 9 -and [int]$raw -lt $valid.Count) { $p2Idx = [int]$raw }
         else { Write-Host ("  Enter a number between 0 and {0}." -f ($valid.Count - 1)) -ForegroundColor Yellow }
@@ -3163,7 +3198,7 @@ function Invoke-CrosshairSetup {
     Write-Log ("Crosshairs: done. Deployed={0} Skipped={1} Errors={2}" -f $deployed, $skipped, $errors)
 
     Write-Host ""
-    $hideCursor = (Read-Host "  Also hide the Windows cursor for all lightgun games? (Y/N)").Trim().ToUpper()
+    $hideCursor = (Read-HostSafe "  Also hide the Windows cursor for all lightgun games? (Y/N)").ToUpper()
     if ($hideCursor -eq "Y") {
         Write-Host ""
         Invoke-CursorHideSetup -UserProfilesDir $UserProfilesDir
@@ -4948,7 +4983,7 @@ function Invoke-FFBPluginSetup {
         Write-Host ""
         Write-Host ("  {0} game(s) are covered by BOTH FFB Blaster and the third-party plugin:" -f $overlaps.Count) -ForegroundColor Cyan
         foreach ($ov in $overlaps) { Write-Host ("    - {0}" -f $ov.Profile.BaseName) -ForegroundColor DarkGray }
-        $ans = (Read-Host "  Use FFB Blaster (native) for these games instead of the third-party plugin? (Y/N)").Trim().ToUpper()
+        $ans = (Read-HostSafe "  Use FFB Blaster (native) for these games instead of the third-party plugin? (Y/N)").ToUpper()
         $useNativeForOverlaps = ($ans -eq "Y")
         Write-Log ("FFBPlugin: {0} overlapping game(s) with native FFB Blaster -- user chose {1}" -f $overlaps.Count, $(if ($useNativeForOverlaps) {"native"} else {"third-party plugin"}))
     }
@@ -5263,7 +5298,7 @@ function Invoke-FFBBlasterSetup {
     Write-Host "  Do you have an active, paid TeknoParrot membership? (Y/N)" -ForegroundColor Yellow
     Write-Host "  If you answer N, FFB Blaster will NOT be set up -- it does not work" -ForegroundColor Yellow
     Write-Host "  without one, and there is no point enabling a field that has no effect." -ForegroundColor Yellow
-    $hasSub = (Read-Host "  Answer").Trim().ToUpper()
+    $hasSub = (Read-HostSafe "  Answer").ToUpper()
     if ($hasSub -ne "Y") {
         Write-Host "  Skipped -- no membership." -ForegroundColor DarkGray
         Write-Log "FFBBlaster setup: skipped -- user has no TeknoParrot membership."
@@ -5616,7 +5651,7 @@ function Invoke-BepInExUpdateCheck {
     foreach ($o in ($outdated | Sort-Object Code)) {
         Write-Host ("    - {0}: {1} -> {2}" -f $o.Code, $o.Installed, $latest.Version) -ForegroundColor DarkGray
     }
-    $ans = (Read-Host ("  Update BepInEx to {0} for these {1} game(s)? (Y/N)" -f $latest.Version, $outdated.Count)).Trim().ToUpper()
+    $ans = (Read-HostSafe ("  Update BepInEx to {0} for these {1} game(s)? (Y/N)" -f $latest.Version, $outdated.Count)).ToUpper()
     if ($ans -ne "Y") {
         Write-Host "  Skipped -- no changes made." -ForegroundColor DarkGray
         Write-Log "BepInEx update check: user declined the batched update."
@@ -6044,7 +6079,7 @@ function Invoke-CheckForUpdates {
     Write-Host "       this session will exit rather than keep running the old code."
     Write-Host ""
 
-    $ans = (Read-Host "  Update to $latestDisplay now? (Y/N)").Trim().ToUpper()
+    $ans = (Read-HostSafe "  Update to $latestDisplay now? (Y/N)").ToUpper()
     if ($ans -ne "Y") {
         Write-Host "  Skipped -- no changes made." -ForegroundColor DarkGray
         Write-Log "CheckForUpdates: user declined the update to $($release.TagName)."
@@ -6111,7 +6146,7 @@ function Invoke-StartupUpdateCheck {
     Write-Log "StartupUpdateCheck: update available (v$ScriptVersion -> $($release.TagName))."
 
     while ($true) {
-        $ans = (Read-Host "  Update now, remind me later, or view release notes? (Y/N/V)").Trim().ToUpper()
+        $ans = (Read-HostSafe "  Update now, remind me later, or view release notes? (Y/N/V)").ToUpper()
 
         if ($ans -eq "V") {
             Write-Host ""
@@ -6134,7 +6169,7 @@ function Invoke-StartupUpdateCheck {
             Write-Host "    5) Require you to restart TeknoParrot Manager afterward --"
             Write-Host "       this session will exit rather than keep running the old code."
             Write-Host ""
-            $confirm = (Read-Host "  Proceed? (Y/N)").Trim().ToUpper()
+            $confirm = (Read-HostSafe "  Proceed? (Y/N)").ToUpper()
             if ($confirm -ne "Y") {
                 Write-Host "  Skipped -- no changes made." -ForegroundColor DarkGray
                 Write-Log "StartupUpdateCheck: user backed out of the update to $($release.TagName)."
@@ -8277,7 +8312,7 @@ function Invoke-DeviceSurvey {
     # Scriptblock instead of a nested function: PowerShell nested functions
     # escape into session scope after the first call, polluting the environment
     # for the rest of the session. A scriptblock stays local to this function.
-    $readYesNo = { param([string]$q) return ((Read-Host "   $q (Y/N)").Trim().ToUpper() -eq "Y") }
+    $readYesNo = { param([string]$q) return ((Read-HostSafe "   $q (Y/N)").ToUpper() -eq "Y") }
 
     Write-Host ""
     Write-Host " Which controls do you have and want to use?" -ForegroundColor Cyan
@@ -8316,7 +8351,7 @@ function Invoke-DeviceSurvey {
             Write-Host "   No lightgun. For gun games, aim with:" -ForegroundColor Yellow
             Write-Host "     1) Trackball       (precise, but no fixed center; you roll to aim)"
             Write-Host "     2) Xbox right stick (smooth and self-centering)"
-            if ((Read-Host "   Choose 1 or 2").Trim() -eq "2") {
+            if ((Read-HostSafe "   Choose 1 or 2") -eq "2") {
                 $plan["Lightgun games (no gun)"] = "your Xbox right stick (analog aim)"
             } else {
                 $plan["Lightgun games (no gun)"] = "your trackball (relative/mouse aim)"
@@ -8389,7 +8424,7 @@ function Invoke-RestoreBackup {
         Write-Host ("    {0,3})  {1}   ({2} file(s))" -f ($i + 1), $b.Name, $fileCount)
     }
     Write-Host ""
-    $choice = (Read-Host "  Enter number to restore, or Enter to cancel").Trim()
+    $choice = (Read-HostSafe "  Enter number to restore, or Enter to cancel")
     if ([string]::IsNullOrWhiteSpace($choice)) {
         Write-Host "  Restore cancelled." -ForegroundColor DarkGray
         Write-Log "Restore: cancelled by user."
@@ -8413,7 +8448,7 @@ function Invoke-RestoreBackup {
     Write-Host ""
     Write-Host ("  Selected : {0}  ({1} profile(s))" -f $selected.Name, $backupXmls.Count) -ForegroundColor Yellow
     Write-Host "  WARNING  : This will OVERWRITE all current UserProfiles with the backup." -ForegroundColor Yellow
-    $confirm = (Read-Host "  Type YES to confirm").Trim()
+    $confirm = (Read-HostSafe "  Type YES to confirm")
     if ($confirm.ToUpper() -ne "YES") {
         Write-Host "  Restore cancelled." -ForegroundColor DarkGray
         Write-Log "Restore: user did not confirm."
@@ -8634,7 +8669,7 @@ function Invoke-RestoreLaunchBoxBackup {
         Write-Host ("    {0,3})  {1}   ({2} file(s))" -f ($i + 1), $b.Name, $fileCount)
     }
     Write-Host ""
-    $choice = (Read-Host "  Enter number to restore, or Enter to cancel").Trim()
+    $choice = (Read-HostSafe "  Enter number to restore, or Enter to cancel")
     if ([string]::IsNullOrWhiteSpace($choice)) {
         Write-Host "  Restore cancelled." -ForegroundColor DarkGray
         Write-Log "LaunchBox restore: cancelled by user."
@@ -8651,7 +8686,7 @@ function Invoke-RestoreLaunchBoxBackup {
     Write-Host ("  Selected : {0}" -f $selected.Name) -ForegroundColor Yellow
     Write-Host "  WARNING  : This will OVERWRITE the current LaunchBox Emulators.xml," -ForegroundColor Yellow
     Write-Host "             Platforms.xml, and any platform file(s) in this backup." -ForegroundColor Yellow
-    $confirm = (Read-Host "  Type YES to confirm").Trim()
+    $confirm = (Read-HostSafe "  Type YES to confirm")
     if ($confirm.ToUpper() -ne "YES") {
         Write-Host "  Restore cancelled." -ForegroundColor DarkGray
         Write-Log "LaunchBox restore: user did not confirm."
@@ -8814,7 +8849,7 @@ function Invoke-RestorePostgresBackup {
         Write-Host ("    {0,3})  {1}   ({2} database(s): {3})" -f ($i + 1), $b.Name, $dbFiles.Count, $names)
     }
     Write-Host ""
-    $choice = (Read-Host "  Enter number to restore, or Enter to cancel").Trim()
+    $choice = (Read-HostSafe "  Enter number to restore, or Enter to cancel")
     if ([string]::IsNullOrWhiteSpace($choice)) {
         Write-Host "  Restore cancelled." -ForegroundColor DarkGray
         Write-Log "Postgres restore: cancelled by user."
@@ -8836,7 +8871,7 @@ function Invoke-RestorePostgresBackup {
     Write-Host ("  Selected : {0}  ({1} database(s))" -f $selected.Name, $backupFiles.Count) -ForegroundColor Yellow
     Write-Host "  WARNING  : This will REPLACE the current content of each database" -ForegroundColor Yellow
     Write-Host "             listed above with this backup's snapshot." -ForegroundColor Yellow
-    $confirm = (Read-Host "  Type YES to confirm").Trim()
+    $confirm = (Read-HostSafe "  Type YES to confirm")
     if ($confirm.ToUpper() -ne "YES") {
         Write-Host "  Restore cancelled." -ForegroundColor DarkGray
         Write-Log "Postgres restore: user did not confirm."
@@ -9935,7 +9970,7 @@ if (Test-Path -LiteralPath $configPath) {
             Write-Log "Unattended: auto-accepted saved settings."
             $use = "Y"
         } else {
-            $use = (Read-Host "Use these settings? (Y/N)").Trim()
+            $use = (Read-HostSafe "Use these settings? (Y/N)")
         }
         if ($use.ToUpper() -eq "Y") {
             # A config saved by an older script version could have
@@ -10012,7 +10047,7 @@ if (-not $tpRoot) {
     } elseif ($detected.Count -eq 1) {
         Write-Host ""
         Write-Host "  Auto-detected TeknoParrot at: $($detected[0])" -ForegroundColor Cyan
-        $useIt = (Read-Host "  Use this path? (Y/N)").Trim().ToUpper()
+        $useIt = (Read-HostSafe "  Use this path? (Y/N)").ToUpper()
         if ($useIt -eq "Y") { $tpRoot = $detected[0] }
     } elseif ($detected.Count -gt 1) {
         Write-Host ""
@@ -10020,7 +10055,7 @@ if (-not $tpRoot) {
         for ($i = 0; $i -lt $detected.Count; $i++) {
             Write-Host ("    {0}) {1}" -f ($i + 1), $detected[$i])
         }
-        $pick = (Read-Host "  Enter number to use one, or N to type the path manually").Trim()
+        $pick = (Read-HostSafe "  Enter number to use one, or N to type the path manually")
         if ($pick -match '^\d+$' -and $pick.Length -le 9) {
             $idx = [int]$pick - 1
             if ($idx -ge 0 -and $idx -lt $detected.Count) { $tpRoot = $detected[$idx] }
@@ -10044,7 +10079,7 @@ if (-not $configAccepted -and -not $Unattended) {
     Write-Host "  Is this a RetroBat/Batocera installation?" -ForegroundColor Cyan
     Write-Host "  (Y = game folders use a RetroBat suffix: .teknoparrot / .parrot / .game)" -ForegroundColor DarkCyan
     Write-Host "  (extracted folders will be named  GameName.teknoparrot)" -ForegroundColor DarkCyan
-    $rbChoice = (Read-Host "  Use RetroBat folder naming? (Y/N)").Trim().ToUpper()
+    $rbChoice = (Read-HostSafe "  Use RetroBat folder naming? (Y/N)").ToUpper()
     $retroBat = ($rbChoice -eq "Y")
     if ($retroBat) { Write-Log "RetroBat mode enabled by user." }
 }
@@ -10076,7 +10111,7 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
     Write-Host "    D) Download the latest from Eggman's Repository  (~145 MB)"
     Write-Host "    B) Browse for a ZIP or dat file I already have"
     Write-Host "    N) Skip (not recommended)"
-    $datChoice = (Read-Host "  Choice (D/B/N)").Trim().ToUpper()
+    $datChoice = (Read-HostSafe "  Choice (D/B/N)").ToUpper()
     $raw = ''   # shared path variable for B and the download-fallback path
 
     if ($datChoice -eq 'D') {
@@ -10164,11 +10199,11 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
     # all, depending on which of three separate up-front menu choices
     # (D/Z/F) the user happened to pick.
     if ($eggmanDatZip) {
-        $askSupp = (Read-Host "  Also index supplementary dat for alternate version info? (Y/N)").Trim().ToUpper()
+        $askSupp = (Read-HostSafe "  Also index supplementary dat for alternate version info? (Y/N)").ToUpper()
         $includeSupplementary = ($askSupp -eq 'Y')
         if ($includeSupplementary) { Write-Log "EggmanDat: supplementary indexing enabled." }
     } elseif ($datFilePath) {
-        $askSupp = (Read-Host "  Do you also have a separate supplementary dat file? (Y/N)").Trim().ToUpper()
+        $askSupp = (Read-HostSafe "  Do you also have a separate supplementary dat file? (Y/N)").ToUpper()
         if ($askSupp -eq 'Y') {
             $rawSupp = Read-PathWithBrowse "  Path to supplementary dat file" -Mode File -FileFilter "dat files (*.dat)|*.dat|All files (*.*)|*.*"
             if ($rawSupp) {
@@ -10197,7 +10232,7 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
     # optional -- so only "currently using" appears here.
     $currentSizeMBPreCheck = if (Test-Path -LiteralPath $eggmanDatZip) { [Math]::Round((Get-Item -LiteralPath $eggmanDatZip).Length / 1MB, 1) } else { 0 }
     Write-Host ("  Currently using  : {0}  ({1} MB)" -f (Split-Path -Leaf $eggmanDatZip), $currentSizeMBPreCheck) -ForegroundColor Cyan
-    $checkUpdate = (Read-Host "Check for a newer Eggman dat release? (Y/N)").Trim().ToUpper()
+    $checkUpdate = (Read-HostSafe "Check for a newer Eggman dat release? (Y/N)").ToUpper()
     if ($checkUpdate -eq 'Y') {
         Write-Host "  Checking GitHub for latest Eggman dat release..." -ForegroundColor Cyan
         $rel = Get-EggmanDatRelease
@@ -10215,7 +10250,7 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
                 if ($upToDate.Status -eq 'Unknown') {
                     Write-Host "  Could not determine your current dat file's size -- offering the download anyway." -ForegroundColor Yellow
                 }
-                $doUpdate = (Read-Host "  Download and switch to the latest release? (Y/N)").Trim().ToUpper()
+                $doUpdate = (Read-HostSafe "  Download and switch to the latest release? (Y/N)").ToUpper()
                 if ($doUpdate -eq 'Y') {
                     $savedPath = Invoke-EggmanDatDownloadInteractive $rel
                     if ($savedPath) {
@@ -10531,21 +10566,31 @@ if ($datIndex.Count -gt 0 -and $gameProfilesDir) {
 
 # =============================================================================
 # ADAPTIVE MAIN MENU (issue #104) -- single data-driven model, rendered at one
-# of three layout tiers depending on the current console window size. Every
-# tier shows the same 14 numbered options with the same meaning; only how
-# much description text is shown changes. Numbering, the switch-statement
-# dispatch, and all mode behavior are completely unaffected by this -- only
-# Show-MainMenu's own rendering varies.
+# of four layout tiers depending on the current console window's width
+# (Get-ConsoleLayoutTier is width-driven; see that function for the exact
+# breakpoints): Compact (<90 columns), Standard (90-119), Professional
+# (120-149), or Ultra (>=150). Every tier shows the same 14 numbered options
+# with the same meaning; only how much description text is shown, and
+# whether the layout is one or two columns, changes. Numbering, the
+# switch-statement dispatch, and all mode behavior are completely unaffected
+# by this -- only Show-MainMenu's own rendering varies. At extremely short
+# heights (below the documented 60x10 minimum-supported viewport), an
+# emergency compact presentation takes over regardless of tier -- see
+# Get-MainMenuEmergencyCompactRows.
 # =============================================================================
 
 # Single source of truth for every menu item's number, mode string, section,
-# and description at three levels of detail (Full/Standard/Compact). Adding,
-# renumbering, or re-sectioning a menu item only ever needs to change this
-# array -- every rendering tier and the "Enter 1-N" prompt derive from it.
-# A function (not a plain script-scope variable) so it is picked up by the
-# test suite's AST-based function extraction like every other testable
-# helper in this script -- see the "Main menu source-level drift check"
-# Describe block in Tests/TeknoParrot-Manager.Tests.ps1.
+# and description -- ShortDesc (one line) and FullDesc (an array of lines).
+# Adding, renumbering, or re-sectioning a menu item only ever needs to change
+# this array -- every rendering tier and the "Enter 1-N" prompt derive from
+# it. Different tiers show different levels of detail derived from these two
+# fields (or neither, for Standard/Compact's labels-only rendering) -- see
+# "Description text sourcing varies by tier" in ARCHITECTURE.md for exactly
+# which tier uses which field. A function (not a plain script-scope
+# variable) so it is picked up by the test suite's AST-based function
+# extraction like every other testable helper in this script -- see the
+# "Main menu source-level drift check" Describe block in
+# Tests/TeknoParrot-Manager.Tests.ps1.
 function Get-MainMenuSections {
     return @(
     [pscustomobject]@{
@@ -10560,11 +10605,11 @@ function Get-MainMenuSections {
         Header = 'Game Enhancements (all optional -- games work without these)'
         Items  = @(
             [pscustomobject]@{ Number = 4; Mode = 'CrosshairSetup'; Label = 'Crosshair setup'; ShortDesc = 'Deploy custom crosshairs to lightgun games.'; FullDesc = @('Pick and deploy custom crosshairs to all', 'registered lightgun games.') }
-            [pscustomobject]@{ Number = 5; Mode = 'ReShadeSetup'; Label = 'ReShade setup'; ShortDesc = 'Sharper image, better colours, scanlines, borders.'; FullDesc = @('Add visual enhancements (sharper image, better', 'colours, scanlines, borders).') }
+            [pscustomobject]@{ Number = 5; Mode = 'ReShadeSetup'; Label = 'ReShade setup'; ShortDesc = 'Visual filters: sharper image, CRT-style scanlines, borders.'; FullDesc = @('ReShade adds post-processing filters on top of', 'the game -- sharper image, better colours,', 'CRT-style scanlines, and screen borders, for a', 'more authentic arcade-cabinet look.') }
             [pscustomobject]@{ Number = 6; Mode = 'DgVoodoo2Setup'; Label = 'dgVoodoo2 setup'; ShortDesc = 'Fix old DX8/DirectDraw/Glide crashes.'; FullDesc = @('Fix old DX8, DirectDraw, and Glide games that', 'crash or show black screens.') }
             [pscustomobject]@{ Number = 7; Mode = 'GpuFixSetup'; Label = 'GPU fix setup'; ShortDesc = 'Auto-detect GPU, apply matching compatibility fix.'; FullDesc = @('Auto-detect your GPU (AMD / NVIDIA / Intel) and', 'apply the matching compatibility fix to every', 'registered game that has one.') }
             [pscustomobject]@{ Number = 8; Mode = 'FFBSetup'; Label = 'Force feedback (FFB) setup'; ShortDesc = 'Wheel/stick rumble and force feedback.'; FullDesc = @('Wheel/stick rumble and force feedback.', "Covers TeknoParrot's built-in FFB Blaster (needs a", 'paid membership) and a free third-party plugin.') }
-            [pscustomobject]@{ Number = 9; Mode = 'BepInExUpdate'; Label = 'BepInEx update check'; ShortDesc = 'Update games with BepInEx already installed.'; FullDesc = @('Checks games with BepInEx already installed', 'against the latest stable release and offers to', 'update (64-bit only). Never installs it fresh.') }
+            [pscustomobject]@{ Number = 9; Mode = 'BepInExUpdate'; Label = 'BepInEx update check'; ShortDesc = 'Update BepInEx (a game modding framework), if already installed.'; FullDesc = @('BepInEx is a modding framework some TeknoParrot', 'games use for extra features and fixes. Checks', 'games that already have it installed against the', 'latest stable release and offers to update', '(64-bit only). Never installs it fresh.') }
         )
     }
     [pscustomobject]@{
@@ -10572,7 +10617,7 @@ function Get-MainMenuSections {
         Items  = @(
             [pscustomobject]@{ Number = 10; Mode = 'HealthCheck'; Label = 'Library health check'; ShortDesc = 'Read-only status: registered/broken/unregistered counts.'; FullDesc = @('Read-only: reports registered/broken/', 'unregistered counts plus GPU fix / FFB Blaster /', 'dgVoodoo2 coverage and ReShade/BepInEx install', 'counts. No extraction, registration, repair, or', 'network access -- just a fast status check.') }
             [pscustomobject]@{ Number = 11; Mode = 'Restore'; Label = 'Restore backup'; ShortDesc = 'Roll UserProfiles/LaunchBox/Postgres back.'; FullDesc = @('Roll UserProfiles, LaunchBox files, or Postgres', 'databases back to a previous backup.') }
-            [pscustomobject]@{ Number = 12; Mode = 'PostgresSetup'; Label = 'Postgres setup'; ShortDesc = 'Local PostgreSQL for some Incredible Technologies games.'; FullDesc = @('Installs/configures the local PostgreSQL', 'database that some Incredible Technologies', 'games need (Golden Tee Live, Power Putt Live,', 'Silver Strike Bowling Live, Target Toss Pro).', 'Requires running this script as Administrator', "if PostgreSQL isn't installed yet.") }
+            [pscustomobject]@{ Number = 12; Mode = 'PostgresSetup'; Label = 'Postgres setup'; ShortDesc = 'Local PostgreSQL database for Golden Tee and other IT games.'; FullDesc = @('Installs/configures the local PostgreSQL', 'database that some Incredible Technologies (IT)', 'games need to keep local scores/settings (Golden', 'Tee Live, Power Putt Live, Silver Strike Bowling', 'Live, Target Toss Pro). Requires running this', "script as Administrator if PostgreSQL isn't", 'installed yet.') }
         )
     }
     [pscustomobject]@{
@@ -10720,14 +10765,14 @@ function Get-MainMenuDefaultDescription {
         'RegisterOnly' { return 'Register already-extracted games.' }
         'PropagateControls' { return 'Copy bindings from reference games.' }
         'CrosshairSetup' { return 'Deploy lightgun crosshairs.' }
-        'ReShadeSetup' { return 'Apply visual enhancements.' }
+        'ReShadeSetup' { return 'Visual filters: sharper image, CRT-style scanlines.' }
         'DgVoodoo2Setup' { return 'Fix older DirectX/Glide games.' }
         'GpuFixSetup' { return 'Apply GPU compatibility fixes.' }
         'FFBSetup' { return 'Configure wheel/stick feedback.' }
-        'BepInExUpdate' { return 'Update existing BepInEx installs.' }
+        'BepInExUpdate' { return 'Update BepInEx (a modding framework), if installed.' }
         'HealthCheck' { return 'Read-only library status.' }
         'Restore' { return 'Restore UserProfiles or databases.' }
-        'PostgresSetup' { return 'Install local PostgreSQL support.' }
+        'PostgresSetup' { return 'Local PostgreSQL for Golden Tee and other IT games.' }
         'CheckForUpdates' { return 'Manual backup-first update check.' }
         default { return $Item.ShortDesc }
     }
@@ -11135,14 +11180,20 @@ function Get-MainMenuBodyRows {
     }
 
     $rows = New-Object System.Collections.Generic.List[object]
+    if ($Geometry.Tier -eq 'Compact') {
+        # Deliberately placed BEFORE the section rows, not after: when a
+        # short viewport forces Limit-MainMenuBodyRowsToBudget to trim body
+        # rows, it keeps the TAIL of this list so the last real menu item
+        # (14, Exit) always survives. A purely decorative hint like this one
+        # must never out-rank that -- if it were last, it would win the
+        # tail-preservation over Exit itself at a short height.
+        [void]$rows.Add((New-ConsoleRenderRow -Text '  Type ? for descriptions.' -Color 'DarkGray'))
+        [void]$rows.Add((New-ConsoleRenderRow))
+    }
     foreach ($section in $Sections) {
         foreach ($row in (Get-MainMenuSectionRows -Section $section -Geometry $Geometry -Detail $detail)) {
             [void]$rows.Add($row)
         }
-    }
-    if ($Geometry.Tier -eq 'Compact') {
-        [void]$rows.Add((New-ConsoleRenderRow -Text '  Type ? for descriptions.' -Color 'DarkGray'))
-        [void]$rows.Add((New-ConsoleRenderRow))
     }
     return @(Get-PaddedMainMenuRows -Rows $rows.ToArray() -Padding $Geometry.LeftPadding)
 }
@@ -11158,6 +11209,139 @@ function Limit-MainMenuRowsToViewport {
     return @($Rows | Select-Object -First $maxRows)
 }
 
+# Truncates BODY rows only (never the banner or footer) so a short-height
+# console still shows the footer's Quit/Help controls and the menu's last
+# item (14, Exit) without the terminal itself having to scroll -- issue #104
+# RC3 correction. Earlier behavior flattened banner+body+footer into one
+# list and kept only the first N rows, which chopped off the Application
+# section (Check for Updates, Exit) and the entire footer at short heights;
+# a pre-existing test even asserted that as intentional ("small viewport...
+# leaves prompt space" previously asserted `Should -Not -Match 'Exit'`).
+# Trimming BODY from the front (keeping its tail) instead means whatever
+# gets dropped first is the earliest sections (Library Management, Game
+# Enhancements), not the footer or the last item -- the controls a user
+# needs to actually operate the menu (pick a number, quit, get help) always
+# render, even if some earlier item descriptions don't fit.
+function Limit-MainMenuBodyRowsToBudget {
+    param(
+        [object[]]$BodyRows,
+        [int]$BodyBudget
+    )
+
+    if ($BodyBudget -le 0) { return @() }
+    if ($BodyRows.Count -le $BodyBudget) { return @($BodyRows) }
+    return @($BodyRows | Select-Object -Last $BodyBudget)
+}
+
+# Single-line banner ("TeknoParrot Manager v1.0 RC2.1") with no frame and no
+# blank separator, for viewports too short for the normal framed banner (5-6
+# rows) to leave any room for menu content -- see
+# Get-MainMenuEmergencyCompactRows.
+function Get-MainMenuMinimalBannerRows {
+    param([object]$Geometry)
+    $text = "TeknoParrot Manager {0}" -f (Get-ManagerVersionLine)
+    $text = $text -replace '^TeknoParrot Manager Version ', 'TeknoParrot Manager v'
+    if ($text.Length -gt $Geometry.MenuWidth -and $Geometry.MenuWidth -gt 3) {
+        $text = $text.Substring(0, $Geometry.MenuWidth)
+    }
+    return @(Get-PaddedMainMenuRows -Rows @((New-ConsoleRenderRow -Text $text -Color 'Cyan')) -Padding $Geometry.LeftPadding)
+}
+
+# Single-line footer with no frame/rule, for the same reason as
+# Get-MainMenuMinimalBannerRows above.
+function Get-MainMenuMinimalFooterRows {
+    param([object]$Geometry)
+    $footer = 'Enter number | Q=Quit'
+    if ($footer.Length -gt $Geometry.FooterWidth) { $footer = 'N | Q' }
+    return @(Get-PaddedMainMenuRows -Rows @((New-ConsoleRenderRow -Text $footer -Color 'White')) -Padding $Geometry.LeftPadding)
+}
+
+# Packs every menu item's "N) Label" as densely as the viewport width
+# allows, word-wrapping only when a token would overflow the line, instead
+# of one item per row. This is the fallback for viewports too short to show
+# even the normal Compact tier's one-item-per-row Labels rendering (e.g. the
+# minimum supported 60x10 terminal) -- at that size, 4 section headers + 14
+# item rows (18 rows) cannot fit no matter how much else is trimmed, so
+# every option must share rows instead of some options being dropped
+# entirely. Section grouping is intentionally not preserved here (headers
+# are dropped) since the priority at this size is that every option NUMBER
+# is visible and reachable, not that they stay visually grouped.
+function Get-MainMenuFlowPackedItemRows {
+    param(
+        [int]$Width,
+        [object]$Geometry
+    )
+    $tokens = @((Get-MainMenuItems) | ForEach-Object { '{0}) {1}' -f $_.Number, $_.Label })
+    $wrapWidth = [Math]::Max(20, $Width)
+
+    # Packs whole "N) Label" tokens greedily, never splitting one across two
+    # lines -- unlike a generic word-wrap (e.g. Split-TextForMenuWidth),
+    # which treats "4)" and "Crosshair" as separate words and can break an
+    # option's number from its own label at a line boundary. A single
+    # option's number and name staying on one line matters more here than
+    # tight packing, since this is the presentation a very-short-viewport
+    # user reads to figure out what to type.
+    $lines = New-Object System.Collections.Generic.List[string]
+    $current = ''
+    foreach ($token in $tokens) {
+        if ($current.Length -eq 0) {
+            $current = $token
+        } elseif (($current.Length + 2 + $token.Length) -le $wrapWidth) {
+            $current = "$current  $token"
+        } else {
+            [void]$lines.Add($current)
+            $current = $token
+        }
+    }
+    if ($current.Length -gt 0) { [void]$lines.Add($current) }
+
+    $rows = @($lines | ForEach-Object { New-ConsoleRenderRow -Text $_ -Color 'White' })
+    return @(Get-PaddedMainMenuRows -Rows $rows -Padding $Geometry.LeftPadding)
+}
+
+# Emergency compact presentation for viewports too short to show all 14
+# options one per row even with every description stripped (issue #104
+# RC3-B correction: at the minimum supported 60x10 terminal, the normal
+# Compact-tier body -- 4 section headers + 14 item rows, 18 rows minimum --
+# cannot fit even after Limit-MainMenuBodyRowsToBudget trims it, so the
+# normal path was silently dropping every item including 14 (Exit), leaving
+# only the banner and footer visible. Reserving space for Exit and the
+# footer is not enough on its own if the fix only protects those two and
+# still drops every OTHER option -- this replaces the normal framed banner
+# and footer with single-line minimal versions (freeing several rows) and
+# flow-packs every item's "N) Label" as densely as the width allows, so
+# every option number stays visible and reachable without scrolling, rather
+# than choosing which options to silently omit.
+function Get-MainMenuEmergencyCompactRows {
+    param(
+        [object]$Geometry,
+        # Real terminal row budget (Max(5, real Height - 2)) -- when the
+        # flow-packed item rows don't all fit alongside the minimal banner
+        # and footer, those two are still NEVER dropped; item rows are
+        # trimmed from the front instead (keeping the tail), so the last
+        # item line -- which always ends with "14) Exit" -- and the footer
+        # both survive even at a viewport too short to show every earlier
+        # option. Below the documented 60x10 minimum this can still mean an
+        # early option's line goes missing, but the footer and Exit itself
+        # are the two guarantees that must never break.
+        [int]$MaxRows = 0
+    )
+    $bannerRows = @(Get-MainMenuMinimalBannerRows -Geometry $Geometry)
+    $footerRows = @(Get-MainMenuMinimalFooterRows -Geometry $Geometry)
+    $itemRows = @(Get-MainMenuFlowPackedItemRows -Width ([Math]::Max(20, $Geometry.MenuWidth - $Geometry.LeftPadding)) -Geometry $Geometry)
+
+    if ($MaxRows -gt 0) {
+        $itemBudget = [Math]::Max(0, $MaxRows - $bannerRows.Count - $footerRows.Count)
+        $itemRows = Limit-MainMenuBodyRowsToBudget -BodyRows $itemRows -BodyBudget $itemBudget
+    }
+
+    $rows = New-Object System.Collections.Generic.List[object]
+    foreach ($row in $bannerRows) { [void]$rows.Add($row) }
+    foreach ($row in $itemRows) { [void]$rows.Add($row) }
+    foreach ($row in $footerRows) { [void]$rows.Add($row) }
+    return @($rows.ToArray())
+}
+
 function Render-MainMenuScreen {
     param(
         [ValidateSet('Ultra', 'Professional', 'Standard', 'Compact')][string]$Tier,
@@ -11168,11 +11352,47 @@ function Render-MainMenuScreen {
 
     $geometry = Get-MainMenuGeometry -Tier $Tier -ViewportWidth $Width -ViewportHeight $Height -UltraLayoutMode $UltraLayoutMode
     $sections = @(Get-MainMenuSections)
+    $bannerRows = @(Get-MainMenuBannerRows -Geometry $geometry)
+    $footerRows = @(Get-MainMenuFooterRows -Geometry $geometry)
+    $bodyRows = @(Get-MainMenuBodyRows -Sections $sections -Geometry $geometry)
+
+    # Uses the caller's real requested $Height here, NOT $geometry.ViewportHeight
+    # -- Get-MainMenuGeometry internally clamps ViewportHeight to a floor of 10
+    # for its own column/description-width math, which is correct for that
+    # purpose but would silently let more rows render than an actually-shorter
+    # real terminal (e.g. height 8 or 9) can show without scrolling if reused
+    # here for the row-count budget/cap.
+    $maxTotalRows = [Math]::Max(5, $Height - 2)
+    $reserved = $bannerRows.Count + $footerRows.Count
+    $bodyBudget = [Math]::Max(0, $maxTotalRows - $reserved)
+
+    # If the normal (one item per row) body can't fit every option even
+    # after trimming, switch to the emergency flow-packed presentation
+    # instead of silently dropping options -- see
+    # Get-MainMenuEmergencyCompactRows. $totalItemCount is the number of
+    # individual item rows the normal Labels-detail body needs at minimum
+    # (ignoring section headers/blank lines, which are the first things
+    # trimmed); if the budget can't even hold that many rows, some options
+    # would be dropped, not just descriptions.
+    $totalItemCount = (Get-MainMenuItems).Count
+    if ($bodyBudget -lt $totalItemCount) {
+        # $maxTotalRows (real Height - 2, not the geometry-clamped height)
+        # is passed straight through as the row budget -- NOT run back
+        # through Limit-MainMenuRowsToViewport's generic front-truncation,
+        # which would cut off the LAST rows (the footer) once content
+        # overflowed. Get-MainMenuEmergencyCompactRows reserves the banner
+        # and footer unconditionally and only trims item rows if needed.
+        $rows = Get-MainMenuEmergencyCompactRows -Geometry $geometry -MaxRows $maxTotalRows
+        return [pscustomobject]@{ Geometry = $geometry; Rows = $rows }
+    }
+
+    $bodyRows = Limit-MainMenuBodyRowsToBudget -BodyRows $bodyRows -BodyBudget $bodyBudget
+
     $rows = New-Object System.Collections.Generic.List[object]
-    foreach ($row in (Get-MainMenuBannerRows -Geometry $geometry)) { [void]$rows.Add($row) }
-    foreach ($row in (Get-MainMenuBodyRows -Sections $sections -Geometry $geometry)) { [void]$rows.Add($row) }
-    foreach ($row in (Get-MainMenuFooterRows -Geometry $geometry)) { [void]$rows.Add($row) }
-    return [pscustomobject]@{ Geometry = $geometry; Rows = (Limit-MainMenuRowsToViewport -Rows $rows.ToArray() -ViewportHeight $geometry.ViewportHeight) }
+    foreach ($row in $bannerRows) { [void]$rows.Add($row) }
+    foreach ($row in $bodyRows) { [void]$rows.Add($row) }
+    foreach ($row in $footerRows) { [void]$rows.Add($row) }
+    return [pscustomobject]@{ Geometry = $geometry; Rows = (Limit-MainMenuRowsToViewport -Rows $rows.ToArray() -ViewportHeight $Height) }
 }
 
 function Write-ConsoleRenderRows {
@@ -11310,11 +11530,22 @@ function Read-MainMenuChoiceResponsive {
 
     try {
         if ([Console]::IsInputRedirected) {
-            $rawFallback = Read-Host $readHostPrompt
-            $fallback = if ($null -eq $rawFallback) { '' } else { $rawFallback.Trim() }
-            return [pscustomobject]@{ Redraw = $false; Value = $fallback }
+            # Redirected/piped stdin: never enter the keyboard-polling loop
+            # below -- [Console]::KeyAvailable cannot see piped input, and
+            # polling it here is exactly the 40-second hang from issue #135.
+            # Read-HostSafe exits cleanly with a nonzero code the moment
+            # stdin is exhausted, instead of looping forever re-reading an
+            # already-closed stream.
+            return [pscustomobject]@{ Redraw = $false; Value = (Read-HostSafe $readHostPrompt) }
         }
-    } catch {}
+    } catch {
+        # [Console]::IsInputRedirected itself threw (unusual host) -- log it
+        # rather than silently swallowing (issue #135) and fall through to
+        # the keyboard-polling loop, which has its own KeyAvailable-throws
+        # fallback to Read-HostSafe below if a real keyboard also isn't
+        # available.
+        Write-Log "Read-MainMenuChoiceResponsive: [Console]::IsInputRedirected threw -- $_"
+    }
 
     $value = ''
     Write-Host $Prompt -NoNewline
@@ -11346,10 +11577,13 @@ function Read-MainMenuChoiceResponsive {
                 Start-Sleep -Milliseconds 80
             }
         } catch {
+            # [Console]::KeyAvailable/ReadKey threw -- no real keyboard
+            # available either. Log it (issue #135: never silently swallow
+            # an input-detection failure) and fall back to Read-HostSafe,
+            # which exits cleanly if stdin turns out to be exhausted too.
+            Write-Log "Read-MainMenuChoiceResponsive: keyboard polling threw -- $_"
             Write-Host ''
-            $rawFallback = Read-Host $readHostPrompt
-            $fallback = if ($null -eq $rawFallback) { '' } else { $rawFallback.Trim() }
-            return [pscustomobject]@{ Redraw = $false; Value = $fallback }
+            return [pscustomobject]@{ Redraw = $false; Value = (Read-HostSafe $readHostPrompt) }
         }
     }
 }
@@ -11357,6 +11591,17 @@ function Read-MainMenuChoiceResponsive {
 # =============================================================================
 # MAIN MENU LOOP
 # =============================================================================
+# $MinBoundForArchetype must be set before the loop starts, not only in
+# SECTION 10 below -- the standalone "Propagate Controls" menu handler
+# (PropagateControls mode) runs entirely inside this loop and returns via
+# `continue` without ever reaching SECTION 10. Before this fix, running
+# Propagate Controls as the first action of a session left the variable
+# $null, which [int]$minBound coerced to 0 in Build-ArchetypePool -- every
+# profile (including fully unbound ones) then qualified as an archetype,
+# every UserProfiles file was treated as a pool source, and propagation
+# silently produced "Games updated: 0" with no per-game report lines. See
+# issue #139 and LESSONS_LEARNED.md.
+$MinBoundForArchetype = 5
 try {
 Set-ConsoleMaximizedIfSupported
 while ($true) {
@@ -11435,7 +11680,7 @@ while ($true) {
         Write-Host "     direct LaunchBox integration)"
         Write-Host "  3) Postgres database backup (only relevant if you've used the"
         Write-Host "     Postgres setup mode)"
-        $restoreChoice = (Read-Host "  Enter 1-3").Trim()
+        $restoreChoice = (Read-HostSafe "  Enter 1-3")
         if ($restoreChoice -eq "2") {
             if (-not $lbRoot) {
                 Write-Host "  No LaunchBox root is configured yet -- nothing to restore." -ForegroundColor Yellow
@@ -11688,7 +11933,7 @@ while ($true) {
             Write-Log "PropagateControls: unattended -- propagation = Y."
             $goCtl = "Y"
         } else {
-            $goCtl = (Read-Host " Propagate controls now? (Y/N)").Trim()
+            $goCtl = (Read-HostSafe " Propagate controls now? (Y/N)")
         }
 
         if ($goCtl.ToUpper() -eq "Y") {
@@ -11877,7 +12122,7 @@ while ($true) {
         $nativeEnabledCodes = Invoke-FFBBlasterSetup -UserProfilesDir $userProfilesDir -TpRoot $tpRoot
 
         Write-Host ""
-        $doFfbPlugin = (Read-Host "  Also set up the free third-party FFB plugin (covers additional games)? (Y/N)").Trim().ToUpper()
+        $doFfbPlugin = (Read-HostSafe "  Also set up the free third-party FFB plugin (covers additional games)? (Y/N)").ToUpper()
         if ($doFfbPlugin -eq "Y") {
             $ffbCacheDir = Join-Path $PSScriptRoot "FFBPlugin"
             Invoke-FFBPluginSetup -UserProfilesDir $userProfilesDir -CacheDir $ffbCacheDir -NativeEnabledCodes $nativeEnabledCodes
@@ -12002,7 +12247,7 @@ while ($true) {
                 Write-Host "  [Unattended] Continuing with network staging folder." -ForegroundColor Yellow
                 Write-Log "Unattended: network staging folder -- continuing."
             } else {
-                $contNet = (Read-Host "  Continue with network staging folder? (Y/N)").Trim()
+                $contNet = (Read-HostSafe "  Continue with network staging folder? (Y/N)")
                 if ($contNet.ToUpper() -ne "Y") {
                     Write-Host "Aborted." -ForegroundColor Yellow
                     Write-Log "Aborted: user declined network staging folder."
@@ -12044,7 +12289,7 @@ while ($true) {
                     Write-Host "  [Unattended] Continuing despite low free space." -ForegroundColor Yellow
                     Write-Log "Unattended: low disk space warning -- continuing."
                 } else {
-                    $cont = (Read-Host "  Continue anyway? (Y/N)").Trim()
+                    $cont = (Read-HostSafe "  Continue anyway? (Y/N)")
                     if ($cont.ToUpper() -ne "Y") { Write-Host "Aborted." -ForegroundColor Yellow; Write-Log "Aborted: low staging-drive space."; [void](Read-Host "  Press Enter to return to menu"); continue }
                 }
             }
@@ -12091,7 +12336,7 @@ while ($true) {
         $dryRunActive = [bool]$DryRun
         if (-not $Unattended -and -not $dryRunActive) {
             Write-Host ""
-            $previewAns = (Read-Host "  Run in PREVIEW mode first? No changes will be written -- this just shows what AutoSync/Register would do. (Y/N)").Trim().ToUpper()
+            $previewAns = (Read-HostSafe "  Run in PREVIEW mode first? No changes will be written -- this just shows what AutoSync/Register would do. (Y/N)").ToUpper()
             $dryRunActive = ($previewAns -eq "Y")
         }
     }
@@ -12139,7 +12384,7 @@ if ($backupErrors -gt 0) {
         Write-Host "  [Unattended] Continuing despite incomplete backup." -ForegroundColor Yellow
         Write-Log "Unattended: incomplete backup -- continuing."
     } else {
-        $contBackup = (Read-Host "  Continue anyway? (Y/N)").Trim().ToUpper()
+        $contBackup = (Read-HostSafe "  Continue anyway? (Y/N)").ToUpper()
         if ($contBackup -ne "Y") {
             Write-Host "Aborted." -ForegroundColor Yellow
             Write-Log "Aborted: user declined to continue with incomplete backup."
@@ -12364,7 +12609,7 @@ $duplicateConflicts = @($manualRegData.GetEnumerator() | Where-Object { $_.Value
 if ($duplicateConflicts.Count -gt 0 -and -not $Unattended) {
     Write-Host ""
     Write-Host ("  {0} duplicate profile conflict(s) found (one profile code claimed by two folders)." -f $duplicateConflicts.Count) -ForegroundColor Yellow
-    $resolveChoice = (Read-Host "  Resolve them now by picking which folder keeps the profile? (Y/N)").Trim().ToUpper()
+    $resolveChoice = (Read-HostSafe "  Resolve them now by picking which folder keeps the profile? (Y/N)").ToUpper()
     if ($resolveChoice -eq "Y") {
         foreach ($entry in $duplicateConflicts) {
             $folderName = $entry.Key
@@ -12383,7 +12628,7 @@ if ($duplicateConflicts.Count -gt 0 -and -not $Unattended) {
             Write-Host ("  Profile          : {0}" -f $code) -ForegroundColor Yellow
             Write-Host ("  Currently set to : {0}" -f $currentExe) -ForegroundColor DarkGray
             Write-Host ("  Conflicting copy : {0}" -f $info.Exe) -ForegroundColor DarkGray
-            $pick = (Read-Host "  [K]eep current / [S]witch to conflicting copy / [Q]uit resolving").Trim().ToUpper()
+            $pick = (Read-HostSafe "  [K]eep current / [S]witch to conflicting copy / [Q]uit resolving").ToUpper()
             if ($pick -eq "Q") { break }
             if ($pick -eq "S") {
                 try {
@@ -12436,7 +12681,7 @@ if ($dryRunActive) {
     Write-Host "  same as that game's file in the UserProfiles\ folder (called the profile" -ForegroundColor DarkCyan
     Write-Host "  code), but ending in .png instead of .xml. TeknoParrot-Manager-controls.txt" -ForegroundColor DarkCyan
     Write-Host "  lists every game's file name if you're not sure." -ForegroundColor DarkCyan
-    $doThumb = (Read-Host "Download thumbnails for registered games missing an icon? (Y/N)").Trim().ToUpper()
+    $doThumb = (Read-HostSafe "Download thumbnails for registered games missing an icon? (Y/N)").ToUpper()
 }
 if ($doThumb -eq "Y") {
     Write-Host ""
@@ -12456,7 +12701,7 @@ if ($Unattended) {
     Write-Log "Unattended: repair = Y."
     $doRepair = "Y"
 } else {
-    $doRepair = (Read-Host "Check for and repair broken game paths now? (Y/N)").Trim()
+    $doRepair = (Read-HostSafe "Check for and repair broken game paths now? (Y/N)")
 }
 $nf   = @(); $amb2 = @()   # initialise so the final summary can reference them safely
 if ($doRepair.Trim().ToUpper() -eq "Y") {
@@ -12537,7 +12782,7 @@ if ($pool.Count -eq 0) {
     Write-Host " your lightgun reports position. If anything looks wrong, answer N," -ForegroundColor Yellow
     Write-Host " fix the game above in TeknoParrotUI, then re-run." -ForegroundColor Yellow
     Write-Host ""
-    if (-not $Unattended -and (Read-Host " Want a recommended binding plan for more control types first? (Y/N)").Trim().ToUpper() -eq "Y") {
+    if (-not $Unattended -and (Read-HostSafe " Want a recommended binding plan for more control types first? (Y/N)").ToUpper() -eq "Y") {
         Invoke-DeviceSurvey
         Write-Host ""
     }
@@ -12546,7 +12791,7 @@ if ($pool.Count -eq 0) {
         Write-Log "Unattended: propagation = Y."
         $goCtl = "Y"
     } else {
-        $goCtl = (Read-Host " Propagate controls now? (Y/N)").Trim()
+        $goCtl = (Read-HostSafe " Propagate controls now? (Y/N)")
     }
     if ($goCtl.ToUpper() -eq "Y") {
         $reports = Invoke-ControlPropagation -userProfilesDir $userProfilesDir -pool $pool -minBound $MinBoundForArchetype -noPropagate $noPropagateList -forceArchetype $forceArchetypeMap -familyOverride $familyOverrideMap -canonicalArchetype $canonicalArchetypeMap -DryRun $dryRunActive
@@ -12649,7 +12894,7 @@ if ($dryRunActive) {
     Write-Host "    needed. LaunchBox must be closed first; the script checks for you." -ForegroundColor DarkGray
     Write-Host "    (Prefer the old manual-import reference file instead? Answer N here," -ForegroundColor DarkGray
     Write-Host "     then Y to the next question.)" -ForegroundColor DarkGray
-    $doLBSetup = (Read-Host "  Y/N").Trim().ToUpper()
+    $doLBSetup = (Read-HostSafe "  Y/N").ToUpper()
 }
 
 if ($doLBSetup -eq "Y" -and -not $lbRoot) {
@@ -12657,7 +12902,7 @@ if ($doLBSetup -eq "Y" -and -not $lbRoot) {
     if ($lbDetected.Count -eq 1) {
         Write-Host ""
         Write-Host "  Auto-detected LaunchBox at: $($lbDetected[0])" -ForegroundColor Cyan
-        $useLbIt = (Read-Host "  Use this path? (Y/N)").Trim().ToUpper()
+        $useLbIt = (Read-HostSafe "  Use this path? (Y/N)").ToUpper()
         if ($useLbIt -eq "Y") { $lbRoot = $lbDetected[0] }
     } elseif ($lbDetected.Count -gt 1) {
         Write-Host ""
@@ -12665,7 +12910,7 @@ if ($doLBSetup -eq "Y" -and -not $lbRoot) {
         for ($i = 0; $i -lt $lbDetected.Count; $i++) {
             Write-Host ("    {0}) {1}" -f ($i + 1), $lbDetected[$i])
         }
-        $lbPick = (Read-Host "  Enter number to use one, or N to type the path manually").Trim()
+        $lbPick = (Read-HostSafe "  Enter number to use one, or N to type the path manually")
         if ($lbPick -match '^\d+$' -and $lbPick.Length -le 9) {
             $lbIdx = [int]$lbPick - 1
             if ($lbIdx -ge 0 -and $lbIdx -lt $lbDetected.Count) { $lbRoot = $lbDetected[$lbIdx] }
@@ -12692,7 +12937,7 @@ if ($doLBSetup -eq "Y" -and $lbRoot -and (Test-LaunchBoxRunning)) {
     $doLBSetup = "N"
     $doLB = "Y"
 } elseif ($doLBSetup -ne "Y" -and -not $dryRunActive -and -not $Unattended) {
-    $doLB = (Read-Host "  Export a LaunchBox manual-import reference file instead? (Y/N)").Trim().ToUpper()
+    $doLB = (Read-HostSafe "  Export a LaunchBox manual-import reference file instead? (Y/N)").ToUpper()
 } else {
     $doLB = "N"
 }
@@ -12701,7 +12946,7 @@ if ($doLBSetup -eq "Y") {
     $usesSavedChoice = $false
     if ($lbPlatformMode -and -not $Unattended) {
         $savedLabel = if ($lbPlatformMode -eq "Custom") { $lbCustomPlatformName } else { $lbPlatformMode }
-        $useSaved = (Read-Host "  Use saved LaunchBox platform choice ($savedLabel)? (Y/N)").Trim().ToUpper()
+        $useSaved = (Read-HostSafe "  Use saved LaunchBox platform choice ($savedLabel)? (Y/N)").ToUpper()
         $usesSavedChoice = ($useSaved -eq "Y")
     }
     if (-not $usesSavedChoice) {
@@ -12715,13 +12960,13 @@ if ($doLBSetup -eq "Y") {
         Write-Host "    3) A separate platform with a name you choose"
         Write-Host "    4) Both -- mixed into Arcade AND a separate TeknoParrot platform"
         Write-Host ""
-        $platChoice = (Read-Host "  Enter 1-4").Trim()
+        $platChoice = (Read-HostSafe "  Enter 1-4")
         switch ($platChoice) {
             "1" { $lbPlatformMode = "Arcade" }
             "2" { $lbPlatformMode = "TeknoParrot" }
             "3" {
                 $lbPlatformMode = "Custom"
-                $lbCustomPlatformName = (Read-Host "  Enter a platform name").Trim()
+                $lbCustomPlatformName = (Read-HostSafe "  Enter a platform name")
                 if ([string]::IsNullOrWhiteSpace($lbCustomPlatformName)) { $lbCustomPlatformName = "TeknoParrot" }
             }
             "4" { $lbPlatformMode = "Both" }
@@ -12817,7 +13062,7 @@ if ($dryRunActive) {
     $doHS = "N"
     Write-Log "Unattended: HyperSpin 2 export skipped."
 } else {
-    $doHS = (Read-Host "Export registered games to HyperSpin 2? (Y/N)").Trim().ToUpper()
+    $doHS = (Read-HostSafe "Export registered games to HyperSpin 2? (Y/N)").ToUpper()
 }
 if ($doHS -eq "Y") {
     if (-not $hsDataPath) {
@@ -12858,7 +13103,7 @@ if ($Unattended) {
     $doCrosshairs = "N"
     Write-Log "Unattended: crosshair setup skipped."
 } else {
-    $doCrosshairs = (Read-Host "Configure custom crosshairs for lightgun games? (Y/N)").Trim().ToUpper()
+    $doCrosshairs = (Read-HostSafe "Configure custom crosshairs for lightgun games? (Y/N)").ToUpper()
 }
 if ($doCrosshairs -eq "Y") {
     Write-Host ""
@@ -12896,7 +13141,7 @@ if ($Unattended) {
     $doReShade = "N"
     Write-Log "Unattended: ReShade setup skipped."
 } else {
-    $doReShade = (Read-Host "Set up ReShade visual enhancements for your games? (Y/N)").Trim().ToUpper()
+    $doReShade = (Read-HostSafe "Set up ReShade visual enhancements for your games? (Y/N)").ToUpper()
 }
 $rsSetupDone = $false
 if ($doReShade -eq "Y") {
@@ -12986,7 +13231,7 @@ if ($Unattended) {
     $doDgVoodoo = "N"
     Write-Log "Unattended: dgVoodoo2 setup skipped."
 } else {
-    $doDgVoodoo = (Read-Host "Set up dgVoodoo2 for old DX8/Glide games? (Y/N)").Trim().ToUpper()
+    $doDgVoodoo = (Read-HostSafe "Set up dgVoodoo2 for old DX8/Glide games? (Y/N)").ToUpper()
 }
 if ($doDgVoodoo -eq "Y") {
     $bundledDg2 = Join-Path $PSScriptRoot "dgVoodoo2"
@@ -13062,7 +13307,7 @@ if ($dryRunActive) {
     $doGpuFix = "N"
     Write-Log "Unattended: GPU fix setup skipped."
 } else {
-    $doGpuFix = (Read-Host "Apply GPU compatibility fixes for your games? (Y/N)").Trim().ToUpper()
+    $doGpuFix = (Read-HostSafe "Apply GPU compatibility fixes for your games? (Y/N)").ToUpper()
 }
 if ($doGpuFix -eq "Y") {
     Write-Host ""
@@ -13553,7 +13798,7 @@ Write-Host ""
         Write-Host ""
         Write-Host "  [Y] Apply changes" -ForegroundColor Cyan
         Write-Host "  [N] Return to the main menu" -ForegroundColor Cyan
-        $applyNow = (Read-Host "  Your choice").Trim().ToUpper()
+        $applyNow = (Read-HostSafe "  Your choice").ToUpper()
         if ($applyNow -eq "Y") {
             $pendingApplyMode = $mode
             Write-Log "PreviewMode: user chose to apply for real -- re-entering $mode."

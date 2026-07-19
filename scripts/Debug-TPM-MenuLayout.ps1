@@ -20,65 +20,20 @@ if ($parseErrors.Count -gt 0) {
     throw "Failed to parse TeknoParrot-Manager.ps1: $($parseErrors -join '; ')"
 }
 
-$menuFunctions = @(
-    'Get-ManagerDisplayVersion',
-    'Get-ManagerAsciiBannerLines',
-    'Get-ManagerVersionLine',
-    'Test-UseManagerAsciiBanner',
-    'Convert-ManagerFigletLine',
-    'Get-ManagerFigletBannerLines',
-    'Get-ManagerBannerMode',
-    'Get-CenteredTextLine',
-    'New-ManagerBannerSegmentRow',
-    'New-ManagerBannerTextRow',
-    'New-ManagerBannerSegment',
-    'New-ManagerTitleRow',
-    'New-ManagerFigletRow',
-    'New-ManagerAttributionRow',
-    'Get-ManagerBannerLines',
-    'Get-ManagerBannerRows',
-    'Write-ManagerBanner',
-    'Get-MainMenuSections',
-    'Get-MainMenuItems',
-    'Get-ConsoleLayoutTier',
-    'Get-ConsoleContentWidth',
-    'Get-ConsoleContentHeight',
-    'Get-MainMenuRenderMetrics',
-    'New-ConsoleRenderRow',
-    'New-ConsoleRenderSegmentRow',
-    'New-ConsoleRenderSegment',
-    'Get-MainMenuSectionColor',
-    'Get-MainMenuDefaultDescription',
-    'Get-MainMenuGeometry',
-    'Split-TextForMenuWidth',
-    'Format-MainMenuItemLines',
-    'Format-MainMenuSectionLines',
-    'Get-PaddedMainMenuRows',
-    'Get-MainMenuBannerRows',
-    'Get-MainMenuFooterRows',
-    'Get-MainMenuSectionRows',
-    'Join-MainMenuRenderColumns',
-    'Get-MainMenuBodyRows',
-    'Limit-MainMenuRowsToViewport',
-    'Render-MainMenuScreen',
-    'Write-ConsoleRenderRows',
-    'Set-ConsoleRenderOrigin',
-    'Clear-ConsoleForFreshRender',
-    'Center-MainMenuLines',
-    'Join-MainMenuColumns',
-    'Read-MainMenuChoiceResponsive',
-    'Show-MainMenu'
-)
-
-$functionAsts = $ast.FindAll({
-    param($node)
-    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-        $menuFunctions -contains $node.Name
-}, $true)
-
-foreach ($functionName in $menuFunctions) {
-    $fn = $functionAsts | Where-Object { $_.Name -eq $functionName } | Select-Object -First 1
-    if (-not $fn) { throw "Menu function not found: $functionName" }
+# Loads EVERY function definition from the production script, not a
+# hand-maintained allowlist. A hardcoded list of "the menu functions this
+# diagnostic needs" silently drifts out of sync the moment a new dependency
+# is added to the render pipeline -- confirmed as a real regression: this
+# diagnostic crashed with "Limit-MainMenuBodyRowsToBudget: the term ... is
+# not recognized" the moment that function was introduced (RC3 short-
+# viewport truncation fix) and never added to the old allowlist. Loading
+# every function is exactly the same pattern already used by
+# Tests\TeknoParrot-Manager.Tests.ps1 and Tests\InstallHealthCheck.Tests.ps1
+# to dot-source the production script's functions, so this diagnostic now
+# stays correct automatically as the render pipeline gains or renames
+# helpers, instead of needing a matching manual edit every time.
+$functionAsts = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
+foreach ($fn in $functionAsts) {
     . ([scriptblock]::Create($fn.Extent.Text))
 }
 

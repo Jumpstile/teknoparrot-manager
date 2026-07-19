@@ -462,6 +462,91 @@ Describe "Set-SecondaryExecutablePath" {
     }
 }
 
+Describe "Read-HostSafe / Exit-TpmProcess (issue #135: non-interactive input)" {
+    # Read-Host returns $null when redirected stdin has run out of piped
+    # lines (or, more rarely, when Read-Host is unavailable in the current
+    # host). Read-HostSafe is the one centralized wrapper every interactive
+    # prompt in the script goes through so that failure mode has a single,
+    # tested implementation instead of ~65 individual unguarded .Trim()/
+    # .ToUpper() call sites. Exit-TpmProcess is mocked here so the exhausted-
+    # input path can be exercised without terminating the test runner.
+
+    It "returns the trimmed value for a normal (interactive-equivalent) answer" {
+        Mock Read-Host { return '  Y  ' }
+        Read-HostSafe -Prompt 'Continue?' | Should -Be 'Y'
+    }
+
+    It "returns an empty string for a blank answer (user pressed Enter with nothing typed)" {
+        Mock Read-Host { return '' }
+        Read-HostSafe -Prompt 'Continue?' | Should -Be ''
+    }
+
+    It "exits with code 1 and does not return a real answer when Read-Host returns null (exhausted redirected stdin)" {
+        Mock Read-Host { return $null }
+        Mock Exit-TpmProcess { }
+        Mock Write-Log { }
+
+        Read-HostSafe -Prompt 'Continue?' | Should -Be ''
+
+        Should -Invoke Exit-TpmProcess -Times 1 -ParameterFilter { $Code -eq 1 }
+        Should -Invoke Write-Log -Times 1
+    }
+
+    It "never lets a null Read-Host result crash a caller's .ToUpper() call" {
+        Mock Read-Host { return $null }
+        Mock Exit-TpmProcess { }
+        Mock Write-Log { }
+
+        { (Read-HostSafe -Prompt 'Continue?').ToUpper() } | Should -Not -Throw
+    }
+}
+
+Describe "Read-MainMenuChoiceResponsive redirected-input handling (issue #135)" {
+    # Confirms the main menu prompt never enters the [Console]::KeyAvailable
+    # polling loop when stdin is redirected (polling a keyboard that cannot
+    # receive piped input is the 40-second hang from issue #135), and that
+    # an exhausted redirected stream exits cleanly instead of looping.
+    #
+    # [Console]::IsInputRedirected is a static, unmockable property whose
+    # value depends on how THIS test process itself was launched -- true
+    # when run non-interactively (this repo's CI, or piped/redirected local
+    # runs), false when a developer runs Invoke-Pester directly in an
+    # interactive terminal window. These two It blocks are guarded to only
+    # run in whichever of those two states is actually live, rather than
+    # asserting a specific state or risking the interactive-terminal case
+    # falling into a real keyboard-polling wait inside a test run.
+    It "returns via Read-HostSafe without entering the keyboard-polling loop when input is redirected" -Skip:(-not [Console]::IsInputRedirected) {
+        Mock Read-Host { return 'AutoSync' }
+        $result = Read-MainMenuChoiceResponsive -Prompt 'Choice:' -InitialWidth 80 -InitialHeight 25
+        $result.Value | Should -Be 'AutoSync'
+        $result.Redraw | Should -BeFalse
+    }
+
+    It "exits cleanly via Exit-TpmProcess instead of looping when redirected stdin is exhausted" -Skip:(-not [Console]::IsInputRedirected) {
+        Mock Read-Host { return $null }
+        Mock Exit-TpmProcess { }
+        Mock Write-Log { }
+
+        $result = Read-MainMenuChoiceResponsive -Prompt 'Choice:' -InitialWidth 80 -InitialHeight 25
+
+        $result.Value | Should -Be ''
+        Should -Invoke Exit-TpmProcess -Times 1 -ParameterFilter { $Code -eq 1 }
+    }
+
+    It "logs (does not silently swallow) an [Console]::IsInputRedirected detection failure" {
+        # IsInputRedirected itself cannot be mocked (static .NET member), so
+        # this exercises the documented behavior directly: the function's
+        # catch block around that check must call Write-Log, never an empty
+        # `catch {}` (issue #135's "do not silently swallow" requirement).
+        # Confirmed by source inspection matching this test's expectation:
+        # see the comment immediately above the try/catch in
+        # Read-MainMenuChoiceResponsive.
+        $fnText = (Get-Command Read-MainMenuChoiceResponsive).Definition
+        $fnText | Should -Not -Match 'catch\s*\{\s*\}'
+        $fnText | Should -Match 'IsInputRedirected.*threw'
+    }
+}
+
 Describe "Get-ButtonKey / Test-ButtonIsBound" {
     BeforeAll {
         function New-ButtonNode([string]$xml) {
@@ -1756,10 +1841,174 @@ Describe "Invoke-TpmDownload progress overlay cleanup (issue #132)" {
     }
 }
 
+Describe "Invoke-TpmDownload timeout / malformed content / cancellation (issue #132)" {
+    # Rounds out the issue #132 acceptance criteria (HTTP 200/404 and mixed-
+    # batch cleanup are already covered above): a network timeout, a
+    # corrupt/incomplete downloaded file, and a user-cancelled transfer are
+    # not special-cased anywhere in Invoke-TpmDownload -- they are ordinary
+    # exceptions that must still be caught by the outer try/catch/finally,
+    # never mis-reported as a 404 ("not in the online pack"), and must still
+    # clear the Id 42 progress overlay and remove the partial temp file.
+    BeforeAll {
+        Mock Write-Log {}
+        Mock Write-Host {}
+        Mock Write-DownloadAudit {}
+        Mock Write-TpmDownloadMetrics {}
+        Mock Start-Sleep {}
+        Mock Write-Progress {}
+    }
+    BeforeEach {
+        Mock Test-TpmDownloadBitsAvailable { $false }
+    }
+
+    It "treats an HttpClient timeout as a generic failure (not a 404), clears the overlay, and removes the partial file" {
+        Mock Invoke-TpmDownloadHttpClient {
+            Set-Content -LiteralPath $TempPath -Value "partial" -NoNewline
+            throw [System.Threading.Tasks.TaskCanceledException]::new("A task was canceled.")
+        }
+        Mock Invoke-TpmDownloadWebRequest { throw [System.Threading.Tasks.TaskCanceledException]::new("A task was canceled.") }
+        $savePath = Join-Path $TestDrive "timeout-fail.png"
+        $statusCode = 0
+
+        $result = Invoke-TpmDownload -DownloadUrl "https://example.com/slow.png" -DestinationPath $savePath -Label 'Thumbnails' -LastStatusCode ([ref]$statusCode)
+
+        $result | Should -BeFalse
+        $statusCode | Should -Not -Be 404
+        Test-Path -LiteralPath $savePath | Should -BeFalse
+        Should -Invoke Write-Progress -Times 1 -ParameterFilter { $Id -eq 42 -and $Completed }
+    }
+
+    It "rejects an incomplete/malformed download that doesn't match the expected size, clears the overlay, and leaves no partial file behind" {
+        Mock Invoke-TpmDownloadHttpClient {
+            # Simulates a truncated/corrupt transfer: succeeds without
+            # throwing, but writes fewer bytes than the caller expects.
+            Set-Content -LiteralPath $TempPath -Value "short" -NoNewline
+        }
+        $savePath = Join-Path $TestDrive "malformed.png"
+
+        $result = Invoke-TpmDownload -DownloadUrl "https://example.com/a.png" -DestinationPath $savePath -ExpectedBytes 999999 -Label 'Thumbnails'
+
+        $result | Should -BeFalse
+        Test-Path -LiteralPath $savePath | Should -BeFalse
+        Should -Invoke Write-Progress -Times 1 -ParameterFilter { $Id -eq 42 -and $Completed }
+    }
+
+    It "treats a cancelled transfer (OperationCanceledException) as a clean failure, not an unhandled crash" {
+        Mock Invoke-TpmDownloadHttpClient { throw [System.OperationCanceledException]::new("The operation was canceled.") }
+        Mock Invoke-TpmDownloadWebRequest { throw [System.OperationCanceledException]::new("The operation was canceled.") }
+        $savePath = Join-Path $TestDrive "cancelled.png"
+
+        { Invoke-TpmDownload -DownloadUrl "https://example.com/a.png" -DestinationPath $savePath -Label 'Thumbnails' } | Should -Not -Throw
+        $result = Invoke-TpmDownload -DownloadUrl "https://example.com/a.png" -DestinationPath $savePath -Label 'Thumbnails'
+
+        $result | Should -BeFalse
+        Should -Invoke Write-Progress -Times 2 -ParameterFilter { $Id -eq 42 -and $Completed }
+    }
+
+    It "clears the overlay for every call across a complete non-404 batch failure (e.g. upstream host unreachable)" {
+        Mock Invoke-TpmDownloadHttpClient { throw "The remote name could not be resolved." }
+        Mock Invoke-TpmDownloadWebRequest { throw "The remote name could not be resolved." }
+
+        $statusCodes = 1..3 | ForEach-Object {
+            $savePath = Join-Path $TestDrive "batch-fail-$_.png"
+            $sc = 0
+            $r = Invoke-TpmDownload -DownloadUrl "https://example.com/x-$_.png" -DestinationPath $savePath -Label 'Thumbnails' -LastStatusCode ([ref]$sc)
+            $r | Should -BeFalse
+            $sc
+        }
+
+        $statusCodes | Should -Not -Contain 404
+        Should -Invoke Write-Progress -Times 3 -ParameterFilter { $Id -eq 42 -and $Completed }
+    }
+}
+
 Describe "Invoke-TpmDownloadBits BITS polling states" {
     It "the polling loop's continue-states list includes TransientError (a recoverable BITS state), not just Connecting/Transferring/Queued" {
         $scriptContent = Get-Content -LiteralPath $scriptPath -Raw
         $scriptContent | Should -Match "'Connecting',\s*'Transferring',\s*'Queued',\s*'TransientError'"
+    }
+}
+
+Describe "Invoke-CrosshairSetup P1/P2 prompts use the safe input path (issue #135 RC3 correction)" {
+    # Invoke-CrosshairSetup cannot be exercised end-to-end in this suite for
+    # the same reason documented on "Invoke-ThumbnailDownload 404-vs-failure
+    # distinction" below: it reads $PSScriptRoot to locate the Crosshairs\
+    # folder, which is empty because functions here are dot-sourced from an
+    # AST extract with no backing file, so the function returns immediately
+    # ("Crosshairs folder not found") before ever reaching the P1/P2 prompts
+    # these tests target -- not something to route around by changing
+    # production code under a "smallest safe fix" scope.
+    #
+    # These two prompts were the two remaining unguarded
+    # `(Read-Host $promptText).Trim()` call sites missed by the original
+    # #135 migration (that migration's regex only matched a Read-Host
+    # argument that was a literal double-quoted string or a fully
+    # parenthesized expression -- $promptText is a bare variable, a third
+    # shape the regex never covered). Each site sits inside a
+    # `while ($null -eq $pXIdx) { ... }` retry loop with no bound: under the
+    # old unguarded code, once redirected stdin was exhausted, `Read-Host`
+    # would return $null forever and `$null.Trim()` would throw a
+    # NullReferenceException on the very first re-read after exhaustion --
+    # worse than the plain crash-once behavior elsewhere in the script,
+    # because Write-Host's "Enter a number..." retry message would print
+    # first, masking that the real cause was exhausted input, not a bad
+    # answer.
+    BeforeAll {
+        $fullSource = Get-Content -LiteralPath $scriptPath -Raw
+        $start = $fullSource.IndexOf('function Invoke-CrosshairSetup')
+        $end = $fullSource.IndexOf("`nfunction ", $start + 10)
+        $script:crosshairSource = $fullSource.Substring($start, $end - $start)
+    }
+
+    It "finds the Invoke-CrosshairSetup function body to check" {
+        $script:crosshairSource | Should -Not -BeNullOrEmpty
+    }
+
+    It "the P1 and P2 index prompts both go through Read-HostSafe" {
+        (@([regex]::Matches($script:crosshairSource, 'Read-HostSafe \$promptText')).Count) | Should -Be 2
+    }
+
+    It "no bare Read-Host call in this function has .Trim() or .ToUpper() chained directly onto it" {
+        $script:crosshairSource | Should -Not -Match '\(Read-Host\b[^)]*\)\.(Trim|ToUpper)\('
+    }
+
+    # Read-HostSafe's own null/exhausted-input behavior (never throws, exits
+    # cleanly via the mockable Exit-TpmProcess instead) is already covered
+    # exhaustively by "Read-HostSafe / Exit-TpmProcess (issue #135:
+    # non-interactive input)" above -- since both crosshair prompts now
+    # route through that exact same, already-tested function instead of a
+    # bare Read-Host, that coverage applies here directly. This test
+    # exercises the specific retry-loop SHAPE used in Invoke-CrosshairSetup
+    # (a `while ($null -eq $idx) { $raw = (Read-HostSafe ...); ... }` loop
+    # that never bounds its own retries) against a mocked exhausted stream,
+    # proving the loop cannot spin on a null dereference even though the
+    # real function isn't directly callable here.
+    It "the crosshair index retry-loop shape terminates via Exit-TpmProcess on exhausted input instead of dereferencing null" {
+        $script:readHostCallCount = 0
+        Mock Read-Host { $script:readHostCallCount++; return $null }
+        Mock Exit-TpmProcess { throw 'simulated-process-exit' }
+        Mock Write-Log { }
+
+        $validCount = 3
+        $lastIdx = $null
+        $idx = $null
+
+        {
+            while ($null -eq $idx) {
+                if ($script:readHostCallCount -gt 5) { throw 'test guard: loop did not stop on exhausted input' }
+                $promptText = if ($null -ne $lastIdx) {
+                    "  P1 crosshair index (0-{0}, Enter for last used: {1})" -f ($validCount - 1), $lastIdx
+                } else { "  P1 crosshair index (0-{0})" -f ($validCount - 1) }
+                $raw = (Read-HostSafe $promptText)
+                if ($raw -eq '' -and $null -ne $lastIdx) { $idx = $lastIdx }
+                elseif ($raw -match '^\d+$' -and $raw.Length -le 9 -and [int]$raw -lt $validCount) { $idx = [int]$raw }
+            }
+        } | Should -Throw 'simulated-process-exit'
+
+        # Exactly one Read-Host call before the mocked Exit-TpmProcess threw
+        # -- proves the loop did not spin re-reading the exhausted stream.
+        $script:readHostCallCount | Should -Be 1
+        Should -Invoke Exit-TpmProcess -Times 1 -ParameterFilter { $Code -eq 1 }
     }
 }
 
@@ -2048,6 +2297,173 @@ $binding
         $boundSlots.Count | Should -Be 1
         $manualReport.Status | Should -Be 'bound'
         $manualReport.Manual | Should -Contain 'Wheel Right'
+    }
+}
+
+Describe "Invoke-ControlPropagation canonicalArchetype Input API correction (issue #139)" {
+    # Fixtures modeled directly on the real diagnostic data posted to issue
+    # #139: StreetFighterIII3rdStrike (SF3) and fghtjam (Capcom Fighting Jam)
+    # were found to have byte-for-byte identical Coin1/Coin2/P1ButtonStart/
+    # P2ButtonStart bindings (button 54/54/55/55 on the same two joystick
+    # GUIDs) -- the reported "inconsistent mapping" was never a binding
+    # divergence between these two titles. The actual defect confirmed on
+    # this issue was that "Input API" can independently drift between two
+    # archetypes of the same family (fghtjam's on-disk FieldOptions lacked
+    # MergedInput entirely, unlike SF3's), and that canonicalArchetype
+    # correction only propagates whatever the canonical game's Input API
+    # happens to be in the live pool snapshot at the moment propagation
+    # runs -- so the canonical game must already be on the intended API
+    # before the fix is applied, or the "fix" just propagates the wrong
+    # value to every other archetype in the family.
+    BeforeAll {
+        function New-ButtonFamilyProfileXml {
+            param(
+                [string]$Name,
+                [string]$InputApiValue,
+                [string[]]$InputApiOptions
+            )
+            $optionsXml = ($InputApiOptions | ForEach-Object { "        <string>$_</string>" }) -join "`n"
+            $slots = @(
+                @{ Name = 'Test';               Mapping = 'Test';           Button = 92 }
+                @{ Name = 'Service 1';           Mapping = 'Service1';       Button = 93 }
+                @{ Name = 'Service 2';           Mapping = 'Service2';       Button = 94 }
+                @{ Name = 'Coin 1';              Mapping = 'Coin1';          Button = 54 }
+                @{ Name = 'Coin 2';              Mapping = 'Coin2';          Button = 54 }
+                @{ Name = 'Player 1 Start';      Mapping = 'P1ButtonStart';  Button = 55 }
+                @{ Name = 'Player 2 Start';      Mapping = 'P2ButtonStart';  Button = 55 }
+            )
+            $buttonsXml = ($slots | ForEach-Object {
+                @"
+    <JoystickButtons>
+      <ButtonName>$($_.Name)</ButtonName>
+      <InputMapping>$($_.Mapping)</InputMapping>
+      <DirectInputButton>
+        <Button>$($_.Button)</Button>
+      </DirectInputButton>
+    </JoystickButtons>
+"@
+            }) -join "`n"
+            return @"
+<GameProfile>
+  <GameName>$Name</GameName>
+  <JoystickButtons>
+$buttonsXml
+  </JoystickButtons>
+  <ConfigValues>
+    <FieldInformation>
+      <FieldName>Input API</FieldName>
+      <FieldValue>$InputApiValue</FieldValue>
+      <FieldOptions>
+$optionsXml
+      </FieldOptions>
+    </FieldInformation>
+  </ConfigValues>
+</GameProfile>
+"@
+        }
+    }
+
+    It "does not alter either archetype's own button bindings, even though both are independently bound and physically identical" {
+        $profiles = Join-Path $TestDrive ("issue139-bindings-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+
+        New-ButtonFamilyProfileXml -Name 'StreetFighterIII3rdStrike' -InputApiValue 'MergedInput' -InputApiOptions @('DirectInput', 'XInput', 'MergedInput') |
+            Set-Content -LiteralPath (Join-Path $profiles 'StreetFighterIII3rdStrike.xml') -Encoding UTF8
+        New-ButtonFamilyProfileXml -Name 'fghtjam' -InputApiValue 'DirectInput' -InputApiOptions @('DirectInput', 'XInput') |
+            Set-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Encoding UTF8
+
+        $before = Get-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Raw
+        $pool = Build-ArchetypePool $profiles 5
+        [void](Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 5 -DryRun:$false)
+        $after = Get-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Raw
+
+        ([xml]$after).SelectSingleNode("/GameProfile/JoystickButtons/JoystickButtons[InputMapping='Coin1']/DirectInputButton/Button").InnerText | Should -Be '54'
+        ([xml]$after).SelectSingleNode("/GameProfile/JoystickButtons/JoystickButtons[InputMapping='P1ButtonStart']/DirectInputButton/Button").InnerText | Should -Be '55'
+    }
+
+    It "corrects a non-canonical archetype's Input API to match the canonical archetype's CURRENT value, including injecting a missing MergedInput FieldOptions entry" {
+        $profiles = Join-Path $TestDrive ("issue139-api-fix-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+
+        New-ButtonFamilyProfileXml -Name 'StreetFighterIII3rdStrike' -InputApiValue 'MergedInput' -InputApiOptions @('DirectInput', 'XInput', 'MergedInput') |
+            Set-Content -LiteralPath (Join-Path $profiles 'StreetFighterIII3rdStrike.xml') -Encoding UTF8
+        New-ButtonFamilyProfileXml -Name 'fghtjam' -InputApiValue 'DirectInput' -InputApiOptions @('DirectInput', 'XInput') |
+            Set-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Encoding UTF8
+
+        $pool = Build-ArchetypePool $profiles 5
+        $canonicalArchetype = @{ button = 'StreetFighterIII3rdStrike' }
+        $reports = Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 5 -canonicalArchetype $canonicalArchetype -DryRun:$false
+
+        [xml]$fghtjamAfter = Get-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Raw
+        $apiField = $fghtjamAfter.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName='Input API']")
+        $apiField.FieldValue | Should -Be 'MergedInput'
+        @($apiField.SelectNodes('FieldOptions/string') | ForEach-Object { $_.InnerText }) | Should -Contain 'MergedInput'
+
+        $fixedReport = @($reports | Where-Object { $_.Code -eq 'fghtjam' } | Select-Object -First 1)
+        $fixedReport.Status | Should -Be 'api-fixed-canonical'
+    }
+
+    It "propagates the WRONG value if the canonical archetype itself is not yet on the intended API when correction runs (ordering hazard confirmed on issue #139)" {
+        # This documents the exact failure mode from the issue thread: writing
+        # canonicalArchetype to overrides.json before switching the canonical
+        # game's own Input API does not "fix forward" -- it corrects every
+        # other archetype in the family to match whatever the canonical
+        # game's CURRENT (possibly still-wrong) value is.
+        $profiles = Join-Path $TestDrive ("issue139-ordering-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+
+        New-ButtonFamilyProfileXml -Name 'StreetFighterIII3rdStrike' -InputApiValue 'DirectInput' -InputApiOptions @('DirectInput', 'XInput', 'MergedInput') |
+            Set-Content -LiteralPath (Join-Path $profiles 'StreetFighterIII3rdStrike.xml') -Encoding UTF8
+        New-ButtonFamilyProfileXml -Name 'fghtjam' -InputApiValue 'MergedInput' -InputApiOptions @('DirectInput', 'XInput', 'MergedInput') |
+            Set-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Encoding UTF8
+
+        $pool = Build-ArchetypePool $profiles 5
+        $canonicalArchetype = @{ button = 'StreetFighterIII3rdStrike' }
+        [void](Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 5 -canonicalArchetype $canonicalArchetype -DryRun:$false)
+
+        [xml]$fghtjamAfter = Get-Content -LiteralPath (Join-Path $profiles 'fghtjam.xml') -Raw
+        $fghtjamAfter.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName='Input API']/FieldValue").InnerText | Should -Be 'DirectInput'
+    }
+
+    It "does not touch a non-canonical archetype whose Input API already matches the canonical archetype" {
+        $profiles = Join-Path $TestDrive ("issue139-noop-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+
+        New-ButtonFamilyProfileXml -Name 'StreetFighterIII3rdStrike' -InputApiValue 'MergedInput' -InputApiOptions @('DirectInput', 'XInput', 'MergedInput') |
+            Set-Content -LiteralPath (Join-Path $profiles 'StreetFighterIII3rdStrike.xml') -Encoding UTF8
+        New-ButtonFamilyProfileXml -Name 'BBCF' -InputApiValue 'MergedInput' -InputApiOptions @('DirectInput', 'XInput', 'MergedInput') |
+            Set-Content -LiteralPath (Join-Path $profiles 'BBCF.xml') -Encoding UTF8
+
+        $pool = Build-ArchetypePool $profiles 5
+        $canonicalArchetype = @{ button = 'StreetFighterIII3rdStrike' }
+        $reports = Invoke-ControlPropagation -userProfilesDir $profiles -pool $pool -minBound 5 -canonicalArchetype $canonicalArchetype -DryRun:$false
+
+        @($reports | Where-Object { $_.Code -eq 'BBCF' }).Count | Should -Be 0
+    }
+}
+
+Describe "MinBoundForArchetype initialization order (issue #139)" {
+    # Confirmed root cause on issue #139: the standalone "Propagate Controls"
+    # menu handler runs entirely inside the MAIN MENU LOOP and returns via
+    # `continue` without ever reaching SECTION 10, where
+    # $MinBoundForArchetype was previously first assigned. Left unset on
+    # that path, [int]$minBound coerced $null to 0 in Build-ArchetypePool,
+    # so every profile (including fully unbound ones) qualified as an
+    # archetype and propagation silently produced "Games updated: 0" with no
+    # per-game report lines. This is a source-level regression guard (not a
+    # functional test) because the bug is about variable-initialization
+    # ordering in the interactive menu loop, not a pure function's behavior.
+    BeforeAll {
+        $script:rawScriptText = Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\TeknoParrot-Manager.ps1") -Raw
+    }
+
+    It "assigns `$MinBoundForArchetype before the standalone PropagateControls menu handler can read it" {
+        $handlerIndex = $script:rawScriptText.IndexOf('if ($mode -eq "PropagateControls")')
+        $handlerIndex | Should -BeGreaterThan 0
+
+        $assignmentIndex = $script:rawScriptText.IndexOf('$MinBoundForArchetype = 5')
+        $assignmentIndex | Should -BeGreaterThan 0
+        $assignmentIndex | Should -BeLessThan $handlerIndex
     }
 }
 
@@ -3420,12 +3836,20 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         $screen.Geometry.MenuWidth | Should -BeGreaterThan 145
     }
     It "UltraCentered renders a single centered content block" {
-        $screen = Render-MainMenuScreen -Tier 'Ultra' -Width 180 -Height 30 -UltraLayoutMode 'UltraCentered'
+        # Height 65 is tall enough for UltraCentered's full-description,
+        # single-column content to render in full without any body
+        # truncation (confirmed empirically: content needs 61 rows; a
+        # shorter height, e.g. 30, legitimately truncates the earliest
+        # sections first per Limit-MainMenuBodyRowsToBudget -- see the
+        # "issue #104 RC3 correction" tests below, which cover that case
+        # directly and assert Exit/footer survive instead of AutoSync).
+        $screen = Render-MainMenuScreen -Tier 'Ultra' -Width 180 -Height 65 -UltraLayoutMode 'UltraCentered'
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
 
         $screen.Geometry.ColumnCount | Should -Be 1
         $screen.Geometry.LeftPadding | Should -BeGreaterThan 10
         $output | Should -Match ([regex]::Escape("1) AutoSync"))
+        $output | Should -Match ([regex]::Escape("14) Exit"))
         $output | Should -Not -Match '(?m)LIBRARY MANAGEMENT\s+-+\s+GAME ENHANCEMENTS'
     }
     It "narrow Professional tier remains bounded and readable" {
@@ -3447,17 +3871,75 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
             }
         }
     }
-    It "small viewport renders only top-visible rows and leaves prompt space" {
+    It "small viewport keeps the footer and Exit visible without scrolling, even if it must drop earlier sections (issue #104 RC3 correction)" {
+        # Prior behavior flattened banner+body+footer and kept only the
+        # first N rows top-to-bottom -- at a short height that silently
+        # dropped the entire footer (Quit/Help controls) and the
+        # Application section (option 14, Exit), which a real user could
+        # never reach without resizing or scrolling. This asserted that
+        # loss as "expected" (`Should -Not -Match 'Exit'`); the corrected
+        # behavior below is the opposite: the footer and Exit must survive,
+        # and it is earlier body content that gets trimmed first if
+        # something has to give.
         $screen = Render-MainMenuScreen -Tier 'Compact' -Width 80 -Height 12
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
 
         $screen.Rows.Count | Should -BeLessOrEqual 10
         $output | Should -Match 'TeknoParrot Manager'
-        $output | Should -Match 'Version 1.0 RC2.1'
-        $output | Should -Match 'LIBRARY MANAGEMENT'
-        $output | Should -Match 'AutoSync'
-        $output | Should -Not -Match 'APPLICATION'
-        $output | Should -Not -Match 'Exit'
+        $output | Should -Match '14\) Exit'
+        $output | Should -Match 'Enter number'
+    }
+
+    It "reserves footer rows unconditionally so they are never truncated away, across every tier at a short height" {
+        foreach ($case in @(
+            @{ Tier = 'Compact'; Width = 80 },
+            @{ Tier = 'Standard'; Width = 100 },
+            @{ Tier = 'Professional'; Width = 132 },
+            @{ Tier = 'Ultra'; Width = 160 }
+        )) {
+            $screen = Render-MainMenuScreen -Tier $case.Tier -Width $case.Width -Height 12
+            $normalFooterRows = @(Get-MainMenuFooterRows -Geometry $screen.Geometry)
+            $minimalFooterRows = @(Get-MainMenuMinimalFooterRows -Geometry $screen.Geometry)
+
+            # At this height, a narrow-enough tier may now legitimately fall
+            # into the emergency compact presentation (issue #104 RC3-B),
+            # which uses a single-line minimal footer instead of the normal
+            # framed one -- either is acceptable here, since the point of
+            # this test is that the footer is never truncated away
+            # entirely, not that one specific footer variant is used.
+            $screen.Rows.Count | Should -BeGreaterOrEqual 1
+            $lastRowText = $screen.Rows[-1].Text
+            $matchesNormalTail = ($normalFooterRows.Count -gt 0) -and ($lastRowText -eq $normalFooterRows[-1].Text)
+            $matchesMinimalTail = ($minimalFooterRows.Count -gt 0) -and ($lastRowText -eq $minimalFooterRows[-1].Text)
+            ($matchesNormalTail -or $matchesMinimalTail) | Should -BeTrue
+        }
+    }
+
+    It "keeps option 14 (Exit) visible at every tier when the viewport is short, single-column layouts" {
+        foreach ($case in @(
+            @{ Tier = 'Compact'; Width = 80 },
+            @{ Tier = 'Standard'; Width = 100 }
+        )) {
+            $screen = Render-MainMenuScreen -Tier $case.Tier -Width $case.Width -Height 12
+            $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+            $output | Should -Match '14\) Exit'
+        }
+    }
+
+    It "keeps option 14 (Exit) visible at Professional/Ultra two-column tiers when the viewport is short" {
+        # Two-column layouts interleave rows from all four sections per row
+        # index (Join-MainMenuRenderColumns), so Exit's row can appear
+        # earlier in the flat row list than in a single-column layout --
+        # confirms the front-trim-only-single-column-body assumption still
+        # leaves Exit visible where it actually lives in a 2-column render.
+        foreach ($case in @(
+            @{ Tier = 'Professional'; Width = 132 },
+            @{ Tier = 'Ultra'; Width = 160 }
+        )) {
+            $screen = Render-MainMenuScreen -Tier $case.Tier -Width $case.Width -Height 12
+            $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+            $output | Should -Match '14\) Exit'
+        }
     }
     It "Show-MainMenu delegates to the stateless render-clear-write pipeline" {
         $mainScriptContent = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1') -Raw
@@ -3481,6 +3963,239 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
 
         $mainScriptContent | Should -Match '\[Console\]::IsInputRedirected'
         $mainScriptContent | Should -Match 'Read-Host \$Prompt'
+    }
+}
+
+Describe "Minimum supported 60x10 viewport and nearby boundaries (issue #104 RC3-B correction)" {
+    # At 60x10, the normal per-item-per-row Compact body (4 section headers
+    # + 14 item rows = 18 rows minimum) cannot fit even after
+    # Limit-MainMenuBodyRowsToBudget trims it -- the framed banner (6 rows)
+    # and footer (2 rows) alone already consume the entire 8-row budget
+    # (ViewportHeight - 2), leaving zero rows for body content. Simply
+    # reserving Exit + the footer is not sufficient on its own: it still
+    # silently drops every OTHER option. Get-MainMenuEmergencyCompactRows
+    # replaces the framed banner/footer with single-line versions and
+    # flow-packs every "N) Label" as densely as the width allows, so every
+    # option stays visible.
+    # Using -TestCases (Pester's own parameterized-test mechanism) rather
+    # than `foreach ($height in ...) { It ... { ...$height... } }`: a plain
+    # PowerShell foreach-loop variable closed over by an It scriptblock is
+    # NOT visible inside that scriptblock's body when Pester actually runs
+    # it (confirmed by isolated repro -- the value reads as $null/empty at
+    # Run time even though it renders correctly in the It's own title,
+    # which is built separately at Discovery time). -TestCases passes each
+    # case's values in as real bound parameters instead, which does work.
+    It "at the supported 60x<Height> minimum and its immediate boundaries, every option 1-14 is visible, Exit and the footer are present, and nothing scrolls off the viewport" -TestCases @(
+        @{ Height = 9 }, @{ Height = 10 }, @{ Height = 11 }, @{ Height = 12 }
+    ) {
+        param($Height)
+        $screen = Render-MainMenuScreen -Tier (Get-ConsoleLayoutTier -Width 60 -Height $Height -RequiredFullLines 0) -Width 60 -Height $Height
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+
+        $screen.Rows.Count | Should -BeLessOrEqual ([Math]::Max(5, $Height - 2))
+        $allItemNumbers = @((Get-MainMenuItems) | ForEach-Object { $_.Number })
+        foreach ($n in $allItemNumbers) {
+            $output | Should -Match ([regex]::Escape("$n)"))
+        }
+        $output | Should -Match '14\) Exit'
+        $output | Should -Match 'Enter number'
+        $output | Should -Match 'Q=Quit'
+    }
+
+    It "below the documented 60x10 minimum (60x8), the footer and option 14 (Exit) are still never dropped, even though an earlier option's line may not fit" {
+        # 60x8 is below the documented supported floor, so unlike the exact
+        # cases above, this does not require every option to be visible --
+        # only that the two guarantees which must NEVER break (the footer's
+        # Quit control, and Exit specifically) still hold, and that nothing
+        # crashes or silently renders a blank/broken screen.
+        $screen = Render-MainMenuScreen -Tier (Get-ConsoleLayoutTier -Width 60 -Height 8 -RequiredFullLines 0) -Width 60 -Height 8
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+
+        $screen.Rows.Count | Should -BeLessOrEqual ([Math]::Max(5, 8 - 2))
+        $output | Should -Match '14\) Exit'
+        $output | Should -Match 'Enter number'
+        $output | Should -Match 'Q=Quit'
+    }
+
+    It "every flow-packed 'N) Label' token matches Get-MainMenuItems exactly (no drift between the emergency presentation and the real dispatch data)" {
+        $geometry = Get-MainMenuGeometry -Tier 'Compact' -ViewportWidth 60 -ViewportHeight 10
+        $rows = Get-MainMenuFlowPackedItemRows -Width 58 -Geometry $geometry
+        $flatText = ($rows | ForEach-Object { $_.Text }) -join ' '
+
+        foreach ($item in (Get-MainMenuItems)) {
+            $flatText | Should -Match ([regex]::Escape("$($item.Number)) $($item.Label)"))
+        }
+    }
+
+    # Using -TestCases (Pester's own parameterized-test mechanism), not a
+    # `foreach ($case in ...) { ... }` loop bundled inside a single `It`
+    # body: a bundled loop reports as exactly one pass/fail for all four
+    # cases combined, so a reviewer reading Pester's output cannot tell
+    # whether all four widths/heights actually ran, whether they ran with
+    # their own distinct values, or whether an early failure silently
+    # skipped the remaining cases (`Should` throws, which stops the loop).
+    # -TestCases gives each case its own named, independently-reported
+    # result instead. (Note: a bundled loop entirely INSIDE one It body is
+    # not the same closure defect as a loop that WRAPS separate `It` calls
+    # -- confirmed by isolated repro that the bundled form here did receive
+    # correct per-iteration values -- but it still doesn't prove independent
+    # per-case execution/reporting, which is what this rewrite is for.)
+    It "at <Width>x<Height>, Exit and the footer stay visible without scrolling, using this case's own dimensions" -TestCases @(
+        @{ Width = 80;  Height = 8;  ExpectedTier = 'Compact' }
+        @{ Width = 100; Height = 8;  ExpectedTier = 'Standard' }
+        @{ Width = 150; Height = 8;  ExpectedTier = 'Ultra' }
+        @{ Width = 100; Height = 20; ExpectedTier = 'Standard' }
+    ) {
+        param($Width, $Height, $ExpectedTier)
+        $tier = Get-ConsoleLayoutTier -Width $Width -Height $Height -RequiredFullLines 0
+
+        # Proves the WIDTH bound into this case actually drove tier
+        # selection (Get-ConsoleLayoutTier is width-only, so this is a
+        # second, independent confirmation of the Width binding below, not
+        # a duplicate of it) -- a cross-case value swap between the 80/100/
+        # 150-wide cases would flip this and fail.
+        $tier | Should -Be $ExpectedTier
+
+        $screen = Render-MainMenuScreen -Tier $tier -Width $Width -Height $Height
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+
+        # Proves this case actually ran with ITS OWN Width, not a value
+        # shared or duplicated from another case -- the specific
+        # "accidental duplicate binding" this rewrite guards against. The
+        # geometry object is threaded all the way through from the -Width
+        # parameter passed into Render-MainMenuScreen above, so a mismatch
+        # here would mean cross-case value bleed. (ViewportWidth, not
+        # Height, because Get-MainMenuGeometry internally clamps
+        # ViewportHeight to a floor of 10 for its own column-width math --
+        # see the real-height budgeting note in ARCHITECTURE.md -- so it
+        # would not reflect this case's own Height value for the two 8-row
+        # cases here even when everything is working correctly.)
+        $screen.Geometry.ViewportWidth | Should -Be $Width
+
+        # This case's own Height still matters even though the two
+        # Width=100 cases (100x8 and 100x20) share a tier: the row-count
+        # ceiling is derived from THIS case's real Height (Max(5,
+        # Height-2) = 6 for height 8, 18 for height 20), so a cross-case
+        # Height swap between those two would change which bound applies.
+        $screen.Rows.Count | Should -BeLessOrEqual ([Math]::Max(5, $Height - 2))
+        $output | Should -Match '14\) Exit'
+        $output | Should -Match 'Q=Quit'
+
+        # All four of these cases happen to be wide enough that the render
+        # pipeline shows every option even in its most space-constrained
+        # form (confirmed empirically, not assumed) -- verified per case
+        # rather than in a separate test, so this remains part of the same
+        # independently-reported, per-case proof.
+        foreach ($n in @((Get-MainMenuItems) | ForEach-Object { $_.Number })) {
+            $output | Should -Match ([regex]::Escape("$n)"))
+        }
+    }
+
+    It "a generously tall Compact-width window (60x30) still uses the normal framed presentation, not the emergency fallback" {
+        # Confirms the emergency mode is gated correctly -- it must not
+        # trigger just because the width is narrow, only when the height
+        # genuinely can't fit every option any other way.
+        $screen = Render-MainMenuScreen -Tier 'Compact' -Width 60 -Height 30
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+
+        $output | Should -Match 'LIBRARY MANAGEMENT'
+        $output | Should -Match 'APPLICATION'
+        $output | Should -Match '14\) Exit'
+    }
+
+    It "every numbered option in the emergency presentation still maps to the same Mode the live switch statement dispatches on" {
+        # Cross-checks against the same source-of-truth used by "Main menu
+        # source-level drift check" elsewhere in this file: the emergency
+        # presentation's numbers come directly from Get-MainMenuItems, the
+        # same data the switch statement's case labels are generated from,
+        # so there is no separate hand-maintained number-to-mode mapping
+        # that could drift.
+        $mainScriptContent = Get-Content -LiteralPath $scriptPath -Raw
+        foreach ($item in (Get-MainMenuItems)) {
+            if ($item.Mode -eq 'Exit') { continue }
+            $mainScriptContent | Should -Match ([regex]::Escape('"{0}"' -f $item.Number) + '\s*\{\s*\$mode\s*=\s*"' + [regex]::Escape($item.Mode) + '"')
+        }
+    }
+}
+
+Describe "Issue #140 wording surfaces at every layout tier (issue #104/#140 RC3 correction)" {
+    # Confirmed gap: Get-MainMenuSectionRows has a Professional-tier-only
+    # special case (`if ($Geometry.Layout -eq 'ProfessionalTwoColumn')`)
+    # that always sources its description text from
+    # Get-MainMenuDefaultDescription instead of the shared ShortDesc/
+    # FullDesc fields on the item -- so the #140 wording improvements
+    # (ReShade/Postgres/BepInEx) landed only on ShortDesc/FullDesc and never
+    # reached that function, meaning Professional tier (and Compact tier's
+    # "?" detail view, which explicitly falls back to Professional -- see
+    # the `if ($helpTier -eq 'Compact') { $helpTier = 'Professional' }` line
+    # in the main menu loop) kept showing the OLD text, including the
+    # literal "Install local PostgreSQL support." wording this issue was
+    # filed to improve. Fixed by updating Get-MainMenuDefaultDescription's
+    # text directly, since the Professional-specific routing itself is
+    # deliberate (a shorter, single-line variant for a tighter column) and
+    # out of scope to change.
+    It "Professional tier (two-column) shows the improved wording, not the pre-#140 defaults" {
+        $screen = Render-MainMenuScreen -Tier 'Professional' -Width 150 -Height 40
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+
+        $output | Should -Match 'CRT'
+        $output | Should -Match 'Golden Tee'
+        $output | Should -Match 'modding framework'
+        $output | Should -Not -Match 'Install local PostgreSQL support\.'
+        $output | Should -Not -Match 'Apply visual enhancements\.'
+        $output | Should -Not -Match 'Update existing BepInEx installs\.'
+    }
+
+    It "Compact tier's '?' detail view (falls back to Professional) also shows the improved wording" {
+        # Reproduces the main loop's exact fallback: a Compact-tier console
+        # pressing '?' is shown the Professional layout, not Compact's own
+        # (label-only) layout. At this narrower two-column width the
+        # description text legitimately word-wraps across render rows AND
+        # across the column gutter/frame characters, so "modding" and
+        # "framework" can end up separated by more than plain whitespace --
+        # assert each word is present rather than requiring adjacency.
+        $screen = Render-MainMenuScreen -Tier 'Professional' -Width 80 -Height 40
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+
+        $output | Should -Match 'CRT'
+        $output | Should -Match 'Golden Tee'
+        $output | Should -Match 'modding'
+        $output | Should -Match 'framework'
+    }
+
+    It "Ultra two-column tier (the default 'largest layout') shows the improved ShortDesc wording" {
+        $screen = Render-MainMenuScreen -Tier 'Ultra' -Width 160 -Height 40
+        $screen.Geometry.Layout | Should -Be 'UltraTwoColumn'
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+
+        $output | Should -Match 'CRT'
+        $output | Should -Match 'Golden Tee'
+        $output | Should -Match 'modding framework'
+    }
+
+    It "UltraCentered (single-column, full descriptions) shows the improved FullDesc wording" {
+        $screen = Render-MainMenuScreen -Tier 'Ultra' -Width 180 -Height 65 -UltraLayoutMode 'UltraCentered'
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+
+        $output | Should -Match 'CRT'
+        $output | Should -Match 'Golden Tee'
+        $output | Should -Match 'modding framework'
+    }
+
+    It "Standard and Compact tiers' own (labels-only) render is unaffected -- no description text shown either way" {
+        # Documents existing, unchanged-by-this-fix behavior: Standard and
+        # Compact both render Labels-only detail with no per-item
+        # description at all (Compact's escape hatch is the '?' key, tested
+        # above, which is a SEPARATE render call, not part of this one).
+        foreach ($case in @(
+            @{ Tier = 'Compact'; Width = 80 }
+            @{ Tier = 'Standard'; Width = 100 }
+        )) {
+            $screen = Render-MainMenuScreen -Tier $case.Tier -Width $case.Width -Height 40
+            $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+            $output | Should -Not -Match 'CRT'
+            $output | Should -Not -Match 'Golden Tee'
+        }
     }
 }
 
@@ -3509,6 +4224,53 @@ Describe "Menu layout debug script" {
         $output | Should -Match 'Selected layout mode\s+:\s+UltraCentered'
         $output | Should -Match 'Requested ultra mode\s+:\s+UltraCentered'
         $output | Should -Match 'Selected layout mode\s+:\s+UltraCentered'
+    }
+
+    # The two tests above invoke the diagnostic via `& $debugScript` from
+    # INSIDE this same Pester process -- that call runs in a child scope of
+    # the current session, which already has every production function
+    # (including Limit-MainMenuBodyRowsToBudget) dot-sourced into it by this
+    # file's own top-level BeforeAll. That let a real regression pass
+    # invisibly: the packaged script itself only loaded a hand-maintained
+    # allowlist of function names and never defined
+    # Limit-MainMenuBodyRowsToBudget (added for the RC3 short-viewport
+    # truncation fix), so running the actual, unmodified .ps1 file as a
+    # user would -- a fresh process with nothing pre-loaded -- crashed with
+    # "the term 'Limit-MainMenuBodyRowsToBudget' is ... not recognized" the
+    # moment -Render exercised the render pipeline. `& $debugScript` here
+    # never caught it because the missing function was already present from
+    # this file's own BeforeAll, not from the diagnostic script itself.
+    # These tests launch a genuinely separate PROCESS instead, so nothing
+    # from this test session's scope can leak in and mask a missing
+    # dependency in the packaged script.
+    It "runs successfully as a genuinely isolated process (not just a child scope) under pwsh, with -Render exercising the full pipeline" {
+        $debugScript = Join-Path $PSScriptRoot '..\scripts\Debug-TPM-MenuLayout.ps1'
+        $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
+        if (-not $pwshCmd) { Set-ItResult -Skipped -Because 'pwsh is not available on this machine'; return }
+
+        $output = & $pwshCmd.Source -NoProfile -NonInteractive -File $debugScript -Width 150 -Height 40 -Render 2>&1 | Out-String
+        $exitCode = $LASTEXITCODE
+
+        $exitCode | Should -Be 0
+        $output | Should -Not -Match 'is not recognized as the name of a cmdlet'
+        $output | Should -Not -Match 'CommandNotFoundException'
+        $output | Should -Match '14\) Exit'
+        $output | Should -Match 'Enter number'
+    }
+
+    It "runs successfully as a genuinely isolated process under real Windows PowerShell 5.1, with -Render exercising the full pipeline" {
+        $debugScript = Join-Path $PSScriptRoot '..\scripts\Debug-TPM-MenuLayout.ps1'
+        $ps51Path = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        if (-not (Test-Path -LiteralPath $ps51Path)) { Set-ItResult -Skipped -Because 'Windows PowerShell 5.1 is not available on this machine'; return }
+
+        $output = & $ps51Path -NoProfile -File $debugScript -Width 150 -Height 40 -Render 2>&1 | Out-String
+        $exitCode = $LASTEXITCODE
+
+        $exitCode | Should -Be 0
+        $output | Should -Not -Match 'is not recognized as the name of a cmdlet'
+        $output | Should -Not -Match 'CommandNotFoundException'
+        $output | Should -Match '14\) Exit'
+        $output | Should -Match 'Enter number'
     }
 }
 
