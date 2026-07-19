@@ -791,6 +791,70 @@ Describe "Test-TPMInstallHealthGate (issue #146)" {
         $gate.Passed | Should -Be $false
         $gate.Reason | Should -Match 'UserProfiles folder exists -- missing'
     }
+
+    # Review round 3: a health result must never contain a critical name
+    # more than once -- the prior fix's $checkByName hashtable just
+    # overwrote on a repeated name, so whichever entry was written last
+    # silently won, regardless of whether the resolution happened to be a
+    # pass or a fail. Both possible orderings must fail identically, since
+    # the duplication itself is the defect, not which value "won".
+    It "fails on a duplicate critical check name ordered false then true" {
+        $healthResult = [pscustomobject]@{
+            Status = 'PASS'
+            Checks = @(
+                [pscustomobject]@{ Name = 'TeknoParrotUi.exe exists'; Passed = $false }
+                [pscustomobject]@{ Name = 'TeknoParrotUi.exe exists'; Passed = $true }
+                [pscustomobject]@{ Name = 'GameProfiles folder exists'; Passed = $true }
+                [pscustomobject]@{ Name = 'UserProfiles folder exists'; Passed = $true }
+            )
+        }
+        $gate = Test-TPMInstallHealthGate -HealthResult $healthResult
+        $gate.Passed | Should -Be $false
+        $gate.Reason | Should -Match 'TeknoParrotUi\.exe exists -- appears 2 times'
+    }
+
+    It "fails on a duplicate critical check name ordered true then false" {
+        $healthResult = [pscustomobject]@{
+            Status = 'PASS'
+            Checks = @(
+                [pscustomobject]@{ Name = 'TeknoParrotUi.exe exists'; Passed = $true }
+                [pscustomobject]@{ Name = 'TeknoParrotUi.exe exists'; Passed = $false }
+                [pscustomobject]@{ Name = 'GameProfiles folder exists'; Passed = $true }
+                [pscustomobject]@{ Name = 'UserProfiles folder exists'; Passed = $true }
+            )
+        }
+        $gate = Test-TPMInstallHealthGate -HealthResult $healthResult
+        $gate.Passed | Should -Be $false
+        $gate.Reason | Should -Match 'TeknoParrotUi\.exe exists -- appears 2 times'
+    }
+
+    It "fails on a duplicate critical check name even when both occurrences pass" {
+        $healthResult = [pscustomobject]@{
+            Status = 'PASS'
+            Checks = @(
+                [pscustomobject]@{ Name = 'GameProfiles folder exists'; Passed = $true }
+                [pscustomobject]@{ Name = 'GameProfiles folder exists'; Passed = $true }
+                [pscustomobject]@{ Name = 'TeknoParrotUi.exe exists'; Passed = $true }
+                [pscustomobject]@{ Name = 'UserProfiles folder exists'; Passed = $true }
+            )
+        }
+        $gate = Test-TPMInstallHealthGate -HealthResult $healthResult
+        $gate.Passed | Should -Be $false
+        $gate.Reason | Should -Match 'GameProfiles folder exists -- appears 2 times'
+    }
+
+    It "passes when each of the three critical checks occurs exactly once" {
+        $healthResult = [pscustomobject]@{
+            Status = 'PASS'
+            Checks = @(
+                [pscustomobject]@{ Name = 'TeknoParrotUi.exe exists'; Passed = $true }
+                [pscustomobject]@{ Name = 'GameProfiles folder exists'; Passed = $true }
+                [pscustomobject]@{ Name = 'UserProfiles folder exists'; Passed = $true }
+            )
+        }
+        $gate = Test-TPMInstallHealthGate -HealthResult $healthResult
+        $gate.Passed | Should -Be $true
+    }
 }
 
 Describe "New-CertificationScorecard requested/effective root reporting (issue #146)" {
@@ -841,5 +905,230 @@ Describe "New-CertificationScorecard requested/effective root reporting (issue #
         $result.Overall | Should -Be 'NOT CERTIFIED'
         $healthItem = $result.Items | Where-Object { $_.Area -eq 'Real Install Health' }
         $healthItem.Passed | Should -Be $false
+    }
+
+    # Review round 3: "Unattended TPM config restoration" was recorded by
+    # Add-CheckResult during a real run but never rolled up into the
+    # scorecard at all -- a failed or missing restoration could not, by
+    # itself, flip Overall to NOT CERTIFIED even though a developer's real
+    # saved config was left corrupted.
+    It "fails certification (NOT CERTIFIED) when the config restoration check explicitly failed, even though every other gate passed" {
+        $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
+        $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $false; Details = 'restore threw: Access to the path is denied' }
+
+        $result = New-CertificationScorecard -Results $fake
+
+        $result.Overall | Should -Be 'NOT CERTIFIED'
+        $restoreItem = $result.Items | Where-Object { $_.Area -eq 'Unattended TPM config restoration' }
+        $restoreItem.Passed | Should -Be $false
+        $restoreItem.Details | Should -Match 'restore threw'
+    }
+
+    It "fails certification (NOT CERTIFIED) when the config restoration check is missing entirely from an unattended run" {
+        $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
+        $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
+        # No 'Unattended TPM config restoration' check at all -- must never
+        # read as a silent pass.
+
+        $result = New-CertificationScorecard -Results $fake
+
+        $result.Overall | Should -Be 'NOT CERTIFIED'
+        $restoreItem = $result.Items | Where-Object { $_.Area -eq 'Unattended TPM config restoration' }
+        $restoreItem.Passed | Should -Be $false
+    }
+
+    It "certifies when the config restoration check explicitly passed alongside every other gate" {
+        $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
+        $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true; Details = 'config file restored to its pre-run state' }
+
+        $result = New-CertificationScorecard -Results $fake
+
+        $result.Overall | Should -Be 'CERTIFIED'
+        $restoreItem = $result.Items | Where-Object { $_.Area -eq 'Unattended TPM config restoration' }
+        $restoreItem.Passed | Should -Be $true
+    }
+
+    It "marks config restoration explicitly not applicable (not silently passing) for a smoke-mode run" {
+        $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $true
+
+        $result = New-CertificationScorecard -Results $fake
+
+        $result.Overall | Should -Be 'CERTIFIED'
+        $restoreItem = $result.Items | Where-Object { $_.Area -eq 'Unattended TPM config restoration' }
+        $restoreItem.Passed | Should -Be $true
+        $restoreItem.Details | Should -Match 'not applicable -- smoke mode'
+    }
+}
+
+Describe "Invoke-TPMUnattendedRootBinding integration (issue #146 review round 3)" {
+    # Integration-level coverage of the full snapshot -> override/create ->
+    # invoke -> restore -> verify orchestration, exercising the real
+    # sequencing of the round 2 pure-function pieces together rather than
+    # each in isolation. $InvokeUnattended stands in for the real pwsh
+    # subprocess call -- these tests never launch pwsh.
+    BeforeAll {
+        function New-FakeUnattendedLogContent {
+            param([string]$EffectiveRoot)
+            $lines = @(
+                'Configuration:'
+                "  TeknoParrot root     : $EffectiveRoot"
+                '  ZIP source folder    : W:\ROMS\TeknoParrot Collection'
+                ''
+                'Loading collection dat from ZIP...'
+            )
+            return ($lines -join [Environment]::NewLine)
+        }
+    }
+
+    It "creates a temporary config, invokes unattended, and removes the temporary config when none existed beforehand" {
+        $configPath = Join-Path $TestDrive ("no-prior-" + [guid]::NewGuid().ToString('N') + '.json')
+        $logPath = Join-Path $TestDrive ("no-prior-log-" + [guid]::NewGuid().ToString('N') + '.log')
+        $requestedRoot = 'W:\Emulators\TeknoParrot'
+
+        Test-Path -LiteralPath $configPath | Should -Be $false
+
+        $script:configExistedDuringInvoke = $null
+        $script:configContentDuringInvoke = $null
+        $invoke = {
+            $script:configExistedDuringInvoke = Test-Path -LiteralPath $configPath -PathType Leaf
+            $script:configContentDuringInvoke = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+            New-FakeUnattendedLogContent -EffectiveRoot $requestedRoot | Set-Content -LiteralPath $logPath -Encoding utf8
+        }
+
+        $binding = Invoke-TPMUnattendedRootBinding -ConfigPath $configPath -TeknoParrotRoot $requestedRoot -LogPath $logPath -InvokeUnattended $invoke
+
+        # Temporary config existed, with the requested root bound, at the
+        # moment unattended TPM actually ran.
+        $script:configExistedDuringInvoke | Should -Be $true
+        $script:configContentDuringInvoke.TeknoParrotRoot | Should -Be $requestedRoot
+        $script:configContentDuringInvoke.GamesInstallFolder | Should -Be $requestedRoot
+
+        # And it is gone afterward -- never left behind as if it were a
+        # real saved setting.
+        Test-Path -LiteralPath $configPath | Should -Be $false
+
+        $binding.EffectiveTeknoParrotRoot | Should -Be $requestedRoot
+        ($binding.Checks | Where-Object { $_.Name -eq 'TPM unattended run' }).Passed | Should -Be $true
+        ($binding.Checks | Where-Object { $_.Name -eq 'Unattended TPM used requested root' }).Passed | Should -Be $true
+        ($binding.Checks | Where-Object { $_.Name -eq 'Unattended TPM config restoration' }).Passed | Should -Be $true
+    }
+
+    It "restores an existing config byte-for-byte after a successful run" {
+        $configPath = Join-Path $TestDrive ("existing-byte-" + [guid]::NewGuid().ToString('N') + '.json')
+        $logPath = Join-Path $TestDrive ("existing-byte-log-" + [guid]::NewGuid().ToString('N') + '.log')
+        $originalContent = '{"TeknoParrotRoot":"C:\\Users\\Someone\\LaunchBox\\Emulators\\TeknoParrot","ZipSourceFolder":"W:\\ROMS\\TeknoParrot Collection","RetroBat":true}'
+        Set-Content -LiteralPath $configPath -Value $originalContent -Encoding utf8 -NoNewline
+        $requestedRoot = 'W:\Emulators\TeknoParrot'
+
+        $invoke = {
+            New-FakeUnattendedLogContent -EffectiveRoot $requestedRoot | Set-Content -LiteralPath $logPath -Encoding utf8
+        }
+
+        [void](Invoke-TPMUnattendedRootBinding -ConfigPath $configPath -TeknoParrotRoot $requestedRoot -LogPath $logPath -InvokeUnattended $invoke)
+
+        (Get-Content -LiteralPath $configPath -Raw) | Should -Be $originalContent
+    }
+
+    It "still restores the config when unattended TPM ran but used the wrong effective root (a real failure, not an exception)" {
+        $configPath = Join-Path $TestDrive ("wrong-root-" + [guid]::NewGuid().ToString('N') + '.json')
+        $logPath = Join-Path $TestDrive ("wrong-root-log-" + [guid]::NewGuid().ToString('N') + '.log')
+        $originalContent = '{"TeknoParrotRoot":"C:\\Users\\Someone\\LaunchBox\\Emulators\\TeknoParrot"}'
+        Set-Content -LiteralPath $configPath -Value $originalContent -Encoding utf8 -NoNewline
+        $requestedRoot = 'W:\Emulators\TeknoParrot'
+
+        $invoke = {
+            # TPM ran but ended up using a different (stale) root than requested.
+            New-FakeUnattendedLogContent -EffectiveRoot 'C:\Users\Someone\LaunchBox\Emulators\TeknoParrot' | Set-Content -LiteralPath $logPath -Encoding utf8
+        }
+
+        $binding = Invoke-TPMUnattendedRootBinding -ConfigPath $configPath -TeknoParrotRoot $requestedRoot -LogPath $logPath -InvokeUnattended $invoke
+
+        ($binding.Checks | Where-Object { $_.Name -eq 'Unattended TPM used requested root' }).Passed | Should -Be $false
+        (Get-Content -LiteralPath $configPath -Raw) | Should -Be $originalContent
+        ($binding.Checks | Where-Object { $_.Name -eq 'Unattended TPM config restoration' }).Passed | Should -Be $true
+    }
+
+    It "still restores the config when the unattended invocation itself throws, and re-throws the same exception to the caller" {
+        $configPath = Join-Path $TestDrive ("throws-" + [guid]::NewGuid().ToString('N') + '.json')
+        $logPath = Join-Path $TestDrive ("throws-log-" + [guid]::NewGuid().ToString('N') + '.log')
+        $originalContent = '{"TeknoParrotRoot":"C:\\Users\\Someone\\LaunchBox\\Emulators\\TeknoParrot"}'
+        Set-Content -LiteralPath $configPath -Value $originalContent -Encoding utf8 -NoNewline
+        $requestedRoot = 'W:\Emulators\TeknoParrot'
+
+        $invoke = { throw "simulated pwsh launch failure" }
+
+        $threw = $false
+        try {
+            Invoke-TPMUnattendedRootBinding -ConfigPath $configPath -TeknoParrotRoot $requestedRoot -LogPath $logPath -InvokeUnattended $invoke
+        } catch {
+            $threw = $true
+            $_.Exception.Message | Should -Match 'simulated pwsh launch failure'
+        }
+
+        $threw | Should -Be $true -Because "an unattended-invocation exception must propagate, exactly as it did before this extraction"
+        (Get-Content -LiteralPath $configPath -Raw) | Should -Be $originalContent -Because "the finally block must restore the config even when the try block threw"
+    }
+
+    It "reports a restore failure as its own failed check, and that failure alone forces the final scorecard to NOT CERTIFIED" {
+        $configDir = Join-Path $TestDrive ("restore-fail-dir-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+        $configPath = Join-Path $configDir 'TeknoParrot-Manager.config.json'
+        $logPath = Join-Path $TestDrive ("restore-fail-log-" + [guid]::NewGuid().ToString('N') + '.log')
+        $originalContent = '{"TeknoParrotRoot":"C:\\Users\\Someone\\LaunchBox\\Emulators\\TeknoParrot"}'
+        Set-Content -LiteralPath $configPath -Value $originalContent -Encoding utf8 -NoNewline
+        $requestedRoot = 'W:\Emulators\TeknoParrot'
+
+        # Simulates an external interference that makes the eventual restore
+        # write fail for real (DirectoryNotFoundException from
+        # [System.IO.File]::WriteAllText), rather than mocking the restore
+        # function itself -- the whole directory the config lived in is gone
+        # by the time Invoke-TPMUnattendedRootBinding's finally block tries
+        # to write the pre-run snapshot back.
+        $invoke = {
+            New-FakeUnattendedLogContent -EffectiveRoot $requestedRoot | Set-Content -LiteralPath $logPath -Encoding utf8
+            Remove-Item -LiteralPath $configDir -Recurse -Force
+        }
+
+        $binding = Invoke-TPMUnattendedRootBinding -ConfigPath $configPath -TeknoParrotRoot $requestedRoot -LogPath $logPath -InvokeUnattended $invoke
+
+        $restoreCheck = $binding.Checks | Where-Object { $_.Name -eq 'Unattended TPM config restoration' }
+        $restoreCheck.Passed | Should -Be $false
+        $restoreCheck.Details | Should -Match 'restore threw'
+
+        # Compose the binding's real checks into a full results object and
+        # confirm the restoration failure alone flips the scorecard, even
+        # though every other gate in the fixture passes.
+        $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
+        $fake.EffectiveTeknoParrotRoot = $binding.EffectiveTeknoParrotRoot
+        foreach ($check in $binding.Checks) { $fake.Checks += $check }
+
+        $result = New-CertificationScorecard -Results $fake
+        $result.Overall | Should -Be 'NOT CERTIFIED'
+    }
+
+    It "does not label a real unattended-mode effective-root failure as smoke mode (finding #4, at the integration level)" {
+        $configPath = Join-Path $TestDrive ("unparsable-" + [guid]::NewGuid().ToString('N') + '.json')
+        $logPath = Join-Path $TestDrive ("unparsable-log-" + [guid]::NewGuid().ToString('N') + '.log')
+        $requestedRoot = 'W:\Emulators\TeknoParrot'
+
+        $invoke = {
+            "Some unrelated startup output`nERROR: TeknoParrot crashed before printing its Configuration block" | Set-Content -LiteralPath $logPath -Encoding utf8
+        }
+
+        $binding = Invoke-TPMUnattendedRootBinding -ConfigPath $configPath -TeknoParrotRoot $requestedRoot -LogPath $logPath -InvokeUnattended $invoke
+
+        $binding.EffectiveTeknoParrotRoot | Should -Be $null
+        $rootCheck = $binding.Checks | Where-Object { $_.Name -eq 'Unattended TPM used requested root' }
+        $rootCheck.Passed | Should -Be $false
+        $rootCheck.Details | Should -Not -Match 'smoke mode'
+
+        $reportText = Get-TPMEffectiveRootReportText -EffectiveRoot $binding.EffectiveTeknoParrotRoot -SmokeMode $false
+        $reportText | Should -Not -Match 'smoke mode'
+        $reportText | Should -Match 'could not be confirmed'
     }
 }
