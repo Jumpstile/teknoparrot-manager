@@ -1711,8 +1711,15 @@ Describe "New-TPMCertificationScreenshot (issue #151)" {
             [System.IO.File]::WriteAllBytes($p, $short)
         }
 
+        # Issue #151 review round 3: Test-TPMPngStructure's chunk-bounds
+        # check now catches this specific cut (removing bytes from the
+        # tail makes IDAT's own declared length overrun the file) before
+        # the loop ever reaches the "no IEND chunk at all" end-of-file
+        # case, so the precise reason names the overrunning chunk rather
+        # than a generic "likely truncated" -- both are genuine truncation
+        # rejections, just described more specifically now.
         $shot.Status | Should -Be 'Failed'
-        $shot.Details | Should -Match 'truncated'
+        $shot.Details | Should -Match 'overruns the end of the file'
     }
 
     It "Test-TPMScreenshotFileValid rejects a materially truncated PNG (over half the file cut off)" {
@@ -1725,7 +1732,7 @@ Describe "New-TPMCertificationScreenshot (issue #151)" {
 
         $validation = Test-TPMScreenshotFileValid -Path $truncPath
         $validation.Valid | Should -Be $false
-        $validation.Reason | Should -Match 'truncated'
+        $validation.Reason | Should -Match 'overruns the end of the file'
     }
 
     It "Test-TPMScreenshotFileValid rejects a corrupted PNG signature" {
@@ -1752,6 +1759,148 @@ Describe "New-TPMCertificationScreenshot (issue #151)" {
 
         $validation = Test-TPMScreenshotFileValid -Path $p
         $validation.Valid | Should -Be $true
+    }
+
+    # --- review round 3: PNG chunk/CRC structural validation. GDI+
+    # decoding (even the round-2 forced full-frame LockBits decode) does
+    # not validate PNG CRC integrity -- a PNG with a single corrupted byte
+    # inside IDAT, with its signature and IEND both otherwise intact,
+    # decoded and locked-bits successfully under the round-2 validator.
+    # Only chunk-level CRC-32 validation actually detects this. ---
+    It "rejects (Status = 'Failed') a valid PNG with one byte modified inside an IDAT chunk, signature and IEND otherwise intact" {
+        $dir = Join-Path $TestDrive ("shots-idatcorrupt-" + [guid]::NewGuid().ToString('N'))
+
+        $shot = New-TPMCertificationScreenshot -ScreenshotDir $dir -Name 'idat-corrupt' -EvidenceType 'DeterministicRender' -CaptureAction {
+            param($p)
+            $full = New-RealPngBytes
+            $corrupted = [byte[]]$full.Clone()
+            # Locate the IDAT chunk and flip one byte in the middle of its
+            # data -- everything else (signature, chunk structure, IEND)
+            # stays byte-for-byte intact.
+            $pos = 8
+            $idatDataStart = -1
+            $idatLength = 0
+            while ($pos -lt $corrupted.Length) {
+                $length = ([uint32]$corrupted[$pos] -shl 24) -bor ([uint32]$corrupted[$pos + 1] -shl 16) -bor ([uint32]$corrupted[$pos + 2] -shl 8) -bor [uint32]$corrupted[$pos + 3]
+                $type = [System.Text.Encoding]::ASCII.GetString($corrupted, $pos + 4, 4)
+                if ($type -eq 'IDAT') { $idatDataStart = $pos + 8; $idatLength = $length; break }
+                $pos = $pos + 8 + $length + 4
+            }
+            $flipOffset = $idatDataStart + [int]($idatLength / 2)
+            $corrupted[$flipOffset] = $corrupted[$flipOffset] -bxor 0xFF
+            [System.IO.File]::WriteAllBytes($p, $corrupted)
+        }
+
+        $shot.Status | Should -Not -Be 'Captured'
+        $shot.Status | Should -Be 'Failed'
+        $shot.Details | Should -Match 'CRC'
+    }
+
+    It "Test-TPMScreenshotFileValid rejects a byte-corrupted IDAT chunk with the mismatched CRC values in the reason" {
+        $dir = Join-Path $TestDrive ("shots-idatcorrupt2-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        $full = New-RealPngBytes
+        $corrupted = [byte[]]$full.Clone()
+        $pos = 8
+        $idatDataStart = -1
+        $idatLength = 0
+        while ($pos -lt $corrupted.Length) {
+            $length = ([uint32]$corrupted[$pos] -shl 24) -bor ([uint32]$corrupted[$pos + 1] -shl 16) -bor ([uint32]$corrupted[$pos + 2] -shl 8) -bor [uint32]$corrupted[$pos + 3]
+            $type = [System.Text.Encoding]::ASCII.GetString($corrupted, $pos + 4, 4)
+            if ($type -eq 'IDAT') { $idatDataStart = $pos + 8; $idatLength = $length; break }
+            $pos = $pos + 8 + $length + 4
+        }
+        $flipOffset = $idatDataStart + [int]($idatLength / 2)
+        $corrupted[$flipOffset] = $corrupted[$flipOffset] -bxor 0xFF
+        $corruptPath = Join-Path $dir 'idat-corrupt.png'
+        [System.IO.File]::WriteAllBytes($corruptPath, $corrupted)
+
+        $validation = Test-TPMScreenshotFileValid -Path $corruptPath
+        $validation.Valid | Should -Be $false
+        $validation.Reason | Should -Match "IDAT.*failed CRC validation"
+        $validation.Reason | Should -Match 'stored=0x'
+        $validation.Reason | Should -Match 'computed=0x'
+    }
+
+    It "rejects (Status = 'Failed') a PNG whose IHDR chunk declares a length other than 13 bytes" {
+        $dir = Join-Path $TestDrive ("shots-badihdrlen-" + [guid]::NewGuid().ToString('N'))
+
+        $shot = New-TPMCertificationScreenshot -ScreenshotDir $dir -Name 'bad-ihdr-length' -EvidenceType 'DeterministicRender' -CaptureAction {
+            param($p)
+            $full = New-RealPngBytes
+            $bad = [byte[]]$full.Clone()
+            # IHDR's 4-byte length field is bytes 8-11 (right after the
+            # 8-byte signature) -- set it to 14 instead of the spec-
+            # mandated 13.
+            $bad[8] = 0; $bad[9] = 0; $bad[10] = 0; $bad[11] = 14
+            [System.IO.File]::WriteAllBytes($p, $bad)
+        }
+
+        $shot.Status | Should -Not -Be 'Captured'
+        $shot.Status | Should -Be 'Failed'
+        $shot.Details | Should -Match 'IHDR'
+        $shot.Details | Should -Match '13'
+    }
+
+    It "Test-TPMScreenshotFileValid rejects a PNG whose IHDR length is not exactly 13, before any CRC or GDI+ check runs" {
+        $dir = Join-Path $TestDrive ("shots-badihdrlen2-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        $full = New-RealPngBytes
+        $bad = [byte[]]$full.Clone()
+        $bad[8] = 0; $bad[9] = 0; $bad[10] = 0; $bad[11] = 20
+        $badPath = Join-Path $dir 'bad-ihdr.png'
+        [System.IO.File]::WriteAllBytes($badPath, $bad)
+
+        $validation = Test-TPMScreenshotFileValid -Path $badPath
+        $validation.Valid | Should -Be $false
+        $validation.Reason | Should -Match 'IHDR chunk must be exactly 13 bytes, found 20'
+    }
+
+    It "Test-TPMPngStructure rejects a chunk whose declared length overruns the file (bounds/overrun guard, independent of truncation)" {
+        $full = New-RealPngBytes
+        $bad = [byte[]]$full.Clone()
+        # Set IHDR's length field to an absurdly large value -- this must
+        # be caught as an overrun, not silently read past the buffer.
+        $bad[8] = 0x7F; $bad[9] = 0xFF; $bad[10] = 0xFF; $bad[11] = 0xFF
+
+        $structure = Test-TPMPngStructure -Bytes $bad
+        $structure.Valid | Should -Be $false
+        $structure.Reason | Should -Match 'overruns the end of the file'
+    }
+
+    It "Test-TPMPngStructure rejects extra data appended after a valid IEND chunk" {
+        $full = New-RealPngBytes
+        $withTrailingJunk = $full + ([byte[]](1, 2, 3, 4))
+
+        $structure = Test-TPMPngStructure -Bytes $withTrailingJunk
+        $structure.Valid | Should -Be $false
+        $structure.Reason | Should -Match 'extra data after'
+    }
+
+    It "Test-TPMPngStructure rejects a stream whose first chunk is not IHDR" {
+        $full = New-RealPngBytes
+        # Signature (8 bytes) followed directly by the real IEND chunk
+        # (the last 12 bytes of a real generated PNG -- a genuinely valid
+        # chunk with a correct CRC, reused here rather than hand-built, so
+        # this test exercises only the "first chunk must be IHDR" check
+        # and nothing else) instead of IHDR -- structurally invalid
+        # regardless of what a real decoder might tolerate.
+        $realIendChunk = $full[($full.Length - 12)..($full.Length - 1)]
+        $malformed = $full[0..7] + $realIendChunk
+
+        $structure = Test-TPMPngStructure -Bytes $malformed
+        $structure.Valid | Should -Be $false
+        $structure.Reason | Should -Match 'first chunk must be IHDR'
+    }
+
+    It "Get-TPMCrc32 computes the correct CRC-32 for the well-known ASCII input 'IEND' (independent verification against a known-good value)" {
+        # IEND's CRC (over just the 4-byte type, zero-length data) is a
+        # fixed, well-known value: 0xAE426082. Independently confirms the
+        # CRC-32 implementation itself is correct, not just self-
+        # consistent with its own chunk-walking caller.
+        $bytes = [System.Text.Encoding]::ASCII.GetBytes('IEND')
+        $crc = Get-TPMCrc32 -Bytes $bytes -Offset 0 -Count 4
+        ('{0:X8}' -f $crc) | Should -Be 'AE426082'
     }
 
     It "fails validation (Status = 'Failed') when the capture action deletes the reserved file instead of writing to it" {

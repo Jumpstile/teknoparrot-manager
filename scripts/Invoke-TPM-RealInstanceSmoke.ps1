@@ -702,33 +702,158 @@ function New-TPMScreenshotReservedPath {
     }
 }
 
-# Issue #151 review round 2 (the one remaining finding from round 1's
-# validation work): "successfully constructed an Image object" was not
-# strong enough proof of a real, complete PNG. GDI+ detects actual image
-# format from content, not the file extension, so JPEG bytes saved with a
-# .png name previously decoded without error and passed as 'Captured'.
-# GDI+ can also decode a materially truncated PNG far enough to report
-# valid-looking dimensions before ever touching the (incomplete) pixel
-# data, since Image.FromStream does not eagerly decode scanlines. Neither
-# case is real evidence, so validation now layers five independent checks
-# before any of them can report success -- filename, format guess, and
-# "it decoded to *something*" are each individually insufficient, so none
-# of them are relied on alone:
-#   1. file exists / is non-empty (unchanged from round 1)
-#   2. the file's first 8 bytes are the exact PNG signature (magic bytes)
-#      -- rejects non-PNG content outright, before any decoder sees it
-#   3. the chunk immediately after the signature is IHDR, and the file's
-#      final chunk is IEND -- the two structural markers every complete,
-#      spec-conformant PNG must have; a truncated file is missing IEND
-#      even when enough of the header/IDAT survived for a decoder to
-#      still produce a plausible-looking partial image
-#   4. GDI+ decodes it AND reports RawFormat = Png specifically (not just
+# Issue #151 review round 3: GDI+ decoding, even forced via LockBits, does
+# not validate PNG CRC integrity -- a valid PNG with one byte flipped
+# inside its IDAT payload (signature, chunk structure, and IEND all still
+# intact) decoded and locked-bits successfully, since GDI+'s deflate
+# decompressor tolerates plenty of bit-level corruption without raising an
+# error. CRC validation is the only way to actually detect this class of
+# corruption, and the PNG spec ties a CRC to each individual chunk, so it
+# has to be computed per-chunk, not over the whole file. Standard CRC-32
+# (polynomial 0xEDB88320, same variant zlib/PNG both use), table-based for
+# speed. $script:tpmCrc32Table is built once and reused -- this can run
+# per-chunk per-screenshot, and rebuilding a 256-entry table on every call
+# would be wasted work for no benefit.
+function Get-TPMCrc32 {
+    param([byte[]]$Bytes, [int]$Offset, [int]$Count)
+    if (-not $script:tpmCrc32Table) {
+        $table = New-Object 'uint32[]' 256
+        for ($n = 0; $n -lt 256; $n++) {
+            $c = [uint32]$n
+            for ($k = 0; $k -lt 8; $k++) {
+                if (($c -band 1) -ne 0) {
+                    $c = 0xEDB88320 -bxor ($c -shr 1)
+                } else {
+                    $c = $c -shr 1
+                }
+            }
+            $table[$n] = $c
+        }
+        $script:tpmCrc32Table = $table
+    }
+    # [uint32]::MaxValue, not [uint32]0xFFFFFFFF -- PowerShell parses the
+    # hex literal 0xFFFFFFFF as a signed Int32 (-1) first, and casting a
+    # negative value to [uint32] is a checked conversion that throws
+    # ("Value was either too large or too small for a UInt32") rather than
+    # wrapping the way C-style unchecked casts do. Confirmed by direct
+    # repro.
+    $crc = [uint32]::MaxValue
+    for ($i = 0; $i -lt $Count; $i++) {
+        $index = ($crc -bxor [uint32]$Bytes[$Offset + $i]) -band [uint32]0xFF
+        $crc = $script:tpmCrc32Table[$index] -bxor ($crc -shr 8)
+    }
+    return $crc -bxor [uint32]::MaxValue
+}
+
+# Issue #151 review round 3: parses the PNG chunk stream directly instead
+# of trusting a decoder's opinion of it -- "GDI+ decoded it" and "GDI+
+# decoded it losslessly" are different claims, and only chunk-level CRC
+# validation actually establishes the second one. Every chunk is walked
+# (4-byte big-endian length, 4-byte type, data, 4-byte CRC), each is
+# required to stay fully within the file's bounds, the first chunk must be
+# IHDR with exactly 13 bytes of data (both mandated by the spec), the
+# stream must end in a zero-length IEND with nothing after it, and every
+# chunk's stored CRC (not just the three critical ones -- ancillary chunks
+# too, since this is cheap enough on a screenshot-sized file to just do
+# for all of them rather than special-case which ones matter) is
+# recomputed and compared against what is actually in the file. Position
+# arithmetic uses [int64] throughout -- a chunk's declared length is a
+# 32-bit field an attacker-or-corruption-controlled file could set close
+# to its max value, and adding that directly to a 32-bit position/length
+# comparison risks silent integer overflow masking exactly the "chunk
+# claims to extend past the file" case this function exists to catch.
+function Test-TPMPngStructure {
+    param([byte[]]$Bytes)
+
+    $pngSignature = [byte[]](0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+    if ($Bytes.Length -lt 8) {
+        return [pscustomobject]@{ Valid = $false; Reason = 'file is too short to contain a PNG signature' }
+    }
+    for ($i = 0; $i -lt 8; $i++) {
+        if ($Bytes[$i] -ne $pngSignature[$i]) {
+            return [pscustomobject]@{ Valid = $false; Reason = 'file does not start with the PNG signature (magic bytes) -- not a real PNG regardless of its .png extension' }
+        }
+    }
+
+    [int64]$pos = 8
+    [int64]$fileLength = $Bytes.Length
+    $chunkIndex = 0
+    $sawIend = $false
+
+    while ($pos -lt $fileLength) {
+        if ($sawIend) {
+            return [pscustomobject]@{ Valid = $false; Reason = 'PNG contains extra data after its terminating IEND chunk' }
+        }
+        if ($pos + 8 -gt $fileLength) {
+            return [pscustomobject]@{ Valid = $false; Reason = 'PNG chunk header runs past the end of the file -- truncated or malformed' }
+        }
+        [int64]$length = ([uint32]$Bytes[$pos] -shl 24) -bor ([uint32]$Bytes[$pos + 1] -shl 16) -bor ([uint32]$Bytes[$pos + 2] -shl 8) -bor [uint32]$Bytes[$pos + 3]
+        $type = [System.Text.Encoding]::ASCII.GetString($Bytes, [int]($pos + 4), 4)
+        [int64]$dataStart = $pos + 8
+        [int64]$crcStart = $dataStart + $length
+
+        if ($crcStart + 4 -gt $fileLength) {
+            return [pscustomobject]@{ Valid = $false; Reason = "PNG '$type' chunk declares a length ($length) whose data/CRC overruns the end of the file" }
+        }
+
+        if ($chunkIndex -eq 0 -and $type -ne 'IHDR') {
+            return [pscustomobject]@{ Valid = $false; Reason = "PNG's first chunk must be IHDR, found '$type'" }
+        }
+        if ($type -eq 'IHDR' -and $length -ne 13) {
+            return [pscustomobject]@{ Valid = $false; Reason = "PNG IHDR chunk must be exactly 13 bytes, found $length" }
+        }
+        if ($type -eq 'IEND' -and $length -ne 0) {
+            return [pscustomobject]@{ Valid = $false; Reason = "PNG IEND chunk must have zero length, found $length" }
+        }
+
+        $storedCrc = ([uint32]$Bytes[$crcStart] -shl 24) -bor ([uint32]$Bytes[$crcStart + 1] -shl 16) -bor ([uint32]$Bytes[$crcStart + 2] -shl 8) -bor [uint32]$Bytes[$crcStart + 3]
+        $computedCrc = Get-TPMCrc32 -Bytes $Bytes -Offset ([int]($pos + 4)) -Count ([int](4 + $length))
+        if ($storedCrc -ne $computedCrc) {
+            return [pscustomobject]@{ Valid = $false; Reason = ("PNG '{0}' chunk failed CRC validation (stored=0x{1:X8} computed=0x{2:X8}) -- structurally corrupted" -f $type, $storedCrc, $computedCrc) }
+        }
+
+        if ($type -eq 'IEND') { $sawIend = $true }
+        $pos = $crcStart + 4
+        $chunkIndex++
+    }
+
+    if (-not $sawIend) {
+        return [pscustomobject]@{ Valid = $false; Reason = 'PNG does not end with an IEND chunk -- likely truncated' }
+    }
+    return [pscustomobject]@{ Valid = $true; Reason = 'PNG chunk structure and CRC validation passed' }
+}
+
+# Issue #151 review round 2/3: "successfully constructed an Image object"
+# was not strong enough proof of a real, complete, uncorrupted PNG. GDI+
+# detects actual image format from content, not the file extension, so
+# JPEG bytes saved with a .png name previously decoded without error and
+# passed as 'Captured'. GDI+ can also decode a materially truncated PNG
+# far enough to report valid-looking dimensions before ever touching the
+# (incomplete) pixel data, since Image.FromStream does not eagerly decode
+# scanlines -- and even forced full-frame decoding (LockBits) does not
+# validate per-chunk CRC integrity, so a PNG with a single corrupted byte
+# inside IDAT (signature, structure, and IEND all otherwise intact) can
+# still decode losslessly-looking without ever raising an error. None of
+# "right filename", "GDI+ guessed a format", "GDI+ decoded *something*",
+# or "GDI+ decoded the full frame without throwing" is sufficient proof on
+# its own, so validation layers six independent checks before any of them
+# can report success:
+#   1. file exists / is non-empty
+#   2. Test-TPMPngStructure: signature, chunk-by-chunk bounds/structure
+#      (first chunk IHDR with exactly 13 bytes, terminal zero-length IEND,
+#      nothing after it), and CRC-32 validation of every chunk -- this is
+#      the only layer that actually detects payload-level corruption that
+#      preserves the file's overall shape
+#   3. GDI+ decodes it AND reports RawFormat = Png specifically (not just
 #      "some image") -- this is what actually catches a renamed JPEG,
 #      since GDI+ would decode it successfully but report RawFormat = Jpeg
+#   4. positive width/height
 #   5. LockBits over the full frame forces GDI+ to materialize every
 #      scanline right now rather than lazily on first pixel access --
 #      throws on incomplete/corrupt compressed data that construction
 #      alone did not touch
+#   6. no file lock remains afterward (verified by validating from an
+#      in-memory byte copy in the first place -- see below)
 # Reads the file's bytes into memory and constructs the validation Image
 # from that byte array (System.Drawing.Image.FromStream), never
 # Image.FromFile -- the latter keeps an open handle on the source file
@@ -745,30 +870,9 @@ function Test-TPMScreenshotFileValid {
         return [pscustomobject]@{ Valid = $false; Reason = 'file is empty (zero length)' }
     }
 
-    $pngSignature = [byte[]](0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
-    if ($bytes.Length -lt 8) {
-        return [pscustomobject]@{ Valid = $false; Reason = 'file is too short to contain a PNG signature' }
-    }
-    for ($i = 0; $i -lt 8; $i++) {
-        if ($bytes[$i] -ne $pngSignature[$i]) {
-            return [pscustomobject]@{ Valid = $false; Reason = 'file does not start with the PNG signature (magic bytes) -- not a real PNG regardless of its .png extension' }
-        }
-    }
-
-    if ($bytes.Length -lt 16 -or ([System.Text.Encoding]::ASCII.GetString($bytes, 12, 4)) -ne 'IHDR') {
-        return [pscustomobject]@{ Valid = $false; Reason = 'PNG is missing its required IHDR chunk immediately after the signature' }
-    }
-    # IEND is always a fixed 12-byte trailer: 4-byte length (always 0, since
-    # IEND carries no data) + 4-byte type "IEND" + 4-byte CRC. Checking the
-    # length field too, not just the "IEND" text, catches a truncated file
-    # that happens to still end in bytes that spell IEND by coincidence.
-    if ($bytes.Length -lt 12) {
-        return [pscustomobject]@{ Valid = $false; Reason = 'PNG is missing its required IEND trailer -- likely truncated' }
-    }
-    $iendType = [System.Text.Encoding]::ASCII.GetString($bytes, $bytes.Length - 8, 4)
-    $iendLength = ([int]$bytes[$bytes.Length - 12] -shl 24) -bor ([int]$bytes[$bytes.Length - 11] -shl 16) -bor ([int]$bytes[$bytes.Length - 10] -shl 8) -bor [int]$bytes[$bytes.Length - 9]
-    if ($iendType -ne 'IEND' -or $iendLength -ne 0) {
-        return [pscustomobject]@{ Valid = $false; Reason = 'PNG is missing its required IEND trailer -- likely truncated' }
+    $structure = Test-TPMPngStructure -Bytes $bytes
+    if (-not $structure.Valid) {
+        return [pscustomobject]@{ Valid = $false; Reason = $structure.Reason }
     }
 
     # Same hardcoded-literal false positive as the other Add-Type calls in
