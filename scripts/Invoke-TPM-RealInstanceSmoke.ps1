@@ -204,6 +204,32 @@ function Set-TPMConfigJsonRoot {
     return $true
 }
 
+# Issue #146 review round 2 (finding #2): a machine with no saved
+# TeknoParrot-Manager.config.json previously could not have unattended TPM
+# bound to the requested certification root at all -- the run was skipped
+# outright and both checks failed. TeknoParrot-Manager.ps1's own
+# -Unattended flow (see its "SECTION 1" config load) only requires
+# TeknoParrotRoot and GamesInstallFolder to be non-empty strings to get
+# past config load and print its "Configuration:" block (which is all this
+# harness reads back); GamesInstallFolder's existence on disk is never
+# checked at that point, so reusing the already-validated TeknoParrotRoot
+# for it is a safe, always-valid placeholder that needs no extra folder to
+# be created or cleaned up. This is intentionally the minimal config
+# TeknoParrot-Manager.ps1 requires, not a full settings file. The caller
+# treats the resulting file exactly like any other override -- it is
+# removed afterward by the same Restore-TPMConfigJsonSnapshot call used for
+# the existing-config path, because the pre-run snapshot for a config that
+# did not exist yet is $null.
+function New-TPMTemporaryUnattendedConfig {
+    param([string]$ConfigPath, [string]$TeknoParrotRoot)
+    $cfg = [ordered]@{
+        TeknoParrotRoot    = $TeknoParrotRoot
+        GamesInstallFolder = $TeknoParrotRoot
+    }
+    [System.IO.File]::WriteAllText($ConfigPath, ($cfg | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
+    return $true
+}
+
 function Restore-TPMConfigJsonSnapshot {
     # $Snapshot is deliberately untyped, not [string] -- a [string]-typed
     # parameter coerces a $null argument to an empty string during binding,
@@ -220,6 +246,38 @@ function Restore-TPMConfigJsonSnapshot {
         return
     }
     [System.IO.File]::WriteAllText($ConfigPath, [string]$Snapshot, (New-Object System.Text.UTF8Encoding $false))
+}
+
+# Issue #146 review round 2 (finding #3): Restore-TPMConfigJsonSnapshot's
+# own success was never verified -- a locked file that silently survived
+# Remove-Item's -ErrorAction SilentlyContinue, or any other restore failure,
+# left the developer's real saved config permanently overwritten with the
+# certification's temporary override with no failure signal anywhere. This
+# reads the config path back after a restore attempt and compares it
+# against what the pre-run snapshot says should be there, so a failed
+# restore is always caught and reported, never assumed to have worked
+# because the call itself didn't throw.
+function Test-TPMConfigRestored {
+    param([string]$ConfigPath, $ExpectedSnapshot)
+    if ($null -eq $ExpectedSnapshot) {
+        return -not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)
+    }
+    if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) { return $false }
+    $current = Get-Content -LiteralPath $ConfigPath -Raw
+    return ($current -eq [string]$ExpectedSnapshot)
+}
+
+# Issue #146 review round 2 (finding #4): extracted so the "Certification
+# Target" report section's effective-root text is independently testable --
+# it previously fell back to "smoke mode" text whenever EffectiveRoot was
+# empty, with no regard for whether unattended TPM was actually requested,
+# misreporting a real -RunUnattendedTPM failure (missing/unparsable
+# effective root) as if it were an ordinary smoke-mode run.
+function Get-TPMEffectiveRootReportText {
+    param([string]$EffectiveRoot, [bool]$SmokeMode)
+    if ($EffectiveRoot) { return $EffectiveRoot }
+    if ($SmokeMode) { return 'not applicable -- smoke mode (no unattended TPM run)' }
+    return '(not found in unattended log) -- unattended TPM was requested but the effective root could not be confirmed'
 }
 
 # Parses the TeknoParrot root TPM actually used from its own unattended-run
@@ -258,18 +316,65 @@ function Test-TPMUnattendedRootMatch {
 # the installation-critical markers and still scored [PASS]. Gate success
 # must reflect the structured health result's own meaning, not merely that
 # a report was written. Pure/testable against a fabricated health result.
+#
+# Issue #146 review round 2 (finding #1): the first version of this gate
+# only looked for critical-named Checks entries that were PRESENT and
+# FAILED -- a HealthResult with the critical entries missing entirely (a
+# truncated/corrupted-but-still-parseable JSON, or any structure that
+# simply omits them) matched nothing in that filter and PASSED by default.
+# Absent data must never read as success: every one of the three
+# installation-critical checks must be explicitly present, with an
+# explicit boolean Passed = $true, or the gate fails and says exactly
+# which check was missing/null/non-boolean/false. $LoadError lets the call
+# site distinguish "file missing" from "file present but invalid JSON" in
+# the reported reason without this function needing to know how the JSON
+# was read.
 function Test-TPMInstallHealthGate {
-    param($HealthResult)
+    param($HealthResult, [string]$LoadError)
     $installCriticalNames = @('TeknoParrotUi.exe exists', 'GameProfiles folder exists', 'UserProfiles folder exists')
+
     if (-not $HealthResult) {
-        return [pscustomobject]@{ Passed = $false; Reason = 'no health result collected' }
+        $reason = if ($LoadError) { $LoadError } else { 'no health result collected' }
+        return [pscustomobject]@{ Passed = $false; Reason = $reason }
     }
-    $criticalFailures = @(@($HealthResult.Checks) | Where-Object { $installCriticalNames -contains $_.Name -and -not $_.Passed })
-    if ($criticalFailures.Count -gt 0) {
-        $names = ($criticalFailures | ForEach-Object { $_.Name }) -join ', '
-        return [pscustomobject]@{ Passed = $false; Reason = "installation-critical check(s) failed: $names" }
+
+    $checks = @($HealthResult.Checks)
+    if ($checks.Count -eq 0) {
+        return [pscustomobject]@{ Passed = $false; Reason = 'health result has no Checks entries' }
     }
-    return [pscustomobject]@{ Passed = $true; Reason = 'no installation-critical failures' }
+
+    $checkByName = @{}
+    foreach ($c in $checks) {
+        if ($null -ne $c -and $c.PSObject.Properties.Name -contains 'Name' -and -not [string]::IsNullOrWhiteSpace([string]$c.Name)) {
+            $checkByName[[string]$c.Name] = $c
+        }
+    }
+
+    $problems = New-Object System.Collections.Generic.List[string]
+    foreach ($name in $installCriticalNames) {
+        if (-not $checkByName.ContainsKey($name)) {
+            [void]$problems.Add("$name -- missing from health result")
+            continue
+        }
+        $check = $checkByName[$name]
+        if (-not ($check.PSObject.Properties.Name -contains 'Passed') -or $null -eq $check.Passed) {
+            [void]$problems.Add("$name -- Passed value missing or null")
+            continue
+        }
+        if ($check.Passed -isnot [bool]) {
+            [void]$problems.Add("$name -- Passed value is not a boolean (got: $($check.Passed))")
+            continue
+        }
+        if ($check.Passed -ne $true) {
+            [void]$problems.Add("$name -- failed")
+        }
+    }
+
+    if ($problems.Count -gt 0) {
+        return [pscustomobject]@{ Passed = $false; Reason = ("installation-critical check(s) not confirmed passing: " + ($problems -join '; ')) }
+    }
+
+    return [pscustomobject]@{ Passed = $true; Reason = 'all installation-critical checks present and passed' }
 }
 
 # Issue #136: the Pester regression gate previously ran synchronously with
@@ -1021,10 +1126,17 @@ try {
         $results.InstallHealthReport = Join-Path $healthOutDir 'InstallHealth.md'
         $healthJsonPath = Join-Path $healthOutDir 'InstallHealth.json'
         $healthResult = $null
-        if (Test-Path -LiteralPath $healthJsonPath -PathType Leaf) {
-            try { $healthResult = Get-Content -LiteralPath $healthJsonPath -Raw | ConvertFrom-Json } catch {}
+        $healthLoadError = $null
+        if (-not (Test-Path -LiteralPath $healthJsonPath -PathType Leaf)) {
+            $healthLoadError = "InstallHealth.json not found at $healthJsonPath"
+        } else {
+            try {
+                $healthResult = Get-Content -LiteralPath $healthJsonPath -Raw | ConvertFrom-Json
+            } catch {
+                $healthLoadError = "InstallHealth.json at $healthJsonPath failed to parse: $($_.Exception.Message)"
+            }
         }
-        $healthGate = Test-TPMInstallHealthGate -HealthResult $healthResult
+        $healthGate = Test-TPMInstallHealthGate -HealthResult $healthResult -LoadError $healthLoadError
         $results.InstallHealthGate = $healthGate
         Add-CheckResult 'Real install health check' $healthGate.Passed ("{0} -- {1}" -f $results.InstallHealthReport, $healthGate.Reason)
     } else {
@@ -1062,17 +1174,22 @@ try {
         # requested -TeknoParrotRoot, so the resulting log was not actually
         # evidence against the target named in the scorecard. This harness
         # temporarily overrides just the TeknoParrotRoot field of the
-        # existing saved config for the duration of this one run, then
-        # restores the original file unconditionally (finally block) so a
-        # developer's real saved settings are never left corrupted by a
-        # certification pass, however the run finishes.
+        # existing saved config (or, per review round 2 finding #2, creates
+        # a minimal temporary one if no config exists yet) for the duration
+        # of this one run, then restores the original file unconditionally
+        # (finally block) so a developer's real saved settings are never
+        # left corrupted by a certification pass, however the run finishes.
         $tpmConfigPath = Join-Path $RepoPath 'TeknoParrot-Manager.config.json'
         $configSnapshot = Get-TPMConfigJsonSnapshot -ConfigPath $tpmConfigPath
         try {
-            $overrideWritten = Set-TPMConfigJsonRoot -ConfigPath $tpmConfigPath -TeknoParrotRoot $TeknoParrotRoot
+            if ($null -eq $configSnapshot) {
+                $overrideWritten = New-TPMTemporaryUnattendedConfig -ConfigPath $tpmConfigPath -TeknoParrotRoot $TeknoParrotRoot
+            } else {
+                $overrideWritten = Set-TPMConfigJsonRoot -ConfigPath $tpmConfigPath -TeknoParrotRoot $TeknoParrotRoot
+            }
             if (-not $overrideWritten) {
-                Add-CheckResult 'TPM unattended run' $false "no saved TeknoParrot-Manager.config.json found at $tpmConfigPath -- unattended TPM was not run, since it cannot be bound to the requested root without one"
-                Add-CheckResult 'Unattended TPM used requested root' $false "no saved config to override at $tpmConfigPath"
+                Add-CheckResult 'TPM unattended run' $false "could not prepare TeknoParrot-Manager.config.json at $tpmConfigPath for the unattended run"
+                Add-CheckResult 'Unattended TPM used requested root' $false "no config available to bind to the requested root at $tpmConfigPath"
             } else {
                 pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -Unattended *> $tpmLog
                 Add-CheckResult 'TPM unattended run' $true "log=$tpmLog"
@@ -1081,11 +1198,39 @@ try {
                 $results.EffectiveTeknoParrotRoot = $effectiveRoot
                 $rootsMatch = Test-TPMUnattendedRootMatch -RequestedRoot $TeknoParrotRoot -EffectiveRoot $effectiveRoot
                 $effectiveRootDetailText = if ($effectiveRoot) { $effectiveRoot } else { '(not found in unattended log)' }
-                Add-CheckResult 'Unattended TPM used requested root' $rootsMatch `
-                    ("requested={0} effective={1}" -f $TeknoParrotRoot, $effectiveRootDetailText)
+                if ($rootsMatch) {
+                    Add-CheckResult 'Unattended TPM used requested root' $true `
+                        ("requested={0} effective={1}" -f $TeknoParrotRoot, $effectiveRootDetailText)
+                } else {
+                    # Issue #146 review round 2 (finding #4): this failure must
+                    # be reported with its own explicit reason and must never
+                    # be conflated with, or read back later as, smoke mode --
+                    # SmokeMode only ever reflects whether -RunUnattendedTPM
+                    # was requested at all (see $results.SmokeMode above), and
+                    # is untouched by this branch.
+                    Add-CheckResult 'Unattended TPM used requested root' $false `
+                        ("requested={0} effective={1} -- effective root missing, unparsable, or does not match the requested root" -f $TeknoParrotRoot, $effectiveRootDetailText)
+                }
             }
         } finally {
-            Restore-TPMConfigJsonSnapshot -ConfigPath $tpmConfigPath -Snapshot $configSnapshot
+            # Issue #146 review round 2 (finding #3): the restore call's own
+            # success is never assumed -- it is verified by reading the
+            # config path back, and a failed restore fails certification
+            # with an explicit reason rather than continuing silently.
+            $restoreError = $null
+            try {
+                Restore-TPMConfigJsonSnapshot -ConfigPath $tpmConfigPath -Snapshot $configSnapshot
+            } catch {
+                $restoreError = $_.Exception.Message
+            }
+            $restoreVerified = Test-TPMConfigRestored -ConfigPath $tpmConfigPath -ExpectedSnapshot $configSnapshot
+            if ($restoreError) {
+                Add-CheckResult 'Unattended TPM config restoration' $false "restore threw: $restoreError"
+            } elseif (-not $restoreVerified) {
+                Add-CheckResult 'Unattended TPM config restoration' $false "config file state at $tpmConfigPath does not match its pre-run snapshot after restore"
+            } else {
+                Add-CheckResult 'Unattended TPM config restoration' $true "config file at $tpmConfigPath restored to its pre-run state"
+            }
         }
     }
 
@@ -1186,7 +1331,7 @@ finally {
     Add-CertificationReport ("- PowerShell version: {0}" -f $results.PowerShellVersion)
     Add-CertificationReport ("- TPM script version: {0}" -f $tpmScriptVersion)
     Add-CertificationReport ("- TPM display version: {0}" -f $tpmDisplayVersion)
-    $effectiveRootReportText = if ($results.EffectiveTeknoParrotRoot) { $results.EffectiveTeknoParrotRoot } else { 'not applicable -- smoke mode (no unattended TPM run)' }
+    $effectiveRootReportText = Get-TPMEffectiveRootReportText -EffectiveRoot $results.EffectiveTeknoParrotRoot -SmokeMode $results.SmokeMode
     Add-CertificationReport ("- Requested TeknoParrot root: {0}" -f $results.RequestedTeknoParrotRoot)
     Add-CertificationReport ("- Effective TeknoParrot root: {0}" -f $effectiveRootReportText)
     Add-CertificationReport ("- Certified at: {0}" -f $results.Timestamp)

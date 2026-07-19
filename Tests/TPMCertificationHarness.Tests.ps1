@@ -460,6 +460,92 @@ Describe "TPM config JSON snapshot/override/restore (issue #146)" {
 
         Test-Path -LiteralPath $configPath | Should -Be $false
     }
+
+    # Review round 2 (finding #2): no saved config exists at all on this
+    # machine -- unattended TPM must still be bound to the requested root
+    # via a minimal temporary config, not skipped outright.
+    It "New-TPMTemporaryUnattendedConfig creates a config with only TeknoParrotRoot and GamesInstallFolder set to the requested root" {
+        $configPath = Join-Path $TestDrive ("temp-config-" + [guid]::NewGuid().ToString('N') + '.json')
+        $requestedRoot = 'W:\Emulators\TeknoParrot'
+
+        $written = New-TPMTemporaryUnattendedConfig -ConfigPath $configPath -TeknoParrotRoot $requestedRoot
+        $written | Should -Be $true
+
+        Test-Path -LiteralPath $configPath | Should -Be $true
+        $cfg = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+        $cfg.TeknoParrotRoot | Should -Be $requestedRoot
+        $cfg.GamesInstallFolder | Should -Be $requestedRoot
+    }
+
+    It "New-TPMTemporaryUnattendedConfig's output is removed cleanly by Restore-TPMConfigJsonSnapshot with a null snapshot (the same cleanup path as the existing-config case)" {
+        $configPath = Join-Path $TestDrive ("temp-config-cleanup-" + [guid]::NewGuid().ToString('N') + '.json')
+        $snapshot = Get-TPMConfigJsonSnapshot -ConfigPath $configPath
+        $snapshot | Should -Be $null
+
+        [void](New-TPMTemporaryUnattendedConfig -ConfigPath $configPath -TeknoParrotRoot 'W:\Emulators\TeknoParrot')
+        Test-Path -LiteralPath $configPath | Should -Be $true
+
+        Restore-TPMConfigJsonSnapshot -ConfigPath $configPath -Snapshot $snapshot
+
+        Test-Path -LiteralPath $configPath | Should -Be $false
+    }
+
+    # Review round 2 (finding #3): the restore call's own success must be
+    # verified, never assumed just because it did not throw.
+    It "Test-TPMConfigRestored reports true when the file was correctly removed for a null (no-prior-config) snapshot" {
+        $configPath = Join-Path $TestDrive ("verify-null-ok-" + [guid]::NewGuid().ToString('N') + '.json')
+        Test-TPMConfigRestored -ConfigPath $configPath -ExpectedSnapshot $null | Should -Be $true
+    }
+
+    It "Test-TPMConfigRestored reports false when a file is still present after restore expected it removed (simulated failed delete)" {
+        $configPath = Join-Path $TestDrive ("verify-null-fail-" + [guid]::NewGuid().ToString('N') + '.json')
+        Set-Content -LiteralPath $configPath -Value '{"TeknoParrotRoot":"W:\\Emulators\\TeknoParrot"}' -Encoding utf8 -NoNewline
+
+        Test-TPMConfigRestored -ConfigPath $configPath -ExpectedSnapshot $null | Should -Be $false
+    }
+
+    It "Test-TPMConfigRestored reports true when the file content exactly matches the expected snapshot" {
+        $configPath = Join-Path $TestDrive ("verify-match-" + [guid]::NewGuid().ToString('N') + '.json')
+        $content = '{"TeknoParrotRoot":"C:\\SavedPath\\TeknoParrot"}'
+        Set-Content -LiteralPath $configPath -Value $content -Encoding utf8 -NoNewline
+
+        Test-TPMConfigRestored -ConfigPath $configPath -ExpectedSnapshot $content | Should -Be $true
+    }
+
+    It "Test-TPMConfigRestored reports false when a snapshot was expected but the file is missing (simulated failed write-back)" {
+        $configPath = Join-Path $TestDrive ("verify-missing-" + [guid]::NewGuid().ToString('N') + '.json')
+        Test-TPMConfigRestored -ConfigPath $configPath -ExpectedSnapshot '{"TeknoParrotRoot":"C:\\SavedPath\\TeknoParrot"}' | Should -Be $false
+    }
+
+    It "Test-TPMConfigRestored reports false when the file content differs from the expected snapshot (simulated corrupted restore)" {
+        $configPath = Join-Path $TestDrive ("verify-mismatch-" + [guid]::NewGuid().ToString('N') + '.json')
+        Set-Content -LiteralPath $configPath -Value '{"TeknoParrotRoot":"W:\\Emulators\\TeknoParrot"}' -Encoding utf8 -NoNewline
+
+        Test-TPMConfigRestored -ConfigPath $configPath -ExpectedSnapshot '{"TeknoParrotRoot":"C:\\SavedPath\\TeknoParrot"}' | Should -Be $false
+    }
+}
+
+Describe "Get-TPMEffectiveRootReportText (issue #146 review round 2, finding #4)" {
+    It "returns the effective root text when one was captured, regardless of SmokeMode" {
+        Get-TPMEffectiveRootReportText -EffectiveRoot 'W:\Emulators\TeknoParrot' -SmokeMode $false | Should -Be 'W:\Emulators\TeknoParrot'
+        Get-TPMEffectiveRootReportText -EffectiveRoot 'W:\Emulators\TeknoParrot' -SmokeMode $true | Should -Be 'W:\Emulators\TeknoParrot'
+    }
+
+    It "returns the smoke-mode label only when SmokeMode is true and no effective root was captured" {
+        $text = Get-TPMEffectiveRootReportText -EffectiveRoot $null -SmokeMode $true
+        $text | Should -Match 'smoke mode'
+    }
+
+    It "does NOT describe a real unattended-mode failure (missing/unparsable effective root) as smoke mode -- this is the exact defect from finding #4" {
+        $text = Get-TPMEffectiveRootReportText -EffectiveRoot $null -SmokeMode $false
+        $text | Should -Not -Match 'smoke mode'
+        $text | Should -Match 'could not be confirmed'
+    }
+
+    It "does NOT describe a real unattended-mode failure as smoke mode when EffectiveRoot is an empty string" {
+        $text = Get-TPMEffectiveRootReportText -EffectiveRoot '' -SmokeMode $false
+        $text | Should -Not -Match 'smoke mode'
+    }
 }
 
 Describe "Get-TPMEffectiveRootFromUnattendedLog / Test-TPMUnattendedRootMatch (issue #146)" {
@@ -602,7 +688,108 @@ Describe "Test-TPMInstallHealthGate (issue #146)" {
 
         $gate = Test-TPMInstallHealthGate -HealthResult $healthResult
         $gate.Passed | Should -Be $true
-        $gate.Reason | Should -Match 'no installation-critical failures'
+        $gate.Reason | Should -Match 'all installation-critical checks present and passed'
+    }
+
+    # Review round 2 (finding #1): absent/incomplete/malformed data must
+    # never read as success -- these cover every case the second Codex
+    # review explicitly called out, none of which the first version of this
+    # gate handled correctly (it only looked for present-and-failed named
+    # checks, so anything simply missing or malformed matched nothing and
+    # passed by default).
+    It "fails with the LoadError reason when InstallHealth.json was missing on disk" {
+        $gate = Test-TPMInstallHealthGate -HealthResult $null -LoadError 'InstallHealth.json not found at C:\fake\InstallHealth.json'
+        $gate.Passed | Should -Be $false
+        $gate.Reason | Should -Match 'not found'
+    }
+
+    It "fails with the LoadError reason when InstallHealth.json was present but invalid JSON" {
+        $gate = Test-TPMInstallHealthGate -HealthResult $null -LoadError 'InstallHealth.json at C:\fake\InstallHealth.json failed to parse: Unexpected token'
+        $gate.Passed | Should -Be $false
+        $gate.Reason | Should -Match 'failed to parse'
+    }
+
+    It "fails when the Checks array is empty" {
+        $healthResult = [pscustomobject]@{ Status = 'PASS'; Checks = @() }
+        $gate = Test-TPMInstallHealthGate -HealthResult $healthResult
+        $gate.Passed | Should -Be $false
+        $gate.Reason | Should -Match 'no Checks entries'
+    }
+
+    It "fails when Checks is entirely absent from the health result" {
+        $healthResult = [pscustomobject]@{ Status = 'PASS' }
+        $gate = Test-TPMInstallHealthGate -HealthResult $healthResult
+        $gate.Passed | Should -Be $false
+    }
+
+    It "fails when one installation-critical check is missing from Checks entirely (not merely unfailed)" {
+        $healthResult = [pscustomobject]@{
+            Status = 'PASS'
+            Checks = @(
+                [pscustomobject]@{ Name = 'TeknoParrotUi.exe exists'; Passed = $true }
+                [pscustomobject]@{ Name = 'GameProfiles folder exists'; Passed = $true }
+                # UserProfiles folder exists is missing entirely -- the
+                # pre-fix filter matched nothing named that and passed.
+            )
+        }
+        $gate = Test-TPMInstallHealthGate -HealthResult $healthResult
+        $gate.Passed | Should -Be $false
+        $gate.Reason | Should -Match 'UserProfiles folder exists -- missing'
+    }
+
+    It "fails when a critical check's Passed value is null" {
+        $healthResult = [pscustomobject]@{
+            Status = 'PASS'
+            Checks = @(
+                [pscustomobject]@{ Name = 'TeknoParrotUi.exe exists'; Passed = $null }
+                [pscustomobject]@{ Name = 'GameProfiles folder exists'; Passed = $true }
+                [pscustomobject]@{ Name = 'UserProfiles folder exists'; Passed = $true }
+            )
+        }
+        $gate = Test-TPMInstallHealthGate -HealthResult $healthResult
+        $gate.Passed | Should -Be $false
+        $gate.Reason | Should -Match 'TeknoParrotUi\.exe exists -- Passed value missing or null'
+    }
+
+    It "fails when a critical check's Passed value is an empty string" {
+        $healthResult = [pscustomobject]@{
+            Status = 'PASS'
+            Checks = @(
+                [pscustomobject]@{ Name = 'TeknoParrotUi.exe exists'; Passed = '' }
+                [pscustomobject]@{ Name = 'GameProfiles folder exists'; Passed = $true }
+                [pscustomobject]@{ Name = 'UserProfiles folder exists'; Passed = $true }
+            )
+        }
+        $gate = Test-TPMInstallHealthGate -HealthResult $healthResult
+        $gate.Passed | Should -Be $false
+    }
+
+    It "fails when a critical check's Passed value is an unknown non-boolean value (e.g. a string 'true' or an integer)" {
+        $healthResult = [pscustomobject]@{
+            Status = 'PASS'
+            Checks = @(
+                [pscustomobject]@{ Name = 'TeknoParrotUi.exe exists'; Passed = 'true' }
+                [pscustomobject]@{ Name = 'GameProfiles folder exists'; Passed = 1 }
+                [pscustomobject]@{ Name = 'UserProfiles folder exists'; Passed = $true }
+            )
+        }
+        $gate = Test-TPMInstallHealthGate -HealthResult $healthResult
+        $gate.Passed | Should -Be $false
+        $gate.Reason | Should -Match 'not a boolean'
+    }
+
+    It "fails when Checks contains entries with no Name at all alongside the real critical names" {
+        $healthResult = [pscustomobject]@{
+            Status = 'PASS'
+            Checks = @(
+                [pscustomobject]@{ Passed = $true }
+                [pscustomobject]@{ Name = 'TeknoParrotUi.exe exists'; Passed = $true }
+                [pscustomobject]@{ Name = 'GameProfiles folder exists'; Passed = $true }
+            )
+        }
+        $gate = Test-TPMInstallHealthGate -HealthResult $healthResult
+        $gate.Passed | Should -Be $false
+        $gate.Reason | Should -Match 'UserProfiles folder exists -- missing'
     }
 }
 
