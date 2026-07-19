@@ -64,14 +64,72 @@ $certificationJson = Join-Path $reportDir "TPM-Certification-Scorecard.json"
 # own regression tests rather than assumed to already exist.
 $screenshotDir = Join-Path $reportDir "Screenshots"
 
+$script:tpmValidationReportLines = New-Object System.Collections.Generic.List[string]
+$script:tpmCertificationReportLines = New-Object System.Collections.Generic.List[string]
+
 function Add-Report {
     param([string]$Text)
-    $Text | Out-File -FilePath $md -Append -Encoding utf8
+    $script:tpmValidationReportLines.Add($Text)
 }
 
 function Add-CertificationReport {
     param([string]$Text)
-    $Text | Out-File -FilePath $certificationMd -Append -Encoding utf8
+    $script:tpmCertificationReportLines.Add($Text)
+}
+
+function Publish-TPMCertificationArtifacts {
+    param([object[]]$Artifacts)
+
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    $staged = New-Object System.Collections.Generic.List[object]
+    $destinations = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    try {
+        foreach ($artifact in $Artifacts) {
+            if ($null -eq $artifact -or [string]::IsNullOrWhiteSpace([string]$artifact.Path)) {
+                throw 'authoritative artifact has no destination path'
+            }
+            $destination = [System.IO.Path]::GetFullPath([string]$artifact.Path)
+            if (-not $destinations.Add($destination)) {
+                throw "duplicate authoritative artifact destination: $destination"
+            }
+            if (Test-Path -LiteralPath $destination) {
+                throw "authoritative artifact destination already exists: $destination"
+            }
+            $parent = [System.IO.Path]::GetDirectoryName($destination)
+            if ([string]::IsNullOrWhiteSpace($parent) -or -not (Test-Path -LiteralPath $parent -PathType Container)) {
+                throw "authoritative artifact parent does not exist: $parent"
+            }
+        }
+        foreach ($artifact in $Artifacts) {
+            $destination = [System.IO.Path]::GetFullPath([string]$artifact.Path)
+            $parent = [System.IO.Path]::GetDirectoryName($destination)
+            $pending = Join-Path $parent ('.' + [System.IO.Path]::GetFileName($destination) + '.' + [guid]::NewGuid().ToString('N') + '.pending')
+            [System.IO.File]::WriteAllText($pending, [string]$artifact.Content, $encoding)
+            if (-not (Test-Path -LiteralPath $pending -PathType Leaf) -or (Get-Item -LiteralPath $pending).Length -le 0) {
+                throw "authoritative artifact staging failed: $destination"
+            }
+            $staged.Add([pscustomobject]@{ Pending=$pending; Final=$destination; Promoted=$false })
+        }
+        foreach ($item in $staged) {
+            Move-Item -LiteralPath $item.Pending -Destination $item.Final -ErrorAction Stop
+            $item.Promoted = $true
+        }
+    } catch {
+        $failure = $_.Exception.Message
+        $cleanupErrors = New-Object System.Collections.Generic.List[string]
+        foreach ($item in $staged) {
+            foreach ($path in @($item.Pending, $(if ($item.Promoted) { $item.Final } else { $null }))) {
+                if (-not [string]::IsNullOrWhiteSpace([string]$path) -and (Test-Path -LiteralPath $path)) {
+                    try { Remove-Item -LiteralPath $path -Force -ErrorAction Stop }
+                    catch { $cleanupErrors.Add("$path -- $($_.Exception.Message)") }
+                }
+            }
+        }
+        if ($cleanupErrors.Count -gt 0) {
+            throw "certification artifact publication failed: $failure; partial-artifact cleanup also failed: $($cleanupErrors -join '; ')"
+        }
+        throw "certification artifact publication failed; no authoritative reports were retained: $failure"
+    }
 }
 
 function Copy-IfExists {
@@ -627,14 +685,14 @@ function New-TPMCertificationScreenshot {
     )
 
     $recordName = if ([string]::IsNullOrWhiteSpace($Name)) { 'unnamed-evidence' } else { $Name }
-    if ([string]::IsNullOrWhiteSpace($Name)) { return [pscustomobject]@{ Name=$recordName; Label=$recordName; Path=$null; Status='Failed'; EvidenceType='Failed'; CaptureScope=$null; Details='invalid evidence metadata: Name is empty' } }
-    if ($Skip) { return [pscustomobject]@{ Name=$recordName; Label=$recordName; Path=$null; Status='Skipped'; EvidenceType='Skipped'; CaptureScope=$null; Details=$(if ($SkipReason) { $SkipReason } else { 'not applicable to this run' }) } }
-    if ([string]::IsNullOrWhiteSpace($ScreenshotDir)) { return [pscustomobject]@{ Name=$recordName; Label=$recordName; Path=$null; Status='Failed'; EvidenceType='Failed'; CaptureScope=$null; Details='invalid evidence metadata: ScreenshotDir is empty' } }
+    if ([string]::IsNullOrWhiteSpace($Name)) { return [pscustomobject]@{ Name=$recordName; Label=$recordName; Path=$null; Status='Failed'; EvidenceType='Failed'; Required=$true; WorkflowId=$script:tpmEvidenceWorkflowId; CaptureScope=$null; Details='invalid evidence metadata: Name is empty' } }
+    if ($Skip) { return [pscustomobject]@{ Name=$recordName; Label=$recordName; Path=$null; Status='Skipped'; EvidenceType='Skipped'; Required=$false; WorkflowId=$script:tpmEvidenceWorkflowId; CaptureScope=$null; Details=$(if ($SkipReason) { $SkipReason } else { 'not applicable to this run' }) } }
+    if ([string]::IsNullOrWhiteSpace($ScreenshotDir)) { return [pscustomobject]@{ Name=$recordName; Label=$recordName; Path=$null; Status='Failed'; EvidenceType='Failed'; Required=$true; WorkflowId=$script:tpmEvidenceWorkflowId; CaptureScope=$null; Details='invalid evidence metadata: ScreenshotDir is empty' } }
     if (@('ScreenCapture','DeterministicRender') -cnotcontains $EvidenceType) {
         $suppliedType = if ([string]::IsNullOrWhiteSpace($EvidenceType)) { '(empty)' } else { $EvidenceType }
-        return [pscustomobject]@{ Name=$recordName; Label=$recordName; Path=$null; Status='Failed'; EvidenceType='Failed'; CaptureScope=$null; Details="invalid evidence metadata: EvidenceType '$suppliedType' is not ScreenCapture or DeterministicRender" }
+        return [pscustomobject]@{ Name=$recordName; Label=$recordName; Path=$null; Status='Failed'; EvidenceType='Failed'; Required=$true; WorkflowId=$script:tpmEvidenceWorkflowId; CaptureScope=$null; Details="invalid evidence metadata: EvidenceType '$suppliedType' is not ScreenCapture or DeterministicRender" }
     }
-    if (-not $CaptureAction) { return [pscustomobject]@{ Name=$recordName; Label=$recordName; Path=$null; Status='Failed'; EvidenceType='Failed'; CaptureScope=$null; Details='no CaptureAction supplied' } }
+    if (-not $CaptureAction) { return [pscustomobject]@{ Name=$recordName; Label=$recordName; Path=$null; Status='Failed'; EvidenceType='Failed'; Required=$true; WorkflowId=$script:tpmEvidenceWorkflowId; CaptureScope=$null; Details='no CaptureAction supplied' } }
 
     if (-not (Test-Path -LiteralPath $ScreenshotDir -PathType Container)) {
         New-Item -ItemType Directory -Force -Path $ScreenshotDir | Out-Null
@@ -643,7 +701,7 @@ function New-TPMCertificationScreenshot {
     try {
         $path = New-TPMScreenshotReservedPath -ScreenshotDir $ScreenshotDir -Name $Name
     } catch {
-        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $null; Status = 'Failed'; EvidenceType = 'Failed'; CaptureScope = $null; Details = "could not reserve a unique screenshot path: $($_.Exception.Message)" }
+        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $null; Status = 'Failed'; EvidenceType = 'Failed'; Required = $true; WorkflowId = $script:tpmEvidenceWorkflowId; CaptureScope = $null; Details = "could not reserve a unique screenshot path: $($_.Exception.Message)" }
     }
 
     try {
@@ -657,12 +715,12 @@ function New-TPMCertificationScreenshot {
         # discarding evidence, even evidence of a failure.
         $validation = Test-TPMScreenshotFileValid -Path $path
         if (-not $validation.Valid) {
-            return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $path; Status = 'Failed'; EvidenceType = 'Failed'; CaptureScope = $null; Details = $validation.Reason }
+            return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $path; Status = 'Failed'; EvidenceType = 'Failed'; Required = $true; WorkflowId = $script:tpmEvidenceWorkflowId; CaptureScope = $null; Details = $validation.Reason }
         }
         $resolvedScope = if ($EvidenceType -eq 'ScreenCapture' -and $captureScope) { [string]$captureScope } else { $null }
-        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $path; Status = 'Captured'; EvidenceType = $EvidenceType; CaptureScope = $resolvedScope; Details = 'captured' }
+        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $path; Status = 'Captured'; EvidenceType = $EvidenceType; Required = $true; WorkflowId = $script:tpmEvidenceWorkflowId; CaptureScope = $resolvedScope; Details = 'captured' }
     } catch {
-        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $path; Status = 'Failed'; EvidenceType = 'Failed'; CaptureScope = $null; Details = $_.Exception.Message }
+        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $path; Status = 'Failed'; EvidenceType = 'Failed'; Required = $true; WorkflowId = $script:tpmEvidenceWorkflowId; CaptureScope = $null; Details = $_.Exception.Message }
     }
 }
 
@@ -678,6 +736,7 @@ function New-TPMCertificationScreenshot {
 # reserved file is a zero-byte placeholder -- $CaptureAction's real
 # content overwrites it immediately afterward.
 $script:tpmScreenshotSequence = 0
+$script:tpmEvidenceWorkflowId = [guid]::NewGuid().ToString('N')
 function New-TPMScreenshotReservedPath {
     param([string]$ScreenshotDir, [string]$Name)
     $safeName = ($Name -replace '[^A-Za-z0-9_\-]', '-')
@@ -1421,13 +1480,12 @@ $results = [ordered]@{
     BackupDir = $backupDir
     SmokeMode = (-not $RunUnattendedTPM)
     Checks = @()
-    # Issue #151: certification evidence, not a scored gate -- deliberately
-    # never read by New-CertificationScorecard's $scoreItems/$applicableItems
-    # scoring computation. A screenshot failure is recorded explicitly (see
-    # New-TPMCertificationScreenshot) but must never itself flip Overall or
-    # change the score, per the issue's explicit "do not modify
-    # certification scoring" constraint.
+    # Evidence remains outside numeric score arithmetic, but required
+    # evidence eligibility is enforced by Complete-TPMCertificationTransaction.
+    # A perfect numeric score therefore cannot certify an incomplete run.
     Screenshots = @()
+    EvidenceWorkflowId = $script:tpmEvidenceWorkflowId
+    PreliminaryStatus = 'RUNNING'
 }
 
 # Records one screenshot attempt (captured, failed, or skipped) onto
@@ -1442,7 +1500,7 @@ function Add-Screenshot {
         else { $shot=New-TPMCertificationScreenshot -ScreenshotDir $ScreenshotDir -Name $Name -EvidenceType $EvidenceType -CaptureAction $CaptureAction }
     } catch {
         $safeName=if([string]::IsNullOrWhiteSpace($Name)){'unnamed-evidence'}else{$Name}
-        $shot=[pscustomobject]@{Name=$safeName;Label=$safeName;Path=$null;Status='Failed';EvidenceType='Failed';CaptureScope=$null;Details="evidence creation failed safely: $($_.Exception.Message)"}
+        $shot=[pscustomobject]@{Name=$safeName;Label=$safeName;Path=$null;Status='Failed';EvidenceType='Failed';Required=(-not $Skip);WorkflowId=$script:tpmEvidenceWorkflowId;CaptureScope=$null;Details="evidence creation failed safely: $($_.Exception.Message)"}
     }
     $script:results.Screenshots += $shot
     $mark=switch($shot.Status){'Captured'{'[SHOT]'}'Skipped'{'[SKIP]'}default{'[FAIL]'}}
@@ -1451,15 +1509,142 @@ function Add-Screenshot {
     return $shot
 }
 
-function Set-TPMCertificationEvidenceFinalization {
-    param($Certification,$Results,$FinalEvidence)
-    $passed=($null -ne $FinalEvidence -and $FinalEvidence.Status -eq 'Captured' -and $FinalEvidence.EvidenceType -eq 'ScreenCapture')
-    $details=if($passed){'final certification evidence captured'}elseif($null -eq $FinalEvidence){'final certification evidence record is missing'}else{"final certification evidence failed: $($FinalEvidence.Details)"}
-    $status=[pscustomobject]@{Passed=$passed;Status=$(if($passed){'Pass'}else{'Fail'});Details=$details}
-    $Certification|Add-Member -NotePropertyName EvidenceFinalization -NotePropertyValue $status -Force
-    $Results.EvidenceFinalization=$status
-    if(-not $passed){$Certification.Overall='NOT CERTIFIED'}
-    return $status
+function Complete-TPMCertificationTransaction {
+    param($Certification, $Results)
+
+    # System Invariant Inventory: this manifest is the authoritative production
+    # evidence contract. Every expected identifier occurs exactly once; no
+    # unrelated record can substitute for a missing required artifact.
+    $expectedEvidence = [ordered]@{
+        'certification-suite-running' = [pscustomobject]@{ Required=$true; EvidenceType='ScreenCapture' }
+        'requested-effective-root-evidence' = [pscustomobject]@{ Required=$true; EvidenceType='ScreenCapture' }
+        'live-thumbnail-evidence' = [pscustomobject]@{ Required=$false; EvidenceType='Skipped' }
+        'live-controls-evidence' = [pscustomobject]@{ Required=$false; EvidenceType='Skipped' }
+        'adaptive-menu-normal' = [pscustomobject]@{ Required=$true; EvidenceType='DeterministicRender' }
+        'adaptive-menu-small' = [pscustomobject]@{ Required=$true; EvidenceType='DeterministicRender' }
+        'adaptive-menu-maximized' = [pscustomobject]@{ Required=$true; EvidenceType='DeterministicRender' }
+        'smoke-file-safety-evidence' = [pscustomobject]@{ Required=$true; EvidenceType='DeterministicRender' }
+        'final-certification-result' = [pscustomobject]@{ Required=$true; EvidenceType='ScreenCapture' }
+    }
+    $errors = New-Object System.Collections.Generic.List[string]
+    $evidence = @($Results.Screenshots)
+    $workflowId = [string]$Results.EvidenceWorkflowId
+    if ([string]::IsNullOrWhiteSpace($workflowId)) {
+        $errors.Add('certification evidence workflow identity is missing')
+    }
+
+    foreach ($expectedName in $expectedEvidence.Keys) {
+        $recordsForName = @($evidence | Where-Object { $_.Name -ceq $expectedName })
+        if ($recordsForName.Count -ne 1) {
+            $errors.Add("expected exactly one '$expectedName' evidence record; found $($recordsForName.Count)")
+        }
+    }
+
+    foreach ($shot in $evidence) {
+        if ($null -eq $shot) {
+            $errors.Add('null evidence record is not permitted')
+            continue
+        }
+        $properties = @($shot.PSObject.Properties.Name)
+        if ($properties -notcontains 'Name' -or [string]::IsNullOrWhiteSpace([string]$shot.Name)) {
+            $errors.Add('evidence record has no valid Name')
+            continue
+        }
+        $name = [string]$shot.Name
+        if (@($expectedEvidence.Keys) -cnotcontains $name) {
+            $errors.Add("unexpected evidence record '$name'")
+            continue
+        }
+        $expected = $expectedEvidence[$name]
+        if ($properties -notcontains 'WorkflowId' -or [string]::IsNullOrWhiteSpace([string]$shot.WorkflowId) -or
+            [string]$shot.WorkflowId -cne $workflowId) {
+            $errors.Add("evidence '$name' did not originate from this certification evidence workflow")
+            continue
+        }
+        if ($properties -notcontains 'Required' -or $shot.Required -isnot [bool] -or $shot.Required -ne $expected.Required) {
+            $errors.Add("evidence '$name' has invalid Required metadata")
+            continue
+        }
+        if ($expected.Required) {
+            if ($shot.Status -cne 'Captured') {
+                $errors.Add("required evidence '$name' is $($shot.Status): $($shot.Details)")
+                continue
+            }
+            if ([string]$shot.EvidenceType -cne $expected.EvidenceType) {
+                $errors.Add("required evidence '$name' has EvidenceType '$($shot.EvidenceType)', expected '$($expected.EvidenceType)'")
+                continue
+            }
+            if ([string]::IsNullOrWhiteSpace([string]$shot.Path)) {
+                $errors.Add("required evidence '$name' has no file path")
+                continue
+            }
+            try {
+                $validation = Test-TPMScreenshotFileValid -Path ([string]$shot.Path)
+                if (-not $validation.Valid) {
+                    $errors.Add("required evidence '$name' failed final validation: $($validation.Reason)")
+                }
+            } catch {
+                $errors.Add("required evidence '$name' final validation threw: $($_.Exception.Message)")
+            }
+        } elseif ($shot.Status -cne 'Skipped' -or $shot.EvidenceType -cne 'Skipped' -or $shot.Path) {
+            $errors.Add("optional evidence '$name' is not an explicit pathless Skipped record")
+        }
+    }
+
+    $evidencePassed = ($errors.Count -eq 0)
+    $evidenceStatus = [pscustomobject]@{
+        Passed = $evidencePassed
+        Status = $(if ($evidencePassed) { 'Pass' } else { 'Fail' })
+        Details = $(if ($evidencePassed) { 'complete evidence manifest validated, including exactly one final-certification-result' } else { $errors -join '; ' })
+    }
+    $scoreEligible = ($Certification.Overall -ceq 'CERTIFIED')
+    $certified = ($scoreEligible -and $evidencePassed)
+    $finalStatus = if ($certified) { 'PASS' } else { 'FAIL' }
+    $finalOverall = if ($certified) { 'CERTIFIED' } else { 'NOT CERTIFIED' }
+    $exitCode = if ($certified) { 0 } else { 1 }
+    $transaction = [pscustomobject]@{
+        Passed = $certified
+        Status = $finalStatus
+        Overall = $finalOverall
+        ExitCode = $exitCode
+        ScoreEligible = $scoreEligible
+        Evidence = $evidenceStatus
+    }
+
+    # This is the only assignment point for final authoritative outcome state.
+    $Certification.Overall = $finalOverall
+    $Certification.Screenshots = $evidence
+    $Certification | Add-Member -NotePropertyName Status -NotePropertyValue $finalStatus -Force
+    $Certification | Add-Member -NotePropertyName ExitCode -NotePropertyValue $exitCode -Force
+    $Certification | Add-Member -NotePropertyName ScoreEligible -NotePropertyValue $scoreEligible -Force
+    $Certification | Add-Member -NotePropertyName EvidenceFinalization -NotePropertyValue $evidenceStatus -Force
+    $Certification | Add-Member -NotePropertyName Finalization -NotePropertyValue $transaction -Force
+    $Results.Status = $finalStatus
+    $Results.EvidenceFinalization = $evidenceStatus
+    $Results.Finalization = $transaction
+    $Results.CertificationOverall = $finalOverall
+    $Results.ExitCode = $exitCode
+    return $transaction
+}
+
+function Get-TPMCertificationFinalConsoleLines {
+    param($Finalization)
+    @(
+        "FINAL STATUS : $($Finalization.Status)"
+        "OVERALL      : $($Finalization.Overall)"
+        "EXIT CODE    : $($Finalization.ExitCode)"
+        "EVIDENCE     : $($Finalization.Evidence.Status) -- $($Finalization.Evidence.Details)"
+    )
+}
+
+function Get-TPMCertificationFinalReportLines {
+    param($Finalization)
+    @(
+        "Status: **$($Finalization.Status)**"
+        "Overall: **$($Finalization.Overall)**"
+        "Process exit code: $($Finalization.ExitCode)"
+        "Evidence finalization: $($Finalization.Evidence.Status) -- $($Finalization.Evidence.Details)"
+    )
 }
 
 function Add-CheckResult {
@@ -2129,10 +2314,10 @@ try {
         }
     }
 
-    $results.Status = if (@($results.Checks | Where-Object { -not $_.Passed }).Count -eq 0) { 'PASS' } else { 'FAIL' }
+    $results.PreliminaryStatus = if (@($results.Checks | Where-Object { -not $_.Passed }).Count -eq 0) { 'PASS' } else { 'FAIL' }
 }
 catch {
-    $results.Status = 'FAIL'
+    $results.PreliminaryStatus = 'FAIL'
     $results.Error = $_.Exception.Message
     Add-CheckResult 'Unhandled validation error' $false $_.Exception.Message
     throw
@@ -2233,15 +2418,14 @@ finally {
 
     Write-Host ""
     Write-Host "============================================"
-    Write-Host " TPM CERTIFICATION SCORECARD"
+    Write-Host " TPM CERTIFICATION SCORECARD - PROVISIONAL"
     Write-Host "============================================"
-    Write-Host (" Overall : {0}" -f $certification.Overall)
+    Write-Host (" Pending : final evidence validation (gate result: {0})" -f $certification.Overall)
     Write-Host (" Score   : {0}/{1} ({2}%)" -f $certification.Passed, $certification.Total, $certification.ScorePercent)
     Write-Host (" Report  : {0}" -f $certificationMd)
     Write-Host "============================================"
-    $finalEvidence=Add-Screenshot -ScreenshotDir $screenshotDir -Name 'final-certification-result' -EvidenceType 'ScreenCapture' -CaptureAction { param($p) Save-TPMScreenCapture -Path $p }
-    $evidenceFinalization=Set-TPMCertificationEvidenceFinalization -Certification $certification -Results $results -FinalEvidence $finalEvidence
-    if(-not $evidenceFinalization.Passed){ Write-Host (" FINALIZATION FAILED: {0}" -f $evidenceFinalization.Details) -ForegroundColor Red; Write-Host ' Overall : NOT CERTIFIED' -ForegroundColor Red }
+    [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'final-certification-result' -EvidenceType 'ScreenCapture' -CaptureAction { param($p) Save-TPMScreenCapture -Path $p })
+    $finalization = Complete-TPMCertificationTransaction -Certification $certification -Results $results
     Clear-TPMConsoleStatus
 
     # $results.Screenshots now includes the final-certification-result
@@ -2249,15 +2433,13 @@ finally {
     # taken when New-CertificationScorecard was called above, before that
     # entry existed) so both JSON artifacts reflect the complete list, not
     # the incomplete one from before the final screenshot.
-    $certification.Screenshots = @($results.Screenshots)
-    $certification | ConvertTo-Json -Depth 8 | Out-File $certificationJson -Encoding utf8
-    $results | ConvertTo-Json -Depth 8 | Out-File $json -Encoding utf8
-
-    Add-CertificationReport "# TPM Certification Scorecard"
+    try {
+        Add-CertificationReport "# TPM Certification Scorecard"
     Add-CertificationReport ""
-    Add-CertificationReport ("Overall: **{0}**" -f $certification.Overall)
+    foreach ($line in @(Get-TPMCertificationFinalReportLines -Finalization $finalization)) {
+        Add-CertificationReport $line
+    }
     Add-CertificationReport ("Score: {0}/{1} ({2}%)" -f $certification.Passed, $certification.Total, $certification.ScorePercent)
-    Add-CertificationReport ("Evidence finalization: {0} -- {1}" -f $certification.EvidenceFinalization.Status, $certification.EvidenceFinalization.Details)
     Add-CertificationReport ("Elapsed: {0}" -f $results.Elapsed)
     Add-CertificationReport ""
     Add-CertificationReport "## Certification Target"
@@ -2320,8 +2502,9 @@ finally {
     Add-Report ""
     Add-Report "## Summary"
     Add-Report ""
-    Add-Report "Status: **$($results.Status)**"
-    Add-Report ("Certification: **{0}**" -f $certification.Overall)
+    foreach ($line in @(Get-TPMCertificationFinalReportLines -Finalization $finalization)) {
+        Add-Report $line
+    }
     Add-Report "Elapsed: $($results.Elapsed)"
     Add-Report ("Report folder: {0}" -f $reportDir)
     Add-Report ("Backup folder: {0}" -f $backupDir)
@@ -2380,4 +2563,27 @@ finally {
             Add-Report ("- [{0}] {1} (type={2}{3}): {4}" -f $shotMark, $shot.Label, $shot.EvidenceType, $shotScopeText, $shotLocation)
         }
     }
+
+        $newline = [Environment]::NewLine
+        $artifacts = @(
+            [pscustomobject]@{Path=$certificationJson;Content=($certification | ConvertTo-Json -Depth 8)}
+            [pscustomobject]@{Path=$json;Content=($results | ConvertTo-Json -Depth 8)}
+            [pscustomobject]@{Path=$certificationMd;Content=(($script:tpmCertificationReportLines -join $newline) + $newline)}
+            [pscustomobject]@{Path=$md;Content=(($script:tpmValidationReportLines -join $newline) + $newline)}
+        )
+        Publish-TPMCertificationArtifacts -Artifacts $artifacts
+    } catch {
+        $publicationError = $_.Exception.Message
+        Write-Host (" FINAL STATUS : FAIL") -ForegroundColor Red
+        Write-Host (" OVERALL      : NOT CERTIFIED") -ForegroundColor Red
+        Write-Host (" EXIT CODE    : 1") -ForegroundColor Red
+        Write-Host (" REPORTS      : {0}" -f $publicationError) -ForegroundColor Red
+        exit 1
+    }
+
+    $finalColor = if ($finalization.Passed) { 'Green' } else { 'Red' }
+    foreach ($line in @(Get-TPMCertificationFinalConsoleLines -Finalization $finalization)) {
+        Write-Host (" {0}" -f $line) -ForegroundColor $finalColor
+    }
+    exit $finalization.ExitCode
 }

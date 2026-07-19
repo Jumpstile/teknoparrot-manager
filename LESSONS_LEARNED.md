@@ -653,3 +653,8 @@ correct) is not evidence the body executed correctly.
 ## Issue #154 -- parameter validation can bypass controlled failure paths
 
 A wrapper forwarded an omitted optional EvidenceType as an explicit empty string. ValidateSet rejected it before the callee body could return its intended Skipped/Failed record, aborting arcade certification during evidence finalization. For internal transaction metadata, validate inside the function and return structured failure evidence; wrappers must not forward capture-only parameters on skip paths. A required final artifact may remain outside numeric scoring, but failure must still force the overall certification outcome to NOT CERTIFIED.
+
+
+## Issue #154 follow-up -- finalization must be one transaction
+
+Fixing a parameter-binding crash was insufficient because evidence, scorecard outcome, report status, and process exit were still independent. A certification pipeline needs a formal manifest and one final authority. Intermediate gate arithmetic is eligibility, not certification. Finalization must validate the complete accumulated evidence set, reject missing/duplicate/substituted records, and propagate one outcome object to every human- and machine-readable output and the process exit code.

@@ -999,6 +999,19 @@ longer appears inline in the if-block, since it now lives inside `Get-MainMenuSe
   behavior that was already supposed to work.
 
 
-## Certification evidence finalization (issue #154)
+## Certification finalization transaction (issue #154)
 
-Evidence metadata is validated inside `New-TPMCertificationScreenshot`, not by parameter-binding attributes, so null/empty internal metadata becomes a structured Failed record instead of terminating the harness. `Add-Screenshot` omits capture-only parameters on Skip paths and is the sole accumulator. Final certification evidence is a non-scored finalization invariant: failure leaves Passed/Total unchanged but forces Overall to NOT CERTIFIED and is serialized consistently in both result objects and Markdown.
+Complete-TPMCertificationTransaction is the sole authority for the final outcome. Numeric scoring is computed first and remains unchanged, but it establishes only score eligibility. Certification also requires the complete evidence manifest. The transaction propagates one derived Status, Overall, and ExitCode to the scorecard, validation result, both Markdown reports, console renderer, and process exit.
+
+### System Invariant Inventory
+
+1. The evidence manifest contains exactly these identifiers once each: certification-suite-running, requested-effective-root-evidence, live-thumbnail-evidence, live-controls-evidence, the three adaptive-menu captures, smoke-file-safety-evidence, and final-certification-result.
+2. Required evidence is every non-skipped production capture. Every required record must be Captured, have its manifest-declared type, carry the current workflow provenance identifier, have a path, and pass PNG validation again during finalization.
+3. The two conditional live-evidence slots are optional only when represented as pathless Skipped records. Optional evidence cannot masquerade as a capture or failure.
+4. Exactly one case-sensitive final-certification-result must exist and must be the required validated ScreenCapture created in the current workflow. Zero, duplicates, wrong identity/type/provenance, skipped, failed, or unrelated substitutes fail.
+5. Unexpected, null, malformed, extra, conflicting, or duplicate evidence fails the manifest. A later success never removes an earlier required failure.
+6. A passing numeric score cannot override evidence failure. Conversely, complete evidence cannot override a failed score.
+7. Final PASS, CERTIFIED, and exit code 0 are emitted only together. Every other combination becomes FAIL, NOT CERTIFIED, and exit code 1.
+8. Reports and console text render the transaction object; they do not recalculate outcome. The process exits with that same transaction's ExitCode.
+9. The pre-final screenshot display is explicitly provisional and cannot claim certification before final evidence is validated.
+10. Final report publication is guarded. A write failure removes partial authoritative report files, prints only a failure console outcome, and exits nonzero; a final PASS console is emitted only after all reports are written.
