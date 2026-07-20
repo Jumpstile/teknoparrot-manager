@@ -310,4 +310,4 @@ function New-TPMCommitMarkerReportV1 {
     }
 }
 
-Export-ModuleMember -Function New-TPMEligibilityReportV1,Get-TPMFinalEvidenceStatusV1,New-TPMPublicationReportV1,New-TPMFinalOutcomeReportV1,New-TPMScorecardReportV1,New-TPMValidationReportV1,New-TPMManifestReportV1,New-TPMCommitMarkerReportV1
+Export-ModuleMember -Function New-TPMEligibilityReportV1,Get-TPMFinalEvidenceStatusV1,New-TPMPublicationReportV1,New-TPMFinalOutcomeReportV1,New-TPMScorecardReportV1,New-TPMValidationReportV1,New-TPMManifestReportV1,New-TPMCommitMarkerReportV1,Assert-TPMMarkdownRunIdentityV1,Assert-TPMMarkdownSha256V1

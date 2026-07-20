@@ -68,6 +68,9 @@ have passed. Stable identifiers are retained across revisions.
   identities, byte lengths, SHA-256 hashes, and run correlation.
 - [ ] ADR155-0306 -- Stage the complete seven-file bundle and expose authority
   only after the marker is durably validated; never overwrite a destination.
+  (Partial: deterministic staging with rollback is built; durable-validation
+  read-back, promotion to a final destination, and exposing publication
+  authority remain outstanding -- see evidence below.)
 - [ ] ADR155-0307 -- Compose the sole final outcome from issued eligibility and
   issued publication outcomes; console, reports, result, and exit code agree.
 - [ ] ADR155-0308 -- Publish authoritative NOT CERTIFIED bundles for ineligible
@@ -848,3 +851,106 @@ Phase 3 work: staging/publication (ADR155-0306), the sole final-outcome
 composition already substantially covered by the dispatcher's
 `IssueFinalOutcome` (ADR155-0307), NOT-CERTIFIED bundle publication
 (ADR155-0308), and the atomic cutover (ADR155-0309).
+
+## Phase 3 publication staging (ADR155-0306, partial) -- 2026-07-20
+
+Adds `scripts/TPMCertification.Publication.psm1`: `New-TPMPublicationStagingV1`,
+the first filesystem-writing function in Phase 3. Deliberately scoped to
+deterministic staging only, per instruction: no promotion to a final
+destination, no durable-validation read-back, no `Committed=true`
+transition, and no wiring into the dispatcher's
+`RegisterCommittedPublication`/`RegisterPublicationFailure` phase machine.
+The result object's `Committed` field is hardcoded `$false` in every
+outcome to make that boundary explicit and unambiguous to any future
+caller.
+
+- Takes the five report objects plus the already-built Manifest and
+  Marker (from ADR155-0305) and an absolute `StagingParentRoot`. Before
+  any filesystem action, it cross-validates the bundle purely from data
+  the prior builders already vouched for: re-parses Manifest.Json and
+  Marker.Json, confirms `Manifest.RunIdentity == Marker.RunIdentity` and
+  `Marker.ManifestSha256` matches the actual `Manifest.Bytes` hash, then
+  walks the Manifest's own `Artifacts` array and requires each supplied
+  report argument's `FileName` and SHA-256 (recomputed from its own
+  `Bytes`, never trusted from the caller) match what the Manifest already
+  recorded for that identifier. A caller passing a report in the wrong
+  parameter slot, or a Manifest/Marker pair from two different runs, is
+  rejected with `PUBLISH_INVALID` before any directory or file is
+  touched -- confirmed by a test that asserts zero files exist under
+  `StagingParentRoot` after such a rejection.
+- Deterministic, atomic construction: the staging directory is
+  `StagingParentRoot\<RunIdentity>`, resolved through the existing
+  `Resolve-TPMContainedPathV1` (component-based containment, reparse
+  rejection) rather than any new path logic. The same RunIdentity always
+  resolves to the same location, so a second staging attempt for an
+  already-fully-staged run deterministically collides on the first file
+  write rather than silently landing somewhere else.
+- Per-file, never-overwrite semantics matching Section 10's "leaf must
+  not exist" rule: each of the seven files is written with
+  `IO.FileStream` opened `FileMode.CreateNew` (the same idiom already
+  used by `Write-TPMShadowDiagnosticV1` in Shadow.psm1), which throws if
+  that exact file already exists; nothing is ever truncated or replaced.
+  The staging directory itself is created if absent but may also be
+  reused if already present (e.g. a retry after a prior run's clean
+  rollback) -- reuse is safe specifically because the per-file check
+  still fails closed on any actual collision.
+- Rollback: files written during a failed staging attempt are tracked in
+  an owned-paths list and deleted only from that list, never by
+  directory-wide cleanup, so a colliding pre-existing file that this call
+  did not create is never touched even when it caused the failure. The
+  freshly created staging directory is removed only if this call created
+  it and it is empty afterward; a reused (already-existing) directory is
+  never removed. Failure codes follow the ADR-Section-9 vocabulary
+  (`STAGING_FAILED` for directory-level problems including reparse-point
+  rejection, `PROMOTION_FAILED` for a report-file collision or write
+  exception, `MARKER_WRITE_FAILED` specifically when the failing artifact
+  is the marker, `ROLLBACK_FAILED` if cleanup itself throws).
+- Exports `Assert-TPMMarkdownRunIdentityV1`/`Assert-TPMMarkdownSha256V1`
+  from Reports.psm1 (previously private, added during the ADR155-0304
+  Markdown-injection fix) so the new module reuses the existing format
+  validators instead of duplicating the regexes.
+- Manually verified end-to-end before writing formal tests: happy-path
+  staging of a full 7-artifact bundle with on-disk bytes hash-matched
+  against the source report bytes; re-staging the same run rejected with
+  the original files unmodified; a deliberately pre-placed colliding file
+  at the third artifact position caused the first two already-written
+  files to be rolled back while the pre-existing collider remained
+  untouched.
+- ADR155-Q001/Q002: `Tests/TPMCertification.Publication.Tests.ps1` (11
+  tests: exact seven-file output with on-disk byte-hash verification
+  against every source report; deterministic RunIdentity-named staging
+  path; re-staging the same run fails closed with originals untouched;
+  rollback removes only the files this call wrote when a mid-bundle
+  write collides, leaving the pre-existing collider intact; rollback of
+  a freshly created empty directory on a first-file collision; rejection
+  of a staging directory that is a pre-existing reparse point -- skipped
+  automatically on both engines in this sandbox since creating a
+  symbolic link requires elevated privileges here; relative/null/empty
+  `StagingParentRoot` rejection; Manifest/Marker shape and null
+  rejection; cross-run Marker/Manifest correlation rejection; mismatched
+  report-argument rejection; and confirmation that pre-flight rejection
+  performs zero filesystem writes) passed 11/11 on pwsh 7.6.3 and 10/11
+  (1 skipped for the reason above) on Windows PowerShell 5.1.26100.8875.
+  Combined with `Tests/TPMCertification.Reports.Tests.ps1` (unchanged
+  behavior, re-run to confirm the new Reports.psm1 exports introduced no
+  regression): 59/59 on pwsh, 58/59 (1 skipped) on Windows PowerShell 5.1.
+- ADR155-Q003/Q004: `Invoke-Pester -Path .\Tests` passed 924/924 on pwsh
+  7.6.3 and 918/924 (5 unchanged issue #148 Repair-GamePaths failures, 1
+  skipped) on Windows PowerShell 5.1.
+- ADR155-Q005/Q006/Q007: all three changed/new files
+  (`scripts/TPMCertification.Reports.psm1`,
+  `scripts/TPMCertification.Publication.psm1`,
+  `Tests/TPMCertification.Publication.Tests.ps1`) had zero non-ASCII
+  bytes, zero parser errors, zero PSScriptAnalyzer findings (repository
+  settings), and zero InjectionHunter findings.
+
+ADR155-0306 remains unchecked and is explicitly partial: this checkpoint
+delivers deterministic staging and rollback only. Still outstanding for
+ADR155-0306: durable post-write validation (reading the staged bundle
+back and re-verifying it against the Manifest/Marker before treating it
+as authoritative), promotion from the private staging directory to a
+final destination, and the sole `Committed` transition described in
+Section 9. No publication-state transition beyond staging was wired into
+the dispatcher; `RegisterCommittedPublication`/`RegisterPublicationFailure`
+are unchanged and still take only the publisher's raw observations as
+before this commit. No atomic cutover (ADR155-0309) began.
