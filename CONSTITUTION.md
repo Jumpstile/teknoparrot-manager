@@ -124,6 +124,75 @@ a cross-reference to the separate control that actually satisfies it (e.g.
 `SECURITY.md`, a compliance policy document, or an external audit), never
 as a reason the obligation itself was skipped.
 
+## Document ownership and canonical responsibility
+
+The "Governance hierarchy" above establishes precedence *between* tiers
+when documents conflict. This section is the complementary rule for the
+normal case, when documents don't conflict: each document should have one
+clearly defined responsibility and be the canonical source for it, so
+there is rarely a conflict to resolve in the first place.
+
+- **Engineering principles, architectural philosophy, review workflow,
+  documentation philosophy, coding standards, testing philosophy, quality
+  expectations, and long-term project values belong in this document**
+  (or, where a portfolio-wide Engineering Standard exists for one of
+  them, in that standard -- tier 4 above). Every other engineering
+  document derives its authority from this one and the tiers below it;
+  none should redefine engineering policy independently. Operational
+  procedures -- the concrete steps a role follows to do its job -- belong
+  in their own documents, which reference this one rather than restate
+  it.
+- **Canonical ownership in this repository**, as an explicit instance of
+  the governance hierarchy's tiers 2-6:
+
+  | Document | Owns |
+  |---|---|
+  | `CONSTITUTION.md` | Engineering philosophy, architectural principles, review workflow, documentation philosophy, engineering standards (tier 1) |
+  | ADRs | Architectural decisions and their rationale (tier 2) |
+  | `ENGINEERING_GOVERNANCE.md` | Issue lifecycle, labels, milestones, prioritization, project governance (tier 3) |
+  | `RELEASE-SAFETY-CHECKLIST.md` | Release execution, publication order, release gates (tier 5) |
+  | `ARCADE-CLAUDE.md` | Hardware certification procedures and arcade-workstation operational guidance (tier 5) |
+  | User documentation (`README.md`, wiki, Quick Start) | Installation, configuration, and usage (tier 6) |
+
+  This table names the documents this repository currently has; it is not
+  itself a new tier -- each row's document stays in the tier the
+  governance hierarchy already assigns it (noted above for each row).
+
+Practically, this means: engineering policy is written once, in this
+document (or a tier-4 standard), and every operational document points
+back to it rather than embedding its own copy that can drift out of sync.
+Prefer a cross-reference over duplicated guidance whenever a second
+document needs to say the same thing a first document already says. When
+engineering policy changes, the canonical document is updated first, and
+anything that referenced it is correct by virtue of the reference, not
+because it needed a matching edit.
+
+### AI guidance
+
+An AI assistant working in this repository should read this document
+before implementing or reviewing substantial engineering work, for the
+same reason a human contributor would: it is the stable reference other
+roles (reviewers, release managers, future maintainers) also read, so
+working from it keeps everyone's understanding of "how we do things here"
+the same document, not independently-formed impressions that can quietly
+diverge. Precedence when a document conflicts with this one is exactly
+"Governance hierarchy" above -- this Constitution governs, unless an
+approved ADR (tier 2, which sits *above* this document's tier 1 position
+only insofar as an adopted ADR is the recorded decision this Constitution
+itself defers to for architecture) explicitly supersedes it for the
+specific decision that ADR covers.
+
+### Maintenance
+
+This document should evolve deliberately, not reactively. A new
+engineering principle earns a place here after it has demonstrated real
+value through actual project experience -- a pattern used more than once,
+a mistake avoided because the rule existed, a review cycle that went
+better for having it -- not merely because it seemed reasonable when
+proposed. This is the same discipline "Long-lived policy does not live in
+an issue tracker" (below) applies to *where* policy is written; this
+paragraph is about *when* it's written down as permanent.
+
 ## Long-lived policy does not live in an issue tracker
 
 GitHub issues (and their equivalents on other trackers) are for tracking
