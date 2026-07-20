@@ -194,7 +194,7 @@ Describe 'ADR-0155 Phase 3 publication report builder' {
 
 Describe 'ADR-0155 Phase 3 final-outcome report builder' {
  BeforeEach {$root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $root|Out-Null}
- It 'projects a CERTIFIED final outcome into the exact six-field file schema' {
+ It 'projects a CERTIFIED final outcome into the exact seven-field file schema' {
   $run=New-FullPipelineRunV1 $root $true $false
   $report=New-TPMFinalOutcomeReportV1 -FinalOutcome $run.FinalOutcome
   $report.FileName|Should -Be 'TPM-Certification-Final-Outcome.json'
@@ -238,5 +238,13 @@ Describe 'ADR-0155 Phase 3 final-outcome report builder' {
   {New-TPMFinalOutcomeReportV1 -FinalOutcome $wrongType}|Should -Throw '*REPORT_INVALID*'
   {New-TPMFinalOutcomeReportV1 -FinalOutcome $null}|Should -Throw
   {New-TPMFinalOutcomeReportV1 -FinalOutcome ([pscustomobject]@{CanonicalJson='{}';RunIdentity='x'})}|Should -Throw '*REPORT_INVALID*'
+ }
+ It 'rejects a same-type compiled final outcome whose canonical JSON omits PublicationCommitted' {
+  Initialize-TPMCertificationTypesV1|Out-Null
+  $type='Jumpstile.TPM.Certification.V1.TPMFinalOutcomeV1'-as[type]
+  $ctor=$type.GetConstructors([Reflection.BindingFlags]'NonPublic,Instance')[0]
+  $json='{"SchemaVersion":1,"RunIdentity":"deadbeefdeadbeefdeadbeefdeadbeef","EligibilityPayloadSha256":"'+('a'*64)+'","EligibleForCertification":true,"FinalStatus":"CERTIFIED","ExitCode":0,"FailureReasons":[]}'
+  $incomplete=$ctor.Invoke(@('deadbeefdeadbeefdeadbeefdeadbeef',$json))
+  {New-TPMFinalOutcomeReportV1 -FinalOutcome $incomplete}|Should -Throw '*REPORT_INVALID*PublicationCommitted*'
  }
 }

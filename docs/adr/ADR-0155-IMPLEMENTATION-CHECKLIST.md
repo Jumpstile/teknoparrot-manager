@@ -609,3 +609,40 @@ ADR155-0304 remains unchecked: three of five canonical reports are done
 (Scorecard, Validation) remain, and need the Section 8.4 base64url
 transport machinery this round deliberately did not build. No harness
 wiring, file I/O, staging, or publication in this commit.
+
+## Phase 3 delta review correction -- 2026-07-20
+
+Independent delta review of commit `05239c7` returned CHANGES REQUIRED
+with two findings, both corrected in this commit:
+
+- P2: `New-TPMFinalOutcomeReportV1`'s required-source-field validation
+  list checked six of the seven `TPMFinalOutcomeV1` fields it depends on
+  the source object being well-formed for, omitting `PublicationCommitted`
+  -- even though the builder's own output never reads that field's value
+  (`RequiredPublicationState` is the fixed file-schema literal
+  `'Committed'`, never derived from `PublicationCommitted`, which is
+  unchanged by this fix). Added `PublicationCommitted` to the validation
+  list, so a malformed or incomplete compiled object is rejected before
+  being treated as authoritative, rather than only checking the fields the
+  builder happens to consume. Added a regression test constructing a
+  same-compiled-type `TPMFinalOutcomeV1` whose canonical JSON omits
+  `PublicationCommitted`; the builder now rejects it with
+  `REPORT_INVALID`.
+- P3: renamed the "exact six-field file schema" test description to
+  "exact seven-field file schema" -- the file schema has seven fields
+  (SchemaVersion, RunIdentity, EligibilityPayloadSha256,
+  EligibilityStatus, RequiredPublicationState, FinalStatus, ExitCode);
+  the prose was simply miscounted.
+
+- ADR155-Q001/Q002: `Tests/TPMCertification.Reports.Tests.ps1` gained 1
+  more test (20 total). Combined with all prior focused suites: 85/85 on
+  pwsh 7.6.3 and 85/85 on Windows PowerShell 5.1.26100.8875.
+- ADR155-Q003/Q004: `Invoke-Pester -Path .\Tests` passed 885/885 on pwsh
+  7.6.3 and 880/885 on Windows PowerShell 5.1, with exactly the same five
+  unchanged issue #148 Repair-GamePaths failures.
+- ADR155-Q005/Q006/Q007: both changed files had zero non-ASCII bytes, zero
+  parser errors, zero PSScriptAnalyzer findings, and zero InjectionHunter
+  findings.
+
+No architectural or behavioral change beyond the two findings; ADR155-0304
+remains unchecked for the same reason as above.

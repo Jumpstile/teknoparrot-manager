@@ -54,7 +54,7 @@ function New-TPMFinalOutcomeReportV1 {
     param([Parameter(Mandatory=$true)]$FinalOutcome)
     if($null-eq$FinalOutcome-or$FinalOutcome.GetType().FullName-cne'Jumpstile.TPM.Certification.V1.TPMFinalOutcomeV1'){throw 'REPORT_INVALID: FinalOutcome must be an issued TPMFinalOutcomeV1'}
     try{$parsed=ConvertFrom-Json -InputObject $FinalOutcome.CanonicalJson -ErrorAction Stop}catch{throw 'REPORT_INVALID: FinalOutcome.CanonicalJson did not parse as JSON'}
-    foreach($field in @('SchemaVersion','RunIdentity','EligibilityPayloadSha256','EligibleForCertification','FinalStatus','ExitCode')){
+    foreach($field in @('SchemaVersion','RunIdentity','EligibilityPayloadSha256','EligibleForCertification','PublicationCommitted','FinalStatus','ExitCode')){
         if($null-eq$parsed.PSObject.Properties[$field]){throw "REPORT_INVALID: FinalOutcome is missing $field"}
     }
     $eligibilityStatus=if([bool]$parsed.EligibleForCertification){'Eligible'}else{'NotEligible'}
