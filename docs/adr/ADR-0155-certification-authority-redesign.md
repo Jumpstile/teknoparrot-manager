@@ -97,12 +97,29 @@ PowerShell 5.1, and pwsh.
 
 ## 3. Canonical encoding and exact validation
 
-All authoritative JSON is BOM-less UTF-8 with LF, no insignificant whitespace,
-properties and arrays in schema order, JSON escaping, base-10 integers without
-leading zeroes, lowercase Boolean literals, and null only where permitted.
-Object schemas are closed: unknown, missing, duplicate, or reordered properties
-fail. Arrays reject missing, extra, duplicate, substituted, or reordered
-identifiers. Enums are ordinal case-sensitive.
+All authoritative JSON uses RFC 8785 JSON Canonicalization Scheme (JCS), with
+I-JSON input constraints, as the sole canonical representation. The JCS output
+bytes are encoded directly as UTF-8 without BOM. JCS therefore governs every
+byte-level choice: object properties are sorted lexicographically by UTF-16 code
+units; array order is preserved; insignificant whitespace is absent; null is the
+four bytes null; true and false are lowercase; numbers use the ECMAScript
+shortest round-trippable finite-number form; NaN, Infinity, and negative zero are rejected. Every authoritative integer is
+restricted to the I-JSON interoperable range -9007199254740991 through
+9007199254740991 even when its compiled storage type is signed 64-bit.
+
+Strings must contain Unicode scalar values only; unpaired UTF-16 surrogates are
+rejected. Quotation mark, reverse solidus, and U+0000 through U+001F use the JCS
+JSON escapes. The short escapes \b, \t, \n, \f, and \r are used where defined;
+other control characters use lowercase four-digit \u hexadecimal. Solidus is
+never escaped. All other characters, including non-ASCII characters, are emitted
+as their direct UTF-8 encoding. These rules and RFC 8785 are normative; the same
+logical typed object must produce identical bytes in every implementation.
+
+Schema tables in this ADR define required membership and array order, not an
+alternative object-property order. JCS property sorting is the serialized object
+order. Object schemas are closed: unknown, missing, or duplicate properties
+fail before canonicalization. Arrays reject missing, extra, duplicate,
+substituted, or reordered identifiers. Enums are ordinal case-sensitive.
 
 Fact, evidence, eligibility, publication, and final-outcome documents are
 limited to 16 MiB each. Manifest and marker are limited to 1 MiB. Limits apply
@@ -294,12 +311,29 @@ TEMP_CONFIG_NOT_REMOVED.
 ## 6. Evidence authority
 
 Each evidence record has exactly Identifier, Status, EvidenceType, Required,
-Path, CaptureScope, FileSha256, Width, Height, FailureReason. Captured requires
-EvidenceType ScreenCapture or DeterministicRender, unique contained normalized
-path, validated PNG, 64-hex hash, positive dimensions, null failure, and scope
-ConsoleWindow, BoundedRegion, FullDesktop, or Deterministic. Skipped requires
-Required=false, all capture fields null, and non-empty failure/reason text.
-Failed requires all capture fields null and a non-empty reason.
+Path, CaptureScope, FileSha256, Width, Height, FailureCode, FailureMessage.
+Captured requires EvidenceType ScreenCapture or DeterministicRender, unique
+contained normalized path, validated PNG, 64-hex hash, positive dimensions,
+null FailureCode/FailureMessage, and scope ConsoleWindow, BoundedRegion,
+FullDesktop, or Deterministic. Skipped requires Required=false, all capture
+fields null, FailureCode EVIDENCE_SKIPPED, and a non-empty FailureMessage.
+Failed requires all capture fields null and one non-empty authoritative code and
+explanatory message.
+
+The complete evidence-code inventory, evaluated in this fixed first-failure
+order, is: EVIDENCE_IDENTIFIER_INVALID, EVIDENCE_DUPLICATE,
+EVIDENCE_ORDER_INVALID, EVIDENCE_POST_FINAL, EVIDENCE_METADATA_INVALID,
+EVIDENCE_TYPE_INVALID, EVIDENCE_REQUIRED_SKIPPED,
+EVIDENCE_CAPTURE_ACTION_MISSING, EVIDENCE_CAPTURE_EXCEPTION,
+EVIDENCE_PATH_INVALID, EVIDENCE_PATH_OUTSIDE_ROOT, EVIDENCE_PATH_DUPLICATE,
+EVIDENCE_FILE_MISSING, EVIDENCE_FILE_EMPTY, EVIDENCE_PNG_INVALID,
+EVIDENCE_DIMENSIONS_INVALID, EVIDENCE_FILE_LOCKED, EVIDENCE_HASH_FAILED, and
+EVIDENCE_SKIPPED. Manifest-level failures use SourceIdentifier
+evidence-manifest; record failures use that record's Identifier, or
+unidentified-evidence when the identifier itself is invalid. Eligibility maps
+each non-Captured required record and each Failed optional record to exactly
+SourceIdentifier, FailureCode as Code, and FailureMessage as Message. Codes and
+source identifiers are authoritative. Messages are explanatory only.
 
 Exactly once and in order:
 certification-suite-running (required ScreenCapture);
@@ -322,12 +356,14 @@ Duplicate paths, copied objects, reordered records, or post-final records fail.
 ### 7.1 Score arithmetic
 
 ApplicableCount is the number of non-N/A items. PassedCount is the count with
-Status Pass. RawPercentage = PassedCount * 100 / ApplicableCount using decimal
-arithmetic. Percentage is RawPercentage rounded to exactly two decimal places
-using midpoint-away-from-zero. ApplicableCount must be > 0. Threshold is exactly
-100.00. ScoreEligible is true only when every applicable item passes and
-Percentage = 100.00. EvidenceEligible follows Section 6.
-EligibleForCertification = ScoreEligible AND EvidenceEligible.
+Status Pass. ApplicableCount must be greater than zero. PercentageBasisPoints is
+PassedCount * 10000 / ApplicableCount, rounded to the nearest signed integer with
+midpoints away from zero. ThresholdBasisPoints is exactly 10000. ScoreEligible
+is true only when every applicable item passes and PercentageBasisPoints=10000.
+User-facing percentage text is derived as the integer quotient and two-digit
+remainder of PercentageBasisPoints divided by 100; it is never parsed back into
+authority. EvidenceEligible follows Section 6. EligibleForCertification =
+ScoreEligible AND EvidenceEligible.
 
 ### 7.2 Detached eligibility payload
 
@@ -335,13 +371,15 @@ EligibleForCertification = ScoreEligible AND EvidenceEligible.
 
 Payload has exactly, in order: SchemaVersion=1, RunIdentity, Mode,
 FactSetSha256, EvidenceSetSha256, SealedRunSha256, ScoreItems (eleven ordered
-Section 5 items), ApplicableCount, PassedCount, Percentage (JSON number with
-exactly two fractional digits), Threshold (100.00), ScoreEligible,
-EvidenceEligible, EligibleForCertification, FailureReasons.
+Section 5 items), ApplicableCount, PassedCount, PercentageBasisPoints integer,
+ThresholdBasisPoints integer 10000, ScoreEligible, EvidenceEligible,
+EligibleForCertification, FailureReasons.
 
 FailureReasons is the stable ordered union of score-item reasons followed by
 evidence reasons. Each has exactly SourceIdentifier, Code, Message. Ordering is
-manifest order, then local reason order.
+manifest order, then local reason order. SourceIdentifier and Code determine
+semantic equivalence. Message is explanatory, is not authoritative, and is
+excluded from semantic-equivalence comparisons.
 
 Integrity has exactly Algorithm='SHA-256' and EligibilityPayloadSha256. The hash
 covers the canonical Payload object bytes only, starting with its opening brace
@@ -384,10 +422,19 @@ It is also conditional. Without a valid marker it is not an outcome and must be
 ignored. This lets the marker commit the exact final projection without making
 publication depend on an already-authoritative final outcome.
 
-### 8.4 Scorecard Markdown
+### 8.4 Normative Markdown scalar encoding and scorecard
 
-'TPM-Certification-Scorecard.md' is UTF-8/LF and begins with exactly these
-single-line keys in order:
+Markdown is BOM-less UTF-8 with LF. Fixed headings and keys below are literal.
+No caller-controlled value is interpolated into a heading, list marker, emphasis
+construct, pipe-delimited table, inline-code span, or fenced block. Arbitrary
+structured values use JCS bytes encoded as RFC 4648 Section 5 base64url without
+padding on one ASCII line. Arbitrary human messages use the JCS serialization of
+one JSON string on one ASCII-safe line; non-ASCII bytes in that serialized
+string are then base64url encoded. Thus newlines, pipes, backticks, fences,
+heading markers, emphasis markers, list markers, and embedded delimiters can
+never alter Markdown structure.
+
+'TPM-Certification-Scorecard.md' begins with exactly these single-line keys:
 
     Schema-Version: 1
     Run-Identity: <RunIdentity>
@@ -395,22 +442,25 @@ single-line keys in order:
     Fact-Set-SHA256: <hash>
     Evidence-Set-SHA256: <hash>
 
-Then one blank line, '# Certification Eligibility Scorecard', one line
-'Eligibility: ELIGIBLE|NOT ELIGIBLE', one line
-'Score: <PassedCount>/<ApplicableCount> (<Percentage>%)', then eleven headings
-'## <Identifier>' in manifest order. Each contains exactly
-'Status: PASS|FAIL|N/A', a fenced json block equal to canonical Details, and
-ordered '- Failure: <Code>: <Message>' lines or '- Failure: none'.
+Then one blank line, '# Certification Eligibility Scorecard',
+'Eligibility: ELIGIBLE|NOT ELIGIBLE', and
+'Score: <PassedCount>/<ApplicableCount> (<derived percentage with two digits>%)'.
+It then has eleven fixed '## <Identifier>' headings in manifest order. Each has
+'Status: PASS|FAIL|N/A', 'Details-JCS-Base64Url: <value>', then one
+'Failure-Code: <Code>' and 'Failure-Message-Base64Url: <value>' pair per reason.
+No reasons is represented only by 'Failure-Code: none'.
 
 ### 8.5 Validation Markdown
 
-'TPM-Certification-Validation.md' has the same five metadata lines, then one
-blank line, '# Certification Validation', sections '## Facts', '## Evidence',
-'## Eligibility', and '## Failure Reasons' in that order. Facts and Evidence
-contain fenced json blocks byte-equivalent after UTF-8 decoding to their
-canonical arrays. Eligibility contains each canonical scalar as
-'<Name>: <value>'. Failure Reasons uses the same ordered lines as eligibility
-JSON. It never recalculates a value.
+'TPM-Certification-Validation.md' has the same five metadata lines, one blank
+line, '# Certification Validation', then fixed sections '## Facts',
+'## Evidence', '## Eligibility', and '## Failure Reasons'. Facts contains
+'Facts-JCS-Base64Url: <value>'; Evidence contains
+'Evidence-JCS-Base64Url: <value>'; Eligibility contains
+'Eligibility-Payload-JCS-Base64Url: <value>'. Failure Reasons uses the same
+code/message pair grammar as the scorecard. Base64url decoding must yield the
+exact JCS bytes whose hashes and schemas are validated. No Markdown field
+recalculates authority.
 
 ### 8.6 Manifest
 
@@ -446,40 +496,59 @@ and final-outcome composition. Marker presence alone is never sufficient.
 
 A private staging directory receives closed and flushed files. Promotion order
 is the five reports, manifest, marker. Existing destinations fail; nothing is
-overwritten. Failure before marker produces no authoritative publication.
-Cleanup removes only files owned by this run and cannot convert failure to
-success. After marker promotion, durable revalidation determines whether commit
-occurred; an invalid marker is never authority.
+overwritten. Before durable marker validation, state is Uncommitted. Staging,
+promotion, marker-write, or durable-validation failure leaves Committed=false.
+Pre-commit rollback removes only files owned by this run; rollback failure adds
+ROLLBACK_FAILED beside the original publication failure but cannot create
+authority.
 
-Consumer validation order is fixed:
+Successful durable validation performs the sole monotonic transition from
+Uncommitted to Committed. Once Committed=true it can never return to false.
+Post-commit staging-directory cleanup runs afterward. Its failure records the
+non-authoritative diagnostic warning POST_COMMIT_CLEANUP_FAILED but does not
+change Committed, eligibility, final status, or exit code. An invalid marker is
+never authority.
 
-1. Apply Section 10 containment to directory and marker.
-2. Strict-parse marker and validate its exact schema.
-3. Validate manifest path, byte length, and hash from marker.
-4. Strict-parse manifest; validate run, counts, order, identifiers, names,
-   ArtifactSetSha256, and marker correlations.
-5. Resolve each artifact literally; validate length and hash.
-6. Parse eligibility; validate detached payload hash and the three sealed hashes.
-7. Parse publication and final-outcome candidates; compare every field.
-8. Parse Markdown metadata and grammar; compare every repeated semantic value.
-9. Reconstruct immutable eligibility and publication objects.
-10. Compose immutable final outcome.
+Consumer validation order is fixed and has no forward reference:
+
+1. Apply Section 10 containment to the run directory and marker.
+2. Strict-parse the marker and validate only its self-contained schema.
+3. Resolve the manifest from the validated marker; validate its byte length and
+   ManifestSha256.
+4. Strict-parse the manifest; validate run correlation, count, order,
+   identifiers, filenames, ArtifactSetSha256, and marker correlations.
+5. Resolve all five reports from the validated manifest by literal contained
+   paths; validate each byte length and ArtifactSha256.
+6. Strict-parse EligibilityJson; validate its detached payload hash and obtain
+   the expected fact, evidence, and sealed-run hashes.
+7. Parse ValidationMarkdown's fixed grammar and base64url values. Strict-parse
+   the decoded Facts and Evidence arrays, reconstruct the canonical sealed-run
+   object using the already validated schema version, run identity, and mode,
+   then validate FactSetSha256, EvidenceSetSha256, and SealedRunSha256.
+8. Parse ScorecardMarkdown and compare authoritative codes, identifiers, status,
+   counts, basis points, and hashes to EligibilityJson.
+9. Strict-parse PublicationJson and FinalOutcomeJson and compare every
+   authoritative field to the validated eligibility and manifest.
+10. Reconstruct immutable eligibility and committed publication objects, then
+    compose the immutable final outcome.
 
 Semantic equivalence means equality after parsing into the exact typed field,
 not textual similarity: strings and enums ordinal case-sensitive; hashes exact
-lowercase; paths under Section 10; integers exact; percentage exact decimal
-scale/value; Booleans exact; null distinct from empty; arrays exact order and
-cardinality; Details JSON canonical byte equality; failure codes/messages exact.
-Markdown prose outside defined fields carries no authority. Any mismatch fails
-the whole bundle.
+lowercase; paths under Section 10; integers and basis points exact; Booleans
+exact; null distinct from empty; arrays exact order/cardinality; Details JCS
+bytes exact; and failure SourceIdentifier/Code pairs exact. Human-readable
+FailureMessage text and Markdown prose are explanatory and excluded from
+semantic equivalence. Any authoritative-field mismatch fails the whole bundle.
 
 The workflow authority issues TPMPublicationOutcomeV1 only from the publisher's
 raw observations plus durable validation. That compiled object has exactly
 SchemaVersion=1, RunIdentity, EligibilityPayloadSha256, Committed Boolean,
-ManifestSha256 nullable, ArtifactSetSha256 nullable, and FailureReasons. A
-committed outcome requires both hashes and no reasons. Failure requires null
-hashes and one or more ordered codes from STAGING_FAILED, PROMOTION_FAILED,
-MARKER_WRITE_FAILED, DURABLE_VALIDATION_FAILED, or CLEANUP_FAILED.
+ManifestSha256 nullable, ArtifactSetSha256 nullable, FailureReasons, and
+DiagnosticWarnings. A committed outcome requires both hashes and no failure
+reasons; DiagnosticWarnings may contain POST_COMMIT_CLEANUP_FAILED without
+changing commitment. Pre-commit failure requires Committed=false and one or more
+ordered codes from STAGING_FAILED, PROMOTION_FAILED, MARKER_WRITE_FAILED,
+DURABLE_VALIDATION_FAILED, or ROLLBACK_FAILED.
 
 It then issues TPMFinalOutcomeV1
 from its own exact issued eligibility and publication references. That object
