@@ -17,7 +17,8 @@ have passed. Stable identifiers are retained across revisions.
   `408336ee0aa9ba34d4fe35bf179b5170def8e497` records ADR155-Q001 through
   ADR155-Q007; review-correction commit
   `589bd0a69453e7763845c5e5f2b90464d4bedd74` advances ADR155-0102,
-  ADR155-0103, ADR155-0105, and ADR155-T008.
+  ADR155-0103, ADR155-0105, and ADR155-T008. Commit `f99e394` records
+  ADR155-0201 through ADR155-0207.
 
 ## Phase 1 -- Isolated authority primitives
 
@@ -174,3 +175,70 @@ Phase 2 and later checklist items remain intentionally incomplete.
   module and at the individually dispositioned 16-finding production baseline.
 - ADR155-0201 remains unchecked. Its dispatcher is an isolated prototype only;
   no Phase 2 production integration or workflow authority has begun.
+
+## Phase 2 implementation evidence -- 2026-07-20
+
+- ADR155-0201/0202: commit `f99e394` adds `scripts/TPMCertification.Shadow.psm1`,
+  a single dispatcher closure (`New-TPMWorkflowAuthorityV1`) over one private
+  `[pscustomobject]` state object, reusing the Phase 1 provenance/JCS/hash/
+  containment primitives. The dispatch scriptblock fails closed on every
+  illegal phase transition, duplicate fact, out-of-order fact, duplicate
+  score-preview issuance, post-final evidence, and post-seal write
+  (`ILLEGAL_PHASE`, `FACT_DUPLICATE`, `FACT_ORDER_INVALID`,
+  `DUPLICATE_ISSUANCE`, `EVIDENCE_POST_FINAL`, `MANIFEST_INCOMPLETE`).
+- ADR155-0203: `Assert-TPMFactRecordV1` enforces the exact field set for each
+  of the eleven certification categories from ADR Section 5. Conclusions
+  (`Get-TPMFactDecisionV1`) are computed separately from the recorded raw
+  data and are never accepted as input.
+- ADR155-0204: `Assert-TPMEvidenceRecordV1` enforces the nine-item manifest
+  order, immediate PNG validation via the injected validator callback, path
+  containment and per-run path ownership (rejecting reuse), a SHA-256 file
+  hash re-verified after validation, and a terminal ninth (`IssueFinalEvidence`)
+  record that consumes the score preview by identity.
+- ADR155-0205: `Seal` requires all eleven facts and nine evidence records,
+  builds canonical JSON directly from the recorded per-item JCS fragments,
+  nulls every mutable collection, and returns only a compiled
+  `TPMSealedRunReaderV1` issued through the same identity-checked closure as
+  Phase 1's `TPMSealedRunReaderV1`.
+- ADR155-0206: `Invoke-TPMShadowCertificationV1` and its harness call site in
+  `Invoke-TPM-RealInstanceSmoke.ps1` run only after the legacy
+  `final-certification-result` screenshot and before
+  `Complete-TPMCertificationTransaction`. The shadow result is written to a
+  separate `ShadowMigration` diagnostic file and the harness never reads it
+  back into `$results`; regression test `ADR-0155 Phase 2 production shadow
+  boundary` asserts this ordering and the absence of any `$results.Shadow`
+  reference by inspecting the production script's own source text.
+- ADR155-0207: `Compare-TPMShadowScoreV1` records field-level
+  `ScoreItems[i].{Identifier,Status,Passed}` divergences against the legacy
+  score items; `Invoke-TPMShadowCertificationV1` sets `MigrationEligible`
+  false whenever any divergence, or any shadow-side exception, occurs, and
+  persists the diagnostic via `Write-TPMShadowDiagnosticV1`
+  (`FileMode.CreateNew`, refusing to overwrite a prior run's diagnostic).
+- Defect fix: the encoding-path validator in `Assert-TPMFactRecordV1`'s
+  `Static Analysis` case checked `$f.Contains('\\')` -- a two-character
+  literal in a single-quoted string, i.e. two consecutive backslashes -- and
+  split dot-segments only on `/`, so `..\bad.ps1` was accepted. It now
+  checks `$f.Contains('\')` (one backslash) and splits on `[\\/]`, matching
+  the split behavior already used by Phase 1's `Resolve-TPMContainedPathV1`.
+- ADR155-Q001/Q002: `Tests/TPMCertification.Shadow.Tests.ps1` passed 16/16 on
+  pwsh 7.6.3 and 16/16 on Windows PowerShell 5.1.26100.8875.
+- ADR155-Q003: `Invoke-Pester -Path .\Tests` passed 842/842 on pwsh 7.6.3.
+- ADR155-Q004: the same suite passed 837/842 on Windows PowerShell 5.1; the
+  only failures are the five unchanged Repair-GamePaths cases tracked by
+  #148, individually confirmed unchanged by name against the Phase 1
+  baseline.
+- ADR155-Q005: the new module, its focused tests, and the modified harness
+  script each had zero non-ASCII bytes and zero parser errors.
+- ADR155-Q006: repository-configured PSScriptAnalyzer returned zero findings
+  for all three files.
+- ADR155-Q007: InjectionHunter returned zero findings for the new module and
+  its focused tests. The harness script's six findings (one `AddScript`, one
+  `StaticPropertyInjection`, four `AddType`) are byte-for-byte the same six
+  findings present before this change (confirmed by re-running
+  InjectionHunter against the pre-diff working tree via `git stash`); the
+  Phase 2 diff introduces none of them and does not touch any of the
+  flagged lines.
+
+Phase 2 shadow authority does not alter legacy certification decisions,
+console output, reports, or exit codes. Phase 3 and Phase 4 checklist items
+remain intentionally incomplete; Phase 3 has not begun.
