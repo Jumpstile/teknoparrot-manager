@@ -428,11 +428,29 @@ Markdown is BOM-less UTF-8 with LF. Fixed headings and keys below are literal.
 No caller-controlled value is interpolated into a heading, list marker, emphasis
 construct, pipe-delimited table, inline-code span, or fenced block. Arbitrary
 structured values use JCS bytes encoded as RFC 4648 Section 5 base64url without
-padding on one ASCII line. Arbitrary human messages use the JCS serialization of
-one JSON string on one ASCII-safe line; non-ASCII bytes in that serialized
-string are then base64url encoded. Thus newlines, pipes, backticks, fences,
-heading markers, emphasis markers, list markers, and embedded delimiters can
-never alter Markdown structure.
+padding on one ASCII line.
+
+Failure-Message-Base64Url uses one exact transport. The producer must serialize
+the complete message as exactly one RFC 8785 JCS-compliant JSON string, encode
+that complete serialized string as UTF-8, base64url-encode the entire UTF-8 byte
+sequence under RFC 4648 Section 5, and remove every trailing equals-sign padding
+character. No subset of bytes, including only non-ASCII bytes, is encoded.
+
+The consumer must first reject characters outside the unpadded RFC 4648
+base64url alphabet and reject a length whose remainder modulo four is one. If
+its decoder requires padding, it restores the unique required internal padding,
+then base64url-decodes the entire field. It decodes the resulting bytes as
+strict UTF-8, rejecting malformed byte sequences, and parses the decoded text as
+exactly one JSON value with no trailing data. That value must be a string. The
+consumer then RFC 8785 JCS-serializes the parsed string and requires byte-for-byte
+equality with the decoded UTF-8 bytes; otherwise the field is non-canonical and
+fails. Malformed base64url, invalid UTF-8, non-string JSON, trailing data, and
+non-canonical serialization all invalidate the report.
+
+This same producer and consumer contract governs every
+Failure-Message-Base64Url field in Scorecard Markdown and Validation Markdown.
+Thus newlines, pipes, backticks, fences, headings, emphasis markers, list
+markers, and embedded delimiters can never alter Markdown structure.
 
 'TPM-Certification-Scorecard.md' begins with exactly these single-line keys:
 
