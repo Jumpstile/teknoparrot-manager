@@ -34,7 +34,12 @@ implementation of that portfolio-wide principle, not a competing policy.
    this step is satisfied by the documented external review workflow
    (Regular Codex) per `CONSTITUTION.md`'s "Single-Maintainer
    Governance" -- not by a GitHub approving review, which the repository
-   owner cannot submit on their own pull request.
+   owner cannot submit on their own pull request. When a review returns
+   findings, follow `CONSTITUTION.md`'s "Independent Review Workflow" --
+   fix in focused commits, then a delta review scoped to those commits
+   (its "Delta Review Principle"), not a full re-review, closes the loop
+   unless the delta review itself determines the scope has materially
+   expanded.
 5. **Real-Hardware Certification** (where applicable) -- the TPM
    Certification Suite run on an actual arcade machine against an actual
    TeknoParrot install, not simulated or run only in a dev environment.

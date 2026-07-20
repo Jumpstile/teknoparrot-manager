@@ -406,6 +406,79 @@ governance to one platform's specific feature; wording it as
 mechanism among others, is durable regardless of which review tooling a
 project actually uses.
 
+### Independent Review Workflow
+
+Independent Review Required (above) says a second, independent pass must
+evaluate a change before it's treated as settled. This section describes
+the ordered workflow that satisfies it for any non-trivial engineering
+work, and specifically how a review that finds problems reaches
+resolution without either skipping re-verification or re-reviewing
+everything from scratch on every iteration:
+
+1. **Architecture and requirements are approved before implementation
+   begins.** For anything governed by a design document (an ADR, a
+   specification-driven finding under
+   `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`), the design is settled
+   first; implementation does not start against a moving target.
+2. **Implementation is completed.**
+3. **An independent reviewer performs a full review** -- the reviewer did
+   not write the change, evaluates it against the approved architecture
+   and this project's quality gates, and returns a verdict.
+4. **Findings are addressed in one or more focused commits.** Each
+   commit fixes what the review found; it does not restart or redesign
+   work the review did not flag as wrong.
+5. **The independent reviewer performs a delta review of only the
+   changes made to address the findings** -- see "Delta Review
+   Principle" below.
+6. **If the delta review is approved, the work may proceed** -- to merge,
+   or to the next phase of a multi-phase effort (the next ADR phase, the
+   next checklist item, the next milestone). If the delta review finds
+   the fix incomplete, incorrect, or newly regressed something, it
+   returns to step 4, not step 3 -- the review scope stays limited to
+   what changed since the prior finding until the reviewer determines
+   the scope has genuinely expanded (see below).
+
+#### Delta Review Principle
+
+A delta review verifies only the changes introduced to resolve
+previously reported findings. It does not repeat the entire review
+unless the scope has materially expanded -- new files touched that
+weren't part of the original review surface, a fix that required
+touching logic the original review didn't cover, or a finding whose fix
+turned out to require an architectural change rather than a local
+correction. Absent one of those, re-verifying the whole change on every
+iteration is waste: the parts the first full review already covered and
+found sound have not changed, and re-reviewing them again teaches
+nothing new while spending real reviewer effort.
+
+This principle exists because it is what makes rounds of review
+practical rather than theoretical. A workflow that required a full
+re-review after every single-line fix would create pressure to either
+skip re-verification (defeating Independent Review Required) or bundle
+unrelated fixes to amortize review cost (defeating focused, traceable
+commits). Scoping re-review to the actual delta keeps both intact:
+
+- **Maintains independent verification** -- nothing is treated as fixed
+  merely because the fix looks plausible; the reviewer still confirms it.
+- **Reduces reviewer effort** -- proportional to what actually changed,
+  not to the size of the whole artifact under review.
+- **Ensures every reported finding is explicitly revalidated** -- a delta
+  review's job is to confirm each finding from the prior round, by name,
+  is actually resolved, not to form a fresh general impression.
+- **Avoids unnecessary full re-reviews** -- the common failure mode this
+  principle prevents is reviewer fatigue turning into rubber-stamping on
+  the third or fourth round of an iterative fix; bounding review scope to
+  the actual delta keeps each round as rigorous as the first.
+- **Preserves traceability between findings and corrective commits** --
+  each delta review names which commit(s) it is verifying against which
+  finding(s), so the review history reads as a resolved audit trail, not
+  a series of unlinked approvals.
+
+This workflow and principle apply to any non-trivial engineering work in
+any Jumpstile project -- code, architecture documents, and operational
+documentation alike -- not only to this repository's TPM certification
+work where the pattern was first formalized in practice.
+
 ### Single-Maintainer Governance
 
 When a repository has only one GitHub maintainer with merge authority,
