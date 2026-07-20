@@ -2,19 +2,21 @@
 
 **Status:** Proposed. No production code or tests changed as part of this document. Covers `scripts/Invoke-TPM-RealInstanceSmoke.ps1`'s certification-evidence/scoring/publication pipeline (issue #154, PR #155), as of commit `c6bc7ba` on `codex/issue-154-evidence-finalization`.
 
-**Revision note:** an architecture review of this ADR's first draft returned ARCHITECTURE CHANGES REQUIRED -- the draft named abstractions (`TPMFactStore`, `TPMDecisionSnapshot`, "commit marker") without defining what makes each one *enforceably* authoritative rather than merely well-named. This revision replaces every such abstraction with a concrete ownership, immutability, provenance, and verification mechanism, expressed in terms PowerShell can actually enforce, not merely intend. No implementation has started; this remains a design document.
+**Revision history:**
+- Draft 1: named the abstractions (`TPMFactStore`, `TPMDecisionSnapshot`, "commit marker") without defining what made them authoritative. Returned ARCHITECTURE CHANGES REQUIRED.
+- Draft 2: replaced named abstractions with mechanisms, but several were still described conceptually (immutability PowerShell classes cannot actually enforce; an ownership token that is itself an observable, copyable value; check facts that were still interpreted Booleans rather than raw measurements; a decision/publish/decision cycle; unspecified failure-publication and manifest/marker semantics; migration phases without an explicit no-dual-authority rule). This revision (Draft 3) replaces every one of those with a mechanism concrete enough that an implementer never has to infer intent.
 
 ---
 
 ## 1. Context and problem statement
 
-Three independent adversarial review rounds on this pipeline each found a real, distinct forgeability gap:
+Three independent adversarial review rounds on the *implemented* pipeline (rounds 1-3, summarized below) each found a real, distinct forgeability gap. Two further independent architecture reviews of *this ADR itself* (the two revisions above) found that describing the fix conceptually is not the same as specifying it concretely -- an abstraction that is merely named, or a mechanism that PowerShell cannot actually enforce the way it's described, reproduces exactly the "named but not proven" failure mode the ADR exists to close.
 
 - **Round 1** (issue #151): evidence-capture correctness -- filename collisions, format masquerading, missing CRC integrity.
-- **Round 2** (issue #154, round 1): the transaction wasn't the sole outcome authority -- evidence, score, report status, and process exit could disagree with each other.
-- **Round 3** (issue #154, rounds 2-3): the transaction *was* the sole authority, but it still trusted several **descriptions** of workflow activity (a public evidence array, a caller-supplied score-item array, an optional publish callback) rather than **facts the workflow itself owned**.
+- **Round 2** (issue #154, round 1): the transaction wasn't the sole outcome authority.
+- **Round 3** (issue #154, rounds 2-3): the transaction trusted *descriptions* of workflow activity rather than *facts the workflow itself owned*.
 
-**Problem statement:** the recurrence itself is the signal worth acting on. Naming a private ledger, a "decision snapshot," and a "commit marker" is not the same as making each of those things *structurally* unforgeable -- as this ADR's own first draft demonstrated by being sent back for exactly that reason. This revision's job is to specify, for each abstraction, the concrete mechanism that makes it authoritative, not merely the name that implies it should be.
+**Problem statement, restated for this revision:** every architectural guarantee in this document must answer, concretely, "what mechanism enforces this, in PowerShell, today, without relying on a language feature PowerShell classes don't actually provide (true immutability), without relying on an observable value as proof of ownership (which can leak or be guessed), without letting an interpreted conclusion masquerade as an observed fact, and without letting publication and outcome depend on each other in a cycle." Sections 5-16 below are organized so each of the eight review findings that produced this revision maps to exactly one section, stated at the top of that section.
 
 ---
 
@@ -38,486 +40,419 @@ Main script body
         -ScreenshotDir $screenshotDir -ReportDir $reportDir
         |
         |- validates submitted evidence against $script:tpmEvidenceLedger
-        |  (reference-identity, seal check, manifest, path/label/scope checks)
-        |- validates $Certification.Items against Get-TPMExpectedScoreItemManifest
-        |  (shape only -- no ownership/provenance check)
+        |- validates $Certification.Items against a shape-only manifest
         |- derives score from Items, derives evidence-pass from ledger
         |- Add-Member -Force's Status/Overall/ExitCode/... onto $Certification
         |  and $Results IN PLACE, repeatedly, across the run
-        |- builds $decisionSnapshot (a fresh pscustomobject, no Published field)
-        |- invokes -BuildArtifacts $decisionSnapshot -> artifact array
-        |- validates artifacts against Get-TPMExpectedArtifactManifest
-        |- Publish-TPMCertificationArtifacts: stage -> promote non-marker ->
-        |  durably re-read non-marker -> promote marker -> durably re-read marker
-        `- on publish failure: mutates the ALREADY-RETURNED $transaction object
-           in place (Passed/Status/Overall/ExitCode/Published/PublicationError)
+        |- builds a decision object, invokes -BuildArtifacts, publishes
+        `- on publish failure: mutates the ALREADY-RETURNED decision object
+           in place
 ```
 
-This is the state after three rounds of genuine, tested hardening. The 812-test suite proves every *previously discovered* forgery technique against it fails -- it does not prove the architecture is structurally incapable of producing the next one, which is what this ADR is now required to establish.
+This is the state after three rounds of genuine, tested hardening (812 passing tests). It proves every *previously discovered* forgery technique fails against it -- it does not, by itself, establish that the architecture is structurally incapable of producing the next one, which is the standard this ADR is held to.
 
 ---
 
 ## 3. Current architecture assessment
 
 ### 3.1 Authoritative source of truth
-
-There isn't one. Three different bespoke authorities exist (private ledger for evidence with reference-identity checking; shape-only manifest validation for score; manifest-validated atomic commit for publication), each invented in a different round after a different category was separately found forgeable, with no shared underlying mechanism.
+Split across three bespoke, unevenly-strong mechanisms (evidence ledger with reference-identity; score validated by shape only; publication validated by artifact identity only), each invented reactively in a different round.
 
 ### 3.2 Immutable vs. mutable data
-
-Actually immutable today: the per-run `WorkflowId`, and the evidence ledger's append-only discipline. Not immutable: `$certification.Items` (a plain mutable array of mutable objects), `$certification` itself (`Add-Member -Force`d in place repeatedly), and `$results` (an ordered hashtable mutated from many call sites across the script's lifetime).
+Actually immutable: the per-run `WorkflowId`; the evidence ledger's append-only discipline. Mutable and repeatedly mutated in place: `$certification.Items`, `$certification` itself, `$results`.
 
 ### 3.3 Derived vs. trusted data
-
-Score arithmetic and evidence pass/fail are correctly *derived*, fresh, at commit time -- but derived from *inputs* (score Items) that have no ownership guarantee of their own. "Derived, not trusted" is necessary but not sufficient without also making the input authoritative.
+Score and evidence-pass are derived fresh at commit time, but from inputs (score Items) with no ownership guarantee -- "derived, not trusted" needs the input to also be authoritative, which it currently isn't for score.
 
 ### 3.4 Presentation-only data
-
-Provisional console output, per-record capture echoes, and report prose sections. None of these feed back into any decision; this boundary is already correctly drawn.
+Provisional console output and report prose. Correctly non-authoritative already; unchanged by this ADR.
 
 ### 3.5 Transaction boundary
-
-Two nested phases inside one function: decision computation, then publication (invoked from inside the decision phase), whose failure retroactively mutates the already-computed decision object in place rather than composing a new outcome.
+Two nested phases in one function; publish failure retroactively mutates an already-returned decision object rather than composing a new outcome. This is the specific defect Section 8 (via Section 6 of this revision) exists to remove.
 
 ### 3.6 What "committed" means today
+A commit-marker file's existence, promoted last. Correct in spirit, underspecified in what a consumer must check -- see Section 10 (renumbered; publication/manifest/marker semantics, this revision's Finding 6).
 
-The commit marker file's existence on disk, promoted strictly after every other artifact is durably re-read and verified. Operationally correct, but (per the architecture review that produced this revision) insufficient on its own -- see Section 10 for what a consumer must additionally verify before trusting a marker's presence.
-
-### 3.7 Interruption/crash guarantees
-
-No partial output is ever observable (satisfied); no resumption of a crashed run is attempted (an assumption, not a guarantee -- addressed in Section 17); cleanup failure during rollback is surfaced, not swallowed (satisfied).
-
-### 3.8 Trust-boundary table (superseded by Section 17's expanded version)
-
-| Boundary | Protected by | Protects against | Does **not** protect against |
-|---|---|---|---|
-| Evidence identity | Reference-identity vs. private ledger | Forged/copied/substituted/replayed evidence objects | Direct field mutation of a *real* ledger object; same-process arbitrary code (see Section 17.9) |
-| Score validity | Manifest **shape** check only | Malformed/incomplete/wrong-typed Items arrays | A well-formed but entirely fabricated Items array -- no provenance check exists at all |
-| Publication identity | Artifact-manifest Id/destination check | Wrong/incomplete/misdestined artifact sets | Correct ID/destination with substituted or corrupted *content* -- no hash binding exists (see Section 9) |
-| Publication durability | Stage -> promote -> durable-reread -> marker | Crash/interruption/partial write | A reader trusting marker presence alone without validating the manifest it commits (see Section 10) |
-
-### 3.9 Can this be simplified rather than further validated?
-
-Yes -- this remains the governing principle of the whole redesign: one uniformly-enforced ownership/immutability/provenance rule, applied to every fact category, replaces three independently-invented, unevenly-strong defense mechanisms.
-
-### 3.10 Would a different internal model eliminate whole classes of attack?
-
-Yes, per Sections 5-12 below, which is where this revision replaces the first draft's named-but-underspecified abstractions with concrete mechanisms.
+### 3.7-3.10
+Unchanged from the prior revision; superseded in detail by Sections 15 (trust boundaries) and 16 (simplification/alternatives) below.
 
 ---
 
-## 4. Proposed seven-stage pipeline
+## 4. Proposed pipeline (revised to remove the publish/outcome cycle -- Finding 4)
 
 ```
-Checks execute -> Immutable Fact Store -> Eligibility Decision (frozen) ->
-Artifact Builder -> Staged Bundle -> Atomic Publish -> Commit Marker -> Final Outcome
+Checks execute
+     |
+     v
+Immutable Fact Store (raw measurements only -- Finding 3)
+     |
+     v  Seal()
+Eligibility Snapshot (frozen, derives every conclusion -- Finding 1, 3)
+     |
+     v
+Artifact Builder (projects ONLY the Eligibility Snapshot into report content)
+     |
+     v
+Staged Bundle (four reports)
+     |
+     v
+Atomic Publish -> Committed Manifest -> Commit Marker (two artifacts, hash-chained -- Finding 6)
+     |
+     v
+Publication Result (Published: bool: exists only in memory / as a verifiable marker, never embedded in the reports -- Finding 4)
+     |
+     v
+Final Outcome (composed fresh from Eligibility Snapshot + Publication Result,
+               both at write time and at every later read time -- Finding 4)
 ```
 
-(Renamed from the first draft's six-stage version: "Decision Snapshot" is renamed "Eligibility Decision" per Section 8, and an explicit eighth stage, "Final Outcome," is added because Section 8 establishes that eligibility and final certification status are not the same object.)
+The critical correction from the prior draft: **the Artifact Builder consumes only the Eligibility Snapshot, never the Final Outcome.** The Final Outcome does not exist yet when artifacts are built (it cannot -- it requires knowing whether publication succeeded, and the artifacts are what get published). Publication depends on Eligibility; Final Outcome depends on Publication. There is no path in this diagram from Final Outcome back to Publication or to the artifacts -- the apparent cycle in the prior draft existed only because that draft never stated this ordering explicitly.
 
-| Stage | Status today | Gap this ADR closes |
+---
+
+## 5. Finding 1 -- Actual immutability: a concrete, enforceable mechanism
+
+**What was wrong:** the prior draft relied on PowerShell `class` semantics (`hidden` fields, an intended-but-unenforced absence of setters). PowerShell classes do not have a `readonly` property modifier; a `hidden` field remains reachable and settable through several ordinary PowerShell mechanisms (`$obj.psobject.Properties`, `Add-Member -Force`, and simple reflection), none of which require the "same-process arbitrary code" threat this ADR already places out of scope -- they are reachable through ordinary scripting. Describing this as "immutability" overstated what the language actually guarantees.
+
+**The mechanism, concretely: compiled .NET value types with constructor-only assignment, plus string-backed sealed state.** Two techniques, used for two different things:
+
+### 5.1 Language-guaranteed immutable value types, for every frozen output
+
+`TPMFact`, `TPMEligibilitySnapshot`, `TPMPublicationResult`, `TPMFinalOutcome`, and each Committed-Manifest entry are defined as **compiled C# types via `Add-Type -Language CSharp -TypeDefinition "..."`** -- not PowerShell `class`. This repository already uses this exact mechanism (`Get-TPMConsoleWindowRect`'s P/Invoke wrapper), so it is a proven, working pattern on both Windows PowerShell 5.1 and pwsh 7 in this codebase, not a new dependency.
+
+```csharp
+public sealed class TPMFinalOutcome
+{
+    public string FinalStatus { get; }
+    public string FinalOverall { get; }
+    public int FinalExitCode { get; }
+    public TPMFinalOutcome(string finalStatus, string finalOverall, int finalExitCode)
+    {
+        FinalStatus = finalStatus; FinalOverall = finalOverall; FinalExitCode = finalExitCode;
+    }
+}
+```
+
+This is a **language guarantee**, not a project convention: `{ get; }`-only auto-properties compile to a backing field with no public (or any ordinary-reachable) setter at the CLR level. PowerShell script code has no syntax that can assign `$outcome.FinalStatus = 'PASS'` -- the .NET property system itself rejects it ("property is read-only"), the same way it would reject the equivalent C# statement. This is categorically different from a PowerShell `class`'s `hidden` field, which remains assignable through ordinary PowerShell object-manipulation cmdlets. (Reflection -- `[System.Reflection.FieldInfo]::SetValue` against the compiled type's private backing field -- can still defeat this, exactly as it can defeat a real C# `readonly` field or a C# 9 `record`; this is the same explicitly-out-of-scope, same-process-arbitrary-code threat already stated in Section 15.10/15.6, not a new gap this mechanism introduces.)
+
+### 5.2 Sealed internal state as an immutable string, for the Fact Store specifically
+
+The Fact Store's working area, during "checks execute," is necessarily mutable (facts are appended one at a time) -- this is not claimed to be immutable, and does not need to be; it is protected by ownership (Finding 2), not by immutability. What changes at `Seal()`:
+
+- `Seal()` serializes every accumulated `TPMFact` into a single canonical JSON string: `$this.SealedFactsJson = ($facts | ConvertTo-Json -Depth 6)`.
+- `SealedFactsJson` is a `[string]`. **.NET strings are immutable by CLR language guarantee** -- there is no operation that mutates a `[string]` in place; every apparent "modification" produces a new string, leaving the original untouched. This is not a project convention either; it is a property of the CLR type itself.
+- After `Seal()` runs, the store's pre-seal mutable list is never read again by any store method -- every accessor added after this point (`GetSealedFacts()`) works exclusively from `SealedFactsJson`, deserializing a **fresh** `TPMFact[]` via `ConvertFrom-Json` on every call.
+- Because deserialization always allocates new objects, no two calls to `GetSealedFacts()` can ever return objects that share any mutable state -- this is what "copy-on-write detached primitive snapshot" (one of the review's own suggested mechanisms) means concretely here: the "write" is the one-time serialization at `Seal()`, and every subsequent read is a detached copy taken from that frozen string.
+
+### 5.3 Distinguishing the three guarantee levels, explicitly
+
+- **Language guarantee** (enforced by the CLR/C# compiler, cannot be violated by PowerShell script syntax at all): `{ get; }`-only auto-properties on the compiled types (5.1); `[string]` immutability (5.2).
+- **Implementation guarantee** (enforced by this codebase's own function bodies, verifiable by test but not by the language itself): `Seal()` is the only place `SealedFactsJson` is ever assigned; no store method other than `Seal()`'s own body reads the pre-seal mutable list after sealing; `GetSealedFacts()` always deserializes fresh rather than caching and returning a shared deserialized instance.
+- **Project invariant** (a discipline this pipeline's code review enforces, not verifiable by either the language or a single function's own logic in isolation): nothing in the certification pipeline ever holds a reference to a `TPMFact`/`TPMEligibilitySnapshot`/etc. instance across a call boundary in a way that lets it be handed to code that shouldn't have decision-relevant access to it; every function that receives one of these types treats it purely as an input to read, never attempts to reconstruct one via anything other than its constructor.
+
+This three-level distinction is stated once, here, and referenced by name (`language guarantee` / `implementation guarantee` / `project invariant`) everywhere else in this document a guarantee is claimed, so a future implementer never has to guess which kind of guarantee a given sentence is making.
+
+---
+
+## 6. Finding 2 -- Ownership proof that is never an observable value
+
+**What was wrong:** the prior draft's `OwningRunToken` was a GUID *stored as data on the object* and compared by value. Any code that could read the token's value (even from a `hidden` field, per Finding 1's own critique of what `hidden` actually protects; or from a log line, an error message, or a debug dump that happened to include it) could then construct an entirely new, unrelated object carrying the same token value and have it accepted -- ownership was reduced to "knows a copyable string," not "is the code the store was actually handed to."
+
+**The mechanism: a closure-held capability, never exposed as object state.**
+
+### 6.1 The recording authority is a scriptblock closure, not a token
+
+`New-TPMFactStore` does not return an object with a settable-looking `OwningRunToken` property. It returns **two** things, only one of which can mutate anything:
+
+```powershell
+function New-TPMFactStore {
+    $sealed = $false
+    $facts = New-Object System.Collections.Generic.List[object]
+    $recordFact = {
+        param($Fact)
+        if ($sealed) { throw 'fact store is sealed' }
+        $facts.Add($Fact)
+    }.GetNewClosure()
+    $sealFn = {
+        $script:sealed = $true   # closure-local, see 6.2 for the precise capture note
+        # ... serialize $facts into the immutable SealedFactsJson (Section 5.2) ...
+    }.GetNewClosure()
+    $reader = New-TPMFactStoreReader ...   # read-only handle, Section 6.3
+    [pscustomobject]@{ Recorder = $recordFact; Seal = $sealFn; Reader = $reader }
+}
+```
+
+`$recordFact` is a `[scriptblock]` produced by `.GetNewClosure()` -- a real, working PowerShell mechanism (not hypothetical) that captures `$facts` and `$sealed` *by lexical reference* into the closure's own private execution context. The only way to add a fact to this specific store instance is to invoke *this specific scriptblock instance* -- `& $recordFact $someFact`. There is no property, field, or token whose *value* another piece of code could present to achieve the same effect; the authority is the closure reference itself, and a closure reference is not a value that can be reconstructed by knowing what it "looks like" -- it either is a reference to that exact closure, obtained from that exact `New-TPMFactStore` call, or it is not, with nothing in between.
+
+### 6.2 Who obtains the recorder
+
+Exactly the caller of `New-TPMFactStore` -- the main script body, at run start (unchanged cardinality from the previous revision's Section 5.2: exactly one call per run). `Add-TPMFactStoreCheck -Recorder $recordFact -Fact ...` and `Add-TPMFactStoreEvidence -Recorder $recordFact -Fact ...` take the closure itself as their mandatory parameter and invoke it -- they do not take the store object and a token; they take the capability directly. Nothing else in the script ever receives `$recordFact` -- it is not returned by the `Reader` handle (6.3), not embedded in any fact, not logged, not serialized.
+
+### 6.3 The read side has no recording power at all
+
+`$store.Reader` (or however the read handle is named) exposes only `GetSealedFacts()` (Section 5.2) and nothing else -- it does not expose `$recordFact`, does not expose `$sealFn`, and cannot be used, no matter what is done with it, to add or seal facts. **Possessing the reader, or the whole returned `[pscustomobject]` wrapper, proves nothing about recording authority** -- this directly satisfies the review's stated property: "consumers must never obtain the authority simply by possessing the object." The Artifact Builder (Section 4) receives only a `Reader`-equivalent detached fact projection (Section 5.2's fresh deserialization) and the Eligibility Snapshot -- never the recorder closure, never the store's mutable internals.
+
+### 6.4 Why this is stronger than a compared value, restated plainly
+
+A compared value (GUID, string, number) can always, in principle, be copied by anything that once observed it -- the security property of a comparison is only as strong as the value's secrecy, and Section 6 of the prior draft never actually kept the token secret (it was a "hidden" object field, readable through ordinary PowerShell reflection-adjacent mechanisms per Finding 1). A closure reference is not observed as a value at all -- there is no `Get-Something -Value` operation that yields "the recorder" as data; either a piece of code is the one specific caller `New-TPMFactStore` handed the scriptblock reference to, or it never had it, and no amount of inspecting the store, the reader, or any fact can manufacture it. This is the "closure-held capability" mechanism from the review's own example list, chosen over "private run context" or "registry-owned identity" because it requires no additional state (a private context/registry is itself one more piece of state that would need its own protection) and is directly expressible in PowerShell today via `.GetNewClosure()`, already a standard idiom.
+
+---
+
+## 7. Finding 3 -- Raw facts, not interpreted conclusions
+
+**What was wrong:** the prior draft's check-fact schema stored a pre-computed Boolean (`the check's raw pass/fail Boolean as directly observed`) -- calling a Boolean verdict "raw" does not make it a measurement; a pass/fail Boolean is already the output of applying a judgment to some more primitive observation, and storing it in the Fact Store let a fabricated Boolean substitute for the judgment the Eligibility Snapshot is supposed to be the only place that computes.
+
+**The principle, stated precisely (needed because the raw/interpreted line is genuinely subtle in a few cases):** a fact is raw if it is the most primitive value a producer function directly observes -- a count, a byte length, a hash, an existence check's own literal return value, a version string, a path. A fact is an interpreted conclusion if it is the result of applying a pass/fail *threshold or comparison* to some more primitive observation. `Test-Path $x` returning `$true` is a raw observation (it is the atomic thing the .NET/PowerShell runtime directly reports); `$FailedTests -eq 0` is a conclusion (it applies a threshold to a more primitive count). The Fact Store holds the former category exclusively; the Eligibility Snapshot computation (Section 8) is the only place the latter category is ever produced.
+
+### 7.1 Revised check-fact raw-value schema, per category
+
+| Canonical identifier | Raw observed measurement (replaces the prior draft's Boolean) |
+|---|---|
+| `Pester` | `TotalTests`, `PassedTests`, `FailedTests`, `SkippedTests` (four raw integer counts) |
+| `Static Analysis` | `FindingsCount` (raw integer; optionally the raw findings list itself, if downstream reporting needs the detail, but eligibility only ever reads the count) |
+| `Real Install Health` | The individual raw signals `Test-TPMInstallHealthGate` itself directly observes (e.g. each sub-check's own literal result), recorded as a set of named raw observations rather than pre-collapsed into one verdict -- the specific sub-signals are an implementation detail of that gate, ported unchanged in *shape*, only moved one level earlier (recorded before collapse, not after) |
+| `Backups` | `UserProfilesBackupExists`, `GameProfilesBackupExists` (each the literal `Test-Path`-equivalent observation, not a judgment about whether backups are "sufficient") |
+| `Smoke File Safety` | `SnapshotAdded`, `SnapshotRemoved`, `SnapshotChanged` (raw diff counts, per area if the underlying snapshot mechanism already reports per-area -- already close to raw in today's implementation, ported as-is) plus `SmokeModeActive` (the literal `-RunUnattendedTPM`-derived observation of which mode this run is, since applicability itself is derived from this raw fact, not stored as a pre-computed applicability judgment) |
+| `pcsx2x6 crosshair path (issue #79)` | `ExpectedCanonicalPath`, `ObservedPath` (both raw strings; the equality comparison is a conclusion, computed only in Eligibility) |
+| `Behavioral Certification (Virtual Beta Tester)` | `Total`, `Passed`, `Failed` (raw counts, mirroring Pester) |
+| `Unattended TPM root binding` | `RequestedRoot`, `EffectiveRoot` (both raw strings; the comparison is a conclusion) |
+| `Unattended TPM config restoration` | `ExpectedHash`, `ObservedHash` (both raw hash values of the config file's content before/after; the hash *comparison* -- do they match -- is a conclusion computed in Eligibility, per the review's own worked example for this exact category) |
+| `Repository` | `RepositoryAvailable` (the literal existence/accessibility observation), `GitStatusRaw` (the raw `git status` text) -- "is the repository in an acceptable state" is a conclusion over these; "does `git status` return this text" is not |
+
+### 7.2 What this changes about the Eligibility Snapshot
+
+`Get-TPMCertificationEligibility` (Section 8) is now the **only** place any of the following comparisons happen: `FailedTests -eq 0`, `FindingsCount -eq 0`, `ExpectedCanonicalPath -ceq ObservedPath`, `ExpectedHash -eq ObservedHash`, and the equivalent threshold/comparison for every other category. No fact, anywhere, is permitted to already encode a pass/fail verdict -- if a future contributor adds a new check-fact category whose "raw value" is a pre-computed Boolean, that is a defect against this ADR's schema, not a legitimate new fact category, exactly as strictly as the existing PNG-structural-validation rules are enforced against new evidence categories.
+
+### 7.3 Evidence facts (unchanged from the previous revision -- already raw)
+
+Evidence facts (a captured file's path plus its structural PNG validation result) were already raw measurements in the prior revision -- "does this decode as a structurally valid PNG of positive dimensions" is an observation about the file, not a judgment about whether the certification should pass because of it (the judgment -- "is this required evidence's presence what certification needs" -- is applied in Eligibility, same as check facts). No change to Section 7's evidence schema from the previous revision is needed; only the check-fact schema (7.1 above) required correction.
+
+---
+
+## 8. Finding 4 -- Breaking the Outcome -> Publish -> Outcome cycle
+
+**What was wrong:** the prior draft's `TPMFinalOutcome` was positioned as if it were an input the Artifact Builder or publication step might need, while also being described as composed *from* the publication result -- read literally, this implies final reports (built before publication) would need to already know the final outcome (which depends on publication), a genuine circular dependency the prior draft never explicitly resolved.
+
+**The fix: four distinct, one-directionally-dependent objects, and an explicit statement of which object each downstream consumer reads.**
+
+### 8.1 The four objects, restated with corrected dependencies
+
+1. **Raw Facts** (Section 5-7) -- the sealed Fact Store's content. Depends on nothing else in this list.
+2. **Eligibility Snapshot** (`TPMEligibilitySnapshot`, renamed from the prior draft's `TPMEligibilityDecision` to match this ADR's stage-diagram terminology) -- computed from Raw Facts alone, by `Get-TPMCertificationEligibility -Reader $factStoreReader`. Depends only on (1).
+3. **Publication Result** (`TPMPublicationResult`, renamed from `TPMPublicationOutcome`) -- produced by attempting to publish artifacts that were built from (2) alone. Depends only on (2) -- **never on Final Outcome, because Final Outcome does not exist yet at this point in the run.**
+4. **Final Outcome** (`TPMFinalOutcome`) -- composed from (2) and (3) together, by `New-TPMFinalOutcome -Eligibility $eligibility -Publication $publicationResult`. Depends on both, produced only after both already exist.
+
+### 8.2 What the Artifact Builder actually receives (this is what breaks the cycle)
+
+The Artifact Builder (Section 4, Section 11 of the prior revision, unchanged in this revision) receives **only the Eligibility Snapshot and the detached fact projection** -- never the Publication Result, never a Final Outcome, because neither exists at artifact-build time. The report content it produces therefore contains the Eligibility Snapshot's own fields (`EligibleForCertification`, and the structured evidence/score eligibility detail) -- **the reports say whether the run was eligible for certification, not whether they themselves were successfully published**, which is a question a report cannot answer about itself for the same reason round 3 already discovered (a `Published` field baked into content generated before publication is attempted is always stale or meaningless).
+
+### 8.3 What "Final reports derive from Final Outcome" actually means
+
+Not that the on-disk artifact *content* contains Final Outcome fields (Section 8.2 explains why that's impossible without a cycle) -- it means the **rendered, consumer-facing result** (console output at write time; `Read-TPMCommittedCertification`'s return value at read time, per Finding 6) is always computed by composing Eligibility with a freshly-determined Publication state:
+
+- **At write time:** immediately after `Publish-TPMCertificationBundle` returns its `TPMPublicationResult`, the main script calls `New-TPMFinalOutcome -Eligibility $eligibility -Publication $publicationResult` once, and every write-time consumer (console `Write-Host`, the process exit code) reads that single `$finalOutcome` value. This is unchanged from the prior revision's Section 12 guarantee.
+- **At read time** (a later, independent process auditing a committed bundle): there is no stored `TPMFinalOutcome` to read back at all -- `Read-TPMCommittedCertification` (Finding 6) reconstructs one, fresh, by (a) reading the Eligibility Snapshot fields embedded in the verified artifacts, and (b) treating "the commit marker validated successfully" as proof that `Publication.Published` was `$true` for this bundle (if it weren't, per Finding 5, no marker would exist to find) -- then calling the same `New-TPMFinalOutcome` composition function a second, independent time. **The composition function is pure and produces the same result from the same two inputs regardless of whether it's called at write time or read time**, which is what makes this not a cycle: nothing is ever read back into itself, because Final Outcome is never itself the thing being read -- Eligibility and (proof of) Publication are.
+
+### 8.4 Explicit non-cyclic dependency graph
+
+```
+Raw Facts --> Eligibility Snapshot --> Artifact content (report bodies)
+                    |                        |
+                    |                        v
+                    |                  Staged Bundle --> Atomic Publish --> Publication Result
+                    |                                                             |
+                    v                                                             v
+                    +----------------------> New-TPMFinalOutcome <----------------+
+                                                     |
+                                                     v
+                                          Final Outcome (write-time console/exit
+                                          code; OR read-time, recomputed fresh
+                                          by Read-TPMCommittedCertification)
+```
+
+Every arrow points forward exactly once; nothing downstream of Final Outcome feeds back into anything upstream of it.
+
+---
+
+## 9. Finding 5 -- Failure publication, defined as rigorously as success
+
+**What was wrong:** the prior draft never stated whether a NOT CERTIFIED run publishes anything, leaving "what does a failed run's on-disk output look like" entirely to inference.
+
+### 9.1 What reports exist for a failed run
+
+**Identical to a successful run: the same four report artifacts plus the Committed Manifest plus the Commit Marker (Finding 6).** There is no reduced or different artifact set for a failure -- Section 9 of the prior revision's manifest (now Finding 6's two-artifact chain) is produced unconditionally by every run that reaches the publish step, regardless of `EligibleForCertification`.
+
+### 9.2 Which artifacts are required
+
+The same closed artifact-identity set (Section 11 of the prior revision, unchanged) for every outcome. `Test-TPMArtifactManifest`'s (successor's) required-identity check has no `EligibleForCertification`-conditional branch.
+
+### 9.3 Do failures produce committed bundles
+
+**Yes.** A NOT CERTIFIED run's bundle is committed (Committed Manifest + Commit Marker both promoted and durably verified) exactly like a CERTIFIED run's, *provided publication itself succeeds* -- eligibility and publication are orthogonal (Section 8.1's dependency graph: Publication depends only on Eligibility's *content*, not on Eligibility's *verdict*; a `-BuildArtifacts`-equivalent step runs, and a publish attempt happens, whether `EligibleForCertification` is `$true` or `$false`). This preserves the current, correct, already-relied-upon operational behavior: testers and auditors need durable, verifiable evidence of *why* a run failed, not only proof that passing runs passed. The only case with *no* committed bundle at all is when publication itself throws (Section 9.5).
+
+### 9.4 How NOT CERTIFIED is represented
+
+Inside the committed, hash-verified artifacts themselves: the Eligibility Snapshot's `EligibleForCertification = $false`, plus its structured `EvidenceEligibility`/`ScoreEligibility` detail explaining which raw facts (Section 7) caused it, rendered into the report content by the Artifact Builder exactly as a `$true` value would be -- there is no separate "failure report format," only the same template rendering a different (still fully specified) Eligibility Snapshot.
+
+### 9.5 Consumer behavior
+
+`Read-TPMCommittedCertification` (Finding 6) returns two logically independent pieces of information, and callers must check both, not conflate them: **`Valid`** (was this bundle genuinely, completely, tamper-free committed -- a question about publication integrity) and **`FinalOutcome.FinalStatus`** (was the underlying run certified -- a question about eligibility). A validly-committed bundle for a failed run returns `Valid = $true` (the bundle is real and trustworthy) with `FinalOutcome.FinalStatus = 'FAIL'` (the run itself did not certify) -- these are not the same axis, and this document states explicitly, here, that a consumer conflating them (e.g. treating `Valid = $true` as if it meant "certified") is a caller-side bug the API surface does not itself prevent by naming alone; call sites and their own tests are responsible for reading `FinalOutcome.FinalStatus`, not `Valid`, when the question is "did this run pass."
+
+### 9.6 Commit-marker behavior
+
+Identical mechanism for both outcomes (Section 8.2/8.3's rule that the marker/manifest never embed Publication or Final Outcome fields applies regardless of Eligibility's verdict) -- the marker does not, and structurally cannot, encode PASS/FAIL itself; it only proves the bundle (whatever Eligibility content it wraps) was durably and completely committed. A reader determines PASS/FAIL only by reading the Eligibility Snapshot content the marker's hash chain (Finding 6) already proved was genuinely part of this commit -- never from the marker's own bytes directly.
+
+---
+
+## 10. Finding 6 -- Manifest and commit marker: two artifacts, explicitly defined
+
+**What was wrong:** the prior draft's Section 9 introduced a "committed manifest" containing per-artifact hashes while simultaneously describing it as effectively the same thing as round 3's existing "commit marker," without ever stating whether these were one artifact or two, or (if two) how they relate.
+
+**Decision: two artifacts, in a three-tier hash chain.**
+
+### 10.1 Identities
+
+| Artifact | Identity (in the closed artifact-identity manifest) | Contains |
 |---|---|---|
-| Checks execute | Exists | None |
-| Immutable Fact Store | Partial (evidence only) | Section 5-7: unify and make provenance-checked, not just type-checked |
-| Eligibility Decision (frozen) | Partial, and semantically wrong (claims final status) | Section 8: correct the boundary |
-| Artifact Builder | Exists, but arbitrary | Section 11: constrain to a deterministic projection |
-| Staged Bundle | Exists | Section 9: bind to exact content via hashes |
-| Atomic Publish | Exists | Section 9-10: hash-bound manifest, defined consumer contract |
-| Commit Marker | Exists | Section 10: define what "trustworthy" means beyond presence |
-| **Final Outcome** (new) | Does not exist as a distinct stage today | Section 8, 12: the only object authorized to carry PASS/CERTIFIED/exit-code semantics |
+| Report artifacts (four, unchanged) | `CertificationScorecardJson`, `ValidationReportJson`, `CertificationScorecardMarkdown`, `ValidationReportMarkdown` | Eligibility Snapshot content, rendered (Section 8.2) |
+| **Committed Manifest** (new) | `CommittedManifest` | For each of the four report artifacts: canonical filename, canonical destination, byte length, SHA-256 hash, schema-version, certification-run identity (the full field list from the prior draft's Section 9.1) |
+| **Commit Marker** (existing, round 3, extended) | `CommitMarker` | A minimal record: schema-version, certification-run identity, and -- new in this revision -- the SHA-256 hash **of the Committed Manifest artifact itself** |
+
+### 10.2 Ordering
+
+Strict three-tier promotion order, all within the same atomic staged-bundle operation (Section 6 of the prior revision's stage/promote/durably-verify sequence, unchanged in its atomicity guarantees): the four report artifacts are staged and promoted first (fixed order, as today); the Committed Manifest is staged and promoted second, after all four reports are durably verified against the hashes it itself declares; the Commit Marker is staged and promoted **last**, only after the Committed Manifest is durably verified against the hash the Marker itself embeds.
+
+### 10.3 Hashes and dependency, explicit
+
+```
+Report 1 --hash--\
+Report 2 --hash---+--> Committed Manifest (embeds all four hashes)
+Report 3 --hash---+          |
+Report 4 --hash--/           v
+                        hash of Committed Manifest
+                              |
+                              v
+                        Commit Marker (embeds that one hash)
+```
+
+The Marker depends on (embeds a hash of) the Manifest; the Manifest depends on (embeds hashes of) the four reports. Verifying the Marker alone proves nothing about the reports directly -- it proves the Manifest it points to hasn't changed since the Marker was written; verifying the Manifest against its own embedded hashes is what actually proves the four reports haven't changed. A consumer must walk the whole chain (Section 10.4), not stop at the Marker.
+
+### 10.4 Consumer validation (`Read-TPMCommittedCertification`, six steps, revised to reflect the two-artifact chain)
+
+1. Marker exists at the expected path. Absence -> reject, "not committed."
+2. Marker's embedded certification-run identity matches the run identity the caller expects (if checking a specific run) -- rejects a marker copied from a different run.
+3. Manifest exists, parses, and its SHA-256 hash matches the hash the Marker embeds -- rejects a marker paired with a substituted or stale manifest.
+4. For each of the four report artifacts the Manifest lists: file exists at the Manifest's canonical destination; filename matches; byte length matches; SHA-256 hash matches the Manifest's own recorded hash for that artifact.
+5. Completeness: every artifact ID the Manifest declares is present (missing -> reject, "partial publication"), and no additional file in the report directory matches a known authoritative filename pattern without being listed in the Manifest (extra/debris file -> reject).
+6. Only if 1-5 all pass: parse the Eligibility Snapshot fields out of the verified report artifacts, treat step 1-5's success as proof `Publication.Published = $true` for this bundle, and compute `FinalOutcome` via `New-TPMFinalOutcome` (Section 8.3's read-time recomposition) before returning `Valid = $true` plus the computed outcome.
+
+This is the same six-step count and the same rejection coverage as the prior revision's Section 10, restructured to reflect that step "verify the manifest" and step "verify the marker" are now two distinct, hash-chained steps rather than one artifact wearing both names.
 
 ---
 
-## 5. Workflow-owned provenance
+## 11. The Artifact Builder as a deterministic projection (unchanged from the prior revision's Section 11, restated briefly)
 
-**The first draft's error:** it said evidence objects were authenticated because they were reference-identical to entries in a `$script:tpmEvidenceLedger` `List[object]`, and implied a `TPMFactStore` *type* would generalize this. Neither claim, by itself, establishes genuine provenance: `-is [TPMFactStore]` proves an object is *shaped* like a fact-store record; it does not prove *this specific run's* workflow produced it, and reference-identity against a `List[object]` scoped only by ordinary PowerShell variable scoping is a convention, not a boundary enforced against same-process code.
-
-### 5.1 One store instance per run, owned by run-specific identity
-
-Each certification run generates a **run capability token** at start -- a fresh `[guid]` (already the existing `WorkflowId` pattern, generalized) held only by the top-level script scope that starts the run. The `TPMFactStore` constructor is **private-by-convention plus capability-gated**: it accepts the run capability token as a mandatory constructor argument and stores it in a `hidden` field. Every subsequent operation against the store that must prove "this call belongs to the run that owns this store" (sealing, and -- during migration Phase 2 -- direct fact recording from a context outside the designated recording functions) requires presenting the same token value, compared by exact value equality (`-ceq` against the GUID's string form, or `.Equals()` on the `[guid]` itself). A store constructed with, or later checked against, a different token is provably not this run's store.
-
-This is not cryptographic secrecy (a GUID visible in-process is not a secret from other same-process code -- see 5.6) -- it is **identity binding**: it converts "is this object shaped like a fact store" into "was this object constructed with, and does it still carry, this run's specific capability value," which a copied or freshly-constructed impostor object cannot satisfy without also having obtained the real token, which is not exposed by any getter (see Section 6.2).
-
-### 5.2 Who may create the store
-
-Exactly one call, at the top of the main script body, immediately after the run capability token is generated: `$factStore = New-TPMFactStore -RunToken $runToken`. No other function in the script constructs a `TPMFactStore`. This is enforced the same way the current codebase already enforces "only `Add-Screenshot` appends to the evidence ledger" -- by code-review convention backed by a structural source-text check (the existing test suite already has a precedent for this: "uses the one transaction as the source... `Publish-TPMCertificationArtifacts -Artifacts` count is 1" -- the migration's regression suite adds an equivalent "`New-TPMFactStore` is called exactly once in the whole script" structural test).
-
-### 5.3 Which code paths may append facts
-
-Only two functions, both taking the store instance (not the run token directly) as a mandatory parameter, and both internally re-validating the store's token against the script-scope `$runToken` before writing: `Add-TPMFactStoreCheck -Store $factStore -Fact ...` and `Add-TPMFactStoreEvidence -Store $factStore -Fact ...` (the direct successors to today's `Add-CheckResult`/`Add-Screenshot`). No other function is granted this capability. The store's underlying fact collections (Section 6) are `hidden`, so nothing outside these two functions -- not even other functions in the same script -- can append directly, only through them.
-
-### 5.4 How producers prove they belong to the run
-
-The producer (main script body) already holds `$runToken` from Section 5.1 in its own scope, obtained once from the single `New-TPMFactStore` call site. `Add-TPMFactStoreCheck`/`Add-TPMFactStoreEvidence` require the caller to pass `-Store $factStore`, and internally assert `$Store.OwningRunToken -ceq $runToken` (where `$runToken` is itself read from the same script-scope variable the constructor call established, not re-derived) before accepting the fact. This closes the gap the first draft left open: it is not enough for the *object* to be a `TPMFactStore`; the *specific instance* must be provably the one this run created, checked at every write, not only at construction.
-
-### 5.5 How facts from another run, or a copied/caller-created store instance, are rejected
-
-Two independent, redundant mechanisms:
-
-1. **Token mismatch.** A `TPMFactStore` instance belonging to a different run (a prior run's leftover object, or a deliberately-constructed impostor with a different or blank token) fails the `OwningRunToken` comparison in 5.4 and is rejected at the first write attempt -- not silently accepted and only caught later at commit time.
-2. **Reference-identity at commit time** (generalizing round 3's evidence-ledger mechanism to the whole store, not just evidence): `Get-TPMCertificationEligibility -Store $factStore` (Section 8's successor to `Complete-TPMCertificationTransaction`) validates that every fact it examines is `[object]::ReferenceEquals` to an entry the store's own internal collection actually holds -- so even a *correctly-tokened* but field-copied fact object (someone who obtained the real token through some other means and built a convincing-looking record) still fails, because copying field values can never reproduce object identity.
-
-A store instance constructed directly by calling code (bypassing 5.2's single call site) is, by definition, a "copied or caller-created" instance under this ADR's threat model -- it either carries no valid token (rejected by 5.4/5.5.1) or, if the caller also fabricated a plausible-looking token, still cannot make its facts reference-equal to anything the real store holds (rejected by 5.5.2), because the real store's internal collections are `hidden` and never returned by reference (Section 6.4).
-
-### 5.6 Explicit threat-model boundary: same-process arbitrary code execution
-
-**Out of scope**, stated explicitly rather than left implicit. If an actor already has the ability to execute arbitrary PowerShell in the same process as the certification run -- for example by dot-sourcing additional code into the running session, or by directly manipulating `hidden` fields via reflection (`.GetType().GetField(...)`, which PowerShell does not prevent) -- no in-process ownership or immutability mechanism this ADR describes can stop them, the same way no software can defend its own process's memory against code running with equal privilege in that same process. This is not a gap specific to this design: it is the same boundary the existing (round 3) evidence ledger already operates under, made explicit here rather than left implicit as it was in the first draft. The actual guarantee this ADR provides is: **constructing a plausible-looking object using only the public API surface (the exported functions and their documented parameters) is insufficient to forge a fact, a decision, or a publication** -- reflection-based or otherwise-privileged same-process tampering is a different, and explicitly out-of-scope, threat.
-
-### 5.7 Three distinct properties, not one
-
-The first draft conflated these; this revision separates them explicitly, because a check that only proves one is not proof of the others:
-
-1. **Correct object type** (`-is [TPMFactStore]`, or `-is [TPMFact]` for an individual record) -- proves shape only. Necessary, not sufficient.
-2. **Valid fact shape** (the closed schema in Section 7 -- required fields present, correctly typed, cardinality respected) -- proves the record is *structurally* well-formed. Still not sufficient on its own; a well-formed, entirely fabricated record is still fabricated.
-3. **Genuinely issued by the active certification workflow** -- proven only by the combination of 5.4's token check at write time *and* 5.5.2's reference-identity check at read time. This is the property that actually matters for certification integrity, and it is the one the first draft's naming implied without defining.
+Canonical internal builder functions, pure from `(Eligibility Snapshot, detached fact projection)` to `(content string)`, no closures over mutable outer state; a schema-validated, output-checked extensibility point if a pluggable builder is ever genuinely needed, never an unconstrained callback. Section 8.2 above adds the explicit constraint that the builder's *input* is the Eligibility Snapshot only, never a Publication Result or Final Outcome, which did not exist as an explicit rule in the prior revision.
 
 ---
 
-## 6. Enforceable immutability
+## 12. The composed Final Outcome as the only rendered result (unchanged in guarantee, restated with corrected terminology)
 
-**The first draft's error:** it relied on "PowerShell class semantics" and a `Seal()` method as if declaring a class and adding a boolean flag were themselves sufficient. They are not -- a PowerShell class's properties remain publicly settable by default, a `Seal()`-checked mutator only blocks mutation through *that specific mutator method*, and returning a live reference to an internal collection from any getter hands the caller a mutable object regardless of how many seal checks guard the store's own methods.
-
-Concrete mechanisms, all required together (none is sufficient alone):
-
-### 6.1 Copy-on-ingress
-
-Every `Add-TPMFactStoreCheck`/`Add-TPMFactStoreEvidence` call constructs a **new**, store-owned record from the caller-supplied values field-by-field (or via a defensive `.PSObject.Copy()`/manual property-by-property copy for the specific closed schema in Section 7) -- it never retains the caller's own object. This is what "copy-on-ingress" means concretely: the store's internal collection never contains an object the caller still holds a reference to.
-
-### 6.2 Private internal records; no retained caller references
-
-The store's internal collections (the fact-store successor to today's `$script:tpmEvidenceLedger` and `$results.Checks`) are `hidden` class fields, never exposed via a public property. There is no getter that returns `$this.InternalFacts` directly.
-
-### 6.3 No shared mutable collections
-
-The store never hands out its internal `List[TPMFact]` (or equivalent) itself, under any name, to any caller -- not even a "read-only view" that is actually the same `List[object]` wrapped in a thin, non-enforcing type. PowerShell's `List[T].AsReadOnly()` produces a `ReadOnlyCollection<T>` wrapper around the *same underlying list* -- mutating the original list through the store's own internal reference still mutates what the wrapper exposes, so `AsReadOnly()` alone is a documentation hint, not an enforcement boundary, and is not relied upon as one here.
-
-### 6.4 Read-only or detached projections on egress
-
-Any method that lets external code inspect the store's contents (e.g. `$factStore.GetFactsForReview()`, used by the Artifact Builder in Section 11) returns a **freshly-constructed array of freshly-constructed, detached copies** of each record -- not the internal objects themselves, not a wrapper around the internal collection. Mutating anything in the returned array has zero effect on the store's own internal state. This is the same "defensive copy on the way out" discipline as 6.1's "defensive copy on the way in," applied symmetrically.
-
-### 6.5 Defensive copying for nested values
-
-Where a fact's raw value is itself a reference type with mutable sub-fields (uncommon in this pipeline's actual fact categories -- see Section 7, which are deliberately scalar/string/path-valued -- but a general rule for any future fact category that isn't), the copy in 6.1 and the projection in 6.4 must be **deep**, not shallow: copying a wrapper object while leaving its nested mutable fields shared with the caller reintroduces exactly the hole this section closes.
-
-### 6.6 Rejection of mutation after sealing
-
-`Seal()` sets a `hidden` boolean. Every mutator (`AddCheck`, `AddEvidence`, and any other internal mutator) checks it first and `throw`s if already sealed -- this generalizes the existing, already-proven `Add-Screenshot` seal-check pattern from round 3 to the whole store. This is necessary but (per the header of this section) not sufficient by itself; it only prevents *new* facts from being added after sealing, it says nothing about whether an *already-added* fact's fields can still be mutated in place, which 6.1-6.4 separately close by ensuring no live, mutable reference to any stored fact ever escapes the store in the first place.
-
-### 6.7 No callback receives an authoritative mutable object
-
-The Artifact Builder callback (Section 11) receives only: (a) the array of detached, read-only-in-practice fact copies from 6.4, and (b) the Eligibility Decision (Section 8), itself constructed as a **frozen value type** -- a `class` whose every property is set once in the constructor and never has a public setter at all (PowerShell classes support this directly: declare properties without `[Parameter()]`-style external set access by simply never writing a method or property setter that mutates them post-construction, and by never exposing a constructor overload that allows re-construction from mutable external state after the fact). Neither object the callback receives is the store itself, and neither is anything the callback could mutate to retroactively change what the store, the eligibility decision, or the final outcome actually record.
-
-### 6.8 How this differs from "intending" immutability
-
-Every mechanism above is checkable independently by a test: 6.1/6.4 by asserting that mutating a value obtained from the store (via ingress or egress) has no observable effect on a value read from the store afterward; 6.2/6.3 by asserting no public property or method returns the internal collection by reference (a reflection-based test, or simply the absence of any such method in the public surface, audited during code review); 6.6 by asserting a mutator throws post-seal (already proven pattern); 6.7 by asserting the Artifact Builder callback's parameter types are the frozen/detached types, never the store type itself. This is what makes immutability *enforced*, in the sense the architecture review asked for, rather than merely documented as an intent.
+`TPMEligibilitySnapshot` and `TPMPublicationResult` have no property that means "certified" -- only `TPMFinalOutcome` does, producible only by `New-TPMFinalOutcome`, called once at write time and recomputed identically (Section 8.3) at read time, never stored as a field inside a published artifact (Finding 4's resolution makes this the reason, not merely an assertion). Every write-time consumer (console, exit code) and every read-time consumer (`Read-TPMCommittedCertification`'s return value) derives from a `TPMFinalOutcome` computed by that one function, from those two inputs, and nothing else.
 
 ---
 
-## 7. Closed raw-fact schema
+## 13. Proposed object ownership model (summary, updated names and mechanisms)
 
-**The first draft's error:** it let `$certification.Items` (score facts) remain a free-standing, caller-constructed array validated only for shape, with no equivalent to evidence's ownership/provenance mechanism, and never separated "raw observed value" from "already-interpreted conclusion" for either fact category.
-
-The Fact Store (Section 5-6) holds only **raw observed facts** -- what a check or capture actually produced -- never a caller's own conclusion about what those facts mean (that derivation happens once, in Section 8, from the sealed store). Every fact category is defined by the following closed schema; no fact category is added ad hoc without updating this table in the same change:
-
-### 7.1 Evidence fact categories (unchanged in substance from round 3, restated in this schema)
-
-| Field | Definition |
-|---|---|
-| Canonical fact identifier | One of the nine fixed strings already established in round 3 (`certification-suite-running`, `requested-effective-root-evidence`, `live-thumbnail-evidence`, `live-controls-evidence`, `adaptive-menu-normal`, `adaptive-menu-small`, `adaptive-menu-maximized`, `smoke-file-safety-evidence`, `final-certification-result`) |
-| Raw observed value | The captured file's path plus its structural-validation result (PNG structure, dimensions) -- not an interpretation, just what was captured and whether it decodes |
-| Authorized producer | `Add-TPMFactStoreEvidence`, exclusively (Section 5.3) |
-| Cardinality | Exactly one per identifier for the seven required identifiers; exactly one (as an explicit Skipped record) for the two conditional identifiers |
-| Ordering requirements | `final-certification-result` must be the last fact appended to the store, of any category (Section 5, generalizing round 3's ledger-position rule store-wide, not evidence-only) |
-| Duplicate behavior | A second fact for an identifier already recorded is rejected at ingestion (`Add-TPMFactStoreEvidence` throws), not silently accepted and only caught at eligibility-computation time -- tightening round 3's "caught at commit" behavior to "rejected at write," consistent with Section 6.6's seal discipline generalized to per-identifier uniqueness during the open (pre-seal) phase too |
-| Missing-fact behavior | A required identifier absent when the store seals is an eligibility-blocking gap (Section 8) |
-| Applicability/tri-state behavior | The two conditional identifiers (`live-thumbnail-evidence`, `live-controls-evidence`) are the only ones permitted an explicit Skipped record in place of a capture |
-| Provenance fields | `OwningRunToken` (Section 5.1, not a caller-visible field -- checked internally, never serialized), append-sequence position (informational, per round 3) |
-| Ingestion-time validation | PNG structural validation, path containment/uniqueness, label/filename consistency, capture-scope presence for ScreenCapture types -- all already implemented in round 3's `Add-Screenshot`/`New-TPMCertificationScreenshot`, ported unchanged into `Add-TPMFactStoreEvidence` |
-
-### 7.2 Check fact categories (new -- does not exist as a closed schema today)
-
-| Field | Definition |
-|---|---|
-| Canonical fact identifier | One of the eleven fixed strings already established as score-item `Area` values (`Repository`, `Pester`, `Static Analysis`, `Real Install Health`, `Backups`, `Smoke File Safety`, `Artifacts`, `pcsx2x6 crosshair path (issue #79)`, `Behavioral Certification (Virtual Beta Tester)`, `Unattended TPM root binding`, `Unattended TPM config restoration`) |
-| Raw observed value | The check's raw pass/fail Boolean *as directly observed* (e.g. `$results.Pester.Failed -eq 0`), plus supporting raw detail text -- not a pre-computed "score contribution," which does not exist at the fact level at all (see Section 8: scoring is derived later, never stored as a fact) |
-| Authorized producer | `Add-TPMFactStoreCheck`, exclusively |
-| Cardinality | Exactly one per identifier |
-| Ordering requirements | None beyond "before the store seals" -- unlike evidence, check facts have no relative-ordering requirement among themselves |
-| Duplicate behavior | Rejected at ingestion, same as evidence |
-| Missing-fact behavior | An identifier absent when the store seals is an eligibility-blocking gap, same as evidence |
-| Applicability/tri-state behavior | `Smoke File Safety` and `Unattended TPM config restoration` are the only two identifiers permitted a `NotApplicable` raw value in place of a Boolean, per the existing manifest (`Get-TPMExpectedScoreItemManifest`) |
-| Provenance fields | `OwningRunToken`, append-sequence position |
-| Ingestion-time validation | Strict `[bool]` typing for the raw value when not `NotApplicable` (already implemented in round 3's `Test-TPMScoreItemManifest`, ported into `Add-TPMFactStoreCheck`'s own validation instead of a separate post-hoc manifest check against a caller-supplied array) |
-
-**Consequence of unifying both categories under one schema and one store:** `Test-TPMScoreItemManifest`'s current shape-only validation (Section 3.8's identified weak point) is subsumed -- once check facts can *only* enter the store through `Add-TPMFactStoreCheck`, with the same ownership/provenance mechanism evidence already has, there is no longer a separate "trust the caller's array" step for score facts to skip. The score derivation in Section 8 reads *only* from the sealed store, the same way evidence validation already does.
+| Type | Owns | Constructed by | Immutability mechanism (Finding 1) | Ownership mechanism (Finding 2) |
+|---|---|---|---|---|
+| Fact Store (mutable, pre-seal) | Accumulating `TPMFact` list | `New-TPMFactStore`, once per run | N/A -- protected by ownership, not immutability | Closure-held `Recorder`/`Seal` scriptblocks (Section 6) |
+| Sealed Fact Store state | `SealedFactsJson` | `Seal()`, once | `[string]` CLR immutability (5.2) | Same closures; sealed state read only via fresh-deserialize accessor |
+| `TPMFact` | One raw measurement (Section 7) | Compiled C# constructor, via `Recorder` | `{ get; }`-only compiled type (5.1) | Only constructible by the ingestion functions holding the `Recorder` |
+| `TPMEligibilitySnapshot` | `EligibleForCertification` + structured detail (Section 8.1) | `Get-TPMCertificationEligibility`, from sealed state | Compiled type (5.1) | Only constructible by that one function |
+| `TPMPublicationResult` | `Published`, `PublicationError` (Section 8.1) | The publish step's return value | Compiled type (5.1) | Only constructible by that one function |
+| `TPMFinalOutcome` | `FinalStatus`, `FinalOverall`, `FinalExitCode` (Section 8.1) | `New-TPMFinalOutcome`, write-time once + read-time recompute (Section 8.3) | Compiled type (5.1) | Only constructible by that one function |
+| Committed Manifest / Commit Marker (Section 10) | Hash chain over the report artifacts | The publish step | Immutable once promoted (on-disk, atomic) | Publish step is the sole writer; consumer contract (10.4) is the sole reader path |
 
 ---
 
-## 8. Correcting the decision boundary: eligibility vs. final outcome
+## 14. Simplified transaction design (concrete flow, no code, corrected for Findings 2/4/6)
 
-**The first draft's error:** `TPMDecisionSnapshot` was described as the transaction's decision object, but its fields (`Passed`, `Status`, `Overall`, `ExitCode`) already claimed final certification semantics (`'PASS'`, `'CERTIFIED'`, `0`) *before* publication had even been attempted -- exactly the boundary confusion Section 3.5 identified in the current implementation, simply renamed rather than fixed.
-
-### 8.1 `TPMEligibilityDecision` (replaces `TPMDecisionSnapshot`)
-
-A frozen value (Section 6.7's construction discipline), computed once by `Get-TPMCertificationEligibility -Store $sealedFactStore`, expressing **only pre-publication eligibility**:
-
-- `EligibleForCertification` (`[bool]`) -- true only if every required fact is present, valid, and (for evidence) passes structural re-validation, and every check fact's raw value satisfies the certification's pass condition.
-- `EvidenceEligibility` (structured detail: which facts, if any, blocked eligibility and why).
-- `ScoreEligibility` (structured detail: same, for check facts).
-
-**`TPMEligibilityDecision` has no `Status`, `Overall`, `ExitCode`, `Passed`, or any field that reads as a final certification verdict.** It cannot, by construction (no such property exists on the type), be rendered to a console, a report, or a process exit code as if it were the certification's result -- there is nothing on the object that means that.
-
-### 8.2 `TPMPublicationOutcome`
-
-Produced by attempting publication (Section 9-10) of an artifact set built from an `EligibleForCertification` `TPMEligibilityDecision`. Fields: `Published` (`[bool]`), `PublicationError` (nullable string), `CommittedManifestHash` (Section 9's hash-bound manifest's own hash, once committed).
-
-### 8.3 `TPMFinalOutcome` (new type -- did not exist even by name in the first draft)
-
-The **only** type authorized to carry final certification semantics, produced by `New-TPMFinalOutcome -Eligibility $eligibilityDecision -Publication $publicationOutcome`:
-
-- `FinalStatus` (`'PASS'` or `'FAIL'`)
-- `FinalOverall` (`'CERTIFIED'` or `'NOT CERTIFIED'`)
-- `FinalExitCode` (`0` or `1`)
-
-Composition rule, stated exhaustively: `FinalStatus = 'PASS'` if and only if `Eligibility.EligibleForCertification -eq $true` **and** `Publication.Published -eq $true`; every other combination (including publication never having been attempted at all) produces `FinalStatus = 'FAIL'`, `FinalOverall = 'NOT CERTIFIED'`, `FinalExitCode = 1`. This is a pure function of its two frozen inputs -- it does not mutate either input, and it is the *only* function in the whole pipeline permitted to construct a `TPMFinalOutcome`.
-
-### 8.4 Why this boundary correction matters structurally, not just semantically
-
-Under the current (and first-draft) design, a caller who obtains the pre-publication decision object before publication is attempted holds an object that already *claims* `Status = 'PASS'` -- if anything in the pipeline were to render that object (a logging statement, a debug dump, a premature report write) before publication actually completes, it would misrepresent an ineligible-for-final-certification state as certified. Under this revision, no object exists, at any point before `New-TPMFinalOutcome` runs, that has a property meaning "certified" at all -- `TPMEligibilityDecision.EligibleForCertification` means "eligible to attempt publication," a categorically different and non-final claim, enforced by the type simply not having any of the final-status property names.
+1. `$factStore = New-TPMFactStore` -- returns `{ Recorder, Seal, Reader }` (Section 6.1). Only the main script body ever holds `Recorder`/`Seal`.
+2. Every check/evidence capture calls `Add-TPMFactStoreCheck`/`Add-TPMFactStoreEvidence -Recorder $factStore.Recorder -Fact ...`, recording **raw measurements only** (Section 7).
+3. On `final-certification-result`, `& $factStore.Seal` -- transitions to the immutable `SealedFactsJson` representation (Section 5.2).
+4. `$eligibility = Get-TPMCertificationEligibility -Reader $factStore.Reader` -- the only place any pass/fail comparison happens (Section 7.2); returns a `TPMEligibilitySnapshot` with **no final-status fields at all**.
+5. `$artifacts = <canonical builders> -Eligibility $eligibility -FactProjection ($factStore.Reader.GetSealedFacts())` -- the four report contents, built from Eligibility alone (Section 8.2).
+6. `$manifest = New-TPMCommittedManifest -Artifacts $artifacts -RunIdentity $runIdentity` -- hashes the four reports (Section 10.1).
+7. `$publicationResult = Publish-TPMCertificationBundle -Manifest $manifest` -- stages/promotes the four reports, then the Manifest, then the Marker (Section 10.2), durably verifying the hash chain at each tier; returns `TPMPublicationResult`.
+8. `$finalOutcome = New-TPMFinalOutcome -Eligibility $eligibility -Publication $publicationResult` -- the only point `FinalStatus`/`FinalOverall`/`FinalExitCode` come into existence (Section 8.1.4).
+9. Console/exit code read `$finalOutcome` exclusively. `exit $finalOutcome.FinalExitCode`.
+10. A later, independent read uses `Read-TPMCommittedCertification -ReportDir $dir` exclusively (Section 10.4), which recomputes a `TPMFinalOutcome` fresh rather than trusting any stored one.
 
 ---
 
-## 9. Binding publication to exact content
+## 15. Expanded trust-boundary analysis (unchanged in substance from the prior revision; renumbered)
 
-**The first draft's error:** the artifact manifest (`Test-TPMArtifactManifest`, round 3) validated artifact *identity* (Id, destination) but never artifact *content* -- an artifact with the correct Id and destination but substituted, corrupted, or stale content passed the manifest check, per Section 3.8's trust-boundary table.
-
-### 9.1 Canonical committed artifact manifest
-
-Before staging (Section 9.2), the Artifact Builder's output (Section 11) is assembled into a **canonical committed manifest** -- itself one more artifact in the staged bundle, promoted last (generalizing round 3's commit-marker-last ordering) -- containing, for every other artifact:
-
-| Field | Definition |
-|---|---|
-| Artifact ID | The existing closed identity set (`CertificationScorecardJson`, `ValidationReportJson`, `CertificationScorecardMarkdown`, `ValidationReportMarkdown`) |
-| Canonical filename | The exact filename component of the artifact's destination path, independent of the full path (so a filename substitution is detectable even if the directory happens to match) |
-| Canonical contained destination | The full path, re-verified contained within `-ReportDir` (round 3's existing containment check, retained) |
-| Byte length | The exact staged content's length in bytes, computed at staging time from the same byte buffer that gets written |
-| Cryptographic hash | SHA-256 of the exact staged byte content (`[System.Security.Cryptography.SHA256]::Create().ComputeHash(...)` over the UTF-8-encoded content, consistent with this repository's existing BOM-less-UTF-8 convention) |
-| Schema/version information | A fixed schema-version integer for the manifest format itself, so a future format change is detectable by a consumer rather than silently misparsed |
-| Certification-run identity | The run capability token's string form (Section 5.1) -- binds the manifest, and everything it commits, to one specific run, not merely "a" run |
-
-### 9.2 What "binding" means concretely
-
-`Publish-TPMCertificationBundle` (the successor to `Publish-TPMCertificationArtifacts`) computes each artifact's hash *at staging time*, before promotion, and includes it in the manifest artifact that itself gets staged and promoted as part of the same all-or-nothing set (Section 6's staged-bundle mechanism, unchanged in its atomicity guarantees from round 3). The durable-verification step already present in round 3 (re-reading each promoted file and comparing to staged content) is extended to compare against the **hash recorded in the manifest**, not merely byte-for-byte against an in-memory staged copy -- so the check that currently only proves "the file on disk matches what this process just wrote" is strengthened to "the file on disk matches what the committed, hash-bound manifest itself asserts," which is the property a *later, independent* consumer (Section 10) can also verify without having been present for the original staging.
+Child-process boundaries; serialization/deserialization (now including the explicit note that `SealedFactsJson`'s `ConvertTo-Json`/`ConvertFrom-Json` round-trip, Section 5.2, is an internal freezing mechanism, not a trust boundary crossing -- the trust boundary remains only the on-disk committed artifacts, Section 10); external files as observations; concurrent certification runs; run-directory ownership; report-directory/run identity binding (now additionally enforced by the Manifest/Marker hash chain, Section 10.3, not only by an identity field); producer exceptions; partial producer completion; interrupted execution; same-process arbitrary code execution (explicitly out of scope, restated from Section 6.4/5.1's reflection caveat); reparse points/symlinks (future work item, not a current gap); and a consolidated inside/outside statement -- all as detailed in the prior revision, carried forward unchanged except where Sections 5-10 above sharpen a mechanism the trust-boundary table already referenced.
 
 ---
 
-## 10. Commit-marker and consumer contract
+## 16. Alternatives considered (unchanged from the prior revision)
 
-**The first draft's error:** it asserted the marker's mere presence was "durable proof of a complete publish" without specifying what a consumer must actually check -- Section 3.6 already flagged this as insufficient on its own.
-
-### 10.1 The consumer-side validator
-
-`Read-TPMCommittedCertification -ReportDir $dir` is the **only** sanctioned way to read a certification run's result back for any purpose (a later audit, a release-integrity check, a dashboard). It performs, in order, and rejects (returns an explicit `Valid = $false` with a reason, never a partial/best-effort result) on failure of any step:
-
-1. **Marker presence.** The commit-marker file exists at the expected path. Absence -> reject, "not committed."
-2. **Marker freshness/run-binding.** The marker's own content includes the certification-run identity (Section 9.1) the caller expects (if the caller is checking a specific run) -- a marker copied from a different run's `-ReportDir` into this one (a stale or copied marker) is rejected here, because its embedded run identity won't match the directory's own other artifacts' embedded run identity (checked in step 4).
-3. **Manifest presence and self-consistency.** The committed manifest artifact (Section 9.1) exists, parses, and its own schema-version is one this reader understands.
-4. **Per-artifact verification against the manifest**, for every artifact the manifest lists: the file exists at the manifest's canonical destination; its filename matches the manifest's canonical filename; its byte length matches; its SHA-256 hash matches; its embedded run identity (where the artifact format carries one, e.g. the JSON artifacts' own `EvidenceWorkflowId` field) matches the manifest's certification-run identity.
-5. **Completeness.** Every artifact ID the manifest declares is present on disk (missing artifact -> reject, "partial publication"), and **no additional file presents itself as an authoritative artifact** -- concretely, the reader also lists the report directory's actual contents and rejects if any file matches one of the known authoritative filename patterns but is *not* listed in the manifest (an extra, unmanifested "authoritative-looking" artifact -- e.g. a stray `TPM-Certification-Scorecard.json` left behind by a failed, uncleaned-up prior attempt -- is exactly the "partial publication" or "cleanup failure that leaves debris behind" scenario this step exists to catch).
-6. **Substitution/tamper detection.** Step 4's hash comparison is what actually catches a substituted or modified artifact -- correct ID and destination with different bytes fails the hash check, closing the gap Section 3.8/9 identified.
-
-Only if all six steps pass does `Read-TPMCommittedCertification` return `Valid = $true` together with the parsed `TPMFinalOutcome` fields it read from the (now-verified) artifacts. **Marker presence alone is never sufficient** -- it is step 1 of six, not the whole check, directly answering the architecture review's explicit correction on this point.
-
-### 10.2 What this rejects, enumerated against the review's list
-
-Stale/copied markers (10.1.2); markers from another run (10.1.2, 10.1.4); missing artifacts (10.1.5); additional authoritative artifacts (10.1.5); modified artifacts (10.1.4/10.1.6); substituted artifacts (10.1.6); mismatched hashes or lengths (10.1.4); wrong canonical filenames (10.1.4); mismatched manifests (10.1.3/10.1.4); partial publications (10.1.5); cleanup failures that leave a marker behind (10.1.5, via the "no unmanifested authoritative-looking file" check -- a cleanup failure that leaves the marker but not all real artifacts is caught at step 5's completeness check, and one that leaves extra debris is caught at step 5's extra-file check).
+Do-nothing/continue incremental hardening (rejected -- the pattern that produced this ADR); full ground-up rewrite (rejected -- most of the pipeline's shape is already correct); score-only provenance ledger without unifying into one Fact Store (rejected as the long-term answer, acceptable fallback); cryptographic signing of in-process facts themselves rather than only the on-disk manifest (rejected as disproportionate for a same-process-only threat, per Section 6.4's ownership mechanism already closing the relevant gap without it); trusting marker presence alone (rejected, superseded by Section 10's chain).
 
 ---
 
-## 11. The Artifact Builder as a deterministic projection, not an arbitrary trust boundary
+## 17. Four-phase migration plan, with no dual decision authority (Finding 7) and an explicit publisher timeline (Finding 8)
 
-**The first draft's error:** `-BuildArtifacts` remained an arbitrary caller-supplied scriptblock, manifest-validated for identity but not constrained in what it could *do* -- nothing prevented a callback from producing content unrelated to the actual sealed facts and eligibility decision it was handed, as Section 3.8 and the review both flagged.
+**What was wrong:** the prior draft's phases specified writable/read-only components but never stated whether a phase could run the new and legacy decision logic *simultaneously* in a way that made either one authoritative depending on circumstance, and never named which function actually calls the publish step at each phase.
 
-### 11.1 Canonical internal builders, preferred
+**The rule, stated once, applied to every phase below:** each phase names exactly one **authoritative source** (the only computation whose result reaches the console, the exit code, and the publish step) and, optionally, a **shadow source** (a second computation, run in parallel, whose result is logged for comparison and never read by anything that affects behavior). A shadow source is explicitly permitted; a second *authoritative* source, even briefly, is not. Each phase also names its **publication authority** -- the one function that actually calls a publish operation -- answering Finding 8 in the same table.
 
-For the four report artifacts already known today (`CertificationScorecardJson`, `ValidationReportJson`, `CertificationScorecardMarkdown`, `ValidationReportMarkdown`), the redesign's default is **no caller-supplied callback at all** -- four fixed, internal functions (`Get-TPMCertificationScorecardJsonArtifact -Eligibility $e -FactStoreProjection $facts`, and its three siblings), each a pure function from `(TPMEligibilityDecision, detached fact-copy array)` to `(content string)`, with no closure over mutable outer-scope variables (correcting the first draft's own noted minor gap: today's `$buildCertificationArtifacts` closures over `$certification`/`$results`/`$reportDir`). Determinism is checkable directly: calling the same builder twice with the same frozen inputs produces byte-identical content, verified by a regression test.
+| Phase | Authoritative source | Shadow source | Prohibited actions | Publication authority (Finding 8) |
+|---|---|---|---|---|
+| **1** | Legacy (`$results`/`$certification`/`Complete-TPMCertificationTransaction`, unchanged) | None -- new types (`TPMFact`, `TPMEligibilitySnapshot`, etc.) exist only in isolated unit tests, not wired into the running pipeline at all | New types must not be constructed from, or compared against, any live run's data this phase | `Publish-TPMCertificationArtifacts` (round 3, unchanged) |
+| **2** | Legacy (unchanged) | New: `TPMFactStore` records the *same* facts the legacy path records (both are written to, from the same call sites, for comparison purposes only), and `Get-TPMCertificationEligibility` computes a shadow `TPMEligibilitySnapshot`, logged (e.g. to a diagnostic file) but never read by console output, exit-code logic, or the publish step | The shadow Eligibility computation must not write to `$results`/`$certification`; must not be read by any report-rendering or exit-code call site; must not trigger its own publish attempt (exactly one publish call per run, by the authoritative/legacy path) | `Publish-TPMCertificationArtifacts` (still legacy, unchanged) |
+| **3** | **New** (`Get-TPMCertificationEligibility` / `Publish-TPMCertificationBundle` / `New-TPMFinalOutcome`) -- authority flips here, once Phase 2's shadow comparison has demonstrated equivalence across the full adversarial matrix (both evidence- and now check-fact-side, per Finding 3's schema change) | None -- legacy is fully removed in this same phase, not merely demoted to shadow (removing the two-decision-engine risk entirely rather than prolonging it) | `Complete-TPMCertificationTransaction` and every direct `$results.Checks`/`$results.Screenshots`/`Add-Member -Force`-on-decision-state call site are deleted in the same change that flips authority -- both cannot coexist even transiently | **`Publish-TPMCertificationBundle`** (new, hash-chained per Finding 6) -- cutover from `Publish-TPMCertificationArtifacts` happens in this one atomic change; the old publisher is deleted in the same commit |
+| **4** | New (unchanged from Phase 3) | None | The old `-BuildArtifacts` arbitrary-callback parameter and identity-only (non-hash-bound) manifest validation are removed entirely | `Publish-TPMCertificationBundle` (unchanged from Phase 3 -- this phase adds `Read-TPMCommittedCertification` and completes documentation; the publisher itself does not change again) |
 
-### 11.2 Where extensibility is genuinely required
+**Why Phase 2's shadow comparison satisfies "shadow comparison is acceptable, decision authority is not":** the shadow computation in Phase 2 genuinely runs, on real data, every real run -- it is not a no-op placeholder -- but its result reaches nowhere a human or the process exit code would observe it during that phase; it exists solely to accumulate evidence (a diagnostic comparison log across many real runs) that the new engine agrees with the legacy engine before Phase 3 ever lets the new engine's result reach anything authoritative. This is the concrete difference between "shadow" (observed, not decisive) and "dual authority" (either could be decisive, even briefly) the review's finding asked this ADR to make unambiguous.
 
-If a future artifact category needs a pluggable builder (not currently the case for any of the four existing artifacts), the extensibility point is not "run arbitrary code and manifest-check its output's identity" -- it is a **schema-validated projection function** whose *output* is checked, not merely trusted: the returned content must parse against a fixed schema for that artifact category (e.g. a JSON Schema for the JSON artifacts, or a required-section-headings check for the Markdown ones), and every value the schema requires to trace back to the `TPMEligibilityDecision`/fact projection it was given (e.g. a JSON artifact's `EligibleForCertification` field must literally equal `$Eligibility.EligibleForCertification`, checked by the framework after the callback returns, not merely assumed) -- so a callback that produces schema-valid but *semantically disconnected* content (e.g. hardcoding `"EligibleForCertification": true` regardless of what it was actually handed) is caught by this post-return equality check, not merely by the artifact-identity manifest that never inspected content at all under the current design.
-
----
-
-## 12. The composed Final Outcome as the only rendered result
-
-**The first draft's error:** it asserted this as a design goal without a concrete guarantee mechanism.
-
-Concrete guarantee: `TPMEligibilityDecision` (Section 8.1) has no property that means "certified," and `TPMPublicationOutcome` (Section 8.2) has no property that means "certified" either -- only `TPMFinalOutcome` (Section 8.3) does, and it is producible only by `New-TPMFinalOutcome`, called exactly once per run, after publication has been attempted (never before). Every consumer of a final result -- console output, the Markdown report, the JSON report, the returned structured result, and the process exit code -- reads from the single `$finalOutcome` variable the main script binds from that one call, and the existing structural-source-text-check pattern already used elsewhere in this pipeline's regression suite (e.g. round 3's "uses the one transaction as the source" test) is extended to assert: no `Write-Host`/report-building/`exit` call site in the main script references `$eligibilityDecision.EligibleForCertification` or `$publicationOutcome.Published` directly as if either were the final answer -- every such site is required to go through `$finalOutcome`. Because the intermediate types structurally cannot express "certified" (Section 8.4), this is not merely a convention the source-text check polices as a backstop -- it is impossible to violate by accident, since there is no field to accidentally read.
+**Per-phase acceptance gates, rollback boundaries, and legacy-removal points** are otherwise unchanged from the prior revision's Section 16 (each phase: single atomic commit, revertible as a unit; Phase 2's gate is shadow-vs-legacy equivalence across the adversarial matrix; Phase 3's gate is the structural type-reflection test proving `TPMEligibilitySnapshot` has no final-status properties; Phase 4's gate is the full Section 19 acceptance-criteria list below).
 
 ---
 
-## 13. Proposed object ownership model (summary)
-
-| Type | Owns | Constructed by | Mutable after construction? |
-|---|---|---|---|
-| `TPMFactStore` | Raw evidence + check facts (Section 7), keyed by canonical identifier | `New-TPMFactStore`, exactly once per run (Section 5.2) | Append-only until `Seal()`; no field mutation ever, per Section 6 |
-| `TPMEligibilityDecision` | `EligibleForCertification` + structured evidence/score eligibility detail (Section 8.1) | `Get-TPMCertificationEligibility`, from a sealed store | No -- frozen at construction (Section 6.7) |
-| `TPMPublicationOutcome` | `Published`, `PublicationError`, `CommittedManifestHash` (Section 8.2) | `Publish-TPMCertificationBundle`'s return value | No |
-| `TPMFinalOutcome` | `FinalStatus`, `FinalOverall`, `FinalExitCode` (Section 8.3) | `New-TPMFinalOutcome`, exactly once (Section 12) | No |
-| Committed manifest (Section 9.1) | Per-artifact ID/filename/destination/length/hash/schema-version/run-identity | The publish step, from the Artifact Builder's output | No (itself a promoted, immutable-on-disk artifact once committed) |
-
-Ownership rule: nothing outside the constructing function for a given type may build one directly with the same effect as a genuine call -- for `TPMFactStore` this is enforced by the token/reference-identity mechanism in Section 5; for the three outcome-related types, by the combination of frozen construction (Section 6.7) and the single-call-site structural tests (Sections 5.2, 12).
-
----
-
-## 14. Simplified transaction design (concrete flow, no code)
-
-1. `$runToken = [guid]::NewGuid()`; `$factStore = New-TPMFactStore -RunToken $runToken` -- exactly once, at run start.
-2. Every check and every evidence capture calls `Add-TPMFactStoreCheck`/`Add-TPMFactStoreEvidence -Store $factStore ...`, which internally re-validate `$Store.OwningRunToken` against `$runToken` before writing (Section 5.4).
-3. On `final-certification-result`, `$factStore.Seal()` (Section 6.6).
-4. `$eligibility = Get-TPMCertificationEligibility -Store $factStore` -- reads only sealed, reference-identity-verified facts (Section 5.5.2); returns a frozen `TPMEligibilityDecision` (Section 8.1) with **no final-status semantics**.
-5. `$factProjection = $factStore.GetFactsForReview()` -- detached copies (Section 6.4), for the Artifact Builder's use.
-6. `$artifacts = Get-TPMCertificationScorecardJsonArtifact -Eligibility $eligibility -FactStoreProjection $factProjection` and its three siblings (Section 11.1) -- or, if extensibility is used, a schema-validated callback (Section 11.2).
-7. `$manifest = New-TPMCommittedManifest -Artifacts $artifacts -RunToken $runToken` (Section 9.1) -- computes hashes, appends the manifest itself as one more staged artifact.
-8. `$publication = Publish-TPMCertificationBundle -Manifest $manifest` (Section 9.2) -- stage, promote non-marker artifacts in manifest order, durably verify each against its manifest hash, promote the manifest/marker last, durably verify it. Returns `TPMPublicationOutcome`.
-9. `$finalOutcome = New-TPMFinalOutcome -Eligibility $eligibility -Publication $publication` (Section 8.3, 12) -- the **only** point where `FinalStatus`/`FinalOverall`/`FinalExitCode` come into existence.
-10. Reports/console/exit code all read `$finalOutcome` exclusively (Section 12). `exit $finalOutcome.FinalExitCode`.
-11. A later, independent read of this run's results (an audit, a release-integrity check) uses `Read-TPMCommittedCertification -ReportDir $dir` (Section 10.1) exclusively -- never re-parses individual report files directly and trusts them without the six-step verification.
-
----
-
-## 15. Alternatives considered
-
-### 15.1 Do nothing; continue incremental hardening
-
-**Rejected as the primary path.** It's the pattern that produced this ADR. Not free-standing risk, though -- the current implementation remains safe to keep operating while this redesign is planned and phased in.
-
-### 15.2 Full ground-up rewrite
-
-**Rejected.** Section 4's stage-by-stage assessment shows most of the pipeline's structural shape (staged bundle, atomic publish, the concept of a commit marker) is already correct; a rewrite would re-risk already-solved problems for no benefit over a targeted migration.
-
-### 15.3 Score-only provenance ledger, without unifying evidence and score into one Fact Store type
-
-**Rejected as the long-term answer**, retained as an acceptable fallback if the full migration is deprioritized. Closes the immediate score/evidence asymmetry (Section 3.8) but leaves two independently-maintained ownership mechanisms instead of one that generalizes to whatever fact category is discovered next.
-
-### 15.4 Cryptographic signing of evidence/score records themselves (not just the committed manifest)
-
-**Rejected as disproportionate for in-process facts**, while a lighter-weight version is adopted for the *published, on-disk* artifacts (Section 9's SHA-256 manifest binding) where it earns its complexity: on-disk artifacts genuinely need to be verifiable later, by a separate process, potentially after the producing process has exited -- exactly where a hash-bound manifest is the appropriate tool. In-process facts, by contrast, are only ever read within the same run that produced them (Section 5.6's threat-model boundary), where reference-identity and token-checking already close the actually-relevant threat at far lower complexity than per-fact signing would add.
-
-### 15.5 Trusting the marker's presence alone (the first draft's original position)
-
-**Rejected**, per the architecture review and Section 10 -- superseded by the six-step consumer contract.
-
----
-
-## 16. Four-phase migration plan, with explicit cutover rules
-
-**The first draft's error:** it described four phases in prose without specifying, for each, what was and was not writable, or how the transition between phases avoided a period where both the legacy and new architectures could independently produce a decision.
-
-### Phase 1 -- Introduce the types, read-only compatibility, zero behavior change
-
-- **Authoritative source of truth:** unchanged -- still `$results`/`$certification`/`$script:tpmEvidenceLedger`, exactly as today.
-- **Writable components:** `TPMFactStore`, `TPMEligibilityDecision`, `TPMPublicationOutcome`, `TPMFinalOutcome` classes are introduced and unit-tested **in isolation**, with their own dedicated test fixtures -- not yet wired into the main script at all.
-- **Read-only compatibility projections:** none needed yet; nothing in the main flow reads the new types.
-- **Prohibited legacy writes:** none prohibited -- legacy code is completely untouched this phase.
-- **Dual-write prevention:** not applicable -- only one architecture is live (legacy).
-- **Rollback boundary:** trivial -- Phase 1 adds new, unused code; reverting is deleting files, no data-model risk.
-- **Acceptance gate before advancing to Phase 2:** every new type's own unit tests pass (immutability guarantees per Section 6.8, token/reference-identity checks per Section 5.7) on both PowerShell engines; zero changes to the existing 812-test suite's assertions.
-- **Removal point for legacy paths:** none this phase.
-
-### Phase 2 -- Fact recording moves to the new store; legacy `$results`/ledger become read-only mirrors
-
-- **Authoritative source of truth:** `$factStore` becomes authoritative for both evidence and check facts.
-- **Writable components:** `Add-TPMFactStoreCheck`/`Add-TPMFactStoreEvidence` are the only fact-recording entry points now called from the main script body (replacing `Add-CheckResult`/`Add-Screenshot`'s internal bodies, though the public function names/call sites in the main script can stay the same during transition -- only their internals change to delegate to the store).
-- **Read-only compatibility projections:** `$results.Checks`/`$results.Screenshots` are populated as a **derived, read-only mirror** of the store's contents (via `GetFactsForReview()`, Section 6.4's detached copies) purely so any *reporting* code not yet migrated in this phase still has data to render -- never written to directly, and never read back into a decision.
-- **Prohibited legacy writes:** direct `$results.Checks +=`/`$results.Screenshots +=` (or equivalent hashtable mutation) is removed from every call site; the only way a fact enters the system is through the two store-recording functions.
-- **Dual-write prevention:** enforced by the prohibition above being a completed removal, not a soft deprecation -- Phase 2 does not ship with both a legacy write path and a store write path simultaneously live; the legacy write statements are deleted in the same change that introduces the store-backed replacements, verified by a structural source-text test (per the existing pattern) asserting zero remaining direct-mutation call sites.
-- **Rollback boundary:** revertible as a single atomic commit revert (the phase lands as one reviewed round per Section 16's closing note) -- there is no intermediate, partially-migrated state committed to `main`.
-- **Acceptance gate before advancing to Phase 3:** `Get-TPMCertificationEligibility` (reading only from the sealed store) produces identical `EligibleForCertification` results to the current `Complete-TPMCertificationTransaction`'s evidence-pass/score-eligible computation, across the full existing adversarial test matrix (copied-field forgery, reordering, replay -- Section 5.5's tests, now also applied to check facts per Section 7.2's unification) re-targeted at the new store; zero regression in evidence-side adversarial tests.
-- **Removal point for legacy paths:** `$script:tpmEvidenceLedger` and direct `$results.Checks`/`$results.Screenshots` mutation are removed entirely this phase, not merely deprecated.
-
-### Phase 3 -- Decision/publication/outcome split; remove in-place mutation
-
-- **Authoritative source of truth:** `TPMEligibilityDecision` for eligibility; `TPMPublicationOutcome` for publish result; `TPMFinalOutcome` for the certification verdict -- three distinct objects, composed, never mutated into each other.
-- **Writable components:** `Get-TPMCertificationEligibility`, `Publish-TPMCertificationBundle`, `New-TPMFinalOutcome` -- each producing its own immutable output, none mutating a pre-existing object.
-- **Read-only compatibility projections:** `$certification`/`$results`'s `Overall`/`Status`/`ExitCode`/`Finalization` fields (if anything outside the migrated pipeline still reads them during this transitional phase) are populated **once, after `$finalOutcome` exists**, as a final, read-only mirror -- never the other way around, and never mutated a second time afterward.
-- **Prohibited legacy writes:** every `Add-Member -Force` currently patching decision state onto `$Certification`/`$Results` in place (today's publish-failure downgrade path) is removed -- publish failure instead produces a `TPMPublicationOutcome` with `Published = $false`, composed into `TPMFinalOutcome` by `New-TPMFinalOutcome`'s ordinary composition rule (Section 8.3), never by mutating a previously-returned object.
-- **Dual-write prevention:** `Complete-TPMCertificationTransaction` (the old, single mutating-in-place function) is deleted in the same change that introduces `Get-TPMCertificationEligibility`/`Publish-TPMCertificationBundle`/`New-TPMFinalOutcome` -- both cannot coexist as live, independently-decision-capable paths even transiently within this phase.
-- **Rollback boundary:** single atomic commit revert, same discipline as Phase 2.
-- **Acceptance gate before advancing to Phase 4:** a test asserting `TPMEligibilityDecision` has no property named `Status`/`Overall`/`ExitCode`/`Passed` (Section 8.4's structural guarantee, checked by reflection over the type's public properties); full existing adversarial matrix re-verified against the new composed-outcome flow; publish-failure-downgrades-in-place test class from round 3 is replaced with publish-failure-produces-FAIL-FinalOutcome tests against the new composition.
-- **Removal point for legacy paths:** `Complete-TPMCertificationTransaction` itself is deleted this phase.
-
-### Phase 4 -- Artifact/manifest/consumer-contract completion; documentation rewrite
-
-- **Authoritative source of truth:** the committed manifest (Section 9.1) for "what was published"; `Read-TPMCommittedCertification` (Section 10.1) for "how anything downstream reads a result back."
-- **Writable components:** `New-TPMCommittedManifest`, the canonical internal Artifact Builders (Section 11.1).
-- **Read-only compatibility projections:** none remain by end of this phase -- this is the phase that removes the last of them.
-- **Prohibited legacy writes:** the old `-BuildArtifacts` arbitrary-callback parameter and `Test-TPMArtifactManifest`'s identity-only (non-hash-bound) validation are removed.
-- **Dual-write prevention:** `Publish-TPMCertificationArtifacts` (round 3's version, identity-only) is deleted in the same change `Publish-TPMCertificationBundle` (hash-bound) replaces it.
-- **Rollback boundary:** single atomic commit revert.
-- **Acceptance gate before this ADR is marked Accepted:** every Section 19 acceptance-criterion item is satisfied; `ARCHITECTURE.md`'s certification section is rewritten (not incrementally amended a fifth time) around this ownership model; full verification matrix (ASCII/parse/PSScriptAnalyzer/InjectionHunter/Pester, both engines) passes; no change to PNG structural validation, Smoke File Safety tri-state logic, restoration, packaging, or release behavior, confirmed the same explicit way rounds 1-3 confirmed it.
-- **Removal point for legacy paths:** by the end of this phase, no function, type, or code path from the pre-ADR architecture remains reachable from the main script.
-
-**Cross-phase invariant, stated once for all four phases:** at no point during or between phases does the codebase contain two independently-writable, independently-decision-capable representations of the same fact category simultaneously -- each phase either fully migrates a category's write path in one atomic change, or does not touch it yet at all. This directly answers the review's "no phase may allow both legacy and new to remain independently writable or decision-capable."
-
----
-
-## 17. Expanded trust-boundary analysis
-
-Extending Section 3.8's table with the categories the architecture review specifically named:
-
-| Boundary | Position under this design |
-|---|---|
-| **17.1 Child-process boundaries** | The certification harness does not currently spawn child processes that participate in fact recording (Pester/PSScriptAnalyzer run in-process or as directly-invoked, synchronously-awaited cmdlets whose *results* are recorded as facts by the parent process, not as independent fact-producers). No fact-recording capability (the run token, Section 5.1) is passed to, or trusted from, any child process. If a future check needs to run out-of-process, its result must be re-validated and recorded by the parent via the normal `Add-TPMFactStoreCheck` path -- a child process is never granted direct fact-store write access. |
-| **17.2 Serialization and deserialization** | The only serialization boundary in the redesigned pipeline is the committed manifest and its artifacts (Section 9) -- deliberately hash-bound because they cross a real trust boundary (written by this process, potentially read by a different, later process or session). In-process objects (`TPMFactStore`, `TPMEligibilityDecision`, etc.) are never serialized/deserialized mid-run; PowerShell's `ConvertTo-Json`/`ConvertFrom-Json` round-trip (used only for the final JSON *artifacts*, not for internal state) is explicitly a one-way, outbound-only operation in this design -- nothing deserializes a JSON artifact back into a live `TPMFactStore` or `TPMEligibilityDecision` mid-run. |
-| **17.3 External files as observations** | Any check whose raw observed value comes from reading an external file (e.g. a Pester output file, a PSScriptAnalyzer results file) is a fact whose "authorized producer" (Section 7's schema) is still the in-process `Add-TPMFactStoreCheck` call that reads that file and records the result -- the external file itself is not trusted as a fact source directly; it is an input the producer function observes once, at a known point in the run, the same way today's code already reads Pester/PSScriptAnalyzer output into `$results`. |
-| **17.4 Concurrent certification runs** | Each run generates its own `$runToken` (Section 5.1) and its own `-ReportDir`/`-ScreenshotDir`. Two concurrent runs never share a `TPMFactStore` instance (each run's main script body calls `New-TPMFactStore` exactly once, for itself). If two concurrent runs' output directories were ever misconfigured to overlap, `Publish-TPMCertificationArtifacts`'s existing (round 3) "destination already exists" pre-stage check would cause the second run's publish to fail closed, rather than silently interleave with the first's artifacts -- this behavior is retained unchanged in `Publish-TPMCertificationBundle`. |
-| **17.5 Run-directory ownership** | `-ReportDir`/`-ScreenshotDir` are not independently "owned" by a capability mechanism the way the fact store is -- they are ordinary filesystem paths, protected only by normal OS file permissions and the atomic-publish "destination already exists" check (17.4). This is a deliberately lighter-weight boundary than the in-process fact-store ownership model, consistent with Section 5.6's threat model: filesystem-level tampering by an actor with write access to the report directory is the same class of out-of-scope threat as same-process code tampering, not a gap specific to this design. |
-| **17.6 Report-directory/run identity binding** | Closed by Section 9.1's "certification-run identity" manifest field and Section 10.1 step 2/4 -- a reader can detect a report directory whose artifacts don't all agree on the same run identity, which is the concrete mechanism binding a directory's contents to one specific run rather than trusting the directory path alone. |
-| **17.7 Producer exceptions** | `Add-TPMFactStoreCheck`/`Add-TPMFactStoreEvidence` catch exceptions from the underlying capture/check logic exactly as today's `Add-Screenshot` does (round 3's existing "evidence creation failed safely" pattern) -- a producer exception becomes a structured `Failed` fact, recorded through the normal ingestion path (Section 7), never an unrecorded silent gap. |
-| **17.8 Partial producer completion** | If the main script itself crashes mid-run (after some facts are recorded but before `Seal()`), the store is simply never sealed and never reaches `Get-TPMCertificationEligibility` -- there is no partial-eligibility computation, because eligibility is only ever computed from a *sealed* store (Section 8.1's precondition). The orphaned, unsealed store and its facts are discarded with the process; nothing persists them past the crash (consistent with Section 3.7's existing "no resumption is attempted" assumption, now stated as an explicit precondition of `Get-TPMCertificationEligibility` rather than an implicit property of when it happens to be called). |
-| **17.9 Interrupted execution** | Covered by 17.8 (pre-seal) and Section 10 (post-seal, during publication -- the six-step consumer contract's completeness/extra-file checks are exactly what "interrupted after some artifacts promoted" produces, and are rejected). |
-| **17.10 Same-process arbitrary code execution** | Explicitly out of scope -- see Section 5.6. Restated here for completeness of this table, not because the boundary differs from Section 5.6's statement. |
-| **17.11 Reparse points or symbolic links** | Not currently a concern this pipeline's actual deployment encounters (`-ReportDir`/`-ScreenshotDir` are ordinary local paths created by the harness itself, never user-supplied paths that could be a symlink to an unexpected location) -- explicitly out of scope for this ADR, but flagged here rather than silently unconsidered: if `-ReportDir` or `-ScreenshotDir` ever become externally-supplied/configurable paths in the future, path resolution should use `[System.IO.Path]::GetFullPath` followed by a check against `[System.IO.File]::ResolveLinkTarget` (or equivalent) to detect and reject a reparse point substituting a different physical destination than the one validated at containment-check time -- noted as a **future work item**, not a gap in the current design, since the current design's paths are never externally supplied. |
-| **17.12 What is inside vs. outside the supported threat model, stated together** | **Inside:** a caller (test code, or a hypothetical malicious contributor working only through this pipeline's own public functions) constructing a plausible-looking fact, decision, artifact, or manifest object and attempting to have it accepted as genuine, without possessing the real run token or reference-identity to the real store/decision objects. **Outside:** same-process arbitrary code execution/reflection (17.10/5.6); OS-level file-permission or reparse-point tampering with the report directory outside this process's own writes (17.5, 17.11); a compromised PowerShell engine or host process itself; concurrent-run misconfiguration beyond the atomic-publish collision check already in place (17.4). |
-
----
-
-## 18. Risks and mitigations
+## 18. Risks and mitigations (updated for this revision's new mechanisms)
 
 | Risk | Mitigation |
 |---|---|
-| Phase 1's refactor silently changes observable behavior | Zero required changes to the existing 812-test suite's *assertion content* is the explicit Phase 1 gate (Section 16); any assertion-level change signals an unplanned behavior change requiring separate justification. |
-| PowerShell `class` semantics introduce a PS-5.1-vs-pwsh-7 compatibility gap | Every new class verified under both engines from Phase 1 onward, per this repository's existing dual-engine verification standard. |
-| A capability-token check (Section 5.4) is itself forgettable -- a future contributor adds a new fact-recording path that skips the token check | The structural source-text test pattern (already used for "exactly one `New-TPMFactStore` call," Section 5.2) is extended to assert every function that appends to the store's internal collections is one of exactly the two sanctioned recorder functions -- a new, unsanctioned append site fails this test even before any runtime check would catch it. |
-| The six-step consumer contract (Section 10) is expensive to run on every read, discouraging its use in favor of ad hoc file reads | `Read-TPMCommittedCertification` is documented (Section 10.1) as the *only* sanctioned read path; a code-review-enforced rule (mirroring how this repository already enforces "only `Add-Screenshot` appends evidence") that any code reading a certification result must go through it, not re-implement a partial check. |
-| Migration spread across four rounds re-introduces the "many rounds, same unaddressed pattern" risk this ADR responds to | Unlike rounds 1-3, all four phases are pre-planned as one coherent migration toward this ADR's single end-state, each with its own closing verification and explicit cutover rule (Section 16), not independently-discovered reactive fixes. |
-| Scope creep into PNG validation, Smoke File Safety, or release mechanics | Every phase's acceptance criteria explicitly excludes these, mirroring the scope discipline already demonstrated in rounds 1-3's commit messages. |
-| Hash computation (Section 9) adds measurable overhead to every publish | SHA-256 over report-sized text content (kilobytes, not megabytes) is not performance-relevant for a certification run already dominated by Pester-suite execution time; not treated as a risk requiring mitigation, noted only for completeness. |
+| `Add-Type -Language CSharp` compiled types (Finding 1) behave differently under Windows PowerShell 5.1's older C# compiler vs. pwsh 7's | This repository already relies on `Add-Type -Language CSharp` successfully on both engines (`Get-TPMConsoleWindowRect`); get-only auto-properties are C# 6+, supported by both engines' compilers; verified on both from Phase 1. |
+| A closure-based capability (Finding 2) is unfamiliar compared to a simple parameter, raising the chance a future contributor "simplifies" it back into a token | Documented here, in `ARCHITECTURE.md` (Phase 4), and enforced by a structural source-text test asserting the only two call sites that invoke `$factStore.Recorder`/`.Seal` are the sanctioned recording functions -- the same enforcement pattern already used elsewhere in this pipeline. |
+| Re-deriving every check's raw measurements (Finding 3) instead of trusting existing Boolean checks requires touching every check category's recording call site | Phase 2 is exactly the phase this migration happens in, verified per-category against the existing adversarial matrix before Phase 3 flips authority -- not deferred or partial. |
+| The Manifest/Marker hash chain (Finding 6) adds a second file and a second hash-verification pass to every publish | Two small JSON files and two SHA-256 computations over kilobyte-scale content is not performance-relevant for a run already dominated by Pester execution time; not treated as a risk requiring further mitigation. |
+| Phase 2's shadow computation (Finding 7) doubles the work done per run (legacy + new, both computing eligibility) for the duration of that phase | Accepted as the explicit cost of proving equivalence before cutover -- Phase 2 is a bounded, single-round cost, not a standing overhead; it ends at Phase 3's cutover. |
 
 ---
 
 ## 19. Acceptance criteria
 
-Implementation on this ADR **may not begin** until this document itself, in its current (revised) form, defines all of the following -- which it now does, at the sections indicated. This section is the explicit gate the architecture review asked for.
+Implementation may not begin until this document defines all of the following concretely enough that an implementer never has to infer intent -- which, per the sections cited, it now does.
 
-- [x] **Workflow-owned provenance** -- Section 5: run capability token, single construction call site, token-checked recording functions, dual rejection mechanism (token mismatch + reference-identity), explicit same-process threat-model boundary, three-way distinction between type/shape/genuine-issuance.
-- [x] **Enforceable immutability** -- Section 6: copy-on-ingress, hidden internal records, no shared mutable collections (including why `AsReadOnly()` alone is insufficient), detached egress projections, deep-copy note for nested values, seal-checked mutators, callback isolation from authoritative mutable objects, and an explicit statement of how each mechanism is independently testable.
-- [x] **Closed raw-fact schemas** -- Section 7: full schema table for both existing fact categories (evidence, checks), explicit separation of raw observed value from derived conclusion.
-- [x] **Pre-publication eligibility vs. final outcome** -- Section 8: `TPMEligibilityDecision` redefined to carry no final-status fields at all; `TPMPublicationOutcome` and the new `TPMFinalOutcome` type; explicit composition rule; explanation of why this is a structural guarantee, not a naming change.
-- [x] **Deterministic artifact construction** -- Section 11: canonical internal builders as the default; schema-validated, output-checked extensibility point as the only alternative; explicit rejection of an unconstrained callback.
-- [x] **Hash-bound committed manifest** -- Section 9: full manifest field list including SHA-256 content hash and run identity; explicit description of how staging-time hashing binds to durable verification.
-- [x] **Consumer verification** -- Section 10: six-step `Read-TPMCommittedCertification` contract, enumerated against every rejection case the review named.
-- [x] **One final-outcome authority** -- Section 12: structural (not merely conventional) guarantee that only `TPMFinalOutcome` can express certification status, backed by the intermediate types simply lacking the relevant properties.
-- [x] **Phase-specific cutover and rollback rules** -- Section 16: all four phases specify authoritative source of truth, writable components, read-only projections, prohibited legacy writes, dual-write prevention, rollback boundary, acceptance gate, and legacy-removal point, plus a stated cross-phase invariant against simultaneous dual decision-capability.
-- [x] **Documented threat-model boundaries** -- Section 17: eleven explicit boundary categories plus a consolidated inside/outside statement, and Section 5.6's same-process caveat restated where relevant.
+- [x] **Finding 1 -- Actual immutability**, defined via a concrete mechanism (Section 5): compiled C# value types with constructor-only, `{ get; }`-only properties (a language guarantee) for every frozen output type, and CLR string immutability for the Fact Store's sealed representation, with an explicit three-way distinction between language guarantees, implementation guarantees, and project invariants.
+- [x] **Finding 2 -- Non-observable ownership proof** (Section 6): a closure-held `Recorder`/`Seal` capability returned only to the single caller of `New-TPMFactStore`, never exposed as comparable object state, with an explicit statement that possessing the store or its reader proves nothing about recording authority.
+- [x] **Finding 3 -- Raw facts only** (Section 7): a revised schema for every check-fact category replacing pre-computed Booleans with raw measurements (counts, hashes, raw strings), a stated raw-vs-conclusion principle, and confirmation that evidence facts already satisfied this.
+- [x] **Finding 4 -- No publish/outcome cycle** (Section 8): four objects with a strictly one-directional dependency graph, an explicit statement that the Artifact Builder consumes only the Eligibility Snapshot, and a description of Final Outcome as always-derived (at both write time and read time) rather than ever itself a stored, self-referential field.
+- [x] **Finding 5 -- Failure publication** (Section 9): identical artifact/manifest requirements for every outcome, explicit confirmation that failed runs commit bundles, how NOT CERTIFIED is represented inside the committed content, and the explicit `Valid` vs. `FinalStatus` distinction consumers must not conflate.
+- [x] **Finding 6 -- Manifest/marker relationship** (Section 10): decided as two artifacts, with explicit identities, promotion ordering, a three-tier hash chain, and a six-step consumer contract walking that chain.
+- [x] **Finding 7 -- No dual decision authority during migration** (Section 17): every phase names one authoritative source, an optional non-decisive shadow source, explicit prohibited actions, and the rule that a shadow may observe but never decide.
+- [x] **Finding 8 -- Publisher transition** (Section 17's table): the exact publisher function named for every one of the four phases, with the single cutover point (Phase 2 -> 3) stated explicitly.
 
-Once Phase 4 (Section 16) actually lands, this ADR's Status changes from Proposed to Accepted; until then, no phase begins implementation against a criterion this list does not yet mark satisfied by the document itself.
+Once Phase 4 (Section 17) lands, this ADR's Status changes from Proposed to Accepted.
 
 ---
 
 ## 20. Conclusion
 
-The current architecture is not the simplest viable design, and -- as the first draft of this ADR itself demonstrated by being sent back -- *naming* the right abstractions is not the same as *specifying* them. This revision replaces every previously-named-but-underspecified concept with a concrete PowerShell-realizable mechanism: a capability-token-and-reference-identity-checked Fact Store (Section 5), enforced through copy-on-ingress/egress discipline rather than class-declaration alone (Section 6), a closed schema separating raw facts from derived conclusions (Section 7), a decision boundary that structurally cannot claim final status before publication (Section 8), a hash-bound committed manifest (Section 9) with a six-step consumer contract (Section 10), a constrained rather than arbitrary Artifact Builder (Section 11), a single composed Final Outcome authority (Section 12), an explicit four-phase migration with per-phase cutover rules preventing any dual-decision-capable intermediate state (Section 16), and an expanded trust-boundary analysis naming exactly what is and is not defended (Section 17).
+Two rounds of architecture review of this document itself demonstrated the same lesson its subject matter already teaches: naming the right concept is not the same as specifying a mechanism that enforces it. This revision replaces every remaining conceptual description with something an implementer can build directly from the document alone -- compiled, language-enforced immutable types instead of PowerShell-class intentions (Section 5); a closure-held capability instead of a comparable token (Section 6); raw measurements instead of pre-judged Booleans (Section 7); an explicitly acyclic four-object dependency graph instead of an implied cycle (Section 8); a fully specified failure-publication path (Section 9); a named, hash-chained two-artifact manifest/marker relationship (Section 10); and a migration plan that names, per phase, exactly one authoritative decision source and exactly one publisher (Section 17).
 
-**Recommendation, unchanged from the first draft:** proceed with the four-phase migration, now fully specified, rather than a fifth incremental hardening pass. Implementation may begin only once this document satisfies Section 19's acceptance criteria -- which it now does.
+**Recommendation, unchanged:** proceed with the four-phase migration as now fully specified. Implementation may begin once this document satisfies Section 19's acceptance criteria -- which it now does.
