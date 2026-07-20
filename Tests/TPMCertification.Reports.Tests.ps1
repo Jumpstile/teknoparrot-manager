@@ -46,6 +46,30 @@ BeforeAll {
   foreach($fact in $facts){&$authority RecordFact $fact}
   return &$authority DeriveScorePreview
  }
+ function New-FullPipelineRunV1($Root,[bool]$CommitPublication,[bool]$ForcePesterFailure){
+  $authority=New-TPMProductionWorkflowAuthorityV1 -Mode Smoke -EvidenceRoot $Root -PngValidator $validator
+  $facts=New-TestFacts $Root
+  if($ForcePesterFailure){$facts[1].Data.Failed=1;$facts[1].Data.Passed=1}
+  foreach($fact in $facts){&$authority RecordFact $fact}
+  $ids=@('certification-suite-running','requested-effective-root-evidence','live-thumbnail-evidence','live-controls-evidence','adaptive-menu-normal','adaptive-menu-small','adaptive-menu-maximized','smoke-file-safety-evidence')
+  $types=@('ScreenCapture','ScreenCapture',$null,$null,'DeterministicRender','DeterministicRender','DeterministicRender','DeterministicRender')
+  for($i=0;$i-lt8;$i++){$e=if($i-in2,3){New-TestEvidence $Root $ids[$i] $false $null $i -Skipped}else{New-TestEvidence $Root $ids[$i] $true $types[$i] $i};&$authority RecordEvidence $e}
+  $preview=&$authority DeriveScorePreview
+  $final=New-TestEvidence $Root 'final-certification-result' $true 'ScreenCapture' 8
+  &$authority IssueFinalEvidence $final $preview
+  $sealed=&$authority Seal
+  $eligibility=&$authority IssueEligibility $sealed
+  $candidate=&$authority IssuePublicationCandidate $eligibility
+  if($CommitPublication){
+   $observation=[ordered]@{ManifestSha256=('b'*64);ArtifactSetSha256=('c'*64);DiagnosticWarnings=@()}
+   $outcome=&$authority RegisterCommittedPublication $observation $candidate
+  }else{
+   $reasons=@([ordered]@{Code='STAGING_FAILED';Message='could not reserve staging directory'})
+   $outcome=&$authority RegisterPublicationFailure $reasons $candidate
+  }
+  $finalOutcome=&$authority IssueFinalOutcome $eligibility $outcome
+  return @{Authority=$authority;Eligibility=$eligibility;PublicationCandidate=$candidate;PublicationOutcome=$outcome;FinalOutcome=$finalOutcome}
+ }
 }
 
 Describe 'ADR-0155 Phase 3 eligibility report builder' {
@@ -139,5 +163,80 @@ Describe 'ADR-0155 Phase 3 final-evidence status builder' {
  It 'rejects null and plain-object input' {
   {Get-TPMFinalEvidenceStatusV1 -ScorePreview $null}|Should -Throw
   {Get-TPMFinalEvidenceStatusV1 -ScorePreview ([pscustomobject]@{CanonicalJson='{}';RunIdentity='x'})}|Should -Throw '*REPORT_INVALID*'
+ }
+}
+
+Describe 'ADR-0155 Phase 3 publication report builder' {
+ BeforeEach {$root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $root|Out-Null}
+ It 'produces the exact seven-field candidate schema verbatim from the issued candidate' {
+  $run=New-FullPipelineRunV1 $root $true $false
+  $report=New-TPMPublicationReportV1 -PublicationCandidate $run.PublicationCandidate
+  $report.FileName|Should -Be 'TPM-Certification-Publication.json'
+  $report.Json|Should -Be $run.PublicationCandidate.CanonicalJson
+  $parsed=$report.Json|ConvertFrom-Json
+  @($parsed.PSObject.Properties.Name|Sort-Object)|Should -Be @('CommitMarkerFileName','EligibilityPayloadSha256','IntendedState','ManifestFileName','RequiredArtifactCount','RunIdentity','SchemaVersion')
+  $parsed.IntendedState|Should -Be 'Committed'
+  $parsed.RequiredArtifactCount|Should -Be 5
+  $parsed.ManifestFileName|Should -Be 'TPM-Certification-Manifest.json'
+  $parsed.CommitMarkerFileName|Should -Be 'TPM-Certification-Commit.json'
+  $report.ByteLength|Should -Be $report.Bytes.Length
+ }
+ It 'rejects a synthetic candidate, the wrong compiled type, and null/plain-object input' {
+  Initialize-TPMCertificationTypesV1|Out-Null
+  $type='Jumpstile.TPM.Certification.V1.TPMEligibilitySnapshotV1'-as[type]
+  $ctor=$type.GetConstructors([Reflection.BindingFlags]'NonPublic,Instance')[0]
+  $wrongType=$ctor.Invoke(@('deadbeefdeadbeefdeadbeefdeadbeef','{}'))
+  {New-TPMPublicationReportV1 -PublicationCandidate $wrongType}|Should -Throw '*REPORT_INVALID*'
+  {New-TPMPublicationReportV1 -PublicationCandidate $null}|Should -Throw
+  {New-TPMPublicationReportV1 -PublicationCandidate ([pscustomobject]@{CanonicalJson='{}';RunIdentity='x'})}|Should -Throw '*REPORT_INVALID*'
+ }
+}
+
+Describe 'ADR-0155 Phase 3 final-outcome report builder' {
+ BeforeEach {$root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $root|Out-Null}
+ It 'projects a CERTIFIED final outcome into the exact six-field file schema' {
+  $run=New-FullPipelineRunV1 $root $true $false
+  $report=New-TPMFinalOutcomeReportV1 -FinalOutcome $run.FinalOutcome
+  $report.FileName|Should -Be 'TPM-Certification-Final-Outcome.json'
+  $parsed=$report.Json|ConvertFrom-Json
+  @($parsed.PSObject.Properties.Name|Sort-Object)|Should -Be @('EligibilityPayloadSha256','EligibilityStatus','ExitCode','FinalStatus','RequiredPublicationState','RunIdentity','SchemaVersion')
+  $parsed.EligibilityStatus|Should -Be 'Eligible'
+  $parsed.RequiredPublicationState|Should -Be 'Committed'
+  $parsed.FinalStatus|Should -Be 'CERTIFIED'
+  $parsed.ExitCode|Should -Be 0
+  $parsed.RunIdentity|Should -Be (&$run.Authority GetRunIdentity)
+ }
+ It 'projects a NOT CERTIFIED outcome (publication failed) with EligibilityStatus still Eligible' {
+  $run=New-FullPipelineRunV1 $root $false $false
+  $report=New-TPMFinalOutcomeReportV1 -FinalOutcome $run.FinalOutcome
+  $parsed=$report.Json|ConvertFrom-Json
+  $parsed.EligibilityStatus|Should -Be 'Eligible'
+  $parsed.FinalStatus|Should -Be 'NOT CERTIFIED'
+  $parsed.ExitCode|Should -Be 1
+ }
+ It 'projects a NOT CERTIFIED outcome (score ineligible) as EligibilityStatus NotEligible' {
+  $run=New-FullPipelineRunV1 $root $true $true
+  $report=New-TPMFinalOutcomeReportV1 -FinalOutcome $run.FinalOutcome
+  $parsed=$report.Json|ConvertFrom-Json
+  $parsed.EligibilityStatus|Should -Be 'NotEligible'
+  $parsed.FinalStatus|Should -Be 'NOT CERTIFIED'
+  $parsed.ExitCode|Should -Be 1
+ }
+ It 'never omits FailureReasons information by silently dropping it -- the file schema deliberately excludes it, unlike the compiled object' {
+  $run=New-FullPipelineRunV1 $root $false $true
+  $compiled=$run.FinalOutcome.CanonicalJson|ConvertFrom-Json
+  @($compiled.FailureReasons).Count|Should -BeGreaterThan 0
+  $report=New-TPMFinalOutcomeReportV1 -FinalOutcome $run.FinalOutcome
+  $parsed=$report.Json|ConvertFrom-Json
+  $parsed.PSObject.Properties.Name|Should -Not -Contain 'FailureReasons'
+ }
+ It 'rejects a synthetic final outcome, the wrong compiled type, and null/plain-object input' {
+  Initialize-TPMCertificationTypesV1|Out-Null
+  $type='Jumpstile.TPM.Certification.V1.TPMPublicationOutcomeV1'-as[type]
+  $ctor=$type.GetConstructors([Reflection.BindingFlags]'NonPublic,Instance')[0]
+  $wrongType=$ctor.Invoke(@('deadbeefdeadbeefdeadbeefdeadbeef','{}'))
+  {New-TPMFinalOutcomeReportV1 -FinalOutcome $wrongType}|Should -Throw '*REPORT_INVALID*'
+  {New-TPMFinalOutcomeReportV1 -FinalOutcome $null}|Should -Throw
+  {New-TPMFinalOutcomeReportV1 -FinalOutcome ([pscustomobject]@{CanonicalJson='{}';RunIdentity='x'})}|Should -Throw '*REPORT_INVALID*'
  }
 }

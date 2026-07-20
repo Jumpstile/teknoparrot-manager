@@ -558,3 +558,54 @@ authorized, per ADR155-0309's atomic-cutover framing.
   InjectionHunter findings.
 
 No harness wiring, file I/O, staging, or publication in this commit.
+
+## Phase 3 publication and final-outcome report builders -- 2026-07-20
+
+Adds two more of the five canonical reports (ADR155-0304) to
+`scripts/TPMCertification.Reports.psm1`:
+
+- `New-TPMPublicationReportV1` -- `TPM-Certification-Publication.json`
+  (Section 8.2). The issued `TPMPublicationCandidateV1`'s field set
+  matches the file schema exactly (same seven fields), so this builder
+  validates the compiled type and passes its `CanonicalJson` through
+  verbatim rather than reconstructing it -- no re-parse/re-serialize
+  drift is possible because there is no transformation to perform.
+- `New-TPMFinalOutcomeReportV1` -- `TPM-Certification-Final-Outcome.json`
+  (Section 8.3). Unlike Publication, this file schema is a genuine
+  *projection* of the issued `TPMFinalOutcomeV1`, not a verbatim copy:
+  the compiled object carries `EligibleForCertification`/
+  `PublicationCommitted` Booleans and `FailureReasons`, while the file
+  requires `EligibilityStatus` (`'Eligible'`/`'NotEligible'`, derived from
+  `EligibleForCertification`), the fixed literal
+  `RequiredPublicationState='Committed'`, and no `FailureReasons` field at
+  all. The builder strict-parses the compiled object's own trusted
+  `CanonicalJson`, asserts every field it depends on is present, and
+  rebuilds the six-field file schema through `ConvertTo-TPMJcsV1` rather
+  than hand-splicing, since (unlike Publication and Eligibility) the
+  output is a different shape from the input.
+- Both builders follow the established pattern: validate the exact
+  compiled type and namespace before doing anything else, reuse
+  `Get-TPMSha256HexV1`/`ConvertTo-TPMJcsV1` from Authority.psm1 rather
+  than reimplementing hashing or canonicalization, and produce bytes
+  only -- no file I/O, staging, or harness wiring.
+- ADR155-Q001/Q002: `Tests/TPMCertification.Reports.Tests.ps1` gained 9
+  more tests (exact seven/six-field schemas, verbatim-vs-projected
+  behavior confirmed directly against both builders, all three
+  EligibilityStatus/FinalStatus/ExitCode combinations -- eligible+committed,
+  eligible+publication-failed, score-ineligible+committed -- an explicit
+  check that `FailureReasons` is present on the compiled object but absent
+  from the final-outcome file, and synthetic/wrong-type/null rejection for
+  both builders). Combined with all prior focused suites: 84/84 on pwsh
+  7.6.3 and 84/84 on Windows PowerShell 5.1.26100.8875.
+- ADR155-Q003/Q004: `Invoke-Pester -Path .\Tests` passed 884/884 on pwsh
+  7.6.3 and 879/884 on Windows PowerShell 5.1, with exactly the same five
+  unchanged issue #148 Repair-GamePaths failures.
+- ADR155-Q005/Q006/Q007: both changed/touched files had zero non-ASCII
+  bytes, zero parser errors, zero PSScriptAnalyzer findings, and zero
+  InjectionHunter findings.
+
+ADR155-0304 remains unchecked: three of five canonical reports are done
+(Eligibility, Publication, Final Outcome); the two Markdown reports
+(Scorecard, Validation) remain, and need the Section 8.4 base64url
+transport machinery this round deliberately did not build. No harness
+wiring, file I/O, staging, or publication in this commit.
