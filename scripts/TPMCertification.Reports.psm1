@@ -216,7 +216,7 @@ function New-TPMValidationReportV1 {
     if($reasons.Count-eq0){
         [void]$lines.Add('Failure-Code: none')
     }else{
-        $allowedFailureCodes=@(Get-TPMFactFailureCodesV1)+@(Get-TPMEvidenceFailureCodesV1)
+        $allowedFailureCodes=(Get-TPMFactFailureCodesV1)+(Get-TPMEvidenceFailureCodesV1)
         foreach($reason in $reasons){
             foreach($field in @('Code','Message')){if($null-eq$reason.PSObject.Properties[$field]){throw 'REPORT_INVALID: FailureReasons entry missing Code/Message'}}
             Assert-TPMMarkdownFailureCodeV1 ([string]$reason.Code) $allowedFailureCodes

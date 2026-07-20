@@ -29,9 +29,11 @@ BeforeAll {
   $path=[IO.Path]::GetFullPath((Join-Path $Root ("$Index.png")));[IO.File]::WriteAllBytes($path,[byte[]](137,80,78,71,13,10,26,10,$Index));$sha=[Security.Cryptography.SHA256]::Create();try{$hash=-join($sha.ComputeHash([IO.File]::ReadAllBytes($path))|ForEach-Object{$_.ToString('x2')})}finally{$sha.Dispose()};[ordered]@{Identifier=$Identifier;Status='Captured';EvidenceType=$Type;Required=$Required;Path=$path;CaptureScope=$(if($Type-eq'ScreenCapture'){'ConsoleWindow'}else{'Deterministic'});FileSha256=$hash;Width=1;Height=1;FailureCode=$null;FailureMessage=$null}
  }
  $validator={param($Path)[pscustomobject]@{Valid=$true;Reason='test PNG';Width=1;Height=1}}
- function New-FullPipelineRunV1($Root){
+ function New-FullPipelineRunV1($Root,[bool]$ForcePesterFailure=$false){
   $authority=New-TPMProductionWorkflowAuthorityV1 -Mode Smoke -EvidenceRoot $Root -PngValidator $validator
-  foreach($fact in New-TestFacts $Root){&$authority RecordFact $fact}
+  $facts=New-TestFacts $Root
+  if($ForcePesterFailure){$facts[1].Data.Failed=1;$facts[1].Data.Passed=1}
+  foreach($fact in $facts){&$authority RecordFact $fact}
   $ids=@('certification-suite-running','requested-effective-root-evidence','live-thumbnail-evidence','live-controls-evidence','adaptive-menu-normal','adaptive-menu-small','adaptive-menu-maximized','smoke-file-safety-evidence')
   $types=@('ScreenCapture','ScreenCapture',$null,$null,'DeterministicRender','DeterministicRender','DeterministicRender','DeterministicRender')
   for($i=0;$i-lt8;$i++){$e=if($i-in2,3){New-TestEvidence $Root $ids[$i] $false $null $i -Skipped}else{New-TestEvidence $Root $ids[$i] $true $types[$i] $i};&$authority RecordEvidence $e}
@@ -46,8 +48,8 @@ BeforeAll {
   $finalOutcome=&$authority IssueFinalOutcome $eligibility $outcome
   return @{Authority=$authority;Sealed=$sealed;Eligibility=$eligibility;PublicationCandidate=$candidate;PublicationOutcome=$outcome;FinalOutcome=$finalOutcome}
  }
- function New-FullBundleV1($Root){
-  $run=New-FullPipelineRunV1 $Root
+ function New-FullBundleV1($Root,[bool]$ForcePesterFailure=$false){
+  $run=New-FullPipelineRunV1 $Root $ForcePesterFailure
   $eligibilityReport=New-TPMEligibilityReportV1 -Eligibility $run.Eligibility
   $publicationReport=New-TPMPublicationReportV1 -PublicationCandidate $run.PublicationCandidate
   $finalOutcomeReport=New-TPMFinalOutcomeReportV1 -FinalOutcome $run.FinalOutcome
@@ -356,5 +358,62 @@ Describe 'ADR-0155 Phase 3 publication commit (promotion and durable validation)
   {Invoke-CommitV1 $bundle $stagingParent ' '}|Should -Throw '*PUBLISH_INVALID*'
   {Invoke-CommitV1 $bundle $stagingParent ''}|Should -Throw
   {Invoke-CommitV1 $bundle $stagingParent $null}|Should -Throw
+ }
+}
+
+Describe 'ADR-0155 Phase 3 authoritative NOT CERTIFIED bundle publication' {
+ BeforeEach {
+  $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $root|Out-Null
+  $stagingParent=Join-Path $root 'staging';New-Item -ItemType Directory -Path $stagingParent|Out-Null
+  $destinationParent=Join-Path $root 'destination';New-Item -ItemType Directory -Path $destinationParent|Out-Null
+ }
+
+ It 'publishes a complete, committed, seven-artifact bundle for a score-ineligible run through the same single path used for eligible runs' {
+  $bundle=New-FullBundleV1 $root $true
+  $bundle.Run.Eligibility.CanonicalJson|Should -Match '"EligibleForCertification":false'
+  $commit=Invoke-CommitV1 $bundle $stagingParent $destinationParent
+  $commit.Committed|Should -Be $true
+  $commit.FailureCode|Should -BeNullOrEmpty
+  (Get-ChildItem -LiteralPath $commit.DestinationDirectory -File).Count|Should -Be 7
+  $expectedNames=@('TPM-Certification-Eligibility.json','TPM-Certification-Publication.json','TPM-Certification-Final-Outcome.json','TPM-Certification-Scorecard.md','TPM-Certification-Validation.md','TPM-Certification-Manifest.json','TPM-Certification-Commit.json')
+  @(Get-ChildItem -LiteralPath $commit.DestinationDirectory -File|ForEach-Object{$_.Name}|Sort-Object)|Should -Be @($expectedNames|Sort-Object)
+ }
+
+ It 'never lets a committed NOT CERTIFIED publication read as certification success: the Final-Outcome artifact and projection both say NOT CERTIFIED / ExitCode 1 despite Committed=true' {
+  $bundle=New-FullBundleV1 $root $true
+  $commit=Invoke-CommitV1 $bundle $stagingParent $destinationParent
+  $commit.Committed|Should -Be $true
+  $finalOutcomeOnDisk=Join-Path $commit.DestinationDirectory 'TPM-Certification-Final-Outcome.json'
+  $parsedFinalOutcome=[IO.File]::ReadAllText($finalOutcomeOnDisk)|ConvertFrom-Json
+  $parsedFinalOutcome.FinalStatus|Should -Be 'NOT CERTIFIED'
+  $parsedFinalOutcome.ExitCode|Should -Be 1
+  $projection=New-TPMFinalOutcomeProjectionV1 -FinalOutcome $bundle.Run.FinalOutcome
+  $projection.FinalStatus|Should -Be 'NOT CERTIFIED'
+  $projection.ExitCode|Should -Be 1
+ }
+
+ It 'authoritatively documents why the run was not certified: the committed Scorecard and Validation artifacts still carry the failing category and its Failure-Code' {
+  $bundle=New-FullBundleV1 $root $true
+  $commit=Invoke-CommitV1 $bundle $stagingParent $destinationParent
+  $commit.Committed|Should -Be $true
+  $scorecardOnDisk=[IO.File]::ReadAllText((Join-Path $commit.DestinationDirectory 'TPM-Certification-Scorecard.md'))
+  $scorecardOnDisk|Should -Match 'Eligibility: NOT ELIGIBLE'
+  $scorecardOnDisk|Should -Match '(?m)^Status: FAIL$'
+  $scorecardOnDisk|Should -Match 'PESTER_FAILURES'
+ }
+
+ It 'produces the same ManifestSha256/ArtifactSetSha256/DiagnosticWarnings schema on commit for an ineligible run as for an eligible one -- no alternate publication path' {
+  $eligibleBundle=New-FullBundleV1 $root $false
+  $eligibleCommit=Invoke-CommitV1 $eligibleBundle $stagingParent $destinationParent
+  $root2=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $root2|Out-Null
+  $stagingParent2=Join-Path $root2 'staging';New-Item -ItemType Directory -Path $stagingParent2|Out-Null
+  $destinationParent2=Join-Path $root2 'destination';New-Item -ItemType Directory -Path $destinationParent2|Out-Null
+  $ineligibleBundle=New-FullBundleV1 $root2 $true
+  $ineligibleCommit=Invoke-CommitV1 $ineligibleBundle $stagingParent2 $destinationParent2
+  $eligibleCommit.Committed|Should -Be $true
+  $ineligibleCommit.Committed|Should -Be $true
+  @($eligibleCommit.PSObject.Properties.Name|Sort-Object)|Should -Be @($ineligibleCommit.PSObject.Properties.Name|Sort-Object)
+  $ineligibleCommit.ManifestSha256|Should -Match '^[0-9a-f]{64}$'
+  $ineligibleCommit.ArtifactSetSha256|Should -Match '^[0-9a-f]{64}$'
  }
 }

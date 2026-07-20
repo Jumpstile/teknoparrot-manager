@@ -70,7 +70,7 @@ have passed. Stable identifiers are retained across revisions.
   only after the marker is durably validated; never overwrite a destination.
 - [x] ADR155-0307 -- Compose the sole final outcome from issued eligibility and
   issued publication outcomes; console, reports, result, and exit code agree.
-- [ ] ADR155-0308 -- Publish authoritative NOT CERTIFIED bundles for ineligible
+- [x] ADR155-0308 -- Publish authoritative NOT CERTIFIED bundles for ineligible
   runs without confusing committed publication with certification success.
 - [ ] ADR155-0309 -- Remove every legacy decision assignment, arbitrary builder,
   and competing publisher at the atomic Phase 3 cutover.
@@ -1194,3 +1194,90 @@ wiring. `TeknoParrot-Manager.ps1` is untouched by this commit. Remaining
 Phase 3 work: NOT-CERTIFIED bundle publication (ADR155-0308) and the
 atomic cutover that removes every legacy decision assignment and
 competing publisher (ADR155-0309).
+
+## Phase 3 authoritative NOT CERTIFIED bundle publication (ADR155-0308) -- 2026-07-20
+
+Completes ADR155-0308. No new production code path was needed: since
+`IssuePublicationCandidate` (Production.psm1) was never gated on
+`EligibleForCertification`, and none of the report/manifest/marker/
+staging/commit builders reference `EligibleForCertification` or
+`FinalStatus` as anything other than data to project, the single
+existing publication path already staged and committed a NOT CERTIFIED
+run's bundle exactly the same way as a CERTIFIED one -- confirmed by
+grep across `Reports.psm1`/`Publication.psm1` before writing any code,
+per instruction to avoid introducing an alternate path. This checkpoint
+is therefore proof, not new construction.
+
+- Added `Describe 'ADR-0155 Phase 3 authoritative NOT CERTIFIED bundle
+  publication'` to `Tests/TPMCertification.Publication.Tests.ps1`,
+  extending the existing `New-FullPipelineRunV1`/`New-FullBundleV1`
+  helpers with the same `ForcePesterFailure` parameter already used
+  elsewhere in this suite family, so a score-ineligible run can be
+  driven through the complete pipeline (facts through commit) for the
+  first time in this test file.
+- **Defect found and fixed by this checkpoint's own new tests, not a
+  pre-existing known issue:** `New-TPMValidationReportV1`'s top-level
+  failure-code vocabulary check built
+  `$allowedFailureCodes=@(Get-TPMFactFailureCodesV1)+@(Get-TPMEvidenceFailureCodesV1)`.
+  Both `Get-*FailureCodesV1` accessors already return their array as one
+  object via the established `return ,@(...)` idiom (documented from an
+  earlier round of this same PR); wrapping each call in an *additional*
+  `@()` re-wrapped that single array object into a one-element array
+  containing it, so concatenation produced a 2-element array of arrays
+  (63 codes hidden two levels deep) instead of a flat 63-element array
+  of code strings. Confirmed by direct reproduction
+  (`(@(Get-TPMFactFailureCodesV1)+@(Get-TPMEvidenceFailureCodesV1))
+  -contains 'PESTER_FAILURES'` returned `False`) before fixing. This is
+  the third occurrence of the exact double-array-wrap defect class this
+  repository has hit before (see `LESSONS_LEARNED.md`'s PowerShell
+  `return @()` gotcha). Every prior test of this vocabulary used either
+  a single-array call site (`New-TPMScorecardReportV1`'s per-item check,
+  never wrapped, never buggy) or a synthetic/reflectively constructed
+  object crafted specifically to be *rejected* -- so nothing before this
+  checkpoint's own new end-to-end test (which is the first to drive a
+  real, non-synthetic `PESTER_FAILURES` code through the top-level
+  Validation path) exercised the false-negative direction of this check.
+  Fixed by removing the redundant `@()` wrapping:
+  `$allowedFailureCodes=(Get-TPMFactFailureCodesV1)+(Get-TPMEvidenceFailureCodesV1)`.
+  Re-verified directly: the corrected expression is a flat 63-element
+  `[string]` array containing both `PESTER_FAILURES` and a representative
+  evidence code. Without this fix, any real ineligible run with an actual
+  failure reason would have thrown `REPORT_INVALID: unrecognized failure
+  code ...` out of the Validation builder, which would have blocked
+  exactly the NOT CERTIFIED publication this checkpoint requires --
+  ADR155-0308 could not have been completed without this fix.
+- Regression coverage added (4 tests): a score-ineligible run's full
+  bundle stages and commits successfully (`Committed=true`) through the
+  same `New-TPMPublicationStagingV1`/`New-TPMPublicationCommitV1` path
+  used for eligible runs, producing all seven files; the committed
+  Final-Outcome artifact on disk and the `New-TPMFinalOutcomeProjectionV1`
+  projection both independently read `FinalStatus='NOT CERTIFIED'`/
+  `ExitCode=1` even though `Committed=true` -- the specific non-conflation
+  the checklist item names; the committed Scorecard shows `Eligibility:
+  NOT ELIGIBLE`, a `Status: FAIL` category line, and the `PESTER_FAILURES`
+  Failure-Code (this is the test that caught the defect above); and the
+  commit result's field set and hash-format guarantees
+  (`ManifestSha256`/`ArtifactSetSha256` format) are identical between an
+  eligible and an ineligible run's commit, confirming there is exactly
+  one schema and one code path, not two.
+- ADR155-Q001/Q002: `Tests/TPMCertification.Publication.Tests.ps1` gained
+  4 more tests (27 total). Combined with `Tests/TPMCertification.Reports.Tests.ps1`
+  (unchanged behavior, re-run to confirm the one-line fix introduced no
+  regression): 82/82 on pwsh 7.6.3 and 81/82 (1 skipped, unchanged
+  reason) on Windows PowerShell 5.1.26100.8875.
+- ADR155-Q003/Q004: `Invoke-Pester -Path .\Tests` passed 947/947 on pwsh
+  7.6.3 and 941/947 on Windows PowerShell 5.1, with exactly the same
+  five unchanged issue #148 Repair-GamePaths failures (1 unrelated
+  skipped test).
+- ADR155-Q005/Q006/Q007: both changed files
+  (`scripts/TPMCertification.Reports.psm1`,
+  `Tests/TPMCertification.Publication.Tests.ps1`) had zero non-ASCII
+  bytes, zero parser errors, zero PSScriptAnalyzer findings, and zero
+  InjectionHunter findings.
+
+ADR155-0308 is now checked. No alternate publication path was
+introduced -- the fix is a one-line correction inside the already-approved
+`New-TPMValidationReportV1`, and no certification-decision logic changed
+anywhere. Remaining Phase 3 work: the atomic cutover that removes every
+legacy decision assignment and competing publisher (ADR155-0309), which
+is now the only unchecked ADR155-030x item.
