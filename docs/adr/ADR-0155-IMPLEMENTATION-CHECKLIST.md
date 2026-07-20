@@ -18,7 +18,9 @@ have passed. Stable identifiers are retained across revisions.
   ADR155-Q007; review-correction commit
   `589bd0a69453e7763845c5e5f2b90464d4bedd74` advances ADR155-0102,
   ADR155-0103, ADR155-0105, and ADR155-T008. Commit `f99e394` records
-  ADR155-0201 through ADR155-0207.
+  ADR155-0201 through ADR155-0207. Review-correction commit `942e70f` records
+  the `New-TPMWorkflowAuthorityV1`/`New-TPMShadowWorkflowAuthorityV1` naming
+  and module-coexistence fix to ADR155-0201.
 
 ## Phase 1 -- Isolated authority primitives
 
@@ -179,9 +181,9 @@ Phase 2 and later checklist items remain intentionally incomplete.
 ## Phase 2 implementation evidence -- 2026-07-20
 
 - ADR155-0201/0202: commit `f99e394` adds `scripts/TPMCertification.Shadow.psm1`,
-  a single dispatcher closure (`New-TPMWorkflowAuthorityV1`) over one private
-  `[pscustomobject]` state object, reusing the Phase 1 provenance/JCS/hash/
-  containment primitives. The dispatch scriptblock fails closed on every
+  a single dispatcher closure (`New-TPMShadowWorkflowAuthorityV1`) over one
+  private `[pscustomobject]` state object, reusing the Phase 1 provenance/JCS/
+  hash/containment primitives. The dispatch scriptblock fails closed on every
   illegal phase transition, duplicate fact, out-of-order fact, duplicate
   score-preview issuance, post-final evidence, and post-seal write
   (`ILLEGAL_PHASE`, `FACT_DUPLICATE`, `FACT_ORDER_INVALID`,
@@ -238,6 +240,68 @@ Phase 2 and later checklist items remain intentionally incomplete.
   InjectionHunter against the pre-diff working tree via `git stash`); the
   Phase 2 diff introduces none of them and does not touch any of the
   flagged lines.
+
+## Phase 2 review-correction evidence -- 2026-07-20
+
+Independent Phase 2 review of commits `f99e394`/`e900a8b` found one finding:
+`scripts/TPMCertification.Authority.psm1` and `scripts/TPMCertification.Shadow.psm1`
+both exported a public function named `New-TPMWorkflowAuthorityV1` with
+incompatible signatures (Authority's Phase 1 prototype takes no parameters;
+Shadow's Phase 2 dispatcher requires `-Mode`/`-EvidenceRoot`). Reviewer testing
+showed that once both modules are imported into one session -- which
+`Invoke-Pester -Path .\Tests` already does, and which Phase 3 will require --
+`Get-Command New-TPMWorkflowAuthorityV1` resolved to whichever module was
+imported later, hiding the other.
+
+- Renamed Shadow's exported factory from `New-TPMWorkflowAuthorityV1` to
+  `New-TPMShadowWorkflowAuthorityV1` in `scripts/TPMCertification.Shadow.psm1`
+  (the function definition, its Export-ModuleMember entry, and its own
+  internal call site inside `Invoke-TPMShadowCertificationV1`), and updated
+  every call site in `Tests/TPMCertification.Shadow.Tests.ps1`.
+  `scripts/TPMCertification.Authority.psm1` is unchanged; its Phase 1
+  `New-TPMWorkflowAuthorityV1` prototype keeps its name.
+- The rename alone was insufficient: reviewer testing after the rename showed
+  that importing `TPMCertification.Authority.psm1` at global/session scope
+  and then importing `TPMCertification.Shadow.psm1` still removed Authority's
+  entire exported surface (not just the renamed factory --
+  `Initialize-TPMCertificationTypesV1`, `ConvertTo-TPMJcsV1`,
+  `Get-TPMSha256HexV1`, `Resolve-TPMContainedPathV1`, all of it) from the
+  session. The cause was Shadow's own top-of-file
+  `Import-Module ... TPMCertification.Authority.psm1 -Force`: forcing a
+  reload of a module already loaded at global scope, from within a second
+  module's nested import, re-parents that module's exports to the second
+  module's private scope and drops the prior global registration. Removing
+  `-Force` from that one line (`scripts/TPMCertification.Shadow.psm1:1`) is
+  sufficient: a non-forced `Import-Module` of an already-loaded module by the
+  same resolved path is a no-op rather than a destructive reload, and Shadow
+  still resolves the Authority functions it depends on internally either way.
+- Added `Describe 'ADR-0155 Phase 1/Phase 2 module coexistence'` to
+  `Tests/TPMCertification.Shadow.Tests.ps1`: it spawns a child process of the
+  current engine for each import order (Authority-then-Shadow and
+  Shadow-then-Authority), imports both modules by absolute path, and asserts
+  by `Get-Command ... ModuleName` that `New-TPMWorkflowAuthorityV1` remains
+  owned by `TPMCertification.Authority` and `New-TPMShadowWorkflowAuthorityV1`
+  remains owned by `TPMCertification.Shadow` in both orders, and that calling
+  each with no arguments fails or succeeds according to its own real
+  parameter set (Authority's succeeds with zero arguments; Shadow's fails on
+  its own missing-mandatory-parameter message) rather than the other
+  factory's behavior.
+- ADR155-Q001/Q002: `Tests/TPMCertification.Authority.Tests.ps1` (unchanged)
+  passed 14/14 on pwsh 7.6.3 and 14/14 on Windows PowerShell 5.1.26100.8875;
+  `Tests/TPMCertification.Shadow.Tests.ps1` passed 17/17 (16 existing plus the
+  new coexistence test) on both engines.
+- ADR155-Q003/Q004: `Invoke-Pester -Path .\Tests` passed 843/843 on pwsh
+  7.6.3 and 838/843 on Windows PowerShell 5.1, with exactly the same five
+  unchanged issue #148 Repair-GamePaths failures.
+- ADR155-Q005/Q006/Q007: `scripts/TPMCertification.Shadow.psm1` and
+  `Tests/TPMCertification.Shadow.Tests.ps1` each had zero non-ASCII bytes,
+  zero parser errors, zero PSScriptAnalyzer findings, and zero InjectionHunter
+  findings after the fix.
+
+This fix is isolated to import statements, one function name, and its call
+sites; it changes no schema, phase-machine transition, provenance check, or
+publication behavior. ADR155-0201/0202/0206 evidence above remains accurate
+under the new name.
 
 Phase 2 shadow authority does not alter legacy certification decisions,
 console output, reports, or exit codes. Phase 3 and Phase 4 checklist items
