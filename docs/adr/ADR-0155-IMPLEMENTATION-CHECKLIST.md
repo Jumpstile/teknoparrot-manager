@@ -11,8 +11,13 @@ have passed. Stable identifiers are retained across revisions.
   `98033787fb6f46c1e453cb1e64f7f464202ea31c`.
 - [x] ADR155-0002 -- Every implementation item has a stable identifier.
 - [ ] ADR155-0003 -- PR description links this checklist and the approved ADR.
-- [ ] ADR155-0004 -- Every implementation commit lists the checklist identifiers
-  it advances.
+- [x] ADR155-0004 -- Every implementation commit lists the checklist identifiers
+  it advances. Commit `28b70092179efecdb073fb300175790c11436aa6`
+  records ADR155-0101 through ADR155-0105; commit
+  `408336ee0aa9ba34d4fe35bf179b5170def8e497` records ADR155-Q001 through
+  ADR155-Q007; review-correction commit
+  `589bd0a69453e7763845c5e5f2b90464d4bedd74` advances ADR155-0102,
+  ADR155-0103, ADR155-0105, and ADR155-T008.
 
 ## Phase 1 -- Isolated authority primitives
 
@@ -118,7 +123,11 @@ have passed. Stable identifiers are retained across revisions.
 - ADR155-0103: the isolated module implements the closed-schema RFC 8785 subset
   used by this ADR (null, Boolean, string, safe signed integer, object, array),
   strict surrogate and UTF-8 handling, SHA-256 lowercase hex, and canonical
-  whole-message unpadded base64url transport.
+  whole-message unpadded base64url transport. `ConvertTo-TPMJcsV1` deliberately
+  rejects every non-integer numeric value because the current authoritative
+  schemas never require fractional values. Rejecting unsupported numeric forms
+  is an intentional specification decision; ECMAScript shortest-round-trip
+  formatting is therefore intentionally outside ADR-0155 Phase 1 scope.
 - ADR155-0104: containment resolves relative candidates against the canonical
   absolute root and compares volume and components with OrdinalIgnoreCase. It
   rejects dot segments, sibling prefixes, ADS, device paths, non-file URI
@@ -139,5 +148,29 @@ have passed. Stable identifiers are retained across revisions.
   patterns rather than attacker-controlled code, command, or pattern text.
   No Phase 1 input reaches dynamic execution.
 
+`New-TPMWorkflowAuthorityV1` is an isolated functioning prototype of
+ADR155-0201. It exists in Phase 1 solely to validate capability separation,
+sealing, post-seal recording rejection, and in-process provenance identity.
+ADR155-0201 remains unchecked: full Phase 2 workflow integration, its complete
+phase machine, and production observation routing are still pending independent
+Phase 1 approval.
+
 Phase 1 remains isolated and does not alter legacy certification authority.
 Phase 2 and later checklist items remain intentionally incomplete.
+
+## Phase 1 review-correction evidence -- 2026-07-19
+
+- Commit `589bd0a69453e7763845c5e5f2b90464d4bedd74` adds explicit
+  rejection of padded base64url and reflects over both every derived
+  authoritative type and `ValueV1` when verifying deep immutability.
+- Focused tests remained 14/14 on pwsh 7.6.3 and 14/14 on Windows PowerShell
+  5.1.26100.8875. The two review cases strengthen existing tests rather than
+  increasing test-container cardinality.
+- Full Pester remained 826/826 on pwsh and 821/826 on Windows PowerShell 5.1,
+  with exactly the five unchanged issue #148 Repair-GamePaths failures.
+- ASCII and parser checks returned zero for the production script, Phase 1
+  module, and focused tests. Repository-configured PSScriptAnalyzer returned
+  zero findings for all three. InjectionHunter remained zero for the Phase 1
+  module and at the individually dispositioned 16-finding production baseline.
+- ADR155-0201 remains unchecked. Its dispatcher is an isolated prototype only;
+  no Phase 2 production integration or workflow authority has begun.
