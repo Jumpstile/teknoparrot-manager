@@ -31,7 +31,8 @@ any item fails -- report the failure instead (see "Reporting format").
 2. **GitHub Quality Gates passed.** Confirm CI
    (`.github/workflows/ci.yml`) is green on that exact commit -- e.g.
    `gh run list --commit <SHA>`. A missing or failing run blocks
-   certification.
+   certification. See "Certification gate" below for what passing Quality
+   Gates establishes and what it does not establish.
 3. **Working tree is clean.** `git status --short` in the local repository
    (`W:\Emulators\TeknoParrot\Scripts`) returns nothing before checkout, and
    nothing untracked or modified is carried over from a prior run.
@@ -39,15 +40,22 @@ any item fails -- report the failure instead (see "Reporting format").
    `C:\Users\EliSi\LaunchBox\Emulators\TeknoParrot` contains both
    `TeknoParrotUi.exe` and `GameProfiles` (see "Locations"). Do not
    substitute another path.
-5. **Required tooling versions.** Real Windows PowerShell 5.1 is available
+5. **TeknoParrotUi.exe is not running.** Confirm no `TeknoParrotUi.exe`
+   process is active before starting:
+   `Get-Process TeknoParrotUi -ErrorAction SilentlyContinue`. Certification-
+   suite backup/restore operations can fail or be blocked while
+   TeknoParrotUi.exe is running -- it holds profile files open, and
+   `Invoke-RestoreBackup` refuses to run rather than risk leaving
+   `UserProfiles` in a mixed old/new state.
+6. **Required tooling versions.** Real Windows PowerShell 5.1 is available
    (`powershell.exe`, not just `pwsh`), plus PowerShell 7, Git, Node.js, and
    `gh` (see "Tooling"). Record actual versions (`$PSVersionTable.PSVersion`,
    `git --version`, `node --version`, `gh --version`) as part of the run's
    evidence.
-6. **Test harness is ready.** `W:\Emulators\TeknoParrot\TPM-TestHarness` and
+7. **Test harness is ready.** `W:\Emulators\TeknoParrot\TPM-TestHarness` and
    its `Reports` and `Backups` subfolders exist and are writable; no stale
    lock files or leftover artifacts from a prior aborted run.
-7. **Record the certification start time.** Note it in the run's evidence --
+8. **Record the certification start time.** Note it in the run's evidence --
    reports are timestamped individually, but the start time establishes what
    state of the machine and installation the run actually certified against.
 
