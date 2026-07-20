@@ -21,7 +21,8 @@ have passed. Stable identifiers are retained across revisions.
   ADR155-0201 through ADR155-0207. Review-correction commit `942e70f` records
   the `New-TPMWorkflowAuthorityV1`/`New-TPMShadowWorkflowAuthorityV1` naming
   and module-coexistence fix to ADR155-0201. Commit `1dd994a` records the
-  Phase 3 prerequisite shared-primitive extraction described below.
+  Phase 3 prerequisite shared-primitive extraction described below. The
+  Phase 3 production-dispatcher commit records ADR155-0301.
 
 ## Phase 1 -- Isolated authority primitives
 
@@ -55,7 +56,7 @@ have passed. Stable identifiers are retained across revisions.
 
 ## Phase 3 -- Authoritative cutover and publication
 
-- [ ] ADR155-0301 -- Derive the eleven score items and eligibility payload only
+- [x] ADR155-0301 -- Derive the eleven score items and eligibility payload only
   from the sealed raw-fact and evidence authority.
 - [ ] ADR155-0302 -- Implement the detached JCS eligibility envelope and every
   non-recursive hash domain from ADR Section 4.
@@ -356,6 +357,97 @@ fact/evidence schema and decision logic Shadow.psm1 already implements).
   findings.
 
 Shadow's own behavior is unchanged (17/17 Shadow tests pass, byte-identical
-assertions, before and after the move). This commit is deliberately isolated
-from the Phase 3 production-dispatcher implementation itself, which has not
-yet been written.
+assertions, before and after the move).
+
+## Phase 3 production dispatcher -- 2026-07-20
+
+Adds `scripts/TPMCertification.Production.psm1`: a dispatcher closure
+(`New-TPMProductionWorkflowAuthorityV1`, deliberately named apart from both
+`New-TPMWorkflowAuthorityV1` and `New-TPMShadowWorkflowAuthorityV1` to avoid
+the exact export collision fixed earlier in this PR) implementing the
+complete closed phase machine from ADR Section 2.1, Collecting through
+FinalOutcomeIssued. `RecordFact`, `RecordEvidence`, `DeriveScorePreview`,
+`IssueFinalEvidence`, and `Seal` reuse the same fact/evidence schemas and
+phase-machine rules as the approved Phase 1/2 authorities (via the shared
+Authority.psm1 primitives above) -- Facts and Evidence are deliberately kept
+in private state after `Seal` (unlike the Phase 2 shadow dispatcher, which
+discards them) because `IssueEligibility` must derive its payload from that
+same raw, sealed data, not from a second parse of any serialized form.
+
+- ADR155-0301: `IssueEligibility` validates the caller's sealed-run reader by
+  the same ReferenceEquals/RunIdentity/type/schema provenance check as every
+  other issuance, then derives all eleven score items via the shared
+  `Get-TPMFactDecisionV1`, evidence eligibility from the nine sealed evidence
+  records against the manifest's `Required`/`Status` rules, and the full
+  Section 7.2 payload shape (`ApplicableCount`, `PassedCount`,
+  `PercentageBasisPoints` rounded per `MidpointRounding.AwayFromZero`,
+  `ThresholdBasisPoints`, `ScoreEligible`, `EvidenceEligible`,
+  `EligibleForCertification`, ordered `FailureReasons`) in
+  `Get-TPMEligibilityPayloadV1`, exported for direct unit testing.
+- Partial ADR155-0302 progress: implements the `FactSetSha256`,
+  `EvidenceSetSha256`, `SealedRunSha256`, and `EligibilityPayloadSha256` hash
+  domains from the Section 4 table (computed from the exact bytes retained at
+  `Seal`, not re-parsed JSON) and issues `TPMEligibilitySnapshotV1` holding
+  the canonical Payload bytes. The checklist item remains unchecked because
+  the detached Payload-then-Integrity file envelope itself (the actual
+  `TPM-Certification-Eligibility.json` document) and the `ArtifactSha256`/
+  `ArtifactSetSha256`/`ManifestSha256` hash domains belong to the not-yet-built
+  report/manifest builders (ADR155-0304).
+- Extends the same provenance-gated issuance pattern through
+  `IssuePublicationCandidate` (Section 8.2 candidate schema),
+  `RegisterCommittedPublication`/`RegisterPublicationFailure` (Section 9
+  `TPMPublicationOutcomeV1`, from raw publisher observations the dispatcher
+  itself never produces -- no publisher exists yet), and `IssueFinalOutcome`
+  (Section 9 `TPMFinalOutcomeV1`, composing `FinalStatus`/`ExitCode` only from
+  the dispatcher's own already-validated `EligibleForCertification` and
+  `Committed` booleans). This exercises the full phase table but does not
+  complete ADR155-0303/0304/0305/0306/0307/0308/0309, all of which need the
+  report builders, staging/publisher, and harness cutover that remain
+  unbuilt.
+- Two defects were caught and fixed while writing this module, both before
+  committing:
+  - Every call from inside the dispatcher's own `.GetNewClosure()` scriptblock
+    to a function imported (without `-Force`) from `TPMCertification.Authority.psm1`
+    failed with "term not recognized," even though the same functions resolved
+    fine from plain (non-closure) functions in the same module. The existing,
+    approved Shadow dispatcher already worked around exactly this by capturing
+    each cross-module function as a `${function:Name}` reference before
+    building the closure and invoking it via `&$captured` instead of calling
+    it by name; this module was missing that pattern for its own new
+    operations and now follows it throughout.
+  - `Get-TPMEligibilityPayloadV1` wrapped its `$Facts`/`$Evidence`
+    `Collections.Generic.List[object]` parameters in `@(...)` inside a
+    function that also declares other parameters, which threw "Argument
+    types do not match" -- the same PowerShell binder quirk already
+    documented elsewhere in this repository's history for
+    `Invoke-TPM-RealInstanceSmoke.ps1`. Fixed by copying into a new
+    `List[object]` via `foreach` instead of wrapping with `@()`.
+  - The new module-coexistence test's `$orders` array (three candidate
+    import orders, each itself a 3-element array) silently flattened into one
+    6-element array, because a multi-line `@( @(...) @(...) )` literal with
+    no commas between rows treats each row as separate pipeline output that
+    the outer `@()` re-flattens -- the same class of bug as the two above,
+    fixed with the established `,@(...)` idiom on each row.
+- ADR155-Q001/Q002: `Tests/TPMCertification.Production.Tests.ps1` (14 tests:
+  full pipeline to CERTIFIED, publication-failure and eligibility-failure
+  outcomes, RegisterPublicationFailure directly from EligibilityIssued,
+  phase/provenance/schema rejection for every new operation, eligibility
+  rounding and zero-applicable-count derivation, and three-module
+  coexistence) passed 14/14 on pwsh 7.6.3 and 14/14 on Windows PowerShell
+  5.1.26100.8875. Combined with the unchanged Authority and Shadow suites:
+  50/50 on both engines.
+- ADR155-Q003/Q004: `Invoke-Pester -Path .\Tests` passed 862/862 on pwsh
+  7.6.3 and 857/862 on Windows PowerShell 5.1, with exactly the same five
+  unchanged issue #148 Repair-GamePaths failures.
+- ADR155-Q005/Q006/Q007: the new module and its tests, plus
+  `TPMCertification.Authority.psm1` (two more primitives exported --
+  `Assert-TPMExactFieldsV1` and `Assert-TPMStringV1` -- needed by this
+  module's publication-observation validators), had zero non-ASCII bytes,
+  zero parser errors, zero PSScriptAnalyzer findings, and zero InjectionHunter
+  findings.
+
+This dispatcher is not wired into the production harness and has no
+publication, console, status, or exit-code authority; `Invoke-TPM-RealInstanceSmoke.ps1`
+is unchanged by this commit. Phase 3 report/manifest/marker builders,
+staging/publisher, external consumer validation, and the atomic cutover
+(ADR155-0303 through 0309) remain unbuilt.
