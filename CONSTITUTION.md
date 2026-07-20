@@ -17,19 +17,46 @@ When applicable, Jumpstile project governance is followed in this order:
 3. `ENGINEERING_GOVERNANCE.md` -- the GitHub issue/label governance
    standard (issue taxonomy, label taxonomy, milestone/cross-link/
    acceptance-criteria policy, bug and feature lifecycle).
-4. Repository-specific engineering standards (e.g. `SECURITY.md`,
-   `RELEASE-SAFETY-CHECKLIST.md`, `ARCHITECTURE.md`).
-5. Task-specific instructions.
+4. **Engineering Standards** -- portfolio-wide, repository-agnostic
+   standards adopted across every Jumpstile project (currently
+   `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`, `INVENTORY_STANDARDS.md`,
+   and `ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md`; see below
+   for anticipated future additions to this tier, not yet present). These
+   documents govern *how* engineering work is done, independent of which
+   project it's done in.
+5. **Project Standards** -- this repository's own engineering standards
+   (e.g. `SECURITY.md`, `RELEASE-SAFETY-CHECKLIST.md`, `ARCHITECTURE.md`).
+   These apply this project's specific technical decisions and threat
+   model; they operate inside the boundaries tier 4's portfolio standards
+   set, but are not themselves portfolio-wide.
+6. **Project Documentation** -- user- and contributor-facing documentation
+   that is not itself a standard (e.g. `README.md`, the wiki, Quick Start
+   guides, `CONTRIBUTING.md`). Authoritative for what the project
+   currently does and how to use/contribute to it, but does not carry
+   engineering-standard authority over tiers 1-5.
+7. Task-specific instructions.
+
+Tiers 4 and 5 were a single, undifferentiated tier ("repository-specific
+engineering standards") before this document's Codex-reviewed governance
+round; splitting them makes explicit what was previously only implied by
+each standard's own "Status" line (several tier-4 documents already
+described themselves as "the template for every Jumpstile project," which
+is a portfolio-wide claim a project-specific document like `SECURITY.md`
+does not and should not make). When adopting a new standard, place it in
+tier 4 only if it is genuinely intended to be repository-agnostic and
+adopted unchanged (or near-unchanged) across projects; place it in tier 5
+if it encodes this project's own specific decisions, even if structured
+similarly to a tier-4 document.
 
 `PROJECT_IDENTITY_STANDARD.md` (public identity, branding, and attribution
 policy) and `TEAM_COORDINATION_STANDARD.md` (issue-based coordination
 protocol for human and AI contributors) are anticipated future additions to
-this hierarchy, not currently present in this repository. They are
-deliberately omitted from the numbered list above rather than referenced as
-if live -- a governance document should never point at something that
-doesn't exist. If and when either is adopted, it slots into this hierarchy
-immediately after this document, and this list is updated in the same
-change that adds it.
+tier 4, not currently present in this repository. They are deliberately
+omitted from the numbered list above rather than referenced as if live -- a
+governance document should never point at something that doesn't exist. If
+and when either is adopted, it slots into tier 4 alongside the other
+Engineering Standards, and this list is updated in the same change that
+adds it.
 
 If an existing file, issue, PR, release note, wiki page, or other public
 artifact conflicts with a document higher in this list, the higher document
@@ -37,12 +64,65 @@ is authoritative. The conflict is reported and a compliant resolution
 recommended before proceeding with whatever task surfaced it -- silently
 picking one side of the conflict is not an acceptable resolution.
 
+### Resolving conflicts between two documents in the same tier
+
+The rule above resolves conflicts *between* tiers. Two documents *within*
+the same tier (e.g. two tier-4 Engineering Standards, or two tier-5
+Project Standards) can also conflict with each other -- the contradictory
+inventory-mandate wording that prompted this section's addition (one
+tier-4 document said REQUIRED, another said "strongly recommended," for
+the same situation) is a real instance of exactly this, not a
+hypothetical. When two same-tier documents conflict:
+
+1. The more specifically applicable document governs -- the one whose
+   scope more precisely matches the situation at hand wins over a more
+   general document that merely touches on it in passing.
+2. This does not apply, and the higher-tier resolution rule reasserts
+   itself, if the more-specific document's position would relax a safety,
+   security, regulatory, compliance, or legal obligation the more-general
+   document (or a higher tier) protects -- see "Legal, regulatory, and
+   safety obligations" below, which is never something a
+   more-specifically-applicable document can be used to narrow.
+3. If it is genuinely ambiguous which document is more specifically
+   applicable, or the conflict is substantive rather than merely a wording
+   inconsistency, this is escalated (reported, with a recommended
+   resolution) before proceeding, the same as a cross-tier conflict --
+   never silently resolved by picking whichever document was read first
+   or is more convenient for the task at hand.
+4. The resolution is then proposed as a fix to the losing document (or
+   both, if the conflict reveals both need clarifying), through the
+   normal governance process, so the same conflict does not have to be
+   re-resolved by judgment call the next time it's encountered.
+
 Once a document is created and integrated into a project's governance
 hierarchy, it applies automatically: every significant PR, merge
 recommendation, and release is audited against it without needing to be
 asked each time. A believed-necessary change to a standard is proposed
 through the normal governance process (a PR against that document), not
 bypassed in the moment it's inconvenient.
+
+### Legal, regulatory, and safety obligations sit outside and above this hierarchy
+
+The seven-tier hierarchy above resolves conflicts *between* this
+portfolio's own governance documents. It is not the full universe of
+obligations a project must satisfy, and none of its tiers -- including
+tier 4's Engineering Standards, and any artifact one of them requires (a
+Specification Inventory, a System Invariant Inventory, a velocity
+checklist, or any other engineering-scope document) -- may be read as
+permission to exclude, narrow, defer, or deprioritize a legal requirement,
+regulatory requirement, compliance obligation, safety requirement,
+security requirement, or organizational policy that applies to the work.
+Those obligations always take precedence over every tier of this
+hierarchy, in full, regardless of how any tier-4/5 standard scopes its own
+engineering requirements. A Specification Inventory's "Deliberately out of
+scope" section, for example, documents an *engineering* scoping decision
+about what a component itself is responsible for verifying -- it never
+documents a decision to skip a legal, regulatory, safety, or security
+obligation; if such an obligation applies, it applies regardless of what
+any inventory says, and should appear in the inventory (if at all) only as
+a cross-reference to the separate control that actually satisfies it (e.g.
+`SECURITY.md`, a compliance policy document, or an external audit), never
+as a reason the obligation itself was skipped.
 
 ## Long-lived policy does not live in an issue tracker
 
@@ -130,6 +210,18 @@ Before publishing any investigation:
 
 Never overstate confidence.
 
+(For the specific, recurring case of a review finding that traces to a
+governing specification -- a file format, a protocol, a language grammar,
+an API contract -- see `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`. It
+operationalizes this rule for that situation: a specification-governed
+finding is evidence about the specification's coverage, not just about
+one bug, and "challenge your own conclusions" / "look for contradictory
+evidence" become a mandatory self-adversarial review against the
+specification before submission, not just a mindset.
+`INVENTORY_STANDARDS.md` defines the Specification Inventory and System
+Invariant Inventory artifacts that standard's problem-class resolution
+work produces.)
+
 ## Publishing rule
 
 Before posting GitHub issues, comments, PR descriptions, reviews, release
@@ -143,7 +235,7 @@ notes, or wiki content:
 (TPM's own procedural checklist form of this rule -- forbidden examples,
 the per-issue/PR sweep, and the guardrail against bundling a technical
 correction into an attribution cleanup pass -- lives in
-`RELEASE-SAFETY-CHECKLIST.md` section 7. That is the operational detail;
+`RELEASE-SAFETY-CHECKLIST.md` section 8. That is the operational detail;
 this is the standing cross-project rule it implements. A broader
 identity/branding policy beyond attribution footers specifically is
 expected to live in `PROJECT_IDENTITY_STANDARD.md` once that document is
@@ -244,6 +336,15 @@ classification is deliberately coarse. Use it only to prioritize which
 behavioral tests are worth writing next, never as an input to whether a
 build is certified or a release is approved.
 
+TVD's "durable, prioritized investment over one-off effort" logic for
+behavioral tests specifically is generalized to engineering process as a
+whole in `ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md`. That
+standard governs how engineering velocity is optimized portfolio-wide --
+parallelizing independent work, automating repetitive tasks, batching
+problem-class resolutions -- always inside the quality gates this
+Constitution and its subordinate standards already require, never as a
+tradeoff against them.
+
 ## Release governance: technical readiness is not release authorization
 
 Passing all engineering gates makes a release **eligible** to be
@@ -282,6 +383,72 @@ Engineering artifacts -- including tests, certification, CI results,
 code review, documentation, and release validation -- constitute
 **release evidence**. They provide technical justification for a release
 recommendation but do not themselves authorize a production release.
+
+### Independent Review Required
+
+**Independent Review Required** is the standing requirement's name, used
+consistently everywhere this Constitution or a subordinate document
+discusses it -- not "GitHub approval required," which names one possible
+*mechanism* for satisfying the requirement, not the requirement itself.
+The requirement is: a second, independent pass -- by a person or agent
+that did not write the change under review -- evaluates it before it is
+treated as settled (`RELEASE-SAFETY-CHECKLIST.md`'s release order step 4
+is this requirement's concrete release-process instantiation).
+
+A GitHub approving review is one way to satisfy Independent Review
+Required, and the default one where available. It is not the only way.
+The project's documented external review workflow -- an independent AI
+reviewer such as Regular Codex, a second human reviewer, or another
+documented independent-review process -- equally satisfies it. Wording
+this requirement as a mechanism-specific rule ("a GitHub approval") ties
+governance to one platform's specific feature; wording it as
+"Independent Review Required," with GitHub approval as one recognized
+mechanism among others, is durable regardless of which review tooling a
+project actually uses.
+
+### Single-Maintainer Governance
+
+When a repository has only one GitHub maintainer with merge authority,
+the following applies:
+
+- **Independent Review Required remains in full effect.** Nothing in
+  this section reduces, waives, or narrows it.
+- **GitHub's native approving-review mechanism cannot be used to satisfy
+  it under this condition**, because GitHub does not permit a pull
+  request's own author to submit a formal approving review on that same
+  pull request -- a platform restriction, not a governance choice. Under
+  single-maintainer conditions, Independent Review Required is instead
+  satisfied by the project's documented external review workflow (for
+  example, Regular Codex or another independent reviewer) -- the
+  finding(s) and disposition recorded in the PR the same way a formal
+  review would be, per this repository's established practice.
+- **`main`'s branch-protection required-approving-review count may
+  therefore be set to zero** for a single-maintainer repository -- this
+  is a recognition that the GitHub-native mechanism is structurally
+  unusable under this condition, not a waiver of the underlying
+  requirement, which the paragraph above still requires be satisfied by
+  the documented external workflow before a PR is treated as reviewed.
+- **Automated quality gates remain mandatory and unaffected.** This
+  section concerns only which mechanism satisfies Independent Review
+  Required; it never concerns whether CI, static analysis, or any other
+  automated gate runs or blocks a merge. Required-status-check branch
+  protection (e.g. a required "Quality gates" check) is preserved, and
+  should be enabled wherever a repository's CI produces a check suited to
+  it, independent of the maintainer-count question this section governs.
+- **Documentation certification, release certification, and every other
+  required engineering standard remain unchanged** -- this section is
+  narrowly scoped to how Independent Review Required is satisfied, not a
+  general relaxation of any other gate in this hierarchy.
+- **This exception exists solely because of the GitHub self-approval
+  restriction.** It is not general license to relax review rigor for any
+  other reason, and it is not invoked to excuse skipping the external
+  review workflow itself -- only to explain why GitHub's own approval
+  button cannot be the mechanism that satisfies it.
+- **If a second maintainer with merge authority is added, the
+  required-approving-review branch protection must be re-enabled**
+  (restored to at least 1) in the same change that grants the new
+  maintainer merge authority. This section describes a condition scoped
+  to single-maintainer repositories, not a permanent state.
 
 ### Recommendation authority
 
