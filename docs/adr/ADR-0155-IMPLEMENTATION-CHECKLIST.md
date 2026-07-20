@@ -64,7 +64,7 @@ have passed. Stable identifiers are retained across revisions.
   claim `CERTIFIED` before publication.
 - [x] ADR155-0304 -- Replace arbitrary artifact callbacks with deterministic
   internal builders for the five canonical reports.
-- [ ] ADR155-0305 -- Build the exact manifest and commit marker with canonical
+- [x] ADR155-0305 -- Build the exact manifest and commit marker with canonical
   identities, byte lengths, SHA-256 hashes, and run correlation.
 - [ ] ADR155-0306 -- Stage the complete seven-file bundle and expose authority
   only after the marker is durably validated; never overwrite a destination.
@@ -772,3 +772,79 @@ against the built module).
 
 No architectural or behavioral change beyond this one finding. No
 manifest/marker, staging, publication, or harness wiring began.
+
+## Phase 3 manifest and commit-marker report builders -- 2026-07-20
+
+Completes ADR155-0305: the last two of the seven canonical publication
+artifacts, both pure builders with no file I/O, staging, or harness wiring.
+
+- Adds `New-TPMManifestReportV1` (`TPM-Certification-Manifest.json`,
+  Section 8) to Reports.psm1. Takes the issued `TPMEligibilitySnapshotV1`
+  and all five already-built report objects (Eligibility, Publication,
+  Final-Outcome JSON; Scorecard, Validation Markdown), validates the
+  Eligibility snapshot's compiled type and its `CanonicalJson`'s
+  `RunIdentity` format, validates each report argument is in its correct
+  fixed positional slot by checking `FileName` against a new
+  `$script:TpmManifestArtifactsV1` constant (the fixed
+  Identifier/FileName/ContentType order from Section 8), and computes
+  `ArtifactSha256` per artifact plus `ArtifactSetSha256` over the
+  assembled `Artifacts` array -- both from the reports' own `Bytes`, never
+  from caller-supplied duplicate data. `EligibilityPayloadSha256` is
+  independently recomputed from the snapshot's own `CanonicalJson` bytes,
+  matching the same self-verifying pattern used throughout this module.
+- Adds `New-TPMCommitMarkerReportV1` (`TPM-Certification-Commit.json`,
+  Section 8) to Reports.psm1. Takes only the manifest report object,
+  strict-parses its own trusted `Json`, validates the manifest's
+  `RunIdentity`/`EligibilityPayloadSha256`/`ArtifactSetSha256` formats and
+  `ArtifactCount`, and computes `ManifestSha256` from the manifest's own
+  `Bytes` -- the marker never receives or trusts any value the manifest
+  builder did not itself already validate and emit.
+- Both builders reuse `Get-TPMSha256HexV1`/`ConvertTo-TPMJcsV1` from
+  Authority.psm1 and the `Assert-TPMMarkdownRunIdentityV1`/
+  `Assert-TPMMarkdownSha256V1` format validators added in the prior
+  delta-review fix; no new validation logic was invented for formats
+  already covered.
+- Manually verified end-to-end (outside the builder code, via
+  independently recomputed SHA-256 hashes over a full 7-artifact bundle
+  from a fresh pipeline run) before formal test authoring: every
+  individual report's hash matches the manifest's own per-artifact
+  `Sha256` entry; the manifest's own bytes hash to the marker's
+  `ManifestSha256`; the manifest's `ArtifactSetSha256` matches the
+  marker's own `ArtifactSetSha256`.
+- One test-authoring defect caught before committing: a "sorted top-level
+  key" assertion in the new manifest-schema test used `Sort-Object`'s
+  default culture-aware comparison, which disagrees with
+  `ConvertTo-TPMJcsV1`'s actual `[StringComparer]::Ordinal` sort
+  (`'ArtifactSetSha256'` sorts before `'Artifacts'` under ordinal
+  comparison because uppercase `S` precedes lowercase `s`, opposite of
+  culture-aware default order). Fixed by sorting the asserted key array
+  with `[Array]::Sort($x,[StringComparer]::Ordinal)` to match the
+  production code's own comparer instead of relying on the default.
+- ADR155-Q001/Q002: `Tests/TPMCertification.Reports.Tests.ps1` gained 8
+  more tests (49 total; 134 combined with all prior focused suites) --
+  exact six-field manifest schema with fixed artifact order and correct
+  per-artifact hashes, independently recomputed `ArtifactSetSha256`
+  cross-check, rejection of a report passed in the wrong positional slot,
+  rejection of synthetic/wrong-type/null Eligibility, rejection of a
+  same-compiled-type Eligibility with a newline-bearing `RunIdentity`,
+  exact eight-field marker schema with every hash/identity field
+  cross-checked against the manifest's own values, and rejection of a
+  manifest-shaped-but-invalid object and of null input. 134/134 on pwsh
+  7.6.3 and 134/134 on Windows PowerShell 5.1.26100.8875.
+- ADR155-Q003/Q004: `Invoke-Pester -Path .\Tests` passed 913/913 on pwsh
+  7.6.3 and 908/913 on Windows PowerShell 5.1, with exactly the same five
+  unchanged issue #148 Repair-GamePaths failures.
+- ADR155-Q005/Q006/Q007: both changed files (`scripts/TPMCertification.Reports.psm1`,
+  `Tests/TPMCertification.Reports.Tests.ps1`) had zero non-ASCII bytes,
+  zero parser errors, zero PSScriptAnalyzer findings (repository settings),
+  and zero InjectionHunter findings. `scripts/TPMCertification.Authority.psm1`
+  was not touched this checkpoint.
+
+ADR155-0305 is now checked: the exact seven-file canonical publication
+bundle (five reports plus manifest plus commit marker) exists in full as
+pure, deterministic, side-effect-free builders. No staging, publication,
+atomic cutover, filesystem writes, or harness wiring began. Remaining
+Phase 3 work: staging/publication (ADR155-0306), the sole final-outcome
+composition already substantially covered by the dispatcher's
+`IssueFinalOutcome` (ADR155-0307), NOT-CERTIFIED bundle publication
+(ADR155-0308), and the atomic cutover (ADR155-0309).

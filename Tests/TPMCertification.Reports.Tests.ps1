@@ -93,6 +93,15 @@ BeforeAll {
   $json='{"SchemaVersion":1,"RunIdentity":"'+$escapedRunIdentity+'","Mode":"Smoke","Facts":[],"Evidence":[]}'
   return $ctor.Invoke(@('deadbeefdeadbeefdeadbeefdeadbeef',$json))
  }
+ function New-FullReportBundleV1($Root){
+  $run=New-FullPipelineRunV1 $Root $true $false
+  $eligibilityReport=New-TPMEligibilityReportV1 -Eligibility $run.Eligibility
+  $publicationReport=New-TPMPublicationReportV1 -PublicationCandidate $run.PublicationCandidate
+  $finalOutcomeReport=New-TPMFinalOutcomeReportV1 -FinalOutcome $run.FinalOutcome
+  $scorecardReport=New-TPMScorecardReportV1 -Eligibility $run.Eligibility
+  $validationReport=New-TPMValidationReportV1 -SealedRun $run.Sealed -Eligibility $run.Eligibility
+  return @{Run=$run;EligibilityReport=$eligibilityReport;PublicationReport=$publicationReport;FinalOutcomeReport=$finalOutcomeReport;ScorecardReport=$scorecardReport;ValidationReport=$validationReport}
+ }
 }
 
 Describe 'ADR-0155 Phase 3 eligibility report builder' {
@@ -443,6 +452,82 @@ Describe 'ADR-0155 Phase 3 validation report builder' {
   {New-TPMValidationReportV1 -SealedRun $sealed -Eligibility $newlineCode}|Should -Throw '*REPORT_INVALID*'
   $unknownCode=New-SyntheticEligibilityV1 -FailureCode 'NOT_A_REAL_CODE'
   {New-TPMValidationReportV1 -SealedRun $sealed -Eligibility $unknownCode}|Should -Throw '*REPORT_INVALID*unrecognized failure code*'
+ }
+}
+
+Describe 'ADR-0155 Phase 3 manifest and commit-marker report builders' {
+ BeforeEach {$root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $root|Out-Null}
+ It 'produces the exact six-field manifest with five artifacts in fixed order and correct per-artifact hashes' {
+  $bundle=New-FullReportBundleV1 $root
+  $manifest=New-TPMManifestReportV1 -Eligibility $bundle.Run.Eligibility -EligibilityReport $bundle.EligibilityReport -PublicationReport $bundle.PublicationReport -FinalOutcomeReport $bundle.FinalOutcomeReport -ScorecardReport $bundle.ScorecardReport -ValidationReport $bundle.ValidationReport
+  $manifest.FileName|Should -Be 'TPM-Certification-Manifest.json'
+  $parsed=$manifest.Json|ConvertFrom-Json
+  $sortedNames=[string[]]@($parsed.PSObject.Properties.Name);[Array]::Sort($sortedNames,[StringComparer]::Ordinal)
+  $sortedNames|Should -Be @('ArtifactCount','ArtifactSetSha256','Artifacts','EligibilityPayloadSha256','RunIdentity','SchemaVersion')
+  $parsed.ArtifactCount|Should -Be 5
+  @($parsed.Artifacts).Count|Should -Be 5
+  $expectedOrder=@('EligibilityJson','PublicationJson','FinalOutcomeJson','ScorecardMarkdown','ValidationMarkdown')
+  @($parsed.Artifacts|ForEach-Object{$_.Identifier})|Should -Be $expectedOrder
+  $expectedFileNames=@('TPM-Certification-Eligibility.json','TPM-Certification-Publication.json','TPM-Certification-Final-Outcome.json','TPM-Certification-Scorecard.md','TPM-Certification-Validation.md')
+  @($parsed.Artifacts|ForEach-Object{$_.FileName})|Should -Be $expectedFileNames
+  $expectedContentTypes=@('application/json','application/json','application/json','text/markdown','text/markdown')
+  @($parsed.Artifacts|ForEach-Object{$_.ContentType})|Should -Be $expectedContentTypes
+  $reports=@($bundle.EligibilityReport,$bundle.PublicationReport,$bundle.FinalOutcomeReport,$bundle.ScorecardReport,$bundle.ValidationReport)
+  for($i=0;$i-lt5;$i++){
+   $expectedHash=-join([Security.Cryptography.SHA256]::Create().ComputeHash($reports[$i].Bytes)|ForEach-Object{$_.ToString('x2')})
+   $parsed.Artifacts[$i].Sha256|Should -Be $expectedHash
+   $parsed.Artifacts[$i].ByteLength|Should -Be $reports[$i].Bytes.Length
+   $parsed.Artifacts[$i].EligibilityPayloadSha256|Should -Be $parsed.EligibilityPayloadSha256
+  }
+ }
+ It 'computes ArtifactSetSha256 as the hash of the exact canonical Artifacts array' {
+  $bundle=New-FullReportBundleV1 $root
+  $manifest=New-TPMManifestReportV1 -Eligibility $bundle.Run.Eligibility -EligibilityReport $bundle.EligibilityReport -PublicationReport $bundle.PublicationReport -FinalOutcomeReport $bundle.FinalOutcomeReport -ScorecardReport $bundle.ScorecardReport -ValidationReport $bundle.ValidationReport
+  $parsed=$manifest.Json|ConvertFrom-Json
+  $artifactsJson=ConvertTo-TPMJcsV1 $parsed.Artifacts
+  $utf8=New-Object Text.UTF8Encoding $false
+  $expectedHash=-join([Security.Cryptography.SHA256]::Create().ComputeHash($utf8.GetBytes($artifactsJson))|ForEach-Object{$_.ToString('x2')})
+  $parsed.ArtifactSetSha256|Should -Be $expectedHash
+ }
+ It 'rejects a report passed into the wrong positional slot' {
+  $bundle=New-FullReportBundleV1 $root
+  {New-TPMManifestReportV1 -Eligibility $bundle.Run.Eligibility -EligibilityReport $bundle.PublicationReport -PublicationReport $bundle.EligibilityReport -FinalOutcomeReport $bundle.FinalOutcomeReport -ScorecardReport $bundle.ScorecardReport -ValidationReport $bundle.ValidationReport}|Should -Throw '*REPORT_INVALID*FileName mismatch*'
+ }
+ It 'rejects a synthetic eligibility object, the wrong compiled type, and null input' {
+  $bundle=New-FullReportBundleV1 $root
+  Initialize-TPMCertificationTypesV1|Out-Null
+  $type='Jumpstile.TPM.Certification.V1.TPMScorePreviewV1'-as[type]
+  $ctor=$type.GetConstructors([Reflection.BindingFlags]'NonPublic,Instance')[0]
+  $wrongType=$ctor.Invoke(@('deadbeefdeadbeefdeadbeefdeadbeef','{}'))
+  {New-TPMManifestReportV1 -Eligibility $wrongType -EligibilityReport $bundle.EligibilityReport -PublicationReport $bundle.PublicationReport -FinalOutcomeReport $bundle.FinalOutcomeReport -ScorecardReport $bundle.ScorecardReport -ValidationReport $bundle.ValidationReport}|Should -Throw '*REPORT_INVALID*'
+  {New-TPMManifestReportV1 -Eligibility $null -EligibilityReport $bundle.EligibilityReport -PublicationReport $bundle.PublicationReport -FinalOutcomeReport $bundle.FinalOutcomeReport -ScorecardReport $bundle.ScorecardReport -ValidationReport $bundle.ValidationReport}|Should -Throw
+ }
+ It 'rejects a same-compiled-type eligibility with a newline-bearing RunIdentity' {
+  $bundle=New-FullReportBundleV1 $root
+  $malicious=New-SyntheticEligibilityV1 -RunIdentity "deadbeef`n## INJECTED"
+  {New-TPMManifestReportV1 -Eligibility $malicious -EligibilityReport $bundle.EligibilityReport -PublicationReport $bundle.PublicationReport -FinalOutcomeReport $bundle.FinalOutcomeReport -ScorecardReport $bundle.ScorecardReport -ValidationReport $bundle.ValidationReport}|Should -Throw '*REPORT_INVALID*RunIdentity*'
+ }
+ It 'produces the exact eight-field commit marker with ManifestSha256 matching the actual manifest bytes' {
+  $bundle=New-FullReportBundleV1 $root
+  $manifest=New-TPMManifestReportV1 -Eligibility $bundle.Run.Eligibility -EligibilityReport $bundle.EligibilityReport -PublicationReport $bundle.PublicationReport -FinalOutcomeReport $bundle.FinalOutcomeReport -ScorecardReport $bundle.ScorecardReport -ValidationReport $bundle.ValidationReport
+  $marker=New-TPMCommitMarkerReportV1 -Manifest $manifest
+  $marker.FileName|Should -Be 'TPM-Certification-Commit.json'
+  $parsed=$marker.Json|ConvertFrom-Json
+  @($parsed.PSObject.Properties.Name|Sort-Object)|Should -Be @('ArtifactCount','ArtifactSetSha256','EligibilityPayloadSha256','ManifestByteLength','ManifestFileName','ManifestSha256','RunIdentity','SchemaVersion')
+  $parsed.ManifestFileName|Should -Be 'TPM-Certification-Manifest.json'
+  $parsed.ManifestByteLength|Should -Be $manifest.Bytes.Length
+  $utf8=New-Object Text.UTF8Encoding $false
+  $expectedManifestHash=-join([Security.Cryptography.SHA256]::Create().ComputeHash($manifest.Bytes)|ForEach-Object{$_.ToString('x2')})
+  $parsed.ManifestSha256|Should -Be $expectedManifestHash
+  $manifestParsed=$manifest.Json|ConvertFrom-Json
+  $parsed.ArtifactSetSha256|Should -Be $manifestParsed.ArtifactSetSha256
+  $parsed.ArtifactCount|Should -Be 5
+  $parsed.RunIdentity|Should -Be $manifestParsed.RunIdentity
+  $parsed.EligibilityPayloadSha256|Should -Be $manifestParsed.EligibilityPayloadSha256
+ }
+ It 'rejects a manifest-shaped object that is not an actual New-TPMManifestReportV1 result, and null input' {
+  {New-TPMCommitMarkerReportV1 -Manifest ([pscustomobject]@{FileName='TPM-Certification-Manifest.json';Json='{}';Bytes=[byte[]]@(1,2,3)})}|Should -Throw '*REPORT_INVALID*'
+  {New-TPMCommitMarkerReportV1 -Manifest $null}|Should -Throw
  }
 }
 

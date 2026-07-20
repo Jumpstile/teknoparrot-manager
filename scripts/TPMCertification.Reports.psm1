@@ -215,4 +215,99 @@ function New-TPMValidationReportV1 {
     }
 }
 
-Export-ModuleMember -Function New-TPMEligibilityReportV1,Get-TPMFinalEvidenceStatusV1,New-TPMPublicationReportV1,New-TPMFinalOutcomeReportV1,New-TPMScorecardReportV1,New-TPMValidationReportV1
+$script:TpmManifestArtifactsV1 = @(
+    [ordered]@{Identifier='EligibilityJson';FileName='TPM-Certification-Eligibility.json';ContentType='application/json'}
+    [ordered]@{Identifier='PublicationJson';FileName='TPM-Certification-Publication.json';ContentType='application/json'}
+    [ordered]@{Identifier='FinalOutcomeJson';FileName='TPM-Certification-Final-Outcome.json';ContentType='application/json'}
+    [ordered]@{Identifier='ScorecardMarkdown';FileName='TPM-Certification-Scorecard.md';ContentType='text/markdown'}
+    [ordered]@{Identifier='ValidationMarkdown';FileName='TPM-Certification-Validation.md';ContentType='text/markdown'}
+)
+
+function New-TPMManifestReportV1 {
+    param(
+        [Parameter(Mandatory=$true)]$Eligibility,
+        [Parameter(Mandatory=$true)]$EligibilityReport,
+        [Parameter(Mandatory=$true)]$PublicationReport,
+        [Parameter(Mandatory=$true)]$FinalOutcomeReport,
+        [Parameter(Mandatory=$true)]$ScorecardReport,
+        [Parameter(Mandatory=$true)]$ValidationReport
+    )
+    if($null-eq$Eligibility-or$Eligibility.GetType().FullName-cne'Jumpstile.TPM.Certification.V1.TPMEligibilitySnapshotV1'){throw 'REPORT_INVALID: Eligibility must be an issued TPMEligibilitySnapshotV1'}
+    try{$parsed=ConvertFrom-Json -InputObject $Eligibility.CanonicalJson -ErrorAction Stop}catch{throw 'REPORT_INVALID: Eligibility.CanonicalJson did not parse as JSON'}
+    if($null-eq$parsed.PSObject.Properties['RunIdentity']){throw 'REPORT_INVALID: Eligibility is missing RunIdentity'}
+    Assert-TPMMarkdownRunIdentityV1 ([string]$parsed.RunIdentity)
+
+    $utf8=New-Object Text.UTF8Encoding($false)
+    $eligibilityPayloadHash=Get-TPMSha256HexV1 -Bytes ($utf8.GetBytes($Eligibility.CanonicalJson))
+    $reports=@($EligibilityReport,$PublicationReport,$FinalOutcomeReport,$ScorecardReport,$ValidationReport)
+    $expectedArtifacts=@($script:TpmManifestArtifactsV1)
+    $artifacts=New-Object Collections.Generic.List[object]
+    for($i=0;$i-lt$expectedArtifacts.Count;$i++){
+        $report=$reports[$i];$expected=$expectedArtifacts[$i]
+        if($null-eq$report-or$report.PSObject.Properties.Name-notcontains'FileName'-or$report.PSObject.Properties.Name-notcontains'Bytes'){throw "REPORT_INVALID: $($expected.Identifier) is not a valid report object"}
+        if([string]$report.FileName-cne$expected.FileName){throw "REPORT_INVALID: $($expected.Identifier) FileName mismatch"}
+        if($report.Bytes.Length-le0){throw "REPORT_INVALID: $($expected.Identifier) has zero-length content"}
+        $artifacts.Add([ordered]@{
+            Identifier=$expected.Identifier
+            FileName=$expected.FileName
+            ContentType=$expected.ContentType
+            ByteLength=$report.Bytes.Length
+            Sha256=(Get-TPMSha256HexV1 -Bytes $report.Bytes)
+            EligibilityPayloadSha256=$eligibilityPayloadHash
+        })
+    }
+    $artifactsArray=$artifacts.ToArray()
+    $artifactSetJson=ConvertTo-TPMJcsV1 $artifactsArray
+    $artifactSetHash=Get-TPMSha256HexV1 -Bytes ($utf8.GetBytes($artifactSetJson))
+    $manifest=[ordered]@{
+        SchemaVersion=1
+        RunIdentity=[string]$parsed.RunIdentity
+        EligibilityPayloadSha256=$eligibilityPayloadHash
+        ArtifactCount=5
+        ArtifactSetSha256=$artifactSetHash
+        Artifacts=$artifactsArray
+    }
+    $json=ConvertTo-TPMJcsV1 $manifest
+    $bytes=$utf8.GetBytes($json)
+    return [pscustomobject]@{
+        FileName='TPM-Certification-Manifest.json'
+        Json=$json
+        Bytes=$bytes
+        ByteLength=$bytes.Length
+    }
+}
+
+function New-TPMCommitMarkerReportV1 {
+    param([Parameter(Mandatory=$true)]$Manifest)
+    if($null-eq$Manifest-or$Manifest.PSObject.Properties.Name-notcontains'Json'-or$Manifest.PSObject.Properties.Name-notcontains'Bytes'-or[string]$Manifest.FileName-cne'TPM-Certification-Manifest.json'){throw 'REPORT_INVALID: Manifest must be a New-TPMManifestReportV1 result'}
+    try{$parsed=ConvertFrom-Json -InputObject $Manifest.Json -ErrorAction Stop}catch{throw 'REPORT_INVALID: Manifest.Json did not parse as JSON'}
+    foreach($field in @('RunIdentity','EligibilityPayloadSha256','ArtifactCount','ArtifactSetSha256')){if($null-eq$parsed.PSObject.Properties[$field]){throw "REPORT_INVALID: Manifest is missing $field"}}
+    Assert-TPMMarkdownRunIdentityV1 ([string]$parsed.RunIdentity)
+    Assert-TPMMarkdownSha256V1 ([string]$parsed.EligibilityPayloadSha256) 'EligibilityPayloadSha256'
+    Assert-TPMMarkdownSha256V1 ([string]$parsed.ArtifactSetSha256) 'ArtifactSetSha256'
+    if([int]$parsed.ArtifactCount-ne5){throw 'REPORT_INVALID: ArtifactCount must be 5'}
+    if($Manifest.Bytes.Length-le0){throw 'REPORT_INVALID: Manifest has zero-length content'}
+
+    $utf8=New-Object Text.UTF8Encoding($false)
+    $manifestHash=Get-TPMSha256HexV1 -Bytes $Manifest.Bytes
+    $marker=[ordered]@{
+        SchemaVersion=1
+        RunIdentity=[string]$parsed.RunIdentity
+        ManifestFileName='TPM-Certification-Manifest.json'
+        ManifestByteLength=$Manifest.Bytes.Length
+        ManifestSha256=$manifestHash
+        ArtifactSetSha256=[string]$parsed.ArtifactSetSha256
+        ArtifactCount=5
+        EligibilityPayloadSha256=[string]$parsed.EligibilityPayloadSha256
+    }
+    $json=ConvertTo-TPMJcsV1 $marker
+    $bytes=$utf8.GetBytes($json)
+    return [pscustomobject]@{
+        FileName='TPM-Certification-Commit.json'
+        Json=$json
+        Bytes=$bytes
+        ByteLength=$bytes.Length
+    }
+}
+
+Export-ModuleMember -Function New-TPMEligibilityReportV1,Get-TPMFinalEvidenceStatusV1,New-TPMPublicationReportV1,New-TPMFinalOutcomeReportV1,New-TPMScorecardReportV1,New-TPMValidationReportV1,New-TPMManifestReportV1,New-TPMCommitMarkerReportV1
