@@ -176,6 +176,57 @@ Describe 'ADR-0155 Phase 3 publication staging builder' {
   {New-TPMPublicationStagingV1 -StagingParentRoot $stagingParent -EligibilityReport $bundle.EligibilityReport -PublicationReport $bundle.PublicationReport -FinalOutcomeReport $bundle.FinalOutcomeReport -ScorecardReport $bundle.ScorecardReport -ValidationReport $bundle.ValidationReport -Manifest $bundle.Manifest -Marker $null}|Should -Throw
  }
 
+ It 'rejects a Manifest whose Bytes diverge from its own Json, and performs zero filesystem writes' {
+  $bundle=New-FullBundleV1 $root
+  $divergentBytes=[Text.Encoding]::UTF8.GetBytes('TAMPERED, NOT THE REAL MANIFEST JSON')
+  $tamperedManifest=[pscustomobject]@{FileName=$bundle.Manifest.FileName;Json=$bundle.Manifest.Json;Bytes=$divergentBytes;ByteLength=$divergentBytes.Length}
+  $tamperedMarker=New-TPMCommitMarkerReportV1 -Manifest $tamperedManifest
+  {New-TPMPublicationStagingV1 -StagingParentRoot $stagingParent -EligibilityReport $bundle.EligibilityReport -PublicationReport $bundle.PublicationReport -FinalOutcomeReport $bundle.FinalOutcomeReport -ScorecardReport $bundle.ScorecardReport -ValidationReport $bundle.ValidationReport -Manifest $tamperedManifest -Marker $tamperedMarker}|Should -Throw '*PUBLISH_INVALID*Manifest.Bytes*BOM-less UTF-8*'
+  (Get-ChildItem -LiteralPath $stagingParent -Recurse -File -ErrorAction SilentlyContinue).Count|Should -Be 0
+ }
+
+ It 'rejects a Marker whose Bytes diverge from its own Json, and performs zero filesystem writes' {
+  $bundle=New-FullBundleV1 $root
+  $divergentBytes=[Text.Encoding]::UTF8.GetBytes('TAMPERED, NOT THE REAL MARKER JSON')
+  $tamperedMarker=[pscustomobject]@{FileName=$bundle.Marker.FileName;Json=$bundle.Marker.Json;Bytes=$divergentBytes;ByteLength=$divergentBytes.Length}
+  {New-TPMPublicationStagingV1 -StagingParentRoot $stagingParent -EligibilityReport $bundle.EligibilityReport -PublicationReport $bundle.PublicationReport -FinalOutcomeReport $bundle.FinalOutcomeReport -ScorecardReport $bundle.ScorecardReport -ValidationReport $bundle.ValidationReport -Manifest $bundle.Manifest -Marker $tamperedMarker}|Should -Throw '*PUBLISH_INVALID*Marker.Bytes*BOM-less UTF-8*'
+  (Get-ChildItem -LiteralPath $stagingParent -Recurse -File -ErrorAction SilentlyContinue).Count|Should -Be 0
+ }
+
+ It 'rejects a Manifest whose Bytes are a UTF-8-BOM-prefixed encoding of its own Json, and performs zero filesystem writes' {
+  $bundle=New-FullBundleV1 $root
+  $bomPrefixedBytes=[byte[]](@(0xEF,0xBB,0xBF)+[Text.Encoding]::UTF8.GetBytes($bundle.Manifest.Json))
+  $tamperedManifest=[pscustomobject]@{FileName=$bundle.Manifest.FileName;Json=$bundle.Manifest.Json;Bytes=$bomPrefixedBytes;ByteLength=$bomPrefixedBytes.Length}
+  $tamperedMarker=New-TPMCommitMarkerReportV1 -Manifest $tamperedManifest
+  {New-TPMPublicationStagingV1 -StagingParentRoot $stagingParent -EligibilityReport $bundle.EligibilityReport -PublicationReport $bundle.PublicationReport -FinalOutcomeReport $bundle.FinalOutcomeReport -ScorecardReport $bundle.ScorecardReport -ValidationReport $bundle.ValidationReport -Manifest $tamperedManifest -Marker $tamperedMarker}|Should -Throw '*PUBLISH_INVALID*Manifest.Bytes*BOM-less UTF-8*'
+  (Get-ChildItem -LiteralPath $stagingParent -Recurse -File -ErrorAction SilentlyContinue).Count|Should -Be 0
+ }
+
+ It 'rejects a Manifest whose Bytes have a trailing byte appended after its own correctly encoded Json, and performs zero filesystem writes' {
+  $bundle=New-FullBundleV1 $root
+  $trailingByteBytes=[byte[]]([Text.Encoding]::UTF8.GetBytes($bundle.Manifest.Json)+[byte[]](0x0A))
+  $tamperedManifest=[pscustomobject]@{FileName=$bundle.Manifest.FileName;Json=$bundle.Manifest.Json;Bytes=$trailingByteBytes;ByteLength=$trailingByteBytes.Length}
+  $tamperedMarker=New-TPMCommitMarkerReportV1 -Manifest $tamperedManifest
+  {New-TPMPublicationStagingV1 -StagingParentRoot $stagingParent -EligibilityReport $bundle.EligibilityReport -PublicationReport $bundle.PublicationReport -FinalOutcomeReport $bundle.FinalOutcomeReport -ScorecardReport $bundle.ScorecardReport -ValidationReport $bundle.ValidationReport -Manifest $tamperedManifest -Marker $tamperedMarker}|Should -Throw '*PUBLISH_INVALID*Manifest.Bytes*BOM-less UTF-8*'
+  (Get-ChildItem -LiteralPath $stagingParent -Recurse -File -ErrorAction SilentlyContinue).Count|Should -Be 0
+ }
+
+ It 'rejects a Marker whose Bytes are a UTF-8-BOM-prefixed encoding of its own Json, and performs zero filesystem writes' {
+  $bundle=New-FullBundleV1 $root
+  $bomPrefixedBytes=[byte[]](@(0xEF,0xBB,0xBF)+[Text.Encoding]::UTF8.GetBytes($bundle.Marker.Json))
+  $tamperedMarker=[pscustomobject]@{FileName=$bundle.Marker.FileName;Json=$bundle.Marker.Json;Bytes=$bomPrefixedBytes;ByteLength=$bomPrefixedBytes.Length}
+  {New-TPMPublicationStagingV1 -StagingParentRoot $stagingParent -EligibilityReport $bundle.EligibilityReport -PublicationReport $bundle.PublicationReport -FinalOutcomeReport $bundle.FinalOutcomeReport -ScorecardReport $bundle.ScorecardReport -ValidationReport $bundle.ValidationReport -Manifest $bundle.Manifest -Marker $tamperedMarker}|Should -Throw '*PUBLISH_INVALID*Marker.Bytes*BOM-less UTF-8*'
+  (Get-ChildItem -LiteralPath $stagingParent -Recurse -File -ErrorAction SilentlyContinue).Count|Should -Be 0
+ }
+
+ It 'rejects a Marker whose Bytes have a trailing byte appended after its own correctly encoded Json, and performs zero filesystem writes' {
+  $bundle=New-FullBundleV1 $root
+  $trailingByteBytes=[byte[]]([Text.Encoding]::UTF8.GetBytes($bundle.Marker.Json)+[byte[]](0x0A))
+  $tamperedMarker=[pscustomobject]@{FileName=$bundle.Marker.FileName;Json=$bundle.Marker.Json;Bytes=$trailingByteBytes;ByteLength=$trailingByteBytes.Length}
+  {New-TPMPublicationStagingV1 -StagingParentRoot $stagingParent -EligibilityReport $bundle.EligibilityReport -PublicationReport $bundle.PublicationReport -FinalOutcomeReport $bundle.FinalOutcomeReport -ScorecardReport $bundle.ScorecardReport -ValidationReport $bundle.ValidationReport -Manifest $bundle.Manifest -Marker $tamperedMarker}|Should -Throw '*PUBLISH_INVALID*Marker.Bytes*BOM-less UTF-8*'
+  (Get-ChildItem -LiteralPath $stagingParent -Recurse -File -ErrorAction SilentlyContinue).Count|Should -Be 0
+ }
+
  It 'rejects a Marker whose ManifestSha256 does not correlate to the supplied Manifest bytes' {
   $bundleA=New-FullBundleV1 $root
   $root2=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $root2|Out-Null

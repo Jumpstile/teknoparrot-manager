@@ -954,3 +954,63 @@ Section 9. No publication-state transition beyond staging was wired into
 the dispatcher; `RegisterCommittedPublication`/`RegisterPublicationFailure`
 are unchanged and still take only the publisher's raw observations as
 before this commit. No atomic cutover (ADR155-0309) began.
+
+## Phase 3 delta review correction -- 2026-07-20
+
+Independent review of commit `9a1da1f` returned CHANGES REQUIRED with one
+blocking P2 finding, corrected in this commit:
+
+**P2 (confirmed by direct reproduction before fixing):**
+`New-TPMPublicationStagingV1` validated `Manifest.Json`/`Marker.Json` (the
+RunIdentity, ArtifactSetSha256, and cross-correlation checks all read
+parsed JSON) but staged `Manifest.Bytes`/`Marker.Bytes` directly without
+ever proving those byte arrays were the exact BOM-less UTF-8 encoding of
+the JSON that had just been validated. A proof-of-concept confirmed the
+gap directly: a real, valid Manifest/Marker pair produced by the actual
+builder pipeline, with `Manifest.Bytes` swapped for an unrelated string
+and a `Marker.Json`/`Bytes` pair rebuilt to match that divergent hash
+(exactly what `New-TPMCommitMarkerReportV1` would do if handed the
+tampered object, since it only trusts `Manifest.Bytes` for hashing) was
+accepted by pre-flight validation and staged to disk verbatim -- the
+on-disk `TPM-Certification-Manifest.json` file contained the tampered
+string, not the JSON that had passed every logical check.
+
+- Added, immediately after `Manifest.Json`/`Marker.Json` parse (before
+  any other field validation): compute
+  `Get-TPMSha256HexV1 -Bytes (UTF8Encoding($false).GetBytes(Manifest.Json))`
+  and require it match `Get-TPMSha256HexV1 -Bytes $Manifest.Bytes`
+  exactly; same for Marker. Mismatch throws `PUBLISH_INVALID: Manifest.Bytes
+  is not the exact BOM-less UTF-8 encoding of Manifest.Json` (and the
+  Marker equivalent) before any directory or file is touched. No bytes
+  are normalized, repaired, or replaced -- a mismatch is rejected outright,
+  never silently corrected to the "intended" value.
+  `$manifestHash` (already computed for the existing
+  `Marker.ManifestSha256` correlation check) is now reused for this new
+  check rather than recomputed, so the same SHA-256 of `Manifest.Bytes`
+  backs both invariants.
+- Added 6 regression tests to
+  `Tests/TPMCertification.Publication.Tests.ps1`, each asserting both the
+  specific `PUBLISH_INVALID` rejection and zero filesystem writes under
+  `StagingParentRoot` afterward: Manifest.Bytes an unrelated divergent
+  value; Marker.Bytes an unrelated divergent value; Manifest.Bytes a
+  UTF-8-BOM-prefixed (`EF BB BF`) encoding of its own otherwise-correct
+  Json; Manifest.Bytes its own correctly encoded Json plus one trailing
+  byte; and the same BOM-prefixed and trailing-byte variants for
+  Marker.Bytes.
+- ADR155-Q001/Q002: `Tests/TPMCertification.Publication.Tests.ps1` gained
+  6 tests (17 total). 17/17 on pwsh 7.6.3 and 16/17 (1 skipped, unchanged
+  reason: symbolic-link creation for the reparse-point test requires
+  elevated privileges in this sandbox) on Windows PowerShell
+  5.1.26100.8875.
+- ADR155-Q003/Q004: `Invoke-Pester -Path .\Tests` passed 930/930 on pwsh
+  7.6.3 and 924/930 on Windows PowerShell 5.1 (same five unchanged issue
+  #148 Repair-GamePaths failures, 1 skipped).
+- ADR155-Q005/Q006/Q007: both changed files
+  (`scripts/TPMCertification.Publication.psm1`,
+  `Tests/TPMCertification.Publication.Tests.ps1`) had zero non-ASCII
+  bytes, zero parser errors, zero PSScriptAnalyzer findings, and zero
+  InjectionHunter findings.
+
+No architectural or behavioral change beyond this one finding. No durable
+read-back, promotion, dispatcher transitions, or atomic cutover began;
+ADR155-0306 remains partial for the same reasons as above.

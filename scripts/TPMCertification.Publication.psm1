@@ -19,13 +19,19 @@ function New-TPMPublicationStagingV1 {
     if($null-eq$Marker-or$Marker.PSObject.Properties.Name-notcontains'Json'-or$Marker.PSObject.Properties.Name-notcontains'Bytes'-or[string]$Marker.FileName-cne'TPM-Certification-Commit.json'){throw 'PUBLISH_INVALID: Marker must be a New-TPMCommitMarkerReportV1 result'}
     try{$parsedManifest=ConvertFrom-Json -InputObject $Manifest.Json -ErrorAction Stop}catch{throw 'PUBLISH_INVALID: Manifest.Json did not parse as JSON'}
     try{$parsedMarker=ConvertFrom-Json -InputObject $Marker.Json -ErrorAction Stop}catch{throw 'PUBLISH_INVALID: Marker.Json did not parse as JSON'}
+    $utf8=New-Object Text.UTF8Encoding($false)
+    $manifestHash=Get-TPMSha256HexV1 -Bytes $Manifest.Bytes
+    $manifestJsonHash=Get-TPMSha256HexV1 -Bytes ($utf8.GetBytes($Manifest.Json))
+    if($manifestJsonHash-cne$manifestHash){throw 'PUBLISH_INVALID: Manifest.Bytes is not the exact BOM-less UTF-8 encoding of Manifest.Json'}
+    $markerHash=Get-TPMSha256HexV1 -Bytes $Marker.Bytes
+    $markerJsonHash=Get-TPMSha256HexV1 -Bytes ($utf8.GetBytes($Marker.Json))
+    if($markerJsonHash-cne$markerHash){throw 'PUBLISH_INVALID: Marker.Bytes is not the exact BOM-less UTF-8 encoding of Marker.Json'}
     foreach($field in @('RunIdentity','ArtifactSetSha256','Artifacts')){if($null-eq$parsedManifest.PSObject.Properties[$field]){throw "PUBLISH_INVALID: Manifest is missing $field"}}
     foreach($field in @('RunIdentity','ManifestSha256')){if($null-eq$parsedMarker.PSObject.Properties[$field]){throw "PUBLISH_INVALID: Marker is missing $field"}}
     Assert-TPMMarkdownRunIdentityV1 ([string]$parsedManifest.RunIdentity)
     Assert-TPMMarkdownRunIdentityV1 ([string]$parsedMarker.RunIdentity)
     if([string]$parsedManifest.RunIdentity-cne[string]$parsedMarker.RunIdentity){throw 'PUBLISH_INVALID: Manifest and Marker RunIdentity differ'}
     Assert-TPMMarkdownSha256V1 ([string]$parsedMarker.ManifestSha256) 'ManifestSha256'
-    $manifestHash=Get-TPMSha256HexV1 -Bytes $Manifest.Bytes
     if([string]$parsedMarker.ManifestSha256-cne$manifestHash){throw 'PUBLISH_INVALID: Marker.ManifestSha256 does not match Manifest bytes'}
 
     $reportsByIdentifier=[ordered]@{
