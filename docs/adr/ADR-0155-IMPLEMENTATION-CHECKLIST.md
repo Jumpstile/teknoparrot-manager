@@ -451,3 +451,69 @@ publication, console, status, or exit-code authority; `Invoke-TPM-RealInstanceSm
 is unchanged by this commit. Phase 3 report/manifest/marker builders,
 staging/publisher, external consumer validation, and the atomic cutover
 (ADR155-0303 through 0309) remain unbuilt.
+
+Independently reviewed and returned APPROVED (commit `0848424` reviewed as a
+production-dispatcher checkpoint separate from the frozen Phase 2 baseline;
+Phase 1/2 files confirmed byte-identical to the last approved Phase 2
+commit). One non-blocking maintainability note from that review: four of
+the five `DUPLICATE_ISSUANCE` guards in the dispatcher (`Eligibility`,
+`PublicationCandidate`, `PublicationOutcome` from either `Register*` path,
+`FinalOutcome`) are unreachable given the phase machine's strictly forward
+progression -- a repeat call always hits its `ILLEGAL_PHASE` guard first.
+Harmless defense-in-depth; left as-is, noted here for a future maintainer.
+
+## Phase 3 eligibility report builder -- 2026-07-20
+
+Adds `scripts/TPMCertification.Reports.psm1`: `New-TPMEligibilityReportV1`,
+a pure, side-effect-free builder that turns an issued `TPMEligibilitySnapshotV1`
+into the exact `TPM-Certification-Eligibility.json` bytes from ADR Section
+7.2/8.1. Deliberately kept in its own module, separate from the dispatcher
+(`Production.psm1`) and from any future publisher/staging code, matching
+the Section 12 producer/consumer split between "deterministic builder" and
+"publisher."
+
+- Advances the remaining half of ADR155-0302: the detached
+  Payload-then-Integrity envelope itself. Confirmed by direct test that
+  `ConvertTo-TPMJcsV1` sorts the two top-level keys as `Integrity` before
+  `Payload` (`"I" < "P"` under ordinal UTF-16 comparison) -- opposite of the
+  ADR prose's reading order, which Section 3 explicitly says is membership/
+  array order, not a claim about serialized object-property order. The
+  builder therefore hardcodes `Integrity` first via literal string
+  concatenation of already-canonical fragments (the same technique `Seal`
+  already uses for the sealed-run document), splicing in the eligibility
+  snapshot's own `CanonicalJson` verbatim as the `Payload` value rather than
+  re-parsing and re-serializing it -- avoiding any risk of round-trip drift
+  between the hash that was computed at `IssueEligibility` time and the
+  bytes actually embedded in the report.
+  `EligibilityPayloadSha256` is independently recomputed by the builder
+  from the snapshot's own canonical bytes rather than trusted from a
+  caller-supplied value, so the report is self-verifying.
+  ADR155-0302 remains unchecked: `ArtifactSha256`, `ArtifactSetSha256`, and
+  `ManifestSha256` are still outstanding, and per the Section 4 table their
+  producer is the publisher, not this builder -- they depend on the
+  not-yet-built manifest/staging work (ADR155-0304/0305/0306).
+- The builder validates its input is exactly a
+  `Jumpstile.TPM.Certification.V1.TPMEligibilitySnapshotV1` instance (type
+  and namespace) and rejects anything else, including a same-type object
+  constructed directly via reflection rather than issued by a real
+  dispatcher -- documented explicitly as a boundary, not a gap: ADR Section
+  2.1 forbids the dispatcher's own capability (and therefore its private
+  `ReferenceEquals` registry) from ever being passed to a renderer/builder,
+  so full dispatcher-identity provenance is deliberately out of reach here
+  by design; the workflow must only ever call this builder with an object
+  it just received directly from its own dispatcher.
+- ADR155-Q001/Q002: `Tests/TPMCertification.Reports.Tests.ps1` (6 tests:
+  exact envelope key order and hash self-consistency, verbatim Payload
+  byte-splice with no re-serialization drift, BOM-less UTF-8 output, wrong-
+  compiled-type rejection, and null/plain-object rejection) passed 6/6 on
+  pwsh 7.6.3 and 6/6 on Windows PowerShell 5.1.26100.8875.
+- ADR155-Q003/Q004: `Invoke-Pester -Path .\Tests` passed 868/868 on pwsh
+  7.6.3 and 863/868 on Windows PowerShell 5.1, with exactly the same five
+  unchanged issue #148 Repair-GamePaths failures.
+- ADR155-Q005/Q006/Q007: the new module and its tests had zero non-ASCII
+  bytes, zero parser errors, zero PSScriptAnalyzer findings, and zero
+  InjectionHunter findings.
+
+This builder produces bytes only; nothing is written to disk, staged, or
+published, and no harness wiring or final-authority ownership was touched.
+ADR155-0303 through 0309 remain unbuilt.
