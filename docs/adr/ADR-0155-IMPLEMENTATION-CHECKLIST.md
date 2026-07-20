@@ -66,11 +66,8 @@ have passed. Stable identifiers are retained across revisions.
   internal builders for the five canonical reports.
 - [x] ADR155-0305 -- Build the exact manifest and commit marker with canonical
   identities, byte lengths, SHA-256 hashes, and run correlation.
-- [ ] ADR155-0306 -- Stage the complete seven-file bundle and expose authority
+- [x] ADR155-0306 -- Stage the complete seven-file bundle and expose authority
   only after the marker is durably validated; never overwrite a destination.
-  (Partial: deterministic staging with rollback is built; durable-validation
-  read-back, promotion to a final destination, and exposing publication
-  authority remain outstanding -- see evidence below.)
 - [ ] ADR155-0307 -- Compose the sole final outcome from issued eligibility and
   issued publication outcomes; console, reports, result, and exit code agree.
 - [ ] ADR155-0308 -- Publish authoritative NOT CERTIFIED bundles for ineligible
@@ -1014,3 +1011,111 @@ string, not the JSON that had passed every logical check.
 No architectural or behavioral change beyond this one finding. No durable
 read-back, promotion, dispatcher transitions, or atomic cutover began;
 ADR155-0306 remains partial for the same reasons as above.
+
+## Phase 3 publication commit: promotion and durable validation (ADR155-0306, complete) -- 2026-07-20
+
+Completes ADR155-0306. Adds `New-TPMPublicationCommitV1` to
+`scripts/TPMCertification.Publication.psm1`, alongside (not in place of)
+the already-approved `New-TPMPublicationStagingV1`, which it calls
+internally and does not modify. Still no wiring into the dispatcher's
+`RegisterCommittedPublication`/`RegisterPublicationFailure`, and no
+atomic cutover -- per instruction, this checkpoint is the last of
+ADR155-0306's own scope, not ADR155-0309.
+
+- Validates `DestinationRoot` (absolute, non-empty) before calling
+  `New-TPMPublicationStagingV1`; a staging failure is propagated verbatim
+  (`Committed=$false`, staging's own `FailureCode`/`FailureMessage`) with
+  no promotion attempt and no destination directory created.
+- Promotion: a deterministic `DestinationRoot\<RunIdentity>` directory
+  (same RunIdentity-per-run scheme as staging, same
+  create-or-reuse-with-reparse-rejection care, intentionally duplicated
+  rather than extracted into a shared helper so the already-reviewed
+  `New-TPMPublicationStagingV1` internals stay untouched). Each of the
+  seven staged files is moved via `IO.File.Move` in the manifest's fixed
+  order (five reports, manifest, marker); a pre-existence check on the
+  destination path enforces "never overwrite a destination" per-file,
+  matching the same idiom already used for staging's own
+  `FileMode.CreateNew` writes.
+- Durable validation: after all seven files are promoted, each is
+  re-read from its destination path and its SHA-256 recomputed and
+  compared against the hash the Manifest already recorded for it (the
+  five reports against `Manifest.Artifacts[i].Sha256`; the Manifest and
+  Marker themselves against the hashes already computed during staging's
+  pre-flight). A mismatch fails closed with `DURABLE_VALIDATION_FAILED`
+  and is rolled back like any other promotion failure. Because staging's
+  own pre-flight already guarantees every staged artifact's bytes match
+  what the Manifest recorded for it, and `IO.File.Move` is a rename that
+  cannot alter file contents, this branch is unreachable through the
+  public API's own trust chain under normal operation -- it exists as
+  defense-in-depth against out-of-band corruption (e.g. antivirus
+  quarantine-and-replace, disk-level corruption) between promotion and
+  read-back, and is exercised by code review rather than a runtime test;
+  the same is true of the `ROLLBACK_FAILED` code, which requires a
+  genuine filesystem-level failure (a locked handle, a permissions
+  change mid-operation) to trigger and was judged not worth a fragile,
+  potentially environment-dependent lock-contention test.
+- Rollback (promotion or durable-validation failure): every file this
+  call itself promoted is moved back from the destination to its
+  original staging path -- never deleted outright -- so a failed commit
+  leaves the staging directory exactly as staging originally produced it
+  and nothing is lost; only files this call actually moved are touched,
+  matching the same "removes only files owned by this run" guarantee
+  already established for staging. The destination directory is removed
+  only if this call created it and it ends up empty.
+- The sole `Committed` transition: `Committed` starts `$false` and is
+  set to `$true` only once, after every file has promoted and durably
+  validated successfully; nothing after that point can change it back
+  (post-commit cleanup failure only appends a diagnostic warning). On
+  success the result also carries `ManifestSha256` and `ArtifactSetSha256`
+  (independently recomputed/read from the already-validated Manifest,
+  not re-derived from caller input) plus `DiagnosticWarnings` -- exactly
+  the three fields `Assert-TPMPublicationObservationV1` in
+  `TPMCertification.Production.psm1` already expects for a future
+  `RegisterCommittedPublication` call, confirmed by a test asserting the
+  returned values satisfy that function's own format regexes and
+  closed-vocabulary warning check. This shape match is deliberate reuse
+  of an already-defined contract, not new wiring: `RegisterCommittedPublication`
+  is not called anywhere in this module or its tests.
+- Post-commit cleanup: once `Committed=true`, the (now-empty, since every
+  file was moved out) private staging directory is removed; failure adds
+  `POST_COMMIT_CLEANUP_FAILED` to `DiagnosticWarnings` without changing
+  `Committed`, matching Section 9 exactly.
+- Manually verified end-to-end before writing formal tests: full 7-file
+  commit with post-write on-disk hash verification against every source
+  report, confirmed `ManifestSha256`/`ArtifactSetSha256` match the
+  Manifest's own recorded values, confirmed staging-directory cleanup,
+  and confirmed re-committing the same run fails closed with the
+  original destination untouched and the second attempt's own staged
+  files rolled back to its own staging directory.
+- ADR155-Q001/Q002: `Tests/TPMCertification.Publication.Tests.ps1` gained
+  6 tests (23 total): full commit with per-file on-disk hash
+  verification and `ManifestSha256`/`ArtifactSetSha256`/`DiagnosticWarnings`
+  correctness; the returned shape satisfying
+  `Assert-TPMPublicationObservationV1`'s own format rules; re-committing
+  the same run rejected with the original destination untouched and the
+  second attempt's files rolled back to its own staging directory;
+  staging-failure propagation with zero destination writes; a
+  mid-promotion collision rolling the already-promoted files back to
+  staging rather than leaving a partially promoted destination; and
+  relative/null/empty `DestinationRoot` rejection. 23/23 on pwsh 7.6.3
+  and 22/23 (1 skipped, unchanged reason: symbolic-link creation for the
+  staging-side reparse-point test requires elevated privileges in this
+  sandbox) on Windows PowerShell 5.1.26100.8875.
+- ADR155-Q003/Q004: `Invoke-Pester -Path .\Tests` passed 936/936 on pwsh
+  7.6.3 and 930/936 on Windows PowerShell 5.1 (same five unchanged issue
+  #148 Repair-GamePaths failures, 1 skipped).
+- ADR155-Q005/Q006/Q007: both changed files
+  (`scripts/TPMCertification.Publication.psm1`,
+  `Tests/TPMCertification.Publication.Tests.ps1`) had zero non-ASCII
+  bytes, zero parser errors, zero PSScriptAnalyzer findings, and zero
+  InjectionHunter findings.
+
+ADR155-0306 is now fully checked. `RegisterCommittedPublication`,
+`RegisterPublicationFailure`, and the rest of the dispatcher's phase
+machine are unchanged and still take only raw publisher observations as
+before -- no dispatcher wiring, and no atomic cutover, began. Remaining
+Phase 3 work: the sole final-outcome composition already substantially
+covered by the dispatcher's `IssueFinalOutcome` (ADR155-0307),
+NOT-CERTIFIED bundle publication (ADR155-0308), and the atomic cutover
+that removes every legacy decision assignment and competing publisher
+(ADR155-0309).

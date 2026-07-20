@@ -123,4 +123,134 @@ function New-TPMPublicationStagingV1 {
     return [pscustomobject]$result
 }
 
-Export-ModuleMember -Function New-TPMPublicationStagingV1
+function New-TPMPublicationCommitV1 {
+    param(
+        [Parameter(Mandatory=$true)][string]$StagingParentRoot,
+        [Parameter(Mandatory=$true)][string]$DestinationRoot,
+        [Parameter(Mandatory=$true)]$EligibilityReport,
+        [Parameter(Mandatory=$true)]$PublicationReport,
+        [Parameter(Mandatory=$true)]$FinalOutcomeReport,
+        [Parameter(Mandatory=$true)]$ScorecardReport,
+        [Parameter(Mandatory=$true)]$ValidationReport,
+        [Parameter(Mandatory=$true)]$Manifest,
+        [Parameter(Mandatory=$true)]$Marker
+    )
+    if([string]::IsNullOrWhiteSpace($DestinationRoot)){throw 'PUBLISH_INVALID: DestinationRoot is required'}
+    if(-not [IO.Path]::IsPathRooted($DestinationRoot)){throw 'PUBLISH_INVALID: DestinationRoot must be absolute'}
+
+    $staging=New-TPMPublicationStagingV1 -StagingParentRoot $StagingParentRoot -EligibilityReport $EligibilityReport -PublicationReport $PublicationReport -FinalOutcomeReport $FinalOutcomeReport -ScorecardReport $ScorecardReport -ValidationReport $ValidationReport -Manifest $Manifest -Marker $Marker
+
+    $result=[ordered]@{Committed=$false;RunIdentity=$staging.RunIdentity;DestinationDirectory=$null;ManifestSha256=$null;ArtifactSetSha256=$null;DiagnosticWarnings=@();FailureCode=$staging.FailureCode;FailureMessage=$staging.FailureMessage}
+    if($staging.FailureCode){
+        return [pscustomobject]$result
+    }
+
+    $parsedManifest=ConvertFrom-Json -InputObject $Manifest.Json
+    $manifestArtifactSetSha256=[string]$parsedManifest.ArtifactSetSha256
+    $expectedHashByFileName=@{}
+    foreach($entry in @($parsedManifest.Artifacts)){$expectedHashByFileName[[string]$entry.FileName]=[string]$entry.Sha256}
+    $manifestHash=Get-TPMSha256HexV1 -Bytes $Manifest.Bytes
+    $markerHash=Get-TPMSha256HexV1 -Bytes $Marker.Bytes
+    $expectedHashByFileName[[string]$Manifest.FileName]=$manifestHash
+    $expectedHashByFileName[[string]$Marker.FileName]=$markerHash
+
+    $normalizedDestinationParent=[IO.Path]::GetFullPath($DestinationRoot).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+    try{
+        $destinationDir=Resolve-TPMContainedPathV1 -Root $normalizedDestinationParent -Path $staging.RunIdentity
+    }catch{
+        $result.FailureCode='PROMOTION_FAILED';$result.FailureMessage=$_.Exception.Message
+        return [pscustomobject]$result
+    }
+    $result.DestinationDirectory=$destinationDir
+    $destinationCreatedThisCall=$false
+    try{
+        if(Test-Path -LiteralPath $destinationDir){
+            $existing=Get-Item -LiteralPath $destinationDir -Force -ErrorAction Stop
+            if(-not $existing.PSIsContainer){throw 'PATH_INVALID: destination path exists and is not a directory'}
+            if(($existing.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'PATH_REPARSE_POINT: destination directory is a reparse point'}
+        }else{
+            [void](New-Item -ItemType Directory -Path $destinationDir -ErrorAction Stop)
+            $destinationCreatedThisCall=$true
+            $destinationDir=Resolve-TPMContainedPathV1 -Root $normalizedDestinationParent -Path $staging.RunIdentity
+            if(((Get-Item -LiteralPath $destinationDir -Force -ErrorAction Stop).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'PATH_REPARSE_POINT: destination directory is a reparse point'}
+        }
+    }catch{
+        $result.FailureCode='PROMOTION_FAILED';$result.FailureMessage=$_.Exception.Message
+        try{if($destinationCreatedThisCall-and(Test-Path -LiteralPath $destinationDir)){$remaining=@(Get-ChildItem -LiteralPath $destinationDir -Force -ErrorAction Stop);if($remaining.Count-eq0){Remove-Item -LiteralPath $destinationDir -Force -ErrorAction Stop}}}catch{$result.FailureCode='ROLLBACK_FAILED'}
+        return [pscustomobject]$result
+    }
+
+    $promoted=New-Object Collections.Generic.List[object]
+    $promotionFailed=$false
+    $promotionFailureCode=$null
+    $promotionFailureMessage=$null
+    foreach($file in $staging.Files){
+        try{
+            $destinationPath=Resolve-TPMContainedPathV1 -Root $destinationDir -Path $file.FileName
+            if(Test-Path -LiteralPath $destinationPath){throw "PATH_ALREADY_EXISTS: $($file.FileName)"}
+            [IO.File]::Move($file.Path,$destinationPath)
+            $promoted.Add([pscustomobject]@{Identifier=$file.Identifier;FileName=$file.FileName;StagingPath=$file.Path;DestinationPath=$destinationPath})
+        }catch{
+            $promotionFailed=$true
+            $promotionFailureCode=if($file.Identifier-ceq'Marker'){'MARKER_WRITE_FAILED'}else{'PROMOTION_FAILED'}
+            $promotionFailureMessage=$_.Exception.Message
+            break
+        }
+    }
+
+    if($promotionFailed){
+        $rollbackFailed=$false
+        foreach($p in $promoted){
+            try{if(Test-Path -LiteralPath $p.DestinationPath){[IO.File]::Move($p.DestinationPath,$p.StagingPath)}}catch{$rollbackFailed=$true}
+        }
+        try{if($destinationCreatedThisCall-and(Test-Path -LiteralPath $destinationDir)){$remaining=@(Get-ChildItem -LiteralPath $destinationDir -Force -ErrorAction Stop);if($remaining.Count-eq0){Remove-Item -LiteralPath $destinationDir -Force -ErrorAction Stop}}}catch{$rollbackFailed=$true}
+        $result.FailureCode=if($rollbackFailed){'ROLLBACK_FAILED'}else{$promotionFailureCode}
+        $result.FailureMessage=$promotionFailureMessage
+        return [pscustomobject]$result
+    }
+
+    $durableValidationFailed=$false
+    $durableValidationMessage=$null
+    foreach($p in $promoted){
+        try{
+            $onDiskBytes=[IO.File]::ReadAllBytes($p.DestinationPath)
+            $onDiskHash=Get-TPMSha256HexV1 -Bytes $onDiskBytes
+            $expected=$expectedHashByFileName[$p.FileName]
+            if($onDiskHash-cne$expected){throw "durable validation hash mismatch for $($p.FileName)"}
+        }catch{
+            $durableValidationFailed=$true
+            $durableValidationMessage=$_.Exception.Message
+            break
+        }
+    }
+
+    if($durableValidationFailed){
+        $rollbackFailed=$false
+        foreach($p in $promoted){
+            try{if(Test-Path -LiteralPath $p.DestinationPath){[IO.File]::Move($p.DestinationPath,$p.StagingPath)}}catch{$rollbackFailed=$true}
+        }
+        try{if($destinationCreatedThisCall-and(Test-Path -LiteralPath $destinationDir)){$remaining=@(Get-ChildItem -LiteralPath $destinationDir -Force -ErrorAction Stop);if($remaining.Count-eq0){Remove-Item -LiteralPath $destinationDir -Force -ErrorAction Stop}}}catch{$rollbackFailed=$true}
+        $result.FailureCode=if($rollbackFailed){'ROLLBACK_FAILED'}else{'DURABLE_VALIDATION_FAILED'}
+        $result.FailureMessage=$durableValidationMessage
+        return [pscustomobject]$result
+    }
+
+    $result.Committed=$true
+    $result.FailureCode=$null
+    $result.FailureMessage=$null
+    $result.ManifestSha256=$manifestHash
+    $result.ArtifactSetSha256=$manifestArtifactSetSha256
+
+    $diagnosticWarnings=New-Object Collections.Generic.List[string]
+    try{
+        if(Test-Path -LiteralPath $staging.StagingDirectory){
+            $remaining=@(Get-ChildItem -LiteralPath $staging.StagingDirectory -Force -ErrorAction Stop)
+            if($remaining.Count-eq0){Remove-Item -LiteralPath $staging.StagingDirectory -Force -ErrorAction Stop}
+        }
+    }catch{[void]$diagnosticWarnings.Add('POST_COMMIT_CLEANUP_FAILED')}
+    $result.DiagnosticWarnings=$diagnosticWarnings.ToArray()
+
+    return [pscustomobject]$result
+}
+
+Export-ModuleMember -Function New-TPMPublicationStagingV1,New-TPMPublicationCommitV1

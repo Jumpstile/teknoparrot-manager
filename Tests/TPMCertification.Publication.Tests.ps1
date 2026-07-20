@@ -60,6 +60,9 @@ BeforeAll {
  function Invoke-StagingV1($Bundle,[string]$StagingParentRoot){
   return New-TPMPublicationStagingV1 -StagingParentRoot $StagingParentRoot -EligibilityReport $Bundle.EligibilityReport -PublicationReport $Bundle.PublicationReport -FinalOutcomeReport $Bundle.FinalOutcomeReport -ScorecardReport $Bundle.ScorecardReport -ValidationReport $Bundle.ValidationReport -Manifest $Bundle.Manifest -Marker $Bundle.Marker
  }
+ function Invoke-CommitV1($Bundle,[string]$StagingParentRoot,[string]$DestinationRoot){
+  return New-TPMPublicationCommitV1 -StagingParentRoot $StagingParentRoot -DestinationRoot $DestinationRoot -EligibilityReport $Bundle.EligibilityReport -PublicationReport $Bundle.PublicationReport -FinalOutcomeReport $Bundle.FinalOutcomeReport -ScorecardReport $Bundle.ScorecardReport -ValidationReport $Bundle.ValidationReport -Manifest $Bundle.Manifest -Marker $Bundle.Marker
+ }
 }
 
 Describe 'ADR-0155 Phase 3 publication staging builder' {
@@ -247,5 +250,111 @@ Describe 'ADR-0155 Phase 3 publication staging builder' {
   $bundleB=New-FullBundleV1 $root2
   {New-TPMPublicationStagingV1 -StagingParentRoot $stagingParent -EligibilityReport $bundleB.EligibilityReport -PublicationReport $bundleA.PublicationReport -FinalOutcomeReport $bundleA.FinalOutcomeReport -ScorecardReport $bundleA.ScorecardReport -ValidationReport $bundleA.ValidationReport -Manifest $bundleA.Manifest -Marker $bundleA.Marker}|Should -Throw
   (Get-ChildItem -LiteralPath $stagingParent -Recurse -File -ErrorAction SilentlyContinue).Count|Should -Be 0
+ }
+}
+
+Describe 'ADR-0155 Phase 3 publication commit (promotion and durable validation)' {
+ BeforeEach {
+  $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $root|Out-Null
+  $stagingParent=Join-Path $root 'staging';New-Item -ItemType Directory -Path $stagingParent|Out-Null
+  $destinationParent=Join-Path $root 'destination';New-Item -ItemType Directory -Path $destinationParent|Out-Null
+ }
+
+ It 'promotes all seven files to a deterministic RunIdentity-named destination, durably validates them, cleans up staging, and sets Committed=true' {
+  $bundle=New-FullBundleV1 $root
+  $commit=Invoke-CommitV1 $bundle $stagingParent $destinationParent
+  $commit.FailureCode|Should -BeNullOrEmpty
+  $commit.Committed|Should -Be $true
+  $parsedManifest=$bundle.Manifest.Json|ConvertFrom-Json
+  $commit.RunIdentity|Should -Be $parsedManifest.RunIdentity
+  $commit.DestinationDirectory|Should -Be (Join-Path ([IO.Path]::GetFullPath($destinationParent)) $parsedManifest.RunIdentity)
+  $onDisk=@(Get-ChildItem -LiteralPath $commit.DestinationDirectory -File)
+  $onDisk.Count|Should -Be 7
+  $expectedNames=@('TPM-Certification-Eligibility.json','TPM-Certification-Publication.json','TPM-Certification-Final-Outcome.json','TPM-Certification-Scorecard.md','TPM-Certification-Validation.md','TPM-Certification-Manifest.json','TPM-Certification-Commit.json')
+  @($onDisk|ForEach-Object{$_.Name}|Sort-Object)|Should -Be @($expectedNames|Sort-Object)
+  foreach($name in $expectedNames){
+   $sourceBytes=switch($name){
+    'TPM-Certification-Eligibility.json'{$bundle.EligibilityReport.Bytes}
+    'TPM-Certification-Publication.json'{$bundle.PublicationReport.Bytes}
+    'TPM-Certification-Final-Outcome.json'{$bundle.FinalOutcomeReport.Bytes}
+    'TPM-Certification-Scorecard.md'{$bundle.ScorecardReport.Bytes}
+    'TPM-Certification-Validation.md'{$bundle.ValidationReport.Bytes}
+    'TPM-Certification-Manifest.json'{$bundle.Manifest.Bytes}
+    'TPM-Certification-Commit.json'{$bundle.Marker.Bytes}
+   }
+   $onDiskHash=Get-TPMSha256HexV1 -Bytes ([IO.File]::ReadAllBytes((Join-Path $commit.DestinationDirectory $name)))
+   $onDiskHash|Should -Be (Get-TPMSha256HexV1 -Bytes $sourceBytes)
+  }
+  $commit.ManifestSha256|Should -Be (Get-TPMSha256HexV1 -Bytes $bundle.Manifest.Bytes)
+  $commit.ArtifactSetSha256|Should -Be $parsedManifest.ArtifactSetSha256
+  $commit.DiagnosticWarnings|Should -BeNullOrEmpty
+  (Test-Path -LiteralPath $stagingParent -PathType Container) -and ((Get-ChildItem -LiteralPath $stagingParent -Directory).Count -eq 0)|Should -Be $true
+ }
+
+ It 'produces a result shape that satisfies the dispatcher''s own publication-observation schema on success' {
+  $bundle=New-FullBundleV1 $root
+  $commit=Invoke-CommitV1 $bundle $stagingParent $destinationParent
+  $commit.Committed|Should -Be $true
+  $commit.ManifestSha256|Should -Match '^[0-9a-f]{64}$'
+  $commit.ArtifactSetSha256|Should -Match '^[0-9a-f]{64}$'
+  foreach($warning in @($commit.DiagnosticWarnings)){$warning|Should -Be 'POST_COMMIT_CLEANUP_FAILED'}
+ }
+
+ It 'never overwrites an existing destination: committing the same run again fails closed, leaves the original destination untouched, and rolls the second attempt''s staged files back to its own staging directory' {
+  $bundle=New-FullBundleV1 $root
+  $first=Invoke-CommitV1 $bundle $stagingParent $destinationParent
+  $first.Committed|Should -Be $true
+  $beforeHashes=@(Get-ChildItem -LiteralPath $first.DestinationDirectory -File|ForEach-Object{Get-TPMSha256HexV1 -Bytes ([IO.File]::ReadAllBytes($_.FullName))}|Sort-Object)
+  $stagingParent2=Join-Path $root 'staging2';New-Item -ItemType Directory -Path $stagingParent2|Out-Null
+  $second=Invoke-CommitV1 $bundle $stagingParent2 $destinationParent
+  $second.Committed|Should -Be $false
+  $second.FailureCode|Should -Be 'PROMOTION_FAILED'
+  $afterHashes=@(Get-ChildItem -LiteralPath $first.DestinationDirectory -File|ForEach-Object{Get-TPMSha256HexV1 -Bytes ([IO.File]::ReadAllBytes($_.FullName))}|Sort-Object)
+  $afterHashes|Should -Be $beforeHashes
+  (Get-ChildItem -LiteralPath $first.DestinationDirectory -File).Count|Should -Be 7
+  (Get-ChildItem -LiteralPath $stagingParent2 -Recurse -File).Count|Should -BeGreaterThan 0
+ }
+
+ It 'propagates a staging failure without attempting promotion, leaving Committed=false and no destination directory created' {
+  $bundle=New-FullBundleV1 $root
+  $first=Invoke-CommitV1 $bundle $stagingParent $destinationParent
+  $first.Committed|Should -Be $true
+  $stagingParent2=Join-Path $root 'staging2';New-Item -ItemType Directory -Path $stagingParent2|Out-Null
+  $collidingDir=Join-Path ([IO.Path]::GetFullPath($stagingParent2)) (($bundle.Manifest.Json|ConvertFrom-Json).RunIdentity)
+  New-Item -ItemType Directory -Path $collidingDir|Out-Null
+  [IO.File]::WriteAllBytes((Join-Path $collidingDir 'TPM-Certification-Eligibility.json'),[byte[]](9))
+  $destinationParent2=Join-Path $root 'destination2';New-Item -ItemType Directory -Path $destinationParent2|Out-Null
+  $second=Invoke-CommitV1 $bundle $stagingParent2 $destinationParent2
+  $second.Committed|Should -Be $false
+  $second.FailureCode|Should -Be 'PROMOTION_FAILED'
+  $second.FailureMessage|Should -Match 'TPM-Certification-Eligibility\.json'
+  (Get-ChildItem -LiteralPath $destinationParent2 -Recurse -File -ErrorAction SilentlyContinue).Count|Should -Be 0
+ }
+
+ It 'rolls a mid-promotion collision back to the staging directory rather than leaving a partially promoted destination' {
+  $bundle=New-FullBundleV1 $root
+  $stagingParent2=Join-Path $root 'staging2';New-Item -ItemType Directory -Path $stagingParent2|Out-Null
+  $collidingDir=Join-Path ([IO.Path]::GetFullPath($destinationParent)) (($bundle.Manifest.Json|ConvertFrom-Json).RunIdentity)
+  New-Item -ItemType Directory -Path $collidingDir|Out-Null
+  [IO.File]::WriteAllBytes((Join-Path $collidingDir 'TPM-Certification-Scorecard.md'),[byte[]](9))
+  $commit=Invoke-CommitV1 $bundle $stagingParent2 $destinationParent
+  $commit.Committed|Should -Be $false
+  $commit.FailureCode|Should -Be 'PROMOTION_FAILED'
+  $commit.FailureMessage|Should -Match 'TPM-Certification-Scorecard\.md'
+  $remainingCollider=@(Get-ChildItem -LiteralPath $collidingDir -File)
+  $remainingCollider.Count|Should -Be 1
+  $remainingCollider[0].Name|Should -Be 'TPM-Certification-Scorecard.md'
+  $rolledBack=@(Get-ChildItem -LiteralPath $stagingParent2 -Recurse -File)
+  ($rolledBack|Where-Object{$_.Name-eq'TPM-Certification-Eligibility.json'}).Count|Should -Be 1
+  ($rolledBack|Where-Object{$_.Name-eq'TPM-Certification-Publication.json'}).Count|Should -Be 1
+  ($rolledBack|Where-Object{$_.Name-eq'TPM-Certification-Final-Outcome.json'}).Count|Should -Be 1
+ }
+
+ It 'rejects when DestinationRoot is relative, null, or whitespace' {
+  $bundle=New-FullBundleV1 $root
+  {Invoke-CommitV1 $bundle $stagingParent 'relative\path'}|Should -Throw '*PUBLISH_INVALID*absolute*'
+  {Invoke-CommitV1 $bundle $stagingParent ' '}|Should -Throw '*PUBLISH_INVALID*'
+  {Invoke-CommitV1 $bundle $stagingParent ''}|Should -Throw
+  {Invoke-CommitV1 $bundle $stagingParent $null}|Should -Throw
  }
 }
