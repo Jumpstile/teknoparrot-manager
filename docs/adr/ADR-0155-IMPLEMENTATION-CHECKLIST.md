@@ -16,15 +16,15 @@ have passed. Stable identifiers are retained across revisions.
 
 ## Phase 1 -- Isolated authority primitives
 
-- [ ] ADR155-0101 -- Add the versioned, idempotent compiled-type loader for
+- [x] ADR155-0101 -- Add the versioned, idempotent compiled-type loader for
   `Jumpstile.TPM.Certification.V1` and reject partial/incompatible type sets.
-- [ ] ADR155-0102 -- Authoritative compiled types expose only deeply immutable
+- [x] ADR155-0102 -- Authoritative compiled types expose only deeply immutable
   scalar/string/enum state and have no public constructors or setters.
-- [ ] ADR155-0103 -- Add RFC 8785 JCS serialization for the closed ADR schemas,
+- [x] ADR155-0103 -- Add RFC 8785 JCS serialization for the closed ADR schemas,
   strict UTF-8 without BOM, I-JSON range enforcement, and deterministic hashes.
-- [ ] ADR155-0104 -- Add component-aware Windows path containment with explicit
+- [x] ADR155-0104 -- Add component-aware Windows path containment with explicit
   sibling-prefix, traversal, ADS, device-path, and reparse-point rejection.
-- [ ] ADR155-0105 -- Add isolated PS 5.1 and pwsh regression coverage for type
+- [x] ADR155-0105 -- Add isolated PS 5.1 and pwsh regression coverage for type
   loading, canonicalization, hashing, and containment.
 
 ## Phase 2 -- Shadow fact and evidence authority
@@ -97,14 +97,47 @@ have passed. Stable identifiers are retained across revisions.
 
 ## Required quality gates
 
-- [ ] ADR155-Q001 -- Targeted tests pass under Windows PowerShell 5.1.
-- [ ] ADR155-Q002 -- Targeted tests pass under pwsh.
-- [ ] ADR155-Q003 -- Full suite passes under pwsh.
-- [ ] ADR155-Q004 -- Windows PowerShell 5.1 retains only the five issue #148
+- [x] ADR155-Q001 -- Targeted tests pass under Windows PowerShell 5.1.
+- [x] ADR155-Q002 -- Targeted tests pass under pwsh.
+- [x] ADR155-Q003 -- Full suite passes under pwsh.
+- [x] ADR155-Q004 -- Windows PowerShell 5.1 retains only the five issue #148
   failures until #148 is resolved separately.
-- [ ] ADR155-Q005 -- ASCII and parser checks pass.
-- [ ] ADR155-Q006 -- PSScriptAnalyzer passes with repository settings.
-- [ ] ADR155-Q007 -- InjectionHunter findings are individually dispositioned.
+- [x] ADR155-Q005 -- ASCII and parser checks pass.
+- [x] ADR155-Q006 -- PSScriptAnalyzer passes with repository settings.
+- [x] ADR155-Q007 -- InjectionHunter findings are individually dispositioned.
 - [ ] ADR155-Q008 -- Independent code review returns MERGE-READY.
 - [ ] ADR155-Q009 -- Final arcade-machine certification passes on the exact
   merged commit before PR #155 may be treated as release-ready.
+
+## Phase 1 implementation evidence -- 2026-07-19
+
+- ADR155-0101/0102: `scripts/TPMCertification.Authority.psm1` loads the
+  exact ten-type V1 set once, rejects partial or incompatible collisions, and
+  validates shared assembly identity, schema version, authority marker, private
+  constructors, readonly scalar backing fields, and absence of public setters.
+- ADR155-0103: the isolated module implements the closed-schema RFC 8785 subset
+  used by this ADR (null, Boolean, string, safe signed integer, object, array),
+  strict surrogate and UTF-8 handling, SHA-256 lowercase hex, and canonical
+  whole-message unpadded base64url transport.
+- ADR155-0104: containment resolves relative candidates against the canonical
+  absolute root and compares volume and components with OrdinalIgnoreCase. It
+  rejects dot segments, sibling prefixes, ADS, device paths, non-file URI
+  syntax, and existing reparse-point components without wildcard expansion.
+- ADR155-0105/Q001/Q002: `Tests/TPMCertification.Authority.Tests.ps1` passed
+  14/14 on pwsh 7.6.3 and 14/14 on Windows PowerShell 5.1.26100.8875.
+- ADR155-Q003: `Invoke-Pester -Path .\Tests` passed 826/826 on pwsh 7.6.3.
+- ADR155-Q004: the same suite passed 821/826 on Windows PowerShell 5.1; the
+  only failures are the five unchanged Repair-GamePaths cases tracked by #148.
+- ADR155-Q005: production script, new module, and focused tests each had zero
+  non-ASCII bytes and zero parser errors.
+- ADR155-Q006: repository-configured PSScriptAnalyzer returned zero findings
+  for the production script, new module, and focused tests.
+- ADR155-Q007: InjectionHunter returned zero findings for the new module. Its
+  16 production-script findings are unchanged because Phase 1 does not modify
+  `TeknoParrot-Manager.ps1`: four Add-Type calls use fixed assembly names, and
+  twelve UnsafeEscaping findings use fixed format or regular-expression
+  patterns rather than attacker-controlled code, command, or pattern text.
+  No Phase 1 input reaches dynamic execution.
+
+Phase 1 remains isolated and does not alter legacy certification authority.
+Phase 2 and later checklist items remain intentionally incomplete.
