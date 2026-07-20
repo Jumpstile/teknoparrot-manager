@@ -12,9 +12,14 @@ Describe 'ADR-0155 Phase 1 compiled authority primitives' {
   $process=Start-Process $engine -ArgumentList @('-NoProfile','-Command',$code) -Wait -PassThru
   $process.ExitCode|Should -Be 24
  }
- It 'stores only deeply immutable scalar state' {
+ It 'stores only deeply immutable scalar state in each derived type and its base type' {
   foreach($type in Initialize-TPMCertificationTypesV1){
-   foreach($field in $type.BaseType.GetFields([Reflection.BindingFlags]'NonPublic,Instance')){$field.IsInitOnly|Should -BeTrue;$field.FieldType|Should -Be ([string])}
+   $type.BaseType.FullName|Should -Be 'Jumpstile.TPM.Certification.V1.ValueV1'
+   foreach($level in @($type,$type.BaseType)){
+    $level|Should -Not -BeNullOrEmpty
+    foreach($field in $level.GetFields([Reflection.BindingFlags]'Public,NonPublic,Instance,DeclaredOnly')){$field.IsInitOnly|Should -BeTrue;$field.FieldType|Should -Be ([string])}
+    @($level.GetProperties([Reflection.BindingFlags]'Public,Instance,DeclaredOnly')|Where-Object CanWrite).Count|Should -Be 0
+   }
   }
  }
  It 'separates capability and rejects synthetic provenance and post-seal writes' {$a=New-TPMWorkflowAuthorityV1;&$a Record ([ordered]@{b=2;a=1});$r=&$a Seal;(&$a ValidateIssued $r)|Should -BeTrue;$t='Jumpstile.TPM.Certification.V1.TPMSealedRunReaderV1'-as[type];$ctor=$t.GetConstructors([Reflection.BindingFlags]'NonPublic,Instance')[0];$fake=$ctor.Invoke(@($r.RunIdentity,$r.CanonicalJson));(&$a ValidateIssued $fake)|Should -BeFalse;{&$a Record @{x=1}}|Should -Throw;$r.PSObject.Properties.Name|Should -Not -Contain Record}
@@ -28,7 +33,7 @@ Describe 'ADR-0155 Phase 1 JCS and whole-message transport' {
  It 'sorts object properties and preserves arrays' {ConvertTo-TPMJcsV1 ([ordered]@{z=@(3,2,1);a=$true})|Should -Be '{"a":true,"z":[3,2,1]}'}
  It 'rejects unsafe integers fractions and unpaired surrogates' {{ConvertTo-TPMJcsV1 ([long]9007199254740992)}|Should -Throw;{ConvertTo-TPMJcsV1 ([double]1.5)}|Should -Throw;{ConvertTo-TPMJcsV1 ([string][char]0xD800)}|Should -Throw}
  It 'round trips the entire JCS string as unpadded base64url' {$m='line'+[char]10+'| heading fence / '+[char]0x263A;$e=ConvertTo-TPMFailureMessageBase64UrlV1 $m;$e|Should -Match '^[A-Za-z0-9_-]+$';$e|Should -Not -Match '=';ConvertFrom-TPMFailureMessageBase64UrlV1 $e|Should -Be $m}
- It 'rejects malformed invalid UTF8 non-string and noncanonical inputs' {{ConvertFrom-TPMFailureMessageBase64UrlV1 'a'}|Should -Throw;{ConvertFrom-TPMFailureMessageBase64UrlV1 '!!!!'}|Should -Throw;$bad=[Convert]::ToBase64String([byte[]](0xC3,0x28)).TrimEnd('=').Replace('+','-').Replace('/','_');{ConvertFrom-TPMFailureMessageBase64UrlV1 $bad}|Should -Throw;$u=New-Object Text.UTF8Encoding($false);$number=[Convert]::ToBase64String($u.GetBytes('1')).TrimEnd('=');{ConvertFrom-TPMFailureMessageBase64UrlV1 $number}|Should -Throw;$slash=[Convert]::ToBase64String($u.GetBytes('"a\/b"')).TrimEnd('=').Replace('+','-').Replace('/','_');{ConvertFrom-TPMFailureMessageBase64UrlV1 $slash}|Should -Throw}
+ It 'rejects malformed invalid UTF8 non-string and noncanonical inputs' {{ConvertFrom-TPMFailureMessageBase64UrlV1 'a'}|Should -Throw;{ConvertFrom-TPMFailureMessageBase64UrlV1 '!!!!'}|Should -Throw;$valid=ConvertTo-TPMFailureMessageBase64UrlV1 'padded';{ConvertFrom-TPMFailureMessageBase64UrlV1 ($valid+'=')}|Should -Throw;$bad=[Convert]::ToBase64String([byte[]](0xC3,0x28)).TrimEnd('=').Replace('+','-').Replace('/','_');{ConvertFrom-TPMFailureMessageBase64UrlV1 $bad}|Should -Throw;$u=New-Object Text.UTF8Encoding($false);$number=[Convert]::ToBase64String($u.GetBytes('1')).TrimEnd('=');{ConvertFrom-TPMFailureMessageBase64UrlV1 $number}|Should -Throw;$slash=[Convert]::ToBase64String($u.GetBytes('"a\/b"')).TrimEnd('=').Replace('+','-').Replace('/','_');{ConvertFrom-TPMFailureMessageBase64UrlV1 $slash}|Should -Throw}
 }
 Describe 'ADR-0155 Phase 1 hashing and containment' {
     It 'matches the SHA-256 known vector' {
