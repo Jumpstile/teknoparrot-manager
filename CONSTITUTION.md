@@ -20,10 +20,11 @@ When applicable, Jumpstile project governance is followed in this order:
 4. **Engineering Standards** -- portfolio-wide, repository-agnostic
    standards adopted across every Jumpstile project (currently
    `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`, `INVENTORY_STANDARDS.md`,
-   and `ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md`; see below
-   for anticipated future additions to this tier, not yet present). These
-   documents govern *how* engineering work is done, independent of which
-   project it's done in.
+   `ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md`, and
+   `INDEPENDENT_REVIEW_WORKFLOW_STANDARD.md`; see below for anticipated
+   future additions to this tier, not yet present). These documents govern
+   *how* engineering work is done, independent of which project it's done
+   in.
 5. **Project Standards** -- this repository's own engineering standards
    (e.g. `SECURITY.md`, `RELEASE-SAFETY-CHECKLIST.md`, `ARCHITECTURE.md`).
    These apply this project's specific technical decisions and threat
@@ -147,9 +148,10 @@ there is rarely a conflict to resolve in the first place.
 
   | Document | Owns |
   |---|---|
-  | `CONSTITUTION.md` | Engineering philosophy, architectural principles, review workflow, documentation philosophy, engineering standards (tier 1) |
+  | `CONSTITUTION.md` | Engineering philosophy, architectural principles, the review-workflow *requirement*, documentation philosophy, which Engineering Standards exist (tier 1) |
   | ADRs | Architectural decisions and their rationale (tier 2) |
   | `ENGINEERING_GOVERNANCE.md` | Issue lifecycle, labels, milestones, prioritization, project governance (tier 3) |
+  | `INDEPENDENT_REVIEW_WORKFLOW_STANDARD.md` | The detailed review-workflow *process* -- full review, delta review, when a delta review must escalate to a new full review (tier 4) |
   | `RELEASE-SAFETY-CHECKLIST.md` | Release execution, publication order, release gates (tier 5) |
   | `ARCADE-CLAUDE.md` | Hardware certification procedures and arcade-workstation operational guidance (tier 5) |
   | User documentation (`README.md`, wiki, Quick Start) | Installation, configuration, and usage (tier 6) |
@@ -478,75 +480,16 @@ project actually uses.
 ### Independent Review Workflow
 
 Independent Review Required (above) says a second, independent pass must
-evaluate a change before it's treated as settled. This section describes
-the ordered workflow that satisfies it for any non-trivial engineering
-work, and specifically how a review that finds problems reaches
-resolution without either skipping re-verification or re-reviewing
-everything from scratch on every iteration:
-
-1. **Architecture and requirements are approved before implementation
-   begins.** For anything governed by a design document (an ADR, a
-   specification-driven finding under
-   `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`), the design is settled
-   first; implementation does not start against a moving target.
-2. **Implementation is completed.**
-3. **An independent reviewer performs a full review** -- the reviewer did
-   not write the change, evaluates it against the approved architecture
-   and this project's quality gates, and returns a verdict.
-4. **Findings are addressed in one or more focused commits.** Each
-   commit fixes what the review found; it does not restart or redesign
-   work the review did not flag as wrong.
-5. **The independent reviewer performs a delta review of only the
-   changes made to address the findings** -- see "Delta Review
-   Principle" below.
-6. **If the delta review is approved, the work may proceed** -- to merge,
-   or to the next phase of a multi-phase effort (the next ADR phase, the
-   next checklist item, the next milestone). If the delta review finds
-   the fix incomplete, incorrect, or newly regressed something, it
-   returns to step 4, not step 3 -- the review scope stays limited to
-   what changed since the prior finding until the reviewer determines
-   the scope has genuinely expanded (see below).
-
-#### Delta Review Principle
-
-A delta review verifies only the changes introduced to resolve
-previously reported findings. It does not repeat the entire review
-unless the scope has materially expanded -- new files touched that
-weren't part of the original review surface, a fix that required
-touching logic the original review didn't cover, or a finding whose fix
-turned out to require an architectural change rather than a local
-correction. Absent one of those, re-verifying the whole change on every
-iteration is waste: the parts the first full review already covered and
-found sound have not changed, and re-reviewing them again teaches
-nothing new while spending real reviewer effort.
-
-This principle exists because it is what makes rounds of review
-practical rather than theoretical. A workflow that required a full
-re-review after every single-line fix would create pressure to either
-skip re-verification (defeating Independent Review Required) or bundle
-unrelated fixes to amortize review cost (defeating focused, traceable
-commits). Scoping re-review to the actual delta keeps both intact:
-
-- **Maintains independent verification** -- nothing is treated as fixed
-  merely because the fix looks plausible; the reviewer still confirms it.
-- **Reduces reviewer effort** -- proportional to what actually changed,
-  not to the size of the whole artifact under review.
-- **Ensures every reported finding is explicitly revalidated** -- a delta
-  review's job is to confirm each finding from the prior round, by name,
-  is actually resolved, not to form a fresh general impression.
-- **Avoids unnecessary full re-reviews** -- the common failure mode this
-  principle prevents is reviewer fatigue turning into rubber-stamping on
-  the third or fourth round of an iterative fix; bounding review scope to
-  the actual delta keeps each round as rigorous as the first.
-- **Preserves traceability between findings and corrective commits** --
-  each delta review names which commit(s) it is verifying against which
-  finding(s), so the review history reads as a resolved audit trail, not
-  a series of unlinked approvals.
-
-This workflow and principle apply to any non-trivial engineering work in
-any Jumpstile project -- code, architecture documents, and operational
-documentation alike -- not only to this repository's TPM certification
-work where the pattern was first formalized in practice.
+evaluate a change before it's treated as settled. The ordered process that
+carries this out -- architecture approved before implementation, full
+review, findings fixed in focused commits, a delta review of only those
+changes, then progression -- and the Delta Review Principle that keeps a
+delta review scoped to what actually changed instead of repeating the
+whole review on every iteration, are defined in
+`INDEPENDENT_REVIEW_WORKFLOW_STANDARD.md` (tier 4, "Governance hierarchy"
+above), not restated here. That standard applies to any non-trivial
+engineering work in any Jumpstile project -- code, architecture documents,
+and operational documentation alike.
 
 ### Single-Maintainer Governance
 
