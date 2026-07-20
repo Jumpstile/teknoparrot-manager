@@ -281,6 +281,67 @@ Describe 'ADR-0155 Phase 3 final-outcome report builder' {
  }
 }
 
+Describe 'ADR-0155 Phase 3 sole final-outcome composition projection' {
+ BeforeEach {$root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $root|Out-Null}
+ It 'projects a CERTIFIED outcome into RunIdentity, FinalStatus, ExitCode, and a deterministic ConsoleMessage' {
+  $run=New-FullPipelineRunV1 $root $true $false
+  $projection=New-TPMFinalOutcomeProjectionV1 -FinalOutcome $run.FinalOutcome
+  $projection.RunIdentity|Should -Be (&$run.Authority GetRunIdentity)
+  $projection.FinalStatus|Should -Be 'CERTIFIED'
+  $projection.ExitCode|Should -Be 0
+  $projection.ConsoleMessage|Should -Be "Certification RunIdentity: $($projection.RunIdentity) -- FinalStatus: CERTIFIED -- ExitCode: 0"
+ }
+ It 'projects a NOT CERTIFIED outcome (publication failed) with ExitCode 1' {
+  $run=New-FullPipelineRunV1 $root $false $false
+  $projection=New-TPMFinalOutcomeProjectionV1 -FinalOutcome $run.FinalOutcome
+  $projection.FinalStatus|Should -Be 'NOT CERTIFIED'
+  $projection.ExitCode|Should -Be 1
+  $projection.ConsoleMessage|Should -Match 'FinalStatus: NOT CERTIFIED -- ExitCode: 1$'
+ }
+ It 'projects a NOT CERTIFIED outcome (score ineligible) with ExitCode 1' {
+  $run=New-FullPipelineRunV1 $root $true $true
+  $projection=New-TPMFinalOutcomeProjectionV1 -FinalOutcome $run.FinalOutcome
+  $projection.FinalStatus|Should -Be 'NOT CERTIFIED'
+  $projection.ExitCode|Should -Be 1
+ }
+ It 'derives its projection from the same validated New-TPMFinalOutcomeReportV1 output rather than re-deciding certification' {
+  $run=New-FullPipelineRunV1 $root $true $false
+  $report=New-TPMFinalOutcomeReportV1 -FinalOutcome $run.FinalOutcome
+  $parsedReport=$report.Json|ConvertFrom-Json
+  $projection=New-TPMFinalOutcomeProjectionV1 -FinalOutcome $run.FinalOutcome
+  $projection.RunIdentity|Should -Be $parsedReport.RunIdentity
+  $projection.FinalStatus|Should -Be $parsedReport.FinalStatus
+  $projection.ExitCode|Should -Be $parsedReport.ExitCode
+ }
+ It 'rejects the wrong compiled type and null input, propagated from New-TPMFinalOutcomeReportV1' {
+  Initialize-TPMCertificationTypesV1|Out-Null
+  $type='Jumpstile.TPM.Certification.V1.TPMPublicationOutcomeV1'-as[type]
+  $ctor=$type.GetConstructors([Reflection.BindingFlags]'NonPublic,Instance')[0]
+  $wrongType=$ctor.Invoke(@('deadbeefdeadbeefdeadbeefdeadbeef','{}'))
+  {New-TPMFinalOutcomeProjectionV1 -FinalOutcome $wrongType}|Should -Throw '*REPORT_INVALID*'
+  {New-TPMFinalOutcomeProjectionV1 -FinalOutcome $null}|Should -Throw
+ }
+ It 'rejects a same-type compiled final outcome whose FinalStatus and ExitCode disagree, without fabricating a decision' {
+  Initialize-TPMCertificationTypesV1|Out-Null
+  $type='Jumpstile.TPM.Certification.V1.TPMFinalOutcomeV1'-as[type]
+  $ctor=$type.GetConstructors([Reflection.BindingFlags]'NonPublic,Instance')[0]
+  $json='{"SchemaVersion":1,"RunIdentity":"deadbeefdeadbeefdeadbeefdeadbeef","EligibilityPayloadSha256":"'+('a'*64)+'","EligibleForCertification":true,"PublicationCommitted":true,"FinalStatus":"CERTIFIED","ExitCode":1,"FailureReasons":[]}'
+  $inconsistent=$ctor.Invoke(@('deadbeefdeadbeefdeadbeefdeadbeef',$json))
+  {New-TPMFinalOutcomeProjectionV1 -FinalOutcome $inconsistent}|Should -Throw '*REPORT_INVALID*FinalStatus and ExitCode disagree*'
+ }
+ It 'rejects a same-type compiled final outcome with an out-of-vocabulary FinalStatus or ExitCode' {
+  Initialize-TPMCertificationTypesV1|Out-Null
+  $type='Jumpstile.TPM.Certification.V1.TPMFinalOutcomeV1'-as[type]
+  $ctor=$type.GetConstructors([Reflection.BindingFlags]'NonPublic,Instance')[0]
+  $badStatusJson='{"SchemaVersion":1,"RunIdentity":"deadbeefdeadbeefdeadbeefdeadbeef","EligibilityPayloadSha256":"'+('a'*64)+'","EligibleForCertification":true,"PublicationCommitted":true,"FinalStatus":"MAYBE CERTIFIED","ExitCode":0,"FailureReasons":[]}'
+  $badStatus=$ctor.Invoke(@('deadbeefdeadbeefdeadbeefdeadbeef',$badStatusJson))
+  {New-TPMFinalOutcomeProjectionV1 -FinalOutcome $badStatus}|Should -Throw '*REPORT_INVALID*FinalStatus*'
+  $badExitJson='{"SchemaVersion":1,"RunIdentity":"deadbeefdeadbeefdeadbeefdeadbeef","EligibilityPayloadSha256":"'+('a'*64)+'","EligibleForCertification":false,"PublicationCommitted":false,"FinalStatus":"NOT CERTIFIED","ExitCode":2,"FailureReasons":[]}'
+  $badExit=$ctor.Invoke(@('deadbeefdeadbeefdeadbeefdeadbeef',$badExitJson))
+  {New-TPMFinalOutcomeProjectionV1 -FinalOutcome $badExit}|Should -Throw '*REPORT_INVALID*ExitCode*'
+ }
+}
+
 Describe 'ADR-0155 Phase 3 scorecard report builder' {
  BeforeEach {$root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $root|Out-Null}
  It 'produces the exact five metadata lines, eleven category headings in manifest order, and a self-consistent hash' {

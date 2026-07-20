@@ -68,7 +68,7 @@ have passed. Stable identifiers are retained across revisions.
   identities, byte lengths, SHA-256 hashes, and run correlation.
 - [x] ADR155-0306 -- Stage the complete seven-file bundle and expose authority
   only after the marker is durably validated; never overwrite a destination.
-- [ ] ADR155-0307 -- Compose the sole final outcome from issued eligibility and
+- [x] ADR155-0307 -- Compose the sole final outcome from issued eligibility and
   issued publication outcomes; console, reports, result, and exit code agree.
 - [ ] ADR155-0308 -- Publish authoritative NOT CERTIFIED bundles for ineligible
   runs without confusing committed publication with certification success.
@@ -1119,3 +1119,78 @@ covered by the dispatcher's `IssueFinalOutcome` (ADR155-0307),
 NOT-CERTIFIED bundle publication (ADR155-0308), and the atomic cutover
 that removes every legacy decision assignment and competing publisher
 (ADR155-0309).
+
+## Phase 3 sole final-outcome composition projection (ADR155-0307) -- 2026-07-20
+
+Completes ADR155-0307. The certification decision itself was already
+composed exactly once, by the dispatcher's own `IssueFinalOutcome`
+operation in `scripts/TPMCertification.Production.psm1`
+(`$certified=[bool]$state.EligibleForCertification-and[bool]$state.PublicationCommitted`,
+tested since the Phase 3 production-dispatcher checkpoint). What
+remained per Section 9's closing sentence -- "Console, process return,
+and every in-memory status project this one final object" -- was a
+single, pure, reusable projection of that already-decided outcome into
+what a console message, process exit code, and in-memory result would
+need, so that harness wiring (ADR155-0309, not begun here) has exactly
+one function to call rather than an occasion to re-derive the
+CERTIFIED/NOT CERTIFIED decision a second time from raw booleans.
+
+- Adds `New-TPMFinalOutcomeProjectionV1` to
+  `scripts/TPMCertification.Reports.psm1`. It calls the already-approved
+  `New-TPMFinalOutcomeReportV1` internally (unmodified) and derives its
+  output from that report's own validated JSON, rather than re-parsing
+  `FinalOutcome.CanonicalJson` a second time independently -- there is
+  exactly one place in this codebase (`New-TPMFinalOutcomeReportV1`)
+  that validates and shapes the final-outcome fields, and this function
+  reuses it rather than duplicating the check. Wrong-compiled-type and
+  null-input rejection are inherited from that call, confirmed by test.
+- Returns `{RunIdentity, FinalStatus, ExitCode, ConsoleMessage}`.
+  `ConsoleMessage` is a fixed-format string built only from
+  `RunIdentity` (re-validated via the existing
+  `Assert-TPMMarkdownRunIdentityV1`), the closed two-value `FinalStatus`
+  vocabulary (`CERTIFIED`/`NOT CERTIFIED`, explicitly checked), and
+  `ExitCode` (checked to be exactly 0 or 1) -- no free-text field (e.g.
+  `FailureReasons[].Message`) is interpolated into it, so there is no
+  Markdown-injection-class surface to defend against here the way the
+  Scorecard/Validation builders needed to; the full `FailureReasons`
+  detail remains available only in the already-built
+  `TPM-Certification-Final-Outcome.json`/eligibility artifacts for
+  anyone consuming the detail, deliberately keeping this projection
+  minimal.
+- Adds one defense-in-depth consistency check not present in
+  `New-TPMFinalOutcomeReportV1`: `FinalStatus` and `ExitCode` must agree
+  (`CERTIFIED` iff `ExitCode=0`) or the projection is rejected with
+  `REPORT_INVALID: FinalStatus and ExitCode disagree`. This is a
+  same-object internal-consistency check, not a re-derivation of the
+  certification decision from `EligibleForCertification`/
+  `PublicationCommitted` -- those booleans are never read by this
+  function.
+- Manually verified end-to-end against three real pipeline outcomes
+  (CERTIFIED; NOT CERTIFIED via publication failure; NOT CERTIFIED via
+  score ineligibility) before writing formal tests, and against a
+  reflectively constructed same-compiled-type object with
+  `FinalStatus="CERTIFIED"`/`ExitCode=1` to confirm the consistency
+  check rejects it.
+- ADR155-Q001/Q002: `Tests/TPMCertification.Reports.Tests.ps1` gained 7
+  tests (55 total): CERTIFIED projection with exact `ConsoleMessage`
+  text; NOT CERTIFIED (publication-failed) and NOT CERTIFIED
+  (score-ineligible) projections; confirmation the projection's three
+  scalar fields match `New-TPMFinalOutcomeReportV1`'s own output rather
+  than being independently derived; wrong-type/null rejection;
+  FinalStatus/ExitCode disagreement rejection; and out-of-vocabulary
+  FinalStatus/ExitCode rejection. 55/55 on pwsh 7.6.3 and 55/55 on
+  Windows PowerShell 5.1.26100.8875.
+- ADR155-Q003/Q004: `Invoke-Pester -Path .\Tests` passed 943/943 on pwsh
+  7.6.3 and 937/943 on Windows PowerShell 5.1, with exactly the same
+  five unchanged issue #148 Repair-GamePaths failures (1 unrelated
+  skipped test, unchanged reason, from the Publication suite).
+- ADR155-Q005/Q006/Q007: both changed files had zero non-ASCII bytes,
+  zero parser errors, zero PSScriptAnalyzer findings, and zero
+  InjectionHunter findings.
+
+ADR155-0307 is now checked. This is a pure, side-effect-free function --
+no `Write-Host`, no file I/O, no process-exit-code call, and no harness
+wiring. `TeknoParrot-Manager.ps1` is untouched by this commit. Remaining
+Phase 3 work: NOT-CERTIFIED bundle publication (ADR155-0308) and the
+atomic cutover that removes every legacy decision assignment and
+competing publisher (ADR155-0309).

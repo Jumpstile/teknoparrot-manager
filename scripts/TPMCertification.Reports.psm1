@@ -78,6 +78,25 @@ function New-TPMFinalOutcomeReportV1 {
     }
 }
 
+function New-TPMFinalOutcomeProjectionV1 {
+    param([Parameter(Mandatory=$true)]$FinalOutcome)
+    $report=New-TPMFinalOutcomeReportV1 -FinalOutcome $FinalOutcome
+    $parsed=ConvertFrom-Json -InputObject $report.Json
+    Assert-TPMMarkdownRunIdentityV1 ([string]$parsed.RunIdentity)
+    if(@('CERTIFIED','NOT CERTIFIED')-cnotcontains[string]$parsed.FinalStatus){throw 'REPORT_INVALID: FinalStatus must be CERTIFIED or NOT CERTIFIED'}
+    if([int]$parsed.ExitCode-ne0-and[int]$parsed.ExitCode-ne1){throw 'REPORT_INVALID: ExitCode must be 0 or 1'}
+    if(([string]$parsed.FinalStatus-ceq'CERTIFIED')-ne([int]$parsed.ExitCode-eq0)){throw 'REPORT_INVALID: FinalStatus and ExitCode disagree'}
+    $runIdentity=[string]$parsed.RunIdentity
+    $finalStatus=[string]$parsed.FinalStatus
+    $exitCode=[int]$parsed.ExitCode
+    return [pscustomobject]@{
+        RunIdentity=$runIdentity
+        FinalStatus=$finalStatus
+        ExitCode=$exitCode
+        ConsoleMessage="Certification RunIdentity: $runIdentity -- FinalStatus: $finalStatus -- ExitCode: $exitCode"
+    }
+}
+
 $script:TpmMarkdownEligibleV1='ELIGIBLE'
 $script:TpmMarkdownNotEligibleV1='NOT ELIGIBLE'
 $script:TpmMarkdownStatusMapV1=@{Pass='PASS';Fail='FAIL';NotApplicable='N/A'}
@@ -310,4 +329,4 @@ function New-TPMCommitMarkerReportV1 {
     }
 }
 
-Export-ModuleMember -Function New-TPMEligibilityReportV1,Get-TPMFinalEvidenceStatusV1,New-TPMPublicationReportV1,New-TPMFinalOutcomeReportV1,New-TPMScorecardReportV1,New-TPMValidationReportV1,New-TPMManifestReportV1,New-TPMCommitMarkerReportV1,Assert-TPMMarkdownRunIdentityV1,Assert-TPMMarkdownSha256V1
+Export-ModuleMember -Function New-TPMEligibilityReportV1,Get-TPMFinalEvidenceStatusV1,New-TPMPublicationReportV1,New-TPMFinalOutcomeReportV1,New-TPMFinalOutcomeProjectionV1,New-TPMScorecardReportV1,New-TPMValidationReportV1,New-TPMManifestReportV1,New-TPMCommitMarkerReportV1,Assert-TPMMarkdownRunIdentityV1,Assert-TPMMarkdownSha256V1
