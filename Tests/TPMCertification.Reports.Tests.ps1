@@ -39,6 +39,13 @@ BeforeAll {
   $sealed=&$authority Seal
   return &$authority IssueEligibility $sealed
  }
+ function New-IssuedScorePreviewV1($Root,[bool]$ForcePesterFailure){
+  $authority=New-TPMProductionWorkflowAuthorityV1 -Mode Smoke -EvidenceRoot $Root -PngValidator $validator
+  $facts=New-TestFacts $Root
+  if($ForcePesterFailure){$facts[1].Data.Failed=1;$facts[1].Data.Passed=1}
+  foreach($fact in $facts){&$authority RecordFact $fact}
+  return &$authority DeriveScorePreview
+ }
 }
 
 Describe 'ADR-0155 Phase 3 eligibility report builder' {
@@ -91,5 +98,46 @@ Describe 'ADR-0155 Phase 3 eligibility report builder' {
  It 'rejects null and plain-object input' {
   {New-TPMEligibilityReportV1 -Eligibility $null}|Should -Throw
   {New-TPMEligibilityReportV1 -Eligibility ([pscustomobject]@{CanonicalJson='{}';RunIdentity='x'})}|Should -Throw '*REPORT_INVALID*'
+ }
+}
+
+Describe 'ADR-0155 Phase 3 final-evidence status builder' {
+ BeforeEach {$root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $root|Out-Null}
+ It 'renders ELIGIBLE when every applicable score item passes' {
+  $preview=New-IssuedScorePreviewV1 $root $false
+  $status=Get-TPMFinalEvidenceStatusV1 -ScorePreview $preview
+  $status.Status|Should -Be 'ELIGIBLE'
+  $status.ScoreEligible|Should -BeTrue
+  $status.PercentageBasisPoints|Should -Be 10000
+ }
+ It 'renders NOT ELIGIBLE PENDING EVIDENCE AND PUBLICATION, never CERTIFIED, when a score item fails' {
+  $preview=New-IssuedScorePreviewV1 $root $true
+  $status=Get-TPMFinalEvidenceStatusV1 -ScorePreview $preview
+  $status.Status|Should -Be 'NOT ELIGIBLE PENDING EVIDENCE AND PUBLICATION'
+  $status.ScoreEligible|Should -BeFalse
+  $status.Status|Should -Not -Match 'CERTIFIED'
+ }
+ It 'never renders CERTIFIED even for a fully passing run, because evidence and publication are still pending' {
+  $preview=New-IssuedScorePreviewV1 $root $false
+  $status=Get-TPMFinalEvidenceStatusV1 -ScorePreview $preview
+  $status.Status|Should -Not -Match 'CERTIFIED'
+ }
+ It 'rejects a synthetic score preview that was never issued by a dispatcher' {
+  Initialize-TPMCertificationTypesV1|Out-Null
+  $type='Jumpstile.TPM.Certification.V1.TPMScorePreviewV1'-as[type]
+  $ctor=$type.GetConstructors([Reflection.BindingFlags]'NonPublic,Instance')[0]
+  $fake=$ctor.Invoke(@('deadbeefdeadbeefdeadbeefdeadbeef','not valid json'))
+  {Get-TPMFinalEvidenceStatusV1 -ScorePreview $fake}|Should -Throw '*REPORT_INVALID*'
+ }
+ It 'rejects an object of the wrong compiled type' {
+  Initialize-TPMCertificationTypesV1|Out-Null
+  $type='Jumpstile.TPM.Certification.V1.TPMSealedRunReaderV1'-as[type]
+  $ctor=$type.GetConstructors([Reflection.BindingFlags]'NonPublic,Instance')[0]
+  $wrongType=$ctor.Invoke(@('deadbeefdeadbeefdeadbeefdeadbeef','{}'))
+  {Get-TPMFinalEvidenceStatusV1 -ScorePreview $wrongType}|Should -Throw '*REPORT_INVALID*'
+ }
+ It 'rejects null and plain-object input' {
+  {Get-TPMFinalEvidenceStatusV1 -ScorePreview $null}|Should -Throw
+  {Get-TPMFinalEvidenceStatusV1 -ScorePreview ([pscustomobject]@{CanonicalJson='{}';RunIdentity='x'})}|Should -Throw '*REPORT_INVALID*'
  }
 }

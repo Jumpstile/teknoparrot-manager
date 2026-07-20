@@ -517,3 +517,44 @@ the Section 12 producer/consumer split between "deterministic builder" and
 This builder produces bytes only; nothing is written to disk, staged, or
 published, and no harness wiring or final-authority ownership was touched.
 ADR155-0303 through 0309 remain unbuilt.
+
+## Phase 3 shared score aggregate and final-evidence status -- 2026-07-20
+
+Adds `Get-TPMScoreAggregateV1` to `scripts/TPMCertification.Authority.psm1`:
+the score-arithmetic portion of `Get-TPMEligibilityPayloadV1` (ApplicableCount,
+PassedCount, PercentageBasisPoints with `MidpointRounding.AwayFromZero`,
+ThresholdBasisPoints, ScoreEligible from Section 7.1), extracted so it can be
+reused rather than duplicated. `Get-TPMEligibilityPayloadV1` (Production.psm1)
+now calls it instead of recomputing the same logic inline; behavior is
+unchanged, confirmed by rerunning the existing Production suite unmodified
+(still 14/14 on both engines).
+
+Adds `Get-TPMFinalEvidenceStatusV1` to `scripts/TPMCertification.Reports.psm1`:
+given an issued `TPMScorePreviewV1`, calls the same shared
+`Get-TPMScoreAggregateV1` to derive its status text -- exactly `'ELIGIBLE'`
+or `'NOT ELIGIBLE PENDING EVIDENCE AND PUBLICATION'`, never `'CERTIFIED'` --
+per Section 6's rule for what the `final-certification-result` evidence
+capture may render at `IssueFinalEvidence` time, before Sealing or
+Eligibility exist. Advances the pure-logic portion of ADR155-0303; the item
+stays unchecked because "render" implies the harness actually using this
+function to produce the on-screen/captured text, which is deliberately not
+done here -- wiring a report/status builder into the live certification
+harness is harness-integration work, out of scope until explicitly
+authorized, per ADR155-0309's atomic-cutover framing.
+
+- ADR155-Q001/Q002: `Tests/TPMCertification.Reports.Tests.ps1` gained 6
+  more tests (ELIGIBLE/NOT-ELIGIBLE rendering, an explicit assertion the
+  status never contains "CERTIFIED" even for a fully passing run, and
+  synthetic/wrong-type/null rejection); `Tests/TPMCertification.Authority.Tests.ps1`
+  gained 3 tests for `Get-TPMScoreAggregateV1` directly (aggregate counts
+  and rounding, the ScoreEligible conjunction, and the zero-applicable
+  throw). Combined with all prior focused suites: 65/65 on pwsh 7.6.3 and
+  65/65 on Windows PowerShell 5.1.26100.8875.
+- ADR155-Q003/Q004: `Invoke-Pester -Path .\Tests` passed 877/877 on pwsh
+  7.6.3 and 872/877 on Windows PowerShell 5.1, with exactly the same five
+  unchanged issue #148 Repair-GamePaths failures.
+- ADR155-Q005/Q006/Q007: all five changed/touched files had zero non-ASCII
+  bytes, zero parser errors, zero PSScriptAnalyzer findings, and zero
+  InjectionHunter findings.
+
+No harness wiring, file I/O, staging, or publication in this commit.

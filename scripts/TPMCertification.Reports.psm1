@@ -18,4 +18,23 @@ function New-TPMEligibilityReportV1 {
     }
 }
 
-Export-ModuleMember -Function New-TPMEligibilityReportV1
+$script:TpmFinalEvidenceEligibleStatusV1='ELIGIBLE'
+$script:TpmFinalEvidenceNotEligibleStatusV1='NOT ELIGIBLE PENDING EVIDENCE AND PUBLICATION'
+
+function Get-TPMFinalEvidenceStatusV1 {
+    param([Parameter(Mandatory=$true)]$ScorePreview)
+    if($null-eq$ScorePreview-or$ScorePreview.GetType().FullName-cne'Jumpstile.TPM.Certification.V1.TPMScorePreviewV1'){throw 'REPORT_INVALID: ScorePreview must be an issued TPMScorePreviewV1'}
+    try{$parsed=ConvertFrom-Json -InputObject $ScorePreview.CanonicalJson -ErrorAction Stop}catch{throw 'REPORT_INVALID: ScorePreview.CanonicalJson did not parse as JSON'}
+    if($null-eq$parsed-or$null-eq$parsed.ScoreItems){throw 'REPORT_INVALID: ScorePreview is missing ScoreItems'}
+    $aggregate=Get-TPMScoreAggregateV1 -ScoreItems $parsed.ScoreItems
+    $status=if($aggregate.ScoreEligible){$script:TpmFinalEvidenceEligibleStatusV1}else{$script:TpmFinalEvidenceNotEligibleStatusV1}
+    return [pscustomobject]@{
+        Status=$status
+        ScoreEligible=$aggregate.ScoreEligible
+        ApplicableCount=$aggregate.ApplicableCount
+        PassedCount=$aggregate.PassedCount
+        PercentageBasisPoints=$aggregate.PercentageBasisPoints
+    }
+}
+
+Export-ModuleMember -Function New-TPMEligibilityReportV1,Get-TPMFinalEvidenceStatusV1

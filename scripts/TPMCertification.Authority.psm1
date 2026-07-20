@@ -246,4 +246,17 @@ function Assert-TPMEvidenceRecordV1 {
     }
 }
 
-Export-ModuleMember -Function Initialize-TPMCertificationTypesV1,ConvertTo-TPMJcsV1,ConvertTo-TPMFailureMessageBase64UrlV1,ConvertFrom-TPMFailureMessageBase64UrlV1,New-TPMWorkflowAuthorityV1,Get-TPMSha256HexV1,Resolve-TPMContainedPathV1,Get-TPMFactIdentifiersV1,Get-TPMEvidenceManifestV1,Get-TPMEvidenceFailureCodesV1,Assert-TPMFactRecordV1,Get-TPMFactDecisionV1,Assert-TPMEvidenceRecordV1,Copy-TPMClosedValueV1,Assert-TPMExactFieldsV1,Assert-TPMStringV1
+function Get-TPMScoreAggregateV1 {
+    param([Parameter(Mandatory=$true)]$ScoreItems)
+    $items=New-Object Collections.Generic.List[object];foreach($item in $ScoreItems){[void]$items.Add($item)}
+    $applicable=New-Object Collections.Generic.List[object];foreach($item in $items){if($item.Status-cne'NotApplicable'){[void]$applicable.Add($item)}}
+    $applicableCount=$applicable.Count
+    if($applicableCount-le0){throw 'ELIGIBILITY_INVALID: ApplicableCount must be greater than zero'}
+    $passedCount=0;foreach($item in $applicable){if($item.Status-ceq'Pass'){$passedCount++}}
+    $percentageBasisPoints=[int][Math]::Round(([decimal]$passedCount*10000/$applicableCount),0,[MidpointRounding]::AwayFromZero)
+    $thresholdBasisPoints=10000
+    $scoreEligible=($passedCount-eq$applicableCount)-and($percentageBasisPoints-eq$thresholdBasisPoints)
+    return [ordered]@{ApplicableCount=$applicableCount;PassedCount=$passedCount;PercentageBasisPoints=$percentageBasisPoints;ThresholdBasisPoints=$thresholdBasisPoints;ScoreEligible=$scoreEligible}
+}
+
+Export-ModuleMember -Function Initialize-TPMCertificationTypesV1,ConvertTo-TPMJcsV1,ConvertTo-TPMFailureMessageBase64UrlV1,ConvertFrom-TPMFailureMessageBase64UrlV1,New-TPMWorkflowAuthorityV1,Get-TPMSha256HexV1,Resolve-TPMContainedPathV1,Get-TPMFactIdentifiersV1,Get-TPMEvidenceManifestV1,Get-TPMEvidenceFailureCodesV1,Assert-TPMFactRecordV1,Get-TPMFactDecisionV1,Assert-TPMEvidenceRecordV1,Copy-TPMClosedValueV1,Assert-TPMExactFieldsV1,Assert-TPMStringV1,Get-TPMScoreAggregateV1

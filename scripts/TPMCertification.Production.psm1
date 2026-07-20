@@ -14,13 +14,12 @@ function Get-TPMEligibilityPayloadV1 {
     $factsList=New-Object Collections.Generic.List[object];foreach($fact in $Facts){[void]$factsList.Add($fact)}
     $scoreItems=New-Object Collections.Generic.List[object]
     foreach($fact in $factsList){$scoreItems.Add((Get-TPMFactDecisionV1 $fact $Mode ''))}
-    $applicable=New-Object Collections.Generic.List[object];foreach($item in $scoreItems){if($item.Status-cne'NotApplicable'){[void]$applicable.Add($item)}}
-    $applicableCount=$applicable.Count
-    if($applicableCount-le0){throw 'ELIGIBILITY_INVALID: ApplicableCount must be greater than zero'}
-    $passedCount=0;foreach($item in $applicable){if($item.Status-ceq'Pass'){$passedCount++}}
-    $percentageBasisPoints=[int][Math]::Round(([decimal]$passedCount*10000/$applicableCount),0,[MidpointRounding]::AwayFromZero)
-    $thresholdBasisPoints=10000
-    $scoreEligible=($passedCount-eq$applicableCount)-and($percentageBasisPoints-eq$thresholdBasisPoints)
+    $aggregate=Get-TPMScoreAggregateV1 -ScoreItems $scoreItems
+    $applicableCount=$aggregate.ApplicableCount
+    $passedCount=$aggregate.PassedCount
+    $percentageBasisPoints=$aggregate.PercentageBasisPoints
+    $thresholdBasisPoints=$aggregate.ThresholdBasisPoints
+    $scoreEligible=$aggregate.ScoreEligible
 
     $evidenceManifest=Get-TPMEvidenceManifestV1
     $evidenceList=New-Object Collections.Generic.List[object];foreach($record in $Evidence){[void]$evidenceList.Add($record)}

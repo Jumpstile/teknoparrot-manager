@@ -75,6 +75,27 @@ Describe 'ADR-0155 Phase 3 prerequisite: shared fact/evidence primitives extract
   $original.Nested.Value=2
   $copy.Nested.Value|Should -Be 1
  }
+ It 'aggregates score items into ApplicableCount, PassedCount, and rounded PercentageBasisPoints' {
+  $items=@(
+   [pscustomobject]@{Identifier='a';Status='Pass'}
+   [pscustomobject]@{Identifier='b';Status='Fail'}
+   [pscustomobject]@{Identifier='c';Status='NotApplicable'}
+  )
+  $aggregate=Get-TPMScoreAggregateV1 -ScoreItems $items
+  $aggregate.ApplicableCount|Should -Be 2
+  $aggregate.PassedCount|Should -Be 1
+  $aggregate.PercentageBasisPoints|Should -Be 5000
+  $aggregate.ThresholdBasisPoints|Should -Be 10000
+  $aggregate.ScoreEligible|Should -BeFalse
+ }
+ It 'reports ScoreEligible true only when every applicable item passes and the percentage is exactly 10000' {
+  $items=@([pscustomobject]@{Identifier='a';Status='Pass'},[pscustomobject]@{Identifier='b';Status='Pass'})
+  (Get-TPMScoreAggregateV1 -ScoreItems $items).ScoreEligible|Should -BeTrue
+ }
+ It 'throws when every item is NotApplicable' {
+  $items=@([pscustomobject]@{Identifier='a';Status='NotApplicable'})
+  {Get-TPMScoreAggregateV1 -ScoreItems $items}|Should -Throw '*ApplicableCount*'
+ }
 }
 Describe 'ADR-0155 Phase 1 hashing and containment' {
     It 'matches the SHA-256 known vector' {
