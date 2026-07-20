@@ -34,19 +34,19 @@ have passed. Stable identifiers are retained across revisions.
 
 ## Phase 2 -- Shadow fact and evidence authority
 
-- [ ] ADR155-0201 -- Add one dispatcher closure over one private shared state
+- [x] ADR155-0201 -- Add one dispatcher closure over one private shared state
   object; expose no token-bearing state or mutable authoritative reference.
-- [ ] ADR155-0202 -- Implement the closed phase machine and fail closed on every
+- [x] ADR155-0202 -- Implement the closed phase machine and fail closed on every
   illegal transition, duplicate, missing fact, or post-seal write.
-- [ ] ADR155-0203 -- Record the complete raw schemas for all eleven certification
+- [x] ADR155-0203 -- Record the complete raw schemas for all eleven certification
   categories; conclusions remain derived and are never accepted as facts.
-- [ ] ADR155-0204 -- Record the exact nine-item evidence manifest with immediate
+- [x] ADR155-0204 -- Record the exact nine-item evidence manifest with immediate
   PNG validation, path ownership, file hashes, and terminal final evidence.
-- [ ] ADR155-0205 -- Seal to canonical private bytes, destroy mutable builders,
+- [x] ADR155-0205 -- Seal to canonical private bytes, destroy mutable builders,
   and return only an immutable reader/projection.
-- [ ] ADR155-0206 -- Run legacy authority and new shadow authority without giving
+- [x] ADR155-0206 -- Run legacy authority and new shadow authority without giving
   the shadow publication, console, status, or exit-code authority.
-- [ ] ADR155-0207 -- Persist field-level divergence diagnostics and exclude every
+- [x] ADR155-0207 -- Persist field-level divergence diagnostics and exclude every
   divergent run from Phase 3 migration evidence.
 
 ## Phase 3 -- Authoritative cutover and publication

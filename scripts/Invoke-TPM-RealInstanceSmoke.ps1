@@ -35,6 +35,7 @@ $ErrorActionPreference = "Stop"
 $runTimer = [System.Diagnostics.Stopwatch]::StartNew()
 
 . (Join-Path $PSScriptRoot 'Resolve-Pcsx2Directory.ps1')
+Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Shadow.psm1') -Force
 
 $RepoPath = (Resolve-Path -LiteralPath $RepoPath).Path
 if (!(Test-Path -LiteralPath $TeknoParrotRoot -PathType Container)) {
@@ -434,7 +435,26 @@ function Invoke-TPMUnattendedRootBinding {
         }
     }
 
+    $snapshotHash = $null
+    if ($null -ne $configSnapshot) {
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $snapshotBytes = (New-Object System.Text.UTF8Encoding $false).GetBytes([string]$configSnapshot)
+            $snapshotHash = -join ($sha256.ComputeHash($snapshotBytes) | ForEach-Object { $_.ToString('x2') })
+        } finally {
+            $sha256.Dispose()
+        }
+    }
+    $restorationCheck = @($checkResults.ToArray() | Where-Object { $_.Name -ceq 'Unattended TPM config restoration' }) | Select-Object -Last 1
+
     return [pscustomobject]@{
+        PriorConfigExisted = ($null -ne $configSnapshot)
+        TemporaryConfigCreated = ($null -eq $configSnapshot -and [bool]$overrideWritten)
+        RestoreAttempted = $true
+        RestoreSucceeded = ($null -eq $restoreError)
+        VerificationSucceeded = [bool]$restoreVerified
+        SnapshotSha256 = $snapshotHash
+        RestorationFailureReason = $(if ($restorationCheck -and -not $restorationCheck.Passed) { [string]$restorationCheck.Details } else { $null })
         # .ToArray(), not @($checkResults) -- confirmed by direct repro that
         # wrapping a System.Collections.Generic.List[object] in @(...) inside
         # a function that also has parameters throws "Argument types do not
@@ -2659,6 +2679,7 @@ try {
             pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -Unattended *> $tpmLog
         }
         $results.EffectiveTeknoParrotRoot = $binding.EffectiveTeknoParrotRoot
+        $results.UnattendedBinding = $binding
         foreach ($check in $binding.Checks) {
             Add-CheckResult $check.Name $check.Passed $check.Details
         }
@@ -2849,6 +2870,30 @@ finally {
     Write-Host (" Report  : {0}" -f $certificationMd)
     Write-Host "============================================"
     [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'final-certification-result' -EvidenceType 'ScreenCapture' -CaptureAction { param($p) Save-TPMScreenCapture -Path $p })
+    # ADR-0155 Phase 2: execute the new authority as a shadow observer only.
+    # Its result is written outside the legacy publication directory and is
+    # never consulted for score, report, console, status, or exit-code output.
+    $shadowDiagnosticDir = Join-Path $HarnessRoot 'ShadowMigration'
+    $shadowDiagnosticPath = Join-Path $shadowDiagnosticDir ("{0}.json" -f $stamp)
+    try {
+        $shadowFacts = New-TPMShadowFactRecordsFromLegacyV1 -Results $results -RepositoryPath $RepoPath -ReportDirectory $reportDir -BackupDirectory $backupDir -HealthResult $healthResult -HealthLoadError $healthLoadError -UnattendedBinding $binding
+        $shadowPngValidator = {
+            param($Path)
+            $valid = Test-TPMScreenshotFileValid -Path $Path
+            if (-not $valid.Valid) { return [pscustomobject]@{Valid=$false;Reason=$valid.Reason;Width=0;Height=0} }
+            $image = [System.Drawing.Image]::FromFile($Path)
+            try { return [pscustomobject]@{Valid=$true;Reason=$valid.Reason;Width=$image.Width;Height=$image.Height} }
+            finally { $image.Dispose() }
+        }
+        [void](Invoke-TPMShadowCertificationV1 -Mode $(if($results.SmokeMode){'Smoke'}else{'Unattended'}) -EvidenceRoot $screenshotDir -FactRecords $shadowFacts -LegacyEvidence $results.Screenshots -LegacyScoreItems $certification.Items -DiagnosticPath $shadowDiagnosticPath -PngValidator $shadowPngValidator)
+    } catch {
+        # Shadow authority has no production authority in Phase 2. A failure
+        # excludes this run from migration evidence but cannot alter legacy
+        # certification output. Persist the cause separately and continue.
+        if (-not (Test-Path -LiteralPath $shadowDiagnosticDir -PathType Container)) { [void](New-Item -ItemType Directory -Path $shadowDiagnosticDir) }
+        $shadowFailure = [ordered]@{SchemaVersion=1;Mode=$(if($results.SmokeMode){'Smoke'}else{'Unattended'});RunIdentity=$null;MigrationEligible=$false;Phase='Failed';SealedRunSha256=$null;Divergences=@([ordered]@{Path='ShadowAdapter';Legacy='completed';Shadow='failed';ComparisonRule='both observation adapters complete'});ErrorCode='SHADOW_ADAPTER_FAILED';ErrorMessage=$_.Exception.Message}
+        [System.IO.File]::WriteAllText($shadowDiagnosticPath,($shadowFailure | ConvertTo-Json -Depth 8 -Compress),(New-Object System.Text.UTF8Encoding $false))
+    }
 
     # System Invariant Inventory: publication as part of commit. Report
     # content depends on the transaction's decision (it renders Finalization
