@@ -20,6 +20,39 @@ pull requests, or release-specific status.
 
 ---
 
+## Pre-Certification Checklist
+
+Work through this list before starting a certification pass. Do not begin if
+any item fails -- report the failure instead (see "Reporting format").
+
+1. **Commit SHA matches the frozen release candidate.** Confirm you were
+   given an exact SHA, not a branch name or "latest" (see "Certification
+   gate"). After checkout, `git rev-parse HEAD` must match it exactly.
+2. **GitHub Quality Gates passed.** Confirm CI
+   (`.github/workflows/ci.yml`) is green on that exact commit -- e.g.
+   `gh run list --commit <SHA>`. A missing or failing run blocks
+   certification.
+3. **Working tree is clean.** `git status --short` in the local repository
+   (`W:\Emulators\TeknoParrot\Scripts`) returns nothing before checkout, and
+   nothing untracked or modified is carried over from a prior run.
+4. **Production TeknoParrot installation path exists.**
+   `C:\Users\EliSi\LaunchBox\Emulators\TeknoParrot` contains both
+   `TeknoParrotUi.exe` and `GameProfiles` (see "Locations"). Do not
+   substitute another path.
+5. **Required tooling versions.** Real Windows PowerShell 5.1 is available
+   (`powershell.exe`, not just `pwsh`), plus PowerShell 7, Git, Node.js, and
+   `gh` (see "Tooling"). Record actual versions (`$PSVersionTable.PSVersion`,
+   `git --version`, `node --version`, `gh --version`) as part of the run's
+   evidence.
+6. **Test harness is ready.** `W:\Emulators\TeknoParrot\TPM-TestHarness` and
+   its `Reports` and `Backups` subfolders exist and are writable; no stale
+   lock files or leftover artifacts from a prior aborted run.
+7. **Record the certification start time.** Note it in the run's evidence --
+   reports are timestamped individually, but the start time establishes what
+   state of the machine and installation the run actually certified against.
+
+---
+
 ## Role
 
 - Verify builds on the real arcade machine, execute the certification suite,
