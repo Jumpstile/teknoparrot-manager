@@ -20,7 +20,8 @@ have passed. Stable identifiers are retained across revisions.
   ADR155-0103, ADR155-0105, and ADR155-T008. Commit `f99e394` records
   ADR155-0201 through ADR155-0207. Review-correction commit `942e70f` records
   the `New-TPMWorkflowAuthorityV1`/`New-TPMShadowWorkflowAuthorityV1` naming
-  and module-coexistence fix to ADR155-0201.
+  and module-coexistence fix to ADR155-0201. Commit `1dd994a` records the
+  Phase 3 prerequisite shared-primitive extraction described below.
 
 ## Phase 1 -- Isolated authority primitives
 
@@ -306,3 +307,55 @@ under the new name.
 Phase 2 shadow authority does not alter legacy certification decisions,
 console output, reports, or exit codes. Phase 3 and Phase 4 checklist items
 remain intentionally incomplete; Phase 3 has not begun.
+
+## Phase 3 prerequisite: shared primitive extraction -- 2026-07-20
+
+Commit `1dd994a` advances this prerequisite (not a numbered ADR155 item
+itself, since Section 2.2 requires eligibility/publication/final-outcome to
+be issued by the same continuous dispatcher that recorded facts and
+evidence, which means the Phase 3 production dispatcher needs the same
+fact/evidence schema and decision logic Shadow.psm1 already implements).
+
+- Moved `Assert-TPMFactRecordV1`, `Get-TPMFactDecisionV1`,
+  `Assert-TPMEvidenceRecordV1`, their schema/copy helpers, and the three
+  manifest constant arrays from `scripts/TPMCertification.Shadow.psm1` to
+  `scripts/TPMCertification.Authority.psm1` verbatim; no logic changed.
+  Added `Get-TPMFactIdentifiersV1`, `Get-TPMEvidenceManifestV1`, and
+  `Get-TPMEvidenceFailureCodesV1` accessors for the moved constant data.
+- Exported only the primitives Shadow.psm1 calls externally
+  (`Assert-TPMFactRecordV1`, `Get-TPMFactDecisionV1`,
+  `Assert-TPMEvidenceRecordV1`, `Copy-TPMClosedValueV1`, and the three
+  accessors); the field/type-level helpers (`Assert-TPMExactFieldsV1`,
+  `Assert-TPMBooleanV1`, etc.) stay private to Authority.psm1.
+- `scripts/TPMCertification.Shadow.psm1` now imports these from Authority.psm1
+  instead of defining them; `New-TPMShadowWorkflowAuthorityV1`'s phase
+  machine, schemas, and decisions are otherwise unchanged.
+- Caught and fixed a double-array-wrap defect introduced by the move itself:
+  the new accessor functions return their array as one object via
+  `return ,@(...)`, so callers must bind the result directly rather than
+  wrapping it in `@()` again; an extra `@()` around an already-single-object
+  array return produces a one-element array containing that array. This
+  surfaced immediately as `FACT_ORDER_INVALID` across the Shadow suite and
+  was fixed before committing.
+- Added direct-export regression coverage to
+  `Tests/TPMCertification.Authority.Tests.ps1` (positive/negative fact and
+  evidence vectors, N/A decision, defensive-copy isolation) and extended the
+  module-coexistence test in `Tests/TPMCertification.Shadow.Tests.ps1` to
+  assert `Assert-TPMFactRecordV1` and `Get-TPMFactIdentifiersV1` resolve to
+  `TPMCertification.Authority` regardless of import order, alongside the
+  existing workflow-authority-factory coexistence coverage.
+- ADR155-Q001/Q002: `Tests/TPMCertification.Authority.Tests.ps1` and
+  `Tests/TPMCertification.Shadow.Tests.ps1` together passed 36/36 on both
+  pwsh 7.6.3 and Windows PowerShell 5.1.26100.8875 (14+17 prior plus 5 new
+  Authority tests).
+- ADR155-Q003/Q004: `Invoke-Pester -Path .\Tests` passed 848/848 on pwsh
+  7.6.3 and 843/848 on Windows PowerShell 5.1, with exactly the same five
+  unchanged issue #148 Repair-GamePaths failures.
+- ADR155-Q005/Q006/Q007: all four changed files had zero non-ASCII bytes,
+  zero parser errors, zero PSScriptAnalyzer findings, and zero InjectionHunter
+  findings.
+
+Shadow's own behavior is unchanged (17/17 Shadow tests pass, byte-identical
+assertions, before and after the move). This commit is deliberately isolated
+from the Phase 3 production-dispatcher implementation itself, which has not
+yet been written.
