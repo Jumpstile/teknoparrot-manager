@@ -21,13 +21,20 @@ implementation of that portfolio-wide principle, not a competing policy.
    (see Section 1 below); full suite once before believed complete.
 3. **Manual Testing** -- a human exercises the actual behavior, not just
    the test suite, for anything UX/visual/behavioral.
-4. **Independent Review** -- a second, independent pass (human or a second
-   AI agent) that did not write the fix reviews it before it's treated as
-   settled. Convergent independent diagnosis of the same root cause from
-   two separate reviewers is strong evidence a fix targets the real defect.
-   When the finding under review traces to a governing specification, see
-   Section 10 below -- work is not submitted for this step until it meets
-   `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`'s Definition of Review Ready.
+4. **Independent Review** -- Independent Review Required
+   (`CONSTITUTION.md`'s "Independent Review Required"): a second,
+   independent pass (human or a second AI agent) that did not write the
+   fix reviews it before it's treated as settled. Convergent independent
+   diagnosis of the same root cause from two separate reviewers is strong
+   evidence a fix targets the real defect. When the finding under review
+   traces to a governing specification, see Section 10 below -- work is
+   not submitted for this step until it meets
+   `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`'s Definition of Review
+   Ready. For this repository specifically (currently single-maintainer),
+   this step is satisfied by the documented external review workflow
+   (Regular Codex) per `CONSTITUTION.md`'s "Single-Maintainer
+   Governance" -- not by a GitHub approving review, which the repository
+   owner cannot submit on their own pull request.
 5. **Real-Hardware Certification** (where applicable) -- the TPM
    Certification Suite run on an actual arcade machine against an actual
    TeknoParrot install, not simulated or run only in a dev environment.
@@ -488,6 +495,18 @@ Normal PR review remains the standing rule for release-critical changes. Admin
 override merges are exceptions, not precedent; when one is used, record the
 affected PRs, why review was bypassed, what automated evidence was green at
 merge time, and what later certification evidence closed the release risk.
+
+The instances logged below predate `CONSTITUTION.md`'s "Single-Maintainer
+Governance" section and were driven by the same underlying platform
+restriction that section now formally addresses (GitHub reporting "review
+required" that this repository's sole maintainer structurally cannot
+satisfy via GitHub's own approval mechanism). They remain here as
+historical record per `CONSTITUTION.md`'s "Historical evidence in
+investigations" principle, not as ongoing precedent -- going forward, this
+condition is handled by the documented policy (Independent Review
+Required satisfied via the external review workflow, required-approving-
+review branch protection set to zero) rather than by an ad hoc admin
+override each time.
 
 ### 2026-07-03 -- v0.99.45 release-candidate exception
 

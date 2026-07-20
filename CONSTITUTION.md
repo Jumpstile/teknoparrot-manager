@@ -384,6 +384,72 @@ code review, documentation, and release validation -- constitute
 **release evidence**. They provide technical justification for a release
 recommendation but do not themselves authorize a production release.
 
+### Independent Review Required
+
+**Independent Review Required** is the standing requirement's name, used
+consistently everywhere this Constitution or a subordinate document
+discusses it -- not "GitHub approval required," which names one possible
+*mechanism* for satisfying the requirement, not the requirement itself.
+The requirement is: a second, independent pass -- by a person or agent
+that did not write the change under review -- evaluates it before it is
+treated as settled (`RELEASE-SAFETY-CHECKLIST.md`'s release order step 4
+is this requirement's concrete release-process instantiation).
+
+A GitHub approving review is one way to satisfy Independent Review
+Required, and the default one where available. It is not the only way.
+The project's documented external review workflow -- an independent AI
+reviewer such as Regular Codex, a second human reviewer, or another
+documented independent-review process -- equally satisfies it. Wording
+this requirement as a mechanism-specific rule ("a GitHub approval") ties
+governance to one platform's specific feature; wording it as
+"Independent Review Required," with GitHub approval as one recognized
+mechanism among others, is durable regardless of which review tooling a
+project actually uses.
+
+### Single-Maintainer Governance
+
+When a repository has only one GitHub maintainer with merge authority,
+the following applies:
+
+- **Independent Review Required remains in full effect.** Nothing in
+  this section reduces, waives, or narrows it.
+- **GitHub's native approving-review mechanism cannot be used to satisfy
+  it under this condition**, because GitHub does not permit a pull
+  request's own author to submit a formal approving review on that same
+  pull request -- a platform restriction, not a governance choice. Under
+  single-maintainer conditions, Independent Review Required is instead
+  satisfied by the project's documented external review workflow (for
+  example, Regular Codex or another independent reviewer) -- the
+  finding(s) and disposition recorded in the PR the same way a formal
+  review would be, per this repository's established practice.
+- **`main`'s branch-protection required-approving-review count may
+  therefore be set to zero** for a single-maintainer repository -- this
+  is a recognition that the GitHub-native mechanism is structurally
+  unusable under this condition, not a waiver of the underlying
+  requirement, which the paragraph above still requires be satisfied by
+  the documented external workflow before a PR is treated as reviewed.
+- **Automated quality gates remain mandatory and unaffected.** This
+  section concerns only which mechanism satisfies Independent Review
+  Required; it never concerns whether CI, static analysis, or any other
+  automated gate runs or blocks a merge. Required-status-check branch
+  protection (e.g. a required "Quality gates" check) is preserved, and
+  should be enabled wherever a repository's CI produces a check suited to
+  it, independent of the maintainer-count question this section governs.
+- **Documentation certification, release certification, and every other
+  required engineering standard remain unchanged** -- this section is
+  narrowly scoped to how Independent Review Required is satisfied, not a
+  general relaxation of any other gate in this hierarchy.
+- **This exception exists solely because of the GitHub self-approval
+  restriction.** It is not general license to relax review rigor for any
+  other reason, and it is not invoked to excuse skipping the external
+  review workflow itself -- only to explain why GitHub's own approval
+  button cannot be the mechanism that satisfies it.
+- **If a second maintainer with merge authority is added, the
+  required-approving-review branch protection must be re-enabled**
+  (restored to at least 1) in the same change that grants the new
+  maintainer merge authority. This section describes a condition scoped
+  to single-maintainer repositories, not a permanent state.
+
 ### Recommendation authority
 
 Any engineering role may recommend release readiness. Only the Release
