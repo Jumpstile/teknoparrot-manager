@@ -83,6 +83,9 @@ reintroducing a real bug.
 | SECURITY.md | Threat model and sanitization invariants -- what counts as untrusted input and why |
 | LESSONS_LEARNED.md | Engineering post-mortems; governs investigation and verification approach |
 | ARCHITECTURE.md | Feature design, key functions, and design decisions for every major feature |
+| SPECIFICATION_DRIVEN_REVIEW_STANDARD.md | Required whenever a review finding traces to a governing specification (file format, protocol, grammar, API contract) -- problem-class resolution, mandatory self-adversarial review, and the Definition of Review Ready |
+| INVENTORY_STANDARDS.md | Specification Inventory / System Invariant Inventory -- build before implementing against a non-trivial specification-governed finding |
+| ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md | Standing velocity principles (parallelize safely, automate repetition, batch problem-class resolutions) -- always inside existing quality gates, never a tradeoff against them |
 
 ---
 
@@ -101,6 +104,9 @@ ARCHITECTURE.md                  -- feature implementation reference (dev, not u
 LESSONS_LEARNED.md               -- engineering post-mortems
 RELEASE-SAFETY-CHECKLIST.md      -- pre-commit and release gates
 SECURITY.md                      -- threat model and sanitization rules
+SPECIFICATION_DRIVEN_REVIEW_STANDARD.md -- problem-class resolution for specification-governed findings
+INVENTORY_STANDARDS.md           -- Specification Inventory / System Invariant Inventory standard
+ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md -- velocity principles inside existing quality gates
 PSScriptAnalyzerSettings.psd1    -- approved PSScriptAnalyzer exclusions with rationale (dev)
 .github\workflows\ci.yml         -- GitHub Actions CI pipeline (dev, not in release ZIP)
 ```
@@ -127,12 +133,17 @@ ZIP name: `TeknoParrot Manager v1.0 RC2.1.zip` (always versioned).
 
 **Exclude:** `ReShade\` (not redistributable; user obtains from reshade.me),
 `dgVoodoo2\` (user provides), `FFBPlugin\` and `BepInExCache\` (live-downloaded
-each run, never bundled), `AGENTS.md`, `README.md`, `QUICKSTART.md`,
+each run, never bundled), `AGENTS.md`, `CLAUDE.md`, `README.md`, `QUICKSTART.md`,
 `ARCHITECTURE.md`, `LESSONS_LEARNED.md`, `RELEASE-SAFETY-CHECKLIST.md`,
-`SECURITY.md`, `PSScriptAnalyzerSettings.psd1`, `.github\`,
+`SECURITY.md`, `CONSTITUTION.md`, `ENGINEERING_GOVERNANCE.md`,
+`CONTRIBUTING.md`, `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`,
+`INVENTORY_STANDARDS.md`, `ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md`,
+`PSScriptAnalyzerSettings.psd1`, `.github\`,
 `*.zip`, `*.log`, `*.config.json`.
 
-Full mechanics: RELEASE-SAFETY-CHECKLIST.md section 4.
+Full mechanics and the authoritative version of this list:
+RELEASE-SAFETY-CHECKLIST.md section 4 -- if this list and that section
+are ever found to disagree, section 4 is correct and this list is stale.
 
 ---
 

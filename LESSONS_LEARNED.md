@@ -62,6 +62,20 @@ this stops being a reasonable one-off exception and starts being a real gap
 in the review pipeline that should be fixed before a fourth instance, not
 documented again.
 
+**Resolution.** The independent-reviewer account this entry called for
+was configured (Regular Codex, used as the documented external review
+workflow across this session and since). `CONSTITUTION.md`'s
+"Single-Maintainer Governance" section formalizes the underlying policy
+this entry's recommendation implied: Independent Review Required is
+satisfied by that documented external workflow, not by a GitHub approving
+review this repository's sole maintainer cannot submit; `main`'s
+required-approving-review branch protection was set to zero for exactly
+this reason (GitHub's self-approval restriction, not a relaxation of the
+review requirement itself), with `main`'s CI ("Quality gates") made an
+explicitly *required* status check in the same change, so the admin-
+override pattern this entry warned against is no longer the mechanism
+this condition is handled by.
+
 ## TPM Certification Suite (commit bb2a160): [scriptblock]::Create() dot-sourcing breaks cross-file Pester module mocking
 
 **What happened.** A real arcade-machine certification run reported 10 Pester

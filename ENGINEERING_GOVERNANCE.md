@@ -75,6 +75,12 @@ deliberately different labels).
   only in a commit message -- someone auditing issue history later should
   not have to cross-reference git log to understand why an issue was
   considered resolved.
+- Explicit cross-linking is also what makes safe parallel work possible
+  (`ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md`'s "parallelize
+  independent work whenever safe" principle) -- an accurately cross-
+  linked dependency graph is how a contributor confirms two issues are
+  genuinely independent before working on them concurrently, rather than
+  discovering a hidden dependency after the fact.
 
 ### Acceptance criteria policy
 
@@ -88,6 +94,15 @@ deliberately different labels).
   necessary but not sufficient for anything the certification suite
   itself doesn't already cover (see `CONSTITUTION.md`'s "Engineering
   review rule").
+- When a bug or finding traces to a governing specification (a file
+  format, a protocol, a language grammar, an API contract), acceptance
+  criteria are not "the reported case now passes" -- see
+  `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`'s "Definition of Review
+  Ready" and `INVENTORY_STANDARDS.md` for the Specification Inventory
+  that criteria should be checked against. An issue closed against a
+  specification-governed finding should reference that it was resolved
+  as a problem class, not as an isolated instance, in its closing
+  evidence.
 
 ### Release assignment policy
 
