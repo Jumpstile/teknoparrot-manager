@@ -10,6 +10,16 @@ treat it as two roles in one ask and confirm before starting the second part.
 
 ---
 
+## Maintaining This Document
+
+This document describes the stable operating procedures of the TPM hardware
+certification workstation. Update it whenever the workstation configuration,
+certification workflow, tooling, or authoritative installation paths change.
+Do not use this document to track temporary implementation phases, active
+pull requests, or release-specific status.
+
+---
+
 ## Role
 
 - Verify builds on the real arcade machine, execute the certification suite,
