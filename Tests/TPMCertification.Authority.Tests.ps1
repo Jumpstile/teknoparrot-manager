@@ -35,6 +35,47 @@ Describe 'ADR-0155 Phase 1 JCS and whole-message transport' {
  It 'round trips the entire JCS string as unpadded base64url' {$m='line'+[char]10+'| heading fence / '+[char]0x263A;$e=ConvertTo-TPMFailureMessageBase64UrlV1 $m;$e|Should -Match '^[A-Za-z0-9_-]+$';$e|Should -Not -Match '=';ConvertFrom-TPMFailureMessageBase64UrlV1 $e|Should -Be $m}
  It 'rejects malformed invalid UTF8 non-string and noncanonical inputs' {{ConvertFrom-TPMFailureMessageBase64UrlV1 'a'}|Should -Throw;{ConvertFrom-TPMFailureMessageBase64UrlV1 '!!!!'}|Should -Throw;$valid=ConvertTo-TPMFailureMessageBase64UrlV1 'padded';{ConvertFrom-TPMFailureMessageBase64UrlV1 ($valid+'=')}|Should -Throw;$bad=[Convert]::ToBase64String([byte[]](0xC3,0x28)).TrimEnd('=').Replace('+','-').Replace('/','_');{ConvertFrom-TPMFailureMessageBase64UrlV1 $bad}|Should -Throw;$u=New-Object Text.UTF8Encoding($false);$number=[Convert]::ToBase64String($u.GetBytes('1')).TrimEnd('=');{ConvertFrom-TPMFailureMessageBase64UrlV1 $number}|Should -Throw;$slash=[Convert]::ToBase64String($u.GetBytes('"a\/b"')).TrimEnd('=').Replace('+','-').Replace('/','_');{ConvertFrom-TPMFailureMessageBase64UrlV1 $slash}|Should -Throw}
 }
+Describe 'ADR-0155 Phase 3 prerequisite: shared fact/evidence primitives extracted from Shadow' {
+ It 'exports the exact eleven fact identifiers and nine-item evidence manifest used by Phase 2' {
+  (Get-TPMFactIdentifiersV1)|Should -Be @('Repository','Pester','Static Analysis','Real Install Health','Backups','Smoke File Safety','Artifacts','pcsx2x6 crosshair path (issue #79)','Behavioral Certification (Virtual Beta Tester)','Unattended TPM root binding','Unattended TPM config restoration')
+  (Get-TPMEvidenceManifestV1).Count|Should -Be 9
+  (Get-TPMEvidenceManifestV1)[0].Identifier|Should -Be 'certification-suite-running'
+  (Get-TPMEvidenceManifestV1)[8].Identifier|Should -Be 'final-certification-result'
+  (Get-TPMEvidenceFailureCodesV1)|Should -Contain 'EVIDENCE_SKIPPED'
+  (Get-TPMEvidenceFailureCodesV1).Count|Should -Be 19
+ }
+ It 'validates and decides a Repository fact record identically to the pre-extraction Shadow behavior' {
+  $record=[ordered]@{Identifier='Repository';Applicable=$true;Data=[ordered]@{RepositoryPath=(Join-Path $TestDrive 'repo');RepositoryAvailable=$true;RepositoryClean=$true;GitStatus='(clean)'}}
+  {Assert-TPMFactRecordV1 $record Smoke (Join-Path $TestDrive 'report')}|Should -Not -Throw
+  $decision=Get-TPMFactDecisionV1 $record Smoke (Join-Path $TestDrive 'report')
+  $decision.Status|Should -Be 'Pass';$decision.Passed|Should -BeTrue
+  $bad=[ordered]@{Identifier='NotARealCategory';Applicable=$true;Data=[ordered]@{}}
+  {Assert-TPMFactRecordV1 $bad Smoke (Join-Path $TestDrive 'report')}|Should -Throw '*FACT_IDENTIFIER_INVALID*'
+ }
+ It 'returns NotApplicable with a null Passed value for an inapplicable category' {
+  $record=[ordered]@{Identifier='Smoke File Safety';Applicable=$false;Data=[ordered]@{}}
+  $decision=Get-TPMFactDecisionV1 $record Unattended (Join-Path $TestDrive 'report')
+  $decision.Status|Should -Be 'NotApplicable';$decision.Passed|Should -BeNullOrEmpty
+ }
+ It 'validates a captured evidence record against the manifest and rejects a mismatched identifier' {
+  $root=Join-Path $TestDrive 'evidence-primitives';New-Item -ItemType Directory -Path $root -Force|Out-Null
+  $path=Join-Path $root '0.png';[IO.File]::WriteAllBytes($path,[byte[]](137,80,78,71,13,10,26,10,1))
+  $sha=[Security.Cryptography.SHA256]::Create();try{$hash=-join($sha.ComputeHash([IO.File]::ReadAllBytes($path))|ForEach-Object{$_.ToString('x2')})}finally{$sha.Dispose()}
+  $expected=(Get-TPMEvidenceManifestV1)[0]
+  $record=[ordered]@{Identifier=$expected.Identifier;Status='Captured';EvidenceType='ScreenCapture';Required=$true;Path=$path;CaptureScope='ConsoleWindow';FileSha256=$hash;Width=1;Height=1;FailureCode=$null;FailureMessage=$null}
+  $validator={param($p)[pscustomobject]@{Valid=$true;Reason='ok';Width=1;Height=1}}
+  $owned=New-Object 'Collections.Generic.HashSet[string]'
+  {Assert-TPMEvidenceRecordV1 $record $expected $root $validator $owned}|Should -Not -Throw
+  $mismatched=[ordered]@{Identifier='wrong-identifier';Status='Captured';EvidenceType='ScreenCapture';Required=$true;Path=$path;CaptureScope='ConsoleWindow';FileSha256=$hash;Width=1;Height=1;FailureCode=$null;FailureMessage=$null}
+  {Assert-TPMEvidenceRecordV1 $mismatched $expected $root $validator $owned}|Should -Throw '*EVIDENCE_ORDER_INVALID*'
+ }
+ It 'returns a defensive copy that caller mutation cannot reach back into' {
+  $original=[ordered]@{Nested=[ordered]@{Value=1}}
+  $copy=Copy-TPMClosedValueV1 $original
+  $original.Nested.Value=2
+  $copy.Nested.Value|Should -Be 1
+ }
+}
 Describe 'ADR-0155 Phase 1 hashing and containment' {
     It 'matches the SHA-256 known vector' {
         $bytes = [Text.Encoding]::UTF8.GetBytes('abc')

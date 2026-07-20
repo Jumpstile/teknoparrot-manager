@@ -108,6 +108,9 @@ Describe 'ADR-0155 Phase 1/Phase 2 module coexistence' {
     '$result.ShadowModule = (Get-Command New-TPMShadowWorkflowAuthorityV1).ModuleName'
     'try { New-TPMWorkflowAuthorityV1 | Out-Null; $result.AuthorityZeroArgOk = $true } catch { $result.AuthorityZeroArgOk = $false }'
     'try { New-TPMShadowWorkflowAuthorityV1 | Out-Null; $result.ShadowZeroArgFailedOnMissingParams = $false } catch { $result.ShadowZeroArgFailedOnMissingParams = (($_.Exception.Message -match "Mode") -or ($_.Exception.Message -match "EvidenceRoot")) }'
+    '$result.AssertFactModule = (Get-Command Assert-TPMFactRecordV1).ModuleName'
+    '$result.FactIdentifierCount = (Get-TPMFactIdentifiersV1).Count'
+    'try { Assert-TPMFactRecordV1 ([ordered]@{Identifier="NotARealCategory";Applicable=$true;Data=[ordered]@{}}) Smoke "C:\\" | Out-Null; $result.RejectsUnknownFactIdentifier = $false } catch { $result.RejectsUnknownFactIdentifier = ($_.Exception.Message -match "FACT_IDENTIFIER_INVALID") }'
     '$result | ConvertTo-Json -Compress'
    )
    [IO.File]::WriteAllText($probe,($lines-join"`n"),(New-Object Text.UTF8Encoding $false))
@@ -117,6 +120,9 @@ Describe 'ADR-0155 Phase 1/Phase 2 module coexistence' {
    $result.ShadowModule|Should -Be 'TPMCertification.Shadow'
    $result.AuthorityZeroArgOk|Should -BeTrue
    $result.ShadowZeroArgFailedOnMissingParams|Should -BeTrue
+   $result.AssertFactModule|Should -Be 'TPMCertification.Authority'
+   $result.FactIdentifierCount|Should -Be 11
+   $result.RejectsUnknownFactIdentifier|Should -BeTrue
   }
  }
 }
