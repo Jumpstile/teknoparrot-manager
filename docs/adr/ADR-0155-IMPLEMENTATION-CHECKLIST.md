@@ -62,7 +62,7 @@ have passed. Stable identifiers are retained across revisions.
   non-recursive hash domain from ADR Section 4.
 - [ ] ADR155-0303 -- Render final evidence from eligibility only; it must never
   claim `CERTIFIED` before publication.
-- [ ] ADR155-0304 -- Replace arbitrary artifact callbacks with deterministic
+- [x] ADR155-0304 -- Replace arbitrary artifact callbacks with deterministic
   internal builders for the five canonical reports.
 - [ ] ADR155-0305 -- Build the exact manifest and commit marker with canonical
   identities, byte lengths, SHA-256 hashes, and run correlation.
@@ -646,3 +646,67 @@ with two findings, both corrected in this commit:
 
 No architectural or behavioral change beyond the two findings; ADR155-0304
 remains unchecked for the same reason as above.
+
+## Phase 3 base64url transport and Markdown report builders -- 2026-07-20
+
+Completes ADR155-0304: the two remaining canonical reports (Scorecard,
+Validation) and their Section 8.4 base64url transport prerequisite.
+
+- Extends `ConvertTo-TPMJcsV1` (Authority.psm1) with a `PSCustomObject`
+  branch alongside its existing `IDictionary`/`IEnumerable` handling.
+  `ConvertFrom-Json` (used throughout this module's builders to consume a
+  compiled object's own trusted `CanonicalJson`) produces `PSCustomObject`
+  for JSON objects, not `IDictionary`; without this, re-canonicalizing a
+  parsed sub-structure -- needed for `Details-JCS-Base64Url` per score
+  item -- threw `unsupported JCS value`. Confirmed by direct reproduction
+  before fixing. The change is purely additive (a new type branch; no
+  existing behavior for hashtables, arrays, or scalars changes) and
+  verified byte-identical on a representative round-trip
+  (`canonicalize -> ConvertFrom-Json -> canonicalize again`) before being
+  used anywhere else.
+- Adds `ConvertTo-TPMJcsBase64UrlV1`/`ConvertFrom-TPMJcsBase64UrlV1`
+  (Authority.psm1): the Section 8.4 "arbitrary structured values use JCS
+  bytes encoded as RFC 4648 base64url without padding" transport --
+  distinct from the already-approved `ConvertTo/FromTPMFailureMessageBase64UrlV1`
+  pair (Phase 1), which wraps the message as one JCS JSON *string* first.
+  This transport encodes already-canonical JCS bytes directly, with the
+  same malformed-input/alphabet/padding rejection rules.
+- Adds `New-TPMScorecardReportV1` (`TPM-Certification-Scorecard.md`,
+  Section 8.4) and `New-TPMValidationReportV1`
+  (`TPM-Certification-Validation.md`, Section 8.5) to Reports.psm1. Both
+  strict-parse their input compiled object(s)' own trusted `CanonicalJson`
+  (Eligibility alone for Scorecard; SealedRun plus Eligibility for
+  Validation, with an explicit cross-check that both share the same
+  `RunIdentity`), assert every field depended upon is present, and build
+  the fixed-heading/fixed-key Markdown structure with no caller-controlled
+  value interpolated into headings, list markers, or fences -- every
+  Identifier and Code comes from the closed manifest/decision vocabulary,
+  never free text; every free-text Message goes through the base64url
+  transport.
+- ADR155-Q001/Q002: `Tests/TPMCertification.Reports.Tests.ps1` gained 14
+  more tests (34 total; 119 combined with all prior focused suites),
+  including direct verification that decoding `Facts-JCS-Base64Url`/
+  `Evidence-JCS-Base64Url`/`Eligibility-Payload-JCS-Base64Url` and
+  rehashing reproduces the exact `Fact-Set-SHA256`/`Evidence-Set-SHA256`/
+  original `Eligibility.CanonicalJson` bytes; a failing-category Scorecard
+  render (`NOT ELIGIBLE`, `FAIL`, correct `Failure-Code`/
+  `Failure-Message-Base64Url`); rejection of a `SealedRun`/`Eligibility`
+  pair from two different runs; the new JCS-base64url transport's
+  malformed-input rejection and its distinctness from the Failure-Message
+  transport; and the `ConvertTo-TPMJcsV1` `PSCustomObject` round-trip
+  itself, including the empty-object edge case. 119/119 on pwsh 7.6.3 and
+  119/119 on Windows PowerShell 5.1.26100.8875.
+- ADR155-Q003/Q004: `Invoke-Pester -Path .\Tests` passed 899/899 on pwsh
+  7.6.3 and 894/899 on Windows PowerShell 5.1, with exactly the same five
+  unchanged issue #148 Repair-GamePaths failures.
+- ADR155-Q005/Q006/Q007: all three changed/touched files had zero
+  non-ASCII bytes, zero parser errors, zero PSScriptAnalyzer findings, and
+  zero InjectionHunter findings.
+
+All five canonical reports (ADR155-0304) now exist as pure, deterministic,
+side-effect-free builders. No harness wiring, file I/O, staging, or
+publication. Remaining Phase 3 work: the manifest and commit-marker
+builders (ADR155-0305), staging/publication (ADR155-0306), the sole
+final-outcome composition already substantially covered by the
+dispatcher's `IssueFinalOutcome` (ADR155-0307), NOT-CERTIFIED bundle
+publication (ADR155-0308), and the atomic cutover (ADR155-0309).

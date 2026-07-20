@@ -46,6 +46,7 @@ function ConvertTo-TPMJcsV1([Parameter(Mandatory=$true)][AllowNull()][AllowEmpty
     if($null-eq$InputObject){return 'null'};if($InputObject-is[bool]){if($InputObject){return 'true'}else{return 'false'}};if($InputObject-is[string]){return  ConvertTo-TPMJcsStringV1 $InputObject}
     if($InputObject.GetType()-in@([byte],[sbyte],[int16],[uint16],[int32],[uint32],[int64],[uint64])){$n=[decimal]$InputObject;if($n-lt-9007199254740991-or$n-gt9007199254740991){throw 'I-JSON range'};return $n.ToString('0',[Globalization.CultureInfo]::InvariantCulture)}
     if($InputObject-is[Collections.IDictionary]){foreach($key in $InputObject.Keys){if($key-isnot[string]){throw 'JCS object keys must be strings'}};[string[]]$keys=@($InputObject.Keys);[Array]::Sort($keys,[StringComparer]::Ordinal);return '{'+(@($keys|ForEach-Object{(ConvertTo-TPMJcsStringV1 $_)+':'+(ConvertTo-TPMJcsV1 $InputObject[$_])})-join',')+'}'}
+    if($InputObject-is[Management.Automation.PSCustomObject]){$properties=@($InputObject.PSObject.Properties);[string[]]$keys=@($properties|ForEach-Object{[string]$_.Name});[Array]::Sort($keys,[StringComparer]::Ordinal);$map=@{};foreach($property in $properties){$map[[string]$property.Name]=$property.Value};return '{'+(@($keys|ForEach-Object{(ConvertTo-TPMJcsStringV1 $_)+':'+(ConvertTo-TPMJcsV1 $map[$_])})-join',')+'}'}
     if($InputObject-is[Collections.IEnumerable]){return '['+(@($InputObject|ForEach-Object{ConvertTo-TPMJcsV1 $_})-join',')+']'}
     throw 'unsupported JCS value'
 }
@@ -57,6 +58,12 @@ function ConvertFrom-TPMFailureMessageBase64UrlV1([string]$Value){
  try{$m=ConvertFrom-Json -InputObject $t -ErrorAction Stop}catch{throw 'invalid JSON string'}
  if($m-isnot[string]-or(ConvertTo-TPMJcsStringV1 $m)-cne$t){throw 'noncanonical JSON string'}
  return $m
+}
+function ConvertTo-TPMJcsBase64UrlV1([Parameter(Mandatory=$true)][string]$CanonicalJson){$u=New-Object Text.UTF8Encoding($false,$true);[Convert]::ToBase64String($u.GetBytes($CanonicalJson)).TrimEnd('=').Replace('+','-').Replace('/','_')}
+function ConvertFrom-TPMJcsBase64UrlV1([string]$Value){
+ if(!$Value-or$Value-cnotmatch'^[A-Za-z0-9_-]+$'-or$Value.Length%4-eq1){throw 'malformed base64url'}
+ $p=$Value.Replace('-','+').Replace('_','/');if($p.Length%4-eq2){$p+='=='}elseif($p.Length%4-eq3){$p+='='}
+ try{$b=[Convert]::FromBase64String($p);return (New-Object Text.UTF8Encoding($false,$true)).GetString($b)}catch{throw 'malformed transport'}
 }
 
 function New-TPMWorkflowAuthorityV1 {
@@ -259,4 +266,4 @@ function Get-TPMScoreAggregateV1 {
     return [ordered]@{ApplicableCount=$applicableCount;PassedCount=$passedCount;PercentageBasisPoints=$percentageBasisPoints;ThresholdBasisPoints=$thresholdBasisPoints;ScoreEligible=$scoreEligible}
 }
 
-Export-ModuleMember -Function Initialize-TPMCertificationTypesV1,ConvertTo-TPMJcsV1,ConvertTo-TPMFailureMessageBase64UrlV1,ConvertFrom-TPMFailureMessageBase64UrlV1,New-TPMWorkflowAuthorityV1,Get-TPMSha256HexV1,Resolve-TPMContainedPathV1,Get-TPMFactIdentifiersV1,Get-TPMEvidenceManifestV1,Get-TPMEvidenceFailureCodesV1,Assert-TPMFactRecordV1,Get-TPMFactDecisionV1,Assert-TPMEvidenceRecordV1,Copy-TPMClosedValueV1,Assert-TPMExactFieldsV1,Assert-TPMStringV1,Get-TPMScoreAggregateV1
+Export-ModuleMember -Function Initialize-TPMCertificationTypesV1,ConvertTo-TPMJcsV1,ConvertTo-TPMFailureMessageBase64UrlV1,ConvertFrom-TPMFailureMessageBase64UrlV1,New-TPMWorkflowAuthorityV1,Get-TPMSha256HexV1,Resolve-TPMContainedPathV1,Get-TPMFactIdentifiersV1,Get-TPMEvidenceManifestV1,Get-TPMEvidenceFailureCodesV1,Assert-TPMFactRecordV1,Get-TPMFactDecisionV1,Assert-TPMEvidenceRecordV1,Copy-TPMClosedValueV1,Assert-TPMExactFieldsV1,Assert-TPMStringV1,Get-TPMScoreAggregateV1,ConvertTo-TPMJcsBase64UrlV1,ConvertFrom-TPMJcsBase64UrlV1

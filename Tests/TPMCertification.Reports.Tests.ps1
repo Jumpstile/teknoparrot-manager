@@ -68,7 +68,7 @@ BeforeAll {
    $outcome=&$authority RegisterPublicationFailure $reasons $candidate
   }
   $finalOutcome=&$authority IssueFinalOutcome $eligibility $outcome
-  return @{Authority=$authority;Eligibility=$eligibility;PublicationCandidate=$candidate;PublicationOutcome=$outcome;FinalOutcome=$finalOutcome}
+  return @{Authority=$authority;Sealed=$sealed;Eligibility=$eligibility;PublicationCandidate=$candidate;PublicationOutcome=$outcome;FinalOutcome=$finalOutcome}
  }
 }
 
@@ -246,5 +246,177 @@ Describe 'ADR-0155 Phase 3 final-outcome report builder' {
   $json='{"SchemaVersion":1,"RunIdentity":"deadbeefdeadbeefdeadbeefdeadbeef","EligibilityPayloadSha256":"'+('a'*64)+'","EligibleForCertification":true,"FinalStatus":"CERTIFIED","ExitCode":0,"FailureReasons":[]}'
   $incomplete=$ctor.Invoke(@('deadbeefdeadbeefdeadbeefdeadbeef',$json))
   {New-TPMFinalOutcomeReportV1 -FinalOutcome $incomplete}|Should -Throw '*REPORT_INVALID*PublicationCommitted*'
+ }
+}
+
+Describe 'ADR-0155 Phase 3 scorecard report builder' {
+ BeforeEach {$root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $root|Out-Null}
+ It 'produces the exact five metadata lines, eleven category headings in manifest order, and a self-consistent hash' {
+  $eligibility=New-IssuedEligibilityV1 $root
+  $report=New-TPMScorecardReportV1 -Eligibility $eligibility
+  $report.FileName|Should -Be 'TPM-Certification-Scorecard.md'
+  $lines=$report.Markdown -split "`n"
+  $lines[0]|Should -Match '^Schema-Version: 1$'
+  $lines[1]|Should -Match '^Run-Identity: [0-9a-f]{32}$'
+  $utf8=New-Object Text.UTF8Encoding $false
+  $expectedHash=-join([Security.Cryptography.SHA256]::Create().ComputeHash($utf8.GetBytes($eligibility.CanonicalJson))|ForEach-Object{$_.ToString('x2')})
+  $lines[2]|Should -Be "Eligibility-Payload-SHA256: $expectedHash"
+  $lines[5]|Should -Be ''
+  $lines[6]|Should -Be '# Certification Eligibility Scorecard'
+  $lines[7]|Should -Be 'Eligibility: ELIGIBLE'
+  $lines[8]|Should -Be 'Score: 8/8 (100.00%)'
+  $headings=@($lines|Where-Object{$_-like '## *'}|ForEach-Object{$_.Substring(3)})
+  $headings|Should -Be @('Repository','Pester','Static Analysis','Real Install Health','Backups','Smoke File Safety','Artifacts','pcsx2x6 crosshair path (issue #79)','Behavioral Certification (Virtual Beta Tester)','Unattended TPM root binding','Unattended TPM config restoration')
+  ($report.Markdown|Select-String -Pattern 'Failure-Code: ' -AllMatches).Matches.Count|Should -Be 11
+  $report.Bytes[0]|Should -Not -Be 0xEF
+ }
+ It 'renders N/A for not-applicable categories and PASS for applicable passing categories' {
+  $eligibility=New-IssuedEligibilityV1 $root
+  $report=New-TPMScorecardReportV1 -Eligibility $eligibility
+  $lines=$report.Markdown -split "`n"
+  $pcsx2Index=[array]::IndexOf($lines,'## pcsx2x6 crosshair path (issue #79)')
+  $lines[$pcsx2Index+1]|Should -Be 'Status: N/A'
+  $repositoryIndex=[array]::IndexOf($lines,'## Repository')
+  $lines[$repositoryIndex+1]|Should -Be 'Status: PASS'
+ }
+ It 'round-trips Details-JCS-Base64Url to the exact original Details bytes for a representative category' {
+  $eligibility=New-IssuedEligibilityV1 $root
+  $report=New-TPMScorecardReportV1 -Eligibility $eligibility
+  $lines=$report.Markdown -split "`n"
+  $repositoryIndex=[array]::IndexOf($lines,'## Repository')
+  $detailsLine=$lines[$repositoryIndex+2]
+  $detailsLine|Should -Match '^Details-JCS-Base64Url: '
+  $encoded=$detailsLine.Substring('Details-JCS-Base64Url: '.Length)
+  $decoded=ConvertFrom-TPMJcsBase64UrlV1 $encoded
+  $decoded|Should -Match '"RepositoryAvailable":true'
+  $decoded|Should -Match '"RepositoryClean":true'
+ }
+ It 'renders NOT ELIGIBLE and a failure code/message pair when a category fails' {
+  $authority=New-TPMProductionWorkflowAuthorityV1 -Mode Smoke -EvidenceRoot $root -PngValidator $validator
+  $facts=New-TestFacts $root;$facts[1].Data.Failed=1;$facts[1].Data.Passed=1
+  foreach($f in $facts){&$authority RecordFact $f}
+  $ids=@('certification-suite-running','requested-effective-root-evidence','live-thumbnail-evidence','live-controls-evidence','adaptive-menu-normal','adaptive-menu-small','adaptive-menu-maximized','smoke-file-safety-evidence')
+  $types=@('ScreenCapture','ScreenCapture',$null,$null,'DeterministicRender','DeterministicRender','DeterministicRender','DeterministicRender')
+  for($i=0;$i-lt8;$i++){$e=if($i-in2,3){New-TestEvidence $root $ids[$i] $false $null $i -Skipped}else{New-TestEvidence $root $ids[$i] $true $types[$i] $i};&$authority RecordEvidence $e}
+  $preview=&$authority DeriveScorePreview
+  $final=New-TestEvidence $root 'final-certification-result' $true 'ScreenCapture' 8
+  &$authority IssueFinalEvidence $final $preview
+  $sealed=&$authority Seal
+  $eligibility=&$authority IssueEligibility $sealed
+  $report=New-TPMScorecardReportV1 -Eligibility $eligibility
+  $lines=$report.Markdown -split "`n"
+  $lines[7]|Should -Be 'Eligibility: NOT ELIGIBLE'
+  $pesterIndex=[array]::IndexOf($lines,'## Pester')
+  $lines[$pesterIndex+1]|Should -Be 'Status: FAIL'
+  $lines[$pesterIndex+3]|Should -Be 'Failure-Code: PESTER_FAILURES'
+  $lines[$pesterIndex+4]|Should -Match '^Failure-Message-Base64Url: '
+  $encodedMessage=$lines[$pesterIndex+4].Substring('Failure-Message-Base64Url: '.Length)
+  ConvertFrom-TPMFailureMessageBase64UrlV1 $encodedMessage|Should -Be 'PESTER_FAILURES'
+ }
+ It 'rejects a synthetic eligibility object, the wrong compiled type, and null/plain-object input' {
+  Initialize-TPMCertificationTypesV1|Out-Null
+  $type='Jumpstile.TPM.Certification.V1.TPMScorePreviewV1'-as[type]
+  $ctor=$type.GetConstructors([Reflection.BindingFlags]'NonPublic,Instance')[0]
+  $wrongType=$ctor.Invoke(@('deadbeefdeadbeefdeadbeefdeadbeef','{}'))
+  {New-TPMScorecardReportV1 -Eligibility $wrongType}|Should -Throw '*REPORT_INVALID*'
+  {New-TPMScorecardReportV1 -Eligibility $null}|Should -Throw
+  {New-TPMScorecardReportV1 -Eligibility ([pscustomobject]@{CanonicalJson='{}';RunIdentity='x'})}|Should -Throw '*REPORT_INVALID*'
+ }
+}
+
+Describe 'ADR-0155 Phase 3 validation report builder' {
+ BeforeEach {$root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $root|Out-Null}
+ It 'produces Facts/Evidence/Eligibility base64url fields that decode to hashes matching the metadata header' {
+  $run=New-FullPipelineRunV1 $root $true $false
+  $report=New-TPMValidationReportV1 -SealedRun $run.Sealed -Eligibility $run.Eligibility
+  $report.FileName|Should -Be 'TPM-Certification-Validation.md'
+  $lines=$report.Markdown -split "`n"
+  $lines[0]|Should -Be 'Schema-Version: 1'
+  $lines[5]|Should -Be ''
+  $lines[6]|Should -Be '# Certification Validation'
+  $lines|Should -Contain '## Facts'
+  $lines|Should -Contain '## Evidence'
+  $lines|Should -Contain '## Eligibility'
+  $lines|Should -Contain '## Failure Reasons'
+
+  $utf8=New-Object Text.UTF8Encoding $false
+  $factsLine=@($lines|Where-Object{$_-like 'Facts-JCS-Base64Url:*'})[0]
+  $factsEncoded=$factsLine.Substring('Facts-JCS-Base64Url: '.Length)
+  $decodedFacts=ConvertFrom-TPMJcsBase64UrlV1 $factsEncoded
+  $decodedFactsHash=-join([Security.Cryptography.SHA256]::Create().ComputeHash($utf8.GetBytes($decodedFacts))|ForEach-Object{$_.ToString('x2')})
+  $factSetShaLine=@($lines|Where-Object{$_-like 'Fact-Set-SHA256:*'})[0]
+  $factSetShaLine|Should -Be "Fact-Set-SHA256: $decodedFactsHash"
+
+  $evidenceLine=@($lines|Where-Object{$_-like 'Evidence-JCS-Base64Url:*'})[0]
+  $evidenceEncoded=$evidenceLine.Substring('Evidence-JCS-Base64Url: '.Length)
+  $decodedEvidence=ConvertFrom-TPMJcsBase64UrlV1 $evidenceEncoded
+  $decodedEvidenceHash=-join([Security.Cryptography.SHA256]::Create().ComputeHash($utf8.GetBytes($decodedEvidence))|ForEach-Object{$_.ToString('x2')})
+  $evidenceSetShaLine=@($lines|Where-Object{$_-like 'Evidence-Set-SHA256:*'})[0]
+  $evidenceSetShaLine|Should -Be "Evidence-Set-SHA256: $decodedEvidenceHash"
+
+  $eligLine=@($lines|Where-Object{$_-like 'Eligibility-Payload-JCS-Base64Url:*'})[0]
+  $eligEncoded=$eligLine.Substring('Eligibility-Payload-JCS-Base64Url: '.Length)
+  $decodedElig=ConvertFrom-TPMJcsBase64UrlV1 $eligEncoded
+  $decodedElig|Should -Be $run.Eligibility.CanonicalJson
+ }
+ It 'renders Failure-Code: none when the eligibility payload has no failure reasons' {
+  $run=New-FullPipelineRunV1 $root $true $false
+  $report=New-TPMValidationReportV1 -SealedRun $run.Sealed -Eligibility $run.Eligibility
+  $lines=$report.Markdown -split "`n"
+  $failureReasonsIndex=[array]::IndexOf($lines,'## Failure Reasons')
+  $lines[$failureReasonsIndex+1]|Should -Be 'Failure-Code: none'
+ }
+ It 'rejects a SealedRun and Eligibility from two different runs' {
+  $runA=New-FullPipelineRunV1 $root $true $false
+  $root2=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $root2|Out-Null
+  $runB=New-FullPipelineRunV1 $root2 $true $false
+  {New-TPMValidationReportV1 -SealedRun $runA.Sealed -Eligibility $runB.Eligibility}|Should -Throw '*REPORT_INVALID*RunIdentity*'
+ }
+ It 'rejects wrong compiled types and null/plain-object input for both parameters' {
+  Initialize-TPMCertificationTypesV1|Out-Null
+  $type='Jumpstile.TPM.Certification.V1.TPMScorePreviewV1'-as[type]
+  $ctor=$type.GetConstructors([Reflection.BindingFlags]'NonPublic,Instance')[0]
+  $wrongType=$ctor.Invoke(@('deadbeefdeadbeefdeadbeefdeadbeef','{}'))
+  $run=New-FullPipelineRunV1 $root $true $false
+  {New-TPMValidationReportV1 -SealedRun $wrongType -Eligibility $run.Eligibility}|Should -Throw '*REPORT_INVALID*'
+  {New-TPMValidationReportV1 -SealedRun $run.Sealed -Eligibility $wrongType}|Should -Throw '*REPORT_INVALID*'
+  {New-TPMValidationReportV1 -SealedRun $null -Eligibility $run.Eligibility}|Should -Throw
+  {New-TPMValidationReportV1 -SealedRun $run.Sealed -Eligibility $null}|Should -Throw
+ }
+}
+
+Describe 'ADR-0155 Phase 3 JCS base64url transport (Section 8.4)' {
+ It 'round-trips arbitrary canonical JSON through the unpadded base64url alphabet' {
+  $canonical=ConvertTo-TPMJcsV1 ([ordered]@{z=@(3,2,1);a=$true;nested=[ordered]@{x=1}})
+  $encoded=ConvertTo-TPMJcsBase64UrlV1 $canonical
+  $encoded|Should -Match '^[A-Za-z0-9_-]+$'
+  $encoded|Should -Not -Match '='
+  ConvertFrom-TPMJcsBase64UrlV1 $encoded|Should -Be $canonical
+ }
+ It 'rejects padded input, invalid alphabet characters, and an invalid length remainder' {
+  {ConvertFrom-TPMJcsBase64UrlV1 'abc='}|Should -Throw
+  {ConvertFrom-TPMJcsBase64UrlV1 'abc!!!'}|Should -Throw
+  {ConvertFrom-TPMJcsBase64UrlV1 'AAAAA'}|Should -Throw
+ }
+ It 'is a distinct transport from ConvertTo-TPMFailureMessageBase64UrlV1 -- encodes bytes directly with no JSON-string wrapping layer' {
+  $canonical='{"a":1}'
+  $jcsEncoded=ConvertTo-TPMJcsBase64UrlV1 $canonical
+  $failureMessageEncoded=ConvertTo-TPMFailureMessageBase64UrlV1 $canonical
+  $jcsEncoded|Should -Not -Be $failureMessageEncoded
+  ConvertFrom-TPMJcsBase64UrlV1 $jcsEncoded|Should -Be $canonical
+ }
+}
+
+Describe 'ADR-0155 Phase 1 JCS canonicalization of parsed PSCustomObject (PowerShell round-trip support)' {
+ It 'produces byte-identical canonical output for a value round-tripped through ConvertFrom-Json' {
+  $original=[ordered]@{z=@(3,2,1);a=$true;nested=[ordered]@{x=1;y='hello'};b=$null}
+  $originalJson=ConvertTo-TPMJcsV1 $original
+  $parsed=$originalJson|ConvertFrom-Json
+  $roundTripped=ConvertTo-TPMJcsV1 $parsed
+  $roundTripped|Should -Be $originalJson
+ }
+ It 'canonicalizes an empty parsed object to {}' {
+  $parsed='{}'|ConvertFrom-Json
+  ConvertTo-TPMJcsV1 $parsed|Should -Be '{}'
  }
 }
