@@ -710,3 +710,65 @@ builders (ADR155-0305), staging/publication (ADR155-0306), the sole
 final-outcome composition already substantially covered by the
 dispatcher's `IssueFinalOutcome` (ADR155-0307), NOT-CERTIFIED bundle
 publication (ADR155-0308), and the atomic cutover (ADR155-0309).
+
+## Phase 3 delta review correction -- 2026-07-20
+
+Independent review of commit `0b43384` returned CHANGES REQUIRED with one
+P2 finding, corrected in this commit:
+
+**P2 (confirmed by direct reproduction before fixing):** both Markdown
+builders interpolated `RunIdentity`, SHA-256 fields, and
+`FailureReasons[].Code` directly after checking only compiled type and
+field presence -- never their format. Since a same-compiled-type object
+is reachable via reflection (exactly as this suite's own provenance-
+rejection tests already construct), a malformed `RunIdentity` containing
+an embedded newline and fake heading text was demonstrated to inject
+arbitrary Markdown structure into `New-TPMScorecardReportV1`'s output
+before this fix (`Run-Identity: deadbeef` followed by a literal injected
+`## INJECTED HEADING` / `Status: PASS` line pair, reproduced directly
+against the built module).
+
+- Added `Assert-TPMMarkdownRunIdentityV1` (`^[0-9a-f]{32}$`),
+  `Assert-TPMMarkdownSha256V1` (`^[0-9a-f]{64}$`), and
+  `Assert-TPMMarkdownFailureCodeV1` (closed-vocabulary membership) to
+  Reports.psm1, and call all three before any of those fields are
+  interpolated in either builder. Malformed values are rejected with
+  `REPORT_INVALID`; nothing is sanitized or escaped, matching the
+  instruction not to alter Markdown-structural characters into a
+  different-but-still-parsed form. `EligibilityPayloadSha256` needed no
+  new check -- it is always computed by the builder itself via
+  `Get-TPMSha256HexV1`, never taken from parsed input.
+- Added `Get-TPMFactFailureCodesV1` to Authority.psm1: the closed,
+  44-code vocabulary of every code `Get-TPMFactDecisionV1` can actually
+  emit (enumerated directly from its `Add-Reason` call sites, not the
+  broader theoretical set Section 5's prose lists, some of which --
+  `HEALTH_CHECK_MISSING`, `HEALTH_CHECK_DUPLICATE`,
+  `HEALTH_CHECK_NON_BOOLEAN` -- are rejected earlier as `SCHEMA_INVALID`
+  by `Assert-TPMFactRecordV1` and can never reach a decision as a
+  `FailureReasons` entry). `New-TPMScorecardReportV1`'s per-item
+  `FailureReasons` (sourced only from `Get-TPMFactDecisionV1`) validates
+  against this vocabulary alone; `New-TPMValidationReportV1`'s top-level
+  `FailureReasons` (the ordered union of score-item and evidence reasons,
+  per `Get-TPMEligibilityPayloadV1`) validates against this vocabulary
+  unioned with the existing `Get-TPMEvidenceFailureCodesV1`.
+- Free-text failure messages remain exclusively in
+  `Failure-Message-Base64Url`, unchanged by this fix.
+- Added regression tests to both builders' Describe blocks (via two new
+  synthetic-object helpers, `New-SyntheticEligibilityV1` and
+  `New-SyntheticSealedRunV1`, each building a complete, otherwise-valid
+  eleven-item compiled object with one caller-controlled field) covering
+  a newline-bearing `RunIdentity`, a malformed `FactSetSha256`/
+  `EvidenceSetSha256`, and a newline-bearing or unknown failure code, for
+  both `New-TPMScorecardReportV1` and `New-TPMValidationReportV1`.
+- ADR155-Q001/Q002: `Tests/TPMCertification.Reports.Tests.ps1` gained 7
+  more tests (41 total; 126 combined with all prior focused suites).
+  126/126 on pwsh 7.6.3 and 126/126 on Windows PowerShell 5.1.26100.8875.
+- ADR155-Q003/Q004: `Invoke-Pester -Path .\Tests` passed 906/906 on pwsh
+  7.6.3 and 901/906 on Windows PowerShell 5.1, with exactly the same five
+  unchanged issue #148 Repair-GamePaths failures.
+- ADR155-Q005/Q006/Q007: all three changed files had zero non-ASCII
+  bytes, zero parser errors, zero PSScriptAnalyzer findings, and zero
+  InjectionHunter findings.
+
+No architectural or behavioral change beyond this one finding. No
+manifest/marker, staging, publication, or harness wiring began.

@@ -70,6 +70,29 @@ BeforeAll {
   $finalOutcome=&$authority IssueFinalOutcome $eligibility $outcome
   return @{Authority=$authority;Sealed=$sealed;Eligibility=$eligibility;PublicationCandidate=$candidate;PublicationOutcome=$outcome;FinalOutcome=$finalOutcome}
  }
+ function New-SyntheticEligibilityV1 {
+  param([string]$RunIdentity='deadbeefdeadbeefdeadbeefdeadbeef',[string]$FactSetSha256=('a'*64),[string]$EvidenceSetSha256=('a'*64),[string]$FailureCode=$null,[string]$FailureMessage='synthetic')
+  Initialize-TPMCertificationTypesV1|Out-Null
+  $type='Jumpstile.TPM.Certification.V1.TPMEligibilitySnapshotV1'-as[type]
+  $ctor=$type.GetConstructors([Reflection.BindingFlags]'NonPublic,Instance')[0]
+  $ids=Get-TPMFactIdentifiersV1
+  $scoreItems=@($ids|ForEach-Object{[ordered]@{Identifier=$_;Status='NotApplicable';Passed=$null;Details=[ordered]@{};FailureReasons=@()}})
+  if($FailureCode){$scoreItems[0]=[ordered]@{Identifier=$ids[0];Status='Fail';Passed=$false;Details=[ordered]@{};FailureReasons=@([ordered]@{Code=$FailureCode;Message=$FailureMessage})}}
+  $scoreItemsJson=ConvertTo-TPMJcsV1 $scoreItems
+  $failureReasonsJson=if($FailureCode){ConvertTo-TPMJcsV1 @([ordered]@{SourceIdentifier=$ids[0];Code=$FailureCode;Message=$FailureMessage})}else{'[]'}
+  $escapedRunIdentity=$RunIdentity.Replace('\','\\').Replace('"','\"').Replace("`n",'\n')
+  $json='{"RunIdentity":"'+$escapedRunIdentity+'","FactSetSha256":"'+$FactSetSha256+'","EvidenceSetSha256":"'+$EvidenceSetSha256+'","ScoreItems":'+$scoreItemsJson+',"ApplicableCount":11,"PassedCount":11,"PercentageBasisPoints":10000,"EligibleForCertification":true,"FailureReasons":'+$failureReasonsJson+'}'
+  return $ctor.Invoke(@('deadbeefdeadbeefdeadbeefdeadbeef',$json))
+ }
+ function New-SyntheticSealedRunV1 {
+  param([string]$RunIdentity='deadbeefdeadbeefdeadbeefdeadbeef')
+  Initialize-TPMCertificationTypesV1|Out-Null
+  $type='Jumpstile.TPM.Certification.V1.TPMSealedRunReaderV1'-as[type]
+  $ctor=$type.GetConstructors([Reflection.BindingFlags]'NonPublic,Instance')[0]
+  $escapedRunIdentity=$RunIdentity.Replace('\','\\').Replace('"','\"').Replace("`n",'\n')
+  $json='{"SchemaVersion":1,"RunIdentity":"'+$escapedRunIdentity+'","Mode":"Smoke","Facts":[],"Evidence":[]}'
+  return $ctor.Invoke(@('deadbeefdeadbeefdeadbeefdeadbeef',$json))
+ }
 }
 
 Describe 'ADR-0155 Phase 3 eligibility report builder' {
@@ -322,6 +345,24 @@ Describe 'ADR-0155 Phase 3 scorecard report builder' {
   {New-TPMScorecardReportV1 -Eligibility $null}|Should -Throw
   {New-TPMScorecardReportV1 -Eligibility ([pscustomobject]@{CanonicalJson='{}';RunIdentity='x'})}|Should -Throw '*REPORT_INVALID*'
  }
+ It 'rejects a same-compiled-type eligibility with a newline-bearing RunIdentity rather than injecting a Markdown line' {
+  $malicious=New-SyntheticEligibilityV1 -RunIdentity "deadbeef`n## INJECTED HEADING`nStatus: PASS"
+  {New-TPMScorecardReportV1 -Eligibility $malicious}|Should -Throw '*REPORT_INVALID*RunIdentity*'
+ }
+ It 'rejects a same-compiled-type eligibility with a malformed FactSetSha256/EvidenceSetSha256' {
+  $badFactHash=New-SyntheticEligibilityV1 -FactSetSha256 'not-a-hash'
+  {New-TPMScorecardReportV1 -Eligibility $badFactHash}|Should -Throw '*REPORT_INVALID*FactSetSha256*'
+  $badEvidenceHash=New-SyntheticEligibilityV1 -EvidenceSetSha256 ('a'*63)
+  {New-TPMScorecardReportV1 -Eligibility $badEvidenceHash}|Should -Throw '*REPORT_INVALID*EvidenceSetSha256*'
+ }
+ It 'rejects a same-compiled-type eligibility with a newline-bearing failure code' {
+  $malicious=New-SyntheticEligibilityV1 -FailureCode "REPOSITORY_UNAVAILABLE`n## INJECTED"
+  {New-TPMScorecardReportV1 -Eligibility $malicious}|Should -Throw '*REPORT_INVALID*'
+ }
+ It 'rejects a same-compiled-type eligibility with an unknown failure code' {
+  $malicious=New-SyntheticEligibilityV1 -FailureCode 'NOT_A_REAL_CODE'
+  {New-TPMScorecardReportV1 -Eligibility $malicious}|Should -Throw '*REPORT_INVALID*unrecognized failure code*'
+ }
 }
 
 Describe 'ADR-0155 Phase 3 validation report builder' {
@@ -382,6 +423,26 @@ Describe 'ADR-0155 Phase 3 validation report builder' {
   {New-TPMValidationReportV1 -SealedRun $run.Sealed -Eligibility $wrongType}|Should -Throw '*REPORT_INVALID*'
   {New-TPMValidationReportV1 -SealedRun $null -Eligibility $run.Eligibility}|Should -Throw
   {New-TPMValidationReportV1 -SealedRun $run.Sealed -Eligibility $null}|Should -Throw
+ }
+ It 'rejects a same-compiled-type pair with a newline-bearing RunIdentity rather than injecting a Markdown line' {
+  $maliciousRunIdentity="deadbeef`n## INJECTED HEADING`nStatus: PASS"
+  $sealed=New-SyntheticSealedRunV1 -RunIdentity $maliciousRunIdentity
+  $eligibility=New-SyntheticEligibilityV1 -RunIdentity $maliciousRunIdentity
+  {New-TPMValidationReportV1 -SealedRun $sealed -Eligibility $eligibility}|Should -Throw '*REPORT_INVALID*RunIdentity*'
+ }
+ It 'rejects a same-compiled-type pair with a malformed FactSetSha256/EvidenceSetSha256' {
+  $sealed=New-SyntheticSealedRunV1
+  $badFactHash=New-SyntheticEligibilityV1 -FactSetSha256 'not-a-hash'
+  {New-TPMValidationReportV1 -SealedRun $sealed -Eligibility $badFactHash}|Should -Throw '*REPORT_INVALID*FactSetSha256*'
+  $badEvidenceHash=New-SyntheticEligibilityV1 -EvidenceSetSha256 ('a'*63)
+  {New-TPMValidationReportV1 -SealedRun $sealed -Eligibility $badEvidenceHash}|Should -Throw '*REPORT_INVALID*EvidenceSetSha256*'
+ }
+ It 'rejects a same-compiled-type pair with a newline-bearing or unknown failure code' {
+  $sealed=New-SyntheticSealedRunV1
+  $newlineCode=New-SyntheticEligibilityV1 -FailureCode "REPOSITORY_UNAVAILABLE`n## INJECTED"
+  {New-TPMValidationReportV1 -SealedRun $sealed -Eligibility $newlineCode}|Should -Throw '*REPORT_INVALID*'
+  $unknownCode=New-SyntheticEligibilityV1 -FailureCode 'NOT_A_REAL_CODE'
+  {New-TPMValidationReportV1 -SealedRun $sealed -Eligibility $unknownCode}|Should -Throw '*REPORT_INVALID*unrecognized failure code*'
  }
 }
 

@@ -82,6 +82,19 @@ $script:TpmMarkdownEligibleV1='ELIGIBLE'
 $script:TpmMarkdownNotEligibleV1='NOT ELIGIBLE'
 $script:TpmMarkdownStatusMapV1=@{Pass='PASS';Fail='FAIL';NotApplicable='N/A'}
 
+function Assert-TPMMarkdownRunIdentityV1 {
+    param([string]$Value)
+    if($Value-cnotmatch'^[0-9a-f]{32}$'){throw 'REPORT_INVALID: RunIdentity is not exactly 32 lowercase hexadecimal characters'}
+}
+function Assert-TPMMarkdownSha256V1 {
+    param([string]$Value,[string]$Context)
+    if($Value-cnotmatch'^[0-9a-f]{64}$'){throw "REPORT_INVALID: $Context is not exactly 64 lowercase hexadecimal characters"}
+}
+function Assert-TPMMarkdownFailureCodeV1 {
+    param([string]$Value,[string[]]$AllowedCodes)
+    if($AllowedCodes-cnotcontains$Value){throw "REPORT_INVALID: unrecognized failure code $Value"}
+}
+
 function New-TPMScorecardReportV1 {
     param([Parameter(Mandatory=$true)]$Eligibility)
     if($null-eq$Eligibility-or$Eligibility.GetType().FullName-cne'Jumpstile.TPM.Certification.V1.TPMEligibilitySnapshotV1'){throw 'REPORT_INVALID: Eligibility must be an issued TPMEligibilitySnapshotV1'}
@@ -89,6 +102,9 @@ function New-TPMScorecardReportV1 {
     foreach($field in @('RunIdentity','FactSetSha256','EvidenceSetSha256','ScoreItems','ApplicableCount','PassedCount','PercentageBasisPoints','EligibleForCertification')){
         if($null-eq$parsed.PSObject.Properties[$field]){throw "REPORT_INVALID: Eligibility is missing $field"}
     }
+    Assert-TPMMarkdownRunIdentityV1 ([string]$parsed.RunIdentity)
+    Assert-TPMMarkdownSha256V1 ([string]$parsed.FactSetSha256) 'FactSetSha256'
+    Assert-TPMMarkdownSha256V1 ([string]$parsed.EvidenceSetSha256) 'EvidenceSetSha256'
     $utf8=New-Object Text.UTF8Encoding($false)
     $eligibilityPayloadHash=Get-TPMSha256HexV1 -Bytes ($utf8.GetBytes($Eligibility.CanonicalJson))
     $manifestIdentifiers=Get-TPMFactIdentifiersV1
@@ -125,6 +141,7 @@ function New-TPMScorecardReportV1 {
         }else{
             foreach($reason in $reasons){
                 foreach($field in @('Code','Message')){if($null-eq$reason.PSObject.Properties[$field]){throw 'REPORT_INVALID: FailureReasons entry missing Code/Message'}}
+                Assert-TPMMarkdownFailureCodeV1 ([string]$reason.Code) (Get-TPMFactFailureCodesV1)
                 [void]$lines.Add("Failure-Code: $([string]$reason.Code)")
                 [void]$lines.Add('Failure-Message-Base64Url: '+(ConvertTo-TPMFailureMessageBase64UrlV1 ([string]$reason.Message)))
             }
@@ -152,6 +169,9 @@ function New-TPMValidationReportV1 {
     foreach($field in @('RunIdentity','Facts','Evidence')){if($null-eq$sealedParsed.PSObject.Properties[$field]){throw "REPORT_INVALID: SealedRun is missing $field"}}
     try{$eligibilityParsed=ConvertFrom-Json -InputObject $Eligibility.CanonicalJson -ErrorAction Stop}catch{throw 'REPORT_INVALID: Eligibility.CanonicalJson did not parse as JSON'}
     foreach($field in @('FactSetSha256','EvidenceSetSha256','FailureReasons')){if($null-eq$eligibilityParsed.PSObject.Properties[$field]){throw "REPORT_INVALID: Eligibility is missing $field"}}
+    Assert-TPMMarkdownRunIdentityV1 ([string]$sealedParsed.RunIdentity)
+    Assert-TPMMarkdownSha256V1 ([string]$eligibilityParsed.FactSetSha256) 'FactSetSha256'
+    Assert-TPMMarkdownSha256V1 ([string]$eligibilityParsed.EvidenceSetSha256) 'EvidenceSetSha256'
 
     $utf8=New-Object Text.UTF8Encoding($false)
     $eligibilityPayloadHash=Get-TPMSha256HexV1 -Bytes ($utf8.GetBytes($Eligibility.CanonicalJson))
@@ -177,8 +197,10 @@ function New-TPMValidationReportV1 {
     if($reasons.Count-eq0){
         [void]$lines.Add('Failure-Code: none')
     }else{
+        $allowedFailureCodes=@(Get-TPMFactFailureCodesV1)+@(Get-TPMEvidenceFailureCodesV1)
         foreach($reason in $reasons){
             foreach($field in @('Code','Message')){if($null-eq$reason.PSObject.Properties[$field]){throw 'REPORT_INVALID: FailureReasons entry missing Code/Message'}}
+            Assert-TPMMarkdownFailureCodeV1 ([string]$reason.Code) $allowedFailureCodes
             [void]$lines.Add("Failure-Code: $([string]$reason.Code)")
             [void]$lines.Add('Failure-Message-Base64Url: '+(ConvertTo-TPMFailureMessageBase64UrlV1 ([string]$reason.Message)))
         }

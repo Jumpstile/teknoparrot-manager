@@ -151,9 +151,26 @@ $script:TpmEvidenceFailureCodesV1 = @(
     'EVIDENCE_PNG_INVALID','EVIDENCE_DIMENSIONS_INVALID','EVIDENCE_FILE_LOCKED',
     'EVIDENCE_HASH_FAILED','EVIDENCE_SKIPPED'
 )
+$script:TpmFactFailureCodesV1 = @(
+    'REPOSITORY_UNAVAILABLE','REPOSITORY_DIRTY',
+    'PESTER_NOT_EXECUTED','PESTER_EMPTY','PESTER_FAILURES','PESTER_NOT_RUN','PESTER_COUNTS_INVALID',
+    'PARSER_NOT_EXECUTED','PARSER_ERRORS','ENCODING_NOT_EXECUTED','ENCODING_NON_ASCII',
+    'ANALYZER_NOT_EXECUTED','PSSCRIPTANALYZER_FINDINGS','INJECTION_FINDING_UNRESOLVED',
+    'HEALTH_REPORT_MISSING','HEALTH_REPORT_INVALID','HEALTH_CHECK_FAILED',
+    'BACKUP_NONE_CREATED','BACKUP_VERIFICATION_NOT_EXECUTED','BACKUP_VERIFICATION_FAILED',
+    'SMOKE_TREE_CHANGED','SMOKE_TREE_UNREADABLE',
+    'REPORT_DIRECTORY_UNAVAILABLE','STAGING_UNAVAILABLE','ARTIFACT_MANIFEST_UNCONFIGURED',
+    'PUBLISHER_UNAVAILABLE','PACKAGE_VALIDATION_NOT_EXECUTED','PACKAGE_VALIDATION_FAILED',
+    'PCSX2_FILES_MISSING','PCSX2_INI_MISSING','PCSX2_PATH_NONCANONICAL','PCSX2_LEGACY_ROOT_PRESENT',
+    'VBT_NOT_EXECUTED','VBT_EMPTY','VBT_FAILURES','VBT_COUNTS_INVALID',
+    'EFFECTIVE_ROOT_MISSING','EFFECTIVE_ROOT_INVALID','EFFECTIVE_ROOT_MISMATCH',
+    'RESTORE_NOT_ATTEMPTED','RESTORE_FAILED','RESTORE_VERIFICATION_FAILED','RESTORE_SNAPSHOT_INVALID',
+    'TEMP_CONFIG_NOT_REMOVED'
+)
 function Get-TPMFactIdentifiersV1 { return ,@($script:TpmFactIdentifiersV1) }
 function Get-TPMEvidenceManifestV1 { return ,@($script:TpmEvidenceManifestV1) }
 function Get-TPMEvidenceFailureCodesV1 { return ,@($script:TpmEvidenceFailureCodesV1) }
+function Get-TPMFactFailureCodesV1 { return ,@($script:TpmFactFailureCodesV1) }
 
 function Get-TPMValueMapV1 {
     param([Parameter(Mandatory=$true)]$Value)
@@ -266,4 +283,4 @@ function Get-TPMScoreAggregateV1 {
     return [ordered]@{ApplicableCount=$applicableCount;PassedCount=$passedCount;PercentageBasisPoints=$percentageBasisPoints;ThresholdBasisPoints=$thresholdBasisPoints;ScoreEligible=$scoreEligible}
 }
 
-Export-ModuleMember -Function Initialize-TPMCertificationTypesV1,ConvertTo-TPMJcsV1,ConvertTo-TPMFailureMessageBase64UrlV1,ConvertFrom-TPMFailureMessageBase64UrlV1,New-TPMWorkflowAuthorityV1,Get-TPMSha256HexV1,Resolve-TPMContainedPathV1,Get-TPMFactIdentifiersV1,Get-TPMEvidenceManifestV1,Get-TPMEvidenceFailureCodesV1,Assert-TPMFactRecordV1,Get-TPMFactDecisionV1,Assert-TPMEvidenceRecordV1,Copy-TPMClosedValueV1,Assert-TPMExactFieldsV1,Assert-TPMStringV1,Get-TPMScoreAggregateV1,ConvertTo-TPMJcsBase64UrlV1,ConvertFrom-TPMJcsBase64UrlV1
+Export-ModuleMember -Function Initialize-TPMCertificationTypesV1,ConvertTo-TPMJcsV1,ConvertTo-TPMFailureMessageBase64UrlV1,ConvertFrom-TPMFailureMessageBase64UrlV1,New-TPMWorkflowAuthorityV1,Get-TPMSha256HexV1,Resolve-TPMContainedPathV1,Get-TPMFactIdentifiersV1,Get-TPMEvidenceManifestV1,Get-TPMEvidenceFailureCodesV1,Assert-TPMFactRecordV1,Get-TPMFactDecisionV1,Assert-TPMEvidenceRecordV1,Copy-TPMClosedValueV1,Assert-TPMExactFieldsV1,Assert-TPMStringV1,Get-TPMScoreAggregateV1,ConvertTo-TPMJcsBase64UrlV1,ConvertFrom-TPMJcsBase64UrlV1,Get-TPMFactFailureCodesV1
