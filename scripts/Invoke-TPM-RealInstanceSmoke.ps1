@@ -36,6 +36,7 @@ $runTimer = [System.Diagnostics.Stopwatch]::StartNew()
 
 . (Join-Path $PSScriptRoot 'Resolve-Pcsx2Directory.ps1')
 Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Shadow.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Orchestration.psm1') -Force
 
 $RepoPath = (Resolve-Path -LiteralPath $RepoPath).Path
 if (!(Test-Path -LiteralPath $TeknoParrotRoot -PathType Container)) {
@@ -2895,6 +2896,52 @@ finally {
         [System.IO.File]::WriteAllText($shadowDiagnosticPath,($shadowFailure | ConvertTo-Json -Depth 8 -Compress),(New-Object System.Text.UTF8Encoding $false))
     }
 
+    # ADR-0155 Phase 3 (ADR155-0309): execute the real authority. From this
+    # point on, $productionResult.Projection -- not legacy $finalization -- is
+    # what determines the console FINAL STATUS line and the process exit
+    # code below. Legacy scoring, its own console reports, and its own
+    # publication (immediately below this block) are unchanged and
+    # untouched; only the decision that exits the process moves to this
+    # authority, per ADR Section 11's atomic-cutover framing (this is
+    # harness wiring only -- legacy removal is a separate, later change).
+    # Independent of the Phase 2 shadow block above: this authority does not
+    # read $shadowFacts or depend on the shadow try/catch having succeeded.
+    # Its bundle publishes under $reportDir\Authoritative\<RunIdentity>\,
+    # never inside $reportDir itself, since legacy already owns canonical
+    # filenames there (e.g. TPM-Certification-Commit.json) that
+    # Publication.psm1's never-overwrite contract would otherwise collide
+    # with.
+    $productionStagingParentRoot = Join-Path $reportDir 'Authoritative\_staging'
+    $productionDestinationRoot = Join-Path $reportDir 'Authoritative'
+    try {
+        $productionFacts = New-TPMShadowFactRecordsFromLegacyV1 -Results $results -RepositoryPath $RepoPath -ReportDirectory $reportDir -BackupDirectory $backupDir -HealthResult $healthResult -HealthLoadError $healthLoadError -UnattendedBinding $binding
+        $productionPngValidator = {
+            param($Path)
+            $valid = Test-TPMScreenshotFileValid -Path $Path
+            if (-not $valid.Valid) { return [pscustomobject]@{Valid=$false;Reason=$valid.Reason;Width=0;Height=0} }
+            $image = [System.Drawing.Image]::FromFile($Path)
+            try { return [pscustomobject]@{Valid=$true;Reason=$valid.Reason;Width=$image.Width;Height=$image.Height} }
+            finally { $image.Dispose() }
+        }
+        $productionResult = Invoke-TPMProductionCertificationV1 -Mode $(if($results.SmokeMode){'Smoke'}else{'Unattended'}) -Facts $productionFacts -EvidenceRoot $screenshotDir -ReportRoot $reportDir -LegacyEvidence $results.Screenshots -StagingParentRoot $productionStagingParentRoot -DestinationRoot $productionDestinationRoot -PngValidator $productionPngValidator
+    } catch {
+        # The authoritative pipeline could not reach a decision at all. Per
+        # ADR Section 11, this is never certifiable and must not fall back to
+        # any other decision source -- doing so would reintroduce the "mixed
+        # authorities" ambiguity the ADR prohibits. Fail closed: hard NOT
+        # CERTIFIED / exit 1, with the cause preserved for diagnosis.
+        $productionResult = [pscustomobject]@{
+            Projection = [pscustomobject]@{
+                RunIdentity = $null
+                FinalStatus = 'NOT CERTIFIED'
+                ExitCode = 1
+                ConsoleMessage = "Certification authority pipeline failed before reaching a decision: $($_.Exception.Message)"
+            }
+            CommitResult = $null
+            Error = $_.Exception.Message
+        }
+    }
+
     # System Invariant Inventory: publication as part of commit. Report
     # content depends on the transaction's decision (it renders Finalization
     # into both reports), so it cannot be built before the transaction runs --
@@ -3069,12 +3116,28 @@ finally {
         Write-Host (" OVERALL      : NOT CERTIFIED") -ForegroundColor Red
         Write-Host (" EXIT CODE    : 1") -ForegroundColor Red
         Write-Host (" REPORTS      : {0}" -f $finalization.PublicationError) -ForegroundColor Red
-        exit $finalization.ExitCode
+    } else {
+        $finalColor = if ($finalization.Passed) { 'Green' } else { 'Red' }
+        foreach ($line in @(Get-TPMCertificationFinalConsoleLines -Finalization $finalization)) {
+            Write-Host (" {0}" -f $line) -ForegroundColor $finalColor
+        }
     }
 
-    $finalColor = if ($finalization.Passed) { 'Green' } else { 'Red' }
-    foreach ($line in @(Get-TPMCertificationFinalConsoleLines -Finalization $finalization)) {
-        Write-Host (" {0}" -f $line) -ForegroundColor $finalColor
+    # ADR-0155 Phase 3 (ADR155-0309): the process exit code and the
+    # authoritative FINAL STATUS line derive from $productionResult.Projection
+    # (Section 9's runtime TPMFinalOutcomeV1), not from legacy $finalization
+    # above -- legacy's own PASS/FAIL/CERTIFIED lines printed above remain
+    # informational only. This is the harness-wiring half of the atomic
+    # cutover; legacy's own decision computation and publication are
+    # otherwise untouched and continue to run exactly as before.
+    $authoritativeColor = if ($productionResult.Projection.FinalStatus -eq 'CERTIFIED') { 'Green' } else { 'Red' }
+    Write-Host ""
+    Write-Host " ============================================" -ForegroundColor $authoritativeColor
+    Write-Host " AUTHORITATIVE CERTIFICATION RESULT (ADR-0155)" -ForegroundColor $authoritativeColor
+    Write-Host " ============================================" -ForegroundColor $authoritativeColor
+    Write-Host (" {0}" -f $productionResult.Projection.ConsoleMessage) -ForegroundColor $authoritativeColor
+    if ($productionResult.CommitResult -and $productionResult.CommitResult.Committed) {
+        Write-Host (" Authoritative bundle : {0}" -f $productionResult.CommitResult.DestinationDirectory) -ForegroundColor $authoritativeColor
     }
-    exit $finalization.ExitCode
+    exit $productionResult.Projection.ExitCode
 }
