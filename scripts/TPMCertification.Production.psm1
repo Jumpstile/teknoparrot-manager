@@ -1,5 +1,15 @@
 Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Authority.psm1')
 Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Shadow.psm1')
+# Test-TPMArtifactsPreflightV1 (below) genuinely depends on these commands
+# existing -- imported here directly rather than relying on
+# Orchestration.psm1 to have already pulled them in. Nested Import-Module
+# calls from within another module do not reliably make that module's
+# imports visible outside its own scope (confirmed empirically: a session
+# that only imported Orchestration.psm1 could not see Reports.psm1's
+# exports), so this module must declare its own dependency rather than
+# assume something else already loaded it.
+Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Reports.psm1')
+Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Publication.psm1')
 Set-StrictMode -Version 2.0
 
 function Get-TPMEligibilityPayloadV1 {
