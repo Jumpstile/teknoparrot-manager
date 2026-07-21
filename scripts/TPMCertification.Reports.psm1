@@ -78,6 +78,49 @@ function New-TPMFinalOutcomeReportV1 {
     }
 }
 
+function New-TPMFinalOutcomeCandidateReportV1 {
+    # ADR-0155 Section 8.3 candidate artifact, distinct from Section 9's
+    # runtime TPMFinalOutcomeV1 (built by New-TPMFinalOutcomeReportV1, which
+    # this function does not modify or relax). This candidate is derived from
+    # eligibility alone -- available immediately after IssueEligibility, long
+    # before any publication attempt -- so it can be staged into the
+    # publication bundle's manifest without depending on an already-committed
+    # publication outcome. It carries EligibilityStatus/RequiredPublicationState
+    # (not the real EligibleForCertification/PublicationCommitted Booleans) and
+    # has no FailureReasons, exactly matching Section 8.3's schema. It must
+    # never be accepted by New-TPMFinalOutcomeProjectionV1 or any other
+    # runtime certification/console/exit-code path -- only a genuine
+    # dispatcher-issued TPMFinalOutcomeV1, reflecting real PublicationCommitted
+    # state, may drive that decision.
+    param([Parameter(Mandatory=$true)]$Eligibility)
+    if($null-eq$Eligibility-or$Eligibility.GetType().FullName-cne'Jumpstile.TPM.Certification.V1.TPMEligibilitySnapshotV1'){throw 'REPORT_INVALID: Eligibility must be an issued TPMEligibilitySnapshotV1'}
+    try{$parsed=ConvertFrom-Json -InputObject $Eligibility.CanonicalJson -ErrorAction Stop}catch{throw 'REPORT_INVALID: Eligibility.CanonicalJson did not parse as JSON'}
+    foreach($field in @('RunIdentity','EligibleForCertification')){if($null-eq$parsed.PSObject.Properties[$field]){throw "REPORT_INVALID: Eligibility is missing $field"}}
+    $utf8=New-Object Text.UTF8Encoding($false)
+    $payloadHash=Get-TPMSha256HexV1 -Bytes ($utf8.GetBytes($Eligibility.CanonicalJson))
+    $certified=[bool]$parsed.EligibleForCertification
+    $eligibilityStatus=if($certified){'Eligible'}else{'NotEligible'}
+    $finalStatus=if($certified){'CERTIFIED'}else{'NOT CERTIFIED'}
+    $exitCode=if($certified){0}else{1}
+    $candidate=[ordered]@{
+        SchemaVersion=1
+        RunIdentity=[string]$parsed.RunIdentity
+        EligibilityPayloadSha256=$payloadHash
+        EligibilityStatus=$eligibilityStatus
+        RequiredPublicationState='Committed'
+        FinalStatus=$finalStatus
+        ExitCode=$exitCode
+    }
+    $json=ConvertTo-TPMJcsV1 $candidate
+    $bytes=$utf8.GetBytes($json)
+    return [pscustomobject]@{
+        FileName='TPM-Certification-Final-Outcome.json'
+        Json=$json
+        Bytes=$bytes
+        ByteLength=$bytes.Length
+    }
+}
+
 function New-TPMFinalOutcomeProjectionV1 {
     param([Parameter(Mandatory=$true)]$FinalOutcome)
     $report=New-TPMFinalOutcomeReportV1 -FinalOutcome $FinalOutcome
@@ -329,4 +372,4 @@ function New-TPMCommitMarkerReportV1 {
     }
 }
 
-Export-ModuleMember -Function New-TPMEligibilityReportV1,Get-TPMFinalEvidenceStatusV1,New-TPMPublicationReportV1,New-TPMFinalOutcomeReportV1,New-TPMFinalOutcomeProjectionV1,New-TPMScorecardReportV1,New-TPMValidationReportV1,New-TPMManifestReportV1,New-TPMCommitMarkerReportV1,Assert-TPMMarkdownRunIdentityV1,Assert-TPMMarkdownSha256V1
+Export-ModuleMember -Function New-TPMEligibilityReportV1,Get-TPMFinalEvidenceStatusV1,New-TPMPublicationReportV1,New-TPMFinalOutcomeReportV1,New-TPMFinalOutcomeCandidateReportV1,New-TPMFinalOutcomeProjectionV1,New-TPMScorecardReportV1,New-TPMValidationReportV1,New-TPMManifestReportV1,New-TPMCommitMarkerReportV1,Assert-TPMMarkdownRunIdentityV1,Assert-TPMMarkdownSha256V1

@@ -281,6 +281,73 @@ Describe 'ADR-0155 Phase 3 final-outcome report builder' {
  }
 }
 
+Describe 'ADR-0155 Phase 3 final-outcome candidate report builder (Section 8.3)' {
+ BeforeEach {$root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $root|Out-Null}
+ It 'builds the exact seven-field candidate schema from eligibility alone, with no publication or dispatcher final outcome ever issued' {
+  $eligibility=New-IssuedEligibilityV1 $root
+  $report=New-TPMFinalOutcomeCandidateReportV1 -Eligibility $eligibility
+  $report.FileName|Should -Be 'TPM-Certification-Final-Outcome.json'
+  $parsed=$report.Json|ConvertFrom-Json
+  @($parsed.PSObject.Properties.Name|Sort-Object)|Should -Be @('EligibilityPayloadSha256','EligibilityStatus','ExitCode','FinalStatus','RequiredPublicationState','RunIdentity','SchemaVersion')
+  $parsed.EligibilityStatus|Should -Be 'Eligible'
+  $parsed.RequiredPublicationState|Should -Be 'Committed'
+  $parsed.FinalStatus|Should -Be 'CERTIFIED'
+  $parsed.ExitCode|Should -Be 0
+  $eligibilityParsed=$eligibility.CanonicalJson|ConvertFrom-Json
+  $parsed.RunIdentity|Should -Be $eligibilityParsed.RunIdentity
+ }
+ It 'derives NotEligible/NOT CERTIFIED/1 from a score-ineligible eligibility, still without any publication attempt' {
+  $run=New-FullPipelineRunV1 $root $true $true
+  $report=New-TPMFinalOutcomeCandidateReportV1 -Eligibility $run.Eligibility
+  $parsed=$report.Json|ConvertFrom-Json
+  $parsed.EligibilityStatus|Should -Be 'NotEligible'
+  $parsed.FinalStatus|Should -Be 'NOT CERTIFIED'
+  $parsed.ExitCode|Should -Be 1
+ }
+ It 'computes EligibilityPayloadSha256 identically to New-TPMEligibilityReportV1 for the same eligibility object' {
+  $eligibility=New-IssuedEligibilityV1 $root
+  $eligibilityReport=New-TPMEligibilityReportV1 -Eligibility $eligibility
+  $candidateReport=New-TPMFinalOutcomeCandidateReportV1 -Eligibility $eligibility
+  $candidateParsed=$candidateReport.Json|ConvertFrom-Json
+  $candidateParsed.EligibilityPayloadSha256|Should -Be $eligibilityReport.EligibilityPayloadSha256
+ }
+ It 'never includes FailureReasons -- Section 8.3 excludes it, unlike Section 9''s runtime object' {
+  $eligibility=New-IssuedEligibilityV1 $root
+  $report=New-TPMFinalOutcomeCandidateReportV1 -Eligibility $eligibility
+  $parsed=$report.Json|ConvertFrom-Json
+  $parsed.PSObject.Properties.Name|Should -Not -Contain 'FailureReasons'
+ }
+ It 'produces BOM-less UTF-8 bytes' {
+  $eligibility=New-IssuedEligibilityV1 $root
+  $report=New-TPMFinalOutcomeCandidateReportV1 -Eligibility $eligibility
+  $report.Bytes[0]|Should -Not -Be 0xEF
+  $report.ByteLength|Should -Be $report.Bytes.Length
+ }
+ It 'rejects the wrong compiled type and null/plain-object input' {
+  Initialize-TPMCertificationTypesV1|Out-Null
+  $type='Jumpstile.TPM.Certification.V1.TPMScorePreviewV1'-as[type]
+  $ctor=$type.GetConstructors([Reflection.BindingFlags]'NonPublic,Instance')[0]
+  $wrongType=$ctor.Invoke(@('deadbeefdeadbeefdeadbeefdeadbeef','{}'))
+  {New-TPMFinalOutcomeCandidateReportV1 -Eligibility $wrongType}|Should -Throw '*REPORT_INVALID*'
+  {New-TPMFinalOutcomeCandidateReportV1 -Eligibility $null}|Should -Throw
+  {New-TPMFinalOutcomeCandidateReportV1 -Eligibility ([pscustomobject]@{CanonicalJson='{}';RunIdentity='x'})}|Should -Throw '*REPORT_INVALID*'
+ }
+ It 'rejects a same-type compiled eligibility whose canonical JSON omits EligibleForCertification' {
+  Initialize-TPMCertificationTypesV1|Out-Null
+  $type='Jumpstile.TPM.Certification.V1.TPMEligibilitySnapshotV1'-as[type]
+  $ctor=$type.GetConstructors([Reflection.BindingFlags]'NonPublic,Instance')[0]
+  $json='{"RunIdentity":"deadbeefdeadbeefdeadbeefdeadbeef","FactSetSha256":"'+('a'*64)+'"}'
+  $incomplete=$ctor.Invoke(@('deadbeefdeadbeefdeadbeefdeadbeef',$json))
+  {New-TPMFinalOutcomeCandidateReportV1 -Eligibility $incomplete}|Should -Throw '*REPORT_INVALID*EligibleForCertification*'
+ }
+ It 'can never satisfy the runtime certification path -- New-TPMFinalOutcomeProjectionV1 rejects the candidate''s own output object' {
+  $eligibility=New-IssuedEligibilityV1 $root
+  $candidateReport=New-TPMFinalOutcomeCandidateReportV1 -Eligibility $eligibility
+  {New-TPMFinalOutcomeProjectionV1 -FinalOutcome $candidateReport}|Should -Throw '*REPORT_INVALID*'
+  {New-TPMFinalOutcomeReportV1 -FinalOutcome $candidateReport}|Should -Throw '*REPORT_INVALID*'
+ }
+}
+
 Describe 'ADR-0155 Phase 3 sole final-outcome composition projection' {
  BeforeEach {$root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $root|Out-Null}
  It 'projects a CERTIFIED outcome into RunIdentity, FinalStatus, ExitCode, and a deterministic ConsoleMessage' {
