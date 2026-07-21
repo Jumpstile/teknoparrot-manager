@@ -322,6 +322,95 @@ function Get-TPMEmulatorContractV1 {
     return [pscustomobject]@{ ContractId = $ContractId; Path = $contractPath; Contract = $validated }
 }
 
+$script:TpmSupportedContractSchemaVersionsV1 = @('1.0.0')
+
+function Get-TPMSupportedContractSchemaVersionsV1 { return , @($script:TpmSupportedContractSchemaVersionsV1) }
+
+function Assert-TPMSupportedContractSchemaVersionV1 {
+    # Assert-TPMEmulatorContractV1 already requires SchemaVersion -ceq '1.0.0'
+    # inline; this is the explicit, queryable form of that same rule -- the
+    # single source both Test-TPMContractRegistryIntegrityV1 and any future
+    # multi-schema-version loader consult, so "which versions does this build
+    # actually support" is never re-typed as a second string literal.
+    param([Parameter(Mandatory = $true)]$Contract)
+    if ($script:TpmSupportedContractSchemaVersionsV1 -cnotcontains $Contract.SchemaVersion) {
+        throw "SCHEMA_INVALID: Contract.SchemaVersion '$($Contract.SchemaVersion)' is not a supported EmulatorContractV1 version"
+    }
+}
+
+function Assert-TPMContractLocatorsResolveV1 {
+    # Verifies every EvidenceReference's Locator (the evidence.md / experiments.md
+    # anchor a claim's proof lives at) actually resolves -- both the file and a
+    # heading that starts with the anchor fragment. A contract with a citation
+    # pointing nowhere is exactly as untrustworthy as one with no citation at
+    # all, and this is the only mechanized check that would ever catch it.
+    param([Parameter(Mandatory = $true)]$Contract, [Parameter(Mandatory = $true)][string]$ContractDirectory)
+    foreach ($ref in $Contract.EvidenceReferences) {
+        $locator = [string]$ref.Locator
+        if ($locator -notmatch '^([^#]+)#(.+)$') { throw "SCHEMA_INVALID: EvidenceReferences[$($ref.EvidenceId)].Locator '$locator' is not in 'file#fragment' form" }
+        $file = $Matches[1]
+        $fragment = $Matches[2]
+        $filePath = Join-Path $ContractDirectory $file
+        if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) { throw "SCHEMA_INVALID: EvidenceReferences[$($ref.EvidenceId)].Locator points to missing file '$file'" }
+        $lines = [System.IO.File]::ReadAllLines($filePath)
+        $found = $false
+        foreach ($line in $lines) {
+            if ($line.TrimStart() -match '^#{1,6}\s+(.+)$') {
+                if ($Matches[1].StartsWith($fragment, [StringComparison]::Ordinal)) { $found = $true; break }
+            }
+        }
+        if (-not $found) { throw "SCHEMA_INVALID: EvidenceReferences[$($ref.EvidenceId)].Locator anchor '$fragment' has no matching heading in '$file'" }
+    }
+}
+
+function Test-TPMContractRegistryIntegrityV1 {
+    # The permanent, fail-closed health check for the whole contract
+    # registry: discovers every contracts/*/contract.json, validates each
+    # (schema shape, unique ownership paths, unique capability IDs -- all
+    # already enforced inside Assert-TPMEmulatorContractV1), verifies every
+    # evidence/experiment Locator resolves, and verifies the schema version
+    # is one this build supports. Collects every failure across every
+    # contract rather than stopping at the first bad one, since a caller
+    # deciding whether the registry as a whole is trustworthy needs the full
+    # picture. This is the function any certification entry point must call
+    # first and fail closed on -- a contract nobody can currently validate
+    # must never be silently treated as though it still applies.
+    param([string]$ContractsRoot)
+    $root = if ([string]::IsNullOrWhiteSpace($ContractsRoot)) { Get-TPMContractsRootV1 } else { $ContractsRoot }
+    $errors = New-Object Collections.Generic.List[object]
+    $valid = New-Object Collections.Generic.List[object]
+    if (-not (Test-Path -LiteralPath $root -PathType Container)) {
+        return [pscustomobject]@{ Valid = $true; ContractCount = 0; Contracts = @(); Errors = @() }
+    }
+    $dirs = @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne '_schema' } | Sort-Object Name)
+    foreach ($dir in $dirs) {
+        $contractPath = Join-Path $dir.FullName 'contract.json'
+        if (-not (Test-Path -LiteralPath $contractPath -PathType Leaf)) { continue }
+        try {
+            $json = [System.IO.File]::ReadAllText($contractPath)
+            $parsed = ConvertFrom-TPMOrderedJsonV1 -Json $json
+            $validated = Assert-TPMEmulatorContractV1 -Contract $parsed -ExpectedContractId $dir.Name
+            Assert-TPMSupportedContractSchemaVersionV1 -Contract $validated
+            Assert-TPMContractLocatorsResolveV1 -Contract $validated -ContractDirectory $dir.FullName
+            $valid.Add([pscustomobject]@{ ContractId = $dir.Name; Path = $contractPath; Contract = $validated })
+        } catch {
+            $errors.Add([pscustomobject]@{ ContractId = $dir.Name; Message = $_.Exception.Message })
+        }
+    }
+    return [pscustomobject]@{ Valid = ($errors.Count -eq 0); ContractCount = $valid.Count; Contracts = $valid.ToArray(); Errors = $errors.ToArray() }
+}
+
+function Assert-TPMContractRegistryValidV1 {
+    # The fail-closed guard: throws with every accumulated error if the
+    # registry is not currently valid. Certification callers use this, not
+    # Test-TPMContractRegistryIntegrityV1 directly, when the intended
+    # behavior on failure is to stop rather than to report and continue.
+    param([Parameter(Mandatory = $true)]$IntegrityResult)
+    if ($IntegrityResult.Valid) { return }
+    $messages = @($IntegrityResult.Errors | ForEach-Object { "$($_.ContractId): $($_.Message)" }) -join '; '
+    throw "CONTRACT_REGISTRY_INVALID: $messages"
+}
+
 function Resolve-TPMEmulatorVersionMatchV1 {
     # Pure function: given a contract's VersionDetector and an already-extracted
     # observed version signal (e.g. a captured window-title string), computes
@@ -459,6 +548,8 @@ function Resolve-TPMObservableEvidenceV1 {
 
 Export-ModuleMember -Function Get-TPMContractsRootV1, ConvertFrom-TPMOrderedJsonV1, ConvertTo-TPMOrderedValueV1, `
     Assert-TPMEmulatorContractV1, Get-TPMRegisteredEmulatorContractsV1, Get-TPMEmulatorContractV1, `
+    Get-TPMSupportedContractSchemaVersionsV1, Assert-TPMSupportedContractSchemaVersionV1, `
+    Assert-TPMContractLocatorsResolveV1, Test-TPMContractRegistryIntegrityV1, Assert-TPMContractRegistryValidV1, `
     Resolve-TPMEmulatorVersionMatchV1, Assert-TPMOwnershipWriteAllowedV1, `
     Resolve-TPMEnvironmentDataRootV1, Invoke-TPMEnvironmentInitializationActionV1, Test-TPMEnvironmentInitializedV1, `
     Test-TPMRuntimeApplicabilityV1, Resolve-TPMObservableEvidenceV1
