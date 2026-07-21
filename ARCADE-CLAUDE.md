@@ -127,6 +127,27 @@ Release Certification."
 
 ---
 
+## Certification Cadence
+
+- The real arcade machine (the production installation, see "Locations") is
+  the authoritative certification environment. A synthetic-only pass --
+  Pester, harnesses, mocks -- is evidence toward certification, not a
+  certification by itself.
+- Whenever the implementation team freezes a meaningful integration SHA --
+  not only release candidates -- that SHA should be certified against the
+  real installation before the work it represents is considered complete.
+- Treat any divergence between synthetic test results and real-hardware
+  behavior as a release blocker: stop and report it rather than trusting
+  either result alone.
+- A certification run must never modify the implementation branch beyond
+  recording evidence or applying a fix the user has explicitly approved
+  (see "Role").
+- This cadence does not relax the Certification gate above. No certification
+  run begins until a specific commit SHA is explicitly handed over for that
+  run -- a stated intent to certify "after every step" is not itself a SHA.
+
+---
+
 ## Certification workflow
 
 1. Pull the specified commit into the local repository.
