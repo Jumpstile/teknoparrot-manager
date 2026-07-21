@@ -284,7 +284,17 @@ the file that happened to be open.
     helper documented in `docs/AUTO_UPDATE.md` -- omitting this folder was a
     real pre-1.0 packaging gap; the menu-integrated "Check for Updates" option
     does not itself depend on it, but the documented standalone helper does),
-    and `scripts\Debug-TPM-MenuLayout.ps1` (RC2 menu-layout verification helper).
+    `scripts\Debug-TPM-MenuLayout.ps1` (RC2 menu-layout verification helper),
+    `contracts\` (the Emulator Contract Verification Framework's registered
+    contracts -- `_schema\`, `pcsx2x6\`, and any future emulator contract
+    directories, each with its `contract.json`/`evidence.md`/`experiments.md`),
+    and `scripts\TPMCertification.Contracts.psm1` (the ECVF loader/validator/
+    evaluator module those contracts are read through). Both are production
+    runtime components, not dev-only tooling -- they ship deliberately rather
+    than being duplicated into `TeknoParrot-Manager.ps1` as a parallel copy,
+    per the architectural decision that packaging should change to fit the
+    framework rather than the framework being reshaped to fit the prior
+    release layout.
   - Exclude: `ReShade\` (DLLs not redistributable; user obtains from
     reshade.me), `dgVoodoo2\` (user provides), `FFBPlugin\` and
     `BepInExCache\` (auto-downloaded live from GitHub each run, never

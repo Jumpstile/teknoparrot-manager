@@ -26,7 +26,13 @@ try {
         'LICENSE',
         'scripts/Debug-TPM-MenuLayout.ps1',
         'tools/Invoke-TpmAutoUpdate.ps1',
-        'tools/TpmAutoUpdate.Core.psm1'
+        'tools/TpmAutoUpdate.Core.psm1',
+        'scripts/TPMCertification.Contracts.psm1',
+        'contracts/_schema/EmulatorContractV1.schema.json',
+        'contracts/_schema/CertificationEnvelopeV1.schema.json',
+        'contracts/pcsx2x6/contract.json',
+        'contracts/pcsx2x6/evidence.md',
+        'contracts/pcsx2x6/experiments.md'
     )
 
     foreach ($entry in $required) {
