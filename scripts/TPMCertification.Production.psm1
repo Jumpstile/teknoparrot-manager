@@ -253,6 +253,39 @@ function New-TPMProductionWorkflowAuthorityV1 {
 # Executed=$false / not-ready, which correctly fails eligibility rather than
 # silently passing.
 
+function Find-TPMInjectionHunterModuleV1 {
+    # Get-Module -ListAvailable only searches the CURRENT engine's own
+    # $env:PSModulePath. Windows PowerShell 5.1's default path never includes
+    # the sibling "...\PowerShell\Modules" convention pwsh uses (confirmed:
+    # 5.1's path has only "...\WindowsPowerShell\Modules" variants), so a
+    # module installed only for pwsh is invisible from 5.1 even though it is
+    # genuinely present on the machine. The certification harness always
+    # runs this check under pwsh in real use (Run-TPM-Tests.ps1's relaunch),
+    # but this must still report honestly if ever invoked under 5.1 directly
+    # -- so it also probes the sibling module-root convention, not just the
+    # current engine's own search path.
+    $found = Get-Module -ListAvailable InjectionHunter -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($found) { return $found }
+
+    $candidateRoots = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in @($env:PSModulePath -split ';')) {
+        if ([string]::IsNullOrWhiteSpace($entry)) { continue }
+        [void]$candidateRoots.Add($entry)
+        if ($entry -match '(?i)\\WindowsPowerShell\\Modules$') { [void]$candidateRoots.Add(($entry -replace '(?i)\\WindowsPowerShell\\Modules$', '\PowerShell\Modules')) }
+        elseif ($entry -match '(?i)\\PowerShell\\Modules$') { [void]$candidateRoots.Add(($entry -replace '(?i)\\PowerShell\\Modules$', '\WindowsPowerShell\Modules')) }
+    }
+    foreach ($root in $candidateRoots) {
+        $manifest = Get-ChildItem -LiteralPath (Join-Path $root 'InjectionHunter') -Filter 'InjectionHunter.psd1' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($manifest) {
+            try {
+                $data = Import-PowerShellDataFile -Path $manifest.FullName
+                return [pscustomobject]@{Path=$manifest.FullName;Version=[version]($data.ModuleVersion)}
+            } catch { continue }
+        }
+    }
+    return $null
+}
+
 function Test-TPMStaticAnalysisParserV1 {
     param(
         [Parameter(Mandatory=$true)][string]$Path,
@@ -293,7 +326,7 @@ function Test-TPMStaticAnalysisInjectionHunterV1 {
         [Parameter(Mandatory=$true)][string]$Path,
         [Parameter(Mandatory=$true)][string]$DispositionRegistryPath
     )
-    $module = Get-Module -ListAvailable InjectionHunter -ErrorAction SilentlyContinue | Select-Object -First 1
+    $module = Find-TPMInjectionHunterModuleV1
     if (-not $module) {
         return [ordered]@{Executed=$false;FindingCount=0;UnresolvedFindingCount=0;ToolVersion=$null;Dispositions=@()}
     }
@@ -410,4 +443,4 @@ function New-TPMProductionFactRecordsFromLegacyV1 {
     return $result.ToArray()
 }
 
-Export-ModuleMember -Function New-TPMProductionWorkflowAuthorityV1,Get-TPMEligibilityPayloadV1,New-TPMProductionFactRecordsFromLegacyV1,Test-TPMStaticAnalysisParserV1,Test-TPMStaticAnalysisEncodingV1,Test-TPMStaticAnalysisInjectionHunterV1,Test-TPMArtifactsPreflightV1
+Export-ModuleMember -Function New-TPMProductionWorkflowAuthorityV1,Get-TPMEligibilityPayloadV1,New-TPMProductionFactRecordsFromLegacyV1,Test-TPMStaticAnalysisParserV1,Test-TPMStaticAnalysisEncodingV1,Test-TPMStaticAnalysisInjectionHunterV1,Test-TPMArtifactsPreflightV1,Find-TPMInjectionHunterModuleV1
