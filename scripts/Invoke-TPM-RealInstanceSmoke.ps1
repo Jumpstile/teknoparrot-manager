@@ -36,6 +36,7 @@ $runTimer = [System.Diagnostics.Stopwatch]::StartNew()
 
 . (Join-Path $PSScriptRoot 'Resolve-Pcsx2Directory.ps1')
 Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Shadow.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Production.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Orchestration.psm1') -Force
 
 $RepoPath = (Resolve-Path -LiteralPath $RepoPath).Path
@@ -2913,8 +2914,13 @@ finally {
     # with.
     $productionStagingParentRoot = Join-Path $reportDir 'Authoritative\_staging'
     $productionDestinationRoot = Join-Path $reportDir 'Authoritative'
+    $productionDispositionRegistryPath = Join-Path $PSScriptRoot 'InjectionHunterDispositions.psd1'
     try {
-        $productionFacts = New-TPMShadowFactRecordsFromLegacyV1 -Results $results -RepositoryPath $RepoPath -ReportDirectory $reportDir -BackupDirectory $backupDir -HealthResult $healthResult -HealthLoadError $healthLoadError -UnattendedBinding $binding
+        # Real facts, not the Phase 2 shadow placeholder (issue #171): Static
+        # Analysis and Artifacts are genuinely observed here (real parser/
+        # encoding/InjectionHunter execution, real staging/publisher
+        # preflight), not hardcoded not-executed defaults.
+        $productionFacts = New-TPMProductionFactRecordsFromLegacyV1 -Results $results -RepositoryPath $RepoPath -ReportDirectory $reportDir -BackupDirectory $backupDir -HealthResult $healthResult -HealthLoadError $healthLoadError -UnattendedBinding $binding -StagingParentRoot $productionStagingParentRoot -DestinationRoot $productionDestinationRoot -DispositionRegistryPath $productionDispositionRegistryPath
         $productionPngValidator = {
             param($Path)
             $valid = Test-TPMScreenshotFileValid -Path $Path
