@@ -303,4 +303,75 @@ function Get-TPMScoreAggregateV1 {
     return [ordered]@{ApplicableCount=$applicableCount;PassedCount=$passedCount;PercentageBasisPoints=$percentageBasisPoints;ThresholdBasisPoints=$thresholdBasisPoints;ScoreEligible=$scoreEligible}
 }
 
-Export-ModuleMember -Function Initialize-TPMCertificationTypesV1,ConvertTo-TPMJcsV1,ConvertTo-TPMFailureMessageBase64UrlV1,ConvertFrom-TPMFailureMessageBase64UrlV1,New-TPMWorkflowAuthorityV1,Get-TPMSha256HexV1,Resolve-TPMContainedPathV1,Get-TPMFactIdentifiersV1,Get-TPMEvidenceManifestV1,Get-TPMEvidenceFailureCodesV1,Assert-TPMFactRecordV1,Get-TPMFactDecisionV1,Assert-TPMEvidenceRecordV1,Copy-TPMClosedValueV1,Assert-TPMExactFieldsV1,Assert-TPMStringV1,Get-TPMScoreAggregateV1,ConvertTo-TPMJcsBase64UrlV1,ConvertFrom-TPMJcsBase64UrlV1,Get-TPMFactFailureCodesV1,Assert-TPMDiagnosticRecordV1,Assert-TPMBooleanV1,Assert-TPMIntegerV1,Get-TPMValueMapV1
+# --- Emulator Contract Verification Framework (ECVF) integration ---
+#
+# Authority consumes the generic EmulatorContractVerificationResult envelope
+# shape (see contracts/_schema/CertificationEnvelopeV1.schema.json) as data,
+# the same way it already consumes every other Section 5.x fact's Data
+# shape -- it does not import TPMCertification.Contracts.psm1 (that would
+# create a circular module dependency, since Contracts.psm1 already imports
+# this file for its own validation primitives), and it contains no
+# ContractId- or CapabilityId-specific branching anywhere. A caller that has
+# already loaded and evaluated a contract via Contracts.psm1 passes the
+# result in; Authority only ever validates the shape and derives Status.
+$script:TpmEcvfVersionMatchStateValuesV1=@('Matched','Compatible','Unknown','Diverged','Unsupported')
+$script:TpmEcvfCapabilityTypeValuesV1=@('Environment','Runtime')
+$script:TpmEcvfStatusValuesV1=@('Pass','Fail','NotApplicable','Blocked')
+
+function Assert-TPMEmulatorContractVerificationRecordV1 {
+    param($Record)
+    $d=Assert-TPMExactFieldsV1 $Record @('ContractId','ContractSchemaVersion','UpstreamCommitUsed','VersionMatchState','CapabilityType','CapabilityId','Applicable','Status','Codes','EvidenceReferences') 'EmulatorContractVerificationResult'
+    Assert-TPMStringV1 $d.ContractId 'ContractId'
+    Assert-TPMStringV1 $d.ContractSchemaVersion 'ContractSchemaVersion'
+    if($d.UpstreamCommitUsed-cnotmatch'^[0-9a-f]{40}$'){throw 'SCHEMA_INVALID: UpstreamCommitUsed must be a lowercase 40-hex SHA'}
+    if($script:TpmEcvfVersionMatchStateValuesV1-cnotcontains$d.VersionMatchState){throw 'SCHEMA_INVALID: VersionMatchState'}
+    if($script:TpmEcvfCapabilityTypeValuesV1-cnotcontains$d.CapabilityType){throw 'SCHEMA_INVALID: CapabilityType'}
+    Assert-TPMStringV1 $d.CapabilityId 'CapabilityId'
+    Assert-TPMBooleanV1 $d.Applicable 'Applicable'
+    if($script:TpmEcvfStatusValuesV1-cnotcontains$d.Status){throw 'SCHEMA_INVALID: Status'}
+    $codes=@($d.Codes);foreach($c in $codes){Assert-TPMStringV1 $c 'Codes entry'}
+    $refs=@($d.EvidenceReferences);foreach($r in $refs){Assert-TPMStringV1 $r 'EvidenceReferences entry'}
+    if(($d.VersionMatchState-ceq'Unknown'-or$d.VersionMatchState-ceq'Diverged'-or$d.VersionMatchState-ceq'Unsupported')-and$d.Status-cne'Blocked'){throw 'SCHEMA_INVALID: untrusted VersionMatchState must yield Status=Blocked'}
+    if(-not$d.Applicable-and$d.Status-cne'NotApplicable'){throw 'SCHEMA_INVALID: a non-applicable capability must yield Status=NotApplicable'}
+    return $d
+}
+
+function New-TPMEmulatorContractVerificationRecordV1 {
+    # Builds a validated generic envelope from a loaded contract object
+    # (anything with ContractId/SchemaVersion/UpstreamPinnedCommit -- the
+    # shape Contracts.psm1's Get-TPMEmulatorContractV1 returns, but this
+    # function never calls into that module, it only reads properties) plus
+    # a pre-computed classification. Status is derived here, uniformly,
+    # from VersionMatchState/Applicable/CapabilityPassed -- never from
+    # which contract or capability it is.
+    param(
+        [Parameter(Mandatory=$true)]$Contract,
+        [Parameter(Mandatory=$true)][ValidateSet('Environment','Runtime')][string]$CapabilityType,
+        [Parameter(Mandatory=$true)][string]$CapabilityId,
+        [Parameter(Mandatory=$true)][ValidateSet('Matched','Compatible','Unknown','Diverged','Unsupported')][string]$VersionMatchState,
+        [Parameter(Mandatory=$true)][bool]$Applicable,
+        [bool]$CapabilityPassed=$false,
+        [string[]]$Codes=@(),
+        [string[]]$EvidenceReferences=@()
+    )
+    $status=
+        if($VersionMatchState-ceq'Unknown'-or$VersionMatchState-ceq'Diverged'-or$VersionMatchState-ceq'Unsupported'){'Blocked'}
+        elseif(-not$Applicable){'NotApplicable'}
+        elseif($CapabilityPassed){'Pass'}
+        else{'Fail'}
+    $record=[ordered]@{
+        ContractId=[string]$Contract.ContractId
+        ContractSchemaVersion=[string]$Contract.SchemaVersion
+        UpstreamCommitUsed=[string]$Contract.UpstreamPinnedCommit
+        VersionMatchState=$VersionMatchState
+        CapabilityType=$CapabilityType
+        CapabilityId=$CapabilityId
+        Applicable=$Applicable
+        Status=$status
+        Codes=@($Codes)
+        EvidenceReferences=@($EvidenceReferences)
+    }
+    return Assert-TPMEmulatorContractVerificationRecordV1 $record
+}
+
+Export-ModuleMember -Function Initialize-TPMCertificationTypesV1,ConvertTo-TPMJcsV1,ConvertTo-TPMFailureMessageBase64UrlV1,ConvertFrom-TPMFailureMessageBase64UrlV1,New-TPMWorkflowAuthorityV1,Get-TPMSha256HexV1,Resolve-TPMContainedPathV1,Get-TPMFactIdentifiersV1,Get-TPMEvidenceManifestV1,Get-TPMEvidenceFailureCodesV1,Assert-TPMFactRecordV1,Get-TPMFactDecisionV1,Assert-TPMEvidenceRecordV1,Copy-TPMClosedValueV1,Assert-TPMExactFieldsV1,Assert-TPMStringV1,Get-TPMScoreAggregateV1,ConvertTo-TPMJcsBase64UrlV1,ConvertFrom-TPMJcsBase64UrlV1,Get-TPMFactFailureCodesV1,Assert-TPMDiagnosticRecordV1,Assert-TPMBooleanV1,Assert-TPMIntegerV1,Get-TPMValueMapV1,Assert-TPMEmulatorContractVerificationRecordV1,New-TPMEmulatorContractVerificationRecordV1
