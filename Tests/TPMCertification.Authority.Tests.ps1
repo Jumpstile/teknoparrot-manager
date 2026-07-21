@@ -124,3 +124,67 @@ Describe 'ADR-0155 Phase 1 hashing and containment' {
         { Resolve-TPMContainedPathV1 -Root $root -Path (Join-Path $link 'capture.png') } | Should -Throw '*PATH_REPARSE_POINT*'
     }
 }
+
+Describe 'ECVF: generic Emulator Contract Verification envelope (no emulator-specific logic)' {
+    BeforeAll {
+        $script:fakeContract = [pscustomobject]@{ ContractId = 'fixture-emu'; SchemaVersion = '1.0.0'; UpstreamPinnedCommit = ('a' * 40) }
+    }
+
+    It 'Matched + Applicable + Passed yields Status=Pass' {
+        $r = New-TPMEmulatorContractVerificationRecordV1 -Contract $script:fakeContract -CapabilityType 'Environment' -CapabilityId 'env-init' -VersionMatchState 'Matched' -Applicable $true -CapabilityPassed $true
+        $r.Status | Should -Be 'Pass'
+    }
+
+    It 'Matched + Applicable + not-Passed yields Status=Fail' {
+        $r = New-TPMEmulatorContractVerificationRecordV1 -Contract $script:fakeContract -CapabilityType 'Environment' -CapabilityId 'env-init' -VersionMatchState 'Matched' -Applicable $true -CapabilityPassed $false
+        $r.Status | Should -Be 'Fail'
+    }
+
+    It 'not Applicable yields Status=NotApplicable regardless of CapabilityPassed' {
+        $r = New-TPMEmulatorContractVerificationRecordV1 -Contract $script:fakeContract -CapabilityType 'Runtime' -CapabilityId 'jvs-lightgun' -VersionMatchState 'Matched' -Applicable $false -CapabilityPassed $true
+        $r.Status | Should -Be 'NotApplicable'
+    }
+
+    It 'Unknown/Diverged/Unsupported VersionMatchState always yields Status=Blocked, even when CapabilityPassed is true' {
+        foreach ($state in @('Unknown', 'Diverged', 'Unsupported')) {
+            $r = New-TPMEmulatorContractVerificationRecordV1 -Contract $script:fakeContract -CapabilityType 'Runtime' -CapabilityId 'jvs-lightgun' -VersionMatchState $state -Applicable $true -CapabilityPassed $true
+            $r.Status | Should -Be 'Blocked' -Because "VersionMatchState=$state must never be silently trusted"
+        }
+    }
+
+    It 'carries ContractId/SchemaVersion/UpstreamPinnedCommit through from the caller-supplied contract object unmodified' {
+        $r = New-TPMEmulatorContractVerificationRecordV1 -Contract $script:fakeContract -CapabilityType 'Environment' -CapabilityId 'env-init' -VersionMatchState 'Matched' -Applicable $true -CapabilityPassed $true
+        $r.ContractId | Should -Be 'fixture-emu'
+        $r.ContractSchemaVersion | Should -Be '1.0.0'
+        $r.UpstreamCommitUsed | Should -Be ('a' * 40)
+    }
+
+    It 'Assert-TPMEmulatorContractVerificationRecordV1 rejects a record missing fields' {
+        { Assert-TPMEmulatorContractVerificationRecordV1 -Record ([ordered]@{ ContractId = 'x'; ContractSchemaVersion = '1.0.0' }) } | Should -Throw '*field count*'
+    }
+
+    It 'Assert-TPMEmulatorContractVerificationRecordV1 rejects Status=Pass paired with an untrusted VersionMatchState' {
+        $bad = [ordered]@{ ContractId = 'x'; ContractSchemaVersion = '1.0.0'; UpstreamCommitUsed = ('a' * 40); VersionMatchState = 'Diverged'; CapabilityType = 'Environment'; CapabilityId = 'env-init'; Applicable = $true; Status = 'Pass'; Codes = @(); EvidenceReferences = @() }
+        { Assert-TPMEmulatorContractVerificationRecordV1 -Record $bad } | Should -Throw '*Blocked*'
+    }
+
+    It 'Assert-TPMEmulatorContractVerificationRecordV1 rejects Status other than NotApplicable when Applicable=false' {
+        $bad = [ordered]@{ ContractId = 'x'; ContractSchemaVersion = '1.0.0'; UpstreamCommitUsed = ('a' * 40); VersionMatchState = 'Matched'; CapabilityType = 'Environment'; CapabilityId = 'env-init'; Applicable = $false; Status = 'Pass'; Codes = @(); EvidenceReferences = @() }
+        { Assert-TPMEmulatorContractVerificationRecordV1 -Record $bad } | Should -Throw '*NotApplicable*'
+    }
+
+    It 'Assert-TPMEmulatorContractVerificationRecordV1 rejects an unrecognized CapabilityType' {
+        $bad = [ordered]@{ ContractId = 'x'; ContractSchemaVersion = '1.0.0'; UpstreamCommitUsed = ('a' * 40); VersionMatchState = 'Matched'; CapabilityType = 'SomethingElse'; CapabilityId = 'env-init'; Applicable = $true; Status = 'Fail'; Codes = @(); EvidenceReferences = @() }
+        { Assert-TPMEmulatorContractVerificationRecordV1 -Record $bad } | Should -Throw '*CapabilityType*'
+    }
+
+    It 'round-trips a real, registry-loaded pcsx2x6 contract with no code path referencing pcsx2x6 by name' {
+        $contractsModule = Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\TPMCertification.Contracts.psm1'
+        Import-Module $contractsModule -Force
+        $loaded = Get-TPMEmulatorContractV1 -ContractId 'pcsx2x6'
+        $r = New-TPMEmulatorContractVerificationRecordV1 -Contract $loaded.Contract -CapabilityType 'Environment' -CapabilityId 'env-init' -VersionMatchState 'Matched' -Applicable $true -CapabilityPassed $true -EvidenceReferences @('ev-portable-root')
+        $r.ContractId | Should -Be 'pcsx2x6'
+        $r.UpstreamCommitUsed | Should -Be 'c6e731ac0b9859011d358c021b7e2c9c95296a93'
+        { Assert-TPMEmulatorContractVerificationRecordV1 -Record $r } | Should -Not -Throw
+    }
+}
