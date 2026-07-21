@@ -175,32 +175,67 @@ function Copy-IfExists {
 }
 
 function Get-TreeHash {
+    # Issue #172: must always return a genuine array, never bare $null.
+    # PowerShell collapses a zero-object pipeline/return to $null at the
+    # caller (a nonexistent path, or an existing-but-empty directory, both
+    # produce zero output objects) -- Compare-TreeSnapshot's own @($Before)
+    # wrapping then turns that $null into a one-element array containing a
+    # single $null, miscounted as one unreadable file. Collecting into an
+    # explicit list and returning it with the unary comma operator (,) below
+    # forces the array itself through as one object, never enumerated onto
+    # the pipeline and never collapsed, regardless of element count -- 0, 1,
+    # or many.
     param([string]$Path)
-    if (!(Test-Path -LiteralPath $Path)) { return @() }
-    $resolved = (Resolve-Path -LiteralPath $Path).Path
-    $base = $resolved.TrimEnd('\')
-    Get-ChildItem -LiteralPath $resolved -Recurse -File -ErrorAction SilentlyContinue |
-        Sort-Object FullName |
-        ForEach-Object {
-            $relative = $_.FullName
-            if ($_.FullName.Length -gt $base.Length) {
-                $relative = $_.FullName.Substring($base.Length).TrimStart('\')
+    $results = New-Object Collections.Generic.List[object]
+    if (Test-Path -LiteralPath $Path) {
+        $resolved = (Resolve-Path -LiteralPath $Path).Path
+        $base = $resolved.TrimEnd('\')
+        foreach ($file in @(Get-ChildItem -LiteralPath $resolved -Recurse -File -ErrorAction SilentlyContinue | Sort-Object FullName)) {
+            $relative = $file.FullName
+            if ($file.FullName.Length -gt $base.Length) {
+                $relative = $file.FullName.Substring($base.Length).TrimStart('\')
             }
             if ([string]::IsNullOrWhiteSpace($relative)) {
-                $relative = $_.Name
+                $relative = $file.Name
             }
-            $h = Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256
-            [pscustomobject]@{
-                RelativePath = $relative
-                Path = $_.FullName
-                Hash = $h.Hash
-                Length = $_.Length
+            try {
+                $h = Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256 -ErrorAction Stop
+                $results.Add([pscustomobject]@{
+                    RelativePath = $relative
+                    Path = $file.FullName
+                    Hash = $h.Hash
+                    Length = $file.Length
+                })
+            } catch {
+                # A file that exists but genuinely cannot be hashed (locked,
+                # access denied, disappeared mid-enumeration) is a real
+                # unreadable entry -- represented explicitly with a null
+                # RelativePath so Compare-TreeSnapshot's existing skip
+                # detection counts it correctly, rather than letting the
+                # exception propagate under this script's global
+                # $ErrorActionPreference = "Stop" and abort the whole run.
+                $results.Add([pscustomobject]@{
+                    RelativePath = $null
+                    Path = $file.FullName
+                    Hash = $null
+                    Length = $null
+                })
             }
         }
+    }
+    return ,$results.ToArray()
 }
 
 function Compare-TreeSnapshot {
+    # Issue #172: defensively normalize a bare $null to a true empty array
+    # here too, not just at Get-TreeHash's boundary -- [object[]] parameter
+    # typing does not coerce $null to @() on its own (confirmed empirically),
+    # so @($Before) on a $null argument would otherwise produce the same
+    # phantom one-null-element array this function exists to count
+    # correctly for genuine unreadable entries.
     param([object[]]$Before, [object[]]$After)
+    if ($null -eq $Before) { $Before = @() }
+    if ($null -eq $After) { $After = @() }
     $beforeMap = @{}
     $beforeSkipped = 0
     foreach ($item in @($Before)) {

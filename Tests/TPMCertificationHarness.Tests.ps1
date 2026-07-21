@@ -3141,3 +3141,90 @@ Describe "Issue #154 round 3 -- authoritative workflow-owned facts, not descript
         }
     }
 }
+
+Describe "Get-TreeHash / Compare-TreeSnapshot (issue #172)" {
+    # A nonexistent path, or an existing-but-empty directory, both produce
+    # zero output objects from Get-TreeHash. PowerShell collapses a
+    # zero-object function output to $null at the caller; Compare-TreeSnapshot's
+    # own @($Before) wrapping previously turned that $null into a one-element
+    # array containing a single $null, miscounted as one unreadable file (see
+    # issue #172 for the full trace). These tests cover both the fix and the
+    # scenarios it must not break.
+    BeforeEach { $root = Join-Path $TestDrive ([guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Path $root | Out-Null }
+
+    It "a nonexistent tree produces a valid empty snapshot: zero readable files, zero skipped files" {
+        $missing = Join-Path $root 'does-not-exist'
+        $snapshot = Get-TreeHash $missing
+        @($snapshot).Count | Should -Be 0
+        $cmp = Compare-TreeSnapshot $snapshot $snapshot
+        $cmp.BeforeCount | Should -Be 0
+        $cmp.AfterCount | Should -Be 0
+        $cmp.BeforeSkipped | Should -Be 0
+        $cmp.AfterSkipped | Should -Be 0
+    }
+
+    It "an existing but empty tree also produces a valid empty snapshot, not a phantom skipped entry" {
+        $empty = Join-Path $root 'empty'; New-Item -ItemType Directory -Path $empty | Out-Null
+        $snapshot = Get-TreeHash $empty
+        @($snapshot).Count | Should -Be 0
+        $cmp = Compare-TreeSnapshot $snapshot $snapshot
+        $cmp.BeforeSkipped | Should -Be 0
+        $cmp.AfterSkipped | Should -Be 0
+    }
+
+    It "existing readable files are hashed and compared normally, with zero false skips" {
+        $populated = Join-Path $root 'populated'; New-Item -ItemType Directory -Path $populated | Out-Null
+        [IO.File]::WriteAllText((Join-Path $populated 'a.txt'), 'hello')
+        [IO.File]::WriteAllText((Join-Path $populated 'b.txt'), 'world')
+        $before = Get-TreeHash $populated
+        [IO.File]::WriteAllText((Join-Path $populated 'a.txt'), 'changed')
+        $after = Get-TreeHash $populated
+        @($before).Count | Should -Be 2
+        $cmp = Compare-TreeSnapshot $before $after
+        $cmp.Changed | Should -Be 1
+        $cmp.Added | Should -Be 0
+        $cmp.Removed | Should -Be 0
+        $cmp.BeforeSkipped | Should -Be 0
+        $cmp.AfterSkipped | Should -Be 0
+    }
+
+    It "a genuinely unreadable (locked) file still increments the skipped count, rather than crashing the run or being silently dropped" {
+        $lockedDir = Join-Path $root 'locked'; New-Item -ItemType Directory -Path $lockedDir | Out-Null
+        $lockedFile = Join-Path $lockedDir 'locked.bin'
+        [IO.File]::WriteAllText($lockedFile, 'data')
+        $stream = [IO.File]::Open($lockedFile, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+        try {
+            # Assigning directly rather than via `{ $snapshot = ... } | Should
+            # -Not -Throw` -- that form invokes the scriptblock in a child
+            # scope, so the assignment never reaches this block's own
+            # $snapshot. If Get-TreeHash throws here, the test fails with
+            # that exception, which is itself a clear, correct failure mode.
+            $snapshot = Get-TreeHash $lockedDir
+            @($snapshot).Count | Should -Be 1
+            $cmp = Compare-TreeSnapshot $snapshot $snapshot
+            $cmp.BeforeSkipped | Should -Be 1
+            $cmp.AfterSkipped | Should -Be 1
+        } finally {
+            $stream.Dispose()
+        }
+    }
+
+    It "a before/after comparison where both trees are absent reports zero throughout, with no phantom null record" {
+        $cmp = Compare-TreeSnapshot (Get-TreeHash (Join-Path $root 'absent-a')) (Get-TreeHash (Join-Path $root 'absent-b'))
+        $cmp.BeforeCount | Should -Be 0
+        $cmp.AfterCount | Should -Be 0
+        $cmp.Added | Should -Be 0
+        $cmp.Removed | Should -Be 0
+        $cmp.Changed | Should -Be 0
+        $cmp.BeforeSkipped | Should -Be 0
+        $cmp.AfterSkipped | Should -Be 0
+    }
+
+    It "Compare-TreeSnapshot normalizes a bare `$null argument to empty, defensively, independent of Get-TreeHash's own fix" {
+        $cmp = Compare-TreeSnapshot $null $null
+        $cmp.BeforeCount | Should -Be 0
+        $cmp.AfterCount | Should -Be 0
+        $cmp.BeforeSkipped | Should -Be 0
+        $cmp.AfterSkipped | Should -Be 0
+    }
+}
