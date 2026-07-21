@@ -1,0 +1,229 @@
+{
+  "ContractId": "pcsx2x6",
+  "SchemaVersion": "1.0.0",
+  "DisplayName": "PS2Homebrew-arcade pcsx2x6",
+  "UpstreamRepository": "https://github.com/PS2Homebrew-arcade/pcsx2x6",
+  "UpstreamPinnedCommit": "c6e731ac0b9859011d358c021b7e2c9c95296a93",
+  "UpstreamPinnedCommitDate": "2026-07-14",
+  "VersionDetector": {
+    "Method": "WindowTitleRegex",
+    "Source": "MainWindowTitle",
+    "Pattern": "PCSX2x6 v[0-9.]+-[0-9]+-g([0-9a-f]+)",
+    "MatchedCommitMap": [
+      {
+        "VersionString": "c6e731ac0",
+        "Commit": "c6e731ac0b9859011d358c021b7e2c9c95296a93",
+        "MatchState": "Matched"
+      }
+    ]
+  },
+  "ContractStatus": "EvidenceGathered",
+  "EvidenceConfidence": "SourceVerified",
+  "OwnershipBoundaries": [
+    {
+      "SettingPath": "USB1.Type",
+      "Owner": "Emulator",
+      "Mutability": "EmulatorManaged",
+      "ReadPolicy": "ReadForVerificationOnly",
+      "WritePolicy": "NeverWrite",
+      "EvidenceReference": "ev-vmmanager-jvsmode"
+    },
+    {
+      "SettingPath": "USB2.Type",
+      "Owner": "Emulator",
+      "Mutability": "EmulatorManaged",
+      "ReadPolicy": "ReadForVerificationOnly",
+      "WritePolicy": "NeverWrite",
+      "EvidenceReference": "ev-vmmanager-jvsmode"
+    },
+    {
+      "SettingPath": "JvsMode",
+      "Owner": "Runtime",
+      "Mutability": "Computed",
+      "ReadPolicy": "ReadForVerificationOnly",
+      "WritePolicy": "NeverWrite",
+      "EvidenceReference": "ev-vmmanager-jvsmode"
+    },
+    {
+      "SettingPath": "USB1.guncon2_cursor_path[jvsmode=lightgun]",
+      "Owner": "Emulator",
+      "Mutability": "Computed",
+      "ReadPolicy": "ReadForVerificationOnly",
+      "WritePolicy": "NeverWrite",
+      "EvidenceReference": "ev-guncon2-clear"
+    },
+    {
+      "SettingPath": "USB2.guncon2_cursor_path[jvsmode=lightgun]",
+      "Owner": "Emulator",
+      "Mutability": "Computed",
+      "ReadPolicy": "ReadForVerificationOnly",
+      "WritePolicy": "NeverWrite",
+      "EvidenceReference": "ev-guncon2-clear"
+    },
+    {
+      "SettingPath": "portable.txt",
+      "Owner": "User",
+      "Mutability": "UserManaged",
+      "ReadPolicy": "ReadForVerificationOnly",
+      "WritePolicy": "NeverWrite",
+      "EvidenceReference": "ev-portable-root"
+    },
+    {
+      "SettingPath": "CrosshairPngPlacement",
+      "Owner": "TPM",
+      "Mutability": "TPMManaged",
+      "ReadPolicy": "ReadFreely",
+      "WritePolicy": "WriteDirectly",
+      "EvidenceReference": "ev-issue-79-png-placement"
+    }
+  ],
+  "EnvironmentCapabilities": [
+    {
+      "CapabilityId": "env-init",
+      "PresenceDetector": {
+        "Method": "PathExists",
+        "Source": "pcsx2-qtx64.exe",
+        "Pattern": null
+      },
+      "DataRootResolver": {
+        "Method": "FileContentLiteral",
+        "Source": "portable.txt",
+        "DefaultValue": "TeknoParrot"
+      },
+      "InitializationAction": {
+        "Method": "CliInvocation",
+        "Command": "pcsx2-qtx64.exe",
+        "Arguments": ["-testconfig", "-portable"],
+        "ExpectedExitCodes": [0],
+        "TimeoutSeconds": 30
+      },
+      "InitializedVerifier": {
+        "RequiredPaths": ["inis/PCSX2.ini"],
+        "RequiredMarkers": ["[USB1]", "[USB2]", "[JVS]"],
+        "ParseMethod": "IniSections"
+      },
+      "ObservableEvidence": ["ev-portable-root", "ev-testconfig-init", "ev-clean-copy-experiment"],
+      "ExpectedOutcome": "Resolved data-root inis/PCSX2.ini exists, is non-empty, parses, and contains the default USB1/USB2/JVS sections -- created by the emulator's own -testconfig mechanism, never hand-authored by TPM."
+    }
+  ],
+  "RuntimeCapabilities": [
+    {
+      "CapabilityId": "jvs-lightgun",
+      "Scenario": "JVS lightgun mode",
+      "ApplicabilityPredicate": {
+        "GunGame": true,
+        "EmulatorType": "pcsx2x6"
+      },
+      "Trigger": {
+        "Description": "The title's own .acgame archive carries a [data] jvsmode key. When jvsmode=lightgun, VMManager.cpp unconditionally sets USB1/USB2 Type=guncon2 and calls ACJV::SetMode(JVS_MODE::LIGHTGUN) -- TPM has no role in triggering this and must not attempt to.",
+        "Source": "pcsx2/VMManager.cpp, ACGAME .acgame [data] jvsmode field"
+      },
+      "ObservableEvidence": [
+        {
+          "EvidenceSourceType": "EmulatorLog",
+          "Reliability": 1,
+          "Locator": "ACGAME: jvsmode=lightgun -> GunCon2 on USB1+USB2",
+          "Status": "Unconfirmed"
+        },
+        {
+          "EvidenceSourceType": "IniSnapshot",
+          "Reliability": 2,
+          "Locator": "Type = guncon2",
+          "Status": "Unconfirmed"
+        }
+      ],
+      "ExpectedOutcome": "Post-launch evidence confirms the emulator itself reached JVS_MODE::LIGHTGUN with Type=guncon2 on both USB ports for this title. Evidence source not yet resolved -- see experiments.md for the pending controlled-launch experiment that must confirm which signal (log line, persisted ini state, or neither) is actually reliable before this capability can advance past Investigating.",
+      "CapabilityStatus": "Investigating"
+    }
+  ],
+  "EvidenceReferences": [
+    {
+      "EvidenceId": "ev-portable-root",
+      "Type": "SourceCitation",
+      "Description": "EmuFolders::GetPortableModePath() reads portable.txt content; empty content defaults to the literal subfolder name \"TeknoParrot\" (fork-specific customization, source comment: \"Default to TeknoParrot subfolder so all data stays organised under the exe directory\"). Non-empty content is used as the literal data-root subfolder name instead.",
+      "Locator": "evidence.md#ev-portable-root",
+      "Commit": "c6e731ac0b9859011d358c021b7e2c9c95296a93",
+      "Confidence": "ExperimentVerified",
+      "RecordedDate": "2026-07-20"
+    },
+    {
+      "EvidenceId": "ev-testconfig-init",
+      "Type": "SourceCitation",
+      "Description": "-testconfig is a purpose-built headless init path: main() returns EXIT_SUCCESS immediately after InitializeConfig(), before any window or event loop. InitializeConfig() calls Save() synchronously when the ini does not already exist.",
+      "Locator": "evidence.md#ev-testconfig-init",
+      "Commit": "c6e731ac0b9859011d358c021b7e2c9c95296a93",
+      "Confidence": "ExperimentVerified",
+      "RecordedDate": "2026-07-20"
+    },
+    {
+      "EvidenceId": "ev-usb-ini-contract",
+      "Type": "SourceCitation",
+      "Description": "USB::GetConfigSection(port) returns \"USB{port+1}\" (sections [USB1]/[USB2]); USB::GetConfigString's real key is fmt::format(\"{}_{}\", devname, key), i.e. guncon2_cursor_path for the guncon2 device -- not [USB Port N guncon2] / cursor_path.",
+      "Locator": "evidence.md#ev-usb-ini-contract",
+      "Commit": "c6e731ac0b9859011d358c021b7e2c9c95296a93",
+      "Confidence": "HardwareVerified",
+      "RecordedDate": "2026-07-20"
+    },
+    {
+      "EvidenceId": "ev-guncon2-clear",
+      "Type": "SourceCitation",
+      "Description": "GunCon2Device::UpdateSettings() reads cursor_path but unconditionally clears it in memory when ACJV::GetMode() == JVS_MODE::LIGHTGUN (source comment: \"In TP LIGHTGUN mode our OSD overlay draws the crosshair; suppress guncon2's own PNG cursor\"). Not yet confirmed whether a TPM-written cursor_path value on disk is harmless-but-inert or actively misleading to inspect post-launch.",
+      "Locator": "evidence.md#ev-guncon2-clear",
+      "Commit": "c6e731ac0b9859011d358c021b7e2c9c95296a93",
+      "Confidence": "SourceVerified",
+      "RecordedDate": "2026-07-20"
+    },
+    {
+      "EvidenceId": "ev-vmmanager-jvsmode",
+      "Type": "SourceCitation",
+      "Description": "When a title's .acgame [data] jvsmode field equals \"lightgun\", VMManager.cpp unconditionally calls Host::SetBaseStringSettingValue(\"USB1\"/\"USB2\", \"Type\", \"guncon2\") and ACJV::SetMode(JVS_MODE::LIGHTGUN), and logs \"ACGAME: jvsmode=lightgun -> GunCon2 on USB1+USB2\" via Console.WriteLn. Whether this log line reaches a file under <DataRoot>/logs, and whether the Type write survives to disk after a clean shutdown, are both unconfirmed -- see experiments.md.",
+      "Locator": "evidence.md#ev-vmmanager-jvsmode",
+      "Commit": "c6e731ac0b9859011d358c021b7e2c9c95296a93",
+      "Confidence": "SourceVerified",
+      "RecordedDate": "2026-07-20"
+    },
+    {
+      "EvidenceId": "ev-clean-copy-experiment",
+      "Type": "ControlledExperiment",
+      "Description": "Ran pcsx2-qtx64.exe -testconfig -portable against isolated scratch copies (no live arcade data touched): exit code 0 in all runs; no UI window observed; first run 1774ms creating the full TeknoParrot\\ tree; second identical run 227ms with a byte-identical ini SHA-256 (confirms idempotent, IsDirty()-gated save); empty portable.txt produced TeknoParrot\\inis\\PCSX2.ini; portable.txt=\"CustomDataRoot\" produced CustomDataRoot\\inis\\PCSX2.ini with no TeknoParrot\\ folder at all.",
+      "Locator": "experiments.md#exp-001-clean-copy-testconfig",
+      "Commit": "c6e731ac0b9859011d358c021b7e2c9c95296a93",
+      "Confidence": "ExperimentVerified",
+      "RecordedDate": "2026-07-20"
+    },
+    {
+      "EvidenceId": "ev-live-ini-observation",
+      "Type": "HardwareObservation",
+      "Description": "The certified arcade machine's live pcsx2x6\\TeknoParrot\\inis\\PCSX2.ini has [USB1]/[USB2] sections (both Type = None at time of observation) and a separate top-level [JVS] section; it has no [USB Port N guncon2] section anywhere, confirming the real on-disk contract matches ev-usb-ini-contract, not TPM's prior assumption.",
+      "Locator": "evidence.md#ev-live-ini-observation",
+      "Commit": null,
+      "Confidence": "HardwareVerified",
+      "RecordedDate": "2026-07-20"
+    },
+    {
+      "EvidenceId": "ev-gamegprofile-gungame-flag",
+      "Type": "HardwareObservation",
+      "Description": "The certified cabinet's own GameProfiles\\*.xml carry <GunGame>true</GunGame> on every current EmulatorType=pcsx2x6 title (cobrata, cobrataw, timecrs3, timecrs4, vnight) and it is absent on non-gun pcsx2x6 titles checked (acedriv3, tekken4, soulclb2) -- the field this contract's RuntimeCapability ApplicabilityPredicate keys on.",
+      "Locator": "evidence.md#ev-gamegprofile-gungame-flag",
+      "Commit": null,
+      "Confidence": "HardwareVerified",
+      "RecordedDate": "2026-07-20"
+    },
+    {
+      "EvidenceId": "ev-issue-79-png-placement",
+      "Type": "HardwareObservation",
+      "Description": "Crosshair PNG deployment to <Pcsx2Dir>\\TeknoParrot\\crosshairs\\ (vs. the legacy <Pcsx2Dir> root) is a file-placement concern from issue #79, independent of the ini/JVS findings above, and the same deployment code path also serves ElfLdr2/standard game folders that this investigation did not examine. Retained as TPM-owned pending separate evidence on whether it still matters for pcsx2x6 specifically.",
+      "Locator": "evidence.md#ev-issue-79-png-placement",
+      "Commit": null,
+      "Confidence": "SourceVerified",
+      "RecordedDate": "2026-07-20"
+    }
+  ],
+  "DriftPolicy": {
+    "OnUnknownVersion": "FailClosed",
+    "OnDivergedVersion": "FailClosed",
+    "OnCompatibleRange": "Proceed",
+    "KnownCompatibleRange": [],
+    "RevalidationTrigger": "Recheck when the installed build's window-title version string no longer matches MatchedCommitMap, or when PS2Homebrew-arcade/pcsx2x6's default branch HEAD moves past the pinned commit and TPM is updated to track it."
+  }
+}
