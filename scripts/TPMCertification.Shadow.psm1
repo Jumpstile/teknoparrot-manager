@@ -137,4 +137,4 @@ function New-TPMShadowFactRecordsFromLegacyV1 {
       $(if($mode-ceq'Smoke'){[ordered]@{Identifier='Unattended TPM config restoration';Applicable=$false;Data=[ordered]@{}}}else{[ordered]@{Identifier='Unattended TPM config restoration';Applicable=$true;Data=[ordered]@{PriorConfigExisted=[bool]$binding.PriorConfigExisted;TemporaryConfigCreated=[bool]$binding.TemporaryConfigCreated;RestoreAttempted=[bool]$binding.RestoreAttempted;RestoreSucceeded=[bool]$binding.RestoreSucceeded;VerificationSucceeded=[bool]$binding.VerificationSucceeded;SnapshotSha256=$binding.SnapshotSha256;FailureReason=$binding.RestorationFailureReason}}})
     )
 }
-Export-ModuleMember -Function New-TPMShadowWorkflowAuthorityV1,Invoke-TPMShadowCertificationV1,New-TPMShadowFactRecordsFromLegacyV1
+Export-ModuleMember -Function New-TPMShadowWorkflowAuthorityV1,Invoke-TPMShadowCertificationV1,New-TPMShadowFactRecordsFromLegacyV1,ConvertTo-TPMShadowEvidenceRecordV1
