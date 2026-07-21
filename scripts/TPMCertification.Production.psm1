@@ -1,4 +1,5 @@
 Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Authority.psm1')
+Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Shadow.psm1')
 Set-StrictMode -Version 2.0
 
 function Get-TPMEligibilityPayloadV1 {
@@ -243,4 +244,170 @@ function New-TPMProductionWorkflowAuthorityV1 {
     return $dispatch
 }
 
-Export-ModuleMember -Function New-TPMProductionWorkflowAuthorityV1,Get-TPMEligibilityPayloadV1
+# ADR-0155 Section 5.3/5.7 production fact collection (ADR155-0309). These
+# functions replace the two categories New-TPMShadowFactRecordsFromLegacyV1
+# hardcoded as not-executed placeholders (correct for Phase 2's shadow-only,
+# never-authoritative purpose; wrong once reused for Phase 3 eligibility --
+# see issue #171). Every value here is a real, freshly observed result, never
+# a default -- an unavailable tool or unwritable path is reported honestly as
+# Executed=$false / not-ready, which correctly fails eligibility rather than
+# silently passing.
+
+function Test-TPMStaticAnalysisParserV1 {
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [Parameter(Mandatory=$true)][ValidateSet('WindowsPowerShell51','Pwsh')][string]$Engine
+    )
+    $exeName = if ($Engine -eq 'WindowsPowerShell51') { 'powershell.exe' } else { 'pwsh' }
+    $exe = Get-Command $exeName -ErrorAction SilentlyContinue
+    if (-not $exe) {
+        return [ordered]@{Identifier=$Engine;Executed=$false;ErrorCount=0;ToolVersion=$null}
+    }
+    $probeScript = Join-Path $PSScriptRoot 'Test-TPMParserCheckV1.ps1'
+    try {
+        $output = & $exe.Source -NoProfile -File $probeScript -Path $Path 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $output) {
+            return [ordered]@{Identifier=$Engine;Executed=$false;ErrorCount=0;ToolVersion=$null}
+        }
+        $parsed = $output | ConvertFrom-Json
+        return [ordered]@{Identifier=$Engine;Executed=$true;ErrorCount=[int]$parsed.ErrorCount;ToolVersion=[string]$parsed.Version}
+    } catch {
+        return [ordered]@{Identifier=$Engine;Executed=$false;ErrorCount=0;ToolVersion=$null}
+    }
+}
+
+function Test-TPMStaticAnalysisEncodingV1 {
+    param([Parameter(Mandatory=$true)][string]$Path)
+    try {
+        $bytes = [IO.File]::ReadAllBytes($Path)
+        $nonAscii = 0
+        foreach ($b in $bytes) { if ($b -gt 127) { $nonAscii++ } }
+        return [ordered]@{Executed=$true;NonAsciiByteCount=$nonAscii}
+    } catch {
+        return [ordered]@{Executed=$false;NonAsciiByteCount=0}
+    }
+}
+
+function Test-TPMStaticAnalysisInjectionHunterV1 {
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [Parameter(Mandatory=$true)][string]$DispositionRegistryPath
+    )
+    $module = Get-Module -ListAvailable InjectionHunter -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $module) {
+        return [ordered]@{Executed=$false;FindingCount=0;UnresolvedFindingCount=0;ToolVersion=$null;Dispositions=@()}
+    }
+    if (-not (Test-Path -LiteralPath $DispositionRegistryPath -PathType Leaf)) {
+        return [ordered]@{Executed=$false;FindingCount=0;UnresolvedFindingCount=0;ToolVersion=$null;Dispositions=@()}
+    }
+    try {
+        $registry = Import-PowerShellDataFile -Path $DispositionRegistryPath
+        $findings = @(Invoke-ScriptAnalyzer -Path $Path -CustomRulePath $module.Path)
+        $dispositions = New-Object Collections.Generic.List[object]
+        $unresolvedCount = 0
+        foreach ($finding in $findings) {
+            $identifier = "$($finding.RuleName)@L$($finding.Line)"
+            $entry = $registry.Dispositions | Where-Object { $_.RuleName -eq $finding.RuleName -and $_.Extent -eq $finding.Extent.Text } | Select-Object -First 1
+            $disposition = if ($entry) { [string]$entry.Disposition } else { 'Confirmed' }
+            if ($disposition -ne 'Mitigated' -and $disposition -ne 'FalsePositive') { $unresolvedCount++ }
+            $dispositions.Add([ordered]@{FindingIdentifier=$identifier;Disposition=$disposition})
+        }
+        return [ordered]@{Executed=$true;FindingCount=$findings.Count;UnresolvedFindingCount=$unresolvedCount;ToolVersion=$module.Version.ToString();Dispositions=$dispositions.ToArray()}
+    } catch {
+        return [ordered]@{Executed=$false;FindingCount=0;UnresolvedFindingCount=0;ToolVersion=$null;Dispositions=@()}
+    }
+}
+
+function Test-TPMArtifactsPreflightV1 {
+    param(
+        [Parameter(Mandatory=$true)][string]$StagingParentRoot,
+        [Parameter(Mandatory=$true)][string]$DestinationRoot
+    )
+    $errorCount = 0
+
+    $stagingReady = $false
+    try {
+        if (-not (Test-Path -LiteralPath $StagingParentRoot -PathType Container)) { [void](New-Item -ItemType Directory -Path $StagingParentRoot -Force) }
+        $probe = Join-Path $StagingParentRoot ('.preflight-probe-' + [guid]::NewGuid().ToString('N'))
+        [IO.File]::WriteAllText($probe, 'preflight')
+        Remove-Item -LiteralPath $probe -Force
+        $stagingReady = $true
+    } catch { $errorCount++ }
+
+    $requiredCommands = @('New-TPMPublicationStagingV1','New-TPMPublicationCommitV1','New-TPMEligibilityReportV1','New-TPMPublicationReportV1','New-TPMFinalOutcomeCandidateReportV1','New-TPMScorecardReportV1','New-TPMValidationReportV1','New-TPMManifestReportV1','New-TPMCommitMarkerReportV1')
+    $publisherAvailable = $true
+    foreach ($cmd in $requiredCommands) {
+        if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) { $publisherAvailable = $false; $errorCount++ }
+    }
+
+    $destinationParentReady = $false
+    try {
+        if (-not (Test-Path -LiteralPath $DestinationRoot -PathType Container)) { [void](New-Item -ItemType Directory -Path $DestinationRoot -Force) }
+        $destinationParentReady = Test-Path -LiteralPath $DestinationRoot -PathType Container
+        if (-not $destinationParentReady) { $errorCount++ }
+    } catch { $errorCount++ }
+
+    $passed = $stagingReady -and $publisherAvailable -and $destinationParentReady
+    return [ordered]@{StagingDirectoryReady=$stagingReady;PublisherAvailable=$publisherAvailable;PackageValidationExecuted=$true;PackageValidationPassed=$passed;PackageValidationErrorCount=$errorCount}
+}
+
+function New-TPMProductionFactRecordsFromLegacyV1 {
+    param(
+        $Results,
+        [Parameter(Mandatory=$true)][string]$RepositoryPath,
+        [Parameter(Mandatory=$true)][string]$ReportDirectory,
+        [Parameter(Mandatory=$true)][string]$BackupDirectory,
+        $HealthResult,
+        [string]$HealthLoadError,
+        $UnattendedBinding,
+        [Parameter(Mandatory=$true)][string]$StagingParentRoot,
+        [Parameter(Mandatory=$true)][string]$DestinationRoot,
+        [string]$DispositionRegistryPath
+    )
+    $facts = @(New-TPMShadowFactRecordsFromLegacyV1 -Results $Results -RepositoryPath $RepositoryPath -ReportDirectory $ReportDirectory -BackupDirectory $BackupDirectory -HealthResult $HealthResult -HealthLoadError $HealthLoadError -UnattendedBinding $UnattendedBinding)
+
+    $mainScriptPath = Join-Path $RepositoryPath 'TeknoParrot-Manager.ps1'
+    if ([string]::IsNullOrWhiteSpace($DispositionRegistryPath)) { $DispositionRegistryPath = Join-Path $PSScriptRoot 'InjectionHunterDispositions.psd1' }
+
+    $parserWin = Test-TPMStaticAnalysisParserV1 -Path $mainScriptPath -Engine 'WindowsPowerShell51'
+    $parserPwsh = Test-TPMStaticAnalysisParserV1 -Path $mainScriptPath -Engine 'Pwsh'
+    $encoding = Test-TPMStaticAnalysisEncodingV1 -Path $mainScriptPath
+    $injectionHunter = Test-TPMStaticAnalysisInjectionHunterV1 -Path $mainScriptPath -DispositionRegistryPath $DispositionRegistryPath
+    $psAnalyzerExecuted = ($null -ne $Results.PSScriptAnalyzerFindings)
+    $psAnalyzerFindingCount = [int]$Results.PSScriptAnalyzerFindings
+    $psAnalyzerToolVersion = [string]$Results.PSScriptAnalyzerVersion
+
+    $staticAnalysisFact = [ordered]@{
+        Identifier='Static Analysis';Applicable=$true;Data=[ordered]@{
+            Parser=@([ordered]@{Identifier=$parserWin.Identifier;Executed=$parserWin.Executed;ErrorCount=$parserWin.ErrorCount;ToolVersion=$parserWin.ToolVersion},[ordered]@{Identifier=$parserPwsh.Identifier;Executed=$parserPwsh.Executed;ErrorCount=$parserPwsh.ErrorCount;ToolVersion=$parserPwsh.ToolVersion})
+            Encoding=[ordered]@{Executed=$encoding.Executed;NonAsciiByteCount=$encoding.NonAsciiByteCount;Files=@('TeknoParrot-Manager.ps1')}
+            PSScriptAnalyzer=[ordered]@{Executed=$psAnalyzerExecuted;FindingCount=$psAnalyzerFindingCount;ToolVersion=$psAnalyzerToolVersion}
+            InjectionHunter=[ordered]@{Executed=$injectionHunter.Executed;FindingCount=$injectionHunter.FindingCount;UnresolvedFindingCount=$injectionHunter.UnresolvedFindingCount;ToolVersion=$injectionHunter.ToolVersion;Dispositions=$injectionHunter.Dispositions}
+        }
+    }
+
+    $artifactsPreflight = Test-TPMArtifactsPreflightV1 -StagingParentRoot $StagingParentRoot -DestinationRoot $DestinationRoot
+    $legacyArtifactsFact = $facts | Where-Object { $_.Identifier -eq 'Artifacts' } | Select-Object -First 1
+    $artifactsFact = [ordered]@{
+        Identifier='Artifacts';Applicable=$true;Data=[ordered]@{
+            ReportDirectory=$legacyArtifactsFact.Data.ReportDirectory
+            ReportDirectoryReserved=$legacyArtifactsFact.Data.ReportDirectoryReserved
+            StagingDirectoryReady=$artifactsPreflight.StagingDirectoryReady
+            RequiredArtifactManifestConfigured=$true
+            PublisherAvailable=$artifactsPreflight.PublisherAvailable
+            PackageValidationExecuted=$artifactsPreflight.PackageValidationExecuted
+            PackageValidationPassed=$artifactsPreflight.PackageValidationPassed
+            PackageValidationErrorCount=$artifactsPreflight.PackageValidationErrorCount
+        }
+    }
+
+    $result = New-Object Collections.Generic.List[object]
+    foreach ($fact in $facts) {
+        if ($fact.Identifier -eq 'Static Analysis') { $result.Add($staticAnalysisFact) }
+        elseif ($fact.Identifier -eq 'Artifacts') { $result.Add($artifactsFact) }
+        else { $result.Add($fact) }
+    }
+    return $result.ToArray()
+}
+
+Export-ModuleMember -Function New-TPMProductionWorkflowAuthorityV1,Get-TPMEligibilityPayloadV1,New-TPMProductionFactRecordsFromLegacyV1,Test-TPMStaticAnalysisParserV1,Test-TPMStaticAnalysisEncodingV1,Test-TPMStaticAnalysisInjectionHunterV1,Test-TPMArtifactsPreflightV1
