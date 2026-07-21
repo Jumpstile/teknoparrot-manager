@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/Jumpstile/teknoparrot-manager/contracts/_schema/CertificationEnvelopeV1.schema.json",
+  "title": "EmulatorContractVerificationResultV1",
+  "description": "The generic certification result shape every contract x capability evaluation produces. Replaces the bespoke, hand-authored per-emulator Data shape ADR-0155 section 5.8 previously used -- one envelope shape, reused for every registered contract, so adding an emulator produces more envelope instances rather than more ADR prose or bespoke authority code. Not yet wired into TPMCertification.Authority.psm1, TPMCertification.Shadow.psm1, or Invoke-TPM-RealInstanceSmoke.ps1 -- this document describes the target shape for that future wiring step.",
+  "type": "object",
+  "required": [
+    "ContractId", "ContractSchemaVersion", "UpstreamCommitUsed", "VersionMatchState",
+    "CapabilityType", "CapabilityId", "Applicable", "Status", "Codes", "EvidenceReferences"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "ContractId": { "type": "string" },
+    "ContractSchemaVersion": { "type": "string" },
+    "UpstreamCommitUsed": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "VersionMatchState": { "enum": ["Matched", "Compatible", "Unknown", "Diverged", "Unsupported"] },
+    "CapabilityType": { "enum": ["Environment", "Runtime"] },
+    "CapabilityId": { "type": "string" },
+    "Applicable": { "type": "boolean" },
+    "Status": {
+      "enum": ["Pass", "Fail", "NotApplicable", "Blocked"],
+      "description": "Blocked means VersionMatchState was Unknown or Diverged and the capability was never evaluated -- distinct from Fail, which means it was evaluated and found wrong."
+    },
+    "Codes": { "type": "array", "items": { "type": "string" } },
+    "EvidenceReferences": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "EvidenceId(s) consulted for this specific evaluation, plus (for Runtime capabilities) which ObservableEvidence entry, by reliability rank, actually produced the result."
+    }
+  }
+}
