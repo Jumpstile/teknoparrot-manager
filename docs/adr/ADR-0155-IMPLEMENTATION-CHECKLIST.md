@@ -1308,8 +1308,9 @@ added (this checklist file itself was not touched by that commit).
   tests (63 total). 63/63 on pwsh 7.6.3 and 63/63 on Windows PowerShell
   5.1.
 - ADR155-Q003/Q004: `Invoke-Pester -Path .\Tests` passed 955/955 on pwsh
-  7.6.3 and 950/955 on Windows PowerShell 5.1 (same five unchanged issue
-  #148 failures).
+  7.6.3. Windows PowerShell 5.1: 949 passed, 5 failed, 1 skipped = 955
+  total, with the same five unchanged issue #148 failures and the same
+  pre-existing skip.
 - ADR155-Q005/Q006/Q007: both changed files had zero non-ASCII bytes,
   zero parser errors, zero PSScriptAnalyzer findings, and zero
   InjectionHunter findings.
@@ -1421,7 +1422,7 @@ consumer.
   Repair-GamePaths failures and one unrelated pre-existing skip --
   confirmed as environmental flakiness from concurrent execution, not a
   regression.
-- ADR155-Q005/Q006/Q007: all four changed/new files
+- ADR155-Q005/Q006/Q007: all four changed/new PowerShell files
   (`scripts/TPMCertification.Production.psm1`,
   `scripts/TPMCertification.ProductionCycle.psm1`,
   `Tests/TPMCertification.Production.Tests.ps1`,
