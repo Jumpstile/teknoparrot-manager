@@ -2925,6 +2925,46 @@ function Invoke-GpuFixSetup {
 # it (inserts before the next section header), and missing sections (appends at EOF).
 function Set-Pcsx2CursorPaths {
     param([string]$IniPath, [string]$P1Path, [string]$P2Path)
+
+    # ECVF: cursor_path is pcsx2x6-emulator-owned for jvsmode=lightgun
+    # titles (contracts\pcsx2x6\contract.json, evidence.md#ev-guncon2-clear) --
+    # the emulator itself clears it in memory whenever JVS mode is
+    # LIGHTGUN, so writing it here does not affect what is actually
+    # rendered for any currently-supported TeknoParrot lightgun title.
+    # Consulted dynamically (not hardcoded) so this adapts automatically
+    # if the contract is ever revised -- a future non-JVS GunCon2 title,
+    # or updated evidence from the pending hardware experiment recorded
+    # in contracts\pcsx2x6\experiments.md. If the framework cannot be
+    # consulted at all, this fails closed: skip the write rather than
+    # fall back to the old, now-confirmed-incorrect unconditional write.
+    $writeAllowed = $false
+    $skipReason = "the pcsx2x6 emulator contract framework was not available to confirm this write is safe"
+    try {
+        # $PSScriptRoot can be an empty string (e.g. a function body invoked
+        # from a dynamically-created scriptblock with no backing file, as in
+        # this project's own Pester harness) -- Join-Path rejects an empty
+        # -Path with a binding exception, so this whole resolution step
+        # must be inside the try, not just the module load that follows it.
+        $ecvfContractsModule = Join-Path $PSScriptRoot "scripts\TPMCertification.Contracts.psm1"
+        if (Test-Path -LiteralPath $ecvfContractsModule -PathType Leaf) {
+            Import-Module $ecvfContractsModule -Force -ErrorAction Stop
+            $loadedContract = Get-TPMEmulatorContractV1 -ContractId 'pcsx2x6'
+            try {
+                Assert-TPMOwnershipWriteAllowedV1 -Contract $loadedContract.Contract -SettingPath 'USB1.guncon2_cursor_path[jvsmode=lightgun]' | Out-Null
+                $writeAllowed = $true
+            } catch {
+                $skipReason = "pcsx2x6's cursor_path is emulator-owned for jvsmode=lightgun titles -- $_"
+            }
+        }
+    } catch {
+        $skipReason = "could not load or evaluate the pcsx2x6 emulator contract -- $_"
+    }
+    if (-not $writeAllowed) {
+        Write-Host ("    NOTE: Skipping PCSX2.ini cursor_path write -- {0}" -f $skipReason) -ForegroundColor Yellow
+        Write-Log "Crosshairs: skipped PCSX2.ini cursor_path write -- $skipReason"
+        return $false
+    }
+
     try {
         $lines   = [System.IO.File]::ReadAllLines($IniPath)
         $out     = New-Object System.Collections.Generic.List[string]
@@ -2965,9 +3005,11 @@ function Set-Pcsx2CursorPaths {
         Copy-Item -LiteralPath $IniPath -Destination $iniBackup -ErrorAction Stop
         [System.IO.File]::WriteAllText($IniPath, ($out -join "`r`n"), (New-Object System.Text.UTF8Encoding $false))
         Write-Log "Crosshairs: updated PCSX2.ini at $IniPath (backup: $iniBackup)"
+        return $true
     } catch {
         Write-Host ("    WARNING: Could not update PCSX2.ini -- {0}" -f $_) -ForegroundColor Yellow
         Write-Log "Crosshairs: PCSX2.ini update failed -- $_"
+        return $false
     }
 }
 
@@ -3157,8 +3199,9 @@ function Invoke-CrosshairSetup {
                         Copy-Item -LiteralPath $valid[$p2Idx] -Destination $p2Dest -Force -ErrorAction Stop
                         $iniPath = Join-Path $pcsx2Dir "inis\PCSX2.ini"
                         if (Test-Path -LiteralPath $iniPath) {
-                            Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path $p1Dest -P2Path $p2Dest
-                            Write-Host ("    Pcsx2x6 -> {0}  (PCSX2.ini updated)" -f $pcsx2Dir) -ForegroundColor Green
+                            $iniUpdated = Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path $p1Dest -P2Path $p2Dest
+                            $iniStatus = if ($iniUpdated) { "PCSX2.ini updated" } else { "PNGs copied; PCSX2.ini cursor_path left untouched, see note above" }
+                            Write-Host ("    Pcsx2x6 -> {0}  ({1})" -f $pcsx2Dir, $iniStatus) -ForegroundColor Green
                         } else {
                             Write-Host ("    Pcsx2x6 -> {0}  (PCSX2.ini not found; PNGs copied)" -f $pcsx2Dir) -ForegroundColor Green
                             Write-Log "Crosshairs: Pcsx2x6 PCSX2.ini not found at $iniPath"
