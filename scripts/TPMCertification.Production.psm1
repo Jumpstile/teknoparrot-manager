@@ -78,7 +78,7 @@ function Assert-TPMPublicationFailureReasonsV1 {
         if($script:TpmPublicationFailureCodesV1-cnotcontains$map.Code){throw 'SCHEMA_INVALID: publication failure Code'}
         Assert-TPMStringV1 $map.Message 'publication failure Message'
     }
-    return $reasons
+    return ,$reasons
 }
 
 function New-TPMProductionWorkflowAuthorityV1 {

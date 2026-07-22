@@ -78,6 +78,16 @@ Describe 'ADR-0155 Phase 3 production dispatcher lifecycle' {
   $payload.PublicationCommitted|Should -BeFalse
   @($payload.FailureReasons|Where-Object{$_.Code-eq'STAGING_FAILED'}).Count|Should -Be 1
  }
+ It 'issues TPMPublicationOutcomeV1.FailureReasons as a genuine JSON array, not a bare object, when exactly one reason is given' {
+  $run=New-SealedRunV1 $root
+  $eligibility=&$run.Authority IssueEligibility $run.Sealed
+  $reasons=@([ordered]@{Code='PROMOTION_FAILED';Message='exactly one reason'})
+  $outcome=&$run.Authority RegisterPublicationFailure $reasons $eligibility
+  $outcome.CanonicalJson|Should -Match '"FailureReasons":\['
+  $parsed=$outcome.CanonicalJson|ConvertFrom-Json
+  @($parsed.FailureReasons).Count|Should -Be 1
+  $parsed.FailureReasons[0].Code|Should -Be 'PROMOTION_FAILED'
+ }
  It 'produces NOT CERTIFIED with exit code 1 when publication commits but eligibility failed' {
   $root2=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $root2|Out-Null
   $authority=New-TPMProductionWorkflowAuthorityV1 -Mode Smoke -EvidenceRoot $root2 -PngValidator $validator

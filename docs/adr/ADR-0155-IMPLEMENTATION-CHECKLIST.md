@@ -1281,3 +1281,158 @@ introduced -- the fix is a one-line correction inside the already-approved
 anywhere. Remaining Phase 3 work: the atomic cutover that removes every
 legacy decision assignment and competing publisher (ADR155-0309), which
 is now the only unchecked ADR155-030x item.
+
+## Phase 3 ADR155-0309 prerequisite: Section 8.3 final-outcome candidate report builder -- 2026-07-21
+
+Commit `c0dc793` resolves a staging/publication ordering circularity found
+while starting ADR155-0309 harness wiring: `New-TPMFinalOutcomeReportV1`
+(Section 9) strictly requires a genuine dispatcher-issued
+`TPMFinalOutcomeV1`, which can only exist after `RegisterCommittedPublication`
+-- but `RegisterCommittedPublication` needs real manifest hashes, and the
+manifest needs a `FinalOutcomeJson` artifact. Independently reviewed in an
+isolated worktree and returned APPROVED before this checklist entry was
+added (this checklist file itself was not touched by that commit).
+
+- Adds `New-TPMFinalOutcomeCandidateReportV1` to
+  `scripts/TPMCertification.Reports.psm1`: builds the Section 8.3
+  candidate schema (`EligibilityStatus`/`RequiredPublicationState`, no
+  `FailureReasons` -- distinct from Section 9's
+  `EligibleForCertification`/`PublicationCommitted`/`FailureReasons`)
+  directly from an issued `TPMEligibilitySnapshotV1`, available
+  immediately after `IssueEligibility`, before any publication attempt.
+  `New-TPMFinalOutcomeReportV1` and `New-TPMFinalOutcomeProjectionV1` are
+  unchanged -- same strict type check, same runtime authority; a
+  regression test proves the candidate's own output object is rejected
+  by both.
+- ADR155-Q001/Q002: `Tests/TPMCertification.Reports.Tests.ps1` gained 8
+  tests (63 total). 63/63 on pwsh 7.6.3 and 63/63 on Windows PowerShell
+  5.1.
+- ADR155-Q003/Q004: `Invoke-Pester -Path .\Tests` passed 955/955 on pwsh
+  7.6.3 and 950/955 on Windows PowerShell 5.1 (same five unchanged issue
+  #148 failures).
+- ADR155-Q005/Q006/Q007: both changed files had zero non-ASCII bytes,
+  zero parser errors, zero PSScriptAnalyzer findings, and zero
+  InjectionHunter findings.
+
+Broader harness wiring (staging, manifest construction, publication,
+final-outcome issuance) remained paused pending this review.
+
+## Phase 3 ADR155-0309 Sub-step A: production certification cycle orchestration -- 2026-07-21
+
+Wires the approved authority, builders, publication commit, and
+projection into a single, tested orchestration path -- proving the
+circularity fix from the prerequisite above actually closes end to end
+with real values, not the placeholder `ManifestSha256`/`ArtifactSetSha256`
+every dispatcher/publication test before this commit had to use. This is
+the orchestration primitive that broader harness wiring will call; it
+does not yet touch `Invoke-TPM-RealInstanceSmoke.ps1` or remove any
+legacy decision/publish code (that remains for a later, separately
+reviewed sub-step).
+
+**Safety invariant** (documented in the function's own header comment,
+repeated here per instruction): the Section 8.3 candidate and the
+Section 9 dispatcher-issued `TPMFinalOutcomeV1` can diverge only when
+`EligibleForCertification=true` and publication does not commit. In
+every other case their `FinalStatus`/`ExitCode` agree -- the candidate's
+eligibility-only derivation and the dispatcher's
+`EligibleForCertification AND PublicationCommitted` derivation reduce to
+the same value whenever `EligibleForCertification` is false, and
+coincide by definition once `PublicationCommitted` is true. In the one
+divergent case, the bundle is never durably committed -- no valid commit
+marker exists at the destination -- so per Section 8.2/8.3 the
+candidate-bearing bundle is non-authoritative and must be ignored by any
+consumer.
+
+- Adds `scripts/TPMCertification.ProductionCycle.psm1`:
+  `Complete-TPMProductionCertificationCycleV1`, implementing the required
+  seven-step sequence exactly: (1) issue eligibility through the
+  workflow authority; (2) build the Section 8.3 candidate final-outcome
+  report from that eligibility; (3) use the candidate only while
+  constructing and staging the five-artifact bundle and manifest; (4)
+  attempt publication (`New-TPMPublicationCommitV1`) and register the
+  real observation (`RegisterCommittedPublication` on success,
+  `RegisterPublicationFailure` on failure) -- `ManifestSha256`/
+  `ArtifactSetSha256` come from the actual commit result, never a
+  placeholder; (5) issue the genuine `TPMFinalOutcomeV1` only after the
+  dispatcher has issued `TPMPublicationOutcomeV1` -- enforced by the
+  dispatcher's own phase machine, not re-implemented here; (6) derive the
+  runtime projection (`New-TPMFinalOutcomeProjectionV1`) only from that
+  genuine object; (7) publication failure can never leave an
+  authoritative bundle or marker (guaranteed by `New-TPMPublicationCommitV1`'s
+  existing rollback, proven again through this orchestration) and can
+  never produce CERTIFIED (guaranteed by the dispatcher's own
+  `EligibleForCertification AND PublicationCommitted` composition).
+- No new production code path for construction/staging/publication/
+  projection itself -- this function only sequences calls to
+  already-approved primitives from `Authority.psm1` (via the injected
+  dispatcher closure), `Reports.psm1`, and `Publication.psm1`.
+- **Defect found and fixed by this checkpoint's own integration testing,
+  not a pre-existing known issue:** `Assert-TPMPublicationFailureReasonsV1`
+  in `scripts/TPMCertification.Production.psm1` used `return $reasons`
+  instead of `return ,$reasons`. When `RegisterPublicationFailure` is
+  given exactly one failure reason -- the common case, and exactly what
+  this orchestration produces on a single publish failure -- PowerShell's
+  return statement unrolled the one-element array into a bare scalar on
+  the pipeline, so `TPMPublicationOutcomeV1.FailureReasons` serialized as
+  a bare JSON object instead of a one-element JSON array, violating
+  Section 9's array schema. `IssueFinalOutcome`'s own `FailureReasons`
+  aggregation was unaffected (it already used the safe `.ToArray()`/`@()`
+  pattern), which is exactly why no prior test caught this -- every
+  existing test asserted against the derived `TPMFinalOutcomeV1.FailureReasons`,
+  never directly against `TPMPublicationOutcomeV1.FailureReasons`.
+  Confirmed by direct reproduction before fixing. This is the fourth
+  occurrence of the exact `return @()`-without-comma defect class this
+  repository has hit before. Fixed with the one-character correction
+  (`return ,$reasons`); added a direct regression test asserting the
+  `TPMPublicationOutcomeV1.FailureReasons` JSON is a genuine array (not
+  just checking `.Code`/`.Message`, which would not have caught this).
+- Regression coverage added (`Tests/TPMCertification.ProductionCycle.Tests.ps1`,
+  6 tests) proving both explicitly required watch items plus general
+  correctness: a genuine CERTIFIED run end to end with real (non-placeholder)
+  `ManifestSha256`/`ArtifactSetSha256` driving `RegisterCommittedPublication`;
+  a genuine NOT CERTIFIED (score-ineligible) run that still publishes the
+  complete seven-file committed bundle; **watch item 1** -- the candidate
+  participates in manifest construction (its bytes are exactly what the
+  manifest records for the `FinalOutcomeJson` slot) but is structurally
+  rejected by both `New-TPMFinalOutcomeReportV1` and
+  `New-TPMFinalOutcomeProjectionV1`, and the runtime projection is proven
+  to come only from the genuine dispatcher-issued object; **watch item 2**
+  -- an eligible run whose publication fails (mid-promotion collision)
+  produces `Committed=false`, a `PublicationOutcome` with null hashes and
+  a non-empty `FailureReasons` array, `PublicationCommitted:false` on the
+  genuine `FinalOutcome`, `FinalStatus='NOT CERTIFIED'`/`ExitCode=1` from
+  the projection, and no commit marker or extra file at the destination
+  beyond the pre-existing collider; rollback leaves the failed attempt's
+  files in its own staging directory rather than partially promoted; and
+  the on-disk committed `Final-Outcome.json` matches the Section 8.3
+  schema and agrees with the runtime projection when publication commits.
+- ADR155-Q001/Q002: `Tests/TPMCertification.ProductionCycle.Tests.ps1`
+  (6 tests) plus one new regression test added to
+  `Tests/TPMCertification.Production.Tests.ps1` for the `FailureReasons`
+  array fix: 21/21 combined on pwsh 7.6.3 and 21/21 on Windows PowerShell
+  5.1.26100.8875.
+- ADR155-Q003/Q004: `Invoke-Pester -Path .\Tests` passed 962/962 on pwsh
+  7.6.3. Windows PowerShell 5.1 showed one additional failure
+  (`Tests/TpmAutoUpdate.DestructivePath.Tests.ps1`, unrelated to any file
+  touched by this commit) on a run where the pwsh and Windows PowerShell
+  5.1 full suites executed concurrently; re-run in isolation that file
+  passed 10/10, and a clean, non-concurrent re-run of the full suite
+  passed 956/962 with exactly the same five unchanged issue #148
+  Repair-GamePaths failures and one unrelated pre-existing skip --
+  confirmed as environmental flakiness from concurrent execution, not a
+  regression.
+- ADR155-Q005/Q006/Q007: all four changed/new files
+  (`scripts/TPMCertification.Production.psm1`,
+  `scripts/TPMCertification.ProductionCycle.psm1`,
+  `Tests/TPMCertification.Production.Tests.ps1`,
+  `Tests/TPMCertification.ProductionCycle.Tests.ps1`) had zero non-ASCII
+  bytes, zero parser errors, zero PSScriptAnalyzer findings, and zero
+  InjectionHunter findings.
+
+`Invoke-TPM-RealInstanceSmoke.ps1` and `TeknoParrot-Manager.ps1` are
+untouched by this commit. No legacy decision assignment, arbitrary
+builder, or competing publisher was removed yet -- that remains for a
+separately reviewed ADR155-0309 sub-step, per the explicitly agreed
+two-step sequencing (implementation and review checkpoints on this
+branch only; no merge until both are approved). ADR155-0309 remains
+unchecked and partial.
