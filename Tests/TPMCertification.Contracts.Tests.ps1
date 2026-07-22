@@ -28,7 +28,7 @@ BeforeAll {
    EnvironmentCapabilities = @(
     [ordered]@{
      CapabilityId = 'env-init'
-     PresenceDetector = [ordered]@{ Method = 'FileHash'; Source = 'fixture.exe'; Pattern = $null }
+     PresenceDetector = [ordered]@{ Method = 'PathExists'; Source = 'fixture.exe'; Pattern = $null }
      DataRootResolver = [ordered]@{ Method = 'FileContentLiteral'; Source = 'portable.txt'; DefaultValue = 'Default' }
      InitializationAction = [ordered]@{ Method = 'CliInvocation'; Command = 'fixture.exe'; Arguments = @('-testconfig'); ExpectedExitCodes = @(0); TimeoutSeconds = 30 }
      InitializedVerifier = [ordered]@{ RequiredPaths = @('inis/Fixture.ini'); RequiredMarkers = @('[Section]'); ParseMethod = 'IniSections' }
@@ -295,5 +295,103 @@ Describe 'ECVF foundation -- generic capability evaluators (fixture filesystem, 
   $result = Resolve-TPMObservableEvidenceV1 -ObservableEvidence $evidence -Sources @{ LogPath = $logPath }
   $result.Matched | Should -Be $true
   $result.SourceUsed.EvidenceSourceType | Should -Be 'EmulatorLog'
+ }
+}
+
+Describe 'ECVF foundation -- Test-TPMEmulatorPresentV1' {
+ BeforeEach { $script:presRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Path $script:presRoot | Out-Null }
+
+ It 'PathExists: true when the relative Source path exists under InstallDir' {
+  [IO.File]::WriteAllText((Join-Path $script:presRoot 'fixture.exe'), '')
+  $detector = [ordered]@{ Method = 'PathExists'; Source = 'fixture.exe'; Pattern = $null }
+  (Test-TPMEmulatorPresentV1 -Detector $detector -InstallDir $script:presRoot) | Should -Be $true
+ }
+
+ It 'PathExists: false when the relative Source path does not exist' {
+  $detector = [ordered]@{ Method = 'PathExists'; Source = 'missing.exe'; Pattern = $null }
+  (Test-TPMEmulatorPresentV1 -Detector $detector -InstallDir $script:presRoot) | Should -Be $false
+ }
+
+ It 'an unimplemented Method returns false rather than throwing (never invasive by accident)' {
+  $detector = [ordered]@{ Method = 'WindowTitleRegex'; Source = 'x'; Pattern = 'y' }
+  (Test-TPMEmulatorPresentV1 -Detector $detector -InstallDir $script:presRoot) | Should -Be $false
+ }
+}
+
+Describe 'ECVF foundation -- Get-TPMEmulatorContractObservationsV1 (shared by Shadow and Smoke)' {
+ BeforeAll {
+  function New-ContractFixtureOnDiskV1 {
+   param([string]$ContractsRoot, [string]$ContractId, [hashtable]$Overrides = @{})
+   $contract = New-ValidContractFixtureV1
+   $contract.ContractId = $ContractId
+   foreach ($key in $Overrides.Keys) { $contract[$key] = $Overrides[$key] }
+   $dir = Join-Path $ContractsRoot $ContractId
+   New-Item -ItemType Directory -Path $dir -Force | Out-Null
+   [IO.File]::WriteAllText((Join-Path $dir 'contract.json'), (ConvertTo-FixtureJsonV1 $contract))
+   [IO.File]::WriteAllText((Join-Path $dir 'evidence.md'), "# fixture`n`n### ev-1`nfixture citation`n")
+   return $dir
+  }
+ }
+
+ BeforeEach {
+  $script:contractsRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString('N') + '-contracts')
+  New-Item -ItemType Directory -Path $script:contractsRoot | Out-Null
+  $script:installRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString('N') + '-install')
+  New-Item -ItemType Directory -Path $script:installRoot | Out-Null
+ }
+
+ It 'reports RegistryValid=false and empty Observations when the registry itself is broken' {
+  $dir = New-ContractFixtureOnDiskV1 -ContractsRoot $script:contractsRoot -ContractId 'broken-emu'
+  Remove-Item -LiteralPath (Join-Path $dir 'evidence.md') -Force
+  $result = Get-TPMEmulatorContractObservationsV1 -InstallRoot $script:installRoot -ContractsRoot $script:contractsRoot
+  $result.RegistryValid | Should -Be $false
+  $result.Observations.Count | Should -Be 0
+ }
+
+ It 'Environment capability: Applicable=false and CapabilityPassed=false when the emulator is absent from InstallRoot' {
+  New-ContractFixtureOnDiskV1 -ContractsRoot $script:contractsRoot -ContractId 'absent-emu' | Out-Null
+  $result = Get-TPMEmulatorContractObservationsV1 -InstallRoot $script:installRoot -ContractsRoot $script:contractsRoot
+  $result.RegistryValid | Should -Be $true
+  $obs = $result.Observations | Where-Object { $_.CapabilityType -eq 'Environment' } | Select-Object -First 1
+  $obs.Applicable | Should -Be $false
+  $obs.CapabilityPassed | Should -Be $false
+ }
+
+ It 'Environment capability: Applicable=true and CapabilityPassed=true when present and already initialized' {
+  New-ContractFixtureOnDiskV1 -ContractsRoot $script:contractsRoot -ContractId 'present-emu' | Out-Null
+  [IO.File]::WriteAllText((Join-Path $script:installRoot 'fixture.exe'), '')
+  New-Item -ItemType Directory -Path (Join-Path $script:installRoot 'Default\inis') -Force | Out-Null
+  [IO.File]::WriteAllText((Join-Path $script:installRoot 'Default\inis\Fixture.ini'), "[Section]`r`n")
+  $result = Get-TPMEmulatorContractObservationsV1 -InstallRoot $script:installRoot -ContractsRoot $script:contractsRoot
+  $obs = $result.Observations | Where-Object { $_.CapabilityType -eq 'Environment' } | Select-Object -First 1
+  $obs.Applicable | Should -Be $true
+  $obs.CapabilityPassed | Should -Be $true
+  $obs.DataRoot | Should -Be (Join-Path $script:installRoot 'Default')
+ }
+
+ It 'Environment capability: Applicable=true and CapabilityPassed=false when present but not yet initialized' {
+  New-ContractFixtureOnDiskV1 -ContractsRoot $script:contractsRoot -ContractId 'uninit-emu' | Out-Null
+  [IO.File]::WriteAllText((Join-Path $script:installRoot 'fixture.exe'), '')
+  $result = Get-TPMEmulatorContractObservationsV1 -InstallRoot $script:installRoot -ContractsRoot $script:contractsRoot
+  $obs = $result.Observations | Where-Object { $_.CapabilityType -eq 'Environment' } | Select-Object -First 1
+  $obs.Applicable | Should -Be $true
+  $obs.CapabilityPassed | Should -Be $false
+  $obs.Reason | Should -Not -BeNullOrEmpty
+ }
+
+ It 'never invokes InitializationAction -- absence of the ini is reported, not repaired' {
+  New-ContractFixtureOnDiskV1 -ContractsRoot $script:contractsRoot -ContractId 'never-repair-emu' | Out-Null
+  [IO.File]::WriteAllText((Join-Path $script:installRoot 'fixture.exe'), '')
+  Get-TPMEmulatorContractObservationsV1 -InstallRoot $script:installRoot -ContractsRoot $script:contractsRoot | Out-Null
+  (Test-Path -LiteralPath (Join-Path $script:installRoot 'Default\inis\Fixture.ini')) | Should -Be $false
+ }
+
+ It 'RuntimeCapability: only applicable contexts produce an observation, each explicitly unresolved (no live launch performed)' {
+  New-ContractFixtureOnDiskV1 -ContractsRoot $script:contractsRoot -ContractId 'runtime-emu' | Out-Null
+  $result = Get-TPMEmulatorContractObservationsV1 -InstallRoot $script:installRoot -ContractsRoot $script:contractsRoot -RuntimeContexts @(@{ GunGame = $true }, @{ GunGame = $false })
+  $runtimeObs = @($result.Observations | Where-Object { $_.CapabilityType -eq 'Runtime' })
+  $runtimeObs.Count | Should -Be 1
+  $runtimeObs[0].CapabilityPassed | Should -Be $false
+  $runtimeObs[0].Reason | Should -Match 'live launch'
  }
 }

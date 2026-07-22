@@ -546,10 +546,71 @@ function Resolve-TPMObservableEvidenceV1 {
     return [pscustomobject]@{ Matched = $false; SourceUsed = $null }
 }
 
+function Test-TPMEmulatorPresentV1 {
+    # Generic PresenceDetector interpreter. PathExists is the only
+    # non-invasive Method implemented -- it never launches anything, only
+    # checks a relative path exists under InstallDir. WindowTitleRegex and
+    # the other detector methods require actually running the emulator
+    # (however briefly) to observe output, which read-only presence
+    # detection must not do; callers needing those signals must capture
+    # them separately (see Resolve-TPMEmulatorVersionMatchV1) and are
+    # expected to treat 'not yet observed' as Unknown, never as absent.
+    param([Parameter(Mandatory = $true)]$Detector, [Parameter(Mandatory = $true)][string]$InstallDir)
+    switch ($Detector.Method) {
+        'PathExists' { return (Test-Path -LiteralPath (Join-Path $InstallDir $Detector.Source)) }
+        default { return $false }
+    }
+}
+
+function Get-TPMEmulatorContractObservationsV1 {
+    # The single, shared, read-only pass over every registered contract for
+    # a given install root -- this is what both Shadow and Smoke call, so
+    # neither reimplements its own copy of "walk contracts, check presence,
+    # verify environment capability." Never invokes InitializationAction
+    # (that is a repair action a caller must opt into explicitly and
+    # separately) and never resolves VersionMatchState (that requires
+    # launching the emulator, which observation collection must not do --
+    # callers that have a captured version signal resolve it themselves via
+    # Resolve-TPMEmulatorVersionMatchV1 and combine it with these
+    # observations). RuntimeContexts, when supplied, only gets
+    # applicability checked here; runtime evidence resolution needs a real
+    # launch and is out of scope for this collector.
+    param([Parameter(Mandatory = $true)][string]$InstallRoot, [object[]]$RuntimeContexts = @(), [string]$ContractsRoot)
+    $integrity = if ([string]::IsNullOrWhiteSpace($ContractsRoot)) { Test-TPMContractRegistryIntegrityV1 } else { Test-TPMContractRegistryIntegrityV1 -ContractsRoot $ContractsRoot }
+    if (-not $integrity.Valid) {
+        return [pscustomobject]@{ RegistryValid = $false; Errors = $integrity.Errors; Observations = @() }
+    }
+    $observations = New-Object Collections.Generic.List[object]
+    foreach ($entry in $integrity.Contracts) {
+        $contract = $entry.Contract
+        foreach ($cap in $contract.EnvironmentCapabilities) {
+            $present = Test-TPMEmulatorPresentV1 -Detector $cap.PresenceDetector -InstallDir $InstallRoot
+            $observation = [ordered]@{ ContractId = $contract.ContractId; CapabilityType = 'Environment'; CapabilityId = $cap.CapabilityId; Applicable = $present; CapabilityPassed = $false; DataRoot = $null; Reason = $null }
+            if ($present) {
+                $dataRoot = Resolve-TPMEnvironmentDataRootV1 -Resolver $cap.DataRootResolver -InstallDir $InstallRoot
+                $verified = Test-TPMEnvironmentInitializedV1 -Verifier $cap.InitializedVerifier -DataRoot $dataRoot
+                $observation.DataRoot = $dataRoot
+                $observation.CapabilityPassed = $verified.Initialized
+                $observation.Reason = $verified.Reason
+            }
+            $observations.Add([pscustomobject]$observation)
+        }
+        foreach ($cap in $contract.RuntimeCapabilities) {
+            foreach ($context in $RuntimeContexts) {
+                $applicable = Test-TPMRuntimeApplicabilityV1 -Predicate $cap.ApplicabilityPredicate -Context $context
+                if (-not $applicable) { continue }
+                $observations.Add([pscustomobject]@{ ContractId = $contract.ContractId; CapabilityType = 'Runtime'; CapabilityId = $cap.CapabilityId; Applicable = $true; CapabilityPassed = $false; DataRoot = $null; Reason = 'runtime evidence resolution requires a live launch; not performed by this read-only collector' })
+            }
+        }
+    }
+    return [pscustomobject]@{ RegistryValid = $true; Errors = @(); Observations = $observations.ToArray() }
+}
+
 Export-ModuleMember -Function Get-TPMContractsRootV1, ConvertFrom-TPMOrderedJsonV1, ConvertTo-TPMOrderedValueV1, `
     Assert-TPMEmulatorContractV1, Get-TPMRegisteredEmulatorContractsV1, Get-TPMEmulatorContractV1, `
     Get-TPMSupportedContractSchemaVersionsV1, Assert-TPMSupportedContractSchemaVersionV1, `
     Assert-TPMContractLocatorsResolveV1, Test-TPMContractRegistryIntegrityV1, Assert-TPMContractRegistryValidV1, `
     Resolve-TPMEmulatorVersionMatchV1, Assert-TPMOwnershipWriteAllowedV1, `
     Resolve-TPMEnvironmentDataRootV1, Invoke-TPMEnvironmentInitializationActionV1, Test-TPMEnvironmentInitializedV1, `
-    Test-TPMRuntimeApplicabilityV1, Resolve-TPMObservableEvidenceV1
+    Test-TPMRuntimeApplicabilityV1, Resolve-TPMObservableEvidenceV1, `
+    Test-TPMEmulatorPresentV1, Get-TPMEmulatorContractObservationsV1
