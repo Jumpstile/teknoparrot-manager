@@ -2150,19 +2150,34 @@ Describe "Invoke-TpmDownload finally block always clears the progress overlay (i
 }
 
 Describe "Crosshair setup regression guards" {
-    It "backs up PCSX2.ini before rewriting cursor paths" {
+    # ECVF: cursor_path is pcsx2x6-emulator-owned for jvsmode=lightgun
+    # titles (contracts\pcsx2x6\contract.json, evidence.md#ev-guncon2-clear)
+    # -- the emulator clears it in memory regardless of what TPM writes, so
+    # Set-Pcsx2CursorPaths now consults the ECVF contract framework before
+    # writing and fails closed (skips the write) if that framework cannot
+    # be consulted, rather than falling back to the old unconditional
+    # write. In THIS test harness specifically, $PSScriptRoot resolves to
+    # an empty string for a function body extracted via AST and
+    # dot-sourced from a scriptblock (confirmed empirically -- there is no
+    # real backing file for the dynamically-created scriptblock), so the
+    # module path never resolves and every call here exercises the
+    # fail-closed "framework unavailable" branch. That is the correct,
+    # real behavior for this test's actual scope: proving the function
+    # never falls back to writing when it cannot confirm the write is
+    # safe -- not a workaround to keep an old assertion passing.
+    It "skips the cursor_path write, leaves the ini untouched, and creates no backup when the ECVF framework cannot be consulted" {
         $iniDir = Join-Path $TestDrive "inis"
         New-Item -ItemType Directory -Path $iniDir -Force | Out-Null
         $iniPath = Join-Path $iniDir "PCSX2.ini"
         Set-Content -LiteralPath $iniPath -Value "[USB Port 1 guncon2]`ncursor_path = old1`n[USB Port 2 guncon2]`ncursor_path = old2"
+        $originalContent = Get-Content -LiteralPath $iniPath -Raw
         Mock Write-Log {}
 
-        Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path "C:\Crosshairs\P1.png" -P2Path "C:\Crosshairs\P2.png"
+        $result = Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path "C:\Crosshairs\P1.png" -P2Path "C:\Crosshairs\P2.png"
 
-        $updated = Get-Content -LiteralPath $iniPath -Raw
-        $updated | Should -Match ([regex]::Escape("cursor_path = C:\Crosshairs\P1.png"))
-        $updated | Should -Match ([regex]::Escape("cursor_path = C:\Crosshairs\P2.png"))
-        @(Get-ChildItem -LiteralPath $iniDir -Filter "PCSX2.ini.bak_*" -File).Count | Should -Be 1
+        $result | Should -Be $false
+        (Get-Content -LiteralPath $iniPath -Raw) | Should -Be $originalContent
+        @(Get-ChildItem -LiteralPath $iniDir -Filter "PCSX2.ini.bak_*" -File).Count | Should -Be 0
     }
 
     # Invoke-CrosshairSetup itself is an interactive wizard (Read-Host prompts,
