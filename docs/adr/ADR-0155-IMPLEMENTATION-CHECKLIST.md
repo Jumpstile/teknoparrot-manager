@@ -1437,3 +1437,239 @@ separately reviewed ADR155-0309 sub-step, per the explicitly agreed
 two-step sequencing (implementation and review checkpoints on this
 branch only; no merge until both are approved). ADR155-0309 remains
 unchecked and partial.
+
+## Phase 3 ADR155-0309 Checkpoint B1: dedicated production fact adapter -- 2026-07-22
+
+Replaces `New-TPMShadowFactRecordsFromLegacyV1` (Phase 2's placeholder-
+tolerant, never-authoritative shadow adapter) as the production authority's
+fact source with a dedicated module,
+`scripts/TPMCertification.ProductionFacts.psm1`, that never imports or
+calls `TPMCertification.Shadow.psm1` and never expands its public surface.
+Full architecture summary: `ARCHITECTURE.md` ("ADR-0155 production fact
+adapter (ADR155-0309 Checkpoint B1)").
+
+**Iteration history (independent implementation, not the unreviewed
+c0dc793..b6f54b1 reference lineage, which was consulted only as prior-art
+spec material and never merged or cherry-picked):**
+
+- **Round 1** built the module with an exported `-RelativePaths` test seam
+  on the inventory function, a four-file inventory (release package only),
+  an InjectionHunter identity of RuleName+Extent (no File), and a
+  `Test-TPMProductionPackagePreflightV1` that recursively deleted its
+  caller-supplied `PreflightScratchRoot` directly.
+- **Round 2 corrections (first review pass):** removed the `-RelativePaths`
+  seam from the exported entry point (moved to a private, InModuleScope-only
+  `Resolve-TPMProductionPowerShellInventoryEntriesV1`); expanded the
+  inventory to the full 16-entry union of release-package and ADR-0155
+  production certification/harness content (`scripts/Invoke-TPM-
+  RealInstanceSmoke.ps1`, `scripts/Invoke-TPM-InstallHealthCheck.ps1`,
+  `scripts/Resolve-Pcsx2Directory.ps1`, `scripts/Run-TPM-Tests.ps1`, all six
+  `TPMCertification.*.psm1` modules including `Shadow.psm1`'s own file
+  content -- but not its exports -- and `Test-TPMParserCheckV1.ps1`, with
+  `scripts/Preview-TPM-ConsoleUx.ps1` and `Tests/*` explicitly documented as
+  excluded dev-only content); added File to the InjectionHunter match key and
+  FindingIdentifier, with same-file duplicate-extent occurrences (a real,
+  legitimate case in this repository, e.g. TeknoParrot-Manager.ps1's
+  `-replace '\.(teknoparrot|parrot|game)$'` construct at two separate lines)
+  resolved by ascending-Line pairing between findings and registry entries
+  sharing a match key, and a genuinely duplicate raw finding identity treated
+  as a scanner defect (fail closed); replaced the unsafe direct
+  `Remove-Item -Recurse` on the caller's scratch root with
+  `New-/Remove-TPMOwnedScratchDirectoryV1` (owns and deletes exactly one
+  validated child, never the parent); added parser cross-file engine-version
+  consistency checking, `Invoke-TPMExternalProcessWithTimeoutV1` preserving
+  diagnostics rather than deleting them when a timed-out child's termination
+  cannot be confirmed, and `Invoke-TPMBoundedScriptBlockV1` (a genuine
+  wall-clock bound for the in-process PSScriptAnalyzer/InjectionHunter
+  scans).
+- **Defects found and fixed by this checkpoint's own integration testing,
+  not pre-existing known issues:**
+  1. `Start-Process -ArgumentList` does not quote array elements containing
+     spaces or Win32 command-line metacharacters on this environment's
+     PowerShell/Windows build -- a path like `a file (with) [odd] chars.ps1`
+     arrived at the child process split into multiple separate argv tokens,
+     silently corrupting it. Fixed with `ConvertTo-TPMWin32QuotedArgumentV1`,
+     a CommandLineToArgvW-compatible quoting function applied to every
+     argument before `Start-Process` joins them; proven with a dedicated
+     regression test using a path containing both spaces and metacharacters.
+  2. Windows PowerShell 5.1 does not reliably populate `.ExitCode` on a
+     `Start-Process -PassThru` object unless `.Handle` is touched first --
+     confirmed by direct reproduction (`$proc.ExitCode` read back `$null`
+     even after a normal, non-timed-out exit, until `[void]$proc.Handle` was
+     added immediately after `Start-Process` returns). See
+     `LESSONS_LEARNED.md`.
+  3. `DiagnosticRecord.Line`/`.Column` are ScriptProperties bound to the
+     runspace that produced them, not intrinsic .NET properties -- reading
+     them back after a same-process `[PowerShell]::Create()` runspace
+     handoff intermittently failed (and, worse, produced sporadic unrelated
+     failures reading other results depending on timing). Fixed by switching
+     `Invoke-TPMBoundedScriptBlockV1` to `Start-Job` (a genuine background
+     process, not a same-process runspace) and projecting to plain
+     primitive-typed fields before the result crosses back. See
+     `LESSONS_LEARNED.md`.
+  4. The PowerShell array-subexpression operator (`@(...)`) applied directly
+     to a `System.Collections.Generic.List[object]` variable threw
+     "Argument types do not match" on this environment's pwsh 7.6.4 build,
+     even though the identical list enumerated correctly via `.ToArray()`,
+     an `[array]` cast, or piping through `ForEach-Object` -- this corrupted
+     the InjectionHunter finding/registry-entry pairing logic in a way that
+     was silently absorbed by the surrounding `try`/`catch` as a bare
+     `Executed=$false`, not a visible error, until debugged directly. Fixed
+     by never wrapping a `List[object]` directly in `@()`; added a
+     dedicated `Sort-TPMByLineV1` manual-sort helper (also avoiding
+     `Sort-Object` piped over a collection of Hashtables, which showed the
+     same failure mode) in place of `@($list | Sort-Object Line)`. See
+     `LESSONS_LEARNED.md`.
+- Regression coverage: `Tests/TPMCertification.ProductionFacts.Tests.ps1`
+  (51 tests) covering: the fixed 16-file inventory and its non-overridable
+  production entry point; missing/duplicate/outside-root/unreadable
+  inventory-entry rejection (via `InModuleScope`); parser success/failure/
+  no-engine/timeout/non-zero-exit/malformed/extra/partial/mismatched-path/
+  missing-field/negative-count/cross-file-version-mismatch/full-coverage
+  gating, plus the space-and-metacharacter path regression; a genuine
+  (non-mocked) bounded-execution timeout; PSScriptAnalyzer aggregation
+  (never reusing the legacy count) and missing-settings handling; disposition
+  registry accept and six rejection modes (closed schema, bad SchemaVersion,
+  bad File normalization, bad Disposition, duplicate File+RuleName+Extent+
+  Line, and the same-key/different-Line acceptance case); InjectionHunter
+  cross-file non-collision, same-file duplicate-occurrence pairing, stale-
+  entry fail-closed, missing-registry/missing-module handling; scratch-
+  directory ownership (creates/owns/removes exactly one child; rejects a
+  pre-existing child name and an outside-root child name; refuses to
+  recursively remove a path no longer resolving inside its recorded parent
+  or a reparse point standing in the owned child's place); the real
+  preflight pipeline's genuine success, genuine command-failure (mocked to
+  throw, not merely absent from `Get-Command`), staging failure, and
+  cleanup-failure-forces-PackageValidationPassed-false cases; a self-scan
+  proving the complete real 16-file inventory (not merely the newly
+  authored files) is ASCII-clean, parses under both engines, and is
+  analyzed by both Static Analysis gates with zero unresolved findings; and
+  full 11-fact integration through the real dispatcher.
+- ADR155-Q005/Q006/Q007: the four new/changed files
+  (`scripts/TPMCertification.ProductionFacts.psm1`,
+  `scripts/Test-TPMParserCheckV1.ps1`,
+  `scripts/InjectionHunterDispositions.psd1`,
+  `Tests/TPMCertification.ProductionFacts.Tests.ps1`) had zero non-ASCII
+  bytes, zero parser errors, zero PSScriptAnalyzer findings, and zero
+  InjectionHunter findings (against the module code itself; the complete
+  16-file production inventory's own findings are the 27 real dispositioned
+  entries in `scripts/InjectionHunterDispositions.psd1`, one new pre-existing
+  PSScriptAnalyzer finding was newly surfaced in
+  `scripts/Invoke-TPM-InstallHealthCheck.ps1` by scanning it for the first
+  time -- observed and reported honestly, not fixed, as out of scope for
+  this checkpoint).
+- Full suite: 1013/1013 on pwsh 7.6.4; 1006/1011 on Windows PowerShell 5.1
+  with exactly the five pre-existing issue #148 Repair-GamePaths failures
+  and two legitimate skips (one pre-existing reparse-point skip, one new
+  symlink-creation-permission skip in the scratch-ownership adversarial
+  test, matching the same `Set-ItResult -Skipped` pattern already used
+  elsewhere in this suite for unprivileged environments).
+
+`TPMCertification.Production.psm1` is untouched by this checkpoint (byte-
+identical to its pre-checkpoint state). No harness wiring, fact-source
+swap into `Invoke-TPM-RealInstanceSmoke.ps1`, ECVF work, or hardware
+certification was performed. Nothing from this checkpoint has been
+committed, staged, or pushed. ADR155-0309 remains unchecked and partial.
+
+## Phase 3 ADR155-0309 Checkpoint B1 -- round 3 corrections -- 2026-07-22
+
+Three focused corrections after the second review pass:
+
+1. **Fixed the genuine `PSAvoidAssignmentToAutomaticVariable` finding** the
+   complete inventory surfaced in `scripts/Invoke-TPM-InstallHealthCheck.ps1`
+   (line 33, `Write-HealthLog`'s `-Event` parameter collided with
+   PowerShell's automatic `$Event` variable). Renamed to `-EventName`;
+   every existing call site uses positional arguments, so no caller needed
+   updating. Added `Tests/InstallHealthCheck.Tests.ps1` coverage (3 new
+   tests: original positional call shape unchanged, `-EventName` works as a
+   named parameter, `-Event` no longer exists as a parameter name) proving
+   behavior is otherwise identical. `Test-TPMProductionPSScriptAnalyzerV1`
+   now genuinely reports `FindingCount=0` across the real 16-file inventory
+   -- confirmed by direct re-run, not assumed.
+2. **Minimized the module's public surface to exactly two functions**:
+   `Get-TPMProductionPowerShellInventoryV1` and
+   `New-TPMProductionFactRecordsV1`. Every other function (parser/
+   PSScriptAnalyzer/InjectionHunter probes, the bounded-execution and
+   external-process primitives, the disposition-registry validator, and --
+   the specific finding -- `New-`/`Remove-TPMOwnedScratchDirectoryV1`) is
+   now unexported. The scratch-directory primitives being exported let any
+   caller forge an `Owned=$true` descriptor with an arbitrary
+   `ParentRoot`/`Path` and invoke a public recursive-deletion capability --
+   ownership represented by a caller-constructible object is not an
+   authorization boundary. All existing tests for the now-private functions
+   were rewritten to reach them via Pester's `InModuleScope`
+   (`-Parameters`, not closure capture -- confirmed by direct reproduction
+   that a plain outer-scope variable is NOT visible inside an
+   `InModuleScope` scriptblock without it). Added a regression test
+   asserting the exact exported command set.
+3. **Analyzer version truthfulness and bounded-job hardening.**
+   `Test-TPMProductionPSScriptAnalyzerV1`/`Test-TPMProductionInjectionHunterV1`
+   now report `ToolVersion` from a value the bounded `Start-Job` itself
+   returns (querying its own loaded `PSScriptAnalyzer` module, or the exact
+   `InjectionHunter` manifest at the `-CustomRulePath` it was handed) --
+   never a parent-process `Get-Module -ListAvailable` discovery, which is
+   not proof of what the job genuinely loaded and ran. Both functions fail
+   closed when the job cannot load the analyzer, when the returned version
+   is missing/malformed, when different files report different versions,
+   or when the per-file result is missing, duplicate, extra, or malformed
+   (schema-checked against the job's own declared fields).
+   `Invoke-TPMBoundedScriptBlockV1` now re-checks the job's own `.State`
+   after `Stop-Job` (a short grace-window `Wait-Job` first, since `Stop-Job`
+   does not guarantee the job has actually stopped by the time it returns)
+   and reports `TerminationConfirmed=$false` with the job's Id/State
+   preserved (never `Remove-Job`-ed) rather than silently reporting a
+   cleanly handled timeout when termination could not be confirmed.
+   - **Defects found and fixed by this round's own testing:**
+     1. `Receive-Job` attaches its own bookkeeping properties
+        (`RunspaceId`, and `PSShowComputerName` observed in some runs) to
+        every deserialized job-result object -- the new strict per-file
+        result schema check initially (and incorrectly) treated these as
+        unexpected/malformed extra fields, which made the real (non-mocked)
+        analysis of every file report `Executed=$false`, discovered by
+        direct reproduction against the real inventory, not assumed to be
+        correct from the code alone. Fixed with a shared
+        `Get-TPMJobResultOwnPropertyNamesV1` helper that filters known job
+        bookkeeping properties before comparing against the expected
+        schema.
+     2. Mocking `Invoke-TPMBoundedScriptBlockV1` with Pester consistently
+        threw `ParseException: The ordered attribute can be specified only
+        on a hash literal node` regardless of the mock's own content --
+        traced by direct bisection to the function's own `-Parameters`
+        parameter being typed
+        `[System.Collections.Specialized.OrderedDictionary]`; Pester's
+        mock-proxy generation could not handle that type constraint.
+        Removed the strict type (kept as an untyped parameter, documented
+        by a comment above `param()` establishing the `[ordered]@{...}`
+        calling convention every caller in this module already follows) --
+        confirmed this alone resolves the mocking failure with an isolated
+        repro before reapplying it to the full suite.
+   - Regression coverage added: cross-file version-consistency and
+     malformed/missing/duplicate/extra-result-record fail-closed tests for
+     both `Test-TPMProductionPSScriptAnalyzerV1` and
+     `Test-TPMProductionInjectionHunterV1`; a genuine (non-mocked) confirms
+     the exact `ToolVersion` reported matches the real installed module
+     version for both PSScriptAnalyzer and InjectionHunter.
+- ADR155-Q005/Q006/Q007: the four fact-adapter files plus the two
+  `Invoke-TPM-InstallHealthCheck.ps1`/`Tests/InstallHealthCheck.Tests.ps1`
+  files touched by correction 1 all had zero non-ASCII bytes, zero parse
+  errors, zero PSScriptAnalyzer findings, and zero InjectionHunter findings.
+  `Test-TPMProductionPSScriptAnalyzerV1` run fresh against the complete
+  real 16-file inventory reports `FindingCount=0` (confirmed directly, not
+  assumed) -- the `Invoke-TPM-InstallHealthCheck.ps1` finding from the prior
+  round's evidence entry no longer exists.
+- Full suite: 1023/1023 on pwsh 7.6.4 (0 skipped); 1016/1023 on Windows
+  PowerShell 5.1 (1016 passed, 5 failed, 2 skipped) -- reconciling exactly:
+  the 5 failures are the same pre-existing issue #148 Repair-GamePaths
+  failures (confirmed by name), and the 2 skips are the pre-existing
+  reparse-point skip plus this round's scratch-ownership
+  symlink-creation-permission skip (both legitimate, unprivileged-
+  environment `Set-ItResult -Skipped` cases -- pwsh's 0-skip run on this
+  machine reflects that engine's own environment permitting symbolic-link
+  creation where the unelevated Windows PowerShell 5.1 session does not).
+  1016 + 5 + 2 = 1023, matching pwsh's total test count exactly.
+
+`TPMCertification.Production.psm1` remains untouched by this checkpoint.
+No harness wiring, fact-source swap into `Invoke-TPM-RealInstanceSmoke.ps1`,
+ECVF work, or hardware certification was performed. Nothing from this
+checkpoint has been committed, staged, or pushed. ADR155-0309 remains
+unchecked and partial.

@@ -1037,3 +1037,123 @@ Complete-TPMCertificationTransaction is the sole authority for the final outcome
 16. **(Round 3) `$Certification.Items` is validated against the exact expected score-item manifest** (identifiers, count, uniqueness, strict Boolean `Passed`, correct tri-state usage) before it can influence the score at all.
 17. **(Round 3) `-BuildArtifacts` is mandatory**, and its returned artifact set is validated against the exact expected artifact-identity manifest (five identities, unique, contained within `-ReportDir`) before anything is written to disk.
 18. **(Round 3) Serialized certification/validation content never embeds a `Published` field.** The commit marker's mere presence on disk, promoted and durably verified strictly after every other artifact, is the only authoritative proof of a complete publish -- there is no stale self-referential publish state to go wrong.
+
+## ADR-0155 production fact adapter (ADR155-0309 Checkpoint B1)
+
+`scripts/TPMCertification.ProductionFacts.psm1` builds all eleven raw facts
+the production authority (`TPMCertification.Production.psm1`) consumes. It
+is a dedicated module, separate from `TPMCertification.Shadow.psm1`'s Phase 2
+adapter: it never imports or calls Shadow, and never expands Shadow's public
+surface. Full design rationale, defect history, and evidence: ADR-0155
+implementation checklist (`docs/adr/ADR-0155-IMPLEMENTATION-CHECKLIST.md`,
+Checkpoint B1 entry). Key structural decisions:
+
+- **The authoritative production PowerShell inventory is fixed and
+  non-overridable.** `Get-TPMProductionPowerShellInventoryV1` takes only
+  `-RepositoryPath` -- there is no parameter through which any caller,
+  production or test, can substitute a different file set. The real,
+  16-entry list (the union of the release-package PowerShell contents and
+  every ADR-0155 production certification/harness script/module) lives in
+  a module-private constant; a separate, unexported
+  `Resolve-TPMProductionPowerShellInventoryEntriesV1` does the actual
+  missing/duplicate/outside-root/unreadable validation and is the only
+  thing tests exercise with a synthetic file list (via Pester's
+  `InModuleScope`).
+- **Static Analysis facts are real, not placeholders.** Parser (both engines,
+  one out-of-process invocation per file, explicit timeout, exact
+  requested-file/result correlation, cross-file engine-version consistency),
+  encoding (multi-file, aggregate `NonAsciiByteCount`), PSScriptAnalyzer, and
+  InjectionHunter all run fresh over the complete inventory every time --
+  `Test-TPMProductionPSScriptAnalyzerV1`/`Test-TPMProductionInjectionHunterV1`
+  never read the legacy harness's own precomputed `$Results.PSScriptAnalyzerFindings`.
+- **InjectionHunter disposition identity is File + RuleName + Extent
+  (match key), with Line only disambiguating multiple identical
+  same-file occurrences.** Registry entries and current findings sharing a
+  match key are paired one-to-one in ascending-Line order; a count mismatch
+  either way leaves the surplus finding(s) Confirmed/unresolved or the
+  surplus registry entry(ies) stale (fail-closed). A duplicate raw finding
+  identity (File+RuleName+Extent+Line appearing twice from a single scan)
+  is treated as a scanner defect and also fails closed.
+  `scripts/InjectionHunterDispositions.psd1` is the checked-in disposition
+  record for every current finding across the complete inventory.
+- **Artifacts preflight genuinely exercises the real pipeline.** Rather than
+  trusting `Get-Command` visibility as the dependency contract,
+  `Test-TPMProductionPackagePreflightV1` drives a full synthetic run through
+  the real production authority, all five report builders, the manifest,
+  the commit marker, and `New-TPMPublicationCommitV1`, entirely inside one
+  owned scratch child directory it creates beneath the caller's
+  `PreflightScratchRoot` (see the scratch-ownership invariant below) --
+  never the caller's real `StagingParentRoot`/`DestinationRoot`, which are
+  checked separately for write-reservation only.
+- **Bounded execution for in-process analysis.** PSScriptAnalyzer and
+  InjectionHunter scans run via `Invoke-TPMBoundedScriptBlockV1`, which uses
+  `Start-Job` (a genuine background process) rather than a same-process
+  runspace -- confirmed necessary because `DiagnosticRecord.Line`/`Column`
+  are ScriptProperties bound to the producing runspace, not intrinsic .NET
+  properties, and cross-runspace access to them was unreliable. This gives
+  every per-file scan a real wall-clock timeout.
+
+### Scratch-directory ownership invariant (New-/Remove-TPMOwnedScratchDirectoryV1)
+
+`Test-TPMProductionPackagePreflightV1` used to recursively delete its
+caller-supplied `PreflightScratchRoot` directly in a `finally` block -- if
+that path pre-existed or were misbound to a broad directory, unrelated data
+could be erased. The corrected model:
+
+1. `New-TPMOwnedScratchDirectoryV1` creates and owns exactly one
+   GUID-named child beneath a validated parent; it rejects a pre-existing
+   child name, an out-of-root child path, and (if the resulting child were
+   ever found to be a reparse point) refuses to proceed.
+2. `Remove-TPMOwnedScratchDirectoryV1` re-verifies containment and
+   re-checks for a reparse point immediately before deleting, and
+   recursively removes only that exact owned child -- never the caller's
+   parent, never a pre-existing directory, never anything the containment
+   check can no longer prove is the same path.
+3. Cleanup failure is folded into `PackageValidationErrorCount` and forces
+   `PackageValidationPassed=$false` -- it can never be silently masked by an
+   otherwise-successful pipeline proof.
+
+### System Invariant Inventory (Checkpoint B1)
+
+1. The production PowerShell inventory returned by
+   `Get-TPMProductionPowerShellInventoryV1` is always the same fixed
+   16-entry list; no exported parameter, on this function or any other
+   production entry point, can substitute a different file set.
+2. Every inventory entry must exist, be readable, resolve inside the
+   repository root, and be distinct from every other entry -- a single
+   invalid entry fails the whole inventory rather than silently shrinking
+   it.
+3. `Static Analysis`'s Parser/Encoding/PSScriptAnalyzer/InjectionHunter
+   sub-facts are always freshly observed against the complete current
+   inventory; none of them may be populated from a previously computed or
+   externally supplied value (in particular, never from the legacy
+   harness's own `$Results.PSScriptAnalyzerFindings`).
+4. A parser probe's `Executed=$true` requires every requested file to have
+   produced exactly one structured, schema-valid, exactly-correlated result
+   from the exact same engine version -- a version mismatch across files,
+   a missing/extra/malformed result, or any file failing coverage forces
+   the whole engine's result to `Executed=$false`.
+5. An InjectionHunter disposition-registry entry's identity is File +
+   RuleName + Extent + Line; two entries may never share that full
+   identity. A finding's match against the registry uses File + RuleName +
+   Extent only, with same-key entries and findings paired in ascending-Line
+   order -- a registry entry that cannot be paired against any current
+   finding (stale) fails the whole check closed; a finding that cannot be
+   paired against any registry entry is Confirmed/unresolved, never
+   silently passed.
+6. A duplicate raw current-finding identity (File+RuleName+Extent+Line
+   appearing twice from a single scan) is never silently deduplicated or
+   double-counted -- it fails the check closed as a scanner-integrity
+   defect.
+7. `Test-TPMProductionPackagePreflightV1` never writes synthetic
+   certification-looking artifacts into the caller's real
+   `StagingParentRoot`/`DestinationRoot` -- every genuine pipeline
+   invocation happens inside its own disposable, owned scratch child.
+8. `PublisherAvailable`/`PackageValidationPassed` can never be `$true` on
+   the strength of `Get-Command` name resolution alone -- they require a
+   genuine, successful synthetic invocation of the real authority/report/
+   publication pipeline, including a real canonical-filename cross-check.
+9. A scratch-directory helper never recursively deletes a caller-supplied
+   parent directory, a path that no longer resolves inside its recorded
+   parent, or a path that is (or has become) a reparse point -- it deletes
+   only the one child it itself created and still owns.

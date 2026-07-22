@@ -55,7 +55,7 @@ BeforeAll {
     }
     $functionAsts = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
     foreach ($fn in $functionAsts) {
-        if ($fn.Name -eq 'Test-XmlFolder') {
+        if ($fn.Name -eq 'Test-XmlFolder' -or $fn.Name -eq 'Write-HealthLog') {
             . ([scriptblock]::Create($fn.Extent.Text))
         }
     }
@@ -226,5 +226,34 @@ Describe "Test-XmlFolder -LiteralPath / encoding safety (issue #77)" {
         $result = Test-XmlFolder -Name 'QuestionPath' -Path $literalQuestionPath
         $result.FileCount | Should -Be 0
         $result.InvalidCount | Should -Be 0
+    }
+}
+
+Describe "Write-HealthLog -EventName (renamed from the automatic-variable-colliding -Event, ADR155-0309 Checkpoint B1)" {
+    # PSScriptAnalyzer's PSAvoidAssignmentToAutomaticVariable flagged the
+    # original -Event parameter (colliding with PowerShell's automatic
+    # $Event variable, used by event subscriptions). Renamed to -EventName;
+    # every existing call site in the script uses positional arguments, so
+    # no caller needed updating. This proves the renamed parameter still
+    # produces byte-for-byte the same log line shape as before.
+    BeforeEach {
+        $script:logPath = Join-Path $TestDrive ("healthlog-" + [guid]::NewGuid().ToString('N') + '.log')
+    }
+    It "writes level, event name, and message into the log line in the original positions" {
+        Write-HealthLog 'INFO' 'Start' 'RunId=abc123 Root=C:\TeknoParrot'
+        $line = Get-Content -LiteralPath $script:logPath -Raw
+        $line | Should -Match '\[INFO\]'
+        $line | Should -Match '\[Start\]'
+        $line | Should -Match ([regex]::Escape('RunId=abc123 Root=C:\TeknoParrot'))
+    }
+    It "accepts -EventName as a named parameter" {
+        Write-HealthLog -Level 'WARN' -EventName 'GameProfilesFolderMissing' -Message 'not found'
+        $line = Get-Content -LiteralPath $script:logPath -Raw
+        $line | Should -Match '\[WARN\]'
+        $line | Should -Match '\[GameProfilesFolderMissing\]'
+        $line | Should -Match 'not found'
+    }
+    It "no longer exposes a parameter named exactly 'Event' (the automatic-variable collision)" {
+        (Get-Command Write-HealthLog).Parameters.Keys | Should -Not -Contain 'Event'
     }
 }

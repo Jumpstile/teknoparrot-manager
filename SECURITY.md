@@ -91,6 +91,47 @@ write from leaving a corrupt file if the process is interrupted mid-save.
 folder is a literal UNC path rather than a mapped drive letter; fixed in
 v0.91.
 
+## ADR-0155 production fact adapter trust boundaries (Checkpoint B1)
+
+`scripts/TPMCertification.ProductionFacts.psm1` introduced several new
+process/filesystem/module trust boundaries:
+
+- **External process invocation (parser probe).** Every path handed to
+  `powershell.exe`/`pwsh` via `Test-TPMParserCheckV1.ps1` is an internal
+  repository file path from the fixed production inventory, never
+  user/network input, but it is still passed through
+  `ConvertTo-TPMWin32QuotedArgumentV1` (a CommandLineToArgvW-compatible
+  quoting function) before reaching `Start-Process -ArgumentList` -- that
+  array form does not auto-quote elements containing spaces or Win32
+  command-line metacharacters on this environment's build (confirmed by
+  direct reproduction; a path could otherwise be silently split into
+  multiple argv tokens). Never string-concatenated into a single `-Command`
+  argument.
+- **Temporary-file handling.** `Invoke-TPMExternalProcessWithTimeoutV1`
+  redirects a child process's stdout/stderr to GUID-named files under a
+  caller-supplied working directory. If a timed-out child's termination
+  cannot be confirmed (`Stop-Process` throws, or `WaitForExit` after
+  `Stop-Process` still reports not-exited), those files are neither read
+  nor deleted -- a still-writing process and a concurrent read/delete on
+  the same file is a real race, and destroying the only diagnostic evidence
+  of why the process hung would be counterproductive.
+- **Module discovery (`Find-TPMInjectionHunterModuleV1`).** Falls back to
+  probing the sibling `WindowsPowerShell\Modules`/`PowerShell\Modules`
+  convention when the current engine's own `Get-Module -ListAvailable` finds
+  nothing (a genuine Windows PowerShell 5.1 vs. pwsh `$env:PSModulePath`
+  gap, not a security relaxation) -- it still only resolves modules already
+  installed under the user's own module-root conventions, never a
+  caller-supplied or externally-sourced path.
+- **Recursive cleanup ownership (`New-`/`Remove-TPMOwnedScratchDirectoryV1`).**
+  `Test-TPMProductionPackagePreflightV1` no longer recursively deletes a
+  caller-supplied scratch root directly. It creates and owns exactly one
+  GUID-named child beneath a validated parent (rejecting a pre-existing
+  child name, an out-of-root child path, or a reparse point), and only ever
+  recursively removes that exact owned child -- re-verified as
+  still-contained and still-not-a-reparse-point immediately before
+  deletion. A caller-supplied parent directory, and any pre-existing
+  content in it, is never touched.
+
 ## Required sweep before every commit/build
 
 See RELEASE-SAFETY-CHECKLIST.md section 1 for the full pre-commit gate
