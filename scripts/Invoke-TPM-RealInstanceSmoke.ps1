@@ -2117,6 +2117,36 @@ try {
         }
     }
 
+    # ECVF: generic Emulator Contract Verification, informational and
+    # side-by-side with the legacy pcsx2x6-specific block above -- not yet
+    # authoritative (see TPMCertification.Shadow.psm1's
+    # Get-TPMShadowEmulatorContractVerificationV1 doc comment for why: no
+    # new mandatory Section 9 fact identifier has been registered, and
+    # cutting the live gate over is a separate, later, explicitly-approved
+    # step gated on the jvs-lightgun RuntimeCapability no longer being
+    # Unconfirmed). $pcsx2Dir here is the already-resolved pcsx2x6 folder
+    # itself, matching the contract's PresenceDetector, which expects
+    # InstallRoot to be the emulator's own folder, not the overall
+    # TeknoParrot root -- a second contract with a different subfolder
+    # convention will need this reconciled, not copied.
+    Write-TPMGateHeader -Gate 'Emulator Contract Verification (ECVF, informational)' -Purpose 'Generic, contract-driven verification alongside the legacy pcsx2x6 block -- reports only, never blocks' -Expected 'pass, or not-applicable if no pcsx2x6 folder exists'
+    if ($pcsx2Dir) {
+        try {
+            $ecvf = Get-TPMShadowEmulatorContractVerificationV1 -TeknoParrotRoot $pcsx2Dir
+            if (-not $ecvf.RegistryValid) {
+                $errorSummary = ($ecvf.Errors | ForEach-Object { "$($_.ContractId): $($_.Message)" }) -join '; '
+                Add-CheckResult 'Emulator Contract Verification (ECVF, informational)' $false "registry invalid -- $errorSummary"
+            } else {
+                $summary = ($ecvf.Records | ForEach-Object { "$($_.ContractId)/$($_.CapabilityType)/$($_.CapabilityId)=$($_.Status)" }) -join ', '
+                Add-CheckResult 'Emulator Contract Verification (ECVF, informational)' $true $(if ($summary) { $summary } else { 'no applicable capabilities' })
+            }
+        } catch {
+            Add-CheckResult 'Emulator Contract Verification (ECVF, informational)' $false "evaluation threw -- $_"
+        }
+    } else {
+        Add-CheckResult 'Emulator Contract Verification (ECVF, informational)' $true 'not applicable -- no pcsx2x6 folder in this install'
+    }
+
     # Issue #146: "Expected" now states the real gate condition -- a report
     # being written is necessary but not sufficient. Add-CheckResult below
     # is gated on Test-TPMInstallHealthGate's semantic read of the
