@@ -1,4 +1,5 @@
 Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Authority.psm1')
+Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Contracts.psm1')
 Set-StrictMode -Version 2.0
 
 function New-TPMShadowWorkflowAuthorityV1 {
@@ -137,4 +138,46 @@ function New-TPMShadowFactRecordsFromLegacyV1 {
       $(if($mode-ceq'Smoke'){[ordered]@{Identifier='Unattended TPM config restoration';Applicable=$false;Data=[ordered]@{}}}else{[ordered]@{Identifier='Unattended TPM config restoration';Applicable=$true;Data=[ordered]@{PriorConfigExisted=[bool]$binding.PriorConfigExisted;TemporaryConfigCreated=[bool]$binding.TemporaryConfigCreated;RestoreAttempted=[bool]$binding.RestoreAttempted;RestoreSucceeded=[bool]$binding.RestoreSucceeded;VerificationSucceeded=[bool]$binding.VerificationSucceeded;SnapshotSha256=$binding.SnapshotSha256;FailureReason=$binding.RestorationFailureReason}}})
     )
 }
-Export-ModuleMember -Function New-TPMShadowWorkflowAuthorityV1,Invoke-TPMShadowCertificationV1,New-TPMShadowFactRecordsFromLegacyV1,ConvertTo-TPMShadowEvidenceRecordV1
+
+function Get-TPMShadowEmulatorContractVerificationV1 {
+    # Informational, generic Emulator Contract Verification records for
+    # shadow/candidate reporting -- built entirely from Contracts.psm1's
+    # registry/observation collector and Authority.psm1's envelope
+    # constructor, with no contract-specific logic anywhere in this
+    # function. These are NOT fed through the strict Section 9 fact
+    # dispatcher (Assert-TPMFactRecordV1/Get-TPMFactDecisionV1), which
+    # would require registering a new mandatory fact identifier -- a
+    # separate, later, explicitly-approved cutover once RuntimeCapability
+    # evidence is no longer Unconfirmed. Callers should treat Records as
+    # informational, the same way the legacy pcsx2x6 crosshair record is
+    # already documented as "informational, not a hard requirement".
+    #
+    # VersionMatchState is always reported as Unknown here -- resolving it
+    # for real requires launching the emulator to observe a version
+    # signal (see Resolve-TPMEmulatorVersionMatchV1), which read-only
+    # shadow reporting must not do. Every record's Status is therefore
+    # Blocked until a caller with an actual captured version signal
+    # supplies it; this is accurate, not a placeholder to silently fix
+    # later -- Authority's envelope construction forces Blocked precisely
+    # so an unverified version is never mistaken for a passing one.
+    param([Parameter(Mandatory=$true)][string]$TeknoParrotRoot,[object[]]$RuntimeContexts=@(),[string]$ContractsRoot)
+    $integrity=if([string]::IsNullOrWhiteSpace($ContractsRoot)){Test-TPMContractRegistryIntegrityV1}else{Test-TPMContractRegistryIntegrityV1 -ContractsRoot $ContractsRoot}
+    if(-not$integrity.Valid){return [pscustomobject]@{RegistryValid=$false;Errors=$integrity.Errors;Records=@()}}
+    $contractsById=@{};foreach($entry in $integrity.Contracts){$contractsById[$entry.ContractId]=$entry.Contract}
+    $observed=if([string]::IsNullOrWhiteSpace($ContractsRoot)){Get-TPMEmulatorContractObservationsV1 -InstallRoot $TeknoParrotRoot -RuntimeContexts $RuntimeContexts}else{Get-TPMEmulatorContractObservationsV1 -InstallRoot $TeknoParrotRoot -RuntimeContexts $RuntimeContexts -ContractsRoot $ContractsRoot}
+    $records=New-Object Collections.Generic.List[object]
+    foreach($obs in $observed.Observations){
+        $contract=$contractsById[$obs.ContractId]
+        # Do not build Codes via `if(...){@(x)}else{@()}` -- an @() that is
+        # the sole output of an if/else branch collapses to $null at
+        # assignment (the same empty-array-to-null bug class fixed for
+        # issue #172), which then becomes a one-element [$null] array via
+        # @($null) downstream. An explicit List avoids the collapse.
+        $codesList=New-Object Collections.Generic.List[string]
+        if($obs.Reason){$codesList.Add([string]$obs.Reason)}
+        $records.Add((New-TPMEmulatorContractVerificationRecordV1 -Contract $contract -CapabilityType $obs.CapabilityType -CapabilityId $obs.CapabilityId -VersionMatchState 'Unknown' -Applicable $obs.Applicable -CapabilityPassed $obs.CapabilityPassed -Codes $codesList.ToArray()))
+    }
+    return [pscustomobject]@{RegistryValid=$true;Errors=@();Records=$records.ToArray()}
+}
+
+Export-ModuleMember -Function New-TPMShadowWorkflowAuthorityV1,Invoke-TPMShadowCertificationV1,New-TPMShadowFactRecordsFromLegacyV1,ConvertTo-TPMShadowEvidenceRecordV1,Get-TPMShadowEmulatorContractVerificationV1

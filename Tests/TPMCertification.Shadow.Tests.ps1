@@ -126,3 +126,88 @@ Describe 'ADR-0155 Phase 1/Phase 2 module coexistence' {
   }
  }
 }
+
+Describe 'ECVF: Get-TPMShadowEmulatorContractVerificationV1 (informational, generic, side-by-side with the legacy pcsx2x6 record)' {
+ BeforeAll {
+  function New-ShadowContractFixtureV1 {
+   param([string]$ContractsRoot,[string]$ContractId)
+   $contract=[ordered]@{
+    ContractId=$ContractId;SchemaVersion='1.0.0';DisplayName='Fixture';UpstreamRepository='https://example.invalid';UpstreamPinnedCommit=('a'*40);UpstreamPinnedCommitDate='2026-01-01'
+    VersionDetector=[ordered]@{Method='WindowTitleRegex';Source='WindowTitle';Pattern='Fixture v(.+)';MatchedCommitMap=@()}
+    ContractStatus='EvidenceGathered';EvidenceConfidence='SourceVerified'
+    OwnershipBoundaries=@([ordered]@{SettingPath='Foo';Owner='TPM';Mutability='TPMManaged';ReadPolicy='ReadFreely';WritePolicy='WriteDirectly';EvidenceReference='ev-1'})
+    EnvironmentCapabilities=@([ordered]@{
+     CapabilityId='env-init'
+     PresenceDetector=[ordered]@{Method='PathExists';Source='fixture.exe';Pattern=$null}
+     DataRootResolver=[ordered]@{Method='FileContentLiteral';Source='portable.txt';DefaultValue='Default'}
+     InitializationAction=[ordered]@{Method='None';Command=$null;Arguments=@();ExpectedExitCodes=@(0);TimeoutSeconds=30}
+     InitializedVerifier=[ordered]@{RequiredPaths=@('inis/Fixture.ini');RequiredMarkers=@();ParseMethod='IniSections'}
+     ObservableEvidence=@('ev-1');ExpectedOutcome='fixture'
+    })
+    RuntimeCapabilities=@()
+    EvidenceReferences=@([ordered]@{EvidenceId='ev-1';Type='SourceCitation';Description='fixture';Locator='evidence.md#ev-1';Commit=('a'*40);Confidence='SourceVerified';RecordedDate='2026-01-01'})
+    DriftPolicy=[ordered]@{OnUnknownVersion='FailClosed';OnDivergedVersion='FailClosed';OnCompatibleRange='Proceed';KnownCompatibleRange=@();RevalidationTrigger='fixture'}
+   }
+   $dir=Join-Path $ContractsRoot $ContractId
+   New-Item -ItemType Directory -Path $dir -Force|Out-Null
+   [IO.File]::WriteAllText((Join-Path $dir 'contract.json'),($contract|ConvertTo-Json -Depth 12))
+   [IO.File]::WriteAllText((Join-Path $dir 'evidence.md'),"# fixture`n`n### ev-1`nfixture`n")
+   return $dir
+  }
+ }
+
+ BeforeEach {
+  $script:contractsRoot=Join-Path $TestDrive ([guid]::NewGuid().ToString('N')+'-contracts')
+  New-Item -ItemType Directory -Path $script:contractsRoot|Out-Null
+  $script:installRoot=Join-Path $TestDrive ([guid]::NewGuid().ToString('N')+'-install')
+  New-Item -ItemType Directory -Path $script:installRoot|Out-Null
+ }
+
+ It 'reports RegistryValid=false with empty Records when the contract registry is broken' {
+  $dir=New-ShadowContractFixtureV1 -ContractsRoot $script:contractsRoot -ContractId 'broken-emu'
+  Remove-Item -LiteralPath (Join-Path $dir 'evidence.md') -Force
+  $result=Get-TPMShadowEmulatorContractVerificationV1 -TeknoParrotRoot $script:installRoot -ContractsRoot $script:contractsRoot
+  $result.RegistryValid|Should -Be $false
+  $result.Records.Count|Should -Be 0
+ }
+
+ It 'produces one Blocked, Environment-type record when the fixture emulator is present and initialized, with no [$null] Codes phantom entry' {
+  New-ShadowContractFixtureV1 -ContractsRoot $script:contractsRoot -ContractId 'present-emu' | Out-Null
+  [IO.File]::WriteAllText((Join-Path $script:installRoot 'fixture.exe'),'')
+  New-Item -ItemType Directory -Path (Join-Path $script:installRoot 'Default\inis') -Force|Out-Null
+  [IO.File]::WriteAllText((Join-Path $script:installRoot 'Default\inis\Fixture.ini'),'')
+  $result=Get-TPMShadowEmulatorContractVerificationV1 -TeknoParrotRoot $script:installRoot -ContractsRoot $script:contractsRoot
+  $result.RegistryValid|Should -Be $true
+  $record=$result.Records|Where-Object{$_.ContractId-eq'present-emu'-and$_.CapabilityType-eq'Environment'}|Select-Object -First 1
+  $record|Should -Not -BeNullOrEmpty
+  $record.Applicable|Should -Be $true
+  $record.VersionMatchState|Should -Be 'Unknown'
+  $record.Status|Should -Be 'Blocked'
+  ($null -eq $record.Codes)|Should -Be $false -Because 'Codes must be a real empty array, not the null this collapsed to before the fix'
+  @($record.Codes).Count|Should -Be 0
+  @($record.Codes|Where-Object{$null-eq$_}).Count|Should -Be 0
+ }
+
+ It 'produces a record with a non-empty, non-null Codes entry when the fixture emulator is present but not yet initialized' {
+  New-ShadowContractFixtureV1 -ContractsRoot $script:contractsRoot -ContractId 'uninit-emu' | Out-Null
+  [IO.File]::WriteAllText((Join-Path $script:installRoot 'fixture.exe'),'')
+  $result=Get-TPMShadowEmulatorContractVerificationV1 -TeknoParrotRoot $script:installRoot -ContractsRoot $script:contractsRoot
+  $record=$result.Records|Where-Object{$_.ContractId-eq'uninit-emu'-and$_.CapabilityType-eq'Environment'}|Select-Object -First 1
+  $record.Applicable|Should -Be $true
+  $record.Status|Should -Be 'Blocked'
+  @($record.Codes).Count|Should -Be 1
+  @($record.Codes)[0]|Should -Match 'missing required path'
+ }
+
+ It 'produces one Blocked, Environment-type record for the real registered pcsx2x6 contract against a fixture install where it is present and initialized' {
+  New-Item -ItemType Directory -Path (Join-Path $script:installRoot 'TeknoParrot\inis') -Force|Out-Null
+  [IO.File]::WriteAllText((Join-Path $script:installRoot 'pcsx2-qtx64.exe'),'')
+  [IO.File]::WriteAllText((Join-Path $script:installRoot 'TeknoParrot\inis\PCSX2.ini'),"[USB1]`r`n[USB2]`r`n[JVS]`r`n")
+  $result=Get-TPMShadowEmulatorContractVerificationV1 -TeknoParrotRoot $script:installRoot
+  $result.RegistryValid|Should -Be $true
+  $record=$result.Records|Where-Object{$_.ContractId-eq'pcsx2x6'-and$_.CapabilityType-eq'Environment'}|Select-Object -First 1
+  $record|Should -Not -BeNullOrEmpty
+  $record.Applicable|Should -Be $true
+  $record.Status|Should -Be 'Blocked'
+ }
+}
