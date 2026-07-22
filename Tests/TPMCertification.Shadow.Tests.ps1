@@ -86,10 +86,24 @@ Describe 'ADR-0155 Phase 2 legacy observation adapter' {
   $authority=New-TPMShadowWorkflowAuthorityV1 -Mode Smoke -EvidenceRoot $root -PngValidator $validator;foreach($fact in $facts){&$authority RecordFact $fact};(&$authority DeriveScorePreview).CanonicalJson|Should -Match 'ANALYZER_NOT_EXECUTED'
  }
 }
-Describe 'ADR-0155 Phase 2 production shadow boundary' {
- It 'runs after terminal evidence and cannot control legacy publication, console, status, or exit' {
-  $source=[IO.File]::ReadAllText((Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\Invoke-TPM-RealInstanceSmoke.ps1'));$final=$source.IndexOf("-Name 'final-certification-result'");$shadow=$source.IndexOf('Invoke-TPMShadowCertificationV1');$legacy=$source.IndexOf('Complete-TPMCertificationTransaction -Certification')
-  $source|Should -Match "Import-Module .*TPMCertification.Shadow.psm1";$final|Should -BeLessThan $shadow;$shadow|Should -BeLessThan $legacy;$source|Should -Match '\[void\]\(Invoke-TPMShadowCertificationV1';($source.Contains("Join-Path `$HarnessRoot 'ShadowMigration'"))|Should -BeTrue;$source|Should -Not -Match '\$results\.Shadow'
+Describe 'ADR-0155 Phase 3 production shadow boundary (ADR155-0309 Checkpoint B2)' {
+ It 'never imports or invokes TPMCertification.Shadow.psm1 from the production harness' {
+  # Checkpoint B2 supersedes the Phase 2 shadow-observer wiring this test
+  # used to assert: the harness is now driven directly by the Phase 3
+  # production authority (Authority/Production/ProductionCycle/
+  # ProductionFacts/ProductionEvidence/Publication/Reports), never by
+  # Shadow.psm1 -- Shadow remains a standalone, never-authoritative
+  # observer module exercised only by its own test suite above, not
+  # imported or called by this harness at all.
+  # Only real Import-Module/invocation syntax is checked -- explanatory
+  # comments documenting that Shadow is deliberately not imported (and
+  # naming it to say so) are legitimate and must not trip this assertion.
+  $codeLines=@([IO.File]::ReadAllLines((Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\Invoke-TPM-RealInstanceSmoke.ps1'))|Where-Object{$_ -notmatch '^\s*#'})
+  $code=$codeLines -join "`n"
+  $code|Should -Not -Match 'Import-Module\s+[^\r\n]*TPMCertification\.Shadow\.psm1'
+  $code|Should -Not -Match 'Invoke-TPMShadowCertificationV1'
+  $code|Should -Not -Match 'New-TPMShadowFactRecordsFromLegacyV1'
+  $code|Should -Not -Match 'New-TPMShadowWorkflowAuthorityV1'
  }
 }
 Describe 'ADR-0155 Phase 1/Phase 2 module coexistence' {

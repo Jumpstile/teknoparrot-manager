@@ -28,7 +28,7 @@ BeforeAll {
  }
 
  function New-InventoryFixture([string]$Root){
-  # Creates stub content for ALL SIXTEEN entries in the real, fixed
+  # Creates stub content for ALL SEVENTEEN entries in the real, fixed
   # authoritative inventory -- Get-TPMProductionPowerShellInventoryV1 no
   # longer accepts a reduced/overridden file set, so any test driving it
   # through the real (non-InModuleScope) entry point needs every entry
@@ -38,7 +38,7 @@ BeforeAll {
   $relativePaths=@(
    'TeknoParrot-Manager.ps1','scripts/Debug-TPM-MenuLayout.ps1','tools/Invoke-TpmAutoUpdate.ps1','tools/TpmAutoUpdate.Core.psm1',
    'scripts/Invoke-TPM-RealInstanceSmoke.ps1','scripts/Invoke-TPM-InstallHealthCheck.ps1','scripts/Resolve-Pcsx2Directory.ps1','scripts/Run-TPM-Tests.ps1',
-   'scripts/TPMCertification.Authority.psm1','scripts/TPMCertification.Production.psm1','scripts/TPMCertification.ProductionCycle.psm1','scripts/TPMCertification.ProductionFacts.psm1',
+   'scripts/TPMCertification.Authority.psm1','scripts/TPMCertification.Production.psm1','scripts/TPMCertification.ProductionCycle.psm1','scripts/TPMCertification.ProductionEvidence.psm1','scripts/TPMCertification.ProductionFacts.psm1',
    'scripts/TPMCertification.Publication.psm1','scripts/TPMCertification.Reports.psm1','scripts/TPMCertification.Shadow.psm1','scripts/Test-TPMParserCheckV1.ps1'
   )
   foreach($relative in $relativePaths){
@@ -65,13 +65,13 @@ Describe 'TPMCertification.ProductionFacts public API surface' {
 }
 
 Describe 'Get-TPMProductionPowerShellInventoryV1 (production entry point)' {
- It 'resolves the complete, real, 16-file authoritative inventory in deterministic order' {
+ It 'resolves the complete, real, 17-file authoritative inventory in deterministic order' {
   $inv=Get-TPMProductionPowerShellInventoryV1 -RepositoryPath $repoRoot
-  $inv.Count|Should -Be 16
+  $inv.Count|Should -Be 17
   @($inv.RelativePath)|Should -Be @(
    'TeknoParrot-Manager.ps1','scripts/Debug-TPM-MenuLayout.ps1','tools/Invoke-TpmAutoUpdate.ps1','tools/TpmAutoUpdate.Core.psm1',
    'scripts/Invoke-TPM-RealInstanceSmoke.ps1','scripts/Invoke-TPM-InstallHealthCheck.ps1','scripts/Resolve-Pcsx2Directory.ps1','scripts/Run-TPM-Tests.ps1',
-   'scripts/TPMCertification.Authority.psm1','scripts/TPMCertification.Production.psm1','scripts/TPMCertification.ProductionCycle.psm1','scripts/TPMCertification.ProductionFacts.psm1',
+   'scripts/TPMCertification.Authority.psm1','scripts/TPMCertification.Production.psm1','scripts/TPMCertification.ProductionCycle.psm1','scripts/TPMCertification.ProductionEvidence.psm1','scripts/TPMCertification.ProductionFacts.psm1',
    'scripts/TPMCertification.Publication.psm1','scripts/TPMCertification.Reports.psm1','scripts/TPMCertification.Shadow.psm1','scripts/Test-TPMParserCheckV1.ps1'
   )
   foreach($item in $inv){Test-Path -LiteralPath $item.FullPath -PathType Leaf|Should -BeTrue}
@@ -504,6 +504,17 @@ Describe 'Test-TPMProductionInjectionHunterV1 (private, InModuleScope only)' {
   $result.ToolVersion|Should -Be $expectedVersion
  }
  It 'does not cross-match an identical extent in a different file (File is part of the match key)' {
+  # ADR155-0309 Checkpoint B2 fix: a finding with no matching registry key
+  # at all (as opposed to a stale registry ENTRY with no matching finding)
+  # must fall through to the safe 'Confirmed'/unresolved default, not crash
+  # the whole gate to Executed=false -- confirmed by direct reproduction
+  # that the prior "else{@()}" branch collapsed to $null when captured by
+  # assignment (the same null-collapse LESSONS_LEARNED.md documents
+  # elsewhere for "return @() vs return ,@()"), which happened to make this
+  # test pass for the wrong reason (a crash, not a real non-cross-match
+  # verification). Real cross-match prevention is that b.ps1's finding gets
+  # its own unresolved 'Confirmed' disposition rather than inheriting a's
+  # 'FalsePositive'.
   $targetA=Join-Path $TestDrive 'a.ps1';[IO.File]::WriteAllText($targetA,'Add-Type -AssemblyName System.Net.Http')
   $targetB=Join-Path $TestDrive 'b.ps1';[IO.File]::WriteAllText($targetB,'Add-Type -AssemblyName System.Net.Http')
   $inv=@([ordered]@{RelativePath='a.ps1';FullPath=$targetA},[ordered]@{RelativePath='b.ps1';FullPath=$targetB})
@@ -512,7 +523,11 @@ Describe 'Test-TPMProductionInjectionHunterV1 (private, InModuleScope only)' {
   $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;RegistryPath=$registryPath} {
    Test-TPMProductionInjectionHunterV1 -Inventory $Inv -DispositionRegistryPath $RegistryPath
   }
-  $result.Executed|Should -BeFalse
+  $result.Executed|Should -BeTrue
+  $result.FindingCount|Should -Be 2
+  $result.UnresolvedFindingCount|Should -Be 1
+  ($result.Dispositions|Where-Object{$_.FindingIdentifier-like'a.ps1::*'}).Disposition|Should -Be 'FalsePositive'
+  ($result.Dispositions|Where-Object{$_.FindingIdentifier-like'b.ps1::*'}).Disposition|Should -Be 'Confirmed'
  }
  It 'gives each of two identical same-file occurrences its own registry entry, matched in line order' {
   $target=Join-Path $TestDrive 'dup-extent.ps1'
@@ -729,7 +744,7 @@ Describe 'New-TPMProductionFactRecordsV1' {
   $staticAnalysis=($facts|Where-Object{$_.Identifier -eq 'Static Analysis'}).Data
   $staticAnalysis.PSScriptAnalyzer.FindingCount|Should -Be 0
   $staticAnalysis.PSScriptAnalyzer.FindingCount|Should -Not -Be 999
-  $staticAnalysis.Encoding.Files.Count|Should -Be 16
+  $staticAnalysis.Encoding.Files.Count|Should -Be 17
   $staticAnalysis.InjectionHunter.Executed|Should -BeTrue
 
   $artifacts=($facts|Where-Object{$_.Identifier -eq 'Artifacts'}).Data

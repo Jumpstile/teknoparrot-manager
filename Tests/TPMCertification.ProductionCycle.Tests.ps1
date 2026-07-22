@@ -43,6 +43,20 @@ BeforeAll {
   $sealed=&$authority Seal
   return @{Authority=$authority;Sealed=$sealed}
  }
+
+ # ADR155-0309 Checkpoint B2 review correction: a thin, real-dispatcher-
+ # delegating wrapper that lets a test inject a failure at one named
+ # dispatcher operation while every other operation still goes through the
+ # genuine authority -- this exercises the real post-commit exception path
+ # inside Complete-TPMProductionCertificationCycleV1 itself, not a
+ # reimplementation of it.
+ function New-TPMFailingAuthorityWrapperV1([scriptblock]$RealAuthority,[string]$FailOperation,[string]$FailMessage='INJECTED_TEST_FAILURE_AFTER_COMMIT'){
+  return {
+   param([string]$Operation,$Value,$Dependency)
+   if($Operation-ceq$FailOperation){throw $FailMessage}
+   return &$RealAuthority $Operation $Value $Dependency
+  }.GetNewClosure()
+ }
 }
 
 Describe 'ADR-0155 Phase 3 production certification cycle orchestration' {
@@ -138,5 +152,176 @@ Describe 'ADR-0155 Phase 3 production certification cycle orchestration' {
   @($onDiskParsed.PSObject.Properties.Name|Sort-Object)|Should -Be @('EligibilityPayloadSha256','EligibilityStatus','ExitCode','FinalStatus','RequiredPublicationState','RunIdentity','SchemaVersion')
   $onDiskParsed.FinalStatus|Should -Be $result.Projection.FinalStatus
   $onDiskParsed.ExitCode|Should -Be $result.Projection.ExitCode
+ }
+}
+
+Describe 'ADR-0155 Phase 3 post-commit exception safety (ADR155-0309 Checkpoint B2 review correction)' {
+ BeforeEach {
+  $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $root|Out-Null
+  $stagingParent=Join-Path $root 'staging';New-Item -ItemType Directory -Path $stagingParent|Out-Null
+  $destinationParent=Join-Path $root 'destination';New-Item -ItemType Directory -Path $destinationParent|Out-Null
+  # Review correction: a locked-file test's injected authority closure runs
+  # several call-frames deep (through the dispatcher, through
+  # Complete-TPMProductionCertificationCycleV1's own catch block, back into
+  # this It block) -- `$script:` inside that closure is NOT lexically bound
+  # by .GetNewClosure() the way an ordinary captured variable is; it is
+  # dynamically resolved to whatever module/script is executing at the
+  # moment the closure body runs, which is a DIFFERENT script scope
+  # (TPMCertification.Production's own) than this test file's. A stream
+  # assigned via `$script:lockStream = ...` inside such a closure is
+  # therefore invisible to this file's own `$script:lockStream` reads,
+  # leaving the handle open and failing Pester's own TestDrive cleanup even
+  # though every assertion in the test itself passes. $tpmLockBox is a
+  # Hashtable (a reference type) that IS captured correctly by
+  # .GetNewClosure() regardless of call depth -- every holder of a
+  # reference to the same Hashtable instance sees the same `.Stream`
+  # value. $tpmActiveLockStreams is a defensive AfterEach backstop: even if
+  # an assertion or the cycle call itself throws before this It block's own
+  # try/finally runs its disposal, any stream registered here still gets
+  # closed before the next test / TestDrive teardown.
+  $script:tpmActiveLockBoxes=New-Object Collections.Generic.List[object]
+ }
+
+ AfterEach {
+  # Defensive backstop: each lock box is a Hashtable an It block registered
+  # via $script:tpmActiveLockBoxes.Add($tpmLockBox) immediately after
+  # creating it (a normal, non-nested assignment, so $script: here is
+  # unambiguous) -- its .Stream field may be set later, from deep inside
+  # the injected closure, but because Hashtable is a reference type every
+  # holder of this same box sees that same .Stream value. This runs even
+  # if the It block's own try/finally never got the chance to (an
+  # unexpected exception before that point).
+  foreach($lockBox in $script:tpmActiveLockBoxes){
+   if($lockBox.Stream){
+    try{$lockBox.Stream.Dispose()}catch{}
+    $lockBox.Stream=$null
+   }
+  }
+  $script:tpmActiveLockBoxes=New-Object Collections.Generic.List[object]
+ }
+
+ It 'an exception injected at IssueFinalOutcome AFTER a successful commit is fully rolled back: no file remains at the destination, and the re-thrown message says so honestly (POST_COMMIT_ROLLBACK_SUCCEEDED)' {
+  $run=New-SealedRunV1 $root
+  $runIdentity=&$run.Authority GetRunIdentity
+  $destinationDir=Join-Path ([IO.Path]::GetFullPath($destinationParent)) $runIdentity
+  $failingAuthority=New-TPMFailingAuthorityWrapperV1 -RealAuthority $run.Authority -FailOperation 'IssueFinalOutcome'
+  $errorRecord=$null
+  try{
+   Complete-TPMProductionCertificationCycleV1 -Authority $failingAuthority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent
+  }catch{$errorRecord=$_}
+  $errorRecord|Should -Not -BeNullOrEmpty
+  $errorRecord.Exception.Message|Should -Match '^POST_COMMIT_ROLLBACK_SUCCEEDED:'
+  $errorRecord.Exception.Message|Should -Match 'INJECTED_TEST_FAILURE_AFTER_COMMIT'
+  $errorRecord.Exception.Message|Should -Not -Match 'nothing published'
+  (Test-Path -LiteralPath $destinationDir)|Should -Be $false
+ }
+
+ It 'an exception injected at RegisterCommittedPublication AFTER a successful commit is fully rolled back the same way' {
+  $run=New-SealedRunV1 $root
+  $runIdentity=&$run.Authority GetRunIdentity
+  $destinationDir=Join-Path ([IO.Path]::GetFullPath($destinationParent)) $runIdentity
+  $failingAuthority=New-TPMFailingAuthorityWrapperV1 -RealAuthority $run.Authority -FailOperation 'RegisterCommittedPublication'
+  $errorRecord=$null
+  try{
+   Complete-TPMProductionCertificationCycleV1 -Authority $failingAuthority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent
+  }catch{$errorRecord=$_}
+  $errorRecord.Exception.Message|Should -Match '^POST_COMMIT_ROLLBACK_SUCCEEDED:'
+  (Test-Path -LiteralPath $destinationDir)|Should -Be $false
+ }
+
+ It 'when rollback itself cannot fully complete (a locked non-marker file), the marker is still removed first and the failure is reported truthfully, never as "nothing published" (POST_COMMIT_ROLLBACK_FAILED)' {
+  $run=New-SealedRunV1 $root
+  $runIdentity=&$run.Authority GetRunIdentity
+  $destinationDir=Join-Path ([IO.Path]::GetFullPath($destinationParent)) $runIdentity
+  $lockedPath=Join-Path $destinationDir 'TPM-Certification-Validation.md'
+  $tpmLockBox=[ordered]@{Stream=$null}
+  [void]$script:tpmActiveLockBoxes.Add($tpmLockBox)
+  $failingAuthority={
+   param([string]$Operation,$Value,$Dependency)
+   if($Operation-ceq'IssueFinalOutcome'){
+    # By this point RegisterCommittedPublication has already run and the
+    # bundle is genuinely, durably promoted to $destinationDir -- lock one
+    # of its files right now, simulating an external process holding it
+    # open at the exact moment rollback would need to delete it. Assigning
+    # through $tpmLockBox (a Hashtable, captured lexically by
+    # GetNewClosure) rather than $script: is what makes this stream
+    # visible to the finally block below and to the AfterEach backstop,
+    # regardless of how deep this closure is invoked from.
+    $tpmLockBox.Stream=[IO.File]::Open($lockedPath,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)
+    throw 'INJECTED_TEST_FAILURE_AFTER_COMMIT'
+   }
+   return &$run.Authority $Operation $Value $Dependency
+  }.GetNewClosure()
+  $errorRecord=$null
+  try{
+   try{
+    Complete-TPMProductionCertificationCycleV1 -Authority $failingAuthority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent
+   }catch{$errorRecord=$_}
+  }finally{
+   if($tpmLockBox.Stream){$tpmLockBox.Stream.Dispose();$tpmLockBox.Stream=$null}
+  }
+  $errorRecord|Should -Not -BeNullOrEmpty
+  $errorRecord.Exception.Message|Should -Match '^POST_COMMIT_ROLLBACK_FAILED:'
+  $errorRecord.Exception.Message|Should -Not -Match 'no authoritative (marker|bundle) was (written|published)'
+  $errorRecord.Exception.Message|Should -Match 'MarkerRemoved=True'
+  $errorRecord.Exception.Message|Should -Match 'TPM-Certification-Validation\.md'
+  # The marker itself -- the durable "this bundle is authoritative" signal
+  # -- was removed even though the locked file remains, proving the
+  # rollback breaks the authoritative appearance immediately rather than
+  # all-or-nothing.
+  (Test-Path -LiteralPath (Join-Path $destinationDir 'TPM-Certification-Commit.json'))|Should -Be $false
+  (Test-Path -LiteralPath $lockedPath)|Should -Be $true
+ }
+
+ It 'when the commit marker itself cannot be removed, rollback is fail-closed: MarkerRemoved=false, FullyRolledBack=false, POST_COMMIT_ROLLBACK_FAILED, and the message never claims no authoritative marker/bundle remains' {
+  $run=New-SealedRunV1 $root
+  $runIdentity=&$run.Authority GetRunIdentity
+  $destinationDir=Join-Path ([IO.Path]::GetFullPath($destinationParent)) $runIdentity
+  $lockedMarkerPath=Join-Path $destinationDir 'TPM-Certification-Commit.json'
+  $tpmLockBox=[ordered]@{Stream=$null}
+  [void]$script:tpmActiveLockBoxes.Add($tpmLockBox)
+  $failingAuthority={
+   param([string]$Operation,$Value,$Dependency)
+   if($Operation-ceq'IssueFinalOutcome'){
+    $tpmLockBox.Stream=[IO.File]::Open($lockedMarkerPath,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)
+    throw 'INJECTED_TEST_FAILURE_AFTER_COMMIT'
+   }
+   return &$run.Authority $Operation $Value $Dependency
+  }.GetNewClosure()
+  $errorRecord=$null
+  try{
+   try{
+    Complete-TPMProductionCertificationCycleV1 -Authority $failingAuthority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent
+   }catch{$errorRecord=$_}
+  }finally{
+   if($tpmLockBox.Stream){$tpmLockBox.Stream.Dispose();$tpmLockBox.Stream=$null}
+  }
+  $errorRecord|Should -Not -BeNullOrEmpty
+  $errorRecord.Exception.Message|Should -Match '^POST_COMMIT_ROLLBACK_FAILED:'
+  $errorRecord.Exception.Message|Should -Not -Match 'no authoritative (marker|bundle) was (written|published)'
+  $errorRecord.Exception.Message|Should -Not -Match 'no authoritative bundle remains'
+  $errorRecord.Exception.Message|Should -Match 'MarkerRemoved=False'
+  $errorRecord.Exception.Message|Should -Match 'TPM-Certification-Commit\.json'
+  # The locked marker is exactly what could not be removed -- it must
+  # still physically exist, proving MarkerRemoved=false is truthful, not
+  # merely a default.
+  (Test-Path -LiteralPath $lockedMarkerPath)|Should -Be $true
+ }
+
+ It 'the harness only prints "PUBLISHED : UNKNOWN" when the abort message carries the POST_COMMIT_ROLLBACK_FAILED prefix, never for a fully-rolled-back or ordinary abort' {
+  $harnessPath=Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\Invoke-TPM-RealInstanceSmoke.ps1'
+  $source=[IO.File]::ReadAllText($harnessPath)
+  $source|Should -Match "rollbackDidNotFullyComplete = \[string\]\`$productionAbortMessage -like 'POST_COMMIT_ROLLBACK_FAILED:\*'"
+  $source|Should -Match 'PUBLISHED\s+:\s+UNKNOWN'
+  # The exact same match expression the harness uses, exercised directly
+  # against both real exception-message shapes this module actually
+  # produces -- proving the gate fires only for the FAILED case, not the
+  # SUCCEEDED case or an ordinary pre-commit abort message.
+  $succeededMessage='POST_COMMIT_ROLLBACK_SUCCEEDED: certification finalization failed after publication (x); the just-published bundle at C:\dest\run was fully rolled back (commit marker removed) -- no authoritative bundle remains for this run.'
+  $failedMessage='POST_COMMIT_ROLLBACK_FAILED: certification finalization failed after publication (x); rollback of the just-published bundle at C:\dest\run did not fully succeed (MarkerRemoved=False; remaining files: C:\dest\run\TPM-Certification-Commit.json; errors: TPM-Certification-Commit.json: in use) -- this directory may still contain an authoritative-looking bundle and requires manual verification.'
+  $ordinaryAbortMessage='PRODUCTION_EVIDENCE_COUNT_INVALID: expected 9 harness evidence records, found 3'
+  ($succeededMessage -like 'POST_COMMIT_ROLLBACK_FAILED:*')|Should -Be $false
+  ($failedMessage -like 'POST_COMMIT_ROLLBACK_FAILED:*')|Should -Be $true
+  ($ordinaryAbortMessage -like 'POST_COMMIT_ROLLBACK_FAILED:*')|Should -Be $false
  }
 }

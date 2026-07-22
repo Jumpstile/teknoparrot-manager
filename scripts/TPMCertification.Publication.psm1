@@ -253,4 +253,73 @@ function New-TPMPublicationCommitV1 {
     return [pscustomobject]$result
 }
 
-Export-ModuleMember -Function New-TPMPublicationStagingV1,New-TPMPublicationCommitV1
+function Remove-TPMPublicationCommitV1 {
+    # Rolls back an ALREADY-COMMITTED bundle (New-TPMPublicationCommitV1
+    # returned Committed=$true at $DestinationDirectory) when a step that
+    # must run AFTER a successful commit -- but BEFORE a genuine final
+    # outcome exists -- fails (e.g. RegisterCommittedPublication or
+    # IssueFinalOutcome throwing). The commit marker is the durable "this
+    # bundle is authoritative" signal every consumer relies on (the same
+    # reason New-TPMPublicationStagingV1/New-TPMPublicationCommitV1
+    # promote it strictly LAST when committing) -- so it is removed FIRST
+    # here, before any other file. The instant it is gone, no reader can
+    # treat this directory as a committed bundle, even if the rest of this
+    # cleanup only partially succeeds. Each file's on-disk content is
+    # verified against the report object's own bytes before deletion --
+    # this function refuses to delete a file whose content does not match
+    # what this cycle actually wrote, rather than force-deleting by name
+    # alone.
+    param(
+        [Parameter(Mandatory=$true)][string]$DestinationDirectory,
+        [Parameter(Mandatory=$true)]$EligibilityReport,
+        [Parameter(Mandatory=$true)]$PublicationReport,
+        [Parameter(Mandatory=$true)]$FinalOutcomeReport,
+        [Parameter(Mandatory=$true)]$ScorecardReport,
+        [Parameter(Mandatory=$true)]$ValidationReport,
+        [Parameter(Mandatory=$true)]$Manifest,
+        [Parameter(Mandatory=$true)]$Marker
+    )
+    $ordered=@($Marker,$Manifest,$EligibilityReport,$PublicationReport,$FinalOutcomeReport,$ScorecardReport,$ValidationReport)
+    $removed=New-Object Collections.Generic.List[string]
+    $remaining=New-Object Collections.Generic.List[string]
+    $errors=New-Object Collections.Generic.List[string]
+    $markerRemoved=$false
+    foreach($report in $ordered){
+        $fileName=[string]$report.FileName
+        $path=$null
+        try{
+            $path=Resolve-TPMContainedPathV1 -Root $DestinationDirectory -Path $fileName
+        }catch{
+            [void]$errors.Add("$fileName`: $($_.Exception.Message)")
+            continue
+        }
+        if(-not(Test-Path -LiteralPath $path -PathType Leaf)){continue}
+        try{
+            $onDiskBytes=[IO.File]::ReadAllBytes($path)
+            $onDiskHash=Get-TPMSha256HexV1 -Bytes $onDiskBytes
+            $expectedHash=Get-TPMSha256HexV1 -Bytes $report.Bytes
+            if($onDiskHash-cne$expectedHash){throw "on-disk content does not match this cycle's own report bytes -- refusing to delete a file that may not be the one this cycle wrote"}
+            Remove-Item -LiteralPath $path -Force -ErrorAction Stop
+            [void]$removed.Add($path)
+            if($fileName-ceq[string]$Marker.FileName){$markerRemoved=$true}
+        }catch{
+            [void]$remaining.Add($path)
+            [void]$errors.Add("$fileName`: $($_.Exception.Message)")
+        }
+    }
+    try{
+        if(Test-Path -LiteralPath $DestinationDirectory -PathType Container){
+            $left=@(Get-ChildItem -LiteralPath $DestinationDirectory -Force -ErrorAction Stop)
+            if($left.Count-eq0){Remove-Item -LiteralPath $DestinationDirectory -Force -ErrorAction Stop}
+        }
+    }catch{[void]$errors.Add("DestinationDirectory cleanup: $($_.Exception.Message)")}
+    return [pscustomobject][ordered]@{
+        MarkerRemoved=$markerRemoved
+        FullyRolledBack=($remaining.Count-eq0-and$errors.Count-eq0)
+        RemovedFiles=$removed.ToArray()
+        RemainingFiles=$remaining.ToArray()
+        Errors=$errors.ToArray()
+    }
+}
+
+Export-ModuleMember -Function New-TPMPublicationStagingV1,New-TPMPublicationCommitV1,Remove-TPMPublicationCommitV1

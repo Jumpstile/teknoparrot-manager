@@ -1673,3 +1673,139 @@ No harness wiring, fact-source swap into `Invoke-TPM-RealInstanceSmoke.ps1`,
 ECVF work, or hardware certification was performed. Nothing from this
 checkpoint has been committed, staged, or pushed. ADR155-0309 remains
 unchecked and partial.
+
+## Phase 3 ADR155-0309 Checkpoint B2: atomic production-harness cutover -- 2026-07-22
+
+Base: `codex/issue-154-evidence-finalization` at
+`17c3c2e8c67d2acd504a2b31e1517a11d1547966` (Checkpoint B1, approved, pushed,
+CI-green). `scripts/Invoke-TPM-RealInstanceSmoke.ps1` is rewired end-to-end
+onto the Phase 3 production authority; every competing legacy certification
+path is deleted, not bypassed.
+
+1. **New adapter: `scripts/TPMCertification.ProductionEvidence.psm1`.**
+   Exactly one exported function, `New-TPMProductionEvidenceRecordV1`,
+   converting one legacy `Add-Screenshot` evidence-ledger record into the
+   production authority's evidence schema. Deliberately does not import or
+   call `TPMCertification.Shadow.psm1` -- a fresh implementation against
+   Authority.psm1's schema, not a reuse of Shadow's Phase 2 adapter. Strict
+   (`-ceq`/`-cne`) identity/order checks against the legacy record's own
+   `Name`/`Status` fields before trusting it as `Captured`; PNG validation
+   (`Test-TPMScreenshotFileValid` + `System.Drawing.Image`) gates every
+   `Captured` evidence path before its hash/dimensions are recorded.
+2. **Harness rewiring.** Import block now imports Authority/Production/
+   Reports/Publication/ProductionFacts/ProductionCycle/ProductionEvidence
+   directly (never Shadow). The certification-decision tail (inside the
+   pre-existing outer `finally` block) builds the production authority,
+   records all 11 facts (`New-TPMProductionFactRecordsV1`), records the 9
+   real evidence records in ledger order via
+   `New-TPMProductionEvidenceRecordV1`, issues final evidence, seals, and
+   invokes `Complete-TPMProductionCertificationCycleV1` -- the sole
+   certification-decision/publication call. This entire sequence runs
+   inside one `try`/`catch`: any exception produces an explicit
+   "CERTIFICATION PIPELINE ABORTED (infrastructure failure)" diagnostic and
+   exit code 1, never a fabricated decision, never a legacy fallback (none
+   exists to fall back to), never a marker/bundle write. On success, the
+   only "FINAL STATUS"/"EXIT CODE" console lines and the only `exit` call
+   in that path come from `$productionCycleResult.Projection` -- the
+   dispatcher's own final outcome.
+3. **Legacy-path removal (problem-class sweep, not just the named
+   functions).** Deleted entirely from `Invoke-TPM-RealInstanceSmoke.ps1`:
+   `Complete-TPMCertificationTransaction`, `Get-TPMCertificationScoreFromItems`,
+   `Test-TPMScoreItemManifest`, `Test-TPMArtifactManifest`,
+   `Publish-TPMCertificationArtifacts`, `Get-TPMExpectedScoreItemManifest`,
+   `Get-TPMExpectedArtifactManifest`, `Get-TPMCertificationFinalConsoleLines`,
+   `Get-TPMCertificationFinalReportLines`, and the `Add-Report`/
+   `Add-CertificationReport` accumulators that fed them. Repo-wide grep
+   confirmed every remaining reference to these names is inside an
+   explanatory comment about their removal, never a live call. The only
+   surviving `Overall`/status-producing surfaces are (a) the pre-flight
+   `TPM-Invalid-Certification-Environment.{md,json}` diagnostic, which
+   throws before the production authority is even constructed, and (b) the
+   explicitly-labeled "PROVISIONAL"/"Pending: final evidence validation"
+   console preview, computed by informational-only inline arithmetic --
+   neither reaches or competes with the dispatcher's own final-outcome exit
+   path, which is the sole live `exit` site reachable after certification
+   begins.
+4. **B1 inventory/InjectionHunter update.** `TPMCertification.ProductionEvidence.psm1`
+   added to the fixed inventory (`TPMCertification.ProductionFacts.psm1`'s
+   `$script:TpmProductionPowerShellInventoryRelativePathsV1`, now 17
+   entries) and to the Pester fixture/self-scan test expectations. Fresh
+   PSScriptAnalyzer and InjectionHunter scans of the new file: zero
+   findings on both -- no new `InjectionHunterDispositions.psd1` entries
+   were needed.
+5. **Two real defects found and fixed while re-validating the gates against
+   the rewritten harness** (both are also recorded in LESSONS_LEARNED.md):
+   - Large-scale legacy-function deletion was done with `sed -i` line-range
+     deletion; `sed` silently flattened the file's CRLF working-tree line
+     endings to bare LF. This invalidated the `InjectionRisk.AddScript`
+     disposition-registry entry, which hardcodes its `Extent` field with
+     explicit `` `r`n `` escapes to match the working tree's real CRLF form
+     -- surfacing as a `DISPOSITION_REGISTRY_STALE` exception, not an
+     obviously line-ending-related symptom. Fixed by normalizing both
+     `Invoke-TPM-RealInstanceSmoke.ps1` and the new `ProductionEvidence.psm1`
+     back to CRLF before re-running the gates; no registry changes were
+     needed once line endings were restored.
+   - `Test-TPMProductionInjectionHunterV1`'s pairing loop used a bare
+     `else{@()}` for a match key with no registry entry at all -- an
+     if/else branch's own output enumeration collapsed that empty array to
+     `$null` when captured by assignment (the same "`return @()` unwraps to
+     `$null`" class already documented elsewhere in this file, but never
+     comma-wrapped in this one spot). This had stayed latent through three
+     B1 review rounds (every prior finding always matched an existing
+     registry entry) and was only exposed once B2's deletions shifted
+     enough code to produce, briefly, an unmatched match key. Fixed with
+     `else{,@()}`. One existing test had been asserting
+     `Executed | Should -BeFalse` for exactly this scenario -- passing only
+     because of the crash, not because it verified the intended
+     `Confirmed`/unresolved fallthrough; corrected to assert the real
+     contract (`Executed=$true`, `UnresolvedFindingCount=1`, the correct
+     per-finding disposition).
+6. **Test suite changes.** Removed `Tests/TPMCertificationHarness.Tests.ps1`'s
+   entire `Describe "Issue #154 round 3 -- authoritative workflow-owned
+   facts, not descriptions of them"` block (~554 lines) -- it exercised only
+   the now-deleted legacy transaction/publication pipeline by design, not a
+   regression. Replaced `Tests/TPMCertification.Shadow.Tests.ps1`'s
+   `Describe "ADR-0155 Phase 2 production shadow boundary"` (which asserted
+   the now-superseded Shadow-in-harness wiring) with
+   `Describe "ADR-0155 Phase 3 production shadow boundary (ADR155-0309
+   Checkpoint B2)"`, asserting the real current invariant: no live
+   `Import-Module`/invocation of any Shadow.psm1 symbol anywhere in the
+   harness (comments naming Shadow to document its deliberate absence are
+   correctly excluded from the check).
+7. **Gate totals.**
+   - ASCII/BOM: 0 non-ASCII bytes across all 17 inventory files (pwsh and
+     WinPS 5.1 both confirmed).
+   - Dual-engine parser: 0 parse errors on both engines across all 17 files.
+   - PSScriptAnalyzer (project settings): 0 findings across all 17 files on
+     both engines.
+   - InjectionHunter: `Executed=true`, `FindingCount=27`,
+     `UnresolvedFindingCount=0`, `ToolVersion=1.0.0` on both engines
+     (unchanged from B1's 27 -- the new file contributed zero findings).
+   - Full Pester suite: 976/976 on pwsh 7.6.4 (0 skipped); 969/976 on
+     Windows PowerShell 5.1 (969 passed, 5 failed, 2 skipped) -- the 5
+     failures are the same pre-existing issue #148 `Repair-GamePaths`
+     failures this repo's WinPS 5.1 environment has always produced
+     (confirmed by name against the B1 checklist entry), and the 2 skips
+     are the same pre-existing unelevated-environment
+     reparse-point/symlink-permission cases. 969 + 5 + 2 = 976, matching
+     pwsh's total exactly.
+
+Complete file list this checkpoint touches: `ARCHITECTURE.md`,
+`LESSONS_LEARNED.md`, `SECURITY.md`,
+`docs/adr/ADR-0155-IMPLEMENTATION-CHECKLIST.md`,
+`Tests/TPMCertification.ProductionFacts.Tests.ps1`,
+`Tests/TPMCertification.Shadow.Tests.ps1`,
+`Tests/TPMCertificationHarness.Tests.ps1`,
+`scripts/Invoke-TPM-RealInstanceSmoke.ps1`,
+`scripts/TPMCertification.ProductionFacts.psm1` (inventory-list addition
+only), and the new `scripts/TPMCertification.ProductionEvidence.psm1`.
+`TPMCertification.Authority.psm1`/`.Production.psm1`/`.ProductionCycle.psm1`/
+`.Publication.psm1`/`.Reports.psm1`/`.Shadow.psm1` are all byte-identical to
+B1. No packaging-manifest changes were needed: `Tests/Test-ReleasePackage.ps1`
+and the release ZIP contents list in CLAUDE.md never enumerated any
+`TPMCertification.*.psm1` file (they are dev/certification-only, never
+packaged), so the new adapter needs no entry there, consistent with every
+sibling module. No ECVF/EXP-002/hardware-certification/packaging-output/
+release-publication work was touched. Nothing from this checkpoint has been
+committed, staged, or pushed -- it is left for independent review exactly as
+requested.

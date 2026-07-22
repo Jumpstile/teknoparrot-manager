@@ -132,6 +132,37 @@ process/filesystem/module trust boundaries:
   deletion. A caller-supplied parent directory, and any pre-existing
   content in it, is never touched.
 
+## ADR-0155 production harness cutover trust boundaries (Checkpoint B2)
+
+`scripts/Invoke-TPM-RealInstanceSmoke.ps1`'s rewiring onto the production
+authority, and the new `scripts/TPMCertification.ProductionEvidence.psm1`
+adapter, introduce no new trust boundary beyond what Checkpoint B1 already
+covers -- the same fixed, internal-file-only invocation surface applies --
+but the cutover itself has security-relevant properties worth stating
+explicitly:
+
+- **No legacy fallback on failure.** The removal of
+  `Complete-TPMCertificationTransaction`/`Publish-TPMCertificationArtifacts`/
+  `Get-TPMCertificationScoreFromItems` means there is no remaining code path
+  an exception (or a future defect) could silently fall back to. An
+  exception anywhere between authority construction and cycle completion
+  always produces the explicit "CERTIFICATION PIPELINE ABORTED" diagnostic
+  and a nonzero exit, never a fabricated `CERTIFIED`/`NOT CERTIFIED` result.
+- **Evidence adaptation never trusts the legacy ledger's own field values
+  for identity.** `New-TPMProductionEvidenceRecordV1` re-derives `Status`/
+  `EvidenceType`/`CaptureScope` from the legacy record's own fields under
+  strict equality checks (`-ceq`/`-cne`) rather than assuming the ledger
+  entry at a given array position is genuinely the evidence the production
+  authority expects there -- a reordered, substituted, or replayed ledger
+  entry surfaces as `EVIDENCE_ORDER_INVALID`/`EVIDENCE_IDENTIFIER_INVALID`,
+  not a silently-accepted mismatch.
+- **PNG validation happens before any evidence record is trusted as
+  `Captured`.** The same `$productionPngValidator` (real PNG-header/
+  dimension validation via `Test-TPMScreenshotFileValid` plus
+  `System.Drawing.Image`) gates every evidence path before its hash/
+  dimensions are recorded; a validation failure or exception inside the
+  validator degrades that evidence to `Failed`, never `Captured`.
+
 ## Required sweep before every commit/build
 
 See RELEASE-SAFETY-CHECKLIST.md section 1 for the full pre-commit gate

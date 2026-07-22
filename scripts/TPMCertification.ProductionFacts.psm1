@@ -76,6 +76,7 @@ $script:TpmProductionPowerShellInventoryRelativePathsV1 = @(
     'scripts/TPMCertification.Authority.psm1',
     'scripts/TPMCertification.Production.psm1',
     'scripts/TPMCertification.ProductionCycle.psm1',
+    'scripts/TPMCertification.ProductionEvidence.psm1',
     'scripts/TPMCertification.ProductionFacts.psm1',
     'scripts/TPMCertification.Publication.psm1',
     'scripts/TPMCertification.Reports.psm1',
@@ -547,7 +548,15 @@ function Test-TPMProductionInjectionHunterV1 {
         $dispositionByIdentity=@{}
         foreach($key in $findingsByKey.Keys){
             $orderedFindings=Sort-TPMByLineV1 $findingsByKey[$key]
-            $orderedEntries=if($registry.ByMatchKey.ContainsKey($key)){Sort-TPMByLineV1 $registry.ByMatchKey[$key]}else{@()}
+            # Deliberately NOT a bare "else{@()}" -- confirmed by direct
+            # reproduction that an if/else branch's own output enumeration
+            # collapses a zero-element array to $null when captured by
+            # assignment (the same "return @() vs return ,@()" null-collapse
+            # documented elsewhere in this file), so the empty-registry
+            # branch must be comma-wrapped too or a match key with no
+            # registry entry yet crashes here instead of falling through to
+            # the safe "Confirmed" default below.
+            $orderedEntries=if($registry.ByMatchKey.ContainsKey($key)){Sort-TPMByLineV1 $registry.ByMatchKey[$key]}else{,@()}
             for($i=0;$i-lt$orderedFindings.Count;$i++){
                 $finding=$orderedFindings[$i]
                 $findingIdentity=$finding.RelativePath+"`u{1F}"+$finding.RuleName+"`u{1F}"+$finding.Extent+"`u{1F}"+$finding.Line

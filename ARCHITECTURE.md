@@ -1052,7 +1052,7 @@ Checkpoint B1 entry). Key structural decisions:
   non-overridable.** `Get-TPMProductionPowerShellInventoryV1` takes only
   `-RepositoryPath` -- there is no parameter through which any caller,
   production or test, can substitute a different file set. The real,
-  16-entry list (the union of the release-package PowerShell contents and
+  17-entry list (the union of the release-package PowerShell contents and
   every ADR-0155 production certification/harness script/module) lives in
   a module-private constant; a separate, unexported
   `Resolve-TPMProductionPowerShellInventoryEntriesV1` does the actual
@@ -1117,7 +1117,7 @@ could be erased. The corrected model:
 
 1. The production PowerShell inventory returned by
    `Get-TPMProductionPowerShellInventoryV1` is always the same fixed
-   16-entry list; no exported parameter, on this function or any other
+   17-entry list; no exported parameter, on this function or any other
    production entry point, can substitute a different file set.
 2. Every inventory entry must exist, be readable, resolve inside the
    repository root, and be distinct from every other entry -- a single
@@ -1157,3 +1157,65 @@ could be erased. The corrected model:
    parent directory, a path that no longer resolves inside its recorded
    parent, or a path that is (or has become) a reparse point -- it deletes
    only the one child it itself created and still owns.
+
+## ADR-0155 production harness cutover (ADR155-0309 Checkpoint B2)
+
+`scripts/Invoke-TPM-RealInstanceSmoke.ps1` is now driven end-to-end by the
+Phase 3 production authority (`TPMCertification.Authority.psm1` /
+`.Production.psm1` / `.ProductionCycle.psm1` / `.ProductionFacts.psm1` /
+`.ProductionEvidence.psm1` / `.Publication.psm1` / `.Reports.psm1`) --
+`Complete-TPMProductionCertificationCycleV1` is the sole certification
+decision/publication path the harness invokes. Full design rationale,
+defect history, and evidence: ADR-0155 implementation checklist
+(`docs/adr/ADR-0155-IMPLEMENTATION-CHECKLIST.md`, Checkpoint B2 entry). Key
+structural decisions:
+
+- **The harness never imports or calls `TPMCertification.Shadow.psm1`.**
+  Shadow remains a standalone, never-authoritative Phase 2 observer module,
+  exercised only by its own test suite -- it has no wiring into the
+  production harness at all (Checkpoint B1's shadow-observer integration is
+  superseded, not extended). `scripts/TPMCertification.ProductionEvidence.psm1`
+  is a fresh, independent evidence adapter (`New-TPMProductionEvidenceRecordV1`,
+  its only exported function) converting the harness's legacy
+  `Add-Screenshot` evidence-ledger records into the production authority's
+  evidence schema -- it does not reuse or call any Shadow.psm1 code.
+- **Every competing legacy certification/publication path is deleted, not
+  merely bypassed.** `Complete-TPMCertificationTransaction`,
+  `Get-TPMCertificationScoreFromItems`, `Test-TPMScoreItemManifest`,
+  `Test-TPMArtifactManifest`, `Publish-TPMCertificationArtifacts`, and their
+  associated `Get-TPMExpectedScoreItemManifest`/`Get-TPMExpectedArtifactManifest`/
+  `Get-TPMCertificationFinalConsoleLines`/`Get-TPMCertificationFinalReportLines`
+  helpers no longer exist anywhere in the harness source. There is no
+  remaining code path that can assign a competing `FINAL STATUS`/`Overall`/
+  exit code, or write a competing report/marker/bundle.
+- **Exactly one authoritative destination, one bundle, one publisher.**
+  `$reportDir` is the sole publication destination; `New-TPMPublicationCommitV1`
+  (invoked only through `Complete-TPMProductionCertificationCycleV1`) is the
+  sole writer of `TPM-Certification-{Eligibility,Publication,Final-Outcome,
+  Scorecard,Validation,Manifest,Commit}.{json,md}`. The remaining
+  non-authoritative surfaces are clearly distinct and never share a
+  filename or an outcome-bearing field with the authoritative bundle:
+  - The pre-flight `TPM-Invalid-Certification-Environment.{md,json}`
+    diagnostic, written only when the requested TeknoParrot root fails
+    validation, before the production authority is even constructed --
+    it throws immediately after, so it never reaches the decision surface.
+  - The "TPM CERTIFICATION SCORECARD - PROVISIONAL" console block, explicitly
+    labeled "Pending: final evidence validation" and computed by informational-
+    only inline arithmetic (not `Get-TPMCertificationScoreFromItems`, which no
+    longer exists) -- it never sets the exit code and is clearly distinguished
+    from the genuine, dispatcher-issued final status printed later.
+- **An exception before a genuine final outcome produces an infrastructure
+  abort, never a fabricated certification decision.** The entire
+  authority-construction-through-cycle-completion sequence (build authority,
+  record 11 facts, record 9 evidence records via `New-TPMProductionEvidenceRecordV1`,
+  issue final evidence, seal, invoke `Complete-TPMProductionCertificationCycleV1`)
+  runs inside one `try`/`catch`. Any exception there sets `$productionAborted`,
+  prints an explicit "CERTIFICATION PIPELINE ABORTED (infrastructure failure)"
+  diagnostic naming the failure, and exits `1` -- it never falls back to the
+  removed legacy mechanism, never reports `CERTIFIED`/`NOT CERTIFIED`, and
+  never publishes a marker or bundle.
+- **The dispatcher-issued final outcome is the sole source of the harness's
+  externally visible status and exit code.** `$productionCycleResult.Projection`
+  (`FinalStatus`, `ExitCode`, `RunIdentity`) drives the only "FINAL STATUS"/
+  "EXIT CODE" lines and the only `exit` call reachable after certification
+  facts/evidence begin recording.
