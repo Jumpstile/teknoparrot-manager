@@ -1889,3 +1889,30 @@ PowerShell paths, and batch `RUN_EXIT` return after cleanup. No real-install
 certification, TeknoParrot/PCSX2 mutation, ECVF, EXP-002, packaging, release,
 emulator-contract, hardware, GitHub, commit, staging, or push action is part of
 this checkpoint.
+
+### Independent-review correction: inner schema and behavioral abort surfaces
+
+The outer `HealthResult`/`Checks` validation was insufficient because it still
+read `.Name` and `.Passed` from unchecked entries. The adapter now validates
+the complete entry schema before member use and deliberately rejects null,
+scalar, nested-collection, missing-member, null-member, malformed-name, and
+non-Boolean entries. Empty collections, missing required checks, and duplicate
+required checks are schema/infrastructure errors. Valid additional checks are
+accepted but do not expand the authority contract's three projected checks;
+explicit Missing/InvalidJson load-error facts remain unchanged.
+
+Process-level regressions run copied harness/module sources from a synthetic Git
+repository and synthetic install root. Test-only substitutions inject a late
+smoke failure after a real synthetic install-health report and an unattended
+failure only after temporary configuration restoration. Instrumented copied
+production entry points leave an observable marker if authority, fact,
+evidence, or cycle composition is entered; both abort paths prove the marker
+and every authoritative bundle/marker filename remain absent while preserving
+the initiating text and a nonzero process exit. This seam exists only in test
+copies and adds no production bypass.
+
+Launcher regressions now cover explicit sentinel exits through direct/relaunch
+paths, thrown harness errors, unavailable pwsh, batch cleanup, and the
+report-present Explorer branch with a harmless test PATH substitute. Exact exit
+preservation is claimed only when a child returns a code; exceptional launch or
+script failures are required to remain nonzero.

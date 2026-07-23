@@ -173,11 +173,21 @@ point. An early exception therefore cannot be replaced by a strict-mode member
 access in `finally`, and cannot produce a certification outcome or publication.
 
 The production fact adapter also treats a no-error install-health value as
-untrusted schema input: it must be a `PSCustomObject` with a present, non-null
-`Checks` property. Null, scalar, collection, missing-property, and null-property
-values throw a deliberate infrastructure/schema exception. An explicit load
-error remains the only route by which absent or invalid JSON becomes a valid
-fail-closed `Missing`/`InvalidJson` fact; no missing member is synthesized.
+untrusted schema input: it must be a `PSCustomObject` with a present, non-null,
+non-empty collection-valued `Checks` property. Before reading entry values, the
+adapter proves each entry is a non-null `PSCustomObject`, proves `Name` and
+`Passed` exist, requires a nonblank string name and strict Boolean result, and
+rejects nested collections, malformed extra entries, missing required names,
+and duplicate required names with a stable
+`PRODUCTION_HEALTH_RESULT_SCHEMA_INVALID` prefix. An explicit load error remains
+the only route by which absent or invalid JSON becomes a valid fail-closed
+`Missing`/`InvalidJson` fact; no missing member is synthesized.
+
+Behavioral abort tests do not expose a production failure-injection surface.
+They copy the harness/modules into a temporary synthetic repository, instrument
+only those copies to record attempted composition, and inject failures only in
+the copied source. Production has no test switch, environment bypass, or public
+callback capable of skipping collection or entering finalization early.
 
 ## Required sweep before every commit/build
 

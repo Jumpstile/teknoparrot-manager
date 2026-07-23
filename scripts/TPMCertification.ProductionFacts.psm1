@@ -805,9 +805,46 @@ function New-TPMProductionFactRecordsV1 {
     }
     $healthChecks=@()
     if($healthState-ceq'Loaded'){
+        $rawHealthChecks=$HealthResult.Checks
+        if($rawHealthChecks-is[string]-or$rawHealthChecks-isnot[Collections.IEnumerable]){
+            throw 'PRODUCTION_HEALTH_RESULT_SCHEMA_INVALID: HealthResult.Checks must be a non-empty collection'
+        }
+        $validatedHealthChecks=@()
+        $healthIndex=0
+        foreach($entry in $rawHealthChecks){
+            if($null-eq$entry){
+                throw "PRODUCTION_HEALTH_RESULT_SCHEMA_INVALID: HealthResult.Checks[$healthIndex] is null"
+            }
+            if($entry-isnot[Management.Automation.PSCustomObject]){
+                throw "PRODUCTION_HEALTH_RESULT_SCHEMA_INVALID: HealthResult.Checks[$healthIndex] must be a PSCustomObject"
+            }
+            $entryProperties=@($entry.PSObject.Properties.Name)
+            if($entryProperties-cnotcontains'Name'){
+                throw "PRODUCTION_HEALTH_RESULT_SCHEMA_INVALID: HealthResult.Checks[$healthIndex].Name is missing"
+            }
+            if($entry.Name-isnot[string]-or[string]::IsNullOrWhiteSpace([string]$entry.Name)){
+                throw "PRODUCTION_HEALTH_RESULT_SCHEMA_INVALID: HealthResult.Checks[$healthIndex].Name must be a nonblank string"
+            }
+            if($entryProperties-cnotcontains'Passed'){
+                throw "PRODUCTION_HEALTH_RESULT_SCHEMA_INVALID: HealthResult.Checks[$healthIndex].Passed is missing"
+            }
+            if($entry.Passed-isnot[bool]){
+                throw "PRODUCTION_HEALTH_RESULT_SCHEMA_INVALID: HealthResult.Checks[$healthIndex].Passed must be Boolean"
+            }
+            $validatedHealthChecks+=,[pscustomobject]@{Name=[string]$entry.Name;Passed=[bool]$entry.Passed}
+            $healthIndex++
+        }
+        if($validatedHealthChecks.Count-eq0){
+            throw 'PRODUCTION_HEALTH_RESULT_SCHEMA_INVALID: HealthResult.Checks must not be empty'
+        }
         foreach($name in @('TeknoParrotUi.exe exists','GameProfiles folder exists','UserProfiles folder exists')){
-            $healthMatches=@($HealthResult.Checks|Where-Object{$_.Name-ceq$name})
-            if($healthMatches.Count-ne1-or$healthMatches[0].Passed-isnot[bool]){$healthState='InvalidJson';$HealthLoadError="critical health check '$name' was missing, duplicated, or non-Boolean";$healthChecks=@();break}
+            $healthMatches=@($validatedHealthChecks|Where-Object{$_.Name-ceq$name})
+            if($healthMatches.Count-eq0){
+                throw "PRODUCTION_HEALTH_RESULT_SCHEMA_INVALID: required health check '$name' is missing"
+            }
+            if($healthMatches.Count-ne1){
+                throw "PRODUCTION_HEALTH_RESULT_SCHEMA_INVALID: required health check '$name' is duplicated"
+            }
             $healthChecks+=,[ordered]@{Name=$name;Passed=[bool]$healthMatches[0].Passed}
         }
     }

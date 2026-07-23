@@ -736,6 +736,7 @@ Describe 'New-TPMProductionFactRecordsV1' {
   [IO.File]::WriteAllText($emptyRegistry,'@{ SchemaVersion = 1; Dispositions = @() }')
   $realSettingsPath=Join-Path $repoRoot 'PSScriptAnalyzerSettings.psd1'
 
+  $fixture.Health.Checks+=,[pscustomobject]@{Name='Optional informational check';Passed=$true}
   $facts=@(New-TPMProductionFactRecordsV1 -Results $fixture.Results -RepositoryPath $repo -ReportDirectory $report -BackupDirectory $backup -HealthResult $fixture.Health -StagingParentRoot $staging -DestinationRoot $destination -WorkingDirectory $work -DispositionRegistryPath $emptyRegistry -PSScriptAnalyzerSettingsPath $realSettingsPath)
 
   $facts.Count|Should -Be 11
@@ -751,11 +752,15 @@ Describe 'New-TPMProductionFactRecordsV1' {
   $artifacts.PublisherAvailable|Should -BeTrue
   $artifacts.PackageValidationPassed|Should -BeTrue
 
+  $health=($facts|Where-Object Identifier -eq 'Real Install Health').Data
+  @($health.Checks).Count|Should -Be 3
+  @($health.Checks.Name)|Should -Not -Contain 'Optional informational check'
+
   $mode='Smoke'
   foreach($fact in $facts){ { Assert-TPMFactRecordV1 $fact $mode $report } | Should -Not -Throw }
  }
 
- It 'rejects null, scalar, collection, missing Checks, and null Checks health results without an explicit load error' {
+ It 'rejects every malformed outer and inner health shape with a deliberate schema diagnostic, never PropertyNotFoundException' {
   $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
   $repo=New-InventoryFixture $root
   $report=Join-Path $root 'report';$backup=Join-Path $root 'backup'
@@ -769,12 +774,32 @@ Describe 'New-TPMProductionFactRecordsV1' {
    StagingParentRoot=$staging;DestinationRoot=$destination;WorkingDirectory=$work
    DispositionRegistryPath=$emptyRegistry;PSScriptAnalyzerSettingsPath=$settings
   }
+  $required=@(
+   [pscustomobject]@{Name='TeknoParrotUi.exe exists';Passed=$true}
+   [pscustomobject]@{Name='GameProfiles folder exists';Passed=$true}
+   [pscustomobject]@{Name='UserProfiles folder exists';Passed=$true}
+  )
+  $nested=[object[]]@([pscustomobject]@{Name='Nested';Passed=$true})
   $invalid=@(
    @{Value=$null;Message='HealthResult is null'}
    @{Value='not-an-object';Message='must be a PSCustomObject'}
    @{Value=@([pscustomobject]@{Checks=@()});Message='must be a PSCustomObject'}
    @{Value=[pscustomobject]@{Status='Passed'};Message='HealthResult.Checks is missing'}
    @{Value=[pscustomobject]@{Checks=$null};Message='HealthResult.Checks is null'}
+   @{Value=[pscustomobject]@{Checks='not-a-collection'};Message='Checks must be a non-empty collection'}
+   @{Value=[pscustomobject]@{Checks=[object[]]@()};Message='Checks must not be empty'}
+   @{Value=[pscustomobject]@{Checks=[object[]]@($null)};Message='Checks[0] is null'}
+   @{Value=[pscustomobject]@{Checks=[object[]]@('scalar')};Message='Checks[0] must be a PSCustomObject'}
+   @{Value=[pscustomobject]@{Checks=[object[]]@(,$nested)};Message='Checks[0] must be a PSCustomObject'}
+   @{Value=[pscustomobject]@{Checks=[object[]]@([pscustomobject]@{Passed=$true})};Message='Checks[0].Name is missing'}
+   @{Value=[pscustomobject]@{Checks=[object[]]@([pscustomobject]@{Name=$null;Passed=$true})};Message='Checks[0].Name must be a nonblank string'}
+   @{Value=[pscustomobject]@{Checks=[object[]]@([pscustomobject]@{Name=' ';Passed=$true})};Message='Checks[0].Name must be a nonblank string'}
+   @{Value=[pscustomobject]@{Checks=[object[]]@([pscustomobject]@{Name=42;Passed=$true})};Message='Checks[0].Name must be a nonblank string'}
+   @{Value=[pscustomobject]@{Checks=[object[]]@([pscustomobject]@{Name='TeknoParrotUi.exe exists'})};Message='Checks[0].Passed is missing'}
+   @{Value=[pscustomobject]@{Checks=[object[]]@([pscustomobject]@{Name='TeknoParrotUi.exe exists';Passed=$null})};Message='Checks[0].Passed must be Boolean'}
+   @{Value=[pscustomobject]@{Checks=[object[]]@([pscustomobject]@{Name='TeknoParrotUi.exe exists';Passed='true'})};Message='Checks[0].Passed must be Boolean'}
+   @{Value=[pscustomobject]@{Checks=[object[]]@([pscustomobject]@{Name='TeknoParrotUi.exe exists';Passed=1})};Message='Checks[0].Passed must be Boolean'}
+   @{Value=[pscustomobject]@{Checks=[object[]]@($required[0],$required[0],$required[1],$required[2])};Message="required health check 'TeknoParrotUi.exe exists' is duplicated"}
   )
   foreach($case in $invalid){
    $caught=$null
@@ -782,8 +807,20 @@ Describe 'New-TPMProductionFactRecordsV1' {
    $caught|Should -Not -BeNullOrEmpty
    $caught.Exception.Message|Should -Match '^PRODUCTION_HEALTH_RESULT_SCHEMA_INVALID:'
    $caught.Exception.Message|Should -Match ([regex]::Escape($case.Message))
+   $caught.Exception.Message|Should -Not -Match 'property .* cannot be found'
+   $caught.FullyQualifiedErrorId|Should -Not -Match 'PropertyNotFound'
    $caught.Exception.GetType().FullName|Should -Be 'System.Management.Automation.RuntimeException'
   }
+ }
+
+ It 'rejects a structurally valid collection that omits a required check' {
+  $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+  $repo=New-InventoryFixture $root;$report=Join-Path $root 'report';$backup=Join-Path $root 'backup'
+  $fixture=New-LegacyResultsFixture $repo $report $backup
+  $fixture.Health.Checks=@($fixture.Health.Checks|Where-Object Name -ne 'UserProfiles folder exists')
+  $caught=$null
+  try { New-TPMProductionFactRecordsV1 -Results $fixture.Results -RepositoryPath $repo -ReportDirectory $report -BackupDirectory $backup -HealthResult $fixture.Health -StagingParentRoot (Join-Path $root 'staging') -DestinationRoot (Join-Path $root 'destination') -WorkingDirectory (Join-Path $root 'work') } catch { $caught=$_ }
+  $caught.Exception.Message|Should -Be "PRODUCTION_HEALTH_RESULT_SCHEMA_INVALID: required health check 'UserProfiles folder exists' is missing"
  }
 
  It 'preserves explicit Missing and InvalidJson health load states as valid fail-closed facts' {

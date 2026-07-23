@@ -732,3 +732,20 @@ gate before every downstream authority/fact/evidence/publication operation.
 Also test the top-level composition path, not only valid synthetic adapters.
 Wrapper scripts must explicitly return the saved child exit code; a displayed
 abort is not process failure unless every launcher layer propagates it.
+
+## ADR155-0309 review follow-up -- validating a container is not validating its entries
+
+Checking that `HealthResult` was a `PSCustomObject` and had a non-null `Checks`
+property still left strict-mode member reads on each unchecked entry. A null,
+scalar, nested collection, or missing `Name`/`Passed` member could therefore
+escape as another raw `PropertyNotFoundException`. Rule: validate every layer
+of a deserialized schema before the first member read, including unexpected
+entries that will not be projected into the authoritative result; ignored data
+is still attacker- or corruption-controlled input during enumeration.
+
+Exit propagation has two different contracts: exact code preservation after a
+child returns an exit code, and merely nonzero failure when process creation or
+script execution throws before such a code exists. Documentation and tests
+must not claim the former for the latter. Presentation work is tested
+behaviorally with a real report-directory/Explorer branch while substituting a
+harmless executable in the test-only PATH.

@@ -1171,16 +1171,28 @@ could be erased. The corrected model:
    nonzero process exit and writes no authoritative marker or bundle.
 4. A health result without an explicit load error is valid input to the
    production fact adapter only when it is a structured object with a present,
-   non-null `Checks` property. Null, scalar, collection, missing-property, and
-   null-property inputs are infrastructure/schema errors; the adapter never
-   invents `Checks` or weakens strict mode.
+   non-null, non-empty collection-valued `Checks` property. Every entry must be
+   a non-null `PSCustomObject` with a present, nonblank string `Name` and a
+   present strict-Boolean `Passed`; scalar/nested-collection entries, malformed
+   unexpected entries, missing required checks, and duplicate required checks
+   are deliberate `PRODUCTION_HEALTH_RESULT_SCHEMA_INVALID` infrastructure
+   errors before any member is trusted. The adapter never invents `Checks` or
+   weakens strict mode. Structurally valid additional checks are permitted but
+   are not projected into the three-check authoritative fact.
 5. An explicit install-health load error remains evidence of a fail-closed
    `Missing` or `InvalidJson` fact. That path does not require a health result
    object and is distinct from the invalid no-error schema states above.
-6. Every launcher layer preserves the exact child exit code after all
-   presentation and cleanup work. The PowerShell direct and relaunch paths
-   return the harness code, and the batch launcher returns its saved
-   `RUN_EXIT`; pause, Explorer launch, `popd`, and `endlocal` cannot replace it.
+6. On normal child completion, the PowerShell direct and relaunch paths return
+   the harness's exact exit code; a thrown harness error or unavailable pwsh
+   fails nonzero rather than being converted to success. The batch launcher
+   returns the `RUN_EXIT` captured immediately after its PowerShell child even
+   when the report/Explorer presentation branch runs; pause, Explorer launch,
+   `popd`, and `endlocal` cannot replace that saved result. No exact numeric
+   code is promised for a child that terminates by exception before producing
+   one.
+7. Process-level abort tests use only copied synthetic repositories and
+   test-local module/source substitution. No production parameter, environment
+   variable, or callable hook can inject a collection failure or bypass a gate.
 
 ## ADR-0155 production harness cutover (ADR155-0309 Checkpoint B2)
 

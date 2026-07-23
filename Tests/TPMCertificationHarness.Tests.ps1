@@ -2725,3 +2725,113 @@ Describe 'real harness incomplete-collection fail-closed path' {
         $authorityCreation|Should -BeGreaterThan $abortGate
     }
 }
+
+Describe 'late collection failures cannot enter production composition' {
+    BeforeAll {
+        $sourceRepo=Split-Path $PSScriptRoot -Parent
+
+        function New-SyntheticHarnessRepository {
+            param([string]$Root,[string]$FailureMessage)
+            $repo=Join-Path $Root 'repo'
+            $scripts=Join-Path $repo 'scripts'
+            $tools=Join-Path $repo 'tools'
+            $tests=Join-Path $repo 'Tests'
+            New-Item -ItemType Directory -Path $scripts,$tools,$tests -Force|Out-Null
+            Copy-Item -Path (Join-Path $sourceRepo 'scripts\*') -Destination $scripts -Force
+            Copy-Item -Path (Join-Path $sourceRepo 'tools\*') -Destination $tools -Force
+            Copy-Item -LiteralPath (Join-Path $sourceRepo 'PSScriptAnalyzerSettings.psd1') -Destination $repo
+
+            @'
+param([switch]$Unattended)
+$ScriptVersion = "test"
+$ReleaseCandidateLabel = "Synthetic"
+'@|Set-Content -LiteralPath (Join-Path $repo 'TeknoParrot-Manager.ps1') -Encoding ascii
+            "Describe 'synthetic repository' { It 'passes' { `$true|Should -BeTrue } }"|Set-Content -LiteralPath (Join-Path $tests 'Synthetic.Tests.ps1') -Encoding ascii
+
+            $harnessPath=Join-Path $scripts 'Invoke-TPM-RealInstanceSmoke.ps1'
+            $harness=[IO.File]::ReadAllText($harnessPath)
+            $unattendedCommand='pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -Unattended *> $tpmLog'
+            @([regex]::Matches($harness,[regex]::Escape($unattendedCommand))).Count|Should -Be 1
+            $syntheticUnattended='[IO.File]::WriteAllText($tpmLog,("Configuration:{0}  TeknoParrot root     : {1}{0}  ZIP source folder    : synthetic{0}{0}Loading collection dat from ZIP...{0}" -f [Environment]::NewLine,$TeknoParrotRoot),(New-Object Text.UTF8Encoding $false))'
+            $harness=$harness.Replace($unattendedCommand,$syntheticUnattended)
+            $insertion='# Issue #151: requested/effective root evidence.'
+            @([regex]::Matches($harness,[regex]::Escape($insertion))).Count|Should -Be 1
+            $failureStatement=if($FailureMessage-ceq'POST_RESTORATION_COLLECTION_FAILURE_SENTINEL'){"if(Test-Path -LiteralPath `$tpmConfigPath){throw 'CONFIG_RESTORATION_NOT_COMPLETE'}`r`n    throw '$FailureMessage'"}else{"throw '$FailureMessage'"}
+            $harness=$harness.Replace($insertion,$failureStatement+"`r`n`r`n    "+$insertion)
+            [IO.File]::WriteAllText($harnessPath,$harness,(New-Object Text.UTF8Encoding $false))
+
+            $instrument=@{
+                'TPMCertification.Production.psm1'='New-TPMProductionWorkflowAuthorityV1'
+                'TPMCertification.ProductionFacts.psm1'='New-TPMProductionFactRecordsV1'
+                'TPMCertification.ProductionEvidence.psm1'='New-TPMProductionEvidenceRecordV1'
+                'TPMCertification.ProductionCycle.psm1'='Complete-TPMProductionCertificationCycleV1'
+            }
+            foreach($moduleName in $instrument.Keys){
+                $modulePath=Join-Path $scripts $moduleName
+                $moduleText=[IO.File]::ReadAllText($modulePath)
+                $needle="function $($instrument[$moduleName]) {"
+                @([regex]::Matches($moduleText,[regex]::Escape($needle))).Count|Should -Be 1
+                $markerLine='[IO.File]::AppendAllText($env:TPM_TEST_COMPOSITION_MARKER,''' + $instrument[$moduleName] + '''+[Environment]::NewLine)'
+                $moduleText=$moduleText.Replace($needle,$needle+"`r`n    "+$markerLine)
+                [IO.File]::WriteAllText($modulePath,$moduleText,(New-Object Text.UTF8Encoding $false))
+            }
+
+            & git -C $repo init -q
+            & git -C $repo checkout -q -b main
+            & git -C $repo add -- .
+            & git -C $repo -c user.name=TPM-Test -c user.email=tpm-test@example.invalid commit -q -m baseline
+            $head=& git -C $repo rev-parse HEAD
+            & git -C $repo update-ref refs/remotes/origin/main $head
+            return $repo
+        }
+
+        function Invoke-SyntheticLateFailure {
+            param([switch]$Unattended,[string]$FailureMessage)
+            $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            $repo=New-SyntheticHarnessRepository -Root $root -FailureMessage $FailureMessage
+            $install=Join-Path $root 'install'
+            $harnessRoot=Join-Path $root 'harness'
+            New-Item -ItemType Directory -Path $install,(Join-Path $install 'GameProfiles'),(Join-Path $install 'UserProfiles'),$harnessRoot -Force|Out-Null
+            New-Item -ItemType File -Path (Join-Path $install 'TeknoParrotUi.exe')|Out-Null
+            '<GameProfile />'|Set-Content -LiteralPath (Join-Path $install 'GameProfiles\one.xml') -Encoding ascii
+            $marker=Join-Path $root 'composition-entered.txt'
+            $savedMarker=$env:TPM_TEST_COMPOSITION_MARKER
+            try{
+                $env:TPM_TEST_COMPOSITION_MARKER=$marker
+                $arguments=@('-NoProfile','-File',(Join-Path $repo 'scripts\Invoke-TPM-RealInstanceSmoke.ps1'),'-RepoPath',$repo,'-TeknoParrotRoot',$install,'-HarnessRoot',$harnessRoot)
+                if($Unattended){$arguments+='-RunUnattendedTPM'}
+                $output=@(& pwsh @arguments 2>&1)
+                $exitCode=$LASTEXITCODE
+            }finally{
+                $env:TPM_TEST_COMPOSITION_MARKER=$savedMarker
+            }
+            return [pscustomobject]@{Root=$root;Repo=$repo;Install=$install;HarnessRoot=$harnessRoot;Marker=$marker;Output=($output-join"`n");ExitCode=$exitCode}
+        }
+
+        function Assert-SyntheticCollectionAbort {
+            param($Result,[string]$FailureMessage)
+            $Result.ExitCode|Should -Not -Be 0
+            $Result.Output|Should -Match 'CERTIFICATION PIPELINE ABORTED \(infrastructure failure\)'
+            $Result.Output|Should -Match ([regex]::Escape($FailureMessage))
+            $Result.Output|Should -Not -Match 'PropertyNotFoundException'
+            Test-Path -LiteralPath $Result.Marker|Should -BeFalse
+            $authoritative=@(Get-ChildItem -LiteralPath $Result.HarnessRoot -File -Recurse -ErrorAction SilentlyContinue|Where-Object{$_.Name-match'^TPM-Certification-(Final-Outcome|Commit|Manifest|Scorecard|Eligibility|Publication)\.'})
+            $authoritative.Count|Should -Be 0
+            Test-Path -LiteralPath (Join-Path $Result.HarnessRoot 'Reports')|Should -BeTrue
+        }
+    }
+
+    It 'a late smoke failure after install-health collection retains its error and never enters composition' {
+        $message='LATE_SMOKE_COLLECTION_FAILURE_SENTINEL'
+        $result=Invoke-SyntheticLateFailure -FailureMessage $message
+        Assert-SyntheticCollectionAbort -Result $result -FailureMessage $message
+        @(Get-ChildItem -LiteralPath $result.HarnessRoot -Filter InstallHealth.json -File -Recurse).Count|Should -Be 1
+    }
+
+    It 'an unattended failure after configuration restoration retains its error and never enters composition' {
+        $message='POST_RESTORATION_COLLECTION_FAILURE_SENTINEL'
+        $result=Invoke-SyntheticLateFailure -Unattended -FailureMessage $message
+        Assert-SyntheticCollectionAbort -Result $result -FailureMessage $message
+        Test-Path -LiteralPath (Join-Path $result.Repo 'TeknoParrot-Manager.config.json')|Should -BeFalse
+    }
+}
