@@ -2582,3 +2582,108 @@ Describe "Issue #154 evidence metadata and finalization regression" {
         foreach($call in $calls){($call -match '-Skip(?:\s|\))' -or $call -match "-EvidenceType\s+'(?:ScreenCapture|DeterministicRender)'")|Should -BeTrue -Because $call}
     }
 }
+
+Describe "Get-TreeHash / Compare-TreeSnapshot absent-tree handling (issue #172)" {
+    # Real certification RunIdentity 2e045f369a2240adb8eaaaed4d9496a0 reported
+    # Pcsx2x6Crosshairs BeforeSkipped=1/AfterSkipped=1 against a canonical
+    # crosshairs directory that did not exist on disk at all -- confirmed
+    # root cause: Get-TreeHash's "return @()" collapsed to $null at the
+    # caller (capturing zero pipeline objects into a variable always
+    # yields $null on this environment), and Compare-TreeSnapshot's
+    # "@($Before)" then wrapped that $null into a ONE-element array
+    # containing a single $null, which its own per-item loop counted as a
+    # skipped entry that never actually existed. These tests exercise the
+    # full producer (Get-TreeHash) -> consumer (Compare-TreeSnapshot)
+    # path together, the same shape every real caller uses, not the
+    # functions in isolation.
+
+    It "an absent tree, compared before and after, produces an all-zero result -- not a phantom skipped entry" {
+        $missing = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $before = Get-TreeHash $missing
+        $after = Get-TreeHash $missing
+        $result = Compare-TreeSnapshot $before $after
+        $result.Added | Should -Be 0
+        $result.Removed | Should -Be 0
+        $result.Changed | Should -Be 0
+        $result.BeforeSkipped | Should -Be 0
+        $result.AfterSkipped | Should -Be 0
+        $result.BeforeCount | Should -Be 0
+        $result.AfterCount | Should -Be 0
+    }
+
+    It "Get-TreeHash returns a real, non-null, zero-count array for an absent path" {
+        $missing = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $result = Get-TreeHash $missing
+        ($null -eq $result) | Should -BeFalse
+        @($result).Count | Should -Be 0
+    }
+
+    It "Compare-TreeSnapshot treats a literal `$null` argument as an empty snapshot, not a phantom skipped entry" {
+        $result = Compare-TreeSnapshot $null $null
+        $result.BeforeSkipped | Should -Be 0
+        $result.AfterSkipped | Should -Be 0
+        $result.BeforeCount | Should -Be 0
+        $result.AfterCount | Should -Be 0
+    }
+
+    It "a tree that goes from absent to present is reported as entirely Added, with zero phantom skips" {
+        $root = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $before = Get-TreeHash $root
+        New-Item -ItemType Directory -Path $root | Out-Null
+        [IO.File]::WriteAllText((Join-Path $root 'a.txt'), 'a')
+        [IO.File]::WriteAllText((Join-Path $root 'b.txt'), 'b')
+        $after = Get-TreeHash $root
+        $result = Compare-TreeSnapshot $before $after
+        $result.Added | Should -Be 2
+        $result.Removed | Should -Be 0
+        $result.Changed | Should -Be 0
+        $result.BeforeSkipped | Should -Be 0
+        $result.AfterSkipped | Should -Be 0
+    }
+
+    It "a tree that goes from present to absent is reported as entirely Removed, with zero phantom skips" {
+        $root = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $root | Out-Null
+        [IO.File]::WriteAllText((Join-Path $root 'a.txt'), 'a')
+        $before = Get-TreeHash $root
+        Remove-Item -LiteralPath $root -Recurse -Force
+        $after = Get-TreeHash $root
+        $result = Compare-TreeSnapshot $before $after
+        $result.Added | Should -Be 0
+        $result.Removed | Should -Be 1
+        $result.Changed | Should -Be 0
+        $result.BeforeSkipped | Should -Be 0
+        $result.AfterSkipped | Should -Be 0
+    }
+
+    It "a genuinely malformed entry (a real `$null` element inside a non-empty snapshot) is still counted as skipped -- fail-closed behavior is preserved" {
+        $realEntry = [pscustomobject]@{ RelativePath = 'real.txt'; Path = 'C:\fake\real.txt'; Hash = 'ABC'; Length = 3 }
+        $before = @($realEntry, $null)
+        $after = @($realEntry)
+        $result = Compare-TreeSnapshot $before $after
+        $result.BeforeSkipped | Should -Be 1
+        $result.AfterSkipped | Should -Be 0
+        $result.BeforeCount | Should -Be 2
+    }
+
+    It "a genuinely malformed entry (a blank RelativePath inside a non-empty snapshot) is still counted as skipped" {
+        $blankEntry = [pscustomobject]@{ RelativePath = '   '; Path = 'C:\fake\blank.txt'; Hash = 'ABC'; Length = 3 }
+        $after = @($blankEntry)
+        $result = Compare-TreeSnapshot @() $after
+        $result.AfterSkipped | Should -Be 1
+        $result.AfterCount | Should -Be 1
+    }
+
+    It "UserProfiles, GameProfiles, and Pcsx2x6Crosshairs share identical absent-tree semantics -- proven by exercising the same shared functions each production call site uses, since no per-tree special-casing exists at this layer" {
+        foreach ($label in @('UserProfiles', 'GameProfiles', 'Pcsx2x6Crosshairs')) {
+            $missing = Join-Path $TestDrive ([guid]::NewGuid().ToString('N') + "-$label")
+            $before = Get-TreeHash $missing
+            $after = Get-TreeHash $missing
+            $result = Compare-TreeSnapshot $before $after
+            $result.BeforeSkipped | Should -Be 0 -Because "$label before-tree"
+            $result.AfterSkipped | Should -Be 0 -Because "$label after-tree"
+            $result.Added | Should -Be 0 -Because "$label added"
+            $result.Removed | Should -Be 0 -Because "$label removed"
+        }
+    }
+}

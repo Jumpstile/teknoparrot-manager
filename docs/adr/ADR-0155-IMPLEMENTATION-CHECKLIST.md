@@ -1809,3 +1809,53 @@ sibling module. No ECVF/EXP-002/hardware-certification/packaging-output/
 release-publication work was touched. Nothing from this checkpoint has been
 committed, staged, or pushed -- it is left for independent review exactly as
 requested.
+
+## Issue #172 correction -- absent-tree false-positive skip (discovered during ADR-0155 real-hardware validation, adjacent to Checkpoint B2, not itself a checkpoint) -- 2026-07-22
+
+Real certification (`RunIdentity 2e045f369a2240adb8eaaaed4d9496a0`) against a
+machine whose pcsx2x6 crosshair setup was never completed reported
+`Pcsx2x6Crosshairs BeforeSkipped=1`/`AfterSkipped=1` even though the
+canonical crosshairs directory simply does not exist there -- nothing was
+ever unreadable. This is pre-existing `Invoke-TPM-RealInstanceSmoke.ps1`
+tree-diffing code (`Get-TreeHash`/`Compare-TreeSnapshot`), not part of the
+Checkpoint B1/B2 production-authority cutover, discovered only because
+ADR-0155 real-hardware validation was what actually exercised the
+never-completed-crosshairs machine state.
+
+Confirmed root cause: the same "`return @()` unwraps to `$null`" class this
+session's own LESSONS_LEARNED.md already documents twice, present
+independently at three layers -- `Get-TreeHash`'s absent-path `return @()`,
+`Compare-TreeSnapshot`'s own `@($Before)` turning that `$null` into a
+one-element array containing a single `$null` (counted as a skip), and a
+caller-side `else { @() }` fallback with the identical un-wrapped-branch bug.
+Fixed all three independently (`,@()` at the producer; explicit,
+both-branches-comma-wrapped `$null` normalization inside
+`Compare-TreeSnapshot` itself; `,@()` at both caller-side fallbacks) rather
+than relying on any single layer's fix to protect the others, per the
+review's explicit "resolve the full producer/caller/consumer problem class"
+requirement. Independently implemented on this approved PR lineage; the
+unreviewed alternate-lineage implementation was not consulted or
+cherry-picked.
+
+Eight new regression tests (`Tests/TPMCertificationHarness.Tests.ps1`,
+`Describe "Get-TreeHash / Compare-TreeSnapshot absent-tree handling (issue
+#172)"`) prove: an absent tree compared before/after is all-zero, not a
+phantom skip; `Get-TreeHash` returns a genuine non-null zero-count array for
+an absent path; `Compare-TreeSnapshot` treats a literal `$null` argument as
+empty; absent-to-present and present-to-absent transitions remain accurate;
+a genuinely malformed entry (a real `$null` element, or a blank
+`RelativePath`) inside an otherwise non-empty snapshot is still counted as
+skipped -- fail-closed behavior for real defects is unchanged; and
+`UserProfiles`/`GameProfiles`/`Pcsx2x6Crosshairs` share identical semantics,
+proven by exercising the same shared functions every production call site
+uses rather than asserting per-tree special cases that do not exist. The
+fix was verified against a hand-reproduction of the exact pre-fix code
+(`BeforeSkipped=1`/`AfterSkipped=1`, matching the real certification run's
+symptom exactly) before confirming the new tests catch it.
+
+Files touched: `scripts/Invoke-TPM-RealInstanceSmoke.ps1` (the fix, all
+three layers), `Tests/TPMCertificationHarness.Tests.ps1` (the eight new
+tests), `LESSONS_LEARNED.md`, `ARCHITECTURE.md`,
+`docs/adr/ADR-0155-IMPLEMENTATION-CHECKLIST.md` (this entry). No ECVF,
+pcsx2x6 configuration, EXP-002, packaging, release state, or unrelated issue
+was touched. Left uncommitted and unstaged for independent review.

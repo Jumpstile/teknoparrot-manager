@@ -100,8 +100,17 @@ function Copy-IfExists {
 }
 
 function Get-TreeHash {
+    # Issue #172: a bare "return @()" collapses to $null at the caller --
+    # capturing zero pipeline objects into a variable always yields $null,
+    # not an empty array, on this environment (confirmed by direct
+    # reproduction; the same class already documented in LESSONS_LEARNED.md
+    # under "return @() unwraps to $null"). An absent tree must produce a
+    # real, zero-length snapshot, not $null, so every caller downstream can
+    # trust "no entries" without re-deriving it from a null check of its
+    # own. The comma operator forces this return to be captured as a
+    # genuine empty array.
     param([string]$Path)
-    if (!(Test-Path -LiteralPath $Path)) { return @() }
+    if (!(Test-Path -LiteralPath $Path)) { return ,@() }
     $resolved = (Resolve-Path -LiteralPath $Path).Path
     $base = $resolved.TrimEnd('\')
     Get-ChildItem -LiteralPath $resolved -Recurse -File -ErrorAction SilentlyContinue |
@@ -125,16 +134,38 @@ function Get-TreeHash {
 }
 
 function Compare-TreeSnapshot {
+    # Issue #172: defensive, caller-independent normalization. Whatever
+    # produced $Before/$After -- Get-TreeHash's own absent-tree case (now
+    # fixed above), a future caller that passes $null directly, or any
+    # other producer -- a missing/null snapshot argument must become a
+    # real, zero-entry snapshot here too, never a phantom one-element
+    # array. Confirmed by direct reproduction: wrapping a genuinely $null
+    # argument in "@($Before)" produces a ONE-element array containing a
+    # single $null (PowerShell's "@($null)" behavior), which the per-item
+    # loop below then counted as one skipped entry that never actually
+    # existed. Both branches of the null-check are comma-wrapped -- also
+    # confirmed by direct reproduction that an un-wrapped empty-array
+    # branch of an if/else collapses to $null under this same "captured by
+    # assignment" rule, even on the branch that is not the $null case.
+    #
+    # This normalization only ever collapses a null/absent ARGUMENT to
+    # empty. It does not touch the per-item loop below, which still flags
+    # a genuinely malformed entry (a real $null element, or a real element
+    # with a blank RelativePath) inside an otherwise non-empty snapshot as
+    # skipped -- that fail-closed behavior is unchanged and still exercised
+    # by a snapshot that legitimately contains such an entry.
     param([object[]]$Before, [object[]]$After)
+    $beforeItems = if ($null -eq $Before) { ,@() } else { ,@($Before) }
+    $afterItems = if ($null -eq $After) { ,@() } else { ,@($After) }
     $beforeMap = @{}
     $beforeSkipped = 0
-    foreach ($item in @($Before)) {
+    foreach ($item in $beforeItems) {
         if (-not $item -or [string]::IsNullOrWhiteSpace([string]$item.RelativePath)) { $beforeSkipped++; continue }
         $beforeMap[[string]$item.RelativePath] = $item.Hash
     }
     $afterMap = @{}
     $afterSkipped = 0
-    foreach ($item in @($After)) {
+    foreach ($item in $afterItems) {
         if (-not $item -or [string]::IsNullOrWhiteSpace([string]$item.RelativePath)) { $afterSkipped++; continue }
         $afterMap[[string]$item.RelativePath] = $item.Hash
     }
@@ -149,8 +180,8 @@ function Compare-TreeSnapshot {
         if (-not $afterMap.ContainsKey($key)) { $removed++ }
     }
     [pscustomobject]@{
-        BeforeCount = @($Before).Count
-        AfterCount = @($After).Count
+        BeforeCount = $beforeItems.Count
+        AfterCount = $afterItems.Count
         Added = $added
         Removed = $removed
         Changed = $changed
@@ -1763,7 +1794,14 @@ try {
     $gameProfilesPath = Join-Path $TeknoParrotRoot 'GameProfiles'
     $preUserProfiles = Get-TreeHash $userProfilesPath
     $preGameProfiles = Get-TreeHash $gameProfilesPath
-    $preCrosshairs = if ($crosshairPath) { Get-TreeHash $crosshairPath } else { @() }
+    # Issue #172: this if/else's own empty branch is comma-wrapped for the
+    # same reason Compare-TreeSnapshot's internal normalization is -- an
+    # un-wrapped "else { @() }" here collapses to $null when captured by
+    # this assignment, on this environment, confirmed by direct
+    # reproduction. Compare-TreeSnapshot now also defends against a null
+    # argument on its own, but no caller should rely on that alone to
+    # avoid producing a null snapshot in the first place.
+    $preCrosshairs = if ($crosshairPath) { Get-TreeHash $crosshairPath } else { ,@() }
 
     Write-TPMGateHeader -Gate 'Pester regression suite' -Purpose 'Runs every unit/regression test in the repo' -Expected 'zero failed tests'
     $pesterCommand = Get-Command Invoke-Pester -ErrorAction SilentlyContinue
@@ -2198,7 +2236,9 @@ try {
     Write-TPMGateHeader -Gate 'Smoke file safety' -Purpose 'Confirms nothing changed in UserProfiles/GameProfiles during this smoke run' -Expected 'no unexpected file changes'
     $postUserProfiles = Get-TreeHash $userProfilesPath
     $postGameProfiles = Get-TreeHash $gameProfilesPath
-    $postCrosshairs = if ($crosshairPath) { Get-TreeHash $crosshairPath } else { @() }
+    # Issue #172: see the matching $preCrosshairs comment above -- the
+    # empty branch here must be comma-wrapped for the same reason.
+    $postCrosshairs = if ($crosshairPath) { Get-TreeHash $crosshairPath } else { ,@() }
     $results.Snapshots = [ordered]@{
         UserProfiles = Compare-TreeSnapshot $preUserProfiles $postUserProfiles
         GameProfiles = Compare-TreeSnapshot $preGameProfiles $postGameProfiles

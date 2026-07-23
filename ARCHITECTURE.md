@@ -1219,3 +1219,29 @@ structural decisions:
   (`FinalStatus`, `ExitCode`, `RunIdentity`) drives the only "FINAL STATUS"/
   "EXIT CODE" lines and the only `exit` call reachable after certification
   facts/evidence begin recording.
+
+## Absent-tree snapshot diffing (Get-TreeHash / Compare-TreeSnapshot, issue #172)
+
+`scripts/Invoke-TPM-RealInstanceSmoke.ps1`'s `UserProfiles`/`GameProfiles`/
+`Pcsx2x6Crosshairs` Smoke File Safety facts are all produced by the same two
+functions, called before and after the certification suite runs, feeding the
+same `Compare-TreeSnapshot`:
+
+- `Get-TreeHash -Path <dir>` walks a directory recursively (`Get-ChildItem
+  -Recurse -File`), hashing every file, and returns one record per file:
+  `RelativePath`, `Path`, `Hash`, `Length`. When `<dir>` does not exist, it
+  returns a genuine zero-length array (`return ,@()`) -- never `$null`.
+- `Compare-TreeSnapshot -Before <snapshot> -After <snapshot>` diffs two such
+  arrays by `RelativePath`, producing `Added`/`Removed`/`Changed` counts plus
+  `BeforeSkipped`/`AfterSkipped` counts for any genuinely malformed entry
+  (a `$null` element, or an element with a blank `RelativePath`) found in
+  either snapshot. It normalizes a `$null` `-Before`/`-After` argument to a
+  real empty array itself, independent of what produced that argument --
+  every layer in this path (producer, consumer, and every caller-side
+  fallback) defends against the same class of bug on its own; see
+  LESSONS_LEARNED.md's issue #172 entry for the three-layer defect this
+  replaced and why no single layer's fix was considered sufficient.
+- No per-tree special-casing exists anywhere in this path. `UserProfiles`,
+  `GameProfiles`, and `Pcsx2x6Crosshairs` are three call sites sharing
+  identical semantics through the same two functions -- a fix or regression
+  in one is a fix or regression in all three.
