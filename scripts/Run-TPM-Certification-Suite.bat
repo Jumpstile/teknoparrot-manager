@@ -171,4 +171,4 @@ echo Review the output above and the report files for full details.
 echo.
 pause
 popd >nul
-endlocal
+endlocal & exit /b %RUN_EXIT%

@@ -2687,3 +2687,41 @@ Describe "Get-TreeHash / Compare-TreeSnapshot absent-tree handling (issue #172)"
         }
     }
 }
+
+Describe 'real harness incomplete-collection fail-closed path' {
+    It 'retains the initiating pre-Pester exception, exits nonzero, and publishes no authority marker or bundle' {
+        $repoRoot = Split-Path $PSScriptRoot -Parent
+        $harnessPath = Join-Path $repoRoot 'scripts\Invoke-TPM-RealInstanceSmoke.ps1'
+        $root = Join-Path $TestDrive 'synthetic-install'
+        $harnessRoot = Join-Path $TestDrive 'synthetic-harness'
+        New-Item -ItemType Directory -Path $root,(Join-Path $root 'GameProfiles'),(Join-Path $root 'UserProfiles'),$harnessRoot -Force|Out-Null
+        New-Item -ItemType File -Path (Join-Path $root 'TeknoParrotUi.exe') -Force|Out-Null
+
+        $command="function Get-Command { [CmdletBinding()]param([Parameter(Position=0)]`$Name) if(`$Name -ceq 'Invoke-Pester'){return}; Microsoft.PowerShell.Core\Get-Command @PSBoundParameters }; & '$harnessPath' -RepoPath '$repoRoot' -TeknoParrotRoot '$root' -HarnessRoot '$harnessRoot'"
+        $output=@(& pwsh -NoProfile -Command $command 2>&1)
+        $processExit=$LASTEXITCODE
+
+        $text=$output -join "`n"
+        $processExit|Should -BeGreaterThan 0
+        $text|Should -Match 'CERTIFICATION PIPELINE ABORTED \(infrastructure failure\)'
+        $text|Should -Match ([regex]::Escape('Invoke-Pester not found. Install it with: Install-Module Pester -Scope CurrentUser -Force'))
+        $text|Should -Match 'STATUS\s+: NOT DETERMINED -- no certification decision was reached'
+        $text|Should -Not -Match 'The property ''Checks'' cannot be found'
+
+        $authoritativeNames=@(
+            'TPM-Certification-Final-Outcome.json','TPM-Certification-Final-Outcome.md',
+            'TPM-Certification-Commit.json','TPM-Certification-Commit.md',
+            'TPM-Certification-Manifest.json','TPM-Certification-Manifest.md',
+            'TPM-Certification-Scorecard.json','TPM-Certification-Scorecard.md',
+            'TPM-Certification-Eligibility.json','TPM-Certification-Eligibility.md',
+            'TPM-Certification-Publication.json','TPM-Certification-Publication.md'
+        )
+        $written=@(Get-ChildItem -LiteralPath $harnessRoot -File -Recurse -ErrorAction SilentlyContinue)
+        @($written|Where-Object{$authoritativeNames-ccontains$_.Name}).Count|Should -Be 0
+        $source=[IO.File]::ReadAllText($harnessPath)
+        $abortGate=$source.IndexOf('if(-not$collectionCompleted)')
+        $authorityCreation=$source.IndexOf('$productionAuthority = New-TPMProductionWorkflowAuthorityV1')
+        $abortGate|Should -BeGreaterThan -1
+        $authorityCreation|Should -BeGreaterThan $abortGate
+    }
+}

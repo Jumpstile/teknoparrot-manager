@@ -1158,6 +1158,30 @@ could be erased. The corrected model:
    parent, or a path that is (or has become) a reparse point -- it deletes
    only the one child it itself created and still owns.
 
+### System Invariant Inventory (collection abort and launcher exit)
+
+1. Production composition is reachable only after the harness records that
+   every collection gate completed. An exception before that point is an
+   infrastructure abort, never an authoritative NOT CERTIFIED decision.
+2. The first collection exception is retained as the initiating error record
+   and diagnostic. Cleanup and abort reporting must not replace it with a
+   secondary schema or strict-mode exception.
+3. Incomplete collection cannot create a production authority, adapt facts or
+   evidence, seal a run, issue an outcome, or invoke publication. It returns a
+   nonzero process exit and writes no authoritative marker or bundle.
+4. A health result without an explicit load error is valid input to the
+   production fact adapter only when it is a structured object with a present,
+   non-null `Checks` property. Null, scalar, collection, missing-property, and
+   null-property inputs are infrastructure/schema errors; the adapter never
+   invents `Checks` or weakens strict mode.
+5. An explicit install-health load error remains evidence of a fail-closed
+   `Missing` or `InvalidJson` fact. That path does not require a health result
+   object and is distinct from the invalid no-error schema states above.
+6. Every launcher layer preserves the exact child exit code after all
+   presentation and cleanup work. The PowerShell direct and relaunch paths
+   return the harness code, and the batch launcher returns its saved
+   `RUN_EXIT`; pause, Explorer launch, `popd`, and `endlocal` cannot replace it.
+
 ## ADR-0155 production harness cutover (ADR155-0309 Checkpoint B2)
 
 `scripts/Invoke-TPM-RealInstanceSmoke.ps1` is now driven end-to-end by the

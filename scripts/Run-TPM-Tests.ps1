@@ -79,3 +79,4 @@ $params.VerbosityLevel = $VerbosityLevel
 $params.PesterRegressionTimeoutSeconds = $PesterRegressionTimeoutSeconds
 
 & $harness @params
+exit $LASTEXITCODE

@@ -754,4 +754,54 @@ Describe 'New-TPMProductionFactRecordsV1' {
   $mode='Smoke'
   foreach($fact in $facts){ { Assert-TPMFactRecordV1 $fact $mode $report } | Should -Not -Throw }
  }
+
+ It 'rejects null, scalar, collection, missing Checks, and null Checks health results without an explicit load error' {
+  $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+  $repo=New-InventoryFixture $root
+  $report=Join-Path $root 'report';$backup=Join-Path $root 'backup'
+  $fixture=New-LegacyResultsFixture $repo $report $backup
+  $work=Join-Path $root 'work';$staging=Join-Path $root 'staging';$destination=Join-Path $root 'destination'
+  $emptyRegistry=Join-Path $root 'empty-dispositions.psd1'
+  [IO.File]::WriteAllText($emptyRegistry,'@{ SchemaVersion = 1; Dispositions = @() }')
+  $settings=Join-Path $repoRoot 'PSScriptAnalyzerSettings.psd1'
+  $common=@{
+   Results=$fixture.Results;RepositoryPath=$repo;ReportDirectory=$report;BackupDirectory=$backup
+   StagingParentRoot=$staging;DestinationRoot=$destination;WorkingDirectory=$work
+   DispositionRegistryPath=$emptyRegistry;PSScriptAnalyzerSettingsPath=$settings
+  }
+  $invalid=@(
+   @{Value=$null;Message='HealthResult is null'}
+   @{Value='not-an-object';Message='must be a PSCustomObject'}
+   @{Value=@([pscustomobject]@{Checks=@()});Message='must be a PSCustomObject'}
+   @{Value=[pscustomobject]@{Status='Passed'};Message='HealthResult.Checks is missing'}
+   @{Value=[pscustomobject]@{Checks=$null};Message='HealthResult.Checks is null'}
+  )
+  foreach($case in $invalid){
+   $caught=$null
+   try { New-TPMProductionFactRecordsV1 @common -HealthResult $case.Value } catch { $caught=$_ }
+   $caught|Should -Not -BeNullOrEmpty
+   $caught.Exception.Message|Should -Match '^PRODUCTION_HEALTH_RESULT_SCHEMA_INVALID:'
+   $caught.Exception.Message|Should -Match ([regex]::Escape($case.Message))
+   $caught.Exception.GetType().FullName|Should -Be 'System.Management.Automation.RuntimeException'
+  }
+ }
+
+ It 'preserves explicit Missing and InvalidJson health load states as valid fail-closed facts' {
+  foreach($state in @('Missing','InvalidJson')){
+   $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+   $repo=New-InventoryFixture $root
+   $report=Join-Path $root 'report';$backup=Join-Path $root 'backup'
+   $fixture=New-LegacyResultsFixture $repo $report $backup
+   if($state-ceq'Missing'){Remove-Item -LiteralPath (Join-Path $report 'InstallHealth\InstallHealth.json')}
+   $work=Join-Path $root 'work';$staging=Join-Path $root 'staging';$destination=Join-Path $root 'destination'
+   $emptyRegistry=Join-Path $root 'empty-dispositions.psd1'
+   [IO.File]::WriteAllText($emptyRegistry,'@{ SchemaVersion = 1; Dispositions = @() }')
+   $facts=@(New-TPMProductionFactRecordsV1 -Results $fixture.Results -RepositoryPath $repo -ReportDirectory $report -BackupDirectory $backup -HealthResult $null -HealthLoadError 'explicit load failure' -StagingParentRoot $staging -DestinationRoot $destination -WorkingDirectory $work -DispositionRegistryPath $emptyRegistry -PSScriptAnalyzerSettingsPath (Join-Path $repoRoot 'PSScriptAnalyzerSettings.psd1'))
+   $health=($facts|Where-Object Identifier -eq 'Real Install Health').Data
+   $health.LoadState|Should -Be $state
+   $health.LoadError|Should -Be 'explicit load failure'
+   @($health.Checks).Count|Should -Be 0
+   { Assert-TPMFactRecordV1 ($facts|Where-Object Identifier -eq 'Real Install Health') 'Smoke' $report }|Should -Not -Throw
+  }
+ }
 }

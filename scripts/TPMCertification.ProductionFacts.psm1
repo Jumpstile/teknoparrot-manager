@@ -786,7 +786,23 @@ function New-TPMProductionFactRecordsV1 {
     $testDigest=Get-TPMProductionTreeSha256V1 (Join-Path $RepositoryPath 'Tests')
 
     $healthPath=Join-Path $ReportDirectory 'InstallHealth\InstallHealth.json'
-    $healthState=if($HealthLoadError){if(Test-Path -LiteralPath $healthPath -PathType Leaf){'InvalidJson'}else{'Missing'}}else{'Loaded'}
+    if($HealthLoadError){
+        $healthState=if(Test-Path -LiteralPath $healthPath -PathType Leaf){'InvalidJson'}else{'Missing'}
+    }else{
+        if($null-eq$HealthResult){
+            throw 'PRODUCTION_HEALTH_RESULT_SCHEMA_INVALID: HealthResult is null without an explicit load error'
+        }
+        if($HealthResult-isnot[Management.Automation.PSCustomObject]){
+            throw "PRODUCTION_HEALTH_RESULT_SCHEMA_INVALID: HealthResult must be a PSCustomObject, found $($HealthResult.GetType().FullName)"
+        }
+        if(@($HealthResult.PSObject.Properties.Name)-cnotcontains'Checks'){
+            throw 'PRODUCTION_HEALTH_RESULT_SCHEMA_INVALID: HealthResult.Checks is missing'
+        }
+        if($null-eq$HealthResult.Checks){
+            throw 'PRODUCTION_HEALTH_RESULT_SCHEMA_INVALID: HealthResult.Checks is null'
+        }
+        $healthState='Loaded'
+    }
     $healthChecks=@()
     if($healthState-ceq'Loaded'){
         foreach($name in @('TeknoParrotUi.exe exists','GameProfiles folder exists','UserProfiles folder exists')){

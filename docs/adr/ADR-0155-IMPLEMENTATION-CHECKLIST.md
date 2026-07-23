@@ -1859,3 +1859,33 @@ tests), `LESSONS_LEARNED.md`, `ARCHITECTURE.md`,
 `docs/adr/ADR-0155-IMPLEMENTATION-CHECKLIST.md` (this entry). No ECVF,
 pcsx2x6 configuration, EXP-002, packaging, release state, or unrelated issue
 was touched. Left uncommitted and unstaged for independent review.
+
+## ADR155-0309 infrastructure-abort repair exposed by Issue #172 -- 2026-07-23
+
+A real certification run aborted before Pester/install-health collection, but
+the harness's unconditional `finally` tail continued into production fact
+adaptation. The uninitialized `$healthResult` was `$null`; strict-mode access to
+`$HealthResult.Checks` raised a secondary `PropertyNotFoundException` that
+replaced the unknown initiating exception. Independently,
+`Run-TPM-Tests.ps1` omitted `exit $LASTEXITCODE` on its direct pwsh path and
+the batch launcher saved `RUN_EXIT` but never returned it after presentation.
+
+The correction records explicit collection state before the main `try`, keeps
+the initiating `ErrorRecord` and complete diagnostic, marks collection complete
+only after the last collection gate, and places an infrastructure-abort exit
+before scorecard/evidence/authority/fact/seal/outcome/publication work in
+`finally`. The production fact adapter now deliberately rejects null, scalar,
+collection, missing-`Checks`, and null-`Checks` values when no load error was
+reported, while explicit Missing/InvalidJson load failures retain their
+existing fail-closed fact schema. The PowerShell runner exits with the exact
+harness code in direct and relaunch paths; the batch tail uses
+`endlocal & exit /b %RUN_EXIT%` only after pause and `popd`.
+
+Regression coverage exercises malformed health schemas, explicit load-error
+states, an actual child-process pre-Pester failure against a synthetic install
+and harness root, absence of every authoritative publication filename, exact
+initiating text, nonzero abort exit, sentinel exit propagation through both
+PowerShell paths, and batch `RUN_EXIT` return after cleanup. No real-install
+certification, TeknoParrot/PCSX2 mutation, ECVF, EXP-002, packaging, release,
+emulator-contract, hardware, GitHub, commit, staging, or push action is part of
+this checkpoint.

@@ -1547,6 +1547,16 @@ $results = [ordered]@{
     PreliminaryStatus = 'RUNNING'
 }
 
+# Collection is a prerequisite phase, not part of finalization. These values
+# exist before any collection operation so strict mode can never turn an early
+# failure into a secondary uninitialized-variable/property exception.
+$collectionCompleted = $false
+$collectionLocationPushed = $false
+$collectionFailure = $null
+$collectionFailureDiagnostic = $null
+$healthResult = $null
+$healthLoadError = $null
+
 # Records one screenshot attempt (captured, failed, or skipped) onto
 # $results.Screenshots and echoes a short status line to the console --
 # the same "one accumulator, one console line" pattern Add-CheckResult
@@ -1719,8 +1729,10 @@ if (-not $rootValidation.IsValid) {
     throw $invalidMsg
 }
 
-Push-Location $RepoPath
 try {
+    Push-Location $RepoPath
+    $collectionLocationPushed = $true
+
     # Issue #151: first required evidence slot -- captured as early as
     # possible in the real gate flow so the screenshot actually shows the
     # certification suite mid-run, not an empty or pre-launch console.
@@ -2162,6 +2174,7 @@ try {
         $results.InstallHealthGate = $healthGate
         Add-CheckResult 'Real install health check' $healthGate.Passed ("{0} -- {1}" -f $results.InstallHealthReport, $healthGate.Reason)
     } else {
+        $healthLoadError = "install health script not found at $healthScript"
         Add-CheckResult 'Real install health check' $false "missing=$healthScript"
     }
 
@@ -2287,18 +2300,52 @@ try {
     }
 
     $results.PreliminaryStatus = if (@($results.Checks | Where-Object { -not $_.Passed }).Count -eq 0) { 'PASS' } else { 'FAIL' }
+    $collectionCompleted = $true
 }
 catch {
+    $collectionFailure = $_
+    $collectionFailureDiagnostic = ($_ | Out-String).Trim()
     $results.PreliminaryStatus = 'FAIL'
-    $results.Error = $_.Exception.Message
-    Add-CheckResult 'Unhandled validation error' $false $_.Exception.Message
-    throw
+    $results.Error = $collectionFailure.Exception.Message
+    try { Add-CheckResult 'Unhandled validation error' $false $collectionFailure.Exception.Message }
+    catch {
+        $secondaryDiagnostic = ($_ | Out-String).Trim()
+        $collectionFailureDiagnostic += [Environment]::NewLine +
+            "Secondary failure while recording the validation check (initiating failure retained): $secondaryDiagnostic"
+    }
 }
 finally {
-    Pop-Location
+    if($collectionLocationPushed){
+        try { Pop-Location }
+        catch {
+            if($collectionCompleted){
+                $collectionCompleted=$false
+                $collectionFailure=$_
+                $collectionFailureDiagnostic=($_|Out-String).Trim()
+                $results.PreliminaryStatus='FAIL'
+                $results.Error=$collectionFailure.Exception.Message
+            }
+        }
+    }
     $runTimer.Stop()
     $results.Elapsed = $runTimer.Elapsed.ToString()
     $results.PowerShellVersion = $PSVersionTable.PSVersion.ToString()
+
+    if(-not$collectionCompleted){
+        $collectionAbortMessage=if($null-ne$collectionFailure){$collectionFailure.Exception.Message}else{'collection did not reach its successful completion point'}
+        Write-Host ""
+        Write-Host "============================================" -ForegroundColor Red
+        Write-Host " CERTIFICATION PIPELINE ABORTED (infrastructure failure)" -ForegroundColor Red
+        Write-Host "============================================" -ForegroundColor Red
+        Write-Host (" REASON       : {0}" -f $collectionAbortMessage) -ForegroundColor Red
+        if(-not[string]::IsNullOrWhiteSpace($collectionFailureDiagnostic)){
+            Write-Host " DIAGNOSTIC   :" -ForegroundColor Red
+            Write-Host $collectionFailureDiagnostic -ForegroundColor Red
+        }
+        Write-Host " STATUS       : NOT DETERMINED -- no certification decision was reached" -ForegroundColor Red
+        Write-Host " PUBLISHED    : false -- collection was incomplete; production composition was not entered" -ForegroundColor Red
+        exit 1
+    }
 
     # Issue #111 / Release Integrity: TPM script version and display version
     # are read via regex against the raw file text, never by executing

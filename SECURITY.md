@@ -163,6 +163,22 @@ explicitly:
   dimensions are recorded; a validation failure or exception inside the
   validator degrades that evidence to `Failed`, never `Captured`.
 
+## ADR155-0309 infrastructure-abort containment
+
+Collection and production finalization are separate trust phases. The harness
+initializes collection state and install-health adapter inputs before entering
+collection, retains the first initiating `ErrorRecord`, and permits production
+authority construction only after collection reaches its explicit completion
+point. An early exception therefore cannot be replaced by a strict-mode member
+access in `finally`, and cannot produce a certification outcome or publication.
+
+The production fact adapter also treats a no-error install-health value as
+untrusted schema input: it must be a `PSCustomObject` with a present, non-null
+`Checks` property. Null, scalar, collection, missing-property, and null-property
+values throw a deliberate infrastructure/schema exception. An explicit load
+error remains the only route by which absent or invalid JSON becomes a valid
+fail-closed `Missing`/`InvalidJson` fact; no missing member is synthesized.
+
 ## Required sweep before every commit/build
 
 See RELEASE-SAFETY-CHECKLIST.md section 1 for the full pre-commit gate
