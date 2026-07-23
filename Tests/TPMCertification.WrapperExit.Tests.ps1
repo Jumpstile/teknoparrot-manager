@@ -29,17 +29,79 @@ exit $ExitCode
   function Set-FakeHarnessThrow {
    "throw 'FAKE_HARNESS_THROW_SENTINEL'"|Set-Content -LiteralPath (Join-Path $fakeScripts 'Invoke-TPM-RealInstanceSmoke.ps1') -Encoding ascii
   }
+  function ConvertTo-Win32QuotedArgument {
+   param([Parameter(Mandatory=$true)][AllowEmptyString()][string]$Value)
+   if($Value.Length-gt 0-and $Value.IndexOfAny([char[]](' ',"`t",'"'))-lt 0){return $Value}
+   $builder=New-Object Text.StringBuilder
+   [void]$builder.Append('"')
+   $index=0
+   while($index-lt $Value.Length){
+    $backslashes=0
+    while($index-lt $Value.Length-and $Value[$index]-eq '\'){$backslashes++;$index++}
+    if($index-eq $Value.Length){
+     [void]$builder.Append('\'*($backslashes*2))
+     break
+    }elseif($Value[$index]-eq '"'){
+     [void]$builder.Append('\'*($backslashes*2+1))
+     [void]$builder.Append('"')
+     $index++
+    }else{
+     [void]$builder.Append('\'*$backslashes)
+     [void]$builder.Append($Value[$index])
+     $index++
+    }
+   }
+   [void]$builder.Append('"')
+   return $builder.ToString()
+  }
+  function ConvertTo-PowerShellLiteral {
+   param([Parameter(Mandatory=$true)][AllowEmptyString()][string]$Value)
+   return "'"+$Value.Replace("'","''")+"'"
+  }
+  function Invoke-CapturedPowerShell {
+   param(
+    [Parameter(Mandatory=$true)][string]$FilePath,
+    [Parameter(Mandatory=$true)][string[]]$ArgumentList,
+    [Parameter(Mandatory=$true)][string]$Name
+   )
+   $stdoutPath=Join-Path $TestDrive ($Name+'-stdout.txt')
+   $stderrPath=Join-Path $TestDrive ($Name+'-stderr.txt')
+   $quotedArguments=@($ArgumentList|ForEach-Object{ConvertTo-Win32QuotedArgument -Value $_})
+   $process=$null
+   $terminationConfirmed=$false
+   try{
+    $process=Start-Process -FilePath $FilePath -ArgumentList $quotedArguments -NoNewWindow -Wait -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+    [void]$process.Handle
+    $process.Refresh()
+    $terminationConfirmed=$process.HasExited
+    if(-not $terminationConfirmed){throw "PowerShell child '$Name' remained active after Start-Process -Wait."}
+    $exitCode=$process.ExitCode
+   }finally{
+    if($null-ne $process-and -not $process.HasExited){
+     try{Stop-Process -Id $process.Id -Force -ErrorAction Stop}catch{[Diagnostics.Debug]::WriteLine($_.Exception.Message)}
+     try{[void]$process.WaitForExit(5000)}catch{[Diagnostics.Debug]::WriteLine($_.Exception.Message)}
+     $terminationConfirmed=$process.HasExited
+    }
+    if($null-ne $process){$process.Dispose()}
+   }
+   if(-not $terminationConfirmed){throw "PowerShell child '$Name' termination could not be confirmed; redirected files were preserved."}
+   return [pscustomobject]@{
+    ExitCode=$exitCode
+    StdOut=[IO.File]::ReadAllText($stdoutPath)
+    StdErr=[IO.File]::ReadAllText($stderrPath)
+   }
+  }
  }
 
  It 'returns the fake harness sentinel through the direct pwsh path' {
   Set-FakeHarnessExit
-  & pwsh -NoProfile -File (Join-Path $fakeScripts 'Run-TPM-Tests.ps1') -RepoPath $fakeRepo -TeknoParrotRoot $fakeRoot -NoPwshRelaunch
+  & pwsh -NoProfile -NonInteractive -File (Join-Path $fakeScripts 'Run-TPM-Tests.ps1') -RepoPath $fakeRepo -TeknoParrotRoot $fakeRoot -NoPwshRelaunch
   $LASTEXITCODE|Should -Be $sentinel
  }
 
  It 'returns the fake harness sentinel through the Windows PowerShell relaunch path' {
   Set-FakeHarnessExit
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $fakeScripts 'Run-TPM-Tests.ps1') -RepoPath $fakeRepo -TeknoParrotRoot $fakeRoot
+  & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $fakeScripts 'Run-TPM-Tests.ps1') -RepoPath $fakeRepo -TeknoParrotRoot $fakeRoot
   $LASTEXITCODE|Should -Be $sentinel
  }
 
@@ -66,24 +128,25 @@ exit $ExitCode
 
  It 'returns nonzero when the harness throws instead of explicitly exiting in direct and relaunch paths' {
   Set-FakeHarnessThrow
-  $direct=@(& pwsh -NoProfile -File (Join-Path $fakeScripts 'Run-TPM-Tests.ps1') -RepoPath $fakeRepo -TeknoParrotRoot $fakeRoot -NoPwshRelaunch 2>&1)
-  $directExit=$LASTEXITCODE
-  $relaunch=@(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $fakeScripts 'Run-TPM-Tests.ps1') -RepoPath $fakeRepo -TeknoParrotRoot $fakeRoot 2>&1)
-  $relaunchExit=$LASTEXITCODE
-  $directExit|Should -Not -Be 0
-  $relaunchExit|Should -Not -Be 0
-  ($direct-join"`n")|Should -Match 'FAKE_HARNESS_THROW_SENTINEL'
-  ($relaunch-join"`n")|Should -Match 'FAKE_HARNESS_THROW_SENTINEL'
+  $runner=Join-Path $fakeScripts 'Run-TPM-Tests.ps1'
+  $direct=Invoke-CapturedPowerShell -FilePath 'pwsh' -Name 'throw-direct' -ArgumentList @('-NoProfile','-NonInteractive','-File',$runner,'-RepoPath',$fakeRepo,'-TeknoParrotRoot',$fakeRoot,'-NoPwshRelaunch')
+  $relaunch=Invoke-CapturedPowerShell -FilePath 'powershell.exe' -Name 'throw-relaunch' -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$runner,'-RepoPath',$fakeRepo,'-TeknoParrotRoot',$fakeRoot)
+  $direct.ExitCode|Should -Not -Be 0
+  $relaunch.ExitCode|Should -Not -Be 0
+  ($direct.StdOut+"`n"+$direct.StdErr)|Should -Match 'FAKE_HARNESS_THROW_SENTINEL'
+  ($relaunch.StdOut+"`n"+$relaunch.StdErr)|Should -Match 'FAKE_HARNESS_THROW_SENTINEL'
  }
 
  It 'returns nonzero when Windows PowerShell cannot resolve pwsh for relaunch' {
   Set-FakeHarnessExit
   $runner=Join-Path $fakeScripts 'Run-TPM-Tests.ps1'
-  $command="function Get-Command { [CmdletBinding()]param([Parameter(Position=0)]`$Name) if(`$Name -ceq 'pwsh'){return}; Microsoft.PowerShell.Core\Get-Command @PSBoundParameters }; & '$runner' -RepoPath '$fakeRepo' -TeknoParrotRoot '$fakeRoot'"
-  $output=@(& powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $command 2>&1)
-  $exitCode=$LASTEXITCODE
-  $exitCode|Should -Not -Be 0
-  ($output-join"`n")|Should -Match 'PowerShell 7 \(pwsh\) is required'
+  $runnerLiteral=ConvertTo-PowerShellLiteral -Value $runner
+  $repoLiteral=ConvertTo-PowerShellLiteral -Value $fakeRepo
+  $rootLiteral=ConvertTo-PowerShellLiteral -Value $fakeRoot
+  $command="function Get-Command { [CmdletBinding()]param([Parameter(Position=0)]`$Name) if(`$Name -ceq 'pwsh'){return}; Microsoft.PowerShell.Core\Get-Command @PSBoundParameters }; & $runnerLiteral -RepoPath $repoLiteral -TeknoParrotRoot $rootLiteral"
+  $result=Invoke-CapturedPowerShell -FilePath 'powershell.exe' -Name 'missing-pwsh' -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',$command)
+  $result.ExitCode|Should -Not -Be 0
+  ($result.StdOut+"`n"+$result.StdErr)|Should -Match 'PowerShell 7 \(pwsh\) is required'
  }
 
  It 'keeps RUN_EXIT when a report exists and the Explorer presentation branch is reached' {
