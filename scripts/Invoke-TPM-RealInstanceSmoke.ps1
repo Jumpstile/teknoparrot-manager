@@ -7,6 +7,10 @@ param(
 
     [string]$HarnessRoot,
 
+    [string]$ReportDirectory,
+
+    [string]$OperatorStatusPath,
+
     [switch]$RunUnattendedTPM,
 
     # Summary (default): only the final certification scorecard and any real
@@ -35,6 +39,7 @@ $ErrorActionPreference = "Stop"
 $runTimer = [System.Diagnostics.Stopwatch]::StartNew()
 
 . (Join-Path $PSScriptRoot 'Resolve-Pcsx2Directory.ps1')
+Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Execution.psm1') -Force
 # ADR155-0309 Checkpoint B2: the production authority is the sole
 # certification decision/publication path. TPMCertification.Shadow.psm1 is
 # deliberately not imported here -- Phase 2's shadow adapter is
@@ -65,7 +70,7 @@ if ([string]::IsNullOrWhiteSpace($HarnessRoot)) {
 }
 
 $stamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
-$reportDir = Join-Path $HarnessRoot "Reports\$stamp"
+$reportDir = if ([string]::IsNullOrWhiteSpace($ReportDirectory)) { Join-Path $HarnessRoot "Reports\$stamp" } else { [IO.Path]::GetFullPath($ReportDirectory) }
 $backupDir = Join-Path $HarnessRoot "Backups\$stamp"
 New-Item -ItemType Directory -Force -Path $reportDir, $backupDir | Out-Null
 
@@ -1648,12 +1653,12 @@ function Set-TPMConsoleStatus {
         } else {
             "$Purpose | $Expected"
         }
-        Write-Progress -Id 42 -Activity 'TPM Certification Suite' -Status $status -PercentComplete 0
+        if (-not [string]::IsNullOrWhiteSpace($script:OperatorStatusPath)) { Add-Content -LiteralPath $script:OperatorStatusPath -Value $status -Encoding utf8 }
+
     } catch {}
 }
 
 function Clear-TPMConsoleStatus {
-    try { Write-Progress -Id 42 -Activity 'TPM Certification Suite' -Completed } catch {}
     try { [Console]::Title = 'TeknoParrot Manager Certification Suite' } catch {}
 }
 
@@ -1661,7 +1666,10 @@ function Write-TPMGateHeader {
     param([string]$Gate, [string]$Purpose, [string]$Expected)
     Set-TPMConsoleStatus -Gate $Gate -Purpose $Purpose -Expected $Expected
     Write-Host ""
-    Write-Host ("--- Running: {0}" -f $Gate) -ForegroundColor Cyan
+    $script:tpmOperatorPhase++
+    $line = ("[{0}/8] {1} -- {2}" -f $script:tpmOperatorPhase,$Gate,$Expected)
+    if (-not [string]::IsNullOrWhiteSpace($script:OperatorStatusPath)) { Add-Content -LiteralPath $script:OperatorStatusPath -Value $line -Encoding utf8 }
+    Write-Host $line
     Write-Host ("    Purpose : {0}" -f $Purpose) -ForegroundColor DarkGray
     Write-Host ("    Expected: {0}" -f $Expected) -ForegroundColor DarkGray
 }
@@ -1729,6 +1737,8 @@ if (-not $rootValidation.IsValid) {
     throw $invalidMsg
 }
 
+$script:OperatorStatusPath=$OperatorStatusPath
+$script:tpmOperatorPhase=0
 try {
     Push-Location $RepoPath
     $collectionLocationPushed = $true
@@ -1751,28 +1761,21 @@ try {
         $gitStatusText = ($gitStatusLines -join [Environment]::NewLine)
     }
 
-    # Issue #111: origin/main comparison, so a reviewer can tell from the
-    # scorecard alone whether this run actually certified the latest pushed
-    # commit or a stale/local one. Never blocks the run over a failed
-    # fetch (no network is a real, non-fatal scenario) -- says so plainly
-    # instead of silently omitting the comparison.
+    # Certification is read-only and never performs network synchronization.
+    # Compare only with an already-present cached remote-tracking ref.
     $originMainCommit = $null
-    $fetchFailed = $false
     try {
-        git fetch origin main --quiet 2>$null
-        if ($LASTEXITCODE -ne 0) { $fetchFailed = $true }
-        else { $originMainCommit = (git rev-parse origin/main 2>$null) }
-    } catch {
-        $fetchFailed = $true
-    }
-    $syncStatus = if ($fetchFailed -or -not $originMainCommit) {
-        'UNKNOWN -- could not fetch origin/main (offline or unreachable)'
+        $env:GIT_TERMINAL_PROMPT = '0'
+        $originMainCommit = (git rev-parse --verify origin/main 2>$null)
+        if ($LASTEXITCODE -ne 0) { $originMainCommit = $null }
+    } catch { $originMainCommit = $null }
+    $syncStatus = if (-not $originMainCommit) {
+        'UNKNOWN -- cached origin/main is unavailable; certification does not access the network'
     } elseif ($gitCommit -eq $originMainCommit) {
-        'MATCHES origin/main'
+        'MATCHES cached origin/main'
     } else {
-        "DIFFERS from origin/main ($originMainCommit) -- this run may not reflect the latest pushed commit"
+        "DIFFERS from cached origin/main ($originMainCommit)"
     }
-
     $results.GitVersion = $gitVersion
     $results.GitBranch = $gitBranch
     $results.Commit = $gitCommit
@@ -1815,230 +1818,39 @@ try {
     # avoid producing a null snapshot in the first place.
     $preCrosshairs = if ($crosshairPath) { Get-TreeHash $crosshairPath } else { ,@() }
 
-    Write-TPMGateHeader -Gate 'Pester regression suite' -Purpose 'Runs every unit/regression test in the repo' -Expected 'zero failed tests'
-    $pesterCommand = Get-Command Invoke-Pester -ErrorAction SilentlyContinue
-    if (-not $pesterCommand) { throw 'Invoke-Pester not found. Install it with: Install-Module Pester -Scope CurrentUser -Force' }
-    $pesterModule = Get-Module Pester -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1
-    if ($pesterModule) { $results.PesterVersion = $pesterModule.Version.ToString() }
-    $pesterOutputText = Join-Path $reportDir 'Pester-output.txt'
-
-    # Issue #136: Output.Verbosity 'None' (the previous Summary-mode setting)
-    # means Pester emits literally zero per-file/per-test text, to any
-    # stream -- there is nothing "quiet capture" could have captured. A real
-    # certification timeout came back with "Last known output: (no output
-    # captured)" because of this, not a capture-mechanism bug. Verbosity is
-    # now always at least 'Detailed' so a hang can always be diagnosed
-    # (which file, which Describe block, how many tests completed) -- see
-    # the stream choice below for how this stays console-quiet in Summary
-    # mode despite that.
-    $pesterOutputVerbosity = switch ($VerbosityLevel) {
-        'Summary'    { 'Detailed' }
-        'Detailed'   { 'Detailed' }
-        'Diagnostic' { 'Diagnostic' }
+    Write-TPMGateHeader -Gate 'Pester regression suite' -Purpose 'Runs every unit/regression test in an isolated PowerShell process' -Expected 'zero failed tests'
+    $pesterChild = Join-Path $PSScriptRoot 'Invoke-TPM-PesterChild.ps1'
+    $pesterResultPath = Join-Path $reportDir 'Pester-result-v1.json'
+    $pesterNUnitPath = Join-Path $reportDir 'Pester-NUnit.xml'
+    $technicalLogDirectory = Join-Path $reportDir 'TechnicalLogs'
+    $pesterProcess = Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList @(
+        '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$pesterChild,
+        '-RepositoryPath',$RepoPath,'-ResultPath',$pesterResultPath,'-NUnitPath',$pesterNUnitPath
+    ) -WorkingDirectory $RepoPath -LogDirectory $technicalLogDirectory -Identity 'pester' -TimeoutSeconds $PesterRegressionTimeoutSeconds -Environment @{NO_COLOR='1';TERM='dumb';GIT_TERMINAL_PROMPT='0'}
+    if ($pesterProcess.TimedOut) { throw "Pester regression suite timed out after $PesterRegressionTimeoutSeconds seconds." }
+    $pesterContract = Read-TPMPesterResultV1 -Path $pesterResultPath
+    if (($pesterProcess.ExitCode -eq 0) -ne ($pesterContract.Failed -eq 0 -and $pesterContract.FailedContainers -eq 0)) {
+        throw 'PESTER_RESULT_CONTRADICTORY: child exit code disagrees with structured result'
     }
-    $pesterConfig = New-PesterConfiguration
-    $pesterConfig.Run.Path = $RepoPath
-    $pesterConfig.Run.PassThru = $true
-    $pesterConfig.Output.Verbosity = $pesterOutputVerbosity
-
-    # Issue #136: runs on a dedicated in-process runspace, not a background
-    # Job -- a Job is a separate process, so its PassThru result would cross
-    # process boundaries via CliXml serialization, which does not preserve
-    # the deep object graph the Virtual Beta Tester reporting below actually
-    # reads (.Tests, .Block.Tag, .ScriptBlock.File several levels deep). A
-    # same-process runspace keeps $pesterResult a live, fully-populated
-    # object while still letting this loop poll for a hang/timeout.
-    $pesterProgressText = Join-Path $reportDir 'Pester-progress.txt'
-    $pesterHeartbeatIntervalSeconds = 15
-    $pesterRunspace = [runspacefactory]::CreateRunspace()
-    $pesterRunspace.Open()
-    $pesterPs = [powershell]::Create()
-    $pesterPs.Runspace = $pesterRunspace
-    [void]$pesterPs.AddScript({
-        param($Config, $OutputPath)
-        Import-Module Pester -MinimumVersion 5.0 -ErrorAction Stop
-        # Issue #136: Pester's own live per-Describe/per-test progress text
-        # is written to the Information stream (6), not the Error stream
-        # (2) -- confirmed by direct reproduction: with 2>&1, the file stayed
-        # completely empty for the whole run and only received the final
-        # PassThru result object's default-formatted text dump at the very
-        # end (useless during an actual hang, since that end is never
-        # reached). With 6>&1, the file receives each line live as Pester
-        # writes it. Also confirmed 6>&1 does not additionally echo to the
-        # live console (tested in a real foreground session, not just a
-        # background job) -- so Summary mode's "keep the console quiet"
-        # intent still holds even though Verbosity is no longer 'None'.
-        Invoke-Pester -Configuration $Config 6>&1 | Tee-Object -FilePath $OutputPath
-    }).AddArgument($pesterConfig).AddArgument($pesterOutputText)
-
-    $pesterStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-    $pesterAsyncResult = $pesterPs.BeginInvoke()
-    $lastHeartbeatSeconds = 0
-    $pesterTimedOut = $false
-    $pesterResult = $null
-
-    try {
-        while (-not $pesterAsyncResult.IsCompleted) {
-            Start-Sleep -Milliseconds 500
-            $elapsed = $pesterStopwatch.Elapsed.TotalSeconds
-
-            if (Test-TPMPesterHeartbeatDue -ElapsedSeconds $elapsed -LastHeartbeatSeconds $lastHeartbeatSeconds -HeartbeatIntervalSeconds $pesterHeartbeatIntervalSeconds) {
-                $lastHeartbeatSeconds = $elapsed
-                $lastLine = ''
-                try {
-                    if (Test-Path -LiteralPath $pesterOutputText) {
-                        $lastLine = [string](Get-Content -LiteralPath $pesterOutputText -Tail 1 -ErrorAction SilentlyContinue)
-                    }
-                } catch {}
-                $heartbeatMsg = Get-TPMPesterHeartbeatMessage -ElapsedSeconds $elapsed -LastOutputLine $lastLine
-                Write-Host $heartbeatMsg -ForegroundColor DarkGray
-                Add-Content -LiteralPath $pesterProgressText -Value ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $heartbeatMsg)
-                Set-TPMConsoleStatus -Gate 'Pester regression suite' -Purpose ("Running -- {0:n0}s elapsed" -f $elapsed) -Expected 'zero failed tests'
-            }
-
-            if (Test-TPMPesterTimedOut -ElapsedSeconds $elapsed -TimeoutSeconds $PesterRegressionTimeoutSeconds) {
-                $pesterTimedOut = $true
-                break
-            }
-        }
-
-        if ($pesterTimedOut) {
-            $lastLine = ''
-            try {
-                if (Test-Path -LiteralPath $pesterOutputText) {
-                    $lastLine = ((Get-Content -LiteralPath $pesterOutputText -Tail 5 -ErrorAction SilentlyContinue) -join ' | ')
-                }
-            } catch {}
-            try { $pesterPs.Stop() } catch {}
-            $timeoutMsg = Get-TPMPesterTimeoutMessage -ElapsedSeconds $pesterStopwatch.Elapsed.TotalSeconds -TimeoutSeconds $PesterRegressionTimeoutSeconds -LastOutputLine $lastLine -OutputPath $pesterOutputText -ProgressPath $pesterProgressText
-            Add-Content -LiteralPath $pesterProgressText -Value ("[{0}] TIMED OUT -- {1}" -f (Get-Date -Format 'HH:mm:ss'), $timeoutMsg)
-            $results.Pester = [pscustomobject]@{
-                Passed = $null; Failed = $null; Skipped = $null; Inconclusive = $null; NotRun = $null; Total = $null
-                Duration = $pesterStopwatch.Elapsed.ToString(); Result = 'TimedOut'
-            }
-            Add-CheckResult 'Pester tests' $false $timeoutMsg
-            throw $timeoutMsg
-        }
-
-        # EndInvoke returns a PSDataCollection[PSObject], not a bare array --
-        # "-is [array]" is false for it, so Get-PesterSummary and the VBT
-        # candidate-selection logic below (which both branch on
-        # "-is [array]" to unwrap a single-result collection) would silently
-        # treat the wrapper itself as the result object and find none of the
-        # expected properties. Confirmed directly: without this @() wrap,
-        # every field in $results.Pester comes back $null even on a normal
-        # passing run. Wrapping here makes it a real array, matching what a
-        # direct (non-runspace) Invoke-Pester call already produced before
-        # this fix.
-        $pesterResult = @($pesterPs.EndInvoke($pesterAsyncResult))
-    } finally {
-        try { $pesterPs.Dispose() } catch {}
-        try { $pesterRunspace.Close() } catch {}
-        try { $pesterRunspace.Dispose() } catch {}
+    $results.PesterVersion = $pesterContract.Engine
+    $results.Pester = [pscustomobject]@{
+        Passed=$pesterContract.Passed;Failed=$pesterContract.Failed;Skipped=$pesterContract.Skipped
+        Inconclusive=0;NotRun=$pesterContract.NotRun;Total=$pesterContract.Discovered
+        Duration=[timespan]::FromMilliseconds($pesterContract.DurationMilliseconds);Result=$(if($pesterContract.Failed -eq 0){'Passed'}else{'Failed'})
     }
-
-    $pesterSummary = Get-PesterSummary -PesterResult $pesterResult
-    $pesterSummary | ConvertTo-Json -Depth 4 | Out-File (Join-Path $reportDir 'Pester-summary.json') -Encoding utf8
-    $results.Pester = $pesterSummary
-    Add-CheckResult 'Pester tests' ($pesterSummary.Failed -eq 0) "total=$($pesterSummary.Total) passed=$($pesterSummary.Passed) failed=$($pesterSummary.Failed)"
-
-    # Issue #88 Phase 1/1.5: report Behavioral Certification (Virtual Beta
-    # Tester) coverage as its own visible line, not folded anonymously into
-    # the overall Pester count -- a scorecard reader should be able to see
-    # this coverage exists, and its shape by category, without opening
-    # individual test files. Derived from the same PassThru result already
-    # collected above, filtered to Tests/VirtualBetaTester*.Tests.ps1 by
-    # source file, not by name pattern (robust to Describe/It renames).
-    $vbtCandidate = $pesterResult
-    if ($pesterResult -is [array]) {
-        $vbtCandidate = @($pesterResult) | Where-Object {
-            $_ -and ($_.PSObject.Properties.Name -contains 'Tests')
-        } | Select-Object -Last 1
+    $results.Pester | ConvertTo-Json -Depth 4 | Out-File (Join-Path $reportDir 'Pester-summary.json') -Encoding utf8
+    Add-CheckResult 'Pester tests' ($pesterContract.Failed -eq 0) "total=$($pesterContract.Discovered) passed=$($pesterContract.Passed) failed=$($pesterContract.Failed)"
+    if(-not[string]::IsNullOrWhiteSpace($script:OperatorStatusPath)){Add-Content -LiteralPath $script:OperatorStatusPath -Value ("Pester totals: total={0} passed={1} failed={2} skipped={3} containers={4}" -f $pesterContract.Discovered,$pesterContract.Passed,$pesterContract.Failed,$pesterContract.Skipped,$pesterContract.Containers) -Encoding utf8}
+    $categories=$pesterContract.Categories
+    $results.VirtualBetaTester=[pscustomobject]@{
+        Total=$categories.VirtualBetaTesterTotal;Passed=$categories.VirtualBetaTesterPassed;Failed=$categories.VirtualBetaTesterFailed
+        HumanBehaviors=$categories.HumanBehaviors;IdempotencyChecks=$categories.IdempotencyChecks
+        RecoveryBehaviors=$categories.RecoveryBehaviors;EnvironmentVariations=$categories.EnvironmentVariations;HighTvdBehaviors=$categories.HighTvdBehaviors
     }
-    $vbtTests = @()
-    if ($vbtCandidate -and $vbtCandidate.PSObject.Properties.Name -contains 'Tests') {
-        $vbtTests = @($vbtCandidate.Tests | Where-Object {
-            $_.ScriptBlock -and $_.ScriptBlock.File -and ([System.IO.Path]::GetFileName($_.ScriptBlock.File) -like 'VirtualBetaTester.*.Tests.ps1')
-        })
-    }
-    $vbtPassed = @($vbtTests | Where-Object { $_.Result -eq 'Passed' }).Count
-    $vbtFailed = @($vbtTests | Where-Object { $_.Result -eq 'Failed' }).Count
-
-    # Category breakdown by Describe-block name, not a separate tagging
-    # system -- each category below maps to one or more Describe blocks
-    # already named distinctly enough to classify by simple keyword match.
-    function Get-VbtCategoryCount {
-        param($Tests, [string[]]$Keywords)
-        return @($Tests | Where-Object {
-            $blockName = ($_.Block.Name)
-            $matched = $false
-            foreach ($kw in $Keywords) { if ($blockName -like "*$kw*") { $matched = $true; break } }
-            $matched
-        }).Count
-    }
-    $vbtHumanBehaviors  = Get-VbtCategoryCount -Tests $vbtTests -Keywords @('human workflow', 'main menu', 'decision paths')
-    $vbtIdempotency     = Get-VbtCategoryCount -Tests $vbtTests -Keywords @('idempotency', 'repeat-run', 'AutoSync repeat-run', 'preview')
-    $vbtRecoveryChecks  = Get-VbtCategoryCount -Tests $vbtTests -Keywords @('backup safety', 'read-only', 'recovery')
-    $vbtEnvironmentVars = Get-VbtCategoryCount -Tests $vbtTests -Keywords @('messy environment')
-
-    # Issue #88 phase 1.6: Tester Value Density is recorded as a real Pester
-    # tag on each Describe block ('TVD-High'/'TVD-Medium'/'TVD-Low'), not
-    # just a code comment, specifically so this count is queryable evidence
-    # rather than a guess. Per CONSTITUTION.md ("Tester Value Density"),
-    # this is tracked as coverage evidence only -- never converted to a
-    # percentage or folded into the Pass/Fail decision for this gate.
-    # -Tag on a Describe block lands on the containing Block, not copied down
-    # to each individual test's own .Tag (confirmed empty on .Tests[].Tag) --
-    # check .Block.Tag instead.
-    $vbtHighTvd = @($vbtTests | Where-Object { $_.Block -and $_.Block.Tag -and ($_.Block.Tag -contains 'TVD-High') }).Count
-
-    $results.VirtualBetaTester = [pscustomobject]@{
-        Total               = $vbtTests.Count
-        Passed              = $vbtPassed
-        Failed              = $vbtFailed
-        HumanBehaviors      = $vbtHumanBehaviors
-        IdempotencyChecks   = $vbtIdempotency
-        RecoveryBehaviors   = $vbtRecoveryChecks
-        EnvironmentVariations = $vbtEnvironmentVars
-        HighTvdBehaviors    = $vbtHighTvd
-    }
-    Add-CheckResult 'Behavioral Certification (Virtual Beta Tester)' ($vbtTests.Count -gt 0 -and $vbtFailed -eq 0) `
-        ("total={0} passed={1} failed={2} | human-behaviors={3} idempotency={4} recovery={5} environment-variations={6} high-tvd-behaviors={7}" -f `
-            $vbtTests.Count, $vbtPassed, $vbtFailed, $vbtHumanBehaviors, $vbtIdempotency, $vbtRecoveryChecks, $vbtEnvironmentVars, $vbtHighTvd)
-
-    # Never hidden by -VerbosityLevel Summary: if anything actually failed,
-    # print exactly what, regardless of console verbosity. Also persisted to
-    # a file, not just printed. Independent of the issue #136 fix to
-    # Output.Verbosity/stream capture above (Pester-output.txt now gets live
-    # per-test detail at every -VerbosityLevel) -- this file exists because
-    # relying on parsing that text would be fragile; $pesterResult.Failed is
-    # read directly as an object instead.
-    $failuresText = Join-Path $reportDir 'Pester-Failures.txt'
-    if ($pesterSummary.Failed -gt 0) {
-        Write-Host ""
-        Write-Host "Pester failures ($($pesterSummary.Failed)):" -ForegroundColor Red
-        $failedTests = @($pesterResult.Failed)
-        if ($failedTests.Count -eq 0 -and $pesterResult -is [array]) {
-            $failedTests = @($pesterResult | Where-Object { $_.PSObject.Properties.Name -contains 'Failed' } | Select-Object -ExpandProperty Failed)
-        }
-        $failureLines = @()
-        foreach ($failedTest in $failedTests) {
-            $testPath = if ($failedTest.PSObject.Properties.Name -contains 'ExpandedPath') { $failedTest.ExpandedPath } else { $failedTest.Name }
-            Write-Host "  - $testPath" -ForegroundColor Red
-            $failureLines += "- $testPath"
-            $errorRecord = $null
-            if ($failedTest.PSObject.Properties.Name -contains 'ErrorRecord' -and $failedTest.ErrorRecord) {
-                $errorRecord = @($failedTest.ErrorRecord) | Select-Object -First 1
-            }
-            if ($errorRecord) {
-                $failureLines += "    $($errorRecord.ToString())"
-            }
-        }
-        $failureLines | Out-File -FilePath $failuresText -Encoding utf8
-    } else {
-        "(no failures)" | Out-File -FilePath $failuresText -Encoding utf8
-    }
-
+    Add-CheckResult 'Behavioral Certification (Virtual Beta Tester)' ($categories.VirtualBetaTesterTotal -gt 0 -and $categories.VirtualBetaTesterFailed -eq 0) "total=$($categories.VirtualBetaTesterTotal) passed=$($categories.VirtualBetaTesterPassed) failed=$($categories.VirtualBetaTesterFailed)"
+    $failureLines=@($pesterContract.Failures|ForEach-Object{"- $($_.Name): $($_.Message)"})
+    if($failureLines.Count-eq0){$failureLines=@('(no failures)')}
+    $failureLines|Out-File -FilePath (Join-Path $reportDir 'Pester-Failures.txt') -Encoding utf8
     Write-TPMGateHeader -Gate 'Static analysis (PSScriptAnalyzer)' -Purpose 'Scans TeknoParrot-Manager.ps1 for known-bad patterns' -Expected 'zero Error/Warning findings'
     $analyzerCommand = Get-Command Invoke-ScriptAnalyzer -ErrorAction SilentlyContinue
     if (-not $analyzerCommand) { throw 'Invoke-ScriptAnalyzer not found. Install it with: Install-Module PSScriptAnalyzer -Scope CurrentUser -Force' }
@@ -2214,7 +2026,9 @@ try {
         # tests, not just its individual pure-function pieces.
         $tpmConfigPath = Join-Path $RepoPath 'TeknoParrot-Manager.config.json'
         $binding = Invoke-TPMUnattendedRootBinding -ConfigPath $tpmConfigPath -TeknoParrotRoot $TeknoParrotRoot -LogPath $tpmLog -InvokeUnattended {
-            pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -Unattended *> $tpmLog
+            $unattended=Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$scriptPath,'-Unattended') -WorkingDirectory $RepoPath -LogDirectory (Join-Path $reportDir 'TechnicalLogs') -Identity 'unattended-tpm' -Environment @{NO_COLOR='1';TERM='dumb';GIT_TERMINAL_PROMPT='0'}
+            Copy-Item -LiteralPath $unattended.StdOutPath -Destination $tpmLog -Force
+            if($unattended.ExitCode-ne0){throw "Unattended TPM exited with code $($unattended.ExitCode). See $($unattended.StdErrPath)"}
         }
         $results.EffectiveTeknoParrotRoot = $binding.EffectiveTeknoParrotRoot
         $results.UnattendedBinding = $binding
@@ -2292,7 +2106,9 @@ try {
             $tierHeight = $tier.Height
             [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name $tier.Name -EvidenceType 'DeterministicRender' -CaptureAction {
                 param($p)
-                $renderedLines = @(& pwsh -NoProfile -File $debugMenuScript -Width $tierWidth -Height $tierHeight -Render)
+                $render=Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList @('-NoProfile','-NonInteractive','-File',$debugMenuScript,'-Width',[string]$tierWidth,'-Height',[string]$tierHeight,'-Render') -WorkingDirectory $RepoPath -LogDirectory (Join-Path $reportDir 'TechnicalLogs') -Identity ("menu-{0}"-f$tier.Name) -Environment @{NO_COLOR='1';TERM='dumb'}
+                if($render.ExitCode-ne0){throw "Menu renderer exited with code $($render.ExitCode)."}
+                $renderedLines = @(Get-Content -LiteralPath $render.StdOutPath)
                 if ($renderedLines.Count -eq 0) { throw "Debug-TPM-MenuLayout.ps1 -Width $tierWidth -Height $tierHeight -Render produced no output" }
                 Save-TPMRenderedTextCapture -Path $p -Lines $renderedLines
             })
@@ -2344,6 +2160,10 @@ finally {
         }
         Write-Host " STATUS       : NOT DETERMINED -- no certification decision was reached" -ForegroundColor Red
         Write-Host " PUBLISHED    : false -- collection was incomplete; production composition was not entered" -ForegroundColor Red
+        if(-not[string]::IsNullOrWhiteSpace($script:OperatorStatusPath)){
+            Add-Content -LiteralPath $script:OperatorStatusPath -Value 'FINAL STATUS: PIPELINE ABORTED' -Encoding utf8
+            Add-Content -LiteralPath $script:OperatorStatusPath -Value ("Reason: {0}" -f (ConvertTo-TPMSafeTechnicalTextV1 -Text $collectionAbortMessage)) -Encoding utf8
+        }
         exit 1
     }
 
@@ -2535,6 +2355,7 @@ finally {
             Write-Host (" PUBLISHED    : UNKNOWN -- publication rollback did not fully complete; a bundle may still be present at {0} and requires manual verification" -f $productionDestinationRoot) -ForegroundColor Red
         } else {
             Write-Host (" PUBLISHED    : false -- no authoritative marker or bundle was written") -ForegroundColor Red
+            if(-not[string]::IsNullOrWhiteSpace($script:OperatorStatusPath)){Add-Content -LiteralPath $script:OperatorStatusPath -Value 'FINAL STATUS: PIPELINE ABORTED' -Encoding utf8;Add-Content -LiteralPath $script:OperatorStatusPath -Value ("Reason: {0}" -f (ConvertTo-TPMSafeTechnicalTextV1 -Text $productionAbortMessage)) -Encoding utf8}
         }
         exit 1
     }
@@ -2554,7 +2375,7 @@ finally {
     # itself is a report bundle.
     $reportsDisplay = if ($productionCycleResult.Commit.Committed) { $productionCycleResult.Commit.DestinationDirectory } else { '(not published)' }
     Write-Host ""
-    Write-Host (" FINAL STATUS : {0}" -f $productionProjection.FinalStatus) -ForegroundColor $finalColor
+$finalLine=("FINAL STATUS: {0}" -f $productionProjection.FinalStatus); Write-Host $finalLine -ForegroundColor $finalColor; if(-not[string]::IsNullOrWhiteSpace($script:OperatorStatusPath)){Add-Content -LiteralPath $script:OperatorStatusPath -Value $finalLine -Encoding utf8;Add-Content -LiteralPath $script:OperatorStatusPath -Value ("Total elapsed: {0}" -f $runTimer.Elapsed) -Encoding utf8;Add-Content -LiteralPath $script:OperatorStatusPath -Value ("Report: {0}" -f $reportDir) -Encoding utf8;Add-Content -LiteralPath $script:OperatorStatusPath -Value ("Technical log: {0}" -f (Join-Path $reportDir 'TechnicalLogs')) -Encoding utf8}
     Write-Host (" EXIT CODE    : {0}" -f $productionProjection.ExitCode) -ForegroundColor $finalColor
     Write-Host (" RUN IDENTITY : {0}" -f $productionProjection.RunIdentity) -ForegroundColor $finalColor
     Write-Host (" REPORTS      : {0}" -f $reportsDisplay) -ForegroundColor $finalColor

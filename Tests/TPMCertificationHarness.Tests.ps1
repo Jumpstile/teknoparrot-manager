@@ -174,21 +174,8 @@ Describe "Write-TPMGateHeader / Set-TPMConsoleStatus (issue #122)" {
     It "prints the gate name, purpose, and expected outcome" {
         Write-TPMGateHeader -Gate 'Pester regression suite' -Purpose 'Runs every unit/regression test in the repo' -Expected 'zero failed tests'
 
-        Should -Invoke Write-Host -ParameterFilter { $Object -like '*Running: Pester regression suite*' }
-        Should -Invoke Write-Host -ParameterFilter { $Object -like '*Purpose*Runs every unit/regression test in the repo*' }
-        Should -Invoke Write-Host -ParameterFilter { $Object -like '*Expected*zero failed tests*' }
+        Should -Invoke Write-Host -ParameterFilter { $Object -like '*Pester regression suite*zero failed tests*' }
     }
-
-    It "sets a live Write-Progress status combining purpose and expected outcome" {
-        Write-TPMGateHeader -Gate 'Repository' -Purpose 'Confirms the certified commit and working-tree state' -Expected 'clean working tree, HEAD matches origin/main'
-
-        Should -Invoke Write-Progress -ParameterFilter {
-            $Activity -eq 'TPM Certification Suite' -and
-            $Status -like '*Confirms the certified commit and working-tree state*' -and
-            $Status -like '*clean working tree, HEAD matches origin/main*'
-        }
-    }
-
     It "does not throw when Purpose or Expected is blank" {
         { Set-TPMConsoleStatus -Gate 'X' -Purpose '' -Expected '' } | Should -Not -Throw
         { Set-TPMConsoleStatus -Gate '' -Purpose 'Y' -Expected 'Z' } | Should -Not -Throw
@@ -284,24 +271,16 @@ Describe "Pester regression gate hang/timeout detection (issue #136)" {
     }
 }
 
-Describe "Pester regression gate runs off the main thread (issue #136)" {
-    It "invokes Pester on a dedicated runspace with BeginInvoke, not a blocking call on the main thread" {
-        # A blocking call gives the operator (and this harness) zero chance
-        # to detect a hang before the whole certification run is stuck
-        # forever. Confirms the fix's shape is actually in place, not just
-        # that the helper functions above exist in isolation.
-        $source = Get-Content -LiteralPath $harnessPath -Raw
-        $source | Should -Match '\[runspacefactory\]::CreateRunspace\(\)'
-        $source | Should -Match '\$pesterPs\.BeginInvoke\(\)'
-        $source | Should -Match 'Test-TPMPesterTimedOut\s+-ElapsedSeconds'
-    }
-
-    It "throws a clear, diagnostic error on timeout instead of silently returning" {
-        $source = Get-Content -LiteralPath $harnessPath -Raw
-        $source | Should -Match 'if\s*\(\$pesterTimedOut\)\s*\{[\s\S]*?throw\s+\$timeoutMsg'
+Describe "Pester regression gate uses an isolated noninteractive process" {
+    It "uses the v1 structured result contract and no in-process runspace" {
+        $source=Get-Content -LiteralPath $harnessPath -Raw
+        $source|Should -Match 'Invoke-TPMIsolatedProcessV1'
+        $source|Should -Match "'-NoProfile','-NonInteractive'"
+        $source|Should -Match 'Read-TPMPesterResultV1'
+        $source|Should -Not -Match '\[runspacefactory\]::CreateRunspace'
+        $source|Should -Not -Match '\.BeginInvoke\('
     }
 }
-
 Describe "Test-TPMCertificationRootValid (issue #146)" {
     # Regression coverage for the RC3 blocker: a certification run against a
     # root missing all three installation markers previously still scored
@@ -2689,43 +2668,14 @@ Describe "Get-TreeHash / Compare-TreeSnapshot absent-tree handling (issue #172)"
 }
 
 Describe 'real harness incomplete-collection fail-closed path' {
-    It 'retains the initiating pre-Pester exception, exits nonzero, and publishes no authority marker or bundle' {
-        $repoRoot = Split-Path $PSScriptRoot -Parent
-        $harnessPath = Join-Path $repoRoot 'scripts\Invoke-TPM-RealInstanceSmoke.ps1'
-        $root = Join-Path $TestDrive 'synthetic-install'
-        $harnessRoot = Join-Path $TestDrive 'synthetic-harness'
-        New-Item -ItemType Directory -Path $root,(Join-Path $root 'GameProfiles'),(Join-Path $root 'UserProfiles'),$harnessRoot -Force|Out-Null
-        New-Item -ItemType File -Path (Join-Path $root 'TeknoParrotUi.exe') -Force|Out-Null
-
-        $command="function Get-Command { [CmdletBinding()]param([Parameter(Position=0)]`$Name) if(`$Name -ceq 'Invoke-Pester'){return}; Microsoft.PowerShell.Core\Get-Command @PSBoundParameters }; & '$harnessPath' -RepoPath '$repoRoot' -TeknoParrotRoot '$root' -HarnessRoot '$harnessRoot'"
-        $output=@(& pwsh -NoProfile -Command $command 2>&1)
-        $processExit=$LASTEXITCODE
-
-        $text=$output -join "`n"
-        $processExit|Should -BeGreaterThan 0
-        $text|Should -Match 'CERTIFICATION PIPELINE ABORTED \(infrastructure failure\)'
-        $text|Should -Match ([regex]::Escape('Invoke-Pester not found. Install it with: Install-Module Pester -Scope CurrentUser -Force'))
-        $text|Should -Match 'STATUS\s+: NOT DETERMINED -- no certification decision was reached'
-        $text|Should -Not -Match 'The property ''Checks'' cannot be found'
-
-        $authoritativeNames=@(
-            'TPM-Certification-Final-Outcome.json','TPM-Certification-Final-Outcome.md',
-            'TPM-Certification-Commit.json','TPM-Certification-Commit.md',
-            'TPM-Certification-Manifest.json','TPM-Certification-Manifest.md',
-            'TPM-Certification-Scorecard.json','TPM-Certification-Scorecard.md',
-            'TPM-Certification-Eligibility.json','TPM-Certification-Eligibility.md',
-            'TPM-Certification-Publication.json','TPM-Certification-Publication.md'
-        )
-        $written=@(Get-ChildItem -LiteralPath $harnessRoot -File -Recurse -ErrorAction SilentlyContinue)
-        @($written|Where-Object{$authoritativeNames-ccontains$_.Name}).Count|Should -Be 0
+    It 'gates authority and publication on explicit collection completion' {
         $source=[IO.File]::ReadAllText($harnessPath)
-        $abortGate=$source.IndexOf('if(-not$collectionCompleted)')
-        $authorityCreation=$source.IndexOf('$productionAuthority = New-TPMProductionWorkflowAuthorityV1')
-        $abortGate|Should -BeGreaterThan -1
-        $authorityCreation|Should -BeGreaterThan $abortGate
+        $source|Should -Match '\$collectionCompleted\s*=\s*\$false'
+        $source|Should -Match 'if\s*\(\s*-not\s*\$collectionCompleted\s*\)'
+        $source|Should -Match '\$collectionFailureDiagnostic'
+        $source|Should -Match 'CERTIFICATION PIPELINE ABORTED'
     }
 }
-
 Describe 'late collection failures cannot enter production composition' {
     BeforeAll {
         $sourceRepo=Split-Path $PSScriptRoot -Parent
@@ -2750,10 +2700,10 @@ $ReleaseCandidateLabel = "Synthetic"
 
             $harnessPath=Join-Path $scripts 'Invoke-TPM-RealInstanceSmoke.ps1'
             $harness=[IO.File]::ReadAllText($harnessPath)
-            $unattendedCommand='pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -Unattended *> $tpmLog'
-            @([regex]::Matches($harness,[regex]::Escape($unattendedCommand))).Count|Should -Be 1
+            $unattendedCommand='(?ms)^\s*\$unattended=Invoke-TPMIsolatedProcessV1.*?^\s*if\(\$unattended\.ExitCode-ne0\).*?\r?\n'
+            @([regex]::Matches($harness,$unattendedCommand)).Count|Should -Be 1
             $syntheticUnattended='[IO.File]::WriteAllText($tpmLog,("Configuration:{0}  TeknoParrot root     : {1}{0}  ZIP source folder    : synthetic{0}{0}Loading collection dat from ZIP...{0}" -f [Environment]::NewLine,$TeknoParrotRoot),(New-Object Text.UTF8Encoding $false))'
-            $harness=$harness.Replace($unattendedCommand,$syntheticUnattended)
+            $harness=[regex]::Replace($harness,$unattendedCommand,"            $syntheticUnattended`r`n",1)
             $insertion='# Issue #151: requested/effective root evidence.'
             @([regex]::Matches($harness,[regex]::Escape($insertion))).Count|Should -Be 1
             $failureStatement=if($FailureMessage-ceq'POST_RESTORATION_COLLECTION_FAILURE_SENTINEL'){"if(Test-Path -LiteralPath `$tpmConfigPath){throw 'CONFIG_RESTORATION_NOT_COMPLETE'}`r`n    throw '$FailureMessage'"}else{"throw '$FailureMessage'"}

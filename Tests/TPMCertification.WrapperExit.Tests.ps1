@@ -5,19 +5,33 @@ Describe 'certification launcher exit propagation' {
   $repoRoot=Split-Path $PSScriptRoot -Parent
   $runnerSource=Join-Path $repoRoot 'scripts\Run-TPM-Tests.ps1'
   $batchSource=Join-Path $repoRoot 'scripts\Run-TPM-Certification-Suite.bat'
+  $executionSource=Join-Path $repoRoot 'scripts\TPMCertification.Execution.psm1'
+  $pesterChildSource=Join-Path $repoRoot 'scripts\Invoke-TPM-PesterChild.ps1'
+  $settingsSource=Join-Path $repoRoot 'PSScriptAnalyzerSettings.psd1'
+  $registrySource=Join-Path $repoRoot 'scripts\InjectionHunterDispositions.psd1'
   $sentinel=37
   $fakeRepo=Join-Path $TestDrive 'fake-repo'
   $fakeScripts=Join-Path $fakeRepo 'scripts'
   $fakeRoot=Join-Path $TestDrive 'fake-install'
-  New-Item -ItemType Directory -Path $fakeScripts,$fakeRoot -Force|Out-Null
+  New-Item -ItemType Directory -Path $fakeScripts,$fakeRoot,(Join-Path $fakeRepo 'Tests') -Force|Out-Null
   Copy-Item -LiteralPath $runnerSource -Destination (Join-Path $fakeScripts 'Run-TPM-Tests.ps1')
   Copy-Item -LiteralPath $batchSource -Destination (Join-Path $fakeScripts 'Run-TPM-Certification-Suite.bat')
+  Copy-Item -LiteralPath $executionSource -Destination (Join-Path $fakeScripts 'TPMCertification.Execution.psm1')
+  Copy-Item -LiteralPath $pesterChildSource -Destination (Join-Path $fakeScripts 'Invoke-TPM-PesterChild.ps1')
+  Copy-Item -LiteralPath $settingsSource -Destination (Join-Path $fakeRepo 'PSScriptAnalyzerSettings.psd1')
+  Copy-Item -LiteralPath $registrySource -Destination (Join-Path $fakeScripts 'InjectionHunterDispositions.psd1')
+  git -C $fakeRepo init --quiet
+  git -C $fakeRepo config user.email 'fixture@example.invalid'
+  git -C $fakeRepo config user.name 'Fixture'
+  git -C $fakeRepo commit --allow-empty -m 'fixture' --quiet
   function Set-FakeHarnessExit {
    @'
 param(
  [string]$RepoPath,
  [Parameter(Mandatory=$true)][string]$TeknoParrotRoot,
  [string]$HarnessRoot,
+ [string]$ReportDirectory,
+ [string]$OperatorStatusPath,
  [switch]$RunUnattendedTPM,
  [string]$VerbosityLevel,
  [int]$PesterRegressionTimeoutSeconds,
@@ -133,8 +147,8 @@ exit $ExitCode
   $relaunch=Invoke-CapturedPowerShell -FilePath 'powershell.exe' -Name 'throw-relaunch' -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$runner,'-RepoPath',$fakeRepo,'-TeknoParrotRoot',$fakeRoot)
   $direct.ExitCode|Should -Not -Be 0
   $relaunch.ExitCode|Should -Not -Be 0
-  ($direct.StdOut+"`n"+$direct.StdErr)|Should -Match 'FAKE_HARNESS_THROW_SENTINEL'
-  ($relaunch.StdOut+"`n"+$relaunch.StdErr)|Should -Match 'FAKE_HARNESS_THROW_SENTINEL'
+  $technicalErrors=@(Get-ChildItem -LiteralPath (Join-Path (Split-Path $fakeRepo -Parent) 'TPM-TestHarness') -Filter '*-stderr.log' -File -Recurse|ForEach-Object{Get-Content -LiteralPath $_.FullName -Raw}) -join "`n"
+  $technicalErrors|Should -Match 'FAKE_HARNESS_THROW_SENTINEL'
  }
 
  It 'returns nonzero when Windows PowerShell cannot resolve pwsh for relaunch' {
@@ -163,14 +177,17 @@ exit $ExitCode
   $repoPath='"'+$fakeRepo+'"'
   $inputPath='"'+$inputFile+'"'
   $savedPath=$env:PATH
+  $savedPresentation=$env:TPM_PRESENT_RESULTS
   try{
    $env:PATH=$fakeBin+';'+$savedPath
+   $env:TPM_PRESENT_RESULTS='1'
    $output=@(& cmd.exe /d /c "$batchPath $repoPath < $inputPath" 2>&1)
    $exitCode=$LASTEXITCODE
   }finally{
    $env:PATH=$savedPath
+   $env:TPM_PRESENT_RESULTS=$savedPresentation
   }
   $exitCode|Should -Be $sentinel
-  ($output-join"`n")|Should -Match 'Opening report folder'
+  ($output-join"`n")|Should -Match 'Opening the completed report folder'
  }
 }

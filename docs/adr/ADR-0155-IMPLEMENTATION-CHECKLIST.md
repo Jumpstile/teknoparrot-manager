@@ -1916,3 +1916,13 @@ paths, thrown harness errors, unavailable pwsh, batch cleanup, and the
 report-present Explorer branch with a harmless test PATH substitute. Exact exit
 preservation is claimed only when a child returns a code; exceptional launch or
 script failures are required to remain nonzero.
+
+### Operator-experience execution invariant
+
+- [x] Certification performs no active Git synchronization.
+- [x] PowerShell children use `-NoProfile -NonInteractive` with closed stdin.
+- [x] Child stdout/stderr and process metadata are retained under timestamped technical logs.
+- [x] Pester returns an exact versioned result contract that is validated fail-closed.
+- [x] Normal operator output is numbered, append-only, and reports elapsed/status locations.
+- [x] Optional post-run Explorer/pause occurs only after the certification exit code is captured.
+- [ ] Independent review and real-install certification remain separate checkpoints.

@@ -1281,3 +1281,7 @@ same `Compare-TreeSnapshot`:
   `GameProfiles`, and `Pcsx2x6Crosshairs` are three call sites sharing
   identical semantics through the same two functions -- a fix or regression
   in one is a fix or regression in all three.
+
+### Certification execution boundary (ADR155 operator experience)
+
+Certification enters a noninteractive boundary after target paths are resolved. `Run-TPM-Tests.ps1` preflights every required executable, module, configuration file, and writable report location without installing or trusting anything. It then launches the harness with closed standard input, `-NoProfile -NonInteractive`, separate timestamped stdout/stderr logs, bounded lifetime, and termination metadata. Pester runs only in `Invoke-TPM-PesterChild.ps1`; its parent accepts only the exact version-1 JSON result schema and rejects missing, malformed, unknown, or contradictory results as infrastructure aborts. The operator surface is an append-only numbered phase display; technical streams remain in `TechnicalLogs`. Certification never fetches or mutates Git state.

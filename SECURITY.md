@@ -196,3 +196,7 @@ sequence (ASCII/parse check, PSScriptAnalyzer, InjectionHunter, Pester).
 InjectionHunter findings in particular must be traced to confirm whether
 the flagged input is actually attacker-controlled before being dismissed
 as a false positive -- a finding is never dismissed by label alone.
+
+### Noninteractive certification boundary
+
+After the operator confirms target paths, certification closes child stdin and passes `-NoProfile -NonInteractive` to every PowerShell child. A prompt is therefore an infrastructure defect and must fail closed; automation must not suppress confirmation globally or answer a prompt. Dependency preflight is discovery-only: it must not install modules/providers, register repositories, change repository trust, alter execution policy, or contact Git remotes. Child stdout and stderr are captured separately, control/ANSI sequences are sanitized in technical logs, process identity and termination are recorded, and a missing or contradictory structured Pester result cannot become a certification decision.

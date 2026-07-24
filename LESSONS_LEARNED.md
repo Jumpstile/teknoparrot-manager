@@ -749,3 +749,7 @@ script execution throws before such a code exists. Documentation and tests
 must not claim the former for the latter. Presentation work is tested
 behaviorally with a real report-directory/Explorer branch while substituting a
 harmless executable in the test-only PATH.
+
+### Certification UI and process isolation are one safety boundary
+
+Raw child streams are not merely noisy: progress redraws, host records, and prompts can obscure whether a run is still valid. Running Pester in-process also made its rich runtime object an undocumented composition dependency. The durable correction is a closed-input child boundary, separate technical logs, a small versioned result contract, strict parent validation, bounded termination, and a simple append-only operator status channel. Tests must exercise the composed process path under both PowerShell engines; source assertions alone cannot prove prompt or exit behavior. Never use a blanket confirmation override to make an unattended path appear safe.

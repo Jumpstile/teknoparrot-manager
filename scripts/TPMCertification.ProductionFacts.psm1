@@ -73,6 +73,8 @@ $script:TpmProductionPowerShellInventoryRelativePathsV1 = @(
     'scripts/Invoke-TPM-InstallHealthCheck.ps1',
     'scripts/Resolve-Pcsx2Directory.ps1',
     'scripts/Run-TPM-Tests.ps1',
+    'scripts/TPMCertification.Execution.psm1',
+    'scripts/Invoke-TPM-PesterChild.ps1',
     'scripts/TPMCertification.Authority.psm1',
     'scripts/TPMCertification.Production.psm1',
     'scripts/TPMCertification.ProductionCycle.psm1',

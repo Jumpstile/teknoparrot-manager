@@ -198,20 +198,12 @@
             Reasoning   = 'AssemblyName is a fixed string literal. No attacker-controlled input reaches Add-Type.'
         }
         @{
-            File        = 'scripts/Invoke-TPM-RealInstanceSmoke.ps1'
-            RuleName    = 'InjectionRisk.AddScript'
-            Line        = 2320
-            # Built with explicit `r`n (rather than a literal here-string)
-            # A single double-quoted string with explicit `r`n escapes
-            # (restricted/data language mode permits escape sequences within
-            # one string literal, but not the `+` concatenation operator
-            # between multiple literals) so the entry matches the source
-            # file's actual CRLF line endings exactly, regardless of this
-            # .psd1 file's own line endings -- InjectionHunter's Extent.Text
-            # is an exact substring of the source file, CRLF included.
-            Extent      = "`$pesterPs.AddScript({`r`n        param(`$Config, `$OutputPath)`r`n        Import-Module Pester -MinimumVersion 5.0 -ErrorAction Stop`r`n        # Issue #136: Pester's own live per-Describe/per-test progress text`r`n        # is written to the Information stream (6), not the Error stream`r`n        # (2) -- confirmed by direct reproduction: with 2>&1, the file stayed`r`n        # completely empty for the whole run and only received the final`r`n        # PassThru result object's default-formatted text dump at the very`r`n        # end (useless during an actual hang, since that end is never`r`n        # reached). With 6>&1, the file receives each line live as Pester`r`n        # writes it. Also confirmed 6>&1 does not additionally echo to the`r`n        # live console (tested in a real foreground session, not just a`r`n        # background job) -- so Summary mode's ""keep the console quiet""`r`n        # intent still holds even though Verbosity is no longer 'None'.`r`n        Invoke-Pester -Configuration `$Config 6>&1 | Tee-Object -FilePath `$OutputPath`r`n    })"
+            File        = 'scripts/TPMCertification.Execution.psm1'
+            RuleName    = 'InjectionRisk.StaticPropertyInjection'
+            Line        = 163
+            Extent      = '$result.$name'
             Disposition = 'FalsePositive'
-            Reasoning   = 'The scriptblock argument is a fixed, hardcoded literal (not built from a string or any external input). AddScript with a compile-time literal poses no injection risk -- the risk this rule targets is a scriptblock constructed dynamically from untrusted data, which is not the case here.'
+            Reasoning   = '$name is drawn only from the fixed, hardcoded numeric-field allowlist in Read-TPMPesterResultV1. The JSON result object is untrusted and validated fail-closed, but no external value can select the property name used by this access.'
         }
         @{
             File        = 'scripts/Invoke-TPM-RealInstanceSmoke.ps1'

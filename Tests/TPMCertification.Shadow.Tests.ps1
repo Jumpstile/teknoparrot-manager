@@ -2,6 +2,7 @@
 BeforeAll {
  $modulePath=Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\TPMCertification.Shadow.psm1'
  Import-Module $modulePath -Force
+ Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\TPMCertification.Execution.psm1') -Force
  function New-TestFacts([string]$Root,[string]$Mode='Smoke'){
   $hash='a'*64;$repo=[IO.Path]::GetFullPath((Join-Path $Root 'repo'));$report=[IO.Path]::GetFullPath((Join-Path $Root 'report'));$backup=[IO.Path]::GetFullPath((Join-Path $Root 'backup'))
   @(
@@ -121,19 +122,31 @@ Describe 'ADR-0155 Phase 1/Phase 2 module coexistence' {
     '$result.AuthorityModule = (Get-Command New-TPMWorkflowAuthorityV1).ModuleName'
     '$result.ShadowModule = (Get-Command New-TPMShadowWorkflowAuthorityV1).ModuleName'
     'try { New-TPMWorkflowAuthorityV1 | Out-Null; $result.AuthorityZeroArgOk = $true } catch { $result.AuthorityZeroArgOk = $false }'
-    'try { New-TPMShadowWorkflowAuthorityV1 | Out-Null; $result.ShadowZeroArgFailedOnMissingParams = $false } catch { $result.ShadowZeroArgFailedOnMissingParams = (($_.Exception.Message -match "Mode") -or ($_.Exception.Message -match "EvidenceRoot")) }'
+    '$shadowCommand = Get-Command New-TPMShadowWorkflowAuthorityV1'
+    '$result.ShadowRequiresMode = $shadowCommand.Parameters[''Mode''].Attributes.Mandatory -contains $true'
+    '$result.ShadowRequiresEvidenceRoot = $shadowCommand.Parameters[''EvidenceRoot''].Attributes.Mandatory -contains $true'
     '$result.AssertFactModule = (Get-Command Assert-TPMFactRecordV1).ModuleName'
     '$result.FactIdentifierCount = (Get-TPMFactIdentifiersV1).Count'
     'try { Assert-TPMFactRecordV1 ([ordered]@{Identifier="NotARealCategory";Applicable=$true;Data=[ordered]@{}}) Smoke "C:\\" | Out-Null; $result.RejectsUnknownFactIdentifier = $false } catch { $result.RejectsUnknownFactIdentifier = ($_.Exception.Message -match "FACT_IDENTIFIER_INVALID") }'
     '$result | ConvertTo-Json -Compress'
    )
    [IO.File]::WriteAllText($probe,($lines-join"`n"),(New-Object Text.UTF8Encoding $false))
-   $json=& $engine -NoProfile -File $probe
+   $stdin=Join-Path $TestDrive (([guid]::NewGuid().ToString('N'))+'.stdin')
+   $stdout=Join-Path $TestDrive (([guid]::NewGuid().ToString('N'))+'.stdout')
+   $stderr=Join-Path $TestDrive (([guid]::NewGuid().ToString('N'))+'.stderr')
+   [IO.File]::WriteAllBytes($stdin,[byte[]]@())
+   $arguments=@('-NoProfile','-NonInteractive','-File',$probe)|ForEach-Object{ConvertTo-TPMWin32ArgumentV1 -Value $_}
+   $process=Start-Process -FilePath $engine -ArgumentList $arguments -Wait -PassThru -RedirectStandardInput $stdin -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+   [void]$process.Handle
+   $process.HasExited|Should -BeTrue
+   $process.ExitCode|Should -Be 0
+   $json=Get-Content -LiteralPath $stdout -Raw
    $result=$json|ConvertFrom-Json
    $result.AuthorityModule|Should -Be 'TPMCertification.Authority'
    $result.ShadowModule|Should -Be 'TPMCertification.Shadow'
    $result.AuthorityZeroArgOk|Should -BeTrue
-   $result.ShadowZeroArgFailedOnMissingParams|Should -BeTrue
+   $result.ShadowRequiresMode|Should -BeTrue
+   $result.ShadowRequiresEvidenceRoot|Should -BeTrue
    $result.AssertFactModule|Should -Be 'TPMCertification.Authority'
    $result.FactIdentifierCount|Should -Be 11
    $result.RejectsUnknownFactIdentifier|Should -BeTrue

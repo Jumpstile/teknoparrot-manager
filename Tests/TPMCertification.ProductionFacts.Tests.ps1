@@ -37,7 +37,7 @@ BeforeAll {
   New-Item -ItemType Directory -Path $repo,(Join-Path $repo 'scripts'),(Join-Path $repo 'tools') -Force|Out-Null
   $relativePaths=@(
    'TeknoParrot-Manager.ps1','scripts/Debug-TPM-MenuLayout.ps1','tools/Invoke-TpmAutoUpdate.ps1','tools/TpmAutoUpdate.Core.psm1',
-   'scripts/Invoke-TPM-RealInstanceSmoke.ps1','scripts/Invoke-TPM-InstallHealthCheck.ps1','scripts/Resolve-Pcsx2Directory.ps1','scripts/Run-TPM-Tests.ps1',
+   'scripts/Invoke-TPM-RealInstanceSmoke.ps1','scripts/Invoke-TPM-InstallHealthCheck.ps1','scripts/Resolve-Pcsx2Directory.ps1','scripts/Run-TPM-Tests.ps1','scripts/TPMCertification.Execution.psm1','scripts/Invoke-TPM-PesterChild.ps1',
    'scripts/TPMCertification.Authority.psm1','scripts/TPMCertification.Production.psm1','scripts/TPMCertification.ProductionCycle.psm1','scripts/TPMCertification.ProductionEvidence.psm1','scripts/TPMCertification.ProductionFacts.psm1',
    'scripts/TPMCertification.Publication.psm1','scripts/TPMCertification.Reports.psm1','scripts/TPMCertification.Shadow.psm1','scripts/Test-TPMParserCheckV1.ps1'
   )
@@ -65,12 +65,12 @@ Describe 'TPMCertification.ProductionFacts public API surface' {
 }
 
 Describe 'Get-TPMProductionPowerShellInventoryV1 (production entry point)' {
- It 'resolves the complete, real, 17-file authoritative inventory in deterministic order' {
+ It 'resolves the complete, real, 19-file authoritative inventory in deterministic order' {
   $inv=Get-TPMProductionPowerShellInventoryV1 -RepositoryPath $repoRoot
-  $inv.Count|Should -Be 17
+  $inv.Count|Should -Be 19
   @($inv.RelativePath)|Should -Be @(
    'TeknoParrot-Manager.ps1','scripts/Debug-TPM-MenuLayout.ps1','tools/Invoke-TpmAutoUpdate.ps1','tools/TpmAutoUpdate.Core.psm1',
-   'scripts/Invoke-TPM-RealInstanceSmoke.ps1','scripts/Invoke-TPM-InstallHealthCheck.ps1','scripts/Resolve-Pcsx2Directory.ps1','scripts/Run-TPM-Tests.ps1',
+   'scripts/Invoke-TPM-RealInstanceSmoke.ps1','scripts/Invoke-TPM-InstallHealthCheck.ps1','scripts/Resolve-Pcsx2Directory.ps1','scripts/Run-TPM-Tests.ps1','scripts/TPMCertification.Execution.psm1','scripts/Invoke-TPM-PesterChild.ps1',
    'scripts/TPMCertification.Authority.psm1','scripts/TPMCertification.Production.psm1','scripts/TPMCertification.ProductionCycle.psm1','scripts/TPMCertification.ProductionEvidence.psm1','scripts/TPMCertification.ProductionFacts.psm1',
    'scripts/TPMCertification.Publication.psm1','scripts/TPMCertification.Reports.psm1','scripts/TPMCertification.Shadow.psm1','scripts/Test-TPMParserCheckV1.ps1'
   )
@@ -745,7 +745,7 @@ Describe 'New-TPMProductionFactRecordsV1' {
   $staticAnalysis=($facts|Where-Object{$_.Identifier -eq 'Static Analysis'}).Data
   $staticAnalysis.PSScriptAnalyzer.FindingCount|Should -Be 0
   $staticAnalysis.PSScriptAnalyzer.FindingCount|Should -Not -Be 999
-  $staticAnalysis.Encoding.Files.Count|Should -Be 17
+  $staticAnalysis.Encoding.Files.Count|Should -Be 19
   $staticAnalysis.InjectionHunter.Executed|Should -BeTrue
 
   $artifacts=($facts|Where-Object{$_.Identifier -eq 'Artifacts'}).Data
