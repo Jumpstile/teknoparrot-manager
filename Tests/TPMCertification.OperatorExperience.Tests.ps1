@@ -49,7 +49,7 @@ Describe 'certification noninteractive execution boundary' {
  }
  It 'runs a child with closed stdin, separate logs, exact exit, and termination proof' {
   $engine=if($PSVersionTable.PSEdition-eq'Core'){(Get-Command pwsh).Source}else{(Get-Command powershell.exe).Source}
-  $r=Invoke-TPMIsolatedProcessV1 -FilePath $engine -ArgumentList @('-NoProfile','-NonInteractive','-Command','[Console]::Out.Write("OUT");[Console]::Error.Write("ERR");exit 37') -WorkingDirectory $TestDrive -LogDirectory $TestDrive -Identity sentinel -TimeoutSeconds 20
+  $r=Invoke-TPMIsolatedProcessV1 -FilePath $engine -ArgumentList @('-NoProfile','-NonInteractive','-Command','[Console]::Out.Write("OUT");[Console]::Error.Write("ERR");exit 37') -WorkingDirectoryRoot $TestDrive -WorkingDirectory $TestDrive -LogDirectoryRoot $TestDrive -LogDirectory $TestDrive -Identity sentinel -TimeoutSeconds 20
   $r.ExitCode|Should -Be 37;$r.TerminationConfirmed|Should -BeTrue
   (Get-Content $r.StdOutPath -Raw)|Should -Be 'OUT';(Get-Content $r.StdErrPath -Raw)|Should -Be 'ERR'
  }
@@ -279,7 +279,7 @@ Describe 'real prompt-attempt probes -- interactive prompts must fail promptly, 
 
  It '<Label> under <EngineName> terminates promptly without accepting input (nonzero exit, no hang)' -TestCases $cases {
   param($EngineName,$EnginePath,$Label,$Command)
-  $r=Invoke-TPMIsolatedProcessV1 -FilePath $EnginePath -ArgumentList @('-NoProfile','-NonInteractive','-Command',$Command) -WorkingDirectory $TestDrive -LogDirectory $TestDrive -Identity ('prompt-probe-'+[guid]::NewGuid().ToString('N').Substring(0,8)) -TimeoutSeconds 30
+  $r=Invoke-TPMIsolatedProcessV1 -FilePath $EnginePath -ArgumentList @('-NoProfile','-NonInteractive','-Command',$Command) -WorkingDirectoryRoot $TestDrive -WorkingDirectory $TestDrive -LogDirectoryRoot $TestDrive -LogDirectory $TestDrive -Identity ('prompt-probe-'+[guid]::NewGuid().ToString('N').Substring(0,8)) -TimeoutSeconds 30
   $r.TimedOut|Should -BeFalse -Because 'a real hang here would itself be the infrastructure bug this probe exists to catch'
   $r.TerminationConfirmed|Should -BeTrue
   $r.ExitCode|Should -Not -Be 0 -Because 'an interactive prompt attempted under closed/NonInteractive stdin must fail, never silently proceed'
@@ -316,6 +316,64 @@ Describe 'log sanitization fails closed on persistent retry exhaustion' {
    foreach($hr in @(0x80070070,0x800700CE,0x80070003)){
     Test-TPMTransientIOHResultV1 -HResult $hr|Should -BeFalse
    }
+  }
+  It 'rejects an HResult adjacent (off by one on either side) to the two transient values -- proves the classifier is not accidentally matching a wider range' {
+   Test-TPMTransientIOHResultV1 -HResult ($script:ERROR_SHARING_VIOLATION_HRESULT-1)|Should -BeFalse
+   Test-TPMTransientIOHResultV1 -HResult ($script:ERROR_LOCK_VIOLATION_HRESULT+1)|Should -BeFalse
+  }
+  It 'ADR155-0309 round 3: classifies the ACTUAL, empirically-observed HResult of a genuine OS-level sharing violation and lock violation as transient, and adjacent nontransient real exceptions as nontransient' {
+   # This is the direct empirical resolution for round 3's "do not assume
+   # textbook HResint values" requirement -- not synthetic
+   # IOException(message, hresult) construction (that is covered above),
+   # but the REAL .HResult the CLR reports for a genuine, OS-produced
+   # ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION on this exact host, in
+   # this exact process. Confirmed to be identical decimal/hex values
+   # under both Windows PowerShell 5.1 and pwsh 7+ during round 3's
+   # investigation: 0x80070020 / -2147024864 (sharing) and 0x80070021 /
+   # -2147024863 (lock) -- the two literals Test-TPMTransientIOHResultV1
+   # already compares against, confirmed correct rather than assumed.
+   $probeDir=Join-Path $TestDrive ('hresult-empirical-'+[guid]::NewGuid().ToString('N'))
+   [void](New-Item -ItemType Directory -Path $probeDir -Force)
+
+   $sharePath=Join-Path $probeDir 'share.txt'
+   [IO.File]::WriteAllText($sharePath,'x')
+   $sharingHandle=New-Object IO.FileStream($sharePath,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+   try{
+    $caughtSharing=$null
+    # New-Object's constructor invocation wraps the real .NET exception in a
+    # System.Management.Automation.MethodInvocationException -- the genuine
+    # IOException (and its real .HResult) is the InnerException, confirmed
+    # by direct reproduction during round 3's investigation.
+    try{ [void](New-Object IO.FileStream($sharePath,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)) }
+    catch{ $caughtSharing=if($_.Exception.InnerException){$_.Exception.InnerException}else{$_.Exception} }
+    $caughtSharing|Should -Not -BeNullOrEmpty -Because 'a genuine ERROR_SHARING_VIOLATION must actually occur for this to be real empirical evidence'
+    $caughtSharing|Should -BeOfType [IO.IOException]
+    $caughtSharing.HResult|Should -Be $script:ERROR_SHARING_VIOLATION_HRESULT
+    Test-TPMTransientIOHResultV1 -HResult $caughtSharing.HResult|Should -BeTrue
+   }finally{ $sharingHandle.Dispose() }
+
+   $lockPath=Join-Path $probeDir 'lock.txt'
+   [IO.File]::WriteAllText($lockPath,'0123456789')
+   $lockHandleA=New-Object IO.FileStream($lockPath,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::ReadWrite)
+   $lockHandleB=New-Object IO.FileStream($lockPath,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::ReadWrite)
+   try{
+    $lockHandleA.Lock(0,5)
+    $caughtLock=$null
+    try{ $lockHandleB.Lock(0,5) }
+    catch{ $caughtLock=if($_.Exception.InnerException){$_.Exception.InnerException}else{$_.Exception} }
+    $caughtLock|Should -Not -BeNullOrEmpty -Because 'a genuine ERROR_LOCK_VIOLATION must actually occur for this to be real empirical evidence'
+    $caughtLock|Should -BeOfType [IO.IOException]
+    $caughtLock.HResult|Should -Be $script:ERROR_LOCK_VIOLATION_HRESULT
+    Test-TPMTransientIOHResultV1 -HResult $caughtLock.HResult|Should -BeTrue
+    $lockHandleA.Unlock(0,5)
+   }finally{ $lockHandleA.Dispose();$lockHandleB.Dispose() }
+
+   # Adjacent, genuinely-thrown nontransient exceptions must remain nontransient.
+   $caughtMissing=$null
+   try{ [void](New-Object IO.FileStream((Join-Path $probeDir 'does-not-exist.txt'),[IO.FileMode]::Open)) }
+   catch{ $caughtMissing=if($_.Exception.InnerException){$_.Exception.InnerException}else{$_.Exception} }
+   $caughtMissing|Should -Not -BeNullOrEmpty
+   Test-TPMTransientIOHResultV1 -HResult $caughtMissing.HResult|Should -BeFalse
   }
  }
 
@@ -486,11 +544,18 @@ Describe 'owned-directory reparse-chain and component-boundary containment' {
   }
  }
 
- It 'accepts an ordinary nested non-reparse directory (control case)' {
+ It 'accepts an ordinary nested non-reparse target several levels below a distinct trusted root' {
   $root=Join-Path $TestDrive 'control-root'
+  [void](New-Item -ItemType Directory -Path $root -Force)
   $nested=Join-Path $root 'a\b\c'
   [void](New-Item -ItemType Directory -Path $nested -Force)
-  { Assert-TPMOwnedDirectoryV1 -Path $nested }|Should -Not -Throw
+  { Assert-TPMOwnedDirectoryV1 -Root $root -Path $nested }|Should -Not -Throw
+ }
+ It 'accepts Root and Target being identical and both ordinary (root==target control case, handled deliberately)' {
+  $root=Join-Path $TestDrive 'degenerate-root'
+  [void](New-Item -ItemType Directory -Path $root -Force)
+  $result=Assert-TPMOwnedDirectoryV1 -Root $root -Path $root
+  $result|Should -Be ([IO.Path]::GetFullPath($root).TrimEnd([IO.Path]::DirectorySeparatorChar))
  }
  It 'rejects a target outside the owned root via a sibling-prefix collision (segment-boundary proof)' {
   $root=Join-Path $TestDrive 'Foo\Root'
@@ -499,37 +564,58 @@ Describe 'owned-directory reparse-chain and component-boundary containment' {
   [void](New-Item -ItemType Directory -Path $sibling -Force)
   Test-TPMPathIsContainedV1 -Root $root -Target $sibling|Should -BeFalse -Because 'a raw string-prefix check would wrongly accept Root-Evil as being under Root'
   { Assert-TPMNoReparseInChainV1 -Root $root -Target $sibling }|Should -Throw '*PROCESS_PATH_OUTSIDE_OWNED_ROOT*'
+  { Assert-TPMOwnedDirectoryV1 -Root $root -Path $sibling }|Should -Throw '*PROCESS_PATH_OUTSIDE_OWNED_ROOT*' -Because 'the real public entry point must reject the sibling too, not only the low-level chain helper'
  }
- It 'rejects a `..`-escape attempt from the target path' {
+ It 'rejects a `..`-escape attempt from the target path, through the real entry point' {
   $root=Join-Path $TestDrive 'escape-root'
   [void](New-Item -ItemType Directory -Path $root -Force)
   $outside=Join-Path $TestDrive 'escape-root-outside'
   [void](New-Item -ItemType Directory -Path $outside -Force)
   $escaped=Join-Path $root '..\escape-root-outside'
   { Assert-TPMNoReparseInChainV1 -Root $root -Target $escaped }|Should -Throw '*PROCESS_PATH_OUTSIDE_OWNED_ROOT*'
+  { Assert-TPMOwnedDirectoryV1 -Root $root -Path $escaped }|Should -Throw '*PROCESS_PATH_OUTSIDE_OWNED_ROOT*'
  }
- It 'rejects a missing unauthorized ancestor instead of silently creating it' {
+ It 'rejects a missing unauthorized ancestor instead of silently creating it, through the real entry point' {
   $root=Join-Path $TestDrive 'missing-ancestor-root'
   [void](New-Item -ItemType Directory -Path $root -Force)
   $target=Join-Path $root 'no-such-parent\leaf'
   { Assert-TPMNoReparseInChainV1 -Root $root -Target $target -AllowMissingLeaf }|Should -Throw '*does not exist and is not the authorized creation leaf*'
+  { Assert-TPMOwnedDirectoryV1 -Root $root -Path $target -CreateIfMissing }|Should -Throw '*does not exist and is not the authorized creation leaf*' -Because 'only a single authorized leaf may be missing -- an unauthorized missing intermediate ancestor must never be silently created'
  }
  It 'the missing-authorized-leaf-creation case succeeds via -CreateIfMissing and is revalidated afterward' {
   $root=Join-Path $TestDrive 'create-leaf-parent'
   [void](New-Item -ItemType Directory -Path $root -Force)
   $leaf=Join-Path $root 'brand-new-leaf'
   Test-Path -LiteralPath $leaf|Should -BeFalse
-  $result=Assert-TPMOwnedDirectoryV1 -Path $leaf -CreateIfMissing
+  $result=Assert-TPMOwnedDirectoryV1 -Root $root -Path $leaf -CreateIfMissing
   $result|Should -Be ([IO.Path]::GetFullPath($leaf).TrimEnd([IO.Path]::DirectorySeparatorChar))
   Test-Path -LiteralPath $leaf -PathType Container|Should -BeTrue
-  { Assert-TPMOwnedDirectoryV1 -Path $leaf -CreateIfMissing }|Should -Not -Throw -Because 'a second call against the now-existing, still-valid directory must also pass'
+  { Assert-TPMOwnedDirectoryV1 -Root $root -Path $leaf -CreateIfMissing }|Should -Not -Throw -Because 'a second call against the now-existing, still-valid directory must also pass'
+ }
+ It 'New-TPMOwnedDirectoryChainV1 brings a multi-level path into existence one authorized level at a time, all reparse-checked' {
+  $root=Join-Path $TestDrive 'chain-bringup-root'
+  [void](New-Item -ItemType Directory -Path $root -Force)
+  $target=Join-Path $root 'level1\level2\level3'
+  Test-Path -LiteralPath (Join-Path $root 'level1')|Should -BeFalse
+  $result=New-TPMOwnedDirectoryChainV1 -Root $root -Path $target
+  $result|Should -Be ([IO.Path]::GetFullPath($target).TrimEnd([IO.Path]::DirectorySeparatorChar))
+  Test-Path -LiteralPath $target -PathType Container|Should -BeTrue
+  { Assert-TPMOwnedDirectoryV1 -Root $root -Path $target }|Should -Not -Throw -Because 'every intermediate level the chain helper created must itself pass reparse validation afterward'
  }
  It 'New-TPMCreateNewFileV1 uses CreateNew semantics and refuses to silently reuse/overwrite an existing file' {
-  $parent=Join-Path $TestDrive 'createnew-root'
-  [void](New-Item -ItemType Directory -Path $parent -Force)
-  $first=New-TPMCreateNewFileV1 -Parent $parent -Name 'evidence.log'
+  $root=Join-Path $TestDrive 'createnew-root'
+  [void](New-Item -ItemType Directory -Path $root -Force)
+  $first=New-TPMCreateNewFileV1 -Root $root -Parent $root -Name 'evidence.log'
   Test-Path -LiteralPath $first|Should -BeTrue
-  { New-TPMCreateNewFileV1 -Parent $parent -Name 'evidence.log' }|Should -Throw -Because 'CreateNew must fail closed rather than silently reopening/overwriting a file that already exists at this path'
+  { New-TPMCreateNewFileV1 -Root $root -Parent $root -Name 'evidence.log' }|Should -Throw -Because 'CreateNew must fail closed rather than silently reopening/overwriting a file that already exists at this path'
+ }
+ It 'rejects a drive/root-qualifier mismatch between Root and Target, where a second drive is available' {
+  $secondDrive=@(Get-PSDrive -PSProvider FileSystem|Where-Object{$_.Name.Length-eq1-and$_.Name-ne(Split-Path -Qualifier $TestDrive).TrimEnd(':')}|Select-Object -First 1)
+  if($secondDrive.Count-eq0){Set-ItResult -Skipped -Because 'no second FileSystem drive letter is available in this environment to safely test a drive mismatch';return}
+  $root=Join-Path $TestDrive 'drive-mismatch-root'
+  [void](New-Item -ItemType Directory -Path $root -Force)
+  $otherDriveTarget=($secondDrive[0].Name+':\tpm-drive-mismatch-probe')
+  { Assert-TPMOwnedDirectoryV1 -Root $root -Path $otherDriveTarget }|Should -Throw '*PROCESS_PATH_OUTSIDE_OWNED_ROOT*'
  }
 
  Context 'reparse-point rejection (requires junction/symlink creation to be permitted for this test account)' {
@@ -539,11 +625,11 @@ Describe 'owned-directory reparse-chain and component-boundary containment' {
   # junctions. Every non-reparse-creation containment test in this
   # Describe (segment-boundary, sibling-prefix, `..`-escape,
   # missing-ancestor, CreateNew-reuse) runs unconditionally above.
-  It 'rejects an owned root that is itself a reparse point' -Skip:(-not$script:junctionsSupported) {
+  It 'rejects a trusted root that is itself a reparse point, through the real entry point' -Skip:(-not$script:junctionsSupported) {
    $real=Join-Path $TestDrive 'reparse-root-real'
    $link=Join-Path $TestDrive 'reparse-root-link'
    New-TPMTestJunctionV1 -LinkPath $link -TargetPath $real
-   { Assert-TPMOwnedDirectoryV1 -Path $link }|Should -Throw '*reparse point rejected*'
+   { Assert-TPMOwnedDirectoryV1 -Root $link -Path $link }|Should -Throw '*reparse point rejected*'
   }
   It 'rejects an intermediate junction in the chain between root and target' -Skip:(-not$script:junctionsSupported) {
    $root=Join-Path $TestDrive 'chain-root'
@@ -554,14 +640,26 @@ Describe 'owned-directory reparse-chain and component-boundary containment' {
    $leaf=Join-Path $link 'leaf'
    [void](New-Item -ItemType Directory -Path $leaf -Force)
    { Assert-TPMNoReparseInChainV1 -Root $root -Target $leaf }|Should -Throw '*reparse point rejected in owned-path chain*'
+   { Assert-TPMOwnedDirectoryV1 -Root $root -Path $leaf }|Should -Throw '*reparse point rejected in owned-path chain*' -Because 'the real public entry point must reject an intermediate-level junction, not just the leaf'
   }
-  It 'rejects a reparse-point leaf' -Skip:(-not$script:junctionsSupported) {
+  It 'rejects a reparse-point leaf, through the real entry point' -Skip:(-not$script:junctionsSupported) {
    $root=Join-Path $TestDrive 'leaf-reparse-root'
    [void](New-Item -ItemType Directory -Path $root -Force)
    $real=Join-Path $TestDrive 'leaf-reparse-real'
    $link=Join-Path $root 'leaf-link'
    New-TPMTestJunctionV1 -LinkPath $link -TargetPath $real
    { Assert-TPMNoReparseInChainV1 -Root $root -Target $link }|Should -Throw '*reparse point rejected in owned-path chain*'
+   { Assert-TPMOwnedDirectoryV1 -Root $root -Path $link }|Should -Throw '*reparse point rejected in owned-path chain*'
+  }
+  It 'Invoke-TPMIsolatedProcessV1 rejects a junction anywhere in the LogDirectoryRoot-to-LogDirectory chain before ever spawning a process' -Skip:(-not$script:junctionsSupported) {
+   $engine=if($PSVersionTable.PSEdition-eq'Core'){(Get-Command pwsh).Source}else{(Get-Command powershell.exe).Source}
+   $logRoot=Join-Path $TestDrive 'isolated-log-root'
+   [void](New-Item -ItemType Directory -Path $logRoot -Force)
+   $real=Join-Path $TestDrive 'isolated-log-real'
+   $link=Join-Path $logRoot 'log-link'
+   New-TPMTestJunctionV1 -LinkPath $link -TargetPath $real
+   $logDirectory=Join-Path $link 'run'
+   { Invoke-TPMIsolatedProcessV1 -FilePath $engine -ArgumentList @('-NoProfile','-NonInteractive','-Command','exit 0') -WorkingDirectoryRoot $TestDrive -WorkingDirectory $TestDrive -LogDirectoryRoot $logRoot -LogDirectory $logDirectory -Identity 'junction-reject-probe' -TimeoutSeconds 20 }|Should -Throw '*reparse point rejected*' -Because 'the isolation primitive must fail closed on an intermediate junction before ever launching the child process'
   }
   It 'reparse substitution injected between validation and use is caught by TOCTOU revalidation after creation' -Skip:(-not$script:junctionsSupported) {
    # This is the one sub-case the task explicitly allows narrowing: safely
@@ -576,12 +674,31 @@ Describe 'owned-directory reparse-chain and component-boundary containment' {
    $parent=Join-Path $TestDrive 'toctou-parent'
    [void](New-Item -ItemType Directory -Path $parent -Force)
    $leaf=Join-Path $parent 'toctou-leaf'
-   $result=Assert-TPMOwnedDirectoryV1 -Path $leaf -CreateIfMissing
+   $result=Assert-TPMOwnedDirectoryV1 -Root $parent -Path $leaf -CreateIfMissing
    $result|Should -Not -BeNullOrEmpty
    Remove-Item -LiteralPath $leaf -Force -Recurse
    $real=Join-Path $TestDrive 'toctou-real'
    New-TPMTestJunctionV1 -LinkPath $leaf -TargetPath $real
-   { Assert-TPMOwnedDirectoryV1 -Path $leaf }|Should -Throw '*reparse point rejected*' -Because 'revalidation must never trust a path just because it passed validation earlier'
+   { Assert-TPMOwnedDirectoryV1 -Root $parent -Path $leaf }|Should -Throw '*reparse point rejected*' -Because 'revalidation must never trust a path just because it passed validation earlier'
+  }
+  It 'a substitution injected strictly AFTER Assert-TPMOwnedDirectoryV1 validated the parent, but BEFORE New-TPMCreateNewFileV1 opens the owned file, is caught by the second, closer-to-use revalidation point' -Skip:(-not$script:junctionsSupported) {
+   $root=Join-Path $TestDrive 'preuse-root'
+   [void](New-Item -ItemType Directory -Path $root -Force)
+   $parent=Join-Path $root 'preuse-parent'
+   $validated=Assert-TPMOwnedDirectoryV1 -Root $root -Path $parent -CreateIfMissing
+   $validated|Should -Not -BeNullOrEmpty
+   # Simulates a substitution landing strictly between an earlier,
+   # already-completed Assert-TPMOwnedDirectoryV1 validation and the
+   # later file-creation call -- distinct from the post-creation TOCTOU
+   # case above, which revalidates by re-running Assert-TPMOwnedDirectoryV1
+   # itself. This proves New-TPMCreateNewFileV1's OWN internal
+   # pre-open revalidation (the second of the two required points)
+   # independently catches a substitution that a caller who only
+   # validated once, earlier, would otherwise miss.
+   Remove-Item -LiteralPath $parent -Force -Recurse
+   $real=Join-Path $TestDrive 'preuse-real'
+   New-TPMTestJunctionV1 -LinkPath $parent -TargetPath $real
+   { New-TPMCreateNewFileV1 -Root $root -Parent $parent -Name 'evidence.log' }|Should -Throw '*reparse point rejected*' -Because 'New-TPMCreateNewFileV1 must never trust an earlier validation of Parent -- it revalidates immediately before opening the file'
   }
  }
 }

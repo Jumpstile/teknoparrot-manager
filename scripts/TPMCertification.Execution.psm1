@@ -208,46 +208,118 @@ function Assert-TPMNoReparseInChainV1 {
 }
 
 function Assert-TPMOwnedDirectoryV1 {
-    # This directory (once validated) is itself the trusted owned root
-    # that New-TPMCreateNewFileV1 creates files beneath -- so the chain
-    # walked below runs from this path's own drive/UNC root down to this
-    # exact directory, checking every existing ancestor for reparse-point
-    # substitution, not merely this directory's own leaf attributes.
+    # ADR155-0309 round 3 correction: a prior round of this function called
+    # Assert-TPMNoReparseInChainV1 with Root and Target both set to the
+    # SAME path, which meant the chain walk below (see
+    # Assert-TPMNoReparseInChainV1's own "only the last component is
+    # inspected when Root and Target are identical" behavior) only ever
+    # inspected the leaf directory's own attributes -- no ancestor above
+    # the leaf, including the caller's real trust boundary, was ever
+    # actually consulted. That defeated the entire point of ancestor-chain
+    # reparse validation: a junction planted at an INTERMEDIATE level
+    # (e.g. the harness's own "Reports" or "ProductionWork" folder) was
+    # never checked at all, only the final path component was.
     #
-    # -CreateIfMissing creates the directory when it does not yet exist --
-    # callers such as Invoke-TPMIsolatedProcessV1 own their working/log
-    # directories and are expected to bring them into existence on first
-    # use, not to fail because nothing has written to that path yet. Only
-    # the immediate leaf may be created this way: its parent must already
-    # exist and pass the chain check, matching the single-authorized-leaf
-    # rule in Assert-TPMNoReparseInChainV1. New-Item is called WITHOUT
-    # -Force so that if something else has raced in and created a
-    # (possibly reparse-point) entry at this exact path between the
-    # pre-creation check and now, creation fails closed instead of
-    # -Force's silent "already exists, do nothing" behavior. After
-    # creation, the ENTIRE chain is re-validated (TOCTOU close): creation
-    # itself is a second window in which the freshly-created path could in
-    # principle have been raced, so the pre-creation validation is never
-    # trusted to still hold post-creation.
-    param([Parameter(Mandatory=$true)][string]$Path,[switch]$CreateIfMissing)
+    # -Root is now a distinct, mandatory, CALLER-SUPPLIED trusted anchor --
+    # this function never infers or guesses one. -Root itself is validated
+    # here (must exist, be stat-able, and not itself be a reparse point)
+    # before anything else happens; -Path (the target) must equal -Root or
+    # be a proper component-boundary descendant of it (Root == Target is a
+    # deliberately supported, explicit case -- e.g. a caller's own
+    # already-established top-level working directory -- not an
+    # accidental collapse: it is exercised by a dedicated regression test
+    # precisely so this remains a deliberate choice, not a silent default).
+    # Every existing component from -Root through -Path inclusive is then
+    # walked and reparse-checked by Assert-TPMNoReparseInChainV1.
+    #
+    # -CreateIfMissing creates -Path when it does not yet exist -- but only
+    # the single immediate leaf: its parent must already be an EXISTING,
+    # already-validated component of the Root-to-Path chain (i.e. -Path
+    # must be at most one level below something that already exists).
+    # Callers that need to bring a multi-level path into existence beneath
+    # a trusted root (e.g. HarnessRoot\Reports\<stamp>) must do so one
+    # authorized level at a time -- see New-TPMOwnedDirectoryChainV1 --
+    # never by asking the filesystem to create several untracked
+    # intermediate levels in one call, which is exactly the shortcut that
+    # let an unvalidated intermediate directory come into existence under
+    # the old root==target defect. New-Item is called WITHOUT -Force so
+    # that if something else has raced in and created a (possibly
+    # reparse-point) entry at this exact path between the pre-creation
+    # check and now, creation fails closed instead of -Force's silent
+    # "already exists, do nothing" behavior.
+    #
+    # After creation, the ENTIRE Root-to-Path chain is re-validated
+    # (TOCTOU-narrowing point 1): creation itself is a window in which the
+    # freshly-created path could in principle have been raced, so the
+    # pre-creation validation is never trusted to still hold
+    # post-creation. This narrows the TOCTOU race; it does not, and cannot,
+    # eliminate it -- a substitution racing in strictly between this
+    # revalidation and the caller's own subsequent use of the path remains
+    # possible in principle. Callers that go on to create an owned file
+    # beneath the validated path (New-TPMCreateNewFileV1) get a SECOND,
+    # later revalidation immediately before that file is actually opened,
+    # which narrows the window further but likewise does not eliminate it.
+    # If a substitution IS observed at any validation point, this fails
+    # closed (throws) rather than proceeding.
+    param([Parameter(Mandatory=$true)][string]$Root,[Parameter(Mandatory=$true)][string]$Path,[switch]$CreateIfMissing)
+    $rootFull=[IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+    if(-not(Test-Path -LiteralPath $rootFull -PathType Container)){throw "PROCESS_DIRECTORY_INVALID: trusted root does not exist: $rootFull"}
+    $rootItem=Get-Item -LiteralPath $rootFull -Force
+    if(($rootItem.Attributes-band[IO.FileAttributes]::ReparsePoint)-ne0){throw "PROCESS_DIRECTORY_INVALID: reparse point rejected at trusted root: $rootFull"}
     $full=[IO.Path]::GetFullPath($Path).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
-    Assert-TPMNoReparseInChainV1 -Root $full -Target $full -AllowMissingLeaf:$CreateIfMissing
+    if(-not[IO.Path]::GetPathRoot($rootFull).Equals([IO.Path]::GetPathRoot($full),[StringComparison]::OrdinalIgnoreCase)){throw "PROCESS_PATH_OUTSIDE_OWNED_ROOT: $full is on a different drive/root than owned root $rootFull"}
+    Assert-TPMNoReparseInChainV1 -Root $rootFull -Target $full -AllowMissingLeaf:$CreateIfMissing
     if(-not(Test-Path -LiteralPath $full -PathType Container)){
         if(-not$CreateIfMissing){throw "PROCESS_DIRECTORY_INVALID: directory does not exist: $full"}
         $parent=[IO.Path]::GetDirectoryName($full)
         if([string]::IsNullOrEmpty($parent)-or-not(Test-Path -LiteralPath $parent -PathType Container)){throw "PROCESS_DIRECTORY_INVALID: parent of directory to create does not exist or is not itself validated: $full"}
         [void](New-Item -ItemType Directory -Path $full -ErrorAction Stop)
-        Assert-TPMNoReparseInChainV1 -Root $full -Target $full
+        Assert-TPMNoReparseInChainV1 -Root $rootFull -Target $full
     }
     return $full
 }
 
+function New-TPMOwnedDirectoryChainV1 {
+    # Brings a multi-level directory path into existence beneath a trusted
+    # root by validating/creating exactly one authorized level at a time
+    # through Assert-TPMOwnedDirectoryV1 -CreateIfMissing, instead of ever
+    # asking the filesystem (New-Item's own intermediate-directory
+    # creation) to bring multiple untracked levels into existence in a
+    # single call -- see Assert-TPMOwnedDirectoryV1's own comment for why
+    # that shortcut is exactly the defect this round corrects. Every
+    # intermediate level created along the way is individually
+    # reparse-checked, both before and after its own creation, by the
+    # underlying Assert-TPMOwnedDirectoryV1 call for that level. Returns
+    # the fully validated final path.
+    param([Parameter(Mandatory=$true)][string]$Root,[Parameter(Mandatory=$true)][string]$Path)
+    $rootFull=[IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+    $targetFull=[IO.Path]::GetFullPath($Path).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+    if(-not(Test-TPMPathIsContainedV1 -Root $rootFull -Target $targetFull)){throw "PROCESS_PATH_OUTSIDE_OWNED_ROOT: $targetFull is not a component-boundary descendant of owned root $rootFull"}
+    $rootParts=Get-TPMPathComponentsV1 -FullPath $rootFull
+    $targetParts=Get-TPMPathComponentsV1 -FullPath $targetFull
+    $current=Assert-TPMOwnedDirectoryV1 -Root $rootFull -Path $rootFull -CreateIfMissing
+    for($i=$rootParts.Count;$i-lt$targetParts.Count;$i++){
+        $next=Join-Path $current $targetParts[$i]
+        $current=Assert-TPMOwnedDirectoryV1 -Root $current -Path $next -CreateIfMissing
+    }
+    return $current
+}
+
 function New-TPMCreateNewFileV1 {
-    param([Parameter(Mandatory=$true)][string]$Parent,[Parameter(Mandatory=$true)][string]$Name)
-    $root=Assert-TPMOwnedDirectoryV1 -Path $Parent
-    $path=[IO.Path]::GetFullPath((Join-Path $root $Name))
-    if(-not(Test-TPMPathIsContainedV1 -Root $root -Target $path)){throw 'PROCESS_PATH_OUTSIDE_OWNED_ROOT'}
-    Assert-TPMNoReparseInChainV1 -Root $root -Target $path -AllowMissingLeaf
+    # -Root is the caller's real trusted anchor for -Parent (which may
+    # equal -Root or be a validated descendant of it) -- NOT -Parent
+    # collapsed onto itself. -Parent is revalidated against -Root here
+    # (TOCTOU-narrowing point), and the eventual file path is revalidated
+    # against -Root a SECOND time immediately before the underlying
+    # FileStream is opened (point 2 of 2; see Assert-TPMOwnedDirectoryV1's
+    # comment) -- as close to actual use as this code can get. Neither
+    # revalidation eliminates the residual race; each narrows it.
+    param([Parameter(Mandatory=$true)][string]$Root,[Parameter(Mandatory=$true)][string]$Parent,[Parameter(Mandatory=$true)][string]$Name)
+    $rootFull=Assert-TPMOwnedDirectoryV1 -Root $Root -Path $Root
+    $parentFull=Assert-TPMOwnedDirectoryV1 -Root $rootFull -Path $Parent
+    $path=[IO.Path]::GetFullPath((Join-Path $parentFull $Name))
+    if(-not(Test-TPMPathIsContainedV1 -Root $rootFull -Target $path)){throw 'PROCESS_PATH_OUTSIDE_OWNED_ROOT'}
+    Assert-TPMNoReparseInChainV1 -Root $rootFull -Target $path -AllowMissingLeaf
     $stream=New-Object IO.FileStream($path,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::Read)
     $stream.Dispose()
     return $path
@@ -257,7 +329,9 @@ function Invoke-TPMIsolatedProcessV1 {
     param(
         [Parameter(Mandatory=$true)][string]$FilePath,
         [Parameter(Mandatory=$true)][string[]]$ArgumentList,
+        [Parameter(Mandatory=$true)][string]$WorkingDirectoryRoot,
         [Parameter(Mandatory=$true)][string]$WorkingDirectory,
+        [Parameter(Mandatory=$true)][string]$LogDirectoryRoot,
         [Parameter(Mandatory=$true)][string]$LogDirectory,
         [Parameter(Mandatory=$true)][ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Identity,
         [int]$TimeoutSeconds=3600,
@@ -265,13 +339,18 @@ function Invoke-TPMIsolatedProcessV1 {
         [switch]$RelayOperatorStatus,
         [hashtable]$Environment
     )
-    $workingRoot=Assert-TPMOwnedDirectoryV1 -Path $WorkingDirectory -CreateIfMissing
-    $logRoot=Assert-TPMOwnedDirectoryV1 -Path $LogDirectory -CreateIfMissing
+    # WorkingDirectoryRoot/LogDirectoryRoot are the caller's own real,
+    # independently-justified trust anchors -- this function never invents
+    # one (e.g. by taking Split-Path on its own WorkingDirectory/
+    # LogDirectory parameters). See ARCHITECTURE.md for what each
+    # production caller supplies and why.
+    $workingRoot=Assert-TPMOwnedDirectoryV1 -Root $WorkingDirectoryRoot -Path $WorkingDirectory -CreateIfMissing
+    $logRoot=Assert-TPMOwnedDirectoryV1 -Root $LogDirectoryRoot -Path $LogDirectory -CreateIfMissing
     $nonce=[guid]::NewGuid().ToString('N')
     $prefix=$nonce+'-'+$Identity
-    $stdinPath=New-TPMCreateNewFileV1 -Parent $logRoot -Name ($prefix+'-stdin.empty')
-    $stdoutPath=New-TPMCreateNewFileV1 -Parent $logRoot -Name ($prefix+'-stdout.log')
-    $stderrPath=New-TPMCreateNewFileV1 -Parent $logRoot -Name ($prefix+'-stderr.log')
+    $stdinPath=New-TPMCreateNewFileV1 -Root $LogDirectoryRoot -Parent $logRoot -Name ($prefix+'-stdin.empty')
+    $stdoutPath=New-TPMCreateNewFileV1 -Root $LogDirectoryRoot -Parent $logRoot -Name ($prefix+'-stdout.log')
+    $stderrPath=New-TPMCreateNewFileV1 -Root $LogDirectoryRoot -Parent $logRoot -Name ($prefix+'-stderr.log')
     $metadataPath=Join-Path $logRoot ($prefix+'-process.json')
     $quoted=@($ArgumentList|ForEach-Object{ConvertTo-TPMWin32ArgumentV1 -Value $_})
     $started=[DateTime]::UtcNow
@@ -345,6 +424,10 @@ function Invoke-TPMIsolatedProcessV1 {
         ExitCode=$exitCode;TimedOut=$timedOut;TerminationConfirmed=$terminationConfirmed
         StandardInput=$stdinPath;StandardOutput=$stdoutPath;StandardError=$stderrPath
     }
+    # Second, later revalidation point (mirrors New-TPMCreateNewFileV1's own
+    # pre-open recheck) immediately before this owned file is actually
+    # opened -- narrows, but does not eliminate, the residual TOCTOU race.
+    Assert-TPMNoReparseInChainV1 -Root $LogDirectoryRoot -Target $metadataPath -AllowMissingLeaf
     $metadataStream=New-Object IO.FileStream($metadataPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::Read)
     try{
         $bytes=(New-Object Text.UTF8Encoding $false).GetBytes(($metadata|ConvertTo-Json -Depth 5))
@@ -423,4 +506,4 @@ function Read-TPMPesterResultV1 {
         Stop-TPMPesterSchemaV1 'unexpected validation failure'
     }
 }
-Export-ModuleMember -Function ConvertTo-TPMWin32ArgumentV1,ConvertTo-TPMSafeTechnicalTextV1,Write-TPMSafeTechnicalFileV1,Invoke-TPMIsolatedProcessV1,Read-TPMPesterResultV1,Test-TPMTransientIOHResultV1,Invoke-TPMSafeFileRetryV1,New-TPMSanitizationExhaustedExceptionV1,Assert-TPMOwnedDirectoryV1,New-TPMCreateNewFileV1,Test-TPMPathIsContainedV1,Assert-TPMNoReparseInChainV1,Get-TPMPathComponentsV1
+Export-ModuleMember -Function ConvertTo-TPMWin32ArgumentV1,ConvertTo-TPMSafeTechnicalTextV1,Write-TPMSafeTechnicalFileV1,Invoke-TPMIsolatedProcessV1,Read-TPMPesterResultV1,Test-TPMTransientIOHResultV1,Invoke-TPMSafeFileRetryV1,New-TPMSanitizationExhaustedExceptionV1,Assert-TPMOwnedDirectoryV1,New-TPMOwnedDirectoryChainV1,New-TPMCreateNewFileV1,Test-TPMPathIsContainedV1,Assert-TPMNoReparseInChainV1,Get-TPMPathComponentsV1

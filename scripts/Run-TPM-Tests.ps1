@@ -36,7 +36,22 @@ $stamp=Get-Date -Format 'yyyy-MM-dd_HH-mm-ss'
 $reportDirectory=Join-Path $HarnessRoot "Reports\$stamp"
 $logDirectory=Join-Path $reportDirectory 'TechnicalLogs'
 $statusPath=Join-Path $reportDirectory 'OperatorStatus.txt'
-foreach($directory in @($reportDirectory,$logDirectory)){[void](New-Item -ItemType Directory -Path $directory -Force)}
+# ADR155-0309 round 3: HarnessRoot is this tool's own top-level trusted
+# boundary, but Assert-TPMOwnedDirectoryV1 requires a trusted ROOT to
+# already exist -- HarnessRoot itself may not exist yet on a first run, so
+# it cannot be its own bootstrap root. The genuinely already-existing
+# anchor one level further up is HarnessRoot's own parent directory (in
+# the default case this is the same directory containing the resolved
+# repository checkout, which must already exist for $RepoPath itself to
+# have resolved). Everything from there down through
+# TechnicalLogs is brought into existence one authorized level at a time
+# via New-TPMOwnedDirectoryChainV1, not via a raw New-Item -Force that
+# would silently create (and never reparse-check) untracked intermediate
+# levels.
+$harnessRootParent=[IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($HarnessRoot))
+if([string]::IsNullOrEmpty($harnessRootParent)){throw "PROCESS_DIRECTORY_INVALID: HarnessRoot has no resolvable parent directory to anchor trust in: $HarnessRoot"}
+[void](New-TPMOwnedDirectoryChainV1 -Root $harnessRootParent -Path $reportDirectory)
+[void](New-TPMOwnedDirectoryChainV1 -Root $reportDirectory -Path $logDirectory)
 
 if (-not $NoPwshRelaunch -and $PSVersionTable.PSEdition -ne 'Core') {
     $pwshCommand = Get-Command pwsh -ErrorAction SilentlyContinue
@@ -51,7 +66,13 @@ if (-not $NoPwshRelaunch -and $PSVersionTable.PSEdition -ne 'Core') {
         '-PesterRegressionTimeoutSeconds',[string]$PesterRegressionTimeoutSeconds
     )
     if($RunUnattendedTPM){$argsList+='-RunUnattendedTPM'}
-    $result=Invoke-TPMIsolatedProcessV1 -FilePath $pwshCommand.Source -ArgumentList $argsList -WorkingDirectory $RepoPath -LogDirectory $logDirectory -Identity 'pwsh-relaunch' -TimeoutSeconds ($PesterRegressionTimeoutSeconds+1800)
+    # WorkingDirectory's trust anchor is $RepoPath itself (the caller's
+    # own repo checkout -- no narrower, more-authoritative root than the
+    # repo root is available or meaningful here; Root == Target is the
+    # deliberately supported degenerate case, see Assert-TPMOwnedDirectoryV1).
+    # LogDirectory's trust anchor is $reportDirectory, already established
+    # above via New-TPMOwnedDirectoryChainV1.
+    $result=Invoke-TPMIsolatedProcessV1 -FilePath $pwshCommand.Source -ArgumentList $argsList -WorkingDirectoryRoot $RepoPath -WorkingDirectory $RepoPath -LogDirectoryRoot $reportDirectory -LogDirectory $logDirectory -Identity 'pwsh-relaunch' -TimeoutSeconds ($PesterRegressionTimeoutSeconds+1800)
     $safeOutput=Get-Content -LiteralPath $result.StdOutPath -Raw -ErrorAction SilentlyContinue
     if($safeOutput){Write-Host $safeOutput.TrimEnd()}
     exit [int]$result.ExitCode
@@ -121,7 +142,7 @@ $params=@(
 if($RunUnattendedTPM){$params+='-RunUnattendedTPM'}
 $harnessResult=$null
 try{
-    $harnessResult=Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList $params -WorkingDirectory $resolvedRepo -LogDirectory $logDirectory -Identity 'certification-harness' -TimeoutSeconds ($PesterRegressionTimeoutSeconds+1800) -OperatorStatusPath $statusPath -RelayOperatorStatus -Environment @{GIT_TERMINAL_PROMPT='0';NO_COLOR='1';TERM='dumb'}
+    $harnessResult=Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList $params -WorkingDirectoryRoot $resolvedRepo -WorkingDirectory $resolvedRepo -LogDirectoryRoot $reportDirectory -LogDirectory $logDirectory -Identity 'certification-harness' -TimeoutSeconds ($PesterRegressionTimeoutSeconds+1800) -OperatorStatusPath $statusPath -RelayOperatorStatus -Environment @{GIT_TERMINAL_PROMPT='0';NO_COLOR='1';TERM='dumb'}
 }catch{
     Write-Host 'FINAL STATUS: PIPELINE ABORTED'
     Write-Host ("Reason: certification process isolation failed: {0}"-f$_.Exception.Message)

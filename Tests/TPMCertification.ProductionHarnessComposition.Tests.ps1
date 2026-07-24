@@ -146,7 +146,7 @@ BeforeAll {
         # exactly this reason).
         $emptyRegistry = Join-Path $Root 'empty-dispositions.psd1'
         if (-not (Test-Path -LiteralPath $emptyRegistry)) { [IO.File]::WriteAllText($emptyRegistry, '@{ SchemaVersion = 1; Dispositions = @() }') }
-        $facts = @(New-TPMProductionFactRecordsV1 -Results $fixture.Results -RepositoryPath $repo -ReportDirectory $report -BackupDirectory $backup -HealthResult $fixture.Health -StagingParentRoot $staging -DestinationRoot $destination -WorkingDirectory $work -DispositionRegistryPath $emptyRegistry)
+        $facts = @(New-TPMProductionFactRecordsV1 -Results $fixture.Results -RepositoryPath $repo -ReportDirectory $report -BackupDirectory $backup -HealthResult $fixture.Health -StagingParentRoot $staging -DestinationRoot $destination -WorkingDirectoryRoot $Root -WorkingDirectory $work -DispositionRegistryPath $emptyRegistry)
         foreach ($fact in $facts) { [void](& $authority RecordFact $fact) }
 
         $manifest = Get-TPMEvidenceManifestV1

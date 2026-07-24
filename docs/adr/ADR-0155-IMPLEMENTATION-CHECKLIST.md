@@ -2141,3 +2141,115 @@ covered. The fail-closed correction round in this same commit added roughly
 140 more lines ahead of that same finding, so the registry entry's line was
 updated again, 244 -> 401, for the same reason -- still the same finding
 (same file/rule/extent), never a removed-and-re-added one.
+
+## ADR155-0309 round 3 -- trusted-root wiring correction -- 2026-07-24
+
+A further independent static review of PR #155 found a real defect the
+round-6 "fail-closed correction" above did not catch: `Assert-TPMOwnedDirectoryV1`
+always called `Assert-TPMNoReparseInChainV1` with `-Root $full -Target $full`
+-- the SAME path -- so the ancestor-chain walk that round only ever inspected
+the leaf directory's own attributes, never any real ancestor. This defeated
+the round-6 hardening's stated purpose (walking every existing component from
+"the declared owned root" through the target) without failing any of that
+round's own tests, because every one of those tests happened to validate a
+directory already exactly one level below an already-existing, already-
+validated parent. The specific gap -- an intermediate-level junction planted
+above a multi-level MISSING path (e.g. the harness's own `Reports` or
+`ProductionWork` folder, one level above the timestamped run directory
+actually passed to the function) -- was reachable in production (`New-Item
+-ItemType Directory` silently creates untracked intermediate levels) but was
+never exercised by any prior test.
+
+**Self-root wiring defect and correction, precisely.** The defect: Root and
+Target parameters were the same string in every call, by construction --
+`Assert-TPMOwnedDirectoryV1 -Path $full` computed `$full` once and passed it
+as both Root and Target to the chain walker, so "declared owned root" was
+never actually a caller-declared value distinct from the thing being
+validated. The correction: `Assert-TPMOwnedDirectoryV1 -Root <trustedRoot>
+-Path <target> [-CreateIfMissing]` now requires the caller to supply a
+distinct trusted root as a separate, mandatory parameter. The root is
+validated on its own (existence, stat-ability, non-reparse) before the target
+is even resolved. Root == Target remains a supported, explicitly tested case
+(a caller's own already-established top-level directory) -- the fix is not
+"Root and Target must always differ," it is "the caller must say what the
+root is, rather than the function silently manufacturing one by copying the
+target." A new `New-TPMOwnedDirectoryChainV1` helper brings a multi-level
+path into existence one authorized level at a time (each level going through
+`Assert-TPMOwnedDirectoryV1 -CreateIfMissing` against the previous,
+already-validated level as its root) instead of ever relying on `New-Item`'s
+own multi-level auto-create. `New-TPMCreateNewFileV1` gained the same
+distinct `-Root` parameter and a second revalidation point, immediately
+before the underlying `FileStream` is opened, narrowing (not eliminating) the
+TOCTOU window a single validate-then-use call leaves open.
+`Invoke-TPMIsolatedProcessV1` gained mandatory `-WorkingDirectoryRoot`/
+`-LogDirectoryRoot` parameters; every real caller was updated to supply its
+own genuinely-already-established anchor (`HarnessRoot` for the harness
+scripts' report/log/production-work trees, the repository checkout path
+itself for working directories, each caller's own already-validated
+scratch parent for `TPMCertification.ProductionFacts.psm1`'s parser probe)
+-- see ARCHITECTURE.md's "Trusted-root wiring correction (ADR155-0309 round
+3)" for the exact caller list and what each one supplies. See SECURITY.md
+for the corrected invariant statement, including the explicit acknowledgment
+that this narrows, and does not eliminate, the residual TOCTOU race.
+
+**Signed-HResult empirical verification (Item 3).** The same round's static
+review flagged that `Test-TPMTransientIOHResultV1`'s comparison of
+`Exception.HResult` (a signed `Int32`) against the hex literals `0x80070020`/
+`0x80070021` had never been empirically verified against real OS-produced
+values under both engines, and that comparing a signed HResult against an
+unsigned/wrongly-typed hex literal is a classic PowerShell footgun. Direct
+verification (both `pwsh` 7.6.4 and Windows PowerShell 5.1.26100.8875, this
+machine): `0x80070020`/`0x80070021` parse as genuine `[int32]` literals with
+values `-2147024864`/`-2147024863` under BOTH engines (PowerShell's hex-literal
+parser keeps an 8-hex-digit literal as `Int32`, using its 32-bit bit pattern
+including the sign bit, rather than promoting it to `Int64`/`UInt32` -- the
+footgun the reviewer was right to be suspicious of does not actually occur for
+an 8-digit literal on either engine tested). A genuine OS-level sharing
+violation (`[IO.FileStream]` opened twice with `FileShare.None`) and a genuine
+lock violation (`FileStream.Lock()` called twice over the same byte range)
+were reproduced directly (not synthesized via the `IOException(message,
+hresult)` constructor) and both produced `System.IO.IOException` with
+`.HResult` exactly `-2147024864` (`0x80070020`) and `-2147024863`
+(`0x80070021`) respectively, identically under both engines -- matching the
+classifier's existing literals exactly. No code change to
+`Test-TPMTransientIOHResultV1` was needed; the classification was already
+correct, now with empirical proof rather than an unverified assumption behind
+it. New tests in `Tests/TPMCertification.OperatorExperience.Tests.ps1`
+("ADR155-0309 round 3: classifies the ACTUAL, empirically-observed HResult of
+a genuine OS-level sharing violation and lock violation...") reproduce both
+real violations directly and assert the classifier, plus an off-by-one
+adjacent-value check on both sides of each transient literal.
+
+**InjectionHunter disposition-registry occurrence-count correction (Item
+4).** The disposition-registry entry for `scripts/Invoke-TPM-RealInstanceSmoke.ps1`'s
+`Add-Type -AssemblyName System.Drawing` finding read "A second, separate
+occurrence of Add-Type with the same fixed AssemblyName literal elsewhere in
+this file (see line 1169 above)." A direct grep of the source (both at commit
+`3931b5e9` and in the round-3-corrected checkout) shows THREE textually
+identical occurrences of that statement, not two. A fresh raw InjectionHunter
+scan (identical tool version 1.0.0, identical 19-file production inventory,
+exported to JSON and diffed by File+RuleName+Line+Column+Extent identity)
+against both `3931b5e9` (27 raw findings) and the round-3-corrected checkout
+(27 raw findings) confirmed: the scanner emits a finding for only TWO of the
+three source occurrences in either commit (the `Save-TPMScreenCapture`
+occurrence, immediately preceded in the same function by a separate `Add-Type
+-AssemblyName System.Windows.Forms` call, never produces its own finding);
+every other finding identity is unchanged between the two commits modulo pure
+line-number drift from this round's edits (verified: 21 of 27 identities
+unchanged at the exact same line, the remaining 6 shifted by exactly the
+lines this round added ahead of them in `scripts/TPMCertification.Execution.psm1`
+and `scripts/Invoke-TPM-RealInstanceSmoke.ps1`, same File+RuleName+Extent
+throughout); zero added, zero removed findings. No new disposition entry was
+added for the third, unflagged source occurrence -- per this registry's own
+stated purpose (dispositioning findings the scanner actually emits, not
+speculative source review), an occurrence the tool never flags gets no entry
+of its own, only a documented explanation. The existing entry's reasoning
+text was corrected to state the true count (three source occurrences, two
+flagged, the third's absence explained) instead of the false "a second,
+separate occurrence" framing.
+`Test-TPMProductionInjectionHunterV1` run directly against the corrected
+registry and current inventory reports `FindingCount=27`,
+`UnresolvedFindingCount=0`, `Dispositions.Count=27` -- zero unresolved, and
+`Assert-TPMDispositionRegistryV1`'s own stale-entry check (every registry
+entry must be consumed by a real current finding) raised no
+`DISPOSITION_REGISTRY_STALE` error, confirming zero stale entries.

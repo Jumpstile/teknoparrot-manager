@@ -123,7 +123,7 @@ Describe 'Test-TPMProductionParserProbeV1 (private, InModuleScope only)' {
   $work=Join-Path $TestDrive ('work-'+[guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $work|Out-Null
   $engine=if($PSVersionTable.PSEdition -ceq 'Core'){'Pwsh'}else{'WindowsPowerShell51'}
   $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Engine=$engine;Work=$work} {
-   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine $Engine -WorkingDirectory $Work
+   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine $Engine -WorkingDirectoryRoot $Work -WorkingDirectory $Work
   }
   $result.Executed|Should -BeTrue
   $result.ErrorCount|Should -Be 0
@@ -135,7 +135,7 @@ Describe 'Test-TPMProductionParserProbeV1 (private, InModuleScope only)' {
   $work=Join-Path $TestDrive ('work-'+[guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $work|Out-Null
   $engine=if($PSVersionTable.PSEdition -ceq 'Core'){'Pwsh'}else{'WindowsPowerShell51'}
   $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Engine=$engine;Work=$work} {
-   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine $Engine -WorkingDirectory $Work
+   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine $Engine -WorkingDirectoryRoot $Work -WorkingDirectory $Work
   }
   $result.Executed|Should -BeTrue
   $result.ErrorCount|Should -BeGreaterThan 0
@@ -149,7 +149,7 @@ Describe 'Test-TPMProductionParserProbeV1 (private, InModuleScope only)' {
   $work=Join-Path $TestDrive ('work-'+[guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $work|Out-Null
   $engine=if($PSVersionTable.PSEdition -ceq 'Core'){'Pwsh'}else{'WindowsPowerShell51'}
   $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Engine=$engine;Work=$work} {
-   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine $Engine -WorkingDirectory $Work
+   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine $Engine -WorkingDirectoryRoot $Work -WorkingDirectory $Work
   }
   $result.Executed|Should -BeTrue
   $result.ErrorCount|Should -Be 0
@@ -159,7 +159,7 @@ Describe 'Test-TPMProductionParserProbeV1 (private, InModuleScope only)' {
   $inv=@([ordered]@{RelativePath='a.ps1';FullPath=(Join-Path $TestDrive 'a.ps1')})
   $work=Join-Path $TestDrive ('work-'+[guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $work|Out-Null
   $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Work=$work} {
-   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine Pwsh -WorkingDirectory $Work
+   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine Pwsh -WorkingDirectoryRoot $Work -WorkingDirectory $Work
   }
   $result.Executed|Should -BeFalse
  }
@@ -169,7 +169,7 @@ Describe 'Test-TPMProductionParserProbeV1 (private, InModuleScope only)' {
   [IO.File]::WriteAllText((Join-Path $TestDrive 'a.ps1'),'1')
   $work=Join-Path $TestDrive ('work-'+[guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $work|Out-Null
   $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Work=$work} {
-   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine Pwsh -WorkingDirectory $Work
+   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine Pwsh -WorkingDirectoryRoot $Work -WorkingDirectory $Work
   }
   $result.Executed|Should -BeFalse
  }
@@ -179,7 +179,7 @@ Describe 'Test-TPMProductionParserProbeV1 (private, InModuleScope only)' {
   [IO.File]::WriteAllText((Join-Path $TestDrive 'a.ps1'),'1')
   $work=Join-Path $TestDrive ('work-'+[guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $work|Out-Null
   $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Work=$work} {
-   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine Pwsh -WorkingDirectory $Work
+   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine Pwsh -WorkingDirectoryRoot $Work -WorkingDirectory $Work
   }
   $result.Executed|Should -BeFalse
  }
@@ -194,7 +194,7 @@ Describe 'Test-TPMProductionParserProbeV1 (private, InModuleScope only)' {
   [IO.File]::WriteAllText((Join-Path $TestDrive 'a.ps1'),'1')
   $work=Join-Path $TestDrive ('work-'+[guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $work|Out-Null
   $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Work=$work} {
-   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine Pwsh -WorkingDirectory $Work
+   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine Pwsh -WorkingDirectoryRoot $Work -WorkingDirectory $Work
   }
   $result.Executed|Should -BeFalse
  }
@@ -211,7 +211,7 @@ Describe 'Test-TPMProductionParserProbeV1 (private, InModuleScope only)' {
   [IO.File]::WriteAllText((Join-Path $TestDrive 'a.ps1'),'1')
   $work=Join-Path $TestDrive ('work-'+[guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $work|Out-Null
   $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Work=$work} {
-   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine Pwsh -WorkingDirectory $Work
+   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine Pwsh -WorkingDirectoryRoot $Work -WorkingDirectory $Work
   }
   $result.Executed|Should -BeFalse
  }
@@ -227,7 +227,7 @@ Describe 'Test-TPMProductionParserProbeV1 (private, InModuleScope only)' {
   [IO.File]::WriteAllText((Join-Path $TestDrive 'a.ps1'),'1')
   $work=Join-Path $TestDrive ('work-'+[guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $work|Out-Null
   $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Work=$work} {
-   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine Pwsh -WorkingDirectory $Work
+   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine Pwsh -WorkingDirectoryRoot $Work -WorkingDirectory $Work
   }
   $result.Executed|Should -BeFalse
  }
@@ -243,7 +243,7 @@ Describe 'Test-TPMProductionParserProbeV1 (private, InModuleScope only)' {
   [IO.File]::WriteAllText((Join-Path $TestDrive 'a.ps1'),'1')
   $work=Join-Path $TestDrive ('work-'+[guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $work|Out-Null
   $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Work=$work} {
-   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine Pwsh -WorkingDirectory $Work
+   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine Pwsh -WorkingDirectoryRoot $Work -WorkingDirectory $Work
   }
   $result.Executed|Should -BeFalse
  }
@@ -260,7 +260,7 @@ Describe 'Test-TPMProductionParserProbeV1 (private, InModuleScope only)' {
   [IO.File]::WriteAllText((Join-Path $TestDrive 'a.ps1'),'1')
   $work=Join-Path $TestDrive ('work-'+[guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $work|Out-Null
   $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Work=$work} {
-   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine Pwsh -WorkingDirectory $Work
+   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine Pwsh -WorkingDirectoryRoot $Work -WorkingDirectory $Work
   }
   $result.Executed|Should -BeFalse
  }
@@ -277,7 +277,7 @@ Describe 'Test-TPMProductionParserProbeV1 (private, InModuleScope only)' {
   [IO.File]::WriteAllText((Join-Path $TestDrive 'a.ps1'),'1')
   $work=Join-Path $TestDrive ('work-'+[guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $work|Out-Null
   $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Work=$work} {
-   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine Pwsh -WorkingDirectory $Work
+   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine Pwsh -WorkingDirectoryRoot $Work -WorkingDirectory $Work
   }
   $result.Executed|Should -BeFalse
  }
@@ -295,7 +295,7 @@ Describe 'Test-TPMProductionParserProbeV1 (private, InModuleScope only)' {
   [IO.File]::WriteAllText((Join-Path $TestDrive 'first.ps1'),'1');[IO.File]::WriteAllText((Join-Path $TestDrive 'second.ps1'),'1')
   $work=Join-Path $TestDrive ('work-'+[guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $work|Out-Null
   $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Work=$work} {
-   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine Pwsh -WorkingDirectory $Work
+   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine Pwsh -WorkingDirectoryRoot $Work -WorkingDirectory $Work
   }
   $result.Executed|Should -BeFalse
  }
@@ -306,7 +306,7 @@ Describe 'Test-TPMProductionParserProbeV1 (private, InModuleScope only)' {
   $work=Join-Path $TestDrive ('work-'+[guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $work|Out-Null
   $engine=if($PSVersionTable.PSEdition -ceq 'Core'){'Pwsh'}else{'WindowsPowerShell51'}
   $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Engine=$engine;Work=$work} {
-   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine $Engine -WorkingDirectory $Work
+   Test-TPMProductionParserProbeV1 -Inventory $Inv -Engine $Engine -WorkingDirectoryRoot $Work -WorkingDirectory $Work
   }
   $result.Executed|Should -BeTrue
   $result.ErrorCount|Should -BeGreaterThan 0
@@ -322,7 +322,7 @@ Describe 'Invoke-TPMExternalProcessWithTimeoutV1 termination confirmation (priva
   $exe=(Get-Command pwsh -ErrorAction SilentlyContinue)
   if(-not $exe){ Set-ItResult -Skipped -Because 'pwsh not available'; return }
   $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{ExeSource=$exe.Source;ArgList=$argumentList;Work=$work} {
-   Invoke-TPMExternalProcessWithTimeoutV1 -FilePath $ExeSource -ArgumentList $ArgList -TimeoutSeconds 1 -WorkingDirectory $Work
+   Invoke-TPMExternalProcessWithTimeoutV1 -FilePath $ExeSource -ArgumentList $ArgList -TimeoutSeconds 1 -WorkingDirectoryRoot $Work -WorkingDirectory $Work
   }
   $result.TimedOut|Should -BeTrue
   if(-not $result.TerminationConfirmed){
@@ -737,7 +737,7 @@ Describe 'New-TPMProductionFactRecordsV1' {
   $realSettingsPath=Join-Path $repoRoot 'PSScriptAnalyzerSettings.psd1'
 
   $fixture.Health.Checks+=,[pscustomobject]@{Name='Optional informational check';Passed=$true}
-  $facts=@(New-TPMProductionFactRecordsV1 -Results $fixture.Results -RepositoryPath $repo -ReportDirectory $report -BackupDirectory $backup -HealthResult $fixture.Health -StagingParentRoot $staging -DestinationRoot $destination -WorkingDirectory $work -DispositionRegistryPath $emptyRegistry -PSScriptAnalyzerSettingsPath $realSettingsPath)
+  $facts=@(New-TPMProductionFactRecordsV1 -Results $fixture.Results -RepositoryPath $repo -ReportDirectory $report -BackupDirectory $backup -HealthResult $fixture.Health -StagingParentRoot $staging -DestinationRoot $destination -WorkingDirectoryRoot $root -WorkingDirectory $work -DispositionRegistryPath $emptyRegistry -PSScriptAnalyzerSettingsPath $realSettingsPath)
 
   $facts.Count|Should -Be 11
   @($facts.Identifier)|Should -Be @('Repository','Pester','Static Analysis','Real Install Health','Backups','Smoke File Safety','Artifacts','pcsx2x6 crosshair path (issue #79)','Behavioral Certification (Virtual Beta Tester)','Unattended TPM root binding','Unattended TPM config restoration')
@@ -771,7 +771,7 @@ Describe 'New-TPMProductionFactRecordsV1' {
   $settings=Join-Path $repoRoot 'PSScriptAnalyzerSettings.psd1'
   $common=@{
    Results=$fixture.Results;RepositoryPath=$repo;ReportDirectory=$report;BackupDirectory=$backup
-   StagingParentRoot=$staging;DestinationRoot=$destination;WorkingDirectory=$work
+   StagingParentRoot=$staging;DestinationRoot=$destination;WorkingDirectoryRoot=$root;WorkingDirectory=$work
    DispositionRegistryPath=$emptyRegistry;PSScriptAnalyzerSettingsPath=$settings
   }
   $required=@(
@@ -819,7 +819,7 @@ Describe 'New-TPMProductionFactRecordsV1' {
   $fixture=New-LegacyResultsFixture $repo $report $backup
   $fixture.Health.Checks=@($fixture.Health.Checks|Where-Object Name -ne 'UserProfiles folder exists')
   $caught=$null
-  try { New-TPMProductionFactRecordsV1 -Results $fixture.Results -RepositoryPath $repo -ReportDirectory $report -BackupDirectory $backup -HealthResult $fixture.Health -StagingParentRoot (Join-Path $root 'staging') -DestinationRoot (Join-Path $root 'destination') -WorkingDirectory (Join-Path $root 'work') } catch { $caught=$_ }
+  try { New-TPMProductionFactRecordsV1 -Results $fixture.Results -RepositoryPath $repo -ReportDirectory $report -BackupDirectory $backup -HealthResult $fixture.Health -StagingParentRoot (Join-Path $root 'staging') -DestinationRoot (Join-Path $root 'destination') -WorkingDirectoryRoot $root -WorkingDirectory (Join-Path $root 'work') } catch { $caught=$_ }
   $caught.Exception.Message|Should -Be "PRODUCTION_HEALTH_RESULT_SCHEMA_INVALID: required health check 'UserProfiles folder exists' is missing"
  }
 
@@ -833,7 +833,7 @@ Describe 'New-TPMProductionFactRecordsV1' {
    $work=Join-Path $root 'work';$staging=Join-Path $root 'staging';$destination=Join-Path $root 'destination'
    $emptyRegistry=Join-Path $root 'empty-dispositions.psd1'
    [IO.File]::WriteAllText($emptyRegistry,'@{ SchemaVersion = 1; Dispositions = @() }')
-   $facts=@(New-TPMProductionFactRecordsV1 -Results $fixture.Results -RepositoryPath $repo -ReportDirectory $report -BackupDirectory $backup -HealthResult $null -HealthLoadError 'explicit load failure' -StagingParentRoot $staging -DestinationRoot $destination -WorkingDirectory $work -DispositionRegistryPath $emptyRegistry -PSScriptAnalyzerSettingsPath (Join-Path $repoRoot 'PSScriptAnalyzerSettings.psd1'))
+   $facts=@(New-TPMProductionFactRecordsV1 -Results $fixture.Results -RepositoryPath $repo -ReportDirectory $report -BackupDirectory $backup -HealthResult $null -HealthLoadError 'explicit load failure' -StagingParentRoot $staging -DestinationRoot $destination -WorkingDirectoryRoot $root -WorkingDirectory $work -DispositionRegistryPath $emptyRegistry -PSScriptAnalyzerSettingsPath (Join-Path $repoRoot 'PSScriptAnalyzerSettings.psd1'))
    $health=($facts|Where-Object Identifier -eq 'Real Install Health').Data
    $health.LoadState|Should -Be $state
    $health.LoadError|Should -Be 'explicit load failure'

@@ -1282,7 +1282,10 @@ Summary:
   *count* -- never argument content. Its working/log directories are resolved
   to a full path, verified non-reparse-point, and (via
   `Assert-TPMOwnedDirectoryV1 -CreateIfMissing`) created on first use if they
-  do not already exist.
+  do not already exist. As of the round 3 correction below, the caller must
+  supply a distinct `-WorkingDirectoryRoot`/`-LogDirectoryRoot` trust anchor
+  for each -- see "Trusted-root wiring correction" for what each real caller
+  supplies and why.
 - **`Read-TPMPesterResultV1`** treats the JSON result `Invoke-TPM-PesterChild.ps1`
   writes as a closed contract: exact top-level and `Categories` field sets,
   pinned `SchemaVersion`, every numeric field constrained to a true bounded
@@ -1383,7 +1386,7 @@ Now:
   the leaf with plain `New-Item` (no `-Force`, so a raced/attacker-planted
   entry at that path fails the creation instead of being silently reused),
   and then **revalidates the entire chain again** before returning --
-  closing the TOCTOU window between the pre-creation check and the
+  narrowing the TOCTOU window between the pre-creation check and the
   directory actually coming into existence. The pre-creation validation is
   never trusted to still hold post-creation.
 - `New-TPMCreateNewFileV1` still uses `FileMode.CreateNew` (never
@@ -1394,6 +1397,108 @@ Now:
 - This closes the specific reparse-redirection and sibling-prefix races
   identified in this round's review -- it is not a claim that every possible
   filesystem race anywhere in the certification pipeline is eliminated.
+
+**Trusted-root wiring correction (ADR155-0309 round 3).** An independent
+static reviewer found that the round-2 version of `Assert-TPMOwnedDirectoryV1`
+above, while it did walk the full chain from "root" to "target" for reparse
+points, was always invoked internally with Root and Target set to the SAME
+path (`Assert-TPMNoReparseInChainV1 -Root $full -Target $full`). Because
+`Assert-TPMNoReparseInChainV1`'s chain walk only inspects components at or
+below the point where Root and Target parts start to differ, a Root==Target
+call inspects *only the leaf* -- functionally identical to the pre-round-2
+leaf-only check the round-2 work was written to fix. An intermediate-level
+junction (e.g. planted at the harness's own `Reports` or `ProductionWork`
+folder, one level above the timestamped run directory actually passed in)
+was never inspected at all; `New-Item -ItemType Directory` was then relied
+on to silently create that unvalidated intermediate level as part of
+creating the deeper leaf. This defeated the round-2 hardening's actual
+purpose without failing any of round 2's own tests, because every one of
+those tests happened to validate a directory that was already exactly one
+level below an already-existing, already-validated parent -- the specific
+gap (an intermediate level ABOVE a multi-level missing path) was never
+exercised.
+
+The fix makes the trusted root a distinct, explicit, CALLER-SUPPLIED
+parameter that is never inferred, and never silently collapsed onto the
+target just because the target happens to already exist as a directory:
+
+- `Assert-TPMOwnedDirectoryV1 -Root <trustedRoot> -Path <target>
+  [-CreateIfMissing]` -- `-Root` is validated on its own (must exist, be
+  stat-able, and not itself be a reparse point) before anything else
+  happens. `-Path` must equal `-Root` or be a component-boundary descendant
+  of it; Root==Target is a deliberately supported, explicitly tested case
+  (e.g. a caller's own already-established top-level directory), not an
+  accidental default. A drive/path-root-qualifier mismatch between `-Root`
+  and `-Path` (e.g. root on `C:`, target resolving to `D:`) is rejected
+  before any filesystem access.
+- `-CreateIfMissing` still creates only the single immediate leaf -- its
+  parent must already be an existing, already-validated component of the
+  chain. Bringing a *multi-level* path into existence beneath a trusted
+  root (e.g. `HarnessRoot\Reports\<stamp>`, two levels below `HarnessRoot`)
+  now goes through `New-TPMOwnedDirectoryChainV1 -Root <trustedRoot> -Path
+  <target>`, which creates/validates one authorized level at a time via
+  repeated `Assert-TPMOwnedDirectoryV1 -CreateIfMissing` calls -- never by
+  asking the filesystem to create several untracked intermediate levels in
+  one call, which is exactly the shortcut the round-3 defect exploited.
+- `New-TPMCreateNewFileV1 -Root <trustedRoot> -Parent <parent> -Name <name>`
+  now takes the same distinct trusted-root parameter, revalidates `-Parent`
+  against it, and then revalidates the full chain a SECOND time immediately
+  before the underlying `FileStream` is actually opened -- a second,
+  closer-to-use TOCTOU-narrowing point, distinct from the post-creation
+  revalidation `Assert-TPMOwnedDirectoryV1` already performs.
+  `Invoke-TPMIsolatedProcessV1`'s own directly-created metadata file
+  (`<prefix>-process.json`, which does not go through
+  `New-TPMCreateNewFileV1`) gets the same pre-open revalidation call
+  inline, for the same reason.
+- **Residual race, stated plainly:** narrowing a TOCTOU window is not
+  eliminating it. A substitution that lands strictly between the final
+  pre-use revalidation and the actual open/create call remains possible in
+  principle on this OS; this code fails closed (throws) if it is ever
+  observed at any validation point, but no claim is made, in code comments
+  or here, that the race is eliminated -- only narrowed at each additional
+  validation point.
+
+**`Invoke-TPMIsolatedProcessV1`** now takes `-WorkingDirectoryRoot` and
+`-LogDirectoryRoot` as separate mandatory parameters alongside
+`-WorkingDirectory`/`-LogDirectory`. Every real caller was updated to supply
+its own genuinely-already-established trust anchor, never a convenient but
+unvalidated parent:
+
+- `scripts/Run-TPM-Tests.ps1` -- `HarnessRoot` (the tool's own top-level,
+  operator-configured output boundary) is the root for `$reportDirectory`
+  and `$logDirectory` (both brought into existence via
+  `New-TPMOwnedDirectoryChainV1 -Root $HarnessRoot`, replacing the previous
+  raw `New-Item -ItemType Directory -Force` loop over both paths at once).
+  `$RepoPath`/`$resolvedRepo` is its own root for the working-directory
+  parameter (Root==Target: the repository checkout itself has no
+  narrower, more-authoritative ancestor available to this tool).
+- `scripts/Invoke-TPM-RealInstanceSmoke.ps1` -- same pattern: `$reportDir`,
+  `$backupDir`, and `$productionWorkingDirectory` are all established via
+  `New-TPMOwnedDirectoryChainV1 -Root $HarnessRoot` near the top of the
+  script (replacing the previous raw `New-Item -Force -Path $reportDir,
+  $backupDir`). All three `Invoke-TPMIsolatedProcessV1` call sites (Pester
+  child, unattended-TPM relaunch, adaptive-menu renderer) use `$reportDir`
+  as `-LogDirectoryRoot` (their `-LogDirectory` is always
+  `$reportDir\TechnicalLogs`, one level below) and `$RepoPath` as
+  `-WorkingDirectoryRoot` (Root==Target).
+- `scripts/TPMCertification.ProductionFacts.psm1` -- `New-TPMProductionFactRecordsV1`
+  gained a new mandatory `-WorkingDirectoryRoot` parameter, threaded through
+  `Test-TPMProductionParserProbeV1` and `Invoke-TPMExternalProcessWithTimeoutV1`
+  down to `Invoke-TPMIsolatedProcessV1` (used as both the working- and
+  log-directory root, since the parser probe's working directory and log
+  directory are deliberately the same directory). The real harness caller
+  supplies its own already-established `$productionWorkingDirectory`
+  (`HarnessRoot\ProductionWork\<stamp>`, itself brought into existence via
+  `New-TPMOwnedDirectoryChainV1` before this call) as its own root
+  (Root==Target: once established by the caller, it is already validated).
+
+No caller in this codebase was found that lacked a clear, already-justified
+trust-root authority to supply -- every call site's root is traceable to
+either `HarnessRoot` (this tool's own top-level output boundary) or the
+caller's own already-resolved repository checkout path. Test callers
+(`Tests/*.ps1`) anchor their roots in their own `$TestDrive` (Pester's
+per-test isolated temp directory) or another `New-Item`-created directory
+under it -- never a shared or real filesystem location.
 
 ## Absent-tree snapshot diffing (Get-TreeHash / Compare-TreeSnapshot, issue #172)
 

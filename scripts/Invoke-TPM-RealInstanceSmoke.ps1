@@ -72,7 +72,25 @@ if ([string]::IsNullOrWhiteSpace($HarnessRoot)) {
 $stamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
 $reportDir = if ([string]::IsNullOrWhiteSpace($ReportDirectory)) { Join-Path $HarnessRoot "Reports\$stamp" } else { [IO.Path]::GetFullPath($ReportDirectory) }
 $backupDir = Join-Path $HarnessRoot "Backups\$stamp"
-New-Item -ItemType Directory -Force -Path $reportDir, $backupDir | Out-Null
+# ADR155-0309 round 3: HarnessRoot is this harness's own top-level trusted
+# boundary, but Assert-TPMOwnedDirectoryV1 requires a trusted ROOT to
+# already exist -- HarnessRoot itself may not exist yet on a first run, so
+# it cannot be its own bootstrap root. The genuinely already-existing
+# anchor one level further up is HarnessRoot's own parent directory (in
+# the default case, the same directory containing the resolved repository
+# checkout). $reportDir/$backupDir are brought into existence one
+# authorized, reparse-checked level at a time via
+# New-TPMOwnedDirectoryChainV1 (see scripts/TPMCertification.Execution.psm1),
+# never via a raw New-Item -Force that would silently create untracked
+# intermediate levels ("Reports"/"Backups") without ever reparse-checking
+# them -- the exact gap the prior round's root==target collapse left open.
+# A caller-supplied -ReportDirectory that does not actually resolve under
+# HarnessRoot's parent is rejected here (PROCESS_PATH_OUTSIDE_OWNED_ROOT)
+# rather than silently trusted.
+$harnessRootParent = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($HarnessRoot))
+if ([string]::IsNullOrEmpty($harnessRootParent)) { throw "PROCESS_DIRECTORY_INVALID: HarnessRoot has no resolvable parent directory to anchor trust in: $HarnessRoot" }
+[void](New-TPMOwnedDirectoryChainV1 -Root $harnessRootParent -Path $reportDir)
+[void](New-TPMOwnedDirectoryChainV1 -Root $harnessRootParent -Path $backupDir)
 
 # Issue #151: certification evidence screenshots. Beneath $reportDir, not a
 # separate top-level folder -- keeps every artifact for one certification
@@ -94,6 +112,14 @@ $screenshotDir = Join-Path $reportDir "Screenshots"
 # builder (also removed; see the problem-class sweep below).
 $productionStagingParentRoot = Join-Path $HarnessRoot 'ProductionStaging'
 $productionWorkingDirectory = Join-Path $HarnessRoot "ProductionWork\$stamp"
+# ADR155-0309 round 3: establish $productionWorkingDirectory (two levels
+# below HarnessRoot: "ProductionWork", then the run-specific $stamp) one
+# authorized level at a time, same discipline as $reportDir/$backupDir
+# above. Once established here it is itself a validated, already-existing
+# path, so it is passed as its own trusted root (Root == Target, the
+# deliberately supported degenerate case) to the parser-probe isolation
+# calls deeper inside TPMCertification.ProductionFacts.psm1.
+[void](New-TPMOwnedDirectoryChainV1 -Root $HarnessRoot -Path $productionWorkingDirectory)
 
 function Copy-IfExists {
     param([string]$Path, [string]$DestName)
@@ -1826,7 +1852,7 @@ try {
     $pesterProcess = Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList @(
         '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$pesterChild,
         '-RepositoryPath',$RepoPath,'-ResultPath',$pesterResultPath,'-NUnitPath',$pesterNUnitPath
-    ) -WorkingDirectory $RepoPath -LogDirectory $technicalLogDirectory -Identity 'pester' -TimeoutSeconds $PesterRegressionTimeoutSeconds -Environment @{NO_COLOR='1';TERM='dumb';GIT_TERMINAL_PROMPT='0'}
+    ) -WorkingDirectoryRoot $RepoPath -WorkingDirectory $RepoPath -LogDirectoryRoot $reportDir -LogDirectory $technicalLogDirectory -Identity 'pester' -TimeoutSeconds $PesterRegressionTimeoutSeconds -Environment @{NO_COLOR='1';TERM='dumb';GIT_TERMINAL_PROMPT='0'}
     if ($pesterProcess.TimedOut) { throw "Pester regression suite timed out after $PesterRegressionTimeoutSeconds seconds." }
     $pesterContract = Read-TPMPesterResultV1 -Path $pesterResultPath
     if (($pesterProcess.ExitCode -eq 0) -ne ($pesterContract.Failed -eq 0 -and $pesterContract.FailedContainers -eq 0)) {
@@ -2026,7 +2052,7 @@ try {
         # tests, not just its individual pure-function pieces.
         $tpmConfigPath = Join-Path $RepoPath 'TeknoParrot-Manager.config.json'
         $binding = Invoke-TPMUnattendedRootBinding -ConfigPath $tpmConfigPath -TeknoParrotRoot $TeknoParrotRoot -LogPath $tpmLog -InvokeUnattended {
-            $unattended=Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$scriptPath,'-Unattended') -WorkingDirectory $RepoPath -LogDirectory (Join-Path $reportDir 'TechnicalLogs') -Identity 'unattended-tpm' -Environment @{NO_COLOR='1';TERM='dumb';GIT_TERMINAL_PROMPT='0'}
+            $unattended=Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$scriptPath,'-Unattended') -WorkingDirectoryRoot $RepoPath -WorkingDirectory $RepoPath -LogDirectoryRoot $reportDir -LogDirectory (Join-Path $reportDir 'TechnicalLogs') -Identity 'unattended-tpm' -Environment @{NO_COLOR='1';TERM='dumb';GIT_TERMINAL_PROMPT='0'}
             Copy-Item -LiteralPath $unattended.StdOutPath -Destination $tpmLog -Force
             if($unattended.ExitCode-ne0){throw "Unattended TPM exited with code $($unattended.ExitCode). See $($unattended.StdErrPath)"}
         }
@@ -2106,7 +2132,7 @@ try {
             $tierHeight = $tier.Height
             [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name $tier.Name -EvidenceType 'DeterministicRender' -CaptureAction {
                 param($p)
-                $render=Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList @('-NoProfile','-NonInteractive','-File',$debugMenuScript,'-Width',[string]$tierWidth,'-Height',[string]$tierHeight,'-Render') -WorkingDirectory $RepoPath -LogDirectory (Join-Path $reportDir 'TechnicalLogs') -Identity ("menu-{0}"-f$tier.Name) -Environment @{NO_COLOR='1';TERM='dumb'}
+                $render=Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList @('-NoProfile','-NonInteractive','-File',$debugMenuScript,'-Width',[string]$tierWidth,'-Height',[string]$tierHeight,'-Render') -WorkingDirectoryRoot $RepoPath -WorkingDirectory $RepoPath -LogDirectoryRoot $reportDir -LogDirectory (Join-Path $reportDir 'TechnicalLogs') -Identity ("menu-{0}"-f$tier.Name) -Environment @{NO_COLOR='1';TERM='dumb'}
                 if($render.ExitCode-ne0){throw "Menu renderer exited with code $($render.ExitCode)."}
                 $renderedLines = @(Get-Content -LiteralPath $render.StdOutPath)
                 if ($renderedLines.Count -eq 0) { throw "Debug-TPM-MenuLayout.ps1 -Width $tierWidth -Height $tierHeight -Render produced no output" }
@@ -2279,7 +2305,7 @@ finally {
         # production authority (above), then record the eleven production
         # facts (below) -- New-TPMProductionFactRecordsV1 is Checkpoint B1's
         # dedicated fact adapter; it never imports or calls Shadow.psm1.
-        $productionFacts = @(New-TPMProductionFactRecordsV1 -Results $results -RepositoryPath $RepoPath -ReportDirectory $reportDir -BackupDirectory $backupDir -HealthResult $healthResult -HealthLoadError $healthLoadError -UnattendedBinding $binding -StagingParentRoot $productionStagingParentRoot -DestinationRoot $productionDestinationRoot -WorkingDirectory $productionWorkingDirectory)
+        $productionFacts = @(New-TPMProductionFactRecordsV1 -Results $results -RepositoryPath $RepoPath -ReportDirectory $reportDir -BackupDirectory $backupDir -HealthResult $healthResult -HealthLoadError $healthLoadError -UnattendedBinding $binding -StagingParentRoot $productionStagingParentRoot -DestinationRoot $productionDestinationRoot -WorkingDirectoryRoot $productionWorkingDirectory -WorkingDirectory $productionWorkingDirectory)
         foreach ($fact in $productionFacts) { [void](&$productionAuthority RecordFact $fact) }
 
         # Step 2: record the nine evidence records in their required order

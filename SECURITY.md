@@ -254,24 +254,44 @@ failed open now fail closed:
   look like it succeeded when it did not. The unsanitized evidence file is
   never deleted or overwritten on failure, and no unsanitized content is
   ever written to the operator console, including in this failure path.
-- **Every existing component of an owned directory's path, from the
-  declared root through the target, is checked individually for the
-  `ReparsePoint` attribute** (`Assert-TPMNoReparseInChainV1`) -- not just
-  the final leaf's own attributes, since a reparse point on any ancestor
-  can silently redirect the effective location. Containment is a
-  component-boundary comparison, not a string-prefix check, so a
-  sibling directory that merely shares a text prefix (e.g. `C:\Owned-Evil`
-  against `C:\Owned`) is never treated as contained. Directory creation
-  (`Assert-TPMOwnedDirectoryV1 -CreateIfMissing`) uses plain `New-Item`
-  (never `-Force`, which would silently no-op on an existing, possibly
-  attacker-planted, entry) and revalidates the entire chain again after
-  creation, closing the TOCTOU window between the pre-creation check and
-  the directory actually coming into existence. File creation
-  (`New-TPMCreateNewFileV1`) continues to use `FileMode.CreateNew` so it
-  fails closed rather than silently reusing or overwriting an existing
-  file. This closes the specific reparse-redirection and sibling-prefix
-  races identified in review -- it is not a claim that every possible
-  filesystem race in the pipeline is eliminated.
+- **Every existing component of an owned directory's path, from a
+  CALLER-SUPPLIED trusted root through the target, is checked individually
+  for the `ReparsePoint` attribute** (`Assert-TPMNoReparseInChainV1`) --
+  not just the final leaf's own attributes, since a reparse point on any
+  ancestor can silently redirect the effective location. The trusted root
+  itself is never inferred or guessed: `Assert-TPMOwnedDirectoryV1 -Root
+  <trustedRoot> -Path <target>` takes it as a distinct, mandatory
+  parameter, validates the root on its own (must exist, be stat-able, and
+  not itself be a reparse point) before anything else happens, and rejects
+  a drive/path-root-qualifier mismatch between root and target. Root and
+  target being identical is a deliberately supported case (e.g. a caller's
+  own already-established top-level directory), not an accidental default
+  -- see ARCHITECTURE.md's "Trusted-root wiring correction (ADR155-0309
+  round 3)" for the earlier defect this replaced, where the root was
+  always silently collapsed onto the target, so only the leaf was ever
+  actually inspected. Containment is a component-boundary comparison, not
+  a string-prefix check, so a sibling directory that merely shares a text
+  prefix (e.g. `C:\Owned-Evil` against `C:\Owned`) is never treated as
+  contained. Directory creation (`Assert-TPMOwnedDirectoryV1
+  -CreateIfMissing`) creates only a single authorized missing leaf (a
+  multi-level bring-up goes through `New-TPMOwnedDirectoryChainV1`, one
+  authorized level at a time), uses plain `New-Item` (never `-Force`,
+  which would silently no-op on an existing, possibly attacker-planted,
+  entry), and revalidates the entire chain again after creation, narrowing
+  the TOCTOU window between the pre-creation check and the directory
+  actually coming into existence. File creation (`New-TPMCreateNewFileV1
+  -Root <trustedRoot> -Parent <parent> -Name <name>`) continues to use
+  `FileMode.CreateNew` so it fails closed rather than silently reusing or
+  overwriting an existing file, and revalidates the full chain a SECOND
+  time immediately before the underlying file handle is actually opened --
+  a second, closer-to-use narrowing point, distinct from the post-creation
+  revalidation. **This narrows, but does not eliminate, the residual
+  TOCTOU race** -- a substitution landing strictly between the final
+  pre-use revalidation and the actual open/create call remains possible in
+  principle on this OS; the code fails closed (throws) if a substitution
+  is ever observed at any validation point, but no claim is made anywhere
+  in this codebase that the race is eliminated, nor that every possible
+  filesystem race in the certification pipeline is eliminated in general.
 
 See `docs/adr/ADR-0155-IMPLEMENTATION-CHECKLIST.md` and
 `Tests/TPMCertification.OperatorExperience.Tests.ps1` ("log sanitization

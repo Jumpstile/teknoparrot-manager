@@ -197,6 +197,7 @@ function Invoke-TPMExternalProcessWithTimeoutV1 {
         [Parameter(Mandatory=$true)][string]$FilePath,
         [Parameter(Mandatory=$true)][string[]]$ArgumentList,
         [Parameter(Mandatory=$true)][int]$TimeoutSeconds,
+        [Parameter(Mandatory=$true)][string]$WorkingDirectoryRoot,
         [Parameter(Mandatory=$true)][string]$WorkingDirectory
     )
     # Deliberately no pre-existence check on $WorkingDirectory here --
@@ -210,8 +211,18 @@ function Invoke-TPMExternalProcessWithTimeoutV1 {
     # first use (as the production harness's own working directory is) --
     # this function's existing try/catch below already fails closed on any
     # genuine validation error the shared primitive throws.
+    #
+    # $WorkingDirectoryRoot is the caller's own already-validated scratch
+    # parent (ADR155-0309 round 3) -- this function has no authority of its
+    # own to invent a trust anchor, so it is threaded straight through from
+    # New-TPMProductionFactRecordsV1's own -WorkingDirectoryRoot parameter,
+    # which the real harness supplies as its already-established
+    # ProductionWork\<stamp> directory (see
+    # scripts/Invoke-TPM-RealInstanceSmoke.ps1). Used as both the working-
+    # and log-directory root because this probe's working directory and log
+    # directory are, deliberately, the same directory.
     try{
-        $invocation=Invoke-TPMIsolatedProcessV1 -FilePath $FilePath -ArgumentList $ArgumentList -TimeoutSeconds $TimeoutSeconds -WorkingDirectory $WorkingDirectory -LogDirectory $WorkingDirectory -Identity 'parser-probe'
+        $invocation=Invoke-TPMIsolatedProcessV1 -FilePath $FilePath -ArgumentList $ArgumentList -TimeoutSeconds $TimeoutSeconds -WorkingDirectoryRoot $WorkingDirectoryRoot -WorkingDirectory $WorkingDirectory -LogDirectoryRoot $WorkingDirectoryRoot -LogDirectory $WorkingDirectory -Identity 'parser-probe'
         $stdout=if(Test-Path -LiteralPath $invocation.StdOutPath){Get-Content -LiteralPath $invocation.StdOutPath -Raw -ErrorAction SilentlyContinue}else{$null}
         $stderr=if(Test-Path -LiteralPath $invocation.StdErrPath){Get-Content -LiteralPath $invocation.StdErrPath -Raw -ErrorAction SilentlyContinue}else{$null}
         return [ordered]@{TimedOut=$invocation.TimedOut;TerminationConfirmed=$invocation.TerminationConfirmed;ExitCode=$invocation.ExitCode;StdOut=$stdout;StdErr=$stderr;StdOutPath=$invocation.StdOutPath;StdErrPath=$invocation.StdErrPath;StdInPath=$invocation.StandardInputPath;MetadataPath=$invocation.MetadataPath}
@@ -223,6 +234,7 @@ function Test-TPMProductionParserProbeV1 {
     param(
         [Parameter(Mandatory=$true)]$Inventory,
         [Parameter(Mandatory=$true)][ValidateSet('WindowsPowerShell51','Pwsh')][string]$Engine,
+        [Parameter(Mandatory=$true)][string]$WorkingDirectoryRoot,
         [Parameter(Mandatory=$true)][string]$WorkingDirectory,
         [int]$TimeoutSeconds=60
     )
@@ -248,7 +260,7 @@ function Test-TPMProductionParserProbeV1 {
     foreach($full in $fullPaths){
         $resultPath=Join-Path $WorkingDirectory ('parser-result-'+[guid]::NewGuid().ToString('N')+'.json')
         $argumentList=@('-NoProfile','-NonInteractive','-File',$probeScript,'-OutputPath',$resultPath,'-Path',$full)
-        $invocation=Invoke-TPMExternalProcessWithTimeoutV1 -FilePath $exe.Source -ArgumentList $argumentList -TimeoutSeconds $TimeoutSeconds -WorkingDirectory $WorkingDirectory
+        $invocation=Invoke-TPMExternalProcessWithTimeoutV1 -FilePath $exe.Source -ArgumentList $argumentList -TimeoutSeconds $TimeoutSeconds -WorkingDirectoryRoot $WorkingDirectoryRoot -WorkingDirectory $WorkingDirectory
         if($invocation.TimedOut){return $notExecuted}
         if($null-eq$invocation.ExitCode-or$invocation.ExitCode-ne0){return $notExecuted}
         if(-not(Test-Path -LiteralPath $resultPath -PathType Leaf)){return $notExecuted}
@@ -762,6 +774,7 @@ function New-TPMProductionFactRecordsV1 {
         $UnattendedBinding,
         [Parameter(Mandatory=$true)][string]$StagingParentRoot,
         [Parameter(Mandatory=$true)][string]$DestinationRoot,
+        [Parameter(Mandatory=$true)][string]$WorkingDirectoryRoot,
         [Parameter(Mandatory=$true)][string]$WorkingDirectory,
         [string]$DispositionRegistryPath,
         [string]$PSScriptAnalyzerSettingsPath
@@ -851,8 +864,8 @@ function New-TPMProductionFactRecordsV1 {
     if([string]::IsNullOrWhiteSpace($DispositionRegistryPath)){$DispositionRegistryPath=Join-Path $PSScriptRoot 'InjectionHunterDispositions.psd1'}
     if([string]::IsNullOrWhiteSpace($PSScriptAnalyzerSettingsPath)){$PSScriptAnalyzerSettingsPath=Join-Path $RepositoryPath 'PSScriptAnalyzerSettings.psd1'}
 
-    $parserWin=Test-TPMProductionParserProbeV1 -Inventory $inventory -Engine 'WindowsPowerShell51' -WorkingDirectory $WorkingDirectory
-    $parserPwsh=Test-TPMProductionParserProbeV1 -Inventory $inventory -Engine 'Pwsh' -WorkingDirectory $WorkingDirectory
+    $parserWin=Test-TPMProductionParserProbeV1 -Inventory $inventory -Engine 'WindowsPowerShell51' -WorkingDirectoryRoot $WorkingDirectoryRoot -WorkingDirectory $WorkingDirectory
+    $parserPwsh=Test-TPMProductionParserProbeV1 -Inventory $inventory -Engine 'Pwsh' -WorkingDirectoryRoot $WorkingDirectoryRoot -WorkingDirectory $WorkingDirectory
     $encoding=Test-TPMProductionEncodingV1 -Inventory $inventory
     $psAnalyzer=Test-TPMProductionPSScriptAnalyzerV1 -Inventory $inventory -SettingsPath $PSScriptAnalyzerSettingsPath
     $injectionHunter=Test-TPMProductionInjectionHunterV1 -Inventory $inventory -DispositionRegistryPath $DispositionRegistryPath

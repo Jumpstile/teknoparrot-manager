@@ -2782,7 +2782,7 @@ $ReleaseCandidateLabel = "Synthetic"
                 $invocation=Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList @(
                     '-NoProfile','-NonInteractive','-File',(Join-Path $repo 'scripts\Invoke-TPM-RealInstanceSmoke.ps1'),
                     '-RepoPath',$repo,'-TeknoParrotRoot',$install,'-HarnessRoot',$harnessRoot
-                ) -WorkingDirectory $repo -LogDirectory $logRoot -Identity 'early-abort-probe' -TimeoutSeconds $TimeoutSeconds
+                ) -WorkingDirectoryRoot $repo -WorkingDirectory $repo -LogDirectoryRoot $logRoot -LogDirectory $logRoot -Identity 'early-abort-probe' -TimeoutSeconds $TimeoutSeconds
             }finally{
                 $env:TPM_TEST_COMPOSITION_MARKER=$savedCompositionMarker
                 $env:TPM_TEST_PESTER_INVOKED_MARKER=$savedPesterMarker
