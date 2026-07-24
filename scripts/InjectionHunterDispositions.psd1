@@ -208,7 +208,7 @@
         @{
             File        = 'scripts/Invoke-TPM-RealInstanceSmoke.ps1'
             RuleName    = 'InjectionRisk.StaticPropertyInjection'
-            Line        = 654
+            Line        = 664
             Extent      = '$candidate.$name'
             Disposition = 'FalsePositive'
             Reasoning   = '$name is drawn only from the fixed, hardcoded $fields array a few lines above (literal property-name candidates such as "PassedCount"/"FailedCount"), never from external or attacker-controlled input. No untrusted value reaches the dynamic property name. (ADR155-0309 round 3: a syntactically identical second occurrence, $summary.Duration = [string]$candidate.$name a few lines further down in the same function, over the fixed "Duration"/"Time" name set, does NOT trigger a raw InjectionRisk.StaticPropertyInjection finding from this scanner/rule version in either checkout compared this round -- confirmed empirically, not assumed. That occurrence is equally safe (same fixed-literal-only $name source) but is deliberately NOT given a disposition entry here, since this registry only records dispositions for findings the scanner actually emits; see ADR-0155-IMPLEMENTATION-CHECKLIST.md for the raw-evidence trail.)'
@@ -216,7 +216,7 @@
         @{
             File        = 'scripts/Invoke-TPM-RealInstanceSmoke.ps1'
             RuleName    = 'InjectionRisk.AddType'
-            Line        = 1185
+            Line        = 1195
             Extent      = 'Add-Type -AssemblyName System.Drawing'
             Disposition = 'FalsePositive'
             Reasoning   = 'AssemblyName is a fixed string literal. No attacker-controlled input reaches Add-Type.'
@@ -224,7 +224,7 @@
         @{
             File        = 'scripts/Invoke-TPM-RealInstanceSmoke.ps1'
             RuleName    = 'InjectionRisk.AddType'
-            Line        = 1248
+            Line        = 1258
             Extent      = "Add-Type -Language CSharp -TypeDefinition `$tpmWindowInteropSource -ErrorAction Stop"
             Disposition = 'FalsePositive'
             Reasoning   = '$tpmWindowInteropSource is a fixed here-string literal defined a few lines above this call (a hardcoded Win32 interop P/Invoke declaration), not built from any variable or external input. No attacker-controlled source reaches Add-Type -TypeDefinition.'
@@ -232,7 +232,7 @@
         @{
             File        = 'scripts/Invoke-TPM-RealInstanceSmoke.ps1'
             RuleName    = 'InjectionRisk.AddType'
-            Line        = 1276
+            Line        = 1286
             Extent      = 'Add-Type -AssemblyName System.Windows.Forms'
             Disposition = 'FalsePositive'
             Reasoning   = 'AssemblyName is a fixed string literal. No attacker-controlled input reaches Add-Type.'
@@ -240,7 +240,7 @@
         @{
             File        = 'scripts/Invoke-TPM-RealInstanceSmoke.ps1'
             RuleName    = 'InjectionRisk.AddType'
-            Line        = 1314
+            Line        = 1324
             Extent      = 'Add-Type -AssemblyName System.Drawing'
             Disposition = 'FalsePositive'
             Reasoning   = 'ADR155-0309 round 3 correction: this reasoning previously claimed this was "a second, separate occurrence... see line 1169 [now 1185] above" -- that count was wrong. The source actually contains THREE textually-identical "Add-Type -AssemblyName System.Drawing" statements in this file (in Test-TPMPngStructure/PNG validation, in Save-TPMScreenCapture, and in Save-TPMRenderedTextCapture), confirmed by direct grep of the current source, not the two the old reasoning implied. Only TWO of the three trigger a raw InjectionRisk.AddType finding from this scanner/rule version (confirmed empirically against both the pre-round-3 commit and the round-3-corrected checkout: the Save-TPMScreenCapture occurrence, immediately preceded by an Add-Type -AssemblyName System.Windows.Forms call in the same function, does not produce its own separate finding in either scan). This entry disposes the finding actually observed at this line; the third, unflagged source occurrence is equally safe (same fixed-literal AssemblyName) but deliberately has no disposition entry of its own, since this registry only records dispositions for findings the scanner actually emits -- see ADR-0155-IMPLEMENTATION-CHECKLIST.md for the raw-evidence trail this correction is based on. No attacker-controlled input reaches Add-Type at any of the three source occurrences.'

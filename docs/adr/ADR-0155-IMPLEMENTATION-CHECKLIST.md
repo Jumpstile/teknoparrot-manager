@@ -2253,3 +2253,109 @@ registry and current inventory reports `FindingCount=27`,
 `Assert-TPMDispositionRegistryV1`'s own stale-entry check (every registry
 entry must be consumed by a real current finding) raised no
 `DISPOSITION_REGISTRY_STALE` error, confirming zero stale entries.
+
+## Phase 3 ADR155-0309 Checkpoint B1 -- round 4 line-identity correction -- 2026-07-24
+
+Pure line-accuracy audit of `scripts/InjectionHunterDispositions.psd1`,
+prompted by the possibility that commits landed after round 3's own
+correction (`0b216e1`, `9b01f13`, `f6fe0fa`, `32145d8`, and this branch's
+own `cf14a80`/`3931b5e`/`1f0a03f`/`a812352` -- none of which touched the
+disposition registry itself) shifted line numbers in
+`scripts/Invoke-TPM-RealInstanceSmoke.ps1` out from under round 3's
+line-accurate entries again. No production PowerShell behavior changed this
+round; the registry is a `.psd1` data file, not executable logic.
+
+**Method.** A fresh raw InjectionHunter scan (tool version 1.0.0, the same
+19-file production inventory `Get-TPMProductionPowerShellInventoryV1`
+enumerates, the same `Invoke-ScriptAnalyzer -Path <file> -CustomRulePath
+<InjectionHunter.psd1>` invocation `Test-TPMProductionInjectionHunterV1`
+itself uses) was captured to structured JSON (File, RuleName, Extent,
+Line, EndLine, StartColumn, EndColumn) and diffed against the registry by
+File+RuleName+Extent match key, pairing same-key occurrences in ascending
+Line order on both sides. 27 raw findings, 27 registry entries, one-to-one
+key coverage with no missing and no stale keys and no per-key count
+mismatch -- the registry's content/reasoning was already correct; only 5 of
+27 `Line` values had drifted:
+
+| File | RuleName | Extent | Old Line | New Line |
+|---|---|---|---|---|
+| scripts/Invoke-TPM-RealInstanceSmoke.ps1 | InjectionRisk.StaticPropertyInjection | `$candidate.$name` | 654 | 664 |
+| scripts/Invoke-TPM-RealInstanceSmoke.ps1 | InjectionRisk.AddType | `Add-Type -AssemblyName System.Drawing` (1st, Test-TPMPngStructure) | 1185 | 1195 |
+| scripts/Invoke-TPM-RealInstanceSmoke.ps1 | InjectionRisk.AddType | `Add-Type -Language CSharp -TypeDefinition $tpmWindowInteropSource -ErrorAction Stop` | 1248 | 1258 |
+| scripts/Invoke-TPM-RealInstanceSmoke.ps1 | InjectionRisk.AddType | `Add-Type -AssemblyName System.Windows.Forms` (Save-TPMScreenCapture) | 1276 | 1286 |
+| scripts/Invoke-TPM-RealInstanceSmoke.ps1 | InjectionRisk.AddType | `Add-Type -AssemblyName System.Drawing` (2nd, Save-TPMRenderedTextCapture) | 1314 | 1324 |
+
+All five are a uniform +10 within `scripts/Invoke-TPM-RealInstanceSmoke.ps1`
+(consistent with 10 lines having been added earlier in that file since
+round 3), but each was independently verified against its own paired raw
+finding rather than applied as a blanket offset. No line in any other
+file (`TeknoParrot-Manager.ps1`, `tools/Invoke-TpmAutoUpdate.ps1`,
+`tools/TpmAutoUpdate.Core.psm1`, `scripts/Debug-TPM-MenuLayout.ps1`,
+`scripts/TPMCertification.Execution.psm1`) had drifted; in particular
+`scripts/TPMCertification.Execution.psm1`'s `$result.$name` entry (round 3
+significantly modified this file) was re-verified still exactly correct at
+line 484 with no side-effect drift from round 3's own edits.
+
+**Round 3's occurrence-count claims re-verified, still true.** Direct grep
+of current source confirms: `scripts/Invoke-TPM-RealInstanceSmoke.ps1`
+still contains exactly THREE `Add-Type -AssemblyName System.Drawing`
+statements (Test-TPMPngStructure/PNG validation at line 1195,
+Save-TPMScreenCapture at line 1287, Save-TPMRenderedTextCapture at line
+1324); the scanner still emits findings for only the first and third (1195,
+1324) -- the Save-TPMScreenCapture occurrence at 1287, immediately preceded
+by its own `Add-Type -AssemblyName System.Windows.Forms` call at 1286, still
+does not produce its own finding. Same file still contains exactly TWO
+`$candidate.$name`-shaped dynamic member-access occurrences (line 664, over
+the fixed per-field name set; line 671, `$candidate.$name` selecting from
+the fixed `Duration`/`Time` name set) and the scanner still emits a finding
+for only the first (664). No new disposition entries were added for either
+unflagged occurrence, per this registry's stated purpose.
+
+**New audit finding, not requiring a registry change.** This round's source
+sweep also located a THIRD, previously-undocumented `Add-Type -AssemblyName
+System.Windows.Forms` occurrence in `TeknoParrot-Manager.ps1` at line 13598
+(the Action-Items-summary save-dialog path), in addition to the two already
+known (line 417, disposed; the `Invoke-TPM-RealInstanceSmoke.ps1` one at
+1286, disposed separately). The raw scan does not emit a finding for line
+13598 -- confirmed by direct grep-and-scan cross-check, not assumed -- so no
+disposition entry was added for it (same "tool never flagged it, no entry"
+rule as the System.Drawing/`$candidate.$name` cases above). Noted here for
+the record; the existing line-417 entry's reasoning makes no occurrence-count
+claim, so it did not need correction.
+
+**Verification.** `Test-TPMProductionInjectionHunterV1` invoked directly
+(not simulated) against the corrected registry and the live 19-file
+inventory, under both pwsh 7.6.4 and Windows PowerShell 5.1, reports
+identically: `Executed=$true`, `FindingCount=27`,
+`UnresolvedFindingCount=0`, `Dispositions.Count=27`, every disposition
+`FalsePositive`, no `DISPOSITION_REGISTRY_STALE` exception.
+
+Full `.\Tests` suite: pwsh 7.6.4 reports 1191/1191 passed (0 failed, 0
+skipped). Windows PowerShell 5.1 reports 1183 passed, 6 failed, 2 skipped
+(1191 total) -- reconciled directly against the unmodified
+`a8123520344ed8c2ef0e9c9a2cbf21235abc2958` baseline itself (via `git stash`
+of this round's two changed files, a full PS5.1 suite run against the bare
+baseline commit, then `git stash pop`): the baseline run reports the
+identical 1183/6/2 split, the same 6 failing test names (the 5 pre-existing
+"Virtual Beta Tester: registered-but-moved recovery via Repair-GamePaths
+(issue #88 A3)" failures plus one genuinely flaky, environment-dependent
+"Screenshot privacy disclosure... Save-TPMScreenCapture returns a
+CaptureScope" failure -- reproduced in isolation, failing identically under
+both pwsh and PS5.1 with a `Win32Exception: The handle is invalid` from
+`Graphics.CopyFromScreen`, and confirmed nondeterministic: it does not fail
+inside the full pwsh suite run despite failing every time it was run in
+isolation, indicating a console/display-handle timing dependency rather than
+anything code- or disposition-registry-related) and the same 2 skips
+(reparse-point creation permission cases). No pass/fail/skip outcome moved
+in either direction as a result of this round's changes -- exactly as
+expected, since no production PowerShell behavior was touched.
+PSScriptAnalyzer with `PSScriptAnalyzerSettings.psd1` against
+`TeknoParrot-Manager.ps1`, `scripts/`, and `tools/` reports zero findings
+(unaffected, as expected -- no `.ps1`/`.psm1` production file touched; a
+recursive sweep including `Tests/` surfaces one pre-existing
+`PSUseSupportsShouldProcess` finding in
+`Tests/TpmAutoUpdate.DestructivePath.Tests.ps1`, outside this round's
+authorized file list and outside the standard non-recursive production
+gate). Zero non-ASCII bytes and zero parse errors on
+`scripts/InjectionHunterDispositions.psd1` and this checklist file, under
+both engines. `git diff --check` clean.
