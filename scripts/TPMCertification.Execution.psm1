@@ -39,49 +39,206 @@ function ConvertTo-TPMSafeTechnicalTextV1 {
     return $builder.ToString()
 }
 
-function Write-TPMSafeTechnicalFileV1 {
+function Test-TPMTransientIOHResultV1 {
     # Windows can briefly hold the redirected-output file handle open after
     # Start-Process's own .HasExited/.ExitCode already report the child as
     # exited (confirmed by direct reproduction: reading a just-exited
     # child's redirected stdout log immediately afterward intermittently
-    # threw "being used by another process"). This is a transient handle-
-    # release delay, not a real error condition -- retry briefly with a
-    # bounded backoff. If the file is still locked once the budget is
-    # exhausted, leave it unsanitized rather than losing the only captured
-    # diagnostic evidence to a thrown exception; sanitization is a
-    # best-effort readability step, not a safety invariant the caller
-    # should be aborted over.
+    # threw "being used by another process"). That specific race is the
+    # ONLY thing the retry loop in Invoke-TPMSafeFileRetryV1 is meant to
+    # tolerate. The two Win32 errors that race produces are
+    # ERROR_SHARING_VIOLATION (32) and ERROR_LOCK_VIOLATION (33), which the
+    # CLR surfaces as an IOException whose HResult is the Win32 code packed
+    # into an HRESULT: 0x80070000 | code, i.e. 0x80070020 / 0x80070021.
+    # Exception.HResult is a plain Int32 property on every System.Exception
+    # in both Windows PowerShell 5.1 (.NET Framework) and pwsh 7+ (.NET) --
+    # using it (rather than a Win32Exception/NativeErrorCode wrapper that
+    # only exists on one engine) keeps this classification identical under
+    # both. Every other IOException subtype/HResult (DirectoryNotFound,
+    # PathTooLong, disk-full, etc. all derive from IOException too) is
+    # deliberately NOT in this list -- those are not transient and must
+    # fail immediately, not be retried.
+    param([Parameter(Mandatory=$true)][int]$HResult)
+    $transientHResults=@(0x80070020,0x80070021)
+    return ($transientHResults-contains$HResult)
+}
+
+function New-TPMSanitizationExhaustedExceptionV1 {
+    # Deliberate, distinctly-tagged exception thrown when the bounded
+    # transient-retry budget in Invoke-TPMSafeFileRetryV1 is exhausted
+    # without success. Message carries operation identity and a safe
+    # target identity (a file path, never raw file content) plus attempt
+    # count/elapsed time/underlying exception identity for diagnosis; the
+    # original exception is preserved as InnerException so its own
+    # HResult/stack trace is never lost. System.IO.IOException is used as
+    # the carrier type (constructible identically under both engines via
+    # the (message, innerException) constructor) with the
+    # SANITIZATION_RETRY_EXHAUSTED: tag making it unambiguous which family
+    # of failure this is -- callers must never mistake it for an ordinary
+    # transient IOException that is safe to retry again.
+    param(
+        [Parameter(Mandatory=$true)][string]$Operation,
+        [Parameter(Mandatory=$true)][string]$TargetIdentity,
+        [Parameter(Mandatory=$true)][int]$AttemptCount,
+        [Parameter(Mandatory=$true)][double]$ElapsedMilliseconds,
+        [Parameter(Mandatory=$true)][Exception]$InnerException
+    )
+    $message=(
+        "SANITIZATION_RETRY_EXHAUSTED: operation={0} target={1} attempts={2} elapsedMs={3} innerType={4} innerHResult=0x{5}" -f
+        $Operation,$TargetIdentity,$AttemptCount,[long]$ElapsedMilliseconds,$InnerException.GetType().FullName,$InnerException.HResult.ToString('X8')
+    )
+    return (New-Object IO.IOException($message,$InnerException))
+}
+
+function Invoke-TPMSafeFileRetryV1 {
+    # Shared bounded-retry wrapper for the read and write halves of
+    # Write-TPMSafeTechnicalFileV1. Bound: 20 attempts at 100ms apart
+    # (~2 seconds worst case per direction) -- chosen because the handle-
+    # release race this exists for is a sub-second OS delay (see
+    # LESSONS_LEARNED.md); 2 seconds is generous headroom without letting a
+    # genuinely stuck lock hang the certification pipeline indefinitely.
+    # Only the exact transient HResults from Test-TPMTransientIOHResultV1
+    # are retried -- every other exception (UnauthorizedAccessException,
+    # a nontransient IOException such as disk-full or a bad path, or
+    # anything else) is rethrown immediately with no retry. On exhaustion
+    # this throws (never returns a value pretending success) so neither
+    # the read nor the write path can silently look like it succeeded.
+    param([Parameter(Mandatory=$true)][string]$Operation,[Parameter(Mandatory=$true)][string]$TargetIdentity,[Parameter(Mandatory=$true)][scriptblock]$Action)
+    $stopwatch=[Diagnostics.Stopwatch]::StartNew()
+    $attempt=0
+    while($true){
+        $attempt++
+        try{
+            return (& $Action)
+        }catch [IO.IOException]{
+            if(-not(Test-TPMTransientIOHResultV1 -HResult $_.Exception.HResult)){throw}
+            if($attempt-ge20){
+                throw (New-TPMSanitizationExhaustedExceptionV1 -Operation $Operation -TargetIdentity $TargetIdentity -AttemptCount $attempt -ElapsedMilliseconds $stopwatch.Elapsed.TotalMilliseconds -InnerException $_.Exception)
+            }
+            Start-Sleep -Milliseconds 100
+        }
+    }
+}
+
+function Write-TPMSafeTechnicalFileV1 {
+    # Sanitization of a just-exited child's captured stdout/stderr is a
+    # safety invariant, not a best-effort convenience: nothing downstream
+    # may assume a log file is safe to display/relay unless this function
+    # actually ran to completion. A persistent (non-transient, or
+    # transient-but-never-clearing) failure on either the read or the
+    # write half must therefore throw rather than silently leaving the
+    # caller believing sanitization happened. The underlying unsanitized
+    # file is never deleted or overwritten on failure -- it remains on
+    # disk as the preserved technical evidence for diagnosis, and this
+    # function never prints its content to the operator console under any
+    # circumstance, including this failure path.
     param([Parameter(Mandatory=$true)][string]$Path)
     if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return}
-    $raw=$null
-    for($attempt=0;$attempt-lt20;$attempt++){
-        try{$raw=[IO.File]::ReadAllText($Path);break}
-        catch [IO.IOException]{Start-Sleep -Milliseconds 100}
-    }
-    if($null-eq$raw){return}
+    $raw=Invoke-TPMSafeFileRetryV1 -Operation 'read-technical-log' -TargetIdentity $Path -Action { [IO.File]::ReadAllText($Path) }
     $safe=ConvertTo-TPMSafeTechnicalTextV1 -Text $raw
-    for($attempt=0;$attempt-lt20;$attempt++){
-        try{[IO.File]::WriteAllText($Path,$safe,(New-Object Text.UTF8Encoding $false));return}
-        catch [IO.IOException]{Start-Sleep -Milliseconds 100}
+    [void](Invoke-TPMSafeFileRetryV1 -Operation 'write-technical-log' -TargetIdentity $Path -Action { [IO.File]::WriteAllText($Path,$safe,(New-Object Text.UTF8Encoding $false)) })
+}
+
+function Get-TPMPathComponentsV1 {
+    # Splits an already-canonical, absolute path into its individual
+    # segments (drive/UNC-root first, then each directory/file name).
+    # Every containment/reparse check below compares these component
+    # arrays element-by-element rather than doing a raw string prefix
+    # comparison, which is what makes the containment check immune to
+    # sibling-prefix confusion (e.g. "C:\Owned-Evil" must never be treated
+    # as being "under" "C:\Owned").
+    param([Parameter(Mandatory=$true)][string]$FullPath)
+    $trimmed=$FullPath.TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+    return @($trimmed-split'[\\/]'|Where-Object{$_.Length-gt0})
+}
+
+function Test-TPMPathIsContainedV1 {
+    # True only when $Target's path components are $Root's components
+    # followed by zero or more additional components (component-boundary
+    # containment) -- i.e. $Target equals $Root or is a proper descendant
+    # of it. Deliberately NOT a $Target.StartsWith($Root) string check:
+    # that class of check is the one a naive implementation gets wrong on
+    # sibling directories that merely share a text prefix.
+    param([Parameter(Mandatory=$true)][string]$Root,[Parameter(Mandatory=$true)][string]$Target)
+    $rootParts=Get-TPMPathComponentsV1 -FullPath ([IO.Path]::GetFullPath($Root))
+    $targetParts=Get-TPMPathComponentsV1 -FullPath ([IO.Path]::GetFullPath($Target))
+    if($targetParts.Count-lt$rootParts.Count){return $false}
+    for($i=0;$i-lt$rootParts.Count;$i++){
+        if(-not$targetParts[$i].Equals($rootParts[$i],[StringComparison]::OrdinalIgnoreCase)){return $false}
+    }
+    return $true
+}
+
+function Assert-TPMNoReparseInChainV1 {
+    # Validates every EXISTING path component from $Root through $Target
+    # (inclusive of both ends) individually for the reparse-point
+    # attribute -- not just $Target's own final attributes. Checking only
+    # the leaf is insufficient: an attacker (or an unrelated junction
+    # already present on the host) could redirect the effective location
+    # via any intermediate ancestor even when the leaf name itself is an
+    # ordinary directory. $Target must first be a component-boundary
+    # descendant of $Root (see Test-TPMPathIsContainedV1); components
+    # above $Root are not inspected, since $Root is the caller's declared
+    # trusted anchor.
+    #
+    # -AllowMissingLeaf permits exactly the final component to not yet
+    # exist (the one authorized creation flow: Assert-TPMOwnedDirectoryV1
+    # -CreateIfMissing bringing its own owned directory into existence for
+    # the first time). Every other missing/uninspectable component in the
+    # chain -- including any missing intermediate ancestor -- is rejected;
+    # only the single authorized leaf may be absent.
+    param([Parameter(Mandatory=$true)][string]$Root,[Parameter(Mandatory=$true)][string]$Target,[switch]$AllowMissingLeaf)
+    $rootFull=[IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+    $targetFull=[IO.Path]::GetFullPath($Target).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+    if(-not(Test-TPMPathIsContainedV1 -Root $rootFull -Target $targetFull)){throw "PROCESS_PATH_OUTSIDE_OWNED_ROOT: $targetFull is not a component-boundary descendant of owned root $rootFull"}
+    $rootParts=Get-TPMPathComponentsV1 -FullPath $rootFull
+    $targetParts=Get-TPMPathComponentsV1 -FullPath $targetFull
+    $current=$targetParts[0]+[IO.Path]::DirectorySeparatorChar
+    for($i=1;$i-lt$targetParts.Count;$i++){
+        $current=Join-Path $current $targetParts[$i]
+        if($i-lt($rootParts.Count-1)){continue}
+        $isLeaf=($i-eq($targetParts.Count-1))
+        if(-not(Test-Path -LiteralPath $current)){
+            if($isLeaf-and$AllowMissingLeaf){continue}
+            throw "PROCESS_DIRECTORY_INVALID: path component does not exist and is not the authorized creation leaf: $current"
+        }
+        $componentItem=Get-Item -LiteralPath $current -Force
+        if(($componentItem.Attributes-band[IO.FileAttributes]::ReparsePoint)-ne0){throw "PROCESS_DIRECTORY_INVALID: reparse point rejected in owned-path chain: $current"}
     }
 }
 
 function Assert-TPMOwnedDirectoryV1 {
-    # -CreateIfMissing creates the directory (and any missing parents) when
-    # it does not yet exist -- callers such as Invoke-TPMIsolatedProcessV1
-    # own their working/log directories and are expected to bring them into
-    # existence on first use, not to fail because nothing has written to
-    # that path yet. The reparse-point rejection below still applies to
-    # whatever directory ends up at this exact path, whether it already
-    # existed or was just created here.
+    # This directory (once validated) is itself the trusted owned root
+    # that New-TPMCreateNewFileV1 creates files beneath -- so the chain
+    # walked below runs from this path's own drive/UNC root down to this
+    # exact directory, checking every existing ancestor for reparse-point
+    # substitution, not merely this directory's own leaf attributes.
+    #
+    # -CreateIfMissing creates the directory when it does not yet exist --
+    # callers such as Invoke-TPMIsolatedProcessV1 own their working/log
+    # directories and are expected to bring them into existence on first
+    # use, not to fail because nothing has written to that path yet. Only
+    # the immediate leaf may be created this way: its parent must already
+    # exist and pass the chain check, matching the single-authorized-leaf
+    # rule in Assert-TPMNoReparseInChainV1. New-Item is called WITHOUT
+    # -Force so that if something else has raced in and created a
+    # (possibly reparse-point) entry at this exact path between the
+    # pre-creation check and now, creation fails closed instead of
+    # -Force's silent "already exists, do nothing" behavior. After
+    # creation, the ENTIRE chain is re-validated (TOCTOU close): creation
+    # itself is a second window in which the freshly-created path could in
+    # principle have been raced, so the pre-creation validation is never
+    # trusted to still hold post-creation.
     param([Parameter(Mandatory=$true)][string]$Path,[switch]$CreateIfMissing)
     $full=[IO.Path]::GetFullPath($Path).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+    Assert-TPMNoReparseInChainV1 -Root $full -Target $full -AllowMissingLeaf:$CreateIfMissing
     if(-not(Test-Path -LiteralPath $full -PathType Container)){
         if(-not$CreateIfMissing){throw "PROCESS_DIRECTORY_INVALID: directory does not exist: $full"}
-        [void](New-Item -ItemType Directory -Path $full -Force -ErrorAction Stop)
+        $parent=[IO.Path]::GetDirectoryName($full)
+        if([string]::IsNullOrEmpty($parent)-or-not(Test-Path -LiteralPath $parent -PathType Container)){throw "PROCESS_DIRECTORY_INVALID: parent of directory to create does not exist or is not itself validated: $full"}
+        [void](New-Item -ItemType Directory -Path $full -ErrorAction Stop)
+        Assert-TPMNoReparseInChainV1 -Root $full -Target $full
     }
-    $item=Get-Item -LiteralPath $full -Force
-    if(($item.Attributes-band[IO.FileAttributes]::ReparsePoint)-ne0){throw "PROCESS_DIRECTORY_INVALID: reparse point rejected: $full"}
     return $full
 }
 
@@ -89,8 +246,8 @@ function New-TPMCreateNewFileV1 {
     param([Parameter(Mandatory=$true)][string]$Parent,[Parameter(Mandatory=$true)][string]$Name)
     $root=Assert-TPMOwnedDirectoryV1 -Path $Parent
     $path=[IO.Path]::GetFullPath((Join-Path $root $Name))
-    $prefix=$root+[IO.Path]::DirectorySeparatorChar
-    if(-not$path.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)){throw 'PROCESS_PATH_OUTSIDE_OWNED_ROOT'}
+    if(-not(Test-TPMPathIsContainedV1 -Root $root -Target $path)){throw 'PROCESS_PATH_OUTSIDE_OWNED_ROOT'}
+    Assert-TPMNoReparseInChainV1 -Root $root -Target $path -AllowMissingLeaf
     $stream=New-Object IO.FileStream($path,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::Read)
     $stream.Dispose()
     return $path
@@ -266,4 +423,4 @@ function Read-TPMPesterResultV1 {
         Stop-TPMPesterSchemaV1 'unexpected validation failure'
     }
 }
-Export-ModuleMember -Function ConvertTo-TPMWin32ArgumentV1,ConvertTo-TPMSafeTechnicalTextV1,Write-TPMSafeTechnicalFileV1,Invoke-TPMIsolatedProcessV1,Read-TPMPesterResultV1
+Export-ModuleMember -Function ConvertTo-TPMWin32ArgumentV1,ConvertTo-TPMSafeTechnicalTextV1,Write-TPMSafeTechnicalFileV1,Invoke-TPMIsolatedProcessV1,Read-TPMPesterResultV1,Test-TPMTransientIOHResultV1,Invoke-TPMSafeFileRetryV1,New-TPMSanitizationExhaustedExceptionV1,Assert-TPMOwnedDirectoryV1,New-TPMCreateNewFileV1,Test-TPMPathIsContainedV1,Assert-TPMNoReparseInChainV1,Get-TPMPathComponentsV1

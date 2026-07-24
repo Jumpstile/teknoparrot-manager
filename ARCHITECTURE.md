@@ -1310,6 +1310,91 @@ Summary:
   parameter cmdlet call all fail promptly with a nonzero exit and no hang
   under `-NonInteractive` with closed stdin, on both PowerShell engines.
 
+### Fail-closed correction round (PR #155 static review, ADR155-0309)
+
+A follow-up static review of the isolation primitive above found two places
+where the original hardening still failed open. Both are now fail-closed;
+neither claims to eliminate every possible filesystem race in general, only
+the specific ones described here.
+
+**Log-sanitization retry (`Write-TPMSafeTechnicalFileV1`).** The original
+bounded retry around reading/writing a just-exited child's captured
+stdout/stderr (see the transient-handle-release race in LESSONS_LEARNED.md)
+retried every `IOException` indiscriminately and, on exhaustion, silently
+returned as if sanitization had succeeded -- so a persistently locked file
+left unsanitized content in place with no signal to the caller.
+`Invoke-TPMSafeFileRetryV1` now classifies exceptions before retrying:
+
+- **Retried** (transient only): an `IOException` whose `.HResult` is exactly
+  `0x80070020` (`ERROR_SHARING_VIOLATION`) or `0x80070021`
+  (`ERROR_LOCK_VIOLATION`) -- the two Win32 codes the just-exited-child
+  handle-release race actually produces. `Exception.HResult` is a plain
+  `Int32` on every `System.Exception` in both Windows PowerShell 5.1 (.NET
+  Framework) and pwsh 7+ (.NET), so this classification is identical under
+  both engines without any engine-only API.
+- **Not retried** (fail immediately): every other `IOException` (disk-full,
+  a bad/missing path, `PathTooLongException`/`DirectoryNotFoundException` --
+  both of which derive from `IOException` and would otherwise have been
+  silently retried too), `UnauthorizedAccessException`, and anything else.
+- **Bound**: 20 attempts, 100ms apart (~2 seconds worst case per direction --
+  read and write are each retried independently), chosen because the
+  handle-release race this exists for is a sub-second OS delay; 2 seconds is
+  headroom without letting a genuinely stuck lock hang the pipeline.
+- **On exhaustion**: throws a deliberately tagged exception
+  (`SANITIZATION_RETRY_EXHAUSTED: operation=... target=... attempts=...
+  elapsedMs=... innerType=... innerHResult=...`, carried as a
+  `System.IO.IOException` with the original exception preserved as
+  `InnerException`) rather than returning. Both the read half and the write
+  half of `Write-TPMSafeTechnicalFileV1` throw on exhaustion -- neither can
+  silently look like it succeeded. The underlying unsanitized file is never
+  deleted or overwritten on failure (the preserved technical evidence for
+  diagnosis), and no unsanitized content is ever written to the operator
+  console, including on this failure path. Because
+  `Invoke-TPMIsolatedProcessV1` calls this function unguarded, the exception
+  propagates naturally into the harness's existing top-level `catch`, which
+  is the same "PIPELINE ABORTED (infrastructure failure)" path every other
+  isolation failure already uses -- no separate classification wiring was
+  needed.
+
+**Owned-directory reparse validation (`Assert-TPMOwnedDirectoryV1`,
+`New-TPMCreateNewFileV1`).** The original version checked only the final
+directory's own `ReparsePoint` attribute and used a `$path.StartsWith($root
++ separator)` containment check. Two gaps: (1) a reparse point anywhere in
+an *ancestor* of the owned directory -- not the directory's own leaf
+attributes -- can silently redirect the effective location, and a
+leaf-only check never saw that; (2) `-Force` on `New-Item -ItemType
+Directory` silently no-ops if something (including an attacker-planted
+reparse point) already exists at that exact path, rather than failing.
+Now:
+
+- `Assert-TPMNoReparseInChainV1` validates every *existing* path component
+  from the declared owned root through the target (inclusive of both ends),
+  individually, for the `ReparsePoint` attribute -- not just the final leaf.
+  Only the single authorized creation leaf (`-CreateIfMissing`'s target) may
+  be missing; every other missing component in the chain is rejected, not
+  silently created.
+- Containment is a component-boundary comparison
+  (`Test-TPMPathIsContainedV1`, splitting both paths into segments and
+  comparing element-by-element), not a string-prefix check -- immune to
+  sibling-prefix confusion (`C:\Owned-Evil` is never treated as being under
+  `C:\Owned`).
+- `Assert-TPMOwnedDirectoryV1 -CreateIfMissing` now requires the parent of
+  the directory being created to already exist and pass validation, creates
+  the leaf with plain `New-Item` (no `-Force`, so a raced/attacker-planted
+  entry at that path fails the creation instead of being silently reused),
+  and then **revalidates the entire chain again** before returning --
+  closing the TOCTOU window between the pre-creation check and the
+  directory actually coming into existence. The pre-creation validation is
+  never trusted to still hold post-creation.
+- `New-TPMCreateNewFileV1` still uses `FileMode.CreateNew` (never
+  `Create`/`OpenOrCreate`) so file creation itself fails closed rather than
+  silently reusing or overwriting an existing (possibly attacker-planted)
+  file, and now validates the file's own containment/reparse chain with the
+  same component-boundary/chain-walk logic instead of the old prefix check.
+- This closes the specific reparse-redirection and sibling-prefix races
+  identified in this round's review -- it is not a claim that every possible
+  filesystem race anywhere in the certification pipeline is eliminated.
+
 ## Absent-tree snapshot diffing (Get-TreeHash / Compare-TreeSnapshot, issue #172)
 
 `scripts/Invoke-TPM-RealInstanceSmoke.ps1`'s `UserProfiles`/`GameProfiles`/

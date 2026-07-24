@@ -286,3 +286,302 @@ Describe 'real prompt-attempt probes -- interactive prompts must fail promptly, 
   Test-Path -LiteralPath $r.StdErrPath|Should -BeTrue
  }
 }
+
+Describe 'log sanitization fails closed on persistent retry exhaustion' {
+ BeforeAll {
+  # Constructs a real System.IO.IOException with a specific HResult using
+  # the IOException(message, hresult) constructor -- a documented .NET
+  # BCL constructor present identically in both Windows PowerShell 5.1
+  # (.NET Framework) and pwsh 7+ (.NET), so tests can exercise the exact
+  # classification boundary (transient vs. not) without needing a real OS
+  # condition for every case. This is not a production bypass: it only
+  # ever appears inside a caller-supplied -Action scriptblock passed into
+  # the exported Invoke-TPMSafeFileRetryV1, exactly how any real caller
+  # uses that function.
+  function New-TPMTestHResultExceptionV1 {
+   param([Parameter(Mandatory=$true)][int]$HResult,[string]$Message='synthetic test exception')
+   return (New-Object IO.IOException($Message,$HResult))
+  }
+  $script:ERROR_SHARING_VIOLATION_HRESULT=0x80070020
+  $script:ERROR_LOCK_VIOLATION_HRESULT=0x80070021
+ }
+
+ Context 'transient HResult classification' {
+  It 'classifies ERROR_SHARING_VIOLATION and ERROR_LOCK_VIOLATION as transient' {
+   Test-TPMTransientIOHResultV1 -HResult $script:ERROR_SHARING_VIOLATION_HRESULT|Should -BeTrue
+   Test-TPMTransientIOHResultV1 -HResult $script:ERROR_LOCK_VIOLATION_HRESULT|Should -BeTrue
+  }
+  It 'classifies unrelated IOException-family HResults (disk full, path too long, directory not found) as nontransient' {
+   # ERROR_DISK_FULL=0x70, ERROR_FILENAME_EXCED_RANGE=0xCE, ERROR_PATH_NOT_FOUND=0x3 -- packed as HRESULTs.
+   foreach($hr in @(0x80070070,0x800700CE,0x80070003)){
+    Test-TPMTransientIOHResultV1 -HResult $hr|Should -BeFalse
+   }
+  }
+ }
+
+ Context 'Invoke-TPMSafeFileRetryV1 retry/exhaustion contract' {
+  It 'retries a transient failure that clears within the bound and returns the successful result' {
+   $script:attempts=0
+   $result=Invoke-TPMSafeFileRetryV1 -Operation 'unit-test-read' -TargetIdentity 'synthetic-target' -Action {
+    $script:attempts++
+    if($script:attempts-lt3){throw (New-TPMTestHResultExceptionV1 -HResult $script:ERROR_SHARING_VIOLATION_HRESULT)}
+    return 'ok'
+   }
+   $result|Should -Be 'ok'
+   $script:attempts|Should -Be 3
+  }
+  It 'throws the deliberate SANITIZATION_RETRY_EXHAUSTED exception after exhausting the retry bound on a persistent transient failure, never silently succeeding' {
+   $script:attempts=0
+   $caught=$null
+   try{
+    Invoke-TPMSafeFileRetryV1 -Operation 'unit-test-read' -TargetIdentity 'synthetic-target-persistent' -Action {
+     $script:attempts++
+     throw (New-TPMTestHResultExceptionV1 -HResult $script:ERROR_SHARING_VIOLATION_HRESULT)
+    }
+   }catch{$caught=$_}
+   $caught|Should -Not -BeNullOrEmpty
+   $caught.Exception|Should -BeOfType [IO.IOException]
+   $caught.Exception.Message|Should -Match '^SANITIZATION_RETRY_EXHAUSTED:'
+   $caught.Exception.Message|Should -Match 'operation=unit-test-read'
+   $caught.Exception.Message|Should -Match 'target=synthetic-target-persistent'
+   $caught.Exception.Message|Should -Match 'attempts=20'
+   $script:attempts|Should -Be 20
+  }
+  It 'preserves the original underlying exception as InnerException on exhaustion' {
+   try{
+    Invoke-TPMSafeFileRetryV1 -Operation 'unit-test-read' -TargetIdentity 'synthetic-target-inner' -Action {
+     throw (New-TPMTestHResultExceptionV1 -HResult $script:ERROR_LOCK_VIOLATION_HRESULT -Message 'lock held forever')
+    }
+   }catch{$caught=$_}
+   $caught.Exception.InnerException|Should -Not -BeNullOrEmpty
+   $caught.Exception.InnerException|Should -BeOfType [IO.IOException]
+   $caught.Exception.InnerException.HResult|Should -Be $script:ERROR_LOCK_VIOLATION_HRESULT
+   $caught.Exception.Message|Should -Match ([regex]::Escape('innerHResult=0x' + $script:ERROR_LOCK_VIOLATION_HRESULT.ToString('X8')))
+  }
+  It 'throws immediately with no retry at all for a nontransient IOException (disk full)' {
+   $script:attempts=0
+   $caught=$null
+   try{
+    Invoke-TPMSafeFileRetryV1 -Operation 'unit-test-write' -TargetIdentity 'synthetic-target-diskfull' -Action {
+     $script:attempts++
+     throw (New-TPMTestHResultExceptionV1 -HResult 0x80070070)
+    }
+   }catch{$caught=$_}
+   $script:attempts|Should -Be 1 -Because 'a nontransient IOException must never be retried'
+   $caught.Exception|Should -BeOfType [IO.IOException]
+   $caught.Exception.Message|Should -Not -Match '^SANITIZATION_RETRY_EXHAUSTED:' -Because 'immediate nontransient failures are the original exception, not the exhaustion-wrapper exception'
+  }
+  It 'throws immediately with no retry at all for UnauthorizedAccessException' {
+   $script:attempts=0
+   $caught=$null
+   try{
+    Invoke-TPMSafeFileRetryV1 -Operation 'unit-test-write' -TargetIdentity 'synthetic-target-unauthorized' -Action {
+     $script:attempts++
+     throw (New-Object UnauthorizedAccessException('access denied'))
+    }
+   }catch{$caught=$_}
+   $script:attempts|Should -Be 1 -Because 'UnauthorizedAccessException is not an IOException and must never be retried'
+   $caught.Exception|Should -BeOfType [UnauthorizedAccessException]
+  }
+  It 'keeps elapsed time bounded on full exhaustion (no runaway retry loop)' {
+   $sw=[Diagnostics.Stopwatch]::StartNew()
+   try{
+    Invoke-TPMSafeFileRetryV1 -Operation 'unit-test-read' -TargetIdentity 'synthetic-target-timing' -Action {
+     throw (New-TPMTestHResultExceptionV1 -HResult $script:ERROR_SHARING_VIOLATION_HRESULT)
+    }
+   }catch{}
+   $sw.Stop()
+   $sw.Elapsed.TotalSeconds|Should -BeLessThan 10 -Because '20 attempts at a 100ms backoff bounds this to roughly 2 seconds; 10s is a generous ceiling that still catches a runaway loop'
+  }
+ }
+
+ Context 'Write-TPMSafeTechnicalFileV1 end-to-end fail-closed behavior (genuine OS-level file locks)' {
+  It 'a genuine transient sharing violation that clears within the retry bound succeeds and sanitizes the file' {
+   $path=Join-Path $TestDrive 'clears-in-time.log'
+   [IO.File]::WriteAllText($path,"before`e[31mred`e[0m",(New-Object Text.UTF8Encoding $false))
+   $blocker=New-Object IO.FileStream($path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)
+   # A background PowerShell instance (its own runspace, via
+   # BeginInvoke/EndInvoke) releases the lock partway through the retry
+   # window. A bare .NET Task/Thread cannot run PowerShell script content
+   # (scriptblocks need an attached runspace), so [PowerShell]::Create()
+   # is the correct primitive here, not System.Threading.Tasks.Task.
+   $releasePs=[PowerShell]::Create()
+   [void]$releasePs.AddScript({param($blockerStream) Start-Sleep -Milliseconds 350; $blockerStream.Dispose()}).AddArgument($blocker)
+   $releaseHandle=$releasePs.BeginInvoke()
+   try{
+    { Write-TPMSafeTechnicalFileV1 -Path $path }|Should -Not -Throw
+   }finally{
+    [void]$releasePs.EndInvoke($releaseHandle)
+    $releasePs.Dispose()
+   }
+   (Get-Content -LiteralPath $path -Raw)|Should -Be 'beforered'
+  }
+  It 'a persistent read-blocking lock (failed read scenario) throws the deliberate exception and preserves the unsanitized evidence file untouched' {
+   $path=Join-Path $TestDrive 'persistent-read-block.log'
+   $original="before`e[31mred`e[0m"
+   [IO.File]::WriteAllText($path,$original,(New-Object Text.UTF8Encoding $false))
+   $blocker=New-Object IO.FileStream($path,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+   try{
+    { Write-TPMSafeTechnicalFileV1 -Path $path }|Should -Throw '*SANITIZATION_RETRY_EXHAUSTED*'
+   }finally{
+    $blocker.Dispose()
+   }
+   [IO.File]::ReadAllText($path)|Should -Be $original -Because 'sanitization failure must never delete or overwrite the preserved technical evidence'
+  }
+  It 'a persistent write-blocking lock (failed write scenario, read succeeds) throws the deliberate exception and preserves the unsanitized evidence file untouched' {
+   $path=Join-Path $TestDrive 'persistent-write-block.log'
+   $original="before`e[31mred`e[0m"
+   [IO.File]::WriteAllText($path,$original,(New-Object Text.UTF8Encoding $false))
+   # FileShare.Read still permits File.ReadAllText's own Read-shared open to
+   # succeed, but denies any handle that requests Write access -- isolating
+   # the failure to the write half specifically.
+   $blocker=New-Object IO.FileStream($path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+   try{
+    { Write-TPMSafeTechnicalFileV1 -Path $path }|Should -Throw '*SANITIZATION_RETRY_EXHAUSTED*'
+   }finally{
+    $blocker.Dispose()
+   }
+   [IO.File]::ReadAllText($path)|Should -Be $original -Because 'sanitization failure must never delete or overwrite the preserved technical evidence'
+  }
+  It 'never writes raw unsanitized content to the operator console (Write-Host) during a failure path' {
+   $path=Join-Path $TestDrive 'console-safety.log'
+   $original="before`e[31mSECRET-MARKER-TOKEN`e[0m"
+   [IO.File]::WriteAllText($path,$original,(New-Object Text.UTF8Encoding $false))
+   $blocker=New-Object IO.FileStream($path,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+   Mock -ModuleName TPMCertification.Execution -CommandName Write-Host -MockWith {}
+   try{
+    try{ Write-TPMSafeTechnicalFileV1 -Path $path }catch{}
+   }finally{
+    $blocker.Dispose()
+   }
+   Should -Invoke -ModuleName TPMCertification.Execution -CommandName Write-Host -Times 0 -Because 'the sanitization failure path must never display unsanitized (or any) content to the operator console'
+  }
+ }
+}
+
+Describe 'owned-directory reparse-chain and component-boundary containment' {
+ BeforeDiscovery {
+  # -Skip below is evaluated at Pester's discovery phase, before any
+  # BeforeAll has run -- the junction-creation capability probe must
+  # therefore run here (BeforeDiscovery), not in BeforeAll, or the -Skip
+  # condition would always see an unset variable and skip unconditionally
+  # regardless of the host's real capability. Uses the system temp
+  # directory rather than $TestDrive since $TestDrive is not established
+  # during discovery.
+  $script:junctionsSupported=$true
+  try{
+   $probeBase=Join-Path ([IO.Path]::GetTempPath()) ('tpm-junction-probe-'+[guid]::NewGuid().ToString('N'))
+   $probeTarget=Join-Path $probeBase 'target'
+   $probeLink=Join-Path $probeBase 'link'
+   [void](New-Item -ItemType Directory -Path $probeTarget -Force -ErrorAction Stop)
+   [void](New-Item -ItemType Junction -Path $probeLink -Target $probeTarget -ErrorAction Stop)
+   Remove-Item -LiteralPath $probeBase -Recurse -Force -ErrorAction SilentlyContinue
+  }catch{$script:junctionsSupported=$false}
+ }
+ BeforeAll {
+  function New-TPMTestJunctionV1 {
+   param([Parameter(Mandatory=$true)][string]$LinkPath,[Parameter(Mandatory=$true)][string]$TargetPath)
+   if(-not(Test-Path -LiteralPath $TargetPath)){[void](New-Item -ItemType Directory -Path $TargetPath -Force)}
+   [void](New-Item -ItemType Junction -Path $LinkPath -Target $TargetPath -ErrorAction Stop)
+  }
+ }
+
+ It 'accepts an ordinary nested non-reparse directory (control case)' {
+  $root=Join-Path $TestDrive 'control-root'
+  $nested=Join-Path $root 'a\b\c'
+  [void](New-Item -ItemType Directory -Path $nested -Force)
+  { Assert-TPMOwnedDirectoryV1 -Path $nested }|Should -Not -Throw
+ }
+ It 'rejects a target outside the owned root via a sibling-prefix collision (segment-boundary proof)' {
+  $root=Join-Path $TestDrive 'Foo\Root'
+  $sibling=Join-Path $TestDrive 'Foo\Root-Evil\leaf'
+  [void](New-Item -ItemType Directory -Path $root -Force)
+  [void](New-Item -ItemType Directory -Path $sibling -Force)
+  Test-TPMPathIsContainedV1 -Root $root -Target $sibling|Should -BeFalse -Because 'a raw string-prefix check would wrongly accept Root-Evil as being under Root'
+  { Assert-TPMNoReparseInChainV1 -Root $root -Target $sibling }|Should -Throw '*PROCESS_PATH_OUTSIDE_OWNED_ROOT*'
+ }
+ It 'rejects a `..`-escape attempt from the target path' {
+  $root=Join-Path $TestDrive 'escape-root'
+  [void](New-Item -ItemType Directory -Path $root -Force)
+  $outside=Join-Path $TestDrive 'escape-root-outside'
+  [void](New-Item -ItemType Directory -Path $outside -Force)
+  $escaped=Join-Path $root '..\escape-root-outside'
+  { Assert-TPMNoReparseInChainV1 -Root $root -Target $escaped }|Should -Throw '*PROCESS_PATH_OUTSIDE_OWNED_ROOT*'
+ }
+ It 'rejects a missing unauthorized ancestor instead of silently creating it' {
+  $root=Join-Path $TestDrive 'missing-ancestor-root'
+  [void](New-Item -ItemType Directory -Path $root -Force)
+  $target=Join-Path $root 'no-such-parent\leaf'
+  { Assert-TPMNoReparseInChainV1 -Root $root -Target $target -AllowMissingLeaf }|Should -Throw '*does not exist and is not the authorized creation leaf*'
+ }
+ It 'the missing-authorized-leaf-creation case succeeds via -CreateIfMissing and is revalidated afterward' {
+  $root=Join-Path $TestDrive 'create-leaf-parent'
+  [void](New-Item -ItemType Directory -Path $root -Force)
+  $leaf=Join-Path $root 'brand-new-leaf'
+  Test-Path -LiteralPath $leaf|Should -BeFalse
+  $result=Assert-TPMOwnedDirectoryV1 -Path $leaf -CreateIfMissing
+  $result|Should -Be ([IO.Path]::GetFullPath($leaf).TrimEnd([IO.Path]::DirectorySeparatorChar))
+  Test-Path -LiteralPath $leaf -PathType Container|Should -BeTrue
+  { Assert-TPMOwnedDirectoryV1 -Path $leaf -CreateIfMissing }|Should -Not -Throw -Because 'a second call against the now-existing, still-valid directory must also pass'
+ }
+ It 'New-TPMCreateNewFileV1 uses CreateNew semantics and refuses to silently reuse/overwrite an existing file' {
+  $parent=Join-Path $TestDrive 'createnew-root'
+  [void](New-Item -ItemType Directory -Path $parent -Force)
+  $first=New-TPMCreateNewFileV1 -Parent $parent -Name 'evidence.log'
+  Test-Path -LiteralPath $first|Should -BeTrue
+  { New-TPMCreateNewFileV1 -Parent $parent -Name 'evidence.log' }|Should -Throw -Because 'CreateNew must fail closed rather than silently reopening/overwriting a file that already exists at this path'
+ }
+
+ Context 'reparse-point rejection (requires junction/symlink creation to be permitted for this test account)' {
+  # Narrowly scoped OS-capability skip (see BeforeDiscovery above): only
+  # this specific junction-creation-dependent sub-case is ever skipped,
+  # and only when the probe proved this host/account cannot create NTFS
+  # junctions. Every non-reparse-creation containment test in this
+  # Describe (segment-boundary, sibling-prefix, `..`-escape,
+  # missing-ancestor, CreateNew-reuse) runs unconditionally above.
+  It 'rejects an owned root that is itself a reparse point' -Skip:(-not$script:junctionsSupported) {
+   $real=Join-Path $TestDrive 'reparse-root-real'
+   $link=Join-Path $TestDrive 'reparse-root-link'
+   New-TPMTestJunctionV1 -LinkPath $link -TargetPath $real
+   { Assert-TPMOwnedDirectoryV1 -Path $link }|Should -Throw '*reparse point rejected*'
+  }
+  It 'rejects an intermediate junction in the chain between root and target' -Skip:(-not$script:junctionsSupported) {
+   $root=Join-Path $TestDrive 'chain-root'
+   [void](New-Item -ItemType Directory -Path $root -Force)
+   $real=Join-Path $TestDrive 'chain-real-mid'
+   $link=Join-Path $root 'mid-link'
+   New-TPMTestJunctionV1 -LinkPath $link -TargetPath $real
+   $leaf=Join-Path $link 'leaf'
+   [void](New-Item -ItemType Directory -Path $leaf -Force)
+   { Assert-TPMNoReparseInChainV1 -Root $root -Target $leaf }|Should -Throw '*reparse point rejected in owned-path chain*'
+  }
+  It 'rejects a reparse-point leaf' -Skip:(-not$script:junctionsSupported) {
+   $root=Join-Path $TestDrive 'leaf-reparse-root'
+   [void](New-Item -ItemType Directory -Path $root -Force)
+   $real=Join-Path $TestDrive 'leaf-reparse-real'
+   $link=Join-Path $root 'leaf-link'
+   New-TPMTestJunctionV1 -LinkPath $link -TargetPath $real
+   { Assert-TPMNoReparseInChainV1 -Root $root -Target $link }|Should -Throw '*reparse point rejected in owned-path chain*'
+  }
+  It 'reparse substitution injected between validation and use is caught by TOCTOU revalidation after creation' -Skip:(-not$script:junctionsSupported) {
+   # This is the one sub-case the task explicitly allows narrowing: safely
+   # racing the exact validate-then-use window in production code is not
+   # reproducible from a test without changing production control flow.
+   # What IS directly provable, and is proven here, is the TOCTOU
+   # revalidation mechanism itself: replace an already-validated,
+   # freshly-created owned directory with a junction, then show that
+   # re-running Assert-TPMOwnedDirectoryV1 against that same path (exactly
+   # what the post-creation revalidation call inside the function does)
+   # detects and rejects it rather than trusting the earlier validation.
+   $parent=Join-Path $TestDrive 'toctou-parent'
+   [void](New-Item -ItemType Directory -Path $parent -Force)
+   $leaf=Join-Path $parent 'toctou-leaf'
+   $result=Assert-TPMOwnedDirectoryV1 -Path $leaf -CreateIfMissing
+   $result|Should -Not -BeNullOrEmpty
+   Remove-Item -LiteralPath $leaf -Force -Recurse
+   $real=Join-Path $TestDrive 'toctou-real'
+   New-TPMTestJunctionV1 -LinkPath $leaf -TargetPath $real
+   { Assert-TPMOwnedDirectoryV1 -Path $leaf }|Should -Throw '*reparse point rejected*' -Because 'revalidation must never trust a path just because it passed validation earlier'
+  }
+ }
+}

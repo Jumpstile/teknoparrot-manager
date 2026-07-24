@@ -235,3 +235,47 @@ no authority, facts, evidence, marker, or bundle produced. See
 `docs/adr/ADR-0155-IMPLEMENTATION-CHECKLIST.md` ("ADR155-0309 certification
 isolation and result-validation hardening") for the full schema and the
 adversarial test inventory.
+
+### Log sanitization and owned-path validation fail closed (PR #155 correction)
+
+Two invariants in `scripts/TPMCertification.Execution.psm1` that previously
+failed open now fail closed:
+
+- **Sanitizing a just-exited child's captured stdout/stderr is a safety
+  invariant, not a best-effort convenience.** `Write-TPMSafeTechnicalFileV1`
+  retries only the exact transient Win32 errors the just-exited-child
+  handle-release race produces (`ERROR_SHARING_VIOLATION` /
+  `ERROR_LOCK_VIOLATION`, `IOException.HResult` `0x80070020` /
+  `0x80070021`) for a bounded 20 attempts / ~2 seconds; every other
+  exception (disk-full, a bad path, `UnauthorizedAccessException`, etc.)
+  throws immediately with no retry. On retry exhaustion it throws a
+  distinctly tagged exception (`SANITIZATION_RETRY_EXHAUSTED:` ...) instead
+  of silently returning -- neither the read half nor the write half can
+  look like it succeeded when it did not. The unsanitized evidence file is
+  never deleted or overwritten on failure, and no unsanitized content is
+  ever written to the operator console, including in this failure path.
+- **Every existing component of an owned directory's path, from the
+  declared root through the target, is checked individually for the
+  `ReparsePoint` attribute** (`Assert-TPMNoReparseInChainV1`) -- not just
+  the final leaf's own attributes, since a reparse point on any ancestor
+  can silently redirect the effective location. Containment is a
+  component-boundary comparison, not a string-prefix check, so a
+  sibling directory that merely shares a text prefix (e.g. `C:\Owned-Evil`
+  against `C:\Owned`) is never treated as contained. Directory creation
+  (`Assert-TPMOwnedDirectoryV1 -CreateIfMissing`) uses plain `New-Item`
+  (never `-Force`, which would silently no-op on an existing, possibly
+  attacker-planted, entry) and revalidates the entire chain again after
+  creation, closing the TOCTOU window between the pre-creation check and
+  the directory actually coming into existence. File creation
+  (`New-TPMCreateNewFileV1`) continues to use `FileMode.CreateNew` so it
+  fails closed rather than silently reusing or overwriting an existing
+  file. This closes the specific reparse-redirection and sibling-prefix
+  races identified in review -- it is not a claim that every possible
+  filesystem race in the pipeline is eliminated.
+
+See `docs/adr/ADR-0155-IMPLEMENTATION-CHECKLIST.md` and
+`Tests/TPMCertification.OperatorExperience.Tests.ps1` ("log sanitization
+fails closed on persistent retry exhaustion" / "owned-directory
+reparse-chain and component-boundary containment") for the full test
+inventory, including the genuine OS-level file-lock and NTFS-junction
+reproductions used to prove both invariants.

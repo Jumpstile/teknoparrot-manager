@@ -2103,3 +2103,41 @@ change was added anywhere in this round. No general-purpose "skip validation
 in test/CI" bypass was added; the only injected-failure seam is the synthetic-
 repository copy pattern already established for the late-abort tests, present
 only in test doubles.
+
+**6. Fail-closed correction (PR #155 static review, following commit).** Two
+paragraphs above are superseded by a later round: `Write-TPMSafeTechnicalFileV1`
+no longer "gives up gracefully" / "leaves unsanitized" on retry exhaustion --
+retries are scoped to exactly `IOException.HResult` `0x80070020`
+(`ERROR_SHARING_VIOLATION`) / `0x80070021` (`ERROR_LOCK_VIOLATION`), every
+other exception throws immediately, and exhaustion of the transient retry
+throws a tagged `SANITIZATION_RETRY_EXHAUSTED:` exception (a
+`System.IO.IOException` carrying the original exception as `InnerException`)
+instead of returning. `Assert-TPMOwnedDirectoryV1` now walks every existing
+path component from the owned root through the target for the `ReparsePoint`
+attribute (not just the leaf), uses a component-boundary containment check
+instead of a string-prefix check, and revalidates the whole chain again after
+`-CreateIfMissing` creates a directory (TOCTOU close). See ARCHITECTURE.md
+("Fail-closed correction round") and SECURITY.md for the corrected contracts,
+and `Tests/TPMCertification.OperatorExperience.Tests.ps1` for the added
+behavioral coverage (genuine OS-level file locks and NTFS junctions).
+
+That same review raised a disposition-registry question: `scripts/
+InjectionHunterDispositions.psd1`'s one line-number change across the
+commit that introduced this section (163 -> 244, `TPMCertification.
+Execution.psm1`, `InjectionRisk.StaticPropertyInjection`, extent
+`$result.$name`) was hypothesized to be caused by the `$PSDefaultParameterValues
+['*:Confirm']=$false` line deleted from `scripts/Invoke-TPM-PesterChild.ps1`
+in that same commit having its own InjectionHunter finding that disappeared
+(an assumed 27 -> 26 finding-count drop). An exact re-run of InjectionHunter
+(identical tool version, identical production inventory, identical per-file
+invocation used by `Test-TPMProductionInjectionHunterV1`) against both
+commits disproved this: the finding count was unchanged (27 in both), and
+`Invoke-TPM-PesterChild.ps1` had zero InjectionHunter findings in either
+commit -- the deleted line was never flagged by the tool at all. The
+line-number change was ordinary drift: unrelated function additions earlier
+in `TPMCertification.Execution.psm1` shifted every later line down,
+including the one pre-existing `$result.$name` finding the entry has always
+covered. The fail-closed correction round in this same commit added roughly
+140 more lines ahead of that same finding, so the registry entry's line was
+updated again, 244 -> 401, for the same reason -- still the same finding
+(same file/rule/extent), never a removed-and-re-added one.

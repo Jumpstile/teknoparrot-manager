@@ -200,7 +200,7 @@
         @{
             File        = 'scripts/TPMCertification.Execution.psm1'
             RuleName    = 'InjectionRisk.StaticPropertyInjection'
-            Line        = 244
+            Line        = 401
             Extent      = '$result.$name'
             Disposition = 'FalsePositive'
             Reasoning   = '$name is drawn only from the fixed, hardcoded numeric-field allowlist in Read-TPMPesterResultV1. The JSON result object is untrusted and validated fail-closed, but no external value can select the property name used by this access.'
@@ -208,7 +208,7 @@
         @{
             File        = 'scripts/Invoke-TPM-RealInstanceSmoke.ps1'
             RuleName    = 'InjectionRisk.StaticPropertyInjection'
-            Line        = 675
+            Line        = 638
             Extent      = '$candidate.$name'
             Disposition = 'FalsePositive'
             Reasoning   = '$name is drawn only from the fixed, hardcoded $fields array a few lines above (literal property-name candidates such as "PassedCount"/"FailedCount"), never from external or attacker-controlled input. No untrusted value reaches the dynamic property name.'
@@ -216,7 +216,7 @@
         @{
             File        = 'scripts/Invoke-TPM-RealInstanceSmoke.ps1'
             RuleName    = 'InjectionRisk.AddType'
-            Line        = 1351
+            Line        = 1169
             Extent      = 'Add-Type -AssemblyName System.Drawing'
             Disposition = 'FalsePositive'
             Reasoning   = 'AssemblyName is a fixed string literal. No attacker-controlled input reaches Add-Type.'
@@ -224,7 +224,7 @@
         @{
             File        = 'scripts/Invoke-TPM-RealInstanceSmoke.ps1'
             RuleName    = 'InjectionRisk.AddType'
-            Line        = 1414
+            Line        = 1232
             Extent      = "Add-Type -Language CSharp -TypeDefinition `$tpmWindowInteropSource -ErrorAction Stop"
             Disposition = 'FalsePositive'
             Reasoning   = '$tpmWindowInteropSource is a fixed here-string literal defined a few lines above this call (a hardcoded Win32 interop P/Invoke declaration), not built from any variable or external input. No attacker-controlled source reaches Add-Type -TypeDefinition.'
@@ -232,7 +232,7 @@
         @{
             File        = 'scripts/Invoke-TPM-RealInstanceSmoke.ps1'
             RuleName    = 'InjectionRisk.AddType'
-            Line        = 1442
+            Line        = 1260
             Extent      = 'Add-Type -AssemblyName System.Windows.Forms'
             Disposition = 'FalsePositive'
             Reasoning   = 'AssemblyName is a fixed string literal. No attacker-controlled input reaches Add-Type.'
@@ -240,10 +240,10 @@
         @{
             File        = 'scripts/Invoke-TPM-RealInstanceSmoke.ps1'
             RuleName    = 'InjectionRisk.AddType'
-            Line        = 1480
+            Line        = 1298
             Extent      = 'Add-Type -AssemblyName System.Drawing'
             Disposition = 'FalsePositive'
-            Reasoning   = 'A second, separate occurrence of Add-Type with the same fixed AssemblyName literal elsewhere in this file (see line 1351 above). No attacker-controlled input reaches Add-Type.'
+            Reasoning   = 'A second, separate occurrence of Add-Type with the same fixed AssemblyName literal elsewhere in this file (see line 1169 above). No attacker-controlled input reaches Add-Type.'
         }
     )
 }
