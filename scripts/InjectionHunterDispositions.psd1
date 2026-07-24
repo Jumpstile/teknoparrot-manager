@@ -200,7 +200,7 @@
         @{
             File        = 'scripts/TPMCertification.Execution.psm1'
             RuleName    = 'InjectionRisk.StaticPropertyInjection'
-            Line        = 163
+            Line        = 244
             Extent      = '$result.$name'
             Disposition = 'FalsePositive'
             Reasoning   = '$name is drawn only from the fixed, hardcoded numeric-field allowlist in Read-TPMPesterResultV1. The JSON result object is untrusted and validated fail-closed, but no external value can select the property name used by this access.'

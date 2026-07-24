@@ -2676,6 +2676,165 @@ Describe 'real harness incomplete-collection fail-closed path' {
         $source|Should -Match 'CERTIFICATION PIPELINE ABORTED'
     }
 }
+
+Describe 'a pre-Pester collection failure genuinely aborts the real harness child process' {
+    # Restores the early-abort regression coverage as a real behavioral
+    # test (a genuine child process launched against a deliberately broken
+    # pre-Pester precondition), not a source-string/source-order assertion.
+    # The source-string Describe block immediately above is left in place
+    # (a cheap smoke check that the fail-closed scaffolding still exists in
+    # source) but is no longer the only evidence for early-abort behavior.
+    BeforeAll {
+        $sourceRepo=Split-Path $PSScriptRoot -Parent
+        Import-Module (Join-Path $sourceRepo 'scripts\TPMCertification.Execution.psm1') -Force
+
+        function New-SyntheticEarlyAbortRepository {
+            # Builds the same kind of synthetic, git-initialized repository
+            # copy used by the late-collection-failure tests below, but
+            # injects the failure BEFORE the harness even announces the
+            # Pester gate ("Write-TPMGateHeader -Gate 'Pester regression
+            # suite'" is the harness's own unique, single-occurrence marker
+            # for that gate) -- proving the abort happens ahead of Pester,
+            # not merely somewhere in collection.
+            param([string]$Root,[string]$FailureMessage)
+            $repo=Join-Path $Root 'repo'
+            $scripts=Join-Path $repo 'scripts'
+            $tools=Join-Path $repo 'tools'
+            $tests=Join-Path $repo 'Tests'
+            New-Item -ItemType Directory -Path $scripts,$tools,$tests -Force|Out-Null
+            Copy-Item -Path (Join-Path $sourceRepo 'scripts\*') -Destination $scripts -Force
+            Copy-Item -Path (Join-Path $sourceRepo 'tools\*') -Destination $tools -Force
+            Copy-Item -LiteralPath (Join-Path $sourceRepo 'PSScriptAnalyzerSettings.psd1') -Destination $repo
+
+            @'
+param([switch]$Unattended)
+$ScriptVersion = "test"
+$ReleaseCandidateLabel = "Synthetic"
+'@|Set-Content -LiteralPath (Join-Path $repo 'TeknoParrot-Manager.ps1') -Encoding ascii
+            # Deliberately no test files in Tests\ -- if the harness ever
+            # reached the Pester gate despite the earlier throw, Pester
+            # would have nothing to discover, which would itself mask the
+            # defect this test exists to catch. An absent Tests\ directory
+            # is fine: the injected throw fires long before the Pester
+            # child process is ever launched.
+
+            $pesterMarkerPath=Join-Path $scripts 'Invoke-TPM-PesterChild.ps1'
+            (Get-Content -LiteralPath $pesterMarkerPath -Raw).Replace(
+                'Import-Module Pester -MinimumVersion 5.0 -ErrorAction Stop',
+                "[IO.File]::AppendAllText(`$env:TPM_TEST_PESTER_INVOKED_MARKER,'invoked'+[Environment]::NewLine); Import-Module Pester -MinimumVersion 5.0 -ErrorAction Stop"
+            )|Set-Content -LiteralPath $pesterMarkerPath -Encoding utf8
+
+            $harnessPath=Join-Path $scripts 'Invoke-TPM-RealInstanceSmoke.ps1'
+            $harness=[IO.File]::ReadAllText($harnessPath)
+            $insertion="    Write-TPMGateHeader -Gate 'Pester regression suite'"
+            @([regex]::Matches($harness,[regex]::Escape($insertion))).Count|Should -Be 1
+            $failureStatement="    throw '$FailureMessage'`r`n"
+            $harness=$harness.Replace($insertion,$failureStatement+$insertion)
+            [IO.File]::WriteAllText($harnessPath,$harness,(New-Object Text.UTF8Encoding $false))
+
+            $instrument=@{
+                'TPMCertification.Production.psm1'='New-TPMProductionWorkflowAuthorityV1'
+                'TPMCertification.ProductionFacts.psm1'='New-TPMProductionFactRecordsV1'
+                'TPMCertification.ProductionEvidence.psm1'='New-TPMProductionEvidenceRecordV1'
+                'TPMCertification.ProductionCycle.psm1'='Complete-TPMProductionCertificationCycleV1'
+            }
+            foreach($moduleName in $instrument.Keys){
+                $modulePath=Join-Path $scripts $moduleName
+                $moduleText=[IO.File]::ReadAllText($modulePath)
+                $needle="function $($instrument[$moduleName]) {"
+                @([regex]::Matches($moduleText,[regex]::Escape($needle))).Count|Should -Be 1
+                $markerLine='[IO.File]::AppendAllText($env:TPM_TEST_COMPOSITION_MARKER,''' + $instrument[$moduleName] + '''+[Environment]::NewLine)'
+                $moduleText=$moduleText.Replace($needle,$needle+"`r`n    "+$markerLine)
+                [IO.File]::WriteAllText($modulePath,$moduleText,(New-Object Text.UTF8Encoding $false))
+            }
+
+            & git -C $repo init -q
+            & git -C $repo checkout -q -b main
+            & git -C $repo add -- .
+            & git -C $repo -c user.name=TPM-Test -c user.email=tpm-test@example.invalid commit -q -m baseline
+            $head=& git -C $repo rev-parse HEAD
+            & git -C $repo update-ref refs/remotes/origin/main $head
+            return $repo
+        }
+
+        function Invoke-SyntheticEarlyFailure {
+            param([string]$FailureMessage,[int]$TimeoutSeconds=120)
+            $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            $repo=New-SyntheticEarlyAbortRepository -Root $root -FailureMessage $FailureMessage
+            $install=Join-Path $root 'install'
+            $harnessRoot=Join-Path $root 'harness'
+            $logRoot=Join-Path $root 'harness-log'
+            New-Item -ItemType Directory -Path $install,(Join-Path $install 'GameProfiles'),(Join-Path $install 'UserProfiles'),$harnessRoot,$logRoot -Force|Out-Null
+            New-Item -ItemType File -Path (Join-Path $install 'TeknoParrotUi.exe')|Out-Null
+            '<GameProfile />'|Set-Content -LiteralPath (Join-Path $install 'GameProfiles\one.xml') -Encoding ascii
+            $compositionMarker=Join-Path $root 'composition-entered.txt'
+            $pesterMarker=Join-Path $root 'pester-invoked.txt'
+            $savedCompositionMarker=$env:TPM_TEST_COMPOSITION_MARKER
+            $savedPesterMarker=$env:TPM_TEST_PESTER_INVOKED_MARKER
+            try{
+                $env:TPM_TEST_COMPOSITION_MARKER=$compositionMarker
+                $env:TPM_TEST_PESTER_INVOKED_MARKER=$pesterMarker
+                # Uses the real, hardened Invoke-TPMIsolatedProcessV1 primitive
+                # -- closed/empty stdin, bounded timeout with confirmed
+                # termination, separate stdout/stderr streams -- to launch the
+                # harness child process, the same primitive the harness itself
+                # uses for every child it spawns.
+                $invocation=Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList @(
+                    '-NoProfile','-NonInteractive','-File',(Join-Path $repo 'scripts\Invoke-TPM-RealInstanceSmoke.ps1'),
+                    '-RepoPath',$repo,'-TeknoParrotRoot',$install,'-HarnessRoot',$harnessRoot
+                ) -WorkingDirectory $repo -LogDirectory $logRoot -Identity 'early-abort-probe' -TimeoutSeconds $TimeoutSeconds
+            }finally{
+                $env:TPM_TEST_COMPOSITION_MARKER=$savedCompositionMarker
+                $env:TPM_TEST_PESTER_INVOKED_MARKER=$savedPesterMarker
+            }
+            $invocation.TimedOut|Should -BeFalse -Because 'the pre-Pester throw must abort long before any timeout could matter'
+            $invocation.TerminationConfirmed|Should -BeTrue
+            $stdout=if(Test-Path -LiteralPath $invocation.StdOutPath){Get-Content -LiteralPath $invocation.StdOutPath -Raw -ErrorAction SilentlyContinue}else{''}
+            $stderr=if(Test-Path -LiteralPath $invocation.StdErrPath){Get-Content -LiteralPath $invocation.StdErrPath -Raw -ErrorAction SilentlyContinue}else{''}
+            return [pscustomobject]@{Root=$root;Repo=$repo;Install=$install;HarnessRoot=$harnessRoot;CompositionMarker=$compositionMarker;PesterMarker=$pesterMarker;Output=($stdout+"`n"+$stderr);ExitCode=$invocation.ExitCode}
+        }
+    }
+
+    It 'a failure before the Pester gate aborts with a nonzero exit, retains the original error, and never claims a certification outcome' {
+        $message='PRE_PESTER_COLLECTION_FAILURE_SENTINEL'
+        $result=Invoke-SyntheticEarlyFailure -FailureMessage $message
+
+        $result.ExitCode|Should -Not -Be 0
+        $result.Output|Should -Match 'CERTIFICATION PIPELINE ABORTED \(infrastructure failure\)'
+        $result.Output|Should -Match ([regex]::Escape($message))
+        $result.Output|Should -Not -Match 'PropertyNotFoundException'
+        # Precise checks against the harness's own two verdict-announcement
+        # mechanisms (the operator-status "FINAL STATUS:" line and the
+        # scorecard's "Overall" field) -- deliberately not a bare \bCERTIFIED\b
+        # scan, which false-positives against unrelated prose already present
+        # in this harness (e.g. a gate purpose reads "Confirms the certified
+        # commit and working-tree state", confirmed by direct reproduction).
+        $result.Output|Should -Not -Match 'FINAL STATUS:\s*CERTIFIED'
+        $result.Output|Should -Not -Match 'FINAL STATUS:\s*NOT CERTIFIED'
+        $result.Output|Should -Not -Match '(?m)^\s*Overall\s*[:=]\s*"?(NOT )?CERTIFIED'
+    }
+
+    It 'a failure before the Pester gate never launches the Pester child process' {
+        $message='PRE_PESTER_COLLECTION_FAILURE_SENTINEL'
+        $result=Invoke-SyntheticEarlyFailure -FailureMessage $message
+        Test-Path -LiteralPath $result.PesterMarker|Should -BeFalse -Because 'Pester must never be invoked once the pre-Pester precondition has already failed'
+        $pesterResults=@(Get-ChildItem -LiteralPath $result.HarnessRoot -Filter 'Pester-result-v1.json' -File -Recurse -ErrorAction SilentlyContinue)
+        $pesterResults.Count|Should -Be 0
+    }
+
+    It 'a failure before the Pester gate never enters production composition or writes an authoritative artifact' {
+        $message='PRE_PESTER_COLLECTION_FAILURE_SENTINEL'
+        $result=Invoke-SyntheticEarlyFailure -FailureMessage $message
+        Test-Path -LiteralPath $result.CompositionMarker|Should -BeFalse -Because 'authority/facts/evidence/cycle composition must never be entered after an early collection failure'
+        $authoritative=@(Get-ChildItem -LiteralPath $result.HarnessRoot -File -Recurse -ErrorAction SilentlyContinue|Where-Object{$_.Name-match'^TPM-Certification-(Final-Outcome|Commit|Manifest|Scorecard|Eligibility|Publication)\.'})
+        $authoritative.Count|Should -Be 0
+    }
+
+    It 'a failure before the Pester gate does not prompt and terminates within the bounded timeout' {
+        $message='PRE_PESTER_COLLECTION_FAILURE_SENTINEL'
+        { Invoke-SyntheticEarlyFailure -FailureMessage $message -TimeoutSeconds 60 } | Should -Not -Throw
+    }
+}
 Describe 'late collection failures cannot enter production composition' {
     BeforeAll {
         $sourceRepo=Split-Path $PSScriptRoot -Parent

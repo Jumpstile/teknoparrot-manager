@@ -200,3 +200,38 @@ as a false positive -- a finding is never dismissed by label alone.
 ### Noninteractive certification boundary
 
 After the operator confirms target paths, certification closes child stdin and passes `-NoProfile -NonInteractive` to every PowerShell child. A prompt is therefore an infrastructure defect and must fail closed; automation must not suppress confirmation globally or answer a prompt. Dependency preflight is discovery-only: it must not install modules/providers, register repositories, change repository trust, alter execution policy, or contact Git remotes. Child stdout and stderr are captured separately, control/ANSI sequences are sanitized in technical logs, process identity and termination are recorded, and a missing or contradictory structured Pester result cannot become a certification decision.
+
+No script or test under `scripts/` or `Tests/` may set
+`$PSDefaultParameterValues['*:Confirm']=$false` or any other blanket
+confirmation-suppression override; a repository-wide regression test enforces
+this (`Tests/TPMCertification.OperatorExperience.Tests.ps1`). Real, bounded
+child-process probes (same file) prove that `Read-Host`,
+`$Host.UI.PromptForChoice`, a `-Confirm`-triggering `ShouldProcess` call, and
+a missing-mandatory-parameter cmdlet call all terminate promptly with a
+nonzero exit and no hang under closed stdin and `-NonInteractive`, on both
+PowerShell engines.
+
+Process metadata captured for every certification child
+(`<prefix>-process.json`, written by `Invoke-TPMIsolatedProcessV1` in
+`scripts/TPMCertification.Execution.psm1`) logs executable identity by
+filename only, a phase identity, PID, timing, exit code, and argument
+*count* -- never argument content -- by default. There is currently no code
+path in this pipeline that logs raw argument values; if one is ever added for
+diagnostics, it must implement an explicit redaction contract (a documented
+list of argument names/patterns treated as sensitive) with tests proving
+password/token/credential-shaped values are redacted before any such change
+merges.
+
+The structured Pester result (`Read-TPMPesterResultV1`) is validated as a
+closed contract before any field is consumed: exact field sets at every
+level, strictly typed and bounded numeric fields, and cross-field
+reconciliation (discovered/passed/failed/skipped/not-run totals, container
+totals, Virtual Beta Tester category totals, and the failure-entry count
+against `Failed`). Every malformed state throws the single
+`PESTER_RESULT_SCHEMA_INVALID:` error family -- never a raw
+`PropertyNotFoundException` or JSON conversion exception -- which the
+harness's collection-abort gate turns into a full infrastructure abort with
+no authority, facts, evidence, marker, or bundle produced. See
+`docs/adr/ADR-0155-IMPLEMENTATION-CHECKLIST.md` ("ADR155-0309 certification
+isolation and result-validation hardening") for the full schema and the
+adversarial test inventory.

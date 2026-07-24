@@ -2,6 +2,7 @@ Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Authority.psm1')
 Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Production.psm1')
 Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Reports.psm1')
 Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Publication.psm1')
+Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Execution.psm1')
 Set-StrictMode -Version 2.0
 
 # ADR-0155 Section 5.3/5.7 production fact collection (ADR155-0309
@@ -198,44 +199,26 @@ function Invoke-TPMExternalProcessWithTimeoutV1 {
         [Parameter(Mandatory=$true)][int]$TimeoutSeconds,
         [Parameter(Mandatory=$true)][string]$WorkingDirectory
     )
-    if(-not(Test-Path -LiteralPath $WorkingDirectory -PathType Container)){[void](New-Item -ItemType Directory -Path $WorkingDirectory -Force)}
-    $stdOutPath=Join-Path $WorkingDirectory ('stdout-'+[guid]::NewGuid().ToString('N')+'.txt')
-    $stdErrPath=Join-Path $WorkingDirectory ('stderr-'+[guid]::NewGuid().ToString('N')+'.txt')
-    $quotedArgumentList=@($ArgumentList|ForEach-Object{ConvertTo-TPMWin32QuotedArgumentV1 -Value $_})
-    $timedOut=$false;$exitCode=$null;$proc=$null;$terminationConfirmed=$true
+    # Deliberately no pre-existence check on $WorkingDirectory here --
+    # Invoke-TPMIsolatedProcessV1 (scripts/TPMCertification.Execution.psm1)
+    # is the single source of truth for working/log-directory validation and
+    # creation (full-path resolution, reparse-point rejection, and creating
+    # the directory on first use via -CreateIfMissing when it does not yet
+    # exist). A redundant guard here that bailed out before ever calling it
+    # was confirmed by direct reproduction to silently report Executed=$false
+    # for every real caller whose working directory is created lazily on
+    # first use (as the production harness's own working directory is) --
+    # this function's existing try/catch below already fails closed on any
+    # genuine validation error the shared primitive throws.
     try{
-        $proc=Start-Process -FilePath $FilePath -ArgumentList $quotedArgumentList -NoNewWindow -PassThru -RedirectStandardOutput $stdOutPath -RedirectStandardError $stdErrPath
-        # Windows PowerShell 5.1 does not reliably populate .ExitCode on a
-        # Start-Process -PassThru object unless .Handle is touched first
-        # (confirmed empirically: ExitCode reads back $null otherwise, even
-        # after a normal, non-timed-out exit). pwsh does not need this, but
-        # touching .Handle is harmless there too.
-        [void]$proc.Handle
-        $exited=$proc.WaitForExit($TimeoutSeconds*1000)
-        if(-not$exited){
-            $timedOut=$true
-            try{Stop-Process -Id $proc.Id -Force -ErrorAction Stop}catch{}
-            try{[void]$proc.WaitForExit(5000)}catch{}
-            $terminationConfirmed=$proc.HasExited
-        }else{
-            $exitCode=$proc.ExitCode
-        }
-    }catch{$timedOut=$true;$terminationConfirmed=$false}
-    # A timed-out child whose termination could not be confirmed may still
-    # be writing stdout/stderr -- reading or deleting those files while that
-    # write could still be in flight would be unsafe and could also destroy
-    # the only diagnostic evidence of why the process hung. Preserve the
-    # files (report their path instead of their content) whenever
-    # termination is not confirmed; only read/delete once genuinely safe.
-    if($timedOut -and -not $terminationConfirmed){
-        return [ordered]@{TimedOut=$true;TerminationConfirmed=$false;ExitCode=$null;StdOut=$null;StdErr=$null;StdOutPath=$stdOutPath;StdErrPath=$stdErrPath}
+        $invocation=Invoke-TPMIsolatedProcessV1 -FilePath $FilePath -ArgumentList $ArgumentList -TimeoutSeconds $TimeoutSeconds -WorkingDirectory $WorkingDirectory -LogDirectory $WorkingDirectory -Identity 'parser-probe'
+        $stdout=if(Test-Path -LiteralPath $invocation.StdOutPath){Get-Content -LiteralPath $invocation.StdOutPath -Raw -ErrorAction SilentlyContinue}else{$null}
+        $stderr=if(Test-Path -LiteralPath $invocation.StdErrPath){Get-Content -LiteralPath $invocation.StdErrPath -Raw -ErrorAction SilentlyContinue}else{$null}
+        return [ordered]@{TimedOut=$invocation.TimedOut;TerminationConfirmed=$invocation.TerminationConfirmed;ExitCode=$invocation.ExitCode;StdOut=$stdout;StdErr=$stderr;StdOutPath=$invocation.StdOutPath;StdErrPath=$invocation.StdErrPath;StdInPath=$invocation.StandardInputPath;MetadataPath=$invocation.MetadataPath}
+    }catch{
+        return [ordered]@{TimedOut=$true;TerminationConfirmed=$false;ExitCode=$null;StdOut=$null;StdErr=$_.Exception.Message;StdOutPath=$null;StdErrPath=$null;StdInPath=$null;MetadataPath=$null}
     }
-    $stdOut=if(Test-Path -LiteralPath $stdOutPath -PathType Leaf){Get-Content -LiteralPath $stdOutPath -Raw -ErrorAction SilentlyContinue}else{$null}
-    $stdErr=if(Test-Path -LiteralPath $stdErrPath -PathType Leaf){Get-Content -LiteralPath $stdErrPath -Raw -ErrorAction SilentlyContinue}else{$null}
-    Remove-Item -LiteralPath $stdOutPath,$stdErrPath -Force -ErrorAction SilentlyContinue
-    return [ordered]@{TimedOut=$timedOut;TerminationConfirmed=$terminationConfirmed;ExitCode=$exitCode;StdOut=$stdOut;StdErr=$stdErr;StdOutPath=$null;StdErrPath=$null}
 }
-
 function Test-TPMProductionParserProbeV1 {
     param(
         [Parameter(Mandatory=$true)]$Inventory,

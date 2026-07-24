@@ -6,7 +6,6 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
-$PSDefaultParameterValues['*:Confirm']=$false
 try{
     Import-Module Pester -MinimumVersion 5.0 -ErrorAction Stop
     $configuration=New-PesterConfiguration
@@ -36,6 +35,8 @@ try{
         $name=if($_.PSObject.Properties.Name-contains'ExpandedPath'){[string]$_.ExpandedPath}else{[string]$_.Name}
         $message=''
         if($_.PSObject.Properties.Name-contains'ErrorRecord'-and$_.ErrorRecord){$message=[string](@($_.ErrorRecord)[0].Exception.Message)}
+        if([string]::IsNullOrWhiteSpace($name)){$name='Unnamed Pester failure'}
+        if([string]::IsNullOrWhiteSpace($message)){$message='Pester reported failure without an exception message'}
         [ordered]@{Name=$name;Message=$message}
     })
     $contract=[ordered]@{
@@ -61,9 +62,11 @@ try{
         }
         Engine=("Pester {0} / pwsh {1}"-f(Get-Module Pester).Version,$PSVersionTable.PSVersion)
     }
-    $temp=$ResultPath+'.partial'
-    [IO.File]::WriteAllText($temp,($contract|ConvertTo-Json -Depth 8),(New-Object Text.UTF8Encoding $false))
-    Move-Item -LiteralPath $temp -Destination $ResultPath -Force
+    if(Test-Path -LiteralPath $ResultPath){throw 'PESTER_RESULT_DESTINATION_EXISTS'}
+    $temp=$ResultPath+'.'+[guid]::NewGuid().ToString('N')+'.partial'
+    $stream=New-Object IO.FileStream($temp,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::Read)
+    try{$bytes=(New-Object Text.UTF8Encoding $false).GetBytes(($contract|ConvertTo-Json -Depth 8));$stream.Write($bytes,0,$bytes.Length)}finally{$stream.Dispose()}
+    Move-Item -LiteralPath $temp -Destination $ResultPath
     if($result.FailedCount-gt0-or@($result.Containers|Where-Object Result -eq Failed).Count-gt0){exit 1}
     exit 0
 }catch{

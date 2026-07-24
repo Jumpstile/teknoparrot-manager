@@ -1256,6 +1256,60 @@ structural decisions:
   "EXIT CODE" lines and the only `exit` call reachable after certification
   facts/evidence begin recording.
 
+## Certification isolation and result-validation hardening (ADR155-0309, 2026-07-24)
+
+`scripts/TPMCertification.Execution.psm1` is the shared child-process
+isolation primitive (`Invoke-TPMIsolatedProcessV1`) and Pester-result contract
+validator (`Read-TPMPesterResultV1`) every certification child process and
+structured result in this pipeline goes through. Full design rationale,
+defect history (including two real regressions found and fixed during
+independent review -- a transient file-lock race and a directory-auto-create
+regression), and the complete adversarial test inventory are in the ADR-0155
+implementation checklist (`docs/adr/ADR-0155-IMPLEMENTATION-CHECKLIST.md`,
+"ADR155-0309 certification isolation and result-validation hardening" entry).
+Summary:
+
+- **`Invoke-TPMIsolatedProcessV1`** launches every certification child
+  (Pester, the parser probe, PSScriptAnalyzer/InjectionHunter bounded jobs'
+  external dependencies, the adaptive-menu renderer, the unattended-TPM
+  relaunch) with `-NoProfile -NonInteractive`, a GUID-nonce-prefixed,
+  `FileMode.CreateNew` empty stdin file (never inherited stdin), separate
+  stdout/stderr files, a bounded timeout with confirmed termination
+  (`Stop-Process` plus a `WaitForExit` grace window and an explicit
+  `HasExited` re-check -- never fire-and-forget `Kill()`), and a
+  `<prefix>-process.json` metadata record that logs executable identity
+  (filename only), phase identity, PID, timing, exit code, and argument
+  *count* -- never argument content. Its working/log directories are resolved
+  to a full path, verified non-reparse-point, and (via
+  `Assert-TPMOwnedDirectoryV1 -CreateIfMissing`) created on first use if they
+  do not already exist.
+- **`Read-TPMPesterResultV1`** treats the JSON result `Invoke-TPM-PesterChild.ps1`
+  writes as a closed contract: exact top-level and `Categories` field sets,
+  pinned `SchemaVersion`, every numeric field constrained to a true bounded
+  nonnegative integral type, `Discovered == Passed+Failed+Skipped+NotRun`,
+  `FailedContainers <= Containers`, `VirtualBetaTesterTotal ==
+  VirtualBetaTesterPassed + VirtualBetaTesterFailed` bounded by the applicable
+  global totals, and `Failures` a present array whose entry count equals
+  `Failed` exactly, with every entry's `Name`/`Message` a nonblank string.
+  Every malformed state throws the single `PESTER_RESULT_SCHEMA_INVALID:
+  <reason>` error family, which the harness's collection-abort gate (see
+  "System Invariant Inventory (collection abort and launcher exit)", above)
+  turns into an infrastructure abort with no authority/facts/evidence/marker/
+  bundle produced -- never a raw `PropertyNotFoundException`.
+- **`TPMCertification.ProductionFacts.psm1`'s external-process helper**
+  (`Invoke-TPMExternalProcessWithTimeoutV1`) delegates directly to
+  `Invoke-TPMIsolatedProcessV1` rather than maintaining a second isolation
+  implementation, so every parser/PSScriptAnalyzer/InjectionHunter child
+  inherits the same closed-stdin, bounded-timeout, confirmed-termination
+  guarantees.
+- **No blanket confirmation suppression** (`$PSDefaultParameterValues['*:Confirm']
+  = $false` or equivalent) exists anywhere in `scripts/` or `Tests/`; each
+  call site that needs non-interactive behavior handles it locally. Real,
+  bounded child-process probes prove `Read-Host`, `$Host.UI.PromptForChoice`,
+  a `-Confirm`-triggering `ShouldProcess` call, and a missing-mandatory-
+  parameter cmdlet call all fail promptly with a nonzero exit and no hang
+  under `-NonInteractive` with closed stdin, on both PowerShell engines.
+
 ## Absent-tree snapshot diffing (Get-TreeHash / Compare-TreeSnapshot, issue #172)
 
 `scripts/Invoke-TPM-RealInstanceSmoke.ps1`'s `UserProfiles`/`GameProfiles`/

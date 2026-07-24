@@ -1926,3 +1926,180 @@ script failures are required to remain nonzero.
 - [x] Normal operator output is numbered, append-only, and reports elapsed/status locations.
 - [x] Optional post-run Explorer/pause occurs only after the certification exit code is captured.
 - [ ] Independent review and real-install certification remain separate checkpoints.
+
+## ADR155-0309 certification isolation and result-validation hardening -- 2026-07-24
+
+An independent review of the in-progress PR #155 operator-experience work found
+five problem classes that needed correction before the pipeline could be
+trusted to run unattended and non-interactively. This round resolves all five
+as problem classes, not point patches.
+
+**1. Closed structured Pester-result contract.** `Read-TPMPesterResultV1`
+(`scripts/TPMCertification.Execution.psm1`) validates the entire result object
+before any field is consumed: exact top-level field set (no missing, no
+unexpected extras), `SchemaVersion` pinned to `1`, `Engine` a nonblank string,
+every numeric field (`Discovered`/`Passed`/`Failed`/`Skipped`/`NotRun`/
+`Containers`/`FailedContainers`/`DurationMilliseconds`) constrained to a true
+integral .NET numeric type in `0..2147483647` (strings, fractions, booleans,
+null, NaN/Infinity, arrays, and out-of-range values are all rejected before
+use), and the reconciliation invariant `Discovered == Passed + Failed +
+Skipped + NotRun` plus `FailedContainers <= Containers`. `Categories` gets its
+own exact field set and integer validation, `VirtualBetaTesterTotal ==
+VirtualBetaTesterPassed + VirtualBetaTesterFailed`, and every category total
+bounded by the applicable global total. `Failures` must be a JSON array (never
+a bare object or scalar); every entry has the exact `Name`/`Message` field set
+with both nonblank strings; the entry count must equal `Failed` exactly in
+both directions (a zero-failure result requires an empty, present array --
+never `$null` -- and a nonzero-failure result requires exactly that many
+entries, not more and not fewer). This repository's own PowerShell reads a
+JSON array property back as a real `System.Object[]` even at zero or one
+elements (confirmed by direct reproduction under both pwsh and Windows
+PowerShell 5.1 -- the collapse-to-scalar/`$null` behavior only happens for a
+*top-level* JSON document, not for an array-valued object property), so no
+`,@()`-style wrapping was needed inside the validator itself; the empty-vs-null
+distinction is still asserted explicitly in the adversarial suite so a future
+change to this behavior would be caught. Every malformed state throws the one
+stable `PESTER_RESULT_SCHEMA_INVALID: <reason>` error family -- never a raw
+`PropertyNotFoundException` or JSON conversion exception -- and the harness's
+own fail-closed collection-abort path (`$collectionCompleted` gate, documented
+above) ensures a validation failure prevents every downstream artifact:
+authority, facts, evidence, marker, and bundle. Table-driven adversarial
+coverage lives in `Tests/TPMCertification.OperatorExperience.Tests.ps1`
+(missing/empty/truncated/malformed JSON, wrong top-level shape, extra/missing
+top-level fields, unsupported `SchemaVersion`, every invalid `Engine` shape,
+every invalid numeric shape crossed with every numeric field, contradictory
+totals, malformed `Categories` in every documented way, malformed `Failures`
+in every documented way, a valid zero-failure result, and a valid result with
+failures).
+
+**2. No blanket confirmation suppression.** The
+`$PSDefaultParameterValues['*:Confirm']=$false` global override that had been
+present in `scripts/Invoke-TPM-PesterChild.ps1` is removed outright and not
+replaced by any other global bypass; a repository-wide regression test
+(`Tests/TPMCertification.OperatorExperience.Tests.ps1`) asserts no script or
+test under `scripts/` or `Tests/` sets this pattern again. Real, bounded
+child-process prompt probes (same file) launch `powershell.exe`/`pwsh` with
+`-NoProfile -NonInteractive` and closed stdin (via
+`Invoke-TPMIsolatedProcessV1`, the same primitive every production child uses)
+and attempt `Read-Host`, `$Host.UI.PromptForChoice`, a `-Confirm`-triggering
+`ShouldProcess` call (`Remove-Item -Confirm`), and a cmdlet call missing a
+mandatory parameter, each with `$ErrorActionPreference='Stop'` set to match
+every real production entry point's own top-of-script posture (confirmed by
+direct reproduction: without `Stop`, a NonInteractive-mode prompt failure is a
+non-terminating error that a bare script silently continues past to its own
+`exit 0` -- this is why `$ErrorActionPreference='Stop'` is a repository-wide
+convention on every production entry point, not an incidental detail). Every
+probe is asserted to terminate promptly with a nonzero exit code, confirmed
+termination, and no hang, under both engines, with a bounded per-probe
+timeout.
+
+**3. Closed parser-child stdin.** `TPMCertification.ProductionFacts.psm1`'s
+`Invoke-TPMExternalProcessWithTimeoutV1` (used by the parser probe,
+PSScriptAnalyzer, and InjectionHunter fact collectors) now delegates directly
+to `Invoke-TPMIsolatedProcessV1` in `TPMCertification.Execution.psm1` instead
+of maintaining a second, independent process-launch implementation -- closing
+the circular-dependency question by having `ProductionFacts.psm1` import
+`Execution.psm1` (a one-directional dependency; `Execution.psm1` does not
+import `ProductionFacts.psm1`). Every parser/analysis child therefore
+inherits the same hardening: GUID-named stdin/stdout/stderr files created with
+`FileMode.CreateNew` (never overwrite-if-exists) beneath a directory verified
+non-reparse-point and (for `Invoke-TPMIsolatedProcessV1`'s own working/log
+roots) either pre-existing or freshly created by this process, separate
+stdout/stderr streams, `-NoProfile -NonInteractive` arguments, a bounded
+timeout with confirmed termination (`Stop-Process` followed by a
+`WaitForExit` grace window and an explicit `HasExited` re-check, never a
+fire-and-forget `Kill()`), exit code captured before the process object is
+disposed, and temp files removed only after termination is confirmed (an
+unconfirmed termination preserves every log for investigation instead of
+deleting evidence). Real (non-mocked) parser-probe tests in
+`Tests/TPMCertification.ProductionFacts.Tests.ps1` already exercised genuine
+child-process parsing (including a file path containing spaces and shell
+metacharacters); the closed-stdin/no-prompt/no-hang property itself is proven
+directly against the shared primitive in
+`Tests/TPMCertification.OperatorExperience.Tests.ps1`'s prompt-probe suite,
+since every parser/analysis child launched by `ProductionFacts.psm1` now goes
+through that exact code path.
+
+**4. Restored behavioral early-abort regression test.** The prior
+`Describe 'real harness incomplete-collection fail-closed path'` block in
+`Tests/TPMCertificationHarness.Tests.ps1` asserted only that certain strings
+appeared in the harness's own source in a certain order -- it proved nothing
+about runtime behavior. A new `Describe 'a pre-Pester collection failure
+genuinely aborts the real harness child process'` block (same file) launches
+the real harness entry point as a real child process (via
+`Invoke-TPMIsolatedProcessV1`) against a copied synthetic repository with a
+single injected `throw` immediately before the harness's own unique Pester-gate
+marker line -- i.e., strictly before Pester, install-health collection, or any
+later gate ever runs. It proves: nonzero process exit code; the original
+sentinel error text is retained verbatim in the captured output (not replaced
+by a secondary exception -- and the output is asserted to contain no
+`PropertyNotFoundException`); the operator-facing "CERTIFICATION PIPELINE
+ABORTED (infrastructure failure)" banner is present; no `FINAL STATUS:
+CERTIFIED`/`FINAL STATUS: NOT CERTIFIED` line and no scorecard `Overall:
+CERTIFIED`/`NOT CERTIFIED` line appear anywhere in the output (a bare
+case-insensitive `\bCERTIFIED\b` scan was tried first and rejected as a test
+design -- it false-positived against unrelated harness prose, e.g. a gate
+purpose string reading "Confirms the certified commit and working-tree
+state"); the Pester child process is never invoked at all (proven by an
+instrumented copy of `Invoke-TPM-PesterChild.ps1` that would append to a
+test-only marker file the moment its own `Import-Module Pester` line is
+reached, and by confirming no `Pester-result-v1.json` exists anywhere under
+the harness root); no authority/facts/evidence/cycle composition is entered
+(the same instrumented-module marker pattern used by the pre-existing late-
+failure tests); no authoritative artifact file
+(`TPM-Certification-Final-Outcome`/`Commit`/`Manifest`/`Scorecard`/
+`Eligibility`/`Publication`) exists anywhere under the harness root; and the
+child process neither prompts nor hangs, under a bounded timeout. The original
+source-string Describe block is left in place as a cheap smoke check but is no
+longer the only evidence for early-abort behavior. The pre-existing late-smoke
+and post-restoration behavioral abort tests are unchanged.
+
+**5. Related isolation hardening.** `Invoke-TPMIsolatedProcessV1`'s stdin/
+stdout/stderr/process-metadata filenames are GUID-nonce-prefixed and created
+with `FileMode.CreateNew` (the prior timestamp-at-one-second-granularity
+naming scheme is gone from every file in `scripts/` and `Tests/` -- confirmed
+by a repository-wide grep for the `yyyyMMdd-HHmmss` pattern). Every owned
+working/log directory is resolved to a full path and verified non-reparse-
+point before use (`Assert-TPMOwnedDirectoryV1`), and every created file's full
+path is verified to remain under that owned root before creation
+(`New-TPMCreateNewFileV1`). Process metadata written to
+`<prefix>-process.json` logs executable identity by filename only
+(`[IO.Path]::GetFileName($FilePath)`), a caller-supplied phase identity, PID,
+start/end timestamps, duration, exit code, and `ArgumentCount` -- never the
+argument values themselves -- so no credential- or path-shaped argument
+content reaches a log by default. `Write-TPMSafeTechnicalFileV1` retries
+briefly (bounded, `IOException`-scoped) before giving up on a captured log
+file, because Windows can briefly hold a just-exited child's redirected-output
+handle open after `Process.HasExited` already reports true (confirmed by
+direct reproduction under load: reading a just-exited child's stdout log
+immediately afterward intermittently threw `IOException: being used by
+another process`); a still-locked file after the retry budget is left
+unsanitized rather than the caller being aborted over a diagnostics-only
+best-effort step. `Assert-TPMOwnedDirectoryV1`'s `-CreateIfMissing` switch
+lets `Invoke-TPMIsolatedProcessV1` bring its own working/log directories into
+existence on first use (restoring behavior several existing call sites --
+e.g. the harness's Pester-gate `TechnicalLogs` directory -- depend on and that
+an earlier, stricter "must already exist" draft of this function had silently
+broken) while still rejecting a reparse-point target either way. This alone
+was not sufficient: `TPMCertification.ProductionFacts.psm1`'s
+`Invoke-TPMExternalProcessWithTimeoutV1` had its own separate, redundant
+pre-existence guard in front of the delegated call to
+`Invoke-TPMIsolatedProcessV1` -- a leftover from before this function
+delegated at all -- which silently short-circuited to a not-executed result
+before the shared primitive's own `-CreateIfMissing` logic ever ran. This was
+found and fixed only by `git stash`-based bisection against the real
+end-to-end `Tests/TPMCertification.ProductionHarnessComposition.Tests.ps1`
+composition test (which had silently flipped from `CERTIFIED` to `NOT
+CERTIFIED`), not by any unit test of the primitive in isolation; the guard is
+now removed entirely, trusting the shared primitive as the single source of
+truth with the caller's existing `try`/`catch` as the fail-closed backstop.
+PSScriptAnalyzer and InjectionHunter tool-version/availability are already
+reported from inside the same bounded job (`Invoke-TPMBoundedScriptBlockV1`)
+that performs the actual scan, not from a parent-process
+`Get-Module -ListAvailable` check assumed to still hold true later.
+
+No PowerShell module/provider installation or execution-policy/trust-setting
+change was added anywhere in this round. No general-purpose "skip validation
+in test/CI" bypass was added; the only injected-failure seam is the synthetic-
+repository copy pattern already established for the late-abort tests, present
+only in test doubles.
