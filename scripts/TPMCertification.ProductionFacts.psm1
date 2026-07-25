@@ -152,7 +152,19 @@ function Find-TPMInjectionHunterModuleV1 {
     foreach($root in $candidateRoots){
         $manifest=Get-ChildItem -LiteralPath (Join-Path $root 'InjectionHunter') -Filter 'InjectionHunter.psd1' -Recurse -ErrorAction SilentlyContinue|Select-Object -First 1
         if($manifest){
-            try{$data=Import-PowerShellDataFile -Path $manifest.FullName;return [pscustomobject]@{Path=$manifest.FullName;Version=[version]($data.ModuleVersion)}}catch{continue}
+            try{
+                $data=Import-PowerShellDataFile -Path $manifest.FullName
+                return [pscustomobject]@{Path=$manifest.FullName;Version=[version]($data.ModuleVersion)}
+            }catch{
+                # A candidate manifest existing but failing to read/parse is
+                # a real, diagnosable condition (a lock, a corrupt file, a
+                # sync placeholder) -- surface it instead of silently moving
+                # on to the next candidate root with no trail. Still
+                # continues the search (a second candidate root may hold a
+                # good copy), never assume this is fatal by itself.
+                Write-Warning ("INJECTIONHUNTER_MANIFEST_READ_FAILED: path=$($manifest.FullName) exceptionType=$($_.Exception.GetType().FullName) message=$(ConvertTo-TPMSafeTechnicalTextV1 $_.Exception.Message)")
+                continue
+            }
         }
     }
     return $null
@@ -298,7 +310,10 @@ function Test-TPMProductionEncodingV1 {
         try{
             $bytes=[IO.File]::ReadAllBytes($item.FullPath)
             foreach($b in $bytes){if($b-gt127){$totalNonAscii++}}
-        }catch{$executed=$false}
+        }catch{
+            $executed=$false
+            Write-Warning ("PRODUCTION_ENCODING_READ_FAILED: file=$($item.RelativePath) exceptionType=$($_.Exception.GetType().FullName) message=$(ConvertTo-TPMSafeTechnicalTextV1 $_.Exception.Message)")
+        }
     }
     $files=@($Inventory|ForEach-Object{$_.RelativePath})
     return [ordered]@{Executed=$executed;NonAsciiByteCount=$totalNonAscii;Files=$files}
@@ -346,14 +361,29 @@ function Invoke-TPMBoundedScriptBlockV1 {
                 # Remove-Job it here) so its Id/State remain available for
                 # investigation instead of silently discarding the only
                 # diagnostic evidence of why it would not stop.
-                return [ordered]@{TimedOut=$true;TerminationConfirmed=$false;Result=$null;HadErrors=$false;JobId=$job.Id;JobState=$job.State.ToString()}
+                return [ordered]@{TimedOut=$true;TerminationConfirmed=$false;Result=$null;HadErrors=$false;JobId=$job.Id;JobState=$job.State.ToString();ErrorMessages=@()}
             }
-            return [ordered]@{TimedOut=$true;TerminationConfirmed=$true;Result=$null;HadErrors=$false;JobId=$null;JobState=$null}
+            return [ordered]@{TimedOut=$true;TerminationConfirmed=$true;Result=$null;HadErrors=$false;JobId=$null;JobState=$null;ErrorMessages=@()}
         }
         try{
             $result=@(Receive-Job -Job $job -ErrorAction Stop -ErrorVariable jobErrors)
-            return [ordered]@{TimedOut=$false;TerminationConfirmed=$true;Result=$result;HadErrors=($job.State-eq'Failed'-or@($jobErrors).Count-gt0);JobId=$null;JobState=$null}
-        }catch{return [ordered]@{TimedOut=$false;TerminationConfirmed=$true;Result=$null;HadErrors=$true;JobId=$null;JobState=$null}}
+            $hadErrors=($job.State-eq'Failed'-or@($jobErrors).Count-gt0)
+            # Preserve what the job's own error stream actually said -- a
+            # bare HadErrors=$true with no message was the exact shape of
+            # diagnostic loss this hardening round exists to close. Each
+            # entry is reduced to its own exception type/message (primitive
+            # strings) since ErrorRecord objects captured via -ErrorVariable
+            # on a job's remoting output are not reliably usable beyond
+            # this call.
+            $errorMessages=@($jobErrors|ForEach-Object{
+                $exceptionType=$(if($_.Exception){$_.Exception.GetType().FullName}else{$null})
+                "$($exceptionType): $($_.ToString())"
+            })
+            return [ordered]@{TimedOut=$false;TerminationConfirmed=$true;Result=$result;HadErrors=$hadErrors;JobId=$null;JobState=$null;ErrorMessages=$errorMessages}
+        }catch{
+            $exceptionType=$_.Exception.GetType().FullName
+            return [ordered]@{TimedOut=$false;TerminationConfirmed=$true;Result=$null;HadErrors=$true;JobId=$null;JobState=$null;ErrorMessages=@("$($exceptionType): $($_.Exception.Message)")}
+        }
     }finally{
         if($terminationConfirmed){Remove-Job -Job $job -Force -ErrorAction SilentlyContinue}
     }
@@ -365,8 +395,12 @@ function Test-TPMProductionPSScriptAnalyzerV1 {
     # Get-Module -ListAvailable discovery -- a version discovered in the
     # parent is not proof of what the job genuinely loaded and ran.
     param([Parameter(Mandatory=$true)]$Inventory,[Parameter(Mandatory=$true)][string]$SettingsPath,[int]$PerFileTimeoutSeconds=60)
-    $notExecuted=[ordered]@{Executed=$false;FindingCount=0;ToolVersion=$null}
-    if(-not(Test-Path -LiteralPath $SettingsPath -PathType Leaf)){return $notExecuted}
+    $notExecuted=[ordered]@{Executed=$false;FindingCount=0;ToolVersion=$null;Diagnostic=$null}
+    if(-not(Test-Path -LiteralPath $SettingsPath -PathType Leaf)){
+        $notExecuted.Diagnostic=[ordered]@{Stage='PSSCRIPTANALYZER_SETTINGS_MISSING';ExceptionType=$null;Message="Settings file not found: $SettingsPath"}
+        Write-Warning 'PSSCRIPTANALYZER_TOOL_LOAD_FAILED: stage=PSSCRIPTANALYZER_SETTINGS_MISSING'
+        return $notExecuted
+    }
     $total=0;$version=$null
     foreach($item in $Inventory){
         $bounded=Invoke-TPMBoundedScriptBlockV1 -ScriptBlock {
@@ -375,7 +409,13 @@ function Test-TPMProductionPSScriptAnalyzerV1 {
             $loaded=Get-Module PSScriptAnalyzer|Select-Object -First 1
             [pscustomobject]@{Path=$Path;FindingCount=$findings.Count;ToolVersion=$(if($loaded){$loaded.Version.ToString()}else{$null})}
         } -Parameters ([ordered]@{Path=$item.FullPath;Settings=$SettingsPath}) -TimeoutSeconds $PerFileTimeoutSeconds
-        if($bounded.TimedOut-or$bounded.HadErrors-or$null-eq$bounded.Result){return $notExecuted}
+        if($bounded.TimedOut-or$bounded.HadErrors-or$null-eq$bounded.Result){
+            $jobErrorText=$(if($bounded.ErrorMessages-and@($bounded.ErrorMessages).Count-gt0){(ConvertTo-TPMSafeTechnicalTextV1 (($bounded.ErrorMessages)-join' | '))}else{'(none captured)'})
+            $stage=if($bounded.TimedOut){'PSSCRIPTANALYZER_JOB_TIMED_OUT'}else{'PSSCRIPTANALYZER_JOB_EXECUTION_FAILED'}
+            $failed=[ordered]@{Executed=$false;FindingCount=0;ToolVersion=$null;Diagnostic=[ordered]@{Stage=$stage;ExceptionType=$null;Message="file=$($item.RelativePath) timedOut=$($bounded.TimedOut) hadErrors=$($bounded.HadErrors) jobErrors=$jobErrorText"}}
+            Write-Warning "PSSCRIPTANALYZER_TOOL_LOAD_FAILED: stage=$stage"
+            return $failed
+        }
         $items=@($bounded.Result|ForEach-Object{$_})
         if($items.Count-ne1){return $notExecuted}
         $r=$items[0]
@@ -465,12 +505,49 @@ function Sort-TPMByLineV1 {
     return ,$arr
 }
 
+function New-TPMInjectionHunterStageExceptionV1 {
+    # Same tagged-message/InnerException-preservation discipline as
+    # New-TPMSanitizationExhaustedExceptionV1 (TPMCertification.Execution.psm1)
+    # -- a stable, closed-set Stage tag prefix followed by a colon, with the
+    # original exception (if any) preserved as InnerException so its own
+    # type/HResult/message are never lost, only ever caught at the single
+    # outer boundary in Test-TPMProductionInjectionHunterV1, which turns it
+    # into a structured Diagnostic instead of erasing it.
+    param(
+        [Parameter(Mandatory=$true)][string]$Stage,
+        [Parameter(Mandatory=$true)][string]$Detail,
+        [Exception]$InnerException
+    )
+    $message="$($Stage): $Detail"
+    if($InnerException){return (New-Object Exception($message,$InnerException))}
+    return (New-Object Exception($message))
+}
+
 function Test-TPMProductionInjectionHunterV1 {
+    # Every failure path returns a Diagnostic field alongside the existing
+    # Executed=$false/ToolVersion=$null shape (an additive field -- callers
+    # that only read the original named properties, such as
+    # New-TPMProductionFactRecordsV1, are unaffected) so a caller that DOES
+    # want to know why the gate failed never has to guess. Diagnostic is
+    # always [ordered]@{Stage=<tag>;ExceptionType=<.NET type or $null>;
+    # Message=<sanitized text>}; Stage is one of a small closed set of tags
+    # identifying which stage of tool loading/scanning failed -- never a
+    # free-form/empty value. A concise, tagged Write-Warning is also emitted
+    # at the point of failure so the operator-facing console output points
+    # at the underlying cause instead of a bare Executed=False.
     param([Parameter(Mandatory=$true)]$Inventory,[Parameter(Mandatory=$true)][string]$DispositionRegistryPath,[int]$PerFileTimeoutSeconds=60)
-    $notExecuted=[ordered]@{Executed=$false;FindingCount=0;UnresolvedFindingCount=0;ToolVersion=$null;Dispositions=@()}
+    $notExecuted=[ordered]@{Executed=$false;FindingCount=0;UnresolvedFindingCount=0;ToolVersion=$null;Dispositions=@();Diagnostic=$null}
     $module=Find-TPMInjectionHunterModuleV1
-    if(-not$module){return $notExecuted}
-    if(-not(Test-Path -LiteralPath $DispositionRegistryPath -PathType Leaf)){return $notExecuted}
+    if(-not$module){
+        $notExecuted.Diagnostic=[ordered]@{Stage='INJECTIONHUNTER_MODULE_NOT_FOUND';ExceptionType=$null;Message='InjectionHunter module manifest was not found on this engine''s module path (or its sibling WindowsPowerShell/PowerShell convention).'}
+        Write-Warning 'INJECTIONHUNTER_TOOL_LOAD_FAILED: stage=INJECTIONHUNTER_MODULE_NOT_FOUND'
+        return $notExecuted
+    }
+    if(-not(Test-Path -LiteralPath $DispositionRegistryPath -PathType Leaf)){
+        $notExecuted.Diagnostic=[ordered]@{Stage='INJECTIONHUNTER_REGISTRY_MISSING';ExceptionType=$null;Message="Disposition registry not found: $DispositionRegistryPath"}
+        Write-Warning 'INJECTIONHUNTER_TOOL_LOAD_FAILED: stage=INJECTIONHUNTER_REGISTRY_MISSING'
+        return $notExecuted
+    }
     try{
         $registry=Assert-TPMDispositionRegistryV1 -Path $DispositionRegistryPath
         $allFindings=New-Object Collections.Generic.List[object]
@@ -488,20 +565,44 @@ function Test-TPMProductionInjectionHunterV1 {
             $bounded=Invoke-TPMBoundedScriptBlockV1 -ScriptBlock {
                 param($Path,$RulePath)
                 $findings=@(Invoke-ScriptAnalyzer -Path $Path -CustomRulePath $RulePath|ForEach-Object{[pscustomobject]@{RuleName=[string]$_.RuleName;Line=[int]$_.Extent.StartLineNumber;Extent=[string]$_.Extent.Text}})
-                $manifestVersion=$null
-                try{$manifestData=Import-PowerShellDataFile -Path $RulePath;$manifestVersion=[string]$manifestData.ModuleVersion}catch{}
-                [pscustomobject]@{Path=$Path;Findings=$findings;ToolVersion=$manifestVersion}
+                $manifestVersion=$null;$manifestErrorType=$null;$manifestErrorMessage=$null;$manifestErrorHResult=$null
+                try{
+                    $manifestData=Import-PowerShellDataFile -Path $RulePath
+                    $manifestVersion=[string]$manifestData.ModuleVersion
+                }catch{
+                    # Preserve the real exception as primitive fields --
+                    # crossing the job's serialization boundary, only
+                    # primitive-typed properties survive intact (the same
+                    # reason DiagnosticRecord's Line/Column are projected to
+                    # plain fields above). Never silently drop this: a
+                    # manifest read/parse failure here is exactly the defect
+                    # class that used to surface only as ToolVersion=$null
+                    # with no explanation.
+                    $manifestErrorType=$_.Exception.GetType().FullName
+                    $manifestErrorMessage=$_.Exception.Message
+                    $manifestErrorHResult=$_.Exception.HResult
+                }
+                [pscustomobject]@{Path=$Path;Findings=$findings;ToolVersion=$manifestVersion;ManifestErrorType=$manifestErrorType;ManifestErrorMessage=$manifestErrorMessage;ManifestErrorHResult=$manifestErrorHResult}
             } -Parameters ([ordered]@{Path=$item.FullPath;RulePath=$module.Path}) -TimeoutSeconds $PerFileTimeoutSeconds
-            if($bounded.TimedOut-or$bounded.HadErrors-or$null-eq$bounded.Result){throw 'INJECTIONHUNTER_SCAN_FAILED'}
+            if($bounded.TimedOut-or$bounded.HadErrors-or$null-eq$bounded.Result){
+                $jobErrorText=$(if($bounded.ErrorMessages-and@($bounded.ErrorMessages).Count-gt0){(ConvertTo-TPMSafeTechnicalTextV1 (($bounded.ErrorMessages)-join' | '))}else{'(none captured)'})
+                throw (New-TPMInjectionHunterStageExceptionV1 -Stage 'INJECTIONHUNTER_JOB_EXECUTION_FAILED' -Detail "file=$($item.RelativePath) timedOut=$($bounded.TimedOut) hadErrors=$($bounded.HadErrors) jobErrors=$jobErrorText")
+            }
             $items=@($bounded.Result|ForEach-Object{$_})
-            if($items.Count-ne1){throw 'INJECTIONHUNTER_SCAN_FAILED'}
+            if($items.Count-ne1){throw (New-TPMInjectionHunterStageExceptionV1 -Stage 'INJECTIONHUNTER_RESULT_SHAPE_INVALID' -Detail "file=$($item.RelativePath) resultCount=$($items.Count)")}
             $r=$items[0]
-            if($null-eq$r){throw 'INJECTIONHUNTER_SCAN_FAILED'}
+            if($null-eq$r){throw (New-TPMInjectionHunterStageExceptionV1 -Stage 'INJECTIONHUNTER_RESULT_SHAPE_INVALID' -Detail "file=$($item.RelativePath) result=null")}
             $propNames=Get-TPMJobResultOwnPropertyNamesV1 $r
-            if(($propNames-join',')-ne'Findings,Path,ToolVersion'){throw 'INJECTIONHUNTER_SCAN_FAILED'}
-            if($r.Path-isnot[string]-or$r.Path-cne$item.FullPath){throw 'INJECTIONHUNTER_SCAN_FAILED'}
-            if($r.ToolVersion-isnot[string]-or[string]::IsNullOrWhiteSpace($r.ToolVersion)){throw 'INJECTIONHUNTER_SCAN_FAILED'}
-            if($null-ne$version-and$r.ToolVersion-cne$version){throw 'INJECTIONHUNTER_SCAN_FAILED'}
+            if(($propNames-join',')-ne'Findings,ManifestErrorHResult,ManifestErrorMessage,ManifestErrorType,Path,ToolVersion'){throw (New-TPMInjectionHunterStageExceptionV1 -Stage 'INJECTIONHUNTER_RESULT_SCHEMA_INVALID' -Detail "file=$($item.RelativePath) properties=$($propNames -join ',')")}
+            if($r.Path-isnot[string]-or$r.Path-cne$item.FullPath){throw (New-TPMInjectionHunterStageExceptionV1 -Stage 'INJECTIONHUNTER_RESULT_PATH_MISMATCH' -Detail "expected=$($item.FullPath) actual=$($r.Path)")}
+            if($r.ToolVersion-isnot[string]-or[string]::IsNullOrWhiteSpace($r.ToolVersion)){
+                if($r.ManifestErrorType){
+                    $inner=New-Object Exception(([string]$r.ManifestErrorMessage))
+                    throw (New-TPMInjectionHunterStageExceptionV1 -Stage 'INJECTIONHUNTER_MANIFEST_LOAD_FAILED' -Detail ("file={0} manifest={1} innerType={2} innerHResult=0x{3} innerMessage={4}" -f $item.RelativePath,$module.Path,$r.ManifestErrorType,('{0:X8}' -f [int]$r.ManifestErrorHResult),(ConvertTo-TPMSafeTechnicalTextV1 $r.ManifestErrorMessage)) -InnerException $inner)
+                }
+                throw (New-TPMInjectionHunterStageExceptionV1 -Stage 'INJECTIONHUNTER_TOOL_VERSION_MISSING' -Detail "file=$($item.RelativePath) manifest=$($module.Path) (no manifest exception captured)")
+            }
+            if($null-ne$version-and$r.ToolVersion-cne$version){throw (New-TPMInjectionHunterStageExceptionV1 -Stage 'INJECTIONHUNTER_TOOL_VERSION_MISMATCH' -Detail "file=$($item.RelativePath) previous=$version current=$($r.ToolVersion)")}
             $version=[string]$r.ToolVersion
             foreach($f in @($r.Findings|ForEach-Object{$_})){[void]$allFindings.Add([pscustomobject]@{RelativePath=$item.RelativePath;RuleName=$f.RuleName;Line=$f.Line;Extent=$f.Extent})}
         }
@@ -584,7 +685,25 @@ function Test-TPMProductionInjectionHunterV1 {
             $dispositions.Add([ordered]@{FindingIdentifier=$identifier;Disposition=$disposition})
         }
         return [ordered]@{Executed=$true;FindingCount=$allFindings.Count;UnresolvedFindingCount=$unresolvedCount;ToolVersion=$version;Dispositions=$dispositions.ToArray()}
-    }catch{return $notExecuted}
+    }catch{
+        # Single outer boundary: every throw above (job execution, result
+        # shape/schema, path mismatch, manifest load, tool-version mismatch,
+        # duplicate-finding, stale-registry-entry, or a raw
+        # DISPOSITION_REGISTRY_INVALID from Assert-TPMDispositionRegistryV1)
+        # lands here. Never erase it -- extract the stable Stage tag from the
+        # message prefix (falling back to a single unclassified tag only if
+        # something throws without one, which would itself be a defect to
+        # investigate), preserve the exception type, and emit a concise
+        # tagged warning so the operator-facing console output always names
+        # the real cause instead of a bare Executed=False.
+        $stage='INJECTIONHUNTER_UNCLASSIFIED_FAILURE'
+        $rawMessage=[string]$_.Exception.Message
+        if($rawMessage-match'^([A-Z0-9_]+):\s*(.*)$'){$stage=$Matches[1]}
+        $safeMessage=ConvertTo-TPMSafeTechnicalTextV1 $rawMessage
+        Write-Warning "INJECTIONHUNTER_TOOL_LOAD_FAILED: stage=$stage exceptionType=$($_.Exception.GetType().FullName)"
+        $result=[ordered]@{Executed=$false;FindingCount=0;UnresolvedFindingCount=0;ToolVersion=$null;Dispositions=@();Diagnostic=[ordered]@{Stage=$stage;ExceptionType=$_.Exception.GetType().FullName;Message=$safeMessage}}
+        return $result
+    }
 }
 
 $script:TpmProductionCanonicalArtifactFileNamesV1=@(

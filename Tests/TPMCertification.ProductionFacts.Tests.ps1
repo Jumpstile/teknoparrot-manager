@@ -368,7 +368,7 @@ Describe 'Test-TPMProductionPSScriptAnalyzerV1 (private, InModuleScope only)' {
   $repo=New-InventoryFixture (Join-Path $TestDrive ([guid]::NewGuid().ToString('N')))
   $inv=Get-TPMProductionPowerShellInventoryV1 -RepositoryPath $repo
   $settings=Join-Path $repoRoot 'PSScriptAnalyzerSettings.psd1'
-  Mock Invoke-TPMBoundedScriptBlockV1 { [ordered]@{TimedOut=$false;Result=@();HadErrors=$true} } -ModuleName TPMCertification.ProductionFacts
+  Mock Invoke-TPMBoundedScriptBlockV1 { [ordered]@{TimedOut=$false;Result=@();HadErrors=$true;ErrorMessages=@('System.Exception: simulated job failure')} } -ModuleName TPMCertification.ProductionFacts
   $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Settings=$settings} {
    Test-TPMProductionPSScriptAnalyzerV1 -Inventory $Inv -SettingsPath $Settings
   }
@@ -560,6 +560,7 @@ Describe 'Test-TPMProductionInjectionHunterV1 (private, InModuleScope only)' {
    Test-TPMProductionInjectionHunterV1 -Inventory $Inv -DispositionRegistryPath $Missing
   }
   $result.Executed|Should -BeFalse
+  $result.Diagnostic.Stage|Should -Be 'INJECTIONHUNTER_REGISTRY_MISSING'
  }
  It 'reports Executed=false when the InjectionHunter module cannot be found' {
   Mock Find-TPMInjectionHunterModuleV1 { $null } -ModuleName TPMCertification.ProductionFacts
@@ -571,6 +572,50 @@ Describe 'Test-TPMProductionInjectionHunterV1 (private, InModuleScope only)' {
    Test-TPMProductionInjectionHunterV1 -Inventory $Inv -DispositionRegistryPath $RegistryPath
   }
   $result.Executed|Should -BeFalse
+  $result.Diagnostic.Stage|Should -Be 'INJECTIONHUNTER_MODULE_NOT_FOUND'
+ }
+ It 'reports Executed=false with a diagnosable INJECTIONHUNTER_JOB_EXECUTION_FAILED stage, preserving the real underlying error text, when the resolved module manifest is corrupt' {
+  # Narrow, test-only seam: Mock the module resolver to point at a
+  # deliberately corrupt .psd1 (invalid PowerShell data-file syntax) so the
+  # job's own Invoke-ScriptAnalyzer -CustomRulePath call genuinely fails --
+  # this is not a production bypass, it exercises the real
+  # Test-TPMProductionInjectionHunterV1 code path end to end (including the
+  # real Start-Job boundary) with a real captured exception, the same way
+  # round 2/3 injected real HResults rather than mocking exception objects.
+  # Empirically confirmed by direct reproduction: Invoke-ScriptAnalyzer
+  # itself rejects a corrupt -CustomRulePath manifest as an invalid "rule
+  # extension" before this module's own Import-PowerShellDataFile read is
+  # ever reached, so the job's error stream (not the manifest-read catch)
+  # is where this specific corruption surfaces -- confirming the fix must
+  # preserve the job's own ErrorMessages, not just the manifest-read catch.
+  $corruptManifest=Join-Path $TestDrive 'CorruptInjectionHunter.psd1'
+  [IO.File]::WriteAllText($corruptManifest,'@{ this is not valid PowerShell data file syntax @@@')
+  Mock Find-TPMInjectionHunterModuleV1 { [pscustomobject]@{Path=$corruptManifest;Version=[version]'1.0.0'} } -ModuleName TPMCertification.ProductionFacts
+  $target=Join-Path $TestDrive 'target6.ps1';[IO.File]::WriteAllText($target,'Add-Type -AssemblyName System.Net.Http')
+  $inv=@([ordered]@{RelativePath='target6.ps1';FullPath=$target})
+  $registryPath=Join-Path $TestDrive 'dispositions6.psd1'
+  [IO.File]::WriteAllText($registryPath,"@{ SchemaVersion = 1; Dispositions = @() }")
+  $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;RegistryPath=$registryPath} {
+   Test-TPMProductionInjectionHunterV1 -Inventory $Inv -DispositionRegistryPath $RegistryPath
+  }
+  $result.Executed|Should -BeFalse
+  $result.Diagnostic|Should -Not -BeNullOrEmpty
+  $result.Diagnostic.Stage|Should -Be 'INJECTIONHUNTER_JOB_EXECUTION_FAILED'
+  $result.Diagnostic.ExceptionType|Should -Not -BeNullOrEmpty
+  $result.Diagnostic.Message|Should -Match 'jobErrors='
+  $result.Diagnostic.Message|Should -Not -Match '^jobErrors=\(none captured\)$'
+ }
+ It 'reports Executed=false with a DISPOSITION_REGISTRY_INVALID diagnostic preserving the exception type when the registry file is malformed' {
+  $target=Join-Path $TestDrive 'target7.ps1';[IO.File]::WriteAllText($target,'1')
+  $inv=@([ordered]@{RelativePath='target7.ps1';FullPath=$target})
+  $badRegistry=Join-Path $TestDrive 'bad-registry.psd1'
+  [IO.File]::WriteAllText($badRegistry,"@{ SchemaVersion = 1; Dispositions = @( @{ File = 'target7.ps1' } ) }")
+  $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;RegistryPath=$badRegistry} {
+   Test-TPMProductionInjectionHunterV1 -Inventory $Inv -DispositionRegistryPath $RegistryPath
+  }
+  $result.Executed|Should -BeFalse
+  $result.Diagnostic.Stage|Should -Be 'DISPOSITION_REGISTRY_INVALID'
+  $result.Diagnostic.ExceptionType|Should -Not -BeNullOrEmpty
  }
 }
 
