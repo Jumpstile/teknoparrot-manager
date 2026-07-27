@@ -72,6 +72,30 @@ BeforeAll {
   if(-not(Test-Path -LiteralPath $TargetPath)){[void](New-Item -ItemType Directory -Path $TargetPath -Force)}
   [void](New-Item -ItemType Junction -Path $LinkPath -Target $TargetPath -ErrorAction Stop)
  }
+ function Remove-TPMTestReparsePointV1 {
+  # Test-only teardown helper (portability round): Remove-Item on a
+  # reparse-point directory, without -Recurse, prompts for confirmation
+  # under genuine Windows PowerShell 5.1 (pwsh does not) -- and that prompt
+  # throws PSInvalidOperationException under -NonInteractive, so the
+  # cleanup silently no-ops when -ErrorAction SilentlyContinue swallows it.
+  # Confirmed by direct reproduction against the real powershell.exe 5.1
+  # engine, not assumed. [IO.Directory]::Delete($Path,$false) unlinks the
+  # reparse point itself without ever traversing into its target, and
+  # behaves identically under both engines since it never goes through the
+  # PowerShell provider's ShouldProcess/confirmation layer at all.
+  # Guarded: refuses to act outside TestDrive, and refuses to act on
+  # anything that is not actually a reparse point, so this can never become
+  # a general-purpose recursive-delete shortcut.
+  param([Parameter(Mandatory=$true)][string]$Path)
+  if(-not(Test-Path -LiteralPath $Path)){return}
+  $full=[IO.Path]::GetFullPath($Path).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+  $testDriveFull=[IO.Path]::GetFullPath($TestDrive).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+  $isInsideTestDrive=$full.Equals($testDriveFull,[StringComparison]::OrdinalIgnoreCase)-or$full.StartsWith($testDriveFull+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)
+  if(-not$isInsideTestDrive){throw "Remove-TPMTestReparsePointV1 refuses to act outside TestDrive: $full"}
+  $item=Get-Item -LiteralPath $full -Force
+  if(($item.Attributes-band[IO.FileAttributes]::ReparsePoint)-eq0){throw "Remove-TPMTestReparsePointV1 refuses to unlink a non-reparse-point path: $full"}
+  [IO.Directory]::Delete($full,$false)
+ }
 }
 
 Describe 'TPMCertification.ProductionFacts public API surface' {
@@ -391,35 +415,49 @@ Describe 'Test-TPMProductionPSScriptAnalyzerV1 (private, InModuleScope only)' {
  It 'sanitizes a deceptive/control-character settings path in the SETTINGS_MISSING Diagnostic.Message and still passes schema validation (Stage 2 diagnostic-edge-case round)' {
   $repo=New-InventoryFixture (Join-Path $TestDrive ([guid]::NewGuid().ToString('N')))
   $inv=Get-TPMProductionPowerShellInventoryV1 -RepositoryPath $repo
-  # A path that does not exist, carrying an ANSI CSI escape sequence and a
-  # raw BEL control character, plus deceptive text designed to look like a
-  # second, different diagnostic line if it survived unsanitized. Tab/CR/LF
-  # are deliberately NOT used here -- ConvertTo-TPMSafeTechnicalTextV1
+  # A path that does not exist, carrying a real ANSI CSI escape sequence and
+  # a real raw BEL control byte, plus deceptive text designed to look like a
+  # second, different diagnostic line if it survived unsanitized. Built via
+  # [char] concatenation, not backtick escapes -- `e/`u{} are PowerShell 6+
+  # parser features; under genuine Windows PowerShell 5.1 they silently
+  # degrade to the LITERAL characters 'e'/'u{7}' (confirmed by direct
+  # reproduction against powershell.exe, not assumed), which would make this
+  # test exercise plain text instead of real control bytes. [char]27/[char]7
+  # construct the identical byte values under both engines. Tab/CR/LF are
+  # deliberately NOT used here -- ConvertTo-TPMSafeTechnicalTextV1
   # intentionally preserves those three as safe printable-adjacent
   # whitespace, so asserting their absence would not be testing a real
   # sanitization guarantee.
-  $deceptive=(Join-Path $TestDrive "missing`e[31mFAKE`u{7}STAGE=INJECTIONHUNTER_MODULE_NOT_FOUND.psd1")
+  $esc=[char]27
+  $bel=[char]7
+  $deceptiveName='missing'+$esc+'[31mFAKE'+$bel+'STAGE=INJECTIONHUNTER_MODULE_NOT_FOUND.psd1'
+  $deceptive=Join-Path $TestDrive $deceptiveName
   $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Deceptive=$deceptive} {
    Test-TPMProductionPSScriptAnalyzerV1 -Inventory $Inv -SettingsPath $Deceptive
   }
   $result.Executed|Should -BeFalse
-  $result.Diagnostic.Stage|Should -Be 'PSSCRIPTANALYZER_SETTINGS_MISSING'
-  $result.Diagnostic.Message|Should -Not -Match "`e" -Because 'the ANSI CSI sequence must be stripped entirely, not merely escaped'
-  $result.Diagnostic.Message|Should -Not -Match "`u{7}" -Because 'the raw BEL byte must never survive; it is rendered as literal \x07 text'
+  $result.Diagnostic.Stage|Should -Be 'PSSCRIPTANALYZER_SETTINGS_MISSING' -Because 'the deceptive embedded "STAGE=INJECTIONHUNTER_MODULE_NOT_FOUND" text must never become the actual Diagnostic.Stage'
+  $result.Diagnostic.Stage|Should -Not -Be 'INJECTIONHUNTER_MODULE_NOT_FOUND'
+  $result.Diagnostic.Message.IndexOf($esc)|Should -Be -1 -Because 'the raw ESC control byte must never survive unsanitized under either engine -- pwsh''s ANSI-sequence regex strips the whole CSI sequence, Windows PowerShell 5.1''s per-character fallback renders the lone ESC byte as visible \x1B text; both are safe, neither leaves a raw ESC byte, confirmed by direct comparison against the real powershell.exe engine'
+  $result.Diagnostic.Message.IndexOf($bel)|Should -Be -1 -Because 'the real raw BEL byte must never survive; it is rendered as literal \x07 text'
   $result.Diagnostic.Message|Should -Match ([regex]::Escape('\x07')) -Because 'the sanitizer renders a stripped control byte as visible \xNN text, not silence, so the operator still sees something happened'
   { Assert-TPMDiagnosticRecordV1 -Value $result.Diagnostic -Context 'Test' } | Should -Not -Throw
  }
  It 'sanitizes a deceptive/control-character file path in the JOB_EXECUTION_FAILED Diagnostic.Message (re-audit fix, not one of the two originally flagged branches)' {
-  $inv=@([ordered]@{RelativePath="deceptive`e[31mFAKE`u{7}STAGE=INJECTIONHUNTER_MODULE_NOT_FOUND.ps1";FullPath=(Join-Path $TestDrive 'x.ps1')})
+  $esc=[char]27
+  $bel=[char]7
+  $deceptiveRelativePath='deceptive'+$esc+'[31mFAKE'+$bel+'STAGE=INJECTIONHUNTER_MODULE_NOT_FOUND.ps1'
+  $inv=@([ordered]@{RelativePath=$deceptiveRelativePath;FullPath=(Join-Path $TestDrive 'x.ps1')})
   $settings=Join-Path $repoRoot 'PSScriptAnalyzerSettings.psd1'
   Mock Invoke-TPMBoundedScriptBlockV1 { [ordered]@{TimedOut=$false;Result=@();HadErrors=$true;ErrorMessages=@('System.Exception: simulated job failure')} } -ModuleName TPMCertification.ProductionFacts
   $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Settings=$settings} {
    Test-TPMProductionPSScriptAnalyzerV1 -Inventory $Inv -SettingsPath $Settings
   }
   $result.Executed|Should -BeFalse
-  $result.Diagnostic.Stage|Should -Be 'PSSCRIPTANALYZER_JOB_EXECUTION_FAILED'
-  $result.Diagnostic.Message|Should -Not -Match "`e" -Because 'the ANSI CSI sequence must be stripped entirely, not merely escaped'
-  $result.Diagnostic.Message|Should -Not -Match "`u{7}" -Because 'the raw BEL byte must never survive; it is rendered as literal \x07 text'
+  $result.Diagnostic.Stage|Should -Be 'PSSCRIPTANALYZER_JOB_EXECUTION_FAILED' -Because 'the deceptive embedded "STAGE=INJECTIONHUNTER_MODULE_NOT_FOUND" text must never become the actual Diagnostic.Stage'
+  $result.Diagnostic.Stage|Should -Not -Be 'INJECTIONHUNTER_MODULE_NOT_FOUND'
+  $result.Diagnostic.Message.IndexOf($esc)|Should -Be -1 -Because 'the raw ESC control byte must never survive unsanitized under either engine -- pwsh''s ANSI-sequence regex strips the whole CSI sequence, Windows PowerShell 5.1''s per-character fallback renders the lone ESC byte as visible \x1B text; both are safe, neither leaves a raw ESC byte, confirmed by direct comparison against the real powershell.exe engine'
+  $result.Diagnostic.Message.IndexOf($bel)|Should -Be -1 -Because 'the real raw BEL byte must never survive; it is rendered as literal \x07 text'
   { Assert-TPMDiagnosticRecordV1 -Value $result.Diagnostic -Context 'Test' } | Should -Not -Throw
  }
  It 'fails closed when the bounded job cannot load PSScriptAnalyzer at all' {
@@ -591,11 +629,26 @@ Describe 'Assert-TPMDispositionRegistryV1 (private, InModuleScope only)' {
 
 Describe 'Test-TPMProductionInjectionHunterV1 (private, InModuleScope only)' {
  It 'executes and matches a real finding against a File+RuleName+Extent disposition registry entry, reporting the exact module version used' {
+  # Portability round: this used to derive its expected version via a bare
+  # Get-Module -ListAvailable InjectionHunter -- a NATIVE $env:PSModulePath
+  # lookup that is blind to the sibling PowerShell/WindowsPowerShell module
+  # root convention Find-TPMInjectionHunterModuleV1 itself probes (see that
+  # function's own comment). On a machine where InjectionHunter is
+  # installed ONLY under the sibling convention for the engine running this
+  # test, that bare Get-Module call would return nothing and this
+  # assertion would fail even though production resolved the module
+  # correctly -- a false failure caused by the TEST reimplementing a
+  # narrower lookup than the code under test. Fixed by resolving through
+  # the actual production discovery function and independently reading the
+  # manifest file it points at via Import-PowerShellDataFile, never trusting
+  # a second, separate Get-Module call to agree with itself.
   $target=Join-Path $TestDrive 'target.ps1';[IO.File]::WriteAllText($target,'Add-Type -AssemblyName System.IO.Compression.FileSystem')
   $inv=@([ordered]@{RelativePath='target.ps1';FullPath=$target})
   $registryPath=Join-Path $TestDrive 'dispositions.psd1'
   [IO.File]::WriteAllText($registryPath,"@{ SchemaVersion = 1; Dispositions = @( @{ File = 'target.ps1'; RuleName = 'InjectionRisk.AddType'; Line = 1; Extent = 'Add-Type -AssemblyName System.IO.Compression.FileSystem'; Disposition = 'FalsePositive'; Reasoning = 'test' } ) }")
-  $expectedVersion=(Get-Module -ListAvailable InjectionHunter|Select-Object -First 1).Version.ToString()
+  $resolvedModule=InModuleScope TPMCertification.ProductionFacts { Find-TPMInjectionHunterModuleV1 }
+  $resolvedModule|Should -Not -BeNullOrEmpty -Because 'InjectionHunter must be resolvable via the production sibling-path discovery for this test to mean anything'
+  $expectedVersion=(Import-PowerShellDataFile -Path $resolvedModule.Path).ModuleVersion
   $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;RegistryPath=$registryPath} {
    Test-TPMProductionInjectionHunterV1 -Inventory $Inv -DispositionRegistryPath $RegistryPath
   }
@@ -604,6 +657,40 @@ Describe 'Test-TPMProductionInjectionHunterV1 (private, InModuleScope only)' {
   $result.UnresolvedFindingCount|Should -Be 0
   $result.Dispositions[0].FindingIdentifier|Should -Match '^target\.ps1::'
   $result.ToolVersion|Should -Be $expectedVersion
+ }
+ It 'resolves InjectionHunter through the sibling-path discovery when it exists only under the OTHER engine''s module-root convention (portability round)' {
+  # Proves Find-TPMInjectionHunterModuleV1's sibling-convention probe
+  # actually works, independent of whatever is really installed on this
+  # machine: a synthetic InjectionHunter manifest is placed ONLY under a
+  # PowerShell\Modules-convention root, $env:PSModulePath is overridden (and
+  # restored in finally) to contain ONLY the sibling WindowsPowerShell\
+  # Modules root -- which does NOT contain InjectionHunter -- so a bare
+  # native Get-Module -ListAvailable lookup against this overridden path
+  # finds nothing, exactly simulating "Windows PowerShell 5.1 cannot
+  # discover it through its native PSModulePath". The production function
+  # must still resolve it by converting that sibling root and finding the
+  # manifest underneath.
+  $fakeRoot=Join-Path $TestDrive ('fake-modules-'+[guid]::NewGuid().ToString('N'))
+  $pwshStyleRoot=Join-Path $fakeRoot 'PowerShell\Modules'
+  $winPSStyleRoot=Join-Path $fakeRoot 'WindowsPowerShell\Modules'
+  $manifestDir=Join-Path $pwshStyleRoot 'InjectionHunter\9.9.9'
+  New-Item -ItemType Directory -Path $manifestDir -Force|Out-Null
+  New-Item -ItemType Directory -Path $winPSStyleRoot -Force|Out-Null
+  $manifestPath=Join-Path $manifestDir 'InjectionHunter.psd1'
+  [IO.File]::WriteAllText($manifestPath,"@{ ModuleVersion = '9.9.9'; RootModule = 'InjectionHunter.psm1' }")
+  $savedPSModulePath=$env:PSModulePath
+  try{
+   $env:PSModulePath=$winPSStyleRoot
+   $nativeLookup=Get-Module -ListAvailable InjectionHunter -ErrorAction SilentlyContinue
+   $nativeLookup|Should -BeNullOrEmpty -Because 'the overridden PSModulePath deliberately contains only the sibling root, which does not have InjectionHunter -- this is the "cannot discover natively" condition being simulated'
+   $resolved=InModuleScope TPMCertification.ProductionFacts { Find-TPMInjectionHunterModuleV1 }
+   $resolved|Should -Not -BeNullOrEmpty -Because 'the production sibling-path probe must still find it via the WindowsPowerShell<->PowerShell convention swap'
+   $resolved.Path|Should -Be $manifestPath
+   (Import-PowerShellDataFile -Path $resolved.Path).ModuleVersion|Should -Be '9.9.9'
+   $resolved.Version|Should -Be ([version]'9.9.9')
+  }finally{
+   $env:PSModulePath=$savedPSModulePath
+  }
  }
  It 'does not cross-match an identical extent in a different file (File is part of the match key)' {
   # ADR155-0309 Checkpoint B2 fix: a finding with no matching registry key
@@ -667,14 +754,18 @@ Describe 'Test-TPMProductionInjectionHunterV1 (private, InModuleScope only)' {
  It 'sanitizes a deceptive/control-character registry path in the REGISTRY_MISSING Diagnostic.Message and still passes schema validation (Stage 2 diagnostic-edge-case round)' {
   $target=Join-Path $TestDrive 'target5.ps1';[IO.File]::WriteAllText($target,'1')
   $inv=@([ordered]@{RelativePath='target5.ps1';FullPath=$target})
-  $deceptive=(Join-Path $TestDrive "missing`e[31mFAKE`u{7}STAGE=INJECTIONHUNTER_DUPLICATE_FINDING.psd1")
+  $esc=[char]27
+  $bel=[char]7
+  $deceptiveName='missing'+$esc+'[31mFAKE'+$bel+'STAGE=INJECTIONHUNTER_DUPLICATE_FINDING.psd1'
+  $deceptive=Join-Path $TestDrive $deceptiveName
   $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Deceptive=$deceptive} {
    Test-TPMProductionInjectionHunterV1 -Inventory $Inv -DispositionRegistryPath $Deceptive
   }
   $result.Executed|Should -BeFalse
-  $result.Diagnostic.Stage|Should -Be 'INJECTIONHUNTER_REGISTRY_MISSING'
-  $result.Diagnostic.Message|Should -Not -Match "`e" -Because 'the ANSI CSI sequence must be stripped entirely, not merely escaped'
-  $result.Diagnostic.Message|Should -Not -Match "`u{7}" -Because 'the raw BEL byte must never survive; it is rendered as literal \x07 text'
+  $result.Diagnostic.Stage|Should -Be 'INJECTIONHUNTER_REGISTRY_MISSING' -Because 'the deceptive embedded "STAGE=INJECTIONHUNTER_DUPLICATE_FINDING" text must never become the actual Diagnostic.Stage'
+  $result.Diagnostic.Stage|Should -Not -Be 'INJECTIONHUNTER_DUPLICATE_FINDING'
+  $result.Diagnostic.Message.IndexOf($esc)|Should -Be -1 -Because 'the raw ESC control byte must never survive unsanitized under either engine -- confirmed by direct comparison against the real powershell.exe engine'
+  $result.Diagnostic.Message.IndexOf($bel)|Should -Be -1 -Because 'the real raw BEL byte must never survive; it is rendered as literal \x07 text'
   $result.Diagnostic.Message|Should -Match ([regex]::Escape('\x07')) -Because 'the sanitizer renders a stripped control byte as visible \xNN text, not silence'
   { Assert-TPMDiagnosticRecordV1 -Value $result.Diagnostic -Context 'Test' } | Should -Not -Throw
  }
@@ -817,7 +908,7 @@ Describe 'New-/Remove-TPMOwnedScratchDirectoryV1 (private, InModuleScope only)' 
    $result|Should -BeFalse
   }
   Test-Path -LiteralPath (Join-Path $realTarget 'must-survive.txt')|Should -BeTrue
-  Remove-Item -LiteralPath $linkPath -Force -ErrorAction SilentlyContinue
+  Remove-TPMTestReparsePointV1 -Path $linkPath
   Remove-Item -LiteralPath $realTarget -Recurse -Force -ErrorAction SilentlyContinue
  }
 }
@@ -897,7 +988,11 @@ Describe 'redirected-cleanup refusal via the real production path (Remove-TPMOwn
    $afterHash|Should -Be $beforeHash -Because 'the foreign marker file bytes must be byte-identical before and after the refused cleanup attempt'
    ($afterChildNames-join ',')|Should -Be ($beforeChildNames-join ',') -Because 'no file was added, removed, or renamed inside the foreign directory -- proving no traversal occurred through the junction'
 
-   Remove-Item -LiteralPath $owned.Path -Force -ErrorAction SilentlyContinue
+   Remove-TPMTestReparsePointV1 -Path $owned.Path
+   $afterTeardownHash=(Get-FileHash -LiteralPath $markerPath -Algorithm SHA256).Hash
+   $afterTeardownChildNames=@(Get-ChildItem -LiteralPath $foreign -Force|Select-Object -ExpandProperty Name|Sort-Object)
+   $afterTeardownHash|Should -Be $beforeHash -Because 'unlinking the junction itself must never touch the foreign target it pointed to'
+   ($afterTeardownChildNames-join ',')|Should -Be ($beforeChildNames-join ',') -Because 'the non-recursive .NET unlink must not traverse into or modify the foreign directory'
    Remove-Item -LiteralPath $foreign -Recurse -Force -ErrorAction SilentlyContinue
   }
   It 'refuses when the recorded ParentRoot itself is a real junction (root-level redirection)' -Skip:(-not$script:tpmProductionFactsJunctionsSupported) {
@@ -920,7 +1015,17 @@ Describe 'redirected-cleanup refusal via the real production path (Remove-TPMOwn
    }
    $afterHash=(Get-FileHash -LiteralPath $markerPath -Algorithm SHA256).Hash
    $afterHash|Should -Be $beforeHash
-   Remove-Item -LiteralPath $linkParent -Force -ErrorAction SilentlyContinue
+   # forgedLeaf ($linkParent\anything) necessarily stops resolving once the
+   # junction itself is unlinked -- $linkParent no longer exists as a path
+   # at all, so anything reached only "through" it is unreachable by that
+   # name. That is expected and correct; the real question is whether the
+   # unlink reached through the junction and deleted realParent's own
+   # content, which must be checked via realParent's real, direct path.
+   $realLeaf=Join-Path $realParent 'anything'
+   Remove-TPMTestReparsePointV1 -Path $linkParent
+   $afterTeardownHash=(Get-FileHash -LiteralPath $markerPath -Algorithm SHA256).Hash
+   $afterTeardownHash|Should -Be $beforeHash -Because 'unlinking the junction itself must never touch the unrelated foreign directory'
+   Test-Path -LiteralPath $realLeaf|Should -BeTrue -Because 'unlinking the junction must not recurse into and delete realParent''s own content, checked via realParent''s real path since the junction alias no longer resolves'
    Remove-Item -LiteralPath $realParent -Recurse -Force -ErrorAction SilentlyContinue
    Remove-Item -LiteralPath $foreign -Recurse -Force -ErrorAction SilentlyContinue
   }
@@ -964,7 +1069,9 @@ Describe 'redirected-cleanup refusal via the real production path (Remove-TPMOwn
    }
    $afterHash=(Get-FileHash -LiteralPath $markerPath -Algorithm SHA256).Hash
    $afterHash|Should -Be $beforeHash -Because 'no traversal through the intermediate junction may reach the foreign leaf'
-   Remove-Item -LiteralPath $midPath -Force -ErrorAction SilentlyContinue
+   Remove-TPMTestReparsePointV1 -Path $midPath
+   $afterTeardownHash=(Get-FileHash -LiteralPath $markerPath -Algorithm SHA256).Hash
+   $afterTeardownHash|Should -Be $beforeHash -Because 'unlinking the intermediate junction itself must never touch the foreign target it pointed to'
    Remove-Item -LiteralPath $foreign -Recurse -Force -ErrorAction SilentlyContinue
    Remove-Item -LiteralPath $parent -Recurse -Force -ErrorAction SilentlyContinue
   }
@@ -1000,7 +1107,11 @@ Describe 'redirected-cleanup refusal via the real production path (Remove-TPMOwn
    }
    $afterHash=(Get-FileHash -LiteralPath $markerPath -Algorithm SHA256).Hash
    $afterHash|Should -Be $beforeHash -Because 'foreign content must remain byte-identical even when cleanup follows an unclear child-process outcome'
-   Remove-Item -LiteralPath $owned.Path -Force -ErrorAction SilentlyContinue
+   Remove-TPMTestReparsePointV1 -Path $owned.Path
+   $afterTeardownHash=(Get-FileHash -LiteralPath $markerPath -Algorithm SHA256).Hash
+   $afterTeardownChildNames=@(Get-ChildItem -LiteralPath $foreign -Force|Select-Object -ExpandProperty Name|Sort-Object)
+   $afterTeardownHash|Should -Be $beforeHash -Because 'unlinking the junction itself must never touch the foreign target it pointed to'
+   ($afterTeardownChildNames-join ',')|Should -Be 'marker.bin' -Because 'the non-recursive .NET unlink must not traverse into or modify the foreign directory'
    Remove-Item -LiteralPath $foreign -Recurse -Force -ErrorAction SilentlyContinue
   }
  }

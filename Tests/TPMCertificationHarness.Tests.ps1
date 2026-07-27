@@ -2968,6 +2968,28 @@ Describe 'Run-TPM-Tests.ps1 real HarnessRoot bootstrap (Item 2, ADR155-0309 foll
             [void](New-Item -ItemType Junction -Path $LinkPath -Target $TargetPath -ErrorAction Stop)
         }
 
+        function Remove-TPMBootstrapTestJunctionV1 {
+            # Test-only teardown helper (portability round): Remove-Item on a
+            # reparse-point directory, without -Recurse, prompts for
+            # confirmation under genuine Windows PowerShell 5.1 (pwsh does
+            # not), and that prompt throws PSInvalidOperationException under
+            # -NonInteractive -- confirmed by direct reproduction against the
+            # real powershell.exe 5.1 engine. [IO.Directory]::Delete($Path,
+            # $false) unlinks the reparse point itself without traversing
+            # into its target and behaves identically under both engines.
+            # Guarded: refuses to act outside TestDrive, and refuses to act
+            # on anything that is not actually a reparse point.
+            param([Parameter(Mandatory=$true)][string]$Path)
+            if(-not(Test-Path -LiteralPath $Path)){return}
+            $full=[IO.Path]::GetFullPath($Path).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+            $testDriveFull=[IO.Path]::GetFullPath($TestDrive).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+            $isInsideTestDrive=$full.Equals($testDriveFull,[StringComparison]::OrdinalIgnoreCase)-or$full.StartsWith($testDriveFull+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)
+            if(-not$isInsideTestDrive){throw "Remove-TPMBootstrapTestJunctionV1 refuses to act outside TestDrive: $full"}
+            $item=Get-Item -LiteralPath $full -Force
+            if(($item.Attributes-band[IO.FileAttributes]::ReparsePoint)-eq0){throw "Remove-TPMBootstrapTestJunctionV1 refuses to unlink a non-reparse-point path: $full"}
+            [IO.Directory]::Delete($full,$false)
+        }
+
         function New-TPMBootstrapFixtureRepository {
             # Copies the real repository's scripts/tools/registry/settings
             # into a TestDrive-rooted git repository so Run-TPM-Tests.ps1's
@@ -3171,7 +3193,7 @@ $needle
         $result.Marker|Should -BeNullOrEmpty -Because 'a rejected junction ancestor must abort before the fixture stop-point is ever reached'
         $result.ExitCode|Should -Not -Be 0
         $result.Stdout|Should -Not -Match 'FINAL STATUS:\s*(NOT )?CERTIFIED'
-        Remove-Item -LiteralPath $linkParent -Force -ErrorAction SilentlyContinue
+        Remove-TPMBootstrapTestJunctionV1 -Path $linkParent
         Remove-Item -LiteralPath $realParent -Recurse -Force -ErrorAction SilentlyContinue
     }
 
@@ -3191,7 +3213,7 @@ $needle
         $result.Marker|Should -BeNullOrEmpty
         $result.ExitCode|Should -Not -Be 0
         $result.Stdout|Should -Not -Match 'FINAL STATUS:\s*(NOT )?CERTIFIED'
-        Remove-Item -LiteralPath $harnessRoot -Force -ErrorAction SilentlyContinue
+        Remove-TPMBootstrapTestJunctionV1 -Path $harnessRoot
         Remove-Item -LiteralPath $real -Recurse -Force -ErrorAction SilentlyContinue
     }
 
@@ -3241,7 +3263,9 @@ $needle
         $result.ExitCode|Should -Not -Be 0
         $result.Stdout|Should -Not -Match 'FINAL STATUS:\s*(NOT )?CERTIFIED'
         Test-Path -LiteralPath (Join-Path $foreign 'must-survive.txt')|Should -BeTrue -Because 'no traversal through the intermediate junction may reach the foreign content'
-        Remove-Item -LiteralPath $reportsPath -Force -ErrorAction SilentlyContinue
+        Remove-TPMBootstrapTestJunctionV1 -Path $reportsPath
+        $afterTeardownContent=Test-Path -LiteralPath (Join-Path $foreign 'must-survive.txt')
+        $afterTeardownContent|Should -BeTrue -Because 'unlinking the intermediate junction itself must never touch the foreign target it pointed to'
         Remove-Item -LiteralPath $foreign -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $harnessRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
