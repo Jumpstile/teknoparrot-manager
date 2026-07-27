@@ -162,7 +162,7 @@ function Find-TPMInjectionHunterModuleV1 {
                 # on to the next candidate root with no trail. Still
                 # continues the search (a second candidate root may hold a
                 # good copy), never assume this is fatal by itself.
-                Write-Warning ("INJECTIONHUNTER_MANIFEST_READ_FAILED: path=$($manifest.FullName) exceptionType=$($_.Exception.GetType().FullName) message=$(ConvertTo-TPMSafeTechnicalTextV1 $_.Exception.Message)")
+                Write-Warning ("INJECTIONHUNTER_MANIFEST_READ_FAILED: path=$(ConvertTo-TPMSafeTechnicalTextV1 $manifest.FullName) exceptionType=$($_.Exception.GetType().FullName) message=$(ConvertTo-TPMSafeTechnicalTextV1 $_.Exception.Message)")
                 continue
             }
         }
@@ -312,7 +312,7 @@ function Test-TPMProductionEncodingV1 {
             foreach($b in $bytes){if($b-gt127){$totalNonAscii++}}
         }catch{
             $executed=$false
-            Write-Warning ("PRODUCTION_ENCODING_READ_FAILED: file=$($item.RelativePath) exceptionType=$($_.Exception.GetType().FullName) message=$(ConvertTo-TPMSafeTechnicalTextV1 $_.Exception.Message)")
+            Write-Warning ("PRODUCTION_ENCODING_READ_FAILED: file=$(ConvertTo-TPMSafeTechnicalTextV1 $item.RelativePath) exceptionType=$($_.Exception.GetType().FullName) message=$(ConvertTo-TPMSafeTechnicalTextV1 $_.Exception.Message)")
         }
     }
     $files=@($Inventory|ForEach-Object{$_.RelativePath})
@@ -349,7 +349,19 @@ function Invoke-TPMBoundedScriptBlockV1 {
     try{
         $completed=Wait-Job -Job $job -Timeout $TimeoutSeconds
         if($null-eq$completed-or$job.State-eq'Running'){
-            try{Stop-Job -Job $job -ErrorAction Stop}catch{}
+            try{
+                Stop-Job -Job $job -ErrorAction Stop
+            }catch{
+                # Stop-Job itself failing (e.g. access denied, remoting
+                # fault) is a real, diagnosable condition -- the job-state
+                # recheck immediately below still runs regardless, so this
+                # does not change the timeout/termination-confirmed outcome;
+                # it only stops the reason Stop-Job failed from being
+                # silently discarded (Item 3 audit, ADR155-0309 follow-up
+                # round: this was the one remaining bare information-
+                # destroying catch in this module's tool-execution path).
+                Write-Warning "PRODUCTION_BOUNDED_JOB_STOP_FAILED: exceptionType=$($_.Exception.GetType().FullName) message=$(ConvertTo-TPMSafeTechnicalTextV1 $_.Exception.Message)"
+            }
             # Stop-Job does not guarantee the job has actually stopped by the
             # time it returns -- wait a short grace window and re-check the
             # job's own State rather than assuming success.
@@ -389,6 +401,22 @@ function Invoke-TPMBoundedScriptBlockV1 {
     }
 }
 
+function New-TPMPSScriptAnalyzerSchemaFailureV1 {
+    # Item 3 audit (ADR155-0309 follow-up round): the job-timeout/job-error
+    # path already preserved a Diagnostic; the result-shape/schema-mismatch
+    # early returns below it did not -- they fell straight into
+    # $notExecuted with Diagnostic=$null, unlike every structurally
+    # equivalent condition in Test-TPMProductionInjectionHunterV1 (which
+    # tags each one via New-TPMInjectionHunterStageExceptionV1). This
+    # closes that gap using the same closed-set Stage tag / sanitized
+    # Message shape and the same concise tagged Write-Warning at the point
+    # of failure, so no failure path in this function can silently look
+    # like a bare Executed=False with no trail.
+    param([Parameter(Mandatory=$true)][string]$Stage,[Parameter(Mandatory=$true)][string]$Detail)
+    Write-Warning "PSSCRIPTANALYZER_TOOL_LOAD_FAILED: stage=$Stage"
+    return [ordered]@{Executed=$false;FindingCount=0;ToolVersion=$null;Diagnostic=[ordered]@{Stage=$Stage;ExceptionType=$null;Message=(ConvertTo-TPMSafeTechnicalTextV1 $Detail)}}
+}
+
 function Test-TPMProductionPSScriptAnalyzerV1 {
     # ToolVersion is reported by the bounded job itself (the process that
     # actually performed the analysis), never by a parent-process
@@ -417,15 +445,15 @@ function Test-TPMProductionPSScriptAnalyzerV1 {
             return $failed
         }
         $items=@($bounded.Result|ForEach-Object{$_})
-        if($items.Count-ne1){return $notExecuted}
+        if($items.Count-ne1){return (New-TPMPSScriptAnalyzerSchemaFailureV1 -Stage 'PSSCRIPTANALYZER_RESULT_SHAPE_INVALID' -Detail "file=$($item.RelativePath) resultCount=$($items.Count)")}
         $r=$items[0]
-        if($null-eq$r){return $notExecuted}
+        if($null-eq$r){return (New-TPMPSScriptAnalyzerSchemaFailureV1 -Stage 'PSSCRIPTANALYZER_RESULT_SHAPE_INVALID' -Detail "file=$($item.RelativePath) result=null")}
         $propNames=Get-TPMJobResultOwnPropertyNamesV1 $r
-        if(($propNames-join',')-ne'FindingCount,Path,ToolVersion'){return $notExecuted}
-        if($r.Path-isnot[string]-or$r.Path-cne$item.FullPath){return $notExecuted}
-        if(-not($r.FindingCount-is[int]-or$r.FindingCount-is[long])-or[long]$r.FindingCount-lt0){return $notExecuted}
-        if($r.ToolVersion-isnot[string]-or[string]::IsNullOrWhiteSpace($r.ToolVersion)){return $notExecuted}
-        if($null-ne$version-and$r.ToolVersion-cne$version){return $notExecuted}
+        if(($propNames-join',')-ne'FindingCount,Path,ToolVersion'){return (New-TPMPSScriptAnalyzerSchemaFailureV1 -Stage 'PSSCRIPTANALYZER_RESULT_SCHEMA_INVALID' -Detail "file=$($item.RelativePath) properties=$($propNames -join ',')")}
+        if($r.Path-isnot[string]-or$r.Path-cne$item.FullPath){return (New-TPMPSScriptAnalyzerSchemaFailureV1 -Stage 'PSSCRIPTANALYZER_RESULT_PATH_MISMATCH' -Detail "expected=$($item.FullPath) actual=$($r.Path)")}
+        if(-not($r.FindingCount-is[int]-or$r.FindingCount-is[long])-or[long]$r.FindingCount-lt0){return (New-TPMPSScriptAnalyzerSchemaFailureV1 -Stage 'PSSCRIPTANALYZER_RESULT_FINDINGCOUNT_INVALID' -Detail "file=$($item.RelativePath)")}
+        if($r.ToolVersion-isnot[string]-or[string]::IsNullOrWhiteSpace($r.ToolVersion)){return (New-TPMPSScriptAnalyzerSchemaFailureV1 -Stage 'PSSCRIPTANALYZER_TOOL_VERSION_MISSING' -Detail "file=$($item.RelativePath)")}
+        if($null-ne$version-and$r.ToolVersion-cne$version){return (New-TPMPSScriptAnalyzerSchemaFailureV1 -Stage 'PSSCRIPTANALYZER_TOOL_VERSION_MISMATCH' -Detail "file=$($item.RelativePath) previous=$version current=$($r.ToolVersion)")}
         $total+=[int]$r.FindingCount
         $version=[string]$r.ToolVersion
     }
@@ -988,6 +1016,17 @@ function New-TPMProductionFactRecordsV1 {
     $encoding=Test-TPMProductionEncodingV1 -Inventory $inventory
     $psAnalyzer=Test-TPMProductionPSScriptAnalyzerV1 -Inventory $inventory -SettingsPath $PSScriptAnalyzerSettingsPath
     $injectionHunter=Test-TPMProductionInjectionHunterV1 -Inventory $inventory -DispositionRegistryPath $DispositionRegistryPath
+    # Item 3 audit (ADR155-0309 follow-up round): a Diagnostic is only ever
+    # meaningful on a genuine Executed=$false result -- on success neither
+    # function's ordered hashtable carries the key at all (additive-only
+    # contract), so bracket indexing (never dot-notation, which would throw
+    # PropertyNotFoundException under this module's Set-StrictMode on a
+    # hashtable with no such key) is used to read it as $null when absent.
+    # Fail closed here if either invariant is violated, rather than letting
+    # a malformed or missing Diagnostic silently flow into the authoritative
+    # fact record.
+    Assert-TPMDiagnosticRecordV1 -Value $psAnalyzer['Diagnostic'] -Context 'PSScriptAnalyzer.Diagnostic' -Nullable:$psAnalyzer.Executed
+    Assert-TPMDiagnosticRecordV1 -Value $injectionHunter['Diagnostic'] -Context 'InjectionHunter.Diagnostic' -Nullable:$injectionHunter.Executed
 
     $staticAnalysisFact=[ordered]@{
         Identifier='Static Analysis';Applicable=$true;Data=[ordered]@{

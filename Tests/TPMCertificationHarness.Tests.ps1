@@ -2944,3 +2944,344 @@ $ReleaseCandidateLabel = "Synthetic"
         Test-Path -LiteralPath (Join-Path $result.Repo 'TeknoParrot-Manager.config.json')|Should -BeFalse
     }
 }
+
+Describe 'Run-TPM-Tests.ps1 real HarnessRoot bootstrap (Item 2, ADR155-0309 follow-up round)' {
+    # Tests the ACTUAL wrapper/entry-point bootstrap path -- scripts\Run-TPM-Tests.ps1
+    # -- as a real child process, not a direct unit-level call to
+    # New-TPMOwnedDirectoryChainV1. A copied TestDrive fixture of the real
+    # repository is used so the entry point can be invoked exactly as a real
+    # operator would invoke it, without ever touching this worktree or a real
+    # TeknoParrot installation. The ONLY production-behavior change made
+    # inside the copied fixture is a narrowly-scoped, env-var-gated
+    # substitution of the single downstream call that would otherwise launch
+    # the real certification harness (Pester / installation inspection /
+    # backups / authority composition / publication) -- when the gating env
+    # var is unset, the copied script is byte-for-byte the same control flow
+    # as production. No production/non-copied file is modified.
+    BeforeAll {
+        $sourceRepo=Split-Path $PSScriptRoot -Parent
+        Import-Module (Join-Path $sourceRepo 'scripts\TPMCertification.Execution.psm1') -Force
+
+        function New-TPMBootstrapTestJunctionV1 {
+            param([Parameter(Mandatory=$true)][string]$LinkPath,[Parameter(Mandatory=$true)][string]$TargetPath)
+            if(-not(Test-Path -LiteralPath $TargetPath)){[void](New-Item -ItemType Directory -Path $TargetPath -Force)}
+            [void](New-Item -ItemType Junction -Path $LinkPath -Target $TargetPath -ErrorAction Stop)
+        }
+
+        function New-TPMBootstrapFixtureRepository {
+            # Copies the real repository's scripts/tools/registry/settings
+            # into a TestDrive-rooted git repository so Run-TPM-Tests.ps1's
+            # own preflight (dependency files, git HEAD readability) passes
+            # exactly as it would against a real checkout. Tests\ only needs
+            # to physically exist -- Run-TPM-Tests.ps1 itself never runs
+            # Pester against it; that happens one process layer further in
+            # (Invoke-TPM-RealInstanceSmoke.ps1), which this fixture's
+            # marker substitution prevents from ever being reached.
+            param([Parameter(Mandatory=$true)][string]$Root)
+            $repo=Join-Path $Root 'repo'
+            $scripts=Join-Path $repo 'scripts'
+            $tools=Join-Path $repo 'tools'
+            $tests=Join-Path $repo 'Tests'
+            New-Item -ItemType Directory -Path $scripts,$tools,$tests -Force|Out-Null
+            Copy-Item -Path (Join-Path $sourceRepo 'scripts\*') -Destination $scripts -Force
+            Copy-Item -Path (Join-Path $sourceRepo 'tools\*') -Destination $tools -Force
+            Copy-Item -LiteralPath (Join-Path $sourceRepo 'PSScriptAnalyzerSettings.psd1') -Destination $repo
+            'placeholder'|Set-Content -LiteralPath (Join-Path $tests 'Placeholder.Tests.ps1') -Encoding ascii
+            @'
+param([switch]$Unattended)
+$ScriptVersion = "test"
+$ReleaseCandidateLabel = "Synthetic"
+'@|Set-Content -LiteralPath (Join-Path $repo 'TeknoParrot-Manager.ps1') -Encoding ascii
+
+            # The ONE narrowly-scoped, env-var-gated substitution: when
+            # TPM_TEST_BOOTSTRAP_MARKER is set, the copied wrapper writes a
+            # marker recording the resolved paths/commit it would otherwise
+            # have handed to the real harness, instead of actually launching
+            # it. When the env var is unset, the original production call
+            # runs unchanged -- so this substitution is inert for any
+            # invocation that does not opt into it.
+            $wrapperPath=Join-Path $scripts 'Run-TPM-Tests.ps1'
+            $wrapperText=[IO.File]::ReadAllText($wrapperPath)
+            $needle="    `$harnessResult=Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList `$params -WorkingDirectoryRoot `$resolvedRepo -WorkingDirectory `$resolvedRepo -LogDirectoryRoot `$reportDirectory -LogDirectory `$logDirectory -Identity 'certification-harness' -TimeoutSeconds (`$PesterRegressionTimeoutSeconds+1800) -OperatorStatusPath `$statusPath -RelayOperatorStatus -Environment @{GIT_TERMINAL_PROMPT='0';NO_COLOR='1';TERM='dumb'}"
+            @([regex]::Matches($wrapperText,[regex]::Escape($needle))).Count|Should -Be 1 -Because 'the exact production call site must still exist unchanged before substitution -- if this ever fails, production control flow changed and this fixture must be updated, not silently patched around'
+            $replacement=@"
+    if(`$env:TPM_TEST_BOOTSTRAP_MARKER){
+        `$bootstrapInfo=[ordered]@{RepoPath=`$resolvedRepo;TeknoParrotRoot=`$resolvedRoot;HarnessRoot=`$HarnessRoot;ReportDirectory=`$reportDirectory;LogDirectory=`$logDirectory;Commit=`$commit;Params=`$params}
+        [IO.File]::WriteAllText(`$env:TPM_TEST_BOOTSTRAP_MARKER,(`$bootstrapInfo|ConvertTo-Json -Depth 5),(New-Object Text.UTF8Encoding `$false))
+        if(`$env:TPM_TEST_BOOTSTRAP_STATUS_TEXT){[IO.File]::WriteAllText(`$statusPath,`$env:TPM_TEST_BOOTSTRAP_STATUS_TEXT,(New-Object Text.UTF8Encoding `$false))}
+        `$tpmTestParsedExitCode=0
+        if(`$env:TPM_TEST_BOOTSTRAP_EXIT_CODE){[void][int]::TryParse(`$env:TPM_TEST_BOOTSTRAP_EXIT_CODE,[ref]`$tpmTestParsedExitCode)}
+        `$harnessResult=[pscustomobject]@{ExitCode=`$tpmTestParsedExitCode}
+    }else{
+$needle
+    }
+"@
+            $wrapperText=$wrapperText.Replace($needle,$replacement)
+            [IO.File]::WriteAllText($wrapperPath,$wrapperText,(New-Object Text.UTF8Encoding $false))
+
+            & git -C $repo init -q
+            & git -C $repo checkout -q -b main
+            & git -C $repo add -- .
+            & git -C $repo -c user.name=TPM-Test -c user.email=tpm-test@example.invalid commit -q -m baseline
+            $head=& git -C $repo rev-parse HEAD
+            & git -C $repo update-ref refs/remotes/origin/main $head
+            return [pscustomobject]@{Repo=$repo;Head=$head.Trim()}
+        }
+
+        function Invoke-TPMBootstrapFixture {
+            param(
+                [Parameter(Mandatory=$true)][string]$Root,
+                [Parameter(Mandatory=$true)][string]$HarnessRoot,
+                [string]$StatusText,
+                [string]$ExitCode,
+                [int]$TimeoutSeconds=60,
+                [switch]$OmitMarker
+            )
+            $fixture=New-TPMBootstrapFixtureRepository -Root $Root
+            $install=Join-Path $Root 'install'
+            New-Item -ItemType Directory -Path $install -Force|Out-Null
+            $logRoot=Join-Path $Root 'invoke-log'
+            New-Item -ItemType Directory -Path $logRoot -Force|Out-Null
+            $marker=Join-Path $Root 'bootstrap-marker.json'
+            $savedMarker=$env:TPM_TEST_BOOTSTRAP_MARKER
+            $savedStatus=$env:TPM_TEST_BOOTSTRAP_STATUS_TEXT
+            $savedExit=$env:TPM_TEST_BOOTSTRAP_EXIT_CODE
+            try{
+                if(-not $OmitMarker){$env:TPM_TEST_BOOTSTRAP_MARKER=$marker}else{$env:TPM_TEST_BOOTSTRAP_MARKER=$null}
+                $env:TPM_TEST_BOOTSTRAP_STATUS_TEXT=$StatusText
+                $env:TPM_TEST_BOOTSTRAP_EXIT_CODE=$ExitCode
+                $arguments=@(
+                    '-NoProfile','-NonInteractive',
+                    '-File',(Join-Path $fixture.Repo 'scripts\Run-TPM-Tests.ps1'),
+                    '-RepoPath',$fixture.Repo,'-TeknoParrotRoot',$install,'-HarnessRoot',$HarnessRoot,'-NoPwshRelaunch'
+                )
+                $invocation=Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList $arguments -WorkingDirectoryRoot $fixture.Repo -WorkingDirectory $fixture.Repo -LogDirectoryRoot $logRoot -LogDirectory $logRoot -Identity 'bootstrap-probe' -TimeoutSeconds $TimeoutSeconds -Environment @{GIT_TERMINAL_PROMPT='0'}
+            }finally{
+                $env:TPM_TEST_BOOTSTRAP_MARKER=$savedMarker
+                $env:TPM_TEST_BOOTSTRAP_STATUS_TEXT=$savedStatus
+                $env:TPM_TEST_BOOTSTRAP_EXIT_CODE=$savedExit
+            }
+            $stdout=if(Test-Path -LiteralPath $invocation.StdOutPath){Get-Content -LiteralPath $invocation.StdOutPath -Raw -ErrorAction SilentlyContinue}else{''}
+            $stderr=if(Test-Path -LiteralPath $invocation.StdErrPath){Get-Content -LiteralPath $invocation.StdErrPath -Raw -ErrorAction SilentlyContinue}else{''}
+            $markerContent=if(Test-Path -LiteralPath $marker){Get-Content -LiteralPath $marker -Raw|ConvertFrom-Json}else{$null}
+            return [pscustomobject]@{
+                Repo=$fixture.Repo;Head=$fixture.Head;Install=$install;HarnessRoot=$HarnessRoot
+                Invocation=$invocation;Stdout=$stdout;Stderr=$stderr;Marker=$markerContent;MarkerPath=$marker
+                TimedOut=$invocation.TimedOut;TerminationConfirmed=$invocation.TerminationConfirmed;ExitCode=[int]$invocation.ExitCode
+            }
+        }
+    }
+
+    It 'establishes exactly the intended HarnessRoot hierarchy and reaches the fixture stop-point with the expected resolved paths and commit' {
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $parent=Join-Path $root 'parent'
+        New-Item -ItemType Directory -Path $parent -Force|Out-Null
+        $harnessRoot=Join-Path $parent 'TPM-TestHarness'
+        Test-Path -LiteralPath $harnessRoot|Should -BeFalse -Because 'HarnessRoot must not exist before this test begins'
+
+        $preGitStatus=& git -c safe.directory=* -C $sourceRepo status --porcelain
+        $result=Invoke-TPMBootstrapFixture -Root $root -HarnessRoot $harnessRoot
+
+        $result.TerminationConfirmed|Should -BeTrue
+        $result.TimedOut|Should -BeFalse
+        $result.Marker|Should -Not -BeNullOrEmpty -Because 'the fixture stop-point must have been reached'
+        $result.Marker.RepoPath|Should -Be $result.Repo
+        $result.Marker.HarnessRoot|Should -Be $harnessRoot
+        $result.Marker.Commit|Should -Be $result.Head
+        $result.Marker.TeknoParrotRoot|Should -Be $result.Install
+
+        Test-Path -LiteralPath $harnessRoot -PathType Container|Should -BeTrue
+        $reportDirs=@(Get-ChildItem -LiteralPath (Join-Path $harnessRoot 'Reports') -Directory)
+        $reportDirs.Count|Should -Be 1 -Because 'exactly one timestamped report directory should have been created'
+        $reportDirectory=$reportDirs[0].FullName
+        $result.Marker.ReportDirectory|Should -Be $reportDirectory
+        Test-Path -LiteralPath (Join-Path $reportDirectory 'TechnicalLogs') -PathType Container|Should -BeTrue
+        $result.Marker.LogDirectory|Should -Be (Join-Path $reportDirectory 'TechnicalLogs')
+
+        # Only the expected descendants exist -- no stray files/directories.
+        $allEntries=@(Get-ChildItem -LiteralPath $harnessRoot -Recurse -Force|ForEach-Object{$_.FullName.Substring($harnessRoot.Length).TrimStart('\')}|Sort-Object)
+        $expected=@('Reports',("Reports\{0}"-f$reportDirs[0].Name),("Reports\{0}\TechnicalLogs"-f$reportDirs[0].Name),("Reports\{0}\OperatorStatus.txt"-f$reportDirs[0].Name))|Sort-Object
+        ($allEntries-join '|')|Should -Be ($expected-join '|')
+
+        # Execution stopped before any real Pester/install-inspection/backup/
+        # authority-composition/publication step: the wrapper's own empty
+        # OperatorStatus.txt placeholder (written unconditionally before the
+        # harness would be launched) remains empty since the fixture never
+        # populated it (TPM_TEST_BOOTSTRAP_STATUS_TEXT was not set here), and
+        # no authoritative certification artifact exists anywhere under
+        # HarnessRoot.
+        (Get-Item -LiteralPath (Join-Path $reportDirectory 'OperatorStatus.txt')).Length|Should -Be 0
+        $authoritative=@(Get-ChildItem -LiteralPath $harnessRoot -File -Recurse -ErrorAction SilentlyContinue|Where-Object{$_.Name-match'^TPM-Certification-(Final-Outcome|Commit|Manifest|Scorecard|Eligibility|Publication)\.'})
+        $authoritative.Count|Should -Be 0
+
+        # No real TeknoParrot/game-install path was ever accessed: the
+        # install directory this test supplied remains exactly as created
+        # (empty), never populated by any real inspection/backup step.
+        @(Get-ChildItem -LiteralPath $result.Install -Force).Count|Should -Be 0
+
+        # The real repository checkout (this worktree) is completely
+        # unaffected by this invocation.
+        $postGitStatus=& git -c safe.directory=* -C $sourceRepo status --porcelain
+        ($postGitStatus-join "`n")|Should -Be ($preGitStatus-join "`n") -Because 'this worktree must remain untouched by any bootstrap test'
+
+        # Captured stdout is concise (the wrapper's own numbered narrative
+        # lines), not a raw diagnostic dump -- detail is redirected to the
+        # technical log directory, matching round 5's operator-console
+        # discipline. Every non-blank stdout line must be one of the
+        # wrapper's own known narrative prefixes.
+        $stdoutLines=@($result.Stdout -split "`r?`n"|Where-Object{$_.Trim().Length-gt0})
+        foreach($line in $stdoutLines){
+            $line|Should -Match '^(TeknoParrot Manager Certification|Target repository:|Target commit:|TeknoParrot:|Reports:|Technical log:|Starting non-interactive certification\.|No further input will be requested\.|FINAL STATUS:|Reason:)' -Because "stdout line '$line' must be a known concise narrative line, not a raw diagnostic dump"
+        }
+    }
+
+    It 'never launches Explorer, never prompts, and closes stdin -- verified by grepping the real entry-point source for reachable interactive calls' {
+        $entryText=[IO.File]::ReadAllText((Join-Path $sourceRepo 'scripts\Run-TPM-Tests.ps1'))
+        $entryText|Should -Not -Match 'explorer\.exe' -Because 'the noninteractive bootstrap path must never launch Explorer'
+        $entryText|Should -Not -Match 'Read-Host'
+        $entryText|Should -Not -Match '\bpause\b'
+        $entryText|Should -Not -Match 'PromptForChoice'
+    }
+
+    It 'the fixture stop-point harness itself returning a nonzero exit code propagates through the wrapper as-is' {
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $harnessRoot=Join-Path $root 'harness'
+        $statusText="FINAL STATUS: PIPELINE ABORTED`r`nReason: synthetic downstream failure sentinel`r`nReport: nowhere`r`nTechnical log: nowhere`r`n"
+        $result=Invoke-TPMBootstrapFixture -Root $root -HarnessRoot $harnessRoot -StatusText $statusText -ExitCode '17'
+        $result.Marker|Should -Not -BeNullOrEmpty
+        $result.ExitCode|Should -Be 17 -Because 'a genuine downstream failure exit code must propagate through the wrapper unchanged'
+        $result.Stdout|Should -Match 'FINAL STATUS: PIPELINE ABORTED'
+        $result.Stdout|Should -Not -Match 'FINAL STATUS:\s*CERTIFIED'
+        $result.Stdout|Should -Not -Match '(?m)^\s*FINAL STATUS:\s*NOT CERTIFIED' -Because 'an infrastructure/bootstrap-level failure must never be observable as a certification verdict'
+    }
+
+    It 'a bootstrap failure (no fixture-stop-point marker reached) exits nonzero and is never observable as a certification verdict' {
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $realParent=Join-Path $root 'real-parent'
+        $linkParent=Join-Path $root 'link-parent'
+        New-Item -ItemType Directory -Path $realParent -Force|Out-Null
+        try{
+            New-TPMBootstrapTestJunctionV1 -LinkPath $linkParent -TargetPath $realParent
+        }catch{
+            Set-ItResult -Skipped -Because 'junction creation is not permitted in this environment'
+            return
+        }
+        $harnessRoot=Join-Path $linkParent 'TPM-TestHarness'
+        $result=Invoke-TPMBootstrapFixture -Root $root -HarnessRoot $harnessRoot
+        $result.Marker|Should -BeNullOrEmpty -Because 'a rejected junction ancestor must abort before the fixture stop-point is ever reached'
+        $result.ExitCode|Should -Not -Be 0
+        $result.Stdout|Should -Not -Match 'FINAL STATUS:\s*(NOT )?CERTIFIED'
+        Remove-Item -LiteralPath $linkParent -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $realParent -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'HarnessRoot itself is a junction whose parent is ordinary -- the reparse point standing at HarnessRoot is rejected' {
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $parent=Join-Path $root 'parent'
+        New-Item -ItemType Directory -Path $parent -Force|Out-Null
+        $real=Join-Path $root 'harness-real'
+        $harnessRoot=Join-Path $parent 'TPM-TestHarness'
+        try{
+            New-TPMBootstrapTestJunctionV1 -LinkPath $harnessRoot -TargetPath $real
+        }catch{
+            Set-ItResult -Skipped -Because 'junction creation is not permitted in this environment'
+            return
+        }
+        $result=Invoke-TPMBootstrapFixture -Root $root -HarnessRoot $harnessRoot
+        $result.Marker|Should -BeNullOrEmpty
+        $result.ExitCode|Should -Not -Be 0
+        $result.Stdout|Should -Not -Match 'FINAL STATUS:\s*(NOT )?CERTIFIED'
+        Remove-Item -LiteralPath $harnessRoot -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $real -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'a missing, untrusted parent directory (never created by this invocation) is rejected rather than silently brought into existence' {
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $missingParent=Join-Path $root 'never-created-parent'
+        Test-Path -LiteralPath $missingParent|Should -BeFalse
+        $harnessRoot=Join-Path $missingParent 'TPM-TestHarness'
+        $result=Invoke-TPMBootstrapFixture -Root $root -HarnessRoot $harnessRoot
+        $result.Marker|Should -BeNullOrEmpty
+        $result.ExitCode|Should -Not -Be 0
+        Test-Path -LiteralPath $missingParent|Should -BeFalse -Because 'an unauthorized missing ancestor must never be silently created by the bootstrap'
+    }
+
+    It 'a Root-vs-Root-Evil sibling-prefix HarnessRoot confusion does not corrupt an unrelated sibling tree' {
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $parent=Join-Path $root 'parent'
+        New-Item -ItemType Directory -Path $parent -Force|Out-Null
+        $harnessRoot=Join-Path $parent 'TPM-TestHarness'
+        $evilSibling=Join-Path $parent 'TPM-TestHarness-Evil'
+        New-Item -ItemType Directory -Path $evilSibling -Force|Out-Null
+        [IO.File]::WriteAllText((Join-Path $evilSibling 'must-survive.txt'),'x')
+        $result=Invoke-TPMBootstrapFixture -Root $root -HarnessRoot $harnessRoot
+        $result.Marker|Should -Not -BeNullOrEmpty
+        Test-Path -LiteralPath (Join-Path $evilSibling 'must-survive.txt')|Should -BeTrue -Because 'creating HarnessRoot must never touch a sibling directory that merely shares a text prefix'
+        @(Get-ChildItem -LiteralPath $evilSibling -Force).Count|Should -Be 1
+    }
+
+    It 'an intermediate component (HarnessRoot\Reports) already substituted with a junction is rejected -- neither the HarnessRoot parent nor HarnessRoot itself is the reparse point' {
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $parent=Join-Path $root 'parent'
+        New-Item -ItemType Directory -Path $parent -Force|Out-Null
+        $harnessRoot=Join-Path $parent 'TPM-TestHarness'
+        New-Item -ItemType Directory -Path $harnessRoot -Force|Out-Null
+        $foreign=Join-Path $root 'foreign-reports'
+        New-Item -ItemType Directory -Path $foreign -Force|Out-Null
+        [IO.File]::WriteAllText((Join-Path $foreign 'must-survive.txt'),'x')
+        $reportsPath=Join-Path $harnessRoot 'Reports'
+        try{
+            New-TPMBootstrapTestJunctionV1 -LinkPath $reportsPath -TargetPath $foreign
+        }catch{
+            Set-ItResult -Skipped -Because 'junction creation is not permitted in this environment'
+            return
+        }
+        $result=Invoke-TPMBootstrapFixture -Root $root -HarnessRoot $harnessRoot
+        $result.Marker|Should -BeNullOrEmpty -Because 'an intermediate junction below an ordinary HarnessRoot must still be rejected by the per-level chain walk'
+        $result.ExitCode|Should -Not -Be 0
+        $result.Stdout|Should -Not -Match 'FINAL STATUS:\s*(NOT )?CERTIFIED'
+        Test-Path -LiteralPath (Join-Path $foreign 'must-survive.txt')|Should -BeTrue -Because 'no traversal through the intermediate junction may reach the foreign content'
+        Remove-Item -LiteralPath $reportsPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $foreign -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $harnessRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'a dot-segment traversal HarnessRoot value canonicalizes to its real resolved location and never touches a decoy sibling' {
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $realParent=Join-Path $root 'real-parent'
+        $decoyParent=Join-Path $root 'decoy-parent'
+        New-Item -ItemType Directory -Path $realParent,$decoyParent -Force|Out-Null
+        [IO.File]::WriteAllText((Join-Path $decoyParent 'must-survive.txt'),'x')
+        # After [IO.Path]::GetFullPath collapse this resolves to
+        # "$realParent\TPM-TestHarness" -- the ".."-laden literal string must
+        # never itself be used for any filesystem operation, and the decoy
+        # sibling (which shares no relationship with the collapsed target)
+        # must remain completely untouched.
+        $traversalHarnessRoot=Join-Path $realParent 'deep\..\TPM-TestHarness'
+        $canonicalHarnessRoot=Join-Path $realParent 'TPM-TestHarness'
+        $result=Invoke-TPMBootstrapFixture -Root $root -HarnessRoot $traversalHarnessRoot
+        $result.Marker|Should -Not -BeNullOrEmpty -Because 'realParent is an ordinary, trusted directory once the dot-segment is collapsed'
+        $result.Marker.HarnessRoot|Should -Be $traversalHarnessRoot -Because 'the wrapper echoes back the literal parameter it was given'
+        Test-Path -LiteralPath $canonicalHarnessRoot -PathType Container|Should -BeTrue -Because 'the bootstrap must land at the canonical collapsed location'
+        Test-Path -LiteralPath (Join-Path $realParent 'deep')|Should -BeFalse -Because 'the dot-segment literal component must never itself be created on disk'
+        Test-Path -LiteralPath (Join-Path $decoyParent 'must-survive.txt')|Should -BeTrue
+        @(Get-ChildItem -LiteralPath $decoyParent -Force).Count|Should -Be 1 -Because 'the decoy sibling must remain completely untouched by a traversal-syntax HarnessRoot value'
+    }
+
+    It 'a descendant creation failure (a file already occupying the Reports directory name) is rejected rather than silently succeeding or corrupting the pre-existing file' {
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $parent=Join-Path $root 'parent'
+        New-Item -ItemType Directory -Path $parent -Force|Out-Null
+        $harnessRoot=Join-Path $parent 'TPM-TestHarness'
+        New-Item -ItemType Directory -Path $harnessRoot -Force|Out-Null
+        $reportsPath=Join-Path $harnessRoot 'Reports'
+        [IO.File]::WriteAllText($reportsPath,'this is a file, not a directory, standing where Reports must be created')
+        $beforeHash=(Get-FileHash -LiteralPath $reportsPath -Algorithm SHA256).Hash
+        $result=Invoke-TPMBootstrapFixture -Root $root -HarnessRoot $harnessRoot
+        $result.Marker|Should -BeNullOrEmpty -Because 'directory creation must fail closed, not silently succeed or fall back to some other location'
+        $result.ExitCode|Should -Not -Be 0
+        $result.Stdout|Should -Not -Match 'FINAL STATUS:\s*(NOT )?CERTIFIED'
+        Test-Path -LiteralPath $reportsPath -PathType Leaf|Should -BeTrue -Because 'the pre-existing file must not be deleted or replaced by a failed directory-creation attempt'
+        (Get-FileHash -LiteralPath $reportsPath -Algorithm SHA256).Hash|Should -Be $beforeHash
+    }
+}

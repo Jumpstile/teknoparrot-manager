@@ -1529,3 +1529,61 @@ same `Compare-TreeSnapshot`:
 ### Certification execution boundary (ADR155 operator experience)
 
 Certification enters a noninteractive boundary after target paths are resolved. `Run-TPM-Tests.ps1` preflights every required executable, module, configuration file, and writable report location without installing or trusting anything. It then launches the harness with closed standard input, `-NoProfile -NonInteractive`, separate timestamped stdout/stderr logs, bounded lifetime, and termination metadata. Pester runs only in `Invoke-TPM-PesterChild.ps1`; its parent accepts only the exact version-1 JSON result schema and rejects missing, malformed, unknown, or contradictory results as infrastructure aborts. The operator surface is an append-only numbered phase display; technical streams remain in `TechnicalLogs`. Certification never fetches or mutates Git state.
+
+#### Redirected-cleanup refusal and real HarnessRoot bootstrap proof (ADR155-0309 follow-up round)
+
+Two behavioral properties implied by the isolation design above, but not
+previously exercised against real reparse points through the actual
+production entry points, now have dedicated adversarial coverage:
+
+- **Cleanup refusal.** `Remove-TPMOwnedScratchDirectoryV1`
+  (`TPMCertification.ProductionFacts.psm1`) revalidates the full
+  ParentRoot-to-Path chain through `Resolve-TPMContainedPathV1`
+  (`TPMCertification.Authority.psm1`) before every recursive delete, and
+  independently checks the target's own `ReparsePoint` attribute. This was
+  already correct; `Tests/TPMCertification.ProductionFacts.Tests.ps1`'s
+  "redirected-cleanup refusal via the real production path" `Describe` block
+  now proves it with real NTFS junctions across the full matrix -- root
+  junction, intermediate-component junction, leaf junction, a
+  Root-vs-Root-Evil sibling-prefix attempt, a forged foreign directory, and
+  cleanup invoked after an uncertain (crash/kill/timeout) child-process
+  termination -- confirming byte-identical foreign content (SHA-256 hash and
+  full directory listing, before and after) in every refusal case. No
+  production change was needed; the coverage closes the gap between the
+  design and its proof.
+- **Real HarnessRoot bootstrap.** `Tests/TPMCertificationHarness.Tests.ps1`'s
+  "Run-TPM-Tests.ps1 real HarnessRoot bootstrap" `Describe` block invokes the
+  actual `scripts/Run-TPM-Tests.ps1` entry point as a real child process
+  (via the same `Invoke-TPMIsolatedProcessV1` primitive production code
+  uses) against a TestDrive-copied fixture repository, with the single
+  downstream call to `Invoke-TPM-RealInstanceSmoke.ps1` replaced -- only
+  inside that copied fixture, gated by an environment variable the
+  production call site does not otherwise branch on -- by a stub that
+  records the resolved paths/commit and exits immediately. This proves the
+  real preflight-then-bootstrap path (not `New-TPMOwnedDirectoryChainV1` in
+  isolation) creates exactly the intended `Reports\<stamp>\TechnicalLogs`
+  hierarchy and nothing else, and fails closed -- before ever reaching the
+  fixture stop-point, with a nonzero exit and no marker written -- when: the
+  HarnessRoot parent is a junction, HarnessRoot itself is a junction, an
+  intermediate component (`HarnessRoot\Reports`) is a junction, the parent is
+  missing, a dot-segment traversal value is supplied (which canonicalizes
+  correctly and never touches a decoy sibling), or a file already occupies
+  the name a directory needs to be created at. A genuine downstream failure
+  exit code propagates unchanged and is never observable as a `CERTIFIED`/
+  `NOT CERTIFIED` verdict.
+- **Diagnostic hardening completed.** The prior round's PSScriptAnalyzer/
+  InjectionHunter tool-execution `Diagnostic` hardening (Stage/ExceptionType/
+  sanitized Message on every `Executed=$false` path) left one bare,
+  information-destroying `catch{}` (around `Stop-Job` in
+  `Invoke-TPMBoundedScriptBlockV1`) and no schema validation for the
+  `Diagnostic` shape itself. Both are closed: `Stop-Job` failures are now
+  captured and reported via a sanitized `Write-Warning` without changing the
+  timeout/termination-confirmed outcome, and a new
+  `Assert-TPMDiagnosticRecordV1` (`TPMCertification.Authority.psm1`) is
+  called from `New-TPMProductionFactRecordsV1` for both tools' results,
+  failing closed on a missing, malformed, or wrong-typed `Diagnostic` rather
+  than letting one silently reach the authoritative fact record. The
+  27-finding/27-disposition/0-unresolved InjectionHunter baseline is
+  unchanged (confirmed by direct invocation against the live production
+  inventory under both engines, not merely by the unit tests' small
+  synthetic fixtures).

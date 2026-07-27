@@ -163,6 +163,40 @@ explicitly:
   dimensions are recorded; a validation failure or exception inside the
   validator degrades that evidence to `Failed`, never `Captured`.
 
+## ADR155-0309 redirected-cleanup and HarnessRoot bootstrap invariants (follow-up round)
+
+Two invariants are now proven with real NTFS reparse points against the
+actual production code paths, not merely asserted by design:
+
+- **Cleanup never follows a reparse point.** `Remove-TPMOwnedScratchDirectoryV1`
+  revalidates the entire ParentRoot-to-Path chain (`Resolve-TPMContainedPathV1`)
+  and the target's own attributes immediately before every recursive delete.
+  A junction substituted anywhere in that chain -- at the root, at an
+  intermediate level, or at the leaf -- causes cleanup to refuse and return
+  `$false`; it never traverses through the junction, and foreign content
+  behind it is left byte-identical. This holds even when cleanup is invoked
+  after an uncertain (crashed/killed/timed-out) child-process termination --
+  there is no special-cased "trust it, the child probably finished cleanly"
+  path.
+- **HarnessRoot bootstrap fails closed on every reparse/traversal
+  substitution.** The real `Run-TPM-Tests.ps1` entry point, invoked as an
+  actual child process, refuses to proceed (nonzero exit, no marker/artifact
+  written, never observable as a `CERTIFIED`/`NOT CERTIFIED` verdict) when
+  HarnessRoot's parent is a junction, HarnessRoot itself is a junction, an
+  intermediate component (`Reports`) is a junction, the parent is missing,
+  or a directory-creation step is blocked by a pre-existing file of the same
+  name. A dot-segment traversal value in `-HarnessRoot` canonicalizes to its
+  real resolved location (via `[IO.Path]::GetFullPath`) and never touches an
+  unrelated decoy sibling merely because it happens to be reachable through
+  the literal ".." text.
+
+Path/file identifiers written to `Write-Warning` diagnostics (e.g.
+`INJECTIONHUNTER_MANIFEST_READ_FAILED`, `PRODUCTION_ENCODING_READ_FAILED`)
+are sanitized through `ConvertTo-TPMSafeTechnicalTextV1` for consistency with
+the exception-message text on the same line, even though these paths
+originate from this module's own file-system enumeration rather than
+attacker-controlled input.
+
 ## ADR155-0309 infrastructure-abort containment
 
 Collection and production finalization are separate trust phases. The harness

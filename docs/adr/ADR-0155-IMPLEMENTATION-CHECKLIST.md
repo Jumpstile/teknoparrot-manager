@@ -2359,3 +2359,100 @@ authorized file list and outside the standard non-recursive production
 gate). Zero non-ASCII bytes and zero parse errors on
 `scripts/InjectionHunterDispositions.psd1` and this checklist file, under
 both engines. `git diff --check` clean.
+
+## ADR155-0309 operator-experience review round -- redirected-cleanup refusal, real HarnessRoot bootstrap, diagnostic-hardening completion -- 2026-07-27
+
+Closes the two behavioral items left incomplete by the prior round's
+diagnostic-hardening commit (`cb0dd97127cb6d4e40c247cefe05599c6a819299`):
+proving the real cleanup path refuses redirected/junctioned targets, and
+proving the real `Run-TPM-Tests.ps1` entry point bootstraps `HarnessRoot`
+correctly and fails closed. Also completes the diagnostic-hardening audit
+itself, which a partial prior round had begun but not finished.
+
+**Changed files:** `scripts/TPMCertification.Authority.psm1`,
+`scripts/TPMCertification.ProductionFacts.psm1`,
+`Tests/TPMCertification.Authority.Tests.ps1`,
+`Tests/TPMCertification.ProductionFacts.Tests.ps1`,
+`Tests/TPMCertificationHarness.Tests.ps1`.
+
+**Redirected-cleanup refusal.** `Tests/TPMCertification.ProductionFacts.Tests.ps1`'s
+"redirected-cleanup refusal via the real production path
+(Remove-TPMOwnedScratchDirectoryV1)" `Describe` block exercises the actual
+production cleanup primitive -- never a replica -- against real NTFS
+junctions: ordinary cleanup succeeds; an already-missing owned leaf is
+idempotent; a forged foreign directory is refused; a root-level junction,
+an intermediate-component junction, and a leaf junction are each refused
+independently; a Root-vs-Root-Evil sibling-prefix confusion is refused;
+cleanup invoked after an uncertain (crash/kill/timeout) child-process
+termination is still refused when the leaf was left redirected. Every
+junction-based refusal case asserts SHA-256-hash and directory-listing
+byte-identity on the foreign target before and after the refused attempt.
+No production defect was found -- `Remove-TPMOwnedScratchDirectoryV1` and
+`Resolve-TPMContainedPathV1` already revalidated the full chain correctly;
+this round adds the missing behavioral proof, not a fix. A real
+junction-capability probe (`BeforeDiscovery`) skips only the junction-
+dependent sub-cases when the test account/OS cannot create junctions; every
+non-junction ownership test remains unconditional.
+
+**Real HarnessRoot bootstrap.** `Tests/TPMCertificationHarness.Tests.ps1`'s
+"Run-TPM-Tests.ps1 real HarnessRoot bootstrap" `Describe` block invokes the
+actual `scripts/Run-TPM-Tests.ps1` entry point as a real child process
+(via `Invoke-TPMIsolatedProcessV1`, `-NoProfile -NonInteractive`, closed
+stdin, redirected stdout/stderr, bounded timeout) against a TestDrive-copied
+fixture repository. The only substitution is inside that copied fixture: the
+single downstream call to `Invoke-TPM-RealInstanceSmoke.ps1` is replaced by
+an environment-variable-gated stub (inert unless the variable is set, which
+production code never sets) that records resolved paths/commit and exits.
+Proven: the success path creates exactly `Reports\<stamp>\TechnicalLogs` and
+nothing else, with the stub receiving the correct resolved paths/commit;
+failure is fail-closed (nonzero exit, no marker, never observable as a
+`CERTIFIED`/`NOT CERTIFIED` verdict) when HarnessRoot's parent is a
+junction, HarnessRoot itself is a junction, an intermediate component
+(`Reports`) is a junction, the parent is missing, a dot-segment traversal
+`-HarnessRoot` value is supplied (proven to canonicalize correctly and never
+touch a decoy sibling), or a file occupies the name a directory needs to be
+created at; a Root-vs-Root-Evil sibling is untouched; a genuine downstream
+failure exit code propagates unchanged; no Explorer launch, prompt, or open
+stdin is reachable in the noninteractive path (verified against the real
+entry-point source). No production defect was found in
+`Run-TPM-Tests.ps1`/`TPMCertification.Execution.psm1`; all scenarios passed
+against the existing implementation.
+
+**Diagnostic-hardening completion.** Two real gaps found by a line-by-line
+audit of `cb0dd97`'s own diff (not merely trusting its commit message) were
+closed: (1) a bare `try{Stop-Job -Job $job -ErrorAction Stop}catch{}` in
+`Invoke-TPMBoundedScriptBlockV1` now captures and reports the failure via a
+sanitized `Write-Warning`, without changing the timeout/termination-
+confirmed outcome; (2) a new `Assert-TPMDiagnosticRecordV1`
+(`TPMCertification.Authority.psm1`) validates the `Diagnostic` shape
+(`Stage`/`ExceptionType`/`Message`) and is called from
+`New-TPMProductionFactRecordsV1` for both `Test-TPMProductionPSScriptAnalyzerV1`
+and `Test-TPMProductionInjectionHunterV1` results, failing closed on a
+missing, malformed, or wrong-typed `Diagnostic` rather than letting one
+reach the authoritative fact record. (`cb0dd97` itself had already hardened
+2 of PSScriptAnalyzer's 8 failure branches and all of InjectionHunter's;
+this round's audit found and closed the remaining 6 PSScriptAnalyzer
+branches were left at `Diagnostic=$null` -- see LESSONS_LEARNED.md's
+"operator-experience follow-up round" entry for why the asymmetry wasn't
+caught earlier.) The two `Write-Warning` lines identified as interpolating
+an unsanitized `path=`/`file=` field next to a sanitized exception message
+(`INJECTIONHUNTER_MANIFEST_READ_FAILED`, `PRODUCTION_ENCODING_READ_FAILED`)
+were made consistent by routing those fields through
+`ConvertTo-TPMSafeTechnicalTextV1` as well.
+
+**Verification.** Focused: 108/108 passed (ProductionFacts + Authority,
+including all new cleanup-refusal and Diagnostic-schema tests) and 280/280
+passed (Harness, including all three new HarnessRoot bootstrap scenarios)
+under both pwsh 7.6.4 and Windows PowerShell 5.1, 0 failed, 0 skipped in
+either. Full `.\Tests` suite: pwsh reports 1226/1226 passed (0 failed, 0
+skipped); Windows PowerShell 5.1 reports the identical 1226/1226 passed (0
+failed, 0 skipped) -- no pre-existing WinPS5.1-only failure reproduced in
+this run. `Test-TPMProductionInjectionHunterV1` invoked directly against the
+live production inventory reports `Executed=$true`, `FindingCount=27`,
+`UnresolvedFindingCount=0`, `Dispositions.Count=27` under both engines,
+matching the established baseline exactly. PSScriptAnalyzer with
+`PSScriptAnalyzerSettings.psd1` against `TeknoParrot-Manager.ps1`,
+`scripts/`, and `tools/` reports zero findings under both engines. Zero
+non-ASCII bytes and zero parse errors (both engines' parser) across
+`scripts/`, `Tests/`, and every doc touched this round. `git diff --check`
+clean.

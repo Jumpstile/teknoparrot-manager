@@ -124,3 +124,36 @@ Describe 'ADR-0155 Phase 1 hashing and containment' {
         { Resolve-TPMContainedPathV1 -Root $root -Path (Join-Path $link 'capture.png') } | Should -Throw '*PATH_REPARSE_POINT*'
     }
 }
+
+Describe 'Assert-TPMDiagnosticRecordV1 (Item 3 audit, ADR155-0309 follow-up round)' {
+    It 'accepts a well-formed Diagnostic with a null ExceptionType' {
+        { Assert-TPMDiagnosticRecordV1 -Value ([ordered]@{Stage='SOME_STAGE';ExceptionType=$null;Message='a message'}) -Context 'Test' } | Should -Not -Throw
+    }
+    It 'accepts a well-formed Diagnostic with a string ExceptionType' {
+        { Assert-TPMDiagnosticRecordV1 -Value ([ordered]@{Stage='SOME_STAGE';ExceptionType='System.Exception';Message='a message'}) -Context 'Test' } | Should -Not -Throw
+    }
+    It 'accepts $null when -Nullable is set (the documented Executed=true contract)' {
+        { Assert-TPMDiagnosticRecordV1 -Value $null -Context 'Test' -Nullable } | Should -Not -Throw
+    }
+    It 'rejects $null when -Nullable is not set' {
+        { Assert-TPMDiagnosticRecordV1 -Value $null -Context 'Test' } | Should -Throw '*SCHEMA_INVALID: Test is required*'
+    }
+    It 'rejects a missing Stage field' {
+        { Assert-TPMDiagnosticRecordV1 -Value ([ordered]@{ExceptionType=$null;Message='m'}) -Context 'Test' } | Should -Throw '*SCHEMA_INVALID: Test must have exactly Stage*'
+    }
+    It 'rejects a blank Stage value' {
+        { Assert-TPMDiagnosticRecordV1 -Value ([ordered]@{Stage=' ';ExceptionType=$null;Message='m'}) -Context 'Test' } | Should -Throw '*SCHEMA_INVALID: Test.Stage*'
+    }
+    It 'rejects a non-string, non-null ExceptionType' {
+        { Assert-TPMDiagnosticRecordV1 -Value ([ordered]@{Stage='S';ExceptionType=42;Message='m'}) -Context 'Test' } | Should -Throw '*SCHEMA_INVALID: Test.ExceptionType must be null or a string*'
+    }
+    It 'rejects a missing Message field' {
+        { Assert-TPMDiagnosticRecordV1 -Value ([ordered]@{Stage='S';ExceptionType=$null}) -Context 'Test' } | Should -Throw '*SCHEMA_INVALID: Test must have exactly Stage*'
+    }
+    It 'rejects a blank Message value' {
+        { Assert-TPMDiagnosticRecordV1 -Value ([ordered]@{Stage='S';ExceptionType=$null;Message=''}) -Context 'Test' } | Should -Throw '*SCHEMA_INVALID: Test.Message*'
+    }
+    It 'rejects an extra, unexpected field' {
+        { Assert-TPMDiagnosticRecordV1 -Value ([ordered]@{Stage='S';ExceptionType=$null;Message='m';Extra='x'}) -Context 'Test' } | Should -Throw '*SCHEMA_INVALID: Test must have exactly Stage*'
+    }
+}

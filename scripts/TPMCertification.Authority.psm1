@@ -190,6 +190,26 @@ function Assert-TPMIntegerV1 { param($Value,[string]$Context,[long]$Minimum=0) i
 function Assert-TPMStringV1 { param($Value,[string]$Context,[switch]$Nullable) if($null-eq$Value){if($Nullable){return};throw "SCHEMA_INVALID: $Context is required"};if($Value-isnot[string]-or[string]::IsNullOrWhiteSpace($Value)){throw "SCHEMA_INVALID: $Context must be a non-empty string"} }
 function Assert-TPMNullableHashV1 { param($Value,[string]$Context) if($null-ne$Value-and($Value-isnot[string]-or$Value-cnotmatch'^[0-9a-f]{64}$')){throw "SCHEMA_INVALID: $Context must be null or lowercase SHA-256"} }
 function Assert-TPMNormalizedPathV1 { param($Value,[string]$Context,[switch]$Nullable) if($null-eq$Value){if($Nullable){return};throw "SCHEMA_INVALID: $Context is required"};Assert-TPMStringV1 $Value $Context;if(-not[IO.Path]::IsPathRooted($Value)){throw "SCHEMA_INVALID: $Context must be absolute"};$full=[IO.Path]::GetFullPath($Value).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar);if($full-cne$Value.TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)){throw "SCHEMA_INVALID: $Context is not normalized"} }
+function Assert-TPMDiagnosticRecordV1 {
+    # Item 3 audit (ADR155-0309 follow-up round): the PSScriptAnalyzer/
+    # InjectionHunter tool-execution wrappers construct a Diagnostic record
+    # by hand at every failure return site (Stage/ExceptionType/Message) --
+    # nothing previously validated that shape, so a future call site could
+    # silently omit or malform a field and no test or caller would ever
+    # notice. -Nullable permits the whole record to be $null, which is the
+    # documented contract on a successful (Executed=$true) result; when
+    # non-null every field is required exactly as named -- Stage a non-empty
+    # string, ExceptionType a string or explicit $null (never omitted, never
+    # a non-string value), Message a non-empty string.
+    param($Value,[string]$Context,[switch]$Nullable)
+    if($null-eq$Value){if($Nullable){return};throw "SCHEMA_INVALID: $Context is required"}
+    $map=Get-TPMValueMapV1 $Value
+    $actual=@($map.Keys|ForEach-Object{[string]$_})
+    if(($actual-join',')-ne'Stage,ExceptionType,Message'){throw "SCHEMA_INVALID: $Context must have exactly Stage, ExceptionType, Message"}
+    Assert-TPMStringV1 $map['Stage'] "$Context.Stage"
+    if($null-ne$map['ExceptionType']-and$map['ExceptionType']-isnot[string]){throw "SCHEMA_INVALID: $Context.ExceptionType must be null or a string"}
+    Assert-TPMStringV1 $map['Message'] "$Context.Message"
+}
 function Copy-TPMClosedValueV1 {
     param([AllowNull()]$Value)
     if($null-eq$Value-or$Value-is[string]-or$Value-is[bool]-or$Value-is[byte]-or$Value-is[int16]-or$Value-is[int32]-or$Value-is[int64]){return $Value}
@@ -283,4 +303,4 @@ function Get-TPMScoreAggregateV1 {
     return [ordered]@{ApplicableCount=$applicableCount;PassedCount=$passedCount;PercentageBasisPoints=$percentageBasisPoints;ThresholdBasisPoints=$thresholdBasisPoints;ScoreEligible=$scoreEligible}
 }
 
-Export-ModuleMember -Function Initialize-TPMCertificationTypesV1,ConvertTo-TPMJcsV1,ConvertTo-TPMFailureMessageBase64UrlV1,ConvertFrom-TPMFailureMessageBase64UrlV1,New-TPMWorkflowAuthorityV1,Get-TPMSha256HexV1,Resolve-TPMContainedPathV1,Get-TPMFactIdentifiersV1,Get-TPMEvidenceManifestV1,Get-TPMEvidenceFailureCodesV1,Assert-TPMFactRecordV1,Get-TPMFactDecisionV1,Assert-TPMEvidenceRecordV1,Copy-TPMClosedValueV1,Assert-TPMExactFieldsV1,Assert-TPMStringV1,Get-TPMScoreAggregateV1,ConvertTo-TPMJcsBase64UrlV1,ConvertFrom-TPMJcsBase64UrlV1,Get-TPMFactFailureCodesV1
+Export-ModuleMember -Function Initialize-TPMCertificationTypesV1,ConvertTo-TPMJcsV1,ConvertTo-TPMFailureMessageBase64UrlV1,ConvertFrom-TPMFailureMessageBase64UrlV1,New-TPMWorkflowAuthorityV1,Get-TPMSha256HexV1,Resolve-TPMContainedPathV1,Get-TPMFactIdentifiersV1,Get-TPMEvidenceManifestV1,Get-TPMEvidenceFailureCodesV1,Assert-TPMFactRecordV1,Get-TPMFactDecisionV1,Assert-TPMEvidenceRecordV1,Copy-TPMClosedValueV1,Assert-TPMExactFieldsV1,Assert-TPMStringV1,Get-TPMScoreAggregateV1,ConvertTo-TPMJcsBase64UrlV1,ConvertFrom-TPMJcsBase64UrlV1,Get-TPMFactFailureCodesV1,Assert-TPMDiagnosticRecordV1
