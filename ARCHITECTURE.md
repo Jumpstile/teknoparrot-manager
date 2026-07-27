@@ -1613,3 +1613,26 @@ production entry points, now have dedicated adversarial coverage:
   and its own `Get-ChildItem` call already used `-ErrorAction
   SilentlyContinue`, which suppresses this class of error regardless of
   `$ErrorActionPreference`.
+
+  **Follow-up correction: both `Test-Path` calls also need
+  `-ErrorAction Stop`.** The try/catch alone only converts the exception
+  when the CALLER's `$ErrorActionPreference` already happens to be `'Stop'`
+  (true for every real entry point, but not the ambient default). Confirmed
+  by direct reproduction that under this engine's default (non-`Stop`)
+  preference, the same illegal-character condition instead writes a raw,
+  unsanitized `Test-Path : Illegal characters in path` record straight to
+  the error stream and merely falls through to the ordinary missing-path
+  branch -- the function still behaves correctly from its own return
+  value's perspective, but that raw record leaks regardless of what the
+  caller's preference is. Adding `-ErrorAction Stop` directly to both
+  `Test-Path` calls makes them terminate unconditionally, independent of
+  ambient `$ErrorActionPreference`, so the adjacent try/catch always
+  converts the condition into the structured, sanitized `Diagnostic` with
+  nothing ever written to the error stream. Confirmed this makes the
+  behavior fully deterministic per engine (not merely one of two tolerated
+  outcomes): genuine Windows PowerShell 5.1 (`PSEdition 'Desktop'`) always
+  throws for a real control-character path and always reaches the new
+  `*_PATH_CHECK_FAILED` stage with zero error-stream output; pwsh
+  (`PSEdition 'Core'`) never raises an error for this input at all, with or
+  without `-ErrorAction Stop`, and always reaches the ordinary `*_MISSING`
+  stage.

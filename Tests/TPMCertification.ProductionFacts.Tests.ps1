@@ -438,12 +438,20 @@ Describe 'Test-TPMProductionPSScriptAnalyzerV1 (private, InModuleScope only)' {
   $result.Diagnostic.Stage|Should -Not -Match 'INJECTIONHUNTER' -Because 'the deceptive embedded fake-stage text in the path must never alter the actual Diagnostic.Stage'
   { Assert-TPMDiagnosticRecordV1 -Value $result.Diagnostic -Context 'Test' } | Should -Not -Throw
  }
- It 'a real ESC/BEL settings path under $ErrorActionPreference=Stop (matching every real entry point) still fails closed, whichever branch the engine''s own Test-Path takes' {
-  # Cross-engine honesty test (unmocked): confirmed by direct reproduction
-  # that genuine Windows PowerShell 5.1 throws for this real input under
-  # Stop while pwsh's Test-Path simply returns $false -- both are
-  # acceptable, fail-closed outcomes; this proves neither engine ever
-  # produces Executed=$true or an unhandled exception for this input.
+ It 'a real ESC/BEL settings path produces the exact deterministic per-engine Stage with zero error-stream leakage (-ErrorAction Stop fix)' {
+  # Real, unmocked Test-Path against a real ESC/BEL path. Confirmed by
+  # direct reproduction against both the real powershell.exe 5.1 engine and
+  # real pwsh that this is now fully deterministic per engine (not a
+  # tolerated either-outcome): genuine Windows PowerShell 5.1's Test-Path
+  # throws System.ArgumentException here (PSEdition 'Desktop'), and real
+  # pwsh's Test-Path simply returns $false with no exception at all
+  # (PSEdition 'Core') -- confirmed identically whether -ErrorAction Stop
+  # is present or not for pwsh, since pwsh never raises an error for this
+  # input to begin with. Before the -ErrorAction Stop fix, Windows
+  # PowerShell 5.1's illegal-path condition was written to the error stream
+  # as a non-terminating error and merely fell through to the ordinary
+  # missing-path branch; this asserts that stream is now completely empty
+  # regardless of which branch is reached.
   $repo=New-InventoryFixture (Join-Path $TestDrive ([guid]::NewGuid().ToString('N')))
   $inv=Get-TPMProductionPowerShellInventoryV1 -RepositoryPath $repo
   $esc=[char]27
@@ -452,18 +460,25 @@ Describe 'Test-TPMProductionPSScriptAnalyzerV1 (private, InModuleScope only)' {
   $deceptive=Join-Path $TestDrive $deceptiveName
   $caught=$null
   $result=$null
-  try{
-   $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Deceptive=$deceptive} {
-    $ErrorActionPreference='Stop'
-    Test-TPMProductionPSScriptAnalyzerV1 -Inventory $Inv -SettingsPath $Deceptive
-   }
-  }catch{$caught=$_}
+  $errorStreamOutput=$(
+   try{
+    $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Deceptive=$deceptive} {
+     Test-TPMProductionPSScriptAnalyzerV1 -Inventory $Inv -SettingsPath $Deceptive
+    }
+   }catch{$caught=$_}
+  ) 2>&1
   $caught|Should -BeNullOrEmpty -Because 'the exception must never escape uncaught regardless of which engine is running this test'
+  $leakedErrors=@($errorStreamOutput|Where-Object{$_ -is [System.Management.Automation.ErrorRecord]})
+  $leakedErrors.Count|Should -Be 0 -Because 'no raw, unsanitized Test-Path error record may ever reach the error stream -- Pester assertions passing is not sufficient proof of this on its own'
   $result.Executed|Should -BeFalse
-  $result.Diagnostic.Stage|Should -BeIn @('PSSCRIPTANALYZER_SETTINGS_PATH_CHECK_FAILED','PSSCRIPTANALYZER_SETTINGS_MISSING')
+  if($PSVersionTable.PSEdition-eq'Desktop'){
+   $result.Diagnostic.Stage|Should -Be 'PSSCRIPTANALYZER_SETTINGS_PATH_CHECK_FAILED' -Because 'genuine Windows PowerShell 5.1 deterministically throws for this real control-character path'
+  }else{
+   $result.Diagnostic.Stage|Should -Be 'PSSCRIPTANALYZER_SETTINGS_MISSING' -Because 'real pwsh deterministically returns $false with no exception for this input'
+  }
   { Assert-TPMDiagnosticRecordV1 -Value $result.Diagnostic -Context 'Test' } | Should -Not -Throw
  }
- It 'sanitizes a deceptive/control-character settings path in the SETTINGS_MISSING Diagnostic.Message and still passes schema validation (Stage 2 diagnostic-edge-case round)' {
+ It 'sanitizes a deceptive/control-character settings path in the Diagnostic.Message and still passes schema validation, whichever branch this engine deterministically reaches (Stage 2 diagnostic-edge-case round, updated for the -ErrorAction Stop fix)' {
   $repo=New-InventoryFixture (Join-Path $TestDrive ([guid]::NewGuid().ToString('N')))
   $inv=Get-TPMProductionPowerShellInventoryV1 -RepositoryPath $repo
   # A path that does not exist, carrying a real ANSI CSI escape sequence and
@@ -479,6 +494,16 @@ Describe 'Test-TPMProductionPSScriptAnalyzerV1 (private, InModuleScope only)' {
   # intentionally preserves those three as safe printable-adjacent
   # whitespace, so asserting their absence would not be testing a real
   # sanitization guarantee.
+  #
+  # Since the -ErrorAction Stop fix, real Windows PowerShell 5.1
+  # (PSEdition 'Desktop') deterministically throws for this real
+  # control-character path and reaches PSSCRIPTANALYZER_SETTINGS_PATH_CHECK_FAILED
+  # instead of PSSCRIPTANALYZER_SETTINGS_MISSING -- confirmed by direct
+  # reproduction. Its Diagnostic.Message is the sanitized EXCEPTION message
+  # ("Illegal characters in path."), which never itself embeds the path, so
+  # the ESC/BEL/deceptive-stage assertions on Message content only apply on
+  # the branch that actually embeds the path (Core/pwsh's *_MISSING branch);
+  # both branches still assert Stage-hijack immunity and schema validity.
   $esc=[char]27
   $bel=[char]7
   $deceptiveName='missing'+$esc+'[31mFAKE'+$bel+'STAGE=INJECTIONHUNTER_MODULE_NOT_FOUND.psd1'
@@ -487,11 +512,16 @@ Describe 'Test-TPMProductionPSScriptAnalyzerV1 (private, InModuleScope only)' {
    Test-TPMProductionPSScriptAnalyzerV1 -Inventory $Inv -SettingsPath $Deceptive
   }
   $result.Executed|Should -BeFalse
-  $result.Diagnostic.Stage|Should -Be 'PSSCRIPTANALYZER_SETTINGS_MISSING' -Because 'the deceptive embedded "STAGE=INJECTIONHUNTER_MODULE_NOT_FOUND" text must never become the actual Diagnostic.Stage'
-  $result.Diagnostic.Stage|Should -Not -Be 'INJECTIONHUNTER_MODULE_NOT_FOUND'
-  $result.Diagnostic.Message.IndexOf($esc)|Should -Be -1 -Because 'the raw ESC control byte must never survive unsanitized under either engine -- pwsh''s ANSI-sequence regex strips the whole CSI sequence, Windows PowerShell 5.1''s per-character fallback renders the lone ESC byte as visible \x1B text; both are safe, neither leaves a raw ESC byte, confirmed by direct comparison against the real powershell.exe engine'
-  $result.Diagnostic.Message.IndexOf($bel)|Should -Be -1 -Because 'the real raw BEL byte must never survive; it is rendered as literal \x07 text'
-  $result.Diagnostic.Message|Should -Match ([regex]::Escape('\x07')) -Because 'the sanitizer renders a stripped control byte as visible \xNN text, not silence, so the operator still sees something happened'
+  $result.Diagnostic.Stage|Should -Not -Be 'INJECTIONHUNTER_MODULE_NOT_FOUND' -Because 'the deceptive embedded "STAGE=INJECTIONHUNTER_MODULE_NOT_FOUND" text must never become the actual Diagnostic.Stage'
+  if($PSVersionTable.PSEdition-eq'Desktop'){
+   $result.Diagnostic.Stage|Should -Be 'PSSCRIPTANALYZER_SETTINGS_PATH_CHECK_FAILED'
+   $result.Diagnostic.ExceptionType|Should -Be 'System.ArgumentException'
+  }else{
+   $result.Diagnostic.Stage|Should -Be 'PSSCRIPTANALYZER_SETTINGS_MISSING'
+   $result.Diagnostic.Message.IndexOf($esc)|Should -Be -1 -Because 'the raw ESC control byte must never survive unsanitized -- pwsh''s ANSI-sequence regex strips the whole CSI sequence'
+   $result.Diagnostic.Message.IndexOf($bel)|Should -Be -1 -Because 'the real raw BEL byte must never survive; it is rendered as literal \x07 text'
+   $result.Diagnostic.Message|Should -Match ([regex]::Escape('\x07')) -Because 'the sanitizer renders a stripped control byte as visible \xNN text, not silence, so the operator still sees something happened'
+  }
   { Assert-TPMDiagnosticRecordV1 -Value $result.Diagnostic -Context 'Test' } | Should -Not -Throw
  }
  It 'sanitizes a deceptive/control-character file path in the JOB_EXECUTION_FAILED Diagnostic.Message (re-audit fix, not one of the two originally flagged branches)' {
@@ -822,7 +852,11 @@ Describe 'Test-TPMProductionInjectionHunterV1 (private, InModuleScope only)' {
   $result.Diagnostic.Stage|Should -Not -Match 'MISSING\.psd1|_MISSING$' -Because 'the deceptive embedded fake-stage text in the path must never alter the actual Diagnostic.Stage'
   { Assert-TPMDiagnosticRecordV1 -Value $result.Diagnostic -Context 'Test' } | Should -Not -Throw
  }
- It 'a real ESC/BEL registry path under $ErrorActionPreference=Stop (matching every real entry point) still fails closed, whichever branch the engine''s own Test-Path takes' {
+ It 'a real ESC/BEL registry path produces the exact deterministic per-engine Stage with zero error-stream leakage (-ErrorAction Stop fix)' {
+  # See the analogous PSScriptAnalyzer settings-path test for the full
+  # rationale: real, unmocked Test-Path; deterministic per engine (Desktop
+  # vs Core), not a tolerated either-outcome; asserts the error stream is
+  # completely empty regardless of which branch is reached.
   $target=Join-Path $TestDrive 'target-honest.ps1';[IO.File]::WriteAllText($target,'1')
   $inv=@([ordered]@{RelativePath='target-honest.ps1';FullPath=$target})
   $esc=[char]27
@@ -831,18 +865,30 @@ Describe 'Test-TPMProductionInjectionHunterV1 (private, InModuleScope only)' {
   $deceptive=Join-Path $TestDrive $deceptiveName
   $caught=$null
   $result=$null
-  try{
-   $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Deceptive=$deceptive} {
-    $ErrorActionPreference='Stop'
-    Test-TPMProductionInjectionHunterV1 -Inventory $Inv -DispositionRegistryPath $Deceptive
-   }
-  }catch{$caught=$_}
+  $errorStreamOutput=$(
+   try{
+    $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Deceptive=$deceptive} {
+     Test-TPMProductionInjectionHunterV1 -Inventory $Inv -DispositionRegistryPath $Deceptive
+    }
+   }catch{$caught=$_}
+  ) 2>&1
   $caught|Should -BeNullOrEmpty -Because 'the exception must never escape uncaught regardless of which engine is running this test'
+  $leakedErrors=@($errorStreamOutput|Where-Object{$_ -is [System.Management.Automation.ErrorRecord]})
+  $leakedErrors.Count|Should -Be 0 -Because 'no raw, unsanitized Test-Path error record may ever reach the error stream -- Pester assertions passing is not sufficient proof of this on its own'
   $result.Executed|Should -BeFalse
-  $result.Diagnostic.Stage|Should -BeIn @('INJECTIONHUNTER_REGISTRY_PATH_CHECK_FAILED','INJECTIONHUNTER_REGISTRY_MISSING')
+  if($PSVersionTable.PSEdition-eq'Desktop'){
+   $result.Diagnostic.Stage|Should -Be 'INJECTIONHUNTER_REGISTRY_PATH_CHECK_FAILED' -Because 'genuine Windows PowerShell 5.1 deterministically throws for this real control-character path'
+  }else{
+   $result.Diagnostic.Stage|Should -Be 'INJECTIONHUNTER_REGISTRY_MISSING' -Because 'real pwsh deterministically returns $false with no exception for this input'
+  }
   { Assert-TPMDiagnosticRecordV1 -Value $result.Diagnostic -Context 'Test' } | Should -Not -Throw
  }
- It 'sanitizes a deceptive/control-character registry path in the REGISTRY_MISSING Diagnostic.Message and still passes schema validation (Stage 2 diagnostic-edge-case round)' {
+ It 'sanitizes a deceptive/control-character registry path in the Diagnostic.Message and still passes schema validation, whichever branch this engine deterministically reaches (Stage 2 diagnostic-edge-case round, updated for the -ErrorAction Stop fix)' {
+  # Since the -ErrorAction Stop fix, real Windows PowerShell 5.1
+  # (PSEdition 'Desktop') deterministically throws for this real
+  # control-character path and reaches INJECTIONHUNTER_REGISTRY_PATH_CHECK_FAILED
+  # instead of INJECTIONHUNTER_REGISTRY_MISSING -- confirmed by direct
+  # reproduction. See the analogous PSScriptAnalyzer settings-path test.
   $target=Join-Path $TestDrive 'target5.ps1';[IO.File]::WriteAllText($target,'1')
   $inv=@([ordered]@{RelativePath='target5.ps1';FullPath=$target})
   $esc=[char]27
@@ -853,11 +899,16 @@ Describe 'Test-TPMProductionInjectionHunterV1 (private, InModuleScope only)' {
    Test-TPMProductionInjectionHunterV1 -Inventory $Inv -DispositionRegistryPath $Deceptive
   }
   $result.Executed|Should -BeFalse
-  $result.Diagnostic.Stage|Should -Be 'INJECTIONHUNTER_REGISTRY_MISSING' -Because 'the deceptive embedded "STAGE=INJECTIONHUNTER_DUPLICATE_FINDING" text must never become the actual Diagnostic.Stage'
-  $result.Diagnostic.Stage|Should -Not -Be 'INJECTIONHUNTER_DUPLICATE_FINDING'
-  $result.Diagnostic.Message.IndexOf($esc)|Should -Be -1 -Because 'the raw ESC control byte must never survive unsanitized under either engine -- confirmed by direct comparison against the real powershell.exe engine'
-  $result.Diagnostic.Message.IndexOf($bel)|Should -Be -1 -Because 'the real raw BEL byte must never survive; it is rendered as literal \x07 text'
-  $result.Diagnostic.Message|Should -Match ([regex]::Escape('\x07')) -Because 'the sanitizer renders a stripped control byte as visible \xNN text, not silence'
+  $result.Diagnostic.Stage|Should -Not -Be 'INJECTIONHUNTER_DUPLICATE_FINDING' -Because 'the deceptive embedded "STAGE=INJECTIONHUNTER_DUPLICATE_FINDING" text must never become the actual Diagnostic.Stage'
+  if($PSVersionTable.PSEdition-eq'Desktop'){
+   $result.Diagnostic.Stage|Should -Be 'INJECTIONHUNTER_REGISTRY_PATH_CHECK_FAILED'
+   $result.Diagnostic.ExceptionType|Should -Be 'System.ArgumentException'
+  }else{
+   $result.Diagnostic.Stage|Should -Be 'INJECTIONHUNTER_REGISTRY_MISSING'
+   $result.Diagnostic.Message.IndexOf($esc)|Should -Be -1 -Because 'the raw ESC control byte must never survive unsanitized -- pwsh''s ANSI-sequence regex strips the whole CSI sequence'
+   $result.Diagnostic.Message.IndexOf($bel)|Should -Be -1 -Because 'the real raw BEL byte must never survive; it is rendered as literal \x07 text'
+   $result.Diagnostic.Message|Should -Match ([regex]::Escape('\x07')) -Because 'the sanitizer renders a stripped control byte as visible \xNN text, not silence'
+  }
   { Assert-TPMDiagnosticRecordV1 -Value $result.Diagnostic -Context 'Test' } | Should -Not -Throw
  }
  It 'produces the exact INJECTIONHUNTER_DUPLICATE_FINDING Stage (not a collapsed INJECTIONHUNTER_UNCLASSIFIED_FAILURE) when the scanner reports the same physical finding twice' {

@@ -425,19 +425,25 @@ function Test-TPMProductionPSScriptAnalyzerV1 {
     param([Parameter(Mandatory=$true)]$Inventory,[Parameter(Mandatory=$true)][string]$SettingsPath,[int]$PerFileTimeoutSeconds=60)
     $notExecuted=[ordered]@{Executed=$false;FindingCount=0;ToolVersion=$null;Diagnostic=$null}
     # Confirmed by direct reproduction against the real powershell.exe 5.1
-    # engine, under the same $ErrorActionPreference='Stop' every real
-    # entry point (Run-TPM-Tests.ps1, Invoke-TPM-RealInstanceSmoke.ps1) sets:
-    # Test-Path throws System.ArgumentException for a path containing real
-    # control characters instead of returning $false (pwsh instead returns
-    # $false with no exception -- both outcomes are handled below). This
-    # Test-Path call sits outside every other try/catch in this function, so
-    # left unguarded that exception would previously escape uncaught before
-    # any Diagnostic could ever be constructed. -Path is never sanitized
+    # engine: Test-Path throws System.ArgumentException for a path
+    # containing real control characters instead of returning $false (pwsh
+    # instead returns $false with no exception -- both outcomes are handled
+    # below). -ErrorAction Stop is required here -- without it, under this
+    # engine's DEFAULT (non-Stop) error preference the same illegal-path
+    # condition is instead written to the error stream as a non-terminating
+    # error and execution merely falls through to the ordinary missing-path
+    # branch below; the call still "succeeds" from this function's own
+    # point of view, but the raw, unsanitized "Test-Path : Illegal
+    # characters in path" record leaks to the error stream regardless of
+    # $ErrorActionPreference at the caller. -ErrorAction Stop makes this
+    # call terminating unconditionally, so the try/catch immediately below
+    # always converts it into the structured, sanitized Diagnostic instead,
+    # with nothing ever reaching the error stream. -Path is never sanitized
     # before this check -- doing so could make this inspect a different
     # path than the one the caller actually supplied.
     $settingsPathValid=$false
     try{
-        $settingsPathValid=Test-Path -LiteralPath $SettingsPath -PathType Leaf
+        $settingsPathValid=Test-Path -LiteralPath $SettingsPath -PathType Leaf -ErrorAction Stop
     }catch{
         $notExecuted.Diagnostic=[ordered]@{Stage='PSSCRIPTANALYZER_SETTINGS_PATH_CHECK_FAILED';ExceptionType=$_.Exception.GetType().FullName;Message=(ConvertTo-TPMSafeTechnicalTextV1 $_.Exception.Message)}
         Write-Warning 'PSSCRIPTANALYZER_TOOL_LOAD_FAILED: stage=PSSCRIPTANALYZER_SETTINGS_PATH_CHECK_FAILED'
@@ -593,13 +599,15 @@ function Test-TPMProductionInjectionHunterV1 {
     # Same problem class as Test-TPMProductionPSScriptAnalyzerV1's
     # SettingsPath check (see its comment): this Test-Path call sits before
     # the try block below starts, so it is not covered by this function's
-    # own outer catch -- confirmed by direct reproduction that a real
-    # control-character DispositionRegistryPath throws System.ArgumentException
-    # here under $ErrorActionPreference='Stop' (every real entry point sets
-    # this). -Path is never sanitized before the check.
+    # own outer catch. -ErrorAction Stop is required -- without it, this
+    # engine's default (non-Stop) error preference writes the raw, unsanitized
+    # "Illegal characters in path" record straight to the error stream on a
+    # real control-character path, instead of terminating into the
+    # try/catch immediately below. -Path is never sanitized before the
+    # check.
     $registryPathValid=$false
     try{
-        $registryPathValid=Test-Path -LiteralPath $DispositionRegistryPath -PathType Leaf
+        $registryPathValid=Test-Path -LiteralPath $DispositionRegistryPath -PathType Leaf -ErrorAction Stop
     }catch{
         $notExecuted.Diagnostic=[ordered]@{Stage='INJECTIONHUNTER_REGISTRY_PATH_CHECK_FAILED';ExceptionType=$_.Exception.GetType().FullName;Message=(ConvertTo-TPMSafeTechnicalTextV1 $_.Exception.Message)}
         Write-Warning 'INJECTIONHUNTER_TOOL_LOAD_FAILED: stage=INJECTIONHUNTER_REGISTRY_PATH_CHECK_FAILED'
