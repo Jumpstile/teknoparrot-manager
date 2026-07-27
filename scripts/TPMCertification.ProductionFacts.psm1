@@ -425,7 +425,7 @@ function Test-TPMProductionPSScriptAnalyzerV1 {
     param([Parameter(Mandatory=$true)]$Inventory,[Parameter(Mandatory=$true)][string]$SettingsPath,[int]$PerFileTimeoutSeconds=60)
     $notExecuted=[ordered]@{Executed=$false;FindingCount=0;ToolVersion=$null;Diagnostic=$null}
     if(-not(Test-Path -LiteralPath $SettingsPath -PathType Leaf)){
-        $notExecuted.Diagnostic=[ordered]@{Stage='PSSCRIPTANALYZER_SETTINGS_MISSING';ExceptionType=$null;Message="Settings file not found: $SettingsPath"}
+        $notExecuted.Diagnostic=[ordered]@{Stage='PSSCRIPTANALYZER_SETTINGS_MISSING';ExceptionType=$null;Message="Settings file not found: $(ConvertTo-TPMSafeTechnicalTextV1 $SettingsPath)"}
         Write-Warning 'PSSCRIPTANALYZER_TOOL_LOAD_FAILED: stage=PSSCRIPTANALYZER_SETTINGS_MISSING'
         return $notExecuted
     }
@@ -440,7 +440,7 @@ function Test-TPMProductionPSScriptAnalyzerV1 {
         if($bounded.TimedOut-or$bounded.HadErrors-or$null-eq$bounded.Result){
             $jobErrorText=$(if($bounded.ErrorMessages-and@($bounded.ErrorMessages).Count-gt0){(ConvertTo-TPMSafeTechnicalTextV1 (($bounded.ErrorMessages)-join' | '))}else{'(none captured)'})
             $stage=if($bounded.TimedOut){'PSSCRIPTANALYZER_JOB_TIMED_OUT'}else{'PSSCRIPTANALYZER_JOB_EXECUTION_FAILED'}
-            $failed=[ordered]@{Executed=$false;FindingCount=0;ToolVersion=$null;Diagnostic=[ordered]@{Stage=$stage;ExceptionType=$null;Message="file=$($item.RelativePath) timedOut=$($bounded.TimedOut) hadErrors=$($bounded.HadErrors) jobErrors=$jobErrorText"}}
+            $failed=[ordered]@{Executed=$false;FindingCount=0;ToolVersion=$null;Diagnostic=[ordered]@{Stage=$stage;ExceptionType=$null;Message="file=$(ConvertTo-TPMSafeTechnicalTextV1 $item.RelativePath) timedOut=$($bounded.TimedOut) hadErrors=$($bounded.HadErrors) jobErrors=$jobErrorText"}}
             Write-Warning "PSSCRIPTANALYZER_TOOL_LOAD_FAILED: stage=$stage"
             return $failed
         }
@@ -572,7 +572,7 @@ function Test-TPMProductionInjectionHunterV1 {
         return $notExecuted
     }
     if(-not(Test-Path -LiteralPath $DispositionRegistryPath -PathType Leaf)){
-        $notExecuted.Diagnostic=[ordered]@{Stage='INJECTIONHUNTER_REGISTRY_MISSING';ExceptionType=$null;Message="Disposition registry not found: $DispositionRegistryPath"}
+        $notExecuted.Diagnostic=[ordered]@{Stage='INJECTIONHUNTER_REGISTRY_MISSING';ExceptionType=$null;Message="Disposition registry not found: $(ConvertTo-TPMSafeTechnicalTextV1 $DispositionRegistryPath)"}
         Write-Warning 'INJECTIONHUNTER_TOOL_LOAD_FAILED: stage=INJECTIONHUNTER_REGISTRY_MISSING'
         return $notExecuted
     }
@@ -644,7 +644,7 @@ function Test-TPMProductionInjectionHunterV1 {
         $seenFindingIdentity=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
         foreach($finding in $allFindings){
             $identity=$finding.RelativePath+"`u{1F}"+$finding.RuleName+"`u{1F}"+$finding.Extent+"`u{1F}"+$finding.Line
-            if(-not$seenFindingIdentity.Add($identity)){throw 'INJECTIONHUNTER_DUPLICATE_FINDING'}
+            if(-not$seenFindingIdentity.Add($identity)){throw "INJECTIONHUNTER_DUPLICATE_FINDING: $($finding.RelativePath)::$($finding.RuleName)@L$($finding.Line)"}
         }
 
         # Matching key is File+RuleName+Extent (per ADR requirement -- Line

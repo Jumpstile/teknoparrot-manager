@@ -388,6 +388,40 @@ Describe 'Test-TPMProductionPSScriptAnalyzerV1 (private, InModuleScope only)' {
   $result.Executed|Should -BeFalse
   $result.Diagnostic.Stage|Should -Be 'PSSCRIPTANALYZER_SETTINGS_MISSING'
  }
+ It 'sanitizes a deceptive/control-character settings path in the SETTINGS_MISSING Diagnostic.Message and still passes schema validation (Stage 2 diagnostic-edge-case round)' {
+  $repo=New-InventoryFixture (Join-Path $TestDrive ([guid]::NewGuid().ToString('N')))
+  $inv=Get-TPMProductionPowerShellInventoryV1 -RepositoryPath $repo
+  # A path that does not exist, carrying an ANSI CSI escape sequence and a
+  # raw BEL control character, plus deceptive text designed to look like a
+  # second, different diagnostic line if it survived unsanitized. Tab/CR/LF
+  # are deliberately NOT used here -- ConvertTo-TPMSafeTechnicalTextV1
+  # intentionally preserves those three as safe printable-adjacent
+  # whitespace, so asserting their absence would not be testing a real
+  # sanitization guarantee.
+  $deceptive=(Join-Path $TestDrive "missing`e[31mFAKE`u{7}STAGE=INJECTIONHUNTER_MODULE_NOT_FOUND.psd1")
+  $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Deceptive=$deceptive} {
+   Test-TPMProductionPSScriptAnalyzerV1 -Inventory $Inv -SettingsPath $Deceptive
+  }
+  $result.Executed|Should -BeFalse
+  $result.Diagnostic.Stage|Should -Be 'PSSCRIPTANALYZER_SETTINGS_MISSING'
+  $result.Diagnostic.Message|Should -Not -Match "`e" -Because 'the ANSI CSI sequence must be stripped entirely, not merely escaped'
+  $result.Diagnostic.Message|Should -Not -Match "`u{7}" -Because 'the raw BEL byte must never survive; it is rendered as literal \x07 text'
+  $result.Diagnostic.Message|Should -Match ([regex]::Escape('\x07')) -Because 'the sanitizer renders a stripped control byte as visible \xNN text, not silence, so the operator still sees something happened'
+  { Assert-TPMDiagnosticRecordV1 -Value $result.Diagnostic -Context 'Test' } | Should -Not -Throw
+ }
+ It 'sanitizes a deceptive/control-character file path in the JOB_EXECUTION_FAILED Diagnostic.Message (re-audit fix, not one of the two originally flagged branches)' {
+  $inv=@([ordered]@{RelativePath="deceptive`e[31mFAKE`u{7}STAGE=INJECTIONHUNTER_MODULE_NOT_FOUND.ps1";FullPath=(Join-Path $TestDrive 'x.ps1')})
+  $settings=Join-Path $repoRoot 'PSScriptAnalyzerSettings.psd1'
+  Mock Invoke-TPMBoundedScriptBlockV1 { [ordered]@{TimedOut=$false;Result=@();HadErrors=$true;ErrorMessages=@('System.Exception: simulated job failure')} } -ModuleName TPMCertification.ProductionFacts
+  $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Settings=$settings} {
+   Test-TPMProductionPSScriptAnalyzerV1 -Inventory $Inv -SettingsPath $Settings
+  }
+  $result.Executed|Should -BeFalse
+  $result.Diagnostic.Stage|Should -Be 'PSSCRIPTANALYZER_JOB_EXECUTION_FAILED'
+  $result.Diagnostic.Message|Should -Not -Match "`e" -Because 'the ANSI CSI sequence must be stripped entirely, not merely escaped'
+  $result.Diagnostic.Message|Should -Not -Match "`u{7}" -Because 'the raw BEL byte must never survive; it is rendered as literal \x07 text'
+  { Assert-TPMDiagnosticRecordV1 -Value $result.Diagnostic -Context 'Test' } | Should -Not -Throw
+ }
  It 'fails closed when the bounded job cannot load PSScriptAnalyzer at all' {
   $repo=New-InventoryFixture (Join-Path $TestDrive ([guid]::NewGuid().ToString('N')))
   $inv=Get-TPMProductionPowerShellInventoryV1 -RepositoryPath $repo
@@ -629,6 +663,40 @@ Describe 'Test-TPMProductionInjectionHunterV1 (private, InModuleScope only)' {
   }
   $result.Executed|Should -BeFalse
   $result.Diagnostic.Stage|Should -Be 'INJECTIONHUNTER_REGISTRY_MISSING'
+ }
+ It 'sanitizes a deceptive/control-character registry path in the REGISTRY_MISSING Diagnostic.Message and still passes schema validation (Stage 2 diagnostic-edge-case round)' {
+  $target=Join-Path $TestDrive 'target5.ps1';[IO.File]::WriteAllText($target,'1')
+  $inv=@([ordered]@{RelativePath='target5.ps1';FullPath=$target})
+  $deceptive=(Join-Path $TestDrive "missing`e[31mFAKE`u{7}STAGE=INJECTIONHUNTER_DUPLICATE_FINDING.psd1")
+  $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Deceptive=$deceptive} {
+   Test-TPMProductionInjectionHunterV1 -Inventory $Inv -DispositionRegistryPath $Deceptive
+  }
+  $result.Executed|Should -BeFalse
+  $result.Diagnostic.Stage|Should -Be 'INJECTIONHUNTER_REGISTRY_MISSING'
+  $result.Diagnostic.Message|Should -Not -Match "`e" -Because 'the ANSI CSI sequence must be stripped entirely, not merely escaped'
+  $result.Diagnostic.Message|Should -Not -Match "`u{7}" -Because 'the raw BEL byte must never survive; it is rendered as literal \x07 text'
+  $result.Diagnostic.Message|Should -Match ([regex]::Escape('\x07')) -Because 'the sanitizer renders a stripped control byte as visible \xNN text, not silence'
+  { Assert-TPMDiagnosticRecordV1 -Value $result.Diagnostic -Context 'Test' } | Should -Not -Throw
+ }
+ It 'produces the exact INJECTIONHUNTER_DUPLICATE_FINDING Stage (not a collapsed INJECTIONHUNTER_UNCLASSIFIED_FAILURE) when the scanner reports the same physical finding twice' {
+  $target=Join-Path $TestDrive 'dup-real-finding.ps1'
+  [IO.File]::WriteAllText($target,'1')
+  $inv=@([ordered]@{RelativePath='dup-real-finding.ps1';FullPath=$target})
+  $registryPath=Join-Path $TestDrive 'dispositions-dupreal.psd1'
+  [IO.File]::WriteAllText($registryPath,'@{ SchemaVersion = 1; Dispositions = @() }')
+  Mock Invoke-TPMBoundedScriptBlockV1 {
+   [ordered]@{TimedOut=$false;HadErrors=$false;Result=@([pscustomobject]@{
+    Path=$Parameters.Path
+    Findings=@([pscustomobject]@{RuleName='InjectionRisk.AddType';Line=1;Extent='dup'},[pscustomobject]@{RuleName='InjectionRisk.AddType';Line=1;Extent='dup'})
+    ToolVersion='1.0.0';ManifestErrorType=$null;ManifestErrorMessage=$null;ManifestErrorHResult=$null
+   })}
+  } -ModuleName TPMCertification.ProductionFacts
+  $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;RegistryPath=$registryPath} {
+   Test-TPMProductionInjectionHunterV1 -Inventory $Inv -DispositionRegistryPath $RegistryPath
+  }
+  $result.Executed|Should -BeFalse
+  $result.Diagnostic.Stage|Should -Be 'INJECTIONHUNTER_DUPLICATE_FINDING' -Because 'Stage 2 fix: the throw site now includes a colon+detail so the outer stage-extraction regex preserves this specific Stage instead of falling back to INJECTIONHUNTER_UNCLASSIFIED_FAILURE'
+  { Assert-TPMDiagnosticRecordV1 -Value $result.Diagnostic -Context 'Test' } | Should -Not -Throw
  }
  It 'reports Executed=false when the InjectionHunter module cannot be found' {
   Mock Find-TPMInjectionHunterModuleV1 { $null } -ModuleName TPMCertification.ProductionFacts
