@@ -412,6 +412,57 @@ Describe 'Test-TPMProductionPSScriptAnalyzerV1 (private, InModuleScope only)' {
   $result.Executed|Should -BeFalse
   $result.Diagnostic.Stage|Should -Be 'PSSCRIPTANALYZER_SETTINGS_MISSING'
  }
+ It 'produces PSSCRIPTANALYZER_SETTINGS_PATH_CHECK_FAILED, with an accurate ExceptionType and a sanitized Message, when Test-Path itself throws (deterministic, both engines)' {
+  # Test-Path is mocked to throw the exact exception genuine Windows
+  # PowerShell 5.1 throws for a real-control-character path under
+  # $ErrorActionPreference='Stop' (confirmed by direct reproduction against
+  # powershell.exe -- pwsh's Test-Path never throws for this input, so a
+  # mock is the only way to exercise this new catch branch deterministically
+  # under both engines rather than relying on an engine-specific accident).
+  $repo=New-InventoryFixture (Join-Path $TestDrive ([guid]::NewGuid().ToString('N')))
+  $inv=Get-TPMProductionPowerShellInventoryV1 -RepositoryPath $repo
+  $esc=[char]27
+  $bel=[char]7
+  $deceptiveName='missing'+$esc+'[31mFAKE'+$bel+'STAGE=PSSCRIPTANALYZER_SETTINGS_MISSING.psd1'
+  $deceptive=Join-Path $TestDrive $deceptiveName
+  Mock Test-Path { throw (New-Object ArgumentException('Illegal characters in path.')) } -ModuleName TPMCertification.ProductionFacts
+  $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Deceptive=$deceptive} {
+   Test-TPMProductionPSScriptAnalyzerV1 -Inventory $Inv -SettingsPath $Deceptive
+  }
+  $result.Executed|Should -BeFalse
+  $result.Diagnostic.Stage|Should -Be 'PSSCRIPTANALYZER_SETTINGS_PATH_CHECK_FAILED' -Because 'a path-check exception is a distinct, honest failure mode from an ordinary missing file'
+  $result.Diagnostic.Stage|Should -Not -Be 'PSSCRIPTANALYZER_SETTINGS_MISSING' -Because 'the *_MISSING stage must be reserved for a successful check that returned false, never for an exception'
+  $result.Diagnostic.ExceptionType|Should -Be 'System.ArgumentException'
+  $result.Diagnostic.Message.IndexOf($esc)|Should -Be -1
+  $result.Diagnostic.Message.IndexOf($bel)|Should -Be -1
+  $result.Diagnostic.Stage|Should -Not -Match 'INJECTIONHUNTER' -Because 'the deceptive embedded fake-stage text in the path must never alter the actual Diagnostic.Stage'
+  { Assert-TPMDiagnosticRecordV1 -Value $result.Diagnostic -Context 'Test' } | Should -Not -Throw
+ }
+ It 'a real ESC/BEL settings path under $ErrorActionPreference=Stop (matching every real entry point) still fails closed, whichever branch the engine''s own Test-Path takes' {
+  # Cross-engine honesty test (unmocked): confirmed by direct reproduction
+  # that genuine Windows PowerShell 5.1 throws for this real input under
+  # Stop while pwsh's Test-Path simply returns $false -- both are
+  # acceptable, fail-closed outcomes; this proves neither engine ever
+  # produces Executed=$true or an unhandled exception for this input.
+  $repo=New-InventoryFixture (Join-Path $TestDrive ([guid]::NewGuid().ToString('N')))
+  $inv=Get-TPMProductionPowerShellInventoryV1 -RepositoryPath $repo
+  $esc=[char]27
+  $bel=[char]7
+  $deceptiveName='missing'+$esc+'[31mFAKE'+$bel+'STAGE=INJECTIONHUNTER_MODULE_NOT_FOUND.psd1'
+  $deceptive=Join-Path $TestDrive $deceptiveName
+  $caught=$null
+  $result=$null
+  try{
+   $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Deceptive=$deceptive} {
+    $ErrorActionPreference='Stop'
+    Test-TPMProductionPSScriptAnalyzerV1 -Inventory $Inv -SettingsPath $Deceptive
+   }
+  }catch{$caught=$_}
+  $caught|Should -BeNullOrEmpty -Because 'the exception must never escape uncaught regardless of which engine is running this test'
+  $result.Executed|Should -BeFalse
+  $result.Diagnostic.Stage|Should -BeIn @('PSSCRIPTANALYZER_SETTINGS_PATH_CHECK_FAILED','PSSCRIPTANALYZER_SETTINGS_MISSING')
+  { Assert-TPMDiagnosticRecordV1 -Value $result.Diagnostic -Context 'Test' } | Should -Not -Throw
+ }
  It 'sanitizes a deceptive/control-character settings path in the SETTINGS_MISSING Diagnostic.Message and still passes schema validation (Stage 2 diagnostic-edge-case round)' {
   $repo=New-InventoryFixture (Join-Path $TestDrive ([guid]::NewGuid().ToString('N')))
   $inv=Get-TPMProductionPowerShellInventoryV1 -RepositoryPath $repo
@@ -750,6 +801,46 @@ Describe 'Test-TPMProductionInjectionHunterV1 (private, InModuleScope only)' {
   }
   $result.Executed|Should -BeFalse
   $result.Diagnostic.Stage|Should -Be 'INJECTIONHUNTER_REGISTRY_MISSING'
+ }
+ It 'produces INJECTIONHUNTER_REGISTRY_PATH_CHECK_FAILED, with an accurate ExceptionType and a sanitized Message, when Test-Path itself throws (deterministic, both engines)' {
+  $target=Join-Path $TestDrive 'target-pcf.ps1';[IO.File]::WriteAllText($target,'1')
+  $inv=@([ordered]@{RelativePath='target-pcf.ps1';FullPath=$target})
+  $esc=[char]27
+  $bel=[char]7
+  $deceptiveName='missing'+$esc+'[31mFAKE'+$bel+'STAGE=INJECTIONHUNTER_REGISTRY_MISSING.psd1'
+  $deceptive=Join-Path $TestDrive $deceptiveName
+  Mock Test-Path { throw (New-Object ArgumentException('Illegal characters in path.')) } -ModuleName TPMCertification.ProductionFacts
+  $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Deceptive=$deceptive} {
+   Test-TPMProductionInjectionHunterV1 -Inventory $Inv -DispositionRegistryPath $Deceptive
+  }
+  $result.Executed|Should -BeFalse
+  $result.Diagnostic.Stage|Should -Be 'INJECTIONHUNTER_REGISTRY_PATH_CHECK_FAILED' -Because 'a path-check exception is a distinct, honest failure mode from an ordinary missing file'
+  $result.Diagnostic.Stage|Should -Not -Be 'INJECTIONHUNTER_REGISTRY_MISSING' -Because 'the *_MISSING stage must be reserved for a successful check that returned false, never for an exception'
+  $result.Diagnostic.ExceptionType|Should -Be 'System.ArgumentException'
+  $result.Diagnostic.Message.IndexOf($esc)|Should -Be -1
+  $result.Diagnostic.Message.IndexOf($bel)|Should -Be -1
+  $result.Diagnostic.Stage|Should -Not -Match 'MISSING\.psd1|_MISSING$' -Because 'the deceptive embedded fake-stage text in the path must never alter the actual Diagnostic.Stage'
+  { Assert-TPMDiagnosticRecordV1 -Value $result.Diagnostic -Context 'Test' } | Should -Not -Throw
+ }
+ It 'a real ESC/BEL registry path under $ErrorActionPreference=Stop (matching every real entry point) still fails closed, whichever branch the engine''s own Test-Path takes' {
+  $target=Join-Path $TestDrive 'target-honest.ps1';[IO.File]::WriteAllText($target,'1')
+  $inv=@([ordered]@{RelativePath='target-honest.ps1';FullPath=$target})
+  $esc=[char]27
+  $bel=[char]7
+  $deceptiveName='missing'+$esc+'[31mFAKE'+$bel+'STAGE=INJECTIONHUNTER_MODULE_NOT_FOUND.psd1'
+  $deceptive=Join-Path $TestDrive $deceptiveName
+  $caught=$null
+  $result=$null
+  try{
+   $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Inv=$inv;Deceptive=$deceptive} {
+    $ErrorActionPreference='Stop'
+    Test-TPMProductionInjectionHunterV1 -Inventory $Inv -DispositionRegistryPath $Deceptive
+   }
+  }catch{$caught=$_}
+  $caught|Should -BeNullOrEmpty -Because 'the exception must never escape uncaught regardless of which engine is running this test'
+  $result.Executed|Should -BeFalse
+  $result.Diagnostic.Stage|Should -BeIn @('INJECTIONHUNTER_REGISTRY_PATH_CHECK_FAILED','INJECTIONHUNTER_REGISTRY_MISSING')
+  { Assert-TPMDiagnosticRecordV1 -Value $result.Diagnostic -Context 'Test' } | Should -Not -Throw
  }
  It 'sanitizes a deceptive/control-character registry path in the REGISTRY_MISSING Diagnostic.Message and still passes schema validation (Stage 2 diagnostic-edge-case round)' {
   $target=Join-Path $TestDrive 'target5.ps1';[IO.File]::WriteAllText($target,'1')

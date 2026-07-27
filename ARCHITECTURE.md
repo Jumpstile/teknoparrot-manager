@@ -1587,3 +1587,29 @@ production entry points, now have dedicated adversarial coverage:
   unchanged (confirmed by direct invocation against the live production
   inventory under both engines, not merely by the unit tests' small
   synthetic fixtures).
+- **Path-validation exception boundary (diagnostic-path-check round).**
+  `Test-TPMProductionPSScriptAnalyzerV1`'s `SettingsPath` check and
+  `Test-TPMProductionInjectionHunterV1`'s `DispositionRegistryPath` check
+  both call `Test-Path` before either function's own try/catch begins.
+  Confirmed by direct reproduction against the real `powershell.exe` 5.1
+  engine: under `$ErrorActionPreference='Stop'` (which every real entry
+  point -- `Run-TPM-Tests.ps1`, `Invoke-TPM-RealInstanceSmoke.ps1` -- sets),
+  a path containing real control characters makes `Test-Path` throw
+  `System.ArgumentException` instead of returning `$false`; unguarded, that
+  exception escaped uncaught before any `Diagnostic` could be constructed.
+  (pwsh's `Test-Path` never throws for this input, even under the same
+  preference -- confirmed separately -- so this is a genuine Windows
+  PowerShell 5.1-only failure mode, not a cross-engine one.) Both call
+  sites now wrap the check in its own try/catch, adding two new distinct
+  Stage tags reserved exclusively for a genuine path-check exception, never
+  reused for an ordinary missing-file result:
+  `PSSCRIPTANALYZER_SETTINGS_PATH_CHECK_FAILED` and
+  `INJECTIONHUNTER_REGISTRY_PATH_CHECK_FAILED`. Neither `-Path` value is
+  sanitized before the check itself -- only the `Diagnostic.Message` text
+  is sanitized afterward -- so this never changes which path is actually
+  inspected. `Find-TPMInjectionHunterModuleV1`, the other filesystem check
+  in this call graph, is unaffected: it only ever scans internal
+  `$env:PSModulePath` entries (never `SettingsPath`/`DispositionRegistryPath`)
+  and its own `Get-ChildItem` call already used `-ErrorAction
+  SilentlyContinue`, which suppresses this class of error regardless of
+  `$ErrorActionPreference`.

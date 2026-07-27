@@ -424,7 +424,26 @@ function Test-TPMProductionPSScriptAnalyzerV1 {
     # parent is not proof of what the job genuinely loaded and ran.
     param([Parameter(Mandatory=$true)]$Inventory,[Parameter(Mandatory=$true)][string]$SettingsPath,[int]$PerFileTimeoutSeconds=60)
     $notExecuted=[ordered]@{Executed=$false;FindingCount=0;ToolVersion=$null;Diagnostic=$null}
-    if(-not(Test-Path -LiteralPath $SettingsPath -PathType Leaf)){
+    # Confirmed by direct reproduction against the real powershell.exe 5.1
+    # engine, under the same $ErrorActionPreference='Stop' every real
+    # entry point (Run-TPM-Tests.ps1, Invoke-TPM-RealInstanceSmoke.ps1) sets:
+    # Test-Path throws System.ArgumentException for a path containing real
+    # control characters instead of returning $false (pwsh instead returns
+    # $false with no exception -- both outcomes are handled below). This
+    # Test-Path call sits outside every other try/catch in this function, so
+    # left unguarded that exception would previously escape uncaught before
+    # any Diagnostic could ever be constructed. -Path is never sanitized
+    # before this check -- doing so could make this inspect a different
+    # path than the one the caller actually supplied.
+    $settingsPathValid=$false
+    try{
+        $settingsPathValid=Test-Path -LiteralPath $SettingsPath -PathType Leaf
+    }catch{
+        $notExecuted.Diagnostic=[ordered]@{Stage='PSSCRIPTANALYZER_SETTINGS_PATH_CHECK_FAILED';ExceptionType=$_.Exception.GetType().FullName;Message=(ConvertTo-TPMSafeTechnicalTextV1 $_.Exception.Message)}
+        Write-Warning 'PSSCRIPTANALYZER_TOOL_LOAD_FAILED: stage=PSSCRIPTANALYZER_SETTINGS_PATH_CHECK_FAILED'
+        return $notExecuted
+    }
+    if(-not$settingsPathValid){
         $notExecuted.Diagnostic=[ordered]@{Stage='PSSCRIPTANALYZER_SETTINGS_MISSING';ExceptionType=$null;Message="Settings file not found: $(ConvertTo-TPMSafeTechnicalTextV1 $SettingsPath)"}
         Write-Warning 'PSSCRIPTANALYZER_TOOL_LOAD_FAILED: stage=PSSCRIPTANALYZER_SETTINGS_MISSING'
         return $notExecuted
@@ -571,7 +590,22 @@ function Test-TPMProductionInjectionHunterV1 {
         Write-Warning 'INJECTIONHUNTER_TOOL_LOAD_FAILED: stage=INJECTIONHUNTER_MODULE_NOT_FOUND'
         return $notExecuted
     }
-    if(-not(Test-Path -LiteralPath $DispositionRegistryPath -PathType Leaf)){
+    # Same problem class as Test-TPMProductionPSScriptAnalyzerV1's
+    # SettingsPath check (see its comment): this Test-Path call sits before
+    # the try block below starts, so it is not covered by this function's
+    # own outer catch -- confirmed by direct reproduction that a real
+    # control-character DispositionRegistryPath throws System.ArgumentException
+    # here under $ErrorActionPreference='Stop' (every real entry point sets
+    # this). -Path is never sanitized before the check.
+    $registryPathValid=$false
+    try{
+        $registryPathValid=Test-Path -LiteralPath $DispositionRegistryPath -PathType Leaf
+    }catch{
+        $notExecuted.Diagnostic=[ordered]@{Stage='INJECTIONHUNTER_REGISTRY_PATH_CHECK_FAILED';ExceptionType=$_.Exception.GetType().FullName;Message=(ConvertTo-TPMSafeTechnicalTextV1 $_.Exception.Message)}
+        Write-Warning 'INJECTIONHUNTER_TOOL_LOAD_FAILED: stage=INJECTIONHUNTER_REGISTRY_PATH_CHECK_FAILED'
+        return $notExecuted
+    }
+    if(-not$registryPathValid){
         $notExecuted.Diagnostic=[ordered]@{Stage='INJECTIONHUNTER_REGISTRY_MISSING';ExceptionType=$null;Message="Disposition registry not found: $(ConvertTo-TPMSafeTechnicalTextV1 $DispositionRegistryPath)"}
         Write-Warning 'INJECTIONHUNTER_TOOL_LOAD_FAILED: stage=INJECTIONHUNTER_REGISTRY_MISSING'
         return $notExecuted
