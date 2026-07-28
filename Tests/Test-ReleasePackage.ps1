@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ZipPath,
 
-    [string]$ExpectedDisplayVersion = 'v1.0 RC2.1'
+    [string]$ExpectedDisplayVersion = 'v1.0 RC3'
 )
 
 Set-StrictMode -Version Latest
@@ -55,7 +55,7 @@ try {
     if ($scriptContent -notmatch [regex]::Escape("# TeknoParrot Manager  |  $ExpectedDisplayVersion")) {
         throw "Packaged TeknoParrot-Manager.ps1 header does not contain expected version: $ExpectedDisplayVersion"
     }
-    # Derived from -ExpectedDisplayVersion (e.g. "v1.0 RC2.1" -> "RC2.1")
+    # Derived from -ExpectedDisplayVersion (e.g. "v1.0 RC3" -> "RC3")
     # rather than hardcoded, so this check does not go stale on the next
     # release the way it did for this one.
     if ($ExpectedDisplayVersion -notmatch '^v[\d.]+\s+(\S+)$') {

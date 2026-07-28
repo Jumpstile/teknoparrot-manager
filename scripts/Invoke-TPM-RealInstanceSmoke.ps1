@@ -280,11 +280,30 @@ function Get-TPMConfigJsonSnapshot {
 }
 
 function Set-TPMConfigJsonRoot {
-    param([string]$ConfigPath, [string]$TeknoParrotRoot)
+    # Issue #154 real-hardware certification finding: TeknoParrot-Manager.ps1's
+    # -Unattended flow has no way to choose which mode to auto-run -- every
+    # mode's own body already auto-answers its internal prompts under
+    # -Unattended, but the initial mode selection itself was only ever
+    # reachable through the interactive menu. Confirmed by direct
+    # reproduction that a real -Unattended launch reached the menu loop with
+    # no mode ever chosen and exited 1 at "Mode must be set before starting."
+    # UnattendedMode is the config field the product now reads (see SECTION 1
+    # of TeknoParrot-Manager.ps1) to auto-select an initial mode only when
+    # -Unattended is set; HealthCheck is the read-only mode this harness's
+    # own "Unattended TPM root binding" gate actually needs -- it proves
+    # config-driven root binding and mode selection work end-to-end without
+    # writing, deleting, or modifying anything in the real install.
+    # Add-Member -Force is required, not a plain "=" assignment -- confirmed
+    # by direct reproduction that assigning to a PSCustomObject property that
+    # does not already exist throws SetValueInvocationException, which a
+    # pre-existing config saved before this field existed would otherwise
+    # hit. Every other field on an existing config is left untouched.
+    param([string]$ConfigPath, [string]$TeknoParrotRoot, [string]$UnattendedMode = 'HealthCheck')
     if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) { return $false }
     $raw = Get-Content -LiteralPath $ConfigPath -Raw
     $cfg = $raw | ConvertFrom-Json
-    $cfg.TeknoParrotRoot = $TeknoParrotRoot
+    $cfg | Add-Member -MemberType NoteProperty -Name TeknoParrotRoot -Value $TeknoParrotRoot -Force
+    $cfg | Add-Member -MemberType NoteProperty -Name UnattendedMode -Value $UnattendedMode -Force
     [System.IO.File]::WriteAllText($ConfigPath, ($cfg | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
     return $true
 }
@@ -306,10 +325,18 @@ function Set-TPMConfigJsonRoot {
 # the existing-config path, because the pre-run snapshot for a config that
 # did not exist yet is $null.
 function New-TPMTemporaryUnattendedConfig {
-    param([string]$ConfigPath, [string]$TeknoParrotRoot)
+    # See Set-TPMConfigJsonRoot's comment for why UnattendedMode is required
+    # and why HealthCheck is the correct value for this harness's own
+    # unattended-root-binding proof. This is the complete minimal config
+    # TeknoParrot-Manager.ps1's -Unattended flow needs to pass config load
+    # AND actually select and run a mode to completion: TeknoParrotRoot and
+    # GamesInstallFolder (pre-existing requirement) plus UnattendedMode
+    # (this fix).
+    param([string]$ConfigPath, [string]$TeknoParrotRoot, [string]$UnattendedMode = 'HealthCheck')
     $cfg = [ordered]@{
         TeknoParrotRoot    = $TeknoParrotRoot
         GamesInstallFolder = $TeknoParrotRoot
+        UnattendedMode     = $UnattendedMode
     }
     [System.IO.File]::WriteAllText($ConfigPath, ($cfg | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
     return $true

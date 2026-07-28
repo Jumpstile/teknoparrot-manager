@@ -2456,3 +2456,80 @@ matching the established baseline exactly. PSScriptAnalyzer with
 non-ASCII bytes and zero parse errors (both engines' parser) across
 `scripts/`, `Tests/`, and every doc touched this round. `git diff --check`
 clean.
+
+## Issue #154 real-hardware certification blockers -- unattended Mode config and Pester 5.8.0 regression -- 2026-07-27
+
+Two independently confirmed blockers from a real-hardware certification run
+at `2405a59` (preserved evidence:
+`W:\Emulators\TeknoParrot\TPM-TestHarness\Reports\2026-07-27_19-33-01`).
+
+**Blocker 1 -- `[Unattended] Mode must be set before starting.` (exit 1).**
+Root cause: `-Unattended` had no CLI or config mechanism to select an
+initial mode; confirmed via git history that this gap has existed unchanged
+since the v0.51 BETA commit that introduced the check, not a recent
+regression. Fixed with a new optional `UnattendedMode` saved-config field
+(read only when `-Unattended`, validated against a single accepted name,
+`HealthCheck` -- not the full set of mode-name strings the main-loop
+`switch` otherwise accepts; this RC supports only the one audited
+unattended path the certification gate needs, and every other value fails
+safely as unsupported), and a clean `exit 0` for
+`HealthCheck`'s own completion under `-Unattended` instead of looping back
+into the same error. `New-TPMTemporaryUnattendedConfig` and
+`Set-TPMConfigJsonRoot` (`scripts/Invoke-TPM-RealInstanceSmoke.ps1`) both
+write/preserve this field now (the latter via `Add-Member -Force`, since a
+direct property assignment throws `SetValueInvocationException` on a
+PSCustomObject property that does not already exist -- confirmed by direct
+reproduction). Proven end-to-end with a real, unmodified `pwsh -File
+TeknoParrot-Manager.ps1 -Unattended` child process
+(`Tests/TeknoParrot-Manager.Tests.ps1`) against a synthetic (non-real)
+install fixture: passes configuration validation, runs the real
+`Invoke-LibraryHealthCheck`, exits 0. See ARCHITECTURE.md's "Real-hardware
+certification blockers (issue #154, 2026-07-27 run)" for the full
+inventory of every mandatory config field this required (TeknoParrotRoot,
+GamesInstallFolder, UnattendedMode, plus the pre-existing unconditional
+`TeknoParrotUi.exe`/`GameProfiles` existence checks in SECTION 2).
+
+**Blocker 2 -- 225 Pester failures (1010 passed / 225 failed / 1235
+total).** Root cause: `Invoke-TPM-PesterChild.ps1`'s open-ended
+`Import-Module Pester -MinimumVersion 5.0` silently picked up Pester 5.8.0
+(a real, newer PowerShell Gallery release) instead of the 5.7.1 this suite
+was actually validated against. Reproduced exactly (identical 1010/225/1235
+split) in an isolated checkout; definitive A/B proof that the SAME full
+1235-test suite scores 1234/1235 under 5.7.1 (the one remaining failure a
+pre-existing, unrelated, already-documented flaky screenshot test) versus
+1010/225/1235 under 5.8.0, with nothing else changed. The regression only
+manifests running the full multi-file suite (any single affected file
+alone shows no difference between Pester versions), consistent with the
+dominant failure signatures being cross-file/`BeforeAll` script-scope
+symptoms, not independent per-test bugs. Fixed by pinning to
+`-RequiredVersion 5.7.1` (a hard pin, not a floor) and aligning
+`Run-TPM-Tests.ps1`'s preflight check to the same exact version. See
+LESSONS_LEARNED.md's "Issue #154" entry for the general rule this
+establishes about open-ended version constraints on test-running tools.
+An unrelated stray Pester 3.4.0 install was found and ruled out (both
+`-MinimumVersion 5.0` and `-RequiredVersion 5.7.1` refuse it outright) but
+not touched -- a separate housekeeping item, not part of this fix.
+
+**Also audited (no defect found):** the preserved evidence's zero-byte
+`PSScriptAnalyzer.json` is confirmed the correct, expected representation
+of zero findings (`@() | ConvertTo-Json | Out-File` genuinely produces zero
+bytes for an empty array piped through the pipeline -- a real PowerShell
+behavior, not corruption). No code change made for this item.
+
+**Changed files:** `TeknoParrot-Manager.ps1`,
+`scripts/Invoke-TPM-RealInstanceSmoke.ps1`, `scripts/Invoke-TPM-PesterChild.ps1`,
+`scripts/Run-TPM-Tests.ps1`, `Tests/TeknoParrot-Manager.Tests.ps1`,
+`Tests/TPMCertificationHarness.Tests.ps1`, `ARCHITECTURE.md`,
+`LESSONS_LEARNED.md`, this checklist.
+
+**Verification.** Focused tests for both fixes pass under Pester 5.7.1
+(config creation/preservation/restoration, the real `-Unattended`
+child-process fixture, all pre-existing `Set-TPMConfigJsonRoot`/
+`New-TPMTemporaryUnattendedConfig`/`Restore-TPMConfigJsonSnapshot`/
+`Test-TPMConfigRestored`/`Invoke-TPMUnattendedRootBinding` tests). Static
+gates all clean under both engines: zero non-ASCII bytes, zero parse
+errors, zero PSScriptAnalyzer findings, InjectionHunter
+`FindingCount=27`/`UnresolvedFindingCount=0`/`Dispositions=27` against the
+live inventory, `git diff --check` clean. Full `.\Tests` suite results
+under both engines with Pester pinned to 5.7.1 recorded separately once
+the complete run finishes.

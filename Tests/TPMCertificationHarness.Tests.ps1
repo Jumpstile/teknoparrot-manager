@@ -102,7 +102,7 @@ BeforeAll {
             GitVersion = 'git version 2.44.0'
             PowerShellVersion = '7.4.0'
             TpmScriptVersion = '1.0'
-            TpmDisplayVersion = 'v1.0 RC2'
+            TpmDisplayVersion = 'v1.0 RC3'
         }
     }
 }
@@ -149,7 +149,7 @@ Describe "New-CertificationScorecard" {
         $result.GitVersion        | Should -Be 'git version 2.44.0'
         $result.PowerShellVersion | Should -Be '7.4.0'
         $result.TpmScriptVersion  | Should -Be '1.0'
-        $result.TpmDisplayVersion | Should -Be 'v1.0 RC2'
+        $result.TpmDisplayVersion | Should -Be 'v1.0 RC3'
     }
 
     It "reports WorkingTreeClean as false when GitStatus is not '(clean)'" {
@@ -412,6 +412,53 @@ Describe "TPM config JSON snapshot/override/restore (issue #146)" {
         $updated.GamesInstallFolder | Should -Be 'E:\Games\TeknoParrot Games'
     }
 
+    # Issue #154 real-hardware certification finding: a real -Unattended
+    # launch had no way to auto-select a mode and always exited 1 at
+    # "Mode must be set before starting." -- UnattendedMode is the field
+    # TeknoParrot-Manager.ps1 now reads (only when -Unattended) to pick an
+    # initial mode; Set-TPMConfigJsonRoot must add/overwrite it the same
+    # way it overwrites TeknoParrotRoot, since both are required for this
+    # harness's own unattended-root-binding gate to complete successfully,
+    # while every other saved setting is still left untouched.
+    It "adds UnattendedMode=HealthCheck to an existing saved config that never had that field, preserving every other saved setting" {
+        $configPath = Join-Path $TestDrive ("no-mode-config-" + [guid]::NewGuid().ToString('N') + '.json')
+        $originalConfig = [ordered]@{
+            TeknoParrotRoot = 'C:\Users\Someone\LaunchBox\Emulators\TeknoParrot'
+            ZipSourceFolder = 'W:\ROMS\TeknoParrot Collection'
+            GamesInstallFolder = 'E:\Games\TeknoParrot Games'
+            RetroBat = $true
+        }
+        [System.IO.File]::WriteAllText($configPath, ($originalConfig | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding $false))
+
+        $requestedRoot = 'W:\Emulators\TeknoParrot'
+        $written = Set-TPMConfigJsonRoot -ConfigPath $configPath -TeknoParrotRoot $requestedRoot
+        $written | Should -Be $true
+
+        $updated = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+        $updated.TeknoParrotRoot | Should -Be $requestedRoot
+        $updated.UnattendedMode | Should -Be 'HealthCheck'
+        $updated.ZipSourceFolder | Should -Be 'W:\ROMS\TeknoParrot Collection'
+        $updated.GamesInstallFolder | Should -Be 'E:\Games\TeknoParrot Games'
+        $updated.RetroBat | Should -Be $true
+    }
+
+    It "overwrites an existing UnattendedMode value with HealthCheck (the value this harness's own gate requires), preserving every other saved setting" {
+        $configPath = Join-Path $TestDrive ("wrong-mode-config-" + [guid]::NewGuid().ToString('N') + '.json')
+        $originalConfig = [ordered]@{
+            TeknoParrotRoot = 'C:\Users\Someone\LaunchBox\Emulators\TeknoParrot'
+            GamesInstallFolder = 'E:\Games\TeknoParrot Games'
+            UnattendedMode = 'AutoSync'
+        }
+        [System.IO.File]::WriteAllText($configPath, ($originalConfig | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding $false))
+
+        $written = Set-TPMConfigJsonRoot -ConfigPath $configPath -TeknoParrotRoot 'W:\Emulators\TeknoParrot'
+        $written | Should -Be $true
+
+        $updated = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+        $updated.UnattendedMode | Should -Be 'HealthCheck'
+        $updated.GamesInstallFolder | Should -Be 'E:\Games\TeknoParrot Games'
+    }
+
     It "returns false and writes nothing when there is no existing config to override" {
         $configPath = Join-Path $TestDrive ("missing-config-" + [guid]::NewGuid().ToString('N') + '.json')
         $written = Set-TPMConfigJsonRoot -ConfigPath $configPath -TeknoParrotRoot 'W:\Emulators\TeknoParrot'
@@ -444,7 +491,7 @@ Describe "TPM config JSON snapshot/override/restore (issue #146)" {
     # Review round 2 (finding #2): no saved config exists at all on this
     # machine -- unattended TPM must still be bound to the requested root
     # via a minimal temporary config, not skipped outright.
-    It "New-TPMTemporaryUnattendedConfig creates a config with only TeknoParrotRoot and GamesInstallFolder set to the requested root" {
+    It "New-TPMTemporaryUnattendedConfig creates the complete minimal config -- TeknoParrotRoot, GamesInstallFolder, and UnattendedMode -- set to the requested root/mode" {
         $configPath = Join-Path $TestDrive ("temp-config-" + [guid]::NewGuid().ToString('N') + '.json')
         $requestedRoot = 'W:\Emulators\TeknoParrot'
 
@@ -455,6 +502,8 @@ Describe "TPM config JSON snapshot/override/restore (issue #146)" {
         $cfg = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
         $cfg.TeknoParrotRoot | Should -Be $requestedRoot
         $cfg.GamesInstallFolder | Should -Be $requestedRoot
+        $cfg.UnattendedMode | Should -Be 'HealthCheck' -Because 'HealthCheck is the read-only mode this harness''s own unattended-root-binding gate needs -- without it TeknoParrot-Manager.ps1''s -Unattended flow has no way to pick an initial mode and exits 1 at "Mode must be set before starting"'
+        @($cfg.PSObject.Properties.Name | Sort-Object) | Should -Be @('GamesInstallFolder','TeknoParrotRoot','UnattendedMode') -Because 'this must remain the complete minimal config -- no untested extra fields'
     }
 
     It "New-TPMTemporaryUnattendedConfig's output is removed cleanly by Restore-TPMConfigJsonSnapshot with a null snapshot (the same cleanup path as the existing-config case)" {
@@ -2720,8 +2769,8 @@ $ReleaseCandidateLabel = "Synthetic"
 
             $pesterMarkerPath=Join-Path $scripts 'Invoke-TPM-PesterChild.ps1'
             (Get-Content -LiteralPath $pesterMarkerPath -Raw).Replace(
-                'Import-Module Pester -MinimumVersion 5.0 -ErrorAction Stop',
-                "[IO.File]::AppendAllText(`$env:TPM_TEST_PESTER_INVOKED_MARKER,'invoked'+[Environment]::NewLine); Import-Module Pester -MinimumVersion 5.0 -ErrorAction Stop"
+                'Import-Module Pester -RequiredVersion 5.7.1 -ErrorAction Stop',
+                "[IO.File]::AppendAllText(`$env:TPM_TEST_PESTER_INVOKED_MARKER,'invoked'+[Environment]::NewLine); Import-Module Pester -RequiredVersion 5.7.1 -ErrorAction Stop"
             )|Set-Content -LiteralPath $pesterMarkerPath -Encoding utf8
 
             $harnessPath=Join-Path $scripts 'Invoke-TPM-RealInstanceSmoke.ps1'

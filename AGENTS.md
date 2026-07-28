@@ -1,7 +1,7 @@
 # TeknoParrot Manager
 
 PowerShell 5.1 script for managing TeknoParrot arcade game libraries.
-Current version: v1.0 RC2.1
+Current version: v1.0 RC3
 
 ---
 
@@ -114,9 +114,9 @@ PSScriptAnalyzerSettings.psd1    -- approved PSScriptAnalyzer exclusions with ra
 **Pester suite.** Loads functions via AST parsing -- the script cannot be
 dot-sourced directly because top-level code launches the interactive menu.
 Covers pure/read-only helpers only; excludes UI, live network/registry/install
-logic. Requires Pester 5.x:
+logic. Requires Pester 5.7.1 for certification-compatible full-suite runs:
 ```powershell
-Install-Module Pester -Scope CurrentUser -Force -SkipPublisherCheck -MinimumVersion 5.0
+Install-Module Pester -Scope CurrentUser -Force -SkipPublisherCheck -RequiredVersion 5.7.1
 Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1
 ```
 
@@ -124,7 +124,7 @@ Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1
 
 ## Release ZIP contents
 
-ZIP name: `TeknoParrot Manager v1.0 RC2.1.zip` (always versioned).
+ZIP name: `TeknoParrot Manager v1.0 RC3.zip` (always versioned).
 
 **Include:** `TeknoParrot-Manager.ps1`, `.bat`, `-README.txt`, `-QuickStart.txt`,
 `-CHANGELOG.txt`, `LICENSE`, `Crosshairs\` (all 321 PNGs),

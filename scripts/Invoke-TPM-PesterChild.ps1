@@ -7,7 +7,25 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 try{
-    Import-Module Pester -MinimumVersion 5.0 -ErrorAction Stop
+    # Issue #154 real-hardware certification finding: an open-ended
+    # -MinimumVersion 5.0 let this harness silently pick up whatever the
+    # newest installed Pester happened to be. A real certification run
+    # picked up Pester 5.8.0 (auto-installed after 5.7.1 was validated) and
+    # produced 225 failures across many unrelated test files -- confirmed by
+    # direct reproduction (identical 1010 passed/225 failed/1235 total) in
+    # an isolated checkout, and confirmed the SAME full suite passes
+    # 1234/1235 (the one remaining failure a pre-existing, unrelated,
+    # already-documented nondeterministic screenshot test) under Pester
+    # 5.7.1 with nothing else changed. This is a real Pester 5.8.0
+    # regression in cross-file script-scope variable handling during a
+    # full multi-file run (it does not reproduce running any single file in
+    # isolation), not a pre-existing test-ordering bug independent of
+    # Pester version. Pinned to the exact version this suite is proven
+    # against -- this is deliberately a HARD pin (RequiredVersion), not a
+    # floor, so a future Pester release can never again silently change
+    # certification behavior without a human deciding to re-validate and
+    # bump this pin.
+    Import-Module Pester -RequiredVersion 5.7.1 -ErrorAction Stop
     $configuration=New-PesterConfiguration
     $configuration.Run.Path=Join-Path $RepositoryPath 'Tests'
     $configuration.Run.PassThru=$true

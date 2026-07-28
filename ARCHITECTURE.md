@@ -1636,3 +1636,159 @@ production entry points, now have dedicated adversarial coverage:
   (`PSEdition 'Core'`) never raises an error for this input at all, with or
   without `-ErrorAction Stop`, and always reaches the ordinary `*_MISSING`
   stage.
+
+## Real-hardware certification blockers (issue #154, 2026-07-27 run)
+
+A real-hardware certification run at commit `2405a59` aborted with two
+independently confirmed blockers. Both are fixed narrowly; neither is a
+feature addition.
+
+### Unattended mode selection (`TeknoParrot-Manager.ps1` exit 1: "Mode must be
+set before starting")
+
+`-Unattended` had no CLI or config mechanism to choose which mode to run.
+Every mode's own body already auto-answers its internal prompts under
+`-Unattended` (the many `if ($Unattended) { ... }` blocks throughout the
+script), but the INITIAL mode choice itself was only ever reachable through
+the interactive menu (`Read-MainMenuChoiceResponsive`) or a same-session
+preview "Apply for real now?" re-entry (`$pendingApplyMode`). Confirmed by
+direct reproduction (not assumed) that a fresh `-Unattended` process always
+reached the menu loop with no mode ever chosen and exited 1. Git history
+confirms the "Mode must be set before starting" check has been unchanged
+since the v0.51 BETA commit that introduced it -- this is a genuine,
+long-standing gap in the `-Unattended` contract, not a regression from
+recent work.
+
+Fixed with a new, optional saved-config field, `UnattendedMode`, read only
+when `-Unattended` is set (an interactive run always chooses its mode from
+the menu regardless of this field) and validated against a single accepted
+name, `HealthCheck` -- not the full set of mode-name strings the main-loop
+`switch` statement otherwise accepts. This RC ships support for only the one
+audited unattended path this harness's certification gate actually needs;
+every other value (including every other real mode name, and never a raw
+menu number) fails safely as unsupported, silently falling through to the
+original "Mode must be set before starting" error. `HealthCheck` (Library
+health check, read-only) is the value this harness's own "Unattended TPM
+root binding" gate needs and now writes: proving config-driven root binding
+and mode selection work end-to-end without writing, deleting, or modifying
+anything in the real install. Since no mode previously exited cleanly under
+`-Unattended` -- every mode ends with a blocking `Read-Host` and a `continue`
+back to the menu, which would immediately re-hit the same "Mode must be set"
+error on the next loop iteration -- `HealthCheck`'s own completion block now
+exits 0 under `-Unattended` instead of looping back; no other mode's
+completion path was touched, since this harness never selects any other
+mode.
+
+`New-TPMTemporaryUnattendedConfig` (`scripts/Invoke-TPM-RealInstanceSmoke.ps1`,
+no-prior-config path) now writes the complete minimal config
+TeknoParrot-Manager.ps1's `-Unattended` flow needs to pass config load AND
+actually select and run a mode to completion: `TeknoParrotRoot`,
+`GamesInstallFolder`, `UnattendedMode`. `Set-TPMConfigJsonRoot` (existing-
+config path) now also sets `UnattendedMode=HealthCheck` via
+`Add-Member -Force` -- confirmed by direct reproduction that assigning to a
+PSCustomObject property that does not already exist throws
+`SetValueInvocationException`, which a pre-existing config saved before
+this field existed would otherwise hit -- while every other saved field is
+left untouched, matching the existing `TeknoParrotRoot`-only override
+contract.
+
+Proven end-to-end with a real, unmodified child-process fixture
+(`Tests/TeknoParrot-Manager.Tests.ps1`): the real script, copied into
+TestDrive, invoked with `-Unattended` against a synthetic (non-real)
+install directory containing only the placeholder files SECTION 2's
+existence checks require (`TeknoParrotUi.exe`, `GameProfiles`), passes
+configuration validation, runs the real `Invoke-LibraryHealthCheck`, and
+exits 0 on its own -- confirming both the config field and the clean-exit
+fix together, not merely that the process avoided the specific error text.
+
+**RC scope note:** the `UnattendedMode` value is validated against a single
+accepted name, `HealthCheck` -- not the full closed set of mode-name strings
+the main-loop `switch` statement otherwise accepts. This RC ships support for
+only the one audited unattended path this harness's certification gate
+actually needs; a general config-driven selector across every mode is out of
+scope for the feature freeze and is deliberately not implemented. Any other
+saved value (including every other real mode name) is rejected the same as
+an unrecognized string.
+
+**Legacy-config strict-mode regression (found and fixed same round):** a
+config saved before this field existed has no `UnattendedMode` property on
+the object at all (not `$null` -- genuinely absent). Confirmed by direct
+reproduction that `$cfg.UnattendedMode` on such an object throws
+`PropertyNotFoundException` under `Set-StrictMode -Version Latest` (both
+pwsh and Windows PowerShell 5.1) -- reproducible only when strict mode is
+active in the same top-level script scope as the read (a separately invoked
+script via the call operator `&` does not inherit the caller's strict-mode
+setting; dot-sourcing does). All three direct `$cfg.UnattendedMode` reads
+(the config-summary display line and the two mode-selection reads) now go
+through `$cfg.PSObject.Properties['UnattendedMode']` existence guards
+instead of bare dot-access, so a legacy config missing the field is read
+exactly like any other absent optional field: no exception, config still
+accepted, falls through to the pre-existing "no mode chosen" safe failure
+under `-Unattended`. Covered by a dedicated real child-process regression
+test in `Tests/TeknoParrot-Manager.Tests.ps1` that dot-sources the
+unmodified script through a wrapper enabling `Set-StrictMode -Version
+Latest`, against a config carrying every other field `Save-Config` has ever
+written (some null) minus only `UnattendedMode` -- confirmed by direct A/B
+testing to fail against the pre-guard code and pass against the fix.
+
+### 225 Pester failures -- Pester 5.8.0 regression, not a production defect
+
+Preserved certification evidence recorded `Pester-summary.json`: 1010
+passed, 225 failed, 0 skipped, 1235 total, and the run's own `Engine` field
+(`Pester-result-v1.json`) as `Pester 5.8.0 / pwsh 7.6.3`. Reproduced exactly
+(same 1010/225/1235 split, overlapping failure signatures) in an isolated
+checkout by installing Pester 5.8.0 side-by-side with the previously
+validated 5.7.1 (both from the real PowerShell Gallery, confirmed real,
+published 2026-06-30) and letting `Invoke-TPM-PesterChild.ps1`'s
+then-open-ended `Import-Module Pester -MinimumVersion 5.0` auto-select the
+newer one.
+
+Definitive A/B proof: the exact same full `.\Tests` suite (1235 tests)
+scores 1234 passed / 1 failed under Pester 5.7.1 (the one remaining failure
+a pre-existing, already-documented nondeterministic screenshot/display-
+handle-timing test, unrelated to Pester version) versus 1010 passed / 225
+failed under Pester 5.8.0, with nothing else in the environment changed.
+Running any single affected file in isolation (e.g.
+`TeknoParrot-Manager.Tests.ps1`, 371/371 either version) shows no
+difference at all -- the regression only manifests running the full
+29-container suite together, consistent with the dominant failure
+signatures (103 of 225 failures carry no exception message at all --
+Pester's own fallback text for a test whose container `BeforeAll` failed;
+most of the rest are `$script:`-scoped setup variables, e.g.
+`$script:RawThrillsPathLimits`/`$script:tpmEvidenceWorkflowId`, "cannot be
+retrieved because it has not been set" -- both classes are consistent with
+a cross-file/BeforeAll script-scope handling change between 5.7.1 and 5.8.0
+during a multi-file run, not with any single test's own logic).
+
+Fixed by pinning `Invoke-TPM-PesterChild.ps1` to
+`Import-Module Pester -RequiredVersion 5.7.1` (a hard pin, not a floor) and
+aligning `Run-TPM-Tests.ps1`'s own preflight check to look for that exact
+version rather than "any Pester >= 5" -- the preflight previously could
+report success with only 5.8.0 present, then have the child fail to import
+it, turning a clear preflight signal into a confusing downstream failure.
+This is deliberately pinning to the version this suite is ALREADY proven
+against, to prevent a future auto-installed Pester release from silently
+changing certification behavior again without a human deciding to
+re-validate and bump the pin -- not adopting a new version.
+
+An unrelated stray `Pester 3.4.0` install
+(`C:\Program Files\WindowsPowerShell\Modules\Pester\3.4.0`) was found on
+the development machine during this investigation; it was ruled out early
+(`-MinimumVersion 5.0`/`-RequiredVersion 5.7.1` both refuse it outright) and
+was not touched -- noted here as a housekeeping item for a separate round,
+not part of this fix.
+
+### `PSScriptAnalyzer.json` zero-byte evidence file -- confirmed correct, not
+a defect
+
+The preserved evidence includes a genuine zero-byte `PSScriptAnalyzer.json`.
+Confirmed by direct reproduction: `scripts/Invoke-TPM-RealInstanceSmoke.ps1`
+writes this file via `$analyzer | ConvertTo-Json -Depth 6 | Out-File ...`;
+piping a genuinely empty array (`@()`, i.e. zero PSScriptAnalyzer findings)
+through `ConvertTo-Json` produces zero pipeline output objects (a
+well-documented PowerShell pipeline behavior -- `@() | ConvertTo-Json`
+differs from `ConvertTo-Json -InputObject @()`, which would produce the
+literal text `"[]"`), so `Out-File` writes nothing at all. A zero-byte file
+is therefore the correct, expected representation of zero findings here,
+matching the run's own `OperatorStatus.txt` ("zero Error/Warning
+findings"). No code change made.

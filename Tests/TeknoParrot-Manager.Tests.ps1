@@ -87,8 +87,8 @@ BeforeAll {
     # below use their own controlled version strings/mocks instead of relying on
     # this value's specific number, so drift here would not silently break them.
     $ScriptVersion = "0.99.39"
-    $ReleaseCandidateLabel = "RC2.1"
-    $DisplayVersion = "v1.0 RC2.1"
+    $ReleaseCandidateLabel = "RC3"
+    $DisplayVersion = "v1.0 RC3"
 
     # Write-Log normally writes beside the production script via top-level
     # initialisation that AST extraction intentionally skips. Give helper tests a
@@ -2855,10 +2855,10 @@ Describe "ConvertTo-ManagerDisplayVersionFromTag" {
     }
     It "renders the same release identically whether it arrives as the running script's own display version or as a raw release tag" {
         # This is the exact regression from issue #134: v1.0 (running as
-        # RC2.1) and the v1.0-RC2.1 release tag are the same release and must
-        # display identically, not as "v1.0" vs "v1.0-RC2.1".
-        $currentDisplay = "v1.0 RC2.1"   # Get-ManagerDisplayVersion's shape when $ScriptVersion=1.0, $ReleaseCandidateLabel=RC2.1
-        $latestDisplay  = ConvertTo-ManagerDisplayVersionFromTag -VersionText 'v1.0-RC2.1'
+        # RC3) and the v1.0-RC3 release tag are the same release and must
+        # display identically, not as "v1.0" vs "v1.0-RC3".
+        $currentDisplay = "v1.0 RC3"   # Get-ManagerDisplayVersion's shape when $ScriptVersion=1.0, $ReleaseCandidateLabel=RC3
+        $latestDisplay  = ConvertTo-ManagerDisplayVersionFromTag -VersionText 'v1.0-RC3'
         $latestDisplay | Should -Be $currentDisplay
     }
 }
@@ -3688,7 +3688,7 @@ Describe "Manager banner rendering" {
         $lines = Get-ManagerBannerLines -Width 80 -Height 30
 
         ($lines -join "`n") | Should -Match 'TeknoParrot Manager'
-        ($lines -join "`n") | Should -Match 'Version 1.0 RC2.1'
+        ($lines -join "`n") | Should -Match 'Version 1.0 RC3'
         ($lines -join "`n") | Should -Not -Match '/_  __/__.*___'
     }
     It "selects responsive branding modes by viewport width" {
@@ -3710,7 +3710,7 @@ Describe "Manager banner rendering" {
 
         $joined.Contains($block) | Should -BeTrue
         $joined | Should -Match 'Developed and maintained by Jumpstile'
-        $joined | Should -Match 'Version 1.0 RC2.1'
+        $joined | Should -Match 'Version 1.0 RC3'
         $lines | ForEach-Object { $_.Length | Should -BeLessOrEqual 180 }
     }
     It "keeps each branding mode inside its target width" {
@@ -3727,7 +3727,7 @@ Describe "Manager banner rendering" {
         $figletRow = $rows | Where-Object { $_.Text.Contains($block) } | Select-Object -First 1
         ($figletRow.Segments | ForEach-Object { $_.Color }) | Should -Contain 'Cyan'
         ($rows | Where-Object { $_.Text -match 'Developed and maintained by Jumpstile' }).Segments.Color | Should -Contain 'Yellow'
-        ($rows | Where-Object { $_.Text -match 'Version 1.0 RC2.1' }).Color | Should -Be 'Cyan'
+        ($rows | Where-Object { $_.Text -match 'Version 1.0 RC3' }).Color | Should -Be 'Cyan'
     }
 }
 
@@ -3766,7 +3766,7 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
 
         $screen.Rows.Count | Should -BeGreaterThan 20
         $output | Should -Match 'Developed and maintained by Jumpstile'
-        $output | Should -Match 'Version 1.0 RC2.1'
+        $output | Should -Match 'Version 1.0 RC3'
         foreach ($item in (Get-MainMenuItems)) {
             $output | Should -Match ([regex]::Escape("$($item.Number)) $($item.Label)"))
         }
@@ -3811,7 +3811,7 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         $screen = Render-MainMenuScreen -Tier 'Compact' -Width 80 -Height 80
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
         $output | Should -Match 'TeknoParrot Manager'
-        $output | Should -Match 'Version 1.0 RC2.1'
+        $output | Should -Match 'Version 1.0 RC3'
         $output | Should -Not -Match '/_  __/'
         $output | Should -Match 'Type \? for descriptions'
         $autoSync = (Get-MainMenuItems) | Where-Object { $_.Mode -eq 'AutoSync' }
@@ -3820,7 +3820,7 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
     It "Professional default tier uses a complete framed two-column menu" {
         $screen = Render-MainMenuScreen -Tier 'Professional' -Width 150 -Height 30
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
-        $output | Should -Match 'Version 1.0 RC2.1'
+        $output | Should -Match 'Version 1.0 RC3'
         $output | Should -Match ([regex]::Escape("1) AutoSync"))
         $output | Should -Match ([regex]::Escape("Extract and register ZIPs safely."))
         $output | Should -Match 'GAME ENHANCEMENTS'
@@ -4450,5 +4450,185 @@ Describe "RC2 DAT selection and override UX (issues #119, #120, #121)" {
     It "issue #121: the DAT browse file filter allows both .zip and .dat by default, not just .zip or All Files" {
         $datFilterMatches = [regex]::Matches($script:scriptContent, 'ZIP/dat files \(\*\.zip;\*\.dat\)\|\*\.zip;\*\.dat')
         $datFilterMatches.Count | Should -BeGreaterThan 0 -Because "every DAT browse call site (initial D/B choice, download-fallback, already-configured re-browse) must offer both extensions from the default filter"
+    }
+}
+
+Describe "TeknoParrot-Manager.ps1 -Unattended real child-process fixture (issue #154 real-hardware certification finding)" {
+    # A real certification run confirmed TeknoParrot-Manager.ps1 -Unattended
+    # always exited 1 at "Mode must be set before starting" -- there was no
+    # config or CLI mechanism to auto-select an initial mode, only the
+    # interactive menu or a same-session preview re-entry. This launches the
+    # REAL, unmodified script (copied into TestDrive, never the real repo
+    # checkout) as a real child process against a synthetic, non-real
+    # "TeknoParrot install" (a bare directory structure), proving the
+    # UnattendedMode config field lets it pass configuration validation and
+    # reach HealthCheck's bounded stop-point (a real, read-only library scan)
+    # and then exit cleanly on its own -- never launching, inspecting, or
+    # modifying a genuine TeknoParrot installation.
+    # Deliberately does NOT import TPMCertification.Execution.psm1 (or any
+    # other shared certification module) here, even though its
+    # Invoke-TPMIsolatedProcessV1 would otherwise be a natural fit --
+    # confirmed by direct reproduction that doing so (with or without
+    # -Force) creates a second, scope-local copy of that module, which
+    # collides with TPMCertification.OperatorExperience.Tests.ps1's own
+    # "Mock -ModuleName TPMCertification.Execution -CommandName Write-Host"
+    # when both files run in the same Pester session: Pester itself throws
+    # "Multiple script or manifest modules named 'TPMCertification.Execution'
+    # are currently loaded" -- reproduced deterministically down to just
+    # these two specific tests, not environmental flakiness. This test uses
+    # a plain, self-contained Start-Process invocation instead, so it never
+    # touches any module another test file also imports.
+    It "passes configuration validation and reaches the HealthCheck bounded stop-point, exiting 0, without ever needing a real TeknoParrot installation" {
+        $fixtureRoot = Join-Path $TestDrive ("unattended-fixture-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $fixtureRoot -Force | Out-Null
+        Copy-Item -LiteralPath $scriptPath -Destination (Join-Path $fixtureRoot 'TeknoParrot-Manager.ps1') -Force
+
+        # SECTION 2 of TeknoParrot-Manager.ps1 unconditionally requires
+        # TeknoParrotUi.exe and a GameProfiles folder to exist at the
+        # configured root (this is a real, pre-existing, non-Unattended-
+        # specific requirement -- confirmed by direct reproduction, not
+        # assumed) -- neither is a genuine executable/profile store here,
+        # since HealthCheck's own read-only scan never launches or
+        # inspects them, only checks they exist.
+        $fakeTpRoot = Join-Path $fixtureRoot 'fake-tp-root'
+        New-Item -ItemType Directory -Path (Join-Path $fakeTpRoot 'UserProfiles') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $fakeTpRoot 'GameProfiles') -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $fakeTpRoot 'TeknoParrotUi.exe'), '')
+
+        $configPath = Join-Path $fixtureRoot 'TeknoParrot-Manager.config.json'
+        $cfg = [ordered]@{ TeknoParrotRoot = $fakeTpRoot; GamesInstallFolder = $fakeTpRoot; UnattendedMode = 'HealthCheck' }
+        [System.IO.File]::WriteAllText($configPath, ($cfg | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding $false))
+
+        $stdoutPath = Join-Path $fixtureRoot 'stdout.log'
+        $stderrPath = Join-Path $fixtureRoot 'stderr.log'
+        $stdinPath = Join-Path $fixtureRoot 'stdin.empty'
+        [IO.File]::WriteAllText($stdinPath, '')
+
+        $process = Start-Process -FilePath (Get-Command pwsh).Source -ArgumentList @('-NoProfile','-NonInteractive','-File',(Join-Path $fixtureRoot 'TeknoParrot-Manager.ps1'),'-Unattended') -WorkingDirectory $fixtureRoot -RedirectStandardInput $stdinPath -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -NoNewWindow -PassThru
+        # Confirmed by direct reproduction under real Windows PowerShell 5.1
+        # (its older .NET Framework CLR, not pwsh's): touching .Handle
+        # immediately after Start-Process -PassThru forces .NET to open and
+        # cache a real handle to the process before it can exit. Skipping
+        # this is a well-known .NET Framework Process-class quirk -- for a
+        # fast-exiting process (HealthCheck completes in ~1.5s here), the
+        # OS can recycle the process record before a later .ExitCode read,
+        # leaving it $null even though WaitForExit already returned $true.
+        # pwsh's newer runtime does not have this problem, which is exactly
+        # why this only reproduced under Windows PowerShell 5.1.
+        [void]$process.Handle
+        $exited = $process.WaitForExit(60000)
+        if (-not $exited) {
+            try { $process.Kill() } catch {}
+            throw "TeknoParrot-Manager.ps1 -Unattended did not exit within the 60-second bound"
+        }
+        $process.WaitForExit()
+
+        $process.ExitCode | Should -Be 0 -Because 'a genuine product defect (Mode must be set before starting) previously made every real -Unattended launch exit 1 here'
+
+        $stdout = if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw } else { '' }
+        $stdout | Should -Not -Match 'Mode must be set before starting' -Because 'this is the exact error text the real certification run hit'
+        $stdout | Should -Match 'Library Health Check' -Because 'HealthCheck must have actually run, not merely avoided the error'
+        $stdout | Should -Match 'Unattended.*Using saved settings' -Because 'confirms the config path was genuinely exercised, not bypassed'
+
+        # No real install was ever touched: this is a synthetic fixture, and
+        # the placeholder TeknoParrotUi.exe -- present only so SECTION 2's
+        # existence check passes -- remains exactly as created (empty),
+        # proving HealthCheck's read-only scan never wrote to it.
+        (Get-Item -LiteralPath (Join-Path $fakeTpRoot 'TeknoParrotUi.exe')).Length | Should -Be 0
+    }
+
+    It "loads a legacy saved config with no UnattendedMode field at all without throwing under Set-StrictMode, and fails safely (no mode chosen) rather than crashing" {
+        # A saved config from before this feature existed has no
+        # UnattendedMode property whatsoever on the deserialized object --
+        # not $null, genuinely absent. Confirmed by direct reproduction that
+        # $cfg.UnattendedMode on such an object throws
+        # PropertyNotFoundException under Set-StrictMode -Version Latest
+        # (both pwsh and Windows PowerShell 5.1). The real interactive/
+        # -Unattended entry point does not itself call Set-StrictMode, but
+        # this exact access pattern must still be safe under any stricter
+        # caller (test harness, future dot-sourcing, etc.), so the fixture
+        # script wraps the real, unmodified TeknoParrot-Manager.ps1 with an
+        # explicit Set-StrictMode -Version Latest to prove the read sites
+        # themselves are strict-mode-safe, not merely that the ordinary
+        # entry point happens not to trip the bug today. The wrapper must
+        # dot-source (". path", not "& path") -- confirmed by direct
+        # reproduction that Set-StrictMode does NOT propagate across a
+        # separate script file invoked with the call operator (&), only
+        # into a dot-sourced one; using & here would silently make this
+        # test exercise no strict-mode enforcement at all.
+        $fixtureRoot = Join-Path $TestDrive ("legacy-config-fixture-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $fixtureRoot -Force | Out-Null
+
+        $realScriptPath = Join-Path $fixtureRoot 'TeknoParrot-Manager.ps1'
+        Copy-Item -LiteralPath $scriptPath -Destination $realScriptPath -Force
+
+        $wrapperPath = Join-Path $fixtureRoot 'StrictModeWrapper.ps1'
+        $wrapperContent = "Set-StrictMode -Version Latest`r`n. '$realScriptPath' @args`r`nexit `$LASTEXITCODE"
+        [System.IO.File]::WriteAllText($wrapperPath, $wrapperContent, (New-Object System.Text.UTF8Encoding $false))
+
+        $fakeTpRoot = Join-Path $fixtureRoot 'fake-tp-root'
+        New-Item -ItemType Directory -Path (Join-Path $fakeTpRoot 'UserProfiles') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $fakeTpRoot 'GameProfiles') -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $fakeTpRoot 'TeknoParrotUi.exe'), '')
+
+        # Mirrors Save-Config's exact key set (every field it has ever
+        # written) minus UnattendedMode -- a genuine legacy config carries
+        # all of these (some null), since Save-Config has always written
+        # them; UnattendedMode is the only key that is a true, brand-new
+        # absence rather than a null value. A fixture with ONLY
+        # TeknoParrotRoot/GamesInstallFolder would be unrealistic and would
+        # also trip strict-mode on all these OTHER pre-existing optional
+        # reads, which are out of this fix's scope.
+        $configPath = Join-Path $fixtureRoot 'TeknoParrot-Manager.config.json'
+        $cfg = [ordered]@{
+            TeknoParrotRoot              = $fakeTpRoot
+            ZipSourceFolder              = $null
+            ZipSourceSupplementaryFolder = $null
+            GamesInstallFolder           = $fakeTpRoot
+            RetroBat                     = $false
+            HyperSpinDataPath            = $null
+            ReShadeSourceDll             = $null
+            ReShadeSourceDll32           = $null
+            DgVoodoo2SourceDir           = $null
+            EggmanDatZip                 = $null
+            DatFilePath                  = $null
+            SupplementaryDatPath         = $null
+            IncludeSupplementary         = $false
+            LaunchBoxRoot                = $null
+            LaunchBoxPlatformMode        = $null
+            LaunchBoxCustomPlatformName  = $null
+            LaunchBoxEmulatorId          = $null
+            PostgresSuperPasswordEncrypted = $null
+            CheckForUpdatesOnStartup     = $true
+        }
+        [System.IO.File]::WriteAllText($configPath, ($cfg | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding $false))
+
+        $stdoutPath = Join-Path $fixtureRoot 'stdout.log'
+        $stderrPath = Join-Path $fixtureRoot 'stderr.log'
+        $stdinPath = Join-Path $fixtureRoot 'stdin.empty'
+        [IO.File]::WriteAllText($stdinPath, '')
+
+        $process = Start-Process -FilePath (Get-Command pwsh).Source -ArgumentList @('-NoProfile','-NonInteractive','-File',$wrapperPath,'-Unattended') -WorkingDirectory $fixtureRoot -RedirectStandardInput $stdinPath -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -NoNewWindow -PassThru
+        [void]$process.Handle
+        $exited = $process.WaitForExit(60000)
+        if (-not $exited) {
+            try { $process.Kill() } catch {}
+            throw "TeknoParrot-Manager.ps1 -Unattended (strict-mode wrapper) did not exit within the 60-second bound"
+        }
+        $process.WaitForExit()
+
+        $stdout = if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw } else { '' }
+        $stderr = if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath -Raw } else { '' }
+
+        $stdout | Should -Not -Match 'PropertyNotFoundException|cannot be found on this object' -Because 'a legacy config missing UnattendedMode must never throw when the property is read'
+        $stderr | Should -Not -Match 'PropertyNotFoundException|cannot be found on this object' -Because 'a legacy config missing UnattendedMode must never throw when the property is read'
+        $stdout | Should -Not -Match 'Saved configuration could not be read \(file may be corrupt\)' -Because 'a legacy config missing only the new optional UnattendedMode field is not corrupt and must still be accepted'
+        $stdout | Should -Match 'Unattended.*Using saved settings' -Because 'the legacy config must still pass validation and be accepted'
+
+        # No mode can be auto-selected from a config that never named one,
+        # so this must fail the same safe, pre-existing way every other
+        # -Unattended launch with no mode chosen already does -- not crash.
+        $process.ExitCode | Should -Be 1 -Because 'no UnattendedMode means no mode was chosen; this must be the pre-existing safe failure, not a new crash'
+        $stdout | Should -Match 'Mode must be set before starting' -Because 'this is the pre-existing, expected safe failure for no mode chosen'
     }
 }

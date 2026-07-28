@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v1.0 RC2.1
+# TeknoParrot Manager  |  v1.0 RC3
 # Author: Jumpstile
 # =============================================================================
 #
@@ -68,7 +68,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
 $ScriptVersion = "1.0"
-$ReleaseCandidateLabel = "RC2.1"
+$ReleaseCandidateLabel = "RC3"
 $DisplayVersion = "v$ScriptVersion $ReleaseCandidateLabel"
 
 function Get-ManagerDisplayVersion {
@@ -9961,6 +9961,8 @@ if (Test-Path -LiteralPath $configPath) {
         if ($cfg.IncludeSupplementary)  { Write-Host "  Supplementary index  : Yes" }
         if ($cfg.LaunchBoxRoot)         { Write-Host "  LaunchBox root       : $($cfg.LaunchBoxRoot)" }
         if ($cfg.LaunchBoxPlatformMode) { Write-Host "  LaunchBox platform   : $($cfg.LaunchBoxPlatformMode)" }
+        $cfgUnattendedModeProp = $cfg.PSObject.Properties['UnattendedMode']
+        if ($cfgUnattendedModeProp -and $cfgUnattendedModeProp.Value) { Write-Host "  Unattended mode      : $($cfgUnattendedModeProp.Value)" }
         if ($null -ne $cfg.CheckForUpdatesOnStartup -and -not $cfg.CheckForUpdatesOnStartup) {
             Write-Host "  Check for updates on startup: Disabled"
         }
@@ -10004,6 +10006,34 @@ if (Test-Path -LiteralPath $configPath) {
             # clear the saved mode and let the platform-choice menu re-ask instead.
             if ($lbPlatformMode -eq "Custom" -and [string]::IsNullOrWhiteSpace($lbCustomPlatformName)) {
                 $lbPlatformMode = $null
+            }
+            # -Unattended has no CLI or config mechanism to pick which mode to
+            # run automatically -- every mode's own body already auto-answers
+            # its internal prompts under -Unattended (see the many
+            # "if ($Unattended) { ... }" blocks throughout this script), but
+            # the INITIAL mode choice itself was only ever reachable through
+            # the interactive menu or a same-session preview "Apply for real
+            # now?" re-entry. A real -Unattended launch as a fresh process
+            # therefore always reached the menu loop with no mode chosen and
+            # exited 1 at "Mode must be set before starting." -- confirmed by
+            # direct reproduction, not assumed. UnattendedMode is an optional
+            # saved-config field read ONLY when -Unattended is set (an
+            # interactive run always chooses its mode from the menu,
+            # regardless of whether this field is present). This RC ships
+            # support for only the audited HealthCheck unattended path --
+            # a general config-driven selector across all modes is out of
+            # scope for the feature freeze, so any other value (including
+            # every other real mode name) is rejected the same as garbage.
+            $cfgUnattendedModePropForSelect = $cfg.PSObject.Properties['UnattendedMode']
+            if ($Unattended -and $cfgUnattendedModePropForSelect -and $cfgUnattendedModePropForSelect.Value) {
+                $validUnattendedModes = @('HealthCheck')
+                $requestedUnattendedMode = [string]$cfgUnattendedModePropForSelect.Value
+                if ($validUnattendedModes -contains $requestedUnattendedMode) {
+                    $pendingApplyMode = $requestedUnattendedMode
+                    Write-Log "Unattended: initial mode from saved config = $requestedUnattendedMode"
+                } else {
+                    Write-Log "WARNING: Unattended: config UnattendedMode '$requestedUnattendedMode' is not a recognized mode -- ignoring, menu loop will report the missing-mode error."
+                }
             }
             $configAccepted = $true
         }
@@ -11233,7 +11263,7 @@ function Limit-MainMenuBodyRowsToBudget {
     return @($BodyRows | Select-Object -Last $BodyBudget)
 }
 
-# Single-line banner ("TeknoParrot Manager v1.0 RC2.1") with no frame and no
+# Single-line banner ("TeknoParrot Manager v1.0 RC3") with no frame and no
 # blank separator, for viewports too short for the normal framed banner (5-6
 # rows) to leave any room for menu content -- see
 # Get-MainMenuEmergencyCompactRows.
@@ -11712,6 +11742,16 @@ while ($true) {
         Write-Host "   Done." -ForegroundColor Cyan
         Write-Host "============================================" -ForegroundColor Cyan
         Write-Log "Health check complete."
+        if ($Unattended) {
+            # An unattended run has no further mode to select -- looping back
+            # to the menu would immediately re-hit "Mode must be set before
+            # starting" and exit 1, turning a genuinely successful health
+            # check into a reported failure. Exit cleanly instead; no other
+            # mode currently supports a config-driven -Unattended entry
+            # point, so this is the only completion path that needs it.
+            Write-Log "Unattended: health check complete -- exiting."
+            exit 0
+        }
         [void](Read-Host "  Press Enter to return to menu")
         continue
     }

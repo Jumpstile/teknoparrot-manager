@@ -88,8 +88,16 @@ foreach($required in @($harness,$pesterChild,$executionModule,$settings,$registr
 foreach($commandName in @('git','pwsh','powershell.exe')){
     if(-not(Get-Command $commandName -ErrorAction SilentlyContinue)){[void]$failures.Add("Required command is unavailable: $commandName")}
 }
-$pester=Get-Module -ListAvailable Pester|Sort-Object Version -Descending|Select-Object -First 1
-if(-not$pester-or$pester.Version.Major-lt5){[void]$failures.Add('Pester 5 or later is required. Install a compatible Pester version, then retry.')}
+# Issue #154 real-hardware certification finding: this preflight used to
+# accept ANY installed Pester >= 5.0 -- it would report success with only
+# Pester 5.8.0 present, then Invoke-TPM-PesterChild.ps1 (pinned to the exact
+# version this suite is proven against after that finding) would fail to
+# import it, turning a clear preflight signal into a confusing later
+# failure. Preflight now checks for the SAME exact pinned version so a
+# missing/wrong Pester version is always caught here, not downstream.
+$requiredPesterVersion=[version]'5.7.1'
+$pester=Get-Module -ListAvailable Pester|Where-Object{$_.Version-eq$requiredPesterVersion}|Select-Object -First 1
+if(-not$pester){[void]$failures.Add("Pester $requiredPesterVersion is required (exact version this suite is validated against -- see Invoke-TPM-PesterChild.ps1). Install it, then retry.")}
 $analyzer=Get-Module -ListAvailable PSScriptAnalyzer|Sort-Object Version -Descending|Select-Object -First 1
 if(-not$analyzer){[void]$failures.Add('PSScriptAnalyzer is required. Install it before certification; certification will not install it.')}
 $injectionHunter=Get-Module -ListAvailable InjectionHunter|Sort-Object Version -Descending|Select-Object -First 1
