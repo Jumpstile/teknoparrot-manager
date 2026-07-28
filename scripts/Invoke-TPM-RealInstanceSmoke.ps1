@@ -58,7 +58,7 @@ Import-Module (Join-Path $PSScriptRoot 'TPMCertification.ProductionFacts.psm1') 
 Import-Module (Join-Path $PSScriptRoot 'TPMCertification.ProductionCycle.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'TPMCertification.ProductionEvidence.psm1') -Force
 
-$RepoPath = (Resolve-Path -LiteralPath $RepoPath).Path
+$RepoPath = (Resolve-Path -LiteralPath $RepoPath).ProviderPath
 if (!(Test-Path -LiteralPath $TeknoParrotRoot -PathType Container)) {
     throw "TeknoParrot root not found: $TeknoParrotRoot"
 }

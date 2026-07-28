@@ -387,24 +387,32 @@ Describe "NAS Git safe-directory certification boundary (issue #154)" {
         $environment['GIT_CONFIG_VALUE_0'] | Should -Not -Be '*'
     }
 
-    It "uses the exact resolved repository for both runner Git reads" {
+    It "uses the FileSystem ProviderPath for both runner Git reads" {
         $runnerSource = Get-Content -LiteralPath $runnerPath -Raw
+        $runnerTokens = $null
+        $runnerParseErrors = $null
+        $runnerAst = [System.Management.Automation.Language.Parser]::ParseFile($runnerPath, [ref]$runnerTokens, [ref]$runnerParseErrors)
 
-        $runnerSource | Should -Match '\$scopedGitArguments\s*=\s*@\('
-        $runnerSource | Should -Match 'safe\.directory=\{0\}'
-        $runnerSource | Should -Match '\$resolvedRepo'
-        [regex]::Matches($runnerSource, '&\s+git\s+@scopedGitArguments\s+rev-parse\s+HEAD').Count | Should -Be 2
+        $runnerParseErrors.Count | Should -Be 0
+        $runnerSource.Contains('$scopedGitArguments') | Should -BeTrue
+        $runnerSource.Contains('safe.directory={0}') | Should -BeTrue
+        [regex]::Matches($runnerSource, [regex]::Escape('& git @scopedGitArguments rev-parse HEAD')).Count | Should -Be 2
+        $resolvedRepoAssignments = @($runnerAst.FindAll({ $args[0] -is [System.Management.Automation.Language.AssignmentStatementAst] -and $args[0].Left.Extent.Text -eq '$resolvedRepo' }, $true))
+        $resolvedRepoAssignments.Count | Should -Be 1
+        $resolvedRepoAssignments[0].Right.Extent.Text.Trim().EndsWith('.ProviderPath') | Should -BeTrue
     }
 
-    It "uses scoped Git arguments for every smoke-harness repository read and passes the exact scope to Pester" {
+    It "uses the FileSystem ProviderPath and scoped Git arguments for every smoke-harness repository read" {
         $harnessSource = Get-Content -LiteralPath $harnessPath -Raw
 
-        $harnessSource | Should -Match '\$gitScopedArguments\s*=\s*@\('
-        $harnessSource | Should -Match 'safe\.directory=\{0\}'
-        $harnessSource | Should -Match '\$RepoPath'
-        [regex]::Matches($harnessSource, '&\s+git\s+@gitScopedArguments').Count | Should -Be 6
-        $harnessSource | Should -Match 'New-TPMPesterChildEnvironment\s+-RepositoryPath\s+\$RepoPath'
-        $harnessSource | Should -Not -Match 'safe\.directory\s*=\s*\*'
+        $harnessSource.Contains('$gitScopedArguments') | Should -BeTrue
+        $harnessSource.Contains('safe.directory={0}') | Should -BeTrue
+        [regex]::Matches($harnessSource, [regex]::Escape('& git @gitScopedArguments')).Count | Should -Be 6
+        $repoPathAssignments = @($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.AssignmentStatementAst] -and $args[0].Left.Extent.Text -eq '$RepoPath' }, $true))
+        $repoPathAssignments.Count | Should -Be 1
+        $repoPathAssignments[0].Right.Extent.Text.Trim().EndsWith('.ProviderPath') | Should -BeTrue
+        $harnessSource.Contains('New-TPMPesterChildEnvironment -RepositoryPath $RepoPath') | Should -BeTrue
+        [regex]::Matches($harnessSource, [regex]::Escape('safe.directory=*')).Count | Should -Be 0
     }
 }
 
@@ -3142,9 +3150,11 @@ $needle
                 [string]$StatusText,
                 [string]$ExitCode,
                 [int]$TimeoutSeconds=60,
-                [switch]$OmitMarker
+                [switch]$OmitMarker,
+                [switch]$ProviderQualifiedRepoPath
             )
             $fixture=New-TPMBootstrapFixtureRepository -Root $Root
+            $requestedRepoPath=if($ProviderQualifiedRepoPath){('Microsoft.PowerShell.Core'+[IO.Path]::DirectorySeparatorChar+'FileSystem::'+$fixture.Repo)}else{$fixture.Repo}
             $install=Join-Path $Root 'install'
             New-Item -ItemType Directory -Path $install -Force|Out-Null
             $logRoot=Join-Path $Root 'invoke-log'
@@ -3160,7 +3170,7 @@ $needle
                 $arguments=@(
                     '-NoProfile','-NonInteractive',
                     '-File',(Join-Path $fixture.Repo 'scripts\Run-TPM-Tests.ps1'),
-                    '-RepoPath',$fixture.Repo,'-TeknoParrotRoot',$install,'-HarnessRoot',$HarnessRoot,'-NoPwshRelaunch'
+                    '-RepoPath',$requestedRepoPath,'-TeknoParrotRoot',$install,'-HarnessRoot',$HarnessRoot,'-NoPwshRelaunch'
                 )
                 $invocation=Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList $arguments -WorkingDirectoryRoot $fixture.Repo -WorkingDirectory $fixture.Repo -LogDirectoryRoot $logRoot -LogDirectory $logRoot -Identity 'bootstrap-probe' -TimeoutSeconds $TimeoutSeconds -Environment @{GIT_TERMINAL_PROMPT='0'}
             }finally{
@@ -3172,7 +3182,7 @@ $needle
             $stderr=if(Test-Path -LiteralPath $invocation.StdErrPath){Get-Content -LiteralPath $invocation.StdErrPath -Raw -ErrorAction SilentlyContinue}else{''}
             $markerContent=if(Test-Path -LiteralPath $marker){Get-Content -LiteralPath $marker -Raw|ConvertFrom-Json}else{$null}
             return [pscustomobject]@{
-                Repo=$fixture.Repo;Head=$fixture.Head;Install=$install;HarnessRoot=$HarnessRoot
+                Repo=$fixture.Repo;RequestedRepoPath=$requestedRepoPath;Head=$fixture.Head;Install=$install;HarnessRoot=$HarnessRoot
                 Invocation=$invocation;Stdout=$stdout;Stderr=$stderr;Marker=$markerContent;MarkerPath=$marker
                 TimedOut=$invocation.TimedOut;TerminationConfirmed=$invocation.TerminationConfirmed;ExitCode=[int]$invocation.ExitCode
             }
@@ -3242,6 +3252,48 @@ $needle
         }
     }
 
+    It 'normalizes a provider-qualified repository path before Git preflight and harness handoff' {
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $parent=Join-Path $root 'parent'
+        New-Item -ItemType Directory -Path $parent -Force|Out-Null
+        $harnessRoot=Join-Path $parent 'TPM-TestHarness'
+        $result=Invoke-TPMBootstrapFixture -Root $root -HarnessRoot $harnessRoot -ProviderQualifiedRepoPath
+
+        $providerQualifiedPrefix='Microsoft.PowerShell.Core'+[IO.Path]::DirectorySeparatorChar+'FileSystem::'
+        $result.RequestedRepoPath.StartsWith($providerQualifiedPrefix,[StringComparison]::OrdinalIgnoreCase) | Should -BeTrue
+        $resolvedRepository=Resolve-Path -LiteralPath $result.RequestedRepoPath
+        $resolvedRepository.Path.StartsWith($providerQualifiedPrefix,[StringComparison]::OrdinalIgnoreCase) | Should -BeTrue
+        $resolvedRepository.Provider.Name | Should -Be 'FileSystem'
+        $resolvedRepository.ProviderPath | Should -Be $result.Repo
+
+        $providerQualifiedOutputPath=Join-Path $root 'provider-qualified-git.stdout'
+        $providerQualifiedErrorPath=Join-Path $root 'provider-qualified-git.stderr'
+        $providerQualifiedProcess=Start-Process -FilePath 'git.exe' -ArgumentList @(
+            '-c',
+            ("safe.directory={0}" -f $resolvedRepository.ProviderPath),
+            '-C',
+            $resolvedRepository.Path,
+            'rev-parse',
+            'HEAD'
+        ) -NoNewWindow -PassThru -Wait -RedirectStandardOutput $providerQualifiedOutputPath -RedirectStandardError $providerQualifiedErrorPath
+        $providerQualifiedExit=$providerQualifiedProcess.ExitCode
+        $providerQualifiedExit | Should -Not -Be 0 -Because 'Git rejects PowerShell provider-qualified paths'
+        (Get-Content -LiteralPath $providerQualifiedErrorPath -Raw) | Should -Match 'cannot change'
+        $fileSystemHead=(& git -c ("safe.directory={0}" -f $resolvedRepository.ProviderPath) -C $resolvedRepository.ProviderPath rev-parse HEAD)
+        $fileSystemExit=$LASTEXITCODE
+        $fileSystemExit | Should -Be 0
+        $fileSystemHead.Trim() | Should -Be $result.Head
+
+        $result.TimedOut | Should -BeFalse
+        $result.TerminationConfirmed | Should -BeTrue
+        $result.Marker | Should -Not -BeNullOrEmpty -Because 'the real runner must reach its fixture stop-point after Git preflight'
+        $result.Marker.RepoPath | Should -Be $result.Repo
+        $result.Marker.Commit | Should -Be $result.Head
+        $harnessParameters=[string[]]@($result.Marker.Params)
+        $repoPathIndex=[array]::IndexOf($harnessParameters,'-RepoPath')
+        $repoPathIndex | Should -BeGreaterThan -1
+        $harnessParameters[$repoPathIndex+1] | Should -Be $result.Repo -Because 'the isolated harness working-directory path must be FileSystem-native'
+    }
     It 'never launches Explorer, never prompts, and closes stdin -- verified by grepping the real entry-point source for reachable interactive calls' {
         $entryText=[IO.File]::ReadAllText((Join-Path $sourceRepo 'scripts\Run-TPM-Tests.ps1'))
         $entryText|Should -Not -Match 'explorer\.exe' -Because 'the noninteractive bootstrap path must never launch Explorer'

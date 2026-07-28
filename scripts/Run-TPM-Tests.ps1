@@ -110,7 +110,7 @@ if($pester){
     }catch{[void]$failures.Add("Pester configuration is incompatible: $($_.Exception.Message)")}
 }
 try{
-    $resolvedRepo=(Resolve-Path -LiteralPath $RepoPath -ErrorAction Stop).Path
+    $resolvedRepo=(Resolve-Path -LiteralPath $RepoPath -ErrorAction Stop).ProviderPath
     $resolvedRoot=(Resolve-Path -LiteralPath $TeknoParrotRoot -ErrorAction Stop).Path
     $env:GIT_TERMINAL_PROMPT='0'
     $scopedGitArguments=@('-c',("safe.directory={0}"-f$resolvedRepo),'-C',$resolvedRepo)
