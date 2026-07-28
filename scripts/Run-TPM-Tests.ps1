@@ -113,7 +113,8 @@ try{
     $resolvedRepo=(Resolve-Path -LiteralPath $RepoPath -ErrorAction Stop).Path
     $resolvedRoot=(Resolve-Path -LiteralPath $TeknoParrotRoot -ErrorAction Stop).Path
     $env:GIT_TERMINAL_PROMPT='0'
-    $commit=(git -C $resolvedRepo rev-parse HEAD 2>$null)
+    $scopedGitArguments=@('-c',("safe.directory={0}"-f$resolvedRepo),'-C',$resolvedRepo)
+    $commit=(& git @scopedGitArguments rev-parse HEAD 2>$null)
     if($LASTEXITCODE-ne0-or[string]::IsNullOrWhiteSpace($commit)){throw 'git could not read HEAD'}
 }catch{[void]$failures.Add("Repository is not readable: $($_.Exception.Message)")}
 foreach($directory in @($HarnessRoot,$reportDirectory,$logDirectory)){
@@ -126,7 +127,7 @@ foreach($directory in @($HarnessRoot,$reportDirectory,$logDirectory)){
 }
 if($failures.Count-gt0){Stop-TPMPreflightV1 -Failures $failures.ToArray() -ReportDirectory $reportDirectory}
 
-$commit=(git -C $resolvedRepo rev-parse HEAD).Trim()
+$commit=(& git @scopedGitArguments rev-parse HEAD).Trim()
 Write-Host 'TeknoParrot Manager Certification'
 Write-Host ''
 Write-Host ("Target repository: {0}"-f$resolvedRepo)

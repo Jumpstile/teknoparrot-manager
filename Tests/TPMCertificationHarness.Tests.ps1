@@ -23,6 +23,7 @@
 
 BeforeAll {
     $harnessPath = Join-Path $PSScriptRoot "..\scripts\Invoke-TPM-RealInstanceSmoke.ps1"
+    $runnerPath = Join-Path $PSScriptRoot "..\scripts\Run-TPM-Tests.ps1"
     $tokens = $null
     $parseErrors = $null
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($harnessPath, [ref]$tokens, [ref]$parseErrors)
@@ -369,6 +370,41 @@ Describe "Fail-fast root validation runs before any certification gate (issue #1
     It "throws Get-TPMInvalidCertificationEnvironmentMessage's exact message when the root is invalid" {
         $source = Get-Content -LiteralPath $harnessPath -Raw
         $source | Should -Match 'if\s*\(-not\s+\$rootValidation\.IsValid\)\s*\{[\s\S]*?throw\s+\$invalidMsg'
+    }
+}
+
+Describe "NAS Git safe-directory certification boundary (issue #154)" {
+    It "builds a Pester-child environment with one exact, process-scoped safe.directory entry" {
+        $environment = New-TPMPesterChildEnvironment -RepositoryPath $TestDrive
+
+        $environment['GIT_CONFIG_COUNT'] | Should -Be '1'
+        $environment['GIT_CONFIG_KEY_0'] | Should -Be 'safe.directory'
+        $environment['GIT_CONFIG_GLOBAL'] | Should -Be 'NUL'
+        $environment['GIT_CONFIG_NOSYSTEM'] | Should -Be '1'
+        $environment['GIT_CONFIG_VALUE_0'] | Should -Be $TestDrive
+        @($environment.Keys | Where-Object { $_ -like 'GIT_CONFIG_*' } | Sort-Object) |
+            Should -Be @('GIT_CONFIG_COUNT', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_VALUE_0')
+        $environment['GIT_CONFIG_VALUE_0'] | Should -Not -Be '*'
+    }
+
+    It "uses the exact resolved repository for both runner Git reads" {
+        $runnerSource = Get-Content -LiteralPath $runnerPath -Raw
+
+        $runnerSource | Should -Match '\$scopedGitArguments\s*=\s*@\('
+        $runnerSource | Should -Match 'safe\.directory=\{0\}'
+        $runnerSource | Should -Match '\$resolvedRepo'
+        [regex]::Matches($runnerSource, '&\s+git\s+@scopedGitArguments\s+rev-parse\s+HEAD').Count | Should -Be 2
+    }
+
+    It "uses scoped Git arguments for every smoke-harness repository read and passes the exact scope to Pester" {
+        $harnessSource = Get-Content -LiteralPath $harnessPath -Raw
+
+        $harnessSource | Should -Match '\$gitScopedArguments\s*=\s*@\('
+        $harnessSource | Should -Match 'safe\.directory=\{0\}'
+        $harnessSource | Should -Match '\$RepoPath'
+        [regex]::Matches($harnessSource, '&\s+git\s+@gitScopedArguments').Count | Should -Be 6
+        $harnessSource | Should -Match 'New-TPMPesterChildEnvironment\s+-RepositoryPath\s+\$RepoPath'
+        $harnessSource | Should -Not -Match 'safe\.directory\s*=\s*\*'
     }
 }
 
@@ -3150,7 +3186,7 @@ $needle
         $harnessRoot=Join-Path $parent 'TPM-TestHarness'
         Test-Path -LiteralPath $harnessRoot|Should -BeFalse -Because 'HarnessRoot must not exist before this test begins'
 
-        $preGitStatus=& git -c safe.directory=* -C $sourceRepo status --porcelain
+        $preGitStatus=& git -c ("safe.directory={0}" -f $sourceRepo) -C $sourceRepo status --porcelain
         $result=Invoke-TPMBootstrapFixture -Root $root -HarnessRoot $harnessRoot
 
         $result.TerminationConfirmed|Should -BeTrue
@@ -3192,7 +3228,7 @@ $needle
 
         # The real repository checkout (this worktree) is completely
         # unaffected by this invocation.
-        $postGitStatus=& git -c safe.directory=* -C $sourceRepo status --porcelain
+        $postGitStatus=& git -c ("safe.directory={0}" -f $sourceRepo) -C $sourceRepo status --porcelain
         ($postGitStatus-join "`n")|Should -Be ($preGitStatus-join "`n") -Because 'this worktree must remain untouched by any bootstrap test'
 
         # Captured stdout is concise (the wrapper's own numbered narrative

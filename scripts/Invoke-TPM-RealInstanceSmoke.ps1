@@ -63,6 +63,7 @@ if (!(Test-Path -LiteralPath $TeknoParrotRoot -PathType Container)) {
     throw "TeknoParrot root not found: $TeknoParrotRoot"
 }
 $TeknoParrotRoot = (Resolve-Path -LiteralPath $TeknoParrotRoot).Path
+$gitScopedArguments = @('-c', ("safe.directory={0}" -f $RepoPath), '-C', $RepoPath)
 
 if ([string]::IsNullOrWhiteSpace($HarnessRoot)) {
     $repoParent = Split-Path -Parent $RepoPath
@@ -260,6 +261,25 @@ function Test-TPMCertificationRootValid {
 function Get-TPMInvalidCertificationEnvironmentMessage {
     param([string]$TeknoParrotRoot, [string[]]$MissingMarkers)
     return ("INVALID CERTIFICATION ENVIRONMENT: '{0}' is missing required TeknoParrot installation marker(s): {1}. This is not a TPM product failure -- the requested -TeknoParrotRoot does not point at a real TeknoParrot installation, so no certification gates were run against it." -f $TeknoParrotRoot, ($MissingMarkers -join ', '))
+}
+
+function New-TPMPesterChildEnvironment {
+    param([Parameter(Mandatory = $true)][string]$RepositoryPath)
+
+    # GIT_CONFIG_* is inherited only by the isolated child process. It adds
+    # one exact safe.directory value without reading or writing persistent
+    # Git configuration, so NoAIAttribution can use its existing git ls-files
+    # call on a NAS-owned worktree.
+    return @{
+        NO_COLOR            = '1'
+        TERM                = 'dumb'
+        GIT_TERMINAL_PROMPT = '0'
+        GIT_CONFIG_GLOBAL   = 'NUL'
+        GIT_CONFIG_NOSYSTEM = '1'
+        GIT_CONFIG_COUNT    = '1'
+        GIT_CONFIG_KEY_0    = 'safe.directory'
+        GIT_CONFIG_VALUE_0  = $RepositoryPath
+    }
 }
 
 # Issue #146: unattended TPM must be bound to the exact requested
@@ -1802,11 +1822,11 @@ try {
     [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'certification-suite-running' -EvidenceType 'ScreenCapture' -CaptureAction { param($p) Save-TPMScreenCapture -Path $p })
 
     Write-TPMGateHeader -Gate 'Repository' -Purpose 'Confirms the certified commit and working-tree state' -Expected 'clean working tree, HEAD matches origin/main'
-    $gitVersion = git --version
-    $gitBranch = git rev-parse --abbrev-ref HEAD
-    $gitCommit = git rev-parse HEAD
-    $gitCommitShort = git rev-parse --short HEAD
-    $gitStatusLines = @(git status --short)
+    $gitVersion = & git @gitScopedArguments --version
+    $gitBranch = & git @gitScopedArguments rev-parse --abbrev-ref HEAD
+    $gitCommit = & git @gitScopedArguments rev-parse HEAD
+    $gitCommitShort = & git @gitScopedArguments rev-parse --short HEAD
+    $gitStatusLines = @(& git @gitScopedArguments status --short)
     $repoClean = ($gitStatusLines.Count -eq 0)
     if ($repoClean) {
         $gitStatusText = '(clean)'
@@ -1819,7 +1839,7 @@ try {
     $originMainCommit = $null
     try {
         $env:GIT_TERMINAL_PROMPT = '0'
-        $originMainCommit = (git rev-parse --verify origin/main 2>$null)
+        $originMainCommit = (& git @gitScopedArguments rev-parse --verify origin/main 2>$null)
         if ($LASTEXITCODE -ne 0) { $originMainCommit = $null }
     } catch { $originMainCommit = $null }
     $syncStatus = if (-not $originMainCommit) {
@@ -1879,7 +1899,7 @@ try {
     $pesterProcess = Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList @(
         '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$pesterChild,
         '-RepositoryPath',$RepoPath,'-ResultPath',$pesterResultPath,'-NUnitPath',$pesterNUnitPath
-    ) -WorkingDirectoryRoot $RepoPath -WorkingDirectory $RepoPath -LogDirectoryRoot $reportDir -LogDirectory $technicalLogDirectory -Identity 'pester' -TimeoutSeconds $PesterRegressionTimeoutSeconds -Environment @{NO_COLOR='1';TERM='dumb';GIT_TERMINAL_PROMPT='0'}
+    ) -WorkingDirectoryRoot $RepoPath -WorkingDirectory $RepoPath -LogDirectoryRoot $reportDir -LogDirectory $technicalLogDirectory -Identity 'pester' -TimeoutSeconds $PesterRegressionTimeoutSeconds -Environment (New-TPMPesterChildEnvironment -RepositoryPath $RepoPath)
     if ($pesterProcess.TimedOut) { throw "Pester regression suite timed out after $PesterRegressionTimeoutSeconds seconds." }
     $pesterContract = Read-TPMPesterResultV1 -Path $pesterResultPath
     if (($pesterProcess.ExitCode -eq 0) -ne ($pesterContract.Failed -eq 0 -and $pesterContract.FailedContainers -eq 0)) {
