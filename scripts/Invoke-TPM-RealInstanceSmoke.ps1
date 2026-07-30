@@ -7,6 +7,10 @@ param(
 
     [string]$HarnessRoot,
 
+    [string]$ReportDirectory,
+
+    [string]$OperatorStatusPath,
+
     [switch]$RunUnattendedTPM,
 
     # Summary (default): only the final certification scorecard and any real
@@ -35,12 +39,31 @@ $ErrorActionPreference = "Stop"
 $runTimer = [System.Diagnostics.Stopwatch]::StartNew()
 
 . (Join-Path $PSScriptRoot 'Resolve-Pcsx2Directory.ps1')
+Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Execution.psm1') -Force
+# ADR155-0309 Checkpoint B2: the production authority is the sole
+# certification decision/publication path. TPMCertification.Shadow.psm1 is
+# deliberately not imported here -- Phase 2's shadow adapter is
+# placeholder-tolerant and never-authoritative; production facts/evidence
+# come from TPMCertification.ProductionFacts.psm1 and
+# TPMCertification.ProductionEvidence.psm1 instead. Each module is imported
+# directly here rather than assumed to already be loaded transitively by
+# another import -- confirmed in Checkpoint B1 that a nested Import-Module
+# call from within one module does not reliably expose that module's own
+# exports to a sibling module's Get-Command calls.
+Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Authority.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Production.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Reports.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Publication.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'TPMCertification.ProductionFacts.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'TPMCertification.ProductionCycle.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'TPMCertification.ProductionEvidence.psm1') -Force
 
-$RepoPath = (Resolve-Path -LiteralPath $RepoPath).Path
+$RepoPath = (Resolve-Path -LiteralPath $RepoPath).ProviderPath
 if (!(Test-Path -LiteralPath $TeknoParrotRoot -PathType Container)) {
     throw "TeknoParrot root not found: $TeknoParrotRoot"
 }
 $TeknoParrotRoot = (Resolve-Path -LiteralPath $TeknoParrotRoot).Path
+$gitScopedArguments = @('-c', ("safe.directory={0}" -f $RepoPath), '-C', $RepoPath)
 
 if ([string]::IsNullOrWhiteSpace($HarnessRoot)) {
     $repoParent = Split-Path -Parent $RepoPath
@@ -48,14 +71,28 @@ if ([string]::IsNullOrWhiteSpace($HarnessRoot)) {
 }
 
 $stamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
-$reportDir = Join-Path $HarnessRoot "Reports\$stamp"
+$reportDir = if ([string]::IsNullOrWhiteSpace($ReportDirectory)) { Join-Path $HarnessRoot "Reports\$stamp" } else { [IO.Path]::GetFullPath($ReportDirectory) }
 $backupDir = Join-Path $HarnessRoot "Backups\$stamp"
-New-Item -ItemType Directory -Force -Path $reportDir, $backupDir | Out-Null
+# ADR155-0309 round 3: HarnessRoot is this harness's own top-level trusted
+# boundary, but Assert-TPMOwnedDirectoryV1 requires a trusted ROOT to
+# already exist -- HarnessRoot itself may not exist yet on a first run, so
+# it cannot be its own bootstrap root. The genuinely already-existing
+# anchor one level further up is HarnessRoot's own parent directory (in
+# the default case, the same directory containing the resolved repository
+# checkout). $reportDir/$backupDir are brought into existence one
+# authorized, reparse-checked level at a time via
+# New-TPMOwnedDirectoryChainV1 (see scripts/TPMCertification.Execution.psm1),
+# never via a raw New-Item -Force that would silently create untracked
+# intermediate levels ("Reports"/"Backups") without ever reparse-checking
+# them -- the exact gap the prior round's root==target collapse left open.
+# A caller-supplied -ReportDirectory that does not actually resolve under
+# HarnessRoot's parent is rejected here (PROCESS_PATH_OUTSIDE_OWNED_ROOT)
+# rather than silently trusted.
+$harnessRootParent = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($HarnessRoot))
+if ([string]::IsNullOrEmpty($harnessRootParent)) { throw "PROCESS_DIRECTORY_INVALID: HarnessRoot has no resolvable parent directory to anchor trust in: $HarnessRoot" }
+[void](New-TPMOwnedDirectoryChainV1 -Root $harnessRootParent -Path $reportDir)
+[void](New-TPMOwnedDirectoryChainV1 -Root $harnessRootParent -Path $backupDir)
 
-$md = Join-Path $reportDir "TPM-Validation-Report.md"
-$json = Join-Path $reportDir "TPM-Validation-Report.json"
-$certificationMd = Join-Path $reportDir "TPM-Certification-Scorecard.md"
-$certificationJson = Join-Path $reportDir "TPM-Certification-Scorecard.json"
 # Issue #151: certification evidence screenshots. Beneath $reportDir, not a
 # separate top-level folder -- keeps every artifact for one certification
 # run (reports, Pester output, screenshots) under the same timestamped
@@ -64,15 +101,26 @@ $certificationJson = Join-Path $reportDir "TPM-Certification-Scorecard.json"
 # own regression tests rather than assumed to already exist.
 $screenshotDir = Join-Path $reportDir "Screenshots"
 
-function Add-Report {
-    param([string]$Text)
-    $Text | Out-File -FilePath $md -Append -Encoding utf8
-}
-
-function Add-CertificationReport {
-    param([string]$Text)
-    $Text | Out-File -FilePath $certificationMd -Append -Encoding utf8
-}
+# ADR155-0309 Checkpoint B2: $reportDir is the sole authoritative
+# publication destination -- TPM-Certification-{Eligibility,Publication,
+# Final-Outcome,Scorecard,Validation,Manifest,Commit}.{json,md} are written
+# there only by New-TPMPublicationCommitV1 (via
+# Complete-TPMProductionCertificationCycleV1, far below), never by this
+# harness directly. The legacy TPM-Validation-Report.{md,json}/
+# TPM-Certification-Scorecard.{md,json} files, and the Add-Report/
+# Add-CertificationReport accumulators that built them, are removed --
+# their only consumer was the legacy Publish-TPMCertificationArtifacts
+# builder (also removed; see the problem-class sweep below).
+$productionStagingParentRoot = Join-Path $HarnessRoot 'ProductionStaging'
+$productionWorkingDirectory = Join-Path $HarnessRoot "ProductionWork\$stamp"
+# ADR155-0309 round 3: establish $productionWorkingDirectory (two levels
+# below HarnessRoot: "ProductionWork", then the run-specific $stamp) one
+# authorized level at a time, same discipline as $reportDir/$backupDir
+# above. Once established here it is itself a validated, already-existing
+# path, so it is passed as its own trusted root (Root == Target, the
+# deliberately supported degenerate case) to the parser-probe isolation
+# calls deeper inside TPMCertification.ProductionFacts.psm1.
+[void](New-TPMOwnedDirectoryChainV1 -Root $HarnessRoot -Path $productionWorkingDirectory)
 
 function Copy-IfExists {
     param([string]$Path, [string]$DestName)
@@ -84,8 +132,17 @@ function Copy-IfExists {
 }
 
 function Get-TreeHash {
+    # Issue #172: a bare "return @()" collapses to $null at the caller --
+    # capturing zero pipeline objects into a variable always yields $null,
+    # not an empty array, on this environment (confirmed by direct
+    # reproduction; the same class already documented in LESSONS_LEARNED.md
+    # under "return @() unwraps to $null"). An absent tree must produce a
+    # real, zero-length snapshot, not $null, so every caller downstream can
+    # trust "no entries" without re-deriving it from a null check of its
+    # own. The comma operator forces this return to be captured as a
+    # genuine empty array.
     param([string]$Path)
-    if (!(Test-Path -LiteralPath $Path)) { return @() }
+    if (!(Test-Path -LiteralPath $Path)) { return ,@() }
     $resolved = (Resolve-Path -LiteralPath $Path).Path
     $base = $resolved.TrimEnd('\')
     Get-ChildItem -LiteralPath $resolved -Recurse -File -ErrorAction SilentlyContinue |
@@ -109,16 +166,38 @@ function Get-TreeHash {
 }
 
 function Compare-TreeSnapshot {
+    # Issue #172: defensive, caller-independent normalization. Whatever
+    # produced $Before/$After -- Get-TreeHash's own absent-tree case (now
+    # fixed above), a future caller that passes $null directly, or any
+    # other producer -- a missing/null snapshot argument must become a
+    # real, zero-entry snapshot here too, never a phantom one-element
+    # array. Confirmed by direct reproduction: wrapping a genuinely $null
+    # argument in "@($Before)" produces a ONE-element array containing a
+    # single $null (PowerShell's "@($null)" behavior), which the per-item
+    # loop below then counted as one skipped entry that never actually
+    # existed. Both branches of the null-check are comma-wrapped -- also
+    # confirmed by direct reproduction that an un-wrapped empty-array
+    # branch of an if/else collapses to $null under this same "captured by
+    # assignment" rule, even on the branch that is not the $null case.
+    #
+    # This normalization only ever collapses a null/absent ARGUMENT to
+    # empty. It does not touch the per-item loop below, which still flags
+    # a genuinely malformed entry (a real $null element, or a real element
+    # with a blank RelativePath) inside an otherwise non-empty snapshot as
+    # skipped -- that fail-closed behavior is unchanged and still exercised
+    # by a snapshot that legitimately contains such an entry.
     param([object[]]$Before, [object[]]$After)
+    $beforeItems = if ($null -eq $Before) { ,@() } else { ,@($Before) }
+    $afterItems = if ($null -eq $After) { ,@() } else { ,@($After) }
     $beforeMap = @{}
     $beforeSkipped = 0
-    foreach ($item in @($Before)) {
+    foreach ($item in $beforeItems) {
         if (-not $item -or [string]::IsNullOrWhiteSpace([string]$item.RelativePath)) { $beforeSkipped++; continue }
         $beforeMap[[string]$item.RelativePath] = $item.Hash
     }
     $afterMap = @{}
     $afterSkipped = 0
-    foreach ($item in @($After)) {
+    foreach ($item in $afterItems) {
         if (-not $item -or [string]::IsNullOrWhiteSpace([string]$item.RelativePath)) { $afterSkipped++; continue }
         $afterMap[[string]$item.RelativePath] = $item.Hash
     }
@@ -133,8 +212,8 @@ function Compare-TreeSnapshot {
         if (-not $afterMap.ContainsKey($key)) { $removed++ }
     }
     [pscustomobject]@{
-        BeforeCount = @($Before).Count
-        AfterCount = @($After).Count
+        BeforeCount = $beforeItems.Count
+        AfterCount = $afterItems.Count
         Added = $added
         Removed = $removed
         Changed = $changed
@@ -184,6 +263,25 @@ function Get-TPMInvalidCertificationEnvironmentMessage {
     return ("INVALID CERTIFICATION ENVIRONMENT: '{0}' is missing required TeknoParrot installation marker(s): {1}. This is not a TPM product failure -- the requested -TeknoParrotRoot does not point at a real TeknoParrot installation, so no certification gates were run against it." -f $TeknoParrotRoot, ($MissingMarkers -join ', '))
 }
 
+function New-TPMPesterChildEnvironment {
+    param([Parameter(Mandatory = $true)][string]$RepositoryPath)
+
+    # GIT_CONFIG_* is inherited only by the isolated child process. It adds
+    # one exact safe.directory value without reading or writing persistent
+    # Git configuration, so NoAIAttribution can use its existing git ls-files
+    # call on a NAS-owned worktree.
+    return @{
+        NO_COLOR            = '1'
+        TERM                = 'dumb'
+        GIT_TERMINAL_PROMPT = '0'
+        GIT_CONFIG_GLOBAL   = 'NUL'
+        GIT_CONFIG_NOSYSTEM = '1'
+        GIT_CONFIG_COUNT    = '1'
+        GIT_CONFIG_KEY_0    = 'safe.directory'
+        GIT_CONFIG_VALUE_0  = $RepositoryPath
+    }
+}
+
 # Issue #146: unattended TPM must be bound to the exact requested
 # certification root, not whatever root was last saved interactively on this
 # machine (TeknoParrot-Manager.ps1's own -Unattended flow reads
@@ -202,11 +300,30 @@ function Get-TPMConfigJsonSnapshot {
 }
 
 function Set-TPMConfigJsonRoot {
-    param([string]$ConfigPath, [string]$TeknoParrotRoot)
+    # Issue #154 real-hardware certification finding: TeknoParrot-Manager.ps1's
+    # -Unattended flow has no way to choose which mode to auto-run -- every
+    # mode's own body already auto-answers its internal prompts under
+    # -Unattended, but the initial mode selection itself was only ever
+    # reachable through the interactive menu. Confirmed by direct
+    # reproduction that a real -Unattended launch reached the menu loop with
+    # no mode ever chosen and exited 1 at "Mode must be set before starting."
+    # UnattendedMode is the config field the product now reads (see SECTION 1
+    # of TeknoParrot-Manager.ps1) to auto-select an initial mode only when
+    # -Unattended is set; HealthCheck is the read-only mode this harness's
+    # own "Unattended TPM root binding" gate actually needs -- it proves
+    # config-driven root binding and mode selection work end-to-end without
+    # writing, deleting, or modifying anything in the real install.
+    # Add-Member -Force is required, not a plain "=" assignment -- confirmed
+    # by direct reproduction that assigning to a PSCustomObject property that
+    # does not already exist throws SetValueInvocationException, which a
+    # pre-existing config saved before this field existed would otherwise
+    # hit. Every other field on an existing config is left untouched.
+    param([string]$ConfigPath, [string]$TeknoParrotRoot, [string]$UnattendedMode = 'HealthCheck')
     if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) { return $false }
     $raw = Get-Content -LiteralPath $ConfigPath -Raw
     $cfg = $raw | ConvertFrom-Json
-    $cfg.TeknoParrotRoot = $TeknoParrotRoot
+    $cfg | Add-Member -MemberType NoteProperty -Name TeknoParrotRoot -Value $TeknoParrotRoot -Force
+    $cfg | Add-Member -MemberType NoteProperty -Name UnattendedMode -Value $UnattendedMode -Force
     [System.IO.File]::WriteAllText($ConfigPath, ($cfg | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
     return $true
 }
@@ -228,10 +345,18 @@ function Set-TPMConfigJsonRoot {
 # the existing-config path, because the pre-run snapshot for a config that
 # did not exist yet is $null.
 function New-TPMTemporaryUnattendedConfig {
-    param([string]$ConfigPath, [string]$TeknoParrotRoot)
+    # See Set-TPMConfigJsonRoot's comment for why UnattendedMode is required
+    # and why HealthCheck is the correct value for this harness's own
+    # unattended-root-binding proof. This is the complete minimal config
+    # TeknoParrot-Manager.ps1's -Unattended flow needs to pass config load
+    # AND actually select and run a mode to completion: TeknoParrotRoot and
+    # GamesInstallFolder (pre-existing requirement) plus UnattendedMode
+    # (this fix).
+    param([string]$ConfigPath, [string]$TeknoParrotRoot, [string]$UnattendedMode = 'HealthCheck')
     $cfg = [ordered]@{
         TeknoParrotRoot    = $TeknoParrotRoot
         GamesInstallFolder = $TeknoParrotRoot
+        UnattendedMode     = $UnattendedMode
     }
     [System.IO.File]::WriteAllText($ConfigPath, ($cfg | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
     return $true
@@ -346,7 +471,26 @@ function Invoke-TPMUnattendedRootBinding {
         }
     }
 
+    $snapshotHash = $null
+    if ($null -ne $configSnapshot) {
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $snapshotBytes = (New-Object System.Text.UTF8Encoding $false).GetBytes([string]$configSnapshot)
+            $snapshotHash = -join ($sha256.ComputeHash($snapshotBytes) | ForEach-Object { $_.ToString('x2') })
+        } finally {
+            $sha256.Dispose()
+        }
+    }
+    $restorationCheck = @($checkResults.ToArray() | Where-Object { $_.Name -ceq 'Unattended TPM config restoration' }) | Select-Object -Last 1
+
     return [pscustomobject]@{
+        PriorConfigExisted = ($null -ne $configSnapshot)
+        TemporaryConfigCreated = ($null -eq $configSnapshot -and [bool]$overrideWritten)
+        RestoreAttempted = $true
+        RestoreSucceeded = ($null -eq $restoreError)
+        VerificationSucceeded = [bool]$restoreVerified
+        SnapshotSha256 = $snapshotHash
+        RestorationFailureReason = $(if ($restorationCheck -and -not $restorationCheck.Passed) { [string]$restorationCheck.Details } else { $null })
         # .ToArray(), not @($checkResults) -- confirmed by direct repro that
         # wrapping a System.Collections.Generic.List[object] in @(...) inside
         # a function that also has parameters throws "Argument types do not
@@ -430,7 +574,34 @@ function Test-TPMInstallHealthGate {
         return [pscustomobject]@{ Passed = $false; Reason = $reason }
     }
 
-    $checks = @($HealthResult.Checks)
+    # $HealthResult.Checks may be entirely absent (not merely empty/null) on a
+    # malformed health result -- under strict mode, dot-accessing a property
+    # that doesn't exist at all throws PropertyNotFoundException before any
+    # wrap below ever runs. Checking via PSObject first treats a missing
+    # Checks property the same as an explicitly null/empty one.
+    #
+    # The wrap itself must happen AFTER a null check, not by wrapping
+    # $checksProperty.Value directly: @($null) is a one-element array
+    # containing $null (Count = 1), not an empty array.
+    #
+    # Review round 2 (Luna Max): the null check must also assign $checks
+    # directly inside each branch of a real if/else STATEMENT, not via
+    # "$checks = if (...) { @() } else { ... }". Capturing @() as the
+    # output of an if/else used as an expression collapses it to $null --
+    # PowerShell only preserves an empty array through a *direct*
+    # assignment, not through pipeline/output-stream capture of a block
+    # that emits zero objects. Without strict mode this accidentally still
+    # "worked" only because bare $null.Count conveniently returns 0 -- but
+    # that convenience is itself suppressed under Set-StrictMode, so the
+    # collapsed-to-null $checks then threw PropertyNotFoundException on
+    # .Count instead of the fail-fast branch below ever being reached.
+    $checksProperty = $HealthResult.PSObject.Properties['Checks']
+    $rawChecks = if ($checksProperty) { $checksProperty.Value } else { $null }
+    if ($null -eq $rawChecks) {
+        $checks = @()
+    } else {
+        $checks = @($rawChecks)
+    }
     if ($checks.Count -eq 0) {
         return [pscustomobject]@{ Passed = $false; Reason = 'health result has no Checks entries' }
     }
@@ -618,24 +789,23 @@ function Get-PesterSummary {
 # to infer capture method from free-text Details.
 function New-TPMCertificationScreenshot {
     param(
-        [Parameter(Mandatory=$true)][string]$ScreenshotDir,
-        [Parameter(Mandatory=$true)][string]$Name,
-        [ValidateSet('ScreenCapture', 'DeterministicRender')][string]$EvidenceType,
+        [AllowNull()][AllowEmptyString()][string]$ScreenshotDir,
+        [AllowNull()][AllowEmptyString()][string]$Name,
+        [AllowNull()][AllowEmptyString()][string]$EvidenceType,
         [scriptblock]$CaptureAction,
         [switch]$Skip,
         [string]$SkipReason
     )
 
-    if ($Skip) {
-        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $null; Status = 'Skipped'; EvidenceType = 'Skipped'; CaptureScope = $null; Details = $(if ($SkipReason) { $SkipReason } else { 'not applicable to this run' }) }
+    $recordName = if ([string]::IsNullOrWhiteSpace($Name)) { 'unnamed-evidence' } else { $Name }
+    if ([string]::IsNullOrWhiteSpace($Name)) { return [pscustomobject]@{ Name=$recordName; Label=$recordName; Path=$null; Status='Failed'; EvidenceType='Failed'; Required=$true; WorkflowId=$script:tpmEvidenceWorkflowId; CaptureScope=$null; Details='invalid evidence metadata: Name is empty' } }
+    if ($Skip) { return [pscustomobject]@{ Name=$recordName; Label=$recordName; Path=$null; Status='Skipped'; EvidenceType='Skipped'; Required=$false; WorkflowId=$script:tpmEvidenceWorkflowId; CaptureScope=$null; Details=$(if ($SkipReason) { $SkipReason } else { 'not applicable to this run' }) } }
+    if ([string]::IsNullOrWhiteSpace($ScreenshotDir)) { return [pscustomobject]@{ Name=$recordName; Label=$recordName; Path=$null; Status='Failed'; EvidenceType='Failed'; Required=$true; WorkflowId=$script:tpmEvidenceWorkflowId; CaptureScope=$null; Details='invalid evidence metadata: ScreenshotDir is empty' } }
+    if (@('ScreenCapture','DeterministicRender') -cnotcontains $EvidenceType) {
+        $suppliedType = if ([string]::IsNullOrWhiteSpace($EvidenceType)) { '(empty)' } else { $EvidenceType }
+        return [pscustomobject]@{ Name=$recordName; Label=$recordName; Path=$null; Status='Failed'; EvidenceType='Failed'; Required=$true; WorkflowId=$script:tpmEvidenceWorkflowId; CaptureScope=$null; Details="invalid evidence metadata: EvidenceType '$suppliedType' is not ScreenCapture or DeterministicRender" }
     }
-
-    if (-not $CaptureAction) {
-        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $null; Status = 'Failed'; EvidenceType = 'Failed'; CaptureScope = $null; Details = 'no CaptureAction supplied' }
-    }
-    if (-not $EvidenceType) {
-        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $null; Status = 'Failed'; EvidenceType = 'Failed'; CaptureScope = $null; Details = 'no EvidenceType supplied for a non-skipped capture' }
-    }
+    if (-not $CaptureAction) { return [pscustomobject]@{ Name=$recordName; Label=$recordName; Path=$null; Status='Failed'; EvidenceType='Failed'; Required=$true; WorkflowId=$script:tpmEvidenceWorkflowId; CaptureScope=$null; Details='no CaptureAction supplied' } }
 
     if (-not (Test-Path -LiteralPath $ScreenshotDir -PathType Container)) {
         New-Item -ItemType Directory -Force -Path $ScreenshotDir | Out-Null
@@ -644,7 +814,7 @@ function New-TPMCertificationScreenshot {
     try {
         $path = New-TPMScreenshotReservedPath -ScreenshotDir $ScreenshotDir -Name $Name
     } catch {
-        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $null; Status = 'Failed'; EvidenceType = 'Failed'; CaptureScope = $null; Details = "could not reserve a unique screenshot path: $($_.Exception.Message)" }
+        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $null; Status = 'Failed'; EvidenceType = 'Failed'; Required = $true; WorkflowId = $script:tpmEvidenceWorkflowId; CaptureScope = $null; Details = "could not reserve a unique screenshot path: $($_.Exception.Message)" }
     }
 
     try {
@@ -658,12 +828,12 @@ function New-TPMCertificationScreenshot {
         # discarding evidence, even evidence of a failure.
         $validation = Test-TPMScreenshotFileValid -Path $path
         if (-not $validation.Valid) {
-            return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $path; Status = 'Failed'; EvidenceType = 'Failed'; CaptureScope = $null; Details = $validation.Reason }
+            return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $path; Status = 'Failed'; EvidenceType = 'Failed'; Required = $true; WorkflowId = $script:tpmEvidenceWorkflowId; CaptureScope = $null; Details = $validation.Reason }
         }
         $resolvedScope = if ($EvidenceType -eq 'ScreenCapture' -and $captureScope) { [string]$captureScope } else { $null }
-        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $path; Status = 'Captured'; EvidenceType = $EvidenceType; CaptureScope = $resolvedScope; Details = 'captured' }
+        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $path; Status = 'Captured'; EvidenceType = $EvidenceType; Required = $true; WorkflowId = $script:tpmEvidenceWorkflowId; CaptureScope = $resolvedScope; Details = 'captured' }
     } catch {
-        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $path; Status = 'Failed'; EvidenceType = 'Failed'; CaptureScope = $null; Details = $_.Exception.Message }
+        return [pscustomobject]@{ Name = $Name; Label = $Name; Path = $path; Status = 'Failed'; EvidenceType = 'Failed'; Required = $true; WorkflowId = $script:tpmEvidenceWorkflowId; CaptureScope = $null; Details = $_.Exception.Message }
     }
 }
 
@@ -679,6 +849,47 @@ function New-TPMCertificationScreenshot {
 # reserved file is a zero-byte placeholder -- $CaptureAction's real
 # content overwrites it immediately afterward.
 $script:tpmScreenshotSequence = 0
+$script:tpmEvidenceWorkflowId = [guid]::NewGuid().ToString('N')
+
+# System Invariant Inventory: evidence issuance ledger. This is the
+# workflow's own private record of what it actually issued, populated only
+# by Add-Screenshot in real append order. It is currently consulted only by
+# Add-Screenshot itself (the same-path duplicate-reservation check a few
+# lines below) -- since ADR155-0309 Checkpoint B2, the certification
+# decision path no longer runs it through Complete-TPMCertificationTransaction
+# (removed; see the Checkpoint B2 comment near the certification tail
+# below). The current production pipeline (New-TPMProductionEvidenceRecordV1
+# plus Authority.psm1's Assert-TPMEvidenceRecordV1, invoked via
+# RecordEvidence/IssueFinalEvidence) validates each submitted evidence
+# record's own path containment, on-disk hash (re-read twice, defeating a
+# same-instant on-disk swap), PNG validity, and required-vs-skipped
+# consistency -- but, unlike the removed transaction, it does not verify
+# that the submitted record is literally the same object instance this
+# ledger produced ([object]::ReferenceEquals). A record reconstructed with
+# every field copied from a genuine ledger entry is not distinguished from
+# the genuine entry by the current pipeline the way it was by the removed
+# one.
+$script:tpmEvidenceLedger = New-Object System.Collections.Generic.List[object]
+# Sealed the instant 'final-certification-result' is issued (successfully,
+# skipped, or failed) -- no further evidence may be appended afterward.
+# This makes "the final record was genuinely issued last" and "no evidence
+# can be replayed in after finalization" true by construction: there is no
+# code path left that can grow the ledger once this is set, independent of
+# any check the transaction later performs.
+$script:tpmEvidenceLedgerSealed = $false
+
+function Reset-TPMEvidenceLedger {
+    # Real production flow never calls this (the script-scope initializers
+    # above already establish a fresh ledger once per run) -- it exists so
+    # Pester fixtures can start each It block with an empty, unsealed ledger
+    # and a fresh workflow identity, the same way the harness starts each
+    # real run, instead of accumulating state across tests.
+    $script:tpmEvidenceLedger = New-Object System.Collections.Generic.List[object]
+    $script:tpmEvidenceLedgerSealed = $false
+    $script:tpmEvidenceWorkflowId = [guid]::NewGuid().ToString('N')
+    $script:tpmScreenshotSequence = 0
+}
+
 function New-TPMScreenshotReservedPath {
     param([string]$ScreenshotDir, [string]$Name)
     $safeName = ($Name -replace '[^A-Za-z0-9_\-]', '-')
@@ -1134,6 +1345,62 @@ function Get-TPMConsoleWindowRect {
     }
 }
 
+# Review round 2 (Luna Max): distinguishes "this native error IS the signal
+# for no usable interactive display" from every other Win32Exception, as its
+# own pure, independently-testable decision -- kept separate from the actual
+# GDI+ probe below so the classification itself can be exercised with a
+# fabricated exception, without needing a real (or genuinely absent) display
+# to hit either branch. ERROR_INVALID_HANDLE (6) is exactly the native error
+# CopyFromScreen raises when there is no capturable desktop/window station
+# (confirmed by direct reproduction in a non-interactive session). Any other
+# native error code is a different, real problem and must not be classified
+# as "no display".
+function Test-TPMWin32ErrorIndicatesNoDisplay {
+    param([int]$NativeErrorCode)
+    return ($NativeErrorCode -eq 6)   # ERROR_INVALID_HANDLE
+}
+
+# Deterministically proves whether THIS session currently has a usable
+# interactive display, by attempting the exact real primitive
+# Save-TPMScreenCapture depends on (GDI+ Graphics.CopyFromScreen), at the
+# smallest possible size. This is a live capability probe, not a static
+# assumption -- a remote/headless session's desktop can transiently gain or
+# lose screen-capture capability (confirmed: the same probe that failed with
+# "The handle is invalid" in one run of this environment succeeded moments
+# later in another), so a one-time environment check taken once and cached
+# would go stale.
+#
+# Only the specific ERROR_INVALID_HANDLE signal (via
+# Test-TPMWin32ErrorIndicatesNoDisplay) is treated as "no display, safe to
+# skip" -- PowerShell wraps a thrown .NET exception from a method call in a
+# MethodInvocationException, so the real Win32Exception is unwrapped from
+# .InnerException before classifying it. Any other exception (a different
+# Win32 error, or an unrelated failure entirely) is NOT a "no display"
+# signal and is allowed to propagate -- a real certification run whose
+# display access fails for some other, genuine reason must still fail
+# loudly, never be silently absorbed as "environment doesn't support this".
+function Test-TPMInteractiveDisplayAvailable {
+    Add-Type -AssemblyName System.Drawing
+    $bitmap = New-Object System.Drawing.Bitmap 1, 1
+    try {
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        try {
+            $graphics.CopyFromScreen(0, 0, 0, 0, (New-Object System.Drawing.Size 1, 1))
+            return $true
+        } catch {
+            $inner = $_.Exception.InnerException
+            if ($inner -is [System.ComponentModel.Win32Exception] -and (Test-TPMWin32ErrorIndicatesNoDisplay -NativeErrorCode $inner.NativeErrorCode)) {
+                return $false
+            }
+            throw
+        } finally {
+            $graphics.Dispose()
+        }
+    } finally {
+        $bitmap.Dispose()
+    }
+}
+
 # Real capture action for an on-screen console moment (certification suite
 # running, final result, requested/effective root evidence) -- grabs the
 # certification console's own window when Get-TPMConsoleWindowRect can
@@ -1141,9 +1408,10 @@ function Get-TPMConsoleWindowRect {
 # screen, explicitly classified as such, only when it cannot (CaptureScope
 # = 'FullDesktop'). Returns the scope string so New-TPMCertificationScreenshot
 # can record which one actually happened -- never silently reported as a
-# narrow capture when it was not. Never called from tests; production-only,
-# since it requires a live display session this harness's own CI run does
-# not have.
+# narrow capture when it was not. In production this must keep failing
+# loudly (never NotApplicable) when a real certification run cannot capture
+# required evidence -- Test-TPMInteractiveDisplayAvailable above exists for
+# the *test's* own runtime skip decision, and is never consulted here.
 function Save-TPMScreenCapture {
     param([string]$Path)
     Add-Type -AssemblyName System.Windows.Forms
@@ -1347,34 +1615,42 @@ function New-CertificationScorecard {
         [pscustomobject]@{Area='Real Install Health'; Passed=[bool]$checkMap['Real install health check']; Details=$Results.InstallHealthReport},
         [pscustomobject]@{Area='Backups'; Passed=($Results.Backup.UserProfiles -or $Results.Backup.GameProfiles); Details=("UserProfiles={0} GameProfiles={1}" -f $Results.Backup.UserProfiles, $Results.Backup.GameProfiles)},
         [pscustomobject]@{Area='Smoke File Safety'; Passed=$smokeFileSafetyPassed; Status=$smokeFileSafetyStatus; Details=$smokeFileSafetyDetails},
-        [pscustomobject]@{Area='Artifacts'; Passed=((Test-Path -LiteralPath $json -PathType Leaf) -and (Test-Path -LiteralPath $md -PathType Leaf)); Details=$reportDir},
+        # ADR155-0309 Checkpoint B2: this is the informational/provisional
+        # preview only -- the real Artifacts readiness signal (staging,
+        # publisher availability, genuine synthetic pipeline invocation) is
+        # the production authority's own Artifacts fact
+        # (Test-TPMProductionPackagePreflightV1, in ProductionFacts.psm1),
+        # not this directory-existence check.
+        [pscustomobject]@{Area='Artifacts'; Passed=(Test-Path -LiteralPath $reportDir -PathType Container); Details=$reportDir},
         [pscustomobject]@{Area='pcsx2x6 crosshair path (issue #79)'; Passed=[bool]$checkMap['pcsx2x6 crosshair path (issue #79)']; Details=$pcsx2x6Details},
         [pscustomobject]@{Area='Behavioral Certification (Virtual Beta Tester)'; Passed=($Results.VirtualBetaTester -and $Results.VirtualBetaTester.Total -gt 0 -and $Results.VirtualBetaTester.Failed -eq 0); Details=$vbtDetails},
         [pscustomobject]@{Area='Unattended TPM root binding'; Passed=$unattendedRootPassed; Details=$unattendedRootDetails},
         [pscustomobject]@{Area='Unattended TPM config restoration'; Passed=$restorePassed; Status=$restoreStatus; Details=$restoreDetails}
     )
 
-    # Issue #146 review round 4: N/A items (currently only the restoration
-    # item in smoke mode) are excluded from both sides of the score --
-    # they must not increase or decrease it, and must never by themselves
-    # force NOT CERTIFIED. Items without a Status property (every other
-    # score item) are unaffected -- this filter only ever excludes an item
-    # that explicitly opted in with Status = 'NotApplicable'.
-    $applicableItems = @($scoreItems | Where-Object { -not ($_.PSObject.Properties.Name -contains 'Status' -and $_.Status -eq 'NotApplicable') })
-    $passedCount = @($applicableItems | Where-Object { $_.Passed }).Count
-    $totalCount = @($applicableItems).Count
-    $overall = if ($passedCount -eq $totalCount) { 'CERTIFIED' } else { 'NOT CERTIFIED' }
+    # ADR155-0309 Checkpoint B2: this is an informational/provisional
+    # preview only, never consulted for the certification decision, exit
+    # code, or publication -- Get-TPMCertificationScoreFromItems (the
+    # legacy scoring authority) has been removed entirely. N/A items
+    # (currently only the restoration item in smoke mode) are still
+    # excluded from both sides of this preview count, matching the
+    # dispatcher's own real scoring semantics, so the provisional display
+    # does not visibly disagree with the eventual authoritative result on
+    # that specific point.
+    $previewApplicableItems = @($scoreItems | Where-Object { -not ($_.PSObject.Properties.Name -contains 'Status' -and $_.Status -eq 'NotApplicable') })
+    $previewPassedCount = @($previewApplicableItems | Where-Object { $_.Passed }).Count
+    $previewTotalCount = @($previewApplicableItems).Count
+    $previewOverall = if ($previewTotalCount -gt 0 -and $previewPassedCount -eq $previewTotalCount) { 'CERTIFIED' } else { 'NOT CERTIFIED' }
+    $previewScorePercent = if ($previewTotalCount -gt 0) { [math]::Round(($previewPassedCount / [double]$previewTotalCount) * 100, 2) } else { 0 }
 
     [pscustomobject]@{
         Timestamp = $Results.Timestamp
-        Overall = $overall
-        Passed = $passedCount
-        Total = $totalCount
-        ScorePercent = [math]::Round(($passedCount / [double]$totalCount) * 100, 2)
+        Overall = $previewOverall
+        Passed = $previewPassedCount
+        Total = $previewTotalCount
+        ScorePercent = $previewScorePercent
         Items = $scoreItems
         ReportDir = $reportDir
-        ValidationReport = $md
-        ValidationJson = $json
         # Issue #111: certification provenance, duplicated onto this object
         # (not just $results/the validation JSON) so a reviewer can confirm
         # the certified commit from the certification scorecard JSON alone,
@@ -1422,14 +1698,26 @@ $results = [ordered]@{
     BackupDir = $backupDir
     SmokeMode = (-not $RunUnattendedTPM)
     Checks = @()
-    # Issue #151: certification evidence, not a scored gate -- deliberately
-    # never read by New-CertificationScorecard's $scoreItems/$applicableItems
-    # scoring computation. A screenshot failure is recorded explicitly (see
-    # New-TPMCertificationScreenshot) but must never itself flip Overall or
-    # change the score, per the issue's explicit "do not modify
-    # certification scoring" constraint.
+    # Evidence remains outside numeric score arithmetic, but required
+    # evidence eligibility is enforced by the production authority (a
+    # Skipped record for a Required slot is rejected immediately at
+    # RecordEvidence time -- EVIDENCE_REQUIRED_SKIPPED -- via
+    # Authority.psm1's Assert-TPMEvidenceRecordV1). A perfect numeric score
+    # therefore cannot certify an incomplete run.
     Screenshots = @()
+    EvidenceWorkflowId = $script:tpmEvidenceWorkflowId
+    PreliminaryStatus = 'RUNNING'
 }
+
+# Collection is a prerequisite phase, not part of finalization. These values
+# exist before any collection operation so strict mode can never turn an early
+# failure into a secondary uninitialized-variable/property exception.
+$collectionCompleted = $false
+$collectionLocationPushed = $false
+$collectionFailure = $null
+$collectionFailureDiagnostic = $null
+$healthResult = $null
+$healthLoadError = $null
 
 # Records one screenshot attempt (captured, failed, or skipped) onto
 # $results.Screenshots and echoes a short status line to the console --
@@ -1437,12 +1725,53 @@ $results = [ordered]@{
 # uses for check results, kept separate because screenshots are evidence,
 # not a pass/fail check.
 function Add-Screenshot {
-    param([string]$ScreenshotDir, [string]$Name, [string]$EvidenceType, [scriptblock]$CaptureAction, [switch]$Skip, [string]$SkipReason)
-    $shot = New-TPMCertificationScreenshot -ScreenshotDir $ScreenshotDir -Name $Name -EvidenceType $EvidenceType -CaptureAction $CaptureAction -Skip:$Skip -SkipReason $SkipReason
+    param([string]$ScreenshotDir,[string]$Name,[string]$EvidenceType,[scriptblock]$CaptureAction,[switch]$Skip,[string]$SkipReason)
+
+    # System Invariant Inventory: replay prevention / final-record ordering.
+    # The ledger seals itself the instant 'final-certification-result' is
+    # issued -- fail loudly (throw) rather than silently accept evidence
+    # after finalization, since that would mean the certification workflow
+    # itself has a logic error, not something a structured Failed record
+    # should quietly absorb.
+    if ($script:tpmEvidenceLedgerSealed) {
+        throw "certification evidence ledger is sealed -- no further evidence may be issued after final-certification-result (attempted: '$Name')"
+    }
+
+    try {
+        if ($Skip) { $shot=New-TPMCertificationScreenshot -ScreenshotDir $ScreenshotDir -Name $Name -Skip -SkipReason $SkipReason }
+        else { $shot=New-TPMCertificationScreenshot -ScreenshotDir $ScreenshotDir -Name $Name -EvidenceType $EvidenceType -CaptureAction $CaptureAction }
+    } catch {
+        $safeName=if([string]::IsNullOrWhiteSpace($Name)){'unnamed-evidence'}else{$Name}
+        $shot=[pscustomobject]@{Name=$safeName;Label=$safeName;Path=$null;Status='Failed';EvidenceType='Failed';Required=(-not $Skip);WorkflowId=$script:tpmEvidenceWorkflowId;CaptureScope=$null;Details="evidence creation failed safely: $($_.Exception.Message)"}
+    }
+
+    # System Invariant Inventory: path ownership / containment, checked at
+    # issuance (fail closed, before the record can ever enter the ledger),
+    # not only re-checked later against the caller's copy of it.
+    if ($shot.Path) {
+        $fullPath = [System.IO.Path]::GetFullPath([string]$shot.Path)
+        $fullScreenshotDir = [System.IO.Path]::GetFullPath($ScreenshotDir)
+        if (-not $fullPath.StartsWith($fullScreenshotDir, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $shot = [pscustomobject]@{Name=$shot.Name;Label=$shot.Name;Path=$shot.Path;Status='Failed';EvidenceType='Failed';Required=$true;WorkflowId=$script:tpmEvidenceWorkflowId;CaptureScope=$null;Details="issued evidence path escapes this run's screenshot directory: $($shot.Path)"}
+        } elseif (@($script:tpmEvidenceLedger | Where-Object { $_.Path -and ([string]$_.Path -ceq [string]$shot.Path) }).Count -gt 0) {
+            $shot = [pscustomobject]@{Name=$shot.Name;Label=$shot.Name;Path=$shot.Path;Status='Failed';EvidenceType='Failed';Required=$true;WorkflowId=$script:tpmEvidenceWorkflowId;CaptureScope=$null;Details="issued evidence path is already owned by another ledger record: $($shot.Path)"}
+        }
+    }
+
+    # Sequence remains an informational/reporting field only. Evidence
+    # ordering that the production pipeline actually trusts comes from each
+    # New-TPMProductionEvidenceRecordV1 call's own position in the harness's
+    # fixed for-loop over $legacyEvidence (see the Checkpoint B2 certification
+    # tail below), not from this mutable property on an already-issued object.
+    $shot = $shot | Add-Member -NotePropertyName Sequence -NotePropertyValue ($script:tpmEvidenceLedger.Count + 1) -Force -PassThru
+    $script:tpmEvidenceLedger.Add($shot)
+    if ([string]$shot.Name -ceq 'final-certification-result') {
+        $script:tpmEvidenceLedgerSealed = $true
+    }
     $script:results.Screenshots += $shot
-    $mark = switch ($shot.Status) { 'Captured' { '[SHOT]' } 'Skipped' { '[SKIP]' } default { '[FAIL]' } }
-    $scopeSuffix = if ($shot.CaptureScope) { " ($($shot.CaptureScope))" } else { '' }
-    Write-Host ("  {0} {1}{2}: {3}" -f $mark, $Name, $scopeSuffix, $(if ($shot.Path) { $shot.Path } else { $shot.Details }))
+    $mark=switch($shot.Status){'Captured'{'[SHOT]'}'Skipped'{'[SKIP]'}default{'[FAIL]'}}
+    $scopeSuffix=if($shot.CaptureScope){" ($($shot.CaptureScope))"}else{''}
+    Write-Host ("  {0} {1}{2}: {3}" -f $mark,$shot.Label,$scopeSuffix,$(if($shot.Path){$shot.Path}else{$shot.Details}))
     return $shot
 }
 
@@ -1481,12 +1810,12 @@ function Set-TPMConsoleStatus {
         } else {
             "$Purpose | $Expected"
         }
-        Write-Progress -Id 42 -Activity 'TPM Certification Suite' -Status $status -PercentComplete 0
+        if (-not [string]::IsNullOrWhiteSpace($script:OperatorStatusPath)) { Add-Content -LiteralPath $script:OperatorStatusPath -Value $status -Encoding utf8 }
+
     } catch {}
 }
 
 function Clear-TPMConsoleStatus {
-    try { Write-Progress -Id 42 -Activity 'TPM Certification Suite' -Completed } catch {}
     try { [Console]::Title = 'TeknoParrot Manager Certification Suite' } catch {}
 }
 
@@ -1494,7 +1823,10 @@ function Write-TPMGateHeader {
     param([string]$Gate, [string]$Purpose, [string]$Expected)
     Set-TPMConsoleStatus -Gate $Gate -Purpose $Purpose -Expected $Expected
     Write-Host ""
-    Write-Host ("--- Running: {0}" -f $Gate) -ForegroundColor Cyan
+    $script:tpmOperatorPhase++
+    $line = ("[{0}/8] {1} -- {2}" -f $script:tpmOperatorPhase,$Gate,$Expected)
+    if (-not [string]::IsNullOrWhiteSpace($script:OperatorStatusPath)) { Add-Content -LiteralPath $script:OperatorStatusPath -Value $line -Encoding utf8 }
+    Write-Host $line
     Write-Host ("    Purpose : {0}" -f $Purpose) -ForegroundColor DarkGray
     Write-Host ("    Expected: {0}" -f $Expected) -ForegroundColor DarkGray
 }
@@ -1544,31 +1876,41 @@ if (-not $rootValidation.IsValid) {
         "- GameProfiles"
         "- UserProfiles"
     )
-    $invalidReportLines -join [Environment]::NewLine | Out-File -FilePath $certificationMd -Encoding utf8
+    # Distinctly-named, non-authoritative diagnostic files -- this never
+    # reaches the production authority/publication path at all (it throws
+    # immediately below), so these must never share a filename with
+    # anything New-TPMPublicationCommitV1 could later write to $reportDir.
+    $invalidEnvironmentMd = Join-Path $reportDir "TPM-Invalid-Certification-Environment.md"
+    $invalidEnvironmentJson = Join-Path $reportDir "TPM-Invalid-Certification-Environment.json"
+    $invalidReportLines -join [Environment]::NewLine | Out-File -FilePath $invalidEnvironmentMd -Encoding utf8
 
     [pscustomobject]@{
         Overall = 'INVALID CERTIFICATION ENVIRONMENT'
         RequestedTeknoParrotRoot = $TeknoParrotRoot
         MissingMarkers = $rootValidation.MissingMarkers
         Timestamp = $stamp
-    } | ConvertTo-Json -Depth 4 | Out-File -FilePath $certificationJson -Encoding utf8
+    } | ConvertTo-Json -Depth 4 | Out-File -FilePath $invalidEnvironmentJson -Encoding utf8
 
     throw $invalidMsg
 }
 
-Push-Location $RepoPath
+$script:OperatorStatusPath=$OperatorStatusPath
+$script:tpmOperatorPhase=0
 try {
+    Push-Location $RepoPath
+    $collectionLocationPushed = $true
+
     # Issue #151: first required evidence slot -- captured as early as
     # possible in the real gate flow so the screenshot actually shows the
     # certification suite mid-run, not an empty or pre-launch console.
     [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'certification-suite-running' -EvidenceType 'ScreenCapture' -CaptureAction { param($p) Save-TPMScreenCapture -Path $p })
 
     Write-TPMGateHeader -Gate 'Repository' -Purpose 'Confirms the certified commit and working-tree state' -Expected 'clean working tree, HEAD matches origin/main'
-    $gitVersion = git --version
-    $gitBranch = git rev-parse --abbrev-ref HEAD
-    $gitCommit = git rev-parse HEAD
-    $gitCommitShort = git rev-parse --short HEAD
-    $gitStatusLines = @(git status --short)
+    $gitVersion = & git @gitScopedArguments --version
+    $gitBranch = & git @gitScopedArguments rev-parse --abbrev-ref HEAD
+    $gitCommit = & git @gitScopedArguments rev-parse HEAD
+    $gitCommitShort = & git @gitScopedArguments rev-parse --short HEAD
+    $gitStatusLines = @(& git @gitScopedArguments status --short)
     $repoClean = ($gitStatusLines.Count -eq 0)
     if ($repoClean) {
         $gitStatusText = '(clean)'
@@ -1576,28 +1918,21 @@ try {
         $gitStatusText = ($gitStatusLines -join [Environment]::NewLine)
     }
 
-    # Issue #111: origin/main comparison, so a reviewer can tell from the
-    # scorecard alone whether this run actually certified the latest pushed
-    # commit or a stale/local one. Never blocks the run over a failed
-    # fetch (no network is a real, non-fatal scenario) -- says so plainly
-    # instead of silently omitting the comparison.
+    # Certification is read-only and never performs network synchronization.
+    # Compare only with an already-present cached remote-tracking ref.
     $originMainCommit = $null
-    $fetchFailed = $false
     try {
-        git fetch origin main --quiet 2>$null
-        if ($LASTEXITCODE -ne 0) { $fetchFailed = $true }
-        else { $originMainCommit = (git rev-parse origin/main 2>$null) }
-    } catch {
-        $fetchFailed = $true
-    }
-    $syncStatus = if ($fetchFailed -or -not $originMainCommit) {
-        'UNKNOWN -- could not fetch origin/main (offline or unreachable)'
+        $env:GIT_TERMINAL_PROMPT = '0'
+        $originMainCommit = (& git @gitScopedArguments rev-parse --verify origin/main 2>$null)
+        if ($LASTEXITCODE -ne 0) { $originMainCommit = $null }
+    } catch { $originMainCommit = $null }
+    $syncStatus = if (-not $originMainCommit) {
+        'UNKNOWN -- cached origin/main is unavailable; certification does not access the network'
     } elseif ($gitCommit -eq $originMainCommit) {
-        'MATCHES origin/main'
+        'MATCHES cached origin/main'
     } else {
-        "DIFFERS from origin/main ($originMainCommit) -- this run may not reflect the latest pushed commit"
+        "DIFFERS from cached origin/main ($originMainCommit)"
     }
-
     $results.GitVersion = $gitVersion
     $results.GitBranch = $gitBranch
     $results.Commit = $gitCommit
@@ -1631,232 +1966,48 @@ try {
     $gameProfilesPath = Join-Path $TeknoParrotRoot 'GameProfiles'
     $preUserProfiles = Get-TreeHash $userProfilesPath
     $preGameProfiles = Get-TreeHash $gameProfilesPath
-    $preCrosshairs = if ($crosshairPath) { Get-TreeHash $crosshairPath } else { @() }
+    # Issue #172: this if/else's own empty branch is comma-wrapped for the
+    # same reason Compare-TreeSnapshot's internal normalization is -- an
+    # un-wrapped "else { @() }" here collapses to $null when captured by
+    # this assignment, on this environment, confirmed by direct
+    # reproduction. Compare-TreeSnapshot now also defends against a null
+    # argument on its own, but no caller should rely on that alone to
+    # avoid producing a null snapshot in the first place.
+    $preCrosshairs = if ($crosshairPath) { Get-TreeHash $crosshairPath } else { ,@() }
 
-    Write-TPMGateHeader -Gate 'Pester regression suite' -Purpose 'Runs every unit/regression test in the repo' -Expected 'zero failed tests'
-    $pesterCommand = Get-Command Invoke-Pester -ErrorAction SilentlyContinue
-    if (-not $pesterCommand) { throw 'Invoke-Pester not found. Install it with: Install-Module Pester -Scope CurrentUser -Force' }
-    $pesterModule = Get-Module Pester -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1
-    if ($pesterModule) { $results.PesterVersion = $pesterModule.Version.ToString() }
-    $pesterOutputText = Join-Path $reportDir 'Pester-output.txt'
-
-    # Issue #136: Output.Verbosity 'None' (the previous Summary-mode setting)
-    # means Pester emits literally zero per-file/per-test text, to any
-    # stream -- there is nothing "quiet capture" could have captured. A real
-    # certification timeout came back with "Last known output: (no output
-    # captured)" because of this, not a capture-mechanism bug. Verbosity is
-    # now always at least 'Detailed' so a hang can always be diagnosed
-    # (which file, which Describe block, how many tests completed) -- see
-    # the stream choice below for how this stays console-quiet in Summary
-    # mode despite that.
-    $pesterOutputVerbosity = switch ($VerbosityLevel) {
-        'Summary'    { 'Detailed' }
-        'Detailed'   { 'Detailed' }
-        'Diagnostic' { 'Diagnostic' }
+    Write-TPMGateHeader -Gate 'Pester regression suite' -Purpose 'Runs every unit/regression test in an isolated PowerShell process' -Expected 'zero failed tests'
+    $pesterChild = Join-Path $PSScriptRoot 'Invoke-TPM-PesterChild.ps1'
+    $pesterResultPath = Join-Path $reportDir 'Pester-result-v1.json'
+    $pesterNUnitPath = Join-Path $reportDir 'Pester-NUnit.xml'
+    $technicalLogDirectory = Join-Path $reportDir 'TechnicalLogs'
+    $pesterProcess = Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList @(
+        '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$pesterChild,
+        '-RepositoryPath',$RepoPath,'-ResultPath',$pesterResultPath,'-NUnitPath',$pesterNUnitPath
+    ) -WorkingDirectoryRoot $RepoPath -WorkingDirectory $RepoPath -LogDirectoryRoot $reportDir -LogDirectory $technicalLogDirectory -Identity 'pester' -TimeoutSeconds $PesterRegressionTimeoutSeconds -Environment (New-TPMPesterChildEnvironment -RepositoryPath $RepoPath)
+    if ($pesterProcess.TimedOut) { throw "Pester regression suite timed out after $PesterRegressionTimeoutSeconds seconds." }
+    $pesterContract = Read-TPMPesterResultV1 -Path $pesterResultPath
+    if (($pesterProcess.ExitCode -eq 0) -ne ($pesterContract.Failed -eq 0 -and $pesterContract.FailedContainers -eq 0)) {
+        throw 'PESTER_RESULT_CONTRADICTORY: child exit code disagrees with structured result'
     }
-    $pesterConfig = New-PesterConfiguration
-    $pesterConfig.Run.Path = $RepoPath
-    $pesterConfig.Run.PassThru = $true
-    $pesterConfig.Output.Verbosity = $pesterOutputVerbosity
-
-    # Issue #136: runs on a dedicated in-process runspace, not a background
-    # Job -- a Job is a separate process, so its PassThru result would cross
-    # process boundaries via CliXml serialization, which does not preserve
-    # the deep object graph the Virtual Beta Tester reporting below actually
-    # reads (.Tests, .Block.Tag, .ScriptBlock.File several levels deep). A
-    # same-process runspace keeps $pesterResult a live, fully-populated
-    # object while still letting this loop poll for a hang/timeout.
-    $pesterProgressText = Join-Path $reportDir 'Pester-progress.txt'
-    $pesterHeartbeatIntervalSeconds = 15
-    $pesterRunspace = [runspacefactory]::CreateRunspace()
-    $pesterRunspace.Open()
-    $pesterPs = [powershell]::Create()
-    $pesterPs.Runspace = $pesterRunspace
-    [void]$pesterPs.AddScript({
-        param($Config, $OutputPath)
-        Import-Module Pester -MinimumVersion 5.0 -ErrorAction Stop
-        # Issue #136: Pester's own live per-Describe/per-test progress text
-        # is written to the Information stream (6), not the Error stream
-        # (2) -- confirmed by direct reproduction: with 2>&1, the file stayed
-        # completely empty for the whole run and only received the final
-        # PassThru result object's default-formatted text dump at the very
-        # end (useless during an actual hang, since that end is never
-        # reached). With 6>&1, the file receives each line live as Pester
-        # writes it. Also confirmed 6>&1 does not additionally echo to the
-        # live console (tested in a real foreground session, not just a
-        # background job) -- so Summary mode's "keep the console quiet"
-        # intent still holds even though Verbosity is no longer 'None'.
-        Invoke-Pester -Configuration $Config 6>&1 | Tee-Object -FilePath $OutputPath
-    }).AddArgument($pesterConfig).AddArgument($pesterOutputText)
-
-    $pesterStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-    $pesterAsyncResult = $pesterPs.BeginInvoke()
-    $lastHeartbeatSeconds = 0
-    $pesterTimedOut = $false
-    $pesterResult = $null
-
-    try {
-        while (-not $pesterAsyncResult.IsCompleted) {
-            Start-Sleep -Milliseconds 500
-            $elapsed = $pesterStopwatch.Elapsed.TotalSeconds
-
-            if (Test-TPMPesterHeartbeatDue -ElapsedSeconds $elapsed -LastHeartbeatSeconds $lastHeartbeatSeconds -HeartbeatIntervalSeconds $pesterHeartbeatIntervalSeconds) {
-                $lastHeartbeatSeconds = $elapsed
-                $lastLine = ''
-                try {
-                    if (Test-Path -LiteralPath $pesterOutputText) {
-                        $lastLine = [string](Get-Content -LiteralPath $pesterOutputText -Tail 1 -ErrorAction SilentlyContinue)
-                    }
-                } catch {}
-                $heartbeatMsg = Get-TPMPesterHeartbeatMessage -ElapsedSeconds $elapsed -LastOutputLine $lastLine
-                Write-Host $heartbeatMsg -ForegroundColor DarkGray
-                Add-Content -LiteralPath $pesterProgressText -Value ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $heartbeatMsg)
-                Set-TPMConsoleStatus -Gate 'Pester regression suite' -Purpose ("Running -- {0:n0}s elapsed" -f $elapsed) -Expected 'zero failed tests'
-            }
-
-            if (Test-TPMPesterTimedOut -ElapsedSeconds $elapsed -TimeoutSeconds $PesterRegressionTimeoutSeconds) {
-                $pesterTimedOut = $true
-                break
-            }
-        }
-
-        if ($pesterTimedOut) {
-            $lastLine = ''
-            try {
-                if (Test-Path -LiteralPath $pesterOutputText) {
-                    $lastLine = ((Get-Content -LiteralPath $pesterOutputText -Tail 5 -ErrorAction SilentlyContinue) -join ' | ')
-                }
-            } catch {}
-            try { $pesterPs.Stop() } catch {}
-            $timeoutMsg = Get-TPMPesterTimeoutMessage -ElapsedSeconds $pesterStopwatch.Elapsed.TotalSeconds -TimeoutSeconds $PesterRegressionTimeoutSeconds -LastOutputLine $lastLine -OutputPath $pesterOutputText -ProgressPath $pesterProgressText
-            Add-Content -LiteralPath $pesterProgressText -Value ("[{0}] TIMED OUT -- {1}" -f (Get-Date -Format 'HH:mm:ss'), $timeoutMsg)
-            $results.Pester = [pscustomobject]@{
-                Passed = $null; Failed = $null; Skipped = $null; Inconclusive = $null; NotRun = $null; Total = $null
-                Duration = $pesterStopwatch.Elapsed.ToString(); Result = 'TimedOut'
-            }
-            Add-CheckResult 'Pester tests' $false $timeoutMsg
-            throw $timeoutMsg
-        }
-
-        # EndInvoke returns a PSDataCollection[PSObject], not a bare array --
-        # "-is [array]" is false for it, so Get-PesterSummary and the VBT
-        # candidate-selection logic below (which both branch on
-        # "-is [array]" to unwrap a single-result collection) would silently
-        # treat the wrapper itself as the result object and find none of the
-        # expected properties. Confirmed directly: without this @() wrap,
-        # every field in $results.Pester comes back $null even on a normal
-        # passing run. Wrapping here makes it a real array, matching what a
-        # direct (non-runspace) Invoke-Pester call already produced before
-        # this fix.
-        $pesterResult = @($pesterPs.EndInvoke($pesterAsyncResult))
-    } finally {
-        try { $pesterPs.Dispose() } catch {}
-        try { $pesterRunspace.Close() } catch {}
-        try { $pesterRunspace.Dispose() } catch {}
+    $results.PesterVersion = $pesterContract.Engine
+    $results.Pester = [pscustomobject]@{
+        Passed=$pesterContract.Passed;Failed=$pesterContract.Failed;Skipped=$pesterContract.Skipped
+        Inconclusive=0;NotRun=$pesterContract.NotRun;Total=$pesterContract.Discovered
+        Duration=[timespan]::FromMilliseconds($pesterContract.DurationMilliseconds);Result=$(if($pesterContract.Failed -eq 0){'Passed'}else{'Failed'})
     }
-
-    $pesterSummary = Get-PesterSummary -PesterResult $pesterResult
-    $pesterSummary | ConvertTo-Json -Depth 4 | Out-File (Join-Path $reportDir 'Pester-summary.json') -Encoding utf8
-    $results.Pester = $pesterSummary
-    Add-CheckResult 'Pester tests' ($pesterSummary.Failed -eq 0) "total=$($pesterSummary.Total) passed=$($pesterSummary.Passed) failed=$($pesterSummary.Failed)"
-
-    # Issue #88 Phase 1/1.5: report Behavioral Certification (Virtual Beta
-    # Tester) coverage as its own visible line, not folded anonymously into
-    # the overall Pester count -- a scorecard reader should be able to see
-    # this coverage exists, and its shape by category, without opening
-    # individual test files. Derived from the same PassThru result already
-    # collected above, filtered to Tests/VirtualBetaTester*.Tests.ps1 by
-    # source file, not by name pattern (robust to Describe/It renames).
-    $vbtCandidate = $pesterResult
-    if ($pesterResult -is [array]) {
-        $vbtCandidate = @($pesterResult) | Where-Object {
-            $_ -and ($_.PSObject.Properties.Name -contains 'Tests')
-        } | Select-Object -Last 1
+    $results.Pester | ConvertTo-Json -Depth 4 | Out-File (Join-Path $reportDir 'Pester-summary.json') -Encoding utf8
+    Add-CheckResult 'Pester tests' ($pesterContract.Failed -eq 0) "total=$($pesterContract.Discovered) passed=$($pesterContract.Passed) failed=$($pesterContract.Failed)"
+    if(-not[string]::IsNullOrWhiteSpace($script:OperatorStatusPath)){Add-Content -LiteralPath $script:OperatorStatusPath -Value ("Pester totals: total={0} passed={1} failed={2} skipped={3} containers={4}" -f $pesterContract.Discovered,$pesterContract.Passed,$pesterContract.Failed,$pesterContract.Skipped,$pesterContract.Containers) -Encoding utf8}
+    $categories=$pesterContract.Categories
+    $results.VirtualBetaTester=[pscustomobject]@{
+        Total=$categories.VirtualBetaTesterTotal;Passed=$categories.VirtualBetaTesterPassed;Failed=$categories.VirtualBetaTesterFailed
+        HumanBehaviors=$categories.HumanBehaviors;IdempotencyChecks=$categories.IdempotencyChecks
+        RecoveryBehaviors=$categories.RecoveryBehaviors;EnvironmentVariations=$categories.EnvironmentVariations;HighTvdBehaviors=$categories.HighTvdBehaviors
     }
-    $vbtTests = @()
-    if ($vbtCandidate -and $vbtCandidate.PSObject.Properties.Name -contains 'Tests') {
-        $vbtTests = @($vbtCandidate.Tests | Where-Object {
-            $_.ScriptBlock -and $_.ScriptBlock.File -and ([System.IO.Path]::GetFileName($_.ScriptBlock.File) -like 'VirtualBetaTester.*.Tests.ps1')
-        })
-    }
-    $vbtPassed = @($vbtTests | Where-Object { $_.Result -eq 'Passed' }).Count
-    $vbtFailed = @($vbtTests | Where-Object { $_.Result -eq 'Failed' }).Count
-
-    # Category breakdown by Describe-block name, not a separate tagging
-    # system -- each category below maps to one or more Describe blocks
-    # already named distinctly enough to classify by simple keyword match.
-    function Get-VbtCategoryCount {
-        param($Tests, [string[]]$Keywords)
-        return @($Tests | Where-Object {
-            $blockName = ($_.Block.Name)
-            $matched = $false
-            foreach ($kw in $Keywords) { if ($blockName -like "*$kw*") { $matched = $true; break } }
-            $matched
-        }).Count
-    }
-    $vbtHumanBehaviors  = Get-VbtCategoryCount -Tests $vbtTests -Keywords @('human workflow', 'main menu', 'decision paths')
-    $vbtIdempotency     = Get-VbtCategoryCount -Tests $vbtTests -Keywords @('idempotency', 'repeat-run', 'AutoSync repeat-run', 'preview')
-    $vbtRecoveryChecks  = Get-VbtCategoryCount -Tests $vbtTests -Keywords @('backup safety', 'read-only', 'recovery')
-    $vbtEnvironmentVars = Get-VbtCategoryCount -Tests $vbtTests -Keywords @('messy environment')
-
-    # Issue #88 phase 1.6: Tester Value Density is recorded as a real Pester
-    # tag on each Describe block ('TVD-High'/'TVD-Medium'/'TVD-Low'), not
-    # just a code comment, specifically so this count is queryable evidence
-    # rather than a guess. Per CONSTITUTION.md ("Tester Value Density"),
-    # this is tracked as coverage evidence only -- never converted to a
-    # percentage or folded into the Pass/Fail decision for this gate.
-    # -Tag on a Describe block lands on the containing Block, not copied down
-    # to each individual test's own .Tag (confirmed empty on .Tests[].Tag) --
-    # check .Block.Tag instead.
-    $vbtHighTvd = @($vbtTests | Where-Object { $_.Block -and $_.Block.Tag -and ($_.Block.Tag -contains 'TVD-High') }).Count
-
-    $results.VirtualBetaTester = [pscustomobject]@{
-        Total               = $vbtTests.Count
-        Passed              = $vbtPassed
-        Failed              = $vbtFailed
-        HumanBehaviors      = $vbtHumanBehaviors
-        IdempotencyChecks   = $vbtIdempotency
-        RecoveryBehaviors   = $vbtRecoveryChecks
-        EnvironmentVariations = $vbtEnvironmentVars
-        HighTvdBehaviors    = $vbtHighTvd
-    }
-    Add-CheckResult 'Behavioral Certification (Virtual Beta Tester)' ($vbtTests.Count -gt 0 -and $vbtFailed -eq 0) `
-        ("total={0} passed={1} failed={2} | human-behaviors={3} idempotency={4} recovery={5} environment-variations={6} high-tvd-behaviors={7}" -f `
-            $vbtTests.Count, $vbtPassed, $vbtFailed, $vbtHumanBehaviors, $vbtIdempotency, $vbtRecoveryChecks, $vbtEnvironmentVars, $vbtHighTvd)
-
-    # Never hidden by -VerbosityLevel Summary: if anything actually failed,
-    # print exactly what, regardless of console verbosity. Also persisted to
-    # a file, not just printed. Independent of the issue #136 fix to
-    # Output.Verbosity/stream capture above (Pester-output.txt now gets live
-    # per-test detail at every -VerbosityLevel) -- this file exists because
-    # relying on parsing that text would be fragile; $pesterResult.Failed is
-    # read directly as an object instead.
-    $failuresText = Join-Path $reportDir 'Pester-Failures.txt'
-    if ($pesterSummary.Failed -gt 0) {
-        Write-Host ""
-        Write-Host "Pester failures ($($pesterSummary.Failed)):" -ForegroundColor Red
-        $failedTests = @($pesterResult.Failed)
-        if ($failedTests.Count -eq 0 -and $pesterResult -is [array]) {
-            $failedTests = @($pesterResult | Where-Object { $_.PSObject.Properties.Name -contains 'Failed' } | Select-Object -ExpandProperty Failed)
-        }
-        $failureLines = @()
-        foreach ($failedTest in $failedTests) {
-            $testPath = if ($failedTest.PSObject.Properties.Name -contains 'ExpandedPath') { $failedTest.ExpandedPath } else { $failedTest.Name }
-            Write-Host "  - $testPath" -ForegroundColor Red
-            $failureLines += "- $testPath"
-            $errorRecord = $null
-            if ($failedTest.PSObject.Properties.Name -contains 'ErrorRecord' -and $failedTest.ErrorRecord) {
-                $errorRecord = @($failedTest.ErrorRecord) | Select-Object -First 1
-            }
-            if ($errorRecord) {
-                $failureLines += "    $($errorRecord.ToString())"
-            }
-        }
-        $failureLines | Out-File -FilePath $failuresText -Encoding utf8
-    } else {
-        "(no failures)" | Out-File -FilePath $failuresText -Encoding utf8
-    }
-
+    Add-CheckResult 'Behavioral Certification (Virtual Beta Tester)' ($categories.VirtualBetaTesterTotal -gt 0 -and $categories.VirtualBetaTesterFailed -eq 0) "total=$($categories.VirtualBetaTesterTotal) passed=$($categories.VirtualBetaTesterPassed) failed=$($categories.VirtualBetaTesterFailed)"
+    $failureLines=@($pesterContract.Failures|ForEach-Object{"- $($_.Name): $($_.Message)"})
+    if($failureLines.Count-eq0){$failureLines=@('(no failures)')}
+    $failureLines|Out-File -FilePath (Join-Path $reportDir 'Pester-Failures.txt') -Encoding utf8
     Write-TPMGateHeader -Gate 'Static analysis (PSScriptAnalyzer)' -Purpose 'Scans TeknoParrot-Manager.ps1 for known-bad patterns' -Expected 'zero Error/Warning findings'
     $analyzerCommand = Get-Command Invoke-ScriptAnalyzer -ErrorAction SilentlyContinue
     if (-not $analyzerCommand) { throw 'Invoke-ScriptAnalyzer not found. Install it with: Install-Module PSScriptAnalyzer -Scope CurrentUser -Force' }
@@ -1992,6 +2143,7 @@ try {
         $results.InstallHealthGate = $healthGate
         Add-CheckResult 'Real install health check' $healthGate.Passed ("{0} -- {1}" -f $results.InstallHealthReport, $healthGate.Reason)
     } else {
+        $healthLoadError = "install health script not found at $healthScript"
         Add-CheckResult 'Real install health check' $false "missing=$healthScript"
     }
 
@@ -2031,9 +2183,12 @@ try {
         # tests, not just its individual pure-function pieces.
         $tpmConfigPath = Join-Path $RepoPath 'TeknoParrot-Manager.config.json'
         $binding = Invoke-TPMUnattendedRootBinding -ConfigPath $tpmConfigPath -TeknoParrotRoot $TeknoParrotRoot -LogPath $tpmLog -InvokeUnattended {
-            pwsh -NoProfile -ExecutionPolicy Bypass -File $scriptPath -Unattended *> $tpmLog
+            $unattended=Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$scriptPath,'-Unattended') -WorkingDirectoryRoot $RepoPath -WorkingDirectory $RepoPath -LogDirectoryRoot $reportDir -LogDirectory (Join-Path $reportDir 'TechnicalLogs') -Identity 'unattended-tpm' -Environment @{NO_COLOR='1';TERM='dumb';GIT_TERMINAL_PROMPT='0'}
+            Copy-Item -LiteralPath $unattended.StdOutPath -Destination $tpmLog -Force
+            if($unattended.ExitCode-ne0){throw "Unattended TPM exited with code $($unattended.ExitCode). See $($unattended.StdErrPath)"}
         }
         $results.EffectiveTeknoParrotRoot = $binding.EffectiveTeknoParrotRoot
+        $results.UnattendedBinding = $binding
         foreach ($check in $binding.Checks) {
             Add-CheckResult $check.Name $check.Passed $check.Details
         }
@@ -2065,7 +2220,9 @@ try {
     Write-TPMGateHeader -Gate 'Smoke file safety' -Purpose 'Confirms nothing changed in UserProfiles/GameProfiles during this smoke run' -Expected 'no unexpected file changes'
     $postUserProfiles = Get-TreeHash $userProfilesPath
     $postGameProfiles = Get-TreeHash $gameProfilesPath
-    $postCrosshairs = if ($crosshairPath) { Get-TreeHash $crosshairPath } else { @() }
+    # Issue #172: see the matching $preCrosshairs comment above -- the
+    # empty branch here must be comma-wrapped for the same reason.
+    $postCrosshairs = if ($crosshairPath) { Get-TreeHash $crosshairPath } else { ,@() }
     $results.Snapshots = [ordered]@{
         UserProfiles = Compare-TreeSnapshot $preUserProfiles $postUserProfiles
         GameProfiles = Compare-TreeSnapshot $preGameProfiles $postGameProfiles
@@ -2106,51 +2263,65 @@ try {
             $tierHeight = $tier.Height
             [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name $tier.Name -EvidenceType 'DeterministicRender' -CaptureAction {
                 param($p)
-                $renderedLines = @(& pwsh -NoProfile -File $debugMenuScript -Width $tierWidth -Height $tierHeight -Render)
+                $render=Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList @('-NoProfile','-NonInteractive','-File',$debugMenuScript,'-Width',[string]$tierWidth,'-Height',[string]$tierHeight,'-Render') -WorkingDirectoryRoot $RepoPath -WorkingDirectory $RepoPath -LogDirectoryRoot $reportDir -LogDirectory (Join-Path $reportDir 'TechnicalLogs') -Identity ("menu-{0}"-f$tier.Name) -Environment @{NO_COLOR='1';TERM='dumb'}
+                if($render.ExitCode-ne0){throw "Menu renderer exited with code $($render.ExitCode)."}
+                $renderedLines = @(Get-Content -LiteralPath $render.StdOutPath)
                 if ($renderedLines.Count -eq 0) { throw "Debug-TPM-MenuLayout.ps1 -Width $tierWidth -Height $tierHeight -Render produced no output" }
                 Save-TPMRenderedTextCapture -Path $p -Lines $renderedLines
             })
         }
     }
 
-    $results.Status = if (@($results.Checks | Where-Object { -not $_.Passed }).Count -eq 0) { 'PASS' } else { 'FAIL' }
+    $results.PreliminaryStatus = if (@($results.Checks | Where-Object { -not $_.Passed }).Count -eq 0) { 'PASS' } else { 'FAIL' }
+    $collectionCompleted = $true
 }
 catch {
-    $results.Status = 'FAIL'
-    $results.Error = $_.Exception.Message
-    Add-CheckResult 'Unhandled validation error' $false $_.Exception.Message
-    throw
+    $collectionFailure = $_
+    $collectionFailureDiagnostic = ($_ | Out-String).Trim()
+    $results.PreliminaryStatus = 'FAIL'
+    $results.Error = $collectionFailure.Exception.Message
+    try { Add-CheckResult 'Unhandled validation error' $false $collectionFailure.Exception.Message }
+    catch {
+        $secondaryDiagnostic = ($_ | Out-String).Trim()
+        $collectionFailureDiagnostic += [Environment]::NewLine +
+            "Secondary failure while recording the validation check (initiating failure retained): $secondaryDiagnostic"
+    }
 }
 finally {
-    Pop-Location
+    if($collectionLocationPushed){
+        try { Pop-Location }
+        catch {
+            if($collectionCompleted){
+                $collectionCompleted=$false
+                $collectionFailure=$_
+                $collectionFailureDiagnostic=($_|Out-String).Trim()
+                $results.PreliminaryStatus='FAIL'
+                $results.Error=$collectionFailure.Exception.Message
+            }
+        }
+    }
     $runTimer.Stop()
     $results.Elapsed = $runTimer.Elapsed.ToString()
     $results.PowerShellVersion = $PSVersionTable.PSVersion.ToString()
 
-    # The "Artifacts" gate below checks that both report files exist on
-    # disk. $md's real content can't be written until after $certification
-    # exists (the validation report shows the certification verdict inline),
-    # so without this stub the gate was checking for a file that structurally
-    # could not exist yet at this point in execution -- it failed on every
-    # run regardless of whether anything was actually wrong. Confirmed via
-    # two independent real-instance runs, both showing "[FAIL] Artifacts"
-    # with an otherwise fully passing run. Pre-creating an empty $md here
-    # (Add-Report below still builds its real content via -Append) makes the
-    # existence check honest without changing what it actually verifies.
-    if (-not (Test-Path -LiteralPath $md -PathType Leaf)) {
-        # New-Item, not Out-File -- a zero-byte file, so the real content
-        # Add-Report appends below doesn't end up with a stray leading
-        # blank line.
-        [void](New-Item -ItemType File -Path $md -Force)
-    }
-    # Issue #151: same stub-then-real-content split as $md above, extended
-    # to $json -- the real, final $results (including the
-    # final-certification-result screenshot, captured further down, after
-    # the console summary it's evidence of) is written once, at the very
-    # end of this finally block, not here. A stub only needs to exist for
-    # the Artifacts gate's existence check.
-    if (-not (Test-Path -LiteralPath $json -PathType Leaf)) {
-        [void](New-Item -ItemType File -Path $json -Force)
+    if(-not$collectionCompleted){
+        $collectionAbortMessage=if($null-ne$collectionFailure){$collectionFailure.Exception.Message}else{'collection did not reach its successful completion point'}
+        Write-Host ""
+        Write-Host "============================================" -ForegroundColor Red
+        Write-Host " CERTIFICATION PIPELINE ABORTED (infrastructure failure)" -ForegroundColor Red
+        Write-Host "============================================" -ForegroundColor Red
+        Write-Host (" REASON       : {0}" -f $collectionAbortMessage) -ForegroundColor Red
+        if(-not[string]::IsNullOrWhiteSpace($collectionFailureDiagnostic)){
+            Write-Host " DIAGNOSTIC   :" -ForegroundColor Red
+            Write-Host $collectionFailureDiagnostic -ForegroundColor Red
+        }
+        Write-Host " STATUS       : NOT DETERMINED -- no certification decision was reached" -ForegroundColor Red
+        Write-Host " PUBLISHED    : false -- collection was incomplete; production composition was not entered" -ForegroundColor Red
+        if(-not[string]::IsNullOrWhiteSpace($script:OperatorStatusPath)){
+            Add-Content -LiteralPath $script:OperatorStatusPath -Value 'FINAL STATUS: PIPELINE ABORTED' -Encoding utf8
+            Add-Content -LiteralPath $script:OperatorStatusPath -Value ("Reason: {0}" -f (ConvertTo-TPMSafeTechnicalTextV1 -Text $collectionAbortMessage)) -Encoding utf8
+        }
+        exit 1
     }
 
     # Issue #111 / Release Integrity: TPM script version and display version
@@ -2217,148 +2388,153 @@ finally {
 
     Write-Host ""
     Write-Host "============================================"
-    Write-Host " TPM CERTIFICATION SCORECARD"
+    Write-Host " TPM CERTIFICATION SCORECARD - PROVISIONAL"
     Write-Host "============================================"
-    Write-Host (" Overall : {0}" -f $certification.Overall)
+    Write-Host (" Pending : final evidence validation (gate result: {0})" -f $certification.Overall)
     Write-Host (" Score   : {0}/{1} ({2}%)" -f $certification.Passed, $certification.Total, $certification.ScorePercent)
-    Write-Host (" Report  : {0}" -f $certificationMd)
+    Write-Host (" Report  : {0}" -f (Join-Path $reportDir 'TPM-Certification-Scorecard.md'))
     Write-Host "============================================"
     [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'final-certification-result' -EvidenceType 'ScreenCapture' -CaptureAction { param($p) Save-TPMScreenCapture -Path $p })
+
+    # ADR155-0309 Checkpoint B2: the production authority is the sole
+    # certification decision/publication path from here on. There is
+    # exactly one authoritative destination ($reportDir), one bundle, and
+    # one publisher (New-TPMPublicationCommitV1, invoked only through
+    # Complete-TPMProductionCertificationCycleV1). The legacy
+    # Complete-TPMCertificationTransaction / Get-TPMCertificationScoreFromItems /
+    # Test-TPMScoreItemManifest / Test-TPMArtifactManifest /
+    # Publish-TPMCertificationArtifacts mechanism, and the
+    # Add-Report/Add-CertificationReport artifact-text accumulators that fed
+    # it, have been removed entirely -- there is no remaining code path in
+    # this file that can assign a competing FINAL STATUS/OVERALL/ExitCode or
+    # write a competing bundle/marker.
+    #
+    # If ANY exception occurs anywhere in this block -- before a genuine
+    # TPMFinalOutcomeV1 exists -- this harness must not fabricate NOT
+    # CERTIFIED or any other authoritative outcome, must report an
+    # infrastructure/aborted-pipeline diagnostic instead, must return a
+    # nonzero exit code, must publish no authoritative marker or bundle, and
+    # must never fall back to the removed legacy authority. The try/catch
+    # below is the only place that can happen.
+    $productionDestinationRoot = $reportDir
+    $productionAborted = $false
+    $productionAbortMessage = $null
+    $productionCycleResult = $null
+    try {
+        $productionPngValidator = {
+            param($Path)
+            $valid = Test-TPMScreenshotFileValid -Path $Path
+            if (-not $valid.Valid) { return [pscustomobject]@{Valid=$false;Reason=$valid.Reason;Width=0;Height=0} }
+            $image = [System.Drawing.Image]::FromFile($Path)
+            try { return [pscustomobject]@{Valid=$true;Reason=$valid.Reason;Width=$image.Width;Height=$image.Height} }
+            finally { $image.Dispose() }
+        }
+
+        $productionAuthority = New-TPMProductionWorkflowAuthorityV1 -Mode $(if($results.SmokeMode){'Smoke'}else{'Unattended'}) -EvidenceRoot $screenshotDir -ReportRoot $reportDir -PngValidator $productionPngValidator
+
+        # Step 1 of the harness's own required sequence: create the
+        # production authority (above), then record the eleven production
+        # facts (below) -- New-TPMProductionFactRecordsV1 is Checkpoint B1's
+        # dedicated fact adapter; it never imports or calls Shadow.psm1.
+        $productionFacts = @(New-TPMProductionFactRecordsV1 -Results $results -RepositoryPath $RepoPath -ReportDirectory $reportDir -BackupDirectory $backupDir -HealthResult $healthResult -HealthLoadError $healthLoadError -UnattendedBinding $binding -StagingParentRoot $productionStagingParentRoot -DestinationRoot $productionDestinationRoot -WorkingDirectoryRoot $productionWorkingDirectory -WorkingDirectory $productionWorkingDirectory)
+        foreach ($fact in $productionFacts) { [void](&$productionAuthority RecordFact $fact) }
+
+        # Step 2: record the nine evidence records in their required order
+        # and provenance. $results.Screenshots is this run's real evidence
+        # issuance ledger, in the exact order Get-TPMEvidenceManifestV1
+        # expects (certification-suite-running, requested-effective-root-
+        # evidence, live-thumbnail-evidence, live-controls-evidence, the
+        # three adaptive-menu captures, smoke-file-safety-evidence,
+        # final-certification-result -- confirmed by the Add-Screenshot call
+        # sites above, in that exact order). New-TPMProductionEvidenceRecordV1
+        # is a fresh, independent adapter against Authority.psm1's own
+        # evidence schema -- it does not import or call Shadow.psm1's
+        # evidence adapter.
+        $productionEvidenceManifest = Get-TPMEvidenceManifestV1
+        $legacyEvidence = @($results.Screenshots)
+        if ($legacyEvidence.Count -ne 9) { throw "PRODUCTION_EVIDENCE_COUNT_INVALID: expected 9 harness evidence records, found $($legacyEvidence.Count)" }
+        for ($i = 0; $i -lt 8; $i++) {
+            $productionRecord = New-TPMProductionEvidenceRecordV1 -LegacyRecord $legacyEvidence[$i] -Expected $productionEvidenceManifest[$i] -EvidenceRoot $screenshotDir -PngValidator $productionPngValidator
+            [void](&$productionAuthority RecordEvidence $productionRecord)
+        }
+
+        # Step 3: issue final evidence -- the dispatcher's own phase machine
+        # requires the score preview it was derived from as a dependency.
+        $productionScorePreview = &$productionAuthority DeriveScorePreview
+        $productionFinalEvidence = New-TPMProductionEvidenceRecordV1 -LegacyRecord $legacyEvidence[8] -Expected $productionEvidenceManifest[8] -EvidenceRoot $screenshotDir -PngValidator $productionPngValidator
+        [void](&$productionAuthority IssueFinalEvidence $productionFinalEvidence $productionScorePreview)
+
+        # Step 4: seal the authority.
+        $productionSealedRun = &$productionAuthority Seal
+
+        # Step 5: invoke the sole seven-step certification core
+        # (Checkpoint B1/ADR155-0309 Sub-step A's
+        # Complete-TPMProductionCertificationCycleV1) -- eligibility,
+        # Section 8.3 candidate (bundle construction only, never presented as
+        # an authoritative runtime outcome), staging, publication commit,
+        # genuine dispatcher-issued TPMFinalOutcomeV1, and the runtime
+        # projection derived exclusively from that genuine final outcome.
+        $productionCycleResult = Complete-TPMProductionCertificationCycleV1 -Authority $productionAuthority -SealedRun $productionSealedRun -StagingParentRoot $productionStagingParentRoot -DestinationRoot $productionDestinationRoot
+    } catch {
+        $productionAborted = $true
+        $productionAbortMessage = $_.Exception.Message
+    }
+
     Clear-TPMConsoleStatus
 
-    # $results.Screenshots now includes the final-certification-result
-    # entry -- refresh $certification.Screenshots (a snapshot array copy
-    # taken when New-CertificationScorecard was called above, before that
-    # entry existed) so both JSON artifacts reflect the complete list, not
-    # the incomplete one from before the final screenshot.
-    $certification.Screenshots = @($results.Screenshots)
-    $certification | ConvertTo-Json -Depth 8 | Out-File $certificationJson -Encoding utf8
-    $results | ConvertTo-Json -Depth 8 | Out-File $json -Encoding utf8
-
-    Add-CertificationReport "# TPM Certification Scorecard"
-    Add-CertificationReport ""
-    Add-CertificationReport ("Overall: **{0}**" -f $certification.Overall)
-    Add-CertificationReport ("Score: {0}/{1} ({2}%)" -f $certification.Passed, $certification.Total, $certification.ScorePercent)
-    Add-CertificationReport ("Elapsed: {0}" -f $results.Elapsed)
-    Add-CertificationReport ""
-    Add-CertificationReport "## Certification Target"
-    Add-CertificationReport ""
-    Add-CertificationReport ("- Repository: {0}" -f $RepoPath)
-    Add-CertificationReport ("- Branch: {0}" -f $results.GitBranch)
-    Add-CertificationReport ("- Commit: {0} ({1})" -f $results.Commit, $results.CommitShort)
-    $originMainText = if ($results.OriginMainCommit) { $results.OriginMainCommit } else { 'unavailable' }
-    $workingTreeText = if ($repoClean) { 'clean' } else { 'dirty' }
-    Add-CertificationReport ("- Origin/main: {0}" -f $originMainText)
-    Add-CertificationReport ("- Sync status: {0}" -f $results.SyncStatus)
-    Add-CertificationReport ("- Working tree: {0}" -f $workingTreeText)
-    Add-CertificationReport ("- Git version: {0}" -f $results.GitVersion)
-    Add-CertificationReport ("- PowerShell version: {0}" -f $results.PowerShellVersion)
-    Add-CertificationReport ("- TPM script version: {0}" -f $tpmScriptVersion)
-    Add-CertificationReport ("- TPM display version: {0}" -f $tpmDisplayVersion)
-    $effectiveRootReportText = Get-TPMEffectiveRootReportText -EffectiveRoot $results.EffectiveTeknoParrotRoot -SmokeMode $results.SmokeMode
-    Add-CertificationReport ("- Requested TeknoParrot root: {0}" -f $results.RequestedTeknoParrotRoot)
-    Add-CertificationReport ("- Effective TeknoParrot root: {0}" -f $effectiveRootReportText)
-    Add-CertificationReport ("- Certified at: {0}" -f $results.Timestamp)
-    Add-CertificationReport ""
-    Add-CertificationReport "## Gates"
-    foreach ($item in $certification.Items) {
-        # Issue #146 review round 4 / #151 review round 1: Get-TPMGateMark
-        # is the single source of truth for this mark -- the Smoke File
-        # Safety evidence screenshot above renders through the exact same
-        # function, so the two can never disagree about what a given
-        # item's real Status/Passed fields mean.
-        $mark = Get-TPMGateMark -Item $item
-        Add-CertificationReport ("- [{0}] {1}: {2}" -f $mark, $item.Area, $item.Details)
-    }
-    Add-CertificationReport ""
-    Add-CertificationReport "## Screenshots"
-    Add-CertificationReport ""
-    # Issue #151 review round 1 (finding #4): standing disclosure,
-    # printed whenever at least one ScreenCapture-type entry exists,
-    # regardless of whether it actually fell back to a full-desktop
-    # capture this run -- a future run's console-window capture could
-    # fall back silently otherwise, and a reviewer should not have to
-    # infer the risk from an individual entry's CaptureScope.
-    if (@($certification.Screenshots | Where-Object { $_.EvidenceType -eq 'ScreenCapture' }).Count -gt 0) {
-        Add-CertificationReport "**Disclosure:** entries marked ScreenCapture below capture a real screen region and may include desktop content unrelated to this certification run beyond the certification console itself (see each entry's capture scope: Window = console-only, FullDesktop = full virtual desktop fallback). DeterministicRender entries never capture the screen -- they rasterize only this run's own rendered report/menu text."
-        Add-CertificationReport ""
-    }
-    if (@($certification.Screenshots).Count -eq 0) {
-        Add-CertificationReport "(none captured)"
-    } else {
-        foreach ($shot in $certification.Screenshots) {
-            $shotMark = switch ($shot.Status) { 'Captured' { 'SHOT' } 'Skipped' { 'SKIP' } default { 'FAIL' } }
-            $shotLocation = if ($shot.Path) { $shot.Path } else { $shot.Details }
-            $shotScopeText = if ($shot.CaptureScope) { " scope=$($shot.CaptureScope)" } else { '' }
-            Add-CertificationReport ("- [{0}] {1} (type={2}{3}): {4}" -f $shotMark, $shot.Label, $shot.EvidenceType, $shotScopeText, $shotLocation)
+    if ($productionAborted) {
+        # No genuine TPMFinalOutcomeV1 exists. Do not fabricate NOT
+        # CERTIFIED or any other authoritative outcome; report an
+        # infrastructure/aborted-pipeline diagnostic and return nonzero.
+        # There is no fallback to the removed legacy authority.
+        #
+        # Whether "no authoritative marker or bundle was written" is
+        # actually TRUE depends on where the exception occurred:
+        # New-TPMPublicationCommitV1's own atomicity guarantees that an
+        # exception BEFORE a successful commit leaves nothing behind, and
+        # Complete-TPMProductionCertificationCycleV1's own post-commit
+        # safety net (Remove-TPMPublicationCommitV1, ADR155-0309 Checkpoint
+        # B2 review correction) rolls back a bundle that WAS committed if a
+        # later step (RegisterCommittedPublication/IssueFinalOutcome)
+        # throws before a genuine final outcome exists. That rollback can
+        # itself fail to fully complete (e.g. a locked file); when it does,
+        # the cycle's own exception message is prefixed
+        # "POST_COMMIT_ROLLBACK_FAILED:" specifically so this harness never
+        # claims "nothing published" when that cannot be proven true.
+        $rollbackDidNotFullyComplete = [string]$productionAbortMessage -like 'POST_COMMIT_ROLLBACK_FAILED:*'
+        Write-Host ""
+        Write-Host "============================================" -ForegroundColor Red
+        Write-Host " CERTIFICATION PIPELINE ABORTED (infrastructure failure)" -ForegroundColor Red
+        Write-Host "============================================" -ForegroundColor Red
+        Write-Host (" REASON       : {0}" -f $productionAbortMessage) -ForegroundColor Red
+        Write-Host (" STATUS       : NOT DETERMINED -- no certification decision was reached") -ForegroundColor Red
+        if ($rollbackDidNotFullyComplete) {
+            Write-Host (" PUBLISHED    : UNKNOWN -- publication rollback did not fully complete; a bundle may still be present at {0} and requires manual verification" -f $productionDestinationRoot) -ForegroundColor Red
+        } else {
+            Write-Host (" PUBLISHED    : false -- no authoritative marker or bundle was written") -ForegroundColor Red
+            if(-not[string]::IsNullOrWhiteSpace($script:OperatorStatusPath)){Add-Content -LiteralPath $script:OperatorStatusPath -Value 'FINAL STATUS: PIPELINE ABORTED' -Encoding utf8;Add-Content -LiteralPath $script:OperatorStatusPath -Value ("Reason: {0}" -f (ConvertTo-TPMSafeTechnicalTextV1 -Text $productionAbortMessage)) -Encoding utf8}
         }
+        exit 1
     }
-    Add-CertificationReport ""
-    Add-CertificationReport "## Artifact folder"
-    Add-CertificationReport $reportDir
 
-    Add-Report "# TPM Validation Report"
-    Add-Report ""
-    Add-Report "## Summary"
-    Add-Report ""
-    Add-Report "Status: **$($results.Status)**"
-    Add-Report ("Certification: **{0}**" -f $certification.Overall)
-    Add-Report "Elapsed: $($results.Elapsed)"
-    Add-Report ("Report folder: {0}" -f $reportDir)
-    Add-Report ("Backup folder: {0}" -f $backupDir)
-    Add-Report ""
-    Add-Report "## Environment"
-    Add-Report ""
-    Add-Report ("- Repo: {0}" -f $RepoPath)
-    Add-Report ("- TeknoParrot root: {0}" -f $TeknoParrotRoot)
-    Add-Report "- Branch: $($results.GitBranch)"
-    Add-Report "- Commit: $($results.Commit)"
-    Add-Report "- Git: $($results.GitVersion)"
-    Add-Report "- PowerShell: $($results.PowerShellVersion)"
-    Add-Report "- Pester: $($results.PesterVersion)"
-    Add-Report "- PSScriptAnalyzer: $($results.PSScriptAnalyzerVersion)"
-    Add-Report ""
-    Add-Report "## Test Results"
-    Add-Report ""
-    Add-Report "- Pester total: $($results.Pester.Total)"
-    Add-Report "- Pester passed: $($results.Pester.Passed)"
-    Add-Report "- Pester failed: $($results.Pester.Failed)"
-    Add-Report "- PSScriptAnalyzer findings: $($results.PSScriptAnalyzerFindings)"
-    Add-Report ""
-    Add-Report "## Checks"
-    Add-Report ""
-    foreach ($check in $results.Checks) {
-        $mark = if ($check.Passed) { 'PASS' } else { 'FAIL' }
-        Add-Report ("- [{0}] {1}: {2}" -f $mark, $check.Name, $check.Details)
-    }
-    Add-Report ""
-    Add-Report "## Artifacts"
-    Add-Report ""
-    Add-Report ("- Certification scorecard: {0}" -f $certificationMd)
-    Add-Report ("- Certification JSON: {0}" -f $certificationJson)
-    Add-Report ("- JSON report: {0}" -f $json)
-    Add-Report ("- Pester summary: {0}" -f (Join-Path $reportDir 'Pester-summary.json'))
-    Add-Report ("- Pester output: {0}" -f (Join-Path $reportDir 'Pester-output.txt'))
-    Add-Report ("- Pester failures (names + errors): {0}" -f (Join-Path $reportDir 'Pester-Failures.txt'))
-    Add-Report ("- PSScriptAnalyzer: {0}" -f (Join-Path $reportDir 'PSScriptAnalyzer.json'))
-    if ($results.InstallHealthReport) {
-        Add-Report ("- Install health: {0}" -f $results.InstallHealthReport)
-    }
-    Add-Report ""
-    Add-Report "## Screenshots"
-    Add-Report ""
-    if (@($results.Screenshots | Where-Object { $_.EvidenceType -eq 'ScreenCapture' }).Count -gt 0) {
-        Add-Report "**Disclosure:** entries marked ScreenCapture below capture a real screen region and may include desktop content unrelated to this certification run beyond the certification console itself (see each entry's capture scope: Window = console-only, FullDesktop = full virtual desktop fallback). DeterministicRender entries never capture the screen -- they rasterize only this run's own rendered report/menu text."
-        Add-Report ""
-    }
-    if (@($results.Screenshots).Count -eq 0) {
-        Add-Report "(none captured)"
-    } else {
-        foreach ($shot in $results.Screenshots) {
-            $shotMark = switch ($shot.Status) { 'Captured' { 'SHOT' } 'Skipped' { 'SKIP' } default { 'FAIL' } }
-            $shotLocation = if ($shot.Path) { $shot.Path } else { $shot.Details }
-            $shotScopeText = if ($shot.CaptureScope) { " scope=$($shot.CaptureScope)" } else { '' }
-            Add-Report ("- [{0}] {1} (type={2}{3}): {4}" -f $shotMark, $shot.Label, $shot.EvidenceType, $shotScopeText, $shotLocation)
-        }
-    }
+    # The dispatcher-issued final outcome's runtime projection is the only
+    # source of externally visible certification status and exit code.
+    # There is no separate legacy FINAL STATUS/OVERALL/ExitCode decision
+    # left anywhere in this file.
+    $productionProjection = $productionCycleResult.Projection
+    $finalColor = if ($productionProjection.FinalStatus -ceq 'CERTIFIED') { 'Green' } else { 'Red' }
+    # The publisher commits into DestinationRoot\<RunIdentity>, not
+    # DestinationRoot itself -- $productionCycleResult.Commit.DestinationDirectory
+    # is the genuine, real on-disk bundle location for a committed
+    # publication. When publication did not commit (Committed=$false), no
+    # such directory is authoritative, so this displays an explicit
+    # "not published" value rather than implying $productionDestinationRoot
+    # itself is a report bundle.
+    $reportsDisplay = if ($productionCycleResult.Commit.Committed) { $productionCycleResult.Commit.DestinationDirectory } else { '(not published)' }
+    Write-Host ""
+$finalLine=("FINAL STATUS: {0}" -f $productionProjection.FinalStatus); Write-Host $finalLine -ForegroundColor $finalColor; if(-not[string]::IsNullOrWhiteSpace($script:OperatorStatusPath)){Add-Content -LiteralPath $script:OperatorStatusPath -Value $finalLine -Encoding utf8;Add-Content -LiteralPath $script:OperatorStatusPath -Value ("Total elapsed: {0}" -f $runTimer.Elapsed) -Encoding utf8;Add-Content -LiteralPath $script:OperatorStatusPath -Value ("Report: {0}" -f $reportDir) -Encoding utf8;Add-Content -LiteralPath $script:OperatorStatusPath -Value ("Technical log: {0}" -f (Join-Path $reportDir 'TechnicalLogs')) -Encoding utf8}
+    Write-Host (" EXIT CODE    : {0}" -f $productionProjection.ExitCode) -ForegroundColor $finalColor
+    Write-Host (" RUN IDENTITY : {0}" -f $productionProjection.RunIdentity) -ForegroundColor $finalColor
+    Write-Host (" REPORTS      : {0}" -f $reportsDisplay) -ForegroundColor $finalColor
+    exit $productionProjection.ExitCode
 }

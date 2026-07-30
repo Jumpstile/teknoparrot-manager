@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC2.1  --  QUICK START
+  TeknoParrot Manager  |  v1.0 RC3  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -9,7 +9,9 @@
   Unfamiliar term (GamePath, UserProfile, archetype, etc.)? See the
   GLOSSARY section near the top of TeknoParrot-Manager-README.txt.
 
-  RELEASE CANDIDATE -- test one game after each run. Profiles are backed up automatically.
+  RELEASE CANDIDATE -- v1.0 RC3 is in preparation. It has not been published
+  or hardware-certified yet. Test one game after each run. Profiles are backed
+  up automatically.
 
 
   NEW TO TEKNOPARROT?

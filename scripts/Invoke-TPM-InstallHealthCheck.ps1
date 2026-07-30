@@ -30,10 +30,10 @@ $mdPath = Join-Path $OutDir 'InstallHealth.md'
 function Write-HealthLog {
     param(
         [string]$Level,
-        [string]$Event,
+        [string]$EventName,
         [string]$Message
     )
-    $line = "{0} [{1}] [{2}] {3}" -f (Get-Date).ToString('o'), $Level, $Event, $Message
+    $line = "{0} [{1}] [{2}] {3}" -f (Get-Date).ToString('o'), $Level, $EventName, $Message
     $line | Out-File -FilePath $logPath -Append -Encoding utf8
 }
 

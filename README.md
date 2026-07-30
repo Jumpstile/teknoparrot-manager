@@ -8,13 +8,19 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 
 ---
 
-## Latest Release Candidate: TeknoParrot Manager v1.0 RC2.1
+## Upcoming Release Candidate: TeknoParrot Manager v1.0 RC3
 
-**[Download v1.0 RC2.1](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC2.1)** - this is the current recommended testing build.
+v1.0 RC3 is in preparation. It has not been published or hardware-certified,
+so no RC3 download is available yet. Its intended tag is `v1.0-RC3`, but that
+tag has not been created.
 
-Final Version 1.0 has not been published yet. v1.0 RC2.1 is a release-hardening follow-up to RC2 (thumbnail download reliability, update-check version display consistency, certification-suite reliability, adaptive-menu refinements): Engineering, Behavioral, and Documentation Certification are all complete, and it's certified 9/9 on real arcade hardware - what's left is real-world validation across different cabinets, GPUs, and TeknoParrot installations before 1.0 ships.
+RC3 prepares a development-only certification-harness fix: the harness can run
+the existing read-only Library Health Check under `-Unattended` and exits cleanly
+when complete. It also pins the certification runner to exactly Pester 5.7.1.
+The currently published v1.0 RC2.1 remains available
+from [Releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
 
-Found something? Report it on the **[v1.0 RC2.1 feedback tracking issue (#137)](https://github.com/Jumpstile/teknoparrot-manager/issues/137)**. (The prior RC1 feedback issue, #102, is scoped to RC1 only.)
+Final Version 1.0 has not been published yet.
 
 ---
 
@@ -140,7 +146,8 @@ This script automates the copy-and-fill step: it scans your games, matches each 
 
 ## Installation
 
-1. Download `TeknoParrot Manager v1.0 RC2.1.zip` from [Releases](../../releases/latest)
+1. RC3 is not published yet. Once it is published, download
+   `TeknoParrot Manager v1.0 RC3.zip` from [Releases](../../releases).
 2. Extract to any folder (e.g. a `Scripts` subfolder alongside your TeknoParrot install)
 3. Double-click **`TeknoParrot-Manager.bat`**
 
@@ -929,4 +936,4 @@ Pull requests are welcome too. Full source and version history: [github.com/Jump
 
 ---
 
-> v1.0 RC2.1 -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v1.0 RC3 (in preparation; not yet published or hardware-certified) -- test one game after each run. Profiles are backed up automatically at the start of every run.

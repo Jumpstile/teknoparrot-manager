@@ -997,3 +997,798 @@ longer appears inline in the if-block, since it now lives inside `Get-MainMenuSe
   wiki entry, tag + ZIP + GitHub release + prune-to-5. It does NOT need a full doc-sweep
   for new features/mode numbers -- by definition nothing user-facing changed except
   behavior that was already supposed to work.
+
+
+## Certification finalization transaction (issue #154)
+
+Complete-TPMCertificationTransaction is the sole authority for the final outcome, over the complete evidence lifecycle, not only the pass/fail decision. It is modeled as a database transaction: it consumes immutable, already-recorded facts -- a private workflow-owned issuance ledger, the scorecard's own Items, an authoritative artifact manifest -- rather than trusting descriptions of those facts that a caller could construct independently, and it treats publication as the final step of the same commit rather than a separate operation the caller has to keep in sync with the decision by hand.
+
+**Round 3 (issue #154): from "validate the description" to "validate against the authority."** Round 2 made the transaction the sole decision authority and added manifest/ordering/derived-score checks, but those checks still validated the *public* `$Results.Screenshots` array and a caller-supplied `$Certification.Items`/artifact set directly -- both are ordinary mutable objects nothing stops another piece of code (or an adversarial test) from constructing a convincing-looking substitute for, with every field, including `WorkflowId` and `Sequence`, copied from a real record. Round 3 does not add more field-level validation on top of that; it changes what is trusted:
+
+- **Authoritative evidence issuance ledger, not the public array.** `$script:tpmEvidenceLedger` is a private, workflow-owned list populated only by `Add-Screenshot`, in real append order. `Complete-TPMCertificationTransaction` validates the caller-submitted `$Results.Screenshots` against this ledger by **reference identity, position for position** (`[object]::ReferenceEquals`) before it validates anything about individual records. A brand-new object with every field copied from a real ledger entry -- Name, Label, Path, WorkflowId, Sequence, all of it -- is still a different object, and reference identity is false for it. This is what "cannot be reconstructed merely by copying public fields" means concretely: the unforgeable fact is which object the workflow actually produced, not what any object claims about itself.
+- **Ordering derived from ledger position, not a trusted property.** `Sequence` remains on each record as an informational/reporting field, but the transaction no longer trusts it for anything security-relevant -- a mutated `Sequence` on an already-issued object cannot forge a different position, because ordering is read directly from the ledger's own append order (`$ledger[$ledger.Count - 1]` must be `final-certification-result`).
+- **Replay prevention and "final record issued last" by construction, not by check.** The ledger seals itself (`$script:tpmEvidenceLedgerSealed`) the instant `final-certification-result` is issued (`Add-Screenshot`), successfully, skipped, or failed. Any further `Add-Screenshot` call after that throws immediately. There is no code path left that can grow the ledger once sealed -- the "final record was genuinely last" invariant holds even before the transaction checks it.
+- **Path ownership, containment, and identity/filename consistency, enforced at issuance and re-verified at commit.** `Add-Screenshot` rejects (fails closed, before the record ever enters the ledger) any path that escapes the run's `-ScreenshotDir`, or that duplicates a path already claimed by another ledger entry. `Complete-TPMCertificationTransaction` re-verifies containment, uniqueness, and that each record's filename and `Label` actually match its identifier, against the ledger's own copies of those fields, as defense-in-depth against direct same-scope ledger manipulation (a residual risk distinct from a caller constructing a public-looking object -- see "Documented boundary" below).
+- **Real capture provenance for ScreenCapture evidence.** A required `ScreenCapture`-typed record must carry a non-empty `CaptureScope` (`Window` or `FullDesktop`, from `Save-TPMScreenCapture`) -- a `Captured` status with no recorded capture scope is rejected, since it cannot have come through the real capture path.
+- **Authoritative score-item manifest, not an arbitrary Items array.** `Get-TPMExpectedScoreItemManifest` is the exact, closed set of certification score-item identifiers. `Test-TPMScoreItemManifest` validates `$Certification.Items` against it -- exact identifiers, no missing/extra/duplicate, strict `[bool]` `Passed` (a truthy non-Boolean like `'true'` or `1` is rejected), and correct NotApplicable/tri-state usage per item -- *before* `Get-TPMCertificationScoreFromItems` is ever allowed to compute a score from it. A synthetic one-item "100% passing" scorecard cannot reach the scoring arithmetic at all.
+- **Mandatory, manifest-validated publication commit.** `-BuildArtifacts` is a required parameter (`[Parameter(Mandatory=$true)]`) -- omitting it is a PowerShell binding error, not a silently-skipped publish. `Get-TPMExpectedArtifactManifest` defines the exact five authoritative artifact identities (four reports plus the commit marker); `Test-TPMArtifactManifest` validates the callback's returned set against it (exact Ids, unique destinations, every destination contained within `-ReportDir`) before `Publish-TPMCertificationArtifacts` ever touches disk.
+- **A decision snapshot, not the transaction object, is what gets serialized.** The object handed to `-BuildArtifacts`, and the one attached to `$Certification.Finalization`/`$Results.Finalization` for JSON/Markdown serialization, deliberately has no `Published`/`PublicationError` fields. Those fields describe the outcome of an operation (publication) that has not happened yet when the content is generated -- embedding them would always serialize a stale value (`$false`, or whatever was true before the real outcome existed) into a report that might go on to publish successfully. The commit marker (below) is the actual durable proof of a complete publish; because a failed publish never leaves it on disk at all, its content never needs to describe an outcome that hadn't happened when it was written.
+- **A real commit boundary: durable verification plus a commit marker, not just stage-then-promote.** `Publish-TPMCertificationArtifacts` treats the last artifact in the array (always the commit marker, by manifest) specially: every other artifact is staged, promoted, and durably re-read back from disk to confirm it matches what was staged, and only once all of that succeeds is the marker itself promoted and durably verified. A concurrent reader, or a process resuming after an interrupted run, should treat the marker's absence as "not committed" regardless of what report files already exist on disk -- partial output is never authoritative.
+- **Documented boundary: this defends against constructed descriptions, not same-scope memory tampering or content forgery.** Everything above defends against a caller (or an adversarial test acting as one) constructing an object, array, or artifact set that merely *describes* legitimate workflow output. It does not defend against an actor with the ability to directly mutate this script's own private state (`$script:tpmEvidenceLedger`, etc. -- the same risk class as editing the script itself) or against a structurally-valid PNG whose *content* was substituted for a different real capture's bytes (see the regression test "rejects a reused PNG substituted for the final-certification-result path" for the explicit boundary: this documents it as intentionally out of scope, the same way PNG semantic/content authenticity was already out of scope for the validator -- see `docs/PNG-EVIDENCE-VALIDATOR-SPECIFICATION-INVENTORY.md`).
+- **Commit atomicity and rollback semantics** (`Publish-TPMCertificationArtifacts`): every artifact is staged to a `.pending` file first; if staging, promotion, or durable verification fails partway, every pending file and every already-promoted file from this attempt is removed, and a pre-existing destination is never overwritten or deleted.
+
+### System Invariant Inventory
+
+1. The evidence manifest contains exactly these identifiers once each: certification-suite-running, requested-effective-root-evidence, live-thumbnail-evidence, live-controls-evidence, the three adaptive-menu captures, smoke-file-safety-evidence, and final-certification-result.
+2. Required evidence is every non-skipped production capture. Every required record must be Captured, have its manifest-declared type, carry the current workflow provenance identifier, have a path, and pass PNG validation again during finalization.
+3. The two conditional live-evidence slots are optional only when represented as pathless Skipped records. Optional evidence cannot masquerade as a capture or failure.
+4. Exactly one case-sensitive final-certification-result must exist and must be the required validated ScreenCapture created in the current workflow. Zero, duplicates, wrong identity/type/provenance, skipped, failed, or unrelated substitutes fail.
+5. Unexpected, null, malformed, extra, conflicting, or duplicate evidence fails the manifest. A later success never removes an earlier required failure.
+6. A passing numeric score cannot override evidence failure. Conversely, complete evidence cannot override a failed score. Both are derived from `$Certification.Items` at commit time, never trusted off a precomputed field, and `$Certification.Items` is itself validated against `Get-TPMExpectedScoreItemManifest` before it is trusted (round 3).
+7. Final PASS, CERTIFIED, and exit code 0 are emitted only together. Every other combination becomes FAIL, NOT CERTIFIED, and exit code 1.
+8. Reports and console text render the transaction object; they do not recalculate outcome. The process exits with that same transaction's ExitCode.
+9. The pre-final screenshot display is explicitly provisional and cannot claim certification before final evidence is validated.
+10. Final report publication is guarded and is part of the same commit as the decision: a write failure downgrades the transaction in place, removes partial authoritative report files, prints only a failure console outcome, and exits nonzero; a final PASS console is emitted only after all reports (including the commit marker) are durably written and verified.
+11. Every evidence record carries an informational `Sequence`, but ordering itself is derived from the ledger's own append position, never trusted off that property. `final-certification-result` must be the ledger's own last entry (round 3: previously a `Sequence` comparison; a mutable property is not a security boundary).
+12. **(Round 3) Submitted evidence must be reference-identical, position for position, to the workflow's private issuance ledger.** A record with every field copied from a real one, a reordered submission, an extra fabricated record, a record missing from the submission, or a record replayed from a different workflow run's ledger all fail here -- this is the primary defense the round-2 design lacked.
+13. **(Round 3) The evidence ledger seals on `final-certification-result` issuance.** No further evidence can be appended afterward (`Add-Screenshot` throws) -- replay-after-finalization is structurally impossible, not merely detected.
+14. **(Round 3) Path ownership, containment, uniqueness, and identifier-to-label/identifier-to-filename consistency** are enforced both at issuance (`Add-Screenshot`, fail closed) and again at commit time against the ledger's own field values.
+15. **(Round 3) Required ScreenCapture evidence must carry a real, non-empty CaptureScope.**
+16. **(Round 3) `$Certification.Items` is validated against the exact expected score-item manifest** (identifiers, count, uniqueness, strict Boolean `Passed`, correct tri-state usage) before it can influence the score at all.
+17. **(Round 3) `-BuildArtifacts` is mandatory**, and its returned artifact set is validated against the exact expected artifact-identity manifest (five identities, unique, contained within `-ReportDir`) before anything is written to disk.
+18. **(Round 3) Serialized certification/validation content never embeds a `Published` field.** The commit marker's mere presence on disk, promoted and durably verified strictly after every other artifact, is the only authoritative proof of a complete publish -- there is no stale self-referential publish state to go wrong.
+
+## ADR-0155 production fact adapter (ADR155-0309 Checkpoint B1)
+
+`scripts/TPMCertification.ProductionFacts.psm1` builds all eleven raw facts
+the production authority (`TPMCertification.Production.psm1`) consumes. It
+is a dedicated module, separate from `TPMCertification.Shadow.psm1`'s Phase 2
+adapter: it never imports or calls Shadow, and never expands Shadow's public
+surface. Full design rationale, defect history, and evidence: ADR-0155
+implementation checklist (`docs/adr/ADR-0155-IMPLEMENTATION-CHECKLIST.md`,
+Checkpoint B1 entry). Key structural decisions:
+
+- **The authoritative production PowerShell inventory is fixed and
+  non-overridable.** `Get-TPMProductionPowerShellInventoryV1` takes only
+  `-RepositoryPath` -- there is no parameter through which any caller,
+  production or test, can substitute a different file set. The real,
+  17-entry list (the union of the release-package PowerShell contents and
+  every ADR-0155 production certification/harness script/module) lives in
+  a module-private constant; a separate, unexported
+  `Resolve-TPMProductionPowerShellInventoryEntriesV1` does the actual
+  missing/duplicate/outside-root/unreadable validation and is the only
+  thing tests exercise with a synthetic file list (via Pester's
+  `InModuleScope`).
+- **Static Analysis facts are real, not placeholders.** Parser (both engines,
+  one out-of-process invocation per file, explicit timeout, exact
+  requested-file/result correlation, cross-file engine-version consistency),
+  encoding (multi-file, aggregate `NonAsciiByteCount`), PSScriptAnalyzer, and
+  InjectionHunter all run fresh over the complete inventory every time --
+  `Test-TPMProductionPSScriptAnalyzerV1`/`Test-TPMProductionInjectionHunterV1`
+  never read the legacy harness's own precomputed `$Results.PSScriptAnalyzerFindings`.
+- **InjectionHunter disposition identity is File + RuleName + Extent
+  (match key), with Line only disambiguating multiple identical
+  same-file occurrences.** Registry entries and current findings sharing a
+  match key are paired one-to-one in ascending-Line order; a count mismatch
+  either way leaves the surplus finding(s) Confirmed/unresolved or the
+  surplus registry entry(ies) stale (fail-closed). A duplicate raw finding
+  identity (File+RuleName+Extent+Line appearing twice from a single scan)
+  is treated as a scanner defect and also fails closed.
+  `scripts/InjectionHunterDispositions.psd1` is the checked-in disposition
+  record for every current finding across the complete inventory.
+- **Artifacts preflight genuinely exercises the real pipeline.** Rather than
+  trusting `Get-Command` visibility as the dependency contract,
+  `Test-TPMProductionPackagePreflightV1` drives a full synthetic run through
+  the real production authority, all five report builders, the manifest,
+  the commit marker, and `New-TPMPublicationCommitV1`, entirely inside one
+  owned scratch child directory it creates beneath the caller's
+  `PreflightScratchRoot` (see the scratch-ownership invariant below) --
+  never the caller's real `StagingParentRoot`/`DestinationRoot`, which are
+  checked separately for write-reservation only.
+- **Bounded execution for in-process analysis.** PSScriptAnalyzer and
+  InjectionHunter scans run via `Invoke-TPMBoundedScriptBlockV1`, which uses
+  `Start-Job` (a genuine background process) rather than a same-process
+  runspace -- confirmed necessary because `DiagnosticRecord.Line`/`Column`
+  are ScriptProperties bound to the producing runspace, not intrinsic .NET
+  properties, and cross-runspace access to them was unreliable. This gives
+  every per-file scan a real wall-clock timeout.
+
+### Scratch-directory ownership invariant (New-/Remove-TPMOwnedScratchDirectoryV1)
+
+`Test-TPMProductionPackagePreflightV1` used to recursively delete its
+caller-supplied `PreflightScratchRoot` directly in a `finally` block -- if
+that path pre-existed or were misbound to a broad directory, unrelated data
+could be erased. The corrected model:
+
+1. `New-TPMOwnedScratchDirectoryV1` creates and owns exactly one
+   GUID-named child beneath a validated parent; it rejects a pre-existing
+   child name, an out-of-root child path, and (if the resulting child were
+   ever found to be a reparse point) refuses to proceed.
+2. `Remove-TPMOwnedScratchDirectoryV1` re-verifies containment and
+   re-checks for a reparse point immediately before deleting, and
+   recursively removes only that exact owned child -- never the caller's
+   parent, never a pre-existing directory, never anything the containment
+   check can no longer prove is the same path.
+3. Cleanup failure is folded into `PackageValidationErrorCount` and forces
+   `PackageValidationPassed=$false` -- it can never be silently masked by an
+   otherwise-successful pipeline proof.
+
+### System Invariant Inventory (Checkpoint B1)
+
+1. The production PowerShell inventory returned by
+   `Get-TPMProductionPowerShellInventoryV1` is always the same fixed
+   17-entry list; no exported parameter, on this function or any other
+   production entry point, can substitute a different file set.
+2. Every inventory entry must exist, be readable, resolve inside the
+   repository root, and be distinct from every other entry -- a single
+   invalid entry fails the whole inventory rather than silently shrinking
+   it.
+3. `Static Analysis`'s Parser/Encoding/PSScriptAnalyzer/InjectionHunter
+   sub-facts are always freshly observed against the complete current
+   inventory; none of them may be populated from a previously computed or
+   externally supplied value (in particular, never from the legacy
+   harness's own `$Results.PSScriptAnalyzerFindings`).
+4. A parser probe's `Executed=$true` requires every requested file to have
+   produced exactly one structured, schema-valid, exactly-correlated result
+   from the exact same engine version -- a version mismatch across files,
+   a missing/extra/malformed result, or any file failing coverage forces
+   the whole engine's result to `Executed=$false`.
+5. An InjectionHunter disposition-registry entry's identity is File +
+   RuleName + Extent + Line; two entries may never share that full
+   identity. A finding's match against the registry uses File + RuleName +
+   Extent only, with same-key entries and findings paired in ascending-Line
+   order -- a registry entry that cannot be paired against any current
+   finding (stale) fails the whole check closed; a finding that cannot be
+   paired against any registry entry is Confirmed/unresolved, never
+   silently passed.
+6. A duplicate raw current-finding identity (File+RuleName+Extent+Line
+   appearing twice from a single scan) is never silently deduplicated or
+   double-counted -- it fails the check closed as a scanner-integrity
+   defect.
+7. `Test-TPMProductionPackagePreflightV1` never writes synthetic
+   certification-looking artifacts into the caller's real
+   `StagingParentRoot`/`DestinationRoot` -- every genuine pipeline
+   invocation happens inside its own disposable, owned scratch child.
+8. `PublisherAvailable`/`PackageValidationPassed` can never be `$true` on
+   the strength of `Get-Command` name resolution alone -- they require a
+   genuine, successful synthetic invocation of the real authority/report/
+   publication pipeline, including a real canonical-filename cross-check.
+9. A scratch-directory helper never recursively deletes a caller-supplied
+   parent directory, a path that no longer resolves inside its recorded
+   parent, or a path that is (or has become) a reparse point -- it deletes
+   only the one child it itself created and still owns.
+
+### System Invariant Inventory (collection abort and launcher exit)
+
+1. Production composition is reachable only after the harness records that
+   every collection gate completed. An exception before that point is an
+   infrastructure abort, never an authoritative NOT CERTIFIED decision.
+2. The first collection exception is retained as the initiating error record
+   and diagnostic. Cleanup and abort reporting must not replace it with a
+   secondary schema or strict-mode exception.
+3. Incomplete collection cannot create a production authority, adapt facts or
+   evidence, seal a run, issue an outcome, or invoke publication. It returns a
+   nonzero process exit and writes no authoritative marker or bundle.
+4. A health result without an explicit load error is valid input to the
+   production fact adapter only when it is a structured object with a present,
+   non-null, non-empty collection-valued `Checks` property. Every entry must be
+   a non-null `PSCustomObject` with a present, nonblank string `Name` and a
+   present strict-Boolean `Passed`; scalar/nested-collection entries, malformed
+   unexpected entries, missing required checks, and duplicate required checks
+   are deliberate `PRODUCTION_HEALTH_RESULT_SCHEMA_INVALID` infrastructure
+   errors before any member is trusted. The adapter never invents `Checks` or
+   weakens strict mode. Structurally valid additional checks are permitted but
+   are not projected into the three-check authoritative fact.
+5. An explicit install-health load error remains evidence of a fail-closed
+   `Missing` or `InvalidJson` fact. That path does not require a health result
+   object and is distinct from the invalid no-error schema states above.
+6. On normal child completion, the PowerShell direct and relaunch paths return
+   the harness's exact exit code; a thrown harness error or unavailable pwsh
+   fails nonzero rather than being converted to success. The batch launcher
+   returns the `RUN_EXIT` captured immediately after its PowerShell child even
+   when the report/Explorer presentation branch runs; pause, Explorer launch,
+   `popd`, and `endlocal` cannot replace that saved result. No exact numeric
+   code is promised for a child that terminates by exception before producing
+   one.
+7. Process-level abort tests use only copied synthetic repositories and
+   test-local module/source substitution. No production parameter, environment
+   variable, or callable hook can inject a collection failure or bypass a gate.
+
+## ADR-0155 production harness cutover (ADR155-0309 Checkpoint B2)
+
+`scripts/Invoke-TPM-RealInstanceSmoke.ps1` is now driven end-to-end by the
+Phase 3 production authority (`TPMCertification.Authority.psm1` /
+`.Production.psm1` / `.ProductionCycle.psm1` / `.ProductionFacts.psm1` /
+`.ProductionEvidence.psm1` / `.Publication.psm1` / `.Reports.psm1`) --
+`Complete-TPMProductionCertificationCycleV1` is the sole certification
+decision/publication path the harness invokes. Full design rationale,
+defect history, and evidence: ADR-0155 implementation checklist
+(`docs/adr/ADR-0155-IMPLEMENTATION-CHECKLIST.md`, Checkpoint B2 entry). Key
+structural decisions:
+
+- **The harness never imports or calls `TPMCertification.Shadow.psm1`.**
+  Shadow remains a standalone, never-authoritative Phase 2 observer module,
+  exercised only by its own test suite -- it has no wiring into the
+  production harness at all (Checkpoint B1's shadow-observer integration is
+  superseded, not extended). `scripts/TPMCertification.ProductionEvidence.psm1`
+  is a fresh, independent evidence adapter (`New-TPMProductionEvidenceRecordV1`,
+  its only exported function) converting the harness's legacy
+  `Add-Screenshot` evidence-ledger records into the production authority's
+  evidence schema -- it does not reuse or call any Shadow.psm1 code.
+- **Every competing legacy certification/publication path is deleted, not
+  merely bypassed.** `Complete-TPMCertificationTransaction`,
+  `Get-TPMCertificationScoreFromItems`, `Test-TPMScoreItemManifest`,
+  `Test-TPMArtifactManifest`, `Publish-TPMCertificationArtifacts`, and their
+  associated `Get-TPMExpectedScoreItemManifest`/`Get-TPMExpectedArtifactManifest`/
+  `Get-TPMCertificationFinalConsoleLines`/`Get-TPMCertificationFinalReportLines`
+  helpers no longer exist anywhere in the harness source. There is no
+  remaining code path that can assign a competing `FINAL STATUS`/`Overall`/
+  exit code, or write a competing report/marker/bundle.
+- **Exactly one authoritative destination, one bundle, one publisher.**
+  `$reportDir` is the sole publication destination; `New-TPMPublicationCommitV1`
+  (invoked only through `Complete-TPMProductionCertificationCycleV1`) is the
+  sole writer of `TPM-Certification-{Eligibility,Publication,Final-Outcome,
+  Scorecard,Validation,Manifest,Commit}.{json,md}`. The remaining
+  non-authoritative surfaces are clearly distinct and never share a
+  filename or an outcome-bearing field with the authoritative bundle:
+  - The pre-flight `TPM-Invalid-Certification-Environment.{md,json}`
+    diagnostic, written only when the requested TeknoParrot root fails
+    validation, before the production authority is even constructed --
+    it throws immediately after, so it never reaches the decision surface.
+  - The "TPM CERTIFICATION SCORECARD - PROVISIONAL" console block, explicitly
+    labeled "Pending: final evidence validation" and computed by informational-
+    only inline arithmetic (not `Get-TPMCertificationScoreFromItems`, which no
+    longer exists) -- it never sets the exit code and is clearly distinguished
+    from the genuine, dispatcher-issued final status printed later.
+- **An exception before a genuine final outcome produces an infrastructure
+  abort, never a fabricated certification decision.** The entire
+  authority-construction-through-cycle-completion sequence (build authority,
+  record 11 facts, record 9 evidence records via `New-TPMProductionEvidenceRecordV1`,
+  issue final evidence, seal, invoke `Complete-TPMProductionCertificationCycleV1`)
+  runs inside one `try`/`catch`. Any exception there sets `$productionAborted`,
+  prints an explicit "CERTIFICATION PIPELINE ABORTED (infrastructure failure)"
+  diagnostic naming the failure, and exits `1` -- it never falls back to the
+  removed legacy mechanism, never reports `CERTIFIED`/`NOT CERTIFIED`, and
+  never publishes a marker or bundle.
+- **The dispatcher-issued final outcome is the sole source of the harness's
+  externally visible status and exit code.** `$productionCycleResult.Projection`
+  (`FinalStatus`, `ExitCode`, `RunIdentity`) drives the only "FINAL STATUS"/
+  "EXIT CODE" lines and the only `exit` call reachable after certification
+  facts/evidence begin recording.
+
+## Certification isolation and result-validation hardening (ADR155-0309, 2026-07-24)
+
+`scripts/TPMCertification.Execution.psm1` is the shared child-process
+isolation primitive (`Invoke-TPMIsolatedProcessV1`) and Pester-result contract
+validator (`Read-TPMPesterResultV1`) every certification child process and
+structured result in this pipeline goes through. Full design rationale,
+defect history (including two real regressions found and fixed during
+independent review -- a transient file-lock race and a directory-auto-create
+regression), and the complete adversarial test inventory are in the ADR-0155
+implementation checklist (`docs/adr/ADR-0155-IMPLEMENTATION-CHECKLIST.md`,
+"ADR155-0309 certification isolation and result-validation hardening" entry).
+Summary:
+
+- **`Invoke-TPMIsolatedProcessV1`** launches every certification child
+  (Pester, the parser probe, PSScriptAnalyzer/InjectionHunter bounded jobs'
+  external dependencies, the adaptive-menu renderer, the unattended-TPM
+  relaunch) with `-NoProfile -NonInteractive`, a GUID-nonce-prefixed,
+  `FileMode.CreateNew` empty stdin file (never inherited stdin), separate
+  stdout/stderr files, a bounded timeout with confirmed termination
+  (`Stop-Process` plus a `WaitForExit` grace window and an explicit
+  `HasExited` re-check -- never fire-and-forget `Kill()`), and a
+  `<prefix>-process.json` metadata record that logs executable identity
+  (filename only), phase identity, PID, timing, exit code, and argument
+  *count* -- never argument content. Its working/log directories are resolved
+  to a full path, verified non-reparse-point, and (via
+  `Assert-TPMOwnedDirectoryV1 -CreateIfMissing`) created on first use if they
+  do not already exist. As of the round 3 correction below, the caller must
+  supply a distinct `-WorkingDirectoryRoot`/`-LogDirectoryRoot` trust anchor
+  for each -- see "Trusted-root wiring correction" for what each real caller
+  supplies and why.
+- **`Read-TPMPesterResultV1`** treats the JSON result `Invoke-TPM-PesterChild.ps1`
+  writes as a closed contract: exact top-level and `Categories` field sets,
+  pinned `SchemaVersion`, every numeric field constrained to a true bounded
+  nonnegative integral type, `Discovered == Passed+Failed+Skipped+NotRun`,
+  `FailedContainers <= Containers`, `VirtualBetaTesterTotal ==
+  VirtualBetaTesterPassed + VirtualBetaTesterFailed` bounded by the applicable
+  global totals, and `Failures` a present array whose entry count equals
+  `Failed` exactly, with every entry's `Name`/`Message` a nonblank string.
+  Every malformed state throws the single `PESTER_RESULT_SCHEMA_INVALID:
+  <reason>` error family, which the harness's collection-abort gate (see
+  "System Invariant Inventory (collection abort and launcher exit)", above)
+  turns into an infrastructure abort with no authority/facts/evidence/marker/
+  bundle produced -- never a raw `PropertyNotFoundException`.
+- **`TPMCertification.ProductionFacts.psm1`'s external-process helper**
+  (`Invoke-TPMExternalProcessWithTimeoutV1`) delegates directly to
+  `Invoke-TPMIsolatedProcessV1` rather than maintaining a second isolation
+  implementation, so every parser/PSScriptAnalyzer/InjectionHunter child
+  inherits the same closed-stdin, bounded-timeout, confirmed-termination
+  guarantees.
+- **No blanket confirmation suppression** (`$PSDefaultParameterValues['*:Confirm']
+  = $false` or equivalent) exists anywhere in `scripts/` or `Tests/`; each
+  call site that needs non-interactive behavior handles it locally. Real,
+  bounded child-process probes prove `Read-Host`, `$Host.UI.PromptForChoice`,
+  a `-Confirm`-triggering `ShouldProcess` call, and a missing-mandatory-
+  parameter cmdlet call all fail promptly with a nonzero exit and no hang
+  under `-NonInteractive` with closed stdin, on both PowerShell engines.
+
+### Fail-closed correction round (PR #155 static review, ADR155-0309)
+
+A follow-up static review of the isolation primitive above found two places
+where the original hardening still failed open. Both are now fail-closed;
+neither claims to eliminate every possible filesystem race in general, only
+the specific ones described here.
+
+**Log-sanitization retry (`Write-TPMSafeTechnicalFileV1`).** The original
+bounded retry around reading/writing a just-exited child's captured
+stdout/stderr (see the transient-handle-release race in LESSONS_LEARNED.md)
+retried every `IOException` indiscriminately and, on exhaustion, silently
+returned as if sanitization had succeeded -- so a persistently locked file
+left unsanitized content in place with no signal to the caller.
+`Invoke-TPMSafeFileRetryV1` now classifies exceptions before retrying:
+
+- **Retried** (transient only): an `IOException` whose `.HResult` is exactly
+  `0x80070020` (`ERROR_SHARING_VIOLATION`) or `0x80070021`
+  (`ERROR_LOCK_VIOLATION`) -- the two Win32 codes the just-exited-child
+  handle-release race actually produces. `Exception.HResult` is a plain
+  `Int32` on every `System.Exception` in both Windows PowerShell 5.1 (.NET
+  Framework) and pwsh 7+ (.NET), so this classification is identical under
+  both engines without any engine-only API.
+- **Not retried** (fail immediately): every other `IOException` (disk-full,
+  a bad/missing path, `PathTooLongException`/`DirectoryNotFoundException` --
+  both of which derive from `IOException` and would otherwise have been
+  silently retried too), `UnauthorizedAccessException`, and anything else.
+- **Bound**: 20 attempts, 100ms apart (~2 seconds worst case per direction --
+  read and write are each retried independently), chosen because the
+  handle-release race this exists for is a sub-second OS delay; 2 seconds is
+  headroom without letting a genuinely stuck lock hang the pipeline.
+- **On exhaustion**: throws a deliberately tagged exception
+  (`SANITIZATION_RETRY_EXHAUSTED: operation=... target=... attempts=...
+  elapsedMs=... innerType=... innerHResult=...`, carried as a
+  `System.IO.IOException` with the original exception preserved as
+  `InnerException`) rather than returning. Both the read half and the write
+  half of `Write-TPMSafeTechnicalFileV1` throw on exhaustion -- neither can
+  silently look like it succeeded. The underlying unsanitized file is never
+  deleted or overwritten on failure (the preserved technical evidence for
+  diagnosis), and no unsanitized content is ever written to the operator
+  console, including on this failure path. Because
+  `Invoke-TPMIsolatedProcessV1` calls this function unguarded, the exception
+  propagates naturally into the harness's existing top-level `catch`, which
+  is the same "PIPELINE ABORTED (infrastructure failure)" path every other
+  isolation failure already uses -- no separate classification wiring was
+  needed.
+
+**Owned-directory reparse validation (`Assert-TPMOwnedDirectoryV1`,
+`New-TPMCreateNewFileV1`).** The original version checked only the final
+directory's own `ReparsePoint` attribute and used a `$path.StartsWith($root
++ separator)` containment check. Two gaps: (1) a reparse point anywhere in
+an *ancestor* of the owned directory -- not the directory's own leaf
+attributes -- can silently redirect the effective location, and a
+leaf-only check never saw that; (2) `-Force` on `New-Item -ItemType
+Directory` silently no-ops if something (including an attacker-planted
+reparse point) already exists at that exact path, rather than failing.
+Now:
+
+- `Assert-TPMNoReparseInChainV1` validates every *existing* path component
+  from the declared owned root through the target (inclusive of both ends),
+  individually, for the `ReparsePoint` attribute -- not just the final leaf.
+  Only the single authorized creation leaf (`-CreateIfMissing`'s target) may
+  be missing; every other missing component in the chain is rejected, not
+  silently created.
+- Containment is a component-boundary comparison
+  (`Test-TPMPathIsContainedV1`, splitting both paths into segments and
+  comparing element-by-element), not a string-prefix check -- immune to
+  sibling-prefix confusion (`C:\Owned-Evil` is never treated as being under
+  `C:\Owned`).
+- `Assert-TPMOwnedDirectoryV1 -CreateIfMissing` now requires the parent of
+  the directory being created to already exist and pass validation, creates
+  the leaf with plain `New-Item` (no `-Force`, so a raced/attacker-planted
+  entry at that path fails the creation instead of being silently reused),
+  and then **revalidates the entire chain again** before returning --
+  narrowing the TOCTOU window between the pre-creation check and the
+  directory actually coming into existence. The pre-creation validation is
+  never trusted to still hold post-creation.
+- `New-TPMCreateNewFileV1` still uses `FileMode.CreateNew` (never
+  `Create`/`OpenOrCreate`) so file creation itself fails closed rather than
+  silently reusing or overwriting an existing (possibly attacker-planted)
+  file, and now validates the file's own containment/reparse chain with the
+  same component-boundary/chain-walk logic instead of the old prefix check.
+- This closes the specific reparse-redirection and sibling-prefix races
+  identified in this round's review -- it is not a claim that every possible
+  filesystem race anywhere in the certification pipeline is eliminated.
+
+**Trusted-root wiring correction (ADR155-0309 round 3).** An independent
+static reviewer found that the round-2 version of `Assert-TPMOwnedDirectoryV1`
+above, while it did walk the full chain from "root" to "target" for reparse
+points, was always invoked internally with Root and Target set to the SAME
+path (`Assert-TPMNoReparseInChainV1 -Root $full -Target $full`). Because
+`Assert-TPMNoReparseInChainV1`'s chain walk only inspects components at or
+below the point where Root and Target parts start to differ, a Root==Target
+call inspects *only the leaf* -- functionally identical to the pre-round-2
+leaf-only check the round-2 work was written to fix. An intermediate-level
+junction (e.g. planted at the harness's own `Reports` or `ProductionWork`
+folder, one level above the timestamped run directory actually passed in)
+was never inspected at all; `New-Item -ItemType Directory` was then relied
+on to silently create that unvalidated intermediate level as part of
+creating the deeper leaf. This defeated the round-2 hardening's actual
+purpose without failing any of round 2's own tests, because every one of
+those tests happened to validate a directory that was already exactly one
+level below an already-existing, already-validated parent -- the specific
+gap (an intermediate level ABOVE a multi-level missing path) was never
+exercised.
+
+The fix makes the trusted root a distinct, explicit, CALLER-SUPPLIED
+parameter that is never inferred, and never silently collapsed onto the
+target just because the target happens to already exist as a directory:
+
+- `Assert-TPMOwnedDirectoryV1 -Root <trustedRoot> -Path <target>
+  [-CreateIfMissing]` -- `-Root` is validated on its own (must exist, be
+  stat-able, and not itself be a reparse point) before anything else
+  happens. `-Path` must equal `-Root` or be a component-boundary descendant
+  of it; Root==Target is a deliberately supported, explicitly tested case
+  (e.g. a caller's own already-established top-level directory), not an
+  accidental default. A drive/path-root-qualifier mismatch between `-Root`
+  and `-Path` (e.g. root on `C:`, target resolving to `D:`) is rejected
+  before any filesystem access.
+- `-CreateIfMissing` still creates only the single immediate leaf -- its
+  parent must already be an existing, already-validated component of the
+  chain. Bringing a *multi-level* path into existence beneath a trusted
+  root (e.g. `HarnessRoot\Reports\<stamp>`, two levels below `HarnessRoot`)
+  now goes through `New-TPMOwnedDirectoryChainV1 -Root <trustedRoot> -Path
+  <target>`, which creates/validates one authorized level at a time via
+  repeated `Assert-TPMOwnedDirectoryV1 -CreateIfMissing` calls -- never by
+  asking the filesystem to create several untracked intermediate levels in
+  one call, which is exactly the shortcut the round-3 defect exploited.
+- `New-TPMCreateNewFileV1 -Root <trustedRoot> -Parent <parent> -Name <name>`
+  now takes the same distinct trusted-root parameter, revalidates `-Parent`
+  against it, and then revalidates the full chain a SECOND time immediately
+  before the underlying `FileStream` is actually opened -- a second,
+  closer-to-use TOCTOU-narrowing point, distinct from the post-creation
+  revalidation `Assert-TPMOwnedDirectoryV1` already performs.
+  `Invoke-TPMIsolatedProcessV1`'s own directly-created metadata file
+  (`<prefix>-process.json`, which does not go through
+  `New-TPMCreateNewFileV1`) gets the same pre-open revalidation call
+  inline, for the same reason.
+- **Residual race, stated plainly:** narrowing a TOCTOU window is not
+  eliminating it. A substitution that lands strictly between the final
+  pre-use revalidation and the actual open/create call remains possible in
+  principle on this OS; this code fails closed (throws) if it is ever
+  observed at any validation point, but no claim is made, in code comments
+  or here, that the race is eliminated -- only narrowed at each additional
+  validation point.
+
+**`Invoke-TPMIsolatedProcessV1`** now takes `-WorkingDirectoryRoot` and
+`-LogDirectoryRoot` as separate mandatory parameters alongside
+`-WorkingDirectory`/`-LogDirectory`. Every real caller was updated to supply
+its own genuinely-already-established trust anchor, never a convenient but
+unvalidated parent:
+
+- `scripts/Run-TPM-Tests.ps1` -- `HarnessRoot` (the tool's own top-level,
+  operator-configured output boundary) is the root for `$reportDirectory`
+  and `$logDirectory` (both brought into existence via
+  `New-TPMOwnedDirectoryChainV1 -Root $HarnessRoot`, replacing the previous
+  raw `New-Item -ItemType Directory -Force` loop over both paths at once).
+  `$RepoPath`/`$resolvedRepo` is its own root for the working-directory
+  parameter (Root==Target: the repository checkout itself has no
+  narrower, more-authoritative ancestor available to this tool).
+- `scripts/Invoke-TPM-RealInstanceSmoke.ps1` -- same pattern: `$reportDir`,
+  `$backupDir`, and `$productionWorkingDirectory` are all established via
+  `New-TPMOwnedDirectoryChainV1 -Root $HarnessRoot` near the top of the
+  script (replacing the previous raw `New-Item -Force -Path $reportDir,
+  $backupDir`). All three `Invoke-TPMIsolatedProcessV1` call sites (Pester
+  child, unattended-TPM relaunch, adaptive-menu renderer) use `$reportDir`
+  as `-LogDirectoryRoot` (their `-LogDirectory` is always
+  `$reportDir\TechnicalLogs`, one level below) and `$RepoPath` as
+  `-WorkingDirectoryRoot` (Root==Target).
+- `scripts/TPMCertification.ProductionFacts.psm1` -- `New-TPMProductionFactRecordsV1`
+  gained a new mandatory `-WorkingDirectoryRoot` parameter, threaded through
+  `Test-TPMProductionParserProbeV1` and `Invoke-TPMExternalProcessWithTimeoutV1`
+  down to `Invoke-TPMIsolatedProcessV1` (used as both the working- and
+  log-directory root, since the parser probe's working directory and log
+  directory are deliberately the same directory). The real harness caller
+  supplies its own already-established `$productionWorkingDirectory`
+  (`HarnessRoot\ProductionWork\<stamp>`, itself brought into existence via
+  `New-TPMOwnedDirectoryChainV1` before this call) as its own root
+  (Root==Target: once established by the caller, it is already validated).
+
+No caller in this codebase was found that lacked a clear, already-justified
+trust-root authority to supply -- every call site's root is traceable to
+either `HarnessRoot` (this tool's own top-level output boundary) or the
+caller's own already-resolved repository checkout path. Test callers
+(`Tests/*.ps1`) anchor their roots in their own `$TestDrive` (Pester's
+per-test isolated temp directory) or another `New-Item`-created directory
+under it -- never a shared or real filesystem location.
+
+## Absent-tree snapshot diffing (Get-TreeHash / Compare-TreeSnapshot, issue #172)
+
+`scripts/Invoke-TPM-RealInstanceSmoke.ps1`'s `UserProfiles`/`GameProfiles`/
+`Pcsx2x6Crosshairs` Smoke File Safety facts are all produced by the same two
+functions, called before and after the certification suite runs, feeding the
+same `Compare-TreeSnapshot`:
+
+- `Get-TreeHash -Path <dir>` walks a directory recursively (`Get-ChildItem
+  -Recurse -File`), hashing every file, and returns one record per file:
+  `RelativePath`, `Path`, `Hash`, `Length`. When `<dir>` does not exist, it
+  returns a genuine zero-length array (`return ,@()`) -- never `$null`.
+- `Compare-TreeSnapshot -Before <snapshot> -After <snapshot>` diffs two such
+  arrays by `RelativePath`, producing `Added`/`Removed`/`Changed` counts plus
+  `BeforeSkipped`/`AfterSkipped` counts for any genuinely malformed entry
+  (a `$null` element, or an element with a blank `RelativePath`) found in
+  either snapshot. It normalizes a `$null` `-Before`/`-After` argument to a
+  real empty array itself, independent of what produced that argument --
+  every layer in this path (producer, consumer, and every caller-side
+  fallback) defends against the same class of bug on its own; see
+  LESSONS_LEARNED.md's issue #172 entry for the three-layer defect this
+  replaced and why no single layer's fix was considered sufficient.
+- No per-tree special-casing exists anywhere in this path. `UserProfiles`,
+  `GameProfiles`, and `Pcsx2x6Crosshairs` are three call sites sharing
+  identical semantics through the same two functions -- a fix or regression
+  in one is a fix or regression in all three.
+
+### Certification execution boundary (ADR155 operator experience)
+
+Certification enters a noninteractive boundary after target paths are resolved. `Run-TPM-Tests.ps1` preflights every required executable, module, configuration file, and writable report location without installing anything. Its direct Git reads pass command-scoped `safe.directory=<exact resolved repository>` together with `-C <exact repository>`. Repository paths resolved for Git or isolated-process working directories use the FileSystem `ProviderPath`, never the provider-qualified `.Path` form Git rejects for UNC NAS paths. Separately, the Pester child inherits one matching process-local `safe.directory` entry and suppresses global and system Git configuration. Neither path writes persistent Git configuration or uses a wildcard `safe.directory` value. It then launches the harness with closed standard input, `-NoProfile -NonInteractive`, separate timestamped stdout/stderr logs, bounded lifetime, and termination metadata. Pester runs only in `Invoke-TPM-PesterChild.ps1`; its parent accepts only the exact version-1 JSON result schema and rejects missing, malformed, unknown, or contradictory results as infrastructure aborts. The operator surface is an append-only numbered phase display; technical streams remain in `TechnicalLogs`. Certification never fetches or mutates Git state.
+
+#### Redirected-cleanup refusal and real HarnessRoot bootstrap proof (ADR155-0309 follow-up round)
+
+Two behavioral properties implied by the isolation design above, but not
+previously exercised against real reparse points through the actual
+production entry points, now have dedicated adversarial coverage:
+
+- **Cleanup refusal.** `Remove-TPMOwnedScratchDirectoryV1`
+  (`TPMCertification.ProductionFacts.psm1`) revalidates the full
+  ParentRoot-to-Path chain through `Resolve-TPMContainedPathV1`
+  (`TPMCertification.Authority.psm1`) before every recursive delete, and
+  independently checks the target's own `ReparsePoint` attribute. This was
+  already correct; `Tests/TPMCertification.ProductionFacts.Tests.ps1`'s
+  "redirected-cleanup refusal via the real production path" `Describe` block
+  now proves it with real NTFS junctions across the full matrix -- root
+  junction, intermediate-component junction, leaf junction, a
+  Root-vs-Root-Evil sibling-prefix attempt, a forged foreign directory, and
+  cleanup invoked after an uncertain (crash/kill/timeout) child-process
+  termination -- confirming byte-identical foreign content (SHA-256 hash and
+  full directory listing, before and after) in every refusal case. No
+  production change was needed; the coverage closes the gap between the
+  design and its proof.
+- **Real HarnessRoot bootstrap.** `Tests/TPMCertificationHarness.Tests.ps1`'s
+  "Run-TPM-Tests.ps1 real HarnessRoot bootstrap" `Describe` block invokes the
+  actual `scripts/Run-TPM-Tests.ps1` entry point as a real child process
+  (via the same `Invoke-TPMIsolatedProcessV1` primitive production code
+  uses) against a TestDrive-copied fixture repository, with the single
+  downstream call to `Invoke-TPM-RealInstanceSmoke.ps1` replaced -- only
+  inside that copied fixture, gated by an environment variable the
+  production call site does not otherwise branch on -- by a stub that
+  records the resolved paths/commit and exits immediately. This proves the
+  real preflight-then-bootstrap path (not `New-TPMOwnedDirectoryChainV1` in
+  isolation) creates exactly the intended `Reports\<stamp>\TechnicalLogs`
+  hierarchy and nothing else, and fails closed -- before ever reaching the
+  fixture stop-point, with a nonzero exit and no marker written -- when: the
+  HarnessRoot parent is a junction, HarnessRoot itself is a junction, an
+  intermediate component (`HarnessRoot\Reports`) is a junction, the parent is
+  missing, a dot-segment traversal value is supplied (which canonicalizes
+  correctly and never touches a decoy sibling), or a file already occupies
+  the name a directory needs to be created at. A genuine downstream failure
+  exit code propagates unchanged and is never observable as a `CERTIFIED`/
+  `NOT CERTIFIED` verdict.
+- **Diagnostic hardening completed.** The prior round's PSScriptAnalyzer/
+  InjectionHunter tool-execution `Diagnostic` hardening (Stage/ExceptionType/
+  sanitized Message on every `Executed=$false` path) left one bare,
+  information-destroying `catch{}` (around `Stop-Job` in
+  `Invoke-TPMBoundedScriptBlockV1`) and no schema validation for the
+  `Diagnostic` shape itself. Both are closed: `Stop-Job` failures are now
+  captured and reported via a sanitized `Write-Warning` without changing the
+  timeout/termination-confirmed outcome, and a new
+  `Assert-TPMDiagnosticRecordV1` (`TPMCertification.Authority.psm1`) is
+  called from `New-TPMProductionFactRecordsV1` for both tools' results,
+  failing closed on a missing, malformed, or wrong-typed `Diagnostic` rather
+  than letting one silently reach the authoritative fact record. The
+  27-finding/27-disposition/0-unresolved InjectionHunter baseline is
+  unchanged (confirmed by direct invocation against the live production
+  inventory under both engines, not merely by the unit tests' small
+  synthetic fixtures).
+- **Path-validation exception boundary (diagnostic-path-check round).**
+  `Test-TPMProductionPSScriptAnalyzerV1`'s `SettingsPath` check and
+  `Test-TPMProductionInjectionHunterV1`'s `DispositionRegistryPath` check
+  both call `Test-Path` before either function's own try/catch begins.
+  Confirmed by direct reproduction against the real `powershell.exe` 5.1
+  engine: under `$ErrorActionPreference='Stop'` (which every real entry
+  point -- `Run-TPM-Tests.ps1`, `Invoke-TPM-RealInstanceSmoke.ps1` -- sets),
+  a path containing real control characters makes `Test-Path` throw
+  `System.ArgumentException` instead of returning `$false`; unguarded, that
+  exception escaped uncaught before any `Diagnostic` could be constructed.
+  (pwsh's `Test-Path` never throws for this input, even under the same
+  preference -- confirmed separately -- so this is a genuine Windows
+  PowerShell 5.1-only failure mode, not a cross-engine one.) Both call
+  sites now wrap the check in its own try/catch, adding two new distinct
+  Stage tags reserved exclusively for a genuine path-check exception, never
+  reused for an ordinary missing-file result:
+  `PSSCRIPTANALYZER_SETTINGS_PATH_CHECK_FAILED` and
+  `INJECTIONHUNTER_REGISTRY_PATH_CHECK_FAILED`. Neither `-Path` value is
+  sanitized before the check itself -- only the `Diagnostic.Message` text
+  is sanitized afterward -- so this never changes which path is actually
+  inspected. `Find-TPMInjectionHunterModuleV1`, the other filesystem check
+  in this call graph, is unaffected: it only ever scans internal
+  `$env:PSModulePath` entries (never `SettingsPath`/`DispositionRegistryPath`)
+  and its own `Get-ChildItem` call already used `-ErrorAction
+  SilentlyContinue`, which suppresses this class of error regardless of
+  `$ErrorActionPreference`.
+
+  **Follow-up correction: both `Test-Path` calls also need
+  `-ErrorAction Stop`.** The try/catch alone only converts the exception
+  when the CALLER's `$ErrorActionPreference` already happens to be `'Stop'`
+  (true for every real entry point, but not the ambient default). Confirmed
+  by direct reproduction that under this engine's default (non-`Stop`)
+  preference, the same illegal-character condition instead writes a raw,
+  unsanitized `Test-Path : Illegal characters in path` record straight to
+  the error stream and merely falls through to the ordinary missing-path
+  branch -- the function still behaves correctly from its own return
+  value's perspective, but that raw record leaks regardless of what the
+  caller's preference is. Adding `-ErrorAction Stop` directly to both
+  `Test-Path` calls makes them terminate unconditionally, independent of
+  ambient `$ErrorActionPreference`, so the adjacent try/catch always
+  converts the condition into the structured, sanitized `Diagnostic` with
+  nothing ever written to the error stream. Confirmed this makes the
+  behavior fully deterministic per engine (not merely one of two tolerated
+  outcomes): genuine Windows PowerShell 5.1 (`PSEdition 'Desktop'`) always
+  throws for a real control-character path and always reaches the new
+  `*_PATH_CHECK_FAILED` stage with zero error-stream output; pwsh
+  (`PSEdition 'Core'`) never raises an error for this input at all, with or
+  without `-ErrorAction Stop`, and always reaches the ordinary `*_MISSING`
+  stage.
+
+## Real-hardware certification blockers (issue #154, 2026-07-27 run)
+
+A real-hardware certification run at commit `2405a59` aborted with two
+independently confirmed blockers. Both are fixed narrowly; neither is a
+feature addition.
+
+### Unattended mode selection (`TeknoParrot-Manager.ps1` exit 1: "Mode must be
+set before starting")
+
+`-Unattended` had no CLI or config mechanism to choose which mode to run.
+Every mode's own body already auto-answers its internal prompts under
+`-Unattended` (the many `if ($Unattended) { ... }` blocks throughout the
+script), but the INITIAL mode choice itself was only ever reachable through
+the interactive menu (`Read-MainMenuChoiceResponsive`) or a same-session
+preview "Apply for real now?" re-entry (`$pendingApplyMode`). Confirmed by
+direct reproduction (not assumed) that a fresh `-Unattended` process always
+reached the menu loop with no mode ever chosen and exited 1. Git history
+confirms the "Mode must be set before starting" check has been unchanged
+since the v0.51 BETA commit that introduced it -- this is a genuine,
+long-standing gap in the `-Unattended` contract, not a regression from
+recent work.
+
+Fixed with a new, optional saved-config field, `UnattendedMode`, read only
+when `-Unattended` is set (an interactive run always chooses its mode from
+the menu regardless of this field) and validated against a single accepted
+name, `HealthCheck` -- not the full set of mode-name strings the main-loop
+`switch` statement otherwise accepts. This RC ships support for only the one
+audited unattended path this harness's certification gate actually needs;
+every other value (including every other real mode name, and never a raw
+menu number) fails safely as unsupported, silently falling through to the
+original "Mode must be set before starting" error. `HealthCheck` (Library
+health check, read-only) is the value this harness's own "Unattended TPM
+root binding" gate needs and now writes: proving config-driven root binding
+and mode selection work end-to-end without writing, deleting, or modifying
+anything in the real install. Since no mode previously exited cleanly under
+`-Unattended` -- every mode ends with a blocking `Read-Host` and a `continue`
+back to the menu, which would immediately re-hit the same "Mode must be set"
+error on the next loop iteration -- `HealthCheck`'s own completion block now
+exits 0 under `-Unattended` instead of looping back; no other mode's
+completion path was touched, since this harness never selects any other
+mode.
+
+`New-TPMTemporaryUnattendedConfig` (`scripts/Invoke-TPM-RealInstanceSmoke.ps1`,
+no-prior-config path) now writes the complete minimal config
+TeknoParrot-Manager.ps1's `-Unattended` flow needs to pass config load AND
+actually select and run a mode to completion: `TeknoParrotRoot`,
+`GamesInstallFolder`, `UnattendedMode`. `Set-TPMConfigJsonRoot` (existing-
+config path) now also sets `UnattendedMode=HealthCheck` via
+`Add-Member -Force` -- confirmed by direct reproduction that assigning to a
+PSCustomObject property that does not already exist throws
+`SetValueInvocationException`, which a pre-existing config saved before
+this field existed would otherwise hit -- while every other saved field is
+left untouched, matching the existing `TeknoParrotRoot`-only override
+contract.
+
+Proven end-to-end with a real, unmodified child-process fixture
+(`Tests/TeknoParrot-Manager.Tests.ps1`): the real script, copied into
+TestDrive, invoked with `-Unattended` against a synthetic (non-real)
+install directory containing only the placeholder files SECTION 2's
+existence checks require (`TeknoParrotUi.exe`, `GameProfiles`), passes
+configuration validation, runs the real `Invoke-LibraryHealthCheck`, and
+exits 0 on its own -- confirming both the config field and the clean-exit
+fix together, not merely that the process avoided the specific error text.
+
+**RC scope note:** the `UnattendedMode` value is validated against a single
+accepted name, `HealthCheck` -- not the full closed set of mode-name strings
+the main-loop `switch` statement otherwise accepts. This RC ships support for
+only the one audited unattended path this harness's certification gate
+actually needs; a general config-driven selector across every mode is out of
+scope for the feature freeze and is deliberately not implemented. Any other
+saved value (including every other real mode name) is rejected the same as
+an unrecognized string.
+
+**Legacy-config strict-mode regression (found and fixed same round):** a
+config saved before this field existed has no `UnattendedMode` property on
+the object at all (not `$null` -- genuinely absent). Confirmed by direct
+reproduction that `$cfg.UnattendedMode` on such an object throws
+`PropertyNotFoundException` under `Set-StrictMode -Version Latest` (both
+pwsh and Windows PowerShell 5.1) -- reproducible only when strict mode is
+active in the same top-level script scope as the read (a separately invoked
+script via the call operator `&` does not inherit the caller's strict-mode
+setting; dot-sourcing does). All three direct `$cfg.UnattendedMode` reads
+(the config-summary display line and the two mode-selection reads) now go
+through `$cfg.PSObject.Properties['UnattendedMode']` existence guards
+instead of bare dot-access, so a legacy config missing the field is read
+exactly like any other absent optional field: no exception, config still
+accepted, falls through to the pre-existing "no mode chosen" safe failure
+under `-Unattended`. Covered by a dedicated real child-process regression
+test in `Tests/TeknoParrot-Manager.Tests.ps1` that dot-sources the
+unmodified script through a wrapper enabling `Set-StrictMode -Version
+Latest`, against a config carrying every other field `Save-Config` has ever
+written (some null) minus only `UnattendedMode` -- confirmed by direct A/B
+testing to fail against the pre-guard code and pass against the fix.
+
+### 225 Pester failures -- Pester 5.8.0 regression, not a production defect
+
+Preserved certification evidence recorded `Pester-summary.json`: 1010
+passed, 225 failed, 0 skipped, 1235 total, and the run's own `Engine` field
+(`Pester-result-v1.json`) as `Pester 5.8.0 / pwsh 7.6.3`. Reproduced exactly
+(same 1010/225/1235 split, overlapping failure signatures) in an isolated
+checkout by installing Pester 5.8.0 side-by-side with the previously
+validated 5.7.1 (both from the real PowerShell Gallery, confirmed real,
+published 2026-06-30) and letting `Invoke-TPM-PesterChild.ps1`'s
+then-open-ended `Import-Module Pester -MinimumVersion 5.0` auto-select the
+newer one.
+
+Definitive A/B proof: the exact same full `.\Tests` suite (1235 tests)
+scores 1234 passed / 1 failed under Pester 5.7.1 (the one remaining failure
+a pre-existing, already-documented nondeterministic screenshot/display-
+handle-timing test, unrelated to Pester version) versus 1010 passed / 225
+failed under Pester 5.8.0, with nothing else in the environment changed.
+Running any single affected file in isolation (e.g.
+`TeknoParrot-Manager.Tests.ps1`, 371/371 either version) shows no
+difference at all -- the regression only manifests running the full
+29-container suite together, consistent with the dominant failure
+signatures (103 of 225 failures carry no exception message at all --
+Pester's own fallback text for a test whose container `BeforeAll` failed;
+most of the rest are `$script:`-scoped setup variables, e.g.
+`$script:RawThrillsPathLimits`/`$script:tpmEvidenceWorkflowId`, "cannot be
+retrieved because it has not been set" -- both classes are consistent with
+a cross-file/BeforeAll script-scope handling change between 5.7.1 and 5.8.0
+during a multi-file run, not with any single test's own logic).
+
+Fixed by pinning `Invoke-TPM-PesterChild.ps1` to
+`Import-Module Pester -RequiredVersion 5.7.1` (a hard pin, not a floor) and
+aligning `Run-TPM-Tests.ps1`'s own preflight check to look for that exact
+version rather than "any Pester >= 5" -- the preflight previously could
+report success with only 5.8.0 present, then have the child fail to import
+it, turning a clear preflight signal into a confusing downstream failure.
+This is deliberately pinning to the version this suite is ALREADY proven
+against, to prevent a future auto-installed Pester release from silently
+changing certification behavior again without a human deciding to
+re-validate and bump the pin -- not adopting a new version.
+
+An unrelated stray `Pester 3.4.0` install
+(`C:\Program Files\WindowsPowerShell\Modules\Pester\3.4.0`) was found on
+the development machine during this investigation; it was ruled out early
+(`-MinimumVersion 5.0`/`-RequiredVersion 5.7.1` both refuse it outright) and
+was not touched -- noted here as a housekeeping item for a separate round,
+not part of this fix.
+
+### `PSScriptAnalyzer.json` zero-byte evidence file -- confirmed correct, not
+a defect
+
+The preserved evidence includes a genuine zero-byte `PSScriptAnalyzer.json`.
+Confirmed by direct reproduction: `scripts/Invoke-TPM-RealInstanceSmoke.ps1`
+writes this file via `$analyzer | ConvertTo-Json -Depth 6 | Out-File ...`;
+piping a genuinely empty array (`@()`, i.e. zero PSScriptAnalyzer findings)
+through `ConvertTo-Json` produces zero pipeline output objects (a
+well-documented PowerShell pipeline behavior -- `@() | ConvertTo-Json`
+differs from `ConvertTo-Json -InputObject @()`, which would produce the
+literal text `"[]"`), so `Out-File` writes nothing at all. A zero-byte file
+is therefore the correct, expected representation of zero findings here,
+matching the run's own `OperatorStatus.txt` ("zero Error/Warning
+findings"). No code change made.

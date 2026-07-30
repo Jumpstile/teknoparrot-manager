@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v1.0 RC2.1
+# TeknoParrot Manager  |  v1.0 RC3
 # Author: Jumpstile
 # =============================================================================
 #
@@ -68,7 +68,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
 $ScriptVersion = "1.0"
-$ReleaseCandidateLabel = "RC2.1"
+$ReleaseCandidateLabel = "RC3"
 $DisplayVersion = "v$ScriptVersion $ReleaseCandidateLabel"
 
 function Get-ManagerDisplayVersion {
@@ -3315,7 +3315,7 @@ function Expand-ZipFileSafe {
     $archive   = $null
     try {
         $archive   = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
-        $fileCount = ($archive.Entries | Where-Object { $_.Name -ne '' }).Count
+        $fileCount = @($archive.Entries | Where-Object { $_.Name -ne '' }).Count
         $current   = 0
         foreach ($entry in $archive.Entries) {
             $rel = $entry.FullName.Replace('/', '\').TrimStart('\')
@@ -3821,7 +3821,13 @@ function Get-TeknoParrotProfileSet {
             break
         } catch {
             $status = 0
-            if ($_.Exception.Response) { try { $status = [int]$_.Exception.Response.StatusCode } catch {} }
+            # Get-TpmHttpStatusCodeFromError guards the same optional
+            # .Exception.Response/.StatusCode access this used to do inline
+            # (unsafe under strict mode for exception types that lack either
+            # property entirely -- RuntimeException from a plain "throw",
+            # HttpRequestException, etc.) and additionally falls back to
+            # extracting a status code embedded only in the message text.
+            $status = Get-TpmHttpStatusCodeFromError -ErrorRecord $_
             if ($attempt -ge 3 -or ($status -ge 400 -and $status -lt 500)) {
                 Write-Log "ProfileSet (GitHub): query failed -- HTTP $status -- $_"; break
             }
@@ -3908,7 +3914,13 @@ function Get-EggmanDatRelease {
             }
         } catch {
             $status = 0
-            if ($_.Exception.Response) { try { $status = [int]$_.Exception.Response.StatusCode } catch {} }
+            # Get-TpmHttpStatusCodeFromError guards the same optional
+            # .Exception.Response/.StatusCode access this used to do inline
+            # (unsafe under strict mode for exception types that lack either
+            # property entirely -- RuntimeException from a plain "throw",
+            # HttpRequestException, etc.) and additionally falls back to
+            # extracting a status code embedded only in the message text.
+            $status = Get-TpmHttpStatusCodeFromError -ErrorRecord $_
             if ($attempt -ge 3 -or ($status -ge 400 -and $status -lt 500)) {
                 Write-Log "EggmanDat: GitHub release query failed -- $_"; return $null
             }
@@ -4065,8 +4077,34 @@ function Write-TpmDownloadMetrics {
 # distinguish "404, not in this repo" from a real transient failure.
 function Get-TpmHttpStatusCodeFromError {
     param($ErrorRecord)
-    if ($ErrorRecord.Exception.Response -and $ErrorRecord.Exception.Response.StatusCode) {
-        try { return [int]$ErrorRecord.Exception.Response.StatusCode } catch {}
+    # Not every exception type this can see (RuntimeException from a plain
+    # "throw '...'" in a mock, HttpRequestException from HttpClient, etc.)
+    # declares a Response property at all -- unlike WebException, where it's
+    # merely $null on a non-HTTP failure. Under strict mode, dot-accessing a
+    # property that doesn't exist throws PropertyNotFoundException, which
+    # previously crashed this function (and its caller) before it ever got a
+    # chance to fall through to the message-based extraction below. Checking
+    # for the property's existence via PSObject first -- rather than just its
+    # truthiness -- preserves the original error path for every exception
+    # type that genuinely lacks the property, instead of throwing a new,
+    # unrelated one.
+    $responseProperty = $ErrorRecord.Exception.PSObject.Properties['Response']
+    if ($responseProperty -and $responseProperty.Value) {
+        # Same existence-before-truthiness reasoning one level deeper: a
+        # Response object can itself be a type (or a test double) that has
+        # no StatusCode property at all, not merely a null/zero one. Dot-
+        # accessing .StatusCode directly in the condition above would throw
+        # under strict mode for that shape instead of falling through.
+        $statusCodeProperty = $responseProperty.Value.PSObject.Properties['StatusCode']
+        if ($statusCodeProperty -and $null -ne $statusCodeProperty.Value) {
+            # [int] cast covers both a plain numeric StatusCode and an
+            # enum-like one (e.g. [System.Net.HttpStatusCode]::NotFound) --
+            # enums cast cleanly to their underlying integer value. The
+            # try/catch only guards a genuinely uncastable value; it still
+            # falls through to the message-based extraction below rather
+            # than silently reporting a wrong code.
+            try { return [int]$statusCodeProperty.Value } catch {}
+        }
     }
     if ($ErrorRecord.Exception.Message -match '\((\d{3})\)') { return [int]$Matches[1] }
     if ($ErrorRecord.Exception.Message -match ':\s*(\d{3})\s') { return [int]$Matches[1] }
@@ -4219,6 +4257,25 @@ function Invoke-EggmanDatDownload {
 }
 
 # Shared interactive download step for a resolved Eggman dat release: checks
+# Review round 3: the default save location ("next to the script", falling
+# back to the current directory only when $PSScriptRoot is unavailable) used
+# to be inlined directly in Invoke-EggmanDatDownloadInteractive below. A
+# regression test needs to predict this exact path to seed a cache-reuse
+# fixture, and computing it independently (e.g. assuming the current
+# directory unconditionally) silently drifts from what this function
+# actually resolves whenever $PSScriptRoot is not blank in the caller's
+# session -- observed as a real, non-obvious divergence under Windows
+# PowerShell 5.1 (issue: Invoke-EggmanDatDownloadInteractive cache reuse).
+# Extracting this into its own function, called by both the production path
+# below and its regression test, makes the two impossible to disagree: both
+# always ask this exact function, so whatever $PSScriptRoot resolves to in
+# either engine or extraction technique, they agree by construction.
+function Get-EggmanDatDefaultSavePath {
+    param([string]$FileName)
+    $scriptRootForDat = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { (Get-Location).Path } else { $PSScriptRoot }
+    return Join-Path $scriptRootForDat $FileName
+}
+
 # the release's filename is safe to use as a save path (defense against a
 # crafted GitHub Releases response -- same convention as every other
 # live-fetched filename in this script), prompts for a save location
@@ -4231,7 +4288,7 @@ function Invoke-EggmanDatDownloadInteractive {
 
     $safeDatFileName = [System.IO.Path]::GetFileName($rel.FileName)
     $scriptRootForDat = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { (Get-Location).Path } else { $PSScriptRoot }
-    $defaultSavePath = Join-Path $scriptRootForDat $safeDatFileName
+    $defaultSavePath = Get-EggmanDatDefaultSavePath -FileName $safeDatFileName
     $unsafeFileName  = [string]::IsNullOrWhiteSpace($safeDatFileName) -or -not (Test-PathInside $defaultSavePath $scriptRootForDat)
     if ($unsafeFileName) {
         Write-Log "EggmanDat: SECURITY -- unsafe release filename '$($rel.FileName)'"
@@ -4304,7 +4361,13 @@ function Get-PostgresGuideRelease {
             }
         } catch {
             $status = 0
-            if ($_.Exception.Response) { try { $status = [int]$_.Exception.Response.StatusCode } catch {} }
+            # Get-TpmHttpStatusCodeFromError guards the same optional
+            # .Exception.Response/.StatusCode access this used to do inline
+            # (unsafe under strict mode for exception types that lack either
+            # property entirely -- RuntimeException from a plain "throw",
+            # HttpRequestException, etc.) and additionally falls back to
+            # extracting a status code embedded only in the message text.
+            $status = Get-TpmHttpStatusCodeFromError -ErrorRecord $_
             if ($attempt -ge 3 -or ($status -ge 400 -and $status -lt 500)) {
                 Write-Log "PostgresGuide: GitHub release query failed -- $_"; return $null
             }
@@ -4858,7 +4921,13 @@ function Get-FFBPluginGameMap {
             return $map
         } catch {
             $status = 0
-            if ($_.Exception.Response) { try { $status = [int]$_.Exception.Response.StatusCode } catch {} }
+            # Get-TpmHttpStatusCodeFromError guards the same optional
+            # .Exception.Response/.StatusCode access this used to do inline
+            # (unsafe under strict mode for exception types that lack either
+            # property entirely -- RuntimeException from a plain "throw",
+            # HttpRequestException, etc.) and additionally falls back to
+            # extracting a status code embedded only in the message text.
+            $status = Get-TpmHttpStatusCodeFromError -ErrorRecord $_
             if ($attempt -ge 3 -or ($status -ge 400 -and $status -lt 500)) {
                 Write-Log "FFBPlugin: AutoSetup.cmd fetch failed -- $_"
                 return $map
@@ -5493,7 +5562,13 @@ function Get-EggmanGameData {
             return @($m.Groups[1].Value | ConvertFrom-Json)
         } catch {
             $status = 0
-            if ($_.Exception.Response) { try { $status = [int]$_.Exception.Response.StatusCode } catch {} }
+            # Get-TpmHttpStatusCodeFromError guards the same optional
+            # .Exception.Response/.StatusCode access this used to do inline
+            # (unsafe under strict mode for exception types that lack either
+            # property entirely -- RuntimeException from a plain "throw",
+            # HttpRequestException, etc.) and additionally falls back to
+            # extracting a status code embedded only in the message text.
+            $status = Get-TpmHttpStatusCodeFromError -ErrorRecord $_
             if ($attempt -ge 3 -or ($status -ge 400 -and $status -lt 500)) {
                 Write-Log "EggmanGameData: fetch failed -- $_"; return $null
             }
@@ -5536,7 +5611,13 @@ function Get-BepInExLatestRelease {
             }
         } catch {
             $status = 0
-            if ($_.Exception.Response) { try { $status = [int]$_.Exception.Response.StatusCode } catch {} }
+            # Get-TpmHttpStatusCodeFromError guards the same optional
+            # .Exception.Response/.StatusCode access this used to do inline
+            # (unsafe under strict mode for exception types that lack either
+            # property entirely -- RuntimeException from a plain "throw",
+            # HttpRequestException, etc.) and additionally falls back to
+            # extracting a status code embedded only in the message text.
+            $status = Get-TpmHttpStatusCodeFromError -ErrorRecord $_
             if ($attempt -ge 3 -or ($status -ge 400 -and $status -lt 500)) {
                 Write-Log "BepInEx: release query failed -- $_"; return $null
             }
@@ -5807,7 +5888,13 @@ function Get-ManagerUpdateRelease {
             }
         } catch {
             $status = 0
-            if ($_.Exception.Response) { try { $status = [int]$_.Exception.Response.StatusCode } catch {} }
+            # Get-TpmHttpStatusCodeFromError guards the same optional
+            # .Exception.Response/.StatusCode access this used to do inline
+            # (unsafe under strict mode for exception types that lack either
+            # property entirely -- RuntimeException from a plain "throw",
+            # HttpRequestException, etc.) and additionally falls back to
+            # extracting a status code embedded only in the message text.
+            $status = Get-TpmHttpStatusCodeFromError -ErrorRecord $_
             if ($attempt -ge $MaxAttempts -or ($status -ge 400 -and $status -lt 500)) {
                 Write-Log "CheckForUpdates: release query failed -- $_"; return $null
             }
@@ -6999,7 +7086,17 @@ function Repair-GamePaths {
             [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "save-failed" })
         }
     }
-    return $reports
+    # Review round 2 (Luna Max): "return $reports" lets the output stream
+    # enumerate the ArrayList -- with exactly one report, that unwraps to
+    # the single pscustomobject itself rather than a one-element collection.
+    # This was masked on pwsh only because PowerShell 6+ added a synthetic
+    # .Count/.Length property to every object (scalars included), so
+    # $reports.Count still happened to read 1 there; Windows PowerShell 5.1
+    # has no such synthetic property, so the exact same unwrap left
+    # $reports.Count genuinely absent (Should -Be 1 saw $null). The leading
+    # comma prevents the unwrap and returns the real ArrayList -- reliably
+    # array-shaped with zero, one, or many reports, on both engines.
+    return ,$reports
 }
 
 # Read-only library status: classifies every UserProfile's GamePath as
@@ -7678,7 +7775,7 @@ function Get-ButtonNodes {
 function Test-ButtonNameDirectional {
     param([string]$name)
     $n = $name.Trim() -replace '(?i)^\s*(player\s*[12]|p[12])\s+', ''
-    $words = ($n -split '\s+') | Where-Object { $_ -ne '' }
+    $words = @($n -split '\s+' | Where-Object { $_ -ne '' })
     if ($words.Count -eq 0) { return $false }
     $dirWords = @('up','down','left','right','north','south','east','west')
     foreach ($w in $words) {
@@ -8420,7 +8517,7 @@ function Invoke-RestoreBackup {
     Write-Host "  Available backups (most recent first):" -ForegroundColor Cyan
     for ($i = 0; $i -lt $backups.Count; $i++) {
         $b         = $backups[$i]
-        $fileCount = (Get-ChildItem -LiteralPath $b.FullName -File -ErrorAction SilentlyContinue).Count
+        $fileCount = @(Get-ChildItem -LiteralPath $b.FullName -File -ErrorAction SilentlyContinue).Count
         Write-Host ("    {0,3})  {1}   ({2} file(s))" -f ($i + 1), $b.Name, $fileCount)
     }
     Write-Host ""
@@ -9961,6 +10058,8 @@ if (Test-Path -LiteralPath $configPath) {
         if ($cfg.IncludeSupplementary)  { Write-Host "  Supplementary index  : Yes" }
         if ($cfg.LaunchBoxRoot)         { Write-Host "  LaunchBox root       : $($cfg.LaunchBoxRoot)" }
         if ($cfg.LaunchBoxPlatformMode) { Write-Host "  LaunchBox platform   : $($cfg.LaunchBoxPlatformMode)" }
+        $cfgUnattendedModeProp = $cfg.PSObject.Properties['UnattendedMode']
+        if ($cfgUnattendedModeProp -and $cfgUnattendedModeProp.Value) { Write-Host "  Unattended mode      : $($cfgUnattendedModeProp.Value)" }
         if ($null -ne $cfg.CheckForUpdatesOnStartup -and -not $cfg.CheckForUpdatesOnStartup) {
             Write-Host "  Check for updates on startup: Disabled"
         }
@@ -10004,6 +10103,34 @@ if (Test-Path -LiteralPath $configPath) {
             # clear the saved mode and let the platform-choice menu re-ask instead.
             if ($lbPlatformMode -eq "Custom" -and [string]::IsNullOrWhiteSpace($lbCustomPlatformName)) {
                 $lbPlatformMode = $null
+            }
+            # -Unattended has no CLI or config mechanism to pick which mode to
+            # run automatically -- every mode's own body already auto-answers
+            # its internal prompts under -Unattended (see the many
+            # "if ($Unattended) { ... }" blocks throughout this script), but
+            # the INITIAL mode choice itself was only ever reachable through
+            # the interactive menu or a same-session preview "Apply for real
+            # now?" re-entry. A real -Unattended launch as a fresh process
+            # therefore always reached the menu loop with no mode chosen and
+            # exited 1 at "Mode must be set before starting." -- confirmed by
+            # direct reproduction, not assumed. UnattendedMode is an optional
+            # saved-config field read ONLY when -Unattended is set (an
+            # interactive run always chooses its mode from the menu,
+            # regardless of whether this field is present). This RC ships
+            # support for only the audited HealthCheck unattended path --
+            # a general config-driven selector across all modes is out of
+            # scope for the feature freeze, so any other value (including
+            # every other real mode name) is rejected the same as garbage.
+            $cfgUnattendedModePropForSelect = $cfg.PSObject.Properties['UnattendedMode']
+            if ($Unattended -and $cfgUnattendedModePropForSelect -and $cfgUnattendedModePropForSelect.Value) {
+                $validUnattendedModes = @('HealthCheck')
+                $requestedUnattendedMode = [string]$cfgUnattendedModePropForSelect.Value
+                if ($validUnattendedModes -contains $requestedUnattendedMode) {
+                    $pendingApplyMode = $requestedUnattendedMode
+                    Write-Log "Unattended: initial mode from saved config = $requestedUnattendedMode"
+                } else {
+                    Write-Log "WARNING: Unattended: config UnattendedMode '$requestedUnattendedMode' is not a recognized mode -- ignoring, menu loop will report the missing-mode error."
+                }
             }
             $configAccepted = $true
         }
@@ -11233,7 +11360,7 @@ function Limit-MainMenuBodyRowsToBudget {
     return @($BodyRows | Select-Object -Last $BodyBudget)
 }
 
-# Single-line banner ("TeknoParrot Manager v1.0 RC2.1") with no frame and no
+# Single-line banner ("TeknoParrot Manager v1.0 RC3") with no frame and no
 # blank separator, for viewports too short for the normal framed banner (5-6
 # rows) to leave any room for menu content -- see
 # Get-MainMenuEmergencyCompactRows.
@@ -11712,6 +11839,16 @@ while ($true) {
         Write-Host "   Done." -ForegroundColor Cyan
         Write-Host "============================================" -ForegroundColor Cyan
         Write-Log "Health check complete."
+        if ($Unattended) {
+            # An unattended run has no further mode to select -- looping back
+            # to the menu would immediately re-hit "Mode must be set before
+            # starting" and exit 1, turning a genuinely successful health
+            # check into a reported failure. Exit cleanly instead; no other
+            # mode currently supports a config-driven -Unattended entry
+            # point, so this is the only completion path that needs it.
+            Write-Log "Unattended: health check complete -- exiting."
+            exit 0
+        }
         [void](Read-Host "  Press Enter to return to menu")
         continue
     }

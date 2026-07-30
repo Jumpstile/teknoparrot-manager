@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased -- v1.0 RC3
+
+- Fixed (issue #154): the development certification harness can run the existing read-only Library Health Check under `-Unattended`, then exits cleanly when it finishes.
+- Fixed (issue #154): the certification Pester runner and preflight now require exactly Pester 5.7.1, preventing an unvalidated newer version from silently changing full-suite results.
+
 ## v1.0 RC2.1
 
 Release-hardening pass on top of RC2: thumbnail downloads, update-check version display, certification-suite reliability, and menu polish.

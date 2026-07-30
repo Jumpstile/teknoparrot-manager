@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC2.1
+  TeknoParrot Manager  |  v1.0 RC3
   Author: Jumpstile
 ===============================================================================
 
@@ -9,6 +9,9 @@
 
   This is a release candidate. Test one game after each run. Your profiles are
   backed up automatically at the start of every run.
+
+  v1.0 RC3 is in preparation. It has not been published or hardware-certified
+  yet.
 
   For a one-page version, see TeknoParrot-Manager-QuickStart.txt.
 
@@ -2385,6 +2388,6 @@
 
 
 ===============================================================================
-  v1.0 RC2.1 -- Test one game after each run.
+  v1.0 RC3 -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================

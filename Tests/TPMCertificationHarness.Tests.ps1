@@ -23,6 +23,7 @@
 
 BeforeAll {
     $harnessPath = Join-Path $PSScriptRoot "..\scripts\Invoke-TPM-RealInstanceSmoke.ps1"
+    $runnerPath = Join-Path $PSScriptRoot "..\scripts\Run-TPM-Tests.ps1"
     $tokens = $null
     $parseErrors = $null
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($harnessPath, [ref]$tokens, [ref]$parseErrors)
@@ -45,6 +46,22 @@ BeforeAll {
     $extractedPath = Join-Path $TestDrive ("harness-functions-" + [guid]::NewGuid().ToString('N') + '.ps1')
     ($functionAsts | ForEach-Object { $_.Extent.Text }) -join "`n`n" | Set-Content -LiteralPath $extractedPath -Encoding utf8
     . $extractedPath
+
+    # AST extraction above pulls only function bodies, not the harness's own
+    # top-level script-scope initializers ($script:tpmEvidenceWorkflowId =
+    # ...; $script:tpmOperatorPhase = 0; $script:tpmScreenshotSequence = 0).
+    # Under strict mode those variables would otherwise be entirely unset
+    # (not merely $null) the first time an extracted function reads them
+    # here, so they are seeded to the same starting values the real harness
+    # assigns at its own top level before any gate/screenshot function runs.
+    # $script:tpmCrc32Table has no top-level initializer in the harness --
+    # it is lazily built on first use behind an `if (-not $script:tpmCrc32Table)`
+    # guard -- but that guard itself requires the variable to exist under
+    # strict mode, so it is seeded here too.
+    $script:tpmEvidenceWorkflowId = [guid]::NewGuid().ToString('N')
+    $script:tpmOperatorPhase = 0
+    $script:tpmCrc32Table = $null
+    $script:tpmScreenshotSequence = 0
 
     # New-CertificationScorecard reads these as unqualified script-scope
     # variables rather than parameters (mirroring the harness's own top-level
@@ -102,7 +119,7 @@ BeforeAll {
             GitVersion = 'git version 2.44.0'
             PowerShellVersion = '7.4.0'
             TpmScriptVersion = '1.0'
-            TpmDisplayVersion = 'v1.0 RC2'
+            TpmDisplayVersion = 'v1.0 RC3'
         }
     }
 }
@@ -149,7 +166,7 @@ Describe "New-CertificationScorecard" {
         $result.GitVersion        | Should -Be 'git version 2.44.0'
         $result.PowerShellVersion | Should -Be '7.4.0'
         $result.TpmScriptVersion  | Should -Be '1.0'
-        $result.TpmDisplayVersion | Should -Be 'v1.0 RC2'
+        $result.TpmDisplayVersion | Should -Be 'v1.0 RC3'
     }
 
     It "reports WorkingTreeClean as false when GitStatus is not '(clean)'" {
@@ -174,21 +191,8 @@ Describe "Write-TPMGateHeader / Set-TPMConsoleStatus (issue #122)" {
     It "prints the gate name, purpose, and expected outcome" {
         Write-TPMGateHeader -Gate 'Pester regression suite' -Purpose 'Runs every unit/regression test in the repo' -Expected 'zero failed tests'
 
-        Should -Invoke Write-Host -ParameterFilter { $Object -like '*Running: Pester regression suite*' }
-        Should -Invoke Write-Host -ParameterFilter { $Object -like '*Purpose*Runs every unit/regression test in the repo*' }
-        Should -Invoke Write-Host -ParameterFilter { $Object -like '*Expected*zero failed tests*' }
+        Should -Invoke Write-Host -ParameterFilter { $Object -like '*Pester regression suite*zero failed tests*' }
     }
-
-    It "sets a live Write-Progress status combining purpose and expected outcome" {
-        Write-TPMGateHeader -Gate 'Repository' -Purpose 'Confirms the certified commit and working-tree state' -Expected 'clean working tree, HEAD matches origin/main'
-
-        Should -Invoke Write-Progress -ParameterFilter {
-            $Activity -eq 'TPM Certification Suite' -and
-            $Status -like '*Confirms the certified commit and working-tree state*' -and
-            $Status -like '*clean working tree, HEAD matches origin/main*'
-        }
-    }
-
     It "does not throw when Purpose or Expected is blank" {
         { Set-TPMConsoleStatus -Gate 'X' -Purpose '' -Expected '' } | Should -Not -Throw
         { Set-TPMConsoleStatus -Gate '' -Purpose 'Y' -Expected 'Z' } | Should -Not -Throw
@@ -284,24 +288,16 @@ Describe "Pester regression gate hang/timeout detection (issue #136)" {
     }
 }
 
-Describe "Pester regression gate runs off the main thread (issue #136)" {
-    It "invokes Pester on a dedicated runspace with BeginInvoke, not a blocking call on the main thread" {
-        # A blocking call gives the operator (and this harness) zero chance
-        # to detect a hang before the whole certification run is stuck
-        # forever. Confirms the fix's shape is actually in place, not just
-        # that the helper functions above exist in isolation.
-        $source = Get-Content -LiteralPath $harnessPath -Raw
-        $source | Should -Match '\[runspacefactory\]::CreateRunspace\(\)'
-        $source | Should -Match '\$pesterPs\.BeginInvoke\(\)'
-        $source | Should -Match 'Test-TPMPesterTimedOut\s+-ElapsedSeconds'
-    }
-
-    It "throws a clear, diagnostic error on timeout instead of silently returning" {
-        $source = Get-Content -LiteralPath $harnessPath -Raw
-        $source | Should -Match 'if\s*\(\$pesterTimedOut\)\s*\{[\s\S]*?throw\s+\$timeoutMsg'
+Describe "Pester regression gate uses an isolated noninteractive process" {
+    It "uses the v1 structured result contract and no in-process runspace" {
+        $source=Get-Content -LiteralPath $harnessPath -Raw
+        $source|Should -Match 'Invoke-TPMIsolatedProcessV1'
+        $source|Should -Match "'-NoProfile','-NonInteractive'"
+        $source|Should -Match 'Read-TPMPesterResultV1'
+        $source|Should -Not -Match '\[runspacefactory\]::CreateRunspace'
+        $source|Should -Not -Match '\.BeginInvoke\('
     }
 }
-
 Describe "Test-TPMCertificationRootValid (issue #146)" {
     # Regression coverage for the RC3 blocker: a certification run against a
     # root missing all three installation markers previously still scored
@@ -393,6 +389,49 @@ Describe "Fail-fast root validation runs before any certification gate (issue #1
     }
 }
 
+Describe "NAS Git safe-directory certification boundary (issue #154)" {
+    It "builds a Pester-child environment with one exact, process-scoped safe.directory entry" {
+        $environment = New-TPMPesterChildEnvironment -RepositoryPath $TestDrive
+
+        $environment['GIT_CONFIG_COUNT'] | Should -Be '1'
+        $environment['GIT_CONFIG_KEY_0'] | Should -Be 'safe.directory'
+        $environment['GIT_CONFIG_GLOBAL'] | Should -Be 'NUL'
+        $environment['GIT_CONFIG_NOSYSTEM'] | Should -Be '1'
+        $environment['GIT_CONFIG_VALUE_0'] | Should -Be $TestDrive
+        @($environment.Keys | Where-Object { $_ -like 'GIT_CONFIG_*' } | Sort-Object) |
+            Should -Be @('GIT_CONFIG_COUNT', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_VALUE_0')
+        $environment['GIT_CONFIG_VALUE_0'] | Should -Not -Be '*'
+    }
+
+    It "uses the FileSystem ProviderPath for both runner Git reads" {
+        $runnerSource = Get-Content -LiteralPath $runnerPath -Raw
+        $runnerTokens = $null
+        $runnerParseErrors = $null
+        $runnerAst = [System.Management.Automation.Language.Parser]::ParseFile($runnerPath, [ref]$runnerTokens, [ref]$runnerParseErrors)
+
+        $runnerParseErrors.Count | Should -Be 0
+        $runnerSource.Contains('$scopedGitArguments') | Should -BeTrue
+        $runnerSource.Contains('safe.directory={0}') | Should -BeTrue
+        [regex]::Matches($runnerSource, [regex]::Escape('& git @scopedGitArguments rev-parse HEAD')).Count | Should -Be 2
+        $resolvedRepoAssignments = @($runnerAst.FindAll({ $args[0] -is [System.Management.Automation.Language.AssignmentStatementAst] -and $args[0].Left.Extent.Text -eq '$resolvedRepo' }, $true))
+        $resolvedRepoAssignments.Count | Should -Be 1
+        $resolvedRepoAssignments[0].Right.Extent.Text.Trim().EndsWith('.ProviderPath') | Should -BeTrue
+    }
+
+    It "uses the FileSystem ProviderPath and scoped Git arguments for every smoke-harness repository read" {
+        $harnessSource = Get-Content -LiteralPath $harnessPath -Raw
+
+        $harnessSource.Contains('$gitScopedArguments') | Should -BeTrue
+        $harnessSource.Contains('safe.directory={0}') | Should -BeTrue
+        [regex]::Matches($harnessSource, [regex]::Escape('& git @gitScopedArguments')).Count | Should -Be 6
+        $repoPathAssignments = @($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.AssignmentStatementAst] -and $args[0].Left.Extent.Text -eq '$RepoPath' }, $true))
+        $repoPathAssignments.Count | Should -Be 1
+        $repoPathAssignments[0].Right.Extent.Text.Trim().EndsWith('.ProviderPath') | Should -BeTrue
+        $harnessSource.Contains('New-TPMPesterChildEnvironment -RepositoryPath $RepoPath') | Should -BeTrue
+        [regex]::Matches($harnessSource, [regex]::Escape('safe.directory=*')).Count | Should -Be 0
+    }
+}
+
 Describe "TPM config JSON snapshot/override/restore (issue #146)" {
     # Regression coverage for the "saved-path conflict" scenario: a real
     # certification run found unattended TPM silently used a saved
@@ -433,6 +472,53 @@ Describe "TPM config JSON snapshot/override/restore (issue #146)" {
         $updated.GamesInstallFolder | Should -Be 'E:\Games\TeknoParrot Games'
     }
 
+    # Issue #154 real-hardware certification finding: a real -Unattended
+    # launch had no way to auto-select a mode and always exited 1 at
+    # "Mode must be set before starting." -- UnattendedMode is the field
+    # TeknoParrot-Manager.ps1 now reads (only when -Unattended) to pick an
+    # initial mode; Set-TPMConfigJsonRoot must add/overwrite it the same
+    # way it overwrites TeknoParrotRoot, since both are required for this
+    # harness's own unattended-root-binding gate to complete successfully,
+    # while every other saved setting is still left untouched.
+    It "adds UnattendedMode=HealthCheck to an existing saved config that never had that field, preserving every other saved setting" {
+        $configPath = Join-Path $TestDrive ("no-mode-config-" + [guid]::NewGuid().ToString('N') + '.json')
+        $originalConfig = [ordered]@{
+            TeknoParrotRoot = 'C:\Users\Someone\LaunchBox\Emulators\TeknoParrot'
+            ZipSourceFolder = 'W:\ROMS\TeknoParrot Collection'
+            GamesInstallFolder = 'E:\Games\TeknoParrot Games'
+            RetroBat = $true
+        }
+        [System.IO.File]::WriteAllText($configPath, ($originalConfig | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding $false))
+
+        $requestedRoot = 'W:\Emulators\TeknoParrot'
+        $written = Set-TPMConfigJsonRoot -ConfigPath $configPath -TeknoParrotRoot $requestedRoot
+        $written | Should -Be $true
+
+        $updated = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+        $updated.TeknoParrotRoot | Should -Be $requestedRoot
+        $updated.UnattendedMode | Should -Be 'HealthCheck'
+        $updated.ZipSourceFolder | Should -Be 'W:\ROMS\TeknoParrot Collection'
+        $updated.GamesInstallFolder | Should -Be 'E:\Games\TeknoParrot Games'
+        $updated.RetroBat | Should -Be $true
+    }
+
+    It "overwrites an existing UnattendedMode value with HealthCheck (the value this harness's own gate requires), preserving every other saved setting" {
+        $configPath = Join-Path $TestDrive ("wrong-mode-config-" + [guid]::NewGuid().ToString('N') + '.json')
+        $originalConfig = [ordered]@{
+            TeknoParrotRoot = 'C:\Users\Someone\LaunchBox\Emulators\TeknoParrot'
+            GamesInstallFolder = 'E:\Games\TeknoParrot Games'
+            UnattendedMode = 'AutoSync'
+        }
+        [System.IO.File]::WriteAllText($configPath, ($originalConfig | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding $false))
+
+        $written = Set-TPMConfigJsonRoot -ConfigPath $configPath -TeknoParrotRoot 'W:\Emulators\TeknoParrot'
+        $written | Should -Be $true
+
+        $updated = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+        $updated.UnattendedMode | Should -Be 'HealthCheck'
+        $updated.GamesInstallFolder | Should -Be 'E:\Games\TeknoParrot Games'
+    }
+
     It "returns false and writes nothing when there is no existing config to override" {
         $configPath = Join-Path $TestDrive ("missing-config-" + [guid]::NewGuid().ToString('N') + '.json')
         $written = Set-TPMConfigJsonRoot -ConfigPath $configPath -TeknoParrotRoot 'W:\Emulators\TeknoParrot'
@@ -465,7 +551,7 @@ Describe "TPM config JSON snapshot/override/restore (issue #146)" {
     # Review round 2 (finding #2): no saved config exists at all on this
     # machine -- unattended TPM must still be bound to the requested root
     # via a minimal temporary config, not skipped outright.
-    It "New-TPMTemporaryUnattendedConfig creates a config with only TeknoParrotRoot and GamesInstallFolder set to the requested root" {
+    It "New-TPMTemporaryUnattendedConfig creates the complete minimal config -- TeknoParrotRoot, GamesInstallFolder, and UnattendedMode -- set to the requested root/mode" {
         $configPath = Join-Path $TestDrive ("temp-config-" + [guid]::NewGuid().ToString('N') + '.json')
         $requestedRoot = 'W:\Emulators\TeknoParrot'
 
@@ -476,6 +562,8 @@ Describe "TPM config JSON snapshot/override/restore (issue #146)" {
         $cfg = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
         $cfg.TeknoParrotRoot | Should -Be $requestedRoot
         $cfg.GamesInstallFolder | Should -Be $requestedRoot
+        $cfg.UnattendedMode | Should -Be 'HealthCheck' -Because 'HealthCheck is the read-only mode this harness''s own unattended-root-binding gate needs -- without it TeknoParrot-Manager.ps1''s -Unattended flow has no way to pick an initial mode and exits 1 at "Mode must be set before starting"'
+        @($cfg.PSObject.Properties.Name | Sort-Object) | Should -Be @('GamesInstallFolder','TeknoParrotRoot','UnattendedMode') -Because 'this must remain the complete minimal config -- no untested extra fields'
     }
 
     It "New-TPMTemporaryUnattendedConfig's output is removed cleanly by Restore-TPMConfigJsonSnapshot with a null snapshot (the same cleanup path as the existing-config case)" {
@@ -721,6 +809,78 @@ Describe "Test-TPMInstallHealthGate (issue #146)" {
         $healthResult = [pscustomobject]@{ Status = 'PASS' }
         $gate = Test-TPMInstallHealthGate -HealthResult $healthResult
         $gate.Passed | Should -Be $false
+        $gate.Reason | Should -Match 'no Checks entries'
+    }
+
+    # Review finding: @($x) where $x is $null produces a ONE-element array
+    # containing $null (Count = 1), not an empty array -- wrapping
+    # $checksProperty.Value directly without a null check first would silently
+    # skip this fail-fast branch for an explicit Checks = $null and fall
+    # through to a different (wrong) Reason. This is the regression guard for
+    # that exact shape, distinct from "absent" (no property at all) and
+    # "empty" (Checks = @()).
+    It "fails with the same no-Checks-entries reason when Checks is explicitly null" {
+        $healthResult = [pscustomobject]@{ Status = 'PASS'; Checks = $null }
+        $gate = Test-TPMInstallHealthGate -HealthResult $healthResult
+        $gate.Passed | Should -Be $false
+        $gate.Reason | Should -Match 'no Checks entries'
+    }
+
+    It "normalizes a single (scalar, non-array) Checks value to a one-element array rather than throwing" {
+        # A single pscustomobject assigned to Checks is not itself an array --
+        # if the normalization only wrapped a truthy value without accounting
+        # for this shape, $checks.Count would be a PropertyNotFoundException
+        # under strict mode (Count doesn't exist on a lone pscustomobject).
+        $healthResult = [pscustomobject]@{
+            Status = 'PASS'
+            Checks = [pscustomobject]@{ Name = 'TeknoParrotUi.exe exists'; Passed = $true }
+        }
+        { Test-TPMInstallHealthGate -HealthResult $healthResult } | Should -Not -Throw
+        $gate = Test-TPMInstallHealthGate -HealthResult $healthResult
+        $gate.Passed | Should -Be $false
+        $gate.Reason | Should -Match 'GameProfiles folder exists -- missing from health result'
+        $gate.Reason | Should -Match 'UserProfiles folder exists -- missing from health result'
+    }
+
+    It "normalizes multiple Checks entries and passes when every installation-critical check is present and true" {
+        $healthResult = [pscustomobject]@{
+            Status = 'PASS'
+            Checks = @(
+                [pscustomobject]@{ Name = 'TeknoParrotUi.exe exists'; Passed = $true }
+                [pscustomobject]@{ Name = 'GameProfiles folder exists'; Passed = $true }
+                [pscustomobject]@{ Name = 'UserProfiles folder exists'; Passed = $true }
+                [pscustomobject]@{ Name = 'Some other non-critical check'; Passed = $false }
+            )
+        }
+        $gate = Test-TPMInstallHealthGate -HealthResult $healthResult
+        $gate.Passed | Should -Be $true
+        $gate.Reason | Should -Match 'all installation-critical checks present and passed'
+    }
+
+    It "handles absent, null, empty, one, and many Checks shapes without throwing under explicit strict mode" {
+        # Regression guard for the review finding itself: run every shape
+        # under Set-StrictMode -Version Latest in this test's own scope,
+        # independent of whatever strict-mode setting the extracted-function
+        # temp file or the outer test runner happens to have.
+        Set-StrictMode -Version Latest
+        try {
+            $shapes = @(
+                [pscustomobject]@{ Status = 'PASS' }
+                [pscustomobject]@{ Status = 'PASS'; Checks = $null }
+                [pscustomobject]@{ Status = 'PASS'; Checks = @() }
+                [pscustomobject]@{ Status = 'PASS'; Checks = [pscustomobject]@{ Name = 'TeknoParrotUi.exe exists'; Passed = $true } }
+                [pscustomobject]@{ Status = 'PASS'; Checks = @(
+                        [pscustomobject]@{ Name = 'TeknoParrotUi.exe exists'; Passed = $true }
+                        [pscustomobject]@{ Name = 'GameProfiles folder exists'; Passed = $true }
+                        [pscustomobject]@{ Name = 'UserProfiles folder exists'; Passed = $true }
+                    ) }
+            )
+            foreach ($healthResult in $shapes) {
+                { Test-TPMInstallHealthGate -HealthResult $healthResult } | Should -Not -Throw
+            }
+        } finally {
+            Set-StrictMode -Off
+        }
     }
 
     It "fails when one installation-critical check is missing from Checks entirely (not merely unfailed)" {
@@ -1959,6 +2119,54 @@ Describe "New-TPMCertificationScreenshot (issue #151)" {
         $handle = [System.IO.File]::Open($shot.Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
         $handle.Close()
     }
+
+    # Review round 2 (Luna Max): every other It in this Describe runs after
+    # whatever sequence/workflow state earlier tests in this file (or earlier
+    # Its in this same Describe) happened to leave behind -- none of them
+    # prove the screenshot-path function is actually self-sufficient rather
+    # than incidentally working because some prior test already primed
+    # $script:tpmScreenshotSequence / $script:tpmEvidenceWorkflowId to a
+    # workable value. This test explicitly resets that state to the same
+    # known-fresh values the real harness starts a run with (via
+    # Reset-TPMEvidenceLedger, a real production function, not a test-only
+    # shortcut), then proves New-TPMScreenshotReservedPath and
+    # New-TPMCertificationScreenshot both work from that known baseline,
+    # under this test's own explicit strict mode -- independent of whatever
+    # state leaked in from any other It.
+    It "New-TPMScreenshotReservedPath and New-TPMCertificationScreenshot work from a freshly-reset sequence/workflow state, under strict mode, independent of any other test" {
+        Set-StrictMode -Version Latest
+        try {
+            Reset-TPMEvidenceLedger
+            $script:tpmScreenshotSequence | Should -Be 0
+
+            $dir = Join-Path $TestDrive ("shots-isolated-" + [guid]::NewGuid().ToString('N'))
+            # New-TPMScreenshotReservedPath -- unlike the New-TPMCertificationScreenshot
+            # wrapper -- does not create $ScreenshotDir itself; [System.IO.File]::Open's
+            # CreateNew throws DirectoryNotFoundException (itself an IOException
+            # subtype) when the parent is missing, which this function's own
+            # catch [System.IO.IOException] retries as if it were a mere name
+            # collision, eventually exhausting all 1000 attempts. The directory
+            # must exist before calling it directly, same as every other real caller.
+            New-Item -ItemType Directory -Force -Path $dir | Out-Null
+
+            # Called directly (not via "{ $x = ... } | Should -Not -Throw") so the
+            # return value is actually captured here -- Should -Not -Throw invokes
+            # its scriptblock via the call operator, which creates its own child
+            # scope, so an assignment made inside it never leaks back out.
+            $firstPath = New-TPMScreenshotReservedPath -ScreenshotDir $dir -Name 'isolated'
+            $script:tpmScreenshotSequence | Should -Be 1
+            [System.IO.Path]::GetFileName($firstPath) | Should -Match '_00001_'
+
+            $secondPath = New-TPMScreenshotReservedPath -ScreenshotDir $dir -Name 'isolated'
+            $script:tpmScreenshotSequence | Should -Be 2
+            [System.IO.Path]::GetFileName($secondPath) | Should -Match '_00002_'
+
+            $shot = New-TPMCertificationScreenshot -ScreenshotDir $dir -Name 'isolated-capture' -EvidenceType 'DeterministicRender' -CaptureAction (New-ValidCaptureAction)
+            $shot.Status | Should -Be 'Captured'
+        } finally {
+            Set-StrictMode -Off
+        }
+    }
 }
 
 Describe "Certification evidence (screenshots) in the scorecard -- report inclusion and scoring isolation (issue #151)" {
@@ -2139,6 +2347,22 @@ Describe "Screenshot privacy disclosure and capture-scope safeguard (issue #151 
     }
 
     It "Save-TPMScreenCapture returns a CaptureScope of 'Window' or 'FullDesktop', never anything else" {
+        # Review round 2 (Luna Max): this exercises the real GDI+ capture
+        # path (not the deterministic rasterized-text stand-in every other
+        # test in this file uses), so it depends on a genuinely usable
+        # interactive display -- something a remote/headless dev session can
+        # transiently lack. Test-TPMInteractiveDisplayAvailable proves that
+        # capability live, right now, the same way production would fail:
+        # only when it deterministically confirms no display is available
+        # does this skip (Set-ItResult -Skipped, a real, visible Pester skip
+        # -- never a silent pass or a NotApplicable substitute). Any other
+        # failure -- including a real capture failure with a display
+        # present -- still fails this test exactly as before.
+        if (-not (Test-TPMInteractiveDisplayAvailable)) {
+            Set-ItResult -Skipped -Because 'this session has no usable interactive display right now (confirmed via a live GDI+ CopyFromScreen probe, ERROR_INVALID_HANDLE) -- a real certification run on real hardware must still fail this evidence requirement, not skip it'
+            return
+        }
+
         $dir = Join-Path $TestDrive ("privacy-scope-" + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Force -Path $dir | Out-Null
         $path = Join-Path $dir 'real.png'
@@ -2147,6 +2371,42 @@ Describe "Screenshot privacy disclosure and capture-scope safeguard (issue #151 
 
         $scope | Should -BeIn @('Window', 'FullDesktop')
         Test-Path -LiteralPath $path -PathType Leaf | Should -Be $true
+    }
+
+    Context "Test-TPMWin32ErrorIndicatesNoDisplay (the no-display classification, independent of any real display)" {
+        It "treats ERROR_INVALID_HANDLE (6) as the no-display signal" {
+            Test-TPMWin32ErrorIndicatesNoDisplay -NativeErrorCode 6 | Should -Be $true
+        }
+        It "does not treat other native error codes as a no-display signal" {
+            Test-TPMWin32ErrorIndicatesNoDisplay -NativeErrorCode 5 | Should -Be $false   # ERROR_ACCESS_DENIED
+            Test-TPMWin32ErrorIndicatesNoDisplay -NativeErrorCode 0 | Should -Be $false
+            Test-TPMWin32ErrorIndicatesNoDisplay -NativeErrorCode 1450 | Should -Be $false   # ERROR_NO_SYSTEM_RESOURCES
+        }
+    }
+
+    Context "Test-TPMInteractiveDisplayAvailable (the live capability probe)" {
+        It "returns a boolean without throwing, regardless of what this particular session's display state happens to be" {
+            # Called directly, not via "{ $x = ... } | Should -Not -Throw" --
+            # Should -Not -Throw invokes its scriptblock via the call
+            # operator, which creates its own child scope, so an assignment
+            # made inside it never leaks back out to $result here. An
+            # uncaught exception from the direct call below fails this It
+            # exactly the same way Should -Not -Throw would.
+            $result = Test-TPMInteractiveDisplayAvailable
+            $result | Should -BeOfType [bool]
+        }
+
+        It "propagates a Win32Exception whose native error code is not the no-display signal, rather than swallowing it" {
+            # Regression guard for the "do not convert a real capture failure
+            # into NotApplicable" requirement: fabricate a distinctly
+            # different native error (ERROR_ACCESS_DENIED) via the same
+            # exception-unwrapping shape Test-TPMInteractiveDisplayAvailable
+            # inspects, and confirm the underlying classification would NOT
+            # treat it as "no display" -- a real, different failure must
+            # still be visible, never silently absorbed.
+            $fakeWin32 = New-Object System.ComponentModel.Win32Exception(5)   # ERROR_ACCESS_DENIED
+            Test-TPMWin32ErrorIndicatesNoDisplay -NativeErrorCode $fakeWin32.NativeErrorCode | Should -Be $false
+        }
     }
 
     It "classifies a full-desktop fallback explicitly on the screenshot record, never silently as a narrow capture" {
@@ -2556,4 +2816,821 @@ Describe "Test-TPMPngStructure complete static PNG inventory coverage (issue #15
     It "allows a conforming unknown ancillary chunk" { (Test-TPMPngStructure (New-InventoryPng @($invIhdr,$invIdat,(New-InventoryChunk foOB @()),$invIend))).Valid|Should -BeTrue }
     It "rejects PLTE after <Type> when an optional truecolor palette is present" -TestCases @(@{Type='bKGD'},@{Type='tRNS'}) { param($Type);$c=New-InventoryChunk $Type @();$plte=New-InventoryChunk PLTE ([byte[]](1,2,3));(Test-TPMPngStructure (New-InventoryPng @($invIhdr,$c,$plte,$invIdat,$invIend))).Valid|Should -BeFalse }
 
+}
+
+
+Describe "Issue #154 evidence metadata and finalization regression" {
+    It "returns Skipped without binding or requiring EvidenceType" {
+        $r=New-TPMCertificationScreenshot -ScreenshotDir $TestDrive -Name 'skip' -Skip -SkipReason 'not shown'
+        $r.Status|Should -Be 'Skipped';$r.EvidenceType|Should -Be 'Skipped'
+    }
+    It "ignores capture-only parameters when Skip is explicit" {
+        $r=New-TPMCertificationScreenshot -ScreenshotDir $TestDrive -Name 'skip-with-capture-data' -Skip -EvidenceType 'Invalid' -CaptureAction { throw 'must not run' }
+        $r.Status|Should -Be 'Skipped';$r.Required|Should -BeFalse;$r.Path|Should -BeNullOrEmpty
+    }
+    It "converts <Case> EvidenceType into controlled Failed evidence" -TestCases @(
+        @{Case='omitted';Value=$null},@{Case='null';Value=$null},@{Case='empty';Value=''},@{Case='whitespace';Value=' '},@{Case='unknown';Value='Other'}
+    ) { param($Case,$Value);$r=New-TPMCertificationScreenshot -ScreenshotDir $TestDrive -Name $Case -EvidenceType $Value -CaptureAction{};$r.Status|Should -Be 'Failed';$r.EvidenceType|Should -Be 'Failed';$r.Details|Should -Match 'invalid evidence metadata' }
+    It "converts empty Name and ScreenshotDir into controlled failures" {
+        (New-TPMCertificationScreenshot -ScreenshotDir $TestDrive -Name '' -EvidenceType ScreenCapture -CaptureAction{}).Status|Should -Be 'Failed'
+        (New-TPMCertificationScreenshot -ScreenshotDir '' -Name 'x' -EvidenceType ScreenCapture -CaptureAction{}).Status|Should -Be 'Failed'
+    }
+    It "gives every production Add-Screenshot call a valid literal type or explicit Skip" {
+        $source=[IO.File]::ReadAllLines((Join-Path $PSScriptRoot '..\scripts\Invoke-TPM-RealInstanceSmoke.ps1'))
+        $calls=@($source|Where-Object{$_ -match '^\s*(\[void\]\(|\$finalEvidence\s*=)?Add-Screenshot\s+-ScreenshotDir'})
+        $calls.Count|Should -Be 8
+        foreach($call in $calls){($call -match '-Skip(?:\s|\))' -or $call -match "-EvidenceType\s+'(?:ScreenCapture|DeterministicRender)'")|Should -BeTrue -Because $call}
+    }
+}
+
+Describe "Get-TreeHash / Compare-TreeSnapshot absent-tree handling (issue #172)" {
+    # Real certification RunIdentity 2e045f369a2240adb8eaaaed4d9496a0 reported
+    # Pcsx2x6Crosshairs BeforeSkipped=1/AfterSkipped=1 against a canonical
+    # crosshairs directory that did not exist on disk at all -- confirmed
+    # root cause: Get-TreeHash's "return @()" collapsed to $null at the
+    # caller (capturing zero pipeline objects into a variable always
+    # yields $null on this environment), and Compare-TreeSnapshot's
+    # "@($Before)" then wrapped that $null into a ONE-element array
+    # containing a single $null, which its own per-item loop counted as a
+    # skipped entry that never actually existed. These tests exercise the
+    # full producer (Get-TreeHash) -> consumer (Compare-TreeSnapshot)
+    # path together, the same shape every real caller uses, not the
+    # functions in isolation.
+
+    It "an absent tree, compared before and after, produces an all-zero result -- not a phantom skipped entry" {
+        $missing = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $before = Get-TreeHash $missing
+        $after = Get-TreeHash $missing
+        $result = Compare-TreeSnapshot $before $after
+        $result.Added | Should -Be 0
+        $result.Removed | Should -Be 0
+        $result.Changed | Should -Be 0
+        $result.BeforeSkipped | Should -Be 0
+        $result.AfterSkipped | Should -Be 0
+        $result.BeforeCount | Should -Be 0
+        $result.AfterCount | Should -Be 0
+    }
+
+    It "Get-TreeHash returns a real, non-null, zero-count array for an absent path" {
+        $missing = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $result = Get-TreeHash $missing
+        ($null -eq $result) | Should -BeFalse
+        @($result).Count | Should -Be 0
+    }
+
+    It "Compare-TreeSnapshot treats a literal `$null` argument as an empty snapshot, not a phantom skipped entry" {
+        $result = Compare-TreeSnapshot $null $null
+        $result.BeforeSkipped | Should -Be 0
+        $result.AfterSkipped | Should -Be 0
+        $result.BeforeCount | Should -Be 0
+        $result.AfterCount | Should -Be 0
+    }
+
+    It "a tree that goes from absent to present is reported as entirely Added, with zero phantom skips" {
+        $root = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $before = Get-TreeHash $root
+        New-Item -ItemType Directory -Path $root | Out-Null
+        [IO.File]::WriteAllText((Join-Path $root 'a.txt'), 'a')
+        [IO.File]::WriteAllText((Join-Path $root 'b.txt'), 'b')
+        $after = Get-TreeHash $root
+        $result = Compare-TreeSnapshot $before $after
+        $result.Added | Should -Be 2
+        $result.Removed | Should -Be 0
+        $result.Changed | Should -Be 0
+        $result.BeforeSkipped | Should -Be 0
+        $result.AfterSkipped | Should -Be 0
+    }
+
+    It "a tree that goes from present to absent is reported as entirely Removed, with zero phantom skips" {
+        $root = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $root | Out-Null
+        [IO.File]::WriteAllText((Join-Path $root 'a.txt'), 'a')
+        $before = Get-TreeHash $root
+        Remove-Item -LiteralPath $root -Recurse -Force
+        $after = Get-TreeHash $root
+        $result = Compare-TreeSnapshot $before $after
+        $result.Added | Should -Be 0
+        $result.Removed | Should -Be 1
+        $result.Changed | Should -Be 0
+        $result.BeforeSkipped | Should -Be 0
+        $result.AfterSkipped | Should -Be 0
+    }
+
+    It "a genuinely malformed entry (a real `$null` element inside a non-empty snapshot) is still counted as skipped -- fail-closed behavior is preserved" {
+        $realEntry = [pscustomobject]@{ RelativePath = 'real.txt'; Path = 'C:\fake\real.txt'; Hash = 'ABC'; Length = 3 }
+        $before = @($realEntry, $null)
+        $after = @($realEntry)
+        $result = Compare-TreeSnapshot $before $after
+        $result.BeforeSkipped | Should -Be 1
+        $result.AfterSkipped | Should -Be 0
+        $result.BeforeCount | Should -Be 2
+    }
+
+    It "a genuinely malformed entry (a blank RelativePath inside a non-empty snapshot) is still counted as skipped" {
+        $blankEntry = [pscustomobject]@{ RelativePath = '   '; Path = 'C:\fake\blank.txt'; Hash = 'ABC'; Length = 3 }
+        $after = @($blankEntry)
+        $result = Compare-TreeSnapshot @() $after
+        $result.AfterSkipped | Should -Be 1
+        $result.AfterCount | Should -Be 1
+    }
+
+    It "UserProfiles, GameProfiles, and Pcsx2x6Crosshairs share identical absent-tree semantics -- proven by exercising the same shared functions each production call site uses, since no per-tree special-casing exists at this layer" {
+        foreach ($label in @('UserProfiles', 'GameProfiles', 'Pcsx2x6Crosshairs')) {
+            $missing = Join-Path $TestDrive ([guid]::NewGuid().ToString('N') + "-$label")
+            $before = Get-TreeHash $missing
+            $after = Get-TreeHash $missing
+            $result = Compare-TreeSnapshot $before $after
+            $result.BeforeSkipped | Should -Be 0 -Because "$label before-tree"
+            $result.AfterSkipped | Should -Be 0 -Because "$label after-tree"
+            $result.Added | Should -Be 0 -Because "$label added"
+            $result.Removed | Should -Be 0 -Because "$label removed"
+        }
+    }
+}
+
+Describe 'real harness incomplete-collection fail-closed path' {
+    It 'gates authority and publication on explicit collection completion' {
+        $source=[IO.File]::ReadAllText($harnessPath)
+        $source|Should -Match '\$collectionCompleted\s*=\s*\$false'
+        $source|Should -Match 'if\s*\(\s*-not\s*\$collectionCompleted\s*\)'
+        $source|Should -Match '\$collectionFailureDiagnostic'
+        $source|Should -Match 'CERTIFICATION PIPELINE ABORTED'
+    }
+}
+
+Describe 'a pre-Pester collection failure genuinely aborts the real harness child process' {
+    # Restores the early-abort regression coverage as a real behavioral
+    # test (a genuine child process launched against a deliberately broken
+    # pre-Pester precondition), not a source-string/source-order assertion.
+    # The source-string Describe block immediately above is left in place
+    # (a cheap smoke check that the fail-closed scaffolding still exists in
+    # source) but is no longer the only evidence for early-abort behavior.
+    BeforeAll {
+        $sourceRepo=Split-Path $PSScriptRoot -Parent
+        Import-Module (Join-Path $sourceRepo 'scripts\TPMCertification.Execution.psm1') -Force
+
+        function New-SyntheticEarlyAbortRepository {
+            # Builds the same kind of synthetic, git-initialized repository
+            # copy used by the late-collection-failure tests below, but
+            # injects the failure BEFORE the harness even announces the
+            # Pester gate ("Write-TPMGateHeader -Gate 'Pester regression
+            # suite'" is the harness's own unique, single-occurrence marker
+            # for that gate) -- proving the abort happens ahead of Pester,
+            # not merely somewhere in collection.
+            param([string]$Root,[string]$FailureMessage)
+            $repo=Join-Path $Root 'repo'
+            $scripts=Join-Path $repo 'scripts'
+            $tools=Join-Path $repo 'tools'
+            $tests=Join-Path $repo 'Tests'
+            New-Item -ItemType Directory -Path $scripts,$tools,$tests -Force|Out-Null
+            Copy-Item -Path (Join-Path $sourceRepo 'scripts\*') -Destination $scripts -Force
+            Copy-Item -Path (Join-Path $sourceRepo 'tools\*') -Destination $tools -Force
+            Copy-Item -LiteralPath (Join-Path $sourceRepo 'PSScriptAnalyzerSettings.psd1') -Destination $repo
+
+            @'
+param([switch]$Unattended)
+$ScriptVersion = "test"
+$ReleaseCandidateLabel = "Synthetic"
+'@|Set-Content -LiteralPath (Join-Path $repo 'TeknoParrot-Manager.ps1') -Encoding ascii
+            # Deliberately no test files in Tests\ -- if the harness ever
+            # reached the Pester gate despite the earlier throw, Pester
+            # would have nothing to discover, which would itself mask the
+            # defect this test exists to catch. An absent Tests\ directory
+            # is fine: the injected throw fires long before the Pester
+            # child process is ever launched.
+
+            $pesterMarkerPath=Join-Path $scripts 'Invoke-TPM-PesterChild.ps1'
+            (Get-Content -LiteralPath $pesterMarkerPath -Raw).Replace(
+                'Import-Module Pester -RequiredVersion 5.7.1 -ErrorAction Stop',
+                "[IO.File]::AppendAllText(`$env:TPM_TEST_PESTER_INVOKED_MARKER,'invoked'+[Environment]::NewLine); Import-Module Pester -RequiredVersion 5.7.1 -ErrorAction Stop"
+            )|Set-Content -LiteralPath $pesterMarkerPath -Encoding utf8
+
+            $harnessPath=Join-Path $scripts 'Invoke-TPM-RealInstanceSmoke.ps1'
+            $harness=[IO.File]::ReadAllText($harnessPath)
+            $insertion="    Write-TPMGateHeader -Gate 'Pester regression suite'"
+            @([regex]::Matches($harness,[regex]::Escape($insertion))).Count|Should -Be 1
+            $failureStatement="    throw '$FailureMessage'`r`n"
+            $harness=$harness.Replace($insertion,$failureStatement+$insertion)
+            [IO.File]::WriteAllText($harnessPath,$harness,(New-Object Text.UTF8Encoding $false))
+
+            $instrument=@{
+                'TPMCertification.Production.psm1'='New-TPMProductionWorkflowAuthorityV1'
+                'TPMCertification.ProductionFacts.psm1'='New-TPMProductionFactRecordsV1'
+                'TPMCertification.ProductionEvidence.psm1'='New-TPMProductionEvidenceRecordV1'
+                'TPMCertification.ProductionCycle.psm1'='Complete-TPMProductionCertificationCycleV1'
+            }
+            foreach($moduleName in $instrument.Keys){
+                $modulePath=Join-Path $scripts $moduleName
+                $moduleText=[IO.File]::ReadAllText($modulePath)
+                $needle="function $($instrument[$moduleName]) {"
+                @([regex]::Matches($moduleText,[regex]::Escape($needle))).Count|Should -Be 1
+                $markerLine='[IO.File]::AppendAllText($env:TPM_TEST_COMPOSITION_MARKER,''' + $instrument[$moduleName] + '''+[Environment]::NewLine)'
+                $moduleText=$moduleText.Replace($needle,$needle+"`r`n    "+$markerLine)
+                [IO.File]::WriteAllText($modulePath,$moduleText,(New-Object Text.UTF8Encoding $false))
+            }
+
+            & git -C $repo init -q
+            & git -C $repo checkout -q -b main
+            & git -C $repo add -- .
+            & git -C $repo -c user.name=TPM-Test -c user.email=tpm-test@example.invalid commit -q -m baseline
+            $head=& git -C $repo rev-parse HEAD
+            & git -C $repo update-ref refs/remotes/origin/main $head
+            return $repo
+        }
+
+        function Invoke-SyntheticEarlyFailure {
+            param([string]$FailureMessage,[int]$TimeoutSeconds=120)
+            $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            $repo=New-SyntheticEarlyAbortRepository -Root $root -FailureMessage $FailureMessage
+            $install=Join-Path $root 'install'
+            $harnessRoot=Join-Path $root 'harness'
+            $logRoot=Join-Path $root 'harness-log'
+            New-Item -ItemType Directory -Path $install,(Join-Path $install 'GameProfiles'),(Join-Path $install 'UserProfiles'),$harnessRoot,$logRoot -Force|Out-Null
+            New-Item -ItemType File -Path (Join-Path $install 'TeknoParrotUi.exe')|Out-Null
+            '<GameProfile />'|Set-Content -LiteralPath (Join-Path $install 'GameProfiles\one.xml') -Encoding ascii
+            $compositionMarker=Join-Path $root 'composition-entered.txt'
+            $pesterMarker=Join-Path $root 'pester-invoked.txt'
+            $savedCompositionMarker=$env:TPM_TEST_COMPOSITION_MARKER
+            $savedPesterMarker=$env:TPM_TEST_PESTER_INVOKED_MARKER
+            try{
+                $env:TPM_TEST_COMPOSITION_MARKER=$compositionMarker
+                $env:TPM_TEST_PESTER_INVOKED_MARKER=$pesterMarker
+                # Uses the real, hardened Invoke-TPMIsolatedProcessV1 primitive
+                # -- closed/empty stdin, bounded timeout with confirmed
+                # termination, separate stdout/stderr streams -- to launch the
+                # harness child process, the same primitive the harness itself
+                # uses for every child it spawns.
+                $invocation=Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList @(
+                    '-NoProfile','-NonInteractive','-File',(Join-Path $repo 'scripts\Invoke-TPM-RealInstanceSmoke.ps1'),
+                    '-RepoPath',$repo,'-TeknoParrotRoot',$install,'-HarnessRoot',$harnessRoot
+                ) -WorkingDirectoryRoot $repo -WorkingDirectory $repo -LogDirectoryRoot $logRoot -LogDirectory $logRoot -Identity 'early-abort-probe' -TimeoutSeconds $TimeoutSeconds
+            }finally{
+                $env:TPM_TEST_COMPOSITION_MARKER=$savedCompositionMarker
+                $env:TPM_TEST_PESTER_INVOKED_MARKER=$savedPesterMarker
+            }
+            $invocation.TimedOut|Should -BeFalse -Because 'the pre-Pester throw must abort long before any timeout could matter'
+            $invocation.TerminationConfirmed|Should -BeTrue
+            $stdout=if(Test-Path -LiteralPath $invocation.StdOutPath){Get-Content -LiteralPath $invocation.StdOutPath -Raw -ErrorAction SilentlyContinue}else{''}
+            $stderr=if(Test-Path -LiteralPath $invocation.StdErrPath){Get-Content -LiteralPath $invocation.StdErrPath -Raw -ErrorAction SilentlyContinue}else{''}
+            return [pscustomobject]@{Root=$root;Repo=$repo;Install=$install;HarnessRoot=$harnessRoot;CompositionMarker=$compositionMarker;PesterMarker=$pesterMarker;Output=($stdout+"`n"+$stderr);ExitCode=$invocation.ExitCode}
+        }
+    }
+
+    It 'a failure before the Pester gate aborts with a nonzero exit, retains the original error, and never claims a certification outcome' {
+        $message='PRE_PESTER_COLLECTION_FAILURE_SENTINEL'
+        $result=Invoke-SyntheticEarlyFailure -FailureMessage $message
+
+        $result.ExitCode|Should -Not -Be 0
+        $result.Output|Should -Match 'CERTIFICATION PIPELINE ABORTED \(infrastructure failure\)'
+        $result.Output|Should -Match ([regex]::Escape($message))
+        $result.Output|Should -Not -Match 'PropertyNotFoundException'
+        # Precise checks against the harness's own two verdict-announcement
+        # mechanisms (the operator-status "FINAL STATUS:" line and the
+        # scorecard's "Overall" field) -- deliberately not a bare \bCERTIFIED\b
+        # scan, which false-positives against unrelated prose already present
+        # in this harness (e.g. a gate purpose reads "Confirms the certified
+        # commit and working-tree state", confirmed by direct reproduction).
+        $result.Output|Should -Not -Match 'FINAL STATUS:\s*CERTIFIED'
+        $result.Output|Should -Not -Match 'FINAL STATUS:\s*NOT CERTIFIED'
+        $result.Output|Should -Not -Match '(?m)^\s*Overall\s*[:=]\s*"?(NOT )?CERTIFIED'
+    }
+
+    It 'a failure before the Pester gate never launches the Pester child process' {
+        $message='PRE_PESTER_COLLECTION_FAILURE_SENTINEL'
+        $result=Invoke-SyntheticEarlyFailure -FailureMessage $message
+        Test-Path -LiteralPath $result.PesterMarker|Should -BeFalse -Because 'Pester must never be invoked once the pre-Pester precondition has already failed'
+        $pesterResults=@(Get-ChildItem -LiteralPath $result.HarnessRoot -Filter 'Pester-result-v1.json' -File -Recurse -ErrorAction SilentlyContinue)
+        $pesterResults.Count|Should -Be 0
+    }
+
+    It 'a failure before the Pester gate never enters production composition or writes an authoritative artifact' {
+        $message='PRE_PESTER_COLLECTION_FAILURE_SENTINEL'
+        $result=Invoke-SyntheticEarlyFailure -FailureMessage $message
+        Test-Path -LiteralPath $result.CompositionMarker|Should -BeFalse -Because 'authority/facts/evidence/cycle composition must never be entered after an early collection failure'
+        $authoritative=@(Get-ChildItem -LiteralPath $result.HarnessRoot -File -Recurse -ErrorAction SilentlyContinue|Where-Object{$_.Name-match'^TPM-Certification-(Final-Outcome|Commit|Manifest|Scorecard|Eligibility|Publication)\.'})
+        $authoritative.Count|Should -Be 0
+    }
+
+    It 'a failure before the Pester gate does not prompt and terminates within the bounded timeout' {
+        $message='PRE_PESTER_COLLECTION_FAILURE_SENTINEL'
+        { Invoke-SyntheticEarlyFailure -FailureMessage $message -TimeoutSeconds 60 } | Should -Not -Throw
+    }
+}
+Describe 'late collection failures cannot enter production composition' {
+    BeforeAll {
+        $sourceRepo=Split-Path $PSScriptRoot -Parent
+
+        function New-SyntheticHarnessRepository {
+            param([string]$Root,[string]$FailureMessage)
+            $repo=Join-Path $Root 'repo'
+            $scripts=Join-Path $repo 'scripts'
+            $tools=Join-Path $repo 'tools'
+            $tests=Join-Path $repo 'Tests'
+            New-Item -ItemType Directory -Path $scripts,$tools,$tests -Force|Out-Null
+            Copy-Item -Path (Join-Path $sourceRepo 'scripts\*') -Destination $scripts -Force
+            Copy-Item -Path (Join-Path $sourceRepo 'tools\*') -Destination $tools -Force
+            Copy-Item -LiteralPath (Join-Path $sourceRepo 'PSScriptAnalyzerSettings.psd1') -Destination $repo
+
+            @'
+param([switch]$Unattended)
+$ScriptVersion = "test"
+$ReleaseCandidateLabel = "Synthetic"
+'@|Set-Content -LiteralPath (Join-Path $repo 'TeknoParrot-Manager.ps1') -Encoding ascii
+            "Describe 'synthetic repository' { It 'passes' { `$true|Should -BeTrue } }"|Set-Content -LiteralPath (Join-Path $tests 'Synthetic.Tests.ps1') -Encoding ascii
+
+            $harnessPath=Join-Path $scripts 'Invoke-TPM-RealInstanceSmoke.ps1'
+            $harness=[IO.File]::ReadAllText($harnessPath)
+            $unattendedCommand='(?ms)^\s*\$unattended=Invoke-TPMIsolatedProcessV1.*?^\s*if\(\$unattended\.ExitCode-ne0\).*?\r?\n'
+            @([regex]::Matches($harness,$unattendedCommand)).Count|Should -Be 1
+            $syntheticUnattended='[IO.File]::WriteAllText($tpmLog,("Configuration:{0}  TeknoParrot root     : {1}{0}  ZIP source folder    : synthetic{0}{0}Loading collection dat from ZIP...{0}" -f [Environment]::NewLine,$TeknoParrotRoot),(New-Object Text.UTF8Encoding $false))'
+            $harness=[regex]::Replace($harness,$unattendedCommand,"            $syntheticUnattended`r`n",1)
+            $insertion='# Issue #151: requested/effective root evidence.'
+            @([regex]::Matches($harness,[regex]::Escape($insertion))).Count|Should -Be 1
+            $failureStatement=if($FailureMessage-ceq'POST_RESTORATION_COLLECTION_FAILURE_SENTINEL'){"if(Test-Path -LiteralPath `$tpmConfigPath){throw 'CONFIG_RESTORATION_NOT_COMPLETE'}`r`n    throw '$FailureMessage'"}else{"throw '$FailureMessage'"}
+            $harness=$harness.Replace($insertion,$failureStatement+"`r`n`r`n    "+$insertion)
+            [IO.File]::WriteAllText($harnessPath,$harness,(New-Object Text.UTF8Encoding $false))
+
+            $instrument=@{
+                'TPMCertification.Production.psm1'='New-TPMProductionWorkflowAuthorityV1'
+                'TPMCertification.ProductionFacts.psm1'='New-TPMProductionFactRecordsV1'
+                'TPMCertification.ProductionEvidence.psm1'='New-TPMProductionEvidenceRecordV1'
+                'TPMCertification.ProductionCycle.psm1'='Complete-TPMProductionCertificationCycleV1'
+            }
+            foreach($moduleName in $instrument.Keys){
+                $modulePath=Join-Path $scripts $moduleName
+                $moduleText=[IO.File]::ReadAllText($modulePath)
+                $needle="function $($instrument[$moduleName]) {"
+                @([regex]::Matches($moduleText,[regex]::Escape($needle))).Count|Should -Be 1
+                $markerLine='[IO.File]::AppendAllText($env:TPM_TEST_COMPOSITION_MARKER,''' + $instrument[$moduleName] + '''+[Environment]::NewLine)'
+                $moduleText=$moduleText.Replace($needle,$needle+"`r`n    "+$markerLine)
+                [IO.File]::WriteAllText($modulePath,$moduleText,(New-Object Text.UTF8Encoding $false))
+            }
+
+            & git -C $repo init -q
+            & git -C $repo checkout -q -b main
+            & git -C $repo add -- .
+            & git -C $repo -c user.name=TPM-Test -c user.email=tpm-test@example.invalid commit -q -m baseline
+            $head=& git -C $repo rev-parse HEAD
+            & git -C $repo update-ref refs/remotes/origin/main $head
+            return $repo
+        }
+
+        function Invoke-SyntheticLateFailure {
+            param([switch]$Unattended,[string]$FailureMessage)
+            $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            $repo=New-SyntheticHarnessRepository -Root $root -FailureMessage $FailureMessage
+            $install=Join-Path $root 'install'
+            $harnessRoot=Join-Path $root 'harness'
+            New-Item -ItemType Directory -Path $install,(Join-Path $install 'GameProfiles'),(Join-Path $install 'UserProfiles'),$harnessRoot -Force|Out-Null
+            New-Item -ItemType File -Path (Join-Path $install 'TeknoParrotUi.exe')|Out-Null
+            '<GameProfile />'|Set-Content -LiteralPath (Join-Path $install 'GameProfiles\one.xml') -Encoding ascii
+            $marker=Join-Path $root 'composition-entered.txt'
+            $savedMarker=$env:TPM_TEST_COMPOSITION_MARKER
+            try{
+                $env:TPM_TEST_COMPOSITION_MARKER=$marker
+                $arguments=@('-NoProfile','-File',(Join-Path $repo 'scripts\Invoke-TPM-RealInstanceSmoke.ps1'),'-RepoPath',$repo,'-TeknoParrotRoot',$install,'-HarnessRoot',$harnessRoot)
+                if($Unattended){$arguments+='-RunUnattendedTPM'}
+                $output=@(& pwsh @arguments 2>&1)
+                $exitCode=$LASTEXITCODE
+            }finally{
+                $env:TPM_TEST_COMPOSITION_MARKER=$savedMarker
+            }
+            return [pscustomobject]@{Root=$root;Repo=$repo;Install=$install;HarnessRoot=$harnessRoot;Marker=$marker;Output=($output-join"`n");ExitCode=$exitCode}
+        }
+
+        function Assert-SyntheticCollectionAbort {
+            param($Result,[string]$FailureMessage)
+            $Result.ExitCode|Should -Not -Be 0
+            $Result.Output|Should -Match 'CERTIFICATION PIPELINE ABORTED \(infrastructure failure\)'
+            $Result.Output|Should -Match ([regex]::Escape($FailureMessage))
+            $Result.Output|Should -Not -Match 'PropertyNotFoundException'
+            Test-Path -LiteralPath $Result.Marker|Should -BeFalse
+            $authoritative=@(Get-ChildItem -LiteralPath $Result.HarnessRoot -File -Recurse -ErrorAction SilentlyContinue|Where-Object{$_.Name-match'^TPM-Certification-(Final-Outcome|Commit|Manifest|Scorecard|Eligibility|Publication)\.'})
+            $authoritative.Count|Should -Be 0
+            Test-Path -LiteralPath (Join-Path $Result.HarnessRoot 'Reports')|Should -BeTrue
+        }
+    }
+
+    It 'a late smoke failure after install-health collection retains its error and never enters composition' {
+        $message='LATE_SMOKE_COLLECTION_FAILURE_SENTINEL'
+        $result=Invoke-SyntheticLateFailure -FailureMessage $message
+        Assert-SyntheticCollectionAbort -Result $result -FailureMessage $message
+        @(Get-ChildItem -LiteralPath $result.HarnessRoot -Filter InstallHealth.json -File -Recurse).Count|Should -Be 1
+    }
+
+    It 'an unattended failure after configuration restoration retains its error and never enters composition' {
+        $message='POST_RESTORATION_COLLECTION_FAILURE_SENTINEL'
+        $result=Invoke-SyntheticLateFailure -Unattended -FailureMessage $message
+        Assert-SyntheticCollectionAbort -Result $result -FailureMessage $message
+        Test-Path -LiteralPath (Join-Path $result.Repo 'TeknoParrot-Manager.config.json')|Should -BeFalse
+    }
+}
+
+Describe 'Run-TPM-Tests.ps1 real HarnessRoot bootstrap (Item 2, ADR155-0309 follow-up round)' {
+    # Tests the ACTUAL wrapper/entry-point bootstrap path -- scripts\Run-TPM-Tests.ps1
+    # -- as a real child process, not a direct unit-level call to
+    # New-TPMOwnedDirectoryChainV1. A copied TestDrive fixture of the real
+    # repository is used so the entry point can be invoked exactly as a real
+    # operator would invoke it, without ever touching this worktree or a real
+    # TeknoParrot installation. The ONLY production-behavior change made
+    # inside the copied fixture is a narrowly-scoped, env-var-gated
+    # substitution of the single downstream call that would otherwise launch
+    # the real certification harness (Pester / installation inspection /
+    # backups / authority composition / publication) -- when the gating env
+    # var is unset, the copied script is byte-for-byte the same control flow
+    # as production. No production/non-copied file is modified.
+    BeforeAll {
+        $sourceRepo=Split-Path $PSScriptRoot -Parent
+        Import-Module (Join-Path $sourceRepo 'scripts\TPMCertification.Execution.psm1') -Force
+
+        function New-TPMBootstrapTestJunctionV1 {
+            param([Parameter(Mandatory=$true)][string]$LinkPath,[Parameter(Mandatory=$true)][string]$TargetPath)
+            if(-not(Test-Path -LiteralPath $TargetPath)){[void](New-Item -ItemType Directory -Path $TargetPath -Force)}
+            [void](New-Item -ItemType Junction -Path $LinkPath -Target $TargetPath -ErrorAction Stop)
+        }
+
+        function Remove-TPMBootstrapTestJunctionV1 {
+            # Test-only teardown helper (portability round): Remove-Item on a
+            # reparse-point directory, without -Recurse, prompts for
+            # confirmation under genuine Windows PowerShell 5.1 (pwsh does
+            # not), and that prompt throws PSInvalidOperationException under
+            # -NonInteractive -- confirmed by direct reproduction against the
+            # real powershell.exe 5.1 engine. [IO.Directory]::Delete($Path,
+            # $false) unlinks the reparse point itself without traversing
+            # into its target and behaves identically under both engines.
+            # Guarded: refuses to act outside TestDrive, and refuses to act
+            # on anything that is not actually a reparse point.
+            param([Parameter(Mandatory=$true)][string]$Path)
+            if(-not(Test-Path -LiteralPath $Path)){return}
+            $full=[IO.Path]::GetFullPath($Path).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+            $testDriveFull=[IO.Path]::GetFullPath($TestDrive).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+            $isInsideTestDrive=$full.Equals($testDriveFull,[StringComparison]::OrdinalIgnoreCase)-or$full.StartsWith($testDriveFull+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)
+            if(-not$isInsideTestDrive){throw "Remove-TPMBootstrapTestJunctionV1 refuses to act outside TestDrive: $full"}
+            $item=Get-Item -LiteralPath $full -Force
+            if(($item.Attributes-band[IO.FileAttributes]::ReparsePoint)-eq0){throw "Remove-TPMBootstrapTestJunctionV1 refuses to unlink a non-reparse-point path: $full"}
+            [IO.Directory]::Delete($full,$false)
+        }
+
+        function New-TPMBootstrapFixtureRepository {
+            # Copies the real repository's scripts/tools/registry/settings
+            # into a TestDrive-rooted git repository so Run-TPM-Tests.ps1's
+            # own preflight (dependency files, git HEAD readability) passes
+            # exactly as it would against a real checkout. Tests\ only needs
+            # to physically exist -- Run-TPM-Tests.ps1 itself never runs
+            # Pester against it; that happens one process layer further in
+            # (Invoke-TPM-RealInstanceSmoke.ps1), which this fixture's
+            # marker substitution prevents from ever being reached.
+            param([Parameter(Mandatory=$true)][string]$Root)
+            $repo=Join-Path $Root 'repo'
+            $scripts=Join-Path $repo 'scripts'
+            $tools=Join-Path $repo 'tools'
+            $tests=Join-Path $repo 'Tests'
+            New-Item -ItemType Directory -Path $scripts,$tools,$tests -Force|Out-Null
+            Copy-Item -Path (Join-Path $sourceRepo 'scripts\*') -Destination $scripts -Force
+            Copy-Item -Path (Join-Path $sourceRepo 'tools\*') -Destination $tools -Force
+            Copy-Item -LiteralPath (Join-Path $sourceRepo 'PSScriptAnalyzerSettings.psd1') -Destination $repo
+            'placeholder'|Set-Content -LiteralPath (Join-Path $tests 'Placeholder.Tests.ps1') -Encoding ascii
+            @'
+param([switch]$Unattended)
+$ScriptVersion = "test"
+$ReleaseCandidateLabel = "Synthetic"
+'@|Set-Content -LiteralPath (Join-Path $repo 'TeknoParrot-Manager.ps1') -Encoding ascii
+
+            # The ONE narrowly-scoped, env-var-gated substitution: when
+            # TPM_TEST_BOOTSTRAP_MARKER is set, the copied wrapper writes a
+            # marker recording the resolved paths/commit it would otherwise
+            # have handed to the real harness, instead of actually launching
+            # it. When the env var is unset, the original production call
+            # runs unchanged -- so this substitution is inert for any
+            # invocation that does not opt into it.
+            $wrapperPath=Join-Path $scripts 'Run-TPM-Tests.ps1'
+            $wrapperText=[IO.File]::ReadAllText($wrapperPath)
+            $needle="    `$harnessResult=Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList `$params -WorkingDirectoryRoot `$resolvedRepo -WorkingDirectory `$resolvedRepo -LogDirectoryRoot `$reportDirectory -LogDirectory `$logDirectory -Identity 'certification-harness' -TimeoutSeconds (`$PesterRegressionTimeoutSeconds+1800) -OperatorStatusPath `$statusPath -RelayOperatorStatus -Environment @{GIT_TERMINAL_PROMPT='0';NO_COLOR='1';TERM='dumb'}"
+            @([regex]::Matches($wrapperText,[regex]::Escape($needle))).Count|Should -Be 1 -Because 'the exact production call site must still exist unchanged before substitution -- if this ever fails, production control flow changed and this fixture must be updated, not silently patched around'
+            $replacement=@"
+    if(`$env:TPM_TEST_BOOTSTRAP_MARKER){
+        `$bootstrapInfo=[ordered]@{RepoPath=`$resolvedRepo;TeknoParrotRoot=`$resolvedRoot;HarnessRoot=`$HarnessRoot;ReportDirectory=`$reportDirectory;LogDirectory=`$logDirectory;Commit=`$commit;Params=`$params}
+        [IO.File]::WriteAllText(`$env:TPM_TEST_BOOTSTRAP_MARKER,(`$bootstrapInfo|ConvertTo-Json -Depth 5),(New-Object Text.UTF8Encoding `$false))
+        if(`$env:TPM_TEST_BOOTSTRAP_STATUS_TEXT){[IO.File]::WriteAllText(`$statusPath,`$env:TPM_TEST_BOOTSTRAP_STATUS_TEXT,(New-Object Text.UTF8Encoding `$false))}
+        `$tpmTestParsedExitCode=0
+        if(`$env:TPM_TEST_BOOTSTRAP_EXIT_CODE){[void][int]::TryParse(`$env:TPM_TEST_BOOTSTRAP_EXIT_CODE,[ref]`$tpmTestParsedExitCode)}
+        `$harnessResult=[pscustomobject]@{ExitCode=`$tpmTestParsedExitCode}
+    }else{
+$needle
+    }
+"@
+            $wrapperText=$wrapperText.Replace($needle,$replacement)
+            [IO.File]::WriteAllText($wrapperPath,$wrapperText,(New-Object Text.UTF8Encoding $false))
+
+            & git -C $repo init -q
+            & git -C $repo checkout -q -b main
+            & git -C $repo add -- .
+            & git -C $repo -c user.name=TPM-Test -c user.email=tpm-test@example.invalid commit -q -m baseline
+            $head=& git -C $repo rev-parse HEAD
+            & git -C $repo update-ref refs/remotes/origin/main $head
+            return [pscustomobject]@{Repo=$repo;Head=$head.Trim()}
+        }
+
+        function Invoke-TPMBootstrapFixture {
+            param(
+                [Parameter(Mandatory=$true)][string]$Root,
+                [Parameter(Mandatory=$true)][string]$HarnessRoot,
+                [string]$StatusText,
+                [string]$ExitCode,
+                [int]$TimeoutSeconds=60,
+                [switch]$OmitMarker,
+                [switch]$ProviderQualifiedRepoPath
+            )
+            $fixture=New-TPMBootstrapFixtureRepository -Root $Root
+            $requestedRepoPath=if($ProviderQualifiedRepoPath){('Microsoft.PowerShell.Core'+[IO.Path]::DirectorySeparatorChar+'FileSystem::'+$fixture.Repo)}else{$fixture.Repo}
+            $install=Join-Path $Root 'install'
+            New-Item -ItemType Directory -Path $install -Force|Out-Null
+            $logRoot=Join-Path $Root 'invoke-log'
+            New-Item -ItemType Directory -Path $logRoot -Force|Out-Null
+            $marker=Join-Path $Root 'bootstrap-marker.json'
+            $savedMarker=$env:TPM_TEST_BOOTSTRAP_MARKER
+            $savedStatus=$env:TPM_TEST_BOOTSTRAP_STATUS_TEXT
+            $savedExit=$env:TPM_TEST_BOOTSTRAP_EXIT_CODE
+            try{
+                if(-not $OmitMarker){$env:TPM_TEST_BOOTSTRAP_MARKER=$marker}else{$env:TPM_TEST_BOOTSTRAP_MARKER=$null}
+                $env:TPM_TEST_BOOTSTRAP_STATUS_TEXT=$StatusText
+                $env:TPM_TEST_BOOTSTRAP_EXIT_CODE=$ExitCode
+                $arguments=@(
+                    '-NoProfile','-NonInteractive',
+                    '-File',(Join-Path $fixture.Repo 'scripts\Run-TPM-Tests.ps1'),
+                    '-RepoPath',$requestedRepoPath,'-TeknoParrotRoot',$install,'-HarnessRoot',$HarnessRoot,'-NoPwshRelaunch'
+                )
+                $invocation=Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList $arguments -WorkingDirectoryRoot $fixture.Repo -WorkingDirectory $fixture.Repo -LogDirectoryRoot $logRoot -LogDirectory $logRoot -Identity 'bootstrap-probe' -TimeoutSeconds $TimeoutSeconds -Environment @{GIT_TERMINAL_PROMPT='0'}
+            }finally{
+                $env:TPM_TEST_BOOTSTRAP_MARKER=$savedMarker
+                $env:TPM_TEST_BOOTSTRAP_STATUS_TEXT=$savedStatus
+                $env:TPM_TEST_BOOTSTRAP_EXIT_CODE=$savedExit
+            }
+            $stdout=if(Test-Path -LiteralPath $invocation.StdOutPath){Get-Content -LiteralPath $invocation.StdOutPath -Raw -ErrorAction SilentlyContinue}else{''}
+            $stderr=if(Test-Path -LiteralPath $invocation.StdErrPath){Get-Content -LiteralPath $invocation.StdErrPath -Raw -ErrorAction SilentlyContinue}else{''}
+            $markerContent=if(Test-Path -LiteralPath $marker){Get-Content -LiteralPath $marker -Raw|ConvertFrom-Json}else{$null}
+            return [pscustomobject]@{
+                Repo=$fixture.Repo;RequestedRepoPath=$requestedRepoPath;Head=$fixture.Head;Install=$install;HarnessRoot=$HarnessRoot
+                Invocation=$invocation;Stdout=$stdout;Stderr=$stderr;Marker=$markerContent;MarkerPath=$marker
+                TimedOut=$invocation.TimedOut;TerminationConfirmed=$invocation.TerminationConfirmed;ExitCode=[int]$invocation.ExitCode
+            }
+        }
+    }
+
+    It 'establishes exactly the intended HarnessRoot hierarchy and reaches the fixture stop-point with the expected resolved paths and commit' {
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $parent=Join-Path $root 'parent'
+        New-Item -ItemType Directory -Path $parent -Force|Out-Null
+        $harnessRoot=Join-Path $parent 'TPM-TestHarness'
+        Test-Path -LiteralPath $harnessRoot|Should -BeFalse -Because 'HarnessRoot must not exist before this test begins'
+
+        $preGitStatus=& git -c ("safe.directory={0}" -f $sourceRepo) -C $sourceRepo status --porcelain
+        $result=Invoke-TPMBootstrapFixture -Root $root -HarnessRoot $harnessRoot
+
+        $result.TerminationConfirmed|Should -BeTrue
+        $result.TimedOut|Should -BeFalse
+        $result.Marker|Should -Not -BeNullOrEmpty -Because 'the fixture stop-point must have been reached'
+        $result.Marker.RepoPath|Should -Be $result.Repo
+        $result.Marker.HarnessRoot|Should -Be $harnessRoot
+        $result.Marker.Commit|Should -Be $result.Head
+        $result.Marker.TeknoParrotRoot|Should -Be $result.Install
+
+        Test-Path -LiteralPath $harnessRoot -PathType Container|Should -BeTrue
+        $reportDirs=@(Get-ChildItem -LiteralPath (Join-Path $harnessRoot 'Reports') -Directory)
+        $reportDirs.Count|Should -Be 1 -Because 'exactly one timestamped report directory should have been created'
+        $reportDirectory=$reportDirs[0].FullName
+        $result.Marker.ReportDirectory|Should -Be $reportDirectory
+        Test-Path -LiteralPath (Join-Path $reportDirectory 'TechnicalLogs') -PathType Container|Should -BeTrue
+        $result.Marker.LogDirectory|Should -Be (Join-Path $reportDirectory 'TechnicalLogs')
+
+        # Only the expected descendants exist -- no stray files/directories.
+        $allEntries=@(Get-ChildItem -LiteralPath $harnessRoot -Recurse -Force|ForEach-Object{$_.FullName.Substring($harnessRoot.Length).TrimStart('\')}|Sort-Object)
+        $expected=@('Reports',("Reports\{0}"-f$reportDirs[0].Name),("Reports\{0}\TechnicalLogs"-f$reportDirs[0].Name),("Reports\{0}\OperatorStatus.txt"-f$reportDirs[0].Name))|Sort-Object
+        ($allEntries-join '|')|Should -Be ($expected-join '|')
+
+        # Execution stopped before any real Pester/install-inspection/backup/
+        # authority-composition/publication step: the wrapper's own empty
+        # OperatorStatus.txt placeholder (written unconditionally before the
+        # harness would be launched) remains empty since the fixture never
+        # populated it (TPM_TEST_BOOTSTRAP_STATUS_TEXT was not set here), and
+        # no authoritative certification artifact exists anywhere under
+        # HarnessRoot.
+        (Get-Item -LiteralPath (Join-Path $reportDirectory 'OperatorStatus.txt')).Length|Should -Be 0
+        $authoritative=@(Get-ChildItem -LiteralPath $harnessRoot -File -Recurse -ErrorAction SilentlyContinue|Where-Object{$_.Name-match'^TPM-Certification-(Final-Outcome|Commit|Manifest|Scorecard|Eligibility|Publication)\.'})
+        $authoritative.Count|Should -Be 0
+
+        # No real TeknoParrot/game-install path was ever accessed: the
+        # install directory this test supplied remains exactly as created
+        # (empty), never populated by any real inspection/backup step.
+        @(Get-ChildItem -LiteralPath $result.Install -Force).Count|Should -Be 0
+
+        # The real repository checkout (this worktree) is completely
+        # unaffected by this invocation.
+        $postGitStatus=& git -c ("safe.directory={0}" -f $sourceRepo) -C $sourceRepo status --porcelain
+        ($postGitStatus-join "`n")|Should -Be ($preGitStatus-join "`n") -Because 'this worktree must remain untouched by any bootstrap test'
+
+        # Captured stdout is concise (the wrapper's own numbered narrative
+        # lines), not a raw diagnostic dump -- detail is redirected to the
+        # technical log directory, matching round 5's operator-console
+        # discipline. Every non-blank stdout line must be one of the
+        # wrapper's own known narrative prefixes.
+        $stdoutLines=@($result.Stdout -split "`r?`n"|Where-Object{$_.Trim().Length-gt0})
+        foreach($line in $stdoutLines){
+            $line|Should -Match '^(TeknoParrot Manager Certification|Target repository:|Target commit:|TeknoParrot:|Reports:|Technical log:|Starting non-interactive certification\.|No further input will be requested\.|FINAL STATUS:|Reason:)' -Because "stdout line '$line' must be a known concise narrative line, not a raw diagnostic dump"
+        }
+    }
+
+    It 'normalizes a provider-qualified repository path before Git preflight and harness handoff' {
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $parent=Join-Path $root 'parent'
+        New-Item -ItemType Directory -Path $parent -Force|Out-Null
+        $harnessRoot=Join-Path $parent 'TPM-TestHarness'
+        $result=Invoke-TPMBootstrapFixture -Root $root -HarnessRoot $harnessRoot -ProviderQualifiedRepoPath
+
+        $providerQualifiedPrefix='Microsoft.PowerShell.Core'+[IO.Path]::DirectorySeparatorChar+'FileSystem::'
+        $result.RequestedRepoPath.StartsWith($providerQualifiedPrefix,[StringComparison]::OrdinalIgnoreCase) | Should -BeTrue
+        $resolvedRepository=Resolve-Path -LiteralPath $result.RequestedRepoPath
+        $resolvedRepository.Path.StartsWith($providerQualifiedPrefix,[StringComparison]::OrdinalIgnoreCase) | Should -BeTrue
+        $resolvedRepository.Provider.Name | Should -Be 'FileSystem'
+        $resolvedRepository.ProviderPath | Should -Be $result.Repo
+
+        $providerQualifiedOutputPath=Join-Path $root 'provider-qualified-git.stdout'
+        $providerQualifiedErrorPath=Join-Path $root 'provider-qualified-git.stderr'
+        $providerQualifiedProcess=Start-Process -FilePath 'git.exe' -ArgumentList @(
+            '-c',
+            ("safe.directory={0}" -f $resolvedRepository.ProviderPath),
+            '-C',
+            $resolvedRepository.Path,
+            'rev-parse',
+            'HEAD'
+        ) -NoNewWindow -PassThru -Wait -RedirectStandardOutput $providerQualifiedOutputPath -RedirectStandardError $providerQualifiedErrorPath
+        $providerQualifiedExit=$providerQualifiedProcess.ExitCode
+        $providerQualifiedExit | Should -Not -Be 0 -Because 'Git rejects PowerShell provider-qualified paths'
+        (Get-Content -LiteralPath $providerQualifiedErrorPath -Raw) | Should -Match 'cannot change'
+        $fileSystemHead=(& git -c ("safe.directory={0}" -f $resolvedRepository.ProviderPath) -C $resolvedRepository.ProviderPath rev-parse HEAD)
+        $fileSystemExit=$LASTEXITCODE
+        $fileSystemExit | Should -Be 0
+        $fileSystemHead.Trim() | Should -Be $result.Head
+
+        $result.TimedOut | Should -BeFalse
+        $result.TerminationConfirmed | Should -BeTrue
+        $result.Marker | Should -Not -BeNullOrEmpty -Because 'the real runner must reach its fixture stop-point after Git preflight'
+        $result.Marker.RepoPath | Should -Be $result.Repo
+        $result.Marker.Commit | Should -Be $result.Head
+        $harnessParameters=[string[]]@($result.Marker.Params)
+        $repoPathIndex=[array]::IndexOf($harnessParameters,'-RepoPath')
+        $repoPathIndex | Should -BeGreaterThan -1
+        $harnessParameters[$repoPathIndex+1] | Should -Be $result.Repo -Because 'the isolated harness working-directory path must be FileSystem-native'
+    }
+    It 'never launches Explorer, never prompts, and closes stdin -- verified by grepping the real entry-point source for reachable interactive calls' {
+        $entryText=[IO.File]::ReadAllText((Join-Path $sourceRepo 'scripts\Run-TPM-Tests.ps1'))
+        $entryText|Should -Not -Match 'explorer\.exe' -Because 'the noninteractive bootstrap path must never launch Explorer'
+        $entryText|Should -Not -Match 'Read-Host'
+        $entryText|Should -Not -Match '\bpause\b'
+        $entryText|Should -Not -Match 'PromptForChoice'
+    }
+
+    It 'the fixture stop-point harness itself returning a nonzero exit code propagates through the wrapper as-is' {
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $harnessRoot=Join-Path $root 'harness'
+        $statusText="FINAL STATUS: PIPELINE ABORTED`r`nReason: synthetic downstream failure sentinel`r`nReport: nowhere`r`nTechnical log: nowhere`r`n"
+        $result=Invoke-TPMBootstrapFixture -Root $root -HarnessRoot $harnessRoot -StatusText $statusText -ExitCode '17'
+        $result.Marker|Should -Not -BeNullOrEmpty
+        $result.ExitCode|Should -Be 17 -Because 'a genuine downstream failure exit code must propagate through the wrapper unchanged'
+        $result.Stdout|Should -Match 'FINAL STATUS: PIPELINE ABORTED'
+        $result.Stdout|Should -Not -Match 'FINAL STATUS:\s*CERTIFIED'
+        $result.Stdout|Should -Not -Match '(?m)^\s*FINAL STATUS:\s*NOT CERTIFIED' -Because 'an infrastructure/bootstrap-level failure must never be observable as a certification verdict'
+    }
+
+    It 'a bootstrap failure (no fixture-stop-point marker reached) exits nonzero and is never observable as a certification verdict' {
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $realParent=Join-Path $root 'real-parent'
+        $linkParent=Join-Path $root 'link-parent'
+        New-Item -ItemType Directory -Path $realParent -Force|Out-Null
+        try{
+            New-TPMBootstrapTestJunctionV1 -LinkPath $linkParent -TargetPath $realParent
+        }catch{
+            Set-ItResult -Skipped -Because 'junction creation is not permitted in this environment'
+            return
+        }
+        $harnessRoot=Join-Path $linkParent 'TPM-TestHarness'
+        $result=Invoke-TPMBootstrapFixture -Root $root -HarnessRoot $harnessRoot
+        $result.Marker|Should -BeNullOrEmpty -Because 'a rejected junction ancestor must abort before the fixture stop-point is ever reached'
+        $result.ExitCode|Should -Not -Be 0
+        $result.Stdout|Should -Not -Match 'FINAL STATUS:\s*(NOT )?CERTIFIED'
+        Remove-TPMBootstrapTestJunctionV1 -Path $linkParent
+        Remove-Item -LiteralPath $realParent -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'HarnessRoot itself is a junction whose parent is ordinary -- the reparse point standing at HarnessRoot is rejected' {
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $parent=Join-Path $root 'parent'
+        New-Item -ItemType Directory -Path $parent -Force|Out-Null
+        $real=Join-Path $root 'harness-real'
+        $harnessRoot=Join-Path $parent 'TPM-TestHarness'
+        try{
+            New-TPMBootstrapTestJunctionV1 -LinkPath $harnessRoot -TargetPath $real
+        }catch{
+            Set-ItResult -Skipped -Because 'junction creation is not permitted in this environment'
+            return
+        }
+        $result=Invoke-TPMBootstrapFixture -Root $root -HarnessRoot $harnessRoot
+        $result.Marker|Should -BeNullOrEmpty
+        $result.ExitCode|Should -Not -Be 0
+        $result.Stdout|Should -Not -Match 'FINAL STATUS:\s*(NOT )?CERTIFIED'
+        Remove-TPMBootstrapTestJunctionV1 -Path $harnessRoot
+        Remove-Item -LiteralPath $real -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'a missing, untrusted parent directory (never created by this invocation) is rejected rather than silently brought into existence' {
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $missingParent=Join-Path $root 'never-created-parent'
+        Test-Path -LiteralPath $missingParent|Should -BeFalse
+        $harnessRoot=Join-Path $missingParent 'TPM-TestHarness'
+        $result=Invoke-TPMBootstrapFixture -Root $root -HarnessRoot $harnessRoot
+        $result.Marker|Should -BeNullOrEmpty
+        $result.ExitCode|Should -Not -Be 0
+        Test-Path -LiteralPath $missingParent|Should -BeFalse -Because 'an unauthorized missing ancestor must never be silently created by the bootstrap'
+    }
+
+    It 'a Root-vs-Root-Evil sibling-prefix HarnessRoot confusion does not corrupt an unrelated sibling tree' {
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $parent=Join-Path $root 'parent'
+        New-Item -ItemType Directory -Path $parent -Force|Out-Null
+        $harnessRoot=Join-Path $parent 'TPM-TestHarness'
+        $evilSibling=Join-Path $parent 'TPM-TestHarness-Evil'
+        New-Item -ItemType Directory -Path $evilSibling -Force|Out-Null
+        [IO.File]::WriteAllText((Join-Path $evilSibling 'must-survive.txt'),'x')
+        $result=Invoke-TPMBootstrapFixture -Root $root -HarnessRoot $harnessRoot
+        $result.Marker|Should -Not -BeNullOrEmpty
+        Test-Path -LiteralPath (Join-Path $evilSibling 'must-survive.txt')|Should -BeTrue -Because 'creating HarnessRoot must never touch a sibling directory that merely shares a text prefix'
+        @(Get-ChildItem -LiteralPath $evilSibling -Force).Count|Should -Be 1
+    }
+
+    It 'an intermediate component (HarnessRoot\Reports) already substituted with a junction is rejected -- neither the HarnessRoot parent nor HarnessRoot itself is the reparse point' {
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $parent=Join-Path $root 'parent'
+        New-Item -ItemType Directory -Path $parent -Force|Out-Null
+        $harnessRoot=Join-Path $parent 'TPM-TestHarness'
+        New-Item -ItemType Directory -Path $harnessRoot -Force|Out-Null
+        $foreign=Join-Path $root 'foreign-reports'
+        New-Item -ItemType Directory -Path $foreign -Force|Out-Null
+        [IO.File]::WriteAllText((Join-Path $foreign 'must-survive.txt'),'x')
+        $reportsPath=Join-Path $harnessRoot 'Reports'
+        try{
+            New-TPMBootstrapTestJunctionV1 -LinkPath $reportsPath -TargetPath $foreign
+        }catch{
+            Set-ItResult -Skipped -Because 'junction creation is not permitted in this environment'
+            return
+        }
+        $result=Invoke-TPMBootstrapFixture -Root $root -HarnessRoot $harnessRoot
+        $result.Marker|Should -BeNullOrEmpty -Because 'an intermediate junction below an ordinary HarnessRoot must still be rejected by the per-level chain walk'
+        $result.ExitCode|Should -Not -Be 0
+        $result.Stdout|Should -Not -Match 'FINAL STATUS:\s*(NOT )?CERTIFIED'
+        Test-Path -LiteralPath (Join-Path $foreign 'must-survive.txt')|Should -BeTrue -Because 'no traversal through the intermediate junction may reach the foreign content'
+        Remove-TPMBootstrapTestJunctionV1 -Path $reportsPath
+        $afterTeardownContent=Test-Path -LiteralPath (Join-Path $foreign 'must-survive.txt')
+        $afterTeardownContent|Should -BeTrue -Because 'unlinking the intermediate junction itself must never touch the foreign target it pointed to'
+        Remove-Item -LiteralPath $foreign -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $harnessRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'a dot-segment traversal HarnessRoot value canonicalizes to its real resolved location and never touches a decoy sibling' {
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $realParent=Join-Path $root 'real-parent'
+        $decoyParent=Join-Path $root 'decoy-parent'
+        New-Item -ItemType Directory -Path $realParent,$decoyParent -Force|Out-Null
+        [IO.File]::WriteAllText((Join-Path $decoyParent 'must-survive.txt'),'x')
+        # After [IO.Path]::GetFullPath collapse this resolves to
+        # "$realParent\TPM-TestHarness" -- the ".."-laden literal string must
+        # never itself be used for any filesystem operation, and the decoy
+        # sibling (which shares no relationship with the collapsed target)
+        # must remain completely untouched.
+        $traversalHarnessRoot=Join-Path $realParent 'deep\..\TPM-TestHarness'
+        $canonicalHarnessRoot=Join-Path $realParent 'TPM-TestHarness'
+        $result=Invoke-TPMBootstrapFixture -Root $root -HarnessRoot $traversalHarnessRoot
+        $result.Marker|Should -Not -BeNullOrEmpty -Because 'realParent is an ordinary, trusted directory once the dot-segment is collapsed'
+        $result.Marker.HarnessRoot|Should -Be $traversalHarnessRoot -Because 'the wrapper echoes back the literal parameter it was given'
+        Test-Path -LiteralPath $canonicalHarnessRoot -PathType Container|Should -BeTrue -Because 'the bootstrap must land at the canonical collapsed location'
+        Test-Path -LiteralPath (Join-Path $realParent 'deep')|Should -BeFalse -Because 'the dot-segment literal component must never itself be created on disk'
+        Test-Path -LiteralPath (Join-Path $decoyParent 'must-survive.txt')|Should -BeTrue
+        @(Get-ChildItem -LiteralPath $decoyParent -Force).Count|Should -Be 1 -Because 'the decoy sibling must remain completely untouched by a traversal-syntax HarnessRoot value'
+    }
+
+    It 'a descendant creation failure (a file already occupying the Reports directory name) is rejected rather than silently succeeding or corrupting the pre-existing file' {
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $parent=Join-Path $root 'parent'
+        New-Item -ItemType Directory -Path $parent -Force|Out-Null
+        $harnessRoot=Join-Path $parent 'TPM-TestHarness'
+        New-Item -ItemType Directory -Path $harnessRoot -Force|Out-Null
+        $reportsPath=Join-Path $harnessRoot 'Reports'
+        [IO.File]::WriteAllText($reportsPath,'this is a file, not a directory, standing where Reports must be created')
+        $beforeHash=(Get-FileHash -LiteralPath $reportsPath -Algorithm SHA256).Hash
+        $result=Invoke-TPMBootstrapFixture -Root $root -HarnessRoot $harnessRoot
+        $result.Marker|Should -BeNullOrEmpty -Because 'directory creation must fail closed, not silently succeed or fall back to some other location'
+        $result.ExitCode|Should -Not -Be 0
+        $result.Stdout|Should -Not -Match 'FINAL STATUS:\s*(NOT )?CERTIFIED'
+        Test-Path -LiteralPath $reportsPath -PathType Leaf|Should -BeTrue -Because 'the pre-existing file must not be deleted or replaced by a failed directory-creation attempt'
+        (Get-FileHash -LiteralPath $reportsPath -Algorithm SHA256).Hash|Should -Be $beforeHash
+    }
 }

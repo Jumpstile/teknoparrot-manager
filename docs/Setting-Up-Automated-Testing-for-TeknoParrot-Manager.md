@@ -126,7 +126,7 @@ gh auth status
 Run in PowerShell 7 as the normal user:
 
 ```powershell
-Install-Module Pester -Scope CurrentUser -Force
+Install-Module Pester -Scope CurrentUser -Force -RequiredVersion 5.7.1
 Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
 ```
 
