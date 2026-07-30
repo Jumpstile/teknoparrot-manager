@@ -39,7 +39,13 @@ BeforeAll {
 
     # Top-level script-scope values the extracted functions read directly
     # (not captured by function-body extraction) -- mirrors production.
+    # $DisplayVersion in particular backs Get-ManagerDisplayVersion, which
+    # the main menu's banner (Get-ManagerVersionLine -> Show-MainMenu) reads
+    # unqualified; without it here, the main-menu Describe below fails with
+    # "$DisplayVersion cannot be retrieved" the moment the menu renders.
     $ScriptVersion = "1.0"
+    $ReleaseCandidateLabel = "RC3"
+    $DisplayVersion = "v$ScriptVersion $ReleaseCandidateLabel"
     $script:logPath = Join-Path $TestDrive "vbt-human-workflow.log"
 
     # Shared scenario dataset -- the same file a certification run and a

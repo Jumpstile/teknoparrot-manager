@@ -1,6 +1,6 @@
 #Requires -Module Pester
-$modulePath=Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\TPMCertification.Authority.psm1'
-Import-Module $modulePath -Force
+$script:modulePath=Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\TPMCertification.Authority.psm1'
+Import-Module $script:modulePath -Force
 Describe 'ADR-0155 Phase 1 compiled authority primitives' {
  It 'loads the complete V1 type set idempotently' {@(Initialize-TPMCertificationTypesV1).Count|Should -Be 10;@(Initialize-TPMCertificationTypesV1).Count|Should -Be 10}
  It 'has no public constructors or setters' {foreach($n in @('TPMScorePreviewV1','TPMSealedRunReaderV1','TPMFactSetV1','TPMFactV1','TPMEvidenceRecordV1','TPMScoreItemV1','TPMEligibilitySnapshotV1','TPMPublicationCandidateV1','TPMPublicationOutcomeV1','TPMFinalOutcomeV1')){$t=('Jumpstile.TPM.Certification.V1.'+$n)-as[type];@($t.GetConstructors()).Count|Should -Be 0;@($t.GetProperties()| Where-Object CanWrite).Count|Should -Be 0}}

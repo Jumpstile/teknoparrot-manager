@@ -1590,6 +1590,55 @@ Describe "Test-EggmanDatReleaseUrl" {
     }
 }
 
+Describe "Get-TpmHttpStatusCodeFromError" {
+    # Review round 2 (Luna Max): every one of these shapes must resolve
+    # without throwing, and without broadly swallowing anything the
+    # message-based fallback could still recover. Fixtures are plain
+    # pscustomobjects standing in for $ErrorRecord -- the function only
+    # ever reads .Exception, .Exception.Message, and (optionally)
+    # .Exception.Response/.Response.StatusCode, so a pscustomobject shaped
+    # the same way as a real ErrorRecord/Exception exercises the same
+    # property-existence code paths as the real .NET types.
+
+    It "returns 0 for an exception type with no Response property at all (e.g. a plain RuntimeException from a mock's throw)" {
+        $errorRecord = $null
+        try { throw "bits failed" } catch { $errorRecord = $_ }
+        Get-TpmHttpStatusCodeFromError -ErrorRecord $errorRecord | Should -Be 0
+    }
+
+    It "returns 0 (not a crash) when Response exists but is explicitly null" {
+        $fake = [pscustomobject]@{ Exception = [pscustomobject]@{ Response = $null; Message = 'transport failure' } }
+        { Get-TpmHttpStatusCodeFromError -ErrorRecord $fake } | Should -Not -Throw
+        Get-TpmHttpStatusCodeFromError -ErrorRecord $fake | Should -Be 0
+    }
+
+    It "returns 0 (not a crash) when Response is present but has no StatusCode property at all" {
+        $fake = [pscustomobject]@{ Exception = [pscustomobject]@{ Response = [pscustomobject]@{ Body = 'oops' }; Message = 'transport failure, no status' } }
+        { Get-TpmHttpStatusCodeFromError -ErrorRecord $fake } | Should -Not -Throw
+        Get-TpmHttpStatusCodeFromError -ErrorRecord $fake | Should -Be 0
+    }
+
+    It "extracts a plain numeric StatusCode from Response" {
+        $fake = [pscustomobject]@{ Exception = [pscustomobject]@{ Response = [pscustomobject]@{ StatusCode = 404 }; Message = 'boom' } }
+        Get-TpmHttpStatusCodeFromError -ErrorRecord $fake | Should -Be 404
+    }
+
+    It "extracts an enum-like StatusCode (e.g. System.Net.HttpStatusCode) by casting it to its underlying integer" {
+        $fake = [pscustomobject]@{ Exception = [pscustomobject]@{ Response = [pscustomobject]@{ StatusCode = [System.Net.HttpStatusCode]::NotFound }; Message = 'boom' } }
+        Get-TpmHttpStatusCodeFromError -ErrorRecord $fake | Should -Be 404
+    }
+
+    It "falls back to extracting a status code embedded only in the exception message when there is no Response at all" {
+        $fake = [pscustomobject]@{ Exception = [pscustomobject]@{ Message = 'Response status code does not indicate success: 404 (Not Found).' } }
+        Get-TpmHttpStatusCodeFromError -ErrorRecord $fake | Should -Be 404
+    }
+
+    It "returns 0 when there is no status code anywhere -- Response, StatusCode, and message all lack one" {
+        $fake = [pscustomobject]@{ Exception = [pscustomobject]@{ Message = 'DNS resolution failed' } }
+        Get-TpmHttpStatusCodeFromError -ErrorRecord $fake | Should -Be 0
+    }
+}
+
 Describe "Invoke-TpmDownload method selection and partial-file cleanup" {
     BeforeAll {
         Mock Write-Log {}
@@ -2092,8 +2141,18 @@ Describe "Invoke-EggmanDatDownloadInteractive cache reuse" {
     }
 
     It "does not re-download when the target file already matches the release size" {
+        # Review round 3: this must ask Get-EggmanDatDefaultSavePath for the
+        # expected path, not assume the current directory directly -- the
+        # production function falls back to the current directory only when
+        # $PSScriptRoot is blank, and assuming that unconditionally silently
+        # diverged from the real default under Windows PowerShell 5.1
+        # (confirmed: Invoke-EggmanDatDownloadInteractive cache reuse failed
+        # there because the fixture was seeded at a different path than the
+        # one production actually checked). Asking the same production
+        # function both sides now share makes them agree by construction,
+        # regardless of how $PSScriptRoot resolves in either engine.
         $fileName = "TeknoParrot.Collection.RomVault.zip"
-        $defaultPath = Join-Path (Get-Location).Path $fileName
+        $defaultPath = Get-EggmanDatDefaultSavePath -FileName $fileName
         try {
             Set-Content -LiteralPath $defaultPath -Value "12345" -NoNewline
             $rel = [pscustomobject]@{

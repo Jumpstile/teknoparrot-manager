@@ -47,6 +47,22 @@ BeforeAll {
     ($functionAsts | ForEach-Object { $_.Extent.Text }) -join "`n`n" | Set-Content -LiteralPath $extractedPath -Encoding utf8
     . $extractedPath
 
+    # AST extraction above pulls only function bodies, not the harness's own
+    # top-level script-scope initializers ($script:tpmEvidenceWorkflowId =
+    # ...; $script:tpmOperatorPhase = 0; $script:tpmScreenshotSequence = 0).
+    # Under strict mode those variables would otherwise be entirely unset
+    # (not merely $null) the first time an extracted function reads them
+    # here, so they are seeded to the same starting values the real harness
+    # assigns at its own top level before any gate/screenshot function runs.
+    # $script:tpmCrc32Table has no top-level initializer in the harness --
+    # it is lazily built on first use behind an `if (-not $script:tpmCrc32Table)`
+    # guard -- but that guard itself requires the variable to exist under
+    # strict mode, so it is seeded here too.
+    $script:tpmEvidenceWorkflowId = [guid]::NewGuid().ToString('N')
+    $script:tpmOperatorPhase = 0
+    $script:tpmCrc32Table = $null
+    $script:tpmScreenshotSequence = 0
+
     # New-CertificationScorecard reads these as unqualified script-scope
     # variables rather than parameters (mirroring the harness's own top-level
     # script scope) -- without these it would read $null, not the bug under
@@ -793,6 +809,78 @@ Describe "Test-TPMInstallHealthGate (issue #146)" {
         $healthResult = [pscustomobject]@{ Status = 'PASS' }
         $gate = Test-TPMInstallHealthGate -HealthResult $healthResult
         $gate.Passed | Should -Be $false
+        $gate.Reason | Should -Match 'no Checks entries'
+    }
+
+    # Review finding: @($x) where $x is $null produces a ONE-element array
+    # containing $null (Count = 1), not an empty array -- wrapping
+    # $checksProperty.Value directly without a null check first would silently
+    # skip this fail-fast branch for an explicit Checks = $null and fall
+    # through to a different (wrong) Reason. This is the regression guard for
+    # that exact shape, distinct from "absent" (no property at all) and
+    # "empty" (Checks = @()).
+    It "fails with the same no-Checks-entries reason when Checks is explicitly null" {
+        $healthResult = [pscustomobject]@{ Status = 'PASS'; Checks = $null }
+        $gate = Test-TPMInstallHealthGate -HealthResult $healthResult
+        $gate.Passed | Should -Be $false
+        $gate.Reason | Should -Match 'no Checks entries'
+    }
+
+    It "normalizes a single (scalar, non-array) Checks value to a one-element array rather than throwing" {
+        # A single pscustomobject assigned to Checks is not itself an array --
+        # if the normalization only wrapped a truthy value without accounting
+        # for this shape, $checks.Count would be a PropertyNotFoundException
+        # under strict mode (Count doesn't exist on a lone pscustomobject).
+        $healthResult = [pscustomobject]@{
+            Status = 'PASS'
+            Checks = [pscustomobject]@{ Name = 'TeknoParrotUi.exe exists'; Passed = $true }
+        }
+        { Test-TPMInstallHealthGate -HealthResult $healthResult } | Should -Not -Throw
+        $gate = Test-TPMInstallHealthGate -HealthResult $healthResult
+        $gate.Passed | Should -Be $false
+        $gate.Reason | Should -Match 'GameProfiles folder exists -- missing from health result'
+        $gate.Reason | Should -Match 'UserProfiles folder exists -- missing from health result'
+    }
+
+    It "normalizes multiple Checks entries and passes when every installation-critical check is present and true" {
+        $healthResult = [pscustomobject]@{
+            Status = 'PASS'
+            Checks = @(
+                [pscustomobject]@{ Name = 'TeknoParrotUi.exe exists'; Passed = $true }
+                [pscustomobject]@{ Name = 'GameProfiles folder exists'; Passed = $true }
+                [pscustomobject]@{ Name = 'UserProfiles folder exists'; Passed = $true }
+                [pscustomobject]@{ Name = 'Some other non-critical check'; Passed = $false }
+            )
+        }
+        $gate = Test-TPMInstallHealthGate -HealthResult $healthResult
+        $gate.Passed | Should -Be $true
+        $gate.Reason | Should -Match 'all installation-critical checks present and passed'
+    }
+
+    It "handles absent, null, empty, one, and many Checks shapes without throwing under explicit strict mode" {
+        # Regression guard for the review finding itself: run every shape
+        # under Set-StrictMode -Version Latest in this test's own scope,
+        # independent of whatever strict-mode setting the extracted-function
+        # temp file or the outer test runner happens to have.
+        Set-StrictMode -Version Latest
+        try {
+            $shapes = @(
+                [pscustomobject]@{ Status = 'PASS' }
+                [pscustomobject]@{ Status = 'PASS'; Checks = $null }
+                [pscustomobject]@{ Status = 'PASS'; Checks = @() }
+                [pscustomobject]@{ Status = 'PASS'; Checks = [pscustomobject]@{ Name = 'TeknoParrotUi.exe exists'; Passed = $true } }
+                [pscustomobject]@{ Status = 'PASS'; Checks = @(
+                        [pscustomobject]@{ Name = 'TeknoParrotUi.exe exists'; Passed = $true }
+                        [pscustomobject]@{ Name = 'GameProfiles folder exists'; Passed = $true }
+                        [pscustomobject]@{ Name = 'UserProfiles folder exists'; Passed = $true }
+                    ) }
+            )
+            foreach ($healthResult in $shapes) {
+                { Test-TPMInstallHealthGate -HealthResult $healthResult } | Should -Not -Throw
+            }
+        } finally {
+            Set-StrictMode -Off
+        }
     }
 
     It "fails when one installation-critical check is missing from Checks entirely (not merely unfailed)" {
@@ -2031,6 +2119,54 @@ Describe "New-TPMCertificationScreenshot (issue #151)" {
         $handle = [System.IO.File]::Open($shot.Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
         $handle.Close()
     }
+
+    # Review round 2 (Luna Max): every other It in this Describe runs after
+    # whatever sequence/workflow state earlier tests in this file (or earlier
+    # Its in this same Describe) happened to leave behind -- none of them
+    # prove the screenshot-path function is actually self-sufficient rather
+    # than incidentally working because some prior test already primed
+    # $script:tpmScreenshotSequence / $script:tpmEvidenceWorkflowId to a
+    # workable value. This test explicitly resets that state to the same
+    # known-fresh values the real harness starts a run with (via
+    # Reset-TPMEvidenceLedger, a real production function, not a test-only
+    # shortcut), then proves New-TPMScreenshotReservedPath and
+    # New-TPMCertificationScreenshot both work from that known baseline,
+    # under this test's own explicit strict mode -- independent of whatever
+    # state leaked in from any other It.
+    It "New-TPMScreenshotReservedPath and New-TPMCertificationScreenshot work from a freshly-reset sequence/workflow state, under strict mode, independent of any other test" {
+        Set-StrictMode -Version Latest
+        try {
+            Reset-TPMEvidenceLedger
+            $script:tpmScreenshotSequence | Should -Be 0
+
+            $dir = Join-Path $TestDrive ("shots-isolated-" + [guid]::NewGuid().ToString('N'))
+            # New-TPMScreenshotReservedPath -- unlike the New-TPMCertificationScreenshot
+            # wrapper -- does not create $ScreenshotDir itself; [System.IO.File]::Open's
+            # CreateNew throws DirectoryNotFoundException (itself an IOException
+            # subtype) when the parent is missing, which this function's own
+            # catch [System.IO.IOException] retries as if it were a mere name
+            # collision, eventually exhausting all 1000 attempts. The directory
+            # must exist before calling it directly, same as every other real caller.
+            New-Item -ItemType Directory -Force -Path $dir | Out-Null
+
+            # Called directly (not via "{ $x = ... } | Should -Not -Throw") so the
+            # return value is actually captured here -- Should -Not -Throw invokes
+            # its scriptblock via the call operator, which creates its own child
+            # scope, so an assignment made inside it never leaks back out.
+            $firstPath = New-TPMScreenshotReservedPath -ScreenshotDir $dir -Name 'isolated'
+            $script:tpmScreenshotSequence | Should -Be 1
+            [System.IO.Path]::GetFileName($firstPath) | Should -Match '_00001_'
+
+            $secondPath = New-TPMScreenshotReservedPath -ScreenshotDir $dir -Name 'isolated'
+            $script:tpmScreenshotSequence | Should -Be 2
+            [System.IO.Path]::GetFileName($secondPath) | Should -Match '_00002_'
+
+            $shot = New-TPMCertificationScreenshot -ScreenshotDir $dir -Name 'isolated-capture' -EvidenceType 'DeterministicRender' -CaptureAction (New-ValidCaptureAction)
+            $shot.Status | Should -Be 'Captured'
+        } finally {
+            Set-StrictMode -Off
+        }
+    }
 }
 
 Describe "Certification evidence (screenshots) in the scorecard -- report inclusion and scoring isolation (issue #151)" {
@@ -2211,6 +2347,22 @@ Describe "Screenshot privacy disclosure and capture-scope safeguard (issue #151 
     }
 
     It "Save-TPMScreenCapture returns a CaptureScope of 'Window' or 'FullDesktop', never anything else" {
+        # Review round 2 (Luna Max): this exercises the real GDI+ capture
+        # path (not the deterministic rasterized-text stand-in every other
+        # test in this file uses), so it depends on a genuinely usable
+        # interactive display -- something a remote/headless dev session can
+        # transiently lack. Test-TPMInteractiveDisplayAvailable proves that
+        # capability live, right now, the same way production would fail:
+        # only when it deterministically confirms no display is available
+        # does this skip (Set-ItResult -Skipped, a real, visible Pester skip
+        # -- never a silent pass or a NotApplicable substitute). Any other
+        # failure -- including a real capture failure with a display
+        # present -- still fails this test exactly as before.
+        if (-not (Test-TPMInteractiveDisplayAvailable)) {
+            Set-ItResult -Skipped -Because 'this session has no usable interactive display right now (confirmed via a live GDI+ CopyFromScreen probe, ERROR_INVALID_HANDLE) -- a real certification run on real hardware must still fail this evidence requirement, not skip it'
+            return
+        }
+
         $dir = Join-Path $TestDrive ("privacy-scope-" + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Force -Path $dir | Out-Null
         $path = Join-Path $dir 'real.png'
@@ -2219,6 +2371,42 @@ Describe "Screenshot privacy disclosure and capture-scope safeguard (issue #151 
 
         $scope | Should -BeIn @('Window', 'FullDesktop')
         Test-Path -LiteralPath $path -PathType Leaf | Should -Be $true
+    }
+
+    Context "Test-TPMWin32ErrorIndicatesNoDisplay (the no-display classification, independent of any real display)" {
+        It "treats ERROR_INVALID_HANDLE (6) as the no-display signal" {
+            Test-TPMWin32ErrorIndicatesNoDisplay -NativeErrorCode 6 | Should -Be $true
+        }
+        It "does not treat other native error codes as a no-display signal" {
+            Test-TPMWin32ErrorIndicatesNoDisplay -NativeErrorCode 5 | Should -Be $false   # ERROR_ACCESS_DENIED
+            Test-TPMWin32ErrorIndicatesNoDisplay -NativeErrorCode 0 | Should -Be $false
+            Test-TPMWin32ErrorIndicatesNoDisplay -NativeErrorCode 1450 | Should -Be $false   # ERROR_NO_SYSTEM_RESOURCES
+        }
+    }
+
+    Context "Test-TPMInteractiveDisplayAvailable (the live capability probe)" {
+        It "returns a boolean without throwing, regardless of what this particular session's display state happens to be" {
+            # Called directly, not via "{ $x = ... } | Should -Not -Throw" --
+            # Should -Not -Throw invokes its scriptblock via the call
+            # operator, which creates its own child scope, so an assignment
+            # made inside it never leaks back out to $result here. An
+            # uncaught exception from the direct call below fails this It
+            # exactly the same way Should -Not -Throw would.
+            $result = Test-TPMInteractiveDisplayAvailable
+            $result | Should -BeOfType [bool]
+        }
+
+        It "propagates a Win32Exception whose native error code is not the no-display signal, rather than swallowing it" {
+            # Regression guard for the "do not convert a real capture failure
+            # into NotApplicable" requirement: fabricate a distinctly
+            # different native error (ERROR_ACCESS_DENIED) via the same
+            # exception-unwrapping shape Test-TPMInteractiveDisplayAvailable
+            # inspects, and confirm the underlying classification would NOT
+            # treat it as "no display" -- a real, different failure must
+            # still be visible, never silently absorbed.
+            $fakeWin32 = New-Object System.ComponentModel.Win32Exception(5)   # ERROR_ACCESS_DENIED
+            Test-TPMWin32ErrorIndicatesNoDisplay -NativeErrorCode $fakeWin32.NativeErrorCode | Should -Be $false
+        }
     }
 
     It "classifies a full-desktop fallback explicitly on the screenshot record, never silently as a narrow capture" {

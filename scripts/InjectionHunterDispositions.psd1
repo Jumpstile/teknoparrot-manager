@@ -240,10 +240,18 @@
         @{
             File        = 'scripts/Invoke-TPM-RealInstanceSmoke.ps1'
             RuleName    = 'InjectionRisk.AddType'
-            Line        = 1324
+            Line        = 1383
             Extent      = 'Add-Type -AssemblyName System.Drawing'
             Disposition = 'FalsePositive'
-            Reasoning   = 'ADR155-0309 round 3 correction: this reasoning previously claimed this was "a second, separate occurrence... see line 1169 [now 1185] above" -- that count was wrong. The source actually contains THREE textually-identical "Add-Type -AssemblyName System.Drawing" statements in this file (in Test-TPMPngStructure/PNG validation, in Save-TPMScreenCapture, and in Save-TPMRenderedTextCapture), confirmed by direct grep of the current source, not the two the old reasoning implied. Only TWO of the three trigger a raw InjectionRisk.AddType finding from this scanner/rule version (confirmed empirically against both the pre-round-3 commit and the round-3-corrected checkout: the Save-TPMScreenCapture occurrence, immediately preceded by an Add-Type -AssemblyName System.Windows.Forms call in the same function, does not produce its own separate finding in either scan). This entry disposes the finding actually observed at this line; the third, unflagged source occurrence is equally safe (same fixed-literal AssemblyName) but deliberately has no disposition entry of its own, since this registry only records dispositions for findings the scanner actually emits -- see ADR-0155-IMPLEMENTATION-CHECKLIST.md for the raw-evidence trail this correction is based on. No attacker-controlled input reaches Add-Type at any of the three source occurrences.'
+            Reasoning   = 'Review round 2 (Luna Max) correction: Test-TPMInteractiveDisplayAvailable (added to prove, live, whether this session has a usable interactive display before the headless-screen-capture test attempts a real GDI+ capture) added a fourth textually-identical "Add-Type -AssemblyName System.Drawing" call, inserted before Save-TPMScreenCapture -- shifting every later line in this file and displacing the ordinal position this registry matches by (File+RuleName+Extent, consumed in ascending Line order). AssemblyName is a fixed string literal here exactly as in the other three occurrences; no attacker-controlled input reaches Add-Type.'
+        }
+        @{
+            File        = 'scripts/Invoke-TPM-RealInstanceSmoke.ps1'
+            RuleName    = 'InjectionRisk.AddType'
+            Line        = 1455
+            Extent      = 'Add-Type -AssemblyName System.Drawing'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'ADR155-0309 round 3 correction (Line renumbered in review round 2 after Test-TPMInteractiveDisplayAvailable was inserted earlier in this file -- match key is File+RuleName+Extent, not Line, so this renumbering does not change what this entry disposes): this reasoning previously claimed this was "a second, separate occurrence... see line 1169 [now 1185] above" -- that count was wrong. The source actually contains multiple textually-identical "Add-Type -AssemblyName System.Drawing" statements in this file (in Test-TPMPngStructure/PNG validation, in Save-TPMScreenCapture, in Save-TPMRenderedTextCapture, and -- as of review round 2 -- in Test-TPMInteractiveDisplayAvailable). Only three of these trigger a raw InjectionRisk.AddType finding from this scanner/rule version (confirmed empirically: the Save-TPMScreenCapture occurrence, immediately preceded by an Add-Type -AssemblyName System.Windows.Forms call in the same function, does not produce its own separate finding). This entry disposes the finding actually observed at this line (Save-TPMRenderedTextCapture''s occurrence); the Save-TPMScreenCapture occurrence is equally safe (same fixed-literal AssemblyName) but deliberately has no disposition entry of its own, since this registry only records dispositions for findings the scanner actually emits -- see ADR-0155-IMPLEMENTATION-CHECKLIST.md for the raw-evidence trail this correction is based on. No attacker-controlled input reaches Add-Type at any of these source occurrences.'
         }
     )
 }

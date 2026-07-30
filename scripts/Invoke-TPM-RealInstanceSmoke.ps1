@@ -574,7 +574,34 @@ function Test-TPMInstallHealthGate {
         return [pscustomobject]@{ Passed = $false; Reason = $reason }
     }
 
-    $checks = @($HealthResult.Checks)
+    # $HealthResult.Checks may be entirely absent (not merely empty/null) on a
+    # malformed health result -- under strict mode, dot-accessing a property
+    # that doesn't exist at all throws PropertyNotFoundException before any
+    # wrap below ever runs. Checking via PSObject first treats a missing
+    # Checks property the same as an explicitly null/empty one.
+    #
+    # The wrap itself must happen AFTER a null check, not by wrapping
+    # $checksProperty.Value directly: @($null) is a one-element array
+    # containing $null (Count = 1), not an empty array.
+    #
+    # Review round 2 (Luna Max): the null check must also assign $checks
+    # directly inside each branch of a real if/else STATEMENT, not via
+    # "$checks = if (...) { @() } else { ... }". Capturing @() as the
+    # output of an if/else used as an expression collapses it to $null --
+    # PowerShell only preserves an empty array through a *direct*
+    # assignment, not through pipeline/output-stream capture of a block
+    # that emits zero objects. Without strict mode this accidentally still
+    # "worked" only because bare $null.Count conveniently returns 0 -- but
+    # that convenience is itself suppressed under Set-StrictMode, so the
+    # collapsed-to-null $checks then threw PropertyNotFoundException on
+    # .Count instead of the fail-fast branch below ever being reached.
+    $checksProperty = $HealthResult.PSObject.Properties['Checks']
+    $rawChecks = if ($checksProperty) { $checksProperty.Value } else { $null }
+    if ($null -eq $rawChecks) {
+        $checks = @()
+    } else {
+        $checks = @($rawChecks)
+    }
     if ($checks.Count -eq 0) {
         return [pscustomobject]@{ Passed = $false; Reason = 'health result has no Checks entries' }
     }
@@ -1318,6 +1345,62 @@ function Get-TPMConsoleWindowRect {
     }
 }
 
+# Review round 2 (Luna Max): distinguishes "this native error IS the signal
+# for no usable interactive display" from every other Win32Exception, as its
+# own pure, independently-testable decision -- kept separate from the actual
+# GDI+ probe below so the classification itself can be exercised with a
+# fabricated exception, without needing a real (or genuinely absent) display
+# to hit either branch. ERROR_INVALID_HANDLE (6) is exactly the native error
+# CopyFromScreen raises when there is no capturable desktop/window station
+# (confirmed by direct reproduction in a non-interactive session). Any other
+# native error code is a different, real problem and must not be classified
+# as "no display".
+function Test-TPMWin32ErrorIndicatesNoDisplay {
+    param([int]$NativeErrorCode)
+    return ($NativeErrorCode -eq 6)   # ERROR_INVALID_HANDLE
+}
+
+# Deterministically proves whether THIS session currently has a usable
+# interactive display, by attempting the exact real primitive
+# Save-TPMScreenCapture depends on (GDI+ Graphics.CopyFromScreen), at the
+# smallest possible size. This is a live capability probe, not a static
+# assumption -- a remote/headless session's desktop can transiently gain or
+# lose screen-capture capability (confirmed: the same probe that failed with
+# "The handle is invalid" in one run of this environment succeeded moments
+# later in another), so a one-time environment check taken once and cached
+# would go stale.
+#
+# Only the specific ERROR_INVALID_HANDLE signal (via
+# Test-TPMWin32ErrorIndicatesNoDisplay) is treated as "no display, safe to
+# skip" -- PowerShell wraps a thrown .NET exception from a method call in a
+# MethodInvocationException, so the real Win32Exception is unwrapped from
+# .InnerException before classifying it. Any other exception (a different
+# Win32 error, or an unrelated failure entirely) is NOT a "no display"
+# signal and is allowed to propagate -- a real certification run whose
+# display access fails for some other, genuine reason must still fail
+# loudly, never be silently absorbed as "environment doesn't support this".
+function Test-TPMInteractiveDisplayAvailable {
+    Add-Type -AssemblyName System.Drawing
+    $bitmap = New-Object System.Drawing.Bitmap 1, 1
+    try {
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        try {
+            $graphics.CopyFromScreen(0, 0, 0, 0, (New-Object System.Drawing.Size 1, 1))
+            return $true
+        } catch {
+            $inner = $_.Exception.InnerException
+            if ($inner -is [System.ComponentModel.Win32Exception] -and (Test-TPMWin32ErrorIndicatesNoDisplay -NativeErrorCode $inner.NativeErrorCode)) {
+                return $false
+            }
+            throw
+        } finally {
+            $graphics.Dispose()
+        }
+    } finally {
+        $bitmap.Dispose()
+    }
+}
+
 # Real capture action for an on-screen console moment (certification suite
 # running, final result, requested/effective root evidence) -- grabs the
 # certification console's own window when Get-TPMConsoleWindowRect can
@@ -1325,9 +1408,10 @@ function Get-TPMConsoleWindowRect {
 # screen, explicitly classified as such, only when it cannot (CaptureScope
 # = 'FullDesktop'). Returns the scope string so New-TPMCertificationScreenshot
 # can record which one actually happened -- never silently reported as a
-# narrow capture when it was not. Never called from tests; production-only,
-# since it requires a live display session this harness's own CI run does
-# not have.
+# narrow capture when it was not. In production this must keep failing
+# loudly (never NotApplicable) when a real certification run cannot capture
+# required evidence -- Test-TPMInteractiveDisplayAvailable above exists for
+# the *test's* own runtime skip decision, and is never consulted here.
 function Save-TPMScreenCapture {
     param([string]$Path)
     Add-Type -AssemblyName System.Windows.Forms
