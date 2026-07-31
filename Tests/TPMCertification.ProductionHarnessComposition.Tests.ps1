@@ -69,7 +69,7 @@ BeforeAll {
         [IO.File]::WriteAllText((Join-Path $Report 'InstallHealth\InstallHealth.json'), '{}')
         $health = [pscustomobject]@{ Checks = @([pscustomobject]@{ Name = 'TeknoParrotUi.exe exists'; Passed = $true }, [pscustomobject]@{ Name = 'GameProfiles folder exists'; Passed = $true }, [pscustomobject]@{ Name = 'UserProfiles folder exists'; Passed = $true }) }
         $results = [pscustomobject]@{
-            SmokeMode = $true; Checks = @([pscustomobject]@{ Name = 'Repository available'; Passed = $true }); GitStatus = '(clean)'
+            SmokeMode = $true; Checks = @([pscustomobject]@{ Name = 'Repository available'; Passed = $true; Details = 'fixture repository is available' }); GitStatus = '(clean)'
             Pester = [pscustomobject]@{ Total = 2; Passed = $(if ($ForceIneligible) { 1 } else { 2 }); Failed = $(if ($ForceIneligible) { 1 } else { 0 }); Skipped = 0; NotRun = 0 }; PesterVersion = '5.7.1'; PowerShellVersion = '7.6.3'
             PSScriptAnalyzerFindings = 999; PSScriptAnalyzerVersion = 'decoy-legacy-value'
             Backup = [pscustomobject]@{ UserProfiles = $true; GameProfiles = $false }
@@ -250,7 +250,7 @@ Describe 'ADR-0155 production harness composition seam (ADR155-0309 Checkpoint B
         $authority = New-TPMProductionWorkflowAuthorityV1 -Mode Smoke -EvidenceRoot $screenshotDir -ReportRoot $report -PngValidator $validator
         { & $authority RecordFact ([ordered]@{Identifier='NotARealFactIdentifier';Applicable=$true;Data=[ordered]@{}}) } | Should -Throw
         (Test-Path -LiteralPath $destination -PathType Container) | Should -Be $true
-        (Get-ChildItem -LiteralPath $destination -Recurse -File).Count | Should -Be 0
+        @(Get-ChildItem -LiteralPath $destination -Recurse -File).Count | Should -Be 0
     }
 
     It 'an exception injected after commit but before the final outcome (through the harness''s own real authority) leaves no authoritative bundle' {
@@ -269,7 +269,7 @@ Describe 'ADR-0155 production harness composition seam (ADR155-0309 Checkpoint B
         $errorRecord | Should -Not -BeNullOrEmpty
         $errorRecord.Exception.Message | Should -Match '^POST_COMMIT_ROLLBACK_SUCCEEDED:'
         $destination = Join-Path $root 'destination'
-        (Get-ChildItem -LiteralPath $destination -Recurse -File).Count | Should -Be 0
+        @(Get-ChildItem -LiteralPath $destination -Recurse -File).Count | Should -Be 0
     }
 
     It 'the harness source never reaches Shadow.psm1 or any removed legacy decision/publication path (problem-class sweep)' {

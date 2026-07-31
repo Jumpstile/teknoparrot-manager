@@ -153,7 +153,7 @@ Describe "Virtual Beta Tester: real-world messy environment simulation (issue #8
         { $script:foundFiles = Get-GameFiles -folder $fixture.InstallFolder } | Should -Not -Throw
 
         $exeNames = @($script:foundFiles | ForEach-Object { $_.Name })
-        ($exeNames | Where-Object { $_ -eq 'ALIENS.exe' }).Count | Should -Be 2 -Because "both the clean folder and the duplicate/oddly-named copy have a real ALIENS.exe"
+        @($exeNames | Where-Object { $_ -eq 'ALIENS.exe' }).Count | Should -Be 2 -Because "both the clean folder and the duplicate/oddly-named copy have a real ALIENS.exe"
         $exeNames | Should -Not -Contain 'readme.txt' -Because "the incomplete extraction has no recognized game file, only a stray text file"
         $exeNames | Should -Contain 'TIMECRS3.exe' -Because "a RetroBat-suffixed (.teknoparrot) folder must scan the same as any other -- the suffix lives on the folder, not the exe"
     }
@@ -167,7 +167,7 @@ Describe "Virtual Beta Tester: real-world messy environment simulation (issue #8
         # The empty folder existing elsewhere in the tree must not make the
         # whole-library scan skip or crash on real games sitting alongside it.
         $wholeLibraryResult = Get-GameFiles -folder $fixture.InstallFolder
-        ($wholeLibraryResult | Where-Object { $_.Name -eq 'ALIENS.exe' }).Count | Should -Be 2
+        @($wholeLibraryResult | Where-Object { $_.Name -eq 'ALIENS.exe' }).Count | Should -Be 2
     }
 
     It "flags the incomplete GameProfile's missing required elements without crashing, and does not flag the complete one" {

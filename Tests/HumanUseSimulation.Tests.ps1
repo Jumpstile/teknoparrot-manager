@@ -12,8 +12,8 @@ Describe "Human-use simulation metadata" {
         @($scenarios).Count | Should -BeGreaterThan 0
 
         $ids = @($scenarios | ForEach-Object { $_.id })
-        ($ids | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count | Should -Be 0
-        ($ids | Select-Object -Unique).Count | Should -Be $ids.Count
+        @($ids | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count | Should -Be 0
+        @($ids | Select-Object -Unique).Count | Should -Be $ids.Count
     }
 
     It "requires core usability fields on every human-use scenario" {

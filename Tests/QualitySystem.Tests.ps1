@@ -14,8 +14,8 @@ Describe "Quality engineering system metadata" {
         @($cases).Count | Should -BeGreaterThan 0
 
         $ids = @($cases | ForEach-Object { $_.id })
-        ($ids | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count | Should -Be 0
-        ($ids | Select-Object -Unique).Count | Should -Be $ids.Count
+        @($ids | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count | Should -Be 0
+        @($ids | Select-Object -Unique).Count | Should -Be $ids.Count
     }
 
     It "requires core fields on every golden normalization case" {

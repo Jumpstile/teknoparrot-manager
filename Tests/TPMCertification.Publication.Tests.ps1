@@ -117,7 +117,7 @@ Describe 'ADR-0155 Phase 3 publication staging builder' {
   $second.FailureMessage|Should -Match 'PATH_ALREADY_EXISTS'
   $afterHashes=@($first.Files|ForEach-Object{Get-TPMSha256HexV1 -Bytes ([IO.File]::ReadAllBytes($_.Path))})
   $afterHashes|Should -Be $beforeHashes
-  (Get-ChildItem -LiteralPath $first.StagingDirectory -File).Count|Should -Be 7
+  @(Get-ChildItem -LiteralPath $first.StagingDirectory -File).Count|Should -Be 7
  }
 
  It 'rolls back only the files it wrote when a mid-bundle write collides with a pre-existing file, leaving the collider intact' {
@@ -145,7 +145,7 @@ Describe 'ADR-0155 Phase 3 publication staging builder' {
   $staging=Invoke-StagingV1 $bundle $stagingParent
   $staging.FailureCode|Should -Be 'PROMOTION_FAILED'
   Test-Path -LiteralPath $runDir|Should -Be $true
-  (Get-ChildItem -LiteralPath $runDir -File).Count|Should -Be 1
+  @(Get-ChildItem -LiteralPath $runDir -File).Count|Should -Be 1
  }
 
  It 'rejects a staging directory that already exists as a reparse point' {
@@ -187,7 +187,7 @@ Describe 'ADR-0155 Phase 3 publication staging builder' {
   $tamperedManifest=[pscustomobject]@{FileName=$bundle.Manifest.FileName;Json=$bundle.Manifest.Json;Bytes=$divergentBytes;ByteLength=$divergentBytes.Length}
   $tamperedMarker=New-TPMCommitMarkerReportV1 -Manifest $tamperedManifest
   {New-TPMPublicationStagingV1 -StagingParentRoot $stagingParent -EligibilityReport $bundle.EligibilityReport -PublicationReport $bundle.PublicationReport -FinalOutcomeReport $bundle.FinalOutcomeReport -ScorecardReport $bundle.ScorecardReport -ValidationReport $bundle.ValidationReport -Manifest $tamperedManifest -Marker $tamperedMarker}|Should -Throw '*PUBLISH_INVALID*Manifest.Bytes*BOM-less UTF-8*'
-  (Get-ChildItem -LiteralPath $stagingParent -Recurse -File -ErrorAction SilentlyContinue).Count|Should -Be 0
+  @(Get-ChildItem -LiteralPath $stagingParent -Recurse -File -ErrorAction SilentlyContinue).Count|Should -Be 0
  }
 
  It 'rejects a Marker whose Bytes diverge from its own Json, and performs zero filesystem writes' {
@@ -195,7 +195,7 @@ Describe 'ADR-0155 Phase 3 publication staging builder' {
   $divergentBytes=[Text.Encoding]::UTF8.GetBytes('TAMPERED, NOT THE REAL MARKER JSON')
   $tamperedMarker=[pscustomobject]@{FileName=$bundle.Marker.FileName;Json=$bundle.Marker.Json;Bytes=$divergentBytes;ByteLength=$divergentBytes.Length}
   {New-TPMPublicationStagingV1 -StagingParentRoot $stagingParent -EligibilityReport $bundle.EligibilityReport -PublicationReport $bundle.PublicationReport -FinalOutcomeReport $bundle.FinalOutcomeReport -ScorecardReport $bundle.ScorecardReport -ValidationReport $bundle.ValidationReport -Manifest $bundle.Manifest -Marker $tamperedMarker}|Should -Throw '*PUBLISH_INVALID*Marker.Bytes*BOM-less UTF-8*'
-  (Get-ChildItem -LiteralPath $stagingParent -Recurse -File -ErrorAction SilentlyContinue).Count|Should -Be 0
+  @(Get-ChildItem -LiteralPath $stagingParent -Recurse -File -ErrorAction SilentlyContinue).Count|Should -Be 0
  }
 
  It 'rejects a Manifest whose Bytes are a UTF-8-BOM-prefixed encoding of its own Json, and performs zero filesystem writes' {
@@ -204,7 +204,7 @@ Describe 'ADR-0155 Phase 3 publication staging builder' {
   $tamperedManifest=[pscustomobject]@{FileName=$bundle.Manifest.FileName;Json=$bundle.Manifest.Json;Bytes=$bomPrefixedBytes;ByteLength=$bomPrefixedBytes.Length}
   $tamperedMarker=New-TPMCommitMarkerReportV1 -Manifest $tamperedManifest
   {New-TPMPublicationStagingV1 -StagingParentRoot $stagingParent -EligibilityReport $bundle.EligibilityReport -PublicationReport $bundle.PublicationReport -FinalOutcomeReport $bundle.FinalOutcomeReport -ScorecardReport $bundle.ScorecardReport -ValidationReport $bundle.ValidationReport -Manifest $tamperedManifest -Marker $tamperedMarker}|Should -Throw '*PUBLISH_INVALID*Manifest.Bytes*BOM-less UTF-8*'
-  (Get-ChildItem -LiteralPath $stagingParent -Recurse -File -ErrorAction SilentlyContinue).Count|Should -Be 0
+  @(Get-ChildItem -LiteralPath $stagingParent -Recurse -File -ErrorAction SilentlyContinue).Count|Should -Be 0
  }
 
  It 'rejects a Manifest whose Bytes have a trailing byte appended after its own correctly encoded Json, and performs zero filesystem writes' {
@@ -213,7 +213,7 @@ Describe 'ADR-0155 Phase 3 publication staging builder' {
   $tamperedManifest=[pscustomobject]@{FileName=$bundle.Manifest.FileName;Json=$bundle.Manifest.Json;Bytes=$trailingByteBytes;ByteLength=$trailingByteBytes.Length}
   $tamperedMarker=New-TPMCommitMarkerReportV1 -Manifest $tamperedManifest
   {New-TPMPublicationStagingV1 -StagingParentRoot $stagingParent -EligibilityReport $bundle.EligibilityReport -PublicationReport $bundle.PublicationReport -FinalOutcomeReport $bundle.FinalOutcomeReport -ScorecardReport $bundle.ScorecardReport -ValidationReport $bundle.ValidationReport -Manifest $tamperedManifest -Marker $tamperedMarker}|Should -Throw '*PUBLISH_INVALID*Manifest.Bytes*BOM-less UTF-8*'
-  (Get-ChildItem -LiteralPath $stagingParent -Recurse -File -ErrorAction SilentlyContinue).Count|Should -Be 0
+  @(Get-ChildItem -LiteralPath $stagingParent -Recurse -File -ErrorAction SilentlyContinue).Count|Should -Be 0
  }
 
  It 'rejects a Marker whose Bytes are a UTF-8-BOM-prefixed encoding of its own Json, and performs zero filesystem writes' {
@@ -221,7 +221,7 @@ Describe 'ADR-0155 Phase 3 publication staging builder' {
   $bomPrefixedBytes=[byte[]](@(0xEF,0xBB,0xBF)+[Text.Encoding]::UTF8.GetBytes($bundle.Marker.Json))
   $tamperedMarker=[pscustomobject]@{FileName=$bundle.Marker.FileName;Json=$bundle.Marker.Json;Bytes=$bomPrefixedBytes;ByteLength=$bomPrefixedBytes.Length}
   {New-TPMPublicationStagingV1 -StagingParentRoot $stagingParent -EligibilityReport $bundle.EligibilityReport -PublicationReport $bundle.PublicationReport -FinalOutcomeReport $bundle.FinalOutcomeReport -ScorecardReport $bundle.ScorecardReport -ValidationReport $bundle.ValidationReport -Manifest $bundle.Manifest -Marker $tamperedMarker}|Should -Throw '*PUBLISH_INVALID*Marker.Bytes*BOM-less UTF-8*'
-  (Get-ChildItem -LiteralPath $stagingParent -Recurse -File -ErrorAction SilentlyContinue).Count|Should -Be 0
+  @(Get-ChildItem -LiteralPath $stagingParent -Recurse -File -ErrorAction SilentlyContinue).Count|Should -Be 0
  }
 
  It 'rejects a Marker whose Bytes have a trailing byte appended after its own correctly encoded Json, and performs zero filesystem writes' {
@@ -229,7 +229,7 @@ Describe 'ADR-0155 Phase 3 publication staging builder' {
   $trailingByteBytes=[byte[]]([Text.Encoding]::UTF8.GetBytes($bundle.Marker.Json)+[byte[]](0x0A))
   $tamperedMarker=[pscustomobject]@{FileName=$bundle.Marker.FileName;Json=$bundle.Marker.Json;Bytes=$trailingByteBytes;ByteLength=$trailingByteBytes.Length}
   {New-TPMPublicationStagingV1 -StagingParentRoot $stagingParent -EligibilityReport $bundle.EligibilityReport -PublicationReport $bundle.PublicationReport -FinalOutcomeReport $bundle.FinalOutcomeReport -ScorecardReport $bundle.ScorecardReport -ValidationReport $bundle.ValidationReport -Manifest $bundle.Manifest -Marker $tamperedMarker}|Should -Throw '*PUBLISH_INVALID*Marker.Bytes*BOM-less UTF-8*'
-  (Get-ChildItem -LiteralPath $stagingParent -Recurse -File -ErrorAction SilentlyContinue).Count|Should -Be 0
+  @(Get-ChildItem -LiteralPath $stagingParent -Recurse -File -ErrorAction SilentlyContinue).Count|Should -Be 0
  }
 
  It 'rejects a Marker whose ManifestSha256 does not correlate to the supplied Manifest bytes' {
@@ -251,7 +251,7 @@ Describe 'ADR-0155 Phase 3 publication staging builder' {
   $root2=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $root2|Out-Null
   $bundleB=New-FullBundleV1 $root2
   {New-TPMPublicationStagingV1 -StagingParentRoot $stagingParent -EligibilityReport $bundleB.EligibilityReport -PublicationReport $bundleA.PublicationReport -FinalOutcomeReport $bundleA.FinalOutcomeReport -ScorecardReport $bundleA.ScorecardReport -ValidationReport $bundleA.ValidationReport -Manifest $bundleA.Manifest -Marker $bundleA.Marker}|Should -Throw
-  (Get-ChildItem -LiteralPath $stagingParent -Recurse -File -ErrorAction SilentlyContinue).Count|Should -Be 0
+  @(Get-ChildItem -LiteralPath $stagingParent -Recurse -File -ErrorAction SilentlyContinue).Count|Should -Be 0
  }
 }
 
@@ -290,7 +290,7 @@ Describe 'ADR-0155 Phase 3 publication commit (promotion and durable validation)
   $commit.ManifestSha256|Should -Be (Get-TPMSha256HexV1 -Bytes $bundle.Manifest.Bytes)
   $commit.ArtifactSetSha256|Should -Be $parsedManifest.ArtifactSetSha256
   $commit.DiagnosticWarnings|Should -BeNullOrEmpty
-  (Test-Path -LiteralPath $stagingParent -PathType Container) -and ((Get-ChildItem -LiteralPath $stagingParent -Directory).Count -eq 0)|Should -Be $true
+  (Test-Path -LiteralPath $stagingParent -PathType Container) -and (@(Get-ChildItem -LiteralPath $stagingParent -Directory).Count -eq 0)|Should -Be $true
  }
 
  It 'produces a result shape that satisfies the dispatcher''s own publication-observation schema on success' {
@@ -313,8 +313,8 @@ Describe 'ADR-0155 Phase 3 publication commit (promotion and durable validation)
   $second.FailureCode|Should -Be 'PROMOTION_FAILED'
   $afterHashes=@(Get-ChildItem -LiteralPath $first.DestinationDirectory -File|ForEach-Object{Get-TPMSha256HexV1 -Bytes ([IO.File]::ReadAllBytes($_.FullName))}|Sort-Object)
   $afterHashes|Should -Be $beforeHashes
-  (Get-ChildItem -LiteralPath $first.DestinationDirectory -File).Count|Should -Be 7
-  (Get-ChildItem -LiteralPath $stagingParent2 -Recurse -File).Count|Should -BeGreaterThan 0
+  @(Get-ChildItem -LiteralPath $first.DestinationDirectory -File).Count|Should -Be 7
+  @(Get-ChildItem -LiteralPath $stagingParent2 -Recurse -File).Count|Should -BeGreaterThan 0
  }
 
  It 'propagates a staging failure without attempting promotion, leaving Committed=false and no destination directory created' {
@@ -330,7 +330,7 @@ Describe 'ADR-0155 Phase 3 publication commit (promotion and durable validation)
   $second.Committed|Should -Be $false
   $second.FailureCode|Should -Be 'PROMOTION_FAILED'
   $second.FailureMessage|Should -Match 'TPM-Certification-Eligibility\.json'
-  (Get-ChildItem -LiteralPath $destinationParent2 -Recurse -File -ErrorAction SilentlyContinue).Count|Should -Be 0
+  @(Get-ChildItem -LiteralPath $destinationParent2 -Recurse -File -ErrorAction SilentlyContinue).Count|Should -Be 0
  }
 
  It 'rolls a mid-promotion collision back to the staging directory rather than leaving a partially promoted destination' {
@@ -347,9 +347,9 @@ Describe 'ADR-0155 Phase 3 publication commit (promotion and durable validation)
   $remainingCollider.Count|Should -Be 1
   $remainingCollider[0].Name|Should -Be 'TPM-Certification-Scorecard.md'
   $rolledBack=@(Get-ChildItem -LiteralPath $stagingParent2 -Recurse -File)
-  ($rolledBack|Where-Object{$_.Name-eq'TPM-Certification-Eligibility.json'}).Count|Should -Be 1
-  ($rolledBack|Where-Object{$_.Name-eq'TPM-Certification-Publication.json'}).Count|Should -Be 1
-  ($rolledBack|Where-Object{$_.Name-eq'TPM-Certification-Final-Outcome.json'}).Count|Should -Be 1
+  @($rolledBack|Where-Object{$_.Name-eq'TPM-Certification-Eligibility.json'}).Count|Should -Be 1
+  @($rolledBack|Where-Object{$_.Name-eq'TPM-Certification-Publication.json'}).Count|Should -Be 1
+  @($rolledBack|Where-Object{$_.Name-eq'TPM-Certification-Final-Outcome.json'}).Count|Should -Be 1
  }
 
  It 'rejects when DestinationRoot is relative, null, or whitespace' {
@@ -374,7 +374,7 @@ Describe 'ADR-0155 Phase 3 authoritative NOT CERTIFIED bundle publication' {
   $commit=Invoke-CommitV1 $bundle $stagingParent $destinationParent
   $commit.Committed|Should -Be $true
   $commit.FailureCode|Should -BeNullOrEmpty
-  (Get-ChildItem -LiteralPath $commit.DestinationDirectory -File).Count|Should -Be 7
+  @(Get-ChildItem -LiteralPath $commit.DestinationDirectory -File).Count|Should -Be 7
   $expectedNames=@('TPM-Certification-Eligibility.json','TPM-Certification-Publication.json','TPM-Certification-Final-Outcome.json','TPM-Certification-Scorecard.md','TPM-Certification-Validation.md','TPM-Certification-Manifest.json','TPM-Certification-Commit.json')
   @(Get-ChildItem -LiteralPath $commit.DestinationDirectory -File|ForEach-Object{$_.Name}|Sort-Object)|Should -Be @($expectedNames|Sort-Object)
  }

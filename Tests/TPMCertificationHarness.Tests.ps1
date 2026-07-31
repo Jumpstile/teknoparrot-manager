@@ -43,36 +43,46 @@ BeforeAll {
     # unrelated function -- not specific to anything this file's own functions
     # do -- and confirmed the fix: extracting to an actual .ps1 file and
     # dot-sourcing that file removes the interference entirely.
-    $extractedPath = Join-Path $TestDrive ("harness-functions-" + [guid]::NewGuid().ToString('N') + '.ps1')
-    ($functionAsts | ForEach-Object { $_.Extent.Text }) -join "`n`n" | Set-Content -LiteralPath $extractedPath -Encoding utf8
-    . $extractedPath
-
-    # AST extraction above pulls only function bodies, not the harness's own
-    # top-level script-scope initializers ($script:tpmEvidenceWorkflowId =
-    # ...; $script:tpmOperatorPhase = 0; $script:tpmScreenshotSequence = 0).
-    # Under strict mode those variables would otherwise be entirely unset
-    # (not merely $null) the first time an extracted function reads them
-    # here, so they are seeded to the same starting values the real harness
-    # assigns at its own top level before any gate/screenshot function runs.
-    # $script:tpmCrc32Table has no top-level initializer in the harness --
-    # it is lazily built on first use behind an `if (-not $script:tpmCrc32Table)`
-    # guard -- but that guard itself requires the variable to exist under
-    # strict mode, so it is seeded here too.
-    $script:tpmEvidenceWorkflowId = [guid]::NewGuid().ToString('N')
-    $script:tpmOperatorPhase = 0
-    $script:tpmCrc32Table = $null
-    $script:tpmScreenshotSequence = 0
-
-    # New-CertificationScorecard reads these as unqualified script-scope
-    # variables rather than parameters (mirroring the harness's own top-level
-    # script scope) -- without these it would read $null, not the bug under
-    # test here.
-    $script:reportDir = Join-Path $TestDrive "Reports\fake-run"
-    $script:json = Join-Path $reportDir "TPM-Validation-Report.json"
-    $script:md = Join-Path $reportDir "TPM-Validation-Report.md"
+    # AST extraction pulls only function bodies.  Build one temporary source
+    # file that contains both the extracted functions and the top-level state
+    # they expect from the real harness.  Keeping the bootstrap in that same
+    # dot-sourced file is important: a caller-scope assignment can appear to
+    # work until strict mode or a nested Pester scope resolves $script: state
+    # from the extracted functions.
+    $reportDir = Join-Path $TestDrive "Reports\fake-run"
+    $json = Join-Path $reportDir "TPM-Validation-Report.json"
+    $md = Join-Path $reportDir "TPM-Validation-Report.md"
     New-Item -ItemType Directory -Force -Path $reportDir | Out-Null
     Set-Content -LiteralPath $json -Value '{}' -Encoding ascii
     Set-Content -LiteralPath $md -Value '# x' -Encoding ascii
+
+    $workflowId = [guid]::NewGuid().ToString('N')
+    function ConvertTo-HarnessPowerShellLiteral {
+        param([Parameter(Mandatory)][string]$Value)
+        return "'" + $Value.Replace("'", "''") + "'"
+    }
+
+    $bootstrapLines = @(
+        ('$script:tpmEvidenceWorkflowId = ' + (ConvertTo-HarnessPowerShellLiteral $workflowId))
+        '$script:tpmOperatorPhase = 0'
+        '$script:tpmCrc32Table = $null'
+        '$script:tpmScreenshotSequence = 0'
+        '$script:tpmEvidenceLedger = New-Object System.Collections.Generic.List[object]'
+        '$script:tpmEvidenceLedgerSealed = $false'
+        '$script:OperatorStatusPath = $null'
+        '$script:results = [pscustomobject]@{ Screenshots = @(); Checks = @() }'
+        ('$script:reportDir = ' + (ConvertTo-HarnessPowerShellLiteral $reportDir))
+        ('$script:json = ' + (ConvertTo-HarnessPowerShellLiteral $json))
+        ('$script:md = ' + (ConvertTo-HarnessPowerShellLiteral $md))
+        '$reportDir = $script:reportDir'
+        '$json = $script:json'
+        '$md = $script:md'
+    ) -join "`n"
+    $functionSource = ($functionAsts | ForEach-Object { $_.Extent.Text }) -join "`n`n"
+    $bootstrapSource = $bootstrapLines + "`n`n" + $functionSource
+    $extractedPath = Join-Path $TestDrive ("harness-functions-" + [guid]::NewGuid().ToString('N') + '.ps1')
+    Set-Content -LiteralPath $extractedPath -Value $bootstrapSource -Encoding utf8
+    . $extractedPath
 
     function New-FakeResults {
         param([bool]$Pcsx2Present, [bool]$SmokeMode = $true)
@@ -93,15 +103,15 @@ BeforeAll {
             EffectiveTeknoParrotRoot = $null
             Screenshots = @()
             Checks = @(
-                [pscustomobject]@{ Name = 'Repository available'; Passed = $true }
-                [pscustomobject]@{ Name = 'Repository clean'; Passed = $true }
+                [pscustomobject]@{ Name = 'Repository available'; Passed = $true; Details = 'fixture repository is available' }
+                [pscustomobject]@{ Name = 'Repository clean'; Passed = $true; Details = 'fixture repository is clean' }
                 # Issue #146: renamed from 'Real install health check
                 # collected' -- the gate now depends on the health result's
                 # own meaning, not merely that a report was written, so the
                 # old name (which described only report creation) no longer
                 # matched what this check actually verifies.
-                [pscustomobject]@{ Name = 'Real install health check'; Passed = $true }
-                [pscustomobject]@{ Name = 'pcsx2x6 crosshair path (issue #79)'; Passed = $true }
+                [pscustomobject]@{ Name = 'Real install health check'; Passed = $true; Details = 'fixture install health passed' }
+                [pscustomobject]@{ Name = 'pcsx2x6 crosshair path (issue #79)'; Passed = $true; Details = 'fixture crosshair path passed' }
             )
             Pcsx2x6 = $pcsx2x6
             VirtualBetaTester = [pscustomobject]@{
@@ -1022,7 +1032,7 @@ Describe "New-CertificationScorecard requested/effective root reporting (issue #
     It "carries RequestedTeknoParrotRoot and EffectiveTeknoParrotRoot onto the returned scorecard object" {
         $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
         $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
-        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true; Details = 'fixture requested root binding passed' }
 
         $result = New-CertificationScorecard -Results $fake
 
@@ -1033,7 +1043,7 @@ Describe "New-CertificationScorecard requested/effective root reporting (issue #
     It "fails certification (NOT CERTIFIED) when the requested and effective roots do not match, even though every other gate passed" {
         $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
         $fake.EffectiveTeknoParrotRoot = 'C:\Users\EliSi\LaunchBox\Emulators\TeknoParrot'
-        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $false }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $false; Details = 'fixture requested root binding failed' }
 
         $result = New-CertificationScorecard -Results $fake
 
@@ -1076,7 +1086,7 @@ Describe "New-CertificationScorecard requested/effective root reporting (issue #
     It "fails certification (NOT CERTIFIED) when the config restoration check explicitly failed, even though every other gate passed" {
         $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
         $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
-        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true; Details = 'fixture requested root binding passed' }
         $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $false; Details = 'restore threw: Access to the path is denied' }
 
         $result = New-CertificationScorecard -Results $fake
@@ -1090,7 +1100,7 @@ Describe "New-CertificationScorecard requested/effective root reporting (issue #
     It "fails certification (NOT CERTIFIED) when the config restoration check is missing entirely from an unattended run" {
         $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
         $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
-        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true; Details = 'fixture requested root binding passed' }
         # No 'Unattended TPM config restoration' check at all -- must never
         # read as a silent pass.
 
@@ -1104,7 +1114,7 @@ Describe "New-CertificationScorecard requested/effective root reporting (issue #
     It "certifies when the config restoration check explicitly passed alongside every other gate" {
         $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
         $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
-        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true; Details = 'fixture requested root binding passed' }
         $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true; Details = 'config file restored to its pre-run state' }
 
         $result = New-CertificationScorecard -Results $fake
@@ -1159,7 +1169,7 @@ Describe "New-CertificationScorecard requested/effective root reporting (issue #
             $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $smoke
             if (-not $smoke) {
                 $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
-                $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
+                $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true; Details = 'fixture requested root binding passed' }
                 $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true; Details = 'config file restored to its pre-run state' }
             }
             $result = New-CertificationScorecard -Results $fake
@@ -1210,7 +1220,7 @@ Describe "New-CertificationScorecard requested/effective root reporting (issue #
     It "an applicable PASS for the restoration item still counts normally toward CERTIFIED" {
         $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
         $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
-        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true; Details = 'fixture requested root binding passed' }
         $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true; Details = 'config file restored to its pre-run state' }
 
         $result = New-CertificationScorecard -Results $fake
@@ -1224,7 +1234,7 @@ Describe "New-CertificationScorecard requested/effective root reporting (issue #
     It "an applicable FAIL for the restoration item still forces NOT CERTIFIED" {
         $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
         $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
-        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true; Details = 'fixture requested root binding passed' }
         $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $false; Details = 'restore threw: Access to the path is denied' }
 
         $result = New-CertificationScorecard -Results $fake
@@ -1302,8 +1312,8 @@ Describe "Smoke File Safety Not Applicable during unattended mode (issue #149)" 
     It "marks Smoke File Safety Status = 'NotApplicable' during unattended mode, even when the (unconditionally-collected) diff shows no changes" {
         $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
         $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
-        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
-        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true; Details = 'fixture requested root binding passed' }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true; Details = 'fixture config restoration passed' }
         # Snapshots = $null (default) -- would read as "clean" under the old
         # logic and score [PASS] with smoke-mode wording; this is exactly
         # the real RC3 scenario the fix addresses.
@@ -1317,8 +1327,8 @@ Describe "Smoke File Safety Not Applicable during unattended mode (issue #149)" 
     It "never stores Passed = \$true for Smoke File Safety during unattended mode -- uses \$null" {
         $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
         $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
-        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
-        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true; Details = 'fixture requested root binding passed' }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true; Details = 'fixture config restoration passed' }
 
         $result = New-CertificationScorecard -Results $fake
 
@@ -1330,8 +1340,8 @@ Describe "Smoke File Safety Not Applicable during unattended mode (issue #149)" 
     It "never reuses smoke-mode wording during unattended mode -- Details does not claim smoke mode" {
         $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
         $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
-        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
-        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true; Details = 'fixture requested root binding passed' }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true; Details = 'fixture config restoration passed' }
 
         $result = New-CertificationScorecard -Results $fake
 
@@ -1343,8 +1353,8 @@ Describe "Smoke File Safety Not Applicable during unattended mode (issue #149)" 
     It "renders [N/A] in the Markdown gate list for Smoke File Safety during unattended mode, never [PASS]" {
         $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
         $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
-        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
-        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true; Details = 'fixture requested root binding passed' }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true; Details = 'fixture config restoration passed' }
 
         $result = New-CertificationScorecard -Results $fake
         $item = $result.Items | Where-Object { $_.Area -eq 'Smoke File Safety' }
@@ -1366,8 +1376,8 @@ Describe "Smoke File Safety Not Applicable during unattended mode (issue #149)" 
     It "excludes the unattended-mode N/A Smoke File Safety item from both Passed and Total (does not inflate or reduce the score)" {
         $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
         $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
-        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
-        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true; Details = 'fixture requested root binding passed' }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true; Details = 'fixture config restoration passed' }
 
         $result = New-CertificationScorecard -Results $fake
 
@@ -1383,8 +1393,8 @@ Describe "Smoke File Safety Not Applicable during unattended mode (issue #149)" 
     It "does not force NOT CERTIFIED by itself -- an unattended run with every other applicable item passing still certifies" {
         $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
         $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
-        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
-        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true; Details = 'fixture requested root binding passed' }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true; Details = 'fixture config restoration passed' }
         $fake.Snapshots = New-FakeDirtySnapshots
         # Even a "dirty" diff must not affect the outcome once the item is
         # correctly excluded as not applicable -- it is never asserted
@@ -1671,11 +1681,11 @@ Describe "New-TPMCertificationScreenshot (issue #151)" {
         }
 
         $paths = $shots.Path
-        ($paths | Select-Object -Unique).Count | Should -Be 50 -Because "every path must be unique, even for 50 identical labels captured back to back"
+        @($paths | Select-Object -Unique).Count | Should -Be 50 -Because "every path must be unique, even for 50 identical labels captured back to back"
         foreach ($p in $paths) {
             Test-Path -LiteralPath $p -PathType Leaf | Should -Be $true -Because "no earlier file may be overwritten by a later capture with the same label"
         }
-        ($shots | Where-Object { $_.Status -ne 'Captured' }).Count | Should -Be 0
+        @($shots | Where-Object { $_.Status -ne 'Captured' }).Count | Should -Be 0
     }
 
     It "never overwrites a pre-existing file at the reserved path (atomic create-with-retry)" {
@@ -2420,8 +2430,8 @@ Describe "Screenshot privacy disclosure and capture-scope safeguard (issue #151 
     It "the Certification Scorecard Markdown discloses that ScreenCapture entries may include unrelated desktop content" {
         $fake = New-FakeResults -Pcsx2Present $true -SmokeMode $false
         $fake.EffectiveTeknoParrotRoot = 'C:\fake\TeknoParrot'
-        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true }
-        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM used requested root'; Passed = $true; Details = 'fixture requested root binding passed' }
+        $fake.Checks += [pscustomobject]@{ Name = 'Unattended TPM config restoration'; Passed = $true; Details = 'fixture config restoration passed' }
         $fake.Screenshots = @(
             [pscustomobject]@{ Name = 'certification-suite-running'; Label = 'certification-suite-running'; Path = 'C:\fake\a.png'; Status = 'Captured'; EvidenceType = 'ScreenCapture'; CaptureScope = 'FullDesktop'; Details = 'captured' }
         )

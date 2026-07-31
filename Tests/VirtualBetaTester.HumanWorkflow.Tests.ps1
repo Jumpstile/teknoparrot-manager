@@ -10,8 +10,9 @@
 # same dataset a human tester's checklist would be built from.
 #
 # No network access, no GUI, no real TeknoParrot install, no writes outside
-# $TestDrive. Deterministic: every external call (Invoke-WebRequest, Read-Host)
-# is mocked with a fixed scripted answer, never live input or a real release.
+# $TestDrive. Deterministic: the update boundary is a test-only seam and
+# Read-Host is mocked with a fixed scripted answer, never live input or a real
+# release.
 #
 # Run with: Invoke-Pester -Path .\Tests\VirtualBetaTester.HumanWorkflow.Tests.ps1
 
@@ -34,7 +35,96 @@ BeforeAll {
     # safe pattern is the standing rule, not a case-by-case judgment call.
     $functionAsts = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
     $extractedFunctionsPath = Join-Path $TestDrive ("vbt-human-workflow-functions-" + [guid]::NewGuid().ToString('N') + '.ps1')
-    ($functionAsts | ForEach-Object { $_.Extent.Text }) -join "`n`n" | Set-Content -LiteralPath $extractedFunctionsPath -Encoding utf8
+    $functionSource = ($functionAsts | ForEach-Object {
+        $source = $_.Extent.Text
+        # These two decision functions are the only VBT paths under test that
+        # reach the update boundary.  Give them unique test-only calls in the
+        # extracted source so another Pester file's mock table cannot divert
+        # them to the live GitHub cmdlet in a full multi-file run.
+        if ($_.Name -in @('Invoke-CheckForUpdates', 'Invoke-StartupUpdateCheck')) {
+            $source = $source.Replace('Get-ManagerUpdateRelease', 'Get-VbtUpdateRelease')
+            $source = $source.Replace('Get-ManagerUpdateReleaseSummary', 'Get-VbtUpdateReleaseSummary')
+            $source = $source.Replace('Invoke-ManagerUpdateInstall', 'Invoke-VbtUpdateInstall')
+        }
+        $source
+    }) -join "`n`n"
+    $originalInstallerAst = $functionAsts | Where-Object Name -eq 'Invoke-ManagerUpdateInstall' | Select-Object -First 1
+    if (-not $originalInstallerAst) {
+        throw 'Could not locate Invoke-ManagerUpdateInstall for the VBT read-only control path.'
+    }
+    $originalInstallerSource = $originalInstallerAst.Extent.Text.Replace('function Invoke-ManagerUpdateInstall', 'function Invoke-VbtOriginalManagerUpdateInstall')
+    $functionSource += "`n`n" + $originalInstallerSource
+
+    # Update tests invoke functions defined in the extracted file.  A Pester
+    # Mock declared in the surrounding It/BeforeEach scope is not a reliable
+    # interception point for that separate execution scope, and a missed
+    # interception falls through to the real GitHub request. Install unique,
+    # deliberately test-only seams in the extracted scope instead. Production
+    # functions and their live fallback behavior are not changed.
+    $updateBoundarySource = @'
+$script:vbtUpdateWebResponse = $null
+$script:vbtUpdateInstallResult = $null
+$script:vbtUpdateInstallCalls = 0
+
+function Set-VbtUpdateWebResponse {
+    param([Parameter(Mandatory)][object]$Response)
+    $script:vbtUpdateWebResponse = $Response
+}
+
+function Set-VbtUpdateInstallResult {
+    param([bool]$Result)
+    $script:vbtUpdateInstallResult = $Result
+    $script:vbtUpdateInstallCalls = 0
+}
+
+function Get-VbtUpdateInstallCallCount {
+    return $script:vbtUpdateInstallCalls
+}
+
+function Get-VbtUpdateReleaseSummary {
+    param([string]$Body)
+    return Get-ManagerUpdateReleaseSummary -Body $Body
+}
+
+function Get-VbtUpdateRelease {
+    param(
+        [int]$MaxAttempts = 3,
+        [int]$TimeoutSec = 20
+    )
+    if ($null -eq $script:vbtUpdateWebResponse) {
+        throw 'VBT update release seam was not configured.'
+    }
+    $payload = $script:vbtUpdateWebResponse.Content | ConvertFrom-Json
+    $asset = @($payload.assets | Where-Object { $_.name -match '^TeknoParrot\.Manager\.v.*\.zip$' }) | Select-Object -First 1
+    if (-not $asset) {
+        return $null
+    }
+    $releaseName = if ($payload.PSObject.Properties.Name -contains 'name') { $payload.name } else { $null }
+    $releaseBody = if ($payload.PSObject.Properties.Name -contains 'body') { $payload.body } else { $null }
+    $sizeBytes = if ($asset.PSObject.Properties.Name -contains 'size' -and $null -ne $asset.size) { [int64]$asset.size } else { [int64]0 }
+    return [pscustomobject]@{
+        TagName     = $payload.tag_name
+        Name        = $releaseName
+        Body        = $releaseBody
+        AssetName   = $asset.name
+        DownloadUrl = $asset.browser_download_url
+        SizeBytes   = $sizeBytes
+    }
+}
+
+function Invoke-VbtUpdateInstall {
+    param(
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [Parameter(Mandatory)][pscustomobject]$Release
+    )
+    if ($null -eq $script:vbtUpdateInstallResult) {
+        return Invoke-VbtOriginalManagerUpdateInstall -ScriptPath $ScriptPath -Release $Release
+    }
+    $script:vbtUpdateInstallCalls++
+    return $script:vbtUpdateInstallResult
+}
+'@
+    Set-Content -LiteralPath $extractedFunctionsPath -Value ($functionSource + "`n`n" + $updateBoundarySource) -Encoding utf8
     . $extractedFunctionsPath
 
     # Top-level script-scope values the extracted functions read directly
@@ -88,9 +178,12 @@ BeforeAll {
         param([string]$TagName = 'v1.1', [string]$AssetName = 'TeknoParrot.Manager.v1.1.zip')
         return (@{
             tag_name = $TagName
+            name     = $TagName
+            body     = 'Test release notes.'
             assets   = @(@{
                 name                  = $AssetName
                 browser_download_url = "https://github.com/Jumpstile/teknoparrot-manager/releases/download/$TagName/$AssetName"
+                size                  = 1
             })
         } | ConvertTo-Json -Depth 5)
     }
@@ -99,7 +192,7 @@ BeforeAll {
 Describe "Virtual Beta Tester: human workflow simulation (issue #88 phase 1)" {
 
     It "startup-calm-current-version: reports already current, no error/warning noise" {
-        Mock Invoke-WebRequest { [pscustomobject]@{ Content = (New-UpdateCheckReleaseJson -TagName $ScriptVersion) } }
+        Set-VbtUpdateWebResponse -Response ([pscustomobject]@{ Content = (New-UpdateCheckReleaseJson -TagName $ScriptVersion) })
         Mock Read-Host { throw "Read-Host should not be called when already current" }
 
         $fixturePath = Join-Path $TestDrive 'startup-calm.ps1'
@@ -120,7 +213,7 @@ Describe "Virtual Beta Tester: human workflow simulation (issue #88 phase 1)" {
     }
 
     It "update-available-explains-safety: explains what an update will do before asking" {
-        Mock Invoke-WebRequest { [pscustomobject]@{ Content = (New-UpdateCheckReleaseJson) } }
+        Set-VbtUpdateWebResponse -Response ([pscustomobject]@{ Content = (New-UpdateCheckReleaseJson) })
         Mock Read-Host { "N" }
 
         $fixturePath = Join-Path $TestDrive 'update-offer.ps1'
@@ -135,7 +228,7 @@ Describe "Virtual Beta Tester: human workflow simulation (issue #88 phase 1)" {
     }
 
     It "read-only-update-failure-actionable: read-only failure tells the user how to recover" {
-        Mock Invoke-WebRequest { [pscustomobject]@{ Content = (New-UpdateCheckReleaseJson) } }
+        Set-VbtUpdateWebResponse -Response ([pscustomobject]@{ Content = (New-UpdateCheckReleaseJson) })
         Mock Read-Host { "Y" }
 
         $root = Join-Path $TestDrive ("readonly-scenario-" + [guid]::NewGuid().ToString('N'))
@@ -155,7 +248,7 @@ Describe "Virtual Beta Tester: human workflow simulation (issue #88 phase 1)" {
     }
 
     It "cancel-path-no-change: declining leaves files unchanged and says so, without destructive-action language" {
-        Mock Invoke-WebRequest { [pscustomobject]@{ Content = (New-UpdateCheckReleaseJson) } }
+        Set-VbtUpdateWebResponse -Response ([pscustomobject]@{ Content = (New-UpdateCheckReleaseJson) })
         Mock Read-Host { "N" }
 
         $fixturePath = Join-Path $TestDrive 'cancel-path.ps1'
@@ -303,7 +396,6 @@ $($menuIfAst.Extent.Text)
 
 Describe "Virtual Beta Tester: startup update-check decision paths (issue #88 phase 1.5)" {
     BeforeAll {
-        $script:installCalls = 0
         function New-StartupCheckReleaseJson {
             param([string]$Body = "Fixes a thing.")
             return (@{
@@ -313,6 +405,7 @@ Describe "Virtual Beta Tester: startup update-check decision paths (issue #88 ph
                 assets   = @(@{
                     name                  = 'TeknoParrot.Manager.v1.1.zip'
                     browser_download_url = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v1.1/TeknoParrot.Manager.v1.1.zip'
+                    size                  = 1
                 })
             } | ConvertTo-Json -Depth 5)
         }
@@ -336,14 +429,12 @@ Describe "Virtual Beta Tester: startup update-check decision paths (issue #88 ph
     }
 
     BeforeEach {
-        $script:installCalls = 0
-        Mock Invoke-WebRequest { [pscustomobject]@{ Content = (New-StartupCheckReleaseJson) } }
+        Set-VbtUpdateWebResponse -Response ([pscustomobject]@{ Content = (New-StartupCheckReleaseJson) })
         # Behavioral invariant, not wording: the ONLY signal that a destructive
-        # install started is this function being called. Mocking it isolates
-        # the decision-path behavior under test from the install machinery
-        # already covered by Tests/TpmAutoUpdate.DestructivePath.Tests.ps1 and
-        # the existing Invoke-CheckForUpdates scenarios above.
-        Mock Invoke-ManagerUpdateInstall { $script:installCalls++; $true }
+        # install started is this function being called. The seam is installed
+        # in the extracted execution scope, while the destructive installer
+        # itself remains covered by Tests/TpmAutoUpdate.DestructivePath.Tests.ps1.
+        Set-VbtUpdateInstallResult -Result $true
     }
 
     It "View notes, then decline: notes are shown and no install is ever attempted" {
@@ -357,7 +448,7 @@ Describe "Virtual Beta Tester: startup update-check decision paths (issue #88 ph
         $text = ($captured | ForEach-Object { $_.ToString() }) -join "`n"
 
         $text.Contains('Fixes a thing.') | Should -Be $true -Because "choosing V must actually show the release notes body"
-        $script:installCalls | Should -Be 0 -Because "declining after viewing notes must never reach the install step -- confirmation required before any destructive action"
+        Get-VbtUpdateInstallCallCount | Should -Be 0 -Because "declining after viewing notes must never reach the install step -- confirmation required before any destructive action"
     }
 
     It "Accept, then confirm: reaches the install step exactly once (backup begins there, mocked)" {
@@ -368,7 +459,7 @@ Describe "Virtual Beta Tester: startup update-check decision paths (issue #88 ph
         Set-Content -LiteralPath $fixturePath -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
 
         Invoke-StartupUpdateCheck -ScriptPath $fixturePath | Out-Null
-        $script:installCalls | Should -Be 1 -Because "accepting and confirming must reach the backup-first install step exactly once"
+        Get-VbtUpdateInstallCallCount | Should -Be 1 -Because "accepting and confirming must reach the backup-first install step exactly once"
     }
 
     It "Accept, then decline the second confirmation: no install is attempted (double confirmation required)" {
@@ -380,7 +471,7 @@ Describe "Virtual Beta Tester: startup update-check decision paths (issue #88 ph
         $originalContent = Get-Content -LiteralPath $fixturePath -Raw
 
         Invoke-StartupUpdateCheck -ScriptPath $fixturePath | Out-Null
-        $script:installCalls | Should -Be 0 -Because "the first Y only offers the update -- a second explicit confirmation is required before anything destructive happens"
+        Get-VbtUpdateInstallCallCount | Should -Be 0 -Because "the first Y only offers the update -- a second explicit confirmation is required before anything destructive happens"
         (Get-Content -LiteralPath $fixturePath -Raw) | Should -Be $originalContent
     }
 
@@ -390,7 +481,7 @@ Describe "Virtual Beta Tester: startup update-check decision paths (issue #88 ph
         Set-Content -LiteralPath $fixturePath -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
 
         { Invoke-StartupUpdateCheck -ScriptPath $fixturePath | Out-Null } | Should -Not -Throw
-        $script:installCalls | Should -Be 0 -Because "an unrecognized/empty answer must default to the safe path (remind later), never to an install"
+        Get-VbtUpdateInstallCallCount | Should -Be 0 -Because "an unrecognized/empty answer must default to the safe path (remind later), never to an install"
     }
 
     It "Mixed-case 'y' is accepted the same as 'Y' (case-insensitive yes)" {
@@ -400,7 +491,7 @@ Describe "Virtual Beta Tester: startup update-check decision paths (issue #88 ph
         Set-Content -LiteralPath $fixturePath -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
 
         Invoke-StartupUpdateCheck -ScriptPath $fixturePath | Out-Null
-        $script:installCalls | Should -Be 1 -Because "a human typing lowercase y expects the same result as uppercase Y"
+        Get-VbtUpdateInstallCallCount | Should -Be 1 -Because "a human typing lowercase y expects the same result as uppercase Y"
     }
 
     It "Whitespace-padded input ('  Y  ') is trimmed and accepted" {
@@ -410,7 +501,7 @@ Describe "Virtual Beta Tester: startup update-check decision paths (issue #88 ph
         Set-Content -LiteralPath $fixturePath -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
 
         Invoke-StartupUpdateCheck -ScriptPath $fixturePath | Out-Null
-        $script:installCalls | Should -Be 1 -Because "a human's stray leading/trailing space when typing Y must not be treated as an invalid answer"
+        Get-VbtUpdateInstallCallCount | Should -Be 1 -Because "a human's stray leading/trailing space when typing Y must not be treated as an invalid answer"
     }
 
     It "Repeated 'view notes' answers before declining never gets stuck or attempts an install" {
@@ -420,6 +511,6 @@ Describe "Virtual Beta Tester: startup update-check decision paths (issue #88 ph
         Set-Content -LiteralPath $fixturePath -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
 
         { Invoke-StartupUpdateCheck -ScriptPath $fixturePath | Out-Null } | Should -Not -Throw
-        $script:installCalls | Should -Be 0
+        Get-VbtUpdateInstallCallCount | Should -Be 0
     }
 }

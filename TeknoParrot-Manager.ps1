@@ -3375,7 +3375,7 @@ function Invoke-AutoSync {
         } catch { Write-Log "AutoSync: could not read sync state -- starting fresh." }
     }
 
-    $zipFiles = Get-ChildItem -LiteralPath $zipSource -Filter *.zip -ErrorAction SilentlyContinue
+    $zipFiles = @(Get-ChildItem -LiteralPath $zipSource -Filter *.zip -ErrorAction SilentlyContinue)
     if (-not $zipFiles -or $zipFiles.Count -eq 0) {
         Write-Host "  No ZIP files found in source. Skipping extraction." -ForegroundColor Yellow
         $subdirHits = @(Get-ChildItem -LiteralPath $zipSource -Directory -ErrorAction SilentlyContinue | ForEach-Object {
@@ -6293,7 +6293,7 @@ function Register-Games {
 
     if ($null -eq $datIndex) { $datIndex = @{} }
 
-    $exeFiles       = Get-GameFiles $installFolder
+    $exeFiles       = @(Get-GameFiles $installFolder)
     $registered     = New-Object System.Collections.ArrayList
     $already        = New-Object System.Collections.ArrayList
     $ambiguous      = New-Object System.Collections.ArrayList
@@ -6455,7 +6455,7 @@ function Register-Games {
                             [void]$tpl.GameProfile.PrependChild($gp)
                         }
                         $gp.InnerText = $exe.FullName
-                        Set-SecondaryExecutablePath $tpl $exe.FullName
+                        [void](Set-SecondaryExecutablePath $tpl $exe.FullName)
                         Save-XmlMaybe $tpl $userProfile $DryRun
                         [void]$registered.Add([pscustomobject]@{
                             Code        = $code
@@ -6558,7 +6558,7 @@ function Register-Games {
                                                 [void]$tpl.GameProfile.PrependChild($gp)
                                             }
                                             $gp.InnerText = $exeToUse
-                                            Set-SecondaryExecutablePath $tpl $exeToUse
+                                            [void](Set-SecondaryExecutablePath $tpl $exeToUse)
                                             Save-XmlMaybe $tpl $userProfile $DryRun
                                             [void]$registered.Add([pscustomobject]@{
                                                 Code     = $datCode
@@ -6671,7 +6671,7 @@ function Register-Games {
                 [void]$tpl.GameProfile.PrependChild($gp)
             }
             $gp.InnerText = $exe.FullName
-            Set-SecondaryExecutablePath $tpl $exe.FullName
+            [void](Set-SecondaryExecutablePath $tpl $exe.FullName)
             Save-XmlMaybe $tpl $userProfile $DryRun
             [void]$registered.Add([pscustomobject]@{ Code = $code; GamePath = $exe.FullName })
             Write-Log "Registered $code -> $($exe.FullName)"
@@ -6807,7 +6807,7 @@ function Register-Games {
                     [void]$tpl.GameProfile.PrependChild($gp)
                 }
                 $gp.InnerText = $exeToUse
-                Set-SecondaryExecutablePath $tpl $exeToUse
+                [void](Set-SecondaryExecutablePath $tpl $exeToUse)
                 Save-XmlMaybe $tpl $userProfile $DryRun
                 $label = if ($datScore -lt 1.0) { "dat/fuzzy $([Math]::Round($datScore,2))" } else { "dat/exact" }
                 [void]$registered.Add([pscustomobject]@{
@@ -6912,7 +6912,7 @@ function Register-Games {
                     [void]$tpl.GameProfile.PrependChild($gp)
                 }
                 $gp.InnerText = $exeToUse
-                Set-SecondaryExecutablePath $tpl $exeToUse
+                [void](Set-SecondaryExecutablePath $tpl $exeToUse)
                 Save-XmlMaybe $tpl $userProfile $DryRun
                 [void]$registered.Add([pscustomobject]@{
                     Code        = $bestCode
@@ -6979,7 +6979,7 @@ function Register-Games {
                     [void]$sfTpl.GameProfile.PrependChild($sfGp)
                 }
                 $sfGp.InnerText = $sfExePath
-                Set-SecondaryExecutablePath $sfTpl $sfExePath
+                [void](Set-SecondaryExecutablePath $sfTpl $sfExePath)
                 Save-XmlMaybe $sfTpl $sfUserProfile $DryRun
                 [void]$registered.Add([pscustomobject]@{ Code = $sfCode; GamePath = $sfExePath; SubFolderMatch = $true })
                 Write-Log "Registered (subFolderMap) $sfCode -> $sfExePath"

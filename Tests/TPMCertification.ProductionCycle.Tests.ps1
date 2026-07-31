@@ -87,7 +87,7 @@ Describe 'ADR-0155 Phase 3 production certification cycle orchestration' {
   $run=New-SealedRunV1 $root $true
   $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent
   $result.Commit.Committed|Should -Be $true
-  (Get-ChildItem -LiteralPath $result.Commit.DestinationDirectory -File).Count|Should -Be 7
+  @(Get-ChildItem -LiteralPath $result.Commit.DestinationDirectory -File).Count|Should -Be 7
   $result.Projection.FinalStatus|Should -Be 'NOT CERTIFIED'
   $result.Projection.ExitCode|Should -Be 1
  }
@@ -139,9 +139,9 @@ Describe 'ADR-0155 Phase 3 production certification cycle orchestration' {
   $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent
   $result.Commit.Committed|Should -Be $false
   $rolledBack=@(Get-ChildItem -LiteralPath $stagingParent -Recurse -File)
-  ($rolledBack|Where-Object{$_.Name-eq'TPM-Certification-Eligibility.json'}).Count|Should -Be 1
-  ($rolledBack|Where-Object{$_.Name-eq'TPM-Certification-Publication.json'}).Count|Should -Be 1
-  ($rolledBack|Where-Object{$_.Name-eq'TPM-Certification-Final-Outcome.json'}).Count|Should -Be 1
+  @($rolledBack|Where-Object{$_.Name-eq'TPM-Certification-Eligibility.json'}).Count|Should -Be 1
+  @($rolledBack|Where-Object{$_.Name-eq'TPM-Certification-Publication.json'}).Count|Should -Be 1
+  @($rolledBack|Where-Object{$_.Name-eq'TPM-Certification-Final-Outcome.json'}).Count|Should -Be 1
  }
 
  It 'the on-disk committed Final-Outcome artifact is the Section 8.3 candidate schema, agreeing with the runtime projection when publication commits' {
