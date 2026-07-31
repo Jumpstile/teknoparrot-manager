@@ -1,6 +1,11 @@
 #Requires -Module Pester
 $script:modulePath=Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\TPMCertification.Authority.psm1'
 Import-Module $script:modulePath -Force
+$script:tpmAuthorityNonWindowsPwsh=$false
+if($PSVersionTable.PSVersion.Major -ge 6){
+ $tpmIsWindowsValue=Get-Variable -Name IsWindows -ValueOnly -ErrorAction SilentlyContinue
+ $script:tpmAuthorityNonWindowsPwsh=-not[bool]$tpmIsWindowsValue
+}
 Describe 'ADR-0155 Phase 1 compiled authority primitives' {
  It 'loads the complete V1 type set idempotently' {@(Initialize-TPMCertificationTypesV1).Count|Should -Be 10;@(Initialize-TPMCertificationTypesV1).Count|Should -Be 10}
  It 'has no public constructors or setters' {foreach($n in @('TPMScorePreviewV1','TPMSealedRunReaderV1','TPMFactSetV1','TPMFactV1','TPMEvidenceRecordV1','TPMScoreItemV1','TPMEligibilitySnapshotV1','TPMPublicationCandidateV1','TPMPublicationOutcomeV1','TPMFinalOutcomeV1')){$t=('Jumpstile.TPM.Certification.V1.'+$n)-as[type];@($t.GetConstructors()).Count|Should -Be 0;@($t.GetProperties()| Where-Object CanWrite).Count|Should -Be 0}}
@@ -114,7 +119,7 @@ Describe 'ADR-0155 Phase 1 hashing and containment' {
         { Resolve-TPMContainedPathV1 -Root $root -Path '\\?\C:\escape.png' } | Should -Throw '*device*'
     }
 
-    It 'rejects an existing reparse point beneath the root' -Skip:(-not $IsWindows -and $PSVersionTable.PSVersion.Major -ge 6) {
+    It 'rejects an existing reparse point beneath the root' -Skip:$script:tpmAuthorityNonWindowsPwsh {
         $root = Join-Path $TestDrive 'root'
         $target = Join-Path $TestDrive 'target'
         $link = Join-Path $root 'link'

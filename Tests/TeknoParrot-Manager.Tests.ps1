@@ -19,9 +19,14 @@ BeforeAll {
         throw "Failed to parse TeknoParrot-Manager.ps1: $($parseErrors -join '; ')"
     }
     $functionAsts = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
-    foreach ($fn in $functionAsts) {
-        . ([scriptblock]::Create($fn.Extent.Text))
-    }
+    # Dot-source the extracted function definitions from one temporary file so
+    # PowerShell gives them the same script scope.  Creating and dot-sourcing
+    # one ScriptBlock per function can leave functions, mocks, and helper state
+    # in subtly different scopes when this container runs alongside other
+    # Pester files.
+    $extractedFunctionsPath = Join-Path $TestDrive ("tpm-manager-functions-{0}.ps1" -f ([guid]::NewGuid().ToString('N')))
+    ($functionAsts | ForEach-Object { $_.Extent.Text }) -join "`r`n`r`n" | Set-Content -LiteralPath $extractedFunctionsPath -Encoding utf8
+    . $extractedFunctionsPath
 
     # $FuzzyAutoThreshold/$FuzzyTieMargin are top-level script-scope constants (not
     # function bodies), so the AST extraction above never picks them up. Functions
@@ -38,6 +43,14 @@ BeforeAll {
     $script:TitleTokenStopWords = [System.Collections.Generic.HashSet[string]]::new(
         [string[]]@('the', 'of', 'a', 'an', 'and', 'vs', 'vs.', 'in', 'for', 'to'),
         [System.StringComparer]::OrdinalIgnoreCase)
+
+    # $RawThrillsPathLimits is another top-level production table omitted by
+    # AST extraction.  Resolver contexts snapshot it in their BeforeAll
+    # blocks before installing their narrow fixtures, so establish the
+    # script-scope slot here first.  The resolver logic and its fixture values
+    # remain unchanged; this only fixes the bootstrap ordering under strict
+    # mode.
+    $script:RawThrillsPathLimits = @{}
 
     # $script:LocalDriveInfoCache/$LocalDriveInfoCachePopulated are top-level
     # script-scope variables (not function bodies) initialised before
@@ -459,6 +472,41 @@ Describe "Set-SecondaryExecutablePath" {
         Set-SecondaryExecutablePath $doc $primary
 
         $doc.GameProfile.SelectSingleNode("GamePath2") | Should -BeNullOrEmpty
+    }
+}
+
+Describe "Register-Games structured result" {
+    It "does not leak the secondary-path helper return value into the result object" {
+        $root = Join-Path $TestDrive "register-games-result"
+        $userProfilesDir = Join-Path $root "UserProfiles"
+        $installFolder = Join-Path $root "Games"
+        $gameFolder = Join-Path $installFolder "TestGame"
+        $gameProfilesDir = Join-Path $root "GameProfiles"
+        New-Item -ItemType Directory -Path $userProfilesDir, $gameFolder, $gameProfilesDir -Force | Out-Null
+
+        $exePath = Join-Path $gameFolder "game.exe"
+        [IO.File]::WriteAllBytes($exePath, [byte[]]@(0))
+        $templatePath = Join-Path $gameProfilesDir "TestGame.xml"
+        [IO.File]::WriteAllText($templatePath, '<GameProfile><ExecutableName>game.exe</ExecutableName><HasTwoExecutables>false</HasTwoExecutables></GameProfile>')
+
+        $profileIndex = @{
+            'game.exe' = @([pscustomobject]@{ Code = 'TestGame'; TemplatePath = $templatePath })
+        }
+
+        # HasTwoExecutables=false makes Set-SecondaryExecutablePath return its
+        # normal $false value. Register-Games must consume that helper result
+        # and still return its documented single structured result, including
+        # in dry-run mode.
+        $result = @(Register-Games -userProfilesDir $userProfilesDir -installFolder $installFolder -profileIndex $profileIndex -gameProfilesDir $gameProfilesDir -DryRun:$true)
+
+        $result.Count | Should -Be 1
+        $result[0] | Should -BeOfType [pscustomobject]
+        @($result[0].PSObject.Properties.Name) | Should -Contain 'Registered'
+        @($result[0].PSObject.Properties.Name) | Should -Contain 'Already'
+        @($result[0].PSObject.Properties.Name) | Should -Contain 'Ambiguous'
+        @($result[0].PSObject.Properties.Name) | Should -Contain 'Unmatched'
+        @($result[0].Registered).Count | Should -Be 1
+        $result[0].Registered[0].Code | Should -Be 'TestGame'
     }
 }
 
@@ -971,7 +1019,7 @@ Describe "Build-DatIndexFromStream" {
     # Skip() had landed on -- on a real 506-game dat this dropped roughly
     # half of all games (493 opened, only 236 closed) regardless of whether
     # they had a valid GameProfile. These games deliberately carry varying
-    # <rom> counts (0, 1, 3) so a regression of that exact shape fails here
+    # ROM counts (0, 1, 3) so a regression of that exact shape fails here
     # instead of only on a multi-hundred-entry real dat.
     BeforeAll {
         function New-DatStream {
@@ -990,7 +1038,7 @@ Describe "Build-DatIndexFromStream" {
         }
     }
 
-    It "indexes every game regardless of how many <rom> entries precede its closing tag" {
+    It "indexes every game regardless of how many ROM entries precede its closing tag" {
         $stream = New-DatStream -RomCounts @(0, 1, 3, 2, 0)
         $index = Build-DatIndexFromStream -stream $stream
         $index.Count | Should -Be 5
@@ -1000,7 +1048,7 @@ Describe "Build-DatIndexFromStream" {
         }
     }
 
-    It "indexes a game with many <rom> entries followed by another game" {
+    It "indexes a game with many ROM entries followed by another game" {
         $stream = New-DatStream -RomCounts @(137, 4)
         $index = Build-DatIndexFromStream -stream $stream
         $index.Count | Should -Be 2
@@ -2783,7 +2831,7 @@ Describe "Get-GameProfileSchemaDrift (issue #43 schema drift detection)" {
         $r.UnknownFieldTypes  | Should -Contain 'FutureRangeSliderV2'
         $r.WouldWrite         | Should -BeFalse
     }
-    It "treats a missing <GameProfile> root as maximal drift, never a write" {
+    It "treats a missing GameProfile root as maximal drift, never a write" {
         $r = Get-GameProfileSchemaDrift -Doc ([xml]"<NotAGameProfile><Foo/></NotAGameProfile>")
         $r.HasRoot    | Should -BeFalse
         $r.HasDrift   | Should -BeTrue
@@ -2928,9 +2976,12 @@ Describe "Get-ManagerUpdateRelease" {
             [pscustomobject]@{
                 Content = (@{
                     tag_name = 'v0.99.99'
+                    name     = 'v0.99.99 BETA'
+                    body     = 'Test release notes.'
                     assets   = @(@{
                         name                  = 'TeknoParrot.Manager.v0.99.99.BETA.zip'
                         browser_download_url = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.99/TeknoParrot.Manager.v0.99.99.BETA.zip'
+                        size                  = 1
                     })
                 } | ConvertTo-Json -Depth 5)
             }
@@ -3147,9 +3198,12 @@ Describe "Invoke-CheckForUpdates" {
             param([string]$TagName = 'v0.99.99', [string]$AssetName = 'TeknoParrot.Manager.v0.99.99.BETA.zip')
             return (@{
                 tag_name = $TagName
+                name     = $TagName
+                body     = 'Test release notes.'
                 assets   = @(@{
                     name                  = $AssetName
                     browser_download_url = "https://github.com/Jumpstile/teknoparrot-manager/releases/download/$TagName/$AssetName"
+                    size                  = 1
                 })
             } | ConvertTo-Json -Depth 5)
         }
@@ -3253,6 +3307,7 @@ Describe "Invoke-ManagerUpdateInstall" {
                 Body        = 'Test release notes.'
                 AssetName   = 'TeknoParrot.Manager.v0.99.99.BETA.zip'
                 DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.99/TeknoParrot.Manager.v0.99.99.BETA.zip'
+                SizeBytes   = 1
             }
         }
 

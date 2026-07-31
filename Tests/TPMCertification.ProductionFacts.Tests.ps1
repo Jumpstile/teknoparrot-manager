@@ -32,7 +32,7 @@ BeforeAll {
   $zero=[pscustomobject]@{Added=0;Removed=0;Changed=0;BeforeSkipped=0;AfterSkipped=0}
   $health=[pscustomobject]@{Checks=@([pscustomobject]@{Name='TeknoParrotUi.exe exists';Passed=$true},[pscustomobject]@{Name='GameProfiles folder exists';Passed=$true},[pscustomobject]@{Name='UserProfiles folder exists';Passed=$true})}
   $results=[pscustomobject]@{
-   SmokeMode=$true;Checks=@([pscustomobject]@{Name='Repository available';Passed=$true});GitStatus='(clean)'
+   SmokeMode=$true;Checks=@([pscustomobject]@{Name='Repository available';Passed=$true;Details='fixture repository is available'});GitStatus='(clean)'
    Pester=[pscustomobject]@{Total=2;Passed=2;Failed=0;Skipped=0;NotRun=0};PesterVersion='5.7.1';PowerShellVersion='7.6.3'
    PSScriptAnalyzerFindings=999;PSScriptAnalyzerVersion='decoy-legacy-value'
    Backup=[pscustomobject]@{UserProfiles=$true;GameProfiles=$false}
@@ -1318,7 +1318,7 @@ Describe 'Get-TPMProductionPowerShellInventoryV1 self-scan (the complete real in
   $inv=Get-TPMProductionPowerShellInventoryV1 -RepositoryPath $repoRoot
   foreach($item in $inv){
    $bytes=[IO.File]::ReadAllBytes($item.FullPath)
-   (@($bytes)|Where-Object{$_-gt127}).Count|Should -Be 0 -Because "$($item.RelativePath) must be pure ASCII"
+   @(@($bytes)|Where-Object{$_-gt127}).Count|Should -Be 0 -Because "$($item.RelativePath) must be pure ASCII"
    $parseErrors=$null;$tokens=$null
    [System.Management.Automation.Language.Parser]::ParseFile($item.FullPath,[ref]$tokens,[ref]$parseErrors)|Out-Null
    $parseErrors.Count|Should -Be 0 -Because "$($item.RelativePath) must parse cleanly"

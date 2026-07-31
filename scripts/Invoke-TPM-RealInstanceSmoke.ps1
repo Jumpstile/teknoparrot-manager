@@ -1029,6 +1029,7 @@ function Test-TPMPngStructure {
     $idatCount = 0
     $idatStarted = $false
     $idatEnded = $false
+    $paletteDependentSeenBeforePlte = $false
     $colorType = $null
     $bitDepth = $null
 
