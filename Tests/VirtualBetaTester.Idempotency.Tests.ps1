@@ -38,11 +38,50 @@ BeforeAll {
     $script:TitleTokenStopWords = [System.Collections.Generic.HashSet[string]]::new(
         [string[]]@('the', 'of', 'a', 'an', 'and', 'vs', 'vs.', 'in', 'for', 'to'),
         [System.StringComparer]::OrdinalIgnoreCase)
+
+    # ECVF (issue #182 follow-up): file-backed fixture used only by the
+    # cursor-path denial tests below. Copies the real, currently-shipped
+    # Authority/Contracts modules and the real pcsx2x6 contract.json into a
+    # $TestDrive tree shaped like the repo (scripts\, contracts\pcsx2x6\),
+    # then re-extracts and dot-sources ONLY Set-Pcsx2CursorPaths from
+    # inside that tree so its $PSScriptRoot resolves there. This makes the
+    # function actually import the module and consult the real contract,
+    # exercising the genuine OWNERSHIP_VIOLATION denial path -- not just
+    # the generic "framework unavailable" fallback that fires elsewhere in
+    # this file because the plain extracted-functions file has no scripts\
+    # folder beside it. Dot-sourcing the returned path inside a single It
+    # block only redefines Set-Pcsx2CursorPaths for that It's own scope; it
+    # does not affect the other extracted functions or any other test.
+    function New-Pcsx2ContractDenialFixture {
+        $fixtureRoot = Join-Path $TestDrive ("ecvf-fixture-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $fixtureRoot 'scripts') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $fixtureRoot 'contracts\pcsx2x6') -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TPMCertification.Authority.psm1') -Destination (Join-Path $fixtureRoot 'scripts\TPMCertification.Authority.psm1') -Force
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TPMCertification.Contracts.psm1') -Destination (Join-Path $fixtureRoot 'scripts\TPMCertification.Contracts.psm1') -Force
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\contract.json') -Destination (Join-Path $fixtureRoot 'contracts\pcsx2x6\contract.json') -Force
+
+        $pcsx2Ast = $functionAsts | Where-Object { $_.Name -eq 'Set-Pcsx2CursorPaths' } | Select-Object -First 1
+        if (-not $pcsx2Ast) { throw "Set-Pcsx2CursorPaths not found while building the ECVF contract-denial fixture" }
+        $pcsx2FixturePath = Join-Path $fixtureRoot 'Set-Pcsx2CursorPaths.ps1'
+        $pcsx2Ast.Extent.Text | Set-Content -LiteralPath $pcsx2FixturePath -Encoding utf8
+        return $pcsx2FixturePath
+    }
 }
 
 Describe "Virtual Beta Tester: idempotency / repeat-run safety (issue #88 phase 1)" -Tag 'TVD-High' {
+    # ECVF (issue #182): cursor_path under [USB1]/[USB2] guncon2 sections is
+    # contract-owned by the emulator (Owner=Emulator, WritePolicy=NeverWrite
+    # in contracts\pcsx2x6\contract.json) -- the emulator clears it in
+    # memory whenever JVS mode is LIGHTGUN regardless of INI contents, so
+    # Set-Pcsx2CursorPaths now consults the contract and denies the write
+    # every time rather than the pre-ECVF behavior of writing it
+    # unconditionally. The idempotency question this Describe block exists
+    # to answer is therefore no longer "does a repeat write stay
+    # byte-identical" but "does a repeat DENIAL stay byte-identical and
+    # backup-free" -- the same repeat-run safety property, applied to the
+    # correct (denied) outcome.
 
-    It "Set-Pcsx2CursorPaths produces byte-identical PCSX2.ini content on a second run with the same target paths" {
+    It "Set-Pcsx2CursorPaths denies the write on every repeat call and never drifts the emulator-owned INI" {
         $iniPath = Join-Path $TestDrive ("pcsx2-idempotent-" + [guid]::NewGuid().ToString('N') + '.ini')
         @(
             '[Frame]',
@@ -54,37 +93,60 @@ Describe "Virtual Beta Tester: idempotency / repeat-run safety (issue #88 phase 
             '[USB Port 2 guncon2]',
             'cursor_path = C:\Old\Legacy\Path\P2.png'
         ) -join "`r`n" | Set-Content -LiteralPath $iniPath -Encoding utf8
+        $originalContent = Get-Content -LiteralPath $iniPath -Raw
 
         $p1 = 'C:\TeknoParrot\pcsx2x6\TeknoParrot\crosshairs\P1.png'
         $p2 = 'C:\TeknoParrot\pcsx2x6\TeknoParrot\crosshairs\P2.png'
 
-        Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path $p1 -P2Path $p2
+        $firstResult = Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path $p1 -P2Path $p2
         $afterFirstRun = Get-Content -LiteralPath $iniPath -Raw
 
-        Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path $p1 -P2Path $p2
+        $secondResult = Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path $p1 -P2Path $p2
         $afterSecondRun = Get-Content -LiteralPath $iniPath -Raw
 
-        $afterSecondRun | Should -Be $afterFirstRun -Because "running the same crosshair-path write twice with identical targets must not duplicate or drift cursor_path entries"
-
-        # A real idempotency check, not just "the strings match": confirm there
-        # is still exactly one cursor_path line per section, not one appended
-        # on top of another.
-        $cursorPathLines = @(($afterSecondRun -split "`r`n") | Where-Object { $_ -match '^cursor_path\s*=' })
-        $cursorPathLines.Count | Should -Be 2 -Because "two guncon2 sections, one cursor_path line each -- a repeat run must not append a duplicate"
+        $firstResult | Should -Be $false -Because "USB1/USB2 guncon2_cursor_path is Owner=Emulator, WritePolicy=NeverWrite -- TPM must never write it"
+        $secondResult | Should -Be $false -Because "a repeat call must deny the write identically, not eventually fall back to writing"
+        $afterFirstRun | Should -Be $originalContent -Because "a denied write must leave emulator-owned INI content byte-identical to what the user had"
+        $afterSecondRun | Should -Be $afterFirstRun -Because "repeat denial must not drift the file across runs"
     }
 
-    It "each run still creates its own timestamped backup (backup-before-write is not itself skipped on a repeat run)" {
+    It "a denied write creates no backup, on the first call or any repeat call" {
         $iniPath = Join-Path $TestDrive ("pcsx2-backup-check-" + [guid]::NewGuid().ToString('N') + '.ini')
         @('[USB Port 1 guncon2]', 'cursor_path = old.png') -join "`r`n" | Set-Content -LiteralPath $iniPath -Encoding utf8
+        $originalContent = Get-Content -LiteralPath $iniPath -Raw
         $iniDir = [System.IO.Path]::GetDirectoryName($iniPath)
         $iniName = [System.IO.Path]::GetFileName($iniPath)
 
-        Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path 'p1.png' -P2Path 'p2.png'
-        Start-Sleep -Milliseconds 1100  # backup filenames are second-resolution timestamps
-        Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path 'p1.png' -P2Path 'p2.png'
+        Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path 'p1.png' -P2Path 'p2.png' | Out-Null
+        Start-Sleep -Milliseconds 1100  # backup filenames would be second-resolution timestamps if any were created
+        Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path 'p1.png' -P2Path 'p2.png' | Out-Null
 
         $backups = @(Get-ChildItem -LiteralPath $iniDir -Filter "$iniName.bak_*")
-        $backups.Count | Should -Be 2 -Because "backup-before-write is a safety invariant that must hold on every run, including repeat runs -- it must never be silently skipped because the file 'already looks right'"
+        $backups.Count | Should -Be 0 -Because "backup-before-write only applies to a write that actually happens -- a denied write (emulator-owned, NeverWrite) must create zero backups, on the first call or any repeat"
+        (Get-Content -LiteralPath $iniPath -Raw) | Should -Be $originalContent -Because "emulator-owned state must remain untouched across repeat denied calls"
+    }
+
+    It "denies the write for the real reason -- the contract's OWNERSHIP_VIOLATION, not just an unreachable framework (file-backed ECVF fixture)" {
+        # Every other test in this Describe block runs Set-Pcsx2CursorPaths
+        # as extracted into the plain $TestDrive functions file, which has
+        # no scripts\ folder beside it -- that exercises the generic
+        # "framework unavailable" fallback, not the contract itself. This
+        # test dot-sources a fixture-scoped copy of just this one function
+        # (see New-Pcsx2ContractDenialFixture in BeforeAll above) so it
+        # actually loads the real Contracts module and the real pcsx2x6
+        # contract, proving the denial comes from the contract's own
+        # ownership rule.
+        . (New-Pcsx2ContractDenialFixture)
+        $iniPath = Join-Path $TestDrive ("pcsx2-real-contract-" + [guid]::NewGuid().ToString('N') + '.ini')
+        @('[USB Port 1 guncon2]', 'cursor_path = old.png') -join "`r`n" | Set-Content -LiteralPath $iniPath -Encoding utf8
+        $originalContent = Get-Content -LiteralPath $iniPath -Raw
+        Mock Write-Log {}
+
+        $result = Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path 'p1.png' -P2Path 'p2.png'
+
+        $result | Should -Be $false
+        (Get-Content -LiteralPath $iniPath -Raw) | Should -Be $originalContent -Because "the real pcsx2x6 contract marks cursor_path Owner=Emulator, WritePolicy=NeverWrite -- the write must be denied and the emulator-owned file left untouched"
+        Should -Invoke Write-Log -ParameterFilter { $msg -match 'OWNERSHIP_VIOLATION' } -Because "the skip reason must come from the real contract's ownership check, proving this exercised actual contract denial rather than the generic framework-unavailable fallback"
     }
 }
 
