@@ -240,8 +240,14 @@ Describe 'certification production entry points reject interactive/mutating depe
   $batch|Should -Match 'powershell\.exe -NoProfile -NonInteractive';$batch|Should -Match 'endlocal & exit /b %RUN_EXIT%'
  }
  It 'no script or test under scripts/ or Tests/ sets a blanket confirmation-suppression default' {
-  $hits=@(Get-ChildItem -LiteralPath $repoRoot -Include '*.ps1','*.psm1' -Recurse -File|
-   Where-Object{$_.FullName -match '\\(scripts|Tests)\\'}|
+  # -Include with -LiteralPath -Recurse is silently inert under Windows
+  # PowerShell 5.1 (it only filters reliably when -Path carries a trailing
+  # wildcard) -- pwsh applies it correctly, but PS 5.1 returns every file
+  # including *.md, producing false-positive hits against documentation
+  # that merely describes this anti-pattern. Filtering by Extension in
+  # Where-Object instead behaves identically on both engines.
+  $hits=@(Get-ChildItem -LiteralPath $repoRoot -Recurse -File|
+   Where-Object{$_.Extension -in @('.ps1', '.psm1') -and $_.FullName -match '\\(scripts|Tests)\\'}|
    Select-String -Pattern '\$PSDefaultParameterValues\s*\[\s*[''"]\*:Confirm[''"]\s*\]' -SimpleMatch:$false)
   $hits.Count|Should -Be 0 -Because 'each call site must handle non-interactive behavior locally and deliberately, never via a hidden global override'
  }
