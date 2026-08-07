@@ -420,11 +420,17 @@ Describe 'ECVF foundation -- Invoke-TPMEnvironmentInitializationActionV1 timeout
   # mid-wait leaves its own child process running on Windows (no POSIX
   # process-group semantics), which would otherwise hold a lock on
   # $TestDrive and fail Pester's own cleanup after this test.
-  $hangExe = Join-Path $script:root 'hang.exe'
+  $processName = 'hang-' + ([guid]::NewGuid().ToString('N'))
+  $hangExe = Join-Path $script:root ($processName + '.exe')
   Copy-Item -LiteralPath (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe') -Destination $hangExe -Force
-  $action = [ordered]@{ Method = 'CliInvocation'; Command = 'hang.exe'; Arguments = @('-NoProfile', '-Command', 'Start-Sleep -Seconds 30'); ExpectedExitCodes = @(0); TimeoutSeconds = 1 }
+  $action = [ordered]@{ Method = 'CliInvocation'; Command = ($processName + '.exe'); Arguments = @('-NoProfile', '-Command', 'Start-Sleep -Seconds 30'); ExpectedExitCodes = @(0); TimeoutSeconds = 1 }
   $sw = [System.Diagnostics.Stopwatch]::StartNew()
-  { Invoke-TPMEnvironmentInitializationActionV1 -Action $action -InstallDir $script:root } | Should -Throw '*did not exit within*'
+  try {
+   { Invoke-TPMEnvironmentInitializationActionV1 -Action $action -InstallDir $script:root } | Should -Throw '*did not exit within*'
+   @(Get-Process -Name $processName -ErrorAction SilentlyContinue).Count | Should -Be 0 -Because "the timed-out child must be confirmed terminated before the action fails"
+  } finally {
+   Get-Process -Name $processName -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  }
   $sw.Stop()
   $sw.Elapsed.TotalSeconds | Should -BeLessThan 20 -Because "the call must return once the timeout elapses, not once the hung process would eventually exit on its own"
  }
