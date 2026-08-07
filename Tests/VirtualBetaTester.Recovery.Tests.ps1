@@ -553,4 +553,46 @@ Describe "Pcsx2x6 crosshair prerequisite automation (issue #173)" -Tag 'TVD-Medi
         $report.USB1CursorPath | Should -BeNullOrEmpty
         $report.USB2CursorPath | Should -BeNullOrEmpty -Because "nothing in this sequence ever writes USB1/USB2 guncon2_cursor_path -- only the emulator's own -testconfig mechanism and a strictly read-only report ran"
     }
+
+    It "Invoke-CrosshairSetup: Unknown ECVF state performs zero crosshair PNG writes" {
+        $fixture = New-Pcsx2CrosshairSetupFixture
+        . $fixture.FixturePath
+        Mock Read-HostSafe { '0' }
+        Mock Start-Process {}
+        Mock Export-CrosshairPreview {}
+        Mock Get-Pcsx2CrosshairPrerequisiteState {
+            [pscustomobject]@{
+                State = 'Unknown'
+                Pcsx2Dir = $fixture.Pcsx2Root
+                DataRoot = $null
+                IniPath = $null
+                Reason = 'synthetic unknown ECVF state'
+            }
+        }
+
+        Invoke-CrosshairSetup -UserProfilesDir $fixture.ProfilesRoot -GamesInstallFolder $fixture.Root -TpRoot $fixture.Root | Out-Null
+
+        $destination = Join-Path $fixture.Pcsx2Root 'TeknoParrot\crosshairs'
+        (Test-Path -LiteralPath (Join-Path $destination 'P1.png')) | Should -Be $false
+        (Test-Path -LiteralPath (Join-Path $destination 'P2.png')) | Should -Be $false
+        @(Get-ChildItem -LiteralPath $fixture.Pcsx2Root -Recurse -Filter '*.png' -File -ErrorAction SilentlyContinue).Count | Should -Be 0
+    }
+
+    It "Invoke-CrosshairSetup: unavailable ECVF contract performs zero crosshair PNG writes" {
+        $fixture = New-Pcsx2CrosshairSetupFixture
+        . $fixture.FixturePath
+        $state = Get-Pcsx2CrosshairPrerequisiteState -Pcsx2Dir $fixture.Pcsx2Root
+        $state.State | Should -Be 'Unknown'
+        $state.Reason | Should -Match 'framework was not available'
+        Mock Read-HostSafe { '0' }
+        Mock Start-Process {}
+        Mock Export-CrosshairPreview {}
+
+        Invoke-CrosshairSetup -UserProfilesDir $fixture.ProfilesRoot -GamesInstallFolder $fixture.Root -TpRoot $fixture.Root | Out-Null
+
+        $destination = Join-Path $fixture.Pcsx2Root 'TeknoParrot\crosshairs'
+        (Test-Path -LiteralPath (Join-Path $destination 'P1.png')) | Should -Be $false
+        (Test-Path -LiteralPath (Join-Path $destination 'P2.png')) | Should -Be $false
+        @(Get-ChildItem -LiteralPath $fixture.Pcsx2Root -Recurse -Filter '*.png' -File -ErrorAction SilentlyContinue).Count | Should -Be 0
+    }
 }
