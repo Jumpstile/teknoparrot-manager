@@ -434,4 +434,22 @@ Describe 'ECVF foundation -- Invoke-TPMEnvironmentInitializationActionV1 timeout
   $sw.Stop()
   $sw.Elapsed.TotalSeconds | Should -BeLessThan 20 -Because "the call must return once the timeout elapses, not once the hung process would eventually exit on its own"
  }
+
+ It 'fails closed when timeout cleanup cannot be confirmed' {
+  $exe = Join-Path $script:root 'cleanup-failure.cmd'
+  [IO.File]::WriteAllText($exe, '@echo off' + [Environment]::NewLine + 'exit /b 0' + [Environment]::NewLine)
+  $fakeProcess = New-Object PSObject
+  $fakeProcess | Add-Member NoteProperty ExitCode $null
+  $fakeProcess | Add-Member ScriptMethod WaitForExit {
+   param([int]$milliseconds)
+   if ($milliseconds -eq 5000) { throw 'termination check denied' }
+   return $false
+  }
+  $fakeProcess | Add-Member ScriptMethod Kill { throw 'kill denied' }
+  Mock Start-Process { return $fakeProcess } -ModuleName TPMCertification.Contracts
+  $action = [ordered]@{ Method = 'CliInvocation'; Command = 'cleanup-failure.cmd'; Arguments = @('-synthetic'); ExpectedExitCodes = @(0); TimeoutSeconds = 1 }
+
+  { Invoke-TPMEnvironmentInitializationActionV1 -Action $action -InstallDir $script:root } | Should -Throw '*termination could not be confirmed*'
+  Should -Invoke Start-Process -ModuleName TPMCertification.Contracts -Times 1 -Exactly
+ }
 }
