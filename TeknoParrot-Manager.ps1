@@ -3030,6 +3030,182 @@ function Resolve-Pcsx2Directory {
            Where-Object { $_.Name -imatch '^pcsx2' } | Select-Object -First 1 -ExpandProperty FullName
 }
 
+# Checks whether a pcsx2x6 process is currently running, so first-run
+# initialization never races a live emulator instance touching the same
+# ini/data-root files. Mirrors the Get-Process -Name guard pattern already
+# used elsewhere in this script for LaunchBox/BigBox/TeknoParrotUi.
+function Test-Pcsx2ProcessRunning {
+    return [bool](Get-Process -Name "pcsx2-qtx64" -ErrorAction SilentlyContinue)
+}
+
+# Read-only classification of a resolved pcsx2x6 install against the ECVF
+# contract's env-init EnvironmentCapability and the canonical crosshair PNG
+# locations (issue #173). Never invokes InitializationAction and never
+# writes anything -- this only reports state; a caller decides separately
+# whether and how to repair. States:
+#   NotInstalled        -- folder missing or emulator executable not found.
+#   Unknown              -- the ECVF contracts framework could not be
+#                           consulted; callers must treat this the same as
+#                           NotInstalled for any write-adjacent decision.
+#   StockUninitialized   -- present, but PCSX2.ini fails the contract's
+#                           InitializedVerifier (no inis\PCSX2.ini yet, or
+#                           missing required sections).
+#   Incomplete           -- PCSX2.ini is initialized but one or both
+#                           canonical crosshair PNGs are missing.
+#   Canonical            -- PCSX2.ini is initialized and both crosshair
+#                           PNGs are present at the canonical location.
+function Get-Pcsx2CrosshairPrerequisiteState {
+    param([Parameter(Mandatory)][string]$Pcsx2Dir)
+
+    $result = [ordered]@{
+        State                 = 'NotInstalled'
+        Pcsx2Dir              = $Pcsx2Dir
+        DataRoot              = $null
+        IniPath               = $null
+        Reason                = $null
+        HasP1Png              = $false
+        HasP2Png              = $false
+        Contract              = $null
+        EnvironmentCapability = $null
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Pcsx2Dir) -or -not (Test-Path -LiteralPath $Pcsx2Dir -PathType Container)) {
+        $result.Reason = "pcsx2x6 install folder not found"
+        return [pscustomobject]$result
+    }
+
+    try {
+        $ecvfContractsModule = Join-Path $PSScriptRoot "scripts\TPMCertification.Contracts.psm1"
+        if (-not (Test-Path -LiteralPath $ecvfContractsModule -PathType Leaf)) {
+            $result.State  = 'Unknown'
+            $result.Reason = "the ECVF contracts framework was not available to classify this install"
+            return [pscustomobject]$result
+        }
+        Import-Module $ecvfContractsModule -Force -ErrorAction Stop
+        $loaded = Get-TPMEmulatorContractV1 -ContractId 'pcsx2x6'
+        $envCap = $loaded.Contract.EnvironmentCapabilities | Where-Object { $_.CapabilityId -eq 'env-init' } | Select-Object -First 1
+        if (-not $envCap) {
+            $result.State  = 'Unknown'
+            $result.Reason = "pcsx2x6 contract has no 'env-init' EnvironmentCapability"
+            return [pscustomobject]$result
+        }
+        $result.Contract              = $loaded.Contract
+        $result.EnvironmentCapability = $envCap
+
+        $present = Test-TPMEmulatorPresentV1 -Detector $envCap.PresenceDetector -InstallDir $Pcsx2Dir
+        if (-not $present) {
+            $result.Reason = "$($envCap.PresenceDetector.Source) not found under $Pcsx2Dir"
+            return [pscustomobject]$result
+        }
+
+        $dataRoot = Resolve-TPMEnvironmentDataRootV1 -Resolver $envCap.DataRootResolver -InstallDir $Pcsx2Dir
+        $result.DataRoot = $dataRoot
+        if ($envCap.InitializedVerifier.RequiredPaths.Count -gt 0) {
+            $result.IniPath = Join-Path $dataRoot $envCap.InitializedVerifier.RequiredPaths[0]
+        }
+
+        $p1Path = Join-Path $dataRoot "crosshairs\P1.png"
+        $p2Path = Join-Path $dataRoot "crosshairs\P2.png"
+        $result.HasP1Png = Test-Path -LiteralPath $p1Path -PathType Leaf
+        $result.HasP2Png = Test-Path -LiteralPath $p2Path -PathType Leaf
+
+        $verified = Test-TPMEnvironmentInitializedV1 -Verifier $envCap.InitializedVerifier -DataRoot $dataRoot
+        if (-not $verified.Initialized) {
+            $result.State  = 'StockUninitialized'
+            $result.Reason = $verified.Reason
+            return [pscustomobject]$result
+        }
+
+        if ($result.HasP1Png -and $result.HasP2Png) {
+            $result.State = 'Canonical'
+        } else {
+            $result.State  = 'Incomplete'
+            $result.Reason = "PCSX2.ini is initialized but one or both canonical crosshair PNGs are missing"
+        }
+        return [pscustomobject]$result
+    } catch {
+        $result.State  = 'Unknown'
+        $result.Reason = "could not load or evaluate the pcsx2x6 emulator contract -- $_"
+        return [pscustomobject]$result
+    }
+}
+
+# Triggers the pcsx2x6 emulator's own -testconfig -portable first-run
+# initialization mechanism (contract EnvironmentCapability 'env-init'),
+# then re-verifies with the same read-only InitializedVerifier used for
+# detection. Never hand-authors PCSX2.ini content -- CliInvocation only
+# ever runs the emulator's own executable (issue #173). The caller must
+# have already obtained user approval and confirmed no pcsx2x6 process is
+# running; this function does not prompt and does not guard against a
+# running process itself.
+function Invoke-Pcsx2FirstRunSetup {
+    param([Parameter(Mandatory)]$State)
+
+    if ($State.State -ne 'StockUninitialized') {
+        return [pscustomobject]@{ Success = $false; Reason = "first-run setup only applies to a StockUninitialized install (current state: $($State.State))" }
+    }
+
+    $ecvfContractsModule = Join-Path $PSScriptRoot "scripts\TPMCertification.Contracts.psm1"
+    try {
+        Import-Module $ecvfContractsModule -Force -ErrorAction Stop
+        Invoke-TPMEnvironmentInitializationActionV1 -Action $State.EnvironmentCapability.InitializationAction -InstallDir $State.Pcsx2Dir | Out-Null
+    } catch {
+        Write-Log "Pcsx2FirstRunSetup: initialization action failed -- $_"
+        return [pscustomobject]@{ Success = $false; Reason = "first-run initialization failed -- $_" }
+    }
+
+    $reverified = Test-TPMEnvironmentInitializedV1 -Verifier $State.EnvironmentCapability.InitializedVerifier -DataRoot $State.DataRoot
+    if (-not $reverified.Initialized) {
+        Write-Log "Pcsx2FirstRunSetup: post-init verification failed -- $($reverified.Reason)"
+        return [pscustomobject]@{ Success = $false; Reason = "PCSX2.ini still not initialized after running first-run setup -- $($reverified.Reason)" }
+    }
+
+    Write-Log "Pcsx2FirstRunSetup: first-run initialization succeeded for $($State.Pcsx2Dir)"
+    return [pscustomobject]@{ Success = $true; Reason = $null }
+}
+
+# Read-only report of the current on-disk cursor_path values for the
+# emulator-owned USB1/USB2 guncon2 device (contract SettingPaths
+# 'USB1.guncon2_cursor_path[jvsmode=lightgun]' /
+# 'USB2.guncon2_cursor_path[jvsmode=lightgun]', Owner=Emulator,
+# WritePolicy=NeverWrite). Uses the real on-disk section/key format
+# confirmed in contracts\pcsx2x6\evidence.md#ev-usb-ini-contract -- [USB1]/
+# [USB2] sections, guncon2_cursor_path key -- not the [USB Port N guncon2]/
+# cursor_path format Set-Pcsx2CursorPaths still targets for its (always
+# contract-denied) write attempt. That mismatch has no effect on write
+# safety -- the write is denied before any section is even parsed -- but it
+# does mean Set-Pcsx2CursorPaths cannot be reused to observe the real
+# value, hence this separate, strictly read-only reader. Never writes
+# anything.
+function Get-Pcsx2CursorPathReport {
+    param([Parameter(Mandatory)][string]$IniPath)
+
+    if (-not (Test-Path -LiteralPath $IniPath -PathType Leaf)) {
+        return [pscustomobject]@{ Available = $false; USB1CursorPath = $null; USB2CursorPath = $null; Reason = "PCSX2.ini not found at $IniPath" }
+    }
+    try {
+        $lines = [System.IO.File]::ReadAllLines($IniPath)
+    } catch {
+        return [pscustomobject]@{ Available = $false; USB1CursorPath = $null; USB2CursorPath = $null; Reason = "could not read PCSX2.ini -- $_" }
+    }
+
+    $values = @{ 'usb1' = $null; 'usb2' = $null }
+    $sect = ''
+    foreach ($ln in $lines) {
+        $t = $ln.Trim()
+        if ($t -match '^\[(.+)\]$') { $sect = $matches[1].ToLower(); continue }
+        if (($sect -eq 'usb1' -or $sect -eq 'usb2') -and $t -match '^guncon2_cursor_path\s*=\s*(.*)$') {
+            $values[$sect] = $matches[1].Trim()
+        }
+    }
+    return [pscustomobject]@{
+        Available      = $true
+        USB1CursorPath = $values['usb1']
+        USB2CursorPath = $values['usb2']
+        Reason         = $null
+    }
+}
+
 # Crosshair setup wizard: HTML preview of all crosshair PNGs, P1/P2 picker,
 # deploy selected images to all registered lightgun game folders. Optionally
 # hides the hardware cursor by setting HideCursor/DisableCursor=1 in every
@@ -3181,6 +3357,43 @@ function Invoke-CrosshairSetup {
                 # Also updates inis\PCSX2.ini with the cursor_path for each USB port.
                 if (-not $pcsx2Deployed) {
                     if ($pcsx2Dir) {
+                        $pcsx2Deployed = $true
+                        $prereqState = Get-Pcsx2CrosshairPrerequisiteState -Pcsx2Dir $pcsx2Dir
+
+                        if ($prereqState.State -eq 'StockUninitialized') {
+                            Write-Host ""
+                            Write-Host "  PCSX2 Crosshair Setup Required" -ForegroundColor Cyan
+                            Write-Host ("    TPM found pcsx2x6 installed but not yet initialized for TeknoParrot ({0})." -f $prereqState.Reason) -ForegroundColor DarkGray
+                            Write-Host "    TPM can trigger the emulator's own first-run initialization, then install the crosshair assets and verify the result." -ForegroundColor DarkGray
+                            $firstRunAnswer = (Read-HostSafe "  Configure Automatically? (Y/N)").ToUpper()
+                            if ($firstRunAnswer -eq "Y") {
+                                if (Test-Pcsx2ProcessRunning) {
+                                    Write-Host "    SKIPPED: pcsx2-qtx64.exe is currently running -- close it and re-run crosshair setup." -ForegroundColor Yellow
+                                    Write-Log "Crosshairs: Pcsx2x6 first-run setup skipped -- process running"
+                                } else {
+                                    $firstRun = Invoke-Pcsx2FirstRunSetup -State $prereqState
+                                    if ($firstRun.Success) {
+                                        Write-Host "    First-run initialization succeeded." -ForegroundColor Green
+                                        $prereqState = Get-Pcsx2CrosshairPrerequisiteState -Pcsx2Dir $pcsx2Dir
+                                    } else {
+                                        Write-Host ("    FAILED: {0}" -f $firstRun.Reason) -ForegroundColor Red
+                                        Write-Log "Crosshairs: Pcsx2x6 first-run setup failed -- $($firstRun.Reason)"
+                                    }
+                                }
+                            } else {
+                                Write-Host "    Skipped -- Pcsx2x6 crosshair setup needs an initialized PCSX2.ini to continue." -ForegroundColor Yellow
+                                Write-Log "Crosshairs: Pcsx2x6 first-run setup declined by user"
+                            }
+                        }
+
+                        if ($prereqState.State -eq 'StockUninitialized') {
+                            # Still not initialized (declined, process running, or
+                            # the trigger failed) -- do not place assets or touch
+                            # cursor_path against an install PCSX2.ini has never
+                            # validated as initialized.
+                            $deployed++; continue
+                        }
+
                         # Deploy to the canonical upstream location
                         # (pcsx2x6\TeknoParrot\crosshairs\), not the folder root --
                         # see issue #79. Official pcsx2x6 crosshair support reads
@@ -3197,17 +3410,28 @@ function Invoke-CrosshairSetup {
                         $p2Dest = Join-Path $crosshairSubDir "P2.png"
                         Copy-Item -LiteralPath $valid[$p1Idx] -Destination $p1Dest -Force -ErrorAction Stop
                         Copy-Item -LiteralPath $valid[$p2Idx] -Destination $p2Dest -Force -ErrorAction Stop
-                        $iniPath = Join-Path $pcsx2Dir "inis\PCSX2.ini"
-                        if (Test-Path -LiteralPath $iniPath) {
+                        # ECVF-correct ini path (contracts\pcsx2x6\evidence.md#ev-portable-root):
+                        # DataRoot\inis\PCSX2.ini, not a bare "$pcsx2Dir\inis\PCSX2.ini" --
+                        # the real ini lives under the resolved TeknoParrot data-root subfolder.
+                        $iniPath = $prereqState.IniPath
+                        if ($iniPath -and (Test-Path -LiteralPath $iniPath)) {
                             $iniUpdated = Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path $p1Dest -P2Path $p2Dest
                             $iniStatus = if ($iniUpdated) { "PCSX2.ini updated" } else { "PNGs copied; PCSX2.ini cursor_path left untouched, see note above" }
                             Write-Host ("    Pcsx2x6 -> {0}  ({1})" -f $pcsx2Dir, $iniStatus) -ForegroundColor Green
+                            # ECVF: cursor_path under [USB1]/[USB2] is emulator-owned,
+                            # WritePolicy=NeverWrite -- this reports the current
+                            # on-disk value for operator visibility, it never writes.
+                            $cursorReport = Get-Pcsx2CursorPathReport -IniPath $iniPath
+                            if ($cursorReport.Available) {
+                                $usb1Display = if ($cursorReport.USB1CursorPath) { $cursorReport.USB1CursorPath } else { "(not set)" }
+                                $usb2Display = if ($cursorReport.USB2CursorPath) { $cursorReport.USB2CursorPath } else { "(not set)" }
+                                Write-Host ("      cursor_path is emulator-managed: USB1={0}  USB2={1}  (PCSX2 clears this automatically when JVS mode is LIGHTGUN -- no action needed)" -f $usb1Display, $usb2Display) -ForegroundColor DarkGray
+                            }
                         } else {
                             Write-Host ("    Pcsx2x6 -> {0}  (PCSX2.ini not found; PNGs copied)" -f $pcsx2Dir) -ForegroundColor Green
                             Write-Log "Crosshairs: Pcsx2x6 PCSX2.ini not found at $iniPath"
                         }
                         Write-Log "Crosshairs: deployed to Pcsx2x6 folder $pcsx2Dir"
-                        $pcsx2Deployed = $true
                     } else {
                         Write-Host "    Pcsx2x6: emulator folder not found in TeknoParrot root -- skipped" -ForegroundColor Yellow
                         Write-Log "Crosshairs: Pcsx2x6 folder not found in $TpRoot"

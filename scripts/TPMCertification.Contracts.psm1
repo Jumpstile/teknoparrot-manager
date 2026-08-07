@@ -470,12 +470,24 @@ function Invoke-TPMEnvironmentInitializationActionV1 {
     # emulator's own executable with the contract-declared arguments and
     # waits for exit -- this never hand-authors configuration content; it
     # only ever triggers the emulator's own init mechanism.
+    #
+    # TimeoutSeconds is enforced here via Process.WaitForExit(ms) rather than
+    # Start-Process -Wait, which blocks indefinitely with no timeout of its
+    # own -- a hung or misbehaving emulator process must not be able to stall
+    # the caller forever. A process that does not exit in time is killed and
+    # this throws; it is never left running in the background.
     param([Parameter(Mandatory = $true)]$Action, [Parameter(Mandatory = $true)][string]$InstallDir)
     if ($Action.Method -eq 'None') { return [pscustomobject]@{ Invoked = $false; ExitCode = $null } }
     if ($Action.Method -ne 'CliInvocation') { throw "INITIALIZATION_ACTION_UNSUPPORTED: Method '$($Action.Method)' is declared but not yet implemented" }
     $exePath = Join-Path $InstallDir $Action.Command
     if (-not (Test-Path -LiteralPath $exePath -PathType Leaf)) { throw "INITIALIZATION_ACTION_FAILED: executable not found at '$exePath'" }
-    $proc = Start-Process -FilePath $exePath -ArgumentList $Action.Arguments -WorkingDirectory $InstallDir -PassThru -Wait
+    $proc = Start-Process -FilePath $exePath -ArgumentList $Action.Arguments -WorkingDirectory $InstallDir -PassThru
+    $timeoutMs = [int]([Math]::Max(1, $Action.TimeoutSeconds) * 1000)
+    $exited = $proc.WaitForExit($timeoutMs)
+    if (-not $exited) {
+        try { $proc.Kill() } catch { }
+        throw "INITIALIZATION_ACTION_FAILED: process did not exit within $($Action.TimeoutSeconds)s and was terminated"
+    }
     $timedExitCode = $proc.ExitCode
     if ($Action.ExpectedExitCodes -notcontains $timedExitCode) { throw "INITIALIZATION_ACTION_FAILED: exit code $timedExitCode not in expected set ($($Action.ExpectedExitCodes -join ', '))" }
     return [pscustomobject]@{ Invoked = $true; ExitCode = $timedExitCode }

@@ -9,6 +9,17 @@
 -------------------------------------------------------------------------------
   Unreleased -- v1.0 RC3
   ------------------------------------------------------------
+  Feature (issue #173): Crosshair Setup now detects a stock, never-initialized
+  pcsx2x6 install and offers to automatically trigger the emulator's own
+  first-run initialization (the same mechanism a manual first launch would
+  use), then verifies the result before placing crosshair assets -- instead
+  of silently reporting "PCSX2.ini not found" and copying PNGs next to a
+  config file that isn't there yet. Also fixes the PCSX2.ini path used for
+  this step, which was missing its data-root subfolder and so failed to find
+  an already-initialized real install. TPM continues to only verify (never
+  write) the emulator-owned cursor_path setting, and now shows its current
+  value for visibility.
+
   Fix (issue #154): the development certification harness can run the existing
   read-only Library Health Check under -Unattended, then exits cleanly when it
   finishes.
