@@ -53,14 +53,14 @@ Describe 'ECVF Contract Stability Regression Suite' {
  It 'every contract has unique EnvironmentCapabilities[].CapabilityId' {
   foreach ($entry in $script:registered) {
    $ids = @($entry.Contract.EnvironmentCapabilities | ForEach-Object { $_.CapabilityId })
-   ($ids | Select-Object -Unique).Count | Should -Be $ids.Count
+   @($ids | Select-Object -Unique).Count | Should -Be @($ids).Count
   }
  }
 
  It 'every contract has unique RuntimeCapabilities[].CapabilityId' {
   foreach ($entry in $script:registered) {
    $ids = @($entry.Contract.RuntimeCapabilities | ForEach-Object { $_.CapabilityId })
-   ($ids | Select-Object -Unique).Count | Should -Be $ids.Count
+   @($ids | Select-Object -Unique).Count | Should -Be @($ids).Count
   }
  }
 
@@ -99,7 +99,7 @@ Describe 'ECVF Contract Stability Regression Suite -- pcsx2x6 specific invariant
  It 'pcsx2x6 jvs-lightgun RuntimeCapability has no Confirmed ObservableEvidence yet (EXP-002 has not run)' {
   $cap = $script:pcsx2.Contract.RuntimeCapabilities | Where-Object { $_.CapabilityId -eq 'jvs-lightgun' } | Select-Object -First 1
   $cap | Should -Not -BeNullOrEmpty
-  ($cap.ObservableEvidence | Where-Object { $_.Status -eq 'Confirmed' }).Count | Should -Be 0 -Because 'this must only flip once contracts/pcsx2x6/experiments.md#exp-002-jvs-runtime-signal records a real hardware result'
+  @($cap.ObservableEvidence | Where-Object { $_.Status -eq 'Confirmed' }).Count | Should -Be 0 -Because 'this must only flip once contracts/pcsx2x6/experiments.md#exp-002-jvs-runtime-signal records a real hardware result'
  }
 
  It 'pcsx2x6 emulator-owned USB1/USB2 Type and JvsMode boundaries never allow WriteDirectly' {
