@@ -118,6 +118,28 @@ BeforeAll {
         }
         return $installRoot
     }
+
+    function New-Pcsx2CrosshairSetupFixture {
+        $fixtureRoot = Join-Path $TestDrive ("crosshair-setup-fixture-" + [guid]::NewGuid().ToString('N'))
+        $crosshairsRoot = Join-Path $fixtureRoot 'Crosshairs'
+        $pcsx2Root = Join-Path $fixtureRoot 'pcsx2x6'
+        $profilesRoot = Join-Path $fixtureRoot 'UserProfiles'
+        New-Item -ItemType Directory -Path $crosshairsRoot, $pcsx2Root, $profilesRoot -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\Crosshairs\000.png') -Destination (Join-Path $crosshairsRoot '000.png') -Force
+        [IO.File]::WriteAllText((Join-Path $profilesRoot 'LIGHTGUN.xml'), '<GameProfile><GunGame>true</GunGame><EmulatorType>Pcsx2x6</EmulatorType></GameProfile>')
+
+        $names = @('Invoke-CrosshairSetup', 'Get-Pcsx2CrosshairPrerequisiteState')
+        $wanted = @($functionAsts | Where-Object { $names -contains $_.Name })
+        if ($wanted.Count -lt $names.Count) { throw "Crosshair setup fixture functions were not found" }
+        $fixturePath = Join-Path $fixtureRoot 'CrosshairSetup.ps1'
+        ($wanted | ForEach-Object { $_.Extent.Text }) -join [Environment]::NewLine | Set-Content -LiteralPath $fixturePath -Encoding utf8
+        return [pscustomobject]@{
+            Root = $fixtureRoot
+            Pcsx2Root = $pcsx2Root
+            ProfilesRoot = $profilesRoot
+            FixturePath = $fixturePath
+        }
+    }
 }
 
 Describe "Virtual Beta Tester: existing-backup recovery (issue #88 phase 1.6)" -Tag 'TVD-Medium' {
