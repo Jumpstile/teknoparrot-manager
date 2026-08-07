@@ -3394,6 +3394,17 @@ function Invoke-CrosshairSetup {
                             $deployed++; continue
                         }
 
+                        # ECVF is fail-closed for every write-adjacent action:
+                        # an Unknown contract state is treated as NotInstalled
+                        # for deployment decisions, while the original state
+                        # remains available for reporting and diagnostics.
+                        $assetCopyState = if ($prereqState.State -eq 'Unknown') { 'NotInstalled' } else { $prereqState.State }
+                        if ($assetCopyState -eq 'NotInstalled') {
+                            Write-Host ("    SKIPPED: Pcsx2x6 prerequisite state is {0}; no crosshair assets or cursor_path handling performed." -f $prereqState.State) -ForegroundColor Yellow
+                            Write-Log ("Crosshairs: Pcsx2x6 deployment skipped -- prerequisite state {0} ({1})" -f $prereqState.State, $prereqState.Reason)
+                            $deployed++; continue
+                        }
+
                         # Deploy to the canonical upstream location
                         # (pcsx2x6\TeknoParrot\crosshairs\), not the folder root --
                         # see issue #79. Official pcsx2x6 crosshair support reads
