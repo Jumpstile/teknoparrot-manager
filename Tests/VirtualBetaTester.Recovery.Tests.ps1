@@ -38,6 +38,34 @@ BeforeAll {
     $script:TitleTokenStopWords = [System.Collections.Generic.HashSet[string]]::new(
         [string[]]@('the', 'of', 'a', 'an', 'and', 'vs', 'vs.', 'in', 'for', 'to'),
         [System.StringComparer]::OrdinalIgnoreCase)
+
+    # ECVF (issue #182 follow-up): file-backed fixture used only by the
+    # cursor-path denial tests below. Copies the real, currently-shipped
+    # Authority/Contracts modules and the real pcsx2x6 contract.json into a
+    # $TestDrive tree shaped like the repo (scripts\, contracts\pcsx2x6\),
+    # then re-extracts and dot-sources ONLY Set-Pcsx2CursorPaths from
+    # inside that tree so its $PSScriptRoot resolves there. This makes the
+    # function actually import the module and consult the real contract,
+    # exercising the genuine OWNERSHIP_VIOLATION denial path -- not just
+    # the generic "framework unavailable" fallback that fires elsewhere in
+    # this file because the plain extracted-functions file has no scripts\
+    # folder beside it. Dot-sourcing the returned path inside a single It
+    # block only redefines Set-Pcsx2CursorPaths for that It's own scope; it
+    # does not affect the other extracted functions or any other test.
+    function New-Pcsx2ContractDenialFixture {
+        $fixtureRoot = Join-Path $TestDrive ("ecvf-fixture-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $fixtureRoot 'scripts') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $fixtureRoot 'contracts\pcsx2x6') -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TPMCertification.Authority.psm1') -Destination (Join-Path $fixtureRoot 'scripts\TPMCertification.Authority.psm1') -Force
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TPMCertification.Contracts.psm1') -Destination (Join-Path $fixtureRoot 'scripts\TPMCertification.Contracts.psm1') -Force
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\contract.json') -Destination (Join-Path $fixtureRoot 'contracts\pcsx2x6\contract.json') -Force
+
+        $pcsx2Ast = $functionAsts | Where-Object { $_.Name -eq 'Set-Pcsx2CursorPaths' } | Select-Object -First 1
+        if (-not $pcsx2Ast) { throw "Set-Pcsx2CursorPaths not found while building the ECVF contract-denial fixture" }
+        $pcsx2FixturePath = Join-Path $fixtureRoot 'Set-Pcsx2CursorPaths.ps1'
+        $pcsx2Ast.Extent.Text | Set-Content -LiteralPath $pcsx2FixturePath -Encoding utf8
+        return $pcsx2FixturePath
+    }
 }
 
 Describe "Virtual Beta Tester: existing-backup recovery (issue #88 phase 1.6)" -Tag 'TVD-Medium' {
@@ -79,40 +107,70 @@ Describe "Virtual Beta Tester: existing-backup recovery (issue #88 phase 1.6)" -
 Describe "Virtual Beta Tester: partial/malformed state recovery (issue #88 phase 1.6)" -Tag 'TVD-High' {
     # Human behavior replaced: a tester whose PCSX2.ini is missing sections
     # entirely (a fresh PCSX2 install that's never had a controller
-    # configured) checks that crosshair setup still works instead of
-    # crashing or silently doing nothing.
-    # Defect class detectable: an INI writer that assumes both guncon2
-    # sections already exist and throws or no-ops when they don't.
+    # configured) checks that crosshair setup does not crash and, per the
+    # ECVF contract (issue #182), correctly leaves emulator-owned state
+    # alone rather than guessing at a repair.
+    # Defect class detectable: an INI writer that throws on partial/missing
+    # state, or one that "recovers" by writing into a setting the contract
+    # marks Owner=Emulator/NeverWrite -- USB1/USB2 guncon2_cursor_path is
+    # contract-owned by the emulator (the emulator clears it in memory
+    # whenever JVS mode is LIGHTGUN regardless of INI contents), so the
+    # correct recovery behavior for missing/partial guncon2 sections is to
+    # deny the write and leave the file exactly as found, not to append or
+    # repair sections TPM does not own.
     # Why existing certification wouldn't already catch it: phase 1's
     # idempotency test always starts from an INI that already has both
-    # sections present; this test starts from an INI with NEITHER section.
+    # sections present; this test starts from an INI with neither/one
+    # section, which is where a naive "always deny" implementation could
+    # still accidentally special-case a repair path.
     # Tester Value Density: High -- a fresh/partial PCSX2 install missing
     # guncon2 sections is a realistic, likely first-time-setup condition,
     # not a contrived edge case.
 
-    It "Set-Pcsx2CursorPaths appends both missing guncon2 sections to an INI that has neither" {
+    It "Set-Pcsx2CursorPaths denies the write and leaves an INI with neither guncon2 section untouched" {
         $iniPath = Join-Path $TestDrive ("pcsx2-missing-sections-" + [guid]::NewGuid().ToString('N') + '.ini')
         @('[Frame]', 'GS = 1') -join "`r`n" | Set-Content -LiteralPath $iniPath -Encoding utf8
+        $originalContent = Get-Content -LiteralPath $iniPath -Raw
 
-        { Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path 'p1.png' -P2Path 'p2.png' } | Should -Not -Throw
+        $result = Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path 'p1.png' -P2Path 'p2.png'
 
-        $content = Get-Content -LiteralPath $iniPath -Raw
-        $content | Should -Match ([regex]::Escape('[USB Port 1 guncon2]'))
-        $content | Should -Match ([regex]::Escape('[USB Port 2 guncon2]'))
-        $cursorPathLines = @((Get-Content -LiteralPath $iniPath) | Where-Object { $_ -match '^cursor_path\s*=' })
-        $cursorPathLines.Count | Should -Be 2 -Because "both missing sections must be appended with exactly one cursor_path line each, not zero (silently skipped) or duplicated"
+        $result | Should -Be $false -Because "USB1/USB2 guncon2_cursor_path is Owner=Emulator, WritePolicy=NeverWrite -- missing sections must not be appended by TPM"
+        (Get-Content -LiteralPath $iniPath -Raw) | Should -Be $originalContent -Because "a denied write must leave an INI with neither guncon2 section exactly as found, not partially repaired"
     }
 
-    It "Set-Pcsx2CursorPaths recovers when only one of the two guncon2 sections exists" {
+    It "Set-Pcsx2CursorPaths denies the write and leaves an INI with only one existing guncon2 section untouched" {
         $iniPath = Join-Path $TestDrive ("pcsx2-one-section-" + [guid]::NewGuid().ToString('N') + '.ini')
         @('[USB Port 1 guncon2]', 'cursor_path = old.png') -join "`r`n" | Set-Content -LiteralPath $iniPath -Encoding utf8
+        $originalContent = Get-Content -LiteralPath $iniPath -Raw
 
-        { Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path 'p1.png' -P2Path 'p2.png' } | Should -Not -Throw
+        $result = Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path 'p1.png' -P2Path 'p2.png'
 
-        $content = Get-Content -LiteralPath $iniPath -Raw
-        $content | Should -Match ([regex]::Escape('[USB Port 2 guncon2]')) -Because "the missing second section must be added, not just the existing first one updated"
-        $cursorPathLines = @((Get-Content -LiteralPath $iniPath) | Where-Object { $_ -match '^cursor_path\s*=' })
-        $cursorPathLines.Count | Should -Be 2
+        $result | Should -Be $false -Because "a partially-present pair of emulator-owned sections must still be denied, not repaired by adding the missing one"
+        (Get-Content -LiteralPath $iniPath -Raw) | Should -Be $originalContent -Because "the existing section's own emulator-owned cursor_path value must also remain untouched, not just the missing section left absent"
+    }
+
+    It "denies the write for the real reason even on partial/malformed state -- the contract's OWNERSHIP_VIOLATION, not just an unreachable framework (file-backed ECVF fixture)" {
+        # The two tests above run Set-Pcsx2CursorPaths as extracted into the
+        # plain $TestDrive functions file, which has no scripts\ folder
+        # beside it -- that exercises the generic "framework unavailable"
+        # fallback, not the contract itself. This test dot-sources a
+        # fixture-scoped copy of just this one function (see
+        # New-Pcsx2ContractDenialFixture in BeforeAll above) so it actually
+        # loads the real Contracts module and the real pcsx2x6 contract,
+        # proving the denial comes from the contract's own ownership rule
+        # even when the INI is missing sections, not merely from the
+        # framework being unreachable.
+        . (New-Pcsx2ContractDenialFixture)
+        $iniPath = Join-Path $TestDrive ("pcsx2-real-contract-partial-" + [guid]::NewGuid().ToString('N') + '.ini')
+        @('[Frame]', 'GS = 1') -join "`r`n" | Set-Content -LiteralPath $iniPath -Encoding utf8
+        $originalContent = Get-Content -LiteralPath $iniPath -Raw
+        Mock Write-Log {}
+
+        $result = Set-Pcsx2CursorPaths -IniPath $iniPath -P1Path 'p1.png' -P2Path 'p2.png'
+
+        $result | Should -Be $false
+        (Get-Content -LiteralPath $iniPath -Raw) | Should -Be $originalContent -Because "the real pcsx2x6 contract denies the write regardless of how incomplete the existing INI is"
+        Should -Invoke Write-Log -ParameterFilter { $msg -match 'OWNERSHIP_VIOLATION' } -Because "the skip reason must come from the real contract's ownership check even on partial/malformed state, proving this exercised actual contract denial rather than the generic framework-unavailable fallback"
     }
 }
 

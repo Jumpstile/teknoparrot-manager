@@ -129,7 +129,8 @@ ZIP name: `TeknoParrot Manager v1.0 RC3.zip` (always versioned).
 **Include:** `TeknoParrot-Manager.ps1`, `.bat`, `-README.txt`, `-QuickStart.txt`,
 `-CHANGELOG.txt`, `LICENSE`, `Crosshairs\` (all 321 PNGs),
 `tools\Invoke-TpmAutoUpdate.ps1`, `tools\TpmAutoUpdate.Core.psm1`,
-`scripts\Debug-TPM-MenuLayout.ps1`.
+`scripts\Debug-TPM-MenuLayout.ps1`, `contracts\` (ECVF registered contracts),
+`scripts\TPMCertification.Contracts.psm1` (ECVF loader/validator/evaluator).
 
 **Exclude:** `ReShade\` (not redistributable; user obtains from reshade.me),
 `dgVoodoo2\` (user provides), `FFBPlugin\` and `BepInExCache\` (live-downloaded

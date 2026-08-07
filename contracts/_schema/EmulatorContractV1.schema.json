@@ -1,0 +1,189 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/Jumpstile/teknoparrot-manager/contracts/_schema/EmulatorContractV1.schema.json",
+  "title": "EmulatorContractV1",
+  "description": "Reference documentation for the Emulator Contract Verification Framework (ECVF) root schema. This file documents the same rules enforced in code by Assert-TPMEmulatorContractV1 in scripts/TPMCertification.Contracts.psm1, which is the authoritative validator. If this document and that function ever disagree, the function is correct and this document is stale.",
+  "type": "object",
+  "required": [
+    "ContractId", "SchemaVersion", "DisplayName",
+    "UpstreamRepository", "UpstreamPinnedCommit", "UpstreamPinnedCommitDate",
+    "VersionDetector", "ContractStatus", "EvidenceConfidence",
+    "OwnershipBoundaries", "EnvironmentCapabilities", "RuntimeCapabilities",
+    "EvidenceReferences", "DriftPolicy"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "ContractId": { "type": "string", "description": "Must equal the contract's own directory name under contracts/." },
+    "SchemaVersion": { "const": "1.0.0" },
+    "DisplayName": { "type": ["string", "null"] },
+    "UpstreamRepository": { "type": "string" },
+    "UpstreamPinnedCommit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "UpstreamPinnedCommitDate": { "type": "string" },
+    "VersionDetector": {
+      "type": "object",
+      "required": ["Method", "Source", "Pattern", "MatchedCommitMap"],
+      "additionalProperties": false,
+      "properties": {
+        "Method": { "enum": ["WindowTitleRegex", "ExecutableVersionResource", "CliVersionFlag", "LogLineRegex", "FileHash", "PathExists"] },
+        "Source": { "type": ["string", "null"] },
+        "Pattern": { "type": "string" },
+        "MatchedCommitMap": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["VersionString", "Commit", "MatchState"],
+            "additionalProperties": false,
+            "properties": {
+              "VersionString": { "type": "string" },
+              "Commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+              "MatchState": { "enum": ["Matched", "Compatible", "Diverged"] }
+            }
+          }
+        }
+      }
+    },
+    "ContractStatus": { "enum": ["Investigating", "EvidenceGathered", "ExperimentallyVerified", "RuntimeVerified", "Certified", "Deprecated", "Superseded"] },
+    "EvidenceConfidence": { "enum": ["Theoretical", "SourceVerified", "ExperimentVerified", "HardwareVerified", "ProductionVerified"] },
+    "OwnershipBoundaries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["SettingPath", "Owner", "Mutability", "ReadPolicy", "WritePolicy", "EvidenceReference"],
+        "additionalProperties": false,
+        "properties": {
+          "SettingPath": { "type": "string" },
+          "Owner": { "enum": ["Emulator", "TPM", "User", "Runtime", "ExternalTool"] },
+          "Mutability": { "enum": ["Immutable", "EmulatorManaged", "TPMManaged", "UserManaged", "Computed"] },
+          "ReadPolicy": { "enum": ["NeverRead", "ReadForVerificationOnly", "ReadForDisplay", "ReadFreely"] },
+          "WritePolicy": { "enum": ["NeverWrite", "WriteOnlyViaEmulatorMechanism", "WriteDirectly", "WriteWithBackup"] },
+          "EvidenceReference": { "type": "string", "description": "Must resolve to an EvidenceId in EvidenceReferences[]." }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "Owner": { "enum": ["Emulator", "Runtime"] } } },
+            "then": { "properties": { "WritePolicy": { "enum": ["NeverWrite", "WriteOnlyViaEmulatorMechanism", "WriteWithBackup"] } } }
+          }
+        ]
+      }
+    },
+    "EnvironmentCapabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["CapabilityId", "PresenceDetector", "DataRootResolver", "InitializationAction", "InitializedVerifier", "ObservableEvidence", "ExpectedOutcome"],
+        "additionalProperties": false,
+        "properties": {
+          "CapabilityId": { "type": "string" },
+          "PresenceDetector": {
+            "type": "object", "required": ["Method", "Source", "Pattern"], "additionalProperties": false,
+            "properties": {
+              "Method": { "enum": ["WindowTitleRegex", "ExecutableVersionResource", "CliVersionFlag", "LogLineRegex", "FileHash", "PathExists"] },
+              "Source": { "type": ["string", "null"] },
+              "Pattern": { "type": ["string", "null"] }
+            }
+          },
+          "DataRootResolver": {
+            "type": "object", "required": ["Method", "Source", "DefaultValue"], "additionalProperties": false,
+            "properties": {
+              "Method": { "enum": ["FileContentLiteral", "FixedPath", "EnvironmentVariable"] },
+              "Source": { "type": "string" },
+              "DefaultValue": { "type": ["string", "null"] }
+            }
+          },
+          "InitializationAction": {
+            "type": "object", "required": ["Method", "Command", "Arguments", "ExpectedExitCodes", "TimeoutSeconds"], "additionalProperties": false,
+            "properties": {
+              "Method": { "enum": ["CliInvocation", "FileTemplate", "None"] },
+              "Command": { "type": ["string", "null"] },
+              "Arguments": { "type": "array", "items": { "type": "string" } },
+              "ExpectedExitCodes": { "type": "array", "items": { "type": "integer" } },
+              "TimeoutSeconds": { "type": "integer", "minimum": 1 }
+            }
+          },
+          "InitializedVerifier": {
+            "type": "object", "required": ["RequiredPaths", "RequiredMarkers", "ParseMethod"], "additionalProperties": false,
+            "properties": {
+              "RequiredPaths": { "type": "array", "items": { "type": "string" } },
+              "RequiredMarkers": { "type": "array", "items": { "type": "string" } },
+              "ParseMethod": { "enum": ["IniSections", "JsonKeys", "YamlKeys"] }
+            }
+          },
+          "ObservableEvidence": {
+            "type": "array", "items": { "type": "string" },
+            "description": "EvidenceId references into EvidenceReferences[] -- not the ranked ObservableEvidence shape RuntimeCapabilities use."
+          },
+          "ExpectedOutcome": { "type": "string" }
+        }
+      }
+    },
+    "RuntimeCapabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["CapabilityId", "Scenario", "ApplicabilityPredicate", "Trigger", "ObservableEvidence", "ExpectedOutcome", "CapabilityStatus"],
+        "additionalProperties": false,
+        "properties": {
+          "CapabilityId": { "type": "string" },
+          "Scenario": { "type": "string" },
+          "ApplicabilityPredicate": { "type": "object", "description": "Non-empty map of field name to scalar (bool/string/number) expected value, ANDed together." },
+          "Trigger": {
+            "type": "object", "required": ["Description", "Source"], "additionalProperties": false,
+            "properties": { "Description": { "type": "string" }, "Source": { "type": "string" } }
+          },
+          "ObservableEvidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["EvidenceSourceType", "Reliability", "Locator", "Status"],
+              "additionalProperties": false,
+              "properties": {
+                "EvidenceSourceType": { "enum": ["EmulatorLog", "IniSnapshot", "ExternalArtifact", "ProcessExitCode"] },
+                "Reliability": { "type": "integer", "minimum": 1, "description": "Unique within the array; 1 = most authoritative. Evaluator walks in ascending order." },
+                "Locator": { "type": ["string", "null"] },
+                "Status": { "enum": ["Confirmed", "Hypothesis", "Unconfirmed"] }
+              }
+            }
+          },
+          "ExpectedOutcome": { "type": "string" },
+          "CapabilityStatus": { "enum": ["Investigating", "EvidenceGathered", "ExperimentallyVerified", "RuntimeVerified", "Certified", "Deprecated", "Superseded"] }
+        }
+      }
+    },
+    "EvidenceReferences": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["EvidenceId", "Type", "Description", "Locator", "Commit", "Confidence", "RecordedDate"],
+        "additionalProperties": false,
+        "properties": {
+          "EvidenceId": { "type": "string" },
+          "Type": { "enum": ["SourceCitation", "ControlledExperiment", "HardwareObservation", "ExternalDocumentation"] },
+          "Description": { "type": "string" },
+          "Locator": { "type": "string", "description": "File path + line range for SourceCitation; evidence.md/experiments.md anchor otherwise." },
+          "Commit": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" },
+          "Confidence": { "enum": ["Theoretical", "SourceVerified", "ExperimentVerified", "HardwareVerified", "ProductionVerified"] },
+          "RecordedDate": { "type": "string" }
+        }
+      }
+    },
+    "DriftPolicy": {
+      "type": "object",
+      "required": ["OnUnknownVersion", "OnDivergedVersion", "OnCompatibleRange", "KnownCompatibleRange", "RevalidationTrigger"],
+      "additionalProperties": false,
+      "properties": {
+        "OnUnknownVersion": { "enum": ["FailClosed", "Block"] },
+        "OnDivergedVersion": { "enum": ["FailClosed", "Block"] },
+        "OnCompatibleRange": { "enum": ["Proceed", "ProceedWithWarning"] },
+        "KnownCompatibleRange": {
+          "type": "array",
+          "items": {
+            "type": "object", "required": ["CommitOrTagStart", "CommitOrTagEnd", "Notes"], "additionalProperties": false,
+            "properties": { "CommitOrTagStart": { "type": "string" }, "CommitOrTagEnd": { "type": "string" }, "Notes": { "type": ["string", "null"] } }
+          }
+        },
+        "RevalidationTrigger": { "type": "string" }
+      }
+    }
+  }
+}
