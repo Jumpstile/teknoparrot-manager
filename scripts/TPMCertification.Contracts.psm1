@@ -481,7 +481,7 @@ function Invoke-TPMEnvironmentInitializationActionV1 {
     if ($Action.Method -ne 'CliInvocation') { throw "INITIALIZATION_ACTION_UNSUPPORTED: Method '$($Action.Method)' is declared but not yet implemented" }
     $exePath = Join-Path $InstallDir $Action.Command
     if (-not (Test-Path -LiteralPath $exePath -PathType Leaf)) { throw "INITIALIZATION_ACTION_FAILED: executable not found at '$exePath'" }
-    $proc = Start-Process -FilePath $exePath -ArgumentList $Action.Arguments -WorkingDirectory $InstallDir -PassThru
+    $startParameters = @{ FilePath = $exePath; WorkingDirectory = $InstallDir; PassThru = $true }`n    # Windows PowerShell 5.1 rejects an empty ArgumentList collection.`n    # Omit the parameter entirely when the contract declares no arguments.`n    if ($null -ne $Action.Arguments -and @($Action.Arguments).Count -gt 0) {`n        $startParameters.ArgumentList = @($Action.Arguments)`n    }`n    $proc = Start-Process @startParameters
     $timeoutMs = [int]([Math]::Max(1, $Action.TimeoutSeconds) * 1000)
     $exited = $proc.WaitForExit($timeoutMs)
     if (-not $exited) {
