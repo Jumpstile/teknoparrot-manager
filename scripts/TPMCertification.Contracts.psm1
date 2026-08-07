@@ -485,7 +485,20 @@ function Invoke-TPMEnvironmentInitializationActionV1 {
     $timeoutMs = [int]([Math]::Max(1, $Action.TimeoutSeconds) * 1000)
     $exited = $proc.WaitForExit($timeoutMs)
     if (-not $exited) {
-        try { $proc.Kill() } catch { }
+        $killError = $null
+        try { $proc.Kill() } catch { $killError = $_.Exception.Message }
+
+        $terminated = $false
+        $waitError = $null
+        try { $terminated = $proc.WaitForExit(5000) } catch { $waitError = $_.Exception.Message }
+        if (-not $terminated) {
+            $detail = if ($killError) { " Kill failed: $killError." } else { "" }
+            if ($waitError) { $detail += " Termination check failed: $waitError." }
+            throw "INITIALIZATION_ACTION_FAILED: process did not exit within $($Action.TimeoutSeconds)s and termination could not be confirmed.$detail"
+        }
+        if ($killError) {
+            throw "INITIALIZATION_ACTION_FAILED: process exceeded TimeoutSeconds; Kill reported failure, although termination was subsequently confirmed: $killError"
+        }
         throw "INITIALIZATION_ACTION_FAILED: process did not exit within $($Action.TimeoutSeconds)s and was terminated"
     }
     $timedExitCode = $proc.ExitCode
