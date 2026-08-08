@@ -932,7 +932,18 @@ Pull requests are welcome too. Full source and version history: [github.com/Jump
 
 ## License
 
-[MIT](LICENSE)
+TeknoParrot Manager is source-available under the [TeknoParrot Manager
+Source-Available Personal/Non-Commercial License](LICENSE). Official
+releases may be used personally and non-commercially, and the source may be
+viewed for transparency. Issue reports and pull requests are welcome for
+consideration.
+
+Commercial use, redistribution, modified distribution, sublicensing,
+bundling, paid support use, arcade-operator use, or incorporation into
+TeknoParrot or another emulator, launcher, or arcade-management product
+requires prior written permission under a separate commercial or integration
+license. See [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md). The
+TeknoParrot Manager name and branding are reserved.
 
 ---
 

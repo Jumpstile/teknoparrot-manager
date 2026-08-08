@@ -9,6 +9,7 @@
 
 - Fixed (issue #154): the development certification harness can run the existing read-only Library Health Check under `-Unattended`, then exits cleanly when it finishes.
 - Fixed (issue #154): the certification Pester runner and preflight now require exactly Pester 5.7.1, preventing an unvalidated newer version from silently changing full-suite results.
+- RC3 licensing: personal, non-commercial use of official releases is permitted; commercial use, redistribution, modified distribution, sublicensing, bundling, paid support use, arcade-operator use, and integration into TeknoParrot or another emulator, launcher, or arcade-management product require prior written permission under a separate commercial/integration license.
 
 ## v1.0 RC2.1
 

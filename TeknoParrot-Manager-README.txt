@@ -66,6 +66,7 @@
     TROUBLESHOOTING
     WHAT IT DOES NOT DO
     SUPPORT / CONTRIBUTING
+    LICENSE
     APPENDIX: FUZZY MATCHING DETAILS
 
 
@@ -2341,6 +2342,25 @@
   history all live at:
 
     https://github.com/Jumpstile/teknoparrot-manager
+
+
+-------------------------------------------------------------------------------
+  LICENSE
+-------------------------------------------------------------------------------
+
+  TeknoParrot Manager is source-available for personal, non-commercial use of
+  official releases. Source viewing for transparency, issue reports, and pull
+  requests submitted for consideration are permitted.
+
+  Commercial use, redistribution, modified distribution, sublicensing,
+  bundling, paid support use, arcade-operator use, or incorporation into
+  TeknoParrot or another emulator, launcher, or arcade-management product
+  requires prior written permission under a separate commercial or integration
+  license. The TeknoParrot Manager name and branding are reserved.
+
+  The complete license text is provided with the source distribution. The
+  commercial/integration licensing notice is maintained separately by the
+  rights holder.
 
 
 -------------------------------------------------------------------------------

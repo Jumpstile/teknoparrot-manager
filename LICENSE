@@ -1,21 +1,46 @@
-MIT License
+TeknoParrot Manager Source-Available Personal/Non-Commercial License
 
 Copyright (c) 2026 Jumpstile
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This license applies to TeknoParrot Manager and the associated code, scripts,
+tests, documentation, workflows, compatibility logic, configuration rules,
+packaged assets, databases, knowledge packs, and release artifacts
+(collectively, the “Materials”). The TeknoParrot Manager name, logos, marks,
+and other branding are also reserved as described below.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Permission is granted to an individual to download, view, inspect, and use an
+official release of the Materials for the individual's personal,
+non-commercial purposes. The individual may make private modifications for
+those same personal, non-commercial purposes. This permission is limited,
+non-exclusive, worldwide, royalty-free, non-transferable, and revocable on
+termination of this license.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+Viewing the source for transparency, reporting issues, and submitting pull
+requests for consideration are permitted. A pull request or issue report does
+not grant any additional license or permission.
+
+Without prior written permission from Jumpstile under a separate commercial or
+integration license, you may not use the Materials or any portion of them for
+commercial use; redistribution or publication; distribution of modified
+versions; sublicensing; bundling with another product or service; paid
+support, consulting, hosting, or managed-service use; arcade-operator use; or
+incorporation into TeknoParrot or any other emulator, launcher,
+arcade-management product, or similar product or service. These restrictions
+apply whether the Materials are used directly, indirectly, or as part of a
+larger work.
+
+You may not use the TeknoParrot Manager name, logos, marks, or branding to
+market, identify, endorse, or imply affiliation with a modified, bundled,
+redistributed, or commercial product. No trademark or branding rights are
+granted by this license.
+
+Each third-party component remains subject to its own applicable license.
+This license does not grant rights to third-party software, data, services,
+or intellectual property.
+
+The Materials are provided “as is” and without warranties of any kind, express
+or implied, to the fullest extent permitted by law. To the fullest extent
+permitted by law, Jumpstile is not liable for any claim, damages, or other
+liability arising from the Materials or their use.
+
+Any permission not expressly granted by this license is reserved.
