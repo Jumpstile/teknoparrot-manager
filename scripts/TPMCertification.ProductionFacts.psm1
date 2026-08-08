@@ -929,7 +929,11 @@ function Test-TPMProductionPackagePreflightV1 {
 
         $commit=New-TPMPublicationCommitV1 -StagingParentRoot $scratchStaging -DestinationRoot $scratchDestination -EligibilityReport $eligibilityReport -PublicationReport $publicationReport -FinalOutcomeReport $finalOutcomeCandidateReport -ScorecardReport $scorecardReport -ValidationReport $validationReport -Manifest $manifestReport -Marker $markerReport
         $publisherAvailable=($canonicalNamesMatch -and $null-ne$commit -and [bool]$commit.Committed)
-    }catch{$publisherAvailable=$false;$canonicalNamesMatch=$false}
+    }catch{
+        $publisherAvailable=$false
+        $canonicalNamesMatch=$false
+        Write-Warning ("PUBLISHER_PREFLIGHT_FAILED: exceptionType=$($_.Exception.GetType().FullName) message=$(ConvertTo-TPMSafeTechnicalTextV1 $_.Exception.Message)")
+    }
     $cleanupSucceeded=$true
     if($null-ne$owned){$cleanupSucceeded=Remove-TPMOwnedScratchDirectoryV1 -Owned $owned}
     if(-not$publisherAvailable){$errorCount++}
