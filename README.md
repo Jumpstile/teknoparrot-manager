@@ -8,16 +8,16 @@ A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arc
 
 ---
 
-## Upcoming Release Candidate: TeknoParrot Manager v1.0 RC3
+## Published Release Candidate: TeknoParrot Manager v1.0 RC3
 
-v1.0 RC3 is in preparation. It has not been published or hardware-certified,
-so no RC3 download is available yet. Its intended tag is `v1.0-RC3`, but that
-tag has not been created.
+v1.0 RC3 is published and hardware-certified. Download the official
+[TeknoParrot Manager v1.0 RC3 release](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC3)
+from GitHub Releases. The published release is tagged `v1.0-RC3`.
 
-RC3 prepares a development-only certification-harness fix: the harness can run
+RC3 includes a development-only certification-harness fix: the harness can run
 the existing read-only Library Health Check under `-Unattended` and exits cleanly
 when complete. It also pins the certification runner to exactly Pester 5.7.1.
-The currently published v1.0 RC2.1 remains available
+The earlier v1.0 RC2.1 remains available
 from [Releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
 
 Final Version 1.0 has not been published yet.
@@ -146,8 +146,8 @@ This script automates the copy-and-fill step: it scans your games, matches each 
 
 ## Installation
 
-1. RC3 is not published yet. Once it is published, download
-   `TeknoParrot Manager v1.0 RC3.zip` from [Releases](../../releases).
+1. Download the official `TeknoParrot Manager v1.0 RC3.zip` release asset
+   from [Releases](../../releases).
 2. Extract to any folder (e.g. a `Scripts` subfolder alongside your TeknoParrot install)
 3. Double-click **`TeknoParrot-Manager.bat`**
 
@@ -947,4 +947,4 @@ TeknoParrot Manager name and branding are reserved.
 
 ---
 
-> v1.0 RC3 (in preparation; not yet published or hardware-certified) -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v1.0 RC3 (published; hardware-certified) -- test one game after each run. Profiles are backed up automatically at the start of every run.

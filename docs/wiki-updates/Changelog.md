@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased -- v1.0 RC3
+## v1.0 RC3 (2026-08-08) -- published hardware-certified release
 
 - Fixed (issue #173): pcsx2x6 crosshair setup now verifies the emulator's own
   first-run initialization and contract-resolved data root before deploying

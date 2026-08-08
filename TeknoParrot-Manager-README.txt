@@ -10,8 +10,8 @@
   This is a release candidate. Test one game after each run. Your profiles are
   backed up automatically at the start of every run.
 
-  v1.0 RC3 is in preparation. It has not been published or hardware-certified
-  yet.
+  v1.0 RC3 is published and hardware-certified. Download the official release
+  from the GitHub Releases page.
 
   For a one-page version, see TeknoParrot-Manager-QuickStart.txt.
 

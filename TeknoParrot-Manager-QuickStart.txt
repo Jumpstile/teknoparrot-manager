@@ -9,9 +9,8 @@
   Unfamiliar term (GamePath, UserProfile, archetype, etc.)? See the
   GLOSSARY section near the top of TeknoParrot-Manager-README.txt.
 
-  RELEASE CANDIDATE -- v1.0 RC3 is in preparation. It has not been published
-  or hardware-certified yet. Test one game after each run. Profiles are backed
-  up automatically.
+  RELEASE CANDIDATE -- v1.0 RC3 is published and hardware-certified. Test one
+  game after each run. Profiles are backed up automatically.
 
 
   NEW TO TEKNOPARROT?

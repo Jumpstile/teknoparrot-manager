@@ -7,8 +7,8 @@
 
 
 -------------------------------------------------------------------------------
-  Unreleased -- v1.0 RC3
-  ------------------------------------------------------------
+  v1.0 RC3  (2026-08-08)  -- published hardware-certified release
+  ----------------------------------------------------------------
   Feature (issue #173): Crosshair Setup now detects a stock, never-initialized
   pcsx2x6 install and offers to automatically trigger the emulator's own
   first-run initialization (the same mechanism a manual first launch would

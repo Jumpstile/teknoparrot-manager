@@ -68,14 +68,14 @@ Describe "Release Integrity source identity" {
         $preview = Get-Content -LiteralPath $previewPath -Raw
         $preview | Should -Match ([regex]::Escape($script:ExpectedDisplayVersion))
     }
-    It "keeps RC3 preparation documentation truthful and aligned with the intended tag" {
+    It "keeps published RC3 documentation truthful and aligned with the release tag" {
         $readme = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'README.md') -Raw
         $topReadme = ($readme -split "`r?`n" | Select-Object -First 30) -join "`n"
 
         $topReadme | Should -Match ([regex]::Escape($script:ExpectedDisplayVersion))
         $topReadme | Should -Match ([regex]::Escape($script:ExpectedTag))
-        $topReadme | Should -Match 'in preparation'
-        $topReadme | Should -Match 'not been published or hardware-certified'
+        $topReadme | Should -Match 'published and hardware-certified'
+        $topReadme | Should -Not -Match 'RC3.*(in preparation|not been published|not yet published)|intended tag|tag has not been created'
         $topReadme | Should -Not -Match '\[Download v1\.0 RC3\]'
         $topReadme | Should -Not -Match 'v1\.0 RC1|v1\.0-RC1|v1\.0\.RC1'
     }
@@ -101,7 +101,7 @@ Describe "Release Integrity source identity" {
         $releasePackage = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'Tests\Test-ReleasePackage.ps1') -Raw
 
         foreach ($content in @($changelog, $wikiChangelog)) {
-            $content | Should -Match 'Unreleased'
+            $content | Should -Not -Match 'Unreleased'
             $content | Should -Match ([regex]::Escape($script:ExpectedDisplayVersion))
             $content | Should -Match 'Pester 5\.7\.1'
         }
