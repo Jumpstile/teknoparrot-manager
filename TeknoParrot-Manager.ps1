@@ -3413,7 +3413,13 @@ function Invoke-CrosshairSetup {
                         # change and is no longer where the emulator looks.
                         # Set-Pcsx2CursorPaths below still writes cursor_path as an
                         # explicit override, which stays correct either way.
-                        $crosshairSubDir = Join-Path $pcsx2Dir "TeknoParrot\crosshairs"
+                        $dataRoot = $prereqState.DataRoot
+                        if ([string]::IsNullOrWhiteSpace($dataRoot)) {
+                            Write-Host ("    SKIPPED: Pcsx2x6 DataRoot could not be resolved for prerequisite state {0}; no crosshair assets or cursor_path handling performed." -f $prereqState.State) -ForegroundColor Yellow
+                            Write-Log ("Crosshairs: Pcsx2x6 deployment skipped -- DataRoot unavailable for prerequisite state {0}" -f $prereqState.State)
+                            $deployed++; continue
+                        }
+                        $crosshairSubDir = Join-Path $dataRoot "crosshairs"
                         if (-not (Test-Path -LiteralPath $crosshairSubDir)) {
                             [void](New-Item -ItemType Directory -LiteralPath $crosshairSubDir -Force -ErrorAction Stop)
                         }
