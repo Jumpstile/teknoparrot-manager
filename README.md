@@ -4,6 +4,11 @@
 
 A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arcade game library on Windows — registration, control propagation, crosshairs, ReShade, dgVoodoo2, GPU fixes, and more.
 
+TeknoParrot Manager is a Windows arcade-library manager and TeknoParrot setup
+tool for organizing extracted arcade games, registering profiles, deploying
+lightgun crosshairs, applying compatibility fixes, and exporting libraries to
+LaunchBox or HyperSpin.
+
 > **Published Release Candidate v1.0 RC3** — test one game after each run. Profiles are backed up automatically before every run.
 
 ---
