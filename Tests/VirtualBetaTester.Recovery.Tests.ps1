@@ -595,4 +595,30 @@ Describe "Pcsx2x6 crosshair prerequisite automation (issue #173)" -Tag 'TVD-Medi
         (Test-Path -LiteralPath (Join-Path $destination 'P2.png')) | Should -Be $false
         @(Get-ChildItem -LiteralPath $fixture.Pcsx2Root -Recurse -Filter '*.png' -File -ErrorAction SilentlyContinue).Count | Should -Be 0
     }
+
+    It "Invoke-CrosshairSetup: uses the contract-resolved non-default DataRoot for PNG placement" {
+        $fixture = New-Pcsx2CrosshairSetupFixture
+        $customRoot = Join-Path $fixture.Pcsx2Root 'PortableData'
+        New-Item -ItemType Directory -Path $customRoot -Force | Out-Null
+        . $fixture.FixturePath
+        Mock Read-HostSafe { '0' }
+        Mock Start-Process {}
+        Mock Export-CrosshairPreview {}
+        Mock Get-Pcsx2CrosshairPrerequisiteState {
+            [pscustomobject]@{
+                State = 'Incomplete'
+                Pcsx2Dir = $fixture.Pcsx2Root
+                DataRoot = $customRoot
+                IniPath = $null
+                Reason = 'synthetic portable DataRoot'
+            }
+        }
+
+        Invoke-CrosshairSetup -UserProfilesDir $fixture.ProfilesRoot -GamesInstallFolder $fixture.Root -TpRoot $fixture.Root | Out-Null
+
+        (Test-Path -LiteralPath (Join-Path $customRoot 'crosshairs\P1.png')) | Should -Be $true
+        (Test-Path -LiteralPath (Join-Path $customRoot 'crosshairs\P2.png')) | Should -Be $true
+        (Test-Path -LiteralPath (Join-Path $fixture.Pcsx2Root 'TeknoParrot\crosshairs\P1.png')) | Should -Be $false
+        (Test-Path -LiteralPath (Join-Path $fixture.Pcsx2Root 'TeknoParrot\crosshairs\P2.png')) | Should -Be $false
+    }
 }
