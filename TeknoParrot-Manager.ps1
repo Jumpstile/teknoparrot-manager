@@ -3416,7 +3416,7 @@ function Invoke-CrosshairSetup {
                         }
                         $crosshairSubDir = Join-Path $dataRoot "crosshairs"
                         if (-not (Test-Path -LiteralPath $crosshairSubDir)) {
-                            [void](New-Item -ItemType Directory -LiteralPath $crosshairSubDir -Force -ErrorAction Stop)
+                            [void](New-Item -ItemType Directory -Path $crosshairSubDir -Force -ErrorAction Stop)
                         }
                         $p1Dest = Join-Path $crosshairSubDir "P1.png"
                         $p2Dest = Join-Path $crosshairSubDir "P2.png"
