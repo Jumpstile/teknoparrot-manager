@@ -2,6 +2,11 @@
 
 ## Unreleased -- v1.0 RC3
 
+- Fixed (issue #173): pcsx2x6 crosshair setup now verifies the emulator's own
+  first-run initialization and contract-resolved data root before deploying
+  assets. Emulator-owned cursor_path settings remain verify-only; TPM never
+  writes them.
+
 - Fixed (issue #154): the development certification harness can run the existing read-only Library Health Check under `-Unattended`, then exits cleanly when it finishes.
 - Fixed (issue #154): the certification Pester runner and preflight now require exactly Pester 5.7.1, preventing an unvalidated newer version from silently changing full-suite results.
 

@@ -914,8 +914,8 @@ The direct LaunchBox integration refuses to write while LaunchBox or BigBox is r
 | `TeknoParrot-LaunchBox-Import.xml` | Scripts folder | LaunchBox manual-import reference XML (only if you skip direct integration) |
 | `LaunchBoxBackups\` | Scripts folder | Timestamped backups of LaunchBox's own files, made before each direct write |
 | `PostgresBackups\` | Scripts folder | Timestamped `pg_dump` backups of Postgres databases, made before each Postgres setup run |
-| `ReShade\ReShade64.dll` | Scripts folder | Bundled ReShade DLL (64-bit) |
-| `ReShade\ReShade32.dll` | Scripts folder | Bundled ReShade DLL (32-bit, optional) |
+| `ReShade\ReShade64.dll` | Scripts folder | User-provided ReShade DLL (64-bit; not included in the release ZIP) |
+| `ReShade\ReShade32.dll` | Scripts folder | User-provided ReShade DLL (32-bit, optional; not included in the release ZIP) |
 | `dgVoodoo2\*.dll` + `dgVoodoo.conf` | Scripts folder | dgVoodoo2 DLLs (you provide) |
 | `Crosshairs\*.png` | Scripts folder | Crosshair images (321 included) |
 | `CustomThumbnails\*.png` | Scripts folder | Your own game icons (optional, you create) |

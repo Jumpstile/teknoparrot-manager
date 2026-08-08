@@ -1227,7 +1227,7 @@
              answer Y when prompted at the end of a normal run.
 
     The script will:
-      a. Show the version of the bundled DLL and check reshade.me for updates.
+      a. Show the version of the user-provided DLL and check reshade.me for updates.
       b. Check the Authenticode signature on the DLL(s) -- ReShade's own
          installer is code-signed, and that signature survives extracting
          and renaming the DLL. An invalid or missing signature is shown as
@@ -1344,7 +1344,7 @@
 
   How to set it up
 
-    Method A -- Bundled folder (recommended):
+    Method A -- User-provided folder (recommended):
       1. Download the latest dgVoodoo2 ZIP from:
            https://dege.freeweb.hu/dgVoodoo2/dgVoodoo2/
       2. Open the ZIP. Create a folder called  dgVoodoo2\  next to this

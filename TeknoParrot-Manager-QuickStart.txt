@@ -684,8 +684,8 @@
                                        location -- a Save dialog lets you
                                        pick somewhere else when prompted.
   TeknoParrot-Manager-CHANGELOG.txt    Full version history.
-  ReShade\ReShade64.dll                Bundled ReShade DLL (64-bit games).
-  ReShade\ReShade32.dll                Bundled ReShade DLL (32-bit games,
+  ReShade\ReShade64.dll                User-provided ReShade DLL (64-bit games).
+  ReShade\ReShade32.dll                User-provided ReShade DLL (32-bit games,
                                        optional). See RESHADE VISUAL
                                        ENHANCEMENTS section above.
   dgVoodoo2\*.dll + dgVoodoo.conf      (Create yourself) dgVoodoo2 DLLs for
