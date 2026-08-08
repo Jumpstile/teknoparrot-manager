@@ -3405,14 +3405,9 @@ function Invoke-CrosshairSetup {
                             $deployed++; continue
                         }
 
-                        # Deploy to the canonical upstream location
-                        # (pcsx2x6\TeknoParrot\crosshairs\), not the folder root --
-                        # see issue #79. Official pcsx2x6 crosshair support reads
-                        # from this subfolder; the folder-root location was this
-                        # script's own pre-existing convention before that upstream
-                        # change and is no longer where the emulator looks.
-                        # Set-Pcsx2CursorPaths below still writes cursor_path as an
-                        # explicit override, which stays correct either way.
+                        # Deploy under the contract-resolved DataRoot, not a
+                        # reconstructed default path. This preserves portable.txt
+                        # and any future resolver behavior in one ownership boundary.
                         $dataRoot = $prereqState.DataRoot
                         if ([string]::IsNullOrWhiteSpace($dataRoot)) {
                             Write-Host ("    SKIPPED: Pcsx2x6 DataRoot could not be resolved for prerequisite state {0}; no crosshair assets or cursor_path handling performed." -f $prereqState.State) -ForegroundColor Yellow
