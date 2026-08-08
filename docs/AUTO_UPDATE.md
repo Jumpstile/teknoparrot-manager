@@ -1,6 +1,8 @@
 # Auto-Update System
 
-Status: standalone helper merged; menu integration shipped in v0.99.39; shared hardened download transport documented below.
+Status: standalone helper merged; menu integration is part of the published v1.0 RC3 release; shared hardened download transport documented below.
+
+Current public release: v1.0-RC3. The v0.99.38 live-verification references below are historical because that release has been retired; they are not current download instructions.
 
 TeknoParrot Manager uses a **manual, backup-first auto-update model**.
 
@@ -11,13 +13,13 @@ The updater must never silently replace files. It checks GitHub Releases, explai
 An independent engineering review found real blockers on the first pass. The packaging, validation, TLS, and testability blockers were fixed and retested against live `Jumpstile/teknoparrot-manager` releases under Windows PowerShell 5.1 before the menu integration was added.
 
 1. **Release packaging mismatch -- fixed**
-   - `-AssetNamePattern` now defaults to `^TeknoParrot\.Manager\.v.*\.zip$`, matching real release assets like `TeknoParrot.Manager.v0.99.38.BETA.zip`.
+   - `-AssetNamePattern` now defaults to `^TeknoParrot\.Manager\.v.*\.zip$`, matching the current release asset `TeknoParrot.Manager.v1.0.RC3.zip`.
    - Verified live: `-CheckOnly` now correctly finds and selects the real release asset instead of throwing.
 
 2. **Content validation before replacement -- fixed**
    - The updater extracts only the `TeknoParrot-Manager.ps1` entry from the downloaded zip (via `Expand-TpmReleaseZipEntry`), never the whole archive.
    - Before replacing the live script, `Test-TpmExtractedScript` verifies: the file exists, is non-empty, does not begin with a zip signature (`PK`), contains the `TeknoParrot Manager` marker, and contains a `$ScriptVersion = "..."` assignment.
-   - Verified live: a full `-Apply` against the real `v0.99.38` release downloads, extracts, validates, and installs the genuine script (confirmed by reading back `$ScriptVersion` after replacement).
+   - Historical live verification: a full `-Apply` against `v0.99.38` previously downloaded, extracted, validated, and installed the genuine script. That release is retired; repeat live verification against the current `v1.0-RC3` asset before changing updater behavior.
 
 3. **PowerShell 5.1 TLS hardening -- fixed**
    - `Enable-TpmTls12` forces `Tls12` into `[Net.ServicePointManager]::SecurityProtocol` before any GitHub API/download call, guarded to skip on PowerShell 6+ where it is unnecessary.
