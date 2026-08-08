@@ -1844,3 +1844,11 @@ literal text `"[]"`), so `Out-File` writes nothing at all. A zero-byte file
 is therefore the correct, expected representation of zero findings here,
 matching the run's own `OperatorStatus.txt` ("zero Error/Warning
 findings"). No code change made.
+---
+
+## Product evolution roadmap
+
+The canonical product evolution roadmap is maintained in [ROADMAP.md](ROADMAP.md).
+ARCHITECTURE.md remains the implementation reference for current and completed
+features. ROADMAP.md is planning-only and does not authorize RC3 scope changes,
+product-code, test, issue, release-package, or updater work.
