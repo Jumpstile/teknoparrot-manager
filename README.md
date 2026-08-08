@@ -17,10 +17,8 @@ from GitHub Releases. The published release is tagged `v1.0-RC3`.
 RC3 includes a development-only certification-harness fix: the harness can run
 the existing read-only Library Health Check under `-Unattended` and exits cleanly
 when complete. It also pins the certification runner to exactly Pester 5.7.1.
-The earlier v1.0 RC2.1 remains available
-from [Releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
-
-Final Version 1.0 has not been published yet.
+RC3 is the current published release candidate. Final Version 1.0 has not
+been published yet and will be announced separately.
 
 ---
 
