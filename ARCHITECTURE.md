@@ -211,6 +211,58 @@ files at any point. Detection is skipped entirely (not an error) when `-TeknoPar
 isn't supplied, or when the emulator's own folder isn't present yet -- nothing to check.
 Read-only, informational only; never blocks or gates registration.
 
+**Pcsx2x6 first-run/crosshair prerequisite automation (issue #173).** Before this round,
+`Invoke-CrosshairSetup`'s Pcsx2x6 branch silently skipped ini handling whenever
+`inis\PCSX2.ini` wasn't found, and computed that path as `<Pcsx2Dir>\inis\PCSX2.ini` --
+missing the `\TeknoParrot\` data-root subfolder the emulator actually uses (confirmed by
+`contracts\pcsx2x6\evidence.md#ev-portable-root`, `EmuFolders::GetPortableModePath()`
+defaults to `TeknoParrot` when `portable.txt` is empty/absent, and
+`ev-live-ini-observation`, a hardware-verified real-cabinet path). That meant the branch
+reported "PCSX2.ini not found" even on an already-initialized real install. Four new,
+read-only-by-default functions replace that silent fallback:
+
+- `Get-Pcsx2CrosshairPrerequisiteState` -- classifies a resolved pcsx2x6 install as
+  `NotInstalled` / `Unknown` (ECVF framework unreachable) / `StockUninitialized` /
+  `Incomplete` / `Canonical`, driven entirely by the pcsx2x6 contract's `env-init`
+  `EnvironmentCapability` (`Test-TPMEmulatorPresentV1`, `Resolve-TPMEnvironmentDataRootV1`,
+  `Test-TPMEnvironmentInitializedV1`) rather than a second hardcoded path/filename
+  assumption. Never invokes `InitializationAction`; classification is always read-only.
+- `Invoke-Pcsx2FirstRunSetup` -- only after `Get-Pcsx2CrosshairPrerequisiteState` returns
+  `StockUninitialized` and the operator explicitly approves, triggers the contract's
+  `InitializationAction` (`pcsx2-qtx64.exe -testconfig -portable`, the emulator's own
+  headless first-run mechanism -- see `ev-testconfig-init`) via
+  `Invoke-TPMEnvironmentInitializationActionV1`, then re-verifies with the same
+  `Test-TPMEnvironmentInitializedV1` used for detection before reporting success. Never
+  hand-authors `PCSX2.ini` content.
+- `Get-Pcsx2CursorPathReport` -- strictly read-only report of the current on-disk
+  `guncon2_cursor_path` values under `[USB1]`/`[USB2]` (the real section/key format per
+  `ev-usb-ini-contract`, not the `[USB Port N guncon2]`/`cursor_path` format
+  `Set-Pcsx2CursorPaths` still targets for its contract-denied write attempt -- that
+  mismatch is harmless to write safety since the write is denied before any section is
+  parsed, but it does mean `Set-Pcsx2CursorPaths` can't be reused to observe the real
+  value). Surfaces operator guidance; never writes.
+- `Test-Pcsx2ProcessRunning` -- guards the first-run trigger against racing a live
+  `pcsx2-qtx64` process, mirroring the existing `Get-Process -Name` pattern used for
+  LaunchBox/BigBox/TeknoParrotUi elsewhere in this script.
+
+`Invoke-CrosshairSetup`'s Pcsx2x6 branch now calls `Get-Pcsx2CrosshairPrerequisiteState`
+first; on `StockUninitialized` it prompts "Configure Automatically? (Y/N)" gating only the
+first-run trigger (PNG placement's existing consent is the wizard's own P1/P2 selection,
+unchanged) and declines to place assets or touch `cursor_path` until PCSX2.ini is actually
+initialized. The ini path used for `Set-Pcsx2CursorPaths` and the new cursor-path report is
+now `$prereqState.IniPath` (contract-derived, DataRoot-correct), not the old bare
+`inis\PCSX2.ini` join. `Set-Pcsx2CursorPaths`'s own internal section-matching format
+(`[USB Port N guncon2]`/`cursor_path`) was deliberately left unchanged -- it is dead code
+today (the contract denies the write before any section is parsed), and fixing it is a
+separate, narrower follow-up, not required for #173's detection/first-run/report scope.
+
+`Invoke-TPMEnvironmentInitializationActionV1` (`TPMCertification.Contracts.psm1`) was
+also fixed in the same round: `TimeoutSeconds` was declared in the contract schema but
+never enforced (`Start-Process -Wait` blocks indefinitely). Since this branch's first-run
+trigger is the first real production caller of that primitive, the gap stopped being
+theoretical. Timeout is now enforced via `Process.WaitForExit(ms)`, killing and throwing
+on a still-running process rather than blocking forever.
+
 ---
 
 ## Dry-run / preview mode (-DryRun, v0.92)

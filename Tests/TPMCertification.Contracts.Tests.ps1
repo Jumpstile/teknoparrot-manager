@@ -395,3 +395,61 @@ Describe 'ECVF foundation -- Get-TPMEmulatorContractObservationsV1 (shared by Sh
   $runtimeObs[0].Reason | Should -Match 'live launch'
  }
 }
+
+Describe 'ECVF foundation -- Invoke-TPMEnvironmentInitializationActionV1 timeout enforcement (issue #173)' {
+ BeforeEach { $script:root = Join-Path $TestDrive ([guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Path $script:root | Out-Null }
+
+ It 'returns Invoked=true with the real exit code when the process exits within the timeout' {
+  [IO.File]::WriteAllText((Join-Path $script:root 'quick.cmd'), "@echo off`r`nexit /b 0`r`n")
+  $action = [ordered]@{ Method = 'CliInvocation'; Command = 'quick.cmd'; Arguments = @(); ExpectedExitCodes = @(0); TimeoutSeconds = 15 }
+  $result = Invoke-TPMEnvironmentInitializationActionV1 -Action $action -InstallDir $script:root
+  $result.Invoked | Should -Be $true
+  $result.ExitCode | Should -Be 0
+ }
+
+ It 'throws INITIALIZATION_ACTION_FAILED and does not hang when the exit code is unexpected' {
+  [IO.File]::WriteAllText((Join-Path $script:root 'bad-exit.cmd'), "@echo off`r`nexit /b 7`r`n")
+  $action = [ordered]@{ Method = 'CliInvocation'; Command = 'bad-exit.cmd'; Arguments = @(); ExpectedExitCodes = @(0); TimeoutSeconds = 15 }
+  { Invoke-TPMEnvironmentInitializationActionV1 -Action $action -InstallDir $script:root } | Should -Throw '*INITIALIZATION_ACTION_FAILED*'
+ }
+
+ It 'kills the process and throws when it does not exit within TimeoutSeconds, instead of blocking forever' {
+  # Copy powershell.exe directly as the tracked process (rather than a .cmd
+  # wrapper that would launch it as an orphanable child) so Kill() actually
+  # terminates the sleeping process immediately -- a cmd.exe wrapper killed
+  # mid-wait leaves its own child process running on Windows (no POSIX
+  # process-group semantics), which would otherwise hold a lock on
+  # $TestDrive and fail Pester's own cleanup after this test.
+  $processName = 'hang-' + ([guid]::NewGuid().ToString('N'))
+  $hangExe = Join-Path $script:root ($processName + '.exe')
+  Copy-Item -LiteralPath (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe') -Destination $hangExe -Force
+  $action = [ordered]@{ Method = 'CliInvocation'; Command = ($processName + '.exe'); Arguments = @('-NoProfile', '-Command', 'Start-Sleep -Seconds 30'); ExpectedExitCodes = @(0); TimeoutSeconds = 1 }
+  $sw = [System.Diagnostics.Stopwatch]::StartNew()
+  try {
+   { Invoke-TPMEnvironmentInitializationActionV1 -Action $action -InstallDir $script:root } | Should -Throw '*did not exit within*'
+   @(Get-Process -Name $processName -ErrorAction SilentlyContinue).Count | Should -Be 0 -Because "the timed-out child must be confirmed terminated before the action fails"
+  } finally {
+   Get-Process -Name $processName -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  }
+  $sw.Stop()
+  $sw.Elapsed.TotalSeconds | Should -BeLessThan 20 -Because "the call must return once the timeout elapses, not once the hung process would eventually exit on its own"
+ }
+
+ It 'fails closed when timeout cleanup cannot be confirmed' {
+  $exe = Join-Path $script:root 'cleanup-failure.cmd'
+  [IO.File]::WriteAllText($exe, '@echo off' + [Environment]::NewLine + 'exit /b 0' + [Environment]::NewLine)
+  $fakeProcess = New-Object PSObject
+  $fakeProcess | Add-Member NoteProperty ExitCode $null
+  $fakeProcess | Add-Member ScriptMethod WaitForExit {
+   param([int]$milliseconds)
+   if ($milliseconds -eq 5000) { throw 'termination check denied' }
+   return $false
+  }
+  $fakeProcess | Add-Member ScriptMethod Kill { throw 'kill denied' }
+  Mock Start-Process { return $fakeProcess } -ModuleName TPMCertification.Contracts
+  $action = [ordered]@{ Method = 'CliInvocation'; Command = 'cleanup-failure.cmd'; Arguments = @('-synthetic'); ExpectedExitCodes = @(0); TimeoutSeconds = 1 }
+
+  { Invoke-TPMEnvironmentInitializationActionV1 -Action $action -InstallDir $script:root } | Should -Throw '*termination could not be confirmed*'
+  Should -Invoke Start-Process -ModuleName TPMCertification.Contracts -Times 1 -Exactly
+ }
+}

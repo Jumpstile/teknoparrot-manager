@@ -470,12 +470,43 @@ function Invoke-TPMEnvironmentInitializationActionV1 {
     # emulator's own executable with the contract-declared arguments and
     # waits for exit -- this never hand-authors configuration content; it
     # only ever triggers the emulator's own init mechanism.
+    #
+    # TimeoutSeconds is enforced here via Process.WaitForExit(ms) rather than
+    # Start-Process -Wait, which blocks indefinitely with no timeout of its
+    # own -- a hung or misbehaving emulator process must not be able to stall
+    # the caller forever. A process that does not exit in time is killed and
+    # this throws; it is never left running in the background.
     param([Parameter(Mandatory = $true)]$Action, [Parameter(Mandatory = $true)][string]$InstallDir)
     if ($Action.Method -eq 'None') { return [pscustomobject]@{ Invoked = $false; ExitCode = $null } }
     if ($Action.Method -ne 'CliInvocation') { throw "INITIALIZATION_ACTION_UNSUPPORTED: Method '$($Action.Method)' is declared but not yet implemented" }
     $exePath = Join-Path $InstallDir $Action.Command
     if (-not (Test-Path -LiteralPath $exePath -PathType Leaf)) { throw "INITIALIZATION_ACTION_FAILED: executable not found at '$exePath'" }
-    $proc = Start-Process -FilePath $exePath -ArgumentList $Action.Arguments -WorkingDirectory $InstallDir -PassThru -Wait
+    $startParameters = @{ FilePath = $exePath; WorkingDirectory = $InstallDir; PassThru = $true }
+    # Windows PowerShell 5.1 rejects an empty ArgumentList collection.
+    # Omit the parameter entirely when the contract declares no arguments.
+    if ($null -ne $Action.Arguments -and @($Action.Arguments).Count -gt 0) {
+        $startParameters.ArgumentList = @($Action.Arguments)
+    }
+    $proc = Start-Process @startParameters
+    $timeoutMs = [int]([Math]::Max(1, $Action.TimeoutSeconds) * 1000)
+    $exited = $proc.WaitForExit($timeoutMs)
+    if (-not $exited) {
+        $killError = $null
+        try { $proc.Kill() } catch { $killError = $_.Exception.Message }
+
+        $terminated = $false
+        $waitError = $null
+        try { $terminated = $proc.WaitForExit(5000) } catch { $waitError = $_.Exception.Message }
+        if (-not $terminated) {
+            $detail = if ($killError) { " Kill failed: $killError." } else { "" }
+            if ($waitError) { $detail += " Termination check failed: $waitError." }
+            throw "INITIALIZATION_ACTION_FAILED: process did not exit within $($Action.TimeoutSeconds)s and termination could not be confirmed.$detail"
+        }
+        if ($killError) {
+            throw "INITIALIZATION_ACTION_FAILED: process exceeded TimeoutSeconds; Kill reported failure, although termination was subsequently confirmed: $killError"
+        }
+        throw "INITIALIZATION_ACTION_FAILED: process did not exit within $($Action.TimeoutSeconds)s and was terminated"
+    }
     $timedExitCode = $proc.ExitCode
     if ($Action.ExpectedExitCodes -notcontains $timedExitCode) { throw "INITIALIZATION_ACTION_FAILED: exit code $timedExitCode not in expected set ($($Action.ExpectedExitCodes -join ', '))" }
     return [pscustomobject]@{ Invoked = $true; ExitCode = $timedExitCode }

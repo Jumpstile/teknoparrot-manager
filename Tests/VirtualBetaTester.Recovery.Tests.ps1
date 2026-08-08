@@ -66,6 +66,80 @@ BeforeAll {
         $pcsx2Ast.Extent.Text | Set-Content -LiteralPath $pcsx2FixturePath -Encoding utf8
         return $pcsx2FixturePath
     }
+
+    # ECVF (issue #173): same $PSScriptRoot-anchored fixture-tree pattern as
+    # New-Pcsx2ContractDenialFixture above, extended to the new pcsx2x6
+    # first-run-automation functions so they too actually import the real
+    # Contracts module and consult the real contract rather than falling
+    # back to "framework unavailable". Write-Log is not included -- it is
+    # already dot-sourced into this file's top-level scope from the full
+    # functionAsts extraction in the outer BeforeAll and remains resolvable
+    # from there once these functions are re-dot-sourced into a single It's
+    # local scope.
+    function New-Pcsx2AutomationFixture {
+        $fixtureRoot = Join-Path $TestDrive ("ecvf-automation-fixture-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path (Join-Path $fixtureRoot 'scripts') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $fixtureRoot 'contracts\pcsx2x6') -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TPMCertification.Authority.psm1') -Destination (Join-Path $fixtureRoot 'scripts\TPMCertification.Authority.psm1') -Force
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TPMCertification.Contracts.psm1') -Destination (Join-Path $fixtureRoot 'scripts\TPMCertification.Contracts.psm1') -Force
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\contract.json') -Destination (Join-Path $fixtureRoot 'contracts\pcsx2x6\contract.json') -Force
+
+        $names = @('Get-Pcsx2CrosshairPrerequisiteState', 'Invoke-Pcsx2FirstRunSetup', 'Get-Pcsx2CursorPathReport', 'Test-Pcsx2ProcessRunning')
+        $wanted = @($functionAsts | Where-Object { $names -contains $_.Name })
+        if ($wanted.Count -lt $names.Count) { throw "One or more required functions were not found while building the ECVF automation fixture (found: $(@($wanted.Name) -join ', '))" }
+        $fixturePath = Join-Path $fixtureRoot 'Pcsx2Automation.ps1'
+        ($wanted | ForEach-Object { $_.Extent.Text }) -join "`n`n" | Set-Content -LiteralPath $fixturePath -Encoding utf8
+        return $fixturePath
+    }
+
+    # Builds a synthetic pcsx2x6 install tree (separate from the
+    # $PSScriptRoot-anchored fixture above -- Pcsx2Dir is a plain parameter,
+    # not resolved via $PSScriptRoot) for Get-Pcsx2CrosshairPrerequisiteState
+    # state-classification tests.
+    function New-Pcsx2InstallFixture {
+        param([switch]$IncludeExecutable, [switch]$Initialized, [switch]$IncludePngs, [string]$PortableTxtContent)
+        $installRoot = Join-Path $TestDrive ("pcsx2-install-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
+        if ($IncludeExecutable) { [IO.File]::WriteAllText((Join-Path $installRoot 'pcsx2-qtx64.exe'), '') }
+        $dataRootLeaf = 'TeknoParrot'
+        if ($PSBoundParameters.ContainsKey('PortableTxtContent')) {
+            [IO.File]::WriteAllText((Join-Path $installRoot 'portable.txt'), $PortableTxtContent)
+            if (-not [string]::IsNullOrWhiteSpace($PortableTxtContent)) { $dataRootLeaf = $PortableTxtContent }
+        }
+        $dataRoot = Join-Path $installRoot $dataRootLeaf
+        if ($Initialized) {
+            New-Item -ItemType Directory -Path (Join-Path $dataRoot 'inis') -Force | Out-Null
+            [IO.File]::WriteAllText((Join-Path $dataRoot 'inis\PCSX2.ini'), "[USB1]`r`nType = None`r`n[USB2]`r`nType = None`r`n[JVS]`r`n")
+        }
+        if ($IncludePngs) {
+            New-Item -ItemType Directory -Path (Join-Path $dataRoot 'crosshairs') -Force | Out-Null
+            [IO.File]::WriteAllText((Join-Path $dataRoot 'crosshairs\P1.png'), 'x')
+            [IO.File]::WriteAllText((Join-Path $dataRoot 'crosshairs\P2.png'), 'x')
+        }
+        return $installRoot
+    }
+
+    function New-Pcsx2CrosshairSetupFixture {
+        $fixtureRoot = Join-Path $TestDrive ("crosshair-setup-fixture-" + [guid]::NewGuid().ToString('N'))
+        $crosshairsRoot = Join-Path $fixtureRoot 'Crosshairs'
+        $pcsx2Root = Join-Path $fixtureRoot 'pcsx2x6'
+        $profilesRoot = Join-Path $fixtureRoot 'UserProfiles'
+        New-Item -ItemType Directory -Path $crosshairsRoot, $pcsx2Root, $profilesRoot -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\Crosshairs\000.png') -Destination (Join-Path $crosshairsRoot '000.png') -Force
+        [IO.File]::WriteAllText((Join-Path $profilesRoot 'LIGHTGUN.xml'), '<GameProfile><GunGame>true</GunGame><EmulatorType>Pcsx2x6</EmulatorType></GameProfile>')
+
+        $names = @('Invoke-CrosshairSetup', 'Get-Pcsx2CrosshairPrerequisiteState')
+        $wanted = @($functionAsts | Where-Object { $names -contains $_.Name })
+        if ($wanted.Count -lt $names.Count) { throw "Crosshair setup fixture functions were not found" }
+        $fixturePath = Join-Path $fixtureRoot 'CrosshairSetup.ps1'
+        ($wanted | ForEach-Object { $_.Extent.Text }) -join [Environment]::NewLine | Set-Content -LiteralPath $fixturePath -Encoding utf8
+        return [pscustomobject]@{
+            Root = $fixtureRoot
+            Pcsx2Root = $pcsx2Root
+            ProfilesRoot = $profilesRoot
+            FixturePath = $fixturePath
+        }
+    }
 }
 
 Describe "Virtual Beta Tester: existing-backup recovery (issue #88 phase 1.6)" -Tag 'TVD-Medium' {
@@ -312,5 +386,239 @@ Describe "Virtual Beta Tester: existing-registration recovery (issue #88 phase 1
         @($result.Already) | Should -Contain 'ALIENS' -Because "a game with an existing UserProfile must be reported as Already, not silently ignored or re-registered"
         @($result.Registered | Where-Object { $_.Code -eq 'ALIENS' }) | Should -BeNullOrEmpty -Because "an already-registered game must not appear in Registered -- that would mean it was written again"
         (Get-Content -LiteralPath $existingUserProfile -Raw) | Should -Be $contentBeforeRun -Because "the user's existing customized profile (including their own GamePath) must be byte-identical after re-running registration -- overwriting it would silently discard real user customization"
+    }
+}
+
+Describe "Pcsx2x6 crosshair prerequisite automation (issue #173)" -Tag 'TVD-Medium' {
+    # Human behavior replaced: a tester whose pcsx2x6 install is a stock,
+    # never-initialized copy (no inis\PCSX2.ini yet) walks through TPM's
+    # crosshair setup and expects TPM to notice and offer to fix it, rather
+    # than silently copying PNGs next to a config file that doesn't exist
+    # and leaving the operator to work out why nothing changed. Also proves
+    # the new detection/first-run-trigger/report functions never write to
+    # the emulator-owned USB1/USB2 guncon2_cursor_path keys, extending the
+    # existing Set-Pcsx2CursorPaths denial coverage to the new code paths
+    # #173 adds around it.
+
+    It "Get-Pcsx2CrosshairPrerequisiteState: classifies NotInstalled when the folder does not exist" {
+        . (New-Pcsx2AutomationFixture)
+        $missing = Join-Path $TestDrive ("does-not-exist-" + [guid]::NewGuid().ToString('N'))
+        (Get-Pcsx2CrosshairPrerequisiteState -Pcsx2Dir $missing).State | Should -Be 'NotInstalled'
+    }
+
+    It "Get-Pcsx2CrosshairPrerequisiteState: classifies NotInstalled when pcsx2-qtx64.exe is absent" {
+        . (New-Pcsx2AutomationFixture)
+        $installRoot = New-Pcsx2InstallFixture
+        $state = Get-Pcsx2CrosshairPrerequisiteState -Pcsx2Dir $installRoot
+        $state.State | Should -Be 'NotInstalled'
+        $state.Reason | Should -Match 'pcsx2-qtx64.exe'
+    }
+
+    It "Get-Pcsx2CrosshairPrerequisiteState: classifies StockUninitialized when the executable is present but PCSX2.ini is not" {
+        . (New-Pcsx2AutomationFixture)
+        $installRoot = New-Pcsx2InstallFixture -IncludeExecutable
+        $state = Get-Pcsx2CrosshairPrerequisiteState -Pcsx2Dir $installRoot
+        $state.State | Should -Be 'StockUninitialized'
+        $state.DataRoot | Should -Be (Join-Path $installRoot 'TeknoParrot')
+    }
+
+    It "Get-Pcsx2CrosshairPrerequisiteState: classifies Incomplete when PCSX2.ini is initialized but crosshair PNGs are missing" {
+        . (New-Pcsx2AutomationFixture)
+        $installRoot = New-Pcsx2InstallFixture -IncludeExecutable -Initialized
+        (Get-Pcsx2CrosshairPrerequisiteState -Pcsx2Dir $installRoot).State | Should -Be 'Incomplete'
+    }
+
+    It "Get-Pcsx2CrosshairPrerequisiteState: classifies Canonical when PCSX2.ini is initialized and both crosshair PNGs are present" {
+        . (New-Pcsx2AutomationFixture)
+        $installRoot = New-Pcsx2InstallFixture -IncludeExecutable -Initialized -IncludePngs
+        $state = Get-Pcsx2CrosshairPrerequisiteState -Pcsx2Dir $installRoot
+        $state.State | Should -Be 'Canonical'
+        $state.HasP1Png | Should -Be $true
+        $state.HasP2Png | Should -Be $true
+    }
+
+    It "Get-Pcsx2CrosshairPrerequisiteState: resolves DataRoot from a non-empty portable.txt instead of the TeknoParrot default" {
+        . (New-Pcsx2AutomationFixture)
+        $installRoot = New-Pcsx2InstallFixture -IncludeExecutable -Initialized -PortableTxtContent 'CustomRoot'
+        $state = Get-Pcsx2CrosshairPrerequisiteState -Pcsx2Dir $installRoot
+        $state.DataRoot | Should -Be (Join-Path $installRoot 'CustomRoot')
+        $state.State | Should -Be 'Incomplete' -Because 'initialized without PNGs still classifies as Incomplete regardless of which data-root leaf resolved'
+    }
+
+    It "Get-Pcsx2CrosshairPrerequisiteState: classification alone never creates or modifies PCSX2.ini" {
+        . (New-Pcsx2AutomationFixture)
+        $installRoot = New-Pcsx2InstallFixture -IncludeExecutable
+        Get-Pcsx2CrosshairPrerequisiteState -Pcsx2Dir $installRoot | Out-Null
+        (Test-Path -LiteralPath (Join-Path $installRoot 'TeknoParrot\inis\PCSX2.ini')) | Should -Be $false -Because "detection is read-only; only an explicitly-approved first-run trigger may create PCSX2.ini"
+    }
+
+    It "Get-Pcsx2CursorPathReport: reports Available=false when PCSX2.ini does not exist" {
+        $missingIni = Join-Path $TestDrive ("missing-" + [guid]::NewGuid().ToString('N') + '.ini')
+        (Get-Pcsx2CursorPathReport -IniPath $missingIni).Available | Should -Be $false
+    }
+
+    It "Get-Pcsx2CursorPathReport: reads the real [USB1]/[USB2] guncon2_cursor_path values without writing anything" {
+        $iniPath = Join-Path $TestDrive ("cursor-report-" + [guid]::NewGuid().ToString('N') + '.ini')
+        $content = "[USB1]`r`nType = guncon2`r`nguncon2_cursor_path = C:\Old\P1.png`r`n[USB2]`r`nType = guncon2`r`nguncon2_cursor_path = C:\Old\P2.png`r`n"
+        [IO.File]::WriteAllText($iniPath, $content)
+        $before = Get-Content -LiteralPath $iniPath -Raw
+        $report = Get-Pcsx2CursorPathReport -IniPath $iniPath
+        $report.Available | Should -Be $true
+        $report.USB1CursorPath | Should -Be 'C:\Old\P1.png'
+        $report.USB2CursorPath | Should -Be 'C:\Old\P2.png'
+        (Get-Content -LiteralPath $iniPath -Raw) | Should -Be $before -Because "this is a read-only report -- it must never modify the ini"
+    }
+
+    It "Get-Pcsx2CursorPathReport: reports null values when the guncon2_cursor_path key is absent" {
+        $iniPath = Join-Path $TestDrive ("cursor-report-empty-" + [guid]::NewGuid().ToString('N') + '.ini')
+        [IO.File]::WriteAllText($iniPath, "[USB1]`r`nType = None`r`n[USB2]`r`nType = None`r`n")
+        $report = Get-Pcsx2CursorPathReport -IniPath $iniPath
+        $report.Available | Should -Be $true
+        $report.USB1CursorPath | Should -BeNullOrEmpty
+        $report.USB2CursorPath | Should -BeNullOrEmpty
+    }
+
+    It "Test-Pcsx2ProcessRunning: returns false when no matching process is running" {
+        Test-Pcsx2ProcessRunning | Should -Be $false
+    }
+
+    It "Test-Pcsx2ProcessRunning: returns true when a process named pcsx2-qtx64 is running" {
+        $exeDir = Join-Path $TestDrive ("fake-pcsx2-proc-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $exeDir -Force | Out-Null
+        $fakeExe = Join-Path $exeDir 'pcsx2-qtx64.exe'
+        Copy-Item -LiteralPath (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe') -Destination $fakeExe -Force
+        $proc = Start-Process -FilePath $fakeExe -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 20') -PassThru
+        try {
+            Start-Sleep -Milliseconds 500
+            Test-Pcsx2ProcessRunning | Should -Be $true
+        } finally {
+            try { $proc.Kill() } catch { }
+            try { $proc.WaitForExit(5000) } catch { }
+        }
+    }
+
+    It "Invoke-Pcsx2FirstRunSetup: refuses when the state is not StockUninitialized" {
+        . (New-Pcsx2AutomationFixture)
+        $state = [pscustomobject]@{ State = 'Canonical'; Pcsx2Dir = $TestDrive; DataRoot = $TestDrive; IniPath = $null; EnvironmentCapability = $null }
+        $result = Invoke-Pcsx2FirstRunSetup -State $state
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match 'StockUninitialized'
+    }
+
+    It "Invoke-Pcsx2FirstRunSetup: triggers the InitializationAction and succeeds when re-verification passes" {
+        . (New-Pcsx2AutomationFixture)
+        $pcsx2Dir = Join-Path $TestDrive ("firstrun-success-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $pcsx2Dir -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $pcsx2Dir 'fake-init.cmd'), "@echo off`r`nmkdir inis 2>nul`r`necho [USB1]>inis\Fixture.ini`r`nexit /b 0`r`n")
+        $envCap = [pscustomobject]@{
+            InitializationAction = [ordered]@{ Method = 'CliInvocation'; Command = 'fake-init.cmd'; Arguments = @(); ExpectedExitCodes = @(0); TimeoutSeconds = 15 }
+            InitializedVerifier  = [ordered]@{ RequiredPaths = @('inis/Fixture.ini'); RequiredMarkers = @('[USB1]'); ParseMethod = 'IniSections' }
+        }
+        $state = [pscustomobject]@{ State = 'StockUninitialized'; Pcsx2Dir = $pcsx2Dir; DataRoot = $pcsx2Dir; IniPath = (Join-Path $pcsx2Dir 'inis\Fixture.ini'); EnvironmentCapability = $envCap }
+        (Invoke-Pcsx2FirstRunSetup -State $state).Success | Should -Be $true
+    }
+
+    It "Invoke-Pcsx2FirstRunSetup: reports failure when re-verification still fails after the action runs" {
+        . (New-Pcsx2AutomationFixture)
+        $pcsx2Dir = Join-Path $TestDrive ("firstrun-fail-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $pcsx2Dir -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $pcsx2Dir 'noop-init.cmd'), "@echo off`r`nexit /b 0`r`n")
+        $envCap = [pscustomobject]@{
+            InitializationAction = [ordered]@{ Method = 'CliInvocation'; Command = 'noop-init.cmd'; Arguments = @(); ExpectedExitCodes = @(0); TimeoutSeconds = 15 }
+            InitializedVerifier  = [ordered]@{ RequiredPaths = @('inis/Fixture.ini'); RequiredMarkers = @('[USB1]'); ParseMethod = 'IniSections' }
+        }
+        $state = [pscustomobject]@{ State = 'StockUninitialized'; Pcsx2Dir = $pcsx2Dir; DataRoot = $pcsx2Dir; IniPath = (Join-Path $pcsx2Dir 'inis\Fixture.ini'); EnvironmentCapability = $envCap }
+        $result = Invoke-Pcsx2FirstRunSetup -State $state
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match 'still not initialized'
+    }
+
+    It "the full detect -> first-run -> report sequence never writes USB1/USB2 guncon2_cursor_path (ECVF never-write guarantee, extended to the new #173 code paths)" {
+        . (New-Pcsx2AutomationFixture)
+        $installRoot = New-Pcsx2InstallFixture -IncludeExecutable
+        $before = Get-Pcsx2CrosshairPrerequisiteState -Pcsx2Dir $installRoot
+        $before.State | Should -Be 'StockUninitialized'
+
+        $pcsx2Dir = $installRoot
+        [IO.File]::WriteAllText((Join-Path $pcsx2Dir 'fake-init.cmd'), "@echo off`r`nmkdir TeknoParrot\inis 2>nul`r`necho [USB1]>TeknoParrot\inis\PCSX2.ini`r`necho [USB2]>>TeknoParrot\inis\PCSX2.ini`r`necho [JVS]>>TeknoParrot\inis\PCSX2.ini`r`nexit /b 0`r`n")
+        $before.EnvironmentCapability.InitializationAction = [ordered]@{ Method = 'CliInvocation'; Command = 'fake-init.cmd'; Arguments = @(); ExpectedExitCodes = @(0); TimeoutSeconds = 15 }
+        $firstRun = Invoke-Pcsx2FirstRunSetup -State $before
+        $firstRun.Success | Should -Be $true
+
+        $after = Get-Pcsx2CrosshairPrerequisiteState -Pcsx2Dir $installRoot
+        $after.State | Should -Be 'Incomplete' -Because 'PCSX2.ini is now initialized but the crosshair PNGs were never placed by this test'
+
+        $report = Get-Pcsx2CursorPathReport -IniPath $after.IniPath
+        $report.Available | Should -Be $true
+        $report.USB1CursorPath | Should -BeNullOrEmpty
+        $report.USB2CursorPath | Should -BeNullOrEmpty -Because "nothing in this sequence ever writes USB1/USB2 guncon2_cursor_path -- only the emulator's own -testconfig mechanism and a strictly read-only report ran"
+    }
+
+    It "Invoke-CrosshairSetup: Unknown ECVF state performs zero crosshair PNG writes" {
+        $fixture = New-Pcsx2CrosshairSetupFixture
+        . $fixture.FixturePath
+        Mock Read-HostSafe { '0' }
+        Mock Start-Process {}
+        Mock Export-CrosshairPreview {}
+        Mock Get-Pcsx2CrosshairPrerequisiteState {
+            [pscustomobject]@{
+                State = 'Unknown'
+                Pcsx2Dir = $fixture.Pcsx2Root
+                DataRoot = $null
+                IniPath = $null
+                Reason = 'synthetic unknown ECVF state'
+            }
+        }
+
+        Invoke-CrosshairSetup -UserProfilesDir $fixture.ProfilesRoot -GamesInstallFolder $fixture.Root -TpRoot $fixture.Root | Out-Null
+
+        $destination = Join-Path $fixture.Pcsx2Root 'TeknoParrot\crosshairs'
+        (Test-Path -LiteralPath (Join-Path $destination 'P1.png')) | Should -Be $false
+        (Test-Path -LiteralPath (Join-Path $destination 'P2.png')) | Should -Be $false
+        @(Get-ChildItem -LiteralPath $fixture.Pcsx2Root -Recurse -Filter '*.png' -File -ErrorAction SilentlyContinue).Count | Should -Be 0
+    }
+
+    It "Invoke-CrosshairSetup: unavailable ECVF contract performs zero crosshair PNG writes" {
+        $fixture = New-Pcsx2CrosshairSetupFixture
+        . $fixture.FixturePath
+        $state = Get-Pcsx2CrosshairPrerequisiteState -Pcsx2Dir $fixture.Pcsx2Root
+        $state.State | Should -Be 'Unknown'
+        $state.Reason | Should -Match 'framework was not available'
+        Mock Read-HostSafe { '0' }
+        Mock Start-Process {}
+        Mock Export-CrosshairPreview {}
+
+        Invoke-CrosshairSetup -UserProfilesDir $fixture.ProfilesRoot -GamesInstallFolder $fixture.Root -TpRoot $fixture.Root | Out-Null
+
+        $destination = Join-Path $fixture.Pcsx2Root 'TeknoParrot\crosshairs'
+        (Test-Path -LiteralPath (Join-Path $destination 'P1.png')) | Should -Be $false
+        (Test-Path -LiteralPath (Join-Path $destination 'P2.png')) | Should -Be $false
+        @(Get-ChildItem -LiteralPath $fixture.Pcsx2Root -Recurse -Filter '*.png' -File -ErrorAction SilentlyContinue).Count | Should -Be 0
+    }
+
+    It "Invoke-CrosshairSetup: uses the contract-resolved non-default DataRoot for PNG placement" {
+        $fixture = New-Pcsx2CrosshairSetupFixture
+        $customRoot = Join-Path $fixture.Pcsx2Root 'PortableData'
+        New-Item -ItemType Directory -Path $customRoot -Force | Out-Null
+        . $fixture.FixturePath
+        Mock Read-HostSafe { '0' }
+        Mock Start-Process {}
+        Mock Export-CrosshairPreview {}
+        Mock Get-Pcsx2CrosshairPrerequisiteState {
+            [pscustomobject]@{
+                State = 'Incomplete'
+                Pcsx2Dir = $fixture.Pcsx2Root
+                DataRoot = $customRoot
+                IniPath = $null
+                Reason = 'synthetic portable DataRoot'
+            }
+        }
+
+        Invoke-CrosshairSetup -UserProfilesDir $fixture.ProfilesRoot -GamesInstallFolder $fixture.Root -TpRoot $fixture.Root | Out-Null
+
+        (Test-Path -LiteralPath (Join-Path $customRoot 'crosshairs\P1.png')) | Should -Be $true
+        (Test-Path -LiteralPath (Join-Path $customRoot 'crosshairs\P2.png')) | Should -Be $true
+        (Test-Path -LiteralPath (Join-Path $fixture.Pcsx2Root 'TeknoParrot\crosshairs\P1.png')) | Should -Be $false
+        (Test-Path -LiteralPath (Join-Path $fixture.Pcsx2Root 'TeknoParrot\crosshairs\P2.png')) | Should -Be $false
     }
 }
