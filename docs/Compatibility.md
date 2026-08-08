@@ -17,6 +17,7 @@ This is a lightweight pre-1.0 checklist for tester notes and release-readiness d
 - Long install paths for Raw Thrills titles and Yu-Gi-Oh! Duel Terminal 6.
 - Pinned-file-version requirements for known iDmac/EBOOT cases.
 - AMD/Intel GPU-specific compatibility warnings.
+- [ParrotOrganizer](https://github.com/natemac/ParrotOrganizer): TeknoParrot-adjacent organizer/launcher; watch releases/tags, curated database revisions, profile/install/launch behavior, metadata-model changes, controls/settings editor behavior, gamepad navigation, and compatibility data that may inform future TPM issues.
 
 ## Documentation follow-up
 
