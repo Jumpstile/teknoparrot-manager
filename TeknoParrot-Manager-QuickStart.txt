@@ -618,6 +618,9 @@
     UserProfiles\FullBackup\<date_time>\. Nothing is ever deleted.
   - If backup folder creation fails, the script stops rather than proceeding
     without a restore point.
+  - You must own or otherwise have lawful rights to the original arcade PCB
+    and any ROM/game data you use. TPM does not provide, distribute, or
+    endorse unauthorized game files.
   - If the log file is inaccessible, a one-time warning is shown with the
     path and error reason. Every entry that cannot be archived is then echoed
     to the console prefixed with [UNLOGGED] so nothing is silently lost.

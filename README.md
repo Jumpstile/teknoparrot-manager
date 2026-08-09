@@ -900,7 +900,7 @@ The direct LaunchBox integration refuses to write while LaunchBox or BigBox is r
 ## What It Does Not Do
 
 - It does not invent control bindings. A control is set only when a reference game you have already bound has it. Everything else is left for you and reported in ACTION REQUIRED.
-- It does not provide game files. You supply your own legally obtained games; the script only registers and configures them.
+- It does not provide game files. You must own or otherwise have lawful rights to the original arcade PCB and any ROM/game data you use. TPM does not provide, distribute, or endorse unauthorized game files; the script only registers and configures your legally obtained games.
 
 ---
 

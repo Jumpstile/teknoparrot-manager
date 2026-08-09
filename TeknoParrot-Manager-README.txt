@@ -2322,8 +2322,10 @@
     reference game you have bound already has it. Everything else is left
     for you and reported in the ACTION REQUIRED summary.
 
-  - It does not provide game files. You supply your own legally obtained
-    games; the script only registers and configures them.
+  - It does not provide game files. You must own or otherwise have lawful
+    rights to the original arcade PCB and any ROM/game data you use. TPM does
+    not provide, distribute, or endorse unauthorized game files; the script
+    only registers and configures your legally obtained games.
 
 
 -------------------------------------------------------------------------------
