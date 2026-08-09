@@ -443,6 +443,7 @@ At the end of every run the script prints — and saves to a text file (default 
 
 - Profiles are backed up before every run to `UserProfiles\FullBackup\<date_time>\`. Nothing is ever deleted automatically.
 - If backup folder creation fails, the script stops rather than proceeding without a restore point.
+- You must own or otherwise have lawful rights to the original arcade PCB and any ROM/game data you use. TPM does not provide, distribute, or endorse unauthorized game files.
 - If the log file is inaccessible, a one-time warning shows the reason. Every entry that can't be written is echoed to the console prefixed with `[UNLOGGED]` so nothing is silently lost. The log also records a download audit trail (source URL, filename, version, SHA256) for every third-party binary the script fetches.
 - If an extraction is interrupted (Ctrl+C, power loss, disk error), the incomplete folder is automatically detected and re-extracted on the next run.
 - Fuzzy name matching auto-registers most NESiCAxLive and other shared-exe games. The similarity score is shown for spot-checking.
