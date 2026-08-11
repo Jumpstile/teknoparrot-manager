@@ -175,6 +175,20 @@ Describe "Issue #217 AutoSync first-run guidance" {
         $script:ProductionSource | Should -Match ([regex]::Escape('if (-not $configAccepted -and -not $Unattended)'))
     }
 }
+Describe "Issue #220 AutoSync Z recovery" {
+    It "re-validates a replacement ZIP source before continuing boundary checks" {
+        $zBranch = [regex]::Match(
+            $script:ProductionSource,
+            '(?s)\} elseif \(\$fix -eq ''Z''\) \{(?<body>.*?)(?:\r?\n)\s*continue\r?\n\s*\}'
+        )
+        $zBranch.Success | Should -BeTrue
+        $zBody = $zBranch.Groups["body"].Value
+        $zBody | Should -Match 'if \(-not \(Test-Path -LiteralPath \$zipSource\)\)'
+        $zBody | Should -Match 'ERROR: ZIP source folder not found: \$zipSource'
+        $zBody | Should -Match 'Write-Log "ERROR: ZIP source not found\."'
+        $zBody | Should -Match 'continue 2'
+    }
+}
 Describe "Test-PathInside" {
 
     It "returns true when child equals parent" {

@@ -12722,6 +12722,10 @@ while ($true) {
                     $zipSource = Read-PathWithBrowse "  Path"
                     $zipPathsJustCaptured = $true
                     if (Save-Config) { Write-Log "Config: ZIP source updated after overlap correction." }
+                    if (-not (Test-Path -LiteralPath $zipSource)) {
+                        Write-Host ""; Write-Host "ERROR: ZIP source folder not found: $zipSource" -ForegroundColor Red
+                        Write-Log "ERROR: ZIP source not found."; [void](Read-Host "  Press Enter to return to menu"); continue 2
+                    }
                     continue
                 }
                 Write-Log "ERROR: staging folder overlaps ZIP source -- user returned to menu."
