@@ -10477,14 +10477,20 @@ if (-not $gamesInstallFolder) {
         Write-Host "ERROR: Unattended mode -- games install folder not in saved settings." -ForegroundColor Red
         Write-Log "ERROR: Unattended mode -- gamesInstallFolder not set."; exit 1
     }
-    $gamesInstallFolder = Read-PathWithBrowse "Enter folder containing your extracted games (e.g. E:\TeknoParrotGames)"
+    Write-Host ""
+    Write-Host "  Games staging folder" -ForegroundColor Cyan
+    Write-Host "  This is where TPM extracts your ZIPs and installs games." -ForegroundColor DarkCyan
+    Write-Host "  It must be a DIFFERENT folder from the one holding your original .zip files." -ForegroundColor Yellow
+    Write-Host "  TPM will create this folder if it does not exist yet." -ForegroundColor DarkCyan
+    Write-Host "  Example: E:\TeknoParrotGames" -ForegroundColor DarkCyan
+    $gamesInstallFolder = Read-PathWithBrowse "  Staging folder path"
 }
 
 if (-not $configAccepted -and -not $Unattended) {
     Write-Host ""
-    Write-Host "  Is this a RetroBat/Batocera installation?" -ForegroundColor Cyan
-    Write-Host "  (Y = game folders use a RetroBat suffix: .teknoparrot / .parrot / .game)" -ForegroundColor DarkCyan
-    Write-Host "  (extracted folders will be named  GameName.teknoparrot)" -ForegroundColor DarkCyan
+    Write-Host "  Folder naming mode" -ForegroundColor Cyan
+    Write-Host "  Y = RetroBat/Batocera style: GameName.teknoparrot" -ForegroundColor DarkCyan
+    Write-Host "  N = Standard style: GameName  (used by LaunchBox and most other frontends)" -ForegroundColor DarkCyan
     $rbChoice = (Read-HostSafe "  Use RetroBat folder naming? (Y/N)").ToUpper()
     $retroBat = ($rbChoice -eq "Y")
     if ($retroBat) { Write-Log "RetroBat mode enabled by user." }
@@ -12602,15 +12608,17 @@ while ($true) {
     if ($mode -eq "AutoSync" -and -not $zipSource) {
         Write-Host ""
         Write-Host "  Main collection ZIP folder" -ForegroundColor Cyan
-        Write-Host "  Point directly at the folder containing the .zip files, not a parent folder." -ForegroundColor DarkCyan
+        Write-Host "  Point directly at the folder containing your original .zip files." -ForegroundColor DarkCyan
+        Write-Host ("  This must be DIFFERENT from the staging folder: {0}" -f $gamesInstallFolder) -ForegroundColor Yellow
         Write-Host "  Example: W:\ROMS\TeknoParrot Collection" -ForegroundColor DarkCyan
         $zipSource = Read-PathWithBrowse "  Path"
         $zipPathsJustCaptured = $true
     }
     if ($mode -eq "AutoSync" -and ($null -eq $zipSourceSupplementary -or $zipSourceSupplementary -eq '') -and -not $Unattended) {
         Write-Host ""
-        Write-Host "  Supplementary games folder (optional)" -ForegroundColor Cyan
-        Write-Host "  Point directly at the folder containing the Supplementary .zip files, not a parent folder." -ForegroundColor DarkCyan
+        Write-Host "  Supplementary game collection folder (optional)" -ForegroundColor Cyan
+        Write-Host "  Only needed if you downloaded the separate Supplementary .zip pack." -ForegroundColor DarkCyan
+        Write-Host "  (This is not the Supplementary DAT -- most users without the pack should press Enter to skip.)" -ForegroundColor DarkCyan
         Write-Host "  Example: W:\ROMS\TeknoParrot Supplementary" -ForegroundColor DarkCyan
         $rawSupp = Read-PathWithBrowse "  Path (or press Enter to skip)"
         if ($rawSupp -and (Test-Path -LiteralPath $rawSupp)) {
@@ -12672,15 +12680,54 @@ while ($true) {
             }
             Write-Log "Network staging folder accepted: $gamesInstallFolder"
         }
-        if (Test-PathInside $gamesInstallFolder $tpRoot) {
-            Write-Host ""; Write-Host "ERROR: The staging folder is inside the TeknoParrot folder." -ForegroundColor Red
-            Write-Host "Choose a staging folder outside $tpRoot to keep the emulator folder clean." -ForegroundColor Yellow
-            Write-Log "ERROR: staging folder inside TeknoParrot root."; [void](Read-Host "  Press Enter to return to menu"); continue
-        }
-        if ((Test-PathInside $gamesInstallFolder $zipSource) -or (Test-PathInside $zipSource $gamesInstallFolder)) {
-            Write-Host ""; Write-Host "ERROR: The staging folder and the ZIP source overlap." -ForegroundColor Red
-            Write-Host "Keep them on separate paths so the original games folder stays clean." -ForegroundColor Yellow
-            Write-Log "ERROR: staging folder overlaps ZIP source."; [void](Read-Host "  Press Enter to return to menu"); continue
+        $pathBoundariesValid = $false
+        while (-not $pathBoundariesValid) {
+            if (Test-PathInside $gamesInstallFolder $tpRoot) {
+                Write-Host ""; Write-Host "ERROR: The staging folder is inside the TeknoParrot folder." -ForegroundColor Red
+                Write-Host ("    Staging folder     : {0}" -f $gamesInstallFolder) -ForegroundColor Yellow
+                Write-Host ("    TeknoParrot folder : {0}" -f $tpRoot) -ForegroundColor Yellow
+                Write-Host "Choose a staging folder outside the TeknoParrot folder to keep the emulator folder clean." -ForegroundColor Yellow
+                if ($Unattended) {
+                    Write-Log "ERROR: staging folder inside TeknoParrot root."; [void](Read-Host "  Press Enter to return to menu"); continue 2
+                }
+                Write-Host ""; Write-Host "    R) Choose a different staging folder" -ForegroundColor Cyan
+                Write-Host "    Q) Return to menu" -ForegroundColor Cyan
+                $fix = (Read-HostSafe "  Choice").ToUpper()
+                if ($fix -eq 'R') {
+                    $gamesInstallFolder = Read-PathWithBrowse "  New staging folder"
+                    if (Save-Config) { Write-Log "Config: staging folder updated to $gamesInstallFolder after TeknoParrot-inside correction" }
+                    continue
+                }
+                Write-Log "ERROR: staging folder inside TeknoParrot root -- user returned to menu."
+                [void](Read-Host "  Press Enter to return to menu"); continue 2
+            }
+            if ((Test-PathInside $gamesInstallFolder $zipSource) -or (Test-PathInside $zipSource $gamesInstallFolder)) {
+                Write-Host ""; Write-Host "ERROR: The staging folder and the ZIP source overlap." -ForegroundColor Red
+                Write-Host ("    Staging folder : {0}" -f $gamesInstallFolder) -ForegroundColor Yellow
+                Write-Host ("    ZIP source     : {0}" -f $zipSource) -ForegroundColor Yellow
+                Write-Host "Keep them on separate paths so the original ZIPs are never modified." -ForegroundColor DarkCyan
+                if ($Unattended) {
+                    Write-Log "ERROR: staging folder overlaps ZIP source."; [void](Read-Host "  Press Enter to return to menu"); continue 2
+                }
+                Write-Host ""; Write-Host "    R) Choose a different staging folder" -ForegroundColor Cyan
+                Write-Host "    Z) Choose a different ZIP source folder" -ForegroundColor Cyan
+                Write-Host "    Q) Return to menu" -ForegroundColor Cyan
+                $fix = (Read-HostSafe "  Choice").ToUpper()
+                if ($fix -eq 'R') {
+                    Write-Host ("  New staging folder must differ from: {0}" -f $zipSource) -ForegroundColor DarkCyan
+                    $gamesInstallFolder = Read-PathWithBrowse "  New staging folder"
+                    if (Save-Config) { Write-Log "Config: staging folder updated to $gamesInstallFolder after overlap correction" }
+                    continue
+                } elseif ($fix -eq 'Z') {
+                    $zipSource = Read-PathWithBrowse "  Path"
+                    $zipPathsJustCaptured = $true
+                    if (Save-Config) { Write-Log "Config: ZIP source updated after overlap correction." }
+                    continue
+                }
+                Write-Log "ERROR: staging folder overlaps ZIP source -- user returned to menu."
+                [void](Read-Host "  Press Enter to return to menu"); continue 2
+            }
+            $pathBoundariesValid = $true
         }
         if (-not (Test-Path -LiteralPath $gamesInstallFolder)) {
             try {
