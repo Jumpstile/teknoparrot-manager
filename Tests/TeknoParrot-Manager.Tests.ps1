@@ -187,6 +187,11 @@ Describe "Issue #220 AutoSync Z recovery" {
         $zBody | Should -Match 'ERROR: ZIP source folder not found: \$zipSource'
         $zBody | Should -Match 'Write-Log "ERROR: ZIP source not found\."'
         $zBody | Should -Match 'continue 2'
+        $existenceCheckIndex = $zBody.IndexOf('if (-not (Test-Path -LiteralPath $zipSource))')
+        $captureIndex = $zBody.IndexOf('$zipPathsJustCaptured = $true')
+        $saveIndex = $zBody.IndexOf('Save-Config')
+        $existenceCheckIndex | Should -BeLessThan $captureIndex
+        $existenceCheckIndex | Should -BeLessThan $saveIndex
     }
 }
 Describe "Test-PathInside" {
