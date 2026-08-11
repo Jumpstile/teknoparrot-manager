@@ -12720,6 +12720,10 @@ while ($true) {
                     continue
                 } elseif ($fix -eq 'Z') {
                     $zipSource = Read-PathWithBrowse "  Path"
+                    if (-not (Test-Path -LiteralPath $zipSource)) {
+                        Write-Host ""; Write-Host "ERROR: ZIP source folder not found: $zipSource" -ForegroundColor Red
+                        Write-Log "ERROR: ZIP source not found."; [void](Read-Host "  Press Enter to return to menu"); continue 2
+                    }
                     $zipPathsJustCaptured = $true
                     if (Save-Config) { Write-Log "Config: ZIP source updated after overlap correction." }
                     continue
