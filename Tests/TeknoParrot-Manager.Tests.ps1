@@ -12,6 +12,7 @@
 
 BeforeAll {
     $scriptPath = Join-Path $PSScriptRoot "..\TeknoParrot-Manager.ps1"
+    $script:ProductionSource = [System.IO.File]::ReadAllText($scriptPath)
     $tokens = $null
     $parseErrors = $null
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors)
@@ -145,7 +146,37 @@ Describe "Write-Log" {
     }
 }
 
+Describe "Issue #217 AutoSync first-run guidance" {
+    It "explains the staging folder role before path selection" {
+        $script:ProductionSource | Should -Match "Games staging folder"
+        $script:ProductionSource | Should -Match "This is where TPM extracts your ZIPs and installs games"
+        $script:ProductionSource | Should -Match "must be a DIFFERENT folder from the one holding your original \.zip files"
+    }
+    It "cross-references the staging folder from the ZIP prompt" {
+        $script:ProductionSource | Should -Match "containing your original \.zip files"
+        $script:ProductionSource | Should -Match "This must be DIFFERENT from the staging folder"
+    }
+    It "distinguishes the supplementary ZIP folder from the Supplementary DAT" {
+        $script:ProductionSource | Should -Match "Supplementary game collection folder"
+        $script:ProductionSource | Should -Match "not the Supplementary DAT"
+        $script:ProductionSource | Should -Match "press Enter to skip"
+    }
+    It "offers path-visible R and Z recovery while preserving the menu fallback" {
+        $script:ProductionSource | Should -Match "Staging folder : \{0\}"
+        $script:ProductionSource | Should -Match "ZIP source     : \{0\}"
+        $script:ProductionSource | Should -Match "R\) Choose a different staging folder"
+        $script:ProductionSource | Should -Match "Z\) Choose a different ZIP source folder"
+        $script:ProductionSource | Should -Match "\$zipSource = ''"
+        $script:ProductionSource | Should -Match "user returned to menu"
+    }
+    It "labels RetroBat as folder naming mode without changing the prompt guard" {
+        $script:ProductionSource | Should -Match "Folder naming mode"
+        $script:ProductionSource | Should -Not -Match "Is this a RetroBat/Batocera installation\?"
+        $script:ProductionSource | Should -Match ([regex]::Escape('if (-not $configAccepted -and -not $Unattended)'))
+    }
+}
 Describe "Test-PathInside" {
+
     It "returns true when child equals parent" {
         Test-PathInside "C:\Foo\Bar" "C:\Foo\Bar" | Should -BeTrue
     }
