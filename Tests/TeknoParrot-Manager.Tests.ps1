@@ -194,6 +194,63 @@ Describe "Issue #220 AutoSync Z recovery" {
         $existenceCheckIndex | Should -BeLessThan $saveIndex
     }
 }
+Describe "Beginner-clarity RC wording (optional-download explanations, first-run framing)" {
+    It "clarifies the Eggman dat is not a game download" {
+        $script:ProductionSource | Should -Match "not the games themselves -- it"
+        $script:ProductionSource | Should -Match "never downloads any game data\. It helps TPM correctly register games"
+    }
+    It "explains what a supplementary dat is before asking about it, for both ZIP and standalone-file modes" {
+        $matches = [regex]::Matches($script:ProductionSource, [regex]::Escape('A supplementary dat is another small index file'))
+        $matches.Count | Should -Be 2
+        $script:ProductionSource | Should -Match "adds alternate"
+        $script:ProductionSource | Should -Match "or regional version info for games already covered by the main dat"
+    }
+    It "clarifies thumbnail download is box art only, not game data" {
+        $script:ProductionSource | Should -Match "This downloads small box-art icons only, never the games themselves"
+    }
+    It "shows a first-run welcome/scope screen only when no saved config exists, gated on -not \$Unattended" {
+        $script:ProductionSource | Should -Match ([regex]::Escape('if (-not (Test-Path -LiteralPath $configPath) -and -not $Unattended) {'))
+        $script:ProductionSource | Should -Match "Welcome to TeknoParrot Manager"
+        $script:ProductionSource | Should -Match "does not provide game files"
+        $script:ProductionSource | Should -Match "does not install or configure TeknoParrot itself"
+        $script:ProductionSource | Should -Match "cannot"
+        $script:ProductionSource | Should -Match "guarantee that any individual game will boot or run fullscreen"
+    }
+}
+
+Describe "Get-WhatTpmDidSummaryLines (beginner-clarity end-of-run recap)" {
+    It "reports ZIP extraction only when AutoSync ran" {
+        $autoSyncLines = Get-WhatTpmDidSummaryLines -AutoSyncRan $true -ZipsExtracted 7 -NewlyRegistered 3 -AlreadyPresent 10 -DatAction 'Reused' -ThumbnailsRequested $true -ManualNeeded 0 -NotInTeknoParrot 0
+        ($autoSyncLines -join "`n") | Should -Match "Extracted 7 ZIP\(s\)"
+
+        $registerOnlyLines = Get-WhatTpmDidSummaryLines -AutoSyncRan $false -ZipsExtracted 0 -NewlyRegistered 3 -AlreadyPresent 10 -DatAction 'Reused' -ThumbnailsRequested $true -ManualNeeded 0 -NotInTeknoParrot 0
+        ($registerOnlyLines -join "`n") | Should -Not -Match "Extracted"
+    }
+    It "describes each dat action distinctly" {
+        ((Get-WhatTpmDidSummaryLines -AutoSyncRan $false -DatAction 'Downloaded' -ThumbnailsRequested $false) -join "`n") | Should -Match "Downloaded the Eggman dat index file"
+        ((Get-WhatTpmDidSummaryLines -AutoSyncRan $false -DatAction 'Updated'    -ThumbnailsRequested $false) -join "`n") | Should -Match "Updated the Eggman dat index file"
+        ((Get-WhatTpmDidSummaryLines -AutoSyncRan $false -DatAction 'Reused'     -ThumbnailsRequested $false) -join "`n") | Should -Match "Used your already-configured dat index file"
+        ((Get-WhatTpmDidSummaryLines -AutoSyncRan $false -DatAction 'NotConfigured' -ThumbnailsRequested $false) -join "`n") | Should -Match "No dat index file configured"
+    }
+    It "distinguishes thumbnails downloaded from skipped" {
+        ((Get-WhatTpmDidSummaryLines -AutoSyncRan $false -DatAction 'Reused' -ThumbnailsRequested $true)  -join "`n") | Should -Match "Downloaded missing game icons"
+        ((Get-WhatTpmDidSummaryLines -AutoSyncRan $false -DatAction 'Reused' -ThumbnailsRequested $false) -join "`n") | Should -Match "Skipped game icon download"
+    }
+    It "surfaces items needing manual attention, or says nothing does" {
+        $needsAttention = Get-WhatTpmDidSummaryLines -AutoSyncRan $false -DatAction 'Reused' -ThumbnailsRequested $false -ManualNeeded 2 -NotInTeknoParrot 1
+        ($needsAttention -join "`n") | Should -Match "3 item\(s\) still need your attention -- see ACTION REQUIRED below"
+
+        $allClear = Get-WhatTpmDidSummaryLines -AutoSyncRan $false -DatAction 'Reused' -ThumbnailsRequested $false -ManualNeeded 0 -NotInTeknoParrot 0
+        ($allClear -join "`n") | Should -Match "Nothing needs manual attention from this run"
+    }
+    It "always includes the TPM-scope disclaimer" {
+        $lines = (Get-WhatTpmDidSummaryLines -AutoSyncRan $false -DatAction 'NotConfigured' -ThumbnailsRequested $false) -join "`n"
+        $lines | Should -Match "does not"
+        $lines | Should -Match "provide games, install TeknoParrot itself, or guarantee"
+        $lines | Should -Match "usually a TeknoParrot, game, or runtime setting"
+    }
+}
+
 Describe "Test-PathInside" {
 
     It "returns true when child equals parent" {

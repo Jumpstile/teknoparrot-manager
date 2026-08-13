@@ -10142,6 +10142,63 @@ function Invoke-ThumbnailDownload {
 }
 
 # =============================================================================
+# "WHAT TPM JUST DID" END-OF-RUN SUMMARY  (beginner clarity, RC4)
+# =============================================================================
+# Pure formatter -- takes the counts/flags the AutoSync/RegisterOnly run
+# already computed and turns them into a plain-English recap plus a scope
+# reminder. Adds no new automation or decisions; every input here is a value
+# the run already had before this function existed. Kept separate from the
+# "Done" counts block above it because that block is the precise numbers a
+# returning user wants at a glance, while this is the "what does that mean"
+# explanation a first-time user needs and an experienced user can skim past.
+function Get-WhatTpmDidSummaryLines {
+    param(
+        [bool]$AutoSyncRan,
+        [int]$ZipsExtracted = 0,
+        [int]$NewlyRegistered = 0,
+        [int]$AlreadyPresent = 0,
+        [ValidateSet('Downloaded', 'Updated', 'Reused', 'NotConfigured')]
+        [string]$DatAction = 'NotConfigured',
+        [bool]$ThumbnailsRequested,
+        [int]$ManualNeeded = 0,
+        [int]$NotInTeknoParrot = 0
+    )
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    [void]$lines.Add("  What TPM just did:")
+    if ($AutoSyncRan) {
+        [void]$lines.Add("    - Extracted $ZipsExtracted ZIP(s) from your source folder into the staging folder.")
+    }
+    [void]$lines.Add("    - Registered $NewlyRegistered new game(s) with TeknoParrot ($AlreadyPresent already registered from before).")
+    switch ($DatAction) {
+        'Downloaded' { [void]$lines.Add("    - Downloaded the Eggman dat index file (an index used to match games -- not a game download).") }
+        'Updated'    { [void]$lines.Add("    - Updated the Eggman dat index file to the latest release.") }
+        'Reused'     { [void]$lines.Add("    - Used your already-configured dat index file (no download this run).") }
+        default      { [void]$lines.Add("    - No dat index file configured -- some games may need manual registration.") }
+    }
+    if ($ThumbnailsRequested) {
+        [void]$lines.Add("    - Downloaded missing game icons (small box-art images, not game data).")
+    } else {
+        [void]$lines.Add("    - Skipped game icon download.")
+    }
+    $needsAttention = $ManualNeeded + $NotInTeknoParrot
+    if ($needsAttention -gt 0) {
+        [void]$lines.Add("    - $needsAttention item(s) still need your attention -- see ACTION REQUIRED below.")
+    } else {
+        [void]$lines.Add("    - Nothing needs manual attention from this run.")
+    }
+    [void]$lines.Add("")
+    [void]$lines.Add("  TPM organizes, extracts, registers, and exports your games -- it does not")
+    [void]$lines.Add("  provide games, install TeknoParrot itself, or guarantee that a game will")
+    [void]$lines.Add("  boot or run fullscreen. If a game crashes or launches windowed once it")
+    [void]$lines.Add("  starts, that is usually a TeknoParrot, game, or runtime setting -- not")
+    [void]$lines.Add("  something TPM changed, unless TPM touched a related file this run (noted")
+    [void]$lines.Add("  above).")
+
+    return $lines
+}
+
+# =============================================================================
 # CONTROLS STATUS REPORT
 # =============================================================================
 # Writes a snapshot of every registered game's control state to a persistent
@@ -10306,6 +10363,34 @@ if ($Unattended -and -not (Test-Path -LiteralPath $configPath)) {
     Write-Host "ERROR: Unattended mode requires saved settings." -ForegroundColor Red
     Write-Host "Run the script once interactively to save your configuration, then retry with -Unattended." -ForegroundColor Yellow
     Write-Log "ERROR: Unattended mode -- no saved config at $configPath"; exit 1
+}
+
+# First-run scope framing: shown exactly once, before the setup wizard below
+# ever asks a question, only when no saved config exists yet (a returning
+# user with a config skips straight to "Saved configuration found:"). Sets
+# expectations before anything else so a beginner isn't left guessing what
+# TPM is responsible for versus what TeknoParrot/the game itself is
+# responsible for. Rephrases the existing ownership disclaimer already
+# shipped in TeknoParrot-Manager-README.txt ("WHAT IT DOES NOT DO") rather
+# than introducing new legal wording.
+if (-not (Test-Path -LiteralPath $configPath) -and -not $Unattended) {
+    Write-Host ""
+    Write-Host "============================================" -ForegroundColor Cyan
+    Write-Host "   Welcome to TeknoParrot Manager" -ForegroundColor Cyan
+    Write-Host "============================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  TPM organizes, extracts, registers, and exports arcade games for" -ForegroundColor DarkCyan
+    Write-Host "  TeknoParrot. It does not provide game files -- you must own or" -ForegroundColor DarkCyan
+    Write-Host "  otherwise have lawful rights to any ROM/game data you use." -ForegroundColor DarkCyan
+    Write-Host ""
+    Write-Host "  TPM does not install or configure TeknoParrot itself, and it cannot" -ForegroundColor DarkCyan
+    Write-Host "  guarantee that any individual game will boot or run fullscreen." -ForegroundColor DarkCyan
+    Write-Host "  If a game crashes or launches windowed once it starts, that is" -ForegroundColor DarkCyan
+    Write-Host "  usually a TeknoParrot, game, or runtime setting to fix in" -ForegroundColor DarkCyan
+    Write-Host "  TeknoParrotUI or the game itself -- not something TPM changed," -ForegroundColor DarkCyan
+    Write-Host "  unless TPM touched a related file (TPM always tells you when it does)." -ForegroundColor DarkCyan
+    Write-Host ""
+    [void](Read-Host "  Press Enter to continue")
 }
 
 if (Test-Path -LiteralPath $configPath) {
@@ -10514,11 +10599,15 @@ if ((($eggmanDatZip -and -not (Test-Path -LiteralPath $eggmanDatZip)) -or ($datF
     $datFilePath = ''
 }
 
+$eggmanDatActionThisRun = if ($eggmanDatZip -or $datFilePath) { 'Reused' } else { 'NotConfigured' }
+
 if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
     Write-Host ""
     Write-Host "  Eggman dat files (highly recommended)" -ForegroundColor Cyan
-    Write-Host "  These help correctly register games that share an executable name," -ForegroundColor DarkCyan
-    Write-Host "  use an ELF instead of an .exe, or have a slightly misnamed folder." -ForegroundColor DarkCyan
+    Write-Host "  This is a small index/database file, not the games themselves -- it" -ForegroundColor DarkCyan
+    Write-Host "  never downloads any game data. It helps TPM correctly register games" -ForegroundColor DarkCyan
+    Write-Host "  that share an executable name, use an ELF instead of an .exe, or have" -ForegroundColor DarkCyan
+    Write-Host "  a slightly misnamed folder." -ForegroundColor DarkCyan
     Write-Host "  Without one, a few games may need registering by hand instead." -ForegroundColor DarkCyan
     Write-Host "    D) Download the latest from Eggman's Repository  (~145 MB)"
     Write-Host "    B) Browse for a ZIP or dat file I already have"
@@ -10534,6 +10623,7 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
             $savedPath = Invoke-EggmanDatDownloadInteractive $rel
             if ($savedPath) {
                 $eggmanDatZip = $savedPath
+                $eggmanDatActionThisRun = 'Downloaded'
                 Write-Host "  Saved: $savedPath" -ForegroundColor Green
                 Write-Log "EggmanDat: downloaded to $savedPath"
             } else {
@@ -10611,10 +10701,16 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
     # all, depending on which of three separate up-front menu choices
     # (D/Z/F) the user happened to pick.
     if ($eggmanDatZip) {
+        Write-Host "  A supplementary dat is another small index file -- it adds alternate" -ForegroundColor DarkCyan
+        Write-Host "  or regional version info for games already covered by the main dat" -ForegroundColor DarkCyan
+        Write-Host "  above. Also just an index, never game data." -ForegroundColor DarkCyan
         $askSupp = (Read-HostSafe "  Also index supplementary dat for alternate version info? (Y/N)").ToUpper()
         $includeSupplementary = ($askSupp -eq 'Y')
         if ($includeSupplementary) { Write-Log "EggmanDat: supplementary indexing enabled." }
     } elseif ($datFilePath) {
+        Write-Host "  A supplementary dat is another small index file -- it adds alternate" -ForegroundColor DarkCyan
+        Write-Host "  or regional version info for games already covered by the main dat" -ForegroundColor DarkCyan
+        Write-Host "  above. Also just an index, never game data." -ForegroundColor DarkCyan
         $askSupp = (Read-HostSafe "  Do you also have a separate supplementary dat file? (Y/N)").ToUpper()
         if ($askSupp -eq 'Y') {
             $rawSupp = Read-PathWithBrowse "  Path to supplementary dat file" -Mode File -FileFilter "dat files (*.dat)|*.dat|All files (*.*)|*.*"
@@ -10667,6 +10763,7 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
                     $savedPath = Invoke-EggmanDatDownloadInteractive $rel
                     if ($savedPath) {
                         $eggmanDatZip = $savedPath
+                        $eggmanDatActionThisRun = 'Updated'
                         Write-Host "  Updated: $savedPath" -ForegroundColor Green
                         Write-Log "EggmanDat: updated to $savedPath"
                         [void](Save-Config)
@@ -13143,6 +13240,8 @@ if ($dryRunActive) {
     Write-Log "Unattended: thumbnail download = Y."
     $doThumb = "Y"
 } else {
+    Write-Host "  This downloads small box-art icons only, never the games themselves --" -ForegroundColor DarkCyan
+    Write-Host "  it just gives each registered game a picture in TeknoParrot's game list." -ForegroundColor DarkCyan
     Write-Host "  Tip: want to use your own game icons instead? Create a  CustomThumbnails\" -ForegroundColor DarkCyan
     Write-Host "  folder next to this script and drop PNG images in it. Name each PNG the" -ForegroundColor DarkCyan
     Write-Host "  same as that game's file in the UserProfiles\ folder (called the profile" -ForegroundColor DarkCyan
@@ -13301,6 +13400,15 @@ if ($result.Ambiguous.Count -gt 0) {
 if ($result.Unmatched.Count -gt 0) {
     Write-Host ("  Not in TeknoParrot : {0} folder(s)  (see ACTION REQUIRED below)" -f $result.Unmatched.Count) -ForegroundColor Yellow
 }
+
+if (-not $dryRunActive) {
+    Write-Host ""
+    $summaryLines = Get-WhatTpmDidSummaryLines -AutoSyncRan ($mode -eq "AutoSync") -ZipsExtracted ($(if ($sync) { $sync.Synced } else { 0 })) `
+        -NewlyRegistered $result.Registered.Count -AlreadyPresent $result.Already.Count -DatAction $eggmanDatActionThisRun `
+        -ThumbnailsRequested ($doThumb -eq "Y") -ManualNeeded $manualRegData.Count -NotInTeknoParrot $result.Unmatched.Count
+    foreach ($sl in $summaryLines) { Write-Host $sl -ForegroundColor DarkCyan }
+}
+
 Write-Host ""
 if (-not $dryRunActive) { Write-Host "  Backup : $backupPath" -ForegroundColor DarkCyan }
 Write-Host "  Log    : $logPath"    -ForegroundColor DarkCyan
