@@ -9,21 +9,22 @@ tool for organizing extracted arcade games, registering profiles, deploying
 lightgun crosshairs, applying compatibility fixes, and exporting libraries to
 LaunchBox or HyperSpin.
 
-> **Published Release Candidate v1.0 RC3** — test one game after each run. Profiles are backed up automatically before every run.
+> **Release Candidate v1.0 RC4** — test one game after each run. Profiles are backed up automatically before every run.
 
 ---
 
-## Published Release Candidate: TeknoParrot Manager v1.0 RC3
+## Release Candidate: TeknoParrot Manager v1.0 RC4
 
-v1.0 RC3 is published and hardware-certified. Download the official
-[TeknoParrot Manager v1.0 RC3 release](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC3)
-from GitHub Releases. The published release is tagged `v1.0-RC3`.
+v1.0 RC4 is in release preparation and not yet published. The previous
+published release, [TeknoParrot Manager v1.0 RC3](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC3),
+remains available on GitHub Releases until RC4 is published.
 
-RC3 includes a development-only certification-harness fix: the harness can run
-the existing read-only Library Health Check under `-Unattended` and exits cleanly
-when complete. It also pins the certification runner to exactly Pester 5.7.1.
-RC3 is the current published release candidate. Final Version 1.0 has not
-been published yet and will be announced separately.
+RC4 explains optional downloads (Eggman dat, thumbnails) in plain language
+before asking whether to proceed, adds a "What TPM just did" recap after
+every AutoSync/registration run, and adds a first-run screen clarifying
+what TPM does and does not do. It also fixes a stale internal diagnostic
+baseline and confirms Centipede Chaos compatibility. Final Version 1.0 has
+not been published yet and will be announced separately.
 
 ---
 
@@ -149,7 +150,7 @@ This script automates the copy-and-fill step: it scans your games, matches each 
 
 ## Installation
 
-1. Download the official `TeknoParrot Manager v1.0 RC3.zip` release asset
+1. Download the official `TeknoParrot Manager v1.0 RC4.zip` release asset
    from [Releases](../../releases).
 2. Extract to any folder (e.g. a `Scripts` subfolder alongside your TeknoParrot install)
 3. Double-click **`TeknoParrot-Manager.bat`**
@@ -950,4 +951,4 @@ TeknoParrot Manager name and branding are reserved.
 
 ---
 
-> v1.0 RC3 (published; hardware-certified) -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v1.0 RC4 (in release preparation) -- test one game after each run. Profiles are backed up automatically at the start of every run.
