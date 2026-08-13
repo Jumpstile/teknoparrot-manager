@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ZipPath,
 
-    [string]$ExpectedDisplayVersion = 'v1.0 RC3'
+    [string]$ExpectedDisplayVersion = 'v1.0 RC4'
 )
 
 Set-StrictMode -Version Latest
