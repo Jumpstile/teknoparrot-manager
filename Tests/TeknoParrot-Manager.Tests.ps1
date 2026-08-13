@@ -79,10 +79,17 @@ BeforeAll {
         'HasTpoSupport','EmulatorType','Is64Bit','ValidMd5','ConfigValues',
         'GameName','GameGenreInternal','IconName','HasModeForSquare',
         'RequiresAdmin','InvokeFullscreenOnStartup','LaunchedFromUsb',
-        'CamberWindowState'
+        'CamberWindowState','JoystickButtons','Patreon','xAxisMin','xAxisMax',
+        'yAxisMin','yAxisMax','InvertedMouseAxis','GunGame','DevOnly',
+        'ResetHint','GasAxisMin','GasAxisMax','OnlineProfileURL',
+        'OnlineIdFieldName','OnlineIdType','UseDirectionalPresses','msysType',
+        'TestExecIs64Bit','SecondExecutableArguments','Requires4GBPatch',
+        'LaunchSecondExecutableMinimized','Use16BitAnalog','RPCS3Config',
+        'RequiresBepInEx','IsTpoExclusive','IsLegacy','AllowSettingSync',
+        'UseRemoteThread','CustomArguments','InvalidFiles','GameVersion'
     )
     $script:RequiredGameProfileTopLevel = @('EmulationProfile','ConfigValues')
-    $script:KnownFieldTypes = @('Bool','Dropdown','Text','Slider')
+    $script:KnownFieldTypes = @('Bool','Dropdown','Text','Slider','DropdownIndex','KeyCapture','MonitorSelection','Numeric')
     $script:InputConfigFields = @()
 
     # The production script loads System.IO.Compression.FileSystem at startup
@@ -1368,6 +1375,18 @@ Describe "Issue #84: Pass-2 dat-name fuzzy fallback rejects candidates with extr
         $extra | Should -Contain 'super'
         $extra | Should -Contain 'arcade'
         $extra | Should -Contain 'edition'
+    }
+    It "blocks a bare Centipede folder matching the Centipede Chaos DAT entry (issue #130/#79, real DAT entry)" {
+        # Confirmed against the live Eggmansworld/TeknoParrot reference dat
+        # (2026-08-06 collection): the only Centipede-related entry is
+        # "Centipede Chaos (1.11)(2019)[ICE Linux PC][TP]" -- there is no
+        # separate older "Centipede" entry in the current catalog to
+        # false-positive against, but this guards the shape of the risk
+        # named in #130 regardless.
+        $extra = Get-ExtraCandidateTokens -FolderName "Centipede" `
+                                           -CandidateName "Centipede Chaos (1.11)(2019)[ICE Linux PC][TP]"
+        @($extra).Count | Should -BeGreaterThan 0
+        $extra | Should -Contain 'chaos'
     }
     It "blocks Battle Gear 4 matching Battle Gear 4 Tuned (real DAT entries)" {
         $extra = Get-ExtraCandidateTokens -FolderName "Battle Gear 4 (2005)[Taito Type X+][TP]" `
@@ -2958,6 +2977,52 @@ Describe "Get-GameProfileSchemaDrift (issue #43 schema drift detection)" {
         $r.HasRoot    | Should -BeFalse
         $r.HasDrift   | Should -BeTrue
         $r.WouldWrite | Should -BeFalse
+    }
+    It "reports no drift for the live Centipede Chaos profile (issue #130/#79)" {
+        # Captured verbatim from teknogods/TeknoParrotUI GameProfiles/Centipede.xml
+        # (2026-08-13). EmulatorType=ElfLdr2, GunGame=false (not a lightgun title
+        # despite the Shooter genre/Start-Shoot button labels), Input API=RawInput,
+        # Patreon=true. This confirms the re-captured baseline above actually
+        # covers the real upstream profile, not just a synthetic fixture.
+        $xml = @"
+<GameProfile>
+	<GamePath></GamePath>
+	<TestMenuParameter></TestMenuParameter>
+	<TestMenuIsExecutable>false</TestMenuIsExecutable>
+	<ExtraParameters></ExtraParameters>
+	<TestMenuExtraParameters></TestMenuExtraParameters>
+	<ResetHint>false</ResetHint>
+	<EmulationProfile>WartranTroopers</EmulationProfile>
+	<GameProfileRevision>1</GameProfileRevision>
+	<HasSeparateTestMode>false</HasSeparateTestMode>
+	<Is64Bit>true</Is64Bit>
+	<EmulatorType>ElfLdr2</EmulatorType>
+	<Patreon>true</Patreon>
+	<RequiresAdmin>false</RequiresAdmin>
+	<InvertedMouseAxis>true</InvertedMouseAxis>
+	<GunGame>false</GunGame>
+	<ExecutableName>game</ExecutableName>
+	<xAxisMin>0</xAxisMin>
+	<xAxisMax>255</xAxisMax>
+	<yAxisMin>0</yAxisMin>
+	<yAxisMax>255</yAxisMax>
+	<ConfigValues>
+		<FieldInformation><CategoryName>General</CategoryName><FieldName>Input API</FieldName><FieldValue>RawInput</FieldValue><FieldType>Dropdown</FieldType></FieldInformation>
+		<FieldInformation><CategoryName>General</CategoryName><FieldName>HideCursor</FieldName><FieldValue>1</FieldValue><FieldType>Bool</FieldType></FieldInformation>
+		<FieldInformation><CategoryName>General</CategoryName><FieldName>Windowed</FieldName><FieldValue>1</FieldValue><FieldType>Bool</FieldType></FieldInformation>
+	</ConfigValues>
+</GameProfile>
+"@
+        $r = Get-GameProfileSchemaDrift -Doc (New-DriftDoc $xml)
+        $r.HasDrift          | Should -BeFalse
+        $r.UnknownNodes.Count | Should -Be 0
+        $r.MissingRequired.Count | Should -Be 0
+        $r.WouldWrite        | Should -BeFalse
+
+        $doc = New-DriftDoc $xml
+        (Get-ProfileInputApi -Doc $doc) | Should -Be 'RawInput'
+        $doc.GameProfile.SelectSingleNode("EmulatorType").InnerText | Should -Be 'ElfLdr2'
+        $doc.GameProfile.SelectSingleNode("GunGame").InnerText      | Should -Be 'false'
     }
 }
 
