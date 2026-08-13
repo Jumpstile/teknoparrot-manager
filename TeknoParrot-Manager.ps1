@@ -512,6 +512,14 @@ function Save-XmlMaybe {
 # captured from live teknogods/TeknoParrotUI GameProfiles. New optional
 # elements appearing upstream are surfaced as 'unknown' (informational, not
 # a failure); the absence of a REQUIRED element is a hard drift finding.
+#
+# Re-captured (issue #130/#79, 2026-08-13) against all 541 profiles in the
+# live teknogods/TeknoParrotUI GameProfiles tree. The prior list predated
+# many long-standing, widely-used elements -- e.g. JoystickButtons appears
+# in 540/541 profiles and Patreon in 199/541, so the drift report was
+# flagging nearly every profile as "unknown" and had stopped being a useful
+# signal. This is a baseline-accuracy fix only: the cardinal invariant is
+# unchanged, unknown nodes are still reported and never acted on.
 $script:KnownGameProfileTopLevel = @(
     'GamePath','GamePath2','TestMenuParameter','TestMenuIsExecutable',
     'ExtraParameters','TestMenuExtraParameters','EmulationProfile',
@@ -520,7 +528,14 @@ $script:KnownGameProfileTopLevel = @(
     'HasTpoSupport','EmulatorType','Is64Bit','ValidMd5','ConfigValues',
     'GameName','GameGenreInternal','IconName','HasModeForSquare',
     'RequiresAdmin','InvokeFullscreenOnStartup','LaunchedFromUsb',
-    'CamberWindowState'
+    'CamberWindowState','JoystickButtons','Patreon','xAxisMin','xAxisMax',
+    'yAxisMin','yAxisMax','InvertedMouseAxis','GunGame','DevOnly',
+    'ResetHint','GasAxisMin','GasAxisMax','OnlineProfileURL',
+    'OnlineIdFieldName','OnlineIdType','UseDirectionalPresses','msysType',
+    'TestExecIs64Bit','SecondExecutableArguments','Requires4GBPatch',
+    'LaunchSecondExecutableMinimized','Use16BitAnalog','RPCS3Config',
+    'RequiresBepInEx','IsTpoExclusive','IsLegacy','AllowSettingSync',
+    'UseRemoteThread','CustomArguments','InvalidFiles','GameVersion'
 )
 
 # Top-level elements that must be present for this script to reason about a
@@ -530,8 +545,11 @@ $script:RequiredGameProfileTopLevel = @('EmulationProfile','ConfigValues')
 
 # FieldType values this script understands inside ConfigValues. An unknown
 # FieldType is reported (so a new control type is noticed) but, again, never
-# acted on.
-$script:KnownFieldTypes = @('Bool','Dropdown','Text','Slider')
+# acted on. Re-captured alongside the top-level baseline above (issue
+# #130/#79): DropdownIndex, KeyCapture, MonitorSelection, and Numeric are
+# all long-standing upstream types (e.g. GoldenTeeLive*, Daytona3, WMMT3),
+# not new with any single title, that the prior list never included.
+$script:KnownFieldTypes = @('Bool','Dropdown','Text','Slider','DropdownIndex','KeyCapture','MonitorSelection','Numeric')
 
 function Get-GameProfileSchemaDrift {
     param(
