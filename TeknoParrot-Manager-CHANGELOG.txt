@@ -7,6 +7,26 @@
 
 
 -------------------------------------------------------------------------------
+  v1.0 RC4  (2026-08-13)  -- beginner clarity, Centipede Chaos coverage
+  ----------------------------------------------------------------
+  Improvement (issue #222): the Eggman dat, supplementary dat, and thumbnail
+  download prompts now explain what the file is and confirm it never
+  downloads game data, before asking whether to proceed. Added a "What TPM
+  just did" recap to the end-of-run summary (ZIPs extracted, games
+  registered, dat file action taken, thumbnail action, and anything still
+  needing manual attention), plus a first-run welcome screen (shown once,
+  new installs only) framing that TPM organizes/extracts/registers/exports
+  games but does not provide games or guarantee boot/fullscreen behavior.
+
+  Fix (issue #130/#79): TPM's GameProfile schema-drift diagnostic had a
+  stale baseline that flagged long-standing, widely-used profile fields
+  (including one present in 540 of 541 current official profiles) as
+  "unknown," which had made the diagnostic's signal unreliable. Re-captured
+  the baseline against the live upstream catalog. Also confirms Centipede
+  Chaos is fully supported through TPM's existing generic profile-parsing,
+  matching, and export logic -- no dedicated per-title code was needed.
+
+-------------------------------------------------------------------------------
   v1.0 RC3  (2026-08-08)  -- published hardware-certified release
   ----------------------------------------------------------------
   Feature (issue #173): Crosshair Setup now detects a stock, never-initialized
