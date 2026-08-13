@@ -1,7 +1,7 @@
 # TeknoParrot Manager
 
 PowerShell 5.1 script for managing TeknoParrot arcade game libraries.
-Current version: v1.0 RC3
+Current version: v1.0 RC4
 
 ---
 
@@ -124,7 +124,7 @@ Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1
 
 ## Release ZIP contents
 
-ZIP name: `TeknoParrot Manager v1.0 RC3.zip` (always versioned).
+ZIP name: `TeknoParrot Manager v1.0 RC4.zip` (always versioned).
 
 **Include:** `TeknoParrot-Manager.ps1`, `.bat`, `-README.txt`, `-QuickStart.txt`,
 `-CHANGELOG.txt`, `LICENSE`, `Crosshairs\` (all 321 PNGs),
