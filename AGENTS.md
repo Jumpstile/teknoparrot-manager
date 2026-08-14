@@ -1,7 +1,7 @@
 # TeknoParrot Manager
 
 PowerShell 5.1 script for managing TeknoParrot arcade game libraries.
-Current version: v1.0 RC4
+Current version: v1.0 RC5
 
 ---
 
@@ -124,13 +124,16 @@ Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1
 
 ## Release ZIP contents
 
-ZIP name: `TeknoParrot Manager v1.0 RC4.zip` (always versioned).
+ZIP name: `TeknoParrot Manager v1.0 RC5.zip` (always versioned).
 
 **Include:** `TeknoParrot-Manager.ps1`, `.bat`, `-README.txt`, `-QuickStart.txt`,
 `-CHANGELOG.txt`, `LICENSE`, `Crosshairs\` (all 321 PNGs),
 `tools\Invoke-TpmAutoUpdate.ps1`, `tools\TpmAutoUpdate.Core.psm1`,
 `scripts\Debug-TPM-MenuLayout.ps1`, `contracts\` (ECVF registered contracts),
-`scripts\TPMCertification.Contracts.psm1` (ECVF loader/validator/evaluator).
+`scripts\TPMCertification.Contracts.psm1` (ECVF loader/validator/evaluator),
+`scripts\TPMCertification.Authority.psm1` (imported by
+`TPMCertification.Contracts.psm1` as its first line -- omitting it breaks
+every ECVF contract load; RC4 shipped without it, see LESSONS_LEARNED.md).
 
 **Exclude:** `ReShade\` (not redistributable; user obtains from reshade.me),
 `dgVoodoo2\` (user provides), `FFBPlugin\` and `BepInExCache\` (live-downloaded

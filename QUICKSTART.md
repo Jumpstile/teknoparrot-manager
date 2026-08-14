@@ -1,6 +1,6 @@
 # TeknoParrot Manager — Quick Start
 
-> **Release Candidate v1.0 RC4** — test one game after each run. Profiles are backed up automatically before every run.
+> **Published Release Candidate v1.0 RC5** — test one game after each run. Profiles are backed up automatically before every run.
 
 Full documentation: [README.md](README.md)
 
