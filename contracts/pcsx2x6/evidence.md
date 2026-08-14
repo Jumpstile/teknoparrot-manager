@@ -107,7 +107,7 @@ suggesting it should, under `<DataRoot>/logs/`), and whether the
 shutdown. See experiments.md.
 
 ### ev-live-ini-observation: real arcade machine's `PCSX2.ini`
-Observed directly at `C:\Users\EliSi\LaunchBox\Emulators\TeknoParrot\pcsx2x6\TeknoParrot\inis\PCSX2.ini`
+Observed directly at `<TeknoParrotRoot>\pcsx2x6\TeknoParrot\inis\PCSX2.ini`
 on the certified cabinet: `[USB1]` and `[USB2]` sections present, both
 `Type = None` at observation time; a separate top-level `[JVS]` section
 (`TestMode`, `VideoVoltage`, `MonitorSyncFrequency`, `VideoSyncSplit`,

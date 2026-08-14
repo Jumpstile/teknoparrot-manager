@@ -7,7 +7,23 @@
 
 
 -------------------------------------------------------------------------------
-  v1.0 RC4  (2026-08-13)  -- beginner clarity, Centipede Chaos coverage
+  v1.0 RC5  (2026-08-14)  -- RC4 packaging correction (RC4 superseded)
+  ----------------------------------------------------------------
+  Fix: the RC4 release ZIP was missing scripts\TPMCertification.Authority.psm1,
+  an unconditional dependency of scripts\TPMCertification.Contracts.psm1
+  (imported at runtime by TeknoParrot-Manager.ps1 for pcsx2x6 crosshair/ECVF
+  setup). Every RC4 install reaching that code path had contract evaluation
+  fail closed silently -- no crash, but pcsx2x6/ECVF contract verification
+  never actually ran. Corrected the release package manifest and the
+  package validator's required-entry list so this class of gap is caught
+  before a release ships. RC4 is superseded; use RC5.
+
+  Also corrects: an active-documentation gap where RC4 guidance still said
+  "in release preparation" after RC4 had actually been published, and
+  redacts a personal filesystem path from contracts\pcsx2x6\evidence.md.
+
+-------------------------------------------------------------------------------
+  v1.0 RC4  (2026-08-13)  -- beginner clarity, Centipede Chaos coverage (SUPERSEDED by RC5)
   ----------------------------------------------------------------
   Improvement (issue #222): the Eggman dat, supplementary dat, and thumbnail
   download prompts now explain what the file is and confirm it never

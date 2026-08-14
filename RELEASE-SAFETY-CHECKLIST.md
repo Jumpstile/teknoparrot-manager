@@ -292,11 +292,19 @@ the file that happened to be open.
     `contracts\` (the Emulator Contract Verification Framework's registered
     contracts -- `_schema\`, `pcsx2x6\`, and any future emulator contract
     directories, each with its `contract.json`/`evidence.md`/`experiments.md`),
-    and `scripts\TPMCertification.Contracts.psm1` (the ECVF loader/validator/
-    evaluator module those contracts are read through). Both are production
-    runtime components, not dev-only tooling -- they ship deliberately rather
-    than being duplicated into `TeknoParrot-Manager.ps1` as a parallel copy,
-    per the architectural decision that packaging should change to fit the
+    `scripts\TPMCertification.Contracts.psm1` (the ECVF loader/validator/
+    evaluator module those contracts are read through), and
+    `scripts\TPMCertification.Authority.psm1` (imported by
+    `TPMCertification.Contracts.psm1` as its very first line -- every ECVF
+    contract load fails without it; the RC4 package shipped without this
+    file even though `TeknoParrot-Manager.ps1` itself imports
+    `TPMCertification.Contracts.psm1` at runtime for pcsx2x6 crosshair setup,
+    silently degrading contract verification to "could not load or evaluate
+    the pcsx2x6 emulator contract" on every affected install -- confirmed
+    2026-08-14, see LESSONS_LEARNED.md). All three are production runtime
+    components, not dev-only tooling -- they ship deliberately rather than
+    being duplicated into `TeknoParrot-Manager.ps1` as a parallel copy, per
+    the architectural decision that packaging should change to fit the
     framework rather than the framework being reshaped to fit the prior
     release layout.
   - Exclude: `ReShade\` (DLLs not redistributable; user obtains from

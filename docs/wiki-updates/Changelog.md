@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.0 RC5 (2026-08-14) -- RC4 packaging correction (RC4 superseded)
+
+- Fix: the RC4 release ZIP was missing `scripts\TPMCertification.Authority.psm1`, an unconditional dependency of `scripts\TPMCertification.Contracts.psm1` (imported at runtime for pcsx2x6 crosshair/ECVF setup). Every RC4 install reaching that code path had contract evaluation fail closed silently -- no crash, but pcsx2x6/ECVF contract verification never actually ran. Corrected the release package manifest and package validator. **RC4 is superseded; use RC5.**
+- Also corrects an active-documentation gap (RC4 guidance still said "in release preparation" after RC4 was actually published) and redacts a personal filesystem path from `contracts\pcsx2x6\evidence.md`.
+
+## v1.0 RC4 (2026-08-13) -- beginner clarity, Centipede Chaos coverage (SUPERSEDED by RC5)
+
+- Improvement (issue #222): the Eggman dat, supplementary dat, and thumbnail download prompts now explain what the file is and confirm it never downloads game data, before asking whether to proceed. Added a "What TPM just did" recap to the end-of-run summary (ZIPs extracted, games registered, dat file action taken, thumbnail action, anything still needing manual attention). Added a first-run welcome screen (new installs only) framing that TPM organizes/extracts/registers/exports games but does not provide games or guarantee boot/fullscreen behavior.
+- Fixed (issue #130/#79): TPM's internal GameProfile schema-drift diagnostic had a stale baseline flagging long-standing, widely-used profile fields as "unknown." Re-captured against the live upstream catalog (541 current official profiles). Also confirms Centipede Chaos is fully supported through TPM's existing generic profile-parsing, matching, and export logic.
+
 ## v1.0 RC3 (2026-08-08) -- published hardware-certified release
 
 - Fixed (issue #173): pcsx2x6 crosshair setup now verifies the emulator's own

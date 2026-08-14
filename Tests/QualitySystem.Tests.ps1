@@ -50,9 +50,9 @@ Describe "Quality engineering system metadata" {
 Describe "Release Integrity source identity" {
     BeforeAll {
         $script:RepoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
-        $script:ExpectedDisplayVersion = 'v1.0 RC3'
-        $script:ExpectedTag = 'v1.0-RC3'
-        $script:ExpectedZipName = 'TeknoParrot Manager v1.0 RC3.zip'
+        $script:ExpectedDisplayVersion = 'v1.0 RC5'
+        $script:ExpectedTag = 'v1.0-RC5'
+        $script:ExpectedZipName = 'TeknoParrot Manager v1.0 RC5.zip'
     }
 
     It "keeps the production script header, runtime label, banner, and console preview on the same release identity" {
@@ -61,22 +61,26 @@ Describe "Release Integrity source identity" {
 
         $content | Should -Match ([regex]::Escape("# TeknoParrot Manager  |  $script:ExpectedDisplayVersion"))
         $content | Should -Match '\$ScriptVersion\s*=\s*"1\.0"'
-        $content | Should -Match '\$ReleaseCandidateLabel\s*=\s*"RC3"'
+        $content | Should -Match '\$ReleaseCandidateLabel\s*=\s*"RC5"'
         $content | Should -Match 'Get-ManagerVersionLine'
         $content | Should -Not -Match 'TeknoParrot Manager\s+v\$ScriptVersion RC1'
         $previewPath = Join-Path $script:RepoRoot 'scripts\Preview-TPM-ConsoleUx.ps1'
         $preview = Get-Content -LiteralPath $previewPath -Raw
         $preview | Should -Match ([regex]::Escape($script:ExpectedDisplayVersion))
     }
-    It "keeps published RC3 documentation truthful and aligned with the release tag" {
+    It "keeps published RC5 documentation truthful and aligned with the release tag" {
         $readme = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'README.md') -Raw
         $topReadme = ($readme -split "`r?`n" | Select-Object -First 30) -join "`n"
 
         $topReadme | Should -Match ([regex]::Escape($script:ExpectedDisplayVersion))
         $topReadme | Should -Match ([regex]::Escape($script:ExpectedTag))
-        $topReadme | Should -Match 'published and hardware-certified'
-        $topReadme | Should -Not -Match 'RC3.*(in preparation|not been published|not yet published)|intended tag|tag has not been created'
-        $topReadme | Should -Not -Match '\[Download v1\.0 RC3\]'
+        # RC5 was validated (exact-SHA static/analysis/Pester evidence, package
+        # structure/hash) but not run through a real-hardware certification
+        # pass in this environment -- "published and validated" is the honest
+        # claim; do not assert "hardware-certified" unless that evidence exists.
+        $topReadme | Should -Match 'published and validated'
+        $topReadme | Should -Not -Match 'RC5.*(in preparation|not been published|not yet published)|intended tag|tag has not been created'
+        $topReadme | Should -Not -Match '\[Download v1\.0 RC5\]'
         $topReadme | Should -Not -Match 'v1\.0 RC1|v1\.0-RC1|v1\.0\.RC1'
     }
 
@@ -95,7 +99,7 @@ Describe "Release Integrity source identity" {
         $agents | Should -Match ([regex]::Escape($script:ExpectedZipName))
     }
 
-    It "keeps the RC3 changelog and release-package defaults aligned with the source identity" {
+    It "keeps the RC5 changelog and release-package defaults aligned with the source identity" {
         $changelog = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'TeknoParrot-Manager-CHANGELOG.txt') -Raw
         $wikiChangelog = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'docs\wiki-updates\Changelog.md') -Raw
         $releasePackage = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'Tests\Test-ReleasePackage.ps1') -Raw

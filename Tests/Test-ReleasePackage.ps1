@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ZipPath,
 
-    [string]$ExpectedDisplayVersion = 'v1.0 RC4'
+    [string]$ExpectedDisplayVersion = 'v1.0 RC5'
 )
 
 Set-StrictMode -Version Latest
@@ -28,6 +28,7 @@ try {
         'tools/Invoke-TpmAutoUpdate.ps1',
         'tools/TpmAutoUpdate.Core.psm1',
         'scripts/TPMCertification.Contracts.psm1',
+        'scripts/TPMCertification.Authority.psm1',
         'contracts/_schema/EmulatorContractV1.schema.json',
         'contracts/_schema/CertificationEnvelopeV1.schema.json',
         'contracts/pcsx2x6/contract.json',

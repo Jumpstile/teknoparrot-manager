@@ -9,22 +9,30 @@ tool for organizing extracted arcade games, registering profiles, deploying
 lightgun crosshairs, applying compatibility fixes, and exporting libraries to
 LaunchBox or HyperSpin.
 
-> **Release Candidate v1.0 RC4** — test one game after each run. Profiles are backed up automatically before every run.
+> **Published Release Candidate v1.0 RC5** — test one game after each run. Profiles are backed up automatically before every run.
 
 ---
 
-## Release Candidate: TeknoParrot Manager v1.0 RC4
+## Published Release Candidate: TeknoParrot Manager v1.0 RC5
 
-v1.0 RC4 is in release preparation and not yet published. The previous
-published release, [TeknoParrot Manager v1.0 RC3](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC3),
-remains available on GitHub Releases until RC4 is published.
+v1.0 RC5 is published and validated. Download the official
+[TeknoParrot Manager v1.0 RC5 release](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC5)
+from GitHub Releases. The published release is tagged `v1.0-RC5`.
 
-RC4 explains optional downloads (Eggman dat, thumbnails) in plain language
-before asking whether to proceed, adds a "What TPM just did" recap after
-every AutoSync/registration run, and adds a first-run screen clarifying
-what TPM does and does not do. It also fixes a stale internal diagnostic
-baseline and confirms Centipede Chaos compatibility. Final Version 1.0 has
-not been published yet and will be announced separately.
+RC5 corrects a packaging defect in RC4: the RC4 release ZIP was missing
+`scripts\TPMCertification.Authority.psm1`, a hard runtime dependency of
+`scripts\TPMCertification.Contracts.psm1`, which silently degraded
+pcsx2x6/ECVF contract verification on every RC4 install (fail-closed, no
+crash, but the contract check never actually ran). **RC4 is superseded --
+use RC5 instead.**
+
+RC4 (superseded) explained optional downloads (Eggman dat, thumbnails) in
+plain language before asking whether to proceed, added a "What TPM just
+did" recap after every AutoSync/registration run, and added a first-run
+screen clarifying what TPM does and does not do. It also fixed a stale
+internal diagnostic baseline and confirmed Centipede Chaos compatibility.
+Final Version 1.0 has not been published yet and will be announced
+separately.
 
 ---
 
@@ -150,7 +158,7 @@ This script automates the copy-and-fill step: it scans your games, matches each 
 
 ## Installation
 
-1. Download the official `TeknoParrot Manager v1.0 RC4.zip` release asset
+1. Download the official `TeknoParrot Manager v1.0 RC5.zip` release asset
    from [Releases](../../releases).
 2. Extract to any folder (e.g. a `Scripts` subfolder alongside your TeknoParrot install)
 3. Double-click **`TeknoParrot-Manager.bat`**
@@ -951,4 +959,4 @@ TeknoParrot Manager name and branding are reserved.
 
 ---
 
-> v1.0 RC4 (in release preparation) -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v1.0 RC5 (published; validated) -- test one game after each run. Profiles are backed up automatically at the start of every run.
