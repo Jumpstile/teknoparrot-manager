@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC5
+  TeknoParrot Manager  |  v1.0 RC6
   Author: Jumpstile
 ===============================================================================
 
@@ -10,10 +10,11 @@
   This is a release candidate. Test one game after each run. Your profiles are
   backed up automatically at the start of every run.
 
-  v1.0 RC5 is published and validated. Download the official release
-  from the GitHub Releases page. RC5 corrects a packaging defect in RC4
-  (a missing internal dependency file degraded pcsx2x6 contract
-  verification) -- RC4 is superseded, use RC5 instead.
+  v1.0 RC6 is in progress and not yet published. The latest published
+  release is v1.0 RC5 -- download it from the GitHub Releases page until
+  RC6 ships. RC5 corrects a packaging defect in RC4 (a missing internal
+  dependency file degraded pcsx2x6 contract verification) -- RC4 is
+  superseded, use RC5 instead.
 
   For a one-page version, see TeknoParrot-Manager-QuickStart.txt.
 
@@ -1210,7 +1211,25 @@
 
     The DLLs are NOT included in the release ZIP or the source repository
     (ReShade is free software but its DLLs are not redistributable).
-    Obtain them as follows:
+    You have two options:
+
+    OPTION A -- Automatic download (recommended)
+
+    From the main menu, choose "ReShade setup." If the DLL is not already
+    present, TPM offers:
+      D) Download automatically from reshade.me
+      B) Browse for a file you already have
+      N) Skip
+
+    Choosing D fetches the official installer directly from reshade.me,
+    verifies its digital signature against ReShade's own certificate before
+    trusting it (refusing and telling you if the signature does not check
+    out), then extracts ReShade32.dll/ReShade64.dll from it automatically.
+    Nothing is ever bundled with TPM itself -- every download is fetched
+    fresh from reshade.me, per reshade.me's own policy against
+    redistributing the binaries.
+
+    OPTION B -- Manual (if you prefer, or already have the DLL)
 
     Step 1.  Go to  https://reshade.me  and download the free installer.
              Choose the standard version (not the add-on version) unless you
@@ -1226,8 +1245,8 @@
              If you also have 32-bit games: repeat with a 32-bit game exe and
              rename the resulting DLL to  ReShade32.dll.
 
-    Step 4.  Run TeknoParrot Manager and choose mode 5 (ReShade setup), or
-             answer Y when prompted at the end of a normal run.
+    Step 4.  Run TeknoParrot Manager and choose "ReShade setup" from the
+             main menu, or answer Y when prompted at the end of a normal run.
 
     The script will:
       a. Show the version of the user-provided DLL and check reshade.me for updates.
@@ -1347,7 +1366,21 @@
 
   How to set it up
 
-    Method A -- User-provided folder (recommended):
+    From the main menu, choose "dgVoodoo2 setup." If the DLLs are not
+    already present, TPM offers:
+      D) Download automatically from the official GitHub release
+      B) Browse for a folder you already have
+      N) Skip
+
+    Method A -- Automatic download (recommended):
+      Choose D. TPM fetches the latest release directly from the official
+      dege-diosg/dgVoodoo2 GitHub Releases channel, verifies the
+      downloaded ZIP's SHA-256 against the checksum GitHub itself publishes
+      for it, and extracts only the files TPM needs into  dgVoodoo2\  next
+      to this script. Nothing is ever bundled with TPM itself -- every
+      download is fetched fresh from the official release.
+
+    Method B -- User-provided folder:
       1. Download the latest dgVoodoo2 ZIP from:
            https://dege.freeweb.hu/dgVoodoo2/dgVoodoo2/
       2. Open the ZIP. Create a folder called  dgVoodoo2\  next to this
@@ -1355,10 +1388,10 @@
            From the  MS\x86\     subfolder : D3D8.dll  DDraw.dll  D3DImm.dll
            From the  3Dfx\x86\  subfolder : Glide2x.dll  Glide3x.dll
            From the root of the ZIP      : dgVoodoo.conf
-      3. Run TeknoParrot Manager and choose mode 6 (dgVoodoo2 setup), or
-         answer Y to the prompt at the end of a normal run.
+      3. Run TeknoParrot Manager and choose "dgVoodoo2 setup" from the main
+         menu, or answer Y to the prompt at the end of a normal run.
 
-    Method B -- Custom folder:
+    Method C -- Custom folder:
       Keep your dgVoodoo2 DLLs anywhere and enter the path when prompted.
       The path is saved to the configuration file so you only need to do
       this once.
@@ -2412,6 +2445,6 @@
 
 
 ===============================================================================
-  v1.0 RC5 -- Test one game after each run.
+  v1.0 RC6 -- Test one game after each run.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================
