@@ -99,6 +99,10 @@ scope of `Get-ReShadeSetupDownloadUrl`, `Test-ReShadeSetupTrustedSignature`,
 - Shader/effect-package files (`ReShade32.json`/`ReShade64.json` and
   similar) are present in the real archive but are never required or
   extracted -- out of scope, see below.
+- The implementation explicitly loads `System.IO.Compression` before
+  referencing `ZipArchive`/`ZipArchiveMode` and retains the separate
+  `System.IO.Compression.FileSystem` load for `ZipFile` APIs; this is
+  required by the Windows PowerShell 5.1 runtime model.
 - Implemented. Verification: `Expand-ReShadeSelfExtractingArchive` Pester
   tests (valid archive, decoy-signature-skip, missing-required-entries,
   no-PK-signature-at-all) plus live confirmation against the real

@@ -2162,7 +2162,7 @@
   Step 5.  Actions tab: New -> Start a program.
              Program: powershell.exe
              Arguments: -ExecutionPolicy Bypass -NonInteractive -File
-               "W:\Emulators\TeknoParrot\Scripts\TeknoParrot-Manager.ps1"
+               "<Scripts folder>\TeknoParrot-Manager.ps1"
                -Unattended
              (adjust the path to match your Scripts folder)
 

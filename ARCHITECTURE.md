@@ -130,6 +130,17 @@ Verified live against the real `ReShade_Setup_6.8.0.exe` during implementation: 
 real archive's DLLs sat at file offset 152576, with an empty decoy match earlier at
 offset 127840.
 
+The compression bootstrap explicitly loads both framework assemblies before any
+archive type is referenced. Windows PowerShell 5.1 does not reliably resolve
+ZipArchive or ZipArchiveMode from System.IO.Compression.FileSystem alone:
+ZipArchive and ZipArchiveMode are provided by System.IO.Compression.dll, while
+ZipFile and ZipFileExtensions are provided by the separate
+System.IO.Compression.FileSystem.dll. The production startup therefore loads
+System.IO.Compression first and retains the FileSystem load for ZipFile APIs.
+The regression test proves all four required types in a pristine Windows
+PowerShell 5.1 child process, so a developer session with a previously loaded
+assembly cannot mask the dependency.
+
 **Signature verification before extraction (identity-pinning, stronger than
 BepInEx/dgVoodoo2/FFBPlugin).** The downloaded `Setup.exe` itself is Authenticode-signed
 with a self-signed certificate (Windows can never chain it to a trusted root, so

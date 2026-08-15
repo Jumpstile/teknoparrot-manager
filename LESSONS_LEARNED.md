@@ -191,6 +191,15 @@ Both calls are idempotent -- if the assembly is already loaded, `Add-Type`
 does nothing and returns silently. The Describe is now self-contained
 regardless of how the surrounding session arrived at that point.
 
+The production startup has the same explicit two-assembly bootstrap before
+`Expand-ReShadeSelfExtractingArchive` can reference `ZipArchive` or
+`ZipArchiveMode`. This is required for a pristine Windows PowerShell 5.1
+process: loading `System.IO.Compression.FileSystem` alone resolves the
+`ZipFile` APIs but does not resolve the archive types in the separate
+`System.IO.Compression` assembly. The regression test launches a fresh PS 5.1
+child process and resolves both API families, so local assembly residue cannot
+hide a release-only extraction failure.
+
 **Rule.** A change is not considered complete until: (1) local quality gates
 pass, (2) the CI pipeline passes on the committed code, and (3) any
 independent review findings are resolved. Local success is a necessary

@@ -304,10 +304,13 @@ function Write-ManagerBanner {
 $startupBannerSize = Get-ManagerBannerViewportSize
 Write-ManagerBanner -Width $startupBannerSize.Width -Height $startupBannerSize.Height
 
-# Load the ZIP assembly once at startup. Expand-ZipFileSafe uses ZipArchive
-# instead of Expand-Archive (PS 5.1 bugs: "already exists" with -Force, partial
-# folders on failure) and instead of ZipFile::ExtractToDirectory (no long-path
-# support). Expand-ZipFileSafe uses \\?\ prefixes to bypass MAX_PATH.
+# Load the separate ZIP assemblies once at startup. ZipArchive/ZipArchiveMode
+# live in System.IO.Compression.dll; ZipFile/ZipFileExtensions live in the
+# separate System.IO.Compression.FileSystem.dll. Expand-ZipFileSafe uses these
+# APIs instead of Expand-Archive (PS 5.1 bugs: "already exists" with -Force,
+# partial folders on failure) and instead of ZipFile::ExtractToDirectory (no
+# long-path support). Expand-ZipFileSafe uses \\?\ prefixes to bypass MAX_PATH.
+Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 # PS 5.1 on older Windows 10 builds defaults to TLS 1.0. Ensure TLS 1.2 is
@@ -13520,7 +13523,7 @@ while ($true) {
         Write-Host "  Main collection ZIP folder" -ForegroundColor Cyan
         Write-Host "  Point directly at the folder containing your original .zip files." -ForegroundColor DarkCyan
         Write-Host ("  This must be DIFFERENT from the staging folder: {0}" -f $gamesInstallFolder) -ForegroundColor Yellow
-        Write-Host "  Example: W:\ROMS\TeknoParrot Collection" -ForegroundColor DarkCyan
+        Write-Host "  Example: <ROM folder>\TeknoParrot Collection" -ForegroundColor DarkCyan
         $zipSource = Read-PathWithBrowse "  Path"
         $zipPathsJustCaptured = $true
     }
@@ -13529,7 +13532,7 @@ while ($true) {
         Write-Host "  Supplementary game collection folder (optional)" -ForegroundColor Cyan
         Write-Host "  Only needed if you downloaded the separate Supplementary .zip pack." -ForegroundColor DarkCyan
         Write-Host "  (This is not the Supplementary DAT -- most users without the pack should press Enter to skip.)" -ForegroundColor DarkCyan
-        Write-Host "  Example: W:\ROMS\TeknoParrot Supplementary" -ForegroundColor DarkCyan
+        Write-Host "  Example: <ROM folder>\TeknoParrot Supplementary" -ForegroundColor DarkCyan
         $rawSupp = Read-PathWithBrowse "  Path (or press Enter to skip)"
         if ($rawSupp -and (Test-Path -LiteralPath $rawSupp)) {
             $zipSourceSupplementary = $rawSupp

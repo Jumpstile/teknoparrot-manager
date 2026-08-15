@@ -62,6 +62,12 @@
   genuine installer actually produces -- a corrupted or tampered download
   reporting a "hash mismatch" status is now rejected even if its
   certificate fingerprint field happened to still read as trusted.
+  Compatibility fix: the startup bootstrap now explicitly loads both .NET
+  compression assemblies required by ReShade extraction. Windows PowerShell
+  5.1 otherwise resolves ZipFile but can leave ZipArchive unavailable.
+  A fresh-process regression test now covers the four required compression
+  types before the RC6 package is rebuilt.
+
 
 -------------------------------------------------------------------------------
   v1.0 RC5  (2026-08-14)  -- RC4 packaging correction (RC4 superseded)

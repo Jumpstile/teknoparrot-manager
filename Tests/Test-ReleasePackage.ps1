@@ -17,6 +17,38 @@ $archive = [System.IO.Compression.ZipFile]::OpenRead($resolvedZip)
 try {
     $entries = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
 
+    $textPathPatterns = @(
+        'W:\\',
+        'C:\\Users\\EliSi\\',
+        '\\\\omvnas\\'
+    )
+
+    $pathLeaks = @()
+    foreach ($entry in @($archive.Entries | Where-Object {
+        $_.Length -gt 0 -and
+        $_.FullName -notmatch '[/\\]$' -and
+        $_.FullName -match '\.(bat|json|md|ps1|psm1|txt)$'
+    })) {
+        $entryName = $entry.FullName.Replace('\', '/')
+        $stream = $entry.Open()
+        try {
+            $reader = New-Object System.IO.StreamReader($stream)
+            try { $content = $reader.ReadToEnd() } finally { $reader.Dispose() }
+        } finally {
+            $stream.Dispose()
+        }
+
+        foreach ($pattern in $textPathPatterns) {
+            if ($content -match $pattern) {
+                $pathLeaks += "$entryName [$pattern]"
+                break
+            }
+        }
+    }
+    if ($pathLeaks.Count -gt 0) {
+        throw "Machine-specific/local absolute paths in shipped text files: $($pathLeaks -join ', ')"
+    }
+
     $required = @(
         'TeknoParrot-Manager.ps1',
         'TeknoParrot-Manager.bat',
@@ -107,6 +139,7 @@ try {
         EntryCount          = $entries.Count
         CrosshairPngCount   = $crosshairs.Count
         RootCrosshairPngs   = $rootCrosshairs.Count
+        PathLeakCount        = $pathLeaks.Count
         ForbiddenEntryCount = $forbidden.Count
         ExpectedVersion     = $ExpectedDisplayVersion
         Valid               = $true

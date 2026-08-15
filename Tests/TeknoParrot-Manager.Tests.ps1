@@ -1056,6 +1056,43 @@ Describe "Get-DiceSimilarity" {
     }
 }
 
+Describe "Windows PowerShell 5.1 compression assembly bootstrap" {
+    It "loads both assemblies from the production startup block before ZipArchive use" {
+        $ps51Path = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        if (-not (Test-Path -LiteralPath $ps51Path -PathType Leaf)) {
+            Set-ItResult -Skipped -Because 'Windows PowerShell 5.1 is not installed on this host.'
+            return
+        }
+
+        $startupBlock = [regex]::Match(
+            $script:ProductionSource,
+            '(?ms)^# Load the separate ZIP assemblies once at startup\..*?^# PS 5\.1 on older').Value
+        $startupAssemblyLines = @(
+            $startupBlock -split '\r?\n' |
+                Where-Object { $_ -match '^\s*Add-Type -AssemblyName System\.IO\.Compression(?:\.FileSystem)?\s*$' }
+        )
+
+        $startupAssemblyLines | Should -Contain 'Add-Type -AssemblyName System.IO.Compression'
+        $startupAssemblyLines | Should -Contain 'Add-Type -AssemblyName System.IO.Compression.FileSystem'
+
+        $probePath = Join-Path $TestDrive 'compression-bootstrap-ps51.ps1'
+        $probeLines = @(
+            '$ErrorActionPreference = ''Stop'''
+        ) + $startupAssemblyLines + @(
+            '$requiredTypes = @([System.IO.Compression.ZipArchive], [System.IO.Compression.ZipArchiveMode], [System.IO.Compression.ZipFile], [System.IO.Compression.ZipFileExtensions])'
+            'if ($requiredTypes.Count -ne 4) { throw "Required compression types did not resolve." }'
+            'Write-Output ''COMPRESSION_BOOTSTRAP_OK'''
+        )
+        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($probePath, ($probeLines -join [Environment]::NewLine), $utf8NoBom)
+
+        $output = & $ps51Path -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probePath 2>&1 | Out-String
+        $exitCode = $LASTEXITCODE
+        $exitCode | Should -Be 0 -Because "the production compression bootstrap must work in a pristine Windows PowerShell 5.1 process. Output: $output"
+        $output | Should -Match 'COMPRESSION_BOOTSTRAP_OK'
+    }
+}
+
 Describe "Expand-ZipFileSafe" {
     BeforeAll {
         # ZipArchive is in System.IO.Compression.dll; ZipFile is in the separate
