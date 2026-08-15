@@ -304,6 +304,15 @@ function Write-ManagerBanner {
 $startupBannerSize = Get-ManagerBannerViewportSize
 Write-ManagerBanner -Width $startupBannerSize.Width -Height $startupBannerSize.Height
 
+# Windows PowerShell 5.1 packaged launchers can run with module autoloading
+# unavailable or disabled by the host. Import the standard modules explicitly
+# so the fail-closed ReShade trust check and SHA-256 verification never depend
+# on ambient command discovery. These modules are inbox dependencies on the
+# supported Windows PowerShell installation and the imports are idempotent.
+Import-Module Microsoft.PowerShell.Security -ErrorAction Stop
+Import-Module Microsoft.PowerShell.Management -ErrorAction Stop
+Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
+
 # Load the separate ZIP assemblies once at startup. ZipArchive/ZipArchiveMode
 # live in System.IO.Compression.dll; ZipFile/ZipFileExtensions live in the
 # separate System.IO.Compression.FileSystem.dll. Expand-ZipFileSafe uses these

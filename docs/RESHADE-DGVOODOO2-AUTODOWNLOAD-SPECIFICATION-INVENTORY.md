@@ -103,6 +103,12 @@ scope of `Get-ReShadeSetupDownloadUrl`, `Test-ReShadeSetupTrustedSignature`,
   referencing `ZipArchive`/`ZipArchiveMode` and retains the separate
   `System.IO.Compression.FileSystem` load for `ZipFile` APIs; this is
   required by the Windows PowerShell 5.1 runtime model.
+
+- The startup bootstrap explicitly imports `Microsoft.PowerShell.Security`, `Microsoft.PowerShell.Management`,
+  and `Microsoft.PowerShell.Utility` before any trust or digest call, because
+  a packaged Windows PowerShell 5.1 host may have module autoloading disabled.
+  This makes `Get-AuthenticodeSignature` and `Get-FileHash` deterministic
+  dependencies without changing either fail-closed verification rule.
 - Implemented. Verification: `Expand-ReShadeSelfExtractingArchive` Pester
   tests (valid archive, decoy-signature-skip, missing-required-entries,
   no-PK-signature-at-all) plus live confirmation against the real

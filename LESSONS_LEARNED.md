@@ -200,6 +200,15 @@ process: loading `System.IO.Compression.FileSystem` alone resolves the
 child process and resolves both API families, so local assembly residue cannot
 hide a release-only extraction failure.
 
+The same rule applies to standard security/hash commands. A packaged launcher
+must not rely on ambient module autoloading for `Get-AuthenticodeSignature` or
+`Get-FileHash`: a host can disable autoloading while still allowing the script to
+start. The production bootstrap now imports `Microsoft.PowerShell.Security`,
+`Microsoft.PowerShell.Management`, and `Microsoft.PowerShell.Utility` explicitly,
+and a fresh PS 5.1 child-process test disables autoloading, invokes both commands,
+and verifies the digest result. This
+keeps the existing ReShade status/thumbprint gate and SHA-256 verification intact.
+
 **Rule.** A change is not considered complete until: (1) local quality gates
 pass, (2) the CI pipeline passes on the committed code, and (3) any
 independent review findings are resolved. Local success is a necessary

@@ -1093,6 +1093,55 @@ Describe "Windows PowerShell 5.1 compression assembly bootstrap" {
     }
 }
 
+Describe "Windows PowerShell 5.1 security and hash module bootstrap" {
+    It "explicitly imports the production modules and invokes both required commands in a fresh packaged-style process" {
+        $ps51Path = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        if (-not (Test-Path -LiteralPath $ps51Path -PathType Leaf)) {
+            Set-ItResult -Skipped -Because 'Windows PowerShell 5.1 is not installed on this host.'
+            return
+        }
+
+        $startupBlock = [regex]::Match(
+            $script:ProductionSource,
+            '(?ms)^# Windows PowerShell 5\.1 packaged launchers can run with module autoloading.*?^# Load the separate ZIP assemblies once at startup\.'
+        ).Value
+        $startupModuleLines = @(
+            $startupBlock -split '\r?\n' |
+                Where-Object { $_ -match '^\s*Import-Module Microsoft\.PowerShell\.(Security|Management|Utility) -ErrorAction Stop\s*$' }
+        )
+
+        $startupModuleLines | Should -Contain 'Import-Module Microsoft.PowerShell.Security -ErrorAction Stop'
+        $startupModuleLines | Should -Contain 'Import-Module Microsoft.PowerShell.Management -ErrorAction Stop'
+        $startupModuleLines | Should -Contain 'Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop'
+
+        $probePath = Join-Path $TestDrive 'security-hash-bootstrap-ps51.ps1'
+        $probeLines = @(
+            '$ErrorActionPreference = ''Stop''',
+            '$PSModuleAutoLoadingPreference = ''None'''
+        ) + $startupModuleLines + @(
+            '$probeFile = [System.IO.Path]::GetTempFileName()'
+            'try {'
+            '    [System.IO.File]::WriteAllText($probeFile, ''TPM module bootstrap probe'')'
+            '    $authCommand = Get-Command Get-AuthenticodeSignature -ErrorAction Stop'
+            '    $hashCommand = Get-Command Get-FileHash -ErrorAction Stop'
+            '    $digest = Get-FileHash -LiteralPath $probeFile -Algorithm SHA256 -ErrorAction Stop'
+            '    $signature = Get-AuthenticodeSignature -LiteralPath $probeFile -ErrorAction Stop'
+            '    if (-not $authCommand -or -not $hashCommand -or [string]::IsNullOrWhiteSpace($digest.Hash) -or $null -eq $signature) { throw ''Security/hash command bootstrap did not resolve and invoke.'' }'
+            '    Write-Output ''SECURITY_HASH_BOOTSTRAP_OK'''
+            '} finally {'
+            '    [System.IO.File]::Delete($probeFile)'
+            '}'
+        )
+        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($probePath, ($probeLines -join [Environment]::NewLine), $utf8NoBom)
+
+        $output = & $ps51Path -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probePath 2>&1 | Out-String
+        $exitCode = $LASTEXITCODE
+        $exitCode | Should -Be 0 -Because "the production security/hash bootstrap must work with module autoloading disabled in a pristine Windows PowerShell 5.1 process. Output: $output"
+        $output | Should -Match 'SECURITY_HASH_BOOTSTRAP_OK'
+    }
+}
+
 Describe "Expand-ZipFileSafe" {
     BeforeAll {
         # ZipArchive is in System.IO.Compression.dll; ZipFile is in the separate
