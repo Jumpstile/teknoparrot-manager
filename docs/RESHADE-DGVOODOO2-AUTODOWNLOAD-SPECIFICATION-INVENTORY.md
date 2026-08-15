@@ -210,8 +210,12 @@ pipeline (allowlisted URL, `.partial` staging, size validation, optional
 SHA-256 validation) before any extraction is even attempted. Extraction
 itself is layered again behind the transactional staging/promotion
 guarantee documented in the companion System Invariant Inventory
-(`docs\RESHADE-DGVOODOO2-AUTODOWNLOAD-INVARIANT-INVENTORY.md`) -- a
-download passing every check in this Specification Inventory is a
+(`docs\RESHADE-DGVOODOO2-AUTODOWNLOAD-INVARIANT-INVENTORY.md`). For
+recoverable failures, that guarantee includes exact pre-state restoration;
+if an underlying filesystem mutation makes exact restoration impossible,
+the transaction reports `ROLLBACK FAILED` / `INCONSISTENT` and preserves
+evidence instead of claiming restoration. A download passing every check
+in this Specification Inventory is a
 necessary but not sufficient condition for a successful deploy; the
 System Invariant Inventory's transactional-extraction and download-trust
 invariants are the layer that governs what happens between "download

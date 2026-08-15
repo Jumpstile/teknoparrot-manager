@@ -1894,6 +1894,60 @@ Describe "Expand-DgVoodoo2Zip (selective extraction, fail-closed on layout drift
             }
         }
     }
+    It "P2 -- ordinary staging cleanup failure is surfaced with exact path and preserves a valid destination" {
+        $zip  = Join-Path $TestDrive "dgv-staging-cleanup-fails.zip"
+        $dest = Join-Path $TestDrive "dgv-staging-cleanup-fails-out"
+        $stagingRoot = Join-Path $env:TEMP 'TeknoParrotManagerStaging'
+        $beforeStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'dgVoodoo2-*' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+        New-TestZip $zip $validEntries
+
+        Mock Remove-Item {
+            param($LiteralPath, $Recurse, $Force, $ErrorAction)
+            if ([System.IO.Path]::GetFileName([string]$LiteralPath) -like 'dgVoodoo2-*') {
+                throw "simulated dgVoodoo2 staging cleanup failure"
+            }
+            if (Test-Path -LiteralPath $LiteralPath -PathType Container) {
+                [System.IO.Directory]::Delete($LiteralPath, [bool]$Recurse)
+            } elseif (Test-Path -LiteralPath $LiteralPath) {
+                [System.IO.File]::Delete($LiteralPath)
+            }
+        }
+
+        $caught = $null
+        try {
+            Expand-DgVoodoo2Zip -ZipPath $zip -DestDir $dest
+        } catch {
+            $caught = $_
+        }
+
+        try {
+            $caught | Should -Not -BeNullOrEmpty
+            $caught.ToString() | Should -Match 'TPM STAGING CLEANUP FAILED'
+            $caught.ToString() | Should -Match 'simulated dgVoodoo2 staging cleanup failure'
+            $caught.ToString() | Should -Not -Match 'ROLLBACK FAILED'
+            $caught.ToString() | Should -Not -Match 'TRANSACTION CLEANUP FAILED'
+            $newStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'dgVoodoo2-*' -ErrorAction SilentlyContinue | Where-Object { $beforeStages -notcontains $_.FullName })
+            $newStages.Count | Should -Be 1
+            $caught.ToString() | Should -Match ([regex]::Escape($newStages[0].FullName))
+            Test-Path -LiteralPath $newStages[0].FullName -PathType Container | Should -BeTrue
+            @(Get-ChildItem -LiteralPath $newStages[0].FullName -Force -Recurse -ErrorAction SilentlyContinue).Count | Should -Be 0
+            Test-Path -LiteralPath (Join-Path $newStages[0].FullName '.tpm-rollback-backup') | Should -BeFalse
+            (Get-ChildItem -LiteralPath $dest -Force | Select-Object -ExpandProperty Name | Sort-Object) | Should -Be @('D3D8.dll', 'D3DImm.dll', 'DDraw.dll', 'dgVoodoo.conf', 'Glide2x.dll', 'Glide3x.dll')
+            (Get-Content -LiteralPath (Join-Path $dest 'D3D8.dll') -Raw) | Should -Be 'd3d8'
+            (Get-Content -LiteralPath (Join-Path $dest 'DDraw.dll') -Raw) | Should -Be 'ddraw'
+            (Get-Content -LiteralPath (Join-Path $dest 'D3DImm.dll') -Raw) | Should -Be 'd3dimm'
+            (Get-Content -LiteralPath (Join-Path $dest 'Glide2x.dll') -Raw) | Should -Be 'glide2x'
+            (Get-Content -LiteralPath (Join-Path $dest 'Glide3x.dll') -Raw) | Should -Be 'glide3x'
+            (Get-Content -LiteralPath (Join-Path $dest 'dgVoodoo.conf') -Raw) | Should -Be 'conf'
+        } finally {
+            $leftoverStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'dgVoodoo2-*' -ErrorAction SilentlyContinue | Where-Object { $beforeStages -notcontains $_.FullName })
+            foreach ($stagePath in $leftoverStages) {
+                if (Test-Path -LiteralPath $stagePath.FullName) {
+                    [System.IO.Directory]::Delete($stagePath.FullName, $true)
+                }
+            }
+        }
+    }
     It "Case 4 -- rollback itself is forced to fail during a dgVoodoo2 promotion: distinct ROLLBACK FAILED error, backup preserved" {
         $zip  = Join-Path $TestDrive "dgv-rollback-fails.zip"
         $dest = Join-Path $TestDrive "dgv-rollback-fails-out"
@@ -2219,6 +2273,56 @@ Describe "Expand-ReShadeSelfExtractingArchive (embedded ZIP scan, fail-closed on
             $newStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'ReShade-*' -ErrorAction SilentlyContinue | Where-Object { $beforeStages -notcontains $_.FullName })
             $newStages.Count | Should -Be 1
             Test-Path -LiteralPath (Join-Path $newStages[0].FullName '.tpm-rollback-backup') | Should -BeTrue
+        } finally {
+            $leftoverStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'ReShade-*' -ErrorAction SilentlyContinue | Where-Object { $beforeStages -notcontains $_.FullName })
+            foreach ($stagePath in $leftoverStages) {
+                if (Test-Path -LiteralPath $stagePath.FullName) {
+                    [System.IO.Directory]::Delete($stagePath.FullName, $true)
+                }
+            }
+        }
+    }
+    It "P2 -- ordinary staging cleanup failure is surfaced with exact path and preserves a valid destination" {
+        $exe  = Join-Path $TestDrive "rs-staging-cleanup-fails-setup.exe"
+        $dest = Join-Path $TestDrive "rs-staging-cleanup-fails-out"
+        $stagingRoot = Join-Path $env:TEMP 'TeknoParrotManagerStaging'
+        $beforeStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'ReShade-*' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+        New-TestSelfExtractingExe $exe @{ 'ReShade32.dll' = 'r32'; 'ReShade64.dll' = 'r64' }
+
+        Mock Remove-Item {
+            param($LiteralPath, $Recurse, $Force, $ErrorAction)
+            if ([System.IO.Path]::GetFileName([string]$LiteralPath) -like 'ReShade-*') {
+                throw "simulated ReShade staging cleanup failure"
+            }
+            if (Test-Path -LiteralPath $LiteralPath -PathType Container) {
+                [System.IO.Directory]::Delete($LiteralPath, [bool]$Recurse)
+            } elseif (Test-Path -LiteralPath $LiteralPath) {
+                [System.IO.File]::Delete($LiteralPath)
+            }
+        }
+
+        $caught = $null
+        try {
+            Expand-ReShadeSelfExtractingArchive -SetupExePath $exe -DestDir $dest
+        } catch {
+            $caught = $_
+        }
+
+        try {
+            $caught | Should -Not -BeNullOrEmpty
+            $caught.ToString() | Should -Match 'TPM STAGING CLEANUP FAILED'
+            $caught.ToString() | Should -Match 'simulated ReShade staging cleanup failure'
+            $caught.ToString() | Should -Not -Match 'ROLLBACK FAILED'
+            $caught.ToString() | Should -Not -Match 'TRANSACTION CLEANUP FAILED'
+            $newStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'ReShade-*' -ErrorAction SilentlyContinue | Where-Object { $beforeStages -notcontains $_.FullName })
+            $newStages.Count | Should -Be 1
+            $caught.ToString() | Should -Match ([regex]::Escape($newStages[0].FullName))
+            Test-Path -LiteralPath $newStages[0].FullName -PathType Container | Should -BeTrue
+            @(Get-ChildItem -LiteralPath $newStages[0].FullName -Force -Recurse -ErrorAction SilentlyContinue).Count | Should -Be 0
+            Test-Path -LiteralPath (Join-Path $newStages[0].FullName '.tpm-rollback-backup') | Should -BeFalse
+            (Get-ChildItem -LiteralPath $dest -Force | Select-Object -ExpandProperty Name | Sort-Object) | Should -Be @('ReShade32.dll', 'ReShade64.dll')
+            (Get-Content -LiteralPath (Join-Path $dest 'ReShade32.dll') -Raw) | Should -Be 'r32'
+            (Get-Content -LiteralPath (Join-Path $dest 'ReShade64.dll') -Raw) | Should -Be 'r64'
         } finally {
             $leftoverStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'ReShade-*' -ErrorAction SilentlyContinue | Where-Object { $beforeStages -notcontains $_.FullName })
             foreach ($stagePath in $leftoverStages) {

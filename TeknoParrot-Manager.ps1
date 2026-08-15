@@ -2298,14 +2298,20 @@ function Get-ReShadeSetupDownloadUrl {
 # there first; $DestDir is never touched until a complete, valid staged set
 # exists. Promotion into $DestDir goes through Invoke-TpmTransactionalPromote,
 # which is itself rollback-safe -- if promoting either file fails partway
-# through, $DestDir is restored to exactly its pre-call state. On ANY
-# failure (PK signature not found, no candidate archive contains both
-# required entries, an extraction-time error on either entry, or a
-# promotion-time error), $DestDir ends up byte-for-byte unchanged from
-# before this function was called. The staging directory is removed on
-# ordinary success/failure; it is preserved when transaction recovery or
-# cleanup fails so recovery evidence remains available. Extracts both DLLs
-# into $DestDir under their existing
+# through and rollback completes, $DestDir is restored to exactly its
+# pre-call state. On a recoverable failure (PK signature not found, no
+# candidate archive contains both required entries, an extraction-time error
+# on either entry, or a promotion-time error whose rollback completes),
+# $DestDir ends up byte-for-byte unchanged from before this function was
+# called. If an underlying filesystem mutation loses the original source
+# before a valid backup is observable, exact restoration is impossible; the
+# transaction instead reports an explicit ROLLBACK FAILED / INCONSISTENT
+# condition and preserves recovery evidence. The staging directory is
+# removed on ordinary success/failure when cleanup succeeds; it is
+# preserved when transaction recovery, transaction cleanup, or ordinary
+# staging cleanup fails so
+# recovery evidence/residue remains available. Extracts both DLLs into
+# $DestDir under their existing
 # ReShade64.dll / ReShade32.dll naming.
 function Expand-ReShadeSelfExtractingArchive {
     param([string]$SetupExePath, [string]$DestDir)
@@ -2326,6 +2332,7 @@ function Expand-ReShadeSelfExtractingArchive {
     $required   = @('ReShade32.dll', 'ReShade64.dll')
     $stagingDir = New-TpmStagingDirectory -Label 'ReShade'
     $rollbackFailurePreserved = $false
+    $operationError = $null
     try {
         # The raw PE stub can legitimately contain earlier byte sequences
         # that happen to match the ZIP local-file-header signature without
@@ -2390,6 +2397,7 @@ function Expand-ReShadeSelfExtractingArchive {
         # destination -- rollback-safe promotion.
         [void](Invoke-TpmTransactionalPromote -StagingDir $stagingDir -DestDir $DestDir -FileNames $required)
     } catch {
+        $operationError = $_
         # If Invoke-TpmTransactionalPromote reports a rollback or cleanup
         # failure, its backup copies live under
         # $stagingDir\.tpm-rollback-backup and are the remaining route to
@@ -2402,8 +2410,17 @@ function Expand-ReShadeSelfExtractingArchive {
         }
         throw
     } finally {
-        if (-not $rollbackFailurePreserved) {
-            try { if (Test-Path -LiteralPath $stagingDir) { Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction SilentlyContinue } } catch {}
+        if (-not $rollbackFailurePreserved -and (Test-Path -LiteralPath $stagingDir)) {
+            try {
+                Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction Stop
+            } catch {
+                $cleanupMessage = "TPM STAGING CLEANUP FAILED for '$stagingDir' -- destination state was left valid or restored, but ordinary staging cleanup failed; residue remains at '$stagingDir'. Cleanup error: $($_.Exception.Message)"
+                if ($operationError) {
+                    $cleanupMessage += " Original operation error: $($operationError.Exception.Message)"
+                }
+                Write-Log $cleanupMessage
+                throw $cleanupMessage
+            }
         }
     }
 }
@@ -6521,15 +6538,21 @@ function Get-DgVoodoo2LatestRelease {
 # there first; $DestDir is never touched until the complete, valid set of 6
 # exists in staging. Promotion into $DestDir goes through
 # Invoke-TpmTransactionalPromote, which is itself rollback-safe -- if
-# promoting any one of the 6 files fails partway through, $DestDir is
-# restored to exactly its pre-call state (any of the other 5 already
-# promoted in this same call are removed again, and any pre-existing files
-# that were moved aside to make room are restored). On ANY failure (missing
-# ZIP entry, an extraction-time error on any single entry, or a promotion-
-# time error), $DestDir ends up byte-for-byte unchanged from before this
-# function was called. The staging directory is removed on ordinary
-# success/failure; it is preserved when transaction recovery or cleanup
-# fails so recovery evidence remains available.
+# promoting any one of the 6 files fails partway through and rollback
+# completes, $DestDir is restored to exactly its pre-call state (any of the
+# other 5 already promoted in this same call are removed again, and any
+# pre-existing files that were moved aside to make room are restored).
+# On a recoverable failure (missing ZIP entry, an extraction-time error on
+# any single entry, or a promotion-time error whose rollback completes),
+# $DestDir ends up byte-for-byte unchanged from before this function was
+# called. If an underlying filesystem mutation loses the original source
+# before a valid backup is observable, exact restoration is impossible; the
+# transaction instead reports an explicit ROLLBACK FAILED / INCONSISTENT
+# condition and preserves recovery evidence. The staging directory is
+# removed on ordinary success/failure when cleanup succeeds; it is
+# preserved when transaction recovery, transaction cleanup, or ordinary
+# staging cleanup fails so
+# recovery evidence/residue remains available.
 function Expand-DgVoodoo2Zip {
     param([string]$ZipPath, [string]$DestDir)
 
@@ -6551,6 +6574,7 @@ function Expand-DgVoodoo2Zip {
 
     $stagingDir = New-TpmStagingDirectory -Label 'dgVoodoo2'
     $rollbackFailurePreserved = $false
+    $operationError = $null
     try {
         $archive = $null
         try {
@@ -6602,6 +6626,7 @@ function Expand-DgVoodoo2Zip {
         # real destination -- rollback-safe promotion.
         [void](Invoke-TpmTransactionalPromote -StagingDir $stagingDir -DestDir $DestDir -FileNames $requiredNames)
     } catch {
+        $operationError = $_
         # Same reasoning as Expand-ReShadeSelfExtractingArchive: if
         # Invoke-TpmTransactionalPromote reports a rollback or cleanup
         # failure, its backup copies under
@@ -6613,8 +6638,17 @@ function Expand-DgVoodoo2Zip {
         }
         throw
     } finally {
-        if (-not $rollbackFailurePreserved) {
-            try { if (Test-Path -LiteralPath $stagingDir) { Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction SilentlyContinue } } catch {}
+        if (-not $rollbackFailurePreserved -and (Test-Path -LiteralPath $stagingDir)) {
+            try {
+                Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction Stop
+            } catch {
+                $cleanupMessage = "TPM STAGING CLEANUP FAILED for '$stagingDir' -- destination state was left valid or restored, but ordinary staging cleanup failed; residue remains at '$stagingDir'. Cleanup error: $($_.Exception.Message)"
+                if ($operationError) {
+                    $cleanupMessage += " Original operation error: $($operationError.Exception.Message)"
+                }
+                Write-Log $cleanupMessage
+                throw $cleanupMessage
+            }
         }
     }
 }

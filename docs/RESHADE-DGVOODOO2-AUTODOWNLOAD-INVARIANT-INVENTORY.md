@@ -53,13 +53,16 @@ names, containment, non-zero length).
 
 ### TX-002 -- Promotion is rollback-safe: partial promotion is never observable
 'Invoke-TpmTransactionalPromote' either succeeds completely (every
-requested file ends up in the destination) or leaves the destination in
-exactly its pre-call state. If any file's move into the destination fails
-partway through, every file already promoted in that same call is removed
-again, every pre-existing destination file that was moved aside to make
-room is restored to its original name and location, and a destination
-directory the call itself created (one that did not exist before) is
-removed again.
+requested file ends up in the destination) or, on a recoverable failure,
+leaves the destination in exactly its pre-call state. If a file move into
+the destination fails partway through and rollback completes, every file
+already promoted in that same call is removed again, every pre-existing
+destination file that was moved aside to make room is restored to its
+original name and location, and a destination directory the call itself
+created (one that did not exist before) is removed again. If an underlying
+filesystem mutation loses the original destination file before a valid
+backup is observable, exact restoration cannot be claimed; the transaction
+fails explicitly as 'ROLLBACK FAILED' / 'INCONSISTENT' and preserves recovery evidence.
 
 **Status history:** marked 'Implemented' after the first remediation
 round, then downgraded to 'Pending -- rollback bookkeeping gap found' when
@@ -131,7 +134,11 @@ third-round primitive-and-wrapper matrix passed.
 Every staging directory created by 'New-TpmStagingDirectory' for an
 extraction attempt is removed before the extraction function returns on
 ordinary success, extraction failure, or promotion failure whose rollback
-completed. When the shared transaction reports 'ROLLBACK FAILED' or
+completed, provided ordinary staging cleanup succeeds. If ordinary staging
+cleanup itself fails while the destination
+state is otherwise valid or restored, the wrapper reports the distinct
+'TPM STAGING CLEANUP FAILED' condition with the exact staging path and
+preserves the residue. When the shared transaction reports 'ROLLBACK FAILED' or
 'TRANSACTION CLEANUP FAILED', the staging directory is deliberately
 preserved so '.tpm-rollback-backup' and any other recovery evidence remain
 available for manual inspection.
@@ -140,8 +147,10 @@ available for manual inspection.
   'Expand-ReShadeSelfExtractingArchive' and 'Expand-DgVoodoo2Zip', plus
   the transaction matrix asserting no staging/backup residue on clean
   success and ordinary successful rollback, preserved backup residue on
-  rollback failure, and preserved staging/backup residue on cleanup
-  failure. The wrapper tests exercise all of those outcomes through both
+  rollback failure, preserved rollback residue on transaction cleanup
+  failure, and preserved staging residue plus exact path/valid destination
+  on ordinary staging cleanup failure. The wrapper tests exercise all of
+  those outcomes through both
   extractors.
 - **Failure mode if violated:** deleting evidence after an incomplete
   rollback would make manual recovery impossible; failing to clean up on
@@ -196,8 +205,8 @@ theoretical property.
 | ID | Status | Implementation pointer | Verification pointer |
 |---|---|---|---|
 | TX-001 | Implemented | `Expand-ReShadeSelfExtractingArchive`, `Expand-DgVoodoo2Zip` (staging phase) | "leaves the destination completely untouched when extraction fails partway through" (both extractors) |
-| TX-002 | Implemented (re-verified after 2nd-round rollback-bookkeeping and swallowed-rollback-failure fixes) | `Invoke-TpmTransactionalPromote` | `Invoke-TpmTransactionalPromote` Cases 1-4 + clean-success (exact-snapshot); Cases 1/2/4 + clean-success repeated end-to-end for both extractors |
-| TX-003 | Implemented | `New-TpmStagingDirectory` + conditional `catch`/`finally` in both extractors (staging dir is preserved, not deleted, specifically when `Invoke-TpmTransactionalPromote` itself reports a `ROLLBACK FAILED` state) | Structural (no dedicated leak-detection test; covered indirectly by every failure-path test's staging-dir absence, and directly by the Case 4 rollback-failure tests asserting the backup is preserved) |
+| TX-002 | Implemented (re-verified after the third-round phase-1 source-loss, setup-boundary, rollback-failure, and cleanup-failure matrix) | `Invoke-TpmTransactionalPromote` | `Invoke-TpmTransactionalPromote` Cases 1-8 + clean-success exact-snapshot matrix, including source-loss, setup failure, forced rollback failure, and restored-destination cleanup failure; the matching source-loss/setup/cleanup-failure cases plus clean-success and promotion-failure cases run end-to-end through both extractors |
+| TX-003 | Implemented | `New-TpmStagingDirectory` + conditional `catch`/`finally` in both extractors (staging is preserved on `ROLLBACK FAILED`, `TRANSACTION CLEANUP FAILED`, or ordinary `TPM STAGING CLEANUP FAILED`) | End-to-end wrapper matrix proves no residue on clean success/ordinary rollback, preserved backup on `ROLLBACK FAILED`, preserved rollback residue on `TRANSACTION CLEANUP FAILED`, and the exact staging path plus valid destination on ordinary `TPM STAGING CLEANUP FAILED` |
 | TRUST-004 | Implemented | Menu-handler wiring (`ReShadeSetup`/`DgVoodoo2Setup` mode blocks) + `Test-ReShadeSetupTrustedSignature` + `Invoke-TpmDownload -ExpectedSha256` | Trust-matrix tests; `Test-TpmDownloadedFile -ExpectedSha256` tests |
 | TRUST-005 | Implemented | `Test-ReShadeSetupTrustedSignature` (`$statusAccepted -and $thumbprintMatch`) | "REJECTS a HashMismatch signature even with the exact pinned thumbprint" |
 

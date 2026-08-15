@@ -75,13 +75,19 @@ now share three primitives (defined next to `Test-PathInside`):
   file being replaced is moved aside first; if any file's promotion fails
   partway through, every file already promoted in that same call is
   removed again and every moved-aside file is restored to its original
-  name/location. The destination ends up byte-for-byte identical to its
-  pre-operation state on any failure, at either phase.
+  name/location. On a recoverable failure, the destination ends up
+  byte-for-byte identical to its pre-operation state at either phase.
+  If an underlying filesystem mutation makes exact restoration impossible,
+  the transaction reports `ROLLBACK FAILED` / `INCONSISTENT` and preserves
+  recovery evidence instead of claiming restoration.
 
 Sequence: extract every required file into staging -> validate the
 complete staged set (entry presence, sanitized names, containment,
 non-zero length) -> only then call `Invoke-TpmTransactionalPromote`. The
-staging directory is always removed afterward (success or failure). See
+staging directory is removed afterward on ordinary success, extraction
+failure, or promotion failure whose rollback completes. It is preserved
+when transaction recovery, transaction cleanup, or ordinary staging
+cleanup fails, so recovery evidence/residue remains available. See
 SECURITY.md ("Transactional extraction (staging + rollback-safe
 promotion)") for the full rationale and the regression tests that force a
 failure during extraction and a separate failure during promotion for
