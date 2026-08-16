@@ -1094,6 +1094,14 @@ Describe "Windows PowerShell 5.1 compression assembly bootstrap" {
 }
 
 Describe "Windows PowerShell 5.1 security and hash module bootstrap" {
+    BeforeAll {
+        $script:SecurityHashStartupBlock = [regex]::Match(
+            $script:ProductionSource,
+            '(?ms)^# Windows PowerShell 5\.1 packaged launchers can run with module autoloading.*?^# Load the separate ZIP assemblies once at startup\.'
+        ).Value
+        $script:SecurityHashStartupLines = @($script:SecurityHashStartupBlock -split '\r?\n')
+    }
+
     It "explicitly imports the production modules and invokes both required commands in a fresh packaged-style process" {
         $ps51Path = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
         if (-not (Test-Path -LiteralPath $ps51Path -PathType Leaf)) {
@@ -1105,20 +1113,16 @@ Describe "Windows PowerShell 5.1 security and hash module bootstrap" {
             $script:ProductionSource,
             '(?ms)^# Windows PowerShell 5\.1 packaged launchers can run with module autoloading.*?^# Load the separate ZIP assemblies once at startup\.'
         ).Value
-        $startupModuleLines = @(
-            $startupBlock -split '\r?\n' |
-                Where-Object { $_ -match '^\s*Import-Module Microsoft\.PowerShell\.(Security|Management|Utility) -ErrorAction Stop\s*$' }
-        )
-
-        $startupModuleLines | Should -Contain 'Import-Module Microsoft.PowerShell.Security -ErrorAction Stop'
-        $startupModuleLines | Should -Contain 'Import-Module Microsoft.PowerShell.Management -ErrorAction Stop'
-        $startupModuleLines | Should -Contain 'Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop'
+        $startupBlock | Should -Match '(?m)^\s*Import-Module -Name \$moduleManifest -Force -ErrorAction Stop\s*$'
+        $startupBlock | Should -Match '(?m)^\s*Import-Module \$moduleName -ErrorAction Stop\s*$'
+        $startupBlock | Should -Match '\$isWindowsPowerShellDesktop'
+        $startupBlock | Should -Not -Match '(?m)^\s*Import-Module Microsoft\.PowerShell\.(Security|Management|Utility) -ErrorAction Stop\s*$'
 
         $probePath = Join-Path $TestDrive 'security-hash-bootstrap-ps51.ps1'
         $probeLines = @(
             '$ErrorActionPreference = ''Stop''',
             '$PSModuleAutoLoadingPreference = ''None'''
-        ) + $startupModuleLines + @(
+        ) + $script:SecurityHashStartupLines + @(
             '$probeFile = [System.IO.Path]::GetTempFileName()'
             'try {'
             '    [System.IO.File]::WriteAllText($probeFile, ''TPM module bootstrap probe'')'
@@ -1140,8 +1144,127 @@ Describe "Windows PowerShell 5.1 security and hash module bootstrap" {
         $exitCode | Should -Be 0 -Because "the production security/hash bootstrap must work with module autoloading disabled in a pristine Windows PowerShell 5.1 process. Output: $output"
         $output | Should -Match 'SECURITY_HASH_BOOTSTRAP_OK'
     }
-}
+    It "uses Windows PowerShell inbox modules when a higher-version PowerShell 7 module root precedes them" {
+        $ps51Path = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        if (-not (Test-Path -LiteralPath $ps51Path -PathType Leaf)) {
+            Set-ItResult -Skipped -Because 'Windows PowerShell 5.1 is not installed on this host.'
+            return
+        }
 
+        $fakeModuleRoot = Join-Path $TestDrive 'polluted-psmodulepath'
+        $fakeModuleVersion = '7.99.0.0'
+        $fakeModuleNames = @(
+            'Microsoft.PowerShell.Security',
+            'Microsoft.PowerShell.Management',
+            'Microsoft.PowerShell.Utility'
+        )
+        foreach ($moduleName in $fakeModuleNames) {
+            $moduleDirectory = Join-Path (Join-Path $fakeModuleRoot $moduleName) $fakeModuleVersion
+            New-Item -ItemType Directory -Path $moduleDirectory -Force | Out-Null
+            $manifestPath = Join-Path $moduleDirectory "$moduleName.psd1"
+            $modulePath = Join-Path $moduleDirectory 'Fake.psm1'
+            $manifest = "@{ RootModule = 'Fake.psm1'; ModuleVersion = '$fakeModuleVersion'; CompatiblePSEditions = @('Core', 'Desktop'); FunctionsToExport = @(); CmdletsToExport = @(); VariablesToExport = @(); AliasesToExport = @() }"
+            [System.IO.File]::WriteAllText($manifestPath, $manifest)
+            [System.IO.File]::WriteAllText($modulePath, '')
+        }
+
+        $fakeRootForChild = $fakeModuleRoot.Replace("'", "''")
+        $probePath = Join-Path $TestDrive 'security-hash-bootstrap-polluted-ps51.ps1'
+        $probeLines = @(
+            '$ErrorActionPreference = ''Stop''',
+            '$PSModuleAutoLoadingPreference = ''None''',
+            ('$fakeModuleRoot = ''{0}''' -f $fakeRootForChild),
+            ('$env:PSModulePath = ''{0};'' + [System.IO.Path]::Combine($PSHOME, ''Modules'')' -f $fakeRootForChild),
+            '$fakeModuleNames = @(''Microsoft.PowerShell.Security'', ''Microsoft.PowerShell.Management'', ''Microsoft.PowerShell.Utility'')',
+            'foreach ($moduleName in $fakeModuleNames) {',
+            '    Import-Module $moduleName -Force -ErrorAction Stop',
+            '    $fakeModule = @(Get-Module -Name $moduleName)[0]',
+            '    $expectedFakePath = [System.IO.Path]::Combine($fakeModuleRoot, $moduleName, ''7.99.0.0'', ''Fake.psm1''); if ($null -eq $fakeModule -or -not [System.String]::Equals($fakeModule.Version.ToString(), ''7.99.0.0'', [System.StringComparison]::OrdinalIgnoreCase) -or -not [System.String]::Equals([System.IO.Path]::GetFullPath($fakeModule.Path), [System.IO.Path]::GetFullPath($expectedFakePath), [System.StringComparison]::OrdinalIgnoreCase)) { throw ("Bare import selected unexpected module for {0}: path={1}; version={2}; expected={3}" -f $moduleName, $fakeModule.Path, $fakeModule.Version, $expectedFakePath) }',
+            '    # Leave the higher-version module loaded so the production path must override it explicitly',
+            '}'
+            '$pollutedModulePathBeforeBootstrap = $env:PSModulePath'
+        ) + $script:SecurityHashStartupLines + @(
+            '$expectedVersions = @{ ''Microsoft.PowerShell.Security'' = ''3.0.0.0''; ''Microsoft.PowerShell.Management'' = ''3.1.0.0''; ''Microsoft.PowerShell.Utility'' = ''3.1.0.0'' }',
+            'foreach ($moduleName in $fakeModuleNames) {',
+            '    $expectedManifest = [System.IO.Path]::Combine($PSHOME, ''Modules'', $moduleName, ($moduleName + ''.psd1''))',
+            '    $inboxModule = $null',
+            '    foreach ($candidate in @(Get-Module -Name $moduleName)) {',
+            '        if ($null -ne $candidate.Path -and [System.String]::Equals([System.IO.Path]::GetFullPath($candidate.Path), [System.IO.Path]::GetFullPath($expectedManifest), [System.StringComparison]::OrdinalIgnoreCase)) { $inboxModule = $candidate }',
+            '    }',
+            '    if ($null -eq $inboxModule) { throw ("Module {0} was not loaded from the Windows PowerShell inbox manifest." -f $moduleName) }',
+            '    if ($inboxModule.Version.ToString() -ne $expectedVersions[$moduleName]) { throw ("Module {0} has unexpected version {1}" -f $moduleName, $inboxModule.Version) }',
+            '}',
+            '$authCommand = Get-Command Get-AuthenticodeSignature -ErrorAction Stop',
+            '$hashCommand = Get-Command Get-FileHash -ErrorAction Stop',
+            'if ($authCommand.Source -ne ''Microsoft.PowerShell.Security'' -or $hashCommand.Source -ne ''Microsoft.PowerShell.Utility'') { throw ''Security/hash command resolved from an unexpected module.'' }',
+            'if ($env:PSModulePath -ne $pollutedModulePathBeforeBootstrap) { throw ''PSModulePath was not restored after inbox module initialization.'' }',
+            '$probeFile = [System.IO.Path]::GetTempFileName()',
+            'try {',
+            '    [System.IO.File]::WriteAllText($probeFile, ''Polluted PSModulePath probe'')',
+            '    $digest = Get-FileHash -LiteralPath $probeFile -Algorithm SHA256 -ErrorAction Stop',
+            '    $signature = Get-AuthenticodeSignature -LiteralPath $probeFile -ErrorAction Stop',
+            '    if ([string]::IsNullOrWhiteSpace($digest.Hash) -or $null -eq $signature) { throw ''Security/hash command did not invoke after inbox resolution.'' }',
+            '    Write-Output ''POLLUTED_PS51_INBOX_MODULES_OK''',
+            '} finally {',
+            '    [System.IO.File]::Delete($probeFile)',
+            '}'
+        )
+        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($probePath, ($probeLines -join [Environment]::NewLine), $utf8NoBom)
+
+        $output = & $ps51Path -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probePath 2>&1 | Out-String
+        $exitCode = $LASTEXITCODE
+        $exitCode | Should -Be 0 -Because "the production bootstrap must override a higher-version polluted module root without changing global module configuration. Output: $output"
+        $output | Should -Match 'POLLUTED_PS51_INBOX_MODULES_OK'
+    }
+
+    It "keeps clean Windows PowerShell 5.1 and PowerShell 7 startup behavior working" {
+        $engines = @()
+        $ps51Path = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        if (Test-Path -LiteralPath $ps51Path -PathType Leaf) {
+            $engines += [pscustomobject]@{ Name = 'PS5_1'; Path = $ps51Path }
+        }
+        $ps7Command = Get-Command pwsh -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -ne $ps7Command -and (Test-Path -LiteralPath $ps7Command.Path -PathType Leaf)) {
+            $engines += [pscustomobject]@{ Name = 'PS7'; Path = $ps7Command.Path }
+        }
+        if ($engines.Count -eq 0) {
+            Set-ItResult -Skipped -Because 'Neither Windows PowerShell 5.1 nor PowerShell 7 is installed on this host.'
+            return
+        }
+
+        foreach ($engine in $engines) {
+            $probePath = Join-Path $TestDrive ("clean-module-bootstrap-{0}.ps1" -f $engine.Name)
+            $marker = "CLEAN_{0}_OK" -f $engine.Name
+            $probeLines = @(
+                '$ErrorActionPreference = ''Stop''',
+                '$PSModuleAutoLoadingPreference = ''None''',
+                '$env:PSModulePath = [System.IO.Path]::Combine($PSHOME, ''Modules'')'
+            ) + $script:SecurityHashStartupLines + @(
+                '$probeFile = [System.IO.Path]::GetTempFileName()',
+                'try {',
+                '    [System.IO.File]::WriteAllText($probeFile, ''Clean module path probe'')',
+                '    $authCommand = Get-Command Get-AuthenticodeSignature -ErrorAction Stop',
+                '    $hashCommand = Get-Command Get-FileHash -ErrorAction Stop',
+                '    $digest = Get-FileHash -LiteralPath $probeFile -Algorithm SHA256 -ErrorAction Stop',
+                '    $signature = Get-AuthenticodeSignature -LiteralPath $probeFile -ErrorAction Stop',
+                '    if (-not $authCommand -or -not $hashCommand -or [string]::IsNullOrWhiteSpace($digest.Hash) -or $null -eq $signature) { throw ''Security/hash command did not resolve in a clean engine process.'' }',
+                ("    Write-Output '{0}'" -f $marker),
+                '} finally {',
+                '    [System.IO.File]::Delete($probeFile)',
+                '}'
+            )
+            $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+            [System.IO.File]::WriteAllText($probePath, ($probeLines -join [Environment]::NewLine), $utf8NoBom)
+
+            $output = & $engine.Path -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probePath 2>&1 | Out-String
+            $exitCode = $LASTEXITCODE
+            $exitCode | Should -Be 0 -Because "the production bootstrap must work in a clean $($engine.Name) process. Output: $output"
+            $output | Should -Match $marker
+        }
+    }
+
+}
 Describe "Expand-ZipFileSafe" {
     BeforeAll {
         # ZipArchive is in System.IO.Compression.dll; ZipFile is in the separate

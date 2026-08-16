@@ -509,13 +509,14 @@ installer IS code-signed, and Authenticode signatures are embedded in the PE its
 survive extracting/renaming the DLL. `Test-ReShadeDllSignature` checks this once per DLL
 at `Invoke-ReShadeSetup` start. Informational, not a gate (see ReShade section).
 
-The startup dependency bootstrap explicitly imports `Microsoft.PowerShell.Security`,
-`Microsoft.PowerShell.Management`, and `Microsoft.PowerShell.Utility` as well as the
-two compression assemblies. This is required for packaged Windows PowerShell 5.1
-launchers whose host has module
-autoloading disabled or unavailable: `Get-AuthenticodeSignature` and `Get-FileHash`
-must resolve explicitly before the ReShade trust and digest paths run. The imports
-do not alter either fail-closed gate.
+The startup dependency bootstrap handles the module-resolution difference explicitly.
+Under Windows PowerShell 5.1/Desktop it resolves the inbox Security, Management, and
+Utility manifests directly from `$PSHOME\Modules\<module>\<module>.psd1` and imports
+them with the resolved manifest path, preventing an inherited PowerShell 7 WindowsApps module
+root from supplying incompatible command definitions. Under PowerShell 7+, it preserves
+native module resolution. During PS5.1 imports only, the process-local PSModulePath is
+scoped to the inbox root and restored in `finally`; user and machine environment is
+never changed, and neither fail-closed gate is altered.
 
 **PostgreSQL MSI.** Not Authenticode-signed (confirmed empirically via
 `Get-AuthenticodeSignature`, `Status: NotSigned`). Audit-logging-only is already the

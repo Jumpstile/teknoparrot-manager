@@ -305,14 +305,59 @@ $startupBannerSize = Get-ManagerBannerViewportSize
 Write-ManagerBanner -Width $startupBannerSize.Width -Height $startupBannerSize.Height
 
 # Windows PowerShell 5.1 packaged launchers can run with module autoloading
-# unavailable or disabled by the host. Import the standard modules explicitly
-# so the fail-closed ReShade trust check and SHA-256 verification never depend
-# on ambient command discovery. These modules are inbox dependencies on the
-# supported Windows PowerShell installation and the imports are idempotent.
-Import-Module Microsoft.PowerShell.Security -ErrorAction Stop
-Import-Module Microsoft.PowerShell.Management -ErrorAction Stop
-Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
+# unavailable or disabled by the host. Its inherited PSModulePath can also
+# contain PowerShell 7 module roots ahead of the Windows PowerShell inbox
+# modules. Resolve the Desktop/5.1 dependencies from this engine's own
+# installation so the fail-closed ReShade trust check and SHA-256 verification
+# never depend on ambient module precedence. Do not use Join-Path or Test-Path
+# here: both are Management commands, which may not yet be available when
+# module autoloading is disabled.
+$standardPowerShellModules = @(
+    'Microsoft.PowerShell.Security',
+    'Microsoft.PowerShell.Management',
+    'Microsoft.PowerShell.Utility'
+)
+$isWindowsPowerShellDesktop = ($PSVersionTable.PSEdition -eq 'Desktop' -and $PSVersionTable.PSVersion.Major -eq 5)
+if ($isWindowsPowerShellDesktop) {
+    # Remove all loaded same-name modules before any inbox manifest is imported.
+    # This prevents a polluted module from satisfying a nested dependency.
+    foreach ($moduleName in $standardPowerShellModules) {
+        $existingModule = Get-Module -Name $moduleName
+        if ($null -ne $existingModule) {
+            Remove-Module -Name $moduleName -Force -ErrorAction Stop
+        }
+    }
+}
+$windowsPowerShellModuleRoot = $null
+$originalPowerShellModulePath = $null
+if ($isWindowsPowerShellDesktop) {
+    $windowsPowerShellModuleRoot = [System.IO.Path]::Combine($PSHOME, 'Modules')
+    $originalPowerShellModulePath = [System.Environment]::GetEnvironmentVariable('PSModulePath', 'Process')
+    [System.Environment]::SetEnvironmentVariable('PSModulePath', $windowsPowerShellModuleRoot, 'Process')
+}
+# Inbox manifests load nested binary modules. Scope only this process's
+# PSModulePath to the inbox root during those imports, then restore the
+# original process value in finally; user and machine environment is untouched.
+try {
+foreach ($moduleName in $standardPowerShellModules) {
+    if ($isWindowsPowerShellDesktop) {
+        $moduleManifest = [System.IO.Path]::Combine($windowsPowerShellModuleRoot, $moduleName, "$moduleName.psd1")
+        if (-not [System.IO.File]::Exists($moduleManifest)) {
+            throw "Required Windows PowerShell inbox module manifest is missing: $moduleManifest"
+        }
+        Import-Module -Name $moduleManifest -Force -ErrorAction Stop
+    } else {
+        # Preserve the native module-resolution behavior under PowerShell 7+.
+        Import-Module $moduleName -ErrorAction Stop
+    }
+}
 
+}
+finally {
+    if ($isWindowsPowerShellDesktop) {
+        [System.Environment]::SetEnvironmentVariable('PSModulePath', $originalPowerShellModulePath, 'Process')
+    }
+}
 # Load the separate ZIP assemblies once at startup. ZipArchive/ZipArchiveMode
 # live in System.IO.Compression.dll; ZipFile/ZipFileExtensions live in the
 # separate System.IO.Compression.FileSystem.dll. Expand-ZipFileSafe uses these

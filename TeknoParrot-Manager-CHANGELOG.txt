@@ -67,12 +67,13 @@
   5.1 otherwise resolves ZipFile but can leave ZipArchive unavailable.
   A fresh-process regression test now covers the four required compression
   types before the RC6 package is rebuilt.
-  Compatibility fix: the startup bootstrap also explicitly imports the inbox
-  Microsoft.PowerShell.Security, Microsoft.PowerShell.Management, and
-  Microsoft.PowerShell.Utility modules. This
-  keeps Get-AuthenticodeSignature and Get-FileHash available when a packaged
-  Windows PowerShell 5.1 host has module autoloading disabled, without weakening
-  either the ReShade signature gate or SHA-256 verification.
+  Compatibility fix: under Windows PowerShell 5.1/Desktop, the startup bootstrap
+  now resolves the inbox Security, Management, and Utility manifests directly from
+  that engine's $PSHOME\Modules tree before importing them. This prevents an inherited
+  PowerShell 7 module root from supplying incompatible command definitions when module
+  autoloading is disabled. The process-local PSModulePath is scoped to the inbox root
+  only during import and restored afterward; user and machine environment is not
+  changed, and neither the ReShade signature gate nor SHA-256 verification is weakened.
 
 
 -------------------------------------------------------------------------------
