@@ -17,21 +17,8 @@ v1.0 RC6 is published and validated. Download the official
 from GitHub Releases. The published release is tagged `v1.0-RC6`.
 
 v1.0 RC6 adds onboarding flow simplification and dgVoodoo2/ReShade
-auto-download on top of RC5. RC5 remains documented below as the superseded
-release that corrected the RC4 packaging defect.
+auto-download.
 
-RC5 corrects a packaging defect in RC4: the RC4 release ZIP was missing
-`scripts\TPMCertification.Authority.psm1`, a hard runtime dependency of
-`scripts\TPMCertification.Contracts.psm1`, which silently degraded
-pcsx2x6/ECVF contract verification on every RC4 install (fail-closed, no
-crash, but the contract check never actually ran). **RC4 is superseded --
-use RC5 instead.**
-
-RC4 (superseded) explained optional downloads (Eggman dat, thumbnails) in
-plain language before asking whether to proceed, added a "What TPM just
-did" recap after every AutoSync/registration run, and added a first-run
-screen clarifying what TPM does and does not do. It also fixed a stale
-internal diagnostic baseline and confirmed Centipede Chaos compatibility.
 Final Version 1.0 has not been published yet and will be announced
 separately.
 
