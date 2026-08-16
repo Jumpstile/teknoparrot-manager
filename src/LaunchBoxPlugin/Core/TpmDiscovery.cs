@@ -1,3 +1,5 @@
+using System.IO;
+
 namespace TeknoParrotManager.LaunchBoxPlugin;
 
 public sealed class TpmDiscoveryResult
