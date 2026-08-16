@@ -7,7 +7,7 @@
 
 
 -------------------------------------------------------------------------------
-  v1.0 RC6  (2026-08-15)  -- onboarding flow simplification, dgVoodoo2/ReShade
+  v1.0 RC6  (2026-08-16)  -- onboarding flow simplification, dgVoodoo2/ReShade
   auto-download
   ----------------------------------------------------------------
   Improvement: first-run wizard now asks fewer blocking questions, and every
@@ -65,8 +65,8 @@
   Compatibility fix: the startup bootstrap now explicitly loads both .NET
   compression assemblies required by ReShade extraction. Windows PowerShell
   5.1 otherwise resolves ZipFile but can leave ZipArchive unavailable.
-  A fresh-process regression test now covers the four required compression
-  types before the RC6 package is rebuilt.
+  A fresh-process regression test covers the four required compression
+  types before the RC6 package ships.
   Compatibility fix: under Windows PowerShell 5.1/Desktop, the startup bootstrap
   now resolves the inbox Security, Management, and Utility manifests directly from
   that engine's $PSHOME\Modules tree before importing them. This prevents an inherited

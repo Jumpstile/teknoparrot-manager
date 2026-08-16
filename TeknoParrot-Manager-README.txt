@@ -10,11 +10,10 @@
   This is a release candidate. Test one game after each run. Your profiles are
   backed up automatically at the start of every run.
 
-  v1.0 RC6 is in progress and not yet published. The latest published
-  release is v1.0 RC5 -- download it from the GitHub Releases page until
-  RC6 ships. RC5 corrects a packaging defect in RC4 (a missing internal
-  dependency file degraded pcsx2x6 contract verification) -- RC4 is
-  superseded, use RC5 instead.
+  v1.0 RC6 is the current published release candidate -- download it from
+  the GitHub Releases page. RC5 corrected a packaging defect in RC4 (a
+  missing internal dependency file degraded pcsx2x6 contract verification)
+  and is superseded; use RC6 instead.
 
   For a one-page version, see TeknoParrot-Manager-QuickStart.txt.
 

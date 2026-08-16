@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.0 RC6 (2026-08-16) -- onboarding, live dependency acquisition
+
+- Improvement: the first-run wizard now asks fewer blocking questions and
+  points users to destination menu entries by label. Uncertain AutoSync
+  matches now trigger the supplementary-dat recommendation only when needed.
+- Feature: dgVoodoo2 and ReShade can be downloaded from their official sources
+  with SHA-256/signature verification and transactional extraction; neither is
+  bundled in the release ZIP.
+- Compatibility: Windows PowerShell 5.1 explicitly loads the compression and
+  inbox Security, Management, and Utility dependencies needed by those trust,
+  hashing, and extraction paths, including when an inherited PowerShell 7
+  module root would otherwise take precedence.
+
 ## v1.0 RC5 (2026-08-14) -- RC4 packaging correction (RC4 superseded)
 
 - Fix: the RC4 release ZIP was missing `scripts\TPMCertification.Authority.psm1`, an unconditional dependency of `scripts\TPMCertification.Contracts.psm1` (imported at runtime for pcsx2x6 crosshair/ECVF setup). Every RC4 install reaching that code path had contract evaluation fail closed silently -- no crash, but pcsx2x6/ECVF contract verification never actually ran. Corrected the release package manifest and package validator. **RC4 is superseded; use RC5.**

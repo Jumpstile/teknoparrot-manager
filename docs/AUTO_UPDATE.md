@@ -1,11 +1,16 @@
 # Auto-Update System
 
-Status: standalone helper merged; menu integration is part of the published v1.0 RC5 release; shared hardened download transport documented below.
+Status: standalone helper merged; menu integration is part of the published v1.0 RC6 release; shared hardened download transport documented below.
 
-Current public release: v1.0-RC5 (v1.0 RC6 is in progress in this
-repository, uncommitted, and not yet published/tagged -- this section
-describes the live GitHub-published state, which remains RC5 until RC6
-ships). RC4 was superseded by RC5 -- RC4's release ZIP was missing `scripts\TPMCertification.Authority.psm1`, degrading pcsx2x6/ECVF contract verification; see LESSONS_LEARNED.md. The v0.99.38 live-verification references below are historical because that release has been retired; they are not current download instructions. The asset-name-pattern match against `TeknoParrot.Manager.v1.0.RC5.zip` (item 1 below) is confirmed structurally (the pattern is version-agnostic); the full live `-CheckOnly`/`-Apply` verification cycle documented for v0.99.38/v1.0-RC3 has not been re-run against the RC5 asset from this environment.
+Current public release: v1.0-RC6. RC5 was superseded by RC6 -- RC5
+corrected the RC4 release ZIP's missing `scripts\TPMCertification.Authority.psm1`,
+which degraded pcsx2x6/ECVF contract verification; see LESSONS_LEARNED.md.
+The v0.99.38 live-verification references below are historical because that
+release has been retired; they are not current download instructions. The
+asset-name-pattern match against `TeknoParrot.Manager.v1.0.RC6.zip` (item 1
+below) is confirmed structurally (the pattern is version-agnostic); the full
+live `-CheckOnly`/`-Apply` verification cycle documented for v0.99.38/v1.0-RC3
+has not been re-run against the RC6 asset from this environment.
 
 TeknoParrot Manager uses a **manual, backup-first auto-update model**.
 
@@ -16,13 +21,13 @@ The updater must never silently replace files. It checks GitHub Releases, explai
 An independent engineering review found real blockers on the first pass. The packaging, validation, TLS, and testability blockers were fixed and retested against live `Jumpstile/teknoparrot-manager` releases under Windows PowerShell 5.1 before the menu integration was added.
 
 1. **Release packaging mismatch -- fixed**
-   - `-AssetNamePattern` now defaults to `^TeknoParrot\.Manager\.v.*\.zip$`, matching the current release asset `TeknoParrot.Manager.v1.0.RC5.zip`.
-   - Verified live against v1.0-RC3 (historical): `-CheckOnly` correctly found and selected the real release asset instead of throwing. Not yet re-verified live against the RC5 asset from this environment; the pattern match itself is confirmed by inspection (version-agnostic regex).
+   - `-AssetNamePattern` now defaults to `^TeknoParrot\.Manager\.v.*\.zip$`, matching the current release asset `TeknoParrot.Manager.v1.0.RC6.zip`.
+   - Verified live against v1.0-RC3 (historical): `-CheckOnly` correctly found and selected the real release asset instead of throwing. Not yet re-verified live against the RC6 asset from this environment; the pattern match itself is confirmed by inspection (version-agnostic regex).
 
 2. **Content validation before replacement -- fixed**
    - The updater extracts only the `TeknoParrot-Manager.ps1` entry from the downloaded zip (via `Expand-TpmReleaseZipEntry`), never the whole archive.
    - Before replacing the live script, `Test-TpmExtractedScript` verifies: the file exists, is non-empty, does not begin with a zip signature (`PK`), contains the `TeknoParrot Manager` marker, and contains a `$ScriptVersion = "..."` assignment.
-   - Historical live verification: a full `-Apply` against `v0.99.38` previously downloaded, extracted, validated, and installed the genuine script. That release is retired; repeat live verification against the current `v1.0-RC5` asset before changing updater behavior.
+   - Historical live verification: a full `-Apply` against `v0.99.38` previously downloaded, extracted, validated, and installed the genuine script. That release is retired; repeat live verification against the current `v1.0-RC6` asset before changing updater behavior.
 
 3. **PowerShell 5.1 TLS hardening -- fixed**
    - `Enable-TpmTls12` forces `Tls12` into `[Net.ServicePointManager]::SecurityProtocol` before any GitHub API/download call, guarded to skip on PowerShell 6+ where it is unnecessary.
