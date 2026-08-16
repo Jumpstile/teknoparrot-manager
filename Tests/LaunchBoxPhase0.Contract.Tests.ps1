@@ -118,7 +118,9 @@ function global:Invoke-Phase0Contract {
             $ExpectedCorrelationId = [string]$request.correlationId
         }
     }
-    Set-Content -LiteralPath $requestPath -Value $RawRequest -Encoding UTF8
+    if (-not $SkipRequestFile) {
+        Set-Content -LiteralPath $requestPath -Value $RawRequest -Encoding UTF8
+    }
     if ([string]::IsNullOrWhiteSpace($ResultPath)) {
         $ResultPath = Join-Path $Fixture.ResultDir ('result-' + [guid]::NewGuid().ToString('N') + '.json')
     }
@@ -155,6 +157,8 @@ BeforeAll {
     } else {
         $script:Phase0PowerShell = (Get-Command pwsh -ErrorAction Stop).Source
     }
+    $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
+    $script:Phase0PowerShell7 = if ($pwsh) { $pwsh.Source } else { $null }
 }
 
 Describe 'LaunchBox Phase 0 TPM contract' {
@@ -223,4 +227,43 @@ Describe 'LaunchBox Phase 0 TPM contract' {
         $call.ExitCode | Should -Be 1
         Test-Path -LiteralPath $unsafeResult | Should -BeFalse
     }
+    It 'enters contract mode before normal startup and never prompts' {
+        $fixture = New-Phase0Fixture -Root $TestDrive
+        $before = Get-Phase0Snapshot -Fixture $fixture
+        $call = Invoke-Phase0Contract -Fixture $fixture -ProductionScript $script:Phase0ProductionScript -PowerShellPath $script:Phase0PowerShell
+        $after = Get-Phase0Snapshot -Fixture $fixture
+        $source = Get-Content -LiteralPath $script:Phase0ProductionScript -Raw
+        $mode = $source.IndexOf('$script:FrontendContractMode = -not')
+        $dispatch = $source.IndexOf('if ($script:FrontendContractMode)')
+        $normalLog = $source.IndexOf('Write-Log "Script started')
+        $config = $source.IndexOf('$configPath')
+        $mode | Should -BeGreaterThan -1
+        $dispatch | Should -BeGreaterThan $mode
+        $normalLog | Should -BeGreaterThan $dispatch
+        $config | Should -BeGreaterThan $dispatch
+        $call.ExitCode | Should -Be 0
+        $call.Result.success | Should -BeTrue
+        $after | Should -Be $before
+    }
+
+    It 'returns a structured failure when the request file is missing' {
+        $fixture = New-Phase0Fixture -Root $TestDrive
+        $call = Invoke-Phase0Contract -Fixture $fixture -SkipRequestFile -ProductionScript $script:Phase0ProductionScript -PowerShellPath $script:Phase0PowerShell
+        $call.ExitCode | Should -Be 1
+        $call.Result.errorCode | Should -Be 'REQUEST_MISSING'
+    }
+
+    It 'has equivalent contract semantics under PowerShell 5.1 and PowerShell 7' {
+        if (-not $script:Phase0PowerShell7) { Set-ItResult -Skipped -Because 'pwsh is not installed'; return }
+        $fixture = New-Phase0Fixture -Root $TestDrive
+        $ps51 = Invoke-Phase0Contract -Fixture $fixture -ProductionScript $script:Phase0ProductionScript -PowerShellPath $script:Phase0PowerShell
+        $ps7 = Invoke-Phase0Contract -Fixture $fixture -ProductionScript $script:Phase0ProductionScript -PowerShellPath $script:Phase0PowerShell7
+        $ps51.ExitCode | Should -Be $ps7.ExitCode
+        $ps51.Result.contractVersion | Should -Be $ps7.Result.contractVersion
+        $ps51.Result.operationId | Should -Be $ps7.Result.operationId
+        $ps51.Result.status | Should -Be $ps7.Result.status
+        $ps51.Result.success | Should -Be $ps7.Result.success
+        @($ps51.Result.evidence).Count | Should -Be @($ps7.Result.evidence).Count
+    }
+
 }
