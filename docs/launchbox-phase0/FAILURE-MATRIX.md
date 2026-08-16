@@ -16,9 +16,10 @@
 | User cancellation | `TPM_CANCELLED` with `cancelled=true` | C# process-runner self-test. |
 | Paths containing spaces | success with structured evidence | Focused Pester fixture and manual PowerShell 5.1 smoke. |
 | Result path overlaps TeknoParrot/UserProfiles | nonzero exit and no result write | Focused Pester test. |
-| LaunchBox/plugin process lacks write permission for isolated temp | `ACCESS_DENIED` | Catch path is implemented; real ACL test is blocked in this environment and remains a host-machine gate. |
-| Native API assembly missing | build fails closed | Native project build verified the explicit missing-assembly error. |
-| LaunchBox/Big Box callback loading | global menu source is present; runtime callback unverified | No LaunchBox installation is present. |
+| LaunchBox/plugin process lacks write permission for isolated temp | `ACCESS_DENIED` | Catch path is implemented; real ACL test remains a host-machine gate. |
+| Native API assembly missing | build fails closed | Native project requires the exact host assembly; documentation API artifacts are not substitutes. |
+| LaunchBox/Big Box callback loading | global menu source is present; runtime callback unverified | Actual host is LaunchBox/Big Box 14.0.0.0; validation is blocked before installation by missing .NET SDK/MSBuild. |
+| LaunchBox host differs from documentation snapshot | do not infer compatibility | Documentation evidence was gathered against 13.27/current docs at spike time; actual validation target is the installed 14.0 host. |
 
 ## No-write evidence
 
