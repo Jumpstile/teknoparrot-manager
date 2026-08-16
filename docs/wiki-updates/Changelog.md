@@ -5,9 +5,16 @@
 - Improvement: the first-run wizard now asks fewer blocking questions and
   points users to destination menu entries by label. Uncertain AutoSync
   matches now trigger the supplementary-dat recommendation only when needed.
-- Feature: dgVoodoo2 and ReShade can be downloaded from their official sources
-  with SHA-256/signature verification and transactional extraction; neither is
-  bundled in the release ZIP.
+- Feature: dgVoodoo2 and ReShade can be downloaded from their official sources.
+  dgVoodoo2 validates the GitHub asset digest when available; ReShade gates
+  extraction on the installer Authenticode status and pinned signer thumbprint.
+  Neither is bundled in the release ZIP.
+- Audit: ReShade records authoritative source, installer filename/version,
+  SHA-256, Authenticode signer/status/thumbprint/trust, and transfer metrics.
+  BepInEx records GitHub source, filename/version, SHA-256/digest validation
+  when available, and transfer metrics; dgVoodoo2, FFBPlugin, Eggman dat,
+  PostgreSQL/update packages, and thumbnail downloads retain their actual
+  source/hash/transfer audit fields.
 - Compatibility: Windows PowerShell 5.1 explicitly loads the compression and
   inbox Security, Management, and Utility dependencies needed by those trust,
   hashing, and extraction paths, including when an inherited PowerShell 7

@@ -10,9 +10,9 @@
   GLOSSARY section near the top of TeknoParrot-Manager-README.txt.
 
   RELEASE CANDIDATE -- v1.0 RC6 is the current published release candidate
-  (download it from GitHub Releases). Test one game after every run.
-  Profiles are backed up automatically. RC5 corrected a packaging defect in
-  RC4 -- RC4 is superseded, use RC6 instead.
+  (download it from GitHub Releases). Final Version 1.0 remains unpublished.
+  Test one game after every run. Profiles are backed up automatically.
+  RC5 corrected a packaging defect in RC4; RC5 and RC4 are superseded by RC6.
 
 
   NEW TO TEKNOPARROT?
@@ -260,9 +260,12 @@
 
   HOW TO SET IT UP
 
-  If you downloaded TeknoParrot Manager as a ZIP release:
-    ReShade64.dll is already in the  ReShade\  folder -- no setup needed.
-    Just run the script and choose mode 5, or answer Y when prompted.
+  If you downloaded TeknoParrot Manager as a ZIP release, the ReShade DLLs
+  are not bundled. Choose mode 5 and answer D to fetch the official installer
+  from reshade.me. TPM records its authoritative source URL, installer
+  filename/version, computed SHA-256, transfer metrics, Authenticode signer/
+  subject/status/thumbprint, and final trust result; a trust mismatch fails
+  closed. The SHA-256 is an audit hash, not a published-digest comparison.
 
   If you cloned from GitHub (or the ReShade\ folder is empty):
     The DLLs are not in the git repository. Get them yourself:
@@ -300,6 +303,10 @@
 
   To set it up:
     1. Download the dgVoodoo2 ZIP from https://dege.freeweb.hu/dgVoodoo2/dgVoodoo2/
+       or answer Y for the mode 6 automatic GitHub release download. The
+       automatic path records the official GitHub source, filename/version,
+       computed SHA-256, and transfer metrics; when GitHub supplies an asset
+       digest, TPM validates it and fails closed on mismatch.
     2. Create a  dgVoodoo2\  folder next to this script and copy in:
          From  MS\x86\      : D3D8.dll, DDraw.dll, D3DImm.dll
          From  3Dfx\x86\   : Glide2x.dll, Glide3x.dll
@@ -339,9 +346,9 @@
        TeknoParrot membership (teknoparrot.com/en/Home/Subscription) or it
        has no effect.
     2) Third-party plugin (mightymikem/FFBArcadePlugin) -- free, no
-       subscription needed, fetched live from GitHub every run. Supports
-       true force feedback on FFB-capable wheels (Thrustmaster and
-       similar) and rumble on Xbox/XInput-style controllers.
+       subscription needed, fetched live from GitHub every run. Its audit
+       entry records source, filename/version, computed SHA-256, and transfer
+       metrics; no publisher signature or digest trust anchor is claimed.
   If a game is covered by both, you are asked once which to use for all
   such games -- it never silently picks one for you.
 
@@ -358,10 +365,12 @@
   Super Bikes 3, TMNT, and others) to get controls or fixes working.
 
   This ONLY updates games that already have BepInEx installed -- it never
-  installs BepInEx into a game that doesn't have it. Only the latest
-  STABLE 64-bit release is ever used (never 32-bit, never a pre-release).
-  If anything is outdated, you're asked once to update everything at once;
-  the old install is backed up first.
+  installs BepInEx into a game that doesn't have it. Only the latest STABLE
+  64-bit release is ever used (never 32-bit, never a pre-release). The audit
+  entry records the GitHub release source, asset filename/version, computed
+  SHA-256, and transfer metrics; when GitHub supplies an asset digest, TPM
+  validates it and fails closed on mismatch. If anything is outdated, you're
+  asked once to update everything at once; the old install is backed up first.
 
   To run:
     Choose mode 9 from the main menu.
@@ -663,9 +672,18 @@
                                        familyOverride, canonicalArchetype,
                                        datFile). See README section
                                        PER-GAME OVERRIDES.
-  TeknoParrot-Manager.log              Log of every run. Includes a download
-                                       audit trail (source/filename/version/
-                                       SHA256) for fetched binaries.
+  TeknoParrot-Manager.log              Log of every run. Includes audit entries
+                                       for ReShade installer source/filename/
+                                       version, SHA-256, transfer metrics, and
+                                       Authenticode signer/status/thumbprint/
+                                       trust result; ReShade SHA is audit-only.
+                                       BepInEx records GitHub source, filename/
+                                       version, SHA-256, and digest validation
+                                       when available. dgVoodoo2 uses the same
+                                       digest validation when available. FFBPlugin,
+                                       Eggman dat, PostgreSQL/update package, and
+                                       thumbnail downloads record their actual
+                                       source/hash/transfer fields.
   TeknoParrot-Manager.syncstate.json   Tracks extracted ZIPs (in staging
                                        folder). Delete to re-extract all.
   TeknoParrot-Manager-controls.txt     Controls state snapshot (written after

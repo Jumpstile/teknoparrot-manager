@@ -32,41 +32,35 @@
   Feature (explicit, user-authorized exception to the feature freeze):
   dgVoodoo2 and ReShade can now be downloaded automatically instead of only
   via manual instructions. dgVoodoo2 fetches the latest release directly
-  from its official GitHub Releases channel (dege-diosg/dgVoodoo2),
-  verifies the downloaded ZIP's SHA-256 against the digest GitHub itself
-  publishes for the asset, and extracts only the 6 known DLL/config files
-  TPM actually uses. The same SHA-256 verification was also added to the
-  existing BepInEx update-check download, since it uses the identical
-  GitHub Releases API digest field. ReShade fetches the official installer
-  directly from reshade.me, verifies its Authenticode signature against a
-  pinned certificate fingerprint (the actual root of trust for a
-  self-signed certificate -- the Subject string alone proves nothing) with
-  logging of both Subject and Thumbprint on every attempt, and -- only once
-  that signature is trusted -- extracts the ReShade32.dll/ReShade64.dll
-  pair from the installer's embedded self-extracting ZIP archive. Both
-  paths fail closed (no partial install, clear error message directing the
-  user to the existing manual fallback) on any download, integrity, or
-  signature failure. Neither dgVoodoo2 nor ReShade is bundled in the
-  release ZIP; both are always fetched live from their official sources,
-  matching this project's existing FFBPlugin/BepInEx/Eggman-dat pattern.
+  from its official GitHub Releases channel (dege-diosg/dgVoodoo2) and
+  validates the downloaded ZIP against GitHub's published asset digest when
+  available. The same digest validation is used for the existing BepInEx
+  update-check download when GitHub supplies its asset digest. ReShade fetches
+  the official installer directly from reshade.me and gates extraction on its
+  Authenticode status plus pinned signer thumbprint; the Subject is logged as
+  secondary evidence. All three paths record source, filename/version, SHA-256,
+  and transfer metrics. ReShade's SHA-256 is an audit hash, not a published-
+  digest comparison. Neither dgVoodoo2 nor ReShade is bundled in the release
+  ZIP; both are fetched live from their official sources.
 
   Security fix (found and fixed via independent review before this round
-  shipped): extraction for both dgVoodoo2 and ReShade is now transactional
-  -- every file is extracted into an isolated staging area and fully
-  validated first, and only a complete, valid set is ever moved into the
-  real destination. If anything fails partway through, the destination is
-  restored to exactly its state before the operation started, instead of
-  potentially being left with a mix of old and newly-extracted files.
-  Also: the ReShade installer's signature check now requires BOTH the
-  pinned certificate fingerprint AND the specific signature status a
-  genuine installer actually produces -- a corrupted or tampered download
-  reporting a "hash mismatch" status is now rejected even if its
-  certificate fingerprint field happened to still read as trusted.
+  shipped): extraction for both dgVoodoo2 and ReShade is now transactional.
+  Recoverable validation, extraction, and promotion failures restore the exact
+  captured destination pre-state. If an underlying filesystem mutation makes a
+  phase-1 source disappear before a valid backup is observable, TPM reports an
+  explicit ROLLBACK FAILED / INCONSISTENT state and preserves evidence rather
+  than claiming restoration. A restored destination with failed evidence cleanup
+  reports TRANSACTION CLEANUP FAILED and preserves the residue. The ReShade
+  installer trust check also requires BOTH the pinned certificate fingerprint
+  AND the specific status a genuine installer produces; a corrupted or tampered
+  download reporting a hash mismatch is rejected even if its fingerprint field
+  happens to read as trusted.
   Compatibility fix: the startup bootstrap now explicitly loads both .NET
   compression assemblies required by ReShade extraction. Windows PowerShell
   5.1 otherwise resolves ZipFile but can leave ZipArchive unavailable.
-  A fresh-process regression test covers the four required compression
-  types before the RC6 package ships.
+  A fresh-process regression test covers the four required compression types
+  and is included in RC6 package validation. Windows PowerShell 5.1 otherwise
+  resolves ZipFile but can leave ZipArchive unavailable.
   Compatibility fix: under Windows PowerShell 5.1/Desktop, the startup bootstrap
   now resolves the inbox Security, Management, and Utility manifests directly from
   that engine's $PSHOME\Modules tree before importing them. This prevents an inherited

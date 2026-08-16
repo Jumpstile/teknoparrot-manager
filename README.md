@@ -92,7 +92,7 @@ separately.
 - **LaunchBox direct integration / HyperSpin 2 export** — writes games straight into LaunchBox's own library, or builds an import file for HyperSpin 2, after each run.
 - **Unattended mode** — `-Unattended` flag for scheduled overnight runs.
 - **Preview / dry-run mode** — see what AutoSync/Register would do (extract, register, repair, propagate) with zero files written, then decide whether to apply it for real.
-- **Download audit logging** — every binary fetched from a third party (Eggman dat ZIP, BepInEx release, FFBArcadePlugin DLLs) has its source URL, filename, version, and SHA256 logged for later verification or troubleshooting.
+- **Download audit logging** -- every shared-pipeline download records its authoritative source URL, filename, version when known, computed SHA-256, and transfer metrics (method, size, elapsed time, average speed). ReShade additionally logs the installer signer/subject, Authenticode status, signer thumbprint, and the status/thumbprint/trust result; its SHA-256 is an audit hash, not a published-digest comparison. BepInEx records its GitHub release source, filename/version, and computed SHA-256; when GitHub supplies an asset digest, the downloader validates it before extraction and logs/fails closed on a mismatch. dgVoodoo2 uses the same digest validation when available. FFBArcadePlugin, Eggman/RomVault dat, the PostgreSQL guide bundle, the TPM update package, and TeknoParrotUI thumbnail downloads receive source/hash/transfer audit entries; unsigned or digest-less sources are not described as cryptographically authenticated.
 - **Safe by design** — timestamped backups before every run, free-space check, full log, one-click restore.
 
 ---
@@ -424,7 +424,7 @@ The script looks for DLLs in a `ReShade\` folder next to the script:
 
 DLLs are never bundled in the release ZIP (ReShade's own policy prohibits redistributing the binaries — TPM always fetches fresh from reshade.me).
 
-**Automatic (recommended):** run "ReShade setup" from the main menu and choose `D`. TPM downloads the official installer from reshade.me, verifies its Authenticode signature against ReShade's own pinned certificate fingerprint before trusting it, and extracts `ReShade32.dll`/`ReShade64.dll` from it automatically.
+**Automatic (recommended):** run ReShade setup from the main menu and choose D. TPM downloads the official installer from reshade.me, verifies its Authenticode status and signer thumbprint against ReShade pinned trust policy before trusting it, and extracts ReShade32.dll/ReShade64.dll from it automatically. The log records the authoritative installer URL, filename/version, computed SHA-256, transfer method/size/time/speed, and the Authenticode signer/subject, status, thumbprint, and final trust result. The SHA-256 is an audit hash; the trust gate is the pinned thumbprint plus accepted status, not a published ReShade digest.
 
 **Manual:**
 1. Download the free installer from [reshade.me](https://reshade.me)
@@ -462,7 +462,7 @@ Some older arcade games use DirectX 8, DirectDraw, or the 3dfx Glide API. On mod
 
 DLLs are never bundled in the release ZIP; TPM always fetches fresh from the official source.
 
-**Automatic (recommended):** run "dgVoodoo2 setup" from the main menu and choose `D`. TPM downloads the latest release directly from the official [dege-diosg/dgVoodoo2](https://github.com/dege-diosg/dgVoodoo2) GitHub Releases channel, verifies the ZIP's SHA-256 against the checksum GitHub itself publishes for it, and extracts only the files TPM needs.
+**Automatic (recommended):** run dgVoodoo2 setup from the main menu and choose D. TPM downloads the latest release directly from the official dege-diosg/dgVoodoo2 GitHub Releases channel, verifies the ZIP SHA-256 against the GitHub asset digest when available, and extracts only the files TPM needs. The log records the GitHub source, filename/version, computed SHA-256, and transfer metrics; a digest mismatch is logged and fails closed.
 
 **Manual:**
 1. Download dgVoodoo2 from [dege.freeweb.hu](https://dege.freeweb.hu/dgVoodoo2/dgVoodoo2/)
@@ -502,7 +502,7 @@ Mode 10 (Library health check) also reports which registered games are eligible 
 
 **Mechanism 2 — Third-party FFB plugin (free, no subscription needed)**
 
-A free, separately-maintained plugin ([mightymikem/FFBArcadePlugin](https://github.com/mightymikem/FFBArcadePlugin)) covering a different set of arcade racers and shooters. The supported-games list and DLLs are always fetched live from GitHub — nothing is bundled, so the list grows over time with no script update needed.
+A free, separately-maintained plugin (mightymikem/FFBArcadePlugin) covering a different set of arcade racers and shooters. The supported-games list and DLLs are always fetched live from GitHub -- nothing is bundled, so the list grows over time with no script update needed. The shared audit records the source, filename/version when known, computed SHA-256, and transfer metrics; this source has no TPM-enforced signer or published-digest trust anchor.
 
 Controller support (per the plugin's own docs): true force feedback on FFB-capable wheels (Thrustmaster and similar), and rumble on Xbox/XInput-style controllers.
 
@@ -520,7 +520,7 @@ Controller support (per the plugin's own docs): true force feedback on FFB-capab
 
 **Mode 9 only checks/updates games that already have BepInEx installed** — it never installs BepInEx into a game that doesn't have it. Only the latest **stable 64-bit** release is ever used; never a 32-bit build, never a pre-release. A 32-bit install is left alone and reported separately.
 
-If anything is outdated, the script lists every such game once and asks a single question: update all of them? Answering Y backs up the existing `BepInEx` folder and related files (to `BepInEx_Backup_<timestamp>` inside that game's own folder) before overwriting anything.
+If anything is outdated, the script lists every such game once and asks a single question: update all of them? Answering Y backs up the existing BepInEx folder and related files before overwriting anything. The shared audit records the GitHub release source, filename/version, computed SHA-256, and transfer metrics; when GitHub supplies an asset digest, the downloader validates it before extraction and logs/fails closed on a mismatch.
 
 **Troubleshooting:** [official guide](https://docs.bepinex.dev/articles/user_guide/troubleshooting.html). **Manual clean reset:** delete `doorstop_config.ini`, `winhttp.dll`, `.doorstop_version`, `changelog.txt`, and the `BepInEx` folder from the game's folder — this fully reverts to vanilla.
 
@@ -539,7 +539,7 @@ Several Incredible Technologies games — Golden Tee Live (2006–2019), Power P
 
 You don't need to run this mode at all if none of your registered games need Postgres — it detects that and tells you so without installing anything.
 
-**A note on trust:** the PostgreSQL 8.3 installer is distributed via Eggmansworld/tp-it-guides's GitHub release bundle. The installer itself is not Authenticode-signed, so the script records SHA256/source audit information for every download but cannot independently verify publisher authenticity the way it does for ReShade (whose installer genuinely is signed). This is a limitation of the installer itself, not something a stronger check in this script could fix.
+**A note on trust:** the PostgreSQL 8.3 installer is distributed via Eggmansworld/tp-it-guides GitHub release bundle. The installer is not Authenticode-signed and this path does not consume a published asset digest, so the script records source, filename/version, computed SHA-256, and transfer metrics but cannot independently verify publisher authenticity the way it does for ReShade. This is a limitation of the installer/source, not something a stronger check in this script can fix.
 
 ---
 
@@ -552,6 +552,7 @@ Mode 13 manually checks the latest TeknoParrot Manager release on GitHub against
 - The current script is backed up to `UpdateBackups\TeknoParrotManager_<timestamp>\` before anything is replaced. If the target is marked read-only, the update is refused with an actionable error instead of silently clearing that attribute.
 - After a successful update, the script exits so you can restart it cleanly — it never keeps running the old, now-stale code in the same session.
 - If anything fails partway through, the exact error is shown, you're told whether a backup was created, and the script returns safely to the main menu without exiting.
+The update download is recorded with its GitHub source, filename/version, computed SHA-256, and transfer metrics. The manager update path validates size and extracted-script content but does not consume GitHub optional asset digests, so that SHA-256 is an audit value rather than an authenticity gate.
 
 You can also run the update check outside the menu via `tools\Invoke-TpmAutoUpdate.ps1 -CheckOnly` (or `-Apply`) — see `docs/AUTO_UPDATE.md` for that standalone helper.
 
@@ -638,7 +639,7 @@ After registration the script offers to download game icons:
 Download thumbnails for registered games missing an icon? (Y/N)
 ```
 
-Answering Y downloads `ProfileCode.png` for every registered game that doesn't already have one in `<TeknoParrotRoot>\Icons\` — the folder TeknoParrotUI uses for thumbnails. Source: [TeknoParrotUIThumbnails](https://github.com/teknogods/TeknoParrotUIThumbnails). Not all games have a thumbnail there; missing ones are skipped without error.
+Answering Y downloads ProfileCode.png for every registered game that does not already have one in <TeknoParrotRoot> Icons -- the folder TeknoParrotUI uses for thumbnails. Source: TeknoParrotUIThumbnails on GitHub. Missing games are skipped without error. The shared audit records source, filename, computed SHA-256, and transfer metrics; no published digest or signer trust gate is claimed for icons.
 
 **Custom thumbnails:** create a `CustomThumbnails\` folder next to the script and drop your PNGs there named `ProfileCode.png` (e.g. `Daytona3.png`). The script copies them to TeknoParrot's Icons folder on the thumbnail step. Files already in Icons are never overwritten.
 
@@ -808,7 +809,8 @@ If backup folder creation fails, the script exits rather than proceeding without
 
 **Manual restore:** close TeknoParrot, copy `.xml` files from a backup folder back into `UserProfiles`, overwriting the current ones. For LaunchBox, close LaunchBox and copy the backed-up files from `Scripts\LaunchBoxBackups\<timestamp>\` back into LaunchBox's `Data\` folder at the matching relative path.
 
-**Log:** every run appends to `TeknoParrot-Manager.log`. If the log file is inaccessible, a one-time warning shows the path and error. Every entry that can't be written is echoed to the console prefixed with `[UNLOGGED]` so nothing is lost. This log also records a download audit trail (source URL, filename, version, SHA256) for every third-party binary the script fetches — including the Eggman dat ZIP, the BepInEx release, FFBArcadePlugin DLLs, PostgreSQL guide bundle, update package, and TeknoParrotUI thumbnails. The downloader also logs the transport method, file size, elapsed time, and average MB/s.
+**Log:** every run appends to `TeknoParrot-Manager.log`. If the log file is inaccessible, a one-time warning shows the path and error; entries that cannot be written are echoed with `[UNLOGGED]`.
+This log also records a download audit trail for every shared-pipeline artifact: ReShade installer source/filename/version/SHA-256 plus Authenticode signer/status/thumbprint/trust result; BepInEx GitHub source/filename/version/SHA-256 plus digest validation when available; dgVoodoo2, FFBArcadePlugin, Eggman/RomVault dat, PostgreSQL guide, TPM update package, and TeknoParrotUI thumbnails with source/hash/transfer audit fields. Transfer method, size, elapsed time, and average MB/s are recorded for each download. Sources without a published digest or signing anchor are not described as cryptographically authenticated.
 
 ---
 

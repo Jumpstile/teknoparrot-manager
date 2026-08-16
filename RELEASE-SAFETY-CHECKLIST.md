@@ -2,6 +2,7 @@
 
 This checklist must be completed before every version tag, ZIP build, and GitHub release.
 It is intentionally redundant: each gate catches a different failure class.
+Release state for the current cycle: v1.0 RC6 is the current published release candidate; RC5 and RC4 are superseded; final Version 1.0 remains unpublished.
 
 The source-controlled repository metadata contract is `.github/repository-metadata.json`.
 Issue #237's release-consistency gate includes a live comparison of that contract

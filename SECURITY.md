@@ -4,6 +4,8 @@ This file documents this project's threat model and the sanitization
 invariants that follow from it. It is the canonical reference for "why is
 this input treated as untrusted" questions raised in code comments.
 
+Current release state: v1.0 RC6 is the current published release candidate; RC5 and RC4 are superseded, and final Version 1.0 remains unpublished.
+
 ## Threat model: live-fetched and externally-sourced values are untrusted input
 
 Any value this script did not itself generate -- a GitHub Releases API
@@ -29,6 +31,22 @@ That pipeline:
 The preferred transport order is BITS, then streamed `HttpClient`, then
 `Invoke-WebRequest` as an emergency fallback. This is a reliability and
 integrity-hardening measure; it is not a cryptographic authenticity guarantee.
+
+### Download audit records by artifact
+
+The shared log records each live-fetched artifact's authoritative source URL,
+filename, version when known, computed SHA-256, and transfer metrics (method,
+size, elapsed time, and average speed). ReShade additionally records the
+installer Authenticode signer/subject, status, signer thumbprint, and final
+trust result. ReShade's SHA-256 is an audit hash; the implementation does not
+compare it to a separately published ReShade digest. BepInEx records its
+GitHub release source, filename/version, SHA-256, and validates the release
+asset digest when GitHub supplies one, failing closed on mismatch. dgVoodoo2
+uses the same digest validation when available. Eggman/RomVault dat,
+FFBArcadePlugin, the PostgreSQL/guide package, the TPM update package, and
+TeknoParrotUI thumbnail downloads receive source/hash/transfer audit entries;
+where no signer or expected digest exists, the log is not an authenticity
+claim.
 
 ## SHA-256 digest verification (BepInEx and dgVoodoo2 GitHub release assets)
 
@@ -78,12 +96,21 @@ primitives (defined next to `Test-PathInside`):
   name and location, so the destination ends up byte-for-byte identical to
   its pre-operation state.
 
-On ANY failure -- a missing/changed ZIP entry, an extraction-time error on
-any single file, or a promotion-time error -- the destination is left
-exactly as it was before the call, and the staging directory is always
-removed. Verified by dedicated regression tests that deliberately force a
-failure during extraction and a separate failure during promotion for both
-extractors, asserting the destination tree afterward.
+For a recoverable failure -- including a validation, extraction, or promotion
+failure for which the original filesystem state remains observable -- the
+destination is restored byte-for-byte to its captured pre-operation state.
+This includes directory existence, relative paths, file-vs-directory shape,
+and file bytes. Rollback and staging evidence is cleaned only after successful
+restoration and successful cleanup.
+
+The supported adversarial case where an underlying filesystem mutation makes
+a phase-1 source disappear before a valid backup is observable is different:
+TPM throws an explicit ROLLBACK FAILED / INCONSISTENT error, preserves the
+available recovery evidence, and does not claim exact restoration. If the
+destination is restored but cleanup of rollback or staging evidence fails, TPM
+throws TRANSACTION CLEANUP FAILED, reports the residue path, and preserves it
+for diagnosis. Dedicated tests cover both extractors and both failure classes,
+plus clean success and exact pre-state restoration.
 
 ## dgVoodoo2 selective extraction (Scripts\dgVoodoo2\)
 
@@ -209,11 +236,12 @@ candidate script is rejected if it is missing, empty, begins with raw ZIP bytes,
 does not contain the TeknoParrot Manager marker, or does not contain a
 `$ScriptVersion = "..."` assignment.
 
-Current limitation: SHA-256 verification against GitHub release-asset digests is
-not merged yet. Release ZIPs may include sidecar `.sha256` files and GitHub may
-publish asset digests, but this release line still relies on HTTPS, release URL
-allowlisting, ZIP/script content validation, backup-before-replace behavior, and
-manual confirmation rather than a merged checksum enforcement step.
+Current limitation: the TPM menu self-update path computes and logs the ZIP's
+SHA-256 but does not currently consume an optional GitHub asset digest as an
+expected value. Its safety boundary is therefore HTTPS, release URL
+allowlisting, ZIP/script content validation, backup-before-replace behavior,
+and manual confirmation. BepInEx and dgVoodoo2 release assets are separate
+paths and do enforce their GitHub-provided SHA-256 digest when available.
 
 ## Rule: sanitize before joining into a filesystem path
 

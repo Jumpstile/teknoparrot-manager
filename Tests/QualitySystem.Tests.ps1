@@ -183,5 +183,52 @@ Describe "Canonical repository discoverability contract" {
         $script:DiscoverabilityChecklist | Should -Match $metadataContractPattern
         $script:DiscoverabilityChecklist | Should -Match '(?i)live GitHub.*(description|homepage|topics)'
         $script:DiscoverabilityChecklist | Should -Match '#237'
+
+    }
+}
+
+Describe "Active release-facing documentation" {
+    BeforeAll {
+        $script:RepoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
+        $script:ActiveReleaseDocs = @(
+            [pscustomobject]@{ RelativePath = 'README.md'; PrefixLines = 25 }
+            [pscustomobject]@{ RelativePath = 'QUICKSTART.md'; PrefixLines = 5 }
+            [pscustomobject]@{ RelativePath = 'TeknoParrot-Manager-README.txt'; PrefixLines = 18 }
+            [pscustomobject]@{ RelativePath = 'TeknoParrot-Manager-QuickStart.txt'; PrefixLines = 17 }
+            [pscustomobject]@{ RelativePath = 'docs\AUTO_UPDATE.md'; PrefixLines = 11 }
+        )
+    }
+
+    It "keeps active release-facing prefixes on the published RC6 state" {
+        foreach ($entry in $script:ActiveReleaseDocs) {
+            $path = Join-Path $script:RepoRoot $entry.RelativePath
+            $content = Get-Content -LiteralPath $path -Raw
+            $lines = [regex]::Split($content, '\r\n|\n')
+            $active = ($lines | Select-Object -First $entry.PrefixLines) -join ([string][char]10)
+
+            $active | Should -Match 'v1\.0[- ]RC6'
+            $active | Should -Match '(?i)published'
+            $active | Should -Not -Match '(?i)RC[345]\s+(?:is|remains)\s+(?:the\s+)?(?:latest|current)'
+            $active | Should -Not -Match '(?i)RC6.{0,120}(in progress|not yet published|has not been published)'
+        }
+    }
+
+    It "rejects older RC installation or download guidance in active prefixes" {
+        foreach ($entry in $script:ActiveReleaseDocs) {
+            $path = Join-Path $script:RepoRoot $entry.RelativePath
+            $content = Get-Content -LiteralPath $path -Raw
+            $lines = [regex]::Split($content, '\r\n|\n')
+            $active = ($lines | Select-Object -First $entry.PrefixLines) -join ([string][char]10)
+
+            $active | Should -Not -Match '(?i)(download|use|install)\s+(?:the\s+)?(?:(?:current|latest)\s+)?(?:release\s+)?(?:v1\.0[- ]?)?RC[345]\b'
+        }
+    }
+
+    It "states that final Version 1.0 is not published yet" {
+        foreach ($entry in $script:ActiveReleaseDocs) {
+            $path = Join-Path $script:RepoRoot $entry.RelativePath
+            $content = Get-Content -LiteralPath $path -Raw
+            $content | Should -Match '(?i)Final Version 1\.0.{0,60}(unpublished|not been published)'
+        }
     }
 }

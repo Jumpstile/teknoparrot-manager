@@ -1,6 +1,6 @@
 # TeknoParrot Manager — Quick Start
 
-> **Published Release Candidate v1.0 RC6** — test one game after every run. Profiles are backed up automatically before every run. RC5 is superseded; download the current RC6 release from GitHub Releases.
+> Published Release Candidate v1.0 RC6 -- test one game after every run. Profiles are backed up automatically before every run. RC5 is superseded; download the current RC6 release from GitHub Releases. Final Version 1.0 remains unpublished.
 
 Full documentation: [README.md](README.md)
 
@@ -175,7 +175,7 @@ ReShade DLLs are not bundled in the release ZIP because ReShade is not redistrib
 
 **To remove:** delete the DLL (`dxgi.dll`, `d3d9.dll`, `d3d12.dll`, or `opengl32.dll`) from the game folder.
 
-**Note:** before deploying, the script checks your ReShade DLL's Authenticode signature (ReShade's installer is code-signed) and warns -- without blocking -- if it isn't validly signed.
+**Note:** before deploying, the script checks your ReShade DLLs Authenticode signature (ReShade installer is code-signed) and warns -- without blocking -- if it is not validly signed. When mode 5 downloads the installer, the log also records the authoritative source, filename/version, SHA-256, transfer metrics, signer/status/thumbprint, and final trust result; the SHA-256 is an audit hash, not a published-digest comparison.
 
 ---
 
@@ -186,7 +186,7 @@ Some older arcade games use DirectX 8, DirectDraw, or 3dfx Glide. On modern PCs 
 **Only use this for games that crash or show a black screen on first launch.**
 
 **Setup:**
-1. Download dgVoodoo2 from [dege.freeweb.hu](https://dege.freeweb.hu/dgVoodoo2/dgVoodoo2/)
+Download dgVoodoo2 from dege.freeweb.hu or use mode 6 automatic GitHub release download. The automatic path validates GitHub asset digest when available, and the log records the GitHub source, filename/version, SHA-256, and transfer metrics; a digest mismatch fails closed.
 2. Create a `dgVoodoo2\` folder next to this script and copy in:
    - From `MS\x86\`: `D3D8.dll`, `DDraw.dll`, `D3DImm.dll`
    - From `3Dfx\x86\`: `Glide2x.dll`, `Glide3x.dll`
@@ -208,7 +208,7 @@ Many TeknoParrot games include optional fix settings for AMD, NVIDIA, or Intel G
 Mode 8 covers two independent ways to get force feedback / rumble working, and they're not mutually exclusive:
 
 - **Native FFB Blaster** — TeknoParrot's own built-in feature, but it requires an active paid TeknoParrot membership. The script asks if you have one; answer N and this part is skipped entirely (there's no point enabling a field that has no effect without a subscription). If you answer Y, the field is discovered dynamically by scanning your `GameProfiles` folder — never hardcoded.
-- **Third-party plugin** (mightymikem/FFBArcadePlugin) — free, no subscription needed. The per-game DLL table is fetched live from that project's GitHub repo every run, so it tracks new games automatically.
+- **Third-party plugin** ([mightymikem/FFBArcadePlugin](https://github.com/mightymikem/FFBArcadePlugin)) -- free, no subscription needed. The per-game DLL table is fetched live from that project's GitHub repo every run. The shared audit records its source, filename/version, computed SHA-256, and transfer metrics; no signer or published-digest trust gate is claimed.
 
 If a game is covered by both, the script asks **one** batched question — keep native FFB Blaster for all of them, or switch to the plugin for all of them — rather than asking per game. DLL collisions (e.g. ReShade already using `d3d9.dll`) are skipped with a warning, never overwritten.
 
@@ -222,7 +222,7 @@ If a game is covered by both, the script asks **one** batched question — keep 
 
 **This mode ONLY checks and updates games that already have BepInEx installed** — it never installs BepInEx into a game that doesn't have it yet (that first install is still a manual step). Only the latest **stable 64-bit** release is ever used — never 32-bit, never a pre-release. A 32-bit install is left alone and reported separately.
 
-If anything is outdated, the script asks once: update all of them? Answering Y backs up the existing `BepInEx` folder first.
+If anything is outdated, the script asks once: update all of them? Answering Y backs up the existing BepInEx folder first. The shared audit records the GitHub release source, filename/version, SHA-256, and transfer metrics; a GitHub asset digest is validated when available and mismatches fail closed.
 
 **Manual clean reset:** delete `doorstop_config.ini`, `winhttp.dll`, `.doorstop_version`, `changelog.txt`, and the `BepInEx` folder from the game's folder — this fully reverts to vanilla.
 
@@ -238,13 +238,13 @@ Several Incredible Technologies games — Golden Tee Live (2006–2019), Power P
 - For newer game profiles (Golden Tee Live 2018+) with TeknoParrot's own "Automatically create Database" feature, the script only fills in connection settings — TeknoParrot creates the database itself on first launch. For older profiles, the script creates the database and restores that game's bundled backup itself.
 - Every run backs up every existing Postgres database first — restore via mode 11 if anything looks wrong.
 
-If none of your registered games need Postgres, mode 12 says so and exits immediately without installing anything.
+If none of your registered games need Postgres, mode 12 says so and exits immediately without installing anything. The PostgreSQL guide download is logged with source, filename/version, SHA-256, and transfer metrics; this path does not claim Authenticode or published-digest verification.
 
 ---
 
 ## Check for Updates
 
-Mode 13 manually checks the latest GitHub release against the version you're running — nothing is downloaded or changed without your explicit Y/N confirmation. If an update exists, it backs up the current script, downloads and validates the update, replaces the script, then exits so you can restart cleanly. A read-only script is refused with a clear error rather than silently overridden, and any failure tells you exactly what went wrong and whether a backup was made.
+Mode 13 manually checks the latest GitHub release against the version you are running -- nothing is downloaded or changed without your explicit Y/N confirmation. If an update exists, it backs up the current script, downloads and validates the update, replaces the script, then exits so you can restart cleanly. A read-only script is refused with a clear error rather than silently overridden, and any failure tells you exactly what went wrong and whether a backup was made. The download log records source, filename/version, SHA-256, and transfer metrics; the manager update path does not consume GitHub optional asset digests, so the hash is audit-only.
 
 ---
 
@@ -346,7 +346,7 @@ After registration the script asks:
 Download thumbnails for registered games missing an icon? (Y/N)
 ```
 
-Answer Y to fetch `ProfileCode.png` for every registered game not already in `<TeknoParrotRoot>\Icons\`. Source: [TeknoParrotUIThumbnails](https://github.com/teknogods/TeknoParrotUIThumbnails). Missing games are skipped without error.
+Answer Y to fetch ProfileCode.png for every registered game not already in <TeknoParrotRoot> Icons. Source: TeknoParrotUIThumbnails on GitHub. Missing games are skipped without error. The shared audit records source, filename, SHA-256, and transfer metrics; no published digest or signer trust gate is claimed for icons.
 
 **Custom thumbnails:**
 1. Create a `CustomThumbnails\` folder next to the script
@@ -444,7 +444,7 @@ At the end of every run the script prints — and saves to a text file (default 
 - Profiles are backed up before every run to `UserProfiles\FullBackup\<date_time>\`. Nothing is ever deleted automatically.
 - If backup folder creation fails, the script stops rather than proceeding without a restore point.
 - You must own or otherwise have lawful rights to the original arcade PCB and any ROM/game data you use. TPM does not provide, distribute, or endorse unauthorized game files.
-- If the log file is inaccessible, a one-time warning shows the reason. Every entry that can't be written is echoed to the console prefixed with `[UNLOGGED]` so nothing is silently lost. The log also records a download audit trail (source URL, filename, version, SHA256) for every third-party binary the script fetches.
+The log also records a download audit trail: ReShade installer source/filename/version/SHA-256 plus Authenticode signer/status/thumbprint/trust result; BepInEx GitHub source/filename/version/SHA-256 plus digest validation when available; dgVoodoo2, FFBArcadePlugin, Eggman/RomVault dat, PostgreSQL guide, TPM update package, and TeknoParrotUI thumbnails with source/hash/transfer audit fields. Transfer method, size, elapsed time, and average MB/s are included. Sources without a published digest or signing anchor are not described as cryptographically authenticated.
 - If an extraction is interrupted (Ctrl+C, power loss, disk error), the incomplete folder is automatically detected and re-extracted on the next run.
 - Fuzzy name matching auto-registers most NESiCAxLive and other shared-exe games. The similarity score is shown for spot-checking.
 - Games already bound are always left untouched. Game-specific controls that don't exist in the reference game are left for manual setup and reported in ACTION REQUIRED.
@@ -478,7 +478,7 @@ At the end of every run the script prints — and saves to a text file (default 
 |------|----------|---------|
 | `TeknoParrot-Manager.config.json` | Scripts folder | Saved folders and settings (Postgres password stored DPAPI-encrypted) |
 | `TeknoParrot-Manager.overrides.json` | Scripts folder | Per-game tweaks (noSync, onlySync, noPropagate, forceArchetype, familyOverride, canonicalArchetype, datFile) |
-| `TeknoParrot-Manager.log` | Scripts folder | Log of every run (includes a download audit trail: source/filename/version/SHA256 for fetched binaries) |
+| TeknoParrot-Manager.log | Scripts folder | Log of every run, including ReShade/BepInEx/dgVoodoo2 and other download audit fields: source, filename/version, SHA-256, and transfer metrics |
 | `TeknoParrot-Manager.syncstate.json` | Staging folder | Tracks extracted ZIPs — delete to re-extract all |
 | `TeknoParrot-Manager-controls.txt` | Scripts folder | Controls state after every run |
 | `TeknoParrot-Manager-ActionItems.txt` | Scripts folder (default; Save dialog can pick elsewhere) | Action items from last run |
