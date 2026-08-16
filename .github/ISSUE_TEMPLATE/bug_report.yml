@@ -1,0 +1,191 @@
+name: Bug report
+description: Tell us what went wrong so we can reproduce and fix it
+title: "[Bug]: "
+labels:
+  - "type:bug"
+  - "status:needs-investigation"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a problem.
+
+        Please search existing issues first. Include exact text where you can,
+        and redact private or sensitive information before attaching anything.
+
+  - type: input
+    id: summary
+    attributes:
+      label: Problem summary
+      description: In one short sentence, what is going wrong?
+      placeholder: Example - Repair mode stops after finding one broken profile
+    validations:
+      required: true
+
+  - type: input
+    id: tpm-version
+    attributes:
+      label: TeknoParrot Manager version or release
+      description: Enter the exact version or release identifier shown by your copy. Check the Releases page if you need help identifying it.
+      placeholder: Example - v1.0.0 or a development build
+    validations:
+      required: true
+
+  - type: textarea
+    id: windows-powershell
+    attributes:
+      label: Windows and PowerShell environment
+      description: Include Windows edition and build, 32-bit or 64-bit, PowerShell version, and how you started TPM (for example Windows PowerShell, PowerShell 7, Windows Terminal, launcher, or scheduled task).
+      placeholder: |
+        Windows edition/build:
+        Architecture:
+        PowerShell version:
+        How TPM was started:
+    validations:
+      required: true
+
+  - type: input
+    id: teknoparrot-version
+    attributes:
+      label: TeknoParrot or TeknoParrotUI version
+      description: If the issue involves TeknoParrot or TeknoParrotUI, enter the exact version shown by that application. Leave blank if it is not relevant.
+      placeholder: Example - TeknoParrotUI 1.0.0.140
+
+  - type: dropdown
+    id: affected-area
+    attributes:
+      label: Affected area
+      description: Choose the closest match. Maintainers use this to apply the repository's component label.
+      options:
+        - Main menu or interactive console (component:menu)
+        - General console UI or output (component:ui)
+        - Game profiles or registration (component:profiles)
+        - AutoSync or extraction (component:sync)
+        - Backup or restore (component:backup)
+        - DAT selection or parsing (component:dat)
+        - Thumbnails (component:thumbnails)
+        - Self-update (component:updater)
+        - PostgreSQL or another installer (component:installer)
+        - LaunchBox, HyperSpin, or RetroBat export (component:export)
+        - Network, downloads, or connectivity (component:networking)
+        - Certification or diagnostics (component:certification)
+        - Testing or test tooling (component:testing)
+        - GitHub, CI, or repository tooling (component:github)
+        - Release packaging or versioning (component:release)
+        - Other or not sure
+    validations:
+      required: true
+
+  - type: input
+    id: affected-item
+    attributes:
+      label: Affected game, profile, or feature
+      description: Name the game, profile, menu option, mode, or feature involved. If none applies, say so.
+      placeholder: Example - Initial setup, AutoSync, and the Virtua Striker 4 profile
+    validations:
+      required: true
+
+  - type: textarea
+    id: trying-to-do
+    attributes:
+      label: What were you trying to do?
+      description: Describe the task you were performing just before the problem happened.
+      placeholder: |
+        I was trying to...
+    validations:
+      required: true
+
+  - type: textarea
+    id: observed-behavior
+    attributes:
+      label: What happened?
+      description: Describe exactly what you saw. Paste the complete error text or console output when available. If there was no error text, say "No error text".
+      placeholder: |
+        Exact error text or observed behavior:
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: What did you expect to happen?
+      description: Describe the result you expected from that action.
+      placeholder: |
+        I expected...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction-steps
+    attributes:
+      label: Steps to reproduce
+      description: Give numbered steps from a clean start or known state. Include the exact menu choices, commands, paths, or profile names needed to reproduce it.
+      placeholder: |
+        1. Start with...
+        2. Choose...
+        3. Observe...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: reproducibility
+    attributes:
+      label: Does it reproduce consistently?
+      description: Choose the result of repeating the same steps.
+      options:
+        - Every time
+        - Most times
+        - Intermittent or timing-dependent
+        - Happened once and cannot be reproduced
+        - Not tested yet
+    validations:
+      required: true
+
+  - type: textarea
+    id: recent-changes
+    attributes:
+      label: Recent changes
+      description: List anything that changed before the problem appeared, such as a TPM or TeknoParrot update, profile edit, driver change, Windows update, moved folder, new peripheral, or changed setting. If nothing changed, say "None known".
+      placeholder: |
+        Recent changes:
+
+  - type: textarea
+    id: logs-and-screenshots
+    attributes:
+      label: Logs, diagnostics, or screenshots
+      description: Optional. Before pasting or attaching anything, remove passwords, tokens, API keys, license keys, personal data, private URLs or paths, IP addresses, serial numbers, usernames, and machine names that are not needed. Review screenshots for the same information. Do not upload complete configuration files unless you have checked them. If none are available, say "None".
+      placeholder: |
+        Paste a redacted excerpt or drag in a redacted file or screenshot:
+
+  - type: textarea
+    id: hardware-details
+    attributes:
+      label: Hardware or peripheral details (only if relevant)
+      description: Fill this in only when the issue involves a controller, wheel, light gun, spinner, trackball, pedals, force feedback, GPU, display, cabinet, or other hardware. Include make/model, connection type, driver or firmware, and relevant mappings. Do not include serial numbers.
+      placeholder: |
+        Hardware details, or "Not relevant":
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Workaround (if known)
+      description: Tell us whether anything lets you complete the task, even if it is temporary.
+      placeholder: |
+        Workaround, or "None known":
+
+  - type: checkboxes
+    id: pre-submit-checklist
+    attributes:
+      label: Pre-submit checklist
+      description: Please confirm each item before submitting.
+      options:
+        - label: I searched existing issues for duplicates.
+          required: true
+        - label: I included the exact TPM version and environment details, or said when they are unavailable.
+          required: true
+        - label: I included exact observed text and reproduction steps, or explained what is missing.
+          required: true
+        - label: I removed secrets and private information from logs, diagnostics, and screenshots.
+          required: true
+        - label: I described the expected behavior and whether the problem reproduces consistently.
+          required: true

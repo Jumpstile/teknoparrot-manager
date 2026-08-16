@@ -2,7 +2,7 @@
 name: TPM Test Report
 description: Report results from the automated TPM test harness
 title: "TPM test report: <date>"
-labels: [testing]
+labels: ["type:testing", "component:testing"]
 ---
 
 ## Test Context
