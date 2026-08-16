@@ -11,7 +11,23 @@ public sealed class TpmSystemMenuItem : ISystemMenuItemPlugin
 {
     public string Caption => "TeknoParrot Manager";
 
-    public Image? IconImage => null;
+    // LaunchBox 14 declares a non-nullable Image property. Keep this tiny
+    // icon owned for the plugin process lifetime; LaunchBox never receives a
+    // disposable temporary or an arbitrary filesystem path.
+    private static readonly Image TpmIcon = CreateIcon();
+
+    public Image IconImage => TpmIcon;
+
+    private static Image CreateIcon()
+    {
+        var bitmap = new Bitmap(16, 16);
+        using var graphics = Graphics.FromImage(bitmap);
+        graphics.Clear(Color.FromArgb(26, 32, 44));
+        graphics.FillRectangle(Brushes.DeepSkyBlue, 3, 3, 10, 10);
+        graphics.FillRectangle(Brushes.White, 6, 6, 4, 4);
+        graphics.DrawRectangle(Pens.White, 2, 2, 11, 11);
+        return bitmap;
+    }
 
     public bool ShowInBigBox => true;
 
