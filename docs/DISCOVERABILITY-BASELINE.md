@@ -76,10 +76,41 @@ text is refreshed, use this exact concise update rather than adding a backlink:
 
 No external post or artificial backlink was created by this task.
 
-## Post-change recheck
+## Post-change verification: 2026-08-16T18:39:30.4908959Z
 
-After the PR is reviewed and the live GitHub settings are reconciled with the
-contract, rerun the repository/API, unauthenticated-page, GitHub-search, and
-Google/Bing checks above. Record the timestamp, exact `main` SHA, live metadata,
-and observed search results here. Repeat the web-search observation after
-indexing time has elapsed; do not treat a delayed result as a code failure.
+The live settings were reconciled after the source-side implementation reached
+`main`. The verification used exact main commit
+`3e8e5ce0730a6b10f1e7308d00bf8ea1f22015f6` and the contract committed at that
+SHA.
+
+A follow-up live read found the description had reverted to stale repository text,
+so the exact contract was reconciled again through authenticated GitHub settings
+access. Homepage and topics remained exact. The final verification below passed
+after reapplication, and a delayed recheck also remained exact.
+
+### Live repository state
+
+- Description exactly matches the contract: `TeknoParrot Manager - Windows PowerShell tool for managing TeknoParrot arcade libraries, controls, crosshairs, compatibility fixes, LaunchBox, and HyperSpin.`
+- Homepage exactly matches the contract:
+  `https://github.com/Jumpstile/teknoparrot-manager/releases`
+- Topics exactly match the contract as a normalized set (the GitHub API may
+  return them in a different order): `arcade`, `arcade-game-library`,
+  `arcade-games`, `crosshair`, `dgvoodoo2`, `game-manager`, `hyperspin`,
+  `launchbox`, `lightgun`, `powershell`, `reshade`, `teknoparrot`,
+  `teknoparrot-manager`, `windows`
+- Visibility remains public: `private: false`, `visibility: public`.
+- Unauthenticated repository page: HTTP 200.
+- Unauthenticated Releases page: HTTP 200.
+
+### GitHub repository search
+
+- Query `TeknoParrot Manager`: canonical match found for
+  `Jumpstile/teknoparrot-manager`; 3 total repository results were returned.
+- Query `teknoparrot-manager`: canonical match found for
+  `Jumpstile/teknoparrot-manager`; 2 total repository results were returned.
+
+The description, homepage, topic set, public state, page accessibility, and
+GitHub-search checks all passed at this timestamp. Google/Bing indexing and
+ranking remain asynchronous observations; repeat the web-search observation
+after indexing time has elapsed, and do not treat a delayed result as a code
+failure or claim a ranking guarantee.
