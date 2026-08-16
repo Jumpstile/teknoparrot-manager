@@ -14,8 +14,15 @@ This is the isolated native plugin proof of concept for issue #242.
 
 ## Native build
 
-The current LaunchBox API assembly is not installed in this environment. Once
-a real LaunchBox installation is supplied, build with:
+The authoritative arcade host is LaunchBox 14.0.0.0. Its API assembly is:
+
+```text
+C:\\Users\\EliSi\\LaunchBox\\Core\\Unbroken.LaunchBox.Plugins.dll
+```
+
+The assembly file/assembly version is `14.0.0.0` and its recorded SHA-256 is
+`99342E74EE99AFA28060439E78C6C08EEFFC90F541FBBCC70AE942B8C4AA5944`. Build
+against that exact file:
 
 ```powershell
 dotnet build .\\src\\LaunchBoxPlugin\\Native\\TeknoParrotManager.LaunchBoxPlugin.csproj `
@@ -28,9 +35,12 @@ The project expects:
 <LaunchBoxRoot>\\Core\\Unbroken.LaunchBox.Plugins.dll
 ```
 
-An explicit `-p:LaunchBoxApiAssemblyPath=...` can be used when the host uses a
-different verified path. The project fails closed when the assembly is absent;
-it does not compile against a locally invented interface shim.
+An explicit `-p:LaunchBoxApiAssemblyPath=...` can be used only for another
+verified host path. The project fails closed when the assembly is absent; it
+does not compile against a documentation, NuGet, or invented interface shim.
+The historical 13.27 documentation evidence does not establish compatibility
+with the actual 14.0 host; interface names must be checked by compilation and
+runtime validation.
 
 ## Deployment
 
