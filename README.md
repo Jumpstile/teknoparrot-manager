@@ -2,12 +2,9 @@
 
 ![TeknoParrot Manager](images/banner.png)
 
-A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arcade game library on Windows — registration, control propagation, crosshairs, ReShade, dgVoodoo2, GPU fixes, and more.
+TeknoParrot Manager is a Windows PowerShell tool for managing TeknoParrot arcade libraries on Windows. It registers extracted games, propagates controls, deploys lightgun crosshairs, applies ReShade and dgVoodoo2 compatibility fixes, and exports libraries to LaunchBox or HyperSpin.
 
-TeknoParrot Manager is a Windows arcade-library manager and TeknoParrot setup
-tool for organizing extracted arcade games, registering profiles, deploying
-lightgun crosshairs, applying compatibility fixes, and exporting libraries to
-LaunchBox or HyperSpin.
+Canonical links: [GitHub repository](https://github.com/Jumpstile/teknoparrot-manager) | [Releases](https://github.com/Jumpstile/teknoparrot-manager/releases) | [Issue tracker](https://github.com/Jumpstile/teknoparrot-manager/issues)
 
 > **Published release candidate: v1.0 RC6** — onboarding flow simplification and dgVoodoo2/ReShade auto-download. Test one game after each run. Profiles are backed up automatically before every run.
 
@@ -20,21 +17,8 @@ v1.0 RC6 is published and validated. Download the official
 from GitHub Releases. The published release is tagged `v1.0-RC6`.
 
 v1.0 RC6 adds onboarding flow simplification and dgVoodoo2/ReShade
-auto-download on top of RC5. RC5 remains documented below as the superseded
-release that corrected the RC4 packaging defect.
+auto-download.
 
-RC5 corrects a packaging defect in RC4: the RC4 release ZIP was missing
-`scripts\TPMCertification.Authority.psm1`, a hard runtime dependency of
-`scripts\TPMCertification.Contracts.psm1`, which silently degraded
-pcsx2x6/ECVF contract verification on every RC4 install (fail-closed, no
-crash, but the contract check never actually ran). **RC4 is superseded --
-use RC5 instead.**
-
-RC4 (superseded) explained optional downloads (Eggman dat, thumbnails) in
-plain language before asking whether to proceed, added a "What TPM just
-did" recap after every AutoSync/registration run, and added a first-run
-screen clarifying what TPM does and does not do. It also fixed a stale
-internal diagnostic baseline and confirmed Centipede Chaos compatibility.
 Final Version 1.0 has not been published yet and will be announced
 separately.
 
@@ -162,8 +146,8 @@ This script automates the copy-and-fill step: it scans your games, matches each 
 
 ## Installation
 
-1. Download the official `TeknoParrot Manager v1.0 RC6.zip` release asset
-   from [Releases](../../releases).
+1. Download the current official release asset from
+   [GitHub Releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
 2. Extract to any folder (e.g. a `Scripts` subfolder alongside your TeknoParrot install)
 3. Double-click **`TeknoParrot-Manager.bat`**
 

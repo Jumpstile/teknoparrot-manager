@@ -1,0 +1,20 @@
+{
+  "description": "TeknoParrot Manager - Windows PowerShell tool for managing TeknoParrot arcade libraries, controls, crosshairs, compatibility fixes, LaunchBox, and HyperSpin.",
+  "homepage": "https://github.com/Jumpstile/teknoparrot-manager/releases",
+  "topics": [
+    "arcade",
+    "arcade-game-library",
+    "arcade-games",
+    "crosshair",
+    "dgvoodoo2",
+    "game-manager",
+    "hyperspin",
+    "launchbox",
+    "lightgun",
+    "powershell",
+    "reshade",
+    "teknoparrot",
+    "teknoparrot-manager",
+    "windows"
+  ]
+}
