@@ -111,6 +111,19 @@ BeforeAll {
     $ReleaseCandidateLabel = "RC3"
     $DisplayVersion = "v1.0 RC3"
 
+    # $Script:ReShadeTrustedCertThumbprint and $Script:ReShadeAcceptedSignatureStatuses
+    # are both top-level script-scope constants (not function bodies), so
+    # the AST extraction above never picks either up.
+    # Test-ReShadeSetupTrustedSignature reads both directly -- mirror the
+    # production values explicitly so the fingerprint/status-gate tests
+    # below exercise the real pinned constants, not an unset $null (an
+    # unset $Script:ReShadeAcceptedSignatureStatuses would make
+    # "-contains" always return $false, making every trust-matrix test
+    # report Trusted=$false regardless of status -- a real gap this
+    # comment documents so it isn't reintroduced silently).
+    $Script:ReShadeTrustedCertThumbprint = '589690208A5E52FB96980C4A6698F50ACD47C49F'
+    $Script:ReShadeAcceptedSignatureStatuses = @('UnknownError')
+
     # Write-Log normally writes beside the production script via top-level
     # initialisation that AST extraction intentionally skips. Give helper tests a
     # real throwaway log target so certification output is not polluted with
@@ -120,6 +133,91 @@ BeforeAll {
     $script:logPath = Join-Path $script:TestLogRoot "TeknoParrot-Manager.Tests.log"
     $script:logWarnShown = $false
     $script:logFailedCount = 0
+
+    # Shared exact-pre/post-state comparison helpers (P1 remediation, 2nd
+    # round): a Pester test that only spot-checks "file X is gone" or "dir
+    # is empty" can pass even when the pre-operation state was actually
+    # different (e.g. the destination directory itself did not exist
+    # before the call but rollback leaves it behind, empty). These helpers
+    # capture and compare the COMPLETE pre/post state -- directory
+    # existence, every entry's relative path, whether it is a file or a
+    # directory, and exact file bytes -- so a rollback test can assert
+    # genuine byte-for-byte/state-equivalence instead of an approximation
+    # of it. Defined here (inside the file-level BeforeAll, alongside the
+    # other test-scope helpers above) rather than as bare top-level
+    # function statements, because Pester v5 only runs true top-level
+    # script code once during Discovery -- functions defined that way are
+    # not reliably visible inside It blocks during the later Run phase.
+    function Get-TpmDirSnapshot {
+        param([string]$Dir)
+        if (-not (Test-Path -LiteralPath $Dir)) {
+            return [pscustomobject]@{ Existed = $false; Entries = @() }
+        }
+        $entries = @(Get-ChildItem -LiteralPath $Dir -Force -Recurse | Sort-Object FullName | ForEach-Object {
+            [pscustomobject]@{
+                RelativePath = $_.FullName.Substring($Dir.Length).TrimStart('\')
+                IsDirectory  = $_.PSIsContainer
+                Content      = if (-not $_.PSIsContainer) { [System.Convert]::ToBase64String([System.IO.File]::ReadAllBytes($_.FullName)) } else { $null }
+            }
+        })
+        return [pscustomobject]@{ Existed = $true; Entries = $entries }
+    }
+
+    function Assert-TpmDirSnapshotUnchanged {
+        param($Before, $After)
+        $After.Existed | Should -Be $Before.Existed
+        $After.Entries.Count | Should -Be $Before.Entries.Count
+        for ($i = 0; $i -lt $Before.Entries.Count; $i++) {
+            $After.Entries[$i].RelativePath | Should -Be $Before.Entries[$i].RelativePath
+            $After.Entries[$i].IsDirectory  | Should -Be $Before.Entries[$i].IsDirectory
+            $After.Entries[$i].Content      | Should -Be $Before.Entries[$i].Content
+        }
+    }
+
+    # Windows may spell the same existing directory with its long user-folder
+    # name or its 8.3 short name. Cleanup errors must still identify this exact
+    # staging directory, so accept only OS-derived equivalent full-path forms.
+    if (-not ('TpmPathInterop' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class TpmPathInterop {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern uint GetLongPathName(string path, StringBuilder buffer, int capacity);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern uint GetShortPathName(string path, StringBuilder buffer, int capacity);
+}
+'@
+    }
+
+    function Get-TpmEquivalentWindowsPath {
+        param([string]$Path)
+        $fullPath = [System.IO.Path]::GetFullPath($Path).TrimEnd('\')
+        $variants = New-Object System.Collections.Generic.List[string]
+        [void]$variants.Add($fullPath)
+        foreach ($methodName in @('GetLongPathName', 'GetShortPathName')) {
+            $buffer = New-Object System.Text.StringBuilder 32768
+            $length = [TpmPathInterop]::$methodName($fullPath, $buffer, $buffer.Capacity)
+            if ($length -gt 0 -and $length -lt $buffer.Capacity) {
+                [void]$variants.Add($buffer.ToString().TrimEnd('\'))
+            }
+        }
+        return @($variants | Select-Object -Unique)
+    }
+
+    function Assert-TpmErrorIdentifiesWindowsPath {
+        param([string]$ErrorText, [string]$ExpectedPath)
+        $variants = @(Get-TpmEquivalentWindowsPath -Path $ExpectedPath)
+        $matched = $false
+        foreach ($variant in $variants) {
+            if ($ErrorText.IndexOf($variant, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                $matched = $true
+                break
+            }
+        }
+        $matched | Should -BeTrue -Because ("cleanup error must identify the actual staging directory; accepted equivalent forms: {0}" -f ($variants -join ' | '))
+    }
 }
 
 AfterAll {
@@ -204,13 +302,15 @@ Describe "Issue #220 AutoSync Z recovery" {
 Describe "Beginner-clarity RC wording (optional-download explanations, first-run framing)" {
     It "clarifies the Eggman dat is not a game download" {
         $script:ProductionSource | Should -Match "not the games themselves -- it"
-        $script:ProductionSource | Should -Match "never downloads any game data\. It helps TPM correctly register games"
+        $script:ProductionSource | Should -Match "never downloads any game data\. It helps TPM recognize and correctly"
     }
-    It "explains what a supplementary dat is before asking about it, for both ZIP and standalone-file modes" {
-        $matches = [regex]::Matches($script:ProductionSource, [regex]::Escape('A supplementary dat is another small index file'))
-        $matches.Count | Should -Be 2
-        $script:ProductionSource | Should -Match "adds alternate"
-        $script:ProductionSource | Should -Match "or regional version info for games already covered by the main dat"
+    It "defers the supplementary-dat follow-up out of the initial wizard, with a note rather than a blocking Y/N" {
+        # Part 2 item 4: the blocking Y/N was removed from the initial
+        # Eggman-dat setup wizard and replaced with a short deferred note;
+        # the actual offer only appears afterward as a targeted, context-
+        # aware post-run recommendation (see the next Describe block).
+        $script:ProductionSource | Should -Match ([regex]::Escape("extra version-info file (supplementary dat)"))
+        $script:ProductionSource | Should -Match ([regex]::Escape("TPM will recommend it then"))
     }
     It "clarifies thumbnail download is box art only, not game data" {
         $script:ProductionSource | Should -Match "This downloads small box-art icons only, never the games themselves"
@@ -663,6 +763,48 @@ Describe "Read-HostSafe / Exit-TpmProcess (issue #135: non-interactive input)" {
     }
 }
 
+Describe "Read-HostSafe -Default contract (onboarding flow restructuring)" {
+    # Strict, explicitly-tested non-interactive-safety contract for the
+    # -Default parameter added to cut first-run decision count: a real
+    # blank line and whitespace-only input both accept the default;
+    # non-blank input always wins and ignores -Default entirely; a null
+    # Read-Host result (exhausted/redirected stdin) NEVER resolves to
+    # -Default -- it must keep hitting the existing hard-exit path
+    # unchanged, exactly as without -Default.
+
+    It "returns the default when Read-Host returns a true blank line" {
+        Mock Read-Host { return '' }
+        Read-HostSafe -Prompt 'Use RetroBat?' -Default 'N' | Should -Be 'N'
+    }
+
+    It "returns the default when Read-Host returns whitespace-only input" {
+        Mock Read-Host { return '   ' }
+        Read-HostSafe -Prompt 'Use RetroBat?' -Default 'N' | Should -Be 'N'
+    }
+
+    It "returns the trimmed non-blank value and ignores -Default entirely" {
+        Mock Read-Host { return '  Y  ' }
+        Read-HostSafe -Prompt 'Use RetroBat?' -Default 'N' | Should -Be 'Y'
+    }
+
+    It "still exits via the hard-exit path on a null (exhausted stdin) result and never returns -Default" {
+        Mock Read-Host { return $null }
+        Mock Exit-TpmProcess { }
+        Mock Write-Log { }
+
+        $result = Read-HostSafe -Prompt 'Use RetroBat?' -Default 'N'
+
+        $result | Should -Be ''
+        $result | Should -Not -Be 'N'
+        Should -Invoke Exit-TpmProcess -Times 1 -ParameterFilter { $Code -eq 1 }
+    }
+
+    It "behaves exactly as before when -Default is omitted (blank returns empty string, not a default)" {
+        Mock Read-Host { return '' }
+        Read-HostSafe -Prompt 'Continue?' | Should -Be ''
+    }
+}
+
 Describe "Read-MainMenuChoiceResponsive redirected-input handling (issue #135)" {
     # Confirms the main menu prompt never enters the [Console]::KeyAvailable
     # polling loop when stdin is redirected (polling a keyboard that cannot
@@ -959,6 +1101,215 @@ Describe "Get-DiceSimilarity" {
     }
 }
 
+Describe "Windows PowerShell 5.1 compression assembly bootstrap" {
+    It "loads both assemblies from the production startup block before ZipArchive use" {
+        $ps51Path = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        if (-not (Test-Path -LiteralPath $ps51Path -PathType Leaf)) {
+            Set-ItResult -Skipped -Because 'Windows PowerShell 5.1 is not installed on this host.'
+            return
+        }
+
+        $startupBlock = [regex]::Match(
+            $script:ProductionSource,
+            '(?ms)^# Load the separate ZIP assemblies once at startup\..*?^# PS 5\.1 on older').Value
+        $startupAssemblyLines = @(
+            $startupBlock -split '\r?\n' |
+                Where-Object { $_ -match '^\s*Add-Type -AssemblyName System\.IO\.Compression(?:\.FileSystem)?\s*$' }
+        )
+
+        $startupAssemblyLines | Should -Contain 'Add-Type -AssemblyName System.IO.Compression'
+        $startupAssemblyLines | Should -Contain 'Add-Type -AssemblyName System.IO.Compression.FileSystem'
+
+        $probePath = Join-Path $TestDrive 'compression-bootstrap-ps51.ps1'
+        $probeLines = @(
+            '$ErrorActionPreference = ''Stop'''
+        ) + $startupAssemblyLines + @(
+            '$requiredTypes = @([System.IO.Compression.ZipArchive], [System.IO.Compression.ZipArchiveMode], [System.IO.Compression.ZipFile], [System.IO.Compression.ZipFileExtensions])'
+            'if ($requiredTypes.Count -ne 4) { throw "Required compression types did not resolve." }'
+            'Write-Output ''COMPRESSION_BOOTSTRAP_OK'''
+        )
+        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($probePath, ($probeLines -join [Environment]::NewLine), $utf8NoBom)
+
+        $output = & $ps51Path -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probePath 2>&1 | Out-String
+        $exitCode = $LASTEXITCODE
+        $exitCode | Should -Be 0 -Because "the production compression bootstrap must work in a pristine Windows PowerShell 5.1 process. Output: $output"
+        $output | Should -Match 'COMPRESSION_BOOTSTRAP_OK'
+    }
+}
+
+Describe "Windows PowerShell 5.1 security and hash module bootstrap" {
+    BeforeAll {
+        $script:SecurityHashStartupBlock = [regex]::Match(
+            $script:ProductionSource,
+            '(?ms)^# Windows PowerShell 5\.1 packaged launchers can run with module autoloading.*?^# Load the separate ZIP assemblies once at startup\.'
+        ).Value
+        $script:SecurityHashStartupLines = @($script:SecurityHashStartupBlock -split '\r?\n')
+    }
+
+    It "explicitly imports the production modules and invokes both required commands in a fresh packaged-style process" {
+        $ps51Path = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        if (-not (Test-Path -LiteralPath $ps51Path -PathType Leaf)) {
+            Set-ItResult -Skipped -Because 'Windows PowerShell 5.1 is not installed on this host.'
+            return
+        }
+
+        $startupBlock = [regex]::Match(
+            $script:ProductionSource,
+            '(?ms)^# Windows PowerShell 5\.1 packaged launchers can run with module autoloading.*?^# Load the separate ZIP assemblies once at startup\.'
+        ).Value
+        $startupBlock | Should -Match '(?m)^\s*Import-Module -Name \$moduleManifest -Force -ErrorAction Stop\s*$'
+        $startupBlock | Should -Match '(?m)^\s*Import-Module \$moduleName -ErrorAction Stop\s*$'
+        $startupBlock | Should -Match '\$isWindowsPowerShellDesktop'
+        $startupBlock | Should -Not -Match '(?m)^\s*Import-Module Microsoft\.PowerShell\.(Security|Management|Utility) -ErrorAction Stop\s*$'
+
+        $probePath = Join-Path $TestDrive 'security-hash-bootstrap-ps51.ps1'
+        $probeLines = @(
+            '$ErrorActionPreference = ''Stop''',
+            '$PSModuleAutoLoadingPreference = ''None'''
+        ) + $script:SecurityHashStartupLines + @(
+            '$probeFile = [System.IO.Path]::GetTempFileName()'
+            'try {'
+            '    [System.IO.File]::WriteAllText($probeFile, ''TPM module bootstrap probe'')'
+            '    $authCommand = Get-Command Get-AuthenticodeSignature -ErrorAction Stop'
+            '    $hashCommand = Get-Command Get-FileHash -ErrorAction Stop'
+            '    $digest = Get-FileHash -LiteralPath $probeFile -Algorithm SHA256 -ErrorAction Stop'
+            '    $signature = Get-AuthenticodeSignature -LiteralPath $probeFile -ErrorAction Stop'
+            '    if (-not $authCommand -or -not $hashCommand -or [string]::IsNullOrWhiteSpace($digest.Hash) -or $null -eq $signature) { throw ''Security/hash command bootstrap did not resolve and invoke.'' }'
+            '    Write-Output ''SECURITY_HASH_BOOTSTRAP_OK'''
+            '} finally {'
+            '    [System.IO.File]::Delete($probeFile)'
+            '}'
+        )
+        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($probePath, ($probeLines -join [Environment]::NewLine), $utf8NoBom)
+
+        $output = & $ps51Path -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probePath 2>&1 | Out-String
+        $exitCode = $LASTEXITCODE
+        $exitCode | Should -Be 0 -Because "the production security/hash bootstrap must work with module autoloading disabled in a pristine Windows PowerShell 5.1 process. Output: $output"
+        $output | Should -Match 'SECURITY_HASH_BOOTSTRAP_OK'
+    }
+    It "uses Windows PowerShell inbox modules when a higher-version PowerShell 7 module root precedes them" {
+        $ps51Path = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        if (-not (Test-Path -LiteralPath $ps51Path -PathType Leaf)) {
+            Set-ItResult -Skipped -Because 'Windows PowerShell 5.1 is not installed on this host.'
+            return
+        }
+
+        $fakeModuleRoot = Join-Path $TestDrive 'polluted-psmodulepath'
+        $fakeModuleVersion = '7.99.0.0'
+        $fakeModuleNames = @(
+            'Microsoft.PowerShell.Security',
+            'Microsoft.PowerShell.Management',
+            'Microsoft.PowerShell.Utility'
+        )
+        foreach ($moduleName in $fakeModuleNames) {
+            $moduleDirectory = Join-Path (Join-Path $fakeModuleRoot $moduleName) $fakeModuleVersion
+            New-Item -ItemType Directory -Path $moduleDirectory -Force | Out-Null
+            $manifestPath = Join-Path $moduleDirectory "$moduleName.psd1"
+            $modulePath = Join-Path $moduleDirectory 'Fake.psm1'
+            $manifest = "@{ RootModule = 'Fake.psm1'; ModuleVersion = '$fakeModuleVersion'; CompatiblePSEditions = @('Core', 'Desktop'); FunctionsToExport = @(); CmdletsToExport = @(); VariablesToExport = @(); AliasesToExport = @() }"
+            [System.IO.File]::WriteAllText($manifestPath, $manifest)
+            [System.IO.File]::WriteAllText($modulePath, '')
+        }
+
+        $fakeRootForChild = $fakeModuleRoot.Replace("'", "''")
+        $probePath = Join-Path $TestDrive 'security-hash-bootstrap-polluted-ps51.ps1'
+        $probeLines = @(
+            '$ErrorActionPreference = ''Stop''',
+            '$PSModuleAutoLoadingPreference = ''None''',
+            ('$fakeModuleRoot = ''{0}''' -f $fakeRootForChild),
+            ('$env:PSModulePath = ''{0};'' + [System.IO.Path]::Combine($PSHOME, ''Modules'')' -f $fakeRootForChild),
+            '$fakeModuleNames = @(''Microsoft.PowerShell.Security'', ''Microsoft.PowerShell.Management'', ''Microsoft.PowerShell.Utility'')',
+            'foreach ($moduleName in $fakeModuleNames) {',
+            '    Import-Module $moduleName -Force -ErrorAction Stop',
+            '    $fakeModule = @(Get-Module -Name $moduleName)[0]',
+            '    $expectedFakePath = [System.IO.Path]::Combine($fakeModuleRoot, $moduleName, ''7.99.0.0'', ''Fake.psm1''); if ($null -eq $fakeModule -or -not [System.String]::Equals($fakeModule.Version.ToString(), ''7.99.0.0'', [System.StringComparison]::OrdinalIgnoreCase) -or -not [System.String]::Equals([System.IO.Path]::GetFullPath($fakeModule.Path), [System.IO.Path]::GetFullPath($expectedFakePath), [System.StringComparison]::OrdinalIgnoreCase)) { throw ("Bare import selected unexpected module for {0}: path={1}; version={2}; expected={3}" -f $moduleName, $fakeModule.Path, $fakeModule.Version, $expectedFakePath) }',
+            '    # Leave the higher-version module loaded so the production path must override it explicitly',
+            '}'
+            '$pollutedModulePathBeforeBootstrap = $env:PSModulePath'
+        ) + $script:SecurityHashStartupLines + @(
+            '$expectedVersions = @{ ''Microsoft.PowerShell.Security'' = ''3.0.0.0''; ''Microsoft.PowerShell.Management'' = ''3.1.0.0''; ''Microsoft.PowerShell.Utility'' = ''3.1.0.0'' }',
+            'foreach ($moduleName in $fakeModuleNames) {',
+            '    $expectedManifest = [System.IO.Path]::Combine($PSHOME, ''Modules'', $moduleName, ($moduleName + ''.psd1''))',
+            '    $inboxModule = $null',
+            '    foreach ($candidate in @(Get-Module -Name $moduleName)) {',
+            '        if ($null -ne $candidate.Path -and [System.String]::Equals([System.IO.Path]::GetFullPath($candidate.Path), [System.IO.Path]::GetFullPath($expectedManifest), [System.StringComparison]::OrdinalIgnoreCase)) { $inboxModule = $candidate }',
+            '    }',
+            '    if ($null -eq $inboxModule) { throw ("Module {0} was not loaded from the Windows PowerShell inbox manifest." -f $moduleName) }',
+            '    if ($inboxModule.Version.ToString() -ne $expectedVersions[$moduleName]) { throw ("Module {0} has unexpected version {1}" -f $moduleName, $inboxModule.Version) }',
+            '}',
+            '$authCommand = Get-Command Get-AuthenticodeSignature -ErrorAction Stop',
+            '$hashCommand = Get-Command Get-FileHash -ErrorAction Stop',
+            'if ($authCommand.Source -ne ''Microsoft.PowerShell.Security'' -or $hashCommand.Source -ne ''Microsoft.PowerShell.Utility'') { throw ''Security/hash command resolved from an unexpected module.'' }',
+            'if ($env:PSModulePath -ne $pollutedModulePathBeforeBootstrap) { throw ''PSModulePath was not restored after inbox module initialization.'' }',
+            '$probeFile = [System.IO.Path]::GetTempFileName()',
+            'try {',
+            '    [System.IO.File]::WriteAllText($probeFile, ''Polluted PSModulePath probe'')',
+            '    $digest = Get-FileHash -LiteralPath $probeFile -Algorithm SHA256 -ErrorAction Stop',
+            '    $signature = Get-AuthenticodeSignature -LiteralPath $probeFile -ErrorAction Stop',
+            '    if ([string]::IsNullOrWhiteSpace($digest.Hash) -or $null -eq $signature) { throw ''Security/hash command did not invoke after inbox resolution.'' }',
+            '    Write-Output ''POLLUTED_PS51_INBOX_MODULES_OK''',
+            '} finally {',
+            '    [System.IO.File]::Delete($probeFile)',
+            '}'
+        )
+        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($probePath, ($probeLines -join [Environment]::NewLine), $utf8NoBom)
+
+        $output = & $ps51Path -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probePath 2>&1 | Out-String
+        $exitCode = $LASTEXITCODE
+        $exitCode | Should -Be 0 -Because "the production bootstrap must override a higher-version polluted module root without changing global module configuration. Output: $output"
+        $output | Should -Match 'POLLUTED_PS51_INBOX_MODULES_OK'
+    }
+
+    It "keeps clean Windows PowerShell 5.1 and PowerShell 7 startup behavior working" {
+        $engines = @()
+        $ps51Path = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        if (Test-Path -LiteralPath $ps51Path -PathType Leaf) {
+            $engines += [pscustomobject]@{ Name = 'PS5_1'; Path = $ps51Path }
+        }
+        $ps7Command = Get-Command pwsh -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -ne $ps7Command -and (Test-Path -LiteralPath $ps7Command.Path -PathType Leaf)) {
+            $engines += [pscustomobject]@{ Name = 'PS7'; Path = $ps7Command.Path }
+        }
+        if ($engines.Count -eq 0) {
+            Set-ItResult -Skipped -Because 'Neither Windows PowerShell 5.1 nor PowerShell 7 is installed on this host.'
+            return
+        }
+
+        foreach ($engine in $engines) {
+            $probePath = Join-Path $TestDrive ("clean-module-bootstrap-{0}.ps1" -f $engine.Name)
+            $marker = "CLEAN_{0}_OK" -f $engine.Name
+            $probeLines = @(
+                '$ErrorActionPreference = ''Stop''',
+                '$PSModuleAutoLoadingPreference = ''None''',
+                '$env:PSModulePath = [System.IO.Path]::Combine($PSHOME, ''Modules'')'
+            ) + $script:SecurityHashStartupLines + @(
+                '$probeFile = [System.IO.Path]::GetTempFileName()',
+                'try {',
+                '    [System.IO.File]::WriteAllText($probeFile, ''Clean module path probe'')',
+                '    $authCommand = Get-Command Get-AuthenticodeSignature -ErrorAction Stop',
+                '    $hashCommand = Get-Command Get-FileHash -ErrorAction Stop',
+                '    $digest = Get-FileHash -LiteralPath $probeFile -Algorithm SHA256 -ErrorAction Stop',
+                '    $signature = Get-AuthenticodeSignature -LiteralPath $probeFile -ErrorAction Stop',
+                '    if (-not $authCommand -or -not $hashCommand -or [string]::IsNullOrWhiteSpace($digest.Hash) -or $null -eq $signature) { throw ''Security/hash command did not resolve in a clean engine process.'' }',
+                ("    Write-Output '{0}'" -f $marker),
+                '} finally {',
+                '    [System.IO.File]::Delete($probeFile)',
+                '}'
+            )
+            $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+            [System.IO.File]::WriteAllText($probePath, ($probeLines -join [Environment]::NewLine), $utf8NoBom)
+
+            $output = & $engine.Path -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probePath 2>&1 | Out-String
+            $exitCode = $LASTEXITCODE
+            $exitCode | Should -Be 0 -Because "the production bootstrap must work in a clean $($engine.Name) process. Output: $output"
+            $output | Should -Match $marker
+        }
+    }
+
+}
 Describe "Expand-ZipFileSafe" {
     BeforeAll {
         # ZipArchive is in System.IO.Compression.dll; ZipFile is in the separate
@@ -1043,6 +1394,1339 @@ Describe "Test-DgVoodoo2UpToDate" {
         [System.IO.File]::WriteAllBytes((Join-Path $dir "DDraw.dll"), [byte[]]@(0))
         $result = Test-DgVoodoo2UpToDate -Apis @('DDraw', 'Glide2x') -ExeDir $dir
         $result.UpToDate | Should -BeFalse
+    }
+}
+
+Describe "Get-TpmSha256FromDigestField" {
+    It "extracts a bare uppercase hex hash from a valid sha256: digest field" {
+        $hex = ('a' * 64)
+        Get-TpmSha256FromDigestField -Digest "sha256:$hex" | Should -Be $hex.ToUpper()
+    }
+    It "returns null for an empty/whitespace digest" {
+        Get-TpmSha256FromDigestField -Digest '' | Should -BeNullOrEmpty
+        Get-TpmSha256FromDigestField -Digest '   ' | Should -BeNullOrEmpty
+    }
+    It "returns null for a non-sha256 digest algorithm" {
+        Get-TpmSha256FromDigestField -Digest ('sha512:' + ('b' * 128)) | Should -BeNullOrEmpty
+    }
+    It "returns null for a malformed (wrong-length) sha256 digest" {
+        Get-TpmSha256FromDigestField -Digest 'sha256:deadbeef' | Should -BeNullOrEmpty
+    }
+}
+
+Describe "Test-TpmDownloadedFile -ExpectedSha256 (fail-closed integrity gate)" {
+    BeforeAll {
+        function Write-Log { param($Message) }
+    }
+    It "passes when the SHA-256 matches" {
+        $path = Join-Path $TestDrive "sha-match.bin"
+        [System.IO.File]::WriteAllBytes($path, [byte[]](1,2,3,4,5))
+        $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        Test-TpmDownloadedFile -Path $path -ExpectedSha256 $hash | Should -BeTrue
+    }
+    It "fails closed when the SHA-256 does not match" {
+        $path = Join-Path $TestDrive "sha-mismatch.bin"
+        [System.IO.File]::WriteAllBytes($path, [byte[]](1,2,3,4,5))
+        Test-TpmDownloadedFile -Path $path -ExpectedSha256 ('0' * 64) | Should -BeFalse
+    }
+    It "is case-insensitive when comparing the expected hash" {
+        $path = Join-Path $TestDrive "sha-case.bin"
+        [System.IO.File]::WriteAllBytes($path, [byte[]](9,9,9))
+        $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        Test-TpmDownloadedFile -Path $path -ExpectedSha256 $hash.ToLower() | Should -BeTrue
+    }
+    It "still validates size-only when -ExpectedSha256 is not supplied (no regression)" {
+        $path = Join-Path $TestDrive "sha-none.bin"
+        [System.IO.File]::WriteAllBytes($path, [byte[]](1,2,3))
+        Test-TpmDownloadedFile -Path $path -ExpectedBytes 3 | Should -BeTrue
+    }
+}
+
+Describe "Get-DgVoodoo2LatestRelease (URL allowlist + digest extraction)" {
+    BeforeAll {
+        function Write-Log { param($Message) }
+        function Get-TpmHttpStatusCodeFromError { param($ErrorRecord) return 0 }
+    }
+    It "accepts a well-formed release with a safe github.com download URL and extracts the digest" {
+        Mock Invoke-WebRequest {
+            [pscustomobject]@{
+                Content = (@{
+                    tag_name = 'v2.87.3'
+                    assets   = @(
+                        @{ name = 'dgVoodoo2_87_3.zip'; browser_download_url = 'https://github.com/dege-diosg/dgVoodoo2/releases/download/v2.87.3/dgVoodoo2_87_3.zip'; size = 9082391; digest = ('sha256:' + ('a' * 64)) },
+                        @{ name = 'dgVoodoo2_87_3_dev64.zip'; browser_download_url = 'https://github.com/dege-diosg/dgVoodoo2/releases/download/v2.87.3/dgVoodoo2_87_3_dev64.zip'; size = 17561846; digest = ('sha256:' + ('b' * 64)) },
+                        @{ name = 'dgVoodoo2_87_3_dbg.zip'; browser_download_url = 'https://github.com/dege-diosg/dgVoodoo2/releases/download/v2.87.3/dgVoodoo2_87_3_dbg.zip'; size = 9926358; digest = ('sha256:' + ('c' * 64)) }
+                    )
+                } | ConvertTo-Json -Depth 5)
+            }
+        }
+        $rel = Get-DgVoodoo2LatestRelease
+        $rel | Should -Not -BeNullOrEmpty
+        $rel.Version | Should -Be '2.87.3'
+        $rel.FileName | Should -Be 'dgVoodoo2_87_3.zip'
+        $rel.DownloadUrl | Should -Be 'https://github.com/dege-diosg/dgVoodoo2/releases/download/v2.87.3/dgVoodoo2_87_3.zip'
+        $rel.ExpectedSha256 | Should -Be ('A' * 64)
+    }
+    It "never selects the dev or debug variant asset as the main ZIP" {
+        Mock Invoke-WebRequest {
+            [pscustomobject]@{
+                Content = (@{
+                    tag_name = 'v2.87.3'
+                    assets   = @(
+                        @{ name = 'dgVoodoo2_87_3_dev64.zip'; browser_download_url = 'https://github.com/dege-diosg/dgVoodoo2/releases/download/v2.87.3/dgVoodoo2_87_3_dev64.zip'; size = 1; digest = $null },
+                        @{ name = 'dgVoodoo2_87_3_dbg.zip'; browser_download_url = 'https://github.com/dege-diosg/dgVoodoo2/releases/download/v2.87.3/dgVoodoo2_87_3_dbg.zip'; size = 1; digest = $null }
+                    )
+                } | ConvertTo-Json -Depth 5)
+            }
+        }
+        Get-DgVoodoo2LatestRelease | Should -BeNullOrEmpty
+    }
+    It "rejects a download URL on a host other than github.com" {
+        Mock Invoke-WebRequest {
+            [pscustomobject]@{
+                Content = (@{
+                    tag_name = 'v2.87.3'
+                    assets   = @(
+                        @{ name = 'dgVoodoo2_87_3.zip'; browser_download_url = 'https://evil.example.com/dgVoodoo2_87_3.zip'; size = 1; digest = $null }
+                    )
+                } | ConvertTo-Json -Depth 5)
+            }
+        }
+        Get-DgVoodoo2LatestRelease | Should -BeNullOrEmpty
+    }
+    It "returns null (no ExpectedSha256) when the asset has no digest field, degrading gracefully" {
+        Mock Invoke-WebRequest {
+            [pscustomobject]@{
+                Content = (@{
+                    tag_name = 'v2.87.3'
+                    assets   = @(
+                        @{ name = 'dgVoodoo2_87_3.zip'; browser_download_url = 'https://github.com/dege-diosg/dgVoodoo2/releases/download/v2.87.3/dgVoodoo2_87_3.zip'; size = 9082391 }
+                    )
+                } | ConvertTo-Json -Depth 5)
+            }
+        }
+        $rel = Get-DgVoodoo2LatestRelease
+        $rel | Should -Not -BeNullOrEmpty
+        $rel.ExpectedSha256 | Should -BeNullOrEmpty
+    }
+}
+
+Describe "New-TpmStagingDirectory" {
+    It "creates a unique directory under the controlled TPM temp staging root, not under a real destination" {
+        $dir1 = New-TpmStagingDirectory -Label 'Test'
+        $dir2 = New-TpmStagingDirectory -Label 'Test'
+        try {
+            Test-Path -LiteralPath $dir1 -PathType Container | Should -BeTrue
+            Test-Path -LiteralPath $dir2 -PathType Container | Should -BeTrue
+            $dir1 | Should -Not -Be $dir2
+            $dir1 | Should -Match ([regex]::Escape('TeknoParrotManagerStaging'))
+        } finally {
+            Remove-Item -LiteralPath $dir1 -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $dir2 -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+Describe "Invoke-TpmTransactionalPromote (rollback-safe promotion, P1 #1 / P1 2nd-round remediation)" {
+    BeforeAll {
+        function Write-Log { param($Message) }
+        function New-StagedFile([string]$dir, [string]$name, [string]$content) {
+            [void][System.IO.Directory]::CreateDirectory($dir)
+            [System.IO.File]::WriteAllText((Join-Path $dir $name), $content)
+        }
+    }
+
+    It "promotes all files into a fresh (previously nonexistent) destination" {
+        $staging = Join-Path $TestDrive ("stage-" + [guid]::NewGuid().ToString('N'))
+        $dest    = Join-Path $TestDrive ("dest-fresh-" + [guid]::NewGuid().ToString('N'))
+        New-StagedFile $staging 'a.txt' 'A'
+        New-StagedFile $staging 'b.txt' 'B'
+        Invoke-TpmTransactionalPromote -StagingDir $staging -DestDir $dest -FileNames @('a.txt', 'b.txt')
+        (Get-Content -LiteralPath (Join-Path $dest 'a.txt') -Raw) | Should -Be 'A'
+        (Get-Content -LiteralPath (Join-Path $dest 'b.txt') -Raw) | Should -Be 'B'
+    }
+
+    It "successful promotion (new + replaced files) leaves exactly the expected final tree, with no temp/backup residue anywhere under staging" {
+        $staging = Join-Path $TestDrive ("stage-" + [guid]::NewGuid().ToString('N'))
+        $dest    = Join-Path $TestDrive ("dest-replace-" + [guid]::NewGuid().ToString('N'))
+        New-StagedFile $dest 'a.txt' 'OLD-A'
+        New-StagedFile $staging 'a.txt' 'NEW-A'
+        New-StagedFile $staging 'b.txt' 'NEW-B'
+        Invoke-TpmTransactionalPromote -StagingDir $staging -DestDir $dest -FileNames @('a.txt', 'b.txt')
+
+        (Get-Content -LiteralPath (Join-Path $dest 'a.txt') -Raw) | Should -Be 'NEW-A'
+        (Get-Content -LiteralPath (Join-Path $dest 'b.txt') -Raw) | Should -Be 'NEW-B'
+        (Get-ChildItem -LiteralPath $dest -Force).Name | Sort-Object | Should -Be @('a.txt', 'b.txt')
+        # Every staged file was moved OUT of $staging into $dest, and the
+        # rollback-backup directory is cleaned up on success -- $staging
+        # itself must be left completely empty, not merely missing the
+        # backup subfolder.
+        (Get-ChildItem -LiteralPath $staging -Force -Recurse -ErrorAction SilentlyContinue).Count | Should -Be 0
+    }
+
+    It "Case 3 -- destination exists with prior files, replacement partially succeeds, a later NEW file's promotion fails: exact pre-state restored" {
+        $staging = Join-Path $TestDrive ("stage-" + [guid]::NewGuid().ToString('N'))
+        $dest    = Join-Path $TestDrive ("dest-rollback-" + [guid]::NewGuid().ToString('N'))
+        # 'a' already exists in the destination (proves exact byte-for-byte
+        # restore-on-rollback, not just "some file exists"); 'b' does not
+        # (proves newly-promoted-file removal-on-rollback); 'c' is the file
+        # whose promotion is forced to fail.
+        New-StagedFile $dest 'a.txt' 'OLD-A'
+        New-StagedFile $staging 'a.txt' 'NEW-A'
+        New-StagedFile $staging 'b.txt' 'NEW-B'
+        New-StagedFile $staging 'c.txt' 'NEW-C'
+        $before = Get-TpmDirSnapshot -Dir $dest
+
+        Mock Move-Item {
+            param($LiteralPath, $Destination)
+            if ($LiteralPath -like "*c.txt") { throw "simulated promotion failure on c.txt" }
+            # NOTE: calling through to the real Move-Item cmdlet (even
+            # module-qualified) from inside its own Mock recurses back into
+            # the mock in this Pester version and overflows the call stack
+            # -- use the underlying .NET primitive instead for the
+            # pass-through (non-simulated-failure) case.
+            [System.IO.File]::Move($LiteralPath, $Destination)
+        }
+
+        { Invoke-TpmTransactionalPromote -StagingDir $staging -DestDir $dest -FileNames @('a.txt', 'b.txt', 'c.txt') } | Should -Throw "*simulated promotion failure*"
+
+        $after = Get-TpmDirSnapshot -Dir $dest
+        Assert-TpmDirSnapshotUnchanged -Before $before -After $after
+        Test-Path -LiteralPath (Join-Path $staging '.tpm-rollback-backup') | Should -BeFalse
+    }
+
+    It "Case 1 -- destination absent before the call, failure before the first file is even promoted: destination directory itself is removed again, not merely left empty" {
+        $staging = Join-Path $TestDrive ("stage-" + [guid]::NewGuid().ToString('N'))
+        $dest    = Join-Path $TestDrive ("dest-rollback-first-" + [guid]::NewGuid().ToString('N'))
+        New-StagedFile $staging 'a.txt' 'NEW-A'
+        New-StagedFile $staging 'b.txt' 'NEW-B'
+        $before = Get-TpmDirSnapshot -Dir $dest
+        $before.Existed | Should -BeFalse   # sanity: this case requires the destination to genuinely not exist yet
+
+        Mock Move-Item {
+            param($LiteralPath, $Destination)
+            if ($LiteralPath -like "*a.txt") { throw "simulated failure on first file" }
+            [System.IO.File]::Move($LiteralPath, $Destination)
+        }
+
+        { Invoke-TpmTransactionalPromote -StagingDir $staging -DestDir $dest -FileNames @('a.txt', 'b.txt') } | Should -Throw "*simulated failure on first file*"
+
+        $after = Get-TpmDirSnapshot -Dir $dest
+        Assert-TpmDirSnapshotUnchanged -Before $before -After $after
+        # Explicit, not merely implied by the snapshot compare: the
+        # directory this call created must not survive rollback.
+        Test-Path -LiteralPath $dest | Should -BeFalse
+    }
+
+    It "Case 2 -- destination absent before the call, first file promotes successfully, second file fails: destination directory itself is removed again" {
+        $staging = Join-Path $TestDrive ("stage-" + [guid]::NewGuid().ToString('N'))
+        $dest    = Join-Path $TestDrive ("dest-rollback-second-" + [guid]::NewGuid().ToString('N'))
+        New-StagedFile $staging 'a.txt' 'NEW-A'
+        New-StagedFile $staging 'b.txt' 'NEW-B'
+        $before = Get-TpmDirSnapshot -Dir $dest
+        $before.Existed | Should -BeFalse
+
+        Mock Move-Item {
+            param($LiteralPath, $Destination)
+            if ($LiteralPath -like "*b.txt") { throw "simulated failure on second file" }
+            [System.IO.File]::Move($LiteralPath, $Destination)
+        }
+
+        { Invoke-TpmTransactionalPromote -StagingDir $staging -DestDir $dest -FileNames @('a.txt', 'b.txt') } | Should -Throw "*simulated failure on second file*"
+
+        $after = Get-TpmDirSnapshot -Dir $dest
+        Assert-TpmDirSnapshotUnchanged -Before $before -After $after
+        Test-Path -LiteralPath $dest | Should -BeFalse
+    }
+
+
+    It "Case 5 -- phase-1 Move-Item throws after a valid backup is observable: the backup is recorded and the exact pre-state is restored" {
+        $staging = Join-Path $TestDrive ("stage-" + [guid]::NewGuid().ToString('N'))
+        $dest    = Join-Path $TestDrive ("dest-valid-phase1-backup-" + [guid]::NewGuid().ToString('N'))
+        New-StagedFile $dest 'a.txt' 'OLD-A'
+        New-StagedFile $staging 'a.txt' 'NEW-A'
+        [void][System.IO.Directory]::CreateDirectory((Join-Path $dest 'keep\nested'))
+        [System.IO.File]::WriteAllText((Join-Path $dest 'keep\nested\marker.txt'), 'KEEP')
+        $before = Get-TpmDirSnapshot -Dir $dest
+        $oldPath = Join-Path $dest 'a.txt'
+
+        Mock Move-Item {
+            param($LiteralPath, $Destination)
+            if ($LiteralPath -ieq $oldPath) {
+                [System.IO.File]::Copy($LiteralPath, $Destination, $true)
+                [System.IO.File]::Delete($LiteralPath)
+                throw "simulated phase-1 failure after valid backup became observable"
+            }
+            [System.IO.File]::Move($LiteralPath, $Destination)
+        }
+
+        { Invoke-TpmTransactionalPromote -StagingDir $staging -DestDir $dest -FileNames @('a.txt') } |
+            Should -Throw "*simulated phase-1 failure after valid backup became observable*"
+
+        $after = Get-TpmDirSnapshot -Dir $dest
+        Assert-TpmDirSnapshotUnchanged -Before $before -After $after
+        Test-Path -LiteralPath (Join-Path $staging '.tpm-rollback-backup') | Should -BeFalse
+    }
+
+    It "Case 6 -- phase-1 Move-Item removes the original before any valid backup is observable: throws an unrecoverable ROLLBACK FAILED result and preserves evidence" {
+        $staging = Join-Path $TestDrive ("stage-" + [guid]::NewGuid().ToString('N'))
+        $dest    = Join-Path $TestDrive ("dest-lost-phase1-source-" + [guid]::NewGuid().ToString('N'))
+        New-StagedFile $dest 'a.txt' 'OLD-A'
+        New-StagedFile $staging 'a.txt' 'NEW-A'
+        $oldPath = Join-Path $dest 'a.txt'
+        $caught = $null
+
+        Mock Move-Item {
+            param($LiteralPath, $Destination)
+            if ($LiteralPath -ieq $oldPath) {
+                [System.IO.File]::Delete($LiteralPath)
+                throw "simulated phase-1 source deletion before backup"
+            }
+            [System.IO.File]::Move($LiteralPath, $Destination)
+        }
+
+        try {
+            Invoke-TpmTransactionalPromote -StagingDir $staging -DestDir $dest -FileNames @('a.txt')
+        } catch {
+            $caught = $_
+        }
+
+        try {
+            $caught | Should -Not -BeNullOrEmpty
+            $caught.ToString() | Should -Match 'ROLLBACK FAILED'
+            $caught.ToString() | Should -Match 'INCONSISTENT'
+            $caught.ToString() | Should -Match 'unrecoverable'
+            $caught.ToString() | Should -Match 'simulated phase-1 source deletion before backup'
+            $caught.ToString() | Should -Match 'Pre-move evidence'
+            Test-Path -LiteralPath $oldPath | Should -BeFalse
+            Test-Path -LiteralPath (Join-Path $staging '.tpm-rollback-backup') | Should -BeTrue
+        } finally {
+            if (Test-Path -LiteralPath $staging) {
+                [System.IO.Directory]::Delete($staging, $true)
+            }
+        }
+    }
+
+    It "Case 7 -- destination setup fails after the destination was absent: the destination remains absent exactly" {
+        $staging = Join-Path $TestDrive ("stage-" + [guid]::NewGuid().ToString('N'))
+        $dest    = Join-Path $TestDrive ("dest-setup-fails-" + [guid]::NewGuid().ToString('N'))
+        New-StagedFile $staging 'a.txt' 'NEW-A'
+        [System.IO.File]::WriteAllText((Join-Path $staging '.tpm-rollback-backup'), 'blocking file')
+        $before = Get-TpmDirSnapshot -Dir $dest
+        $caught = $null
+
+        try {
+            Invoke-TpmTransactionalPromote -StagingDir $staging -DestDir $dest -FileNames @('a.txt')
+        } catch {
+            $caught = $_
+        }
+
+        try {
+            $caught | Should -Not -BeNullOrEmpty
+            $caught.ToString() | Should -Not -Match 'ROLLBACK FAILED|CLEANUP FAILED'
+            $after = Get-TpmDirSnapshot -Dir $dest
+            Assert-TpmDirSnapshotUnchanged -Before $before -After $after
+            Test-Path -LiteralPath $dest | Should -BeFalse
+        } finally {
+            if (Test-Path -LiteralPath $staging) {
+                [System.IO.Directory]::Delete($staging, $true)
+            }
+        }
+    }
+
+    It "Case 8 -- destination restores exactly but rollback-backup cleanup fails: throws TRANSACTION CLEANUP FAILED and preserves residue" {
+        $staging = Join-Path $TestDrive ("stage-" + [guid]::NewGuid().ToString('N'))
+        $dest    = Join-Path $TestDrive ("dest-cleanup-fails-" + [guid]::NewGuid().ToString('N'))
+        New-StagedFile $dest 'a.txt' 'OLD-A'
+        New-StagedFile $staging 'a.txt' 'NEW-A'
+        New-StagedFile $staging 'b.txt' 'NEW-B'
+        [void][System.IO.Directory]::CreateDirectory((Join-Path $dest 'keep\nested'))
+        [System.IO.File]::WriteAllText((Join-Path $dest 'keep\nested\marker.txt'), 'KEEP')
+        $before = Get-TpmDirSnapshot -Dir $dest
+        $backupDir = Join-Path $staging '.tpm-rollback-backup'
+
+        Mock Move-Item {
+            param($LiteralPath, $Destination)
+            if ($LiteralPath -ieq (Join-Path $staging 'b.txt')) {
+                throw "simulated promotion failure before cleanup"
+            }
+            [System.IO.File]::Move($LiteralPath, $Destination)
+        }
+        Mock Remove-Item {
+            param($LiteralPath, $Recurse, $Force, $ErrorAction)
+            if ($LiteralPath -ieq $backupDir) {
+                throw "simulated rollback-backup cleanup failure"
+            }
+            if (Test-Path -LiteralPath $LiteralPath -PathType Container) {
+                [System.IO.Directory]::Delete($LiteralPath, [bool]$Recurse)
+            } elseif (Test-Path -LiteralPath $LiteralPath) {
+                [System.IO.File]::Delete($LiteralPath)
+            }
+        }
+
+        $caught = $null
+        try {
+            Invoke-TpmTransactionalPromote -StagingDir $staging -DestDir $dest -FileNames @('a.txt', 'b.txt')
+        } catch {
+            $caught = $_
+        }
+
+        try {
+            $caught | Should -Not -BeNullOrEmpty
+            $caught.ToString() | Should -Match 'TRANSACTION CLEANUP FAILED'
+            $caught.ToString() | Should -Match 'destination was successfully restored'
+            $caught.ToString() | Should -Match 'simulated promotion failure before cleanup'
+            $caught.ToString() | Should -Match 'simulated rollback-backup cleanup failure'
+            $caught.ToString() | Should -Not -Match 'ROLLBACK FAILED'
+            $after = Get-TpmDirSnapshot -Dir $dest
+            Assert-TpmDirSnapshotUnchanged -Before $before -After $after
+            Test-Path -LiteralPath $backupDir | Should -BeTrue
+        } finally {
+            if (Test-Path -LiteralPath $staging) {
+                [System.IO.Directory]::Delete($staging, $true)
+            }
+        }
+    }
+    It "Case 4 -- rollback itself is forced to fail: throws a distinct ROLLBACK FAILED error carrying both the original and rollback failures, and preserves the backup for manual recovery instead of silently reporting a clean failure" {
+        $staging = Join-Path $TestDrive ("stage-" + [guid]::NewGuid().ToString('N'))
+        $dest    = Join-Path $TestDrive ("dest-rollback-fails-" + [guid]::NewGuid().ToString('N'))
+        New-StagedFile $dest 'a.txt' 'OLD-A'
+        New-StagedFile $staging 'a.txt' 'NEW-A'
+        New-StagedFile $staging 'b.txt' 'NEW-B'
+        New-StagedFile $staging 'c.txt' 'NEW-C'
+
+        Mock Move-Item {
+            param($LiteralPath, $Destination)
+            # Fail the original promotion of c.txt (staging -> dest).
+            if ($LiteralPath -like "*c.txt" -and $LiteralPath -notlike "*.tpm-rollback-backup*") {
+                throw "simulated promotion failure on c.txt"
+            }
+            # Fail the rollback restore of a.txt specifically (the
+            # rollback-backup copy being moved BACK into dest) -- distinct
+            # from the phase-1 move that creates the backup in the first
+            # place, whose $LiteralPath is the dest copy, not the backup
+            # copy.
+            if ($LiteralPath -like "*.tpm-rollback-backup*a.txt") {
+                throw "simulated rollback failure restoring a.txt"
+            }
+            [System.IO.File]::Move($LiteralPath, $Destination)
+        }
+
+        $caught = $null
+        try {
+            Invoke-TpmTransactionalPromote -StagingDir $staging -DestDir $dest -FileNames @('a.txt', 'b.txt', 'c.txt')
+        } catch {
+            $caught = $_
+        }
+
+        $caught | Should -Not -BeNullOrEmpty
+        # Distinct from a plain rolled-back-successfully failure: must
+        # surface as its own, clearly-labeled failure mode.
+        $caught.ToString() | Should -Match 'ROLLBACK FAILED'
+        $caught.ToString() | Should -Match 'INCONSISTENT'
+        # Both the original defect and the rollback defect must be
+        # preserved for diagnosis, not just one or the other.
+        $caught.ToString() | Should -Match 'simulated promotion failure on c\.txt'
+        $caught.ToString() | Should -Match 'simulated rollback failure restoring a\.txt'
+
+        # The backup must be preserved (not cleaned up) precisely because
+        # rollback did not complete -- deleting it here would destroy the
+        # only remaining copy of the pre-operation file.
+        $preservedBackup = Join-Path $staging '.tpm-rollback-backup\a.txt'
+        Test-Path -LiteralPath $preservedBackup | Should -BeTrue
+        (Get-Content -LiteralPath $preservedBackup -Raw) | Should -Be 'OLD-A'
+    }
+}
+
+Describe "Expand-DgVoodoo2Zip (selective extraction, fail-closed on layout drift)" {
+    BeforeAll {
+        Add-Type -AssemblyName System.IO.Compression
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        function New-TestZip([string]$zipPath, [hashtable]$entries) {
+            if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
+            $fs = [System.IO.File]::Open($zipPath, [System.IO.FileMode]::CreateNew)
+            try {
+                $archive = [System.IO.Compression.ZipArchive]::new($fs, [System.IO.Compression.ZipArchiveMode]::Create)
+                try {
+                    foreach ($name in $entries.Keys) {
+                        $entry = $archive.CreateEntry($name)
+                        $w = New-Object System.IO.StreamWriter($entry.Open())
+                        try { $w.Write($entries[$name]) } finally { $w.Dispose() }
+                    }
+                } finally { $archive.Dispose() }
+            } finally { $fs.Dispose() }
+        }
+        $validEntries = @{
+            'MS/x86/D3D8.dll'      = 'd3d8'
+            'MS/x86/DDraw.dll'     = 'ddraw'
+            'MS/x86/D3DImm.dll'    = 'd3dimm'
+            '3Dfx/x86/Glide2x.dll' = 'glide2x'
+            '3Dfx/x86/Glide3x.dll' = 'glide3x'
+            'dgVoodoo.conf'        = 'conf'
+        }
+    }
+    It "extracts all 6 expected files to flat destination names when the layout matches" {
+        $zip  = Join-Path $TestDrive "dgv-valid.zip"
+        $dest = Join-Path $TestDrive "dgv-valid-out"
+        New-TestZip $zip $validEntries
+        Expand-DgVoodoo2Zip -ZipPath $zip -DestDir $dest
+        (Get-Content -LiteralPath (Join-Path $dest "D3D8.dll") -Raw) | Should -Be 'd3d8'
+        (Get-Content -LiteralPath (Join-Path $dest "DDraw.dll") -Raw) | Should -Be 'ddraw'
+        (Get-Content -LiteralPath (Join-Path $dest "D3DImm.dll") -Raw) | Should -Be 'd3dimm'
+        (Get-Content -LiteralPath (Join-Path $dest "Glide2x.dll") -Raw) | Should -Be 'glide2x'
+        (Get-Content -LiteralPath (Join-Path $dest "Glide3x.dll") -Raw) | Should -Be 'glide3x'
+        (Get-Content -LiteralPath (Join-Path $dest "dgVoodoo.conf") -Raw) | Should -Be 'conf'
+    }
+    It "fails closed when an expected entry is missing (layout drift)" {
+        $zip  = Join-Path $TestDrive "dgv-missing.zip"
+        $dest = Join-Path $TestDrive "dgv-missing-out"
+        $bad = $validEntries.Clone()
+        $bad.Remove('MS/x86/DDraw.dll')
+        New-TestZip $zip $bad
+        { Expand-DgVoodoo2Zip -ZipPath $zip -DestDir $dest } | Should -Throw "*layout has changed*"
+    }
+    It "P1 #1: leaves the destination completely untouched when extraction fails partway through (2nd of 6 files)" {
+        $zip  = Join-Path $TestDrive "dgv-extractfail.zip"
+        $dest = Join-Path $TestDrive "dgv-extractfail-out"
+        New-TestZip $zip $validEntries
+        # Pre-existing destination file, to prove it survives an
+        # extraction-phase failure untouched (extraction never reaches
+        # promotion at all in this case).
+        [void][System.IO.Directory]::CreateDirectory($dest)
+        [System.IO.File]::WriteAllText((Join-Path $dest 'D3D8.dll'), 'PRE-EXISTING')
+
+        $script:callCount = 0
+        Mock Copy-TpmZipEntryToFile {
+            param($Entry, $DestPath)
+            $script:callCount++
+            if ($script:callCount -eq 2) { throw "simulated extraction failure on 2nd entry" }
+            # Fall through to the real copy for every other call so the
+            # rest of a normal extraction still behaves realistically.
+            $srcStream = $Entry.Open()
+            try {
+                $dstStream = [System.IO.File]::Open($DestPath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+                try { $srcStream.CopyTo($dstStream) } finally { $dstStream.Dispose() }
+            } finally { $srcStream.Dispose() }
+        }
+
+        { Expand-DgVoodoo2Zip -ZipPath $zip -DestDir $dest } | Should -Throw "*simulated extraction failure*"
+
+        # Destination must be exactly what it was before the call: only
+        # the pre-existing D3D8.dll, with its original (untouched) content.
+        (Get-ChildItem -LiteralPath $dest -Force).Name | Should -Be @('D3D8.dll')
+        (Get-Content -LiteralPath (Join-Path $dest 'D3D8.dll') -Raw) | Should -Be 'PRE-EXISTING'
+    }
+    It "P1 #1: restores destination exactly when promotion fails partway through (after successful extraction of all 6)" {
+        $zip  = Join-Path $TestDrive "dgv-promofail.zip"
+        $dest = Join-Path $TestDrive "dgv-promofail-out"
+        New-TestZip $zip $validEntries
+        [void][System.IO.Directory]::CreateDirectory($dest)
+        [System.IO.File]::WriteAllText((Join-Path $dest 'D3D8.dll'), 'PRE-EXISTING-D3D8')
+
+        Mock Move-Item {
+            param($LiteralPath, $Destination)
+            if ($LiteralPath -like "*Glide3x.dll") { throw "simulated promotion failure on Glide3x.dll" }
+            # NOTE: calling through to the real Move-Item cmdlet (even
+            # module-qualified) from inside its own Mock recurses back into
+            # the mock in this Pester version and overflows the call stack
+            # -- use the underlying .NET primitive instead for the
+            # pass-through (non-simulated-failure) case.
+            [System.IO.File]::Move($LiteralPath, $Destination)
+        }
+
+        { Expand-DgVoodoo2Zip -ZipPath $zip -DestDir $dest } | Should -Throw "*simulated promotion failure*"
+
+        # Exactly the pre-existing file, exactly its original content --
+        # none of the 6 newly-extracted files leaked into the destination.
+        (Get-ChildItem -LiteralPath $dest -Force).Name | Should -Be @('D3D8.dll')
+        (Get-Content -LiteralPath (Join-Path $dest 'D3D8.dll') -Raw) | Should -Be 'PRE-EXISTING-D3D8'
+    }
+    It "successful extraction leaves exactly the expected 6-file final tree and no temp/backup residue" {
+        $zip  = Join-Path $TestDrive "dgv-clean-success.zip"
+        $dest = Join-Path $TestDrive "dgv-clean-success-out"
+        # Baseline BEFORE this call, not an assumed-zero global count --
+        # other tests in this same run (e.g. the "rollback itself fails"
+        # case below) deliberately leave a staging directory behind by
+        # design, and %TEMP%\TeknoParrotManagerStaging is shared real
+        # filesystem state across the whole test session, not something
+        # this test can reset.
+        $stagingRoot = Join-Path $env:TEMP 'TeknoParrotManagerStaging'
+        $before = @(Get-ChildItem -Path $stagingRoot -Directory -Filter 'dgVoodoo2-*' -ErrorAction SilentlyContinue).Count
+        New-TestZip $zip $validEntries
+        Expand-DgVoodoo2Zip -ZipPath $zip -DestDir $dest
+        # PowerShell's default Sort-Object string comparison is
+        # case-insensitive, so 'dgVoodoo.conf' sorts alongside the
+        # 'D'-prefixed names rather than after the 'G'-prefixed ones.
+        (Get-ChildItem -LiteralPath $dest -Force).Name | Sort-Object | Should -Be @(
+            'D3D8.dll', 'D3DImm.dll', 'DDraw.dll', 'dgVoodoo.conf', 'Glide2x.dll', 'Glide3x.dll'
+        )
+        # This call's own staging directory must be gone -- count must be
+        # exactly what it was before this call, not merely "some" residue.
+        (Get-ChildItem -Path $stagingRoot -Directory -Filter 'dgVoodoo2-*' -ErrorAction SilentlyContinue).Count | Should -Be $before
+    }
+    It "Case 1 -- destination absent before the call, promotion fails on the very first required file: destination directory itself is removed again" {
+        $zip  = Join-Path $TestDrive "dgv-rollback-first.zip"
+        $dest = Join-Path $TestDrive "dgv-rollback-first-out"
+        New-TestZip $zip $validEntries
+        $before = Get-TpmDirSnapshot -Dir $dest
+        $before.Existed | Should -BeFalse
+
+        Mock Move-Item {
+            param($LiteralPath, $Destination)
+            if ($LiteralPath -like "*D3D8.dll") { throw "simulated promotion failure on first required file" }
+            [System.IO.File]::Move($LiteralPath, $Destination)
+        }
+
+        { Expand-DgVoodoo2Zip -ZipPath $zip -DestDir $dest } | Should -Throw "*simulated promotion failure*"
+
+        $after = Get-TpmDirSnapshot -Dir $dest
+        Assert-TpmDirSnapshotUnchanged -Before $before -After $after
+        Test-Path -LiteralPath $dest | Should -BeFalse
+    }
+    It "Case 2 -- destination absent before the call, first file promotes, second file fails: destination directory itself is removed again" {
+        $zip  = Join-Path $TestDrive "dgv-rollback-second.zip"
+        $dest = Join-Path $TestDrive "dgv-rollback-second-out"
+        New-TestZip $zip $validEntries
+        $before = Get-TpmDirSnapshot -Dir $dest
+        $before.Existed | Should -BeFalse
+
+        Mock Move-Item {
+            param($LiteralPath, $Destination)
+            if ($LiteralPath -like "*DDraw.dll") { throw "simulated promotion failure on second required file" }
+            [System.IO.File]::Move($LiteralPath, $Destination)
+        }
+
+        { Expand-DgVoodoo2Zip -ZipPath $zip -DestDir $dest } | Should -Throw "*simulated promotion failure*"
+
+        $after = Get-TpmDirSnapshot -Dir $dest
+        Assert-TpmDirSnapshotUnchanged -Before $before -After $after
+        Test-Path -LiteralPath $dest | Should -BeFalse
+    }
+
+    It "Case 5 -- phase-1 source loss before a valid backup is observable: preserves recovery evidence and reports an inconsistent transaction" {
+        $zip  = Join-Path $TestDrive "dgv-phase1-source-loss.zip"
+        $dest = Join-Path $TestDrive "dgv-phase1-source-loss-out"
+        $stagingRoot = Join-Path $env:TEMP 'TeknoParrotManagerStaging'
+        $beforeStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'dgVoodoo2-*' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+        New-TestZip $zip $validEntries
+        [void][System.IO.Directory]::CreateDirectory($dest)
+        [System.IO.File]::WriteAllText((Join-Path $dest 'D3D8.dll'), 'PRE-EXISTING-D3D8')
+        [void][System.IO.Directory]::CreateDirectory((Join-Path $dest 'keep\nested'))
+        [System.IO.File]::WriteAllText((Join-Path $dest 'keep\nested\marker.txt'), 'KEEP')
+        $oldPath = Join-Path $dest 'D3D8.dll'
+        $caught = $null
+
+        Mock Move-Item {
+            param($LiteralPath, $Destination)
+            if ($LiteralPath -ieq $oldPath) {
+                [System.IO.File]::Delete($LiteralPath)
+                throw "simulated dgVoodoo2 phase-1 source deletion before backup"
+            }
+            [System.IO.File]::Move($LiteralPath, $Destination)
+        }
+
+        try {
+            Expand-DgVoodoo2Zip -ZipPath $zip -DestDir $dest
+        } catch {
+            $caught = $_
+        }
+
+        $newStages = @()
+        try {
+            $caught | Should -Not -BeNullOrEmpty
+            $caught.ToString() | Should -Match 'ROLLBACK FAILED'
+            $caught.ToString() | Should -Match 'INCONSISTENT'
+            $caught.ToString() | Should -Match 'unrecoverable'
+            $caught.ToString() | Should -Match 'simulated dgVoodoo2 phase-1 source deletion before backup'
+            $caught.ToString() | Should -Match 'Pre-move evidence'
+            Test-Path -LiteralPath $oldPath | Should -BeFalse
+            Test-Path -LiteralPath $dest -PathType Container | Should -BeTrue
+            (Get-Content -LiteralPath (Join-Path $dest 'keep\nested\marker.txt') -Raw) | Should -Be 'KEEP'
+            $newStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'dgVoodoo2-*' -ErrorAction SilentlyContinue | Where-Object { $beforeStages -notcontains $_.FullName })
+            $newStages.Count | Should -Be 1
+            Test-Path -LiteralPath (Join-Path $newStages[0].FullName '.tpm-rollback-backup') | Should -BeTrue
+        } finally {
+            $leftoverStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'dgVoodoo2-*' -ErrorAction SilentlyContinue | Where-Object { $beforeStages -notcontains $_.FullName })
+            foreach ($stagePath in $leftoverStages) {
+                if (Test-Path -LiteralPath $stagePath.FullName) {
+                    [System.IO.Directory]::Delete($stagePath.FullName, $true)
+                }
+            }
+        }
+    }
+
+    It "Case 6 -- destination absent and transaction setup initialization fails: the destination remains absent exactly" {
+        $zip  = Join-Path $TestDrive "dgv-setup-fails.zip"
+        $dest = Join-Path $TestDrive "dgv-setup-fails-out"
+        $forcedStage = Join-Path $TestDrive ("forced-dgv-stage-" + [guid]::NewGuid().ToString('N'))
+        New-TestZip $zip $validEntries
+        $before = Get-TpmDirSnapshot -Dir $dest
+
+        Mock New-TpmStagingDirectory {
+            [void][System.IO.Directory]::CreateDirectory($forcedStage)
+            [System.IO.File]::WriteAllText((Join-Path $forcedStage '.tpm-rollback-backup'), 'blocking file')
+            return $forcedStage
+        }
+
+        $caught = $null
+        try {
+            Expand-DgVoodoo2Zip -ZipPath $zip -DestDir $dest
+        } catch {
+            $caught = $_
+        }
+
+        try {
+            $caught | Should -Not -BeNullOrEmpty
+            $caught.ToString() | Should -Not -Match 'ROLLBACK FAILED|CLEANUP FAILED'
+            $after = Get-TpmDirSnapshot -Dir $dest
+            Assert-TpmDirSnapshotUnchanged -Before $before -After $after
+            Test-Path -LiteralPath $dest | Should -BeFalse
+            Test-Path -LiteralPath $forcedStage | Should -BeFalse
+        } finally {
+            if (Test-Path -LiteralPath $forcedStage) {
+                [System.IO.Directory]::Delete($forcedStage, $true)
+            }
+        }
+    }
+
+    It "Case 7 -- destination restores exactly but rollback-backup cleanup fails: reports a distinct cleanup error and preserves the wrapper staging evidence" {
+        $zip  = Join-Path $TestDrive "dgv-cleanup-fails.zip"
+        $dest = Join-Path $TestDrive "dgv-cleanup-fails-out"
+        $stagingRoot = Join-Path $env:TEMP 'TeknoParrotManagerStaging'
+        $beforeStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'dgVoodoo2-*' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+        New-TestZip $zip $validEntries
+        [void][System.IO.Directory]::CreateDirectory($dest)
+        [System.IO.File]::WriteAllText((Join-Path $dest 'D3D8.dll'), 'PRE-EXISTING-D3D8')
+        [void][System.IO.Directory]::CreateDirectory((Join-Path $dest 'keep\nested'))
+        [System.IO.File]::WriteAllText((Join-Path $dest 'keep\nested\marker.txt'), 'KEEP')
+        $before = Get-TpmDirSnapshot -Dir $dest
+
+        Mock Move-Item {
+            param($LiteralPath, $Destination)
+            if ($Destination -ieq (Join-Path $dest 'Glide3x.dll')) {
+                throw "simulated dgVoodoo2 promotion failure before cleanup"
+            }
+            [System.IO.File]::Move($LiteralPath, $Destination)
+        }
+        Mock Remove-Item {
+            param($LiteralPath, $Recurse, $Force, $ErrorAction)
+            if ([System.IO.Path]::GetFileName($LiteralPath) -ieq '.tpm-rollback-backup') {
+                throw "simulated dgVoodoo2 rollback-backup cleanup failure"
+            }
+            if (Test-Path -LiteralPath $LiteralPath -PathType Container) {
+                [System.IO.Directory]::Delete($LiteralPath, [bool]$Recurse)
+            } elseif (Test-Path -LiteralPath $LiteralPath) {
+                [System.IO.File]::Delete($LiteralPath)
+            }
+        }
+
+        $caught = $null
+        try {
+            Expand-DgVoodoo2Zip -ZipPath $zip -DestDir $dest
+        } catch {
+            $caught = $_
+        }
+
+        try {
+            $caught | Should -Not -BeNullOrEmpty
+            $caught.ToString() | Should -Match 'TRANSACTION CLEANUP FAILED'
+            $caught.ToString() | Should -Match 'destination was successfully restored'
+            $caught.ToString() | Should -Match 'simulated dgVoodoo2 promotion failure before cleanup'
+            $caught.ToString() | Should -Match 'simulated dgVoodoo2 rollback-backup cleanup failure'
+            $caught.ToString() | Should -Not -Match 'ROLLBACK FAILED'
+            $after = Get-TpmDirSnapshot -Dir $dest
+            Assert-TpmDirSnapshotUnchanged -Before $before -After $after
+            $newStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'dgVoodoo2-*' -ErrorAction SilentlyContinue | Where-Object { $beforeStages -notcontains $_.FullName })
+            $newStages.Count | Should -Be 1
+            Test-Path -LiteralPath (Join-Path $newStages[0].FullName '.tpm-rollback-backup') | Should -BeTrue
+        } finally {
+            $leftoverStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'dgVoodoo2-*' -ErrorAction SilentlyContinue | Where-Object { $beforeStages -notcontains $_.FullName })
+            foreach ($stagePath in $leftoverStages) {
+                if (Test-Path -LiteralPath $stagePath.FullName) {
+                    [System.IO.Directory]::Delete($stagePath.FullName, $true)
+                }
+            }
+        }
+    }
+    It "P2 -- ordinary staging cleanup failure is surfaced with exact path and preserves a valid destination" {
+        $zip  = Join-Path $TestDrive "dgv-staging-cleanup-fails.zip"
+        $dest = Join-Path $TestDrive "dgv-staging-cleanup-fails-out"
+        $stagingRoot = Join-Path $env:TEMP 'TeknoParrotManagerStaging'
+        $beforeStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'dgVoodoo2-*' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+        New-TestZip $zip $validEntries
+
+        Mock Remove-Item {
+            param($LiteralPath, $Recurse, $Force, $ErrorAction)
+            if ([System.IO.Path]::GetFileName([string]$LiteralPath) -like 'dgVoodoo2-*') {
+                throw "simulated dgVoodoo2 staging cleanup failure"
+            }
+            if (Test-Path -LiteralPath $LiteralPath -PathType Container) {
+                [System.IO.Directory]::Delete($LiteralPath, [bool]$Recurse)
+            } elseif (Test-Path -LiteralPath $LiteralPath) {
+                [System.IO.File]::Delete($LiteralPath)
+            }
+        }
+
+        $caught = $null
+        try {
+            Expand-DgVoodoo2Zip -ZipPath $zip -DestDir $dest
+        } catch {
+            $caught = $_
+        }
+
+        try {
+            $caught | Should -Not -BeNullOrEmpty
+            $caught.ToString() | Should -Match 'TPM STAGING CLEANUP FAILED'
+            $caught.ToString() | Should -Match 'simulated dgVoodoo2 staging cleanup failure'
+            $caught.ToString() | Should -Not -Match 'ROLLBACK FAILED'
+            $caught.ToString() | Should -Not -Match 'TRANSACTION CLEANUP FAILED'
+            $newStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'dgVoodoo2-*' -ErrorAction SilentlyContinue | Where-Object { $beforeStages -notcontains $_.FullName })
+            $newStages.Count | Should -Be 1
+            Assert-TpmErrorIdentifiesWindowsPath -ErrorText $caught.ToString() -ExpectedPath $newStages[0].FullName
+            Test-Path -LiteralPath $newStages[0].FullName -PathType Container | Should -BeTrue
+            @(Get-ChildItem -LiteralPath $newStages[0].FullName -Force -Recurse -ErrorAction SilentlyContinue).Count | Should -Be 0
+            Test-Path -LiteralPath (Join-Path $newStages[0].FullName '.tpm-rollback-backup') | Should -BeFalse
+            (Get-ChildItem -LiteralPath $dest -Force | Select-Object -ExpandProperty Name | Sort-Object) | Should -Be @('D3D8.dll', 'D3DImm.dll', 'DDraw.dll', 'dgVoodoo.conf', 'Glide2x.dll', 'Glide3x.dll')
+            (Get-Content -LiteralPath (Join-Path $dest 'D3D8.dll') -Raw) | Should -Be 'd3d8'
+            (Get-Content -LiteralPath (Join-Path $dest 'DDraw.dll') -Raw) | Should -Be 'ddraw'
+            (Get-Content -LiteralPath (Join-Path $dest 'D3DImm.dll') -Raw) | Should -Be 'd3dimm'
+            (Get-Content -LiteralPath (Join-Path $dest 'Glide2x.dll') -Raw) | Should -Be 'glide2x'
+            (Get-Content -LiteralPath (Join-Path $dest 'Glide3x.dll') -Raw) | Should -Be 'glide3x'
+            (Get-Content -LiteralPath (Join-Path $dest 'dgVoodoo.conf') -Raw) | Should -Be 'conf'
+        } finally {
+            $leftoverStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'dgVoodoo2-*' -ErrorAction SilentlyContinue | Where-Object { $beforeStages -notcontains $_.FullName })
+            foreach ($stagePath in $leftoverStages) {
+                if (Test-Path -LiteralPath $stagePath.FullName) {
+                    [System.IO.Directory]::Delete($stagePath.FullName, $true)
+                }
+            }
+        }
+    }
+    It "Case 4 -- rollback itself is forced to fail during a dgVoodoo2 promotion: distinct ROLLBACK FAILED error, backup preserved" {
+        $zip  = Join-Path $TestDrive "dgv-rollback-fails.zip"
+        $dest = Join-Path $TestDrive "dgv-rollback-fails-out"
+        New-TestZip $zip $validEntries
+        [void][System.IO.Directory]::CreateDirectory($dest)
+        [System.IO.File]::WriteAllText((Join-Path $dest 'D3D8.dll'), 'PRE-EXISTING-D3D8')
+
+        Mock Move-Item {
+            param($LiteralPath, $Destination)
+            if ($LiteralPath -like "*Glide3x.dll" -and $LiteralPath -notlike "*.tpm-rollback-backup*") {
+                throw "simulated promotion failure on Glide3x.dll"
+            }
+            if ($LiteralPath -like "*.tpm-rollback-backup*D3D8.dll") {
+                throw "simulated rollback failure restoring D3D8.dll"
+            }
+            [System.IO.File]::Move($LiteralPath, $Destination)
+        }
+
+        $caught = $null
+        try { Expand-DgVoodoo2Zip -ZipPath $zip -DestDir $dest } catch { $caught = $_ }
+
+        $caught | Should -Not -BeNullOrEmpty
+        $caught.ToString() | Should -Match 'ROLLBACK FAILED'
+        $caught.ToString() | Should -Match 'simulated promotion failure on Glide3x\.dll'
+        $caught.ToString() | Should -Match 'simulated rollback failure restoring D3D8\.dll'
+    }
+}
+
+Describe "Expand-ReShadeSelfExtractingArchive (embedded ZIP scan, fail-closed on missing entries)" {
+    BeforeAll {
+        Add-Type -AssemblyName System.IO.Compression
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+        # Builds a synthetic self-extracting-archive-shaped file: a small
+        # non-zip "PE stub" prefix, followed by a real ZIP archive appended
+        # at the end -- mirrors ReShade_Setup_<version>.exe's real shape.
+        function New-TestSelfExtractingExe([string]$exePath, [hashtable]$entries, [switch]$WithDecoyPkSignature) {
+            $stubBytes = [System.Text.Encoding]::ASCII.GetBytes("FAKE-PE-STUB-NOT-A-ZIP")
+            $prefixBytes = if ($WithDecoyPkSignature) {
+                # A decoy "PK\x03\x04"-prefixed region that is NOT a real/parseable
+                # archive with the required entries -- mirrors the real installer's
+                # own resource data producing a false-positive signature match
+                # confirmed during live verification.
+                $stubBytes + [byte[]](0x50,0x4B,0x03,0x04) + [System.Text.Encoding]::ASCII.GetBytes("decoy-not-a-real-entry")
+            } else {
+                $stubBytes
+            }
+            $zipTemp = Join-Path $TestDrive ("zt-{0}.zip" -f ([guid]::NewGuid().ToString('N')))
+            if (Test-Path -LiteralPath $zipTemp) { Remove-Item -LiteralPath $zipTemp -Force }
+            $fs = [System.IO.File]::Open($zipTemp, [System.IO.FileMode]::CreateNew)
+            try {
+                $archive = [System.IO.Compression.ZipArchive]::new($fs, [System.IO.Compression.ZipArchiveMode]::Create)
+                try {
+                    foreach ($name in $entries.Keys) {
+                        $entry = $archive.CreateEntry($name)
+                        $w = New-Object System.IO.StreamWriter($entry.Open())
+                        try { $w.Write($entries[$name]) } finally { $w.Dispose() }
+                    }
+                } finally { $archive.Dispose() }
+            } finally { $fs.Dispose() }
+            $zipBytes = [System.IO.File]::ReadAllBytes($zipTemp)
+            [System.IO.File]::WriteAllBytes($exePath, $prefixBytes + $zipBytes)
+        }
+    }
+    It "locates and extracts both required DLLs from a valid embedded archive" {
+        $exe  = Join-Path $TestDrive "valid-setup.exe"
+        $dest = Join-Path $TestDrive "valid-setup-out"
+        New-TestSelfExtractingExe $exe @{ 'ReShade32.dll' = 'r32'; 'ReShade64.dll' = 'r64'; 'ReShade64.json' = '{}' }
+        Expand-ReShadeSelfExtractingArchive -SetupExePath $exe -DestDir $dest
+        (Get-Content -LiteralPath (Join-Path $dest "ReShade32.dll") -Raw) | Should -Be 'r32'
+        (Get-Content -LiteralPath (Join-Path $dest "ReShade64.dll") -Raw) | Should -Be 'r64'
+    }
+    It "skips a decoy PK signature and still finds the real archive further in the file" {
+        $exe  = Join-Path $TestDrive "decoy-setup.exe"
+        $dest = Join-Path $TestDrive "decoy-setup-out"
+        New-TestSelfExtractingExe $exe @{ 'ReShade32.dll' = 'r32'; 'ReShade64.dll' = 'r64' } -WithDecoyPkSignature
+        Expand-ReShadeSelfExtractingArchive -SetupExePath $exe -DestDir $dest
+        (Get-Content -LiteralPath (Join-Path $dest "ReShade64.dll") -Raw) | Should -Be 'r64'
+    }
+    It "fails closed when the required entries are missing from the embedded archive (format changed)" {
+        $exe  = Join-Path $TestDrive "corruption-setup.exe"
+        $dest = Join-Path $TestDrive "corruption-setup-out"
+        New-TestSelfExtractingExe $exe @{ 'SomeOtherFile.dll' = 'x' }
+        { Expand-ReShadeSelfExtractingArchive -SetupExePath $exe -DestDir $dest } | Should -Throw "*not found*"
+    }
+    It "fails closed when no PK signature exists at all" {
+        $exe  = Join-Path $TestDrive "no-pk-setup.exe"
+        $dest = Join-Path $TestDrive "no-pk-setup-out"
+        [System.IO.File]::WriteAllBytes($exe, [System.Text.Encoding]::ASCII.GetBytes("not a zip at all"))
+        { Expand-ReShadeSelfExtractingArchive -SetupExePath $exe -DestDir $dest } | Should -Throw "*no embedded ZIP*"
+    }
+    It "P1 #1: leaves the destination completely untouched when extraction fails partway through (2nd of 2 files)" {
+        $exe  = Join-Path $TestDrive "rs-extractfail-setup.exe"
+        $dest = Join-Path $TestDrive "rs-extractfail-out"
+        New-TestSelfExtractingExe $exe @{ 'ReShade32.dll' = 'r32'; 'ReShade64.dll' = 'r64' }
+        [void][System.IO.Directory]::CreateDirectory($dest)
+        [System.IO.File]::WriteAllText((Join-Path $dest 'ReShade32.dll'), 'PRE-EXISTING-32')
+
+        $script:callCount = 0
+        Mock Copy-TpmZipEntryToFile {
+            param($Entry, $DestPath)
+            $script:callCount++
+            if ($script:callCount -eq 2) { throw "simulated extraction failure on 2nd entry" }
+            $srcStream = $Entry.Open()
+            try {
+                $dstStream = [System.IO.File]::Open($DestPath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+                try { $srcStream.CopyTo($dstStream) } finally { $dstStream.Dispose() }
+            } finally { $srcStream.Dispose() }
+        }
+
+        { Expand-ReShadeSelfExtractingArchive -SetupExePath $exe -DestDir $dest } | Should -Throw "*simulated extraction failure*"
+
+        (Get-ChildItem -LiteralPath $dest -Force).Name | Should -Be @('ReShade32.dll')
+        (Get-Content -LiteralPath (Join-Path $dest 'ReShade32.dll') -Raw) | Should -Be 'PRE-EXISTING-32'
+    }
+    It "P1 #1: restores destination exactly when promotion fails partway through (after successful extraction of both files)" {
+        $exe  = Join-Path $TestDrive "rs-promofail-setup.exe"
+        $dest = Join-Path $TestDrive "rs-promofail-out"
+        New-TestSelfExtractingExe $exe @{ 'ReShade32.dll' = 'r32'; 'ReShade64.dll' = 'r64' }
+        [void][System.IO.Directory]::CreateDirectory($dest)
+        [System.IO.File]::WriteAllText((Join-Path $dest 'ReShade32.dll'), 'PRE-EXISTING-32')
+
+        Mock Move-Item {
+            param($LiteralPath, $Destination)
+            if ($LiteralPath -like "*ReShade64.dll") { throw "simulated promotion failure on ReShade64.dll" }
+            # NOTE: calling through to the real Move-Item cmdlet (even
+            # module-qualified) from inside its own Mock recurses back into
+            # the mock in this Pester version and overflows the call stack
+            # -- use the underlying .NET primitive instead for the
+            # pass-through (non-simulated-failure) case.
+            [System.IO.File]::Move($LiteralPath, $Destination)
+        }
+
+        { Expand-ReShadeSelfExtractingArchive -SetupExePath $exe -DestDir $dest } | Should -Throw "*simulated promotion failure*"
+
+        (Get-ChildItem -LiteralPath $dest -Force).Name | Should -Be @('ReShade32.dll')
+        (Get-Content -LiteralPath (Join-Path $dest 'ReShade32.dll') -Raw) | Should -Be 'PRE-EXISTING-32'
+    }
+    It "successful extraction leaves exactly the expected 2-file final tree and no temp/backup residue" {
+        $exe  = Join-Path $TestDrive "rs-clean-success-setup.exe"
+        $dest = Join-Path $TestDrive "rs-clean-success-out"
+        # Baseline BEFORE this call -- see the equivalent dgVoodoo2 test for
+        # why this cannot assume a global zero count.
+        $stagingRoot = Join-Path $env:TEMP 'TeknoParrotManagerStaging'
+        $before = @(Get-ChildItem -Path $stagingRoot -Directory -Filter 'ReShade-*' -ErrorAction SilentlyContinue).Count
+        New-TestSelfExtractingExe $exe @{ 'ReShade32.dll' = 'r32'; 'ReShade64.dll' = 'r64' }
+        Expand-ReShadeSelfExtractingArchive -SetupExePath $exe -DestDir $dest
+        (Get-ChildItem -LiteralPath $dest -Force).Name | Sort-Object | Should -Be @('ReShade32.dll', 'ReShade64.dll')
+        (Get-ChildItem -Path $stagingRoot -Directory -Filter 'ReShade-*' -ErrorAction SilentlyContinue).Count | Should -Be $before
+    }
+    It "Case 1 -- destination absent before the call, promotion fails on the very first required file: destination directory itself is removed again" {
+        $exe  = Join-Path $TestDrive "rs-rollback-first-setup.exe"
+        $dest = Join-Path $TestDrive "rs-rollback-first-out"
+        New-TestSelfExtractingExe $exe @{ 'ReShade32.dll' = 'r32'; 'ReShade64.dll' = 'r64' }
+        $before = Get-TpmDirSnapshot -Dir $dest
+        $before.Existed | Should -BeFalse
+
+        Mock Move-Item {
+            param($LiteralPath, $Destination)
+            if ($LiteralPath -like "*ReShade32.dll") { throw "simulated promotion failure on first required file" }
+            [System.IO.File]::Move($LiteralPath, $Destination)
+        }
+
+        { Expand-ReShadeSelfExtractingArchive -SetupExePath $exe -DestDir $dest } | Should -Throw "*simulated promotion failure*"
+
+        $after = Get-TpmDirSnapshot -Dir $dest
+        Assert-TpmDirSnapshotUnchanged -Before $before -After $after
+        Test-Path -LiteralPath $dest | Should -BeFalse
+    }
+    It "Case 2 -- destination absent before the call, first file promotes, second file fails: destination directory itself is removed again" {
+        $exe  = Join-Path $TestDrive "rs-rollback-second-setup.exe"
+        $dest = Join-Path $TestDrive "rs-rollback-second-out"
+        New-TestSelfExtractingExe $exe @{ 'ReShade32.dll' = 'r32'; 'ReShade64.dll' = 'r64' }
+        $before = Get-TpmDirSnapshot -Dir $dest
+        $before.Existed | Should -BeFalse
+
+        Mock Move-Item {
+            param($LiteralPath, $Destination)
+            if ($LiteralPath -like "*ReShade64.dll") { throw "simulated promotion failure on second required file" }
+            [System.IO.File]::Move($LiteralPath, $Destination)
+        }
+
+        { Expand-ReShadeSelfExtractingArchive -SetupExePath $exe -DestDir $dest } | Should -Throw "*simulated promotion failure*"
+
+        $after = Get-TpmDirSnapshot -Dir $dest
+        Assert-TpmDirSnapshotUnchanged -Before $before -After $after
+        Test-Path -LiteralPath $dest | Should -BeFalse
+    }
+
+    It "Case 5 -- phase-1 source loss before a valid backup is observable: preserves recovery evidence and reports an inconsistent transaction" {
+        $exe  = Join-Path $TestDrive "rs-phase1-source-loss-setup.exe"
+        $dest = Join-Path $TestDrive "rs-phase1-source-loss-out"
+        $stagingRoot = Join-Path $env:TEMP 'TeknoParrotManagerStaging'
+        $beforeStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'ReShade-*' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+        New-TestSelfExtractingExe $exe @{ 'ReShade32.dll' = 'r32'; 'ReShade64.dll' = 'r64' }
+        [void][System.IO.Directory]::CreateDirectory($dest)
+        [System.IO.File]::WriteAllText((Join-Path $dest 'ReShade32.dll'), 'PRE-EXISTING-32')
+        [void][System.IO.Directory]::CreateDirectory((Join-Path $dest 'keep\nested'))
+        [System.IO.File]::WriteAllText((Join-Path $dest 'keep\nested\marker.txt'), 'KEEP')
+        $oldPath = Join-Path $dest 'ReShade32.dll'
+        $caught = $null
+
+        Mock Move-Item {
+            param($LiteralPath, $Destination)
+            if ($LiteralPath -ieq $oldPath) {
+                [System.IO.File]::Delete($LiteralPath)
+                throw "simulated ReShade phase-1 source deletion before backup"
+            }
+            [System.IO.File]::Move($LiteralPath, $Destination)
+        }
+
+        try {
+            Expand-ReShadeSelfExtractingArchive -SetupExePath $exe -DestDir $dest
+        } catch {
+            $caught = $_
+        }
+
+        $newStages = @()
+        try {
+            $caught | Should -Not -BeNullOrEmpty
+            $caught.ToString() | Should -Match 'ROLLBACK FAILED'
+            $caught.ToString() | Should -Match 'INCONSISTENT'
+            $caught.ToString() | Should -Match 'unrecoverable'
+            $caught.ToString() | Should -Match 'simulated ReShade phase-1 source deletion before backup'
+            $caught.ToString() | Should -Match 'Pre-move evidence'
+            Test-Path -LiteralPath $oldPath | Should -BeFalse
+            Test-Path -LiteralPath $dest -PathType Container | Should -BeTrue
+            (Get-Content -LiteralPath (Join-Path $dest 'keep\nested\marker.txt') -Raw) | Should -Be 'KEEP'
+            $newStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'ReShade-*' -ErrorAction SilentlyContinue | Where-Object { $beforeStages -notcontains $_.FullName })
+            $newStages.Count | Should -Be 1
+            Test-Path -LiteralPath (Join-Path $newStages[0].FullName '.tpm-rollback-backup') | Should -BeTrue
+        } finally {
+            $leftoverStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'ReShade-*' -ErrorAction SilentlyContinue | Where-Object { $beforeStages -notcontains $_.FullName })
+            foreach ($stagePath in $leftoverStages) {
+                if (Test-Path -LiteralPath $stagePath.FullName) {
+                    [System.IO.Directory]::Delete($stagePath.FullName, $true)
+                }
+            }
+        }
+    }
+
+    It "Case 6 -- destination absent and transaction setup initialization fails: the destination remains absent exactly" {
+        $exe  = Join-Path $TestDrive "rs-setup-fails-setup.exe"
+        $dest = Join-Path $TestDrive "rs-setup-fails-out"
+        $forcedStage = Join-Path $TestDrive ("forced-rs-stage-" + [guid]::NewGuid().ToString('N'))
+        New-TestSelfExtractingExe $exe @{ 'ReShade32.dll' = 'r32'; 'ReShade64.dll' = 'r64' }
+        $before = Get-TpmDirSnapshot -Dir $dest
+
+        Mock New-TpmStagingDirectory {
+            [void][System.IO.Directory]::CreateDirectory($forcedStage)
+            [System.IO.File]::WriteAllText((Join-Path $forcedStage '.tpm-rollback-backup'), 'blocking file')
+            return $forcedStage
+        }
+
+        $caught = $null
+        try {
+            Expand-ReShadeSelfExtractingArchive -SetupExePath $exe -DestDir $dest
+        } catch {
+            $caught = $_
+        }
+
+        try {
+            $caught | Should -Not -BeNullOrEmpty
+            $caught.ToString() | Should -Not -Match 'ROLLBACK FAILED|CLEANUP FAILED'
+            $after = Get-TpmDirSnapshot -Dir $dest
+            Assert-TpmDirSnapshotUnchanged -Before $before -After $after
+            Test-Path -LiteralPath $dest | Should -BeFalse
+            Test-Path -LiteralPath $forcedStage | Should -BeFalse
+        } finally {
+            if (Test-Path -LiteralPath $forcedStage) {
+                [System.IO.Directory]::Delete($forcedStage, $true)
+            }
+        }
+    }
+
+    It "Case 7 -- destination restores exactly but rollback-backup cleanup fails: reports a distinct cleanup error and preserves the wrapper staging evidence" {
+        $exe  = Join-Path $TestDrive "rs-cleanup-fails-setup.exe"
+        $dest = Join-Path $TestDrive "rs-cleanup-fails-out"
+        $stagingRoot = Join-Path $env:TEMP 'TeknoParrotManagerStaging'
+        $beforeStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'ReShade-*' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+        New-TestSelfExtractingExe $exe @{ 'ReShade32.dll' = 'r32'; 'ReShade64.dll' = 'r64' }
+        [void][System.IO.Directory]::CreateDirectory($dest)
+        [System.IO.File]::WriteAllText((Join-Path $dest 'ReShade32.dll'), 'PRE-EXISTING-32')
+        [void][System.IO.Directory]::CreateDirectory((Join-Path $dest 'keep\nested'))
+        [System.IO.File]::WriteAllText((Join-Path $dest 'keep\nested\marker.txt'), 'KEEP')
+        $before = Get-TpmDirSnapshot -Dir $dest
+
+        Mock Move-Item {
+            param($LiteralPath, $Destination)
+            if ($Destination -ieq (Join-Path $dest 'ReShade64.dll')) {
+                throw "simulated ReShade promotion failure before cleanup"
+            }
+            [System.IO.File]::Move($LiteralPath, $Destination)
+        }
+        Mock Remove-Item {
+            param($LiteralPath, $Recurse, $Force, $ErrorAction)
+            if ([System.IO.Path]::GetFileName($LiteralPath) -ieq '.tpm-rollback-backup') {
+                throw "simulated ReShade rollback-backup cleanup failure"
+            }
+            if (Test-Path -LiteralPath $LiteralPath -PathType Container) {
+                [System.IO.Directory]::Delete($LiteralPath, [bool]$Recurse)
+            } elseif (Test-Path -LiteralPath $LiteralPath) {
+                [System.IO.File]::Delete($LiteralPath)
+            }
+        }
+
+        $caught = $null
+        try {
+            Expand-ReShadeSelfExtractingArchive -SetupExePath $exe -DestDir $dest
+        } catch {
+            $caught = $_
+        }
+
+        try {
+            $caught | Should -Not -BeNullOrEmpty
+            $caught.ToString() | Should -Match 'TRANSACTION CLEANUP FAILED'
+            $caught.ToString() | Should -Match 'destination was successfully restored'
+            $caught.ToString() | Should -Match 'simulated ReShade promotion failure before cleanup'
+            $caught.ToString() | Should -Match 'simulated ReShade rollback-backup cleanup failure'
+            $caught.ToString() | Should -Not -Match 'ROLLBACK FAILED'
+            $after = Get-TpmDirSnapshot -Dir $dest
+            Assert-TpmDirSnapshotUnchanged -Before $before -After $after
+            $newStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'ReShade-*' -ErrorAction SilentlyContinue | Where-Object { $beforeStages -notcontains $_.FullName })
+            $newStages.Count | Should -Be 1
+            Test-Path -LiteralPath (Join-Path $newStages[0].FullName '.tpm-rollback-backup') | Should -BeTrue
+        } finally {
+            $leftoverStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'ReShade-*' -ErrorAction SilentlyContinue | Where-Object { $beforeStages -notcontains $_.FullName })
+            foreach ($stagePath in $leftoverStages) {
+                if (Test-Path -LiteralPath $stagePath.FullName) {
+                    [System.IO.Directory]::Delete($stagePath.FullName, $true)
+                }
+            }
+        }
+    }
+    It "P2 -- ordinary staging cleanup failure is surfaced with exact path and preserves a valid destination" {
+        $exe  = Join-Path $TestDrive "rs-staging-cleanup-fails-setup.exe"
+        $dest = Join-Path $TestDrive "rs-staging-cleanup-fails-out"
+        $stagingRoot = Join-Path $env:TEMP 'TeknoParrotManagerStaging'
+        $beforeStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'ReShade-*' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+        New-TestSelfExtractingExe $exe @{ 'ReShade32.dll' = 'r32'; 'ReShade64.dll' = 'r64' }
+
+        Mock Remove-Item {
+            param($LiteralPath, $Recurse, $Force, $ErrorAction)
+            if ([System.IO.Path]::GetFileName([string]$LiteralPath) -like 'ReShade-*') {
+                throw "simulated ReShade staging cleanup failure"
+            }
+            if (Test-Path -LiteralPath $LiteralPath -PathType Container) {
+                [System.IO.Directory]::Delete($LiteralPath, [bool]$Recurse)
+            } elseif (Test-Path -LiteralPath $LiteralPath) {
+                [System.IO.File]::Delete($LiteralPath)
+            }
+        }
+
+        $caught = $null
+        try {
+            Expand-ReShadeSelfExtractingArchive -SetupExePath $exe -DestDir $dest
+        } catch {
+            $caught = $_
+        }
+
+        try {
+            $caught | Should -Not -BeNullOrEmpty
+            $caught.ToString() | Should -Match 'TPM STAGING CLEANUP FAILED'
+            $caught.ToString() | Should -Match 'simulated ReShade staging cleanup failure'
+            $caught.ToString() | Should -Not -Match 'ROLLBACK FAILED'
+            $caught.ToString() | Should -Not -Match 'TRANSACTION CLEANUP FAILED'
+            $newStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'ReShade-*' -ErrorAction SilentlyContinue | Where-Object { $beforeStages -notcontains $_.FullName })
+            $newStages.Count | Should -Be 1
+            Assert-TpmErrorIdentifiesWindowsPath -ErrorText $caught.ToString() -ExpectedPath $newStages[0].FullName
+            Test-Path -LiteralPath $newStages[0].FullName -PathType Container | Should -BeTrue
+            @(Get-ChildItem -LiteralPath $newStages[0].FullName -Force -Recurse -ErrorAction SilentlyContinue).Count | Should -Be 0
+            Test-Path -LiteralPath (Join-Path $newStages[0].FullName '.tpm-rollback-backup') | Should -BeFalse
+            (Get-ChildItem -LiteralPath $dest -Force | Select-Object -ExpandProperty Name | Sort-Object) | Should -Be @('ReShade32.dll', 'ReShade64.dll')
+            (Get-Content -LiteralPath (Join-Path $dest 'ReShade32.dll') -Raw) | Should -Be 'r32'
+            (Get-Content -LiteralPath (Join-Path $dest 'ReShade64.dll') -Raw) | Should -Be 'r64'
+        } finally {
+            $leftoverStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'ReShade-*' -ErrorAction SilentlyContinue | Where-Object { $beforeStages -notcontains $_.FullName })
+            foreach ($stagePath in $leftoverStages) {
+                if (Test-Path -LiteralPath $stagePath.FullName) {
+                    [System.IO.Directory]::Delete($stagePath.FullName, $true)
+                }
+            }
+        }
+    }
+    It "Case 4 -- rollback itself is forced to fail during a ReShade promotion: distinct ROLLBACK FAILED error, backup preserved" {
+        $exe  = Join-Path $TestDrive "rs-rollback-fails-setup.exe"
+        $dest = Join-Path $TestDrive "rs-rollback-fails-out"
+        New-TestSelfExtractingExe $exe @{ 'ReShade32.dll' = 'r32'; 'ReShade64.dll' = 'r64' }
+        [void][System.IO.Directory]::CreateDirectory($dest)
+        [System.IO.File]::WriteAllText((Join-Path $dest 'ReShade32.dll'), 'PRE-EXISTING-32')
+
+        Mock Move-Item {
+            param($LiteralPath, $Destination)
+            if ($LiteralPath -like "*ReShade64.dll" -and $LiteralPath -notlike "*.tpm-rollback-backup*") {
+                throw "simulated promotion failure on ReShade64.dll"
+            }
+            if ($LiteralPath -like "*.tpm-rollback-backup*ReShade32.dll") {
+                throw "simulated rollback failure restoring ReShade32.dll"
+            }
+            [System.IO.File]::Move($LiteralPath, $Destination)
+        }
+
+        $caught = $null
+        try { Expand-ReShadeSelfExtractingArchive -SetupExePath $exe -DestDir $dest } catch { $caught = $_ }
+
+        $caught | Should -Not -BeNullOrEmpty
+        $caught.ToString() | Should -Match 'ROLLBACK FAILED'
+        $caught.ToString() | Should -Match 'simulated promotion failure on ReShade64\.dll'
+        $caught.ToString() | Should -Match 'simulated rollback failure restoring ReShade32\.dll'
+    }
+}
+
+Describe "Test-ReShadeSetupTrustedSignature (fingerprint-as-root-of-trust, fail-closed)" {
+    # Mocked Get-AuthenticodeSignature. Trust requires BOTH the pinned
+    # thumbprint AND an accepted .Status (P1 #2 remediation: an earlier
+    # version of this function checked only the thumbprint and ignored
+    # Status entirely, so a HashMismatch -- a tampered/corrupted file --
+    # paired with a coincidentally/spoofed-correct Thumbprint field would
+    # incorrectly pass. This table exercises every status TPM intentionally
+    # accepts or rejects, plus the wrong-thumbprint and Subject-only cases.
+    BeforeAll {
+        function Write-Log { param($Message) }
+        $trustedThumbprint = $Script:ReShadeTrustedCertThumbprint
+        $trustedSubject     = 'CN=ReShade, E=info@reshade.me'
+    }
+
+    Context "Table-driven status x thumbprint trust matrix" {
+        # Each row: the Get-AuthenticodeSignature.Status to mock, whether
+        # the mocked Thumbprint is the pinned/correct one, and the expected
+        # Trusted outcome. Covers, at minimum: the one accepted self-signed
+        # status with the correct thumbprint (must pass); HashMismatch with
+        # the correct thumbprint (must fail -- this is the P1 #2 bug case);
+        # NotSigned; a right-status/wrong-thumbprint case; and confirms
+        # SubjectMatch never overrides either gate.
+        $matrix = @(
+            @{ Case = 'accepted status (UnknownError) + correct thumbprint => TRUSTED';        Status = 'UnknownError';   ThumbprintCorrect = $true;  ExpectTrusted = $true  }
+            @{ Case = 'HashMismatch + correct thumbprint => REJECTED (P1 #2 regression case)';  Status = 'HashMismatch';   ThumbprintCorrect = $true;  ExpectTrusted = $false }
+            @{ Case = 'NotSigned + correct thumbprint => REJECTED';                             Status = 'NotSigned';      ThumbprintCorrect = $true;  ExpectTrusted = $false }
+            @{ Case = 'NotTrusted + correct thumbprint => REJECTED';                            Status = 'NotTrusted';     ThumbprintCorrect = $true;  ExpectTrusted = $false }
+            @{ Case = 'Incompatible + correct thumbprint => REJECTED';                          Status = 'Incompatible';   ThumbprintCorrect = $true;  ExpectTrusted = $false }
+            @{ Case = 'NotSupportedFileFormat + correct thumbprint => REJECTED';                Status = 'NotSupportedFileFormat'; ThumbprintCorrect = $true; ExpectTrusted = $false }
+            @{ Case = 'unrecognized future status + correct thumbprint => REJECTED (deny-by-default)'; Status = 'SomeFutureStatusNotYetInvented'; ThumbprintCorrect = $true; ExpectTrusted = $false }
+            @{ Case = 'accepted status (UnknownError) + WRONG thumbprint => REJECTED';          Status = 'UnknownError';   ThumbprintCorrect = $false; ExpectTrusted = $false }
+            @{ Case = 'HashMismatch + WRONG thumbprint => REJECTED';                            Status = 'HashMismatch';   ThumbprintCorrect = $false; ExpectTrusted = $false }
+        )
+        It "<Case>" -TestCases $matrix {
+            param($Case, $Status, $ThumbprintCorrect, $ExpectTrusted)
+            $mockedThumbprint = if ($ThumbprintCorrect) { $trustedThumbprint } else { ('F' * 40) }
+            Mock Get-AuthenticodeSignature {
+                [pscustomobject]@{ Status = $Status; SignerCertificate = [pscustomobject]@{ Subject = $trustedSubject; Thumbprint = $mockedThumbprint } }
+            }
+            $result = Test-ReShadeSetupTrustedSignature -Path (Join-Path $TestDrive "any.exe")
+            $result.Trusted | Should -Be $ExpectTrusted
+        }
+    }
+
+    It "trusts a signature whose fingerprint matches the pinned constant and status is UnknownError" {
+        Mock Get-AuthenticodeSignature {
+            [pscustomobject]@{ Status = 'UnknownError'; SignerCertificate = [pscustomobject]@{ Subject = $trustedSubject; Thumbprint = $trustedThumbprint } }
+        }
+        $result = Test-ReShadeSetupTrustedSignature -Path (Join-Path $TestDrive "any.exe")
+        $result.Trusted | Should -BeTrue
+        $result.ThumbprintMatch | Should -BeTrue
+        $result.StatusAccepted | Should -BeTrue
+        $result.SubjectMatch | Should -BeTrue
+    }
+    It "REJECTS a HashMismatch signature even with the exact pinned thumbprint (P1 #2: the core regression this pass fixes)" {
+        Mock Get-AuthenticodeSignature {
+            [pscustomobject]@{ Status = 'HashMismatch'; SignerCertificate = [pscustomobject]@{ Subject = $trustedSubject; Thumbprint = $trustedThumbprint } }
+        }
+        $result = Test-ReShadeSetupTrustedSignature -Path (Join-Path $TestDrive "any.exe")
+        $result.ThumbprintMatch | Should -BeTrue
+        $result.StatusAccepted | Should -BeFalse
+        $result.Trusted | Should -BeFalse
+    }
+    It "fails closed when the Subject matches but the fingerprint does not (spoofed self-signed cert)" {
+        Mock Get-AuthenticodeSignature {
+            [pscustomobject]@{ Status = 'UnknownError'; SignerCertificate = [pscustomobject]@{ Subject = $trustedSubject; Thumbprint = ('F' * 40) } }
+        }
+        $result = Test-ReShadeSetupTrustedSignature -Path (Join-Path $TestDrive "any.exe")
+        $result.Trusted | Should -BeFalse
+        $result.SubjectMatch | Should -BeTrue
+        $result.ThumbprintMatch | Should -BeFalse
+    }
+    It "fails closed when the Subject has changed, even with the pinned fingerprint and accepted status" {
+        Mock Get-AuthenticodeSignature {
+            [pscustomobject]@{ Status = 'UnknownError'; SignerCertificate = [pscustomobject]@{ Subject = 'CN=SomeoneElse'; Thumbprint = $trustedThumbprint } }
+        }
+        $result = Test-ReShadeSetupTrustedSignature -Path (Join-Path $TestDrive "any.exe")
+        # Thumbprint+Status are the hard trust anchor -- Trusted still
+        # reflects that combined gate even though Subject changed, but the
+        # mismatch is surfaced via SubjectMatch for diagnosis (secondary
+        # sanity check only, never a substitute for the fingerprint/status
+        # checks).
+        $result.SubjectMatch | Should -BeFalse
+        $result.Trusted | Should -BeTrue
+    }
+    It "fails closed when both Subject and fingerprint differ" {
+        Mock Get-AuthenticodeSignature {
+            [pscustomobject]@{ Status = 'UnknownError'; SignerCertificate = [pscustomobject]@{ Subject = 'CN=SomeoneElse'; Thumbprint = ('F' * 40) } }
+        }
+        $result = Test-ReShadeSetupTrustedSignature -Path (Join-Path $TestDrive "any.exe")
+        $result.Trusted | Should -BeFalse
+    }
+    It "fails closed when there is no signature at all (SignerCertificate null)" {
+        Mock Get-AuthenticodeSignature {
+            [pscustomobject]@{ Status = 'NotSigned'; SignerCertificate = $null }
+        }
+        $result = Test-ReShadeSetupTrustedSignature -Path (Join-Path $TestDrive "any.exe")
+        $result.Trusted | Should -BeFalse
+    }
+    It "fails closed when Get-AuthenticodeSignature itself throws (unparseable file)" {
+        Mock Get-AuthenticodeSignature { throw "not a valid PE file" }
+        $result = Test-ReShadeSetupTrustedSignature -Path (Join-Path $TestDrive "any.exe")
+        $result.Trusted | Should -BeFalse
+        $result.Status | Should -Be 'Error'
+        $result.StatusAccepted | Should -BeFalse
+    }
+    It "logs Status, Subject, and Thumbprint on every run, pass or fail" {
+        Mock Get-AuthenticodeSignature {
+            [pscustomobject]@{ Status = 'UnknownError'; SignerCertificate = [pscustomobject]@{ Subject = $trustedSubject; Thumbprint = $trustedThumbprint } }
+        }
+        Mock Write-Log { }
+        Test-ReShadeSetupTrustedSignature -Path (Join-Path $TestDrive "any.exe") | Out-Null
+        Should -Invoke Write-Log -Times 1 -ParameterFilter { $Message -match [regex]::Escape($trustedSubject) -and $Message -match [regex]::Escape($trustedThumbprint) -and $Message -match 'Status=UnknownError' }
     }
 }
 
@@ -3916,6 +5600,57 @@ Describe "Get-MainMenuSections / Get-MainMenuItems" {
             $item.ShortDesc | Should -Not -BeNullOrEmpty
             @($item.FullDesc).Count | Should -BeGreaterThan 0
         }
+    }
+}
+
+Describe "Onboarding pointer-text menu-label sync (Part 2 item 8: no hardcoded menu numbers)" {
+    # Every "go do X later" pointer in the onboarding flow must cite the
+    # menu item's stable label text, never a number (numbers shift on
+    # reorder -- LESSONS_LEARNED.md v0.99.28). This asserts the exact label
+    # strings the onboarding ReShade/dgVoodoo2 offer blocks cite are
+    # present verbatim in the live menu-rendering function's own item
+    # list, so a future menu-label rename breaks this test instead of
+    # silently going stale in the pointer text.
+    It "the ReShade onboarding pointer text cites the live 'ReShade setup' menu label verbatim" {
+        $reShadeItem = Get-MainMenuItems | Where-Object { $_.Mode -eq 'ReShadeSetup' }
+        $reShadeItem.Label | Should -Be 'ReShade setup'
+        $script:ProductionSource | Should -Match ([regex]::Escape("main menu's ReShade setup option"))
+    }
+    It "the dgVoodoo2 onboarding pointer text cites the live 'dgVoodoo2 setup' menu label verbatim" {
+        $dgItem = Get-MainMenuItems | Where-Object { $_.Mode -eq 'DgVoodoo2Setup' }
+        $dgItem.Label | Should -Be 'dgVoodoo2 setup'
+        $script:ProductionSource | Should -Match ([regex]::Escape("main menu's dgVoodoo2 setup option"))
+    }
+    It "the onboarding flow never hardcodes a numbered 'option N from the menu' reference for ReShade/dgVoodoo2" {
+        # These exact phrases (with a literal menu number) were the pre-fix
+        # text this round removed -- confirms the regression cannot come
+        # back silently.
+        $script:ProductionSource | Should -Not -Match 'choose option 5 from the menu'
+        $script:ProductionSource | Should -Not -Match 'choose option 6 from the menu'
+    }
+}
+
+Describe "Path-concept non-conflation guard (Part 2 item 9)" {
+    # Guards against re-collapsing the three distinct path concepts this
+    # round's terminology pass deliberately kept separate: the ZIP
+    # source ($zipSource -- "original game files"), the staging/
+    # preparation folder ($gamesInstallFolder -- "ready-to-play games"),
+    # and the TeknoParrot install folder ($tpRoot). Fails if the staging
+    # folder is ever described with the exact phrase "game folder" alone
+    # (the specific collapse this corrections round rejected, since it
+    # would blur it with the ZIP source concept), or if a fourth
+    # "deployed location" concept is introduced.
+    It "never renames the staging/preparation folder to the bare unqualified phrase 'game folder'" {
+        # The staging-folder prompt block's own descriptive text (around
+        # 'This is where TPM extracts your ZIPs and installs games.')
+        # must not use the exact rejected phrase.
+        $script:ProductionSource | Should -Not -Match 'Path to your game folder'
+    }
+    It "never introduces a fourth 'deployed location' path concept" {
+        $script:ProductionSource | Should -Not -Match '(?i)deployed location'
+    }
+    It "the staging folder prompt still pairs the plain phrase with the technical term on first mention" {
+        $script:ProductionSource | Should -Match ([regex]::Escape("This is where TPM extracts your ZIPs and installs games."))
     }
 }
 

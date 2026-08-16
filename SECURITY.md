@@ -30,6 +30,171 @@ The preferred transport order is BITS, then streamed `HttpClient`, then
 `Invoke-WebRequest` as an emergency fallback. This is a reliability and
 integrity-hardening measure; it is not a cryptographic authenticity guarantee.
 
+## SHA-256 digest verification (BepInEx and dgVoodoo2 GitHub release assets)
+
+The GitHub Releases API serves a machine-readable `digest` field
+(`"digest": "sha256:<64-hex>"`) for release assets, computed by GitHub
+itself from the uploaded bytes and served over the same allowlisted
+`api.github.com` host already used to discover the download URL. Confirmed
+present on real release assets during this feature's design and
+independently reconfirmed by a live API call: `dgVoodoo2_87_3.zip` ->
+`sha256:6fb954bed55bf70e948c5045a663a9df31ea206faf105e327bafe46c318f867f`
+and `BepInEx_win_x64_*.zip` -> a similarly-formed digest. `Get-TpmSha256FromDigestField`
+parses this into a bare hex hash; `Invoke-TpmDownload -ExpectedSha256`
+(backed by `Test-TpmDownloadedFile -ExpectedSha256`) computes the
+downloaded file's own SHA-256 and fails closed on any mismatch -- deletes
+the partial file, logs a `SECURITY --` line with both hashes, no
+extraction. This is a real cryptographic integrity check (unlike the
+"reliability, not authenticity" caveat on the general download pipeline
+above), because GitHub itself is the source of the expected digest over an
+allowlisted, HTTPS-only API host. It does not, however, prove the asset was
+authored by the claimed maintainer -- it only proves the bytes downloaded
+match the bytes GitHub currently serves for that release. `Get-BepInExLatestRelease`
+and `Get-DgVoodoo2LatestRelease` both extract this field; a missing/absent
+digest (older release, or a GitHub API change) degrades gracefully to the
+pre-existing size-only validation rather than blocking the download.
+
+## Transactional extraction (staging + rollback-safe promotion)
+
+Added in a P1 remediation pass after an independent review forced a
+failure partway through a multi-file extraction and confirmed the first
+file was left behind in the live destination folder -- a real violation of
+an earlier "no partial deploy" claim in this document, which described the
+intent but not yet the actually-enforced behavior. Both `Expand-DgVoodoo2Zip`
+and `Expand-ReShadeSelfExtractingArchive` now go through three shared
+primitives (defined next to `Test-PathInside`):
+
+- `New-TpmStagingDirectory` creates a fresh, uniquely-named directory under
+  a controlled TPM temp location (`%TEMP%\TeknoParrotManagerStaging\`) --
+  never directly under `Scripts\ReShade\` or `Scripts\dgVoodoo2\`.
+- Every required file is extracted into that staging directory and fully
+  validated there (entry presence, sanitized names, containment checks,
+  non-zero-length) before the real destination is touched at all.
+- `Invoke-TpmTransactionalPromote` performs the actual move into the
+  destination, and is itself rollback-safe: any pre-existing destination
+  file being replaced is moved aside first; if any file's promotion fails
+  partway through, every file already promoted in that same call is
+  removed again and every file moved aside is restored to its original
+  name and location, so the destination ends up byte-for-byte identical to
+  its pre-operation state.
+
+On ANY failure -- a missing/changed ZIP entry, an extraction-time error on
+any single file, or a promotion-time error -- the destination is left
+exactly as it was before the call, and the staging directory is always
+removed. Verified by dedicated regression tests that deliberately force a
+failure during extraction and a separate failure during promotion for both
+extractors, asserting the destination tree afterward.
+
+## dgVoodoo2 selective extraction (Scripts\dgVoodoo2\)
+
+`Get-DgVoodoo2LatestRelease` fetches the latest release from the official
+`github.com/dege-diosg/dgVoodoo2` GitHub Releases channel (same
+URL-allowlist pattern as BepInEx: scheme=https, host exactly
+`github.com`/`api.github.com`, no userinfo, path under
+`/dege-diosg/dgVoodoo2/releases/download/`). `Expand-DgVoodoo2Zip` extracts
+only the 6 known files (`MS\x86\D3D8.dll`, `MS\x86\DDraw.dll`,
+`MS\x86\D3DImm.dll`, `3Dfx\x86\Glide2x.dll`, `3Dfx\x86\Glide3x.dll`, root
+`dgVoodoo.conf` -- verified live against the real ZIP layout during
+implementation) at their expected subpaths, sanitizing each destination
+name via `[System.IO.Path]::GetFileName()` and a `Test-PathInside`
+containment check before writing, the same protection class as
+BepInEx/FFBPlugin. Fails closed -- transactionally, per "Transactional
+extraction" above -- if any of the 6 expected entries is missing at its
+expected subpath: a changed ZIP layout in a future dgVoodoo2 release is a
+"stop and tell the user" event, not a best-effort partial extraction, and
+the destination is left byte-for-byte unchanged.
+`dgVoodoo2\` is never bundled in the release ZIP; TPM always live-fetches it
+fresh from the official GitHub release, matching the FFBPlugin/BepInEx
+integrity posture: HTTPS + host allowlist + SHA-256 digest verification +
+safe extraction, no code-signing trust anchor (dgVoodoo2's official
+distribution is unsigned).
+
+## ReShade identity-pinning with rotation (stronger integrity case than BepInEx/dgVoodoo2/FFBPlugin)
+
+Unlike BepInEx, dgVoodoo2, and FFBPlugin (all unsigned community/upstream
+builds with no code-signing trust anchor), the ReShade installer
+(`ReShade_Setup_<version>.exe`, fetched from `https://reshade.me/downloads/`,
+same host-allowlist pattern used elsewhere: scheme=https, host exactly
+`reshade.me`, no userinfo, path under `/downloads/`) IS Authenticode-signed
+-- just with a self-signed certificate, so Windows can never chain it to a
+trusted root (`Get-AuthenticodeSignature` reports `Status = UnknownError`,
+not `Valid`, and always will for this cert). Because the cert is
+self-signed, gating on `Status -eq 'Valid'` would be permanently
+fail-closed and useless.
+
+**A self-signed certificate's Subject string alone is never a trust
+anchor** -- anyone can mint a self-signed certificate with any Subject
+text, including `CN=ReShade, E=info@reshade.me`. The actual root of trust
+for a self-signed cert is the specific key/certificate itself, identified
+by its fingerprint. Design:
+
+- **Hard trust anchor:** the signer certificate's Thumbprint must equal
+  `589690208A5E52FB96980C4A6698F50ACD47C49F` (`$Script:ReShadeTrustedCertThumbprint`
+  in `TeknoParrot-Manager.ps1`). Source: the fingerprint reshade.me's own
+  download page publishes for the currently-shipping certificate
+  (user-supplied confirmation), independently reconfirmed live during this
+  feature's implementation by downloading `ReShade_Setup_6.8.0.exe` from
+  `https://reshade.me/downloads/` and calling `Get-AuthenticodeSignature`
+  on it directly: `Status=UnknownError`, `Subject='CN=ReShade,
+  E=info@reshade.me'`, `Thumbprint=589690208A5E52FB96980C4A6698F50ACD47C49F`
+  -- an exact match. Re-confirmed live again during the P1 #2 remediation
+  pass below (same values observed against `ReShade_Setup_6.8.0.exe`).
+- **Explicit status policy, evaluated alongside the thumbprint -- not
+  ignored (P1 #2 remediation).** An earlier version of
+  `Test-ReShadeSetupTrustedSignature` checked only the Thumbprint and
+  ignored `.Status` entirely, so a `HashMismatch` signature status (the
+  status Windows reports for a file that was modified after signing --
+  i.e. a tampered or corrupted download) paired with a
+  coincidentally-or-maliciously-matching Thumbprint field would have been
+  reported `Trusted = $true`. This was found and fixed by an independent
+  review round; it is documented here as a concrete case, not a
+  hypothetical one. Trust now requires the signer certificate's Thumbprint
+  to match the pinned constant **AND** `.Status` to be on an explicit,
+  single-entry accept-list (`$Script:ReShadeAcceptedSignatureStatuses`,
+  currently just `@('UnknownError')` -- the one status a genuine, intact,
+  self-signed ReShade installer actually produces, per the live observation
+  above). This is deny-by-default: every other status --
+  `HashMismatch` (tampered/corrupted file), `NotSigned`, `NotTrusted`,
+  `NotSupportedFileFormat`, `Incompatible`, the `Error` sentinel from an
+  exception, or any status not on the list at all (including a future
+  .NET/Windows status this project has never seen) -- fails closed. Adding
+  a status to the accept-list requires the same maintainer-only,
+  independently-sourced justification as changing the thumbprint itself,
+  documented here at the time it is added.
+- **Subject match is a secondary sanity check only** (`Test-ReShadeSetupTrustedSignature`
+  reports it as `SubjectMatch`), layered on top of the thumbprint+status
+  gate, never a substitute for it.
+- **Fail closed on any fingerprint mismatch, unaccepted status, missing
+  signature, invalid/unparseable signature, or exception.** No "proceed
+  anyway with a warning" fallback, and no automatic adoption of a changed
+  fingerprint into config (no TOFU-on-change). The auto-download path
+  deletes the downloaded installer and directs the user to the existing
+  manual DLL-path fallback in `Invoke-ReShadeSetup`'s standalone menu
+  entry.
+- **Rotation:** the trusted fingerprint constant (and, separately, the
+  accepted-status list) can only be updated by a maintainer, sourced
+  independently from the allowlisted `https://reshade.me` site itself (for
+  the fingerprint) or from a live-observed genuine installer (for a status
+  change), and shipped in a TPM version bump with the new value and change
+  rationale documented here -- the same trust model as updating any other
+  pinned identity. TPM itself never auto-updates either value from a live
+  response; it only compares against what is shipped.
+- **Status, Subject, and Thumbprint are all logged on every run, pass or
+  fail** (`Test-ReShadeSetupTrustedSignature` -> `Write-Log`), independent
+  of which one gated the outcome, for audit trail.
+- `Test-ReShadeDllSignature` (the existing raw `Get-AuthenticodeSignature`
+  wrapper, used today for user-supplied DLLs where "informational only" is
+  the correct existing behavior) gained an additive `Thumbprint` field but
+  its return contract and behavior for existing callers are unchanged.
+  `Test-ReShadeSetupTrustedSignature` is a separate function, used only by
+  the auto-download path, that adds the fingerprint-match gate on top.
+- After a trusted signature, `Expand-ReShadeSelfExtractingArchive` replicates
+  the published crosire/reshade installer's own self-extracting-archive
+  format (see ARCHITECTURE.md for the source citation and the live-verified
+  file offsets). `ReShade\` is never bundled in the release ZIP; TPM always
+  live-fetches it fresh from reshade.me, per reshade.me's own
+  do-not-redistribute notice.
+
 ## Auto-update threat model
 
 The updater is intentionally manual, backup-first, and GitHub-Releases-only.

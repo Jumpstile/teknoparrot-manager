@@ -1,5 +1,5 @@
 # =============================================================================
-# TeknoParrot Manager  |  v1.0 RC5
+# TeknoParrot Manager  |  v1.0 RC6
 # Author: Jumpstile
 # =============================================================================
 #
@@ -68,7 +68,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
 $ScriptVersion = "1.0"
-$ReleaseCandidateLabel = "RC5"
+$ReleaseCandidateLabel = "RC6"
 $DisplayVersion = "v$ScriptVersion $ReleaseCandidateLabel"
 
 function Get-ManagerDisplayVersion {
@@ -304,10 +304,67 @@ function Write-ManagerBanner {
 $startupBannerSize = Get-ManagerBannerViewportSize
 Write-ManagerBanner -Width $startupBannerSize.Width -Height $startupBannerSize.Height
 
-# Load the ZIP assembly once at startup. Expand-ZipFileSafe uses ZipArchive
-# instead of Expand-Archive (PS 5.1 bugs: "already exists" with -Force, partial
-# folders on failure) and instead of ZipFile::ExtractToDirectory (no long-path
-# support). Expand-ZipFileSafe uses \\?\ prefixes to bypass MAX_PATH.
+# Windows PowerShell 5.1 packaged launchers can run with module autoloading
+# unavailable or disabled by the host. Its inherited PSModulePath can also
+# contain PowerShell 7 module roots ahead of the Windows PowerShell inbox
+# modules. Resolve the Desktop/5.1 dependencies from this engine's own
+# installation so the fail-closed ReShade trust check and SHA-256 verification
+# never depend on ambient module precedence. Do not use Join-Path or Test-Path
+# here: both are Management commands, which may not yet be available when
+# module autoloading is disabled.
+$standardPowerShellModules = @(
+    'Microsoft.PowerShell.Security',
+    'Microsoft.PowerShell.Management',
+    'Microsoft.PowerShell.Utility'
+)
+$isWindowsPowerShellDesktop = ($PSVersionTable.PSEdition -eq 'Desktop' -and $PSVersionTable.PSVersion.Major -eq 5)
+if ($isWindowsPowerShellDesktop) {
+    # Remove all loaded same-name modules before any inbox manifest is imported.
+    # This prevents a polluted module from satisfying a nested dependency.
+    foreach ($moduleName in $standardPowerShellModules) {
+        $existingModule = Get-Module -Name $moduleName
+        if ($null -ne $existingModule) {
+            Remove-Module -Name $moduleName -Force -ErrorAction Stop
+        }
+    }
+}
+$windowsPowerShellModuleRoot = $null
+$originalPowerShellModulePath = $null
+if ($isWindowsPowerShellDesktop) {
+    $windowsPowerShellModuleRoot = [System.IO.Path]::Combine($PSHOME, 'Modules')
+    $originalPowerShellModulePath = [System.Environment]::GetEnvironmentVariable('PSModulePath', 'Process')
+    [System.Environment]::SetEnvironmentVariable('PSModulePath', $windowsPowerShellModuleRoot, 'Process')
+}
+# Inbox manifests load nested binary modules. Scope only this process's
+# PSModulePath to the inbox root during those imports, then restore the
+# original process value in finally; user and machine environment is untouched.
+try {
+foreach ($moduleName in $standardPowerShellModules) {
+    if ($isWindowsPowerShellDesktop) {
+        $moduleManifest = [System.IO.Path]::Combine($windowsPowerShellModuleRoot, $moduleName, "$moduleName.psd1")
+        if (-not [System.IO.File]::Exists($moduleManifest)) {
+            throw "Required Windows PowerShell inbox module manifest is missing: $moduleManifest"
+        }
+        Import-Module -Name $moduleManifest -Force -ErrorAction Stop
+    } else {
+        # Preserve the native module-resolution behavior under PowerShell 7+.
+        Import-Module $moduleName -ErrorAction Stop
+    }
+}
+
+}
+finally {
+    if ($isWindowsPowerShellDesktop) {
+        [System.Environment]::SetEnvironmentVariable('PSModulePath', $originalPowerShellModulePath, 'Process')
+    }
+}
+# Load the separate ZIP assemblies once at startup. ZipArchive/ZipArchiveMode
+# live in System.IO.Compression.dll; ZipFile/ZipFileExtensions live in the
+# separate System.IO.Compression.FileSystem.dll. Expand-ZipFileSafe uses these
+# APIs instead of Expand-Archive (PS 5.1 bugs: "already exists" with -Force,
+# partial folders on failure) and instead of ZipFile::ExtractToDirectory (no
+# long-path support). Expand-ZipFileSafe uses \\?\ prefixes to bypass MAX_PATH.
+Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 # PS 5.1 on older Windows 10 builds defaults to TLS 1.0. Ensure TLS 1.2 is
@@ -390,9 +447,15 @@ function Exit-TpmProcess {
 # that needs a guaranteed string goes through here instead of a bare
 # Read-Host so this failure mode has exactly one implementation to test.
 function Read-HostSafe {
-    param([string]$Prompt)
+    param([string]$Prompt, [string]$Default = $null)
     $raw = Read-Host $Prompt
     if ($null -eq $raw) {
+        # EOF-safety: Read-Host returned null (redirected/piped stdin
+        # exhausted, or Read-Host unavailable). This NEVER resolves to
+        # -Default -- a null read means the input stream itself ended, which
+        # is a different condition from a deliberate blank line, and must
+        # keep hitting the existing hard-exit path unchanged regardless of
+        # whether a default was offered for this prompt.
         Write-Log "Read-HostSafe: Read-Host returned null (redirected stdin exhausted, or Read-Host unavailable) at prompt '$Prompt' -- exiting."
         Write-Host ""
         Write-Host "  Input ended unexpectedly." -ForegroundColor Red
@@ -400,7 +463,13 @@ function Read-HostSafe {
         Exit-TpmProcess -Code 1
         return ''
     }
-    return $raw.Trim()
+    $trimmed = $raw.Trim()
+    # A real blank line (interactive Enter, or a deliberate blank line in
+    # piped/unattended input) and whitespace-only input are both treated as
+    # "accept the shown default" when -Default was supplied. Non-blank input
+    # always wins and -Default is ignored entirely.
+    if ($trimmed -eq '' -and $null -ne $Default) { return $Default }
+    return $trimmed
 }
 
 function Read-PathWithBrowse {
@@ -918,6 +987,254 @@ function Test-PathInside {
     return $c.StartsWith($p + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)
 }
 
+# =============================================================================
+# TRANSACTIONAL EXTRACTION -- shared staging/promote/rollback primitives
+# =============================================================================
+# Added in the P1 #1 remediation pass: an independent review forced a
+# failure partway through a multi-file extraction (ReShade's 2 DLLs,
+# dgVoodoo2's 6 files) and confirmed the first file was left behind in the
+# live destination folder -- a real violation of the "no partial deploy"
+# guarantee this project's own docs claimed. These three primitives make
+# both dgVoodoo2 and ReShade extraction genuinely all-or-nothing:
+# everything is written to and validated in an isolated staging directory
+# first; only a COMPLETE, valid staged set is ever promoted into the real
+# destination; and promotion itself preserves enough of the prior
+# destination state to restore it exactly if anything fails partway
+# through the promotion itself.
+
+# Creates a fresh, uniquely-named staging directory under a controlled TPM
+# temp location (never directly under Scripts\ReShade\ / Scripts\dgVoodoo2\
+# or any other real destination), so extraction/validation never touches
+# the live destination until a complete, valid set is ready to promote.
+function New-TpmStagingDirectory {
+    param([string]$Label = 'Staging')
+    $root = Join-Path $env:TEMP 'TeknoParrotManagerStaging'
+    [void][System.IO.Directory]::CreateDirectory($root)
+    $safeLabel = ($Label -replace '[^A-Za-z0-9_-]', '_')
+    $dir = Join-Path $root ("{0}-{1}" -f $safeLabel, ([guid]::NewGuid().ToString('N')))
+    [void][System.IO.Directory]::CreateDirectory($dir)
+    return $dir
+}
+
+# Copies one archive entry's content to a destination file path. Extracted
+# into its own function (rather than inlined at each call site) for two
+# reasons: it is shared between dgVoodoo2 and ReShade extraction, and
+# isolating the actual byte-copy step behind a named function lets tests
+# deterministically simulate a failure on a specific file during
+# extraction (e.g. "the 2nd of 6 files fails to copy") without needing to
+# hand-craft a real corrupt ZIP byte stream that fails on exactly one
+# entry.
+function Copy-TpmZipEntryToFile {
+    param($Entry, [string]$DestPath)
+    $srcStream = $Entry.Open()
+    try {
+        $dstStream = [System.IO.File]::Open($DestPath, [System.IO.FileMode]::Create,
+                         [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        try   { $srcStream.CopyTo($dstStream) }
+        finally { $dstStream.Dispose() }
+    } finally { $srcStream.Dispose() }
+}
+
+# Promotes a fully-staged, fully-validated set of files from $StagingDir
+# into $DestDir, rollback-safe: if ANY file fails to move into place, every
+# already-promoted file from this same call is removed again, every
+# destination file that was moved aside to make room is restored to its
+# original location and name, and a destination directory this call
+# created (one that did not exist before) is removed again -- so the
+# externally observable destination state is byte-for-byte identical to
+# what it was before this function was ever called. Callers must have
+# already fully validated the staged files (entry presence, sanitized
+# names, containment, size/format checks) -- this function's only job is
+# the move itself, not content validation.
+#
+# $FileNames must be flat file names (no subpaths) already sanitized and
+# containment-checked by the caller; this function re-validates containment
+# against $DestDir defensively before every write as well, matching the
+# same protection class as the rest of this script's extraction code.
+#
+# Rollback bookkeeping rules (P1 remediation -- a prior version of this
+# function recorded a file as "moved" only in the statement immediately
+# following a successful Move-Item, so a Move-Item that partially mutated
+# the destination before itself throwing -- e.g. a cross-volume move that
+# copies the new bytes in, then fails deleting the source -- left an
+# untracked, unrolled-back file sitting at $destPath):
+#   - Every Move-Item that can mutate $DestDir is wrapped in its own
+#     try/catch. On a thrown error, the destination is re-checked with
+#     Test-Path BEFORE the error propagates; if anything now exists at the
+#     target path, it is recorded exactly as if the move had "succeeded",
+#     because from the destination's point of view, it did. Nothing here
+#     ever infers state from what should have happened -- only from what
+#     Test-Path confirms actually happened.
+#   - Rollback failures are never swallowed. Each rollback step's own
+#     try/catch records a diagnostic string on failure instead of only
+#     logging it; if any rollback step failed, this function throws a
+#     distinct "ROLLBACK FAILED" error carrying both the original failure
+#     and every rollback failure, and deliberately leaves the backup
+#     directory in place (not cleaned up) for manual recovery -- callers
+#     must never treat a caught exception here as "destination restored"
+#     without checking which failure mode they got.
+#
+# P1 3rd-round remediation (phase-1 move-aside is transactional too):
+#   - Before moving a pre-existing destination file aside, capture its
+#     length, SHA256, and timestamp. After any thrown Move-Item, inspect both
+#     the original and backup paths immediately. A backup is usable only when
+#     its length and SHA256 match that captured pre-state. If the original
+#     disappeared without a valid backup, classify the transaction as
+#     unrecoverable and preserve the evidence through the rollback-failure
+#     path instead of silently losing the file.
+#   - Destination-directory and rollback-directory creation are inside the
+#     protected try block, so a setup failure is handled by the same rollback
+#     path that removes a destination directory this call created.
+#   - Rollback-backup cleanup failures are distinct from rollback failures.
+#     The destination is restored in both cases, but a cleanup failure throws
+#     "TPM TRANSACTION CLEANUP FAILED" and preserves the residue for diagnosis.
+function Invoke-TpmTransactionalPromote {
+    param([string]$StagingDir, [string]$DestDir, [string[]]$FileNames)
+
+    $destDirExisted = Test-Path -LiteralPath $DestDir -PathType Container
+    $rollbackDir = Join-Path $StagingDir '.tpm-rollback-backup'
+
+    $movedAside = New-Object System.Collections.Generic.List[string]
+    $promoted = New-Object System.Collections.Generic.List[string]
+    $lostSources = New-Object System.Collections.Generic.List[string]
+    $invalidBackups = New-Object System.Collections.Generic.List[string]
+
+    try {
+        [void][System.IO.Directory]::CreateDirectory($DestDir)
+        [void][System.IO.Directory]::CreateDirectory($rollbackDir)
+
+        foreach ($name in $FileNames) {
+            $safeName = [System.IO.Path]::GetFileName($name)
+            $destPath = Join-Path $DestDir $safeName
+            if ([string]::IsNullOrWhiteSpace($safeName) -or -not (Test-PathInside $destPath $DestDir)) {
+                throw "SECURITY: refused to promote entry outside destination folder ($name)."
+            }
+            if (Test-Path -LiteralPath $destPath -PathType Leaf) {
+                $bakPath = Join-Path $rollbackDir $safeName
+                try {
+                    $preItem = Get-Item -LiteralPath $destPath -ErrorAction Stop
+                    $preHash = (Get-FileHash -LiteralPath $destPath -Algorithm SHA256 -ErrorAction Stop).Hash
+                    $preMoveState = [pscustomobject]@{
+                        Length = [int64]$preItem.Length
+                        Sha256 = ([string]$preHash).ToUpperInvariant()
+                        LastWriteTimeUtc = $preItem.LastWriteTimeUtc
+                    }
+                    $preMoveEvidence = "Length=$($preMoveState.Length) SHA256=$($preMoveState.Sha256) LastWriteTimeUtc=$($preMoveState.LastWriteTimeUtc.ToString('o'))"
+                } catch {
+                    throw "TPM TRANSACTION PRE-STATE CAPTURE FAILED for '$destPath' -- refusing to move the existing file. $_"
+                }
+                try {
+                    Move-Item -LiteralPath $destPath -Destination $bakPath -Force -ErrorAction Stop
+                    [void]$movedAside.Add($safeName)
+                } catch {
+                    $originalExistsAfterFailure = Test-Path -LiteralPath $destPath -PathType Leaf
+                    $backupExistsAfterFailure = Test-Path -LiteralPath $bakPath -PathType Leaf
+                    $backupValid = $false
+                    $backupEvidence = 'backup is not observable'
+                    if ($backupExistsAfterFailure) {
+                        try {
+                            $backupItem = Get-Item -LiteralPath $bakPath -ErrorAction Stop
+                            $backupHash = (Get-FileHash -LiteralPath $bakPath -Algorithm SHA256 -ErrorAction Stop).Hash
+                            $backupEvidence = "Length=$($backupItem.Length) SHA256=$(([string]$backupHash).ToUpperInvariant()) LastWriteTimeUtc=$($backupItem.LastWriteTimeUtc.ToString('o'))"
+                            $backupValid = ([int64]$backupItem.Length -eq $preMoveState.Length) -and
+                                           (([string]$backupHash).ToUpperInvariant() -eq $preMoveState.Sha256)
+                        } catch {
+                            $backupEvidence = "backup inspection failed: $($_.Exception.Message)"
+                        }
+                    }
+                    if ($backupValid) {
+                        [void]$movedAside.Add($safeName)
+                    } elseif (-not $originalExistsAfterFailure) {
+                        $lostMsg = "original file for '$destPath' was lost during move-aside and no valid backup is observable at '$bakPath' -- unrecoverable. Pre-move evidence: $preMoveEvidence. Backup evidence: $backupEvidence. Move error: $_"
+                        [void]$lostSources.Add($lostMsg)
+                        Write-Log "Invoke-TpmTransactionalPromote: PHASE-1 SOURCE LOST -- $lostMsg"
+                    } elseif ($backupExistsAfterFailure) {
+                        $invalidMsg = "backup for '$destPath' exists but does not match the captured pre-state at '$bakPath'. Pre-move evidence: $preMoveEvidence. Backup evidence: $backupEvidence. Move error: $_"
+                        [void]$invalidBackups.Add($invalidMsg)
+                        Write-Log "Invoke-TpmTransactionalPromote: INVALID PHASE-1 BACKUP -- $invalidMsg"
+                    }
+                    throw
+                }
+            }
+        }
+
+        foreach ($name in $FileNames) {
+            $safeName = [System.IO.Path]::GetFileName($name)
+            $srcPath  = Join-Path $StagingDir $safeName
+            $destPath = Join-Path $DestDir $safeName
+            try {
+                Move-Item -LiteralPath $srcPath -Destination $destPath -Force -ErrorAction Stop
+                [void]$promoted.Add($safeName)
+            } catch {
+                if (Test-Path -LiteralPath $destPath) { [void]$promoted.Add($safeName) }
+                throw
+            }
+        }
+    } catch {
+        $promotionError = $_
+        Write-Log "Invoke-TpmTransactionalPromote: FAILED promoting into '$DestDir' -- rolling back. $promotionError"
+        $rollbackErrors = New-Object System.Collections.Generic.List[string]
+        foreach ($lostMsg in $lostSources) { [void]$rollbackErrors.Add($lostMsg) }
+        foreach ($invalidMsg in $invalidBackups) { [void]$rollbackErrors.Add($invalidMsg) }
+
+        foreach ($name in $promoted) {
+            $destPath = Join-Path $DestDir $name
+            try {
+                if (Test-Path -LiteralPath $destPath) { Remove-Item -LiteralPath $destPath -Force -ErrorAction Stop }
+            } catch {
+                Write-Log "Invoke-TpmTransactionalPromote: ROLLBACK FAILED removing promoted '$destPath' -- $_"
+                [void]$rollbackErrors.Add("remove newly-promoted '$destPath' -- $_")
+            }
+        }
+        foreach ($name in $movedAside) {
+            $bakPath  = Join-Path $rollbackDir $name
+            $destPath = Join-Path $DestDir $name
+            try {
+                if (Test-Path -LiteralPath $bakPath) {
+                    Move-Item -LiteralPath $bakPath -Destination $destPath -Force -ErrorAction Stop
+                } else {
+                    [void]$rollbackErrors.Add("backup for '$destPath' is missing -- cannot restore original file")
+                }
+            } catch {
+                Write-Log "Invoke-TpmTransactionalPromote: ROLLBACK FAILED restoring '$destPath' -- $_"
+                [void]$rollbackErrors.Add("restore '$destPath' -- $_")
+            }
+        }
+        if (-not $destDirExisted) {
+            try {
+                if ((Test-Path -LiteralPath $DestDir) -and (@(Get-ChildItem -LiteralPath $DestDir -Force -ErrorAction SilentlyContinue).Count -eq 0)) {
+                    Remove-Item -LiteralPath $DestDir -Force -ErrorAction Stop
+                }
+            } catch {
+                Write-Log "Invoke-TpmTransactionalPromote: ROLLBACK FAILED removing newly-created destination directory '$DestDir' -- $_"
+                [void]$rollbackErrors.Add("remove newly-created destination directory '$DestDir' -- $_")
+            }
+        }
+        if ($rollbackErrors.Count -gt 0) {
+            $rollbackMsg = "TPM TRANSACTION ROLLBACK FAILED for '$DestDir' -- destination state may be INCONSISTENT and requires manual inspection. Backups (if any) preserved at '$rollbackDir'. Original error: $promotionError | Rollback failure(s): $($rollbackErrors -join ' ;; ')"
+            Write-Log "Invoke-TpmTransactionalPromote: $rollbackMsg"
+            throw $rollbackMsg
+        }
+        try {
+            if (Test-Path -LiteralPath $rollbackDir) { Remove-Item -LiteralPath $rollbackDir -Recurse -Force -ErrorAction Stop }
+        } catch {
+            $cleanupMsg = "TPM TRANSACTION CLEANUP FAILED for '$DestDir' -- destination was successfully restored to its pre-call state, but the rollback-backup directory could not be removed and recovery residue remains at '$rollbackDir'. Original promotion error: $promotionError | Cleanup error: $_"
+            Write-Log "Invoke-TpmTransactionalPromote: $cleanupMsg"
+            throw $cleanupMsg
+        }
+        Write-Log "Invoke-TpmTransactionalPromote: rollback completed -- '$DestDir' restored to its pre-call state."
+        throw $promotionError
+    }
+
+    try {
+        if (Test-Path -LiteralPath $rollbackDir) { Remove-Item -LiteralPath $rollbackDir -Recurse -Force -ErrorAction Stop }
+    } catch {
+        $cleanupMsg = "TPM TRANSACTION CLEANUP FAILED for '$DestDir' -- destination promotion succeeded and is correct, but the rollback-backup directory could not be removed and recovery residue remains at '$rollbackDir'. Cleanup error: $_"
+        Write-Log "Invoke-TpmTransactionalPromote: $cleanupMsg"
+        throw $cleanupMsg
+    }
+    return $true
+}
 # Logs a SHA256 audit trail for a binary downloaded from a third-party
 # source (GitHub Releases, a raw repo file, etc). None of the sources this
 # script pulls from publish checksums to verify against, and most of the
@@ -1877,11 +2194,96 @@ function Select-RegisteredGamesInteractive {
 function Test-ReShadeDllSignature {
     param([string]$Path)
     try {
-        $sig    = Get-AuthenticodeSignature -LiteralPath $Path
-        $signer = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { "(none)" }
-        return [pscustomobject]@{ Status = $sig.Status.ToString(); Signer = $signer }
+        $sig        = Get-AuthenticodeSignature -LiteralPath $Path
+        $signer     = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { "(none)" }
+        $thumbprint = if ($sig.SignerCertificate) { $sig.SignerCertificate.Thumbprint } else { "(none)" }
+        # Thumbprint is additive -- every existing caller (informational-only
+        # display for a user-supplied DLL) reads only .Status/.Signer, so
+        # adding a field here does not change this function's existing
+        # return contract or behavior for those callers.
+        return [pscustomobject]@{ Status = $sig.Status.ToString(); Signer = $signer; Thumbprint = $thumbprint }
     } catch {
-        return [pscustomobject]@{ Status = "Error"; Signer = "(none)" }
+        return [pscustomobject]@{ Status = "Error"; Signer = "(none)"; Thumbprint = "(none)" }
+    }
+}
+
+# Hard trust anchor for the ReShade installer's self-signed Authenticode
+# certificate. This is the fingerprint the official reshade.me download
+# page itself publishes for the currently-shipping certificate, and it
+# matches what was independently observed by downloading and inspecting the
+# live installer during this feature's design. See SECURITY.md for the full
+# rationale and rotation procedure -- this value can ONLY be changed by a
+# maintainer, sourced independently from the allowlisted reshade.me site
+# itself, and shipped in a version bump with the change documented in
+# SECURITY.md. TPM never auto-updates this value from a live response.
+$Script:ReShadeTrustedCertThumbprint = '589690208A5E52FB96980C4A6698F50ACD47C49F'
+
+# The ONLY Get-AuthenticodeSignature .Status value this script accepts as
+# "genuinely the intact, legitimately self-signed ReShade installer."
+# ReShade's certificate is self-signed with no independent CA trust anchor,
+# so Windows can never report Status=Valid for it -- confirmed live by
+# downloading and inspecting the real installer during this feature's
+# design (and re-confirmed during the P1 #2 remediation pass): a genuine,
+# untampered ReShade_Setup_<version>.exe reports Status=UnknownError. This
+# is deliberately a single-entry allowlist (deny-by-default), not an
+# "everything except the bad ones" denylist -- SECURITY.md documents this
+# same rationale and the value must be updated there in the same change if
+# it is ever revised.
+$Script:ReShadeAcceptedSignatureStatuses = @('UnknownError')
+
+# Fingerprint-gated, status-gated signature check for a downloaded ReShade
+# Setup.exe, used ONLY by the auto-download path (Part 3b) -- never changes
+# Test-ReShadeDllSignature's own return contract, which stays
+# informational-only for user-supplied DLLs.
+#
+# Trust requires BOTH of the following (P1 #2 remediation: an earlier
+# version of this function checked only the thumbprint and ignored
+# .Status entirely, which let a HashMismatch -- a tampered or corrupted
+# file -- pass as trusted whenever its signer certificate's Thumbprint
+# field happened to still read as the pinned value; that is a real
+# security bug, not a hypothetical one, and is fixed here):
+#   1. Status is on the explicit accept-list ($Script:ReShadeAcceptedSignatureStatuses,
+#      today just 'UnknownError' -- the one status a genuine self-signed
+#      ReShade installer actually produces). Any other status --
+#      HashMismatch (tampered/corrupted), NotSigned, NotTrusted,
+#      NotSupportedFileFormat, Incompatible, the "Error" sentinel from an
+#      exception, or any future/unrecognized status PowerShell might ever
+#      report -- fails closed. This is deny-by-default: only the one
+#      explicitly accepted status can ever pass, not "everything except a
+#      known-bad list."
+#   2. The signer certificate's Thumbprint exactly matches the pinned
+#      constant ($Script:ReShadeTrustedCertThumbprint) -- the hard root of
+#      trust for a self-signed certificate (a self-signed cert's Subject
+#      string alone proves nothing -- anyone can mint a certificate with
+#      any Subject text).
+# Subject match is layered on top as a secondary sanity check only, never
+# a substitute for either of the above. Fails closed (Trusted = $false) on
+# any status/fingerprint mismatch, missing/invalid/unparseable signature,
+# or exception -- no "proceed anyway" fallback and no auto-adoption of a
+# changed fingerprint into config. Logs Status, Subject, and Thumbprint
+# always, pass or fail, for audit trail.
+function Test-ReShadeSetupTrustedSignature {
+    param([string]$Path)
+    $result = Test-ReShadeDllSignature -Path $Path
+    $expectedSubject = 'CN=ReShade, E=info@reshade.me'
+    $statusAccepted  = ($Script:ReShadeAcceptedSignatureStatuses -contains $result.Status)
+    $thumbprintMatch = ($result.Thumbprint -and $result.Thumbprint -ieq $Script:ReShadeTrustedCertThumbprint)
+    $subjectMatch    = ($result.Signer -eq $expectedSubject)
+    # Both gates must pass. Neither alone is sufficient: a matching
+    # thumbprint on a HashMismatch-status file (P1 #2) or an accepted
+    # status with the wrong thumbprint (a different, untrusted signer)
+    # must both fail closed.
+    $trusted         = ($statusAccepted -and $thumbprintMatch)
+    Write-Log ("ReShadeSetup signature: Status={0} StatusAccepted={1} Subject='{2}' Thumbprint={3} ExpectedThumbprint={4} ThumbprintMatch={5} SubjectMatch={6} Trusted={7}" -f `
+        $result.Status, $statusAccepted, $result.Signer, $result.Thumbprint, $Script:ReShadeTrustedCertThumbprint, $thumbprintMatch, $subjectMatch, $trusted)
+    return [pscustomobject]@{
+        Trusted          = $trusted
+        Status           = $result.Status
+        StatusAccepted   = $statusAccepted
+        Signer           = $result.Signer
+        Thumbprint       = $result.Thumbprint
+        ThumbprintMatch  = $thumbprintMatch
+        SubjectMatch     = $subjectMatch
     }
 }
 
@@ -1913,6 +2315,171 @@ function Get-ReShadeLatestVersion {
         if ($resp.Content -match 'ReShade_Setup_(\d+\.\d+\.\d+(?:\.\d+)?)') { return $Matches[1] }
     } catch {}
     return $null
+}
+
+# Constructs the direct download URL for the plain (non-Addon) ReShade
+# installer for a given version string, then validates it against the same
+# host-allowlist pattern used elsewhere in this script (scheme=https, host
+# exactly reshade.me, no userinfo, path under /downloads/). Returns $null on
+# an invalid version string or a URL that fails the allowlist -- callers
+# must treat $null as "do not download."
+function Get-ReShadeSetupDownloadUrl {
+    param([string]$Version)
+    if ([string]::IsNullOrWhiteSpace($Version) -or $Version -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') { return $null }
+    $url = "https://reshade.me/downloads/ReShade_Setup_$Version.exe"
+    $parsedUri = $null
+    $urlOk = [System.Uri]::TryCreate($url, [System.UriKind]::Absolute, [ref]$parsedUri) -and
+             $parsedUri.Scheme -eq 'https' -and
+             $parsedUri.Host -eq 'reshade.me' -and
+             [string]::IsNullOrEmpty($parsedUri.UserInfo) -and
+             $parsedUri.AbsolutePath.StartsWith('/downloads/', [System.StringComparison]::Ordinal)
+    if (-not $urlOk) {
+        Write-Log "ReShadeSetup: unexpected download URL format -- skipping."
+        return $null
+    }
+    return $url
+}
+
+# ReShade_Setup_<version>.exe is a small C# WPF EXE stub with a standard ZIP
+# archive appended to the end of the file (self-extracting-archive format).
+# This replicates the verified block-scan-for-PK-signature logic from
+# crosire/reshade's own published, open-source installer source
+# (setup/MainWindow.xaml.cs, InstallStep_InstallReShadeModule): scan forward
+# for the ZIP local-file-header signature (PK\x03\x04), open everything from
+# that offset onward as a ZipArchive, and require entries named exactly
+# ReShade32.dll and ReShade64.dll. Narrowly scoped to this confirmed format
+# -- not a generic "try to parse whatever" extractor.
+#
+# Transactional (P1 #1 remediation): everything is extracted into an
+# isolated staging directory (New-TpmStagingDirectory) and fully validated
+# there first; $DestDir is never touched until a complete, valid staged set
+# exists. Promotion into $DestDir goes through Invoke-TpmTransactionalPromote,
+# which is itself rollback-safe -- if promoting either file fails partway
+# through and rollback completes, $DestDir is restored to exactly its
+# pre-call state. On a recoverable failure (PK signature not found, no
+# candidate archive contains both required entries, an extraction-time error
+# on either entry, or a promotion-time error whose rollback completes),
+# $DestDir ends up byte-for-byte unchanged from before this function was
+# called. If an underlying filesystem mutation loses the original source
+# before a valid backup is observable, exact restoration is impossible; the
+# transaction instead reports an explicit ROLLBACK FAILED / INCONSISTENT
+# condition and preserves recovery evidence. The staging directory is
+# removed on ordinary success/failure when cleanup succeeds; it is
+# preserved when transaction recovery, transaction cleanup, or ordinary
+# staging cleanup fails so
+# recovery evidence/residue remains available. Extracts both DLLs into
+# $DestDir under their existing
+# ReShade64.dll / ReShade32.dll naming.
+function Expand-ReShadeSelfExtractingArchive {
+    param([string]$SetupExePath, [string]$DestDir)
+
+    $allBytes = [System.IO.File]::ReadAllBytes($SetupExePath)
+    $pkSig    = [byte[]](0x50, 0x4B, 0x03, 0x04)   # "PK\x03\x04"
+    $offsets  = New-Object System.Collections.Generic.List[int]
+    for ($i = 0; $i -le ($allBytes.Length - $pkSig.Length); $i++) {
+        if ($allBytes[$i] -eq $pkSig[0] -and $allBytes[$i + 1] -eq $pkSig[1] -and
+            $allBytes[$i + 2] -eq $pkSig[2] -and $allBytes[$i + 3] -eq $pkSig[3]) {
+            [void]$offsets.Add($i)
+        }
+    }
+    if ($offsets.Count -eq 0) {
+        throw "ReShade installer: no embedded ZIP archive found (PK signature not present) -- format may have changed."
+    }
+
+    $required   = @('ReShade32.dll', 'ReShade64.dll')
+    $stagingDir = New-TpmStagingDirectory -Label 'ReShade'
+    $rollbackFailurePreserved = $false
+    $operationError = $null
+    try {
+        # The raw PE stub can legitimately contain earlier byte sequences
+        # that happen to match the ZIP local-file-header signature without
+        # being a real archive (confirmed live during this feature's
+        # implementation: the real installer's own icon/resource data
+        # produces exactly this -- a PK\x03\x04-prefixed region that
+        # .NET's ZipArchive opens without error but reports zero entries).
+        # Taking the first raw match unconditionally is therefore not
+        # reliable. Instead, try every candidate offset in file order and
+        # use the first one that both opens as a valid archive AND
+        # contains both required entries -- narrowly scoped to "the
+        # confirmed real archive," not a generic best-effort parse.
+        $extracted = $false
+        foreach ($offset in $offsets) {
+            $zipBytes = New-Object byte[] ($allBytes.Length - $offset)
+            [System.Array]::Copy($allBytes, $offset, $zipBytes, 0, $zipBytes.Length)
+            $ms      = New-Object System.IO.MemoryStream(, $zipBytes)
+            $archive = $null
+            try {
+                $archive = [System.IO.Compression.ZipArchive]::new($ms, [System.IO.Compression.ZipArchiveMode]::Read)
+                $entries = @{}
+                foreach ($e in $archive.Entries) { $entries[$e.Name] = $e }
+                $missing = @($required | Where-Object { -not $entries.ContainsKey($_) })
+                if ($missing.Count -gt 0) { continue }
+
+                # This candidate is the confirmed real archive -- copy both
+                # entries into the STAGING directory only, entirely inside
+                # this loop iteration, so nothing here is ever used after
+                # disposal. $DestDir is not touched at all in this phase.
+                foreach ($name in $required) {
+                    $stagePath = Join-Path $stagingDir $name
+                    if (-not (Test-PathInside $stagePath $stagingDir)) {
+                        throw "SECURITY: refused to stage ReShade entry outside staging folder ($name)."
+                    }
+                    Copy-TpmZipEntryToFile -Entry $entries[$name] -DestPath $stagePath
+                }
+                $extracted = $true
+            } catch [System.IO.InvalidDataException] {
+                # Not a valid archive at this offset -- try the next candidate.
+            } finally {
+                if ($archive) { $archive.Dispose() }
+                $ms.Dispose()
+            }
+            if ($extracted) { break }
+        }
+        if (-not $extracted) {
+            throw "ReShade installer: expected entries (ReShade32.dll, ReShade64.dll) not found in any embedded archive candidate -- format may have changed."
+        }
+
+        # Final validation of the staged set before promotion: both files
+        # must actually exist in staging with non-zero length. A failure
+        # here (e.g. Copy-TpmZipEntryToFile silently produced a truncated
+        # file) fails closed before anything is promoted.
+        foreach ($name in $required) {
+            $stagePath = Join-Path $stagingDir $name
+            if (-not (Test-Path -LiteralPath $stagePath -PathType Leaf) -or (Get-Item -LiteralPath $stagePath).Length -le 0) {
+                throw "ReShade installer: staged entry '$name' is missing or empty after extraction -- aborting before any destination change."
+            }
+        }
+
+        # Only now, with a complete and valid staged set, touch the real
+        # destination -- rollback-safe promotion.
+        [void](Invoke-TpmTransactionalPromote -StagingDir $stagingDir -DestDir $DestDir -FileNames $required)
+    } catch {
+        $operationError = $_
+        # If Invoke-TpmTransactionalPromote reports a rollback or cleanup
+        # failure, its backup copies live under
+        # $stagingDir\.tpm-rollback-backup and are the remaining route to
+        # manual recovery -- deleting $stagingDir here would destroy that
+        # evidence right after creating it. Skip cleanup for either
+        # transaction recovery failure mode.
+        if ($_.Exception.Message -match 'ROLLBACK FAILED|CLEANUP FAILED') {
+            $rollbackFailurePreserved = $true
+            Write-Log "Expand-ReShadeSelfExtractingArchive: staging directory '$stagingDir' preserved for manual recovery after a transaction recovery failure."
+        }
+        throw
+    } finally {
+        if (-not $rollbackFailurePreserved -and (Test-Path -LiteralPath $stagingDir)) {
+            try {
+                Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction Stop
+            } catch {
+                $cleanupMessage = "TPM STAGING CLEANUP FAILED for '$stagingDir' -- destination state was left valid or restored, but ordinary staging cleanup failed; residue remains at '$stagingDir'. Cleanup error: $($_.Exception.Message)"
+                if ($operationError) {
+                    $cleanupMessage += " Original operation error: $($operationError.Exception.Message)"
+                }
+                Write-Log $cleanupMessage
+                throw $cleanupMessage
+            }
+        }
+    }
 }
 
 # Full ReShade install wizard: version check, preset choice, game picker, deploy.
@@ -4306,12 +4873,35 @@ function Invoke-TpmDownloadBits {
     }
 }
 
+# Parses a GitHub Releases API asset "digest" field (e.g.
+# "sha256:82f987...") into a bare uppercase hex hash, or $null if the field
+# is absent/empty or not in the sha256: form this script verifies against.
+# Shared by every release-asset fetch that wants to opt into SHA-256
+# verification (currently BepInEx and dgVoodoo2) -- a generic GitHub
+# Releases API feature, not specific to either project.
+function Get-TpmSha256FromDigestField {
+    param([string]$Digest)
+    if ([string]::IsNullOrWhiteSpace($Digest)) { return $null }
+    if ($Digest -match '^sha256:([0-9a-fA-F]{64})$') { return $Matches[1].ToUpper() }
+    return $null
+}
+
 function Test-TpmDownloadedFile {
-    param([string]$Path, [Int64]$ExpectedBytes = 0)
+    param([string]$Path, [Int64]$ExpectedBytes = 0, [string]$ExpectedSha256 = '')
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
     $item = Get-Item -LiteralPath $Path -ErrorAction Stop
     if ($item.Length -le 0) { return $false }
     if ($ExpectedBytes -gt 0 -and $item.Length -ne $ExpectedBytes) { return $false }
+    if ($ExpectedSha256) {
+        # Fail closed: any hashing error (unreadable file, etc.) is treated
+        # the same as a mismatch, never as "skip the check."
+        $actualHash = $null
+        try { $actualHash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash } catch {}
+        if (-not $actualHash -or $actualHash -ine $ExpectedSha256) {
+            Write-Log "Test-TpmDownloadedFile: SECURITY -- SHA-256 mismatch for '$Path' (expected $ExpectedSha256, got $actualHash)."
+            return $false
+        }
+    }
     return $true
 }
 
@@ -4417,7 +5007,7 @@ function Get-TpmHttpStatusCodeFromError {
 # next tier / final failure. Pass -LastStatusCode ([ref]$var) to read the
 # final HTTP status code (0 if unknown/not HTTP-related) after a failure.
 function Invoke-TpmDownload {
-    param([string]$DownloadUrl, [string]$DestinationPath, [Int64]$ExpectedBytes = 0, [string]$Label = 'Download', [string]$Version = '', [switch]$Quiet, [ref]$LastStatusCode)
+    param([string]$DownloadUrl, [string]$DestinationPath, [Int64]$ExpectedBytes = 0, [string]$Label = 'Download', [string]$Version = '', [switch]$Quiet, [ref]$LastStatusCode, [string]$ExpectedSha256 = '')
     if ($LastStatusCode) { $LastStatusCode.Value = 0 }
     $saveDir = Split-Path -Parent $DestinationPath
     if ([string]::IsNullOrWhiteSpace($saveDir)) { $saveDir = (Get-Location).Path }
@@ -4494,8 +5084,13 @@ function Invoke-TpmDownload {
                 }
             }
         }
-        if (-not (Test-TpmDownloadedFile -Path $tempPath -ExpectedBytes $ExpectedBytes)) {
-            throw "Downloaded file is incomplete or empty."
+        if (-not (Test-TpmDownloadedFile -Path $tempPath -ExpectedBytes $ExpectedBytes -ExpectedSha256 $ExpectedSha256)) {
+            # Fail closed: delete the partial file (handled in the catch
+            # block below via $tempPath) and surface a clear error -- this
+            # covers both "incomplete/empty" and "SHA-256 verification
+            # failed" (Test-TpmDownloadedFile already logged the specific
+            # SECURITY reason for the latter).
+            throw "Downloaded file is incomplete, empty, or failed integrity verification."
         }
         if (Test-Path -LiteralPath $DestinationPath -PathType Leaf) {
             Remove-Item -LiteralPath $DestinationPath -Force -ErrorAction Stop
@@ -5903,8 +6498,18 @@ function Get-BepInExLatestRelease {
                 return $null
             }
             $verStr = $stable.tag_name.TrimStart('v')
+            # The GitHub Releases API serves a machine-readable "digest"
+            # field (sha256:<64-hex>) computed by GitHub itself from the
+            # uploaded bytes, over the same allowlisted api.github.com host
+            # already used to discover this download URL -- confirmed
+            # present on real release assets during design. Extracted here
+            # so every caller can opt into SHA-256 verification via
+            # Invoke-TpmDownload -ExpectedSha256 instead of trusting size
+            # alone; $null (not present/not sha256) means the caller falls
+            # back to size-only validation, same as before this field existed.
+            $expectedSha256 = Get-TpmSha256FromDigestField -Digest $x64Asset.digest
             return [pscustomobject]@{
-                Version = $verStr; DownloadUrl = $x64Asset.browser_download_url; FileName = $x64Asset.name; SizeBytes = [int64]$x64Asset.size
+                Version = $verStr; DownloadUrl = $x64Asset.browser_download_url; FileName = $x64Asset.name; SizeBytes = [int64]$x64Asset.size; ExpectedSha256 = $expectedSha256
             }
         } catch {
             $status = 0
@@ -5923,6 +6528,186 @@ function Get-BepInExLatestRelease {
         }
     }
     return $null
+}
+
+# Fetches the latest dgVoodoo2 release from its official GitHub Releases
+# channel (github.com/dege-diosg/dgVoodoo2). Mirrors Get-BepInExLatestRelease
+# almost exactly: same URL-allowlist validation (scheme=https, host exactly
+# github.com/api.github.com, no userinfo, path under the expected releases
+# path), same 3-attempt retry/backoff/4xx-shortcircuit, same SHA-256 digest
+# extraction. Selects the main (non-dev, non-debug) ZIP asset by name
+# pattern -- dgVoodoo2 releases also ship dev/debug variant ZIPs that this
+# script never wants. Returns [pscustomobject]@{ Version; DownloadUrl;
+# FileName; SizeBytes; ExpectedSha256 } or $null.
+function Get-DgVoodoo2LatestRelease {
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try {
+            $apiUri = 'https://api.github.com/repos/dege-diosg/dgVoodoo2/releases/latest'
+            $resp   = Invoke-WebRequest -Uri $apiUri -UseBasicParsing -TimeoutSec 20 `
+                          -Headers @{ 'User-Agent' = "TeknoParrot-Manager/$ScriptVersion" }
+            $release = $resp.Content | ConvertFrom-Json
+            if (-not $release -or -not $release.assets) { return $null }
+            # Main ZIP asset: named like "dgVoodoo2_87_3.zip" -- excludes any
+            # asset name containing "dev" or "debug" (the dev/debug variant
+            # ZIPs this project deliberately never fetches).
+            $mainAsset = @($release.assets | Where-Object {
+                $_.name -match '(?i)^dgVoodoo2[_0-9.]*\.zip$' -and $_.name -notmatch '(?i)dev|debug'
+            }) | Select-Object -First 1
+            if (-not $mainAsset) { return $null }
+            $parsedUri = $null
+            $urlOk = [System.Uri]::TryCreate($mainAsset.browser_download_url, [System.UriKind]::Absolute, [ref]$parsedUri) -and
+                     $parsedUri.Scheme -eq 'https' -and
+                     $parsedUri.Host -eq 'github.com' -and
+                     [string]::IsNullOrEmpty($parsedUri.UserInfo) -and
+                     $parsedUri.AbsolutePath.StartsWith('/dege-diosg/dgVoodoo2/releases/download/', [System.StringComparison]::Ordinal)
+            if (-not $urlOk) {
+                Write-Log "dgVoodoo2: unexpected download URL format -- skipping."
+                return $null
+            }
+            $verStr = $release.tag_name.TrimStart('v')
+            $expectedSha256 = Get-TpmSha256FromDigestField -Digest $mainAsset.digest
+            return [pscustomobject]@{
+                Version = $verStr; DownloadUrl = $mainAsset.browser_download_url; FileName = $mainAsset.name; SizeBytes = [int64]$mainAsset.size; ExpectedSha256 = $expectedSha256
+            }
+        } catch {
+            $status = Get-TpmHttpStatusCodeFromError -ErrorRecord $_
+            if ($attempt -ge 3 -or ($status -ge 400 -and $status -lt 500)) {
+                Write-Log "dgVoodoo2: release query failed -- $_"; return $null
+            }
+            Write-Log "dgVoodoo2: attempt $attempt failed, retrying in 5s -- $_"
+            Start-Sleep -Seconds 5
+        }
+    }
+    return $null
+}
+
+# Extracts only the 6 known dgVoodoo2 files from a downloaded release ZIP
+# into $DestDir, narrowly scoped rather than a generic "extract everything"
+# -- a changed ZIP layout in a future dgVoodoo2 release is a "stop and tell
+# the user" event, not a best-effort partial extraction. Each entry name is
+# sanitized via [System.IO.Path]::GetFileName() and containment-checked via
+# Test-PathInside before writing, same protection class SECURITY.md already
+# mandates for BepInEx/FFBPlugin. Fails closed if any of the 6 expected
+# entries is missing at its expected subpath within the ZIP.
+#
+# Transactional (P1 #1 remediation): all 6 files are extracted into an
+# isolated staging directory (New-TpmStagingDirectory) and fully validated
+# there first; $DestDir is never touched until the complete, valid set of 6
+# exists in staging. Promotion into $DestDir goes through
+# Invoke-TpmTransactionalPromote, which is itself rollback-safe -- if
+# promoting any one of the 6 files fails partway through and rollback
+# completes, $DestDir is restored to exactly its pre-call state (any of the
+# other 5 already promoted in this same call are removed again, and any
+# pre-existing files that were moved aside to make room are restored).
+# On a recoverable failure (missing ZIP entry, an extraction-time error on
+# any single entry, or a promotion-time error whose rollback completes),
+# $DestDir ends up byte-for-byte unchanged from before this function was
+# called. If an underlying filesystem mutation loses the original source
+# before a valid backup is observable, exact restoration is impossible; the
+# transaction instead reports an explicit ROLLBACK FAILED / INCONSISTENT
+# condition and preserves recovery evidence. The staging directory is
+# removed on ordinary success/failure when cleanup succeeds; it is
+# preserved when transaction recovery, transaction cleanup, or ordinary
+# staging cleanup fails so
+# recovery evidence/residue remains available.
+function Expand-DgVoodoo2Zip {
+    param([string]$ZipPath, [string]$DestDir)
+
+    # Expected subpath (inside the ZIP) -> destination file name. Verified
+    # live against the real dgVoodoo2_87_3.zip release layout during this
+    # feature's implementation: D3D8/DDraw/D3DImm all live under MS\x86\,
+    # Glide2x/Glide3x both live under 3Dfx\x86\, and dgVoodoo.conf sits at
+    # the ZIP root -- matching this script's own existing manual-install
+    # instructions ("From the MS\x86\ subfolder", "From the 3Dfx\x86\
+    # subfolder", "From the root of the ZIP").
+    $expectedEntries = [ordered]@{
+        'MS\x86\D3D8.dll'      = 'D3D8.dll'
+        'MS\x86\DDraw.dll'     = 'DDraw.dll'
+        'MS\x86\D3DImm.dll'    = 'D3DImm.dll'
+        '3Dfx\x86\Glide2x.dll' = 'Glide2x.dll'
+        '3Dfx\x86\Glide3x.dll' = 'Glide3x.dll'
+        'dgVoodoo.conf'        = 'dgVoodoo.conf'
+    }
+
+    $stagingDir = New-TpmStagingDirectory -Label 'dgVoodoo2'
+    $rollbackFailurePreserved = $false
+    $operationError = $null
+    try {
+        $archive = $null
+        try {
+            $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+            # Build a lookup of normalized (backslash, no leading slash) ZIP
+            # entry paths -> ZipArchiveEntry, so each expected subpath can be
+            # matched exactly regardless of the ZIP's own separator style.
+            $byPath = @{}
+            foreach ($entry in $archive.Entries) {
+                $norm = $entry.FullName.Replace('/', '\').TrimStart('\')
+                $byPath[$norm] = $entry
+            }
+
+            $missing = @($expectedEntries.Keys | Where-Object { -not $byPath.ContainsKey($_) })
+            if ($missing.Count -gt 0) {
+                throw "dgVoodoo2 release ZIP layout has changed -- missing expected file(s): $($missing -join ', ')"
+            }
+
+            # Phase 1: extract all 6 files into the STAGING directory only.
+            # $DestDir is not touched at all in this phase.
+            foreach ($subPath in $expectedEntries.Keys) {
+                $destName = $expectedEntries[$subPath]
+                # Sanitize: strip to a bare file name (defense in depth even
+                # though $destName is a fixed literal above, not ZIP-derived)
+                # and verify the resolved staging path stays inside
+                # $stagingDir before ever opening a write handle.
+                $safeName  = [System.IO.Path]::GetFileName($destName)
+                $stagePath = Join-Path $stagingDir $safeName
+                if ([string]::IsNullOrWhiteSpace($safeName) -or -not (Test-PathInside $stagePath $stagingDir)) {
+                    throw "SECURITY: refused to stage dgVoodoo2 entry outside staging folder ($destName)."
+                }
+                Copy-TpmZipEntryToFile -Entry $byPath[$subPath] -DestPath $stagePath
+            }
+        } finally {
+            if ($archive) { $archive.Dispose() }
+        }
+
+        # Final validation of the staged set before promotion: all 6 files
+        # must actually exist in staging with non-zero length.
+        $requiredNames = @($expectedEntries.Values)
+        foreach ($name in $requiredNames) {
+            $stagePath = Join-Path $stagingDir $name
+            if (-not (Test-Path -LiteralPath $stagePath -PathType Leaf) -or (Get-Item -LiteralPath $stagePath).Length -le 0) {
+                throw "dgVoodoo2: staged entry '$name' is missing or empty after extraction -- aborting before any destination change."
+            }
+        }
+
+        # Only now, with a complete and valid staged set of 6, touch the
+        # real destination -- rollback-safe promotion.
+        [void](Invoke-TpmTransactionalPromote -StagingDir $stagingDir -DestDir $DestDir -FileNames $requiredNames)
+    } catch {
+        $operationError = $_
+        # Same reasoning as Expand-ReShadeSelfExtractingArchive: if
+        # Invoke-TpmTransactionalPromote reports a rollback or cleanup
+        # failure, its backup copies under
+        # $stagingDir\.tpm-rollback-backup are the remaining route to
+        # manual recovery -- do not delete them here.
+        if ($_.Exception.Message -match 'ROLLBACK FAILED|CLEANUP FAILED') {
+            $rollbackFailurePreserved = $true
+            Write-Log "Expand-DgVoodoo2Zip: staging directory '$stagingDir' preserved for manual recovery after a transaction recovery failure."
+        }
+        throw
+    } finally {
+        if (-not $rollbackFailurePreserved -and (Test-Path -LiteralPath $stagingDir)) {
+            try {
+                Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction Stop
+            } catch {
+                $cleanupMessage = "TPM STAGING CLEANUP FAILED for '$stagingDir' -- destination state was left valid or restored, but ordinary staging cleanup failed; residue remains at '$stagingDir'. Cleanup error: $($_.Exception.Message)"
+                if ($operationError) {
+                    $cleanupMessage += " Original operation error: $($operationError.Exception.Message)"
+                }
+                Write-Log $cleanupMessage
+                throw $cleanupMessage
+            }
+        }
+    }
 }
 
 # Returns the installed BepInEx version string for a game's exe folder, or
@@ -6048,7 +6833,7 @@ function Invoke-BepInExUpdateCheck {
         Write-Log "BepInEx update check: SECURITY -- aborted, unsafe release filename '$($latest.FileName)'"
         return
     }
-    $downloaded = Invoke-TpmDownload -DownloadUrl $latest.DownloadUrl -DestinationPath $zipPath -ExpectedBytes $latest.SizeBytes -Label 'BepInEx' -Version $latest.Version
+    $downloaded = Invoke-TpmDownload -DownloadUrl $latest.DownloadUrl -DestinationPath $zipPath -ExpectedBytes $latest.SizeBytes -Label 'BepInEx' -Version $latest.Version -ExpectedSha256 $latest.ExpectedSha256
     if (-not $downloaded) {
         Write-Host "  Could not download the BepInEx ZIP -- try again later." -ForegroundColor Red
         Write-Log "BepInEx update check: aborted -- ZIP download failed."
@@ -10411,6 +11196,13 @@ if (-not (Test-Path -LiteralPath $configPath) -and -not $Unattended) {
     [void](Read-Host "  Press Enter to continue")
 }
 
+# True first run only: no saved config.json existed at all before this
+# wizard run started. Used to default the PREVIEW prompt to Y on a true
+# first run only -- a returning user (config.json already existed, whether
+# or not they accept it this run) keeps today's default-to-last-choice
+# behavior instead.
+$isTrueFirstRun = -not (Test-Path -LiteralPath $configPath)
+
 if (Test-Path -LiteralPath $configPath) {
     try {
         $cfg = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
@@ -10594,7 +11386,7 @@ if (-not $configAccepted -and -not $Unattended) {
     Write-Host "  Folder naming mode" -ForegroundColor Cyan
     Write-Host "  Y = RetroBat/Batocera style: GameName.teknoparrot" -ForegroundColor DarkCyan
     Write-Host "  N = Standard style: GameName  (used by LaunchBox and most other frontends)" -ForegroundColor DarkCyan
-    $rbChoice = (Read-HostSafe "  Use RetroBat folder naming? (Y/N)").ToUpper()
+    $rbChoice = (Read-HostSafe "  Use RetroBat folder naming? (Y/N, default N)" -Default 'N').ToUpper()
     $retroBat = ($rbChoice -eq "Y")
     if ($retroBat) { Write-Log "RetroBat mode enabled by user." }
 }
@@ -10621,16 +11413,19 @@ $eggmanDatActionThisRun = if ($eggmanDatZip -or $datFilePath) { 'Reused' } else 
 
 if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
     Write-Host ""
-    Write-Host "  Eggman dat files (highly recommended)" -ForegroundColor Cyan
+    Write-Host "  Game-recognition index file (Eggman dat)  (highly recommended)" -ForegroundColor Cyan
     Write-Host "  This is a small index/database file, not the games themselves -- it" -ForegroundColor DarkCyan
-    Write-Host "  never downloads any game data. It helps TPM correctly register games" -ForegroundColor DarkCyan
-    Write-Host "  that share an executable name, use an ELF instead of an .exe, or have" -ForegroundColor DarkCyan
-    Write-Host "  a slightly misnamed folder." -ForegroundColor DarkCyan
+    Write-Host "  never downloads any game data. It helps TPM recognize and correctly" -ForegroundColor DarkCyan
+    Write-Host "  register games that share an executable name, use an ELF instead of" -ForegroundColor DarkCyan
+    Write-Host "  an .exe, or have a slightly misnamed folder. Maintained by the" -ForegroundColor DarkCyan
+    Write-Host "  community game-recognition project (Eggman's Repository) -- a" -ForegroundColor DarkCyan
+    Write-Host "  trusted third-party maintainer's index project, not a game-file" -ForegroundColor DarkCyan
+    Write-Host "  source." -ForegroundColor DarkCyan
     Write-Host "  Without one, a few games may need registering by hand instead." -ForegroundColor DarkCyan
     Write-Host "    D) Download the latest from Eggman's Repository  (~145 MB)"
     Write-Host "    B) Browse for a ZIP or dat file I already have"
     Write-Host "    N) Skip (not recommended)"
-    $datChoice = (Read-HostSafe "  Choice (D/B/N)").ToUpper()
+    $datChoice = (Read-HostSafe "  Choice (D/B/N, default D)" -Default 'D').ToUpper()
     $raw = ''   # shared path variable for B and the download-fallback path
 
     if ($datChoice -eq 'D') {
@@ -10712,37 +11507,20 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
         Write-Host "  file has no release to compare it against." -ForegroundColor Yellow
     }
 
-    # One consistent supplementary-dat follow-up, asked exactly once
-    # regardless of how the primary file was obtained (download or browse)
-    # or which type it turned out to be (ZIP or standalone dat) --
-    # previously this question had different wording, or wasn't asked at
-    # all, depending on which of three separate up-front menu choices
-    # (D/Z/F) the user happened to pick.
-    if ($eggmanDatZip) {
-        Write-Host "  A supplementary dat is another small index file -- it adds alternate" -ForegroundColor DarkCyan
-        Write-Host "  or regional version info for games already covered by the main dat" -ForegroundColor DarkCyan
-        Write-Host "  above. Also just an index, never game data." -ForegroundColor DarkCyan
-        $askSupp = (Read-HostSafe "  Also index supplementary dat for alternate version info? (Y/N)").ToUpper()
-        $includeSupplementary = ($askSupp -eq 'Y')
-        if ($includeSupplementary) { Write-Log "EggmanDat: supplementary indexing enabled." }
-    } elseif ($datFilePath) {
-        Write-Host "  A supplementary dat is another small index file -- it adds alternate" -ForegroundColor DarkCyan
-        Write-Host "  or regional version info for games already covered by the main dat" -ForegroundColor DarkCyan
-        Write-Host "  above. Also just an index, never game data." -ForegroundColor DarkCyan
-        $askSupp = (Read-HostSafe "  Do you also have a separate supplementary dat file? (Y/N)").ToUpper()
-        if ($askSupp -eq 'Y') {
-            $rawSupp = Read-PathWithBrowse "  Path to supplementary dat file" -Mode File -FileFilter "dat files (*.dat)|*.dat|All files (*.*)|*.*"
-            if ($rawSupp) {
-                if (Test-Path -LiteralPath $rawSupp) {
-                    $supplementaryDatPath = $rawSupp
-                    $includeSupplementary = $true
-                    Write-Log "Config: supplementaryDatPath set to $rawSupp"
-                } else {
-                    Write-Host "  WARNING: Supplementary dat not found -- skipped." -ForegroundColor Yellow
-                    Write-Log "Config: supplementary dat not found at $rawSupp -- skipped."
-                }
-            }
-        }
+    # Extra version-info file (supplementary dat) follow-up: deferred out of
+    # this initial wizard rather than asked here. Checked, not assumed: a
+    # supplementary dat only adds alternate/regional version info for games
+    # the main Eggman dat already recognizes -- it does not gate whether a
+    # game is recognized/registered at all, so deferring it does not reduce
+    # baseline recognition quality for a normal first build. Enabling it
+    # later and re-running "Register only" (games already extracted -- just
+    # register) is the existing supported path for applying it retroactively.
+    # Instead of a blocking Y/N here, TPM watches this run's actual match
+    # results and, if any game had an uncertain match, prints a targeted
+    # recommendation to set this up afterward -- see the post-run summary.
+    if ($eggmanDatZip -or $datFilePath) {
+        Write-Host "  An extra version-info file (supplementary dat) can be added later if" -ForegroundColor DarkCyan
+        Write-Host "  any games end up with an uncertain match -- TPM will recommend it then." -ForegroundColor DarkCyan
     }
 } elseif ($eggmanDatZip -and -not $Unattended) {
     # A dat ZIP is already configured -- offer a lightweight check for a
@@ -11760,7 +12538,7 @@ function Limit-MainMenuBodyRowsToBudget {
     return @($BodyRows | Select-Object -Last $BodyBudget)
 }
 
-# Single-line banner ("TeknoParrot Manager v1.0 RC5") with no frame and no
+# Single-line banner ("TeknoParrot Manager v1.0 RC6") with no frame and no
 # blank separator, for viewports too short for the normal framed banner (5-6
 # rows) to leave any room for menu content -- see
 # Get-MainMenuEmergencyCompactRows.
@@ -12519,29 +13297,75 @@ while ($true) {
             } else {
                 Write-Host ""
                 Write-Host "  ReShade 64-bit DLL not found." -ForegroundColor Yellow
-                Write-Host "  To get it:" -ForegroundColor Cyan
-                Write-Host "    1. Download the installer from  https://reshade.me" -ForegroundColor White
-                Write-Host "    2. Run it and point it at any TeknoParrot game exe." -ForegroundColor White
-                Write-Host "       It creates a DLL (e.g. dxgi.dll) in that game folder." -ForegroundColor White
-                Write-Host "    3. Copy that DLL to  $PSScriptRoot\ReShade\  and name it  ReShade64.dll" -ForegroundColor White
-                Write-Host "       Then re-run this script." -ForegroundColor White
-                Write-Host "    -- OR --" -ForegroundColor DarkCyan
-                Write-Host "    Enter the full path to the DLL file now:" -ForegroundColor White
-                Write-Host ""
-                $inp = Read-PathWithBrowse "  Path to ReShade 64-bit DLL (or press Enter to cancel)" -Mode File -FileFilter "DLL files (*.dll)|*.dll|All files (*.*)|*.*"
-                if ([string]::IsNullOrWhiteSpace($inp) -or -not (Test-Path -LiteralPath $inp)) {
-                    Write-Host "  File not found. ReShade setup cancelled." -ForegroundColor Red
-                    Write-Log "ReShade setup: aborted -- DLL not found."
-                    [void](Read-Host "  Press Enter to return to menu")
-                    continue
+                Write-Host "    D) Download automatically from reshade.me"
+                Write-Host "    B) Browse for a file I already have"
+                Write-Host "    N) Skip"
+                $rsGetChoice = (Read-HostSafe "  Choice (D/B/N)").ToUpper()
+                $rsGotDll    = $false
+                if ($rsGetChoice -eq 'D') {
+                    Write-Host "  Checking reshade.me for the latest version..." -ForegroundColor Cyan
+                    $rsLatestVer = Get-ReShadeLatestVersion
+                    if (-not $rsLatestVer) {
+                        Write-Host "  Could not reach reshade.me -- try again later, or choose B to browse for a file you already have." -ForegroundColor Red
+                        Write-Log "ReShade auto-download: aborted -- could not determine latest version."
+                    } else {
+                        $rsSetupUrl = Get-ReShadeSetupDownloadUrl -Version $rsLatestVer
+                        if (-not $rsSetupUrl) {
+                            Write-Host "  Could not build a safe download URL -- aborted." -ForegroundColor Red
+                        } else {
+                            $rsCacheDir  = Join-Path $PSScriptRoot "ReShade"
+                            [void][System.IO.Directory]::CreateDirectory($rsCacheDir)
+                            $rsSetupPath = Join-Path $rsCacheDir "ReShade_Setup_$rsLatestVer.exe"
+                            Write-Host "  Downloading ReShade $rsLatestVer installer..." -ForegroundColor Cyan
+                            if (Invoke-TpmDownload -DownloadUrl $rsSetupUrl -DestinationPath $rsSetupPath -Label 'ReShadeSetup' -Version $rsLatestVer) {
+                                Write-Host "  Verifying installer signature..." -ForegroundColor Cyan
+                                $rsSig = Test-ReShadeSetupTrustedSignature -Path $rsSetupPath
+                                Write-Host ("  Signer     : {0}" -f $rsSig.Signer) -ForegroundColor DarkGray
+                                Write-Host ("  Thumbprint : {0}" -f $rsSig.Thumbprint) -ForegroundColor DarkGray
+                                if (-not $rsSig.Trusted) {
+                                    Write-Host "  SECURITY: Signature does not match the trusted ReShade certificate -- refusing to use this installer." -ForegroundColor Red
+                                    Write-Host "  Choose B to browse for a file you already have and trust instead." -ForegroundColor Yellow
+                                    Write-Log ("ReShade auto-download: SECURITY -- signature not trusted. Subject='{0}' Thumbprint={1}" -f $rsSig.Signer, $rsSig.Thumbprint)
+                                    try { Remove-Item -LiteralPath $rsSetupPath -Force -ErrorAction SilentlyContinue } catch {}
+                                } else {
+                                    Write-Host "  Signature trusted. Extracting ReShade32.dll / ReShade64.dll..." -ForegroundColor Cyan
+                                    try {
+                                        Expand-ReShadeSelfExtractingArchive -SetupExePath $rsSetupPath -DestDir $rsCacheDir
+                                        $rsSourceDll   = Join-Path $rsCacheDir "ReShade64.dll"
+                                        $rsSourceDll32 = Join-Path $rsCacheDir "ReShade32.dll"
+                                        $rsGotDll      = $true
+                                        Write-Host "  Downloaded and extracted successfully." -ForegroundColor Green
+                                        Write-Log "ReShade auto-download: extracted $rsLatestVer to $rsCacheDir"
+                                    } catch {
+                                        Write-Host ("  Extraction failed: {0}" -f $_) -ForegroundColor Red
+                                        Write-Log "ReShade auto-download: extraction failed -- $_"
+                                    }
+                                }
+                            } else {
+                                Write-Host "  Download failed -- try again later, or choose B to browse for a file you already have." -ForegroundColor Red
+                            }
+                        }
+                    }
                 }
-                if ([System.IO.Path]::GetExtension($inp).ToLower() -ne '.dll') {
-                    Write-Host "  That file does not appear to be a DLL. Cancelled." -ForegroundColor Red
-                    Write-Log "ReShade setup: aborted -- file is not a .dll."
-                    [void](Read-Host "  Press Enter to return to menu")
-                    continue
+                if (-not $rsGotDll) {
+                    Write-Host ""
+                    Write-Host "    Enter the full path to the DLL file now:" -ForegroundColor White
+                    Write-Host ""
+                    $inp = Read-PathWithBrowse "  Path to ReShade 64-bit DLL (or press Enter to cancel)" -Mode File -FileFilter "DLL files (*.dll)|*.dll|All files (*.*)|*.*"
+                    if ([string]::IsNullOrWhiteSpace($inp) -or -not (Test-Path -LiteralPath $inp)) {
+                        Write-Host "  File not found. ReShade setup cancelled." -ForegroundColor Red
+                        Write-Log "ReShade setup: aborted -- DLL not found."
+                        [void](Read-Host "  Press Enter to return to menu")
+                        continue
+                    }
+                    if ([System.IO.Path]::GetExtension($inp).ToLower() -ne '.dll') {
+                        Write-Host "  That file does not appear to be a DLL. Cancelled." -ForegroundColor Red
+                        Write-Log "ReShade setup: aborted -- file is not a .dll."
+                        [void](Read-Host "  Press Enter to return to menu")
+                        continue
+                    }
+                    $rsSourceDll = $inp
                 }
-                $rsSourceDll = $inp
             }
             if (Save-Config) {
                 Write-Log "Config: saved ReShadeSourceDll = $rsSourceDll"
@@ -12581,25 +13405,53 @@ while ($true) {
             } else {
                 Write-Host ""
                 Write-Host "  dgVoodoo2 DLL folder not found." -ForegroundColor Yellow
-                Write-Host "  To get dgVoodoo2:" -ForegroundColor Cyan
-                Write-Host "    1. Download the latest ZIP from  https://dege.freeweb.hu/dgVoodoo2/dgVoodoo2/" -ForegroundColor White
-                Write-Host "    2. Open the ZIP and copy these files into a new folder called  dgVoodoo2\" -ForegroundColor White
-                Write-Host "       next to this script:" -ForegroundColor White
-                Write-Host "         From the MS\x86\ subfolder : D3D8.dll  DDraw.dll  D3DImm.dll" -ForegroundColor White
-                Write-Host "         From the 3Dfx\x86\ subfolder : Glide2x.dll  Glide3x.dll" -ForegroundColor White
-                Write-Host "         From the root of the ZIP   : dgVoodoo.conf" -ForegroundColor White
-                Write-Host "       Then re-run this script." -ForegroundColor White
-                Write-Host "    -- OR --" -ForegroundColor DarkCyan
-                Write-Host "    Enter the full path to a folder that already contains those files:" -ForegroundColor White
-                Write-Host ""
-                $inp = Read-PathWithBrowse "  Path to dgVoodoo2 folder (or press Enter to cancel)"
-                if ([string]::IsNullOrWhiteSpace($inp) -or -not (Test-Path -LiteralPath $inp)) {
-                    Write-Host "  Folder not found. dgVoodoo2 setup cancelled." -ForegroundColor Red
-                    Write-Log "dgVoodoo2 setup: aborted -- folder not found."
-                    [void](Read-Host "  Press Enter to return to menu")
-                    continue
+                Write-Host "    D) Download automatically from the official GitHub release"
+                Write-Host "    B) Browse for a folder I already have"
+                Write-Host "    N) Skip"
+                $dgGetChoice = (Read-HostSafe "  Choice (D/B/N)").ToUpper()
+                $dgGotDir    = $false
+                if ($dgGetChoice -eq 'D') {
+                    Write-Host "  Checking the official GitHub release for the latest dgVoodoo2..." -ForegroundColor Cyan
+                    $dgRel = Get-DgVoodoo2LatestRelease
+                    if (-not $dgRel) {
+                        Write-Host "  Could not reach GitHub -- try again later, or choose B to browse for a folder you already have." -ForegroundColor Red
+                        Write-Log "dgVoodoo2 auto-download: aborted -- release query failed."
+                    } else {
+                        Write-Host ("  Found: {0}  ({1} MB)" -f $dgRel.FileName, ([Math]::Round($dgRel.SizeBytes / 1MB, 1))) -ForegroundColor Cyan
+                        $dgCacheDir = Join-Path $PSScriptRoot "dgVoodoo2"
+                        [void][System.IO.Directory]::CreateDirectory($dgCacheDir)
+                        $dgZipPath  = Join-Path $env:TEMP $dgRel.FileName
+                        if (Invoke-TpmDownload -DownloadUrl $dgRel.DownloadUrl -DestinationPath $dgZipPath -ExpectedBytes $dgRel.SizeBytes -Label 'dgVoodoo2' -Version $dgRel.Version -ExpectedSha256 $dgRel.ExpectedSha256) {
+                            try {
+                                Expand-DgVoodoo2Zip -ZipPath $dgZipPath -DestDir $dgCacheDir
+                                $dgSourceDir = $dgCacheDir
+                                $dgGotDir    = $true
+                                Write-Host "  Downloaded and extracted successfully." -ForegroundColor Green
+                                Write-Log "dgVoodoo2 auto-download: extracted $($dgRel.Version) to $dgCacheDir"
+                            } catch {
+                                Write-Host ("  Extraction failed: {0}" -f $_) -ForegroundColor Red
+                                Write-Log "dgVoodoo2 auto-download: extraction failed -- $_"
+                            } finally {
+                                try { Remove-Item -LiteralPath $dgZipPath -Force -ErrorAction SilentlyContinue } catch {}
+                            }
+                        } else {
+                            Write-Host "  Download failed -- try again later, or choose B to browse for a folder you already have." -ForegroundColor Red
+                        }
+                    }
                 }
-                $dgSourceDir = $inp
+                if (-not $dgGotDir) {
+                    Write-Host ""
+                    Write-Host "    Enter the full path to a folder that already contains those files:" -ForegroundColor White
+                    Write-Host ""
+                    $inp = Read-PathWithBrowse "  Path to dgVoodoo2 folder (or press Enter to cancel)"
+                    if ([string]::IsNullOrWhiteSpace($inp) -or -not (Test-Path -LiteralPath $inp)) {
+                        Write-Host "  Folder not found. dgVoodoo2 setup cancelled." -ForegroundColor Red
+                        Write-Log "dgVoodoo2 setup: aborted -- folder not found."
+                        [void](Read-Host "  Press Enter to return to menu")
+                        continue
+                    }
+                    $dgSourceDir = $inp
+                }
             }
             if (Save-Config) {
                 Write-Log "Config: saved DgVoodoo2SourceDir = $dgSourceDir"
@@ -12725,7 +13577,7 @@ while ($true) {
         Write-Host "  Main collection ZIP folder" -ForegroundColor Cyan
         Write-Host "  Point directly at the folder containing your original .zip files." -ForegroundColor DarkCyan
         Write-Host ("  This must be DIFFERENT from the staging folder: {0}" -f $gamesInstallFolder) -ForegroundColor Yellow
-        Write-Host "  Example: W:\ROMS\TeknoParrot Collection" -ForegroundColor DarkCyan
+        Write-Host "  Example: <ROM folder>\TeknoParrot Collection" -ForegroundColor DarkCyan
         $zipSource = Read-PathWithBrowse "  Path"
         $zipPathsJustCaptured = $true
     }
@@ -12734,7 +13586,7 @@ while ($true) {
         Write-Host "  Supplementary game collection folder (optional)" -ForegroundColor Cyan
         Write-Host "  Only needed if you downloaded the separate Supplementary .zip pack." -ForegroundColor DarkCyan
         Write-Host "  (This is not the Supplementary DAT -- most users without the pack should press Enter to skip.)" -ForegroundColor DarkCyan
-        Write-Host "  Example: W:\ROMS\TeknoParrot Supplementary" -ForegroundColor DarkCyan
+        Write-Host "  Example: <ROM folder>\TeknoParrot Supplementary" -ForegroundColor DarkCyan
         $rawSupp = Read-PathWithBrowse "  Path (or press Enter to skip)"
         if ($rawSupp -and (Test-Path -LiteralPath $rawSupp)) {
             $zipSourceSupplementary = $rawSupp
@@ -12918,7 +13770,17 @@ while ($true) {
         $dryRunActive = [bool]$DryRun
         if (-not $Unattended -and -not $dryRunActive) {
             Write-Host ""
-            $previewAns = (Read-HostSafe "  Run in PREVIEW mode first? No changes will be written -- this just shows what AutoSync/Register would do. (Y/N)").ToUpper()
+            # True first run (no config.json existed before this wizard):
+            # default to Y so a brand-new user's first look is a safe
+            # preview. Returning users keep the previous default-to-last-
+            # choice behavior (no default forced, blank Enter = N).
+            $previewDefault = if ($isTrueFirstRun) { 'Y' } else { $null }
+            $previewPromptText = if ($isTrueFirstRun) {
+                "  Run in PREVIEW mode first? No changes will be written -- this just shows what AutoSync/Register would do. (Y/N, default Y)"
+            } else {
+                "  Run in PREVIEW mode first? No changes will be written -- this just shows what AutoSync/Register would do. (Y/N)"
+            }
+            $previewAns = (Read-HostSafe $previewPromptText -Default $previewDefault).ToUpper()
             $dryRunActive = ($previewAns -eq "Y")
         }
     }
@@ -13419,6 +14281,32 @@ if ($result.Unmatched.Count -gt 0) {
     Write-Host ("  Not in TeknoParrot : {0} folder(s)  (see ACTION REQUIRED below)" -f $result.Unmatched.Count) -ForegroundColor Yellow
 }
 
+# Targeted, context-aware recommendation for the extra version-info file
+# (supplementary dat) -- deferred out of the initial wizard (see the
+# Eggman-dat setup block above). Only shown when this run actually had an
+# uncertain match AND a supplementary dat isn't already configured; a clean
+# run with no ambiguous matches sees no extra prompt at all.
+if (-not $dryRunActive -and -not $Unattended -and -not $includeSupplementary -and
+    ($eggmanDatZip -or $datFilePath) -and $result.Ambiguous.Count -gt 0) {
+    Write-Host ""
+    Write-Host ("  {0} game(s) this run had an uncertain match. An extra version-info" -f $result.Ambiguous.Count) -ForegroundColor Yellow
+    Write-Host "  file (supplementary dat) can improve that -- set it up now?" -ForegroundColor Yellow
+    $askSuppNow = (Read-HostSafe "  Set up a supplementary dat now? (Y/N, default N)" -Default 'N').ToUpper()
+    if ($askSuppNow -eq 'Y') {
+        $rawSuppNow = Read-PathWithBrowse "  Path to supplementary dat file" -Mode File -FileFilter "dat files (*.dat)|*.dat|All files (*.*)|*.*"
+        if ($rawSuppNow -and (Test-Path -LiteralPath $rawSuppNow)) {
+            $supplementaryDatPath = $rawSuppNow
+            $includeSupplementary = $true
+            if (Save-Config) { Write-Log "Config: supplementaryDatPath set to $rawSuppNow (post-run recommendation)." }
+            Write-Host "  Saved. Run 'Register only' (games already extracted -- just register)" -ForegroundColor Green
+            Write-Host "  from the main menu to apply it to games already registered this run." -ForegroundColor Green
+        } elseif ($rawSuppNow) {
+            Write-Host "  WARNING: File not found -- skipped." -ForegroundColor Yellow
+            Write-Log "Config: post-run supplementary dat not found at $rawSuppNow -- skipped."
+        }
+    }
+}
+
 if (-not $dryRunActive) {
     Write-Host ""
     $summaryLines = Get-WhatTpmDidSummaryLines -AutoSyncRan ($mode -eq "AutoSync") -ZipsExtracted ($(if ($sync) { $sync.Synced } else { 0 })) `
@@ -13730,15 +14618,22 @@ Write-Host "  Your games work perfectly WITHOUT ReShade -- this is 100% optional
 Write-Host "  It can be removed at any time by deleting one file from a game folder."
 Write-Host "  Press Home while in-game to open the ReShade overlay and pick effects."
 Write-Host ""
+Write-Host "  You can turn this on later from the main menu's ReShade setup option," -ForegroundColor DarkCyan
+Write-Host "  which can also download ReShade for you automatically." -ForegroundColor DarkCyan
+Write-Host ""
 if ($Unattended) {
     $doReShade = "N"
     Write-Log "Unattended: ReShade setup skipped."
 } else {
-    $doReShade = (Read-HostSafe "Set up ReShade visual enhancements for your games? (Y/N)").ToUpper()
+    $doReShade = (Read-HostSafe "Set up ReShade visual enhancements for your games? (Y/N, default N)" -Default 'N').ToUpper()
 }
 $rsSetupDone = $false
 if ($doReShade -eq "Y") {
-    # Locate 64-bit DLL: bundled copy first, then config, then prompt
+    # Locate 64-bit DLL: bundled copy first, then config. No blocking
+    # manual-acquisition prompt here (deferred to the standalone "ReShade
+    # setup" menu entry, which offers a real auto-download option) -- if
+    # nothing is available yet, point the user there instead of stopping
+    # the onboarding flow to walk through manual DLL acquisition.
     $bundledDll2   = Join-Path $PSScriptRoot "ReShade\ReShade64.dll"
     $bundledDll2_32 = Join-Path $PSScriptRoot "ReShade\ReShade32.dll"
     if (-not $rsSourceDll -or -not (Test-Path -LiteralPath $rsSourceDll)) {
@@ -13746,36 +14641,11 @@ if ($doReShade -eq "Y") {
             $rsSourceDll = $bundledDll2
         } else {
             Write-Host ""
-            Write-Host "  ReShade 64-bit DLL not found." -ForegroundColor Yellow
-            Write-Host "  To get it:" -ForegroundColor Cyan
-            Write-Host "    1. Download the installer from  https://reshade.me" -ForegroundColor White
-            Write-Host "    2. Run it and point it at any TeknoParrot game exe." -ForegroundColor White
-            Write-Host "       It will create a DLL file (e.g. dxgi.dll) in that game folder." -ForegroundColor White
-            Write-Host "    3. Copy that DLL to  $PSScriptRoot\ReShade\  and rename it  ReShade64.dll" -ForegroundColor White
-            Write-Host "       Then re-run this script and choose option 5 from the menu." -ForegroundColor White
-            Write-Host "    -- OR --" -ForegroundColor DarkCyan
-            Write-Host "    Enter the full path to the DLL file now:" -ForegroundColor White
-            Write-Host ""
-            $rsInp = Read-PathWithBrowse "  Path to ReShade 64-bit DLL (or press Enter to skip)" -Mode File -FileFilter "DLL files (*.dll)|*.dll|All files (*.*)|*.*"
-            if (-not [string]::IsNullOrWhiteSpace($rsInp) -and (Test-Path -LiteralPath $rsInp) -and
-                ([System.IO.Path]::GetExtension($rsInp).ToLower() -eq '.dll')) {
-                $rsSourceDll = $rsInp
-            } else {
-                if (-not [string]::IsNullOrWhiteSpace($rsInp)) {
-                    Write-Host "  File not found or is not a .dll -- ReShade setup skipped." -ForegroundColor DarkGray
-                } else {
-                    Write-Host "  ReShade setup skipped." -ForegroundColor DarkGray
-                }
-                Write-Log "ReShade post-run: skipped -- DLL not found or invalid."
-                $doReShade = "N"
-            }
-        }
-        if ($doReShade -eq "Y") {
-            if (Save-Config) {
-                Write-Log "Config: saved ReShadeSourceDll = $rsSourceDll"
-            } else {
-                Write-Log "Config: could not save ReShadeSourceDll"
-            }
+            Write-Host "  ReShade 64-bit DLL not found yet." -ForegroundColor Yellow
+            Write-Host "  Run 'ReShade setup' from the main menu to download it automatically" -ForegroundColor Cyan
+            Write-Host "  or point at a copy you already have." -ForegroundColor Cyan
+            Write-Log "ReShade post-run: skipped -- DLL not found yet, deferred to standalone menu entry."
+            $doReShade = "N"
         }
     }
     # Auto-detect bundled 32-bit DLL; no error if absent.
@@ -13820,50 +14690,31 @@ Write-Host ""
 Write-Host "  Only run this for games that crash or show black screens on first launch."
 Write-Host "  Games that run fine do not need it."
 Write-Host ""
+Write-Host "  You can turn this on later from the main menu's dgVoodoo2 setup option," -ForegroundColor DarkCyan
+Write-Host "  which can also download dgVoodoo2 for you automatically." -ForegroundColor DarkCyan
+Write-Host ""
 if ($Unattended) {
     $doDgVoodoo = "N"
     Write-Log "Unattended: dgVoodoo2 setup skipped."
 } else {
-    $doDgVoodoo = (Read-HostSafe "Set up dgVoodoo2 for old DX8/Glide games? (Y/N)").ToUpper()
+    $doDgVoodoo = (Read-HostSafe "Set up dgVoodoo2 for old DX8/Glide games? (Y/N, default N)" -Default 'N').ToUpper()
 }
 if ($doDgVoodoo -eq "Y") {
+    # No blocking manual-acquisition prompt here (deferred to the
+    # standalone "dgVoodoo2 setup" menu entry, which offers a real
+    # auto-download option) -- if nothing is available yet, point the user
+    # there instead of stopping the onboarding flow.
     $bundledDg2 = Join-Path $PSScriptRoot "dgVoodoo2"
     if (-not $dgSourceDir -or -not (Test-Path -LiteralPath $dgSourceDir)) {
         if (Test-Path -LiteralPath $bundledDg2) {
             $dgSourceDir = $bundledDg2
         } else {
             Write-Host ""
-            Write-Host "  dgVoodoo2 DLL folder not found." -ForegroundColor Yellow
-            Write-Host "  To get dgVoodoo2:" -ForegroundColor Cyan
-            Write-Host "    1. Download the latest ZIP from  https://dege.freeweb.hu/dgVoodoo2/dgVoodoo2/" -ForegroundColor White
-            Write-Host "    2. Open the ZIP and copy these files into a new folder called  dgVoodoo2\" -ForegroundColor White
-            Write-Host "       next to this script:" -ForegroundColor White
-            Write-Host "         From the MS\x86\ subfolder : D3D8.dll  DDraw.dll  D3DImm.dll" -ForegroundColor White
-            Write-Host "         From the 3Dfx\x86\ subfolder : Glide2x.dll  Glide3x.dll" -ForegroundColor White
-            Write-Host "         From the root of the ZIP   : dgVoodoo.conf" -ForegroundColor White
-            Write-Host "       Then re-run this script and choose option 6 from the menu." -ForegroundColor White
-            Write-Host "    -- OR --" -ForegroundColor DarkCyan
-            Write-Host "    Enter the full path to a folder that already contains those files:" -ForegroundColor White
-            Write-Host ""
-            $dgInp = Read-PathWithBrowse "  Path to dgVoodoo2 folder (or press Enter to skip)"
-            if (-not [string]::IsNullOrWhiteSpace($dgInp) -and (Test-Path -LiteralPath $dgInp)) {
-                $dgSourceDir = $dgInp
-            } else {
-                if (-not [string]::IsNullOrWhiteSpace($dgInp)) {
-                    Write-Host "  Folder not found -- dgVoodoo2 setup skipped." -ForegroundColor DarkGray
-                } else {
-                    Write-Host "  dgVoodoo2 setup skipped." -ForegroundColor DarkGray
-                }
-                Write-Log "dgVoodoo2 post-run: skipped -- folder not found."
-                $doDgVoodoo = "N"
-            }
-        }
-        if ($doDgVoodoo -eq "Y") {
-            if (Save-Config) {
-                Write-Log "Config: saved DgVoodoo2SourceDir = $dgSourceDir"
-            } else {
-                Write-Log "Config: could not save DgVoodoo2SourceDir"
-            }
+            Write-Host "  dgVoodoo2 DLL folder not found yet." -ForegroundColor Yellow
+            Write-Host "  Run 'dgVoodoo2 setup' from the main menu to download it automatically" -ForegroundColor Cyan
+            Write-Host "  or point at a folder you already have." -ForegroundColor Cyan
+            Write-Log "dgVoodoo2 post-run: skipped -- folder not found yet, deferred to standalone menu entry."
+            $doDgVoodoo = "N"
         }
     }
 }

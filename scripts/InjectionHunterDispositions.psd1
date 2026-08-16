@@ -32,8 +32,8 @@
         @{
             File        = 'TeknoParrot-Manager.ps1'
             RuleName    = 'InjectionRisk.AddType'
-            Line        = 311
-            Extent      = 'Add-Type -AssemblyName System.IO.Compression.FileSystem'
+            Line        = 313
+            Extent      = 'Add-Type -AssemblyName System.IO.Compression'
             Disposition = 'FalsePositive'
             Reasoning   = 'AssemblyName is a fixed string literal, not built from any variable or external input. No attacker-controlled value reaches Add-Type, so there is no assembly-load injection vector here.'
         }

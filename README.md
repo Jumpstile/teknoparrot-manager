@@ -9,7 +9,7 @@ tool for organizing extracted arcade games, registering profiles, deploying
 lightgun crosshairs, applying compatibility fixes, and exporting libraries to
 LaunchBox or HyperSpin.
 
-> **Published Release Candidate v1.0 RC5** — test one game after each run. Profiles are backed up automatically before every run.
+> **In-progress: v1.0 RC6** (uncommitted, not yet published) — onboarding flow simplification and dgVoodoo2/ReShade auto-download, on top of the currently-published **v1.0 RC5**. Test one game after each run. Profiles are backed up automatically before every run.
 
 ---
 
@@ -18,6 +18,11 @@ LaunchBox or HyperSpin.
 v1.0 RC5 is published and validated. Download the official
 [TeknoParrot Manager v1.0 RC5 release](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC5)
 from GitHub Releases. The published release is tagged `v1.0-RC5`.
+
+**v1.0 RC6 is currently in progress in this repository (uncommitted) and
+has not been published or tagged yet.** It adds onboarding flow
+simplification and dgVoodoo2/ReShade auto-download on top of RC5. Until
+RC6 is published, RC5 remains the release to download.
 
 RC5 corrects a packaging defect in RC4: the RC4 release ZIP was missing
 `scripts\TPMCertification.Authority.psm1`, a hard runtime dependency of
@@ -434,14 +439,16 @@ The script looks for DLLs in a `ReShade\` folder next to the script:
 - `ReShade64.dll` — for 64-bit games (required)
 - `ReShade32.dll` — for 32-bit games (optional)
 
-**If you downloaded the ZIP release:** DLLs are already included. Skip to running mode 5.
+DLLs are never bundled in the release ZIP (ReShade's own policy prohibits redistributing the binaries — TPM always fetches fresh from reshade.me).
 
-**If you cloned from GitHub (DLLs not in repo):**
+**Automatic (recommended):** run "ReShade setup" from the main menu and choose `D`. TPM downloads the official installer from reshade.me, verifies its Authenticode signature against ReShade's own pinned certificate fingerprint before trusting it, and extracts `ReShade32.dll`/`ReShade64.dll` from it automatically.
+
+**Manual:**
 1. Download the free installer from [reshade.me](https://reshade.me)
 2. Run it — point it at any 64-bit TeknoParrot game exe. It creates a DLL in that folder.
 3. Copy that DLL to `ReShade\ReShade64.dll` next to the script
 4. (Optional) Repeat with a 32-bit exe and save as `ReShade32.dll`
-5. Run mode 5 or answer Y when prompted after a normal run
+5. Run "ReShade setup" from the main menu, or answer Y when prompted after a normal run
 
 **In-game:** press **Home** to open the ReShade overlay. Toggle effects with tick-boxes, adjust with sliders. Settings save automatically to `ReShade.ini` in the game folder.
 
@@ -470,13 +477,17 @@ Some older arcade games use DirectX 8, DirectDraw, or the 3dfx Glide API. On mod
 | `glide2x.dll` | `Glide2x.dll` |
 | `glide3x.dll` | `Glide3x.dll` |
 
-**Setup:**
+DLLs are never bundled in the release ZIP; TPM always fetches fresh from the official source.
+
+**Automatic (recommended):** run "dgVoodoo2 setup" from the main menu and choose `D`. TPM downloads the latest release directly from the official [dege-diosg/dgVoodoo2](https://github.com/dege-diosg/dgVoodoo2) GitHub Releases channel, verifies the ZIP's SHA-256 against the checksum GitHub itself publishes for it, and extracts only the files TPM needs.
+
+**Manual:**
 1. Download dgVoodoo2 from [dege.freeweb.hu](https://dege.freeweb.hu/dgVoodoo2/dgVoodoo2/)
 2. Create a `dgVoodoo2\` folder next to this script and copy in:
    - From `MS\x86\`: `D3D8.dll`, `DDraw.dll`, `D3DImm.dll`
    - From `3Dfx\x86\`: `Glide2x.dll`, `Glide3x.dll`
    - From the ZIP root: `dgVoodoo.conf`
-3. Run mode 6 or answer Y when prompted after a normal run
+3. Run "dgVoodoo2 setup" from the main menu, or answer Y when prompted after a normal run
 
 The wizard scans every registered game exe for legacy API imports and shows auto-detected games first. You can install to all at once or pick individually.
 
@@ -959,4 +970,4 @@ TeknoParrot Manager name and branding are reserved.
 
 ---
 
-> v1.0 RC5 (published; validated) -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v1.0 RC5 (published; validated) -- test one game after each run. Profiles are backed up automatically at the start of every run. v1.0 RC6 is in progress in this repository and not yet published.
