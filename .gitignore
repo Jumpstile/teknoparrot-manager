@@ -25,6 +25,10 @@ TeknoParrot-Manager-controls.txt
 TeknoParrot-Manager-crosshairs.json
 *.log
 
+# .NET build outputs -- local validation artifacts, never release inputs
+**/bin/
+**/obj/
+
 # LaunchBox backup folder -- user data, written at runtime, never tracked
 LaunchBoxBackups/
 

@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LaunchBoxRoot Condition="'$(LaunchBoxRoot)' == ''">$(LAUNCHBOX_ROOT)</LaunchBoxRoot>
+    <LaunchBoxApiAssemblyPath Condition="'$(LaunchBoxApiAssemblyPath)' == '' and '$(LaunchBoxRoot)' != ''">$(LaunchBoxRoot)\Core\Unbroken.LaunchBox.Plugins.dll</LaunchBoxApiAssemblyPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Core\*.cs" Link="Core\%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('$(LaunchBoxApiAssemblyPath)')">
+    <Reference Include="Unbroken.LaunchBox.Plugins">
+      <HintPath>$(LaunchBoxApiAssemblyPath)</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="RequireLaunchBoxApiAssembly" BeforeTargets="ResolveReferences" Condition="'$(LaunchBoxApiAssemblyPath)' == '' Or !Exists('$(LaunchBoxApiAssemblyPath)')">
+    <Error Text="LaunchBox API assembly not found. Supply /p:LaunchBoxRoot=&lt;LaunchBox install&gt; or /p:LaunchBoxApiAssemblyPath=&lt;LaunchBox install&gt;\Core\Unbroken.LaunchBox.Plugins.dll. This project intentionally fails closed without the host assembly." />
+  </Target>
+</Project>
