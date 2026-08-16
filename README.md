@@ -2,12 +2,9 @@
 
 ![TeknoParrot Manager](images/banner.png)
 
-A PowerShell 5.1 script that automates setting up and managing a TeknoParrot arcade game library on Windows — registration, control propagation, crosshairs, ReShade, dgVoodoo2, GPU fixes, and more.
+TeknoParrot Manager is a Windows PowerShell tool for managing TeknoParrot arcade libraries on Windows. It registers extracted games, propagates controls, deploys lightgun crosshairs, applies ReShade and dgVoodoo2 compatibility fixes, and exports libraries to LaunchBox or HyperSpin.
 
-TeknoParrot Manager is a Windows arcade-library manager and TeknoParrot setup
-tool for organizing extracted arcade games, registering profiles, deploying
-lightgun crosshairs, applying compatibility fixes, and exporting libraries to
-LaunchBox or HyperSpin.
+Canonical links: [GitHub repository](https://github.com/Jumpstile/teknoparrot-manager) | [Releases](https://github.com/Jumpstile/teknoparrot-manager/releases) | [Issue tracker](https://github.com/Jumpstile/teknoparrot-manager/issues)
 
 > **Published release candidate: v1.0 RC6** — onboarding flow simplification and dgVoodoo2/ReShade auto-download. Test one game after each run. Profiles are backed up automatically before every run.
 
@@ -162,8 +159,8 @@ This script automates the copy-and-fill step: it scans your games, matches each 
 
 ## Installation
 
-1. Download the official `TeknoParrot Manager v1.0 RC6.zip` release asset
-   from [Releases](../../releases).
+1. Download the current official release asset from
+   [GitHub Releases](https://github.com/Jumpstile/teknoparrot-manager/releases).
 2. Extract to any folder (e.g. a `Scripts` subfolder alongside your TeknoParrot install)
 3. Double-click **`TeknoParrot-Manager.bat`**
 

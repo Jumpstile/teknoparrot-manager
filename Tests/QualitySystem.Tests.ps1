@@ -128,3 +128,60 @@ Describe "Release Integrity source identity" {
         $checklist | Should -Match 'Release Artifact Audit'
     }
 }
+
+Describe "Canonical repository discoverability contract" {
+    BeforeAll {
+        $script:DiscoverabilityRepoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
+        $script:DiscoverabilityMetadataPath = Join-Path $script:DiscoverabilityRepoRoot ".github\repository-metadata.json"
+        $script:DiscoverabilityMetadata = Get-Content -LiteralPath $script:DiscoverabilityMetadataPath -Raw | ConvertFrom-Json
+        $script:DiscoverabilityReadme = Get-Content -LiteralPath (Join-Path $script:DiscoverabilityRepoRoot "README.md") -Raw
+        $script:DiscoverabilityChecklist = Get-Content -LiteralPath (Join-Path $script:DiscoverabilityRepoRoot "RELEASE-SAFETY-CHECKLIST.md") -Raw
+    }
+
+    It "defines version-agnostic repository metadata" {
+        Test-Path -LiteralPath $script:DiscoverabilityMetadataPath -PathType Leaf | Should -BeTrue
+        $script:DiscoverabilityMetadata.description | Should -Match '^TeknoParrot Manager\b'
+        $script:DiscoverabilityMetadata.description | Should -Not -Match '(?i)\b(?:v?1\.0|RC\d+)\b'
+        $script:DiscoverabilityMetadata.homepage | Should -Be 'https://github.com/Jumpstile/teknoparrot-manager/releases'
+        $script:DiscoverabilityMetadata.homepage | Should -Not -Match '/tag/'
+
+        $topics = @($script:DiscoverabilityMetadata.topics | ForEach-Object { [string]$_ })
+        $topics.Count | Should -BeGreaterThan 0
+        @($topics | Sort-Object -Unique).Count | Should -Be $topics.Count
+        foreach ($topic in $topics) {
+            $topic | Should -Match '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+        }
+    }
+
+    It "keeps supported discoverability topics explicit and non-spammy" {
+        $requiredTopics = @(
+            'arcade', 'arcade-games', 'crosshair', 'dgvoodoo2', 'game-manager',
+            'hyperspin', 'launchbox', 'lightgun', 'powershell', 'reshade',
+            'teknoparrot', 'teknoparrot-manager'
+        )
+
+        $topics = @($script:DiscoverabilityMetadata.topics | ForEach-Object { [string]$_ })
+        foreach ($requiredTopic in $requiredTopics) {
+            $topics | Should -Contain $requiredTopic
+        }
+    }
+
+    It "keeps README identity and canonical links version-agnostic at the top" {
+        $topReadme = ($script:DiscoverabilityReadme -split "`r?`n" | Select-Object -First 14) -join "`n"
+        $repositoryUrlPattern = [regex]::Escape('https://github.com/Jumpstile/teknoparrot-manager')
+        $releasesUrlPattern = [regex]::Escape('https://github.com/Jumpstile/teknoparrot-manager/releases')
+
+        $topReadme | Should -Match '(?m)^# TeknoParrot Manager\s*$'
+        $topReadme | Should -Match 'TeknoParrot Manager is a Windows PowerShell tool'
+        $topReadme | Should -Match $repositoryUrlPattern
+        $topReadme | Should -Match $releasesUrlPattern
+        $topReadme | Should -Not -Match '/releases/tag/'
+    }
+
+    It "makes repository metadata part of release-consistency governance" {
+        $metadataContractPattern = [regex]::Escape('.github/repository-metadata.json')
+        $script:DiscoverabilityChecklist | Should -Match $metadataContractPattern
+        $script:DiscoverabilityChecklist | Should -Match '(?i)live GitHub.*(description|homepage|topics)'
+        $script:DiscoverabilityChecklist | Should -Match '#237'
+    }
+}

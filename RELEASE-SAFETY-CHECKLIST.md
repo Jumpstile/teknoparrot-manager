@@ -3,6 +3,13 @@
 This checklist must be completed before every version tag, ZIP build, and GitHub release.
 It is intentionally redundant: each gate catches a different failure class.
 
+The source-controlled repository metadata contract is `.github/repository-metadata.json`.
+Issue #237's release-consistency gate includes a live comparison of that contract
+with the GitHub repository description, homepage, topics, and canonical release
+links. GitHub repository settings are remote state, so a source-only test cannot
+prove them without credentials; the live comparison is mandatory before tagging
+and after publication.
+
 ---
 
 ## 0. The Jumpstile Release Standard
@@ -271,6 +278,11 @@ the file that happened to be open.
   incorrectly, and proven by a real incident, regression, certification
   failure, or investigation -- not to routine implementation details or
   ordinary design decisions.
+- [ ] Canonical discoverability checked -- README identity and top-of-page
+  repository/Releases links remain version-agnostic where practical; the
+  source-controlled `.github/repository-metadata.json` contract contains no
+  RC-specific description or homepage; live GitHub description, homepage,
+  topics, repository visibility, and Releases URL match the contract.
 
 ---
 
@@ -401,6 +413,14 @@ Certification.
 
 - [ ] Verify tag, commit, release title, asset name, asset size, published
   asset, downloaded asset, and final tag target all match the intended release.
+- [ ] Verify the live GitHub repository description and homepage against
+  `.github/repository-metadata.json`; the description and homepage must not
+  contain a version-specific RC/tag URL, and the homepage must remain the
+  canonical Releases destination.
+- [ ] Verify repository topics remain relevant, non-spammy, and supported by
+  the product; record any intentional change in the release audit.
+- [ ] Verify the README's canonical repository and Releases links still resolve
+  to the repository root and Releases collection, not an RC-specific URL.
 
 ### Phase 6 -- Regression Protection
 
