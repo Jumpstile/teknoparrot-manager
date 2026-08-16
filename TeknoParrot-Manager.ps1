@@ -67,6 +67,13 @@ param(
     [string]$FrontendContractCorrelationId
 )
 
+# Contract mode is established immediately after parameter binding. Nothing
+# below this point may turn a frontend invocation into a normal interactive
+# session, and Write-Log must already be suppressed before any initialization
+# can call it. The dispatch remains below the function definitions so
+# Invoke-TPMFrontendRequest is available without duplicating health-check logic.
+$script:FrontendContractMode = -not [string]::IsNullOrWhiteSpace($FrontendContractRequestPath)
+
 # Single source of truth for the version string used in the banner, log, and
 # GitHub API User-Agent headers. Previously hardcoded in each of those spots
 # independently, which let the User-Agent strings drift out of sync with the
@@ -387,8 +394,6 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $logPath               = Join-Path $PSScriptRoot "TeknoParrot-Manager.log"
 $script:logWarnShown   = $false   # full warning shown at most once to avoid repeated noise
 $script:logFailedCount = 0        # total entries that could not be written this run
-$script:FrontendContractMode = $false
-
 function Write-Log {
     param([string]$msg)
     if ($script:FrontendContractMode) { return }
@@ -11364,8 +11369,12 @@ function Write-ControlsStatus {
     }
 }
 
-if ($FrontendContractRequestPath) {
-    $script:FrontendContractMode = $true
+# Explicit frontend-contract entrypoint. This is intentionally before the
+# normal startup banner, configuration loading, path discovery, menu, and all
+# interactive operations below it. Contract mode performs only the minimal
+# module/runtime initialization above, then validates and executes the one
+# structured operation before exiting with its deterministic status code.
+if ($script:FrontendContractMode) {
     $contractExitCode = Invoke-TPMFrontendRequest -RequestPath $FrontendContractRequestPath -ResultPath $FrontendContractResultPath -ExpectedCorrelationId $FrontendContractCorrelationId
     exit $contractExitCode
 }
