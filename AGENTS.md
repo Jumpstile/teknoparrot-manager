@@ -1,7 +1,7 @@
 # TeknoParrot Manager
 
 PowerShell 5.1 script for managing TeknoParrot arcade game libraries.
-Current version: v1.0 RC5
+Current version: v1.0 RC6
 
 ---
 
@@ -124,7 +124,7 @@ Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1
 
 ## Release ZIP contents
 
-ZIP name: `TeknoParrot Manager v1.0 RC5.zip` (always versioned).
+ZIP name: `TeknoParrot Manager v1.0 RC6.zip` (always versioned).
 
 **Include:** `TeknoParrot-Manager.ps1`, `.bat`, `-README.txt`, `-QuickStart.txt`,
 `-CHANGELOG.txt`, `LICENSE`, `Crosshairs\` (all 321 PNGs),
@@ -135,8 +135,10 @@ ZIP name: `TeknoParrot Manager v1.0 RC5.zip` (always versioned).
 `TPMCertification.Contracts.psm1` as its first line -- omitting it breaks
 every ECVF contract load; RC4 shipped without it, see LESSONS_LEARNED.md).
 
-**Exclude:** `ReShade\` (not redistributable; user obtains from reshade.me),
-`dgVoodoo2\` (user provides), `FFBPlugin\` and `BepInExCache\` (live-downloaded
+**Exclude:** `ReShade\` (live-fetched from reshade.me on demand, never
+bundled -- see reshade.me's own do-not-redistribute notice), `dgVoodoo2\`
+(live-fetched from the official dege-diosg/dgVoodoo2 GitHub releases on
+demand, never bundled), `FFBPlugin\` and `BepInExCache\` (live-downloaded
 each run, never bundled), `AGENTS.md`, `CLAUDE.md`, `README.md`, `QUICKSTART.md`,
 `ARCHITECTURE.md`, `LESSONS_LEARNED.md`, `RELEASE-SAFETY-CHECKLIST.md`,
 `SECURITY.md`, `CONSTITUTION.md`, `ENGINEERING_GOVERNANCE.md`,

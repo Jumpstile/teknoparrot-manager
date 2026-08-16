@@ -2,7 +2,10 @@
 
 Status: standalone helper merged; menu integration is part of the published v1.0 RC5 release; shared hardened download transport documented below.
 
-Current public release: v1.0-RC5. RC4 was superseded by RC5 -- RC4's release ZIP was missing `scripts\TPMCertification.Authority.psm1`, degrading pcsx2x6/ECVF contract verification; see LESSONS_LEARNED.md. The v0.99.38 live-verification references below are historical because that release has been retired; they are not current download instructions. The asset-name-pattern match against `TeknoParrot.Manager.v1.0.RC5.zip` (item 1 below) is confirmed structurally (the pattern is version-agnostic); the full live `-CheckOnly`/`-Apply` verification cycle documented for v0.99.38/v1.0-RC3 has not been re-run against the RC5 asset from this environment.
+Current public release: v1.0-RC5 (v1.0 RC6 is in progress in this
+repository, uncommitted, and not yet published/tagged -- this section
+describes the live GitHub-published state, which remains RC5 until RC6
+ships). RC4 was superseded by RC5 -- RC4's release ZIP was missing `scripts\TPMCertification.Authority.psm1`, degrading pcsx2x6/ECVF contract verification; see LESSONS_LEARNED.md. The v0.99.38 live-verification references below are historical because that release has been retired; they are not current download instructions. The asset-name-pattern match against `TeknoParrot.Manager.v1.0.RC5.zip` (item 1 below) is confirmed structurally (the pattern is version-agnostic); the full live `-CheckOnly`/`-Apply` verification cycle documented for v0.99.38/v1.0-RC3 has not been re-run against the RC5 asset from this environment.
 
 TeknoParrot Manager uses a **manual, backup-first auto-update model**.
 

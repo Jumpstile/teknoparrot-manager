@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC5  --  QUICK START
+  TeknoParrot Manager  |  v1.0 RC6  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -9,9 +9,11 @@
   Unfamiliar term (GamePath, UserProfile, archetype, etc.)? See the
   GLOSSARY section near the top of TeknoParrot-Manager-README.txt.
 
-  RELEASE CANDIDATE -- v1.0 RC5 is published and validated. Test one game
-  after each run. Profiles are backed up automatically. RC5 corrects a
-  packaging defect in RC4 -- RC4 is superseded, use RC5 instead.
+  RELEASE CANDIDATE -- v1.0 RC6 is in progress and not yet published; the
+  latest published release is v1.0 RC5 (download from GitHub Releases
+  until RC6 ships). Test one game after each run. Profiles are backed up
+  automatically. RC5 corrects a packaging defect in RC4 -- RC4 is
+  superseded, use RC5 instead.
 
 
   NEW TO TEKNOPARROT?

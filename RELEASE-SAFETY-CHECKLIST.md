@@ -307,8 +307,10 @@ the file that happened to be open.
     the architectural decision that packaging should change to fit the
     framework rather than the framework being reshaped to fit the prior
     release layout.
-  - Exclude: `ReShade\` (DLLs not redistributable; user obtains from
-    reshade.me), `dgVoodoo2\` (user provides), `FFBPlugin\` and
+  - Exclude: `ReShade\` (live-fetched from reshade.me on demand, never
+    bundled -- see reshade.me's own do-not-redistribute notice),
+    `dgVoodoo2\` (live-fetched from the official dege-diosg/dgVoodoo2
+    GitHub releases on demand, never bundled), `FFBPlugin\` and
     `BepInExCache\` (auto-downloaded live from GitHub each run, never
     bundled), `README.md`, `QUICKSTART.md`, `SECURITY.md`,
     `LESSONS_LEARNED.md`, `ARCHITECTURE.md`, `RELEASE-SAFETY-CHECKLIST.md`,

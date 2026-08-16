@@ -56,15 +56,118 @@ is silently skipped, not silently accepted.
 
 ---
 
+## Transactional extraction (shared by ReShade and dgVoodoo2 auto-download)
+
+Added in a P1 remediation pass: an independent review forced a failure
+partway through a multi-file extraction and confirmed the first file was
+left behind in the live destination folder, contradicting an earlier
+"no partial deploy" claim that described intent, not yet enforced
+behavior. `Expand-ReShadeSelfExtractingArchive` and `Expand-DgVoodoo2Zip`
+now share three primitives (defined next to `Test-PathInside`):
+
+- `New-TpmStagingDirectory` -- a fresh, uniquely-named directory under
+  `%TEMP%\TeknoParrotManagerStaging\`, never the real destination.
+- `Copy-TpmZipEntryToFile` -- the single-entry copy step, factored out so
+  both extractors share one implementation and so extraction-time failures
+  are independently testable.
+- `Invoke-TpmTransactionalPromote` -- moves a fully-staged, fully-validated
+  set of files into the real destination. Any pre-existing destination
+  file being replaced is moved aside first; if any file's promotion fails
+  partway through, every file already promoted in that same call is
+  removed again and every moved-aside file is restored to its original
+  name/location. On a recoverable failure, the destination ends up
+  byte-for-byte identical to its pre-operation state at either phase.
+  If an underlying filesystem mutation makes exact restoration impossible,
+  the transaction reports `ROLLBACK FAILED` / `INCONSISTENT` and preserves
+  recovery evidence instead of claiming restoration.
+
+Sequence: extract every required file into staging -> validate the
+complete staged set (entry presence, sanitized names, containment,
+non-zero length) -> only then call `Invoke-TpmTransactionalPromote`. The
+staging directory is removed afterward on ordinary success, extraction
+failure, or promotion failure whose rollback completes. It is preserved
+when transaction recovery, transaction cleanup, or ordinary staging
+cleanup fails, so recovery evidence/residue remains available. See
+SECURITY.md ("Transactional extraction (staging + rollback-safe
+promotion)") for the full rationale and the regression tests that force a
+failure during extraction and a separate failure during promotion for
+both extractors.
+
 ## ReShade deployment (Mode 5)
 
-**Source DLLs.** Not bundled in the release ZIP (not redistributable). The user
-obtains from reshade.me and places at `Scripts\ReShade\ReShade64.dll` (x64) and
-optionally `ReShade32.dll` (x86). If absent at startup the script prompts at
-runtime. Run the ReShade installer on any game exe to extract the DLL, then copy
-and rename it here for distribution.
+**Source DLLs.** Not bundled in the release ZIP (not redistributable -- reshade.me's
+own policy: "Do NOT share the binaries or shader files. Link users to this website
+instead."). Two ways to obtain them at `Scripts\ReShade\ReShade64.dll` (x64) and
+optionally `ReShade32.dll` (x86): (1) the standalone "ReShade setup" menu entry's
+D) auto-download option (below), or (2) manually -- run the ReShade installer on any
+game exe to extract the DLL, then copy and rename it here for distribution. If absent
+at startup the script prompts at runtime.
 
-**Authenticode check.** `Test-ReShadeDllSignature` (next to `Get-ReShadeLatestVersion`)
+**Auto-download (freeze exception, added alongside dgVoodoo2 auto-download).**
+`Get-ReShadeSetupDownloadUrl` constructs `https://reshade.me/downloads/ReShade_Setup_<version>.exe`
+from `Get-ReShadeLatestVersion`'s scraped version string and validates it against the
+same host-allowlist pattern used elsewhere (scheme=https, host exactly `reshade.me`,
+no userinfo, path under `/downloads/`). The single-host, direct-link, no-redirect/form
+download is confirmed live, not assumed.
+
+`ReShade_Setup_<version>.exe` is a small C# WPF EXE stub with a standard ZIP archive
+appended to the end of the file (self-extracting-archive format) -- confirmed by
+reading crosire/reshade's own published, open-source (BSD-3/MIT) installer code
+(`setup/MainWindow.xaml.cs`, `InstallStep_InstallReShadeModule`), which scans forward
+for the ZIP local-file-header signature (`PK\x03\x04`) and opens everything from that
+offset as a `ZipArchive`. `Expand-ReShadeSelfExtractingArchive` replicates this in
+PowerShell, with one correction found during live verification: the PE stub's own
+resource data (e.g. an embedded icon) can contain an earlier byte sequence that also
+matches the `PK\x03\x04` signature and opens as a technically-valid but empty
+`ZipArchive` -- taking the first raw signature match unconditionally therefore produces
+zero entries, not the real archive. The function instead collects every `PK\x03\x04`
+offset in file order and tries each as a candidate, using the first one that opens
+successfully AND contains both required entries (`ReShade32.dll`, `ReShade64.dll`);
+extraction happens inside that same successful iteration, but only into an isolated
+STAGING directory (`New-TpmStagingDirectory`), never directly into `Scripts\ReShade\` --
+see "Transactional extraction" below. Fails closed if no candidate qualifies.
+Verified live against the real `ReShade_Setup_6.8.0.exe` during implementation: the
+real archive's DLLs sat at file offset 152576, with an empty decoy match earlier at
+offset 127840.
+
+The compression bootstrap explicitly loads both framework assemblies before any
+archive type is referenced. Windows PowerShell 5.1 does not reliably resolve
+ZipArchive or ZipArchiveMode from System.IO.Compression.FileSystem alone:
+ZipArchive and ZipArchiveMode are provided by System.IO.Compression.dll, while
+ZipFile and ZipFileExtensions are provided by the separate
+System.IO.Compression.FileSystem.dll. The production startup therefore loads
+System.IO.Compression first and retains the FileSystem load for ZipFile APIs.
+The regression test proves all four required types in a pristine Windows
+PowerShell 5.1 child process, so a developer session with a previously loaded
+assembly cannot mask the dependency.
+
+**Signature verification before extraction (identity-pinning, stronger than
+BepInEx/dgVoodoo2/FFBPlugin).** The downloaded `Setup.exe` itself is Authenticode-signed
+with a self-signed certificate (Windows can never chain it to a trusted root, so
+`Status` is always `UnknownError`, never `Valid`). `Test-ReShadeSetupTrustedSignature`
+gates on BOTH the signer certificate's **Thumbprint** (`589690208A5E52FB96980C4A6698F50ACD47C49F`,
+`$Script:ReShadeTrustedCertThumbprint`) as the hard trust anchor -- a self-signed cert's
+Subject string alone proves nothing, since anyone can mint one with any Subject text --
+**AND** an explicit accept-list of `.Status` values (`$Script:ReShadeAcceptedSignatureStatuses`,
+currently just `UnknownError`, the one status a genuine installer produces). Both gates
+must pass: a `HashMismatch` status (tampered/corrupted file) fails closed even with the
+exact pinned thumbprint -- an earlier version of this function checked only the
+thumbprint and missed this case; found and fixed via independent review. Subject match
+is a secondary sanity check only. Fails closed on any thumbprint mismatch, unaccepted
+status, missing, or unparseable signature; no auto-adoption of a changed fingerprint or
+status into config. Full rationale, live-verification evidence, and the rotation
+procedure: SECURITY.md ("ReShade identity-pinning with rotation"). This check happens on
+the authoritative signed artifact before any extraction -- a stronger guarantee than the
+manual DLL path, where TPM only ever sees a DLL the user already extracted, with no way
+to confirm it came from a signed installer.
+
+**Wiring.** The standalone "ReShade setup" menu entry's DLL-not-found branch offers
+`D) Download automatically / B) Browse for a file I already have / N) Skip`. The
+onboarding wizard's ReShade offer defaults to N and, if the DLL isn't already
+available, points the user at the standalone menu entry rather than blocking with
+manual instructions.
+
+**Authenticode check (existing, user-supplied DLLs).** `Test-ReShadeDllSignature` (next to `Get-ReShadeLatestVersion`)
 checks the embedded PE signature once per DLL at the start of `Invoke-ReShadeSetup`,
 before any per-game deployment. Informational, not a hard gate: an invalid/missing
 signature is surfaced loudly via `Get-SignatureStatusText` (plain English plus the raw
@@ -96,9 +199,43 @@ registered profiles (WRONG NAME warning for typos), never required. Same
 
 ## dgVoodoo2 deployment (Mode 6)
 
-**Source DLLs.** Bundled at `Scripts\dgVoodoo2\` (not in repo; user provides). Required
-DLLs from the dgVoodoo2 ZIP: `MS\x86\D3D8.dll`, `DDraw.dll`, `D3DImm.dll`;
-`3Dfx\x86\Glide2x.dll`, `Glide3x.dll`; root `dgVoodoo.conf` (optional config).
+**Source DLLs.** Not bundled in the release ZIP (dgVoodoo2's standalone
+redistribution/hosting terms are separate from its bundled-with-a-game/mod
+permission; TPM sidesteps needing either by never hosting the ZIP itself). Placed
+at `Scripts\dgVoodoo2\` via either the standalone "dgVoodoo2 setup" menu entry's
+D) auto-download option (below) or manually (user provides). Required DLLs from
+the dgVoodoo2 ZIP: `MS\x86\D3D8.dll`, `MS\x86\DDraw.dll`, `MS\x86\D3DImm.dll`;
+`3Dfx\x86\Glide2x.dll`, `3Dfx\x86\Glide3x.dll`; root `dgVoodoo.conf` (optional
+config) -- subpaths verified live against the real `dgVoodoo2_87_3.zip` release
+layout during implementation.
+
+**Auto-download (freeze exception).** `Get-DgVoodoo2LatestRelease` mirrors
+`Get-BepInExLatestRelease` almost exactly: queries
+`https://api.github.com/repos/dege-diosg/dgVoodoo2/releases/latest` (the official
+GitHub Releases channel -- authenticated, structured JSON, preferred over
+HTML-scraping dege.freeweb.hu), selects the main (non-dev, non-debug) ZIP asset
+by name pattern (`^dgVoodoo2[_0-9.]*\.zip$`, which the dev/debug variant asset
+names like `dgVoodoo2_87_3_dev64.zip` and `dgVoodoo2_87_3_dbg.zip` fail to
+match), and applies the same URL-allowlist validation (scheme=https, host
+exactly `github.com`/`api.github.com`, no userinfo, path under
+`/dege-diosg/dgVoodoo2/releases/download/`) and 3-attempt retry/backoff/4xx-
+shortcircuit as BepInEx. Also extracts the release asset's GitHub-served SHA-256
+`digest` field for `Invoke-TpmDownload -ExpectedSha256` verification -- see
+SECURITY.md ("SHA-256 digest verification").
+
+`Expand-DgVoodoo2Zip` extracts only the 6 known files at their expected subpaths
+(above), sanitizing each destination name and containment-checking it via
+`Test-PathInside` before writing -- same protection class as BepInEx/FFBPlugin.
+Fails closed if any expected entry is missing at its expected subpath (a changed
+ZIP layout in a future release is a "stop and tell the user" event), and extraction
+is staged/transactional the same way as ReShade -- see "Transactional extraction"
+below.
+
+**Wiring.** The standalone "dgVoodoo2 setup" menu entry's folder-not-found
+branch offers `D) Download automatically / B) Browse for a folder I already have
+/ N) Skip`, mirroring the Eggman-dat menu's freshness pattern. The onboarding
+wizard's dgVoodoo2 offer defaults to N and points the user at the standalone
+menu entry rather than blocking with manual instructions.
 
 **API detection.** `Get-GameLegacyApi` scans first 2 MB for D3D8/DDraw/Glide2x/Glide3x
 import strings. DLL mapping:
@@ -371,6 +508,15 @@ exists: the ReShade DLL is not downloaded by the script (user provides it), but 
 installer IS code-signed, and Authenticode signatures are embedded in the PE itself and
 survive extracting/renaming the DLL. `Test-ReShadeDllSignature` checks this once per DLL
 at `Invoke-ReShadeSetup` start. Informational, not a gate (see ReShade section).
+
+The startup dependency bootstrap handles the module-resolution difference explicitly.
+Under Windows PowerShell 5.1/Desktop it resolves the inbox Security, Management, and
+Utility manifests directly from `$PSHOME\Modules\<module>\<module>.psd1` and imports
+them with the resolved manifest path, preventing an inherited PowerShell 7 WindowsApps module
+root from supplying incompatible command definitions. Under PowerShell 7+, it preserves
+native module resolution. During PS5.1 imports only, the process-local PSModulePath is
+scoped to the inbox root and restored in `finally`; user and machine environment is
+never changed, and neither fail-closed gate is altered.
 
 **PostgreSQL MSI.** Not Authenticode-signed (confirmed empirically via
 `Get-AuthenticodeSignature`, `Status: NotSigned`). Audit-logging-only is already the

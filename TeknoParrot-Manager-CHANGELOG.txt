@@ -7,6 +7,76 @@
 
 
 -------------------------------------------------------------------------------
+  v1.0 RC6  (2026-08-15)  -- onboarding flow simplification, dgVoodoo2/ReShade
+  auto-download
+  ----------------------------------------------------------------
+  Improvement: first-run wizard now asks fewer blocking questions, and every
+  "go do X later" pointer refers to the destination menu entry by its label
+  (e.g. "ReShade setup") instead of a number that can drift on reorder.
+  RetroBat folder naming now defaults to N (standard/LaunchBox style),
+  Eggman dat now defaults to D (download), and the ReShade/dgVoodoo2 offers
+  now default to N with a pointer to their standalone menu entries. The
+  supplementary-dat follow-up question is no longer asked up front during
+  Eggman dat setup; instead, after an AutoSync/Register run, TPM checks
+  whether any games had an uncertain match and only then recommends setting
+  one up, with the actual count of affected games in the prompt. On a true
+  first run (no saved config existed yet), the PREVIEW mode offer now
+  defaults to Y so a new user's first look at TPM is a safe dry run;
+  returning users keep the previous default-to-last-choice behavior.
+  Read-HostSafe gained an optional -Default parameter with a strict
+  non-interactive-safety contract: a real blank line or whitespace-only
+  input accepts the shown default, but redirected/exhausted stdin still
+  hits the existing hard-exit path and never silently resolves to a
+  default.
+
+  Feature (explicit, user-authorized exception to the feature freeze):
+  dgVoodoo2 and ReShade can now be downloaded automatically instead of only
+  via manual instructions. dgVoodoo2 fetches the latest release directly
+  from its official GitHub Releases channel (dege-diosg/dgVoodoo2),
+  verifies the downloaded ZIP's SHA-256 against the digest GitHub itself
+  publishes for the asset, and extracts only the 6 known DLL/config files
+  TPM actually uses. The same SHA-256 verification was also added to the
+  existing BepInEx update-check download, since it uses the identical
+  GitHub Releases API digest field. ReShade fetches the official installer
+  directly from reshade.me, verifies its Authenticode signature against a
+  pinned certificate fingerprint (the actual root of trust for a
+  self-signed certificate -- the Subject string alone proves nothing) with
+  logging of both Subject and Thumbprint on every attempt, and -- only once
+  that signature is trusted -- extracts the ReShade32.dll/ReShade64.dll
+  pair from the installer's embedded self-extracting ZIP archive. Both
+  paths fail closed (no partial install, clear error message directing the
+  user to the existing manual fallback) on any download, integrity, or
+  signature failure. Neither dgVoodoo2 nor ReShade is bundled in the
+  release ZIP; both are always fetched live from their official sources,
+  matching this project's existing FFBPlugin/BepInEx/Eggman-dat pattern.
+
+  Security fix (found and fixed via independent review before this round
+  shipped): extraction for both dgVoodoo2 and ReShade is now transactional
+  -- every file is extracted into an isolated staging area and fully
+  validated first, and only a complete, valid set is ever moved into the
+  real destination. If anything fails partway through, the destination is
+  restored to exactly its state before the operation started, instead of
+  potentially being left with a mix of old and newly-extracted files.
+  Also: the ReShade installer's signature check now requires BOTH the
+  pinned certificate fingerprint AND the specific signature status a
+  genuine installer actually produces -- a corrupted or tampered download
+  reporting a "hash mismatch" status is now rejected even if its
+  certificate fingerprint field happened to still read as trusted.
+  Compatibility fix: the startup bootstrap now explicitly loads both .NET
+  compression assemblies required by ReShade extraction. Windows PowerShell
+  5.1 otherwise resolves ZipFile but can leave ZipArchive unavailable.
+  A fresh-process regression test now covers the four required compression
+  types before the RC6 package is rebuilt.
+  Compatibility fix: under Windows PowerShell 5.1/Desktop, the startup bootstrap
+  now resolves the inbox Security, Management, and Utility manifests directly from
+  that engine's $PSHOME\Modules tree before importing them. This prevents an inherited
+  PowerShell 7 module root from supplying incompatible command definitions when module
+  autoloading is disabled. The process-local PSModulePath is scoped to the inbox root
+  only during import and restored afterward; user and machine environment is not
+  changed, and neither the ReShade signature gate nor SHA-256 verification is weakened.
+
+
+-------------------------------------------------------------------------------
   v1.0 RC5  (2026-08-14)  -- RC4 packaging correction (RC4 superseded)
   ----------------------------------------------------------------
   Fix: the RC4 release ZIP was missing scripts\TPMCertification.Authority.psm1,
