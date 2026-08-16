@@ -24,27 +24,29 @@ The roadmap follows the rule:
 > Build the platform foundations first. Add intelligence second. Add automation last.
 
 No item in this document authorizes product code, UI implementation, tests,
-issue creation or updates, updater work, release-package changes, or an RC3
-scope change.
+issue creation or updates, updater work, release-package changes, or an RC6
+or Version 1.0 scope change.
 
 ## TPM 1.0 completion boundary
 
-The current commitment is to complete the existing TPM 1.0 release path. RC3
-stabilization, validation, certification, release safety, and any remaining
-work required for the existing feature set take precedence over every phase in
-this document.
+The current commitment is to complete and support the existing TPM 1.0 release
+path. v1.0 RC6 is the current published release candidate; RC5 and RC4 are
+superseded, and final Version 1.0 remains unpublished. Release safety,
+certification, and any remaining work required for the existing feature set
+take precedence over every phase in this document.
 
 TPM 1.0 is the boundary between the current product and the post-1.0
 evolution roadmap. No post-1.0 capability should enter implementation until:
 
-1. The RC3 stabilization and validation path is complete.
+1. The RC6 stabilization, validation, and release-safety path is complete.
 2. The TPM 1.0 release decision is explicitly authorized.
 3. The current baseline is recorded so future work can be compared against a
    known release state.
 4. A future phase has a separately authorized scope, ownership boundary,
    acceptance criteria, and review path.
 
-This boundary does not redefine the RC3 release criteria and does not authorize
+
+This boundary does not redefine the RC6 release criteria and does not authorize
 new features during the active freeze.
 
 ## Product evolution principles
@@ -106,9 +108,9 @@ Each boundary must eventually define its owner, inputs, outputs, dependencies,
 failure states, and verification responsibilities. Shared behavior belongs
 behind stable contracts rather than being reimplemented at each call site.
 
-Modularization is not permission to rewrite the product during RC3. The work
-begins only after the TPM 1.0 completion boundary and is staged so every
-intermediate state remains understandable and recoverable.
+Modularization is not permission to rewrite the product during the RC6-era
+completion path. The work begins only after the TPM 1.0 completion boundary and
+is staged so every intermediate state remains understandable and recoverable.
 
 ## Phase 2 -- Human-first GUI platform
 
@@ -380,7 +382,7 @@ This roadmap does not authorize:
 - product-code, UI implementation, schema, menu, configuration, or test changes;
 - issue creation, issue updates, or tracker churn;
 - updater expansion or updater implementation;
-- RC3 scope changes or release-package changes;
+- RC6 scope changes or release-package changes;
 - silent writes to emulator, runtime, user, hardware, provider, or HIP-owned
   state;
 - firmware, driver, licensing, or calibration changes; or

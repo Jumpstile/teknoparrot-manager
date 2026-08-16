@@ -2,19 +2,24 @@
 
 Status: standalone helper merged; menu integration is part of the published v1.0 RC6 release; shared hardened download transport documented below.
 
-Current public release: v1.0-RC6. RC5 was superseded by RC6 -- RC5
-corrected the RC4 release ZIP's missing `scripts\TPMCertification.Authority.psm1`,
-which degraded pcsx2x6/ECVF contract verification; see LESSONS_LEARNED.md.
-The v0.99.38 live-verification references below are historical because that
-release has been retired; they are not current download instructions. The
-asset-name-pattern match against `TeknoParrot.Manager.v1.0.RC6.zip` (item 1
-below) is confirmed structurally (the pattern is version-agnostic); the full
-live `-CheckOnly`/`-Apply` verification cycle documented for v0.99.38/v1.0-RC3
-has not been re-run against the RC6 asset from this environment.
+Current public release: v1.0-RC6. RC5 and RC4 are superseded by RC6.
+Final Version 1.0 remains unpublished.
+The v0.99.38 and v1.0-RC3 live-verification references below are historical
+and are not current download instructions. The RC6 asset-name pattern is
+version-agnostic; the final release validation reruns the package validator
+against the exact RC6 asset before publication.
 
 TeknoParrot Manager uses a **manual, backup-first auto-update model**.
 
 The updater must never silently replace files. It checks GitHub Releases, explains what it found, creates a local backup, downloads the selected release asset, validates the downloaded file, and only then replaces the local script.
+
+All shared live-download audit entries record authoritative source, filename,
+version when known, computed SHA-256, and transfer metrics. ReShade additionally
+records installer Authenticode signer/status/thumbprint/trust; its SHA-256 is
+audit-only. BepInEx and dgVoodoo2 validate GitHub asset digests when available.
+Eggman dat, FFBPlugin, PostgreSQL/update packages, and thumbnail downloads are
+represented with their actual source/hash/transfer fields without inventing a
+signer or digest check that the implementation does not perform.
 
 ## Current implementation status
 
@@ -22,12 +27,17 @@ An independent engineering review found real blockers on the first pass. The pac
 
 1. **Release packaging mismatch -- fixed**
    - `-AssetNamePattern` now defaults to `^TeknoParrot\.Manager\.v.*\.zip$`, matching the current release asset `TeknoParrot.Manager.v1.0.RC6.zip`.
-   - Verified live against v1.0-RC3 (historical): `-CheckOnly` correctly found and selected the real release asset instead of throwing. Not yet re-verified live against the RC6 asset from this environment; the pattern match itself is confirmed by inspection (version-agnostic regex).
+   - Historical live verification against v1.0-RC3 confirmed the updater selected
+     the real release asset. The version-agnostic pattern is also exercised by
+     the RC6 package validation; no older RC is an active download target.
 
 2. **Content validation before replacement -- fixed**
    - The updater extracts only the `TeknoParrot-Manager.ps1` entry from the downloaded zip (via `Expand-TpmReleaseZipEntry`), never the whole archive.
    - Before replacing the live script, `Test-TpmExtractedScript` verifies: the file exists, is non-empty, does not begin with a zip signature (`PK`), contains the `TeknoParrot Manager` marker, and contains a `$ScriptVersion = "..."` assignment.
-   - Historical live verification: a full `-Apply` against `v0.99.38` previously downloaded, extracted, validated, and installed the genuine script. That release is retired; repeat live verification against the current `v1.0-RC6` asset before changing updater behavior.
+   - Historical live verification: a full -Apply against v0.99.38 previously
+     downloaded, extracted, validated, and installed the genuine script. That
+     release is retired; final RC6 release validation uses the exact published
+     asset and does not change updater behavior.
 
 3. **PowerShell 5.1 TLS hardening -- fixed**
    - `Enable-TpmTls12` forces `Tls12` into `[Net.ServicePointManager]::SecurityProtocol` before any GitHub API/download call, guarded to skip on PowerShell 6+ where it is unnecessary.

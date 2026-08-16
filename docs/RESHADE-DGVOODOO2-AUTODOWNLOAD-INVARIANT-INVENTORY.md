@@ -1,4 +1,5 @@
 # ReShade / dgVoodoo2 Auto-Download System Invariant Inventory
+Release context: this inventory documents the v1.0 RC6 published release candidate; final Version 1.0 remains unpublished.
 
 ## Component and boundary
 

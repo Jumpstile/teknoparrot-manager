@@ -11,9 +11,10 @@
   backed up automatically at the start of every run.
 
   v1.0 RC6 is the current published release candidate -- download it from
-  the GitHub Releases page. RC5 corrected a packaging defect in RC4 (a
-  missing internal dependency file degraded pcsx2x6 contract verification)
-  and is superseded; use RC6 instead.
+  the GitHub Releases page. Final Version 1.0 remains unpublished; use RC6
+  for the current release candidate.
+  RC5 corrected a packaging defect in RC4 (a missing internal dependency file
+  degraded pcsx2x6 contract verification) and is superseded by RC6; use RC6.
 
   For a one-page version, see TeknoParrot-Manager-QuickStart.txt.
 
@@ -1214,19 +1215,20 @@
 
     OPTION A -- Automatic download (recommended)
 
-    From the main menu, choose "ReShade setup." If the DLL is not already
-    present, TPM offers:
-      D) Download automatically from reshade.me
-      B) Browse for a file you already have
-      N) Skip
-
-    Choosing D fetches the official installer directly from reshade.me,
-    verifies its digital signature against ReShade's own certificate before
-    trusting it (refusing and telling you if the signature does not check
-    out), then extracts ReShade32.dll/ReShade64.dll from it automatically.
-    Nothing is ever bundled with TPM itself -- every download is fetched
-    fresh from reshade.me, per reshade.me's own policy against
-    redistributing the binaries.
+      From the main menu, choose "ReShade setup." If the DLL is not already
+      present, choose D to fetch the official installer from reshade.me.
+      Choose B to browse for a file you already have, or N to skip.
+      TPM validates the installer Authenticode status and pinned signer
+      thumbprint before trusting it; a mismatch fails closed and returns to
+      the manual-path choice. The trusted installer is then extracted into
+      ReShade32.dll/ReShade64.dll as appropriate.
+      The download audit records the authoritative reshade.me source URL,
+      installer filename and version, computed SHA-256, transfer method/size/
+      elapsed time/average speed, and Authenticode signer/subject, status,
+      thumbprint, and final trust result. The SHA-256 is an audit hash; TPM
+      does not claim it matches a separately published ReShade digest.
+      Nothing is bundled with TPM itself -- the installer is fetched fresh
+      from reshade.me under ReShade's own redistribution policy.
 
     OPTION B -- Manual (if you prefer, or already have the DLL)
 
@@ -1372,12 +1374,13 @@
       N) Skip
 
     Method A -- Automatic download (recommended):
-      Choose D. TPM fetches the latest release directly from the official
-      dege-diosg/dgVoodoo2 GitHub Releases channel, verifies the
-      downloaded ZIP's SHA-256 against the checksum GitHub itself publishes
-      for it, and extracts only the files TPM needs into  dgVoodoo2\  next
-      to this script. Nothing is ever bundled with TPM itself -- every
-      download is fetched fresh from the official release.
+      Choose D. TPM fetches the latest release from the official
+      dege-diosg/dgVoodoo2 GitHub Releases source and records the source,
+      filename/version, computed SHA-256, and transfer metrics. When GitHub
+      supplies the asset digest, TPM validates it and fails closed on a
+      mismatch before extracting the files TPM needs into  dgVoodoo2\.
+      If no digest is supplied, the SHA-256 remains an audit value rather
+      than an authenticity claim. Nothing is bundled with TPM itself.
 
     Method B -- User-provided folder:
       1. Download the latest dgVoodoo2 ZIP from:
@@ -1558,6 +1561,11 @@
     (to BepInEx_Backup_<timestamp> inside that game's own folder) before
     overwriting anything.
 
+    A BepInEx download audit entry records the GitHub release source,
+    asset filename/version, computed SHA-256, and transfer metrics. When
+    GitHub supplies an asset digest, TPM validates it and fails closed on
+    a mismatch; without a digest, the computed SHA-256 is audit-only.
+
   Troubleshooting and manual reset
 
     Official troubleshooting guide:
@@ -1641,13 +1649,12 @@
 
   A note on trust
 
-    The PostgreSQL 8.3 installer is distributed via Eggmansworld/tp-it-guides's
-    GitHub release bundle. The installer itself is not Authenticode-signed,
-    so the script records SHA256/source audit information for every download
-    but cannot independently verify publisher authenticity the way it does
-    for ReShade (whose installer genuinely is signed). This is a limitation
-    of the installer itself, not something a stronger check in this script
-    could fix.
+    The PostgreSQL 8.3 installer is distributed via the Eggmansworld/tp-it-
+    guides GitHub release bundle. Its live download audit records the release
+    source, filename/version when known, computed SHA-256, and transfer
+    metrics. The installer itself is not Authenticode-signed and no GitHub
+    asset digest is consumed for this package, so TPM cannot independently
+    verify publisher authenticity as it does for the ReShade installer.
 
 
   CHECK FOR UPDATES
@@ -2238,11 +2245,18 @@
 
   Log. Every run appends to TeknoParrot-Manager.log next to the script:
   what was extracted, registered, repaired and propagated, and any errors.
-  It also records a download audit trail -- source URL, filename, version
-  (where known), and SHA256 -- for every third-party binary the script
-  fetches (the Eggman dat ZIP, the BepInEx release, and the FFBArcadePlugin
-  DLLs). This does not verify or block anything; it is a record you can
-  check later if you want to confirm what was actually downloaded.
+  It also records a download audit entry for every live-fetched artifact:
+  authoritative source URL, filename, version when known, computed SHA-256,
+  and transfer metrics (method, size, elapsed time, average speed). ReShade
+  additionally records installer Authenticode signer/subject, status,
+  thumbprint, and final trust result; its SHA-256 is an audit hash, not a
+  published-digest comparison. BepInEx records its GitHub release source,
+  filename/version, SHA-256, and validates the GitHub asset digest when
+  available, failing closed on mismatch. dgVoodoo2 uses the same digest
+  validation when available. FFBArcadePlugin, Eggman dat, the PostgreSQL
+  guide/installer bundle, the TPM update package, and thumbnail downloads
+  receive source/hash/transfer audit entries; a missing digest or signer is
+  not presented as cryptographic authenticity proof.
 
   If the log file is inaccessible (permissions, disk full, or path issue),
   the script does not fail silently:

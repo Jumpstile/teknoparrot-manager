@@ -11,6 +11,8 @@ documented in that subsystem's own architecture document (e.g.
 here, with a matching entry in `LESSONS_LEARNED.md` -- see `CONSTITUTION.md`,
 "Documenting non-obvious implementation constraints," for when this applies.
 
+Current release state: v1.0 RC6 is the current published release candidate; RC5 and RC4 are superseded, and final Version 1.0 remains unpublished.
+
 ---
 
 ## Startup: network-path detection and hard timeout (v0.99.23)
@@ -496,20 +498,24 @@ read-only check).
 
 ## Supply-chain trust and download audit (v0.97)
 
-**`Write-DownloadAudit`** (next to `Test-PathInside`) logs source URL, filename, version
-(if known), and SHA256 for every binary the script downloads: the Eggman dat ZIP, the
-BepInEx release ZIP, and the two FFBArcadePlugin DLLs. Deliberately NOT a pass/fail gate
--- none of these sources publish checksums, and the FFBArcadePlugin/BepInEx binaries are
-unsigned community builds with no trust anchor to enforce. The log exists so a user who
-wants to verify what was fetched has a record without reproducing the download.
+**`Write-DownloadAudit` and `Write-TpmDownloadMetrics`.** The shared pipeline
+records each live-fetched artifact's authoritative source URL, filename, version
+when known, computed SHA-256, and transfer metrics (method, size, elapsed time,
+average speed). ReShade additionally records installer Authenticode signer/
+subject, status, signer thumbprint, and final trust result; its SHA-256 is an
+audit hash rather than a published-digest comparison. BepInEx records its GitHub
+release source and validates the asset digest when available. dgVoodoo2 uses the
+same digest validation. Eggman/RomVault dat, FFBArcadePlugin, the PostgreSQL/
+guide bundle, the TPM update package, and thumbnail downloads receive the same
+source/hash/transfer audit fields, but an absent signer or digest is not treated
+as cryptographic authenticity proof.
 
-**ReShade Authenticode.** The one download-adjacent case where an actual trust anchor
-exists: the ReShade DLL is not downloaded by the script (user provides it), but the
-installer IS code-signed, and Authenticode signatures are embedded in the PE itself and
-survive extracting/renaming the DLL. `Test-ReShadeDllSignature` checks this once per DLL
-at `Invoke-ReShadeSetup` start. Informational, not a gate (see ReShade section).
-
-The startup dependency bootstrap handles the module-resolution difference explicitly.
+**ReShade Authenticode.** The auto-download path fetches the signed installer
+from the authoritative reshade.me source and gates extraction on both the
+allowlisted status and pinned signer thumbprint. `Test-ReShadeDllSignature`
+remains informational for user-supplied DLLs; `Test-ReShadeSetupTrustedSignature`
+is the fail-closed installer gate. Both the installer audit record and the
+computed SHA-256 are retained in the log.
 Under Windows PowerShell 5.1/Desktop it resolves the inbox Security, Management, and
 Utility manifests directly from `$PSHOME\Modules\<module>\<module>.psd1` and imports
 them with the resolved manifest path, preventing an inherited PowerShell 7 WindowsApps module
@@ -523,10 +529,12 @@ never changed, and neither fail-closed gate is altered.
 practical ceiling here. Re-check only if EnterpriseDB/the guide repo ships a newer, signed
 installer.
 
-**Scope rationale.** GitHub Releases assets have no published hashes, and most binaries
-are unsigned. A hard verification gate would have nothing legitimate to check against for
-3 of the 4 sources. Authenticode enforcement was only added for ReShade specifically,
-since it is the one source that is actually signed.
+**Scope rationale.** Cryptographic enforcement is applied where the implementation
+has a real trust anchor: the ReShade installer's pinned Authenticode identity,
+and GitHub asset digests for BepInEx/dgVoodoo2 when those digests are supplied.
+Other live-fetched artifacts remain auditable with computed SHA-256 and transfer
+metrics, but are not described as publisher-authenticated when no signer or
+expected digest is available.
 
 ### Shared download pipeline (v0.99.40)
 
@@ -554,8 +562,10 @@ file size, elapsed time, and average MB/s, and still writes the SHA256 download 
 
 Current main-script call sites using the helper:
 
+- ReShade installer download (`Invoke-ReShadeSetup`)
+- dgVoodoo2 release ZIP
 - Eggman/RomVault DAT ZIP (`Invoke-EggmanDatDownload`)
-- PostgreSQL guide bundle
+- PostgreSQL guide/installer bundle
 - FFBArcadePlugin DLLs
 - BepInEx release ZIP
 - TPM menu self-update package
@@ -1996,5 +2006,5 @@ findings"). No code change made.
 
 The canonical product evolution roadmap is maintained in [ROADMAP.md](ROADMAP.md).
 ARCHITECTURE.md remains the implementation reference for current and completed
-features. ROADMAP.md is planning-only and does not authorize RC3 scope changes,
+features. ROADMAP.md is planning-only and does not authorize RC6 scope changes,
 product-code, test, issue, release-package, or updater work.
