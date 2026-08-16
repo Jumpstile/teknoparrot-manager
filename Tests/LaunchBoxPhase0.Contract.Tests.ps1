@@ -94,7 +94,8 @@ function global:Invoke-Phase0Contract {
         [string]$ExpectedCorrelationId,
         [string]$ResultPath,
         [Parameter(Mandatory = $true)][string]$ProductionScript,
-        [Parameter(Mandatory = $true)][string]$PowerShellPath
+        [Parameter(Mandatory = $true)][string]$PowerShellPath,
+        [switch]$SkipRequestFile
     )
 
     $requestPath = Join-Path $Fixture.ResultDir ('request-' + [guid]::NewGuid().ToString('N') + '.json')
