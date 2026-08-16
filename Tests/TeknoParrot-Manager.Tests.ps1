@@ -174,49 +174,61 @@ BeforeAll {
         }
     }
 
-    # Windows may spell the same existing directory with its long user-folder
-    # name or its 8.3 short name. Cleanup errors must still identify this exact
-    # staging directory, so accept only OS-derived equivalent full-path forms.
-    if (-not ('TpmPathInterop' -as [type])) {
+    # Resolve both the expected directory and the path named in the cleanup
+    # error to their filesystem identity. This handles mixed long/8.3 forms
+    # (for example, a short user folder with long later components) without
+    # reducing the assertion to a substring or basename check.
+    if (-not ('TpmFileIdentityInterop' -as [type])) {
         Add-Type -TypeDefinition @'
 using System;
-using System.Text;
 using System.Runtime.InteropServices;
-public static class TpmPathInterop {
+public static class TpmFileIdentityInterop {
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ByHandleFileInformation {
+        public uint FileAttributes;
+        public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
+        public uint VolumeSerialNumber;
+        public uint FileSizeHigh;
+        public uint FileSizeLow;
+        public uint NumberOfLinks;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+    }
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    public static extern uint GetLongPathName(string path, StringBuilder buffer, int capacity);
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    public static extern uint GetShortPathName(string path, StringBuilder buffer, int capacity);
+    private static extern IntPtr CreateFile(string path, uint desiredAccess, uint shareMode, IntPtr securityAttributes, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetFileInformationByHandle(IntPtr handle, out ByHandleFileInformation information);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr handle);
+    public static string GetIdentity(string path) {
+        IntPtr handle = CreateFile(path, 0, 1u | 2u | 4u, IntPtr.Zero, 3u, 0x02000000u, IntPtr.Zero);
+        if (handle == new IntPtr(-1)) { return null; }
+        try {
+            ByHandleFileInformation information;
+            if (!GetFileInformationByHandle(handle, out information)) { return null; }
+            return string.Format("{0:X8}:{1:X8}{2:X8}", information.VolumeSerialNumber, information.FileIndexHigh, information.FileIndexLow);
+        } finally { CloseHandle(handle); }
+    }
 }
 '@
     }
 
-    function Get-TpmEquivalentWindowsPath {
-        param([string]$Path)
-        $fullPath = [System.IO.Path]::GetFullPath($Path).TrimEnd('\')
-        $variants = New-Object System.Collections.Generic.List[string]
-        [void]$variants.Add($fullPath)
-        foreach ($methodName in @('GetLongPathName', 'GetShortPathName')) {
-            $buffer = New-Object System.Text.StringBuilder 32768
-            $length = [TpmPathInterop]::$methodName($fullPath, $buffer, $buffer.Capacity)
-            if ($length -gt 0 -and $length -lt $buffer.Capacity) {
-                [void]$variants.Add($buffer.ToString().TrimEnd('\'))
-            }
-        }
-        return @($variants | Select-Object -Unique)
-    }
-
     function Assert-TpmErrorIdentifiesWindowsPath {
         param([string]$ErrorText, [string]$ExpectedPath)
-        $variants = @(Get-TpmEquivalentWindowsPath -Path $ExpectedPath)
+        $expectedIdentity = [TpmFileIdentityInterop]::GetIdentity($ExpectedPath)
+        $expectedIdentity | Should -Not -BeNullOrEmpty -Because "the expected staging directory must exist"
         $matched = $false
-        foreach ($variant in $variants) {
-            if ($ErrorText.IndexOf($variant, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+        $pathMatches = [regex]::Matches($ErrorText, "(?:TPM STAGING CLEANUP FAILED for|residue remains at) '([^']+)'")
+        foreach ($pathMatch in $pathMatches) {
+            $candidateIdentity = [TpmFileIdentityInterop]::GetIdentity($pathMatch.Groups[1].Value)
+            if ([string]::Equals($candidateIdentity, $expectedIdentity, [System.StringComparison]::OrdinalIgnoreCase)) {
                 $matched = $true
                 break
             }
         }
-        $matched | Should -BeTrue -Because ("cleanup error must identify the actual staging directory; accepted equivalent forms: {0}" -f ($variants -join ' | '))
+        $matched | Should -BeTrue -Because "cleanup error must identify the exact staging directory by filesystem identity"
     }
 }
 
