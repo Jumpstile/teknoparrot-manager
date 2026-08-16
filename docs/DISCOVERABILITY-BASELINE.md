@@ -76,12 +76,17 @@ text is refreshed, use this exact concise update rather than adding a backlink:
 
 No external post or artificial backlink was created by this task.
 
-## Post-change verification: 2026-08-16T18:07:32.7064978Z
+## Post-change verification: 2026-08-16T18:39:30.4908959Z
 
 The live settings were reconciled after the source-side implementation reached
 `main`. The verification used exact main commit
 `3e8e5ce0730a6b10f1e7308d00bf8ea1f22015f6` and the contract committed at that
 SHA.
+
+A follow-up live read found the description had reverted to stale repository text,
+so the exact contract was reconciled again through authenticated GitHub settings
+access. Homepage and topics remained exact. The final verification below passed
+after reapplication, and a delayed recheck also remained exact.
 
 ### Live repository state
 
