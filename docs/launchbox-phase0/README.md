@@ -7,10 +7,12 @@ LaunchBox / Big Box plugin. The plugin is a presentation and orchestration
 layer only. TeknoParrot Manager remains the source of truth for health-check
 logic and future TPM operations.
 
-## Verified host facts
+## Documentation evidence versus host evidence
 
-- The current official LaunchBox changelog identifies Version 13.27 as the
-  current released version for this investigation (released May 12, 2026):
+- The documentation investigation originally used the official LaunchBox
+  changelog identifying Version 13.27 as the current released version at the
+  time of the spike (released May 12, 2026). That is documentation evidence,
+  not the installed host version:
   https://www.launchbox-app.com/about/changelog
 - LaunchBox 13.19 moved the host runtime to .NET 9.0. The native project
   therefore targets `net9.0-windows`, subject to validation against the exact
@@ -30,13 +32,30 @@ logic and future TPM operations.
   uses none of the write or save operations:
   https://pluginapi.launchbox-app.com/html/aa57942f-403e-6c11-bfe5-2465f667c66c.htm
 - The API documentation pages identify the documentation assembly as
-  `Unbroken.LaunchBox.Plugins.dll` version `13.5.0.0`. No LaunchBox installation
-  or current API DLL is present in this development environment, so the exact
-  13.27 assembly version remains unverified. The official documentation also
-  still mentions `LaunchBox\\Metadata`; the official path-change notice moved
-  the assembly to `LaunchBox\\Core`, which is the path used by the native
-  project and must be checked against the supplied host installation:
+  `Unbroken.LaunchBox.Plugins.dll` version `13.5.0.0`. This is a documentation
+  artifact and must not be substituted for the installed host assembly. The
+  official documentation also still mentions `LaunchBox\\Metadata`; the
+  official path-change notice moved the assembly to `LaunchBox\\Core`:
   https://forums.launchbox-app.com/topic/57046-path-change-of-unbrokenlaunchboxpluginsdll/
+
+## Actual arcade host evidence
+
+The authoritative host for issue #244 validation is the installed arcade
+environment, not the historical 13.27 documentation snapshot:
+
+- LaunchBox: `C:\\Users\\EliSi\\LaunchBox\\Core\\LaunchBox.exe`, version
+  `14.0.0.0`.
+- Big Box: `C:\\Users\\EliSi\\LaunchBox\\Core\\BigBox.exe`, version `14.0.0.0`.
+- API assembly: `C:\\Users\\EliSi\\LaunchBox\\Core\\Unbroken.LaunchBox.Plugins.dll`.
+- API file and assembly version: `14.0.0.0`.
+- API SHA-256:
+  `99342E74EE99AFA28060439E78C6C08EEFFC90F541FBBCC70AE942B8C4AA5944`.
+- Regular plugin directory: `C:\\Users\\EliSi\\LaunchBox\\Plugins`.
+
+No LaunchBox 13.27 installation is required or should be installed for this
+validation. Interface names appearing in documentation are not treated as
+proof of binary compatibility; the exact 14.0 assembly must be compiled
+against and inspected before installation.
 
 ## POC state
 
@@ -53,12 +72,14 @@ logic and future TPM operations.
   but TPM does not yet have a selected-profile diagnostics seam that can be
   proven read-only without guessing how LaunchBox's `ApplicationPath` maps to
   the active TPM install.
-- No LaunchBox or Big Box runtime smoke test was possible in this environment.
-  The native project intentionally fails closed until the host API assembly is
-  supplied.
-- The immediately justified host-validation follow-up is tracked in #244 and
-  is blocked until a real LaunchBox 13.27 installation/API assembly is
-  available.
+- The real host/API assembly is now available, but native host validation has
+  not yet started: this machine has the .NET 9 runtime but no .NET SDK or
+  MSBuild compiler, so the required 14.0 API build cannot run. The project
+  continues to fail closed until the exact host assembly can be compiled
+  against.
+- Issue #244 is therefore blocked on compiler availability, not on obtaining
+  LaunchBox 13.27. Do not infer API compatibility from unchanged interface
+  names alone.
 
 ## Repository placement recommendation
 
