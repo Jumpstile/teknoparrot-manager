@@ -9,20 +9,19 @@ tool for organizing extracted arcade games, registering profiles, deploying
 lightgun crosshairs, applying compatibility fixes, and exporting libraries to
 LaunchBox or HyperSpin.
 
-> **In-progress: v1.0 RC6** (uncommitted, not yet published) — onboarding flow simplification and dgVoodoo2/ReShade auto-download, on top of the currently-published **v1.0 RC5**. Test one game after each run. Profiles are backed up automatically before every run.
+> **Published release candidate: v1.0 RC6** — onboarding flow simplification and dgVoodoo2/ReShade auto-download. Test one game after each run. Profiles are backed up automatically before every run.
 
 ---
 
-## Published Release Candidate: TeknoParrot Manager v1.0 RC5
+## Published Release Candidate: TeknoParrot Manager v1.0 RC6
 
-v1.0 RC5 is published and validated. Download the official
-[TeknoParrot Manager v1.0 RC5 release](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC5)
-from GitHub Releases. The published release is tagged `v1.0-RC5`.
+v1.0 RC6 is published and validated. Download the official
+[TeknoParrot Manager v1.0 RC6 release](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC6)
+from GitHub Releases. The published release is tagged `v1.0-RC6`.
 
-**v1.0 RC6 is currently in progress in this repository (uncommitted) and
-has not been published or tagged yet.** It adds onboarding flow
-simplification and dgVoodoo2/ReShade auto-download on top of RC5. Until
-RC6 is published, RC5 remains the release to download.
+v1.0 RC6 adds onboarding flow simplification and dgVoodoo2/ReShade
+auto-download on top of RC5. RC5 remains documented below as the superseded
+release that corrected the RC4 packaging defect.
 
 RC5 corrects a packaging defect in RC4: the RC4 release ZIP was missing
 `scripts\TPMCertification.Authority.psm1`, a hard runtime dependency of
@@ -163,7 +162,7 @@ This script automates the copy-and-fill step: it scans your games, matches each 
 
 ## Installation
 
-1. Download the official `TeknoParrot Manager v1.0 RC5.zip` release asset
+1. Download the official `TeknoParrot Manager v1.0 RC6.zip` release asset
    from [Releases](../../releases).
 2. Extract to any folder (e.g. a `Scripts` subfolder alongside your TeknoParrot install)
 3. Double-click **`TeknoParrot-Manager.bat`**
@@ -970,4 +969,4 @@ TeknoParrot Manager name and branding are reserved.
 
 ---
 
-> v1.0 RC5 (published; validated) -- test one game after each run. Profiles are backed up automatically at the start of every run. v1.0 RC6 is in progress in this repository and not yet published.
+> v1.0 RC6 (published; validated) -- test one game after each run. Profiles are backed up automatically at the start of every run.

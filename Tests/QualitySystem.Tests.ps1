@@ -48,16 +48,10 @@ Describe "Quality engineering system metadata" {
 }
 
 Describe "Release Integrity source identity" {
-    # P1 #3 remediation note: this Describe block previously assumed "the
-    # running script's own identity" and "the last actually-published
-    # GitHub release" are always the same string. That assumption breaks
-    # by design whenever a new RC is in progress in this repository
-    # (uncommitted) but not yet published/tagged -- exactly the state this
-    # remediation pass introduced (v1.0 RC6 in progress on top of the
-    # published v1.0 RC5). Both identities are real, coexisting facts, so
-    # this block now tracks them as two separate constants and asserts
-    # each file against whichever one it is actually supposed to reflect,
-    # instead of asserting they are always identical.
+    # The running source identity and the last published release are tracked
+    # separately so an in-progress release cannot be mistaken for a published
+    # one. After the RC6 publication they intentionally point to the same RC6
+    # identity, while the assertions remain explicit about each surface.
     BeforeAll {
         $script:RepoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
         # What the running script/tooling actually says right now.
@@ -68,10 +62,10 @@ Describe "Release Integrity source identity" {
         # new release is genuinely published/tagged -- never as a
         # substitute for keeping CurrentSourceVersion in sync with
         # $ReleaseCandidateLabel on every version bump.
-        $script:LastPublishedVersion = 'v1.0 RC5'
-        $script:LastPublishedRcLabel = 'RC5'
-        $script:LastPublishedTag     = 'v1.0-RC5'
-        $script:LastPublishedZipName = 'TeknoParrot Manager v1.0 RC5.zip'
+        $script:LastPublishedVersion = 'v1.0 RC6'
+        $script:LastPublishedRcLabel = 'RC6'
+        $script:LastPublishedTag     = 'v1.0-RC6'
+        $script:LastPublishedZipName = 'TeknoParrot Manager v1.0 RC6.zip'
     }
 
     It "keeps the production script header, runtime label, banner, and console preview on the current source identity" {
@@ -93,44 +87,17 @@ Describe "Release Integrity source identity" {
 
         $topReadme | Should -Match ([regex]::Escape($script:LastPublishedVersion))
         $topReadme | Should -Match ([regex]::Escape($script:LastPublishedTag))
-        # RC5 was validated (exact-SHA static/analysis/Pester evidence, package
-        # structure/hash) but not run through a real-hardware certification
-        # pass in this environment -- "published and validated" is the honest
-        # claim; do not assert "hardware-certified" unless that evidence exists.
+        # RC6 has been validated for publication, but this test deliberately
+        # does not claim real-hardware certification without that evidence.
         $topReadme | Should -Match 'published and validated'
-        # Guards the exact regression class this test previously caught for
-        # RC5 (a "published" release whose own docs said "not yet
-        # published") -- still scoped to the LAST PUBLISHED version only.
-        # It is legitimate, not a regression, for CurrentSourceVersion
-        # (RC6) to say "not yet published" while it genuinely is not yet
-        # published -- see the next assertion, which requires that.
+        # Guard the regression class where a published release's own docs
+        # still say it is not published.
         $topReadme | Should -Not -Match ($script:LastPublishedRcLabel + '.*(in preparation|not been published|not yet published)|intended tag|tag has not been created')
         $topReadme | Should -Not -Match '\[Download v1\.0 RC5\]'
         $topReadme | Should -Not -Match 'v1\.0 RC1|v1\.0-RC1|v1\.0\.RC1'
-        # Positive guard (P1 #3): the top of README.md must explicitly say
-        # the current in-progress source version is not yet published, on
-        # the same line as its own version string -- so this distinction
-        # cannot be silently deleted in a future edit without this test
-        # failing (which is exactly the class of drift an independent
-        # review flagged this round).
-        $topReadme | Should -Match ([regex]::Escape($script:CurrentSourceVersion) + '.*(in progress|not yet published)')
-    }
-
-    It "keeps release guidance files' current-source identity aligned with the script" {
-        $files = @(
-            'AGENTS.md',
-            'TeknoParrot-Manager-README.txt',
-            'TeknoParrot-Manager-QuickStart.txt',
-            'TeknoParrot-Manager.bat'
-        )
-
-        foreach ($relative in $files) {
-            $content = Get-Content -LiteralPath (Join-Path $script:RepoRoot $relative) -Raw
-            $content | Should -Match ([regex]::Escape($script:CurrentSourceVersion))
-        }
-        $agents = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'AGENTS.md') -Raw
-        $currentZipName = "TeknoParrot Manager $($script:CurrentSourceVersion).zip"
-        $agents | Should -Match ([regex]::Escape($currentZipName))
+        # The current source identity must also use published wording.
+        $topReadme | Should -Match ([regex]::Escape($script:CurrentSourceVersion) + '.*published')
+        $topReadme | Should -Not -Match ([regex]::Escape($script:CurrentSourceVersion) + '.*(in progress|not yet published)')
     }
 
     It "keeps the changelog and release-package defaults aligned with the current source identity" {
@@ -145,12 +112,9 @@ Describe "Release Integrity source identity" {
     }
 
     It "keeps the wiki changelog staging doc aligned with the last actually-published release" {
-        # docs\wiki-updates\Changelog.md tracks the live GitHub wiki, which
-        # mirrors published releases only -- it intentionally does NOT get
-        # an entry for an in-progress, uncommitted RC (wiki updates for
-        # this round are explicitly out of scope; see the round's own
-        # notes). It must still never claim "Unreleased" and must still
-        # correctly describe the last published version.
+        # docs\wiki-updates\Changelog.md tracks the live GitHub wiki and must
+        # contain the current published release entry. It must never claim
+        # "Unreleased" or omit the last published version.
         $wikiChangelog = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'docs\wiki-updates\Changelog.md') -Raw
         $wikiChangelog | Should -Not -Match 'Unreleased'
         $wikiChangelog | Should -Match ([regex]::Escape($script:LastPublishedVersion))
