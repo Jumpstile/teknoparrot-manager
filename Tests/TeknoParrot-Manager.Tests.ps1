@@ -173,6 +173,51 @@ BeforeAll {
             $After.Entries[$i].Content      | Should -Be $Before.Entries[$i].Content
         }
     }
+
+    # Windows may spell the same existing directory with its long user-folder
+    # name or its 8.3 short name. Cleanup errors must still identify this exact
+    # staging directory, so accept only OS-derived equivalent full-path forms.
+    if (-not ('TpmPathInterop' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class TpmPathInterop {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern uint GetLongPathName(string path, StringBuilder buffer, int capacity);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern uint GetShortPathName(string path, StringBuilder buffer, int capacity);
+}
+'@
+    }
+
+    function Get-TpmEquivalentWindowsPath {
+        param([string]$Path)
+        $fullPath = [System.IO.Path]::GetFullPath($Path).TrimEnd('\')
+        $variants = New-Object System.Collections.Generic.List[string]
+        [void]$variants.Add($fullPath)
+        foreach ($methodName in @('GetLongPathName', 'GetShortPathName')) {
+            $buffer = New-Object System.Text.StringBuilder 32768
+            $length = [TpmPathInterop]::$methodName($fullPath, $buffer, $buffer.Capacity)
+            if ($length -gt 0 -and $length -lt $buffer.Capacity) {
+                [void]$variants.Add($buffer.ToString().TrimEnd('\'))
+            }
+        }
+        return @($variants | Select-Object -Unique)
+    }
+
+    function Assert-TpmErrorIdentifiesWindowsPath {
+        param([string]$ErrorText, [string]$ExpectedPath)
+        $variants = @(Get-TpmEquivalentWindowsPath -Path $ExpectedPath)
+        $matched = $false
+        foreach ($variant in $variants) {
+            if ($ErrorText.IndexOf($variant, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                $matched = $true
+                break
+            }
+        }
+        $matched | Should -BeTrue -Because ("cleanup error must identify the actual staging directory; accepted equivalent forms: {0}" -f ($variants -join ' | '))
+    }
 }
 
 AfterAll {
@@ -2137,7 +2182,7 @@ Describe "Expand-DgVoodoo2Zip (selective extraction, fail-closed on layout drift
             $caught.ToString() | Should -Not -Match 'TRANSACTION CLEANUP FAILED'
             $newStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'dgVoodoo2-*' -ErrorAction SilentlyContinue | Where-Object { $beforeStages -notcontains $_.FullName })
             $newStages.Count | Should -Be 1
-            $caught.ToString() | Should -Match ([regex]::Escape($newStages[0].FullName))
+            Assert-TpmErrorIdentifiesWindowsPath -ErrorText $caught.ToString() -ExpectedPath $newStages[0].FullName
             Test-Path -LiteralPath $newStages[0].FullName -PathType Container | Should -BeTrue
             @(Get-ChildItem -LiteralPath $newStages[0].FullName -Force -Recurse -ErrorAction SilentlyContinue).Count | Should -Be 0
             Test-Path -LiteralPath (Join-Path $newStages[0].FullName '.tpm-rollback-backup') | Should -BeFalse
@@ -2525,7 +2570,7 @@ Describe "Expand-ReShadeSelfExtractingArchive (embedded ZIP scan, fail-closed on
             $caught.ToString() | Should -Not -Match 'TRANSACTION CLEANUP FAILED'
             $newStages = @(Get-ChildItem -LiteralPath $stagingRoot -Directory -Filter 'ReShade-*' -ErrorAction SilentlyContinue | Where-Object { $beforeStages -notcontains $_.FullName })
             $newStages.Count | Should -Be 1
-            $caught.ToString() | Should -Match ([regex]::Escape($newStages[0].FullName))
+            Assert-TpmErrorIdentifiesWindowsPath -ErrorText $caught.ToString() -ExpectedPath $newStages[0].FullName
             Test-Path -LiteralPath $newStages[0].FullName -PathType Container | Should -BeTrue
             @(Get-ChildItem -LiteralPath $newStages[0].FullName -Force -Recurse -ErrorAction SilentlyContinue).Count | Should -Be 0
             Test-Path -LiteralPath (Join-Path $newStages[0].FullName '.tpm-rollback-backup') | Should -BeFalse
