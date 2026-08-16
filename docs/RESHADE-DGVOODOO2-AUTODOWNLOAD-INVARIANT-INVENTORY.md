@@ -11,7 +11,7 @@ the shared transactional-extraction primitives
 (`Expand-ReShadeSelfExtractingArchive`, `Expand-DgVoodoo2Zip`), and the
 download-trust chain that must complete before either extractor is ever
 invoked (`Invoke-TpmDownload` with `-ExpectedSha256`,
-`Test-ReShadeSetupTrustedSignature`).
+`Test-ReShadeSetupTrustedSignature`, and the existing-runtime update orchestration (Get-ReShadeRuntimeState, Invoke-ReShadeRuntimeUpdate).
 
 Triggers this component meets (per INVENTORY_STANDARDS.md, REQUIRED):
 it implements transaction processing / a commit protocol (staged writes,
@@ -158,6 +158,19 @@ available for manual inspection.
   ordinary outcomes would accumulate orphaned staging directories under
   the user's real '%TEMP%\TeknoParrotManagerStaging' on every failed
   download/extraction attempt.
+### RESHADE-UPDATE-006 -- Existing runtime updates are explicit and fail closed
+When a previously installed ReShade runtime is older than the authoritative
+reshade.me version, TPM may update it only after an explicit user approval.
+The update uses the existing download audit, pinned installer trust gate,
+validated extraction, and transactional cache promotion. Declining, failure,
+unknown version metadata, or unavailable latest-version data preserves the
+current runtime and does not install shader/effect packages.
+- **Verified by:** Get-ReShadeDllUpdateStatus,
+  Get-ReShadeRuntimeState, and Invoke-ReShadeRuntimeUpdate Pester tests,
+  plus the Invoke-ReShadeSetup source wiring.
+- **Failure mode if violated:** an outdated runtime could silently be replaced,
+  or an untrusted installer/effect package could cross the runtime trust
+  boundary without approval.
 ### TRUST-004 -- Untrusted or integrity-failed artifacts never reach extraction/deployment
 An artifact is never passed to `Expand-ReShadeSelfExtractingArchive` or
 `Expand-DgVoodoo2Zip` (and by extension never reaches

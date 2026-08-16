@@ -258,12 +258,11 @@
     Optionally also hides the Windows mouse cursor for all lightgun games
     by setting the cursor-hide field in each UserProfile XML.
 
-  - ReShade visual enhancements. Installs ReShade post-processing into your
-    game folders, auto-detecting the correct DLL name from each game's
-    executable. Supports both 64-bit (ReShade64.dll) and 32-bit (ReShade32.dll)
-    games -- the correct DLL is chosen automatically based on each game's
-    architecture. Checks reshade.me for newer versions on each run. Optional --
-    your games work perfectly without it.
+  - ReShade runtime. Installs and updates the ReShade runtime DLLs used by
+    deployment, choosing the correct DLL name and architecture for each game.
+    Visual effects and presets are supplied/configured separately. Checks
+    reshade.me for newer versions on each run. Optional -- your games work
+    perfectly without it.
 
   - dgVoodoo2 legacy compatibility. Fixes older arcade games that crash or
     show black screens due to DirectX 8, DirectDraw, or Glide API usage.
@@ -555,9 +554,9 @@
        Returns to the menu when done.
 
   5) ReShade setup
-       Installs ReShade post-processing into your game folders. Auto-detects
-       the correct DLL name and architecture (32-bit or 64-bit) for each
-       game. See RESHADE VISUAL ENHANCEMENTS below.
+       Installs and updates the ReShade runtime DLLs used by deployment.
+       Visual effects and presets are configured separately; see RESHADE
+       VISUAL ENHANCEMENTS below.
        Returns to the menu when done.
 
   6) dgVoodoo2 setup
@@ -1178,8 +1177,10 @@
                      those bars with decorative arcade cabinet artwork.
 
   Your games work perfectly WITHOUT ReShade. It is entirely optional and
-  can be uninstalled at any time. No knowledge of graphics or shaders is
-  required to use it -- you pick effects through a simple in-game menu.
+  can be uninstalled at any time. TPM currently installs and updates the
+  ReShade runtime DLLs only; it does not install or choose shader/effect
+  packages. Effect curation is a separate research item documented in
+  docs/RESHADE-VISUAL-EFFECTS-RESEARCH.md.
 
   HOW IT IS INSTALLED
 
@@ -1216,7 +1217,10 @@
     OPTION A -- Automatic download (recommended)
 
       From the main menu, choose "ReShade setup." If the DLL is not already
-      present, choose D to fetch the official installer from reshade.me.
+      present, choose D to fetch the official installer from reshade.me. If
+      the existing runtime is older than the version reported by reshade.me,
+      mode 5 offers the same explicit Y/N update path. A declined or failed
+      update keeps the existing runtime unchanged.
       Choose B to browse for a file you already have, or N to skip.
       TPM validates the installer Authenticode status and pinned signer
       thumbprint before trusting it; a mismatch fails closed and returns to
@@ -1229,7 +1233,6 @@
       does not claim it matches a separately published ReShade digest.
       Nothing is bundled with TPM itself -- the installer is fetched fresh
       from reshade.me under ReShade's own redistribution policy.
-
     OPTION B -- Manual (if you prefer, or already have the DLL)
 
     Step 1.  Go to  https://reshade.me  and download the free installer.
@@ -1288,23 +1291,18 @@
     Your settings are saved automatically to a ReShade.ini file in the game
     folder, so you only need to configure once.
 
-    Common effects to try for arcade games:
-      LumaSharpen or CAS     Sharpening
-      CRT_Royale or CRT_Lottes   CRT scanlines and curvature
-      Levels or Vibrance     Colour and contrast
-      Border                 Bezel artwork (requires a border image file)
+    ReShade itself supports many effects, but TPM does not install or choose
+    shader packages. Candidate categories and source/licensing research are
+    documented separately in docs/RESHADE-VISUAL-EFFECTS-RESEARCH.md.
 
   UPDATING RESHADE
 
     The script checks reshade.me for a newer version each time ReShade setup
-    runs. If a newer version is available you will be told. To update:
-
-    1. Download the new installer from reshade.me.
-    2. Run it on any game exe (or extract the DLL manually with 7-Zip).
-    3. Copy the new DLL to  ReShade\ReShade64.dll, replacing the old one.
-       If you use ReShade32.dll for 32-bit games, update that file too.
-    4. Re-run ReShade setup (mode 5) to redeploy the updated DLLs.
-
+    runs. If an existing runtime is older, mode 5 asks whether to download and
+    install the official update. Answer Y to use the existing download,
+    Authenticode trust, extraction, and audit pipeline. Answer N to keep the
+    current runtime unchanged. If the update fails, TPM keeps the current
+    runtime and reports the manual path.
   REMOVING RESHADE
 
     To remove ReShade from a single game: delete the DLL file (d3d9.dll,

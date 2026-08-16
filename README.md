@@ -81,7 +81,7 @@ separately.
 - **AutoSync extraction** — copies and extracts game ZIPs from a NAS or local source, skipping unchanged games.
 - **Game repair** — finds broken or empty game paths and re-points them automatically.
 - **Crosshair setup** — deploys custom P1/P2 cursor images to all lightgun games with an HTML preview of 321 included designs.
-- **ReShade** — installs post-processing into game folders, auto-detecting the correct DLL name and 32/64-bit architecture per game. Checks the Authenticode signature on your ReShade DLL(s) before deploying, since ReShade's own installer is code-signed.
+- **ReShade** -- installs and updates the ReShade runtime DLLs used by deployment; visual effects and presets are configured separately.
 - **dgVoodoo2** — fixes older games that crash on DirectX 8, DirectDraw, or Glide by deploying the correct compatibility DLLs.
 - **GPU fixes** — detects your GPU (AMD / NVIDIA / Intel) and applies the matching vendor fix to every registered game that has one.
 - **Force feedback (FFB)** — native FFB Blaster (needs a paid TeknoParrot membership) and a free third-party plugin (fetched live, no subscription needed), covering different games. If a game is covered by both, you're asked once which to use for all such games.
@@ -205,7 +205,7 @@ Choosing mode 1 or 2 offers a preview/dry-run option first — see [Preview / Dr
 | 3 | **Propagate Controls** | Re-copy control bindings from reference games to other compatible games, without going through AutoSync/Register first |
 | **Game Enhancements** (all optional — games work without these) | | |
 | 4 | **Crosshair setup** | Pick and deploy custom crosshairs to lightgun games |
-| 5 | **ReShade setup** | Install post-processing shaders |
+| 5 | **ReShade setup** | Install/update ReShade runtime DLLs; configure effects separately |
 | 6 | **dgVoodoo2 setup** | Fix DirectX 8 / DirectDraw / Glide compatibility |
 | 7 | **GPU fix setup** | Apply AMD / NVIDIA / Intel vendor fix to all games |
 | 8 | **Force feedback (FFB) setup** | FFB Blaster (membership) + free third-party plugin |
@@ -405,44 +405,43 @@ Mode 4 deploys custom P1/P2 crosshair cursor images to all registered lightgun g
 
 ## ReShade Visual Enhancements
 
-ReShade adds post-processing effects to games without modifying any game files. Remove it by deleting one DLL per game folder — the game is completely unchanged.
+ReShade adds post-processing effects to games without modifying any game files. Remove it by deleting one DLL per game folder -- the game is completely unchanged.
 
-**Popular effects for arcade games:**
+TPM's current boundary is deliberately narrower than ReShade's full effect ecosystem: TPM installs and updates the ReShade runtime DLLs only. It does not download, choose, or silently install shader/effect packages.
 
-| Effect | What it does |
-|--------|-------------|
-| LumaSharpen / CAS | Removes the blurry look of upscaled games |
-| CRT_Royale / CRT_Lottes | Adds classic CRT scanlines and curvature |
-| Levels / Vibrance | Restores vivid colours on modern monitors |
-| Border | Adds decorative arcade cabinet artwork in black bar areas |
+**ReShade capabilities under evaluation:**
+
+| Visual goal | Examples in the ReShade ecosystem | TPM status |
+|-------------|------------------------------------|------------|
+| Sharper image | Luma sharpening or CAS | Research only; no TPM default yet |
+| CRT / scanlines | CRT-Royale or other CRT shaders | Research only; no TPM default yet |
+| Improved color | Vibrance or conservative color adjustment | Research only; no TPM default yet |
+| Smoother edges | SMAA or FXAA | Research only; not enabled by TPM |
+| Arcade display / bezel | Border or overlay effects | Not advertised or installed by TPM |
+
+The curated research, source review, license checks, and real-game evaluation plan are tracked in docs/RESHADE-VISUAL-EFFECTS-RESEARCH.md. No shader filename is exposed as a normal TPM option, and no category is enabled globally until representative arcade tests support it.
 
 **Setup:**
 
-The script looks for DLLs in a `ReShade\` folder next to the script:
-- `ReShade64.dll` — for 64-bit games (required)
-- `ReShade32.dll` — for 32-bit games (optional)
+The script looks for DLLs in a ReShade folder next to the script:
+- ReShade64.dll -- for 64-bit games (required)
+- ReShade32.dll -- for 32-bit games (optional)
 
-DLLs are never bundled in the release ZIP (ReShade's own policy prohibits redistributing the binaries — TPM always fetches fresh from reshade.me).
+DLLs are never bundled in the release ZIP (ReShade's own policy prohibits redistributing the binaries -- TPM always fetches fresh from reshade.me).
 
-**Automatic (recommended):** run ReShade setup from the main menu and choose D. TPM downloads the official installer from reshade.me, verifies its Authenticode status and signer thumbprint against ReShade pinned trust policy before trusting it, and extracts ReShade32.dll/ReShade64.dll from it automatically. The log records the authoritative installer URL, filename/version, computed SHA-256, transfer method/size/time/speed, and the Authenticode signer/subject, status, thumbprint, and final trust result. The SHA-256 is an audit hash; the trust gate is the pinned thumbprint plus accepted status, not a published ReShade digest.
+**Automatic (recommended):** run ReShade setup from the main menu and choose D when no runtime DLL exists. TPM downloads the official installer from reshade.me, verifies its Authenticode status and signer thumbprint against ReShade's pinned trust policy, and extracts ReShade32.dll/ReShade64.dll transactionally. If an existing runtime is older than the current reshade.me version, mode 5 offers the same approved download/update path. A declined or failed update keeps the existing runtime and falls back to the normal manual path.
 
-**Manual:**
-1. Download the free installer from [reshade.me](https://reshade.me)
-2. Run it — point it at any 64-bit TeknoParrot game exe. It creates a DLL in that folder.
-3. Copy that DLL to `ReShade\ReShade64.dll` next to the script
-4. (Optional) Repeat with a 32-bit exe and save as `ReShade32.dll`
-5. Run "ReShade setup" from the main menu, or answer Y when prompted after a normal run
+The download audit records the authoritative installer URL, filename/version, computed SHA-256, transfer method/size/time/speed, and the Authenticode signer/subject, status, thumbprint, and final trust result. The SHA-256 is an audit hash; the trust gate is the pinned thumbprint plus accepted status, not a published ReShade digest.
 
-**In-game:** press **Home** to open the ReShade overlay. Toggle effects with tick-boxes, adjust with sliders. Settings save automatically to `ReShade.ini` in the game folder.
+**Manual:** download the standard installer from https://reshade.me, run it against a representative game executable, and copy the resulting DLLs into the ReShade folder with the names above. The setup wizard also accepts a user-provided preset; per-game ReShadePresets/ProfileCode.ini files override the global preset choice.
 
-**Updating:** the script checks reshade.me for newer versions each run. To update: download the new installer, extract the DLL, replace `ReShade64.dll`, re-run mode 5.
+**In-game:** press **Home** to open the ReShade overlay. Any effects shown there come from the effect files/presets you supplied separately; TPM does not install or select them.
 
-**Signature check:** before deploying, the script checks the Authenticode signature on your ReShade DLL(s) — ReShade's own installer is code-signed, and that signature survives extracting/renaming the DLL. An invalid or missing signature is shown as a warning (with a plain-English reason) but doesn't block setup, since you supplied the file yourself; just make sure it actually came from reshade.me.
+**Signature check:** before deploying, the script checks the Authenticode signature on user-supplied ReShade DLLs. An invalid or missing signature is shown as a warning (with a plain-English reason) but does not block setup, since you supplied the file yourself.
 
-**Removing:** delete the DLL (`dxgi.dll`, `d3d9.dll`, `d3d12.dll`, or `opengl32.dll`) from the game folder. Optionally delete `ReShade.ini` as well.
+**Removing:** delete the DLL (dxgi.dll, d3d9.dll, d3d12.dll, or opengl32.dll) from the game folder. Optionally delete ReShade.ini as well.
 
-Mode 10 (Library health check) reports, purely informationally, how many registered games have ReShade installed -- not flagged as something to fix, since it's a per-game cosmetic choice rather than a clear right answer.
-
+Mode 10 (Library health check) reports, purely informationally, how many registered games have ReShade installed -- not flagged as something to fix, since it is a per-game cosmetic choice rather than a clear right answer.
 ---
 
 ## dgVoodoo2 Legacy Compatibility
