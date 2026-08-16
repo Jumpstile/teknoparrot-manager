@@ -26,8 +26,8 @@ body:
     id: tpm-version
     attributes:
       label: TeknoParrot Manager version or release
-      description: Enter the exact version shown by your copy. When this form was added, the current release was v1.0-RC3; check the Releases page if your copy may be newer.
-      placeholder: Example - v1.0-RC3
+      description: Enter the exact version or release identifier shown by your copy. Check the Releases page if you need help identifying it.
+      placeholder: Example - v1.0.0 or a development build
     validations:
       required: true
 
