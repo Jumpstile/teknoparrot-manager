@@ -14,11 +14,15 @@ The Phase 0 question is whether a native LaunchBox / Big Box plugin can add a
 usable frontend without creating a second TPM implementation or changing
 LaunchBox, TeknoParrot, or game data.
 
-The current environment has no LaunchBox installation, Big Box installation,
-or current `Unbroken.LaunchBox.Plugins.dll`. Official current sources confirm
-LaunchBox 13.27 and the .NET 9 host transition, while the API documentation
-artifact identifies assembly version 13.5.0.0. The current host assembly must
-still be inspected on a real 13.27 installation.
+The documentation investigation originally used official sources current to
+LaunchBox 13.27 and an API documentation artifact identifying assembly version
+13.5.0.0. Those are historical/documentation facts, not a substitute for a
+host DLL. The actual arcade host is LaunchBox 14.0.0.0 with
+`Core\\Unbroken.LaunchBox.Plugins.dll` version 14.0.0.0 and SHA-256
+`99342E74EE99AFA28060439E78C6C08EEFFC90F541FBBCC70AE942B8C4AA5944`.
+LaunchBox 14.0 is authoritative for host validation; no 13.27 installation
+should be sought or installed. Interface-name continuity must not be treated
+as binary compatibility until the exact 14.0 assembly builds successfully.
 
 ## Decision
 
@@ -65,9 +69,9 @@ from TPM core releases while preserving one reviewed contract.
 3. Scrape console output from the normal TPM entry point. Rejected: console
    text is not a stable integration contract and the normal entry point can
    load configuration or enter interactive behavior.
-4. Create a separate repository immediately. Deferred: the current host DLL
-   and installation are absent, so a new repository would add packaging scope
-   before the key compatibility fact is verified.
+4. Create a separate repository immediately. Deferred: host-specific
+   compatibility and packaging should remain outside TPM core until the actual
+   LaunchBox 14.0 assembly has been compiled against and runtime-validated.
 
 ## Consequences
 
@@ -80,10 +84,11 @@ Positive:
 
 Costs and open risks:
 
-- The native assembly cannot be built or loaded until a LaunchBox 13.27
-  installation supplies the current API assembly.
-- The host-validation work is isolated in follow-up issue #244 and is blocked
-  until that installation/API assembly is available.
+- The native assembly must be built against the actual LaunchBox 14.0 host
+  assembly; the historical 13.27 documentation evidence cannot satisfy this
+  gate.
+- The host-validation work is isolated in follow-up issue #244 and currently
+  remains blocked because the arcade machine has no .NET SDK/MSBuild compiler.
 - The plugin must resolve TPM paths from host context or explicit local
   settings; ambiguous discovery is surfaced to the user.
 - The selected-game action needs a separate read-only TPM seam.
