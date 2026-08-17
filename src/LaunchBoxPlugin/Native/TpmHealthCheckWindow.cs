@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -13,6 +14,7 @@ public sealed class TpmHealthCheckWindow : Window
     private readonly Button _cancelButton;
     private readonly CancellationTokenSource _cancellation = new();
     private bool _isRunning = true;
+    private bool _closeRequested;
 
     public TpmHealthCheckWindow(TpmDiscoveryResult discovery, string powershellPath, TimeSpan timeout)
     {
@@ -51,7 +53,8 @@ public sealed class TpmHealthCheckWindow : Window
         layout.Children.Add(_cancelButton);
         Content = layout;
         Loaded += OnLoaded;
-        Closed += (_, _) => _cancellation.Dispose();
+        Closing += OnClosing;
+        Closed += OnClosed;
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -76,8 +79,33 @@ public sealed class TpmHealthCheckWindow : Window
         }
 
         _isRunning = false;
+        if (_closeRequested)
+        {
+            Close();
+            return;
+        }
+
         _cancelButton.Content = "Close";
         _status.Text = FormatResult(result);
+    }
+
+    private void OnClosing(object? sender, CancelEventArgs e)
+    {
+        if (!_isRunning)
+        {
+            return;
+        }
+
+        e.Cancel = true;
+        _closeRequested = true;
+        _status.Text = "Cancelling the TPM process...";
+        _cancelButton.IsEnabled = false;
+        _cancellation.Cancel();
+    }
+
+    private void OnClosed(object? sender, EventArgs e)
+    {
+        _cancellation.Dispose();
     }
 
     private void CancelButtonOnClick(object sender, RoutedEventArgs e)

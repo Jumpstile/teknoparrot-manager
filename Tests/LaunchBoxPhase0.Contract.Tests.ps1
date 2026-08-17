@@ -234,11 +234,14 @@ Describe 'LaunchBox Phase 0 TPM contract' {
         $call = Invoke-Phase0Contract -Fixture $fixture -ProductionScript $script:Phase0ProductionScript -PowerShellPath $script:Phase0PowerShell
         $after = Get-Phase0Snapshot -Fixture $fixture
         $source = Get-Content -LiteralPath $script:Phase0ProductionScript -Raw
-        $mode = $source.IndexOf('$script:FrontendContractMode = -not')
+        $mode = $source.IndexOf('$script:FrontendContractMode = @(')
         $dispatch = $source.IndexOf('if ($script:FrontendContractMode)')
         $normalLog = $source.IndexOf('Write-Log "Script started')
         $config = $source.IndexOf('$configPath')
         $mode | Should -BeGreaterThan -1
+        $source | Should -Match 'FrontendContractRequestPath'
+        $source | Should -Match 'FrontendContractResultPath'
+        $source | Should -Match 'FrontendContractCorrelationId'
         $dispatch | Should -BeGreaterThan $mode
         $normalLog | Should -BeGreaterThan $dispatch
         $config | Should -BeGreaterThan $dispatch

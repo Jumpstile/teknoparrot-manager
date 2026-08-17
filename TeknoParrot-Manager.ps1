@@ -67,12 +67,18 @@ param(
     [string]$FrontendContractCorrelationId
 )
 
-# Contract mode is established immediately after parameter binding. Nothing
-# below this point may turn a frontend invocation into a normal interactive
-# session, and Write-Log must already be suppressed before any initialization
-# can call it. The dispatch remains below the function definitions so
+# Contract mode is established immediately after parameter binding. Any
+# frontend-contract switch activates the fail-closed entrypoint, including a
+# malformed partial invocation; it must never fall through into normal
+# interactive startup. Write-Log is suppressed before any initialization can
+# call it. The dispatch remains below the function definitions so
 # Invoke-TPMFrontendRequest is available without duplicating health-check logic.
-$script:FrontendContractMode = -not [string]::IsNullOrWhiteSpace($FrontendContractRequestPath)
+$script:FrontendContractMode = @(
+    $FrontendContractRequestPath
+    $FrontendContractResultPath
+    $FrontendContractCorrelationId
+) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1
+$script:FrontendContractMode = [bool]$script:FrontendContractMode
 
 # Single source of truth for the version string used in the banner, log, and
 # GitHub API User-Agent headers. Previously hardcoded in each of those spots
