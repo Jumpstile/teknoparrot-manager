@@ -17,6 +17,13 @@ Match order:
 
 ## Safety Rules
 
+- On first setup, TPM derives a staging-folder default from the configured
+  TeknoParrot location. Enter accepts it; B opens the browser for another path.
+- A staging path must not be inside or contain TeknoParrot, either ZIP source,
+  or the TPM program/package folder. Typed and browsed recovery choices use the
+  same symmetric containment check before they are saved or used.
+- TPM creates a missing staging directory only after a real AutoSync run is
+  selected. Preview/Dry Run does not create it.
 - Existing folders are never deleted, renamed, or moved automatically.
 - The resolver is used only to suppress duplicate extraction prompts.
 - A folder is treated as already extracted only when it exists and contains files.

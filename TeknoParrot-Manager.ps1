@@ -987,6 +987,174 @@ function Test-PathInside {
     return $c.StartsWith($p + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)
 }
 
+# True when two paths are the same location or one contains the other. This is
+# deliberately symmetric: a staging folder must not be inside a protected
+# folder, and it must not be a parent that would pull a protected folder into
+# the game-install tree.
+function Test-TpmPathOverlap {
+    param([string]$First, [string]$Second)
+    if ([string]::IsNullOrWhiteSpace($First) -or [string]::IsNullOrWhiteSpace($Second)) { return $false }
+    return (Test-PathInside $First $Second) -or (Test-PathInside $Second $First)
+}
+
+# Validate one proposed staging path before it is accepted or persisted. The
+# ZIP source folders are optional because the first-run wizard asks for the
+# staging folder before AutoSync asks for its source folders; AutoSync passes
+# all known sources back through this same validator during recovery.
+function Test-TpmStagingFolderCandidate {
+    param(
+        [string]$Candidate,
+        [string]$TeknoParrotRoot,
+        [string]$ZipSource = '',
+        [string]$ZipSourceSupplementary = '',
+        [string]$ProgramDirectory = ''
+    )
+    $canonical = $null
+    try {
+        if ([string]::IsNullOrWhiteSpace($Candidate)) { throw 'The staging folder path is empty.' }
+        $canonical = [System.IO.Path]::GetFullPath($Candidate).TrimEnd('\','/')
+        if ([string]::IsNullOrWhiteSpace($canonical)) { throw 'The staging folder path is empty.' }
+    } catch {
+        return [pscustomobject]@{
+            Valid = $false
+            CanonicalPath = $null
+            Reason = $_.Exception.Message
+        }
+    }
+
+    if (Test-Path -LiteralPath $canonical -PathType Leaf -ErrorAction SilentlyContinue) {
+        return [pscustomobject]@{
+            Valid = $false
+            CanonicalPath = $canonical
+            Reason = 'a file already exists at that path'
+        }
+    }
+    $candidateExists = Test-Path -LiteralPath $canonical -ErrorAction SilentlyContinue
+    if ($candidateExists -and
+        -not (Test-Path -LiteralPath $canonical -PathType Container -ErrorAction SilentlyContinue)) {
+        return [pscustomobject]@{
+            Valid = $false
+            CanonicalPath = $canonical
+            Reason = 'the existing item at that path is not a folder'
+        }
+    }
+
+    $protected = @(
+        [pscustomobject]@{ Label = 'the TeknoParrot installation'; Path = $TeknoParrotRoot },
+        [pscustomobject]@{ Label = 'the main ZIP source'; Path = $ZipSource },
+        [pscustomobject]@{ Label = 'the supplementary ZIP source'; Path = $ZipSourceSupplementary },
+        [pscustomobject]@{ Label = 'the TPM program/package folder'; Path = $ProgramDirectory }
+    )
+    foreach ($item in $protected) {
+        if ([string]::IsNullOrWhiteSpace($item.Path)) { continue }
+        if (Test-TpmPathOverlap $canonical $item.Path) {
+            return [pscustomobject]@{
+                Valid = $false
+                CanonicalPath = $canonical
+                Reason = "it overlaps $($item.Label)"
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        Valid = $true
+        CanonicalPath = $canonical
+        Reason = ''
+    }
+}
+
+# Derive a safe, environment-specific default. The first candidates are at
+# the root of the same volume/share as TeknoParrot (for example,
+# S:\TeknoParrot Games), never inside the configured install or TPM package
+# directory. Suffixes and user-data fallbacks handle an existing/conflicting
+# folder without asking a new user to invent a path from scratch.
+function Get-TpmSafeStagingFolderDefault {
+    param(
+        [string]$TeknoParrotRoot,
+        [string]$ZipSource = '',
+        [string]$ZipSourceSupplementary = '',
+        [string]$ProgramDirectory = ''
+    )
+    $canonicalRoot = $null
+    try { $canonicalRoot = [System.IO.Path]::GetFullPath($TeknoParrotRoot).TrimEnd('\','/') } catch { return $null }
+    if ([string]::IsNullOrWhiteSpace($canonicalRoot)) { return $null }
+
+    $candidates = New-Object System.Collections.ArrayList
+    $volumeRoot = $null
+    try { $volumeRoot = [System.IO.Path]::GetPathRoot($canonicalRoot) } catch { $volumeRoot = $null }
+    if ($volumeRoot) {
+        for ($i = 1; $i -le 20; $i++) {
+            $name = if ($i -eq 1) { 'TeknoParrot Games' } else { "TeknoParrot Games $i" }
+            [void]$candidates.Add((Join-Path $volumeRoot $name))
+        }
+    }
+
+    $tpParent = $null
+    try { $tpParent = [System.IO.Path]::GetDirectoryName($canonicalRoot) } catch { $tpParent = $null }
+    if ($tpParent) {
+        [void]$candidates.Add((Join-Path $tpParent 'TeknoParrot Games'))
+    }
+    if ($env:LOCALAPPDATA) {
+        [void]$candidates.Add((Join-Path $env:LOCALAPPDATA 'TeknoParrotManager\Games'))
+    }
+    if ($env:USERPROFILE) {
+        [void]$candidates.Add((Join-Path $env:USERPROFILE 'TeknoParrot Games'))
+    }
+
+    $seen = @{}
+    foreach ($candidate in $candidates) {
+        $check = Test-TpmStagingFolderCandidate -Candidate $candidate `
+            -TeknoParrotRoot $TeknoParrotRoot -ZipSource $ZipSource `
+            -ZipSourceSupplementary $ZipSourceSupplementary -ProgramDirectory $ProgramDirectory
+        if ($check.CanonicalPath -and -not $seen.ContainsKey($check.CanonicalPath.ToLowerInvariant())) {
+            $seen[$check.CanonicalPath.ToLowerInvariant()] = $true
+            if ($check.Valid) { return $check.CanonicalPath }
+        }
+    }
+    return $null
+}
+
+# Prompt for a staging folder with a safe default and validate every typed or
+# browsed answer before returning it. The function never creates a directory;
+# creation stays in the real AutoSync path so Preview/Dry Run remains read-only.
+function Read-TpmStagingFolder {
+    param(
+        [string]$RecommendedPath = '',
+        [string]$TeknoParrotRoot,
+        [string]$ZipSource = '',
+        [string]$ZipSourceSupplementary = '',
+        [string]$ProgramDirectory = ''
+    )
+    while ($true) {
+        $prompt = if ($RecommendedPath) {
+            '  Press Enter to use this location, or B to choose another'
+        } else {
+            '  Staging folder path (or type B to browse)'
+        }
+        $raw = Read-HostSafe $prompt -Default $(if ($RecommendedPath) { $RecommendedPath } else { $null })
+        if ($raw.ToUpper() -eq 'B') {
+            $initialDirectory = ''
+            try { $initialDirectory = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($(if ($RecommendedPath) { $RecommendedPath } else { $TeknoParrotRoot }))) } catch {}
+            if (-not $initialDirectory -or -not (Test-Path -LiteralPath $initialDirectory)) {
+                try { $initialDirectory = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($TeknoParrotRoot)) } catch { $initialDirectory = '' }
+            }
+            $raw = Read-PathWithBrowse '  Choose a staging folder' -InitialDirectory $initialDirectory
+        }
+        if ([string]::IsNullOrWhiteSpace($raw)) {
+            if ($RecommendedPath) { $raw = $RecommendedPath } else { continue }
+        }
+
+        $check = Test-TpmStagingFolderCandidate -Candidate $raw `
+            -TeknoParrotRoot $TeknoParrotRoot -ZipSource $ZipSource `
+            -ZipSourceSupplementary $ZipSourceSupplementary -ProgramDirectory $ProgramDirectory
+        if ($check.Valid) { return $check.CanonicalPath }
+
+        Write-Host ("  That staging folder cannot be used: {0}." -f $check.Reason) -ForegroundColor Red
+        Write-Host '  Choose a folder outside TeknoParrot, TPM, and every ZIP source folder.' -ForegroundColor Yellow
+        Write-Log ("Staging folder rejected: {0} ({1})" -f $raw, $check.Reason)
+    }
+}
+
 # =============================================================================
 # TRANSACTIONAL EXTRACTION -- shared staging/promote/rollback primitives
 # =============================================================================
@@ -11373,12 +11541,22 @@ if (-not $gamesInstallFolder) {
         Write-Log "ERROR: Unattended mode -- gamesInstallFolder not set."; exit 1
     }
     Write-Host ""
-    Write-Host "  Games staging folder" -ForegroundColor Cyan
-    Write-Host "  This is where TPM extracts your ZIPs and installs games." -ForegroundColor DarkCyan
-    Write-Host "  It must be a DIFFERENT folder from the one holding your original .zip files." -ForegroundColor Yellow
-    Write-Host "  TPM will create this folder if it does not exist yet." -ForegroundColor DarkCyan
-    Write-Host "  Example: E:\TeknoParrotGames" -ForegroundColor DarkCyan
-    $gamesInstallFolder = Read-PathWithBrowse "  Staging folder path"
+    Write-Host "  Game installation folder (staging folder)" -ForegroundColor Cyan
+    Write-Host "  This is where TPM extracts and installs games. Your original ZIPs stay where they are." -ForegroundColor DarkCyan
+    Write-Host "  TPM will create the accepted folder if it does not exist yet." -ForegroundColor DarkCyan
+    $recommendedStagingFolder = Get-TpmSafeStagingFolderDefault `
+        -TeknoParrotRoot $tpRoot -ZipSource $zipSource `
+        -ZipSourceSupplementary $zipSourceSupplementary -ProgramDirectory $PSScriptRoot
+    if ($recommendedStagingFolder) {
+        Write-Host ("  TPM recommends: {0}" -f $recommendedStagingFolder) -ForegroundColor Cyan
+        Write-Host "  Press Enter to use this location, or B to choose another." -ForegroundColor DarkCyan
+    } else {
+        Write-Host "  TPM could not derive a safe default from this installation path." -ForegroundColor Yellow
+        Write-Host "  Type a folder or B to browse; it must be outside TeknoParrot, TPM, and your ZIP folders." -ForegroundColor DarkCyan
+    }
+    $gamesInstallFolder = Read-TpmStagingFolder -RecommendedPath $recommendedStagingFolder `
+        -TeknoParrotRoot $tpRoot -ZipSource $zipSource `
+        -ZipSourceSupplementary $zipSourceSupplementary -ProgramDirectory $PSScriptRoot
 }
 
 if (-not $configAccepted -and -not $Unattended) {
@@ -13613,6 +13791,32 @@ while ($true) {
             Write-Host ""; Write-Host "ERROR: ZIP source folder not found: $zipSource" -ForegroundColor Red
             Write-Log "ERROR: ZIP source not found."; [void](Read-Host "  Press Enter to return to menu"); continue
         }
+        # Reject every protected-path overlap before any network classification
+        # or throughput probe can touch the proposed staging location.
+        $earlyStagingCandidate = Test-TpmStagingFolderCandidate `
+            -Candidate $gamesInstallFolder -TeknoParrotRoot $tpRoot `
+            -ZipSource $zipSource -ZipSourceSupplementary $zipSourceSupplementary `
+            -ProgramDirectory $PSScriptRoot
+        if (-not $earlyStagingCandidate.Valid) {
+            Write-Host ""; Write-Host "ERROR: The staging folder is not safe to use." -ForegroundColor Red
+            Write-Host ("    Staging folder : {0}" -f $gamesInstallFolder) -ForegroundColor Yellow
+            Write-Host ("    Reason         : {0}" -f $earlyStagingCandidate.Reason) -ForegroundColor Yellow
+            Write-Host "Choose a folder outside TeknoParrot, TPM, and every ZIP source folder." -ForegroundColor Yellow
+            if ($Unattended) {
+                Write-Log ("ERROR: unsafe staging folder -- {0}" -f $earlyStagingCandidate.Reason)
+                [void](Read-Host "  Press Enter to return to menu"); continue
+            }
+            $recoveryDefault = Get-TpmSafeStagingFolderDefault `
+                -TeknoParrotRoot $tpRoot -ZipSource $zipSource `
+                -ZipSourceSupplementary $zipSourceSupplementary -ProgramDirectory $PSScriptRoot
+            if ($recoveryDefault) { Write-Host ("  TPM recommends: {0}" -f $recoveryDefault) -ForegroundColor Cyan }
+            $gamesInstallFolder = Read-TpmStagingFolder -RecommendedPath $recoveryDefault `
+                -TeknoParrotRoot $tpRoot -ZipSource $zipSource `
+                -ZipSourceSupplementary $zipSourceSupplementary -ProgramDirectory $PSScriptRoot
+            if (Save-Config) { Write-Log "Config: staging folder updated after early unsafe-path rejection" }
+            continue
+        }
+        $gamesInstallFolder = $earlyStagingCandidate.CanonicalPath
         $autoSyncDriveInfo = Get-LocalDriveInfoSafe
         if (Test-IsNetworkPath $gamesInstallFolder -Drives $autoSyncDriveInfo) {
             Write-Host ""
@@ -13661,7 +13865,13 @@ while ($true) {
                 Write-Host "    Q) Return to menu" -ForegroundColor Cyan
                 $fix = (Read-HostSafe "  Choice").ToUpper()
                 if ($fix -eq 'R') {
-                    $gamesInstallFolder = Read-PathWithBrowse "  New staging folder"
+                    $recoveryDefault = Get-TpmSafeStagingFolderDefault `
+                        -TeknoParrotRoot $tpRoot -ZipSource $zipSource `
+                        -ZipSourceSupplementary $zipSourceSupplementary -ProgramDirectory $PSScriptRoot
+                    if ($recoveryDefault) { Write-Host ("  TPM recommends: {0}" -f $recoveryDefault) -ForegroundColor Cyan }
+                    $gamesInstallFolder = Read-TpmStagingFolder -RecommendedPath $recoveryDefault `
+                        -TeknoParrotRoot $tpRoot -ZipSource $zipSource `
+                        -ZipSourceSupplementary $zipSourceSupplementary -ProgramDirectory $PSScriptRoot
                     if (Save-Config) { Write-Log "Config: staging folder updated to $gamesInstallFolder after TeknoParrot-inside correction" }
                     continue
                 }
@@ -13682,7 +13892,13 @@ while ($true) {
                 $fix = (Read-HostSafe "  Choice").ToUpper()
                 if ($fix -eq 'R') {
                     Write-Host ("  New staging folder must differ from: {0}" -f $zipSource) -ForegroundColor DarkCyan
-                    $gamesInstallFolder = Read-PathWithBrowse "  New staging folder"
+                    $recoveryDefault = Get-TpmSafeStagingFolderDefault `
+                        -TeknoParrotRoot $tpRoot -ZipSource $zipSource `
+                        -ZipSourceSupplementary $zipSourceSupplementary -ProgramDirectory $PSScriptRoot
+                    if ($recoveryDefault) { Write-Host ("  TPM recommends: {0}" -f $recoveryDefault) -ForegroundColor Cyan }
+                    $gamesInstallFolder = Read-TpmStagingFolder -RecommendedPath $recoveryDefault `
+                        -TeknoParrotRoot $tpRoot -ZipSource $zipSource `
+                        -ZipSourceSupplementary $zipSourceSupplementary -ProgramDirectory $PSScriptRoot
                     if (Save-Config) { Write-Log "Config: staging folder updated to $gamesInstallFolder after overlap correction" }
                     continue
                 } elseif ($fix -eq 'Z') {
@@ -13698,16 +13914,41 @@ while ($true) {
                 Write-Log "ERROR: staging folder overlaps ZIP source -- user returned to menu."
                 [void](Read-Host "  Press Enter to return to menu"); continue 2
             }
-            $pathBoundariesValid = $true
-        }
-        if (-not (Test-Path -LiteralPath $gamesInstallFolder)) {
-            try {
-                [void][System.IO.Directory]::CreateDirectory($gamesInstallFolder)
-                Write-Host "Created staging folder: $gamesInstallFolder" -ForegroundColor Green
-            } catch {
-                Write-Host ""; Write-Host "ERROR: Could not create staging folder: $_" -ForegroundColor Red
-                Write-Log "ERROR: Could not create staging folder -- $_"; [void](Read-Host "  Press Enter to return to menu"); continue
+            # Defence in depth for any protected path not covered by the
+            # user-facing branches above (TPM package folder, supplementary
+            # source, or a staging parent that contains a protected path).
+            $stagingCandidate = Test-TpmStagingFolderCandidate `
+                -Candidate $gamesInstallFolder -TeknoParrotRoot $tpRoot `
+                -ZipSource $zipSource -ZipSourceSupplementary $zipSourceSupplementary `
+                -ProgramDirectory $PSScriptRoot
+            if (-not $stagingCandidate.Valid) {
+                Write-Host ""; Write-Host "ERROR: The staging folder is not safe to use." -ForegroundColor Red
+                Write-Host ("    Staging folder : {0}" -f $gamesInstallFolder) -ForegroundColor Yellow
+                Write-Host ("    Reason         : {0}" -f $stagingCandidate.Reason) -ForegroundColor Yellow
+                Write-Host "Choose a folder outside TeknoParrot, TPM, and every ZIP source folder." -ForegroundColor Yellow
+                if ($Unattended) {
+                    Write-Log ("ERROR: unsafe staging folder -- {0}" -f $stagingCandidate.Reason)
+                    [void](Read-Host "  Press Enter to return to menu"); continue 2
+                }
+                Write-Host ""; Write-Host "    R) Choose a different staging folder" -ForegroundColor Cyan
+                Write-Host "    Q) Return to menu" -ForegroundColor Cyan
+                $fix = (Read-HostSafe "  Choice").ToUpper()
+                if ($fix -eq 'R') {
+                    $recoveryDefault = Get-TpmSafeStagingFolderDefault `
+                        -TeknoParrotRoot $tpRoot -ZipSource $zipSource `
+                        -ZipSourceSupplementary $zipSourceSupplementary -ProgramDirectory $PSScriptRoot
+                    if ($recoveryDefault) { Write-Host ("  TPM recommends: {0}" -f $recoveryDefault) -ForegroundColor Cyan }
+                    $gamesInstallFolder = Read-TpmStagingFolder -RecommendedPath $recoveryDefault `
+                        -TeknoParrotRoot $tpRoot -ZipSource $zipSource `
+                        -ZipSourceSupplementary $zipSourceSupplementary -ProgramDirectory $PSScriptRoot
+                    if (Save-Config) { Write-Log "Config: staging folder updated after unsafe-path correction" }
+                    continue
+                }
+                Write-Log ("ERROR: unsafe staging folder -- user returned to menu ({0})" -f $stagingCandidate.Reason)
+                [void](Read-Host "  Press Enter to return to menu"); continue 2
             }
+            $gamesInstallFolder = $stagingCandidate.CanonicalPath
+            $pathBoundariesValid = $true
         }
         try {
             $zipBytes = (Get-ChildItem -LiteralPath $zipSource -Filter *.zip -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
@@ -13785,6 +14026,19 @@ while ($true) {
         }
     }
     if ($dryRunActive) { Write-Log "PREVIEW MODE active for this run -- no changes will be written." }
+
+    # Creating the destination is itself a write. Keep it after the preview
+    # decision so Preview/Dry Run never creates a staging directory.
+    if ($mode -eq "AutoSync" -and -not $dryRunActive -and
+        -not (Test-Path -LiteralPath $gamesInstallFolder)) {
+        try {
+            [void][System.IO.Directory]::CreateDirectory($gamesInstallFolder)
+            Write-Host "Created staging folder: $gamesInstallFolder" -ForegroundColor Green
+        } catch {
+            Write-Host ""; Write-Host "ERROR: Could not create staging folder: $_" -ForegroundColor Red
+            Write-Log "ERROR: Could not create staging folder -- $_"; [void](Read-Host "  Press Enter to return to menu"); continue
+        }
+    }
 
     $backupRoot = Join-Path $userProfilesDir "FullBackup"
     $timestamp  = (Get-Date).ToString("yyyy-MM-dd_HH-mm-ss")

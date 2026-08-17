@@ -265,9 +265,10 @@ Describe "Write-Log" {
 
 Describe "Issue #217 AutoSync first-run guidance" {
     It "explains the staging folder role before path selection" {
-        $script:ProductionSource | Should -Match "Games staging folder"
-        $script:ProductionSource | Should -Match "This is where TPM extracts your ZIPs and installs games"
-        $script:ProductionSource | Should -Match "must be a DIFFERENT folder from the one holding your original \.zip files"
+        $script:ProductionSource | Should -Match "Game installation folder \(staging folder\)"
+        $script:ProductionSource | Should -Match "This is where TPM extracts and installs games"
+        $script:ProductionSource | Should -Match "Your original ZIPs stay where they are"
+        $script:ProductionSource | Should -Match "Press Enter to use this location, or B to choose another"
     }
     It "cross-references the staging folder from the ZIP prompt" {
         $script:ProductionSource | Should -Match "containing your original \.zip files"
@@ -290,6 +291,79 @@ Describe "Issue #217 AutoSync first-run guidance" {
         $script:ProductionSource | Should -Match "Folder naming mode"
         $script:ProductionSource | Should -Not -Match "Is this a RetroBat/Batocera installation\?"
         $script:ProductionSource | Should -Match ([regex]::Escape('if (-not $configAccepted -and -not $Unattended)'))
+    }
+}
+Describe "Issue #217/#250 safe staging selection" {
+    It "rejects exact, child, and parent overlaps with every protected location" -TestCases @(
+        @{ Label = 'the TeknoParrot installation itself'; Candidate = 'C:\tpm-217-fixture\TP'; TpRoot = 'C:\tpm-217-fixture\TP'; Main = 'C:\tpm-217-fixture\MainZips'; Supplementary = 'C:\tpm-217-fixture\Supplementary'; Program = 'C:\tpm-217-fixture\Scripts'; Expected = 'the TeknoParrot installation' }
+        @{ Label = 'a child of the TeknoParrot installation'; Candidate = 'C:\tpm-217-fixture\TP\Games'; TpRoot = 'C:\tpm-217-fixture\TP'; Main = 'C:\tpm-217-fixture\MainZips'; Supplementary = 'C:\tpm-217-fixture\Supplementary'; Program = 'C:\tpm-217-fixture\Scripts'; Expected = 'the TeknoParrot installation' }
+        @{ Label = 'a parent of the TeknoParrot installation'; Candidate = 'C:\tpm-217-fixture'; TpRoot = 'C:\tpm-217-fixture\TP'; Main = 'C:\tpm-217-other\MainZips'; Supplementary = 'C:\tpm-217-other\Supplementary'; Program = 'C:\tpm-217-other\Scripts'; Expected = 'the TeknoParrot installation' }
+        @{ Label = 'the main ZIP source itself'; Candidate = 'C:\tpm-217-fixture\MainZips'; TpRoot = 'C:\tpm-217-fixture\TP'; Main = 'C:\tpm-217-fixture\MainZips'; Supplementary = 'C:\tpm-217-fixture\Supplementary'; Program = 'C:\tpm-217-fixture\Scripts'; Expected = 'the main ZIP source' }
+        @{ Label = 'a child of the main ZIP source'; Candidate = 'C:\tpm-217-fixture\MainZips\Nested'; TpRoot = 'C:\tpm-217-fixture\TP'; Main = 'C:\tpm-217-fixture\MainZips'; Supplementary = 'C:\tpm-217-fixture\Supplementary'; Program = 'C:\tpm-217-fixture\Scripts'; Expected = 'the main ZIP source' }
+        @{ Label = 'a parent of the main ZIP source'; Candidate = 'C:\tpm-217-fixture'; TpRoot = 'C:\tpm-217-other\TP'; Main = 'C:\tpm-217-fixture\MainZips'; Supplementary = 'C:\tpm-217-other\Supplementary'; Program = 'C:\tpm-217-other\Scripts'; Expected = 'the main ZIP source' }
+        @{ Label = 'the supplementary ZIP source itself'; Candidate = 'C:\tpm-217-fixture\Supplementary'; TpRoot = 'C:\tpm-217-fixture\TP'; Main = 'C:\tpm-217-fixture\MainZips'; Supplementary = 'C:\tpm-217-fixture\Supplementary'; Program = 'C:\tpm-217-fixture\Scripts'; Expected = 'the supplementary ZIP source' }
+        @{ Label = 'a child of the supplementary ZIP source'; Candidate = 'C:\tpm-217-fixture\Supplementary\Nested'; TpRoot = 'C:\tpm-217-fixture\TP'; Main = 'C:\tpm-217-fixture\MainZips'; Supplementary = 'C:\tpm-217-fixture\Supplementary'; Program = 'C:\tpm-217-fixture\Scripts'; Expected = 'the supplementary ZIP source' }
+        @{ Label = 'a parent of the supplementary ZIP source'; Candidate = 'C:\tpm-217-fixture'; TpRoot = 'C:\tpm-217-other\TP'; Main = 'C:\tpm-217-other\MainZips'; Supplementary = 'C:\tpm-217-fixture\Supplementary'; Program = 'C:\tpm-217-other\Scripts'; Expected = 'the supplementary ZIP source' }
+        @{ Label = 'the TPM program folder itself'; Candidate = 'C:\tpm-217-fixture\Scripts'; TpRoot = 'C:\tpm-217-fixture\TP'; Main = 'C:\tpm-217-fixture\MainZips'; Supplementary = 'C:\tpm-217-fixture\Supplementary'; Program = 'C:\tpm-217-fixture\Scripts'; Expected = 'the TPM program/package folder' }
+        @{ Label = 'a child of the TPM program folder'; Candidate = 'C:\tpm-217-fixture\Scripts\Nested'; TpRoot = 'C:\tpm-217-fixture\TP'; Main = 'C:\tpm-217-fixture\MainZips'; Supplementary = 'C:\tpm-217-fixture\Supplementary'; Program = 'C:\tpm-217-fixture\Scripts'; Expected = 'the TPM program/package folder' }
+        @{ Label = 'a parent of the TPM program folder'; Candidate = 'C:\tpm-217-fixture'; TpRoot = 'C:\tpm-217-other\TP'; Main = 'C:\tpm-217-other\MainZips'; Supplementary = 'C:\tpm-217-other\Supplementary'; Program = 'C:\tpm-217-fixture\Scripts'; Expected = 'the TPM program/package folder' }
+    ) {
+        param($Label, $Candidate, $TpRoot, $Main, $Supplementary, $Program, $Expected)
+        $result = Test-TpmStagingFolderCandidate -Candidate $Candidate -TeknoParrotRoot $TpRoot -ZipSource $Main -ZipSourceSupplementary $Supplementary -ProgramDirectory $Program
+        $result.Valid | Should -BeFalse -Because $Label
+        $result.Reason | Should -Match ([regex]::Escape($Expected))
+    }
+
+    It "accepts a missing safe folder without creating it" {
+        $candidate = Join-Path $TestDrive "new-staging"
+        $result = Test-TpmStagingFolderCandidate -Candidate $candidate -TeknoParrotRoot (Join-Path $TestDrive "TeknoParrot") -ZipSource (Join-Path $TestDrive "OriginalZips") -ZipSourceSupplementary (Join-Path $TestDrive "SupplementaryZips") -ProgramDirectory (Join-Path $TestDrive "Scripts")
+        $result.Valid | Should -BeTrue
+        $result.CanonicalPath | Should -Be ([System.IO.Path]::GetFullPath($candidate))
+        Test-Path -LiteralPath $candidate | Should -BeFalse
+    }
+
+    It "chooses the next same-volume default when the first candidate is a ZIP source" {
+        $tpRoot = 'C:\tpm-217-default\TP'
+        $mainSource = 'C:\TeknoParrot Games'
+        $default = Get-TpmSafeStagingFolderDefault -TeknoParrotRoot $tpRoot -ZipSource $mainSource -ProgramDirectory 'C:\tpm-217-default\Scripts'
+        $default | Should -Be 'C:\TeknoParrot Games 2'
+        (Test-TpmPathOverlap $default $tpRoot) | Should -BeFalse
+        (Test-TpmPathOverlap $default $mainSource) | Should -BeFalse
+    }
+
+    It "uses the recommended location on Enter without opening the browser" {
+        Mock Read-HostSafe { '' }
+        Mock Read-PathWithBrowse {}
+        $recommended = Join-Path $TestDrive "recommended-staging"
+        $result = Read-TpmStagingFolder -RecommendedPath $recommended -TeknoParrotRoot (Join-Path $TestDrive "TeknoParrot") -ZipSource (Join-Path $TestDrive "OriginalZips") -ProgramDirectory (Join-Path $TestDrive "Scripts")
+        $result | Should -Be ([System.IO.Path]::GetFullPath($recommended))
+        Should -Invoke Read-PathWithBrowse -Times 0
+    }
+
+    It "rejects an invalid browsed folder before accepting a later valid folder" {
+        $script:browseResultCount = 0
+        $tpRoot = Join-Path $TestDrive "TeknoParrot"
+        $valid = Join-Path $TestDrive "safe-staging"
+        Mock Read-HostSafe { 'B' }
+        Mock Read-PathWithBrowse {
+            $script:browseResultCount++
+            if ($script:browseResultCount -eq 1) { Join-Path $tpRoot "inside" } else { $valid }
+        }
+        $result = Read-TpmStagingFolder -RecommendedPath '' -TeknoParrotRoot $tpRoot -ZipSource (Join-Path $TestDrive "OriginalZips") -ZipSourceSupplementary (Join-Path $TestDrive "SupplementaryZips") -ProgramDirectory (Join-Path $TestDrive "Scripts")
+        $result | Should -Be ([System.IO.Path]::GetFullPath($valid))
+        $script:browseResultCount | Should -Be 2
+    }
+
+    It "keeps staging creation after the preview decision and behind the real-run guard" {
+        $previewIndex = $script:ProductionSource.IndexOf('$dryRunActive = [bool]$DryRun')
+        $creationIndex = $script:ProductionSource.IndexOf('[System.IO.Directory]::CreateDirectory($gamesInstallFolder)')
+        $previewIndex | Should -BeGreaterThan -1
+        $creationIndex | Should -BeGreaterThan $previewIndex
+        $script:ProductionSource | Should -Match '-and -not \$dryRunActive -and'
+        $earlyValidationIndex = $script:ProductionSource.IndexOf('$earlyStagingCandidate = Test-TpmStagingFolderCandidate')
+        $benchmarkIndex = $script:ProductionSource.IndexOf('Measure-PathWriteThroughput $gamesInstallFolder')
+        $earlyValidationIndex | Should -BeGreaterThan -1
+        $benchmarkIndex | Should -BeGreaterThan $earlyValidationIndex
     }
 }
 Describe "Issue #220 AutoSync Z recovery" {
@@ -5662,7 +5736,7 @@ Describe "Path-concept non-conflation guard (Part 2 item 9)" {
         $script:ProductionSource | Should -Not -Match '(?i)deployed location'
     }
     It "the staging folder prompt still pairs the plain phrase with the technical term on first mention" {
-        $script:ProductionSource | Should -Match ([regex]::Escape("This is where TPM extracts your ZIPs and installs games."))
+        $script:ProductionSource | Should -Match ([regex]::Escape("This is where TPM extracts and installs games. Your original ZIPs stay where they are."))
     }
 }
 

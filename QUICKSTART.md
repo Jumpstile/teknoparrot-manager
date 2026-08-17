@@ -67,7 +67,7 @@ Full documentation: [README.md](README.md)
 
 5. Pick a mode. After each mode completes you return to the menu.
 
-6. Answer the folder prompts. For AutoSync, choose a **local** staging folder with enough free space, **outside** both TeknoParrot and your ZIP source.
+6. For AutoSync, TPM recommends a safe staging folder derived from your configured TeknoParrot location. Press **Enter** to use it or **B** to browse elsewhere. The accepted folder must have enough free space and must be outside (and not contain) TeknoParrot, TPM's program folder, and both ZIP source folders. TPM creates it on a real run if it does not exist; Preview/Dry Run leaves it untouched.
 
 7. Launch `TeknoParrotUi.exe` — your games now appear.
 

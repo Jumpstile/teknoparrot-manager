@@ -130,8 +130,11 @@
      with "?" for details, depending on your console window size -- mode
      numbers and what each one does stay the same.
 
-  4. Answer the folder prompts. For AutoSync, choose a LOCAL staging folder
-     with free space, OUTSIDE both TeknoParrot and your ZIP source.
+  4. For AutoSync, TPM recommends a safe staging folder derived from your
+     configured TeknoParrot location. Press Enter to use it, or B to browse
+     elsewhere. The accepted folder must be outside (and not contain)
+     TeknoParrot, TPM's program folder, and both ZIP source folders. TPM creates
+     it on a real run if it does not exist; Preview/Dry Run leaves it untouched.
 
      Not sure yet? Answer Y to "Run in PREVIEW mode first?" to see what
      AutoSync/Register would do with zero files written. When it finishes,
