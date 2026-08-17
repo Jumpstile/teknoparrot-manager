@@ -366,6 +366,70 @@ Describe "Issue #217/#250 safe staging selection" {
         $benchmarkIndex | Should -BeGreaterThan $earlyValidationIndex
     }
 }
+Describe "Issue #257 explicit staging command semantics" {
+    It "rejects legacy R/recovery and other reserved letters before filesystem parsing" {
+        $tpRoot = Join-Path $TestDrive "arbitrary-working-directory\TeknoParrot"
+        $outsideCwd = Split-Path -Parent $tpRoot
+        $valid = Join-Path $TestDrive "safe-staging-r-sequence"
+        New-Item -ItemType Directory -Path $outsideCwd -Force | Out-Null
+        $oldLocation = Get-Location
+        $inputs = [System.Collections.Queue]::new()
+        @(' R ', 'r', 'R', ' Q ', ' z ', $valid) | ForEach-Object { $inputs.Enqueue($_) }
+        try {
+            Set-Location $outsideCwd
+            Mock Read-HostSafe { [string]$inputs.Dequeue() }
+            Mock Read-PathWithBrowse {}
+            Mock Write-Host {}
+            Mock Write-Log {}
+            $result = Read-TpmStagingFolder -RecommendedPath '' -TeknoParrotRoot $tpRoot `
+                -ZipSource (Join-Path $TestDrive 'OriginalZips') `
+                -ZipSourceSupplementary (Join-Path $TestDrive 'SupplementaryZips') `
+                -ProgramDirectory (Join-Path $TestDrive 'Scripts')
+        } finally {
+            Set-Location $oldLocation
+        }
+        $result | Should -Be ([System.IO.Path]::GetFullPath($valid))
+        Test-Path -LiteralPath (Join-Path $outsideCwd 'R') | Should -BeFalse
+        Should -Invoke Read-PathWithBrowse -Times 0
+        Should -Invoke Write-Log -Times 5
+    }
+
+    It "rejects R when recovery is unavailable at the staging prompt and remains there" {
+        $valid = Join-Path $TestDrive "safe-staging-recovery-unavailable"
+        $inputs = [System.Collections.Queue]::new()
+        @('R', $valid) | ForEach-Object { $inputs.Enqueue($_) }
+        Mock Read-HostSafe { [string]$inputs.Dequeue() }
+        Mock Read-PathWithBrowse {}
+        Mock Write-Host {}
+        Mock Write-Log {}
+        $result = Read-TpmStagingFolder -RecommendedPath '' -TeknoParrotRoot (Join-Path $TestDrive 'TeknoParrot') `
+            -ZipSource (Join-Path $TestDrive 'OriginalZips') -ProgramDirectory (Join-Path $TestDrive 'Scripts')
+        $result | Should -Be ([System.IO.Path]::GetFullPath($valid))
+        Should -Invoke Read-PathWithBrowse -Times 0
+        Test-Path -LiteralPath $valid | Should -BeFalse
+    }
+
+    It "accepts a literal directory named R only when it is fully qualified" {
+        $qualified = Join-Path $TestDrive 'Games\R'
+        Mock Read-HostSafe { $qualified }
+        Mock Write-Log {}
+        $result = Read-TpmStagingFolder -RecommendedPath '' -TeknoParrotRoot (Join-Path $TestDrive 'TeknoParrot') `
+            -ZipSource (Join-Path $TestDrive 'OriginalZips') -ProgramDirectory (Join-Path $TestDrive 'Scripts')
+        $result | Should -Be ([System.IO.Path]::GetFullPath($qualified))
+        Test-Path -LiteralPath $qualified | Should -BeFalse
+    }
+
+    It "recognizes surrounding whitespace for browse without treating it as a path" {
+        $valid = Join-Path $TestDrive 'safe-staging-browse'
+        Mock Read-HostSafe { '  b  ' }
+        Mock Read-PathWithBrowse { $valid }
+        Mock Write-Log {}
+        $result = Read-TpmStagingFolder -RecommendedPath '' -TeknoParrotRoot (Join-Path $TestDrive 'TeknoParrot') `
+            -ZipSource (Join-Path $TestDrive 'OriginalZips') -ProgramDirectory (Join-Path $TestDrive 'Scripts')
+        $result | Should -Be ([System.IO.Path]::GetFullPath($valid))
+        Should -Invoke Read-PathWithBrowse -Times 1
+    }
+}
 Describe "Issue #220 AutoSync Z recovery" {
     It "re-validates a replacement ZIP source before continuing boundary checks" {
         $zBranch = [regex]::Match(

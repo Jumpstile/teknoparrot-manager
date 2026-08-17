@@ -481,7 +481,7 @@ function Read-PathWithBrowse {
         [string]$InitialDirectory = ''
     )
     $raw = (Read-HostSafe "$Prompt (or type B to browse)")
-    if ($raw.ToUpper() -ne 'B') { return $raw }
+    if ($raw.Trim().ToUpperInvariant() -ne 'B') { return $raw }
     try {
         Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
         $initialDir = if ($InitialDirectory -and (Test-Path -LiteralPath $InitialDirectory)) { $InitialDirectory } else { '' }
@@ -1132,7 +1132,28 @@ function Read-TpmStagingFolder {
             '  Staging folder path (or type B to browse)'
         }
         $raw = Read-HostSafe $prompt -Default $(if ($RecommendedPath) { $RecommendedPath } else { $null })
-        if ($raw.ToUpper() -eq 'B') {
+        # Interpret reserved onboarding commands before treating input as a path.
+        # R/Z/Q belong to the surrounding recovery/menu state machine; they are
+        # never valid relative staging paths at this prompt. A literal directory
+        # named R remains available when supplied as a qualified path.
+        $stagingCommand = if ([string]::IsNullOrWhiteSpace($raw)) {
+            'Accept'
+        } else {
+            switch ($raw.Trim().ToUpperInvariant()) {
+                'B' { 'Browse'; break }
+                'R' { 'Recovery'; break }
+                'Q' { 'Reserved'; break }
+                'Z' { 'Reserved'; break }
+                default { 'Path' }
+            }
+        }
+        if ($stagingCommand -eq 'Recovery' -or $stagingCommand -eq 'Reserved') {
+            Write-Host '  That command is not available at this staging-folder prompt.' -ForegroundColor Yellow
+            Write-Host '  Valid commands: Enter to accept the recommendation, or B to browse.' -ForegroundColor Yellow
+            Write-Log ("Staging folder command rejected before path parsing: '{0}'" -f $raw.Trim())
+            continue
+        }
+        if ($stagingCommand -eq 'Browse') {
             $initialDirectory = ''
             try { $initialDirectory = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($(if ($RecommendedPath) { $RecommendedPath } else { $TeknoParrotRoot }))) } catch {}
             if (-not $initialDirectory -or -not (Test-Path -LiteralPath $initialDirectory)) {
@@ -13863,7 +13884,7 @@ while ($true) {
                 }
                 Write-Host ""; Write-Host "    R) Choose a different staging folder" -ForegroundColor Cyan
                 Write-Host "    Q) Return to menu" -ForegroundColor Cyan
-                $fix = (Read-HostSafe "  Choice").ToUpper()
+                $fix = (Read-HostSafe "  Choice").Trim().ToUpperInvariant()
                 if ($fix -eq 'R') {
                     $recoveryDefault = Get-TpmSafeStagingFolderDefault `
                         -TeknoParrotRoot $tpRoot -ZipSource $zipSource `
@@ -13889,7 +13910,7 @@ while ($true) {
                 Write-Host ""; Write-Host "    R) Choose a different staging folder" -ForegroundColor Cyan
                 Write-Host "    Z) Choose a different ZIP source folder" -ForegroundColor Cyan
                 Write-Host "    Q) Return to menu" -ForegroundColor Cyan
-                $fix = (Read-HostSafe "  Choice").ToUpper()
+                $fix = (Read-HostSafe "  Choice").Trim().ToUpperInvariant()
                 if ($fix -eq 'R') {
                     Write-Host ("  New staging folder must differ from: {0}" -f $zipSource) -ForegroundColor DarkCyan
                     $recoveryDefault = Get-TpmSafeStagingFolderDefault `
@@ -13932,7 +13953,7 @@ while ($true) {
                 }
                 Write-Host ""; Write-Host "    R) Choose a different staging folder" -ForegroundColor Cyan
                 Write-Host "    Q) Return to menu" -ForegroundColor Cyan
-                $fix = (Read-HostSafe "  Choice").ToUpper()
+                $fix = (Read-HostSafe "  Choice").Trim().ToUpperInvariant()
                 if ($fix -eq 'R') {
                     $recoveryDefault = Get-TpmSafeStagingFolderDefault `
                         -TeknoParrotRoot $tpRoot -ZipSource $zipSource `
