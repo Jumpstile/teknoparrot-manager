@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Jumpstile/teknoparrot-manager/blob/main/docs/launchbox-phase0/tpm-frontend-contract-v1.schema.json",
+  "title": "TeknoParrot Manager LaunchBox Phase 0 contract v1",
+  "description": "Closed request/result contract for a read-only LaunchBox orchestration call.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/request"
+    },
+    {
+      "$ref": "#/$defs/result"
+    }
+  ],
+  "$defs": {
+    "correlationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contractVersion",
+        "operationId",
+        "correlationId",
+        "paths"
+      ],
+      "properties": {
+        "contractVersion": {
+          "const": "1.0"
+        },
+        "operationId": {
+          "const": "library.health-check"
+        },
+        "correlationId": {
+          "$ref": "#/$defs/correlationId"
+        },
+        "paths": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "userProfilesDirectory",
+            "teknoParrotRoot"
+          ],
+          "properties": {
+            "userProfilesDirectory": {
+              "type": "string",
+              "minLength": 1
+            },
+            "teknoParrotRoot": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contractVersion",
+        "operationId",
+        "correlationId",
+        "status",
+        "success",
+        "cancelled",
+        "errorCode",
+        "summary",
+        "warnings",
+        "evidence",
+        "technicalEvidence"
+      ],
+      "properties": {
+        "contractVersion": {
+          "const": "1.0"
+        },
+        "operationId": {
+          "const": "library.health-check"
+        },
+        "correlationId": {
+          "$ref": "#/$defs/correlationId"
+        },
+        "status": {
+          "enum": [
+            "success",
+            "failure",
+            "cancelled"
+          ]
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "cancelled": {
+          "type": "boolean"
+        },
+        "errorCode": {
+          "type": "string",
+          "minLength": 1
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "value"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value": {}
+            }
+          }
+        },
+        "technicalEvidence": {
+          "type": "object"
+        }
+      }
+    }
+  }
+}

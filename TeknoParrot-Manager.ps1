@@ -59,7 +59,26 @@
 #   - Games extracted into per-game subfolders (AutoSync can do this).
 # =============================================================================
 
-param([switch]$Unattended, [switch]$DryRun)
+param(
+    [switch]$Unattended,
+    [switch]$DryRun,
+    [string]$FrontendContractRequestPath,
+    [string]$FrontendContractResultPath,
+    [string]$FrontendContractCorrelationId
+)
+
+# Contract mode is established immediately after parameter binding. Any
+# frontend-contract switch activates the fail-closed entrypoint, including a
+# malformed partial invocation; it must never fall through into normal
+# interactive startup. Write-Log is suppressed before any initialization can
+# call it. The dispatch remains below the function definitions so
+# Invoke-TPMFrontendRequest is available without duplicating health-check logic.
+$script:FrontendContractMode = @(
+    $FrontendContractRequestPath
+    $FrontendContractResultPath
+    $FrontendContractCorrelationId
+) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1
+$script:FrontendContractMode = [bool]$script:FrontendContractMode
 
 # Single source of truth for the version string used in the banner, log, and
 # GitHub API User-Agent headers. Previously hardcoded in each of those spots
@@ -301,8 +320,10 @@ function Write-ManagerBanner {
     Write-Host ""
 }
 
-$startupBannerSize = Get-ManagerBannerViewportSize
-Write-ManagerBanner -Width $startupBannerSize.Width -Height $startupBannerSize.Height
+if (-not $FrontendContractRequestPath) {
+    $startupBannerSize = Get-ManagerBannerViewportSize
+    Write-ManagerBanner -Width $startupBannerSize.Width -Height $startupBannerSize.Height
+}
 
 # Windows PowerShell 5.1 packaged launchers can run with module autoloading
 # unavailable or disabled by the host. Its inherited PSModulePath can also
@@ -379,9 +400,9 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $logPath               = Join-Path $PSScriptRoot "TeknoParrot-Manager.log"
 $script:logWarnShown   = $false   # full warning shown at most once to avoid repeated noise
 $script:logFailedCount = 0        # total entries that could not be written this run
-
 function Write-Log {
     param([string]$msg)
+    if ($script:FrontendContractMode) { return }
     $line = "[{0}] {1}" -f (Get-Date).ToString("yyyy-MM-dd HH:mm:ss"), $msg
     if ([string]::IsNullOrWhiteSpace($logPath)) {
         Write-Host ("  [UNLOGGED] {0}" -f $msg) -ForegroundColor DarkGray
@@ -8376,7 +8397,7 @@ function Repair-GamePaths {
 # the install folder, never touches the network. Safe to run any time as a
 # fast health check between full AutoSync/Register runs.
 function Invoke-LibraryHealthCheck {
-    param([string]$UserProfilesDir, [string]$LogPath, [string]$TpRoot)
+    param([string]$UserProfilesDir, [string]$LogPath, [string]$TpRoot, [switch]$Structured)
 
     $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
                   Where-Object { $_.Directory.Name -ne "FullBackup" } | Sort-Object BaseName)
@@ -8384,6 +8405,7 @@ function Invoke-LibraryHealthCheck {
     $valid = New-Object System.Collections.ArrayList
     $broken = New-Object System.Collections.ArrayList
     $empty = New-Object System.Collections.ArrayList
+    $healthWarnings = New-Object System.Collections.ArrayList
 
     foreach ($pf in $profiles) {
         try {
@@ -8400,7 +8422,11 @@ function Invoke-LibraryHealthCheck {
             }
         } catch {
             [void]$broken.Add($pf.BaseName)
-            Write-Log "HealthCheck: could not parse $($pf.Name) -- $_"
+            if ($Structured) {
+                [void]$healthWarnings.Add("PROFILE_PARSE_FAILED")
+            } else {
+                Write-Log "HealthCheck: could not parse $($pf.Name) -- $_"
+            }
         }
     }
 
@@ -8487,7 +8513,11 @@ function Invoke-LibraryHealthCheck {
 
             if (Get-BepInExInstalledVersion -ExeDir $exeDir) { $bepInExCount++ }
         } catch {
-            Write-Log "HealthCheck: coverage check could not parse $($pf.Name) -- $_"
+            if ($Structured) {
+                [void]$healthWarnings.Add("COVERAGE_PARSE_FAILED")
+            } else {
+                Write-Log "HealthCheck: coverage check could not parse $($pf.Name) -- $_"
+            }
         }
     }
 
@@ -8558,6 +8588,225 @@ function Invoke-LibraryHealthCheck {
 
     Write-Log ("HealthCheck: total={0} valid={1} broken={2} empty={3} gpuFixNeeded={4} ffbBlasterNeeded={5} dgVoodoo2Needed={6} reShadeCount={7} bepInExCount={8}" -f `
         $profiles.Count, $valid.Count, $broken.Count, $empty.Count, $gpuFixNeeded.Count, $ffbBlasterNeeded.Count, $dgVoodoo2Needed.Count, $reShadeCount, $bepInExCount)
+
+    if ($Structured) {
+        return [pscustomobject][ordered]@{
+            registeredProfiles = [int]$profiles.Count
+            validGamePaths     = [int]$valid.Count
+            brokenGamePaths    = [int]$broken.Count
+            emptyGamePaths     = [int]$empty.Count
+            gpuFixNeeded       = [int]$gpuFixNeeded.Count
+            ffbBlasterNeeded   = [int]$ffbBlasterNeeded.Count
+            dgVoodoo2Needed    = [int]$dgVoodoo2Needed.Count
+            reShadeInstalled   = [int]$reShadeCount
+            bepInExInstalled   = [int]$bepInExCount
+            postgresInstalled  = [bool]$postgresInstalled
+            postgresNeeded     = [int]$postgresNeeded.Count
+            postgresConfigured = [int]$postgresConfigured
+            warnings           = @($healthWarnings | Select-Object -Unique)
+        }
+    }
+}
+
+# -----------------------------------------------------------------------------
+# LaunchBox / Big Box Phase 0 contract adapter
+#
+# This is the only new TPM-side integration seam in Phase 0. It is deliberately
+# explicit and non-interactive: a caller supplies a JSON request and an
+# isolated result path. The adapter validates the request, invokes the existing
+# read-only health-check function, and writes one machine-readable result.
+# It never enters the normal configuration/menu flow.
+function New-TPMFrontendContractResult {
+    param(
+        [string]$CorrelationId,
+        [ValidateSet('success', 'failure', 'cancelled')]
+        [string]$Status,
+        [string]$ErrorCode,
+        [string]$Summary,
+        [object[]]$Warnings = @(),
+        [object[]]$Evidence = @(),
+        [hashtable]$TechnicalEvidence = @{}
+    )
+
+    return [ordered]@{
+        contractVersion   = '1.0'
+        operationId       = 'library.health-check'
+        correlationId     = $CorrelationId
+        status            = $Status
+        success           = ($Status -eq 'success')
+        cancelled         = ($Status -eq 'cancelled')
+        errorCode         = $ErrorCode
+        summary           = $Summary
+        warnings          = @($Warnings)
+        evidence          = @($Evidence)
+        technicalEvidence = $TechnicalEvidence
+    }
+}
+
+function Write-TPMFrontendContractResult {
+    param(
+        [Parameter(Mandatory = $true)]$Result,
+        [Parameter(Mandatory = $true)][string]$ResultPath
+    )
+
+    $fullResultPath = [System.IO.Path]::GetFullPath($ResultPath)
+    $parent = [System.IO.Path]::GetDirectoryName($fullResultPath)
+    if ([string]::IsNullOrWhiteSpace($parent) -or -not (Test-Path -LiteralPath $parent -PathType Container)) {
+        throw 'The contract result directory does not exist.'
+    }
+    $json = $Result | ConvertTo-Json -Depth 8 -Compress
+    [System.IO.File]::WriteAllText($fullResultPath, $json, (New-Object System.Text.UTF8Encoding $false))
+}
+
+function Invoke-TPMFrontendRequest {
+    param(
+        [Parameter(Mandatory = $true)][string]$RequestPath,
+        [Parameter(Mandatory = $true)][string]$ResultPath,
+        [string]$ExpectedCorrelationId
+    )
+
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $correlationId = [guid]::NewGuid().ToString()
+    $expectedCorrelation = [guid]::Empty
+    if ([guid]::TryParse($ExpectedCorrelationId, [ref]$expectedCorrelation)) {
+        $correlationId = $expectedCorrelation.ToString()
+    }
+    $request = $null
+
+    function Complete-FrontendContract {
+        param(
+            [Parameter(Mandatory = $true)]$Result,
+            [Parameter(Mandatory = $true)][int]$ExitCode
+        )
+
+        $stopwatch.Stop()
+        $Result.technicalEvidence.durationMs = [int][Math]::Max(0, $stopwatch.ElapsedMilliseconds)
+        try {
+            Write-TPMFrontendContractResult -Result $Result -ResultPath $ResultPath
+            return $ExitCode
+        } catch {
+            return 1
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($ResultPath)) {
+        return 1
+    }
+
+    if (-not (Test-Path -LiteralPath $RequestPath -PathType Leaf)) {
+        $result = New-TPMFrontendContractResult -CorrelationId $correlationId -Status 'failure' -ErrorCode 'REQUEST_MISSING' `
+            -Summary 'The TPM contract request file was not found.' `
+            -TechnicalEvidence @{ phase = 'request-validation'; resultSource = 'tpm-contract' }
+        return Complete-FrontendContract -Result $result -ExitCode 1
+    }
+
+    try {
+        $request = Get-Content -LiteralPath $RequestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        $result = New-TPMFrontendContractResult -CorrelationId $correlationId -Status 'failure' -ErrorCode 'REQUEST_MALFORMED' `
+            -Summary 'The TPM contract request was not valid JSON.' `
+            -TechnicalEvidence @{ phase = 'request-validation'; resultSource = 'tpm-contract' }
+        return Complete-FrontendContract -Result $result -ExitCode 1
+    }
+
+    try {
+        if ($null -eq $request) { throw 'Request was empty.' }
+        $correlationId = [string]$request.correlationId
+        $requestVersion = [string]$request.contractVersion
+        $operationId = [string]$request.operationId
+        $parsedCorrelation = [guid]::Empty
+        if (-not [guid]::TryParse($correlationId, [ref]$parsedCorrelation)) { throw 'Correlation ID was invalid.' }
+        if ($expectedCorrelation -ne [guid]::Empty -and $parsedCorrelation -ne $expectedCorrelation) {
+            $result = New-TPMFrontendContractResult -CorrelationId $expectedCorrelation.ToString() -Status 'failure' `
+                -ErrorCode 'CORRELATION_MISMATCH' -Summary 'The TPM request correlation ID did not match the invocation.' `
+                -TechnicalEvidence @{ phase = 'request-validation'; resultSource = 'tpm-contract' }
+            return Complete-FrontendContract -Result $result -ExitCode 1
+        }
+        if ($requestVersion -ne '1.0') {
+            $result = New-TPMFrontendContractResult -CorrelationId $correlationId -Status 'failure' `
+                -ErrorCode 'CONTRACT_UNSUPPORTED_VERSION' -Summary 'The TPM contract version is not supported.' `
+                -TechnicalEvidence @{ phase = 'request-validation'; resultSource = 'tpm-contract' }
+            return Complete-FrontendContract -Result $result -ExitCode 1
+        }
+        if ($operationId -ne 'library.health-check') {
+            $result = New-TPMFrontendContractResult -CorrelationId $correlationId -Status 'failure' `
+                -ErrorCode 'OPERATION_UNSUPPORTED' -Summary 'The requested TPM operation is not supported.' `
+                -TechnicalEvidence @{ phase = 'request-validation'; resultSource = 'tpm-contract' }
+            return Complete-FrontendContract -Result $result -ExitCode 1
+        }
+        if ($null -eq $request.paths) { throw 'Request paths were missing.' }
+
+        $userProfilesDir = [string]$request.paths.userProfilesDirectory
+        $tpRoot = [string]$request.paths.teknoParrotRoot
+        if ([string]::IsNullOrWhiteSpace($userProfilesDir) -or [string]::IsNullOrWhiteSpace($tpRoot)) {
+            throw 'Required read-only paths were missing.'
+        }
+        $userProfilesFull = [System.IO.Path]::GetFullPath($userProfilesDir).TrimEnd('\', '/')
+        $tpRootFull = [System.IO.Path]::GetFullPath($tpRoot).TrimEnd('\', '/')
+        $resultFull = [System.IO.Path]::GetFullPath($ResultPath)
+        $resultOverlapsProtectedPath = (Test-PathInside $resultFull $userProfilesFull) -or (Test-PathInside $resultFull $tpRootFull)
+        if ($resultOverlapsProtectedPath) {
+            # Do not write even a failure result into a protected path. The
+            # caller receives a nonzero exit and must treat the missing result
+            # as a contract failure.
+            return 1
+        }
+        if (-not (Test-Path -LiteralPath $tpRootFull -PathType Container)) {
+            $result = New-TPMFrontendContractResult -CorrelationId $correlationId -Status 'failure' `
+                -ErrorCode 'TEKNOPARROT_NOT_FOUND' -Summary 'TeknoParrot was not found at the supplied location.' `
+                -TechnicalEvidence @{ phase = 'path-validation'; resultSource = 'tpm-contract' }
+            return Complete-FrontendContract -Result $result -ExitCode 1
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $tpRootFull 'TeknoParrotUi.exe') -PathType Leaf)) {
+            $result = New-TPMFrontendContractResult -CorrelationId $correlationId -Status 'failure' `
+                -ErrorCode 'TEKNOPARROT_NOT_FOUND' -Summary 'TeknoParrotUi.exe was not found at the supplied location.' `
+                -TechnicalEvidence @{ phase = 'path-validation'; resultSource = 'tpm-contract' }
+            return Complete-FrontendContract -Result $result -ExitCode 1
+        }
+        if (-not (Test-Path -LiteralPath $userProfilesFull -PathType Container)) {
+            $result = New-TPMFrontendContractResult -CorrelationId $correlationId -Status 'failure' `
+                -ErrorCode 'TPM_USER_PROFILES_NOT_FOUND' -Summary 'TeknoParrot UserProfiles was not found at the supplied location.' `
+                -TechnicalEvidence @{ phase = 'path-validation'; resultSource = 'tpm-contract' }
+            return Complete-FrontendContract -Result $result -ExitCode 1
+        }
+        if (-not (Test-PathInside $userProfilesFull $tpRootFull)) {
+            $result = New-TPMFrontendContractResult -CorrelationId $correlationId -Status 'failure' `
+                -ErrorCode 'PATH_AMBIGUOUS' -Summary 'The supplied UserProfiles path is outside the TeknoParrot root.' `
+                -TechnicalEvidence @{ phase = 'path-validation'; resultSource = 'tpm-contract' }
+            return Complete-FrontendContract -Result $result -ExitCode 1
+        }
+
+        $health = & {
+            Invoke-LibraryHealthCheck -UserProfilesDir $userProfilesFull -LogPath $null -TpRoot $tpRootFull -Structured
+        } 2>$null 3>$null 4>$null 5>$null 6>$null
+        if ($null -eq $health) { throw 'The read-only health check returned no structured result.' }
+
+        $evidence = @(
+            [ordered]@{ name = 'registeredProfiles'; value = [int]$health.registeredProfiles }
+            [ordered]@{ name = 'validGamePaths'; value = [int]$health.validGamePaths }
+            [ordered]@{ name = 'brokenGamePaths'; value = [int]$health.brokenGamePaths }
+            [ordered]@{ name = 'emptyGamePaths'; value = [int]$health.emptyGamePaths }
+            [ordered]@{ name = 'gpuFixNeeded'; value = [int]$health.gpuFixNeeded }
+            [ordered]@{ name = 'ffbBlasterNeeded'; value = [int]$health.ffbBlasterNeeded }
+            [ordered]@{ name = 'dgVoodoo2Needed'; value = [int]$health.dgVoodoo2Needed }
+            [ordered]@{ name = 'reShadeInstalled'; value = [int]$health.reShadeInstalled }
+            [ordered]@{ name = 'bepInExInstalled'; value = [int]$health.bepInExInstalled }
+            [ordered]@{ name = 'postgresInstalled'; value = [bool]$health.postgresInstalled }
+            [ordered]@{ name = 'postgresNeeded'; value = [int]$health.postgresNeeded }
+            [ordered]@{ name = 'postgresConfigured'; value = [int]$health.postgresConfigured }
+        )
+        $result = New-TPMFrontendContractResult -CorrelationId $correlationId -Status 'success' -ErrorCode 'NONE' `
+            -Summary 'Read-only TPM library health check completed.' `
+            -Warnings @($health.warnings) -Evidence $evidence `
+            -TechnicalEvidence @{ phase = 'read-only-health-check'; resultSource = 'tpm-contract'; `
+                tpmScriptVersion = $ScriptVersion; writesPermitted = $false }
+        return Complete-FrontendContract -Result $result -ExitCode 0
+    } catch {
+        $result = New-TPMFrontendContractResult -CorrelationId $correlationId -Status 'failure' `
+            -ErrorCode 'TPM_ADAPTER_FAILED' -Summary 'The TPM read-only contract adapter failed closed.' `
+            -TechnicalEvidence @{ phase = 'adapter'; resultSource = 'tpm-contract'; exceptionType = $_.Exception.GetType().Name }
+        return Complete-FrontendContract -Result $result -ExitCode 1
+    }
 }
 
 # =============================================================================
@@ -11313,6 +11562,16 @@ function Write-ControlsStatus {
         Write-Log "Controls status: FAILED to write -- $_"
         return -1
     }
+}
+
+# Explicit frontend-contract entrypoint. This is intentionally before the
+# normal startup banner, configuration loading, path discovery, menu, and all
+# interactive operations below it. Contract mode performs only the minimal
+# module/runtime initialization above, then validates and executes the one
+# structured operation before exiting with its deterministic status code.
+if ($script:FrontendContractMode) {
+    $contractExitCode = Invoke-TPMFrontendRequest -RequestPath $FrontendContractRequestPath -ResultPath $FrontendContractResultPath -ExpectedCorrelationId $FrontendContractCorrelationId
+    exit $contractExitCode
 }
 
 Write-Log "Script started (v$ScriptVersion$(if ($Unattended) { ' [Unattended]' }))."
