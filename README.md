@@ -257,11 +257,15 @@ Already-extracted detection is intentionally conservative. AutoSync and the extr
 
 ## The Staging Folder
 
-AutoSync extracts games into a staging folder you choose. Rules:
+AutoSync extracts games into a staging folder. On a new setup, TPM derives a safe default from the configured TeknoParrot location (for example, <same-volume>\TeknoParrot Games) and shows it before asking. Press **Enter** to use it or **B** to browse elsewhere. TPM creates an accepted missing folder only when a real AutoSync run begins; Preview/Dry Run does not create it. Your original ZIPs stay in their source folders.
+
+Rules:
 
 - **Recommended: local drive** for best performance. Network drives are allowed but the script measures write speed and warns if throughput is insufficient for smooth extraction or gameplay.
-- Must **not** be inside the TeknoParrot folder
-- Must **not** overlap the ZIP source folder
+- Must **not be inside or contain** the TeknoParrot folder
+- Must **not overlap** the main or supplementary ZIP source folder
+- Must **not be inside or contain** the TPM program/package folder
+- An invalid typed or browsed path is rejected before it is saved or used
 - The script warns if the drive has less than ~1.5x the total ZIP size free
 
 Interrupted extractions are handled automatically: a `.extracting` sentinel file is placed next to the game folder at the start and removed only on success. If the sentinel is found on the next run, the incomplete folder is detected and the game is re-extracted from scratch.

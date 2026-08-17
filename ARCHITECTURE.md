@@ -404,6 +404,27 @@ on a still-running process rather than blocking forever.
 
 ---
 
+## Safe staging-folder selection (#217/#250)
+
+The first-run AutoSync prompt treats the game installation folder as the
+staging folder and normally requires no invented path. Get-TpmSafeStagingFolderDefault
+derives candidates from the configured TeknoParrot volume/share and then uses
+safe fallbacks; it never hardcodes a drive letter. Read-TpmStagingFolder displays
+the recommendation and accepts Enter, or opens the folder browser on B.
+
+Test-TpmStagingFolderCandidate canonicalizes each candidate and rejects a file,
+an invalid path, or any symmetric overlap with the TeknoParrot installation,
+main ZIP source, supplementary ZIP source, or TPM program/package directory.
+Symmetric checking rejects both a staging child inside a protected folder and a
+staging parent that would contain one. The first-run prompt may not know ZIP
+sources yet, so the AutoSync boundary validates the saved path again after
+those sources are known; recovery uses the same prompt instead of a raw browser
+answer.
+
+The prompt and validator do not create directories. AutoSync creates a missing
+staging directory only after the preview decision and only for a real run.
+Preview/Dry Run therefore remains read-only with respect to staging setup.
+
 ## Dry-run / preview mode (-DryRun, v0.92)
 
 Scoped to modes 1 (AutoSync) and 2 (Register only). The other modes already have
