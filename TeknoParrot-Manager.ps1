@@ -11315,6 +11315,131 @@ function Write-ControlsStatus {
     }
 }
 
+# =============================================================================
+# CONTROL READINESS ENGINE (issue #255)
+# =============================================================================
+# Read-only assessment of a single profile code across three independent
+# dimensions: Registration, Controls, and Launch observation. Issue #255's
+# evidence session showed a registration/launch-success path can coexist
+# with controls that were skipped or never verified, and TeknoParrotUI's own
+# first-run wizard let its "Controls configuration completed" checkbox
+# become checked with no mapping screen ever opened (issue #253). Collapsing
+# these into a single "Ready" boolean would hide exactly that failure mode,
+# so each dimension is reported on its own and never combined.
+#
+# Hard constraints (do not weaken without a corresponding CLAUDE.md /
+# ARCHITECTURE.md update and explicit sign-off -- see issue #255):
+#   - Never writes a UserProfile or GameProfiles XML file.
+#   - Never runs control propagation (Invoke-ControlPropagation) or invokes
+#     TeknoParrotUI's controls wizard.
+#   - Never infers a mapping that is not already present on disk.
+#   - "Verified" is never assigned by this engine. Confirming a control
+#     actually works requires real evidence (an observed successful test),
+#     which this static, read-only pass cannot manufacture. Registration,
+#     wizard completion, a selected Input API, or a profile's mere existence
+#     are explicitly NOT allowed to imply Verified (issue #255).
+
+# Classifies registration state for one profile code from UserProfiles alone.
+# Returns 'Registered', 'Unregistered', or 'Broken'. Never touches GameProfiles
+# templates -- registration is strictly about what TeknoParrot has on record.
+function Get-ControlReadinessRegistrationState {
+    param([Parameter(Mandatory)][string]$Code, [Parameter(Mandatory)][string]$UserProfilesDir)
+
+    # Profile codes are purely alphanumeric (same invariant as
+    # Resolve-RegisteredGameFolder); a $Code sourced from an externally-fetched
+    # dat index is untrusted input, so reject anything else before it is ever
+    # joined into a path rather than let a traversal sequence reach Join-Path.
+    if ($Code -notmatch '^[\w]+$') { return 'Unregistered' }
+
+    $path = Join-Path $UserProfilesDir "$Code.xml"
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return 'Unregistered' }
+
+    try {
+        $doc = Read-Xml $path
+    } catch {
+        return 'Broken'
+    }
+    if ($null -eq $doc.GameProfile) { return 'Broken' }
+
+    $gpNode = $doc.GameProfile.SelectSingleNode('GamePath')
+    if ($null -eq $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { return 'Broken' }
+
+    $gamePath = $gpNode.InnerText.Trim().TrimEnd('\')
+    if (-not (Test-Path -LiteralPath $gamePath -PathType Leaf)) { return 'Broken' }
+
+    return 'Registered'
+}
+
+# Classifies controls state from an already-loaded profile [xml] document
+# (either a real UserProfile or a read-only GameProfiles template). Returns
+# 'Missing', 'Unsupported', 'NotVerified', or 'Unknown'. 'Verified' is
+# intentionally unreachable here -- see the section header above.
+function Get-ControlReadinessControlsState {
+    param($doc)
+
+    if ($null -eq $doc -or $null -eq $doc.GameProfile) { return 'Unknown' }
+
+    $btns = @(Get-ButtonNodes $doc)
+    if ($btns.Count -eq 0) { return 'Unsupported' }
+
+    $bound = @($btns | Where-Object { Test-ButtonIsBound $_ }).Count
+    if ($bound -eq 0) { return 'Missing' }
+
+    return 'NotVerified'
+}
+
+# Classifies launch-observation state for one profile code. TPM does not
+# launch games itself and has no launch-outcome log to read (TeknoParrotUI
+# and BudgieLoader own the launch path), so this dimension is always
+# 'NotTestedByTpm' today. 'ObservedSuccess'/'ObservedFailure' remain as
+# named states for a future real evidence source -- never synthesize them
+# from registration, controls state, or any other proxy.
+function Get-ControlReadinessLaunchState {
+    param([string]$Code)
+    return 'NotTestedByTpm'
+}
+
+# Combines the three independent dimensions for one profile code into a
+# single read-only report row. Controls are read from whichever profile
+# document actually exists on disk: the real UserProfile when registered,
+# otherwise the GameProfiles template (unregistered games have no real
+# bindings, so falling back to the template's unbound buttons correctly
+# yields 'Missing' rather than 'Unknown'). $GameProfilesDir is optional --
+# omit it to assess registration/controls from UserProfiles only.
+function Get-ControlReadinessAssessment {
+    param(
+        [Parameter(Mandatory)][string]$Code,
+        [Parameter(Mandatory)][string]$UserProfilesDir,
+        [string]$GameProfilesDir = ''
+    )
+
+    $registration = Get-ControlReadinessRegistrationState -Code $Code -UserProfilesDir $UserProfilesDir
+
+    # Same code-shape guard as Get-ControlReadinessRegistrationState -- do not
+    # join an unvalidated $Code into either directory's path.
+    $sourcePath = $null
+    if ($Code -match '^[\w]+$') {
+        $userProfilePath = Join-Path $UserProfilesDir "$Code.xml"
+        $templatePath    = if ($GameProfilesDir) { Join-Path $GameProfilesDir "$Code.xml" } else { '' }
+        $sourcePath =
+            if (Test-Path -LiteralPath $userProfilePath -PathType Leaf) { $userProfilePath }
+            elseif ($templatePath -and (Test-Path -LiteralPath $templatePath -PathType Leaf)) { $templatePath }
+            else { $null }
+    }
+
+    $doc = $null
+    if ($sourcePath) {
+        try { $doc = Read-Xml $sourcePath } catch { $doc = $null }
+    }
+
+    return [pscustomobject]@{
+        Code         = $Code
+        Registration = $registration
+        Controls     = Get-ControlReadinessControlsState $doc
+        Launch       = Get-ControlReadinessLaunchState -Code $Code
+    }
+}
+
 Write-Log "Script started (v$ScriptVersion$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================

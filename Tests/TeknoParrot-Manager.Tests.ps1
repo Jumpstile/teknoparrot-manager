@@ -1035,6 +1035,218 @@ Describe "Get-ButtonKey / Test-ButtonIsBound" {
     }
 }
 
+Describe "Control Readiness Engine (issue #255)" {
+    BeforeAll {
+    # Fixture modeled on the real, published After Burner Climax (abc) profile
+    # (teknogods/TeknoParrotUI GameProfiles/abc.xml, revision 22): Input API
+    # field plus the confirmed required input families -- Start, analog
+    # Joystick X/Y, Throttle Lever, Gun Trigger, Missile Trigger, Climax
+    # Switch. $BoundInputMapping controls which single slot (if any) carries a
+    # real binding, so each test can move between Missing/NotVerified without
+    # duplicating the whole button block.
+    function New-AbcFixtureXml {
+        param(
+            [string]$GamePath = '',
+            [string]$BoundInputMapping = ''
+        )
+        $startBinding = if ($BoundInputMapping -eq 'P1ButtonStart') { '<DirectInputButton>2</DirectInputButton>' } else { '' }
+        $gunBinding   = if ($BoundInputMapping -eq 'P1Button1')     { '<DirectInputButton>0</DirectInputButton>' } else { '' }
+        return @"
+<GameProfile>
+    <GamePath>$GamePath</GamePath>
+    <EmulationProfile>AfterBurnerClimax</EmulationProfile>
+    <GameProfileRevision>22</GameProfileRevision>
+    <ExecutableName>abc</ExecutableName>
+    <EmulatorType>Lindbergh</EmulatorType>
+    <ConfigValues>
+        <FieldInformation>
+            <CategoryName>General</CategoryName>
+            <FieldName>Input API</FieldName>
+            <FieldValue>DirectInput</FieldValue>
+            <FieldType>Dropdown</FieldType>
+            <FieldOptions><string>DirectInput</string><string>XInput</string></FieldOptions>
+        </FieldInformation>
+    </ConfigValues>
+    <JoystickButtons>
+        <JoystickButtons>
+            <ButtonName>Start</ButtonName>
+            <InputMapping>P1ButtonStart</InputMapping>
+            $startBinding
+        </JoystickButtons>
+        <JoystickButtons>
+            <ButtonName>Joystick Analog X</ButtonName>
+            <InputMapping>Analog0</InputMapping>
+            <AnalogType>AnalogJoystick</AnalogType>
+        </JoystickButtons>
+        <JoystickButtons>
+            <ButtonName>Joystick Analog Y</ButtonName>
+            <InputMapping>Analog2</InputMapping>
+            <AnalogType>AnalogJoystickReverse</AnalogType>
+        </JoystickButtons>
+        <JoystickButtons>
+            <ButtonName>Throttle Lever</ButtonName>
+            <InputMapping>Analog4</InputMapping>
+            <AnalogType>SWThrottle</AnalogType>
+        </JoystickButtons>
+        <JoystickButtons>
+            <ButtonName>Gun Trigger</ButtonName>
+            <InputMapping>P1Button1</InputMapping>
+            $gunBinding
+        </JoystickButtons>
+        <JoystickButtons>
+            <ButtonName>Missile Trigger</ButtonName>
+            <InputMapping>P1Button2</InputMapping>
+        </JoystickButtons>
+        <JoystickButtons>
+            <ButtonName>Climax Switch</ButtonName>
+            <InputMapping>P1Button3</InputMapping>
+        </JoystickButtons>
+    </JoystickButtons>
+</GameProfile>
+"@
+    }
+    }
+
+    Context "Get-ControlReadinessRegistrationState" {
+        BeforeEach {
+            $userProfilesDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $userProfilesDir | Out-Null
+        }
+
+        It "returns Unregistered when no UserProfiles entry exists for the code" {
+            Get-ControlReadinessRegistrationState -Code 'abc' -UserProfilesDir $userProfilesDir | Should -Be 'Unregistered'
+        }
+
+        It "returns Broken when the UserProfiles entry is not well-formed XML" {
+            Set-Content -LiteralPath (Join-Path $userProfilesDir 'abc.xml') -Value '<GameProfile><GamePath>' -Encoding utf8
+            Get-ControlReadinessRegistrationState -Code 'abc' -UserProfilesDir $userProfilesDir | Should -Be 'Broken'
+        }
+
+        It "returns Broken when GamePath is missing" {
+            Set-Content -LiteralPath (Join-Path $userProfilesDir 'abc.xml') -Value (New-AbcFixtureXml) -Encoding utf8
+            Get-ControlReadinessRegistrationState -Code 'abc' -UserProfilesDir $userProfilesDir | Should -Be 'Broken'
+        }
+
+        It "returns Broken when GamePath points at a file that no longer exists" {
+            $missingExe = Join-Path $userProfilesDir 'nowhere\abc.exe'
+            Set-Content -LiteralPath (Join-Path $userProfilesDir 'abc.xml') -Value (New-AbcFixtureXml -GamePath $missingExe) -Encoding utf8
+            Get-ControlReadinessRegistrationState -Code 'abc' -UserProfilesDir $userProfilesDir | Should -Be 'Broken'
+        }
+
+        It "returns Registered when GamePath points at an existing file" {
+            $realExe = Join-Path $userProfilesDir 'abc.exe'
+            Set-Content -LiteralPath $realExe -Value 'stub' -Encoding utf8
+            Set-Content -LiteralPath (Join-Path $userProfilesDir 'abc.xml') -Value (New-AbcFixtureXml -GamePath $realExe) -Encoding utf8
+            Get-ControlReadinessRegistrationState -Code 'abc' -UserProfilesDir $userProfilesDir | Should -Be 'Registered'
+        }
+
+        It "rejects a non-alphanumeric code (path-traversal guard) without joining it into a path" {
+            Get-ControlReadinessRegistrationState -Code '..\..\Windows\system.ini' -UserProfilesDir $userProfilesDir | Should -Be 'Unregistered'
+        }
+    }
+
+    Context "Get-ControlReadinessControlsState" {
+        It "returns Unknown when there is no document to read" {
+            Get-ControlReadinessControlsState $null | Should -Be 'Unknown'
+        }
+
+        It "returns Unsupported when the profile defines no JoystickButtons at all" {
+            $doc = [xml]"<GameProfile><GamePath></GamePath></GameProfile>"
+            Get-ControlReadinessControlsState $doc | Should -Be 'Unsupported'
+        }
+
+        It "returns Missing when every defined button is unbound (the abc template as shipped)" {
+            $doc = [xml](New-AbcFixtureXml)
+            Get-ControlReadinessControlsState $doc | Should -Be 'Missing'
+        }
+
+        It "returns NotVerified when at least one button is bound, without claiming Verified" {
+            $doc = [xml](New-AbcFixtureXml -BoundInputMapping 'P1ButtonStart')
+            Get-ControlReadinessControlsState $doc | Should -Be 'NotVerified'
+        }
+
+        It "never returns Verified -- this engine has no evidence source that could earn it" {
+            $doc = [xml](New-AbcFixtureXml -BoundInputMapping 'P1ButtonStart')
+            $states = @('Missing', 'Unsupported', 'NotVerified', 'Unknown')
+            $states | Should -Contain (Get-ControlReadinessControlsState $doc)
+        }
+    }
+
+    Context "Get-ControlReadinessLaunchState" {
+        It "always reports NotTestedByTpm -- TPM does not launch games or read a launch log" {
+            Get-ControlReadinessLaunchState -Code 'abc' | Should -Be 'NotTestedByTpm'
+        }
+    }
+
+    Context "Get-ControlReadinessAssessment (abc regression fixture, issue #255)" {
+        BeforeEach {
+            $userProfilesDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N') + '_up')
+            $gameProfilesDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N') + '_gp')
+            New-Item -ItemType Directory -Path $userProfilesDir | Out-Null
+            New-Item -ItemType Directory -Path $gameProfilesDir | Out-Null
+        }
+
+        It "reproduces the issue #255 evidence: registered+launched but controls not verified" {
+            $realExe = Join-Path $userProfilesDir 'abc.exe'
+            Set-Content -LiteralPath $realExe -Value 'stub' -Encoding utf8
+            Set-Content -LiteralPath (Join-Path $userProfilesDir 'abc.xml') `
+                -Value (New-AbcFixtureXml -GamePath $realExe -BoundInputMapping 'P1ButtonStart') -Encoding utf8
+
+            $result = Get-ControlReadinessAssessment -Code 'abc' -UserProfilesDir $userProfilesDir -GameProfilesDir $gameProfilesDir
+
+            $result.Registration | Should -Be 'Registered'
+            $result.Controls     | Should -Be 'NotVerified'
+            $result.Launch       | Should -Be 'NotTestedByTpm'
+        }
+
+        It "falls back to the GameProfiles template's controls when the game is not yet registered" {
+            Set-Content -LiteralPath (Join-Path $gameProfilesDir 'abc.xml') -Value (New-AbcFixtureXml) -Encoding utf8
+
+            $result = Get-ControlReadinessAssessment -Code 'abc' -UserProfilesDir $userProfilesDir -GameProfilesDir $gameProfilesDir
+
+            $result.Registration | Should -Be 'Unregistered'
+            $result.Controls     | Should -Be 'Missing'
+            $result.Launch       | Should -Be 'NotTestedByTpm'
+        }
+
+        It "reports Unknown controls when neither a UserProfile nor a GameProfiles template exists" {
+            $result = Get-ControlReadinessAssessment -Code 'abc' -UserProfilesDir $userProfilesDir -GameProfilesDir $gameProfilesDir
+            $result.Registration | Should -Be 'Unregistered'
+            $result.Controls     | Should -Be 'Unknown'
+        }
+
+        It "keeps Registration=Broken independent of Controls -- a broken GamePath does not force Controls to Unknown" {
+            Set-Content -LiteralPath (Join-Path $userProfilesDir 'abc.xml') `
+                -Value (New-AbcFixtureXml -GamePath (Join-Path $userProfilesDir 'missing.exe') -BoundInputMapping 'P1ButtonStart') -Encoding utf8
+
+            $result = Get-ControlReadinessAssessment -Code 'abc' -UserProfilesDir $userProfilesDir -GameProfilesDir $gameProfilesDir
+
+            $result.Registration | Should -Be 'Broken'
+            $result.Controls     | Should -Be 'NotVerified'
+        }
+
+        It "never writes to the UserProfiles or GameProfiles XML it reads (read-only guarantee)" {
+            $realExe = Join-Path $userProfilesDir 'abc.exe'
+            Set-Content -LiteralPath $realExe -Value 'stub' -Encoding utf8
+            $profilePath = Join-Path $userProfilesDir 'abc.xml'
+            Set-Content -LiteralPath $profilePath -Value (New-AbcFixtureXml -GamePath $realExe -BoundInputMapping 'P1ButtonStart') -Encoding utf8
+            $before = Get-Content -LiteralPath $profilePath -Raw
+            $beforeWriteTime = (Get-Item -LiteralPath $profilePath).LastWriteTimeUtc
+
+            [void](Get-ControlReadinessAssessment -Code 'abc' -UserProfilesDir $userProfilesDir -GameProfilesDir $gameProfilesDir)
+
+            (Get-Content -LiteralPath $profilePath -Raw) | Should -Be $before
+            (Get-Item -LiteralPath $profilePath).LastWriteTimeUtc | Should -Be $beforeWriteTime
+        }
+
+        It "rejects a non-alphanumeric code (path-traversal guard) end to end" {
+            $result = Get-ControlReadinessAssessment -Code '..\..\secrets' -UserProfilesDir $userProfilesDir -GameProfilesDir $gameProfilesDir
+            $result.Registration | Should -Be 'Unregistered'
+            $result.Controls     | Should -Be 'Unknown'
+        }
+    }
+}
+
 Describe "Get-GameApiDll" {
     BeforeAll {
         function New-FakeExe([string]$name, [string]$marker) {

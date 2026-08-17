@@ -814,6 +814,78 @@ profile with a wrong Input API.
 
 ---
 
+## Control readiness engine (issue #255)
+
+Read-only assessment of a single profile code across three **independent**
+dimensions, added as a standalone branch off issue #255's evidence session.
+A tester's After Burner Climax (`abc`) session showed TeknoParrot launching a
+game successfully while controls had been skipped or never verified in
+TeknoParrotUI's own first-run wizard -- registration success, wizard
+completion, and working controls are three different facts, and issue #253
+already showed the wizard's own "Controls configuration completed" checkbox
+can become checked with no mapping screen ever opened. Collapsing them into
+one "Ready" boolean would reproduce that exact failure mode inside TPM
+itself, so this engine deliberately never does.
+
+**Dimensions and states** (each independent, no combined boolean):
+
+- **Registration**: `Registered`, `Unregistered`, `Broken` -- from
+  `UserProfiles\<code>.xml` alone: does the file exist, parse, have a
+  `GamePath`, and does that `GamePath` still point at a real file.
+- **Controls**: `Verified`, `NotVerified`, `Missing`, `Unsupported`,
+  `Unknown` -- from whichever profile document exists on disk (the real
+  UserProfile if registered, otherwise the read-only GameProfiles template).
+  `Unsupported` means the profile defines zero `JoystickButtons` nodes;
+  `Missing` means buttons are defined but none are bound; `NotVerified`
+  means at least one is bound. `Unknown` means neither document could be
+  read. **`Verified` is never assigned by this engine** -- confirming a
+  control actually works requires real evidence (an observed successful
+  test) that a static read-only pass cannot manufacture. Registration,
+  wizard completion, a selected Input API, or a profile's mere existence are
+  explicitly not allowed to imply it (issue #255's own wording).
+- **Launch observation**: `NotTestedByTpm`, `ObservedSuccess`,
+  `ObservedFailure` -- TPM does not launch games itself (TeknoParrotUI and
+  BudgieLoader own that path) and has no launch-outcome log to read today,
+  so this dimension always reports `NotTestedByTpm`. The other two states
+  are named as extension points for a future real evidence source; nothing
+  in this engine may synthesize them from another dimension.
+
+**Functions** (`TeknoParrot-Manager.ps1`, immediately before the interactive
+menu's top-level code): `Get-ControlReadinessRegistrationState`,
+`Get-ControlReadinessControlsState`, `Get-ControlReadinessLaunchState`, and
+`Get-ControlReadinessAssessment` (combines the three into one
+`[pscustomobject]` row: `Code`, `Registration`, `Controls`, `Launch`).
+`Get-ControlReadinessControlsState` reuses `Get-ButtonNodes` /
+`Test-ButtonIsBound`, the same helpers `Write-ControlsStatus` already uses,
+so bound-detection logic has exactly one implementation.
+
+**Hard constraints** (do not weaken without an explicit CLAUDE.md /
+ARCHITECTURE.md update and sign-off): never writes a UserProfile or
+GameProfiles XML file; never runs `Invoke-ControlPropagation` or invokes
+TeknoParrotUI's controls wizard; never infers a mapping not already present
+on disk. `$Code` is validated against `^[\w]+$` (the same profile-code
+invariant `Resolve-RegisteredGameFolder` already enforces, see SECURITY.md)
+before being joined into either directory's path, since a future caller may
+source it from an externally-fetched dat index rather than a trusted
+filesystem enumeration.
+
+**Regression fixture.** Tests use a fixture modeled on the real, published
+After Burner Climax profile (teknogods/TeknoParrotUI
+`GameProfiles/abc.xml`, revision 22): Input API field plus its confirmed
+required input families (Start, analog Joystick X/Y, Throttle Lever, Gun
+Trigger, Missile Trigger, Climax Switch). See `Tests\TeknoParrot-Manager.Tests.ps1`,
+`Describe "Control Readiness Engine (issue #255)"`.
+
+**Not yet wired up.** This round adds only the pure assessment functions and
+their tests -- no interactive menu entry, no report writer, no change to
+`Register-Games` or `Invoke-ControlPropagation`. Issue #255's own scope is
+evidence-led investigation, not authorization to change TeknoParrot-owned
+state or to decide the eventual UI surface; that is a separate follow-up
+once the investigation's remaining open questions (effective Input API,
+device enumeration, before/after UserProfile comparison) are answered.
+
+---
+
 ## Game registration (Register-Games)
 
 ### Two-executable profiles (v0.99.6)
