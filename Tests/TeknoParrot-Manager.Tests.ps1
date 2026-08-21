@@ -1259,8 +1259,11 @@ Describe "Control Readiness Engine (issue #255)" {
             ) -join "`n")
         }
 
-        It "omits the configure/test question once controls are Verified" -Skip:$false {
-            $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'Verified'; Launch = 'NotTestedByTpm' }
+        It "renders Controls: Verified only when VerificationEvidence proves an actual observed test" {
+            $assessment = [pscustomobject]@{
+                Code = 'abc'; Registration = 'Registered'; Controls = 'Verified'; Launch = 'ObservedSuccess'
+                VerificationEvidence = [pscustomobject]@{ Method = 'Manual play-test, all inputs exercised'; ObservedAt = '2026-08-21T12:00:00Z' }
+            }
             $lines = Get-ControlReadinessSummaryLines -Assessment $assessment
             $lines | Should -Not -Contain 'Would you like TPM to configure/test controls now?'
             $lines | Should -Contain 'Controls: Verified'
@@ -1286,6 +1289,142 @@ Describe "Control Readiness Engine (issue #255)" {
             (Get-ControlReadinessSummaryLines -Assessment ([pscustomobject]@{ Code = 'abc'; Registration = 'Unregistered'; Controls = 'Missing'; Launch = 'NotTestedByTpm' }))[0] | Should -Be 'Game is not registered'
             (Get-ControlReadinessSummaryLines -Assessment ([pscustomobject]@{ Code = 'abc'; Registration = 'Broken'; Controls = 'Missing'; Launch = 'NotTestedByTpm' }))[0] | Should -Be 'Game registration is broken'
         }
+
+        It "registered + Missing controls renders correctly and never reads as ready" {
+            $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'Missing'; Launch = 'NotTestedByTpm' }
+            $lines = Get-ControlReadinessSummaryLines -Assessment $assessment
+            $lines[0] | Should -Be 'Game registered successfully'
+            $lines | Should -Contain 'Controls: Missing'
+            $lines | Should -Contain 'Would you like TPM to configure/test controls now?'
+            ($lines -join "`n") | Should -Not -Match 'Verified'
+            ($lines -join "`n") | Should -Not -Match '(?i)\bready\b'
+        }
+
+        It "renders the ObservedSuccess launch state as an explicit observation" {
+            $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'NotVerified'; Launch = 'ObservedSuccess' }
+            (Get-ControlReadinessSummaryLines -Assessment $assessment) | Should -Contain 'Launch status: Explicitly observed (success)'
+        }
+
+        It "renders the ObservedFailure launch state as an explicit observation" {
+            $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'NotVerified'; Launch = 'ObservedFailure' }
+            (Get-ControlReadinessSummaryLines -Assessment $assessment) | Should -Contain 'Launch status: Explicitly observed (failure)'
+        }
+
+        Context "Fail-closed on caller-supplied Controls = 'Verified' (Codex review, issue #255)" {
+            It "downgrades to Not verified when VerificationEvidence is entirely absent" {
+                $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'Verified'; Launch = 'NotTestedByTpm' }
+                $lines = Get-ControlReadinessSummaryLines -Assessment $assessment
+                $lines | Should -Contain 'Controls: Not verified'
+                $lines | Should -Not -Contain 'Controls: Verified'
+                $lines | Should -Contain 'Would you like TPM to configure/test controls now?'
+            }
+
+            It "downgrades to Not verified when VerificationEvidence is present but null" {
+                $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'Verified'; Launch = 'NotTestedByTpm'; VerificationEvidence = $null }
+                (Get-ControlReadinessSummaryLines -Assessment $assessment) | Should -Contain 'Controls: Not verified'
+            }
+
+            It "downgrades to Not verified when VerificationEvidence is a bare string, not a structured record" {
+                $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'Verified'; Launch = 'NotTestedByTpm'; VerificationEvidence = 'trust me' }
+                (Get-ControlReadinessSummaryLines -Assessment $assessment) | Should -Contain 'Controls: Not verified'
+            }
+
+            It "downgrades to Not verified when VerificationEvidence is missing Method" {
+                $assessment = [pscustomobject]@{
+                    Code = 'abc'; Registration = 'Registered'; Controls = 'Verified'; Launch = 'NotTestedByTpm'
+                    VerificationEvidence = [pscustomobject]@{ ObservedAt = '2026-08-21T12:00:00Z' }
+                }
+                (Get-ControlReadinessSummaryLines -Assessment $assessment) | Should -Contain 'Controls: Not verified'
+            }
+
+            It "downgrades to Not verified when VerificationEvidence is missing ObservedAt" {
+                $assessment = [pscustomobject]@{
+                    Code = 'abc'; Registration = 'Registered'; Controls = 'Verified'; Launch = 'NotTestedByTpm'
+                    VerificationEvidence = [pscustomobject]@{ Method = 'Manual play-test' }
+                }
+                (Get-ControlReadinessSummaryLines -Assessment $assessment) | Should -Contain 'Controls: Not verified'
+            }
+
+            It "downgrades to Not verified when Method/ObservedAt are present but blank" {
+                $assessment = [pscustomobject]@{
+                    Code = 'abc'; Registration = 'Registered'; Controls = 'Verified'; Launch = 'NotTestedByTpm'
+                    VerificationEvidence = [pscustomobject]@{ Method = '  '; ObservedAt = '' }
+                }
+                (Get-ControlReadinessSummaryLines -Assessment $assessment) | Should -Contain 'Controls: Not verified'
+            }
+        }
+    }
+
+    Context "Test-ControlReadinessVerificationEvidence" {
+        It "returns false for a null assessment" {
+            Test-ControlReadinessVerificationEvidence -Assessment $null | Should -Be $false
+        }
+
+        It "returns false when VerificationEvidence is absent" {
+            Test-ControlReadinessVerificationEvidence -Assessment ([pscustomobject]@{ Controls = 'Verified' }) | Should -Be $false
+        }
+
+        It "returns true for a well-formed evidence record" {
+            $assessment = [pscustomobject]@{
+                Controls = 'Verified'
+                VerificationEvidence = [pscustomobject]@{ Method = 'Manual play-test'; ObservedAt = '2026-08-21T12:00:00Z' }
+            }
+            Test-ControlReadinessVerificationEvidence -Assessment $assessment | Should -Be $true
+        }
+    }
+
+    Context "Matrix: signals that must not imply Verified (Codex review, issue #255)" {
+        It "first-run state (wizard-completed, template-shaped, nothing bound) does not imply Verified" {
+            # Mirrors the #255 evidence session: TeknoParrotUI's first-run wizard
+            # marked its controls step complete with no mapping screen opened, so
+            # the on-disk shape is indistinguishable from the shipped template --
+            # every button defined, none bound.
+            $doc = [xml](New-AbcFixtureXml)
+            Get-ControlReadinessControlsState $doc | Should -Not -Be 'Verified'
+            Get-ControlReadinessControlsState $doc | Should -Be 'Missing'
+        }
+
+        It "an all-bound profile does not imply Verified -- binding is not the same as testing" {
+            $allBoundXml = @"
+<GameProfile>
+    <GamePath></GamePath>
+    <JoystickButtons>
+        <JoystickButtons><ButtonName>Start</ButtonName><InputMapping>P1ButtonStart</InputMapping><DirectInputButton>2</DirectInputButton></JoystickButtons>
+        <JoystickButtons><ButtonName>Gun Trigger</ButtonName><InputMapping>P1Button1</InputMapping><DirectInputButton>0</DirectInputButton></JoystickButtons>
+        <JoystickButtons><ButtonName>Missile Trigger</ButtonName><InputMapping>P1Button2</InputMapping><DirectInputButton>1</DirectInputButton></JoystickButtons>
+        <JoystickButtons><ButtonName>Climax Switch</ButtonName><InputMapping>P1Button3</InputMapping><DirectInputButton>3</DirectInputButton></JoystickButtons>
+    </JoystickButtons>
+</GameProfile>
+"@
+            $doc = [xml]$allBoundXml
+            # Every single button is bound (100%) -- there is no bound-count
+            # threshold anywhere in the engine that promotes this to Verified.
+            Get-ControlReadinessControlsState $doc | Should -Be 'NotVerified'
+            Get-ControlReadinessControlsState $doc | Should -Not -Be 'Verified'
+        }
+
+        It "a stored physical device reference (DirectInput GUID) does not imply device presence or Verified" {
+            $deviceReferencedXml = @"
+<GameProfile>
+    <GamePath></GamePath>
+    <JoystickButtons>
+        <JoystickButtons>
+            <ButtonName>Start</ButtonName>
+            <InputMapping>P1ButtonStart</InputMapping>
+            <DirectInputButton>2</DirectInputButton>
+            <DirectInputDeviceGuid>{9e573edb-2130-11ec-8001-444553540000}</DirectInputDeviceGuid>
+        </JoystickButtons>
+        <JoystickButtons><ButtonName>Gun Trigger</ButtonName><InputMapping>P1Button1</InputMapping></JoystickButtons>
+    </JoystickButtons>
+</GameProfile>
+"@
+            $doc = [xml]$deviceReferencedXml
+            # A stored device GUID is a config value on disk, not evidence the
+            # device is physically connected or that the mapping was ever
+            # exercised -- it must still land on NotVerified, never Verified.
+            Get-ControlReadinessControlsState $doc | Should -Be 'NotVerified'
+            Get-ControlReadinessControlsState $doc | Should -Not -Be 'Verified'
+        }
     }
 
     Context "No-write / no-propagation guarantee (AST-verified, issue #255)" {
@@ -1299,6 +1438,7 @@ Describe "Control Readiness Engine (issue #255)" {
               'Get-ControlReadinessControlsState',
               'Get-ControlReadinessLaunchState',
               'Get-ControlReadinessAssessment',
+              'Test-ControlReadinessVerificationEvidence',
               'Get-ControlReadinessSummaryLines') | ForEach-Object { @{ Name = $_ } }
         ) {
             param($Name)
@@ -1313,6 +1453,7 @@ Describe "Control Readiness Engine (issue #255)" {
               'Get-ControlReadinessControlsState',
               'Get-ControlReadinessLaunchState',
               'Get-ControlReadinessAssessment',
+              'Test-ControlReadinessVerificationEvidence',
               'Get-ControlReadinessSummaryLines') | ForEach-Object { @{ Name = $_ } }
         ) {
             param($Name)

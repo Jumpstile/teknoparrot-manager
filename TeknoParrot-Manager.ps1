@@ -11440,6 +11440,38 @@ function Get-ControlReadinessAssessment {
     }
 }
 
+# Returns $true only when $Assessment carries a structured VerificationEvidence
+# record that can actually justify Controls = 'Verified'. Get-ControlReadinessAssessment
+# itself never sets Controls to 'Verified' -- this engine has no evidence
+# source that could earn it (see Get-ControlReadinessControlsState) -- so the
+# only way 'Verified' reaches the formatter today is a caller constructing an
+# assessment object by hand. Issue #255 is explicit that registration, wizard
+# completion, a selected Input API, or a profile's mere existence must never
+# imply Verified; this closes the same gap for any externally-built
+# assessment object, not only for this engine's own output. A well-formed
+# record needs a non-empty Method (what test was performed, e.g. "manual
+# play-test") and a non-empty ObservedAt (when it happened) -- both are
+# cheap to fake, but the point is structural: nothing accidentally reaches
+# 'Verified' just by echoing a Controls string back.
+function Test-ControlReadinessVerificationEvidence {
+    param($Assessment)
+
+    if ($null -eq $Assessment) { return $false }
+    $evidenceProp = $Assessment.PSObject.Properties['VerificationEvidence']
+    if ($null -eq $evidenceProp) { return $false }
+
+    $evidence = $evidenceProp.Value
+    if ($null -eq $evidence) { return $false }
+    if ($evidence -isnot [System.Management.Automation.PSCustomObject]) { return $false }
+
+    $methodProp = $evidence.PSObject.Properties['Method']
+    $observedAtProp = $evidence.PSObject.Properties['ObservedAt']
+    if ($null -eq $methodProp -or [string]::IsNullOrWhiteSpace([string]$methodProp.Value)) { return $false }
+    if ($null -eq $observedAtProp -or [string]::IsNullOrWhiteSpace([string]$observedAtProp.Value)) { return $false }
+
+    return $true
+}
+
 # Formats a Get-ControlReadinessAssessment result into the exact user-facing
 # text issue #255's candidate pre-1.0 UX specifies. Pure string formatting
 # only -- it never prompts, never reads input, and never triggers a
@@ -11447,8 +11479,19 @@ function Get-ControlReadinessAssessment {
 # the question is shown. Returns a string array, one element per display
 # line (including the blank separator line before the closing question),
 # so a caller can Write-Host each line without re-deriving the wording.
+#
+# Fail-closed on Controls = 'Verified': that value is only ever trusted when
+# Test-ControlReadinessVerificationEvidence confirms real evidence backs it.
+# A loose object with Controls = 'Verified' and nothing else is treated the
+# same as an unverified profile -- registration, wizard completion, or the
+# mere presence of the field must never render as verified (issue #255).
 function Get-ControlReadinessSummaryLines {
     param([Parameter(Mandatory)]$Assessment)
+
+    $controlsState = $Assessment.Controls
+    if ($controlsState -eq 'Verified' -and -not (Test-ControlReadinessVerificationEvidence -Assessment $Assessment)) {
+        $controlsState = 'NotVerified'
+    }
 
     $registrationText = switch ($Assessment.Registration) {
         'Registered'   { 'Game registered successfully' }
@@ -11457,13 +11500,13 @@ function Get-ControlReadinessSummaryLines {
         default        { "Game registration: $($Assessment.Registration)" }
     }
 
-    $controlsText = switch ($Assessment.Controls) {
+    $controlsText = switch ($controlsState) {
         'Verified'    { 'Controls: Verified' }
         'NotVerified' { 'Controls: Not verified' }
         'Missing'     { 'Controls: Missing' }
         'Unsupported' { 'Controls: Unsupported' }
         'Unknown'     { 'Controls: Unknown' }
-        default       { "Controls: $($Assessment.Controls)" }
+        default       { "Controls: $controlsState" }
     }
 
     $launchText = switch ($Assessment.Launch) {
@@ -11479,7 +11522,7 @@ function Get-ControlReadinessSummaryLines {
     # verify. Asking again after Verified, or asking when the profile
     # declares no controls at all (Unsupported), would be noise rather than
     # the recovery path issue #255 asked for.
-    if ($Assessment.Controls -in @('NotVerified', 'Missing', 'Unknown')) {
+    if ($controlsState -in @('NotVerified', 'Missing', 'Unknown')) {
         $lines += ''
         $lines += 'Would you like TPM to configure/test controls now?'
     }

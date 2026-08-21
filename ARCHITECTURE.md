@@ -882,10 +882,28 @@ candidate pre-1.0 UX specifies (`Game registered successfully` /
 `Controls: Not verified` / `Launch status: Not tested by TPM`, followed by a
 blank line and `Would you like TPM to configure/test controls now?`). It is
 pure string formatting: it never prompts for input and never decides what a
-"yes" answer does. The closing question is included only when `Controls` is
-`NotVerified`, `Missing`, or `Unknown` -- asking again after `Verified`, or
-asking when a profile declares no controls at all (`Unsupported`), would be
-noise rather than the recovery path issue #255 asked for.
+"yes" answer does. The closing question is included only when the (possibly
+downgraded, see below) controls state is `NotVerified`, `Missing`, or
+`Unknown` -- asking again after `Verified`, or asking when a profile
+declares no controls at all (`Unsupported`), would be noise rather than the
+recovery path issue #255 asked for.
+
+**Fail-closed on `Controls = 'Verified'`.** `Get-ControlReadinessAssessment`
+never produces `Verified` -- this engine has no evidence source that could
+earn it. The only way `Verified` reaches the formatter is a caller building
+an assessment object by hand (a review finding on the initial version of
+this PR: nothing stopped `Get-ControlReadinessSummaryLines` from rendering
+`Controls: Verified` for an arbitrary `[pscustomobject]` with that string
+set, regardless of whether the caller had real evidence). `Get-ControlReadinessSummaryLines`
+now calls `Test-ControlReadinessVerificationEvidence` before trusting
+`Verified`: the assessment must carry a `VerificationEvidence` property that
+is itself a `[pscustomobject]` with a non-empty `Method` (what was tested)
+and a non-empty `ObservedAt` (when). Absent that, the displayed controls
+state is silently downgraded to `NotVerified` -- registration, wizard
+completion, a selected Input API, or a profile's mere existence must never
+imply verified controls, and neither may an unqualified `Verified` string on
+a hand-built object (issue #255's own wording, applied to the formatter's
+input as well as to the engine's output).
 
 **Not yet wired up.** This round adds the pure assessment functions, the
 summary-line formatter, and their tests -- no interactive menu entry, no
