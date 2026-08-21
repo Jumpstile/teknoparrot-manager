@@ -1715,6 +1715,47 @@ Describe "TeknoParrot Wizard Readiness Handoff (issue #253)" {
             Get-TeknoParrotWizardState -TeknoParrotRoot $tpRoot | Select-Object -ExpandProperty State | Should -Be 'Unknown'
         }
 
+        It "returns Unknown for duplicate FirstTimeSetupComplete elements with conflicting values (true then false)" {
+            $xml = @"
+<ParrotData>
+    <FirstTimeSetupComplete>true</FirstTimeSetupComplete>
+    <FirstTimeSetupComplete>false</FirstTimeSetupComplete>
+    <DatXmlLocation>C:\Games\eggman.xml</DatXmlLocation>
+</ParrotData>
+"@
+            Set-Content -LiteralPath (Join-Path $tpRoot 'ParrotData.xml') -Value $xml -Encoding utf8
+            Get-TeknoParrotWizardState -TeknoParrotRoot $tpRoot | Select-Object -ExpandProperty State | Should -Be 'Unknown'
+        }
+
+        It "returns Unknown for duplicate FirstTimeSetupComplete elements with conflicting values (false then true)" {
+            # Order reversed from the previous case -- the rule must not
+            # depend on which conflicting value happens to appear first.
+            $xml = @"
+<ParrotData>
+    <FirstTimeSetupComplete>false</FirstTimeSetupComplete>
+    <FirstTimeSetupComplete>true</FirstTimeSetupComplete>
+</ParrotData>
+"@
+            Set-Content -LiteralPath (Join-Path $tpRoot 'ParrotData.xml') -Value $xml -Encoding utf8
+            Get-TeknoParrotWizardState -TeknoParrotRoot $tpRoot | Select-Object -ExpandProperty State | Should -Be 'Unknown'
+        }
+
+        It "returns Unknown for duplicate FirstTimeSetupComplete elements even when both values agree" {
+            # Deliberate, documented rule: more than one FirstTimeSetupComplete
+            # element is not the schema shape this detector has any confirmed
+            # contract for (the upstream root/shape is unverified -- see the
+            # section header above), so agreeing duplicates are treated the
+            # same as conflicting ones rather than silently accepted.
+            $xml = @"
+<ParrotData>
+    <FirstTimeSetupComplete>true</FirstTimeSetupComplete>
+    <FirstTimeSetupComplete>true</FirstTimeSetupComplete>
+</ParrotData>
+"@
+            Set-Content -LiteralPath (Join-Path $tpRoot 'ParrotData.xml') -Value $xml -Encoding utf8
+            Get-TeknoParrotWizardState -TeknoParrotRoot $tpRoot | Select-Object -ExpandProperty State | Should -Be 'Unknown'
+        }
+
         It "returns a null DatXmlLocation when the field is absent, without affecting State" {
             Set-Content -LiteralPath (Join-Path $tpRoot 'ParrotData.xml') -Value (New-ParrotDataXml -FirstTimeSetupComplete 'true' -OmitDatXmlLocation) -Encoding utf8
             $result = Get-TeknoParrotWizardState -TeknoParrotRoot $tpRoot
@@ -1741,7 +1782,7 @@ Describe "TeknoParrot Wizard Readiness Handoff (issue #253)" {
                 'TeknoParrot first-run setup: Complete'
                 'Controls: Not verified'
                 ''
-                "TeknoParrot handled registration; TeknoParrot's own setup wizard, controls configuration, and DAT/XML setup are managed separately and are not performed by TPM."
+                "TPM registered this game. TeknoParrot owns its own setup wizard, controls configuration, and DAT/XML setup -- those are managed separately and are not performed by TPM."
                 ''
                 'Would you like TPM to configure/test controls now?'
             ) -join "`n")
@@ -1759,7 +1800,7 @@ Describe "TeknoParrot Wizard Readiness Handoff (issue #253)" {
                 'TeknoParrot first-run setup: Not yet complete -- TeknoParrot may still ask you to complete its setup wizard'
                 'Controls: Missing'
                 ''
-                "TeknoParrot handled registration; TeknoParrot's own setup wizard, controls configuration, and DAT/XML setup are managed separately and are not performed by TPM."
+                "TPM registered this game. TeknoParrot owns its own setup wizard, controls configuration, and DAT/XML setup -- those are managed separately and are not performed by TPM."
                 ''
                 'Would you like TPM to configure/test controls now?'
             ) -join "`n")
@@ -1816,6 +1857,20 @@ Describe "TeknoParrot Wizard Readiness Handoff (issue #253)" {
             $lines | Should -Contain 'Controls: Not verified'
             $lines | Should -Contain 'Would you like TPM to configure/test controls now?'
         }
+
+        It "never implies TeknoParrot performed TPM's own registration" {
+            # Codex review: the handoff text must not attribute TPM's
+            # registration work to TeknoParrot. Registration is TPM's own
+            # action; TeknoParrot separately owns its wizard/controls/DAT
+            # setup state.
+            $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'NotVerified'; Launch = 'NotTestedByTpm' }
+            $wizardState = [pscustomobject]@{ State = 'Complete'; DatXmlLocation = $null }
+            $text = (Get-OnboardingHandoffSummaryLines -Assessment $assessment -WizardState $wizardState) -join "`n"
+
+            $text | Should -Not -Match 'TeknoParrot handled registration'
+            $text | Should -Match 'TPM registered this game'
+            $text | Should -Match "TeknoParrot owns its own setup wizard"
+        }
     }
 
     Context "No-write regression (committed snapshot evidence, issue #253)" {
@@ -1861,6 +1916,23 @@ Describe "TeknoParrot Wizard Readiness Handoff (issue #253)" {
             (Compare-Object $before $after -Property Path, Hash, Write) | Should -BeNullOrEmpty
             @($after).Count | Should -Be $beforeCount
         }
+
+        It "leaves ParrotData.xml byte-identical after a spoofed Controls='Verified' handoff call, and fails closed" {
+            # Codex review: the committed no-write snapshot must wrap the
+            # exact spoofed call, not only the normal path.
+            $before = Get-WizardNoWriteDirSnapshot $tpRoot
+            $beforeCount = @($before).Count
+
+            $wizardState = Get-TeknoParrotWizardState -TeknoParrotRoot $tpRoot
+            $spoofed = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'Verified'; Launch = 'NotTestedByTpm' }
+            $lines = Get-OnboardingHandoffSummaryLines -Assessment $spoofed -WizardState $wizardState
+
+            $after = Get-WizardNoWriteDirSnapshot $tpRoot
+            (Compare-Object $before $after -Property Path, Hash, Write) | Should -BeNullOrEmpty
+            @($after).Count | Should -Be $beforeCount
+            $lines | Should -Contain 'Controls: Not verified'
+            $lines | Should -Not -Contain 'Controls: Verified'
+        }
     }
 
     Context "No-write / no-propagation guarantee (AST-verified, issue #253)" {
@@ -1883,16 +1955,33 @@ Describe "TeknoParrot Wizard Readiness Handoff (issue #253)" {
             @('Get-TeknoParrotWizardState', 'Get-OnboardingHandoffSummaryLines') | ForEach-Object { @{ Name = $_ } }
         ) {
             param($Name)
-            $forbidden = @('Invoke-ControlPropagation', 'Set-ProfileInputApi', 'Save-XmlMaybe', 'Save-Xml')
+            $forbiddenCommands = @('Invoke-ControlPropagation', 'Set-ProfileInputApi', 'Save-XmlMaybe', 'Save-Xml',
+                'Add-Content', 'Set-Content', 'Out-File', 'New-Item', 'Remove-Item', 'Move-Item', 'Copy-Item', 'Rename-Item')
             $fn = $wizardProductionAst.FindAll({
                 $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -eq $Name
             }, $true) | Select-Object -First 1
             $fn | Should -Not -BeNullOrEmpty
+
+            # Command-name check: cmdlets and functions (Add-Content, a
+            # wizard-mutation helper, etc.).
             $calls = $fn.Body.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true) |
                 ForEach-Object { $_.GetCommandName() } | Where-Object { $_ }
-            foreach ($f in $forbidden) { $calls | Should -Not -Contain $f }
+            foreach ($f in $forbiddenCommands) { $calls | Should -Not -Contain $f }
             ($calls | Where-Object { $_ -match 'Wizard' }) | Should -BeNullOrEmpty
-            ($calls | Where-Object { $_ -match '^Set-Content$|^Out-File$|^New-Item$|^Remove-Item$|^Move-Item$|^Copy-Item$' }) | Should -BeNullOrEmpty
+
+            # Member/static invocation check: CommandAst alone misses
+            # [xml]/[System.Xml.XmlDocument]::Save(...), [System.IO.File]::
+            # WriteAllText/Delete/Move/Copy(...), and similar .NET method
+            # calls that never appear as a CommandAst name -- those are
+            # InvokeMemberExpressionAst nodes instead (used for both
+            # instance calls like $doc.Save(...) and static calls like
+            # [System.IO.File]::Delete(...)).
+            $forbiddenMembers = @('Save', 'WriteAllText', 'WriteAllBytes', 'WriteAllLines',
+                'AppendAllText', 'AppendAllLines', 'AppendText', 'Delete', 'Move', 'MoveTo',
+                'Copy', 'CopyTo', 'Replace', 'CreateText', 'Create', 'SetLastWriteTime', 'SetAttributes')
+            $memberCalls = $fn.Body.FindAll({ $args[0] -is [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true) |
+                ForEach-Object { ($_.Member.Extent.Text -replace "^[`"']|[`"']$", '') } | Where-Object { $_ }
+            foreach ($m in $forbiddenMembers) { $memberCalls | Should -Not -Contain $m }
         }
     }
 }

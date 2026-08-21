@@ -996,22 +996,37 @@ five explicit outcomes, not a generic `Broken` catch-all:
   never launched yet).
 - `Malformed` -- the file exists but does not parse as XML (`XmlDocument.Load`
   throws).
-- `Unknown` -- the file parses, but `FirstTimeSetupComplete` is absent, or
-  present with a value that isn't a recognizable boolean. This is the
-  "ambiguous schema" outcome: an unrecognized `ParrotData.xml` layout is
-  reported honestly rather than guessed at.
-- `Incomplete` / `Complete` -- `FirstTimeSetupComplete` read as `false` /
-  `true`.
+- `Unknown` -- the file parses, but `FirstTimeSetupComplete` is absent,
+  present more than once (whether the duplicate values agree or conflict --
+  see below), or present exactly once with a value that isn't a
+  recognizable boolean. This is the "ambiguous schema" outcome: an
+  unrecognized `ParrotData.xml` layout is reported honestly rather than
+  guessed at.
+- `Incomplete` / `Complete` -- exactly one `FirstTimeSetupComplete` element
+  found, read as `false` / `true`.
+
+**Duplicate-field rule (Codex review).** `Get-TeknoParrotWizardState` uses
+`SelectNodes('//FirstTimeSetupComplete')`, not `SelectSingleNode`, and
+requires the result count to be exactly 1 before trusting it. More than one
+`FirstTimeSetupComplete` element anywhere in the document -- even if every
+occurrence agrees -- returns `Unknown` rather than picking one occurrence
+and hoping it is authoritative, since a document with duplicate fields is
+not the schema shape this detector has any confirmed contract for (see the
+unverified-schema note below). This is a deliberate, documented choice, not
+an oversight: see `Tests\TeknoParrot-Manager.Tests.ps1` for both the
+duplicate-agreeing-value and duplicate-conflicting-value cases.
 
 **Unverified schema assumption (explicitly flagged, not hidden).** No real,
 hardware-verified `ParrotData.xml` was available to confirm the exact root
-element name against during this round -- the detector locates
-`FirstTimeSetupComplete`/`DatXmlLocation` via `//FieldName` XPath (works
-regardless of root element) rather than assuming a specific one, and any
-document where the field genuinely cannot be found reads as `Unknown`
-rather than defaulting to a guess. This assumption should be confirmed
-against a real installed `ParrotData.xml` before the detector is relied on
-for anything beyond onboarding text.
+element name against during this round -- the detector locates the
+`FirstTimeSetupComplete` and `DatXmlLocation` elements via the XPath
+queries `//FirstTimeSetupComplete` and `//DatXmlLocation` (each matches
+that element name anywhere in the document, regardless of the document's
+actual root element) rather than assuming a specific root, and any
+document where the expected field genuinely cannot be found reads as
+`Unknown` rather than defaulting to a guess. This assumption should be
+confirmed against a real installed `ParrotData.xml` before the detector is
+relied on for anything beyond onboarding text.
 
 **Handoff formatter.** `Get-OnboardingHandoffSummaryLines -Assessment
 $assessment -WizardState $wizardState` combines the issue #255
@@ -1019,8 +1034,13 @@ $assessment -WizardState $wizardState` combines the issue #255
 with this detector's `WizardState` into the user-facing handoff text --
 four independent dimensions, reported as four separate lines, combined
 only here as display text. There is still no combined "Ready" boolean
-anywhere. It fails closed on `Controls = 'Verified'` exactly like
-`Get-ControlReadinessSummaryLines` (same
+anywhere. The closing explanatory line reads "TPM registered this game.
+TeknoParrot owns its own setup wizard, controls configuration, and DAT/XML
+setup..." -- attributing registration to TPM and the wizard/controls/DAT
+ownership to TeknoParrot explicitly and separately (an earlier draft of
+this text incorrectly said "TeknoParrot handled registration," misattributing
+TPM's own work; flagged and corrected in review). It fails closed on
+`Controls = 'Verified'` exactly like `Get-ControlReadinessSummaryLines` (same
 `Test-ControlReadinessVerificationEvidence` gate, reapplied independently
 here rather than assumed from the caller), and every non-`Complete` wizard
 state carries an explicit "TeknoParrot may still ask you to complete its
@@ -1037,7 +1057,13 @@ other TeknoParrot-owned file; never invokes TeknoParrotUI's setup wizard;
 never calls `Invoke-ControlPropagation`, `Set-ProfileInputApi`, or
 `Save-XmlMaybe`. `Read-Xml` (the same helper the #255 engine uses) sets
 `XmlResolver = $null` before loading, so this detector inherits the
-existing XXE-safe parsing behavior rather than needing its own.
+existing XXE-safe parsing behavior rather than needing its own. The AST
+no-write guard test checks both command names (`Add-Content`, `Set-Content`,
+`Save-Xml`, etc.) and member/static invocations (`InvokeMemberExpressionAst`
+covers both `$doc.Save(...)`-style instance calls and
+`[System.IO.File]::Delete(...)`-style static calls) -- a CommandAst-only
+check would miss .NET method calls entirely, since those never appear as a
+CommandAst name.
 
 **Not yet wired up.** This round adds the detector, the handoff formatter,
 and their tests -- no interactive menu entry, no automatic wizard launch,

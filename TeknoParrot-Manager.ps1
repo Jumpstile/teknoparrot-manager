@@ -11709,10 +11709,13 @@ function Get-ControlReadinessSummaryLines {
 # TeknoParrotUI working directory; ParrotData.cs defines that flag alongside
 # DatXmlLocation. This detector does not have a real, hardware-verified copy
 # of ParrotData.xml to confirm the exact root element name against -- so it
-# deliberately locates FirstTimeSetupComplete/DatXmlLocation by XPath
-# `//FieldName` (works regardless of the document's root element) rather
-# than assuming a specific root, and returns 'Unknown' whenever the expected
-# field cannot be found at all, instead of guessing a schema. This
+# deliberately locates the FirstTimeSetupComplete and DatXmlLocation
+# elements via the XPath queries `//FirstTimeSetupComplete` and
+# `//DatXmlLocation` (each matches that element name anywhere in the
+# document, regardless of the document's actual root element) rather than
+# assuming a specific root, and returns 'Unknown' whenever the expected
+# field cannot be found at all -- or is found more than once with
+# conflicting values (see below) -- instead of guessing a schema. This
 # assumption should be confirmed against a real installed ParrotData.xml
 # before this detector is relied upon for anything beyond onboarding text.
 #
@@ -11731,10 +11734,21 @@ function Get-ControlReadinessSummaryLines {
 # ParrotData.xml, read-only. Returns a [pscustomobject] with:
 #   State          -- 'Complete', 'Incomplete', 'Missing', 'Malformed', or
 #                      'Unknown' (present but FirstTimeSetupComplete could
-#                      not be confidently read as a boolean).
+#                      not be confidently read as a boolean, or appears more
+#                      than once).
 #   DatXmlLocation -- the DAT/XML path TeknoParrotUI has on record, if the
 #                      field is present and non-empty; otherwise $null.
 #                      Informational only -- never used to influence State.
+#
+# Exactly one unambiguous FirstTimeSetupComplete element is required to
+# classify Complete/Incomplete. A document with more than one such element
+# anywhere -- whether the values agree or conflict -- is not the schema
+# shape this detector has any confirmed contract for (see the section
+# header above: the exact upstream schema is unverified), so it always
+# reads as 'Unknown' rather than picking one occurrence and hoping it is
+# authoritative. This is the deliberately conservative rule; see
+# Tests\TeknoParrot-Manager.Tests.ps1 for both the duplicate-agreeing-value
+# and duplicate-conflicting-value cases.
 function Get-TeknoParrotWizardState {
     param([Parameter(Mandatory)][string]$TeknoParrotRoot)
 
@@ -11760,8 +11774,12 @@ function Get-TeknoParrotWizardState {
         $null
     }
 
-    $completeNode = $doc.SelectSingleNode('//FirstTimeSetupComplete')
-    if ($null -eq $completeNode -or [string]::IsNullOrWhiteSpace($completeNode.InnerText)) {
+    $completeNodes = @($doc.SelectNodes('//FirstTimeSetupComplete'))
+    if ($completeNodes.Count -ne 1) {
+        return [pscustomobject]@{ State = 'Unknown'; DatXmlLocation = $datXmlLocation }
+    }
+    $completeNode = $completeNodes[0]
+    if ([string]::IsNullOrWhiteSpace($completeNode.InnerText)) {
         return [pscustomobject]@{ State = 'Unknown'; DatXmlLocation = $datXmlLocation }
     }
 
@@ -11840,7 +11858,7 @@ function Get-OnboardingHandoffSummaryLines {
         $wizardText,
         $controlsText,
         '',
-        "TeknoParrot handled registration; TeknoParrot's own setup wizard, controls configuration, and DAT/XML setup are managed separately and are not performed by TPM."
+        "TPM registered this game. TeknoParrot owns its own setup wizard, controls configuration, and DAT/XML setup -- those are managed separately and are not performed by TPM."
     )
 
     # Same gate as Get-ControlReadinessSummaryLines: only offer to
