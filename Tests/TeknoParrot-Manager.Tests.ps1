@@ -3832,22 +3832,45 @@ Describe "Test-ReShadeSetupTrustedSignature (fingerprint-as-root-of-trust, fail-
 }
 
 Describe "Test-EggmanDatUpToDate" {
+    BeforeAll {
+        Add-Type -AssemblyName System.IO.Compression
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        function New-EggmanUpToDateTestZip([string]$zipPath) {
+            $fs = [System.IO.File]::Open($zipPath, [System.IO.FileMode]::CreateNew)
+            try {
+                $archive = [System.IO.Compression.ZipArchive]::new($fs, [System.IO.Compression.ZipArchiveMode]::Create)
+                try {
+                    $entry = $archive.CreateEntry('TeknoParrot.Collection.2026_RomVault.dat')
+                    $writer = New-Object System.IO.StreamWriter($entry.Open())
+                    try { $writer.Write('<data />') } finally { $writer.Dispose() }
+                } finally { $archive.Dispose() }
+            } finally { $fs.Dispose() }
+        }
+    }
+
     # Issue #106: the "check for a newer Eggman dat release" prompt
     # previously always asked to download/switch regardless of whether the
     # remote release had actually changed. The Eggman/RomVault release
     # format exposes no version number, only a filename and size, so exact
-    # byte-size match is the identity signal used.
+    # byte-size match remains the freshness signal after ZIP validation.
     It "reports Current when the local file's size exactly matches the remote release size" {
         $path = Join-Path $TestDrive ("eggman-current-" + [guid]::NewGuid().ToString('N') + '.zip')
-        [System.IO.File]::WriteAllBytes($path, [byte[]]::new(1024))
-        $result = Test-EggmanDatUpToDate -LocalDatPath $path -RemoteSizeBytes 1024
+        New-EggmanUpToDateTestZip -zipPath $path
+        $size = (Get-Item -LiteralPath $path).Length
+        $result = Test-EggmanDatUpToDate -LocalDatPath $path -RemoteSizeBytes $size
         $result.Status | Should -Be 'Current'
-        $result.LocalSizeBytes | Should -Be 1024
+        $result.LocalSizeBytes | Should -Be $size
     }
     It "reports UpdateAvailable when the local file's size differs from the remote release size" {
         $path = Join-Path $TestDrive ("eggman-stale-" + [guid]::NewGuid().ToString('N') + '.zip')
-        [System.IO.File]::WriteAllBytes($path, [byte[]]::new(1024))
-        $result = Test-EggmanDatUpToDate -LocalDatPath $path -RemoteSizeBytes 2048
+        New-EggmanUpToDateTestZip -zipPath $path
+        $result = Test-EggmanDatUpToDate -LocalDatPath $path -RemoteSizeBytes ((Get-Item -LiteralPath $path).Length + 1)
+        $result.Status | Should -Be 'UpdateAvailable'
+    }
+    It "reports UpdateAvailable for a same-size corrupt or wrong-type file instead of Current" {
+        $path = Join-Path $TestDrive ("eggman-corrupt-" + [guid]::NewGuid().ToString('N') + '.zip')
+        Set-Content -LiteralPath $path -Value ('x' * 128) -NoNewline
+        $result = Test-EggmanDatUpToDate -LocalDatPath $path -RemoteSizeBytes 128
         $result.Status | Should -Be 'UpdateAvailable'
     }
     It "reports Unknown (not Current) when the local file does not exist" {
@@ -5093,6 +5116,19 @@ Describe "Write-TpmDownloadProgress" {
 
 Describe "Invoke-EggmanDatDownloadInteractive cache reuse" {
     BeforeAll {
+        Add-Type -AssemblyName System.IO.Compression
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        function New-EggmanTestZip([string]$zipPath) {
+            $fs = [System.IO.File]::Open($zipPath, [System.IO.FileMode]::CreateNew)
+            try {
+                $archive = [System.IO.Compression.ZipArchive]::new($fs, [System.IO.Compression.ZipArchiveMode]::Create)
+                try {
+                    $entry = $archive.CreateEntry('TeknoParrot.Collection.2026_RomVault.dat')
+                    $writer = New-Object System.IO.StreamWriter($entry.Open())
+                    try { $writer.Write('<data />') } finally { $writer.Dispose() }
+                } finally { $archive.Dispose() }
+            } finally { $fs.Dispose() }
+        }
         Mock Write-Log {}
         Mock Write-Host {}
         Mock Read-PathWithBrowse { "" }
@@ -5100,31 +5136,221 @@ Describe "Invoke-EggmanDatDownloadInteractive cache reuse" {
     }
 
     It "does not re-download when the target file already matches the release size" {
-        # Review round 3: this must ask Get-EggmanDatDefaultSavePath for the
-        # expected path, not assume the current directory directly -- the
-        # production function falls back to the current directory only when
-        # $PSScriptRoot is blank, and assuming that unconditionally silently
-        # diverged from the real default under Windows PowerShell 5.1
-        # (confirmed: Invoke-EggmanDatDownloadInteractive cache reuse failed
-        # there because the fixture was seeded at a different path than the
-        # one production actually checked). Asking the same production
-        # function both sides now share makes them agree by construction,
-        # regardless of how $PSScriptRoot resolves in either engine.
+        # Seed the exact deterministic TPM data root through the test-only
+        # RootPath injection. The production path uses LocalApplicationData;
+        # the fixture must never write into the real user profile.
         $fileName = "TeknoParrot.Collection.RomVault.zip"
-        $defaultPath = Get-EggmanDatDefaultSavePath -FileName $fileName
+        $defaultRoot = Join-Path $TestDrive 'eggman-data'
+        New-Item -ItemType Directory -Path $defaultRoot -Force | Out-Null
+        $defaultPath = Get-EggmanDatDefaultSavePath -FileName $fileName -RootPath $defaultRoot
         try {
-            Set-Content -LiteralPath $defaultPath -Value "12345" -NoNewline
+            New-EggmanTestZip -zipPath $defaultPath
+            $releaseSize = (Get-Item -LiteralPath $defaultPath).Length
             $rel = [pscustomobject]@{
                 DownloadUrl = "https://github.com/Eggmansworld/TeknoParrot/releases/download/2026-06-17/$fileName"
                 FileName    = $fileName
-                SizeBytes   = 5
+                SizeBytes   = $releaseSize
             }
 
-            Invoke-EggmanDatDownloadInteractive $rel | Should -Be $defaultPath
+            Invoke-EggmanDatDownloadInteractive $rel -DefaultRoot $defaultRoot | Should -Be $defaultPath
+            Should -Invoke Read-PathWithBrowse -Times 0
             Should -Invoke Invoke-EggmanDatDownload -Times 0
         } finally {
             Remove-Item -LiteralPath $defaultPath -Force -ErrorAction SilentlyContinue
         }
+    }
+}
+
+Describe "Issue #252 Eggman recognition-data location and write boundary" {
+    BeforeAll {
+        Add-Type -AssemblyName System.IO.Compression
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        function New-EggmanFixtureZip([string]$zipPath) {
+            $parent = Split-Path -Parent $zipPath
+            if ($parent) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+            $fs = [System.IO.File]::Open($zipPath, [System.IO.FileMode]::CreateNew)
+            try {
+                $archive = [System.IO.Compression.ZipArchive]::new($fs, [System.IO.Compression.ZipArchiveMode]::Create)
+                try {
+                    $entry = $archive.CreateEntry('TeknoParrot.Collection.2026_RomVault.dat')
+                    $writer = New-Object System.IO.StreamWriter($entry.Open())
+                    try { $writer.Write('<data />') } finally { $writer.Dispose() }
+                } finally { $archive.Dispose() }
+            } finally { $fs.Dispose() }
+        }
+        Mock Write-Log {}
+        Mock Write-Host {}
+    }
+
+    BeforeEach {
+        $script:tpRoot = ''
+        $script:zipSource = ''
+        $script:zipSourceSupplementary = ''
+        $script:gamesInstallFolder = ''
+    }
+
+    It "uses the deterministic TPM per-user data root and does not create it while resolving the path" {
+        $root = Get-EggmanDatDataRoot
+        $root | Should -Match 'TeknoParrotManager\\Eggman$'
+        $root | Should -Not -BeNullOrEmpty
+    }
+
+    It "does not ask for a save location on the normal first-run download path" {
+        $defaultRoot = Join-Path $TestDrive 'normal-default'
+        $fileName = 'TeknoParrot.Collection.RomVault.zip'
+        $script:downloadPath = $null
+        Mock Read-PathWithBrowse {}
+        Mock Invoke-EggmanDatDownload {
+            param([string]$downloadUrl, [string]$savePath, [Int64]$ExpectedBytes)
+            $script:downloadPath = $savePath
+            return $true
+        }
+        $rel = [pscustomobject]@{ DownloadUrl = 'https://example.com/eggman.zip'; FileName = $fileName; SizeBytes = 0 }
+
+        $result = Invoke-EggmanDatDownloadInteractive $rel -DefaultRoot $defaultRoot
+
+        $result | Should -Be (Join-Path $defaultRoot $fileName)
+        $script:downloadPath | Should -Be $result
+        Should -Invoke Read-PathWithBrowse -Times 0
+        Should -Invoke Invoke-EggmanDatDownload -Times 1
+        Test-Path -LiteralPath $defaultRoot | Should -BeFalse
+    }
+
+    It "keeps the explicit alternate-location save override" {
+        $defaultRoot = Join-Path $TestDrive 'alternate-default'
+        $alternate = Join-Path $TestDrive 'alternate-location\Eggman.zip'
+        $script:downloadPath = $null
+        Mock Read-PathWithBrowse { $alternate }
+        Mock Invoke-EggmanDatDownload {
+            param([string]$downloadUrl, [string]$savePath, [Int64]$ExpectedBytes)
+            $script:downloadPath = $savePath
+            return $true
+        }
+        $rel = [pscustomobject]@{ DownloadUrl = 'https://example.com/eggman.zip'; FileName = 'latest.zip'; SizeBytes = 0 }
+
+        $result = Invoke-EggmanDatDownloadInteractive $rel -AllowBrowse -DefaultRoot $defaultRoot
+
+        $result | Should -Be ([System.IO.Path]::GetFullPath($alternate))
+        $script:downloadPath | Should -Be $result
+        Should -Invoke Read-PathWithBrowse -Times 1
+    }
+
+    It "preserves a valid configured path as the update destination when the user accepts the default" {
+        $legacy = Join-Path $TestDrive 'legacy\custom-name.zip'
+        New-EggmanFixtureZip -zipPath $legacy
+        $script:downloadPath = $null
+        Mock Read-PathWithBrowse { '' }
+        Mock Invoke-EggmanDatDownload {
+            param([string]$downloadUrl, [string]$savePath, [Int64]$ExpectedBytes)
+            $script:downloadPath = $savePath
+            return $true
+        }
+        $rel = [pscustomobject]@{
+            DownloadUrl = 'https://example.com/eggman.zip'
+            FileName = 'new-release.zip'
+            SizeBytes = ((Get-Item -LiteralPath $legacy).Length + 1)
+        }
+
+        $result = Invoke-EggmanDatDownloadInteractive $rel -AllowBrowse -PreferredSavePath $legacy -DefaultRoot (Join-Path $TestDrive 'new-default')
+
+        $result | Should -Be ([System.IO.Path]::GetFullPath($legacy))
+        $script:downloadPath | Should -Be $result
+        Should -Invoke Read-PathWithBrowse -Times 1
+    }
+
+    It "rejects corrupt, wrong-type, and wrong-size files before reuse" {
+        $corrupt = Join-Path $TestDrive 'corrupt.zip'
+        Set-Content -LiteralPath $corrupt -Value ('x' * 128) -NoNewline
+        Test-EggmanDatZip -Path $corrupt -ExpectedBytes 128 | Should -BeFalse
+
+        $valid = Join-Path $TestDrive 'valid.zip'
+        New-EggmanFixtureZip -zipPath $valid
+        $size = (Get-Item -LiteralPath $valid).Length
+        Test-EggmanDatZip -Path $valid -ExpectedBytes ($size + 1) | Should -BeFalse
+        Test-EggmanDatZip -Path $valid -ExpectedBytes $size | Should -BeTrue
+    }
+
+    It "rejects protected TeknoParrot, source, and staging destinations without writing" {
+        $tp = Join-Path $TestDrive 'TeknoParrot'
+        $mainSource = Join-Path $TestDrive 'MainGameZips'
+        $suppSource = Join-Path $TestDrive 'SupplementaryGameZips'
+        $staging = Join-Path $TestDrive 'GameStaging'
+        $script:tpRoot = $tp
+        $script:zipSource = $mainSource
+        $script:zipSourceSupplementary = $suppSource
+        $script:gamesInstallFolder = $staging
+        $before = Get-TpmDirSnapshot -Dir $TestDrive
+        Mock Read-PathWithBrowse { Join-Path $tp 'Eggman.zip' }
+        Mock Invoke-EggmanDatDownload { throw 'protected destination must not reach downloader' }
+        $rel = [pscustomobject]@{ DownloadUrl = 'https://example.com/eggman.zip'; FileName = 'latest.zip'; SizeBytes = 0 }
+
+        $defaultResult = Invoke-EggmanDatDownloadInteractive $rel -DefaultRoot (Join-Path $tp 'Eggman')
+        $alternateResult = Invoke-EggmanDatDownloadInteractive $rel -AllowBrowse -DefaultRoot (Join-Path $TestDrive 'safe-default')
+
+        $defaultResult | Should -BeNullOrEmpty
+        $alternateResult | Should -BeNullOrEmpty
+        Should -Invoke Invoke-EggmanDatDownload -Times 0
+        Assert-TpmDirSnapshotUnchanged -Before $before -After (Get-TpmDirSnapshot -Dir $TestDrive)
+    }
+
+    It "leaves the existing destination untouched and removes the temporary file when archive validation fails" {
+        $destination = Join-Path $TestDrive 'existing\Eggman.zip'
+        New-EggmanFixtureZip -zipPath $destination
+        $before = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($destination))
+        $script:eggmanTransportTempPath = $null
+        Mock Test-TpmDownloadBitsAvailable { $false }
+        Mock Invoke-TpmDownloadHttpClient {
+            param([string]$DownloadUrl, [string]$TempPath, [string]$Label)
+            $script:eggmanTransportTempPath = $TempPath
+            Set-Content -LiteralPath $TempPath -Value '12345' -NoNewline
+        }
+        Mock Write-Progress {}
+        $relSize = 5
+
+        $result = Invoke-EggmanDatDownload -downloadUrl 'https://example.com/eggman.zip' -savePath $destination -ExpectedBytes $relSize
+
+        $result | Should -BeFalse
+        [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($destination)) | Should -Be $before
+        Test-Path -LiteralPath $script:eggmanTransportTempPath | Should -BeFalse
+        @(Get-ChildItem -LiteralPath (Split-Path -Parent $destination) -Filter '*.partial' -Force -ErrorAction SilentlyContinue).Count | Should -Be 0
+    }
+
+    Context "Read-only helper AST guard" {
+        BeforeAll {
+            $script:eggmanProductionAst = [System.Management.Automation.Language.Parser]::ParseFile(
+                (Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1'), [ref]$null, [ref]$null)
+        }
+
+        It "keeps path resolution, destination checks, archive validation, and freshness checks free of write APIs" -TestCases (
+            @('Get-EggmanDatDataRoot', 'Get-EggmanDatDefaultSavePath', 'Test-EggmanDatDestinationSafe', 'Test-EggmanDatZip', 'Test-EggmanDatUpToDate') |
+                ForEach-Object { @{ Name = $_ } }
+        ) {
+            param($Name)
+            $fn = $eggmanProductionAst.FindAll({
+                $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -eq $Name
+            }, $true) | Select-Object -First 1
+            $fn | Should -Not -BeNullOrEmpty
+            $forbiddenCommands = @('Add-Content', 'Set-Content', 'Out-File', 'New-Item', 'Remove-Item', 'Move-Item', 'Copy-Item', 'Rename-Item',
+                'Invoke-ControlPropagation', 'Set-ProfileInputApi', 'Save-XmlMaybe', 'Save-Xml')
+            $calls = $fn.Body.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true) |
+                ForEach-Object { $_.GetCommandName() } | Where-Object { $_ }
+            foreach ($nameToReject in $forbiddenCommands) { $calls | Should -Not -Contain $nameToReject }
+            $forbiddenMembers = @('Save', 'WriteAllText', 'WriteAllBytes', 'WriteAllLines', 'AppendAllText', 'AppendAllLines', 'AppendText',
+                'Delete', 'Move', 'MoveTo', 'Copy', 'CopyTo', 'Replace', 'CreateText', 'Create', 'SetLastWriteTime', 'SetAttributes')
+            $memberCalls = $fn.Body.FindAll({ $args[0] -is [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true) |
+                ForEach-Object { ($_.Member.Extent.Text -replace "^[`"']|[`"']$", '') } | Where-Object { $_ }
+            foreach ($memberName in $forbiddenMembers) { $memberCalls | Should -Not -Contain $memberName }
+        }
+    }
+
+    It "documents the ownership boundary and keeps the normal first-run call prompt-free" {
+        $ProductionSource | Should -Match 'ParrotData\.xml'
+        $ProductionSource | Should -Match 'DAT/XML setting'
+        $ProductionSource | Should -Match 'supplementary game ZIPs'
+        $ProductionSource | Should -Match 'staging/install folder'
+        $ProductionSource | Should -Match 'TPM will normally store a downloaded copy under'
+        $ProductionSource | Should -Match 'Invoke-EggmanDatDownloadInteractive \$rel\r?\n\s+if \(\$savedPath\)'
+        $ProductionSource | Should -Match 'Invoke-EggmanDatDownloadInteractive \$rel -AllowBrowse -PreferredSavePath \$eggmanDatZip'
     }
 }
 

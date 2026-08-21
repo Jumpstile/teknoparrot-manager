@@ -323,13 +323,14 @@ Dice score: ~0.85  -->  auto-registered
 During initial setup the script offers to configure the Eggman/RomVault dat:
 
 ```
-D) Download from GitHub now  (~145 MB)
-Z) I have the ZIP already -- enter path
-F) I have separate dat files -- enter paths
+D) Download from GitHub now  (~145 MB; TPM chooses the safe data location)
+B) Browse/import a ZIP or dat file I already have
 N) Skip
 ```
 
 Both the collection dat and supplementary dat are read directly from inside the ZIP — no extraction needed. The supplementary dat takes priority for any game that appears in both (alternate versions that replace the collection version).
+
+Eggman recognition data is separate from TeknoParrotUI's `ParrotData.xml` and DAT/XML setting, and separate from both game ZIP sources and the local staging/install folder. On the normal first-run download path TPM stores the ZIP under `%LOCALAPPDATA%\TeknoParrotManager\Eggman` without asking where to save it. Browse/import remains available for an existing local file, and later explicit updates retain the alternate-location save dialog. A valid previously configured ZIP remains the update destination unless you choose another location.
 
 When the script downloads the Eggman/RomVault ZIP, it uses the shared hardened download pipeline also used for other live file downloads: BITS first, HttpClient fallback, and `Invoke-WebRequest` only as a last resort. Downloads go to a partial/temp file first, show readable progress with size/speed/ETA when available, log final method/size/elapsed/speed metrics, and only move into the cache/final path after completion validation.
 

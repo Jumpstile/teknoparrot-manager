@@ -5196,7 +5196,7 @@ function Get-TpmHttpStatusCodeFromError {
 # next tier / final failure. Pass -LastStatusCode ([ref]$var) to read the
 # final HTTP status code (0 if unknown/not HTTP-related) after a failure.
 function Invoke-TpmDownload {
-    param([string]$DownloadUrl, [string]$DestinationPath, [Int64]$ExpectedBytes = 0, [string]$Label = 'Download', [string]$Version = '', [switch]$Quiet, [ref]$LastStatusCode, [string]$ExpectedSha256 = '')
+    param([string]$DownloadUrl, [string]$DestinationPath, [Int64]$ExpectedBytes = 0, [string]$Label = 'Download', [string]$Version = '', [switch]$Quiet, [ref]$LastStatusCode, [string]$ExpectedSha256 = '', [scriptblock]$ValidationScript)
     if ($LastStatusCode) { $LastStatusCode.Value = 0 }
     $saveDir = Split-Path -Parent $DestinationPath
     if ([string]::IsNullOrWhiteSpace($saveDir)) { $saveDir = (Get-Location).Path }
@@ -5281,6 +5281,9 @@ function Invoke-TpmDownload {
             # SECURITY reason for the latter).
             throw "Downloaded file is incomplete, empty, or failed integrity verification."
         }
+        if ($ValidationScript -and -not (& $ValidationScript $tempPath)) {
+            throw "Downloaded file failed the caller's content validation."
+        }
         if (Test-Path -LiteralPath $DestinationPath -PathType Leaf) {
             Remove-Item -LiteralPath $DestinationPath -Force -ErrorAction Stop
         }
@@ -5310,15 +5313,13 @@ function Invoke-TpmDownload {
     }
 }
 
-# Compares the local Eggman dat ZIP against the latest GitHub release
-# using file size as an existence-and-identity proxy -- the Eggman/RomVault
-# release format exposes no separate version number or date, only a
-# filename and size, so an exact byte-size match is the only real signal
-# available that the local file already IS that release. See issue #106:
-# the "check for a newer release" prompt previously always asked to
-# download/switch regardless of whether the remote release had actually
-# changed. Pure/read-only -- never touches the filesystem beyond reading
-# the local file's size.
+# Compares the local Eggman dat ZIP against the latest GitHub release. The
+# release format exposes no separate version number or date, so the remote
+# byte size remains the freshness signal, but a same-size file is only treated
+# as current after its ZIP structure and collection DAT entry are readable.
+# See issue #106: the "check for a newer release" prompt previously always
+# asked to download/switch regardless of whether the remote release changed.
+# Pure/read-only -- never writes or repairs the local file.
 function Test-EggmanDatUpToDate {
     param(
         [string]$LocalDatPath,
@@ -5328,58 +5329,139 @@ function Test-EggmanDatUpToDate {
         return [pscustomobject]@{ Status = 'Unknown'; LocalSizeBytes = $null }
     }
     $localSizeBytes = (Get-Item -LiteralPath $LocalDatPath).Length
+    if (-not (Test-EggmanDatZip -Path $LocalDatPath -ExpectedBytes $localSizeBytes)) {
+        return [pscustomobject]@{ Status = 'UpdateAvailable'; LocalSizeBytes = $localSizeBytes }
+    }
     $status = if ($localSizeBytes -eq $RemoteSizeBytes) { 'Current' } else { 'UpdateAvailable' }
     return [pscustomobject]@{ Status = $status; LocalSizeBytes = $localSizeBytes }
 }
 
 function Invoke-EggmanDatDownload {
     param([string]$downloadUrl, [string]$savePath, [Int64]$ExpectedBytes = 0)
-    return (Invoke-TpmDownload -DownloadUrl $downloadUrl -DestinationPath $savePath -ExpectedBytes $ExpectedBytes -Label 'EggmanDat')
+    return (Invoke-TpmDownload -DownloadUrl $downloadUrl -DestinationPath $savePath -ExpectedBytes $ExpectedBytes -Label 'EggmanDat' -ValidationScript {
+        param([string]$DownloadedPath)
+        return (Test-EggmanDatZip -Path $DownloadedPath -ExpectedBytes $ExpectedBytes)
+    })
 }
 
-# Shared interactive download step for a resolved Eggman dat release: checks
-# Review round 3: the default save location ("next to the script", falling
-# back to the current directory only when $PSScriptRoot is unavailable) used
-# to be inlined directly in Invoke-EggmanDatDownloadInteractive below. A
-# regression test needs to predict this exact path to seed a cache-reuse
-# fixture, and computing it independently (e.g. assuming the current
-# directory unconditionally) silently drifts from what this function
-# actually resolves whenever $PSScriptRoot is not blank in the caller's
-# session -- observed as a real, non-obvious divergence under Windows
-# PowerShell 5.1 (issue: Invoke-EggmanDatDownloadInteractive cache reuse).
-# Extracting this into its own function, called by both the production path
-# below and its regression test, makes the two impossible to disagree: both
-# always ask this exact function, so whatever $PSScriptRoot resolves to in
-# either engine or extraction technique, they agree by construction.
+# Returns the TPM-owned per-user data root for downloaded Eggman recognition
+# data. This is deliberately outside the TeknoParrot installation, the TPM
+# program folder, game ZIP sources, and the game staging folder. The directory
+# is not created by this read-only resolver; Invoke-TpmDownload creates it only
+# when a validated download is ready to be written.
+function Get-EggmanDatDataRoot {
+    $localAppData = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::LocalApplicationData)
+    if ([string]::IsNullOrWhiteSpace($localAppData)) {
+        $localAppData = [System.Environment]::GetEnvironmentVariable('LOCALAPPDATA')
+    }
+    if ([string]::IsNullOrWhiteSpace($localAppData)) { return $null }
+    return (Join-Path $localAppData 'TeknoParrotManager\Eggman')
+}
+
+# Review round 3 used a script-adjacent default. That made a download write
+# into the TPM package directory and made ownership ambiguous. The default is
+# now a deterministic per-user TPM data location. RootPath is test-only
+# injection: production callers omit it, while focused tests can remain inside
+# their disposable TestDrive instead of touching the real profile.
 function Get-EggmanDatDefaultSavePath {
-    param([string]$FileName)
-    $scriptRootForDat = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { (Get-Location).Path } else { $PSScriptRoot }
-    return Join-Path $scriptRootForDat $FileName
+    param([string]$FileName, [string]$RootPath = '')
+    $dataRoot = if ([string]::IsNullOrWhiteSpace($RootPath)) { Get-EggmanDatDataRoot } else { $RootPath }
+    if ([string]::IsNullOrWhiteSpace($dataRoot)) { return $null }
+    return (Join-Path $dataRoot $FileName)
 }
 
-# the release's filename is safe to use as a save path (defense against a
-# crafted GitHub Releases response -- same convention as every other
-# live-fetched filename in this script), prompts for a save location
-# (defaulting next to the script), and downloads. Used by both the
-# first-time dat setup prompt and the "check for a newer release" prompt on
-# later runs, so there is exactly one place that does this safety check.
+# Download destinations must never overlap a TeknoParrot installation, either
+# game ZIP source, or the extracted-game staging folder. Importing an existing
+# file remains read-only and is handled by the separate B) browse/import path;
+# this guard applies only to paths TPM may write.
+function Test-EggmanDatDestinationSafe {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    $protectedRoots = @($tpRoot, $zipSource, $zipSourceSupplementary, $gamesInstallFolder) |
+        Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
+    foreach ($protectedRoot in $protectedRoots) {
+        if (Test-PathInside -child $Path -parent ([string]$protectedRoot)) { return $false }
+    }
+    return $true
+}
+
+# A matching byte count is not enough to trust a downloaded Eggman archive:
+# a text file, truncated archive, or corrupt ZIP can have the expected length.
+# Require a readable ZIP central directory and the collection DAT entry that
+# Build-DatIndexFromZip consumes. No extraction or write occurs here.
+function Test-EggmanDatZip {
+    param([string]$Path, [Int64]$ExpectedBytes = 0)
+    if (-not (Test-TpmDownloadedFile -Path $Path -ExpectedBytes $ExpectedBytes)) { return $false }
+    $zip = $null
+    try {
+        $zip = [System.IO.Compression.ZipFile]::OpenRead($Path)
+        $collectionEntry = @($zip.Entries | Where-Object { $_.FullName -like '*Collection*_RomVault*.dat' })[0]
+        return ($null -ne $collectionEntry)
+    } catch {
+        Write-Log "EggmanDat: ZIP validation failed for '$Path' -- $_"
+        return $false
+    } finally {
+        if ($zip) { $zip.Dispose() }
+    }
+}
+
+# Shared download step for a resolved Eggman release. The ordinary first-run
+# path uses the deterministic TPM-owned default without asking where to save.
+# AllowBrowse preserves the explicit alternate-location override used by the
+# later update flow. PreferredSavePath preserves a valid configured path rather
+# than silently relocating it when a returning user chooses an update.
 # Returns the saved path on success, or $null on failure/abort.
 function Invoke-EggmanDatDownloadInteractive {
-    param([pscustomobject]$rel)
+    param(
+        [pscustomobject]$rel,
+        [switch]$AllowBrowse,
+        [string]$PreferredSavePath = '',
+        [string]$DefaultRoot = ''
+    )
 
     $safeDatFileName = [System.IO.Path]::GetFileName($rel.FileName)
-    $scriptRootForDat = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { (Get-Location).Path } else { $PSScriptRoot }
-    $defaultSavePath = Get-EggmanDatDefaultSavePath -FileName $safeDatFileName
-    $unsafeFileName  = [string]::IsNullOrWhiteSpace($safeDatFileName) -or -not (Test-PathInside $defaultSavePath $scriptRootForDat)
+    $defaultSavePath = if ([string]::IsNullOrWhiteSpace($PreferredSavePath)) {
+        Get-EggmanDatDefaultSavePath -FileName $safeDatFileName -RootPath $DefaultRoot
+    } else {
+        $PreferredSavePath
+    }
+    $defaultRoot = if ([string]::IsNullOrWhiteSpace($DefaultRoot)) { Get-EggmanDatDataRoot } else { $DefaultRoot }
+    $unsafeFileName  = [string]::IsNullOrWhiteSpace($safeDatFileName) -or
+        [string]::IsNullOrWhiteSpace($defaultSavePath) -or
+        [System.IO.Path]::GetExtension($safeDatFileName) -ne '.zip'
     if ($unsafeFileName) {
         Write-Log "EggmanDat: SECURITY -- unsafe release filename '$($rel.FileName)'"
         Write-Host "  Unexpected filename from GitHub -- skipped for safety." -ForegroundColor Red
         return $null
     }
-    $rawSave = Read-PathWithBrowse "  Save to (Enter for default: $defaultSavePath)" -Mode SaveFile `
-                   -FileFilter "ZIP files (*.zip)|*.zip|All files (*.*)|*.*" -DefaultFileName $safeDatFileName -InitialDirectory $scriptRootForDat
-    if (-not $rawSave) { $rawSave = $defaultSavePath }
-    if ($rel.SizeBytes -gt 0 -and (Test-TpmDownloadedFile -Path $rawSave -ExpectedBytes $rel.SizeBytes)) {
+    if (-not (Test-EggmanDatDestinationSafe -Path $defaultSavePath)) {
+        Write-Log "EggmanDat: SECURITY -- default destination overlaps a protected location: $defaultSavePath"
+        Write-Host "  TPM could not select a safe Eggman data location for this setup." -ForegroundColor Yellow
+        if (-not $AllowBrowse) { return $null }
+        $defaultSavePath = $null
+    }
+    $rawSave = $defaultSavePath
+    if ($AllowBrowse) {
+        $prompt = if ($defaultSavePath) { "  Save to (Enter for default: $defaultSavePath)" } else { "  Save to (choose a safe alternate location)" }
+        $initialDirectory = if ($defaultSavePath) { Split-Path -Parent $defaultSavePath } else { $defaultRoot }
+        $rawSave = Read-PathWithBrowse $prompt -Mode SaveFile `
+                       -FileFilter "ZIP files (*.zip)|*.zip|All files (*.*)|*.*" -DefaultFileName $safeDatFileName -InitialDirectory $initialDirectory
+        if (-not $rawSave) { $rawSave = $defaultSavePath }
+    }
+    if ([string]::IsNullOrWhiteSpace($rawSave)) {
+        Write-Host "  No safe Eggman data destination was selected -- skipped." -ForegroundColor Yellow
+        return $null
+    }
+    try { $rawSave = [System.IO.Path]::GetFullPath($rawSave) } catch {
+        Write-Host "  The selected Eggman data destination is not a valid path -- skipped." -ForegroundColor Yellow
+        return $null
+    }
+    if (-not (Test-EggmanDatDestinationSafe -Path $rawSave)) {
+        Write-Host "  Refusing to write Eggman recognition data under TeknoParrot, a game ZIP source, or staging." -ForegroundColor Red
+        Write-Log "EggmanDat: SECURITY -- rejected protected destination $rawSave"
+        return $null
+    }
+    if ($rel.SizeBytes -gt 0 -and (Test-EggmanDatZip -Path $rawSave -ExpectedBytes $rel.SizeBytes)) {
         Write-Host "  Existing Eggman dat ZIP already matches the release size. Reusing it." -ForegroundColor Green
         Write-Log "EggmanDat: existing ZIP matches release size; download skipped."
         return $rawSave
@@ -12176,9 +12258,16 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
     Write-Host "  community game-recognition project (Eggman's Repository) -- a" -ForegroundColor DarkCyan
     Write-Host "  trusted third-party maintainer's index project, not a game-file" -ForegroundColor DarkCyan
     Write-Host "  source." -ForegroundColor DarkCyan
+    Write-Host "  This recognition data is separate from TeknoParrot's ParrotData.xml" -ForegroundColor DarkCyan
+    Write-Host "  and its DAT/XML setting. It is also separate from your main game ZIPs," -ForegroundColor DarkCyan
+    Write-Host "  supplementary game ZIPs, and the staging/install folder." -ForegroundColor DarkCyan
+    $eggmanDefaultRoot = Get-EggmanDatDataRoot
+    if ($eggmanDefaultRoot) {
+        Write-Host ("  TPM will normally store a downloaded copy under: {0}" -f $eggmanDefaultRoot) -ForegroundColor DarkCyan
+    }
     Write-Host "  Without one, a few games may need registering by hand instead." -ForegroundColor DarkCyan
-    Write-Host "    D) Download the latest from Eggman's Repository  (~145 MB)"
-    Write-Host "    B) Browse for a ZIP or dat file I already have"
+    Write-Host "    D) Download the latest from Eggman's Repository  (~145 MB; TPM chooses the safe data location)"
+    Write-Host "    B) Browse/import a ZIP or dat file I already have"
     Write-Host "    N) Skip (not recommended)"
     $datChoice = (Read-HostSafe "  Choice (D/B/N, default D)" -Default 'D').ToUpper()
     $raw = ''   # shared path variable for B and the download-fallback path
@@ -12212,8 +12301,13 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
             if (Test-Path -LiteralPath $raw) {
                 $ext = [System.IO.Path]::GetExtension($raw).ToLower()
                 if ($ext -eq '.zip') {
-                    $eggmanDatZip = $raw
-                    Write-Log "EggmanDat: ZIP configured at $raw"
+                    if (Test-EggmanDatZip -Path $raw) {
+                        $eggmanDatZip = $raw
+                        Write-Log "EggmanDat: ZIP configured at $raw"
+                    } else {
+                        Write-Host "  WARNING: ZIP is not a readable Eggman archive with a collection DAT -- dat skipped." -ForegroundColor Yellow
+                        Write-Log "EggmanDat: ZIP validation failed at $raw -- skipped."
+                    }
                 } elseif ($ext -eq '.dat') {
                     $datFilePath = $raw
                     Write-Log "Config: datFilePath set to $raw"
@@ -12311,7 +12405,7 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
                 }
                 $doUpdate = (Read-HostSafe "  Download and switch to the latest release? (Y/N)").ToUpper()
                 if ($doUpdate -eq 'Y') {
-                    $savedPath = Invoke-EggmanDatDownloadInteractive $rel
+                    $savedPath = Invoke-EggmanDatDownloadInteractive $rel -AllowBrowse -PreferredSavePath $eggmanDatZip
                     if ($savedPath) {
                         $eggmanDatZip = $savedPath
                         $eggmanDatActionThisRun = 'Updated'
