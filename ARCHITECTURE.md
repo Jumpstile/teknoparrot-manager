@@ -834,15 +834,37 @@ itself, so this engine deliberately never does.
   `GamePath`, and does that `GamePath` still point at a real file.
 - **Controls**: `Verified`, `NotVerified`, `Missing`, `Unsupported`,
   `Unknown` -- from whichever profile document exists on disk (the real
-  UserProfile if registered, otherwise the read-only GameProfiles template).
-  `Unsupported` means the profile defines zero `JoystickButtons` nodes;
-  `Missing` means buttons are defined but none are bound; `NotVerified`
-  means at least one is bound. `Unknown` means neither document could be
-  read. **`Verified` is never assigned by this engine** -- confirming a
-  control actually works requires real evidence (an observed successful
-  test) that a static read-only pass cannot manufacture. Registration,
-  wizard completion, a selected Input API, or a profile's mere existence are
-  explicitly not allowed to imply it (issue #255's own wording).
+  UserProfile if registered, otherwise the read-only GameProfiles template),
+  evaluated against an **authoritative requirements catalog**
+  (`Get-ControlReadinessKnownRequirements`), never from raw document
+  structure alone. A second review round on PR #258 found the original
+  version inferred requiredness structurally -- "zero button nodes" as
+  `Unsupported`, "zero bound" as `Missing`, "any bound" as `NotVerified` --
+  which meant an arbitrary or malformed profile could walk through states
+  it had no authoritative right to. The classifier now works like this:
+  - No catalog entry for `$Code`, or the document's `ExecutableName`/
+    `EmulationProfile` don't match what the catalog entry expects (an
+    ambiguous/unverifiable contract) -> **`Unknown`**. Today only `abc`
+    (After Burner Climax) has a catalog entry; every other code is
+    `Unknown` by construction, not by omission.
+  - The document's own `ConfigValues` declare a selected Input API
+    (`FieldValue`) that is absent from its own declared `FieldOptions` --
+    a real, document-declared contract violation, not a guess -> **`Unsupported`**.
+  - Any catalog-required button `InputMapping` is absent from the document,
+    present-but-unbound (per `Test-ButtonIsBound`), or any catalog-required
+    analog `InputMapping` is absent entirely -> **`Missing`**.
+  - Every catalog-required button and analog mapping is present (and, for
+    buttons, bound) -> **`NotVerified`**. This is the ceiling reachable by
+    static evidence: usable, but not a successful bounded control test.
+  **`Verified` is never assigned by this engine** -- confirming a control
+  actually works requires real evidence (an observed successful test) that
+  a static read-only pass cannot manufacture. Registration, wizard
+  completion, a selected Input API, a profile's mere existence, an
+  all-bound profile, or a stored physical-device reference (e.g. a
+  `DirectInputDeviceGuid`) are explicitly not allowed to imply it (issue
+  #255's own wording, and the specific matrix the second review round
+  required -- see `Describe "Control Readiness Engine (issue #255)"`,
+  `Context "Matrix: signals that must not imply Verified"`).
 - **Launch observation**: `NotTestedByTpm`, `ObservedSuccess`,
   `ObservedFailure` -- TPM does not launch games itself (TeknoParrotUI and
   BudgieLoader own that path) and has no launch-outcome log to read today,
@@ -852,12 +874,18 @@ itself, so this engine deliberately never does.
 
 **Functions** (`TeknoParrot-Manager.ps1`, immediately before the interactive
 menu's top-level code): `Get-ControlReadinessRegistrationState`,
-`Get-ControlReadinessControlsState`, `Get-ControlReadinessLaunchState`, and
-`Get-ControlReadinessAssessment` (combines the three into one
-`[pscustomobject]` row: `Code`, `Registration`, `Controls`, `Launch`).
-`Get-ControlReadinessControlsState` reuses `Get-ButtonNodes` /
-`Test-ButtonIsBound`, the same helpers `Write-ControlsStatus` already uses,
-so bound-detection logic has exactly one implementation.
+`Get-ControlReadinessKnownRequirements`, `Get-ControlReadinessControlsState`,
+`Get-ControlReadinessLaunchState`, `Test-ControlReadinessVerificationEvidence`,
+`Get-ControlReadinessSummaryLines`, and `Get-ControlReadinessAssessment`
+(combines the three dimensions into one `[pscustomobject]` row: `Code`,
+`Registration`, `Controls`, `Launch`). `Get-ControlReadinessControlsState`
+reuses `Get-ButtonNodes` / `Test-ButtonIsBound`, the same helpers
+`Write-ControlsStatus` already uses, so bound-detection logic has exactly
+one implementation. `Get-ControlReadinessKnownRequirements` builds its tiny
+catalog inline on every call (not as a top-level script variable) so the
+Pester harness's function-body AST extraction -- which only picks up
+function definitions, not top-level script-scope variables -- includes it
+automatically.
 
 **Hard constraints** (do not weaken without an explicit CLAUDE.md /
 ARCHITECTURE.md update and sign-off): never writes a UserProfile or

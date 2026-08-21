@@ -11370,21 +11370,131 @@ function Get-ControlReadinessRegistrationState {
     return 'Registered'
 }
 
-# Classifies controls state from an already-loaded profile [xml] document
-# (either a real UserProfile or a read-only GameProfiles template). Returns
-# 'Missing', 'Unsupported', 'NotVerified', or 'Unknown'. 'Verified' is
-# intentionally unreachable here -- see the section header above.
-function Get-ControlReadinessControlsState {
-    param($doc)
+# Returns the authoritative required-control specification for one profile
+# code, or $null when this engine has no such specification. This is a
+# deliberately tiny, hand-curated catalog -- issue #255's own investigation
+# (After Burner Climax / abc, upstream teknogods/TeknoParrotUI GameProfiles
+# revision 22) is the only source of truth populated so far. A profile code
+# with no entry here returns $null on purpose: Get-ControlReadinessControlsState
+# must not infer requiredness from whatever nodes happen to be present in an
+# arbitrary document, so an unrecognized code always falls through to
+# 'Unknown' rather than guessing from structure. Built inline (not as a
+# top-level script variable) so the Pester harness's function-body AST
+# extraction picks it up automatically.
+function Get-ControlReadinessKnownRequirements {
+    param([string]$Code)
 
+    if ([string]::IsNullOrWhiteSpace($Code)) { return $null }
+
+    $catalog = @{
+        'abc' = [pscustomobject]@{
+            # Cross-checked against the document before requirements are
+            # trusted -- see the "ambiguous contract" branch below. A code
+            # match alone is not enough; the document must actually look
+            # like the profile this catalog entry describes.
+            ExpectedExecutableName   = 'abc'
+            ExpectedEmulationProfile = 'AfterBurnerClimax'
+            # InputMapping values for Start, Gun Trigger, Missile Trigger,
+            # Climax Switch -- the confirmed required digital controls from
+            # the published abc.xml.
+            RequiredButtons = @('P1ButtonStart', 'P1Button1', 'P1Button2', 'P1Button3')
+            # InputMapping values for Joystick Analog X/Y and Throttle Lever.
+            RequiredAnalogs = @('Analog0', 'Analog2', 'Analog4')
+        }
+    }
+
+    $key = $Code.ToLowerInvariant()
+    if ($catalog.ContainsKey($key)) { return $catalog[$key] }
+    return $null
+}
+
+# Classifies controls state from an already-loaded profile [xml] document
+# (either a real UserProfile or a read-only GameProfiles template), using
+# the authoritative requirements for $Code. Returns 'Missing', 'Unsupported',
+# 'NotVerified', or 'Unknown'. 'Verified' is intentionally unreachable here
+# -- see the section header above.
+#
+# This deliberately does NOT use raw structural presence as evidence:
+#   - "button nodes exist" does not mean the profile is supported;
+#   - "no button nodes" does not mean the profile is unsupported;
+#   - "some/all buttons bound" does not mean requirements are met or that
+#     controls were ever tested.
+# Every branch below requires either a positive match against the known
+# requirements catalog (Missing/NotVerified) or positive evidence drawn
+# from the document's own declared contract (Unsupported -- a selected
+# Input API that isn't among the profile's own FieldOptions). Without a
+# catalog entry, or without the document matching that entry's expected
+# shape, the honest answer is 'Unknown', not a guess.
+function Get-ControlReadinessControlsState {
+    param(
+        [Parameter(Position = 0)]$doc = $null,
+        [Parameter(Position = 1)][string]$Code = ''
+    )
+
+    $requirements = Get-ControlReadinessKnownRequirements -Code $Code
+    if ($null -eq $requirements) { return 'Unknown' }
     if ($null -eq $doc -or $null -eq $doc.GameProfile) { return 'Unknown' }
 
+    # Ambiguous/unverifiable profile contract: the code matched the catalog,
+    # but the document's own declared identity does not match what that
+    # catalog entry describes. The requirements might not even apply to
+    # this document, so nothing below can be trusted as authoritative.
+    $execNode = $doc.GameProfile.SelectSingleNode('ExecutableName')
+    $emuNode  = $doc.GameProfile.SelectSingleNode('EmulationProfile')
+    $execName = if ($execNode) { $execNode.InnerText.Trim() } else { '' }
+    $emuName  = if ($emuNode) { $emuNode.InnerText.Trim() } else { '' }
+    if ($execName -ne $requirements.ExpectedExecutableName -or
+        $emuName  -ne $requirements.ExpectedEmulationProfile) {
+        return 'Unknown'
+    }
+
+    # Positive unsupported evidence: the profile's own ConfigValues declare
+    # which Input API values it supports (FieldOptions); a selected
+    # FieldValue outside that set is a real, document-declared contract
+    # violation -- not a heuristic guess about what "should" be supported.
+    $inputApiField = $doc.GameProfile.SelectSingleNode("ConfigValues/FieldInformation[FieldName='Input API']")
+    if ($inputApiField) {
+        $selected = $inputApiField.SelectSingleNode('FieldValue')
+        $optionsNode = $inputApiField.SelectSingleNode('FieldOptions')
+        if ($selected -and -not [string]::IsNullOrWhiteSpace($selected.InnerText) -and $optionsNode) {
+            $options = @($optionsNode.SelectNodes('string') | ForEach-Object { $_.InnerText.Trim() })
+            if ($options.Count -gt 0 -and ($options -notcontains $selected.InnerText.Trim())) {
+                return 'Unsupported'
+            }
+        }
+    }
+
     $btns = @(Get-ButtonNodes $doc)
-    if ($btns.Count -eq 0) { return 'Unsupported' }
+    $byMapping = @{}
+    foreach ($b in $btns) {
+        $imNode = $b.SelectSingleNode('InputMapping')
+        if ($imNode -and -not [string]::IsNullOrWhiteSpace($imNode.InnerText)) {
+            $byMapping[$imNode.InnerText.Trim()] = $b
+        }
+    }
 
-    $bound = @($btns | Where-Object { Test-ButtonIsBound $_ }).Count
-    if ($bound -eq 0) { return 'Missing' }
+    foreach ($required in $requirements.RequiredButtons) {
+        if (-not $byMapping.ContainsKey($required)) { return 'Missing' }
+        if (-not (Test-ButtonIsBound $byMapping[$required])) { return 'Missing' }
+    }
+    foreach ($required in $requirements.RequiredAnalogs) {
+        # There is no established "analog is bound" signal anywhere in this
+        # codebase (Test-ButtonIsBound only covers digital Raw/DirectInput/
+        # XInputButton nodes) -- whether an analog axis is actually wired to
+        # a working physical device is a real-evidence question this static
+        # pass cannot answer. Presence of the required mapping slot is the
+        # only authoritative structural fact available; its absence is
+        # unambiguous evidence of Missing.
+        if (-not $byMapping.ContainsKey($required)) { return 'Missing' }
+    }
 
+    # Every known-required control is present and (for digital buttons)
+    # bound. That is usable static evidence, but it is not a successful
+    # bounded control test or a verification record -- see
+    # Test-ControlReadinessVerificationEvidence. Stored device references
+    # (e.g. a DirectInputDeviceGuid) or a fully-bound-beyond-requirements
+    # profile do not change this outcome; there is no threshold that
+    # promotes structural completeness to Verified.
     return 'NotVerified'
 }
 
@@ -11435,7 +11545,7 @@ function Get-ControlReadinessAssessment {
     return [pscustomobject]@{
         Code         = $Code
         Registration = $registration
-        Controls     = Get-ControlReadinessControlsState $doc
+        Controls     = Get-ControlReadinessControlsState $doc $Code
         Launch       = Get-ControlReadinessLaunchState -Code $Code
     }
 }

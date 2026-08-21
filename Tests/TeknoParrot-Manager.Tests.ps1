@@ -1041,30 +1041,73 @@ Describe "Control Readiness Engine (issue #255)" {
     # (teknogods/TeknoParrotUI GameProfiles/abc.xml, revision 22): Input API
     # field plus the confirmed required input families -- Start, analog
     # Joystick X/Y, Throttle Lever, Gun Trigger, Missile Trigger, Climax
-    # Switch. $BoundInputMapping controls which single slot (if any) carries a
-    # real binding, so each test can move between Missing/NotVerified without
-    # duplicating the whole button block.
+    # Switch -- matching Get-ControlReadinessKnownRequirements's 'abc' entry
+    # exactly. $BoundButtonMappings controls which digital button slots carry
+    # a real binding; $OmitAnalog4/$OmitButton2 drop a required mapping
+    # entirely so tests can exercise "required control absent" (Missing)
+    # distinctly from "required control present but unbound" (also Missing).
     function New-AbcFixtureXml {
         param(
             [string]$GamePath = '',
-            [string]$BoundInputMapping = ''
+            [string[]]$BoundButtonMappings = @(),
+            [string]$InputApiValue = 'DirectInput',
+            [string[]]$InputApiOptions = @('DirectInput', 'XInput'),
+            [switch]$OmitAnalog4,
+            [switch]$OmitButton2,
+            [switch]$IncludeDeviceGuid,
+            [string]$EmulationProfile = 'AfterBurnerClimax',
+            [string]$ExecutableName = 'abc',
+            [switch]$FirstTimeSetupComplete
         )
-        $startBinding = if ($BoundInputMapping -eq 'P1ButtonStart') { '<DirectInputButton>2</DirectInputButton>' } else { '' }
-        $gunBinding   = if ($BoundInputMapping -eq 'P1Button1')     { '<DirectInputButton>0</DirectInputButton>' } else { '' }
+
+        function New-BindingXml([string]$Mapping, [int]$Slot) {
+            if ($BoundButtonMappings -notcontains $Mapping) { return '' }
+            $guid = if ($IncludeDeviceGuid) { "`n            <DirectInputDeviceGuid>{9e573edb-2130-11ec-8001-444553540000}</DirectInputDeviceGuid>" } else { '' }
+            return "<DirectInputButton>$Slot</DirectInputButton>$guid"
+        }
+
+        $startBinding   = New-BindingXml 'P1ButtonStart' 2
+        $gunBinding     = New-BindingXml 'P1Button1' 0
+        $missileBinding = New-BindingXml 'P1Button2' 1
+        $climaxBinding  = New-BindingXml 'P1Button3' 3
+
+        $optionsXml = ($InputApiOptions | ForEach-Object { "<string>$_</string>" }) -join ''
+        $firstTimeXml = if ($FirstTimeSetupComplete) { '<FirstTimeSetupComplete>true</FirstTimeSetupComplete>' } else { '' }
+
+        $analog4Block = if ($OmitAnalog4) { '' } else {
+@"
+        <JoystickButtons>
+            <ButtonName>Throttle Lever</ButtonName>
+            <InputMapping>Analog4</InputMapping>
+            <AnalogType>SWThrottle</AnalogType>
+        </JoystickButtons>
+"@
+        }
+        $button2Block = if ($OmitButton2) { '' } else {
+@"
+        <JoystickButtons>
+            <ButtonName>Missile Trigger</ButtonName>
+            <InputMapping>P1Button2</InputMapping>
+            $missileBinding
+        </JoystickButtons>
+"@
+        }
+
         return @"
 <GameProfile>
     <GamePath>$GamePath</GamePath>
-    <EmulationProfile>AfterBurnerClimax</EmulationProfile>
+    <EmulationProfile>$EmulationProfile</EmulationProfile>
     <GameProfileRevision>22</GameProfileRevision>
-    <ExecutableName>abc</ExecutableName>
+    <ExecutableName>$ExecutableName</ExecutableName>
     <EmulatorType>Lindbergh</EmulatorType>
+    $firstTimeXml
     <ConfigValues>
         <FieldInformation>
             <CategoryName>General</CategoryName>
             <FieldName>Input API</FieldName>
-            <FieldValue>DirectInput</FieldValue>
+            <FieldValue>$InputApiValue</FieldValue>
             <FieldType>Dropdown</FieldType>
-            <FieldOptions><string>DirectInput</string><string>XInput</string></FieldOptions>
+            <FieldOptions>$optionsXml</FieldOptions>
         </FieldInformation>
     </ConfigValues>
     <JoystickButtons>
@@ -1083,28 +1126,26 @@ Describe "Control Readiness Engine (issue #255)" {
             <InputMapping>Analog2</InputMapping>
             <AnalogType>AnalogJoystickReverse</AnalogType>
         </JoystickButtons>
-        <JoystickButtons>
-            <ButtonName>Throttle Lever</ButtonName>
-            <InputMapping>Analog4</InputMapping>
-            <AnalogType>SWThrottle</AnalogType>
-        </JoystickButtons>
+$analog4Block
         <JoystickButtons>
             <ButtonName>Gun Trigger</ButtonName>
             <InputMapping>P1Button1</InputMapping>
             $gunBinding
         </JoystickButtons>
-        <JoystickButtons>
-            <ButtonName>Missile Trigger</ButtonName>
-            <InputMapping>P1Button2</InputMapping>
-        </JoystickButtons>
+$button2Block
         <JoystickButtons>
             <ButtonName>Climax Switch</ButtonName>
             <InputMapping>P1Button3</InputMapping>
+            $climaxBinding
         </JoystickButtons>
     </JoystickButtons>
 </GameProfile>
 "@
     }
+
+    # Every required button mapping, for tests that need the "structurally
+    # complete" abc fixture (splat as -BoundButtonMappings $AbcRequiredButtons).
+    $script:AbcRequiredButtons = @('P1ButtonStart', 'P1Button1', 'P1Button2', 'P1Button3')
     }
 
     Context "Get-ControlReadinessRegistrationState" {
@@ -1147,28 +1188,36 @@ Describe "Control Readiness Engine (issue #255)" {
 
     Context "Get-ControlReadinessControlsState" {
         It "returns Unknown when there is no document to read" {
-            Get-ControlReadinessControlsState $null | Should -Be 'Unknown'
+            Get-ControlReadinessControlsState $null 'abc' | Should -Be 'Unknown'
         }
 
-        It "returns Unsupported when the profile defines no JoystickButtons at all" {
+        It "returns Unknown for a profile code with no authoritative requirements catalog entry" {
+            # A profile this engine knows nothing about must never be classified
+            # from raw structure -- "no button nodes" is not evidence of
+            # Unsupported without a requirements catalog to check it against.
             $doc = [xml]"<GameProfile><GamePath></GamePath></GameProfile>"
-            Get-ControlReadinessControlsState $doc | Should -Be 'Unsupported'
+            Get-ControlReadinessControlsState $doc 'someUnknownProfileCode' | Should -Be 'Unknown'
         }
 
-        It "returns Missing when every defined button is unbound (the abc template as shipped)" {
+        It "returns Unknown when no code is supplied at all (legacy positional call)" {
             $doc = [xml](New-AbcFixtureXml)
-            Get-ControlReadinessControlsState $doc | Should -Be 'Missing'
+            Get-ControlReadinessControlsState $doc | Should -Be 'Unknown'
         }
 
-        It "returns NotVerified when at least one button is bound, without claiming Verified" {
-            $doc = [xml](New-AbcFixtureXml -BoundInputMapping 'P1ButtonStart')
-            Get-ControlReadinessControlsState $doc | Should -Be 'NotVerified'
+        It "returns Missing when every required button is unbound (the abc template as shipped)" {
+            $doc = [xml](New-AbcFixtureXml)
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'Missing'
+        }
+
+        It "returns NotVerified once every required button and analog mapping is present and bound, without claiming Verified" {
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons)
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'NotVerified'
         }
 
         It "never returns Verified -- this engine has no evidence source that could earn it" {
-            $doc = [xml](New-AbcFixtureXml -BoundInputMapping 'P1ButtonStart')
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons)
             $states = @('Missing', 'Unsupported', 'NotVerified', 'Unknown')
-            $states | Should -Contain (Get-ControlReadinessControlsState $doc)
+            $states | Should -Contain (Get-ControlReadinessControlsState $doc 'abc')
         }
     }
 
@@ -1190,7 +1239,7 @@ Describe "Control Readiness Engine (issue #255)" {
             $realExe = Join-Path $userProfilesDir 'abc.exe'
             Set-Content -LiteralPath $realExe -Value 'stub' -Encoding utf8
             Set-Content -LiteralPath (Join-Path $userProfilesDir 'abc.xml') `
-                -Value (New-AbcFixtureXml -GamePath $realExe -BoundInputMapping 'P1ButtonStart') -Encoding utf8
+                -Value (New-AbcFixtureXml -GamePath $realExe -BoundButtonMappings $AbcRequiredButtons) -Encoding utf8
 
             $result = Get-ControlReadinessAssessment -Code 'abc' -UserProfilesDir $userProfilesDir -GameProfilesDir $gameProfilesDir
 
@@ -1217,7 +1266,7 @@ Describe "Control Readiness Engine (issue #255)" {
 
         It "keeps Registration=Broken independent of Controls -- a broken GamePath does not force Controls to Unknown" {
             Set-Content -LiteralPath (Join-Path $userProfilesDir 'abc.xml') `
-                -Value (New-AbcFixtureXml -GamePath (Join-Path $userProfilesDir 'missing.exe') -BoundInputMapping 'P1ButtonStart') -Encoding utf8
+                -Value (New-AbcFixtureXml -GamePath (Join-Path $userProfilesDir 'missing.exe') -BoundButtonMappings $AbcRequiredButtons) -Encoding utf8
 
             $result = Get-ControlReadinessAssessment -Code 'abc' -UserProfilesDir $userProfilesDir -GameProfilesDir $gameProfilesDir
 
@@ -1229,7 +1278,7 @@ Describe "Control Readiness Engine (issue #255)" {
             $realExe = Join-Path $userProfilesDir 'abc.exe'
             Set-Content -LiteralPath $realExe -Value 'stub' -Encoding utf8
             $profilePath = Join-Path $userProfilesDir 'abc.xml'
-            Set-Content -LiteralPath $profilePath -Value (New-AbcFixtureXml -GamePath $realExe -BoundInputMapping 'P1ButtonStart') -Encoding utf8
+            Set-Content -LiteralPath $profilePath -Value (New-AbcFixtureXml -GamePath $realExe -BoundButtonMappings $AbcRequiredButtons) -Encoding utf8
             $before = Get-Content -LiteralPath $profilePath -Raw
             $beforeWriteTime = (Get-Item -LiteralPath $profilePath).LastWriteTimeUtc
 
@@ -1373,57 +1422,67 @@ Describe "Control Readiness Engine (issue #255)" {
         }
     }
 
-    Context "Matrix: signals that must not imply Verified (Codex review, issue #255)" {
-        It "first-run state (wizard-completed, template-shaped, nothing bound) does not imply Verified" {
-            # Mirrors the #255 evidence session: TeknoParrotUI's first-run wizard
-            # marked its controls step complete with no mapping screen opened, so
-            # the on-disk shape is indistinguishable from the shipped template --
-            # every button defined, none bound.
-            $doc = [xml](New-AbcFixtureXml)
-            Get-ControlReadinessControlsState $doc | Should -Not -Be 'Verified'
-            Get-ControlReadinessControlsState $doc | Should -Be 'Missing'
+    Context "Matrix: authoritative requiredness and signals that must not imply Verified (Codex review, issue #255)" {
+        It "ABC with every authoritative required control present and bound but untested -> NotVerified" {
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons)
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'NotVerified'
         }
 
-        It "an all-bound profile does not imply Verified -- binding is not the same as testing" {
-            $allBoundXml = @"
-<GameProfile>
-    <GamePath></GamePath>
-    <JoystickButtons>
-        <JoystickButtons><ButtonName>Start</ButtonName><InputMapping>P1ButtonStart</InputMapping><DirectInputButton>2</DirectInputButton></JoystickButtons>
-        <JoystickButtons><ButtonName>Gun Trigger</ButtonName><InputMapping>P1Button1</InputMapping><DirectInputButton>0</DirectInputButton></JoystickButtons>
-        <JoystickButtons><ButtonName>Missile Trigger</ButtonName><InputMapping>P1Button2</InputMapping><DirectInputButton>1</DirectInputButton></JoystickButtons>
-        <JoystickButtons><ButtonName>Climax Switch</ButtonName><InputMapping>P1Button3</InputMapping><DirectInputButton>3</DirectInputButton></JoystickButtons>
-    </JoystickButtons>
-</GameProfile>
-"@
-            $doc = [xml]$allBoundXml
-            # Every single button is bound (100%) -- there is no bound-count
-            # threshold anywhere in the engine that promotes this to Verified.
-            Get-ControlReadinessControlsState $doc | Should -Be 'NotVerified'
-            Get-ControlReadinessControlsState $doc | Should -Not -Be 'Verified'
+        It "ABC missing a known required analog mapping (Throttle Lever, Analog4) -> Missing" {
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons -OmitAnalog4)
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'Missing'
         }
 
-        It "a stored physical device reference (DirectInput GUID) does not imply device presence or Verified" {
-            $deviceReferencedXml = @"
-<GameProfile>
-    <GamePath></GamePath>
-    <JoystickButtons>
-        <JoystickButtons>
-            <ButtonName>Start</ButtonName>
-            <InputMapping>P1ButtonStart</InputMapping>
-            <DirectInputButton>2</DirectInputButton>
-            <DirectInputDeviceGuid>{9e573edb-2130-11ec-8001-444553540000}</DirectInputDeviceGuid>
-        </JoystickButtons>
-        <JoystickButtons><ButtonName>Gun Trigger</ButtonName><InputMapping>P1Button1</InputMapping></JoystickButtons>
-    </JoystickButtons>
-</GameProfile>
-"@
-            $doc = [xml]$deviceReferencedXml
+        It "ABC missing a known required button mapping (Missile Trigger, P1Button2) -> Missing" {
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings @('P1ButtonStart', 'P1Button1', 'P1Button3') -OmitButton2)
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'Missing'
+        }
+
+        It "ABC complete plus stored device references only -> NotVerified or Unknown, never Verified" {
             # A stored device GUID is a config value on disk, not evidence the
             # device is physically connected or that the mapping was ever
-            # exercised -- it must still land on NotVerified, never Verified.
-            Get-ControlReadinessControlsState $doc | Should -Be 'NotVerified'
-            Get-ControlReadinessControlsState $doc | Should -Not -Be 'Verified'
+            # exercised.
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons -IncludeDeviceGuid)
+            $result = Get-ControlReadinessControlsState $doc 'abc'
+            $result | Should -BeIn @('NotVerified', 'Unknown')
+            $result | Should -Not -Be 'Verified'
+        }
+
+        It "ABC all-bound / threshold-like profile -> NotVerified, never Verified" {
+            # Mirrors the #255 evidence session: TeknoParrotUI's first-run wizard
+            # marked its controls step complete with no mapping screen opened.
+            # Whether every button happens to be bound or none are, there is no
+            # bound-count threshold anywhere in the engine that promotes
+            # structural completeness to Verified.
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons)
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'NotVerified'
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Not -Be 'Verified'
+        }
+
+        It "ABC with an ambiguous/mismatched profile contract -> Unknown" {
+            # Code 'abc' matches the catalog, but the document's own declared
+            # EmulationProfile does not match what that catalog entry
+            # describes -- the requirements might not even apply here, so
+            # nothing about this document can be classified authoritatively.
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons -EmulationProfile 'SomeOtherGame')
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'Unknown'
+        }
+
+        It "ABC with positive unsupported/incompatible API evidence -> Unsupported" {
+            # The document's own FieldOptions declare only DirectInput/XInput
+            # as supported; a selected FieldValue outside that set is a real,
+            # document-declared contract violation, not a heuristic guess.
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons -InputApiValue 'RawInput' -InputApiOptions @('DirectInput', 'XInput'))
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'Unsupported'
+        }
+
+        It "FirstTimeSetupComplete = true does not upgrade controls state" {
+            $incomplete = [xml](New-AbcFixtureXml -FirstTimeSetupComplete)
+            Get-ControlReadinessControlsState $incomplete 'abc' | Should -Be 'Missing'
+
+            $complete = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons -FirstTimeSetupComplete)
+            Get-ControlReadinessControlsState $complete 'abc' | Should -Be 'NotVerified'
+            Get-ControlReadinessControlsState $complete 'abc' | Should -Not -Be 'Verified'
         }
     }
 
@@ -1435,6 +1494,7 @@ Describe "Control Readiness Engine (issue #255)" {
 
         It "defines every expected control-readiness function exactly once" -TestCases (
             @('Get-ControlReadinessRegistrationState',
+              'Get-ControlReadinessKnownRequirements',
               'Get-ControlReadinessControlsState',
               'Get-ControlReadinessLaunchState',
               'Get-ControlReadinessAssessment',
@@ -1450,6 +1510,7 @@ Describe "Control Readiness Engine (issue #255)" {
 
         It "never calls a write-capable mapping/configuration path from any control-readiness function" -TestCases (
             @('Get-ControlReadinessRegistrationState',
+              'Get-ControlReadinessKnownRequirements',
               'Get-ControlReadinessControlsState',
               'Get-ControlReadinessLaunchState',
               'Get-ControlReadinessAssessment',
