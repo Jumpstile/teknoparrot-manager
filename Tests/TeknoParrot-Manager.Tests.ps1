@@ -7705,8 +7705,10 @@ Describe "Get-CompatibilityWarnings -- BiosMissing (issue #85 tier 1)" {
     It "reports nothing when both required BIOS files are present" {
         $root = Join-Path $TestDrive ("bios-present-" + [guid]::NewGuid().ToString('N'))
         $userProfilesDir = Join-Path $root 'UserProfiles'
+        $pcsx2Dir = Join-Path $root 'pcsx2x6'
         $biosDir = Join-Path $root 'pcsx2x6\TeknoParrot\bios'
-        New-Item -ItemType Directory -Path $userProfilesDir, $biosDir -Force | Out-Null
+        New-Item -ItemType Directory -Path $userProfilesDir, $pcsx2Dir, $biosDir -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $pcsx2Dir 'pcsx2-qtx64.exe') -Force | Out-Null
         New-Item -ItemType File -Path (Join-Path $biosDir '27v1602T.d') -Force | Out-Null
         New-Item -ItemType File -Path (Join-Path $biosDir '27v1602F.bg') -Force | Out-Null
         New-Pcsx2UserProfile -Path (Join-Path $userProfilesDir 'BLOODYROAR3.xml')
@@ -7718,8 +7720,10 @@ Describe "Get-CompatibilityWarnings -- BiosMissing (issue #85 tier 1)" {
     It "reports a BiosMissing entry with correct MissingFiles and AffectedGames when firmware is absent" {
         $root = Join-Path $TestDrive ("bios-missing-" + [guid]::NewGuid().ToString('N'))
         $userProfilesDir = Join-Path $root 'UserProfiles'
+        $pcsx2Dir = Join-Path $root 'pcsx2x6'
         New-Item -ItemType Directory -Path $userProfilesDir -Force | Out-Null
-        New-Item -ItemType Directory -Path (Join-Path $root 'pcsx2x6') -Force | Out-Null
+        New-Item -ItemType Directory -Path $pcsx2Dir -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $pcsx2Dir 'pcsx2-qtx64.exe') -Force | Out-Null
         New-Pcsx2UserProfile -Path (Join-Path $userProfilesDir 'BLOODYROAR3.xml')
 
         $result = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $root
@@ -7734,8 +7738,10 @@ Describe "Get-CompatibilityWarnings -- BiosMissing (issue #85 tier 1)" {
     It "reports one entry (not duplicated) covering multiple registered pcsx2x6 games" {
         $root = Join-Path $TestDrive ("bios-multi-" + [guid]::NewGuid().ToString('N'))
         $userProfilesDir = Join-Path $root 'UserProfiles'
+        $pcsx2Dir = Join-Path $root 'pcsx2x6'
         New-Item -ItemType Directory -Path $userProfilesDir -Force | Out-Null
-        New-Item -ItemType Directory -Path (Join-Path $root 'pcsx2x6') -Force | Out-Null
+        New-Item -ItemType Directory -Path $pcsx2Dir -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $pcsx2Dir 'pcsx2-qtx64.exe') -Force | Out-Null
         New-Pcsx2UserProfile -Path (Join-Path $userProfilesDir 'BLOODYROAR3.xml')
         New-Pcsx2UserProfile -Path (Join-Path $userProfilesDir 'BLOODYROAR4.xml')
 
@@ -7747,8 +7753,10 @@ Describe "Get-CompatibilityWarnings -- BiosMissing (issue #85 tier 1)" {
     It "reports only the still-missing file when one of the two required files is already present" {
         $root = Join-Path $TestDrive ("bios-partial-" + [guid]::NewGuid().ToString('N'))
         $userProfilesDir = Join-Path $root 'UserProfiles'
+        $pcsx2Dir = Join-Path $root 'pcsx2x6'
         $biosDir = Join-Path $root 'pcsx2x6\TeknoParrot\bios'
-        New-Item -ItemType Directory -Path $userProfilesDir, $biosDir -Force | Out-Null
+        New-Item -ItemType Directory -Path $userProfilesDir, $pcsx2Dir, $biosDir -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $pcsx2Dir 'pcsx2-qtx64.exe') -Force | Out-Null
         New-Item -ItemType File -Path (Join-Path $biosDir '27v1602T.d') -Force | Out-Null
         New-Pcsx2UserProfile -Path (Join-Path $userProfilesDir 'BLOODYROAR3.xml')
 
@@ -7760,8 +7768,10 @@ Describe "Get-CompatibilityWarnings -- BiosMissing (issue #85 tier 1)" {
     It "never reads or modifies the placeholder BIOS files -- existence-only check" {
         $root = Join-Path $TestDrive ("bios-readonly-check-" + [guid]::NewGuid().ToString('N'))
         $userProfilesDir = Join-Path $root 'UserProfiles'
+        $pcsx2Dir = Join-Path $root 'pcsx2x6'
         $biosDir = Join-Path $root 'pcsx2x6\TeknoParrot\bios'
-        New-Item -ItemType Directory -Path $userProfilesDir, $biosDir -Force | Out-Null
+        New-Item -ItemType Directory -Path $userProfilesDir, $pcsx2Dir, $biosDir -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $pcsx2Dir 'pcsx2-qtx64.exe') -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $biosDir '27v1602T.d') -Value 'not real firmware content' -Encoding ascii
         Set-Content -LiteralPath (Join-Path $biosDir '27v1602F.bg') -Value 'not real firmware content' -Encoding ascii
         $beforeT = Get-Content -LiteralPath (Join-Path $biosDir '27v1602T.d') -Raw
@@ -7770,6 +7780,192 @@ Describe "Get-CompatibilityWarnings -- BiosMissing (issue #85 tier 1)" {
         Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $root | Out-Null
 
         (Get-Content -LiteralPath (Join-Path $biosDir '27v1602T.d') -Raw) | Should -Be $beforeT -Because "TPM must never read or modify BIOS file content, only check existence"
+    }
+}
+
+Describe "Get-CompatibilityWarnings -- pcsx2x6 component (issue #254)" {
+    BeforeAll {
+        # The production helper is extracted from the main script into a
+        # $TestDrive file by the outer harness. Mirror the repository-shaped
+        # ECVF tree beside that extracted file so its $PSScriptRoot-anchored
+        # contract lookup consults the real detector and contract.
+        New-Item -ItemType Directory -Path (Join-Path $TestDrive 'scripts'), (Join-Path $TestDrive 'contracts\pcsx2x6') -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TPMCertification.Authority.psm1') -Destination (Join-Path $TestDrive 'scripts\TPMCertification.Authority.psm1') -Force
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TPMCertification.Contracts.psm1') -Destination (Join-Path $TestDrive 'scripts\TPMCertification.Contracts.psm1') -Force
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\contract.json') -Destination (Join-Path $TestDrive 'contracts\pcsx2x6\contract.json') -Force
+
+        $script:RawThrillsPathLimits = @{}
+        $script:FileVersionPins = @{}
+        $script:GpuIncompatibleGames = @{}
+        $script:EmulatorBiosRequirements = @{
+            'Pcsx2x6' = @{
+                RelativeDir   = 'TeknoParrot\bios'
+                RequiredFiles = @('27v1602T.d', '27v1602F.bg')
+            }
+        }
+
+        function New-Pcsx2WarningProfile {
+            param([string]$Path, [string]$EmulatorType = 'Pcsx2x6')
+            $safeType = [System.Security.SecurityElement]::Escape($EmulatorType)
+            [xml]$xml = "<GameProfile><EmulatorType>$safeType</EmulatorType><GamePath>C:\Games\game.exe</GamePath></GameProfile>"
+            $xml.Save($Path)
+        }
+
+        function Get-CompatibilityWarningSnapshot {
+            param([string]$Root)
+            $files = @(Get-ChildItem -LiteralPath $Root -File -Force -Recurse -ErrorAction Stop |
+                Sort-Object FullName | ForEach-Object {
+                    [pscustomobject]@{
+                        RelativePath    = $_.FullName.Substring($Root.Length).TrimStart('\')
+                        SHA256          = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+                        LastWriteTimeUtc = $_.LastWriteTimeUtc
+                    }
+                })
+            [pscustomobject]@{ Existed = Test-Path -LiteralPath $Root; FileCount = $files.Count; Files = $files }
+        }
+
+        function Assert-CompatibilityWarningSnapshotUnchanged {
+            param($Before, $After)
+            $After.Existed | Should -Be $Before.Existed
+            $After.FileCount | Should -Be $Before.FileCount
+            for ($i = 0; $i -lt $Before.Files.Count; $i++) {
+                $After.Files[$i].RelativePath | Should -Be $Before.Files[$i].RelativePath
+                $After.Files[$i].SHA256 | Should -Be $Before.Files[$i].SHA256
+                $After.Files[$i].LastWriteTimeUtc | Should -Be $Before.Files[$i].LastWriteTimeUtc
+            }
+        }
+    }
+
+    It "does not report a missing component when the TeknoParrot root is absent" {
+        $userProfilesDir = Join-Path $TestDrive ("exe-no-root-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $userProfilesDir -Force | Out-Null
+        New-Pcsx2WarningProfile -Path (Join-Path $userProfilesDir 'BLOODYROAR3.xml')
+        $missingRoot = Join-Path $TestDrive ("tp-root-absent-" + [guid]::NewGuid().ToString('N'))
+
+        $result = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $missingRoot
+        @($result.ExeMissing) | Should -BeNullOrEmpty
+    }
+
+    It "does not report a missing component when the pcsx2x6 directory is absent" {
+        $root = Join-Path $TestDrive ("exe-no-directory-" + [guid]::NewGuid().ToString('N'))
+        $userProfilesDir = Join-Path $root 'UserProfiles'
+        New-Item -ItemType Directory -Path $userProfilesDir, $root -Force | Out-Null
+        New-Pcsx2WarningProfile -Path (Join-Path $userProfilesDir 'BLOODYROAR3.xml')
+
+        $result = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $root
+        @($result.ExeMissing) | Should -BeNullOrEmpty
+    }
+
+    It "reports the contract-declared component path when pcsx2-qtx64.exe is absent" {
+        $root = Join-Path $TestDrive ("exe-missing-" + [guid]::NewGuid().ToString('N'))
+        $userProfilesDir = Join-Path $root 'UserProfiles'
+        $pcsx2Dir = Join-Path $root 'pcsx2x6'
+        New-Item -ItemType Directory -Path $userProfilesDir, $pcsx2Dir -Force | Out-Null
+        New-Pcsx2WarningProfile -Path (Join-Path $userProfilesDir 'BLOODYROAR3.xml')
+
+        $result = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $root
+        @($result.ExeMissing).Count | Should -Be 1
+        $entry = $result.ExeMissing[0]
+        $entry.EmulatorType | Should -Be 'Pcsx2x6'
+        $entry.DetectorMethod | Should -Be 'PathExists'
+        $entry.DetectorSource | Should -Be 'pcsx2-qtx64.exe'
+        $entry.ExpectedPath | Should -Be (Join-Path $pcsx2Dir 'pcsx2-qtx64.exe')
+        @($entry.AffectedGames) | Should -Contain 'BLOODYROAR3'
+        @($result.BiosMissing) | Should -BeNullOrEmpty -Because 'the missing component warning is sufficient until the emulator is present'
+    }
+
+    It "does not report ExeMissing when the contract-declared executable is present" {
+        $root = Join-Path $TestDrive ("exe-present-" + [guid]::NewGuid().ToString('N'))
+        $userProfilesDir = Join-Path $root 'UserProfiles'
+        $pcsx2Dir = Join-Path $root 'pcsx2x6'
+        New-Item -ItemType Directory -Path $userProfilesDir, $pcsx2Dir -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $pcsx2Dir 'pcsx2-qtx64.exe') -Force | Out-Null
+        New-Pcsx2WarningProfile -Path (Join-Path $userProfilesDir 'BLOODYROAR3.xml')
+
+        $result = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $root
+        @($result.ExeMissing) | Should -BeNullOrEmpty
+    }
+
+    It "keeps pcsx2x6 component detection independent of the BIOS requirement table" {
+        $root = Join-Path $TestDrive ("exe-no-bios-table-" + [guid]::NewGuid().ToString('N'))
+        $userProfilesDir = Join-Path $root 'UserProfiles'
+        $pcsx2Dir = Join-Path $root 'pcsx2x6'
+        New-Item -ItemType Directory -Path $userProfilesDir, $pcsx2Dir -Force | Out-Null
+        New-Pcsx2WarningProfile -Path (Join-Path $userProfilesDir 'BLOODYROAR3.xml')
+        $previousRequirements = $script:EmulatorBiosRequirements
+        try {
+            $script:EmulatorBiosRequirements = @{}
+            $result = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $root
+            @($result.ExeMissing).Count | Should -Be 1
+        } finally {
+            $script:EmulatorBiosRequirements = $previousRequirements
+        }
+    }
+
+    It "does not inspect a different root when the registered profile's emulator type is pcsx2x6" {
+        $actualRoot = Join-Path $TestDrive ("exe-wrong-root-actual-" + [guid]::NewGuid().ToString('N'))
+        $wrongRoot = Join-Path $TestDrive ("exe-wrong-root-passed-" + [guid]::NewGuid().ToString('N'))
+        $userProfilesDir = Join-Path $actualRoot 'UserProfiles'
+        New-Item -ItemType Directory -Path $userProfilesDir, (Join-Path $actualRoot 'pcsx2x6'), $wrongRoot -Force | Out-Null
+        New-Pcsx2WarningProfile -Path (Join-Path $userProfilesDir 'BLOODYROAR3.xml')
+
+        $result = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $wrongRoot
+        @($result.ExeMissing) | Should -BeNullOrEmpty
+    }
+
+    It "does not report a pcsx2x6 component warning for a non-pcsx2x6 profile" {
+        $root = Join-Path $TestDrive ("exe-profile-mismatch-" + [guid]::NewGuid().ToString('N'))
+        $userProfilesDir = Join-Path $root 'UserProfiles'
+        New-Item -ItemType Directory -Path $userProfilesDir, (Join-Path $root 'pcsx2x6') -Force | Out-Null
+        New-Pcsx2WarningProfile -Path (Join-Path $userProfilesDir 'OTHERGAME.xml') -EmulatorType 'OtherEmulator'
+
+        $result = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $root
+        @($result.ExeMissing) | Should -BeNullOrEmpty
+    }
+
+    It "keeps the warning actionable without asserting antivirus causality" {
+        $start = $script:ProductionSource.IndexOf('# -- 8a. Missing emulator component (issue #254)')
+        $end = $script:ProductionSource.IndexOf('# -- 9. Game-specific setup notes', $start)
+        $warningBlock = $script:ProductionSource.Substring($start, $end - $start)
+
+        $warningBlock | Should -Match 'Get-CompatibilityWarnings|ExeMissing'
+        $warningBlock | Should -Match 'ExpectedPath'
+        $warningBlock | Should -Match 'Verify or restore this component through your normal TeknoParrot installation/update process'
+        $warningBlock | Should -Not -Match '(?i)anti[- ]?virus|quarantine'
+    }
+
+    It "keeps component assessment read-only and preserves the complete TP-root snapshot" {
+        $root = Join-Path $TestDrive ("exe-no-write-" + [guid]::NewGuid().ToString('N'))
+        $userProfilesDir = Join-Path $root 'UserProfiles'
+        $gameProfilesDir = Join-Path $root 'GameProfiles'
+        $gameDir = Join-Path $root 'Games\BloodyRoar3'
+        $pcsx2Dir = Join-Path $root 'pcsx2x6'
+        New-Item -ItemType Directory -Path $userProfilesDir, $gameProfilesDir, $gameDir, $pcsx2Dir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $root 'ParrotData.xml') -Value '<ParrotData />' -Encoding ascii
+        Set-Content -LiteralPath (Join-Path $root 'config.ini') -Value 'unchanged' -Encoding ascii
+        Set-Content -LiteralPath (Join-Path $gameProfilesDir 'profile.xml') -Value '<GameProfile />' -Encoding ascii
+        Set-Content -LiteralPath (Join-Path $gameDir 'game.bin') -Value 'game-content' -Encoding ascii
+        New-Pcsx2WarningProfile -Path (Join-Path $userProfilesDir 'BLOODYROAR3.xml')
+
+        $before = Get-CompatibilityWarningSnapshot -Root $root
+        Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $root | Out-Null
+        $after = Get-CompatibilityWarningSnapshot -Root $root
+
+        @($after.Files).Count | Should -Be $before.FileCount
+        Assert-CompatibilityWarningSnapshotUnchanged -Before $before -After $after
+    }
+
+    It "contains no direct write or repair command in the compatibility-warning function" {
+        $tokens = $null
+        $errors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput($script:ProductionSource, [ref]$tokens, [ref]$errors)
+        $errors.Count | Should -Be 0
+        $fnAst = @($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -eq 'Get-CompatibilityWarnings' }, $true))[0]
+        $banned = @('Invoke-ControlPropagation', 'Set-ProfileInputApi', 'Save-XmlMaybe', 'Save-Xml', 'Set-Content', 'Add-Content', 'Out-File', 'New-Item', 'Remove-Item', 'Move-Item', 'Copy-Item')
+        $commands = @($fnAst.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true) | ForEach-Object { $_.GetCommandName() })
+        @($commands | Where-Object { $_ -in $banned }) | Should -BeNullOrEmpty
+        $fnAst.Extent.Text | Should -Not -Match '\[System\.IO\.File\]::(WriteAllText|WriteAllBytes|AppendAllText|Create|Delete|Move|Copy)'
+        $fnAst.Extent.Text | Should -Not -Match 'Invoke-Pcsx2FirstRunSetup|Invoke-TPMEnvironmentInitializationActionV1'
     }
 }
 

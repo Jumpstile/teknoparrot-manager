@@ -8968,12 +8968,13 @@ function Get-GameSetupNotes {
               })
 }
 
-# Read-only scan for all four checks above. Returns
-# [pscustomobject]@{ PathTooLong = @(...); DllMismatch = @(...); GpuIncompatible = @(...); BiosMissing = @(...) }.
+# Read-only scan for all compatibility checks above. Returns
+# [pscustomobject]@{ PathTooLong = @(...); DllMismatch = @(...); GpuIncompatible = @(...); BiosMissing = @(...); ExeMissing = @(...) }.
 # Each PathTooLong entry: @{ Code; Length; Limit; Suggested }.
 # Each DllMismatch entry: @{ Code; FileName; Found; Required }.
 # Each GpuIncompatible entry: @{ Code; Vendor }.
 # Each BiosMissing entry: @{ EmulatorType; ExpectedDir; MissingFiles; AffectedGames }.
+# Each ExeMissing entry: @{ EmulatorType; ExpectedPath; DetectorMethod; DetectorSource; AffectedGames }.
 function Get-CompatibilityWarnings {
     param([string]$UserProfilesDir, [string]$TeknoParrotRoot = '')
 
@@ -8981,6 +8982,7 @@ function Get-CompatibilityWarnings {
     $dllMismatch  = @()
     $gpuIncompatible = @()
     $biosMissing  = @()
+    $exeMissing   = @()
 
     # Best-effort, silent GPU detection -- never prompts. If undetected
     # (or vendor is NVIDIA, which has no known-broken titles here), the
@@ -9050,11 +9052,13 @@ function Get-CompatibilityWarnings {
     # Existence-only check (Test-Path), never reads file content -- TPM
     # never downloads, links, or redistributes these files. Skipped
     # entirely if -TeknoParrotRoot wasn't supplied (backward compatible
-    # with existing callers) or no emulator has a confirmed requirement.
+    # with existing callers). BIOS checks still require a confirmed
+    # requirement, but the pcsx2x6 component check below is independent of
+    # that firmware table.
     # One entry per (EmulatorType, missing-file-set), not per game -- every
     # game sharing that emulator would otherwise produce an identical
     # duplicate warning.
-    if ($TeknoParrotRoot -and $EmulatorBiosRequirements -and $EmulatorBiosRequirements.Count -gt 0) {
+    if ($TeknoParrotRoot) {
         $emulatorGames = @{}
         foreach ($pf in $profiles) {
             try {
@@ -9063,7 +9067,8 @@ function Get-CompatibilityWarnings {
                 $etNode = $doc.GameProfile.SelectSingleNode("EmulatorType")
                 if (-not $etNode) { continue }
                 $emuType = $etNode.InnerText.Trim()
-                if (-not $EmulatorBiosRequirements.ContainsKey($emuType)) { continue }
+                $hasBiosRequirement = $EmulatorBiosRequirements -and $EmulatorBiosRequirements.ContainsKey($emuType)
+                if ($emuType -ne 'Pcsx2x6' -and -not $hasBiosRequirement) { continue }
                 if (-not $emulatorGames.ContainsKey($emuType)) { $emulatorGames[$emuType] = [System.Collections.Generic.List[string]]::new() }
                 $emulatorGames[$emuType].Add($pf.BaseName)
             } catch {
@@ -9072,9 +9077,35 @@ function Get-CompatibilityWarnings {
         }
 
         foreach ($emuType in $emulatorGames.Keys) {
-            $req = $EmulatorBiosRequirements[$emuType]
+            $hasBiosRequirement = $EmulatorBiosRequirements -and $EmulatorBiosRequirements.ContainsKey($emuType)
+            $req = if ($hasBiosRequirement) { $EmulatorBiosRequirements[$emuType] } else { $null }
             $emuDir = if ($emuType -eq 'Pcsx2x6') { Resolve-Pcsx2Directory -TeknoParrotRoot $TeknoParrotRoot } else { $null }
             if (-not $emuDir) { continue }  # emulator folder itself not present -- nothing to check yet
+
+            # Issue #254: use the existing ECVF-backed prerequisite detector as
+            # the source of truth for the contract-declared emulator component.
+            # The directory exists here, so NotInstalled means the presence
+            # detector did not find its declared path. Unknown is deliberately
+            # not converted into a warning: an unavailable or ambiguous
+            # contract cannot establish that a component is missing.
+            $pcsx2State = if ($emuType -eq 'Pcsx2x6') {
+                Get-Pcsx2CrosshairPrerequisiteState -Pcsx2Dir $emuDir
+            } else { $null }
+            $presenceDetector = if ($pcsx2State) { $pcsx2State.EnvironmentCapability.PresenceDetector } else { $null }
+            if ($pcsx2State -and $pcsx2State.State -eq 'NotInstalled' -and
+                $presenceDetector -and $presenceDetector.Method -eq 'PathExists' -and
+                -not [string]::IsNullOrWhiteSpace([string]$presenceDetector.Source)) {
+                $exeMissing += [pscustomobject]@{
+                    EmulatorType   = $emuType
+                    ExpectedPath   = Join-Path $emuDir ([string]$presenceDetector.Source)
+                    DetectorMethod = [string]$presenceDetector.Method
+                    DetectorSource = [string]$presenceDetector.Source
+                    AffectedGames  = @($emulatorGames[$emuType] | Sort-Object)
+                }
+                continue  # do not report secondary BIOS noise when the emulator component is absent
+            }
+
+            if (-not $req) { continue }  # no confirmed BIOS requirement for this emulator
 
             $biosDir = Join-Path $emuDir $req.RelativeDir
             $missing = @($req.RequiredFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path $biosDir $_) -PathType Leaf) })
@@ -9089,7 +9120,7 @@ function Get-CompatibilityWarnings {
         }
     }
 
-    return [pscustomobject]@{ PathTooLong = $pathTooLong; DllMismatch = $dllMismatch; GpuIncompatible = $gpuIncompatible; BiosMissing = $biosMissing }
+    return [pscustomobject]@{ PathTooLong = $pathTooLong; DllMismatch = $dllMismatch; GpuIncompatible = $gpuIncompatible; BiosMissing = $biosMissing; ExeMissing = $exeMissing }
 }
 
 # =============================================================================
@@ -15700,6 +15731,7 @@ $hasAnyAction = ($manualRegData.Count -gt 0) -or ($amb2.Count -gt 0) -or
                 ($compatWarnings.DllMismatch.Count -gt 0) -or
                 ($compatWarnings.GpuIncompatible.Count -gt 0) -or
                 ($compatWarnings.BiosMissing.Count -gt 0) -or
+                ($compatWarnings.ExeMissing.Count -gt 0) -or
                 ($setupNotes.Count -gt 0)
 
 if ($hasAnyAction) {
@@ -15935,6 +15967,25 @@ if ($hasAnyAction) {
         }
     }
 
+    # -- 8a. Missing emulator component (issue #254) --------------------------
+    if ($compatWarnings.ExeMissing.Count -gt 0) {
+        foreach ($e in $compatWarnings.ExeMissing) {
+            Write-Host ""
+            Write-Host ("  {0} EMULATOR COMPONENT NOT FOUND" -f $e.EmulatorType.ToUpper()) -ForegroundColor Yellow
+            Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
+            Write-Host "  A registered game uses this emulator, but the component declared" -ForegroundColor DarkCyan
+            Write-Host "  by its ECVF contract was not found at the expected path below." -ForegroundColor DarkCyan
+            Write-Host "  TPM only checked the contract-declared path; it did not determine why" -ForegroundColor DarkCyan
+            Write-Host "  the file is missing." -ForegroundColor DarkCyan
+            Write-Host ""
+            Write-Host ("  Expected : {0}" -f $e.ExpectedPath) -ForegroundColor Cyan
+            Write-Host ("  Affected : {0}" -f ($e.AffectedGames -join ', ')) -ForegroundColor DarkGray
+            Write-Host "  Action   : Verify or restore this component through your normal TeknoParrot installation/update process, then re-run TPM." -ForegroundColor DarkCyan
+            Write-Host "             TPM does not download, extract, reinstall, or modify TeknoParrot." -ForegroundColor DarkCyan
+            Write-Host ""
+        }
+    }
+
     # -- 9. Game-specific setup notes (informational) -------------------------
     if ($setupNotes.Count -gt 0) {
         Write-Host ""
@@ -16096,6 +16147,21 @@ if ($hasAnyAction) {
             [void]$asb.AppendLine("  Place in : $($b.ExpectedDir)")
             [void]$asb.AppendLine("  Missing  : $($b.MissingFiles -join ', ')")
             [void]$asb.AppendLine("  Affected : $($b.AffectedGames -join ', ')")
+        }
+    }
+    if ($compatWarnings.ExeMissing.Count -gt 0) {
+        foreach ($e in $compatWarnings.ExeMissing) {
+            [void]$asb.AppendLine("")
+            [void]$asb.AppendLine("$($e.EmulatorType.ToUpper()) EMULATOR COMPONENT NOT FOUND")
+            [void]$asb.AppendLine("----------------------------------------------------------")
+            [void]$asb.AppendLine("A registered game uses this emulator, but the component declared")
+            [void]$asb.AppendLine("by its ECVF contract was not found at the expected path below.")
+            [void]$asb.AppendLine("TPM only checked the contract-declared path; it did not determine why")
+            [void]$asb.AppendLine("the file is missing.")
+            [void]$asb.AppendLine("  Expected : $($e.ExpectedPath)")
+            [void]$asb.AppendLine("  Affected : $($e.AffectedGames -join ', ')")
+            [void]$asb.AppendLine("  Action   : Verify or restore this component through your normal TeknoParrot installation/update process, then re-run TPM.")
+            [void]$asb.AppendLine("             TPM does not download, extract, reinstall, or modify TeknoParrot.")
         }
     }
     if ($setupNotes.Count -gt 0) {
