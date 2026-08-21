@@ -876,13 +876,25 @@ required input families (Start, analog Joystick X/Y, Throttle Lever, Gun
 Trigger, Missile Trigger, Climax Switch). See `Tests\TeknoParrot-Manager.Tests.ps1`,
 `Describe "Control Readiness Engine (issue #255)"`.
 
-**Not yet wired up.** This round adds only the pure assessment functions and
-their tests -- no interactive menu entry, no report writer, no change to
-`Register-Games` or `Invoke-ControlPropagation`. Issue #255's own scope is
-evidence-led investigation, not authorization to change TeknoParrot-owned
-state or to decide the eventual UI surface; that is a separate follow-up
-once the investigation's remaining open questions (effective Input API,
-device enumeration, before/after UserProfile comparison) are answered.
+**Display formatting.** `Get-ControlReadinessSummaryLines` turns one
+`Get-ControlReadinessAssessment` row into the exact text lines issue #255's
+candidate pre-1.0 UX specifies (`Game registered successfully` /
+`Controls: Not verified` / `Launch status: Not tested by TPM`, followed by a
+blank line and `Would you like TPM to configure/test controls now?`). It is
+pure string formatting: it never prompts for input and never decides what a
+"yes" answer does. The closing question is included only when `Controls` is
+`NotVerified`, `Missing`, or `Unknown` -- asking again after `Verified`, or
+asking when a profile declares no controls at all (`Unsupported`), would be
+noise rather than the recovery path issue #255 asked for.
+
+**Not yet wired up.** This round adds the pure assessment functions, the
+summary-line formatter, and their tests -- no interactive menu entry, no
+report writer, no change to `Register-Games` or `Invoke-ControlPropagation`.
+Issue #255's own scope is evidence-led investigation, not authorization to
+change TeknoParrot-owned state or to decide the eventual UI surface; that is
+a separate follow-up once the investigation's remaining open questions
+(effective Input API, device enumeration, before/after UserProfile
+comparison) are answered.
 
 ---
 

@@ -11440,6 +11440,53 @@ function Get-ControlReadinessAssessment {
     }
 }
 
+# Formats a Get-ControlReadinessAssessment result into the exact user-facing
+# text issue #255's candidate pre-1.0 UX specifies. Pure string formatting
+# only -- it never prompts, never reads input, and never triggers a
+# configure/test action itself; a future caller decides what happens after
+# the question is shown. Returns a string array, one element per display
+# line (including the blank separator line before the closing question),
+# so a caller can Write-Host each line without re-deriving the wording.
+function Get-ControlReadinessSummaryLines {
+    param([Parameter(Mandatory)]$Assessment)
+
+    $registrationText = switch ($Assessment.Registration) {
+        'Registered'   { 'Game registered successfully' }
+        'Unregistered' { 'Game is not registered' }
+        'Broken'       { 'Game registration is broken' }
+        default        { "Game registration: $($Assessment.Registration)" }
+    }
+
+    $controlsText = switch ($Assessment.Controls) {
+        'Verified'    { 'Controls: Verified' }
+        'NotVerified' { 'Controls: Not verified' }
+        'Missing'     { 'Controls: Missing' }
+        'Unsupported' { 'Controls: Unsupported' }
+        'Unknown'     { 'Controls: Unknown' }
+        default       { "Controls: $($Assessment.Controls)" }
+    }
+
+    $launchText = switch ($Assessment.Launch) {
+        'NotTestedByTpm'  { 'Launch status: Not tested by TPM' }
+        'ObservedSuccess' { 'Launch status: Explicitly observed (success)' }
+        'ObservedFailure' { 'Launch status: Explicitly observed (failure)' }
+        default           { "Launch status: $($Assessment.Launch)" }
+    }
+
+    $lines = @($registrationText, $controlsText, $launchText)
+
+    # Only offer to configure/test controls when there is something left to
+    # verify. Asking again after Verified, or asking when the profile
+    # declares no controls at all (Unsupported), would be noise rather than
+    # the recovery path issue #255 asked for.
+    if ($Assessment.Controls -in @('NotVerified', 'Missing', 'Unknown')) {
+        $lines += ''
+        $lines += 'Would you like TPM to configure/test controls now?'
+    }
+
+    return $lines
+}
+
 Write-Log "Script started (v$ScriptVersion$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================

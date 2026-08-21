@@ -1245,6 +1245,88 @@ Describe "Control Readiness Engine (issue #255)" {
             $result.Controls     | Should -Be 'Unknown'
         }
     }
+
+    Context "Get-ControlReadinessSummaryLines" {
+        It "reproduces the issue #255 candidate pre-1.0 UX exactly for the abc regression fixture" {
+            $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'NotVerified'; Launch = 'NotTestedByTpm' }
+            $lines = Get-ControlReadinessSummaryLines -Assessment $assessment
+            ($lines -join "`n") | Should -Be (@(
+                'Game registered successfully'
+                'Controls: Not verified'
+                'Launch status: Not tested by TPM'
+                ''
+                'Would you like TPM to configure/test controls now?'
+            ) -join "`n")
+        }
+
+        It "omits the configure/test question once controls are Verified" -Skip:$false {
+            $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'Verified'; Launch = 'NotTestedByTpm' }
+            $lines = Get-ControlReadinessSummaryLines -Assessment $assessment
+            $lines | Should -Not -Contain 'Would you like TPM to configure/test controls now?'
+            $lines | Should -Contain 'Controls: Verified'
+        }
+
+        It "omits the configure/test question when the profile has no controls to verify (Unsupported)" {
+            $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'Unsupported'; Launch = 'NotTestedByTpm' }
+            $lines = Get-ControlReadinessSummaryLines -Assessment $assessment
+            $lines | Should -Not -Contain 'Would you like TPM to configure/test controls now?'
+        }
+
+        It "asks the configure/test question for Missing and Unknown controls, same as NotVerified" -TestCases @(
+            @{ Controls = 'Missing' }
+            @{ Controls = 'Unknown' }
+        ) {
+            param($Controls)
+            $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Unregistered'; Controls = $Controls; Launch = 'NotTestedByTpm' }
+            $lines = Get-ControlReadinessSummaryLines -Assessment $assessment
+            $lines | Should -Contain 'Would you like TPM to configure/test controls now?'
+        }
+
+        It "reflects Unregistered and Broken registration text distinctly from Registered" {
+            (Get-ControlReadinessSummaryLines -Assessment ([pscustomobject]@{ Code = 'abc'; Registration = 'Unregistered'; Controls = 'Missing'; Launch = 'NotTestedByTpm' }))[0] | Should -Be 'Game is not registered'
+            (Get-ControlReadinessSummaryLines -Assessment ([pscustomobject]@{ Code = 'abc'; Registration = 'Broken'; Controls = 'Missing'; Launch = 'NotTestedByTpm' }))[0] | Should -Be 'Game registration is broken'
+        }
+    }
+
+    Context "No-write / no-propagation guarantee (AST-verified, issue #255)" {
+        BeforeAll {
+            $script:productionAst = [System.Management.Automation.Language.Parser]::ParseFile(
+                (Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1'), [ref]$null, [ref]$null)
+        }
+
+        It "defines every expected control-readiness function exactly once" -TestCases (
+            @('Get-ControlReadinessRegistrationState',
+              'Get-ControlReadinessControlsState',
+              'Get-ControlReadinessLaunchState',
+              'Get-ControlReadinessAssessment',
+              'Get-ControlReadinessSummaryLines') | ForEach-Object { @{ Name = $_ } }
+        ) {
+            param($Name)
+            $matches = $productionAst.FindAll({
+                $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -eq $Name
+            }, $true)
+            @($matches).Count | Should -Be 1
+        }
+
+        It "never calls a write-capable mapping/configuration path from any control-readiness function" -TestCases (
+            @('Get-ControlReadinessRegistrationState',
+              'Get-ControlReadinessControlsState',
+              'Get-ControlReadinessLaunchState',
+              'Get-ControlReadinessAssessment',
+              'Get-ControlReadinessSummaryLines') | ForEach-Object { @{ Name = $_ } }
+        ) {
+            param($Name)
+            $forbidden = @('Invoke-ControlPropagation', 'Set-ProfileInputApi', 'Save-XmlMaybe')
+            $fn = $productionAst.FindAll({
+                $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -eq $Name
+            }, $true) | Select-Object -First 1
+            $fn | Should -Not -BeNullOrEmpty
+            $calls = $fn.Body.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true) |
+                ForEach-Object { $_.GetCommandName() } | Where-Object { $_ }
+            foreach ($f in $forbidden) { $calls | Should -Not -Contain $f }
+            ($calls | Where-Object { $_ -match 'Wizard' }) | Should -BeNullOrEmpty
+        }
+    }
 }
 
 Describe "Get-GameApiDll" {
