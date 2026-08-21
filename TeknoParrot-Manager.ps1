@@ -11697,6 +11697,180 @@ function Get-ControlReadinessSummaryLines {
     return $lines
 }
 
+# =============================================================================
+# TEKNOPARROT WIZARD READINESS DETECTOR (issue #253)
+# =============================================================================
+# Read-only detection of TeknoParrotUI's own first-run wizard state, so TPM
+# can tell a user what TeknoParrot may still ask them to do without ever
+# touching TeknoParrot-owned state itself. Per issue #253's own investigation
+# of the upstream TeknoParrotUI source: MainWindow.xaml.cs shows the wizard
+# is shown/skipped based on Lazydata.ParrotData.FirstTimeSetupComplete;
+# JoystickHelper.cs serializes/deserializes ParrotData.xml in the
+# TeknoParrotUI working directory; ParrotData.cs defines that flag alongside
+# DatXmlLocation. This detector does not have a real, hardware-verified copy
+# of ParrotData.xml to confirm the exact root element name against -- so it
+# deliberately locates the FirstTimeSetupComplete and DatXmlLocation
+# elements via the XPath queries `//FirstTimeSetupComplete` and
+# `//DatXmlLocation` (each matches that element name anywhere in the
+# document, regardless of the document's actual root element) rather than
+# assuming a specific root, and returns 'Unknown' whenever the expected
+# field cannot be found at all -- or is found more than once with
+# conflicting values (see below) -- instead of guessing a schema. This
+# assumption should be confirmed against a real installed ParrotData.xml
+# before this detector is relied upon for anything beyond onboarding text.
+#
+# Hard constraints (same standing as the issue #255 control readiness
+# engine above -- do not weaken without a CLAUDE.md / ARCHITECTURE.md
+# update and explicit sign-off):
+#   - Never creates, writes, repairs, rewrites, or normalizes ParrotData.xml
+#     or any other TeknoParrot-owned file.
+#   - Never invokes TeknoParrotUI's setup wizard.
+#   - A missing file, unparseable XML, and a parseable-but-unrecognized
+#     schema are three different facts and are classified distinctly
+#     ('Missing', 'Malformed', 'Unknown') rather than folded into one
+#     generic failure state.
+
+# Classifies TeknoParrotUI's first-run wizard state from its own
+# ParrotData.xml, read-only. Returns a [pscustomobject] with:
+#   State          -- 'Complete', 'Incomplete', 'Missing', 'Malformed', or
+#                      'Unknown' (present but FirstTimeSetupComplete could
+#                      not be confidently read as a boolean, or appears more
+#                      than once).
+#   DatXmlLocation -- the DAT/XML path TeknoParrotUI has on record, if the
+#                      field is present and non-empty; otherwise $null.
+#                      Informational only -- never used to influence State.
+#
+# Exactly one unambiguous FirstTimeSetupComplete element is required to
+# classify Complete/Incomplete. A document with more than one such element
+# anywhere -- whether the values agree or conflict -- is not the schema
+# shape this detector has any confirmed contract for (see the section
+# header above: the exact upstream schema is unverified), so it always
+# reads as 'Unknown' rather than picking one occurrence and hoping it is
+# authoritative. This is the deliberately conservative rule; see
+# Tests\TeknoParrot-Manager.Tests.ps1 for both the duplicate-agreeing-value
+# and duplicate-conflicting-value cases.
+function Get-TeknoParrotWizardState {
+    param([Parameter(Mandatory)][string]$TeknoParrotRoot)
+
+    $path = Join-Path $TeknoParrotRoot 'ParrotData.xml'
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        return [pscustomobject]@{ State = 'Missing'; DatXmlLocation = $null }
+    }
+
+    $doc = $null
+    try {
+        $doc = Read-Xml $path
+    } catch {
+        return [pscustomobject]@{ State = 'Malformed'; DatXmlLocation = $null }
+    }
+    if ($null -eq $doc -or $null -eq $doc.DocumentElement) {
+        return [pscustomobject]@{ State = 'Malformed'; DatXmlLocation = $null }
+    }
+
+    $datNode = $doc.SelectSingleNode('//DatXmlLocation')
+    $datXmlLocation = if ($datNode -and -not [string]::IsNullOrWhiteSpace($datNode.InnerText)) {
+        $datNode.InnerText.Trim()
+    } else {
+        $null
+    }
+
+    $completeNodes = @($doc.SelectNodes('//FirstTimeSetupComplete'))
+    if ($completeNodes.Count -ne 1) {
+        return [pscustomobject]@{ State = 'Unknown'; DatXmlLocation = $datXmlLocation }
+    }
+    $completeNode = $completeNodes[0]
+    if ([string]::IsNullOrWhiteSpace($completeNode.InnerText)) {
+        return [pscustomobject]@{ State = 'Unknown'; DatXmlLocation = $datXmlLocation }
+    }
+
+    $state = switch ($completeNode.InnerText.Trim().ToLowerInvariant()) {
+        'true'  { 'Complete' }
+        'false' { 'Incomplete' }
+        default { 'Unknown' }
+    }
+    return [pscustomobject]@{ State = $state; DatXmlLocation = $datXmlLocation }
+}
+
+# Combines the issue #255 control-readiness assessment with the issue #253
+# TeknoParrotUI wizard state into the onboarding handoff text a user sees
+# after registration/AutoSync. Four dimensions -- Registration, Controls,
+# Launch, and TeknoParrotUI wizard state -- are reported independently and
+# combined ONLY here, as display text; there is still no combined "Ready"
+# boolean anywhere. Pure string formatting: never prompts, never triggers a
+# configure/test/wizard action itself.
+#
+# Fails closed exactly like Get-ControlReadinessSummaryLines: a caller-
+# supplied Controls = 'Verified' is only trusted when
+# Test-ControlReadinessVerificationEvidence confirms real evidence backs
+# it, so this formatter cannot be tricked into claiming controls are ready
+# by a hand-built assessment object either.
+function Get-OnboardingHandoffSummaryLines {
+    param(
+        [Parameter(Mandatory)]$Assessment,
+        [Parameter(Mandatory)]$WizardState
+    )
+
+    $controlsState = $Assessment.Controls
+    if ($controlsState -eq 'Verified' -and -not (Test-ControlReadinessVerificationEvidence -Assessment $Assessment)) {
+        $controlsState = 'NotVerified'
+    }
+
+    $registrationText = switch ($Assessment.Registration) {
+        'Registered'   { 'Game registered successfully' }
+        'Unregistered' { 'Game is not registered' }
+        'Broken'       { 'Game registration is broken' }
+        default        { "Game registration: $($Assessment.Registration)" }
+    }
+
+    $launchText = switch ($Assessment.Launch) {
+        'NotTestedByTpm'  { 'Launch status: Not tested by TPM' }
+        'ObservedSuccess' { 'Launch status: Explicitly observed (success)' }
+        'ObservedFailure' { 'Launch status: Explicitly observed (failure)' }
+        default           { "Launch status: $($Assessment.Launch)" }
+    }
+
+    # Every non-Complete wizard state carries the same caveat: TPM cannot
+    # prove TeknoParrot's own setup wizard is done, so it must not imply
+    # that it is. Only 'Complete' -- FirstTimeSetupComplete read as true --
+    # omits it.
+    $wizardCaveat = ' -- TeknoParrot may still ask you to complete its setup wizard'
+    $wizardText = switch ($WizardState.State) {
+        'Complete'   { 'TeknoParrot first-run setup: Complete' }
+        'Incomplete' { "TeknoParrot first-run setup: Not yet complete$wizardCaveat" }
+        'Missing'    { "TeknoParrot first-run setup: Unknown (no ParrotData.xml found yet)$wizardCaveat" }
+        'Malformed'  { "TeknoParrot first-run setup: Could not be read (its ParrotData.xml appears damaged)$wizardCaveat" }
+        'Unknown'    { "TeknoParrot first-run setup: Unknown (unrecognized ParrotData.xml layout)$wizardCaveat" }
+        default      { "TeknoParrot first-run setup: $($WizardState.State)$wizardCaveat" }
+    }
+
+    $controlsText = switch ($controlsState) {
+        'Verified'    { 'Controls: Verified' }
+        'NotVerified' { 'Controls: Not verified' }
+        'Missing'     { 'Controls: Missing' }
+        'Unsupported' { 'Controls: Unsupported' }
+        'Unknown'     { 'Controls: Unknown' }
+        default       { "Controls: $controlsState" }
+    }
+
+    $lines = @(
+        $registrationText,
+        $launchText,
+        $wizardText,
+        $controlsText,
+        '',
+        "TPM registered this game. TeknoParrot owns its own setup wizard, controls configuration, and DAT/XML setup -- those are managed separately and are not performed by TPM."
+    )
+
+    # Same gate as Get-ControlReadinessSummaryLines: only offer to
+    # configure/test controls when there is something left to verify.
+    if ($controlsState -in @('NotVerified', 'Missing', 'Unknown')) {
+        $lines += ''
+        $lines += 'Would you like TPM to configure/test controls now?'
+    }
+
+    return $lines
+}
+
 Write-Log "Script started (v$ScriptVersion$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================

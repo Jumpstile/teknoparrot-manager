@@ -1650,6 +1650,342 @@ $button2Block
     }
 }
 
+Describe "TeknoParrot Wizard Readiness Handoff (issue #253)" {
+    BeforeAll {
+        function New-ParrotDataXml {
+            param(
+                [string]$FirstTimeSetupComplete = 'true',
+                [string]$DatXmlLocation = 'C:\Games\eggman.xml',
+                [switch]$OmitFirstTimeSetupComplete,
+                [switch]$OmitDatXmlLocation
+            )
+            $completeXml = if ($OmitFirstTimeSetupComplete) { '' } else { "<FirstTimeSetupComplete>$FirstTimeSetupComplete</FirstTimeSetupComplete>" }
+            $datXml = if ($OmitDatXmlLocation) { '' } else { "<DatXmlLocation>$DatXmlLocation</DatXmlLocation>" }
+            return @"
+<ParrotData>
+    $completeXml
+    $datXml
+</ParrotData>
+"@
+        }
+    }
+
+    Context "Get-TeknoParrotWizardState" {
+        BeforeEach {
+            $tpRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $tpRoot | Out-Null
+        }
+
+        It "returns Missing when ParrotData.xml does not exist, and creates nothing" {
+            Get-TeknoParrotWizardState -TeknoParrotRoot $tpRoot | Select-Object -ExpandProperty State | Should -Be 'Missing'
+            Test-Path -LiteralPath (Join-Path $tpRoot 'ParrotData.xml') | Should -Be $false
+        }
+
+        It "returns Complete when FirstTimeSetupComplete is true, and does not touch the file" {
+            $path = Join-Path $tpRoot 'ParrotData.xml'
+            Set-Content -LiteralPath $path -Value (New-ParrotDataXml -FirstTimeSetupComplete 'true') -Encoding utf8
+            $before = Get-Content -LiteralPath $path -Raw
+            $beforeWrite = (Get-Item -LiteralPath $path).LastWriteTimeUtc
+
+            $result = Get-TeknoParrotWizardState -TeknoParrotRoot $tpRoot
+
+            $result.State | Should -Be 'Complete'
+            $result.DatXmlLocation | Should -Be 'C:\Games\eggman.xml'
+            (Get-Content -LiteralPath $path -Raw) | Should -Be $before
+            (Get-Item -LiteralPath $path).LastWriteTimeUtc | Should -Be $beforeWrite
+        }
+
+        It "returns Incomplete when FirstTimeSetupComplete is false" {
+            Set-Content -LiteralPath (Join-Path $tpRoot 'ParrotData.xml') -Value (New-ParrotDataXml -FirstTimeSetupComplete 'false') -Encoding utf8
+            Get-TeknoParrotWizardState -TeknoParrotRoot $tpRoot | Select-Object -ExpandProperty State | Should -Be 'Incomplete'
+        }
+
+        It "returns Malformed for unparseable XML" {
+            Set-Content -LiteralPath (Join-Path $tpRoot 'ParrotData.xml') -Value '<ParrotData><FirstTimeSetupComplete>true' -Encoding utf8
+            Get-TeknoParrotWizardState -TeknoParrotRoot $tpRoot | Select-Object -ExpandProperty State | Should -Be 'Malformed'
+        }
+
+        It "returns Unknown when FirstTimeSetupComplete is absent (schema/field ambiguity)" {
+            Set-Content -LiteralPath (Join-Path $tpRoot 'ParrotData.xml') -Value (New-ParrotDataXml -OmitFirstTimeSetupComplete) -Encoding utf8
+            Get-TeknoParrotWizardState -TeknoParrotRoot $tpRoot | Select-Object -ExpandProperty State | Should -Be 'Unknown'
+        }
+
+        It "returns Unknown when FirstTimeSetupComplete is present but not a recognizable boolean" {
+            Set-Content -LiteralPath (Join-Path $tpRoot 'ParrotData.xml') -Value (New-ParrotDataXml -FirstTimeSetupComplete 'maybe') -Encoding utf8
+            Get-TeknoParrotWizardState -TeknoParrotRoot $tpRoot | Select-Object -ExpandProperty State | Should -Be 'Unknown'
+        }
+
+        It "returns Unknown for duplicate FirstTimeSetupComplete elements with conflicting values (true then false)" {
+            $xml = @"
+<ParrotData>
+    <FirstTimeSetupComplete>true</FirstTimeSetupComplete>
+    <FirstTimeSetupComplete>false</FirstTimeSetupComplete>
+    <DatXmlLocation>C:\Games\eggman.xml</DatXmlLocation>
+</ParrotData>
+"@
+            Set-Content -LiteralPath (Join-Path $tpRoot 'ParrotData.xml') -Value $xml -Encoding utf8
+            Get-TeknoParrotWizardState -TeknoParrotRoot $tpRoot | Select-Object -ExpandProperty State | Should -Be 'Unknown'
+        }
+
+        It "returns Unknown for duplicate FirstTimeSetupComplete elements with conflicting values (false then true)" {
+            # Order reversed from the previous case -- the rule must not
+            # depend on which conflicting value happens to appear first.
+            $xml = @"
+<ParrotData>
+    <FirstTimeSetupComplete>false</FirstTimeSetupComplete>
+    <FirstTimeSetupComplete>true</FirstTimeSetupComplete>
+</ParrotData>
+"@
+            Set-Content -LiteralPath (Join-Path $tpRoot 'ParrotData.xml') -Value $xml -Encoding utf8
+            Get-TeknoParrotWizardState -TeknoParrotRoot $tpRoot | Select-Object -ExpandProperty State | Should -Be 'Unknown'
+        }
+
+        It "returns Unknown for duplicate FirstTimeSetupComplete elements even when both values agree" {
+            # Deliberate, documented rule: more than one FirstTimeSetupComplete
+            # element is not the schema shape this detector has any confirmed
+            # contract for (the upstream root/shape is unverified -- see the
+            # section header above), so agreeing duplicates are treated the
+            # same as conflicting ones rather than silently accepted.
+            $xml = @"
+<ParrotData>
+    <FirstTimeSetupComplete>true</FirstTimeSetupComplete>
+    <FirstTimeSetupComplete>true</FirstTimeSetupComplete>
+</ParrotData>
+"@
+            Set-Content -LiteralPath (Join-Path $tpRoot 'ParrotData.xml') -Value $xml -Encoding utf8
+            Get-TeknoParrotWizardState -TeknoParrotRoot $tpRoot | Select-Object -ExpandProperty State | Should -Be 'Unknown'
+        }
+
+        It "returns a null DatXmlLocation when the field is absent, without affecting State" {
+            Set-Content -LiteralPath (Join-Path $tpRoot 'ParrotData.xml') -Value (New-ParrotDataXml -FirstTimeSetupComplete 'true' -OmitDatXmlLocation) -Encoding utf8
+            $result = Get-TeknoParrotWizardState -TeknoParrotRoot $tpRoot
+            $result.State | Should -Be 'Complete'
+            $result.DatXmlLocation | Should -BeNullOrEmpty
+        }
+
+        It "classifies an empty ParrotData.xml (root element only) as Unknown, not Malformed" {
+            Set-Content -LiteralPath (Join-Path $tpRoot 'ParrotData.xml') -Value '<ParrotData></ParrotData>' -Encoding utf8
+            Get-TeknoParrotWizardState -TeknoParrotRoot $tpRoot | Select-Object -ExpandProperty State | Should -Be 'Unknown'
+        }
+    }
+
+    Context "Get-OnboardingHandoffSummaryLines" {
+        It "reproduces the exact handoff text: registered + launched + wizard complete + controls NotVerified" {
+            $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'NotVerified'; Launch = 'ObservedSuccess' }
+            $wizardState = [pscustomobject]@{ State = 'Complete'; DatXmlLocation = 'C:\Games\eggman.xml' }
+
+            $lines = Get-OnboardingHandoffSummaryLines -Assessment $assessment -WizardState $wizardState
+
+            ($lines -join "`n") | Should -Be (@(
+                'Game registered successfully'
+                'Launch status: Explicitly observed (success)'
+                'TeknoParrot first-run setup: Complete'
+                'Controls: Not verified'
+                ''
+                "TPM registered this game. TeknoParrot owns its own setup wizard, controls configuration, and DAT/XML setup -- those are managed separately and are not performed by TPM."
+                ''
+                'Would you like TPM to configure/test controls now?'
+            ) -join "`n")
+        }
+
+        It "reproduces the exact handoff text: registered + wizard incomplete + controls Missing" {
+            $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'Missing'; Launch = 'NotTestedByTpm' }
+            $wizardState = [pscustomobject]@{ State = 'Incomplete'; DatXmlLocation = $null }
+
+            $lines = Get-OnboardingHandoffSummaryLines -Assessment $assessment -WizardState $wizardState
+
+            ($lines -join "`n") | Should -Be (@(
+                'Game registered successfully'
+                'Launch status: Not tested by TPM'
+                'TeknoParrot first-run setup: Not yet complete -- TeknoParrot may still ask you to complete its setup wizard'
+                'Controls: Missing'
+                ''
+                "TPM registered this game. TeknoParrot owns its own setup wizard, controls configuration, and DAT/XML setup -- those are managed separately and are not performed by TPM."
+                ''
+                'Would you like TPM to configure/test controls now?'
+            ) -join "`n")
+        }
+
+        It "keeps registration, launch, wizard, and controls as four separate lines, never merged" {
+            $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'NotVerified'; Launch = 'NotTestedByTpm' }
+            $wizardState = [pscustomobject]@{ State = 'Complete'; DatXmlLocation = $null }
+            $lines = Get-OnboardingHandoffSummaryLines -Assessment $assessment -WizardState $wizardState
+
+            $lines | Should -Contain 'Game registered successfully'
+            $lines | Should -Contain 'Launch status: Not tested by TPM'
+            $lines | Should -Contain 'TeknoParrot first-run setup: Complete'
+            $lines | Should -Contain 'Controls: Not verified'
+        }
+
+        It "never claims Controls are ready/Verified unless the #258 evidence model says Verified" -TestCases @(
+            @{ Registration = 'Registered'; Controls = 'NotVerified'; Launch = 'NotTestedByTpm'; WizardStateName = 'Complete' }
+            @{ Registration = 'Registered'; Controls = 'Missing'; Launch = 'ObservedSuccess'; WizardStateName = 'Complete' }
+            @{ Registration = 'Registered'; Controls = 'Unknown'; Launch = 'NotTestedByTpm'; WizardStateName = 'Incomplete' }
+            @{ Registration = 'Registered'; Controls = 'Unsupported'; Launch = 'NotTestedByTpm'; WizardStateName = 'Complete' }
+        ) {
+            param($Registration, $Controls, $Launch, $WizardStateName)
+            $assessment = [pscustomobject]@{ Code = 'abc'; Registration = $Registration; Controls = $Controls; Launch = $Launch }
+            $wizardState = [pscustomobject]@{ State = $WizardStateName; DatXmlLocation = $null }
+            $lines = Get-OnboardingHandoffSummaryLines -Assessment $assessment -WizardState $wizardState
+            $lines | Should -Not -Contain 'Controls: Verified'
+        }
+
+        It "fails closed on a caller-supplied Controls = 'Verified' with no VerificationEvidence" {
+            $spoofed = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'Verified'; Launch = 'NotTestedByTpm' }
+            $wizardState = [pscustomobject]@{ State = 'Complete'; DatXmlLocation = $null }
+            $lines = Get-OnboardingHandoffSummaryLines -Assessment $spoofed -WizardState $wizardState
+            $lines | Should -Contain 'Controls: Not verified'
+            $lines | Should -Not -Contain 'Controls: Verified'
+        }
+
+        It "renders Controls: Verified only when VerificationEvidence proves an actual observed test" {
+            $evidenced = [pscustomobject]@{
+                Code = 'abc'; Registration = 'Registered'; Controls = 'Verified'; Launch = 'ObservedSuccess'
+                VerificationEvidence = [pscustomobject]@{ Method = 'Manual play-test'; ObservedAt = '2026-08-21T12:00:00Z' }
+            }
+            $wizardState = [pscustomobject]@{ State = 'Complete'; DatXmlLocation = $null }
+            (Get-OnboardingHandoffSummaryLines -Assessment $evidenced -WizardState $wizardState) | Should -Contain 'Controls: Verified'
+        }
+
+        It "does not upgrade controls text based on wizard Complete, launch success, or FirstTimeSetupComplete alone" {
+            # Every one of these signals is present and positive, but Controls
+            # is still NotVerified (the #258 evidence model's own ceiling) --
+            # the handoff text must reflect that honestly, not imply readiness.
+            $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'NotVerified'; Launch = 'ObservedSuccess' }
+            $wizardState = [pscustomobject]@{ State = 'Complete'; DatXmlLocation = 'C:\Games\eggman.xml' }
+            $lines = Get-OnboardingHandoffSummaryLines -Assessment $assessment -WizardState $wizardState
+            $lines | Should -Contain 'Controls: Not verified'
+            $lines | Should -Contain 'Would you like TPM to configure/test controls now?'
+        }
+
+        It "never implies TeknoParrot performed TPM's own registration" {
+            # Codex review: the handoff text must not attribute TPM's
+            # registration work to TeknoParrot. Registration is TPM's own
+            # action; TeknoParrot separately owns its wizard/controls/DAT
+            # setup state.
+            $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'NotVerified'; Launch = 'NotTestedByTpm' }
+            $wizardState = [pscustomobject]@{ State = 'Complete'; DatXmlLocation = $null }
+            $text = (Get-OnboardingHandoffSummaryLines -Assessment $assessment -WizardState $wizardState) -join "`n"
+
+            $text | Should -Not -Match 'TeknoParrot handled registration'
+            $text | Should -Match 'TPM registered this game'
+            $text | Should -Match "TeknoParrot owns its own setup wizard"
+        }
+    }
+
+    Context "No-write regression (committed snapshot evidence, issue #253)" {
+        BeforeAll {
+            function Get-WizardNoWriteDirSnapshot {
+                param([string]$Dir)
+                Get-ChildItem -LiteralPath $Dir -Recurse -File | Sort-Object FullName | ForEach-Object {
+                    [pscustomobject]@{
+                        Path = $_.FullName
+                        Hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+                        Write = $_.LastWriteTimeUtc
+                    }
+                }
+            }
+        }
+
+        BeforeEach {
+            $tpRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $tpRoot | Out-Null
+            Set-Content -LiteralPath (Join-Path $tpRoot 'ParrotData.xml') -Value (New-ParrotDataXml -FirstTimeSetupComplete 'true') -Encoding utf8
+        }
+
+        It "leaves ParrotData.xml byte-identical after a normal wizard-state detection run" {
+            $before = Get-WizardNoWriteDirSnapshot $tpRoot
+            $beforeCount = @($before).Count
+
+            [void](Get-TeknoParrotWizardState -TeknoParrotRoot $tpRoot)
+
+            $after = Get-WizardNoWriteDirSnapshot $tpRoot
+            (Compare-Object $before $after -Property Path, Hash, Write) | Should -BeNullOrEmpty
+            @($after).Count | Should -Be $beforeCount
+        }
+
+        It "leaves ParrotData.xml byte-identical after formatting the full onboarding handoff" {
+            $before = Get-WizardNoWriteDirSnapshot $tpRoot
+            $beforeCount = @($before).Count
+
+            $wizardState = Get-TeknoParrotWizardState -TeknoParrotRoot $tpRoot
+            $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'NotVerified'; Launch = 'NotTestedByTpm' }
+            [void](Get-OnboardingHandoffSummaryLines -Assessment $assessment -WizardState $wizardState)
+
+            $after = Get-WizardNoWriteDirSnapshot $tpRoot
+            (Compare-Object $before $after -Property Path, Hash, Write) | Should -BeNullOrEmpty
+            @($after).Count | Should -Be $beforeCount
+        }
+
+        It "leaves ParrotData.xml byte-identical after a spoofed Controls='Verified' handoff call, and fails closed" {
+            # Codex review: the committed no-write snapshot must wrap the
+            # exact spoofed call, not only the normal path.
+            $before = Get-WizardNoWriteDirSnapshot $tpRoot
+            $beforeCount = @($before).Count
+
+            $wizardState = Get-TeknoParrotWizardState -TeknoParrotRoot $tpRoot
+            $spoofed = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'Verified'; Launch = 'NotTestedByTpm' }
+            $lines = Get-OnboardingHandoffSummaryLines -Assessment $spoofed -WizardState $wizardState
+
+            $after = Get-WizardNoWriteDirSnapshot $tpRoot
+            (Compare-Object $before $after -Property Path, Hash, Write) | Should -BeNullOrEmpty
+            @($after).Count | Should -Be $beforeCount
+            $lines | Should -Contain 'Controls: Not verified'
+            $lines | Should -Not -Contain 'Controls: Verified'
+        }
+    }
+
+    Context "No-write / no-propagation guarantee (AST-verified, issue #253)" {
+        BeforeAll {
+            $script:wizardProductionAst = [System.Management.Automation.Language.Parser]::ParseFile(
+                (Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1'), [ref]$null, [ref]$null)
+        }
+
+        It "defines every expected wizard-handoff function exactly once" -TestCases (
+            @('Get-TeknoParrotWizardState', 'Get-OnboardingHandoffSummaryLines') | ForEach-Object { @{ Name = $_ } }
+        ) {
+            param($Name)
+            $matches = $wizardProductionAst.FindAll({
+                $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -eq $Name
+            }, $true)
+            @($matches).Count | Should -Be 1
+        }
+
+        It "never calls a write-capable or wizard-mutation path from any wizard-handoff function" -TestCases (
+            @('Get-TeknoParrotWizardState', 'Get-OnboardingHandoffSummaryLines') | ForEach-Object { @{ Name = $_ } }
+        ) {
+            param($Name)
+            $forbiddenCommands = @('Invoke-ControlPropagation', 'Set-ProfileInputApi', 'Save-XmlMaybe', 'Save-Xml',
+                'Add-Content', 'Set-Content', 'Out-File', 'New-Item', 'Remove-Item', 'Move-Item', 'Copy-Item', 'Rename-Item')
+            $fn = $wizardProductionAst.FindAll({
+                $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -eq $Name
+            }, $true) | Select-Object -First 1
+            $fn | Should -Not -BeNullOrEmpty
+
+            # Command-name check: cmdlets and functions (Add-Content, a
+            # wizard-mutation helper, etc.).
+            $calls = $fn.Body.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true) |
+                ForEach-Object { $_.GetCommandName() } | Where-Object { $_ }
+            foreach ($f in $forbiddenCommands) { $calls | Should -Not -Contain $f }
+            ($calls | Where-Object { $_ -match 'Wizard' }) | Should -BeNullOrEmpty
+
+            # Member/static invocation check: CommandAst alone misses
+            # [xml]/[System.Xml.XmlDocument]::Save(...), [System.IO.File]::
+            # WriteAllText/Delete/Move/Copy(...), and similar .NET method
+            # calls that never appear as a CommandAst name -- those are
+            # InvokeMemberExpressionAst nodes instead (used for both
+            # instance calls like $doc.Save(...) and static calls like
+            # [System.IO.File]::Delete(...)).
+            $forbiddenMembers = @('Save', 'WriteAllText', 'WriteAllBytes', 'WriteAllLines',
+                'AppendAllText', 'AppendAllLines', 'AppendText', 'Delete', 'Move', 'MoveTo',
+                'Copy', 'CopyTo', 'Replace', 'CreateText', 'Create', 'SetLastWriteTime', 'SetAttributes')
+            $memberCalls = $fn.Body.FindAll({ $args[0] -is [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true) |
+                ForEach-Object { ($_.Member.Extent.Text -replace "^[`"']|[`"']$", '') } | Where-Object { $_ }
+            foreach ($m in $forbiddenMembers) { $memberCalls | Should -Not -Contain $m }
+        }
+    }
+}
+
 Describe "Get-GameApiDll" {
     BeforeAll {
         function New-FakeExe([string]$name, [string]$marker) {

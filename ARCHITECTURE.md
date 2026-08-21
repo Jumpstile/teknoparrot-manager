@@ -971,6 +971,111 @@ comparison) are answered.
 
 ---
 
+## TeknoParrot wizard readiness handoff (issue #253)
+
+Read-only detection of TeknoParrotUI's own first-run wizard state, added so
+TPM can tell a user what TeknoParrot may still ask them to do after
+registration/AutoSync, without ever touching TeknoParrot-owned state. Issue
+#253's own investigation of the upstream TeknoParrotUI source found the
+wizard is shown/skipped based on `Lazydata.ParrotData.FirstTimeSetupComplete`
+(`MainWindow.xaml.cs:813-816`), that `ParrotData.xml` is serialized in the
+TeknoParrotUI working directory (`JoystickHelper.cs:41,56-58`), and that the
+completion flag lives alongside `DatXmlLocation` (`ParrotData.cs:42-43`).
+TeknoParrotUI's wizard also owns DAT/XML selection, game scanning, controls
+configuration, and account/serial steps -- none of that is TPM's to perform
+or claim credit for.
+
+**Function**: `Get-TeknoParrotWizardState -TeknoParrotRoot $tpRoot` reads
+`$tpRoot\ParrotData.xml` (same root TPM already resolves via
+`Find-TeknoParrotRoot`, alongside the existing `UserProfiles`/`GameProfiles`
+paths) and returns a `[pscustomobject]` with `State` and `DatXmlLocation`.
+
+**States**: `Complete`, `Incomplete`, `Missing`, `Malformed`, `Unknown` --
+five explicit outcomes, not a generic `Broken` catch-all:
+- `Missing` -- no `ParrotData.xml` at all (clean install, or TeknoParrotUI
+  never launched yet).
+- `Malformed` -- the file exists but does not parse as XML (`XmlDocument.Load`
+  throws).
+- `Unknown` -- the file parses, but `FirstTimeSetupComplete` is absent,
+  present more than once (whether the duplicate values agree or conflict --
+  see below), or present exactly once with a value that isn't a
+  recognizable boolean. This is the "ambiguous schema" outcome: an
+  unrecognized `ParrotData.xml` layout is reported honestly rather than
+  guessed at.
+- `Incomplete` / `Complete` -- exactly one `FirstTimeSetupComplete` element
+  found, read as `false` / `true`.
+
+**Duplicate-field rule (Codex review).** `Get-TeknoParrotWizardState` uses
+`SelectNodes('//FirstTimeSetupComplete')`, not `SelectSingleNode`, and
+requires the result count to be exactly 1 before trusting it. More than one
+`FirstTimeSetupComplete` element anywhere in the document -- even if every
+occurrence agrees -- returns `Unknown` rather than picking one occurrence
+and hoping it is authoritative, since a document with duplicate fields is
+not the schema shape this detector has any confirmed contract for (see the
+unverified-schema note below). This is a deliberate, documented choice, not
+an oversight: see `Tests\TeknoParrot-Manager.Tests.ps1` for both the
+duplicate-agreeing-value and duplicate-conflicting-value cases.
+
+**Unverified schema assumption (explicitly flagged, not hidden).** No real,
+hardware-verified `ParrotData.xml` was available to confirm the exact root
+element name against during this round -- the detector locates the
+`FirstTimeSetupComplete` and `DatXmlLocation` elements via the XPath
+queries `//FirstTimeSetupComplete` and `//DatXmlLocation` (each matches
+that element name anywhere in the document, regardless of the document's
+actual root element) rather than assuming a specific root, and any
+document where the expected field genuinely cannot be found reads as
+`Unknown` rather than defaulting to a guess. This assumption should be
+confirmed against a real installed `ParrotData.xml` before the detector is
+relied on for anything beyond onboarding text.
+
+**Handoff formatter.** `Get-OnboardingHandoffSummaryLines -Assessment
+$assessment -WizardState $wizardState` combines the issue #255
+`Get-ControlReadinessAssessment` row (`Registration`/`Controls`/`Launch`)
+with this detector's `WizardState` into the user-facing handoff text --
+four independent dimensions, reported as four separate lines, combined
+only here as display text. There is still no combined "Ready" boolean
+anywhere. The closing explanatory line reads "TPM registered this game.
+TeknoParrot owns its own setup wizard, controls configuration, and DAT/XML
+setup..." -- attributing registration to TPM and the wizard/controls/DAT
+ownership to TeknoParrot explicitly and separately (an earlier draft of
+this text incorrectly said "TeknoParrot handled registration," misattributing
+TPM's own work; flagged and corrected in review). It fails closed on
+`Controls = 'Verified'` exactly like `Get-ControlReadinessSummaryLines` (same
+`Test-ControlReadinessVerificationEvidence` gate, reapplied independently
+here rather than assumed from the caller), and every non-`Complete` wizard
+state carries an explicit "TeknoParrot may still ask you to complete its
+setup wizard" caveat -- `FirstTimeSetupComplete`, a successful launch,
+bound-button counts, and stored device references are exactly the signals
+issue #255/#253 both call out as **not** allowed to imply verified
+controls or a finished setup, and this formatter does not let any of them
+do so.
+
+**Hard constraints** (same standing as the issue #255 engine -- do not
+weaken without a CLAUDE.md/ARCHITECTURE.md update and sign-off): never
+creates, writes, repairs, rewrites, or normalizes `ParrotData.xml` or any
+other TeknoParrot-owned file; never invokes TeknoParrotUI's setup wizard;
+never calls `Invoke-ControlPropagation`, `Set-ProfileInputApi`, or
+`Save-XmlMaybe`. `Read-Xml` (the same helper the #255 engine uses) sets
+`XmlResolver = $null` before loading, so this detector inherits the
+existing XXE-safe parsing behavior rather than needing its own. The AST
+no-write guard test checks both command names (`Add-Content`, `Set-Content`,
+`Save-Xml`, etc.) and member/static invocations (`InvokeMemberExpressionAst`
+covers both `$doc.Save(...)`-style instance calls and
+`[System.IO.File]::Delete(...)`-style static calls) -- a CommandAst-only
+check would miss .NET method calls entirely, since those never appear as a
+CommandAst name.
+
+**Not yet wired up.** This round adds the detector, the handoff formatter,
+and their tests -- no interactive menu entry, no automatic wizard launch,
+no write path. Issue #253's own scope is a coordination boundary, not
+authorization to modify TeknoParrot state; determining whether any
+TeknoParrot-owned write is ever safe (file/field owner, schema, backup,
+verification, rollback) is explicitly deferred to a separately-scoped,
+separately-reviewed follow-up per the issue's own "Acceptance and safety"
+section.
+
+---
+
 ## Game registration (Register-Games)
 
 ### Two-executable profiles (v0.99.6)
