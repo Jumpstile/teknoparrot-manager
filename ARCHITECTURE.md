@@ -843,28 +843,40 @@ itself, so this engine deliberately never does.
   which meant an arbitrary or malformed profile could walk through states
   it had no authoritative right to. The classifier now works like this:
   - No catalog entry for `$Code`, or the document's `ExecutableName`/
-    `EmulationProfile` don't match what the catalog entry expects (an
-    ambiguous/unverifiable contract) -> **`Unknown`**. Today only `abc`
-    (After Burner Climax) has a catalog entry; every other code is
-    `Unknown` by construction, not by omission.
+    `EmulationProfile`/`GameProfileRevision` don't *all* match what the
+    catalog entry expects (an ambiguous/unverifiable contract) ->
+    **`Unknown`**. Today only `abc` (After Burner Climax) has a catalog
+    entry, bound explicitly to the captured provenance: teknogods/TeknoParrotUI
+    `GameProfiles/abc.xml`, `GameProfileRevision = 22`. The revision check
+    exists so a future upstream revision of `abc.xml` with different
+    required controls is never silently classified against this entry's
+    stale requirements -- it reads as `Unknown` until a reviewer adds a
+    matching contract. Every other code is `Unknown` by construction, not
+    by omission.
   - The document's own `ConfigValues` declare a selected Input API
     (`FieldValue`) that is absent from its own declared `FieldOptions` --
     a real, document-declared contract violation, not a guess -> **`Unsupported`**.
   - Any catalog-required button `InputMapping` is absent from the document,
-    present-but-unbound (per `Test-ButtonIsBound`), or any catalog-required
-    analog `InputMapping` is absent entirely -> **`Missing`**.
-  - Every catalog-required button and analog mapping is present (and, for
-    buttons, bound) -> **`NotVerified`**. This is the ceiling reachable by
-    static evidence: usable, but not a successful bounded control test.
+    present-but-unbound or bound with an empty binding element (per
+    `Test-ControlReadinessButtonBindingUsable`, which layers a non-empty-
+    content check on top of `Test-ButtonIsBound` rather than weakening that
+    shared helper), or any catalog-required analog `InputMapping` is absent
+    entirely or present with an empty/missing `AnalogType` (per
+    `Test-ControlReadinessAnalogMappingUsable`) -> **`Missing`**.
+  - Every catalog-required button and analog mapping is present and
+    structurally usable (and, for buttons, bound with real content) ->
+    **`NotVerified`**. This is the ceiling reachable by static evidence:
+    usable, but not a successful bounded control test.
   **`Verified` is never assigned by this engine** -- confirming a control
   actually works requires real evidence (an observed successful test) that
   a static read-only pass cannot manufacture. Registration, wizard
   completion, a selected Input API, a profile's mere existence, an
   all-bound profile, or a stored physical-device reference (e.g. a
   `DirectInputDeviceGuid`) are explicitly not allowed to imply it (issue
-  #255's own wording, and the specific matrix the second review round
-  required -- see `Describe "Control Readiness Engine (issue #255)"`,
-  `Context "Matrix: signals that must not imply Verified"`).
+  #255's own wording, and the specific matrix the review rounds required --
+  see `Describe "Control Readiness Engine (issue #255)"`,
+  `Context "Matrix: authoritative requiredness and signals that must not
+  imply Verified"`).
 - **Launch observation**: `NotTestedByTpm`, `ObservedSuccess`,
   `ObservedFailure` -- TPM does not launch games itself (TeknoParrotUI and
   BudgieLoader own that path) and has no launch-outcome log to read today,
@@ -874,16 +886,22 @@ itself, so this engine deliberately never does.
 
 **Functions** (`TeknoParrot-Manager.ps1`, immediately before the interactive
 menu's top-level code): `Get-ControlReadinessRegistrationState`,
-`Get-ControlReadinessKnownRequirements`, `Get-ControlReadinessControlsState`,
+`Get-ControlReadinessKnownRequirements`, `Test-ControlReadinessButtonBindingUsable`,
+`Test-ControlReadinessAnalogMappingUsable`, `Get-ControlReadinessControlsState`,
 `Get-ControlReadinessLaunchState`, `Test-ControlReadinessVerificationEvidence`,
 `Get-ControlReadinessSummaryLines`, and `Get-ControlReadinessAssessment`
 (combines the three dimensions into one `[pscustomobject]` row: `Code`,
 `Registration`, `Controls`, `Launch`). `Get-ControlReadinessControlsState`
 reuses `Get-ButtonNodes` / `Test-ButtonIsBound`, the same helpers
 `Write-ControlsStatus` already uses, so bound-detection logic has exactly
-one implementation. `Get-ControlReadinessKnownRequirements` builds its tiny
-catalog inline on every call (not as a top-level script variable) so the
-Pester harness's function-body AST extraction -- which only picks up
+one implementation; `Test-ControlReadinessButtonBindingUsable` layers a
+non-empty-content check on top of `Test-ButtonIsBound` locally (an empty
+`<DirectInputButton></DirectInputButton>` still counts as "bound" for
+`Test-ButtonIsBound`'s own purposes, which is too permissive for readiness
+classification) rather than changing that shared helper's behavior for its
+other, unrelated callers. `Get-ControlReadinessKnownRequirements` builds
+its tiny catalog inline on every call (not as a top-level script variable)
+so the Pester harness's function-body AST extraction -- which only picks up
 function definitions, not top-level script-scope variables -- includes it
 automatically.
 
@@ -896,6 +914,15 @@ invariant `Resolve-RegisteredGameFolder` already enforces, see SECURITY.md)
 before being joined into either directory's path, since a future caller may
 source it from an externally-fetched dat index rather than a trusted
 filesystem enumeration.
+
+**Precise I/O surface** (stated exactly, not more broadly than it is): the
+control-readiness XML assessment reads `<code>.xml` under the caller-supplied
+`UserProfilesDir`/`GameProfilesDir` only. Separately,
+`Get-ControlReadinessRegistrationState` performs a read-only `Test-Path`
+existence check against the registered profile's `GamePath` (an arbitrary
+game executable location, not a UserProfiles/GameProfiles path) to
+distinguish `Registered` from `Broken`. No function in this section calls
+or reaches a write-capable path.
 
 **Regression fixture.** Tests use a fixture modeled on the real, published
 After Burner Climax profile (teknogods/TeknoParrotUI

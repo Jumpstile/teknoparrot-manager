@@ -1050,17 +1050,26 @@ Describe "Control Readiness Engine (issue #255)" {
         param(
             [string]$GamePath = '',
             [string[]]$BoundButtonMappings = @(),
+            [string[]]$EmptyBoundButtonMappings = @(),
             [string]$InputApiValue = 'DirectInput',
             [string[]]$InputApiOptions = @('DirectInput', 'XInput'),
             [switch]$OmitAnalog4,
             [switch]$OmitButton2,
+            [switch]$EmptyAnalog4Type,
+            [switch]$OmitAnalog4Type,
             [switch]$IncludeDeviceGuid,
             [string]$EmulationProfile = 'AfterBurnerClimax',
             [string]$ExecutableName = 'abc',
+            [int]$GameProfileRevision = 22,
             [switch]$FirstTimeSetupComplete
         )
 
         function New-BindingXml([string]$Mapping, [int]$Slot) {
+            if ($EmptyBoundButtonMappings -contains $Mapping) {
+                # A binding element that exists but is empty -- structurally
+                # present, not a usable binding. Must not count as bound.
+                return '<DirectInputButton></DirectInputButton>'
+            }
             if ($BoundButtonMappings -notcontains $Mapping) { return '' }
             $guid = if ($IncludeDeviceGuid) { "`n            <DirectInputDeviceGuid>{9e573edb-2130-11ec-8001-444553540000}</DirectInputDeviceGuid>" } else { '' }
             return "<DirectInputButton>$Slot</DirectInputButton>$guid"
@@ -1074,12 +1083,13 @@ Describe "Control Readiness Engine (issue #255)" {
         $optionsXml = ($InputApiOptions | ForEach-Object { "<string>$_</string>" }) -join ''
         $firstTimeXml = if ($FirstTimeSetupComplete) { '<FirstTimeSetupComplete>true</FirstTimeSetupComplete>' } else { '' }
 
+        $analog4TypeXml = if ($OmitAnalog4Type) { '' } elseif ($EmptyAnalog4Type) { '<AnalogType></AnalogType>' } else { '<AnalogType>SWThrottle</AnalogType>' }
         $analog4Block = if ($OmitAnalog4) { '' } else {
 @"
         <JoystickButtons>
             <ButtonName>Throttle Lever</ButtonName>
             <InputMapping>Analog4</InputMapping>
-            <AnalogType>SWThrottle</AnalogType>
+            $analog4TypeXml
         </JoystickButtons>
 "@
         }
@@ -1097,7 +1107,7 @@ Describe "Control Readiness Engine (issue #255)" {
 <GameProfile>
     <GamePath>$GamePath</GamePath>
     <EmulationProfile>$EmulationProfile</EmulationProfile>
-    <GameProfileRevision>22</GameProfileRevision>
+    <GameProfileRevision>$GameProfileRevision</GameProfileRevision>
     <ExecutableName>$ExecutableName</ExecutableName>
     <EmulatorType>Lindbergh</EmulatorType>
     $firstTimeXml
@@ -1468,6 +1478,42 @@ $button2Block
             Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'Unknown'
         }
 
+        It "ABC with a GameProfileRevision that does not match the catalog's captured provenance -> Unknown" -TestCases @(
+            @{ Revision = 21 }
+            @{ Revision = 23 }
+        ) {
+            # The catalog entry is bound to GameProfileRevision 22 -- the
+            # exact revision captured during issue #255's evidence session.
+            # A different revision is not assumed to share the same required
+            # controls, so it must not be classified against this entry.
+            param($Revision)
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons -GameProfileRevision $Revision)
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'Unknown'
+        }
+
+        It "ABC with a missing GameProfileRevision element -> Unknown" {
+            $rawXml = (New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons) -replace '<GameProfileRevision>22</GameProfileRevision>', ''
+            $doc = [xml]$rawXml
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'Unknown'
+        }
+
+        It "ABC with an empty required button binding element -> Missing, not bound" {
+            # <DirectInputButton></DirectInputButton> exists structurally but
+            # carries no usable value -- it must not count as a real binding.
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons -EmptyBoundButtonMappings @('P1ButtonStart'))
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'Missing'
+        }
+
+        It "ABC with an empty AnalogType on a required analog mapping -> Missing" {
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons -EmptyAnalog4Type)
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'Missing'
+        }
+
+        It "ABC with a required analog mapping missing its AnalogType element entirely -> Missing" {
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons -OmitAnalog4Type)
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'Missing'
+        }
+
         It "ABC with positive unsupported/incompatible API evidence -> Unsupported" {
             # The document's own FieldOptions declare only DirectInput/XInput
             # as supported; a selected FieldValue outside that set is a real,
@@ -1486,6 +1532,75 @@ $button2Block
         }
     }
 
+    Context "No-write regression (committed snapshot evidence, issue #255)" {
+        # Snapshots SHA-256, LastWriteTimeUtc, and file count for every file
+        # under both UserProfiles and GameProfiles before and after running
+        # the normal assessment path AND a spoofed Controls = 'Verified'
+        # formatter call with no evidence -- proving both paths are truly
+        # read-only, not just documented as such.
+        BeforeAll {
+            function Get-ControlReadinessNoWriteDirSnapshot {
+                param([string]$Dir)
+                Get-ChildItem -LiteralPath $Dir -Recurse -File | Sort-Object FullName | ForEach-Object {
+                    [pscustomobject]@{
+                        Path = $_.FullName
+                        Hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+                        Write = $_.LastWriteTimeUtc
+                    }
+                }
+            }
+        }
+
+        BeforeEach {
+            $userProfilesDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N') + '_up')
+            $gameProfilesDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N') + '_gp')
+            New-Item -ItemType Directory -Path $userProfilesDir, $gameProfilesDir | Out-Null
+
+            $realExe = Join-Path $userProfilesDir 'abc.exe'
+            Set-Content -LiteralPath $realExe -Value 'stub' -Encoding utf8
+            Set-Content -LiteralPath (Join-Path $userProfilesDir 'abc.xml') `
+                -Value (New-AbcFixtureXml -GamePath $realExe -BoundButtonMappings $AbcRequiredButtons) -Encoding utf8
+            Set-Content -LiteralPath (Join-Path $gameProfilesDir 'abc.xml') `
+                -Value (New-AbcFixtureXml) -Encoding utf8
+        }
+
+        It "leaves UserProfiles and GameProfiles byte-identical after a normal assessment run" {
+            $beforeUp = Get-ControlReadinessNoWriteDirSnapshot $userProfilesDir
+            $beforeGp = Get-ControlReadinessNoWriteDirSnapshot $gameProfilesDir
+            $beforeUpCount = @($beforeUp).Count
+            $beforeGpCount = @($beforeGp).Count
+
+            [void](Get-ControlReadinessAssessment -Code 'abc' -UserProfilesDir $userProfilesDir -GameProfilesDir $gameProfilesDir)
+
+            $afterUp = Get-ControlReadinessNoWriteDirSnapshot $userProfilesDir
+            $afterGp = Get-ControlReadinessNoWriteDirSnapshot $gameProfilesDir
+
+            (Compare-Object $beforeUp $afterUp -Property Path, Hash, Write) | Should -BeNullOrEmpty
+            (Compare-Object $beforeGp $afterGp -Property Path, Hash, Write) | Should -BeNullOrEmpty
+            @($afterUp).Count | Should -Be $beforeUpCount
+            @($afterGp).Count | Should -Be $beforeGpCount
+        }
+
+        It "leaves UserProfiles and GameProfiles byte-identical after a spoofed Controls='Verified' formatter call" {
+            $beforeUp = Get-ControlReadinessNoWriteDirSnapshot $userProfilesDir
+            $beforeGp = Get-ControlReadinessNoWriteDirSnapshot $gameProfilesDir
+            $beforeUpCount = @($beforeUp).Count
+            $beforeGpCount = @($beforeGp).Count
+
+            $spoofed = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'Verified'; Launch = 'NotTestedByTpm' }
+            $lines = Get-ControlReadinessSummaryLines -Assessment $spoofed
+            $lines | Should -Contain 'Controls: Not verified'
+
+            $afterUp = Get-ControlReadinessNoWriteDirSnapshot $userProfilesDir
+            $afterGp = Get-ControlReadinessNoWriteDirSnapshot $gameProfilesDir
+
+            (Compare-Object $beforeUp $afterUp -Property Path, Hash, Write) | Should -BeNullOrEmpty
+            (Compare-Object $beforeGp $afterGp -Property Path, Hash, Write) | Should -BeNullOrEmpty
+            @($afterUp).Count | Should -Be $beforeUpCount
+            @($afterGp).Count | Should -Be $beforeGpCount
+        }
+    }
+
     Context "No-write / no-propagation guarantee (AST-verified, issue #255)" {
         BeforeAll {
             $script:productionAst = [System.Management.Automation.Language.Parser]::ParseFile(
@@ -1495,6 +1610,8 @@ $button2Block
         It "defines every expected control-readiness function exactly once" -TestCases (
             @('Get-ControlReadinessRegistrationState',
               'Get-ControlReadinessKnownRequirements',
+              'Test-ControlReadinessButtonBindingUsable',
+              'Test-ControlReadinessAnalogMappingUsable',
               'Get-ControlReadinessControlsState',
               'Get-ControlReadinessLaunchState',
               'Get-ControlReadinessAssessment',
@@ -1511,6 +1628,8 @@ $button2Block
         It "never calls a write-capable mapping/configuration path from any control-readiness function" -TestCases (
             @('Get-ControlReadinessRegistrationState',
               'Get-ControlReadinessKnownRequirements',
+              'Test-ControlReadinessButtonBindingUsable',
+              'Test-ControlReadinessAnalogMappingUsable',
               'Get-ControlReadinessControlsState',
               'Get-ControlReadinessLaunchState',
               'Get-ControlReadinessAssessment',

@@ -11338,6 +11338,15 @@ function Write-ControlsStatus {
 #     which this static, read-only pass cannot manufacture. Registration,
 #     wizard completion, a selected Input API, or a profile's mere existence
 #     are explicitly NOT allowed to imply Verified (issue #255).
+#
+# Precise I/O surface (do not describe this more broadly than it actually
+# is): the control-readiness XML assessment reads `<code>.xml` under the
+# caller-supplied UserProfilesDir/GameProfilesDir only. Separately,
+# Get-ControlReadinessRegistrationState performs a read-only Test-Path
+# existence check against the registered profile's GamePath (an arbitrary
+# game executable location, not a UserProfiles/GameProfiles path) to
+# distinguish 'Registered' from 'Broken'. Neither of these, nor any other
+# function in this section, calls or reaches a write-capable path.
 
 # Classifies registration state for one profile code from UserProfiles alone.
 # Returns 'Registered', 'Unregistered', or 'Broken'. Never touches GameProfiles
@@ -11388,15 +11397,25 @@ function Get-ControlReadinessKnownRequirements {
 
     $catalog = @{
         'abc' = [pscustomobject]@{
-            # Cross-checked against the document before requirements are
-            # trusted -- see the "ambiguous contract" branch below. A code
-            # match alone is not enough; the document must actually look
-            # like the profile this catalog entry describes.
+            # Provenance: teknogods/TeknoParrotUI, GameProfiles/abc.xml,
+            # GameProfileRevision 22 -- captured during issue #255's evidence
+            # session. This entry is valid ONLY for that exact captured
+            # identity/revision. Cross-checked against the document before
+            # requirements are trusted (see the "ambiguous contract" branch
+            # below): ExecutableName, EmulationProfile, AND
+            # GameProfileRevision must all match, or the document is treated
+            # as Unknown. A code match alone is not enough, and a later
+            # upstream revision of abc.xml is not assumed to share these
+            # requirements -- if teknogods ever ships a revision 23+ with
+            # different required controls, this entry must not silently keep
+            # classifying it against stale requirements; it will instead
+            # read as Unknown until a reviewer adds a matching contract.
             ExpectedExecutableName   = 'abc'
             ExpectedEmulationProfile = 'AfterBurnerClimax'
+            ExpectedGameProfileRevision = 22
             # InputMapping values for Start, Gun Trigger, Missile Trigger,
             # Climax Switch -- the confirmed required digital controls from
-            # the published abc.xml.
+            # the published abc.xml revision 22.
             RequiredButtons = @('P1ButtonStart', 'P1Button1', 'P1Button2', 'P1Button3')
             # InputMapping values for Joystick Analog X/Y and Throttle Lever.
             RequiredAnalogs = @('Analog0', 'Analog2', 'Analog4')
@@ -11425,6 +11444,34 @@ function Get-ControlReadinessKnownRequirements {
 # Input API that isn't among the profile's own FieldOptions). Without a
 # catalog entry, or without the document matching that entry's expected
 # shape, the honest answer is 'Unknown', not a guess.
+# Test-ButtonIsBound (shared with Write-ControlsStatus/Invoke-ControlPropagation)
+# only checks whether a RawInputButton/DirectInputButton/XInputButton node
+# exists -- an empty element (`<DirectInputButton></DirectInputButton>`)
+# still counts as "bound" for its purposes. That is too permissive for
+# readiness classification: an empty binding element is not a usable
+# binding, so this local wrapper adds a non-empty-content requirement on
+# top of Test-ButtonIsBound rather than weakening the shared helper (which
+# other, unrelated callers may depend on).
+function Test-ControlReadinessButtonBindingUsable {
+    param($btn)
+    if (-not (Test-ButtonIsBound $btn)) { return $false }
+    foreach ($nodeName in @('RawInputButton', 'DirectInputButton', 'XInputButton')) {
+        $n = $btn.SelectSingleNode($nodeName)
+        if ($n -and -not [string]::IsNullOrWhiteSpace($n.InnerText)) { return $true }
+    }
+    return $false
+}
+
+# An analog InputMapping slot is only a structurally complete mapping when
+# it also declares a non-empty AnalogType -- a slot with the mapping name
+# present but AnalogType missing or blank is malformed/incomplete, not a
+# real analog binding, and must not count toward a required analog control.
+function Test-ControlReadinessAnalogMappingUsable {
+    param($btn)
+    $atNode = $btn.SelectSingleNode('AnalogType')
+    return ($null -ne $atNode) -and -not [string]::IsNullOrWhiteSpace($atNode.InnerText)
+}
+
 function Get-ControlReadinessControlsState {
     param(
         [Parameter(Position = 0)]$doc = $null,
@@ -11437,14 +11484,22 @@ function Get-ControlReadinessControlsState {
 
     # Ambiguous/unverifiable profile contract: the code matched the catalog,
     # but the document's own declared identity does not match what that
-    # catalog entry describes. The requirements might not even apply to
-    # this document, so nothing below can be trusted as authoritative.
-    $execNode = $doc.GameProfile.SelectSingleNode('ExecutableName')
-    $emuNode  = $doc.GameProfile.SelectSingleNode('EmulationProfile')
+    # catalog entry describes -- including GameProfileRevision, since a
+    # later upstream revision is not assumed to share the same required
+    # controls. The requirements might not even apply to this document, so
+    # nothing below can be trusted as authoritative.
+    $execNode     = $doc.GameProfile.SelectSingleNode('ExecutableName')
+    $emuNode      = $doc.GameProfile.SelectSingleNode('EmulationProfile')
+    $revisionNode = $doc.GameProfile.SelectSingleNode('GameProfileRevision')
     $execName = if ($execNode) { $execNode.InnerText.Trim() } else { '' }
     $emuName  = if ($emuNode) { $emuNode.InnerText.Trim() } else { '' }
+    $revision = $null
+    if ($revisionNode -and -not [string]::IsNullOrWhiteSpace($revisionNode.InnerText)) {
+        [void][int]::TryParse($revisionNode.InnerText.Trim(), [ref]$revision)
+    }
     if ($execName -ne $requirements.ExpectedExecutableName -or
-        $emuName  -ne $requirements.ExpectedEmulationProfile) {
+        $emuName  -ne $requirements.ExpectedEmulationProfile -or
+        $null -eq $revision -or $revision -ne $requirements.ExpectedGameProfileRevision) {
         return 'Unknown'
     }
 
@@ -11475,7 +11530,7 @@ function Get-ControlReadinessControlsState {
 
     foreach ($required in $requirements.RequiredButtons) {
         if (-not $byMapping.ContainsKey($required)) { return 'Missing' }
-        if (-not (Test-ButtonIsBound $byMapping[$required])) { return 'Missing' }
+        if (-not (Test-ControlReadinessButtonBindingUsable $byMapping[$required])) { return 'Missing' }
     }
     foreach ($required in $requirements.RequiredAnalogs) {
         # There is no established "analog is bound" signal anywhere in this
@@ -11483,9 +11538,11 @@ function Get-ControlReadinessControlsState {
         # XInputButton nodes) -- whether an analog axis is actually wired to
         # a working physical device is a real-evidence question this static
         # pass cannot answer. Presence of the required mapping slot is the
-        # only authoritative structural fact available; its absence is
-        # unambiguous evidence of Missing.
+        # only authoritative structural fact available, but presence alone
+        # is not enough: a slot with an empty/missing AnalogType is not a
+        # structurally complete analog mapping either.
         if (-not $byMapping.ContainsKey($required)) { return 'Missing' }
+        if (-not (Test-ControlReadinessAnalogMappingUsable $byMapping[$required])) { return 'Missing' }
     }
 
     # Every known-required control is present and (for digital buttons)
