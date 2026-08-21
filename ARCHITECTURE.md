@@ -814,6 +814,163 @@ profile with a wrong Input API.
 
 ---
 
+## Control readiness engine (issue #255)
+
+Read-only assessment of a single profile code across three **independent**
+dimensions, added as a standalone branch off issue #255's evidence session.
+A tester's After Burner Climax (`abc`) session showed TeknoParrot launching a
+game successfully while controls had been skipped or never verified in
+TeknoParrotUI's own first-run wizard -- registration success, wizard
+completion, and working controls are three different facts, and issue #253
+already showed the wizard's own "Controls configuration completed" checkbox
+can become checked with no mapping screen ever opened. Collapsing them into
+one "Ready" boolean would reproduce that exact failure mode inside TPM
+itself, so this engine deliberately never does.
+
+**Dimensions and states** (each independent, no combined boolean):
+
+- **Registration**: `Registered`, `Unregistered`, `Broken` -- from
+  `UserProfiles\<code>.xml` alone: does the file exist, parse, have a
+  `GamePath`, and does that `GamePath` still point at a real file.
+- **Controls**: `Verified`, `NotVerified`, `Missing`, `Unsupported`,
+  `Unknown` -- from whichever profile document exists on disk (the real
+  UserProfile if registered, otherwise the read-only GameProfiles template),
+  evaluated against an **authoritative requirements catalog**
+  (`Get-ControlReadinessKnownRequirements`), never from raw document
+  structure alone. A second review round on PR #258 found the original
+  version inferred requiredness structurally -- "zero button nodes" as
+  `Unsupported`, "zero bound" as `Missing`, "any bound" as `NotVerified` --
+  which meant an arbitrary or malformed profile could walk through states
+  it had no authoritative right to. The classifier now works like this:
+  - No catalog entry for `$Code`, or the document's `ExecutableName`/
+    `EmulationProfile`/`GameProfileRevision` don't *all* match what the
+    catalog entry expects (an ambiguous/unverifiable contract) ->
+    **`Unknown`**. Today only `abc` (After Burner Climax) has a catalog
+    entry, bound explicitly to the captured provenance: teknogods/TeknoParrotUI
+    `GameProfiles/abc.xml`, `GameProfileRevision = 22`. The revision check
+    exists so a future upstream revision of `abc.xml` with different
+    required controls is never silently classified against this entry's
+    stale requirements -- it reads as `Unknown` until a reviewer adds a
+    matching contract. Every other code is `Unknown` by construction, not
+    by omission.
+  - The document's own `ConfigValues` declare a selected Input API
+    (`FieldValue`) that is absent from its own declared `FieldOptions` --
+    a real, document-declared contract violation, not a guess -> **`Unsupported`**.
+  - Any catalog-required button `InputMapping` is absent from the document,
+    present-but-unbound or bound with an empty binding element (per
+    `Test-ControlReadinessButtonBindingUsable`, which layers a non-empty-
+    content check on top of `Test-ButtonIsBound` rather than weakening that
+    shared helper), or any catalog-required analog `InputMapping` is absent
+    entirely or present with an empty/missing `AnalogType` (per
+    `Test-ControlReadinessAnalogMappingUsable`) -> **`Missing`**.
+  - Every catalog-required button and analog mapping is present and
+    structurally usable (and, for buttons, bound with real content) ->
+    **`NotVerified`**. This is the ceiling reachable by static evidence:
+    usable, but not a successful bounded control test.
+  **`Verified` is never assigned by this engine** -- confirming a control
+  actually works requires real evidence (an observed successful test) that
+  a static read-only pass cannot manufacture. Registration, wizard
+  completion, a selected Input API, a profile's mere existence, an
+  all-bound profile, or a stored physical-device reference (e.g. a
+  `DirectInputDeviceGuid`) are explicitly not allowed to imply it (issue
+  #255's own wording, and the specific matrix the review rounds required --
+  see `Describe "Control Readiness Engine (issue #255)"`,
+  `Context "Matrix: authoritative requiredness and signals that must not
+  imply Verified"`).
+- **Launch observation**: `NotTestedByTpm`, `ObservedSuccess`,
+  `ObservedFailure` -- TPM does not launch games itself (TeknoParrotUI and
+  BudgieLoader own that path) and has no launch-outcome log to read today,
+  so this dimension always reports `NotTestedByTpm`. The other two states
+  are named as extension points for a future real evidence source; nothing
+  in this engine may synthesize them from another dimension.
+
+**Functions** (`TeknoParrot-Manager.ps1`, immediately before the interactive
+menu's top-level code): `Get-ControlReadinessRegistrationState`,
+`Get-ControlReadinessKnownRequirements`, `Test-ControlReadinessButtonBindingUsable`,
+`Test-ControlReadinessAnalogMappingUsable`, `Get-ControlReadinessControlsState`,
+`Get-ControlReadinessLaunchState`, `Test-ControlReadinessVerificationEvidence`,
+`Get-ControlReadinessSummaryLines`, and `Get-ControlReadinessAssessment`
+(combines the three dimensions into one `[pscustomobject]` row: `Code`,
+`Registration`, `Controls`, `Launch`). `Get-ControlReadinessControlsState`
+reuses `Get-ButtonNodes` / `Test-ButtonIsBound`, the same helpers
+`Write-ControlsStatus` already uses, so bound-detection logic has exactly
+one implementation; `Test-ControlReadinessButtonBindingUsable` layers a
+non-empty-content check on top of `Test-ButtonIsBound` locally (an empty
+`<DirectInputButton></DirectInputButton>` still counts as "bound" for
+`Test-ButtonIsBound`'s own purposes, which is too permissive for readiness
+classification) rather than changing that shared helper's behavior for its
+other, unrelated callers. `Get-ControlReadinessKnownRequirements` builds
+its tiny catalog inline on every call (not as a top-level script variable)
+so the Pester harness's function-body AST extraction -- which only picks up
+function definitions, not top-level script-scope variables -- includes it
+automatically.
+
+**Hard constraints** (do not weaken without an explicit CLAUDE.md /
+ARCHITECTURE.md update and sign-off): never writes a UserProfile or
+GameProfiles XML file; never runs `Invoke-ControlPropagation` or invokes
+TeknoParrotUI's controls wizard; never infers a mapping not already present
+on disk. `$Code` is validated against `^[\w]+$` (the same profile-code
+invariant `Resolve-RegisteredGameFolder` already enforces, see SECURITY.md)
+before being joined into either directory's path, since a future caller may
+source it from an externally-fetched dat index rather than a trusted
+filesystem enumeration.
+
+**Precise I/O surface** (stated exactly, not more broadly than it is): the
+control-readiness XML assessment reads `<code>.xml` under the caller-supplied
+`UserProfilesDir`/`GameProfilesDir` only. Separately,
+`Get-ControlReadinessRegistrationState` performs a read-only `Test-Path`
+existence check against the registered profile's `GamePath` (an arbitrary
+game executable location, not a UserProfiles/GameProfiles path) to
+distinguish `Registered` from `Broken`. No function in this section calls
+or reaches a write-capable path.
+
+**Regression fixture.** Tests use a fixture modeled on the real, published
+After Burner Climax profile (teknogods/TeknoParrotUI
+`GameProfiles/abc.xml`, revision 22): Input API field plus its confirmed
+required input families (Start, analog Joystick X/Y, Throttle Lever, Gun
+Trigger, Missile Trigger, Climax Switch). See `Tests\TeknoParrot-Manager.Tests.ps1`,
+`Describe "Control Readiness Engine (issue #255)"`.
+
+**Display formatting.** `Get-ControlReadinessSummaryLines` turns one
+`Get-ControlReadinessAssessment` row into the exact text lines issue #255's
+candidate pre-1.0 UX specifies (`Game registered successfully` /
+`Controls: Not verified` / `Launch status: Not tested by TPM`, followed by a
+blank line and `Would you like TPM to configure/test controls now?`). It is
+pure string formatting: it never prompts for input and never decides what a
+"yes" answer does. The closing question is included only when the (possibly
+downgraded, see below) controls state is `NotVerified`, `Missing`, or
+`Unknown` -- asking again after `Verified`, or asking when a profile
+declares no controls at all (`Unsupported`), would be noise rather than the
+recovery path issue #255 asked for.
+
+**Fail-closed on `Controls = 'Verified'`.** `Get-ControlReadinessAssessment`
+never produces `Verified` -- this engine has no evidence source that could
+earn it. The only way `Verified` reaches the formatter is a caller building
+an assessment object by hand (a review finding on the initial version of
+this PR: nothing stopped `Get-ControlReadinessSummaryLines` from rendering
+`Controls: Verified` for an arbitrary `[pscustomobject]` with that string
+set, regardless of whether the caller had real evidence). `Get-ControlReadinessSummaryLines`
+now calls `Test-ControlReadinessVerificationEvidence` before trusting
+`Verified`: the assessment must carry a `VerificationEvidence` property that
+is itself a `[pscustomobject]` with a non-empty `Method` (what was tested)
+and a non-empty `ObservedAt` (when). Absent that, the displayed controls
+state is silently downgraded to `NotVerified` -- registration, wizard
+completion, a selected Input API, or a profile's mere existence must never
+imply verified controls, and neither may an unqualified `Verified` string on
+a hand-built object (issue #255's own wording, applied to the formatter's
+input as well as to the engine's output).
+
+**Not yet wired up.** This round adds the pure assessment functions, the
+summary-line formatter, and their tests -- no interactive menu entry, no
+report writer, no change to `Register-Games` or `Invoke-ControlPropagation`.
+Issue #255's own scope is evidence-led investigation, not authorization to
+change TeknoParrot-owned state or to decide the eventual UI surface; that is
+a separate follow-up once the investigation's remaining open questions
+(effective Input API, device enumeration, before/after UserProfile
+comparison) are answered.
+
+---
+
 ## Game registration (Register-Games)
 
 ### Two-executable profiles (v0.99.6)

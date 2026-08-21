@@ -1035,6 +1035,621 @@ Describe "Get-ButtonKey / Test-ButtonIsBound" {
     }
 }
 
+Describe "Control Readiness Engine (issue #255)" {
+    BeforeAll {
+    # Fixture modeled on the real, published After Burner Climax (abc) profile
+    # (teknogods/TeknoParrotUI GameProfiles/abc.xml, revision 22): Input API
+    # field plus the confirmed required input families -- Start, analog
+    # Joystick X/Y, Throttle Lever, Gun Trigger, Missile Trigger, Climax
+    # Switch -- matching Get-ControlReadinessKnownRequirements's 'abc' entry
+    # exactly. $BoundButtonMappings controls which digital button slots carry
+    # a real binding; $OmitAnalog4/$OmitButton2 drop a required mapping
+    # entirely so tests can exercise "required control absent" (Missing)
+    # distinctly from "required control present but unbound" (also Missing).
+    function New-AbcFixtureXml {
+        param(
+            [string]$GamePath = '',
+            [string[]]$BoundButtonMappings = @(),
+            [string[]]$EmptyBoundButtonMappings = @(),
+            [string]$InputApiValue = 'DirectInput',
+            [string[]]$InputApiOptions = @('DirectInput', 'XInput'),
+            [switch]$OmitAnalog4,
+            [switch]$OmitButton2,
+            [switch]$EmptyAnalog4Type,
+            [switch]$OmitAnalog4Type,
+            [switch]$IncludeDeviceGuid,
+            [string]$EmulationProfile = 'AfterBurnerClimax',
+            [string]$ExecutableName = 'abc',
+            [int]$GameProfileRevision = 22,
+            [switch]$FirstTimeSetupComplete
+        )
+
+        function New-BindingXml([string]$Mapping, [int]$Slot) {
+            if ($EmptyBoundButtonMappings -contains $Mapping) {
+                # A binding element that exists but is empty -- structurally
+                # present, not a usable binding. Must not count as bound.
+                return '<DirectInputButton></DirectInputButton>'
+            }
+            if ($BoundButtonMappings -notcontains $Mapping) { return '' }
+            $guid = if ($IncludeDeviceGuid) { "`n            <DirectInputDeviceGuid>{9e573edb-2130-11ec-8001-444553540000}</DirectInputDeviceGuid>" } else { '' }
+            return "<DirectInputButton>$Slot</DirectInputButton>$guid"
+        }
+
+        $startBinding   = New-BindingXml 'P1ButtonStart' 2
+        $gunBinding     = New-BindingXml 'P1Button1' 0
+        $missileBinding = New-BindingXml 'P1Button2' 1
+        $climaxBinding  = New-BindingXml 'P1Button3' 3
+
+        $optionsXml = ($InputApiOptions | ForEach-Object { "<string>$_</string>" }) -join ''
+        $firstTimeXml = if ($FirstTimeSetupComplete) { '<FirstTimeSetupComplete>true</FirstTimeSetupComplete>' } else { '' }
+
+        $analog4TypeXml = if ($OmitAnalog4Type) { '' } elseif ($EmptyAnalog4Type) { '<AnalogType></AnalogType>' } else { '<AnalogType>SWThrottle</AnalogType>' }
+        $analog4Block = if ($OmitAnalog4) { '' } else {
+@"
+        <JoystickButtons>
+            <ButtonName>Throttle Lever</ButtonName>
+            <InputMapping>Analog4</InputMapping>
+            $analog4TypeXml
+        </JoystickButtons>
+"@
+        }
+        $button2Block = if ($OmitButton2) { '' } else {
+@"
+        <JoystickButtons>
+            <ButtonName>Missile Trigger</ButtonName>
+            <InputMapping>P1Button2</InputMapping>
+            $missileBinding
+        </JoystickButtons>
+"@
+        }
+
+        return @"
+<GameProfile>
+    <GamePath>$GamePath</GamePath>
+    <EmulationProfile>$EmulationProfile</EmulationProfile>
+    <GameProfileRevision>$GameProfileRevision</GameProfileRevision>
+    <ExecutableName>$ExecutableName</ExecutableName>
+    <EmulatorType>Lindbergh</EmulatorType>
+    $firstTimeXml
+    <ConfigValues>
+        <FieldInformation>
+            <CategoryName>General</CategoryName>
+            <FieldName>Input API</FieldName>
+            <FieldValue>$InputApiValue</FieldValue>
+            <FieldType>Dropdown</FieldType>
+            <FieldOptions>$optionsXml</FieldOptions>
+        </FieldInformation>
+    </ConfigValues>
+    <JoystickButtons>
+        <JoystickButtons>
+            <ButtonName>Start</ButtonName>
+            <InputMapping>P1ButtonStart</InputMapping>
+            $startBinding
+        </JoystickButtons>
+        <JoystickButtons>
+            <ButtonName>Joystick Analog X</ButtonName>
+            <InputMapping>Analog0</InputMapping>
+            <AnalogType>AnalogJoystick</AnalogType>
+        </JoystickButtons>
+        <JoystickButtons>
+            <ButtonName>Joystick Analog Y</ButtonName>
+            <InputMapping>Analog2</InputMapping>
+            <AnalogType>AnalogJoystickReverse</AnalogType>
+        </JoystickButtons>
+$analog4Block
+        <JoystickButtons>
+            <ButtonName>Gun Trigger</ButtonName>
+            <InputMapping>P1Button1</InputMapping>
+            $gunBinding
+        </JoystickButtons>
+$button2Block
+        <JoystickButtons>
+            <ButtonName>Climax Switch</ButtonName>
+            <InputMapping>P1Button3</InputMapping>
+            $climaxBinding
+        </JoystickButtons>
+    </JoystickButtons>
+</GameProfile>
+"@
+    }
+
+    # Every required button mapping, for tests that need the "structurally
+    # complete" abc fixture (splat as -BoundButtonMappings $AbcRequiredButtons).
+    $script:AbcRequiredButtons = @('P1ButtonStart', 'P1Button1', 'P1Button2', 'P1Button3')
+    }
+
+    Context "Get-ControlReadinessRegistrationState" {
+        BeforeEach {
+            $userProfilesDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $userProfilesDir | Out-Null
+        }
+
+        It "returns Unregistered when no UserProfiles entry exists for the code" {
+            Get-ControlReadinessRegistrationState -Code 'abc' -UserProfilesDir $userProfilesDir | Should -Be 'Unregistered'
+        }
+
+        It "returns Broken when the UserProfiles entry is not well-formed XML" {
+            Set-Content -LiteralPath (Join-Path $userProfilesDir 'abc.xml') -Value '<GameProfile><GamePath>' -Encoding utf8
+            Get-ControlReadinessRegistrationState -Code 'abc' -UserProfilesDir $userProfilesDir | Should -Be 'Broken'
+        }
+
+        It "returns Broken when GamePath is missing" {
+            Set-Content -LiteralPath (Join-Path $userProfilesDir 'abc.xml') -Value (New-AbcFixtureXml) -Encoding utf8
+            Get-ControlReadinessRegistrationState -Code 'abc' -UserProfilesDir $userProfilesDir | Should -Be 'Broken'
+        }
+
+        It "returns Broken when GamePath points at a file that no longer exists" {
+            $missingExe = Join-Path $userProfilesDir 'nowhere\abc.exe'
+            Set-Content -LiteralPath (Join-Path $userProfilesDir 'abc.xml') -Value (New-AbcFixtureXml -GamePath $missingExe) -Encoding utf8
+            Get-ControlReadinessRegistrationState -Code 'abc' -UserProfilesDir $userProfilesDir | Should -Be 'Broken'
+        }
+
+        It "returns Registered when GamePath points at an existing file" {
+            $realExe = Join-Path $userProfilesDir 'abc.exe'
+            Set-Content -LiteralPath $realExe -Value 'stub' -Encoding utf8
+            Set-Content -LiteralPath (Join-Path $userProfilesDir 'abc.xml') -Value (New-AbcFixtureXml -GamePath $realExe) -Encoding utf8
+            Get-ControlReadinessRegistrationState -Code 'abc' -UserProfilesDir $userProfilesDir | Should -Be 'Registered'
+        }
+
+        It "rejects a non-alphanumeric code (path-traversal guard) without joining it into a path" {
+            Get-ControlReadinessRegistrationState -Code '..\..\Windows\system.ini' -UserProfilesDir $userProfilesDir | Should -Be 'Unregistered'
+        }
+    }
+
+    Context "Get-ControlReadinessControlsState" {
+        It "returns Unknown when there is no document to read" {
+            Get-ControlReadinessControlsState $null 'abc' | Should -Be 'Unknown'
+        }
+
+        It "returns Unknown for a profile code with no authoritative requirements catalog entry" {
+            # A profile this engine knows nothing about must never be classified
+            # from raw structure -- "no button nodes" is not evidence of
+            # Unsupported without a requirements catalog to check it against.
+            $doc = [xml]"<GameProfile><GamePath></GamePath></GameProfile>"
+            Get-ControlReadinessControlsState $doc 'someUnknownProfileCode' | Should -Be 'Unknown'
+        }
+
+        It "returns Unknown when no code is supplied at all (legacy positional call)" {
+            $doc = [xml](New-AbcFixtureXml)
+            Get-ControlReadinessControlsState $doc | Should -Be 'Unknown'
+        }
+
+        It "returns Missing when every required button is unbound (the abc template as shipped)" {
+            $doc = [xml](New-AbcFixtureXml)
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'Missing'
+        }
+
+        It "returns NotVerified once every required button and analog mapping is present and bound, without claiming Verified" {
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons)
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'NotVerified'
+        }
+
+        It "never returns Verified -- this engine has no evidence source that could earn it" {
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons)
+            $states = @('Missing', 'Unsupported', 'NotVerified', 'Unknown')
+            $states | Should -Contain (Get-ControlReadinessControlsState $doc 'abc')
+        }
+    }
+
+    Context "Get-ControlReadinessLaunchState" {
+        It "always reports NotTestedByTpm -- TPM does not launch games or read a launch log" {
+            Get-ControlReadinessLaunchState -Code 'abc' | Should -Be 'NotTestedByTpm'
+        }
+    }
+
+    Context "Get-ControlReadinessAssessment (abc regression fixture, issue #255)" {
+        BeforeEach {
+            $userProfilesDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N') + '_up')
+            $gameProfilesDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N') + '_gp')
+            New-Item -ItemType Directory -Path $userProfilesDir | Out-Null
+            New-Item -ItemType Directory -Path $gameProfilesDir | Out-Null
+        }
+
+        It "reproduces the issue #255 evidence: registered+launched but controls not verified" {
+            $realExe = Join-Path $userProfilesDir 'abc.exe'
+            Set-Content -LiteralPath $realExe -Value 'stub' -Encoding utf8
+            Set-Content -LiteralPath (Join-Path $userProfilesDir 'abc.xml') `
+                -Value (New-AbcFixtureXml -GamePath $realExe -BoundButtonMappings $AbcRequiredButtons) -Encoding utf8
+
+            $result = Get-ControlReadinessAssessment -Code 'abc' -UserProfilesDir $userProfilesDir -GameProfilesDir $gameProfilesDir
+
+            $result.Registration | Should -Be 'Registered'
+            $result.Controls     | Should -Be 'NotVerified'
+            $result.Launch       | Should -Be 'NotTestedByTpm'
+        }
+
+        It "falls back to the GameProfiles template's controls when the game is not yet registered" {
+            Set-Content -LiteralPath (Join-Path $gameProfilesDir 'abc.xml') -Value (New-AbcFixtureXml) -Encoding utf8
+
+            $result = Get-ControlReadinessAssessment -Code 'abc' -UserProfilesDir $userProfilesDir -GameProfilesDir $gameProfilesDir
+
+            $result.Registration | Should -Be 'Unregistered'
+            $result.Controls     | Should -Be 'Missing'
+            $result.Launch       | Should -Be 'NotTestedByTpm'
+        }
+
+        It "reports Unknown controls when neither a UserProfile nor a GameProfiles template exists" {
+            $result = Get-ControlReadinessAssessment -Code 'abc' -UserProfilesDir $userProfilesDir -GameProfilesDir $gameProfilesDir
+            $result.Registration | Should -Be 'Unregistered'
+            $result.Controls     | Should -Be 'Unknown'
+        }
+
+        It "keeps Registration=Broken independent of Controls -- a broken GamePath does not force Controls to Unknown" {
+            Set-Content -LiteralPath (Join-Path $userProfilesDir 'abc.xml') `
+                -Value (New-AbcFixtureXml -GamePath (Join-Path $userProfilesDir 'missing.exe') -BoundButtonMappings $AbcRequiredButtons) -Encoding utf8
+
+            $result = Get-ControlReadinessAssessment -Code 'abc' -UserProfilesDir $userProfilesDir -GameProfilesDir $gameProfilesDir
+
+            $result.Registration | Should -Be 'Broken'
+            $result.Controls     | Should -Be 'NotVerified'
+        }
+
+        It "never writes to the UserProfiles or GameProfiles XML it reads (read-only guarantee)" {
+            $realExe = Join-Path $userProfilesDir 'abc.exe'
+            Set-Content -LiteralPath $realExe -Value 'stub' -Encoding utf8
+            $profilePath = Join-Path $userProfilesDir 'abc.xml'
+            Set-Content -LiteralPath $profilePath -Value (New-AbcFixtureXml -GamePath $realExe -BoundButtonMappings $AbcRequiredButtons) -Encoding utf8
+            $before = Get-Content -LiteralPath $profilePath -Raw
+            $beforeWriteTime = (Get-Item -LiteralPath $profilePath).LastWriteTimeUtc
+
+            [void](Get-ControlReadinessAssessment -Code 'abc' -UserProfilesDir $userProfilesDir -GameProfilesDir $gameProfilesDir)
+
+            (Get-Content -LiteralPath $profilePath -Raw) | Should -Be $before
+            (Get-Item -LiteralPath $profilePath).LastWriteTimeUtc | Should -Be $beforeWriteTime
+        }
+
+        It "rejects a non-alphanumeric code (path-traversal guard) end to end" {
+            $result = Get-ControlReadinessAssessment -Code '..\..\secrets' -UserProfilesDir $userProfilesDir -GameProfilesDir $gameProfilesDir
+            $result.Registration | Should -Be 'Unregistered'
+            $result.Controls     | Should -Be 'Unknown'
+        }
+    }
+
+    Context "Get-ControlReadinessSummaryLines" {
+        It "reproduces the issue #255 candidate pre-1.0 UX exactly for the abc regression fixture" {
+            $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'NotVerified'; Launch = 'NotTestedByTpm' }
+            $lines = Get-ControlReadinessSummaryLines -Assessment $assessment
+            ($lines -join "`n") | Should -Be (@(
+                'Game registered successfully'
+                'Controls: Not verified'
+                'Launch status: Not tested by TPM'
+                ''
+                'Would you like TPM to configure/test controls now?'
+            ) -join "`n")
+        }
+
+        It "renders Controls: Verified only when VerificationEvidence proves an actual observed test" {
+            $assessment = [pscustomobject]@{
+                Code = 'abc'; Registration = 'Registered'; Controls = 'Verified'; Launch = 'ObservedSuccess'
+                VerificationEvidence = [pscustomobject]@{ Method = 'Manual play-test, all inputs exercised'; ObservedAt = '2026-08-21T12:00:00Z' }
+            }
+            $lines = Get-ControlReadinessSummaryLines -Assessment $assessment
+            $lines | Should -Not -Contain 'Would you like TPM to configure/test controls now?'
+            $lines | Should -Contain 'Controls: Verified'
+        }
+
+        It "omits the configure/test question when the profile has no controls to verify (Unsupported)" {
+            $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'Unsupported'; Launch = 'NotTestedByTpm' }
+            $lines = Get-ControlReadinessSummaryLines -Assessment $assessment
+            $lines | Should -Not -Contain 'Would you like TPM to configure/test controls now?'
+        }
+
+        It "asks the configure/test question for Missing and Unknown controls, same as NotVerified" -TestCases @(
+            @{ Controls = 'Missing' }
+            @{ Controls = 'Unknown' }
+        ) {
+            param($Controls)
+            $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Unregistered'; Controls = $Controls; Launch = 'NotTestedByTpm' }
+            $lines = Get-ControlReadinessSummaryLines -Assessment $assessment
+            $lines | Should -Contain 'Would you like TPM to configure/test controls now?'
+        }
+
+        It "reflects Unregistered and Broken registration text distinctly from Registered" {
+            (Get-ControlReadinessSummaryLines -Assessment ([pscustomobject]@{ Code = 'abc'; Registration = 'Unregistered'; Controls = 'Missing'; Launch = 'NotTestedByTpm' }))[0] | Should -Be 'Game is not registered'
+            (Get-ControlReadinessSummaryLines -Assessment ([pscustomobject]@{ Code = 'abc'; Registration = 'Broken'; Controls = 'Missing'; Launch = 'NotTestedByTpm' }))[0] | Should -Be 'Game registration is broken'
+        }
+
+        It "registered + Missing controls renders correctly and never reads as ready" {
+            $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'Missing'; Launch = 'NotTestedByTpm' }
+            $lines = Get-ControlReadinessSummaryLines -Assessment $assessment
+            $lines[0] | Should -Be 'Game registered successfully'
+            $lines | Should -Contain 'Controls: Missing'
+            $lines | Should -Contain 'Would you like TPM to configure/test controls now?'
+            ($lines -join "`n") | Should -Not -Match 'Verified'
+            ($lines -join "`n") | Should -Not -Match '(?i)\bready\b'
+        }
+
+        It "renders the ObservedSuccess launch state as an explicit observation" {
+            $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'NotVerified'; Launch = 'ObservedSuccess' }
+            (Get-ControlReadinessSummaryLines -Assessment $assessment) | Should -Contain 'Launch status: Explicitly observed (success)'
+        }
+
+        It "renders the ObservedFailure launch state as an explicit observation" {
+            $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'NotVerified'; Launch = 'ObservedFailure' }
+            (Get-ControlReadinessSummaryLines -Assessment $assessment) | Should -Contain 'Launch status: Explicitly observed (failure)'
+        }
+
+        Context "Fail-closed on caller-supplied Controls = 'Verified' (Codex review, issue #255)" {
+            It "downgrades to Not verified when VerificationEvidence is entirely absent" {
+                $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'Verified'; Launch = 'NotTestedByTpm' }
+                $lines = Get-ControlReadinessSummaryLines -Assessment $assessment
+                $lines | Should -Contain 'Controls: Not verified'
+                $lines | Should -Not -Contain 'Controls: Verified'
+                $lines | Should -Contain 'Would you like TPM to configure/test controls now?'
+            }
+
+            It "downgrades to Not verified when VerificationEvidence is present but null" {
+                $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'Verified'; Launch = 'NotTestedByTpm'; VerificationEvidence = $null }
+                (Get-ControlReadinessSummaryLines -Assessment $assessment) | Should -Contain 'Controls: Not verified'
+            }
+
+            It "downgrades to Not verified when VerificationEvidence is a bare string, not a structured record" {
+                $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'Verified'; Launch = 'NotTestedByTpm'; VerificationEvidence = 'trust me' }
+                (Get-ControlReadinessSummaryLines -Assessment $assessment) | Should -Contain 'Controls: Not verified'
+            }
+
+            It "downgrades to Not verified when VerificationEvidence is missing Method" {
+                $assessment = [pscustomobject]@{
+                    Code = 'abc'; Registration = 'Registered'; Controls = 'Verified'; Launch = 'NotTestedByTpm'
+                    VerificationEvidence = [pscustomobject]@{ ObservedAt = '2026-08-21T12:00:00Z' }
+                }
+                (Get-ControlReadinessSummaryLines -Assessment $assessment) | Should -Contain 'Controls: Not verified'
+            }
+
+            It "downgrades to Not verified when VerificationEvidence is missing ObservedAt" {
+                $assessment = [pscustomobject]@{
+                    Code = 'abc'; Registration = 'Registered'; Controls = 'Verified'; Launch = 'NotTestedByTpm'
+                    VerificationEvidence = [pscustomobject]@{ Method = 'Manual play-test' }
+                }
+                (Get-ControlReadinessSummaryLines -Assessment $assessment) | Should -Contain 'Controls: Not verified'
+            }
+
+            It "downgrades to Not verified when Method/ObservedAt are present but blank" {
+                $assessment = [pscustomobject]@{
+                    Code = 'abc'; Registration = 'Registered'; Controls = 'Verified'; Launch = 'NotTestedByTpm'
+                    VerificationEvidence = [pscustomobject]@{ Method = '  '; ObservedAt = '' }
+                }
+                (Get-ControlReadinessSummaryLines -Assessment $assessment) | Should -Contain 'Controls: Not verified'
+            }
+        }
+    }
+
+    Context "Test-ControlReadinessVerificationEvidence" {
+        It "returns false for a null assessment" {
+            Test-ControlReadinessVerificationEvidence -Assessment $null | Should -Be $false
+        }
+
+        It "returns false when VerificationEvidence is absent" {
+            Test-ControlReadinessVerificationEvidence -Assessment ([pscustomobject]@{ Controls = 'Verified' }) | Should -Be $false
+        }
+
+        It "returns true for a well-formed evidence record" {
+            $assessment = [pscustomobject]@{
+                Controls = 'Verified'
+                VerificationEvidence = [pscustomobject]@{ Method = 'Manual play-test'; ObservedAt = '2026-08-21T12:00:00Z' }
+            }
+            Test-ControlReadinessVerificationEvidence -Assessment $assessment | Should -Be $true
+        }
+    }
+
+    Context "Matrix: authoritative requiredness and signals that must not imply Verified (Codex review, issue #255)" {
+        It "ABC with every authoritative required control present and bound but untested -> NotVerified" {
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons)
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'NotVerified'
+        }
+
+        It "ABC missing a known required analog mapping (Throttle Lever, Analog4) -> Missing" {
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons -OmitAnalog4)
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'Missing'
+        }
+
+        It "ABC missing a known required button mapping (Missile Trigger, P1Button2) -> Missing" {
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings @('P1ButtonStart', 'P1Button1', 'P1Button3') -OmitButton2)
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'Missing'
+        }
+
+        It "ABC complete plus stored device references only -> NotVerified or Unknown, never Verified" {
+            # A stored device GUID is a config value on disk, not evidence the
+            # device is physically connected or that the mapping was ever
+            # exercised.
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons -IncludeDeviceGuid)
+            $result = Get-ControlReadinessControlsState $doc 'abc'
+            $result | Should -BeIn @('NotVerified', 'Unknown')
+            $result | Should -Not -Be 'Verified'
+        }
+
+        It "ABC all-bound / threshold-like profile -> NotVerified, never Verified" {
+            # Mirrors the #255 evidence session: TeknoParrotUI's first-run wizard
+            # marked its controls step complete with no mapping screen opened.
+            # Whether every button happens to be bound or none are, there is no
+            # bound-count threshold anywhere in the engine that promotes
+            # structural completeness to Verified.
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons)
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'NotVerified'
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Not -Be 'Verified'
+        }
+
+        It "ABC with an ambiguous/mismatched profile contract -> Unknown" {
+            # Code 'abc' matches the catalog, but the document's own declared
+            # EmulationProfile does not match what that catalog entry
+            # describes -- the requirements might not even apply here, so
+            # nothing about this document can be classified authoritatively.
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons -EmulationProfile 'SomeOtherGame')
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'Unknown'
+        }
+
+        It "ABC with a GameProfileRevision that does not match the catalog's captured provenance -> Unknown" -TestCases @(
+            @{ Revision = 21 }
+            @{ Revision = 23 }
+        ) {
+            # The catalog entry is bound to GameProfileRevision 22 -- the
+            # exact revision captured during issue #255's evidence session.
+            # A different revision is not assumed to share the same required
+            # controls, so it must not be classified against this entry.
+            param($Revision)
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons -GameProfileRevision $Revision)
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'Unknown'
+        }
+
+        It "ABC with a missing GameProfileRevision element -> Unknown" {
+            $rawXml = (New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons) -replace '<GameProfileRevision>22</GameProfileRevision>', ''
+            $doc = [xml]$rawXml
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'Unknown'
+        }
+
+        It "ABC with an empty required button binding element -> Missing, not bound" {
+            # <DirectInputButton></DirectInputButton> exists structurally but
+            # carries no usable value -- it must not count as a real binding.
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons -EmptyBoundButtonMappings @('P1ButtonStart'))
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'Missing'
+        }
+
+        It "ABC with an empty AnalogType on a required analog mapping -> Missing" {
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons -EmptyAnalog4Type)
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'Missing'
+        }
+
+        It "ABC with a required analog mapping missing its AnalogType element entirely -> Missing" {
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons -OmitAnalog4Type)
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'Missing'
+        }
+
+        It "ABC with positive unsupported/incompatible API evidence -> Unsupported" {
+            # The document's own FieldOptions declare only DirectInput/XInput
+            # as supported; a selected FieldValue outside that set is a real,
+            # document-declared contract violation, not a heuristic guess.
+            $doc = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons -InputApiValue 'RawInput' -InputApiOptions @('DirectInput', 'XInput'))
+            Get-ControlReadinessControlsState $doc 'abc' | Should -Be 'Unsupported'
+        }
+
+        It "FirstTimeSetupComplete = true does not upgrade controls state" {
+            $incomplete = [xml](New-AbcFixtureXml -FirstTimeSetupComplete)
+            Get-ControlReadinessControlsState $incomplete 'abc' | Should -Be 'Missing'
+
+            $complete = [xml](New-AbcFixtureXml -BoundButtonMappings $AbcRequiredButtons -FirstTimeSetupComplete)
+            Get-ControlReadinessControlsState $complete 'abc' | Should -Be 'NotVerified'
+            Get-ControlReadinessControlsState $complete 'abc' | Should -Not -Be 'Verified'
+        }
+    }
+
+    Context "No-write regression (committed snapshot evidence, issue #255)" {
+        # Snapshots SHA-256, LastWriteTimeUtc, and file count for every file
+        # under both UserProfiles and GameProfiles before and after running
+        # the normal assessment path AND a spoofed Controls = 'Verified'
+        # formatter call with no evidence -- proving both paths are truly
+        # read-only, not just documented as such.
+        BeforeAll {
+            function Get-ControlReadinessNoWriteDirSnapshot {
+                param([string]$Dir)
+                Get-ChildItem -LiteralPath $Dir -Recurse -File | Sort-Object FullName | ForEach-Object {
+                    [pscustomobject]@{
+                        Path = $_.FullName
+                        Hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+                        Write = $_.LastWriteTimeUtc
+                    }
+                }
+            }
+        }
+
+        BeforeEach {
+            $userProfilesDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N') + '_up')
+            $gameProfilesDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N') + '_gp')
+            New-Item -ItemType Directory -Path $userProfilesDir, $gameProfilesDir | Out-Null
+
+            $realExe = Join-Path $userProfilesDir 'abc.exe'
+            Set-Content -LiteralPath $realExe -Value 'stub' -Encoding utf8
+            Set-Content -LiteralPath (Join-Path $userProfilesDir 'abc.xml') `
+                -Value (New-AbcFixtureXml -GamePath $realExe -BoundButtonMappings $AbcRequiredButtons) -Encoding utf8
+            Set-Content -LiteralPath (Join-Path $gameProfilesDir 'abc.xml') `
+                -Value (New-AbcFixtureXml) -Encoding utf8
+        }
+
+        It "leaves UserProfiles and GameProfiles byte-identical after a normal assessment run" {
+            $beforeUp = Get-ControlReadinessNoWriteDirSnapshot $userProfilesDir
+            $beforeGp = Get-ControlReadinessNoWriteDirSnapshot $gameProfilesDir
+            $beforeUpCount = @($beforeUp).Count
+            $beforeGpCount = @($beforeGp).Count
+
+            [void](Get-ControlReadinessAssessment -Code 'abc' -UserProfilesDir $userProfilesDir -GameProfilesDir $gameProfilesDir)
+
+            $afterUp = Get-ControlReadinessNoWriteDirSnapshot $userProfilesDir
+            $afterGp = Get-ControlReadinessNoWriteDirSnapshot $gameProfilesDir
+
+            (Compare-Object $beforeUp $afterUp -Property Path, Hash, Write) | Should -BeNullOrEmpty
+            (Compare-Object $beforeGp $afterGp -Property Path, Hash, Write) | Should -BeNullOrEmpty
+            @($afterUp).Count | Should -Be $beforeUpCount
+            @($afterGp).Count | Should -Be $beforeGpCount
+        }
+
+        It "leaves UserProfiles and GameProfiles byte-identical after a spoofed Controls='Verified' formatter call" {
+            $beforeUp = Get-ControlReadinessNoWriteDirSnapshot $userProfilesDir
+            $beforeGp = Get-ControlReadinessNoWriteDirSnapshot $gameProfilesDir
+            $beforeUpCount = @($beforeUp).Count
+            $beforeGpCount = @($beforeGp).Count
+
+            $spoofed = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'Verified'; Launch = 'NotTestedByTpm' }
+            $lines = Get-ControlReadinessSummaryLines -Assessment $spoofed
+            $lines | Should -Contain 'Controls: Not verified'
+
+            $afterUp = Get-ControlReadinessNoWriteDirSnapshot $userProfilesDir
+            $afterGp = Get-ControlReadinessNoWriteDirSnapshot $gameProfilesDir
+
+            (Compare-Object $beforeUp $afterUp -Property Path, Hash, Write) | Should -BeNullOrEmpty
+            (Compare-Object $beforeGp $afterGp -Property Path, Hash, Write) | Should -BeNullOrEmpty
+            @($afterUp).Count | Should -Be $beforeUpCount
+            @($afterGp).Count | Should -Be $beforeGpCount
+        }
+    }
+
+    Context "No-write / no-propagation guarantee (AST-verified, issue #255)" {
+        BeforeAll {
+            $script:productionAst = [System.Management.Automation.Language.Parser]::ParseFile(
+                (Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1'), [ref]$null, [ref]$null)
+        }
+
+        It "defines every expected control-readiness function exactly once" -TestCases (
+            @('Get-ControlReadinessRegistrationState',
+              'Get-ControlReadinessKnownRequirements',
+              'Test-ControlReadinessButtonBindingUsable',
+              'Test-ControlReadinessAnalogMappingUsable',
+              'Get-ControlReadinessControlsState',
+              'Get-ControlReadinessLaunchState',
+              'Get-ControlReadinessAssessment',
+              'Test-ControlReadinessVerificationEvidence',
+              'Get-ControlReadinessSummaryLines') | ForEach-Object { @{ Name = $_ } }
+        ) {
+            param($Name)
+            $matches = $productionAst.FindAll({
+                $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -eq $Name
+            }, $true)
+            @($matches).Count | Should -Be 1
+        }
+
+        It "never calls a write-capable mapping/configuration path from any control-readiness function" -TestCases (
+            @('Get-ControlReadinessRegistrationState',
+              'Get-ControlReadinessKnownRequirements',
+              'Test-ControlReadinessButtonBindingUsable',
+              'Test-ControlReadinessAnalogMappingUsable',
+              'Get-ControlReadinessControlsState',
+              'Get-ControlReadinessLaunchState',
+              'Get-ControlReadinessAssessment',
+              'Test-ControlReadinessVerificationEvidence',
+              'Get-ControlReadinessSummaryLines') | ForEach-Object { @{ Name = $_ } }
+        ) {
+            param($Name)
+            $forbidden = @('Invoke-ControlPropagation', 'Set-ProfileInputApi', 'Save-XmlMaybe')
+            $fn = $productionAst.FindAll({
+                $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -eq $Name
+            }, $true) | Select-Object -First 1
+            $fn | Should -Not -BeNullOrEmpty
+            $calls = $fn.Body.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true) |
+                ForEach-Object { $_.GetCommandName() } | Where-Object { $_ }
+            foreach ($f in $forbidden) { $calls | Should -Not -Contain $f }
+            ($calls | Where-Object { $_ -match 'Wizard' }) | Should -BeNullOrEmpty
+        }
+    }
+}
+
 Describe "Get-GameApiDll" {
     BeforeAll {
         function New-FakeExe([string]$name, [string]$marker) {

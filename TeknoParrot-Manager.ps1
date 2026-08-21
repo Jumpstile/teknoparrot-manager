@@ -11315,6 +11315,388 @@ function Write-ControlsStatus {
     }
 }
 
+# =============================================================================
+# CONTROL READINESS ENGINE (issue #255)
+# =============================================================================
+# Read-only assessment of a single profile code across three independent
+# dimensions: Registration, Controls, and Launch observation. Issue #255's
+# evidence session showed a registration/launch-success path can coexist
+# with controls that were skipped or never verified, and TeknoParrotUI's own
+# first-run wizard let its "Controls configuration completed" checkbox
+# become checked with no mapping screen ever opened (issue #253). Collapsing
+# these into a single "Ready" boolean would hide exactly that failure mode,
+# so each dimension is reported on its own and never combined.
+#
+# Hard constraints (do not weaken without a corresponding CLAUDE.md /
+# ARCHITECTURE.md update and explicit sign-off -- see issue #255):
+#   - Never writes a UserProfile or GameProfiles XML file.
+#   - Never runs control propagation (Invoke-ControlPropagation) or invokes
+#     TeknoParrotUI's controls wizard.
+#   - Never infers a mapping that is not already present on disk.
+#   - "Verified" is never assigned by this engine. Confirming a control
+#     actually works requires real evidence (an observed successful test),
+#     which this static, read-only pass cannot manufacture. Registration,
+#     wizard completion, a selected Input API, or a profile's mere existence
+#     are explicitly NOT allowed to imply Verified (issue #255).
+#
+# Precise I/O surface (do not describe this more broadly than it actually
+# is): the control-readiness XML assessment reads `<code>.xml` under the
+# caller-supplied UserProfilesDir/GameProfilesDir only. Separately,
+# Get-ControlReadinessRegistrationState performs a read-only Test-Path
+# existence check against the registered profile's GamePath (an arbitrary
+# game executable location, not a UserProfiles/GameProfiles path) to
+# distinguish 'Registered' from 'Broken'. Neither of these, nor any other
+# function in this section, calls or reaches a write-capable path.
+
+# Classifies registration state for one profile code from UserProfiles alone.
+# Returns 'Registered', 'Unregistered', or 'Broken'. Never touches GameProfiles
+# templates -- registration is strictly about what TeknoParrot has on record.
+function Get-ControlReadinessRegistrationState {
+    param([Parameter(Mandatory)][string]$Code, [Parameter(Mandatory)][string]$UserProfilesDir)
+
+    # Profile codes are purely alphanumeric (same invariant as
+    # Resolve-RegisteredGameFolder); a $Code sourced from an externally-fetched
+    # dat index is untrusted input, so reject anything else before it is ever
+    # joined into a path rather than let a traversal sequence reach Join-Path.
+    if ($Code -notmatch '^[\w]+$') { return 'Unregistered' }
+
+    $path = Join-Path $UserProfilesDir "$Code.xml"
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return 'Unregistered' }
+
+    try {
+        $doc = Read-Xml $path
+    } catch {
+        return 'Broken'
+    }
+    if ($null -eq $doc.GameProfile) { return 'Broken' }
+
+    $gpNode = $doc.GameProfile.SelectSingleNode('GamePath')
+    if ($null -eq $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { return 'Broken' }
+
+    $gamePath = $gpNode.InnerText.Trim().TrimEnd('\')
+    if (-not (Test-Path -LiteralPath $gamePath -PathType Leaf)) { return 'Broken' }
+
+    return 'Registered'
+}
+
+# Returns the authoritative required-control specification for one profile
+# code, or $null when this engine has no such specification. This is a
+# deliberately tiny, hand-curated catalog -- issue #255's own investigation
+# (After Burner Climax / abc, upstream teknogods/TeknoParrotUI GameProfiles
+# revision 22) is the only source of truth populated so far. A profile code
+# with no entry here returns $null on purpose: Get-ControlReadinessControlsState
+# must not infer requiredness from whatever nodes happen to be present in an
+# arbitrary document, so an unrecognized code always falls through to
+# 'Unknown' rather than guessing from structure. Built inline (not as a
+# top-level script variable) so the Pester harness's function-body AST
+# extraction picks it up automatically.
+function Get-ControlReadinessKnownRequirements {
+    param([string]$Code)
+
+    if ([string]::IsNullOrWhiteSpace($Code)) { return $null }
+
+    $catalog = @{
+        'abc' = [pscustomobject]@{
+            # Provenance: teknogods/TeknoParrotUI, GameProfiles/abc.xml,
+            # GameProfileRevision 22 -- captured during issue #255's evidence
+            # session. This entry is valid ONLY for that exact captured
+            # identity/revision. Cross-checked against the document before
+            # requirements are trusted (see the "ambiguous contract" branch
+            # below): ExecutableName, EmulationProfile, AND
+            # GameProfileRevision must all match, or the document is treated
+            # as Unknown. A code match alone is not enough, and a later
+            # upstream revision of abc.xml is not assumed to share these
+            # requirements -- if teknogods ever ships a revision 23+ with
+            # different required controls, this entry must not silently keep
+            # classifying it against stale requirements; it will instead
+            # read as Unknown until a reviewer adds a matching contract.
+            ExpectedExecutableName   = 'abc'
+            ExpectedEmulationProfile = 'AfterBurnerClimax'
+            ExpectedGameProfileRevision = 22
+            # InputMapping values for Start, Gun Trigger, Missile Trigger,
+            # Climax Switch -- the confirmed required digital controls from
+            # the published abc.xml revision 22.
+            RequiredButtons = @('P1ButtonStart', 'P1Button1', 'P1Button2', 'P1Button3')
+            # InputMapping values for Joystick Analog X/Y and Throttle Lever.
+            RequiredAnalogs = @('Analog0', 'Analog2', 'Analog4')
+        }
+    }
+
+    $key = $Code.ToLowerInvariant()
+    if ($catalog.ContainsKey($key)) { return $catalog[$key] }
+    return $null
+}
+
+# Classifies controls state from an already-loaded profile [xml] document
+# (either a real UserProfile or a read-only GameProfiles template), using
+# the authoritative requirements for $Code. Returns 'Missing', 'Unsupported',
+# 'NotVerified', or 'Unknown'. 'Verified' is intentionally unreachable here
+# -- see the section header above.
+#
+# This deliberately does NOT use raw structural presence as evidence:
+#   - "button nodes exist" does not mean the profile is supported;
+#   - "no button nodes" does not mean the profile is unsupported;
+#   - "some/all buttons bound" does not mean requirements are met or that
+#     controls were ever tested.
+# Every branch below requires either a positive match against the known
+# requirements catalog (Missing/NotVerified) or positive evidence drawn
+# from the document's own declared contract (Unsupported -- a selected
+# Input API that isn't among the profile's own FieldOptions). Without a
+# catalog entry, or without the document matching that entry's expected
+# shape, the honest answer is 'Unknown', not a guess.
+# Test-ButtonIsBound (shared with Write-ControlsStatus/Invoke-ControlPropagation)
+# only checks whether a RawInputButton/DirectInputButton/XInputButton node
+# exists -- an empty element (`<DirectInputButton></DirectInputButton>`)
+# still counts as "bound" for its purposes. That is too permissive for
+# readiness classification: an empty binding element is not a usable
+# binding, so this local wrapper adds a non-empty-content requirement on
+# top of Test-ButtonIsBound rather than weakening the shared helper (which
+# other, unrelated callers may depend on).
+function Test-ControlReadinessButtonBindingUsable {
+    param($btn)
+    if (-not (Test-ButtonIsBound $btn)) { return $false }
+    foreach ($nodeName in @('RawInputButton', 'DirectInputButton', 'XInputButton')) {
+        $n = $btn.SelectSingleNode($nodeName)
+        if ($n -and -not [string]::IsNullOrWhiteSpace($n.InnerText)) { return $true }
+    }
+    return $false
+}
+
+# An analog InputMapping slot is only a structurally complete mapping when
+# it also declares a non-empty AnalogType -- a slot with the mapping name
+# present but AnalogType missing or blank is malformed/incomplete, not a
+# real analog binding, and must not count toward a required analog control.
+function Test-ControlReadinessAnalogMappingUsable {
+    param($btn)
+    $atNode = $btn.SelectSingleNode('AnalogType')
+    return ($null -ne $atNode) -and -not [string]::IsNullOrWhiteSpace($atNode.InnerText)
+}
+
+function Get-ControlReadinessControlsState {
+    param(
+        [Parameter(Position = 0)]$doc = $null,
+        [Parameter(Position = 1)][string]$Code = ''
+    )
+
+    $requirements = Get-ControlReadinessKnownRequirements -Code $Code
+    if ($null -eq $requirements) { return 'Unknown' }
+    if ($null -eq $doc -or $null -eq $doc.GameProfile) { return 'Unknown' }
+
+    # Ambiguous/unverifiable profile contract: the code matched the catalog,
+    # but the document's own declared identity does not match what that
+    # catalog entry describes -- including GameProfileRevision, since a
+    # later upstream revision is not assumed to share the same required
+    # controls. The requirements might not even apply to this document, so
+    # nothing below can be trusted as authoritative.
+    $execNode     = $doc.GameProfile.SelectSingleNode('ExecutableName')
+    $emuNode      = $doc.GameProfile.SelectSingleNode('EmulationProfile')
+    $revisionNode = $doc.GameProfile.SelectSingleNode('GameProfileRevision')
+    $execName = if ($execNode) { $execNode.InnerText.Trim() } else { '' }
+    $emuName  = if ($emuNode) { $emuNode.InnerText.Trim() } else { '' }
+    $revision = $null
+    if ($revisionNode -and -not [string]::IsNullOrWhiteSpace($revisionNode.InnerText)) {
+        [void][int]::TryParse($revisionNode.InnerText.Trim(), [ref]$revision)
+    }
+    if ($execName -ne $requirements.ExpectedExecutableName -or
+        $emuName  -ne $requirements.ExpectedEmulationProfile -or
+        $null -eq $revision -or $revision -ne $requirements.ExpectedGameProfileRevision) {
+        return 'Unknown'
+    }
+
+    # Positive unsupported evidence: the profile's own ConfigValues declare
+    # which Input API values it supports (FieldOptions); a selected
+    # FieldValue outside that set is a real, document-declared contract
+    # violation -- not a heuristic guess about what "should" be supported.
+    $inputApiField = $doc.GameProfile.SelectSingleNode("ConfigValues/FieldInformation[FieldName='Input API']")
+    if ($inputApiField) {
+        $selected = $inputApiField.SelectSingleNode('FieldValue')
+        $optionsNode = $inputApiField.SelectSingleNode('FieldOptions')
+        if ($selected -and -not [string]::IsNullOrWhiteSpace($selected.InnerText) -and $optionsNode) {
+            $options = @($optionsNode.SelectNodes('string') | ForEach-Object { $_.InnerText.Trim() })
+            if ($options.Count -gt 0 -and ($options -notcontains $selected.InnerText.Trim())) {
+                return 'Unsupported'
+            }
+        }
+    }
+
+    $btns = @(Get-ButtonNodes $doc)
+    $byMapping = @{}
+    foreach ($b in $btns) {
+        $imNode = $b.SelectSingleNode('InputMapping')
+        if ($imNode -and -not [string]::IsNullOrWhiteSpace($imNode.InnerText)) {
+            $byMapping[$imNode.InnerText.Trim()] = $b
+        }
+    }
+
+    foreach ($required in $requirements.RequiredButtons) {
+        if (-not $byMapping.ContainsKey($required)) { return 'Missing' }
+        if (-not (Test-ControlReadinessButtonBindingUsable $byMapping[$required])) { return 'Missing' }
+    }
+    foreach ($required in $requirements.RequiredAnalogs) {
+        # There is no established "analog is bound" signal anywhere in this
+        # codebase (Test-ButtonIsBound only covers digital Raw/DirectInput/
+        # XInputButton nodes) -- whether an analog axis is actually wired to
+        # a working physical device is a real-evidence question this static
+        # pass cannot answer. Presence of the required mapping slot is the
+        # only authoritative structural fact available, but presence alone
+        # is not enough: a slot with an empty/missing AnalogType is not a
+        # structurally complete analog mapping either.
+        if (-not $byMapping.ContainsKey($required)) { return 'Missing' }
+        if (-not (Test-ControlReadinessAnalogMappingUsable $byMapping[$required])) { return 'Missing' }
+    }
+
+    # Every known-required control is present and (for digital buttons)
+    # bound. That is usable static evidence, but it is not a successful
+    # bounded control test or a verification record -- see
+    # Test-ControlReadinessVerificationEvidence. Stored device references
+    # (e.g. a DirectInputDeviceGuid) or a fully-bound-beyond-requirements
+    # profile do not change this outcome; there is no threshold that
+    # promotes structural completeness to Verified.
+    return 'NotVerified'
+}
+
+# Classifies launch-observation state for one profile code. TPM does not
+# launch games itself and has no launch-outcome log to read (TeknoParrotUI
+# and BudgieLoader own the launch path), so this dimension is always
+# 'NotTestedByTpm' today. 'ObservedSuccess'/'ObservedFailure' remain as
+# named states for a future real evidence source -- never synthesize them
+# from registration, controls state, or any other proxy.
+function Get-ControlReadinessLaunchState {
+    param([string]$Code)
+    return 'NotTestedByTpm'
+}
+
+# Combines the three independent dimensions for one profile code into a
+# single read-only report row. Controls are read from whichever profile
+# document actually exists on disk: the real UserProfile when registered,
+# otherwise the GameProfiles template (unregistered games have no real
+# bindings, so falling back to the template's unbound buttons correctly
+# yields 'Missing' rather than 'Unknown'). $GameProfilesDir is optional --
+# omit it to assess registration/controls from UserProfiles only.
+function Get-ControlReadinessAssessment {
+    param(
+        [Parameter(Mandatory)][string]$Code,
+        [Parameter(Mandatory)][string]$UserProfilesDir,
+        [string]$GameProfilesDir = ''
+    )
+
+    $registration = Get-ControlReadinessRegistrationState -Code $Code -UserProfilesDir $UserProfilesDir
+
+    # Same code-shape guard as Get-ControlReadinessRegistrationState -- do not
+    # join an unvalidated $Code into either directory's path.
+    $sourcePath = $null
+    if ($Code -match '^[\w]+$') {
+        $userProfilePath = Join-Path $UserProfilesDir "$Code.xml"
+        $templatePath    = if ($GameProfilesDir) { Join-Path $GameProfilesDir "$Code.xml" } else { '' }
+        $sourcePath =
+            if (Test-Path -LiteralPath $userProfilePath -PathType Leaf) { $userProfilePath }
+            elseif ($templatePath -and (Test-Path -LiteralPath $templatePath -PathType Leaf)) { $templatePath }
+            else { $null }
+    }
+
+    $doc = $null
+    if ($sourcePath) {
+        try { $doc = Read-Xml $sourcePath } catch { $doc = $null }
+    }
+
+    return [pscustomobject]@{
+        Code         = $Code
+        Registration = $registration
+        Controls     = Get-ControlReadinessControlsState $doc $Code
+        Launch       = Get-ControlReadinessLaunchState -Code $Code
+    }
+}
+
+# Returns $true only when $Assessment carries a structured VerificationEvidence
+# record that can actually justify Controls = 'Verified'. Get-ControlReadinessAssessment
+# itself never sets Controls to 'Verified' -- this engine has no evidence
+# source that could earn it (see Get-ControlReadinessControlsState) -- so the
+# only way 'Verified' reaches the formatter today is a caller constructing an
+# assessment object by hand. Issue #255 is explicit that registration, wizard
+# completion, a selected Input API, or a profile's mere existence must never
+# imply Verified; this closes the same gap for any externally-built
+# assessment object, not only for this engine's own output. A well-formed
+# record needs a non-empty Method (what test was performed, e.g. "manual
+# play-test") and a non-empty ObservedAt (when it happened) -- both are
+# cheap to fake, but the point is structural: nothing accidentally reaches
+# 'Verified' just by echoing a Controls string back.
+function Test-ControlReadinessVerificationEvidence {
+    param($Assessment)
+
+    if ($null -eq $Assessment) { return $false }
+    $evidenceProp = $Assessment.PSObject.Properties['VerificationEvidence']
+    if ($null -eq $evidenceProp) { return $false }
+
+    $evidence = $evidenceProp.Value
+    if ($null -eq $evidence) { return $false }
+    if ($evidence -isnot [System.Management.Automation.PSCustomObject]) { return $false }
+
+    $methodProp = $evidence.PSObject.Properties['Method']
+    $observedAtProp = $evidence.PSObject.Properties['ObservedAt']
+    if ($null -eq $methodProp -or [string]::IsNullOrWhiteSpace([string]$methodProp.Value)) { return $false }
+    if ($null -eq $observedAtProp -or [string]::IsNullOrWhiteSpace([string]$observedAtProp.Value)) { return $false }
+
+    return $true
+}
+
+# Formats a Get-ControlReadinessAssessment result into the exact user-facing
+# text issue #255's candidate pre-1.0 UX specifies. Pure string formatting
+# only -- it never prompts, never reads input, and never triggers a
+# configure/test action itself; a future caller decides what happens after
+# the question is shown. Returns a string array, one element per display
+# line (including the blank separator line before the closing question),
+# so a caller can Write-Host each line without re-deriving the wording.
+#
+# Fail-closed on Controls = 'Verified': that value is only ever trusted when
+# Test-ControlReadinessVerificationEvidence confirms real evidence backs it.
+# A loose object with Controls = 'Verified' and nothing else is treated the
+# same as an unverified profile -- registration, wizard completion, or the
+# mere presence of the field must never render as verified (issue #255).
+function Get-ControlReadinessSummaryLines {
+    param([Parameter(Mandatory)]$Assessment)
+
+    $controlsState = $Assessment.Controls
+    if ($controlsState -eq 'Verified' -and -not (Test-ControlReadinessVerificationEvidence -Assessment $Assessment)) {
+        $controlsState = 'NotVerified'
+    }
+
+    $registrationText = switch ($Assessment.Registration) {
+        'Registered'   { 'Game registered successfully' }
+        'Unregistered' { 'Game is not registered' }
+        'Broken'       { 'Game registration is broken' }
+        default        { "Game registration: $($Assessment.Registration)" }
+    }
+
+    $controlsText = switch ($controlsState) {
+        'Verified'    { 'Controls: Verified' }
+        'NotVerified' { 'Controls: Not verified' }
+        'Missing'     { 'Controls: Missing' }
+        'Unsupported' { 'Controls: Unsupported' }
+        'Unknown'     { 'Controls: Unknown' }
+        default       { "Controls: $controlsState" }
+    }
+
+    $launchText = switch ($Assessment.Launch) {
+        'NotTestedByTpm'  { 'Launch status: Not tested by TPM' }
+        'ObservedSuccess' { 'Launch status: Explicitly observed (success)' }
+        'ObservedFailure' { 'Launch status: Explicitly observed (failure)' }
+        default           { "Launch status: $($Assessment.Launch)" }
+    }
+
+    $lines = @($registrationText, $controlsText, $launchText)
+
+    # Only offer to configure/test controls when there is something left to
+    # verify. Asking again after Verified, or asking when the profile
+    # declares no controls at all (Unsupported), would be noise rather than
+    # the recovery path issue #255 asked for.
+    if ($controlsState -in @('NotVerified', 'Missing', 'Unknown')) {
+        $lines += ''
+        $lines += 'Would you like TPM to configure/test controls now?'
+    }
+
+    return $lines
+}
+
 Write-Log "Script started (v$ScriptVersion$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
