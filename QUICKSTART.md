@@ -403,13 +403,14 @@ Folder names are normalised before comparison: years like `(2012)`, ISO dates li
 During initial setup the script asks:
 
 ```
-D) Download from GitHub now  (~145 MB)
-Z) I have the ZIP already -- enter path
-F) I have separate dat files -- enter paths
+D) Download from GitHub now  (~145 MB; TPM chooses the safe data location)
+B) Browse/import a ZIP or dat file I already have
 N) Skip
 ```
 
 Both the collection dat and supplementary dat are read directly from inside the ZIP — no extraction needed. The supplementary dat takes priority for any game in both (it represents the version you should install).
+
+Eggman recognition data is separate from TeknoParrotUI's `ParrotData.xml` and DAT/XML setting, and separate from the main/supplementary game ZIP sources and the staging/install folder. The normal first-run download goes to `%LOCALAPPDATA%\TeknoParrotManager\Eggman` without a save-location prompt. Browse/import remains available, and an explicit later update retains the alternate-location save dialog. A valid configured ZIP remains the update destination unless you choose another location.
 
 On repeat runs, the script reuses your last dat choice automatically but offers to check for a newer dat release first.
 

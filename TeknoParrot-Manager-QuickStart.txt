@@ -554,19 +554,24 @@
 
     D) Download from GitHub now  (~145 MB, one-time)
        The script queries the GitHub API for the latest release asset, shows
-       the file name and size, asks where to save it, and downloads it. If
-       GitHub is unreachable or the download fails, it falls through to a
-       manual path prompt.
+       the file name and size, and stores it under the TPM-owned per-user
+       data location (%LOCALAPPDATA%\TeknoParrotManager\Eggman). The normal
+       path does not ask where to save it. If GitHub is unreachable or the
+       download fails, it falls through to a manual browse/import prompt.
 
-    Z) I have the ZIP already -- enter path
-       Point to the TeknoParrot.Collection.*_RomVault.zip on disk. Both the
-       collection dat and supplementary dat are read directly from inside the
-       ZIP -- no extraction needed.
-
-    F) I have separate dat files -- enter paths
-       Enter the collection .dat path, then optionally the supplementary .dat.
+    B) Browse/import a ZIP or dat file I already have
+       Point to the Eggman/RomVault ZIP or a standalone .dat file on disk.
+       Both the collection dat and supplementary dat are read directly from
+       inside the ZIP -- no extraction needed.
 
     N) Skip (you can always re-run setup later to configure it).
+
+  Eggman recognition data is not TeknoParrotUI's ParrotData.xml, not its
+  DAT/XML setting, and not a main or supplementary game ZIP. It is also not
+  the staging/install folder: it is only the index TPM reads to recognize
+  games. On a later explicit update, the save dialog remains available for
+  an alternate location, and a valid configured ZIP stays at its existing
+  path unless you choose another one.
 
   The script uses the dat's <GameProfile> codes to register three types of
   games that would otherwise appear in ACTION REQUIRED:

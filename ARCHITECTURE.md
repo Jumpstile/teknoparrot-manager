@@ -305,6 +305,34 @@ Migrated from `Eggmansworld/Datfiles` (archived, fixed "teknoparrot" tag) to
 `Eggmansworld/TeknoParrot` (date-based tags per release). `Get-EggmanDatRelease` queries
 `.../releases/latest` instead of a fixed tag.
 
+### Eggman recognition-data ownership (issue #252)
+
+The Eggman/RomVault ZIP is TPM recognition data: an index TPM reads to resolve
+ambiguous game/profile identities. It is not TeknoParrotUI's `ParrotData.xml`,
+TeknoParrot's DAT/XML setting, a main or supplementary game ZIP, or the local
+game staging/install directory.
+
+New downloads use the deterministic per-user TPM data root
+`%LOCALAPPDATA%\TeknoParrotManager\Eggman`. `Get-EggmanDatDataRoot` and
+`Get-EggmanDatDefaultSavePath` only resolve that path; they do not create it.
+The shared download pipeline creates the directory only when a download is
+ready to write. Its partial-file cleanup remains responsible for leaving no
+incomplete download behind.
+
+The ordinary first-run `D` choice uses this default without asking the user for
+a save location. The existing `B` browse/import path remains available for a
+ZIP or standalone `.dat` the user already has. On a later explicit update,
+the save dialog remains available as an alternate-location override, and a
+valid configured Eggman ZIP is the default destination so it is not silently
+relocated. Every destination TPM may write is rejected when it overlaps the
+TeknoParrot root, either game ZIP source, or the game staging folder.
+
+Before reuse or replacement, the ZIP must meet the expected byte count (when
+known), open as a readable archive, and contain the collection DAT entry used
+by `Build-DatIndexFromZip`. Validation happens before the shared downloader
+replaces an existing destination. A failed or invalid download therefore
+leaves the previous destination untouched and removes the partial file.
+
 ---
 
 ## Compatibility warnings (Get-CompatibilityWarnings)
