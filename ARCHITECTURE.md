@@ -378,6 +378,23 @@ files at any point. Detection is skipped entirely (not an error) when `-TeknoPar
 isn't supplied, or when the emulator's own folder isn't present yet -- nothing to check.
 Read-only, informational only; never blocks or gates registration.
 
+**Missing pcsx2x6 component (issue #254).** When a registered profile uses
+`Pcsx2x6` and `-TeknoParrotRoot` resolves an existing `pcsx2x6` directory,
+`Get-CompatibilityWarnings` delegates component presence to the existing
+`Get-Pcsx2CrosshairPrerequisiteState` ECVF path. That path reads the
+`pcsx2x6` contract's `env-init` `PresenceDetector` through
+`Test-TPMEmulatorPresentV1`; the warning reports the detector's declared
+relative path as an `ExeMissing` entry when the directory exists but that
+component is absent. A missing root or emulator directory remains
+unclassified, and an unavailable/ambiguous ECVF contract produces no missing
+component claim. The console and saved ACTION REQUIRED summary identify the
+expected path and affected registered profiles, instruct the operator to
+verify or restore the component through the normal TeknoParrot installation or
+update process, and state that TPM did not determine why the file is missing.
+This is a read-only, informational warning: it does not claim antivirus
+causality, block registration, download or repair anything, or write to the
+TeknoParrot root, profiles, configuration, ParrotData, or game folders.
+
 **Pcsx2x6 first-run/crosshair prerequisite automation (issue #173).** Before this round,
 `Invoke-CrosshairSetup`'s Pcsx2x6 branch silently skipped ini handling whenever
 `inis\PCSX2.ini` wasn't found, and computed that path as `<Pcsx2Dir>\inis\PCSX2.ini` --
