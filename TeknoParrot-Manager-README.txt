@@ -43,6 +43,7 @@
     CONTROL PROPAGATION
     PROPAGATE CONTROLS              -- mode 3
     DEVICE SURVEY
+    CONTROL CONTEXTS AND FRONTEND LAUNCH
     FRONTEND LAUNCHER INTEGRATION
       LAUNCHBOX
       HYPERSPIN 2
@@ -174,9 +175,11 @@
     recognises it and does not create a duplicate.
 
   - Control propagation. Bind ONE game of each control type once; the script
-    copies those controls to every other game of the same type, matched so a
-    wheel value can never land on a gun. Aim-mode settings (relative input,
-    sensitivity, hide-cursor) are also carried across.
+    can copy those known controls to other games of the same type, matched so
+    a wheel value can never land on a gun. Aim-mode settings (relative input,
+    sensitivity, hide-cursor) are also carried across. This is a bounded
+    reference-copy aid, not universal device detection or complete mapping
+    for every shooter.
 
   - Device survey. Asks which controls you have and prints a tailored plan of
     which game to bind with which device.
@@ -395,12 +398,13 @@
                        this is used instead of fuzzy matching for ambiguous
                        games, since it's exact rather than a best guess.
 
-  Control propagation   This script's way of avoiding rebinding every game
-                       in a control family by hand: bind ONE game per type
-                       (button, driving, lightgun, trackball, analog) in
-                       TeknoParrot's own UI, and this script copies those
-                       same bindings to every other unbound game of that
-                       type. See CONTROL PROPAGATION below.
+  Control propagation   This script's bounded way of avoiding rebinding every
+                       game in a control family by hand: bind ONE game per
+                       type (button, driving, lightgun, trackball, analog) in
+                       TeknoParrot's own UI, and this script can copy those
+                       known bindings to other unbound games of that type.
+                       It is not universal device detection or complete
+                       shooter mapping. See CONTROL PROPAGATION below.
 
   Archetype / reference game
                        A game with enough buttons already bound (manually,
@@ -850,14 +854,16 @@
 
   Binding controls for every game by hand is tedious when many games use the
   same device. Instead, bind ONE game of each control type, and the script
-  copies those controls to the rest.
+  can copy those known controls to the rest. This is a bounded assist, not
+  universal device detection or complete mapping for every shooter.
 
   How to use it:
 
     1. In TeknoParrotUi.exe, fully bind one game of each control type you
        use -- a lightgun game, a driving game, a fighting game, a trackball
        game, and so on. Bind everything: buttons, axes, Test, Service, Coin,
-       Start. Good games to start with:
+       Start, and any game-specific controls you intend to use. Good games to
+       start with:
 
          Fighting / buttons    Street Fighter III, BlazBlue, Tekken 7,
                                Dead or Alive 5
@@ -914,9 +920,19 @@
   What stays manual (and is reported):
 
     - Game-specific controls that do not exist in the game you bound.
+    - Controls that are only partially bound. Shooter games may use different
+      secondary controls such as action, grenade, reload, Start, Service, or
+      Test; map and test those in TeknoParrotUI.
     - Any game whose control type you have not yet bound a reference for.
       These appear in the ACTION REQUIRED section at the end of the run
       with the control type name and a suggestion of which game to bind.
+
+  A copied or propagated status means a known value was copied; it does not
+  mean the target's controls are complete or verified. Missing means an
+  expected control is absent, partial means some expected controls are
+  present but others remain, and unknown or unsupported means there is not
+  enough reliable evidence to claim readiness. Verified means the required
+  controls were mapped and tested in the launch path you intend to use.
 
   After propagation, launch ONE updated game and test it before trusting the
   rest. If anything is wrong, restore from the backup made at the start of
@@ -948,6 +964,52 @@
 
   If you have no lightgun, gun games can be aimed with the Windows mouse
   cursor (a mouse or trackball, absolute aim) or with the Xbox right stick.
+
+
+-------------------------------------------------------------------------------
+  CONTROL CONTEXTS AND FRONTEND LAUNCH
+-------------------------------------------------------------------------------
+
+  TeknoParrot and a game frontend operate in separate control and launch
+  contexts. A successful direct launch proves the direct TeknoParrot path
+  only; it does not prove that a RetroBat or other frontend launch will
+  preserve the same settings or input behavior.
+
+  Direct TeknoParrot
+    TeknoParrotUI launches the game and reads the selected profile from
+    UserProfiles. Configure and test the game's controls here first.
+
+  RetroBat or another frontend
+    The frontend selects and launches the game and may add its own command
+    line, focus, and input path. TPM can support folder naming, registration,
+    and readiness reporting, but direct TeknoParrot success does not prove
+    frontend behavior. Test both paths separately.
+
+  Mouse and keyboard
+    A profile may accept mouse/keyboard through RawInput or another
+    profile-specific mode. This is separate from controller and light-gun
+    setup; direct mouse success does not prove that a frontend or a gun setup
+    will work.
+
+  Controller
+    XInput, DirectInput, and RawInput controller configurations are separate
+    choices and may require per-game mapping. A controller being present does
+    not prove that every shooter uses the expected controls.
+
+  Light gun
+    A Sinden or other light gun is a separate pointer/device context. Light-
+    gun setup is not the same as mouse or controller setup. Crosshairs or
+    calibration do not, by themselves, verify in-game controls.
+
+  For an existing or partly configured library, do not delete or reset it
+  just because one path is unclear. Point TPM at the correct folders, use
+  Preview/Dry Run or the health check, preserve the automatic backups, and
+  test the direct and frontend paths separately.
+
+  TPM can register games, repair known paths, report readiness, and copy
+  known mappings. It does not yet detect "my gun/controller" and map every
+  shooter correctly. A broader device/context-aware mapping system is a
+  post-1.0 direction, not a 1.0 promise.
 
 
 -------------------------------------------------------------------------------
@@ -1778,6 +1840,13 @@
   Note: the old folders are never deleted automatically. You can remove them
   manually once the new .teknoparrot folders are confirmed working.
 
+  Folder naming and registration do not own frontend controls. RetroBat can
+  add its own launch, focus, and input behavior around the TeknoParrot
+  profile. If a shooter works when launched directly from TeknoParrotUI but
+  not from RetroBat, compare the frontend's selected game, command line,
+  focus, and input settings and test them as a separate path. Do not treat
+  the direct result as proof of frontend readiness.
+
 
 -------------------------------------------------------------------------------
   THUMBNAIL DOWNLOAD
@@ -1948,6 +2017,14 @@
   This is particularly useful when a game aims wrong days or weeks later --
   open the file and you can immediately see whether controls were propagated
   and from which reference game, without re-running the script.
+
+  Read the control facts separately: copied/propagated means a known value
+  was copied from a reference; missing means an expected control is absent;
+  partial means some expected controls are present but others remain;
+  unknown or unsupported means TPM cannot make a reliable readiness claim;
+  and verified means the required controls were mapped and tested in the
+  target launch path. This propagation inventory never changes a copied
+  status into verified.
 
 
 -------------------------------------------------------------------------------
@@ -2238,8 +2315,15 @@
     run outside this script.
 
   - Light guns. A gun such as the Sinden presents to Windows as a pointer and
-    is bound in RawInput mode. Bind it on your lightgun reference game and it
-    propagates; gun calibration lives in the gun's own software.
+    is bound in RawInput mode. It is a separate device context from mouse,
+    keyboard, or controller input. Bind it on your lightgun reference game
+    and known settings can propagate; gun calibration lives in the gun's own
+    software. Crosshairs or calibration do not prove in-game controls.
+
+  - Shooter secondary controls. Different games may use different inputs for
+    action, grenade, reload, Start, Service, or Test. Do not assume that aim
+    and fire being present means the game is fully mapped; map and test the
+    target game's required controls in the launch path you intend to use.
 
 
 -------------------------------------------------------------------------------
@@ -2361,6 +2445,20 @@
     and re-run propagation after correcting the reference game's bindings in
     TeknoParrotUI.
 
+  A game works directly in TeknoParrotUI but not from RetroBat or another
+  frontend.
+    Treat the frontend as a separate launch and input path. Confirm that it
+    selects the same profile and game folder, then compare its command line,
+    focus, and input settings. TPM's RetroBat support covers folder naming
+    and registration conventions; it does not own the frontend's input
+    routing.
+
+  A shooter aims or fires but a secondary control is missing.
+    Do not assume the reference mapping is complete. Check the target game's
+    action, grenade, reload, Start, Service, Test, and other game-specific
+    controls in TeknoParrotUI, then map and test them in the same launch path
+    you intend to use.
+
   A game appears twice in TeknoParrotUI.
     Two UserProfile files exist for the same game. This can happen if the
     game was registered manually and then again by the script. Delete one of
@@ -2389,6 +2487,11 @@
   - It does not invent control bindings. A control is set only when a
     reference game you have bound already has it. Everything else is left
     for you and reported in the ACTION REQUIRED summary.
+
+  - It does not provide universal device detection, controller/light-gun
+    profile switching, or complete automatic mapping for every shooter.
+    Direct TeknoParrot, frontend launch, mouse/keyboard, controller, and
+    light-gun setups remain separate contexts that must be tested separately.
 
   - It does not provide game files. You must own or otherwise have lawful
     rights to the original arcade PCB and any ROM/game data you use. TPM does

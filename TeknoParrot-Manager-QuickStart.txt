@@ -3,8 +3,8 @@
   Author: Jumpstile
 ===============================================================================
 
-  Registers your games with TeknoParrot and copies controls across games of
-  the same type. Full details: TeknoParrot-Manager-README.txt.
+  Registers your games with TeknoParrot and can copy known controls across
+  games of the same type. Full details: TeknoParrot-Manager-README.txt.
 
   Unfamiliar term (GamePath, UserProfile, archetype, etc.)? See the
   GLOSSARY section near the top of TeknoParrot-Manager-README.txt.
@@ -160,7 +160,8 @@
   COPY YOUR CONTROLS (OPTIONAL BUT RECOMMENDED)
   ---------------------------------------------
   1. In TeknoParrot, fully bind ONE game of each control type you use.
-     Bind everything: buttons, axes, Test, Service, Coin, Start.
+     Bind everything: buttons, axes, Test, Service, Coin, Start, and any
+     game-specific controls you intend to use.
 
      Good games to bind first:
        Fighting / buttons  Street Fighter III, BlazBlue, Tekken 7
@@ -169,9 +170,52 @@
        Trackball           Golden Tee Live, Silver Strike Bowling
 
   2. Re-run this script. After registration it runs propagation automatically,
-     copying those controls to every other game of the same type.
+     copying those known controls to other games of the same type.
 
   3. Launch ONE updated game and test it before trusting the rest.
+
+  Shooter games may use different secondary controls such as action, grenade,
+  reload, Start, Service, or Test. A copied or propagated status is not the
+  same as verified; map and test the target game's required controls in
+  TeknoParrotUI.
+
+
+  CONTROL CONTEXTS AND FRONTEND LAUNCH
+  ------------------------------------
+  Direct TeknoParrot, a frontend such as RetroBat, mouse/keyboard, controller,
+  and future light-gun setups are separate control contexts:
+
+  Direct TeknoParrot       TeknoParrotUI reads the selected profile from
+                           UserProfiles. Configure and test controls here
+                           first.
+
+  RetroBat / frontend      The frontend adds its own game selection, launch,
+                           focus, and input path. A game working directly does
+                           not prove that the frontend preserves the same
+                           behavior. Test both paths separately.
+
+  Mouse and keyboard       A profile may use RawInput or another
+                           profile-specific mode. This is separate from
+                           controller and light-gun setup.
+
+  Controller               XInput, DirectInput, and RawInput configurations
+                           are separate choices and may need per-game mapping.
+
+  Light gun               A Sinden or other light gun is a separate
+                          pointer/device context. Crosshairs or calibration
+                          do not prove in-game controls.
+
+  For an existing or partly configured library, do not delete or reset it just
+  because one path is unclear. Point TPM at the correct folders, use Preview/
+  Dry Run or the health check, preserve backups, and test direct and frontend
+  paths separately.
+
+  TPM can register games, repair known paths, report readiness, and copy known
+  mappings. It does not yet detect a gun/controller and map every shooter
+  correctly. Keep these facts distinct: copied/propagated, missing, partial,
+  unknown/unsupported, and verified. Only mapped and tested controls in the
+  intended launch path are verified. A broader device/context-aware mapping
+  system is a post-1.0 direction.
 
 
   IMPORTANT
@@ -195,6 +239,16 @@
   Controls wrong after       Restore from backup (mode 11), or delete the
   propagation                game's .xml and re-run after fixing the
                              reference game's bindings in TeknoParrotUI.
+
+  Works directly but not     Treat RetroBat or another frontend as a separate
+  from RetroBat              launch/input path. Confirm the same profile and
+                             folder, then compare command line, focus, and
+                             input settings.
+
+  Shooter is missing a       Check action, grenade, reload, Start, Service,
+  secondary control          Test, and other game-specific controls in
+                             TeknoParrotUI; map and test them for the intended
+                             launch path.
 
   Game won't launch (Raw     Check ACTION REQUIRED -- the script auto-detects
   Thrills, e.g. H2Overdrive, if that game's install path is too long for its
@@ -396,6 +450,10 @@
 
   To switch later: delete TeknoParrot-Manager.config.json and re-run, or set "RetroBat": true
   in the JSON. To re-extract with the new naming: also delete syncstate.json.
+  Folder naming and registration do not own frontend controls. If a game works
+  directly from TeknoParrotUI but not from RetroBat, compare the frontend's
+  selected game, command line, focus, and input settings; treat the two launch
+  paths separately.
   Full details: TeknoParrot-Manager-README.txt.
 
 

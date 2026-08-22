@@ -13,6 +13,7 @@ Full documentation: [README.md](README.md)
 - [Mode List](#mode-list)
 - [Game Selection (AutoSync)](#game-selection-autosync)
 - [Copy Your Controls](#copy-your-controls)
+- [Control Contexts and Frontend Launch](#control-contexts-and-frontend-launch)
 - [Crosshair Setup](#crosshair-setup)
 - [ReShade Visual Enhancements](#reshade-visual-enhancements)
 - [dgVoodoo2 Legacy Compatibility](#dgvoodoo2-legacy-compatibility)
@@ -111,7 +112,7 @@ In Browse or Search: type numbers or ranges (e.g. `1,3,5-7`) to add games to you
 
 ## Copy Your Controls
 
-Bind ONE game of each control type in TeknoParrotUI — then the script copies those bindings to every other game of the same type automatically.
+Bind ONE game of each control type in TeknoParrotUI — then the script can copy those known bindings to other games of the same type. This is a bounded reference-copy aid, not universal device detection or complete mapping for every shooter.
 
 **Good reference games to bind first:**
 
@@ -123,9 +124,27 @@ Bind ONE game of each control type in TeknoParrotUI — then the script copies t
 | Trackball | Golden Tee Live, Silver Strike Bowling |
 
 **Steps:**
-1. In TeknoParrotUI, fully bind one game of each type — buttons, axes, Test, Service, Coin, Start
+1. In TeknoParrotUI, fully bind one game of each type — buttons, axes, Test, Service, Coin, Start, and any game-specific controls you intend to use
 2. Re-run this script — propagation runs automatically after registration
 3. Launch ONE updated game and test it before trusting the rest
+
+Shooter games may use different secondary controls such as action, grenade, reload, Start, Service, or Test. A copied or propagated status is not the same as verified; map and test the target game's required controls in TeknoParrotUI.
+
+---
+
+## Control Contexts and Frontend Launch
+
+Direct TeknoParrot, a frontend such as RetroBat, mouse/keyboard, controller, and future light-gun setups are separate control contexts:
+
+- **Direct TeknoParrot:** TeknoParrotUI reads the selected profile from `UserProfiles`. Configure and test controls here first.
+- **RetroBat / other frontend:** the frontend adds its own game selection, launch, focus, and input path. A game working directly does not prove that the frontend preserves the same behavior. Test both paths separately.
+- **Mouse and keyboard:** a profile may use RawInput or another profile-specific mode. This is separate from controller and light-gun setup.
+- **Controller:** XInput, DirectInput, and RawInput configurations are separate choices and may need per-game mapping.
+- **Light gun:** a Sinden or other light gun is a separate pointer/device context. Crosshairs or calibration do not prove in-game controls.
+
+For an existing or partly configured library, do not delete or reset it just because one path is unclear. Point TPM at the correct folders, use Preview/Dry Run or the health check, preserve backups, and test direct and frontend paths separately.
+
+TPM can register games, repair known paths, report readiness, and copy known mappings. It does not yet detect a gun/controller and map every shooter correctly. Keep these facts distinct: copied/propagated, missing, partial, unknown/unsupported, and verified. Only mapped and tested controls in the intended launch path are verified. A broader device/context-aware mapping system is a post-1.0 direction.
 
 ---
 
@@ -297,6 +316,8 @@ Answer **Y** and game folders are extracted as `GameName.teknoparrot` instead of
 
 **To switch an existing library:** delete `TeknoParrot-Manager.config.json` and re-run. To re-extract with the new naming, also delete `TeknoParrot-Manager.syncstate.json` from your staging folder.
 
+Folder naming and registration do not own frontend controls. If a game works directly from TeknoParrotUI but not from RetroBat, compare the frontend's selected game, command line, focus, and input settings; treat the two launch paths separately.
+
 ---
 
 ## Preview / Dry-Run Mode
@@ -452,6 +473,7 @@ The log also records a download audit trail: ReShade installer source/filename/v
 - Fuzzy name matching auto-registers most NESiCAxLive and other shared-exe games. The similarity score is shown for spot-checking.
 - Games already bound are always left untouched. Game-specific controls that don't exist in the reference game are left for manual setup and reported in ACTION REQUIRED.
 - After every run, `TeknoParrot-Manager-controls.txt` is written next to the script: every game, its control family, propagation source, bound count, and any buttons still set manually. It is a propagation inventory, not proof that controls have been verified; review the ACTION REQUIRED controls status and map/test required controls before treating a game as ready.
+- A copied/propagated control value is not the same as a verified control. Missing means an expected control is absent; partial means some expected controls are present; unknown/unsupported means readiness cannot be claimed; verified means the required controls were mapped and tested in the target launch path.
 - After registering, the script offers to repair any broken game paths automatically.
 - On later runs the script remembers your settings — press Y to reuse, N to reconfigure.
 - To fix a mis-classified control family (e.g. FamilyGuyBowling auto-detected as driving when it should be trackball), add it to the `familyOverride` section of `overrides.json`.
@@ -467,6 +489,8 @@ The log also records a download audit trail: ReShade installer source/filename/v
 | Game not in TeknoParrot | Check ACTION REQUIRED — may need manual registration or needs to be extracted first. |
 | Extraction keeps failing | Check the log for the specific error. Verify free space and that the ZIP is not corrupted. |
 | Controls wrong after propagation | Restore from backup (mode 11), or delete the game's `.xml` and re-run after fixing the reference game's bindings in TeknoParrotUI. |
+| Works directly but not from RetroBat | Treat the frontend as a separate launch/input path. Confirm the same profile and folder, then compare its command-line, focus, and input settings. |
+| Shooter is missing a secondary control | Check action, grenade, reload, Start, Service, Test, and other game-specific controls in TeknoParrotUI; map and test them for the intended launch path. |
 | Wrong fuzzy match | Delete the game's `.xml` from `UserProfiles` and add a `forceArchetype` entry in `overrides.json`. |
 | Game appears twice in TeknoParrotUI | Delete one of the duplicate `.xml` files from `UserProfiles` — keep the one with the correct path and any bindings already set. |
 | `[UNLOGGED]` on console | Log file is inaccessible — check that the TeknoParrot folder is not read-only and you have write permission. |
