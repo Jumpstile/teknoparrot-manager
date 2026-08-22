@@ -5,10 +5,15 @@ Status: standalone helper merged; menu integration is part of the published v1.0
 Current published release: v1.0-RC7.
 Release archive: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7
 Previous published public release: v1.0-RC6 (historical). Final Version 1.0 remains unpublished.
+Publication note (2026-08-22): GitHub serves the immutable RC7 asset as
+`TeknoParrot.Manager.v1.0.RC7.zip` after filename normalization. The Scripts
+mirror uses that exact published filename. The verified asset is 4,862,794
+bytes with SHA-256
+`45D14469CF750AC14B0F4113FB4117E2DA1C80F612C335D66B61C6E3FE5ABF84`.
 The v0.99.38 and v1.0-RC3 live-verification references below are historical
 and are not current download instructions. The asset-name pattern is
-version-agnostic; staged RC7 validation reruns the package validator against
-the exact candidate asset before publication.
+version-agnostic; published RC7 validation runs the package validator against
+the exact GitHub asset and its Scripts mirror copy.
 
 TeknoParrot Manager uses a **manual, backup-first auto-update model**.
 
@@ -27,19 +32,19 @@ signer or digest check that the implementation does not perform.
 An independent engineering review found real blockers on the first pass. The packaging, validation, TLS, and testability blockers were fixed and retested against live `Jumpstile/teknoparrot-manager` releases under Windows PowerShell 5.1 before the menu integration was added.
 
 1. **Release packaging mismatch -- fixed**
-   - `-AssetNamePattern` now defaults to `^TeknoParrot\.Manager\.v.*\.zip$`, matching the staged candidate asset name `TeknoParrot.Manager.v1.0.RC7.zip` without claiming that asset is published.
+   - `-AssetNamePattern` now defaults to `^TeknoParrot\.Manager\.v.*\.zip$`, matching the published GitHub asset name `TeknoParrot.Manager.v1.0.RC7.zip`.
    - Historical live verification against v1.0-RC3 confirmed the updater selected
-     the real release asset. The version-agnostic pattern is also exercised by
-     the staged RC7 package validation; no older RC is an active download target.
+    the real release asset. The version-agnostic pattern is also exercised by
+    the published RC7 package validation; no older RC is an active download target.
 
 2. **Content validation before replacement -- fixed**
    - The updater extracts only the `TeknoParrot-Manager.ps1` entry from the downloaded zip (via `Expand-TpmReleaseZipEntry`), never the whole archive.
    - Before replacing the live script, `Test-TpmExtractedScript` verifies: the file exists, is non-empty, does not begin with a zip signature (`PK`), contains the `TeknoParrot Manager` marker, and contains a `$ScriptVersion = "..."` assignment.
    - Historical live verification: a full -Apply against v0.99.38 previously
      downloaded, extracted, validated, and installed the genuine script. That
-    release is retired; RC6 remains the last published asset. RC7 validation
-    uses an exact locally staged candidate asset before publication and does
-    not change updater behavior.
+    release is retired; RC6 is historical. RC7 validation uses the exact
+    published GitHub asset and its mirror copy and does not change updater
+    behavior.
 
 3. **PowerShell 5.1 TLS hardening -- fixed**
    - `Enable-TpmTls12` forces `Tls12` into `[Net.ServicePointManager]::SecurityProtocol` before any GitHub API/download call, guarded to skip on PowerShell 6+ where it is unnecessary.

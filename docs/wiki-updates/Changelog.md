@@ -4,6 +4,11 @@
 
 - Publication: v1.0 RC7 is published. Release archive:
   https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7
+- Asset filename: GitHub serves the immutable asset as
+  `TeknoParrot.Manager.v1.0.RC7.zip` after filename normalization. The
+  verified SHA-256 is
+  `45D14469CF750AC14B0F4113FB4117E2DA1C80F612C335D66B61C6E3FE5ABF84` and
+  the size is 4,862,794 bytes.
 - Readiness: RC7 carries the read-only controls-readiness handoff and
   contract-backed missing-component warnings. When controls are Missing, Not
   verified, Unsupported, or Unknown, ACTION REQUIRED directs the user to open
