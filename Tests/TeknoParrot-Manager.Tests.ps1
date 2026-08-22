@@ -212,6 +212,8 @@ public static class TpmFileIdentityInterop {
         } finally { CloseHandle(handle); }
     }
 }
+
+
 '@
     }
 
@@ -8492,5 +8494,83 @@ Describe "TeknoParrot-Manager.ps1 -Unattended real child-process fixture (issue 
         # -Unattended launch with no mode chosen already does -- not crash.
         $process.ExitCode | Should -Be 1 -Because 'no UnattendedMode means no mode was chosen; this must be the pre-existing safe failure, not a new crash'
         $stdout | Should -Match 'Mode must be set before starting' -Because 'this is the pre-existing, expected safe failure for no mode chosen'
+    }
+}
+
+Describe "Invoke-ValidationReport" {
+    BeforeEach {
+        $script:ValidationReportMode = $false
+        Mock Get-ControlReadinessActionItems { @() }
+        Mock Get-CompatibilityWarnings {
+            [pscustomobject]@{
+                PathTooLong = @(); DllMismatch = @(); GpuIncompatible = @(); BiosMissing = @(); ExeMissing = @(); ComponentMissing = @()
+            }
+        }
+    }
+
+    It "writes JSON and text evidence without changing application files" {
+        $root = Join-Path $TestDrive 'validation-root'
+        $games = Join-Path $TestDrive 'validation-games'
+        $reportPath = Join-Path $TestDrive 'reports\rc8-validation.json'
+        New-Item -ItemType Directory -Path (Split-Path -Parent $reportPath) -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $root 'GameProfiles'), (Join-Path $root 'UserProfiles'), $games -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $root 'TeknoParrotUi.exe'), 'fixture')
+
+        $result = Invoke-ValidationReport -BaseDirectory $TestDrive -RequestedPath $reportPath `
+            -TeknoParrotRoot $root -GamesInstallFolder $games -DryRunRequested $true -NoPromptsRequested $true
+
+        $result.ExitCode | Should -Be 0
+        $result.Report.Result | Should -Be 'PASS'
+        Test-Path -LiteralPath $result.JsonPath -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath $result.TextPath -PathType Leaf | Should -BeTrue
+        @($result.Report.ApplicationFilesChanged).Count | Should -Be 0
+        @($result.Report.FilesWouldChange).Count | Should -Be 0
+        $result.Report.WriteMode | Should -Be 'ReadOnly except report files'
+        $result.Report.NetworkAccess | Should -Be 'Not requested'
+        $result.Report.GameLaunchRequested | Should -BeFalse
+        $result.Report.LibraryHealth.State | Should -Be 'Ready'
+    }
+
+    It "preserves control readiness distinctions and surfaces them as action required" {
+        $root = Join-Path $TestDrive 'controls-root'
+        $games = Join-Path $TestDrive 'controls-games'
+        New-Item -ItemType Directory -Path (Join-Path $root 'GameProfiles'), (Join-Path $root 'UserProfiles'), $games -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $root 'TeknoParrotUi.exe'), 'fixture')
+
+        Mock Get-ControlReadinessActionItems {
+            [pscustomobject]@{
+                Code = 'abc'
+                Assessment = [pscustomobject]@{ Registration = 'Registered'; Controls = 'Missing'; Launch = 'NotTestedByTpm' }
+                SummaryLines = @('Controls: Missing')
+            }
+        }
+
+        $result = Invoke-ValidationReport -BaseDirectory $TestDrive `
+            -TeknoParrotRoot $root -GamesInstallFolder $games -DryRunRequested $true -NoPromptsRequested $true
+
+        $result.ExitCode | Should -Be 2
+        $result.Report.Result | Should -Be 'ACTION_REQUIRED'
+        $result.Report.ControlsReadiness.StateLegend | Should -Contain 'Copied'
+        $result.Report.ControlsReadiness.StateLegend | Should -Contain 'Partial'
+        $result.Report.ControlsReadiness.StateLegend | Should -Contain 'Unknown'
+        $result.Report.ControlsReadiness.StateLegend | Should -Contain 'Verified'
+        $result.Report.ControlsReadiness.ActionItems[0].Controls | Should -Be 'Missing'
+        $result.Report.ControlsReadiness.ActionItems[0].PropagationStatus | Should -Be 'Unknown'
+        (@($result.Report.ActionRequired | Where-Object { $_.Category -eq 'Controls' })).Count | Should -Be 1
+    }
+
+    It "fails with a distinct validation exit code when required paths are unresolved" {
+        $missingRoot = Join-Path $TestDrive 'does-not-exist-root'
+        $missingGames = Join-Path $TestDrive 'does-not-exist-games'
+        $reportPath = Join-Path $TestDrive 'missing-validation.json'
+
+        $result = Invoke-ValidationReport -BaseDirectory $TestDrive -RequestedPath $reportPath `
+            -TeknoParrotRoot $missingRoot -GamesInstallFolder $missingGames -DryRunRequested $true -NoPromptsRequested $true
+
+        $result.ExitCode | Should -Be 3
+        $result.Report.Result | Should -Be 'FAIL'
+        @($result.Report.Errors).Count | Should -BeGreaterThan 0
+        Test-Path -LiteralPath $result.JsonPath -PathType Leaf | Should -BeTrue
+        $result.Report.ApplicationFilesChanged | Should -BeNullOrEmpty
     }
 }

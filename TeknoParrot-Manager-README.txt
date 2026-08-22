@@ -61,6 +61,7 @@
     CONTROLS STATUS FILE
     PER-GAME OVERRIDES
     ACTION REQUIRED SUMMARY
+    VALIDATION / REPORT MODE
     UNATTENDED / SCHEDULED MODE
     GAME REPAIR
     CONTROLLERS AND INPUT NOTES
@@ -1399,6 +1400,10 @@
   flagged as something to fix -- ReShade is a per-game cosmetic choice,
   not a clear right-or-wrong answer like a GPU fix.
 
+  Full validation/report mode can inspect existing game folders safely and
+  surface a stale or problematic ReShade runtime in ACTION REQUIRED before
+  launch. It does not download or replace the runtime.
+
 
   DGVOODOO2 LEGACY COMPATIBILITY
   --------------------------------
@@ -1629,6 +1634,12 @@
     asset filename/version, computed SHA-256, and transfer metrics. When
     GitHub supplies an asset digest, TPM validates it and fails closed on
     a mismatch; without a digest, the computed SHA-256 is audit-only.
+
+    Full validation/report mode can inventory existing BepInEx runtimes and
+    surface stale or problematic findings in ACTION REQUIRED without updating
+    anything. Any update remains explicit, backup-first, provenance/trust-
+    gated, transactional, rollback-aware, and limited to files TPM already
+    owns or is authorized to manage.
 
   Troubleshooting and manual reset
 
@@ -2198,6 +2209,12 @@
                                diagnose why it is missing or repair, download,
                                reinstall, or modify TeknoParrot.
 
+    ReShade / BepInEx runtime Full validation inventories safely inspectable
+                               existing runtimes and reports stale, malformed,
+                               mismatched, or otherwise review-needed findings.
+                               This is advisory; validation never updates a
+                               game by itself.
+
     Setup notes               Any currently registered game that has special
                               setup notes in the community compatibility
                               database (eggmansworld.github.io/TeknoParrot) --
@@ -2222,6 +2239,41 @@
   file name; it's skipped automatically during unattended runs and preview/
   dry-run mode, both of which just save to the default path with no prompt.
   The script tells you the path when it writes the file.
+
+
+-------------------------------------------------------------------------------
+  VALIDATION / REPORT MODE
+-------------------------------------------------------------------------------
+
+  For a repeatable pre-release or scheduled check, run:
+
+      .\TeknoParrot-Manager.ps1 -ValidationReport -DryRun -NoPrompts
+
+  This non-interactive mode writes a JSON report and a matching .txt summary.
+  It reads the selected TeknoParrot installation and games folder but does
+  not prompt, check for updates, access the network, launch a game, create a
+  backup, or change application files. Use these optional switches when the
+  paths must be explicit:
+
+      -ValidationTeknoParrotRoot "C:\path\to\TeknoParrot"
+      -ValidationGamesInstallFolder "C:\path\to\Games"
+      -ValidationReportPath "C:\path\to\validation.json"
+
+  The report includes paths and release identity, runtime presence,
+  valid/broken/empty profile counts, TeknoParrot wizard state, controls
+  readiness, compatibility warnings, ReShade/BepInEx inventory findings, and
+  exact ACTION REQUIRED items. Copied, missing, partial, unknown, and verified
+  control states remain distinct; verified still requires explicit evidence.
+
+  Exit codes are stable for automation:
+    0  validation passed and no action is required
+    2  warnings or ACTION REQUIRED findings remain
+    3  required paths are missing or ambiguous
+    4  the report could not be generated or written
+
+  Validation is evidence collection only. ReShade and BepInEx updates remain
+  explicit, backup-first, provenance/trust-gated, transactional, and
+  rollback-aware. Validation never applies them.
 
 
 -------------------------------------------------------------------------------

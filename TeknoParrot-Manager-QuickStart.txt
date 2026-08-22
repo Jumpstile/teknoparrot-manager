@@ -351,6 +351,11 @@
   d3d9.dll, or opengl32.dll) from that game's folder. Nothing else
   needs to be changed.
 
+  Full validation can inventory existing ReShade runtimes and put stale or
+  problematic findings in ACTION REQUIRED before launch. It does not
+  auto-update them; updates remain explicit, backup-first, trust-gated,
+  transactional, and rollback-aware.
+
   Full details, effect descriptions, and update instructions:
   TeknoParrot-Manager-README.txt -- RESHADE VISUAL ENHANCEMENTS section.
 
@@ -433,6 +438,11 @@
   SHA-256, and transfer metrics; when GitHub supplies an asset digest, TPM
   validates it and fails closed on mismatch. If anything is outdated, you're
   asked once to update everything at once; the old install is backed up first.
+  Full validation can inventory existing BepInEx runtimes and put stale or
+  problematic findings in ACTION REQUIRED without updating anything. Any
+  update remains explicit, provenance/trust-gated, transactional,
+  rollback-aware, and limited to files TPM already owns or is authorized to
+  manage.
 
   To run:
     Choose mode 9 from the main menu.
@@ -459,6 +469,31 @@
   selected game, command line, focus, and input settings; treat the two launch
   paths separately.
   Full details: TeknoParrot-Manager-README.txt.
+
+
+  VALIDATION / REPORT MODE
+  ------------------------
+  For a repeatable, non-interactive pre-release check, run:
+
+      .\TeknoParrot-Manager.ps1 -ValidationReport -DryRun -NoPrompts
+
+  This writes a JSON report and a matching .txt summary. It reads the
+  selected TeknoParrot installation and games folder but does not prompt,
+  check for updates, access the network, launch a game, create a backup, or
+  change application files. It reports profile health, controls readiness,
+  compatibility warnings, and safely inspectable ReShade/BepInEx runtime
+  findings in ACTION REQUIRED.
+
+  Optional explicit paths:
+      -ValidationTeknoParrotRoot "C:\path\to\TeknoParrot"
+      -ValidationGamesInstallFolder "C:\path\to\Games"
+      -ValidationReportPath "C:\path\to\validation.json"
+
+  Exit codes: 0 means no action is required; 2 means warnings or ACTION
+  REQUIRED findings remain; 3 means required paths are missing or ambiguous;
+  4 means the report could not be generated or written. Validation never
+  updates ReShade or BepInEx. Any update remains explicit, backup-first,
+  provenance/trust-gated, transactional, and rollback-aware.
 
 
   UNATTENDED MODE

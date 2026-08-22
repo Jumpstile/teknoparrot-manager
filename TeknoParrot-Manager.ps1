@@ -59,7 +59,15 @@
 #   - Games extracted into per-game subfolders (AutoSync can do this).
 # =============================================================================
 
-param([switch]$Unattended, [switch]$DryRun)
+param(
+    [switch]$Unattended,
+    [switch]$DryRun,
+    [switch]$ValidationReport,
+    [switch]$NoPrompts,
+    [string]$ValidationReportPath = '',
+    [string]$ValidationTeknoParrotRoot = '',
+    [string]$ValidationGamesInstallFolder = ''
+)
 
 # Single source of truth for the version string used in the banner, log, and
 # GitHub API User-Agent headers. Previously hardcoded in each of those spots
@@ -301,8 +309,10 @@ function Write-ManagerBanner {
     Write-Host ""
 }
 
-$startupBannerSize = Get-ManagerBannerViewportSize
-Write-ManagerBanner -Width $startupBannerSize.Width -Height $startupBannerSize.Height
+if (-not $ValidationReport) {
+    $startupBannerSize = Get-ManagerBannerViewportSize
+    Write-ManagerBanner -Width $startupBannerSize.Width -Height $startupBannerSize.Height
+}
 
 # Windows PowerShell 5.1 packaged launchers can run with module autoloading
 # unavailable or disabled by the host. Its inherited PSModulePath can also
@@ -379,9 +389,11 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $logPath               = Join-Path $PSScriptRoot "TeknoParrot-Manager.log"
 $script:logWarnShown   = $false   # full warning shown at most once to avoid repeated noise
 $script:logFailedCount = 0        # total entries that could not be written this run
+$script:ValidationReportMode = $false
 
 function Write-Log {
     param([string]$msg)
+    if ($script:ValidationReportMode) { return }
     $line = "[{0}] {1}" -f (Get-Date).ToString("yyyy-MM-dd HH:mm:ss"), $msg
     if ([string]::IsNullOrWhiteSpace($logPath)) {
         Write-Host ("  [UNLOGGED] {0}" -f $msg) -ForegroundColor DarkGray
@@ -12247,6 +12259,498 @@ function Get-ControlReadinessActionItems {
     }
 
     return @($items)
+}
+
+# Returns the two report files for the non-interactive validation mode. A
+# caller may provide either extension; the companion file always uses the
+# other format beside it. This helper does not create directories or files.
+function Get-ValidationReportPaths {
+    param(
+        [string]$RequestedPath = '',
+        [string]$BaseDirectory = ''
+    )
+
+    $base = if ([string]::IsNullOrWhiteSpace($BaseDirectory)) {
+        (Get-Location).Path
+    } else {
+        $BaseDirectory
+    }
+    try { $base = [System.IO.Path]::GetFullPath($base) } catch {}
+
+    $requested = $RequestedPath
+    if ([string]::IsNullOrWhiteSpace($requested)) {
+        $jsonPath = Join-Path $base 'TeknoParrot-Manager-ValidationReport.json'
+        $textPath = Join-Path $base 'TeknoParrot-Manager-ValidationReport.txt'
+    } else {
+        $fullRequested = if ([System.IO.Path]::IsPathRooted($requested)) {
+            $requested
+        } else {
+            Join-Path $base $requested
+        }
+        try { $fullRequested = [System.IO.Path]::GetFullPath($fullRequested) } catch {}
+        if ([System.IO.Path]::GetExtension($fullRequested).ToLowerInvariant() -eq '.txt') {
+            $textPath = $fullRequested
+            $jsonPath = [System.IO.Path]::ChangeExtension($fullRequested, '.json')
+        } else {
+            $jsonPath = $fullRequested
+            $textPath = [System.IO.Path]::ChangeExtension($fullRequested, '.txt')
+        }
+    }
+
+    return [pscustomobject]@{
+        JsonPath = $jsonPath
+        TextPath = $textPath
+    }
+}
+
+# Read-only equivalent of the interactive library health summary. It returns
+# structured profile records so validation/report mode can distinguish valid,
+# broken, and empty GamePath values without printing the interactive repair
+# advice or calling any write-capable path.
+function Get-ValidationProfileHealth {
+    param([string]$UserProfilesDir = '')
+
+    $valid = New-Object System.Collections.ArrayList
+    $broken = New-Object System.Collections.ArrayList
+    $empty = New-Object System.Collections.ArrayList
+    $parseErrors = New-Object System.Collections.ArrayList
+
+    if ([string]::IsNullOrWhiteSpace($UserProfilesDir) -or
+        -not (Test-Path -LiteralPath $UserProfilesDir -PathType Container)) {
+        return [pscustomobject]@{
+            State       = 'Missing'
+            Total       = 0
+            Valid       = @()
+            Broken      = @()
+            Empty       = @()
+            ParseErrors = @()
+        }
+    }
+
+    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object BaseName)
+    foreach ($profileFile in $profiles) {
+        try {
+            $doc = Read-Xml $profileFile.FullName
+            if ($null -eq $doc -or $null -eq $doc.GameProfile) {
+                [void]$broken.Add([pscustomobject]@{
+                    Code = $profileFile.BaseName; Path = $profileFile.FullName; Reason = 'GameProfile element missing'
+                })
+                continue
+            }
+            $gamePathNode = $doc.GameProfile.SelectSingleNode('GamePath')
+            $gamePath = if ($gamePathNode) { $gamePathNode.InnerText.Trim() } else { '' }
+            if ([string]::IsNullOrWhiteSpace($gamePath)) {
+                [void]$empty.Add([pscustomobject]@{
+                    Code = $profileFile.BaseName; Path = $profileFile.FullName; GamePath = ''
+                })
+            } elseif (Test-Path -LiteralPath $gamePath) {
+                [void]$valid.Add([pscustomobject]@{
+                    Code = $profileFile.BaseName; Path = $profileFile.FullName; GamePath = $gamePath
+                })
+            } else {
+                [void]$broken.Add([pscustomobject]@{
+                    Code = $profileFile.BaseName; Path = $profileFile.FullName; GamePath = $gamePath; Reason = 'GamePath does not exist'
+                })
+            }
+        } catch {
+            [void]$parseErrors.Add([pscustomobject]@{
+                Code = $profileFile.BaseName; Path = $profileFile.FullName; Error = $_.Exception.Message
+            })
+            [void]$broken.Add([pscustomobject]@{
+                Code = $profileFile.BaseName; Path = $profileFile.FullName; Reason = 'Profile XML could not be read'
+            })
+        }
+    }
+
+    return [pscustomobject]@{
+        State       = 'Ready'
+        Total       = $profiles.Count
+        Valid       = @($valid)
+        Broken      = @($broken)
+        Empty       = @($empty)
+        ParseErrors = @($parseErrors)
+    }
+}
+
+# Runs the safe, non-interactive validation/report surface requested by issue
+# #276. The only intended writes are the JSON and text reports named by the
+# caller. It never loads the menu, checks for updates, reaches a network
+# source, launches a game, edits TeknoParrot-owned XML, or invokes repair,
+# registration, extraction, propagation, or setup actions.
+#
+# Exit codes are deliberately stable and scriptable:
+#   0 = validation passed and no action is required
+#   2 = validation completed with warnings/action-required findings
+#   3 = required validation input is missing or ambiguous
+#   4 = the report itself could not be generated or written
+function Invoke-ValidationReport {
+    param(
+        [string]$ConfigPath = '',
+        [string]$BaseDirectory = '',
+        [string]$RequestedPath = '',
+        [string]$TeknoParrotRoot = '',
+        [string]$GamesInstallFolder = '',
+        [bool]$DryRunRequested = $false,
+        [bool]$NoPromptsRequested = $false
+    )
+
+    $script:ValidationReportMode = $true
+    $reportPaths = Get-ValidationReportPaths -RequestedPath $RequestedPath -BaseDirectory $BaseDirectory
+    $base = if ([string]::IsNullOrWhiteSpace($BaseDirectory)) { (Get-Location).Path } else { $BaseDirectory }
+    try { $base = [System.IO.Path]::GetFullPath($base) } catch {}
+
+    $errors = New-Object System.Collections.ArrayList
+    $warnings = New-Object System.Collections.ArrayList
+    $actions = New-Object System.Collections.ArrayList
+    $configState = 'Missing'
+    $cfg = $null
+
+    if (-not [string]::IsNullOrWhiteSpace($ConfigPath) -and
+        (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
+        try {
+            $cfg = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+            if ($null -eq $cfg) { throw 'Config file parsed as null.' }
+            $configState = 'Loaded'
+        } catch {
+            $configState = 'Malformed'
+            [void]$warnings.Add("Saved configuration could not be read: $($_.Exception.Message)")
+        }
+    }
+
+    $configRoot = ''
+    $configGames = ''
+    if ($cfg) {
+        $configRoot = if ($cfg.TeknoParrotRoot -is [array]) {
+            if (@($cfg.TeknoParrotRoot).Count -gt 0) { [string]$cfg.TeknoParrotRoot[0] } else { '' }
+        } else { [string]$cfg.TeknoParrotRoot }
+        $configGames = [string]$cfg.GamesInstallFolder
+    }
+
+    $resolvePath = {
+        param([string]$Value)
+        if ([string]::IsNullOrWhiteSpace($Value)) { return '' }
+        $candidate = if ([System.IO.Path]::IsPathRooted($Value)) { $Value } else { Join-Path $base $Value }
+        try { return [System.IO.Path]::GetFullPath($candidate) } catch { return $candidate }
+    }
+
+    $resolvedRoot = & $resolvePath $TeknoParrotRoot
+    $rootSource = if ($resolvedRoot) { 'Explicit' } else { '' }
+    if (-not $resolvedRoot -and $configRoot) {
+        $resolvedRoot = & $resolvePath $configRoot
+        $rootSource = 'SavedConfig'
+    }
+    if (-not $resolvedRoot) {
+        try {
+            $detectedRoots = @(Find-TeknoParrotRoot)
+            if ($detectedRoots.Count -eq 1 -and
+                $detectedRoots[0] -is [System.Collections.IList]) {
+                $detectedRoots = @($detectedRoots[0])
+            }
+            $detectedRoots = @($detectedRoots | ForEach-Object { [string]$_ } |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+            if ($detectedRoots.Count -eq 1) {
+                $resolvedRoot = & $resolvePath $detectedRoots[0]
+                $rootSource = 'AutoDetected'
+            } elseif ($detectedRoots.Count -gt 1) {
+                [void]$errors.Add('More than one TeknoParrot installation was detected; provide -ValidationTeknoParrotRoot.')
+                [void]$actions.Add([pscustomobject]@{
+                    Category = 'Paths'; Code = 'AmbiguousTeknoParrotRoot'; Status = 'ActionRequired'
+                    Detail = ($detectedRoots -join '; ')
+                })
+            }
+        } catch {
+            [void]$warnings.Add("Automatic TeknoParrot root detection was unavailable: $($_.Exception.Message)")
+        }
+    }
+
+    $resolvedGames = & $resolvePath $GamesInstallFolder
+    $gamesSource = if ($resolvedGames) { 'Explicit' } else { '' }
+    if (-not $resolvedGames -and $configGames) {
+        $resolvedGames = & $resolvePath $configGames
+        $gamesSource = 'SavedConfig'
+    }
+
+    $rootExists = $resolvedRoot -and (Test-Path -LiteralPath $resolvedRoot -PathType Container)
+    $gamesExists = $resolvedGames -and (Test-Path -LiteralPath $resolvedGames -PathType Container)
+    if (-not $resolvedRoot) {
+        [void]$errors.Add('TeknoParrot root was not supplied, saved, or uniquely detected.')
+        [void]$actions.Add([pscustomobject]@{
+            Category = 'Paths'; Code = 'TeknoParrotRoot'; Status = 'Missing'; Detail = 'Provide -ValidationTeknoParrotRoot or a valid saved configuration.'
+        })
+    } elseif (-not $rootExists) {
+        [void]$errors.Add("TeknoParrot root does not exist: $resolvedRoot")
+        [void]$actions.Add([pscustomobject]@{
+            Category = 'Paths'; Code = 'TeknoParrotRoot'; Status = 'Missing'; Detail = $resolvedRoot
+        })
+    }
+    if (-not $resolvedGames) {
+        [void]$errors.Add('Games install folder was not supplied or found in saved configuration.')
+        [void]$actions.Add([pscustomobject]@{
+            Category = 'Paths'; Code = 'GamesInstallFolder'; Status = 'Missing'; Detail = 'Provide -ValidationGamesInstallFolder or a valid saved configuration.'
+        })
+    } elseif (-not $gamesExists) {
+        [void]$errors.Add("Games install folder does not exist: $resolvedGames")
+        [void]$actions.Add([pscustomobject]@{
+            Category = 'Paths'; Code = 'GamesInstallFolder'; Status = 'Missing'; Detail = $resolvedGames
+        })
+    }
+
+    if (-not $DryRunRequested) {
+        [void]$actions.Add([pscustomobject]@{
+            Category = 'Invocation'; Code = 'DryRun'; Status = 'Requested'; Detail = 'Run validation with -DryRun so the invocation is explicitly read-only.'
+        })
+    }
+    if (-not $NoPromptsRequested) {
+        [void]$actions.Add([pscustomobject]@{
+            Category = 'Invocation'; Code = 'NoPrompts'; Status = 'Requested'; Detail = 'Run validation with -NoPrompts so automation can prove the non-interactive contract.'
+        })
+    }
+
+    $gameProfilesDir = if ($rootExists) { Join-Path $resolvedRoot 'GameProfiles' } else { '' }
+    $userProfilesDir = if ($rootExists) { Join-Path $resolvedRoot 'UserProfiles' } else { '' }
+    $profileHealth = Get-ValidationProfileHealth -UserProfilesDir $userProfilesDir
+
+    if ($rootExists -and -not (Test-Path -LiteralPath (Join-Path $resolvedRoot 'TeknoParrotUi.exe') -PathType Leaf)) {
+        [void]$warnings.Add('TeknoParrotUi.exe was not found under the selected root.')
+        [void]$actions.Add([pscustomobject]@{
+            Category = 'Runtime'; Code = 'TeknoParrotUi'; Status = 'Missing'; Detail = (Join-Path $resolvedRoot 'TeknoParrotUi.exe')
+        })
+    }
+    if ($rootExists -and -not (Test-Path -LiteralPath $gameProfilesDir -PathType Container)) {
+        [void]$warnings.Add('GameProfiles directory was not found under the selected root.')
+        [void]$actions.Add([pscustomobject]@{
+            Category = 'Runtime'; Code = 'GameProfiles'; Status = 'Missing'; Detail = $gameProfilesDir
+        })
+    }
+    if ($rootExists -and -not (Test-Path -LiteralPath $userProfilesDir -PathType Container)) {
+        [void]$warnings.Add('UserProfiles directory was not found under the selected root.')
+        [void]$actions.Add([pscustomobject]@{
+            Category = 'Runtime'; Code = 'UserProfiles'; Status = 'Missing'; Detail = $userProfilesDir
+        })
+    }
+
+    $wizardState = if ($rootExists) {
+        try { Get-TeknoParrotWizardState -TeknoParrotRoot $resolvedRoot } catch {
+            [void]$warnings.Add("TeknoParrot first-run state could not be read: $($_.Exception.Message)")
+            [pscustomobject]@{ State = 'Unknown'; DatXmlLocation = $null }
+        }
+    } else {
+        [pscustomobject]@{ State = 'Unavailable'; DatXmlLocation = $null }
+    }
+
+    $controlItems = @()
+    if (Test-Path -LiteralPath $userProfilesDir -PathType Container) {
+        try {
+            $controlItems = @(Get-ControlReadinessActionItems -UserProfilesDir $userProfilesDir `
+                -GameProfilesDir $gameProfilesDir -TeknoParrotRoot $resolvedRoot)
+        } catch {
+            [void]$warnings.Add("Controls readiness could not be assessed: $($_.Exception.Message)")
+        }
+    }
+    $controlReports = New-Object System.Collections.ArrayList
+    foreach ($item in @($controlItems)) {
+        $assessment = $item.Assessment
+        $capability = $null
+        if (Get-Command Get-ProfileInputCapabilities -ErrorAction SilentlyContinue) {
+            $profilePath = Join-Path $userProfilesDir "$($item.Code).xml"
+            if (Test-Path -LiteralPath $profilePath -PathType Leaf) {
+                try { $capability = Get-ProfileInputCapabilities -doc (Read-Xml $profilePath) } catch {
+                    $capability = [pscustomobject]@{ SelectedApi = $null; SupportedApis = @(); RawInput = 'Unknown'; RawInputTrackball = 'Unknown'; Evidence = 'Could not read profile' }
+                }
+            }
+        }
+        [void]$controlReports.Add([pscustomobject]@{
+            Code               = $item.Code
+            Registration       = $assessment.Registration
+            Controls           = $assessment.Controls
+            Launch             = $assessment.Launch
+            PropagationStatus  = 'Unknown'
+            InputCapabilities  = $capability
+            SummaryLines       = @($item.SummaryLines)
+        })
+        [void]$actions.Add([pscustomobject]@{
+            Category          = 'Controls'
+            Code              = $item.Code
+            Status            = $assessment.Controls
+            Registration      = $assessment.Registration
+            Controls          = $assessment.Controls
+            Launch            = $assessment.Launch
+            PropagationStatus = 'Unknown'
+            SummaryLines      = @($item.SummaryLines)
+        })
+    }
+
+    $compatibility = [pscustomobject]@{
+        PathTooLong = @(); DllMismatch = @(); GpuIncompatible = @(); BiosMissing = @(); ExeMissing = @(); ComponentMissing = @()
+    }
+    if (Test-Path -LiteralPath $userProfilesDir -PathType Container) {
+        try {
+            $compatibility = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $resolvedRoot
+        } catch {
+            [void]$warnings.Add("Compatibility warnings could not be assessed: $($_.Exception.Message)")
+        }
+    }
+
+    $compatibilityFields = @('PathTooLong', 'DllMismatch', 'GpuIncompatible', 'BiosMissing', 'ExeMissing', 'ComponentMissing')
+    foreach ($field in $compatibilityFields) {
+        foreach ($finding in @($compatibility.$field)) {
+            [void]$actions.Add([pscustomobject]@{
+                Category = 'Compatibility'; Code = $field; Status = 'ActionRequired'; Detail = $finding
+            })
+        }
+    }
+    foreach ($healthProfile in @($profileHealth.Broken)) {
+        [void]$actions.Add([pscustomobject]@{
+            Category = 'Library'; Code = $healthProfile.Code; Status = 'Broken'; Detail = $healthProfile.Reason
+        })
+    }
+    foreach ($healthProfile in @($profileHealth.Empty)) {
+        [void]$actions.Add([pscustomobject]@{
+            Category = 'Library'; Code = $healthProfile.Code; Status = 'Empty'; Detail = 'GamePath is empty'
+        })
+    }
+
+    $scriptPath = Join-Path $base 'TeknoParrot-Manager.ps1'
+    $tpUiPath = if ($resolvedRoot) { Join-Path $resolvedRoot 'TeknoParrotUi.exe' } else { '' }
+    $displayVersion = try { Get-ManagerDisplayVersion } catch { 'v1.0 RC7' }
+    $report = [ordered]@{
+        SchemaVersion = '1.0'
+        ReportType = 'TeknoParrotManager.Validation'
+        GeneratedAtUtc = [DateTime]::UtcNow.ToString('o')
+        Result = 'PASS'
+        ExitCode = 0
+        ReleaseIdentity = [ordered]@{
+            CurrentDisplayVersion = $displayVersion
+            CurrentPublicRelease = 'v1.0 RC7'
+            FinalV1Publication = 'Not published'
+            RC8Candidate = 'Not prepared by validation mode'
+        }
+        Invocation = [ordered]@{
+            ValidationReport = $true
+            DryRunRequested = $DryRunRequested
+            NoPromptsRequested = $NoPromptsRequested
+            EffectiveWriteMode = 'ReadOnly except report files'
+            EffectiveNoPrompts = $true
+            NetworkRequested = $false
+            GameLaunchRequested = $false
+        }
+        Paths = [ordered]@{
+            Config = $ConfigPath
+            ConfigState = $configState
+            TeknoParrotRoot = $resolvedRoot
+            TeknoParrotRootSource = $rootSource
+            GamesInstallFolder = $resolvedGames
+            GamesInstallFolderSource = $gamesSource
+            GameProfiles = $gameProfilesDir
+            UserProfiles = $userProfilesDir
+        }
+        Runtime = [ordered]@{
+            ManagerScript = [ordered]@{ Path = $scriptPath; Exists = (Test-Path -LiteralPath $scriptPath -PathType Leaf) }
+            TeknoParrotUi = [ordered]@{ Path = $tpUiPath; Exists = ($tpUiPath -and (Test-Path -LiteralPath $tpUiPath -PathType Leaf)) }
+            GameProfiles = [ordered]@{ Exists = ($gameProfilesDir -and (Test-Path -LiteralPath $gameProfilesDir -PathType Container)); FileCount = @(if ($gameProfilesDir) { Get-ChildItem -LiteralPath $gameProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue }).Count }
+            UserProfiles = [ordered]@{ Exists = ($userProfilesDir -and (Test-Path -LiteralPath $userProfilesDir -PathType Container)); FileCount = $profileHealth.Total }
+        }
+        Wizard = $wizardState
+        LibraryHealth = $profileHealth
+        ControlsReadiness = [ordered]@{
+            ActionItems = @($controlReports)
+            StateLegend = @('Copied', 'Missing', 'Partial', 'Unknown', 'Verified')
+            PropagationStatusForUnobservedProfiles = 'Unknown'
+            VerificationRule = 'Verified requires explicit evidence; registration, copied settings, or profile presence do not imply verification.'
+        }
+        CompatibilityWarnings = $compatibility
+        ActionRequired = @($actions)
+        Warnings = @($warnings)
+        Errors = @($errors)
+        WriteMode = 'ReadOnly except report files'
+        NetworkAccess = 'Not requested'
+        GameLaunchRequested = $false
+        ApplicationFilesChanged = @()
+        FilesWouldChange = @()
+        ReportFiles = @($reportPaths.JsonPath, $reportPaths.TextPath)
+    }
+
+    if ($errors.Count -gt 0) {
+        $report.Result = 'FAIL'
+        $report.ExitCode = 3
+    } elseif ($actions.Count -gt 0 -or $warnings.Count -gt 0) {
+        $report.Result = 'ACTION_REQUIRED'
+        $report.ExitCode = 2
+    }
+
+    $humanLines = New-Object System.Collections.ArrayList
+    [void]$humanLines.Add('TeknoParrot Manager validation report')
+    [void]$humanLines.Add(('Result              : {0} (exit {1})' -f $report.Result, $report.ExitCode))
+    [void]$humanLines.Add(('Release identity    : {0}' -f $displayVersion))
+    [void]$humanLines.Add(('TeknoParrot root    : {0}' -f $(if ($resolvedRoot) { $resolvedRoot } else { 'not resolved' })))
+    [void]$humanLines.Add(('Games install folder: {0}' -f $(if ($resolvedGames) { $resolvedGames } else { 'not resolved' })))
+    [void]$humanLines.Add(('Profiles            : {0} total; {1} valid; {2} broken; {3} empty' -f $profileHealth.Total, @($profileHealth.Valid).Count, @($profileHealth.Broken).Count, @($profileHealth.Empty).Count))
+    [void]$humanLines.Add(('Controls action items: {0}' -f @($controlReports).Count))
+    [void]$humanLines.Add(('Compatibility items  : {0}' -f (@($actions | Where-Object { $_.Category -eq 'Compatibility' }).Count)))
+    [void]$humanLines.Add(('Writes to application: none'))
+    [void]$humanLines.Add(('Network/game launch  : not requested / not requested'))
+    [void]$humanLines.Add(('JSON report          : {0}' -f $reportPaths.JsonPath))
+    [void]$humanLines.Add(('Text report          : {0}' -f $reportPaths.TextPath))
+    if (@($actions).Count -gt 0) {
+        [void]$humanLines.Add('')
+        [void]$humanLines.Add('Action required:')
+        foreach ($action in @($actions | Select-Object -First 12)) {
+            [void]$humanLines.Add(('  - [{0}] {1}: {2}' -f $action.Category, $action.Code, $action.Status))
+        }
+        if (@($actions).Count -gt 12) { [void]$humanLines.Add(('  ... and {0} more' -f (@($actions).Count - 12))) }
+    }
+    if (@($warnings).Count -gt 0) {
+        [void]$humanLines.Add('')
+        [void]$humanLines.Add('Warnings:')
+        foreach ($warning in @($warnings)) { [void]$humanLines.Add(('  - {0}' -f $warning)) }
+    }
+    if (@($errors).Count -gt 0) {
+        [void]$humanLines.Add('')
+        [void]$humanLines.Add('Errors:')
+        foreach ($errorText in @($errors)) { [void]$humanLines.Add(('  - {0}' -f $errorText)) }
+    }
+
+    $report.HumanSummary = @($humanLines)
+    $writeError = $null
+    try {
+        $json = $report | ConvertTo-Json -Depth 12
+        [System.IO.File]::WriteAllText($reportPaths.JsonPath, $json, (New-Object System.Text.UTF8Encoding $false))
+        [System.IO.File]::WriteAllText($reportPaths.TextPath, ($humanLines -join [Environment]::NewLine), (New-Object System.Text.UTF8Encoding $false))
+    } catch {
+        $writeError = $_.Exception.Message
+        $report.Result = 'REPORT_ERROR'
+        $report.ExitCode = 4
+        $report.Errors = @($report.Errors + "Could not write validation report: $writeError")
+        $report.HumanSummary = @($humanLines + '' + "Could not write validation report: $writeError")
+    }
+
+    $script:ValidationReportMode = $false
+    return [pscustomobject]@{
+        ExitCode = [int]$report.ExitCode
+        Report = [pscustomobject]$report
+        HumanText = @($report.HumanSummary)
+        JsonPath = $reportPaths.JsonPath
+        TextPath = $reportPaths.TextPath
+        WriteError = $writeError
+    }
+}
+
+if ($ValidationReport) {
+    # Validation/report mode exits before the normal configuration prompt,
+    # startup update check, menu, and action handlers. Its only output files
+    # are the explicit JSON/text reports returned by Invoke-ValidationReport.
+    $script:ValidationReportMode = $true
+    $validation = Invoke-ValidationReport `
+        -ConfigPath (Join-Path $PSScriptRoot 'TeknoParrot-Manager.config.json') `
+        -BaseDirectory $PSScriptRoot `
+        -RequestedPath $ValidationReportPath `
+        -TeknoParrotRoot $ValidationTeknoParrotRoot `
+        -GamesInstallFolder $ValidationGamesInstallFolder `
+        -DryRunRequested ([bool]$DryRun) `
+        -NoPromptsRequested ([bool]$NoPrompts)
+    foreach ($line in @($validation.HumanText)) { Write-Host $line }
+    exit [int]$validation.ExitCode
 }
 
 Write-Log "Script started (v$ScriptVersion$(if ($Unattended) { ' [Unattended]' }))."

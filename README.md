@@ -57,6 +57,7 @@ separately.
 - [Action Required Summary](#action-required-summary)
 - [Unattended / Scheduled Mode](#unattended--scheduled-mode)
 - [Preview / Dry-Run Mode](#preview--dry-run-mode)
+- [Validation / Report Mode](#validation--report-mode)
 - [Game Repair](#game-repair)
 - [Safety, Backup and Log](#safety-backup-and-log)
 - [Resetting](#resetting)
@@ -85,6 +86,7 @@ separately.
 - **GPU fixes** — detects your GPU (AMD / NVIDIA / Intel) and applies the matching vendor fix to every registered game that has one.
 - **Force feedback (FFB)** — native FFB Blaster (needs a paid TeknoParrot membership) and a free third-party plugin (fetched live, no subscription needed), covering different games. If a game is covered by both, you're asked once which to use for all such games.
 - **BepInEx update check** — checks games that already have BepInEx installed against the latest stable 64-bit release and offers a batched update. Never installs BepInEx fresh.
+- **Validation / report mode** — runs a non-interactive, read-only inventory of the selected installation and writes machine-readable JSON plus a human-readable text report. It does not launch games, use the network, or apply updates.
 - **Postgres setup** — installs and configures the local PostgreSQL 8.3 database some Incredible Technologies games need (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball). Detects which registered games need it automatically; never reinstalls Postgres or recreates an existing database.
 - **Automatic compatibility warnings** — every run checks for known install-path-length limits (Raw Thrills titles, Yu-Gi-Oh! Duel Terminal 6), pinned-file-version requirements (BlazBlue/iDmacDrv32.dll, Tekken Tag Tournament 2/EBOOT.BIN), and known GPU-vendor incompatibilities (AMD/Intel), with details in ACTION REQUIRED.
 - **Game-specific setup notes** — every run checks the community compatibility database (eggmansworld.github.io/TeknoParrot) for any registered game with special setup notes — workarounds, known quirks, the expected executable name — and lists them in ACTION REQUIRED.
@@ -459,7 +461,7 @@ DLLs are never bundled in the release ZIP (ReShade's own policy prohibits redist
 
 **In-game:** press **Home** to open the ReShade overlay. Toggle effects with tick-boxes, adjust with sliders. Settings save automatically to `ReShade.ini` in the game folder.
 
-**Updating:** the script checks reshade.me for newer versions each run. To update: download the new installer, extract the DLL, replace `ReShade64.dll`, re-run mode 5.
+**Updating:** the explicit ReShade setup path checks reshade.me for newer versions. Full validation can inventory safely inspectable installed ReShade runtimes and put stale or problematic findings in **Action Required** before launch; it does not auto-update. Any update remains explicit, backup-first, trust-gated, transactional, and rollback-aware: download the new installer, extract the DLL, replace `ReShade64.dll`, and re-run mode 5.
 
 **Signature check:** before deploying, the script checks the Authenticode signature on your ReShade DLL(s) — ReShade's own installer is code-signed, and that signature survives extracting/renaming the DLL. An invalid or missing signature is shown as a warning (with a plain-English reason) but doesn't block setup, since you supplied the file yourself; just make sure it actually came from reshade.me.
 
@@ -544,7 +546,7 @@ Controller support (per the plugin's own docs): true force feedback on FFB-capab
 
 **Mode 9 only checks/updates games that already have BepInEx installed** — it never installs BepInEx into a game that doesn't have it. Only the latest **stable 64-bit** release is ever used; never a 32-bit build, never a pre-release. A 32-bit install is left alone and reported separately.
 
-If anything is outdated, the script lists every such game once and asks a single question: update all of them? Answering Y backs up the existing BepInEx folder and related files before overwriting anything. The shared audit records the GitHub release source, filename/version, computed SHA-256, and transfer metrics; when GitHub supplies an asset digest, the downloader validates it before extraction and logs/fails closed on a mismatch.
+If anything is outdated, the script lists every such game once and asks a single question: update all of them? Answering Y backs up the existing BepInEx folder and related files before overwriting anything. The shared audit records the GitHub release source, filename/version, computed SHA-256, and transfer metrics; when GitHub supplies an asset digest, the downloader validates it before extraction and logs/fails closed on a mismatch. Full validation can inventory existing BepInEx runtimes and put stale or problematic findings in **Action Required**; it does not auto-update them.
 
 **Troubleshooting:** [official guide](https://docs.bepinex.dev/articles/user_guide/troubleshooting.html). **Manual clean reset:** delete `doorstop_config.ini`, `winhttp.dll`, `.doorstop_version`, `changelog.txt`, and the `BepInEx` folder from the game's folder — this fully reverts to vanilla.
 
@@ -754,6 +756,7 @@ At the end of every run the script prints — and saves to a text file — every
 | **GPU incompatibility** | Specific registered games confirmed not to work on your detected GPU vendor (AMD or Intel). Informational only — no fix exists. Checked automatically every run; silently skipped if the vendor can't be auto-detected. |
 | **Firmware not installed** | Registered games whose emulator (currently pcsx2x6 only) needs firmware/BIOS files TeknoParrot itself doesn't provide. Shows the exact files and folder needed. TPM never downloads, links, or redistributes these — existence check only. Checked automatically every run when a pcsx2x6-based game is registered. |
 | **Emulator component not found** | A contract-backed required emulator component is missing at its expected path. Shows the contract/detector evidence and affected profiles. Use the normal TeknoParrot installation/update process; TPM does not diagnose why it is missing or repair, download, reinstall, or modify TeknoParrot. |
+| **ReShade / BepInEx runtime** | Full validation inventories safely inspectable existing runtimes and reports stale, malformed, mismatched, or otherwise review-needed findings. This is advisory; validation never updates a game by itself. |
 | **Setup notes** | Any registered game with special setup notes in the community compatibility database (eggmansworld.github.io/TeknoParrot) — workarounds, known quirks, etc. Shows the expected executable name and the full notes text, word-wrapped and separated game-by-game. Informational only; skipped silently if the live fetch fails. |
 
 ---
@@ -810,6 +813,48 @@ In preview mode:
 After a preview finishes, the script confirms nothing was changed and asks whether you'd like to perform the operation for real — answer **Y** to immediately re-run the same mode for real (a fresh scan, not a replay of the preview, since anything could have changed since it ran; no menu, no preview prompt shown again), or **N** to return to the menu without changing anything.
 
 This is most useful the first time you point the script at a new library, or after changing settings, to build confidence before letting it touch your files.
+
+---
+
+## Validation / Report Mode
+
+For a repeatable pre-release or scheduled check, run the non-interactive
+validation surface explicitly:
+
+```powershell
+.\TeknoParrot-Manager.ps1 -ValidationReport -DryRun -NoPrompts
+```
+
+You can provide paths without accepting or changing saved settings:
+
+```powershell
+.\TeknoParrot-Manager.ps1 -ValidationReport -DryRun -NoPrompts `
+  -ValidationTeknoParrotRoot "C:\path\to\TeknoParrot" `
+  -ValidationGamesInstallFolder "C:\path\to\Games" `
+  -ValidationReportPath "C:\path\to\validation.json"
+```
+
+The command writes a JSON report and a matching `.txt` summary. It does not
+prompt, check for updates, access the network, launch a game, create a backup,
+or change application files. The report records paths and identity, runtime
+presence, valid/broken/empty profile counts, wizard state, controls readiness,
+compatibility warnings, ReShade/BepInEx inventory findings, and the exact
+`ActionRequired` items. Control evidence remains separate: copied, missing,
+partial, unknown, and verified are not collapsed into one ready/not-ready
+answer; verified still requires explicit evidence.
+
+Exit codes are stable for automation:
+
+| Code | Meaning |
+|------|---------|
+| `0` | Validation passed and no action is required |
+| `2` | Validation completed, but warnings or Action Required findings remain |
+| `3` | Required paths are missing or ambiguous |
+| `4` | The report could not be generated or written |
+
+This mode is evidence collection only. ReShade and BepInEx updates remain
+explicit operations with backup-first, provenance/trust, transactional, and
+rollback protections; they are never applied by validation mode.
 
 ---
 

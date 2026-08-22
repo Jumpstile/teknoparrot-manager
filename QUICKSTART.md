@@ -25,6 +25,7 @@ Full documentation: [README.md](README.md)
 - [HyperSpin 2 Export](#hyperspin-2-export)
 - [RetroBat / Batocera](#retrobat--batocera)
 - [Preview / Dry-Run Mode](#preview--dry-run-mode)
+- [Validation / Report Mode](#validation--report-mode)
 - [Unattended Mode](#unattended-mode)
 - [Thumbnail Download](#thumbnail-download)
 - [Restoring a Backup](#restoring-a-backup)
@@ -194,7 +195,7 @@ ReShade DLLs are not bundled in the release ZIP because ReShade is not redistrib
 
 **To remove:** delete the DLL (`dxgi.dll`, `d3d9.dll`, `d3d12.dll`, or `opengl32.dll`) from the game folder.
 
-**Note:** before deploying, the script checks your ReShade DLLs Authenticode signature (ReShade installer is code-signed) and warns -- without blocking -- if it is not validly signed. When mode 5 downloads the installer, the log also records the authoritative source, filename/version, SHA-256, transfer metrics, signer/status/thumbprint, and final trust result; the SHA-256 is an audit hash, not a published-digest comparison.
+**Note:** before deploying, the script checks your ReShade DLLs Authenticode signature (ReShade installer is code-signed) and warns -- without blocking -- if it is not validly signed. When mode 5 downloads the installer, the log also records the authoritative source, filename/version, SHA-256, transfer metrics, signer/status/thumbprint, and final trust result; the SHA-256 is an audit hash, not a published-digest comparison. Full validation can inventory existing ReShade runtimes and put stale/problematic findings in **Action Required**; it does not auto-update them.
 
 ---
 
@@ -241,7 +242,7 @@ If a game is covered by both, the script asks **one** batched question — keep 
 
 **This mode ONLY checks and updates games that already have BepInEx installed** — it never installs BepInEx into a game that doesn't have it yet (that first install is still a manual step). Only the latest **stable 64-bit** release is ever used — never 32-bit, never a pre-release. A 32-bit install is left alone and reported separately.
 
-If anything is outdated, the script asks once: update all of them? Answering Y backs up the existing BepInEx folder first. The shared audit records the GitHub release source, filename/version, SHA-256, and transfer metrics; a GitHub asset digest is validated when available and mismatches fail closed.
+If anything is outdated, the script asks once: update all of them? Answering Y backs up the existing BepInEx folder first. The shared audit records the GitHub release source, filename/version, SHA-256, and transfer metrics; a GitHub asset digest is validated when available and mismatches fail closed. Full validation can inventory existing BepInEx runtimes and put stale/problematic findings in **Action Required**; it does not auto-update them.
 
 **Manual clean reset:** delete `doorstop_config.ini`, `winhttp.dll`, `.doorstop_version`, `changelog.txt`, and the `BepInEx` folder from the game's folder — this fully reverts to vanilla.
 
@@ -331,6 +332,31 @@ Run in PREVIEW mode first? (Y/N)
 Answer Y (or pass `-DryRun` on the command line) to see exactly what would happen — extraction, registration, repair, control propagation — with **zero files written**. After a preview pass, the script offers to apply the same run for real immediately, without re-entering any answers.
 
 Preview mode skips the LaunchBox/HyperSpin 2 export offers, the thumbnail download offer, and the GPU fix offer too, since those are themselves writes that don't make sense after a run that changed nothing.
+
+---
+
+## Validation / Report Mode
+
+For a repeatable, non-interactive pre-release check:
+
+```powershell
+.\TeknoParrot-Manager.ps1 -ValidationReport -DryRun -NoPrompts
+```
+
+The command writes a JSON report and matching text summary. It reads the
+selected TeknoParrot installation and games folder, but does not prompt,
+access the network, launch a game, create a backup, or change application
+files. It reports profile health, controls readiness, compatibility warnings,
+and safely inspectable ReShade/BepInEx runtime findings in **Action Required**.
+
+Use `-ValidationTeknoParrotRoot`, `-ValidationGamesInstallFolder`, and
+`-ValidationReportPath` to make the paths and output explicit. Exit code `0`
+means no action is required, `2` means warnings/action items remain, `3`
+means required paths are missing or ambiguous, and `4` means the report could
+not be generated or written.
+
+Validation does not update ReShade or BepInEx. Any update remains explicit,
+backup-first, provenance/trust-gated, transactional, and rollback-aware.
 
 ---
 
