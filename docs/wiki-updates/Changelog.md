@@ -9,6 +9,10 @@
   verified SHA-256 is
   `45D14469CF750AC14B0F4113FB4117E2DA1C80F612C335D66B61C6E3FE5ABF84` and
   the size is 4,862,794 bytes.
+- Release visibility: RC7 is a release candidate by product/version naming,
+  but it is not hidden from GitHub's front-page Releases panel. The GitHub
+  prerelease flag is not used when it would prevent RC visibility; RC7 is the
+  repository's latest surfaced release. Final Version 1.0 remains unpublished.
 - Readiness: RC7 carries the read-only controls-readiness handoff and
   contract-backed missing-component warnings. When controls are Missing, Not
   verified, Unsupported, or Unknown, ACTION REQUIRED directs the user to open

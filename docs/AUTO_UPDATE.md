@@ -10,6 +10,11 @@ Publication note (2026-08-22): GitHub serves the immutable RC7 asset as
 mirror uses that exact published filename. The verified asset is 4,862,794
 bytes with SHA-256
 `45D14469CF750AC14B0F4113FB4117E2DA1C80F612C335D66B61C6E3FE5ABF84`.
+Release visibility note: RC7 is a release candidate by product/version
+naming, but it is not hidden from GitHub's front-page Releases panel. The
+GitHub prerelease flag is not used when it would prevent RC visibility; RC7
+is the repository's latest surfaced release. Final Version 1.0 remains
+unpublished.
 The v0.99.38 and v1.0-RC3 live-verification references below are historical
 and are not current download instructions. The asset-name pattern is
 version-agnostic; published RC7 validation runs the package validator against
