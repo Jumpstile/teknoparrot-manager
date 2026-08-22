@@ -4673,6 +4673,94 @@ Describe "Get-ReShadeLatestVersion retry behavior" {
     }
 }
 
+Describe "ReShade runtime update detection and acquisition" {
+    It "classifies an older 64-bit runtime as outdated and requests an update" {
+        $source64 = Join-Path $TestDrive 'ReShade64.dll'
+        $source32 = Join-Path $TestDrive 'ReShade32.dll'
+        New-Item -ItemType File -Path $source64,$source32 -Force | Out-Null
+        Mock Get-ReShadeDllVersion {
+            param([string]$Path)
+            if ($Path -like '*32.dll') { return '6.8.0' }
+            return '6.7.3'
+        }
+        $state = Get-ReShadeRuntimeState -SourceDll $source64 -SourceDll32 $source32 -LatestVersion '6.8.0'
+        $state.Bitness64.Status | Should -Be 'Outdated'
+        $state.Bitness32.Status | Should -Be 'Current'
+        $state.NeedsUpdate | Should -BeTrue
+    }
+
+    It "does not replace a current runtime or treat a missing optional 32-bit DLL as an update" {
+        $source64 = Join-Path $TestDrive 'ReShade64.dll'
+        New-Item -ItemType File -Path $source64 -Force | Out-Null
+        Mock Get-ReShadeDllVersion { '6.8.0' }
+        $state = Get-ReShadeRuntimeState -SourceDll $source64 -SourceDll32 $null -LatestVersion '6.8.0'
+        $state.Bitness64.Status | Should -Be 'Current'
+        $state.Bitness32.Status | Should -Be 'Missing'
+        $state.NeedsUpdate | Should -BeFalse
+    }
+
+    It "refuses to download without explicit approval" {
+        Mock Invoke-TpmDownload { throw 'download must not be called without approval' }
+        $result = Invoke-ReShadeRuntimeUpdate -CacheDir (Join-Path $TestDrive 'ReShade') -Version '6.8.0'
+        $result.Approved | Should -BeFalse
+        $result.Succeeded | Should -BeFalse
+        $result.Error | Should -Match 'Explicit approval'
+        Should -Invoke Invoke-TpmDownload -Times 0 -Exactly
+    }
+
+    It "uses the official download, trust gate, and transactional extraction after approval" {
+        $cacheDir = Join-Path $TestDrive 'ReShade'
+        Mock Get-ReShadeSetupDownloadUrl { 'https://reshade.me/downloads/ReShade_Setup_6.8.0.exe' }
+        Mock Invoke-TpmDownload { $true }
+        Mock Test-ReShadeSetupTrustedSignature {
+            [pscustomobject]@{
+                Trusted = $true
+                Status = 'UnknownError'
+                Thumbprint = $Script:ReShadeTrustedCertThumbprint
+            }
+        }
+        Mock Expand-ReShadeSelfExtractingArchive {
+            param([string]$DestDir)
+            New-Item -ItemType Directory -Path $DestDir -Force | Out-Null
+            New-Item -ItemType File -Path (Join-Path $DestDir 'ReShade64.dll') -Force | Out-Null
+            New-Item -ItemType File -Path (Join-Path $DestDir 'ReShade32.dll') -Force | Out-Null
+        }
+        $result = Invoke-ReShadeRuntimeUpdate -CacheDir $cacheDir -Version '6.8.0' -Approved
+        $result.Succeeded | Should -BeTrue
+        $result.SourceDll | Should -Be (Join-Path $cacheDir 'ReShade64.dll')
+        $result.SourceDll32 | Should -Be (Join-Path $cacheDir 'ReShade32.dll')
+        Should -Invoke Invoke-TpmDownload -Times 1 -Exactly
+        Should -Invoke Test-ReShadeSetupTrustedSignature -Times 1 -Exactly
+        Should -Invoke Expand-ReShadeSelfExtractingArchive -Times 1 -Exactly
+    }
+
+    It "fails closed when the downloaded installer does not pass the existing trust gate" {
+        $cacheDir = Join-Path $TestDrive 'ReShade'
+        $setupPath = Join-Path $cacheDir 'ReShade_Setup_6.8.0.exe'
+        Mock Get-ReShadeSetupDownloadUrl { 'https://reshade.me/downloads/ReShade_Setup_6.8.0.exe' }
+        Mock Invoke-TpmDownload {
+            param([string]$DestinationPath)
+            New-Item -ItemType Directory -Path (Split-Path -Parent $DestinationPath) -Force | Out-Null
+            [System.IO.File]::WriteAllText($DestinationPath, 'rejected installer')
+            $true
+        }
+        Mock Test-ReShadeSetupTrustedSignature {
+            [pscustomobject]@{ Trusted = $false; Status = 'HashMismatch'; Thumbprint = 'WRONG' }
+        }
+        Mock Expand-ReShadeSelfExtractingArchive { throw 'extraction must not run after trust failure' }
+        $result = Invoke-ReShadeRuntimeUpdate -CacheDir $cacheDir -Version '6.8.0' -Approved
+        $result.Succeeded | Should -BeFalse
+        $result.Error | Should -Match 'trust gate rejected'
+        (Test-Path -LiteralPath $setupPath -PathType Leaf) | Should -BeFalse
+        Should -Invoke Expand-ReShadeSelfExtractingArchive -Times 0 -Exactly
+    }
+
+    It "wires the existing setup flow to the approved runtime-update helper" {
+        $script:ProductionSource | Should -Match 'Invoke-ReShadeRuntimeUpdate'
+        $script:ProductionSource | Should -Match 'Get-ReShadeRuntimeState'
+        $script:ProductionSource | Should -Match 'Keeping the existing ReShade runtime'
+    }
+}
 Describe "Test-EggmanDatReleaseUrl" {
     It "accepts the expected Eggmansworld TeknoParrot GitHub release URL" {
         Test-EggmanDatReleaseUrl "https://github.com/Eggmansworld/TeknoParrot/releases/download/2026-06-17/TeknoParrot.Collection.RomVault.zip" | Should -BeTrue
@@ -7613,7 +7701,7 @@ Describe "Issue #140 wording surfaces at every layout tier (issue #104/#140 RC3 
         $screen = Render-MainMenuScreen -Tier 'Professional' -Width 150 -Height 40
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
 
-        $output | Should -Match 'CRT'
+        $output | Should -Match 'runtime DLLs'
         $output | Should -Match 'Golden Tee'
         $output | Should -Match 'modding framework'
         $output | Should -Not -Match 'Install local PostgreSQL support\.'
@@ -7632,7 +7720,7 @@ Describe "Issue #140 wording surfaces at every layout tier (issue #104/#140 RC3 
         $screen = Render-MainMenuScreen -Tier 'Professional' -Width 80 -Height 40
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
 
-        $output | Should -Match 'CRT'
+        $output | Should -Match 'runtime DLLs'
         $output | Should -Match 'Golden Tee'
         $output | Should -Match 'modding'
         $output | Should -Match 'framework'
@@ -7643,7 +7731,7 @@ Describe "Issue #140 wording surfaces at every layout tier (issue #104/#140 RC3 
         $screen.Geometry.Layout | Should -Be 'UltraTwoColumn'
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
 
-        $output | Should -Match 'CRT'
+        $output | Should -Match 'runtime DLLs'
         $output | Should -Match 'Golden Tee'
         $output | Should -Match 'modding framework'
     }
@@ -7652,7 +7740,7 @@ Describe "Issue #140 wording surfaces at every layout tier (issue #104/#140 RC3 
         $screen = Render-MainMenuScreen -Tier 'Ultra' -Width 180 -Height 65 -UltraLayoutMode 'UltraCentered'
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
 
-        $output | Should -Match 'CRT'
+        $output | Should -Match 'runtime DLLs'
         $output | Should -Match 'Golden Tee'
         $output | Should -Match 'modding framework'
     }

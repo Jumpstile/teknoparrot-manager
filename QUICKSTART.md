@@ -81,7 +81,7 @@ Full documentation: [README.md](README.md)
 | 2 | **Register only** | Games already extracted — just register |
 | 3 | **Propagate Controls** | Copy control bindings from a reference game to every other game of the same type, without a full AutoSync/Register pass |
 | 4 | **Crosshair setup** | Pick and deploy custom crosshairs to lightgun games |
-| 5 | **ReShade setup** | Add visual post-processing to game folders |
+| 5 | **ReShade setup** | Install/update ReShade runtime DLLs; configure effects separately |
 | 6 | **dgVoodoo2 setup** | Fix old DX8 / DirectDraw / Glide games |
 | 7 | **GPU fix setup** | Apply AMD / NVIDIA / Intel vendor fix to registered games |
 | 8 | **Force feedback (FFB) setup** | Native FFB Blaster (membership) + free third-party plugin |
@@ -150,97 +150,21 @@ Run mode 4 again any time to change designs. Add your own PNG files to the `Cros
 
 ReShade adds post-processing effects without modifying any game files. Remove it by deleting one DLL from a game folder.
 
-**Popular effects:**
-
-| Effect | What it does |
-|--------|-------------|
-| LumaSharpen / CAS | Removes blurry upscaling |
-| CRT_Royale / CRT_Lottes | Classic scanlines and curvature |
-| Levels / Vibrance | Vivid colours on modern monitors |
-| Border | Arcade cabinet artwork in black bars |
+TPM currently installs and updates the ReShade runtime DLLs only. It does not install or choose shader/effect packages. Sharpening, CRT/scanlines, color, edge-smoothing, and bezel ideas are research topics, not current TPM defaults. See docs/RESHADE-VISUAL-EFFECTS-RESEARCH.md.
 
 ### If you downloaded the ZIP release
 
-ReShade DLLs are not bundled in the release ZIP because ReShade is not redistributed by TPM. Download the installer from [reshade.me](https://reshade.me), extract the DLL, then place it in the `ReShade\` folder as described below.
+ReShade DLLs are not bundled in the release ZIP because ReShade is not redistributed by TPM. Run mode 5 and answer D to fetch the official installer from reshade.me when no runtime DLL is present. If an existing runtime is older, mode 5 offers the same explicit Y/N update path. A decline or failure leaves the current runtime unchanged. TPM validates the installer trust gate before extraction and records the authoritative source, filename/version, SHA-256, transfer metrics, signer/status/thumbprint, and final trust result; the SHA-256 is an audit hash, not a published-digest comparison.
 
-### If you cloned from GitHub (DLLs not included in repo)
+### If you already have the DLL
 
-1. Download the installer from [reshade.me](https://reshade.me)
-2. Run it — point it at any 64-bit TeknoParrot game exe. It creates a DLL in that folder.
-3. Copy that DLL to `ReShade\ReShade64.dll` next to the script
-4. (Optional) Repeat with a 32-bit game exe and save as `ReShade32.dll`
-5. Run mode 5 or answer Y when prompted
+1. Download the standard installer from https://reshade.me.
+2. Run it against a representative TeknoParrot game executable.
+3. Copy the 64-bit DLL to ReShade/ReShade64.dll next to the script.
+4. Optionally repeat with a 32-bit executable and save ReShade/ReShade32.dll.
+5. Run mode 5, then select games and optionally supply a preset.
 
-**In-game:** press **Home** to open the ReShade overlay. Toggle effects, adjust sliders — settings save to `ReShade.ini` in the game folder.
-
-**To remove:** delete the DLL (`dxgi.dll`, `d3d9.dll`, `d3d12.dll`, or `opengl32.dll`) from the game folder.
-
-**Note:** before deploying, the script checks your ReShade DLLs Authenticode signature (ReShade installer is code-signed) and warns -- without blocking -- if it is not validly signed. When mode 5 downloads the installer, the log also records the authoritative source, filename/version, SHA-256, transfer metrics, signer/status/thumbprint, and final trust result; the SHA-256 is an audit hash, not a published-digest comparison.
-
----
-
-## dgVoodoo2 Legacy Compatibility
-
-Some older arcade games use DirectX 8, DirectDraw, or 3dfx Glide. On modern PCs these cause crashes or black screens. dgVoodoo2 translates old API calls into DirectX 11/12 — no game files are changed.
-
-**Only use this for games that crash or show a black screen on first launch.**
-
-**Setup:**
-Download dgVoodoo2 from dege.freeweb.hu or use mode 6 automatic GitHub release download. The automatic path validates GitHub asset digest when available, and the log records the GitHub source, filename/version, SHA-256, and transfer metrics; a digest mismatch fails closed.
-2. Create a `dgVoodoo2\` folder next to this script and copy in:
-   - From `MS\x86\`: `D3D8.dll`, `DDraw.dll`, `D3DImm.dll`
-   - From `3Dfx\x86\`: `Glide2x.dll`, `Glide3x.dll`
-   - From the ZIP root: `dgVoodoo.conf`
-3. Run mode 6 or answer Y at the end of any run. The wizard auto-detects which games need it and shows them first.
-
-**To remove:** delete the deployed DLL(s) from the game folder.
-
----
-
-## GPU Compatibility Fixes
-
-Many TeknoParrot games include optional fix settings for AMD, NVIDIA, or Intel GPUs. Mode 7 auto-detects your GPU via WMI and applies the correct fix to every registered game that supports one. `GameProfiles` is scanned at runtime — newly added games are always covered without a script update. Safe to re-run any time you change GPU or update drivers.
-
----
-
-## Force Feedback (FFB) Setup
-
-Mode 8 covers two independent ways to get force feedback / rumble working, and they're not mutually exclusive:
-
-- **Native FFB Blaster** — TeknoParrot's own built-in feature, but it requires an active paid TeknoParrot membership. The script asks if you have one; answer N and this part is skipped entirely (there's no point enabling a field that has no effect without a subscription). If you answer Y, the field is discovered dynamically by scanning your `GameProfiles` folder — never hardcoded.
-- **Third-party plugin** ([mightymikem/FFBArcadePlugin](https://github.com/mightymikem/FFBArcadePlugin)) -- free, no subscription needed. The per-game DLL table is fetched live from that project's GitHub repo every run. The shared audit records its source, filename/version, computed SHA-256, and transfer metrics; no signer or published-digest trust gate is claimed.
-
-If a game is covered by both, the script asks **one** batched question — keep native FFB Blaster for all of them, or switch to the plugin for all of them — rather than asking per game. DLL collisions (e.g. ReShade already using `d3d9.dll`) are skipped with a warning, never overwritten.
-
-**To remove the plugin:** delete the deployed DLL file from the game's folder.
-
----
-
-## BepInEx Update Check
-
-[BepInEx](https://docs.bepinex.dev) is a third-party Unity plugin/modding framework some games need for controls or fixes to work. Mode 9 shows a live-fetched example list each time you open it.
-
-**This mode ONLY checks and updates games that already have BepInEx installed** — it never installs BepInEx into a game that doesn't have it yet (that first install is still a manual step). Only the latest **stable 64-bit** release is ever used — never 32-bit, never a pre-release. A 32-bit install is left alone and reported separately.
-
-If anything is outdated, the script asks once: update all of them? Answering Y backs up the existing BepInEx folder first. The shared audit records the GitHub release source, filename/version, SHA-256, and transfer metrics; a GitHub asset digest is validated when available and mismatches fail closed.
-
-**Manual clean reset:** delete `doorstop_config.ini`, `winhttp.dll`, `.doorstop_version`, `changelog.txt`, and the `BepInEx` folder from the game's folder — this fully reverts to vanilla.
-
----
-
-## Postgres Setup
-
-Several Incredible Technologies games — Golden Tee Live (2006–2019), Power Putt Live (2012/2013), Silver Strike Bowling Live, Target Toss Pro (Bags / Lawn Darts), and Orange County Choppers Pinball — need a small local PostgreSQL 8.3 database. Mode 12 detects which of your registered games need this automatically and handles the rest:
-
-- **If PostgreSQL isn't installed yet**, the script installs it silently. This is the **only** feature in this script requiring Administrator — close the window, right-click `TeknoParrot-Manager.bat` → **Run as administrator**, and re-run mode 12. You'll be asked for two passwords: a service-account password (rarely needed again) and a database password (saved, encrypted, for future runs).
-- **If PostgreSQL is already installed, it's never reinstalled or modified.**
-- **A database that already exists is never recreated or restored over.** A `Pass` field that's already filled in is never overwritten.
-- For newer game profiles (Golden Tee Live 2018+) with TeknoParrot's own "Automatically create Database" feature, the script only fills in connection settings — TeknoParrot creates the database itself on first launch. For older profiles, the script creates the database and restores that game's bundled backup itself.
-- Every run backs up every existing Postgres database first — restore via mode 11 if anything looks wrong.
-
-If none of your registered games need Postgres, mode 12 says so and exits immediately without installing anything. The PostgreSQL guide download is logged with source, filename/version, SHA-256, and transfer metrics; this path does not claim Authenticode or published-digest verification.
-
----
+**In-game:** press **Home** to open the ReShade overlay. Effects shown there come from files/presets supplied separately; TPM does not install or choose them.
 
 ## Check for Updates
 

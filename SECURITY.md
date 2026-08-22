@@ -194,10 +194,10 @@ by its fingerprint. Design:
 - **Fail closed on any fingerprint mismatch, unaccepted status, missing
   signature, invalid/unparseable signature, or exception.** No "proceed
   anyway with a warning" fallback, and no automatic adoption of a changed
-  fingerprint into config (no TOFU-on-change). The auto-download path
-  deletes the downloaded installer and directs the user to the existing
-  manual DLL-path fallback in `Invoke-ReShadeSetup`'s standalone menu
-  entry.
+  fingerprint into config (no TOFU-on-change). Both first-install and
+  existing-runtime update paths use the same trust gate before extraction.
+  An untrusted download is not deployed; TPM keeps the prior runtime and
+  returns to the manual or unchanged-runtime path.
 - **Rotation:** the trusted fingerprint constant (and, separately, the
   accepted-status list) can only be updated by a maintainer, sourced
   independently from the allowlisted `https://reshade.me` site itself (for
