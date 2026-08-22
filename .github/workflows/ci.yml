@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   quality-gates:
@@ -38,6 +38,23 @@ jobs:
             exit 1
           }
           Write-Host "Parse check passed: 0 errors."
+
+      - name: Prettier formatting baseline
+        shell: powershell
+        run: |
+          $version = (Get-Content -LiteralPath "$PWD\.prettier-version" -Raw).Trim()
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            Write-Error "Prettier version file is not pinned to a semantic version: '$version'"
+            exit 1
+          }
+          $targets = @(
+            '.prettier-baseline.json',
+            '.github/**/*.json',
+            '.github/**/*.yml',
+            '.github/**/*.yaml'
+          )
+          & npx --yes --package ("prettier@{0}" -f $version) prettier --check --no-error-on-unmatched-pattern --config "$PWD\.prettierrc.json" $targets
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Install PSScriptAnalyzer
         shell: powershell

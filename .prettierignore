@@ -1,0 +1,22 @@
+# PowerShell, launcher, and release-text files have their own compatibility
+# and line-ending rules. Prettier must never rewrite them.
+*.ps1
+*.bat
+*.txt
+
+# Binary assets and downloaded/runtime-owned directories are not source text.
+Crosshairs/
+ReShade/
+dgVoodoo2/
+FFBPlugin/
+BepInExCache/
+*.zip
+*.png
+
+# Local build products and task-local artifacts must remain untouched.
+src/
+bin/
+obj/
+
+# Repository instruction text is outside the formatting baseline.
+AGENTS.md

@@ -1,0 +1,20 @@
+{
+  "tool": "prettier",
+  "versionFile": ".prettier-version",
+  "configFile": ".prettierrc.json",
+  "checkedGlobs": [
+    ".prettier-baseline.json",
+    ".github/**/*.json",
+    ".github/**/*.yml",
+    ".github/**/*.yaml"
+  ],
+  "excludedByPolicy": [
+    "**/*.ps1",
+    "**/*.bat",
+    "**/*.txt",
+    "Crosshairs/**",
+    "src/**",
+    "bin/**",
+    "obj/**"
+  ]
+}

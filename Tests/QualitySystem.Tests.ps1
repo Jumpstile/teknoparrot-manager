@@ -47,6 +47,42 @@ Describe "Quality engineering system metadata" {
     }
 }
 
+Describe "Prettier formatting baseline" {
+    BeforeAll {
+        $script:FormattingRepoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
+        $script:FormattingBaselinePath = Join-Path $script:FormattingRepoRoot ".prettier-baseline.json"
+        $script:FormattingBaseline = Get-Content -LiteralPath $script:FormattingBaselinePath -Raw | ConvertFrom-Json
+        $script:FormattingVersion = (Get-Content -LiteralPath (Join-Path $script:FormattingRepoRoot ".prettier-version") -Raw).Trim()
+        $script:FormattingIgnore = Get-Content -LiteralPath (Join-Path $script:FormattingRepoRoot ".prettierignore") -Raw
+        $script:FormattingWorkflow = Get-Content -LiteralPath (Join-Path $script:FormattingRepoRoot ".github\workflows\ci.yml") -Raw
+    }
+
+    It "pins one formatter version and names the checked maintenance-file globs" {
+        $script:FormattingVersion | Should -Match '^\d+\.\d+\.\d+$'
+        $script:FormattingBaseline.tool | Should -Be 'prettier'
+        $script:FormattingBaseline.versionFile | Should -Be '.prettier-version'
+        $script:FormattingBaseline.configFile | Should -Be '.prettierrc.json'
+        @($script:FormattingBaseline.checkedGlobs) | Should -Contain '.prettier-baseline.json'
+        @($script:FormattingBaseline.checkedGlobs) | Should -Contain '.github/**/*.json'
+        @($script:FormattingBaseline.checkedGlobs) | Should -Contain '.github/**/*.yml'
+    }
+
+    It "keeps PowerShell and release-text files outside the Prettier scope" {
+        $script:FormattingIgnore | Should -Match '(?m)^\*\.ps1\s*$'
+        $script:FormattingIgnore | Should -Match '(?m)^\*\.txt\s*$'
+        $script:FormattingIgnore | Should -Match '(?m)^src/\s*$'
+        @($script:FormattingBaseline.excludedByPolicy) | Should -Contain '**/*.ps1'
+        @($script:FormattingBaseline.excludedByPolicy) | Should -Contain '**/*.txt'
+    }
+
+    It "runs the pinned baseline check in CI" {
+        $script:FormattingWorkflow | Should -Match 'Prettier formatting baseline'
+        $script:FormattingWorkflow | Should -Match 'prettier@\{0\}'
+        $script:FormattingWorkflow | Should -Match '--no-error-on-unmatched-pattern'
+        $script:FormattingWorkflow | Should -Match '\.prettierrc\.json'
+    }
+}
+
 Describe "Release Integrity source identity" -Tag 'ReleaseConsistency' {
     # The running source identity and the last published release are tracked
     # separately so source identity cannot drift from publication state. RC7 is

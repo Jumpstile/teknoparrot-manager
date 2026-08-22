@@ -45,6 +45,23 @@ lifecycle from filed to closed.
   `RELEASE-SAFETY-CHECKLIST.md` section 3 for what "the docs" means here
   (it's more than just `README.md`).
 
+## Repository formatting
+
+The repository formatting baseline uses the pinned Prettier version in
+`.prettier-version` with `.prettierrc.json`. It covers the repository's JSON
+and YAML maintenance files listed in `.prettier-baseline.json`. PowerShell,
+launcher files, release text, binary assets, and local build products are
+excluded deliberately; do not run a broad formatter over those files.
+
+From PowerShell, run the same check used by CI:
+
+```powershell
+$version = (Get-Content -LiteralPath .\.prettier-version -Raw).Trim()
+npx --yes --package ("prettier@{0}" -f $version) prettier --check --no-error-on-unmatched-pattern `
+  --config .\.prettierrc.json .\.prettier-baseline.json `
+  '.github/**/*.json' '.github/**/*.yml' '.github/**/*.yaml'
+```
+
 ## Release governance
 
 This project follows the Jumpstile Release Standard -- see
