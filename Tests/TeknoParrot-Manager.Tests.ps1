@@ -500,6 +500,11 @@ Describe "Get-WhatTpmDidSummaryLines (beginner-clarity end-of-run recap)" {
         $allClear = Get-WhatTpmDidSummaryLines -AutoSyncRan $false -DatAction 'Reused' -ThumbnailsRequested $false -ManualNeeded 0 -NotInTeknoParrot 0
         ($allClear -join "`n") | Should -Match "Nothing needs manual attention from this run"
     }
+    It "counts controls-readiness items as manual attention without changing the scope disclaimer" {
+        $lines = Get-WhatTpmDidSummaryLines -AutoSyncRan $false -DatAction 'Reused' -ThumbnailsRequested $false `
+            -ManualNeeded 0 -NotInTeknoParrot 0 -ControlsNeedAttention 1
+        ($lines -join "`n") | Should -Match "1 item\(s\) still need your attention -- see ACTION REQUIRED below"
+    }
     It "always includes the TPM-scope disclaimer" {
         $lines = (Get-WhatTpmDidSummaryLines -AutoSyncRan $false -DatAction 'NotConfigured' -ThumbnailsRequested $false) -join "`n"
         $lines | Should -Match "does not"
@@ -1305,6 +1310,95 @@ $button2Block
         }
     }
 
+    Context "Get-ControlReadinessActionItems (wired onboarding handoff, issue #255)" {
+        BeforeAll {
+            function Get-ReadinessHandoffSnapshot {
+                param([string]$Dir)
+                $files = @(Get-ChildItem -LiteralPath $Dir -Recurse -File -Force -ErrorAction Stop |
+                    Sort-Object FullName | ForEach-Object {
+                        [pscustomobject]@{
+                            Path  = $_.FullName
+                            Hash  = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+                            Write = $_.LastWriteTimeUtc
+                        }
+                    })
+                [pscustomobject]@{ Existed = Test-Path -LiteralPath $Dir; FileCount = $files.Count; Files = $files }
+            }
+        }
+
+        BeforeEach {
+            $userProfilesDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N') + '_up')
+            $gameProfilesDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N') + '_gp')
+            $tpRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString('N') + '_tp')
+            New-Item -ItemType Directory -Path $userProfilesDir, $gameProfilesDir, $tpRoot | Out-Null
+            Set-Content -LiteralPath (Join-Path $tpRoot 'ParrotData.xml') -Value '<ParrotData><FirstTimeSetupComplete>true</FirstTimeSetupComplete></ParrotData>' -Encoding utf8
+        }
+
+        It "surfaces registered abc with wizard complete and missing controls as not ready" {
+            $realExe = Join-Path $userProfilesDir 'abc.exe'
+            Set-Content -LiteralPath $realExe -Value 'stub' -Encoding utf8
+            Set-Content -LiteralPath (Join-Path $userProfilesDir 'abc.xml') -Value (
+                New-AbcFixtureXml -GamePath $realExe -InputApiValue 'XInput' -FirstTimeSetupComplete -OmitAnalog4
+            ) -Encoding utf8
+
+            $items = @(Get-ControlReadinessActionItems -UserProfilesDir $userProfilesDir `
+                -GameProfilesDir $gameProfilesDir -TeknoParrotRoot $tpRoot)
+
+            $items.Count | Should -Be 1
+            $items[0].Assessment.Registration | Should -Be 'Registered'
+            $items[0].Assessment.Controls | Should -Be 'Missing'
+            $items[0].SummaryLines | Should -Contain 'TeknoParrot first-run setup: Complete'
+            $items[0].SummaryLines | Should -Contain 'Controls: Missing'
+            $items[0].SummaryLines | Should -Contain 'Open TeknoParrot controls configuration and map/test controls before treating this game as ready.'
+            $items[0].SummaryLines | Should -Not -Contain 'Controls: Verified'
+        }
+
+        It "keeps complete XInput bindings with stored device references at NotVerified" {
+            $realExe = Join-Path $userProfilesDir 'abc.exe'
+            Set-Content -LiteralPath $realExe -Value 'stub' -Encoding utf8
+            Set-Content -LiteralPath (Join-Path $userProfilesDir 'abc.xml') -Value (
+                New-AbcFixtureXml -GamePath $realExe -InputApiValue 'XInput' `
+                    -BoundButtonMappings $AbcRequiredButtons -IncludeDeviceGuid -FirstTimeSetupComplete
+            ) -Encoding utf8
+
+            $items = @(Get-ControlReadinessActionItems -UserProfilesDir $userProfilesDir `
+                -GameProfilesDir $gameProfilesDir -TeknoParrotRoot $tpRoot)
+
+            $items.Count | Should -Be 1
+            $items[0].Assessment.Controls | Should -Be 'NotVerified'
+            $items[0].SummaryLines | Should -Contain 'Controls: Not verified'
+            $items[0].SummaryLines | Should -Contain 'Open TeknoParrot controls configuration and map/test controls before treating this game as ready.'
+            $items[0].SummaryLines | Should -Not -Contain 'Controls: Verified'
+        }
+
+        It "leaves UserProfiles, GameProfiles, and ParrotData unchanged across the full handoff path" {
+            $realExe = Join-Path $userProfilesDir 'abc.exe'
+            Set-Content -LiteralPath $realExe -Value 'stub' -Encoding utf8
+            Set-Content -LiteralPath (Join-Path $userProfilesDir 'abc.xml') -Value (
+                New-AbcFixtureXml -GamePath $realExe -InputApiValue 'XInput' -FirstTimeSetupComplete -OmitButton2
+            ) -Encoding utf8
+            Set-Content -LiteralPath (Join-Path $gameProfilesDir 'abc.xml') -Value (New-AbcFixtureXml) -Encoding utf8
+
+            $beforeUp = Get-ReadinessHandoffSnapshot -Dir $userProfilesDir
+            $beforeGp = Get-ReadinessHandoffSnapshot -Dir $gameProfilesDir
+            $beforeTp = Get-ReadinessHandoffSnapshot -Dir $tpRoot
+
+            [void](Get-ControlReadinessActionItems -UserProfilesDir $userProfilesDir `
+                -GameProfilesDir $gameProfilesDir -TeknoParrotRoot $tpRoot)
+
+            $afterUp = Get-ReadinessHandoffSnapshot -Dir $userProfilesDir
+            $afterGp = Get-ReadinessHandoffSnapshot -Dir $gameProfilesDir
+            $afterTp = Get-ReadinessHandoffSnapshot -Dir $tpRoot
+
+            (Compare-Object $beforeUp.Files $afterUp.Files -Property Path, Hash, Write) | Should -BeNullOrEmpty
+            (Compare-Object $beforeGp.Files $afterGp.Files -Property Path, Hash, Write) | Should -BeNullOrEmpty
+            (Compare-Object $beforeTp.Files $afterTp.Files -Property Path, Hash, Write) | Should -BeNullOrEmpty
+            $afterUp.FileCount | Should -Be $beforeUp.FileCount
+            $afterGp.FileCount | Should -Be $beforeGp.FileCount
+            $afterTp.FileCount | Should -Be $beforeTp.FileCount
+        }
+    }
+
     Context "Get-ControlReadinessSummaryLines" {
         It "reproduces the issue #255 candidate pre-1.0 UX exactly for the abc regression fixture" {
             $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'NotVerified'; Launch = 'NotTestedByTpm' }
@@ -1314,7 +1408,7 @@ $button2Block
                 'Controls: Not verified'
                 'Launch status: Not tested by TPM'
                 ''
-                'Would you like TPM to configure/test controls now?'
+                'Open TeknoParrot controls configuration and map/test controls before treating this game as ready.'
             ) -join "`n")
         }
 
@@ -1324,14 +1418,14 @@ $button2Block
                 VerificationEvidence = [pscustomobject]@{ Method = 'Manual play-test, all inputs exercised'; ObservedAt = '2026-08-21T12:00:00Z' }
             }
             $lines = Get-ControlReadinessSummaryLines -Assessment $assessment
-            $lines | Should -Not -Contain 'Would you like TPM to configure/test controls now?'
+            $lines | Should -Not -Contain 'Open TeknoParrot controls configuration and map/test controls before treating this game as ready.'
             $lines | Should -Contain 'Controls: Verified'
         }
 
         It "omits the configure/test question when the profile has no controls to verify (Unsupported)" {
             $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'Unsupported'; Launch = 'NotTestedByTpm' }
             $lines = Get-ControlReadinessSummaryLines -Assessment $assessment
-            $lines | Should -Not -Contain 'Would you like TPM to configure/test controls now?'
+            $lines | Should -Not -Contain 'Open TeknoParrot controls configuration and map/test controls before treating this game as ready.'
         }
 
         It "asks the configure/test question for Missing and Unknown controls, same as NotVerified" -TestCases @(
@@ -1341,7 +1435,7 @@ $button2Block
             param($Controls)
             $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Unregistered'; Controls = $Controls; Launch = 'NotTestedByTpm' }
             $lines = Get-ControlReadinessSummaryLines -Assessment $assessment
-            $lines | Should -Contain 'Would you like TPM to configure/test controls now?'
+            $lines | Should -Contain 'Open TeknoParrot controls configuration and map/test controls before treating this game as ready.'
         }
 
         It "reflects Unregistered and Broken registration text distinctly from Registered" {
@@ -1354,9 +1448,9 @@ $button2Block
             $lines = Get-ControlReadinessSummaryLines -Assessment $assessment
             $lines[0] | Should -Be 'Game registered successfully'
             $lines | Should -Contain 'Controls: Missing'
-            $lines | Should -Contain 'Would you like TPM to configure/test controls now?'
+            $lines | Should -Contain 'Open TeknoParrot controls configuration and map/test controls before treating this game as ready.'
             ($lines -join "`n") | Should -Not -Match 'Verified'
-            ($lines -join "`n") | Should -Not -Match '(?i)\bready\b'
+            ($lines -join "`n") | Should -Not -Match 'Controls:\s+Verified'
         }
 
         It "renders the ObservedSuccess launch state as an explicit observation" {
@@ -1375,7 +1469,7 @@ $button2Block
                 $lines = Get-ControlReadinessSummaryLines -Assessment $assessment
                 $lines | Should -Contain 'Controls: Not verified'
                 $lines | Should -Not -Contain 'Controls: Verified'
-                $lines | Should -Contain 'Would you like TPM to configure/test controls now?'
+                $lines | Should -Contain 'Open TeknoParrot controls configuration and map/test controls before treating this game as ready.'
             }
 
             It "downgrades to Not verified when VerificationEvidence is present but null" {
@@ -1616,7 +1710,8 @@ $button2Block
               'Get-ControlReadinessLaunchState',
               'Get-ControlReadinessAssessment',
               'Test-ControlReadinessVerificationEvidence',
-              'Get-ControlReadinessSummaryLines') | ForEach-Object { @{ Name = $_ } }
+              'Get-ControlReadinessSummaryLines',
+              'Get-ControlReadinessActionItems') | ForEach-Object { @{ Name = $_ } }
         ) {
             param($Name)
             $matches = $productionAst.FindAll({
@@ -1634,10 +1729,13 @@ $button2Block
               'Get-ControlReadinessLaunchState',
               'Get-ControlReadinessAssessment',
               'Test-ControlReadinessVerificationEvidence',
-              'Get-ControlReadinessSummaryLines') | ForEach-Object { @{ Name = $_ } }
+              'Get-ControlReadinessSummaryLines',
+              'Get-ControlReadinessActionItems') | ForEach-Object { @{ Name = $_ } }
         ) {
             param($Name)
-            $forbidden = @('Invoke-ControlPropagation', 'Set-ProfileInputApi', 'Save-XmlMaybe')
+            $forbidden = @('Invoke-ControlPropagation', 'Set-ProfileInputApi', 'Save-XmlMaybe', 'Save-Xml',
+                'Add-Content', 'Set-Content', 'Out-File', 'New-Item', 'Remove-Item', 'Move-Item',
+                'Copy-Item', 'Rename-Item')
             $fn = $productionAst.FindAll({
                 $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -eq $Name
             }, $true) | Select-Object -First 1
@@ -1645,7 +1743,21 @@ $button2Block
             $calls = $fn.Body.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true) |
                 ForEach-Object { $_.GetCommandName() } | Where-Object { $_ }
             foreach ($f in $forbidden) { $calls | Should -Not -Contain $f }
-            ($calls | Where-Object { $_ -match 'Wizard' }) | Should -BeNullOrEmpty
+            $wizardCalls = @($calls | Where-Object { $_ -match 'Wizard' })
+            if ($Name -eq 'Get-ControlReadinessActionItems') {
+                # This bridge may read the existing ParrotData detector to
+                # preserve the #253 handoff dimensions. It must not call any
+                # wizard mutation/automation path.
+                @($wizardCalls | Where-Object { $_ -ne 'Get-TeknoParrotWizardState' }) | Should -BeNullOrEmpty
+            } else {
+                $wizardCalls | Should -BeNullOrEmpty
+            }
+
+            $memberCalls = $fn.Body.FindAll({
+                $args[0] -is [System.Management.Automation.Language.InvokeMemberExpressionAst]
+            }, $true) | ForEach-Object { $_.Extent.Text }
+            ($memberCalls -join "`n") | Should -Not -Match '(?i)\.(Save|WriteAllText|WriteAllBytes|AppendAllText|Create|Delete|Move|Copy)\s*\('
+            $fn.Extent.Text | Should -Not -Match '(?i)\[(System\.IO\.(File|Directory))\]::(WriteAllText|WriteAllBytes|AppendAllText|Create|Delete|Move|Copy)'
         }
     }
 }
@@ -1784,7 +1896,7 @@ Describe "TeknoParrot Wizard Readiness Handoff (issue #253)" {
                 ''
                 "TPM registered this game. TeknoParrot owns its own setup wizard, controls configuration, and DAT/XML setup -- those are managed separately and are not performed by TPM."
                 ''
-                'Would you like TPM to configure/test controls now?'
+                'Open TeknoParrot controls configuration and map/test controls before treating this game as ready.'
             ) -join "`n")
         }
 
@@ -1802,7 +1914,7 @@ Describe "TeknoParrot Wizard Readiness Handoff (issue #253)" {
                 ''
                 "TPM registered this game. TeknoParrot owns its own setup wizard, controls configuration, and DAT/XML setup -- those are managed separately and are not performed by TPM."
                 ''
-                'Would you like TPM to configure/test controls now?'
+                'Open TeknoParrot controls configuration and map/test controls before treating this game as ready.'
             ) -join "`n")
         }
 
@@ -1855,7 +1967,7 @@ Describe "TeknoParrot Wizard Readiness Handoff (issue #253)" {
             $wizardState = [pscustomobject]@{ State = 'Complete'; DatXmlLocation = 'C:\Games\eggman.xml' }
             $lines = Get-OnboardingHandoffSummaryLines -Assessment $assessment -WizardState $wizardState
             $lines | Should -Contain 'Controls: Not verified'
-            $lines | Should -Contain 'Would you like TPM to configure/test controls now?'
+            $lines | Should -Contain 'Open TeknoParrot controls configuration and map/test controls before treating this game as ready.'
         }
 
         It "never implies TeknoParrot performed TPM's own registration" {
