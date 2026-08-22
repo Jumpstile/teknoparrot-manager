@@ -9368,6 +9368,62 @@ function Get-ProfileInputApi {
     return $v.InnerText.Trim()
 }
 
+# Read-only capability evidence for the input APIs that TeknoParrot exposes
+# through the profile's "Input API" field. RawInput and RawInputTrackball are
+# separate enum values upstream; a profile that lists one must not be treated
+# as if it supported the other. Older profiles often omit FieldOptions, so a
+# missing options list is Unknown rather than an inferred Yes/No. This helper
+# only reports what the profile declares -- it never changes FieldValue or
+# invents a device mapping.
+function Get-ProfileInputCapabilities {
+    param($doc)
+
+    $unknown = [pscustomobject]@{
+        SelectedApi          = $null
+        SupportedApis        = @()
+        RawInput             = 'Unknown'
+        RawInputTrackball    = 'Unknown'
+        Evidence             = 'Input API field missing'
+    }
+    if ($null -eq $doc) { return $unknown }
+
+    $field = $doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[FieldName=$(ConvertTo-XPathStringLiteral 'Input API')]")
+    if ($null -eq $field) { return $unknown }
+
+    $selectedNode = $field.SelectSingleNode('FieldValue')
+    $selectedApi = if ($selectedNode -and -not [string]::IsNullOrWhiteSpace($selectedNode.InnerText)) {
+        $selectedNode.InnerText.Trim()
+    } else { $null }
+
+    $optionsNode = $field.SelectSingleNode('FieldOptions')
+    $hasExplicitOptions = $null -ne $optionsNode
+    $supportedApis = if ($hasExplicitOptions) {
+        @($optionsNode.SelectNodes('string') | ForEach-Object {
+            if (-not [string]::IsNullOrWhiteSpace($_.InnerText)) { $_.InnerText.Trim() }
+        } | Where-Object { $_ })
+    } else { @() }
+
+    $rawInputState = 'Unknown'
+    $rawInputTrackballState = 'Unknown'
+    if ($hasExplicitOptions) {
+        $rawInputState = if ($supportedApis -contains 'RawInput') { 'Supported' } else { 'Unsupported' }
+        $rawInputTrackballState = if ($supportedApis -contains 'RawInputTrackball') { 'Supported' } else { 'Unsupported' }
+    } else {
+        # A selected value is positive evidence for that exact API even when
+        # an older profile does not serialize FieldOptions.
+        if ($selectedApi -eq 'RawInput') { $rawInputState = 'Supported' }
+        if ($selectedApi -eq 'RawInputTrackball') { $rawInputTrackballState = 'Supported' }
+    }
+
+    return [pscustomobject]@{
+        SelectedApi       = $selectedApi
+        SupportedApis     = $supportedApis
+        RawInput          = $rawInputState
+        RawInputTrackball = $rawInputTrackballState
+        Evidence          = if ($hasExplicitOptions) { 'Input API FieldOptions' } else { 'Selected Input API only' }
+    }
+}
+
 # Sets the "Input API" FieldValue, but only if the field exists AND lists the
 # requested API among its options. Returns $true on success. This matters
 # because a RawInput binding will not work if the profile's API says XInput.
@@ -9578,6 +9634,7 @@ function Build-ArchetypePool {
                 Path        = $f.FullName
                 Family      = (Get-ProfileFamily $doc)
                 InputApi    = (Get-ProfileInputApi $doc)
+                InputCapabilities = (Get-ProfileInputCapabilities $doc)
                 Devices     = (Get-ProfileDevices $doc)
                 ConfigCarry = (Get-ConfigFieldMap $doc $InputConfigFields)
                 Map         = $map
@@ -11475,6 +11532,7 @@ function Write-ControlsStatus {
         if ($null -eq $doc.GameProfile) { continue }
 
         $family = Get-ProfileFamily $doc
+        $inputCapabilities = Get-ProfileInputCapabilities $doc
         $btns   = @(Get-ButtonNodes $doc)
         $bound  = 0
         $manual = New-Object System.Collections.ArrayList
@@ -11528,6 +11586,7 @@ function Write-ControlsStatus {
             Code = $f.BaseName; Family = $family
             Bound = $bound; Total = $btns.Count
             Manual = $manual; Mismatch = $mismatch; Status = $status; Reference = $reference
+            InputCapabilities = $inputCapabilities
         })
     }
 
@@ -11551,6 +11610,9 @@ function Write-ControlsStatus {
             $boundLabel = "{0}/{1} bound" -f $row.Bound, $row.Total
             $refPart    = if ($row.Reference) { "  <- $($row.Reference)" } else { "" }
             [void]$sb.AppendLine(("  {0,-44} {1,-12}  {2}{3}" -f $row.Code, $boundLabel, $row.Status, $refPart))
+            $cap = $row.InputCapabilities
+            $apiLabel = if ($cap.SelectedApi) { $cap.SelectedApi } else { 'Unknown' }
+            [void]$sb.AppendLine(("    input capability: API={0}; RawInput={1}; RawInputTrackball={2}" -f $apiLabel, $cap.RawInput, $cap.RawInputTrackball))
             if ($row.Manual.Count -gt 0) {
                 [void]$sb.AppendLine("    manual: $($row.Manual -join ', ')")
             }

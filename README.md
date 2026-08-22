@@ -690,9 +690,10 @@ After every run the script writes `TeknoParrot-Manager-controls.txt` next to its
 
 [lightgun]
   SomeNewGame               0/52 bound   no controls
+    input capability: API=RawInput; RawInput=Supported; RawInputTrackball=Unsupported
 ```
 
-Each entry shows: control family, how many buttons are bound, status (REFERENCE / propagated / already bound / no controls), which reference game controls came from, and any buttons still set manually. This file is a propagation inventory, not proof that a game's controls have been verified. The ACTION REQUIRED summary can still report Controls: Not verified, Missing, Unsupported, or Unknown until the required controls are mapped and tested.
+Each entry shows: control family, how many buttons are bound, status (REFERENCE / propagated / already bound / no controls), which reference game controls came from, and any buttons still set manually. It also records the selected Input API and the profile-declared `RawInput` and `RawInputTrackball` capability states (`Supported`, `Unsupported`, or `Unknown`). This is capability evidence only, not device detection or proof that a game's controls have been verified. The ACTION REQUIRED summary can still report Controls: Not verified, Missing, Unsupported, or Unknown until the required controls are mapped and tested.
 
 The file is overwritten on every run. It's most useful when a game misbehaves days later — you can immediately see whether controls were propagated and from which reference, without re-running the script.
 

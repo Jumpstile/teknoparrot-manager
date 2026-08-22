@@ -216,6 +216,10 @@
   unknown/unsupported, and verified. Only mapped and tested controls in the
   intended launch path are verified. A broader device/context-aware mapping
   system is a post-1.0 direction.
+  The controls status file also records the selected Input API and the
+  profile-declared RawInput and RawInputTrackball capability states
+  (Supported, Unsupported, or Unknown). This is capability evidence only,
+  not device detection or proof that the controls work.
 
 
   IMPORTANT

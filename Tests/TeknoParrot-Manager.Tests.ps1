@@ -6182,6 +6182,69 @@ Describe "RawInput / RawInputTrackball field handling (issue #46)" {
     }
 }
 
+Describe "RawInput capability detection (issue #42)" {
+    BeforeAll {
+        function New-InputApiDoc {
+            param(
+                [string]$SelectedApi = '',
+                [string[]]$Options = @(),
+                [switch]$OmitOptions,
+                [switch]$OmitField
+            )
+            if ($OmitField) { return [xml]'<GameProfile><ConfigValues /></GameProfile>' }
+            $optionsXml = ''
+            if (-not $OmitOptions) {
+                $optionsXml = '<FieldOptions>' + (($Options | ForEach-Object { '<string>' + $_ + '</string>' }) -join '') + '</FieldOptions>'
+            }
+            return [xml]("<GameProfile><ConfigValues><FieldInformation><FieldName>Input API</FieldName><FieldValue>$SelectedApi</FieldValue><FieldType>Dropdown</FieldType>$optionsXml</FieldInformation></ConfigValues></GameProfile>")
+        }
+    }
+
+    It "recognizes RawInput and RawInputTrackball as separate declared capabilities" {
+        $r = Get-ProfileInputCapabilities (New-InputApiDoc -SelectedApi 'RawInputTrackball' -Options @('DirectInput', 'RawInput', 'RawInputTrackball', 'MergedInput'))
+        $r.SelectedApi       | Should -Be 'RawInputTrackball'
+        $r.RawInput          | Should -Be 'Supported'
+        $r.RawInputTrackball | Should -Be 'Supported'
+        $r.SupportedApis     | Should -Contain 'RawInputTrackball'
+        $r.Evidence          | Should -Be 'Input API FieldOptions'
+    }
+
+    It "reports an explicitly listed API as unsupported when the profile omits it" {
+        $r = Get-ProfileInputCapabilities (New-InputApiDoc -SelectedApi 'DirectInput' -Options @('DirectInput', 'XInput'))
+        $r.RawInput          | Should -Be 'Unsupported'
+        $r.RawInputTrackball | Should -Be 'Unsupported'
+    }
+
+    It "uses a selected RawInput value as positive evidence for an older profile without FieldOptions" {
+        $r = Get-ProfileInputCapabilities (New-InputApiDoc -SelectedApi 'RawInput' -OmitOptions)
+        $r.RawInput          | Should -Be 'Supported'
+        $r.RawInputTrackball | Should -Be 'Unknown'
+        $r.Evidence          | Should -Be 'Selected Input API only'
+    }
+
+    It "fails closed as unknown when the input field is absent and ignores future option names" {
+        $missing = Get-ProfileInputCapabilities (New-InputApiDoc -OmitField)
+        $missing.RawInput          | Should -Be 'Unknown'
+        $missing.RawInputTrackball | Should -Be 'Unknown'
+
+        $future = Get-ProfileInputCapabilities (New-InputApiDoc -SelectedApi 'FutureInputV2' -Options @('FutureInputV2'))
+        $future.RawInput          | Should -Be 'Unsupported'
+        $future.RawInputTrackball | Should -Be 'Unsupported'
+    }
+
+    It "surfaces capability states in the read-only controls status report" {
+        $profiles = Join-Path $TestDrive 'capability-report-UserProfiles'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        $xml = '<GameProfile><ConfigValues><FieldInformation><FieldName>Input API</FieldName><FieldValue>RawInputTrackball</FieldValue><FieldType>Dropdown</FieldType><FieldOptions><string>RawInput</string><string>RawInputTrackball</string></FieldOptions></FieldInformation></ConfigValues><JoystickButtons><JoystickButtons><ButtonName>Trackball</ButtonName><InputMapping>P1Trackball</InputMapping></JoystickButtons></JoystickButtons></GameProfile>'
+        [System.IO.File]::WriteAllText((Join-Path $profiles 'Trackball.xml'), $xml)
+        $reportPath = Join-Path $TestDrive 'TeknoParrot-Manager-controls.txt'
+
+        Write-ControlsStatus -userProfilesDir $profiles -pool $null -propagationReports $null -outputPath $reportPath | Should -Be 1
+        $text = Get-Content -LiteralPath $reportPath -Raw
+        $text | Should -Match 'input capability: API=RawInputTrackball; RawInput=Supported; RawInputTrackball=Supported'
+    }
+}
+
 Describe "GPU fix vendor matrix + safe re-run (issue #46)" {
     BeforeAll {
         function New-GpuDoc {

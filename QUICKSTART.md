@@ -474,6 +474,7 @@ The log also records a download audit trail: ReShade installer source/filename/v
 - Games already bound are always left untouched. Game-specific controls that don't exist in the reference game are left for manual setup and reported in ACTION REQUIRED.
 - After every run, `TeknoParrot-Manager-controls.txt` is written next to the script: every game, its control family, propagation source, bound count, and any buttons still set manually. It is a propagation inventory, not proof that controls have been verified; review the ACTION REQUIRED controls status and map/test required controls before treating a game as ready.
 - A copied/propagated control value is not the same as a verified control. Missing means an expected control is absent; partial means some expected controls are present; unknown/unsupported means readiness cannot be claimed; verified means the required controls were mapped and tested in the target launch path.
+- The same report records the selected Input API plus profile-declared `RawInput` and `RawInputTrackball` capability states (`Supported`, `Unsupported`, or `Unknown`). This is capability evidence only, not device detection or proof that controls work.
 - After registering, the script offers to repair any broken game paths automatically.
 - On later runs the script remembers your settings — press Y to reuse, N to reconfigure.
 - To fix a mis-classified control family (e.g. FamilyGuyBowling auto-detected as driving when it should be trackball), add it to the `familyOverride` section of `overrides.json`.

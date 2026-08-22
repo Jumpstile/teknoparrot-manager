@@ -1999,6 +1999,7 @@
 
     [lightgun]
       SomeNewGame                 0/52 bound   no controls
+        input capability: API=RawInput; RawInput=Supported; RawInputTrackball=Unsupported
 
   Each game shows:
     - Control family (button, driving, lightgun, trackball, analog, spinner)
@@ -2009,6 +2010,10 @@
       threshold), no controls, no reference game (waiting for you to bind one)
     - Which reference game the controls came from (for propagated games)
     - Any buttons still left manual (listed by name)
+    - The selected Input API plus profile-declared RawInput and
+      RawInputTrackball capability states (Supported, Unsupported, or
+      Unknown). This is capability evidence only, not device detection or
+      proof that the controls work.
 
   The file is overwritten on every run. It reflects the state of your
   UserProfiles at the moment the script completed, regardless of whether
