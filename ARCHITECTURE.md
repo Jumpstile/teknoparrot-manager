@@ -11,7 +11,7 @@ documented in that subsystem's own architecture document (e.g.
 here, with a matching entry in `LESSONS_LEARNED.md` -- see `CONSTITUTION.md`,
 "Documenting non-obvious implementation constraints," for when this applies.
 
-Current release state: v1.0 RC6 is the current published release candidate; RC5 and RC4 are superseded, and final Version 1.0 remains unpublished.
+Current release state: v1.0 RC7 is the current source candidate (pre-publication; not yet published); v1.0 RC6 is the last published release, and final Version 1.0 remains unpublished.
 
 ---
 
@@ -2365,5 +2365,5 @@ findings"). No code change made.
 
 The canonical product evolution roadmap is maintained in [ROADMAP.md](ROADMAP.md).
 ARCHITECTURE.md remains the implementation reference for current and completed
-features. ROADMAP.md is planning-only and does not authorize RC6 scope changes,
+features. ROADMAP.md is planning-only and does not authorize RC7 scope changes,
 product-code, test, issue, release-package, or updater work.

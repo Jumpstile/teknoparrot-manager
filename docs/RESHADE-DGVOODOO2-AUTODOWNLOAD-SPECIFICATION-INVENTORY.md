@@ -1,5 +1,5 @@
 # ReShade / dgVoodoo2 Auto-Download Specification Inventory
-Release context: this inventory documents the v1.0 RC6 published release candidate; final Version 1.0 remains unpublished.
+Release context: this inventory documents the v1.0 RC7 source candidate (pre-publication; not yet published). The v1.0 RC6 release is the last published release; final Version 1.0 remains unpublished.
 
 Governing sources (multiple, one per external contract this component
 conforms to -- see "In scope" below for which rule family cites which

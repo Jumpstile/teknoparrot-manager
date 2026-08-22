@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.0 RC7 (pre-publication; not yet published)
+
+- Source candidate: this staged wiki entry describes v1.0 RC7 before any tag,
+  GitHub release, or public download exists.
+- Readiness: RC7 carries the read-only controls-readiness handoff and
+  contract-backed missing-component warnings. Registration, launch
+  observation, wizard state, and controls readiness remain separate.
+- Publication state: v1.0 RC6 remains the last published release. This staging
+  document is not a publication action.
+
 ## v1.0 RC6 (2026-08-16) -- onboarding, live dependency acquisition
 
 - Improvement: the first-run wizard now asks fewer blocking questions and
