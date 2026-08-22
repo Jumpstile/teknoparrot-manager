@@ -50,6 +50,16 @@ evolution roadmap. No post-1.0 capability should enter implementation until:
 This boundary does not redefine the RC7 release criteria and does not authorize
 new features during the active freeze.
 
+## Version 1.0 backlog before final release
+
+The following item remains an explicit pre-1.0 backlog item and is not complete:
+
+- [#59 -- Rebind controls](https://github.com/Jumpstile/teknoparrot-manager/issues/59)
+  remains open and is tracked for Version 1.0. It should be implemented as soon
+  as practical before the final Version 1.0 release, subject to separately
+  authorized scope, implementation, and validation evidence. The roadmap does
+  not claim #59 is complete.
+
 ## Product evolution principles
 
 ### Foundations before intelligence
@@ -256,6 +266,14 @@ supported capability classes. It is an evidence view, not permission to change
 firmware, drivers, licenses, calibration, or other hardware-owned state.
 Hardware-sensitive claims remain evidence-assisted until separately authorized
 validation establishes otherwise.
+
+### Post-1.0 cabinet-control design anchor
+
+[#267 -- Post-1.0 cabinet control inventory, visual guides, and LEDBlinky
+export](https://github.com/Jumpstile/teknoparrot-manager/issues/267) remains a
+post-1.0 design/research item. Any LEDBlinky integration depends on identity
+mapping research and front-end-specific behavior across the supported browsing
+and launch ecosystems. It is not RC7 or final Version 1.0 release scope.
 
 ## Phase 5 -- Deterministic configuration profiles
 
