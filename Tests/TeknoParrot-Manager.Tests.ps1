@@ -1885,6 +1885,62 @@ Describe "TeknoParrot Wizard Readiness Handoff (issue #253)" {
         }
     }
 
+    Context "Get-TeknoParrotUiFirstRunAdvisory (issue #260)" {
+        BeforeAll {
+            function Get-UiHandoffSnapshot {
+                param([string]$Dir)
+                Get-ChildItem -LiteralPath $Dir -Recurse -File -Force | Sort-Object FullName | ForEach-Object {
+                    [pscustomobject]@{
+                        Path  = $_.FullName
+                        Hash  = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+                        Write = $_.LastWriteTimeUtc
+                    }
+                }
+            }
+        }
+
+        BeforeEach {
+            $tpRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $tpRoot | Out-Null
+            $tpUiPath = Join-Path $tpRoot 'TeknoParrotUi.exe'
+            Set-Content -LiteralPath $tpUiPath -Value 'stub' -Encoding ascii
+        }
+
+        It "returns a display-only advisory with the explicit UI path when setup is missing" {
+            $before = Get-UiHandoffSnapshot $tpRoot
+
+            $result = Get-TeknoParrotUiFirstRunAdvisory -TeknoParrotRoot $tpRoot -TeknoParrotUiPath $tpUiPath
+
+            $result.State | Should -Be 'Missing'
+            $result.NeedsAttention | Should -BeTrue
+            ($result.Lines -join "`n") | Should -Match ([regex]::Escape($tpUiPath))
+            ($result.Lines -join "`n") | Should -Match 'will not launch TeknoParrotUI'
+            (Compare-Object $before (Get-UiHandoffSnapshot $tpRoot) -Property Path, Hash, Write) | Should -BeNullOrEmpty
+        }
+
+        It "does not show an advisory when the existing wizard state is complete" {
+            Set-Content -LiteralPath (Join-Path $tpRoot 'ParrotData.xml') -Value (New-ParrotDataXml -FirstTimeSetupComplete 'true') -Encoding utf8
+
+            $result = Get-TeknoParrotUiFirstRunAdvisory -TeknoParrotRoot $tpRoot -TeknoParrotUiPath $tpUiPath
+
+            $result.State | Should -Be 'Complete'
+            $result.NeedsAttention | Should -BeFalse
+            @($result.Lines).Count | Should -Be 0
+            $result.TeknoParrotUiPath | Should -Be $tpUiPath
+        }
+
+        It "keeps incomplete setup separate from controls readiness" {
+            Set-Content -LiteralPath (Join-Path $tpRoot 'ParrotData.xml') -Value (New-ParrotDataXml -FirstTimeSetupComplete 'false') -Encoding utf8
+
+            $result = Get-TeknoParrotUiFirstRunAdvisory -TeknoParrotRoot $tpRoot -TeknoParrotUiPath $tpUiPath
+
+            $result.State | Should -Be 'Incomplete'
+            $result.NeedsAttention | Should -BeTrue
+            ($result.Lines -join "`n") | Should -Match 'first-run setup is not complete'
+            ($result.Lines -join "`n") | Should -Not -Match '(?i)controls.*verified'
+        }
+    }
+
     Context "Get-OnboardingHandoffSummaryLines" {
         It "reproduces the exact handoff text: registered + launched + wizard complete + controls NotVerified" {
             $assessment = [pscustomobject]@{ Code = 'abc'; Registration = 'Registered'; Controls = 'NotVerified'; Launch = 'ObservedSuccess' }
@@ -2058,7 +2114,7 @@ Describe "TeknoParrot Wizard Readiness Handoff (issue #253)" {
         }
 
         It "defines every expected wizard-handoff function exactly once" -TestCases (
-            @('Get-TeknoParrotWizardState', 'Get-OnboardingHandoffSummaryLines') | ForEach-Object { @{ Name = $_ } }
+            @('Get-TeknoParrotWizardState', 'Get-TeknoParrotUiFirstRunAdvisory', 'Get-OnboardingHandoffSummaryLines') | ForEach-Object { @{ Name = $_ } }
         ) {
             param($Name)
             $matches = $wizardProductionAst.FindAll({
@@ -2068,7 +2124,7 @@ Describe "TeknoParrot Wizard Readiness Handoff (issue #253)" {
         }
 
         It "never calls a write-capable or wizard-mutation path from any wizard-handoff function" -TestCases (
-            @('Get-TeknoParrotWizardState', 'Get-OnboardingHandoffSummaryLines') | ForEach-Object { @{ Name = $_ } }
+            @('Get-TeknoParrotWizardState', 'Get-TeknoParrotUiFirstRunAdvisory', 'Get-OnboardingHandoffSummaryLines') | ForEach-Object { @{ Name = $_ } }
         ) {
             param($Name)
             $forbiddenCommands = @('Invoke-ControlPropagation', 'Set-ProfileInputApi', 'Save-XmlMaybe', 'Save-Xml',
@@ -2083,7 +2139,12 @@ Describe "TeknoParrot Wizard Readiness Handoff (issue #253)" {
             $calls = $fn.Body.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true) |
                 ForEach-Object { $_.GetCommandName() } | Where-Object { $_ }
             foreach ($f in $forbiddenCommands) { $calls | Should -Not -Contain $f }
-            ($calls | Where-Object { $_ -match 'Wizard' }) | Should -BeNullOrEmpty
+            $wizardCalls = @($calls | Where-Object { $_ -match 'Wizard' })
+            if ($Name -eq 'Get-TeknoParrotUiFirstRunAdvisory') {
+                @($wizardCalls | Where-Object { $_ -ne 'Get-TeknoParrotWizardState' }) | Should -BeNullOrEmpty
+            } else {
+                $wizardCalls | Should -BeNullOrEmpty
+            }
 
             # Member/static invocation check: CommandAst alone misses
             # [xml]/[System.Xml.XmlDocument]::Save(...), [System.IO.File]::

@@ -64,6 +64,15 @@
   - Run TeknoParrotUi.exe once so it downloads its game profiles.
   - Have your games as ZIP files (for AutoSync) or already extracted.
 
+  TEKNOPARROTUI FIRST-RUN HANDOFF
+  -------------------------------
+  After you choose the TeknoParrot folder, TPM reads TeknoParrotUI's
+  ParrotData.xml setup marker read-only. If setup is incomplete or the marker
+  cannot be read safely, TPM shows the exact TeknoParrotUi.exe path for you to
+  open yourself. TPM does not start the UI or edit ParrotData.xml, controls,
+  or DAT/XML settings. This handoff is separate from checking whether game
+  controls are mapped and verified.
+
 
   TYPICAL FIRST RUN
   -----------------

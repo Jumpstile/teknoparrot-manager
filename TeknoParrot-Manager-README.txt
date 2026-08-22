@@ -473,6 +473,21 @@
 
 
 -------------------------------------------------------------------------------
+  TEKNOPARROTUI FIRST-RUN HANDOFF
+-------------------------------------------------------------------------------
+
+  After TPM confirms the TeknoParrot root, it reads TeknoParrotUI's
+  ParrotData.xml setup marker without changing it. If setup is incomplete, the
+  marker is missing or malformed, or its layout is not recognized safely, TPM
+  prints the exact TeknoParrotUi.exe path for you to open yourself.
+
+  This is display-only. TPM does not launch TeknoParrotUI, edit ParrotData.xml,
+  change controls, or change DAT/XML settings. A completed first-run wizard is
+  not proof that a game's controls are mapped or verified; those remain
+  separate TeknoParrotUI and game checks.
+
+
+-------------------------------------------------------------------------------
   RUNNING THE SCRIPT
 -------------------------------------------------------------------------------
 

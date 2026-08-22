@@ -12518,6 +12518,50 @@ function Get-TeknoParrotWizardState {
     return [pscustomobject]@{ State = $state; DatXmlLocation = $datXmlLocation }
 }
 
+# Builds the early, display-only TeknoParrotUI handoff advisory (issue #260).
+# This intentionally reuses Get-TeknoParrotWizardState instead of adding a
+# second ParrotData.xml parser. The returned path is the explicit executable
+# path already validated by the caller; this function never launches it.
+#
+# The advisory is separate from control readiness: a completed TeknoParrotUI
+# wizard does not prove that game controls are mapped or verified, and an
+# incomplete/missing wizard state does not authorize TPM to edit TeknoParrot
+# files. All remediation remains in TeknoParrotUi.exe itself.
+function Get-TeknoParrotUiFirstRunAdvisory {
+    param(
+        [Parameter(Mandatory)][string]$TeknoParrotRoot,
+        [Parameter(Mandatory)][string]$TeknoParrotUiPath
+    )
+
+    $wizardState = Get-TeknoParrotWizardState -TeknoParrotRoot $TeknoParrotRoot
+    $needsAttention = ($wizardState.State -ne 'Complete')
+    $lines = @()
+
+    if ($needsAttention) {
+        $reason = switch ($wizardState.State) {
+            'Incomplete' { 'TeknoParrotUI reports that its first-run setup is not complete.' }
+            'Missing'    { 'TeknoParrotUI has not exposed a ParrotData.xml setup record yet.' }
+            'Malformed'  { 'TeknoParrotUI setup state could not be read because ParrotData.xml is malformed.' }
+            'Unknown'    { 'TeknoParrotUI setup state could not be recognized safely.' }
+            default      { "TeknoParrotUI setup state is $($wizardState.State)." }
+        }
+        $lines = @(
+            'TeknoParrotUI first-run setup may still need attention.',
+            "  Open this TeknoParrotUI executable yourself: $TeknoParrotUiPath",
+            "  Reason: $reason",
+            '  TPM will not launch TeknoParrotUI or modify ParrotData.xml, controls, or DAT/XML settings.'
+        )
+    }
+
+    return [pscustomobject]@{
+        State             = $wizardState.State
+        DatXmlLocation    = $wizardState.DatXmlLocation
+        TeknoParrotUiPath = $TeknoParrotUiPath
+        NeedsAttention    = $needsAttention
+        Lines             = @($lines)
+    }
+}
+
 # Combines the issue #255 control-readiness assessment with the issue #253
 # TeknoParrotUI wizard state into the onboarding handoff text a user sees
 # after registration/AutoSync. Four dimensions -- Registration, Controls,
@@ -13678,6 +13722,22 @@ if (-not (Test-Path -LiteralPath $tpExe)) {
     Write-Host ""; Write-Host "ERROR: TeknoParrotUi.exe not found in: $tpRoot" -ForegroundColor Red
     Write-Host "Make sure the path points to the TeknoParrot root folder." -ForegroundColor Yellow
     Write-Log "ERROR: TeknoParrotUi.exe not found."; exit 1
+}
+
+# Read-only handoff: tell the user when TeknoParrotUI may still need its own
+# first-run setup, without starting the UI or touching its files. This runs
+# after the executable path is validated so the advisory can name the exact
+# TeknoParrotUi.exe that the user should open.
+$tpWizardAdvisory = Get-TeknoParrotUiFirstRunAdvisory `
+    -TeknoParrotRoot $tpRoot -TeknoParrotUiPath $tpExe
+if ($tpWizardAdvisory.NeedsAttention) {
+    Write-Host ""
+    Write-Host "TeknoParrotUI setup handoff" -ForegroundColor Yellow
+    foreach ($line in @($tpWizardAdvisory.Lines)) {
+        Write-Host $line -ForegroundColor DarkCyan
+    }
+    Write-Log ("TeknoParrotUI setup handoff: state={0} path={1} -- display-only advisory; no TeknoParrot-owned files changed." -f `
+        $tpWizardAdvisory.State, $tpWizardAdvisory.TeknoParrotUiPath)
 }
 
 $gameProfilesDir = Join-Path $tpRoot "GameProfiles"

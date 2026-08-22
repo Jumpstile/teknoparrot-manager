@@ -143,6 +143,19 @@ This script automates the copy-and-fill step: it scans your games, matches each 
 - TeknoParrot installed with `TeknoParrotUi.exe` run at least once (so it downloads its `GameProfiles` folder)
 - Your games as ZIP files (for AutoSync) or already extracted into subfolders
 
+## TeknoParrotUI first-run handoff
+
+After TPM confirms the TeknoParrot root, it reads TeknoParrotUI's
+`ParrotData.xml` setup marker without changing it. If the marker says setup is
+incomplete, is missing, is malformed, or cannot be recognized safely, TPM
+prints an advisory with the exact `TeknoParrotUi.exe` path to open yourself.
+
+This is a handoff, not an automatic setup step: TPM does not launch
+TeknoParrotUI, edit `ParrotData.xml`, change controls, or change DAT/XML
+settings. A completed first-run wizard also does not prove that a particular
+game's controls are mapped or verified; those remain separate TeknoParrotUI
+and game checks.
+
 ---
 
 ## Installation
