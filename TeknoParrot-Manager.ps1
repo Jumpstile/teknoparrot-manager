@@ -4505,7 +4505,7 @@ function Invoke-CursorHideSetup {
 # ZipFile::ExtractToDirectory which throws PathTooLongException for games with
 # deeply-nested internal paths. Includes a zip-slip guard.
 function Expand-ZipFileSafe {
-    param([string]$ZipPath, [string]$DestDir, [string]$GameName = '')
+    param([string]$ZipPath, [string]$DestDir, [string]$GameName = '', [int]$ProgressId = 43)
 
     # GetFullPath on the (short) base is safe. We deliberately avoid calling
     # GetFullPath on the combined base+entry path: on .NET 4.x (PS 5.1) that
@@ -4547,7 +4547,7 @@ function Expand-ZipFileSafe {
             $current++
             if ($fileCount -gt 0) {
                 $pct = [Math]::Min(100, [int](($current / $fileCount) * 100))
-                Write-Progress -Activity "Extracting: $label" `
+                Write-Progress -Id $ProgressId -Activity "Extracting: $label" `
                                -Status ("File {0} of {1}" -f $current, $fileCount) `
                                -PercentComplete $pct
             }
@@ -4566,7 +4566,10 @@ function Expand-ZipFileSafe {
         }
     } finally {
         if ($archive) { $archive.Dispose() }
-        Write-Progress -Activity "Extracting: $label" -Completed
+        # Id 43 belongs to archive extraction. Always complete it here, even
+        # when opening, validating, or extracting the archive throws, so the
+        # next phase cannot inherit a stale extraction artifact.
+        Write-Progress -Id $ProgressId -Activity "Extracting: $label" -Completed
     }
 }
 
@@ -8255,7 +8258,7 @@ function Register-Games {
     foreach ($exe in $exeFiles) {
         $_regI++
         if ($_regTotal -gt 0) {
-            Write-Progress -Activity "Scanning game library" `
+            Write-Progress -Id 44 -Activity "Scanning game library" `
                            -Status ("({0}/{1}) {2}" -f $_regI, $_regTotal, $exe.Directory.Name) `
                            -PercentComplete ([int]($_regI / $_regTotal * 100))
         }
@@ -8583,7 +8586,9 @@ function Register-Games {
             Write-Log "Register FAILED $code -- $_"
         }
     }
-    Write-Progress -Activity "Scanning game library" -Completed
+    # Id 44 belongs to registration scanning. Complete it before any later
+    # phase (including post-AutoSync summaries) begins.
+    Write-Progress -Id 44 -Activity "Scanning game library" -Completed
 
     # Second pass: folders that had recognisable executables but none of them were
     # in $profileIndex (no exe->profile mapping). These are typically games whose

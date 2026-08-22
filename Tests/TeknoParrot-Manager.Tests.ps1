@@ -868,6 +868,7 @@ Describe "Register-Games structured result" {
         # normal $false value. Register-Games must consume that helper result
         # and still return its documented single structured result, including
         # in dry-run mode.
+        Mock Write-Progress {}
         $result = @(Register-Games -userProfilesDir $userProfilesDir -installFolder $installFolder -profileIndex $profileIndex -gameProfilesDir $gameProfilesDir -DryRun:$true)
 
         $result.Count | Should -Be 1
@@ -878,6 +879,7 @@ Describe "Register-Games structured result" {
         @($result[0].PSObject.Properties.Name) | Should -Contain 'Unmatched'
         @($result[0].Registered).Count | Should -Be 1
         $result[0].Registered[0].Code | Should -Be 'TestGame'
+        Should -Invoke Write-Progress -Times 1 -ParameterFilter { $Id -eq 44 -and $Completed }
     }
 }
 
@@ -2554,8 +2556,10 @@ Describe "Expand-ZipFileSafe" {
         $zip  = Join-Path $TestDrive "normal.zip"
         $dest = Join-Path $TestDrive "normal-out"
         New-TestZip $zip @{ "sub/folder/file.txt" = "hello" }
+        Mock Write-Progress {}
         Expand-ZipFileSafe -ZipPath $zip -DestDir $dest
         Get-Content -LiteralPath (Join-Path $dest "sub\folder\file.txt") -Raw | Should -Be "hello"
+        Should -Invoke Write-Progress -Times 1 -ParameterFilter { $Id -eq 43 -and $Completed }
     }
     It "rejects an entry with a directory traversal segment" {
         $zip  = Join-Path $TestDrive "traversal.zip"
@@ -2579,7 +2583,9 @@ Describe "Expand-ZipFileSafe" {
         $zip = Join-Path $TestDrive "corrupt.zip"
         [System.IO.File]::WriteAllBytes($zip, [byte[]]@(1,2,3,4,5))
         $dest = Join-Path $TestDrive "corrupt-out"
+        Mock Write-Progress {}
         { Expand-ZipFileSafe -ZipPath $zip -DestDir $dest } | Should -Throw
+        Should -Invoke Write-Progress -Times 1 -ParameterFilter { $Id -eq 43 -and $Completed }
     }
 }
 
