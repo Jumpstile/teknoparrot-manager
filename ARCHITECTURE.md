@@ -934,7 +934,8 @@ menu's top-level code): `Get-ControlReadinessRegistrationState`,
 `Get-ControlReadinessKnownRequirements`, `Test-ControlReadinessButtonBindingUsable`,
 `Test-ControlReadinessAnalogMappingUsable`, `Get-ControlReadinessControlsState`,
 `Get-ControlReadinessLaunchState`, `Test-ControlReadinessVerificationEvidence`,
-`Get-ControlReadinessSummaryLines`, and `Get-ControlReadinessAssessment`
+`Get-ControlReadinessSummaryLines`, `Get-ControlReadinessAssessment`, and
+`Get-ControlReadinessActionItems`
 (combines the three dimensions into one `[pscustomobject]` row: `Code`,
 `Registration`, `Controls`, `Launch`). `Get-ControlReadinessControlsState`
 reuses `Get-ButtonNodes` / `Test-ButtonIsBound`, the same helpers
@@ -980,13 +981,31 @@ Trigger, Missile Trigger, Climax Switch). See `Tests\TeknoParrot-Manager.Tests.p
 `Get-ControlReadinessAssessment` row into the exact text lines issue #255's
 candidate pre-1.0 UX specifies (`Game registered successfully` /
 `Controls: Not verified` / `Launch status: Not tested by TPM`, followed by a
-blank line and `Would you like TPM to configure/test controls now?`). It is
+blank line and `Open TeknoParrot controls configuration and map/test controls
+before treating this game as ready.`). It is
 pure string formatting: it never prompts for input and never decides what a
-"yes" answer does. The closing question is included only when the (possibly
+follow-on action does. The closing instruction is included only when the (possibly
 downgraded, see below) controls state is `NotVerified`, `Missing`, or
 `Unknown` -- asking again after `Verified`, or asking when a profile
 declares no controls at all (`Unsupported`), would be noise rather than the
 recovery path issue #255 asked for.
+
+**Runtime handoff wiring (issue #255 remediation).** After the registration
+summary, `Get-ControlReadinessActionItems` enumerates the read-only
+`UserProfiles` XML directory, selects only catalog-backed profile codes, and
+reuses `Get-ControlReadinessAssessment` for each still-registered profile.
+Ambiguous `abc` identity/revision data therefore appears as `Controls:
+Unknown`; incomplete bindings appear as `Missing`; structurally complete but
+untested bindings appear as `Not verified`; and positive contract violations
+appear as `Unsupported`. Each item is rendered through
+`Get-OnboardingHandoffSummaryLines`, so registration, launch observation,
+TeknoParrot wizard state, and controls remain separate lines in the
+ACTION REQUIRED console and saved summary. The recap counts these items as
+manual attention, and the final next-step text tells the user to review the
+controls status before treating a registered game as ready. There is still no
+combined `Ready` flag. Uncataloged profiles remain outside this catalog-backed
+action list and stay `Unknown` in direct assessments rather than being
+promoted by heuristic structure.
 
 **Fail-closed on `Controls = 'Verified'`.** `Get-ControlReadinessAssessment`
 never produces `Verified` -- this engine has no evidence source that could
@@ -1110,14 +1129,14 @@ covers both `$doc.Save(...)`-style instance calls and
 check would miss .NET method calls entirely, since those never appear as a
 CommandAst name.
 
-**Not yet wired up.** This round adds the detector, the handoff formatter,
-and their tests -- no interactive menu entry, no automatic wizard launch,
-no write path. Issue #253's own scope is a coordination boundary, not
-authorization to modify TeknoParrot state; determining whether any
-TeknoParrot-owned write is ever safe (file/field owner, schema, backup,
-verification, rollback) is explicitly deferred to a separately-scoped,
-separately-reviewed follow-up per the issue's own "Acceptance and safety"
-section.
+**Read-only handoff wiring.** The #255 remediation calls the detector and
+handoff formatter from the catalog-backed ACTION REQUIRED bridge after
+registration/AutoSync. This is display-only: it adds no interactive menu
+entry, does not launch or automate the TeknoParrot wizard, and does not write
+TeknoParrot-owned state. Issue #253's coordination boundary remains intact;
+determining whether any TeknoParrot-owned write is ever safe (file/field
+owner, schema, backup, verification, rollback) remains separately scoped and
+separately reviewed under that issue's "Acceptance and safety" section.
 
 ---
 

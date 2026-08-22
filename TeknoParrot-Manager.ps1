@@ -11266,7 +11266,8 @@ function Get-WhatTpmDidSummaryLines {
         [string]$DatAction = 'NotConfigured',
         [bool]$ThumbnailsRequested,
         [int]$ManualNeeded = 0,
-        [int]$NotInTeknoParrot = 0
+        [int]$NotInTeknoParrot = 0,
+        [int]$ControlsNeedAttention = 0
     )
 
     $lines = New-Object System.Collections.Generic.List[string]
@@ -11286,7 +11287,7 @@ function Get-WhatTpmDidSummaryLines {
     } else {
         [void]$lines.Add("    - Skipped game icon download.")
     }
-    $needsAttention = $ManualNeeded + $NotInTeknoParrot
+    $needsAttention = $ManualNeeded + $NotInTeknoParrot + $ControlsNeedAttention
     if ($needsAttention -gt 0) {
         [void]$lines.Add("    - $needsAttention item(s) still need your attention -- see ACTION REQUIRED below.")
     } else {
@@ -11798,13 +11799,13 @@ function Get-ControlReadinessSummaryLines {
 
     $lines = @($registrationText, $controlsText, $launchText)
 
-    # Only offer to configure/test controls when there is something left to
-    # verify. Asking again after Verified, or asking when the profile
-    # declares no controls at all (Unsupported), would be noise rather than
-    # the recovery path issue #255 asked for.
+    # Only offer a recovery instruction when there is something left to
+    # verify. A static readiness pass cannot configure or test controls, so
+    # the instruction names TeknoParrot's own controls UI rather than
+    # implying that TPM will write mappings or run a test.
     if ($controlsState -in @('NotVerified', 'Missing', 'Unknown')) {
         $lines += ''
-        $lines += 'Would you like TPM to configure/test controls now?'
+        $lines += 'Open TeknoParrot controls configuration and map/test controls before treating this game as ready.'
     }
 
     return $lines
@@ -11974,14 +11975,74 @@ function Get-OnboardingHandoffSummaryLines {
         "TPM registered this game. TeknoParrot owns its own setup wizard, controls configuration, and DAT/XML setup -- those are managed separately and are not performed by TPM."
     )
 
-    # Same gate as Get-ControlReadinessSummaryLines: only offer to
-    # configure/test controls when there is something left to verify.
+    # Same gate as Get-ControlReadinessSummaryLines: only offer a direct
+    # TeknoParrot map/test instruction when there is something left to verify.
     if ($controlsState -in @('NotVerified', 'Missing', 'Unknown')) {
         $lines += ''
-        $lines += 'Would you like TPM to configure/test controls now?'
+        $lines += 'Open TeknoParrot controls configuration and map/test controls before treating this game as ready.'
     }
 
     return $lines
+}
+
+# Builds the read-only controls handoff items shown in ACTION REQUIRED after
+# registration. Only profile codes with an authoritative requirements catalog
+# entry are surfaced here: an uncataloged profile remains Unknown in a direct
+# assessment rather than being classified from structure or silently treated
+# as ready. A catalog-backed profile whose identity is ambiguous is surfaced
+# as Unknown, so stale or mismatched requirements cannot disappear from the
+# user-facing readiness report.
+function Get-ControlReadinessActionItems {
+    param(
+        [Parameter(Mandatory)][string]$UserProfilesDir,
+        [string]$GameProfilesDir = '',
+        [string]$TeknoParrotRoot = ''
+    )
+
+    $items = New-Object System.Collections.ArrayList
+    if (-not (Test-Path -LiteralPath $UserProfilesDir -PathType Container)) {
+        return @()
+    }
+
+    $wizardState = if ($TeknoParrotRoot) {
+        Get-TeknoParrotWizardState -TeknoParrotRoot $TeknoParrotRoot
+    } else {
+        [pscustomobject]@{ State = 'Unknown'; DatXmlLocation = $null }
+    }
+
+    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Directory.Name -ne 'FullBackup' } |
+        Sort-Object BaseName)
+
+    foreach ($profileFile in $profiles) {
+        $code = $profileFile.BaseName
+        if ($null -eq (Get-ControlReadinessKnownRequirements -Code $code)) { continue }
+
+        $assessment = Get-ControlReadinessAssessment -Code $code `
+            -UserProfilesDir $UserProfilesDir -GameProfilesDir $GameProfilesDir
+        if ($assessment.Registration -ne 'Registered') { continue }
+
+        $displayControls = $assessment.Controls
+        if ($displayControls -eq 'Verified' -and
+            -not (Test-ControlReadinessVerificationEvidence -Assessment $assessment)) {
+            $displayControls = 'NotVerified'
+        }
+        if ($displayControls -eq 'Verified') { continue }
+
+        $summaryLines = if ($TeknoParrotRoot) {
+            Get-OnboardingHandoffSummaryLines -Assessment $assessment -WizardState $wizardState
+        } else {
+            Get-ControlReadinessSummaryLines -Assessment $assessment
+        }
+
+        [void]$items.Add([pscustomobject]@{
+            Code         = $code
+            Assessment   = $assessment
+            SummaryLines = @($summaryLines)
+        })
+    }
+
+    return @($items)
 }
 
 Write-Log "Script started (v$ScriptVersion$(if ($Unattended) { ' [Unattended]' }))."
@@ -15237,6 +15298,13 @@ if ($result.Unmatched.Count -gt 0) {
     Write-Host ("  Not in TeknoParrot : {0} folder(s)  (see ACTION REQUIRED below)" -f $result.Unmatched.Count) -ForegroundColor Yellow
 }
 
+# Read-only bridge from the #258/#262 evidence model into the end-of-run
+# handoff. This deliberately runs before the recap so the recap can count
+# controls that still need attention, and the same snapshot is then rendered
+# in ACTION REQUIRED below without re-reading or modifying any profile.
+$controlReadinessItems = @(Get-ControlReadinessActionItems -UserProfilesDir $userProfilesDir `
+    -GameProfilesDir $gameProfilesDir -TeknoParrotRoot $tpRoot)
+
 # Targeted, context-aware recommendation for the extra version-info file
 # (supplementary dat) -- deferred out of the initial wizard (see the
 # Eggman-dat setup block above). Only shown when this run actually had an
@@ -15267,7 +15335,8 @@ if (-not $dryRunActive) {
     Write-Host ""
     $summaryLines = Get-WhatTpmDidSummaryLines -AutoSyncRan ($mode -eq "AutoSync") -ZipsExtracted ($(if ($sync) { $sync.Synced } else { 0 })) `
         -NewlyRegistered $result.Registered.Count -AlreadyPresent $result.Already.Count -DatAction $eggmanDatActionThisRun `
-        -ThumbnailsRequested ($doThumb -eq "Y") -ManualNeeded $manualRegData.Count -NotInTeknoParrot $result.Unmatched.Count
+        -ThumbnailsRequested ($doThumb -eq "Y") -ManualNeeded $manualRegData.Count -NotInTeknoParrot $result.Unmatched.Count `
+        -ControlsNeedAttention $controlReadinessItems.Count
     foreach ($sl in $summaryLines) { Write-Host $sl -ForegroundColor DarkCyan }
 }
 
@@ -15727,6 +15796,7 @@ $setupNotes     = Get-GameSetupNotes -UserProfilesDir $userProfilesDir
 $hasAnyAction = ($manualRegData.Count -gt 0) -or ($amb2.Count -gt 0) -or
                 ($nf.Count -gt 0) -or ($noArchetypeItems.Count -gt 0) -or
                 ($result.Unmatched.Count -gt 0) -or
+                ($controlReadinessItems.Count -gt 0) -or
                 ($compatWarnings.PathTooLong.Count -gt 0) -or
                 ($compatWarnings.DllMismatch.Count -gt 0) -or
                 ($compatWarnings.GpuIncompatible.Count -gt 0) -or
@@ -15986,6 +16056,24 @@ if ($hasAnyAction) {
         }
     }
 
+    # -- 8b. Controls readiness (issues #255/#253) ----------------------------
+    if ($controlReadinessItems.Count -gt 0) {
+        foreach ($item in $controlReadinessItems) {
+            Write-Host ""
+            Write-Host ("  CONTROLS NOT READY : {0}" -f $item.Code) -ForegroundColor Yellow
+            Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
+            Write-Host "  Registration, launch success, and TeknoParrot wizard completion" -ForegroundColor DarkCyan
+            Write-Host "  are reported separately and do not prove that controls work." -ForegroundColor DarkCyan
+            foreach ($line in $item.SummaryLines) {
+                if ([string]::IsNullOrEmpty([string]$line)) {
+                    Write-Host ""
+                } else {
+                    Write-Host ("  {0}" -f $line) -ForegroundColor DarkCyan
+                }
+            }
+        }
+    }
+
     # -- 9. Game-specific setup notes (informational) -------------------------
     if ($setupNotes.Count -gt 0) {
         Write-Host ""
@@ -16164,6 +16252,18 @@ if ($hasAnyAction) {
             [void]$asb.AppendLine("             TPM does not download, extract, reinstall, or modify TeknoParrot.")
         }
     }
+    if ($controlReadinessItems.Count -gt 0) {
+        foreach ($item in $controlReadinessItems) {
+            [void]$asb.AppendLine("")
+            [void]$asb.AppendLine("CONTROLS NOT READY : $($item.Code)")
+            [void]$asb.AppendLine("----------------------------------------------------------")
+            [void]$asb.AppendLine("Registration, launch success, and TeknoParrot wizard completion")
+            [void]$asb.AppendLine("are reported separately and do not prove that controls work.")
+            foreach ($line in $item.SummaryLines) {
+                [void]$asb.AppendLine([string]$line)
+            }
+        }
+    }
     if ($setupNotes.Count -gt 0) {
         [void]$asb.AppendLine(""); [void]$asb.AppendLine("GAME-SPECIFIC SETUP NOTES (informational)")
         [void]$asb.AppendLine("----------------------------------------------------------")
@@ -16194,7 +16294,7 @@ if ($hasAnyAction) {
 
 Write-Host ""
 Write-Host "  Next steps:" -ForegroundColor Cyan
-Write-Host "   1. Launch TeknoParrotUi.exe -- registered games now appear."
+Write-Host "   1. Launch TeknoParrotUi.exe -- registered games now appear; review ACTION REQUIRED controls status before treating them as ready."
 Write-Host "   2. Work through the ACTION REQUIRED items above."
 Write-Host "   3. Bind one game of each control type, then re-run and propagate."
 Write-Host "   4. Test one propagated game before trusting the rest."
