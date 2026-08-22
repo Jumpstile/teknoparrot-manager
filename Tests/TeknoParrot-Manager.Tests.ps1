@@ -2548,6 +2548,25 @@ Describe "Expand-ZipFileSafe" {
         }
     }
 
+    BeforeEach {
+        $script:Issue243ProgressCalls = @()
+        $script:Issue243Phase = 'extraction'
+        $script:Issue243CancelOnUpdate = $false
+        Mock Write-Progress {
+            $script:Issue243ProgressCalls += [pscustomobject]@{
+                Phase            = $script:Issue243Phase
+                Id               = $Id
+                IdBound          = $PSBoundParameters.ContainsKey('Id')
+                ParentIdBound    = $PSBoundParameters.ContainsKey('ParentId')
+                Activity         = $Activity
+                Status           = $Status
+                PercentComplete  = $PercentComplete
+                Completed        = [bool]$Completed
+            }
+            if (-not $Completed -and $script:Issue243CancelOnUpdate) { $script:Issue243CancelOnUpdate = $false; throw [System.OperationCanceledException]::new('cancelled') }
+        }
+        Mock Write-Log {}
+    }
     It "extracts normal nested entries with their content intact" {
         $zip  = Join-Path $TestDrive "normal.zip"
         $dest = Join-Path $TestDrive "normal-out"
@@ -2579,8 +2598,119 @@ Describe "Expand-ZipFileSafe" {
         $dest = Join-Path $TestDrive "corrupt-out"
         { Expand-ZipFileSafe -ZipPath $zip -DestDir $dest } | Should -Throw
     }
-}
 
+    It "owns and completes one explicit extraction ID for a normal multi-game sequence" {
+        $zip1 = Join-Path $TestDrive "issue243-game-one.zip"
+        $zip2 = Join-Path $TestDrive "issue243-game-two.zip"
+        New-TestZip $zip1 @{ "nested/one.txt" = "one"; "nested/two.txt" = "two" }
+        New-TestZip $zip2 @{ "game.exe" = "two" }
+
+        $script:Issue243Phase = 'extraction-1'
+        Expand-ZipFileSafe -ZipPath $zip1 -DestDir (Join-Path $TestDrive "issue243-game-one") -GameName "Game One"
+        $script:Issue243Phase = 'summary'
+        Write-Host "AutoSync summary"
+        $script:Issue243Phase = 'extraction-2'
+        Expand-ZipFileSafe -ZipPath $zip2 -DestDir (Join-Path $TestDrive "issue243-game-two") -GameName "Game Two"
+
+        $extractionCalls = @($script:Issue243ProgressCalls | Where-Object { $_.Activity -like 'Extracting:*' })
+        $extractionCalls.Count | Should -Be 5
+        @($extractionCalls | Where-Object { $_.Id -ne 43 }).Count | Should -Be 0
+        @($extractionCalls | Where-Object { $_.ParentIdBound }).Count | Should -Be 0
+        @($extractionCalls | Where-Object { $_.Completed }).Count | Should -Be 2
+        @($extractionCalls | Where-Object { -not $_.Completed }).Count | Should -Be 3
+    }
+
+    It "completes extraction before the registration scan starts" {
+        $zip = Join-Path $TestDrive "issue243-transition.zip"
+        New-TestZip $zip @{ "game.exe" = "content" }
+
+        $script:Issue243Phase = 'extraction'
+        Expand-ZipFileSafe -ZipPath $zip -DestDir (Join-Path $TestDrive "issue243-transition") -GameName "Transition Game"
+        $script:Issue243Phase = 'scan'
+        Write-Progress -Activity "Scanning game library" -Status "(1/1) Transition Game" -PercentComplete 100
+
+        $scanIndex = -1
+        for ($i = 0; $i -lt $script:Issue243ProgressCalls.Count; $i++) {
+            if ($script:Issue243ProgressCalls[$i].Activity -eq 'Scanning game library') {
+                $scanIndex = $i
+                break
+            }
+        }
+        $scanIndex | Should -BeGreaterThan -1
+        $script:Issue243ProgressCalls[$scanIndex].Id | Should -Be 0
+        $script:Issue243ProgressCalls[$scanIndex].IdBound | Should -BeFalse
+        $beforeScan = @($script:Issue243ProgressCalls[0..($scanIndex - 1)])
+        @($beforeScan | Where-Object { $_.Activity -like 'Extracting:*' -and $_.Completed }).Count | Should -Be 1
+        @($script:Issue243ProgressCalls[$scanIndex..($script:Issue243ProgressCalls.Count - 1)] | Where-Object { $_.Id -eq 43 }).Count | Should -Be 0
+    }
+
+    It "cleans up the explicit extraction ID across extracted, skipped, and up-to-date AutoSync paths" {
+        $source = Join-Path $TestDrive "issue243-mixed-source"
+        $install = Join-Path $TestDrive "issue243-mixed-install"
+        $profiles = Join-Path $TestDrive "issue243-mixed-profiles"
+        New-Item -ItemType Directory -Path $source, $install, $profiles -Force | Out-Null
+
+        $skipName = "Issue243Skipped"
+        $upToDateName = "Issue243UpToDate"
+        $extractName = "Issue243Extracted"
+        $skipZip = Join-Path $source ($skipName + ".zip")
+        $upToDateZip = Join-Path $source ($upToDateName + ".zip")
+        $extractZip = Join-Path $source ($extractName + ".zip")
+        New-TestZip $skipZip @{ "skip.txt" = "skip" }
+        New-TestZip $upToDateZip @{ "already.txt" = "already" }
+        New-TestZip $extractZip @{ "new.txt" = "new" }
+
+        $upToDateFolder = Join-Path $install $upToDateName
+        New-Item -ItemType Directory -Path $upToDateFolder -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $upToDateFolder "already.txt") -Value "already" -NoNewline
+
+        $script:Issue243Phase = 'autosync'
+        $result = Invoke-AutoSync -zipSource $source -installFolder $install -syncStatePath (Join-Path $TestDrive "issue243-mixed-state.json") -noSync @($skipName) -datIndex @{} -userProfilesDir $profiles
+
+        $result.Synced | Should -Be 1
+        $result.UpToDate | Should -Be 1
+        $result.Skipped | Should -Be 1
+        $result.Failed | Should -Be 0
+        @($script:Issue243ProgressCalls | Where-Object { $_.Activity -like 'Extracting:*' -and $_.Id -eq 43 -and $_.Completed }).Count | Should -Be 1
+        @($script:Issue243ProgressCalls | Where-Object { $_.Id -ne 43 -and $_.Activity -like 'Extracting:*' }).Count | Should -Be 0
+    }
+
+    It "completes the explicit extraction ID when archive opening fails" {
+        $source = Join-Path $TestDrive "issue243-failure-source"
+        $install = Join-Path $TestDrive "issue243-failure-install"
+        $profiles = Join-Path $TestDrive "issue243-failure-profiles"
+        $statePath = Join-Path $TestDrive "issue243-failure-state.json"
+        New-Item -ItemType Directory -Path $source, $install, $profiles -Force | Out-Null
+        $badZip = Join-Path $source "Issue243Broken.zip"
+        [System.IO.File]::WriteAllBytes($badZip, [byte[]]@(1,2,3,4))
+
+        $script:Issue243Phase = 'failure'
+        $result = Invoke-AutoSync -zipSource $source -installFolder $install -syncStatePath $statePath -datIndex @{} -userProfilesDir $profiles
+
+        $result.Failed | Should -Be 1
+        @($script:Issue243ProgressCalls | Where-Object { $_.Id -eq 43 -and $_.Completed }).Count | Should -Be 1
+    }
+
+    It "completes the explicit extraction ID when the progress host cancels extraction" {
+        $zip = Join-Path $TestDrive "issue243-cancelled.zip"
+        New-TestZip $zip @{ "cancelled.txt" = "cancelled" }
+        $script:Issue243CancelOnUpdate = $true
+
+        { Expand-ZipFileSafe -ZipPath $zip -DestDir (Join-Path $TestDrive "issue243-cancelled") -GameName "Cancelled Game" } | Should -Throw
+
+        @($script:Issue243ProgressCalls | Where-Object { $_.Id -eq 43 -and $_.Completed }).Count | Should -Be 1
+    }
+    It "does not invent an extraction progress record on the no-ZIP early return" {
+        $source = Join-Path $TestDrive "issue243-empty-source"
+        $install = Join-Path $TestDrive "issue243-empty-install"
+        New-Item -ItemType Directory -Path $source, $install -Force | Out-Null
+
+        $result = Invoke-AutoSync -zipSource $source -installFolder $install -syncStatePath (Join-Path $TestDrive "issue243-empty-state.json") -datIndex @{}
+
+        $result.Synced | Should -Be 0
+        @($script:Issue243ProgressCalls).Count | Should -Be 0
+    }
+}
 Describe "Test-DgVoodoo2UpToDate" {
     It "is not eligible when the game imports no legacy API" {
         $result = Test-DgVoodoo2UpToDate -Apis @() -ExeDir (Join-Path $TestDrive "anything")

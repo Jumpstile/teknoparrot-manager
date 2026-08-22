@@ -4511,6 +4511,14 @@ function Expand-ZipFileSafe {
         '\\?\' + $destFull
     }
     $label     = if ($GameName) { $GameName } else { [System.IO.Path]::GetFileNameWithoutExtension($ZipPath) }
+    # Keep extraction progress separate from the download overlay (Id 42) and
+    # the registration scan (the legacy/default Id 0). An implicit Id 0 lets
+    # Windows PowerShell carry a completed extraction row into the next
+    # progress activity on hosts that do not fully redraw the old record.
+    # This function owns Id 43 for its entire lifetime and completes it in the
+    # finally block on success, validation failure, cancellation, and every
+    # other exit path after the function starts.
+    $extractionProgressId = 43
     $archive   = $null
     try {
         $archive   = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
@@ -4535,7 +4543,7 @@ function Expand-ZipFileSafe {
             $current++
             if ($fileCount -gt 0) {
                 $pct = [Math]::Min(100, [int](($current / $fileCount) * 100))
-                Write-Progress -Activity "Extracting: $label" `
+                Write-Progress -Id $extractionProgressId -Activity "Extracting: $label" `
                                -Status ("File {0} of {1}" -f $current, $fileCount) `
                                -PercentComplete $pct
             }
@@ -4554,7 +4562,7 @@ function Expand-ZipFileSafe {
         }
     } finally {
         if ($archive) { $archive.Dispose() }
-        Write-Progress -Activity "Extracting: $label" -Completed
+        Write-Progress -Id $extractionProgressId -Activity "Extracting: $label" -Completed
     }
 }
 
