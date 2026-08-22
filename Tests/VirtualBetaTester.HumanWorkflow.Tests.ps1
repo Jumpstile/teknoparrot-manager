@@ -102,6 +102,7 @@ function Get-VbtUpdateRelease {
     $releaseName = if ($payload.PSObject.Properties.Name -contains 'name') { $payload.name } else { $null }
     $releaseBody = if ($payload.PSObject.Properties.Name -contains 'body') { $payload.body } else { $null }
     $sizeBytes = if ($asset.PSObject.Properties.Name -contains 'size' -and $null -ne $asset.size) { [int64]$asset.size } else { [int64]0 }
+    $expectedSha256 = if ($asset.PSObject.Properties.Name -contains 'digest') { Get-TpmSha256FromDigestField -Digest ([string]$asset.digest) } else { $null }
     return [pscustomobject]@{
         TagName     = $payload.tag_name
         Name        = $releaseName
@@ -109,6 +110,7 @@ function Get-VbtUpdateRelease {
         AssetName   = $asset.name
         DownloadUrl = $asset.browser_download_url
         SizeBytes   = $sizeBytes
+        ExpectedSha256 = $expectedSha256
     }
 }
 
@@ -184,6 +186,7 @@ function Invoke-VbtUpdateInstall {
                 name                  = $AssetName
                 browser_download_url = "https://github.com/Jumpstile/teknoparrot-manager/releases/download/$TagName/$AssetName"
                 size                  = 1
+                digest                = ('sha256:' + ('a' * 64))
             })
         } | ConvertTo-Json -Depth 5)
     }
@@ -406,6 +409,7 @@ Describe "Virtual Beta Tester: startup update-check decision paths (issue #88 ph
                     name                  = 'TeknoParrot.Manager.v1.1.zip'
                     browser_download_url = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v1.1/TeknoParrot.Manager.v1.1.zip'
                     size                  = 1
+                    digest                = ('sha256:' + ('a' * 64))
                 })
             } | ConvertTo-Json -Depth 5)
         }

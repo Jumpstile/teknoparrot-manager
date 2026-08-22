@@ -4732,6 +4732,237 @@ Describe "New-PostgresPgPassFile / Remove-PostgresPgPassFile" {
     }
 }
 
+Describe "Issue #131 PostgreSQL setup state and password population" {
+    BeforeAll {
+        $script:OriginalPostgresInstallDir = $script:PostgresInstallDir
+        $script:OriginalPostgresBinDir = $script:PostgresBinDir
+
+        function New-TestPostgresProfile {
+            param(
+                [Parameter(Mandatory)][string]$UserProfilesDir,
+                [Parameter(Mandatory)][string]$Name,
+                [string]$PassValue = '',
+                [switch]$MissingPassField,
+                [string]$PathValue = 'C:\Program Files (x86)\PostgreSQL\8.3\bin\',
+                [string]$AddressValue = '127.0.0.1',
+                [string]$PortValue = '5432',
+                [string]$UserValue = 'postgres'
+            )
+            New-Item -ItemType Directory -Path $UserProfilesDir -Force | Out-Null
+            $passField = if ($MissingPassField) { '' } else { "<FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Pass</FieldName><FieldValue>$PassValue</FieldValue></FieldInformation>" }
+            $xml = @"
+<GameProfile>
+  <GameName>$Name</GameName>
+  <GamePath>C:\Games\$Name\game.exe</GamePath>
+  <ConfigValues>
+    <FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Path</FieldName><FieldValue>$PathValue</FieldValue></FieldInformation>
+    <FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Address</FieldName><FieldValue>$AddressValue</FieldValue></FieldInformation>
+    <FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Port</FieldName><FieldValue>$PortValue</FieldValue></FieldInformation>
+    <FieldInformation><CategoryName>Postgres</CategoryName><FieldName>User</FieldName><FieldValue>$UserValue</FieldValue></FieldInformation>
+    <FieldInformation><CategoryName>Postgres</CategoryName><FieldName>DbName</FieldName><FieldValue>GameDB$Name</FieldValue></FieldInformation>
+    $passField
+  </ConfigValues>
+</GameProfile>
+"@
+            $path = Join-Path $UserProfilesDir ($Name + '.xml')
+            [System.IO.File]::WriteAllText($path, $xml, (New-Object System.Text.UTF8Encoding $false))
+            return $path
+        }
+
+        function Get-TestProfilePassword {
+            param([string]$Path)
+            $doc = Read-Xml $Path
+            return Get-PostgresFieldValue -Doc $doc -FieldName 'Pass'
+        }
+    }
+
+    AfterAll {
+        $script:PostgresInstallDir = $script:OriginalPostgresInstallDir
+        $script:PostgresBinDir = $script:OriginalPostgresBinDir
+    }
+
+    It "classifies a present, fully configured PostgreSQL profile as already configured" {
+        $root = Join-Path $TestDrive 'pg-present'
+        $profilePath = New-TestPostgresProfile -UserProfilesDir $root -Name 'GOLDENTEE' -PassValue 'existing-value'
+
+        $status = Get-PostgresSetupStatus -UserProfilesDir $root -PostgresInstalled:$true -AuthenticationState 'Verified'
+
+        $status.State | Should -Be 'AlreadyConfigured'
+        $status.DetectedCount | Should -Be 1
+        $status.AlreadyConfiguredCount | Should -Be 1
+        $status.Profiles[0].DetectionState | Should -Be 'Detected'
+        $status.Profiles[0].State | Should -Be 'AlreadyConfigured'
+        $status.Profiles[0].PSObject.Properties.Name | Should -Not -Contain 'Password'
+        $profilePath | Should -Exist
+    }
+
+    It "classifies detected profiles as missing setup when PostgreSQL is absent" {
+        $root = Join-Path $TestDrive 'pg-absent'
+        New-TestPostgresProfile -UserProfilesDir $root -Name 'POWERPUTT' | Out-Null
+
+        $status = Get-PostgresSetupStatus -UserProfilesDir $root -PostgresInstalled:$false
+
+        $status.State | Should -Be 'MissingSetup'
+        $status.MissingSetupCount | Should -Be 1
+        $status.Profiles[0].State | Should -Be 'MissingSetup'
+    }
+
+    It "classifies an installed profile with an empty Pass field as password-population-needed" {
+        $root = Join-Path $TestDrive 'pg-population-needed'
+        New-TestPostgresProfile -UserProfilesDir $root -Name 'SILVERSTRIKE' | Out-Null
+
+        $status = Get-PostgresSetupStatus -UserProfilesDir $root -PostgresInstalled:$true -AuthenticationState 'Verified'
+
+        $status.State | Should -Be 'PasswordPopulationNeeded'
+        $status.PasswordPopulationNeededCount | Should -Be 1
+        $status.Profiles[0].State | Should -Be 'PasswordPopulationNeeded'
+    }
+
+    It "populates a password before completing the remaining missing setup fields" {
+        $root = Join-Path $TestDrive 'pg-missing-setup-password'
+        $profilePath = New-TestPostgresProfile -UserProfilesDir $root -Name 'ORANGECOUNTY' `
+            -PathValue '' -AddressValue '' -PortValue '' -UserValue ''
+        Mock Test-PostgresPassword { $true }
+
+        $status = Get-PostgresSetupStatus -UserProfilesDir $root -PostgresInstalled:$true -AuthenticationState 'Verified'
+        $result = Invoke-PostgresPasswordPopulation -UserProfilesDir $root -SuperPasswordPlain 'fixture-secret' `
+            -Profiles $status.Profiles -BackupRoot (Join-Path $TestDrive 'backups-missing-setup') -Approved
+
+        $status.State | Should -Be 'PasswordPopulationNeeded'
+        $status.PasswordPopulationNeededCount | Should -Be 1
+        $status.Profiles[0].PasswordPopulationNeeded | Should -BeTrue
+        $result.State | Should -Be 'Completed'
+        $result.UpdatedProfiles | Should -Contain 'ORANGECOUNTY'
+        (Get-TestProfilePassword -Path $profilePath) | Should -Be 'fixture-secret'
+    }
+
+    It "does not modify an already configured profile unnecessarily" {
+        $root = Join-Path $TestDrive 'pg-already-configured'
+        $profilePath = New-TestPostgresProfile -UserProfilesDir $root -Name 'TARGETTOSS' -PassValue 'existing-value'
+        $before = [Convert]::ToBase64String([IO.File]::ReadAllBytes($profilePath))
+        Mock Test-PostgresPassword { throw 'authentication should not be probed when no population is needed' }
+
+        $profile = (Get-PostgresSetupStatus -UserProfilesDir $root -PostgresInstalled:$true -AuthenticationState 'Verified').Profiles
+        $result = Invoke-PostgresPasswordPopulation -UserProfilesDir $root -SuperPasswordPlain 'fixture-secret' -Profiles $profile -BackupRoot (Join-Path $TestDrive 'backups') -Approved
+
+        $result.State | Should -Be 'AlreadyConfigured'
+        $result.Changed | Should -BeFalse
+        [Convert]::ToBase64String([IO.File]::ReadAllBytes($profilePath)) | Should -Be $before
+        $result.BackupPath | Should -BeNullOrEmpty
+    }
+
+    It "populates multiple affected profiles after approval and leaves an existing credential untouched" {
+        $root = Join-Path $TestDrive 'pg-multiple'
+        $first = New-TestPostgresProfile -UserProfilesDir $root -Name 'GOLDENTEE'
+        $second = New-TestPostgresProfile -UserProfilesDir $root -Name 'SILVERSTRIKE'
+        $existing = New-TestPostgresProfile -UserProfilesDir $root -Name 'TARGETTOSS' -PassValue 'existing-value'
+        $existingBefore = [Convert]::ToBase64String([IO.File]::ReadAllBytes($existing))
+        Mock Test-PostgresPassword { $true }
+
+        $profiles = (Get-PostgresSetupStatus -UserProfilesDir $root -PostgresInstalled:$true -AuthenticationState 'Verified').Profiles
+        $result = Invoke-PostgresPasswordPopulation -UserProfilesDir $root -SuperPasswordPlain 'fixture-secret' -Profiles $profiles -BackupRoot (Join-Path $TestDrive 'backups') -Approved
+        $outputText = ($result | ConvertTo-Json -Depth 8)
+
+        $result.State | Should -Be 'Completed'
+        $result.UpdatedProfiles.Count | Should -Be 2
+        @($result.UpdatedProfiles) | Should -Contain 'GOLDENTEE'
+        @($result.UpdatedProfiles) | Should -Contain 'SILVERSTRIKE'
+        (Get-TestProfilePassword -Path $first) | Should -Be 'fixture-secret'
+        (Get-TestProfilePassword -Path $second) | Should -Be 'fixture-secret'
+        (Get-TestProfilePassword -Path $existing) | Should -Be 'existing-value'
+        [Convert]::ToBase64String([IO.File]::ReadAllBytes($existing)) | Should -Be $existingBefore
+        $result.BackupPath | Should -Exist
+        (Get-ChildItem -LiteralPath $result.BackupPath -File -Recurse | Measure-Object).Count | Should -Be 2
+        (Get-Content -LiteralPath (Join-Path $result.BackupPath 'GOLDENTEE.xml') -Raw) | Should -Not -Match 'fixture-secret'
+        $outputText | Should -Not -Match 'fixture-secret'
+        (Get-Content -LiteralPath $script:logPath -Raw) | Should -Not -Match 'fixture-secret'
+    }
+
+    It "reports skipped and performs no backup or write when population is declined" {
+        $root = Join-Path $TestDrive 'pg-declined'
+        $profilePath = New-TestPostgresProfile -UserProfilesDir $root -Name 'POWERPUTT'
+        $before = [Convert]::ToBase64String([IO.File]::ReadAllBytes($profilePath))
+        $backupRoot = Join-Path $TestDrive ('backups-declined-' + [guid]::NewGuid().ToString('N'))
+        Mock Test-PostgresPassword { throw 'verification must not run after decline' }
+
+        $profile = (Get-PostgresSetupStatus -UserProfilesDir $root -PostgresInstalled:$true -AuthenticationState 'Verified').Profiles
+        $result = Invoke-PostgresPasswordPopulation -UserProfilesDir $root -SuperPasswordPlain 'fixture-secret' -Profiles $profile -BackupRoot $backupRoot
+
+        $result.State | Should -Be 'Skipped'
+        $result.SkippedProfiles | Should -Contain 'POWERPUTT'
+        [Convert]::ToBase64String([IO.File]::ReadAllBytes($profilePath)) | Should -Be $before
+        Test-Path -LiteralPath (Join-Path $backupRoot 'ProfileConfigurations') | Should -BeFalse
+    }
+
+    It "returns reset-needed before backup or profile writes when the supplied password fails verification" {
+        $root = Join-Path $TestDrive 'pg-reset-needed'
+        $profilePath = New-TestPostgresProfile -UserProfilesDir $root -Name 'GOLDENTEE'
+        Mock Test-PostgresPassword { $false }
+
+        $profile = (Get-PostgresSetupStatus -UserProfilesDir $root -PostgresInstalled:$true -AuthenticationState 'Verified').Profiles
+        $result = Invoke-PostgresPasswordPopulation -UserProfilesDir $root -SuperPasswordPlain 'fixture-secret' -Profiles $profile -BackupRoot (Join-Path $TestDrive ('backups-reset-' + [guid]::NewGuid().ToString('N'))) -Approved
+
+        $result.State | Should -Be 'ResetNeeded'
+        $result.Changed | Should -BeFalse
+        $result.BackupPath | Should -BeNullOrEmpty
+        (Get-TestProfilePassword -Path $profilePath) | Should -BeNullOrEmpty
+    }
+
+    It "backs up profiles before a write failure and reports confirmed rollback" {
+        $root = Join-Path $TestDrive 'pg-rollback'
+        $profilePath = New-TestPostgresProfile -UserProfilesDir $root -Name 'GOLDENTEE'
+        Mock Test-PostgresPassword { $true }
+        Mock Save-Xml { throw 'synthetic profile write failure' }
+
+        $profile = (Get-PostgresSetupStatus -UserProfilesDir $root -PostgresInstalled:$true -AuthenticationState 'Verified').Profiles
+        $result = Invoke-PostgresPasswordPopulation -UserProfilesDir $root -SuperPasswordPlain 'fixture-secret' -Profiles $profile -BackupRoot (Join-Path $TestDrive 'backups') -Approved
+
+        $result.State | Should -Be 'RecoveryBlocked'
+        $result.RollbackSucceeded | Should -BeTrue
+        (Get-TestProfilePassword -Path $profilePath) | Should -BeNullOrEmpty
+        $result.BackupPath | Should -Exist
+    }
+
+    It "classifies forgotten-password recovery as reset-needed and blocks when ownership is not proven" {
+        $root = Join-Path $TestDrive 'pg-recovery-blocked'
+        New-TestPostgresProfile -UserProfilesDir $root -Name 'GOLDENTEE' | Out-Null
+        Mock Test-PostgresInstalled { $false }
+
+        $safety = Get-PostgresRecoverySafety
+        $result = Invoke-PostgresGuidedRecovery -BackupRoot (Join-Path $TestDrive 'backups') -Approved
+
+        $safety.Authorized | Should -BeFalse
+        $safety.State | Should -Be 'Unsupported'
+        $result.State | Should -Be 'RecoveryBlocked'
+        $result.ConfigBackupPath | Should -BeNullOrEmpty
+    }
+
+    It "backs up known PostgreSQL configuration before the manual recovery handoff" {
+        $installRoot = Join-Path $TestDrive 'postgres-install'
+        $dataRoot = Join-Path $installRoot 'data'
+        New-Item -ItemType Directory -Path $dataRoot -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $dataRoot 'postgresql.conf') -Value 'port = 5432' -Encoding ascii
+        Set-Content -LiteralPath (Join-Path $dataRoot 'pg_hba.conf') -Value 'local all all trust' -Encoding ascii
+        $script:PostgresInstallDir = $installRoot
+        $script:PostgresBinDir = Join-Path $installRoot 'bin'
+        Mock Test-PostgresInstalled { $true }
+
+        $result = Invoke-PostgresGuidedRecovery -BackupRoot (Join-Path $TestDrive 'backups') -Approved
+
+        $result.State | Should -Be 'ResetNeeded'
+        $result.RecoveryReady | Should -BeTrue
+        $result.ConfigBackupPath | Should -Exist
+        (Get-ChildItem -LiteralPath $result.ConfigBackupPath -File | Measure-Object).Count | Should -Be 2
+        (Get-Content -LiteralPath (Join-Path $result.ConfigBackupPath 'pg_hba.conf') -Raw) | Should -BeLike '*local all all trust*'
+    }
+
+    It "does not expose installer password channels" {
+        $installerBody = (Get-Command Install-Postgres83).ScriptBlock.ToString()
+        $installerBody | Should -Not -Match 'SERVICEPASSWORD|SUPERPASSWORD|/l\*v'
+        $installerBody | Should -Match 'Start-Process -FilePath .msiexec\.exe'
+    }
+}
+
 Describe "Read-PathWithBrowse" {
     # This is UI code (it can launch a real WinForms file/folder picker), which
     # is outside this project's stated Pester scope the same way other menu/UI
@@ -5464,9 +5695,87 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
 
         $result = Invoke-EggmanDatDownloadInteractive $rel -AllowBrowse -PreferredSavePath $legacy -DefaultRoot (Join-Path $TestDrive 'new-default')
 
-        $result | Should -Be ([System.IO.Path]::GetFullPath($legacy))
+        $expected = Join-Path (Split-Path -Parent $legacy) 'new-release.zip'
+        $result | Should -Be ([System.IO.Path]::GetFullPath($expected))
         $script:downloadPath | Should -Be $result
         Should -Invoke Read-PathWithBrowse -Times 1
+    }
+
+    It "uses an existing safe configured ZIP under the TeknoParrot root and selects the newer release beside it" {
+        $tp = Join-Path $TestDrive 'configured-TeknoParrot'
+        $legacy = Join-Path $tp 'TeknoParrot.Collection.2026-08-16_RomVault.zip'
+        New-EggmanFixtureZip -zipPath $legacy
+        $script:tpRoot = $tp
+        $script:downloadPath = $null
+        Mock Read-PathWithBrowse { '' }
+        Mock Invoke-EggmanDatDownload {
+            param([string]$downloadUrl, [string]$savePath, [Int64]$ExpectedBytes)
+            $script:downloadPath = $savePath
+            return $true
+        }
+        $rel = [pscustomobject]@{
+            DownloadUrl = 'https://example.com/eggman.zip'
+            FileName    = 'TeknoParrot.Collection.2026-08-22_RomVault.zip'
+            SizeBytes   = ((Get-Item -LiteralPath $legacy).Length + 1)
+        }
+
+        $result = Invoke-EggmanDatDownloadInteractive $rel -AllowBrowse -PreferredSavePath $legacy -DefaultRoot (Join-Path $TestDrive 'new-default')
+
+        $expected = Join-Path $tp 'TeknoParrot.Collection.2026-08-22_RomVault.zip'
+        $result | Should -Be ([System.IO.Path]::GetFullPath($expected))
+        $script:downloadPath | Should -Be $result
+        Should -Invoke Invoke-EggmanDatDownload -Times 1
+        Should -Invoke Read-PathWithBrowse -Times 1
+    }
+
+    It "falls back to a deterministic TPM location and explains an unsafe configured path" {
+        $source = Join-Path $TestDrive 'game-zips'
+        $legacy = Join-Path $source 'TeknoParrot.Collection.2026-08-16_RomVault.zip'
+        New-EggmanFixtureZip -zipPath $legacy
+        $fallbackRoot = Join-Path $TestDrive 'safe-eggman-fallback'
+        $script:zipSource = $source
+        $script:downloadPath = $null
+        $script:hostLines = @()
+        Mock Write-Host {
+            param([string]$Object)
+            $script:hostLines += $Object
+        }
+        Mock Read-PathWithBrowse { '' }
+        Mock Invoke-EggmanDatDownload {
+            param([string]$downloadUrl, [string]$savePath, [Int64]$ExpectedBytes)
+            $script:downloadPath = $savePath
+            return $true
+        }
+        $rel = [pscustomobject]@{
+            DownloadUrl = 'https://example.com/eggman.zip'
+            FileName    = 'TeknoParrot.Collection.2026-08-22_RomVault.zip'
+            SizeBytes   = 0
+        }
+
+        $result = Invoke-EggmanDatDownloadInteractive $rel -AllowBrowse -PreferredSavePath $legacy -DefaultRoot $fallbackRoot
+
+        $result | Should -Be ([System.IO.Path]::GetFullPath((Join-Path $fallbackRoot $rel.FileName)))
+        $script:downloadPath | Should -Be $result
+        ($script:hostLines -join "`n") | Should -Match 'Existing Eggman path was not used'
+        ($script:hostLines -join "`n") | Should -Match 'game ZIP source'
+        $result | Should -Not -Match ([regex]::Escape($source))
+    }
+
+    It "does not send an unsafe or ambiguous configured path to the downloader" {
+        $tp = Join-Path $TestDrive 'unsafe-TeknoParrot'
+        $source = Join-Path $TestDrive 'ambiguous-source'
+        $legacy = Join-Path $source 'configured.zip'
+        New-EggmanFixtureZip -zipPath $legacy
+        $script:tpRoot = $tp
+        $script:zipSource = $source
+        Mock Read-PathWithBrowse { Join-Path $tp 'unsafe.zip' }
+        Mock Invoke-EggmanDatDownload { throw 'unsafe destination must not reach downloader' }
+        $rel = [pscustomobject]@{ DownloadUrl = 'https://example.com/eggman.zip'; FileName = 'latest.zip'; SizeBytes = 0 }
+
+        $result = Invoke-EggmanDatDownloadInteractive $rel -AllowBrowse -PreferredSavePath $legacy -DefaultRoot (Join-Path $tp 'fallback')
+
+        $result | Should -BeNullOrEmpty
+        Should -Invoke Invoke-EggmanDatDownload -Times 0
     }
 
     It "rejects corrupt, wrong-type, and wrong-size files before reuse" {
@@ -5533,7 +5842,7 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
         }
 
         It "keeps path resolution, destination checks, archive validation, and freshness checks free of write APIs" -TestCases (
-            @('Get-EggmanDatDataRoot', 'Get-EggmanDatDefaultSavePath', 'Test-EggmanDatDestinationSafe', 'Test-EggmanDatZip', 'Test-EggmanDatUpToDate') |
+            @('Get-EggmanDatDataRoot', 'Get-EggmanDatDefaultSavePath', 'Get-EggmanDatDestinationAssessment', 'Get-EggmanDatConfiguredPathAssessment', 'Test-EggmanDatDestinationSafe', 'Test-EggmanDatZip', 'Test-EggmanDatUpToDate') |
                 ForEach-Object { @{ Name = $_ } }
         ) {
             param($Name)
@@ -8513,6 +8822,16 @@ Describe "Get-CompatibilityWarnings -- pcsx2x6 component (issue #254)" {
             @($memberNames | Where-Object { $_ -in $bannedMembers }) | Should -BeNullOrEmpty
             $fnAst.Extent.Text | Should -Not -Match 'Invoke-Pcsx2FirstRunSetup|Invoke-TPMEnvironmentInitializationActionV1'
         }
+    }
+
+    AfterAll {
+        # This Describe imports a deliberately isolated contracts copy under
+        # TestDrive. Remove only that copy before the combined ECVF suite
+        # imports the canonical module; otherwise Pester sees two modules with
+        # the same name and module-scoped mocks fail nondeterministically.
+        Get-Module -Name TPMCertification.Contracts |
+            Where-Object { $_.Path -and $_.Path.StartsWith($TestDrive, [System.StringComparison]::OrdinalIgnoreCase) } |
+            Remove-Module -Force -ErrorAction SilentlyContinue
     }
 }
 

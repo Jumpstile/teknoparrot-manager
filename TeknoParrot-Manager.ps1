@@ -3791,6 +3791,522 @@ function Test-PostgresPassword {
     }
 }
 
+# Returns $true when a named Postgres field is present in the profile schema.
+# Get-PostgresFieldValue deliberately returns $null for both a missing field
+# and an empty field, so the state model needs this separate predicate before
+# it decides whether writing a password is safe.
+function Test-PostgresFieldPresent {
+    param([System.Xml.XmlDocument]$Doc, [string]$FieldName)
+    $xpLit = ConvertTo-XPathStringLiteral $FieldName
+    return ($null -ne $Doc.SelectSingleNode("/GameProfile/ConfigValues/FieldInformation[CategoryName='Postgres' and FieldName=$xpLit]"))
+}
+
+# Proves that a registered profile is a safe, known XML target before TPM
+# copies or writes it. The UserProfiles directory is the configured TPM-owned
+# root; an arbitrary path inside a profile's GamePath is not a write grant.
+function Test-PostgresProfileWritePath {
+    param([string]$UserProfilesDir, [string]$ProfilePath)
+
+    $result = [ordered]@{
+        Authorized = $false
+        State      = 'Unknown'
+        Reason     = ''
+        FullPath   = $ProfilePath
+        RootPath   = $UserProfilesDir
+    }
+    if ([string]::IsNullOrWhiteSpace($UserProfilesDir) -or [string]::IsNullOrWhiteSpace($ProfilePath)) {
+        $result.State = 'Malformed'
+        $result.Reason = 'the profile root or profile path is empty'
+        return [pscustomobject]$result
+    }
+    if (-not [System.IO.Path]::IsPathRooted($UserProfilesDir) -or -not [System.IO.Path]::IsPathRooted($ProfilePath)) {
+        $result.State = 'Malformed'
+        $result.Reason = 'the profile root and profile path must be absolute paths'
+        return [pscustomobject]$result
+    }
+
+    try {
+        $rootFull = [System.IO.Path]::GetFullPath($UserProfilesDir).TrimEnd('\','/')
+        $profileFull = [System.IO.Path]::GetFullPath($ProfilePath)
+    } catch {
+        $result.State = 'Malformed'
+        $result.Reason = 'the profile path could not be normalized'
+        return [pscustomobject]$result
+    }
+    $result.FullPath = $profileFull
+    $result.RootPath = $rootFull
+
+    $rootItem = Get-Item -LiteralPath $rootFull -Force -ErrorAction SilentlyContinue
+    if ($null -eq $rootItem -or -not $rootItem.PSIsContainer) {
+        $result.State = 'Missing'
+        $result.Reason = 'the configured UserProfiles directory is not an existing directory'
+        return [pscustomobject]$result
+    }
+    if (($rootItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        $result.State = 'ReparsePoint'
+        $result.Reason = 'the configured UserProfiles directory is redirected'
+        return [pscustomobject]$result
+    }
+    if (-not (Test-PathInside -child $profileFull -parent $rootFull) -or $profileFull -ieq $rootFull) {
+        $result.State = 'OutsideAuthorizedRoot'
+        $result.Reason = 'the profile is outside the configured UserProfiles directory'
+        return [pscustomobject]$result
+    }
+
+    $profileItem = Get-Item -LiteralPath $profileFull -Force -ErrorAction SilentlyContinue
+    if ($null -eq $profileItem) {
+        $result.State = 'Missing'
+        $result.Reason = 'the profile file does not exist'
+        return [pscustomobject]$result
+    }
+    if ($profileItem.PSIsContainer) {
+        $result.State = 'DirectoryOnly'
+        $result.Reason = 'the profile target is a directory, not a file'
+        return [pscustomobject]$result
+    }
+    if (($profileItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        $result.State = 'ReparsePoint'
+        $result.Reason = 'the profile file is redirected'
+        return [pscustomobject]$result
+    }
+    if ($profileItem.Extension -ine '.xml') {
+        $result.State = 'Unsupported'
+        $result.Reason = 'the profile target is not an XML file'
+        return [pscustomobject]$result
+    }
+
+    # Check every existing directory between the file and the configured root.
+    # This closes a junction/symlink escape even when the final file itself is
+    # a normal leaf.
+    $cursor = Split-Path -Parent $profileFull
+    while ($cursor) {
+        $cursorItem = Get-Item -LiteralPath $cursor -Force -ErrorAction SilentlyContinue
+        if ($null -eq $cursorItem) {
+            $result.State = 'Unknown'
+            $result.Reason = 'a profile parent directory could not be inspected'
+            return [pscustomobject]$result
+        }
+        if (($cursorItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            $result.State = 'ReparsePoint'
+            $result.Reason = 'a profile parent directory is redirected'
+            return [pscustomobject]$result
+        }
+        if ($cursor -ieq $rootFull) { break }
+        $next = Split-Path -Parent $cursor
+        if (-not $next -or $next -ieq $cursor) {
+            $result.State = 'Unknown'
+            $result.Reason = 'the profile path did not reach the configured root'
+            return [pscustomobject]$result
+        }
+        $cursor = $next
+    }
+
+    $result.Authorized = $true
+    $result.State = 'Authorized'
+    $result.Reason = 'the profile is a regular XML file under the configured UserProfiles directory'
+    return [pscustomobject]$result
+}
+
+# Read-only inventory of the IT profiles that TPM can understand. The result
+# intentionally contains booleans and state labels, never the password value
+# or an XmlDocument that could accidentally serialize it into a report.
+function Get-PostgresProfileInventory {
+    param(
+        [string]$UserProfilesDir,
+        [bool]$PostgresInstalled = $false
+    )
+
+    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Directory.Name -ne 'FullBackup' })
+    $inventory = @()
+    foreach ($pf in $profiles) {
+        try {
+            $doc = Read-Xml $pf.FullName
+            if (-not $doc.GameProfile -or -not (Test-GameNeedsPostgres $doc)) { continue }
+
+            $authorization = Test-PostgresProfileWritePath -UserProfilesDir $UserProfilesDir -ProfilePath $pf.FullName
+            $gamePathNode = $doc.GameProfile.SelectSingleNode('GamePath')
+            $gameNameNode = $doc.GameProfile.SelectSingleNode('GameName')
+            $fieldNames = @('Path', 'Address', 'Port', 'User', 'Pass')
+            $fieldValues = @{}
+            foreach ($fieldName in $fieldNames) {
+                $fieldValues[$fieldName] = Get-PostgresFieldValue -Doc $doc -FieldName $fieldName
+            }
+            $passPresent = Test-PostgresFieldPresent -Doc $doc -FieldName 'Pass'
+            $missingConnectionFields = @($fieldNames | Where-Object {
+                $_ -ne 'Pass' -and [string]::IsNullOrWhiteSpace([string]$fieldValues[$_])
+            })
+
+            $passwordConfigured = -not [string]::IsNullOrWhiteSpace([string]$fieldValues['Pass'])
+            $passwordPopulationNeeded = $passPresent -and -not $passwordConfigured
+
+            if (-not $authorization.Authorized) {
+                $state = 'RecoveryBlocked'
+            } elseif (-not $passPresent) {
+                $state = 'RecoveryBlocked'
+                $authorization = [pscustomobject]@{
+                    Authorized = $false
+                    State      = 'Unsupported'
+                    Reason     = 'the Postgres Pass field is absent from this profile schema'
+                    FullPath   = $authorization.FullPath
+                    RootPath   = $authorization.RootPath
+                }
+            } elseif (-not $PostgresInstalled) {
+                $state = 'MissingSetup'
+            } elseif (-not $passwordConfigured) {
+                # A profile can need both the connection fields and the
+                # password. Give the credential handoff its own actionable
+                # state; MissingConnectionFields still preserves the rest of
+                # the setup gap for Invoke-PostgresGameSetup to fill after
+                # this approved, backed-up population step.
+                $state = 'PasswordPopulationNeeded'
+            } elseif ($missingConnectionFields.Count -gt 0) {
+                $state = 'MissingSetup'
+            } else {
+                $state = 'AlreadyConfigured'
+            }
+
+            $inventory += [pscustomobject]@{
+                ProfileName            = $pf.BaseName
+                ProfilePath            = $pf.FullName
+                GameName               = if ($gameNameNode) { $gameNameNode.InnerText } else { $pf.BaseName }
+                GamePath               = if ($gamePathNode) { $gamePathNode.InnerText } else { '' }
+                DetectionState         = 'Detected'
+                State                  = $state
+                PasswordFieldPresent   = $passPresent
+                PasswordConfigured     = $passwordConfigured
+                PasswordPopulationNeeded = $passwordPopulationNeeded
+                MissingConnectionFields = $missingConnectionFields
+                WriteAuthorization     = $authorization
+            }
+        } catch {
+            # A malformed profile is an actionable safety finding, not a reason
+            # to guess at a target or continue with a partial credential pass.
+            $inventory += [pscustomobject]@{
+                ProfileName             = $pf.BaseName
+                ProfilePath             = $pf.FullName
+                GameName                = $pf.BaseName
+                GamePath                = ''
+                DetectionState          = 'Detected'
+                State                   = 'RecoveryBlocked'
+                PasswordFieldPresent    = $false
+                PasswordConfigured      = $false
+                PasswordPopulationNeeded = $false
+                MissingConnectionFields = @()
+                WriteAuthorization      = [pscustomobject]@{
+                    Authorized = $false
+                    State      = 'Unknown'
+                    Reason     = 'the profile could not be parsed safely'
+                    FullPath   = $pf.FullName
+                    RootPath   = $UserProfilesDir
+                }
+            }
+        }
+    }
+    return @($inventory)
+}
+
+# Read-only aggregate state used by setup mode and validation/report output.
+# AuthenticationState is supplied only after a password probe; this function
+# itself never prompts, decrypts, or writes a password.
+function Get-PostgresSetupStatus {
+    param(
+        [string]$UserProfilesDir,
+        [Nullable[bool]]$PostgresInstalled = $null,
+        [ValidateSet('Unknown', 'Verified', 'ResetNeeded', 'RecoveryBlocked')]
+        [string]$AuthenticationState = 'Unknown'
+    )
+
+    if ($null -eq $PostgresInstalled) { $PostgresInstalled = [bool](Test-PostgresInstalled) }
+    $profiles = @(Get-PostgresProfileInventory -UserProfilesDir $UserProfilesDir -PostgresInstalled:$PostgresInstalled)
+    $blocked = @($profiles | Where-Object { $_.State -eq 'RecoveryBlocked' })
+    $passwordNeeded = @($profiles | Where-Object { $_.PasswordPopulationNeeded })
+    $missingSetup = @($profiles | Where-Object { $_.State -eq 'MissingSetup' })
+    $alreadyConfigured = @($profiles | Where-Object { $_.State -eq 'AlreadyConfigured' })
+
+    if ($profiles.Count -eq 0) {
+        $state = 'Skipped'
+        $action = 'No registered TeknoParrot IT profiles requiring PostgreSQL were detected.'
+    } elseif ($blocked.Count -gt 0 -or $AuthenticationState -eq 'RecoveryBlocked') {
+        $state = 'RecoveryBlocked'
+        $action = 'TPM could not prove that every affected profile or recovery target is safe to change.'
+    } elseif ($AuthenticationState -eq 'ResetNeeded') {
+        $state = 'ResetNeeded'
+        $action = 'The PostgreSQL password could not be verified; use the guided recovery path before changing profiles.'
+    } elseif (-not $PostgresInstalled) {
+        $state = 'MissingSetup'
+        $action = 'PostgreSQL is not installed; setup remains opt-in and no profile will be changed yet.'
+    } elseif ($passwordNeeded.Count -gt 0) {
+        $state = 'PasswordPopulationNeeded'
+        $action = 'A verified PostgreSQL password can be populated into the listed profiles after explicit approval.'
+    } elseif ($missingSetup.Count -gt 0) {
+        $state = 'MissingSetup'
+        $action = 'PostgreSQL is available, but one or more profiles still need non-password connection fields.'
+    } elseif ($alreadyConfigured.Count -eq $profiles.Count) {
+        $state = 'AlreadyConfigured'
+        $action = 'All detected profiles already contain the required PostgreSQL connection fields.'
+    } else {
+        $state = 'Detected'
+        $action = 'PostgreSQL-needing profiles were detected and require review.'
+    }
+
+    return [pscustomobject]@{
+        State                         = $state
+        ActionRequired                = $action
+        PostgresInstalled             = [bool]$PostgresInstalled
+        AuthenticationState           = $AuthenticationState
+        DetectedCount                 = $profiles.Count
+        AlreadyConfiguredCount        = $alreadyConfigured.Count
+        MissingSetupCount             = $missingSetup.Count
+        PasswordPopulationNeededCount = $passwordNeeded.Count
+        RecoveryBlockedCount          = $blocked.Count
+        Profiles                      = $profiles
+    }
+}
+
+# Creates a managed, pre-write copy of the affected XML profiles. The copy is
+# deliberately made before any password or connection field is changed and is
+# also the rollback source for the password population transaction.
+function Backup-PostgresProfileConfigurations {
+    param(
+        [string]$UserProfilesDir,
+        [object[]]$Profiles,
+        [string]$BackupRoot = (Join-Path $PSScriptRoot 'PostgresBackups')
+    )
+
+    $items = @($Profiles)
+    if ($items.Count -eq 0) {
+        return [pscustomobject]@{ Success = $true; State = 'NoChanges'; BackupPath = $null; Entries = @(); Reason = '' }
+    }
+    $authorizations = @()
+    foreach ($profileRecord in $items) {
+        $authorization = Test-PostgresProfileWritePath -UserProfilesDir $UserProfilesDir -ProfilePath $profileRecord.ProfilePath
+        if (-not $authorization.Authorized) {
+            return [pscustomobject]@{ Success = $false; State = 'RecoveryBlocked'; BackupPath = $null; Entries = @(); Reason = "$($profileRecord.ProfileName): $($authorization.Reason)" }
+        }
+        $authorizations += [pscustomobject]@{ Profile = $profileRecord; Authorization = $authorization }
+    }
+
+    $stamp = (Get-Date).ToString('yyyy-MM-dd_HH-mm-ss') + '_' + [guid]::NewGuid().ToString('N')
+    $backupPath = Join-Path (Join-Path $BackupRoot 'ProfileConfigurations') $stamp
+    $entries = @()
+    try {
+        [void][System.IO.Directory]::CreateDirectory($backupPath)
+        foreach ($item in $authorizations) {
+            $relative = $item.Authorization.FullPath.Substring($item.Authorization.RootPath.Length).TrimStart('\','/')
+            if ([string]::IsNullOrWhiteSpace($relative) -or $relative.Contains('..')) {
+                throw 'profile relative path could not be proven safe'
+            }
+            $destination = Join-Path $backupPath $relative
+            $destinationDir = Split-Path -Parent $destination
+            [void][System.IO.Directory]::CreateDirectory($destinationDir)
+            Copy-Item -LiteralPath $item.Authorization.FullPath -Destination $destination -Force -ErrorAction Stop
+            $entries += [pscustomobject]@{
+                ProfileName = $item.Profile.ProfileName
+                OriginalPath = $item.Authorization.FullPath
+                BackupPath = $destination
+            }
+        }
+        Write-Log ("Postgres profile backup: saved {0} profile configuration(s)." -f $entries.Count)
+        return [pscustomobject]@{ Success = $true; State = 'BackedUp'; BackupPath = $backupPath; Entries = @($entries); Reason = '' }
+    } catch {
+        Write-Log 'Postgres profile backup: failed before profile writes; no password was changed.'
+        return [pscustomobject]@{ Success = $false; State = 'RecoveryBlocked'; BackupPath = $backupPath; Entries = @($entries); Reason = 'the profile backup could not be completed' }
+    }
+}
+
+# Backs up only the two known PostgreSQL server configuration files. This is
+# used by guided recovery; TPM never edits pg_hba.conf or postgresql.conf in
+# RC8, and refuses recovery preparation when their ownership/path cannot be
+# proven.
+function Backup-PostgresServerConfiguration {
+    param([string]$BackupRoot = (Join-Path $PSScriptRoot 'PostgresBackups'))
+
+    $installRoot = Get-Item -LiteralPath $script:PostgresInstallDir -Force -ErrorAction SilentlyContinue
+    $dataRoot = Get-Item -LiteralPath (Join-Path $script:PostgresInstallDir 'data') -Force -ErrorAction SilentlyContinue
+    if ($null -eq $installRoot -or $null -eq $dataRoot -or -not $installRoot.PSIsContainer -or -not $dataRoot.PSIsContainer) {
+        return [pscustomobject]@{ Success = $false; State = 'RecoveryBlocked'; BackupPath = $null; Files = @(); Reason = 'the expected PostgreSQL install/data directories are not both present' }
+    }
+    foreach ($item in @($installRoot, $dataRoot)) {
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            return [pscustomobject]@{ Success = $false; State = 'RecoveryBlocked'; BackupPath = $null; Files = @(); Reason = 'the expected PostgreSQL install/data path is redirected' }
+        }
+    }
+
+    $configPaths = @(
+        (Join-Path $dataRoot.FullName 'postgresql.conf'),
+        (Join-Path $dataRoot.FullName 'pg_hba.conf')
+    )
+    foreach ($path in $configPaths) {
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        if ($null -eq $item -or $item.PSIsContainer -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            return [pscustomobject]@{ Success = $false; State = 'RecoveryBlocked'; BackupPath = $null; Files = @(); Reason = 'a required PostgreSQL configuration file is missing or redirected' }
+        }
+        if (-not (Test-PathInside -child $item.FullName -parent $installRoot.FullName)) {
+            return [pscustomobject]@{ Success = $false; State = 'RecoveryBlocked'; BackupPath = $null; Files = @(); Reason = 'a PostgreSQL configuration file is outside the expected install root' }
+        }
+    }
+
+    $stamp = (Get-Date).ToString('yyyy-MM-dd_HH-mm-ss') + '_' + [guid]::NewGuid().ToString('N')
+    $backupPath = Join-Path (Join-Path $BackupRoot 'ServerConfigurations') $stamp
+    $copied = @()
+    try {
+        [void][System.IO.Directory]::CreateDirectory($backupPath)
+        foreach ($path in $configPaths) {
+            $destination = Join-Path $backupPath ([System.IO.Path]::GetFileName($path))
+            Copy-Item -LiteralPath $path -Destination $destination -Force -ErrorAction Stop
+            $copied += $destination
+        }
+        Write-Log 'Postgres recovery: backed up the known server configuration files.'
+        return [pscustomobject]@{ Success = $true; State = 'BackedUp'; BackupPath = $backupPath; Files = @($copied); Reason = '' }
+    } catch {
+        Write-Log 'Postgres recovery: server configuration backup failed; no authentication settings were changed.'
+        return [pscustomobject]@{ Success = $false; State = 'RecoveryBlocked'; BackupPath = $backupPath; Files = @($copied); Reason = 'the server configuration backup could not be completed' }
+    }
+}
+
+# Proves whether TPM can prepare a recovery handoff without changing the
+# server. A successful result means only that the exact, known installation
+# and both configuration files were found; it does not authorize TPM to edit
+# authentication rules or reset a password automatically.
+function Get-PostgresRecoverySafety {
+    if (-not (Test-PostgresInstalled)) {
+        return [pscustomobject]@{ Authorized = $false; State = 'Unsupported'; Reason = 'PostgreSQL is not installed and running' }
+    }
+    $installRoot = Get-Item -LiteralPath $script:PostgresInstallDir -Force -ErrorAction SilentlyContinue
+    $dataRoot = Get-Item -LiteralPath (Join-Path $script:PostgresInstallDir 'data') -Force -ErrorAction SilentlyContinue
+    if ($null -eq $installRoot -or $null -eq $dataRoot -or -not $installRoot.PSIsContainer -or -not $dataRoot.PSIsContainer) {
+        return [pscustomobject]@{ Authorized = $false; State = 'RecoveryBlocked'; Reason = 'the expected PostgreSQL install/data directories are not both present' }
+    }
+    foreach ($item in @($installRoot, $dataRoot)) {
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            return [pscustomobject]@{ Authorized = $false; State = 'RecoveryBlocked'; Reason = 'the expected PostgreSQL install/data path is redirected' }
+        }
+    }
+    foreach ($name in @('postgresql.conf', 'pg_hba.conf')) {
+        $configPath = Join-Path $dataRoot.FullName $name
+        $configItem = Get-Item -LiteralPath $configPath -Force -ErrorAction SilentlyContinue
+        if ($null -eq $configItem -or $configItem.PSIsContainer -or ($configItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            return [pscustomobject]@{ Authorized = $false; State = 'RecoveryBlocked'; Reason = 'a required PostgreSQL configuration file is missing or redirected' }
+        }
+        if (-not (Test-PathInside -child $configItem.FullName -parent $installRoot.FullName)) {
+            return [pscustomobject]@{ Authorized = $false; State = 'RecoveryBlocked'; Reason = 'a PostgreSQL configuration file is outside the expected install root' }
+        }
+    }
+    return [pscustomobject]@{ Authorized = $true; State = 'Ready'; Reason = 'the known PostgreSQL install and configuration files are inspectable' }
+}
+
+# Guided recovery is intentionally manual in RC8. TPM can prove and back up
+# the known configuration, but it does not change authentication rules or
+# reset a database password without a separately reviewed, owner-aware flow.
+function Invoke-PostgresGuidedRecovery {
+    param(
+        [string]$BackupRoot = (Join-Path $PSScriptRoot 'PostgresBackups'),
+        [switch]$Approved
+    )
+
+    if (-not $Approved) {
+        Write-Log 'Postgres recovery: user declined the guided recovery handoff.'
+        return [pscustomobject]@{ State = 'Skipped'; RecoveryReady = $false; ConfigBackupPath = $null; ActionRequired = 'Recovery was declined; no PostgreSQL settings or data were changed.' }
+    }
+    $safety = Get-PostgresRecoverySafety
+    if (-not $safety.Authorized) {
+        Write-Host '  Action Required: safe PostgreSQL recovery could not be proven.' -ForegroundColor Yellow
+        Write-Host '  No authentication settings, profiles, or database data were changed.' -ForegroundColor DarkGray
+        Write-Log 'Postgres recovery: blocked because safe ownership/configuration could not be proven.'
+        return [pscustomobject]@{ State = 'RecoveryBlocked'; RecoveryReady = $false; ConfigBackupPath = $null; ActionRequired = 'Use the PostgreSQL owner-supported manual recovery procedure, then run mode 12 again.' }
+    }
+
+    $backup = Backup-PostgresServerConfiguration -BackupRoot $BackupRoot
+    if (-not $backup.Success) {
+        Write-Host '  Action Required: PostgreSQL configuration backup failed; recovery is blocked.' -ForegroundColor Yellow
+        Write-Log 'Postgres recovery: blocked because configuration backup did not complete.'
+        return [pscustomobject]@{ State = 'RecoveryBlocked'; RecoveryReady = $false; ConfigBackupPath = $backup.BackupPath; ActionRequired = 'No authentication settings or database data were changed.' }
+    }
+
+    Write-Host '  Recovery preparation complete: PostgreSQL configuration was backed up.' -ForegroundColor Cyan
+    Write-Host '  TPM will not change pg_hba.conf, change authentication rules, or recreate database data.' -ForegroundColor DarkGray
+    Write-Host '  Complete the PostgreSQL owner-supported password recovery manually, then run mode 12 again.' -ForegroundColor Yellow
+    Write-Log 'Postgres recovery: configuration backup complete; manual owner-supported password recovery is required.'
+    return [pscustomobject]@{ State = 'ResetNeeded'; RecoveryReady = $true; ConfigBackupPath = $backup.BackupPath; ActionRequired = 'Complete manual PostgreSQL password recovery and run mode 12 again.' }
+}
+
+# Populates only the existing Postgres Pass field in safely authorized IT
+# profiles. All candidate profile files are copied first; a failed write rolls
+# every changed file back from that copy. The password is used only in memory
+# and as the target profile value TeknoParrot itself requires; it never enters
+# output, logs, command-line arguments, or a validation/report object.
+function Invoke-PostgresPasswordPopulation {
+    param(
+        [string]$UserProfilesDir,
+        [string]$SuperPasswordPlain,
+        [object[]]$Profiles,
+        [string]$BackupRoot = (Join-Path $PSScriptRoot 'PostgresBackups'),
+        [switch]$Approved
+    )
+
+    $items = @($Profiles)
+    if ($items.Count -eq 0) {
+        $status = Get-PostgresSetupStatus -UserProfilesDir $UserProfilesDir -PostgresInstalled:$true -AuthenticationState 'Verified'
+        $items = @($status.Profiles)
+    }
+    $candidates = @($items | Where-Object { $_.State -in @('PasswordPopulationNeeded', 'MissingSetup') })
+    $targets = @($items | Where-Object { $_.PasswordPopulationNeeded -or $_.State -eq 'PasswordPopulationNeeded' })
+    $blocked = @($items | Where-Object { $_.State -eq 'RecoveryBlocked' -or -not $_.WriteAuthorization.Authorized })
+
+    if ($blocked.Count -gt 0) {
+        return [pscustomobject]@{ State = 'RecoveryBlocked'; Changed = $false; BackupPath = $null; UpdatedProfiles = @(); AlreadyConfiguredProfiles = @(); SkippedProfiles = @(); RecoveryBlockedProfiles = @($blocked.ProfileName); RollbackSucceeded = $true; ActionRequired = 'One or more profile write targets could not be proven safe.' }
+    }
+    if (-not $Approved) {
+        return [pscustomobject]@{ State = 'Skipped'; Changed = $false; BackupPath = $null; UpdatedProfiles = @(); AlreadyConfiguredProfiles = @($items | Where-Object State -eq 'AlreadyConfigured' | ForEach-Object ProfileName); SkippedProfiles = @($targets.ProfileName); RecoveryBlockedProfiles = @(); RollbackSucceeded = $true; ActionRequired = 'Password population was declined; no profiles were changed.' }
+    }
+    if ($targets.Count -eq 0) {
+        return [pscustomobject]@{ State = 'AlreadyConfigured'; Changed = $false; BackupPath = $null; UpdatedProfiles = @(); AlreadyConfiguredProfiles = @($items.ProfileName); SkippedProfiles = @(); RecoveryBlockedProfiles = @(); RollbackSucceeded = $true; ActionRequired = 'No profile requires password population.' }
+    }
+    if ([string]::IsNullOrWhiteSpace($SuperPasswordPlain)) {
+        return [pscustomobject]@{ State = 'RecoveryBlocked'; Changed = $false; BackupPath = $null; UpdatedProfiles = @(); AlreadyConfiguredProfiles = @(); SkippedProfiles = @(); RecoveryBlockedProfiles = @($targets.ProfileName); RollbackSucceeded = $true; ActionRequired = 'A verified PostgreSQL password was not available.' }
+    }
+    if (-not (Test-PostgresPassword -SuperPasswordPlain $SuperPasswordPlain)) {
+        return [pscustomobject]@{ State = 'ResetNeeded'; Changed = $false; BackupPath = $null; UpdatedProfiles = @(); AlreadyConfiguredProfiles = @(); SkippedProfiles = @(); RecoveryBlockedProfiles = @(); RollbackSucceeded = $true; ActionRequired = 'The PostgreSQL password failed verification; use guided recovery.' }
+    }
+
+    $backup = Backup-PostgresProfileConfigurations -UserProfilesDir $UserProfilesDir -Profiles $candidates -BackupRoot $BackupRoot
+    if (-not $backup.Success) {
+        return [pscustomobject]@{ State = 'RecoveryBlocked'; Changed = $false; BackupPath = $backup.BackupPath; UpdatedProfiles = @(); AlreadyConfiguredProfiles = @(); SkippedProfiles = @(); RecoveryBlockedProfiles = @($targets.ProfileName); RollbackSucceeded = $true; ActionRequired = 'Profile backup did not complete; no profiles were changed.' }
+    }
+
+    $updated = @()
+    $already = @()
+    try {
+        foreach ($profileRecord in $targets) {
+            $authorization = Test-PostgresProfileWritePath -UserProfilesDir $UserProfilesDir -ProfilePath $profileRecord.ProfilePath
+            if (-not $authorization.Authorized) { throw 'a profile target became unsafe before write' }
+            $doc = Read-Xml $authorization.FullPath
+            if (-not (Test-PostgresFieldPresent -Doc $doc -FieldName 'Pass')) { throw 'a Postgres Pass field was not present at write time' }
+            if (-not [string]::IsNullOrWhiteSpace([string](Get-PostgresFieldValue -Doc $doc -FieldName 'Pass'))) {
+                $already += $profileRecord.ProfileName
+                continue
+            }
+            if (-not (Set-PostgresFieldValue -Doc $doc -FieldName 'Pass' -Value $SuperPasswordPlain)) { throw 'the Postgres Pass field could not be updated' }
+            Save-Xml -Doc $doc -Path $authorization.FullPath
+            $updated += $profileRecord.ProfileName
+        }
+        Write-Log ("Postgres password population: updated {0} profile(s); existing credentials were left untouched." -f $updated.Count)
+        return [pscustomobject]@{ State = 'Completed'; Changed = ($updated.Count -gt 0); BackupPath = $backup.BackupPath; UpdatedProfiles = @($updated); AlreadyConfiguredProfiles = @($already); SkippedProfiles = @(); RecoveryBlockedProfiles = @(); RollbackSucceeded = $true; ActionRequired = '' }
+    } catch {
+        $rollbackSucceeded = $true
+        foreach ($entry in @($backup.Entries)) {
+            try { Copy-Item -LiteralPath $entry.BackupPath -Destination $entry.OriginalPath -Force -ErrorAction Stop } catch { $rollbackSucceeded = $false }
+        }
+        if ($rollbackSucceeded) {
+            Write-Log 'Postgres password population: write failed; profile files were rolled back from the pre-write backup.'
+        } else {
+            Write-Log 'Postgres password population: write and rollback both require manual review.'
+        }
+        return [pscustomobject]@{ State = 'RecoveryBlocked'; Changed = $false; BackupPath = $backup.BackupPath; UpdatedProfiles = @(); AlreadyConfiguredProfiles = @($already); SkippedProfiles = @(); RecoveryBlockedProfiles = @($targets.ProfileName); RollbackSucceeded = $rollbackSucceeded; ActionRequired = if ($rollbackSucceeded) { 'No completed population was retained; review the backup if needed.' } else { 'Rollback could not be confirmed; stop and restore the named profile backup before continuing.' } }
+    }
+}
+
 # =============================================================================
 # GPU Fix Setup: detect GPU vendor, scan TeknoParrot GameProfiles for fix
 # fields (so newly added games are covered automatically), and apply the
@@ -5756,15 +6272,154 @@ function Get-EggmanDatDefaultSavePath {
 # game ZIP source, or the extracted-game staging folder. Importing an existing
 # file remains read-only and is handled by the separate B) browse/import path;
 # this guard applies only to paths TPM may write.
-function Test-EggmanDatDestinationSafe {
-    param([string]$Path)
-    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
-    $protectedRoots = @($tpRoot, $zipSource, $zipSourceSupplementary, $gamesInstallFolder) |
+function Get-EggmanDatDestinationAssessment {
+    param(
+        [string]$Path,
+        [string]$ConfiguredDirectory = '',
+        [switch]$AllowExistingConfiguredPath
+    )
+
+    $result = [ordered]@{
+        Safe       = $false
+        State      = 'Unknown'
+        Reason     = ''
+        FullPath   = $null
+        ParentPath = $null
+        Exists     = $false
+    }
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        $result.State  = 'Missing'
+        $result.Reason = 'the Eggman destination path is empty'
+        return [pscustomobject]$result
+    }
+    if (-not [System.IO.Path]::IsPathRooted($Path)) {
+        $result.State  = 'Malformed'
+        $result.Reason = 'the Eggman destination must be an absolute path'
+        return [pscustomobject]$result
+    }
+    try {
+        $fullPath = [System.IO.Path]::GetFullPath($Path)
+    } catch {
+        $result.State  = 'Malformed'
+        $result.Reason = 'the Eggman destination could not be normalized'
+        return [pscustomobject]$result
+    }
+    $result.FullPath = $fullPath
+    if ([System.IO.Path]::GetExtension($fullPath) -ine '.zip') {
+        $result.State  = 'Unsupported'
+        $result.Reason = 'the Eggman destination must be a .zip file'
+        return [pscustomobject]$result
+    }
+
+    $existing = Get-Item -LiteralPath $fullPath -Force -ErrorAction SilentlyContinue
+    $result.Exists = ($null -ne $existing)
+    if ($existing) {
+        if ($existing.PSIsContainer) {
+            $result.State  = 'DirectoryOnly'
+            $result.Reason = 'the configured Eggman path is a directory, not a ZIP file'
+            return [pscustomobject]$result
+        }
+        if (($existing.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            $result.State  = 'ReparsePoint'
+            $result.Reason = 'the configured Eggman ZIP is redirected or reparse-backed'
+            return [pscustomobject]$result
+        }
+        if ($existing.IsReadOnly) {
+            $result.State  = 'NotWritable'
+            $result.Reason = 'the configured Eggman ZIP is marked read-only'
+            return [pscustomobject]$result
+        }
+    }
+
+    $parentPath = Split-Path -Parent $fullPath
+    if ([string]::IsNullOrWhiteSpace($parentPath)) {
+        $result.State  = 'Malformed'
+        $result.Reason = 'the Eggman destination has no usable parent directory'
+        return [pscustomobject]$result
+    }
+    try { $parentPath = [System.IO.Path]::GetFullPath($parentPath) } catch {}
+    $result.ParentPath = $parentPath
+
+    # Inspect every existing parent. Missing descendants are acceptable for a
+    # TPM-owned default because Invoke-TpmDownload creates them only after the
+    # destination has passed this read-only assessment.
+    $cursor = $parentPath
+    $nearestExisting = $null
+    while ($cursor) {
+        $cursorItem = Get-Item -LiteralPath $cursor -Force -ErrorAction SilentlyContinue
+        if ($cursorItem) {
+            if (-not $cursorItem.PSIsContainer) {
+                $result.State  = 'MissingParent'
+                $result.Reason = 'an Eggman destination parent is a file, not a directory'
+                return [pscustomobject]$result
+            }
+            $nearestExisting = $cursorItem
+            break
+        }
+        $next = Split-Path -Parent $cursor
+        if (-not $next -or $next -ieq $cursor) { break }
+        $cursor = $next
+    }
+    if ($null -eq $nearestExisting) {
+        $result.State  = 'MissingParent'
+        $result.Reason = 'no existing parent directory could be inspected'
+        return [pscustomobject]$result
+    }
+
+    $cursor = $parentPath
+    while ($cursor) {
+        $cursorItem = Get-Item -LiteralPath $cursor -Force -ErrorAction SilentlyContinue
+        if ($cursorItem) {
+            if (($cursorItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                $result.State  = 'ReparsePoint'
+                $result.Reason = 'an Eggman destination parent is redirected or reparse-backed'
+                return [pscustomobject]$result
+            }
+            if ($cursorItem.FullName -ieq $nearestExisting.FullName) { break }
+        }
+        $next = Split-Path -Parent $cursor
+        if (-not $next -or $next -ieq $cursor) { break }
+        $cursor = $next
+    }
+
+    $protectedRoots = @($zipSource, $zipSourceSupplementary, $gamesInstallFolder) |
         Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
     foreach ($protectedRoot in $protectedRoots) {
-        if (Test-PathInside -child $Path -parent ([string]$protectedRoot)) { return $false }
+        if (Test-PathInside -child $fullPath -parent ([string]$protectedRoot)) {
+            $result.State  = 'ProtectedLocation'
+            $result.Reason = 'the destination is inside a configured game ZIP source or staging folder'
+            return [pscustomobject]$result
+        }
     }
-    return $true
+    $underTeknoParrot = -not [string]::IsNullOrWhiteSpace([string]$tpRoot) -and
+        (Test-PathInside -child $fullPath -parent ([string]$tpRoot))
+    $configuredDirectoryFull = ''
+    if (-not [string]::IsNullOrWhiteSpace($ConfiguredDirectory)) {
+        try { $configuredDirectoryFull = [System.IO.Path]::GetFullPath($ConfiguredDirectory).TrimEnd('\','/') } catch {}
+    }
+    $sameConfiguredDirectory = $configuredDirectoryFull -and
+        ([System.IO.Path]::GetFullPath($parentPath).TrimEnd('\','/') -ieq $configuredDirectoryFull)
+    if ($underTeknoParrot -and -not ($sameConfiguredDirectory -or ($AllowExistingConfiguredPath -and $result.Exists))) {
+        $result.State  = 'ProtectedLocation'
+        $result.Reason = 'the destination is inside the TeknoParrot installation and is not an explicitly verified existing configured ZIP location'
+        return [pscustomobject]$result
+    }
+    if (($nearestExisting.Attributes -band [System.IO.FileAttributes]::ReadOnly) -ne 0) {
+        $result.State  = 'NotWritable'
+        $result.Reason = 'the Eggman destination parent is marked read-only'
+        return [pscustomobject]$result
+    }
+
+    $result.Safe   = $true
+    $result.State  = if ($result.Exists) { 'ExistingSafe' } else { 'SafeDefault' }
+    $result.Reason = if ($result.Exists) { 'the existing Eggman ZIP and its parent path are inspectable and writable' } else { 'the destination has a safe, inspectable parent path' }
+    return [pscustomobject]$result
+}
+
+function Test-EggmanDatDestinationSafe {
+    param([string]$Path, [string]$ConfiguredDirectory = '')
+    $assessment = Get-EggmanDatDestinationAssessment -Path $Path -ConfiguredDirectory $ConfiguredDirectory
+    return [bool]$assessment.Safe
 }
 
 # A matching byte count is not enough to trust a downloaded Eggman archive:
@@ -5802,25 +6457,52 @@ function Invoke-EggmanDatDownloadInteractive {
     )
 
     $safeDatFileName = [System.IO.Path]::GetFileName($rel.FileName)
-    $defaultSavePath = if ([string]::IsNullOrWhiteSpace($PreferredSavePath)) {
-        Get-EggmanDatDefaultSavePath -FileName $safeDatFileName -RootPath $DefaultRoot
-    } else {
-        $PreferredSavePath
-    }
     $defaultRoot = if ([string]::IsNullOrWhiteSpace($DefaultRoot)) { Get-EggmanDatDataRoot } else { $DefaultRoot }
     $unsafeFileName  = [string]::IsNullOrWhiteSpace($safeDatFileName) -or
-        [string]::IsNullOrWhiteSpace($defaultSavePath) -or
         [System.IO.Path]::GetExtension($safeDatFileName) -ne '.zip'
     if ($unsafeFileName) {
         Write-Log "EggmanDat: SECURITY -- unsafe release filename '$($rel.FileName)'"
         Write-Host "  Unexpected filename from GitHub -- skipped for safety." -ForegroundColor Red
         return $null
     }
-    if (-not (Test-EggmanDatDestinationSafe -Path $defaultSavePath)) {
-        Write-Log "EggmanDat: SECURITY -- default destination overlaps a protected location: $defaultSavePath"
+    $defaultSavePath = $null
+    $configuredDirectory = ''
+    $configuredReason = ''
+    if (-not [string]::IsNullOrWhiteSpace($PreferredSavePath)) {
+        $configured = Get-EggmanDatConfiguredPathAssessment -Path $PreferredSavePath
+        if ($configured.Safe) {
+            $configuredDirectory = $configured.ParentPath
+            $defaultSavePath = Join-Path $configuredDirectory $safeDatFileName
+            $candidate = Get-EggmanDatDestinationAssessment -Path $defaultSavePath -ConfiguredDirectory $configuredDirectory
+            if (-not $candidate.Safe) {
+                $configuredReason = "the latest ZIP name could not be safely placed beside it: $($candidate.Reason)"
+                $defaultSavePath = $null
+            }
+        } else {
+            $configuredReason = $configured.Reason
+        }
+    }
+    if ($configuredReason) {
+        Write-Host ("  Existing Eggman path was not used: {0}" -f $configuredReason) -ForegroundColor Yellow
+        Write-Log ("EggmanDat: configured path was not used -- {0}" -f $configuredReason)
+    }
+    if (-not $defaultSavePath) {
+        $fallbackPath = Get-EggmanDatDefaultSavePath -FileName $safeDatFileName -RootPath $defaultRoot
+        if ($fallbackPath) {
+            $fallback = Get-EggmanDatDestinationAssessment -Path $fallbackPath
+            if ($fallback.Safe) {
+                $defaultSavePath = $fallback.FullPath
+                if ($configuredReason) {
+                    Write-Host ("  Using TPM-managed safe location: {0}" -f $defaultSavePath) -ForegroundColor DarkCyan
+                }
+            } else {
+                Write-Log ("EggmanDat: TPM-managed fallback was not safe -- {0}" -f $fallback.Reason)
+            }
+        }
+    }
+    if (-not $defaultSavePath) {
         Write-Host "  TPM could not select a safe Eggman data location for this setup." -ForegroundColor Yellow
         if (-not $AllowBrowse) { return $null }
-        $defaultSavePath = $null
     }
     $rawSave = $defaultSavePath
     if ($AllowBrowse) {
@@ -5838,9 +6520,10 @@ function Invoke-EggmanDatDownloadInteractive {
         Write-Host "  The selected Eggman data destination is not a valid path -- skipped." -ForegroundColor Yellow
         return $null
     }
-    if (-not (Test-EggmanDatDestinationSafe -Path $rawSave)) {
-        Write-Host "  Refusing to write Eggman recognition data under TeknoParrot, a game ZIP source, or staging." -ForegroundColor Red
-        Write-Log "EggmanDat: SECURITY -- rejected protected destination $rawSave"
+    $finalAssessment = Get-EggmanDatDestinationAssessment -Path $rawSave -ConfiguredDirectory $configuredDirectory
+    if (-not $finalAssessment.Safe) {
+        Write-Host ("  Refusing to write Eggman recognition data: {0}" -f $finalAssessment.Reason) -ForegroundColor Red
+        Write-Log ("EggmanDat: SECURITY -- rejected destination {0}: {1}" -f $rawSave, $finalAssessment.Reason)
         return $null
     }
     if ($rel.SizeBytes -gt 0 -and (Test-EggmanDatZip -Path $rawSave -ExpectedBytes $rel.SizeBytes)) {
@@ -6037,106 +6720,20 @@ function Test-PostgresInstallationsRegistry {
 # Safe to call even when nothing is present -- every step checks first and
 # skips cleanly. Never called when Test-PostgresInstalled is already true.
 function Remove-PostgresPartialInstall {
-    Write-Log "Postgres: checking for partial/stale install before fresh attempt..."
-
-    $uninstallKeys = @(
-        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
-        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
-    )
-    $expectedInstallDir = $script:PostgresInstallDir.TrimEnd('\')
-    $pgInstallationsCheck = Test-PostgresInstallationsRegistry -ExpectedInstallDir $expectedInstallDir
-    $pgEntries = Get-ItemProperty -Path $uninstallKeys -ErrorAction SilentlyContinue |
-                     Where-Object { $_.DisplayName -like "PostgreSQL*8.3*" }
-    foreach ($entry in $pgEntries) {
-        # Only ever uninstall an entry confirmed to be OUR install location --
-        # someone could have an unrelated standalone PostgreSQL 8.3 for
-        # legacy dev work at a different path, and a DisplayName match alone
-        # is not enough to assume it's safe to remove. Case-insensitive EXACT
-        # equality (-ine), not -notlike -- this was previously -notlike, which
-        # treats the path as a wildcard pattern; a real path containing `[`,
-        # `]`, or `*` could have matched/missed unintentionally. Caught in a
-        # full deep-scan review; harmless today since the path is a hardcoded
-        # constant with no wildcard metacharacters, but -ine is the correct
-        # operator for what this comparison actually means.
-        $installLoc = if ($entry.InstallLocation) { $entry.InstallLocation.TrimEnd('\') } else { '' }
-        if ($installLoc -ine $expectedInstallDir) {
-            Write-Log "Postgres: skipping uninstall of '$($entry.DisplayName)' -- InstallLocation '$installLoc' does not match our expected path, not touching it."
-            continue
-        }
-        if ($pgInstallationsCheck.HasRecord -and $pgInstallationsCheck.Mismatch) {
-            Write-Log "Postgres: skipping uninstall of '$($entry.DisplayName)' -- PostgreSQL's own Installations registry record disagrees with the matched InstallLocation, not touching it."
-            continue
-        }
-        $productCode = $entry.PSChildName
-        if ($productCode -notmatch '^\{[0-9A-Fa-f]{8}-([0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}\}$') { continue }
-        $uninstallLog = Join-Path $env:TEMP ("pg83-uninstall-" + [guid]::NewGuid().ToString("N") + ".log")
-        try {
-            Start-Process -FilePath "msiexec.exe" -ArgumentList @("/x", $productCode, "/qn", "/l*v", "`"$uninstallLog`"") -Wait -PassThru | Out-Null
-            Write-Log "Postgres: uninstalled stale entry $productCode"
-        } finally {
-            Remove-Item -LiteralPath $uninstallLog -Force -ErrorAction SilentlyContinue
-        }
-    }
-
-    # Only the exact service name our own install recipe creates -- not a
-    # wildcard match, since an unrelated Postgres install (a different
-    # version, or a hand-named service) must never be stopped or deleted
-    # by this cleanup.
-    $pgServices = @(Get-Service -Name $script:PostgresServiceName -ErrorAction SilentlyContinue)
-    foreach ($svc in $pgServices) {
-        if ($svc.Status -eq 'Running') { Stop-Service -Name $svc.Name -Force -ErrorAction SilentlyContinue }
-        & sc.exe delete $svc.Name | Out-Null
-        Write-Log "Postgres: removed leftover service $($svc.Name)"
-    }
-
-    if (Test-Path -LiteralPath $script:PostgresInstallDir) {
-        Remove-Item -LiteralPath $script:PostgresInstallDir -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Log "Postgres: removed leftover $script:PostgresInstallDir"
-    }
-
-    $pgUser = Get-LocalUser -Name "postgres" -ErrorAction SilentlyContinue
-    if ($pgUser) {
-        Remove-LocalUser -Name "postgres" -ErrorAction SilentlyContinue
-        Write-Log "Postgres: removed leftover local user 'postgres'"
-    }
-
-    # Remove-LocalUser does not clean up the profile folder or its
-    # ProfileList registry SID mapping -- a stale entry here produces "No
-    # mapping between account names and security IDs was done" on the next
-    # install attempt (confirmed empirically this session).
-    $profileListPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList"
-    $staleProfiles = Get-ChildItem -Path $profileListPath -ErrorAction SilentlyContinue | Where-Object {
-        $imagePath = (Get-ItemProperty -Path $_.PSPath -Name ProfileImagePath -ErrorAction SilentlyContinue).ProfileImagePath
-        $imagePath -and ($imagePath -like "*\postgres")
-    }
-    foreach ($sidKey in $staleProfiles) {
-        $imagePath = (Get-ItemProperty -Path $sidKey.PSPath -Name ProfileImagePath).ProfileImagePath
-        Remove-Item -Path $sidKey.PSPath -Recurse -Force -ErrorAction SilentlyContinue
-        if (Test-Path -LiteralPath $imagePath) {
-            Remove-Item -LiteralPath $imagePath -Recurse -Force -ErrorAction SilentlyContinue
-        }
-        Write-Log "Postgres: removed orphaned profile registration for $imagePath"
-    }
-    if (Test-Path -LiteralPath "C:\Users\postgres") {
-        Remove-Item -LiteralPath "C:\Users\postgres" -Recurse -Force -ErrorAction SilentlyContinue
-    }
+    Write-Host '  Action Required: TPM will not remove a partial PostgreSQL installation automatically.' -ForegroundColor Yellow
+    Write-Host '  Stop here and use a PostgreSQL owner-supported cleanup/recovery procedure.' -ForegroundColor DarkGray
+    Write-Log 'Postgres cleanup: blocked; no service, user, registry, or data removal is permitted.'
+    return [pscustomobject]@{ State = 'RecoveryBlocked'; Changed = $false }
 }
 
-# Installs PostgreSQL 8.3 silently using the confirmed-working property set
-# above. Requires Administrator (creates a Windows service + a local user
-# account) -- prints a clear message and returns $false rather than failing
-# unhelpfully if not elevated. Returns $true on confirmed success
-# (Test-PostgresInstalled checked afterward, not just msiexec's exit code,
-# since a misleading "success" with no real service was observed during
-# this session's testing). The superuser password is returned via
-# $OutSuperPasswordPlain so the caller can DPAPI-encrypt and save it --
-# this function never persists anything itself, and always deletes its
-# working folder (including the verbose install log, which logs connection
-# passwords in plaintext in deferred custom-action data even though the
-# command-line echo masks them) in a `finally` block regardless of outcome.
+# Opens the PostgreSQL 8.3 installer only after explicit setup approval.
+# Passwords are entered in the installer UI, never supplied as process
+# arguments or written to a verbose installer log. Existing or partial
+# installation directories are not removed or replaced automatically.
 function Install-Postgres83 {
-    param([ref]$OutSuperPasswordPlain)
+    param([ref]$OutInstallResult)
 
+    if ($OutInstallResult) { $OutInstallResult.Value = $null }
     if (-not (Test-RunningAsAdministrator)) {
         Write-Host "  ERROR: Installing PostgreSQL requires Administrator privileges." -ForegroundColor Red
         Write-Host "  Close this window and re-run TeknoParrot Manager as Administrator." -ForegroundColor Yellow
@@ -6144,30 +6741,19 @@ function Install-Postgres83 {
         return $false
     }
 
-    Write-Host ""
-    Write-Host "  PostgreSQL 8.3 is required by one or more of your registered games." -ForegroundColor Cyan
-    Write-Host "  It's a small local database program that runs quietly in the" -ForegroundColor DarkGray
-    Write-Host "  background and only talks to TeknoParrot -- nothing is sent over" -ForegroundColor DarkGray
-    Write-Host "  the internet, and it won't interfere with anything else on your PC." -ForegroundColor DarkGray
-    Write-Host ""
-    Write-Host "  You'll be asked for two different passwords:" -ForegroundColor White
-    Write-Host "    1) A SERVICE ACCOUNT password -- for a Windows account Windows uses" -ForegroundColor DarkGray
-    Write-Host "       to run PostgreSQL in the background. You'll almost never need it again." -ForegroundColor DarkGray
-    Write-Host "    2) A DATABASE password -- this is the important one. It gets saved" -ForegroundColor DarkGray
-    Write-Host "       (encrypted) so every Postgres game can be configured automatically." -ForegroundColor DarkGray
-    Write-Host ""
-
-    $svcPwPlain   = Read-ConfirmedPostgresPassword "the SERVICE ACCOUNT password"
-    Write-Host ""
-    $superPwPlain = Read-ConfirmedPostgresPassword "the DATABASE password"
-    Write-Host ""
+    $existingInstall = Get-Item -LiteralPath $script:PostgresInstallDir -Force -ErrorAction SilentlyContinue
+    if ($existingInstall) {
+        Write-Host '  Action Required: a PostgreSQL install directory already exists but is not healthy.' -ForegroundColor Yellow
+        Write-Host '  TPM will not remove or replace it. Complete manual recovery first.' -ForegroundColor DarkGray
+        Write-Log 'Postgres install: blocked because an existing or partial install directory was found.'
+        return $false
+    }
 
     Write-Host "  Checking for the PostgreSQL installer..." -ForegroundColor Cyan
     $rel = Get-PostgresGuideRelease
     if ($null -eq $rel) {
         Write-Host "  ERROR: Could not reach GitHub to download the installer." -ForegroundColor Red
         Write-Log "Postgres install: aborted -- could not fetch release info."
-        $svcPwPlain = $null; $superPwPlain = $null
         return $false
     }
 
@@ -6189,60 +6775,18 @@ function Install-Postgres83 {
             return $false
         }
 
-        Remove-PostgresPartialInstall
-
-        Write-Host "  Installing PostgreSQL 8.3 -- this can take a minute or two..." -ForegroundColor Cyan
-        $logPath = Join-Path $workDir "pg83-install.log"
-        $msiArgs = @(
-            "/i", "`"$($msiFile.FullName)`"",
-            "/qn",
-            "/l*v", "`"$logPath`"",
-            "INTERNALLAUNCH=1",
-            "ROOTDRIVE=C:\",
-            "SERVICEACCOUNT=postgres",
-            "SERVICEDOMAIN=$env:COMPUTERNAME",
-            "SERVICEPASSWORD=`"$svcPwPlain`"",
-            "SERVICEPASSWORDV=`"$svcPwPlain`"",
-            "CREATESERVICEUSER=1",
-            "SUPERUSER=postgres",
-            "SUPERPASSWORD=`"$superPwPlain`"",
-            "LISTENPORT=5432",
-            "LOCALE=C",
-            "ENCODING=UTF8",
-            "CLENCODE=UTF8",
-            "PERMITREMOTE=0",
-            "RUNSTACKBUILDER=0",
-            "DOSERVICE=1",
-            "DOINITDB=1"
-        )
-        # Known, accepted limitation: passing SERVICEPASSWORD/SUPERPASSWORD
-        # as msiexec command-line properties means they are briefly visible
-        # to anything that can inspect this process's command line (Task
-        # Manager's command-line column, Process Explorer, a WMI
-        # Win32_Process query) for the duration of this one call. MSI's own
-        # SecureCustomProperties marking (confirmed present for both
-        # properties when the MSI's tables were inspected this session)
-        # only redacts them from msiexec's *own* verbose log -- it does not
-        # hide them from the OS-level process command line. There is no
-        # msiexec mechanism that avoids this for a silent property-driven
-        # install; it is an inherent trade-off of this approach, not
-        # something this script can route around. The exposure window is
-        # already minimized (synchronous call, passwords cleared from this
-        # script's own memory immediately after).
-        $proc = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -PassThru
-        $svcPwPlain = $null
-        [GC]::Collect()
+        Write-Host '  Opening the PostgreSQL installer. Enter its credentials only in the installer UI.' -ForegroundColor Cyan
+        Write-Host '  TPM does not pass passwords on the command line or request verbose MSI logging.' -ForegroundColor DarkGray
+        $proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', $msiFile.FullName) -Wait -PassThru
 
         if ($proc.ExitCode -ne 0 -or -not (Test-PostgresInstalled)) {
             Write-Host "  ERROR: PostgreSQL install did not complete successfully." -ForegroundColor Red
-            Write-Log "Postgres install: FAILED -- msiexec exit code $($proc.ExitCode)"
-            $superPwPlain = $null
+            Write-Log "Postgres install: FAILED -- installer exit code $($proc.ExitCode)"
             return $false
         }
 
         Write-Host "  PostgreSQL 8.3 installed and running." -ForegroundColor Green
         Write-Log "Postgres install: succeeded."
-        $OutSuperPasswordPlain.Value = $superPwPlain
         return $true
     } finally {
         Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -6368,14 +6912,21 @@ function Invoke-PostgresGameSetup {
                 continue
             }
 
+            # Password population is a separate, backed-up transaction. Do
+            # not silently write a credential from this database-setup pass;
+            # a missing Pass field means the caller must stop and report the
+            # profile as recovery-blocked instead.
+            if ([string]::IsNullOrWhiteSpace((Get-PostgresFieldValue $doc "Pass"))) {
+                Write-Log "Postgres: $($pf.BaseName) still needs the approved password-population step -- skipped."
+                $results.Errors++
+                continue
+            }
+
             $changed = $false
             if ([string]::IsNullOrWhiteSpace((Get-PostgresFieldValue $doc "Path")))    { if (Set-PostgresFieldValue $doc "Path" $relBinPath)    { $changed = $true } }
             if ([string]::IsNullOrWhiteSpace((Get-PostgresFieldValue $doc "Address"))) { if (Set-PostgresFieldValue $doc "Address" "127.0.0.1") { $changed = $true } }
             if ([string]::IsNullOrWhiteSpace((Get-PostgresFieldValue $doc "Port")))    { if (Set-PostgresFieldValue $doc "Port" "5432")          { $changed = $true } }
             if ([string]::IsNullOrWhiteSpace((Get-PostgresFieldValue $doc "User")))    { if (Set-PostgresFieldValue $doc "User" "postgres")      { $changed = $true } }
-            if ([string]::IsNullOrWhiteSpace((Get-PostgresFieldValue $doc "Pass"))) {
-                if (Set-PostgresFieldValue $doc "Pass" $SuperPasswordPlain) { $changed = $true }
-            }
 
             if (Test-PostgresDatabaseExists -DbName $dbName -SuperPasswordPlain $SuperPasswordPlain) {
                 if ($changed) { Save-Xml $doc $pf.FullName; $results.Configured++ }
@@ -13102,6 +13653,32 @@ function Get-ValidationReportPaths {
     }
 }
 
+# Validates a previously configured ZIP as a narrowly scoped write anchor.
+# An existing configured file may be under the TeknoParrot root because the
+# user explicitly chose it in an earlier run; that exception applies only to
+# this verified file and its exact parent directory, never to arbitrary new
+# paths under the installation.
+function Get-EggmanDatConfiguredPathAssessment {
+    param([string]$Path)
+
+    $assessment = Get-EggmanDatDestinationAssessment -Path $Path -AllowExistingConfiguredPath
+    if (-not $assessment.Safe) { return $assessment }
+    if (-not $assessment.Exists) {
+        $assessment.State  = 'Missing'
+        $assessment.Reason = 'the configured Eggman ZIP does not exist'
+        return [pscustomobject]$assessment
+    }
+    if (-not (Test-EggmanDatZip -Path $assessment.FullPath)) {
+        $assessment.Safe   = $false
+        $assessment.State  = 'InvalidArchive'
+        $assessment.Reason = 'the configured file is not a readable Eggman ZIP containing the collection DAT'
+        return [pscustomobject]$assessment
+    }
+    $assessment.State   = 'ExistingConfigured'
+    $assessment.Reason = 'the configured Eggman ZIP is a readable archive with a writable parent directory'
+    return [pscustomobject]$assessment
+}
+
 # Report files are the one intentional write surface of validation mode. An
 # existing path is overwriteable only when it already identifies itself as a
 # TPM validation report; arbitrary application/user files, reparse targets,
@@ -13474,10 +14051,11 @@ function Invoke-ValidationReport {
     }
 
     $compatibilityFields = @('LaunchPathRisk', 'PathTooLong', 'DllMismatch', 'GpuIncompatible', 'BiosMissing', 'ExeMissing', 'ComponentMissing')
-    foreach ($field in $compatibilityFields) {
-        foreach ($finding in @($compatibility.$field)) {
+    foreach ($compatibilityProperty in @($compatibility.PSObject.Properties)) {
+        if ($compatibilityFields -notcontains $compatibilityProperty.Name) { continue }
+        foreach ($finding in @($compatibilityProperty.Value)) {
             [void]$actions.Add([pscustomobject]@{
-                Category = 'Compatibility'; Code = $field; Status = 'ActionRequired'; Detail = $finding
+                Category = 'Compatibility'; Code = $compatibilityProperty.Name; Status = 'ActionRequired'; Detail = $finding
             })
         }
     }
@@ -15640,16 +16218,8 @@ while ($true) {
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
 
         Write-Host "  Scanning registered games for Postgres requirements..." -ForegroundColor DarkGray
-        $needCount = 0
-        $pgProfiles = Get-ChildItem -LiteralPath $userProfilesDir -Filter *.xml -File -ErrorAction SilentlyContinue |
-                          Where-Object { $_.Directory.Name -ne "FullBackup" }
-        foreach ($pf in $pgProfiles) {
-            try {
-                $doc = Read-Xml $pf.FullName
-                if ($doc.GameProfile -and (Test-GameNeedsPostgres $doc)) { $needCount++ }
-            } catch {}
-        }
-
+        $pgStatus = Get-PostgresSetupStatus -UserProfilesDir $userProfilesDir
+        $needCount = $pgStatus.DetectedCount
         if ($needCount -eq 0) {
             Write-Host "  No registered games need PostgreSQL -- nothing to do." -ForegroundColor Green
             Write-Log "Postgres setup: no Postgres-needing games registered."
@@ -15658,8 +16228,21 @@ while ($true) {
         }
 
         Write-Host ("  {0} registered game(s) need PostgreSQL." -f $needCount) -ForegroundColor Cyan
+        Write-Host "  Current profile state:" -ForegroundColor DarkGray
+        foreach ($pgProfile in @($pgStatus.Profiles)) {
+            Write-Host ("    {0} : {1}" -f $pgProfile.ProfileName, $pgProfile.State) -ForegroundColor DarkGray
+        }
 
-        if (-not (Test-PostgresInstalled) -and -not (Test-RunningAsAdministrator)) {
+        if ($pgStatus.State -eq 'RecoveryBlocked') {
+            Write-Host "  Action Required: one or more PostgreSQL profile targets are not safe to change." -ForegroundColor Yellow
+            Write-Host "  No profile, authentication setting, or database data was changed." -ForegroundColor DarkGray
+            Write-Log "Postgres setup: blocked because a profile target or schema could not be proven safe."
+            [void](Read-Host "  Press Enter to return to menu")
+            continue
+        }
+
+        $postgresInstalled = [bool]$pgStatus.PostgresInstalled
+        if (-not $postgresInstalled -and -not (Test-RunningAsAdministrator)) {
             Write-Host ""
             Write-Host "  PostgreSQL is not installed yet, and installing it requires" -ForegroundColor Red
             Write-Host "  Administrator privileges (it creates a Windows service and a" -ForegroundColor Red
@@ -15673,8 +16256,34 @@ while ($true) {
             continue
         }
 
+        if (-not $postgresInstalled) {
+            Write-Host ""
+            Write-Host "  PostgreSQL setup is opt-in. TPM will open the installer's own UI." -ForegroundColor Cyan
+            Write-Host "  Passwords will be entered only in that UI and later verified here." -ForegroundColor DarkGray
+            $installApproval = Read-HostSafe "  Download and open the PostgreSQL installer? (Y/N)"
+            if ($installApproval.ToUpperInvariant() -ne 'Y') {
+                Write-Host "  PostgreSQL setup skipped; no profiles were changed." -ForegroundColor DarkGray
+                Write-Log "Postgres setup: user declined installation."
+                [void](Read-Host "  Press Enter to return to menu")
+                continue
+            }
+            $ignoredInstallerPassword = $null
+            if (-not (Install-Postgres83 -OutInstallResult ([ref]$ignoredInstallerPassword))) {
+                Write-Host "  PostgreSQL setup is recovery-blocked; no profile or database changes were made." -ForegroundColor Yellow
+                [void](Read-Host "  Press Enter to return to menu")
+                continue
+            }
+            $postgresInstalled = [bool](Test-PostgresInstalled)
+            if (-not $postgresInstalled) {
+                Write-Host "  Action Required: the installer did not produce a verified PostgreSQL service." -ForegroundColor Yellow
+                [void](Read-Host "  Press Enter to return to menu")
+                continue
+            }
+        }
+
         $superPwPlain = $null
-        if (Test-PostgresInstalled) {
+        $passwordVerified = $false
+        if ($postgresInstalled) {
             Write-Host "  PostgreSQL is already installed -- it will not be reinstalled or modified." -ForegroundColor Green
             if ($postgresSuperPasswordEncrypted) {
                 try {
@@ -15682,20 +16291,27 @@ while ($true) {
                     $savedPwPlain = ConvertFrom-SecureStringPlain $secure
                     if (Test-PostgresPassword $savedPwPlain) {
                         $superPwPlain = $savedPwPlain
+                        $passwordVerified = $true
                     } else {
-                        Write-Log "Postgres setup: saved password no longer works -- will re-prompt."
+                        Write-Log "Postgres setup: saved password no longer verifies -- reset-needed state."
                     }
                 } catch {
                     Write-Log "Postgres setup: could not decrypt saved password -- $_"
                 }
+                $savedPwPlain = $null
             }
-            if (-not $superPwPlain) {
+            if (-not $passwordVerified) {
                 Write-Host "  Enter your existing PostgreSQL database password to continue:" -ForegroundColor Cyan
                 $superPwSecure  = Read-Host "  Password" -AsSecureString
                 $typedPwPlain   = ConvertFrom-SecureStringPlain $superPwSecure
-                if (-not (Test-PostgresPassword $typedPwPlain)) {
-                    Write-Host "  ERROR: That password did not work against your PostgreSQL server." -ForegroundColor Red
-                    Write-Log "Postgres setup: aborted -- password verification failed."
+                $passwordVerified = Test-PostgresPassword $typedPwPlain
+                if (-not $passwordVerified) {
+                    $typedPwPlain = $null
+                    Write-Host "  Reset needed: the password could not be verified." -ForegroundColor Yellow
+                    Write-Host "  TPM will not change authentication rules or recreate database data." -ForegroundColor DarkGray
+                    $recoveryApproval = Read-HostSafe "  Start the safe PostgreSQL recovery guidance? (Y/N)"
+                    $recovery = Invoke-PostgresGuidedRecovery -Approved:($recoveryApproval.ToUpperInvariant() -eq 'Y')
+                    Write-Host ("  Recovery state: {0}" -f $recovery.State) -ForegroundColor $(if ($recovery.State -eq 'RecoveryBlocked') { 'Yellow' } else { 'DarkGray' })
                     [void](Read-Host "  Press Enter to return to menu")
                     continue
                 }
@@ -15703,16 +16319,52 @@ while ($true) {
                 $postgresSuperPasswordEncrypted = ConvertTo-PostgresEncryptedPassword $superPwPlain
                 if (Save-Config) { Write-Log "Postgres setup: saved (encrypted) password for future runs." }
             }
-        } else {
-            $outPw = [ref]$null
-            if (-not (Install-Postgres83 -OutSuperPasswordPlain $outPw)) {
-                Write-Host "  PostgreSQL setup did not complete -- see TeknoParrot-Manager.log." -ForegroundColor Red
-                [void](Read-Host "  Press Enter to return to menu")
-                continue
+        }
+
+        $pgStatus = Get-PostgresSetupStatus -UserProfilesDir $userProfilesDir -PostgresInstalled:$true -AuthenticationState 'Verified'
+        if ($pgStatus.State -eq 'RecoveryBlocked') {
+            Write-Host "  Action Required: profile/password population safety could not be proven." -ForegroundColor Yellow
+            Write-Host "  No profile or database changes were made." -ForegroundColor DarkGray
+            $superPwPlain = $null
+            [void](Read-Host "  Press Enter to return to menu")
+            continue
+        }
+
+        $profileCandidates = @($pgStatus.Profiles | Where-Object { $_.State -in @('PasswordPopulationNeeded', 'MissingSetup') })
+        $passwordTargets = @($pgStatus.Profiles | Where-Object { $_.State -eq 'PasswordPopulationNeeded' })
+        if ($profileCandidates.Count -gt 0) {
+            if ($passwordTargets.Count -gt 0) {
+                Write-Host ""
+                Write-Host ("  {0} profile(s) need the verified PostgreSQL password populated." -f $passwordTargets.Count) -ForegroundColor Cyan
+                Write-Host ("  TPM will update only these existing Pass fields: {0}" -f (($passwordTargets | ForEach-Object ProfileName) -join ', ')) -ForegroundColor DarkGray
+                $populationApproval = Read-HostSafe "  Back up and populate these profiles now? (Y/N)"
+                $population = Invoke-PostgresPasswordPopulation -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain -Profiles $profileCandidates -Approved:($populationApproval.ToUpperInvariant() -eq 'Y')
+                if ($population.State -eq 'Skipped') {
+                    Write-Host "  Password population skipped; no profile or database changes were made." -ForegroundColor DarkGray
+                    $superPwPlain = $null
+                    [void](Read-Host "  Press Enter to return to menu")
+                    continue
+                }
+                if ($population.State -in @('RecoveryBlocked', 'ResetNeeded')) {
+                    Write-Host ("  Action Required: password population state is {0}." -f $population.State) -ForegroundColor Yellow
+                    Write-Host "  No unconfirmed profile changes were retained." -ForegroundColor DarkGray
+                    $superPwPlain = $null
+                    [void](Read-Host "  Press Enter to return to menu")
+                    continue
+                }
+                if ($population.UpdatedProfiles.Count -gt 0) {
+                    Write-Host ("  Password populated into: {0}" -f ($population.UpdatedProfiles -join ', ')) -ForegroundColor Green
+                    Write-Host ("  Profile backup       : {0}" -f $population.BackupPath) -ForegroundColor DarkCyan
+                }
+            } else {
+                $profileBackup = Backup-PostgresProfileConfigurations -UserProfilesDir $userProfilesDir -Profiles $profileCandidates
+                if (-not $profileBackup.Success) {
+                    Write-Host "  Action Required: profile backup failed; no profile/database changes were made." -ForegroundColor Yellow
+                    $superPwPlain = $null
+                    [void](Read-Host "  Press Enter to return to menu")
+                    continue
+                }
             }
-            $superPwPlain = $outPw.Value
-            $postgresSuperPasswordEncrypted = ConvertTo-PostgresEncryptedPassword $superPwPlain
-            if (Save-Config) { Write-Log "Postgres setup: saved (encrypted) database password." }
         }
 
         Write-Host ""

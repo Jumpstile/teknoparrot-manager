@@ -358,7 +358,7 @@ N) Skip
 
 Both the collection dat and supplementary dat are read directly from inside the ZIP — no extraction needed. The supplementary dat takes priority for any game that appears in both (alternate versions that replace the collection version).
 
-Eggman recognition data is separate from TeknoParrotUI's `ParrotData.xml` and DAT/XML setting, and separate from both game ZIP sources and the local staging/install folder. On the normal first-run download path TPM stores the ZIP under `%LOCALAPPDATA%\TeknoParrotManager\Eggman` without asking where to save it. Browse/import remains available for an existing local file, and later explicit updates retain the alternate-location save dialog. A valid previously configured ZIP remains the update destination unless you choose another location.
+Eggman recognition data is separate from TeknoParrotUI's `ParrotData.xml` and DAT/XML setting, and separate from both game ZIP sources and the local staging/install folder. On the normal first-run download path TPM stores the ZIP under `%LOCALAPPDATA%\TeknoParrotManager\Eggman` without asking where to save it. Browse/import remains available for an existing local file, and later explicit updates retain the alternate-location save dialog. A valid previously configured ZIP is the update anchor: TPM places a newer release beside it in the same verified directory unless you choose another location. If that path is missing, unsafe, redirected, unwritable, or ambiguous, TPM explains why and uses a deterministic TPM-managed fallback when it can prove one is safe.
 
 When the script downloads the Eggman/RomVault ZIP, it uses the shared hardened download pipeline also used for other live file downloads: BITS first, HttpClient fallback, and `Invoke-WebRequest` only as a last resort. Downloads go to a partial/temp file first, show readable progress with size/speed/ETA when available, log final method/size/elapsed/speed metrics, and only move into the cache/final path after completion validation.
 
@@ -583,12 +583,15 @@ If anything is outdated, the script lists every such game once and asks a single
 
 Several Incredible Technologies games — Golden Tee Live (2006–2019), Power Putt Live (2012/2013), Silver Strike Bowling Live, Target Toss Pro (Bags / Lawn Darts), and Orange County Choppers Pinball — need a small local PostgreSQL 8.3 database to store game data. Mode 12 detects which of your registered games need it automatically (no hardcoded list to keep up to date) and handles the rest:
 
-- **If PostgreSQL isn't installed yet**, it downloads and installs PostgreSQL 8.3 silently. This requires running the script as **Administrator** — the only feature in this script that does, since it creates a real Windows service and a local `postgres` user account. You'll be asked for two passwords: a service-account password (Windows uses it to run PostgreSQL in the background — you'll rarely need it again) and a database password (the important one — every Postgres game's settings need it).
+- **If PostgreSQL isn't installed yet**, mode 12 remains opt-in and opens the PostgreSQL installer's own UI after an Administrator check. TPM does not pass passwords on the installer command line or request verbose MSI logging. After the installer completes, TPM verifies the database password before offering profile setup.
 - **If PostgreSQL is already installed, it is never reinstalled or modified.** The script just uses it as-is.
-- **For each Postgres-needing game, a database that already exists is never recreated or restored over.** Likewise, a `Pass` field that's already filled in is left completely untouched.
+- **Each detected IT profile is classified** as detected, already configured, missing setup, password-population-needed, reset-needed, skipped, or recovery-blocked. A `Pass` field that's already filled in is left completely untouched.
+- **After explicit approval**, TPM backs up every affected profile before writing and populates the verified PostgreSQL password into each existing TeknoParrot `Pass` field that needs it. The result lists updated profile names, not the password. The profile field is the only intentional credential destination because TeknoParrot must read it; TPM does not copy that value into logs, reports, screenshots, issue comments, or command-line arguments.
+- **If a password is forgotten or recovery ownership cannot be proven**, TPM reports reset-needed/recovery-blocked, backs up the known PostgreSQL configuration when its exact paths are verifiable, and gives manual guidance. It does not change authentication rules, wipe/recreate data, or continue with profile writes.
+- **For each Postgres-needing game, a database that already exists is never recreated or restored over.** Database backups are made before database setup work, and profile writes use the pre-write profile backup for rollback.
 - For games whose profile already has TeknoParrot's own "Automatically create Database" feature (Golden Tee Live 2018 and newer), the script only fills in the connection fields (server address, port, username) — TeknoParrot creates the database itself and asks for the backup location on first launch. For older profiles that predate that feature, this script creates the database and restores that game's bundled backup itself.
 - Every time this mode runs, it backs up every existing Postgres database first, before touching anything — restore them via mode 11 if anything looks wrong.
-- The database password is encrypted (Windows DPAPI, tied to your Windows account and this PC) before being saved to the config file — the first secret this script has ever needed to store.
+- The database password is encrypted (Windows DPAPI, tied to your Windows account and this PC) before being saved to the TPM config file. The target TeknoParrot profile may also contain the credential in its existing `Pass` field because the game requires that value; TPM never prints or logs it.
 
 You don't need to run this mode at all if none of your registered games need Postgres — it detects that and tells you so without installing anything.
 
@@ -1019,7 +1022,7 @@ folders automatically.
 The script detects mapped network drives to avoid scanning them during game discovery. If a previously mapped drive is now unreachable, startup may take a few seconds before timing out gracefully — this is expected and the drive is skipped.
 
 **Postgres connection fails / "password authentication failed".**
-The database password is saved encrypted in `config.json`. If you changed it externally (via pgAdmin or similar), delete `PostgresSuperPasswordEncrypted` from `config.json` and re-run mode 12 — the script will ask for the correct password and save it again.
+The database password is saved encrypted in `config.json`. If you changed it externally (via pgAdmin or similar), delete `PostgresSuperPasswordEncrypted` from `config.json` and re-run mode 12. TPM will classify the run as reset-needed if verification fails, back up known server configuration when safe, and stop for manual PostgreSQL owner-supported recovery rather than changing authentication rules automatically.
 
 **"LaunchBox is currently open" error.**
 The direct LaunchBox integration refuses to write while LaunchBox or BigBox is running. Close both, then re-run.
