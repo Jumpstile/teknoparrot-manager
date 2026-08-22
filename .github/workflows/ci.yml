@@ -62,12 +62,15 @@ jobs:
         shell: powershell
         run: Install-Module Pester -Scope CurrentUser -Force -SkipPublisherCheck -MinimumVersion 5.0
 
-      - name: Pester regression suite
+      - name: Pester regression suites
         shell: powershell
         run: |
           Import-Module Pester -MinimumVersion 5.0
           $config = New-PesterConfiguration
-          $config.Run.Path = "$PWD\Tests\TeknoParrot-Manager.Tests.ps1"
+          $config.Run.Path = @(
+            "$PWD\Tests\TeknoParrot-Manager.Tests.ps1",
+            "$PWD\Tests\QualitySystem.Tests.ps1"
+          )
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'
           $config.TestResult.Enabled = $true

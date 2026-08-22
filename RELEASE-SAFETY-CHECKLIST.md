@@ -199,6 +199,16 @@ See Section 3 below for the mechanical checklist this policy implements.
   Fix the regression before proceeding; do NOT adjust the test to match wrong behavior
   unless the behavior change was explicitly intended this round.
 
+- [ ] Release-document consistency gate (#237) -- must be 100% green before
+  any tag, package build, or GitHub release:
+  ```powershell
+  Invoke-Pester -Path .\Tests\QualitySystem.Tests.ps1 -Tag ReleaseConsistency
+  ```
+  This gate checks active release identity/publication state, rejects current
+  guidance toward superseded RCs, preserves clearly historical references,
+  and enforces BepInEx update-check/update-only wording. The normal CI Pester
+  run includes `QualitySystem.Tests.ps1`; a red result blocks the release.
+
 ---
 
 ## 2. Upstream compatibility safety review (issue #47)
@@ -284,6 +294,11 @@ the file that happened to be open.
   source-controlled `.github/repository-metadata.json` contract contains no
   RC-specific description or homepage; live GitHub description, homepage,
   topics, repository visibility, and Releases URL match the contract.
+- [ ] Release-document consistency checked -- the automated #237 gate is
+  green, and the full sweep remains semantic: verify active release identity,
+  publication state, superseded-RC guidance, and user-visible capability names
+  against current behavior. For example, BepInEx must remain described as an
+  existing-install update check for stable 64-bit builds, never fresh setup.
 
 ---
 
@@ -482,6 +497,12 @@ production code.
 
 - [ ] Verify the GitHub release: published (not draft), correct tag, correct
   target commit.
+- [ ] Rerun the release-document consistency gate against the published tag:
+  ```powershell
+  Invoke-Pester -Path .\Tests\QualitySystem.Tests.ps1 -Tag ReleaseConsistency
+  ```
+  Confirm active documentation still identifies the published release and does
+  not regress to superseded-RC or fresh-install BepInEx guidance.
 - [ ] Verify the release asset: exists, correct file, matches
   `Tests\Test-ReleasePackage.ps1` validation (re-run against the actual
   downloaded asset, not just the local build, to rule out upload corruption).

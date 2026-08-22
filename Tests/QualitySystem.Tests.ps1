@@ -47,7 +47,7 @@ Describe "Quality engineering system metadata" {
     }
 }
 
-Describe "Release Integrity source identity" {
+Describe "Release Integrity source identity" -Tag 'ReleaseConsistency' {
     # The running source identity and the last published release are tracked
     # separately so an in-progress release cannot be mistaken for a published
     # one. After the RC6 publication they intentionally point to the same RC6
@@ -129,7 +129,7 @@ Describe "Release Integrity source identity" {
     }
 }
 
-Describe "Canonical repository discoverability contract" {
+Describe "Canonical repository discoverability contract" -Tag 'ReleaseConsistency' {
     BeforeAll {
         $script:DiscoverabilityRepoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
         $script:DiscoverabilityMetadataPath = Join-Path $script:DiscoverabilityRepoRoot ".github\repository-metadata.json"
@@ -187,7 +187,7 @@ Describe "Canonical repository discoverability contract" {
     }
 }
 
-Describe "Active release-facing documentation" {
+Describe "Active release-facing documentation" -Tag 'ReleaseConsistency' {
     BeforeAll {
         $script:RepoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
         $script:ActiveReleaseDocs = @(
@@ -230,5 +230,165 @@ Describe "Active release-facing documentation" {
             $content = Get-Content -LiteralPath $path -Raw
             $content | Should -Match '(?i)Final Version 1\.0.{0,60}(unpublished|not been published)'
         }
+    }
+}
+
+Describe "Release-document consistency contract" -Tag 'ReleaseConsistency' {
+    BeforeAll {
+        $script:ReleaseDocumentContract = [pscustomobject]@{
+            CurrentVersionLabel = 'v1.0 RC6'
+            CurrentVersionPattern = 'v1\.0[- ]RC6'
+        }
+
+        $script:ReleaseDocumentConsistencyFinder = {
+            param(
+                [Parameter(Mandatory)]
+                [object[]]$Documents,
+
+                [Parameter(Mandatory)]
+                [pscustomobject]$Contract
+            )
+
+            $findings = New-Object 'System.Collections.Generic.List[string]'
+            $staleReleasePattern = '(?i)\b(?:download|use|install)\s+(?:the\s+)?(?:(?:current|latest)\s+)?(?:release\s+)?(?:v1\.0[- ]?)?RC[0-5]\b|\b(?:current|latest)\s+(?:release|release candidate|candidate)\s*(?:is|:)\s*(?:v1\.0[- ]?)?RC[0-5]\b'
+
+            foreach ($document in $Documents) {
+                if ($document.Scope -eq 'Historical') {
+                    continue
+                }
+
+                $text = [string]$document.Text
+                if ([string]$document.Scope -eq 'ActiveIdentity') {
+                    if ($text -notmatch $Contract.CurrentVersionPattern) {
+                        [void]$findings.Add("$($document.Path): active text does not identify $($Contract.CurrentVersionLabel).")
+                    }
+
+                    if ($text -notmatch '(?i)\bpublished\b') {
+                        [void]$findings.Add("$($document.Path): active text does not state the current release is published.")
+                    }
+
+                    $notPublishedPattern = '(?i)' + $Contract.CurrentVersionPattern + '.{0,140}(?:in progress|not yet published|has not been published|unpublished)'
+                    if ($text -match $notPublishedPattern) {
+                        [void]$findings.Add("$($document.Path): current release is described as unpublished or in progress.")
+                    }
+
+                    foreach ($line in [regex]::Split($text, '\r\n|\n')) {
+                        if ($line -match $staleReleasePattern) {
+                            [void]$findings.Add("$($document.Path): active text gives guidance toward a superseded RC.")
+                        }
+                    }
+                }
+
+                if ([string]$document.Scope -eq 'ActiveBepInEx') {
+                    if ($text -notmatch '(?i)\bBepInEx\s+update(?:\s+check)?\b') {
+                        [void]$findings.Add("$($document.Path): active BepInEx wording does not identify an update check.")
+                    }
+
+                    if ($text -notmatch '(?i)(?:already|existing)[\s\S]{0,100}BepInEx[\s\S]{0,50}installed|BepInEx[\s\S]{0,100}(?:already|existing)[\s\S]{0,50}installed') {
+                        [void]$findings.Add("$($document.Path): active BepInEx wording does not require an existing installation.")
+                    }
+
+                    if ($text -notmatch "(?i)(?:never|does not|doesn't)[\s\S]{0,60}install(?:s)?\s+BepInEx") {
+                        [void]$findings.Add("$($document.Path): active BepInEx wording does not reject fresh installation.")
+                    }
+
+                    if ($text -notmatch '(?i)stable.{0,40}64-bit|64-bit.{0,40}stable') {
+                        [void]$findings.Add("$($document.Path): active BepInEx wording does not constrain updates to stable 64-bit builds.")
+                    }
+
+                    if ($text -match '(?i)\bBepInEx\s+setup\b|\b(?:TPM|this mode|mode 9|the script)\s+(?:installs?|sets up|configures?)\s+BepInEx') {
+                        [void]$findings.Add("$($document.Path): active BepInEx wording implies setup or fresh installation.")
+                    }
+                }
+            }
+
+            return $findings.ToArray()
+        }
+
+        $script:ReleaseIdentityDocuments = @(
+            [pscustomobject]@{ Path = 'README.md'; Scope = 'ActiveIdentity'; Text = 'Published release candidate: v1.0 RC6. Download it from GitHub Releases.' }
+            [pscustomobject]@{ Path = 'QUICKSTART.md'; Scope = 'ActiveIdentity'; Text = 'Published release candidate: v1.0 RC6. Final Version 1.0 remains unpublished.' }
+        )
+
+    }
+
+    It "fails a fixture where active documents identify different current RCs" {
+        $contradictory = @(
+            $script:ReleaseIdentityDocuments[0]
+            [pscustomobject]@{ Path = 'QUICKSTART.md'; Scope = 'ActiveIdentity'; Text = 'Published release candidate: v1.0 RC5. Download it from GitHub Releases.' }
+        )
+
+        $findings = @(& $script:ReleaseDocumentConsistencyFinder -Documents $contradictory -Contract $script:ReleaseDocumentContract)
+        $findings.Count | Should -BeGreaterThan 0
+        ($findings -join "`n") | Should -Match 'QUICKSTART\.md'
+    }
+
+    It "fails a fixture with superseded RC installation guidance" {
+        $stale = @(
+            [pscustomobject]@{ Path = 'README.md'; Scope = 'ActiveIdentity'; Text = 'Published release candidate: v1.0 RC6.' }
+            [pscustomobject]@{ Path = 'QUICKSTART.md'; Scope = 'ActiveIdentity'; Text = 'Published release candidate: v1.0 RC6. Download v1.0-RC5 here.' }
+        )
+
+        $findings = @(& $script:ReleaseDocumentConsistencyFinder -Documents $stale -Contract $script:ReleaseDocumentContract)
+        $findings.Count | Should -BeGreaterThan 0
+        ($findings -join "`n") | Should -Match 'superseded RC'
+    }
+
+    It "fails a fixture that marks the current release as unpublished" {
+        $unpublished = @(
+            [pscustomobject]@{ Path = 'README.md'; Scope = 'ActiveIdentity'; Text = 'Published release candidate: v1.0 RC6.' }
+            [pscustomobject]@{ Path = 'QUICKSTART.md'; Scope = 'ActiveIdentity'; Text = 'The current release v1.0 RC6 is not yet published.' }
+        )
+
+        $findings = @(& $script:ReleaseDocumentConsistencyFinder -Documents $unpublished -Contract $script:ReleaseDocumentContract)
+        $findings.Count | Should -BeGreaterThan 0
+        ($findings -join "`n") | Should -Match 'unpublished or in progress'
+    }
+
+    It "fails active BepInEx setup or fresh-install wording" {
+        $misleading = @(
+            [pscustomobject]@{ Path = 'README.md'; Scope = 'ActiveBepInEx'; Text = 'BepInEx setup: Mode 9 installs BepInEx fresh into every game. Stable 64-bit release.' }
+        )
+
+        $findings = @(& $script:ReleaseDocumentConsistencyFinder -Documents $misleading -Contract $script:ReleaseDocumentContract)
+        $findings.Count | Should -BeGreaterThan 0
+        ($findings -join "`n") | Should -Match 'setup or fresh installation'
+    }
+
+    It "allows clearly historical RC and BepInEx wording outside active guidance" {
+        $documents = @(
+            $script:ReleaseIdentityDocuments[0]
+            [pscustomobject]@{ Path = 'docs/wiki-updates/Changelog.md'; Scope = 'Historical'; Text = 'v1.0 RC5 used the earlier BepInEx setup wording and is superseded.' }
+        )
+
+        $findings = @(& $script:ReleaseDocumentConsistencyFinder -Documents $documents -Contract $script:ReleaseDocumentContract)
+        $findings.Count | Should -Be 0
+    }
+
+    It "passes the repository active release and BepInEx documents" {
+        $repoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
+        $documents = @()
+
+        foreach ($entry in @(
+            [pscustomobject]@{ RelativePath = 'README.md' }
+            [pscustomobject]@{ RelativePath = 'QUICKSTART.md' }
+            [pscustomobject]@{ RelativePath = 'TeknoParrot-Manager-README.txt' }
+            [pscustomobject]@{ RelativePath = 'TeknoParrot-Manager-QuickStart.txt' }
+            [pscustomobject]@{ RelativePath = 'docs\AUTO_UPDATE.md' }
+        )) {
+            $content = Get-Content -LiteralPath (Join-Path $repoRoot $entry.RelativePath) -Raw
+            $documents += [pscustomobject]@{ Path = $entry.RelativePath; Scope = 'ActiveIdentity'; Text = $content }
+        }
+
+        foreach ($relativePath in @('README.md', 'QUICKSTART.md', 'TeknoParrot-Manager-README.txt', 'TeknoParrot-Manager-QuickStart.txt')) {
+            $documents += [pscustomobject]@{
+                Path = $relativePath
+                Scope = 'ActiveBepInEx'
+                Text = Get-Content -LiteralPath (Join-Path $repoRoot $relativePath) -Raw
+            }
+        }
+
+        $findings = @(& $script:ReleaseDocumentConsistencyFinder -Documents $documents -Contract $script:ReleaseDocumentContract)
+        $findings.Count | Should -Be 0
     }
 }
