@@ -6357,6 +6357,7 @@ Describe "Get-ManagerUpdateRelease" {
                         name                  = 'TeknoParrot.Manager.v0.99.99.BETA.zip'
                         browser_download_url = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.99/TeknoParrot.Manager.v0.99.99.BETA.zip'
                         size                  = 1
+                        digest                = ('sha256:' + ('a' * 64))
                     })
                 } | ConvertTo-Json -Depth 5)
             }
@@ -6364,6 +6365,28 @@ Describe "Get-ManagerUpdateRelease" {
         $release = Get-ManagerUpdateRelease
         $release.TagName | Should -Be 'v0.99.99'
         $release.AssetName | Should -Be 'TeknoParrot.Manager.v0.99.99.BETA.zip'
+        $release.ExpectedSha256 | Should -Be ('A' * 64)
+        $release.DigestStatus | Should -Be 'Verified'
+    }
+
+    It "retains a matching release but marks missing or malformed digests as unusable" {
+        Mock Invoke-WebRequest {
+            [pscustomobject]@{
+                Content = (@{
+                    tag_name = 'v0.99.99'
+                    assets   = @(@{
+                        name                  = 'TeknoParrot.Manager.v0.99.99.BETA.zip'
+                        browser_download_url = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.99/TeknoParrot.Manager.v0.99.99.BETA.zip'
+                        size                  = 1
+                        digest                = 'sha256:not-a-valid-digest'
+                    })
+                } | ConvertTo-Json -Depth 5)
+            }
+        }
+        $release = Get-ManagerUpdateRelease
+        $release | Should -Not -BeNullOrEmpty
+        $release.ExpectedSha256 | Should -BeNullOrEmpty
+        $release.DigestStatus | Should -Be 'MissingOrMalformed'
     }
 
     It "returns null when no asset matches the expected name pattern" {
@@ -6579,6 +6602,7 @@ Describe "Invoke-CheckForUpdates" {
                     name                  = $AssetName
                     browser_download_url = "https://github.com/Jumpstile/teknoparrot-manager/releases/download/$TagName/$AssetName"
                     size                  = 1
+                    digest                = ('sha256:' + ('a' * 64))
                 })
             } | ConvertTo-Json -Depth 5)
         }
@@ -6683,6 +6707,7 @@ Describe "Invoke-ManagerUpdateInstall" {
                 AssetName   = 'TeknoParrot.Manager.v0.99.99.BETA.zip'
                 DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.99/TeknoParrot.Manager.v0.99.99.BETA.zip'
                 SizeBytes   = 1
+                ExpectedSha256 = ('A' * 64)
             }
         }
 
@@ -6732,6 +6757,44 @@ Describe "Invoke-ManagerUpdateInstall" {
 
         Invoke-ManagerUpdateInstall -ScriptPath $path -Release (New-StartupCheckRelease) | Should -BeTrue
         (Get-Content -LiteralPath $path -Raw) | Should -Match 'ScriptVersion = "0.99.99"'
+    }
+
+    It "refuses a missing or malformed digest before backup or download" {
+        $root = Join-Path $TestDrive ("digest-missing-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $path = Join-Path $root 'TeknoParrot-Manager.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii -NoNewline
+        $release = New-StartupCheckRelease
+        $release.ExpectedSha256 = $null
+
+        Mock New-ManagerUpdateBackup { throw 'backup should not be called without a release digest' }
+        Mock Invoke-TpmDownload { throw 'download should not be called without a release digest' }
+
+        Invoke-ManagerUpdateInstall -ScriptPath $path -Release $release | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeFalse
+        Should -Invoke New-ManagerUpdateBackup -Times 0
+        Should -Invoke Invoke-TpmDownload -Times 0
+        (Get-Content -LiteralPath $path -Raw) | Should -Be '$ScriptVersion = "0.0.1"'
+    }
+
+    It "passes the digest to the staged download and stops before extraction when verification fails" {
+        $root = Join-Path $TestDrive ("digest-mismatch-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $path = Join-Path $root 'TeknoParrot-Manager.ps1'
+        Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii -NoNewline
+        $originalContent = Get-Content -LiteralPath $path -Raw
+        $release = New-StartupCheckRelease
+        $release.ExpectedSha256 = 'B' * 64
+
+        Mock Invoke-TpmDownload { return $false }
+        Mock Expand-ManagerUpdateAsset { throw 'extraction should not be reached after digest mismatch' }
+
+        Invoke-ManagerUpdateInstall -ScriptPath $path -Release $release | Should -BeFalse
+        (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
+        $backupFiles = @(Get-ChildItem -LiteralPath (Join-Path $root 'UpdateBackups') -Recurse -Filter 'TeknoParrot-Manager.ps1' -ErrorAction SilentlyContinue)
+        $backupFiles.Count | Should -Be 1
+        Should -Invoke Invoke-TpmDownload -Times 1 -ParameterFilter { $ExpectedSha256 -eq ('B' * 64) }
+        Should -Invoke Expand-ManagerUpdateAsset -Times 0
     }
 
     It "returns false and leaves the original untouched when the target is read-only" {
@@ -6951,7 +7014,7 @@ Describe "Invoke-ManagerUpdateInstall" {
 
 Describe "Invoke-StartupUpdateCheck" {
     It "returns false and does not prompt when already current" {
-        Mock Get-ManagerUpdateRelease { [pscustomobject]@{ TagName = "v$ScriptVersion"; Name = $null; Body = $null; AssetName = 'x'; DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.39/x' } }
+        Mock Get-ManagerUpdateRelease { [pscustomobject]@{ TagName = "v$ScriptVersion"; Name = $null; Body = $null; AssetName = 'x'; DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.39/x'; ExpectedSha256 = ('A' * 64) } }
         Mock Read-Host { throw "Read-Host should not be called when already current" }
 
         $path = Join-Path $TestDrive 'startup-current.ps1'
@@ -6972,7 +7035,7 @@ Describe "Invoke-StartupUpdateCheck" {
 
     It "returns false and makes no changes when the user chooses N (remind me later)" {
         Mock Get-ManagerUpdateRelease {
-            [pscustomobject]@{ TagName = 'v0.99.99'; Name = 'v0.99.99'; Body = 'Notes.'; AssetName = 'x.zip'; DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.99/x.zip' }
+            [pscustomobject]@{ TagName = 'v0.99.99'; Name = 'v0.99.99'; Body = 'Notes.'; AssetName = 'x.zip'; DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.99/x.zip'; ExpectedSha256 = ('A' * 64) }
         }
         Mock Read-Host { "N" }
 
@@ -6986,7 +7049,7 @@ Describe "Invoke-StartupUpdateCheck" {
 
     It "shows release notes on V and then still lets the user decline with N" {
         Mock Get-ManagerUpdateRelease {
-            [pscustomobject]@{ TagName = 'v0.99.99'; Name = 'v0.99.99'; Body = 'Detailed notes here.'; AssetName = 'x.zip'; DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.99/x.zip' }
+            [pscustomobject]@{ TagName = 'v0.99.99'; Name = 'v0.99.99'; Body = 'Detailed notes here.'; AssetName = 'x.zip'; DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.99/x.zip'; ExpectedSha256 = ('A' * 64) }
         }
         $script:readHostCallCount = 0
         Mock Read-Host {
@@ -7004,7 +7067,7 @@ Describe "Invoke-StartupUpdateCheck" {
 
     It "returns false without downloading when Y is chosen but the target is read-only" {
         Mock Get-ManagerUpdateRelease {
-            [pscustomobject]@{ TagName = 'v0.99.99'; Name = 'v0.99.99'; Body = 'Notes.'; AssetName = 'x.zip'; DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.99/x.zip' }
+            [pscustomobject]@{ TagName = 'v0.99.99'; Name = 'v0.99.99'; Body = 'Notes.'; AssetName = 'x.zip'; DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.99/x.zip'; ExpectedSha256 = ('A' * 64) }
         }
         Mock Read-Host { "Y" }
         Mock Invoke-WebRequest { throw "Invoke-WebRequest should not be called when the target is read-only" }

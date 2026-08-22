@@ -5233,6 +5233,11 @@ function Get-TpmSha256FromDigestField {
     return $null
 }
 
+function Test-TpmSha256Hex {
+    param([string]$Hash)
+    return (-not [string]::IsNullOrWhiteSpace($Hash) -and $Hash -match '^[0-9a-fA-F]{64}$')
+}
+
 function Test-TpmDownloadedFile {
     param([string]$Path, [Int64]$ExpectedBytes = 0, [string]$ExpectedSha256 = '')
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
@@ -7753,13 +7758,17 @@ function Get-ManagerUpdateRelease {
                 Write-Log "CheckForUpdates: refusing non-release GitHub asset URL: $($asset.browser_download_url)"
                 return $null
             }
+            $expectedSha256 = Get-TpmSha256FromDigestField -Digest $asset.digest
+            $digestStatus = if (Test-TpmSha256Hex -Hash $expectedSha256) { 'Verified' } else { 'MissingOrMalformed' }
             return [pscustomobject]@{
-                TagName     = $release.tag_name
-                Name        = $release.name
-                Body        = $release.body
-                AssetName   = $asset.name
-                DownloadUrl = $asset.browser_download_url
-                SizeBytes   = [int64]$asset.size
+                TagName        = $release.tag_name
+                Name           = $release.name
+                Body           = $release.body
+                AssetName      = $asset.name
+                DownloadUrl    = $asset.browser_download_url
+                SizeBytes      = [int64]$asset.size
+                ExpectedSha256 = $expectedSha256
+                DigestStatus   = $digestStatus
             }
         } catch {
             $status = 0
@@ -7905,6 +7914,14 @@ function Invoke-ManagerUpdateInstall {
         [Parameter(Mandatory)][pscustomobject]$Release
     )
 
+    if (-not (Test-TpmSha256Hex -Hash $Release.ExpectedSha256)) {
+        Write-Host ""
+        Write-Host "  SECURITY: the release asset has no valid SHA-256 digest. No update was downloaded or applied." -ForegroundColor Red
+        Write-Host "  Backup created: No" -ForegroundColor Yellow
+        Write-Log "CheckForUpdates: SECURITY -- refusing update because release asset digest is missing or malformed."
+        return $false
+    }
+
     try {
         Assert-ManagerUpdateTargetWritable -Path $ScriptPath
     } catch {
@@ -7927,7 +7944,7 @@ function Invoke-ManagerUpdateInstall {
 
         Write-Host "  Downloading $($Release.AssetName)..." -ForegroundColor DarkGray
         $downloadedZipPath = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-update-" + [guid]::NewGuid().ToString('N') + '.zip')
-        if (-not (Invoke-TpmDownload -DownloadUrl $Release.DownloadUrl -DestinationPath $downloadedZipPath -ExpectedBytes $Release.SizeBytes -Label 'CheckForUpdates' -Version $Release.TagName)) {
+        if (-not (Invoke-TpmDownload -DownloadUrl $Release.DownloadUrl -DestinationPath $downloadedZipPath -ExpectedBytes $Release.SizeBytes -Label 'CheckForUpdates' -Version $Release.TagName -ExpectedSha256 $Release.ExpectedSha256)) {
             throw "Downloaded update asset is missing, empty, or incomplete: $downloadedZipPath"
         }
 
@@ -8008,6 +8025,12 @@ function Invoke-CheckForUpdates {
         return $false
     }
 
+    if (-not (Test-TpmSha256Hex -Hash $release.ExpectedSha256)) {
+        Write-Host "  SECURITY: the latest release has no valid SHA-256 digest. No update will be offered." -ForegroundColor Red
+        Write-Log "CheckForUpdates: SECURITY -- latest release asset digest is missing or malformed."
+        return $false
+    }
+
     try {
         $latestVersion = ConvertTo-ManagerComparableVersion -VersionText $release.TagName
     } catch {
@@ -8076,6 +8099,11 @@ function Invoke-StartupUpdateCheck {
     $release = Get-ManagerUpdateRelease -MaxAttempts 1 -TimeoutSec 5
     if (-not $release) {
         Write-Log "StartupUpdateCheck: release check failed, found no usable asset, or GitHub was unreachable -- continuing to menu."
+        return $false
+    }
+
+    if (-not (Test-TpmSha256Hex -Hash $release.ExpectedSha256)) {
+        Write-Log "StartupUpdateCheck: SECURITY -- latest release asset digest is missing or malformed; continuing to menu."
         return $false
     }
 
