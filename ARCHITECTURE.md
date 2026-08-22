@@ -11,7 +11,7 @@ documented in that subsystem's own architecture document (e.g.
 here, with a matching entry in `LESSONS_LEARNED.md` -- see `CONSTITUTION.md`,
 "Documenting non-obvious implementation constraints," for when this applies.
 
-Current release state: v1.0 RC7 is the current source candidate (pre-publication; not yet published); v1.0 RC6 is the last published release, and final Version 1.0 remains unpublished.
+Current release state: v1.0 RC7 is the current published release; v1.0 RC6 is the previous published release (historical), and final Version 1.0 remains unpublished.
 
 ---
 

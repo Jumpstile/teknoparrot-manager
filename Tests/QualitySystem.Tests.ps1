@@ -49,24 +49,25 @@ Describe "Quality engineering system metadata" {
 
 Describe "Release Integrity source identity" -Tag 'ReleaseConsistency' {
     # The running source identity and the last published release are tracked
-    # separately so an in-progress release cannot be mistaken for a published
-    # one. RC7 is the current source candidate, while RC6 remains the last
-    # actually published release until a later publication decision.
+    # separately so source identity cannot drift from publication state. RC7 is
+    # the current published release, while RC6 remains historical.
     BeforeAll {
         $script:RepoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
         # What the running script/tooling actually says right now.
         $script:CurrentSourceVersion = 'v1.0 RC7'
         $script:CurrentSourceRcLabel = 'RC7'
-        $script:CurrentSourceState = 'pre-publication'
+        $script:CurrentSourceState = 'published'
         # The last actually-published, tagged GitHub release. Update this
         # (and the "documentation truthful" assertions below) only when a
         # new release is genuinely published/tagged -- never as a
         # substitute for keeping CurrentSourceVersion in sync with
         # $ReleaseCandidateLabel on every version bump.
-        $script:LastPublishedVersion = 'v1.0 RC6'
-        $script:LastPublishedRcLabel = 'RC6'
-        $script:LastPublishedTag     = 'v1.0-RC6'
-        $script:LastPublishedZipName = 'TeknoParrot Manager v1.0 RC6.zip'
+        $script:LastPublishedVersion = 'v1.0 RC7'
+        $script:LastPublishedRcLabel = 'RC7'
+        $script:LastPublishedTag     = 'v1.0-RC7'
+        $script:LastPublishedZipName = 'TeknoParrot Manager v1.0 RC7.zip'
+        $script:PreviousPublishedVersion = 'v1.0 RC6'
+        $script:PreviousPublishedVersionPattern = 'v1\.0[- ]RC6'
     }
 
     It "keeps the production script header, runtime label, banner, and console preview on the current source identity" {
@@ -88,10 +89,11 @@ Describe "Release Integrity source identity" -Tag 'ReleaseConsistency' {
 
         $topReadme | Should -Match ([regex]::Escape($script:LastPublishedVersion))
         $topReadme | Should -Match ([regex]::Escape($script:LastPublishedTag))
-        $topReadme | Should -Match ('(?i)last published release.{0,80}' + [regex]::Escape($script:LastPublishedVersion))
-        $topReadme | Should -Match ([regex]::Escape($script:CurrentSourceVersion) + '.{0,100}(pre-publication|not yet published|unpublished)')
-        $topReadme | Should -Not -Match ([regex]::Escape($script:CurrentSourceVersion) + '.{0,100}(published release|published and validated)')
-        $topReadme | Should -Not -Match 'releases/(?:tag|download)/v1\.0-RC7'
+        $topReadme | Should -Match ('(?i)(?:current|last) published release.{0,80}' + [regex]::Escape($script:LastPublishedVersion))
+        $topReadme | Should -Match ([regex]::Escape($script:CurrentSourceVersion) + '.{0,100}published')
+        $topReadme | Should -Not -Match '(?i)(pre-publication|not yet published|tag/release does not exist)'
+        $topReadme | Should -Match 'releases/(?:tag|download)/v1\.0-RC7'
+        $topReadme | Should -Match ('(?i)(?:previous|historical) published release.{0,80}' + $script:PreviousPublishedVersionPattern)
         $topReadme | Should -Not -Match '\[Download v1\.0 RC5\]'
         $topReadme | Should -Not -Match 'v1\.0 RC1|v1\.0-RC1|v1\.0\.RC1'
     }
@@ -108,14 +110,14 @@ Describe "Release Integrity source identity" -Tag 'ReleaseConsistency' {
     }
 
     It "keeps the wiki changelog staging doc aligned with source and publication state" {
-        # docs\wiki-updates\Changelog.md tracks the live GitHub wiki staging
-        # content. It records the RC7 source candidate without claiming that
-        # candidate has been published, and retains the last published RC6.
+        # docs\wiki-updates\Changelog.md tracks the live GitHub wiki content.
+        # It records the published RC7 release and retains historical RC6.
         $wikiChangelog = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'docs\wiki-updates\Changelog.md') -Raw
         $wikiChangelog | Should -Not -Match 'Unreleased'
         $wikiChangelog | Should -Match ([regex]::Escape($script:CurrentSourceVersion))
-        $wikiChangelog | Should -Match '(?i)(pre-publication|not yet published|unpublished)'
         $wikiChangelog | Should -Match ([regex]::Escape($script:LastPublishedVersion))
+        $wikiChangelog | Should -Match 'releases/tag/v1\.0-RC7'
+        $wikiChangelog | Should -Match ('(?i)(?:previous|historical) published release.{0,80}' + $script:PreviousPublishedVersionPattern)
     }
 
     It "documents Release Integrity Audit as a mandatory public-release gate" {
@@ -197,7 +199,7 @@ Describe "Active release-facing documentation" -Tag 'ReleaseConsistency' {
         )
     }
 
-    It "keeps active release-facing prefixes on the RC7 pre-publication state" {
+    It "keeps active release-facing prefixes on the published RC7 state" {
         foreach ($entry in $script:ActiveReleaseDocs) {
             $path = Join-Path $script:RepoRoot $entry.RelativePath
             $content = Get-Content -LiteralPath $path -Raw
@@ -205,10 +207,10 @@ Describe "Active release-facing documentation" -Tag 'ReleaseConsistency' {
             $active = ($lines | Select-Object -First $entry.PrefixLines) -join ([string][char]10)
 
             $active | Should -Match 'v1\.0[- ]RC7'
-            $active | Should -Match '(?i)(pre-publication|not yet published|unpublished)'
-            $active | Should -Match '(?i)last published[\s\S]{0,80}v1\.0[- ]RC6'
-            $active | Should -Not -Match '(?i)published release candidate.{0,80}RC7'
-            $active | Should -Not -Match 'releases/(?:tag|download)/v1\.0-RC7'
+            $active | Should -Match '(?i)current published release'
+            $active | Should -Match ('(?i)(?:previous|historical) published[\s\S]{0,80}' + $script:PreviousPublishedVersionPattern)
+            $active | Should -Not -Match '(?i)(?:RC7[\s\S]{0,120}(?:pre-publication|not yet published)|RC7 tag/release does not exist)'
+            $active | Should -Match 'releases/(?:tag|download)/v1\.0-RC7'
             $active | Should -Not -Match '(?i)(download|use|install)\s+(?:the\s+)?(?:(?:current|latest)\s+)?(?:release\s+)?(?:v1\.0[- ]?)?RC[0-6]\b'
         }
     }
@@ -238,9 +240,11 @@ Describe "Release-document consistency contract" -Tag 'ReleaseConsistency' {
         $script:ReleaseDocumentContract = [pscustomobject]@{
             CurrentVersionLabel = 'v1.0 RC7'
             CurrentVersionPattern = 'v1\.0[- ]RC7'
-            CurrentSourceStatePattern = '(?i)(?:pre-publication|not yet published|unpublished)'
-            LastPublishedVersionLabel = 'v1.0 RC6'
-            LastPublishedVersionPattern = 'v1\.0[- ]RC6'
+            CurrentSourceStatePattern = '(?i)current\s+published\s+release'
+            LastPublishedVersionLabel = 'v1.0 RC7'
+            LastPublishedVersionPattern = 'v1\.0[- ]RC7'
+            PreviousPublishedVersionLabel = 'v1.0 RC6'
+            PreviousPublishedVersionPattern = 'v1\.0[- ]RC6'
             CurrentReleaseUrlPattern = 'releases/(?:tag|download)/v1\.0-RC7'
         }
 
@@ -268,20 +272,23 @@ Describe "Release-document consistency contract" -Tag 'ReleaseConsistency' {
                     }
 
                     if ($text -notmatch $Contract.CurrentSourceStatePattern) {
-                        [void]$findings.Add("$($document.Path): active text does not state that the current source candidate is pre-publication.")
+                        [void]$findings.Add("$($document.Path): active text does not identify the current published release.")
                     }
 
-                    $publishedCurrentPattern = '(?i)(?:published release candidate|current source candidate.{0,120}\bis published\b|current source candidate.{0,120}published and validated)'
-                    if ($text -match $publishedCurrentPattern) {
-                        [void]$findings.Add("$($document.Path): current source candidate is described as published.")
+                    if ($text -match '(?i)(?:pre-publication|not yet published|tag/release does not exist|intentionally not active)') {
+                        [void]$findings.Add("$($document.Path): active text still describes RC7 as pre-publication.")
                     }
 
-                    if ($text -notmatch ('(?i)(?:last|previous|historical)\s+published[\s\S]{0,80}' + $Contract.LastPublishedVersionPattern)) {
-                        [void]$findings.Add("$($document.Path): active text does not identify the last published release $($Contract.LastPublishedVersionLabel).")
+                    if ($text -notmatch ('(?i)(?:current|last)\s+published[\s\S]{0,80}' + $Contract.LastPublishedVersionPattern)) {
+                        [void]$findings.Add("$($document.Path): active text does not identify the current published release $($Contract.LastPublishedVersionLabel).")
                     }
 
-                    if ($text -match $Contract.CurrentReleaseUrlPattern) {
-                        [void]$findings.Add("$($document.Path): active text contains a pre-publication RC7 tag or release URL.")
+                    if ($text -notmatch ('(?i)(?:previous|historical)\s+published[\s\S]{0,80}' + $Contract.PreviousPublishedVersionPattern)) {
+                        [void]$findings.Add("$($document.Path): active text does not identify previous published release $($Contract.PreviousPublishedVersionLabel).")
+                    }
+
+                    if ($text -notmatch $Contract.CurrentReleaseUrlPattern) {
+                        [void]$findings.Add("$($document.Path): active text does not contain the published RC7 release URL.")
                     }
 
                     foreach ($line in [regex]::Split($text, '\r\n|\n')) {
@@ -318,8 +325,8 @@ Describe "Release-document consistency contract" -Tag 'ReleaseConsistency' {
         }
 
         $script:ReleaseIdentityDocuments = @(
-            [pscustomobject]@{ Path = 'README.md'; Scope = 'ActiveIdentity'; Text = 'Current source candidate: v1.0 RC7 (pre-publication; not yet published). Last published release: v1.0 RC6.' }
-            [pscustomobject]@{ Path = 'QUICKSTART.md'; Scope = 'ActiveIdentity'; Text = 'Current source candidate: v1.0 RC7 (pre-publication; not yet published). Last published release: v1.0 RC6.' }
+            [pscustomobject]@{ Path = 'README.md'; Scope = 'ActiveIdentity'; Text = 'Current published release: v1.0 RC7. Release archive: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7. Previous published release: v1.0 RC6 (historical).' }
+            [pscustomobject]@{ Path = 'QUICKSTART.md'; Scope = 'ActiveIdentity'; Text = 'Current published release: v1.0 RC7. Release archive: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7. Previous published release: v1.0 RC6 (historical).' }
         )
 
     }
@@ -327,7 +334,7 @@ Describe "Release-document consistency contract" -Tag 'ReleaseConsistency' {
     It "fails a fixture where active documents identify different current RCs" {
             $contradictory = @(
             $script:ReleaseIdentityDocuments[0]
-            [pscustomobject]@{ Path = 'QUICKSTART.md'; Scope = 'ActiveIdentity'; Text = 'Current source candidate: v1.0 RC6 (pre-publication; not yet published). Last published release: v1.0 RC6.' }
+            [pscustomobject]@{ Path = 'QUICKSTART.md'; Scope = 'ActiveIdentity'; Text = 'Current published release: v1.0 RC6. Release archive: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC6. Previous published release: v1.0 RC6 (historical).' }
         )
 
         $findings = @(& $script:ReleaseDocumentConsistencyFinder -Documents $contradictory -Contract $script:ReleaseDocumentContract)
@@ -337,8 +344,8 @@ Describe "Release-document consistency contract" -Tag 'ReleaseConsistency' {
 
     It "fails a fixture with superseded RC installation guidance" {
         $stale = @(
-            [pscustomobject]@{ Path = 'README.md'; Scope = 'ActiveIdentity'; Text = 'Current source candidate: v1.0 RC7 (pre-publication; not yet published). Last published release: v1.0 RC6.' }
-            [pscustomobject]@{ Path = 'QUICKSTART.md'; Scope = 'ActiveIdentity'; Text = 'Current source candidate: v1.0 RC7 (pre-publication; not yet published). Last published release: v1.0 RC6. Download v1.0-RC6 here.' }
+            [pscustomobject]@{ Path = 'README.md'; Scope = 'ActiveIdentity'; Text = 'Current published release: v1.0 RC7. Release archive: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7. Previous published release: v1.0 RC6 (historical).' }
+            [pscustomobject]@{ Path = 'QUICKSTART.md'; Scope = 'ActiveIdentity'; Text = 'Current published release: v1.0 RC7. Release archive: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7. Previous published release: v1.0 RC6 (historical). Download v1.0-RC6 here.' }
         )
 
         $findings = @(& $script:ReleaseDocumentConsistencyFinder -Documents $stale -Contract $script:ReleaseDocumentContract)
@@ -346,15 +353,15 @@ Describe "Release-document consistency contract" -Tag 'ReleaseConsistency' {
         ($findings -join "`n") | Should -Match 'superseded RC'
     }
 
-    It "fails a fixture that marks the current source candidate as published" {
+    It "fails a fixture that leaves the current RC7 in pre-publication state" {
         $unpublished = @(
-            [pscustomobject]@{ Path = 'README.md'; Scope = 'ActiveIdentity'; Text = 'Current source candidate: v1.0 RC7 (pre-publication; not yet published). Last published release: v1.0 RC6.' }
-            [pscustomobject]@{ Path = 'QUICKSTART.md'; Scope = 'ActiveIdentity'; Text = 'Current source candidate: v1.0 RC7 is published and validated. Last published release: v1.0 RC6.' }
+            [pscustomobject]@{ Path = 'README.md'; Scope = 'ActiveIdentity'; Text = 'Current published release: v1.0 RC7. Release archive: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7. Previous published release: v1.0 RC6 (historical).' }
+            [pscustomobject]@{ Path = 'QUICKSTART.md'; Scope = 'ActiveIdentity'; Text = 'Current source candidate: v1.0 RC7 (pre-publication; not yet published). Previous published release: v1.0 RC6 (historical).' }
         )
 
         $findings = @(& $script:ReleaseDocumentConsistencyFinder -Documents $unpublished -Contract $script:ReleaseDocumentContract)
         $findings.Count | Should -BeGreaterThan 0
-        ($findings -join "`n") | Should -Match 'current source candidate is described as published'
+        ($findings -join "`n") | Should -Match 'still describes RC7 as pre-publication'
     }
 
     It "fails active BepInEx setup or fresh-install wording" {

@@ -7,11 +7,11 @@
 
 
 -------------------------------------------------------------------------------
-  v1.0 RC7  (pre-publication; not yet published)  -- release-readiness state
+  v1.0 RC7  (2026-08-22)  -- published release candidate
   ----------------------------------------------------------------
-  Source candidate: current runtime and active documentation identity is v1.0
-  RC7, but no RC7 tag, GitHub release, or public download exists yet. v1.0
-  RC6 remains the last published release.
+  Current published release: v1.0 RC7. Release archive:
+  https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7
+  v1.0 RC6 is the previous published release (historical).
 
   Readiness: preserved separate registration, launch-observation, wizard, and
   controls-readiness states; added a read-only action-required controls handoff

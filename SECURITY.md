@@ -4,7 +4,7 @@ This file documents this project's threat model and the sanitization
 invariants that follow from it. It is the canonical reference for "why is
 this input treated as untrusted" questions raised in code comments.
 
-Current release state: v1.0 RC7 is the current source candidate (pre-publication; not yet published); v1.0 RC6 is the last published release, and final Version 1.0 remains unpublished.
+Current release state: v1.0 RC7 is the current published release; v1.0 RC6 is the previous published release (historical), and final Version 1.0 remains unpublished.
 
 ## Threat model: live-fetched and externally-sourced values are untrusted input
 

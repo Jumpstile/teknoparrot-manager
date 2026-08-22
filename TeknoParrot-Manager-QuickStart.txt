@@ -9,10 +9,10 @@
   Unfamiliar term (GamePath, UserProfile, archetype, etc.)? See the
   GLOSSARY section near the top of TeknoParrot-Manager-README.txt.
 
-  RELEASE CANDIDATE -- v1.0 RC7 is the current source candidate
-  (pre-publication; not yet published). Last published release: v1.0 RC6.
-  The RC7 tag/release does not exist yet; use the generic GitHub Releases page
-  for published assets. Final Version 1.0 remains unpublished.
+  CURRENT PUBLISHED RELEASE -- v1.0 RC7. Release archive:
+  https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7
+  Previous published release: v1.0 RC6 (historical). Final Version 1.0
+  remains unpublished.
   Test one game after every run. Profiles are backed up automatically.
 
 

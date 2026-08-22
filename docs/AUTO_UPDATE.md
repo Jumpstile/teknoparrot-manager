@@ -1,10 +1,10 @@
 # Auto-Update System
 
-Status: standalone helper merged; menu integration is part of the v1.0 RC7 source candidate (pre-publication; not yet published); shared hardened download transport documented below.
+Status: standalone helper merged; menu integration is part of the published v1.0 RC7 release; shared hardened download transport documented below.
 
-Current source candidate: v1.0-RC7 (pre-publication; not yet published).
-Last published public release: v1.0-RC6 (previous published release).
-The RC7 tag/release URL is intentionally not active before publication. Final Version 1.0 remains unpublished.
+Current published release: v1.0-RC7.
+Release archive: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7
+Previous published public release: v1.0-RC6 (historical). Final Version 1.0 remains unpublished.
 The v0.99.38 and v1.0-RC3 live-verification references below are historical
 and are not current download instructions. The asset-name pattern is
 version-agnostic; staged RC7 validation reruns the package validator against

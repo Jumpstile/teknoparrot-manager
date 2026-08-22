@@ -1,8 +1,8 @@
 # TeknoParrot Manager
 
 PowerShell 5.1 script for managing TeknoParrot arcade game libraries.
-Current source candidate: v1.0 RC7 (pre-publication; not yet published)
-Release state: v1.0 RC7 is the current source candidate; v1.0 RC6 is the last published release; final Version 1.0 remains unpublished.
+Current published release: v1.0 RC7
+Release state: v1.0 RC7 is the current published release; v1.0 RC6 is the previous published release (historical); final Version 1.0 remains unpublished.
 
 ---
 

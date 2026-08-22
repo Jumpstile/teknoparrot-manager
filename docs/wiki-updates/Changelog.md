@@ -1,17 +1,16 @@
 # Changelog
 
-## v1.0 RC7 (pre-publication; not yet published)
+## v1.0 RC7 (2026-08-22) -- published release candidate
 
-- Source candidate: this staged wiki entry describes v1.0 RC7 before any tag,
-  GitHub release, or public download exists.
+- Publication: v1.0 RC7 is published. Release archive:
+  https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7
 - Readiness: RC7 carries the read-only controls-readiness handoff and
   contract-backed missing-component warnings. When controls are Missing, Not
   verified, Unsupported, or Unknown, ACTION REQUIRED directs the user to open
   TeknoParrot controls configuration and map/test controls before treating the
   game as ready. Registration, launch observation, wizard state, and controls
   readiness remain separate.
-- Publication state: v1.0 RC6 remains the last published release. This staging
-  document is not a publication action.
+- Previous published release: v1.0 RC6 (historical).
 
 ## v1.0 RC6 (2026-08-16) -- onboarding, live dependency acquisition
 
