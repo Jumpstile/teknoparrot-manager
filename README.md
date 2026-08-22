@@ -594,7 +594,7 @@ Your choice is remembered for next time (with the option to change it). Choosing
 
 New games have no box art or metadata yet. In LaunchBox, right-click a newly added game and use **Edit... → Search** to fetch it, the same way you would for any manually-imported game.
 
-If anything looks wrong afterward, use menu option 9 (**Restore backup**) and choose **LaunchBox library backup** to restore the exact files the script changed.
+If anything looks wrong afterward, use menu option 11 (**Restore backup**) and choose **LaunchBox library backup** to restore the exact files the script changed.
 
 **Prefer the manual import wizard instead?** Answer N to the direct-integration question, then Y to the follow-up, to get a reference file (`TeknoParrot-LaunchBox-Import.xml`) and step-by-step wizard instructions — useful if you'd rather not let the script touch LaunchBox's files directly. The wizard command line is `--profile=%romfile%.xml`, and you point it at your `UserProfiles` folder importing the profile `*.xml` files themselves (not the game executables — TeknoParrot launches by profile, so the profile XML is what LaunchBox treats as the "rom").
 
@@ -672,7 +672,7 @@ After every run the script writes `TeknoParrot-Manager-controls.txt` next to its
   SomeNewGame               0/52 bound   no controls
 ```
 
-Each entry shows: control family, how many buttons are bound, status (REFERENCE / propagated / already bound / no controls), which reference game controls came from, and any buttons still set manually.
+Each entry shows: control family, how many buttons are bound, status (REFERENCE / propagated / already bound / no controls), which reference game controls came from, and any buttons still set manually. This file is a propagation inventory, not proof that a game's controls have been verified. The ACTION REQUIRED summary can still report Controls: Not verified, Missing, Unsupported, or Unknown until the required controls are mapped and tested.
 
 The file is overwritten on every run. It's most useful when a game misbehaves days later — you can immediately see whether controls were propagated and from which reference, without re-running the script.
 
@@ -725,10 +725,12 @@ At the end of every run the script prints — and saves to a text file — every
 | **Fix these game paths** | Profiles with a broken path that couldn't be auto-repaired (shared exe, multiple candidates). Open TeknoParrotUI and point each to the correct folder. |
 | **Extract first** | Profiles with a broken path because the game isn't extracted yet. Extract then re-run Repair. |
 | **Set up controls** | Control types with no reference game bound yet. Shows which games are waiting and suggests titles to bind. |
+| **Controls not ready** | Registered games whose catalog-backed controls are **Missing**, **Not verified**, **Unsupported**, or **Unknown**. Registration, a successful launch, and TeknoParrot wizard completion do not verify controls. Open TeknoParrot controls configuration and map/test controls before treating the game as ready. |
 | **Path too long** | Specific games (Raw Thrills titles, Yu-Gi-Oh! Duel Terminal 6) whose install path exceeds a hard-coded engine-specific limit. Shows the exact short folder name to rename to. Checked automatically every run. |
 | **File version mismatch** | Specific games needing an OLDER pinned version of a particular file rather than the latest (BlazBlue-series/`iDmacDrv32.dll`, Tekken Tag Tournament 2/`EBOOT.BIN`). Shows the file name, current/required CRC32, and where to get the right version. Checked automatically every run. |
 | **GPU incompatibility** | Specific registered games confirmed not to work on your detected GPU vendor (AMD or Intel). Informational only — no fix exists. Checked automatically every run; silently skipped if the vendor can't be auto-detected. |
 | **Firmware not installed** | Registered games whose emulator (currently pcsx2x6 only) needs firmware/BIOS files TeknoParrot itself doesn't provide. Shows the exact files and folder needed. TPM never downloads, links, or redistributes these — existence check only. Checked automatically every run when a pcsx2x6-based game is registered. |
+| **Emulator component not found** | A contract-backed required emulator component is missing at its expected path. Shows the contract/detector evidence and affected profiles. Use the normal TeknoParrot installation/update process; TPM does not diagnose why it is missing or repair, download, reinstall, or modify TeknoParrot. |
 | **Setup notes** | Any registered game with special setup notes in the community compatibility database (eggmansworld.github.io/TeknoParrot) — workarounds, known quirks, etc. Shows the expected executable name and the full notes text, word-wrapped and separated game-by-game. Informational only; skipped silently if the live fetch fails. |
 
 ---

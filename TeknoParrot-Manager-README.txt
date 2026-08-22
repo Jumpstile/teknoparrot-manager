@@ -213,8 +213,9 @@
   - Controls status file. After every run, writes a persistent
     TeknoParrot-Manager-controls.txt listing every registered game, its
     control family, whether controls were propagated and from which reference
-    game, and how many buttons are still set manually. Useful weeks later
-    when a game aims wrong and you have forgotten what state it was left in.
+    game, and how many buttons are still set manually. This is a propagation
+    inventory, not proof that controls have been verified; the ACTION REQUIRED
+    summary remains authoritative for the separate controls-readiness state.
 
   - Thumbnail download. After registration, optionally downloads game icons
     from the TeknoParrotUIThumbnails GitHub repository directly into
@@ -2035,7 +2036,8 @@
 -------------------------------------------------------------------------------
 
   At the end of every run, the script prints an ACTION REQUIRED section
-  listing everything that needs your attention. It has up to nine parts:
+  listing everything that needs your attention. It has up to twelve parts;
+  sections with no items are omitted:
 
     Not in TeknoParrot        Game folders whose executables did not match
                               any TeknoParrot profile. Informational -- no
@@ -2069,6 +2071,14 @@
                               and suggests specific titles to bind in
                               TeknoParrotUI for each type.
 
+    Controls not ready        Registered games whose catalog-backed controls
+                               are Missing, Not verified, Unsupported, or
+                               Unknown. Registration, a successful launch, and
+                               TeknoParrot wizard completion do not verify
+                               controls. Open TeknoParrot controls
+                               configuration and map/test controls before
+                               treating the game as ready.
+
     Path too long             Specific games (Raw Thrills titles, Yu-Gi-Oh!
                               Duel Terminal 6) whose install path exceeds a
                               hard-coded engine-specific length limit and
@@ -2091,12 +2101,20 @@
                               time on something that was never going to work.
 
     Firmware not installed    Registered games whose emulator (currently
-                              pcsx2x6 only) needs firmware/BIOS files
-                              TeknoParrot itself doesn't provide. Shows the
-                              exact files needed and the folder to place
-                              them in. TeknoParrot Manager never downloads,
-                              links, or redistributes these files -- this
-                              is an existence check only.
+                               pcsx2x6 only) needs firmware/BIOS files
+                               TeknoParrot itself doesn't provide. Shows the
+                               exact files needed and the folder to place
+                               them in. TeknoParrot Manager never downloads,
+                               links, or redistributes these files -- this
+                               is an existence check only.
+
+    Emulator component not    A contract-backed required emulator component
+    found                      is missing at its expected path. Shows the
+                               contract/detector evidence and affected
+                               profiles. Use the normal TeknoParrot
+                               installation/update process; TPM does not
+                               diagnose why it is missing or repair, download,
+                               reinstall, or modify TeknoParrot.
 
     Setup notes               Any currently registered game that has special
                               setup notes in the community compatibility
@@ -2108,8 +2126,9 @@
                               separated game-by-game so long entries stay
                               readable. Informational only.
 
-  These last five checks run automatically on every AutoSync/Register
-  run -- no separate mode needed. The GPU check silently skips if your
+  These compatibility, firmware, emulator-component, controls-readiness,
+  and setup-notes checks run automatically on every AutoSync/Register run --
+  no separate mode needed. The GPU check silently skips if your
   GPU vendor cannot be auto-detected -- it never prompts mid-run. The
   setup notes check needs a live fetch of that site's data and is skipped
   (with nothing shown) if the fetch fails -- it never blocks the rest of

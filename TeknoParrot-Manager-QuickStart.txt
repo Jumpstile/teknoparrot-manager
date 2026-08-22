@@ -622,10 +622,25 @@
                             Shows which games are waiting and suggests titles
                             to bind in TeknoParrotUI for each type.
 
+    Controls not ready      Registered games whose catalog-backed controls are
+                            Missing, Not verified, Unsupported, or Unknown.
+                            Registration, a successful launch, and TeknoParrot
+                            wizard completion do not verify controls. Open
+                            TeknoParrot controls configuration and map/test
+                            controls before treating the game as ready.
+
     Setup notes             Registered games with special setup notes in the
                             community compatibility database (eggmansworld.
                             github.io/TeknoParrot). Shows the expected
                             executable name and the full notes text.
+
+    Emulator component      A contract-backed required emulator component is
+    not found               missing at its expected path. Shows the contract
+                            and detector evidence plus affected profiles. Use
+                            the normal TeknoParrot installation/update
+                            process; TPM does not diagnose why it is missing
+                            or repair, download, reinstall, or modify
+                            TeknoParrot.
 
   By default the summary is saved to TeknoParrot-Manager-ActionItems.txt next
   to the script -- a Save dialog lets you pick a different location instead,
@@ -658,7 +673,9 @@
     unsupported vs just failing to register.
   - After every run, TeknoParrot-Manager-controls.txt is written next to
     the script: every game, its family, propagation source, bound count,
-    and any buttons still manual. Open it when a game misbehaves weeks later.
+    and any buttons still manual. It is a propagation inventory, not proof
+    that controls have been verified; review ACTION REQUIRED and map/test
+    required controls before treating a game as ready.
   - On first run, the script auto-detects TeknoParrot's install path before
     prompting -- scans LaunchBox folders, drive roots, and Program Files.
   - After registering, the script offers to download missing game thumbnails

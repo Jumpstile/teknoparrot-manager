@@ -245,7 +245,7 @@ writes profiles, verify the following properties are still intact.
   there (preferably a tester report tied to a GitHub issue).
 
 ### Rollback / restore
-- [ ] The Restore Backup flow (mode 9) covers every new file type this
+- [ ] The Restore Backup flow (mode 11) covers every new file type this
   release touches.
 - [ ] A LaunchBox or Postgres backup taken under the previous release can
   still be restored by this release without error.
