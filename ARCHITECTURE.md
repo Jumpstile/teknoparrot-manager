@@ -378,22 +378,34 @@ files at any point. Detection is skipped entirely (not an error) when `-TeknoPar
 isn't supplied, or when the emulator's own folder isn't present yet -- nothing to check.
 Read-only, informational only; never blocks or gates registration.
 
-**Missing pcsx2x6 component (issue #254).** When a registered profile uses
-`Pcsx2x6` and `-TeknoParrotRoot` resolves an existing `pcsx2x6` directory,
-`Get-CompatibilityWarnings` delegates component presence to the existing
-`Get-Pcsx2CrosshairPrerequisiteState` ECVF path. That path reads the
-`pcsx2x6` contract's `env-init` `PresenceDetector` through
-`Test-TPMEmulatorPresentV1`; the warning reports the detector's declared
-relative path as an `ExeMissing` entry when the directory exists but that
-component is absent. A missing root or emulator directory remains
-unclassified, and an unavailable/ambiguous ECVF contract produces no missing
-component claim. The console and saved ACTION REQUIRED summary identify the
-expected path and affected registered profiles, instruct the operator to
-verify or restore the component through the normal TeknoParrot installation or
-update process, and state that TPM did not determine why the file is missing.
-This is a read-only, informational warning: it does not claim antivirus
-causality, block registration, download or repair anything, or write to the
-TeknoParrot root, profiles, configuration, ParrotData, or game folders.
+**Contract-backed missing emulator components (issues #254/#268).**
+`Get-CompatibilityWarnings` now delegates required-component presence to the
+generic `Get-ContractBackedMissingComponents` path. For each registered
+`EmulatorType`, that helper loads the ECVF registry through
+`TPMCertification.Contracts.psm1`, requires exactly one matching contract, and
+examines only `EnvironmentCapabilities[].PresenceDetector` entries whose
+method is `PathExists` and whose source is a safe relative path. The existing
+pcsx2x6 directory resolver and `pcsx2-qtx64.exe` behavior remain unchanged;
+other contract-backed families use a directory matching the contract ID.
+
+A missing-component entry is produced only when the matching emulator folder
+already exists and the shared `Test-TPMEmulatorPresentV1` detector reports the
+contract-declared path absent. Each entry carries the contract ID/status,
+evidence confidence, capability ID, detector method/source, expected path, and
+the grouped affected registered profiles. The console and saved ACTION
+REQUIRED summaries tell the operator to verify or restore the component through
+the normal TeknoParrot installation/update process. `ExeMissing` is retained
+as the compatibility result name for #254 callers; `ComponentMissing` is its
+general semantic alias.
+
+The current repository contract registry contains only `pcsx2x6`, so that is
+the only real emulator family currently eligible for this warning. An
+unmatched, missing, invalid, or ambiguous contract, an unsupported detector
+method, or an absent emulator folder remains Unknown/unclassified and produces
+no missing-component claim. This is a read-only, informational warning: it
+does not claim antivirus or quarantine causality, block registration, download,
+repair, re-extract, reinstall, or write to the TeknoParrot root, profiles,
+configuration, ParrotData, emulator folders, or game folders.
 
 **Pcsx2x6 first-run/crosshair prerequisite automation (issue #173).** Before this round,
 `Invoke-CrosshairSetup`'s Pcsx2x6 branch silently skipped ini handling whenever
