@@ -7165,6 +7165,372 @@ function Get-BepInExInstalledArch {
     return Get-ExeArchitecture -ExePath $whPath
 }
 
+# Reads a local PE file version without making any network request. ReShade
+# and BepInEx inventory deliberately use the file's own version metadata only;
+# they do not infer a version from a filename or silently contact an update
+# service from validation/report mode.
+function Get-TpmLocalFileVersion {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $null
+    }
+    try {
+        $versionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($Path)
+        if ([string]::IsNullOrWhiteSpace($versionInfo.FileVersion)) { return $null }
+        return $versionInfo.FileVersion.Trim()
+    } catch {
+        return $null
+    }
+}
+
+# Finds an update warning already left by an existing ReShade runtime log.
+# ReShade normally performs its own online tag check when the overlay opens;
+# validation/report mode stays offline, but an existing log warning is useful
+# evidence and should be surfaced before the next launch when present.
+function Get-ReShadeRuntimeUpdateWarning {
+    param([string[]]$Directories)
+
+    $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($directory in @($Directories)) {
+        if ([string]::IsNullOrWhiteSpace($directory) -or -not (Test-Path -LiteralPath $directory -PathType Container)) { continue }
+        foreach ($logFile in @(Get-ChildItem -LiteralPath $directory -Filter 'ReShade*.log' -File -ErrorAction SilentlyContinue)) {
+            if (-not $seen.Add($logFile.FullName)) { continue }
+            try {
+                $content = Get-Content -LiteralPath $logFile.FullName -Raw -ErrorAction Stop
+                if ($content -match '(?i)(?:an update is available|build of ReShade is outdated|newer version.*ReShade|ReShade.*newer version)') {
+                    $warningVersion = $null
+                    if ($content -match '(?i)(?:new version|latest version|version)\s*\(?v?(\d+\.\d+\.\d+(?:\.\d+)?)') {
+                        $warningVersion = $Matches[1]
+                    }
+                    return [pscustomobject]@{
+                        Detected = $true
+                        Version  = $warningVersion
+                        LogPath  = $logFile.FullName
+                    }
+                }
+            } catch {}
+        }
+    }
+    return [pscustomobject]@{ Detected = $false; Version = $null; LogPath = $null }
+}
+
+# Read-only inventory for one existing ReShade installation. The manager
+# source DLL is only a local comparison point; it is never treated as proof
+# of the current upstream release. A prior ReShade log warning is stronger
+# evidence and is surfaced explicitly for Action Required.
+function Get-ReShadeRuntimeInventory {
+    param(
+        [string]$ProfileCode,
+        [System.Xml.XmlDocument]$Doc,
+        [string]$GamePath,
+        [string]$ExeDir,
+        [string]$ManagerBaseDirectory = ''
+    )
+
+    $targetInfo = $null
+    try { $targetInfo = Get-ReShadeTargetInfo -Doc $Doc -GamePath $GamePath -ExeDir $ExeDir } catch {}
+    if ($null -eq $targetInfo) {
+        return [pscustomobject]@{
+            Code = $ProfileCode; State = 'Unknown'; ActionRequired = $true; Findings = @('Could not determine the ReShade target path.')
+            RuntimePath = $null; InstalledVersion = $null; ReferenceVersion = $null; ReferencePath = $null
+            UpdateWarningObserved = $false; UpdateWarningVersion = $null; UpdateWarningLog = $null; DllName = $null; TargetDir = $null
+        }
+    }
+
+    $runtimePath = Join-Path $targetInfo.TargetDir $targetInfo.DllName
+    $baseResult = [ordered]@{
+        Code = $ProfileCode
+        State = 'NotInstalled'
+        ActionRequired = $false
+        Findings = @()
+        RuntimePath = $runtimePath
+        InstalledVersion = $null
+        ReferenceVersion = $null
+        ReferencePath = $null
+        UpdateWarningObserved = $false
+        UpdateWarningVersion = $null
+        UpdateWarningLog = $null
+        DllName = $targetInfo.DllName
+        TargetDir = $targetInfo.TargetDir
+        ApiDetected = $targetInfo.ApiDetected
+    }
+    if (-not (Test-Path -LiteralPath $runtimePath -PathType Leaf)) {
+        return [pscustomobject]$baseResult
+    }
+
+    $baseResult.State = 'Installed'
+    $runtimeItem = Get-Item -LiteralPath $runtimePath -ErrorAction SilentlyContinue
+    if ($null -eq $runtimeItem -or $runtimeItem.Length -le 0) {
+        $baseResult.State = 'Malformed'
+        $baseResult.ActionRequired = $true
+        $baseResult.Findings += 'ReShade runtime file is missing or empty.'
+    }
+    $installedVersion = Get-TpmLocalFileVersion -Path $runtimePath
+    $baseResult.InstalledVersion = $installedVersion
+    $installedParsed = $null
+    if ([string]::IsNullOrWhiteSpace($installedVersion) -or
+        -not [version]::TryParse($installedVersion, [ref]$installedParsed)) {
+        $baseResult.State = 'UnknownVersion'
+        $baseResult.ActionRequired = $true
+        $baseResult.Findings += 'ReShade runtime version could not be read from file metadata.'
+    }
+
+    $warning = Get-ReShadeRuntimeUpdateWarning -Directories @($targetInfo.TargetDir, $ExeDir)
+    if ($warning.Detected) {
+        $baseResult.State = 'UpdateWarningObserved'
+        $baseResult.ActionRequired = $true
+        $baseResult.UpdateWarningObserved = $true
+        $baseResult.UpdateWarningVersion = $warning.Version
+        $baseResult.UpdateWarningLog = $warning.LogPath
+        $baseResult.Findings += 'Existing ReShade log reports that an update is available.'
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($ManagerBaseDirectory) -and $installedParsed) {
+        $arch = Get-ExeArchitecture -ExePath $GamePath
+        $referenceName = if ($arch -eq 'x86') { 'ReShade32.dll' } else { 'ReShade64.dll' }
+        $referencePath = Join-Path (Join-Path $ManagerBaseDirectory 'ReShade') $referenceName
+        $referenceVersion = Get-TpmLocalFileVersion -Path $referencePath
+        $referenceParsed = $null
+        if ($referenceVersion -and [version]::TryParse($referenceVersion, [ref]$referenceParsed)) {
+            $baseResult.ReferencePath = $referencePath
+            $baseResult.ReferenceVersion = $referenceVersion
+            if ($referenceParsed -gt $installedParsed) {
+                $baseResult.State = 'OutdatedRelativeToManagerSource'
+                $baseResult.ActionRequired = $true
+                $baseResult.Findings += "Installed ReShade $installedVersion is older than local manager source $referenceVersion."
+            }
+        }
+    }
+
+    return [pscustomobject]$baseResult
+}
+
+# A local cache can prove that TPM already has a newer BepInEx archive, but it
+# is not claimed to be the current upstream release. Validation uses this
+# comparison only when the cached archive has a safe, versioned filename and
+# non-zero length; otherwise the latest-version comparison remains Unknown.
+function Get-BepInExCachedLatestVersion {
+    param([string]$CacheDir)
+
+    $bestVersion = $null
+    $bestPath = $null
+    if ([string]::IsNullOrWhiteSpace($CacheDir) -or -not (Test-Path -LiteralPath $CacheDir -PathType Container)) {
+        return [pscustomobject]@{ Version = $null; Path = $null }
+    }
+    foreach ($archive in @(Get-ChildItem -LiteralPath $CacheDir -Filter 'BepInEx_win_x64_*.zip' -File -ErrorAction SilentlyContinue)) {
+        if ($archive.Length -le 0 -or $archive.Name -notmatch '^BepInEx_win_x64_(\d+(?:\.\d+){1,3})\.zip$') { continue }
+        $parsed = $null
+        if (-not [version]::TryParse($Matches[1], [ref]$parsed)) { continue }
+        if ($null -eq $bestVersion -or $parsed -gt $bestVersion) {
+            $bestVersion = $parsed
+            $bestPath = $archive.FullName
+        }
+    }
+    return [pscustomobject]@{
+        Version = if ($bestVersion) { $bestVersion.ToString() } else { $null }
+        Path = $bestPath
+    }
+}
+
+# Read-only inventory for one existing BepInEx installation. It distinguishes
+# a healthy x64 install, a deliberately unmanaged x86 install, an unknown
+# architecture, and partial/malformed files. No update endpoint is queried.
+function Get-BepInExRuntimeInventory {
+    param(
+        [string]$ProfileCode,
+        [string]$ExeDir,
+        [string]$CacheDir = ''
+    )
+
+    $bepRoot = Join-Path $ExeDir 'BepInEx'
+    $coreDll = Join-Path $bepRoot 'core\BepInEx.dll'
+    $doorstop = Join-Path $ExeDir 'winhttp.dll'
+    $doorstopConfig = Join-Path $ExeDir 'doorstop_config.ini'
+    $doorstopVersion = Join-Path $ExeDir '.doorstop_version'
+    $changelog = Join-Path $ExeDir 'changelog.txt'
+    $anyMarker = (Test-Path -LiteralPath $bepRoot) -or (Test-Path -LiteralPath $doorstop) -or
+                 (Test-Path -LiteralPath $doorstopConfig) -or (Test-Path -LiteralPath $doorstopVersion)
+    $result = [ordered]@{
+        Code = $ProfileCode
+        State = 'NotInstalled'
+        ActionRequired = $false
+        Findings = @()
+        Root = $bepRoot
+        InstalledVersion = $null
+        Architecture = $null
+        CachedLatestVersion = $null
+        CachedArchivePath = $null
+        Files = [ordered]@{
+            CoreDll = (Test-Path -LiteralPath $coreDll -PathType Leaf)
+            Doorstop = (Test-Path -LiteralPath $doorstop -PathType Leaf)
+            DoorstopConfig = (Test-Path -LiteralPath $doorstopConfig -PathType Leaf)
+            DoorstopVersion = (Test-Path -LiteralPath $doorstopVersion -PathType Leaf)
+            Changelog = (Test-Path -LiteralPath $changelog -PathType Leaf)
+        }
+    }
+    if (-not $anyMarker) { return [pscustomobject]$result }
+
+    $result.State = 'Installed'
+    $installedVersion = Get-BepInExInstalledVersion -ExeDir $ExeDir
+    $result.InstalledVersion = $installedVersion
+    $parsedInstalled = $null
+    if ([string]::IsNullOrWhiteSpace($installedVersion) -or
+        -not [version]::TryParse($installedVersion, [ref]$parsedInstalled)) {
+        $result.State = 'Malformed'
+        $result.ActionRequired = $true
+        $result.Findings += 'BepInEx version could not be read from BepInEx.dll metadata.'
+    }
+    if (-not $result.Files.CoreDll) {
+        $result.State = 'Partial'
+        $result.ActionRequired = $true
+        $result.Findings += 'BepInEx core DLL is missing.'
+    }
+    if (-not $result.Files.Doorstop) {
+        $result.State = 'Partial'
+        $result.ActionRequired = $true
+        $result.Findings += 'BepInEx native doorstop loader (winhttp.dll) is missing.'
+    }
+
+    if ($result.Files.Doorstop) {
+        $result.Architecture = Get-BepInExInstalledArch -ExeDir $ExeDir
+        if ($result.Architecture -eq 'x86') {
+            $result.State = 'UnsupportedArchitecture'
+            $result.ActionRequired = $true
+            $result.Findings += 'BepInEx x86 install is present; TPM only manages the stable x64 line.'
+        } elseif ($result.Architecture -ne 'x64') {
+            $result.State = 'UnknownArchitecture'
+            $result.ActionRequired = $true
+            $result.Findings += 'BepInEx loader architecture could not be verified.'
+        }
+    }
+
+    $cached = Get-BepInExCachedLatestVersion -CacheDir $CacheDir
+    $result.CachedLatestVersion = $cached.Version
+    $result.CachedArchivePath = $cached.Path
+    $parsedCached = $null
+    if ($parsedInstalled -and $cached.Version -and [version]::TryParse($cached.Version, [ref]$parsedCached) -and
+        $parsedCached -gt $parsedInstalled -and $result.Architecture -eq 'x64') {
+        $result.State = 'OutdatedRelativeToLocalCache'
+        $result.ActionRequired = $true
+        $result.Findings += "Installed BepInEx $installedVersion is older than local cached release $($cached.Version)."
+    }
+
+    return [pscustomobject]$result
+}
+
+# Promotes only the BepInEx files that this feature explicitly owns. The ZIP
+# is extracted into isolated staging first; the existing install is copied to
+# a user-visible backup before promotion; and any promotion failure removes
+# the changed owned items and restores that backup. Extra user plugins inside
+# BepInEx are therefore preserved on success and restored on rollback.
+function Invoke-BepInExTransactionalInstall {
+    param(
+        [string]$ZipPath,
+        [string]$ExeDir,
+        [string]$Code,
+        [string]$ExpectedVersion = ''
+    )
+
+    $ownedItems = @('BepInEx', 'doorstop_config.ini', 'winhttp.dll', '.doorstop_version', 'changelog.txt')
+    $stagingDir = New-TpmStagingDirectory -Label ('BepInEx-' + $Code)
+    $timestamp = (Get-Date).ToString('yyyy-MM-dd_HH-mm-ss')
+    $backupPath = Join-Path $ExeDir ('BepInEx_Backup_' + $timestamp)
+    $suffix = 1
+    while (Test-Path -LiteralPath $backupPath) {
+        $backupPath = Join-Path $ExeDir ('BepInEx_Backup_{0}_{1}' -f $timestamp, $suffix)
+        $suffix++
+    }
+    $backupCreated = $false
+    $promotedItems = New-Object System.Collections.Generic.List[string]
+    $rollbackFailure = $null
+
+    try {
+        Expand-ZipFileSafe -ZipPath $ZipPath -DestDir $stagingDir -GameName $Code
+        $stageCore = Join-Path $stagingDir 'BepInEx\core\BepInEx.dll'
+        $stageDoorstop = Join-Path $stagingDir 'winhttp.dll'
+        if (-not (Test-Path -LiteralPath $stageCore -PathType Leaf) -or
+            -not (Test-Path -LiteralPath $stageDoorstop -PathType Leaf)) {
+            throw 'BepInEx archive did not contain the expected x64 core DLL and native doorstop loader.'
+        }
+
+        [void][System.IO.Directory]::CreateDirectory($backupPath)
+        foreach ($item in $ownedItems) {
+            $source = Join-Path $ExeDir $item
+            if (Test-Path -LiteralPath $source) {
+                Copy-Item -LiteralPath $source -Destination (Join-Path $backupPath $item) -Recurse -Force -ErrorAction Stop
+            }
+        }
+        $backupCreated = $true
+
+        foreach ($item in $ownedItems) {
+            $stagePath = Join-Path $stagingDir $item
+            if (-not (Test-Path -LiteralPath $stagePath)) { continue }
+            $destPath = Join-Path $ExeDir $item
+            [void]$promotedItems.Add($item)
+            if ($item -eq 'BepInEx') {
+                [void][System.IO.Directory]::CreateDirectory($destPath)
+                foreach ($entry in @(Get-ChildItem -LiteralPath $stagePath -File -Recurse -Force -ErrorAction Stop)) {
+                    $relative = $entry.FullName.Substring($stagePath.Length).TrimStart('\')
+                    $destinationFile = Join-Path $destPath $relative
+                    [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($destinationFile))
+                    Copy-Item -LiteralPath $entry.FullName -Destination $destinationFile -Force -ErrorAction Stop
+                }
+            } else {
+                Copy-Item -LiteralPath $stagePath -Destination $destPath -Force -ErrorAction Stop
+            }
+        }
+
+        $installedAfter = Get-BepInExInstalledVersion -ExeDir $ExeDir
+        if ([string]::IsNullOrWhiteSpace($installedAfter)) {
+            throw 'BepInEx promotion completed without a readable BepInEx.dll version.'
+        }
+        if ($ExpectedVersion) {
+            $expectedParsed = $null; $installedParsed = $null
+            if ([version]::TryParse($ExpectedVersion, [ref]$expectedParsed) -and
+                [version]::TryParse($installedAfter, [ref]$installedParsed) -and
+                $installedParsed -lt $expectedParsed) {
+                throw "BepInEx promotion produced version $installedAfter, expected $ExpectedVersion."
+            }
+        }
+        return [pscustomobject]@{ BackupPath = $backupPath; InstalledVersion = $installedAfter }
+    } catch {
+        $promotionError = $_
+        if ($backupCreated) {
+            try {
+                foreach ($item in $promotedItems) {
+                    $destPath = Join-Path $ExeDir $item
+                    if (Test-Path -LiteralPath $destPath) {
+                        Remove-Item -LiteralPath $destPath -Recurse -Force -ErrorAction Stop
+                    }
+                    $backupItem = Join-Path $backupPath $item
+                    if (Test-Path -LiteralPath $backupItem) {
+                        if ($item -eq 'BepInEx') {
+                            [void][System.IO.Directory]::CreateDirectory($destPath)
+                            foreach ($entry in @(Get-ChildItem -LiteralPath $backupItem -Force -ErrorAction Stop)) {
+                                Copy-Item -LiteralPath $entry.FullName -Destination (Join-Path $destPath $entry.Name) -Recurse -Force -ErrorAction Stop
+                            }
+                        } else {
+                            Copy-Item -LiteralPath $backupItem -Destination $destPath -Force -ErrorAction Stop
+                        }
+                    }
+                }
+            } catch {
+                $rollbackFailure = $_.Exception.Message
+            }
+        }
+        if ($rollbackFailure) {
+            throw "BepInEx update failed and rollback is incomplete; backup remains at '$backupPath'. Original error: $promotionError Rollback error: $rollbackFailure"
+        }
+        throw
+    } finally {
+        if (Test-Path -LiteralPath $stagingDir) {
+            try { Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction Stop } catch {
+                Write-Log "BepInEx transaction: staging cleanup failed at '$stagingDir' -- $_"
+            }
+        }
+    }
+}
+
 # Walks every registered profile with an existing BepInEx install, checks
 # each against the latest stable x64 release, and offers a single batched
 # update for everything outdated. Never touches a game without BepInEx
@@ -7178,6 +7544,11 @@ function Invoke-BepInExUpdateCheck {
     if (-not $latest) {
         Write-Host "  Could not reach GitHub to check the latest BepInEx version -- try again later." -ForegroundColor Red
         Write-Log "BepInEx update check: aborted -- release query failed."
+        return
+    }
+    if ([string]::IsNullOrWhiteSpace($latest.ExpectedSha256)) {
+        Write-Host "  The selected BepInEx release has no published SHA-256 digest -- no update will be applied." -ForegroundColor Yellow
+        Write-Log "BepInEx update check: SECURITY -- release asset has no published SHA-256 digest; refusing to apply."
         return
     }
     Write-Host ("  Latest stable: {0}" -f $latest.Version) -ForegroundColor DarkGray
@@ -7272,16 +7643,9 @@ function Invoke-BepInExUpdateCheck {
     $updated = 0; $updateErrors = 0
     foreach ($o in $outdated) {
         try {
-            $timestamp  = (Get-Date).ToString("yyyy-MM-dd_HH-mm-ss")
-            $backupPath = Join-Path $o.ExeDir ("BepInEx_Backup_" + $timestamp)
-            [void][System.IO.Directory]::CreateDirectory($backupPath)
-            foreach ($item in @('BepInEx', 'doorstop_config.ini', 'winhttp.dll', '.doorstop_version', 'changelog.txt')) {
-                $srcItem = Join-Path $o.ExeDir $item
-                if (Test-Path -LiteralPath $srcItem) {
-                    Copy-Item -LiteralPath $srcItem -Destination $backupPath -Recurse -Force -ErrorAction Stop
-                }
-            }
-            Expand-ZipFileSafe -ZipPath $zipPath -DestDir $o.ExeDir -GameName $o.Code
+            $transaction = Invoke-BepInExTransactionalInstall -ZipPath $zipPath -ExeDir $o.ExeDir `
+                -Code $o.Code -ExpectedVersion $latest.Version
+            $backupPath = $transaction.BackupPath
             Write-Host ("    OK    {0}  ({1} -> {2})" -f $o.Code, $o.Installed, $latest.Version) -ForegroundColor Green
             Write-Log "BepInEx: updated $($o.Code) from $($o.Installed) to $($latest.Version) (backup: $backupPath)"
             $updated++
@@ -12600,6 +12964,43 @@ function Invoke-ValidationReport {
             })
         }
     }
+    $reShadeInventory = New-Object System.Collections.ArrayList
+    $bepInExInventory = New-Object System.Collections.ArrayList
+    $bepInExCacheDir = Join-Path $base 'BepInExCache'
+    foreach ($validProfile in @($profileHealth.Valid)) {
+        try {
+            $profileDoc = Read-Xml $validProfile.Path
+            if ($null -eq $profileDoc -or $null -eq $profileDoc.GameProfile) { continue }
+            $gamePathNode = $profileDoc.GameProfile.SelectSingleNode('GamePath')
+            if ($null -eq $gamePathNode -or [string]::IsNullOrWhiteSpace($gamePathNode.InnerText)) { continue }
+            $gamePath = $gamePathNode.InnerText.Trim()
+            $exeDir = [System.IO.Path]::GetDirectoryName($gamePath)
+            if ([string]::IsNullOrWhiteSpace($exeDir) -or -not (Test-Path -LiteralPath $exeDir -PathType Container)) { continue }
+
+            $reShadeState = Get-ReShadeRuntimeInventory -ProfileCode $validProfile.Code -Doc $profileDoc `
+                -GamePath $gamePath -ExeDir $exeDir -ManagerBaseDirectory $base
+            [void]$reShadeInventory.Add($reShadeState)
+            if ($reShadeState.ActionRequired) {
+                [void]$actions.Add([pscustomobject]@{
+                    Category = 'ReShadeRuntime'; Code = $validProfile.Code; Status = $reShadeState.State
+                    InstalledVersion = $reShadeState.InstalledVersion; ReferenceVersion = $reShadeState.ReferenceVersion
+                    Detail = ($reShadeState.Findings -join '; ')
+                })
+            }
+
+            $bepState = Get-BepInExRuntimeInventory -ProfileCode $validProfile.Code -ExeDir $exeDir -CacheDir $bepInExCacheDir
+            [void]$bepInExInventory.Add($bepState)
+            if ($bepState.ActionRequired) {
+                [void]$actions.Add([pscustomobject]@{
+                    Category = 'BepInExRuntime'; Code = $validProfile.Code; Status = $bepState.State
+                    InstalledVersion = $bepState.InstalledVersion; Architecture = $bepState.Architecture
+                    CachedLatestVersion = $bepState.CachedLatestVersion; Detail = ($bepState.Findings -join '; ')
+                })
+            }
+        } catch {
+            [void]$warnings.Add("Runtime inventory failed for $($validProfile.Code): $($_.Exception.Message)")
+        }
+    }
     foreach ($healthProfile in @($profileHealth.Broken)) {
         [void]$actions.Add([pscustomobject]@{
             Category = 'Library'; Code = $healthProfile.Code; Status = 'Broken'; Detail = $healthProfile.Reason
@@ -12651,6 +13052,11 @@ function Invoke-ValidationReport {
             GameProfiles = [ordered]@{ Exists = ($gameProfilesDir -and (Test-Path -LiteralPath $gameProfilesDir -PathType Container)); FileCount = @(if ($gameProfilesDir) { Get-ChildItem -LiteralPath $gameProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue }).Count }
             UserProfiles = [ordered]@{ Exists = ($userProfilesDir -and (Test-Path -LiteralPath $userProfilesDir -PathType Container)); FileCount = $profileHealth.Total }
         }
+        RuntimeInventory = [ordered]@{
+            NetworkComparison = 'Not requested'
+            ReShade = @($reShadeInventory)
+            BepInEx = @($bepInExInventory)
+        }
         Wizard = $wizardState
         LibraryHealth = $profileHealth
         ControlsReadiness = [ordered]@{
@@ -12687,6 +13093,8 @@ function Invoke-ValidationReport {
     [void]$humanLines.Add(('Games install folder: {0}' -f $(if ($resolvedGames) { $resolvedGames } else { 'not resolved' })))
     [void]$humanLines.Add(('Profiles            : {0} total; {1} valid; {2} broken; {3} empty' -f $profileHealth.Total, @($profileHealth.Valid).Count, @($profileHealth.Broken).Count, @($profileHealth.Empty).Count))
     [void]$humanLines.Add(('Controls action items: {0}' -f @($controlReports).Count))
+    [void]$humanLines.Add(('ReShade runtimes    : {0} inspected; {1} action item(s)' -f @($reShadeInventory).Count, (@($actions | Where-Object { $_.Category -eq 'ReShadeRuntime' }).Count)))
+    [void]$humanLines.Add(('BepInEx runtimes    : {0} inspected; {1} action item(s)' -f @($bepInExInventory).Count, (@($actions | Where-Object { $_.Category -eq 'BepInExRuntime' }).Count)))
     [void]$humanLines.Add(('Compatibility items  : {0}' -f (@($actions | Where-Object { $_.Category -eq 'Compatibility' }).Count)))
     [void]$humanLines.Add(('Writes to application: none'))
     [void]$humanLines.Add(('Network/game launch  : not requested / not requested'))

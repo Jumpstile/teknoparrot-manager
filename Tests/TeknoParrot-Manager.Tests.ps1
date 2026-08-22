@@ -8574,3 +8574,156 @@ Describe "Invoke-ValidationReport" {
         $result.Report.ApplicationFilesChanged | Should -BeNullOrEmpty
     }
 }
+
+Describe "RC8 ReShade and BepInEx runtime inventory" {
+    BeforeEach {
+        $script:ValidationReportMode = $false
+        Mock Write-Log { }
+    }
+
+    It "surfaces an existing ReShade update warning before launch" {
+        $gameDir = Join-Path $TestDrive 'reshade-game'
+        New-Item -ItemType Directory -Path $gameDir -Force | Out-Null
+        $runtimePath = Join-Path $gameDir 'dxgi.dll'
+        [IO.File]::WriteAllText($runtimePath, 'runtime')
+        [IO.File]::WriteAllText((Join-Path $gameDir 'ReShade.log'), 'An update is available! Please visit https://reshade.me and install the new version (v6.7.3).')
+
+        Mock Get-ReShadeTargetInfo {
+            [pscustomobject]@{ TargetDir = $gameDir; DllName = 'dxgi.dll'; ApiDetected = $true }
+        }
+        Mock Get-TpmLocalFileVersion { '6.6.0.0' }
+
+        $result = Get-ReShadeRuntimeInventory -ProfileCode 'ActionDeka' -Doc ([xml]'<GameProfile />') `
+            -GamePath (Join-Path $gameDir 'game.exe') -ExeDir $gameDir -ManagerBaseDirectory $TestDrive
+
+        $result.State | Should -Be 'UpdateWarningObserved'
+        $result.ActionRequired | Should -BeTrue
+        $result.UpdateWarningObserved | Should -BeTrue
+        $result.UpdateWarningVersion | Should -Be '6.7.3'
+        $result.Findings -join ';' | Should -Match 'update is available'
+    }
+
+    It "reports an x64 BepInEx runtime older than a local cached release" {
+        $gameDir = Join-Path $TestDrive 'bepinex-game'
+        $cacheDir = Join-Path $TestDrive 'BepInExCache'
+        New-Item -ItemType Directory -Path (Join-Path $gameDir 'BepInEx\core'), $cacheDir -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $gameDir 'BepInEx\core\BepInEx.dll'), 'core')
+        [IO.File]::WriteAllText((Join-Path $gameDir 'winhttp.dll'), 'loader')
+        [IO.File]::WriteAllText((Join-Path $cacheDir 'BepInEx_win_x64_5.4.24.0.zip'), 'cache')
+
+        Mock Get-BepInExInstalledVersion { '5.4.23.0' }
+        Mock Get-BepInExInstalledArch { 'x64' }
+
+        $result = Get-BepInExRuntimeInventory -ProfileCode 'ActionDeka' -ExeDir $gameDir -CacheDir $cacheDir
+
+        $result.State | Should -Be 'OutdatedRelativeToLocalCache'
+        $result.ActionRequired | Should -BeTrue
+        $result.InstalledVersion | Should -Be '5.4.23.0'
+        $result.CachedLatestVersion | Should -Be '5.4.24.0'
+    }
+
+    It "adds ReShade and BepInEx findings to full validation Action Required without applying updates" {
+        $root = Join-Path $TestDrive 'runtime-root'
+        $games = Join-Path $TestDrive 'runtime-games'
+        $gameDir = Join-Path $games 'ActionDeka'
+        New-Item -ItemType Directory -Path (Join-Path $root 'GameProfiles'), (Join-Path $root 'UserProfiles'), `
+            (Join-Path $root 'BepInExCache'), $gameDir, (Join-Path $gameDir 'BepInEx\core') -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $root 'TeknoParrotUi.exe'), 'fixture')
+        [IO.File]::WriteAllText((Join-Path $gameDir 'game.exe'), 'MZ d3d11.dll')
+        [IO.File]::WriteAllText((Join-Path $gameDir 'dxgi.dll'), 'reshade')
+        [IO.File]::WriteAllText((Join-Path $gameDir 'ReShade.log'), 'An update is available! install the new version (v6.7.3).')
+        [IO.File]::WriteAllText((Join-Path $gameDir 'BepInEx\core\BepInEx.dll'), 'core')
+        [IO.File]::WriteAllText((Join-Path $gameDir 'winhttp.dll'), 'loader')
+        [IO.File]::WriteAllText((Join-Path $root 'BepInExCache\BepInEx_win_x64_5.4.24.0.zip'), 'cache')
+        $profileXml = '<GameProfile><GamePath>{0}</GamePath></GameProfile>' -f (Join-Path $gameDir 'game.exe').Replace('&', '&amp;')
+        [IO.File]::WriteAllText((Join-Path $root 'UserProfiles\ActionDeka.xml'), $profileXml)
+
+        Mock Get-ControlReadinessActionItems { @() }
+        Mock Get-CompatibilityWarnings {
+            [pscustomobject]@{
+                PathTooLong = @(); DllMismatch = @(); GpuIncompatible = @(); BiosMissing = @(); ExeMissing = @(); ComponentMissing = @()
+            }
+        }
+        Mock Get-TpmLocalFileVersion { '6.6.0.0' }
+        Mock Get-BepInExInstalledVersion { '5.4.23.0' }
+        Mock Get-BepInExInstalledArch { 'x64' }
+        Mock Get-ExeArchitecture { 'x64' }
+
+        $result = Invoke-ValidationReport -BaseDirectory $TestDrive `
+            -TeknoParrotRoot $root -GamesInstallFolder $games -DryRunRequested $true -NoPromptsRequested $true
+
+        $result.ExitCode | Should -Be 2
+        @($result.Report.RuntimeInventory.ReShade).Count | Should -Be 1
+        @($result.Report.RuntimeInventory.BepInEx).Count | Should -Be 1
+        (@($result.Report.ActionRequired | Where-Object { $_.Category -eq 'ReShadeRuntime' })).Count | Should -Be 1
+        (@($result.Report.ActionRequired | Where-Object { $_.Category -eq 'BepInExRuntime' })).Count | Should -Be 1
+        @($result.Report.ApplicationFilesChanged).Count | Should -Be 0
+        @($result.Report.FilesWouldChange).Count | Should -Be 0
+    }
+
+    It "promotes only owned BepInEx files while preserving user plugins and a backup" {
+        $gameDir = Join-Path $TestDrive 'transaction-game'
+        $zipPath = Join-Path $TestDrive 'BepInEx.zip'
+        New-Item -ItemType Directory -Path (Join-Path $gameDir 'BepInEx\core'), (Join-Path $gameDir 'BepInEx\plugins') -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $gameDir 'BepInEx\core\BepInEx.dll'), 'old-core')
+        [IO.File]::WriteAllText((Join-Path $gameDir 'BepInEx\plugins\user-plugin.dll'), 'user-plugin')
+        [IO.File]::WriteAllText((Join-Path $gameDir 'winhttp.dll'), 'old-loader')
+
+        $fs = [IO.File]::Open($zipPath, [IO.FileMode]::Create)
+        try {
+            $archive = [IO.Compression.ZipArchive]::new($fs, [IO.Compression.ZipArchiveMode]::Create)
+            try {
+                foreach ($entryData in @{
+                    'BepInEx/core/BepInEx.dll' = 'new-core'
+                    'winhttp.dll' = 'new-loader'
+                    'doorstop_config.ini' = 'new-config'
+                    '.doorstop_version' = 'new-doorstop'
+                }.GetEnumerator()) {
+                    $entry = $archive.CreateEntry($entryData.Key)
+                    $writer = New-Object IO.StreamWriter($entry.Open())
+                    try { $writer.Write($entryData.Value) } finally { $writer.Dispose() }
+                }
+            } finally { $archive.Dispose() }
+        } finally { $fs.Dispose() }
+
+        Mock Get-BepInExInstalledVersion { '5.4.24.0' }
+        $transaction = Invoke-BepInExTransactionalInstall -ZipPath $zipPath -ExeDir $gameDir -Code 'ActionDeka' -ExpectedVersion '5.4.24.0'
+
+        Get-Content -LiteralPath (Join-Path $gameDir 'BepInEx\core\BepInEx.dll') -Raw | Should -Be 'new-core'
+        Get-Content -LiteralPath (Join-Path $gameDir 'winhttp.dll') -Raw | Should -Be 'new-loader'
+        Get-Content -LiteralPath (Join-Path $gameDir 'BepInEx\plugins\user-plugin.dll') -Raw | Should -Be 'user-plugin'
+        Test-Path -LiteralPath $transaction.BackupPath -PathType Container | Should -BeTrue
+        Get-Content -LiteralPath (Join-Path $transaction.BackupPath 'BepInEx\core\BepInEx.dll') -Raw | Should -Be 'old-core'
+    }
+
+    It "restores the pre-update state when BepInEx promotion validation fails" {
+        $gameDir = Join-Path $TestDrive 'rollback-game'
+        $zipPath = Join-Path $TestDrive 'BepInEx-rollback.zip'
+        New-Item -ItemType Directory -Path (Join-Path $gameDir 'BepInEx\core'), (Join-Path $gameDir 'BepInEx\plugins') -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $gameDir 'BepInEx\core\BepInEx.dll'), 'old-core')
+        [IO.File]::WriteAllText((Join-Path $gameDir 'BepInEx\plugins\user-plugin.dll'), 'user-plugin')
+        [IO.File]::WriteAllText((Join-Path $gameDir 'winhttp.dll'), 'old-loader')
+
+        $fs = [IO.File]::Open($zipPath, [IO.FileMode]::Create)
+        try {
+            $archive = [IO.Compression.ZipArchive]::new($fs, [IO.Compression.ZipArchiveMode]::Create)
+            try {
+                foreach ($entryData in @{
+                    'BepInEx/core/BepInEx.dll' = 'new-core'
+                    'winhttp.dll' = 'new-loader'
+                }.GetEnumerator()) {
+                    $entry = $archive.CreateEntry($entryData.Key)
+                    $writer = New-Object IO.StreamWriter($entry.Open())
+                    try { $writer.Write($entryData.Value) } finally { $writer.Dispose() }
+                }
+            } finally { $archive.Dispose() }
+        } finally { $fs.Dispose() }
+
+        Mock Get-BepInExInstalledVersion { $null }
+        { Invoke-BepInExTransactionalInstall -ZipPath $zipPath -ExeDir $gameDir -Code 'ActionDeka' } | Should -Throw '*without a readable BepInEx.dll version*'
+        Get-Content -LiteralPath (Join-Path $gameDir 'BepInEx\core\BepInEx.dll') -Raw | Should -Be 'old-core'
+        Get-Content -LiteralPath (Join-Path $gameDir 'winhttp.dll') -Raw | Should -Be 'old-loader'
+        Get-Content -LiteralPath (Join-Path $gameDir 'BepInEx\plugins\user-plugin.dll') -Raw | Should -Be 'user-plugin'
+        @(Get-ChildItem -LiteralPath $gameDir -Directory -Filter 'BepInEx_Backup_*').Count | Should -Be 1
+    }
+}
