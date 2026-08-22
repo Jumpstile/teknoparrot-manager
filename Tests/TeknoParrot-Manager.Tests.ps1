@@ -881,6 +881,36 @@ Describe "Register-Games structured result" {
         $result[0].Registered[0].Code | Should -Be 'TestGame'
         Should -Invoke Write-Progress -Times 1 -ParameterFilter { $Id -eq 44 -and $Completed }
     }
+
+    It "completes registration progress when the scan faults" {
+        $root = Join-Path $TestDrive "register-games-progress-fault"
+        $userProfilesDir = Join-Path $root "UserProfiles"
+        $installFolder = Join-Path $root "Games"
+        $gameFolder = Join-Path $installFolder "TestGame"
+        $gameProfilesDir = Join-Path $root "GameProfiles"
+        New-Item -ItemType Directory -Path $userProfilesDir, $gameFolder, $gameProfilesDir -Force | Out-Null
+
+        $exePath = Join-Path $gameFolder "game.exe"
+        [IO.File]::WriteAllBytes($exePath, [byte[]]@(0))
+        $templatePath = Join-Path $gameProfilesDir "TestGame.xml"
+        [IO.File]::WriteAllText($templatePath, '<GameProfile><ExecutableName>game.exe</ExecutableName><HasTwoExecutables>false</HasTwoExecutables></GameProfile>')
+        $profileIndex = @{
+            'game.exe' = @([pscustomobject]@{ Code = 'TestGame'; TemplatePath = $templatePath })
+        }
+
+        $script:registrationProgressCompleted = 0
+        Mock Write-Log {}
+        Mock Write-Progress {
+            if ($Completed) {
+                $script:registrationProgressCompleted++
+                return
+            }
+            throw 'simulated registration progress fault'
+        }
+
+        { Register-Games -userProfilesDir $userProfilesDir -installFolder $installFolder -profileIndex $profileIndex -gameProfilesDir $gameProfilesDir -DryRun:$true } | Should -Throw '*simulated registration progress fault*'
+        $script:registrationProgressCompleted | Should -Be 1
+    }
 }
 
 Describe "Read-HostSafe / Exit-TpmProcess (issue #135: non-interactive input)" {
@@ -7965,6 +7995,88 @@ Describe "Resolve-Pcsx2Directory" {
     }
 }
 
+Describe "pcsx2x6 launch-path risk diagnostic" {
+    BeforeAll {
+        $script:RawThrillsPathLimits = @{}
+        $script:FileVersionPins = @{}
+        $script:GpuIncompatibleGames = @{}
+        $script:EmulatorBiosRequirements = @{}
+    }
+
+    It "flags the standalone hyphen in Ace Driver 3 - Final Turn for pcsx2x6" {
+        $path = Join-Path $TestDrive 'Ace Driver 3 - Final Turn\game.exe'
+
+        $result = Get-LaunchPathRisk -ProfileCode 'AceDriver3' -GamePath $path -EmulatorType 'Pcsx2x6'
+
+        $result.ActionRequired | Should -BeTrue
+        $result.Status | Should -Be 'LaunchPathRisk'
+        $result.PathField | Should -Be 'GamePath'
+        @($result.RiskTokens) | Should -Contain '-'
+        $result.Guidance | Should -Match 'quoted'
+        $result.Guidance | Should -Match 'not a BIOS diagnosis'
+        $result.Guidance | Should -Match 'pcsx2x6'
+    }
+
+    It "flags an argument-like token in an explicit pcsx2x6 path" {
+        $path = Join-Path $TestDrive 'PCSX2X6\Ace Driver 3 -Final Turn\game.exe'
+
+        $result = Get-LaunchPathRisk -ProfileCode 'AceDriver3' -GamePath $path
+
+        $result.ActionRequired | Should -BeTrue
+        @($result.RiskTokens) | Should -Contain '-Final'
+        @($result.RiskKinds) | Should -Contain 'ArgumentLikeToken'
+    }
+
+    It "does not flag a standalone hyphen in a non-pcsx2x6 Chihiro path" {
+        $path = Join-Path $TestDrive 'Crazy Taxi - High Roller\game.exe'
+
+        $result = Get-LaunchPathRisk -ProfileCode 'CrazyTaxi' -GamePath $path -EmulatorType 'Chihiro'
+
+        $result.ActionRequired | Should -BeFalse
+        $result.Status | Should -Be 'NotDetected'
+    }
+
+    It "surfaces a pcsx2x6 path risk separately from BIOS findings" {
+        $userProfilesDir = Join-Path $TestDrive 'launch-risk-profiles'
+        New-Item -ItemType Directory -Path $userProfilesDir -Force | Out-Null
+        $xml = '<GameProfile><EmulatorType>Pcsx2x6</EmulatorType><GamePath>C:\Games\Ace Driver 3 - Final Turn\game.exe</GamePath></GameProfile>'
+        [IO.File]::WriteAllText((Join-Path $userProfilesDir 'AceDriver3.xml'), $xml)
+
+        $result = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir
+
+        @($result.LaunchPathRisk).Count | Should -Be 1
+        $result.LaunchPathRisk[0].Code | Should -Be 'AceDriver3'
+        @($result.BiosMissing) | Should -BeNullOrEmpty
+    }
+
+    It "shows the launch-risk guidance in the read-only library health check" {
+        $userProfilesDir = Join-Path $TestDrive 'launch-risk-health-profiles'
+        New-Item -ItemType Directory -Path $userProfilesDir -Force | Out-Null
+        $xml = '<GameProfile><EmulatorType>Pcsx2x6</EmulatorType><GamePath>C:\Games\Ace Driver 3 - Final Turn\game.exe</GamePath></GameProfile>'
+        [IO.File]::WriteAllText((Join-Path $userProfilesDir 'AceDriver3.xml'), $xml)
+
+        $messages = New-Object System.Collections.ArrayList
+        Mock Write-Host { param($Object) [void]$messages.Add([string]$Object) }
+        Mock Write-Log { }
+        Mock Get-DetectedGpuVendor { [pscustomobject]@{ Vendor = $null } }
+        Mock Get-GpuAndFfbFieldNames {
+            [pscustomobject]@{
+                Gpu = [pscustomobject]@{ BoolFields = @(); DropdownFields = @() }
+                Ffb = [pscustomobject]@{ BoolFields = @(); DropdownFields = @() }
+            }
+        }
+        Mock Get-FFBBlasterSupport { [pscustomobject]@{ Status = 'Unsupported'; WouldWrite = $false } }
+        Mock Test-GameNeedsPostgres { $false }
+        Mock Test-PostgresInstalled { $false }
+
+        Invoke-LibraryHealthCheck -UserProfilesDir $userProfilesDir -LogPath '' -TpRoot $TestDrive
+
+        ($messages -join "`n") | Should -Match 'ACTION REQUIRED: LAUNCH PATH RISK'
+        ($messages -join "`n") | Should -Match 'Ace Driver 3 - Final Turn'
+        ($messages -join "`n") | Should -Match 'TPM will not rename folders'
+    }
+}
+
 Describe "Get-CompatibilityWarnings -- BiosMissing (issue #85 tier 1)" {
     BeforeAll {
         $script:RawThrillsPathLimits = @{}
@@ -8633,7 +8745,7 @@ Describe "Invoke-ValidationReport" {
         Mock Get-ControlReadinessActionItems { @() }
         Mock Get-CompatibilityWarnings {
             [pscustomobject]@{
-                PathTooLong = @(); DllMismatch = @(); GpuIncompatible = @(); BiosMissing = @(); ExeMissing = @(); ComponentMissing = @()
+                PathTooLong = @(); DllMismatch = @(); GpuIncompatible = @(); BiosMissing = @(); ExeMissing = @(); ComponentMissing = @(); LaunchPathRisk = @()
             }
         }
     }
@@ -8659,6 +8771,33 @@ Describe "Invoke-ValidationReport" {
         $result.Report.NetworkAccess | Should -Be 'Not requested'
         $result.Report.GameLaunchRequested | Should -BeFalse
         $result.Report.LibraryHealth.State | Should -Be 'Ready'
+    }
+
+    It "surfaces a pcsx2x6 launch-path risk in validation Action Required" {
+        $root = Join-Path $TestDrive 'validation-launch-risk-root'
+        $games = Join-Path $TestDrive 'validation-launch-risk-games'
+        New-Item -ItemType Directory -Path (Join-Path $root 'GameProfiles'), (Join-Path $root 'UserProfiles'), $games -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $root 'TeknoParrotUi.exe'), 'fixture')
+
+        Mock Get-CompatibilityWarnings {
+            [pscustomobject]@{
+                PathTooLong = @(); DllMismatch = @(); GpuIncompatible = @(); BiosMissing = @(); ExeMissing = @(); ComponentMissing = @()
+                LaunchPathRisk = @([pscustomobject]@{
+                    Code = 'AceDriver3'; PathField = 'GamePath'; EmulatorType = 'Pcsx2x6'
+                    GamePath = 'C:\Games\Ace Driver 3 - Final Turn\game.exe'
+                    Status = 'LaunchPathRisk'; RiskTokens = @('-')
+                    Guidance = 'Keep the complete path quoted; this is not a BIOS diagnosis.'
+                })
+            }
+        }
+
+        $result = Invoke-ValidationReport -BaseDirectory $TestDrive `
+            -TeknoParrotRoot $root -GamesInstallFolder $games -DryRunRequested $true -NoPromptsRequested $true
+
+        $result.ExitCode | Should -Be 2
+        (@($result.Report.ActionRequired | Where-Object { $_.Category -eq 'Compatibility' -and $_.Code -eq 'LaunchPathRisk' })).Count | Should -Be 1
+        $result.HumanText -join "`n" | Should -Match 'Launch path risks'
+        $result.HumanText -join "`n" | Should -Match 'Action required'
     }
 
     It "preserves control readiness distinctions and surfaces them as action required" {
@@ -8752,6 +8891,19 @@ Describe "RC8 ReShade and BepInEx runtime inventory" {
         $result.CachedLatestVersion | Should -Be '5.4.24.0'
     }
 
+    It "classifies changelog-only BepInEx residue as stale/problematic" {
+        $gameDir = Join-Path $TestDrive 'bepinex-changelog-only'
+        New-Item -ItemType Directory -Path $gameDir -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $gameDir 'changelog.txt'), 'old residue')
+
+        $result = Get-BepInExRuntimeInventory -ProfileCode 'ActionDeka' -ExeDir $gameDir
+
+        $result.State | Should -Be 'StaleResidue'
+        $result.ActionRequired | Should -BeTrue
+        $result.Files.Changelog | Should -BeTrue
+        $result.Findings -join ';' | Should -Match 'changelog residue'
+    }
+
     It "adds ReShade and BepInEx findings to full validation Action Required without applying updates" {
         $root = Join-Path $TestDrive 'runtime-root'
         $games = Join-Path $TestDrive 'runtime-games'
@@ -8771,7 +8923,7 @@ Describe "RC8 ReShade and BepInEx runtime inventory" {
         Mock Get-ControlReadinessActionItems { @() }
         Mock Get-CompatibilityWarnings {
             [pscustomobject]@{
-                PathTooLong = @(); DllMismatch = @(); GpuIncompatible = @(); BiosMissing = @(); ExeMissing = @(); ComponentMissing = @()
+                PathTooLong = @(); DllMismatch = @(); GpuIncompatible = @(); BiosMissing = @(); ExeMissing = @(); ComponentMissing = @(); LaunchPathRisk = @()
             }
         }
         Mock Get-TpmLocalFileVersion { '6.6.0.0' }
@@ -8795,6 +8947,7 @@ Describe "RC8 ReShade and BepInEx runtime inventory" {
         $gameDir = Join-Path $TestDrive 'transaction-game'
         $zipPath = Join-Path $TestDrive 'BepInEx.zip'
         New-Item -ItemType Directory -Path (Join-Path $gameDir 'BepInEx\core'), (Join-Path $gameDir 'BepInEx\plugins') -Force | Out-Null
+        [IO.File]::WriteAllBytes((Join-Path $gameDir 'game.exe'), [byte[]]@(0))
         [IO.File]::WriteAllText((Join-Path $gameDir 'BepInEx\core\BepInEx.dll'), 'old-core')
         [IO.File]::WriteAllText((Join-Path $gameDir 'BepInEx\plugins\user-plugin.dll'), 'user-plugin')
         [IO.File]::WriteAllText((Join-Path $gameDir 'winhttp.dll'), 'old-loader')
@@ -8817,7 +8970,7 @@ Describe "RC8 ReShade and BepInEx runtime inventory" {
         } finally { $fs.Dispose() }
 
         Mock Get-BepInExInstalledVersion { '5.4.24.0' }
-        $transaction = Invoke-BepInExTransactionalInstall -ZipPath $zipPath -ExeDir $gameDir -Code 'ActionDeka' -ExpectedVersion '5.4.24.0'
+        $transaction = Invoke-BepInExTransactionalInstall -ZipPath $zipPath -ExeDir $gameDir -Code 'ActionDeka' -ExpectedVersion '5.4.24.0' -GamePath (Join-Path $gameDir 'game.exe') -AuthorizedGamesRoot $TestDrive
 
         Get-Content -LiteralPath (Join-Path $gameDir 'BepInEx\core\BepInEx.dll') -Raw | Should -Be 'new-core'
         Get-Content -LiteralPath (Join-Path $gameDir 'winhttp.dll') -Raw | Should -Be 'new-loader'
@@ -8830,6 +8983,7 @@ Describe "RC8 ReShade and BepInEx runtime inventory" {
         $gameDir = Join-Path $TestDrive 'rollback-game'
         $zipPath = Join-Path $TestDrive 'BepInEx-rollback.zip'
         New-Item -ItemType Directory -Path (Join-Path $gameDir 'BepInEx\core'), (Join-Path $gameDir 'BepInEx\plugins') -Force | Out-Null
+        [IO.File]::WriteAllBytes((Join-Path $gameDir 'game.exe'), [byte[]]@(0))
         [IO.File]::WriteAllText((Join-Path $gameDir 'BepInEx\core\BepInEx.dll'), 'old-core')
         [IO.File]::WriteAllText((Join-Path $gameDir 'BepInEx\plugins\user-plugin.dll'), 'user-plugin')
         [IO.File]::WriteAllText((Join-Path $gameDir 'winhttp.dll'), 'old-loader')
@@ -8850,10 +9004,284 @@ Describe "RC8 ReShade and BepInEx runtime inventory" {
         } finally { $fs.Dispose() }
 
         Mock Get-BepInExInstalledVersion { $null }
-        { Invoke-BepInExTransactionalInstall -ZipPath $zipPath -ExeDir $gameDir -Code 'ActionDeka' } | Should -Throw '*without a readable BepInEx.dll version*'
+        { Invoke-BepInExTransactionalInstall -ZipPath $zipPath -ExeDir $gameDir -Code 'ActionDeka' -GamePath (Join-Path $gameDir 'game.exe') -AuthorizedGamesRoot $TestDrive } | Should -Throw '*without a readable BepInEx.dll version*'
         Get-Content -LiteralPath (Join-Path $gameDir 'BepInEx\core\BepInEx.dll') -Raw | Should -Be 'old-core'
         Get-Content -LiteralPath (Join-Path $gameDir 'winhttp.dll') -Raw | Should -Be 'old-loader'
         Get-Content -LiteralPath (Join-Path $gameDir 'BepInEx\plugins\user-plugin.dll') -Raw | Should -Be 'user-plugin'
         @(Get-ChildItem -LiteralPath $gameDir -Directory -Filter 'BepInEx_Backup_*').Count | Should -Be 1
+    }
+
+    It "surfaces an incomplete rollback and preserves the BepInEx backup when rollback fails" {
+        $gameDir = Join-Path $TestDrive 'rollback-failure-game'
+        $zipPath = Join-Path $TestDrive 'BepInEx-rollback-failure.zip'
+        New-Item -ItemType Directory -Path (Join-Path $gameDir 'BepInEx\core') -Force | Out-Null
+        [IO.File]::WriteAllBytes((Join-Path $gameDir 'game.exe'), [byte[]]@(0))
+        [IO.File]::WriteAllText((Join-Path $gameDir 'BepInEx\core\BepInEx.dll'), 'old-core')
+        [IO.File]::WriteAllText((Join-Path $gameDir 'winhttp.dll'), 'old-loader')
+
+        $fs = [IO.File]::Open($zipPath, [IO.FileMode]::Create)
+        try {
+            $archive = [IO.Compression.ZipArchive]::new($fs, [IO.Compression.ZipArchiveMode]::Create)
+            try {
+                foreach ($entryData in @{
+                    'BepInEx/core/BepInEx.dll' = 'new-core'
+                    'winhttp.dll' = 'new-loader'
+                }.GetEnumerator()) {
+                    $entry = $archive.CreateEntry($entryData.Key)
+                    $writer = New-Object IO.StreamWriter($entry.Open())
+                    try { $writer.Write($entryData.Value) } finally { $writer.Dispose() }
+                }
+            } finally { $archive.Dispose() }
+        } finally { $fs.Dispose() }
+
+        Mock Get-BepInExInstalledVersion { $null }
+        Mock Remove-Item {
+            param($LiteralPath, $Recurse, $Force, $ErrorAction)
+            if ([IO.Path]::GetFileName($LiteralPath) -eq 'BepInEx' -and $LiteralPath -notlike '*BepInEx_Backup_*') {
+                throw 'simulated BepInEx rollback removal failure'
+            }
+            if (Test-Path -LiteralPath $LiteralPath -PathType Container) {
+                [IO.Directory]::Delete($LiteralPath, [bool]$Recurse)
+            } elseif (Test-Path -LiteralPath $LiteralPath) {
+                [IO.File]::Delete($LiteralPath)
+            }
+        }
+
+        $caught = $null
+        try {
+            Invoke-BepInExTransactionalInstall -ZipPath $zipPath -ExeDir $gameDir -Code 'ActionDeka' -GamePath (Join-Path $gameDir 'game.exe') -AuthorizedGamesRoot $TestDrive
+        } catch {
+            $caught = $_
+        }
+
+        $caught | Should -Not -BeNullOrEmpty
+        $caught.ToString() | Should -Match 'rollback is incomplete'
+        $caught.ToString() | Should -Match 'simulated BepInEx rollback removal failure'
+        @(Get-ChildItem -LiteralPath $gameDir -Directory -Filter 'BepInEx_Backup_*').Count | Should -Be 1
+    }
+}
+
+Describe "BepInEx authorized game-root boundary" {
+    It "authorizes an existing leaf executable under the configured games root" {
+        $root = Join-Path $TestDrive 'authorized-root'
+        $gameDir = Join-Path $root 'ActionDeka'
+        $gamePath = Join-Path $gameDir 'game.exe'
+        New-Item -ItemType Directory -Path $gameDir -Force | Out-Null
+        [IO.File]::WriteAllBytes($gamePath, [byte[]]@(0))
+
+        $result = Get-TpmAuthorizedGamePath -GamePath $gamePath -AuthorizedGamesRoot $root
+
+        $result.Authorized | Should -BeTrue
+        $result.State | Should -Be 'Authorized'
+        $result.ExeDir | Should -Be ([IO.Path]::GetFullPath($gameDir))
+    }
+
+    It "rejects a UserProfile GamePath outside the configured games root" {
+        $root = Join-Path $TestDrive 'authorized-root-outside'
+        $outside = Join-Path $TestDrive 'outside-root\game.exe'
+        New-Item -ItemType Directory -Path $root, (Split-Path -Parent $outside) -Force | Out-Null
+        [IO.File]::WriteAllBytes($outside, [byte[]]@(0))
+
+        $result = Get-TpmAuthorizedGamePath -GamePath $outside -AuthorizedGamesRoot $root
+
+        $result.Authorized | Should -BeFalse
+        $result.State | Should -Be 'OutsideAuthorizedRoot'
+    }
+
+    It "rejects a directory-only GamePath instead of treating it as an executable" {
+        $root = Join-Path $TestDrive 'authorized-root-directory'
+        $gameDir = Join-Path $root 'ActionDeka'
+        New-Item -ItemType Directory -Path $gameDir -Force | Out-Null
+
+        $result = Get-TpmAuthorizedGamePath -GamePath $gameDir -AuthorizedGamesRoot $root
+
+        $result.Authorized | Should -BeFalse
+        $result.State | Should -Be 'NotLeaf'
+    }
+
+    It "rejects a missing GamePath before any update-capable caller can use it" {
+        $root = Join-Path $TestDrive 'authorized-root-missing'
+        $missingPath = Join-Path $root 'ActionDeka\missing.exe'
+        New-Item -ItemType Directory -Path (Split-Path -Parent $missingPath) -Force | Out-Null
+
+        $result = Get-TpmAuthorizedGamePath -GamePath $missingPath -AuthorizedGamesRoot $root
+
+        $result.Authorized | Should -BeFalse
+        $result.State | Should -Be 'Missing'
+    }
+
+    It "rejects a malformed or relative GamePath" {
+        $root = Join-Path $TestDrive 'authorized-root-malformed'
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+
+        $result = Get-TpmAuthorizedGamePath -GamePath 'not-an-absolute-path.exe' -AuthorizedGamesRoot $root
+
+        $result.Authorized | Should -BeFalse
+        $result.State | Should -Be 'Malformed'
+    }
+
+    It "rejects a GamePath that passes through a reparse or redirected directory" {
+        $root = Join-Path $TestDrive 'authorized-root-reparse'
+        $target = Join-Path $TestDrive 'redirected-target'
+        $redirectedDir = Join-Path $root 'RedirectedGame'
+        New-Item -ItemType Directory -Path $root, $target -Force | Out-Null
+        [IO.File]::WriteAllBytes((Join-Path $target 'game.exe'), [byte[]]@(0))
+        New-Item -ItemType Junction -Path $redirectedDir -Target $target -Force | Out-Null
+
+        $result = Get-TpmAuthorizedGamePath -GamePath (Join-Path $redirectedDir 'game.exe') -AuthorizedGamesRoot $root
+
+        $result.Authorized | Should -BeFalse
+        @('ReparsePoint', 'OutsideAuthorizedRoot') | Should -Contain $result.State
+    }
+}
+
+Describe "BepInEx update authorization and trust gates" {
+    BeforeEach {
+        $script:bepUpdateRoot = Join-Path $TestDrive 'bep-update-root'
+        $script:bepUpdateGameDir = Join-Path $script:bepUpdateRoot 'ActionDeka'
+        $script:bepUpdateGamePath = Join-Path $script:bepUpdateGameDir 'game.exe'
+        $script:bepUpdateProfiles = Join-Path $TestDrive 'bep-update-profiles'
+        $script:bepUpdateCache = Join-Path $TestDrive 'bep-update-cache'
+        New-Item -ItemType Directory -Path $script:bepUpdateGameDir, $script:bepUpdateProfiles -Force | Out-Null
+        [IO.File]::WriteAllBytes($script:bepUpdateGamePath, [byte[]]@(0))
+        $profileXml = '<GameProfile><GamePath>{0}</GamePath></GameProfile>' -f $script:bepUpdateGamePath.Replace('&', '&amp;')
+        [IO.File]::WriteAllText((Join-Path $script:bepUpdateProfiles 'ActionDeka.xml'), $profileXml)
+
+        $script:bepLatest = [pscustomobject]@{
+            Version = '5.4.24.0'
+            DownloadUrl = 'https://github.com/BepInEx/BepInEx/releases/download/v5.4.24.0/BepInEx_win_x64_5.4.24.0.zip'
+            FileName = 'BepInEx_win_x64_5.4.24.0.zip'
+            SizeBytes = 1
+            ExpectedSha256 = ('A' * 64)
+        }
+        $script:bepAuthorization = [pscustomobject]@{
+            Authorized = $true
+            State = 'Authorized'
+            Reason = 'test authorization'
+            GamePath = $script:bepUpdateGamePath
+            FullPath = $script:bepUpdateGamePath
+            ExeDir = $script:bepUpdateGameDir
+            RootPath = $script:bepUpdateRoot
+        }
+        $script:bepDownloadCalls = 0
+        $script:bepTransactionCalls = 0
+
+        Mock Write-Host {}
+        Mock Write-Log {}
+        Mock Get-BepInExLatestRelease { $script:bepLatest }
+        Mock Get-TpmAuthorizedGamePath { $script:bepAuthorization }
+        Mock Get-BepInExInstalledVersion { '5.4.23.0' }
+        Mock Get-BepInExInstalledArch { 'x64' }
+        Mock Read-HostSafe { throw 'unexpected BepInEx update prompt' }
+        Mock Invoke-TpmDownload { $script:bepDownloadCalls++; return $true }
+        Mock Invoke-BepInExTransactionalInstall {
+            $script:bepTransactionCalls++
+            return [pscustomobject]@{ BackupPath = 'test-backup' }
+        }
+    }
+
+    It "refuses an out-of-root UserProfiles path before prompt or download" {
+        $script:bepAuthorization.Authorized = $false
+        $script:bepAuthorization.State = 'OutsideAuthorizedRoot'
+        $script:bepAuthorization.Reason = 'outside authorized root'
+
+        Invoke-BepInExUpdateCheck -UserProfilesDir $script:bepUpdateProfiles -CacheDir $script:bepUpdateCache -AuthorizedGamesRoot $script:bepUpdateRoot | Out-Null
+
+        $script:bepDownloadCalls | Should -Be 0
+        $script:bepTransactionCalls | Should -Be 0
+        Should -Invoke Read-HostSafe -Times 0
+        Test-Path -LiteralPath $script:bepUpdateCache | Should -BeFalse
+    }
+
+    It "refuses a reparse or redirected path before prompt or download" {
+        $script:bepAuthorization.Authorized = $false
+        $script:bepAuthorization.State = 'ReparsePoint'
+        $script:bepAuthorization.Reason = 'reparse or redirected path'
+
+        Invoke-BepInExUpdateCheck -UserProfilesDir $script:bepUpdateProfiles -CacheDir $script:bepUpdateCache -AuthorizedGamesRoot $script:bepUpdateRoot | Out-Null
+
+        $script:bepDownloadCalls | Should -Be 0
+        $script:bepTransactionCalls | Should -Be 0
+        Should -Invoke Read-HostSafe -Times 0
+        Test-Path -LiteralPath $script:bepUpdateCache | Should -BeFalse
+    }
+
+    It "requires a leaf executable before offering an update" {
+        $script:bepAuthorization.Authorized = $false
+        $script:bepAuthorization.State = 'NotLeaf'
+        $script:bepAuthorization.Reason = 'a directory is not a leaf executable'
+
+        Invoke-BepInExUpdateCheck -UserProfilesDir $script:bepUpdateProfiles -CacheDir $script:bepUpdateCache -AuthorizedGamesRoot $script:bepUpdateRoot | Out-Null
+
+        $script:bepDownloadCalls | Should -Be 0
+        $script:bepTransactionCalls | Should -Be 0
+        Should -Invoke Read-HostSafe -Times 0
+    }
+
+    It "refuses a missing digest before prompt or download" {
+        $script:bepLatest.ExpectedSha256 = $null
+
+        Invoke-BepInExUpdateCheck -UserProfilesDir $script:bepUpdateProfiles -CacheDir $script:bepUpdateCache -AuthorizedGamesRoot $script:bepUpdateRoot | Out-Null
+
+        $script:bepDownloadCalls | Should -Be 0
+        Should -Invoke Read-HostSafe -Times 0
+    }
+
+    It "refuses a malformed digest before prompt or download" {
+        $script:bepLatest.ExpectedSha256 = 'not-a-sha256'
+
+        Invoke-BepInExUpdateCheck -UserProfilesDir $script:bepUpdateProfiles -CacheDir $script:bepUpdateCache -AuthorizedGamesRoot $script:bepUpdateRoot | Out-Null
+
+        $script:bepDownloadCalls | Should -Be 0
+        Should -Invoke Read-HostSafe -Times 0
+    }
+
+    It "does not download or mutate when the user explicitly declines" {
+        Mock Read-HostSafe { 'N' }
+
+        Invoke-BepInExUpdateCheck -UserProfilesDir $script:bepUpdateProfiles -CacheDir $script:bepUpdateCache -AuthorizedGamesRoot $script:bepUpdateRoot | Out-Null
+
+        $script:bepDownloadCalls | Should -Be 0
+        $script:bepTransactionCalls | Should -Be 0
+        Test-Path -LiteralPath $script:bepUpdateCache | Should -BeFalse
+    }
+
+    It "only downloads and enters the transaction after explicit approval for an authorized path" {
+        Mock Read-HostSafe { 'Y' }
+
+        Invoke-BepInExUpdateCheck -UserProfilesDir $script:bepUpdateProfiles -CacheDir $script:bepUpdateCache -AuthorizedGamesRoot $script:bepUpdateRoot | Out-Null
+
+        $script:bepDownloadCalls | Should -Be 1
+        $script:bepTransactionCalls | Should -Be 1
+        Test-Path -LiteralPath $script:bepUpdateCache -PathType Container | Should -BeTrue
+    }
+}
+
+Describe "Validation report output collision guard" {
+    BeforeEach {
+        $script:ValidationReportMode = $false
+        Mock Get-ControlReadinessActionItems { @() }
+        Mock Get-CompatibilityWarnings {
+            [pscustomobject]@{
+                PathTooLong = @(); DllMismatch = @(); GpuIncompatible = @(); BiosMissing = @(); ExeMissing = @(); ComponentMissing = @(); LaunchPathRisk = @()
+            }
+        }
+    }
+
+    It "refuses to overwrite an existing application-looking report path" {
+        $root = Join-Path $TestDrive 'collision-root'
+        $games = Join-Path $TestDrive 'collision-games'
+        $collisionPath = Join-Path $TestDrive 'TeknoParrotUi.exe'
+        New-Item -ItemType Directory -Path (Join-Path $root 'GameProfiles'), (Join-Path $root 'UserProfiles'), $games -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $root 'TeknoParrotUi.exe'), 'fixture')
+        [IO.File]::WriteAllText($collisionPath, 'do-not-overwrite')
+
+        $result = Invoke-ValidationReport -BaseDirectory $TestDrive -RequestedPath $collisionPath -TeknoParrotRoot $root -GamesInstallFolder $games -DryRunRequested $true -NoPromptsRequested $true
+
+        $result.ExitCode | Should -Be 4
+        $result.Report.Result | Should -Be 'REPORT_ERROR'
+        $result.WriteError | Should -Match 'refusing to overwrite'
+        Get-Content -LiteralPath $collisionPath -Raw | Should -Be 'do-not-overwrite'
+        Test-Path -LiteralPath ([IO.Path]::ChangeExtension($collisionPath, '.txt')) -PathType Leaf | Should -BeFalse
     }
 }

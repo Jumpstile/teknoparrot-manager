@@ -573,7 +573,7 @@ Controller support (per the plugin's own docs): true force feedback on FFB-capab
 
 **Mode 9 only checks/updates games that already have BepInEx installed** — it never installs BepInEx into a game that doesn't have it. Only the latest **stable 64-bit** release is ever used; never a 32-bit build, never a pre-release. A 32-bit install is left alone and reported separately.
 
-If anything is outdated, the script lists every such game once and asks a single question: update all of them? Answering Y backs up the existing BepInEx folder and related files before overwriting anything. The shared audit records the GitHub release source, filename/version, computed SHA-256, and transfer metrics; when GitHub supplies an asset digest, the downloader validates it before extraction and logs/fails closed on a mismatch. Full validation can inventory existing BepInEx runtimes and put stale or problematic findings in **Action Required**; it does not auto-update them.
+If anything is outdated, the script lists every such game once and asks a single question: update all of them? Answering Y backs up the existing BepInEx folder and related files before overwriting anything. The update path uses the configured games-install folder as its authorization boundary: a UserProfile GamePath must be an existing leaf executable inside that known, non-reparse root. Missing, directory-only, malformed, outside-root, or redirected paths are reported as **Action Required** and never reach the prompt, download, backup, or transaction stages. The shared audit records the GitHub release source, filename/version, computed SHA-256, and transfer metrics; when GitHub supplies an asset digest, the downloader validates it before extraction and logs/fails closed on a mismatch. Full validation can inventory existing BepInEx runtimes and put stale, incomplete, or problematic findings in **Action Required**; changelog-only residue is not treated as a clean NotInstalled state, and validation does not auto-update runtimes.
 
 **Troubleshooting:** [official guide](https://docs.bepinex.dev/articles/user_guide/troubleshooting.html). **Manual clean reset:** delete `doorstop_config.ini`, `winhttp.dll`, `.doorstop_version`, `changelog.txt`, and the `BepInEx` folder from the game's folder — this fully reverts to vanilla.
 
@@ -778,6 +778,7 @@ At the end of every run the script prints — and saves to a text file — every
 | **Extract first** | Profiles with a broken path because the game isn't extracted yet. Extract then re-run Repair. |
 | **Set up controls** | Control types with no reference game bound yet. Shows which games are waiting and suggests titles to bind. |
 | **Controls not ready** | Registered games whose catalog-backed controls are **Missing**, **Not verified**, **Unsupported**, or **Unknown**. Registration, a successful launch, and TeknoParrot wizard completion do not verify controls. Open TeknoParrot controls configuration and map/test controls before treating the game as ready. |
+| **Launch path risk** | A registered `GamePath` or `GamePath2` for a `pcsx2x6` profile contains a standalone hyphen or argument-like token that may become a separate command-line value when an emulator or frontend launch path is unquoted. Keep the complete path quoted and test direct TeknoParrot and frontend launches separately. This is not a BIOS diagnosis unless an observed launch error explicitly names BIOS; TPM does not rename folders automatically. |
 | **Path too long** | Specific games (Raw Thrills titles, Yu-Gi-Oh! Duel Terminal 6) whose install path exceeds a hard-coded engine-specific limit. Shows the exact short folder name to rename to. Checked automatically every run. |
 | **File version mismatch** | Specific games needing an OLDER pinned version of a particular file rather than the latest (BlazBlue-series/`iDmacDrv32.dll`, Tekken Tag Tournament 2/`EBOOT.BIN`). Shows the file name, current/required CRC32, and where to get the right version. Checked automatically every run. |
 | **GPU incompatibility** | Specific registered games confirmed not to work on your detected GPU vendor (AMD or Intel). Informational only — no fix exists. Checked automatically every run; silently skipped if the vendor can't be auto-detected. |
@@ -861,11 +862,14 @@ You can provide paths without accepting or changing saved settings:
   -ValidationReportPath "C:\path\to\validation.json"
 ```
 
-The command writes a JSON report and a matching `.txt` summary. It does not
-prompt, check for updates, access the network, launch a game, create a backup,
-or change application files. The report records paths and identity, runtime
-presence, valid/broken/empty profile counts, wizard state, controls readiness,
-compatibility warnings, ReShade/BepInEx inventory findings, and the exact
+The command writes a JSON report and a matching `.txt` summary. An existing
+TPM validation report may be refreshed, but an unrelated existing file,
+application-looking path, or redirected output location is refused before any
+report write. It does not prompt, check for updates, access the network, launch
+a game, create a backup, or change application files. The report records paths
+and identity, runtime presence, valid/broken/empty profile counts, wizard state,
+controls readiness, compatibility warnings, ReShade/BepInEx inventory findings,
+and the exact
 `ActionRequired` items. Control evidence remains separate: copied, missing,
 partial, unknown, and verified are not collapsed into one ready/not-ready
 answer; verified still requires explicit evidence.
@@ -999,6 +1003,17 @@ Most features run as a normal user. The only exception: Postgres installation (m
 
 **"Path too long" errors during extraction.**
 TeknoParrot's own folder structure adds path length on top of already-long staging paths. Shorten your staging folder's path (e.g. `E:\TP Games\` instead of `E:\My Arcade Games Collection\TeknoParrot Games 2024\`) and re-run. The ACTION REQUIRED section also flags specific games that TeknoParrot itself requires to be at a short path.
+
+**The emulator reports `Unknown parameter: '-'` or a similar launch error.**
+
+Run the validation report or the read-only library health check. TPM flags a
+registered `GamePath`/`GamePath2` for a `pcsx2x6` profile containing a
+standalone hyphen or argument-like token, such as `Ace Driver 3 - Final Turn`,
+because an unquoted frontend or pcsx2x6 launch command can pass that token as a
+separate argument. Keep the complete path quoted and test direct TeknoParrot
+and frontend launch paths separately. This diagnostic is not a BIOS finding
+unless the observed error explicitly names BIOS, and TPM does not rename
+folders automatically.
 
 **Network drive timeouts at startup.**
 The script detects mapped network drives to avoid scanning them during game discovery. If a previously mapped drive is now unreachable, startup may take a few seconds before timing out gracefully — this is expected and the drive is skipped.

@@ -999,6 +999,222 @@ function Test-PathInside {
     return $c.StartsWith($p + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)
 }
 
+# Creates one stable, explainable result for the game-root authorization checks
+# used by BepInEx update and inventory paths. A non-authorized result is never
+# a reason to prompt, download, create a backup, or start a transaction.
+function New-TpmPathAuthorizationResult {
+    param(
+        [bool]$Authorized,
+        [string]$State,
+        [string]$Reason,
+        [string]$GamePath = '',
+        [string]$FullPath = '',
+        [string]$ExeDir = '',
+        [string]$RootPath = ''
+    )
+
+    return [pscustomobject]@{
+        Authorized = $Authorized
+        State      = $State
+        Reason     = $Reason
+        GamePath   = $GamePath
+        FullPath   = $FullPath
+        ExeDir     = $ExeDir
+        RootPath   = $RootPath
+    }
+}
+
+# Proves that the configured games root is an existing, non-reparse directory.
+# The caller must have an independently configured/known root; it must not be
+# inferred from an arbitrary UserProfile GamePath.
+function Get-TpmAuthorizedGamesRoot {
+    param([string]$GamesRoot)
+
+    if ([string]::IsNullOrWhiteSpace($GamesRoot)) {
+        return New-TpmPathAuthorizationResult -Authorized:$false -State 'Unknown' -Reason 'the authorized games root is unavailable'
+    }
+    if (-not [System.IO.Path]::IsPathRooted($GamesRoot)) {
+        return New-TpmPathAuthorizationResult -Authorized:$false -State 'Malformed' -Reason 'the authorized games root is not an absolute path' -RootPath $GamesRoot
+    }
+
+    try {
+        $fullRoot = [System.IO.Path]::GetFullPath($GamesRoot)
+    } catch {
+        return New-TpmPathAuthorizationResult -Authorized:$false -State 'Malformed' -Reason "the authorized games root is malformed: $($_.Exception.Message)" -RootPath $GamesRoot
+    }
+
+    if (-not (Test-Path -LiteralPath $fullRoot -PathType Container -ErrorAction SilentlyContinue)) {
+        $state = if (Test-Path -LiteralPath $fullRoot -PathType Leaf -ErrorAction SilentlyContinue) { 'Unsupported' } else { 'Missing' }
+        $reason = if ($state -eq 'Unsupported') { 'the authorized games root is a file, not a directory' } else { 'the authorized games root does not exist' }
+        return New-TpmPathAuthorizationResult -Authorized:$false -State $state -Reason $reason -RootPath $fullRoot
+    }
+
+    try {
+        $rootItem = Get-Item -LiteralPath $fullRoot -Force -ErrorAction Stop
+        $cursor = $rootItem
+        while ($null -ne $cursor) {
+            if (($cursor.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                return New-TpmPathAuthorizationResult -Authorized:$false -State 'ReparsePoint' -Reason "the authorized games root or one of its parent directories is redirected: $($cursor.FullName)" -RootPath $fullRoot
+            }
+            $parent = $cursor.Parent
+            if ($null -eq $parent -or $parent.FullName -ieq $cursor.FullName) { break }
+            $cursor = $parent
+        }
+    } catch {
+        return New-TpmPathAuthorizationResult -Authorized:$false -State 'Unknown' -Reason "the authorized games root could not be inspected safely: $($_.Exception.Message)" -RootPath $fullRoot
+    }
+
+    return New-TpmPathAuthorizationResult -Authorized:$true -State 'Authorized' -Reason 'the configured games root is an existing non-reparse directory' -RootPath $fullRoot
+}
+
+# Proves that a profile's GamePath is a real leaf executable inside the
+# configured games root. Lexical containment alone is insufficient: every
+# existing path component is checked for reparse/redirect attributes, and the
+# resolved item must remain inside the authorized root.
+function Get-TpmAuthorizedGamePath {
+    param(
+        [string]$GamePath,
+        [string]$AuthorizedGamesRoot
+    )
+
+    if ([string]::IsNullOrWhiteSpace($GamePath)) {
+        return New-TpmPathAuthorizationResult -Authorized:$false -State 'Missing' -Reason 'the profile GamePath is empty' -GamePath $GamePath -RootPath $AuthorizedGamesRoot
+    }
+    if (-not [System.IO.Path]::IsPathRooted($GamePath)) {
+        return New-TpmPathAuthorizationResult -Authorized:$false -State 'Malformed' -Reason 'the profile GamePath is not an absolute path' -GamePath $GamePath -RootPath $AuthorizedGamesRoot
+    }
+
+    $root = Get-TpmAuthorizedGamesRoot -GamesRoot $AuthorizedGamesRoot
+    if (-not $root.Authorized) {
+        return New-TpmPathAuthorizationResult -Authorized:$false -State $root.State -Reason ("cannot prove the authorized games root: {0}" -f $root.Reason) -GamePath $GamePath -RootPath $root.RootPath
+    }
+
+    try {
+        $fullGamePath = [System.IO.Path]::GetFullPath($GamePath)
+    } catch {
+        return New-TpmPathAuthorizationResult -Authorized:$false -State 'Malformed' -Reason "the profile GamePath is malformed: $($_.Exception.Message)" -GamePath $GamePath -RootPath $root.RootPath
+    }
+
+    if (-not (Test-PathInside $fullGamePath $root.RootPath)) {
+        return New-TpmPathAuthorizationResult -Authorized:$false -State 'OutsideAuthorizedRoot' -Reason "the profile GamePath is outside the authorized games root: $($root.RootPath)" -GamePath $GamePath -FullPath $fullGamePath -RootPath $root.RootPath
+    }
+    if (-not (Test-Path -LiteralPath $fullGamePath -PathType Leaf -ErrorAction SilentlyContinue)) {
+        if (Test-Path -LiteralPath $fullGamePath -PathType Container -ErrorAction SilentlyContinue) {
+            return New-TpmPathAuthorizationResult -Authorized:$false -State 'NotLeaf' -Reason 'the profile GamePath is a directory; a leaf executable is required' -GamePath $GamePath -FullPath $fullGamePath -RootPath $root.RootPath
+        }
+        return New-TpmPathAuthorizationResult -Authorized:$false -State 'Missing' -Reason 'the profile GamePath does not exist as a leaf executable' -GamePath $GamePath -FullPath $fullGamePath -RootPath $root.RootPath
+    }
+
+    try {
+        $gameItem = Get-Item -LiteralPath $fullGamePath -Force -ErrorAction Stop
+        if ($gameItem.PSIsContainer) {
+            return New-TpmPathAuthorizationResult -Authorized:$false -State 'NotLeaf' -Reason 'the profile GamePath is a directory; a leaf executable is required' -GamePath $GamePath -FullPath $fullGamePath -RootPath $root.RootPath
+        }
+        if (($gameItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            return New-TpmPathAuthorizationResult -Authorized:$false -State 'ReparsePoint' -Reason 'the profile GamePath is a reparse/redirected file' -GamePath $GamePath -FullPath $fullGamePath -RootPath $root.RootPath
+        }
+        if (-not (Test-PathInside $gameItem.FullName $root.RootPath)) {
+            return New-TpmPathAuthorizationResult -Authorized:$false -State 'OutsideAuthorizedRoot' -Reason 'the inspected GamePath resolves outside the authorized games root' -GamePath $GamePath -FullPath $fullGamePath -RootPath $root.RootPath
+        }
+
+        $rootComparison = $root.RootPath.TrimEnd('\','/')
+        $cursor = $gameItem.Directory
+        $reachedRoot = $false
+        while ($null -ne $cursor) {
+            if (($cursor.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                return New-TpmPathAuthorizationResult -Authorized:$false -State 'ReparsePoint' -Reason "the profile GamePath passes through a reparse/redirected directory: $($cursor.FullName)" -GamePath $GamePath -FullPath $fullGamePath -RootPath $root.RootPath
+            }
+            $cursorComparison = $cursor.FullName.TrimEnd('\','/')
+            if ($cursorComparison -ieq $rootComparison) {
+                $reachedRoot = $true
+                break
+            }
+            $parent = $cursor.Parent
+            if ($null -eq $parent -or $parent.FullName -ieq $cursor.FullName) { break }
+            $cursor = $parent
+        }
+        if (-not $reachedRoot) {
+            return New-TpmPathAuthorizationResult -Authorized:$false -State 'OutsideAuthorizedRoot' -Reason 'the inspected GamePath could not be proven to descend from the authorized games root' -GamePath $GamePath -FullPath $fullGamePath -RootPath $root.RootPath
+        }
+
+        return New-TpmPathAuthorizationResult -Authorized:$true -State 'Authorized' -Reason 'the GamePath is a non-reparse leaf inside the configured games root' -GamePath $GamePath -FullPath $gameItem.FullName -ExeDir $gameItem.Directory.FullName -RootPath $root.RootPath
+    } catch {
+        return New-TpmPathAuthorizationResult -Authorized:$false -State 'Unknown' -Reason "the profile GamePath could not be inspected safely: $($_.Exception.Message)" -GamePath $GamePath -FullPath $fullGamePath -RootPath $root.RootPath
+    }
+}
+
+# Read-only pcsx2x6 launch-path diagnostic for folders or executable paths
+# containing a standalone hyphen or a token that looks like a command-line
+# switch. If a frontend/emulator launch path is not quoted correctly, such a
+# token can be passed as a separate argv value (for example, the standalone '-'
+# in "Ace Driver 3 - Final Turn"). This is a launch-path risk only; it is
+# never converted into a BIOS diagnosis, and it never renames or moves a folder.
+function Get-LaunchPathRisk {
+    param(
+        [string]$ProfileCode = '',
+        [string]$GamePath = '',
+        [string]$EmulatorType = '',
+        [ValidateSet('GamePath', 'GamePath2')]
+        [string]$PathField = 'GamePath'
+    )
+
+    $result = [ordered]@{
+        Code            = $ProfileCode
+        PathField       = $PathField
+        GamePath        = $GamePath
+        EmulatorType    = $EmulatorType
+        ActionRequired  = $false
+        Status          = 'NotDetected'
+        RiskTokens      = @()
+        RiskKinds       = @()
+        Guidance        = $null
+    }
+
+    if ([string]::IsNullOrWhiteSpace($GamePath)) {
+        return [pscustomobject]$result
+    }
+
+    # Current evidence is specific to pcsx2x6 launch handling. Chihiro and
+    # other emulator families legitimately use titles containing " - " (for
+    # example, Crazy Taxi variants), so do not turn this into a generic
+    # hyphenated-folder warning.
+    $isPcsx2Path = ($EmulatorType -match '(?i)pcsx2x6') -or
+        ($GamePath -match '(?i)(^|[\\/])pcsx2x6([\\/]|$)')
+    if (-not $isPcsx2Path) {
+        return [pscustomobject]$result
+    }
+
+    $riskTokens = New-Object System.Collections.ArrayList
+    $riskKinds = New-Object System.Collections.ArrayList
+    foreach ($segment in ($GamePath -split '[\\/]')) {
+        if ([string]::IsNullOrWhiteSpace($segment)) { continue }
+        foreach ($rawToken in ($segment -split '\s+')) {
+            $token = $rawToken.Trim().Trim('"')
+            if ([string]::IsNullOrWhiteSpace($token)) { continue }
+            if ($token -eq '-' -or $token -eq '--') {
+                [void]$riskTokens.Add($token)
+                [void]$riskKinds.Add('StandaloneHyphen')
+            } elseif ($token -match '^--?[A-Za-z0-9_][A-Za-z0-9_.:=/+~@%\-]*$') {
+                [void]$riskTokens.Add($token)
+                [void]$riskKinds.Add('ArgumentLikeToken')
+            }
+        }
+    }
+
+    if ($riskTokens.Count -eq 0) {
+        return [pscustomobject]$result
+    }
+
+    $tokenDescription = ($riskTokens | Select-Object -Unique) -join ', '
+
+    $result.ActionRequired = $true
+    $result.Status = 'LaunchPathRisk'
+    $result.RiskTokens = @($riskTokens | Select-Object -Unique)
+    $result.RiskKinds = @($riskKinds | Select-Object -Unique)
+    $result.Guidance = "The $PathField for this pcsx2x6 game contains standalone hyphen or argument-like token(s) [$tokenDescription] that may become separate command-line arguments when the path is not quoted. Keep the complete path quoted in the launch configuration and test the direct and frontend paths separately. This is not a BIOS diagnosis unless an observed launch error explicitly names BIOS. TPM will not rename folders automatically."
+    return [pscustomobject]$result
+}
+
 # True when two paths are the same location or one contains the other. This is
 # deliberately symmetric: a staging folder must not be inside a protected
 # folder, and it must not be a parent that would pull a protected folder into
@@ -7347,8 +7563,43 @@ function Get-BepInExRuntimeInventory {
     param(
         [string]$ProfileCode,
         [string]$ExeDir,
-        [string]$CacheDir = ''
+        [string]$CacheDir = '',
+        [string]$GamePath = '',
+        [string]$AuthorizedGamesRoot = ''
     )
+
+    $authorization = $null
+    if (-not [string]::IsNullOrWhiteSpace($GamePath) -or
+        -not [string]::IsNullOrWhiteSpace($AuthorizedGamesRoot)) {
+        $authorization = Get-TpmAuthorizedGamePath -GamePath $GamePath -AuthorizedGamesRoot $AuthorizedGamesRoot
+        if (-not $authorization.Authorized) {
+            $unsupportedStates = @('OutsideAuthorizedRoot', 'NotLeaf', 'ReparsePoint', 'Unsupported')
+            $inventoryState = if ($unsupportedStates -contains $authorization.State) { 'UnsupportedPath' } else { 'UnknownAuthorization' }
+            return [pscustomobject][ordered]@{
+                Code                 = $ProfileCode
+                State                = $inventoryState
+                ActionRequired       = $true
+                Findings             = @("BepInEx inspection/update is not offered: $($authorization.Reason)")
+                Root                 = $null
+                GamePath             = $GamePath
+                AuthorizedGamesRoot  = $AuthorizedGamesRoot
+                AuthorizationState   = $authorization.State
+                AuthorizationReason  = $authorization.Reason
+                InstalledVersion     = $null
+                Architecture        = $null
+                CachedLatestVersion  = $null
+                CachedArchivePath    = $null
+                Files                = [ordered]@{
+                    CoreDll = $false
+                    Doorstop = $false
+                    DoorstopConfig = $false
+                    DoorstopVersion = $false
+                    Changelog = $false
+                }
+            }
+        }
+        $ExeDir = $authorization.ExeDir
+    }
 
     $bepRoot = Join-Path $ExeDir 'BepInEx'
     $coreDll = Join-Path $bepRoot 'core\BepInEx.dll'
@@ -7357,18 +7608,28 @@ function Get-BepInExRuntimeInventory {
     $doorstopVersion = Join-Path $ExeDir '.doorstop_version'
     $changelog = Join-Path $ExeDir 'changelog.txt'
     $anyMarker = (Test-Path -LiteralPath $bepRoot) -or (Test-Path -LiteralPath $doorstop) -or
-                 (Test-Path -LiteralPath $doorstopConfig) -or (Test-Path -LiteralPath $doorstopVersion)
+                 (Test-Path -LiteralPath $doorstopConfig) -or (Test-Path -LiteralPath $doorstopVersion) -or
+                 (Test-Path -LiteralPath $changelog)
+    $changelogOnly = (Test-Path -LiteralPath $changelog -PathType Leaf) -and
+        -not (Test-Path -LiteralPath $coreDll -PathType Leaf) -and
+        -not (Test-Path -LiteralPath $doorstop -PathType Leaf) -and
+        -not (Test-Path -LiteralPath $doorstopConfig -PathType Leaf) -and
+        -not (Test-Path -LiteralPath $doorstopVersion -PathType Leaf)
     $result = [ordered]@{
-        Code = $ProfileCode
-        State = 'NotInstalled'
-        ActionRequired = $false
-        Findings = @()
-        Root = $bepRoot
-        InstalledVersion = $null
-        Architecture = $null
+        Code                = $ProfileCode
+        State               = 'NotInstalled'
+        ActionRequired      = $false
+        Findings            = @()
+        Root                = $bepRoot
+        GamePath            = if ($authorization) { $authorization.GamePath } else { $GamePath }
+        AuthorizedGamesRoot = if ($authorization) { $authorization.RootPath } else { $AuthorizedGamesRoot }
+        AuthorizationState  = if ($authorization) { $authorization.State } else { 'NotChecked' }
+        AuthorizationReason = if ($authorization) { $authorization.Reason } else { 'Direct inventory call without update authorization context' }
+        InstalledVersion    = $null
+        Architecture        = $null
         CachedLatestVersion = $null
-        CachedArchivePath = $null
-        Files = [ordered]@{
+        CachedArchivePath   = $null
+        Files               = [ordered]@{
             CoreDll = (Test-Path -LiteralPath $coreDll -PathType Leaf)
             Doorstop = (Test-Path -LiteralPath $doorstop -PathType Leaf)
             DoorstopConfig = (Test-Path -LiteralPath $doorstopConfig -PathType Leaf)
@@ -7422,6 +7683,11 @@ function Get-BepInExRuntimeInventory {
         $result.ActionRequired = $true
         $result.Findings += "Installed BepInEx $installedVersion is older than local cached release $($cached.Version)."
     }
+    if ($changelogOnly) {
+        $result.State = 'StaleResidue'
+        $result.ActionRequired = $true
+        $result.Findings += 'Only BepInEx changelog residue was found; the runtime is incomplete or stale and is not treated as NotInstalled.'
+    }
 
     return [pscustomobject]$result
 }
@@ -7436,8 +7702,24 @@ function Invoke-BepInExTransactionalInstall {
         [string]$ZipPath,
         [string]$ExeDir,
         [string]$Code,
-        [string]$ExpectedVersion = ''
+        [string]$ExpectedVersion = '',
+        [string]$GamePath = '',
+        [string]$AuthorizedGamesRoot = ''
     )
+
+    $authorization = Get-TpmAuthorizedGamePath -GamePath $GamePath -AuthorizedGamesRoot $AuthorizedGamesRoot
+    if (-not $authorization.Authorized) {
+        throw "BepInEx transaction refused before staging: $($authorization.State) -- $($authorization.Reason)"
+    }
+    try {
+        $canonicalExeDir = [System.IO.Path]::GetFullPath($ExeDir).TrimEnd('\','/')
+        $authorizedExeDir = [System.IO.Path]::GetFullPath($authorization.ExeDir).TrimEnd('\','/')
+        if ($canonicalExeDir -ine $authorizedExeDir) {
+            throw "transaction target directory '$ExeDir' does not match the authorized GamePath directory '$($authorization.ExeDir)'"
+        }
+    } catch {
+        throw "BepInEx transaction refused before staging: $_"
+    }
 
     $ownedItems = @('BepInEx', 'doorstop_config.ini', 'winhttp.dll', '.doorstop_version', 'changelog.txt')
     $stagingDir = New-TpmStagingDirectory -Label ('BepInEx-' + $Code)
@@ -7544,7 +7826,19 @@ function Invoke-BepInExTransactionalInstall {
 # update for everything outdated. Never touches a game without BepInEx
 # already installed, and never touches an x86 install (policy: x64 only).
 function Invoke-BepInExUpdateCheck {
-    param([string]$UserProfilesDir, [string]$CacheDir)
+    param(
+        [string]$UserProfilesDir,
+        [string]$CacheDir,
+        [string]$AuthorizedGamesRoot = ''
+    )
+
+    $rootAuthorization = Get-TpmAuthorizedGamesRoot -GamesRoot $AuthorizedGamesRoot
+    if (-not $rootAuthorization.Authorized) {
+        Write-Host ("  ACTION REQUIRED: BepInEx updates are disabled because the games root is not authorized ({0})." -f $rootAuthorization.Reason) -ForegroundColor Yellow
+        Write-Log "BepInEx update check: SECURITY -- no update offered because the authorized games root could not be proven. State=$($rootAuthorization.State) Reason=$($rootAuthorization.Reason)"
+        return
+    }
+    $AuthorizedGamesRoot = $rootAuthorization.RootPath
 
     Write-Host ""
     Write-Host "  Checking the latest stable BepInEx release..." -ForegroundColor DarkGray
@@ -7554,9 +7848,9 @@ function Invoke-BepInExUpdateCheck {
         Write-Log "BepInEx update check: aborted -- release query failed."
         return
     }
-    if ([string]::IsNullOrWhiteSpace($latest.ExpectedSha256)) {
-        Write-Host "  The selected BepInEx release has no published SHA-256 digest -- no update will be applied." -ForegroundColor Yellow
-        Write-Log "BepInEx update check: SECURITY -- release asset has no published SHA-256 digest; refusing to apply."
+    if (-not (Test-TpmSha256Hex -Hash ([string]$latest.ExpectedSha256))) {
+        Write-Host "  The selected BepInEx release has no valid SHA-256 digest -- no update will be applied." -ForegroundColor Yellow
+        Write-Log "BepInEx update check: SECURITY -- release asset has a missing or malformed SHA-256 digest; refusing to apply."
         return
     }
     Write-Host ("  Latest stable: {0}" -f $latest.Version) -ForegroundColor DarkGray
@@ -7569,17 +7863,33 @@ function Invoke-BepInExUpdateCheck {
         return
     }
 
-    $outdated = @(); $upToDate = 0; $skippedX86 = 0; $errors = 0
+    $outdated = @(); $upToDate = 0; $skippedX86 = 0; $blocked = 0; $errors = 0
 
     foreach ($pf in $profiles) {
         try {
             $doc = Read-Xml $pf.FullName
-            if (-not $doc.GameProfile) { continue }
+            if (-not $doc.GameProfile) {
+                $blocked++
+                Write-Host ("  ACTION REQUIRED: {0} has no GameProfile element; BepInEx update was not offered." -f $pf.BaseName) -ForegroundColor Yellow
+                Write-Log "BepInEx update check: no update offered for $($pf.BaseName) because the GameProfile element is missing."
+                continue
+            }
             $gpNode = $doc.GameProfile.SelectSingleNode("GamePath")
-            if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { continue }
+            if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) {
+                $blocked++
+                Write-Host ("  ACTION REQUIRED: {0} has no usable GamePath; BepInEx update was not offered." -f $pf.BaseName) -ForegroundColor Yellow
+                Write-Log "BepInEx update check: no update offered for $($pf.BaseName) because GamePath is missing or empty."
+                continue
+            }
             $gamePath = $gpNode.InnerText.Trim()
-            if (-not (Test-Path -LiteralPath $gamePath)) { continue }
-            $exeDir = [System.IO.Path]::GetDirectoryName($gamePath)
+            $authorization = Get-TpmAuthorizedGamePath -GamePath $gamePath -AuthorizedGamesRoot $AuthorizedGamesRoot
+            if (-not $authorization.Authorized) {
+                $blocked++
+                Write-Host ("  ACTION REQUIRED: {0} -- BepInEx update was not offered ({1})." -f $pf.BaseName, $authorization.Reason) -ForegroundColor Yellow
+                Write-Log "BepInEx update check: no update offered for $($pf.BaseName). AuthorizationState=$($authorization.State) Reason=$($authorization.Reason)"
+                continue
+            }
+            $exeDir = $authorization.ExeDir
 
             $installedVer = Get-BepInExInstalledVersion -ExeDir $exeDir
             if (-not $installedVer) { continue }   # BepInEx not installed here -- not relevant to this feature
@@ -7596,7 +7906,7 @@ function Invoke-BepInExUpdateCheck {
             if (-not [version]::TryParse($latest.Version, [ref]$latestParsed)) { continue }
 
             if ($instParsed -lt $latestParsed) {
-                $outdated += [pscustomobject]@{ Code = $pf.BaseName; ExeDir = $exeDir; Installed = $installedVer }
+                $outdated += [pscustomobject]@{ Code = $pf.BaseName; GamePath = $authorization.FullPath; ExeDir = $exeDir; Installed = $installedVer }
             } else {
                 $upToDate++
             }
@@ -7612,8 +7922,9 @@ function Invoke-BepInExUpdateCheck {
         if ($skippedX86 -gt 0) {
             Write-Host ("  32-bit (skipped): {0}  (this script only manages 64-bit installs)" -f $skippedX86) -ForegroundColor DarkGray
         }
+        if ($blocked -gt 0) { Write-Host ("  Action required: {0} game(s) were not eligible for an update" -f $blocked) -ForegroundColor Yellow }
         if ($errors -gt 0) { Write-Host ("  Errors      : {0}" -f $errors) -ForegroundColor Red }
-        Write-Log ("BepInEx update check: complete. UpToDate={0} 32bitSkipped={1} Errors={2}" -f $upToDate, $skippedX86, $errors)
+        Write-Log ("BepInEx update check: complete. UpToDate={0} 32bitSkipped={1} Blocked={2} Errors={3}" -f $upToDate, $skippedX86, $blocked, $errors)
         return
     }
 
@@ -7652,7 +7963,7 @@ function Invoke-BepInExUpdateCheck {
     foreach ($o in $outdated) {
         try {
             $transaction = Invoke-BepInExTransactionalInstall -ZipPath $zipPath -ExeDir $o.ExeDir `
-                -Code $o.Code -ExpectedVersion $latest.Version
+                -Code $o.Code -ExpectedVersion $latest.Version -GamePath $o.GamePath -AuthorizedGamesRoot $AuthorizedGamesRoot
             $backupPath = $transaction.BackupPath
             Write-Host ("    OK    {0}  ({1} -> {2})" -f $o.Code, $o.Installed, $latest.Version) -ForegroundColor Green
             Write-Log "BepInEx: updated $($o.Code) from $($o.Installed) to $($latest.Version) (backup: $backupPath)"
@@ -7668,8 +7979,9 @@ function Invoke-BepInExUpdateCheck {
     Write-Host ("  Updated     : {0} game(s)" -f $updated) -ForegroundColor Green
     if ($upToDate -gt 0) { Write-Host ("  Up to date  : {0}" -f $upToDate) -ForegroundColor DarkGray }
     if ($skippedX86 -gt 0) { Write-Host ("  32-bit (skipped): {0}" -f $skippedX86) -ForegroundColor DarkGray }
+    if ($blocked -gt 0) { Write-Host ("  Action required: {0} game(s) were not eligible for an update" -f $blocked) -ForegroundColor Yellow }
     if ($updateErrors -gt 0) { Write-Host ("  Errors      : {0} -- see log for details" -f $updateErrors) -ForegroundColor Red }
-    Write-Log ("BepInEx update check: complete. Updated={0} UpToDate={1} 32bitSkipped={2} Errors={3}" -f $updated, $upToDate, $skippedX86, $updateErrors)
+    Write-Log ("BepInEx update check: complete. Updated={0} UpToDate={1} 32bitSkipped={2} Blocked={3} Errors={4}" -f $updated, $upToDate, $skippedX86, $blocked, $updateErrors)
 }
 
 # =============================================================================
@@ -8255,6 +8567,7 @@ function Register-Games {
     $_regTotal = $exeFiles.Count
     $_regI     = 0
 
+    try {
     foreach ($exe in $exeFiles) {
         $_regI++
         if ($_regTotal -gt 0) {
@@ -8586,9 +8899,12 @@ function Register-Games {
             Write-Log "Register FAILED $code -- $_"
         }
     }
-    # Id 44 belongs to registration scanning. Complete it before any later
-    # phase (including post-AutoSync summaries) begins.
-    Write-Progress -Id 44 -Activity "Scanning game library" -Completed
+    } finally {
+        # Id 44 belongs to registration scanning. Complete it before any later
+        # phase (including post-AutoSync summaries) begins, including when the
+        # scan faults before its normal tail is reached.
+        Write-Progress -Id 44 -Activity "Scanning game library" -Completed
+    }
 
     # Second pass: folders that had recognisable executables but none of them were
     # in $profileIndex (no exe->profile mapping). These are typically games whose
@@ -9021,6 +9337,7 @@ function Invoke-LibraryHealthCheck {
     $valid = New-Object System.Collections.ArrayList
     $broken = New-Object System.Collections.ArrayList
     $empty = New-Object System.Collections.ArrayList
+    $launchPathRisks = New-Object System.Collections.ArrayList
 
     foreach ($pf in $profiles) {
         try {
@@ -9028,6 +9345,16 @@ function Invoke-LibraryHealthCheck {
             if (-not $doc.GameProfile) { [void]$broken.Add($pf.BaseName); continue }
             $gpNode  = $doc.GameProfile.SelectSingleNode("GamePath")
             $curPath = if ($gpNode) { $gpNode.InnerText.Trim() } else { "" }
+            $emulatorNode = $doc.GameProfile.SelectSingleNode("EmulatorType")
+            $emulatorType = if ($emulatorNode) { $emulatorNode.InnerText.Trim() } else { '' }
+            foreach ($pathField in @('GamePath', 'GamePath2')) {
+                $pathNode = $doc.GameProfile.SelectSingleNode($pathField)
+                if ($pathNode -and -not [string]::IsNullOrWhiteSpace($pathNode.InnerText)) {
+                    $pathRisk = Get-LaunchPathRisk -ProfileCode $pf.BaseName -GamePath $pathNode.InnerText.Trim() `
+                        -EmulatorType $emulatorType -PathField $pathField
+                    if ($pathRisk.ActionRequired) { [void]$launchPathRisks.Add($pathRisk) }
+                }
+            }
             if ([string]::IsNullOrWhiteSpace($curPath)) {
                 [void]$empty.Add($pf.BaseName)
             } elseif (Test-Path -LiteralPath $curPath) {
@@ -9060,6 +9387,21 @@ function Invoke-LibraryHealthCheck {
         Write-Host ""
         Write-Host "  Run Register only (mode 2) or AutoSync (mode 1) and choose Repair" -ForegroundColor DarkCyan
         Write-Host "  to fix broken paths automatically where possible." -ForegroundColor DarkCyan
+    }
+    if ($launchPathRisks.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  ACTION REQUIRED: LAUNCH PATH RISK" -ForegroundColor Yellow
+        Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
+        Write-Host "  These pcsx2x6 paths contain a standalone hyphen or argument-like token" -ForegroundColor DarkCyan
+        Write-Host "  may become a separate command-line argument if the launch path is" -ForegroundColor DarkCyan
+        Write-Host "  not quoted. Keep the complete path quoted and test direct and" -ForegroundColor DarkCyan
+        Write-Host "  frontend launches separately. TPM will not rename folders." -ForegroundColor DarkCyan
+        foreach ($risk in ($launchPathRisks | Sort-Object Code, PathField)) {
+            Write-Host ("  Game       : {0} ({1})" -f $risk.Code, $risk.PathField) -ForegroundColor Yellow
+            Write-Host ("  Path       : {0}" -f $risk.GamePath) -ForegroundColor DarkGray
+            Write-Host ("  Token(s)   : {0}" -f ($risk.RiskTokens -join ', ')) -ForegroundColor Cyan
+            Write-Host ("  Guidance   : {0}" -f $risk.Guidance) -ForegroundColor DarkCyan
+        }
     }
 
     # -- Optional-setup coverage: GPU fix + FFB Blaster -------------------------
@@ -9193,8 +9535,8 @@ function Invoke-LibraryHealthCheck {
         } catch {}
     }
 
-    Write-Log ("HealthCheck: total={0} valid={1} broken={2} empty={3} gpuFixNeeded={4} ffbBlasterNeeded={5} dgVoodoo2Needed={6} reShadeCount={7} bepInExCount={8}" -f `
-        $profiles.Count, $valid.Count, $broken.Count, $empty.Count, $gpuFixNeeded.Count, $ffbBlasterNeeded.Count, $dgVoodoo2Needed.Count, $reShadeCount, $bepInExCount)
+    Write-Log ("HealthCheck: total={0} valid={1} broken={2} empty={3} launchPathRisks={4} gpuFixNeeded={5} ffbBlasterNeeded={6} dgVoodoo2Needed={7} reShadeCount={8} bepInExCount={9}" -f `
+        $profiles.Count, $valid.Count, $broken.Count, $empty.Count, $launchPathRisks.Count, $gpuFixNeeded.Count, $ffbBlasterNeeded.Count, $dgVoodoo2Needed.Count, $reShadeCount, $bepInExCount)
 }
 
 # =============================================================================
@@ -9524,7 +9866,7 @@ function Get-GameSetupNotes {
 }
 
 # Read-only scan for all compatibility checks above. Returns
-# [pscustomobject]@{ PathTooLong = @(...); DllMismatch = @(...); GpuIncompatible = @(...); BiosMissing = @(...); ExeMissing = @(...) }.
+# [pscustomobject]@{ PathTooLong = @(...); DllMismatch = @(...); GpuIncompatible = @(...); BiosMissing = @(...); ExeMissing = @(...); LaunchPathRisk = @(...) }.
 # Each PathTooLong entry: @{ Code; Length; Limit; Suggested }.
 # Each DllMismatch entry: @{ Code; FileName; Found; Required }.
 # Each GpuIncompatible entry: @{ Code; Vendor }.
@@ -9532,6 +9874,9 @@ function Get-GameSetupNotes {
 # Each ExeMissing/ComponentMissing entry: @{ EmulatorType; ContractId;
 # ContractStatus; Confidence; ContractBacked; CapabilityId; ExpectedPath;
 # DetectorMethod; DetectorSource; AffectedProfiles; AffectedGames }.
+# Each LaunchPathRisk entry is a read-only warning for a GamePath or GamePath2
+# containing a standalone hyphen or argument-like token that may be split into
+# a separate argv value when an emulator/frontend launch path is unquoted.
 function Get-CompatibilityWarnings {
     param([string]$UserProfilesDir, [string]$TeknoParrotRoot = '')
 
@@ -9540,6 +9885,7 @@ function Get-CompatibilityWarnings {
     $gpuIncompatible = @()
     $biosMissing  = @()
     $exeMissing   = @()
+    $launchPathRisk = @()
 
     # Best-effort, silent GPU detection -- never prompts. If undetected
     # (or vendor is NVIDIA, which has no known-broken titles here), the
@@ -9557,10 +9903,22 @@ function Get-CompatibilityWarnings {
         $code = $pf.BaseName
         $relevant = $RawThrillsPathLimits.ContainsKey($code) -or $FileVersionPins.ContainsKey($code) -or
                     ($gpuList -and $gpuList.Contains($code))
-        if (-not $relevant) { continue }
         try {
             $doc = Read-Xml $pf.FullName
             if (-not $doc.GameProfile) { continue }
+
+            $emulatorNode = $doc.GameProfile.SelectSingleNode("EmulatorType")
+            $emulatorType = if ($emulatorNode) { $emulatorNode.InnerText.Trim() } else { '' }
+            foreach ($pathField in @('GamePath', 'GamePath2')) {
+                $pathNode = $doc.GameProfile.SelectSingleNode($pathField)
+                if ($pathNode -and -not [string]::IsNullOrWhiteSpace($pathNode.InnerText)) {
+                    $pathRisk = Get-LaunchPathRisk -ProfileCode $code -GamePath $pathNode.InnerText.Trim() `
+                        -EmulatorType $emulatorType -PathField $pathField
+                    if ($pathRisk.ActionRequired) { $launchPathRisk += $pathRisk }
+                }
+            }
+
+            if (-not $relevant) { continue }
             $gpNode = $doc.GameProfile.SelectSingleNode("GamePath")
             if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { continue }
             $curPath = $gpNode.InnerText.Trim()
@@ -9671,7 +10029,7 @@ function Get-CompatibilityWarnings {
     # #254 callers/tests; its entries now represent any contract-declared
     # required component, not only an executable. ComponentMissing is the
     # general semantic alias for new callers.
-    return [pscustomobject]@{ PathTooLong = $pathTooLong; DllMismatch = $dllMismatch; GpuIncompatible = $gpuIncompatible; BiosMissing = $biosMissing; ExeMissing = $exeMissing; ComponentMissing = $exeMissing }
+    return [pscustomobject]@{ PathTooLong = $pathTooLong; DllMismatch = $dllMismatch; GpuIncompatible = $gpuIncompatible; BiosMissing = $biosMissing; ExeMissing = $exeMissing; ComponentMissing = $exeMissing; LaunchPathRisk = $launchPathRisk }
 }
 
 # =============================================================================
@@ -12744,6 +13102,75 @@ function Get-ValidationReportPaths {
     }
 }
 
+# Report files are the one intentional write surface of validation mode. An
+# existing path is overwriteable only when it already identifies itself as a
+# TPM validation report; arbitrary application/user files, reparse targets,
+# and redirected parent folders are refused before any report write occurs.
+function Test-ValidationReportOutputPath {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return [pscustomobject]@{ Valid = $false; Path = $Path; Reason = 'the validation report path is empty' }
+    }
+    try {
+        $fullPath = [System.IO.Path]::GetFullPath($Path)
+    } catch {
+        return [pscustomobject]@{ Valid = $false; Path = $Path; Reason = "the validation report path is malformed: $($_.Exception.Message)" }
+    }
+
+    $existingFile = [System.IO.File]::Exists($fullPath)
+    $existingDirectory = [System.IO.Directory]::Exists($fullPath)
+    if ($existingDirectory) {
+        return [pscustomobject]@{ Valid = $false; Path = $fullPath; Reason = "the validation report path is a directory: $fullPath" }
+    }
+    if ($existingFile) {
+        try {
+            $item = Get-Item -LiteralPath $fullPath -Force -ErrorAction Stop
+            if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                return [pscustomobject]@{ Valid = $false; Path = $fullPath; Reason = "the validation report path is a reparse/redirected file: $fullPath" }
+            }
+            $recognized = $false
+            if ([System.IO.Path]::GetExtension($fullPath).ToLowerInvariant() -eq '.json') {
+                try {
+                    $existingReport = Get-Content -LiteralPath $fullPath -Raw -ErrorAction Stop | ConvertFrom-Json
+                    $recognized = ($existingReport.ReportType -eq 'TeknoParrotManager.Validation')
+                } catch {}
+            } elseif ([System.IO.Path]::GetExtension($fullPath).ToLowerInvariant() -eq '.txt') {
+                try {
+                    $firstLine = Get-Content -LiteralPath $fullPath -TotalCount 1 -ErrorAction Stop
+                    $recognized = ([string]$firstLine -eq 'TeknoParrot Manager validation report')
+                } catch {}
+            }
+            if (-not $recognized) {
+                return [pscustomobject]@{ Valid = $false; Path = $fullPath; Reason = "the validation report path already contains an unrelated file; refusing to overwrite: $fullPath" }
+            }
+        } catch {
+            return [pscustomobject]@{ Valid = $false; Path = $fullPath; Reason = "the validation report path could not be inspected safely: $($_.Exception.Message)" }
+        }
+    }
+
+    try {
+        $parentPath = [System.IO.Path]::GetDirectoryName($fullPath)
+        while (-not [string]::IsNullOrWhiteSpace($parentPath)) {
+            if (-not [string]::IsNullOrWhiteSpace($parentPath) -and
+                [System.IO.Directory]::Exists($parentPath)) {
+                $parentItem = [System.IO.DirectoryInfo]::new($parentPath)
+                if (($parentItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    return [pscustomobject]@{ Valid = $false; Path = $fullPath; Reason = "the validation report parent is a reparse/redirected folder: $parentPath" }
+                }
+            }
+            $nextParent = [System.IO.Path]::GetDirectoryName($parentPath.TrimEnd('\','/'))
+            if ([string]::IsNullOrWhiteSpace($nextParent)) { break }
+            if ($nextParent -eq $parentPath) { break }
+            $parentPath = $nextParent
+        }
+    } catch {
+        return [pscustomobject]@{ Valid = $false; Path = $fullPath; Reason = "the validation report parent could not be inspected safely: $($_.Exception.Message)" }
+    }
+
+    return [pscustomobject]@{ Valid = $true; Path = $fullPath; Reason = $null }
+}
+
 # Read-only equivalent of the interactive library health summary. It returns
 # structured profile records so validation/report mode can distinguish valid,
 # broken, and empty GamePath values without printing the interactive repair
@@ -12838,12 +13265,23 @@ function Invoke-ValidationReport {
 
     $script:ValidationReportMode = $true
     $reportPaths = Get-ValidationReportPaths -RequestedPath $RequestedPath -BaseDirectory $BaseDirectory
+    $reportPathError = $null
+    foreach ($reportOutputPath in @($reportPaths.JsonPath, $reportPaths.TextPath)) {
+        $reportOutputStatus = Test-ValidationReportOutputPath -Path $reportOutputPath
+        if (-not $reportOutputStatus.Valid) {
+            $reportPathError = $reportOutputStatus.Reason
+            break
+        }
+    }
     $base = if ([string]::IsNullOrWhiteSpace($BaseDirectory)) { (Get-Location).Path } else { $BaseDirectory }
     try { $base = [System.IO.Path]::GetFullPath($base) } catch {}
 
     $errors = New-Object System.Collections.ArrayList
     $warnings = New-Object System.Collections.ArrayList
     $actions = New-Object System.Collections.ArrayList
+    if ($reportPathError) {
+        [void]$errors.Add($reportPathError)
+    }
     $configState = 'Missing'
     $cfg = $null
 
@@ -12981,7 +13419,8 @@ function Invoke-ValidationReport {
     }
 
     $controlItems = @()
-    if (Test-Path -LiteralPath $userProfilesDir -PathType Container) {
+    if (-not [string]::IsNullOrWhiteSpace($userProfilesDir) -and
+        (Test-Path -LiteralPath $userProfilesDir -PathType Container)) {
         try {
             $controlItems = @(Get-ControlReadinessActionItems -UserProfilesDir $userProfilesDir `
                 -GameProfilesDir $gameProfilesDir -TeknoParrotRoot $resolvedRoot)
@@ -13025,7 +13464,8 @@ function Invoke-ValidationReport {
     $compatibility = [pscustomobject]@{
         PathTooLong = @(); DllMismatch = @(); GpuIncompatible = @(); BiosMissing = @(); ExeMissing = @(); ComponentMissing = @()
     }
-    if (Test-Path -LiteralPath $userProfilesDir -PathType Container) {
+    if (-not [string]::IsNullOrWhiteSpace($userProfilesDir) -and
+        (Test-Path -LiteralPath $userProfilesDir -PathType Container)) {
         try {
             $compatibility = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $resolvedRoot
         } catch {
@@ -13033,7 +13473,7 @@ function Invoke-ValidationReport {
         }
     }
 
-    $compatibilityFields = @('PathTooLong', 'DllMismatch', 'GpuIncompatible', 'BiosMissing', 'ExeMissing', 'ComponentMissing')
+    $compatibilityFields = @('LaunchPathRisk', 'PathTooLong', 'DllMismatch', 'GpuIncompatible', 'BiosMissing', 'ExeMissing', 'ComponentMissing')
     foreach ($field in $compatibilityFields) {
         foreach ($finding in @($compatibility.$field)) {
             [void]$actions.Add([pscustomobject]@{
@@ -13065,13 +13505,15 @@ function Invoke-ValidationReport {
                 })
             }
 
-            $bepState = Get-BepInExRuntimeInventory -ProfileCode $validProfile.Code -ExeDir $exeDir -CacheDir $bepInExCacheDir
+            $bepState = Get-BepInExRuntimeInventory -ProfileCode $validProfile.Code -ExeDir $exeDir -CacheDir $bepInExCacheDir -GamePath $gamePath -AuthorizedGamesRoot $resolvedGames
             [void]$bepInExInventory.Add($bepState)
             if ($bepState.ActionRequired) {
                 [void]$actions.Add([pscustomobject]@{
                     Category = 'BepInExRuntime'; Code = $validProfile.Code; Status = $bepState.State
                     InstalledVersion = $bepState.InstalledVersion; Architecture = $bepState.Architecture
-                    CachedLatestVersion = $bepState.CachedLatestVersion; Detail = ($bepState.Findings -join '; ')
+                    CachedLatestVersion = $bepState.CachedLatestVersion
+                    AuthorizationState = $bepState.AuthorizationState
+                    Detail = ($bepState.Findings -join '; ')
                 })
             }
         } catch {
@@ -13146,7 +13588,7 @@ function Invoke-ValidationReport {
         ActionRequired = @($actions)
         Warnings = @($warnings)
         Errors = @($errors)
-        WriteMode = 'ReadOnly except report files'
+        WriteMode = if ($reportPathError) { 'ReadOnly; report output refused before write' } else { 'ReadOnly except report files' }
         NetworkAccess = 'Not requested'
         GameLaunchRequested = $false
         ApplicationFilesChanged = @()
@@ -13161,6 +13603,10 @@ function Invoke-ValidationReport {
         $report.Result = 'ACTION_REQUIRED'
         $report.ExitCode = 2
     }
+    if ($reportPathError) {
+        $report.Result = 'REPORT_ERROR'
+        $report.ExitCode = 4
+    }
 
     $humanLines = New-Object System.Collections.ArrayList
     [void]$humanLines.Add('TeknoParrot Manager validation report')
@@ -13170,6 +13616,7 @@ function Invoke-ValidationReport {
     [void]$humanLines.Add(('Games install folder: {0}' -f $(if ($resolvedGames) { $resolvedGames } else { 'not resolved' })))
     [void]$humanLines.Add(('Profiles            : {0} total; {1} valid; {2} broken; {3} empty' -f $profileHealth.Total, @($profileHealth.Valid).Count, @($profileHealth.Broken).Count, @($profileHealth.Empty).Count))
     [void]$humanLines.Add(('Controls action items: {0}' -f @($controlReports).Count))
+    [void]$humanLines.Add(('Launch path risks   : {0} action item(s)' -f (@($actions | Where-Object { $_.Code -eq 'LaunchPathRisk' }).Count)))
     [void]$humanLines.Add(('ReShade runtimes    : {0} inspected; {1} action item(s)' -f @($reShadeInventory).Count, (@($actions | Where-Object { $_.Category -eq 'ReShadeRuntime' }).Count)))
     [void]$humanLines.Add(('BepInEx runtimes    : {0} inspected; {1} action item(s)' -f @($bepInExInventory).Count, (@($actions | Where-Object { $_.Category -eq 'BepInExRuntime' }).Count)))
     [void]$humanLines.Add(('Compatibility items  : {0}' -f (@($actions | Where-Object { $_.Category -eq 'Compatibility' }).Count)))
@@ -13198,16 +13645,21 @@ function Invoke-ValidationReport {
 
     $report.HumanSummary = @($humanLines)
     $writeError = $null
-    try {
-        $json = $report | ConvertTo-Json -Depth 12
-        [System.IO.File]::WriteAllText($reportPaths.JsonPath, $json, (New-Object System.Text.UTF8Encoding $false))
-        [System.IO.File]::WriteAllText($reportPaths.TextPath, ($humanLines -join [Environment]::NewLine), (New-Object System.Text.UTF8Encoding $false))
-    } catch {
-        $writeError = $_.Exception.Message
-        $report.Result = 'REPORT_ERROR'
-        $report.ExitCode = 4
-        $report.Errors = @($report.Errors + "Could not write validation report: $writeError")
-        $report.HumanSummary = @($humanLines + '' + "Could not write validation report: $writeError")
+    if ($reportPathError) {
+        $writeError = $reportPathError
+        $report.HumanSummary = @($humanLines + '' + "Validation report output refused before write: $reportPathError")
+    } else {
+        try {
+            $json = $report | ConvertTo-Json -Depth 12
+            [System.IO.File]::WriteAllText($reportPaths.JsonPath, $json, (New-Object System.Text.UTF8Encoding $false))
+            [System.IO.File]::WriteAllText($reportPaths.TextPath, ($humanLines -join [Environment]::NewLine), (New-Object System.Text.UTF8Encoding $false))
+        } catch {
+            $writeError = $_.Exception.Message
+            $report.Result = 'REPORT_ERROR'
+            $report.ExitCode = 4
+            $report.Errors = @($report.Errors + "Could not write validation report: $writeError")
+            $report.HumanSummary = @($humanLines + '' + "Could not write validation report: $writeError")
+        }
     }
 
     $script:ValidationReportMode = $false
@@ -15712,7 +16164,7 @@ while ($true) {
         Write-Host "  game's folder, then reinstall."
 
         $bepInExCacheDir = Join-Path $PSScriptRoot "BepInExCache"
-        Invoke-BepInExUpdateCheck -UserProfilesDir $userProfilesDir -CacheDir $bepInExCacheDir
+        Invoke-BepInExUpdateCheck -UserProfilesDir $userProfilesDir -CacheDir $bepInExCacheDir -AuthorizedGamesRoot $gamesInstallFolder
 
         Write-Host ""
         Write-Host "Done." -ForegroundColor Green
@@ -17006,6 +17458,7 @@ $hasAnyAction = ($manualRegData.Count -gt 0) -or ($amb2.Count -gt 0) -or
                 ($nf.Count -gt 0) -or ($noArchetypeItems.Count -gt 0) -or
                 ($result.Unmatched.Count -gt 0) -or
                 ($controlReadinessItems.Count -gt 0) -or
+                ($compatWarnings.LaunchPathRisk.Count -gt 0) -or
                 ($compatWarnings.PathTooLong.Count -gt 0) -or
                 ($compatWarnings.DllMismatch.Count -gt 0) -or
                 ($compatWarnings.GpuIncompatible.Count -gt 0) -or
@@ -17159,7 +17612,29 @@ if ($hasAnyAction) {
         Write-Host ""
     }
 
-    # -- 6. Raw Thrills games whose install path is too long ------------------
+    # -- 6. Launch paths that may split a hyphen/switch into argv ------------
+    if ($compatWarnings.LaunchPathRisk.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  LAUNCH PATH RISK -- QUOTE BEFORE LAUNCH" -ForegroundColor Yellow
+        Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
+        Write-Host "  These pcsx2x6 game/executable paths contain a standalone hyphen or an" -ForegroundColor DarkCyan
+        Write-Host "  argument-like token that may become a separate command-line value" -ForegroundColor DarkCyan
+        Write-Host "  when a TeknoParrot or frontend launch path is not quoted." -ForegroundColor DarkCyan
+        Write-Host "  Keep the complete path quoted and test direct and frontend launches" -ForegroundColor DarkCyan
+        Write-Host "  separately. This is not a BIOS diagnosis unless an observed launch" -ForegroundColor DarkCyan
+        Write-Host "  error explicitly names BIOS. TPM will not rename folders automatically." -ForegroundColor DarkCyan
+        Write-Host ""
+        foreach ($w in ($compatWarnings.LaunchPathRisk | Sort-Object Code, PathField)) {
+            Write-Host ("  Game       : {0} ({1})" -f $w.Code, $w.PathField) -ForegroundColor Yellow
+            Write-Host ("  Emulator   : {0}" -f $(if ($w.EmulatorType) { $w.EmulatorType } else { 'not declared' })) -ForegroundColor DarkGray
+            Write-Host ("  Path       : {0}" -f $w.GamePath) -ForegroundColor DarkGray
+            Write-Host ("  Token(s)   : {0}" -f ($w.RiskTokens -join ', ')) -ForegroundColor Cyan
+            Write-Host ("  Guidance   : {0}" -f $w.Guidance) -ForegroundColor DarkCyan
+            Write-Host ""
+        }
+    }
+
+    # -- 7. Raw Thrills games whose install path is too long ------------------
     if ($compatWarnings.PathTooLong.Count -gt 0) {
         Write-Host ""
         Write-Host "  PATH TOO LONG -- THESE GAMES MAY FAIL TO LAUNCH" -ForegroundColor Yellow
@@ -17411,6 +17886,23 @@ if ($hasAnyAction) {
             [void]$asb.AppendLine("  Game        : $($w.Code)")
             [void]$asb.AppendLine("  Current path: $($w.Length) characters (limit ~$($w.Limit))")
             [void]$asb.AppendLine("  Rename to   : $($w.Suggested)")
+        }
+    }
+    if ($compatWarnings.LaunchPathRisk.Count -gt 0) {
+        [void]$asb.AppendLine(""); [void]$asb.AppendLine("LAUNCH PATH RISK -- QUOTE BEFORE LAUNCH")
+        [void]$asb.AppendLine("----------------------------------------------------------")
+        [void]$asb.AppendLine("These pcsx2x6 game/executable paths contain a standalone hyphen or argument-like")
+        [void]$asb.AppendLine("token that may become a separate command-line value when unquoted.")
+        [void]$asb.AppendLine("Keep the complete path quoted and test direct and frontend launches separately.")
+        [void]$asb.AppendLine("This is not a BIOS diagnosis unless an observed launch error explicitly names BIOS.")
+        [void]$asb.AppendLine("TPM will not rename folders automatically.")
+        foreach ($w in ($compatWarnings.LaunchPathRisk | Sort-Object Code, PathField)) {
+            [void]$asb.AppendLine("")
+            [void]$asb.AppendLine("  Game       : $($w.Code) ($($w.PathField))")
+            [void]$asb.AppendLine("  Emulator   : $(if ($w.EmulatorType) { $w.EmulatorType } else { 'not declared' })")
+            [void]$asb.AppendLine("  Path       : $($w.GamePath)")
+            [void]$asb.AppendLine("  Token(s)   : $($w.RiskTokens -join ', ')")
+            [void]$asb.AppendLine("  Guidance   : $($w.Guidance)")
         }
     }
     if ($compatWarnings.DllMismatch.Count -gt 0) {
