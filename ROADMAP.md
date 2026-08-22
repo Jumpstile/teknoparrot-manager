@@ -132,6 +132,37 @@ hosting model, layout system, or implementation technology.
 The GUI must implement the approved Human-First Explainable Automation UI
 Contract.
 
+### LaunchBox and Big Box native plugin track
+
+A native LaunchBox / Big Box plugin is a desired post-1.0 front-end
+integration direction. It must keep TPM core as the source of truth rather than
+reimplementing profile, compatibility, backup, transaction, or verification
+logic in the plugin.
+
+PR #245 is Phase 0 feasibility evidence only. It is not a merge-ready
+implementation and must not be merged as-is. Any future implementation starts
+only after the Version 1.0 boundary and after revalidation against current
+`main`.
+
+The intended architecture is:
+
+```text
+LaunchBox / Big Box plugin
+        -> versioned JSON request/result contract
+        -> explicit non-interactive TPM entry point
+        -> existing TPM logic
+```
+
+Read-only health and status workflows come first. Write-capable or per-game
+actions require separate ownership definition, backup, preview, explicit
+approval, and effective-result verification before they can be implemented.
+The plugin must not bypass those gates or silently mutate LaunchBox, Big Box,
+TeknoParrot, or TPM-owned state.
+
+This roadmap entry is planning guidance only. It does not authorize merging
+PR #245, changing RC7 or final Version 1.0 scope, changing a package or tag,
+publishing a release, or publishing wiki changes.
+
 ### Glanceable first
 
 The default view must let a user answer at a glance:
