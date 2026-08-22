@@ -251,6 +251,29 @@ timestamps, versions, applicable ruleset, ownership decision, confidence,
 expected benefit, cost, maintenance impact, and unresolved risk. The same
 evidence must produce the same result for the same ruleset.
 
+### Arcade light-gun controller calibration and validation
+
+[#273 -- Plan full lightgun calibration and validation workflow](https://github.com/Jumpstile/teknoparrot-manager/issues/273)
+tracks post-1.0 design for a full arcade light-gun controller calibration and
+validation workflow. It depends on the CIP evidence model because it must
+separate physical/device evidence, device software readiness, TeknoParrot
+profile capability, UserProfile binding state, direct TeknoParrot launch,
+frontend launch behavior, game/operator-menu calibration, and actual in-game
+verification.
+
+The first acceptable slice is read-only evidence and guided user instruction:
+TPM may identify likely shooter profiles, inspect current input API and binding
+state, explain ownership boundaries, compare direct TeknoParrot launch against
+frontend launch where the user tests both, and record sanitized evidence. TPM
+must not claim calibration from launch success or crosshair presence alone.
+
+Write-capable correction is later work. It requires a separately approved
+ownership contract, preview, backup, explicit approval, containment checks, and
+effective-result verification. TPM must not automatically change Windows mouse
+settings, display scaling, device drivers, firmware, third-party device
+software, or TeknoParrot profiles based on generic advice or community-reported
+settings.
+
 ## Phase 4 -- EPIC Hardware Intelligence Platform (HIP)
 
 TPM should consume HIP as the authoritative hardware capability source rather
@@ -404,7 +427,8 @@ This roadmap does not authorize:
 - RC7 scope changes or release-package changes;
 - silent writes to emulator, runtime, user, hardware, provider, or HIP-owned
   state;
-- firmware, driver, licensing, or calibration changes; or
+- firmware, driver, licensing, calibration, third-party device-software, or
+  Windows-global input/display changes; or
 - autonomous runtime internet research, self-modifying compatibility logic, or
   ungoverned telemetry.
 
