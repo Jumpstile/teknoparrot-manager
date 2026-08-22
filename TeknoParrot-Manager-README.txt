@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC6
+  TeknoParrot Manager  |  v1.0 RC7
   Author: Jumpstile
 ===============================================================================
 
@@ -10,11 +10,11 @@
   This is a release candidate. Test one game after each run. Your profiles are
   backed up automatically at the start of every run.
 
-  v1.0 RC6 is the current published release candidate -- download it from
-  the GitHub Releases page. Final Version 1.0 remains unpublished; use RC6
-  for the current release candidate.
-  RC5 corrected a packaging defect in RC4 (a missing internal dependency file
-  degraded pcsx2x6 contract verification) and is superseded by RC6; use RC6.
+  v1.0 RC7 is the current source candidate (pre-publication; not yet
+  published). The RC7 tag/release does not exist yet. Last published release:
+  v1.0 RC6 (previous published release). Use the generic GitHub Releases page
+  for the latest published asset until RC7 is explicitly approved and released.
+  Final Version 1.0 remains unpublished.
 
   For a one-page version, see TeknoParrot-Manager-QuickStart.txt.
 
@@ -2459,6 +2459,7 @@
 
 
 ===============================================================================
-  v1.0 RC6 -- Test one game after each run.
+  v1.0 RC7 (pre-publication) -- Test one game after each run. Last published
+  release: v1.0 RC6.
   Profiles are backed up automatically at the start of every run.
 ===============================================================================

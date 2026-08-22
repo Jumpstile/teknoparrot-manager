@@ -6,18 +6,19 @@ TeknoParrot Manager is a Windows PowerShell tool for managing TeknoParrot arcade
 
 Canonical links: [GitHub repository](https://github.com/Jumpstile/teknoparrot-manager) | [Releases](https://github.com/Jumpstile/teknoparrot-manager/releases) | [Issue tracker](https://github.com/Jumpstile/teknoparrot-manager/issues)
 
-> **Published release candidate: v1.0 RC6** — onboarding flow simplification and dgVoodoo2/ReShade auto-download. Test one game after each run. Profiles are backed up automatically before every run.
+> **Current source candidate: v1.0 RC7 (pre-publication; not yet published)** -- read-only readiness and contract-backed compatibility warnings. Test one game after each run. Profiles are backed up automatically before every run. Last published release: v1.0 RC6.
 
 ---
 
-## Published Release Candidate: TeknoParrot Manager v1.0 RC6
+## Current Source Candidate: TeknoParrot Manager v1.0 RC7
 
-v1.0 RC6 is published and validated. Download the official
-[TeknoParrot Manager v1.0 RC6 release](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC6)
-from GitHub Releases. The published release is tagged `v1.0-RC6`.
+v1.0 RC7 is the current source candidate for pre-publication validation. It
+has not been published, so no RC7 tag or release URL is active. Use the
+[generic GitHub Releases page](https://github.com/Jumpstile/teknoparrot-manager/releases)
+only for published assets.
 
-v1.0 RC6 adds onboarding flow simplification and dgVoodoo2/ReShade
-auto-download.
+Last published release: v1.0 RC6 (previous published release; historical
+[RC6 release archive](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC6)). The RC6 release remains the last public download until RC7 is explicitly approved and published.
 
 Final Version 1.0 has not been published yet and will be announced
 separately.
@@ -960,4 +961,4 @@ TeknoParrot Manager name and branding are reserved.
 
 ---
 
-> v1.0 RC6 (published; validated) -- test one game after each run. Profiles are backed up automatically at the start of every run.
+> v1.0 RC7 (pre-publication; not yet published) -- last published release: v1.0 RC6. Test one game after each run. Profiles are backed up automatically at the start of every run.

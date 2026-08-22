@@ -7,6 +7,19 @@
 
 
 -------------------------------------------------------------------------------
+  v1.0 RC7  (pre-publication; not yet published)  -- release-readiness state
+  ----------------------------------------------------------------
+  Source candidate: current runtime and active documentation identity is v1.0
+  RC7, but no RC7 tag, GitHub release, or public download exists yet. v1.0
+  RC6 remains the last published release.
+
+  Readiness: preserved separate registration, launch-observation, wizard, and
+  controls-readiness states; added read-only action-required controls handoff;
+  generalized contract-backed missing-component warnings beyond pcsx2x6 while
+  keeping unknown or unsupported contracts fail-closed.
+
+
+-------------------------------------------------------------------------------
   v1.0 RC6  (2026-08-16)  -- onboarding flow simplification, dgVoodoo2/ReShade
   auto-download
   ----------------------------------------------------------------

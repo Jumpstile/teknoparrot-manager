@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC6  --  QUICK START
+  TeknoParrot Manager  |  v1.0 RC7  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -9,10 +9,11 @@
   Unfamiliar term (GamePath, UserProfile, archetype, etc.)? See the
   GLOSSARY section near the top of TeknoParrot-Manager-README.txt.
 
-  RELEASE CANDIDATE -- v1.0 RC6 is the current published release candidate
-  (download it from GitHub Releases). Final Version 1.0 remains unpublished.
+  RELEASE CANDIDATE -- v1.0 RC7 is the current source candidate
+  (pre-publication; not yet published). Last published release: v1.0 RC6.
+  The RC7 tag/release does not exist yet; use the generic GitHub Releases page
+  for published assets. Final Version 1.0 remains unpublished.
   Test one game after every run. Profiles are backed up automatically.
-  RC5 corrected a packaging defect in RC4; RC5 and RC4 are superseded by RC6.
 
 
   NEW TO TEKNOPARROT?
