@@ -28,6 +28,12 @@
   that bulk-configures TeknoParrot's per-game profiles for you instead of
   doing it one game at a time through TeknoParrotUI.
 
+  It is also useful for advanced users who want repeatable, auditable library
+  operations: previews, logs, backups, action summaries, exact paths, profile
+  identifiers, hashes, and validation evidence keep bulk work reviewable.
+  Expert workflows still detect first, preview supported changes, back up
+  before writes, and verify the result.
+
   Key terms used in this document:
 
     UserProfile   Your per-game settings file (game path, controls, GPU

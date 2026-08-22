@@ -82,6 +82,13 @@
   This script is for people with large TeknoParrot collections who want
   registration, controls, and game management handled automatically.
 
+  It is also useful for advanced users who already know TeknoParrot but want
+  repeatable, auditable library operations. Preview runs, logs, backups, action
+  summaries, exact paths, profile identifiers, hashes, and validation evidence
+  make bulk work easier to review without hiding the technical detail. See
+  docs\ADVANCED-USERS.md in the repository for the full evidence and ownership
+  model.
+
   You will get the most out of it if you:
 
     -- have a large collection (dozens or hundreds of games)

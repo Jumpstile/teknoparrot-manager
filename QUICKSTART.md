@@ -9,6 +9,7 @@ Full documentation: [README.md](README.md)
 ## Contents
 
 - [Requirements](#requirements)
+- [Advanced users](#advanced-users)
 - [Run It](#run-it)
 - [Mode List](#mode-list)
 - [Game Selection (AutoSync)](#game-selection-autosync)
@@ -46,14 +47,23 @@ Full documentation: [README.md](README.md)
 - Your games as ZIP files (for AutoSync) or already extracted into subfolders
 - Administrator privileges, but **only** if you use Postgres setup (mode 12) to install PostgreSQL for the first time — everything else runs as a normal user
 
-### TeknoParrotUI first-run handoff
+## TeknoParrotUI first-run handoff
 
 After you choose the TeknoParrot folder, TPM checks TeknoParrotUI's
 `ParrotData.xml` marker read-only. If setup is incomplete or the marker cannot
 be read safely, TPM shows the exact `TeknoParrotUi.exe` path for you to open.
 TPM does not start the UI or edit its `ParrotData.xml`, controls, or DAT/XML
 settings. This setup handoff is separate from checking whether a game's
-controls are mapped and verified.
+## Advanced users
+
+TPM is also for people who already know TeknoParrot and want repeatable,
+auditable library operations. Use previews, logs, backups, action summaries,
+exact paths, profile identifiers, hashes, and validation evidence to review
+bulk work without losing the technical detail.
+
+The full [advanced-user guide](docs/ADVANCED-USERS.md) explains the evidence
+model and ownership boundaries. Expert workflows still detect first, preview
+supported changes, back up before writes, and verify the result.
 
 ---
 

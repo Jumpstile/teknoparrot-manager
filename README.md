@@ -28,6 +28,7 @@ separately.
 - [Glossary](#glossary)
 - [How It Works](#how-it-works)
 - [Requirements](#requirements)
+- [Advanced Users](#advanced-users)
 - [Installation](#installation)
 - [Running the Script](#running-the-script)
 - [Modes](#modes)
@@ -93,6 +94,7 @@ separately.
 - **LaunchBox direct integration / HyperSpin 2 export** — writes games straight into LaunchBox's own library, or builds an import file for HyperSpin 2, after each run.
 - **Unattended mode** — `-Unattended` flag for scheduled overnight runs.
 - **Preview / dry-run mode** — see what AutoSync/Register would do (extract, register, repair, propagate) with zero files written, then decide whether to apply it for real.
+- **Beginner and advanced workflows** — plain-language guidance for first-time users, with repeatable runs, previews, logs, backups, evidence, and exact paths available for power users.
 - **Download audit logging** -- every shared-pipeline download records its authoritative source URL, filename, version when known, computed SHA-256, and transfer metrics (method, size, elapsed time, average speed). ReShade additionally logs the installer signer/subject, Authenticode status, signer thumbprint, and the status/thumbprint/trust result; its SHA-256 is an audit hash, not a published-digest comparison. BepInEx records its GitHub release source, filename/version, and computed SHA-256; when GitHub supplies an asset digest, the downloader validates it before extraction and logs/fails closed on a mismatch. dgVoodoo2 uses the same digest validation when available. FFBArcadePlugin, Eggman/RomVault dat, the PostgreSQL guide bundle, the TPM update package, and TeknoParrotUI thumbnail downloads receive source/hash/transfer audit entries; unsigned or digest-less sources are not described as cryptographically authenticated.
 - **Safe by design** — timestamped backups before every run, free-space check, full log, one-click restore.
 
@@ -154,7 +156,19 @@ This is a handoff, not an automatic setup step: TPM does not launch
 TeknoParrotUI, edit `ParrotData.xml`, change controls, or change DAT/XML
 settings. A completed first-run wizard also does not prove that a particular
 game's controls are mapped or verified; those remain separate TeknoParrotUI
-and game checks.
+## Advanced users
+
+TPM is useful both for beginners who want safe guidance and for advanced users
+who already know TeknoParrot but need repeatable, auditable library work. Dry
+runs, logs, backups, action summaries, exact paths, profile identifiers, hashes,
+and validation evidence make bulk operations easier to review without hiding
+the technical detail.
+
+The advanced-user guide explains the evidence and ownership boundaries:
+[docs/ADVANCED-USERS.md](docs/ADVANCED-USERS.md). TPM still applies the same
+rules to expert setups: detect first, identify the owner, preview supported
+changes, back up before writes, request approval when needed, and verify the
+result.
 
 ---
 

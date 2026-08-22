@@ -83,6 +83,31 @@ Describe "Prettier formatting baseline" {
     }
 }
 
+Describe "Advanced-user value messaging" {
+    BeforeAll {
+        $script:AdvancedRepoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
+        $script:AdvancedReadme = Get-Content -LiteralPath (Join-Path $script:AdvancedRepoRoot "README.md") -Raw
+        $script:AdvancedQuickStart = Get-Content -LiteralPath (Join-Path $script:AdvancedRepoRoot "QUICKSTART.md") -Raw
+        $script:AdvancedPlainReadme = Get-Content -LiteralPath (Join-Path $script:AdvancedRepoRoot "TeknoParrot-Manager-README.txt") -Raw
+        $script:AdvancedGuide = Get-Content -LiteralPath (Join-Path $script:AdvancedRepoRoot "docs\ADVANCED-USERS.md") -Raw
+    }
+
+    It "keeps the advanced-user guide linked from the Markdown entry points" {
+        $script:AdvancedReadme | Should -Match 'docs/ADVANCED-USERS\.md'
+        $script:AdvancedQuickStart | Should -Match 'docs/ADVANCED-USERS\.md'
+        $script:AdvancedGuide | Should -Match '(?i)repeatable.*evidence-backed'
+    }
+
+    It "describes beginner and advanced value without promising opaque automation" {
+        $combined = $script:AdvancedReadme + "`n" + $script:AdvancedQuickStart + "`n" + $script:AdvancedPlainReadme
+        $combined | Should -Match '(?i)beginner'
+        $combined | Should -Match '(?i)advanced users'
+        $combined | Should -Match '(?i)repeatable'
+        $combined | Should -Match '(?i)auditable'
+        $script:AdvancedGuide | Should -Match '(?i)must not silently change'
+    }
+}
+
 Describe "Release Integrity source identity" -Tag 'ReleaseConsistency' {
     # The running source identity and the last published release are tracked
     # separately so source identity cannot drift from publication state. RC7 is
