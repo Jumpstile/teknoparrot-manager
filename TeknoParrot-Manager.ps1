@@ -3804,6 +3804,152 @@ function Resolve-Pcsx2Directory {
            Where-Object { $_.Name -imatch '^pcsx2' } | Select-Object -First 1 -ExpandProperty FullName
 }
 
+# Read-only, contract-backed required-component assessment shared by the
+# compatibility warning surface. A warning is eligible only when exactly one
+# valid ECVF contract matches the registered EmulatorType, the contract has a
+# non-empty PathExists PresenceDetector, and the corresponding emulator folder
+# already exists. Missing/invalid/ambiguous contracts, unsupported detector
+# methods, and absent emulator folders remain Unknown/unclassified and produce
+# no missing-component claim.
+function Get-ContractBackedMissingComponents {
+    param(
+        [Parameter(Mandatory)][string]$EmulatorType,
+        [Parameter(Mandatory)][string]$TeknoParrotRoot,
+        [string[]]$AffectedProfiles = @(),
+        [string]$ContractsRoot = ''
+    )
+
+    $unknown = [ordered]@{
+        State             = 'Unknown'
+        Reason            = $null
+        ContractId        = $null
+        EmulatorDirectory = $null
+        Components        = @()
+    }
+
+    if ([string]::IsNullOrWhiteSpace($EmulatorType)) {
+        $unknown.Reason = 'registered profile did not declare an emulator type'
+        return [pscustomobject]$unknown
+    }
+    if ([string]::IsNullOrWhiteSpace($TeknoParrotRoot) -or
+        -not (Test-Path -LiteralPath $TeknoParrotRoot -PathType Container)) {
+        $unknown.Reason = 'TeknoParrot root was not available for component assessment'
+        return [pscustomobject]$unknown
+    }
+
+    try {
+        $ecvfContractsModule = Join-Path $PSScriptRoot "scripts\TPMCertification.Contracts.psm1"
+        if (-not (Test-Path -LiteralPath $ecvfContractsModule -PathType Leaf)) {
+            $unknown.Reason = 'the ECVF contracts framework was not available'
+            return [pscustomobject]$unknown
+        }
+        Import-Module $ecvfContractsModule -Force -ErrorAction Stop
+
+        $resolvedContractsRoot = if ([string]::IsNullOrWhiteSpace($ContractsRoot)) {
+            Join-Path $PSScriptRoot 'contracts'
+        } else { $ContractsRoot }
+        # Use the ECVF registry loader used by the existing #254 detector.
+        # It validates each discovered contract's machine-readable schema and
+        # fails closed if any contract cannot be loaded; this warning path does
+        # not reinterpret a second contract format of its own.
+        $registeredContracts = Get-TPMRegisteredEmulatorContractsV1 -ContractsRoot $resolvedContractsRoot
+        $contractMatches = @($registeredContracts | Where-Object {
+            [string]::Equals([string]$_.ContractId, $EmulatorType, [StringComparison]::OrdinalIgnoreCase)
+        })
+        if ($contractMatches.Count -ne 1) {
+            $unknown.Reason = if ($contractMatches.Count -eq 0) {
+                "no ECVF contract matched EmulatorType '$EmulatorType'"
+            } else {
+                "more than one ECVF contract matched EmulatorType '$EmulatorType'"
+            }
+            return [pscustomobject]$unknown
+        }
+
+        $contractEntry = $contractMatches[0]
+        $contract = $contractEntry.Contract
+        $contractId = [string]$contract.ContractId
+        $unknown.ContractId = $contractId
+
+        $emulatorDirectory = if ([string]::Equals($contractId, 'pcsx2x6', [StringComparison]::OrdinalIgnoreCase)) {
+            # Preserve #254's established resolver, including its supported
+            # casing and pcsx2-prefixed fallback names.
+            Resolve-Pcsx2Directory -TeknoParrotRoot $TeknoParrotRoot
+        } else {
+            @(Get-ChildItem -LiteralPath $TeknoParrotRoot -Directory -ErrorAction SilentlyContinue |
+                Where-Object { [string]::Equals($_.Name, $contractId, [StringComparison]::OrdinalIgnoreCase) } |
+                Select-Object -First 1 -ExpandProperty FullName)
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$emulatorDirectory) -or
+            -not (Test-Path -LiteralPath $emulatorDirectory -PathType Container)) {
+            $unknown.Reason = "the contract-matched emulator folder '$contractId' was not present"
+            return [pscustomobject]$unknown
+        }
+        $unknown.EmulatorDirectory = $emulatorDirectory
+
+        $capabilities = @($contract.EnvironmentCapabilities | Where-Object {
+            $_.PresenceDetector -and
+            $_.PresenceDetector.Method -eq 'PathExists' -and
+            -not [string]::IsNullOrWhiteSpace([string]$_.PresenceDetector.Source)
+        })
+        if ($capabilities.Count -eq 0) {
+            $unknown.Reason = "contract '$contractId' has no usable PathExists required-component detector"
+            return [pscustomobject]$unknown
+        }
+
+        $affected = @($AffectedProfiles | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique)
+        $missing = New-Object System.Collections.Generic.List[object]
+        foreach ($capability in $capabilities) {
+            $detector = $capability.PresenceDetector
+            $relativeSource = [string]$detector.Source
+            if ([System.IO.Path]::IsPathRooted($relativeSource) -or
+                $relativeSource -match '(^|[\\/])\.\.([\\/]|$)') {
+                # A contract path that is not safely relative to its own
+                # emulator folder cannot establish a trustworthy warning.
+                continue
+            }
+            try {
+                $expectedPath = Join-Path $emulatorDirectory $relativeSource
+                $emulatorFull = [System.IO.Path]::GetFullPath($emulatorDirectory).TrimEnd([char]'\', [char]'/' )
+                $expectedFull = [System.IO.Path]::GetFullPath($expectedPath)
+                $withinEmulator = $expectedFull.StartsWith($emulatorFull + [System.IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -or
+                                  [string]::Equals($expectedFull, $emulatorFull, [StringComparison]::OrdinalIgnoreCase)
+                if (-not $withinEmulator) { continue }
+            } catch {
+                continue
+            }
+
+            if (Test-TPMEmulatorPresentV1 -Detector $detector -InstallDir $emulatorDirectory) { continue }
+
+            $missing.Add([pscustomobject]@{
+                EmulatorType       = $EmulatorType
+                ContractId          = $contractId
+                ContractDisplayName = [string]$contract.DisplayName
+                ContractStatus      = [string]$contract.ContractStatus
+                Confidence          = [string]$contract.EvidenceConfidence
+                ContractBacked      = $true
+                CapabilityId        = [string]$capability.CapabilityId
+                ExpectedPath        = $expectedPath
+                DetectorMethod      = [string]$detector.Method
+                DetectorSource      = $relativeSource
+                AffectedProfiles    = $affected
+                AffectedGames       = $affected
+                State               = 'Missing'
+            })
+        }
+
+        return [pscustomobject]@{
+            State             = if ($missing.Count -gt 0) { 'Missing' } else { 'Present' }
+            Reason            = if ($missing.Count -gt 0) { 'one or more contract-declared components were absent' } else { $null }
+            ContractId        = $contractId
+            EmulatorDirectory = $emulatorDirectory
+            Components        = $missing.ToArray()
+        }
+    } catch {
+        $unknown.Reason = 'could not load or evaluate the ECVF contract -- ' + $_.Exception.Message
+        return [pscustomobject]$unknown
+    }
+}
+
 # Checks whether a pcsx2x6 process is currently running, so first-run
 # initialization never races a live emulator instance touching the same
 # ini/data-root files. Mirrors the Get-Process -Name guard pattern already
@@ -8974,7 +9120,9 @@ function Get-GameSetupNotes {
 # Each DllMismatch entry: @{ Code; FileName; Found; Required }.
 # Each GpuIncompatible entry: @{ Code; Vendor }.
 # Each BiosMissing entry: @{ EmulatorType; ExpectedDir; MissingFiles; AffectedGames }.
-# Each ExeMissing entry: @{ EmulatorType; ExpectedPath; DetectorMethod; DetectorSource; AffectedGames }.
+# Each ExeMissing/ComponentMissing entry: @{ EmulatorType; ContractId;
+# ContractStatus; Confidence; ContractBacked; CapabilityId; ExpectedPath;
+# DetectorMethod; DetectorSource; AffectedProfiles; AffectedGames }.
 function Get-CompatibilityWarnings {
     param([string]$UserProfilesDir, [string]$TeknoParrotRoot = '')
 
@@ -9067,8 +9215,7 @@ function Get-CompatibilityWarnings {
                 $etNode = $doc.GameProfile.SelectSingleNode("EmulatorType")
                 if (-not $etNode) { continue }
                 $emuType = $etNode.InnerText.Trim()
-                $hasBiosRequirement = $EmulatorBiosRequirements -and $EmulatorBiosRequirements.ContainsKey($emuType)
-                if ($emuType -ne 'Pcsx2x6' -and -not $hasBiosRequirement) { continue }
+                if ([string]::IsNullOrWhiteSpace($emuType)) { continue }
                 if (-not $emulatorGames.ContainsKey($emuType)) { $emulatorGames[$emuType] = [System.Collections.Generic.List[string]]::new() }
                 $emulatorGames[$emuType].Add($pf.BaseName)
             } catch {
@@ -9078,32 +9225,23 @@ function Get-CompatibilityWarnings {
 
         foreach ($emuType in $emulatorGames.Keys) {
             $hasBiosRequirement = $EmulatorBiosRequirements -and $EmulatorBiosRequirements.ContainsKey($emuType)
+
+            # Issue #254/#268: inspect only a positively matched ECVF
+            # contract. Missing or ambiguous contracts, unsupported detector
+            # methods, and absent emulator folders remain unclassified rather
+            # than becoming speculative component warnings.
+            $componentState = Get-ContractBackedMissingComponents `
+                -EmulatorType $emuType `
+                -TeknoParrotRoot $TeknoParrotRoot `
+                -AffectedProfiles @($emulatorGames[$emuType])
+            if (@($componentState.Components).Count -gt 0) {
+                $exeMissing += @($componentState.Components)
+                continue  # do not report secondary BIOS noise when a required component is absent
+            }
+
             $req = if ($hasBiosRequirement) { $EmulatorBiosRequirements[$emuType] } else { $null }
             $emuDir = if ($emuType -eq 'Pcsx2x6') { Resolve-Pcsx2Directory -TeknoParrotRoot $TeknoParrotRoot } else { $null }
             if (-not $emuDir) { continue }  # emulator folder itself not present -- nothing to check yet
-
-            # Issue #254: use the existing ECVF-backed prerequisite detector as
-            # the source of truth for the contract-declared emulator component.
-            # The directory exists here, so NotInstalled means the presence
-            # detector did not find its declared path. Unknown is deliberately
-            # not converted into a warning: an unavailable or ambiguous
-            # contract cannot establish that a component is missing.
-            $pcsx2State = if ($emuType -eq 'Pcsx2x6') {
-                Get-Pcsx2CrosshairPrerequisiteState -Pcsx2Dir $emuDir
-            } else { $null }
-            $presenceDetector = if ($pcsx2State) { $pcsx2State.EnvironmentCapability.PresenceDetector } else { $null }
-            if ($pcsx2State -and $pcsx2State.State -eq 'NotInstalled' -and
-                $presenceDetector -and $presenceDetector.Method -eq 'PathExists' -and
-                -not [string]::IsNullOrWhiteSpace([string]$presenceDetector.Source)) {
-                $exeMissing += [pscustomobject]@{
-                    EmulatorType   = $emuType
-                    ExpectedPath   = Join-Path $emuDir ([string]$presenceDetector.Source)
-                    DetectorMethod = [string]$presenceDetector.Method
-                    DetectorSource = [string]$presenceDetector.Source
-                    AffectedGames  = @($emulatorGames[$emuType] | Sort-Object)
-                }
-                continue  # do not report secondary BIOS noise when the emulator component is absent
-            }
 
             if (-not $req) { continue }  # no confirmed BIOS requirement for this emulator
 
@@ -9120,7 +9258,11 @@ function Get-CompatibilityWarnings {
         }
     }
 
-    return [pscustomobject]@{ PathTooLong = $pathTooLong; DllMismatch = $dllMismatch; GpuIncompatible = $gpuIncompatible; BiosMissing = $biosMissing; ExeMissing = $exeMissing }
+    # ExeMissing is retained as the compatibility-warning field name for the
+    # #254 callers/tests; its entries now represent any contract-declared
+    # required component, not only an executable. ComponentMissing is the
+    # general semantic alias for new callers.
+    return [pscustomobject]@{ PathTooLong = $pathTooLong; DllMismatch = $dllMismatch; GpuIncompatible = $gpuIncompatible; BiosMissing = $biosMissing; ExeMissing = $exeMissing; ComponentMissing = $exeMissing }
 }
 
 # =============================================================================
@@ -16048,6 +16190,9 @@ if ($hasAnyAction) {
             Write-Host "  TPM only checked the contract-declared path; it did not determine why" -ForegroundColor DarkCyan
             Write-Host "  the file is missing." -ForegroundColor DarkCyan
             Write-Host ""
+            Write-Host ("  Contract : {0} ({1})" -f $e.ContractId, $e.ContractStatus) -ForegroundColor DarkGray
+            Write-Host ("  Detector : {0} / {1}" -f $e.DetectorMethod, $e.DetectorSource) -ForegroundColor DarkGray
+            Write-Host ("  Evidence : contract-backed; confidence {0}" -f $e.Confidence) -ForegroundColor DarkGray
             Write-Host ("  Expected : {0}" -f $e.ExpectedPath) -ForegroundColor Cyan
             Write-Host ("  Affected : {0}" -f ($e.AffectedGames -join ', ')) -ForegroundColor DarkGray
             Write-Host "  Action   : Verify or restore this component through your normal TeknoParrot installation/update process, then re-run TPM." -ForegroundColor DarkCyan
@@ -16246,6 +16391,9 @@ if ($hasAnyAction) {
             [void]$asb.AppendLine("by its ECVF contract was not found at the expected path below.")
             [void]$asb.AppendLine("TPM only checked the contract-declared path; it did not determine why")
             [void]$asb.AppendLine("the file is missing.")
+            [void]$asb.AppendLine("  Contract : $($e.ContractId) ($($e.ContractStatus))")
+            [void]$asb.AppendLine("  Detector : $($e.DetectorMethod) / $($e.DetectorSource)")
+            [void]$asb.AppendLine("  Evidence : contract-backed; confidence $($e.Confidence)")
             [void]$asb.AppendLine("  Expected : $($e.ExpectedPath)")
             [void]$asb.AppendLine("  Affected : $($e.AffectedGames -join ', ')")
             [void]$asb.AppendLine("  Action   : Verify or restore this component through your normal TeknoParrot installation/update process, then re-run TPM.")

@@ -7906,6 +7906,54 @@ Describe "Get-CompatibilityWarnings -- pcsx2x6 component (issue #254)" {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TPMCertification.Contracts.psm1') -Destination (Join-Path $TestDrive 'scripts\TPMCertification.Contracts.psm1') -Force
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\contract.json') -Destination (Join-Path $TestDrive 'contracts\pcsx2x6\contract.json') -Force
 
+        # A synthetic non-pcsx2x6 contract proves the production path is
+        # generalized without adding an unsupported real emulator contract to
+        # the repository. Its PathExists detector is the same ECVF shape used
+        # by the real pcsx2x6 contract.
+        $fixtureContractDir = Join-Path $TestDrive 'contracts\fixtureemu'
+        New-Item -ItemType Directory -Path $fixtureContractDir -Force | Out-Null
+        $fixtureContract = [ordered]@{
+            ContractId = 'fixtureemu'
+            SchemaVersion = '1.0.0'
+            DisplayName = 'Fixture emulator'
+            UpstreamRepository = 'https://example.invalid/fixtureemu'
+            UpstreamPinnedCommit = ('0' * 40)
+            UpstreamPinnedCommitDate = '2026-01-01'
+            VersionDetector = [ordered]@{ Method = 'PathExists'; Source = 'fixture.exe'; Pattern = '^fixture$'; MatchedCommitMap = @() }
+            ContractStatus = 'EvidenceGathered'
+            EvidenceConfidence = 'SourceVerified'
+            OwnershipBoundaries = @([ordered]@{
+                SettingPath = 'FixtureSetting'; Owner = 'Emulator'; Mutability = 'EmulatorManaged'
+                ReadPolicy = 'ReadForVerificationOnly'; WritePolicy = 'NeverWrite'; EvidenceReference = 'ev-fixture'
+            })
+            EnvironmentCapabilities = @([ordered]@{
+                CapabilityId = 'env-init'
+                PresenceDetector = [ordered]@{ Method = 'PathExists'; Source = 'fixture.exe'; Pattern = $null }
+                DataRootResolver = [ordered]@{ Method = 'FixedPath'; Source = 'Data'; DefaultValue = $null }
+                InitializationAction = [ordered]@{ Method = 'None'; Command = $null; Arguments = @(); ExpectedExitCodes = @(0); TimeoutSeconds = 1 }
+                InitializedVerifier = [ordered]@{ RequiredPaths = @('fixture.ini'); RequiredMarkers = @(); ParseMethod = 'IniSections' }
+                ObservableEvidence = @('ev-fixture')
+                ExpectedOutcome = 'fixture.exe exists under the fixture emulator directory'
+            })
+            RuntimeCapabilities = @()
+            EvidenceReferences = @([ordered]@{
+                EvidenceId = 'ev-fixture'; Type = 'SourceCitation'; Description = 'Synthetic test contract'
+                Locator = 'evidence.md#fixture'; Commit = $null; Confidence = 'SourceVerified'; RecordedDate = '2026-01-01'
+            })
+            DriftPolicy = [ordered]@{
+                OnUnknownVersion = 'FailClosed'; OnDivergedVersion = 'FailClosed'; OnCompatibleRange = 'ProceedWithWarning'
+                KnownCompatibleRange = @(); RevalidationTrigger = 'test fixture only'
+            }
+        }
+        [System.IO.File]::WriteAllText(
+            (Join-Path $fixtureContractDir 'contract.json'),
+            ($fixtureContract | ConvertTo-Json -Depth 10),
+            (New-Object System.Text.UTF8Encoding $false))
+        [System.IO.File]::WriteAllText(
+            (Join-Path $fixtureContractDir 'evidence.md'),
+            '# fixture`r`n',
+            (New-Object System.Text.UTF8Encoding $false))
+
         $script:RawThrillsPathLimits = @{}
         $script:FileVersionPins = @{}
         $script:GpuIncompatibleGames = @{}
@@ -7998,6 +8046,74 @@ Describe "Get-CompatibilityWarnings -- pcsx2x6 component (issue #254)" {
         @($result.ExeMissing) | Should -BeNullOrEmpty
     }
 
+    It "reports a missing component for a non-pcsx2x6 contract-backed emulator and groups affected profiles" {
+        $root = Join-Path $TestDrive ("fixture-component-missing-" + [guid]::NewGuid().ToString('N'))
+        $userProfilesDir = Join-Path $root 'UserProfiles'
+        $fixtureDir = Join-Path $root 'fixtureemu'
+        New-Item -ItemType Directory -Path $userProfilesDir, $fixtureDir -Force | Out-Null
+        New-Pcsx2WarningProfile -Path (Join-Path $userProfilesDir 'FIXTUREONE.xml') -EmulatorType 'FixtureEmu'
+        New-Pcsx2WarningProfile -Path (Join-Path $userProfilesDir 'FIXTURETWO.xml') -EmulatorType 'fixtureemu'
+        Import-Module (Join-Path $TestDrive 'scripts\TPMCertification.Contracts.psm1') -Force
+        $registeredContracts = Get-TPMRegisteredEmulatorContractsV1 -ContractsRoot (Join-Path $TestDrive 'contracts')
+        @($registeredContracts | ForEach-Object { $_.ContractId }) | Should -Contain 'fixtureemu'
+        $directState = Get-ContractBackedMissingComponents -EmulatorType 'FixtureEmu' -TeknoParrotRoot $root -AffectedProfiles @('FIXTUREONE', 'FIXTURETWO')
+        $directState.State | Should -Be 'Missing'
+
+        $result = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $root
+        @($result.ExeMissing).Count | Should -Be 1
+        @($result.ComponentMissing).Count | Should -Be 1
+        $entry = $result.ExeMissing[0]
+        $entry.ContractId | Should -Be 'fixtureemu'
+        $entry.ContractBacked | Should -BeTrue
+        $entry.Confidence | Should -Be 'SourceVerified'
+        $entry.CapabilityId | Should -Be 'env-init'
+        $entry.DetectorMethod | Should -Be 'PathExists'
+        $entry.DetectorSource | Should -Be 'fixture.exe'
+        $entry.ExpectedPath | Should -Be (Join-Path $fixtureDir 'fixture.exe')
+        @($entry.AffectedProfiles) | Should -Contain 'FIXTUREONE'
+        @($entry.AffectedProfiles) | Should -Contain 'FIXTURETWO'
+    }
+
+    It "does not report a non-pcsx2x6 component when the contract-declared path is present" {
+        $root = Join-Path $TestDrive ("fixture-component-present-" + [guid]::NewGuid().ToString('N'))
+        $userProfilesDir = Join-Path $root 'UserProfiles'
+        $fixtureDir = Join-Path $root 'fixtureemu'
+        New-Item -ItemType Directory -Path $userProfilesDir, $fixtureDir -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $fixtureDir 'fixture.exe') -Force | Out-Null
+        New-Pcsx2WarningProfile -Path (Join-Path $userProfilesDir 'FIXTUREGAME.xml') -EmulatorType 'FixtureEmu'
+
+        $result = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $root
+        @($result.ExeMissing) | Should -BeNullOrEmpty
+    }
+
+    It "does not claim a missing component for an emulator family with no matching contract" {
+        $root = Join-Path $TestDrive ("fixture-contract-missing-" + [guid]::NewGuid().ToString('N'))
+        $userProfilesDir = Join-Path $root 'UserProfiles'
+        $uncontractedDir = Join-Path $root 'uncontracted'
+        New-Item -ItemType Directory -Path $userProfilesDir, $uncontractedDir -Force | Out-Null
+        New-Pcsx2WarningProfile -Path (Join-Path $userProfilesDir 'UNCONTRACTED.xml') -EmulatorType 'UncontractedEmu'
+
+        $result = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $root
+        @($result.ExeMissing) | Should -BeNullOrEmpty
+        $state = Get-ContractBackedMissingComponents -EmulatorType 'UncontractedEmu' -TeknoParrotRoot $root -AffectedProfiles @('UNCONTRACTED')
+        $state.State | Should -Be 'Unknown'
+        @($state.Components) | Should -BeNullOrEmpty
+    }
+
+    It "fails closed without a missing-component claim when the contract registry cannot be loaded unambiguously" {
+        $root = Join-Path $TestDrive ("fixture-contract-invalid-" + [guid]::NewGuid().ToString('N'))
+        $userProfilesDir = Join-Path $root 'UserProfiles'
+        $fixtureDir = Join-Path $root 'fixtureemu'
+        $contractsRoot = Join-Path $TestDrive ("contracts-invalid-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $userProfilesDir, $fixtureDir, (Join-Path $contractsRoot 'fixtureemu'), (Join-Path $contractsRoot 'broken') -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $TestDrive 'contracts\fixtureemu\contract.json') -Destination (Join-Path $contractsRoot 'fixtureemu\contract.json') -Force
+        Set-Content -LiteralPath (Join-Path $contractsRoot 'broken\contract.json') -Value '{ malformed' -Encoding ascii
+
+        $state = Get-ContractBackedMissingComponents -EmulatorType 'FixtureEmu' -TeknoParrotRoot $root -AffectedProfiles @('FIXTUREGAME') -ContractsRoot $contractsRoot
+        $state.State | Should -Be 'Unknown'
+        @($state.Components) | Should -BeNullOrEmpty
+    }
+
     It "keeps pcsx2x6 component detection independent of the BIOS requirement table" {
         $root = Join-Path $TestDrive ("exe-no-bios-table-" + [guid]::NewGuid().ToString('N'))
         $userProfilesDir = Join-Path $root 'UserProfiles'
@@ -8042,8 +8158,13 @@ Describe "Get-CompatibilityWarnings -- pcsx2x6 component (issue #254)" {
 
         $warningBlock | Should -Match 'Get-CompatibilityWarnings|ExeMissing'
         $warningBlock | Should -Match 'ExpectedPath'
+        $warningBlock | Should -Match 'DetectorMethod|DetectorSource'
+        $warningBlock | Should -Match 'Confidence'
         $warningBlock | Should -Match 'Verify or restore this component through your normal TeknoParrot installation/update process'
         $warningBlock | Should -Not -Match '(?i)anti[- ]?virus|quarantine'
+        $script:ProductionSource | Should -Match '\$asb\.AppendLine\("  Contract : \$\(\$e\.ContractId\)'
+        $script:ProductionSource | Should -Match '\$asb\.AppendLine\("  Detector : \$\(\$e\.DetectorMethod\)'
+        $script:ProductionSource | Should -Match '\$asb\.AppendLine\("  Evidence : contract-backed; confidence \$\(\$e\.Confidence\)'
     }
 
     It "keeps component assessment read-only and preserves the complete TP-root snapshot" {
@@ -8052,12 +8173,14 @@ Describe "Get-CompatibilityWarnings -- pcsx2x6 component (issue #254)" {
         $gameProfilesDir = Join-Path $root 'GameProfiles'
         $gameDir = Join-Path $root 'Games\BloodyRoar3'
         $pcsx2Dir = Join-Path $root 'pcsx2x6'
-        New-Item -ItemType Directory -Path $userProfilesDir, $gameProfilesDir, $gameDir, $pcsx2Dir -Force | Out-Null
+        $fixtureDir = Join-Path $root 'fixtureemu'
+        New-Item -ItemType Directory -Path $userProfilesDir, $gameProfilesDir, $gameDir, $pcsx2Dir, $fixtureDir -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $root 'ParrotData.xml') -Value '<ParrotData />' -Encoding ascii
         Set-Content -LiteralPath (Join-Path $root 'config.ini') -Value 'unchanged' -Encoding ascii
         Set-Content -LiteralPath (Join-Path $gameProfilesDir 'profile.xml') -Value '<GameProfile />' -Encoding ascii
         Set-Content -LiteralPath (Join-Path $gameDir 'game.bin') -Value 'game-content' -Encoding ascii
         New-Pcsx2WarningProfile -Path (Join-Path $userProfilesDir 'BLOODYROAR3.xml')
+        New-Pcsx2WarningProfile -Path (Join-Path $userProfilesDir 'FIXTUREGAME.xml') -EmulatorType 'FixtureEmu'
 
         $before = Get-CompatibilityWarningSnapshot -Root $root
         Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $root | Out-Null
@@ -8072,12 +8195,17 @@ Describe "Get-CompatibilityWarnings -- pcsx2x6 component (issue #254)" {
         $errors = $null
         $ast = [System.Management.Automation.Language.Parser]::ParseInput($script:ProductionSource, [ref]$tokens, [ref]$errors)
         $errors.Count | Should -Be 0
-        $fnAst = @($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -eq 'Get-CompatibilityWarnings' }, $true))[0]
-        $banned = @('Invoke-ControlPropagation', 'Set-ProfileInputApi', 'Save-XmlMaybe', 'Save-Xml', 'Set-Content', 'Add-Content', 'Out-File', 'New-Item', 'Remove-Item', 'Move-Item', 'Copy-Item')
-        $commands = @($fnAst.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true) | ForEach-Object { $_.GetCommandName() })
-        @($commands | Where-Object { $_ -in $banned }) | Should -BeNullOrEmpty
-        $fnAst.Extent.Text | Should -Not -Match '\[System\.IO\.File\]::(WriteAllText|WriteAllBytes|AppendAllText|Create|Delete|Move|Copy)'
-        $fnAst.Extent.Text | Should -Not -Match 'Invoke-Pcsx2FirstRunSetup|Invoke-TPMEnvironmentInitializationActionV1'
+        $banned = @('Invoke-ControlPropagation', 'Set-ProfileInputApi', 'Save-XmlMaybe', 'Save-Xml', 'Set-Content', 'Add-Content', 'Out-File', 'New-Item', 'Remove-Item', 'Move-Item', 'Copy-Item', 'Rename-Item')
+        $bannedMembers = @('Save', 'WriteAllText', 'WriteAllBytes', 'AppendAllText', 'Create', 'Delete', 'Move', 'Copy')
+        foreach ($name in @('Get-CompatibilityWarnings', 'Get-ContractBackedMissingComponents')) {
+            $fnAst = @($ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -eq $name }, $true))[0]
+            $fnAst | Should -Not -BeNullOrEmpty
+            $commands = @($fnAst.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true) | ForEach-Object { $_.GetCommandName() })
+            @($commands | Where-Object { $_ -in $banned }) | Should -BeNullOrEmpty
+            $memberNames = @($fnAst.FindAll({ $args[0] -is [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true) | ForEach-Object { $_.Member.Extent.Text.Trim() })
+            @($memberNames | Where-Object { $_ -in $bannedMembers }) | Should -BeNullOrEmpty
+            $fnAst.Extent.Text | Should -Not -Match 'Invoke-Pcsx2FirstRunSetup|Invoke-TPMEnvironmentInitializationActionV1'
+        }
     }
 }
 
