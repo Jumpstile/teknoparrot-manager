@@ -434,9 +434,11 @@ At the end of every run the script prints — and saves to a text file (default 
 | **Fix these game paths** | Profiles with broken paths that couldn't be auto-repaired — open TeknoParrotUI and point each to the correct folder |
 | **Extract first** | Profiles pointing at unextracted games — extract and re-run Repair |
 | **Set up controls** | Control types with no reference game bound yet — shows which games are waiting and suggests what to bind |
+| **Controls not ready** | Registered games whose catalog-backed controls are **Missing**, **Not verified**, **Unsupported**, or **Unknown**. Registration, a successful launch, and TeknoParrot wizard completion do not verify controls. Open TeknoParrot controls configuration and map/test controls before treating the game as ready. |
 | **Setup notes** | Registered games with special setup notes from the community compatibility database — shows the expected executable name and the full notes text |
 | **Compatibility warnings** | Known install-path-length limits, pinned-file-version requirements, and GPU-vendor incompatibilities for specific games |
 | **Firmware not installed** | Registered games whose emulator (currently pcsx2x6 only) needs firmware/BIOS files TeknoParrot itself doesn't provide — shows the exact files and folder needed. TPM never downloads, links, or redistributes these; existence check only |
+| **Emulator component not found** | A contract-backed required emulator component is missing at its expected path. Shows the contract/detector evidence and affected profiles. Use the normal TeknoParrot installation/update process; TPM does not diagnose why it is missing or repair, download, reinstall, or modify TeknoParrot |
 
 ---
 
@@ -449,7 +451,7 @@ The log also records a download audit trail: ReShade installer source/filename/v
 - If an extraction is interrupted (Ctrl+C, power loss, disk error), the incomplete folder is automatically detected and re-extracted on the next run.
 - Fuzzy name matching auto-registers most NESiCAxLive and other shared-exe games. The similarity score is shown for spot-checking.
 - Games already bound are always left untouched. Game-specific controls that don't exist in the reference game are left for manual setup and reported in ACTION REQUIRED.
-- After every run, `TeknoParrot-Manager-controls.txt` is written next to the script: every game, its control family, propagation source, bound count, and any buttons still set manually.
+- After every run, `TeknoParrot-Manager-controls.txt` is written next to the script: every game, its control family, propagation source, bound count, and any buttons still set manually. It is a propagation inventory, not proof that controls have been verified; review the ACTION REQUIRED controls status and map/test required controls before treating a game as ready.
 - After registering, the script offers to repair any broken game paths automatically.
 - On later runs the script remembers your settings — press Y to reuse, N to reconfigure.
 - To fix a mis-classified control family (e.g. FamilyGuyBowling auto-detected as driving when it should be trackball), add it to the `familyOverride` section of `overrides.json`.

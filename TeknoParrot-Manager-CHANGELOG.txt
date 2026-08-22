@@ -14,9 +14,11 @@
   RC6 remains the last published release.
 
   Readiness: preserved separate registration, launch-observation, wizard, and
-  controls-readiness states; added read-only action-required controls handoff;
-  generalized contract-backed missing-component warnings beyond pcsx2x6 while
-  keeping unknown or unsupported contracts fail-closed.
+  controls-readiness states; added a read-only action-required controls handoff
+  that keeps Missing, Not verified, Unsupported, and Unknown visible and tells
+  users to map/test required controls; generalized contract-backed
+  missing-component warnings beyond pcsx2x6 while keeping unknown or
+  unsupported contracts fail-closed.
 
 
 -------------------------------------------------------------------------------

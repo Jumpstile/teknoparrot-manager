@@ -29,6 +29,19 @@ Match order:
 - A folder is treated as already extracted only when it exists and contains files.
 - Existing backup and path-safety behavior remains unchanged.
 
+## Readiness handoff
+
+The ACTION REQUIRED summary reports controls readiness separately from
+registration, launch observation, and TeknoParrot wizard state. A registered
+or successfully launched game can still be **Missing**, **Not verified**,
+**Unsupported**, or **Unknown** for controls. When that happens, open
+TeknoParrot controls configuration and map/test controls before treating the
+game as ready. TPM does not turn registration, launch success, wizard
+completion, bound counts, or stored device references into verified controls.
+
+The controls status file is a propagation inventory, not verification evidence.
+TPM does not write mappings as part of this readiness handoff.
+
 ## Issue #66 Coverage
 
 Regression coverage includes:

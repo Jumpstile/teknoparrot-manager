@@ -5,8 +5,11 @@
 - Source candidate: this staged wiki entry describes v1.0 RC7 before any tag,
   GitHub release, or public download exists.
 - Readiness: RC7 carries the read-only controls-readiness handoff and
-  contract-backed missing-component warnings. Registration, launch
-  observation, wizard state, and controls readiness remain separate.
+  contract-backed missing-component warnings. When controls are Missing, Not
+  verified, Unsupported, or Unknown, ACTION REQUIRED directs the user to open
+  TeknoParrot controls configuration and map/test controls before treating the
+  game as ready. Registration, launch observation, wizard state, and controls
+  readiness remain separate.
 - Publication state: v1.0 RC6 remains the last published release. This staging
   document is not a publication action.
 
