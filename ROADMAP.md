@@ -409,6 +409,64 @@ Knowledge records are provenance-bearing and deterministic. They do not permit
 TPM to rewrite its own code, invent facts, bypass an ownership boundary, or
 treat stale evidence as current.
 
+## Post-1.0 / 1.1 -- Complex-game workflows, sessions, and readiness
+
+The product input recorded in issues #279, #280, and #281 points to a
+post-1.0 gap beyond ordinary single-game setup: users want safe, reproducible
+support for complex workflows, ready-made profile inputs, emulator coverage,
+and clearer evidence of what is actually ready. The following issue-backed
+work is a planning group for that gap. It is not an RC8 scope expansion.
+
+### Workflow and environment foundations
+
+- [#282 Workflow Profiles for Complex Games](https://github.com/Jumpstile/teknoparrot-manager/issues/282)
+  defines declarative, deterministic workflows for prerequisites, ordered
+  processes, placement, recovery, and post-launch verification.
+- [#284 Environment Orchestration Framework](https://github.com/Jumpstile/teknoparrot-manager/issues/284)
+  provides reusable process, window, monitor, launch-order, and optional audio
+  coordination without emulator-specific hardcoding.
+- [#288 Complex Game Readiness Reports](https://github.com/Jumpstile/teknoparrot-manager/issues/288)
+  turns observed results into evidence-based reports with satisfied and
+  missing prerequisites, manual actions, confidence, evidence, and the next
+  safe action.
+
+### Game-specific and session workflows
+
+- [#285 The Key of Avalon Guided Setup](https://github.com/Jumpstile/teknoparrot-manager/issues/285)
+  depends on #282 and uses the orchestration/reporting foundations for all
+  supported revisions, server/client setup, prerequisite validation, monitor
+  guidance, controller guidance, and readiness evidence. It must not modify
+  Dolphin or TeknoParrot.
+- [#283 Network Session Manager](https://github.com/Jumpstile/teknoparrot-manager/issues/283)
+  defines roles, host/client workflows, readiness validation, launch
+  orchestration, and diagnostics for LAN and user-owned remote sessions.
+- [#286 LAN Session Validation and Diagnostics](https://github.com/Jumpstile/teknoparrot-manager/issues/286)
+  is the validation child of #283 for revisions, emulator/plugin versions,
+  required files, ports, firewall state, cabinet IDs, peer connectivity, and
+  evidence-based readiness.
+- [#287 Remote Session Support via User-Owned Networks](https://github.com/Jumpstile/teknoparrot-manager/issues/287)
+  is the user-owned-network child of #283 for Tailscale, ZeroTier, and
+  WireGuard. Matchmaking, relay servers, and hosted networking services are
+  explicitly excluded.
+
+### Planning relationships and boundaries
+
+- #279 remains the safe, approval-gated UserProfiles preset-pack track; an
+  imported profile is a candidate, not authoritative state, and controls are
+  never marked Verified without bounded evidence.
+- #280 remains the prebuild-parity analysis track, translating known-good
+  profiles, frontend expectations, emulator coverage, control presets, media,
+  and reduced first-run decisions into safe TPM-managed capabilities.
+- #281 remains the post-1.0 PCSX2x6 investigation track, including .acgame,
+  arcade BIOS, and System 246/System 256 considerations.
+- #200 broad automatic device/context-aware control mapping remains deferred;
+  this roadmap group must not use workflow or profile language to bypass that
+  boundary.
+- All seven issues are assigned to the Post-1.0 / 1.1 milestone. None is part
+  of RC8. Any future implementation still requires an authorized design,
+  ownership contract, explicit approval policy, backup/rollback, redaction,
+  effective-result verification, and fail-closed behavior.
+
 ## Phase 8 -- Safe automation
 
 Safe automation is the final adoption phase because it depends on the GUI,
