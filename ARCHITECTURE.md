@@ -99,12 +99,11 @@ both extractors.
 
 **Source DLLs.** Not bundled in the release ZIP (not redistributable -- reshade.me's
 own policy: "Do NOT share the binaries or shader files. Link users to this website
-instead."). Two ways to obtain them at `Scripts\ReShade\ReShade64.dll` (x64) and
-optionally `ReShade32.dll` (x86): (1) the standalone "ReShade setup" menu entry's
-D) auto-download option (below), or (2) manually -- run the ReShade installer on any
-game exe to extract the DLL, then copy and rename it here for distribution. If absent
-at startup the script prompts at runtime.
-
+instead."). At Scripts\ReShade\ReShade64.dll (x64) and optionally
+ReShade32.dll (x86), TPM either uses a cached runtime obtained through the
+standalone "ReShade setup" menu entry or a user-provided DLL. If absent at startup
+the standalone menu offers the approved download path; an onboarding offer points
+users there without forcing runtime acquisition.
 **Auto-download (freeze exception, added alongside dgVoodoo2 auto-download).**
 `Get-ReShadeSetupDownloadUrl` constructs `https://reshade.me/downloads/ReShade_Setup_<version>.exe`
 from `Get-ReShadeLatestVersion`'s scraped version string and validates it against the
@@ -143,6 +142,23 @@ The regression test proves all four required types in a pristine Windows
 PowerShell 5.1 child process, so a developer session with a previously loaded
 assembly cannot mask the dependency.
 
+**Existing-runtime update.** Get-ReShadeDllVersion reads the file version from
+each installed runtime without guessing when metadata is absent.
+Get-ReShadeRuntimeState compares the 64-bit runtime and any existing 32-bit
+runtime with the version reported by Get-ReShadeLatestVersion. Only an older
+existing DLL triggers an explicit Y/N prompt. An approved update calls
+Invoke-ReShadeRuntimeUpdate, which uses Invoke-TpmDownload,
+Test-ReShadeSetupTrustedSignature, and Expand-ReShadeSelfExtractingArchive in
+that order. The old runtime remains the deployment source if the user declines
+or any update step fails; successful updates use the transactional ReShade
+cache and save the chosen source paths.
+
+**Curated effect boundary.** TPM does not currently download or select shader
+packages. The official ReShade package manifest and upstream repositories are
+being evaluated in docs/RESHADE-VISUAL-EFFECTS-RESEARCH.md; no effect category
+is a TPM default until source, license, dependency, performance, and real-game
+evidence support it. This keeps the runtime update trust boundary separate from
+future curated shader assets.
 **Signature verification before extraction (identity-pinning, stronger than
 BepInEx/dgVoodoo2/FFBPlugin).** The downloaded `Setup.exe` itself is Authenticode-signed
 with a self-signed certificate (Windows can never chain it to a trusted root, so
@@ -164,7 +180,7 @@ manual DLL path, where TPM only ever sees a DLL the user already extracted, with
 to confirm it came from a signed installer.
 
 **Wiring.** The standalone "ReShade setup" menu entry's DLL-not-found branch offers
-`D) Download automatically / B) Browse for a file I already have / N) Skip`. The
+`D) Download automatically / B) Browse for a file I already have / N) Skip; if an existing runtime is older, the same entry offers an explicit update prompt`. The
 onboarding wizard's ReShade offer defaults to N and, if the DLL isn't already
 available, points the user at the standalone menu entry rather than blocking with
 manual instructions.

@@ -186,17 +186,31 @@ scope of `Get-ReShadeSetupDownloadUrl`, `Test-ReShadeSetupTrustedSignature`,
   real extraction against the actual `dgVoodoo2_87_3.zip` produced all 6
   files with correct byte sizes.
 
+### RESHADE-RUNTIME-007 -- Existing-runtime update contract
+- When an existing ReShade DLL has a readable older file version than the
+  current version reported by reshade.me, mode 5 offers an explicit Y/N update.
+- An approved update uses the same authoritative URL construction, shared
+  download audit, pinned Authenticode status/thumbprint gate, self-extracting
+  archive validation, and transactional cache promotion as first acquisition.
+- A declined, unavailable, unclassifiable, untrusted, or failed update never
+  replaces the existing source DLL and does not weaken the manual path.
+- Implemented. Verification: Get-ReShadeDllVersion,
+  Get-ReShadeDllUpdateStatus, Get-ReShadeRuntimeState, and
+  Invoke-ReShadeRuntimeUpdate tests in
+  Tests\TeknoParrot-Manager.Tests.ps1; setup-flow wiring is source-checked.
 ## Deliberately out of scope
 
 - **ReShade `_Addon` installer variant.** TPM only ever requests the
   plain build. Belongs to a different trust/feature surface (addon
   support) this project has never offered even in the manual-instructions
   path.
-- **ReShade shader/effect-package auto-download** (`ReShade32.json` /
-  `ReShade64.json`-driven, the official installer's separate step). TPM
-  has never managed shader packages; this round does not start. The
-  self-extracting archive contains these entries but
-  `Expand-ReShadeSelfExtractingArchive` never reads or requires them.
+- **ReShade shader/effect-package auto-download.** TPM still does not manage
+  shader packages, presets, executable add-ons, or arbitrary repositories.
+  The curated research-first boundary and candidate evaluation are documented
+  in docs/RESHADE-VISUAL-EFFECTS-RESEARCH.md; this runtime round does not
+  expand the trusted download boundary. The self-extracting archive may contain
+  effect metadata, but Expand-ReShadeSelfExtractingArchive never reads or
+  requires it.
 - **Revocation checking for the ReShade certificate.** The certificate is
   self-signed with no CA chain; there is no revocation authority to check
   against. Not a gap -- there is nothing to check.

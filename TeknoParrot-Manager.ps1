@@ -2529,6 +2529,134 @@ function Get-ReShadeSetupDownloadUrl {
     return $url
 }
 
+# Returns the three-part file version from a ReShade DLL, or $null when the
+# file is absent, unreadable, or does not expose a usable numeric version.
+function Get-ReShadeDllVersion {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $null
+    }
+    try {
+        $vi = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($Path)
+        $versionText = "{0}.{1}.{2}" -f $vi.FileMajorPart, $vi.FileMinorPart, $vi.FileBuildPart
+        $parsed = $null
+        if (-not [version]::TryParse($versionText, [ref]$parsed)) { return $null }
+        return $versionText
+    } catch {
+        return $null
+    }
+}
+
+# Classifies one installed DLL against the authoritative version discovered
+# from reshade.me. Unknown versions stay unknown rather than being guessed.
+function Get-ReShadeDllUpdateStatus {
+    param([string]$Path, [string]$LatestVersion)
+    $exists = (-not [string]::IsNullOrWhiteSpace($Path) -and (Test-Path -LiteralPath $Path -PathType Leaf))
+    $versionText = Get-ReShadeDllVersion -Path $Path
+    $latest = $null
+    $installed = $null
+    $status = 'Missing'
+    if ($exists) {
+        if (-not $versionText -or -not [version]::TryParse($versionText, [ref]$installed)) {
+            $status = 'Unknown'
+        } elseif (-not $LatestVersion -or -not [version]::TryParse($LatestVersion, [ref]$latest)) {
+            $status = 'Unknown'
+        } elseif ($installed -lt $latest) {
+            $status = 'Outdated'
+        } else {
+            $status = 'Current'
+        }
+    }
+    return [pscustomobject]@{
+        Path          = $Path
+        Exists        = $exists
+        Version       = $versionText
+        LatestVersion = $LatestVersion
+        Status        = $status
+    }
+}
+
+# Read-only state for the existing ReShade runtime. A missing optional 32-bit
+# DLL is reported but does not by itself trigger an update. An older 64-bit or
+# existing older 32-bit DLL does trigger the explicit update prompt.
+function Get-ReShadeRuntimeState {
+    param([string]$SourceDll, [string]$SourceDll32, [string]$LatestVersion)
+    $bitness64 = Get-ReShadeDllUpdateStatus -Path $SourceDll -LatestVersion $LatestVersion
+    $bitness32 = Get-ReShadeDllUpdateStatus -Path $SourceDll32 -LatestVersion $LatestVersion
+    $needsUpdate = ($bitness64.Status -eq 'Outdated') -or ($bitness32.Status -eq 'Outdated')
+    return [pscustomobject]@{
+        LatestVersion = $LatestVersion
+        Bitness64     = $bitness64
+        Bitness32     = $bitness32
+        NeedsUpdate   = $needsUpdate
+    }
+}
+
+# Downloads and validates the official ReShade installer, then promotes both
+# runtime DLLs into the local ReShade cache through the existing transactional
+# extractor. No publisher digest is invented: the shared download audit logs
+# the calculated SHA-256, while Test-ReShadeSetupTrustedSignature remains the
+# authoritative signer/status/thumbprint gate.
+function Invoke-ReShadeRuntimeUpdate {
+    param(
+        [string]$CacheDir,
+        [string]$Version,
+        [switch]$Approved
+    )
+    $result = [ordered]@{
+        Approved      = [bool]$Approved
+        Succeeded     = $false
+        Version       = $Version
+        InstallerPath = $null
+        SourceDll     = $null
+        SourceDll32   = $null
+        Error         = $null
+    }
+    if (-not $Approved) {
+        $result.Error = 'Explicit approval was not provided.'
+        return [pscustomobject]$result
+    }
+    try {
+        $downloadUrl = Get-ReShadeSetupDownloadUrl -Version $Version
+        if (-not $downloadUrl) { throw "ReShade runtime update: invalid official download URL." }
+        if (-not (Test-Path -LiteralPath $CacheDir -PathType Container)) {
+            New-Item -ItemType Directory -Path $CacheDir -Force -ErrorAction Stop | Out-Null
+        }
+        $setupPath = Join-Path $CacheDir ("ReShade_Setup_{0}.exe" -f $Version)
+        $result.InstallerPath = $setupPath
+        if (-not (Invoke-TpmDownload -DownloadUrl $downloadUrl -DestinationPath $setupPath -Label 'ReShadeSetup' -Version $Version)) {
+            throw "ReShade runtime update: installer download failed."
+        }
+        $signature = Test-ReShadeSetupTrustedSignature -Path $setupPath
+        if (-not $signature.Trusted) {
+            if (Test-Path -LiteralPath $setupPath -PathType Leaf) {
+                try {
+                    Remove-Item -LiteralPath $setupPath -Force -ErrorAction Stop
+                } catch {
+                    Write-Log ("ReShade runtime update: could not remove rejected installer {0}: {1}" -f $setupPath, $_.Exception.Message)
+                }
+            }
+            throw ("ReShade runtime update: installer trust gate rejected the download (Status={0}, Thumbprint={1})." -f $signature.Status, $signature.Thumbprint)
+        }
+        Expand-ReShadeSelfExtractingArchive -SetupExePath $setupPath -DestDir $CacheDir
+        $sourceDll = Join-Path $CacheDir 'ReShade64.dll'
+        $sourceDll32 = Join-Path $CacheDir 'ReShade32.dll'
+        foreach ($requiredPath in @($sourceDll, $sourceDll32)) {
+            if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+                throw ("ReShade runtime update: extracted runtime file is missing: {0}" -f $requiredPath)
+            }
+        }
+        $result.Succeeded = $true
+        $result.SourceDll = $sourceDll
+        $result.SourceDll32 = $sourceDll32
+        Write-Log ("ReShade runtime update: trusted installer {0} extracted to {1}." -f $Version, $CacheDir)
+    } catch {
+        $result.Error = $_.Exception.Message
+        Write-Log ("ReShade runtime update failed: {0}" -f $result.Error)
+    }
+    return [pscustomobject]$result
+}
+
 # ReShade_Setup_<version>.exe is a small C# WPF EXE stub with a standard ZIP
 # archive appended to the end of the file (self-extracting-archive format).
 # This replicates the verified block-scan-for-PK-signature logic from
@@ -2715,21 +2843,58 @@ function Invoke-ReShadeSetup {
         [string]$HsDataPath
     )
 
-    # Version check
-    $bVer = $null
-    try {
-        $vi   = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($SourceDll)
-        $bVer = "$($vi.FileMajorPart).$($vi.FileMinorPart).$($vi.FileBuildPart)"
+    # Version and update check. Existing older DLLs use the same approved
+    # download, signature, extraction, and audit pipeline as first install.
+    $bVer = Get-ReShadeDllVersion -Path $SourceDll
+    if ($bVer) {
         Write-Host ("  ReShade (64-bit) : {0}" -f $bVer) -ForegroundColor DarkGray
-    } catch {}
+    }
     if ($SourceDll32 -and (Test-Path -LiteralPath $SourceDll32)) {
-        try {
-            $vi32   = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($SourceDll32)
-            $bVer32 = "$($vi32.FileMajorPart).$($vi32.FileMinorPart).$($vi32.FileBuildPart)"
+        $bVer32 = Get-ReShadeDllVersion -Path $SourceDll32
+        if ($bVer32) {
             Write-Host ("  ReShade (32-bit) : {0}" -f $bVer32) -ForegroundColor DarkGray
-        } catch {}
+        } else {
+            Write-Host "  ReShade (32-bit) : version unknown" -ForegroundColor DarkGray
+        }
     } else {
         Write-Host "  ReShade (32-bit) : not found -- 32-bit games will be skipped" -ForegroundColor DarkGray
+    }
+
+    Write-Host "  Checking reshade.me for updates..." -ForegroundColor DarkGray
+    $latest = Get-ReShadeLatestVersion
+    if ($latest) {
+        $runtimeState = Get-ReShadeRuntimeState -SourceDll $SourceDll -SourceDll32 $SourceDll32 -LatestVersion $latest
+        if ($runtimeState.NeedsUpdate) {
+            $updateChoice = (Read-HostSafe ("  ReShade {0} is available. Download and install it now? (Y/N, default N)" -f $latest) -Default 'N').ToUpper()
+            if ($updateChoice -eq 'Y') {
+                Write-Host ("  Downloading and verifying ReShade {0}..." -f $latest) -ForegroundColor Cyan
+                $cacheDir = Join-Path $PSScriptRoot 'ReShade'
+                $updateResult = Invoke-ReShadeRuntimeUpdate -CacheDir $cacheDir -Version $latest -Approved
+                if ($updateResult.Succeeded) {
+                    $SourceDll = $updateResult.SourceDll
+                    $SourceDll32 = $updateResult.SourceDll32
+                    $script:rsSourceDll = $SourceDll
+                    $script:rsSourceDll32 = $SourceDll32
+                    if (Save-Config) {
+                        Write-Log ("Config: saved ReShade runtime cache paths after update: {0}" -f $SourceDll)
+                    } else {
+                        Write-Log "Config: could not save ReShade runtime cache paths after update."
+                    }
+                    $bVer = Get-ReShadeDllVersion -Path $SourceDll
+                    Write-Host ("  ReShade updated successfully to {0}." -f $bVer) -ForegroundColor Green
+                } else {
+                    Write-Host ("  ReShade update failed -- keeping the existing runtime. {0}" -f $updateResult.Error) -ForegroundColor Yellow
+                }
+            } else {
+                Write-Host "  Keeping the existing ReShade runtime; no files were changed." -ForegroundColor DarkGray
+            }
+        } elseif ($runtimeState.Bitness64.Status -eq 'Current') {
+            Write-Host ("  ReShade runtime is up to date ({0})." -f $latest) -ForegroundColor Green
+        } else {
+            Write-Host "  ReShade update check could not classify the installed DLL; no automatic replacement was attempted." -ForegroundColor DarkGray
+        }
+    } else {
+        Write-Host "  (Could not reach reshade.me -- update check skipped.)" -ForegroundColor DarkGray
     }
 
     # Authenticode check on the DLL(s) before deploying them anywhere.
@@ -2751,22 +2916,6 @@ function Invoke-ReShadeSetup {
             Write-Host "  it actually came from https://reshade.me and wasn't substituted." -ForegroundColor Yellow
         }
     }
-
-    if ($bVer) {
-        Write-Host "  Checking reshade.me for updates..." -ForegroundColor DarkGray
-        $latest = Get-ReShadeLatestVersion
-        if ($latest) {
-            if ([version]$latest -gt [version]$bVer) {
-                Write-Host ("  Newer version available: {0}  (you have {1})" -f $latest, $bVer) -ForegroundColor Yellow
-                Write-Host "  Get it at  https://reshade.me  and replace ReShade\ReShade64.dll (and ReShade32.dll for 32-bit games)." -ForegroundColor Cyan
-            } else {
-                Write-Host ("  Up to date ({0})." -f $bVer) -ForegroundColor Green
-            }
-        } else {
-            Write-Host "  (Could not reach reshade.me -- update check skipped.)" -ForegroundColor DarkGray
-        }
-    }
-
     # Preset / shader options
     Write-Host ""
     Write-Host "  Preset / visual effects:" -ForegroundColor Cyan
@@ -12993,7 +13142,7 @@ function Get-MainMenuSections {
         Header = 'Game Enhancements (all optional -- games work without these)'
         Items  = @(
             [pscustomobject]@{ Number = 4; Mode = 'CrosshairSetup'; Label = 'Crosshair setup'; ShortDesc = 'Deploy custom crosshairs to lightgun games.'; FullDesc = @('Pick and deploy custom crosshairs to all', 'registered lightgun games.') }
-            [pscustomobject]@{ Number = 5; Mode = 'ReShadeSetup'; Label = 'ReShade setup'; ShortDesc = 'Visual filters: sharper image, CRT-style scanlines, borders.'; FullDesc = @('ReShade adds post-processing filters on top of', 'the game -- sharper image, better colours,', 'CRT-style scanlines, and screen borders, for a', 'more authentic arcade-cabinet look.') }
+            [pscustomobject]@{ Number = 5; Mode = 'ReShadeSetup'; Label = 'ReShade setup'; ShortDesc = 'Install/update ReShade runtime DLLs; configure effects separately.'; FullDesc = @('Install or update the ReShade runtime DLLs.', 'TPM does not install or choose shader packages;', 'configure visual effects separately in ReShade.') }
             [pscustomobject]@{ Number = 6; Mode = 'DgVoodoo2Setup'; Label = 'dgVoodoo2 setup'; ShortDesc = 'Fix old DX8/DirectDraw/Glide crashes.'; FullDesc = @('Fix old DX8, DirectDraw, and Glide games that', 'crash or show black screens.') }
             [pscustomobject]@{ Number = 7; Mode = 'GpuFixSetup'; Label = 'GPU fix setup'; ShortDesc = 'Auto-detect GPU, apply matching compatibility fix.'; FullDesc = @('Auto-detect your GPU (AMD / NVIDIA / Intel) and', 'apply the matching compatibility fix to every', 'registered game that has one.') }
             [pscustomobject]@{ Number = 8; Mode = 'FFBSetup'; Label = 'Force feedback (FFB) setup'; ShortDesc = 'Wheel/stick rumble and force feedback.'; FullDesc = @('Wheel/stick rumble and force feedback.', "Covers TeknoParrot's built-in FFB Blaster (needs a", 'paid membership) and a free third-party plugin.') }
@@ -13153,7 +13302,7 @@ function Get-MainMenuDefaultDescription {
         'RegisterOnly' { return 'Register already-extracted games.' }
         'PropagateControls' { return 'Copy bindings from reference games.' }
         'CrosshairSetup' { return 'Deploy lightgun crosshairs.' }
-        'ReShadeSetup' { return 'Visual filters: sharper image, CRT-style scanlines.' }
+        'ReShadeSetup' { return 'Install/update ReShade runtime DLLs; configure effects separately.' }
         'DgVoodoo2Setup' { return 'Fix older DirectX/Glide games.' }
         'GpuFixSetup' { return 'Apply GPU compatibility fixes.' }
         'FFBSetup' { return 'Configure wheel/stick feedback.' }
