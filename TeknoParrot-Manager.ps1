@@ -5739,9 +5739,9 @@ function Test-EggmanDatZip {
 
 # Shared download step for a resolved Eggman release. The ordinary first-run
 # path uses the deterministic TPM-owned default without asking where to save.
-# AllowBrowse preserves the explicit alternate-location override used by the
-# later update flow. PreferredSavePath preserves a valid configured path rather
-# than silently relocating it when a returning user chooses an update.
+# AllowBrowse is used only when no preferred path was supplied. The configured
+# update flow supplies PreferredSavePath, so a valid configured path is reused
+# without an alternate-location dialog and is still revalidated before use.
 # Returns the saved path on success, or $null on failure/abort.
 function Invoke-EggmanDatDownloadInteractive {
     param(
@@ -7395,6 +7395,77 @@ function Get-BepInExStagedFiles {
     return @($result)
 }
 
+# Removes only a TPM-created BepInEx staging directory under the controlled
+# temporary root. The complete path and every existing descendant are checked
+# again immediately before recursive deletion so cleanup cannot follow a
+# replaced reparse point or delete an unrelated path.
+function Remove-BepInExStagingDirectory {
+    param([Parameter(Mandatory)][string]$StagingDir)
+    if ([string]::IsNullOrWhiteSpace($StagingDir) -or $StagingDir -match '[\r\n]') {
+        throw 'TPM BEPINEX STAGING CLEANUP REFUSED because the staging path was empty or malformed.'
+    }
+    try {
+        $stagingRoot = [System.IO.Path]::GetFullPath((Join-Path $env:TEMP 'TeknoParrotManagerStaging')).TrimEnd('\','/')
+        $stagingFull = [System.IO.Path]::GetFullPath($StagingDir).TrimEnd('\','/')
+    } catch {
+        throw 'TPM BEPINEX STAGING CLEANUP REFUSED because the staging path could not be canonicalized.'
+    }
+    $leaf = [System.IO.Path]::GetFileName($stagingFull)
+    if ([string]::IsNullOrWhiteSpace($leaf) -or $leaf -notlike 'BepInEx-*' -or
+        -not (Test-PathInside -child $stagingFull -parent $stagingRoot)) {
+        throw "TPM BEPINEX STAGING CLEANUP REFUSED for '$stagingFull' because it is not a TPM BepInEx directory under the controlled staging root."
+    }
+    if (-not (Test-Path -LiteralPath $stagingFull)) { return $true }
+    if (-not (Test-BepInExNoReparsePath -Root $stagingRoot -Path $stagingFull)) {
+        throw "TPM BEPINEX STAGING CLEANUP REFUSED for '$stagingFull' because its path is reparse-backed or otherwise unsafe."
+    }
+    try {
+        $pending = New-Object 'System.Collections.Generic.Stack[string]'
+        $files = New-Object 'System.Collections.Generic.List[string]'
+        $directories = New-Object 'System.Collections.Generic.List[string]'
+        $pending.Push($stagingFull)
+        while ($pending.Count -gt 0) {
+            $current = $pending.Pop()
+            if (-not (Test-PathInside -child $current -parent $stagingRoot) -or
+                -not (Test-BepInExNoReparsePath -Root $stagingRoot -Path $current)) {
+                throw "staging directory is outside the controlled root or reparse-backed: $current"
+            }
+            [void]$directories.Add($current)
+            foreach ($child in @(Get-ChildItem -LiteralPath $current -Force -ErrorAction Stop)) {
+                $childFull = [System.IO.Path]::GetFullPath($child.FullName)
+                if (-not (Test-PathInside -child $childFull -parent $stagingFull)) {
+                    throw "staging descendant escaped the validated directory: $childFull"
+                }
+                if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    throw "staging descendant is reparse-backed: $childFull"
+                }
+                if ($child.PSIsContainer) { $pending.Push($childFull) } else { [void]$files.Add($childFull) }
+            }
+        }
+        foreach ($file in $files) {
+            if (-not (Test-Path -LiteralPath $file)) { continue }
+            if (-not (Test-PathInside -child $file -parent $stagingFull) -or
+                -not (Test-BepInExNoReparsePath -Root $stagingRoot -Path $file)) {
+                throw "staging file changed to an unsafe path before cleanup: $file"
+            }
+            Remove-Item -LiteralPath $file -Force -ErrorAction Stop
+        }
+        for ($i = $directories.Count - 1; $i -ge 0; $i--) {
+            $directory = $directories[$i]
+            if (-not (Test-Path -LiteralPath $directory)) { continue }
+            if (-not (Test-PathInside -child $directory -parent $stagingRoot) -or
+                -not (Test-BepInExNoReparsePath -Root $stagingRoot -Path $directory)) {
+                throw "staging directory changed to an unsafe path before cleanup: $directory"
+            }
+            Remove-Item -LiteralPath $directory -Force -ErrorAction Stop
+        }
+        if (Test-Path -LiteralPath $stagingFull) { throw 'staging directory remains after removal' }
+    } catch {
+        throw "TPM BEPINEX STAGING CLEANUP FAILED for '$stagingFull' -- residue remains at '$stagingFull'. Cleanup error: $($_.Exception.Message)"
+    }
+    return $true
+}
+
 function Test-BepInExFileMatch {
     param([Parameter(Mandatory)][string]$Source, [Parameter(Mandatory)][string]$Destination)
     if (-not (Test-Path -LiteralPath $Source -PathType Leaf) -or -not (Test-Path -LiteralPath $Destination -PathType Leaf)) { return $false }
@@ -7612,9 +7683,10 @@ function Invoke-BepInExUpdateCheck {
     $zipPath = Join-Path $CacheDir $safeFileName
     if ([string]::IsNullOrWhiteSpace($safeFileName) -or -not (Test-PathInside $zipPath $CacheDir)) { Write-Log 'BepInEx update check: blocked on unsafe release filename.'; return }
     if (-not (Invoke-TpmDownload -DownloadUrl $latest.DownloadUrl -DestinationPath $zipPath -ExpectedBytes $latest.SizeBytes -Label 'BepInEx' -Version $latest.Version -ExpectedSha256 $latest.ExpectedSha256)) { Write-Log 'BepInEx update check: download or digest verification failed.'; return }
-    $updated = 0; $updateErrors = 0
+    $updated = 0; $updatedWithCleanupFailure = 0; $updateErrors = 0; $cleanupErrors = 0
     foreach ($o in @($outdated | Sort-Object Code)) {
-        $stagingDir = $null; $preserveStaging = $false
+        $stagingDir = $null; $preserveStaging = $false; $promotionSucceeded = $false; $cleanupFailureRecorded = $false
+        $backupPath = $null
         try {
             if (-not (Test-BepInExGameRootSafe -GameRoot $o.ExeDir -ApprovedRoot $ApprovedGamesRoot) -or -not (Test-BepInExExistingTreeSafe -GameRoot $o.ExeDir)) { throw 'BepInEx final root safety check failed.' }
             $stagingDir = New-TpmStagingDirectory -Label 'BepInEx'
@@ -7625,22 +7697,51 @@ function Invoke-BepInExUpdateCheck {
             if (-not (Test-BepInExGameRootSafe -GameRoot $o.ExeDir -ApprovedRoot $ApprovedGamesRoot) -or -not (Test-BepInExExistingTreeSafe -GameRoot $o.ExeDir)) { throw 'BepInEx root failed after backup.' }
             $validation = { return ((Get-BepInExInstalledVersion -ExeDir $o.ExeDir) -eq $latest.Version) }
             [void](Invoke-TpmTransactionalTreePromote -StagingDir $stagingDir -DestDir $o.ExeDir -RelativeFiles $relativeFiles -ValidationScript $validation)
+            $promotionSucceeded = $true
+            [void](Remove-BepInExStagingDirectory -StagingDir $stagingDir)
+            $stagingDir = $null
             Write-Host ("    OK    {0}  ({1} -> {2})" -f $o.Code, $o.Installed, $latest.Version) -ForegroundColor Green
             Write-Log "BepInEx: updated $($o.Code) from $($o.Installed) to $($latest.Version); backup=$backupPath"
             $updated++
         } catch {
-            if ($_.Exception.Message -match 'ROLLBACK FAILED|CLEANUP FAILED') { $preserveStaging = $true }
-            Write-Host ("    ERROR {0} -- update blocked" -f $o.Code) -ForegroundColor Red
-            Write-Log "BepInEx: update blocked for $($o.Code); evidence and backups were preserved where available."
-            $updateErrors++
+            if ($promotionSucceeded -and $_.Exception.Message -match '^TPM BEPINEX STAGING CLEANUP (FAILED|REFUSED)') {
+                $preserveStaging = $true
+                $cleanupFailureRecorded = $true
+                Write-Host ("    WARNING {0} -- update applied, but staging cleanup failed" -f $o.Code) -ForegroundColor Yellow
+                Write-Host ("            ACTION REQUIRED: inspect and remove residue at {0}" -f $stagingDir) -ForegroundColor Yellow
+                Write-Log "BepInEx: update applied for $($o.Code), but staging cleanup failed; action required; residue=$stagingDir; backup=$backupPath"
+                $updatedWithCleanupFailure++
+                $cleanupErrors++
+            } else {
+                if ($_.Exception.Message -match 'ROLLBACK FAILED|CLEANUP FAILED') { $preserveStaging = $true }
+                Write-Host ("    ERROR {0} -- update blocked" -f $o.Code) -ForegroundColor Red
+                Write-Log "BepInEx: update blocked for $($o.Code); evidence and backups were preserved where available."
+                $updateErrors++
+            }
         } finally {
-            if ($stagingDir -and -not $preserveStaging -and (Test-Path -LiteralPath $stagingDir)) { Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction SilentlyContinue }
+            if ($stagingDir -and -not $preserveStaging) {
+                try {
+                    [void](Remove-BepInExStagingDirectory -StagingDir $stagingDir)
+                    $stagingDir = $null
+                } catch {
+                    $preserveStaging = $true
+                    if (-not $cleanupFailureRecorded) {
+                        Write-Host ("    ACTION REQUIRED {0} -- staging cleanup failed" -f $o.Code) -ForegroundColor Yellow
+                        Write-Host ("                    Inspect and remove residue at {0}" -f $stagingDir) -ForegroundColor Yellow
+                        Write-Log "BepInEx: staging cleanup failed for blocked update $($o.Code); action required; residue=$stagingDir"
+                        $cleanupErrors++
+                    }
+                }
+            }
         }
     }
-    Write-Host ("  Updated: {0} game(s)" -f $updated) -ForegroundColor Green
+    Write-Host ("  Updated cleanly: {0} game(s)" -f $updated) -ForegroundColor Green
+    if ($updatedWithCleanupFailure -gt 0) { Write-Host ("  Updated with cleanup failure: {0} -- ACTION REQUIRED" -f $updatedWithCleanupFailure) -ForegroundColor Yellow }
     if ($upToDate -gt 0) { Write-Host ("  Up to date: {0}" -f $upToDate) -ForegroundColor DarkGray }
     if ($skippedX86 -gt 0) { Write-Host ("  32-bit skipped: {0}" -f $skippedX86) -ForegroundColor DarkGray }
     if ($updateErrors -gt 0) { Write-Host ("  Errors: {0} -- see log for details" -f $updateErrors) -ForegroundColor Red }
+    if ($cleanupErrors -gt 0) { Write-Host ("  Cleanup failures: {0} -- see log for residue path(s)" -f $cleanupErrors) -ForegroundColor Yellow }
+    Write-Log ("BepInEx update check: updatedCleanly={0} updatedWithCleanupFailure={1} errors={2} cleanupFailures={3}" -f $updated, $updatedWithCleanupFailure, $updateErrors, $cleanupErrors)
 }
 # =============================================================================
 # CHECK FOR UPDATES -- manual, backup-first self-update for this script

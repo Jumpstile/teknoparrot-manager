@@ -210,7 +210,9 @@ Some older arcade games use DirectX 8, DirectDraw, or 3dfx Glide. On modern PCs 
 **Only use this for games that crash or show a black screen on first launch.**
 
 **Setup:**
-Download dgVoodoo2 from dege.freeweb.hu or use mode 6 automatic GitHub release download. The automatic path validates GitHub asset digest when available, and the log records the GitHub source, filename/version, SHA-256, and transfer metrics; a digest mismatch fails closed. 2. Create a `dgVoodoo2\` folder next to this script and copy in:
+
+1. Download dgVoodoo2 from dege.freeweb.hu or use mode 6 automatic GitHub release download. The automatic path validates GitHub asset digest when available, and the log records the GitHub source, filename/version, SHA-256, and transfer metrics; a digest mismatch fails closed.
+2. Create a `dgVoodoo2\` folder next to this script and copy in:
 
 - From `MS\x86\`: `D3D8.dll`, `DDraw.dll`, `D3DImm.dll`
 - From `3Dfx\x86\`: `Glide2x.dll`, `Glide3x.dll`
@@ -453,7 +455,7 @@ N) Skip
 
 Both the collection dat and supplementary dat are read directly from inside the ZIP — no extraction needed. The supplementary dat takes priority for any game in both (it represents the version you should install).
 
-Eggman recognition data is separate from TeknoParrotUI's `ParrotData.xml` and DAT/XML setting, and separate from the main/supplementary game ZIP sources and the staging/install folder. The normal first-run download goes to `%LOCALAPPDATA%\TeknoParrotManager\Eggman` without a save-location prompt. Browse/import remains available, and an explicit later update retains the alternate-location save dialog. A valid configured ZIP remains the update destination unless you choose another location.
+Eggman recognition data is separate from TeknoParrotUI's `ParrotData.xml` and DAT/XML setting, and separate from the main/supplementary game ZIP sources and the staging/install folder. The normal first-run download goes to `%LOCALAPPDATA%\TeknoParrotManager\Eggman` without a save-location prompt, and browse/import remains available for an existing local file. A later explicit update reuses a valid configured ZIP at its existing location without an alternate-location save dialog. Every supplied, previously configured, or user-selected destination is canonicalized and revalidated before reuse, download, or write; unsafe destinations are rejected before network/download work begins.
 
 On repeat runs, the script reuses your last dat choice automatically but offers to check for a newer dat release first.
 

@@ -576,9 +576,11 @@
   Eggman recognition data is not TeknoParrotUI's ParrotData.xml, not its
   DAT/XML setting, and not a main or supplementary game ZIP. It is also not
   the staging/install folder: it is only the index TPM reads to recognize
-  games. On a later explicit update, the save dialog remains available for
-  an alternate location, and a valid configured ZIP stays at its existing
-  path unless you choose another one.
+  games. On a later explicit update, TPM reuses a valid configured ZIP at its
+  existing path without an alternate-location save dialog. Every supplied,
+  previously configured, or user-selected destination is canonicalized and
+  revalidated before reuse, download, or write. An unsafe destination is
+  rejected before network/download work begins.
 
   The script uses the dat's <GameProfile> codes to register three types of
   games that would otherwise appear in ACTION REQUIRED:

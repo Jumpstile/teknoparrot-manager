@@ -284,7 +284,7 @@ Describe "Issue #217 AutoSync first-run guidance" {
         $script:ProductionSource | Should -Match "ZIP source     : \{0\}"
         $script:ProductionSource | Should -Match "R\) Choose a different staging folder"
         $script:ProductionSource | Should -Match "Z\) Choose a different ZIP source folder"
-        $script:ProductionSource | Should -Match "\$zipSource = ''"
+        $script:ProductionSource | Should -Match ([regex]::Escape('$zipSource = ' + "''"))
         $script:ProductionSource | Should -Match "user returned to menu"
     }
     It "labels RetroBat as folder naming mode without changing the prompt guard" {
@@ -465,7 +465,7 @@ Describe "Beginner-clarity RC wording (optional-download explanations, first-run
     It "clarifies thumbnail download is box art only, not game data" {
         $script:ProductionSource | Should -Match "This downloads small box-art icons only, never the games themselves"
     }
-    It "shows a first-run welcome/scope screen only when no saved config exists, gated on -not \$Unattended" {
+    It 'shows a first-run welcome/scope screen only when no saved config exists, gated on -not $Unattended' {
         $script:ProductionSource | Should -Match ([regex]::Escape('if (-not (Test-Path -LiteralPath $configPath) -and -not $Unattended) {'))
         $script:ProductionSource | Should -Match "Welcome to TeknoParrot Manager"
         $script:ProductionSource | Should -Match "does not provide game files"
@@ -4795,6 +4795,77 @@ Describe "BepInEx authorized-root and transaction guards" {
         (Get-Content -LiteralPath $file -Raw) | Should -Be ('original' + [Environment]::NewLine)
         @(Get-ChildItem -LiteralPath $game -Directory -Filter 'BepInEx_Backup_*' -ErrorAction SilentlyContinue).Count | Should -BeGreaterThan 0
     }
+
+    It "refuses to recursively clean a path outside the controlled BepInEx staging root" {
+        $outside = Join-Path $TestDrive ('BepInEx-outside-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $outside -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $outside 'keep.txt') -Value 'keep'
+        Mock Remove-Item {}
+
+        { Remove-BepInExStagingDirectory -StagingDir $outside } | Should -Throw '*TPM BEPINEX STAGING CLEANUP REFUSED*'
+        Should -Invoke Remove-Item -Times 0 -Exactly
+        Test-Path -LiteralPath (Join-Path $outside 'keep.txt') -PathType Leaf | Should -BeTrue
+    }
+
+    Context "post-promotion staging cleanup reporting" {
+        BeforeEach {
+            $script:bepApproved = Join-Path $TestDrive 'BepApproved'
+            $script:bepGame = Join-Path $script:bepApproved 'CleanupGame'
+            $script:bepProfiles = Join-Path $TestDrive 'BepCleanupProfiles'
+            $script:bepCache = Join-Path $TestDrive 'BepCleanupCache'
+            $script:bepStage = Join-Path (Join-Path $env:TEMP 'TeknoParrotManagerStaging') ('BepInEx-test-' + [guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $script:bepApproved, $script:bepGame, $script:bepProfiles -Force | Out-Null
+            $gameExe = Join-Path $script:bepGame 'game.exe'
+            New-Item -ItemType File -Path $gameExe -Force | Out-Null
+            $safeGameExe = [System.Security.SecurityElement]::Escape($gameExe)
+            Set-Content -LiteralPath (Join-Path $script:bepProfiles 'CLEANUPGAME.xml') -Value ("<GameProfile><GamePath>$safeGameExe</GamePath></GameProfile>")
+
+            Mock Test-BepInExGameRootSafe { $true }
+            Mock Test-BepInExNoReparsePath { $true }
+            Mock Test-BepInExExistingTreeSafe { $true }
+            Mock Get-BepInExLatestRelease { [pscustomobject]@{ Version = '5.4.23'; DownloadUrl = 'https://github.com/BepInEx/BepInEx/releases/download/v5.4.23/BepInEx_win_x64_5.4.23.zip'; FileName = 'BepInEx_win_x64_5.4.23.zip'; SizeBytes = 1; ExpectedSha256 = $null } }
+            Mock Get-BepInExInstalledVersion { '5.4.22' }
+            Mock Get-BepInExInstalledArch { 'x64' }
+            Mock Read-HostSafe { 'Y' }
+            Mock Invoke-TpmDownload { $true }
+            Mock New-TpmStagingDirectory {
+                New-Item -ItemType Directory -Path $script:bepStage -Force | Out-Null
+                return $script:bepStage
+            }
+            Mock Expand-ZipFileSafe {}
+            Mock Get-BepInExStagedFiles { @('BepInEx\core.dll') }
+            Mock New-BepInExUpdateBackup { Join-Path $script:bepGame 'BepInEx_Backup_test' }
+            Mock Invoke-TpmTransactionalTreePromote { $true }
+        }
+
+        AfterEach {
+            if ($script:bepStage -and (Test-Path -LiteralPath $script:bepStage)) {
+                [System.IO.Directory]::Delete($script:bepStage, $true)
+            }
+        }
+
+        It "counts a promoted update only after controlled staging cleanup succeeds" {
+            Invoke-BepInExUpdateCheck -UserProfilesDir $script:bepProfiles -CacheDir $script:bepCache -ApprovedGamesRoot $script:bepApproved
+
+            Test-Path -LiteralPath $script:bepStage | Should -BeFalse
+            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match '^  Updated cleanly: 1 game\(s\)$' } -Times 1 -Exactly
+            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'Updated with cleanup failure' } -Times 0 -Exactly
+            Should -Invoke Write-Log -ParameterFilter { [string]$msg -eq 'BepInEx update check: updatedCleanly=1 updatedWithCleanupFailure=0 errors=0 cleanupFailures=0' } -Times 1 -Exactly
+        }
+
+        It "reports action required and excludes a promoted update from the clean count when staging cleanup fails" {
+            Mock Remove-BepInExStagingDirectory { throw "TPM BEPINEX STAGING CLEANUP FAILED for '$script:bepStage' -- residue remains at '$script:bepStage'." }
+
+            Invoke-BepInExUpdateCheck -UserProfilesDir $script:bepProfiles -CacheDir $script:bepCache -ApprovedGamesRoot $script:bepApproved
+
+            Test-Path -LiteralPath $script:bepStage -PathType Container | Should -BeTrue
+            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match '^  Updated cleanly: 0 game\(s\)$' } -Times 1 -Exactly
+            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match '^  Updated with cleanup failure: 1 -- ACTION REQUIRED$' } -Times 1 -Exactly
+            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match [regex]::Escape($script:bepStage) } -Times 1 -Exactly
+            Should -Invoke Write-Log -ParameterFilter { [string]$msg -match 'update applied.*staging cleanup failed' -and [string]$msg -match [regex]::Escape($script:bepStage) } -Times 1 -Exactly
+            Should -Invoke Write-Log -ParameterFilter { [string]$msg -eq 'BepInEx update check: updatedCleanly=0 updatedWithCleanupFailure=1 errors=0 cleanupFailures=1' } -Times 1 -Exactly
+        }
+    }
 }
 Describe "Read-PathWithBrowse" {
     # This is UI code (it can launch a real WinForms file/folder picker), which
@@ -8065,8 +8136,10 @@ Describe "Get-CompatibilityWarnings -- pcsx2x6 component (issue #254)" {
         # ECVF tree beside that extracted file so its $PSScriptRoot-anchored
         # contract lookup consults the real detector and contract.
         New-Item -ItemType Directory -Path (Join-Path $TestDrive 'scripts'), (Join-Path $TestDrive 'contracts\pcsx2x6') -Force | Out-Null
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TPMCertification.Authority.psm1') -Destination (Join-Path $TestDrive 'scripts\TPMCertification.Authority.psm1') -Force
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TPMCertification.Contracts.psm1') -Destination (Join-Path $TestDrive 'scripts\TPMCertification.Contracts.psm1') -Force
+        $script:compatAuthorityModulePath = Join-Path $TestDrive 'scripts\TPMCertification.Authority.psm1'
+        $script:compatContractsModulePath = Join-Path $TestDrive 'scripts\TPMCertification.Contracts.psm1'
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TPMCertification.Authority.psm1') -Destination $script:compatAuthorityModulePath -Force
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\scripts\TPMCertification.Contracts.psm1') -Destination $script:compatContractsModulePath -Force
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\contracts\pcsx2x6\contract.json') -Destination (Join-Path $TestDrive 'contracts\pcsx2x6\contract.json') -Force
 
         # A synthetic non-pcsx2x6 contract proves the production path is
@@ -8216,7 +8289,7 @@ Describe "Get-CompatibilityWarnings -- pcsx2x6 component (issue #254)" {
         New-Item -ItemType Directory -Path $userProfilesDir, $fixtureDir -Force | Out-Null
         New-Pcsx2WarningProfile -Path (Join-Path $userProfilesDir 'FIXTUREONE.xml') -EmulatorType 'FixtureEmu'
         New-Pcsx2WarningProfile -Path (Join-Path $userProfilesDir 'FIXTURETWO.xml') -EmulatorType 'fixtureemu'
-        Import-Module (Join-Path $TestDrive 'scripts\TPMCertification.Contracts.psm1') -Force
+        Import-Module $script:compatContractsModulePath -Force
         $registeredContracts = Get-TPMRegisteredEmulatorContractsV1 -ContractsRoot (Join-Path $TestDrive 'contracts')
         @($registeredContracts | ForEach-Object { $_.ContractId }) | Should -Contain 'fixtureemu'
         $directState = Get-ContractBackedMissingComponents -EmulatorType 'FixtureEmu' -TeknoParrotRoot $root -AffectedProfiles @('FIXTUREONE', 'FIXTURETWO')
@@ -8368,6 +8441,16 @@ Describe "Get-CompatibilityWarnings -- pcsx2x6 component (issue #254)" {
             $memberNames = @($fnAst.FindAll({ $args[0] -is [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true) | ForEach-Object { $_.Member.Extent.Text.Trim() })
             @($memberNames | Where-Object { $_ -in $bannedMembers }) | Should -BeNullOrEmpty
             $fnAst.Extent.Text | Should -Not -Match 'Invoke-Pcsx2FirstRunSetup|Invoke-TPMEnvironmentInitializationActionV1'
+        }
+    }
+
+    AfterAll {
+        foreach ($modulePath in @($script:compatContractsModulePath, $script:compatAuthorityModulePath)) {
+            $fullModulePath = [System.IO.Path]::GetFullPath($modulePath)
+            $loadedModules = @(Get-Module -All | Where-Object {
+                $_.Path -and [string]::Equals([System.IO.Path]::GetFullPath($_.Path), $fullModulePath, [System.StringComparison]::OrdinalIgnoreCase)
+            })
+            if ($loadedModules.Count -gt 0) { $loadedModules | Remove-Module -Force -ErrorAction Stop }
         }
     }
 }

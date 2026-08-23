@@ -124,7 +124,12 @@ The release ZIP is staged and inventory-checked before promotion. A timestamped
 backup of the fixed BepInEx tree and related bootstrap files is hash-verified
 before live changes. Promotion uses a rollback-safe tree transaction;
 recoverable failures restore the exact pre-operation tree, while rollback or
-cleanup failures preserve evidence and report the update as blocked.
+transaction-cleanup failures preserve evidence and report the update as
+blocked. Ordinary post-promotion staging cleanup only removes a canonical
+`BepInEx-*` directory under the controlled TPM temporary root after reparse
+revalidation. If that cleanup fails, TPM preserves the residue, identifies its
+validated path in the log and ACTION REQUIRED output, and excludes the applied
+update from the clean-update count.
 
 ## PostgreSQL guided recovery and credential boundaries
 

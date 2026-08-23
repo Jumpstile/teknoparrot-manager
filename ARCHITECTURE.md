@@ -323,16 +323,17 @@ incomplete download behind.
 
 The ordinary first-run `D` choice uses this default without asking the user for
 a save location. The existing `B` browse/import path remains available for a
-ZIP or standalone `.dat` the user already has. On a later explicit update,
-the save dialog remains available as an alternate-location override, and a
-valid configured Eggman ZIP is the default destination so it is not silently
-relocated. Every destination TPM may write is rejected when it overlaps the
-TeknoParrot root, either game ZIP source, or the game staging folder.
+ZIP or standalone `.dat` the user already has. On a later explicit update, a
+valid configured Eggman ZIP is reused at its existing location without an
+alternate-location save dialog, so it is not silently relocated.
 
 When a configured Eggman ZIP is already verified safe, the update flow
 reuses a safe configured destination without an unnecessary browse prompt.
-An explicit alternate-location choice remains available, and the final
-destination is revalidated before download and write.
+Every destination supplied to the downloader, including a previously
+configured or user-selected path, is canonicalized and revalidated before
+reuse, download, or write. A destination that overlaps the TeknoParrot root,
+either game ZIP source, or the game staging folder is rejected before any
+network/download work begins.
 Before reuse or replacement, the ZIP must meet the expected byte count (when
 known), open as a readable archive, and contain the collection DAT entry used
 by `Build-DatIndexFromZip`. Validation happens before the shared downloader
@@ -352,7 +353,10 @@ The release ZIP is staged and inventory-checked before promotion. A
 timestamped BepInEx backup is copied and hash-verified before live changes.
 Promotion uses one rollback-safe tree transaction; recoverable failures
 restore the pre-operation tree, while rollback or cleanup uncertainty
-preserves evidence and reports the update as blocked.
+preserves evidence and does not report clean completion. If live promotion
+succeeds but ordinary staging cleanup fails, the update is reported separately
+as applied-with-cleanup-failure, excluded from the clean-update count, and the
+validated residue path is logged and shown as ACTION REQUIRED.
 
 ---
 
