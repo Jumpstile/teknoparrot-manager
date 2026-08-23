@@ -3448,121 +3448,307 @@ function Test-SafePostgresDbName {
     return ($DbName -match '^[A-Za-z0-9_]+$')
 }
 
-# Issue #3 (v1.0 roadmap): every Postgres helper used to set $env:PGPASSWORD
-# for the duration of a psql.exe/pg_dump.exe/etc. call. For the few
-# milliseconds that child process runs, the password is visible in its own
-# environment block to anything else on the system that can inspect a
-# process's environment (Task Manager, Process Explorer, a WMI query) --
-# flagged by an external review as acceptable for this project's actual
-# use case (a single local arcade machine) but worth closing for v1.0.
-# libpq-based tools (psql/pg_dump/pg_restore/createdb/dropdb all are)
-# automatically pick up a PGPASSFILE env var pointing at a standard
-# ".pgpass" credential file instead, never putting the password in their
-# own environment or command line. This writes one, locked down to the
-# current user via icacls, for the caller to point PGPASSFILE at and
-# delete via Remove-PostgresPgPassFile when done.
-#
-# Single line with "*" for the database field covers every call site here --
-# they all use a fixed -h 127.0.0.1 -p 5432 -U postgres and only the
-# database name (or no -d at all) varies. Per the .pgpass format
-# (https://www.postgresql.org/docs/current/libpq-pgpass.html), only "\" and
-# ":" need escaping in a field, and only the password field here can
-# realistically contain either.
+# Every libpq helper uses a short-lived PGPASSFILE rather than PGPASSWORD.
+# The file is created in the system temporary directory, stripped of
+# inherited ACLs, granted only to the current Windows identity, and deleted
+# before the helper returns. The process environment is restored afterward.
+# A cleanup failure blocks the operation rather than leaving a credential
+# behind. GameProfile Pass values remain a compatibility-required plaintext
+# boundary for TeknoParrotUI; recovery backups are ACL-locked evidence.
 function New-PostgresPgPassFile {
-    param([string]$Password)
-    $path = Join-Path ([System.IO.Path]::GetTempPath()) ("tpm-pgpass-" + [guid]::NewGuid().ToString("N") + ".conf")
+    param([Parameter(Mandatory)][string]$Password)
+    if ([string]::IsNullOrEmpty($Password)) { throw 'Postgres: cannot create a credential file for an empty password.' }
+    $path = Join-Path ([System.IO.Path]::GetTempPath()) ('tpm-pgpass-' + [guid]::NewGuid().ToString('N') + '.conf')
     $escaped = $Password -replace '\\', '\\' -replace ':', '\:'
-    $line = "127.0.0.1:5432:*:postgres:$escaped"
-    [System.IO.File]::WriteAllText($path, $line + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding $false))
-    # Best-effort hardening, not load-bearing: the temp folder itself is
-    # already restricted to the current user by default NTFS inheritance,
-    # so a failure here (e.g. icacls unavailable) does not block the
-    # credential-file approach from working -- it just loses the extra
-    # explicit lockdown.
+    $line = '127.0.0.1:5432:*:postgres:' + $escaped
     try {
+        [System.IO.File]::WriteAllText($path, $line + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding $false))
         $owner = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-        & icacls $path /inheritance:r /grant:r "${owner}:(R)" 2>&1 | Out-Null
+        & icacls $path /inheritance:r /grant:r ($owner + ':(F)') 1>$null 2>$null
+        if ($LASTEXITCODE -ne 0) { throw 'icacls failed' }
     } catch {
-        Write-Log "Postgres: could not lock down pgpass file ACL -- $_"
+        try { if (Test-Path -LiteralPath $path) { [System.IO.File]::Delete($path) } } catch {}
+        throw 'Postgres: could not create and lock down the temporary credential file.'
     }
     return $path
 }
 
-# Deletes a temporary pgpass file created by New-PostgresPgPassFile. Never
-# throws -- this always runs from a `finally` block, and a failure to
-# delete a temp file (e.g. AV briefly holding a handle) should never mask
-# whatever the real result of the Postgres operation was.
 function Remove-PostgresPgPassFile {
-    param([string]$Path)
+    param([string]$Path, [switch]$ThrowOnFailure)
     if ($Path -and (Test-Path -LiteralPath $Path)) {
-        try { [System.IO.File]::Delete($Path) } catch {}
+        try {
+            [System.IO.File]::Delete($Path)
+            if (Test-Path -LiteralPath $Path) { throw 'credential file remains' }
+        } catch {
+            if ($ThrowOnFailure) { throw 'Postgres: temporary credential cleanup failed.' }
+            return $false
+        }
     }
+    return $true
 }
 
-# Read-only: true if PostgreSQL 8.3 is already installed (service exists
-# and psql.exe is present). Never reinstalls or modifies an existing
-# install -- callers use this to skip straight to per-game configuration
-# when it's already true, per the explicit "never touch an existing
-# install" requirement.
+function Set-PostgresPgPassFileEnvironment {
+    param([string]$Path)
+    $previous = [Environment]::GetEnvironmentVariable('PGPASSFILE', 'Process')
+    [Environment]::SetEnvironmentVariable('PGPASSFILE', $Path, 'Process')
+    return $previous
+}
+
+function Restore-PostgresPgPassFileEnvironment {
+    param([string]$PreviousValue)
+    [Environment]::SetEnvironmentVariable('PGPASSFILE', $PreviousValue, 'Process')
+}
+
+function Wait-PostgresServiceState {
+    param([Parameter(Mandatory)][string]$DesiredStatus, [int]$TimeoutSeconds = 30)
+    $service = Get-Service -Name $script:PostgresServiceName -ErrorAction Stop
+    if ($service.PSObject.Methods.Name -contains 'WaitForStatus') {
+        $service.WaitForStatus($DesiredStatus, [TimeSpan]::FromSeconds($TimeoutSeconds))
+    }
+    $observed = Get-Service -Name $script:PostgresServiceName -ErrorAction Stop
+    if ([string]$observed.Status -ne $DesiredStatus) {
+        throw "PostgreSQL service did not reach the required state '$DesiredStatus'."
+    }
+    return $observed
+}
+
 function Test-PostgresInstalled {
     $svc = Get-Service -Name $script:PostgresServiceName -ErrorAction SilentlyContinue
-    $psqlExists = Test-Path -LiteralPath (Join-Path $script:PostgresBinDir "psql.exe")
+    $psqlExists = Test-Path -LiteralPath (Join-Path $script:PostgresBinDir 'psql.exe')
     return (($null -ne $svc) -and $psqlExists)
 }
 
-# Read-only: true if a database with this exact name already exists on
-# the local Postgres server. This is the check that gates every
-# database-creation/restore step in the setup mode -- a database that
-# already exists for an already-configured game is never touched,
-# recreated, or restored over.
+# Returns a verified tri-state result instead of collapsing a connection or
+# query failure into "database absent". Creation is allowed only when
+# Verified is true and Exists is false.
+function Get-PostgresDatabaseState {
+    param([Parameter(Mandatory)][string]$DbName, [Parameter(Mandatory)][string]$SuperPasswordPlain)
+    if (-not (Test-SafePostgresDbName $DbName)) { throw 'Postgres: unsafe database name.' }
+    $psqlExe = Join-Path $script:PostgresBinDir 'psql.exe'
+    if (-not (Test-Path -LiteralPath $psqlExe -PathType Leaf)) { throw 'Postgres: psql.exe could not be verified.' }
+    $pgpassFile = New-PostgresPgPassFile -Password $SuperPasswordPlain
+    $previousPgPassFile = $null
+    try {
+        $previousPgPassFile = Set-PostgresPgPassFileEnvironment -Path $pgpassFile
+        $result = & $psqlExe -U postgres -h 127.0.0.1 -p 5432 -tAc "SELECT 1 FROM pg_database WHERE datname='$DbName'" 2>$null
+        if ($LASTEXITCODE -ne 0) { throw 'Postgres: database existence query failed.' }
+        return [pscustomobject]@{ Exists = ($result -match '^\s*1\s*$'); Verified = $true }
+    } finally {
+        Restore-PostgresPgPassFileEnvironment -PreviousValue $previousPgPassFile
+        Remove-PostgresPgPassFile -Path $pgpassFile -ThrowOnFailure
+    }
+}
+
 function Test-PostgresDatabaseExists {
     param([string]$DbName, [string]$SuperPasswordPlain)
-    if (-not (Test-SafePostgresDbName $DbName)) {
-        Write-Log "Postgres: refusing unsafe database name '$DbName'"
+    try { return ((Get-PostgresDatabaseState -DbName $DbName -SuperPasswordPlain $SuperPasswordPlain).Exists) }
+    catch {
+        Write-Log "Postgres: database existence check failed for '$DbName' -- operation blocked."
         return $false
-    }
-    $psqlExe = Join-Path $script:PostgresBinDir "psql.exe"
-    if (-not (Test-Path -LiteralPath $psqlExe)) { return $false }
-    $pgpassFile = New-PostgresPgPassFile -Password $SuperPasswordPlain
-    $env:PGPASSFILE = $pgpassFile
-    try {
-        $result = & $psqlExe -U postgres -h 127.0.0.1 -p 5432 -tAc "SELECT 1 FROM pg_database WHERE datname='$DbName'" 2>$null
-        return ($result -match '1')
-    } catch {
-        Write-Log "Postgres: could not check database '$DbName' -- $_"
-        return $false
-    } finally {
-        $env:PGPASSFILE = $null
-        Remove-PostgresPgPassFile -Path $pgpassFile
     }
 }
 
-# Verifies a password actually authenticates against the running Postgres
-# server (a trivial SELECT 1) -- called right after obtaining a password
-# (decrypted from saved config, or freshly typed) so a wrong/stale
-# password produces one clear error immediately, instead of a confusing
-# wall of per-game failures that would otherwise all silently degrade to
-# "treat as nonexistent" further downstream (every Postgres helper here
-# returns $false on any connection error, including a bad password, so a
-# wrong password fails safe -- nothing gets corrupted -- but it would
-# otherwise look like 20 separate unrelated failures instead of one).
 function Test-PostgresPassword {
-    param([string]$SuperPasswordPlain)
-    $psqlExe = Join-Path $script:PostgresBinDir "psql.exe"
-    if (-not (Test-Path -LiteralPath $psqlExe)) { return $false }
+    param([Parameter(Mandatory)][string]$SuperPasswordPlain)
+    $psqlExe = Join-Path $script:PostgresBinDir 'psql.exe'
+    if (-not (Test-Path -LiteralPath $psqlExe -PathType Leaf)) { return $false }
     $pgpassFile = New-PostgresPgPassFile -Password $SuperPasswordPlain
-    $env:PGPASSFILE = $pgpassFile
+    $previousPgPassFile = $null
     try {
-        & $psqlExe -U postgres -h 127.0.0.1 -p 5432 -tAc "SELECT 1" 2>$null | Out-Null
+        $previousPgPassFile = Set-PostgresPgPassFileEnvironment -Path $pgpassFile
+        & $psqlExe -U postgres -h 127.0.0.1 -p 5432 -tAc 'SELECT 1' 2>$null | Out-Null
         return ($LASTEXITCODE -eq 0)
-    } catch {
-        return $false
     } finally {
-        $env:PGPASSFILE = $null
-        Remove-PostgresPgPassFile -Path $pgpassFile
+        Restore-PostgresPgPassFileEnvironment -PreviousValue $previousPgPassFile
+        Remove-PostgresPgPassFile -Path $pgpassFile -ThrowOnFailure
     }
 }
 
+function ConvertTo-PostgresSqlPasswordLiteral {
+    param([Parameter(Mandatory)][string]$Password)
+    if ([string]::IsNullOrEmpty($Password) -or $Password.IndexOf([char]0) -ge 0) {
+        throw 'Postgres: the recovery password is empty or contains a NUL character.'
+    }
+    $builder = New-Object System.Text.StringBuilder
+    foreach ($character in $Password.ToCharArray()) {
+        $code = [int][char]$character
+        switch ($code) {
+            8  { [void]$builder.Append('\b') }
+            9  { [void]$builder.Append('\t') }
+            10 { [void]$builder.Append('\n') }
+            11 { [void]$builder.Append('\v') }
+            12 { [void]$builder.Append('\f') }
+            13 { [void]$builder.Append('\r') }
+            39 { [void]$builder.Append([char]92); [void]$builder.Append([char]39) }
+            92 { [void]$builder.Append([char]92); [void]$builder.Append([char]92) }
+            default {
+                if ($code -lt 32) {
+                    [void]$builder.Append([char]92)
+                    [void]$builder.Append(('{0:D3}' -f $code))
+                } else { [void]$builder.Append($character) }
+            }
+        }
+    }
+    return "E'" + $builder.ToString() + "'"
+}
+
+function ConvertTo-PostgresRedactedText {
+    param([string]$Text, [string[]]$Secrets = @())
+    $safe = if ($null -eq $Text) { '' } else { [string]$Text }
+    foreach ($secret in @($Secrets)) {
+        if (-not [string]::IsNullOrEmpty($secret)) { $safe = $safe.Replace($secret, '[REDACTED]') }
+    }
+    return $safe
+}
+
+function Invoke-PostgresNativeProcessWithInput {
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [Parameter(Mandatory)][string]$Arguments,
+        [Parameter(Mandatory)][string]$InputText,
+        [string[]]$Secrets = @()
+    )
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $FilePath
+    $psi.Arguments = $Arguments
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    try { $psi.StandardInputEncoding = New-Object System.Text.UTF8Encoding $false } catch {}
+    $proc = New-Object System.Diagnostics.Process
+    $proc.StartInfo = $psi
+    try {
+        if (-not $proc.Start()) { throw 'Postgres process could not be started.' }
+        $proc.StandardInput.Write($InputText)
+        $proc.StandardInput.Close()
+        $stdout = $proc.StandardOutput.ReadToEnd()
+        $stderr = $proc.StandardError.ReadToEnd()
+        $proc.WaitForExit()
+        return [pscustomobject]@{
+            ExitCode = $proc.ExitCode
+            Output = ConvertTo-PostgresRedactedText -Text $stdout -Secrets $Secrets
+            Error = ConvertTo-PostgresRedactedText -Text $stderr -Secrets $Secrets
+        }
+    } finally { $proc.Dispose() }
+}
+
+function Copy-PostgresRecoveryEvidenceFile {
+    param([Parameter(Mandatory)][string]$Source, [Parameter(Mandatory)][string]$Destination)
+    if (-not (Test-Path -LiteralPath $Source -PathType Leaf)) { throw 'Postgres recovery evidence source is missing.' }
+    [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($Destination))
+    Copy-Item -LiteralPath $Source -Destination $Destination -Force -ErrorAction Stop
+    $sourceItem = Get-Item -LiteralPath $Source -Force -ErrorAction Stop
+    $destItem = Get-Item -LiteralPath $Destination -Force -ErrorAction Stop
+    $sourceHash = (Get-FileHash -LiteralPath $Source -Algorithm SHA256 -ErrorAction Stop).Hash
+    $destHash = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256 -ErrorAction Stop).Hash
+    if ($sourceItem.Length -ne $destItem.Length -or $sourceHash -ne $destHash) { throw 'Postgres recovery evidence hash verification failed.' }
+    return [pscustomobject]@{ Source = $Source; Backup = $Destination; Sha256 = $destHash }
+}
+
+function Lock-PostgresRecoveryDirectory {
+    param([Parameter(Mandatory)][string]$Path)
+    $owner = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    & icacls $Path /inheritance:r /grant:r ($owner + ':(OI)(CI)(F)') 1>$null 2>$null
+    if ($LASTEXITCODE -ne 0) { throw 'Postgres recovery evidence ACL could not be verified.' }
+}
+
+function New-PostgresRecoveryBackup {
+    param([Parameter(Mandatory)][string]$UserProfilesDir)
+    $timestamp = (Get-Date).ToString('yyyy-MM-dd_HH-mm-ss_fff')
+    $backupRoot = Join-Path (Join-Path $PSScriptRoot 'PostgresRecoveryBackups') $timestamp
+    $configBackupRoot = Join-Path $backupRoot 'PostgreSQL'
+    $profileBackupRoot = Join-Path $backupRoot 'Profiles'
+    $profileBackups = New-Object System.Collections.Generic.List[object]
+    $configBackups = New-Object System.Collections.Generic.List[object]
+    try {
+        [void][System.IO.Directory]::CreateDirectory($configBackupRoot)
+        [void][System.IO.Directory]::CreateDirectory($profileBackupRoot)
+        Lock-PostgresRecoveryDirectory -Path $backupRoot
+        $dataDir = Join-Path $script:PostgresInstallDir 'data'
+        if (-not (Test-Path -LiteralPath $dataDir -PathType Container)) { throw 'Postgres data directory is not present.' }
+        foreach ($configName in @('pg_hba.conf', 'postgresql.conf')) {
+            [void]$configBackups.Add((Copy-PostgresRecoveryEvidenceFile -Source (Join-Path $dataDir $configName) -Destination (Join-Path $configBackupRoot $configName)))
+        }
+        $configVariable = Get-Variable -Name configPath -Scope Script -ErrorAction SilentlyContinue
+        if ($configVariable -and $configVariable.Value -and (Test-Path -LiteralPath $configVariable.Value -PathType Leaf)) {
+            [void]$configBackups.Add((Copy-PostgresRecoveryEvidenceFile -Source $configVariable.Value -Destination (Join-Path $backupRoot 'TeknoParrot-Manager.config.json')))
+        }
+        if (-not (Test-Path -LiteralPath $UserProfilesDir -PathType Container)) { throw 'UserProfiles directory is not present.' }
+        $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction Stop | Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object Name)
+        foreach ($profileFile in $profiles) {
+            $doc = Read-Xml $profileFile.FullName
+            if ($doc.GameProfile -and (Test-GameNeedsPostgres $doc)) {
+                [void]$profileBackups.Add((Copy-PostgresRecoveryEvidenceFile -Source $profileFile.FullName -Destination (Join-Path $profileBackupRoot $profileFile.Name)))
+            }
+        }
+        if ($profileBackups.Count -eq 0) { throw 'No affected PostgreSQL profiles were identified.' }
+        return [pscustomobject]@{ Path = $backupRoot; ConfigBackups = @($configBackups); ProfileBackups = @($profileBackups); Verified = $true }
+    } catch {
+        Write-Log "Postgres recovery backup: blocked; evidence remains at $backupRoot."
+        return [pscustomobject]@{ Path = $backupRoot; ConfigBackups = @($configBackups); ProfileBackups = @($profileBackups); Verified = $false }
+    }
+}
+
+function Restore-PostgresProfileBackups {
+    param([Parameter(Mandatory)]$RecoveryBackup)
+    foreach ($item in @($RecoveryBackup.ProfileBackups | Sort-Object Source)) {
+        Copy-Item -LiteralPath $item.Backup -Destination $item.Source -Force -ErrorAction Stop
+        $sourceHash = (Get-FileHash -LiteralPath $item.Source -Algorithm SHA256 -ErrorAction Stop).Hash
+        $backupHash = (Get-FileHash -LiteralPath $item.Backup -Algorithm SHA256 -ErrorAction Stop).Hash
+        if ($sourceHash -ne $backupHash) { throw 'Postgres profile rollback hash verification failed.' }
+    }
+    return $true
+}
+
+function Reset-PostgresPasswordAutomatically {
+    param([Parameter(Mandatory)][string]$NewPassword, [Parameter(Mandatory)]$RecoveryBackup)
+    $result = [ordered]@{ Attempted = $false; Succeeded = $false; RecoveryBlocked = $true; BackupPath = $RecoveryBackup.Path; Reason = '' }
+    if (-not $RecoveryBackup.Verified) { $result.Reason = 'Verified recovery evidence is unavailable.'; return [pscustomobject]$result }
+    $postgresExe = Join-Path $script:PostgresBinDir 'postgres.exe'
+    $dataDir = Join-Path $script:PostgresInstallDir 'data'
+    if (-not (Test-Path -LiteralPath $postgresExe -PathType Leaf) -or -not (Test-Path -LiteralPath $dataDir -PathType Container)) {
+        $result.Reason = 'The PostgreSQL executable or data directory could not be verified.'
+        return [pscustomobject]$result
+    }
+    if ($dataDir -match '[\r\n"]') { $result.Reason = 'The PostgreSQL data path is not safe for the native recovery command.'; return [pscustomobject]$result }
+    $service = Get-Service -Name $script:PostgresServiceName -ErrorAction SilentlyContinue
+    if ($null -eq $service) { $result.Reason = 'The PostgreSQL service could not be verified.'; return [pscustomobject]$result }
+    $wasRunning = ([string]$service.Status -ne 'Stopped')
+    try {
+        $result.Attempted = $true
+        if ($wasRunning) {
+            Stop-Service -Name $script:PostgresServiceName -Force -ErrorAction Stop
+            Wait-PostgresServiceState -DesiredStatus 'Stopped' | Out-Null
+        }
+        if (Test-Path -LiteralPath (Join-Path $dataDir 'postmaster.pid') -PathType Leaf) { throw 'A live PostgreSQL postmaster is still present.' }
+        $literal = ConvertTo-PostgresSqlPasswordLiteral -Password $NewPassword
+        $sql = 'ALTER ROLE postgres WITH PASSWORD ' + $literal + ';' + [Environment]::NewLine + [Environment]::NewLine
+        $processResult = Invoke-PostgresNativeProcessWithInput -FilePath $postgresExe -Arguments ('--single -D "' + $dataDir + '" -j postgres') -InputText $sql -Secrets @($NewPassword)
+        if ($processResult.ExitCode -ne 0) { throw "Automatic PostgreSQL password reset failed with exit code $($processResult.ExitCode)." }
+        Start-Service -Name $script:PostgresServiceName -ErrorAction Stop
+        Wait-PostgresServiceState -DesiredStatus 'Running' | Out-Null
+        if (-not (Test-PostgresPassword -SuperPasswordPlain $NewPassword)) { throw 'The reset completed but the approved password did not authenticate.' }
+        if (-not $wasRunning) {
+            Stop-Service -Name $script:PostgresServiceName -Force -ErrorAction Stop
+            Wait-PostgresServiceState -DesiredStatus 'Stopped' | Out-Null
+        }
+        $result.Succeeded = $true
+        $result.RecoveryBlocked = $false
+        $result.Reason = 'Automatic PostgreSQL password reset and authentication verification completed.'
+        Write-Log "Postgres recovery: automatic password reset completed; pg_hba.conf was not changed. Evidence=$($RecoveryBackup.Path)"
+    } catch {
+        $result.Reason = 'Automatic PostgreSQL password reset did not complete.'
+        Write-Log "Postgres recovery: blocked; no recovery-complete result was reported. Evidence=$($RecoveryBackup.Path)"
+        try {
+            $current = Get-Service -Name $script:PostgresServiceName -ErrorAction SilentlyContinue
+            if ($current -and $wasRunning -and [string]$current.Status -eq 'Stopped') { Start-Service -Name $script:PostgresServiceName -ErrorAction Stop; Wait-PostgresServiceState -DesiredStatus 'Running' | Out-Null }
+            if ($current -and -not $wasRunning -and [string]$current.Status -eq 'Running') { Stop-Service -Name $script:PostgresServiceName -Force -ErrorAction Stop; Wait-PostgresServiceState -DesiredStatus 'Stopped' | Out-Null }
+        } catch { Write-Log 'Postgres recovery: original service state could not be restored.' }
+    }
+    return [pscustomobject]$result
+}
 # =============================================================================
 # GPU Fix Setup: detect GPU vendor, scan TeknoParrot GameProfiles for fix
 # fields (so newly added games are covered automatically), and apply the
@@ -5553,9 +5739,9 @@ function Test-EggmanDatZip {
 
 # Shared download step for a resolved Eggman release. The ordinary first-run
 # path uses the deterministic TPM-owned default without asking where to save.
-# AllowBrowse preserves the explicit alternate-location override used by the
-# later update flow. PreferredSavePath preserves a valid configured path rather
-# than silently relocating it when a returning user chooses an update.
+# AllowBrowse is used only when no preferred path was supplied. The configured
+# update flow supplies PreferredSavePath, so a valid configured path is reused
+# without an alternate-location dialog and is still revalidated before use.
 # Returns the saved path on success, or $null on failure/abort.
 function Invoke-EggmanDatDownloadInteractive {
     param(
@@ -5587,7 +5773,7 @@ function Invoke-EggmanDatDownloadInteractive {
         $defaultSavePath = $null
     }
     $rawSave = $defaultSavePath
-    if ($AllowBrowse) {
+    if ($AllowBrowse -and [string]::IsNullOrWhiteSpace($PreferredSavePath)) {
         $prompt = if ($defaultSavePath) { "  Save to (Enter for default: $defaultSavePath)" } else { "  Save to (choose a safe alternate location)" }
         $initialDirectory = if ($defaultSavePath) { Split-Path -Parent $defaultSavePath } else { $defaultRoot }
         $rawSave = Read-PathWithBrowse $prompt -Mode SaveFile `
@@ -5732,22 +5918,27 @@ function ConvertTo-PostgresEncryptedPassword {
     return ($secure | ConvertFrom-SecureString)
 }
 
-# Prompts twice and requires both entries to match, so a typo doesn't
-# silently set a password the user didn't intend. Returns plaintext (the
-# caller is responsible for clearing it once consumed).
+# Accepts two SecureString entries and returns plaintext only to the immediate
+# caller. The entries are cleared on every path; the prompt never echoes the
+# approved password and no retry detail includes it.
 function Read-ConfirmedPostgresPassword {
     param([string]$WhatFor)
     while ($true) {
-        $first  = Read-Host "  Enter $WhatFor" -AsSecureString
-        $second = Read-Host "  Re-enter the same password to confirm" -AsSecureString
-        $firstPlain  = ConvertFrom-SecureStringPlain $first
-        $secondPlain = ConvertFrom-SecureStringPlain $second
-        if ($firstPlain -eq $secondPlain) {
+        $firstPlain = $null; $secondPlain = $null
+        try {
+            $first = Read-Host "  Enter $WhatFor" -AsSecureString
+            $second = Read-Host '  Re-enter the same password to confirm' -AsSecureString
+            $firstPlain = ConvertFrom-SecureStringPlain $first
+            $secondPlain = ConvertFrom-SecureStringPlain $second
+            if (-not [string]::IsNullOrEmpty($firstPlain) -and [string]::Equals($firstPlain, $secondPlain, [System.StringComparison]::Ordinal)) {
+                $approved = $firstPlain
+                return $approved
+            }
+        } finally {
+            $firstPlain = $null
             $secondPlain = $null
-            return $firstPlain
         }
-        $firstPlain = $null
-        Write-Host "  Those two didn't match -- let's try again." -ForegroundColor Yellow
+        Write-Host "  Those two entries did not match or were empty -- let's try again." -ForegroundColor Yellow
     }
 }
 
@@ -5895,9 +6086,9 @@ function Remove-PostgresPartialInstall {
 # this session's testing). The superuser password is returned via
 # $OutSuperPasswordPlain so the caller can DPAPI-encrypt and save it --
 # this function never persists anything itself, and always deletes its
-# working folder (including the verbose install log, which logs connection
-# passwords in plaintext in deferred custom-action data even though the
-# command-line echo masks them) in a `finally` block regardless of outcome.
+# working folder (the ZIP and extracted MSI) in a finally block regardless of
+# outcome. No verbose MSI log is requested because this PostgreSQL 8.3 MSI can
+# write connection passwords into deferred custom-action logging.
 function Install-Postgres83 {
     param([ref]$OutSuperPasswordPlain)
 
@@ -5956,11 +6147,9 @@ function Install-Postgres83 {
         Remove-PostgresPartialInstall
 
         Write-Host "  Installing PostgreSQL 8.3 -- this can take a minute or two..." -ForegroundColor Cyan
-        $logPath = Join-Path $workDir "pg83-install.log"
         $msiArgs = @(
             "/i", "`"$($msiFile.FullName)`"",
             "/qn",
-            "/l*v", "`"$logPath`"",
             "INTERNALLAUNCH=1",
             "ROOTDRIVE=C:\",
             "SERVICEACCOUNT=postgres",
@@ -5979,20 +6168,15 @@ function Install-Postgres83 {
             "DOSERVICE=1",
             "DOINITDB=1"
         )
-        # Known, accepted limitation: passing SERVICEPASSWORD/SUPERPASSWORD
-        # as msiexec command-line properties means they are briefly visible
-        # to anything that can inspect this process's command line (Task
-        # Manager's command-line column, Process Explorer, a WMI
-        # Win32_Process query) for the duration of this one call. MSI's own
-        # SecureCustomProperties marking (confirmed present for both
-        # properties when the MSI's tables were inspected this session)
-        # only redacts them from msiexec's *own* verbose log -- it does not
-        # hide them from the OS-level process command line. There is no
-        # msiexec mechanism that avoids this for a silent property-driven
-        # install; it is an inherent trade-off of this approach, not
-        # something this script can route around. The exposure window is
-        # already minimized (synchronous call, passwords cleared from this
-        # script's own memory immediately after).
+        # Known, accepted limitation: the PostgreSQL 8.3 MSI requires
+        # SERVICEPASSWORD/SUPERPASSWORD as public command-line properties. They are
+        # briefly visible to OS process inspection (Task Manager, Process Explorer,
+        # WMI, or equivalent) during this synchronous call. TPM does not request a
+        # verbose MSI log because this MSI's deferred custom actions can write the
+        # connection passwords into that log. There is no property-driven MSI
+        # mechanism that removes the command-line exposure; TPM does not print or log
+        # the argument list, clears its password variables immediately after the call,
+        # and deletes the downloaded/extracted working folder in finally.
         $proc = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -PassThru
         $svcPwPlain = $null
         [GC]::Collect()
@@ -6009,6 +6193,9 @@ function Install-Postgres83 {
         $OutSuperPasswordPlain.Value = $superPwPlain
         return $true
     } finally {
+        $svcPwPlain = $null
+        $superPwPlain = $null
+        [GC]::Collect()
         Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
@@ -6045,147 +6232,130 @@ function Get-PostgresBackupFile {
     return $best.FullName
 }
 
-# Creates a database and restores a game's bundled backup into it. Only
-# ever called for a database confirmed NOT to already exist
-# (Test-PostgresDatabaseExists gates every call site in
-# Invoke-PostgresGameSetup below) -- never recreates or overwrites an
-# existing database. $Encoding should be "UTF8" only for the Golden Tee
-# Live 2006 database (GameDB06); "SQL_ASCII" for every other game, per the
-# guide's Appendix A -- this is a static, empirically-confirmed exception
-# (same category as the project's existing hardcoded
-# $RawThrillsPathLimits/$FileVersionPins lists), not something derived at
-# runtime. pg_restore warnings on stderr are expected and ignored per the
-# guide ("IGNORE the warning about errors on restore") -- only a database
-# that doesn't exist afterward is treated as a real failure.
+# Creates a database and restores a bundled backup only after a verified
+# database-state query proved that the exact database name is absent. It
+# never drops or recreates an existing database.
 function New-PostgresDatabaseFromBackup {
     param([string]$DbName, [string]$Encoding, [string]$BackupFile, [string]$SuperPasswordPlain)
-
-    if (-not (Test-SafePostgresDbName $DbName)) {
-        Write-Log "Postgres: refusing unsafe database name '$DbName'"
-        return $false
+    if (-not (Test-SafePostgresDbName $DbName)) { Write-Log 'Postgres: refusing unsafe database name.'; return $false }
+    foreach ($exeName in @('createdb.exe', 'psql.exe', 'pg_restore.exe')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $script:PostgresBinDir $exeName) -PathType Leaf)) { return $false }
     }
-
-    $createdbExe  = Join-Path $script:PostgresBinDir "createdb.exe"
-    $psqlExe      = Join-Path $script:PostgresBinDir "psql.exe"
-    $pgRestoreExe = Join-Path $script:PostgresBinDir "pg_restore.exe"
-
+    if (-not (Test-Path -LiteralPath $BackupFile -PathType Leaf)) { return $false }
+    $createdbExe = Join-Path $script:PostgresBinDir 'createdb.exe'
+    $psqlExe = Join-Path $script:PostgresBinDir 'psql.exe'
+    $pgRestoreExe = Join-Path $script:PostgresBinDir 'pg_restore.exe'
     $pgpassFile = New-PostgresPgPassFile -Password $SuperPasswordPlain
-    $env:PGPASSFILE = $pgpassFile
+    $previousPgPassFile = $null
     try {
+        $previousPgPassFile = Set-PostgresPgPassFileEnvironment -Path $pgpassFile
         & $createdbExe -U postgres -h 127.0.0.1 -p 5432 -E $Encoding -T template0 $DbName 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            Write-Log "Postgres: createdb failed for '$DbName' (exit $LASTEXITCODE)"
-            return $false
-        }
-
+        if ($LASTEXITCODE -ne 0) { return $false }
         & $psqlExe -U postgres -h 127.0.0.1 -p 5432 -d $DbName -c "ALTER DATABASE `"$DbName`" SET standard_conforming_strings = on;" 2>&1 | Out-Null
-
         & $pgRestoreExe -U postgres -h 127.0.0.1 -p 5432 -d $DbName $BackupFile 2>&1 | Out-Null
-        return (Test-PostgresDatabaseExists -DbName $DbName -SuperPasswordPlain $SuperPasswordPlain)
-    } catch {
-        Write-Log "Postgres: database creation failed for '$DbName' -- $_"
-        return $false
-    } finally {
-        $env:PGPASSFILE = $null
-        Remove-PostgresPgPassFile -Path $pgpassFile
+        if ($LASTEXITCODE -ne 0) { return $false }
+        $state = Get-PostgresDatabaseState -DbName $DbName -SuperPasswordPlain $SuperPasswordPlain
+        return ($state.Verified -and $state.Exists)
+    } catch { return $false }
+    finally {
+        Restore-PostgresPgPassFileEnvironment -PreviousValue $previousPgPassFile
+        Remove-PostgresPgPassFile -Path $pgpassFile -ThrowOnFailure
     }
 }
-
-# Main per-game Postgres setup pass: for every registered profile that
-# needs Postgres, fills in connection fields (Path/Address/Port/User only
-# when currently empty -- in practice TeknoParrot ships these already
-# correctly pre-filled, so this is normally a no-op; Pass only when
-# currently empty, NEVER overwriting an existing value, since the user may
-# have already configured it correctly and silently overwriting it is
-# exactly what this script's "never overwrite existing config" convention
-# exists to prevent) and, for profiles whose GameProfile predates the
-# "Automatically create Database" feature, creates and restores that
-# game's database -- but only when Test-PostgresDatabaseExists first
-# confirms it doesn't already exist. Returns
-# [pscustomobject]@{ Configured; DbCreated; AlreadyConfigured; Errors }
-# counts. Caller is responsible for the backup pass
-# (Backup-PostgresDatabases) before calling this.
+# Main per-game Postgres setup pass. All profiles are preflighted and all
+# database existence checks must be verified before any profile write. Pass is
+# written whenever it differs because TeknoParrotUI owns that plaintext
+# compatibility field; the caller must supply a verified recovery backup.
 function Invoke-PostgresGameSetup {
-    param([string]$UserProfilesDir, [string]$SuperPasswordPlain)
-
+    param([string]$UserProfilesDir, [string]$SuperPasswordPlain, $RecoveryBackup = $null)
+    $results = [ordered]@{ Configured = 0; DbCreated = 0; AlreadyConfigured = 0; Errors = 0; RecoveryBlocked = $false; BackupPath = $null }
+    if (-not $RecoveryBackup) { $RecoveryBackup = New-PostgresRecoveryBackup -UserProfilesDir $UserProfilesDir }
+    if ($RecoveryBackup) { $results.BackupPath = $RecoveryBackup.Path }
+    if (-not $RecoveryBackup -or -not $RecoveryBackup.Verified) {
+        $results.Errors++
+        $results.RecoveryBlocked = $true
+        Write-Log 'Postgres: profile setup blocked because recovery evidence was not verified.'
+        return [pscustomobject]$results
+    }
     $relBinPath = $script:PostgresBinDir.TrimEnd('\') + '\'
-    $results = [ordered]@{ Configured = 0; DbCreated = 0; AlreadyConfigured = 0; Errors = 0 }
-
-    $profiles = Get-ChildItem -LiteralPath $UserProfilesDir -Filter *.xml -File -ErrorAction SilentlyContinue |
-                    Where-Object { $_.Directory.Name -ne "FullBackup" }
-
+    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction Stop | Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object Name)
+    $plans = New-Object System.Collections.Generic.List[object]
+    $dbState = @{}
+    $preflightBlocked = $false
     foreach ($pf in $profiles) {
         try {
             $doc = Read-Xml $pf.FullName
-            if (-not $doc.GameProfile) { continue }
-            if (-not (Test-GameNeedsPostgres $doc)) { continue }
-
-            $gpNode   = $doc.GameProfile.SelectSingleNode("GamePath")
-            $gamePath = if ($gpNode) { $gpNode.InnerText } else { "" }
-            if (-not $gamePath -or -not (Test-Path -LiteralPath $gamePath)) { continue }
-            $gameFolder = Split-Path -Parent $gamePath
-
-            $dbName = Get-PostgresFieldValue $doc "DbName"
-            if ([string]::IsNullOrWhiteSpace($dbName) -or -not (Test-SafePostgresDbName $dbName)) {
-                Write-Log "Postgres: $($pf.BaseName) has no usable DbName -- skipped."
-                $results.Errors++
-                continue
-            }
-
+            if (-not $doc.GameProfile -or -not (Test-GameNeedsPostgres $doc)) { continue }
+            $dbName = Get-PostgresFieldValue $doc 'DbName'
+            if ([string]::IsNullOrWhiteSpace($dbName) -or -not (Test-SafePostgresDbName $dbName)) { throw 'The profile has no safe PostgreSQL database name.' }
+            if ($null -eq (Get-PostgresFieldValue $doc 'Pass')) { throw 'The profile has no PostgreSQL Pass field.' }
             $changed = $false
-            if ([string]::IsNullOrWhiteSpace((Get-PostgresFieldValue $doc "Path")))    { if (Set-PostgresFieldValue $doc "Path" $relBinPath)    { $changed = $true } }
-            if ([string]::IsNullOrWhiteSpace((Get-PostgresFieldValue $doc "Address"))) { if (Set-PostgresFieldValue $doc "Address" "127.0.0.1") { $changed = $true } }
-            if ([string]::IsNullOrWhiteSpace((Get-PostgresFieldValue $doc "Port")))    { if (Set-PostgresFieldValue $doc "Port" "5432")          { $changed = $true } }
-            if ([string]::IsNullOrWhiteSpace((Get-PostgresFieldValue $doc "User")))    { if (Set-PostgresFieldValue $doc "User" "postgres")      { $changed = $true } }
-            if ([string]::IsNullOrWhiteSpace((Get-PostgresFieldValue $doc "Pass"))) {
-                if (Set-PostgresFieldValue $doc "Pass" $SuperPasswordPlain) { $changed = $true }
+            foreach ($field in @(@('Path', $relBinPath), @('Address', '127.0.0.1'), @('Port', '5432'), @('User', 'postgres'))) {
+                if ([string]::IsNullOrWhiteSpace((Get-PostgresFieldValue $doc $field[0]))) {
+                    if (-not (Set-PostgresFieldValue $doc $field[0] $field[1])) { throw "The profile has no PostgreSQL $($field[0]) field." }
+                    $changed = $true
+                }
             }
-
-            if (Test-PostgresDatabaseExists -DbName $dbName -SuperPasswordPlain $SuperPasswordPlain) {
-                if ($changed) { Save-Xml $doc $pf.FullName; $results.Configured++ }
-                else { $results.AlreadyConfigured++ }
-                Write-Log "Postgres: $($pf.BaseName) -- database '$dbName' already exists, left untouched."
-                continue
+            if (-not [string]::Equals((Get-PostgresFieldValue $doc 'Pass'), $SuperPasswordPlain, [System.StringComparison]::Ordinal)) {
+                if (-not (Set-PostgresFieldValue $doc 'Pass' $SuperPasswordPlain)) { throw 'The profile PostgreSQL Pass field could not be updated.' }
+                $changed = $true
             }
-
-            $autoCreate = Get-PostgresFieldValue $doc "Automatically create Database"
-            if ($autoCreate -eq "1") {
-                # TPUI's own first-launch flow creates the database itself --
-                # nothing more for this script to do beyond the field updates above.
-                if ($changed) { Save-Xml $doc $pf.FullName; $results.Configured++ }
-                Write-Log "Postgres: $($pf.BaseName) -- deferring database creation to TPUI's own Express install."
-                continue
+            if ($dbState.ContainsKey($dbName)) { $state = $dbState[$dbName] }
+            else {
+                $state = Get-PostgresDatabaseState -DbName $dbName -SuperPasswordPlain $SuperPasswordPlain
+                if (-not $state.Verified) { throw 'The database existence result was not verified.' }
+                $dbState[$dbName] = $state
             }
-
-            # Older GameProfileRevision predating that feature -- create
-            # and restore the database ourselves.
-            $backupFile = Get-PostgresBackupFile $gameFolder
-            if (-not $backupFile) {
-                Write-Log "Postgres: $($pf.BaseName) -- no pg_backup file found, database not created."
-                if ($changed) { Save-Xml $doc $pf.FullName; $results.Configured++ }
-                $results.Errors++
-                continue
+            $autoCreate = (Get-PostgresFieldValue $doc 'Automatically create Database') -eq '1'
+            $backupFile = $null; $encoding = $null
+            if (-not $state.Exists -and -not $autoCreate) {
+                $gamePathNode = $doc.GameProfile.SelectSingleNode('GamePath')
+                $gamePath = if ($gamePathNode) { $gamePathNode.InnerText } else { '' }
+                if ([string]::IsNullOrWhiteSpace($gamePath) -or -not (Test-Path -LiteralPath $gamePath -PathType Leaf)) { throw 'The profile needs database creation but its game executable is unavailable.' }
+                $backupFile = Get-PostgresBackupFile -GameFolder ([System.IO.Path]::GetDirectoryName($gamePath))
+                if (-not $backupFile) { throw 'The profile needs database creation but no bundled pg_backup file was found.' }
+                $encoding = if ($dbName -eq 'GameDB06') { 'UTF8' } else { 'SQL_ASCII' }
             }
-
-            $encoding = if ($dbName -eq 'GameDB06') { 'UTF8' } else { 'SQL_ASCII' }
-            if (New-PostgresDatabaseFromBackup -DbName $dbName -Encoding $encoding -BackupFile $backupFile -SuperPasswordPlain $SuperPasswordPlain) {
-                $results.DbCreated++
-                Write-Log "Postgres: $($pf.BaseName) -- created and restored database '$dbName'."
-            } else {
-                $results.Errors++
-                Write-Log "Postgres: $($pf.BaseName) -- FAILED to create/restore database '$dbName'."
-            }
-
-            if ($changed) { Save-Xml $doc $pf.FullName; $results.Configured++ }
+            [void]$plans.Add([pscustomobject]@{ Profile = $pf; Document = $doc; DbName = $dbName; DbExists = [bool]$state.Exists; AutoCreate = $autoCreate; BackupFile = $backupFile; Encoding = $encoding; Changed = $changed })
         } catch {
-            Write-Log "Postgres: error processing $($pf.Name) -- $_"
+            $preflightBlocked = $true
             $results.Errors++
+            Write-Log "Postgres: preflight blocked for $($pf.BaseName); no profile write was attempted."
         }
     }
-
+    if ($preflightBlocked) {
+        $results.RecoveryBlocked = $true
+        Write-Log 'Postgres: profile setup aborted because preflight was not fully verified.'
+        return [pscustomobject]$results
+    }
+    foreach ($plan in @($plans | Sort-Object { $_.Profile.Name })) {
+        if ($plan.DbExists -or $plan.AutoCreate) { continue }
+        if (-not (New-PostgresDatabaseFromBackup -DbName $plan.DbName -Encoding $plan.Encoding -BackupFile $plan.BackupFile -SuperPasswordPlain $SuperPasswordPlain)) {
+            $results.Errors++
+            $results.RecoveryBlocked = $true
+            Write-Log "Postgres: database creation failed for $($plan.Profile.BaseName); no profile write was reported complete."
+            return [pscustomobject]$results
+        }
+        $plan.DbExists = $true
+        $dbState[$plan.DbName] = [pscustomobject]@{ Exists = $true; Verified = $true }
+        $results.DbCreated++
+    }
+    try {
+        foreach ($plan in @($plans | Sort-Object { $_.Profile.Name })) {
+            if ($plan.Changed) {
+                Save-Xml $plan.Document $plan.Profile.FullName
+                $results.Configured++
+            } else { $results.AlreadyConfigured++ }
+        }
+    } catch {
+        $results.Errors++
+        $results.RecoveryBlocked = $true
+        Write-Log "Postgres: profile write failed; restoring from verified evidence at $($RecoveryBackup.Path)."
+        try { Restore-PostgresProfileBackups -RecoveryBackup $RecoveryBackup | Out-Null; Write-Log 'Postgres: profile rollback completed.' }
+        catch { Write-Log "Postgres: profile rollback failed; evidence remains at $($RecoveryBackup.Path)." }
+    }
     return [pscustomobject]$results
 }
-
 # =============================================================================
 # FFB ARCADE PLUGIN  (force feedback / rumble for arcade racers and shooters)
 # =============================================================================
@@ -6982,7 +7152,15 @@ function Get-DgVoodoo2LatestRelease {
                 return $null
             }
             $verStr = $release.tag_name.TrimStart('v')
-            $expectedSha256 = Get-TpmSha256FromDigestField -Digest $mainAsset.digest
+            # GitHub may omit the optional digest property on an otherwise
+            # valid release asset. Read it by property presence so strict
+            # mode does not turn that compatibility case into a failed query.
+            $digest = if ($mainAsset.PSObject.Properties.Name -contains 'digest') {
+                $mainAsset.digest
+            } else {
+                $null
+            }
+            $expectedSha256 = Get-TpmSha256FromDigestField -Digest $digest
             return [pscustomobject]@{
                 Version = $verStr; DownloadUrl = $mainAsset.browser_download_url; FileName = $mainAsset.name; SizeBytes = [int64]$mainAsset.size; ExpectedSha256 = $expectedSha256
             }
@@ -7153,141 +7331,426 @@ function Get-BepInExInstalledArch {
     return Get-ExeArchitecture -ExePath $whPath
 }
 
-# Walks every registered profile with an existing BepInEx install, checks
-# each against the latest stable x64 release, and offers a single batched
-# update for everything outdated. Never touches a game without BepInEx
-# already installed, and never touches an x86 install (policy: x64 only).
+function Test-BepInExNoReparsePath {
+    param([Parameter(Mandatory)][string]$Root, [Parameter(Mandatory)][string]$Path)
+    try {
+        if ([string]::IsNullOrWhiteSpace($Root) -or [string]::IsNullOrWhiteSpace($Path)) { return $false }
+        $rootFull = [System.IO.Path]::GetFullPath($Root).TrimEnd('\','/')
+        $pathFull = [System.IO.Path]::GetFullPath($Path).TrimEnd('\','/')
+        if (-not (Test-PathInside -child $pathFull -parent $rootFull)) { return $false }
+        if (-not (Test-Path -LiteralPath $rootFull -PathType Container -ErrorAction SilentlyContinue)) { return $false }
+        $rootItem = Get-Item -LiteralPath $rootFull -Force -ErrorAction Stop
+        if (($rootItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+        $relative = $pathFull.Substring($rootFull.Length).TrimStart('\','/')
+        $cursor = $rootFull
+        foreach ($part in ($relative -split '[\/]')) {
+            if ([string]::IsNullOrWhiteSpace($part)) { continue }
+            $cursor = Join-Path $cursor $part
+            if (-not (Test-Path -LiteralPath $cursor)) { continue }
+            $item = Get-Item -LiteralPath $cursor -Force -ErrorAction Stop
+            if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+            if ($cursor -ine $pathFull -and -not $item.PSIsContainer) { return $false }
+        }
+        return $true
+    } catch { return $false }
+}
+
+function Test-BepInExGameRootSafe {
+    param([Parameter(Mandatory)][string]$GameRoot, [Parameter(Mandatory)][string]$ApprovedRoot)
+    if (-not (Test-Path -LiteralPath $GameRoot -PathType Container -ErrorAction SilentlyContinue)) { return $false }
+    return (Test-BepInExNoReparsePath -Root $ApprovedRoot -Path $GameRoot)
+}
+
+function Test-BepInExExistingTreeSafe {
+    param([Parameter(Mandatory)][string]$GameRoot)
+    foreach ($name in @('BepInEx', 'doorstop_config.ini', 'winhttp.dll', '.doorstop_version', 'changelog.txt')) {
+        $path = Join-Path $GameRoot $name
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+        if (-not (Test-BepInExNoReparsePath -Root $GameRoot -Path $path)) { return $false }
+        try {
+            $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+            if ($item.PSIsContainer) {
+                foreach ($child in @(Get-ChildItem -LiteralPath $path -Force -Recurse -ErrorAction Stop)) {
+                    if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+                }
+            }
+        } catch { return $false }
+    }
+    return $true
+}
+
+function Get-BepInExStagedFiles {
+    param([Parameter(Mandatory)][string]$StagingDir, [Parameter(Mandatory)][string]$DestDir)
+    if (-not (Test-Path -LiteralPath $StagingDir -PathType Container)) { throw 'BepInEx staging directory is missing.' }
+    foreach ($item in @(Get-ChildItem -LiteralPath $StagingDir -Force -Recurse -ErrorAction Stop)) {
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'BepInEx staging contains a reparse point.' }
+    }
+    $stageFull = [System.IO.Path]::GetFullPath($StagingDir).TrimEnd('\','/')
+    $files = @(Get-ChildItem -LiteralPath $StagingDir -File -Recurse -ErrorAction Stop | Sort-Object FullName)
+    $result = New-Object System.Collections.Generic.List[string]
+    $seen = @{}
+    foreach ($file in $files) {
+        $relative = $file.FullName.Substring($stageFull.Length).TrimStart('\','/')
+        if ([string]::IsNullOrWhiteSpace($relative) -or [System.IO.Path]::IsPathRooted($relative) -or $relative -match '(^|[\/])\.\.([\/]|$)') { throw 'BepInEx staging contains an unsafe relative path.' }
+        $destPath = Join-Path $DestDir $relative
+        if (-not (Test-PathInside -child $file.FullName -parent $StagingDir) -or -not (Test-PathInside -child $destPath -parent $DestDir)) { throw 'BepInEx staging path escaped its approved directory.' }
+        $key = $relative.ToLowerInvariant()
+        if ($seen.ContainsKey($key)) { throw 'BepInEx staging contains duplicate file names.' }
+        $seen[$key] = $true
+        [void]$result.Add($relative)
+    }
+    if ($result.Count -eq 0) { throw 'BepInEx ZIP contained no files to promote.' }
+    return @($result)
+}
+
+# Removes only a TPM-created BepInEx staging directory under the controlled
+# temporary root. The complete path and every existing descendant are checked
+# again immediately before recursive deletion so cleanup cannot follow a
+# replaced reparse point or delete an unrelated path.
+function Remove-BepInExStagingDirectory {
+    param([Parameter(Mandatory)][string]$StagingDir)
+    if ([string]::IsNullOrWhiteSpace($StagingDir) -or $StagingDir -match '[\r\n]') {
+        throw 'TPM BEPINEX STAGING CLEANUP REFUSED because the staging path was empty or malformed.'
+    }
+    try {
+        $stagingRoot = [System.IO.Path]::GetFullPath((Join-Path $env:TEMP 'TeknoParrotManagerStaging')).TrimEnd('\','/')
+        $stagingFull = [System.IO.Path]::GetFullPath($StagingDir).TrimEnd('\','/')
+    } catch {
+        throw 'TPM BEPINEX STAGING CLEANUP REFUSED because the staging path could not be canonicalized.'
+    }
+    $leaf = [System.IO.Path]::GetFileName($stagingFull)
+    if ([string]::IsNullOrWhiteSpace($leaf) -or $leaf -notlike 'BepInEx-*' -or
+        -not (Test-PathInside -child $stagingFull -parent $stagingRoot)) {
+        throw "TPM BEPINEX STAGING CLEANUP REFUSED for '$stagingFull' because it is not a TPM BepInEx directory under the controlled staging root."
+    }
+    if (-not (Test-Path -LiteralPath $stagingFull)) { return $true }
+    if (-not (Test-BepInExNoReparsePath -Root $stagingRoot -Path $stagingFull)) {
+        throw "TPM BEPINEX STAGING CLEANUP REFUSED for '$stagingFull' because its path is reparse-backed or otherwise unsafe."
+    }
+    try {
+        $pending = New-Object 'System.Collections.Generic.Stack[string]'
+        $files = New-Object 'System.Collections.Generic.List[string]'
+        $directories = New-Object 'System.Collections.Generic.List[string]'
+        $pending.Push($stagingFull)
+        while ($pending.Count -gt 0) {
+            $current = $pending.Pop()
+            if (-not (Test-PathInside -child $current -parent $stagingRoot) -or
+                -not (Test-BepInExNoReparsePath -Root $stagingRoot -Path $current)) {
+                throw "staging directory is outside the controlled root or reparse-backed: $current"
+            }
+            [void]$directories.Add($current)
+            foreach ($child in @(Get-ChildItem -LiteralPath $current -Force -ErrorAction Stop)) {
+                $childFull = [System.IO.Path]::GetFullPath($child.FullName)
+                if (-not (Test-PathInside -child $childFull -parent $stagingFull)) {
+                    throw "staging descendant escaped the validated directory: $childFull"
+                }
+                if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    throw "staging descendant is reparse-backed: $childFull"
+                }
+                if ($child.PSIsContainer) { $pending.Push($childFull) } else { [void]$files.Add($childFull) }
+            }
+        }
+        foreach ($file in $files) {
+            if (-not (Test-Path -LiteralPath $file)) { continue }
+            if (-not (Test-PathInside -child $file -parent $stagingFull) -or
+                -not (Test-BepInExNoReparsePath -Root $stagingRoot -Path $file)) {
+                throw "staging file changed to an unsafe path before cleanup: $file"
+            }
+            Remove-Item -LiteralPath $file -Force -ErrorAction Stop
+        }
+        for ($i = $directories.Count - 1; $i -ge 0; $i--) {
+            $directory = $directories[$i]
+            if (-not (Test-Path -LiteralPath $directory)) { continue }
+            if (-not (Test-PathInside -child $directory -parent $stagingRoot) -or
+                -not (Test-BepInExNoReparsePath -Root $stagingRoot -Path $directory)) {
+                throw "staging directory changed to an unsafe path before cleanup: $directory"
+            }
+            Remove-Item -LiteralPath $directory -Force -ErrorAction Stop
+        }
+        if (Test-Path -LiteralPath $stagingFull) { throw 'staging directory remains after removal' }
+    } catch {
+        throw "TPM BEPINEX STAGING CLEANUP FAILED for '$stagingFull' -- residue remains at '$stagingFull'. Cleanup error: $($_.Exception.Message)"
+    }
+    return $true
+}
+
+function Test-BepInExFileMatch {
+    param([Parameter(Mandatory)][string]$Source, [Parameter(Mandatory)][string]$Destination)
+    if (-not (Test-Path -LiteralPath $Source -PathType Leaf) -or -not (Test-Path -LiteralPath $Destination -PathType Leaf)) { return $false }
+    try {
+        $sourceItem = Get-Item -LiteralPath $Source -Force -ErrorAction Stop
+        $destItem = Get-Item -LiteralPath $Destination -Force -ErrorAction Stop
+        if ($sourceItem.Length -ne $destItem.Length) { return $false }
+        $sourceHash = (Get-FileHash -LiteralPath $Source -Algorithm SHA256 -ErrorAction Stop).Hash
+        $destHash = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256 -ErrorAction Stop).Hash
+        return [string]::Equals([string]$sourceHash, [string]$destHash, [System.StringComparison]::OrdinalIgnoreCase)
+    } catch { return $false }
+}
+
+function Test-BepInExBackupEntry {
+    param([Parameter(Mandatory)][string]$Source, [Parameter(Mandatory)][string]$Backup)
+    try {
+        if (-not (Test-Path -LiteralPath $Source) -or -not (Test-Path -LiteralPath $Backup)) { return $false }
+        $sourceItem = Get-Item -LiteralPath $Source -Force -ErrorAction Stop
+        if (-not $sourceItem.PSIsContainer) { return (Test-BepInExFileMatch -Source $Source -Destination $Backup) }
+        foreach ($child in @(Get-ChildItem -LiteralPath $Backup -Force -Recurse -ErrorAction Stop)) {
+            if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+        }
+        $sourceFiles = @(Get-ChildItem -LiteralPath $Source -File -Recurse -ErrorAction Stop)
+        $backupFiles = @(Get-ChildItem -LiteralPath $Backup -File -Recurse -ErrorAction Stop)
+        if ($sourceFiles.Count -ne $backupFiles.Count) { return $false }
+        $sourceRoot = [System.IO.Path]::GetFullPath($Source).TrimEnd('\','/')
+        foreach ($file in $sourceFiles) {
+            $relative = $file.FullName.Substring($sourceRoot.Length).TrimStart('\','/')
+            if (-not (Test-BepInExFileMatch -Source $file.FullName -Destination (Join-Path $Backup $relative))) { return $false }
+        }
+        return $true
+    } catch { return $false }
+}
+
+function New-BepInExUpdateBackup {
+    param([Parameter(Mandatory)][string]$GameRoot)
+    if (-not (Test-BepInExExistingTreeSafe -GameRoot $GameRoot)) { throw 'BepInEx target tree is unsafe before backup.' }
+    $baseName = 'BepInEx_Backup_' + (Get-Date).ToString('yyyy-MM-dd_HH-mm-ss')
+    $backupPath = Join-Path $GameRoot $baseName
+    $suffix = 1
+    while (Test-Path -LiteralPath $backupPath) { $backupPath = Join-Path $GameRoot ($baseName + '-' + $suffix); $suffix++ }
+    [void][System.IO.Directory]::CreateDirectory($backupPath)
+    try {
+        foreach ($name in @('BepInEx', 'doorstop_config.ini', 'winhttp.dll', '.doorstop_version', 'changelog.txt')) {
+            $source = Join-Path $GameRoot $name
+            if (-not (Test-Path -LiteralPath $source)) { continue }
+            if (-not (Test-BepInExNoReparsePath -Root $GameRoot -Path $source)) { throw "BepInEx source is reparse-backed: $name" }
+            $destination = Join-Path $backupPath $name
+            Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force -ErrorAction Stop
+            if (-not (Test-BepInExBackupEntry -Source $source -Backup $destination)) { throw "BepInEx backup verification failed for $name" }
+        }
+        return $backupPath
+    } catch { throw "BepInEx backup failed; evidence remains at '$backupPath'." }
+}
+
+function Invoke-TpmTransactionalTreePromote {
+    param(
+        [Parameter(Mandatory)][string]$StagingDir,
+        [Parameter(Mandatory)][string]$DestDir,
+        [Parameter(Mandatory)][string[]]$RelativeFiles,
+        [scriptblock]$ValidationScript = $null
+    )
+    $rollbackDir = Join-Path $StagingDir '.tpm-rollback-backup'
+    $originals = New-Object System.Collections.Generic.List[object]
+    $promoted = New-Object System.Collections.Generic.List[string]
+    $createdDirs = New-Object System.Collections.Generic.List[string]
+    try {
+        if (-not (Test-Path -LiteralPath $DestDir -PathType Container)) { throw 'BepInEx destination directory is missing.' }
+        [void][System.IO.Directory]::CreateDirectory($rollbackDir)
+        $seen = @{}
+        foreach ($relative in @($RelativeFiles | Sort-Object)) {
+            if ([string]::IsNullOrWhiteSpace($relative) -or [System.IO.Path]::IsPathRooted($relative) -or $relative -match '(^|[\/])\.\.([\/]|$)') { throw 'BepInEx transaction received an unsafe relative path.' }
+            $source = Join-Path $StagingDir $relative
+            $destination = Join-Path $DestDir $relative
+            if (-not (Test-PathInside -child $source -parent $StagingDir) -or -not (Test-PathInside -child $destination -parent $DestDir)) { throw 'BepInEx transaction path escaped its approved directory.' }
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "BepInEx staged file is missing: $relative" }
+            $key = $relative.ToLowerInvariant()
+            if ($seen.ContainsKey($key)) { throw 'BepInEx transaction received duplicate paths.' }
+            $seen[$key] = $true
+            if (-not (Test-BepInExNoReparsePath -Root $DestDir -Path $destination)) { throw "BepInEx destination path is unsafe: $relative" }
+            if (Test-Path -LiteralPath $destination) {
+                if (-not (Test-Path -LiteralPath $destination -PathType Leaf)) { throw "BepInEx destination is not a file: $relative" }
+                $rollbackFile = Join-Path $rollbackDir $relative
+                [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($rollbackFile))
+                Copy-Item -LiteralPath $destination -Destination $rollbackFile -Force -ErrorAction Stop
+                if (-not (Test-BepInExFileMatch -Source $destination -Destination $rollbackFile)) { throw "BepInEx rollback capture failed: $relative" }
+                [void]$originals.Add([pscustomobject]@{ Relative = $relative; Backup = $rollbackFile })
+            }
+        }
+        $destFull = [System.IO.Path]::GetFullPath($DestDir).TrimEnd('\','/')
+        foreach ($relative in @($RelativeFiles | Sort-Object)) {
+            $source = Join-Path $StagingDir $relative
+            $destination = Join-Path $DestDir $relative
+            $parent = [System.IO.Path]::GetDirectoryName($destination)
+            $missing = New-Object System.Collections.Generic.List[string]
+            $cursor = $parent
+            while ($cursor -and $cursor -ine $destFull -and -not (Test-Path -LiteralPath $cursor -PathType Container)) {
+                [void]$missing.Add($cursor)
+                $cursor = [System.IO.Path]::GetDirectoryName($cursor)
+            }
+            if ($cursor -ine $destFull) { throw "BepInEx destination parent is outside the game root: $relative" }
+            for ($i = $missing.Count - 1; $i -ge 0; $i--) {
+                [void][System.IO.Directory]::CreateDirectory($missing[$i])
+                [void]$createdDirs.Add($missing[$i])
+            }
+            [void]$promoted.Add($relative)
+            Copy-Item -LiteralPath $source -Destination $destination -Force -ErrorAction Stop
+            if (-not (Test-BepInExFileMatch -Source $source -Destination $destination)) { throw "BepInEx promoted file verification failed: $relative" }
+        }
+        if ($ValidationScript -and -not [bool](& $ValidationScript)) { throw 'BepInEx post-promotion validation failed.' }
+    } catch {
+        $promotionError = $_
+        $rollbackErrors = New-Object System.Collections.Generic.List[string]
+        for ($i = $promoted.Count - 1; $i -ge 0; $i--) {
+            $destination = Join-Path $DestDir $promoted[$i]
+            try {
+                if (Test-Path -LiteralPath $destination) {
+                    $item = Get-Item -LiteralPath $destination -Force -ErrorAction Stop
+                    if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or $item.PSIsContainer) { throw 'promoted target is not a regular file' }
+                    Remove-Item -LiteralPath $destination -Force -ErrorAction Stop
+                }
+            } catch { [void]$rollbackErrors.Add("remove '$destination'") }
+        }
+        for ($i = $originals.Count - 1; $i -ge 0; $i--) {
+            $entry = $originals[$i]; $destination = Join-Path $DestDir $entry.Relative
+            try {
+                [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($destination))
+                Copy-Item -LiteralPath $entry.Backup -Destination $destination -Force -ErrorAction Stop
+                if (-not (Test-BepInExFileMatch -Source $entry.Backup -Destination $destination)) { throw 'restored hash mismatch' }
+            } catch { [void]$rollbackErrors.Add("restore '$destination'") }
+        }
+        for ($i = $createdDirs.Count - 1; $i -ge 0; $i--) {
+            try {
+                $dir = $createdDirs[$i]
+                if (Test-Path -LiteralPath $dir -PathType Container -and @(Get-ChildItem -LiteralPath $dir -Force -ErrorAction SilentlyContinue).Count -eq 0) { Remove-Item -LiteralPath $dir -Force -ErrorAction Stop }
+            } catch { [void]$rollbackErrors.Add("remove created directory '$($createdDirs[$i])'") }
+        }
+        if ($rollbackErrors.Count -gt 0) {
+            $message = "TPM TRANSACTION ROLLBACK FAILED for '$DestDir'; evidence remains at '$rollbackDir'."
+            Write-Log "BepInEx: $message"
+            throw $message
+        }
+        try { if (Test-Path -LiteralPath $rollbackDir) { Remove-Item -LiteralPath $rollbackDir -Recurse -Force -ErrorAction Stop } } catch {
+            $message = "TPM TRANSACTION CLEANUP FAILED for '$DestDir'; evidence remains at '$rollbackDir'."
+            Write-Log "BepInEx: $message"
+            throw $message
+        }
+        Write-Log "BepInEx: rollback completed for '$DestDir'."
+        throw $promotionError
+    }
+    try { if (Test-Path -LiteralPath $rollbackDir) { Remove-Item -LiteralPath $rollbackDir -Recurse -Force -ErrorAction Stop } } catch {
+        $message = "TPM TRANSACTION CLEANUP FAILED for '$DestDir'; evidence remains at '$rollbackDir'."
+        Write-Log "BepInEx: $message"
+        throw $message
+    }
+    return $true
+}
+
+# Validates every inspectable game root before release query, prompt, download,
+# backup, extraction, or promotion. Only an existing BepInEx installation is
+# eligible for update, and only stable x64 releases are considered.
 function Invoke-BepInExUpdateCheck {
-    param([string]$UserProfilesDir, [string]$CacheDir)
-
-    Write-Host ""
-    Write-Host "  Checking the latest stable BepInEx release..." -ForegroundColor DarkGray
-    $latest = Get-BepInExLatestRelease
-    if (-not $latest) {
-        Write-Host "  Could not reach GitHub to check the latest BepInEx version -- try again later." -ForegroundColor Red
-        Write-Log "BepInEx update check: aborted -- release query failed."
-        return
-    }
-    Write-Host ("  Latest stable: {0}" -f $latest.Version) -ForegroundColor DarkGray
-
-    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
-                  Where-Object { $_.Directory.Name -ne "FullBackup" })
-    if ($profiles.Count -eq 0) {
-        Write-Host "  No registered games found." -ForegroundColor Yellow
-        Write-Log "BepInEx update check: aborted -- no registered profiles."
-        return
-    }
-
-    $outdated = @(); $upToDate = 0; $skippedX86 = 0; $errors = 0
-
+    param([string]$UserProfilesDir, [string]$CacheDir, [string]$ApprovedGamesRoot = '')
+    if ([string]::IsNullOrWhiteSpace($ApprovedGamesRoot)) { $ApprovedGamesRoot = $gamesInstallFolder }
+    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object Name)
+    if ($profiles.Count -eq 0) { Write-Host '  No registered games found.' -ForegroundColor Yellow; Write-Log 'BepInEx update check: aborted -- no registered profiles.'; return }
+    if (-not (Test-Path -LiteralPath $ApprovedGamesRoot -PathType Container -ErrorAction SilentlyContinue)) { Write-Host '  The configured games root could not be verified -- no BepInEx changes made.' -ForegroundColor Red; Write-Log "BepInEx update check: blocked because approved root is unavailable: $ApprovedGamesRoot"; return }
+    $candidates = New-Object System.Collections.Generic.List[object]
+    $safetyBlocked = $false
     foreach ($pf in $profiles) {
         try {
             $doc = Read-Xml $pf.FullName
             if (-not $doc.GameProfile) { continue }
-            $gpNode = $doc.GameProfile.SelectSingleNode("GamePath")
-            if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { continue }
-            $gamePath = $gpNode.InnerText.Trim()
-            if (-not (Test-Path -LiteralPath $gamePath)) { continue }
+            $gamePathNode = $doc.GameProfile.SelectSingleNode('GamePath')
+            if (-not $gamePathNode -or [string]::IsNullOrWhiteSpace($gamePathNode.InnerText)) { continue }
+            $gamePath = $gamePathNode.InnerText.Trim()
+            if (-not (Test-Path -LiteralPath $gamePath -PathType Leaf)) { continue }
             $exeDir = [System.IO.Path]::GetDirectoryName($gamePath)
-
-            $installedVer = Get-BepInExInstalledVersion -ExeDir $exeDir
-            if (-not $installedVer) { continue }   # BepInEx not installed here -- not relevant to this feature
-
-            $arch = Get-BepInExInstalledArch -ExeDir $exeDir
-            if ($arch -eq 'x86') {
-                $skippedX86++
+            if (-not (Test-BepInExGameRootSafe -GameRoot $exeDir -ApprovedRoot $ApprovedGamesRoot) -or -not (Test-BepInExNoReparsePath -Root $exeDir -Path $gamePath)) {
+                $safetyBlocked = $true
+                Write-Host ("  Refusing BepInEx updates because game root is not safe: {0}" -f $pf.BaseName) -ForegroundColor Red
+                Write-Log "BepInEx update check: blocked on unsafe game root for $($pf.BaseName)."
                 continue
             }
-            if ($arch -ne 'x64') { continue }   # could not determine arch -- skip rather than guess
+            [void]$candidates.Add([pscustomobject]@{ Code = $pf.BaseName; ExeDir = $exeDir })
+        } catch { $safetyBlocked = $true; Write-Log "BepInEx update check: root validation failed for $($pf.BaseName)." }
+    }
+    if ($safetyBlocked) { Write-Host '  No BepInEx download or write was attempted.' -ForegroundColor Yellow; return }
 
+    Write-Host ''
+    Write-Host '  Checking the latest stable BepInEx release...' -ForegroundColor DarkGray
+    $latest = Get-BepInExLatestRelease
+    if (-not $latest) { Write-Host '  Could not reach GitHub to check the latest BepInEx version -- try again later.' -ForegroundColor Red; Write-Log 'BepInEx update check: aborted -- release query failed.'; return }
+    Write-Host ("  Latest stable: {0}" -f $latest.Version) -ForegroundColor DarkGray
+    $outdated = New-Object System.Collections.Generic.List[object]
+    $upToDate = 0; $skippedX86 = 0; $errors = 0
+    foreach ($candidate in $candidates) {
+        try {
+            $installedVer = Get-BepInExInstalledVersion -ExeDir $candidate.ExeDir
+            if (-not $installedVer) { continue }
+            $arch = Get-BepInExInstalledArch -ExeDir $candidate.ExeDir
+            if ($arch -eq 'x86') { $skippedX86++; continue }
+            if ($arch -ne 'x64') { continue }
             $instParsed = $null; $latestParsed = $null
-            if (-not [version]::TryParse($installedVer, [ref]$instParsed)) { continue }
-            if (-not [version]::TryParse($latest.Version, [ref]$latestParsed)) { continue }
-
-            if ($instParsed -lt $latestParsed) {
-                $outdated += [pscustomobject]@{ Code = $pf.BaseName; ExeDir = $exeDir; Installed = $installedVer }
-            } else {
-                $upToDate++
-            }
-        } catch {
-            Write-Log "BepInEx update check: error reading $($pf.BaseName) -- $_"
-            $errors++
-        }
+            if (-not [version]::TryParse($installedVer, [ref]$instParsed) -or -not [version]::TryParse($latest.Version, [ref]$latestParsed)) { continue }
+            if ($instParsed -lt $latestParsed) { [void]$outdated.Add([pscustomobject]@{ Code = $candidate.Code; ExeDir = $candidate.ExeDir; Installed = $installedVer }) } else { $upToDate++ }
+        } catch { $errors++; Write-Log "BepInEx update check: inspection failed for $($candidate.Code)." }
     }
-
-    if ($outdated.Count -eq 0) {
-        Write-Host ""
-        Write-Host ("  Up to date  : {0} game(s)" -f $upToDate) -ForegroundColor Green
-        if ($skippedX86 -gt 0) {
-            Write-Host ("  32-bit (skipped): {0}  (this script only manages 64-bit installs)" -f $skippedX86) -ForegroundColor DarkGray
-        }
-        if ($errors -gt 0) { Write-Host ("  Errors      : {0}" -f $errors) -ForegroundColor Red }
-        Write-Log ("BepInEx update check: complete. UpToDate={0} 32bitSkipped={1} Errors={2}" -f $upToDate, $skippedX86, $errors)
-        return
-    }
-
-    Write-Host ""
+    if ($outdated.Count -eq 0) { Write-Host ("  Up to date: {0} game(s)" -f $upToDate) -ForegroundColor Green; if($skippedX86 -gt 0){Write-Host ("  32-bit skipped: {0}" -f $skippedX86) -ForegroundColor DarkGray}; if($errors -gt 0){Write-Host ("  Errors: {0}" -f $errors) -ForegroundColor Red}; return }
     Write-Host ("  {0} game(s) have an outdated BepInEx install:" -f $outdated.Count) -ForegroundColor Cyan
-    foreach ($o in ($outdated | Sort-Object Code)) {
-        Write-Host ("    - {0}: {1} -> {2}" -f $o.Code, $o.Installed, $latest.Version) -ForegroundColor DarkGray
-    }
-    $ans = (Read-HostSafe ("  Update BepInEx to {0} for these {1} game(s)? (Y/N)" -f $latest.Version, $outdated.Count)).ToUpper()
-    if ($ans -ne "Y") {
-        Write-Host "  Skipped -- no changes made." -ForegroundColor DarkGray
-        Write-Log "BepInEx update check: user declined the batched update."
-        return
-    }
-
-    Write-Host "  Downloading BepInEx $($latest.Version) (x64)..." -ForegroundColor DarkGray
+    foreach ($o in @($outdated | Sort-Object Code)) { Write-Host ("    - {0}: {1} -> {2}" -f $o.Code, $o.Installed, $latest.Version) -ForegroundColor DarkGray }
+    if ((Read-HostSafe ("  Update BepInEx to {0} for these {1} game(s)? (Y/N)" -f $latest.Version, $outdated.Count)).ToUpper() -ne 'Y') { Write-Log 'BepInEx update check: user declined the batched update.'; return }
     [void][System.IO.Directory]::CreateDirectory($CacheDir)
-    # Security: $latest.FileName comes from the GitHub Releases API (untrusted
-    # input) -- strip to a bare filename and verify containment before using
-    # it as a download destination, same pattern as the FFB plugin fix.
     $safeFileName = [System.IO.Path]::GetFileName($latest.FileName)
     $zipPath = Join-Path $CacheDir $safeFileName
-    if ([string]::IsNullOrWhiteSpace($safeFileName) -or -not (Test-PathInside $zipPath $CacheDir)) {
-        Write-Host "  Could not reach GitHub to check the latest BepInEx version -- try again later." -ForegroundColor Red
-        Write-Log "BepInEx update check: SECURITY -- aborted, unsafe release filename '$($latest.FileName)'"
-        return
-    }
-    $downloaded = Invoke-TpmDownload -DownloadUrl $latest.DownloadUrl -DestinationPath $zipPath -ExpectedBytes $latest.SizeBytes -Label 'BepInEx' -Version $latest.Version -ExpectedSha256 $latest.ExpectedSha256
-    if (-not $downloaded) {
-        Write-Host "  Could not download the BepInEx ZIP -- try again later." -ForegroundColor Red
-        Write-Log "BepInEx update check: aborted -- ZIP download failed."
-        return
-    }
-
-    $updated = 0; $updateErrors = 0
-    foreach ($o in $outdated) {
+    if ([string]::IsNullOrWhiteSpace($safeFileName) -or -not (Test-PathInside $zipPath $CacheDir)) { Write-Log 'BepInEx update check: blocked on unsafe release filename.'; return }
+    if (-not (Invoke-TpmDownload -DownloadUrl $latest.DownloadUrl -DestinationPath $zipPath -ExpectedBytes $latest.SizeBytes -Label 'BepInEx' -Version $latest.Version -ExpectedSha256 $latest.ExpectedSha256)) { Write-Log 'BepInEx update check: download or digest verification failed.'; return }
+    $updated = 0; $updatedWithCleanupFailure = 0; $updateErrors = 0; $cleanupErrors = 0
+    foreach ($o in @($outdated | Sort-Object Code)) {
+        $stagingDir = $null; $preserveStaging = $false; $promotionSucceeded = $false; $cleanupFailureRecorded = $false
+        $backupPath = $null
         try {
-            $timestamp  = (Get-Date).ToString("yyyy-MM-dd_HH-mm-ss")
-            $backupPath = Join-Path $o.ExeDir ("BepInEx_Backup_" + $timestamp)
-            [void][System.IO.Directory]::CreateDirectory($backupPath)
-            foreach ($item in @('BepInEx', 'doorstop_config.ini', 'winhttp.dll', '.doorstop_version', 'changelog.txt')) {
-                $srcItem = Join-Path $o.ExeDir $item
-                if (Test-Path -LiteralPath $srcItem) {
-                    Copy-Item -LiteralPath $srcItem -Destination $backupPath -Recurse -Force -ErrorAction Stop
-                }
-            }
-            Expand-ZipFileSafe -ZipPath $zipPath -DestDir $o.ExeDir -GameName $o.Code
+            if (-not (Test-BepInExGameRootSafe -GameRoot $o.ExeDir -ApprovedRoot $ApprovedGamesRoot) -or -not (Test-BepInExExistingTreeSafe -GameRoot $o.ExeDir)) { throw 'BepInEx final root safety check failed.' }
+            $stagingDir = New-TpmStagingDirectory -Label 'BepInEx'
+            Expand-ZipFileSafe -ZipPath $zipPath -DestDir $stagingDir -GameName $o.Code
+            $relativeFiles = @(Get-BepInExStagedFiles -StagingDir $stagingDir -DestDir $o.ExeDir)
+            if (-not (Test-BepInExGameRootSafe -GameRoot $o.ExeDir -ApprovedRoot $ApprovedGamesRoot) -or -not (Test-BepInExExistingTreeSafe -GameRoot $o.ExeDir)) { throw 'BepInEx root changed before backup.' }
+            $backupPath = New-BepInExUpdateBackup -GameRoot $o.ExeDir
+            if (-not (Test-BepInExGameRootSafe -GameRoot $o.ExeDir -ApprovedRoot $ApprovedGamesRoot) -or -not (Test-BepInExExistingTreeSafe -GameRoot $o.ExeDir)) { throw 'BepInEx root failed after backup.' }
+            $validation = { return ((Get-BepInExInstalledVersion -ExeDir $o.ExeDir) -eq $latest.Version) }
+            [void](Invoke-TpmTransactionalTreePromote -StagingDir $stagingDir -DestDir $o.ExeDir -RelativeFiles $relativeFiles -ValidationScript $validation)
+            $promotionSucceeded = $true
+            [void](Remove-BepInExStagingDirectory -StagingDir $stagingDir)
+            $stagingDir = $null
             Write-Host ("    OK    {0}  ({1} -> {2})" -f $o.Code, $o.Installed, $latest.Version) -ForegroundColor Green
-            Write-Log "BepInEx: updated $($o.Code) from $($o.Installed) to $($latest.Version) (backup: $backupPath)"
+            Write-Log "BepInEx: updated $($o.Code) from $($o.Installed) to $($latest.Version); backup=$backupPath"
             $updated++
         } catch {
-            Write-Host ("    ERROR {0} -- {1}" -f $o.Code, $_) -ForegroundColor Red
-            Write-Log "BepInEx: error updating $($o.Code) -- $_"
-            $updateErrors++
+            if ($promotionSucceeded -and $_.Exception.Message -match '^TPM BEPINEX STAGING CLEANUP (FAILED|REFUSED)') {
+                $preserveStaging = $true
+                $cleanupFailureRecorded = $true
+                Write-Host ("    WARNING {0} -- update applied, but staging cleanup failed" -f $o.Code) -ForegroundColor Yellow
+                Write-Host ("            ACTION REQUIRED: inspect and remove residue at {0}" -f $stagingDir) -ForegroundColor Yellow
+                Write-Log "BepInEx: update applied for $($o.Code), but staging cleanup failed; action required; residue=$stagingDir; backup=$backupPath"
+                $updatedWithCleanupFailure++
+                $cleanupErrors++
+            } else {
+                if ($_.Exception.Message -match 'ROLLBACK FAILED|CLEANUP FAILED') { $preserveStaging = $true }
+                Write-Host ("    ERROR {0} -- update blocked" -f $o.Code) -ForegroundColor Red
+                Write-Log "BepInEx: update blocked for $($o.Code); evidence and backups were preserved where available."
+                $updateErrors++
+            }
+        } finally {
+            if ($stagingDir -and -not $preserveStaging) {
+                try {
+                    [void](Remove-BepInExStagingDirectory -StagingDir $stagingDir)
+                    $stagingDir = $null
+                } catch {
+                    $preserveStaging = $true
+                    if (-not $cleanupFailureRecorded) {
+                        Write-Host ("    ACTION REQUIRED {0} -- staging cleanup failed" -f $o.Code) -ForegroundColor Yellow
+                        Write-Host ("                    Inspect and remove residue at {0}" -f $stagingDir) -ForegroundColor Yellow
+                        Write-Log "BepInEx: staging cleanup failed for blocked update $($o.Code); action required; residue=$stagingDir"
+                        $cleanupErrors++
+                    }
+                }
+            }
         }
     }
-
-    Write-Host ""
-    Write-Host ("  Updated     : {0} game(s)" -f $updated) -ForegroundColor Green
-    if ($upToDate -gt 0) { Write-Host ("  Up to date  : {0}" -f $upToDate) -ForegroundColor DarkGray }
-    if ($skippedX86 -gt 0) { Write-Host ("  32-bit (skipped): {0}" -f $skippedX86) -ForegroundColor DarkGray }
-    if ($updateErrors -gt 0) { Write-Host ("  Errors      : {0} -- see log for details" -f $updateErrors) -ForegroundColor Red }
-    Write-Log ("BepInEx update check: complete. Updated={0} UpToDate={1} 32bitSkipped={2} Errors={3}" -f $updated, $upToDate, $skippedX86, $updateErrors)
+    Write-Host ("  Updated cleanly: {0} game(s)" -f $updated) -ForegroundColor Green
+    if ($updatedWithCleanupFailure -gt 0) { Write-Host ("  Updated with cleanup failure: {0} -- ACTION REQUIRED" -f $updatedWithCleanupFailure) -ForegroundColor Yellow }
+    if ($upToDate -gt 0) { Write-Host ("  Up to date: {0}" -f $upToDate) -ForegroundColor DarkGray }
+    if ($skippedX86 -gt 0) { Write-Host ("  32-bit skipped: {0}" -f $skippedX86) -ForegroundColor DarkGray }
+    if ($updateErrors -gt 0) { Write-Host ("  Errors: {0} -- see log for details" -f $updateErrors) -ForegroundColor Red }
+    if ($cleanupErrors -gt 0) { Write-Host ("  Cleanup failures: {0} -- see log for residue path(s)" -f $cleanupErrors) -ForegroundColor Yellow }
+    Write-Log ("BepInEx update check: updatedCleanly={0} updatedWithCleanupFailure={1} errors={2} cleanupFailures={3}" -f $updated, $updatedWithCleanupFailure, $updateErrors, $cleanupErrors)
 }
-
 # =============================================================================
 # CHECK FOR UPDATES -- manual, backup-first self-update for this script
 # =============================================================================
@@ -10378,69 +10841,58 @@ function Set-XmlChildText {
 # POSTGRESQL DATABASE BACKUP/RESTORE
 # =============================================================================
 
-# Backs up every Postgres database belonging to a registered, Postgres-
-# needing game that currently exists, into
-# Scripts\PostgresBackups\<timestamp>\<dbname>.backup (pg_dump custom
-# format, matching what pg_restore expects). Runs unconditionally at the
-# start of the Postgres setup mode, before any install/create/restore work
-# -- same "always back up first, regardless of whether this run changes
-# anything" convention already used at the start of every AutoSync/
-# Register run. Skipped (logged, not an error) if PostgreSQL isn't
-# installed yet or no Postgres databases exist -- nothing to back up on a
-# first run. Returns the backup folder path, or $null if nothing was
-# backed up.
+# Backs up every verified, existing Postgres database used by a registered
+# profile. A query failure is not treated as an absent database. The result
+# is explicit so the caller cannot proceed to profile writes after a partial
+# backup.
 function Backup-PostgresDatabases {
     param([string]$UserProfilesDir, [string]$SuperPasswordPlain)
-
-    if (-not (Test-PostgresInstalled)) { return $null }
-
-    $dbNames = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::OrdinalIgnoreCase)
-    $profiles = Get-ChildItem -LiteralPath $UserProfilesDir -Filter *.xml -File -ErrorAction SilentlyContinue |
-                    Where-Object { $_.Directory.Name -ne "FullBackup" }
+    $result = [ordered]@{ Path = $null; Succeeded = $true; ExistingDatabaseCount = 0; FailedDatabaseCount = 0 }
+    if (-not (Test-PostgresInstalled)) { return [pscustomobject]$result }
+    $names = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::OrdinalIgnoreCase)
+    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction Stop | Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object Name)
     foreach ($pf in $profiles) {
         try {
             $doc = Read-Xml $pf.FullName
-            if (-not $doc.GameProfile) { continue }
-            if (-not (Test-GameNeedsPostgres $doc)) { continue }
-            $dbName = Get-PostgresFieldValue $doc "DbName"
-            if (-not [string]::IsNullOrWhiteSpace($dbName) -and (Test-SafePostgresDbName $dbName)) {
-                if (Test-PostgresDatabaseExists -DbName $dbName -SuperPasswordPlain $SuperPasswordPlain) {
-                    [void]$dbNames.Add($dbName)
-                }
-            }
+            if (-not $doc.GameProfile -or -not (Test-GameNeedsPostgres $doc)) { continue }
+            $dbName = Get-PostgresFieldValue $doc 'DbName'
+            if ([string]::IsNullOrWhiteSpace($dbName) -or -not (Test-SafePostgresDbName $dbName)) { $result.FailedDatabaseCount++; continue }
+            $state = Get-PostgresDatabaseState -DbName $dbName -SuperPasswordPlain $SuperPasswordPlain
+            if ($state.Exists) { [void]$names.Add($dbName) }
         } catch {
-            Write-Log "Postgres backup: could not check $($pf.Name) -- $_"
+            $result.FailedDatabaseCount++
+            Write-Log "Postgres backup: database state could not be verified for $($pf.BaseName); backup is incomplete."
         }
     }
-
-    if ($dbNames.Count -eq 0) {
-        Write-Log "Postgres backup: no existing databases to back up."
-        return $null
+    if ($names.Count -eq 0) {
+        if ($result.FailedDatabaseCount -gt 0) { $result.Succeeded = $false }
+        return [pscustomobject]$result
     }
-
-    $timestamp  = (Get-Date).ToString("yyyy-MM-dd_HH-mm-ss")
-    $backupPath = Join-Path (Join-Path $PSScriptRoot "PostgresBackups") $timestamp
-    [void][System.IO.Directory]::CreateDirectory($backupPath)
-
-    $pgDumpExe = Join-Path $script:PostgresBinDir "pg_dump.exe"
-    $pgpassFile = New-PostgresPgPassFile -Password $SuperPasswordPlain
-    $env:PGPASSFILE = $pgpassFile
+    $result.ExistingDatabaseCount = $names.Count
+    $result.Path = Join-Path (Join-Path $PSScriptRoot 'PostgresBackups') ((Get-Date).ToString('yyyy-MM-dd_HH-mm-ss_fff'))
+    [void][System.IO.Directory]::CreateDirectory($result.Path)
+    $pgDumpExe = Join-Path $script:PostgresBinDir 'pg_dump.exe'
+    if (-not (Test-Path -LiteralPath $pgDumpExe -PathType Leaf)) { $result.Succeeded = $false; $result.FailedDatabaseCount += $names.Count; return [pscustomobject]$result }
+    $pgpassFile = $null; $previousPgPassFile = $null
     try {
-        foreach ($dbName in $dbNames) {
-            $destFile = Join-Path $backupPath "$dbName.backup"
-            & $pgDumpExe -U postgres -h 127.0.0.1 -p 5432 -F c -f $destFile $dbName 2>&1 | Out-Null
-            if (Test-Path -LiteralPath $destFile) {
-                Write-Log "Postgres backup: dumped $dbName -> $destFile"
-            } else {
-                Write-Log "Postgres backup: FAILED to dump $dbName"
-            }
+        $pgpassFile = New-PostgresPgPassFile -Password $SuperPasswordPlain
+        $previousPgPassFile = Set-PostgresPgPassFileEnvironment -Path $pgpassFile
+        foreach ($dbName in @($names | Sort-Object)) {
+            $destFile = Join-Path $result.Path ($dbName + '.backup')
+            & $pgDumpExe -U postgres -h 127.0.0.1 -p 5432 -F c -f $destFile $dbName 2>$null
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $destFile -PathType Leaf) -or (Get-Item -LiteralPath $destFile).Length -eq 0) {
+                $result.FailedDatabaseCount++
+                $result.Succeeded = $false
+            } else { Write-Log "Postgres backup: verified database backup for $dbName at $($result.Path)." }
         }
+    } catch {
+        $result.Succeeded = $false
+        $result.FailedDatabaseCount++
     } finally {
-        $env:PGPASSFILE = $null
-        Remove-PostgresPgPassFile -Path $pgpassFile
+        if ($previousPgPassFile -ne $null -or $pgpassFile) { Restore-PostgresPgPassFileEnvironment -PreviousValue $previousPgPassFile }
+        if ($pgpassFile) { Remove-PostgresPgPassFile -Path $pgpassFile -ThrowOnFailure }
     }
-
-    return $backupPath
+    return [pscustomobject]$result
 }
 
 # Restores a previous Postgres database backup. Mirrors
@@ -10535,12 +10987,13 @@ function Invoke-RestorePostgresBackup {
             $dbName = $bf.BaseName
             if (-not (Test-SafePostgresDbName $dbName)) { $errCount++; continue }
             $pgpassFile = New-PostgresPgPassFile -Password $superPwPlain
-            $env:PGPASSFILE = $pgpassFile
+            $previousPgPassFile = $null
             try {
+                $previousPgPassFile = Set-PostgresPgPassFileEnvironment -Path $pgpassFile
                 & $dropdbExe -U postgres -h 127.0.0.1 -p 5432 --if-exists $dbName 2>&1 | Out-Null
             } finally {
-                $env:PGPASSFILE = $null
-                Remove-PostgresPgPassFile -Path $pgpassFile
+                Restore-PostgresPgPassFileEnvironment -PreviousValue $previousPgPassFile
+                Remove-PostgresPgPassFile -Path $pgpassFile -ThrowOnFailure
             }
             $encoding = if ($dbName -eq 'GameDB06') { 'UTF8' } else { 'SQL_ASCII' }
             if (New-PostgresDatabaseFromBackup -DbName $dbName -Encoding $encoding -BackupFile $bf.FullName -SuperPasswordPlain $superPwPlain) {
@@ -10554,6 +11007,11 @@ function Invoke-RestorePostgresBackup {
         }
     } finally {
         $superPwPlain = $null
+        $savedPwPlain = $null
+        $typedPwPlain = $null
+        $secure = $null
+        $superPwSecure = $null
+        [GC]::Collect()
     }
 
     if ($errCount -gt 0) {
@@ -14119,114 +14577,134 @@ while ($true) {
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         Write-Host " PostgreSQL Setup (Incredible Technologies games)" -ForegroundColor Cyan
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
-
         Write-Host "  Scanning registered games for Postgres requirements..." -ForegroundColor DarkGray
-        $needCount = 0
-        $pgProfiles = Get-ChildItem -LiteralPath $userProfilesDir -Filter *.xml -File -ErrorAction SilentlyContinue |
-                          Where-Object { $_.Directory.Name -ne "FullBackup" }
+        $pgProfiles = @(Get-ChildItem -LiteralPath $userProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object Name)
+        $needCount = 0; $scanBlocked = $false
         foreach ($pf in $pgProfiles) {
             try {
                 $doc = Read-Xml $pf.FullName
                 if ($doc.GameProfile -and (Test-GameNeedsPostgres $doc)) { $needCount++ }
-            } catch {}
+            } catch { $scanBlocked = $true; Write-Log "Postgres setup: profile scan failed for $($pf.BaseName); recovery is blocked." }
         }
-
+        if ($scanBlocked) {
+            Write-Host "  Could not safely scan every registered profile -- no changes made." -ForegroundColor Red
+            [void](Read-Host "  Press Enter to return to menu")
+            continue
+        }
         if ($needCount -eq 0) {
             Write-Host "  No registered games need PostgreSQL -- nothing to do." -ForegroundColor Green
             Write-Log "Postgres setup: no Postgres-needing games registered."
             [void](Read-Host "  Press Enter to return to menu")
             continue
         }
-
         Write-Host ("  {0} registered game(s) need PostgreSQL." -f $needCount) -ForegroundColor Cyan
-
         if (-not (Test-PostgresInstalled) -and -not (Test-RunningAsAdministrator)) {
-            Write-Host ""
-            Write-Host "  PostgreSQL is not installed yet, and installing it requires" -ForegroundColor Red
-            Write-Host "  Administrator privileges (it creates a Windows service and a" -ForegroundColor Red
-            Write-Host "  Windows user account)." -ForegroundColor Red
-            Write-Host ""
-            Write-Host "  Close this window and re-run TeknoParrot Manager as Administrator" -ForegroundColor Yellow
-            Write-Host "  (right-click TeknoParrot-Manager.bat -> Run as administrator), then" -ForegroundColor Yellow
-            Write-Host "  choose this mode again." -ForegroundColor Yellow
-            Write-Log "Postgres setup: aborted -- PostgreSQL not installed and not running as Administrator."
+            Write-Host "  PostgreSQL is not installed yet, and installation requires Administrator privileges." -ForegroundColor Red
+            Write-Log 'Postgres setup: blocked because installation requires Administrator privileges.'
             [void](Read-Host "  Press Enter to return to menu")
             continue
         }
 
         $superPwPlain = $null
-        if (Test-PostgresInstalled) {
-            Write-Host "  PostgreSQL is already installed -- it will not be reinstalled or modified." -ForegroundColor Green
-            if ($postgresSuperPasswordEncrypted) {
-                try {
-                    $secure = ConvertTo-SecureString -String $postgresSuperPasswordEncrypted
-                    $savedPwPlain = ConvertFrom-SecureStringPlain $secure
-                    if (Test-PostgresPassword $savedPwPlain) {
-                        $superPwPlain = $savedPwPlain
-                    } else {
-                        Write-Log "Postgres setup: saved password no longer works -- will re-prompt."
-                    }
-                } catch {
-                    Write-Log "Postgres setup: could not decrypt saved password -- $_"
+        $recoveryBackup = $null
+        try {
+            if (Test-PostgresInstalled) {
+                Write-Host "  PostgreSQL is already installed -- existing data will be preserved." -ForegroundColor Green
+                if ($postgresSuperPasswordEncrypted) {
+                    try {
+                        $secure = ConvertTo-SecureString -String $postgresSuperPasswordEncrypted
+                        $savedPwPlain = ConvertFrom-SecureStringPlain $secure
+                        if (Test-PostgresPassword -SuperPasswordPlain $savedPwPlain) { $superPwPlain = $savedPwPlain }
+                        else { Write-Log 'Postgres setup: saved password did not authenticate; guided recovery is required.' }
+                    } catch { Write-Log 'Postgres setup: saved password could not be verified; guided recovery is required.' }
+                    finally { $savedPwPlain = $null }
                 }
-            }
-            if (-not $superPwPlain) {
-                Write-Host "  Enter your existing PostgreSQL database password to continue:" -ForegroundColor Cyan
-                $superPwSecure  = Read-Host "  Password" -AsSecureString
-                $typedPwPlain   = ConvertFrom-SecureStringPlain $superPwSecure
-                if (-not (Test-PostgresPassword $typedPwPlain)) {
-                    Write-Host "  ERROR: That password did not work against your PostgreSQL server." -ForegroundColor Red
-                    Write-Log "Postgres setup: aborted -- password verification failed."
-                    [void](Read-Host "  Press Enter to return to menu")
+                if (-not $superPwPlain) {
+                    if (-not (Test-RunningAsAdministrator)) {
+                        Write-Host "  The saved password is not usable. Administrator privileges are required for automatic recovery." -ForegroundColor Red
+                        Write-Log 'Postgres setup: recovery blocked because Administrator privileges were unavailable.'
+                        continue
+                    }
+                    $typedPwPlain = Read-ConfirmedPostgresPassword 'the new PostgreSQL database password TPM should set automatically'
+                    if (Test-PostgresPassword -SuperPasswordPlain $typedPwPlain) {
+                        $superPwPlain = $typedPwPlain
+                    } else {
+                        Write-Host "  TPM is creating a verified recovery backup before resetting the PostgreSQL role password..." -ForegroundColor Cyan
+                        $recoveryBackup = New-PostgresRecoveryBackup -UserProfilesDir $userProfilesDir
+                        if (-not $recoveryBackup.Verified) {
+                            Write-Host ("  Recovery BLOCKED. Evidence: {0}" -f $recoveryBackup.Path) -ForegroundColor Red
+                            Write-Log 'Postgres setup: automatic reset blocked because recovery evidence was not verified.'
+                            continue
+                        }
+                        $reset = Reset-PostgresPasswordAutomatically -NewPassword $typedPwPlain -RecoveryBackup $recoveryBackup
+                        if (-not $reset.Succeeded) {
+                            Write-Host ("  Recovery BLOCKED. No profile changes were reported complete. Evidence: {0}" -f $reset.BackupPath) -ForegroundColor Red
+                            Write-Log 'Postgres setup: automatic password reset failed; no recovery-complete result was reported.'
+                            continue
+                        }
+                        $superPwPlain = $typedPwPlain
+                    }
+                }
+            } else {
+                $outPw = [ref]$null
+                if (-not (Install-Postgres83 -OutSuperPasswordPlain $outPw)) {
+                    Write-Host "  PostgreSQL setup did not complete -- no profile changes made." -ForegroundColor Red
                     continue
                 }
-                $superPwPlain = $typedPwPlain
-                $postgresSuperPasswordEncrypted = ConvertTo-PostgresEncryptedPassword $superPwPlain
-                if (Save-Config) { Write-Log "Postgres setup: saved (encrypted) password for future runs." }
+                $superPwPlain = $outPw.Value
             }
-        } else {
-            $outPw = [ref]$null
-            if (-not (Install-Postgres83 -OutSuperPasswordPlain $outPw)) {
-                Write-Host "  PostgreSQL setup did not complete -- see TeknoParrot-Manager.log." -ForegroundColor Red
-                [void](Read-Host "  Press Enter to return to menu")
+
+            if (-not $recoveryBackup) { $recoveryBackup = New-PostgresRecoveryBackup -UserProfilesDir $userProfilesDir }
+            if (-not $recoveryBackup.Verified) {
+                Write-Host ("  Recovery BLOCKED. No profile changes were made. Evidence: {0}" -f $recoveryBackup.Path) -ForegroundColor Red
+                Write-Log 'Postgres setup: verified recovery evidence was unavailable before configuration changes.'
                 continue
             }
-            $superPwPlain = $outPw.Value
             $postgresSuperPasswordEncrypted = ConvertTo-PostgresEncryptedPassword $superPwPlain
-            if (Save-Config) { Write-Log "Postgres setup: saved (encrypted) database password." }
-        }
+            if (-not (Save-Config)) {
+                Write-Host "  Recovery BLOCKED because the protected manager configuration could not be saved." -ForegroundColor Red
+                Write-Log 'Postgres setup: blocked because encrypted password configuration save failed.'
+                continue
+            }
 
-        Write-Host ""
-        Write-Host "  Backing up existing Postgres databases..." -ForegroundColor Cyan
-        $pgBackupPath = Backup-PostgresDatabases -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain
-        if ($pgBackupPath) {
-            Write-Host ("  Backup saved : {0}" -f $pgBackupPath) -ForegroundColor DarkCyan
-        } else {
-            Write-Host "  No existing databases to back up yet." -ForegroundColor DarkGray
-        }
+            Write-Host "  Backing up existing Postgres databases..." -ForegroundColor Cyan
+            $pgBackup = Backup-PostgresDatabases -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain
+            if (-not $pgBackup.Succeeded) {
+                Write-Host "  Recovery BLOCKED because the database backup was incomplete." -ForegroundColor Red
+                if ($pgBackup.Path) { Write-Host ("  Database backup evidence: {0}" -f $pgBackup.Path) -ForegroundColor Yellow }
+                Write-Log 'Postgres setup: blocked before profile population because database backup was incomplete.'
+                continue
+            }
+            if ($pgBackup.Path) { Write-Host ("  Database backup saved: {0}" -f $pgBackup.Path) -ForegroundColor DarkCyan }
+            else { Write-Host "  No existing databases needed backup." -ForegroundColor DarkGray }
 
-        Write-Host ""
-        Write-Host "  Configuring games and creating any missing databases..." -ForegroundColor Cyan
-        $pgResults = Invoke-PostgresGameSetup -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain
-        $superPwPlain = $null
-        [GC]::Collect()
-
-        Write-Host ""
-        Write-Host "  Results:" -ForegroundColor Cyan
-        Write-Host ("    Fields updated         : {0}" -f $pgResults.Configured) -ForegroundColor Green
-        Write-Host ("    Databases created      : {0}" -f $pgResults.DbCreated) -ForegroundColor Green
-        Write-Host ("    Already configured     : {0}" -f $pgResults.AlreadyConfigured) -ForegroundColor DarkGray
-        if ($pgResults.Errors -gt 0) {
-            Write-Host ("    Errors                 : {0}  (see TeknoParrot-Manager.log)" -f $pgResults.Errors) -ForegroundColor Red
+            Write-Host "  Configuring games and creating only missing databases..." -ForegroundColor Cyan
+            $pgResults = Invoke-PostgresGameSetup -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain -RecoveryBackup $recoveryBackup
+            if ($pgResults.RecoveryBlocked) {
+                Write-Host ("  Recovery BLOCKED. No recovery-complete result was reported. Evidence: {0}" -f $pgResults.BackupPath) -ForegroundColor Red
+                Write-Log 'Postgres setup: profile population was recovery-blocked.'
+                continue
+            }
+            Write-Host ""
+            Write-Host "  Results:" -ForegroundColor Cyan
+            Write-Host ("    Fields updated         : {0}" -f $pgResults.Configured) -ForegroundColor Green
+            Write-Host ("    Databases created      : {0}" -f $pgResults.DbCreated) -ForegroundColor Green
+            Write-Host ("    Already configured     : {0}" -f $pgResults.AlreadyConfigured) -ForegroundColor DarkGray
+            if ($pgResults.Errors -gt 0) { Write-Host ("    Errors                 : {0}  (see TeknoParrot-Manager.log)" -f $pgResults.Errors) -ForegroundColor Red }
+            Write-Log ("Postgres setup: complete. Configured={0} DbCreated={1} AlreadyConfigured={2} Errors={3}" -f $pgResults.Configured, $pgResults.DbCreated, $pgResults.AlreadyConfigured, $pgResults.Errors)
+        } finally {
+            if ($outPw) { $outPw.Value = $null }
+            $outPw = $null
+            $secure = $null
+            $superPwSecure = $null
+            $savedPwPlain = $null
+            $typedPwPlain = $null
+            $superPwPlain = $null
+            [GC]::Collect()
         }
-        Write-Host ""
-        Write-Host "  If anything looks wrong, use menu option 11 (Restore backup) ->" -ForegroundColor DarkCyan
-        Write-Host "  Postgres database backup to undo database changes." -ForegroundColor DarkCyan
-        Write-Log ("Postgres setup: complete. Configured={0} DbCreated={1} AlreadyConfigured={2} Errors={3}" -f $pgResults.Configured, $pgResults.DbCreated, $pgResults.AlreadyConfigured, $pgResults.Errors)
         [void](Read-Host "  Press Enter to return to menu")
         continue
     }
-
     if ($mode -eq "CheckForUpdates") {
         Write-Host ""
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
@@ -14645,7 +15123,7 @@ while ($true) {
         Write-Host "  game's folder, then reinstall."
 
         $bepInExCacheDir = Join-Path $PSScriptRoot "BepInExCache"
-        Invoke-BepInExUpdateCheck -UserProfilesDir $userProfilesDir -CacheDir $bepInExCacheDir
+        Invoke-BepInExUpdateCheck -UserProfilesDir $userProfilesDir -CacheDir $bepInExCacheDir -ApprovedGamesRoot $gamesInstallFolder
 
         Write-Host ""
         Write-Host "Done." -ForegroundColor Green

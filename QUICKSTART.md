@@ -46,6 +46,28 @@ Full documentation: [README.md](README.md)
 
 ---
 
+## TeknoParrotUI first-run handoff
+
+After you choose the TeknoParrot folder, TPM checks TeknoParrotUI's
+ParrotData.xml marker read-only. If setup is incomplete or the marker cannot
+be read safely, TPM shows the exact TeknoParrotUi.exe path for you to open.
+TPM does not start the UI or edit its ParrotData.xml, controls, or DAT/XML
+settings. This setup handoff is separate from checking whether a game's
+controls are mapped and verified.
+
+## Advanced users
+
+TPM is also for people who already know TeknoParrot and want repeatable,
+auditable library operations. Use previews, logs, backups, action summaries,
+exact paths, profile identifiers, hashes, and validation evidence to review
+bulk work without losing the technical detail.
+
+The full advanced-user guide in docs/ADVANCED-USERS.md explains the evidence
+model and ownership boundaries. Expert workflows still detect first, preview
+supported changes, back up before writes, and verify the result.
+
+---
+
 ## Run It
 
 1. Open PowerShell in the folder containing `TeknoParrot-Manager.ps1`:
@@ -75,22 +97,22 @@ Full documentation: [README.md](README.md)
 
 ## Mode List
 
-| # | Mode | What it does |
-|---|------|-------------|
-| 1 | **AutoSync** | Extract ZIPs from NAS or local source, then register |
-| 2 | **Register only** | Games already extracted — just register |
-| 3 | **Propagate Controls** | Copy control bindings from a reference game to every other game of the same type, without a full AutoSync/Register pass |
-| 4 | **Crosshair setup** | Pick and deploy custom crosshairs to lightgun games |
-| 5 | **ReShade setup** | Add visual post-processing to game folders |
-| 6 | **dgVoodoo2 setup** | Fix old DX8 / DirectDraw / Glide games |
-| 7 | **GPU fix setup** | Apply AMD / NVIDIA / Intel vendor fix to registered games |
-| 8 | **Force feedback (FFB) setup** | Native FFB Blaster (membership) + free third-party plugin |
-| 9 | **BepInEx update check** | Update an existing BepInEx install to the latest stable 64-bit release |
-| 10 | **Library health check** | Read-only registered/broken/empty status, plus GPU fix / FFB Blaster / dgVoodoo2 / Postgres coverage and ReShade/BepInEx install counts |
-| 11 | **Restore backup** | Roll TeknoParrot profiles, LaunchBox's library files, or Postgres databases back to a previous backup |
-| 12 | **Postgres setup** | Installs/configures the local PostgreSQL database some Incredible Technologies games need |
-| 13 | **Check for Updates** | Check GitHub for a newer TPM release and install it |
-| 14 | **Exit** | Quit |
+| #   | Mode                           | What it does                                                                                                                               |
+| --- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | **AutoSync**                   | Extract ZIPs from NAS or local source, then register                                                                                       |
+| 2   | **Register only**              | Games already extracted — just register                                                                                                    |
+| 3   | **Propagate Controls**         | Copy known bindings from a reference game to compatible unbound games in the same detected family; not universal device or shooter mapping |
+| 4   | **Crosshair setup**            | Pick and deploy custom crosshairs to lightgun games                                                                                        |
+| 5   | **ReShade setup**              | Add visual post-processing to game folders                                                                                                 |
+| 6   | **dgVoodoo2 setup**            | Fix old DX8 / DirectDraw / Glide games                                                                                                     |
+| 7   | **GPU fix setup**              | Apply AMD / NVIDIA / Intel vendor fix to registered games                                                                                  |
+| 8   | **Force feedback (FFB) setup** | Native FFB Blaster (membership) + free third-party plugin                                                                                  |
+| 9   | **BepInEx update check**       | Update an existing BepInEx install to the latest stable 64-bit release                                                                     |
+| 10  | **Library health check**       | Read-only registered/broken/empty status, plus GPU fix / FFB Blaster / dgVoodoo2 / Postgres coverage and ReShade/BepInEx install counts    |
+| 11  | **Restore backup**             | Roll TeknoParrot profiles, LaunchBox's library files, or Postgres databases back to a previous backup                                      |
+| 12  | **Postgres setup**             | Installs/configures the local PostgreSQL database some Incredible Technologies games need                                                  |
+| 13  | **Check for Updates**          | Check GitHub for a newer TPM release and install it                                                                                        |
+| 14  | **Exit**                       | Quit                                                                                                                                       |
 
 ---
 
@@ -111,18 +133,19 @@ In Browse or Search: type numbers or ranges (e.g. `1,3,5-7`) to add games to you
 
 ## Copy Your Controls
 
-Bind ONE game of each control type in TeknoParrotUI — then the script copies those bindings to every other game of the same type automatically.
+Bind ONE game of each control type in TeknoParrotUI. The script can copy those known bindings to compatible unbound games in the same detected control family. This is a bounded reference-copy aid, not universal controller or gun detection or complete shooter mapping.
 
 **Good reference games to bind first:**
 
-| Type | Suggestions |
-|------|------------|
+| Type               | Suggestions                                             |
+| ------------------ | ------------------------------------------------------- |
 | Fighting / buttons | Street Fighter III, BlazBlue, Tekken 7, Dead or Alive 5 |
-| Driving | Daytona Championship USA, Initial D, OutRun 2 SP |
-| Lightgun | House of the Dead 4, Aliens Extermination |
-| Trackball | Golden Tee Live, Silver Strike Bowling |
+| Driving            | Daytona Championship USA, Initial D, OutRun 2 SP        |
+| Lightgun           | House of the Dead 4, Aliens Extermination               |
+| Trackball          | Golden Tee Live, Silver Strike Bowling                  |
 
 **Steps:**
+
 1. In TeknoParrotUI, fully bind one game of each type — buttons, axes, Test, Service, Coin, Start
 2. Re-run this script — propagation runs automatically after registration
 3. Launch ONE updated game and test it before trusting the rest
@@ -134,6 +157,7 @@ Bind ONE game of each control type in TeknoParrotUI — then the script copies t
 Mode 4 deploys custom crosshair cursor images to all registered lightgun games.
 
 **Steps:**
+
 1. An HTML preview page opens in your browser showing all 321 included designs
 2. Enter the index number for your P1 and P2 crosshair (can be the same)
 3. The script copies the images to every registered lightgun game:
@@ -152,12 +176,12 @@ ReShade adds post-processing effects without modifying any game files. Remove it
 
 **Popular effects:**
 
-| Effect | What it does |
-|--------|-------------|
-| LumaSharpen / CAS | Removes blurry upscaling |
-| CRT_Royale / CRT_Lottes | Classic scanlines and curvature |
-| Levels / Vibrance | Vivid colours on modern monitors |
-| Border | Arcade cabinet artwork in black bars |
+| Effect                  | What it does                         |
+| ----------------------- | ------------------------------------ |
+| LumaSharpen / CAS       | Removes blurry upscaling             |
+| CRT_Royale / CRT_Lottes | Classic scanlines and curvature      |
+| Levels / Vibrance       | Vivid colours on modern monitors     |
+| Border                  | Arcade cabinet artwork in black bars |
 
 ### If you downloaded the ZIP release
 
@@ -186,11 +210,14 @@ Some older arcade games use DirectX 8, DirectDraw, or 3dfx Glide. On modern PCs 
 **Only use this for games that crash or show a black screen on first launch.**
 
 **Setup:**
-Download dgVoodoo2 from dege.freeweb.hu or use mode 6 automatic GitHub release download. The automatic path validates GitHub asset digest when available, and the log records the GitHub source, filename/version, SHA-256, and transfer metrics; a digest mismatch fails closed.
+
+1. Download dgVoodoo2 from dege.freeweb.hu or use mode 6 automatic GitHub release download. The automatic path validates GitHub asset digest when available, and the log records the GitHub source, filename/version, SHA-256, and transfer metrics; a digest mismatch fails closed.
 2. Create a `dgVoodoo2\` folder next to this script and copy in:
-   - From `MS\x86\`: `D3D8.dll`, `DDraw.dll`, `D3DImm.dll`
-   - From `3Dfx\x86\`: `Glide2x.dll`, `Glide3x.dll`
-   - From the ZIP root: `dgVoodoo.conf`
+
+- From `MS\x86\`: `D3D8.dll`, `DDraw.dll`, `D3DImm.dll`
+- From `3Dfx\x86\`: `Glide2x.dll`, `Glide3x.dll`
+- From the ZIP root: `dgVoodoo.conf`
+
 3. Run mode 6 or answer Y at the end of any run. The wizard auto-detects which games need it and shows them first.
 
 **To remove:** delete the deployed DLL(s) from the game folder.
@@ -222,23 +249,40 @@ If a game is covered by both, the script asks **one** batched question — keep 
 
 **This mode ONLY checks and updates games that already have BepInEx installed** — it never installs BepInEx into a game that doesn't have it yet (that first install is still a manual step). Only the latest **stable 64-bit** release is ever used — never 32-bit, never a pre-release. A 32-bit install is left alone and reported separately.
 
-If anything is outdated, the script asks once: update all of them? Answering Y backs up the existing BepInEx folder first. The shared audit records the GitHub release source, filename/version, SHA-256, and transfer metrics; a GitHub asset digest is validated when available and mismatches fail closed.
-
+If anything is outdated, the script asks once: update all of them? Before
+that prompt, TPM verifies every candidate game root is inside the configured
+games folder and that the root and existing BepInEx files are not reparse-backed.
+Answering Y downloads the stable x64 ZIP only after those checks. TPM extracts
+to isolated staging, verifies the staged file set and the backup, then promotes
+the complete tree through a rollback-safe transaction. Unsafe roots, failed
+backups, extraction errors, digest failures, and rollback uncertainty fail closed
+without reporting an update as complete.
 **Manual clean reset:** delete `doorstop_config.ini`, `winhttp.dll`, `.doorstop_version`, `changelog.txt`, and the `BepInEx` folder from the game's folder — this fully reverts to vanilla.
 
 ---
 
 ## Postgres Setup
 
-Several Incredible Technologies games — Golden Tee Live (2006–2019), Power Putt Live (2012/2013), Silver Strike Bowling Live, Target Toss Pro (Bags / Lawn Darts), and Orange County Choppers Pinball — need a small local PostgreSQL 8.3 database. Mode 12 detects which of your registered games need this automatically and handles the rest:
+Several Incredible Technologies games -- Golden Tee Live (2006-2019),
+Power Putt Live (2012/2013), Silver Strike Bowling Live, Target Toss Pro
+(Bags / Lawn Darts), and Orange County Choppers Pinball -- need a small local
+PostgreSQL 8.3 database. Mode 12 detects which registered games need it.
 
-- **If PostgreSQL isn't installed yet**, the script installs it silently. This is the **only** feature in this script requiring Administrator — close the window, right-click `TeknoParrot-Manager.bat` → **Run as administrator**, and re-run mode 12. You'll be asked for two passwords: a service-account password (rarely needed again) and a database password (saved, encrypted, for future runs).
-- **If PostgreSQL is already installed, it's never reinstalled or modified.**
-- **A database that already exists is never recreated or restored over.** A `Pass` field that's already filled in is never overwritten.
-- For newer game profiles (Golden Tee Live 2018+) with TeknoParrot's own "Automatically create Database" feature, the script only fills in connection settings — TeknoParrot creates the database itself on first launch. For older profiles, the script creates the database and restores that game's bundled backup itself.
-- Every run backs up every existing Postgres database first — restore via mode 11 if anything looks wrong.
-
-If none of your registered games need Postgres, mode 12 says so and exits immediately without installing anything. The PostgreSQL guide download is logged with source, filename/version, SHA-256, and transfer metrics; this path does not claim Authenticode or published-digest verification.
+- If PostgreSQL is not installed yet, the script installs it silently. This is
+  the only feature requiring Administrator. You enter a service-account password
+  and a database password through secure confirmation prompts.
+- If PostgreSQL is already installed, TPM preserves existing data. If the saved
+  password no longer works, TPM asks for a replacement, creates and verifies a
+  configuration/profile recovery backup, and automatically resets the postgres
+  role through PostgreSQL single-user mode. No manual follow-up command is needed.
+- Recovery changes the role password only. TPM does not edit pg_hba.conf, drop
+  or recreate databases, or wipe existing PostgreSQL data.
+- After recovery, TPM updates only affected profiles whose connection values are
+  not already correct. The TeknoParrotUI Pass field remains plaintext because
+  TeknoParrotUI reads it directly; already-correct profiles are skipped.
+- Recovery evidence and database backups are created before profile population.
+  Any backup, reset, database, or profile-write failure is reported as blocked.
+  If none of your registered games need Postgres, mode 12 says so and exits immediately without installing anything. The PostgreSQL guide download is logged with source, filename/version, SHA-256, and transfer metrics; this path does not claim Authenticode or published-digest verification.
 
 ---
 
@@ -349,6 +393,7 @@ Download thumbnails for registered games missing an icon? (Y/N)
 Answer Y to fetch ProfileCode.png for every registered game not already in <TeknoParrotRoot> Icons. Source: TeknoParrotUIThumbnails on GitHub. Missing games are skipped without error. The shared audit records source, filename, SHA-256, and transfer metrics; no published digest or signer trust gate is claimed for icons.
 
 **Custom thumbnails:**
+
 1. Create a `CustomThumbnails\` folder next to the script
 2. Name each image `ProfileCode.png` — e.g. `Daytona3.png`, `HouseOfDead4.png`
 3. Run the script and answer Y to the thumbnail prompt — your images are copied to TeknoParrot's Icons folder. Files already present are never overwritten.
@@ -364,7 +409,7 @@ Answer Y to fetch ProfileCode.png for every registered game not already in <Tekn
 3. Pick which kind to restore:
    - **TeknoParrot UserProfiles backup**
    - **LaunchBox library backup** — only relevant if you've used direct LaunchBox integration
-   - **Postgres database backup** — only relevant if you've used Postgres setup (mode 12); this replaces the *current* content of each database restored
+   - **Postgres database backup** — only relevant if you've used Postgres setup (mode 12); this replaces the _current_ content of each database restored
 4. The script lists all available backups of that kind (most recent first), pick one by number, type `YES` to confirm
 5. Re-open TeknoParrot (or LaunchBox) to use the restored data
 
@@ -388,11 +433,11 @@ Third-party FFB plugin coverage isn't included here (checking it needs a live lo
 
 Games that share an executable (all NESiCAxLive titles use `game.exe`) are auto-registered by comparing the game folder name to every candidate profile using a similarity score.
 
-| Score | Action |
-|-------|--------|
-| >= 0.72 | Auto-registered and shown in cyan — spot-check |
+| Score   | Action                                                                         |
+| ------- | ------------------------------------------------------------------------------ |
+| >= 0.72 | Auto-registered and shown in cyan — spot-check                                 |
 | >= 0.40 | Listed in ACTION REQUIRED with best-guess profile shown — one click to confirm |
-| < 0.40 | Listed in ACTION REQUIRED with full candidate list |
+| < 0.40  | Listed in ACTION REQUIRED with full candidate list                             |
 
 Folder names are normalised before comparison: years like `(2012)`, ISO dates like `(2015-12-28)`, decimal versions like `(2.10.00)`, region codes like `(JPN)`, version strings like `(ver 1.1)`, and bracket metadata like `[NESiCAxLive]` are all stripped. Meaningful names like `(Special Edition)` are kept because they may distinguish two titles.
 
@@ -410,11 +455,12 @@ N) Skip
 
 Both the collection dat and supplementary dat are read directly from inside the ZIP — no extraction needed. The supplementary dat takes priority for any game in both (it represents the version you should install).
 
-Eggman recognition data is separate from TeknoParrotUI's `ParrotData.xml` and DAT/XML setting, and separate from the main/supplementary game ZIP sources and the staging/install folder. The normal first-run download goes to `%LOCALAPPDATA%\TeknoParrotManager\Eggman` without a save-location prompt. Browse/import remains available, and an explicit later update retains the alternate-location save dialog. A valid configured ZIP remains the update destination unless you choose another location.
+Eggman recognition data is separate from TeknoParrotUI's `ParrotData.xml` and DAT/XML setting, and separate from the main/supplementary game ZIP sources and the staging/install folder. The normal first-run download goes to `%LOCALAPPDATA%\TeknoParrotManager\Eggman` without a save-location prompt, and browse/import remains available for an existing local file. A later explicit update reuses a valid configured ZIP at its existing location without an alternate-location save dialog. Every supplied, previously configured, or user-selected destination is canonicalized and revalidated before reuse, download, or write; unsafe destinations are rejected before network/download work begins.
 
 On repeat runs, the script reuses your last dat choice automatically but offers to check for a newer dat release first.
 
 The dat resolves three registration scenarios that would otherwise require manual action:
+
 - **Shared-executable games** (NESiCAxLive, etc.) — disambiguated instantly by folder name
 - **Games with no profile match** (pcsx2x6, ELF-based Lindbergh titles) — found by normalised folder name in a second pass
 - **Slightly misnamed folders** — fuzzy scan of all dat entries
@@ -427,18 +473,18 @@ Games registered via dat are shown as `Registered (dat/exact)` or `Registered (d
 
 At the end of every run the script prints — and saves to a text file (default `TeknoParrot-Manager-ActionItems.txt` next to the script; a Save dialog lets you pick somewhere else) — everything still needing attention:
 
-| Section | Meaning |
-|---------|---------|
-| **Not in TeknoParrot** | Folders that matched no TeknoParrot profile — informational, likely unsupported games |
-| **Register these games** | Shared-exe games below confidence threshold — shows exe, best-guess profile, and full candidate list |
-| **Fix these game paths** | Profiles with broken paths that couldn't be auto-repaired — open TeknoParrotUI and point each to the correct folder |
-| **Extract first** | Profiles pointing at unextracted games — extract and re-run Repair |
-| **Set up controls** | Control types with no reference game bound yet — shows which games are waiting and suggests what to bind |
-| **Controls not ready** | Registered games whose catalog-backed controls are **Missing**, **Not verified**, **Unsupported**, or **Unknown**. Registration, a successful launch, and TeknoParrot wizard completion do not verify controls. Open TeknoParrot controls configuration and map/test controls before treating the game as ready. |
-| **Setup notes** | Registered games with special setup notes from the community compatibility database — shows the expected executable name and the full notes text |
-| **Compatibility warnings** | Known install-path-length limits, pinned-file-version requirements, and GPU-vendor incompatibilities for specific games |
-| **Firmware not installed** | Registered games whose emulator (currently pcsx2x6 only) needs firmware/BIOS files TeknoParrot itself doesn't provide — shows the exact files and folder needed. TPM never downloads, links, or redistributes these; existence check only |
-| **Emulator component not found** | A contract-backed required emulator component is missing at its expected path. Shows the contract/detector evidence and affected profiles. Use the normal TeknoParrot installation/update process; TPM does not diagnose why it is missing or repair, download, reinstall, or modify TeknoParrot |
+| Section                          | Meaning                                                                                                                                                                                                                                                                                                          |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Not in TeknoParrot**           | Folders that matched no TeknoParrot profile — informational, likely unsupported games                                                                                                                                                                                                                            |
+| **Register these games**         | Shared-exe games below confidence threshold — shows exe, best-guess profile, and full candidate list                                                                                                                                                                                                             |
+| **Fix these game paths**         | Profiles with broken paths that couldn't be auto-repaired — open TeknoParrotUI and point each to the correct folder                                                                                                                                                                                              |
+| **Extract first**                | Profiles pointing at unextracted games — extract and re-run Repair                                                                                                                                                                                                                                               |
+| **Set up controls**              | Control types with no reference game bound yet — shows which games are waiting and suggests what to bind                                                                                                                                                                                                         |
+| **Controls not ready**           | Registered games whose catalog-backed controls are **Missing**, **Not verified**, **Unsupported**, or **Unknown**. Registration, a successful launch, and TeknoParrot wizard completion do not verify controls. Open TeknoParrot controls configuration and map/test controls before treating the game as ready. |
+| **Setup notes**                  | Registered games with special setup notes from the community compatibility database — shows the expected executable name and the full notes text                                                                                                                                                                 |
+| **Compatibility warnings**       | Known install-path-length limits, pinned-file-version requirements, and GPU-vendor incompatibilities for specific games                                                                                                                                                                                          |
+| **Firmware not installed**       | Registered games whose emulator (currently pcsx2x6 only) needs firmware/BIOS files TeknoParrot itself doesn't provide — shows the exact files and folder needed. TPM never downloads, links, or redistributes these; existence check only                                                                        |
+| **Emulator component not found** | A contract-backed required emulator component is missing at its expected path. Shows the contract/detector evidence and affected profiles. Use the normal TeknoParrot installation/update process; TPM does not diagnose why it is missing or repair, download, reinstall, or modify TeknoParrot                 |
 
 ---
 
@@ -447,7 +493,7 @@ At the end of every run the script prints — and saves to a text file (default 
 - Profiles are backed up before every run to `UserProfiles\FullBackup\<date_time>\`. Nothing is ever deleted automatically.
 - If backup folder creation fails, the script stops rather than proceeding without a restore point.
 - You must own or otherwise have lawful rights to the original arcade PCB and any ROM/game data you use. TPM does not provide, distribute, or endorse unauthorized game files.
-The log also records a download audit trail: ReShade installer source/filename/version/SHA-256 plus Authenticode signer/status/thumbprint/trust result; BepInEx GitHub source/filename/version/SHA-256 plus digest validation when available; dgVoodoo2, FFBArcadePlugin, Eggman/RomVault dat, PostgreSQL guide, TPM update package, and TeknoParrotUI thumbnails with source/hash/transfer audit fields. Transfer method, size, elapsed time, and average MB/s are included. Sources without a published digest or signing anchor are not described as cryptographically authenticated.
+  The log also records a download audit trail: ReShade installer source/filename/version/SHA-256 plus Authenticode signer/status/thumbprint/trust result; BepInEx GitHub source/filename/version/SHA-256 plus digest validation when available; dgVoodoo2, FFBArcadePlugin, Eggman/RomVault dat, PostgreSQL guide, TPM update package, and TeknoParrotUI thumbnails with source/hash/transfer audit fields. Transfer method, size, elapsed time, and average MB/s are included. Sources without a published digest or signing anchor are not described as cryptographically authenticated.
 - If an extraction is interrupted (Ctrl+C, power loss, disk error), the incomplete folder is automatically detected and re-extracted on the next run.
 - Fuzzy name matching auto-registers most NESiCAxLive and other shared-exe games. The similarity score is shown for spot-checking.
 - Games already bound are always left untouched. Game-specific controls that don't exist in the reference game are left for manual setup and reported in ACTION REQUIRED.
@@ -455,44 +501,44 @@ The log also records a download audit trail: ReShade installer source/filename/v
 - After registering, the script offers to repair any broken game paths automatically.
 - On later runs the script remembers your settings — press Y to reuse, N to reconfigure.
 - To fix a mis-classified control family (e.g. FamilyGuyBowling auto-detected as driving when it should be trackball), add it to the `familyOverride` section of `overrides.json`.
-- A non-empty config field (like a Postgres `Pass`, or your saved folder paths) is never silently overwritten by a later run — the script always treats your existing configuration as something you may have set deliberately.
+- A Postgres Pass is updated only for affected profiles after a verified backup; values that already match the approved password are skipped. Other non-empty settings remain protected and are not silently overwritten.
 
 ---
 
 ## Quick Fixes
 
-| Problem | Fix |
-|---------|-----|
-| Game won't launch | Open TeknoParrotUI, point the profile to the correct `.exe`. Re-run the script and choose Repair. |
-| Game not in TeknoParrot | Check ACTION REQUIRED — may need manual registration or needs to be extracted first. |
-| Extraction keeps failing | Check the log for the specific error. Verify free space and that the ZIP is not corrupted. |
-| Controls wrong after propagation | Restore from backup (mode 11), or delete the game's `.xml` and re-run after fixing the reference game's bindings in TeknoParrotUI. |
-| Wrong fuzzy match | Delete the game's `.xml` from `UserProfiles` and add a `forceArchetype` entry in `overrides.json`. |
-| Game appears twice in TeknoParrotUI | Delete one of the duplicate `.xml` files from `UserProfiles` — keep the one with the correct path and any bindings already set. |
-| `[UNLOGGED]` on console | Log file is inaccessible — check that the TeknoParrot folder is not read-only and you have write permission. |
-| HyperSpin 2 export fails | TeknoParrot must be set up as an emulator in HyperSpin 2 first — the title must contain "TeknoParrot". |
+| Problem                                    | Fix                                                                                                                                                                                 |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Game won't launch                          | Open TeknoParrotUI, point the profile to the correct `.exe`. Re-run the script and choose Repair.                                                                                   |
+| Game not in TeknoParrot                    | Check ACTION REQUIRED — may need manual registration or needs to be extracted first.                                                                                                |
+| Extraction keeps failing                   | Check the log for the specific error. Verify free space and that the ZIP is not corrupted.                                                                                          |
+| Controls wrong after propagation           | Restore from backup (mode 11), or delete the game's `.xml` and re-run after fixing the reference game's bindings in TeknoParrotUI.                                                  |
+| Wrong fuzzy match                          | Delete the game's `.xml` from `UserProfiles` and add a `forceArchetype` entry in `overrides.json`.                                                                                  |
+| Game appears twice in TeknoParrotUI        | Delete one of the duplicate `.xml` files from `UserProfiles` — keep the one with the correct path and any bindings already set.                                                     |
+| `[UNLOGGED]` on console                    | Log file is inaccessible — check that the TeknoParrot folder is not read-only and you have write permission.                                                                        |
+| HyperSpin 2 export fails                   | TeknoParrot must be set up as an emulator in HyperSpin 2 first — the title must contain "TeknoParrot".                                                                              |
 | Postgres setup says it needs Administrator | Close the window and re-run `TeknoParrot-Manager.bat` via right-click → Run as administrator, then choose mode 12 again. Only needed the first time PostgreSQL itself is installed. |
 
 ---
 
 ## Files the Script Keeps
 
-| File | Location | Purpose |
-|------|----------|---------|
-| `TeknoParrot-Manager.config.json` | Scripts folder | Saved folders and settings (Postgres password stored DPAPI-encrypted) |
-| `TeknoParrot-Manager.overrides.json` | Scripts folder | Per-game tweaks (noSync, onlySync, noPropagate, forceArchetype, familyOverride, canonicalArchetype, datFile) |
-| TeknoParrot-Manager.log | Scripts folder | Log of every run, including ReShade/BepInEx/dgVoodoo2 and other download audit fields: source, filename/version, SHA-256, and transfer metrics |
-| `TeknoParrot-Manager.syncstate.json` | Staging folder | Tracks extracted ZIPs — delete to re-extract all |
-| `TeknoParrot-Manager-controls.txt` | Scripts folder | Controls state after every run |
-| `TeknoParrot-Manager-ActionItems.txt` | Scripts folder (default; Save dialog can pick elsewhere) | Action items from last run |
-| `TeknoParrot-LaunchBox-Import.xml` | Scripts folder | LaunchBox manual-import reference XML (only if you skip direct integration) |
-| `LaunchBoxBackups\` | Scripts folder | Timestamped backups of LaunchBox's own files, made before each direct write |
-| `PostgresBackups\` | Scripts folder | Timestamped `pg_dump` backups of Postgres databases, made before each Postgres setup run |
-| `ReShade\ReShade64.dll` | Scripts folder | User-provided ReShade DLL (64-bit; not included in the release ZIP) |
-| `ReShade\ReShade32.dll` | Scripts folder | User-provided ReShade DLL (32-bit, optional; not included in the release ZIP) |
-| `dgVoodoo2\*.dll` + `dgVoodoo.conf` | Scripts folder | dgVoodoo2 DLLs (you provide) |
-| `Crosshairs\*.png` | Scripts folder | Crosshair images (321 included) |
-| `CustomThumbnails\*.png` | Scripts folder | Your own game icons (optional, you create) |
+| File                                  | Location                                                 | Purpose                                                                                                                                        |
+| ------------------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TeknoParrot-Manager.config.json`     | Scripts folder                                           | Saved folders and settings (Postgres password stored DPAPI-encrypted)                                                                          |
+| `TeknoParrot-Manager.overrides.json`  | Scripts folder                                           | Per-game tweaks (noSync, onlySync, noPropagate, forceArchetype, familyOverride, canonicalArchetype, datFile)                                   |
+| TeknoParrot-Manager.log               | Scripts folder                                           | Log of every run, including ReShade/BepInEx/dgVoodoo2 and other download audit fields: source, filename/version, SHA-256, and transfer metrics |
+| `TeknoParrot-Manager.syncstate.json`  | Staging folder                                           | Tracks extracted ZIPs — delete to re-extract all                                                                                               |
+| `TeknoParrot-Manager-controls.txt`    | Scripts folder                                           | Controls state after every run                                                                                                                 |
+| `TeknoParrot-Manager-ActionItems.txt` | Scripts folder (default; Save dialog can pick elsewhere) | Action items from last run                                                                                                                     |
+| `TeknoParrot-LaunchBox-Import.xml`    | Scripts folder                                           | LaunchBox manual-import reference XML (only if you skip direct integration)                                                                    |
+| `LaunchBoxBackups\`                   | Scripts folder                                           | Timestamped backups of LaunchBox's own files, made before each direct write                                                                    |
+| `PostgresBackups\`                    | Scripts folder                                           | Timestamped `pg_dump` backups of Postgres databases, made before each Postgres setup run                                                       |
+| `ReShade\ReShade64.dll`               | Scripts folder                                           | User-provided ReShade DLL (64-bit; not included in the release ZIP)                                                                            |
+| `ReShade\ReShade32.dll`               | Scripts folder                                           | User-provided ReShade DLL (32-bit, optional; not included in the release ZIP)                                                                  |
+| `dgVoodoo2\*.dll` + `dgVoodoo.conf`   | Scripts folder                                           | dgVoodoo2 DLLs (you provide)                                                                                                                   |
+| `Crosshairs\*.png`                    | Scripts folder                                           | Crosshair images (321 included)                                                                                                                |
+| `CustomThumbnails\*.png`              | Scripts folder                                           | Your own game icons (optional, you create)                                                                                                     |
 
 ---
 

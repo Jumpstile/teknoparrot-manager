@@ -180,6 +180,7 @@ that would be worse than the risk it guards against.
 **Destination resolution.** `Get-ReShadeTargetInfo` (next to `Get-GameApiDll`) is a
 pure extraction of `Invoke-ReShadeSetup`'s destination logic, shared with the Library
 health check so both always agree on where ReShade would land:
+
 - OpenParrot games: deploy to `openparrot\` subfolder if it exists.
 - BudgieLoader games: rename to `opengl32.dll` (forced, regardless of API).
 - Otherwise: `Get-GameApiDll`-detected DLL name from the API scan.
@@ -241,6 +242,7 @@ menu entry rather than blocking with manual instructions.
 
 **API detection.** `Get-GameLegacyApi` scans first 2 MB for D3D8/DDraw/Glide2x/Glide3x
 import strings. DLL mapping:
+
 - D3D8 -> D3D8.dll + D3DImm
 - DDraw -> DDraw.dll + D3DImm
 - Glide2x -> Glide2x.dll
@@ -321,17 +323,40 @@ incomplete download behind.
 
 The ordinary first-run `D` choice uses this default without asking the user for
 a save location. The existing `B` browse/import path remains available for a
-ZIP or standalone `.dat` the user already has. On a later explicit update,
-the save dialog remains available as an alternate-location override, and a
-valid configured Eggman ZIP is the default destination so it is not silently
-relocated. Every destination TPM may write is rejected when it overlaps the
-TeknoParrot root, either game ZIP source, or the game staging folder.
+ZIP or standalone `.dat` the user already has. On a later explicit update, a
+valid configured Eggman ZIP is reused at its existing location without an
+alternate-location save dialog, so it is not silently relocated.
 
+When a configured Eggman ZIP is already verified safe, the update flow
+reuses a safe configured destination without an unnecessary browse prompt.
+Every destination supplied to the downloader, including a previously
+configured or user-selected path, is canonicalized and revalidated before
+reuse, download, or write. A destination that overlaps the TeknoParrot root,
+either game ZIP source, or the game staging folder is rejected before any
+network/download work begins.
 Before reuse or replacement, the ZIP must meet the expected byte count (when
 known), open as a readable archive, and contain the collection DAT entry used
 by `Build-DatIndexFromZip`. Validation happens before the shared downloader
 replaces an existing destination. A failed or invalid download therefore
 leaves the previous destination untouched and removes the partial file.
+
+---
+
+## BepInEx update safety and transaction boundary
+
+Mode 9 validates the configured games root and every existing candidate
+root before querying GitHub, prompting, downloading, creating a backup, or
+starting a transaction. Existing path components and BepInEx target leaves
+are rejected when outside the approved root or reparse-backed.
+
+The release ZIP is staged and inventory-checked before promotion. A
+timestamped BepInEx backup is copied and hash-verified before live changes.
+Promotion uses one rollback-safe tree transaction; recoverable failures
+restore the pre-operation tree, while rollback or cleanup uncertainty
+preserves evidence and does not report clean completion. If live promotion
+succeeds but ordinary staging cleanup fails, the update is reported separately
+as applied-with-cleanup-failure, excluded from the clean-update count, and the
+validated residue path is logged and shown as ACTION REQUIRED.
 
 ---
 
@@ -664,6 +689,7 @@ Feature-freeze exception, explicitly granted by the user. Do not generalize to o
 LaunchBox/frontend ideas without asking again.
 
 **Schema facts** (captured from a live LaunchBox installation, not guessed):
+
 - A `<Game>` entry's `<ApplicationPath>` is the path to the TeknoParrot GameProfile XML
   itself (relative to the LaunchBox root), NOT the game executable. Per-game
   `<CommandLine>` is empty; the emulator template (`--profile=%romfile%.xml`, with
@@ -679,6 +705,7 @@ LaunchBox/frontend ideas without asking again.
   skeleton only when the target platform file has zero existing entries to clone from.
 
 **Safety requirements** (non-negotiable per explicit user request):
+
 - `Test-LaunchBoxRunning`: refuses to write while LaunchBox/BigBox is open.
 - `Backup-LaunchBoxFiles`: backs up every file about to change before any write, aborts
   the whole operation if backup fails. Scoped to the specific files changing only (not the
@@ -718,6 +745,7 @@ detects these dynamically (category existence check); no hardcoded game list.
 
 **Confirmed working silent-install recipe** (derived from real failed install attempts
 root-caused via verbose MSI logs; see LESSONS_LEARNED.md for the full post-mortem):
+
 - Target `postgresql-8.3-int.msi` directly, NOT `postgresql-8.3.msi` (a near-empty UI
   wrapper that has nothing to do under `/qn` and fails, since its only job is to drive the
   internal MSI through dialogs in the InstallUISequence, which silent mode skips).
@@ -750,53 +778,62 @@ elsewhere) blocks the uninstall. Every existing subkey under both the native and
 WOW6432Node `\Installations\` roots is checked via wildcard (not assumed to literally be
 `postgresql-8.3`). Uses `Base Directory` as the value name.
 
-**MSI log security.** Deferred custom actions log connection passwords in plaintext in the
-verbose install log even though the command-line echo masks them. `Install-Postgres83`
-always deletes its entire working folder (ZIP, extracted MSI, verbose log) in a `finally`
-block, success or failure.
+**MSI log and command-line security.**
 
+The PostgreSQL 8.3 MSI requires SERVICEPASSWORD and SUPERPASSWORD as public
+properties. TPM passes them only during one synchronous msiexec call, does
+not print or log the argument list, clears its password variables afterward,
+and deletes the downloaded/extracted working folder in finally. TPM does not
+request a verbose MSI log because this MSI can write connection passwords into
+deferred custom-action logging. The remaining command-line visibility to OS
+process inspection during the call is an explicit accepted threat boundary.
 **Credential storage.**
-- Postgres superuser password: DPAPI-encrypted (`ConvertFrom-SecureString` with no `-Key`,
-  tied to the current Windows user + machine) in `config.json` as
-  `PostgresSuperPasswordEncrypted`.
-- Windows service account password: never persisted at all -- only needed once, at install time.
-- Postgres `Pass` field in UserProfiles: stored in plaintext. This is TeknoParrotUI's own
-  `ConfigValues/FieldInformation` schema -- TeknoParrotUI reads that literal field directly
-  to connect at game-launch time. Encrypting it would break TPUI's own connection; there
-  is no token-indirection mechanism TPUI would understand. Accepted, documented risk.
 
-**pgpass credential files.** `New-PostgresPgPassFile`/`Remove-PostgresPgPassFile` (next to
-`Test-SafePostgresDbName`) write/delete a temporary `.pgpass`-format file instead of using
-`$env:PGPASSWORD` (which exposes the password in the child process's environment block for
-the duration of the call). All five `psql`/`pg_dump`/`pg_restore`/`createdb`/`dropdb`
-call sites use this pattern. The file uses `*` for the database field
-(`127.0.0.1:5432:*:postgres:<password>`), covering every call site since they all use the
-same fixed host/port/user. The colon-escaping in the file is `-replace ':', '\:'` and the
-backslash-escaping is `-replace '\\', '\\'` -- the single-quoted replacement string is a
-literal two-character string (not regex), so this correctly doubles backslashes rather than
-quadrupling them.
+- Postgres superuser password: DPAPI-encrypted in config.json, tied to the
+  current Windows user and machine.
+- Windows service-account password: never persisted; used only during
+  installation and cleared afterward.
+- UserProfile Postgres Pass: plaintext is required because TeknoParrotUI
+  reads that field directly at game launch and has no encrypted-token
+  indirection. TPM writes it only after a verified recovery backup, skips
+  profiles already correct, and never includes its value in logs, summaries,
+  console output, or reports. This is a local compatibility boundary.
+- Recovery backups are TPM-owned evidence under PostgresRecoveryBackups.
+  Inherited ACLs are removed and the current Windows identity receives full
+  control. They remain until the operator removes them and may contain the
+  prior plaintext profile state for exact restoration; they are not uploaded.
+  **Temporary pgpass credential files.**
 
+New-PostgresPgPassFile creates a GUID-named file in the Windows temporary
+directory in libpq format. Inherited ACLs are removed and full control is
+granted only to the current Windows identity. PGPASSFILE is process-scoped,
+the prior value is restored after each helper, and the file is deleted in
+finally. Cleanup failure blocks the operation. Passwords and native output
+are redacted before diagnostic text is returned; no command-line argument
+or log entry contains the password.
 **Scope split.** If a profile's `Automatically create Database` field is present and `1`
 (TPUI's "Express Database Install", GT2018+), this script only fills in connection fields
 and leaves database creation/restore to TPUI's first-launch flow. Only for older
 `GameProfileRevision`s missing that field does this script run `createdb`/`pg_restore`.
 
 **Critical invariants.**
-- A database that already exists is NEVER recreated or restored over. Every
-  database-touching function is gated on `Test-PostgresDatabaseExists` first.
-- A `Pass` field that is already non-empty is never overwritten.
-- `Test-PostgresPassword` (a trivial `SELECT 1`) is called immediately after obtaining a
-  password -- whether decrypted from saved config or freshly typed -- and BEFORE saving a
-  freshly-typed one to config.
 
-**Known accepted risks.**
-- `SERVICEPASSWORD`/`SUPERPASSWORD` passed to `msiexec` as command-line properties are
-  briefly visible to process inspection tools (Task Manager, Process Explorer, WMI) for
-  the duration of that one call. There is no `msiexec` mechanism that avoids this for a
-  silent property-driven install.
-- The Postgres `Pass` field in UserProfiles is in plaintext (see Credential storage above).
-- The PostgreSQL installer is not Authenticode-signed (audit logging only -- same as
-  BepInEx/FFBArcadePlugin).
+- Guided recovery changes only the postgres role password. It never edits
+  pg_hba.conf, drops or recreates a database, restores over an existing
+  database, or wipes PostgreSQL data.
+- Verified recovery evidence is created before service stop, role reset,
+  configuration persistence, database backup, or profile write.
+- A reset, restart, backup, or profile write that cannot be verified returns
+  a blocked result and is never reported complete.
+- Profiles are sorted deterministically. Database state is tri-state verified/
+  exists so a query failure cannot be treated as database absence.
+  **Known accepted risks.**
+- Legacy PostgreSQL MSI public properties are briefly visible to OS process
+  inspection during the synchronous install call; TPM does not request a
+  verbose installer log and clears its own password variables afterward.
+- TeknoParrotUI's plaintext UserProfile Pass field remains a compatibility
+  boundary and must be protected as a local credential.
+- The PostgreSQL installer is not Authenticode-signed (audit logging only).
 
 ---
 
@@ -900,7 +937,7 @@ itself, so this engine deliberately never does.
   which meant an arbitrary or malformed profile could walk through states
   it had no authoritative right to. The classifier now works like this:
   - No catalog entry for `$Code`, or the document's `ExecutableName`/
-    `EmulationProfile`/`GameProfileRevision` don't *all* match what the
+    `EmulationProfile`/`GameProfileRevision` don't _all_ match what the
     catalog entry expects (an ambiguous/unverifiable contract) ->
     **`Unknown`**. Today only `abc` (After Burner Climax) has a catalog
     entry, bound explicitly to the captured provenance: teknogods/TeknoParrotUI
@@ -924,16 +961,16 @@ itself, so this engine deliberately never does.
     structurally usable (and, for buttons, bound with real content) ->
     **`NotVerified`**. This is the ceiling reachable by static evidence:
     usable, but not a successful bounded control test.
-  **`Verified` is never assigned by this engine** -- confirming a control
-  actually works requires real evidence (an observed successful test) that
-  a static read-only pass cannot manufacture. Registration, wizard
-  completion, a selected Input API, a profile's mere existence, an
-  all-bound profile, or a stored physical-device reference (e.g. a
-  `DirectInputDeviceGuid`) are explicitly not allowed to imply it (issue
-  #255's own wording, and the specific matrix the review rounds required --
-  see `Describe "Control Readiness Engine (issue #255)"`,
-  `Context "Matrix: authoritative requiredness and signals that must not
-  imply Verified"`).
+    **`Verified` is never assigned by this engine** -- confirming a control
+    actually works requires real evidence (an observed successful test) that
+    a static read-only pass cannot manufacture. Registration, wizard
+    completion, a selected Input API, a profile's mere existence, an
+    all-bound profile, or a stored physical-device reference (e.g. a
+    `DirectInputDeviceGuid`) are explicitly not allowed to imply it (issue
+    #255's own wording, and the specific matrix the review rounds required --
+    see `Describe "Control Readiness Engine (issue #255)"`,
+    `Context "Matrix: authoritative requiredness and signals that must not
+imply Verified"`).
 - **Launch observation**: `NotTestedByTpm`, `ObservedSuccess`,
   `ObservedFailure` -- TPM does not launch games itself (TeknoParrotUI and
   BudgieLoader own that path) and has no launch-outcome log to read today,
@@ -1068,6 +1105,7 @@ paths) and returns a `[pscustomobject]` with `State` and `DatXmlLocation`.
 
 **States**: `Complete`, `Incomplete`, `Missing`, `Malformed`, `Unknown` --
 five explicit outcomes, not a generic `Broken` catch-all:
+
 - `Missing` -- no `ParrotData.xml` at all (clean install, or TeknoParrotUI
   never launched yet).
 - `Malformed` -- the file exists but does not parse as XML (`XmlDocument.Load`
@@ -1214,8 +1252,7 @@ already-extracted folder for the DAT/list entry
 `Battle Gear 3 (2.08J)(2002)[Namco System 246][TP]`. The same tests cover a negative
 similarly-named sequel case and ensure empty matching folders do not suppress extraction.
 
-**Fuzzy-match alias.** The shared-executable fuzzy-match loop in `Register-Games` (~line
-4640) also tries each candidate's `$RawThrillsPathLimits[$cand.Code].Suggested` value as a
+**Fuzzy-match alias.** The shared-executable fuzzy-match loop in `Register-Games` (~line 4640) also tries each candidate's `$RawThrillsPathLimits[$cand.Code].Suggested` value as a
 second normalised string, taking the higher of the two (real code vs. short-name alias).
 This is the same alias concept applied at the fuzzy-match call site, which `Get-StagingFolderMap`'s
 fix never touched.
@@ -1312,7 +1349,7 @@ Key invariants, each verified empirically while building the standalone tool thi
 - **Never install unvalidated content.** `Test-ManagerUpdateExtractedScript` rejects an
   empty file, a file that is itself raw zip bytes (`PK` signature -- would happen if
   extraction were ever skipped or broken upstream), a file missing the `TeknoParrot
-  Manager` marker, or one missing a `$ScriptVersion` assignment, before it ever replaces
+Manager` marker, or one missing a `$ScriptVersion` assignment, before it ever replaces
   the live script.
 - **`Invoke-CheckForUpdates` never calls `exit`.** It returns `$true` only when a new
   script was actually installed; the menu dispatch block (untestable inline code, same as
@@ -1492,7 +1529,7 @@ presentation-layer work, not a mode-behavior change.
 `Get-MainMenuSectionRows` does not use one shared description field for every tier:
 Standard and Compact tiers show no description at all (Detail `'Labels'`); UltraCentered
 (single-column) uses `$item.FullDesc`; Ultra-two-column and Compact's `?`-triggered
-Professional fallback route through *different* fields depending on `$Geometry.Layout` --
+Professional fallback route through _different_ fields depending on `$Geometry.Layout` --
 Ultra-two-column uses `$item.ShortDesc`, but Professional-two-column has its own carve-out
 (`if ($Geometry.Layout -eq 'ProfessionalTwoColumn') { Get-MainMenuDefaultDescription -Item
 $item }`) that ignores ShortDesc/FullDesc entirely and always sources from the separate
@@ -1565,23 +1602,22 @@ longer appears inline in the if-block, since it now lives inside `Get-MainMenuSe
   for new features/mode numbers -- by definition nothing user-facing changed except
   behavior that was already supposed to work.
 
-
 ## Certification finalization transaction (issue #154)
 
 Complete-TPMCertificationTransaction is the sole authority for the final outcome, over the complete evidence lifecycle, not only the pass/fail decision. It is modeled as a database transaction: it consumes immutable, already-recorded facts -- a private workflow-owned issuance ledger, the scorecard's own Items, an authoritative artifact manifest -- rather than trusting descriptions of those facts that a caller could construct independently, and it treats publication as the final step of the same commit rather than a separate operation the caller has to keep in sync with the decision by hand.
 
-**Round 3 (issue #154): from "validate the description" to "validate against the authority."** Round 2 made the transaction the sole decision authority and added manifest/ordering/derived-score checks, but those checks still validated the *public* `$Results.Screenshots` array and a caller-supplied `$Certification.Items`/artifact set directly -- both are ordinary mutable objects nothing stops another piece of code (or an adversarial test) from constructing a convincing-looking substitute for, with every field, including `WorkflowId` and `Sequence`, copied from a real record. Round 3 does not add more field-level validation on top of that; it changes what is trusted:
+**Round 3 (issue #154): from "validate the description" to "validate against the authority."** Round 2 made the transaction the sole decision authority and added manifest/ordering/derived-score checks, but those checks still validated the _public_ `$Results.Screenshots` array and a caller-supplied `$Certification.Items`/artifact set directly -- both are ordinary mutable objects nothing stops another piece of code (or an adversarial test) from constructing a convincing-looking substitute for, with every field, including `WorkflowId` and `Sequence`, copied from a real record. Round 3 does not add more field-level validation on top of that; it changes what is trusted:
 
 - **Authoritative evidence issuance ledger, not the public array.** `$script:tpmEvidenceLedger` is a private, workflow-owned list populated only by `Add-Screenshot`, in real append order. `Complete-TPMCertificationTransaction` validates the caller-submitted `$Results.Screenshots` against this ledger by **reference identity, position for position** (`[object]::ReferenceEquals`) before it validates anything about individual records. A brand-new object with every field copied from a real ledger entry -- Name, Label, Path, WorkflowId, Sequence, all of it -- is still a different object, and reference identity is false for it. This is what "cannot be reconstructed merely by copying public fields" means concretely: the unforgeable fact is which object the workflow actually produced, not what any object claims about itself.
 - **Ordering derived from ledger position, not a trusted property.** `Sequence` remains on each record as an informational/reporting field, but the transaction no longer trusts it for anything security-relevant -- a mutated `Sequence` on an already-issued object cannot forge a different position, because ordering is read directly from the ledger's own append order (`$ledger[$ledger.Count - 1]` must be `final-certification-result`).
 - **Replay prevention and "final record issued last" by construction, not by check.** The ledger seals itself (`$script:tpmEvidenceLedgerSealed`) the instant `final-certification-result` is issued (`Add-Screenshot`), successfully, skipped, or failed. Any further `Add-Screenshot` call after that throws immediately. There is no code path left that can grow the ledger once sealed -- the "final record was genuinely last" invariant holds even before the transaction checks it.
 - **Path ownership, containment, and identity/filename consistency, enforced at issuance and re-verified at commit.** `Add-Screenshot` rejects (fails closed, before the record ever enters the ledger) any path that escapes the run's `-ScreenshotDir`, or that duplicates a path already claimed by another ledger entry. `Complete-TPMCertificationTransaction` re-verifies containment, uniqueness, and that each record's filename and `Label` actually match its identifier, against the ledger's own copies of those fields, as defense-in-depth against direct same-scope ledger manipulation (a residual risk distinct from a caller constructing a public-looking object -- see "Documented boundary" below).
 - **Real capture provenance for ScreenCapture evidence.** A required `ScreenCapture`-typed record must carry a non-empty `CaptureScope` (`Window` or `FullDesktop`, from `Save-TPMScreenCapture`) -- a `Captured` status with no recorded capture scope is rejected, since it cannot have come through the real capture path.
-- **Authoritative score-item manifest, not an arbitrary Items array.** `Get-TPMExpectedScoreItemManifest` is the exact, closed set of certification score-item identifiers. `Test-TPMScoreItemManifest` validates `$Certification.Items` against it -- exact identifiers, no missing/extra/duplicate, strict `[bool]` `Passed` (a truthy non-Boolean like `'true'` or `1` is rejected), and correct NotApplicable/tri-state usage per item -- *before* `Get-TPMCertificationScoreFromItems` is ever allowed to compute a score from it. A synthetic one-item "100% passing" scorecard cannot reach the scoring arithmetic at all.
+- **Authoritative score-item manifest, not an arbitrary Items array.** `Get-TPMExpectedScoreItemManifest` is the exact, closed set of certification score-item identifiers. `Test-TPMScoreItemManifest` validates `$Certification.Items` against it -- exact identifiers, no missing/extra/duplicate, strict `[bool]` `Passed` (a truthy non-Boolean like `'true'` or `1` is rejected), and correct NotApplicable/tri-state usage per item -- _before_ `Get-TPMCertificationScoreFromItems` is ever allowed to compute a score from it. A synthetic one-item "100% passing" scorecard cannot reach the scoring arithmetic at all.
 - **Mandatory, manifest-validated publication commit.** `-BuildArtifacts` is a required parameter (`[Parameter(Mandatory=$true)]`) -- omitting it is a PowerShell binding error, not a silently-skipped publish. `Get-TPMExpectedArtifactManifest` defines the exact five authoritative artifact identities (four reports plus the commit marker); `Test-TPMArtifactManifest` validates the callback's returned set against it (exact Ids, unique destinations, every destination contained within `-ReportDir`) before `Publish-TPMCertificationArtifacts` ever touches disk.
 - **A decision snapshot, not the transaction object, is what gets serialized.** The object handed to `-BuildArtifacts`, and the one attached to `$Certification.Finalization`/`$Results.Finalization` for JSON/Markdown serialization, deliberately has no `Published`/`PublicationError` fields. Those fields describe the outcome of an operation (publication) that has not happened yet when the content is generated -- embedding them would always serialize a stale value (`$false`, or whatever was true before the real outcome existed) into a report that might go on to publish successfully. The commit marker (below) is the actual durable proof of a complete publish; because a failed publish never leaves it on disk at all, its content never needs to describe an outcome that hadn't happened when it was written.
 - **A real commit boundary: durable verification plus a commit marker, not just stage-then-promote.** `Publish-TPMCertificationArtifacts` treats the last artifact in the array (always the commit marker, by manifest) specially: every other artifact is staged, promoted, and durably re-read back from disk to confirm it matches what was staged, and only once all of that succeeds is the marker itself promoted and durably verified. A concurrent reader, or a process resuming after an interrupted run, should treat the marker's absence as "not committed" regardless of what report files already exist on disk -- partial output is never authoritative.
-- **Documented boundary: this defends against constructed descriptions, not same-scope memory tampering or content forgery.** Everything above defends against a caller (or an adversarial test acting as one) constructing an object, array, or artifact set that merely *describes* legitimate workflow output. It does not defend against an actor with the ability to directly mutate this script's own private state (`$script:tpmEvidenceLedger`, etc. -- the same risk class as editing the script itself) or against a structurally-valid PNG whose *content* was substituted for a different real capture's bytes (see the regression test "rejects a reused PNG substituted for the final-certification-result path" for the explicit boundary: this documents it as intentionally out of scope, the same way PNG semantic/content authenticity was already out of scope for the validator -- see `docs/PNG-EVIDENCE-VALIDATOR-SPECIFICATION-INVENTORY.md`).
+- **Documented boundary: this defends against constructed descriptions, not same-scope memory tampering or content forgery.** Everything above defends against a caller (or an adversarial test acting as one) constructing an object, array, or artifact set that merely _describes_ legitimate workflow output. It does not defend against an actor with the ability to directly mutate this script's own private state (`$script:tpmEvidenceLedger`, etc. -- the same risk class as editing the script itself) or against a structurally-valid PNG whose _content_ was substituted for a different real capture's bytes (see the regression test "rejects a reused PNG substituted for the final-certification-result path" for the explicit boundary: this documents it as intentionally out of scope, the same way PNG semantic/content authenticity was already out of scope for the validator -- see `docs/PNG-EVIDENCE-VALIDATOR-SPECIFICATION-INVENTORY.md`).
 - **Commit atomicity and rollback semantics** (`Publish-TPMCertificationArtifacts`): every artifact is staged to a `.pending` file first; if staging, promotion, or durable verification fails partway, every pending file and every already-promoted file from this attempt is removed, and a pre-existing destination is never overwritten or deleted.
 
 ### System Invariant Inventory
@@ -1795,7 +1831,7 @@ structural decisions:
   `$reportDir` is the sole publication destination; `New-TPMPublicationCommitV1`
   (invoked only through `Complete-TPMProductionCertificationCycleV1`) is the
   sole writer of `TPM-Certification-{Eligibility,Publication,Final-Outcome,
-  Scorecard,Validation,Manifest,Commit}.{json,md}`. The remaining
+Scorecard,Validation,Manifest,Commit}.{json,md}`. The remaining
   non-authoritative surfaces are clearly distinct and never share a
   filename or an outcome-bearing field with the authoritative bundle:
   - The pre-flight `TPM-Invalid-Certification-Environment.{md,json}`
@@ -1846,7 +1882,7 @@ Summary:
   `HasExited` re-check -- never fire-and-forget `Kill()`), and a
   `<prefix>-process.json` metadata record that logs executable identity
   (filename only), phase identity, PID, timing, exit code, and argument
-  *count* -- never argument content. Its working/log directories are resolved
+  _count_ -- never argument content. Its working/log directories are resolved
   to a full path, verified non-reparse-point, and (via
   `Assert-TPMOwnedDirectoryV1 -CreateIfMissing`) created on first use if they
   do not already exist. As of the round 3 correction below, the caller must
@@ -1858,11 +1894,11 @@ Summary:
   pinned `SchemaVersion`, every numeric field constrained to a true bounded
   nonnegative integral type, `Discovered == Passed+Failed+Skipped+NotRun`,
   `FailedContainers <= Containers`, `VirtualBetaTesterTotal ==
-  VirtualBetaTesterPassed + VirtualBetaTesterFailed` bounded by the applicable
+VirtualBetaTesterPassed + VirtualBetaTesterFailed` bounded by the applicable
   global totals, and `Failures` a present array whose entry count equals
   `Failed` exactly, with every entry's `Name`/`Message` a nonblank string.
   Every malformed state throws the single `PESTER_RESULT_SCHEMA_INVALID:
-  <reason>` error family, which the harness's collection-abort gate (see
+<reason>` error family, which the harness's collection-abort gate (see
   "System Invariant Inventory (collection abort and launcher exit)", above)
   turns into an infrastructure abort with no authority/facts/evidence/marker/
   bundle produced -- never a raw `PropertyNotFoundException`.
@@ -1873,7 +1909,7 @@ Summary:
   inherits the same closed-stdin, bounded-timeout, confirmed-termination
   guarantees.
 - **No blanket confirmation suppression** (`$PSDefaultParameterValues['*:Confirm']
-  = $false` or equivalent) exists anywhere in `scripts/` or `Tests/`; each
+= $false` or equivalent) exists anywhere in `scripts/` or `Tests/`; each
   call site that needs non-interactive behavior handles it locally. Real,
   bounded child-process probes prove `Read-Host`, `$Host.UI.PromptForChoice`,
   a `-Confirm`-triggering `ShouldProcess` call, and a missing-mandatory-
@@ -1912,7 +1948,7 @@ left unsanitized content in place with no signal to the caller.
   headroom without letting a genuinely stuck lock hang the pipeline.
 - **On exhaustion**: throws a deliberately tagged exception
   (`SANITIZATION_RETRY_EXHAUSTED: operation=... target=... attempts=...
-  elapsedMs=... innerType=... innerHResult=...`, carried as a
+elapsedMs=... innerType=... innerHResult=...`, carried as a
   `System.IO.IOException` with the original exception preserved as
   `InnerException`) rather than returning. Both the read half and the write
   half of `Write-TPMSafeTechnicalFileV1` throw on exhaustion -- neither can
@@ -1929,26 +1965,27 @@ left unsanitized content in place with no signal to the caller.
 **Owned-directory reparse validation (`Assert-TPMOwnedDirectoryV1`,
 `New-TPMCreateNewFileV1`).** The original version checked only the final
 directory's own `ReparsePoint` attribute and used a `$path.StartsWith($root
-+ separator)` containment check. Two gaps: (1) a reparse point anywhere in
+
+- separator)`containment check. Two gaps: (1) a reparse point anywhere in
 an *ancestor* of the owned directory -- not the directory's own leaf
 attributes -- can silently redirect the effective location, and a
-leaf-only check never saw that; (2) `-Force` on `New-Item -ItemType
-Directory` silently no-ops if something (including an attacker-planted
-reparse point) already exists at that exact path, rather than failing.
-Now:
+leaf-only check never saw that; (2)`-Force`on`New-Item -ItemType
+  Directory` silently no-ops if something (including an attacker-planted
+  reparse point) already exists at that exact path, rather than failing.
+  Now:
 
-- `Assert-TPMNoReparseInChainV1` validates every *existing* path component
+* `Assert-TPMNoReparseInChainV1` validates every _existing_ path component
   from the declared owned root through the target (inclusive of both ends),
   individually, for the `ReparsePoint` attribute -- not just the final leaf.
   Only the single authorized creation leaf (`-CreateIfMissing`'s target) may
   be missing; every other missing component in the chain is rejected, not
   silently created.
-- Containment is a component-boundary comparison
+* Containment is a component-boundary comparison
   (`Test-TPMPathIsContainedV1`, splitting both paths into segments and
   comparing element-by-element), not a string-prefix check -- immune to
   sibling-prefix confusion (`C:\Owned-Evil` is never treated as being under
   `C:\Owned`).
-- `Assert-TPMOwnedDirectoryV1 -CreateIfMissing` now requires the parent of
+* `Assert-TPMOwnedDirectoryV1 -CreateIfMissing` now requires the parent of
   the directory being created to already exist and pass validation, creates
   the leaf with plain `New-Item` (no `-Force`, so a raced/attacker-planted
   entry at that path fails the creation instead of being silently reused),
@@ -1956,12 +1993,12 @@ Now:
   narrowing the TOCTOU window between the pre-creation check and the
   directory actually coming into existence. The pre-creation validation is
   never trusted to still hold post-creation.
-- `New-TPMCreateNewFileV1` still uses `FileMode.CreateNew` (never
+* `New-TPMCreateNewFileV1` still uses `FileMode.CreateNew` (never
   `Create`/`OpenOrCreate`) so file creation itself fails closed rather than
   silently reusing or overwriting an existing (possibly attacker-planted)
   file, and now validates the file's own containment/reparse chain with the
   same component-boundary/chain-walk logic instead of the old prefix check.
-- This closes the specific reparse-redirection and sibling-prefix races
+* This closes the specific reparse-redirection and sibling-prefix races
   identified in this round's review -- it is not a claim that every possible
   filesystem race anywhere in the certification pipeline is eliminated.
 
@@ -1972,7 +2009,7 @@ points, was always invoked internally with Root and Target set to the SAME
 path (`Assert-TPMNoReparseInChainV1 -Root $full -Target $full`). Because
 `Assert-TPMNoReparseInChainV1`'s chain walk only inspects components at or
 below the point where Root and Target parts start to differ, a Root==Target
-call inspects *only the leaf* -- functionally identical to the pre-round-2
+call inspects _only the leaf_ -- functionally identical to the pre-round-2
 leaf-only check the round-2 work was written to fix. An intermediate-level
 junction (e.g. planted at the harness's own `Reports` or `ProductionWork`
 folder, one level above the timestamped run directory actually passed in)
@@ -1990,7 +2027,7 @@ parameter that is never inferred, and never silently collapsed onto the
 target just because the target happens to already exist as a directory:
 
 - `Assert-TPMOwnedDirectoryV1 -Root <trustedRoot> -Path <target>
-  [-CreateIfMissing]` -- `-Root` is validated on its own (must exist, be
+[-CreateIfMissing]` -- `-Root` is validated on its own (must exist, be
   stat-able, and not itself be a reparse point) before anything else
   happens. `-Path` must equal `-Root` or be a component-boundary descendant
   of it; Root==Target is a deliberately supported, explicitly tested case
@@ -2000,10 +2037,10 @@ target just because the target happens to already exist as a directory:
   before any filesystem access.
 - `-CreateIfMissing` still creates only the single immediate leaf -- its
   parent must already be an existing, already-validated component of the
-  chain. Bringing a *multi-level* path into existence beneath a trusted
+  chain. Bringing a _multi-level_ path into existence beneath a trusted
   root (e.g. `HarnessRoot\Reports\<stamp>`, two levels below `HarnessRoot`)
   now goes through `New-TPMOwnedDirectoryChainV1 -Root <trustedRoot> -Path
-  <target>`, which creates/validates one authorized level at a time via
+<target>`, which creates/validates one authorized level at a time via
   repeated `Assert-TPMOwnedDirectoryV1 -CreateIfMissing` calls -- never by
   asking the filesystem to create several untracked intermediate levels in
   one call, which is exactly the shortcut the round-3 defect exploited.
@@ -2043,7 +2080,7 @@ unvalidated parent:
   `$backupDir`, and `$productionWorkingDirectory` are all established via
   `New-TPMOwnedDirectoryChainV1 -Root $HarnessRoot` near the top of the
   script (replacing the previous raw `New-Item -Force -Path $reportDir,
-  $backupDir`). All three `Invoke-TPMIsolatedProcessV1` call sites (Pester
+$backupDir`). All three `Invoke-TPMIsolatedProcessV1` call sites (Pester
   child, unattended-TPM relaunch, adaptive-menu renderer) use `$reportDir`
   as `-LogDirectoryRoot` (their `-LogDirectory` is always
   `$reportDir\TechnicalLogs`, one level below) and `$RepoPath` as
@@ -2075,7 +2112,7 @@ functions, called before and after the certification suite runs, feeding the
 same `Compare-TreeSnapshot`:
 
 - `Get-TreeHash -Path <dir>` walks a directory recursively (`Get-ChildItem
-  -Recurse -File`), hashing every file, and returns one record per file:
+-Recurse -File`), hashing every file, and returns one record per file:
   `RelativePath`, `Path`, `Hash`, `Length`. When `<dir>` does not exist, it
   returns a genuine zero-length array (`return ,@()`) -- never `$null`.
 - `Compare-TreeSnapshot -Before <snapshot> -After <snapshot>` diffs two such
@@ -2178,7 +2215,7 @@ production entry points, now have dedicated adversarial coverage:
   in this call graph, is unaffected: it only ever scans internal
   `$env:PSModulePath` entries (never `SettingsPath`/`DispositionRegistryPath`)
   and its own `Get-ChildItem` call already used `-ErrorAction
-  SilentlyContinue`, which suppresses this class of error regardless of
+SilentlyContinue`, which suppresses this class of error regardless of
   `$ErrorActionPreference`.
 
   **Follow-up correction: both `Test-Path` calls also need
@@ -2211,6 +2248,7 @@ independently confirmed blockers. Both are fixed narrowly; neither is a
 feature addition.
 
 ### Unattended mode selection (`TeknoParrot-Manager.ps1` exit 1: "Mode must be
+
 set before starting")
 
 `-Unattended` had no CLI or config mechanism to choose which mode to run.
@@ -2346,6 +2384,7 @@ was not touched -- noted here as a housekeeping item for a separate round,
 not part of this fix.
 
 ### `PSScriptAnalyzer.json` zero-byte evidence file -- confirmed correct, not
+
 a defect
 
 The preserved evidence includes a genuine zero-byte `PSScriptAnalyzer.json`.
@@ -2359,6 +2398,7 @@ literal text `"[]"`), so `Out-File` writes nothing at all. A zero-byte file
 is therefore the correct, expected representation of zero findings here,
 matching the run's own `OperatorStatus.txt` ("zero Error/Warning
 findings"). No code change made.
+
 ---
 
 ## Product evolution roadmap
