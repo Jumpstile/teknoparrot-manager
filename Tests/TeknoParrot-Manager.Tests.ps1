@@ -4599,8 +4599,8 @@ Describe "New-PostgresPgPassFile / Remove-PostgresPgPassFile" {
     # never visible in psql.exe/etc.'s own process environment block. These
     # tests cover the file format (libpq's documented
     # hostname:port:database:username:password syntax) and escaping rules,
-    # plus cleanup -- not the icacls lockdown, which is best-effort hardening
-    # on top and not load-bearing for correctness.
+    # plus cleanup. The ACL lockdown is part of the credential boundary; the
+    # tests keep the file-format assertions independent of local ACL details.
     It "writes a single line in the documented hostname:port:database:username:password format" {
         $path = New-PostgresPgPassFile -Password "hunter2"
         try {
@@ -4633,6 +4633,169 @@ Describe "New-PostgresPgPassFile / Remove-PostgresPgPassFile" {
     }
 }
 
+Describe "Postgres guided recovery and profile transaction" {
+    It "accepts a confirmed new password through SecureString input without echoing it" {
+        $secure = ConvertTo-SecureString 'New-Password-For-Test' -AsPlainText -Force
+        Mock Read-Host { $secure }
+        Read-ConfirmedPostgresPassword 'the new password' | Should -Be 'New-Password-For-Test'
+        Should -Invoke Read-Host -Times 2
+    }
+
+    It "redacts a supplied password from diagnostic text" {
+        $secret = 'No-Log-Password-123'
+        $safe = ConvertTo-PostgresRedactedText -Text ("native error: $secret") -Secrets @($secret)
+        $safe | Should -Not -Match ([regex]::Escape($secret))
+        $safe | Should -Match '\[REDACTED\]'
+    }
+
+    Context "automatic reset" {
+        BeforeEach {
+            $script:pgSecret = 'Automatic-Reset-Secret-456'
+            $script:pgRoot = Join-Path $TestDrive 'postgres-reset'
+            $script:PostgresInstallDir = $script:pgRoot
+            $script:PostgresBinDir = Join-Path $script:pgRoot 'bin'
+            $script:PostgresServiceName = 'pgsql-test'
+            New-Item -ItemType Directory -Path (Join-Path $script:PostgresBinDir '..\data') -Force | Out-Null
+            New-Item -ItemType File -Path (Join-Path $script:PostgresBinDir 'postgres.exe') -Force | Out-Null
+            $script:pgBackup = [pscustomobject]@{ Path = Join-Path $TestDrive 'PostgresRecoveryBackups\evidence'; Verified = $true }
+            $script:pgNativeArguments = $null
+            $script:pgNativeInput = $null
+            Mock Write-Log { param([string]$Message) if ($Message -match [regex]::Escape($script:pgSecret)) { throw 'secret reached log mock' } }
+            Mock Get-Service { [pscustomobject]@{ Status = 'Stopped' } }
+            Mock Start-Service {}
+            Mock Stop-Service {}
+            Mock Wait-PostgresServiceState {}
+            Mock Test-PostgresPassword { $true }
+        }
+
+        It "attempts the reset through PostgreSQL single-user standard input and reports success" {
+            Mock Invoke-PostgresNativeProcessWithInput {
+                param([string]$FilePath, [string]$Arguments, [string]$InputText, [string[]]$Secrets)
+                $script:pgNativeArguments = $Arguments
+                $script:pgNativeInput = $InputText
+                [pscustomobject]@{ ExitCode = 0; Output = ''; Error = '' }
+            }
+            $result = Reset-PostgresPasswordAutomatically -NewPassword $script:pgSecret -RecoveryBackup $script:pgBackup
+            $result.Attempted | Should -BeTrue
+            $result.Succeeded | Should -BeTrue
+            $result.RecoveryBlocked | Should -BeFalse
+            $script:pgNativeArguments | Should -Not -Match ([regex]::Escape($script:pgSecret))
+            $script:pgNativeInput | Should -Match 'ALTER ROLE postgres WITH PASSWORD'
+            Should -Invoke Invoke-PostgresNativeProcessWithInput -Times 1
+            Should -Invoke Test-PostgresPassword -Times 1
+        }
+
+        It "leaves evidence and reports recovery blocked when the reset fails" {
+            Mock Invoke-PostgresNativeProcessWithInput {
+                [pscustomobject]@{ ExitCode = 7; Output = ''; Error = $script:pgSecret }
+            }
+            $result = Reset-PostgresPasswordAutomatically -NewPassword $script:pgSecret -RecoveryBackup $script:pgBackup
+            $result.Attempted | Should -BeTrue
+            $result.Succeeded | Should -BeFalse
+            $result.RecoveryBlocked | Should -BeTrue
+            $result.BackupPath | Should -Be $script:pgBackup.Path
+            $result.Reason | Should -Not -Match ([regex]::Escape($script:pgSecret))
+            Should -Invoke Start-Service -Times 0
+            Should -Invoke Test-PostgresPassword -Times 0
+        }
+    }
+
+    Context "profile planning" {
+        BeforeEach {
+            $script:pgProfiles = Join-Path $TestDrive 'PostgresProfiles'
+            New-Item -ItemType Directory -Path $script:pgProfiles -Force | Out-Null
+            $script:PostgresBinDir = 'C:\PostgreSQL\bin'
+            $script:pgRecovery = [pscustomobject]@{ Path = Join-Path $TestDrive 'PostgresRecoveryBackups\verified'; Verified = $true; ProfileBackups = @() }
+            $script:pgEvents = New-Object System.Collections.Generic.List[string]
+            $script:pgSaved = New-Object System.Collections.Generic.List[string]
+            Mock Write-Log {}
+            Mock Get-PostgresDatabaseState { [pscustomobject]@{ Exists = $true; Verified = $true } }
+            Mock Save-Xml { param($Doc, [string]$Path) [void]$script:pgEvents.Add('save'); [void]$script:pgSaved.Add($Path) }
+        }
+
+        It "backs up before profile population, updates only stale profiles, and handles multiple profiles deterministically" {
+            $xml = '<GameProfile><ConfigValues><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>DbName</FieldName><FieldValue>GameDB01</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Path</FieldName><FieldValue>C:\\PostgreSQL\\bin\\</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Address</FieldName><FieldValue>127.0.0.1</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Port</FieldName><FieldValue>5432</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>User</FieldName><FieldValue>postgres</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Pass</FieldName><FieldValue>old</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Automatically create Database</FieldName><FieldValue>1</FieldValue></FieldInformation></ConfigValues></GameProfile>'
+            Set-Content -LiteralPath (Join-Path $script:pgProfiles 'A.xml') -Value $xml
+            Set-Content -LiteralPath (Join-Path $script:pgProfiles 'B.xml') -Value ($xml.Replace('<FieldValue>old</FieldValue>', '<FieldValue>approved</FieldValue>'))
+            Mock New-PostgresRecoveryBackup { [void]$script:pgEvents.Add('backup'); $script:pgRecovery }
+            $result = Invoke-PostgresGameSetup -UserProfilesDir $script:pgProfiles -SuperPasswordPlain 'approved'
+            $result.Configured | Should -Be 1
+            $result.AlreadyConfigured | Should -Be 1
+            $result.RecoveryBlocked | Should -BeFalse
+            @($script:pgEvents) | Should -Be @('backup', 'save')
+            $script:pgSaved.Count | Should -Be 1
+            $script:pgSaved[0] | Should -Match 'A\.xml$'
+        }
+
+        It "restores evidence and does not report completion after a partial profile save" {
+            $xml = '<GameProfile><ConfigValues><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>DbName</FieldName><FieldValue>GameDB01</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Path</FieldName><FieldValue></FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Address</FieldName><FieldValue></FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Port</FieldName><FieldValue></FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>User</FieldName><FieldValue></FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Pass</FieldName><FieldValue>old</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Automatically create Database</FieldName><FieldValue>1</FieldValue></FieldInformation></ConfigValues></GameProfile>'
+            Set-Content -LiteralPath (Join-Path $script:pgProfiles 'A.xml') -Value $xml
+            Set-Content -LiteralPath (Join-Path $script:pgProfiles 'B.xml') -Value $xml
+            $script:saveCount = 0; $script:restoreCount = 0
+            Mock Save-Xml { $script:saveCount++; if ($script:saveCount -eq 2) { throw 'simulated profile write failure' } }
+            Mock Restore-PostgresProfileBackups { $script:restoreCount++; $true }
+            $result = Invoke-PostgresGameSetup -UserProfilesDir $script:pgProfiles -SuperPasswordPlain 'approved' -RecoveryBackup $script:pgRecovery
+            $result.RecoveryBlocked | Should -BeTrue
+            $result.Configured | Should -Be 1
+            $script:restoreCount | Should -Be 1
+            $result | Should -Not -BeNullOrEmpty
+        }
+    }
+}
+
+Describe "BepInEx authorized-root and transaction guards" {
+    BeforeEach {
+        Mock Write-Log {}
+        Mock Write-Host {}
+    }
+
+    It "blocks an outside game root before release query, prompt, or download" {
+        $approved = Join-Path $TestDrive 'ApprovedGames'
+        $outside = Join-Path $TestDrive 'OutsideGame'
+        $profiles = Join-Path $TestDrive 'BepProfiles'
+        New-Item -ItemType Directory -Path $approved, $outside, $profiles -Force | Out-Null
+        $exe = Join-Path $outside 'game.exe'
+        New-Item -ItemType File -Path $exe -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $profiles 'Outside.xml') -Value ("<GameProfile><GamePath>$exe</GamePath></GameProfile>")
+        Mock Get-BepInExLatestRelease { throw 'release query should not run' }
+        Mock Read-HostSafe { 'N' }
+        Mock Invoke-TpmDownload { throw 'download should not run' }
+        Invoke-BepInExUpdateCheck -UserProfilesDir $profiles -CacheDir (Join-Path $TestDrive 'BepCache') -ApprovedGamesRoot $approved
+        Should -Invoke Get-BepInExLatestRelease -Times 0
+        Should -Invoke Read-HostSafe -Times 0
+        Should -Invoke Invoke-TpmDownload -Times 0
+    }
+
+    It "fails closed when the approved root is reparse-backed" {
+        $approved = Join-Path $TestDrive 'ReparseApproved'
+        New-Item -ItemType Directory -Path $approved -Force | Out-Null
+        Mock Get-Item { [pscustomobject]@{ Attributes = [System.IO.FileAttributes]::ReparsePoint; PSIsContainer = $true } } -ParameterFilter { $LiteralPath -eq $approved }
+        Test-BepInExGameRootSafe -GameRoot $approved -ApprovedRoot $approved | Should -BeFalse
+    }
+
+    It "restores the exact destination when staged promotion validation fails" {
+        $stage = Join-Path $TestDrive 'BepStage'
+        $dest = Join-Path $TestDrive 'BepDest'
+        New-Item -ItemType Directory -Path (Join-Path $stage 'BepInEx'), (Join-Path $dest 'BepInEx') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $stage 'BepInEx\core.dll') -Value 'new'
+        Set-Content -LiteralPath (Join-Path $dest 'BepInEx\core.dll') -Value 'old'
+        Set-Content -LiteralPath (Join-Path $stage 'winhttp.dll') -Value 'new-shim'
+        $before = Get-TpmDirSnapshot -Dir $dest
+        { Invoke-TpmTransactionalTreePromote -StagingDir $stage -DestDir $dest -RelativeFiles @('BepInEx\core.dll', 'winhttp.dll') -ValidationScript { return $false } } | Should -Throw
+        Assert-TpmDirSnapshotUnchanged -Before $before -After (Get-TpmDirSnapshot -Dir $dest)
+    }
+
+    It "does not alter a live BepInEx file when backup verification fails" {
+        $game = Join-Path $TestDrive 'BackupGame'
+        New-Item -ItemType Directory -Path (Join-Path $game 'BepInEx') -Force | Out-Null
+        $file = Join-Path $game 'BepInEx\core.dll'
+        Set-Content -LiteralPath $file -Value 'original'
+        Mock Test-BepInExBackupEntry { $false }
+        { New-BepInExUpdateBackup -GameRoot $game } | Should -Throw
+        (Get-Content -LiteralPath $file -Raw) | Should -Be ('original' + [Environment]::NewLine)
+        @(Get-ChildItem -LiteralPath $game -Directory -Filter 'BepInEx_Backup_*' -ErrorAction SilentlyContinue).Count | Should -BeGreaterThan 0
+    }
+}
 Describe "Read-PathWithBrowse" {
     # This is UI code (it can launch a real WinForms file/folder picker), which
     # is outside this project's stated Pester scope the same way other menu/UI
@@ -5367,7 +5530,7 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
 
         $result | Should -Be ([System.IO.Path]::GetFullPath($legacy))
         $script:downloadPath | Should -Be $result
-        Should -Invoke Read-PathWithBrowse -Times 1
+        Should -Invoke Read-PathWithBrowse -Times 0
     }
 
     It "rejects corrupt, wrong-type, and wrong-size files before reuse" {

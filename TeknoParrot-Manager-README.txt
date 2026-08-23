@@ -174,7 +174,8 @@
     recognises it and does not create a duplicate.
 
   - Control propagation. Bind ONE game of each control type once; the script
-    copies those controls to every other game of the same type, matched so a
+    can copy those known controls to compatible unbound games in the same
+    detected control family, matched so a
     wheel value can never land on a gun. Aim-mode settings (relative input,
     sensitivity, hide-cursor) are also carried across.
 
@@ -1557,12 +1558,13 @@
     pre-release/beta build. If a game's existing install is 32-bit, it is
     left alone and reported separately; update that one manually.
 
-    If anything is outdated, the script lists every such game once and
-    asks a single question: update all of them to the latest version?
-    Answering Y backs up the existing BepInEx folder and related files
-    (to BepInEx_Backup_<timestamp> inside that game's own folder) before
-    overwriting anything.
-
+    If anything is outdated, the script lists every such game once and asks
+    a single question: update all of them? Before that prompt, TPM verifies
+    every candidate root is inside the configured games folder and existing
+    target paths are not reparse-backed. Answering Y extracts the stable 64-bit
+    ZIP to staging, verifies the staged file set and backup, and promotes
+    through rollback-safe transaction handling. Unsafe roots, failed backups,
+    extraction errors, digest failures, and rollback uncertainty fail closed.
     A BepInEx download audit entry records the GitHub release source,
     asset filename/version, computed SHA-256, and transfer metrics. When
     GitHub supplies an asset digest, TPM validates it and fails closed on
@@ -1601,49 +1603,41 @@
 
   What mode 12 does
 
-    If PostgreSQL isn't installed yet, the script downloads and installs
-    it silently. This is the ONLY feature in this script that requires
-    running as Administrator, since it creates a real Windows service and
-    a local "postgres" Windows user account. You'll be asked for two
-    passwords:
-      1. A SERVICE ACCOUNT password -- for the Windows account that runs
-         PostgreSQL in the background. You'll almost never need it again.
-      2. A DATABASE password -- the important one. It's saved (encrypted)
-         so every Postgres game can be configured automatically, and
-         you'll need it again if you ever connect with pgAdmin yourself.
+    If PostgreSQL isn't installed yet, the script downloads and installs it
+    silently. This is the only feature requiring Administrator privileges.
+    You enter a service-account password and a database password through
+    secure confirmation prompts.
 
-    If PostgreSQL is already installed, it is NEVER reinstalled or
-    modified -- the script just uses it as-is.
+    If PostgreSQL is already installed, TPM preserves existing data. If the
+    saved password no longer works, TPM asks for a replacement, creates and
+    verifies a configuration/profile recovery backup, and automatically
+    resets the postgres role through PostgreSQL single-user mode. No manual
+    follow-up command is needed.
 
-    For each Postgres-needing game:
-      - A database that already exists is NEVER recreated or restored
-        over.
-      - A "Pass" field that's already filled in is NEVER overwritten --
-        you may have already configured it correctly, by hand or on an
-        earlier run.
-      - If the game's profile already has TeknoParrot's own "Automatically
-        create Database" feature (Golden Tee Live 2018 and newer), the
-        script only fills in the connection fields (address, port,
-        username) -- TeknoParrot creates the database itself and asks for
-        the backup location on first launch.
-      - For older profiles that predate that feature, the script creates
-        the database and restores that game's own bundled backup itself
-        (found automatically inside that game's pg_backup folder -- the
-        newest dated subfolder, or the highest-numbered file, matching
-        how the game ships its own backups).
-
-    Every time mode 12 runs, it backs up every existing Postgres database
-    first, before touching anything -- restore them via mode 11) Restore
-    from backup if anything looks wrong.
-
+    Recovery changes the role password only. TPM does not edit pg_hba.conf,
+    drop or recreate databases, or wipe existing PostgreSQL data. A database
+    that already exists is never recreated or restored over. TPM updates
+    only affected profiles whose values are not already correct, in a
+    deterministic order, and fails closed on any backup or write failure.
   Password storage
 
     The database password is encrypted using Windows DPAPI (tied to your
-    Windows account and this PC) before being saved to
-    TeknoParrot-Manager.config.json -- the first secret this script has
-    ever needed to store. The service account password is never saved at
-    all, encrypted or not; it's only needed once, during install.
+    Windows account and this PC) before being saved to the config file.
+    The service-account password is never saved after installation.
 
+    During PostgreSQL operations TPM uses a temporary .pgpass-format file
+    under the Windows temporary directory. It has inherited ACLs removed,
+    grants access only to the current Windows identity, is referenced only
+    through the process PGPASSFILE setting, and is deleted in finally.
+    Cleanup failure blocks the operation. The password is never printed or
+    written to logs, summaries, command arguments, or test evidence.
+
+    TeknoParrotUI requires the affected UserProfile Pass field in plaintext
+    to connect at game launch, so TPM writes that compatibility field only
+    after a verified recovery backup and skips profiles already containing
+    the approved value. Recovery evidence is ACL-locked to the current
+    Windows identity and may contain the prior profile state for exact
+    restoration; do not share it.
   Where this comes from
 
     Full manual setup guide (if you'd rather not automate this):

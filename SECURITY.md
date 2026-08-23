@@ -112,6 +112,55 @@ throws TRANSACTION CLEANUP FAILED, reports the residue path, and preserves it
 for diagnosis. Dedicated tests cover both extractors and both failure classes,
 plus clean success and exact pre-state restoration.
 
+## BepInEx update target boundary
+
+BepInEx update mode fails closed before release discovery, prompting, download,
+backup, or live writes unless the configured games root and every existing
+candidate game root are verified inside the approved root. Existing path
+components, target leaves, and existing BepInEx trees are rejected when
+reparse-backed or ambiguous.
+
+The release ZIP is staged and inventory-checked before promotion. A timestamped
+backup of the fixed BepInEx tree and related bootstrap files is hash-verified
+before live changes. Promotion uses a rollback-safe tree transaction;
+recoverable failures restore the exact pre-operation tree, while rollback or
+cleanup failures preserve evidence and report the update as blocked.
+
+## PostgreSQL guided recovery and credential boundaries
+
+Secure recovery intake uses two SecureString prompts and equality validation.
+Plaintext exists only in TPM memory for the operation and is cleared when the
+mode exits. If the saved DPAPI-protected password fails, TPM requires the
+recovery backup to verify before stopping PostgreSQL or changing a profile.
+
+TPM stops the service, refuses a live postmaster.pid, and invokes PostgreSQL
+8.3 single-user mode with an ALTER ROLE statement on standard input. It starts
+the service again, verifies the service state, and tests the new password.
+The reset does not edit pg_hba.conf and does not drop, recreate, restore over,
+or wipe any existing database. Any reset, restart, backup, or profile-write
+failure returns a recovery-blocked result.
+
+Temporary .pgpass files are created under the Windows temporary directory with
+inherited ACLs removed and full control granted only to the current Windows
+identity. PGPASSFILE is process-scoped, the prior value is restored, and the
+file is deleted in finally. Cleanup failure blocks the operation. Passwords
+are not written to logs, reports, console output, command arguments, or test
+artifacts.
+
+TeknoParrotUI requires the affected UserProfile Pass field in plaintext at
+game launch, so TPM retains that compatibility boundary and updates only
+affected profiles whose value differs. A verified recovery backup is made
+first and already-correct profiles are skipped. Recovery evidence is kept
+under PostgresRecoveryBackups with inherited ACLs removed and full control
+for the current Windows identity; it may contain the prior profile state for
+exact restoration and must be treated as a local credential backup.
+
+The legacy PostgreSQL MSI requires password public properties, so the values
+can be visible to OS process inspection during one synchronous install call.
+TPM does not request a verbose MSI log, does not print or log the argument list,
+clears the password variables immediately afterward, and removes the working
+folder. This is an explicit residual threat boundary of the legacy installer.
+
 ## dgVoodoo2 selective extraction (Scripts\dgVoodoo2\)
 
 `Get-DgVoodoo2LatestRelease` fetches the latest release from the official
@@ -163,7 +212,7 @@ by its fingerprint. Design:
   feature's implementation by downloading `ReShade_Setup_6.8.0.exe` from
   `https://reshade.me/downloads/` and calling `Get-AuthenticodeSignature`
   on it directly: `Status=UnknownError`, `Subject='CN=ReShade,
-  E=info@reshade.me'`, `Thumbprint=589690208A5E52FB96980C4A6698F50ACD47C49F`
+E=info@reshade.me'`, `Thumbprint=589690208A5E52FB96980C4A6698F50ACD47C49F`
   -- an exact match. Re-confirmed live again during the P1 #2 remediation
   pass below (same values observed against `ReShade_Setup_6.8.0.exe`).
 - **Explicit status policy, evaluated alongside the thumbprint -- not
@@ -442,7 +491,7 @@ Process metadata captured for every certification child
 (`<prefix>-process.json`, written by `Invoke-TPMIsolatedProcessV1` in
 `scripts/TPMCertification.Execution.psm1`) logs executable identity by
 filename only, a phase identity, PID, timing, exit code, and argument
-*count* -- never argument content -- by default. There is currently no code
+_count_ -- never argument content -- by default. There is currently no code
 path in this pipeline that logs raw argument values; if one is ever added for
 diagnostics, it must implement an explicit redaction contract (a documented
 list of argument names/patterns treated as sensitive) with tests proving
@@ -487,7 +536,7 @@ failed open now fail closed:
   not just the final leaf's own attributes, since a reparse point on any
   ancestor can silently redirect the effective location. The trusted root
   itself is never inferred or guessed: `Assert-TPMOwnedDirectoryV1 -Root
-  <trustedRoot> -Path <target>` takes it as a distinct, mandatory
+<trustedRoot> -Path <target>` takes it as a distinct, mandatory
   parameter, validates the root on its own (must exist, be stat-able, and
   not itself be a reparse point) before anything else happens, and rejects
   a drive/path-root-qualifier mismatch between root and target. Root and
@@ -500,14 +549,14 @@ failed open now fail closed:
   a string-prefix check, so a sibling directory that merely shares a text
   prefix (e.g. `C:\Owned-Evil` against `C:\Owned`) is never treated as
   contained. Directory creation (`Assert-TPMOwnedDirectoryV1
-  -CreateIfMissing`) creates only a single authorized missing leaf (a
+-CreateIfMissing`) creates only a single authorized missing leaf (a
   multi-level bring-up goes through `New-TPMOwnedDirectoryChainV1`, one
   authorized level at a time), uses plain `New-Item` (never `-Force`,
   which would silently no-op on an existing, possibly attacker-planted,
   entry), and revalidates the entire chain again after creation, narrowing
   the TOCTOU window between the pre-creation check and the directory
   actually coming into existence. File creation (`New-TPMCreateNewFileV1
-  -Root <trustedRoot> -Parent <parent> -Name <name>`) continues to use
+-Root <trustedRoot> -Parent <parent> -Name <name>`) continues to use
   `FileMode.CreateNew` so it fails closed rather than silently reusing or
   overwriting an existing file, and revalidates the full chain a SECOND
   time immediately before the underlying file handle is actually opened --

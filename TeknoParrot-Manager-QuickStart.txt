@@ -40,8 +40,8 @@
     Dat file      A community game database (Eggman/RomVault). The script
                   uses it to tell apart games that share an executable name.
 
-    Propagation   Copying control bindings from one game you have set up
-                  to every other game of the same control type.
+    Propagation   Copying known bindings from one game you have set up
+                  to compatible unbound games in the same detected control family.
 
     Archetype     The one game per control family that you have fully bound.
                   Its bindings are the source for propagation to other games.
@@ -71,7 +71,10 @@
   2. Run TeknoParrot Manager and choose AutoSync or Register only.
   3. Launch TeknoParrotUI and verify your games appear.
   4. In TeknoParrotUI, bind one game of each controller type you use.
-  5. Re-run the script -- it copies those controls to all similar games.
+  5. Re-run the script -- it can copy those known bindings to compatible
+     unbound games in the same detected control family. This is a bounded
+     reference-copy aid, not universal controller/gun detection or complete
+     shooter mapping.
   6. Launch one updated game and test it.
   7. Everything else (crosshairs, ReShade, dgVoodoo2, GPU fix, FFB, BepInEx,
      Postgres -- modes 4-9 and 12) is optional and can be run any time after
@@ -169,7 +172,9 @@
        Trackball           Golden Tee Live, Silver Strike Bowling
 
   2. Re-run this script. After registration it runs propagation automatically,
-     copying those controls to every other game of the same type.
+     copying those known controls to compatible unbound games in the same
+     detected control family. This is a bounded reference-copy aid, not
+     universal controller/gun detection or complete shooter mapping.
 
   3. Launch ONE updated game and test it before trusting the rest.
 
@@ -370,12 +375,13 @@
 
   This ONLY updates games that already have BepInEx installed -- it never
   installs BepInEx into a game that doesn't have it. Only the latest STABLE
-  64-bit release is ever used (never 32-bit, never a pre-release). The audit
-  entry records the GitHub release source, asset filename/version, computed
-  SHA-256, and transfer metrics; when GitHub supplies an asset digest, TPM
-  validates it and fails closed on mismatch. If anything is outdated, you're
-  asked once to update everything at once; the old install is backed up first.
-
+  64-bit release is ever used (never 32-bit, never a pre-release). Before
+  the update prompt, TPM verifies every candidate root is inside the
+  configured games folder and existing target paths are not reparse-backed.
+  The stable 64-bit ZIP is extracted to staging, its file set and backup are
+  verified, and live promotion uses rollback-safe transaction handling.
+  Unsafe roots, failed backups, extraction errors, digest failures, and
+  rollback uncertainty fail closed.
   To run:
     Choose mode 9 from the main menu.
 
