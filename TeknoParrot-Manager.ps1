@@ -7152,7 +7152,15 @@ function Get-DgVoodoo2LatestRelease {
                 return $null
             }
             $verStr = $release.tag_name.TrimStart('v')
-            $expectedSha256 = Get-TpmSha256FromDigestField -Digest $mainAsset.digest
+            # GitHub may omit the optional digest property on an otherwise
+            # valid release asset. Read it by property presence so strict
+            # mode does not turn that compatibility case into a failed query.
+            $digest = if ($mainAsset.PSObject.Properties.Name -contains 'digest') {
+                $mainAsset.digest
+            } else {
+                $null
+            }
+            $expectedSha256 = Get-TpmSha256FromDigestField -Digest $digest
             return [pscustomobject]@{
                 Version = $verStr; DownloadUrl = $mainAsset.browser_download_url; FileName = $mainAsset.name; SizeBytes = [int64]$mainAsset.size; ExpectedSha256 = $expectedSha256
             }

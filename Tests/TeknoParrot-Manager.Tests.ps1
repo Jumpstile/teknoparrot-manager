@@ -62,6 +62,14 @@ BeforeAll {
     $script:LocalDriveInfoCache          = $null
     $script:LocalDriveInfoCachePopulated = $false
 
+    # These are top-level production path variables omitted by AST
+    # extraction. Keep the test bootstrap strict-mode safe and mirror the
+    # production initial state before any fixture supplies concrete paths.
+    $script:tpRoot                 = $null
+    $script:zipSource              = $null
+    $script:zipSourceSupplementary = $null
+    $script:gamesInstallFolder     = $null
+
     # Same situation for the FFB Blaster gating (issue #41) and schema-drift
     # (issue #43) constants -- they are top-level script-scope variables in
     # the production script, not function bodies, so the AST extraction above
@@ -2774,7 +2782,7 @@ Describe "Invoke-TpmTransactionalPromote (rollback-safe promotion, P1 #1 / P1 2n
         # rollback-backup directory is cleaned up on success -- $staging
         # itself must be left completely empty, not merely missing the
         # backup subfolder.
-        (Get-ChildItem -LiteralPath $staging -Force -Recurse -ErrorAction SilentlyContinue).Count | Should -Be 0
+        (@(Get-ChildItem -LiteralPath $staging -Force -Recurse -ErrorAction SilentlyContinue)).Count | Should -Be 0
     }
 
     It "Case 3 -- destination exists with prior files, replacement partially succeeds, a later NEW file's promotion fails: exact pre-state restored" {
