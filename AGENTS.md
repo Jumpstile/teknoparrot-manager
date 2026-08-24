@@ -2,7 +2,9 @@
 
 PowerShell 5.1 script for managing TeknoParrot arcade game libraries.
 Current published release: v1.0 RC7
-Release state: v1.0 RC7 is the current published release; v1.0 RC6 is the previous published release (historical); final Version 1.0 remains unpublished.
+Release state: v1.0 RC7 is the current published release; RC8 is the
+candidate being prepared and is not published; v1.0 RC6 is the previous
+published release (historical); final Version 1.0 remains unpublished.
 
 Canonical workflow and role/path assignments: `docs/ENGINEERING-WORKFLOW.md`. The Desktop ChatGPT and Desktop Codex path is `C:\REPOS\teknoparrot-manager`; the Arcade ChatGPT and Arcade Codex path is `E:\REPOS\teknoparrot-manager`.
 
@@ -127,7 +129,7 @@ Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1
 
 ## Release ZIP contents
 
-Candidate ZIP name: `TeknoParrot Manager v1.0 RC7.zip` (staged validation only until publication is authorized).
+Candidate ZIP name: `TeknoParrot Manager v1.0 RC8.zip` (staged validation only until publication is authorized).
 
 **Include:** `TeknoParrot-Manager.ps1`, `.bat`, `-README.txt`, `-QuickStart.txt`,
 `-CHANGELOG.txt`, `LICENSE`, `Crosshairs\` (all 321 PNGs),

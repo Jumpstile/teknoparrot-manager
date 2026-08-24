@@ -1,10 +1,12 @@
 # Auto-Update System
 
-Status: standalone helper merged; menu integration is part of the published v1.0 RC7 release; shared hardened download transport documented below.
+Status: standalone helper merged; menu integration is part of the published v1.0 RC7 release; RC8 candidate source includes the same updater behavior plus the current remediation fixes, but RC8 is not published.
 
 Current published release: v1.0-RC7.
 Release archive: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7
 Previous published public release: v1.0-RC6 (historical). Final Version 1.0 remains unpublished.
+v1.0 RC8 is the candidate source under review and is not published; RC7 remains the
+current published release and RC6 remains historical.
 Publication note (2026-08-22): GitHub serves the immutable RC7 asset as
 `TeknoParrot.Manager.v1.0.RC7.zip` after filename normalization. The Scripts
 mirror uses that exact published filename. The verified asset is 4,862,794

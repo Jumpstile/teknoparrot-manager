@@ -3,8 +3,29 @@
   Author: Jumpstile
 ===============================================================================
 
-  Most recent version first.
+  Most recent version first. The RC8 entry below is a candidate record only;
+  RC8 is not published and has no tag, release asset, or Scripts mirror.
 
+-------------------------------------------------------------------------------
+  v1.0 RC8  (candidate, not published)  -- runtime recovery, certification
+  identity, governance, and release-integrity preparation
+  ----------------------------------------------------------------
+  Candidate source status: v1.0 RC7 remains the current published release.
+  RC8 is being prepared for independent review and guarded certification.
+  Final Version 1.0 remains unpublished.
+
+  Fixes: Eggman updates offer a validated primary ZIP/source folder when the
+  current DAT is protected under the TeknoParrot root; PostgreSQL elevation
+  failures provide exact Run-as-administrator recovery steps; and BepInEx
+  unsafe-root refusals explain the reason and corrective action without
+  downloading or writing.
+
+  Certification hardening: exact branch/commit/upstream/ref/reflog identity is
+  captured and guarded across production publication/finalization, with
+  structured publisher diagnostics and concurrent-run protection.
+
+  Governance: local-worktree/GitHub handoff, package identity, and #290
+  documentation-freshness evidence are mandatory source-controlled gates.
 
 -------------------------------------------------------------------------------
   v1.0 RC7  (2026-08-22)  -- published release candidate

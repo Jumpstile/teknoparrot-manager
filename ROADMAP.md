@@ -30,8 +30,9 @@ or Version 1.0 scope change.
 ## TPM 1.0 completion boundary
 
 The current commitment is to complete and support the existing TPM 1.0 release
-path. v1.0 RC7 is the current published release; v1.0 RC6 is the previous
-published release (historical), and final Version 1.0 remains unpublished.
+path. v1.0 RC7 is the current published release; RC8 is the candidate being
+prepared and is not published; v1.0 RC6 is the previous published release
+(historical), and final Version 1.0 remains unpublished.
 Release safety,
 certification, and any remaining work required for the existing feature set
 take precedence over every phase in this document.

@@ -8,17 +8,19 @@ Canonical links: [GitHub repository](https://github.com/Jumpstile/teknoparrot-ma
 
 > **Current published release: v1.0 RC7** -- read-only readiness and contract-backed compatibility warnings. Test one game after each run. Profiles are backed up automatically before every run. Previous published release: v1.0 RC6 (historical).
 
+> **RC8 candidate status:** this source tree prepares v1.0 RC8 with the
+> runtime-recovery, certification-identity, and governance corrections described
+> below. RC8 is not published and has no release tag or download asset yet.
+
 ---
 
-## Current Release: TeknoParrot Manager v1.0 RC7
+## Current Published Release: TeknoParrot Manager v1.0 RC7
 
-v1.0 RC7 is the current published release. The tag and release archive are
+v1.0 RC7 remains the current published release. The tag and release archive are
 active: [RC7 release archive](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7).
 
-Previous published release: v1.0 RC6 (historical; [RC6 release archive](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC6)).
-
-Final Version 1.0 has not been published yet and will be announced
-separately.
+The final Version 1.0 remains unpublished. The RC8 candidate in this source
+tree is for review, certification, and release preparation only.
 
 ---
 
@@ -1006,4 +1008,6 @@ TeknoParrot Manager name and branding are reserved.
 
 ---
 
-> v1.0 RC7 (published) -- previous published release: v1.0 RC6 (historical). Test one game after each run. Profiles are backed up automatically at the start of every run.
+> v1.0 RC8 candidate (not published) -- RC7 remains the current published
+> release; previous published release: v1.0 RC6 (historical). Test one game
+> after each run. Profiles are backed up automatically at the start of every run.

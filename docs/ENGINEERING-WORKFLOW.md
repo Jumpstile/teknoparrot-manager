@@ -207,8 +207,9 @@ release publication.
 
 ## Scope boundaries for the current cycle
 
-- RC8 remains remediation/review work only. This workflow does not fix the
-  PostgreSQL, Eggman, or BepInEx blockers tracked by #292.
+- RC8 remains remediation/review work only and is not published. The final
+  candidate incorporates the accepted #292 runtime fixes, but this workflow
+  does not authorize publication.
 - #279, #280, and #281 remain post-1.0 unless explicitly re-scoped and
   approved.
 - Broad automatic mapping under #200 remains deferred unless explicitly

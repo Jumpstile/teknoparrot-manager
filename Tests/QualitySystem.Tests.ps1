@@ -49,19 +49,13 @@ Describe "Quality engineering system metadata" {
 
 Describe "Release Integrity source identity" -Tag 'ReleaseConsistency' {
     # The running source identity and the last published release are tracked
-    # separately so source identity cannot drift from publication state. RC7 is
-    # the current published release, while RC6 remains historical.
+    # separately. RC8 is the candidate source under review; RC7 remains the
+    # latest actually published release.
     BeforeAll {
         $script:RepoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
-        # What the running script/tooling actually says right now.
-        $script:CurrentSourceVersion = 'v1.0 RC7'
-        $script:CurrentSourceRcLabel = 'RC7'
-        $script:CurrentSourceState = 'published'
-        # The last actually-published, tagged GitHub release. Update this
-        # (and the "documentation truthful" assertions below) only when a
-        # new release is genuinely published/tagged -- never as a
-        # substitute for keeping CurrentSourceVersion in sync with
-        # $ReleaseCandidateLabel on every version bump.
+        $script:CurrentSourceVersion = 'v1.0 RC8'
+        $script:CurrentSourceRcLabel = 'RC8'
+        $script:CurrentSourceState = 'candidate'
         $script:LastPublishedVersion = 'v1.0 RC7'
         $script:LastPublishedRcLabel = 'RC7'
         $script:LastPublishedTag     = 'v1.0-RC7'
@@ -70,7 +64,7 @@ Describe "Release Integrity source identity" -Tag 'ReleaseConsistency' {
         $script:PreviousPublishedVersionPattern = 'v1\.0[- ]RC6'
     }
 
-    It "keeps the production script header, runtime label, banner, and console preview on the current source identity" {
+    It "keeps the production script header, runtime label, banner, and console preview on the RC8 candidate identity" {
         $scriptPath = Join-Path $script:RepoRoot 'TeknoParrot-Manager.ps1'
         $content = Get-Content -LiteralPath $scriptPath -Raw
 
@@ -83,22 +77,22 @@ Describe "Release Integrity source identity" -Tag 'ReleaseConsistency' {
         $preview = Get-Content -LiteralPath $previewPath -Raw
         $preview | Should -Match ([regex]::Escape($script:CurrentSourceVersion))
     }
-    It "keeps published-release documentation truthful about the last actually-published release" {
+    It "keeps published-release documentation truthful while identifying RC8 as unpublished" {
         $readme = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'README.md') -Raw
         $topReadme = ($readme -split "`r?`n" | Select-Object -First 40) -join "`n"
 
         $topReadme | Should -Match ([regex]::Escape($script:LastPublishedVersion))
         $topReadme | Should -Match ([regex]::Escape($script:LastPublishedTag))
-        $topReadme | Should -Match ('(?i)(?:current|last) published release.{0,80}' + [regex]::Escape($script:LastPublishedVersion))
-        $topReadme | Should -Match ([regex]::Escape($script:CurrentSourceVersion) + '.{0,100}published')
-        $topReadme | Should -Not -Match '(?i)(pre-publication|not yet published|tag/release does not exist)'
+        $topReadme | Should -Match ('(?i)current published release.{0,80}' + [regex]::Escape($script:LastPublishedVersion))
+        $topReadme | Should -Match ([regex]::Escape($script:CurrentSourceVersion))
+        $topReadme | Should -Match '(?i)RC8 candidate'
+        $topReadme | Should -Match '(?i)RC8 is not published'
         $topReadme | Should -Match 'releases/(?:tag|download)/v1\.0-RC7'
         $topReadme | Should -Match ('(?i)(?:previous|historical) published release.{0,80}' + $script:PreviousPublishedVersionPattern)
         $topReadme | Should -Not -Match '\[Download v1\.0 RC5\]'
         $topReadme | Should -Not -Match 'v1\.0 RC1|v1\.0-RC1|v1\.0\.RC1'
     }
-
-    It "keeps the changelog and release-package defaults aligned with the current source identity" {
+    It "keeps the changelog and release-package defaults aligned with the RC8 source identity" {
         $changelog = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'TeknoParrot-Manager-CHANGELOG.txt') -Raw
         $releasePackage = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'Tests\Test-ReleasePackage.ps1') -Raw
 
@@ -108,18 +102,16 @@ Describe "Release Integrity source identity" -Tag 'ReleaseConsistency' {
 
         $releasePackage | Should -Match ([regex]::Escape($script:CurrentSourceVersion))
     }
-
-    It "keeps the wiki changelog staging doc aligned with source and publication state" {
-        # docs\wiki-updates\Changelog.md tracks the live GitHub wiki content.
-        # It records the published RC7 release and retains historical RC6.
+    It "keeps the wiki changelog staging doc aligned with candidate and publication state" {
+        # wiki-updates\Changelog.md tracks the live GitHub wiki content.
         $wikiChangelog = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'docs\wiki-updates\Changelog.md') -Raw
         $wikiChangelog | Should -Not -Match 'Unreleased'
         $wikiChangelog | Should -Match ([regex]::Escape($script:CurrentSourceVersion))
         $wikiChangelog | Should -Match ([regex]::Escape($script:LastPublishedVersion))
         $wikiChangelog | Should -Match 'releases/tag/v1\.0-RC7'
+        $wikiChangelog | Should -Match '(?i)RC8.*(?:candidate|not published)'
         $wikiChangelog | Should -Match ('(?i)(?:previous|historical) published release.{0,80}' + $script:PreviousPublishedVersionPattern)
     }
-
     It "documents Release Integrity Audit as a mandatory public-release gate" {
         $checklist = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'RELEASE-SAFETY-CHECKLIST.md') -Raw
 
@@ -128,7 +120,6 @@ Describe "Release Integrity source identity" -Tag 'ReleaseConsistency' {
         $checklist | Should -Match 'Release Artifact Audit'
     }
 }
-
 Describe "Canonical repository discoverability contract" -Tag 'ReleaseConsistency' {
     BeforeAll {
         $script:DiscoverabilityRepoRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
@@ -238,9 +229,9 @@ Describe "Active release-facing documentation" -Tag 'ReleaseConsistency' {
 Describe "Release-document consistency contract" -Tag 'ReleaseConsistency' {
     BeforeAll {
         $script:ReleaseDocumentContract = [pscustomobject]@{
-            CurrentVersionLabel = 'v1.0 RC7'
-            CurrentVersionPattern = 'v1\.0[- ]RC7'
-            CurrentSourceStatePattern = '(?i)current\s+published\s+release'
+            CurrentVersionLabel = 'v1.0 RC8'
+            CurrentVersionPattern = 'v1\.0[- ]RC8'
+            CurrentSourceStatePattern = '(?i)(?:RC8[\s\S]{0,100}(?:candidate|not published)|candidate[\s\S]{0,100}RC8)'
             LastPublishedVersionLabel = 'v1.0 RC7'
             LastPublishedVersionPattern = 'v1\.0[- ]RC7'
             PreviousPublishedVersionLabel = 'v1.0 RC6'
@@ -272,12 +263,9 @@ Describe "Release-document consistency contract" -Tag 'ReleaseConsistency' {
                     }
 
                     if ($text -notmatch $Contract.CurrentSourceStatePattern) {
-                        [void]$findings.Add("$($document.Path): active text does not identify the current published release.")
+                        [void]$findings.Add("$($document.Path): active text does not identify the RC8 candidate source.")
                     }
 
-                    if ($text -match '(?i)(?:pre-publication|not yet published|tag/release does not exist|intentionally not active)') {
-                        [void]$findings.Add("$($document.Path): active text still describes RC7 as pre-publication.")
-                    }
 
                     if ($text -notmatch ('(?i)(?:current|last)\s+published[\s\S]{0,80}' + $Contract.LastPublishedVersionPattern)) {
                         [void]$findings.Add("$($document.Path): active text does not identify the current published release $($Contract.LastPublishedVersionLabel).")
@@ -325,8 +313,8 @@ Describe "Release-document consistency contract" -Tag 'ReleaseConsistency' {
         }
 
         $script:ReleaseIdentityDocuments = @(
-            [pscustomobject]@{ Path = 'README.md'; Scope = 'ActiveIdentity'; Text = 'Current published release: v1.0 RC7. Release archive: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7. Previous published release: v1.0 RC6 (historical).' }
-            [pscustomobject]@{ Path = 'QUICKSTART.md'; Scope = 'ActiveIdentity'; Text = 'Current published release: v1.0 RC7. Release archive: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7. Previous published release: v1.0 RC6 (historical).' }
+            [pscustomobject]@{ Path = 'README.md'; Scope = 'ActiveIdentity'; Text = 'Current published release: v1.0 RC7. Release archive: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7. v1.0 RC8 is the candidate being prepared and is not published. Previous published release: v1.0 RC6 (historical).' }
+            [pscustomobject]@{ Path = 'QUICKSTART.md'; Scope = 'ActiveIdentity'; Text = 'Current published release: v1.0 RC7. Release archive: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7. v1.0 RC8 candidate source is not published. Previous published release: v1.0 RC6 (historical).' }
         )
 
     }
@@ -353,15 +341,15 @@ Describe "Release-document consistency contract" -Tag 'ReleaseConsistency' {
         ($findings -join "`n") | Should -Match 'superseded RC'
     }
 
-    It "fails a fixture that leaves the current RC7 in pre-publication state" {
-        $unpublished = @(
+    It "fails a fixture that omits the RC8 candidate state" {
+        $missingCandidate = @(
             [pscustomobject]@{ Path = 'README.md'; Scope = 'ActiveIdentity'; Text = 'Current published release: v1.0 RC7. Release archive: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7. Previous published release: v1.0 RC6 (historical).' }
-            [pscustomobject]@{ Path = 'QUICKSTART.md'; Scope = 'ActiveIdentity'; Text = 'Current source candidate: v1.0 RC7 (pre-publication; not yet published). Previous published release: v1.0 RC6 (historical).' }
+            [pscustomobject]@{ Path = 'QUICKSTART.md'; Scope = 'ActiveIdentity'; Text = 'Current published release: v1.0 RC7. Release archive: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7. Previous published release: v1.0 RC6 (historical).' }
         )
 
-        $findings = @(& $script:ReleaseDocumentConsistencyFinder -Documents $unpublished -Contract $script:ReleaseDocumentContract)
+        $findings = @(& $script:ReleaseDocumentConsistencyFinder -Documents $missingCandidate -Contract $script:ReleaseDocumentContract)
         $findings.Count | Should -BeGreaterThan 0
-        ($findings -join "`n") | Should -Match 'still describes RC7 as pre-publication'
+        ($findings -join "`n") | Should -Match 'does not identify the RC8 candidate'
     }
 
     It "fails active BepInEx setup or fresh-install wording" {

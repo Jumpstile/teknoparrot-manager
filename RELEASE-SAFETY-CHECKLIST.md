@@ -2,7 +2,7 @@
 
 This checklist must be completed before every version tag, ZIP build, and GitHub release.
 It is intentionally redundant: each gate catches a different failure class.
-Release state for the current cycle: v1.0 RC7 is the current published release; v1.0 RC6 is the previous published release (historical); final Version 1.0 remains unpublished.
+Release state for the current cycle: v1.0 RC7 is the current published release; RC8 is the candidate being prepared and is not published; v1.0 RC6 is the previous published release (historical); final Version 1.0 remains unpublished.
 
 Canonical current workflow: `docs/ENGINEERING-WORKFLOW.md`. Desktop ChatGPT and Desktop Codex use `C:\REPOS\teknoparrot-manager`; Arcade ChatGPT and Arcade Codex use `E:\REPOS\teknoparrot-manager`.
 

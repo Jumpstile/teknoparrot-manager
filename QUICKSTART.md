@@ -1,6 +1,6 @@
 # TeknoParrot Manager — Quick Start
 
-> Current published release: v1.0 RC7 -- test one game after every run. Profiles are backed up automatically before every run. [RC7 release archive](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7). Previous published release: v1.0 RC6 (historical). Final Version 1.0 remains unpublished.
+> Current published release: v1.0 RC7 -- test one game after every run. Profiles are backed up automatically before every run. [RC7 release archive](https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7). Previous published release: v1.0 RC6 (historical). v1.0 RC8 is the candidate being prepared and is not published. Final Version 1.0 remains unpublished.
 
 Full documentation: [README.md](README.md)
 

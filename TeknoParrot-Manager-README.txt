@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC7
+  TeknoParrot Manager  |  v1.0 RC8
   Author: Jumpstile
 ===============================================================================
 
@@ -7,14 +7,15 @@
   automatically, copies your controls between games of the same type, and
   keeps your game library organised. Windows / PowerShell 5.1+.
 
-  This is a release candidate. Test one game after each run. Your profiles are
-  backed up automatically at the start of every run.
+  This is the RC8 release candidate source under review. RC8 is not published.
+  Test one game after each run. Your profiles are backed up automatically at
+  the start of every run.
 
   Current published release: v1.0 RC7. The RC7 release archive is available at:
   https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7
   Previous published release: v1.0 RC6 (historical). Final Version 1.0
   remains unpublished.
-  Final Version 1.0 remains unpublished.
+  RC8 has no public release tag or download asset yet.
 
   For a one-page version, see TeknoParrot-Manager-QuickStart.txt.
 
@@ -2476,7 +2477,8 @@
 
 
 ===============================================================================
-  v1.0 RC7 (published) -- Test one game after each run. Previous published
-  release: v1.0 RC6 (historical).
-  Profiles are backed up automatically at the start of every run.
+  v1.0 RC8 candidate (not published) -- RC7 remains the current published
+  release; previous published release: v1.0 RC6 (historical). Test one game
+  after every run. Profiles are backed up automatically at the start of every
+  run.
 ===============================================================================

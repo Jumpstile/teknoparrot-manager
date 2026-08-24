@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.0 RC8 (candidate, not published) -- runtime recovery and release-integrity preparation
+
+- RC7 remains the current published release. RC8 has no public tag, release
+  asset, or Scripts mirror; final Version 1.0 remains unpublished.
+- Eggman updates protect a DAT under the TeknoParrot root and can offer the
+  validated primary ZIP/source folder as the explicit destination.
+- PostgreSQL non-admin recovery and BepInEx unsafe-root refusals provide
+  beginner-readable corrective actions without weakening fail-closed behavior.
+- Certification captures and guards exact branch, commit, upstream, ref, and
+  reflog identity through publication/finalization.
+- Release packaging requires exact source/package identity and a completed #290
+  repository and live-wiki freshness audit.
+
 ## v1.0 RC7 (2026-08-22) -- published release candidate
 
 - Publication: v1.0 RC7 is published. Release archive:
