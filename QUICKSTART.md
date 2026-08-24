@@ -256,7 +256,10 @@ Answering Y downloads the stable x64 ZIP only after those checks. TPM extracts
 to isolated staging, verifies the staged file set and the backup, then promotes
 the complete tree through a rollback-safe transaction. Unsafe roots, failed
 backups, extraction errors, digest failures, and rollback uncertainty fail closed
-without reporting an update as complete.
+without reporting an update as complete. If a root is unsafe, TPM shows the
+configured games root, explains that a real non-reparse folder is required,
+and tells you to correct the game profile/path before running mode 9 again; no
+BepInEx download or write is attempted for that game.
 **Manual clean reset:** delete `doorstop_config.ini`, `winhttp.dll`, `.doorstop_version`, `changelog.txt`, and the `BepInEx` folder from the game's folder — this fully reverts to vanilla.
 
 ---
@@ -275,6 +278,10 @@ PostgreSQL 8.3 database. Mode 12 detects which registered games need it.
   password no longer works, TPM asks for a replacement, creates and verifies a
   configuration/profile recovery backup, and automatically resets the postgres
   role through PostgreSQL single-user mode. No manual follow-up command is needed.
+- If installation or automatic recovery needs elevation and this window is not
+  running as Administrator, close TPM, right-click `TeknoParrot-Manager.bat`
+  (or the PowerShell script), choose **Run as administrator**, and select mode
+  12 again. The blocked step does not change PostgreSQL data or profiles.
 - Recovery changes the role password only. TPM does not edit pg_hba.conf, drop
   or recreate databases, or wipe existing PostgreSQL data.
 - After recovery, TPM updates only affected profiles whose connection values are
@@ -517,7 +524,7 @@ At the end of every run the script prints — and saves to a text file (default 
 | Game appears twice in TeknoParrotUI        | Delete one of the duplicate `.xml` files from `UserProfiles` — keep the one with the correct path and any bindings already set.                                                     |
 | `[UNLOGGED]` on console                    | Log file is inaccessible — check that the TeknoParrot folder is not read-only and you have write permission.                                                                        |
 | HyperSpin 2 export fails                   | TeknoParrot must be set up as an emulator in HyperSpin 2 first — the title must contain "TeknoParrot".                                                                              |
-| Postgres setup says it needs Administrator | Close the window and re-run `TeknoParrot-Manager.bat` via right-click → Run as administrator, then choose mode 12 again. Only needed the first time PostgreSQL itself is installed. |
+| Postgres setup says it needs Administrator | Close the window and re-run `TeknoParrot-Manager.bat` via right-click -> Run as administrator, then choose mode 12 again. This applies to first install and automatic recovery when the saved password is unusable. |
 
 ---
 

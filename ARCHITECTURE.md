@@ -329,11 +329,21 @@ alternate-location save dialog, so it is not silently relocated.
 
 When a configured Eggman ZIP is already verified safe, the update flow
 reuses a safe configured destination without an unnecessary browse prompt.
+The path policy is role-based rather than location-based: the protected
+TeknoParrot root, program/runtime paths, and game staging root remain blocked,
+while the explicitly configured primary ZIP/source folder may be a DAT
+destination when it is reachable, canonical, non-reparse, and outside those
+protected roots. A mapped or NAS path is not rejected merely because it is
+network-backed. The supplementary source is not auto-selected as a primary
+DAT destination, and overlapping source roles are ambiguous and rejected.
+
 Every destination supplied to the downloader, including a previously
 configured or user-selected path, is canonicalized and revalidated before
-reuse, download, or write. A destination that overlaps the TeknoParrot root,
-either game ZIP source, or the game staging folder is rejected before any
-network/download work begins.
+reuse, download, or write. The destination is checked again immediately
+before the shared downloader moves a validated temporary file into place.
+If no role-safe external destination exists, TPM explains the recovery action
+instead of silently skipping the update. Windows share permissions and
+credentials remain an independent operating-system write boundary.
 Before reuse or replacement, the ZIP must meet the expected byte count (when
 known), open as a readable archive, and contain the collection DAT entry used
 by `Build-DatIndexFromZip`. Validation happens before the shared downloader
@@ -1760,6 +1770,17 @@ could be erased. The corrected model:
    parent directory, a path that no longer resolves inside its recorded
    parent, or a path that is (or has become) a reparse point -- it deletes
    only the one child it itself created and still owns.
+10. Every `Artifacts` fact carries an ordered `PackageValidationDiagnostics`
+    collection. Each diagnostic preserves the real publication/preflight
+    `Stage`, `FailureCode`, `FailureMessage`, and optional `ExceptionType`; the
+    broad `PUBLISHER_UNAVAILABLE` and `PACKAGE_VALIDATION_FAILED` decisions
+    retain that detail in both authority `Details` and failure-reason text.
+11. `Complete-TPMProductionCertificationCycleV1` requires an identity guard.
+    The production harness guard re-snapshots branch, commit, remote, refs,
+    and reflogs before eligibility, before commit, after commit, after final
+    outcome, and after final projection. A rejection after commit stays inside
+    the existing rollback boundary and cannot leave an authoritative-looking
+    marker without a valid identity.
 
 ### System Invariant Inventory (collection abort and launcher exit)
 
@@ -1853,6 +1874,15 @@ Scorecard,Validation,Manifest,Commit}.{json,md}`. The remaining
   diagnostic naming the failure, and exits `1` -- it never falls back to the
   removed legacy mechanism, never reports `CERTIFIED`/`NOT CERTIFIED`, and
   never publishes a marker or bundle.
+- **Publication and finalization are identity-guarded as one rollback window.**
+  `Complete-TPMProductionCertificationCycleV1` requires the production caller
+  to supply a guard and invokes it before eligibility, before publication,
+  after commit, after the dispatcher issues the final outcome, and after the
+  final projection is built. The real smoke harness guard re-snapshots the
+  checkout and compares it with the pre-cycle identity. A mutation after
+  commit is therefore treated like any other post-commit finalization failure:
+  the commit marker is removed first and the cycle reports rollback success or
+  rollback failure truthfully.
 - **The dispatcher-issued final outcome is the sole source of the harness's
   externally visible status and exit code.** `$productionCycleResult.Projection`
   (`FinalStatus`, `ExitCode`, `RunIdentity`) drives the only "FINAL STATUS"/

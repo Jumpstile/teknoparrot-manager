@@ -252,7 +252,10 @@ SMOKE_TREE_CHANGED and SMOKE_TREE_UNREADABLE.
 Data: ReportDirectory normalized and contained; ReportDirectoryReserved,
 StagingDirectoryReady, RequiredArtifactManifestConfigured, PublisherAvailable,
 PackageValidationExecuted, and PackageValidationPassed Booleans;
-PackageValidationErrorCount integer >= 0.
+PackageValidationErrorCount integer >= 0; PackageValidationDiagnostics an
+ordered array of zero or more records with exactly Stage, FailureCode,
+FailureMessage, and ExceptionType. FailureCode and FailureMessage preserve the
+publisher/preflight failure returned by the real publication pipeline.
 
 Package Validation means validation of the certification bundle contract in
 Sections 8-10, not creation or validation of a release ZIP. It is a preflight of
@@ -264,6 +267,9 @@ Pass: all six Booleans true and error count zero. Fail otherwise. Never N/A.
 Codes: REPORT_DIRECTORY_UNAVAILABLE, STAGING_UNAVAILABLE,
 ARTIFACT_MANIFEST_UNCONFIGURED, PUBLISHER_UNAVAILABLE,
 PACKAGE_VALIDATION_NOT_EXECUTED, PACKAGE_VALIDATION_FAILED.
+When either broad publisher code is emitted, the authority Details and reason
+message retain the structured PackageValidationDiagnostics rather than
+reducing the failure to a Boolean and count.
 
 ### 5.8 pcsx2x6 crosshair path (issue #79)
 

@@ -4751,6 +4751,31 @@ Describe "Postgres guided recovery and profile transaction" {
     }
 }
 
+Describe "Issue #292 PostgreSQL elevation guidance" {
+    BeforeEach {
+        $script:postgresGuidanceMessages = @()
+        Mock Write-Host { $script:postgresGuidanceMessages += [string]$Object }
+        Mock Write-Log {}
+    }
+
+    It "tells a non-admin recovery user exactly how to relaunch mode 12" {
+        Write-PostgresAdministratorGuidance -Operation Recovery
+
+        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'not running as Administrator'
+        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'Run as administrator'
+        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'select PostgreSQL setup \(mode 12\) again'
+        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'data and profiles were not changed'
+    }
+
+    It "gives the same safe elevation action for a first install" {
+        Write-PostgresAdministratorGuidance -Operation Install
+
+        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'PostgreSQL is not installed yet'
+        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'right-click TeknoParrot-Manager\.bat'
+        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'select PostgreSQL setup \(mode 12\) again'
+    }
+}
+
 Describe "BepInEx authorized-root and transaction guards" {
     BeforeEach {
         Mock Write-Log {}
@@ -4772,6 +4797,18 @@ Describe "BepInEx authorized-root and transaction guards" {
         Should -Invoke Get-BepInExLatestRelease -Times 0
         Should -Invoke Read-HostSafe -Times 0
         Should -Invoke Invoke-TpmDownload -Times 0
+    }
+
+    It "gives an actionable refusal when a BepInEx root is unsafe" {
+        $script:bepGuidanceMessages = @()
+        Mock Write-Host { $script:bepGuidanceMessages += [string]$Object }
+
+        Write-BepInExUnsafeRootGuidance -GameCode 'UnsafeGame' -ApprovedRoot 'E:\Games\TeknoParrot Games'
+
+        ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'Refusing BepInEx updates'
+        ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'Action: verify the game folder'
+        ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'junction/symlink'
+        ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'No BepInEx download or write was attempted'
     }
 
     It "fails closed when the approved root is reparse-backed" {
@@ -5555,7 +5592,7 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
         $script:downloadPath = $null
         Mock Read-PathWithBrowse {}
         Mock Invoke-EggmanDatDownload {
-            param([string]$downloadUrl, [string]$savePath, [Int64]$ExpectedBytes)
+            param([string]$downloadUrl, [string]$savePath, [Int64]$ExpectedBytes, [string]$ProgramDirectory)
             $script:downloadPath = $savePath
             return $true
         }
@@ -5595,7 +5632,7 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
         $script:downloadPath = $null
         Mock Read-PathWithBrowse { '' }
         Mock Invoke-EggmanDatDownload {
-            param([string]$downloadUrl, [string]$savePath, [Int64]$ExpectedBytes)
+            param([string]$downloadUrl, [string]$savePath, [Int64]$ExpectedBytes, [string]$ProgramDirectory)
             $script:downloadPath = $savePath
             return $true
         }
@@ -5624,13 +5661,11 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
         Test-EggmanDatZip -Path $valid -ExpectedBytes $size | Should -BeTrue
     }
 
-    It "rejects protected TeknoParrot, source, and staging destinations without writing" {
+    It "rejects protected TeknoParrot, supplementary source, and staging destinations without writing" {
         $tp = Join-Path $TestDrive 'TeknoParrot'
-        $mainSource = Join-Path $TestDrive 'MainGameZips'
         $suppSource = Join-Path $TestDrive 'SupplementaryGameZips'
         $staging = Join-Path $TestDrive 'GameStaging'
         $script:tpRoot = $tp
-        $script:zipSource = $mainSource
         $script:zipSourceSupplementary = $suppSource
         $script:gamesInstallFolder = $staging
         $before = Get-TpmDirSnapshot -Dir $TestDrive
@@ -5645,6 +5680,133 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
         $alternateResult | Should -BeNullOrEmpty
         Should -Invoke Invoke-EggmanDatDownload -Times 0
         Assert-TpmDirSnapshotUnchanged -Before $before -After (Get-TpmDirSnapshot -Dir $TestDrive)
+    }
+
+    It "accepts a mapped-looking primary NAS source when the source role is safe" {
+        $script:zipSource = 'W:\ROMs\TeknoParrot Collection'
+        Mock Test-TpmNoReparsePath { $true }
+        Mock Test-Path { $true }
+        Mock Test-IsNetworkPath { $false }
+
+        $role = Get-EggmanDatPathRole -Path $script:zipSource -RequestedRole PrimaryZipSource
+
+        $role.Safe | Should -BeTrue
+        $role.Role | Should -Be 'PrimaryZipSource'
+        $role.CanonicalPath | Should -Be 'W:\ROMs\TeknoParrot Collection'
+        Should -Invoke Test-TpmNoReparsePath -Times 1
+        Should -Invoke Test-IsNetworkPath -Times 0
+    }
+
+    It "offers the safe primary source as the fallback for a DAT under TeknoParrot" {
+        $tp = Join-Path $TestDrive 'TeknoParrot'
+        $primary = Join-Path $TestDrive 'MainGameZips'
+        New-Item -ItemType Directory -Path $tp -Force | Out-Null
+        New-Item -ItemType Directory -Path $primary -Force | Out-Null
+        $script:tpRoot = $tp
+        $script:zipSource = $primary
+        $script:downloadPath = $null
+        $script:messages = @()
+        Mock Read-HostSafe { 'Y' }
+        Mock Read-PathWithBrowse { throw 'Browse should not be used when the safe primary source fallback is offered.' }
+        Mock Write-Host { $script:messages += [string]$Object }
+        Mock Invoke-EggmanDatDownload {
+            param([string]$downloadUrl, [string]$savePath, [Int64]$ExpectedBytes, [string]$ProgramDirectory)
+            $script:downloadPath = $savePath
+            return $true
+        }
+        $rel = [pscustomobject]@{ DownloadUrl = 'https://example.com/eggman.zip'; FileName = 'latest.zip'; SizeBytes = 0 }
+
+        $result = Invoke-EggmanDatDownloadInteractive $rel -AllowBrowse -PreferredSavePath (Join-Path $tp 'current.zip')
+
+        $result | Should -Be ([System.IO.Path]::GetFullPath((Join-Path $primary 'latest.zip')))
+        $script:downloadPath | Should -Be $result
+        ($script:messages -join [Environment]::NewLine) | Should -Match 'Current DAT is under the TeknoParrot root'
+        ($script:messages -join [Environment]::NewLine) | Should -Match 'Safe external DAT folder found'
+        Should -Invoke Read-PathWithBrowse -Times 0
+        Should -Invoke Invoke-EggmanDatDownload -Times 1
+    }
+
+    It "does not confuse the supplementary source with the primary DAT destination" {
+        $primary = Join-Path $TestDrive 'MainGameZips'
+        $supplementary = Join-Path $TestDrive 'SupplementaryGameZips'
+        New-Item -ItemType Directory -Path $primary -Force | Out-Null
+        New-Item -ItemType Directory -Path $supplementary -Force | Out-Null
+        $script:zipSource = $primary
+        $script:zipSourceSupplementary = $supplementary
+
+        $candidates = @(Get-EggmanDatDestinationCandidates)
+        $supplementaryRole = Get-EggmanDatPathRole -Path (Join-Path $supplementary 'Eggman.zip')
+
+        $candidates.Count | Should -Be 1
+        $candidates[0].Path | Should -Be ([System.IO.Path]::GetFullPath($primary))
+        $supplementaryRole.Safe | Should -BeFalse
+        $supplementaryRole.ReasonCode | Should -Be 'SupplementarySource'
+    }
+
+    It "rejects a reparse-backed NAS source and ambiguous source roles" {
+        $target = Join-Path $TestDrive 'NasTarget'
+        $link = Join-Path $TestDrive 'NasLink'
+        New-Item -ItemType Directory -Path $target -Force | Out-Null
+        try {
+            [void](New-Item -ItemType Junction -Path $link -Target $target -ErrorAction Stop)
+        } catch {
+            Set-ItResult -Skipped -Because 'This worker cannot create directory junctions.'
+            return
+        }
+
+        $script:zipSource = $link
+        $reparseRole = Get-EggmanDatPathRole -Path $link -RequestedRole PrimaryZipSource
+        $reparseRole.Safe | Should -BeFalse
+        $reparseRole.ReasonCode | Should -Be 'ReparseOrInaccessible'
+
+        $script:zipSource = Join-Path $TestDrive 'Primary'
+        $script:zipSourceSupplementary = Join-Path $TestDrive 'Primary\Child'
+        $ambiguousRole = Get-EggmanDatPathRole -Path (Join-Path $TestDrive 'other.zip')
+        $ambiguousRole.Safe | Should -BeFalse
+        $ambiguousRole.ReasonCode | Should -Be 'AmbiguousSourceRoles'
+    }
+
+    It "reports actionable recovery without querying or downloading when no fallback exists" {
+        $tp = Join-Path $TestDrive 'TeknoParrot'
+        New-Item -ItemType Directory -Path $tp -Force | Out-Null
+        $script:tpRoot = $tp
+        $script:messages = @()
+        Mock Write-Host { $script:messages += [string]$Object }
+        Mock Read-HostSafe { throw 'No prompt is expected without a safe destination.' }
+        Mock Get-EggmanDatRelease { throw 'No release query is expected before destination selection.' }
+        Mock Invoke-EggmanDatDownload { throw 'No download is expected without a safe destination.' }
+
+        $resolution = Resolve-EggmanDatUpdateDestination -CurrentPath (Join-Path $tp 'current.zip')
+
+        $resolution.Status | Should -Be 'NoSafeDestination'
+        ($script:messages -join [Environment]::NewLine) | Should -Match 'No safe external primary DAT folder'
+        ($script:messages -join [Environment]::NewLine) | Should -Match 'Action: configure a reachable primary ZIP/source folder'
+        Should -Invoke Get-EggmanDatRelease -Times 0
+        Should -Invoke Invoke-EggmanDatDownload -Times 0
+    }
+
+    It "revalidates the destination immediately before the final write" {
+        $destination = Join-Path $TestDrive 'safe\Eggman.zip'
+        $script:destinationChecks = 0
+        $script:capturedValidation = $null
+        $script:validationResult = $null
+        $script:validationPath = Join-Path $TestDrive 'partial.zip'
+        Mock Test-EggmanDatDestinationSafe {
+            $script:destinationChecks++
+            return ($script:destinationChecks -eq 1)
+        }
+        Mock Invoke-TpmDownload {
+            param([scriptblock]$ValidationScript)
+            $script:capturedValidation = $ValidationScript
+            $script:validationResult = & $ValidationScript $script:validationPath
+            return $true
+        }
+        Mock Write-Log {}
+
+        Invoke-EggmanDatDownload -downloadUrl 'https://example.com/eggman.zip' -savePath $destination | Should -BeTrue
+        $script:capturedValidation | Should -Not -BeNullOrEmpty
+        $script:validationResult | Should -BeFalse
+        $script:destinationChecks | Should -Be 2
     }
 
     It "leaves the existing destination untouched and removes the temporary file when archive validation fails" {
@@ -5676,7 +5838,7 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
         }
 
         It "keeps path resolution, destination checks, archive validation, and freshness checks free of write APIs" -TestCases (
-            @('Get-EggmanDatDataRoot', 'Get-EggmanDatDefaultSavePath', 'Test-EggmanDatDestinationSafe', 'Test-EggmanDatZip', 'Test-EggmanDatUpToDate') |
+            @('Get-EggmanDatDataRoot', 'Get-EggmanDatDefaultSavePath', 'Test-TpmNoReparsePath', 'Get-EggmanDatPathRole', 'Test-EggmanDatDestinationSafe', 'Test-EggmanDatZip', 'Test-EggmanDatUpToDate') |
                 ForEach-Object { @{ Name = $_ } }
         ) {
             param($Name)
@@ -5703,8 +5865,8 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
         $ProductionSource | Should -Match 'supplementary game ZIPs'
         $ProductionSource | Should -Match 'staging/install folder'
         $ProductionSource | Should -Match 'TPM will normally store a downloaded copy under'
-        $ProductionSource | Should -Match 'Invoke-EggmanDatDownloadInteractive \$rel\r?\n\s+if \(\$savedPath\)'
-        $ProductionSource | Should -Match 'Invoke-EggmanDatDownloadInteractive \$rel -AllowBrowse -PreferredSavePath \$eggmanDatZip'
+        $ProductionSource | Should -Match 'Invoke-EggmanDatDownloadInteractive \$rel -ProgramDirectory \$PSScriptRoot'
+        $ProductionSource | Should -Match 'Resolve-EggmanDatUpdateDestination -CurrentPath \$eggmanDatZip'
     }
 }
 

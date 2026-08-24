@@ -3045,6 +3045,10 @@ $ReleaseCandidateLabel = "Synthetic"
             & git -C $repo -c user.name=TPM-Test -c user.email=tpm-test@example.invalid commit -q -m baseline
             $head=& git -C $repo rev-parse HEAD
             & git -C $repo update-ref refs/remotes/origin/main $head
+            & git -C $repo config remote.origin.url https://example.invalid/tpm.git
+            & git -C $repo config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+            & git -C $repo config branch.main.remote origin
+            & git -C $repo config branch.main.merge refs/heads/main
             return $repo
         }
 
@@ -3182,6 +3186,10 @@ $ReleaseCandidateLabel = "Synthetic"
             & git -C $repo -c user.name=TPM-Test -c user.email=tpm-test@example.invalid commit -q -m baseline
             $head=& git -C $repo rev-parse HEAD
             & git -C $repo update-ref refs/remotes/origin/main $head
+            & git -C $repo config remote.origin.url https://example.invalid/tpm.git
+            & git -C $repo config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+            & git -C $repo config branch.main.remote origin
+            & git -C $repo config branch.main.merge refs/heads/main
             return $repo
         }
 
@@ -3338,6 +3346,10 @@ $needle
             & git -C $repo -c user.name=TPM-Test -c user.email=tpm-test@example.invalid commit -q -m baseline
             $head=& git -C $repo rev-parse HEAD
             & git -C $repo update-ref refs/remotes/origin/main $head
+            & git -C $repo config remote.origin.url https://example.invalid/tpm.git
+            & git -C $repo config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+            & git -C $repo config branch.main.remote origin
+            & git -C $repo config branch.main.merge refs/heads/main
             return [pscustomobject]@{Repo=$repo;Head=$head.Trim()}
         }
 
@@ -3446,7 +3458,7 @@ $needle
         # wrapper's own known narrative prefixes.
         $stdoutLines=@($result.Stdout -split "`r?`n"|Where-Object{$_.Trim().Length-gt0})
         foreach($line in $stdoutLines){
-            $line|Should -Match '^(TeknoParrot Manager Certification|Target repository:|Target commit:|TeknoParrot:|Reports:|Technical log:|Starting non-interactive certification\.|No further input will be requested\.|FINAL STATUS:|Reason:)' -Because "stdout line '$line' must be a known concise narrative line, not a raw diagnostic dump"
+            $line|Should -Match '^(TeknoParrot Manager Certification|Target repository:|Target branch:|Target commit:|Remote ref:|Remote SHA:|Worktree clean:|Expected branch:|Expected SHA:|TeknoParrot:|Reports:|Technical log:|Starting non-interactive certification\.|No further input will be requested\.|FINAL STATUS:|Reason:)' -Because "stdout line '$line' must be a known concise narrative line, not a raw diagnostic dump"
         }
     }
 

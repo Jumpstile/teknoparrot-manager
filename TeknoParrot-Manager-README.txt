@@ -1607,6 +1607,10 @@
     silently. This is the only feature requiring Administrator privileges.
     You enter a service-account password and a database password through
     secure confirmation prompts.
+    If this window is not running as Administrator, TPM explains the next
+    step: close it, right-click TeknoParrot-Manager.bat (or the PowerShell
+    script), choose Run as administrator, and select mode 12 again. The
+    blocked step does not change PostgreSQL data or profiles.
 
     If PostgreSQL is already installed, TPM preserves existing data. If the
     saved password no longer works, TPM asks for a replacement, creates and

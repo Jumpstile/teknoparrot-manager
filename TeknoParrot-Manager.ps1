@@ -987,6 +987,43 @@ function Test-PathInside {
     return $c.StartsWith($p + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)
 }
 
+# Validate existing path components before TPM treats a location as writable.
+# Missing leaf components are allowed for a future download, but an existing
+# junction, symlink, or mount point makes containment ambiguous and is
+# rejected. Mapped/NAS paths are classified by role and access, not rejected
+# merely because they are network-backed.
+function Test-TpmNoReparsePath {
+    param([string]$Path)
+    try {
+        if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+        $canonical = [System.IO.Path]::GetFullPath($Path)
+        $root = [System.IO.Path]::GetPathRoot($canonical)
+        if ([string]::IsNullOrWhiteSpace($root) -or
+            -not (Test-Path -LiteralPath $root -PathType Container -ErrorAction SilentlyContinue)) {
+            return $false
+        }
+        $rootItem = Get-Item -LiteralPath $root -Force -ErrorAction Stop
+        if (($rootItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+
+        $canonicalTrimmed = $canonical.TrimEnd('\','/')
+        $rootTrimmed = $root.TrimEnd('\','/')
+        if ($canonicalTrimmed -eq $rootTrimmed) { return $true }
+        if (-not $canonical.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) { return $false }
+
+        $relative = $canonical.Substring($root.Length).TrimStart('\','/')
+        $cursor = $root
+        foreach ($part in ($relative -split '[\\/]')) {
+            if ([string]::IsNullOrWhiteSpace($part)) { continue }
+            $cursor = Join-Path $cursor $part
+            if (-not (Test-Path -LiteralPath $cursor -ErrorAction SilentlyContinue)) { continue }
+            $item = Get-Item -LiteralPath $cursor -Force -ErrorAction Stop
+            if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+            if ($cursor.TrimEnd('\','/') -ine $canonicalTrimmed -and -not $item.PSIsContainer) { return $false }
+        }
+        return $true
+    } catch { return $false }
+}
+
 # True when two paths are the same location or one contains the other. This is
 # deliberately symmetric: a staging folder must not be inside a protected
 # folder, and it must not be a parent that would pull a protected folder into
@@ -5669,9 +5706,22 @@ function Test-EggmanDatUpToDate {
 }
 
 function Invoke-EggmanDatDownload {
-    param([string]$downloadUrl, [string]$savePath, [Int64]$ExpectedBytes = 0)
+    param(
+        [string]$downloadUrl,
+        [string]$savePath,
+        [Int64]$ExpectedBytes = 0,
+        [string]$ProgramDirectory = ''
+    )
+    if (-not (Test-EggmanDatDestinationSafe -Path $savePath -ProgramDirectory $ProgramDirectory)) {
+        Write-Log "EggmanDat: SECURITY -- destination failed the immediate pre-download role check: $savePath"
+        return $false
+    }
     return (Invoke-TpmDownload -DownloadUrl $downloadUrl -DestinationPath $savePath -ExpectedBytes $ExpectedBytes -Label 'EggmanDat' -ValidationScript {
         param([string]$DownloadedPath)
+        if (-not (Test-EggmanDatDestinationSafe -Path $savePath -ProgramDirectory $ProgramDirectory)) {
+            Write-Log "EggmanDat: SECURITY -- destination failed the immediate pre-write role check: $savePath"
+            return $false
+        }
         return (Test-EggmanDatZip -Path $DownloadedPath -ExpectedBytes $ExpectedBytes)
     })
 }
@@ -5702,19 +5752,232 @@ function Get-EggmanDatDefaultSavePath {
     return (Join-Path $dataRoot $FileName)
 }
 
-# Download destinations must never overlap a TeknoParrot installation, either
-# game ZIP source, or the extracted-game staging folder. Importing an existing
-# file remains read-only and is handled by the separate B) browse/import path;
-# this guard applies only to paths TPM may write.
-function Test-EggmanDatDestinationSafe {
-    param([string]$Path)
-    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
-    $protectedRoots = @($tpRoot, $zipSource, $zipSourceSupplementary, $gamesInstallFolder) |
-        Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
-    foreach ($protectedRoot in $protectedRoots) {
-        if (Test-PathInside -child $Path -parent ([string]$protectedRoot)) { return $false }
+# Classify Eggman paths by role instead of treating every mapped/NAS path as
+# unsafe. The configured primary ZIP source may be an approved DAT destination
+# when it is reachable, canonical, non-reparse, and outside protected roots.
+# The supplementary source is never selected as a primary fallback.
+function Get-EggmanDatPathRole {
+    param(
+        [string]$Path,
+        [ValidateSet('Destination','PrimaryZipSource')]
+        [string]$RequestedRole = 'Destination',
+        [string]$ProgramDirectory = ''
+    )
+
+    $result = [ordered]@{
+        Safe = $false
+        CanonicalPath = $null
+        Role = 'Unknown'
+        ReasonCode = 'Invalid'
+        Reason = 'The path is empty or cannot be canonicalized.'
+        ReparseBacked = $false
     }
-    return $true
+    if ([string]::IsNullOrWhiteSpace($Path)) { return [pscustomobject]$result }
+
+    try {
+        if (-not [System.IO.Path]::IsPathRooted($Path)) { return [pscustomobject]$result }
+        $result.CanonicalPath = [System.IO.Path]::GetFullPath($Path).TrimEnd('\','/')
+        if ([string]::IsNullOrWhiteSpace($result.CanonicalPath)) { return [pscustomobject]$result }
+    } catch { return [pscustomobject]$result }
+
+    $canonicalRoots = @{}
+    foreach ($entry in @(
+        [pscustomobject]@{ Name = 'TeknoParrotRoot'; Path = $tpRoot },
+        [pscustomobject]@{ Name = 'GamesInstall'; Path = $gamesInstallFolder },
+        [pscustomobject]@{ Name = 'ProgramDirectory'; Path = $ProgramDirectory },
+        [pscustomobject]@{ Name = 'PrimaryZipSource'; Path = $zipSource },
+        [pscustomobject]@{ Name = 'SupplementaryZipSource'; Path = $zipSourceSupplementary }
+    )) {
+        if ([string]::IsNullOrWhiteSpace([string]$entry.Path)) { continue }
+        try {
+            if (-not [System.IO.Path]::IsPathRooted([string]$entry.Path)) {
+                $result.ReasonCode = 'Ambiguous'
+                $result.Reason = "$($entry.Name) is not an absolute path."
+                return [pscustomobject]$result
+            }
+            $canonicalRoots[$entry.Name] = [System.IO.Path]::GetFullPath([string]$entry.Path).TrimEnd('\','/')
+        } catch {
+            $result.ReasonCode = 'Ambiguous'
+            $result.Reason = "$($entry.Name) cannot be canonicalized."
+            return [pscustomobject]$result
+        }
+    }
+
+    if ($canonicalRoots.ContainsKey('PrimaryZipSource') -and
+        $canonicalRoots.ContainsKey('SupplementaryZipSource') -and
+        (Test-TpmPathOverlap $canonicalRoots['PrimaryZipSource'] $canonicalRoots['SupplementaryZipSource'])) {
+        $result.ReasonCode = 'AmbiguousSourceRoles'
+        $result.Reason = 'The primary and supplementary ZIP source folders overlap.'
+        return [pscustomobject]$result
+    }
+
+    foreach ($protectedName in @('TeknoParrotRoot','GamesInstall','ProgramDirectory')) {
+        if ($canonicalRoots.ContainsKey($protectedName) -and
+            (Test-TpmPathOverlap $result.CanonicalPath $canonicalRoots[$protectedName])) {
+            $result.ReasonCode = switch ($protectedName) {
+                'TeknoParrotRoot' { 'TeknoParrotRoot' }
+                'GamesInstall' { 'ProtectedStaging' }
+                default { 'ProtectedRuntime' }
+            }
+            $result.Role = 'Protected'
+            $result.Reason = "The path overlaps the protected $protectedName root."
+            return [pscustomobject]$result
+        }
+    }
+
+    if (-not (Test-TpmNoReparsePath -Path $result.CanonicalPath)) {
+        $result.ReasonCode = 'ReparseOrInaccessible'
+        $result.Reason = 'The path or one of its existing parent components is reparse-backed or inaccessible.'
+        $result.ReparseBacked = $true
+        return [pscustomobject]$result
+    }
+
+    $primaryRoot = if ($canonicalRoots.ContainsKey('PrimaryZipSource')) { $canonicalRoots['PrimaryZipSource'] } else { $null }
+    $supplementaryRoot = if ($canonicalRoots.ContainsKey('SupplementaryZipSource')) { $canonicalRoots['SupplementaryZipSource'] } else { $null }
+
+    if ($RequestedRole -eq 'PrimaryZipSource') {
+        if ([string]::IsNullOrWhiteSpace($primaryRoot) -or
+            -not $result.CanonicalPath.Equals($primaryRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $result.ReasonCode = 'NotPrimarySource'
+            $result.Reason = 'The path is not the configured primary ZIP/source folder.'
+            return [pscustomobject]$result
+        }
+        if (-not (Test-Path -LiteralPath $result.CanonicalPath -PathType Container -ErrorAction SilentlyContinue)) {
+            $result.ReasonCode = 'PrimarySourceUnavailable'
+            $result.Reason = 'The configured primary ZIP/source folder is not a reachable directory.'
+            return [pscustomobject]$result
+        }
+        $result.Safe = $true
+        $result.Role = 'PrimaryZipSource'
+        $result.ReasonCode = 'Safe'
+        $result.Reason = 'The configured primary ZIP/source folder is role-safe.'
+        return [pscustomobject]$result
+    }
+
+    if ($supplementaryRoot -and (Test-PathInside $result.CanonicalPath $supplementaryRoot)) {
+        $result.ReasonCode = 'SupplementarySource'
+        $result.Reason = 'The supplementary ZIP/source folder is not an automatic primary DAT destination.'
+        return [pscustomobject]$result
+    }
+    if ($primaryRoot -and (Test-PathInside $result.CanonicalPath $primaryRoot)) {
+        if (Test-Path -LiteralPath $result.CanonicalPath -PathType Container -ErrorAction SilentlyContinue) {
+            $result.ReasonCode = 'DestinationIsFolder'
+            $result.Reason = 'The destination must be a file path, not a source folder.'
+            return [pscustomobject]$result
+        }
+        $result.Safe = $true
+        $result.Role = 'EggmanDatInPrimaryZipSource'
+        $result.ReasonCode = 'Safe'
+        $result.Reason = 'The destination is inside the explicitly configured primary ZIP/source folder.'
+        return [pscustomobject]$result
+    }
+    if (($primaryRoot -and (Test-TpmPathOverlap $result.CanonicalPath $primaryRoot)) -or
+        ($supplementaryRoot -and (Test-TpmPathOverlap $result.CanonicalPath $supplementaryRoot))) {
+        $result.ReasonCode = 'AmbiguousSourceBoundary'
+        $result.Reason = 'The destination overlaps a configured source boundary without being inside an approved role.'
+        return [pscustomobject]$result
+    }
+    if (Test-Path -LiteralPath $result.CanonicalPath -PathType Container -ErrorAction SilentlyContinue) {
+        $result.ReasonCode = 'DestinationIsFolder'
+        $result.Reason = 'The destination must be a file path, not a folder.'
+        return [pscustomobject]$result
+    }
+
+    $result.Safe = $true
+    $result.Role = 'ExternalEggmanDatDestination'
+    $result.ReasonCode = 'Safe'
+    $result.Reason = 'The destination is outside protected roots and source boundaries.'
+    return [pscustomobject]$result
+}
+
+function Test-EggmanDatDestinationSafe {
+    param(
+        [string]$Path,
+        [string]$ProgramDirectory = ''
+    )
+    return [bool](Get-EggmanDatPathRole -Path $Path -RequestedRole Destination -ProgramDirectory $ProgramDirectory).Safe
+}
+
+# Return only a reachable, non-reparse primary source folder. This is the
+# deliberate fallback for a configured DAT that is readable under TeknoParrot
+# but cannot be overwritten there.
+function Get-EggmanDatDestinationCandidates {
+    param([string]$ProgramDirectory = '')
+    $candidate = Get-EggmanDatPathRole -Path $zipSource -RequestedRole PrimaryZipSource -ProgramDirectory $ProgramDirectory
+    if ($candidate.Safe) {
+        return @([pscustomobject]@{
+            Path = $candidate.CanonicalPath
+            Role = $candidate.Role
+            Reason = $candidate.Reason
+        })
+    }
+    return @()
+}
+
+# Resolve the write destination before any release query or download. The
+# current DAT remains readable for comparison, but TPM never writes a
+# replacement under the TeknoParrot root.
+function Resolve-EggmanDatUpdateDestination {
+    param(
+        [string]$CurrentPath,
+        [string]$ProgramDirectory = ''
+    )
+    $current = Get-EggmanDatPathRole -Path $CurrentPath -RequestedRole Destination -ProgramDirectory $ProgramDirectory
+    if ($current.Safe) {
+        return [pscustomobject]@{
+            Status = 'Ready'
+            DestinationPath = $current.CanonicalPath
+            DestinationFolder = [System.IO.Path]::GetDirectoryName($current.CanonicalPath)
+            Reason = $current.Reason
+        }
+    }
+
+    $tpRootCanonical = $null
+    if (-not [string]::IsNullOrWhiteSpace([string]$tpRoot)) {
+        try { $tpRootCanonical = [System.IO.Path]::GetFullPath($tpRoot).TrimEnd('\','/') } catch {}
+    }
+    if ($tpRootCanonical -and (Test-PathInside $current.CanonicalPath $tpRootCanonical)) {
+        Write-Host '  Current DAT is under the TeknoParrot root, which TPM will not write to.' -ForegroundColor Yellow
+        $candidates = @(Get-EggmanDatDestinationCandidates -ProgramDirectory $ProgramDirectory)
+        if ($candidates.Count -gt 0) {
+            $candidate = $candidates[0]
+            Write-Host ("  Safe external DAT folder found: {0}" -f $candidate.Path) -ForegroundColor Green
+            $choice = (Read-HostSafe 'Download latest DAT there? (Y/N)').ToUpper()
+            if ($choice -eq 'Y') {
+                return [pscustomobject]@{
+                    Status = 'FallbackSelected'
+                    DestinationPath = $null
+                    DestinationFolder = $candidate.Path
+                    Reason = $candidate.Reason
+                }
+            }
+            Write-Host '  Keeping the current DAT. No download was started.' -ForegroundColor Yellow
+            return [pscustomobject]@{
+                Status = 'Declined'
+                DestinationPath = $null
+                DestinationFolder = $null
+                Reason = 'The user declined the safe external destination.'
+            }
+        }
+        Write-Host '  No safe external primary DAT folder is configured or reachable.' -ForegroundColor Yellow
+        Write-Host '  Action: configure a reachable primary ZIP/source folder outside TeknoParrot' -ForegroundColor Yellow
+        Write-Host '  and staging, verify its Windows share permissions, then run the update again.' -ForegroundColor Yellow
+        return [pscustomobject]@{
+            Status = 'NoSafeDestination'
+            DestinationPath = $null
+            DestinationFolder = $null
+            Reason = 'No role-safe primary ZIP/source folder was available.'
+        }
+    }
+
+    Write-Host '  The configured Eggman DAT destination is not safe to write.' -ForegroundColor Yellow
+    Write-Host ("  Action: choose a canonical, non-reparse folder outside TeknoParrot and staging; TPM will not write until it passes validation. ({0})" -f $current.Reason) -ForegroundColor Yellow
+    return [pscustomobject]@{
+        Status = 'Invalid'
+        DestinationPath = $null
+        DestinationFolder = $null
+        Reason = $current.Reason
+    }
 }
 
 # A matching byte count is not enough to trust a downloaded Eggman archive:
@@ -5742,13 +6005,16 @@ function Test-EggmanDatZip {
 # AllowBrowse is used only when no preferred path was supplied. The configured
 # update flow supplies PreferredSavePath, so a valid configured path is reused
 # without an alternate-location dialog and is still revalidated before use.
+# An unsafe configured DAT under TeknoParrot may offer the role-safe primary
+# source folder before any download begins.
 # Returns the saved path on success, or $null on failure/abort.
 function Invoke-EggmanDatDownloadInteractive {
     param(
         [pscustomobject]$rel,
         [switch]$AllowBrowse,
         [string]$PreferredSavePath = '',
-        [string]$DefaultRoot = ''
+        [string]$DefaultRoot = '',
+        [string]$ProgramDirectory = ''
     )
 
     $safeDatFileName = [System.IO.Path]::GetFileName($rel.FileName)
@@ -5766,11 +6032,40 @@ function Invoke-EggmanDatDownloadInteractive {
         Write-Host "  Unexpected filename from GitHub -- skipped for safety." -ForegroundColor Red
         return $null
     }
-    if (-not (Test-EggmanDatDestinationSafe -Path $defaultSavePath)) {
-        Write-Log "EggmanDat: SECURITY -- default destination overlaps a protected location: $defaultSavePath"
-        Write-Host "  TPM could not select a safe Eggman data location for this setup." -ForegroundColor Yellow
-        if (-not $AllowBrowse) { return $null }
-        $defaultSavePath = $null
+    $defaultDestination = Get-EggmanDatPathRole -Path $defaultSavePath -RequestedRole Destination -ProgramDirectory $ProgramDirectory
+    if (-not $defaultDestination.Safe) {
+        $isUnderTeknoParrot = $false
+        if (-not [string]::IsNullOrWhiteSpace([string]$tpRoot)) {
+            try {
+                $isUnderTeknoParrot = Test-PathInside $defaultDestination.CanonicalPath ([System.IO.Path]::GetFullPath($tpRoot))
+            } catch {}
+        }
+        if ($isUnderTeknoParrot) {
+            Write-Host '  Current DAT is under the TeknoParrot root, which TPM will not write to.' -ForegroundColor Yellow
+            $candidates = @(Get-EggmanDatDestinationCandidates -ProgramDirectory $ProgramDirectory)
+            if ($candidates.Count -gt 0) {
+                $candidate = $candidates[0]
+                Write-Host ("  Safe external DAT folder found: {0}" -f $candidate.Path) -ForegroundColor Green
+                $choice = (Read-HostSafe 'Download latest DAT there? (Y/N)').ToUpper()
+                if ($choice -eq 'Y') {
+                    $defaultSavePath = Join-Path $candidate.Path $safeDatFileName
+                    $defaultDestination = Get-EggmanDatPathRole -Path $defaultSavePath -RequestedRole Destination -ProgramDirectory $ProgramDirectory
+                } else {
+                    Write-Host '  Keeping the current DAT. No download was started.' -ForegroundColor Yellow
+                    return $null
+                }
+            } else {
+                Write-Host '  No safe external primary DAT folder is configured or reachable.' -ForegroundColor Yellow
+                Write-Host '  Action: configure a reachable primary ZIP/source folder outside TeknoParrot' -ForegroundColor Yellow
+                Write-Host '  and staging, verify its Windows share permissions, then run the update again.' -ForegroundColor Yellow
+                return $null
+            }
+        } else {
+            Write-Log "EggmanDat: SECURITY -- default destination failed role validation: $defaultSavePath ($($defaultDestination.Reason))"
+            Write-Host '  TPM could not select a safe Eggman data location for this setup.' -ForegroundColor Yellow
+            if (-not $AllowBrowse) { return $null }
+            $defaultSavePath = $null
+        }
     }
     $rawSave = $defaultSavePath
     if ($AllowBrowse -and [string]::IsNullOrWhiteSpace($PreferredSavePath)) {
@@ -5788,18 +6083,20 @@ function Invoke-EggmanDatDownloadInteractive {
         Write-Host "  The selected Eggman data destination is not a valid path -- skipped." -ForegroundColor Yellow
         return $null
     }
-    if (-not (Test-EggmanDatDestinationSafe -Path $rawSave)) {
-        Write-Host "  Refusing to write Eggman recognition data under TeknoParrot, a game ZIP source, or staging." -ForegroundColor Red
-        Write-Log "EggmanDat: SECURITY -- rejected protected destination $rawSave"
+    $finalDestination = Get-EggmanDatPathRole -Path $rawSave -RequestedRole Destination -ProgramDirectory $ProgramDirectory
+    if (-not $finalDestination.Safe) {
+        Write-Host '  Refusing to write Eggman recognition data to an unsafe or ambiguous path.' -ForegroundColor Red
+        Write-Log "EggmanDat: SECURITY -- rejected destination $rawSave ($($finalDestination.Reason))"
         return $null
     }
+    $rawSave = $finalDestination.CanonicalPath
     if ($rel.SizeBytes -gt 0 -and (Test-EggmanDatZip -Path $rawSave -ExpectedBytes $rel.SizeBytes)) {
         Write-Host "  Existing Eggman dat ZIP already matches the release size. Reusing it." -ForegroundColor Green
         Write-Log "EggmanDat: existing ZIP matches release size; download skipped."
         return $rawSave
     }
     Write-Host "  Downloading -- this may take a few minutes..." -ForegroundColor Cyan
-    if (Invoke-EggmanDatDownload $rel.DownloadUrl $rawSave -ExpectedBytes $rel.SizeBytes) { return $rawSave }
+    if (Invoke-EggmanDatDownload $rel.DownloadUrl $rawSave -ExpectedBytes $rel.SizeBytes -ProgramDirectory $ProgramDirectory) { return $rawSave }
     return $null
 }
 
@@ -5888,6 +6185,25 @@ function Test-RunningAsAdministrator {
     $identity  = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# Explain the safe manual recovery step when mode 12 reaches an operation
+# that genuinely requires elevation. TPM does not silently relaunch itself or
+# weaken PostgreSQL/data protections; the user must start a new elevated
+# session and choose mode 12 again.
+function Write-PostgresAdministratorGuidance {
+    param(
+        [ValidateSet('Install','Recovery')]
+        [string]$Operation = 'Recovery'
+    )
+    if ($Operation -eq 'Install') {
+        Write-Host '  PostgreSQL is not installed yet, and this TPM window is not running as Administrator.' -ForegroundColor Red
+    } else {
+        Write-Host '  The saved PostgreSQL password is not usable, and this TPM window is not running as Administrator.' -ForegroundColor Red
+    }
+    Write-Host '  Action: close TPM, right-click TeknoParrot-Manager.bat (or the PowerShell script),' -ForegroundColor Yellow
+    Write-Host '  choose Run as administrator, then select PostgreSQL setup (mode 12) again.' -ForegroundColor Yellow
+    Write-Host '  Existing PostgreSQL data and profiles were not changed by this blocked step.' -ForegroundColor Yellow
 }
 
 # Decrypts a SecureString to plaintext only as long as needed, then
@@ -7361,6 +7677,20 @@ function Test-BepInExGameRootSafe {
     return (Test-BepInExNoReparsePath -Root $ApprovedRoot -Path $GameRoot)
 }
 
+function Write-BepInExUnsafeRootGuidance {
+    param(
+        [Parameter(Mandatory)][string]$GameCode,
+        [string]$ApprovedRoot = '',
+        [string]$Reason = 'the game folder is outside the approved root or contains a reparse-backed path'
+    )
+    Write-Host ("  Refusing BepInEx updates because the game root is unsafe: {0}" -f $GameCode) -ForegroundColor Red
+    Write-Host ("  Reason: {0}." -f $Reason) -ForegroundColor Yellow
+    Write-Host ("  Action: verify the game folder is a real folder inside the configured games root: {0}" -f $ApprovedRoot) -ForegroundColor Yellow
+    Write-Host '  Remove any junction/symlink in that path, or correct the game profile path, then run mode 9 again.' -ForegroundColor Yellow
+    Write-Host '  No BepInEx download or write was attempted for this game.' -ForegroundColor Yellow
+    Write-Log "BepInEx update check: blocked on unsafe game root for $GameCode. Action required: verify the game is inside the approved non-reparse root."
+}
+
 function Test-BepInExExistingTreeSafe {
     param([Parameter(Mandatory)][string]$GameRoot)
     foreach ($name in @('BepInEx', 'doorstop_config.ini', 'winhttp.dll', '.doorstop_version', 'changelog.txt')) {
@@ -7654,12 +7984,14 @@ function Invoke-BepInExUpdateCheck {
             $exeDir = [System.IO.Path]::GetDirectoryName($gamePath)
             if (-not (Test-BepInExGameRootSafe -GameRoot $exeDir -ApprovedRoot $ApprovedGamesRoot) -or -not (Test-BepInExNoReparsePath -Root $exeDir -Path $gamePath)) {
                 $safetyBlocked = $true
-                Write-Host ("  Refusing BepInEx updates because game root is not safe: {0}" -f $pf.BaseName) -ForegroundColor Red
-                Write-Log "BepInEx update check: blocked on unsafe game root for $($pf.BaseName)."
+                Write-BepInExUnsafeRootGuidance -GameCode $pf.BaseName -ApprovedRoot $ApprovedGamesRoot
                 continue
             }
             [void]$candidates.Add([pscustomobject]@{ Code = $pf.BaseName; ExeDir = $exeDir })
-        } catch { $safetyBlocked = $true; Write-Log "BepInEx update check: root validation failed for $($pf.BaseName)." }
+        } catch {
+            $safetyBlocked = $true
+            Write-BepInExUnsafeRootGuidance -GameCode $pf.BaseName -ApprovedRoot $ApprovedGamesRoot -Reason 'the game root could not be verified'
+        }
     }
     if ($safetyBlocked) { Write-Host '  No BepInEx download or write was attempted.' -ForegroundColor Yellow; return }
 
@@ -12965,11 +13297,23 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
     $raw = ''   # shared path variable for B and the download-fallback path
 
     if ($datChoice -eq 'D') {
-        Write-Host "  Checking Eggman's Repository for the latest dat release..." -ForegroundColor Cyan
-        $rel = Get-EggmanDatRelease
+        # The default destination is deterministic even before the release
+        # filename is known. Validate a probe path first so no release query
+        # or download starts before a safe destination has been selected.
+        $firstRunProbe = if ($eggmanDefaultRoot) { Join-Path $eggmanDefaultRoot 'Eggman-destination-probe.zip' } else { $null }
+        $firstRunDestination = Get-EggmanDatPathRole -Path $firstRunProbe -RequestedRole Destination -ProgramDirectory $PSScriptRoot
+        if ($firstRunDestination.Safe) {
+            Write-Host "  Checking Eggman's Repository for the latest dat release..." -ForegroundColor Cyan
+            $rel = Get-EggmanDatRelease
+        } else {
+            Write-Host "  TPM could not validate its default Eggman data folder before the download." -ForegroundColor Yellow
+            Write-Host "  Action: choose B and select a canonical, non-reparse ZIP or dat file outside protected roots." -ForegroundColor Yellow
+            Write-Log "EggmanDat: first-run download skipped before release query because the default destination was unsafe: $($firstRunDestination.Reason)"
+            $rel = $null
+        }
         if ($null -ne $rel) {
             Write-Host ("  Found: {0}  ({1} MB)" -f $rel.FileName, $rel.SizeMB) -ForegroundColor Cyan
-            $savedPath = Invoke-EggmanDatDownloadInteractive $rel
+            $savedPath = Invoke-EggmanDatDownloadInteractive $rel -ProgramDirectory $PSScriptRoot
             if ($savedPath) {
                 $eggmanDatZip = $savedPath
                 $eggmanDatActionThisRun = 'Downloaded'
@@ -12980,6 +13324,10 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
                 $raw      = Read-PathWithBrowse "  Path" -Mode File -FileFilter "ZIP/dat files (*.zip;*.dat)|*.zip;*.dat|All files (*.*)|*.*"
                 $datChoice = 'BROWSE'
             }
+        } elseif (-not $firstRunDestination.Safe) {
+            Write-Host "  Automatic download was not started. Enter an existing ZIP or .dat file, or press Enter to skip:" -ForegroundColor Yellow
+            $raw      = Read-PathWithBrowse "  Path" -Mode File -FileFilter "ZIP/dat files (*.zip;*.dat)|*.zip;*.dat|All files (*.*)|*.*"
+            $datChoice = 'BROWSE'
         } else {
             Write-Host "  Could not reach Eggman's Repository. Enter path to an existing ZIP or .dat file, or press Enter to skip:" -ForegroundColor Yellow
             $raw      = Read-PathWithBrowse "  Path" -Mode File -FileFilter "ZIP/dat files (*.zip;*.dat)|*.zip;*.dat|All files (*.*)|*.*"
@@ -13079,33 +13427,49 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
     Write-Host ("  Currently using  : {0}  ({1} MB)" -f (Split-Path -Leaf $eggmanDatZip), $currentSizeMBPreCheck) -ForegroundColor Cyan
     $checkUpdate = (Read-HostSafe "Check for a newer Eggman dat release? (Y/N)").ToUpper()
     if ($checkUpdate -eq 'Y') {
-        Write-Host "  Checking GitHub for latest Eggman dat release..." -ForegroundColor Cyan
-        $rel = Get-EggmanDatRelease
-        if ($null -eq $rel) {
-            Write-Host "  Could not reach GitHub -- keeping your current dat file." -ForegroundColor Yellow
+        # Select and revalidate the destination before contacting GitHub.
+        # Reading the current DAT for comparison is allowed; writing a
+        # replacement under TeknoParrot is not.
+        $updateDestination = Resolve-EggmanDatUpdateDestination -CurrentPath $eggmanDatZip -ProgramDirectory $PSScriptRoot
+        if ($updateDestination.Status -notin @('Ready','FallbackSelected')) {
+            Write-Log "EggmanDat: update skipped before network work because destination status was $($updateDestination.Status)."
         } else {
-            $upToDate = Test-EggmanDatUpToDate -LocalDatPath $eggmanDatZip -RemoteSizeBytes $rel.SizeBytes
-            $currentSizeMB = if ($null -ne $upToDate.LocalSizeBytes) { [Math]::Round($upToDate.LocalSizeBytes / 1MB, 1) } else { 0 }
-            Write-Host ("  Latest available : {0}  ({1} MB)" -f $rel.FileName, $rel.SizeMB) -ForegroundColor Cyan
-            Write-Host ("  Currently using  : {0}  ({1} MB)" -f (Split-Path -Leaf $eggmanDatZip), $currentSizeMB) -ForegroundColor Cyan
-            if ($upToDate.Status -eq 'Current') {
-                Write-Host "  Your dat file is already current -- no download needed." -ForegroundColor Green
-                Write-Log "EggmanDat: local file already matches the latest release size -- skipped prompt."
+            Write-Host "  Checking GitHub for latest Eggman dat release..." -ForegroundColor Cyan
+            $rel = Get-EggmanDatRelease
+            if ($null -eq $rel) {
+                Write-Host "  Could not reach GitHub -- keeping your current dat file." -ForegroundColor Yellow
             } else {
-                if ($upToDate.Status -eq 'Unknown') {
-                    Write-Host "  Could not determine your current dat file's size -- offering the download anyway." -ForegroundColor Yellow
-                }
-                $doUpdate = (Read-HostSafe "  Download and switch to the latest release? (Y/N)").ToUpper()
-                if ($doUpdate -eq 'Y') {
-                    $savedPath = Invoke-EggmanDatDownloadInteractive $rel -AllowBrowse -PreferredSavePath $eggmanDatZip
-                    if ($savedPath) {
-                        $eggmanDatZip = $savedPath
-                        $eggmanDatActionThisRun = 'Updated'
-                        Write-Host "  Updated: $savedPath" -ForegroundColor Green
-                        Write-Log "EggmanDat: updated to $savedPath"
-                        [void](Save-Config)
+                $upToDate = Test-EggmanDatUpToDate -LocalDatPath $eggmanDatZip -RemoteSizeBytes $rel.SizeBytes
+                $currentSizeMB = if ($null -ne $upToDate.LocalSizeBytes) { [Math]::Round($upToDate.LocalSizeBytes / 1MB, 1) } else { 0 }
+                Write-Host ("  Latest available : {0}  ({1} MB)" -f $rel.FileName, $rel.SizeMB) -ForegroundColor Cyan
+                Write-Host ("  Currently using  : {0}  ({1} MB)" -f (Split-Path -Leaf $eggmanDatZip), $currentSizeMB) -ForegroundColor Cyan
+                if ($upToDate.Status -eq 'Current') {
+                    Write-Host "  Your dat file is already current -- no download needed." -ForegroundColor Green
+                    Write-Log "EggmanDat: local file already matches the latest release size -- skipped prompt."
+                } else {
+                    if ($upToDate.Status -eq 'Unknown') {
+                        Write-Host "  Could not determine your current dat file's size -- offering the download anyway." -ForegroundColor Yellow
+                    }
+                    $doUpdate = if ($updateDestination.Status -eq 'FallbackSelected') {
+                        'Y'
                     } else {
-                        Write-Host "  Download failed -- keeping your current dat file." -ForegroundColor Yellow
+                        (Read-HostSafe "  Download and switch to the latest release? (Y/N)").ToUpper()
+                    }
+                    if ($doUpdate -eq 'Y') {
+                        $preferredUpdatePath = $eggmanDatZip
+                        if ($updateDestination.Status -eq 'FallbackSelected') {
+                            $preferredUpdatePath = Join-Path $updateDestination.DestinationFolder ([System.IO.Path]::GetFileName($rel.FileName))
+                        }
+                        $savedPath = Invoke-EggmanDatDownloadInteractive $rel -AllowBrowse -PreferredSavePath $preferredUpdatePath -ProgramDirectory $PSScriptRoot
+                        if ($savedPath) {
+                            $eggmanDatZip = $savedPath
+                            $eggmanDatActionThisRun = 'Updated'
+                            Write-Host "  Updated: $savedPath" -ForegroundColor Green
+                            Write-Log "EggmanDat: updated to $savedPath"
+                            [void](Save-Config)
+                        } else {
+                            Write-Host "  Download failed -- keeping your current dat file." -ForegroundColor Yellow
+                        }
                     }
                 }
             }
@@ -14599,7 +14963,7 @@ while ($true) {
         }
         Write-Host ("  {0} registered game(s) need PostgreSQL." -f $needCount) -ForegroundColor Cyan
         if (-not (Test-PostgresInstalled) -and -not (Test-RunningAsAdministrator)) {
-            Write-Host "  PostgreSQL is not installed yet, and installation requires Administrator privileges." -ForegroundColor Red
+            Write-PostgresAdministratorGuidance -Operation Install
             Write-Log 'Postgres setup: blocked because installation requires Administrator privileges.'
             [void](Read-Host "  Press Enter to return to menu")
             continue
@@ -14621,7 +14985,7 @@ while ($true) {
                 }
                 if (-not $superPwPlain) {
                     if (-not (Test-RunningAsAdministrator)) {
-                        Write-Host "  The saved password is not usable. Administrator privileges are required for automatic recovery." -ForegroundColor Red
+                        Write-PostgresAdministratorGuidance -Operation Recovery
                         Write-Log 'Postgres setup: recovery blocked because Administrator privileges were unavailable.'
                         continue
                     }

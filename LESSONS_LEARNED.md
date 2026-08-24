@@ -817,3 +817,34 @@ Rule: a defensive fix for a strict-mode/property-existence class of bug is corre
 The RC4 packaging list (RELEASE-SAFETY-CHECKLIST.md section 4, mirrored in AGENTS.md) included `scripts\TPMCertification.Contracts.psm1` -- the ECVF loader/validator/evaluator module `TeknoParrot-Manager.ps1` itself imports at runtime for pcsx2x6 crosshair setup -- but not `scripts\TPMCertification.Authority.psm1`. `TPMCertification.Contracts.psm1`'s very first line is `Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Authority.psm1')`: a hard, unconditional dependency. Every real install of the already-published RC4 ZIP that reaches the pcsx2x6 crosshair code path therefore has `Import-Module $ecvfContractsModule` throw immediately (the sibling file it tries to import next to itself does not exist in the package), which every call site's own try/catch design correctly catches and fails closed on -- "could not load or evaluate the pcsx2x6 emulator contract," ECVF state `Unknown`, cursor_path write skipped -- so nothing crashes, but the ECVF safety layer silently never actually runs for any RC4 pcsx2x6 user. Found 2026-08-14 via a dependency read of `TPMCertification.Contracts.psm1` itself (`Import-Module` at line 1), not by any packaging test -- `Tests\Test-ReleasePackage.ps1`'s required-entry list had the same gap as the checklist it was validated against, so it could not have caught this either. Both the checklist/AGENTS.md include lists and the validator's required-entry list were corrected in the same pass to require `TPMCertification.Authority.psm1`. The already-published RC4 asset itself was NOT modified (out of scope for the task that found this); it needs a separate patch release.
 
 Rule: when a release-ZIP include list names a module, grep that module's own source for `Import-Module`/`. $PSScriptRoot\...` and confirm every sibling file it loads at runtime is also on the include list -- a module "included in the ZIP" that cannot actually load once extracted is indistinguishable, to every downstream fail-closed try/catch, from a module that was never imported at all, which means the gap produces no crash and no obviously-wrong error message, only a silently-disabled safety feature. A packaging validator that enumerates required entries by hand alongside the checklist it mirrors will silently inherit the checklist's own omissions; neither one is a substitute for actually reading the shipped module's own dependency imports.
+
+## 2026-08-23 -- #292 Eggman NAS role policy and #293 local-worktree boundary
+
+The Eggman blocker was a path-role error, not proof that NAS or mapped drives are inherently unsafe. A current DAT under the protected TeknoParrot root remains read-only and rejected, while a configured primary external ZIP/source folder may be approved when it canonicalizes, is outside protected roots, is not reparse-backed, and passes its role-specific checks immediately before writing. Supplementary sources, ambiguous overlaps, and reparse-backed paths remain rejected. If no safe destination exists, TPM must explain how to configure or repair one instead of ending at a dead end.
+
+The engineering boundary is equally important: each computer or agent uses a local clone or disposable worktree, and cross-machine handoff uses a pushed Git ref and exact SHA. NAS remains appropriate for ROMs, source data, packages, evidence, backups, and mirrors, but not as an authoritative shared active Git worktree. PostgreSQL recovery and BepInEx unsafe-root failures must provide the operator with the concrete elevation or path-repair action and perform no write until the required safety checks pass.
+
+## Issue #296 -- certification identity and publisher diagnostics are part of the authority contract
+
+The certification checkout identity was captured at preflight, seal, and
+report-fact boundaries, but the final production cycle still had a gap: a
+branch/ref mutation during publication or finalization could occur after the
+last outer snapshot. The correction is a mandatory identity guard on
+`Complete-TPMProductionCertificationCycleV1`, with checks before eligibility,
+before publication, after commit, after the genuine final outcome, and after
+the final projection. A post-commit rejection uses the existing marker-first
+rollback path, so it cannot leave a durable authoritative-looking bundle with
+the wrong checkout identity.
+
+The package preflight also used to retain only `PublisherAvailable`,
+`PackageValidationPassed`, and an error count. That shape made real
+`STAGING_FAILED`, `PROMOTION_FAILED`, `DURABLE_VALIDATION_FAILED`,
+`ROLLBACK_FAILED`, and similar publisher failures hard to disposition. The
+`Artifacts` fact now carries validated stage/code/message/exception records,
+and the authority copies those details into both `Details` and the broad
+failure-reason messages. Rule: a broad gate code is an aggregation, not a
+replacement for the structured failure that caused it.
+
+The Pester certification gate remains an exact `5.7.1` pin. Installed
+`5.8.0` or `3.4.0` results are not certification evidence; the environment
+must provide `5.7.1` before a certification run can start.

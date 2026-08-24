@@ -181,6 +181,26 @@ temp folder.
 
 ---
 
+## Local worktree and runtime path policy (#293)
+
+GitHub is authoritative for cross-machine and cross-agent handoff. Development,
+review, certification, and release validation use a local clone or disposable
+local worktree on each computer. Handoff uses a pushed Git ref and exact commit
+SHA; a shared SMB/NAS Git working tree is never the authoritative checkout.
+
+NAS paths remain valid for ROMs, source data, packages, generated artifacts,
+evidence, backups, and mirrors. Runtime path safety is role-based: an external
+DAT/source folder may be writable when it canonicalizes, is reachable and
+non-reparse, and is outside protected runtime/install/staging roots. A mapped
+or NAS path is not rejected merely because it is network-backed. A Git
+worktree is an engineering artifact, not a runtime data destination.
+
+Before handoff, record the local repository root, branch, exact HEAD, origin
+ref, ancestry, and clean status. Before a runtime write, revalidate the
+canonical destination and its existing path chain immediately before the write.
+
+---
+
 ## Key conventions
 
 - Version bump required on every meaningful change set.

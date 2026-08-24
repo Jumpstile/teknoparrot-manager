@@ -32,7 +32,7 @@ BeforeAll {
   $zero=[pscustomobject]@{Added=0;Removed=0;Changed=0;BeforeSkipped=0;AfterSkipped=0}
   $health=[pscustomobject]@{Checks=@([pscustomobject]@{Name='TeknoParrotUi.exe exists';Passed=$true},[pscustomobject]@{Name='GameProfiles folder exists';Passed=$true},[pscustomobject]@{Name='UserProfiles folder exists';Passed=$true})}
   $results=[pscustomobject]@{
-   SmokeMode=$true;Checks=@([pscustomobject]@{Name='Repository available';Passed=$true;Details='fixture repository is available'});GitStatus='(clean)'
+   SmokeMode=$true;Checks=@([pscustomobject]@{Name='Repository available';Passed=$true;Details='fixture repository is available'});GitStatus='(clean)';CertificationIdentity=(New-TestCertificationIdentity)
    Pester=[pscustomobject]@{Total=2;Passed=2;Failed=0;Skipped=0;NotRun=0};PesterVersion='5.7.1';PowerShellVersion='7.6.3'
    PSScriptAnalyzerFindings=999;PSScriptAnalyzerVersion='decoy-legacy-value'
    Backup=[pscustomobject]@{UserProfiles=$true;GameProfiles=$false}
@@ -66,6 +66,10 @@ BeforeAll {
  }
 
  $repoRoot=(Split-Path $PSScriptRoot -Parent)
+ function New-TestCertificationIdentity {
+  $commit='a'*40;$hash='a'*64;$snapshot=[ordered]@{Branch='main';Commit=$commit;RemoteRef='origin/main';RemoteCommit=$commit;Clean=$true;RefSnapshotSha256=$hash;ReflogSnapshotSha256=$hash}
+  [ordered]@{ExpectedBranch='main';ExpectedCommit=$commit;Start=$snapshot;End=$snapshot;RefMutationDetected=$false;RefMutationReason=$null;IdentityValid=$true}
+ }
 
  function New-TPMTestJunctionV1 {
   param([Parameter(Mandatory=$true)][string]$LinkPath,[Parameter(Mandatory=$true)][string]$TargetPath)
@@ -1273,6 +1277,7 @@ Describe 'Test-TPMProductionPackagePreflightV1 (private, InModuleScope only)' {
   $result.PackageValidationExecuted|Should -BeTrue
   $result.PackageValidationPassed|Should -BeTrue
   $result.PackageValidationErrorCount|Should -Be 0
+  @($result.PackageValidationDiagnostics).Count|Should -Be 0
   Test-Path -LiteralPath $scratch -PathType Container|Should -BeTrue
   Test-Path -LiteralPath (Join-Path $scratch 'pre-existing.txt')|Should -BeTrue
   @(Get-ChildItem -LiteralPath $scratch -Force).Count|Should -Be 1
@@ -1287,6 +1292,8 @@ Describe 'Test-TPMProductionPackagePreflightV1 (private, InModuleScope only)' {
   $result.PublisherAvailable|Should -BeFalse
   $result.PackageValidationPassed|Should -BeFalse
   $result.PackageValidationErrorCount|Should -BeGreaterThan 0
+  $result.PackageValidationDiagnostics[0].FailureCode|Should -Be 'PUBLISHER_PREFLIGHT_EXCEPTION'
+  $result.PackageValidationDiagnostics[0].FailureMessage|Should -Match 'synthetic preflight failure'
  }
  It 'reports staging not ready and a positive error count when the staging root cannot be created' {
   $blocker=Join-Path $TestDrive ('blocker-'+[guid]::NewGuid().ToString('N'))
@@ -1300,6 +1307,7 @@ Describe 'Test-TPMProductionPackagePreflightV1 (private, InModuleScope only)' {
   $result.StagingDirectoryReady|Should -BeFalse
   $result.PackageValidationPassed|Should -BeFalse
   $result.PackageValidationErrorCount|Should -BeGreaterThan 0
+  $result.PackageValidationDiagnostics[0].FailureCode|Should -Be 'STAGING_ROOT_UNAVAILABLE'
  }
  It 'never reports PackageValidationPassed=true when scratch-child cleanup fails' {
   Mock Remove-TPMOwnedScratchDirectoryV1 { $false } -ModuleName TPMCertification.ProductionFacts
@@ -1310,6 +1318,22 @@ Describe 'Test-TPMProductionPackagePreflightV1 (private, InModuleScope only)' {
   }
   $result.PackageValidationPassed|Should -BeFalse
   $result.PackageValidationErrorCount|Should -BeGreaterThan 0
+  $result.PackageValidationDiagnostics[0].FailureCode|Should -Be 'SCRATCH_CLEANUP_FAILED'
+ }
+
+ It 'preserves the publication failure code and message needed to disposition a broad publisher failure' {
+  Mock New-TPMPublicationCommitV1 { [pscustomobject]@{Committed=$false;FailureCode='DURABLE_VALIDATION_FAILED';FailureMessage='durable validation hash mismatch for TPM-Certification-Manifest.json'} } -ModuleName TPMCertification.ProductionFacts
+  $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+  $staging=Join-Path $root 'staging';$destination=Join-Path $root 'destination';$scratch=Join-Path $root 'scratch'
+  $result=InModuleScope TPMCertification.ProductionFacts -Parameters @{Staging=$staging;Destination=$destination;Scratch=$scratch} {
+   Test-TPMProductionPackagePreflightV1 -StagingParentRoot $Staging -DestinationRoot $Destination -PreflightScratchRoot $Scratch
+  }
+  $result.PublisherAvailable|Should -BeFalse
+  $result.PackageValidationPassed|Should -BeFalse
+  @($result.PackageValidationDiagnostics).Count|Should -BeGreaterThan 0
+  $diagnostic=@($result.PackageValidationDiagnostics|Where-Object FailureCode -eq 'DURABLE_VALIDATION_FAILED')[0]
+  $diagnostic.Stage|Should -Be 'PublicationCommit'
+  $diagnostic.FailureMessage|Should -Be 'durable validation hash mismatch for TPM-Certification-Manifest.json'
  }
 }
 
