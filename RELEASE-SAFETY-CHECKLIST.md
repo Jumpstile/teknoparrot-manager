@@ -162,6 +162,31 @@ See Section 3 below for the mechanical checklist this policy implements.
 
 ---
 
+## 0.5. Local worktrees and GitHub handoff (#293)
+
+This is a standing engineering and release gate, not a claim that NAS storage
+is inherently unsafe.
+
+- [ ] GitHub is authoritative for cross-machine and cross-agent handoff.
+- [ ] Development, review, certification, and release validation use a local
+      clone or disposable local worktree on the current computer.
+- [ ] Handoff uses a pushed Git ref and exact commit SHA; record repository
+      root, branch, HEAD, origin ref, ancestry, and clean status.
+- [ ] The validated package is tied to the exact commit identity that produced
+      it; a stale or unidentified package is discarded from release evidence.
+- [ ] NAS is used only as appropriate for ROMs, source data, packages,
+      generated artifacts, evidence, backups, and mirrors -- never as the
+      authoritative shared active Git worktree.
+- [ ] Runtime path decisions classify the path by role and canonical
+      containment. Do not blanket-reject mapped/NAS source paths, and do not
+      allow protected install, runtime, staging, reparse-backed, or ambiguous
+      paths.
+- [ ] Any runtime destination is revalidated immediately before the final
+      write or move, and the user receives recovery guidance when no safe
+      destination exists.
+
+---
+
 ## 1. Pre-commit checks (every commit, not just releases)
 
 - [ ] ASCII check -- zero non-ASCII bytes in the production script:

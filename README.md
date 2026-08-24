@@ -332,7 +332,7 @@ N) Skip
 
 Both the collection dat and supplementary dat are read directly from inside the ZIP — no extraction needed. The supplementary dat takes priority for any game that appears in both (alternate versions that replace the collection version).
 
-Eggman recognition data is separate from TeknoParrotUI's `ParrotData.xml` and DAT/XML setting, and separate from both game ZIP sources and the local staging/install folder. On the normal first-run download path TPM stores the ZIP under `%LOCALAPPDATA%\TeknoParrotManager\Eggman` without asking where to save it. Browse/import remains available for an existing local file. On a later explicit update, TPM reuses a valid configured ZIP at its existing location without opening an alternate-location save dialog. Every destination supplied to the downloader, including a previously configured or user-selected path, is canonicalized and revalidated before reuse, download, or write; an unsafe destination is rejected before network/download work begins.
+Eggman recognition data is separate from TeknoParrotUI's `ParrotData.xml` and DAT/XML setting, and separate from both game ZIP contents and the local staging/install folder. On the normal first-run download path TPM stores the ZIP under `%LOCALAPPDATA%\TeknoParrotManager\Eggman` without asking where to save it. Browse/import remains available for an existing local file. On a later explicit update, TPM reuses a valid configured ZIP at its existing location without opening an alternate-location save dialog. If the current DAT is under the TeknoParrot root, TPM will not overwrite it; it can offer the configured primary ZIP/source folder, including a reachable mapped/NAS folder such as `W:\ROMs\TeknoParrot Collection`, as the explicit destination. The supplementary source is not selected automatically. Every destination supplied to the downloader is canonicalized, checked for protected/reparse/ambiguous paths, and revalidated immediately before write; if no safe external folder exists, TPM explains how to correct the configuration instead of silently skipping.
 
 When the script downloads the Eggman/RomVault ZIP, it uses the shared hardened download pipeline also used for other live file downloads: BITS first, HttpClient fallback, and `Invoke-WebRequest` only as a last resort. Downloads go to a partial/temp file first, show readable progress with size/speed/ETA when available, log final method/size/elapsed/speed metrics, and only move into the cache/final path after completion validation.
 
@@ -541,7 +541,10 @@ paths are not reparse-backed. Answering Y downloads only the stable x64 release
 after those checks, extracts to isolated staging, verifies the staged file set
 and backup, and promotes through a rollback-safe transaction. Unsafe roots,
 failed backups, extraction errors, digest failures, and rollback uncertainty
-fail closed without reporting an update as complete.
+fail closed without reporting an update as complete. If a root is unsafe, TPM
+shows the configured games root, explains that a real non-reparse folder is
+required, and tells you to correct the game profile/path before running mode 9
+again; no BepInEx download or write is attempted for that game.
 **Troubleshooting:** [official guide](https://docs.bepinex.dev/articles/user_guide/troubleshooting.html). **Manual clean reset:** delete `doorstop_config.ini`, `winhttp.dll`, `.doorstop_version`, `changelog.txt`, and the `BepInEx` folder from the game's folder — this fully reverts to vanilla.
 
 ---
@@ -560,6 +563,11 @@ Lawn Darts), and Orange County Choppers Pinball -- need a small local PostgreSQL
   password no longer works, TPM asks for a replacement, creates and verifies a
   configuration/profile recovery backup, and automatically resets the postgres
   role through PostgreSQL single-user mode. No manual follow-up command is needed.
+- If installation or automatic recovery needs elevation and this window is not
+  running as Administrator, TPM tells you to close it, right-click
+  `TeknoParrot-Manager.bat` (or the PowerShell script), choose **Run as
+  administrator**, and select mode 12 again. The blocked step does not change
+  PostgreSQL data or profiles.
 - Recovery changes the role password only. TPM does not edit pg_hba.conf, drop
   or recreate databases, or wipe existing PostgreSQL data.
 - TPM updates only affected profiles whose connection values are not already

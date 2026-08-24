@@ -329,11 +329,21 @@ alternate-location save dialog, so it is not silently relocated.
 
 When a configured Eggman ZIP is already verified safe, the update flow
 reuses a safe configured destination without an unnecessary browse prompt.
+The path policy is role-based rather than location-based: the protected
+TeknoParrot root, program/runtime paths, and game staging root remain blocked,
+while the explicitly configured primary ZIP/source folder may be a DAT
+destination when it is reachable, canonical, non-reparse, and outside those
+protected roots. A mapped or NAS path is not rejected merely because it is
+network-backed. The supplementary source is not auto-selected as a primary
+DAT destination, and overlapping source roles are ambiguous and rejected.
+
 Every destination supplied to the downloader, including a previously
 configured or user-selected path, is canonicalized and revalidated before
-reuse, download, or write. A destination that overlaps the TeknoParrot root,
-either game ZIP source, or the game staging folder is rejected before any
-network/download work begins.
+reuse, download, or write. The destination is checked again immediately
+before the shared downloader moves a validated temporary file into place.
+If no role-safe external destination exists, TPM explains the recovery action
+instead of silently skipping the update. Windows share permissions and
+credentials remain an independent operating-system write boundary.
 Before reuse or replacement, the ZIP must meet the expected byte count (when
 known), open as a readable archive, and contain the collection DAT entry used
 by `Build-DatIndexFromZip`. Validation happens before the shared downloader
