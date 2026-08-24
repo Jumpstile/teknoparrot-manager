@@ -1,282 +1,170 @@
 # Setting Up Automated Testing for TeknoParrot Manager
 
-Version: 0.2 draft
+Version: 0.3
 
-This guide gets a Windows arcade machine ready to run automated TeknoParrot Manager testing against a real TeknoParrot installation using PowerShell, Pester, PSScriptAnalyzer, Claude Code, Codex, and ChatGPT review.
+This guide sets up the local Desktop and ARCADE workflows for scripted TPM
+testing against an approved TeknoParrot installation. The canonical policy
+is docs/ENGINEERING-WORKFLOW.md; this guide is a setup aid and does not
+replace its exact-SHA or release-gate rules.
 
-## Important Path Rule
+## Roles
 
-The TPM repository does **not** have to live on `C:`.
+- Desktop ChatGPT is the chief architect and final readiness/go-no-go
+  recommender from `C:\REPOS\teknoparrot-manager`.
+- Desktop Codex performs implementation, repository edits, local checks, and
+  PR preparation from `C:\REPOS\teknoparrot-manager`.
+- Arcade ChatGPT coordinates and reviews arcade validation evidence from
+  `E:\REPOS\teknoparrot-manager`.
+- Arcade Codex performs exact-SHA validation, runtime observation, and
+  hardware certification from `E:\REPOS\teknoparrot-manager`.
+- Claude is historical or optional. No active step in this guide requires it.
 
-Use whatever development drive makes sense. Recommended examples:
+## Important path rule
 
-```text
-W:\Development\teknoparrot-manager
-W:\Development\TPM-TestHarness
-W:\Emulators\TeknoParrot
-```
+Active Git clones and worktrees must be local. Do not use a NAS, SMB share,
+mapped drive, or UNC path as the active repository. NAS storage remains valid
+for ROM/source data, packages, generated artifacts, evidence, backups, and
+mirrors after the local run; it is not source authority.
 
-or:
+The standard local paths are:
 
-```text
-D:\Jumpstile\teknoparrot-manager
-D:\Jumpstile\TPM-TestHarness
-W:\Emulators\TeknoParrot
-```
+~~~text
+Desktop repository: C:\REPOS\teknoparrot-manager
+ARCADE repository:  E:\REPOS\teknoparrot-manager
+~~~
 
-The scripts are now path-portable:
+RepoPath must point to the local checkout used for the run. HarnessRoot
+defaults beside that repository. TeknoParrotRoot is a run-specific runtime
+input and must pass its marker, containment, and reparse checks.
 
-- `RepoPath` can point anywhere.
-- `TeknoParrotRoot` can point anywhere.
-- `HarnessRoot` can point anywhere.
-- If `RepoPath` is omitted when running `scripts\Run-TPM-Tests.ps1`, it automatically uses the repository containing the script.
-- If `HarnessRoot` is omitted, it creates `TPM-TestHarness` next to the repository folder.
+## Safety rules
 
-## Goal
+1. Use a clean local checkout and record the GitHub branch and exact SHA.
+2. Run scripted commands; do not make ad hoc runtime changes during a test.
+3. Smoke-test first. Any state-changing test must create and verify backups.
+4. Save reports before deciding whether a code change is needed.
+5. Do not edit, commit, push, merge, package, tag, publish, update the live
+   wiki, or copy a release ZIP to a distribution mirror during validation.
+6. Use -RunUnattendedTPM only when the user explicitly requests that lane.
 
-After completing this guide, the arcade machine can run a scripted test harness that:
+## Step 1 - Install and verify tools
 
-- Verifies the TPM repository state.
-- Runs Pester tests.
-- Runs PSScriptAnalyzer.
-- Checks the real TeknoParrot folder structure.
-- Backs up important TeknoParrot folders before state-changing tests.
-- Produces timestamped Markdown and JSON reports.
-- Gives Claude/Codex a repeatable command to run instead of freeform manual testing.
+Install Git, PowerShell 7, GitHub CLI, and the project's supported PowerShell
+modules. Windows PowerShell 5.1 is also required for the primary target.
 
-## Safety Rules
-
-1. Do not give any AI assistant unrestricted access to the arcade machine.
-2. Claude and Codex should run scripted commands only.
-3. First runs must be smoke-test only.
-4. Any test that changes TeknoParrot state must create backups first.
-5. Reports must be saved before deciding whether to make code changes.
-6. Code changes should happen only after a verified, reproducible failure.
-
-## Step 1 - Install Required Software
-
-Open Windows Terminal or PowerShell as Administrator.
-
-Install the core tools with WinGet:
-
-```powershell
-winget install --id Git.Git -e
-winget install --id Microsoft.PowerShell -e
-winget install --id GitHub.cli -e
-winget install --id Microsoft.VisualStudioCode -e
-```
-
-Install Claude Code from Anthropic's official installation instructions.
-
-Install Codex from OpenAI's official Codex instructions or the supported ChatGPT/OpenAI entry point available to the user.
-
-Optional but recommended:
-
-```powershell
-winget install --id 7zip.7zip -e
-winget install --id Microsoft.Sysinternals -e
-```
-
-Restart the machine after installation.
-
-## Step 2 - Verify Tools
-
-Open PowerShell 7, not Windows PowerShell.
-
-Run:
-
-```powershell
+~~~powershell
 git --version
 pwsh --version
+powershell.exe -NoProfile -Command "$PSVersionTable.PSVersion"
 gh --version
-code --version
-```
 
-If Claude Code is installed, run:
-
-```powershell
-claude --version
-claude doctor
-```
-
-## Step 3 - Authenticate GitHub CLI
-
-Run:
-
-```powershell
-gh auth login
-```
-
-Recommended choices:
-
-```text
-GitHub.com
-HTTPS
-Login with browser
-```
-
-Then verify:
-
-```powershell
-gh auth status
-```
-
-## Step 4 - Install PowerShell Test Modules
-
-Run in PowerShell 7 as the normal user:
-
-```powershell
 Install-Module Pester -Scope CurrentUser -Force -RequiredVersion 5.7.1
 Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
-```
+~~~
 
-Verify:
+Authenticate GitHub CLI only when the task requires live CI or branch
+inspection:
 
-```powershell
-Get-Module Pester -ListAvailable
-Get-Module PSScriptAnalyzer -ListAvailable
-```
+~~~powershell
+gh auth login
+gh auth status
+~~~
 
-## Step 5 - Clone TeknoParrot Manager
+Claude installation and diagnostics are optional and are not a prerequisite
+for implementation or certification.
 
-Choose your dev root. Example using `W:\Development`:
+## Step 2 - Prepare the Desktop checkout
 
-```powershell
-mkdir W:\Development -Force
-cd W:\Development
-git clone https://github.com/Jumpstile/teknoparrot-manager.git
-cd W:\Development\teknoparrot-manager
-git status
-```
+Use a clean local clone or isolated worktree. The normal fresh-main sequence
+is:
 
-Expected result:
+~~~powershell
+cd C:\REPOS\teknoparrot-manager
+git fetch origin --prune
+git switch main
+git pull --ff-only origin main
+git switch -c review/<issue-or-purpose>
+git status --short
+~~~
 
-```text
-On branch main
-nothing to commit, working tree clean
-```
+Desktop Codex runs the relevant local gates, records the changed files, and
+hands off the GitHub branch and exact SHA. A branch-only handoff is
+insufficient.
 
-## Step 6 - First Safe Run
+## Step 3 - Prepare the ARCADE checkout
 
-From the TPM repo folder:
+Arcade Codex refreshes a separate local checkout. It must not validate the
+Desktop working directory or an artifact-store Git worktree:
 
-```powershell
-cd W:\Development\teknoparrot-manager
-pwsh -ExecutionPolicy Bypass -File .\scripts\Run-TPM-Tests.ps1 `
-  -TeknoParrotRoot "W:\Emulators\TeknoParrot"
-```
+~~~powershell
+$Repo = 'E:\REPOS\teknoparrot-manager'
+$Branch = 'review/<issue-or-purpose>'
+$ExpectedSha = '<exact SHA from GitHub>'
 
-This automatically uses:
+git -C $Repo fetch origin --prune
+git -C $Repo fetch origin $Branch
+git -C $Repo switch --detach $ExpectedSha
+git -C $Repo status --short
+git -C $Repo rev-parse HEAD
+git -C $Repo ls-remote origin "refs/heads/$Branch"
+~~~
 
-```text
-RepoPath     = current TPM repository
-HarnessRoot = W:\Development\TPM-TestHarness
-```
+The remote branch SHA, local HEAD, clean status, expected ancestry, and CI
+result must all be recorded. Stop if the branch moved or the SHA differs.
 
-Reports go under:
+## Step 4 - Run the safe validation lane
 
-```text
-W:\Development\TPM-TestHarness\Reports\
-```
+Set the approved runtime root and local harness path, then run:
 
-Backups go under:
+~~~powershell
+$TeknoParrotRoot = '<approved TeknoParrot runtime root>'
+$HarnessRoot = 'E:\REPOS\TPM-TestHarness'
+pwsh -ExecutionPolicy Bypass -File "$Repo\scripts\Run-TPM-Tests.ps1" -RepoPath $Repo -TeknoParrotRoot $TeknoParrotRoot -HarnessRoot $HarnessRoot
+~~~
 
-```text
-W:\Development\TPM-TestHarness\Backups\
-```
+The suite reports the repository path, commit, runtime root, harness path,
+and report folder. Keep the local Reports and Backups outputs. If a copy is
+placed in an artifact or evidence store, record the original local paths and
+exact SHA beside it.
 
-## Optional: Fully Explicit Paths
+## Step 5 - Independent evidence review
 
-Use this if your folders are somewhere else:
+Arcade Codex reviews the generated reports independently. It must verify:
 
-```powershell
-pwsh -ExecutionPolicy Bypass -File "D:\Jumpstile\teknoparrot-manager\scripts\Run-TPM-Tests.ps1" `
-  -RepoPath "D:\Jumpstile\teknoparrot-manager" `
-  -TeknoParrotRoot "W:\Emulators\TeknoParrot" `
-  -HarnessRoot "D:\Jumpstile\TPM-TestHarness"
-```
+1. the exact branch/SHA and clean local checkout;
+2. the CI result belongs to that SHA;
+3. Pester and PSScriptAnalyzer output was captured;
+4. runtime markers, containment, and backup gates passed;
+5. every failure is actionable and reproducible from the actual evidence;
+6. controls readiness, registration, launch observation, and verification
+   are reported as separate dimensions.
 
-## Step 7 - Claude Prompt
+Return a concise evidence report. Do not make implementation changes while
+performing the independent review.
 
-Paste this into Claude Code on the arcade machine:
+## Step 6 - ChatGPT coordination
 
-```text
-You are working on Jumpstile/teknoparrot-manager on my arcade machine.
+Desktop ChatGPT works from `C:\REPOS\teknoparrot-manager` and reconciles
+the issue or PR, source branch, exact SHA, changed-file list, CI result,
+Desktop checks, and the independent arcade evidence into a final READY or
+HOLD recommendation.
 
-Do not modify files, commit, push, create branches, create releases, or change TeknoParrot state.
+Arcade ChatGPT works from `E:\REPOS\teknoparrot-manager` and reviews the
+Arcade Codex runtime/hardware report against the same exact SHA. Provide
+the issue or PR, branch, exact SHA, CI result, runtime evidence, report
+paths, and any failure excerpts. Arcade ChatGPT does not implement or
+publish.
 
-Run this exact command from the TPM repo folder:
+A READY recommendation does not authorize a release. No release package,
+tag, public release, live wiki update, or Scripts mirror occurs before
+the explicit Desktop ChatGPT gate and the human Release Manager's
+authorization.
 
-pwsh -ExecutionPolicy Bypass -File .\scripts\Run-TPM-Tests.ps1 -TeknoParrotRoot "W:\Emulators\TeknoParrot"
+## Scope boundaries
 
-Then summarize:
-1. Whether the repo was clean.
-2. Whether Pester passed.
-3. Whether PSScriptAnalyzer was clean.
-4. Whether GameProfiles and UserProfiles exist.
-5. Whether pcsx2x6\TeknoParrot\crosshairs exists.
-6. Whether Centipede Chaos profile candidates were found.
-7. The full report folder path.
-8. Any actionable incompatibilities only.
-
-Do not make changes.
-```
-
-## Step 8 - Codex Prompt
-
-Paste this into Codex after Claude produces the report:
-
-```text
-Independently review the latest TPM test report generated under the configured TPM-TestHarness\Reports folder.
-
-Do not modify files, commit, push, create branches, create releases, or change TeknoParrot state.
-
-Verify:
-1. The test command used was safe and did not include -RunUnattendedTPM.
-2. Backups were created for all existing target folders.
-3. Pester and PSScriptAnalyzer results were captured.
-4. The TeknoParrot folder structure checks are valid.
-5. The pcsx2x6 crosshair path check matches upstream expectations.
-6. The report identifies any Centipede Chaos profile candidates.
-7. Any failure is actionable and reproducible.
-
-Return a concise independent verification report. Do not make changes.
-```
-
-## Step 9 - ChatGPT Review
-
-Paste Claude's summary, Codex's verification report, and any important report excerpts back into ChatGPT.
-
-ChatGPT should then:
-
-- Identify real failures versus harmless environment differences.
-- Decide whether additional testing is needed.
-- Recommend GitHub issues for verified incompatibilities.
-- Recommend whether TPM is safe to proceed toward release.
-
-## Step 10 - Real Integration Run
-
-Run this only after the safe report looks good:
-
-```powershell
-pwsh -ExecutionPolicy Bypass -File .\scripts\Run-TPM-Tests.ps1 `
-  -TeknoParrotRoot "W:\Emulators\TeknoParrot" `
-  -RunUnattendedTPM
-```
-
-Before using this mode, confirm:
-
-- TPM config is already saved and valid.
-- A full TeknoParrot backup exists.
-- The previous smoke test passed.
-- The repo is clean.
-
-## Future Work
-
-This first guide is intentionally practical and TPM-focused. Later improvements should include:
-
-- HTML report generation.
-- JUnit output for CI.
-- Stronger before/after diff summaries.
-- Automated rollback validation.
-- Feature-specific integration tests for crosshairs, ReShade, dgVoodoo, GPU fixes, LaunchBox, HyperSpin, and thumbnails.
+- This guide does not fix the RC8 blockers tracked by #292.
+- #279, #280, and #281 remain post-1.0 unless explicitly re-scoped.
+- Broad automatic mapping under #200 remains deferred unless explicitly
+  approved.
+- Historical reports and old procedures are not current evidence without
+  exact-SHA verification.

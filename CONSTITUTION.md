@@ -153,6 +153,8 @@ there is rarely a conflict to resolve in the first place.
   | `ENGINEERING_GOVERNANCE.md` | Issue lifecycle, labels, milestones, prioritization, project governance (tier 3) |
   | `INDEPENDENT_REVIEW_WORKFLOW_STANDARD.md` | The detailed review-workflow *process* -- full review, delta review, when a delta review must escalate to a new full review (tier 4) |
   | `RELEASE-SAFETY-CHECKLIST.md` | Release execution, publication order, release gates (tier 5) |
+  | `docs/ENGINEERING-WORKFLOW.md` | Current cross-machine workflow, exact-SHA handoff, workspace roles, and readiness boundaries |
+  | `CHATGPT.md`, `CODEX.md`, `ARCADE-CHATGPT.md` | Role-specific workflow entry points; the current Desktop/Arcade assignments are canonical in `docs/ENGINEERING-WORKFLOW.md` (tier 5) |
   | `ARCADE-CLAUDE.md` | Hardware certification procedures and arcade-workstation operational guidance (tier 5) |
   | User documentation (`README.md`, wiki, Quick Start) | Installation, configuration, and usage (tier 6) |
 
@@ -442,7 +444,7 @@ Architect / Release Manager, assigned to specific tools) was adopted during
 TeknoParrot Manager's v1.0 RC2.1 cycle -- see
 `RELEASE-SAFETY-CHECKLIST.md` section 0 in that repository for the full
 concrete implementation, and `docs/RELEASE-RETROSPECTIVE-v1.0-RC2.1.md` for
-the retrospective it was drawn from. Recommended as the standard release
+the retrospective it was drawn from. The current TPM role and workspace mapping is maintained in `docs/ENGINEERING-WORKFLOW.md`; the RC2.1 tool assignment described below is historical and does not make Claude a required active role. Recommended as the standard release
 process for every Jumpstile project. As with everything else in this
 section, the process producing thorough release evidence is still not
 itself release authorization -- the Release Manager step in that process is

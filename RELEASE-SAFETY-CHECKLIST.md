@@ -4,6 +4,8 @@ This checklist must be completed before every version tag, ZIP build, and GitHub
 It is intentionally redundant: each gate catches a different failure class.
 Release state for the current cycle: v1.0 RC7 is the current published release; v1.0 RC6 is the previous published release (historical); final Version 1.0 remains unpublished.
 
+Canonical current workflow: `docs/ENGINEERING-WORKFLOW.md`. Desktop ChatGPT and Desktop Codex use `C:\REPOS\teknoparrot-manager`; Arcade ChatGPT and Arcade Codex use `E:\REPOS\teknoparrot-manager`.
+
 The source-controlled repository metadata contract is `.github/repository-metadata.json`.
 Issue #237's release-consistency gate includes a live comparison of that contract
 with the GitHub repository description, homepage, topics, and canonical release
@@ -84,7 +86,12 @@ issue #138 ("Engineering Governance and Project Health," the permanent
 tracking meta-issue reviewed at every release):
 
 - [ ] **Issue audit** -- every issue touched or discovered this cycle has
-      at least one Type, one Priority, and one Component label.
+      one Type, one Priority, one Component/Area, and one Status label; new
+      investigations use `status:needs-investigation` until triage changes it.
+- [ ] **Triage decision audit** -- every issue has a milestone/release decision
+      (committed target or explicit no committed release target yet) and an
+      explicit relationship review (`Blocks`, `Blocked by`, `Duplicate of`,
+      `Related to`, or `None known`).
 - [ ] **Label audit** -- no duplicate or obsolete labels in active use;
       the label set in the repository matches `ENGINEERING_GOVERNANCE.md`
       Section B exactly.
@@ -92,7 +99,8 @@ tracking meta-issue reviewed at every release):
       milestone is only closed when the release it represents actually
       ships, never merely because its issues are all closed.
 - [ ] **Cross-reference audit** -- release-gate issues list every issue
-      they're actually still waiting on; that list is current, not stale.
+      they're actually still waiting on; that list is current, not stale, and
+      every issue's relationship review is explicit.
 - [ ] **Documentation audit** -- Section 3 below (the mandatory
       documentation sweep).
 - [ ] **Certification audit** -- Section 5 below (Release Integrity
@@ -104,42 +112,40 @@ tracking meta-issue reviewed at every release):
 
 ### AI workflow
 
-The roles below are the concrete assignment of `CONSTITUTION.md`'s existing
-Roles taxonomy (Lead Engineer / Independent Reviewer / Chief Architect /
-Release Manager) to specific tools, as actually used during the RC2.1
-cycle. This is a recommended pattern for other Jumpstile projects, not a
-requirement that every project use every one of these tools -- the
-underlying roles (implementation, independent verification, architecture
-and governance, and the human Release Manager decision) are what matter;
-which specific AI tool fills which role is a project choice.
+The current TPM workflow uses separate Desktop and Arcade role pairs. The
+role assignment is a path and evidence boundary, not release authority:
 
-- **Claude** -- Lead Engineer role. Primary implementation, documentation,
-  and release preparation. Writes the code, writes the docs, prepares (but
-  does not unilaterally authorize) the release.
-- **Codex** -- Independent Reviewer role. Independent verification, real-
-  hardware validation, regression verification, and certification
-  confirmation. Critically, works from a separate environment (the real
-  arcade machine) and does not simply re-read the same diff -- it re-derives
-  findings independently, which is what makes convergent findings between
-  Claude and Codex meaningful evidence rather than an echo of the same
-  analysis.
-- **ChatGPT** -- Chief Architect / Technical Program Manager role.
-  Architecture, governance, release review, and engineering standards --
-  reconciling findings from independent reviews into a release-readiness
-  recommendation, without itself authorizing publication.
-- **Release Manager (human, the repository owner)** -- unchanged from
-  `CONSTITUTION.md`: the sole authority to approve a version change,
-  create the tag, publish the release, and change any release-identity
-  marker. No AI role in this workflow substitutes for this decision.
+- **Desktop ChatGPT** -- chief architect, workflow coordinator, release-gate
+  reviewer, and final readiness/go-no-go recommender. It works from
+  `C:\REPOS\teknoparrot-manager`, reconciles the evidence, and does not
+  publish.
+- **Desktop Codex** -- implementation, repository edits, local checks, and
+  PR preparation from `C:\REPOS\teknoparrot-manager`. It does not merge,
+  publish, tag, update the live wiki, or copy a release ZIP without the
+  explicit gate.
+- **Arcade ChatGPT** -- arcade-side validation evidence coordinator and
+  reviewer. It works from `E:\REPOS\teknoparrot-manager`, reconciles
+  Arcade Codex runtime and hardware reports, and does not implement or
+  publish.
+- **Arcade Codex** -- exact-SHA runtime observation, hardware validation,
+  certification, and evidence collection from
+  `E:\REPOS\teknoparrot-manager`. It does not repair the implementation
+  during certification.
+- **Claude** -- historical or optional only. No active TPM workflow step
+  requires Claude unless the user explicitly reinstates that role.
+- **Release Manager (human, the repository owner)** -- sole authority to
+  approve release identity, create tags, publish releases, update the live
+  wiki, and authorize any distribution mirror.
 
-This multi-role structure is also what makes safe parallel work possible
-under `ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md`: the Lead
-Engineer role continuing implementation on genuinely independent work
-while the Independent Reviewer role audits an already-submitted,
-unrelated piece of work is the standard's "parallelize independent work
-whenever safe" principle in practice, not a deviation from this workflow
--- provided the work streams are actually independent and the review in
-progress is never itself modified by the parallel work.
+GitHub is authoritative for the branch, PR, issue, CI result, and exact
+commit SHA. A local path or package filename never replaces that identity.
+See `docs/ENGINEERING-WORKFLOW.md` for the complete handoff record and
+readiness boundaries.
+
+This structure supports safe parallel work under
+`ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md`: implementation and
+independent validation may proceed on genuinely independent frozen SHAs,
+but neither role changes the other's evidence or release authority.
 
 ### Documentation Sweep Policy (permanent, every release)
 
@@ -151,6 +157,9 @@ release requires review of:
 - `docs/`
 - the GitHub wiki
 - `README.md` / `TeknoParrot-Manager-README.txt`
+- current workflow and role entry points (`docs/ENGINEERING-WORKFLOW.md`,
+  `CHATGPT.md`, `CODEX.md`, `ARCADE-CHATGPT.md`, `ARCADE-CLAUDE.md`,
+  `CLAUDE.md` as historical/optional)
 - `TeknoParrot-Manager-CHANGELOG.txt`
 - `TeknoParrot-Manager-QuickStart.txt` / `QUICKSTART.md`
 - user guides
@@ -263,6 +272,31 @@ table of contents and body, both `.txt` docs, the script's own menu
 `Write-Host` strings, and the wiki) has been checked for drift, not just
 the file that happened to be open.
 
+### #290 Documentation freshness evidence
+
+The #290 gate is not complete until the release record contains a dated
+documentation-freshness evidence record. The record must name the source
+branch and exact SHA, the audit timestamp with timezone, every repository
+document reviewed, every changed repository document, the wiki inspection
+method and checkout/ref, every wiki page reviewed, every changed wiki page,
+and the exact stale-release, stale-feature, or consistency findings. Record
+`none found` explicitly when a sweep has no findings. Also record the
+packaged `.txt` sweep result, the README/QuickStart consistency result, and
+the beginner-readability result for install/setup documentation.
+
+If CI cannot inspect the live wiki, perform and record a manual wiki audit.
+The manual audit must include the complete page list, timestamp, exact
+findings, and changed-page report. A repository-only search does not satisfy
+the #290 gate.
+
+- [ ] #290 evidence record completed with timestamp, source branch, and exact
+      SHA.
+- [ ] Repository document list and changed-document list recorded.
+- [ ] Wiki inspection method/ref, page list, and changed-page list recorded.
+- [ ] Exact findings recorded, including explicit `none found` results.
+- [ ] Packaged `.txt`, README/QuickStart, and beginner-readability results
+      recorded.
+
 - [ ] `$ScriptVersion` and the header comment in the script updated.
 - [ ] CHANGELOG entry written (script behavior changes only -- no debugging
   tooling, sweep process, or internal iteration noise).
@@ -304,6 +338,15 @@ the file that happened to be open.
 
 ## 4. Release mechanics
 
+- [ ] **Source/package identity gate** -- before any package build, tag,
+      public release, live wiki update, or `Scripts` mirror copy, Desktop
+      ChatGPT records an explicit `READY` recommendation for the exact SHA and
+      the human Release Manager records authorization. A READY recommendation
+      alone is not authorization.
+- [ ] Build and validate the package from a clean local checkout under
+      `C:\REPOS` or `E:\REPOS`, with the approved exact source SHA recorded;
+      never build from a shared network checkout, stale mirror, or unverified
+      package directory. Arcade validation must name the same SHA.
 - [ ] `git tag -a vX.YY.ZZ -m "vX.YY.ZZ"` -- tag created AFTER all docs pass.
 - [ ] `git push origin vX.YY.ZZ` -- push the tag before creating the release.
 - [ ] Release ZIP built from Scripts\ (not a temp folder), following this
@@ -342,11 +385,11 @@ the file that happened to be open.
     `BepInExCache\` (auto-downloaded live from GitHub each run, never
     bundled), `README.md`, `QUICKSTART.md`, `SECURITY.md`,
     `LESSONS_LEARNED.md`, `ARCHITECTURE.md`, `RELEASE-SAFETY-CHECKLIST.md`,
-    `CLAUDE.md`, `AGENTS.md`, `CONSTITUTION.md`, `ENGINEERING_GOVERNANCE.md`,
+    `CLAUDE.md`, `AGENTS.md`, `CHATGPT.md`, `CODEX.md`, `ARCADE-CHATGPT.md`, `ARCADE-CLAUDE.md`, `CONSTITUTION.md`, `ENGINEERING_GOVERNANCE.md`,
     `CONTRIBUTING.md`, `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`,
     `INVENTORY_STANDARDS.md`,
     `ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md`,
-    `PSScriptAnalyzerSettings.psd1`, `.github\`,
+    `PSScriptAnalyzerSettings.psd1`, `docs\`, `.github\`,
     `*.zip`, `*.log`, `*.config.json`.
     This list must match `AGENTS.md`'s "Release ZIP contents" exclude
     list exactly. This section is the authoritative source; if the two
@@ -403,13 +446,17 @@ Certification.
 
 - [ ] Review every user-facing document, not only version strings: README,
   Quick Start, CHANGELOG, release notes, this checklist, CONTRIBUTING if
-  present, PROJECT_OVERVIEW if present, CONSTITUTION, CLAUDE.md, AGENTS.md,
+  present, PROJECT_OVERVIEW if present, CONSTITUTION, AGENTS.md,
+  CLAUDE.md, CHATGPT.md, CODEX.md, ARCADE-CHATGPT.md, ARCADE-CLAUDE.md,
   LESSONS_LEARNED, TPM-CERTIFICATION-SUITE, Compatibility, every file under
   `docs\`, and any release-facing text files.
+- [ ] Review the current workflow and role/path entry points against the
+  four-role map: Desktop ChatGPT/Codex use `C:\REPOS`; Arcade ChatGPT/Codex
+  use `E:\REPOS`. Historical role assignments must be marked historical.
 - [ ] Verify menu options, workflow descriptions, certification process,
-  updater behavior, DAT workflow, behavioral certification, scorecards, backup
-  behavior, current capabilities, current limitations, test counts, links, and
-  terminology against the current product.
+  updater behavior, DAT workflow, behavioral certification, scorecards,
+  backup behavior, current capabilities, current limitations, test counts,
+  links, and terminology against the current product.
 
 ### Phase 3 -- Wiki Audit
 
@@ -457,7 +504,7 @@ Certification.
 
 - [ ] Before publishing the draft, download or inspect the uploaded ZIP asset
   and run the same `Tests\Test-ReleasePackage.ps1` validation against it.
-- [ ] After publishing, copy the exact release ZIP into `Scripts\` as the
+- [ ] After publishing and only after the source/package identity gate, copy the exact release ZIP into `Scripts\` as the
   local current-release mirror. This is not optional: `Scripts\` must always
   contain a ZIP identical to the published GitHub release asset.
 - [ ] Prune local distribution ZIPs so `Scripts\` contains exactly one
