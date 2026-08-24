@@ -45,6 +45,19 @@ lifecycle from filed to closed.
   `RELEASE-SAFETY-CHECKLIST.md` section 3 for what "the docs" means here
   (it's more than just `README.md`).
 
+## Worktree and runtime-path policy
+
+GitHub is authoritative for handoff between computers and agents. Work from
+your own local clone or disposable local worktree, and hand off a pushed
+branch/ref plus the exact commit SHA. Do not treat a shared SMB/NAS checkout
+as the active or authoritative Git worktree.
+
+NAS remains valid for ROMs, source data, packages, evidence, backups, generated
+artifacts, and mirrors. TPM runtime code must classify a path by role and
+canonical containment: an accessible external source/DAT folder may be valid,
+while protected install/runtime/staging, reparse-backed, and ambiguous paths
+remain blocked. Revalidate a permitted destination immediately before writing.
+
 ## Release governance
 
 This project follows the Jumpstile Release Standard -- see

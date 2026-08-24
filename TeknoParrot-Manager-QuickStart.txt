@@ -381,7 +381,10 @@
   The stable 64-bit ZIP is extracted to staging, its file set and backup are
   verified, and live promotion uses rollback-safe transaction handling.
   Unsafe roots, failed backups, extraction errors, digest failures, and
-  rollback uncertainty fail closed.
+  rollback uncertainty fail closed. If a root is unsafe, TPM shows the
+  configured games root, explains that a real non-reparse folder is required,
+  and tells you to correct the game profile/path before running mode 9 again;
+  no BepInEx download or write is attempted for that game.
   To run:
     Choose mode 9 from the main menu.
 
@@ -574,13 +577,17 @@
     N) Skip (you can always re-run setup later to configure it).
 
   Eggman recognition data is not TeknoParrotUI's ParrotData.xml, not its
-  DAT/XML setting, and not a main or supplementary game ZIP. It is also not
-  the staging/install folder: it is only the index TPM reads to recognize
-  games. On a later explicit update, TPM reuses a valid configured ZIP at its
-  existing path without an alternate-location save dialog. Every supplied,
-  previously configured, or user-selected destination is canonicalized and
-  revalidated before reuse, download, or write. An unsafe destination is
-  rejected before network/download work begins.
+  DAT/XML setting, and not the contents of a main or supplementary game ZIP.
+  It is also not the staging/install folder: it is only the index TPM reads to
+  recognize games. On a later explicit update, TPM reuses a valid configured
+  ZIP at its existing path without an alternate-location save dialog. If the
+  current DAT is under the TeknoParrot root, TPM will not overwrite it; it can
+  offer a reachable primary ZIP/source folder such as
+  W:\ROMs\TeknoParrot Collection. The supplementary source is not selected
+  automatically. Every destination is canonicalized, checked for protected,
+  reparse-backed, and ambiguous paths, and revalidated immediately before
+  write. If no safe external folder exists, TPM explains how to correct it
+  instead of silently skipping.
 
   The script uses the dat's <GameProfile> codes to register three types of
   games that would otherwise appear in ACTION REQUIRED:

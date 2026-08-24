@@ -297,6 +297,24 @@ allowlisting, ZIP/script content validation, backup-before-replace behavior,
 and manual confirmation. BepInEx and dgVoodoo2 release assets are separate
 paths and do enforce their GitHub-provided SHA-256 digest when available.
 
+## Rule: runtime paths are classified by role, not by NAS/local location
+
+An SMB, UNC, or mapped path is not unsafe merely because it is network-backed.
+Before a runtime write, TPM canonicalizes the path, checks its role and
+containment against protected install/runtime/staging roots, rejects
+reparse-backed or ambiguous path chains, and revalidates the same destination
+immediately before the final write or move. An external primary DAT/source
+folder can therefore be valid when Windows can reach it and its role-specific
+checks pass. A supplementary source is not an automatic primary destination.
+
+This runtime rule is separate from engineering workspace policy. GitHub is
+authoritative for handoff; development, review, certification, and release
+validation use local clones or disposable local worktrees. NAS remains valid
+for ROMs, source data, packages, evidence, backups, generated artifacts, and
+mirrors, but a shared NAS Git worktree is not an authoritative active checkout.
+Operating-system ACLs, share permissions, credentials, and disconnected
+mapped-drive state remain independent reasons a role-safe write can fail.
+
 ## Rule: sanitize before joining into a filesystem path
 
 Any externally-sourced value that is joined into a filesystem path for a
