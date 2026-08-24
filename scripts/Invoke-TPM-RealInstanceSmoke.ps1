@@ -2528,6 +2528,24 @@ finally {
         $postSealIdentity = New-TPMCertificationGitIdentityV1 -Start $certificationIdentityStart -End $postSealIdentityEnd -ExpectedBranch $ExpectedBranch -ExpectedCommit $ExpectedCommit
         if(-not$postSealIdentity.IdentityValid-or[string]$postSealIdentityEnd.RefSnapshotSha256-ne[string]$productionIdentityEnd.RefSnapshotSha256-or[string]$postSealIdentityEnd.ReflogSnapshotSha256-ne[string]$productionIdentityEnd.ReflogSnapshotSha256){throw "CERTIFICATION_IDENTITY_CHANGED_AFTER_SEAL: $($postSealIdentity.RefMutationReason)"}
 
+        # The production cycle owns publication and finalization as one
+        # rollback boundary. Every guard invocation captures the checkout
+        # again, compares it with the last pre-cycle identity, and returns
+        # true only while the branch/ref/reflog/remote identity is stable.
+        # A mutation after a durable commit therefore becomes a cycle
+        # failure, and the cycle removes the commit marker before rethrowing.
+        $productionIdentityGuard = {
+            param([string]$Stage)
+            $cycleIdentityEnd = Get-TPMCertificationGitIdentitySnapshotV1 -RepositoryPath $RepoPath
+            $cycleIdentity = New-TPMCertificationGitIdentityV1 -Start $certificationIdentityStart -End $cycleIdentityEnd -ExpectedBranch $ExpectedBranch -ExpectedCommit $ExpectedCommit
+            $snapshotMatchesProduction = ([string]$cycleIdentityEnd.RefSnapshotSha256 -eq [string]$productionIdentityEnd.RefSnapshotSha256 -and [string]$cycleIdentityEnd.ReflogSnapshotSha256 -eq [string]$productionIdentityEnd.ReflogSnapshotSha256)
+            if(-not$cycleIdentity.IdentityValid-or-not$snapshotMatchesProduction){
+                $reason = if([string]::IsNullOrWhiteSpace([string]$cycleIdentity.RefMutationReason)){'CERTIFICATION_IDENTITY_CHANGED'}else{[string]$cycleIdentity.RefMutationReason}
+                throw ("CERTIFICATION_IDENTITY_CHANGED_DURING_PRODUCTION_CYCLE: stage={0}; reason={1}" -f $Stage,$reason)
+            }
+            return $true
+        }.GetNewClosure()
+
         # Step 5: invoke the sole seven-step certification core
         # (Checkpoint B1/ADR155-0309 Sub-step A's
         # Complete-TPMProductionCertificationCycleV1) -- eligibility,
@@ -2535,7 +2553,7 @@ finally {
         # an authoritative runtime outcome), staging, publication commit,
         # genuine dispatcher-issued TPMFinalOutcomeV1, and the runtime
         # projection derived exclusively from that genuine final outcome.
-        $productionCycleResult = Complete-TPMProductionCertificationCycleV1 -Authority $productionAuthority -SealedRun $productionSealedRun -StagingParentRoot $productionStagingParentRoot -DestinationRoot $productionDestinationRoot
+        $productionCycleResult = Complete-TPMProductionCertificationCycleV1 -Authority $productionAuthority -SealedRun $productionSealedRun -StagingParentRoot $productionStagingParentRoot -DestinationRoot $productionDestinationRoot -IdentityGuard $productionIdentityGuard
     } catch {
         $productionAborted = $true
         $productionAbortMessage = $_.Exception.Message

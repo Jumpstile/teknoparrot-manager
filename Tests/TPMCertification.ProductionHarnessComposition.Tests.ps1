@@ -166,7 +166,8 @@ BeforeAll {
 
         if ($BeforeCycle) { & $BeforeCycle $realAuthority $destination }
 
-        $result = Complete-TPMProductionCertificationCycleV1 -Authority $authority -SealedRun $sealedRun -StagingParentRoot $staging -DestinationRoot $destination
+        $identityGuard = { param([string]$Stage) return $true }
+        $result = Complete-TPMProductionCertificationCycleV1 -Authority $authority -SealedRun $sealedRun -StagingParentRoot $staging -DestinationRoot $destination -IdentityGuard $identityGuard
         return [pscustomobject]@{ Result = $result; Log = $spy.Log; Facts = $facts; DestinationRoot = $destination }
     }
 }
@@ -304,5 +305,6 @@ Describe 'ADR-0155 production harness composition seam (ADR155-0309 Checkpoint B
         $exitStatements | Should -Contain 'exit 1'
         $exitStatements | Should -Contain 'exit $productionProjection.ExitCode'
         $tail | Should -Match '\$productionProjection = \$productionCycleResult\.Projection'
+        $tail | Should -Match '-IdentityGuard \$productionIdentityGuard'
     }
 }

@@ -23,7 +23,7 @@ function New-TestFacts([string]$Root,[bool]$ForcePesterFailure=$false){
    [ordered]@{Identifier='Real Install Health';Applicable=$true;Data=[ordered]@{ReportPath=(Join-Path $report 'InstallHealth.json');LoadState='Loaded';LoadError=$null;Checks=@([ordered]@{Name='TeknoParrotUi.exe exists';Passed=$true},[ordered]@{Name='GameProfiles folder exists';Passed=$true},[ordered]@{Name='UserProfiles folder exists';Passed=$true})}}
    [ordered]@{Identifier='Backups';Applicable=$true;Data=[ordered]@{UserProfilesBackupCreated=$true;UserProfilesBackupPath=$backup;UserProfilesBackupVerified=$true;UserProfilesBackupSha256=$hash;GameProfilesBackupCreated=$false;GameProfilesBackupPath=$null;GameProfilesBackupVerified=$false;GameProfilesBackupSha256=$null;BackupVerificationExecuted=$true}}
    [ordered]@{Identifier='Smoke File Safety';Applicable=$true;Data=[ordered]@{UserProfiles=[ordered]@{Added=0;Removed=0;Changed=0;BeforeSkipped=0;AfterSkipped=0};GameProfiles=[ordered]@{Added=0;Removed=0;Changed=0;BeforeSkipped=0;AfterSkipped=0};Pcsx2x6Crosshairs=[ordered]@{Added=0;Removed=0;Changed=0;BeforeSkipped=0;AfterSkipped=0}}}
-   [ordered]@{Identifier='Artifacts';Applicable=$true;Data=[ordered]@{ReportDirectory=$report;ReportDirectoryReserved=$true;StagingDirectoryReady=$true;RequiredArtifactManifestConfigured=$true;PublisherAvailable=$true;PackageValidationExecuted=$true;PackageValidationPassed=$true;PackageValidationErrorCount=0}}
+   [ordered]@{Identifier='Artifacts';Applicable=$true;Data=[ordered]@{ReportDirectory=$report;ReportDirectoryReserved=$true;StagingDirectoryReady=$true;RequiredArtifactManifestConfigured=$true;PublisherAvailable=$true;PackageValidationExecuted=$true;PackageValidationPassed=$true;PackageValidationErrorCount=0;PackageValidationDiagnostics=@()}}
    [ordered]@{Identifier='pcsx2x6 crosshair path (issue #79)';Applicable=$false;Data=[ordered]@{Present=$false;CanonicalFilesDeployed=$false;LegacyRootPresent=$false;IniFound=$false;CursorPathPointsCanonical=$false;Pcsx2Directory=$null}}
    [ordered]@{Identifier='Behavioral Certification (Virtual Beta Tester)';Applicable=$true;Data=[ordered]@{Executed=$true;Total=2;Passed=2;Failed=0;HumanBehaviors=1;IdempotencyChecks=1;RecoveryBehaviors=0;EnvironmentVariations=0;HighTvdBehaviors=1}}
    [ordered]@{Identifier='Unattended TPM root binding';Applicable=$false;Data=[ordered]@{RequestedRoot=$repo;EffectiveRoot=$null;EffectiveRootParseState='Missing'}}
@@ -44,8 +44,9 @@ function New-TestFacts([string]$Root,[bool]$ForcePesterFailure=$false){
   $preview=&$authority DeriveScorePreview
   $final=New-TestEvidence $Root 'final-certification-result' $true 'ScreenCapture' 8
   &$authority IssueFinalEvidence $final $preview
-  $sealed=&$authority Seal
-  return @{Authority=$authority;Sealed=$sealed}
+ $sealed=&$authority Seal
+  $identityGuard={param([string]$Stage);return $true}
+  return @{Authority=$authority;Sealed=$sealed;IdentityGuard=$identityGuard}
  }
 
  # ADR155-0309 Checkpoint B2 review correction: a thin, real-dispatcher-
@@ -72,7 +73,7 @@ Describe 'ADR-0155 Phase 3 production certification cycle orchestration' {
 
  It 'produces a genuine CERTIFIED outcome end to end: real manifest/artifact-set hashes drive RegisterCommittedPublication, not placeholders' {
   $run=New-SealedRunV1 $root
-  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent
+  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard
   $result.Commit.Committed|Should -Be $true
   $observationParsed=$result.PublicationOutcome.CanonicalJson|ConvertFrom-Json
   $observationParsed.ManifestSha256|Should -Be $result.Commit.ManifestSha256
@@ -87,9 +88,41 @@ Describe 'ADR-0155 Phase 3 production certification cycle orchestration' {
   $result.Projection.ExitCode|Should -Be 0
  }
 
+ It 'rolls back a committed bundle when the identity guard rejects after publication' {
+  $run=New-SealedRunV1 $root
+  $guard={param([string]$Stage) if($Stage-ceq'AfterPublicationCommit'){throw 'CERTIFICATION_IDENTITY_CHANGED_DURING_PRODUCTION_CYCLE: branch/ref mutation'};return $true}.GetNewClosure()
+  $errorRecord=$null
+  try{Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $guard}catch{$errorRecord=$_}
+  $errorRecord|Should -Not -BeNullOrEmpty
+  $errorRecord.Exception.Message|Should -Match '^POST_COMMIT_ROLLBACK_SUCCEEDED:'
+  $errorRecord.Exception.Message|Should -Match 'CERTIFICATION_IDENTITY_CHANGED_DURING_PRODUCTION_CYCLE'
+  $runIdentity=&$run.Authority GetRunIdentity
+  (Test-Path -LiteralPath (Join-Path $destinationParent $runIdentity))|Should -BeFalse
+ }
+
+ It 'keeps the final projection inside the identity rollback boundary' {
+  $run=New-SealedRunV1 $root
+  $guard={param([string]$Stage) if($Stage-ceq'AfterFinalProjection'){throw 'CERTIFICATION_IDENTITY_CHANGED_DURING_PRODUCTION_CYCLE: ref snapshot changed'};return $true}.GetNewClosure()
+  $errorRecord=$null
+  try{Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $guard}catch{$errorRecord=$_}
+  $errorRecord|Should -Not -BeNullOrEmpty
+  $errorRecord.Exception.Message|Should -Match '^POST_COMMIT_ROLLBACK_SUCCEEDED:'
+  $errorRecord.Exception.Message|Should -Match 'CERTIFICATION_IDENTITY_CHANGED_DURING_PRODUCTION_CYCLE'
+  $runIdentity=&$run.Authority GetRunIdentity
+  (Test-Path -LiteralPath (Join-Path $destinationParent $runIdentity))|Should -BeFalse
+ }
+
+ It 'calls the identity guard at every production-cycle publication and finalization boundary' {
+  $run=New-SealedRunV1 $root
+  $stages=New-Object Collections.Generic.List[string]
+  $guard={param([string]$Stage);[void]$Stages.Add($Stage);return $true}.GetNewClosure()
+  [void](Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $guard)
+  @($stages.ToArray())|Should -Be @('BeforeEligibility','BeforePublicationCommit','AfterPublicationCommit','AfterFinalOutcome','AfterFinalProjection')
+ }
+
  It 'produces a genuine NOT CERTIFIED outcome (score-ineligible) while still publishing the complete committed bundle' {
   $run=New-SealedRunV1 $root $true
-  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent
+  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard
   $result.Commit.Committed|Should -Be $true
   @(Get-ChildItem -LiteralPath $result.Commit.DestinationDirectory -File).Count|Should -Be 7
   $result.Projection.FinalStatus|Should -Be 'NOT CERTIFIED'
@@ -98,7 +131,7 @@ Describe 'ADR-0155 Phase 3 production certification cycle orchestration' {
 
  It 'watch item: the Section 8.3 candidate participates in manifest construction but cannot drive runtime certification' {
   $run=New-SealedRunV1 $root
-  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent
+  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard
   # The candidate's own bytes are exactly what got staged/committed into the manifest's FinalOutcomeJson slot.
   $manifestParsed=$result.Manifest.Json|ConvertFrom-Json
   $finalOutcomeEntry=@($manifestParsed.Artifacts|Where-Object{$_.Identifier-eq'FinalOutcomeJson'})[0]
@@ -117,7 +150,7 @@ Describe 'ADR-0155 Phase 3 production certification cycle orchestration' {
   $collidingDir=Join-Path ([IO.Path]::GetFullPath($destinationParent)) $runIdentity
   New-Item -ItemType Directory -Path $collidingDir|Out-Null
   [IO.File]::WriteAllBytes((Join-Path $collidingDir 'TPM-Certification-Eligibility.json'),[byte[]](9,9,9))
-  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent
+  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard
   $result.Commit.Committed|Should -Be $false
   $observationParsed=$result.PublicationOutcome.CanonicalJson|ConvertFrom-Json
   $observationParsed.Committed|Should -Be $false
@@ -140,7 +173,7 @@ Describe 'ADR-0155 Phase 3 production certification cycle orchestration' {
   $collidingDir=Join-Path ([IO.Path]::GetFullPath($destinationParent)) $runIdentity
   New-Item -ItemType Directory -Path $collidingDir|Out-Null
   [IO.File]::WriteAllBytes((Join-Path $collidingDir 'TPM-Certification-Scorecard.md'),[byte[]](9))
-  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent
+  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard
   $result.Commit.Committed|Should -Be $false
   $rolledBack=@(Get-ChildItem -LiteralPath $stagingParent -Recurse -File)
   @($rolledBack|Where-Object{$_.Name-eq'TPM-Certification-Eligibility.json'}).Count|Should -Be 1
@@ -150,7 +183,7 @@ Describe 'ADR-0155 Phase 3 production certification cycle orchestration' {
 
  It 'the on-disk committed Final-Outcome artifact is the Section 8.3 candidate schema, agreeing with the runtime projection when publication commits' {
   $run=New-SealedRunV1 $root
-  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent
+  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard
   $onDiskPath=Join-Path $result.Commit.DestinationDirectory 'TPM-Certification-Final-Outcome.json'
   $onDiskParsed=[IO.File]::ReadAllText($onDiskPath)|ConvertFrom-Json
   @($onDiskParsed.PSObject.Properties.Name|Sort-Object)|Should -Be @('EligibilityPayloadSha256','EligibilityStatus','ExitCode','FinalStatus','RequiredPublicationState','RunIdentity','SchemaVersion')
@@ -211,7 +244,7 @@ Describe 'ADR-0155 Phase 3 post-commit exception safety (ADR155-0309 Checkpoint 
   $failingAuthority=New-TPMFailingAuthorityWrapperV1 -RealAuthority $run.Authority -FailOperation 'IssueFinalOutcome'
   $errorRecord=$null
   try{
-   Complete-TPMProductionCertificationCycleV1 -Authority $failingAuthority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent
+   Complete-TPMProductionCertificationCycleV1 -Authority $failingAuthority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard
   }catch{$errorRecord=$_}
   $errorRecord|Should -Not -BeNullOrEmpty
   $errorRecord.Exception.Message|Should -Match '^POST_COMMIT_ROLLBACK_SUCCEEDED:'
@@ -227,7 +260,7 @@ Describe 'ADR-0155 Phase 3 post-commit exception safety (ADR155-0309 Checkpoint 
   $failingAuthority=New-TPMFailingAuthorityWrapperV1 -RealAuthority $run.Authority -FailOperation 'RegisterCommittedPublication'
   $errorRecord=$null
   try{
-   Complete-TPMProductionCertificationCycleV1 -Authority $failingAuthority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent
+   Complete-TPMProductionCertificationCycleV1 -Authority $failingAuthority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard
   }catch{$errorRecord=$_}
   $errorRecord.Exception.Message|Should -Match '^POST_COMMIT_ROLLBACK_SUCCEEDED:'
   (Test-Path -LiteralPath $destinationDir)|Should -Be $false
@@ -259,7 +292,7 @@ Describe 'ADR-0155 Phase 3 post-commit exception safety (ADR155-0309 Checkpoint 
   $errorRecord=$null
   try{
    try{
-    Complete-TPMProductionCertificationCycleV1 -Authority $failingAuthority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent
+    Complete-TPMProductionCertificationCycleV1 -Authority $failingAuthority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard
    }catch{$errorRecord=$_}
   }finally{
    if($tpmLockBox.Stream){$tpmLockBox.Stream.Dispose();$tpmLockBox.Stream=$null}
@@ -295,7 +328,7 @@ Describe 'ADR-0155 Phase 3 post-commit exception safety (ADR155-0309 Checkpoint 
   $errorRecord=$null
   try{
    try{
-    Complete-TPMProductionCertificationCycleV1 -Authority $failingAuthority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent
+    Complete-TPMProductionCertificationCycleV1 -Authority $failingAuthority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard
    }catch{$errorRecord=$_}
   }finally{
    if($tpmLockBox.Stream){$tpmLockBox.Stream.Dispose();$tpmLockBox.Stream=$null}

@@ -179,6 +179,31 @@ Describe 'Assert-TPMDiagnosticRecordV1 (Item 3 audit, ADR155-0309 follow-up roun
     }
 }
 
+Describe 'Artifacts publisher diagnostics (issue #296)' {
+    It 'keeps publication failure code/message detail in both authority details and broad failure reasons' {
+        $report=Join-Path $TestDrive 'artifact-diagnostics-report'
+        New-Item -ItemType Directory -Path $report -Force|Out-Null
+        $diagnostic=[ordered]@{Stage='PublicationCommit';FailureCode='STAGING_FAILED';FailureMessage='staging rejected the certification manifest';ExceptionType=$null}
+        $record=[ordered]@{Identifier='Artifacts';Applicable=$true;Data=[ordered]@{ReportDirectory=$report;ReportDirectoryReserved=$false;StagingDirectoryReady=$true;RequiredArtifactManifestConfigured=$true;PublisherAvailable=$false;PackageValidationExecuted=$true;PackageValidationPassed=$false;PackageValidationErrorCount=1;PackageValidationDiagnostics=@($diagnostic)}}
+        {Assert-TPMFactRecordV1 $record Smoke $report}|Should -Not -Throw
+        $decision=Get-TPMFactDecisionV1 $record Smoke $report
+        @($decision.FailureReasons.Code)|Should -Contain 'PUBLISHER_UNAVAILABLE'
+        @($decision.FailureReasons.Code)|Should -Contain 'PACKAGE_VALIDATION_FAILED'
+        @($decision.FailureReasons|Where-Object Code -eq 'PUBLISHER_UNAVAILABLE')[0].Message|Should -Match 'STAGING_FAILED'
+        @($decision.FailureReasons|Where-Object Code -eq 'PUBLISHER_UNAVAILABLE')[0].Message|Should -Match 'staging rejected the certification manifest'
+        $decision.Details.PackageValidationDiagnostics[0].FailureCode|Should -Be 'STAGING_FAILED'
+        $decision.Details.PackageValidationDiagnostics[0].FailureMessage|Should -Be 'staging rejected the certification manifest'
+    }
+
+    It 'rejects a malformed publisher diagnostic instead of reducing it to a generic error count' {
+        $report=Join-Path $TestDrive 'malformed-artifact-diagnostics-report'
+        New-Item -ItemType Directory -Path $report -Force|Out-Null
+        $bad=[ordered]@{Stage='PublicationCommit';FailureCode='PROMOTION_FAILED';FailureMessage='';ExceptionType=$null}
+        $record=[ordered]@{Identifier='Artifacts';Applicable=$true;Data=[ordered]@{ReportDirectory=$report;ReportDirectoryReserved=$true;StagingDirectoryReady=$true;RequiredArtifactManifestConfigured=$true;PublisherAvailable=$false;PackageValidationExecuted=$true;PackageValidationPassed=$false;PackageValidationErrorCount=1;PackageValidationDiagnostics=@($bad)}}
+        {Assert-TPMFactRecordV1 $record Smoke $report}|Should -Throw '*PackageValidationDiagnostics*'
+    }
+}
+
 Describe 'ECVF: generic Emulator Contract Verification envelope (no emulator-specific logic)' {
     BeforeAll {
         $script:fakeContract = [pscustomobject]@{ ContractId = 'fixture-emu'; SchemaVersion = '1.0.0'; UpstreamPinnedCommit = ('a' * 40) }
