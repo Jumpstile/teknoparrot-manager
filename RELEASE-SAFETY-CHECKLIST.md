@@ -600,7 +600,7 @@ pre-commit gates in section 1.
 - [ ] After cleanup, perform a quick sweep of the specific issue/PR just
   touched (body, comments, reviews) to confirm nothing else was missed --
   in addition to, not instead of, the full repo-wide sweep already required
-  by CLAUDE.md after any GitHub-touching round.
+  by AGENTS.md after any GitHub-touching round.
 
 ## 9. Release governance exceptions
 
