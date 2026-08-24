@@ -5748,7 +5748,7 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
         $link = Join-Path $TestDrive 'NasLink'
         New-Item -ItemType Directory -Path $target -Force | Out-Null
         try {
-            [void](New-Item -ItemType Junction -LiteralPath $link -Target $target -ErrorAction Stop)
+            [void](New-Item -ItemType Junction -Path $link -Target $target -ErrorAction Stop)
         } catch {
             Set-ItResult -Skipped -Because 'This worker cannot create directory junctions.'
             return
