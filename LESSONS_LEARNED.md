@@ -7,6 +7,38 @@ outcome -- the ones most likely to repeat.
 
 ---
 
+## Issue #292 / RC8: path role is not the same as path location
+
+**What happened.** Eggman recognition data was written through a destination
+policy that treated the configured primary game ZIP source as protected in the
+same way as the TeknoParrot installation, supplementary source, and staging
+roots. A real external source such as `W:\ROMS\TeknoParrot Collection` was
+therefore rejected even though it was the safe external role in that setup.
+The update path also stopped after one invalid browse result, and the shared
+download helper did not repeat the role and reparse checks immediately before
+the final replacement move.
+
+**Why this matters.** NAS trouble can be a path-role error rather than an SMB
+transport error. A mapped drive or UNC path is not unsafe merely because it is
+remote, but it must be reachable, canonicalized, non-reparse, and outside all
+protected roots before TPM writes to it. Conversely, an existing DAT beneath
+the TeknoParrot installation remains protected even when it was previously
+configured; preserving an old path must not become permission to replace it.
+
+**Resolution.** The primary ZIP source is no longer in the protected write
+roots. The TPM program directory is protected explicitly, and the TeknoParrot
+installation, supplementary source, staging folder, and every existing reparse
+component remain blocked. Selected external destinations require an existing
+parent. Preferred-path failure now offers a deterministic fallback and a
+browse retry, while `Invoke-TpmDownload` performs a final exact-destination
+revalidation before deleting or moving anything. Focused tests cover primary
+source allowance, protected roots, sibling-prefix containment, mapped and UNC
+unavailable paths, junction parents, and the final revalidation callback.
+
+**Standing rule.** Treat a path's role as an explicit security decision. Do not
+classify a source, install, staging, or worktree solely from the fact that it is
+local or remote, and do not weaken a protected root to make a NAS path work.
+
 ## Governance exception: PR #87, #89, #91 merged by admin override (branch protection required 1 review)
 
 **What happened.** `main`'s branch protection requires 1 approving review before

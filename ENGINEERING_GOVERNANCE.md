@@ -15,6 +15,23 @@ tracking meta-issue this audit established).
 
 ---
 
+## Workspace and cross-machine authority
+
+GitHub is authoritative for versioned repository history and cross-machine
+engineering handoff. Each machine or agent must use its own local clone or
+disposable local worktree. Pushed GitHub review branches are the only
+cross-machine handoff; the receiving machine fetches and verifies the branch in
+its own checkout.
+
+NAS, UNC, mapped-drive, synchronized, and SMB paths may hold backups, source
+data, generated artifacts, mirrors, or an explicitly authorized runtime
+deployment. They must not be active shared Git worktrees. Existing dirty or
+inaccessible NAS checkouts are preserved as user data and de-authorized without
+deletion, cleanup, reset, rename, or rewrite. The canonical operating details
+are in `docs/LOCAL-WORKTREE-POLICY.md`.
+
+---
+
 ## A. GitHub Issue Governance Standard
 
 ### Required issue fields

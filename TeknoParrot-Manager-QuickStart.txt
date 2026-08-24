@@ -683,8 +683,12 @@
   DAT/XML setting, and not a main or supplementary game ZIP. It is also not
   the staging/install folder: it is only the index TPM reads to recognize
   games. On a later explicit update, the save dialog remains available for
-  an alternate location, and a valid configured ZIP stays at its existing
-  path unless you choose another one.
+  an alternate location. A configured ZIP under the TeknoParrot installation,
+  TPM program folder, supplementary source, or staging folder remains
+  protected. A reachable external primary ZIP folder can be used when its
+  canonical parent is real and non-reparse. If a preferred path is missing or
+  unsafe, TPM explains why, uses a safe fallback when possible, and offers a
+  browse retry.
 
   The script uses the dat's <GameProfile> codes to register three types of
   games that would otherwise appear in ACTION REQUIRED:

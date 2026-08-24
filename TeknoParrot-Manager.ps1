@@ -6094,7 +6094,7 @@ function Get-TpmHttpStatusCodeFromError {
 # next tier / final failure. Pass -LastStatusCode ([ref]$var) to read the
 # final HTTP status code (0 if unknown/not HTTP-related) after a failure.
 function Invoke-TpmDownload {
-    param([string]$DownloadUrl, [string]$DestinationPath, [Int64]$ExpectedBytes = 0, [string]$Label = 'Download', [string]$Version = '', [switch]$Quiet, [ref]$LastStatusCode, [string]$ExpectedSha256 = '', [scriptblock]$ValidationScript)
+    param([string]$DownloadUrl, [string]$DestinationPath, [Int64]$ExpectedBytes = 0, [string]$Label = 'Download', [string]$Version = '', [switch]$Quiet, [ref]$LastStatusCode, [string]$ExpectedSha256 = '', [scriptblock]$ValidationScript, [scriptblock]$DestinationValidationScript)
     if ($LastStatusCode) { $LastStatusCode.Value = 0 }
     $saveDir = Split-Path -Parent $DestinationPath
     if ([string]::IsNullOrWhiteSpace($saveDir)) { $saveDir = (Get-Location).Path }
@@ -6182,6 +6182,13 @@ function Invoke-TpmDownload {
         if ($ValidationScript -and -not (& $ValidationScript $tempPath)) {
             throw "Downloaded file failed the caller's content validation."
         }
+        # Revalidate the exact final path after the download has completed but
+        # before any existing destination is removed or the partial file is
+        # moved into place. Callers that protect a path by role use this hook
+        # to narrow the remaining time-of-check/time-of-use window.
+        if ($DestinationValidationScript -and -not (& $DestinationValidationScript $DestinationPath)) {
+            throw "Download destination failed final safety validation."
+        }
         if (Test-Path -LiteralPath $DestinationPath -PathType Leaf) {
             Remove-Item -LiteralPath $DestinationPath -Force -ErrorAction Stop
         }
@@ -6235,10 +6242,37 @@ function Test-EggmanDatUpToDate {
 }
 
 function Invoke-EggmanDatDownload {
-    param([string]$downloadUrl, [string]$savePath, [Int64]$ExpectedBytes = 0)
+    param(
+        [string]$downloadUrl,
+        [string]$savePath,
+        [Int64]$ExpectedBytes = 0,
+        [string]$ConfiguredDirectory = '',
+        [string]$ProgramDirectory = '',
+        [switch]$RequireExistingParent
+    )
+
+    $assessment = Get-EggmanDatDestinationAssessment -Path $savePath `
+        -ConfiguredDirectory $ConfiguredDirectory -ProgramDirectory $ProgramDirectory `
+        -RequireExistingParent:$RequireExistingParent
+    if (-not $assessment.Safe) {
+        Write-Host ("  Refusing to write Eggman recognition data: {0}" -f $assessment.Reason) -ForegroundColor Red
+        Write-Log ("EggmanDat: SECURITY -- rejected destination before download {0}: {1}" -f $savePath, $assessment.Reason)
+        return $false
+    }
+    $savePath = $assessment.FullPath
     return (Invoke-TpmDownload -DownloadUrl $downloadUrl -DestinationPath $savePath -ExpectedBytes $ExpectedBytes -Label 'EggmanDat' -ValidationScript {
         param([string]$DownloadedPath)
         return (Test-EggmanDatZip -Path $DownloadedPath -ExpectedBytes $ExpectedBytes)
+    } -DestinationValidationScript {
+        param([string]$FinalDestinationPath)
+        $final = Get-EggmanDatDestinationAssessment -Path $FinalDestinationPath `
+            -ConfiguredDirectory $ConfiguredDirectory -ProgramDirectory $ProgramDirectory `
+            -RequireExistingParent:$RequireExistingParent
+        if (-not $final.Safe) {
+            Write-Log ("EggmanDat: SECURITY -- final destination revalidation failed {0}: {1}" -f $FinalDestinationPath, $final.Reason)
+            return $false
+        }
+        return $true
     })
 }
 
@@ -6268,15 +6302,20 @@ function Get-EggmanDatDefaultSavePath {
     return (Join-Path $dataRoot $FileName)
 }
 
-# Download destinations must never overlap a TeknoParrot installation, either
-# game ZIP source, or the extracted-game staging folder. Importing an existing
-# file remains read-only and is handled by the separate B) browse/import path;
-# this guard applies only to paths TPM may write.
+# Download destinations must never overlap a TeknoParrot installation, the TPM
+# program folder, the supplementary game ZIP source, or the extracted-game
+# staging folder. The primary ZIP source has a different role: it is external
+# source data and may also be the user's explicitly selected Eggman destination
+# when its canonicalized directory is real, reachable, and outside every
+# protected root. Importing an existing file remains read-only and is handled
+# by the separate B) browse/import path; this guard applies only to paths TPM
+# may write.
 function Get-EggmanDatDestinationAssessment {
     param(
         [string]$Path,
         [string]$ConfiguredDirectory = '',
-        [switch]$AllowExistingConfiguredPath
+        [string]$ProgramDirectory = '',
+        [switch]$RequireExistingParent
     )
 
     $result = [ordered]@{
@@ -6331,7 +6370,7 @@ function Get-EggmanDatDestinationAssessment {
         }
     }
 
-    $parentPath = Split-Path -Parent $fullPath
+    $parentPath = [System.IO.Path]::GetDirectoryName($fullPath)
     if ([string]::IsNullOrWhiteSpace($parentPath)) {
         $result.State  = 'Malformed'
         $result.Reason = 'the Eggman destination has no usable parent directory'
@@ -6339,6 +6378,18 @@ function Get-EggmanDatDestinationAssessment {
     }
     try { $parentPath = [System.IO.Path]::GetFullPath($parentPath) } catch {}
     $result.ParentPath = $parentPath
+
+    $directParent = Get-Item -LiteralPath $parentPath -Force -ErrorAction SilentlyContinue
+    if ($RequireExistingParent -and $null -eq $directParent) {
+        $result.State  = 'Unavailable'
+        $result.Reason = 'the selected Eggman destination parent directory is unavailable or missing'
+        return [pscustomobject]$result
+    }
+    if ($RequireExistingParent -and -not $directParent.PSIsContainer) {
+        $result.State  = 'MissingParent'
+        $result.Reason = 'the selected Eggman destination parent is a file, not a directory'
+        return [pscustomobject]$result
+    }
 
     # Inspect every existing parent. Missing descendants are acceptable for a
     # TPM-owned default because Invoke-TpmDownload creates them only after the
@@ -6382,26 +6433,25 @@ function Get-EggmanDatDestinationAssessment {
         $cursor = $next
     }
 
-    $protectedRoots = @($zipSource, $zipSourceSupplementary, $gamesInstallFolder) |
+    # Do not add $zipSource here. The main ZIP source is intentionally an
+    # allowed external source-data role when it is canonicalized, reachable,
+    # and outside the protected roots below. Supplementary ZIPs remain
+    # protected because they are a separate game-library source boundary.
+    $programDirectory = if ([string]::IsNullOrWhiteSpace($ProgramDirectory)) { [string]$script:TpmProgramDirectory } else { $ProgramDirectory }
+    $protectedRoots = @($zipSourceSupplementary, $gamesInstallFolder, $programDirectory) |
         Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
     foreach ($protectedRoot in $protectedRoots) {
         if (Test-PathInside -child $fullPath -parent ([string]$protectedRoot)) {
             $result.State  = 'ProtectedLocation'
-            $result.Reason = 'the destination is inside a configured game ZIP source or staging folder'
+            $result.Reason = 'the destination is inside a protected TPM program folder, supplementary game ZIP source, or game staging folder'
             return [pscustomobject]$result
         }
     }
     $underTeknoParrot = -not [string]::IsNullOrWhiteSpace([string]$tpRoot) -and
         (Test-PathInside -child $fullPath -parent ([string]$tpRoot))
-    $configuredDirectoryFull = ''
-    if (-not [string]::IsNullOrWhiteSpace($ConfiguredDirectory)) {
-        try { $configuredDirectoryFull = [System.IO.Path]::GetFullPath($ConfiguredDirectory).TrimEnd('\','/') } catch {}
-    }
-    $sameConfiguredDirectory = $configuredDirectoryFull -and
-        ([System.IO.Path]::GetFullPath($parentPath).TrimEnd('\','/') -ieq $configuredDirectoryFull)
-    if ($underTeknoParrot -and -not ($sameConfiguredDirectory -or ($AllowExistingConfiguredPath -and $result.Exists))) {
+    if ($underTeknoParrot) {
         $result.State  = 'ProtectedLocation'
-        $result.Reason = 'the destination is inside the TeknoParrot installation and is not an explicitly verified existing configured ZIP location'
+        $result.Reason = 'the destination is inside the protected TeknoParrot installation'
         return [pscustomobject]$result
     }
     if (($nearestExisting.Attributes -band [System.IO.FileAttributes]::ReadOnly) -ne 0) {
@@ -6417,8 +6467,9 @@ function Get-EggmanDatDestinationAssessment {
 }
 
 function Test-EggmanDatDestinationSafe {
-    param([string]$Path, [string]$ConfiguredDirectory = '')
-    $assessment = Get-EggmanDatDestinationAssessment -Path $Path -ConfiguredDirectory $ConfiguredDirectory
+    param([string]$Path, [string]$ConfiguredDirectory = '', [string]$ProgramDirectory = '', [switch]$RequireExistingParent)
+    $assessment = Get-EggmanDatDestinationAssessment -Path $Path -ConfiguredDirectory $ConfiguredDirectory `
+        -ProgramDirectory $ProgramDirectory -RequireExistingParent:$RequireExistingParent
     return [bool]$assessment.Safe
 }
 
@@ -6457,6 +6508,7 @@ function Invoke-EggmanDatDownloadInteractive {
     )
 
     $safeDatFileName = [System.IO.Path]::GetFileName($rel.FileName)
+    $programDirectory = [string]$script:TpmProgramDirectory
     $defaultRoot = if ([string]::IsNullOrWhiteSpace($DefaultRoot)) { Get-EggmanDatDataRoot } else { $DefaultRoot }
     $unsafeFileName  = [string]::IsNullOrWhiteSpace($safeDatFileName) -or
         [System.IO.Path]::GetExtension($safeDatFileName) -ne '.zip'
@@ -6469,11 +6521,12 @@ function Invoke-EggmanDatDownloadInteractive {
     $configuredDirectory = ''
     $configuredReason = ''
     if (-not [string]::IsNullOrWhiteSpace($PreferredSavePath)) {
-        $configured = Get-EggmanDatConfiguredPathAssessment -Path $PreferredSavePath
+        $configured = Get-EggmanDatConfiguredPathAssessment -Path $PreferredSavePath -ProgramDirectory $programDirectory
         if ($configured.Safe) {
             $configuredDirectory = $configured.ParentPath
             $defaultSavePath = Join-Path $configuredDirectory $safeDatFileName
-            $candidate = Get-EggmanDatDestinationAssessment -Path $defaultSavePath -ConfiguredDirectory $configuredDirectory
+            $candidate = Get-EggmanDatDestinationAssessment -Path $defaultSavePath `
+                -ConfiguredDirectory $configuredDirectory -ProgramDirectory $programDirectory -RequireExistingParent
             if (-not $candidate.Safe) {
                 $configuredReason = "the latest ZIP name could not be safely placed beside it: $($candidate.Reason)"
                 $defaultSavePath = $null
@@ -6489,7 +6542,7 @@ function Invoke-EggmanDatDownloadInteractive {
     if (-not $defaultSavePath) {
         $fallbackPath = Get-EggmanDatDefaultSavePath -FileName $safeDatFileName -RootPath $defaultRoot
         if ($fallbackPath) {
-            $fallback = Get-EggmanDatDestinationAssessment -Path $fallbackPath
+            $fallback = Get-EggmanDatDestinationAssessment -Path $fallbackPath -ProgramDirectory $programDirectory
             if ($fallback.Safe) {
                 $defaultSavePath = $fallback.FullPath
                 if ($configuredReason) {
@@ -6504,35 +6557,61 @@ function Invoke-EggmanDatDownloadInteractive {
         Write-Host "  TPM could not select a safe Eggman data location for this setup." -ForegroundColor Yellow
         if (-not $AllowBrowse) { return $null }
     }
-    $rawSave = $defaultSavePath
-    if ($AllowBrowse) {
-        $prompt = if ($defaultSavePath) { "  Save to (Enter for default: $defaultSavePath)" } else { "  Save to (choose a safe alternate location)" }
-        $initialDirectory = if ($defaultSavePath) { Split-Path -Parent $defaultSavePath } else { $defaultRoot }
-        $rawSave = Read-PathWithBrowse $prompt -Mode SaveFile `
-                       -FileFilter "ZIP files (*.zip)|*.zip|All files (*.*)|*.*" -DefaultFileName $safeDatFileName -InitialDirectory $initialDirectory
-        if (-not $rawSave) { $rawSave = $defaultSavePath }
-    }
-    if ([string]::IsNullOrWhiteSpace($rawSave)) {
-        Write-Host "  No safe Eggman data destination was selected -- skipped." -ForegroundColor Yellow
-        return $null
-    }
-    try { $rawSave = [System.IO.Path]::GetFullPath($rawSave) } catch {
-        Write-Host "  The selected Eggman data destination is not a valid path -- skipped." -ForegroundColor Yellow
-        return $null
-    }
-    $finalAssessment = Get-EggmanDatDestinationAssessment -Path $rawSave -ConfiguredDirectory $configuredDirectory
-    if (-not $finalAssessment.Safe) {
+    $rawSave = $null
+    $finalAssessment = $null
+    $requiresExistingParent = $false
+    $destinationAttempts = if ($AllowBrowse) { 2 } else { 1 }
+    for ($destinationAttempt = 1; $destinationAttempt -le $destinationAttempts; $destinationAttempt++) {
+        $rawSave = $defaultSavePath
+        $selectedByBrowse = $false
+        if ($AllowBrowse) {
+            $prompt = if ($defaultSavePath) { "  Save to (Enter for default: $defaultSavePath)" } else { "  Save to (choose a safe alternate location)" }
+            $initialDirectory = if ($defaultSavePath) { [System.IO.Path]::GetDirectoryName($defaultSavePath) } else { $defaultRoot }
+            $browseSelection = Read-PathWithBrowse $prompt -Mode SaveFile `
+                               -FileFilter "ZIP files (*.zip)|*.zip|All files (*.*)|*.*" -DefaultFileName $safeDatFileName -InitialDirectory $initialDirectory
+            if ($browseSelection) {
+                $rawSave = $browseSelection
+                $selectedByBrowse = $true
+            }
+        }
+        if ([string]::IsNullOrWhiteSpace($rawSave)) {
+            Write-Host "  No safe Eggman data destination was selected -- skipped." -ForegroundColor Yellow
+            return $null
+        }
+        try { $rawSave = [System.IO.Path]::GetFullPath($rawSave) } catch {
+            if ($AllowBrowse -and $selectedByBrowse -and $destinationAttempt -lt $destinationAttempts) {
+                Write-Host "  That destination is not a valid path. Choose a safe location again." -ForegroundColor Yellow
+                continue
+            }
+            Write-Host "  The selected Eggman data destination is not a valid path -- skipped." -ForegroundColor Yellow
+            return $null
+        }
+        $requiresExistingParent = $selectedByBrowse -or -not [string]::IsNullOrWhiteSpace($configuredDirectory)
+        $finalAssessment = Get-EggmanDatDestinationAssessment -Path $rawSave `
+            -ConfiguredDirectory $configuredDirectory -ProgramDirectory $programDirectory `
+            -RequireExistingParent:$requiresExistingParent
+        if ($finalAssessment.Safe) { break }
+        if ($AllowBrowse -and $selectedByBrowse -and $destinationAttempt -lt $destinationAttempts) {
+            Write-Host ("  That location cannot be used: {0}" -f $finalAssessment.Reason) -ForegroundColor Yellow
+            Write-Host "  Browse again, or cancel to use the TPM-managed fallback." -ForegroundColor DarkCyan
+            Write-Log ("EggmanDat: selected destination was unavailable or unsafe; offering browse retry -- {0}" -f $finalAssessment.Reason)
+            continue
+        }
         Write-Host ("  Refusing to write Eggman recognition data: {0}" -f $finalAssessment.Reason) -ForegroundColor Red
         Write-Log ("EggmanDat: SECURITY -- rejected destination {0}: {1}" -f $rawSave, $finalAssessment.Reason)
         return $null
     }
+    if ($null -eq $finalAssessment -or -not $finalAssessment.Safe) { return $null }
+    $rawSave = $finalAssessment.FullPath
     if ($rel.SizeBytes -gt 0 -and (Test-EggmanDatZip -Path $rawSave -ExpectedBytes $rel.SizeBytes)) {
         Write-Host "  Existing Eggman dat ZIP already matches the release size. Reusing it." -ForegroundColor Green
         Write-Log "EggmanDat: existing ZIP matches release size; download skipped."
         return $rawSave
     }
     Write-Host "  Downloading -- this may take a few minutes..." -ForegroundColor Cyan
-    if (Invoke-EggmanDatDownload $rel.DownloadUrl $rawSave -ExpectedBytes $rel.SizeBytes) { return $rawSave }
+    if (Invoke-EggmanDatDownload $rel.DownloadUrl $rawSave -ExpectedBytes $rel.SizeBytes `
+            -ConfiguredDirectory $configuredDirectory -ProgramDirectory $programDirectory `
+            -RequireExistingParent:$requiresExistingParent) { return $rawSave }
     return $null
 }
 
@@ -13653,15 +13732,14 @@ function Get-ValidationReportPaths {
     }
 }
 
-# Validates a previously configured ZIP as a narrowly scoped write anchor.
-# An existing configured file may be under the TeknoParrot root because the
-# user explicitly chose it in an earlier run; that exception applies only to
-# this verified file and its exact parent directory, never to arbitrary new
-# paths under the installation.
+# Validates a previously configured ZIP before it can become an update write
+# destination. A configured file under the TeknoParrot installation remains
+# protected; only an existing, valid file in an allowed external directory can
+# become the update anchor.
 function Get-EggmanDatConfiguredPathAssessment {
-    param([string]$Path)
+    param([string]$Path, [string]$ProgramDirectory = '')
 
-    $assessment = Get-EggmanDatDestinationAssessment -Path $Path -AllowExistingConfiguredPath
+    $assessment = Get-EggmanDatDestinationAssessment -Path $Path -ProgramDirectory $ProgramDirectory
     if (-not $assessment.Safe) { return $assessment }
     if (-not $assessment.Exists) {
         $assessment.State  = 'Missing'
@@ -14275,6 +14353,7 @@ Write-Log "Script started (v$ScriptVersion$(if ($Unattended) { ' [Unattended]' }
 # =============================================================================
 
 $configPath         = Join-Path $PSScriptRoot "TeknoParrot-Manager.config.json"
+$script:TpmProgramDirectory = $PSScriptRoot
 $tpRoot             = $null
 $mode               = $null   # "AutoSync", "RegisterOnly", "CrosshairSetup", "ReShadeSetup", "DgVoodoo2Setup", "GpuFixSetup", "FFBSetup", "BepInExUpdate", "Restore", or "HealthCheck"
 $pendingApplyMode   = $null   # set when a preview run's "Apply for real now?" prompt is answered Y -- tells the

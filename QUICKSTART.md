@@ -476,7 +476,7 @@ N) Skip
 
 Both the collection dat and supplementary dat are read directly from inside the ZIP — no extraction needed. The supplementary dat takes priority for any game in both (it represents the version you should install).
 
-Eggman recognition data is separate from TeknoParrotUI's `ParrotData.xml` and DAT/XML setting, and separate from the main/supplementary game ZIP sources and the staging/install folder. The normal first-run download goes to `%LOCALAPPDATA%\TeknoParrotManager\Eggman` without a save-location prompt. Browse/import remains available, and an explicit later update retains the alternate-location save dialog. A valid configured ZIP remains the update destination unless you choose another location.
+Eggman recognition data is separate from TeknoParrotUI's `ParrotData.xml` and DAT/XML setting, and separate from the main/supplementary game ZIP sources and the staging/install folder. The normal first-run download goes to `%LOCALAPPDATA%\TeknoParrotManager\Eggman` without a save-location prompt. Browse/import remains available, and an explicit later update retains the alternate-location save dialog. A configured ZIP under the TeknoParrot installation, TPM program folder, supplementary source, or staging folder remains protected. A real external primary ZIP folder can be used when its canonical parent is reachable and non-reparse; if a preferred path is unavailable or unsafe, TPM explains why, uses a safe fallback when possible, and offers a browse retry.
 
 On repeat runs, the script reuses your last dat choice automatically but offers to check for a newer dat release first.
 

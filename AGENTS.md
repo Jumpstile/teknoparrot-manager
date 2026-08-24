@@ -181,6 +181,27 @@ temp folder.
 
 ---
 
+## Git workspace policy
+
+GitHub is authoritative for repository history and cross-machine handoff.
+Every machine and agent uses its own local clone or disposable worktree. A
+pushed GitHub review branch is the only cross-machine handoff; the receiving
+machine fetches it into its own local checkout. See
+[`docs/LOCAL-WORKTREE-POLICY.md`](docs/LOCAL-WORKTREE-POLICY.md).
+
+The machine paths above are runtime and data roles, not active shared Git
+worktrees. `W:\Emulators\TeknoParrot\Scripts` must not be treated as an
+authoritative checkout. `W:\ROMS\TeknoParrot Collection` is source data and
+may remain in use by AutoSync or the Eggman destination flow only under those
+features' path validation rules. Preserve inaccessible or dirty NAS checkouts
+as user data; inventory and de-authorize them without deletion, reset,
+cleanup, rename, or rewrite.
+
+No script, test, or documentation workflow may depend on an active UNC, SMB,
+or mapped-drive Git worktree.
+
+---
+
 ## Key conventions
 
 - Version bump required on every meaningful change set.

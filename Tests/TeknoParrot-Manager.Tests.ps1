@@ -5629,6 +5629,7 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
         $script:zipSource = ''
         $script:zipSourceSupplementary = ''
         $script:gamesInstallFolder = ''
+        $script:TpmProgramDirectory = ''
     }
 
     It "uses the deterministic TPM per-user data root and does not create it while resolving the path" {
@@ -5661,6 +5662,7 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
     It "keeps the explicit alternate-location save override" {
         $defaultRoot = Join-Path $TestDrive 'alternate-default'
         $alternate = Join-Path $TestDrive 'alternate-location\Eggman.zip'
+        New-Item -ItemType Directory -Path (Split-Path -Parent $alternate) -Force | Out-Null
         $script:downloadPath = $null
         Mock Read-PathWithBrowse { $alternate }
         Mock Invoke-EggmanDatDownload {
@@ -5701,13 +5703,16 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
         Should -Invoke Read-PathWithBrowse -Times 1
     }
 
-    It "uses an existing safe configured ZIP under the TeknoParrot root and selects the newer release beside it" {
+    It "keeps a configured ZIP under the protected TeknoParrot root blocked and offers the browse fallback" {
         $tp = Join-Path $TestDrive 'configured-TeknoParrot'
         $legacy = Join-Path $tp 'TeknoParrot.Collection.2026-08-16_RomVault.zip'
         New-EggmanFixtureZip -zipPath $legacy
+        $external = Join-Path $TestDrive 'external-browse-fallback'
+        New-Item -ItemType Directory -Path $external -Force | Out-Null
+        $browsePath = Join-Path $external 'latest.zip'
         $script:tpRoot = $tp
         $script:downloadPath = $null
-        Mock Read-PathWithBrowse { '' }
+        Mock Read-PathWithBrowse { $browsePath }
         Mock Invoke-EggmanDatDownload {
             param([string]$downloadUrl, [string]$savePath, [Int64]$ExpectedBytes)
             $script:downloadPath = $savePath
@@ -5721,25 +5726,18 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
 
         $result = Invoke-EggmanDatDownloadInteractive $rel -AllowBrowse -PreferredSavePath $legacy -DefaultRoot (Join-Path $TestDrive 'new-default')
 
-        $expected = Join-Path $tp 'TeknoParrot.Collection.2026-08-22_RomVault.zip'
-        $result | Should -Be ([System.IO.Path]::GetFullPath($expected))
+        $result | Should -Be ([System.IO.Path]::GetFullPath($browsePath))
         $script:downloadPath | Should -Be $result
         Should -Invoke Invoke-EggmanDatDownload -Times 1
         Should -Invoke Read-PathWithBrowse -Times 1
     }
 
-    It "falls back to a deterministic TPM location and explains an unsafe configured path" {
-        $source = Join-Path $TestDrive 'game-zips'
+    It "allows a valid configured primary external ZIP source and updates beside it" {
+        $source = Join-Path $TestDrive 'primary-game-zips'
         $legacy = Join-Path $source 'TeknoParrot.Collection.2026-08-16_RomVault.zip'
         New-EggmanFixtureZip -zipPath $legacy
-        $fallbackRoot = Join-Path $TestDrive 'safe-eggman-fallback'
         $script:zipSource = $source
         $script:downloadPath = $null
-        $script:hostLines = @()
-        Mock Write-Host {
-            param([string]$Object)
-            $script:hostLines += $Object
-        }
         Mock Read-PathWithBrowse { '' }
         Mock Invoke-EggmanDatDownload {
             param([string]$downloadUrl, [string]$savePath, [Int64]$ExpectedBytes)
@@ -5752,13 +5750,11 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
             SizeBytes   = 0
         }
 
-        $result = Invoke-EggmanDatDownloadInteractive $rel -AllowBrowse -PreferredSavePath $legacy -DefaultRoot $fallbackRoot
+        $result = Invoke-EggmanDatDownloadInteractive $rel -AllowBrowse -PreferredSavePath $legacy -DefaultRoot (Join-Path $TestDrive 'safe-eggman-fallback')
 
-        $result | Should -Be ([System.IO.Path]::GetFullPath((Join-Path $fallbackRoot $rel.FileName)))
+        $result | Should -Be ([System.IO.Path]::GetFullPath((Join-Path $source $rel.FileName)))
         $script:downloadPath | Should -Be $result
-        ($script:hostLines -join "`n") | Should -Match 'Existing Eggman path was not used'
-        ($script:hostLines -join "`n") | Should -Match 'game ZIP source'
-        $result | Should -Not -Match ([regex]::Escape($source))
+        $result | Should -Match ([regex]::Escape($source))
     }
 
     It "does not send an unsafe or ambiguous configured path to the downloader" {
@@ -5790,27 +5786,118 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
         Test-EggmanDatZip -Path $valid -ExpectedBytes $size | Should -BeTrue
     }
 
-    It "rejects protected TeknoParrot, source, and staging destinations without writing" {
+    It "allows the primary source but rejects TeknoParrot, supplementary, and staging destinations" {
         $tp = Join-Path $TestDrive 'TeknoParrot'
         $mainSource = Join-Path $TestDrive 'MainGameZips'
         $suppSource = Join-Path $TestDrive 'SupplementaryGameZips'
         $staging = Join-Path $TestDrive 'GameStaging'
+        $program = Join-Path $TestDrive 'TpmProgram'
         $script:tpRoot = $tp
         $script:zipSource = $mainSource
         $script:zipSourceSupplementary = $suppSource
         $script:gamesInstallFolder = $staging
-        $before = Get-TpmDirSnapshot -Dir $TestDrive
-        Mock Read-PathWithBrowse { Join-Path $tp 'Eggman.zip' }
-        Mock Invoke-EggmanDatDownload { throw 'protected destination must not reach downloader' }
+        $script:TpmProgramDirectory = $program
+        foreach ($candidate in @(
+                (Join-Path $mainSource 'Eggman.zip'),
+                (Join-Path $tp 'Eggman.zip'),
+                (Join-Path $suppSource 'Eggman.zip'),
+                (Join-Path $staging 'Eggman.zip'),
+                (Join-Path $program 'Eggman.zip'))) {
+            $assessment = Get-EggmanDatDestinationAssessment -Path $candidate
+            if ($candidate -like "$(Join-Path $mainSource '*')") {
+                $assessment.Safe | Should -BeTrue
+            } else {
+                $assessment.Safe | Should -BeFalse
+                $assessment.State | Should -Be 'ProtectedLocation'
+            }
+        }
+    }
+
+    It "does not confuse a protected-root sibling with a contained path" {
+        $suppSource = Join-Path $TestDrive 'SupplementaryGameZips'
+        $sibling = Join-Path $TestDrive 'SupplementaryGameZips-archive'
+        New-Item -ItemType Directory -Path $suppSource, $sibling -Force | Out-Null
+        $script:zipSourceSupplementary = $suppSource
+
+        (Get-EggmanDatDestinationAssessment -Path (Join-Path $suppSource 'Eggman.zip')).Safe | Should -BeFalse
+        (Get-EggmanDatDestinationAssessment -Path (Join-Path $sibling 'Eggman.zip')).Safe | Should -BeTrue
+    }
+
+    It "rejects an unavailable mapped or UNC destination and offers a browse retry" {
+        $script:tpRoot = Join-Path $TestDrive 'TeknoParrot'
+        $script:browseCalls = 0
+        $script:hostLines = @()
+        Mock Write-Host {
+            param([string]$Object)
+            $script:hostLines += $Object
+        }
+        Mock Read-PathWithBrowse {
+            $script:browseCalls++
+            if ($script:browseCalls -eq 1) { return 'W:\Unavailable\Eggman\latest.zip' }
+            return '\\OMVNAS\SoftwareForInstallations\Eggman\latest.zip'
+        }
+        Mock Invoke-EggmanDatDownload { throw 'unavailable destination must not reach downloader' }
         $rel = [pscustomobject]@{ DownloadUrl = 'https://example.com/eggman.zip'; FileName = 'latest.zip'; SizeBytes = 0 }
 
-        $defaultResult = Invoke-EggmanDatDownloadInteractive $rel -DefaultRoot (Join-Path $tp 'Eggman')
-        $alternateResult = Invoke-EggmanDatDownloadInteractive $rel -AllowBrowse -DefaultRoot (Join-Path $TestDrive 'safe-default')
+        $result = Invoke-EggmanDatDownloadInteractive $rel -AllowBrowse -PreferredSavePath 'W:\Unavailable\Eggman\current.zip' -DefaultRoot (Join-Path $TestDrive 'safe-default')
 
-        $defaultResult | Should -BeNullOrEmpty
-        $alternateResult | Should -BeNullOrEmpty
+        $result | Should -BeNullOrEmpty
+        $script:browseCalls | Should -Be 2
         Should -Invoke Invoke-EggmanDatDownload -Times 0
-        Assert-TpmDirSnapshotUnchanged -Before $before -After (Get-TpmDirSnapshot -Dir $TestDrive)
+        ($script:hostLines -join "`n") | Should -Match 'unavailable|missing|cannot be used'
+    }
+
+    It "rejects a reparse-backed external source parent before any write" {
+        $root = Join-Path $TestDrive 'primary-source-root'
+        $foreign = Join-Path $TestDrive 'primary-source-foreign'
+        $link = Join-Path $root 'alias'
+        New-Item -ItemType Directory -Path $root, $foreign -Force | Out-Null
+        try { New-Item -ItemType Junction -Path $link -Target $foreign -ErrorAction Stop | Out-Null }
+        catch {
+            Set-ItResult -Skipped -Because 'junction creation is unavailable'
+            return
+        }
+        try {
+            $assessment = Get-EggmanDatDestinationAssessment -Path (Join-Path $link 'Eggman.zip')
+            $assessment.Safe | Should -BeFalse
+            $assessment.State | Should -Be 'ReparsePoint'
+        } finally {
+            [System.IO.Directory]::Delete($link, $false)
+        }
+    }
+
+    It "revalidates the exact destination immediately before replacing it" {
+        $destination = Join-Path $TestDrive 'final-revalidation\Eggman.zip'
+        New-EggmanFixtureZip -zipPath $destination
+        $before = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($destination))
+        $script:finalValidationCalls = 0
+        Mock Test-TpmDownloadBitsAvailable { $false }
+        Mock Invoke-TpmDownloadHttpClient {
+            param([string]$DownloadUrl, [string]$TempPath, [string]$Label)
+            Set-Content -LiteralPath $TempPath -Value 'downloaded' -NoNewline
+        }
+        Mock Write-Progress {}
+
+        $result = Invoke-TpmDownload -DownloadUrl 'https://example.com/eggman.zip' -DestinationPath $destination `
+            -ExpectedBytes 0 -Label 'EggmanDat' -ValidationScript { $true } -DestinationValidationScript {
+                $script:finalValidationCalls++
+                return $false
+            }
+
+        $result | Should -BeFalse
+        $script:finalValidationCalls | Should -Be 1
+        [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($destination)) | Should -Be $before
+    }
+
+    It "rejects a protected destination before invoking the download transport" {
+        $script:tpRoot = Join-Path $TestDrive 'preflight-TeknoParrot'
+        Mock Invoke-TpmDownload { throw 'protected destination must not reach the transport' }
+
+        $result = Invoke-EggmanDatDownload -downloadUrl 'https://example.com/eggman.zip' `
+            -savePath (Join-Path $script:tpRoot 'Eggman.zip')
+
+        $result | Should -BeFalse
+        Should -Invoke Invoke-TpmDownload -Times 0
     }
 
     It "leaves the existing destination untouched and removes the temporary file when archive validation fails" {

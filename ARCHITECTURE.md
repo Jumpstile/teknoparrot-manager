@@ -322,10 +322,22 @@ incomplete download behind.
 The ordinary first-run `D` choice uses this default without asking the user for
 a save location. The existing `B` browse/import path remains available for a
 ZIP or standalone `.dat` the user already has. On a later explicit update,
-the save dialog remains available as an alternate-location override, and a
-valid configured Eggman ZIP is the default destination so it is not silently
-relocated. Every destination TPM may write is rejected when it overlaps the
-TeknoParrot root, either game ZIP source, or the game staging folder.
+the save dialog remains available as an alternate-location override. A
+configured ZIP under the TeknoParrot installation is still protected and is
+not an update write anchor. A valid configured ZIP in an allowed external
+directory, including the primary ZIP source, can remain the update destination
+when its canonical parent is reachable and non-reparse. Every destination TPM
+may write is rejected when it overlaps the TeknoParrot root, TPM program
+folder, supplementary game ZIP source, or game staging folder. A selected
+external mapped-drive or UNC destination must already have a reachable parent;
+TPM does not create an unavailable share.
+
+When a preferred path is missing or unsafe, the update flow explains the
+reason, uses the deterministic TPM-managed fallback when it is safe, and
+offers a browse retry when the user selected an invalid or unavailable path.
+The shared downloader repeats the exact destination assessment immediately
+before it removes an existing file or moves the validated partial archive into
+place. Reparse-backed destinations and parents remain fail-closed.
 
 Before reuse or replacement, the ZIP must meet the expected byte count (when
 known), open as a readable archive, and contain the collection DAT entry used

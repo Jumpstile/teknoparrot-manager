@@ -153,6 +153,15 @@
     the notes text file in the ZIP) for each newly registered game. The dat path
     can also be set in overrides.json (datFile key); that takes precedence.
 
+    Eggman downloads normally use the TPM-owned per-user data location
+    (%LOCALAPPDATA%\TeknoParrotManager\Eggman). On an explicit update, a
+    configured ZIP is an update anchor only when it is outside the TeknoParrot
+    installation, TPM program folder, supplementary source, and staging folder.
+    A reachable external primary ZIP folder can be used when its parent is
+    canonical and non-reparse. If a preferred path is missing or unsafe, TPM
+    explains the reason, uses a safe fallback when possible, and offers a
+    browse retry.
+
   - Already-registered detection. Before flagging a shared-executable folder
     as needing manual registration, the script checks whether any candidate
     profile already has a UserProfile XML (i.e. was registered via

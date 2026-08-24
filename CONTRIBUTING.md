@@ -44,6 +44,11 @@ lifecycle from filed to closed.
   workflow), update the relevant docs in the same change -- see
   `RELEASE-SAFETY-CHECKLIST.md` section 3 for what "the docs" means here
   (it's more than just `README.md`).
+- Work only from a local clone or local disposable worktree. GitHub is the
+  repository authority and a pushed review branch is the only cross-machine
+  handoff. Do not use a mapped drive, UNC path, SMB share, synchronized folder,
+  or NAS checkout as an active shared Git worktree; see
+  [`docs/LOCAL-WORKTREE-POLICY.md`](docs/LOCAL-WORKTREE-POLICY.md).
 
 ## Repository formatting
 
