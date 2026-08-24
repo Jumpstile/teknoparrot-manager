@@ -17,6 +17,10 @@ BeforeAll {
     foreach ($m in 'TPMCertification.Authority.psm1','TPMCertification.Production.psm1','TPMCertification.Reports.psm1','TPMCertification.Publication.psm1','TPMCertification.ProductionCycle.psm1','TPMCertification.ProductionFacts.psm1','TPMCertification.ProductionEvidence.psm1') {
         Import-Module (Join-Path $scriptsDir $m) -Force
     }
+    function New-TestCertificationIdentity {
+        $commit='a'*40;$hash='a'*64;$snapshot=[ordered]@{Branch='main';Commit=$commit;RemoteRef='origin/main';RemoteCommit=$commit;Clean=$true;RefSnapshotSha256=$hash;ReflogSnapshotSha256=$hash}
+        [ordered]@{ExpectedBranch='main';ExpectedCommit=$commit;Start=$snapshot;End=$snapshot;RefMutationDetected=$false;RefMutationReason=$null;IdentityValid=$true}
+    }
 
     function New-TPMSpyAuthorityV1([scriptblock]$RealAuthority) {
         $log = New-Object Collections.Generic.List[string]
@@ -69,7 +73,7 @@ BeforeAll {
         [IO.File]::WriteAllText((Join-Path $Report 'InstallHealth\InstallHealth.json'), '{}')
         $health = [pscustomobject]@{ Checks = @([pscustomobject]@{ Name = 'TeknoParrotUi.exe exists'; Passed = $true }, [pscustomobject]@{ Name = 'GameProfiles folder exists'; Passed = $true }, [pscustomobject]@{ Name = 'UserProfiles folder exists'; Passed = $true }) }
         $results = [pscustomobject]@{
-            SmokeMode = $true; Checks = @([pscustomobject]@{ Name = 'Repository available'; Passed = $true; Details = 'fixture repository is available' }); GitStatus = '(clean)'
+            SmokeMode = $true; Checks = @([pscustomobject]@{ Name = 'Repository available'; Passed = $true; Details = 'fixture repository is available' }); GitStatus = '(clean)'; CertificationIdentity = (New-TestCertificationIdentity)
             Pester = [pscustomobject]@{ Total = 2; Passed = $(if ($ForceIneligible) { 1 } else { 2 }); Failed = $(if ($ForceIneligible) { 1 } else { 0 }); Skipped = 0; NotRun = 0 }; PesterVersion = '5.7.1'; PowerShellVersion = '7.6.3'
             PSScriptAnalyzerFindings = 999; PSScriptAnalyzerVersion = 'decoy-legacy-value'
             Backup = [pscustomobject]@{ UserProfiles = $true; GameProfiles = $false }

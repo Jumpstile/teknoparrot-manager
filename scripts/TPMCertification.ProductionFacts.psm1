@@ -794,8 +794,11 @@ function New-TPMPreflightPngBytesV1 {
 function New-TPMPreflightSyntheticFactsV1 {
     param([Parameter(Mandatory=$true)][string]$ReportRoot)
     $hash='0'*64
+    $commit='0'*40
+    $identitySnapshot=[ordered]@{Branch='preflight';Commit=$commit;RemoteRef='origin/preflight';RemoteCommit=$commit;Clean=$true;RefSnapshotSha256=$hash;ReflogSnapshotSha256=$hash}
+    $identity=[ordered]@{ExpectedBranch='preflight';ExpectedCommit=$commit;Start=$identitySnapshot;End=$identitySnapshot;RefMutationDetected=$false;RefMutationReason=$null;IdentityValid=$true}
     @(
-        [ordered]@{Identifier='Repository';Applicable=$true;Data=[ordered]@{RepositoryPath='C:\preflight';RepositoryAvailable=$true;RepositoryClean=$true;GitStatus='(clean)'}}
+        [ordered]@{Identifier='Repository';Applicable=$true;Data=[ordered]@{RepositoryPath='C:\preflight';RepositoryAvailable=$true;RepositoryClean=$true;GitStatus='(clean)';CertificationIdentity=$identity}}
         [ordered]@{Identifier='Pester';Applicable=$true;Data=[ordered]@{Executed=$true;Total=1;Passed=1;Failed=0;Skipped=0;NotRun=0;Engine='preflight';SuiteSha256=$hash}}
         [ordered]@{Identifier='Static Analysis';Applicable=$true;Data=[ordered]@{Parser=@([ordered]@{Identifier='WindowsPowerShell51';Executed=$true;ErrorCount=0;ToolVersion='preflight'},[ordered]@{Identifier='Pwsh';Executed=$true;ErrorCount=0;ToolVersion='preflight'});Encoding=[ordered]@{Executed=$true;NonAsciiByteCount=0;Files=@('preflight.ps1')};PSScriptAnalyzer=[ordered]@{Executed=$true;FindingCount=0;ToolVersion='preflight'};InjectionHunter=[ordered]@{Executed=$true;FindingCount=0;UnresolvedFindingCount=0;ToolVersion='preflight';Dispositions=@()}}}
         [ordered]@{Identifier='Real Install Health';Applicable=$true;Data=[ordered]@{ReportPath=$null;LoadState='Missing';LoadError='preflight synthetic run: no real install health report';Checks=@()}}
@@ -971,6 +974,12 @@ function New-TPMProductionFactRecordsV1 {
     $mode=if($Results.SmokeMode){'Smoke'}else{'Unattended'}
     $checks=@{};foreach($c in @($Results.Checks)){$checks[[string]$c.Name]=[bool]$c.Passed}
     $testDigest=Get-TPMProductionTreeSha256V1 (Join-Path $RepositoryPath 'Tests')
+    $certificationIdentity=$null
+    if($null-ne$Results-and$Results.PSObject.Properties.Name-ccontains'CertificationIdentity'){$certificationIdentity=$Results.CertificationIdentity}
+    if($null-eq$certificationIdentity){
+        $missingSnapshot=[ordered]@{Branch=$null;Commit=$null;RemoteRef=$null;RemoteCommit=$null;Clean=$false;RefSnapshotSha256=$null;ReflogSnapshotSha256=$null}
+        $certificationIdentity=[ordered]@{ExpectedBranch=$null;ExpectedCommit=$null;Start=$missingSnapshot;End=$missingSnapshot;RefMutationDetected=$false;RefMutationReason='CERTIFICATION_IDENTITY_NOT_CAPTURED';IdentityValid=$false}
+    }
 
     $healthPath=Join-Path $ReportDirectory 'InstallHealth\InstallHealth.json'
     if($HealthLoadError){
@@ -1096,7 +1105,7 @@ function New-TPMProductionFactRecordsV1 {
     }
 
     return @(
-        [ordered]@{Identifier='Repository';Applicable=$true;Data=[ordered]@{RepositoryPath=[IO.Path]::GetFullPath($RepositoryPath);RepositoryAvailable=[bool]$checks['Repository available'];RepositoryClean=($Results.GitStatus-ceq'(clean)');GitStatus=[string]$Results.GitStatus}}
+        [ordered]@{Identifier='Repository';Applicable=$true;Data=[ordered]@{RepositoryPath=[IO.Path]::GetFullPath($RepositoryPath);RepositoryAvailable=[bool]$checks['Repository available'];RepositoryClean=($Results.GitStatus-ceq'(clean)');GitStatus=[string]$Results.GitStatus;CertificationIdentity=$certificationIdentity}}
         [ordered]@{Identifier='Pester';Applicable=$true;Data=[ordered]@{Executed=($null-ne$Results.Pester);Total=[int]$Results.Pester.Total;Passed=[int]$Results.Pester.Passed;Failed=[int]$Results.Pester.Failed;Skipped=[int]$Results.Pester.Skipped;NotRun=[int]$Results.Pester.NotRun;Engine=("Pester {0} / PowerShell {1}"-f$Results.PesterVersion,$Results.PowerShellVersion);SuiteSha256=$testDigest}}
         $staticAnalysisFact
         [ordered]@{Identifier='Real Install Health';Applicable=$true;Data=[ordered]@{ReportPath=$(if(Test-Path -LiteralPath $healthPath -PathType Leaf){[IO.Path]::GetFullPath($healthPath)}else{$null});LoadState=$healthState;LoadError=$(if($healthState-ceq'Loaded'){$null}else{[string]$HealthLoadError});Checks=$healthChecks}}

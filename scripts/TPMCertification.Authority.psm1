@@ -152,7 +152,7 @@ $script:TpmEvidenceFailureCodesV1 = @(
     'EVIDENCE_HASH_FAILED','EVIDENCE_SKIPPED'
 )
 $script:TpmFactFailureCodesV1 = @(
-    'REPOSITORY_UNAVAILABLE','REPOSITORY_DIRTY',
+    'REPOSITORY_UNAVAILABLE','REPOSITORY_DIRTY','REPOSITORY_IDENTITY_INVALID',
     'PESTER_NOT_EXECUTED','PESTER_EMPTY','PESTER_FAILURES','PESTER_NOT_RUN','PESTER_COUNTS_INVALID',
     'PARSER_NOT_EXECUTED','PARSER_ERRORS','ENCODING_NOT_EXECUTED','ENCODING_NON_ASCII',
     'ANALYZER_NOT_EXECUTED','PSSCRIPTANALYZER_FINDINGS','INJECTION_FINDING_UNRESOLVED',
@@ -190,6 +190,31 @@ function Assert-TPMIntegerV1 { param($Value,[string]$Context,[long]$Minimum=0) i
 function Assert-TPMStringV1 { param($Value,[string]$Context,[switch]$Nullable) if($null-eq$Value){if($Nullable){return};throw "SCHEMA_INVALID: $Context is required"};if($Value-isnot[string]-or[string]::IsNullOrWhiteSpace($Value)){throw "SCHEMA_INVALID: $Context must be a non-empty string"} }
 function Assert-TPMNullableHashV1 { param($Value,[string]$Context) if($null-ne$Value-and($Value-isnot[string]-or$Value-cnotmatch'^[0-9a-f]{64}$')){throw "SCHEMA_INVALID: $Context must be null or lowercase SHA-256"} }
 function Assert-TPMNormalizedPathV1 { param($Value,[string]$Context,[switch]$Nullable) if($null-eq$Value){if($Nullable){return};throw "SCHEMA_INVALID: $Context is required"};Assert-TPMStringV1 $Value $Context;if(-not[IO.Path]::IsPathRooted($Value)){throw "SCHEMA_INVALID: $Context must be absolute"};$full=[IO.Path]::GetFullPath($Value).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar);if($full-cne$Value.TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)){throw "SCHEMA_INVALID: $Context is not normalized"} }
+function Assert-TPMNullableGitCommitV1 { param($Value,[string]$Context) if($null-ne$Value-and($Value-isnot[string]-or$Value-cnotmatch'^[0-9a-f]{40}$')){throw "SCHEMA_INVALID: $Context must be null or lowercase Git SHA-1"} }
+function Assert-TPMCertificationGitIdentitySnapshotV1 {
+    param($Value,[string]$Context)
+    $d=Assert-TPMExactFieldsV1 $Value @('Branch','Commit','RemoteRef','RemoteCommit','Clean','RefSnapshotSha256','ReflogSnapshotSha256') $Context
+    Assert-TPMStringV1 $d.Branch ($Context+'.Branch') -Nullable
+    Assert-TPMNullableGitCommitV1 $d.Commit ($Context+'.Commit')
+    Assert-TPMStringV1 $d.RemoteRef ($Context+'.RemoteRef') -Nullable
+    Assert-TPMNullableGitCommitV1 $d.RemoteCommit ($Context+'.RemoteCommit')
+    Assert-TPMBooleanV1 $d.Clean ($Context+'.Clean')
+    Assert-TPMNullableHashV1 $d.RefSnapshotSha256 ($Context+'.RefSnapshotSha256')
+    Assert-TPMNullableHashV1 $d.ReflogSnapshotSha256 ($Context+'.ReflogSnapshotSha256')
+    return $d
+}
+function Assert-TPMCertificationGitIdentityV1 {
+    param($Value,[string]$Context)
+    $d=Assert-TPMExactFieldsV1 $Value @('ExpectedBranch','ExpectedCommit','Start','End','RefMutationDetected','RefMutationReason','IdentityValid') $Context
+    Assert-TPMStringV1 $d.ExpectedBranch ($Context+'.ExpectedBranch') -Nullable
+    Assert-TPMNullableGitCommitV1 $d.ExpectedCommit ($Context+'.ExpectedCommit')
+    Assert-TPMCertificationGitIdentitySnapshotV1 $d.Start ($Context+'.Start')
+    Assert-TPMCertificationGitIdentitySnapshotV1 $d.End ($Context+'.End')
+    Assert-TPMBooleanV1 $d.RefMutationDetected ($Context+'.RefMutationDetected')
+    Assert-TPMStringV1 $d.RefMutationReason ($Context+'.RefMutationReason') -Nullable
+    Assert-TPMBooleanV1 $d.IdentityValid ($Context+'.IdentityValid')
+    return $d
+}
 function Assert-TPMDiagnosticRecordV1 {
     # Item 3 audit (ADR155-0309 follow-up round): the PSScriptAnalyzer/
     # InjectionHunter tool-execution wrappers construct a Diagnostic record
@@ -226,7 +251,7 @@ function Assert-TPMFactRecordV1 {
     $identifier=[string]$recordMap.Identifier;$data=Get-TPMValueMapV1 $recordMap.Data
     if($script:TpmFactIdentifiersV1-cnotcontains$identifier){throw "FACT_IDENTIFIER_INVALID: $identifier"}
     switch -CaseSensitive($identifier){
-      'Repository' {$d=Assert-TPMExactFieldsV1 $data @('RepositoryPath','RepositoryAvailable','RepositoryClean','GitStatus') $identifier;Assert-TPMNormalizedPathV1 $d.RepositoryPath 'RepositoryPath';Assert-TPMBooleanV1 $d.RepositoryAvailable 'RepositoryAvailable';Assert-TPMBooleanV1 $d.RepositoryClean 'RepositoryClean';Assert-TPMStringV1 $d.GitStatus 'GitStatus'}
+      'Repository' {$d=Assert-TPMExactFieldsV1 $data @('RepositoryPath','RepositoryAvailable','RepositoryClean','GitStatus','CertificationIdentity') $identifier;Assert-TPMNormalizedPathV1 $d.RepositoryPath 'RepositoryPath';Assert-TPMBooleanV1 $d.RepositoryAvailable 'RepositoryAvailable';Assert-TPMBooleanV1 $d.RepositoryClean 'RepositoryClean';Assert-TPMStringV1 $d.GitStatus 'GitStatus';Assert-TPMCertificationGitIdentityV1 $d.CertificationIdentity 'CertificationIdentity'|Out-Null}
       'Pester' {$d=Assert-TPMExactFieldsV1 $data @('Executed','Total','Passed','Failed','Skipped','NotRun','Engine','SuiteSha256') $identifier;Assert-TPMBooleanV1 $d.Executed 'Executed';foreach($n in @('Total','Passed','Failed','Skipped','NotRun')){Assert-TPMIntegerV1 $d[$n] $n};if(([long]$d.Passed+[long]$d.Failed+[long]$d.Skipped+[long]$d.NotRun)-ne[long]$d.Total){throw 'SCHEMA_INVALID: Pester counts'};if($d.Executed){Assert-TPMStringV1 $d.Engine 'Engine';Assert-TPMNullableHashV1 $d.SuiteSha256 'SuiteSha256';if($null-eq$d.SuiteSha256){throw 'SCHEMA_INVALID: SuiteSha256 required'}}elseif($null-ne$d.Engine-or$null-ne$d.SuiteSha256){throw 'SCHEMA_INVALID: unexecuted Pester metadata must be null'}}
       'Static Analysis' {$d=Assert-TPMExactFieldsV1 $data @('Parser','Encoding','PSScriptAnalyzer','InjectionHunter') $identifier;$parser=@($d.Parser);if($parser.Count-ne2){throw 'SCHEMA_INVALID: Parser count'};foreach($i in 0..1){$p=Assert-TPMExactFieldsV1 $parser[$i] @('Identifier','Executed','ErrorCount','ToolVersion') 'Parser';$expected=@('WindowsPowerShell51','Pwsh')[$i];if($p.Identifier-cne$expected){throw 'SCHEMA_INVALID: Parser order'};Assert-TPMBooleanV1 $p.Executed 'Parser Executed';Assert-TPMIntegerV1 $p.ErrorCount 'Parser ErrorCount';if($p.Executed){Assert-TPMStringV1 $p.ToolVersion 'Parser ToolVersion'}elseif($null-ne$p.ToolVersion){throw 'SCHEMA_INVALID: Parser ToolVersion'}};$e=Assert-TPMExactFieldsV1 $d.Encoding @('Executed','NonAsciiByteCount','Files') 'Encoding';Assert-TPMBooleanV1 $e.Executed 'Encoding Executed';Assert-TPMIntegerV1 $e.NonAsciiByteCount 'NonAsciiByteCount';if(@($e.Files).Count-eq0){throw 'SCHEMA_INVALID: Encoding Files'};foreach($f in @($e.Files)){Assert-TPMStringV1 $f 'Encoding file';if([IO.Path]::IsPathRooted($f)-or$f.Contains('\')-or@($f-split'[\\/]'|Where-Object{$_-eq'.'-or$_-eq'..'}).Count-gt0){throw 'SCHEMA_INVALID: Encoding file must be normalized repository-relative'}};$a=Assert-TPMExactFieldsV1 $d.PSScriptAnalyzer @('Executed','FindingCount','ToolVersion') 'PSScriptAnalyzer';Assert-TPMBooleanV1 $a.Executed 'Analyzer Executed';Assert-TPMIntegerV1 $a.FindingCount 'FindingCount';if($a.Executed){Assert-TPMStringV1 $a.ToolVersion 'Analyzer ToolVersion'}elseif($null-ne$a.ToolVersion){throw 'SCHEMA_INVALID: Analyzer ToolVersion'};$h=Assert-TPMExactFieldsV1 $d.InjectionHunter @('Executed','FindingCount','UnresolvedFindingCount','ToolVersion','Dispositions') 'InjectionHunter';Assert-TPMBooleanV1 $h.Executed 'InjectionHunter Executed';Assert-TPMIntegerV1 $h.FindingCount 'IH FindingCount';Assert-TPMIntegerV1 $h.UnresolvedFindingCount 'IH unresolved';if(@($h.Dispositions).Count-ne[long]$h.FindingCount){throw 'SCHEMA_INVALID: disposition count'};foreach($x in @($h.Dispositions)){$m=Assert-TPMExactFieldsV1 $x @('FindingIdentifier','Disposition') 'Disposition';Assert-TPMStringV1 $m.FindingIdentifier 'FindingIdentifier';if(@('Confirmed','Mitigated','FalsePositive')-cnotcontains$m.Disposition){throw 'SCHEMA_INVALID: Disposition'}};if([long]$h.UnresolvedFindingCount-ne@($h.Dispositions|Where-Object{$_.Disposition-ceq'Confirmed'}).Count){throw 'SCHEMA_INVALID: IH unresolved count'};if($h.Executed){Assert-TPMStringV1 $h.ToolVersion 'IH ToolVersion'}elseif($null-ne$h.ToolVersion){throw 'SCHEMA_INVALID: IH ToolVersion'}}
       'Real Install Health' {$d=Assert-TPMExactFieldsV1 $data @('ReportPath','LoadState','LoadError','Checks') $identifier;if(@('Loaded','Missing','InvalidJson')-cnotcontains$d.LoadState){throw 'SCHEMA_INVALID: health LoadState'};Assert-TPMNormalizedPathV1 $d.ReportPath 'ReportPath' -Nullable;if($d.LoadState-ceq'Loaded'){if($null-ne$d.LoadError){throw 'SCHEMA_INVALID: loaded health error'};$checks=@($d.Checks);if($checks.Count-ne3){throw 'SCHEMA_INVALID: health check count'};for($i=0;$i-lt3;$i++){$c=Assert-TPMExactFieldsV1 $checks[$i] @('Name','Passed') 'health check';if($c.Name-cne@('TeknoParrotUi.exe exists','GameProfiles folder exists','UserProfiles folder exists')[$i]){throw 'SCHEMA_INVALID: health check order'};Assert-TPMBooleanV1 $c.Passed 'health Passed'}}else{Assert-TPMStringV1 $d.LoadError 'LoadError';if(@($d.Checks).Count-ne0){throw 'SCHEMA_INVALID: unloaded health checks'}}}
@@ -246,7 +271,7 @@ function Get-TPMFactDecisionV1 {
     function Add-Reason([string]$Code){$reasons.Add((New-TPMReasonV1 $Code $Code))}
     if(-not$Record.Applicable){return [ordered]@{Identifier=$identifier;Status='NotApplicable';Passed=$null;Details=(Copy-TPMClosedValueV1 $data);FailureReasons=@()}}
     switch -CaseSensitive($identifier){
-      'Repository' {if(-not$data.RepositoryAvailable){Add-Reason 'REPOSITORY_UNAVAILABLE'};if($data.RepositoryAvailable-and-not$data.RepositoryClean){Add-Reason 'REPOSITORY_DIRTY'}}
+      'Repository' {if(-not$data.RepositoryAvailable){Add-Reason 'REPOSITORY_UNAVAILABLE'};if($data.RepositoryAvailable-and-not$data.RepositoryClean){Add-Reason 'REPOSITORY_DIRTY'};if(-not$data.CertificationIdentity.IdentityValid){Add-Reason 'REPOSITORY_IDENTITY_INVALID'}}
       'Pester' {if(-not$data.Executed){Add-Reason 'PESTER_NOT_EXECUTED'};if($data.Executed-and$data.Total-eq0){Add-Reason 'PESTER_EMPTY'};if($data.Failed-gt0){Add-Reason 'PESTER_FAILURES'};if($data.NotRun-gt0){Add-Reason 'PESTER_NOT_RUN'};if(($data.Passed+$data.Failed+$data.Skipped+$data.NotRun)-ne$data.Total){Add-Reason 'PESTER_COUNTS_INVALID'}}
       'Static Analysis' {if(@($data.Parser|Where-Object{-not$_.Executed}).Count-gt0){Add-Reason 'PARSER_NOT_EXECUTED'};if(@($data.Parser|Where-Object{$_.ErrorCount-gt0}).Count-gt0){Add-Reason 'PARSER_ERRORS'};if(-not$data.Encoding.Executed){Add-Reason 'ENCODING_NOT_EXECUTED'};if($data.Encoding.NonAsciiByteCount-gt0){Add-Reason 'ENCODING_NON_ASCII'};if(-not$data.PSScriptAnalyzer.Executed-or-not$data.InjectionHunter.Executed){Add-Reason 'ANALYZER_NOT_EXECUTED'};if($data.PSScriptAnalyzer.FindingCount-gt0){Add-Reason 'PSSCRIPTANALYZER_FINDINGS'};if($data.InjectionHunter.UnresolvedFindingCount-gt0){Add-Reason 'INJECTION_FINDING_UNRESOLVED'}}
       'Real Install Health' {if($data.LoadState-ceq'Missing'){Add-Reason 'HEALTH_REPORT_MISSING'}elseif($data.LoadState-ceq'InvalidJson'){Add-Reason 'HEALTH_REPORT_INVALID'}else{foreach($c in $data.Checks){if(-not$c.Passed){Add-Reason 'HEALTH_CHECK_FAILED'}}}}

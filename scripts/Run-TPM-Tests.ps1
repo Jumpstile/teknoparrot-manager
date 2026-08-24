@@ -4,6 +4,8 @@ param(
     [string]$TeknoParrotRoot,
     [string]$HarnessRoot,
     [switch]$RunUnattendedTPM,
+    [string]$ExpectedBranch,
+    [string]$ExpectedCommit,
     [switch]$NoPwshRelaunch,
     [ValidateSet('Summary', 'Detailed', 'Diagnostic')]
     [string]$VerbosityLevel = 'Summary',
@@ -66,6 +68,8 @@ if (-not $NoPwshRelaunch -and $PSVersionTable.PSEdition -ne 'Core') {
         '-PesterRegressionTimeoutSeconds',[string]$PesterRegressionTimeoutSeconds
     )
     if($RunUnattendedTPM){$argsList+='-RunUnattendedTPM'}
+    if(-not[string]::IsNullOrWhiteSpace($ExpectedBranch)){$argsList+='-ExpectedBranch';$argsList+=$ExpectedBranch}
+    if(-not[string]::IsNullOrWhiteSpace($ExpectedCommit)){$argsList+='-ExpectedCommit';$argsList+=$ExpectedCommit}
     # WorkingDirectory's trust anchor is $RepoPath itself (the caller's
     # own repo checkout -- no narrower, more-authoritative root than the
     # repo root is available or meaningful here; Root == Target is the
@@ -82,6 +86,7 @@ $pesterChild=Join-Path $PSScriptRoot 'Invoke-TPM-PesterChild.ps1'
 $settings=Join-Path $RepoPath 'PSScriptAnalyzerSettings.psd1'
 $registry=Join-Path $PSScriptRoot 'InjectionHunterDispositions.psd1'
 $failures=New-Object Collections.Generic.List[string]
+$identity=$null
 foreach($required in @($harness,$pesterChild,$executionModule,$settings,$registry,(Join-Path $RepoPath 'Tests'))){
     if(-not(Test-Path -LiteralPath $required)){[void]$failures.Add("Required certification dependency is missing: $required")}
 }
@@ -116,6 +121,16 @@ try{
     $scopedGitArguments=@('-c',("safe.directory={0}"-f$resolvedRepo),'-C',$resolvedRepo)
     $commit=(& git @scopedGitArguments rev-parse HEAD 2>$null)
     if($LASTEXITCODE-ne0-or[string]::IsNullOrWhiteSpace($commit)){throw 'git could not read HEAD'}
+    $identity=Get-TPMCertificationGitIdentitySnapshotV1 -RepositoryPath $resolvedRepo
+    if(-not$identity.Clean){[void]$failures.Add('Certification worktree must be clean immediately before the run.')}
+    if([string]::IsNullOrWhiteSpace([string]$identity.Branch)-or[string]$identity.Branch-ceq'HEAD'){[void]$failures.Add('Certification checkout must be on a named branch, not detached HEAD.')}
+    if([string]::IsNullOrWhiteSpace([string]$identity.RemoteRef)-or[string]::IsNullOrWhiteSpace([string]$identity.RemoteCommit)){[void]$failures.Add('Certification checkout must have a readable cached upstream ref and remote SHA.')}
+    elseif([string]$identity.Commit-ne[string]$identity.RemoteCommit){[void]$failures.Add("Certification HEAD $($identity.Commit) does not match cached remote SHA $($identity.RemoteCommit).")}
+    if([string]::IsNullOrWhiteSpace([string]$identity.RefSnapshotSha256)){[void]$failures.Add('Certification checkout ref snapshot could not be captured.')}
+    if([string]::IsNullOrWhiteSpace([string]$identity.ReflogSnapshotSha256)){[void]$failures.Add('Certification checkout reflog snapshot could not be captured.')}
+    if(-not[string]::IsNullOrWhiteSpace($ExpectedBranch)-and[string]$identity.Branch-ne$ExpectedBranch){[void]$failures.Add("Expected branch '$ExpectedBranch' but found '$($identity.Branch)'.")}
+    if(-not[string]::IsNullOrWhiteSpace($ExpectedCommit)-and[string]$identity.Commit-ne$ExpectedCommit){[void]$failures.Add("Expected HEAD '$ExpectedCommit' but found '$($identity.Commit)'.")}
+    if(-not[string]::IsNullOrWhiteSpace($ExpectedCommit)-and[string]$identity.RemoteCommit-ne$ExpectedCommit){[void]$failures.Add("Expected remote SHA '$ExpectedCommit' but found '$($identity.RemoteCommit)'.")}
 }catch{[void]$failures.Add("Repository is not readable: $($_.Exception.Message)")}
 foreach($directory in @($HarnessRoot,$reportDirectory,$logDirectory)){
     try{
@@ -131,7 +146,13 @@ $commit=(& git @scopedGitArguments rev-parse HEAD).Trim()
 Write-Host 'TeknoParrot Manager Certification'
 Write-Host ''
 Write-Host ("Target repository: {0}"-f$resolvedRepo)
+Write-Host ("Target branch:     {0}"-f$identity.Branch)
 Write-Host ("Target commit:     {0}"-f$commit)
+Write-Host ("Remote ref:        {0}"-f$identity.RemoteRef)
+Write-Host ("Remote SHA:        {0}"-f$identity.RemoteCommit)
+Write-Host ("Worktree clean:    {0}"-f$identity.Clean)
+if(-not[string]::IsNullOrWhiteSpace($ExpectedBranch)){Write-Host ("Expected branch:   {0}"-f$ExpectedBranch)}
+if(-not[string]::IsNullOrWhiteSpace($ExpectedCommit)){Write-Host ("Expected SHA:      {0}"-f$ExpectedCommit)}
 Write-Host ("TeknoParrot:       {0}"-f$resolvedRoot)
 Write-Host ("Reports:           {0}"-f$reportDirectory)
 Write-Host ("Technical log:     {0}"-f$logDirectory)
@@ -149,6 +170,8 @@ $params=@(
     '-PesterRegressionTimeoutSeconds',[string]$PesterRegressionTimeoutSeconds
 )
 if($RunUnattendedTPM){$params+='-RunUnattendedTPM'}
+if(-not[string]::IsNullOrWhiteSpace($ExpectedBranch)){$params+='-ExpectedBranch';$params+=$ExpectedBranch}
+if(-not[string]::IsNullOrWhiteSpace($ExpectedCommit)){$params+='-ExpectedCommit';$params+=$ExpectedCommit}
 $harnessResult=$null
 try{
     $harnessResult=Invoke-TPMIsolatedProcessV1 -FilePath (Get-Command pwsh).Source -ArgumentList $params -WorkingDirectoryRoot $resolvedRepo -WorkingDirectory $resolvedRepo -LogDirectoryRoot $reportDirectory -LogDirectory $logDirectory -Identity 'certification-harness' -TimeoutSeconds ($PesterRegressionTimeoutSeconds+1800) -OperatorStatusPath $statusPath -RelayOperatorStatus -Environment @{GIT_TERMINAL_PROMPT='0';NO_COLOR='1';TERM='dumb'}

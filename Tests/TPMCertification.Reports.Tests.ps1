@@ -6,10 +6,14 @@ BeforeAll {
  Import-Module $modulePath -Force
  $productionModulePath=Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\TPMCertification.Production.psm1'
  Import-Module $productionModulePath -Force
+ function New-TestCertificationIdentity {
+  $commit='a'*40;$hash='a'*64;$snapshot=[ordered]@{Branch='main';Commit=$commit;RemoteRef='origin/main';RemoteCommit=$commit;Clean=$true;RefSnapshotSha256=$hash;ReflogSnapshotSha256=$hash}
+  [ordered]@{ExpectedBranch='main';ExpectedCommit=$commit;Start=$snapshot;End=$snapshot;RefMutationDetected=$false;RefMutationReason=$null;IdentityValid=$true}
+ }
  function New-TestFacts([string]$Root,[string]$Mode='Smoke'){
   $hash='a'*64;$repo=[IO.Path]::GetFullPath((Join-Path $Root 'repo'));$report=[IO.Path]::GetFullPath((Join-Path $Root 'report'));$backup=[IO.Path]::GetFullPath((Join-Path $Root 'backup'))
   @(
-   [ordered]@{Identifier='Repository';Applicable=$true;Data=[ordered]@{RepositoryPath=$repo;RepositoryAvailable=$true;RepositoryClean=$true;GitStatus='(clean)'}}
+   [ordered]@{Identifier='Repository';Applicable=$true;Data=[ordered]@{RepositoryPath=$repo;RepositoryAvailable=$true;RepositoryClean=$true;GitStatus='(clean)';CertificationIdentity=(New-TestCertificationIdentity)}}
    [ordered]@{Identifier='Pester';Applicable=$true;Data=[ordered]@{Executed=$true;Total=2;Passed=2;Failed=0;Skipped=0;NotRun=0;Engine='Pester 5.7.1 / pwsh 7.6.3';SuiteSha256=$hash}}
    [ordered]@{Identifier='Static Analysis';Applicable=$true;Data=[ordered]@{Parser=@([ordered]@{Identifier='WindowsPowerShell51';Executed=$true;ErrorCount=0;ToolVersion='5.1'},[ordered]@{Identifier='Pwsh';Executed=$true;ErrorCount=0;ToolVersion='7.6.3'});Encoding=[ordered]@{Executed=$true;NonAsciiByteCount=0;Files=@('TeknoParrot-Manager.ps1')};PSScriptAnalyzer=[ordered]@{Executed=$true;FindingCount=0;ToolVersion='1.24.0'};InjectionHunter=[ordered]@{Executed=$true;FindingCount=0;UnresolvedFindingCount=0;ToolVersion='1.0.0';Dispositions=@()}}}
    [ordered]@{Identifier='Real Install Health';Applicable=$true;Data=[ordered]@{ReportPath=(Join-Path $report 'InstallHealth.json');LoadState='Loaded';LoadError=$null;Checks=@([ordered]@{Name='TeknoParrotUi.exe exists';Passed=$true},[ordered]@{Name='GameProfiles folder exists';Passed=$true},[ordered]@{Name='UserProfiles folder exists';Passed=$true})}}
@@ -524,6 +528,20 @@ Describe 'ADR-0155 Phase 3 validation report builder' {
   $decodedFactsHash=-join([Security.Cryptography.SHA256]::Create().ComputeHash($utf8.GetBytes($decodedFacts))|ForEach-Object{$_.ToString('x2')})
   $factSetShaLine=@($lines|Where-Object{$_-like 'Fact-Set-SHA256:*'})[0]
   $factSetShaLine|Should -Be "Fact-Set-SHA256: $decodedFactsHash"
+  $decodedFactsObject=$decodedFacts|ConvertFrom-Json
+  $repositoryFact=@($decodedFactsObject|Where-Object{$_.Identifier-ceq'Repository'})[0]
+  $repositoryFact.Data.RepositoryClean|Should -BeTrue
+  $repositoryFact.Data.CertificationIdentity.IdentityValid|Should -BeTrue
+  $repositoryFact.Data.CertificationIdentity.RefMutationDetected|Should -BeFalse
+  $repositoryFact.Data.CertificationIdentity.Start.Branch|Should -Be 'main'
+  $repositoryFact.Data.CertificationIdentity.Start.Commit|Should -Be ('a'*40)
+  $repositoryFact.Data.CertificationIdentity.Start.RemoteRef|Should -Be 'origin/main'
+  $repositoryFact.Data.CertificationIdentity.Start.RemoteCommit|Should -Be ('a'*40)
+  $repositoryFact.Data.CertificationIdentity.Start.Clean|Should -BeTrue
+  $repositoryFact.Data.CertificationIdentity.End.Branch|Should -Be 'main'
+  $repositoryFact.Data.CertificationIdentity.End.Commit|Should -Be ('a'*40)
+  $repositoryFact.Data.CertificationIdentity.End.RemoteCommit|Should -Be ('a'*40)
+  $repositoryFact.Data.CertificationIdentity.End.Clean|Should -BeTrue
 
   $evidenceLine=@($lines|Where-Object{$_-like 'Evidence-JCS-Base64Url:*'})[0]
   $evidenceEncoded=$evidenceLine.Substring('Evidence-JCS-Base64Url: '.Length)

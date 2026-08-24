@@ -20,10 +20,19 @@ Describe 'certification launcher exit propagation' {
   Copy-Item -LiteralPath $pesterChildSource -Destination (Join-Path $fakeScripts 'Invoke-TPM-PesterChild.ps1')
   Copy-Item -LiteralPath $settingsSource -Destination (Join-Path $fakeRepo 'PSScriptAnalyzerSettings.psd1')
   Copy-Item -LiteralPath $registrySource -Destination (Join-Path $fakeScripts 'InjectionHunterDispositions.psd1')
+  Set-Content -LiteralPath (Join-Path $fakeRepo '.gitignore') -Value 'scripts/Invoke-TPM-RealInstanceSmoke.ps1' -Encoding ascii
   git -C $fakeRepo init --quiet
   git -C $fakeRepo config user.email 'fixture@example.invalid'
   git -C $fakeRepo config user.name 'Fixture'
+  git -C $fakeRepo add --all
   git -C $fakeRepo commit --allow-empty -m 'fixture' --quiet
+  $fakeBranch=(git -C $fakeRepo rev-parse --abbrev-ref HEAD).Trim()
+  $fakeHead=(git -C $fakeRepo rev-parse HEAD).Trim()
+  git -C $fakeRepo update-ref ("refs/remotes/origin/{0}"-f$fakeBranch) $fakeHead
+  git -C $fakeRepo config remote.origin.url https://example.invalid/tpm.git
+  git -C $fakeRepo config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+  git -C $fakeRepo config ("branch.{0}.remote"-f$fakeBranch) origin
+  git -C $fakeRepo config ("branch.{0}.merge"-f$fakeBranch) ("refs/heads/{0}"-f$fakeBranch)
   function Set-FakeHarnessExit {
    @'
 param(
