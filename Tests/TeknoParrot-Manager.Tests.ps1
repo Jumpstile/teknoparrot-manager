@@ -5789,6 +5789,8 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
         $destination = Join-Path $TestDrive 'safe\Eggman.zip'
         $script:destinationChecks = 0
         $script:capturedValidation = $null
+        $script:validationResult = $null
+        $script:validationPath = Join-Path $TestDrive 'partial.zip'
         Mock Test-EggmanDatDestinationSafe {
             $script:destinationChecks++
             return ($script:destinationChecks -eq 1)
@@ -5796,13 +5798,14 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
         Mock Invoke-TpmDownload {
             param([scriptblock]$ValidationScript)
             $script:capturedValidation = $ValidationScript
+            $script:validationResult = & $ValidationScript $script:validationPath
             return $true
         }
         Mock Write-Log {}
 
         Invoke-EggmanDatDownload -downloadUrl 'https://example.com/eggman.zip' -savePath $destination | Should -BeTrue
         $script:capturedValidation | Should -Not -BeNullOrEmpty
-        (& $script:capturedValidation (Join-Path $TestDrive 'partial.zip')) | Should -BeFalse
+        $script:validationResult | Should -BeFalse
         $script:destinationChecks | Should -Be 2
     }
 
