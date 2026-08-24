@@ -794,14 +794,17 @@ function New-TPMPreflightPngBytesV1 {
 function New-TPMPreflightSyntheticFactsV1 {
     param([Parameter(Mandatory=$true)][string]$ReportRoot)
     $hash='0'*64
+    $commit='0'*40
+    $identitySnapshot=[ordered]@{Branch='preflight';Commit=$commit;RemoteRef='origin/preflight';RemoteCommit=$commit;Clean=$true;RefSnapshotSha256=$hash;ReflogSnapshotSha256=$hash}
+    $identity=[ordered]@{ExpectedBranch='preflight';ExpectedCommit=$commit;Start=$identitySnapshot;End=$identitySnapshot;RefMutationDetected=$false;RefMutationReason=$null;IdentityValid=$true}
     @(
-        [ordered]@{Identifier='Repository';Applicable=$true;Data=[ordered]@{RepositoryPath='C:\preflight';RepositoryAvailable=$true;RepositoryClean=$true;GitStatus='(clean)'}}
+        [ordered]@{Identifier='Repository';Applicable=$true;Data=[ordered]@{RepositoryPath='C:\preflight';RepositoryAvailable=$true;RepositoryClean=$true;GitStatus='(clean)';CertificationIdentity=$identity}}
         [ordered]@{Identifier='Pester';Applicable=$true;Data=[ordered]@{Executed=$true;Total=1;Passed=1;Failed=0;Skipped=0;NotRun=0;Engine='preflight';SuiteSha256=$hash}}
         [ordered]@{Identifier='Static Analysis';Applicable=$true;Data=[ordered]@{Parser=@([ordered]@{Identifier='WindowsPowerShell51';Executed=$true;ErrorCount=0;ToolVersion='preflight'},[ordered]@{Identifier='Pwsh';Executed=$true;ErrorCount=0;ToolVersion='preflight'});Encoding=[ordered]@{Executed=$true;NonAsciiByteCount=0;Files=@('preflight.ps1')};PSScriptAnalyzer=[ordered]@{Executed=$true;FindingCount=0;ToolVersion='preflight'};InjectionHunter=[ordered]@{Executed=$true;FindingCount=0;UnresolvedFindingCount=0;ToolVersion='preflight';Dispositions=@()}}}
         [ordered]@{Identifier='Real Install Health';Applicable=$true;Data=[ordered]@{ReportPath=$null;LoadState='Missing';LoadError='preflight synthetic run: no real install health report';Checks=@()}}
         [ordered]@{Identifier='Backups';Applicable=$true;Data=[ordered]@{UserProfilesBackupCreated=$false;UserProfilesBackupPath=$null;UserProfilesBackupVerified=$false;UserProfilesBackupSha256=$null;GameProfilesBackupCreated=$false;GameProfilesBackupPath=$null;GameProfilesBackupVerified=$false;GameProfilesBackupSha256=$null;BackupVerificationExecuted=$true}}
         [ordered]@{Identifier='Smoke File Safety';Applicable=$true;Data=[ordered]@{UserProfiles=[ordered]@{Added=0;Removed=0;Changed=0;BeforeSkipped=0;AfterSkipped=0};GameProfiles=[ordered]@{Added=0;Removed=0;Changed=0;BeforeSkipped=0;AfterSkipped=0};Pcsx2x6Crosshairs=[ordered]@{Added=0;Removed=0;Changed=0;BeforeSkipped=0;AfterSkipped=0}}}
-        [ordered]@{Identifier='Artifacts';Applicable=$true;Data=[ordered]@{ReportDirectory=$ReportRoot;ReportDirectoryReserved=$true;StagingDirectoryReady=$true;RequiredArtifactManifestConfigured=$true;PublisherAvailable=$true;PackageValidationExecuted=$true;PackageValidationPassed=$true;PackageValidationErrorCount=0}}
+        [ordered]@{Identifier='Artifacts';Applicable=$true;Data=[ordered]@{ReportDirectory=$ReportRoot;ReportDirectoryReserved=$true;StagingDirectoryReady=$true;RequiredArtifactManifestConfigured=$true;PublisherAvailable=$true;PackageValidationExecuted=$true;PackageValidationPassed=$true;PackageValidationErrorCount=0;PackageValidationDiagnostics=@()}}
         [ordered]@{Identifier='pcsx2x6 crosshair path (issue #79)';Applicable=$false;Data=[ordered]@{Present=$false;CanonicalFilesDeployed=$false;LegacyRootPresent=$false;IniFound=$false;CursorPathPointsCanonical=$false;Pcsx2Directory=$null}}
         [ordered]@{Identifier='Behavioral Certification (Virtual Beta Tester)';Applicable=$true;Data=[ordered]@{Executed=$true;Total=1;Passed=1;Failed=0;HumanBehaviors=0;IdempotencyChecks=0;RecoveryBehaviors=0;EnvironmentVariations=0;HighTvdBehaviors=0}}
         [ordered]@{Identifier='Unattended TPM root binding';Applicable=$false;Data=[ordered]@{RequestedRoot='C:\preflight';EffectiveRoot=$null;EffectiveRootParseState='Missing'}}
@@ -849,6 +852,19 @@ function Remove-TPMOwnedScratchDirectoryV1 {
     }catch{return $false}
 }
 
+function Add-TPMProductionPackageDiagnosticV1 {
+    param(
+        [Parameter(Mandatory=$true)]$Diagnostics,
+        [Parameter(Mandatory=$true)][string]$Stage,
+        [Parameter(Mandatory=$true)][string]$FailureCode,
+        [Parameter(Mandatory=$true)][AllowEmptyString()][string]$FailureMessage,
+        [AllowNull()][string]$ExceptionType
+    )
+    $safeMessage=ConvertTo-TPMSafeTechnicalTextV1 -Text $FailureMessage
+    if([string]::IsNullOrWhiteSpace($safeMessage)){$safeMessage='publisher failure did not provide a message'}
+    [void]$Diagnostics.Add([ordered]@{Stage=$Stage;FailureCode=$FailureCode;FailureMessage=$safeMessage;ExceptionType=$ExceptionType})
+}
+
 function Test-TPMProductionPackagePreflightV1 {
     # Genuine preflight: rather than trusting Get-Command's ambient
     # visibility as the dependency contract, this actually drives a
@@ -867,6 +883,7 @@ function Test-TPMProductionPackagePreflightV1 {
         [Parameter(Mandatory=$true)][string]$PreflightScratchRoot
     )
     $errorCount=0
+    $diagnostics=New-Object Collections.Generic.List[object]
 
     $stagingReady=$false
     try{
@@ -874,7 +891,7 @@ function Test-TPMProductionPackagePreflightV1 {
         $probe=Join-Path $StagingParentRoot ('.preflight-probe-'+[guid]::NewGuid().ToString('N'))
         [IO.File]::WriteAllText($probe,'preflight');Remove-Item -LiteralPath $probe -Force
         $stagingReady=$true
-    }catch{$errorCount++}
+    }catch{$errorCount++;Add-TPMProductionPackageDiagnosticV1 -Diagnostics $diagnostics -Stage 'StagingRootReservation' -FailureCode 'STAGING_ROOT_UNAVAILABLE' -FailureMessage $_.Exception.Message -ExceptionType $_.Exception.GetType().FullName}
 
     $destinationReady=$false
     try{
@@ -882,11 +899,14 @@ function Test-TPMProductionPackagePreflightV1 {
         $probe=Join-Path $DestinationRoot ('.preflight-probe-'+[guid]::NewGuid().ToString('N'))
         [IO.File]::WriteAllText($probe,'preflight');Remove-Item -LiteralPath $probe -Force
         $destinationReady=$true
-    }catch{$errorCount++}
+    }catch{$errorCount++;Add-TPMProductionPackageDiagnosticV1 -Diagnostics $diagnostics -Stage 'DestinationRootReservation' -FailureCode 'DESTINATION_ROOT_UNAVAILABLE' -FailureMessage $_.Exception.Message -ExceptionType $_.Exception.GetType().FullName}
 
     $publisherAvailable=$false
     $canonicalNamesMatch=$false
     $owned=$null
+    $commit=$null
+    $observedNames=@()
+    $pipelineException=$null
     try{
         $owned=New-TPMOwnedScratchDirectoryV1 -ParentRoot $PreflightScratchRoot
         $runRoot=$owned.Path
@@ -929,16 +949,21 @@ function Test-TPMProductionPackagePreflightV1 {
 
         $commit=New-TPMPublicationCommitV1 -StagingParentRoot $scratchStaging -DestinationRoot $scratchDestination -EligibilityReport $eligibilityReport -PublicationReport $publicationReport -FinalOutcomeReport $finalOutcomeCandidateReport -ScorecardReport $scorecardReport -ValidationReport $validationReport -Manifest $manifestReport -Marker $markerReport
         $publisherAvailable=($canonicalNamesMatch -and $null-ne$commit -and [bool]$commit.Committed)
-    }catch{$publisherAvailable=$false;$canonicalNamesMatch=$false}
+    }catch{$publisherAvailable=$false;$canonicalNamesMatch=$false;$pipelineException=$_}
+    if($null-ne$pipelineException){Add-TPMProductionPackageDiagnosticV1 -Diagnostics $diagnostics -Stage 'PublisherPipeline' -FailureCode 'PUBLISHER_PREFLIGHT_EXCEPTION' -FailureMessage $pipelineException.Exception.Message -ExceptionType $pipelineException.Exception.GetType().FullName}
+    elseif($null-ne$commit-and-not[bool]$commit.Committed){$failureCode=if([string]::IsNullOrWhiteSpace([string]$commit.FailureCode)){'PUBLISHER_PREFLIGHT_FAILED'}else{[string]$commit.FailureCode};$failureMessage=if([string]::IsNullOrWhiteSpace([string]$commit.FailureMessage)){'publication preflight did not commit'}else{[string]$commit.FailureMessage};Add-TPMProductionPackageDiagnosticV1 -Diagnostics $diagnostics -Stage 'PublicationCommit' -FailureCode $failureCode -FailureMessage $failureMessage -ExceptionType $null}
+    if($observedNames.Count-gt0-and-not$canonicalNamesMatch){Add-TPMProductionPackageDiagnosticV1 -Diagnostics $diagnostics -Stage 'CanonicalArtifactSet' -FailureCode 'CANONICAL_ARTIFACT_NAMES_MISMATCH' -FailureMessage ("expected={0}; observed={1}"-f(($script:TpmProductionCanonicalArtifactFileNamesV1)-join','),($observedNames-join',')) -ExceptionType $null}
+    if(-not$publisherAvailable-and$diagnostics.Count-eq0){Add-TPMProductionPackageDiagnosticV1 -Diagnostics $diagnostics -Stage 'PublisherPipeline' -FailureCode 'PUBLISHER_PREFLIGHT_FAILED' -FailureMessage 'publication preflight did not produce an actionable diagnostic' -ExceptionType $null}
     $cleanupSucceeded=$true
     if($null-ne$owned){$cleanupSucceeded=Remove-TPMOwnedScratchDirectoryV1 -Owned $owned}
+    if(-not$cleanupSucceeded){Add-TPMProductionPackageDiagnosticV1 -Diagnostics $diagnostics -Stage 'ScratchCleanup' -FailureCode 'SCRATCH_CLEANUP_FAILED' -FailureMessage 'owned preflight scratch cleanup did not complete' -ExceptionType $null}
     if(-not$publisherAvailable){$errorCount++}
     if(-not$cleanupSucceeded){$errorCount++}
 
     # Cleanup failure must never be masked by an otherwise-successful
     # pipeline proof -- PackageValidationPassed folds it in explicitly.
     $passed=$stagingReady-and$destinationReady-and$publisherAvailable-and$cleanupSucceeded
-    return [ordered]@{StagingDirectoryReady=$stagingReady;PublisherAvailable=$publisherAvailable;PackageValidationExecuted=$true;PackageValidationPassed=$passed;PackageValidationErrorCount=$errorCount}
+    return [ordered]@{StagingDirectoryReady=$stagingReady;PublisherAvailable=$publisherAvailable;PackageValidationExecuted=$true;PackageValidationPassed=$passed;PackageValidationErrorCount=$errorCount;PackageValidationDiagnostics=@($diagnostics.ToArray())}
 }
 
 function Get-TPMProductionTreeSha256V1 {
@@ -971,6 +996,12 @@ function New-TPMProductionFactRecordsV1 {
     $mode=if($Results.SmokeMode){'Smoke'}else{'Unattended'}
     $checks=@{};foreach($c in @($Results.Checks)){$checks[[string]$c.Name]=[bool]$c.Passed}
     $testDigest=Get-TPMProductionTreeSha256V1 (Join-Path $RepositoryPath 'Tests')
+    $certificationIdentity=$null
+    if($null-ne$Results-and$Results.PSObject.Properties.Name-ccontains'CertificationIdentity'){$certificationIdentity=$Results.CertificationIdentity}
+    if($null-eq$certificationIdentity){
+        $missingSnapshot=[ordered]@{Branch=$null;Commit=$null;RemoteRef=$null;RemoteCommit=$null;Clean=$false;RefSnapshotSha256=$null;ReflogSnapshotSha256=$null}
+        $certificationIdentity=[ordered]@{ExpectedBranch=$null;ExpectedCommit=$null;Start=$missingSnapshot;End=$missingSnapshot;RefMutationDetected=$false;RefMutationReason='CERTIFICATION_IDENTITY_NOT_CAPTURED';IdentityValid=$false}
+    }
 
     $healthPath=Join-Path $ReportDirectory 'InstallHealth\InstallHealth.json'
     if($HealthLoadError){
@@ -1092,11 +1123,12 @@ function New-TPMProductionFactRecordsV1 {
             PackageValidationExecuted=$artifactsPreflight.PackageValidationExecuted
             PackageValidationPassed=$artifactsPreflight.PackageValidationPassed
             PackageValidationErrorCount=$artifactsPreflight.PackageValidationErrorCount
+            PackageValidationDiagnostics=@($artifactsPreflight.PackageValidationDiagnostics)
         }
     }
 
     return @(
-        [ordered]@{Identifier='Repository';Applicable=$true;Data=[ordered]@{RepositoryPath=[IO.Path]::GetFullPath($RepositoryPath);RepositoryAvailable=[bool]$checks['Repository available'];RepositoryClean=($Results.GitStatus-ceq'(clean)');GitStatus=[string]$Results.GitStatus}}
+        [ordered]@{Identifier='Repository';Applicable=$true;Data=[ordered]@{RepositoryPath=[IO.Path]::GetFullPath($RepositoryPath);RepositoryAvailable=[bool]$checks['Repository available'];RepositoryClean=($Results.GitStatus-ceq'(clean)');GitStatus=[string]$Results.GitStatus;CertificationIdentity=$certificationIdentity}}
         [ordered]@{Identifier='Pester';Applicable=$true;Data=[ordered]@{Executed=($null-ne$Results.Pester);Total=[int]$Results.Pester.Total;Passed=[int]$Results.Pester.Passed;Failed=[int]$Results.Pester.Failed;Skipped=[int]$Results.Pester.Skipped;NotRun=[int]$Results.Pester.NotRun;Engine=("Pester {0} / PowerShell {1}"-f$Results.PesterVersion,$Results.PowerShellVersion);SuiteSha256=$testDigest}}
         $staticAnalysisFact
         [ordered]@{Identifier='Real Install Health';Applicable=$true;Data=[ordered]@{ReportPath=$(if(Test-Path -LiteralPath $healthPath -PathType Leaf){[IO.Path]::GetFullPath($healthPath)}else{$null});LoadState=$healthState;LoadError=$(if($healthState-ceq'Loaded'){$null}else{[string]$HealthLoadError});Checks=$healthChecks}}

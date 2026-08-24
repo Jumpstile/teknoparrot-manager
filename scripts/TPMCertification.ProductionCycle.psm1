@@ -2,6 +2,17 @@ Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Reports.psm1')
 Import-Module (Join-Path $PSScriptRoot 'TPMCertification.Publication.psm1')
 Set-StrictMode -Version 2.0
 
+function Assert-TPMProductionIdentityGuardV1 {
+    param(
+        [Parameter(Mandatory=$true)][scriptblock]$IdentityGuard,
+        [Parameter(Mandatory=$true)][string]$Stage
+    )
+    $guardResult=@(& $IdentityGuard -Stage $Stage)
+    if($guardResult.Count-ne1-or$guardResult[0]-isnot[bool]-or-not[bool]$guardResult[0]){
+        throw "PRODUCTION_IDENTITY_GUARD_REJECTED: stage=$Stage"
+    }
+}
+
 function Complete-TPMProductionCertificationCycleV1 {
     # Safety invariant (ADR-0155 Section 8.3 vs Section 9): the Section 8.3
     # candidate final-outcome report and the Section 9 dispatcher-issued
@@ -24,8 +35,16 @@ function Complete-TPMProductionCertificationCycleV1 {
         [Parameter(Mandatory=$true)]$Authority,
         [Parameter(Mandatory=$true)]$SealedRun,
         [Parameter(Mandatory=$true)][string]$StagingParentRoot,
-        [Parameter(Mandatory=$true)][string]$DestinationRoot
+        [Parameter(Mandatory=$true)][string]$DestinationRoot,
+        [Parameter(Mandatory=$true)][scriptblock]$IdentityGuard
     )
+
+    # The authoritative production caller supplies a guard that snapshots
+    # the checkout identity and throws when branch, ref, reflog, or remote
+    # identity changes. The guard is mandatory so a future caller cannot
+    # accidentally publish a certification result without covering the
+    # publication/finalization window.
+    [void](Assert-TPMProductionIdentityGuardV1 -IdentityGuard $IdentityGuard -Stage 'BeforeEligibility')
 
     # Step 1: issue eligibility through the workflow authority.
     $eligibility=&$Authority IssueEligibility $SealedRun
@@ -45,6 +64,7 @@ function Complete-TPMProductionCertificationCycleV1 {
     $manifest=New-TPMManifestReportV1 -Eligibility $eligibility -EligibilityReport $eligibilityReport -PublicationReport $publicationReport -FinalOutcomeReport $finalOutcomeCandidateReport -ScorecardReport $scorecardReport -ValidationReport $validationReport
     $marker=New-TPMCommitMarkerReportV1 -Manifest $manifest
 
+    [void](Assert-TPMProductionIdentityGuardV1 -IdentityGuard $IdentityGuard -Stage 'BeforePublicationCommit')
     $commit=New-TPMPublicationCommitV1 -StagingParentRoot $StagingParentRoot -DestinationRoot $DestinationRoot -EligibilityReport $eligibilityReport -PublicationReport $publicationReport -FinalOutcomeReport $finalOutcomeCandidateReport -ScorecardReport $scorecardReport -ValidationReport $validationReport -Manifest $manifest -Marker $marker
 
     # Step 4: attempt publication and register the real publication
@@ -75,8 +95,12 @@ function Complete-TPMProductionCertificationCycleV1 {
     if($commit.Committed){
         $observation=[ordered]@{ManifestSha256=$commit.ManifestSha256;ArtifactSetSha256=$commit.ArtifactSetSha256;DiagnosticWarnings=@($commit.DiagnosticWarnings)}
         try{
+            [void](Assert-TPMProductionIdentityGuardV1 -IdentityGuard $IdentityGuard -Stage 'AfterPublicationCommit')
             $publicationOutcome=&$Authority RegisterCommittedPublication $observation $candidate
             $finalOutcome=&$Authority IssueFinalOutcome $eligibility $publicationOutcome
+            [void](Assert-TPMProductionIdentityGuardV1 -IdentityGuard $IdentityGuard -Stage 'AfterFinalOutcome')
+            $projection=New-TPMFinalOutcomeProjectionV1 -FinalOutcome $finalOutcome
+            [void](Assert-TPMProductionIdentityGuardV1 -IdentityGuard $IdentityGuard -Stage 'AfterFinalProjection')
         }catch{
             $originalMessage=$_.Exception.Message
             try{
@@ -103,11 +127,16 @@ function Complete-TPMProductionCertificationCycleV1 {
         # here needs no rollback -- "no authoritative bundle" is already
         # true and stays true.
         $finalOutcome=&$Authority IssueFinalOutcome $eligibility $publicationOutcome
+        [void](Assert-TPMProductionIdentityGuardV1 -IdentityGuard $IdentityGuard -Stage 'AfterFinalOutcome')
+        $projection=New-TPMFinalOutcomeProjectionV1 -FinalOutcome $finalOutcome
+        [void](Assert-TPMProductionIdentityGuardV1 -IdentityGuard $IdentityGuard -Stage 'AfterFinalProjection')
     }
 
     # Step 6: only this genuine final outcome drives runtime console status,
-    # exit code, and final projection -- never the Section 8.3 candidate.
-    $projection=New-TPMFinalOutcomeProjectionV1 -FinalOutcome $finalOutcome
+    # exit code, and final projection -- never the Section 8.3 candidate. The
+    # final guard is inside the same post-commit rollback boundary, so any
+    # identity mutation observed during publication or finalization cannot
+    # leave a durable authoritative-looking bundle behind.
 
     return [pscustomobject]@{
         Eligibility=$eligibility
