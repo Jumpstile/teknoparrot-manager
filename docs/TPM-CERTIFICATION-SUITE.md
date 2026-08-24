@@ -178,25 +178,34 @@ Every certification run should produce:
 
 ## Running Certification
 
-For manual tester validation of the latest merged TPM code (not a full
-certification pass), run `Sync-And-Run.bat` from the repository root on
-`main`. This file lives at the repo root because it depends on the checkout's
-`.git` directory: it fetches `origin/main`, fast-forwards only when safe,
-then launches `TeknoParrot-Manager.ps1`. It is a tester checkout launcher,
-not an installed runtime launcher and not a release ZIP entry point.
+Certification evidence must identify one frozen GitHub branch and exact
+commit SHA. Desktop ChatGPT and Desktop Codex use the local
+`C:\REPOS\teknoparrot-manager` checkout; Arcade ChatGPT and Arcade Codex
+use the local `E:\REPOS\teknoparrot-manager` checkout. Do not use a NAS,
+SMB share, mapped drive, or UNC Git worktree as source authority.
 
-The easiest way to run a certification pass on the arcade machine is to
-double-click `scripts\Run-TPM-Certification-Suite.bat`. It can be copied
-anywhere (Desktop, a USB stick) and still finds the repo -- it does not
-need to be run from inside the repo folder, and does not require
-administrator privileges. It prompts for the TeknoParrot root (with a
-default), runs `scripts\Run-TPM-Tests.ps1`, and keeps the window open at
-the end so you can read the CERTIFIED / NOT CERTIFIED result and the
-report folder location before it closes.
+`Sync-And-Run.bat` is a convenience launcher for manual latest-main
+testing. It may fetch `origin/main` on a local `main` checkout, but it is
+not an exact-SHA certification handoff, package identity proof, or release
+gate.
+
+For an arcade certification pass, Arcade Codex checks out the handed-off
+SHA in the local E path and runs `scripts\Run-TPM-Certification-Suite.bat`
+or `scripts\Run-TPM-Tests.ps1` with the approved TeknoParrot runtime root
+and local harness path. Arcade ChatGPT reviews and coordinates the resulting
+runtime/hardware evidence from the same E-path workflow.
+
+Before reporting a result, record the branch, remote branch SHA, local HEAD,
+clean status, ancestry, CI result, runtime marker/containment result, tool
+versions, and local report paths. A report copied to an artifact store after
+the run must retain those source details.
 
 For scripted or CI-style use, call `scripts\Run-TPM-Tests.ps1` directly
 with `-TeknoParrotRoot` (see that script's parameters for `-RepoPath`,
 `-HarnessRoot`, `-VerbosityLevel`, and `-PesterRegressionTimeoutSeconds`).
+
+Passing tests or a successful runtime run is evidence, not release or
+publication authorization.
 
 ## Pester regression gate: hang detection and live progress (issue #136)
 
@@ -249,9 +258,10 @@ other.
 **CI (`.github/workflows/ci.yml`)** runs on every push and pull request
 against `main`. It is intentionally narrow and fast: ASCII/parse checks on
 `TeknoParrot-Manager.ps1`, PSScriptAnalyzer against that same file, and
-`Tests/TeknoParrot-Manager.Tests.ps1` only -- not the rest of the `Tests/`
-folder. Its job is to catch an obviously broken commit before it lands,
-in minutes, without needing a real TeknoParrot install.
+the two Pester suites `Tests/TeknoParrot-Manager.Tests.ps1` and
+`Tests/QualitySystem.Tests.ps1` -- not the rest of the `Tests/` folder. Its
+job is to catch an obviously broken commit before it lands, in minutes,
+without needing a real TeknoParrot install.
 
 **Full release certification** (`scripts/Run-TPM-Tests.ps1`, or
 `scripts\Run-TPM-Certification-Suite.bat` for a double-click run) is
@@ -263,9 +273,9 @@ scorecard, run against an actual TeknoParrot installation.
 This difference is not incidental. The cross-file Pester mock
 interference documented above (`Tests/TPMCertificationHarness.Tests.ps1`
 vs. `Tests/TpmAutoUpdate.DestructivePath.Tests.ps1`) could **only** be
-caught by running the full `Tests/` folder together -- CI's narrower,
-single-file scope would never have surfaced it, since CI does not run
-those two files in the same Pester invocation. A green CI run is
+caught by running the full `Tests/` folder together -- CI's narrow two-file
+scope would never have surfaced it, since CI does not run those two files in
+its Pester invocation. A green CI run is
 necessary before merging, but it is not evidence that a change is safe
 at the level full certification checks. Do not treat CI passing as a
 substitute for running full certification before a release; do not treat
