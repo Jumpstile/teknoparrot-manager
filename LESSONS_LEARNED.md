@@ -823,3 +823,28 @@ Rule: when a release-ZIP include list names a module, grep that module's own sou
 The Eggman blocker was a path-role error, not proof that NAS or mapped drives are inherently unsafe. A current DAT under the protected TeknoParrot root remains read-only and rejected, while a configured primary external ZIP/source folder may be approved when it canonicalizes, is outside protected roots, is not reparse-backed, and passes its role-specific checks immediately before writing. Supplementary sources, ambiguous overlaps, and reparse-backed paths remain rejected. If no safe destination exists, TPM must explain how to configure or repair one instead of ending at a dead end.
 
 The engineering boundary is equally important: each computer or agent uses a local clone or disposable worktree, and cross-machine handoff uses a pushed Git ref and exact SHA. NAS remains appropriate for ROMs, source data, packages, evidence, backups, and mirrors, but not as an authoritative shared active Git worktree. PostgreSQL recovery and BepInEx unsafe-root failures must provide the operator with the concrete elevation or path-repair action and perform no write until the required safety checks pass.
+
+## Issue #296 -- certification identity and publisher diagnostics are part of the authority contract
+
+The certification checkout identity was captured at preflight, seal, and
+report-fact boundaries, but the final production cycle still had a gap: a
+branch/ref mutation during publication or finalization could occur after the
+last outer snapshot. The correction is a mandatory identity guard on
+`Complete-TPMProductionCertificationCycleV1`, with checks before eligibility,
+before publication, after commit, after the genuine final outcome, and after
+the final projection. A post-commit rejection uses the existing marker-first
+rollback path, so it cannot leave a durable authoritative-looking bundle with
+the wrong checkout identity.
+
+The package preflight also used to retain only `PublisherAvailable`,
+`PackageValidationPassed`, and an error count. That shape made real
+`STAGING_FAILED`, `PROMOTION_FAILED`, `DURABLE_VALIDATION_FAILED`,
+`ROLLBACK_FAILED`, and similar publisher failures hard to disposition. The
+`Artifacts` fact now carries validated stage/code/message/exception records,
+and the authority copies those details into both `Details` and the broad
+failure-reason messages. Rule: a broad gate code is an aggregation, not a
+replacement for the structured failure that caused it.
+
+The Pester certification gate remains an exact `5.7.1` pin. Installed
+`5.8.0` or `3.4.0` results are not certification evidence; the environment
+must provide `5.7.1` before a certification run can start.

@@ -13,6 +13,14 @@ param(
 
     [switch]$RunUnattendedTPM,
 
+    # Optional operator-pinned identity. When supplied, the sealed
+    # repository fact must match both values and the cached upstream ref must
+    # point at the same commit. The start/end snapshots below still protect
+    # runs where an operator records identity separately.
+    [string]$ExpectedBranch,
+
+    [string]$ExpectedCommit,
+
     # Summary (default): only the final certification scorecard and any real
     # test failures reach the console -- the underlying Pester run (which
     # includes noisy Write-Host output from mocked production-code scenarios,
@@ -59,6 +67,8 @@ Import-Module (Join-Path $PSScriptRoot 'TPMCertification.ProductionCycle.psm1') 
 Import-Module (Join-Path $PSScriptRoot 'TPMCertification.ProductionEvidence.psm1') -Force
 
 $RepoPath = (Resolve-Path -LiteralPath $RepoPath).ProviderPath
+$certificationRepositoryLock = Enter-TPMCertificationRepositoryLockV1 -RepositoryPath $RepoPath
+$certificationIdentityStart = Get-TPMCertificationGitIdentitySnapshotV1 -RepositoryPath $RepoPath
 if (!(Test-Path -LiteralPath $TeknoParrotRoot -PathType Container)) {
     throw "TeknoParrot root not found: $TeknoParrotRoot"
 }
@@ -1708,6 +1718,7 @@ $results = [ordered]@{
     Screenshots = @()
     EvidenceWorkflowId = $script:tpmEvidenceWorkflowId
     PreliminaryStatus = 'RUNNING'
+    CertificationIdentity = $null
 }
 
 # Collection is a prerequisite phase, not part of finalization. These values
@@ -1906,7 +1917,7 @@ try {
     # certification suite mid-run, not an empty or pre-launch console.
     [void](Add-Screenshot -ScreenshotDir $screenshotDir -Name 'certification-suite-running' -EvidenceType 'ScreenCapture' -CaptureAction { param($p) Save-TPMScreenCapture -Path $p })
 
-    Write-TPMGateHeader -Gate 'Repository' -Purpose 'Confirms the certified commit and working-tree state' -Expected 'clean working tree, HEAD matches origin/main'
+    Write-TPMGateHeader -Gate 'Repository' -Purpose 'Confirms the certified branch, commit, remote SHA, and working-tree state' -Expected 'clean worktree, pinned branch/commit, cached upstream SHA matches HEAD'
     $gitVersion = & git @gitScopedArguments --version
     $gitBranch = & git @gitScopedArguments rev-parse --abbrev-ref HEAD
     $gitCommit = & git @gitScopedArguments rev-parse HEAD
@@ -2303,6 +2314,10 @@ try {
         }
     }
 
+    $certificationIdentityEnd = Get-TPMCertificationGitIdentitySnapshotV1 -RepositoryPath $RepoPath
+    $results.CertificationIdentity = New-TPMCertificationGitIdentityV1 -Start $certificationIdentityStart -End $certificationIdentityEnd -ExpectedBranch $ExpectedBranch -ExpectedCommit $ExpectedCommit
+    $identityDetails=if($results.CertificationIdentity.IdentityValid){"branch=$($certificationIdentityEnd.Branch) commit=$($certificationIdentityEnd.Commit) remote=$($certificationIdentityEnd.RemoteCommit) clean=$($certificationIdentityEnd.Clean)"}else{[string]$results.CertificationIdentity.RefMutationReason}
+    Add-CheckResult 'Certification identity' ([bool]$results.CertificationIdentity.IdentityValid) $identityDetails
     $results.PreliminaryStatus = if (@($results.Checks | Where-Object { -not $_.Passed }).Count -eq 0) { 'PASS' } else { 'FAIL' }
     $collectionCompleted = $true
 }
@@ -2352,6 +2367,7 @@ finally {
             Add-Content -LiteralPath $script:OperatorStatusPath -Value 'FINAL STATUS: PIPELINE ABORTED' -Encoding utf8
             Add-Content -LiteralPath $script:OperatorStatusPath -Value ("Reason: {0}" -f (ConvertTo-TPMSafeTechnicalTextV1 -Text $collectionAbortMessage)) -Encoding utf8
         }
+        Exit-TPMCertificationRepositoryLockV1 -Lock $certificationRepositoryLock
         exit 1
     }
 
@@ -2468,6 +2484,13 @@ finally {
         # facts (below) -- New-TPMProductionFactRecordsV1 is Checkpoint B1's
         # dedicated fact adapter; it never imports or calls Shadow.psm1.
         $productionFacts = @(New-TPMProductionFactRecordsV1 -Results $results -RepositoryPath $RepoPath -ReportDirectory $reportDir -BackupDirectory $backupDir -HealthResult $healthResult -HealthLoadError $healthLoadError -UnattendedBinding $binding -StagingParentRoot $productionStagingParentRoot -DestinationRoot $productionDestinationRoot -WorkingDirectoryRoot $productionWorkingDirectory -WorkingDirectory $productionWorkingDirectory)
+        $productionIdentityEnd = Get-TPMCertificationGitIdentitySnapshotV1 -RepositoryPath $RepoPath
+        $productionIdentity = New-TPMCertificationGitIdentityV1 -Start $certificationIdentityStart -End $productionIdentityEnd -ExpectedBranch $ExpectedBranch -ExpectedCommit $ExpectedCommit
+        $results.CertificationIdentity = $productionIdentity
+        $repositoryFact = $productionFacts | Where-Object { $_.Identifier -ceq 'Repository' } | Select-Object -First 1
+        $repositoryFact.Data.CertificationIdentity = $productionIdentity
+        $repositoryFact.Data.RepositoryClean = [bool]$productionIdentityEnd.Clean
+        $repositoryFact.Data.GitStatus = if($productionIdentityEnd.Clean){'(clean)'}else{'not clean at final identity check'}
         foreach ($fact in $productionFacts) { [void](&$productionAuthority RecordFact $fact) }
 
         # Step 2: record the nine evidence records in their required order
@@ -2496,7 +2519,32 @@ finally {
         [void](&$productionAuthority IssueFinalEvidence $productionFinalEvidence $productionScorePreview)
 
         # Step 4: seal the authority.
+        $preSealIdentityEnd = Get-TPMCertificationGitIdentitySnapshotV1 -RepositoryPath $RepoPath
+        $preSealIdentity = New-TPMCertificationGitIdentityV1 -Start $certificationIdentityStart -End $preSealIdentityEnd -ExpectedBranch $ExpectedBranch -ExpectedCommit $ExpectedCommit
+        if(-not$preSealIdentity.IdentityValid-or[string]$preSealIdentityEnd.RefSnapshotSha256-ne[string]$productionIdentityEnd.RefSnapshotSha256-or[string]$preSealIdentityEnd.ReflogSnapshotSha256-ne[string]$productionIdentityEnd.ReflogSnapshotSha256){throw "CERTIFICATION_IDENTITY_CHANGED_BEFORE_SEAL: $($preSealIdentity.RefMutationReason)"}
         $productionSealedRun = &$productionAuthority Seal
+
+        $postSealIdentityEnd = Get-TPMCertificationGitIdentitySnapshotV1 -RepositoryPath $RepoPath
+        $postSealIdentity = New-TPMCertificationGitIdentityV1 -Start $certificationIdentityStart -End $postSealIdentityEnd -ExpectedBranch $ExpectedBranch -ExpectedCommit $ExpectedCommit
+        if(-not$postSealIdentity.IdentityValid-or[string]$postSealIdentityEnd.RefSnapshotSha256-ne[string]$productionIdentityEnd.RefSnapshotSha256-or[string]$postSealIdentityEnd.ReflogSnapshotSha256-ne[string]$productionIdentityEnd.ReflogSnapshotSha256){throw "CERTIFICATION_IDENTITY_CHANGED_AFTER_SEAL: $($postSealIdentity.RefMutationReason)"}
+
+        # The production cycle owns publication and finalization as one
+        # rollback boundary. Every guard invocation captures the checkout
+        # again, compares it with the last pre-cycle identity, and returns
+        # true only while the branch/ref/reflog/remote identity is stable.
+        # A mutation after a durable commit therefore becomes a cycle
+        # failure, and the cycle removes the commit marker before rethrowing.
+        $productionIdentityGuard = {
+            param([string]$Stage)
+            $cycleIdentityEnd = Get-TPMCertificationGitIdentitySnapshotV1 -RepositoryPath $RepoPath
+            $cycleIdentity = New-TPMCertificationGitIdentityV1 -Start $certificationIdentityStart -End $cycleIdentityEnd -ExpectedBranch $ExpectedBranch -ExpectedCommit $ExpectedCommit
+            $snapshotMatchesProduction = ([string]$cycleIdentityEnd.RefSnapshotSha256 -eq [string]$productionIdentityEnd.RefSnapshotSha256 -and [string]$cycleIdentityEnd.ReflogSnapshotSha256 -eq [string]$productionIdentityEnd.ReflogSnapshotSha256)
+            if(-not$cycleIdentity.IdentityValid-or-not$snapshotMatchesProduction){
+                $reason = if([string]::IsNullOrWhiteSpace([string]$cycleIdentity.RefMutationReason)){'CERTIFICATION_IDENTITY_CHANGED'}else{[string]$cycleIdentity.RefMutationReason}
+                throw ("CERTIFICATION_IDENTITY_CHANGED_DURING_PRODUCTION_CYCLE: stage={0}; reason={1}" -f $Stage,$reason)
+            }
+            return $true
+        }.GetNewClosure()
 
         # Step 5: invoke the sole seven-step certification core
         # (Checkpoint B1/ADR155-0309 Sub-step A's
@@ -2505,7 +2553,7 @@ finally {
         # an authoritative runtime outcome), staging, publication commit,
         # genuine dispatcher-issued TPMFinalOutcomeV1, and the runtime
         # projection derived exclusively from that genuine final outcome.
-        $productionCycleResult = Complete-TPMProductionCertificationCycleV1 -Authority $productionAuthority -SealedRun $productionSealedRun -StagingParentRoot $productionStagingParentRoot -DestinationRoot $productionDestinationRoot
+        $productionCycleResult = Complete-TPMProductionCertificationCycleV1 -Authority $productionAuthority -SealedRun $productionSealedRun -StagingParentRoot $productionStagingParentRoot -DestinationRoot $productionDestinationRoot -IdentityGuard $productionIdentityGuard
     } catch {
         $productionAborted = $true
         $productionAbortMessage = $_.Exception.Message
@@ -2545,6 +2593,7 @@ finally {
             Write-Host (" PUBLISHED    : false -- no authoritative marker or bundle was written") -ForegroundColor Red
             if(-not[string]::IsNullOrWhiteSpace($script:OperatorStatusPath)){Add-Content -LiteralPath $script:OperatorStatusPath -Value 'FINAL STATUS: PIPELINE ABORTED' -Encoding utf8;Add-Content -LiteralPath $script:OperatorStatusPath -Value ("Reason: {0}" -f (ConvertTo-TPMSafeTechnicalTextV1 -Text $productionAbortMessage)) -Encoding utf8}
         }
+        Exit-TPMCertificationRepositoryLockV1 -Lock $certificationRepositoryLock
         exit 1
     }
 
@@ -2567,5 +2616,6 @@ $finalLine=("FINAL STATUS: {0}" -f $productionProjection.FinalStatus); Write-Hos
     Write-Host (" EXIT CODE    : {0}" -f $productionProjection.ExitCode) -ForegroundColor $finalColor
     Write-Host (" RUN IDENTITY : {0}" -f $productionProjection.RunIdentity) -ForegroundColor $finalColor
     Write-Host (" REPORTS      : {0}" -f $reportsDisplay) -ForegroundColor $finalColor
+    Exit-TPMCertificationRepositoryLockV1 -Lock $certificationRepositoryLock
     exit $productionProjection.ExitCode
 }

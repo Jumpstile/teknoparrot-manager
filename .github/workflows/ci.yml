@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, review/rc8-package-runtime-ux-fixes ]
 
 jobs:
   quality-gates:
