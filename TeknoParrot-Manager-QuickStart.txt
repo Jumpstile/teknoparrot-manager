@@ -582,8 +582,9 @@
   recognize games. On a later explicit update, TPM reuses a valid configured
   ZIP at its existing path without an alternate-location save dialog. If the
   current DAT is under the TeknoParrot root, TPM will not overwrite it; it can
-  offer a reachable primary ZIP/source folder such as
-  W:\ROMs\TeknoParrot Collection. The supplementary source is not selected
+  offer a reachable mapped/NAS primary ZIP/source folder such as
+  <your-mapped-ZIP-source>\TeknoParrot Collection. The supplementary source is
+  not selected
   automatically. Every destination is canonicalized, checked for protected,
   reparse-backed, and ambiguous paths, and revalidated immediately before
   write. If no safe external folder exists, TPM explains how to correct it
