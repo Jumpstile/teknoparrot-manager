@@ -541,16 +541,14 @@ Controller support (per the plugin's own docs): true force feedback on FFB-capab
 **Mode 9 only checks/updates games that already have BepInEx installed** — it never installs BepInEx into a game that doesn't have it. Only the latest **stable 64-bit** release is ever used; never a 32-bit build, never a pre-release. A 32-bit install is left alone and reported separately.
 
 If anything is outdated, the script lists every such game once and asks a
-single question: update all of them? Before that prompt, TPM verifies every
-candidate root is inside the configured games folder and that existing target
-paths are not reparse-backed. Answering Y downloads only the stable x64 release
-after those checks, extracts to isolated staging, verifies the staged file set
-and backup, and promotes through a rollback-safe transaction. Unsafe roots,
-failed backups, extraction errors, digest failures, and rollback uncertainty
-fail closed without reporting an update as complete. If a root is unsafe, TPM
-shows the configured games root, explains that a real non-reparse folder is
-required, and tells you to correct the game profile/path before running mode 9
-again; no BepInEx download or write is attempted for that game.
+single question: update all of them? Before that prompt, TPM checks that every
+candidate folder is inside the configured games folder and is a normal, safe
+folder. It downloads only after those checks, verifies the backup, and promotes
+the complete tree through a rollback-safe transaction. Unsafe roots, failed
+backups, extraction errors, digest failures, and rollback uncertainty fail
+closed without reporting an update as complete. If a root is unsafe, TPM
+explains which game path to correct, makes no download or change, and tells you
+to choose the BepInEx update again afterward.
 **Troubleshooting:** [official guide](https://docs.bepinex.dev/articles/user_guide/troubleshooting.html). **Manual clean reset:** delete `doorstop_config.ini`, `winhttp.dll`, `.doorstop_version`, `changelog.txt`, and the `BepInEx` folder from the game's folder — this fully reverts to vanilla.
 
 ---
@@ -562,18 +560,19 @@ Putt Live (2012/2013), Silver Strike Bowling Live, Target Toss Pro (Bags /
 Lawn Darts), and Orange County Choppers Pinball -- need a small local PostgreSQL
 8.3 database. Mode 12 detects which registered games need it automatically.
 
-- If PostgreSQL is not installed yet, the script installs it silently and asks
-  for a service-account password and database password through secure confirmation
-  prompts. Administrator privileges are required only for this first install.
+- If PostgreSQL is not installed yet, the script installs it when a registered
+  game needs it and asks for a service-account password and database password
+  through masked confirmation prompts. TPM asks Windows for permission itself
+  when the installation needs it.
 - If PostgreSQL is already installed, TPM preserves existing data. If the saved
-  password no longer works, TPM asks for a replacement, creates and verifies a
-  configuration/profile recovery backup, and automatically resets the postgres
-  role through PostgreSQL single-user mode. No manual follow-up command is needed.
-- If installation or automatic recovery needs elevation and this window is not
-  running as Administrator, TPM tells you to close it, right-click
-  `TeknoParrot-Manager.bat` (or the PowerShell script), choose **Run as
-  administrator**, and select mode 12 again. The blocked step does not change
-  PostgreSQL data or profiles.
+  password no longer works, TPM explains the problem, asks whether to fix it,
+  and lets you choose and confirm a replacement. It creates and verifies a
+  protected recovery backup, asks Windows for permission itself, resets only
+  the postgres role, verifies the new password before saving it, and continues
+  the same setup without returning you to the menu.
+- If Windows permission is declined or a predictable recovery step fails, TPM
+  keeps the protected retry information and offers to try again. The chosen
+  password is never shown in commands, logs, messages, or reports.
 - Recovery changes the role password only. TPM does not edit pg_hba.conf, drop
   or recreate databases, or wipe existing PostgreSQL data.
 - TPM updates only affected profiles whose connection values are not already
@@ -939,7 +938,10 @@ TeknoParrot must be set up as an emulator in HyperSpin 2 first. The title must c
 The scan is still running — large game libraries can take a minute. A progress bar (`Scanning game library`) shows current folder/total exe count. If the console is truly frozen (no progress bar, no output for several minutes), check that your staging folder is reachable and not on a disconnected network drive.
 
 **"Access denied" or "you do not have permission" errors.**
-Most features run as a normal user. The only exception: Postgres installation (mode 12) requires Administrator — right-click the `.bat` launcher and choose "Run as administrator" for that run only. All other modes do not require elevated rights.
+Most features run as a normal user. When PostgreSQL setup needs Windows
+permission, TPM asks for it automatically and resumes the same operation after
+approval. If the prompt is declined, choose the retry offered by TPM; do not
+open a separate Administrator PowerShell window.
 
 **"Path too long" errors during extraction.**
 TeknoParrot's own folder structure adds path length on top of already-long staging paths. Shorten your staging folder's path (e.g. `E:\TP Games\` instead of `E:\My Arcade Games Collection\TeknoParrot Games 2024\`) and re-run. The ACTION REQUIRED section also flags specific games that TeknoParrot itself requires to be at a short path.
@@ -948,7 +950,11 @@ TeknoParrot's own folder structure adds path length on top of already-long stagi
 The script detects mapped network drives to avoid scanning them during game discovery. If a previously mapped drive is now unreachable, startup may take a few seconds before timing out gracefully — this is expected and the drive is skipped.
 
 **Postgres connection fails / "password authentication failed".**
-The database password is saved encrypted in `config.json`. If it changed externally (via pgAdmin or similar), mode 12 asks for the replacement securely and attempts the guided PostgreSQL role reset automatically after a verified backup; it does not wipe data or edit authentication rules.
+The database password is saved encrypted in `config.json`. If it changed
+externally (via pgAdmin or similar), mode 12 explains the problem, asks you to
+choose and confirm a replacement, then performs the guided role reset after a
+verified backup. TPM asks Windows for permission and resumes automatically; it
+does not wipe data or edit authentication rules.
 
 **"LaunchBox is currently open" error.**
 The direct LaunchBox integration refuses to write while LaunchBox or BigBox is running. Close both, then re-run.

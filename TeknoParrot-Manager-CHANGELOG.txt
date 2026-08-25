@@ -15,9 +15,10 @@
   Final Version 1.0 remains unpublished.
 
   Fixes: Eggman updates offer a validated primary ZIP/source folder when the
-  current DAT is protected under the TeknoParrot root; PostgreSQL elevation
-  failures provide exact Run-as-administrator recovery steps; and BepInEx
-  unsafe-root refusals explain the reason and corrective action without
+  current DAT is protected under the TeknoParrot root; PostgreSQL setup asks
+  the user to choose a replacement password, requests Windows permission and
+  resumes automatically with protected retry state; and BepInEx unsafe-root
+  refusals explain the correction in beginner-friendly language without
   downloading or writing.
 
   Certification hardening: exact branch/commit/upstream/ref/reflog identity is

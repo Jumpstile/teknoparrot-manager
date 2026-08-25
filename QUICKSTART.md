@@ -42,7 +42,7 @@ Full documentation: [README.md](README.md)
 - PowerShell 5.1 (built into Windows — no install needed)
 - TeknoParrot installed with `TeknoParrotUi.exe` run at least once so it has downloaded its `GameProfiles` folder
 - Your games as ZIP files (for AutoSync) or already extracted into subfolders
-- Administrator privileges, but **only** if you use Postgres setup (mode 12) to install PostgreSQL for the first time — everything else runs as a normal user
+- TPM asks Windows for permission automatically when a safe setup step needs it — you do not need to prepare an Administrator PowerShell window
 
 ---
 
@@ -70,14 +70,16 @@ supported changes, back up before writes, and verify the result.
 
 ## Run It
 
-1. Open PowerShell in the folder containing `TeknoParrot-Manager.ps1`:
+1. Double-click **`TeknoParrot-Manager.bat`**. This is the normal beginner-friendly way to start TPM; it opens the menu for you.
+
+   Advanced users can run the script directly from PowerShell in the folder containing `TeknoParrot-Manager.ps1`:
 
    ```powershell
    cd "C:\path\to\TeknoParrot\Scripts"
    .\TeknoParrot-Manager.ps1
    ```
 
-2. Blocked by execution policy? Allow it for this session only:
+2. If you are using the advanced PowerShell route and Windows blocks the script, allow it for this session only:
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File .\TeknoParrot-Manager.ps1
@@ -247,19 +249,14 @@ If a game is covered by both, the script asks **one** batched question — keep 
 
 [BepInEx](https://docs.bepinex.dev) is a third-party Unity plugin/modding framework some games need for controls or fixes to work. Mode 9 shows a live-fetched example list each time you open it.
 
-**This mode ONLY checks and updates games that already have BepInEx installed** — it never installs BepInEx into a game that doesn't have it yet (that first install is still a manual step). Only the latest **stable 64-bit** release is ever used — never 32-bit, never a pre-release. A 32-bit install is left alone and reported separately.
+**This mode only checks and updates games that already have BepInEx installed** — TPM does not install BepInEx into a game that has never used it, because that can change game compatibility. Only the latest **stable 64-bit** release is ever used — never 32-bit, never a pre-release. A 32-bit install is left alone and reported separately.
 
-If anything is outdated, the script asks once: update all of them? Before
-that prompt, TPM verifies every candidate game root is inside the configured
-games folder and that the root and existing BepInEx files are not reparse-backed.
-Answering Y downloads the stable x64 ZIP only after those checks. TPM extracts
-to isolated staging, verifies the staged file set and the backup, then promotes
-the complete tree through a rollback-safe transaction. Unsafe roots, failed
-backups, extraction errors, digest failures, and rollback uncertainty fail closed
-without reporting an update as complete. If a root is unsafe, TPM shows the
-configured games root, explains that a real non-reparse folder is required,
-and tells you to correct the game profile/path before running mode 9 again; no
-BepInEx download or write is attempted for that game.
+If anything is outdated, TPM asks once whether to update all of them. Before
+that prompt, it checks that every game folder is inside your chosen Games
+folder and is a normal, safe folder. TPM downloads only after those checks,
+backs up first, and uses a rollback-safe update. If a game folder cannot be
+verified, TPM explains which path to check, makes no download or change, and
+tells you to choose the BepInEx update again after correcting it.
 **Manual clean reset:** delete `doorstop_config.ini`, `winhttp.dll`, `.doorstop_version`, `changelog.txt`, and the `BepInEx` folder from the game's folder — this fully reverts to vanilla.
 
 ---
@@ -271,17 +268,19 @@ Power Putt Live (2012/2013), Silver Strike Bowling Live, Target Toss Pro
 (Bags / Lawn Darts), and Orange County Choppers Pinball -- need a small local
 PostgreSQL 8.3 database. Mode 12 detects which registered games need it.
 
-- If PostgreSQL is not installed yet, the script installs it silently. This is
-  the only feature requiring Administrator. You enter a service-account password
-  and a database password through secure confirmation prompts.
+- If PostgreSQL is not installed yet, TPM installs it when a registered game
+  needs it. You choose the service-account and database passwords through
+  masked confirmation prompts. If Windows permission is needed, TPM asks
+  Windows itself and continues the same setup after you approve it.
 - If PostgreSQL is already installed, TPM preserves existing data. If the saved
-  password no longer works, TPM asks for a replacement, creates and verifies a
-  configuration/profile recovery backup, and automatically resets the postgres
-  role through PostgreSQL single-user mode. No manual follow-up command is needed.
-- If installation or automatic recovery needs elevation and this window is not
-  running as Administrator, close TPM, right-click `TeknoParrot-Manager.bat`
-  (or the PowerShell script), choose **Run as administrator**, and select mode
-  12 again. The blocked step does not change PostgreSQL data or profiles.
+  password no longer works, TPM explains the problem, asks whether to fix it,
+  and lets you choose and confirm a new password. TPM creates and verifies a
+  protected recovery backup, asks Windows for permission when needed, resets
+  only the postgres role, verifies the new password, saves it securely, and
+  continues the setup without sending you back to the menu.
+- If Windows permission is declined or the repair cannot finish, TPM keeps the
+  temporary protected repair information and offers a retry. Your password is
+  never shown in commands, logs, or messages, and no database data is deleted.
 - Recovery changes the role password only. TPM does not edit pg_hba.conf, drop
   or recreate databases, or wipe existing PostgreSQL data.
 - After recovery, TPM updates only affected profiles whose connection values are
@@ -524,7 +523,7 @@ At the end of every run the script prints — and saves to a text file (default 
 | Game appears twice in TeknoParrotUI        | Delete one of the duplicate `.xml` files from `UserProfiles` — keep the one with the correct path and any bindings already set.                                                     |
 | `[UNLOGGED]` on console                    | Log file is inaccessible — check that the TeknoParrot folder is not read-only and you have write permission.                                                                        |
 | HyperSpin 2 export fails                   | TeknoParrot must be set up as an emulator in HyperSpin 2 first — the title must contain "TeknoParrot".                                                                              |
-| Postgres setup says it needs Administrator | Close the window and re-run `TeknoParrot-Manager.bat` via right-click -> Run as administrator, then choose mode 12 again. This applies to first install and automatic recovery when the saved password is unusable. |
+| Postgres setup needs Windows permission | TPM asks Windows automatically and resumes the same setup. Approve the Windows prompt; if you decline it, choose the automatic repair retry when TPM offers it. |
 
 ---
 

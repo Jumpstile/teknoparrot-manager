@@ -81,6 +81,17 @@ Human-use simulation should catch issues like:
 - Restore warns before overwriting.
 - Restore confirms final state.
 
+### PostgreSQL guided recovery
+
+- TPM explains that the saved password no longer works in plain language.
+- The user can choose and confirm a new password through masked prompts.
+- TPM asks Windows for permission itself when a reset or install needs it.
+- The same setup resumes after approval; the user does not close TPM or choose
+  the menu option again.
+- Backup, reset, verification, and configuration-save failures remain visible
+  until acknowledged and offer a retry or a safe stop.
+- No password appears in the visible transcript, arguments, logs, or reports.
+
 ## Certification gate
 
 Add a future certification gate named `Human-Use Simulation`.
@@ -112,3 +123,5 @@ Suggested future files:
 3. Add transcript-based tests for update check wording.
 4. Add cancel-path no-change checks.
 5. Add a `Human-Use Simulation` line to the certification scorecard.
+6. Add transcript and source guards for PostgreSQL guided recovery, including
+   password choice, UAC resume, retry visibility, and credential redaction.

@@ -474,7 +474,7 @@ Describe "Beginner-clarity RC wording (optional-download explanations, first-run
         $script:ProductionSource | Should -Match "This downloads small box-art icons only, never the games themselves"
     }
     It 'shows a first-run welcome/scope screen only when no saved config exists, gated on -not $Unattended' {
-        $script:ProductionSource | Should -Match ([regex]::Escape('if (-not (Test-Path -LiteralPath $configPath) -and -not $Unattended) {'))
+        $script:ProductionSource | Should -Match ([regex]::Escape('if (-not (Test-Path -LiteralPath $configPath) -and -not $Unattended -and -not $isPostgresRecoveryResume) {'))
         $script:ProductionSource | Should -Match "Welcome to TeknoParrot Manager"
         $script:ProductionSource | Should -Match "does not provide game files"
         $script:ProductionSource | Should -Match "does not install or configure TeknoParrot itself"
@@ -4751,28 +4751,140 @@ Describe "Postgres guided recovery and profile transaction" {
     }
 }
 
-Describe "Issue #292 PostgreSQL elevation guidance" {
+Describe "Issue #292 PostgreSQL automatic elevation and resume" {
     BeforeEach {
         $script:postgresGuidanceMessages = @()
         Mock Write-Host { $script:postgresGuidanceMessages += [string]$Object }
         Mock Write-Log {}
     }
 
-    It "tells a non-admin recovery user exactly how to relaunch mode 12" {
+    It "explains that TPM will request permission and continue the same repair" {
         Write-PostgresAdministratorGuidance -Operation Recovery
 
-        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'not running as Administrator'
-        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'Run as administrator'
-        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'select PostgreSQL setup \(mode 12\) again'
-        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'data and profiles were not changed'
+        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'Windows will ask you to approve this'
+        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'continue the same setup automatically'
+        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'do not need to close TPM'
+        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'backs up before changing anything'
     }
 
-    It "gives the same safe elevation action for a first install" {
+    It "uses the same automatic permission handoff for a first install" {
         Write-PostgresAdministratorGuidance -Operation Install
 
-        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'PostgreSQL is not installed yet'
-        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'right-click TeknoParrot-Manager\.bat'
-        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'select PostgreSQL setup \(mode 12\) again'
+        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'needs Windows permission to install'
+        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'continue the same setup automatically'
+        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Not -Match '(?i)right-click|Run as administrator|select PostgreSQL setup'
+    }
+
+    It "offers automatic repair instead of manual relaunch instructions" {
+        $script:ProductionSource | Should -Match 'Fix it now\? \(Y/N\)'
+        $script:ProductionSource | Should -Match 'Start-PostgresRecoveryAsAdministrator[\s\S]*?-Operation Recovery'
+        $script:ProductionSource | Should -Match 'PostgresRecoveryResumeToken'
+        $script:ProductionSource | Should -Not -Match '(?i)right-click TeknoParrot-Manager\.bat|select PostgreSQL setup \(mode 12\) again'
+    }
+
+    It "uses the Windows Administrator role and a UAC RunAs child for the recovery gate" {
+        $adminFunction = (Get-Command Test-RunningAsAdministrator).ScriptBlock.ToString()
+        $adminFunction | Should -Match 'WindowsPrincipal'
+        $adminFunction | Should -Match 'WindowsBuiltInRole\]::Administrator'
+        $script:ProductionSource | Should -Match 'Start-Process\s+-FilePath \$hostPath[\s\S]*?-Verb RunAs[\s\S]*?-Wait'
+    }
+
+    It "does not expose credentials in the non-admin recovery guidance" {
+        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Not -Match '(?i)(superPwPlain|newPassword|password\s*[:=]\s*\S+)'
+    }
+
+    It "uses the exact automatic repair offer and no manual elevation path" {
+        $script:ProductionSource | Should -Match "TPM can't use the saved PostgreSQL password"
+        $script:ProductionSource | Should -Match "TPM can fix this automatically"
+        $script:ProductionSource | Should -Match "Fix it now\? \(Y/N\)"
+        $script:ProductionSource | Should -Not -Match '(?i)right-click.*administrator|select PostgreSQL setup.*again'
+    }
+
+    It "resumes option 12 without re-entering the main menu" {
+        $script:ProductionSource | Should -Match ([regex]::Escape('$pendingApplyMode = ''PostgresSetup'''))
+        $script:ProductionSource | Should -Match '-PostgresRecoveryResumeToken'
+        $script:ProductionSource | Should -Match 'PostgreSQL is fixed'
+        $script:ProductionSource | Should -Match 'Press Enter to continue'
+        $script:ProductionSource | Should -Match 'will not claim recovery is complete'
+    }
+
+    It "keeps backup, reset, verification, save, and setup ordering fail-closed" {
+        $source = $script:ProductionSource
+        $helperStart = $source.IndexOf('function Invoke-PostgresSelectedPasswordRecovery')
+        $helperEnd = $source.IndexOf('function Test-PostgresInstallationsRegistry', $helperStart)
+        $helper = $source.Substring($helperStart, $helperEnd - $helperStart)
+        $backup = $helper.IndexOf('New-PostgresRecoveryBackup')
+        $reset = $helper.IndexOf('Reset-PostgresPasswordAutomatically')
+        $verify = $helper.IndexOf('Test-PostgresPassword')
+        $backup | Should -BeGreaterThan -1
+        $reset | Should -BeGreaterThan $backup
+        $verify | Should -BeGreaterThan $reset
+        $postgresMode = $source.IndexOf('if ($mode -eq "PostgresSetup")')
+        $dbBackup = $source.IndexOf('Backup-PostgresDatabases', $postgresMode)
+        $save = $source.IndexOf('Save-Config', $dbBackup)
+        $profileSetup = $source.IndexOf('Invoke-PostgresGameSetup', $dbBackup)
+        $postgresMode | Should -BeGreaterThan -1
+        $save | Should -BeGreaterThan $verify
+        $dbBackup | Should -BeGreaterThan $verify
+        $save | Should -BeGreaterThan $dbBackup
+        $profileSetup | Should -BeGreaterThan $dbBackup
+    }
+
+    It "keeps UAC denial retryable without claiming recovery" {
+        $script:ProductionSource | Should -Match 'Windows did not give TPM permission to continue'
+        $script:ProductionSource | Should -Match 'Nothing was changed by the failed automatic repair'
+        $script:ProductionSource | Should -Match "Read-HostSafe '  Try again\? \(Y/N\)'"
+        $script:ProductionSource | Should -Match 'protected repair information is still available'
+    }
+
+    Context "protected resume state" {
+        BeforeEach {
+            $script:stateConfigPath = Join-Path $TestDrive 'TeknoParrot-Manager.config.json'
+            $script:stateScriptPath = Join-Path $TestDrive 'TeknoParrot-Manager.ps1'
+            $script:stateTpRoot = Join-Path $TestDrive 'TeknoParrot'
+            $script:stateUserProfilesDir = Join-Path $script:stateTpRoot 'UserProfiles'
+            New-Item -ItemType Directory -Path $script:stateUserProfilesDir -Force | Out-Null
+            Set-Content -LiteralPath $script:stateConfigPath -Value '{}'
+            Set-Content -LiteralPath $script:stateScriptPath -Value '# test script'
+            Mock Get-PostgresRecoveryStateDirectory { Join-Path $TestDrive 'RecoveryState' }
+            Mock Set-PostgresRecoveryStateAcl {}
+            Mock Write-Log {}
+        }
+
+        It "stores the chosen password encrypted and validates it only at resume time" {
+            $secret = 'Chosen-Password-For-Resume-789'
+            $statePath = New-PostgresRecoveryState -ConfigPath $script:stateConfigPath -ScriptPath $script:stateScriptPath -TpRoot $script:stateTpRoot -UserProfilesDir $script:stateUserProfilesDir -Operation Recovery -PasswordPlain $secret
+            try {
+                $raw = Get-Content -LiteralPath $statePath -Raw
+                $raw | Should -Not -Match ([regex]::Escape($secret))
+                $saved = $raw | ConvertFrom-Json
+                $saved.PasswordMachineEncrypted | Should -Not -BeNullOrEmpty
+                $saved.PasswordOriginEncrypted | Should -Not -BeNullOrEmpty
+                (Read-PostgresRecoveryState -StatePath $statePath -ExpectedConfigPath $script:stateConfigPath -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir).PasswordPlain | Should -Be $secret
+            } finally {
+                [void](Remove-PostgresRecoveryState -Path $statePath)
+            }
+        }
+
+        It "passes only the protected state path through the UAC command line" {
+            $secret = 'Never-In-Arguments-123'
+            $statePath = Join-Path (Join-Path $TestDrive 'RecoveryState') '.tpm-postgres-recovery-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json'
+            $script:testUacStatePath = $statePath
+            Mock New-PostgresRecoveryState { $script:testUacStatePath }
+            Mock Remove-PostgresRecoveryState { $true }
+            Mock Start-Process {
+                param($FilePath, $ArgumentList, $Verb, $Wait, $PassThru, $ErrorAction)
+                $script:uacFilePath = $FilePath
+                $script:uacArguments = @($ArgumentList)
+                $script:uacVerb = $Verb
+                [pscustomobject]@{ ExitCode = 0 }
+            }
+            Start-PostgresRecoveryAsAdministrator -ConfigPath $script:stateConfigPath -ScriptPath $script:stateScriptPath -TpRoot $script:stateTpRoot -UserProfilesDir $script:stateUserProfilesDir -Operation Recovery -PasswordPlain $secret | Should -BeTrue
+            $script:uacVerb | Should -Be 'RunAs'
+            ($script:uacArguments -join ' ') | Should -Not -Match ([regex]::Escape($secret))
+            ($script:uacArguments -join ' ') | Should -Match 'PostgresRecoveryResumeToken'
+            ($script:uacArguments -join ' ') | Should -Match ([regex]::Escape($statePath))
+        }
     }
 }
 
@@ -4805,10 +4917,11 @@ Describe "BepInEx authorized-root and transaction guards" {
 
         Write-BepInExUnsafeRootGuidance -GameCode 'UnsafeGame' -ApprovedRoot 'E:\Games\TeknoParrot Games'
 
-        ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'Refusing BepInEx updates'
-        ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'Action: verify the game folder'
-        ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'junction/symlink'
-        ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'No BepInEx download or write was attempted'
+        ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'could not safely update BepInEx'
+        ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'move or correct it'
+        ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'did not download or change anything'
+        ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'choose the BepInEx update again'
+        ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Not -Match '(?i)reparse|junction|symlink'
     }
 
     It "fails closed when the approved root is reparse-backed" {

@@ -58,7 +58,11 @@
 #   - Games extracted into per-game subfolders (AutoSync can do this).
 # =============================================================================
 
-param([switch]$Unattended, [switch]$DryRun)
+param(
+    [switch]$Unattended,
+    [switch]$DryRun,
+    [string]$PostgresRecoveryResumeToken = ''
+)
 
 # Single source of truth for the version string used in the banner, log, and
 # GitHub API User-Agent headers. Previously hardcoded in each of those spots
@@ -6186,23 +6190,262 @@ function Test-RunningAsAdministrator {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# Explain the safe manual recovery step when mode 12 reaches an operation
-# that genuinely requires elevation. TPM does not silently relaunch itself or
-# weaken PostgreSQL/data protections; the user must start a new elevated
-# session and choose mode 12 again.
+# Explain why Windows permission is needed before TPM starts its automatic
+# elevation/resume handoff. The normal user path never asks a beginner to
+# close TPM, find a script, or select the same menu item again.
 function Write-PostgresAdministratorGuidance {
     param(
         [ValidateSet('Install','Recovery')]
         [string]$Operation = 'Recovery'
     )
     if ($Operation -eq 'Install') {
-        Write-Host '  PostgreSQL is not installed yet, and this TPM window is not running as Administrator.' -ForegroundColor Red
+        Write-Host '  TPM needs Windows permission to install the small local database used by these games.' -ForegroundColor Yellow
     } else {
-        Write-Host '  The saved PostgreSQL password is not usable, and this TPM window is not running as Administrator.' -ForegroundColor Red
+        Write-Host '  TPM needs Windows permission to repair the saved PostgreSQL password.' -ForegroundColor Yellow
     }
-    Write-Host '  Action: close TPM, right-click TeknoParrot-Manager.bat (or the PowerShell script),' -ForegroundColor Yellow
-    Write-Host '  choose Run as administrator, then select PostgreSQL setup (mode 12) again.' -ForegroundColor Yellow
-    Write-Host '  Existing PostgreSQL data and profiles were not changed by this blocked step.' -ForegroundColor Yellow
+    Write-Host '  Windows will ask you to approve this. TPM will continue the same setup automatically.' -ForegroundColor Yellow
+    Write-Host '  You do not need to close TPM or choose PostgreSQL setup again.' -ForegroundColor Yellow
+    Write-Host '  Existing PostgreSQL data and profiles are protected; TPM backs up before changing anything.' -ForegroundColor Yellow
+}
+
+function Get-PostgresRecoveryStateDirectory {
+    $base = if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) { $env:LOCALAPPDATA } else { $env:TEMP }
+    return (Join-Path $base 'TeknoParrotManager\Recovery')
+}
+
+function Set-PostgresRecoveryStateAcl {
+    param([Parameter(Mandatory)][string]$Path, [switch]$Directory)
+    $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $permission = if ($Directory) { '(OI)(CI)(F)' } else { '(F)' }
+    $rules = @(
+        ('*{0}:{1}' -f $sid, $permission),
+        ('*S-1-5-32-544:{0}' -f $permission),
+        ('*S-1-5-18:{0}' -f $permission)
+    )
+    & icacls $Path /inheritance:r /grant:r @rules 1>$null 2>$null
+    if ($LASTEXITCODE -ne 0) { throw 'Postgres recovery state ACL could not be verified.' }
+}
+
+function Protect-PostgresRecoveryPasswordForElevation {
+    param([Parameter(Mandatory)][string]$PasswordPlain)
+    Add-Type -AssemblyName System.Security
+    $bytes = [Text.Encoding]::UTF8.GetBytes($PasswordPlain)
+    try {
+        $protected = [Security.Cryptography.ProtectedData]::Protect(
+            $bytes, $null, [Security.Cryptography.DataProtectionScope]::LocalMachine)
+        return [Convert]::ToBase64String($protected)
+    } finally {
+        if ($bytes) { [Array]::Clear($bytes, 0, $bytes.Length) }
+    }
+}
+
+function Unprotect-PostgresRecoveryPasswordForElevation {
+    param([Parameter(Mandatory)][string]$ProtectedPassword)
+    Add-Type -AssemblyName System.Security
+    $protected = [Convert]::FromBase64String($ProtectedPassword)
+    $bytes = $null
+    try {
+        $bytes = [Security.Cryptography.ProtectedData]::Unprotect(
+            $protected, $null, [Security.Cryptography.DataProtectionScope]::LocalMachine)
+        return [Text.Encoding]::UTF8.GetString($bytes)
+    } finally {
+        if ($protected) { [Array]::Clear($protected, 0, $protected.Length) }
+        if ($bytes) { [Array]::Clear($bytes, 0, $bytes.Length) }
+    }
+}
+
+function Remove-PostgresRecoveryState {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $true }
+    try {
+        if (Test-Path -LiteralPath $Path -PathType Leaf) {
+            Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
+        }
+        return (-not (Test-Path -LiteralPath $Path -PathType Leaf))
+    } catch {
+        Write-Log 'Postgres recovery: protected resume state cleanup failed.'
+        return $false
+    }
+}
+
+function New-PostgresRecoveryState {
+    param(
+        [Parameter(Mandatory)][string]$ConfigPath,
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [Parameter(Mandatory)][string]$TpRoot,
+        [Parameter(Mandatory)][string]$UserProfilesDir,
+        [ValidateSet('Install','Recovery')]
+        [string]$Operation = 'Recovery',
+        [string]$PasswordPlain = ''
+    )
+    if ($Operation -eq 'Recovery' -and [string]::IsNullOrEmpty($PasswordPlain)) {
+        throw 'Postgres recovery state requires a chosen password.'
+    }
+    $stateDirectory = Get-PostgresRecoveryStateDirectory
+    $statePath = Join-Path $stateDirectory ('.tpm-postgres-recovery-' + [guid]::NewGuid().ToString('N') + '.json')
+    try {
+        [void][System.IO.Directory]::CreateDirectory($stateDirectory)
+        Set-PostgresRecoveryStateAcl -Path $stateDirectory -Directory
+        $parent = Get-Process -Id $PID -ErrorAction Stop
+        $state = [ordered]@{
+            SchemaVersion             = 2
+            Purpose                   = 'TeknoParrotManager.PostgresRecovery'
+            Operation                 = $Operation
+            Nonce                     = [guid]::NewGuid().ToString('N')
+            AttemptId                 = 1
+            CreatedUtc                = (Get-Date).ToUniversalTime().ToString('o')
+            ExpiresUtc                = (Get-Date).ToUniversalTime().AddMinutes(15).ToString('o')
+            ParentPid                 = [int]$PID
+            ParentStartTicks          = [int64]$parent.StartTime.ToUniversalTime().Ticks
+            ScriptPath                = [System.IO.Path]::GetFullPath($ScriptPath)
+            ScriptSha256              = (Get-FileHash -LiteralPath $ScriptPath -Algorithm SHA256 -ErrorAction Stop).Hash
+            ConfigPath                = [System.IO.Path]::GetFullPath($ConfigPath)
+            ConfigSha256              = (Get-FileHash -LiteralPath $ConfigPath -Algorithm SHA256 -ErrorAction Stop).Hash
+            TpRoot                    = [System.IO.Path]::GetFullPath($TpRoot)
+            UserProfilesDir           = [System.IO.Path]::GetFullPath($UserProfilesDir)
+            PasswordMachineEncrypted  = if ($Operation -eq 'Recovery') { Protect-PostgresRecoveryPasswordForElevation -PasswordPlain $PasswordPlain } else { '' }
+            PasswordOriginEncrypted   = if ($Operation -eq 'Recovery') { ConvertTo-PostgresEncryptedPassword -PlainText $PasswordPlain } else { '' }
+        }
+        [System.IO.File]::WriteAllText($statePath, ($state | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding $false))
+        Set-PostgresRecoveryStateAcl -Path $statePath
+        if (-not (Test-Path -LiteralPath $statePath -PathType Leaf)) { throw 'Protected recovery state was not created.' }
+        return $statePath
+    } catch {
+        [void](Remove-PostgresRecoveryState -Path $statePath)
+        throw 'TPM could not prepare the protected PostgreSQL recovery handoff.'
+    } finally {
+        $PasswordPlain = $null
+        [GC]::Collect()
+    }
+}
+
+function Read-PostgresRecoveryState {
+    param(
+        [Parameter(Mandatory)][string]$StatePath,
+        [Parameter(Mandatory)][string]$ExpectedConfigPath,
+        [Parameter(Mandatory)][string]$ExpectedScriptPath,
+        [Parameter(Mandatory)][string]$ExpectedTpRoot,
+        [Parameter(Mandatory)][string]$ExpectedUserProfilesDir
+    )
+    $passwordPlain = $null
+    try {
+        $stateDirectory = [System.IO.Path]::GetFullPath((Get-PostgresRecoveryStateDirectory)).TrimEnd('\','/')
+        $fullPath = [System.IO.Path]::GetFullPath($StatePath)
+        $leaf = [System.IO.Path]::GetFileName($fullPath)
+        if ([System.IO.Path]::GetDirectoryName($fullPath).TrimEnd('\','/') -ine $stateDirectory -or
+            $leaf -notmatch '^\.tpm-postgres-recovery-[0-9a-f]{32}\.json$' -or
+            -not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+            throw 'Recovery state path is not a TPM state file.'
+        }
+        Set-PostgresRecoveryStateAcl -Path $fullPath
+        $state = Get-Content -LiteralPath $fullPath -Raw -ErrorAction Stop | ConvertFrom-Json
+        if ($state.SchemaVersion -ne 2 -or $state.Purpose -ne 'TeknoParrotManager.PostgresRecovery' -or
+            $state.Operation -notin @('Install','Recovery') -or
+            [string]::IsNullOrWhiteSpace([string]$state.Nonce) -or
+            [int]$state.AttemptId -lt 1) { throw 'Recovery state metadata is invalid.' }
+        if ([System.IO.Path]::GetFullPath([string]$state.ConfigPath) -ine [System.IO.Path]::GetFullPath($ExpectedConfigPath) -or
+            [System.IO.Path]::GetFullPath([string]$state.ScriptPath) -ine [System.IO.Path]::GetFullPath($ExpectedScriptPath) -or
+            [System.IO.Path]::GetFullPath([string]$state.TpRoot) -ine [System.IO.Path]::GetFullPath($ExpectedTpRoot) -or
+            [System.IO.Path]::GetFullPath([string]$state.UserProfilesDir) -ine [System.IO.Path]::GetFullPath($ExpectedUserProfilesDir)) {
+            throw 'Recovery state belongs to a different TPM installation.'
+        }
+        $expires = [DateTime]::Parse([string]$state.ExpiresUtc).ToUniversalTime()
+        if ($expires -le (Get-Date).ToUniversalTime()) { throw 'Recovery state has expired.' }
+        $parent = Get-Process -Id ([int]$state.ParentPid) -ErrorAction Stop
+        if ([int64]$parent.StartTime.ToUniversalTime().Ticks -ne [int64]$state.ParentStartTicks) { throw 'Recovery parent identity changed.' }
+        if ((Get-FileHash -LiteralPath $ExpectedScriptPath -Algorithm SHA256 -ErrorAction Stop).Hash -ne [string]$state.ScriptSha256 -or
+            (Get-FileHash -LiteralPath $ExpectedConfigPath -Algorithm SHA256 -ErrorAction Stop).Hash -ne [string]$state.ConfigSha256) {
+            throw 'Recovery source or configuration changed during the handoff.'
+        }
+        if ($state.Operation -eq 'Recovery') {
+            if ([string]::IsNullOrEmpty([string]$state.PasswordMachineEncrypted) -or
+                [string]::IsNullOrEmpty([string]$state.PasswordOriginEncrypted)) { throw 'Recovery password state is missing.' }
+            $passwordPlain = Unprotect-PostgresRecoveryPasswordForElevation -ProtectedPassword ([string]$state.PasswordMachineEncrypted)
+            if ([string]::IsNullOrEmpty($passwordPlain)) { throw 'Recovery password state could not be decrypted.' }
+        } elseif (-not [string]::IsNullOrEmpty([string]$state.PasswordMachineEncrypted) -or
+                  -not [string]::IsNullOrEmpty([string]$state.PasswordOriginEncrypted)) {
+            throw 'Install state unexpectedly contains a password.'
+        }
+        return [pscustomobject]@{
+            Path                    = $fullPath
+            Operation               = [string]$state.Operation
+            PasswordPlain           = $passwordPlain
+            PasswordOriginEncrypted = [string]$state.PasswordOriginEncrypted
+        }
+    } catch {
+        throw 'TPM could not safely resume the protected PostgreSQL setup.'
+    } finally {
+        $passwordPlain = $null
+        [GC]::Collect()
+    }
+}
+
+function Exit-PostgresRecoveryResume {
+    param([Parameter(Mandatory)][string]$Message, [int]$ExitCode = 1)
+    Write-Host ''
+    Write-Host ('  ' + $Message) -ForegroundColor Red
+    Write-Host '  TPM did not report the PostgreSQL setup as complete. No further profile changes were made.' -ForegroundColor Yellow
+    Write-Host '  The protected repair information was kept so you can try again without re-entering the password.' -ForegroundColor Yellow
+    Write-Log 'Postgres recovery resume: stopped before completion; protected state was retained.'
+    [void](Read-HostSafe '  Press Enter to close TPM')
+    exit $ExitCode
+}
+
+function ConvertTo-PostgresProcessArgument {
+    param([Parameter(Mandatory)][string]$Value)
+    if ($Value -notmatch '[\s"]') { return $Value }
+    return '"' + ($Value -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"'
+}
+
+function Start-PostgresRecoveryAsAdministrator {
+    param(
+        [Parameter(Mandatory)][string]$ConfigPath,
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [Parameter(Mandatory)][string]$TpRoot,
+        [Parameter(Mandatory)][string]$UserProfilesDir,
+        [ValidateSet('Install','Recovery')]
+        [string]$Operation = 'Recovery',
+        [string]$PasswordPlain = ''
+    )
+    $statePath = $null
+    try {
+        $statePath = New-PostgresRecoveryState -ConfigPath $ConfigPath -ScriptPath $ScriptPath -TpRoot $TpRoot -UserProfilesDir $UserProfilesDir -Operation $Operation -PasswordPlain $PasswordPlain
+        $hostName = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh.exe' } else { 'powershell.exe' }
+        $hostPath = Join-Path $PSHOME $hostName
+        if (-not (Test-Path -LiteralPath $hostPath -PathType Leaf)) { throw 'PowerShell host was not found.' }
+        $arguments = @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $ScriptPath, '-PostgresRecoveryResumeToken', $statePath) |
+            ForEach-Object { ConvertTo-PostgresProcessArgument -Value ([string]$_) }
+        $argumentString = $arguments -join ' '
+    } catch {
+        Write-Host '  TPM could not prepare the automatic repair. No changes were made.' -ForegroundColor Red
+        Write-Log 'Postgres recovery: protected UAC handoff could not be prepared.'
+        [void](Remove-PostgresRecoveryState -Path $statePath)
+        return $false
+    } finally {
+        $PasswordPlain = $null
+        [GC]::Collect()
+    }
+
+    while ($true) {
+        Write-Host '  TPM will ask Windows for permission, then continue this setup automatically.' -ForegroundColor Cyan
+        try {
+            $child = Start-Process -FilePath $hostPath -ArgumentList $argumentString -Verb RunAs -Wait -PassThru -ErrorAction Stop
+            if ($child.ExitCode -eq 0) {
+                [void](Remove-PostgresRecoveryState -Path $statePath)
+                return $true
+            }
+            Write-Host '  Windows allowed TPM to continue, but PostgreSQL setup did not finish.' -ForegroundColor Red
+        } catch {
+            Write-Host '  Windows did not give TPM permission to continue.' -ForegroundColor Yellow
+            Write-Log 'Postgres recovery: UAC approval was unavailable or was declined.'
+        }
+        Write-Host '  Nothing was changed by the failed automatic repair. The protected repair information is still available.' -ForegroundColor Yellow
+        $retry = (Read-HostSafe '  Try again? (Y/N)').ToUpper()
+        if ($retry -ne 'Y') {
+            [void](Remove-PostgresRecoveryState -Path $statePath)
+            return $false
+        }
+    }
 }
 
 # Decrypts a SecureString to plaintext only as long as needed, then
@@ -6255,6 +6498,26 @@ function Read-ConfirmedPostgresPassword {
         }
         Write-Host "  Those two entries did not match or were empty -- let's try again." -ForegroundColor Yellow
     }
+}
+
+function Invoke-PostgresSelectedPasswordRecovery {
+    param(
+        [Parameter(Mandatory)][string]$UserProfilesDir,
+        [Parameter(Mandatory)][string]$PasswordPlain
+    )
+    Write-Host "  TPM is creating a verified recovery backup before resetting the PostgreSQL role password..." -ForegroundColor Cyan
+    $backup = New-PostgresRecoveryBackup -UserProfilesDir $UserProfilesDir
+    if (-not $backup.Verified) {
+        return [pscustomobject]@{ Succeeded = $false; Backup = $backup; Reason = 'RECOVERY_BACKUP_UNVERIFIED' }
+    }
+    $reset = Reset-PostgresPasswordAutomatically -NewPassword $PasswordPlain -RecoveryBackup $backup
+    if (-not $reset.Succeeded) {
+        return [pscustomobject]@{ Succeeded = $false; Backup = $backup; Reason = 'PASSWORD_RESET_FAILED' }
+    }
+    if (-not (Test-PostgresPassword -SuperPasswordPlain $PasswordPlain)) {
+        return [pscustomobject]@{ Succeeded = $false; Backup = $backup; Reason = 'PASSWORD_VERIFICATION_FAILED' }
+    }
+    return [pscustomobject]@{ Succeeded = $true; Backup = $backup; Reason = $null }
 }
 
 # Cross-checks PostgreSQL's own installation registry record -- written by
@@ -6408,8 +6671,8 @@ function Install-Postgres83 {
     param([ref]$OutSuperPasswordPlain)
 
     if (-not (Test-RunningAsAdministrator)) {
-        Write-Host "  ERROR: Installing PostgreSQL requires Administrator privileges." -ForegroundColor Red
-        Write-Host "  Close this window and re-run TeknoParrot Manager as Administrator." -ForegroundColor Yellow
+        Write-Host "  TPM needs Windows permission before it can install PostgreSQL." -ForegroundColor Red
+        Write-Host "  No changes were made. TPM will request that permission from its normal setup flow." -ForegroundColor Yellow
         Write-Log "Postgres install: aborted -- not running as Administrator."
         return $false
     }
@@ -7682,12 +7945,11 @@ function Write-BepInExUnsafeRootGuidance {
         [string]$ApprovedRoot = '',
         [string]$Reason = 'the game folder is outside the approved root or contains a reparse-backed path'
     )
-    Write-Host ("  Refusing BepInEx updates because the game root is unsafe: {0}" -f $GameCode) -ForegroundColor Red
-    Write-Host ("  Reason: {0}." -f $Reason) -ForegroundColor Yellow
-    Write-Host ("  Action: verify the game folder is a real folder inside the configured games root: {0}" -f $ApprovedRoot) -ForegroundColor Yellow
-    Write-Host '  Remove any junction/symlink in that path, or correct the game profile path, then run mode 9 again.' -ForegroundColor Yellow
-    Write-Host '  No BepInEx download or write was attempted for this game.' -ForegroundColor Yellow
-    Write-Log "BepInEx update check: blocked on unsafe game root for $GameCode. Action required: verify the game is inside the approved non-reparse root."
+    Write-Host ("  TPM could not safely update BepInEx for {0}." -f $GameCode) -ForegroundColor Red
+    Write-Host '  The game folder is not a normal folder inside your chosen Games folder.' -ForegroundColor Yellow
+    Write-Host ("  Check this game's path in TeknoParrot and move or correct it so it is inside: {0}" -f $ApprovedRoot) -ForegroundColor Yellow
+    Write-Host '  TPM did not download or change anything. Then choose the BepInEx update again.' -ForegroundColor Yellow
+    Write-Log "BepInEx update check: blocked on unsafe game root for $GameCode. Technical reason: $Reason. Action required: verify the game is inside the approved non-reparse root."
 }
 
 function Test-BepInExExistingTreeSafe {
@@ -8226,7 +8488,7 @@ function Assert-ManagerUpdateTargetWritable {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return }
     $item = Get-Item -LiteralPath $Path -Force
     if ($item.IsReadOnly) {
-        throw "'$Path' is marked read-only. Remove the read-only attribute (e.g. Set-ItemProperty -LiteralPath '$Path' -Name IsReadOnly -Value `$false) and re-run the update; it will not be silently cleared."
+        throw "'$Path' is marked read-only. Remove the read-only attribute in the file's Properties, then re-run the update; TPM will not silently clear it."
     }
 }
 
@@ -12983,6 +13245,7 @@ Write-Log "Script started (v$ScriptVersion$(if ($Unattended) { ' [Unattended]' }
 # =============================================================================
 
 $configPath         = Join-Path $PSScriptRoot "TeknoParrot-Manager.config.json"
+$isPostgresRecoveryResume = -not [string]::IsNullOrWhiteSpace($PostgresRecoveryResumeToken)
 $tpRoot             = $null
 $mode               = $null   # "AutoSync", "RegisterOnly", "CrosshairSetup", "ReShadeSetup", "DgVoodoo2Setup", "GpuFixSetup", "FFBSetup", "BepInExUpdate", "Restore", or "HealthCheck"
 $pendingApplyMode   = $null   # set when a preview run's "Apply for real now?" prompt is answered Y -- tells the
@@ -13026,7 +13289,7 @@ if ($Unattended -and -not (Test-Path -LiteralPath $configPath)) {
 # responsible for. Rephrases the existing ownership disclaimer already
 # shipped in TeknoParrot-Manager-README.txt ("WHAT IT DOES NOT DO") rather
 # than introducing new legal wording.
-if (-not (Test-Path -LiteralPath $configPath) -and -not $Unattended) {
+if (-not (Test-Path -LiteralPath $configPath) -and -not $Unattended -and -not $isPostgresRecoveryResume) {
     Write-Host ""
     Write-Host "============================================" -ForegroundColor Cyan
     Write-Host "   Welcome to TeknoParrot Manager" -ForegroundColor Cyan
@@ -13088,7 +13351,11 @@ if (Test-Path -LiteralPath $configPath) {
             Write-Host "  Check for updates on startup: Disabled"
         }
         Write-Host ""
-        if ($Unattended) {
+        if ($isPostgresRecoveryResume) {
+            Write-Host "  [Automatic repair] Continuing the PostgreSQL setup." -ForegroundColor DarkCyan
+            Write-Log "Postgres recovery: auto-accepted saved settings for the protected resume."
+            $use = "Y"
+        } elseif ($Unattended) {
             Write-Host "  [Unattended] Using saved settings." -ForegroundColor DarkCyan
             Write-Log "Unattended: auto-accepted saved settings."
             $use = "Y"
@@ -13156,6 +13423,10 @@ if (Test-Path -LiteralPath $configPath) {
                     Write-Log "WARNING: Unattended: config UnattendedMode '$requestedUnattendedMode' is not a recognized mode -- ignoring, menu loop will report the missing-mode error."
                 }
             }
+            if ($isPostgresRecoveryResume) {
+                $pendingApplyMode = 'PostgresSetup'
+                Write-Log 'Postgres recovery: protected resume will enter option 12 automatically.'
+            }
             $configAccepted = $true
         }
         Write-Host ""
@@ -13172,7 +13443,7 @@ if (Test-Path -LiteralPath $configPath) {
 # interactive Y/N/V prompt there, and Unattended is meant to be fast and
 # non-interactive. See Invoke-StartupUpdateCheck's own comment for how it
 # stays from meaningfully delaying startup when GitHub is unreachable.
-if ($checkForUpdatesOnStartup -and -not $Unattended) {
+if ($checkForUpdatesOnStartup -and -not $Unattended -and -not $isPostgresRecoveryResume) {
     $scriptSelfPathForStartupCheck = Join-Path $PSScriptRoot "TeknoParrot-Manager.ps1"
     $startupUpdateInstalled = Invoke-StartupUpdateCheck -ScriptPath $scriptSelfPathForStartupCheck
     if ($startupUpdateInstalled) {
@@ -14940,6 +15211,18 @@ while ($true) {
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         Write-Host " PostgreSQL Setup (Incredible Technologies games)" -ForegroundColor Cyan
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        $postgresResumeState = $null
+        if ($isPostgresRecoveryResume) {
+            try {
+                $postgresResumeState = Read-PostgresRecoveryState -StatePath $PostgresRecoveryResumeToken -ExpectedConfigPath $configPath -ExpectedScriptPath (Join-Path $PSScriptRoot 'TeknoParrot-Manager.ps1') -ExpectedTpRoot $tpRoot -ExpectedUserProfilesDir (Join-Path $tpRoot 'UserProfiles')
+            } catch {
+                Exit-PostgresRecoveryResume -Message 'TPM could not safely continue the protected PostgreSQL setup.'
+            }
+            if (-not (Test-RunningAsAdministrator)) {
+                Exit-PostgresRecoveryResume -Message 'Windows did not give TPM the permission needed to continue the protected PostgreSQL setup.'
+            }
+            Write-Host '  TPM is continuing the PostgreSQL setup automatically.' -ForegroundColor Cyan
+        }
         Write-Host "  Scanning registered games for Postgres requirements..." -ForegroundColor DarkGray
         $pgProfiles = @(Get-ChildItem -LiteralPath $userProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object Name)
         $needCount = 0; $scanBlocked = $false
@@ -14951,67 +15234,107 @@ while ($true) {
         }
         if ($scanBlocked) {
             Write-Host "  Could not safely scan every registered profile -- no changes made." -ForegroundColor Red
+            if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not safely read every registered game profile.' }
             [void](Read-Host "  Press Enter to return to menu")
             continue
         }
         if ($needCount -eq 0) {
             Write-Host "  No registered games need PostgreSQL -- nothing to do." -ForegroundColor Green
             Write-Log "Postgres setup: no Postgres-needing games registered."
+            if ($isPostgresRecoveryResume) {
+                [void](Remove-PostgresRecoveryState -Path $postgresResumeState.Path)
+                Write-Host '  The automatic PostgreSQL setup is complete.' -ForegroundColor Green
+                [void](Read-HostSafe '  Press Enter to close TPM')
+                exit 0
+            }
             [void](Read-Host "  Press Enter to return to menu")
             continue
         }
         Write-Host ("  {0} registered game(s) need PostgreSQL." -f $needCount) -ForegroundColor Cyan
         if (-not (Test-PostgresInstalled) -and -not (Test-RunningAsAdministrator)) {
             Write-PostgresAdministratorGuidance -Operation Install
-            Write-Log 'Postgres setup: blocked because installation requires Administrator privileges.'
-            [void](Read-Host "  Press Enter to return to menu")
+            $elevated = Start-PostgresRecoveryAsAdministrator -ConfigPath $configPath -ScriptPath (Join-Path $PSScriptRoot 'TeknoParrot-Manager.ps1') -TpRoot $tpRoot -UserProfilesDir $userProfilesDir -Operation Install
+            if ($elevated) { exit 0 }
+            Write-Log 'Postgres setup: automatic installation handoff did not complete.'
+            [void](Read-HostSafe "  Press Enter to return to menu")
             continue
+        }
+        if ($isPostgresRecoveryResume -and $postgresResumeState.Operation -eq 'Recovery' -and -not (Test-PostgresInstalled)) {
+            Exit-PostgresRecoveryResume -Message 'The PostgreSQL installation was not available when TPM resumed the repair.'
         }
 
         $superPwPlain = $null
         $recoveryBackup = $null
+        $outPw = $null
         try {
             if (Test-PostgresInstalled) {
                 Write-Host "  PostgreSQL is already installed -- existing data will be preserved." -ForegroundColor Green
-                if ($postgresSuperPasswordEncrypted) {
-                    try {
-                        $secure = ConvertTo-SecureString -String $postgresSuperPasswordEncrypted
-                        $savedPwPlain = ConvertFrom-SecureStringPlain $secure
-                        if (Test-PostgresPassword -SuperPasswordPlain $savedPwPlain) { $superPwPlain = $savedPwPlain }
-                        else { Write-Log 'Postgres setup: saved password did not authenticate; guided recovery is required.' }
-                    } catch { Write-Log 'Postgres setup: saved password could not be verified; guided recovery is required.' }
-                    finally { $savedPwPlain = $null }
-                }
-                if (-not $superPwPlain) {
-                    if (-not (Test-RunningAsAdministrator)) {
-                        Write-PostgresAdministratorGuidance -Operation Recovery
-                        Write-Log 'Postgres setup: recovery blocked because Administrator privileges were unavailable.'
-                        continue
-                    }
-                    $typedPwPlain = Read-ConfirmedPostgresPassword 'the new PostgreSQL database password TPM should set automatically'
+                if ($isPostgresRecoveryResume -and $postgresResumeState.Operation -eq 'Recovery') {
+                    $typedPwPlain = $postgresResumeState.PasswordPlain
                     if (Test-PostgresPassword -SuperPasswordPlain $typedPwPlain) {
                         $superPwPlain = $typedPwPlain
+                        $postgresSuperPasswordEncrypted = $postgresResumeState.PasswordOriginEncrypted
                     } else {
-                        Write-Host "  TPM is creating a verified recovery backup before resetting the PostgreSQL role password..." -ForegroundColor Cyan
-                        $recoveryBackup = New-PostgresRecoveryBackup -UserProfilesDir $userProfilesDir
-                        if (-not $recoveryBackup.Verified) {
-                            Write-Host ("  Recovery BLOCKED. Evidence: {0}" -f $recoveryBackup.Path) -ForegroundColor Red
-                            Write-Log 'Postgres setup: automatic reset blocked because recovery evidence was not verified.'
-                            continue
+                        $recovery = Invoke-PostgresSelectedPasswordRecovery -UserProfilesDir $userProfilesDir -PasswordPlain $typedPwPlain
+                        if (-not $recovery.Succeeded) {
+                            if ($recovery.Backup.Path) { Write-Host ("  Recovery BLOCKED. Evidence: {0}" -f $recovery.Backup.Path) -ForegroundColor Red }
+                            Exit-PostgresRecoveryResume -Message ('TPM could not complete the protected PostgreSQL repair ({0}).' -f $recovery.Reason)
                         }
-                        $reset = Reset-PostgresPasswordAutomatically -NewPassword $typedPwPlain -RecoveryBackup $recoveryBackup
-                        if (-not $reset.Succeeded) {
-                            Write-Host ("  Recovery BLOCKED. No profile changes were reported complete. Evidence: {0}" -f $reset.BackupPath) -ForegroundColor Red
-                            Write-Log 'Postgres setup: automatic password reset failed; no recovery-complete result was reported.'
-                            continue
-                        }
+                        $recoveryBackup = $recovery.Backup
                         $superPwPlain = $typedPwPlain
+                        $postgresSuperPasswordEncrypted = $postgresResumeState.PasswordOriginEncrypted
+                    }
+                } else {
+                    if ($postgresSuperPasswordEncrypted) {
+                        try {
+                            $secure = ConvertTo-SecureString -String $postgresSuperPasswordEncrypted
+                            $savedPwPlain = ConvertFrom-SecureStringPlain $secure
+                            if (Test-PostgresPassword -SuperPasswordPlain $savedPwPlain) { $superPwPlain = $savedPwPlain }
+                            else { Write-Log 'Postgres setup: saved password did not authenticate; guided recovery is required.' }
+                        } catch { Write-Log 'Postgres setup: saved password could not be verified; guided recovery is required.' }
+                        finally { $savedPwPlain = $null }
+                    }
+                    if (-not $superPwPlain) {
+                        Write-Host "  TPM can't use the saved PostgreSQL password." -ForegroundColor Yellow
+                        Write-Host "  TPM can fix this automatically." -ForegroundColor Yellow
+                        Write-Host "  A verified backup is made before any reset. Nothing is changed unless you approve." -ForegroundColor DarkGray
+                        $repairNow = (Read-HostSafe '  Fix it now? (Y/N)').ToUpper()
+                        if ($repairNow -ne 'Y') {
+                            Write-Host '  Nothing was changed. The PostgreSQL setup was not completed.' -ForegroundColor Yellow
+                            [void](Read-HostSafe '  Press Enter to return to menu')
+                            continue
+                        }
+                        Write-Host '  Choose a new PostgreSQL password for TPM to use.' -ForegroundColor Cyan
+                        Write-Host '  The password must not be blank. TPM does not add an extra complexity rule; enter it twice to confirm.' -ForegroundColor DarkGray
+                        Write-Host '  The password is masked and will not be displayed, logged, or placed in command-line arguments.' -ForegroundColor DarkGray
+                        $typedPwPlain = Read-ConfirmedPostgresPassword 'the new PostgreSQL database password'
+                        if (Test-PostgresPassword -SuperPasswordPlain $typedPwPlain) {
+                            $superPwPlain = $typedPwPlain
+                        } else {
+                            if (-not (Test-RunningAsAdministrator)) {
+                                Write-PostgresAdministratorGuidance -Operation Recovery
+                                $elevated = Start-PostgresRecoveryAsAdministrator -ConfigPath $configPath -ScriptPath (Join-Path $PSScriptRoot 'TeknoParrot-Manager.ps1') -TpRoot $tpRoot -UserProfilesDir $userProfilesDir -Operation Recovery -PasswordPlain $typedPwPlain
+                                if ($elevated) { exit 0 }
+                                Write-Log 'Postgres setup: automatic password-repair handoff did not complete.'
+                                [void](Read-HostSafe '  Press Enter to return to menu')
+                                continue
+                            }
+                            $recovery = Invoke-PostgresSelectedPasswordRecovery -UserProfilesDir $userProfilesDir -PasswordPlain $typedPwPlain
+                            if (-not $recovery.Succeeded) {
+                                if ($recovery.Backup.Path) { Write-Host ("  Recovery BLOCKED. Evidence: {0}" -f $recovery.Backup.Path) -ForegroundColor Red }
+                                Write-Log 'Postgres setup: automatic password reset or verification failed; no recovery-complete result was reported.'
+                                continue
+                            }
+                            $recoveryBackup = $recovery.Backup
+                            $superPwPlain = $typedPwPlain
+                        }
                     }
                 }
             } else {
                 $outPw = [ref]$null
                 if (-not (Install-Postgres83 -OutSuperPasswordPlain $outPw)) {
                     Write-Host "  PostgreSQL setup did not complete -- no profile changes made." -ForegroundColor Red
+                    if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'PostgreSQL could not be installed successfully.' }
                     continue
                 }
                 $superPwPlain = $outPw.Value
@@ -15021,31 +15344,44 @@ while ($true) {
             if (-not $recoveryBackup.Verified) {
                 Write-Host ("  Recovery BLOCKED. No profile changes were made. Evidence: {0}" -f $recoveryBackup.Path) -ForegroundColor Red
                 Write-Log 'Postgres setup: verified recovery evidence was unavailable before configuration changes.'
+                if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not verify the protected backup before continuing PostgreSQL setup.' }
                 continue
             }
-            $postgresSuperPasswordEncrypted = ConvertTo-PostgresEncryptedPassword $superPwPlain
-            if (-not (Save-Config)) {
-                Write-Host "  Recovery BLOCKED because the protected manager configuration could not be saved." -ForegroundColor Red
-                Write-Log 'Postgres setup: blocked because encrypted password configuration save failed.'
-                continue
-            }
-
             Write-Host "  Backing up existing Postgres databases..." -ForegroundColor Cyan
             $pgBackup = Backup-PostgresDatabases -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain
             if (-not $pgBackup.Succeeded) {
                 Write-Host "  Recovery BLOCKED because the database backup was incomplete." -ForegroundColor Red
                 if ($pgBackup.Path) { Write-Host ("  Database backup evidence: {0}" -f $pgBackup.Path) -ForegroundColor Yellow }
                 Write-Log 'Postgres setup: blocked before profile population because database backup was incomplete.'
+                if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not finish the database backup before changing game profiles.' }
                 continue
             }
             if ($pgBackup.Path) { Write-Host ("  Database backup saved: {0}" -f $pgBackup.Path) -ForegroundColor DarkCyan }
             else { Write-Host "  No existing databases needed backup." -ForegroundColor DarkGray }
+
+            if (-not $isPostgresRecoveryResume) {
+                $postgresSuperPasswordEncrypted = ConvertTo-PostgresEncryptedPassword $superPwPlain
+            }
+            if (-not (Save-Config)) {
+                Write-Host "  Recovery BLOCKED because the protected manager configuration could not be saved." -ForegroundColor Red
+                Write-Log 'Postgres setup: blocked because encrypted password configuration save failed.'
+                if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not save the protected PostgreSQL password configuration.' }
+                continue
+            }
+
 
             Write-Host "  Configuring games and creating only missing databases..." -ForegroundColor Cyan
             $pgResults = Invoke-PostgresGameSetup -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain -RecoveryBackup $recoveryBackup
             if ($pgResults.RecoveryBlocked) {
                 Write-Host ("  Recovery BLOCKED. No recovery-complete result was reported. Evidence: {0}" -f $pgResults.BackupPath) -ForegroundColor Red
                 Write-Log 'Postgres setup: profile population was recovery-blocked.'
+                if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not safely finish configuring the PostgreSQL game profiles.' }
+                continue
+            }
+            if ([int]$pgResults.Errors -gt 0) {
+                Write-Host ("  PostgreSQL setup reported {0} error(s); TPM will not claim recovery is complete." -f $pgResults.Errors) -ForegroundColor Red
+                Write-Log 'Postgres setup: errors were reported; completion was not claimed.'
+                if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not verify a clean PostgreSQL setup result.' }
                 continue
             }
             Write-Host ""
@@ -15064,6 +15400,19 @@ while ($true) {
             $typedPwPlain = $null
             $superPwPlain = $null
             [GC]::Collect()
+        }
+        if ($isPostgresRecoveryResume) {
+            if (-not (Remove-PostgresRecoveryState -Path $postgresResumeState.Path)) {
+                Exit-PostgresRecoveryResume -Message 'PostgreSQL setup finished, but TPM could not remove its protected temporary repair state.'
+            }
+            if ($postgresResumeState.Operation -eq 'Recovery') {
+                Write-Host '  PostgreSQL is fixed.' -ForegroundColor Green
+                Write-Host '  TPM reset and verified the password successfully.' -ForegroundColor Green
+            } else {
+                Write-Host '  PostgreSQL setup is complete. TPM continued the repair automatically.' -ForegroundColor Green
+            }
+            [void](Read-HostSafe '  Press Enter to continue')
+            exit 0
         }
         [void](Read-Host "  Press Enter to return to menu")
         continue

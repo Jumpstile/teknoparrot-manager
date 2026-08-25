@@ -302,9 +302,9 @@
     Orange County Choppers Pinball). Detects which of your registered
     games need it automatically. Never reinstalls or modifies an existing
     PostgreSQL install, and never recreates or restores over a database
-    that already exists. Installing PostgreSQL itself requires running
-    this script as Administrator. See POSTGRES SETUP below. Available as
-    menu option 12.
+    that already exists. TPM asks Windows for permission itself when setup
+    needs it and continues the same operation. See POSTGRES SETUP below.
+    Available as menu option 12.
 
   - Check for Updates. Manually checks the latest GitHub release against
     the version you're running. Nothing is downloaded or changed without
@@ -473,21 +473,21 @@
   RUNNING THE SCRIPT
 -------------------------------------------------------------------------------
 
-  Step 1.  Open PowerShell and navigate to the folder that contains
-           TeknoParrot-Manager.ps1 (typically a Scripts subfolder inside
-           your TeknoParrot install):
+  Step 1.  Double-click TeknoParrot-Manager.bat. This is the normal way to
+           start TPM; it opens the menu without requiring a PowerShell command.
+
+  Advanced users can open PowerShell and navigate to the folder that contains
+  TeknoParrot-Manager.ps1 (typically a Scripts subfolder inside your
+  TeknoParrot install):
 
       cd "C:\path\to\TeknoParrot\Scripts"
-
-  Step 2.  Run the script:
-
       .\TeknoParrot-Manager.ps1
 
-      If the script is blocked, allow it for this session only:
+      If Windows blocks that advanced route, allow it for this session only:
 
       powershell -ExecutionPolicy Bypass -File .\TeknoParrot-Manager.ps1
 
-  Step 3.  Choose a mode (see below). On later runs the script remembers your
+  Step 2.  Choose a mode (see below). On later runs the script remembers your
            settings and offers to reuse them -- press Y to continue.
 
   Any time you're asked to type a file or folder path, you can type B
@@ -623,9 +623,10 @@
        Live, Silver Strike Bowling Live, Target Toss Pro, Orange County
        Choppers Pinball). Detects which of your registered games need it
        automatically. If PostgreSQL is already installed, it is never
-       reinstalled or modified; if a game's database already exists, it
-       is never recreated or restored over. Installing PostgreSQL itself
-       requires running this script as Administrator. See POSTGRES SETUP
+       reinstalled or modified; if a game's database already exists, it is
+       never recreated or restored over. When Windows permission is needed,
+       TPM asks Windows itself and continues the same operation after approval;
+       you do not need to close TPM or choose mode 12 again. See POSTGRES SETUP
        below for full details.
 
   APPLICATION
@@ -1548,10 +1549,10 @@
   What mode 9 does (and does not do)
 
     This mode ONLY checks and updates games that ALREADY have BepInEx
-    installed. It never installs BepInEx into a game that doesn't have it
-    -- if a game above isn't working and you suspect it needs BepInEx,
-    that initial install is still a manual step (see the official BepInEx
-    docs: https://docs.bepinex.dev).
+    installed. TPM does not install a new modding framework into a game that
+    has never used it because that can change compatibility. If you need that
+    first install, use the game's official BepInEx instructions
+    (https://docs.bepinex.dev).
 
     For every game with an existing BepInEx install, the script compares
     it against the latest STABLE release on GitHub. Only the 64-bit
@@ -1561,11 +1562,13 @@
 
     If anything is outdated, the script lists every such game once and asks
     a single question: update all of them? Before that prompt, TPM verifies
-    every candidate root is inside the configured games folder and existing
-    target paths are not reparse-backed. Answering Y extracts the stable 64-bit
-    ZIP to staging, verifies the staged file set and backup, and promotes
-    through rollback-safe transaction handling. Unsafe roots, failed backups,
-    extraction errors, digest failures, and rollback uncertainty fail closed.
+    every candidate root is inside the configured games folder and is a normal,
+    safe folder. Answering Y extracts the stable 64-bit ZIP to staging,
+    verifies the staged file set and backup, and promotes through rollback-safe
+    transaction handling. Unsafe roots, failed backups, extraction errors,
+    digest failures, and rollback uncertainty fail closed. If a root is unsafe,
+    TPM explains which game path to correct, makes no download or change, and
+    tells you to choose mode 9 again afterward.
     A BepInEx download audit entry records the GitHub release source,
     asset filename/version, computed SHA-256, and transfer metrics. When
     GitHub supplies an asset digest, TPM validates it and fails closed on
@@ -1605,19 +1608,19 @@
   What mode 12 does
 
     If PostgreSQL isn't installed yet, the script downloads and installs it
-    silently. This is the only feature requiring Administrator privileges.
-    You enter a service-account password and a database password through
-    secure confirmation prompts.
-    If this window is not running as Administrator, TPM explains the next
-    step: close it, right-click TeknoParrot-Manager.bat (or the PowerShell
-    script), choose Run as administrator, and select mode 12 again. The
-    blocked step does not change PostgreSQL data or profiles.
+    silently when a registered game needs it. You choose a service-account
+    password and a database password through masked confirmation prompts. If
+    Windows permission is needed, TPM asks Windows itself and continues the
+    same setup after you approve it.
 
     If PostgreSQL is already installed, TPM preserves existing data. If the
-    saved password no longer works, TPM asks for a replacement, creates and
-    verifies a configuration/profile recovery backup, and automatically
-    resets the postgres role through PostgreSQL single-user mode. No manual
-    follow-up command is needed.
+    saved password no longer works, TPM explains the problem, asks whether to
+    fix it, and lets you choose and confirm a replacement. TPM creates and
+    verifies a protected recovery backup, asks Windows for permission itself,
+    resets only the postgres role, verifies the new password before saving it,
+    and continues the setup without returning you to the menu. If Windows
+    permission is declined or a predictable step fails, TPM keeps protected
+    retry information and offers to try again.
 
     Recovery changes the role password only. TPM does not edit pg_hba.conf,
     drop or recreate databases, or wipe existing PostgreSQL data. A database

@@ -803,6 +803,17 @@ process inspection during the call is an explicit accepted threat boundary.
 
 - Postgres superuser password: DPAPI-encrypted in config.json, tied to the
   current Windows user and machine.
+- Guided recovery asks the user to choose and confirm a non-empty password.
+  The password is held only for the immediate operation. If Windows permission
+  is needed, TPM writes a short-lived state manifest with machine-scoped DPAPI
+  password transport, an origin-user DPAPI copy for the eventual config save,
+  exact script/config/TeknoParrot paths and hashes, a nonce, attempt number,
+  parent process identity, and expiry. The state directory/file ACL grants
+  access only to the origin user, local Administrators, and SYSTEM. The UAC
+  child receives only the random state-file path, validates the manifest and
+  parent identity, decrypts the password, and continues option 12
+  automatically. The password is never placed in the child command line,
+  logs, console output, or reports.
 - Windows service-account password: never persisted; used only during
   installation and cleared afterward.
 - UserProfile Postgres Pass: plaintext is required because TeknoParrotUI
@@ -835,6 +846,9 @@ and leaves database creation/restore to TPUI's first-launch flow. Only for older
   database, or wipes PostgreSQL data.
 - Verified recovery evidence is created before service stop, role reset,
   configuration persistence, database backup, or profile write.
+- The database backup completes before the newly verified password is saved
+  to config.json; profile setup starts only after both the protected recovery
+  evidence and database backup succeed.
 - A reset, restart, backup, or profile write that cannot be verified returns
   a blocked result and is never reported complete.
 - Profiles are sorted deterministically. Database state is tri-state verified/

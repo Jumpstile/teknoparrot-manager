@@ -79,6 +79,30 @@
         }
         @{
             File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.AddType'
+            Line        = 6231
+            Extent      = 'Add-Type -AssemblyName System.Security'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'AssemblyName is a fixed string literal used only to load the framework DPAPI implementation. No attacker-controlled input reaches Add-Type.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.AddType'
+            Line        = 6244
+            Extent      = 'Add-Type -AssemblyName System.Security'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'AssemblyName is a fixed string literal used only to load the framework DPAPI implementation. No attacker-controlled input reaches Add-Type.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.ForeachObjectInjection'
+            Line        = 6417
+            Extent      = 'ForEach-Object { ConvertTo-PostgresProcessArgument -Value ([string]$_) }'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The pipeline iterates a fixed argument array and calls a fixed local quoting helper. It performs no dynamic member access or invocation; the values are only validated process arguments and a generated protected-state path.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
             RuleName    = 'InjectionRisk.UnsafeEscaping'
             Line        = 5736
             Extent      = "`$VersionText -replace '^v', ''"

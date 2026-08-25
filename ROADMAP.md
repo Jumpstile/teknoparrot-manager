@@ -463,10 +463,42 @@ work is a planning group for that gap. It is not an RC8 scope expansion.
 - #200 broad automatic device/context-aware control mapping remains deferred;
   this roadmap group must not use workflow or profile language to bypass that
   boundary.
+
 - All seven issues are assigned to the Post-1.0 / 1.1 milestone. None is part
   of RC8. Any future implementation still requires an authorized design,
   ownership contract, explicit approval policy, backup/rollback, redaction,
   effective-result verification, and fail-closed behavior.
+
+### #200 controls and readiness design record (post-1.0 only)
+
+RC8 does not implement broad automatic controller or context-aware mapping.
+The standing simplicity rule remains: the eventual product should configure
+each game automatically, not make a beginner understand TeknoParrot mapping
+internals or manually reproduce raw mapping decisions.
+
+Before any #200 implementation is authorized, the post-1.0 design must define:
+
+- the required gameplay controls for each supported game/profile, including
+  buttons, axes, triggers, pedals, guns, wheels, spinners, and trackballs;
+- Test and Service requirements, including coin/start/service/test inputs and
+  any game-specific operator-menu controls;
+- first-run setup, device-detection, calibration, and per-game calibration
+  prerequisites;
+- an explicit state model: `Complete`, `Partial`, `Missing`, `Unknown`, and
+  `Calibration-required`, with no state promoted to verified without positive
+  control-verification evidence;
+- the boundary between controller detection, XInput availability, launch
+  observation, bound-count thresholds, stored device references, and actual
+  successful gameplay control evidence;
+- a provenance and license/version review of RetroBat's `teknoparrot.yml` as
+  non-authoritative prior art only. It may inform investigation, but it cannot
+  become TPM authority without independent source, version, ownership, and
+  compatibility validation.
+
+RC8 user-facing status must remain beginner-readable: use `Controls not tested
+yet` or `Some controls are configured, but TPM has not verified this game yet`
+when positive verification evidence is absent. Registration, launch
+observation, controls readiness, and verification remain separate.
 
 ## Phase 8 -- Safe automation
 

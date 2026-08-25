@@ -6,8 +6,11 @@
   asset, or Scripts mirror; final Version 1.0 remains unpublished.
 - Eggman updates protect a DAT under the TeknoParrot root and can offer the
   validated primary ZIP/source folder as the explicit destination.
-- PostgreSQL non-admin recovery and BepInEx unsafe-root refusals provide
-  beginner-readable corrective actions without weakening fail-closed behavior.
+- PostgreSQL recovery asks the user to choose a replacement password, requests
+  Windows permission itself, resumes automatically with protected retry state,
+  and keeps the existing fail-closed backup/reset boundaries. BepInEx
+  unsafe-root refusals explain the correction in beginner-readable language
+  without weakening fail-closed behavior.
 - Certification captures and guards exact branch, commit, upstream, ref, and
   reflog identity through publication/finalization.
 - Release packaging requires exact source/package identity and a completed #290
