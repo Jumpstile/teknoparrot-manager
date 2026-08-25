@@ -792,28 +792,30 @@ WOW6432Node `\Installations\` roots is checked via wildcard (not assumed to lite
 
 **MSI log and command-line security.**
 
-The PostgreSQL 8.3 MSI requires SERVICEPASSWORD and SUPERPASSWORD as public
-properties. TPM passes them only during one synchronous msiexec call, does
-not print or log the argument list, clears its password variables afterward,
-and deletes the downloaded/extracted working folder in finally. TPM does not
-request a verbose MSI log because this MSI can write connection passwords into
-deferred custom-action logging. The remaining command-line visibility to OS
-process inspection during the call is an explicit accepted threat boundary.
+The PostgreSQL 8.3 MSI receives SERVICEPASSWORD and SUPERPASSWORD through the
+Windows Installer Automation interface, not a child process command line.
+TPM does not print or log the property string, does not request a verbose MSI
+log because this MSI can write connection passwords into deferred custom-action
+logging, clears its password variables after the in-process call, and deletes
+the downloaded/extracted working folder in finally.
 **Credential storage.**
 
 - Postgres superuser password: DPAPI-encrypted in config.json, tied to the
   current Windows user and machine.
 - Guided recovery asks the user to choose and confirm a non-empty password.
   The password is held only for the immediate operation. If Windows permission
-  is needed, TPM writes a short-lived state manifest with machine-scoped DPAPI
-  password transport, an origin-user DPAPI copy for the eventual config save,
-  exact script/config/TeknoParrot paths and hashes, a nonce, attempt number,
-  parent process identity, and expiry. The state directory/file ACL grants
-  access only to the origin user, local Administrators, and SYSTEM. The UAC
-  child receives only the random state-file path, validates the manifest and
-  parent identity, decrypts the password, and continues option 12
-  automatically. The password is never placed in the child command line,
-  logs, console output, or reports.
+  is needed, TPM writes a short-lived DPAPI-authenticated envelope covering
+  the password and all resume metadata: exact script/config/TeknoParrot paths
+  and hashes, a nonce, attempt number, creation/expiry, origin SID/machine,
+  and parent PID/start time/executable path/hash. The state directory/file
+  ACL grants access only to the origin user, local Administrators, and SYSTEM.
+  The UAC child receives only the random state-file path, atomically claims it
+  and creates a consumed marker before privileged side effects, validates the
+  five-minute maximum lifetime and parent identity, decrypts the password, and
+  continues option 12 automatically. UAC denial can reuse the untouched
+  challenge; a started-child retry always receives a fresh attempt. The
+  password is never placed in the child command line, logs, console output, or
+  reports.
 - Windows service-account password: never persisted; used only during
   installation and cleared afterward.
 - UserProfile Postgres Pass: plaintext is required because TeknoParrotUI
@@ -846,21 +848,21 @@ and leaves database creation/restore to TPUI's first-launch flow. Only for older
   database, or wipes PostgreSQL data.
 - Verified recovery evidence is created before service stop, role reset,
   configuration persistence, database backup, or profile write.
-- The database backup completes before the newly verified password is saved
-  to config.json; profile setup starts only after both the protected recovery
-  evidence and database backup succeed.
+- The role reset and authentication verification complete before the recovered
+  password is saved to config.json. Database backup completes after that save,
+  and profile setup starts only after both the protected recovery evidence and
+  database backup succeed.
 - A reset, restart, backup, or profile write that cannot be verified returns
   a blocked result and is never reported complete.
 - Profiles are sorted deterministically. Database state is tri-state verified/
   exists so a query failure cannot be treated as database absence.
-  **Known accepted risks.**
-- Legacy PostgreSQL MSI public properties are briefly visible to OS process
-  inspection during the synchronous install call; TPM does not request a
-  verbose installer log and clears its own password variables afterward.
+**Known accepted risks.**
+- TPM's in-process Windows Installer call keeps the two installer passwords out
+  of child process arguments. The MSI's lack of a signed package remains an
+  audit boundary; no password-bearing verbose log is requested.
 - TeknoParrotUI's plaintext UserProfile Pass field remains a compatibility
   boundary and must be protected as a local credential.
 - The PostgreSQL installer is not Authenticode-signed (audit logging only).
-
 ---
 
 ## Control propagation (Invoke-ControlPropagation)
@@ -1303,6 +1305,17 @@ suite's `BeforeAll` -- the AST extractor only loads function bodies, never top-l
 `$script:X = ...` assignments. See LESSONS_LEARNED.md (general Pester entry, v0.99.19
 extension).
 
+### Interactive ambiguous registration choice (#300)
+
+`Invoke-ManualRegistrationChoices` handles the remaining shared-executable cases after
+`Register-Games` and duplicate-conflict resolution finish. It presents every validated
+candidate profile code and writes only the profile explicitly selected by the operator.
+Blank or invalid input leaves the folder in ACTION REQUIRED; no best guess is promoted.
+The helper reads the immutable `GameProfiles` template, sets `GamePath`/secondary
+executable state, and writes a new `UserProfiles` XML only when the destination does not
+already exist. Candidate executable paths must remain inside the approved staging root.
+Unresolved cases retain the TeknoParrotUI fallback in the final action summary.
+
 ### Ambiguous list post-loop filter (v0.99.8)
 
 The "needs manual registration" list (`$ambiguous`) is filtered right before `return`
@@ -1612,6 +1625,24 @@ extraction marker (which locates the inline if/else block by a distinctive strin
 own source text) was updated from the literal `"Library Management"` header -- which no
 longer appears inline in the if-block, since it now lives inside `Get-MainMenuSections`
 -- to `"Show-MainMenu"`.
+
+## Shared workflow status and footer (issue #300)
+
+`New-TpmWorkflowStatusContext` creates the structured state machine used by
+multi-step RC8 workflows. Public transitions emit
+`TPM.WorkflowStatusEvent.v1` events through an injected sink; cosmetic console
+rendering never drives workflow decisions. Events carry sequence, immutable
+step denominator, attempt, current activity, next step, user action, outcome,
+bounded recent completions, and sanitized failure/data-safety fields. Passwords,
+secure strings, native arguments, and raw exception text are excluded.
+
+The renderer remeasures window and buffer geometry before every draw, owns only
+its recorded footer rectangle, clips stale cells after resize, and truncates
+rows to the current width. A too-short or failing RawUI downgrades to
+append-only status lines; redirected, unattended, and certification runs keep
+events but perform no cursor or progress writes. Failures remain pinned until
+acknowledged. The existing menu clear/repaint path is never used as failure
+acknowledgement.
 
 ---
 

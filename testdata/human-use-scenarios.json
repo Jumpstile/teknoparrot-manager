@@ -31,12 +31,11 @@
   {
     "id": "read-only-update-failure-actionable",
     "journey": "update-check",
-    "goal": "Read-only update failure tells the user exactly how to recover.",
+    "goal": "Read-only update failure is handled automatically and protection is restored.",
     "requiredPhrases": [
-      "is marked read-only",
-      "Remove the read-only attribute",
-      "re-run the update",
-      "will not be silently cleared"
+      "temporarily cleared the file protection",
+      "restore it after this attempt",
+      "Backup created"
     ],
     "forbiddenPhrases": [
       "Update installed"

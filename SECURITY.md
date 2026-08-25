@@ -162,11 +162,23 @@ under PostgresRecoveryBackups with inherited ACLs removed and full control
 for the current Windows identity; it may contain the prior profile state for
 exact restoration and must be treated as a local credential backup.
 
-The legacy PostgreSQL MSI requires password public properties, so the values
-can be visible to OS process inspection during one synchronous install call.
-TPM does not request a verbose MSI log, does not print or log the argument list,
-clears the password variables immediately afterward, and removes the working
-folder. This is an explicit residual threat boundary of the legacy installer.
+The legacy PostgreSQL MSI receives its public password properties through the
+Windows Installer Automation interface. TPM does not launch a password-bearing
+child process, does not request a verbose MSI log, does not print or log the
+property string, clears the password variables after the in-process call, and
+removes the downloaded working folder.
+
+The UAC resume state is a DPAPI-authenticated envelope covering all metadata,
+not a password blob beside mutable JSON. It binds the nonce, attempt number,
+creation/expiry window, exact script/config/root hashes, origin SID, machine,
+parent PID/start time/executable path/hash, and the operation. The maximum
+lifetime is five minutes. The child atomically renames the challenge and
+creates a one-time consumed marker before any privileged reset/install side
+effect; a started child never replays the same attempt. UAC denial occurs
+before claim and may retry the untouched challenge. A started-child failure
+issues a fresh attempt only after validating that the original metadata is
+unchanged. PostgreSQL's original service state is restored after the complete
+recovery transaction, and failure to restore it blocks completion.
 
 ## dgVoodoo2 selective extraction (Scripts\dgVoodoo2\)
 

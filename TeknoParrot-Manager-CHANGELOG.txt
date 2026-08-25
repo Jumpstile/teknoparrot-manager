@@ -16,10 +16,16 @@
 
   Fixes: Eggman updates offer a validated primary ZIP/source folder when the
   current DAT is protected under the TeknoParrot root; PostgreSQL setup asks
-  the user to choose a replacement password, requests Windows permission and
-  resumes automatically with protected retry state; and BepInEx unsafe-root
-  refusals explain the correction in beginner-friendly language without
-  downloading or writing.
+  the user to choose a replacement password, uses in-process Windows
+  Installer properties, authenticates one-time protected UAC resume state,
+  restores service state truthfully, and resumes automatically; BepInEx
+  setup can install/update selected x64 or x86 games with rollback-safe
+  validation.
+
+  UX: restore, crosshair, first-run, optional-download, update, and recovery
+  paths keep beginner-readable status/retry guidance visible. The shared
+  TPM STATUS footer uses structured events, real steps, and resize-safe
+  cursor/append-only fallbacks without affecting redirected runs.
 
   Certification hardening: exact branch/commit/upstream/ref/reflog identity is
   captured and guarded across production publication/finalization, with

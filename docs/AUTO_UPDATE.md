@@ -153,7 +153,7 @@ Actual flow:
 3. If no newer version exists, report that the user is current and return to the menu.
 4. If a newer version exists, show release tag/name and asset selected.
 5. Explain exactly what updating will do (backup, download, validate, replace, restart) and ask for explicit Y/N confirmation.
-6. If read-only, refuse before any backup/download work with an actionable error.
+6. If the target is read-only, the approved main-menu flow temporarily clears only that target attribute; backup creation still precedes download and replacement, and cleanup restores the attribute. The standalone helper refuses it and tells the operator how to unlock it manually.
 7. Backup current script.
 8. Download replacement.
 9. Validate replacement content.
@@ -175,7 +175,7 @@ Flow:
    - **Y** -- shows the same "what updating will do" explanation as the menu option, asks for a second explicit confirmation, then calls `Invoke-ManagerUpdateInstall`. A successful install still requires the caller (top-level script code, not the function) to exit -- same reasoning as the menu option: the function itself never calls `exit`, both for testability and so the "declined at the second confirmation" path can return normally.
    - **N** (or anything else) -- continues straight to the menu; logged as "remind me later."
    - **V** -- prints the full release body, then re-prompts (Y/N/V again) rather than exiting the loop.
-5. A read-only target is refused the same way as the menu option -- before any backup/download work, with the same actionable error.
+5. A read-only target uses the same approved main-menu handling as the menu option; the standalone helper refuses it before backup/download work.
 
 ## Non-goals for 1.0
 

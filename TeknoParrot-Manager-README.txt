@@ -111,9 +111,9 @@
     (most notably NESiCAxLive, where 80+ games all use game.exe), the script
     compares the game folder name to every candidate profile code and
     auto-registers the best match when the similarity score is high enough.
-    Games below the confidence threshold are flagged with their best-guess
-    profile shown, so even manual registration takes one click instead of
-    hunting through a long list.
+    Games below the confidence threshold are shown with every validated candidate.
+    TPM offers an explicit in-product choice; pressing Enter leaves the case
+    unresolved for TeknoParrotUI instead of guessing.
 
   - Dat file integration (optional). A "dat file" is a community-maintained
     lookup file that maps game files to their correct titles and metadata --
@@ -463,8 +463,8 @@
 -------------------------------------------------------------------------------
 
   - Windows 10 or 11 with PowerShell 5.1 or later (built in).
-  - A TeknoParrot install containing TeknoParrotUi.exe and its GameProfiles
-    folder. Run TeknoParrotUi.exe once first so it downloads profiles.
+  - A TeknoParrot install containing TeknoParrotUi.exe. If its GameProfiles
+    library is missing, TPM opens TeknoParrot and waits for its setup.
   - Your games extracted into per-game subfolders, or as ZIP files for
     AutoSync to extract.
 
@@ -489,6 +489,14 @@
 
   Step 2.  Choose a mode (see below). On later runs the script remembers your
            settings and offers to reuse them -- press Y to continue.
+
+  WORKFLOW STATUS
+  ---------------
+  During multi-step work TPM shows a plain-language status area with the
+  current action, recent completion, next step, and anything needed from you.
+  It uses real step counts, keeps failures visible until acknowledged, and
+  adapts safely when the PowerShell window is resized. Redirected, unattended,
+  and certification runs keep structured events without cursor-control output.
 
   Any time you're asked to type a file or folder path, you can type B
   instead to open a native Windows browse dialog and pick it visually.
@@ -580,12 +588,10 @@
        Covers two independent mechanisms -- see FORCE FEEDBACK (FFB) SETUP
        below. Returns to the menu when done.
 
-  9) BepInEx update check
-       Checks every registered game that already has BepInEx installed
-       against the latest stable release and offers a single batched
-       update. Never installs BepInEx fresh into a game that doesn't have
-       it, and only ever uses the latest stable 64-bit build -- see
-       BEPINEX UPDATE CHECK below. Returns to the menu when done.
+  9) BepInEx setup
+       Offers a user-approved install, update, or repair-reset for selected
+       games using the stable package matching each executable's architecture.
+       Unsafe roots and failed validation make no changes. See BEPINEX SETUP.
 
   MAINTENANCE AND RECOVERY
   ------------------------
@@ -809,8 +815,9 @@
                           handling in TeknoParrotUI. Anything you don't
                           resolve still appears in ACTION REQUIRED.
 
-  At the end of the run the ACTION REQUIRED section lists every game that
-  needs manual registration.
+  At the end of the run TPM offers an explicit candidate choice for each
+  ambiguous game. Any case you leave unresolved remains in ACTION REQUIRED
+  with the TeknoParrotUI fallback.
 
 
 -------------------------------------------------------------------------------
@@ -1312,13 +1319,10 @@
 
   REMOVING RESHADE
 
-    To remove ReShade from a single game: delete the DLL file (d3d9.dll,
-    dxgi.dll, d3d12.dll, or opengl32.dll) from that game's folder. If you
-    copied a preset, delete ReShade.ini as well. Nothing else needs changing.
-
-    To remove ReShade from all games: delete the named DLL from every game
-    folder where you installed it. The ReShade\ folder next to the script can
-    also be deleted -- it does not affect game operation.
+    TPM does not delete an unowned graphics hook because it may belong to
+    another tool. Existing or changed files remain untouched. Any manual
+    removal of a known, user-owned deployment is an advanced troubleshooting
+    action, not the normal beginner workflow.
 
   NOTE ON KEY CONFLICTS
 
@@ -1435,9 +1439,10 @@
 
   Removing dgVoodoo2
 
-    Delete the deployed DLL files (D3D8.dll / DDraw.dll / Glide2x.dll /
-    Glide3x.dll) and dgVoodoo.conf from the game's folder. Nothing else is
-    changed.
+    TPM does not delete an unowned graphics hook because it may belong to
+    another tool. Existing or changed files remain untouched. Any manual
+    removal of a known, user-owned deployment is an advanced troubleshooting
+    action, not the normal beginner workflow.
 
   Mode 10 (Library health check) reports which registered games are
   eligible for dgVoodoo2 (import D3D8/DDraw/Glide) but don't have the
@@ -1526,14 +1531,13 @@
 
   Removing FFB
 
-    FFB Blaster: there is no "undo" button in the menu -- manually set the
-    field back to 0 in the affected UserProfiles\*.xml files, or restore
-    from a pre-FFB backup (mode 11) if you ran this before enabling FFB
-    Blaster.
-    Third-party plugin: delete the deployed DLL file from the game's folder.
+    TPM records its own third-party hook deployments. When you choose native
+    FFB for an overlap, it backs up and removes only a matching unchanged
+    file. Unowned or changed files remain untouched and are reported for
+    advanced troubleshooting.
 
 
-  BEPINEX UPDATE CHECK
+  BEPINEX SETUP
   ----------------------
 
   What is BepInEx?
@@ -1546,47 +1550,32 @@
     mode, so it keeps tracking new games as they're added upstream rather
     than going stale).
 
-  What mode 9 does (and does not do)
+  What mode 9 does
 
-    This mode ONLY checks and updates games that ALREADY have BepInEx
-    installed. TPM does not install a new modding framework into a game that
-    has never used it because that can change compatibility. If you need that
-    first install, use the game's official BepInEx instructions
-    (https://docs.bepinex.dev).
+    Mode 9 offers a user-approved install, update, or repair-reset for
+    selected games. TPM chooses the stable x64 or x86 package matching each
+    game's executable. It downloads only after the game root passes the
+    approved-root and non-reparse checks, verifies the staged file set and
+    backup, and uses rollback-safe promotion.
 
-    For every game with an existing BepInEx install, the script compares
-    it against the latest STABLE release on GitHub. Only the 64-bit
-    ("x64") build is ever used -- never a 32-bit build, and never a
-    pre-release/beta build. If a game's existing install is 32-bit, it is
-    left alone and reported separately; update that one manually.
+    Nothing is installed silently into every game. Unsafe roots, failed
+    backups, extraction errors, digest failures, and rollback uncertainty fail
+    closed. A network failure keeps the operation incomplete and offers the
+    automatic retry path; it never reports an update as complete.
 
-    If anything is outdated, the script lists every such game once and asks
-    a single question: update all of them? Before that prompt, TPM verifies
-    every candidate root is inside the configured games folder and is a normal,
-    safe folder. Answering Y extracts the stable 64-bit ZIP to staging,
-    verifies the staged file set and backup, and promotes through rollback-safe
-    transaction handling. Unsafe roots, failed backups, extraction errors,
-    digest failures, and rollback uncertainty fail closed. If a root is unsafe,
-    TPM explains which game path to correct, makes no download or change, and
-    tells you to choose mode 9 again afterward.
-    A BepInEx download audit entry records the GitHub release source,
-    asset filename/version, computed SHA-256, and transfer metrics. When
-    GitHub supplies an asset digest, TPM validates it and fails closed on
-    a mismatch; without a digest, the computed SHA-256 is audit-only.
+    A BepInEx download audit entry records the GitHub release source, asset
+    filename/version, computed SHA-256, and transfer metrics. When GitHub
+    supplies an asset digest, TPM validates it and fails closed on a mismatch;
+    without a digest, the computed SHA-256 is audit-only.
 
-  Troubleshooting and manual reset
+  Troubleshooting
 
     Official troubleshooting guide:
       https://docs.bepinex.dev/articles/user_guide/troubleshooting.html
 
-    To cleanly uninstall BepInEx from a game folder by hand (for example
-    to start over after a problem), delete these from the game's folder:
-      doorstop_config.ini
-      winhttp.dll
-      .doorstop_version
-      changelog.txt
-      the BepInEx folder
-    This fully reverts the game to vanilla -- nothing else is touched.
+    TPM does not delete an unowned BepInEx or hook file. An advanced
+    troubleshooting path may remove files only after ownership and backup
+    checks identify them as part of the approved TPM transaction.
 
 
   POSTGRES SETUP
@@ -1616,11 +1605,13 @@
     If PostgreSQL is already installed, TPM preserves existing data. If the
     saved password no longer works, TPM explains the problem, asks whether to
     fix it, and lets you choose and confirm a replacement. TPM creates and
-    verifies a protected recovery backup, asks Windows for permission itself,
-    resets only the postgres role, verifies the new password before saving it,
-    and continues the setup without returning you to the menu. If Windows
-    permission is declined or a predictable step fails, TPM keeps protected
-    retry information and offers to try again.
+    verifies a protected recovery backup, resets only the postgres role,
+    verifies the new password, saves the repaired settings, backs up existing
+    databases, and then finishes the remaining profile/database setup. The
+    service is kept running for that full transaction and restored to its
+    original state afterward. If Windows permission is declined or a
+    predictable step fails, TPM keeps protected retry information and offers
+    to try again.
 
     Recovery changes the role password only. TPM does not edit pg_hba.conf,
     drop or recreate databases, or wipe existing PostgreSQL data. A database
@@ -1901,7 +1892,7 @@
   What this is NOT:
 
     - A game that shares an executable name with multiple profiles -- those
-      appear in "Register these games" (manual registration required).
+      appear in "Register these games" (an explicit TPM choice or TeknoParrotUI registration is required).
     - A game whose path is broken -- those appear in "Fix these game paths".
     - A game not yet extracted -- those appear in "Extract first".
 
@@ -2046,16 +2037,12 @@
                               action is needed. See the full section above.
 
     Register these games      Games found on disk that could not be
-                              auto-registered because either their executable
-                              name is shared by multiple TeknoParrot profiles
-                              and the folder-name similarity score was below
-                              the auto-register threshold, or the one profile
-                              they match was already claimed by another folder
-                              earlier in the same run. Shows the executable to
-                              browse to, a best-guess profile where the score
-                              was still meaningful (or which folder already
-                              holds the profile, for the duplicate case), and
-                              the full candidate list.
+                              auto-registered because their executable is
+                              shared or their profile was already claimed.
+                              TPM offers the validated candidate list for an
+                              explicit in-product choice. Press Enter to leave
+                              a case unresolved; it remains here with the
+                              TeknoParrotUI fallback instead of being guessed.
 
     Fix these game paths      Profiles with a broken path that could not be
                               auto-repaired because the executable is shared
@@ -2262,8 +2249,9 @@
   lists all available backups with file counts, and asks you to type YES to
   confirm before changing anything.
 
-  To restore manually: close TeknoParrot completely, then copy the .xml files
-  from a backup folder back into UserProfiles, overwriting the current ones.
+  Advanced emergency recovery only: the normal mode-11 flow keeps the selected
+  backup, asks you to close TeknoParrot, and verifies the restore. Do not copy
+  profile files manually unless TPM's guided path is unavailable.
 
   Log. Every run appends to TeknoParrot-Manager.log next to the script:
   what was extracted, registered, repaired and propagated, and any errors.

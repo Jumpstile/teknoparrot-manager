@@ -92,6 +92,17 @@ Human-use simulation should catch issues like:
   until acknowledged and offer a retry or a safe stop.
 - No password appears in the visible transcript, arguments, logs, or reports.
 
+
+### Persistent workflow status
+
+- Multi-step flows expose structured `TPM.WorkflowStatusEvent.v1` transitions.
+- Interactive consoles show current work, recent completion, next step, and
+  any action needed from the user without clearing scrollback.
+- Window shrink/grow tests cover re-anchoring, stale-cell clearing, narrow
+  fallback, and safe degradation when the viewport cannot reserve the footer.
+- Redirected, unattended, and certification runs retain structured events but
+  emit no cursor or footer writes.
+
 ## Certification gate
 
 Add a future certification gate named `Human-Use Simulation`.

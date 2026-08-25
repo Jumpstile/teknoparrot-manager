@@ -241,7 +241,7 @@ Describe "Virtual Beta Tester: human workflow simulation (issue #88 phase 1)" {
             Assert-ScenarioOutput -ScenarioId 'read-only-update-failure-actionable' -Action {
                 Invoke-CheckForUpdates -ScriptPath $fixturePath | Out-Null
             }
-            Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeFalse -Because "a read-only target must fail before any backup is attempted"
+            Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeTrue -Because "an approved update creates its backup before the network attempt"
         } finally {
             Set-ItemProperty -LiteralPath $fixturePath -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
         }

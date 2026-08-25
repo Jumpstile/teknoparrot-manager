@@ -208,4 +208,50 @@ Describe "Virtual Beta Tester: registered-but-moved recovery via Repair-GamePath
         $reports[0].Status | Should -Be 'fixed' -Because "DryRun still reports what WOULD happen, so a preview is meaningful"
         (Get-Content -LiteralPath $profilePath -Raw) | Should -Be $originalContent -Because "DryRun must never actually write the fix to disk"
     }
+
+
+Describe "Virtual Beta Tester: manual registration candidate choice" -Tag 'TVD-High' {
+    It "writes only the explicitly selected candidate profile and preserves the ambiguity boundary" {
+        $fx = New-ConflictFixture -Name 'manual-registration-choice'
+        $gameFolder = Join-Path $fx.InstallFolder 'Shared Game'
+        New-Item -ItemType Directory -Path $gameFolder -Force | Out-Null
+        $exePath = Join-Path $gameFolder 'shared.exe'
+        New-Item -ItemType File -Path $exePath -Force | Out-Null
+        $template = @'
+<?xml version="1.0" encoding="utf-8"?>
+<GameProfile><ExecutableName>shared.exe</ExecutableName><GamePath></GamePath></GameProfile>
+'@
+        Set-Content -LiteralPath (Join-Path $fx.GameProfilesDir 'PROFILEA.xml') -Value $template -Encoding utf8
+        Set-Content -LiteralPath (Join-Path $fx.GameProfilesDir 'PROFILEB.xml') -Value $template -Encoding utf8
+        $manual = @{ 'Shared Game' = @{ Exe = $exePath; Profiles = 'PROFILEA, PROFILEB' } }
+        $result = [pscustomobject]@{ Registered = New-Object System.Collections.ArrayList }
+        Mock Read-Host { return '2' }
+
+        Invoke-ManualRegistrationChoices -ManualRegData $manual -UserProfilesDir $fx.UserProfilesDir `
+            -GameProfilesDir $fx.GameProfilesDir -InstallFolder $fx.InstallFolder -Result $result
+
+        (Test-Path -LiteralPath (Join-Path $fx.UserProfilesDir 'PROFILEB.xml')) | Should -Be $true
+        (Test-Path -LiteralPath (Join-Path $fx.UserProfilesDir 'PROFILEA.xml')) | Should -Be $false
+        $manual.Count | Should -Be 0
+        ([xml](Get-Content -LiteralPath (Join-Path $fx.UserProfilesDir 'PROFILEB.xml') -Raw)).GameProfile.GamePath | Should -Be $exePath
+    }
+
+    It "leaves the candidate unresolved when the user declines to choose" {
+        $fx = New-ConflictFixture -Name 'manual-registration-decline'
+        $gameFolder = Join-Path $fx.InstallFolder 'Shared Game'
+        New-Item -ItemType Directory -Path $gameFolder -Force | Out-Null
+        $exePath = Join-Path $gameFolder 'shared.exe'
+        New-Item -ItemType File -Path $exePath -Force | Out-Null
+        $manual = @{ 'Shared Game' = @{ Exe = $exePath; Profiles = 'PROFILEA, PROFILEB' } }
+        $result = [pscustomobject]@{ Registered = New-Object System.Collections.ArrayList }
+        Mock Read-Host { return '' }
+
+        Invoke-ManualRegistrationChoices -ManualRegData $manual -UserProfilesDir $fx.UserProfilesDir `
+            -GameProfilesDir $fx.GameProfilesDir -InstallFolder $fx.InstallFolder -Result $result
+
+        $manual.Count | Should -Be 1
+        $result.Registered.Count | Should -Be 0
+    }
+}
+
 }

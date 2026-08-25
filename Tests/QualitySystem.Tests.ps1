@@ -291,20 +291,20 @@ Describe "Release-document consistency contract" -Tag 'ReleaseConsistency' {
                         [void]$findings.Add("$($document.Path): active BepInEx wording does not identify an update check.")
                     }
 
-                    if ($text -notmatch '(?i)(?:already|existing)[\s\S]{0,100}BepInEx[\s\S]{0,50}installed|BepInEx[\s\S]{0,100}(?:already|existing)[\s\S]{0,50}installed') {
-                        [void]$findings.Add("$($document.Path): active BepInEx wording does not require an existing installation.")
+                    if ($text -notmatch '(?i)(?:nothing is installed silently|never installs BepInEx|not installed|if installed|already installed|existing installation)') {
+                        [void]$findings.Add("$($document.Path): active BepInEx wording does not identify the installed/not-installed choice.")
                     }
 
-                    if ($text -notmatch "(?i)(?:never|does not|doesn't)[\s\S]{0,60}install(?:s)?\s+BepInEx") {
-                        [void]$findings.Add("$($document.Path): active BepInEx wording does not reject fresh installation.")
+                    if ($text -notmatch '(?i)(?:explicit|approved|user-approved)[\s\S]{0,100}(?:install|repair|reset)|(?:never|does not|doesn''t)\s+(?:silently|automatically)\s+install') {
+                        [void]$findings.Add("$($document.Path): active BepInEx wording does not require explicit install approval.")
                     }
 
-                    if ($text -notmatch '(?i)stable.{0,40}64-bit|64-bit.{0,40}stable') {
-                        [void]$findings.Add("$($document.Path): active BepInEx wording does not constrain updates to stable 64-bit builds.")
+                    if ($text -notmatch '(?i)stable.{0,60}(?:64-bit|x64)|(?:64-bit|x64).{0,60}stable') {
+                        [void]$findings.Add("$($document.Path): active BepInEx wording does not constrain updates to stable builds.")
                     }
 
-                    if ($text -match '(?i)\bBepInEx\s+setup\b|\b(?:TPM|this mode|mode 9|the script)\s+(?:installs?|sets up|configures?)\s+BepInEx') {
-                        [void]$findings.Add("$($document.Path): active BepInEx wording implies setup or fresh installation.")
+                    if ($text -match '(?i)\bBepInEx\s+setup\b.{0,100}(?:fresh|every game)|\b(?:TPM|this mode|mode 9|the script)\s+(?:silently|automatically)\s+(?:installs?|sets up|configures?)\s+BepInEx') {
+                        [void]$findings.Add("$($document.Path): active BepInEx wording implies unapproved fresh installation.")
                     }
                 }
             }
@@ -359,7 +359,7 @@ Describe "Release-document consistency contract" -Tag 'ReleaseConsistency' {
 
         $findings = @(& $script:ReleaseDocumentConsistencyFinder -Documents $misleading -Contract $script:ReleaseDocumentContract)
         $findings.Count | Should -BeGreaterThan 0
-        ($findings -join "`n") | Should -Match 'setup or fresh installation'
+        ($findings -join "`n") | Should -Match 'unapproved fresh installation'
     }
 
     It "allows clearly historical RC and BepInEx wording outside active guidance" {

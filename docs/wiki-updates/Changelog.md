@@ -6,11 +6,16 @@
   asset, or Scripts mirror; final Version 1.0 remains unpublished.
 - Eggman updates protect a DAT under the TeknoParrot root and can offer the
   validated primary ZIP/source folder as the explicit destination.
-- PostgreSQL recovery asks the user to choose a replacement password, requests
-  Windows permission itself, resumes automatically with protected retry state,
-  and keeps the existing fail-closed backup/reset boundaries. BepInEx
-  unsafe-root refusals explain the correction in beginner-readable language
-  without weakening fail-closed behavior.
+- PostgreSQL recovery asks the user to choose a replacement password, uses
+  in-process Windows Installer properties, authenticates one-time protected
+  UAC resume state, restores service state truthfully, and keeps the
+  fail-closed backup/reset boundaries.
+- BepInEx setup offers approved x64/x86 install, update, and repair-reset paths
+  with verified backup and rollback.
+- Restore, crosshair, first-run, optional-download, update, and recovery flows
+  expose beginner-readable retry/status guidance. The shared TPM STATUS footer
+  uses structured events, real steps, and resize-safe cursor/append-only
+  fallbacks without affecting redirected runs.
 - Certification captures and guards exact branch, commit, upstream, ref, and
   reflog identity through publication/finalization.
 - Release packaging requires exact source/package identity and a completed #290

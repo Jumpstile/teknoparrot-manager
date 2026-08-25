@@ -85,7 +85,7 @@ tree is for review, certification, and release preparation only.
 - **dgVoodoo2** — fixes older games that crash on DirectX 8, DirectDraw, or Glide by deploying the correct compatibility DLLs.
 - **GPU fixes** — detects your GPU (AMD / NVIDIA / Intel) and applies the matching vendor fix to every registered game that has one.
 - **Force feedback (FFB)** — native FFB Blaster (needs a paid TeknoParrot membership) and a free third-party plugin (fetched live, no subscription needed), covering different games. If a game is covered by both, you're asked once which to use for all such games.
-- **BepInEx update check** — checks games that already have BepInEx installed against the latest stable 64-bit release and offers a batched update. Never installs BepInEx fresh.
+- **BepInEx setup** — user-approved install, update, or repair-reset for selected games using stable x64/x86 packages with verified backup and rollback.
 - **Postgres setup** — installs and configures the local PostgreSQL 8.3 database some Incredible Technologies games need (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball). Detects which registered games need it automatically; never reinstalls Postgres or recreates an existing database.
 - **Automatic compatibility warnings** — every run checks for known install-path-length limits (Raw Thrills titles, Yu-Gi-Oh! Duel Terminal 6), pinned-file-version requirements (BlazBlue/iDmacDrv32.dll, Tekken Tag Tournament 2/EBOOT.BIN), and known GPU-vendor incompatibilities (AMD/Intel), with details in ACTION REQUIRED.
 - **Game-specific setup notes** — every run checks the community compatibility database (eggmansworld.github.io/TeknoParrot) for any registered game with special setup notes — workarounds, known quirks, the expected executable name — and lists them in ACTION REQUIRED.
@@ -139,7 +139,8 @@ This script automates the copy-and-fill step: it scans your games, matches each 
 
 - Windows 10 or 11
 - PowerShell 5.1 (built into Windows — no install needed)
-- TeknoParrot installed with `TeknoParrotUi.exe` run at least once (so it downloads its `GameProfiles` folder)
+- TeknoParrot installed with `TeknoParrotUi.exe`; TPM opens it automatically
+  when its profile library is missing
 - Your games as ZIP files (for AutoSync) or already extracted into subfolders
 
 ---
@@ -178,14 +179,15 @@ installed/runtime users should use `TeknoParrot-Manager.bat`.
 TeknoParrot-Manager.bat
 ```
 
-**Option B — PowerShell directly:**
+**Advanced users — direct PowerShell (not needed for the normal workflow):**
 
 ```powershell
 cd "C:\path\to\TeknoParrot\Scripts"
 .\TeknoParrot-Manager.ps1
 ```
 
-**Blocked by execution policy?**
+If Windows blocks an advanced direct launch, use the one-session command below.
+Most users should double-click `TeknoParrot-Manager.bat` instead:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\TeknoParrot-Manager.ps1
@@ -196,6 +198,20 @@ On first run the script scans common install locations for `TeknoParrotUi.exe` a
 Any time you're asked to type a file or folder path, type `B` instead to open a native Windows browse dialog and pick it visually — typing the path directly still works exactly as before.
 
 On later runs it offers to reuse your saved settings — press **Y** to continue, **N** to reconfigure.
+
+## Workflow status
+
+During multi-step work TPM shows a beginner-readable `TPM STATUS` area with
+the current action, recent completed work, the next step, and whether it needs
+anything from you. Failures stay visible until you acknowledge them. The
+status uses real workflow steps, not invented percentages, and keeps the
+technical detail in the normal output and log.
+
+The status area adapts to a resized PowerShell window. It clears only its own
+known area, truncates safely in narrow windows, and falls back to ordinary
+status lines when the console cannot safely reserve a footer. Redirected,
+unattended, and certification runs keep structured status events but do not
+write cursor controls or cosmetic footer output.
 
 ---
 
@@ -217,7 +233,7 @@ Choosing mode 1 or 2 offers a preview/dry-run option first — see [Preview / Dr
 | 6                                                               | **dgVoodoo2 setup**            | Fix DirectX 8 / DirectDraw / Glide compatibility                                                                                                                                                          |
 | 7                                                               | **GPU fix setup**              | Apply AMD / NVIDIA / Intel vendor fix to all games                                                                                                                                                        |
 | 8                                                               | **Force feedback (FFB) setup** | FFB Blaster (membership) + free third-party plugin                                                                                                                                                        |
-| 9                                                               | **BepInEx update check**       | Update an existing BepInEx install to the latest stable 64-bit release                                                                                                                                    |
+| 9                                                               | **BepInEx setup**            | User-approved install/update/repair-reset using stable x64/x86 releases                                                                                                                                    |
 | **Maintenance and Recovery**                                    |                                |                                                                                                                                                                                                           |
 | 10                                                              | **Library health check**       | Read-only registered/broken/empty status, plus GPU fix / FFB Blaster / dgVoodoo2 / Postgres coverage and ReShade/BepInEx install counts                                                                   |
 | 11                                                              | **Restore backup**             | Roll TeknoParrot profiles, LaunchBox's library files, or Postgres databases back to a previous backup                                                                                                     |
@@ -530,26 +546,26 @@ Controller support (per the plugin's own docs): true force feedback on FFB-capab
 
 **If a game is covered by both:** the script lists every such game once and asks a single question — keep FFB Blaster (native) for all of them, or use the third-party plugin for all of them. Your answer applies to the whole list for that run; it never silently picks a side.
 
-**Removing FFB:** FFB Blaster — manually set the field back to `0` in the affected `UserProfiles\*.xml` files, or restore from a pre-FFB backup (mode 11). Third-party plugin — delete the deployed DLL from the game's folder.
+**Removing FFB:** TPM records its own deployed hook files. When you choose
+native FFB for an overlap, it backs up and removes only a matching unchanged
+file. Unowned or changed files remain untouched and are reported as an
+advanced troubleshooting boundary.
 
 ---
 
-## BepInEx Update Check
+## BepInEx setup
 
-[BepInEx](https://docs.bepinex.dev) is a third-party Unity plugin/modding framework — not part of TeknoParrot itself. A handful of games need a community plugin running on top of it to get controls or fixes working. Mode 9 shows a live-fetched list of known examples each time you open it, checked against the eggmansworld.github.io compatibility data, so it keeps tracking new games as they get added upstream instead of going stale.
+[BepInEx](https://docs.bepinex.dev) is a third-party Unity plugin/modding
+framework. Mode 9 shows known examples and offers a user-approved install,
+update, or repair-reset for selected games. TPM chooses the stable x64 or x86
+package matching each executable, validates the download, backs up the fixed
+BepInEx tree, and rolls back any failed promotion.
 
-**Mode 9 only checks/updates games that already have BepInEx installed** — it never installs BepInEx into a game that doesn't have it. Only the latest **stable 64-bit** release is ever used; never a 32-bit build, never a pre-release. A 32-bit install is left alone and reported separately.
-
-If anything is outdated, the script lists every such game once and asks a
-single question: update all of them? Before that prompt, TPM checks that every
-candidate folder is inside the configured games folder and is a normal, safe
-folder. It downloads only after those checks, verifies the backup, and promotes
-the complete tree through a rollback-safe transaction. Unsafe roots, failed
-backups, extraction errors, digest failures, and rollback uncertainty fail
-closed without reporting an update as complete. If a root is unsafe, TPM
-explains which game path to correct, makes no download or change, and tells you
-to choose the BepInEx update again afterward.
-**Troubleshooting:** [official guide](https://docs.bepinex.dev/articles/user_guide/troubleshooting.html). **Manual clean reset:** delete `doorstop_config.ini`, `winhttp.dll`, `.doorstop_version`, `changelog.txt`, and the `BepInEx` folder from the game's folder — this fully reverts to vanilla.
+Nothing is installed silently into every game. Unsafe roots, failed backups,
+extraction errors, digest failures, and rollback uncertainty fail closed.
+Network failures keep the operation incomplete and offer an automatic retry;
+they do not claim that the setup finished. The official troubleshooting guide
+remains available for advanced cases.
 
 ---
 
@@ -567,9 +583,10 @@ Lawn Darts), and Orange County Choppers Pinball -- need a small local PostgreSQL
 - If PostgreSQL is already installed, TPM preserves existing data. If the saved
   password no longer works, TPM explains the problem, asks whether to fix it,
   and lets you choose and confirm a replacement. It creates and verifies a
-  protected recovery backup, asks Windows for permission itself, resets only
-  the postgres role, verifies the new password before saving it, and continues
-  the same setup without returning you to the menu.
+  protected recovery backup, resets only the postgres role, verifies the new
+  password, saves the repaired settings, backs up existing databases, and
+  then finishes the remaining profile/database setup. The service stays
+  available for that transaction and returns to its original state afterward.
 - If Windows permission is declined or a predictable recovery step fails, TPM
   keeps the protected retry information and offers to try again. The chosen
   password is never shown in commands, logs, messages, or reports.
@@ -760,7 +777,7 @@ At the end of every run the script prints — and saves to a text file — every
 | Section                          | Meaning                                                                                                                                                                                                                                                                                                                        |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Not in TeknoParrot**           | Folders with executables that matched no profile. Informational — likely unsupported games or utilities.                                                                                                                                                                                                                       |
-| **Register these games**         | Shared-exe games below the auto-register threshold. Shows the exe, a best-guess profile, and the full candidate list.                                                                                                                                                                                                          |
+| **Register these games**         | Shared-exe games below the auto-register threshold. TPM presents the validated candidate list for an explicit in-product choice; unresolved cases remain in the action summary.                                                                                                                                                                                                          |
 | **Fix these game paths**         | Profiles with a broken path that couldn't be auto-repaired (shared exe, multiple candidates). Open TeknoParrotUI and point each to the correct folder.                                                                                                                                                                         |
 | **Extract first**                | Profiles with a broken path because the game isn't extracted yet. Extract then re-run Repair.                                                                                                                                                                                                                                  |
 | **Set up controls**              | Control types with no reference game bound yet. Shows which games are waiting and suggests titles to bind.                                                                                                                                                                                                                     |
@@ -877,12 +894,15 @@ This log also records a download audit trail for every shared-pipeline artifact:
 
 ## Uninstalling / Removing the Manager
 
-The manager only adds files to the `Scripts\` folder it lives in and to TeknoParrot's own `UserProfiles\` folder. It does not install anything system-wide (except optionally PostgreSQL via mode 12, which has its own cleanup path).
+The manager adds files to the `Scripts\` folder it lives in and to
+TeknoParrot's own `UserProfiles\` folder. Mode 12 may install PostgreSQL as
+an optional local dependency; TPM does not offer a PostgreSQL uninstall menu
+action.
 
 **To remove the manager entirely:**
 
 1. Restore your UserProfiles to any pre-script state using mode 11 (Restore backup) if you want to undo all changes, or simply leave them as-is if they are working correctly.
-2. Stop and uninstall PostgreSQL 8.3 if you installed it via mode 12 — open mode 12 and choose "Uninstall" — before deleting the Scripts folder.
+2. If you intentionally want to remove PostgreSQL, use the normal Windows installed-apps path only after preserving any needed database backups. This is an advanced system-maintenance action, not part of the beginner TPM workflow.
 3. If you used the direct LaunchBox integration, restore your LaunchBox files first via mode 11 > LaunchBox library backup, then close LaunchBox so it re-reads its files.
 4. Delete the `Scripts\` folder.
 
@@ -911,7 +931,7 @@ The manager only adds files to the `Scripts\` folder it lives in and to TeknoPar
 Its GamePath is wrong or the game wasn't fully extracted. In TeknoParrotUI, find the game and point it to the correct `.exe`. Re-run the script and choose Repair.
 
 **A game does not appear in TeknoParrotUI.**
-Check the ACTION REQUIRED section — it may need manual registration (shared exe) or hasn't been extracted yet. If neither applies, check the log for a registration error for that game.
+For an ambiguous shared executable, choose one of TPM's validated candidates or leave it for TeknoParrotUI. If it has not been extracted yet, extract first; otherwise check the log for a registration error.
 
 **A game keeps re-extracting after an interrupted extraction.**
 The `.extracting` sentinel wasn't cleaned up. Delete `<GameName>.extracting` from your staging folder and re-run.
@@ -957,7 +977,10 @@ verified backup. TPM asks Windows for permission and resumes automatically; it
 does not wipe data or edit authentication rules.
 
 **"LaunchBox is currently open" error.**
-The direct LaunchBox integration refuses to write while LaunchBox or BigBox is running. Close both, then re-run.
+TPM keeps the selected restore, explains why LaunchBox or BigBox must close,
+and checks again after you press Enter. It does not force-close the app because
+unsaved work could be lost; you do not need to restart TPM or select the backup
+again.
 
 ---
 
