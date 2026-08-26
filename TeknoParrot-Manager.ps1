@@ -565,7 +565,7 @@ function Clear-TpmWorkflowFooter {
         $windowTop = [int]$raw.WindowPosition.Y
         if (($Context.FooterBounds.PSObject.Properties['WindowTop'] -and $windowTop -ne [int]$Context.FooterBounds.WindowTop) -or
             $raw.CursorPosition.Y -ge $storedTop -and $raw.CursorPosition.Y -lt ($storedTop + $storedHeight)) {
-            $Context.RendererMode = 'AppendOnly'
+            $Context.RendererMode = 'TemporaryAppendOnly'
             $Context.FooterBounds = $null
             $Context.FooterRows = @()
             return
@@ -583,7 +583,7 @@ function Clear-TpmWorkflowFooter {
             $raw.SetBufferContents((New-Object System.Management.Automation.Host.Rectangle(0, $y, $width - 1, $y)), $cells)
         }
     } catch {
-        $Context.RendererMode = 'AppendOnly'
+        $Context.RendererMode = 'TemporaryAppendOnly'
     } finally {
         $Context.FooterBounds = $null
         $Context.FooterRows = @()
@@ -593,7 +593,7 @@ function Clear-TpmWorkflowFooter {
 function Render-TpmWorkflowStatus {
     param([Parameter(Mandatory)]$Context)
     $capability = Get-TpmWorkflowConsoleCapability -Facts $Context.ConsoleFacts
-    if ($Context.RendererMode -eq 'AppendOnly') { $capability.Mode = 'AppendOnly'; $capability.Reason = 'workflow-fallback' }
+    if ($Context.RendererMode -eq 'PermanentAppendOnly') { $capability.Mode = 'AppendOnly'; $capability.Reason = 'permanent-fallback' }
     if ($capability.Mode -eq 'None') { $Context.RendererMode = 'None'; return }
     $snapshot = Get-TpmWorkflowStatusSnapshot -Context $Context
     $rows = @(Format-TpmWorkflowStatusRows -Snapshot $snapshot -Width ([Math]::Max(24, [int]$capability.Width)))
@@ -601,7 +601,7 @@ function Render-TpmWorkflowStatus {
         try {
             if ($Context.FooterBounds) { Clear-TpmWorkflowFooter -Context $Context }
             if ($capability.Height -lt ($rows.Count + 3)) {
-                $Context.RendererMode = 'AppendOnlyTooSmall'
+                $Context.RendererMode = 'TemporaryAppendOnly'
                 if ($Context.ConsoleFacts.Adapter.Append) { & $Context.ConsoleFacts.Adapter.Append $rows }
                 return
             }
@@ -612,7 +612,7 @@ function Render-TpmWorkflowStatus {
             return
         } catch {
             Clear-TpmWorkflowFooter -Context $Context
-            $Context.RendererMode = 'AppendOnly'
+            $Context.RendererMode = 'TemporaryAppendOnly'
             if ($Context.ConsoleFacts.Adapter.Append) { & $Context.ConsoleFacts.Adapter.Append @($rows[0]) }
             return
         }
@@ -638,7 +638,7 @@ function Render-TpmWorkflowStatus {
         }
         $footerHeight = $rows.Count
         if ($capability.Height -lt ($footerHeight + 3)) {
-            $Context.RendererMode = 'AppendOnly'
+            $Context.RendererMode = 'TemporaryAppendOnly'
             Microsoft.PowerShell.Utility\Write-Host ($rows[0]) -ForegroundColor DarkCyan
             if ($rows.Count -gt 1) { Microsoft.PowerShell.Utility\Write-Host ($rows[1]) -ForegroundColor DarkGray }
             return
@@ -647,7 +647,7 @@ function Render-TpmWorkflowStatus {
         if ($top -lt 0 -or $top + $footerHeight -gt [int]$raw.BufferSize.Height) { throw 'Footer geometry is outside the current console buffer.' }
         $cursor = $raw.CursorPosition
         if ($cursor.Y -ge $top -and $cursor.Y -lt ($top + $footerHeight)) {
-            $Context.RendererMode = 'AppendOnly'
+            $Context.RendererMode = 'TemporaryAppendOnly'
             Microsoft.PowerShell.Utility\Write-Host ($rows[0]) -ForegroundColor DarkCyan
             if ($rows.Count -gt 1) { Microsoft.PowerShell.Utility\Write-Host ($rows[1]) -ForegroundColor DarkGray }
             if ($rows.Count -gt 2) { Microsoft.PowerShell.Utility\Write-Host ($rows[2]) -ForegroundColor Yellow }
@@ -666,7 +666,7 @@ function Render-TpmWorkflowStatus {
         $Context.RendererMode = 'CursorFooter'
     } catch {
         Clear-TpmWorkflowFooter -Context $Context
-        $Context.RendererMode = 'AppendOnly'
+        $Context.RendererMode = 'TemporaryAppendOnly'
         Microsoft.PowerShell.Utility\Write-Host ($rows[0]) -ForegroundColor DarkCyan
     }
 }
@@ -9167,7 +9167,9 @@ function Invoke-BepInExUpdateCheck {
     $latestByArch = @{}
     $requiredArchitectures = @($candidates | ForEach-Object {
         $installedArch = Get-BepInExInstalledArch -ExeDir $_.ExeDir
-        if ($installedArch -in @('x64','x86')) { $installedArch } else { Get-ExeArchitecture -ExePath $_.GamePath }
+        $exeArch = $null
+        try { $exeArch = Get-ExeArchitecture -ExePath $_.GamePath } catch {}
+        if ($installedArch -in @('x64','x86') -and ($exeArch -notin @('x64','x86') -or $exeArch -eq $installedArch)) { $installedArch } else { $exeArch }
     } | Where-Object { $_ -in @('x64','x86') } | Sort-Object -Unique)
     foreach ($architecture in $requiredArchitectures) {
         $latestByArch[$architecture] = Get-BepInExLatestRelease -Architecture $architecture
@@ -9185,7 +9187,13 @@ function Invoke-BepInExUpdateCheck {
             $health = Get-BepInExInstallationHealth -ExeDir $candidate.ExeDir
             $installedVer = $health.Version
             $installedArch = $health.Architecture
-            $arch = if ($installedArch -in @('x64','x86')) { $installedArch } else { Get-ExeArchitecture -ExePath $candidate.GamePath }
+            $exeArch = $null
+            try { $exeArch = Get-ExeArchitecture -ExePath $candidate.GamePath } catch {}
+            if ($exeArch -in @('x64','x86') -and $installedArch -in @('x64','x86') -and $installedArch -ne $exeArch) {
+                [void]$outdated.Add([pscustomobject]@{ Code = $candidate.Code; ExeDir = $candidate.ExeDir; GamePath = $candidate.GamePath; Installed = $installedVer; Architecture = $exeArch; Latest = $latestByArch[$exeArch]; RepairRequired = $true })
+                continue
+            }
+            $arch = if ($installedArch -in @('x64','x86')) { $installedArch } else { $exeArch }
             $latest = $latestByArch[$arch]
             if (-not $latest) { continue }
             if (-not $health.Installed) {
@@ -16980,6 +16988,7 @@ while ($true) {
             [void](Acknowledge-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-incomplete')
             [void](Stop-TpmWorkflowStatus -Context $reShadeStatus -Reason 'ReShade setup stopped')
             [void](Close-TpmWorkflowStatus -Context $reShadeStatus)
+            continue
         }
         Write-Host ""
         Write-Host "Done." -ForegroundColor Green
