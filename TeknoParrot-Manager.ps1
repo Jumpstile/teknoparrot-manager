@@ -492,9 +492,11 @@ function New-TpmWorkflowStatusContext {
         Completed        = @()
         Failure          = $null
         FooterBounds     = $null
+        FooterRows       = @()
         RendererMode     = $null
         LastDownloadStatusUtc = $null
         Closed           = $false
+        OwnerState       = 'Unclaimed'
     }
 }
 
@@ -553,11 +555,21 @@ function Clear-TpmWorkflowFooter {
     param([Parameter(Mandatory)]$Context)
     if (-not $Context.FooterBounds -or $Context.RendererMode -ne 'CursorFooter') { return }
     if ($Context.ConsoleFacts -and $Context.ConsoleFacts.Adapter) {
-        try { & $Context.ConsoleFacts.Adapter.Clear $Context.FooterBounds } finally { $Context.FooterBounds = $null }
+        try { & $Context.ConsoleFacts.Adapter.Clear $Context.FooterBounds } finally { $Context.FooterBounds = $null; $Context.FooterRows = @() }
         return
     }
     try {
         $raw = $Host.UI.RawUI
+        $storedTop = [int]$Context.FooterBounds.Top
+        $storedHeight = [int]$Context.FooterBounds.Height
+        $windowTop = [int]$raw.WindowPosition.Y
+        if (($Context.FooterBounds.PSObject.Properties['WindowTop'] -and $windowTop -ne [int]$Context.FooterBounds.WindowTop) -or
+            $raw.CursorPosition.Y -ge $storedTop -and $raw.CursorPosition.Y -lt ($storedTop + $storedHeight)) {
+            $Context.RendererMode = 'AppendOnly'
+            $Context.FooterBounds = $null
+            $Context.FooterRows = @()
+            return
+        }
         $width = [int]$raw.BufferSize.Width
         $height = [int]$raw.BufferSize.Height
         $top = [Math]::Max(0, [int]$Context.FooterBounds.Top)
@@ -574,6 +586,7 @@ function Clear-TpmWorkflowFooter {
         $Context.RendererMode = 'AppendOnly'
     } finally {
         $Context.FooterBounds = $null
+        $Context.FooterRows = @()
     }
 }
 
@@ -581,7 +594,7 @@ function Render-TpmWorkflowStatus {
     param([Parameter(Mandatory)]$Context)
     $capability = Get-TpmWorkflowConsoleCapability -Facts $Context.ConsoleFacts
     if ($Context.RendererMode -eq 'AppendOnly') { $capability.Mode = 'AppendOnly'; $capability.Reason = 'workflow-fallback' }
-    if ($capability.Mode -eq 'None') { return }
+    if ($capability.Mode -eq 'None') { $Context.RendererMode = 'None'; return }
     $snapshot = Get-TpmWorkflowStatusSnapshot -Context $Context
     $rows = @(Format-TpmWorkflowStatusRows -Snapshot $snapshot -Width ([Math]::Max(24, [int]$capability.Width)))
     if ($Context.ConsoleFacts -and $Context.ConsoleFacts.Adapter) {
@@ -593,7 +606,8 @@ function Render-TpmWorkflowStatus {
                 return
             }
             & $Context.ConsoleFacts.Adapter.Draw $rows $capability
-            $Context.FooterBounds = [pscustomobject]@{ Top = $capability.Height - $rows.Count; Height = $rows.Count; Width = $capability.Width }
+            $Context.FooterBounds = [pscustomobject]@{ Top = $capability.Height - $rows.Count; Height = $rows.Count; Width = $capability.Width; WindowTop = 0 }
+            $Context.FooterRows = @($rows)
             $Context.RendererMode = 'CursorFooter'
             return
         } catch {
@@ -604,9 +618,10 @@ function Render-TpmWorkflowStatus {
         }
     }
     if ($capability.Mode -eq 'AppendOnly') {
-        Write-Host ($rows[0]) -ForegroundColor DarkCyan
-        if ($rows.Count -gt 1) { Write-Host ($rows[1]) -ForegroundColor DarkGray }
-        if ($rows.Count -gt 2) { Write-Host ($rows[2]) -ForegroundColor Yellow }
+        $Context.RendererMode = 'AppendOnly'
+        Microsoft.PowerShell.Utility\Write-Host ($rows[0]) -ForegroundColor DarkCyan
+        if ($rows.Count -gt 1) { Microsoft.PowerShell.Utility\Write-Host ($rows[1]) -ForegroundColor DarkGray }
+        if ($rows.Count -gt 2) { Microsoft.PowerShell.Utility\Write-Host ($rows[2]) -ForegroundColor Yellow }
         return
     }
     try {
@@ -615,17 +630,29 @@ function Render-TpmWorkflowStatus {
             -not $Context.FooterBounds -or $Context.FooterBounds.Width -ne $capability.Width -or
             $Context.FooterBounds.Height -ne $rows.Count
         if ($Context.FooterBounds) { Clear-TpmWorkflowFooter -Context $Context }
+        if ($Context.RendererMode -eq 'AppendOnly') {
+            Microsoft.PowerShell.Utility\Write-Host ($rows[0]) -ForegroundColor DarkCyan
+            if ($rows.Count -gt 1) { Microsoft.PowerShell.Utility\Write-Host ($rows[1]) -ForegroundColor DarkGray }
+            if ($rows.Count -gt 2) { Microsoft.PowerShell.Utility\Write-Host ($rows[2]) -ForegroundColor Yellow }
+            return
+        }
         $footerHeight = $rows.Count
         if ($capability.Height -lt ($footerHeight + 3)) {
             $Context.RendererMode = 'AppendOnly'
-            Write-Host ($rows[0]) -ForegroundColor DarkCyan
-            if ($rows.Count -gt 1) { Write-Host ($rows[1]) -ForegroundColor DarkGray }
+            Microsoft.PowerShell.Utility\Write-Host ($rows[0]) -ForegroundColor DarkCyan
+            if ($rows.Count -gt 1) { Microsoft.PowerShell.Utility\Write-Host ($rows[1]) -ForegroundColor DarkGray }
             return
         }
         $top = [int]$raw.WindowPosition.Y + [int]$raw.WindowSize.Height - $footerHeight
         if ($top -lt 0 -or $top + $footerHeight -gt [int]$raw.BufferSize.Height) { throw 'Footer geometry is outside the current console buffer.' }
         $cursor = $raw.CursorPosition
-        if ($cursor.Y -ge $top -and -not $geometryChanged) { throw 'Footer would overwrite the current body cursor.' }
+        if ($cursor.Y -ge $top -and $cursor.Y -lt ($top + $footerHeight)) {
+            $Context.RendererMode = 'AppendOnly'
+            Microsoft.PowerShell.Utility\Write-Host ($rows[0]) -ForegroundColor DarkCyan
+            if ($rows.Count -gt 1) { Microsoft.PowerShell.Utility\Write-Host ($rows[1]) -ForegroundColor DarkGray }
+            if ($rows.Count -gt 2) { Microsoft.PowerShell.Utility\Write-Host ($rows[2]) -ForegroundColor Yellow }
+            return
+        }
         $cells = New-Object 'System.Management.Automation.Host.BufferCell[,]' $footerHeight,$capability.Width
         for ($y = 0; $y -lt $footerHeight; $y++) {
             $text = $rows[$y].PadRight($capability.Width)
@@ -634,25 +661,38 @@ function Render-TpmWorkflowStatus {
             }
         }
         $raw.SetBufferContents((New-Object System.Management.Automation.Host.Rectangle(0, $top, $capability.Width - 1, $top + $footerHeight - 1)), $cells)
-        $Context.FooterBounds = [pscustomobject]@{ Top = $top; Height = $footerHeight; Width = $capability.Width }
+        $Context.FooterBounds = [pscustomobject]@{ Top = $top; Height = $footerHeight; Width = $capability.Width; WindowTop = [int]$raw.WindowPosition.Y }
+        $Context.FooterRows = @($rows)
         $Context.RendererMode = 'CursorFooter'
     } catch {
         Clear-TpmWorkflowFooter -Context $Context
         $Context.RendererMode = 'AppendOnly'
-        Write-Host ($rows[0]) -ForegroundColor DarkCyan
+        Microsoft.PowerShell.Utility\Write-Host ($rows[0]) -ForegroundColor DarkCyan
     }
 }
 
 function Apply-TpmWorkflowStatusEvent {
     param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)]$StatusEvent)
     switch ($StatusEvent.EventKind) {
-        'WorkflowStarted' { $Context.Lifecycle = 'Running'; $Context.State = 'Working' }
-        'StepStarted' { $Context.Lifecycle = 'Running'; $Context.State = 'Working'; $Context.ActiveStepId = $StatusEvent.StepId; $Context.ActiveStepNumber = $StatusEvent.StepNumber; $Context.Attempt = $StatusEvent.Attempt; $Context.Activity = $StatusEvent.Activity; $Context.UserAction = 'Nothing needed from you' }
-        'ActivityUpdated' { $Context.Activity = $StatusEvent.Activity }
-        'WaitingStarted' { if ($Context.Failure) { throw 'Workflow cannot wait while a failure is awaiting acknowledgement.' }; $Context.Lifecycle = 'WaitingForUser'; $Context.State = 'Waiting for you'; $Context.UserAction = $StatusEvent.UserAction }
-        'WaitingEnded' { $Context.Lifecycle = 'Running'; $Context.State = 'Working'; $Context.UserAction = 'Nothing needed from you' }
-        'StepCompleted' { $Context.State = $StatusEvent.Outcome; $Context.Completed = @(@($Context.Completed) + [pscustomobject]@{ Summary = $StatusEvent.Summary; Outcome = $StatusEvent.Outcome } | Select-Object -Last 3); $Context.ActiveStepId = $null; $Context.ActiveStepNumber = $null; $Context.Activity = $null; $Context.NextStep = $StatusEvent.NextStep }
-        'StepSkipped' { $Context.State = 'Skipped'; $Context.Completed = @(@($Context.Completed) + [pscustomobject]@{ Summary = $StatusEvent.Summary; Outcome = 'Skipped' } | Select-Object -Last 3); $Context.ActiveStepId = $null; $Context.ActiveStepNumber = $null; $Context.NextStep = $StatusEvent.NextStep }
+        'WorkflowStarted' {
+            if ($Context.Lifecycle -ne 'Created') { throw 'Workflow can only start from its created state.' }
+            $Context.Lifecycle = 'Running'; $Context.State = 'Working'
+        }
+        'StepStarted' {
+            if ($Context.Lifecycle -notin @('Running','WaitingForUser') -or $Context.ActiveStepId) { throw 'Workflow cannot start a step from its current state.' }
+            $Context.Lifecycle = 'Running'; $Context.State = 'Working'; $Context.ActiveStepId = $StatusEvent.StepId; $Context.ActiveStepNumber = $StatusEvent.StepNumber; $Context.Attempt = $StatusEvent.Attempt; $Context.Activity = $StatusEvent.Activity; $Context.UserAction = 'Nothing needed from you'
+        }
+        'ActivityUpdated' { if ($Context.Lifecycle -notin @('Running','WaitingForUser')) { throw 'Workflow activity cannot update from its current state.' }; $Context.Activity = $StatusEvent.Activity }
+        'WaitingStarted' { if ($Context.Failure) { throw 'Workflow cannot wait while a failure is awaiting acknowledgement.' }; if ($Context.Lifecycle -notin @('Running','Created')) { throw 'Workflow cannot enter waiting state from its current state.' }; $Context.Lifecycle = 'WaitingForUser'; $Context.State = 'Waiting for you'; $Context.UserAction = $StatusEvent.UserAction }
+        'WaitingEnded' { if ($Context.Lifecycle -ne 'WaitingForUser') { throw 'Workflow cannot resume because it is not waiting for user input.' }; $Context.Lifecycle = 'Running'; $Context.State = 'Working'; $Context.UserAction = 'Nothing needed from you' }
+        'StepCompleted' {
+            if (-not $Context.ActiveStepId -or $StatusEvent.StepId -ne $Context.ActiveStepId) { throw 'Workflow can only complete its active step.' }
+            $Context.State = $StatusEvent.Outcome; $Context.Completed = @(@($Context.Completed) + [pscustomobject]@{ Summary = $StatusEvent.Summary; Outcome = $StatusEvent.Outcome } | Select-Object -Last 3); $Context.ActiveStepId = $null; $Context.ActiveStepNumber = $null; $Context.Activity = $null; $Context.NextStep = $StatusEvent.NextStep
+        }
+        'StepSkipped' {
+            if (-not $Context.ActiveStepId -or $StatusEvent.StepId -ne $Context.ActiveStepId) { throw 'Workflow can only skip its active step.' }
+            $Context.State = 'Skipped'; $Context.Completed = @(@($Context.Completed) + [pscustomobject]@{ Summary = $StatusEvent.Summary; Outcome = 'Skipped' } | Select-Object -Last 3); $Context.ActiveStepId = $null; $Context.ActiveStepNumber = $null; $Context.NextStep = $StatusEvent.NextStep
+        }
         'FailureRaised' { $Context.Lifecycle = 'NeedsAttention'; $Context.State = 'Needs attention'; $Context.Failure = [pscustomobject]@{ FailureId = $StatusEvent.FailureId; Message = $StatusEvent.Summary; DataSafety = $StatusEvent.DataSafety; RecoveryActions = @($StatusEvent.RecoveryActions) } }
         'FailureAcknowledged' { if (-not $Context.Failure -or $Context.Failure.FailureId -ne $StatusEvent.FailureId) { throw 'Workflow failure acknowledgement does not match the active failure.' }; $Context.Failure = $null; $Context.Lifecycle = 'Running'; $Context.State = 'Working' }
         'RetryStarted' { $Context.Lifecycle = 'Running'; $Context.State = 'Working'; $Context.Attempt = $StatusEvent.Attempt; $Context.Activity = $StatusEvent.Activity }
@@ -672,6 +712,7 @@ function Publish-TpmWorkflowStatusEvent {
         [string]$UserAction = $null, [string]$Outcome = $null, [int]$ItemNumber = 0, [int]$ItemCount = 0,
         [string]$FailureId = $null, [string]$DataSafety = $null, [object[]]$RecoveryActions = @()
     )
+    if ($Context.Closed) { throw 'Workflow is already closed.' }
     $Context.Sequence++
     $statusEvent = [pscustomobject]@{
         PSTypeName = 'TPM.WorkflowStatusEvent.v1'; SchemaVersion = 1; WorkflowId = $Context.WorkflowId; WorkflowKey = $Context.WorkflowKey
@@ -684,21 +725,38 @@ function Publish-TpmWorkflowStatusEvent {
     Apply-TpmWorkflowStatusEvent -Context $Context -StatusEvent $statusEvent
     $statusEvent.StateAfter = $Context.State
     if ($Context.EventSink) { [void](& $Context.EventSink $statusEvent) }
-    Render-TpmWorkflowStatus -Context $Context
+    $script:TpmWorkflowRendering = $true
+    try { Render-TpmWorkflowStatus -Context $Context } finally { $script:TpmWorkflowRendering = $false }
 }
 
 function Start-TpmWorkflowStatus {
     param([Parameter(Mandatory)]$Context)
+    $active = $script:ActiveTpmWorkflowStatus
+    if ($active -and -not $active.Closed -and $active -ne $Context) {
+        throw 'A workflow is already active; nested or concurrent workflows are rejected.'
+    }
+    if ($Context.Closed -or $Context.Lifecycle -ne 'Created') { throw 'Workflow context cannot be started again.' }
+    $Context.OwnerState = 'Owned'
     $script:ActiveTpmWorkflowStatus = $Context
-    Publish-TpmWorkflowStatusEvent -Context $Context -EventKind WorkflowStarted -Summary $Context.Title
+    try {
+        Publish-TpmWorkflowStatusEvent -Context $Context -EventKind WorkflowStarted -Summary $Context.Title
+    } catch {
+        if ($script:ActiveTpmWorkflowStatus -eq $Context) { $script:ActiveTpmWorkflowStatus = $null }
+        $Context.OwnerState = 'Released'
+        throw
+    }
 }
 
 function Start-TpmWorkflowStep {
     param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$StepId, [string]$Activity = $null)
     if ($Context.Failure) { throw 'Workflow cannot start a step while a failure is awaiting acknowledgement.' }
     $index = 0
-    foreach ($step in @($Context.Steps)) { $index++; if ($step.Id -eq $StepId) { break } }
-    if ($index -gt @($Context.Steps).Count) { throw "Unknown workflow step: $StepId" }
+    $found = $false
+    foreach ($step in @($Context.Steps)) {
+        $index++
+        if ($step.Id -eq $StepId) { $found = $true; break }
+    }
+    if (-not $found) { throw "Unknown workflow step: $StepId" }
     Publish-TpmWorkflowStatusEvent -Context $Context -EventKind StepStarted -StepId $StepId -StepNumber $index -Attempt ([int]$Context.Attempt + 1) -Activity $Activity -NextStep $Context.NextStep
 }
 
@@ -720,7 +778,7 @@ function Resume-TpmWorkflowStatus {
 function Complete-TpmWorkflowStep {
     param([Parameter(Mandatory)]$Context, [ValidateSet('Fixed','Succeeded','Skipped')][string]$Outcome = 'Succeeded', [Parameter(Mandatory)][string]$Summary, [string]$NextStep = $null)
     $kind = if ($Outcome -eq 'Skipped') { 'StepSkipped' } else { 'StepCompleted' }
-    Publish-TpmWorkflowStatusEvent -Context $Context -EventKind $kind -Outcome $Outcome -Summary $Summary -NextStep $NextStep
+    Publish-TpmWorkflowStatusEvent -Context $Context -EventKind $kind -StepId $Context.ActiveStepId -Outcome $Outcome -Summary $Summary -NextStep $NextStep
 }
 
 function Set-TpmWorkflowFailure {
@@ -744,11 +802,64 @@ function Stop-TpmWorkflowStatus {
     if (-not $Context.Failure) { Publish-TpmWorkflowStatusEvent -Context $Context -EventKind WorkflowAborted -Summary $Reason }
 }
 
+function Resolve-TpmWorkflowFailure {
+    param(
+        [Parameter(Mandatory)]$Context,
+        [Parameter(Mandatory)][string]$FailureId,
+        [Parameter(Mandatory)][string]$Message,
+        [Parameter(Mandatory)][string]$DataSafety,
+        [object[]]$RecoveryActions = @(),
+        [switch]$Acknowledge
+    )
+    if (-not $Context.Failure) {
+        [void](Set-TpmWorkflowFailure -Context $Context -FailureId $FailureId -Message $Message -DataSafety $DataSafety -RecoveryActions $RecoveryActions)
+    }
+    if ($Acknowledge) {
+        [void](Read-HostSafe '  Press Enter to acknowledge this result')
+        [void](Acknowledge-TpmWorkflowFailure -Context $Context -FailureId $FailureId)
+        [void](Stop-TpmWorkflowStatus -Context $Context -Reason $Message)
+        [void](Close-TpmWorkflowStatus -Context $Context)
+    }
+}
+
 function Close-TpmWorkflowStatus {
     param([Parameter(Mandatory)]$Context)
-    Publish-TpmWorkflowStatusEvent -Context $Context -EventKind WorkflowClosed
-    if ($script:ActiveTpmWorkflowStatus -eq $Context) { $script:ActiveTpmWorkflowStatus = $null }
-    Clear-TpmWorkflowFooter -Context $Context
+    if ($Context.Closed) { return }
+    if ($script:ActiveTpmWorkflowStatus -and $script:ActiveTpmWorkflowStatus -ne $Context) {
+        throw 'Workflow context does not own the active status channel.'
+    }
+    try { Publish-TpmWorkflowStatusEvent -Context $Context -EventKind WorkflowClosed }
+    finally {
+        if ($script:ActiveTpmWorkflowStatus -eq $Context) { $script:ActiveTpmWorkflowStatus = $null }
+        if ($script:PostgresRecoveryStatus -eq $Context) { $script:PostgresRecoveryStatus = $null }
+        $Context.OwnerState = 'Released'
+        Clear-TpmWorkflowFooter -Context $Context
+    }
+}
+
+function Write-Host {
+    [CmdletBinding()]
+    param(
+        [Parameter(Position = 0, ValueFromRemainingArguments = $true)][object[]]$Object,
+        [ConsoleColor]$ForegroundColor,
+        [ConsoleColor]$BackgroundColor,
+        [switch]$NoNewline,
+        [string]$Separator = ' '
+    )
+    $activeStatus = $script:ActiveTpmWorkflowStatus
+    if (-not $activeStatus -or $activeStatus.Closed -or $script:TpmWorkflowRendering) {
+        Microsoft.PowerShell.Utility\Write-Host @PSBoundParameters
+        return
+    }
+    Clear-TpmWorkflowFooter -Context $activeStatus
+    try {
+        Microsoft.PowerShell.Utility\Write-Host @PSBoundParameters
+    } finally {
+        if (-not $activeStatus.Closed) {
+            $script:TpmWorkflowRendering = $true
+            try { Render-TpmWorkflowStatus -Context $activeStatus } finally { $script:TpmWorkflowRendering = $false }
+        }
+    }
 }
 
 function Write-TpmWorkflowConsoleLine {
@@ -807,6 +918,8 @@ function Exit-TpmProcess {
 # Read-Host so this failure mode has exactly one implementation to test.
 function Read-HostSafe {
     param([string]$Prompt, [string]$Default = $null)
+    $activeStatus = $script:ActiveTpmWorkflowStatus
+    if ($activeStatus) { Clear-TpmWorkflowFooter -Context $activeStatus }
     $raw = Read-Host $Prompt
     if ($null -eq $raw) {
         # EOF-safety: Read-Host returned null (redirected/piped stdin
@@ -827,7 +940,11 @@ function Read-HostSafe {
     # piped/unattended input) and whitespace-only input are both treated as
     # "accept the shown default" when -Default was supplied. Non-blank input
     # always wins and -Default is ignored entirely.
-    if ($trimmed -eq '' -and $null -ne $Default) { return $Default }
+    if ($trimmed -eq '' -and $null -ne $Default) {
+        if ($activeStatus) { Render-TpmWorkflowStatus -Context $activeStatus }
+        return $Default
+    }
+    if ($activeStatus) { Render-TpmWorkflowStatus -Context $activeStatus }
     return $trimmed
 }
 
@@ -1758,7 +1875,7 @@ function Invoke-TpmTransactionalPromote {
     } catch {
         $promotionError = $_
         Write-Log "Invoke-TpmTransactionalPromote: FAILED promoting into '$DestDir' -- rolling back. $promotionError"
-        $rollbackErrors = New-Object System.Collections.Generic.List[string]
+        $rollbackErrors = New-Object System.Collections.ArrayList
         foreach ($lostMsg in $lostSources) { [void]$rollbackErrors.Add($lostMsg) }
         foreach ($invalidMsg in $invalidBackups) { [void]$rollbackErrors.Add($invalidMsg) }
 
@@ -3274,7 +3391,7 @@ function Invoke-ReShadeSetup {
     if ($selectedGames.Count -eq 0) {
         Write-Host "  No games selected. ReShade setup cancelled." -ForegroundColor Yellow
         Write-Log "ReShade setup: cancelled -- no games selected."
-        return
+        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'NO_GAMES_SELECTED' }
     }
 
     # Deploy
@@ -3370,6 +3487,7 @@ function Invoke-ReShadeSetup {
     Write-Host "  TPM does not remove an unowned ReShade hook automatically." -ForegroundColor DarkCyan
     Write-Host "  Existing or changed files need advanced troubleshooting review." -ForegroundColor DarkCyan
     Write-Log ("ReShade setup: Installed={0} Skipped={1} Errors={2} PresetOverrides={3}" -f $deployed, $skipped, $errors, $presetOverrides)
+    return [pscustomobject]@{ Succeeded = ($deployed -gt 0 -and $errors -eq 0); Deployed = $deployed; Errors = $errors; Reason = if ($errors) { 'DEPLOYMENT_ERRORS' } elseif ($deployed -eq 0) { 'NO_GAMES_DEPLOYED' } else { $null } }
 }
 
 # =============================================================================
@@ -3440,7 +3558,7 @@ function Invoke-DgVoodoo2Setup {
         Write-Host ("  ERROR: No dgVoodoo2 DLLs found in: {0}" -f $SourceDir) -ForegroundColor Red
         Write-Host ("  Expected one or more of: {0}" -f ($allExpected -join ', ')) -ForegroundColor Yellow
         Write-Log "dgVoodoo2 setup: aborted -- no DLLs in $SourceDir"
-        return
+        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'NO_SOURCE_FILES' }
     }
     Write-Host ("  Available DLLs : {0}" -f ($available -join ', ')) -ForegroundColor DarkGray
 
@@ -3478,7 +3596,7 @@ function Invoke-DgVoodoo2Setup {
     if ($profiles.Count -eq 0) {
         Write-Host "  No registered games found." -ForegroundColor Yellow
         Write-Log "dgVoodoo2 setup: aborted -- no registered profiles."
-        return
+        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'NO_REGISTERED_PROFILES' }
     }
 
     $detectedMap = @{}   # BaseName -> API array
@@ -3530,13 +3648,13 @@ function Invoke-DgVoodoo2Setup {
     } else {
         Write-Host "  dgVoodoo2 setup cancelled." -ForegroundColor Yellow
         Write-Log "dgVoodoo2 setup: cancelled."
-        return
+        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'DECLINED' }
     }
 
     if ($targetProfiles.Count -eq 0) {
         Write-Host "  No games selected. dgVoodoo2 setup cancelled." -ForegroundColor Yellow
         Write-Log "dgVoodoo2 setup: cancelled -- no games selected."
-        return
+        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'NO_GAMES_SELECTED' }
     }
 
     # Deploy DLLs to each selected game folder.
@@ -3628,6 +3746,7 @@ function Invoke-DgVoodoo2Setup {
     Write-Host "  TPM does not remove an unowned dgVoodoo2 hook automatically." -ForegroundColor DarkCyan
     Write-Host "  Existing or changed files need advanced troubleshooting review." -ForegroundColor DarkCyan
     Write-Log ("dgVoodoo2 setup: deployed={0} skipped={1} errors={2} presetOverrides={3}" -f $deployed, $skipped, $errors, $presetOverrides)
+    return [pscustomobject]@{ Succeeded = ($deployed -gt 0 -and $errors -eq 0); Deployed = $deployed; Errors = $errors; Reason = if ($errors) { 'DEPLOYMENT_ERRORS' } elseif ($deployed -eq 0) { 'NO_GAMES_DEPLOYED' } else { $null } }
 }
 
 # =============================================================================
@@ -6736,7 +6855,8 @@ function New-PostgresRecoveryState {
     }
     if ($AttemptId -lt 1 -or $AttemptId -gt 5) { throw 'Postgres recovery state attempt limit was exceeded.' }
     $stateDirectory = Get-PostgresRecoveryStateDirectory
-    $statePath = Join-Path $stateDirectory ('.tpm-postgres-recovery-' + [guid]::NewGuid().ToString('N') + '.json')
+    $issuanceId = [guid]::NewGuid().ToString('N')
+    $statePath = Join-Path $stateDirectory ('.tpm-postgres-recovery-' + $issuanceId + '.json')
     $tempPath = $statePath + '.tmp'
     try {
         [void][System.IO.Directory]::CreateDirectory($stateDirectory)
@@ -6759,6 +6879,7 @@ function New-PostgresRecoveryState {
         $payload = [ordered]@{
             SchemaVersion           = 3
             Purpose                 = 'TeknoParrotManager.PostgresRecovery'
+            IssuanceId              = $issuanceId
             Operation               = $Operation
             Nonce                   = [guid]::NewGuid().ToString('N')
             AttemptId               = $AttemptId
@@ -6856,9 +6977,11 @@ function Read-PostgresRecoveryState {
         $stateDirectory = [System.IO.Path]::GetFullPath((Get-PostgresRecoveryStateDirectory)).TrimEnd('\','/')
         $fullPath = [System.IO.Path]::GetFullPath($StatePath)
         $leaf = [System.IO.Path]::GetFileName($fullPath)
+        $issuanceMatch = [regex]::Match($leaf, '^\.tpm-postgres-recovery-(?<id>[0-9a-f]{32})\.json$')
         if ([System.IO.Path]::GetDirectoryName($fullPath).TrimEnd('\','/') -ine $stateDirectory -or
-            $leaf -notmatch '^\.tpm-postgres-recovery-[0-9a-f]{32}\.json$' -or
+            -not $issuanceMatch.Success -or
             -not (Test-Path -LiteralPath $fullPath -PathType Leaf)) { throw 'Recovery state path is not a TPM state file.' }
+        $fileIssuanceId = $issuanceMatch.Groups['id'].Value
         $claimPath = $fullPath + '.claim'
         $usedPath = $fullPath + '.used'
         if ((Test-Path -LiteralPath $usedPath -PathType Leaf) -or (Test-Path -LiteralPath $claimPath -PathType Leaf)) { throw 'Recovery state was already consumed.' }
@@ -6875,6 +6998,7 @@ function Read-PostgresRecoveryState {
         if ($outer.SchemaVersion -ne 3 -or $outer.Purpose -ne 'TeknoParrotManager.PostgresRecovery' -or [string]::IsNullOrWhiteSpace([string]$outer.CipherText)) { throw 'Recovery state envelope is invalid.' }
         $payload = Unprotect-PostgresRecoveryEnvelope -ProtectedText ([string]$outer.CipherText) | ConvertFrom-Json
         if ($payload.SchemaVersion -ne 3 -or $payload.Purpose -ne 'TeknoParrotManager.PostgresRecovery' -or
+            [string]$payload.IssuanceId -ne $fileIssuanceId -or
             $payload.Operation -notin @('Install','Recovery') -or [string]::IsNullOrWhiteSpace([string]$payload.Nonce) -or
             [int]$payload.AttemptId -lt 1 -or [int]$payload.AttemptId -gt 5) { throw 'Recovery state metadata is invalid.' }
         $now = (Get-Date).ToUniversalTime()
@@ -6892,6 +7016,9 @@ function Read-PostgresRecoveryState {
             (Get-FileHash -LiteralPath $parent.Path -Algorithm SHA256 -ErrorAction Stop).Hash -ne [string]$payload.ParentProcessSha256) { throw 'Recovery parent identity changed.' }
         if ((Get-FileHash -LiteralPath $ExpectedScriptPath -Algorithm SHA256 -ErrorAction Stop).Hash -ne [string]$payload.ScriptSha256 -or
             (Get-FileHash -LiteralPath $ExpectedConfigPath -Algorithm SHA256 -ErrorAction Stop).Hash -ne [string]$payload.ConfigSha256) { throw 'Recovery source or configuration changed during the handoff.' }
+        $markerText = 'TPM.PostgresRecovery.v3|' + [string]$payload.IssuanceId + '|' + [string]$payload.Nonce + '|' + [string]$payload.AttemptId
+        [System.IO.File]::WriteAllText($usedPath, $markerText, (New-Object System.Text.UTF8Encoding $false))
+        if ((Get-Content -LiteralPath $usedPath -Raw -ErrorAction Stop) -ne $markerText) { throw 'Recovery state consumption marker could not be verified.' }
         if ($payload.Operation -eq 'Recovery') {
             $passwordPlain = [string]$payload.PasswordPlain
             if ([string]::IsNullOrEmpty($passwordPlain) -or [string]::IsNullOrEmpty([string]$payload.PasswordOriginEncrypted)) { throw 'Recovery password state is missing.' }
@@ -6902,6 +7029,8 @@ function Read-PostgresRecoveryState {
             Path                    = $fullPath
             ClaimPath               = $claimPath
             UsedPath                = $usedPath
+            IssuanceId              = [string]$payload.IssuanceId
+            Nonce                   = [string]$payload.Nonce
             Operation               = [string]$payload.Operation
             AttemptId               = [int]$payload.AttemptId
             CreatedUtc              = [string]$payload.CreatedUtc
@@ -6922,6 +7051,12 @@ function Read-PostgresRecoveryState {
         }
     } catch {
         Write-Log ("Postgres recovery state validation failed -- {0}" -f $_.Exception.Message)
+        try {
+            if ($usedPath -and (Test-Path -LiteralPath $usedPath -PathType Leaf)) { Remove-Item -LiteralPath $usedPath -Force -ErrorAction Stop }
+            if ($claimPath -and (Test-Path -LiteralPath $claimPath -PathType Leaf) -and -not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+                [System.IO.File]::Move($claimPath, $fullPath)
+            }
+        } catch { Write-Log 'Postgres recovery state validation cleanup failed; encrypted evidence was retained.' }
         throw 'TPM could not safely resume the protected PostgreSQL setup.'
     } finally {
         $passwordPlain = $null
@@ -7683,6 +7818,7 @@ function Remove-FFBPluginOwnedDeployment {
     param([Parameter(Mandatory)][string]$CacheDir, [Parameter(Mandatory)][string]$ProfileCode)
     $entries = @(Read-FFBPluginOwnership -CacheDir $CacheDir)
     $remaining = New-Object System.Collections.Generic.List[object]
+    $removedItems = New-Object System.Collections.ArrayList
     $removed = $false
     foreach ($entry in $entries) {
         if ([string]$entry.ProfileCode -ne $ProfileCode) { [void]$remaining.Add($entry); continue }
@@ -7700,11 +7836,33 @@ function Remove-FFBPluginOwnedDeployment {
         }
         $backupDir = Join-Path (Join-Path ([string]$entry.GameRoot) 'FullBackup') ('FFBPluginCleanup_' + (Get-Date).ToString('yyyy-MM-dd_HH-mm-ss'))
         [void][System.IO.Directory]::CreateDirectory($backupDir)
-        Copy-Item -LiteralPath $destination -Destination (Join-Path $backupDir ([System.IO.Path]::GetFileName($destination))) -Force -ErrorAction Stop
+        $backupPath = Join-Path $backupDir ([System.IO.Path]::GetFileName($destination))
+        Copy-Item -LiteralPath $destination -Destination $backupPath -Force -ErrorAction Stop
         Remove-Item -LiteralPath $destination -Force -ErrorAction Stop
+        [void]$removedItems.Add([pscustomobject]@{ Destination = $destination; Backup = $backupPath; Hash = $entry.DeployedSha256 })
         $removed = $true
     }
-    if ($removed) { Write-FFBPluginOwnership -CacheDir $CacheDir -Entries $remaining.ToArray() }
+    if ($removed) {
+        try {
+            Write-FFBPluginOwnership -CacheDir $CacheDir -Entries $remaining.ToArray()
+        } catch {
+            $rollbackErrors = New-Object System.Collections.Generic.List[string]
+            foreach ($item in @($removedItems)) {
+                try {
+                    if (-not (Test-Path -LiteralPath $item.Destination -PathType Leaf)) {
+                        Copy-Item -LiteralPath $item.Backup -Destination $item.Destination -Force -ErrorAction Stop
+                    }
+                    if ((Get-FileHash -LiteralPath $item.Destination -Algorithm SHA256 -ErrorAction Stop).Hash -ine [string]$item.Hash) { throw 'restored hash mismatch' }
+                } catch { [void]$rollbackErrors.Add($item.Destination) }
+            }
+            if ($rollbackErrors.Count -gt 0) {
+                Write-Log ("FFBPlugin ownership: manifest write and deletion rollback failed; evidence remains in backup(s): {0}" -f ($rollbackErrors -join ', '))
+                throw 'FFBPlugin ownership manifest update failed and deletion rollback was incomplete.'
+            }
+            Write-Log 'FFBPlugin ownership: manifest write failed; deletion was rolled back from verified backup.'
+            throw 'FFBPlugin ownership manifest update failed; deletion was rolled back.'
+        }
+    }
     return $removed
 }
 
@@ -7725,7 +7883,7 @@ function Invoke-FFBPluginSetup {
     if ($gameMap.Count -eq 0) {
         Write-Host "  Could not reach GitHub to fetch the FFB plugin game list -- try again later." -ForegroundColor Red
         Write-Log "FFBPlugin setup: aborted -- game map fetch failed."
-        return
+        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 1; Reason = 'GAME_MAP_FAILED' }
     }
     Write-Host ("  {0} game(s) in the upstream table." -f $gameMap.Count) -ForegroundColor DarkGray
 
@@ -7733,7 +7891,7 @@ function Invoke-FFBPluginSetup {
     if (-not (Invoke-FFBPluginDownload -destDir $CacheDir)) {
         Write-Host "  Could not download the FFB plugin DLLs -- try again later." -ForegroundColor Red
         Write-Log "FFBPlugin setup: aborted -- DLL download failed."
-        return
+        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 1; Reason = 'DLL_DOWNLOAD_FAILED' }
     }
     $srcDll32 = Join-Path $CacheDir "MAME32.dll"
     $srcDll64 = Join-Path $CacheDir "MAME64.dll"
@@ -7743,7 +7901,7 @@ function Invoke-FFBPluginSetup {
     if ($profiles.Count -eq 0) {
         Write-Host "  No registered games found." -ForegroundColor Yellow
         Write-Log "FFBPlugin setup: aborted -- no registered profiles."
-        return
+        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'NO_REGISTERED_PROFILES' }
     }
 
     # Pre-normalise the FFB table once for fuzzy matching.
@@ -7897,6 +8055,7 @@ function Invoke-FFBPluginSetup {
     Write-Host "  TPM records its own deployed hook files so a later native choice can remove only verified ownership." -ForegroundColor DarkCyan
     Write-Host "  TPM does not remove an unowned FFB hook automatically." -ForegroundColor DarkCyan
     Write-Log ("FFBPlugin setup: deployed={0} skippedNative={1} skippedCollision={2} skippedNoMatch={3} skippedDllMissing={4} errors={5}" -f $deployed, $skippedNative, $skippedCollision, $skippedNoMatch, $skippedDllMissing, $errors)
+    return [pscustomobject]@{ Succeeded = ($errors -eq 0); Deployed = $deployed; Errors = $errors; Reason = if ($errors) { 'DEPLOYMENT_ERRORS' } else { $null } }
 }
 
 # GameProfiles at runtime -- never hardcoded. Shared (read-only) between
@@ -8652,6 +8811,33 @@ function Write-BepInExUnsafeRootGuidance {
     Write-Log "BepInEx update check: blocked on unsafe game root for $GameCode. Technical reason: $Reason. Action required: verify the game is inside the approved non-reparse root."
 }
 
+function Get-BepInExInstallationHealth {
+    param([Parameter(Mandatory)][string]$ExeDir)
+    $result = [ordered]@{ Installed = $false; Complete = $false; Version = $null; Architecture = $null; Reason = 'Not installed' }
+    $dllPath = Join-Path $ExeDir 'BepInEx\core\BepInEx.dll'
+    if (-not (Test-Path -LiteralPath $dllPath -PathType Leaf)) { return [pscustomobject]$result }
+    $result.Installed = $true
+    $result.Version = Get-BepInExInstalledVersion -ExeDir $ExeDir
+    $result.Architecture = Get-BepInExInstalledArch -ExeDir $ExeDir
+    $required = @('BepInEx\core\BepInEx.dll', 'winhttp.dll', 'doorstop_config.ini', '.doorstop_version')
+    foreach ($relative in $required) {
+        $path = Join-Path $ExeDir $relative
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            $result.Reason = 'Missing ' + $relative
+            return [pscustomobject]$result
+        }
+        if (-not (Test-BepInExNoReparsePath -Root $ExeDir -Path $path)) {
+            $result.Reason = 'Unsafe ' + $relative
+            return [pscustomobject]$result
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$result.Version)) { $result.Reason = 'BepInEx version is unreadable'; return [pscustomobject]$result }
+    if ($result.Architecture -notin @('x64','x86')) { $result.Reason = 'BepInEx native bootstrap architecture is unreadable'; return [pscustomobject]$result }
+    $result.Complete = $true
+    $result.Reason = 'Complete'
+    return [pscustomobject]$result
+}
+
 function Test-BepInExExistingTreeSafe {
     param([Parameter(Mandatory)][string]$GameRoot)
     foreach ($name in @('BepInEx', 'doorstop_config.ini', 'winhttp.dll', '.doorstop_version', 'changelog.txt')) {
@@ -8996,13 +9182,18 @@ function Invoke-BepInExUpdateCheck {
     $upToDate = 0; $errors = 0
     foreach ($candidate in $candidates) {
         try {
-            $installedVer = Get-BepInExInstalledVersion -ExeDir $candidate.ExeDir
-            $installedArch = Get-BepInExInstalledArch -ExeDir $candidate.ExeDir
+            $health = Get-BepInExInstallationHealth -ExeDir $candidate.ExeDir
+            $installedVer = $health.Version
+            $installedArch = $health.Architecture
             $arch = if ($installedArch -in @('x64','x86')) { $installedArch } else { Get-ExeArchitecture -ExePath $candidate.GamePath }
             $latest = $latestByArch[$arch]
             if (-not $latest) { continue }
-            if (-not $installedVer) {
-                [void]$outdated.Add([pscustomobject]@{ Code = $candidate.Code; ExeDir = $candidate.ExeDir; GamePath = $candidate.GamePath; Installed = 'Not installed'; Architecture = $arch; Latest = $latest })
+            if (-not $health.Installed) {
+                [void]$outdated.Add([pscustomobject]@{ Code = $candidate.Code; ExeDir = $candidate.ExeDir; GamePath = $candidate.GamePath; Installed = 'Not installed'; Architecture = $arch; Latest = $latest; RepairRequired = $false })
+                continue
+            }
+            if (-not $health.Complete) {
+                [void]$outdated.Add([pscustomobject]@{ Code = $candidate.Code; ExeDir = $candidate.ExeDir; GamePath = $candidate.GamePath; Installed = 'Broken (' + $health.Reason + ')'; Architecture = $arch; Latest = $latest; RepairRequired = $true })
                 continue
             }
             $instParsed = $null; $latestParsed = $null
@@ -10391,7 +10582,8 @@ function Invoke-ManualRegistrationChoices {
             continue
         }
         if (-not $exeFullPath.StartsWith($installRoot + '\', [System.StringComparison]::OrdinalIgnoreCase) -or
-            -not (Test-Path -LiteralPath $exeFullPath -PathType Leaf)) {
+            -not (Test-Path -LiteralPath $exeFullPath -PathType Leaf) -or
+            -not (Test-BepInExNoReparsePath -Root $installRoot -Path $exeFullPath)) {
             Write-Host "  The selected executable is outside the game staging folder or no longer present -- no profile was written." -ForegroundColor Red
             Write-Log "Manual registration: executable rejected for $code; path=$exeFullPath"
             continue
@@ -12004,6 +12196,20 @@ function Invoke-RestoreBackup {
         return
     }
 
+    # Snapshot the live profiles before deletion so a partial copy failure can
+    # roll the live directory back without touching historical FullBackup data.
+    $rollbackDir = Join-Path ([System.IO.Path]::GetTempPath()) ('tpm-restore-rollback-' + [guid]::NewGuid().ToString('N'))
+    try {
+        [void][System.IO.Directory]::CreateDirectory($rollbackDir)
+        Get-ChildItem -LiteralPath $userProfilesDir | Where-Object { $_.Name -ne 'FullBackup' } |
+            Copy-Item -Destination $rollbackDir -Recurse -Force -ErrorAction Stop
+    } catch {
+        Write-Host '  ERROR: Could not snapshot current profiles before restore; nothing was changed.' -ForegroundColor Red
+        Write-Log "Restore: rollback snapshot failed -- $_"
+        if (Test-Path -LiteralPath $rollbackDir) { Remove-Item -LiteralPath $rollbackDir -Recurse -Force -ErrorAction SilentlyContinue }
+        return [pscustomobject]@{ Succeeded = $false; Name = $selected.Name; ErrorCount = 1; RollbackSucceeded = $false }
+    }
+
     # Remove current UserProfiles content, keeping FullBackup intact.
     # Use Where-Object instead of -Exclude for reliable PS 5.1 behaviour.
     # Treat any deletion failures as fatal: a partial delete followed by a
@@ -12016,10 +12222,18 @@ function Invoke-RestoreBackup {
     Get-ChildItem -LiteralPath $userProfilesDir | Where-Object { $_.Name -ne "FullBackup" } |
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable deleteErrs
     if ($deleteErrs.Count -gt 0) {
-        Write-Host ("  ERROR: {0} file(s) could not be removed." -f $deleteErrs.Count) -ForegroundColor Red
-        Write-Host "  Make sure TeknoParrot is fully closed and no files are open, then try again." -ForegroundColor Yellow
+        Write-Host ("  ERROR: {0} file(s) could not be removed. The restore was not completed." -f $deleteErrs.Count) -ForegroundColor Red
+        Write-Host "  TPM will keep the selected backup and attempt to restore the previous live profiles." -ForegroundColor Yellow
         Write-Log "Restore: FAILED -- $($deleteErrs.Count) file(s) could not be removed."
-        return
+        try {
+            Get-ChildItem -LiteralPath $userProfilesDir | Where-Object { $_.Name -ne 'FullBackup' } | Remove-Item -Recurse -Force -ErrorAction Stop
+            Get-ChildItem -LiteralPath $rollbackDir | Copy-Item -Destination $userProfilesDir -Recurse -Force -ErrorAction Stop
+            Remove-Item -LiteralPath $rollbackDir -Recurse -Force -ErrorAction SilentlyContinue
+            return [pscustomobject]@{ Succeeded = $false; Name = $selected.Name; ErrorCount = $deleteErrs.Count; RollbackSucceeded = $true }
+        } catch {
+            Write-Log "Restore: rollback after delete failure failed -- $_"
+            return [pscustomobject]@{ Succeeded = $false; Name = $selected.Name; ErrorCount = $deleteErrs.Count; RollbackSucceeded = $false; RollbackPath = $rollbackDir }
+        }
     }
 
     # Copy backup into UserProfiles. Copy-Item receives FileInfo/DirectoryInfo
@@ -12035,12 +12249,22 @@ function Invoke-RestoreBackup {
 
     if ($errCount -gt 0) {
         Write-Host ("  ERROR: {0} file(s) could not be restored. The restore was not completed." -f $errCount) -ForegroundColor Red
+        Write-Host '  TPM will attempt to restore the previous live profiles from its rollback snapshot.' -ForegroundColor Yellow
         Write-Log "Restore: failed with $errCount error(s) from $($selected.Name)"
-        return [pscustomobject]@{ Succeeded = $false; Name = $selected.Name; ErrorCount = $errCount }
+        try {
+            Get-ChildItem -LiteralPath $userProfilesDir | Where-Object { $_.Name -ne 'FullBackup' } | Remove-Item -Recurse -Force -ErrorAction Stop
+            Get-ChildItem -LiteralPath $rollbackDir | Copy-Item -Destination $userProfilesDir -Recurse -Force -ErrorAction Stop
+            Remove-Item -LiteralPath $rollbackDir -Recurse -Force -ErrorAction SilentlyContinue
+            return [pscustomobject]@{ Succeeded = $false; Name = $selected.Name; ErrorCount = $errCount; RollbackSucceeded = $true }
+        } catch {
+            Write-Log "Restore: rollback after copy failure failed -- $_"
+            return [pscustomobject]@{ Succeeded = $false; Name = $selected.Name; ErrorCount = $errCount; RollbackSucceeded = $false; RollbackPath = $rollbackDir }
+        }
     }
+    Remove-Item -LiteralPath $rollbackDir -Recurse -Force -ErrorAction SilentlyContinue
     Write-Host "  Restore complete." -ForegroundColor Green
     Write-Log "Restore: completed from $($selected.Name), no errors."
-    return [pscustomobject]@{ Succeeded = $true; Name = $selected.Name; ErrorCount = 0 }
+    return [pscustomobject]@{ Succeeded = $true; Name = $selected.Name; ErrorCount = 0; RollbackSucceeded = $true }
 }
 
 # =============================================================================
@@ -14100,6 +14324,8 @@ function Get-ControlReadinessActionItems {
     return @($items)
 }
 
+$script:ActiveTpmWorkflowStatus = $null
+$script:TpmWorkflowRendering = $false
 Write-Log "Script started (v$ScriptVersion$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
@@ -16208,7 +16434,7 @@ while ($true) {
                 Write-Host '  TPM could not verify PostgreSQL service state. No changes were made.' -ForegroundColor Red
                 Write-Log 'Postgres setup: service state could not be verified before the transaction.'
                 if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not verify the PostgreSQL service state before continuing.' }
-                [void](Read-HostSafe '  Press Enter to return to menu')
+                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-service-state' -Message 'PostgreSQL service state could not be verified.' -DataSafety 'No PostgreSQL or profile changes were made.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
                 continue
             }
         }
@@ -16251,6 +16477,8 @@ while ($true) {
                         $repairNow = (Read-HostSafe '  Fix it now? (Y/N)').ToUpper()
                         if ($repairNow -ne 'Y') {
                             Write-Host '  Nothing was changed. The PostgreSQL setup was not completed.' -ForegroundColor Yellow
+                            [void](Stop-TpmWorkflowStatus -Context $postgresStatus -Reason 'PostgreSQL repair declined')
+                            [void](Close-TpmWorkflowStatus -Context $postgresStatus)
                             [void](Read-HostSafe '  Press Enter to return to menu')
                             continue
                         }
@@ -16314,6 +16542,7 @@ while ($true) {
                 if (-not (Install-Postgres83 -OutSuperPasswordPlain $outPw)) {
                     Write-Host "  PostgreSQL setup did not complete -- no profile changes made." -ForegroundColor Red
                     if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'PostgreSQL could not be installed successfully.' }
+                    [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-install-failed' -Message 'PostgreSQL installation did not complete.' -DataSafety 'No PostgreSQL or profile changes were made.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
                     continue
                 }
                 $superPwPlain = $outPw.Value
@@ -16324,6 +16553,7 @@ while ($true) {
                 Write-Host ("  Recovery BLOCKED. No profile changes were made. Evidence: {0}" -f $recoveryBackup.Path) -ForegroundColor Red
                 Write-Log 'Postgres setup: verified recovery evidence was unavailable before configuration changes.'
                 if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not verify the protected backup before continuing PostgreSQL setup.' }
+                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-backup-unverified' -Message 'Verified PostgreSQL recovery evidence was unavailable.' -DataSafety 'No PostgreSQL or profile changes were made.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
                 continue
             }
             [void](Start-TpmWorkflowStep -Context $postgresStatus -StepId 'save' -Activity 'Saving the repaired settings')
@@ -16334,6 +16564,7 @@ while ($true) {
                 Write-Host "  Recovery BLOCKED because the protected manager configuration could not be saved." -ForegroundColor Red
                 Write-Log 'Postgres setup: blocked because encrypted password configuration save failed.'
                 if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not save the protected PostgreSQL password configuration.' }
+                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-config-save' -Message 'Protected PostgreSQL settings could not be saved.' -DataSafety 'PostgreSQL and profile setup did not complete.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
                 continue
             }
             [void](Complete-TpmWorkflowStep -Context $postgresStatus -Outcome Succeeded -Summary 'Repaired settings saved' -NextStep 'Back up existing databases')
@@ -16345,6 +16576,7 @@ while ($true) {
                 if ($pgBackup.Path) { Write-Host ("  Database backup evidence: {0}" -f $pgBackup.Path) -ForegroundColor Yellow }
                 Write-Log 'Postgres setup: blocked before profile population because database backup was incomplete.'
                 if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not finish the database backup before changing game profiles.' }
+                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-database-backup' -Message 'The PostgreSQL database backup was incomplete.' -DataSafety 'No profile population was reported as complete.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
                 continue
             }
             if ($pgBackup.Path) { Write-Host ("  Database backup saved: {0}" -f $pgBackup.Path) -ForegroundColor DarkCyan }
@@ -16360,12 +16592,14 @@ while ($true) {
                 Write-Host ("  Recovery BLOCKED. No recovery-complete result was reported. Evidence: {0}" -f $pgResults.BackupPath) -ForegroundColor Red
                 Write-Log 'Postgres setup: profile population was recovery-blocked.'
                 if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not safely finish configuring the PostgreSQL game profiles.' }
+                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-profile-recovery' -Message 'PostgreSQL profile setup was recovery-blocked.' -DataSafety 'No recovery-complete result was reported.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
                 continue
             }
             if ([int]$pgResults.Errors -gt 0) {
                 Write-Host ("  PostgreSQL setup reported {0} error(s); TPM will not claim recovery is complete." -f $pgResults.Errors) -ForegroundColor Red
                 Write-Log 'Postgres setup: errors were reported; completion was not claimed.'
                 if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not verify a clean PostgreSQL setup result.' }
+                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-profile-errors' -Message 'PostgreSQL game setup reported errors.' -DataSafety 'TPM did not claim recovery complete.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
                 continue
             }
             Write-Host ""
@@ -16393,7 +16627,7 @@ while ($true) {
             Write-Host '  PostgreSQL setup did not finish safely because TPM could not restore the original service state.' -ForegroundColor Red
             Write-Log 'Postgres setup: original service state restoration failed; completion was not claimed.'
             if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not restore the original PostgreSQL service state.' }
-            [void](Read-HostSafe '  Press Enter to return to menu')
+            [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-service-restore' -Message 'The original PostgreSQL service state could not be restored.' -DataSafety 'TPM did not claim PostgreSQL setup complete.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
             continue
         }
         if ($isPostgresRecoveryResume) {
@@ -16409,6 +16643,8 @@ while ($true) {
             [void](Read-HostSafe '  Press Enter to continue')
             exit 0
         }
+        [void](Complete-TpmWorkflowStatus -Context $postgresStatus -Summary 'PostgreSQL setup finished and was verified')
+        [void](Close-TpmWorkflowStatus -Context $postgresStatus)
         [void](Read-Host "  Press Enter to return to menu")
         continue
     }
@@ -16688,13 +16924,13 @@ while ($true) {
                     if ([string]::IsNullOrWhiteSpace($inp) -or -not (Test-Path -LiteralPath $inp)) {
                         Write-Host "  File not found. ReShade setup cancelled." -ForegroundColor Red
                         Write-Log "ReShade setup: aborted -- DLL not found."
-                        [void](Read-Host "  Press Enter to return to menu")
+                        [void](Resolve-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-file-missing' -Message 'The selected ReShade file was not found.' -DataSafety 'No ReShade file was deployed.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
                         continue
                     }
                     if ([System.IO.Path]::GetExtension($inp).ToLower() -ne '.dll') {
                         Write-Host "  That file does not appear to be a DLL. Cancelled." -ForegroundColor Red
                         Write-Log "ReShade setup: aborted -- file is not a .dll."
-                        [void](Read-Host "  Press Enter to return to menu")
+                        [void](Resolve-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-file-type' -Message 'The selected ReShade file is not a DLL.' -DataSafety 'No ReShade file was deployed.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
                         continue
                     }
                     $rsSourceDll = $inp
@@ -16720,7 +16956,7 @@ while ($true) {
         if (-not $rsSourceDll32 -or -not (Test-Path -LiteralPath $rsSourceDll32)) {
             if (Test-Path -LiteralPath $bundledDll32) { $rsSourceDll32 = $bundledDll32 }
         }
-        Invoke-ReShadeSetup -UserProfilesDir $userProfilesDir `
+        $reShadeResult = Invoke-ReShadeSetup -UserProfilesDir $userProfilesDir `
                             -SourceDll $rsSourceDll `
                             -SourceDll32 $rsSourceDll32 `
                             -ConfigPath $configPath `
@@ -16730,7 +16966,7 @@ while ($true) {
                             -GamesInstallFolder $gamesInstallFolder `
                             -RetroBat $retroBat `
                             -HsDataPath $hsDataPath
-        if ($rsSourceDll -and (Test-Path -LiteralPath $rsSourceDll -PathType Leaf)) {
+        if ($reShadeResult -and $reShadeResult.Succeeded) {
             [void](Complete-TpmWorkflowStep -Context $reShadeStatus -Outcome Fixed -Summary 'ReShade source verified' -NextStep 'Install into selected games')
             [void](Start-TpmWorkflowStep -Context $reShadeStatus -StepId 'apply' -Activity 'Installing ReShade into selected games')
             [void](Complete-TpmWorkflowStep -Context $reShadeStatus -Outcome Fixed -Summary 'ReShade files installed' -NextStep 'Verify the result')
@@ -16739,9 +16975,9 @@ while ($true) {
             [void](Complete-TpmWorkflowStatus -Context $reShadeStatus -Summary 'ReShade setup finished')
             [void](Close-TpmWorkflowStatus -Context $reShadeStatus)
         } else {
-            [void](Set-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-source-missing' -Message 'ReShade setup was cancelled because no verified source was available.' -DataSafety 'No unverified ReShade file was deployed.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+            [void](Set-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-incomplete' -Message 'ReShade setup was not completed.' -DataSafety 'No unverified ReShade deployment was reported as complete.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
             [void](Read-HostSafe '  Press Enter to acknowledge the ReShade result')
-            [void](Acknowledge-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-source-missing')
+            [void](Acknowledge-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-incomplete')
             [void](Stop-TpmWorkflowStatus -Context $reShadeStatus -Reason 'ReShade setup stopped')
             [void](Close-TpmWorkflowStatus -Context $reShadeStatus)
         }
@@ -16821,7 +17057,7 @@ while ($true) {
                     if ([string]::IsNullOrWhiteSpace($inp) -or -not (Test-Path -LiteralPath $inp)) {
                         Write-Host "  Folder not found. dgVoodoo2 setup cancelled." -ForegroundColor Red
                         Write-Log "dgVoodoo2 setup: aborted -- folder not found."
-                        [void](Read-Host "  Press Enter to return to menu")
+                        [void](Resolve-TpmWorkflowFailure -Context $dgStatus -FailureId 'dgv-folder-missing' -Message 'The selected dgVoodoo2 folder was not found.' -DataSafety 'No dgVoodoo2 files were deployed.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
                         continue
                     }
                     $dgSourceDir = $inp
@@ -16844,9 +17080,17 @@ while ($true) {
                 Write-Log "Config: could not save DgVoodoo2SourceDir"
             }
         }
-        Invoke-DgVoodoo2Setup -UserProfilesDir $userProfilesDir `
+        $dgResult = Invoke-DgVoodoo2Setup -UserProfilesDir $userProfilesDir `
                               -SourceDir $dgSourceDir `
                               -TpRoot $tpRoot
+        if (-not ($dgResult -and $dgResult.Succeeded)) {
+            [void](Set-TpmWorkflowFailure -Context $dgStatus -FailureId 'dgv-deployment-failed' -Message 'dgVoodoo2 setup was not completed.' -DataSafety 'TPM did not claim a complete dgVoodoo2 deployment.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+            [void](Read-HostSafe '  Press Enter to acknowledge the dgVoodoo2 result')
+            [void](Acknowledge-TpmWorkflowFailure -Context $dgStatus -FailureId 'dgv-deployment-failed')
+            [void](Stop-TpmWorkflowStatus -Context $dgStatus -Reason 'dgVoodoo2 setup stopped')
+            [void](Close-TpmWorkflowStatus -Context $dgStatus)
+            continue
+        }
         [void](Complete-TpmWorkflowStep -Context $dgStatus -Outcome Fixed -Summary 'dgVoodoo2 files installed' -NextStep 'Verify the result')
         [void](Start-TpmWorkflowStep -Context $dgStatus -StepId 'verify' -Activity 'Verifying dgVoodoo2 setup')
         [void](Complete-TpmWorkflowStep -Context $dgStatus -Summary 'dgVoodoo2 setup finished')
@@ -16918,7 +17162,15 @@ while ($true) {
         if ($doFfbPlugin -eq "Y") {
             [void](Start-TpmWorkflowStep -Context $ffbStatus -StepId 'plugin' -Activity 'Downloading and applying the optional plugin')
             $ffbCacheDir = Join-Path $PSScriptRoot "FFBPlugin"
-            Invoke-FFBPluginSetup -UserProfilesDir $userProfilesDir -CacheDir $ffbCacheDir -NativeEnabledCodes $nativeEnabledCodes
+            $ffbPluginResult = Invoke-FFBPluginSetup -UserProfilesDir $userProfilesDir -CacheDir $ffbCacheDir -NativeEnabledCodes $nativeEnabledCodes
+            if (-not ($ffbPluginResult -and $ffbPluginResult.Succeeded)) {
+                [void](Set-TpmWorkflowFailure -Context $ffbStatus -FailureId 'ffb-plugin-failed' -Message 'The optional force-feedback plugin was not completed.' -DataSafety 'TPM did not claim a complete third-party plugin deployment.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+                [void](Read-HostSafe '  Press Enter to acknowledge the force-feedback result')
+                [void](Acknowledge-TpmWorkflowFailure -Context $ffbStatus -FailureId 'ffb-plugin-failed')
+                [void](Stop-TpmWorkflowStatus -Context $ffbStatus -Reason 'Force-feedback setup stopped')
+                [void](Close-TpmWorkflowStatus -Context $ffbStatus)
+                continue
+            }
             [void](Complete-TpmWorkflowStep -Context $ffbStatus -Outcome Fixed -Summary 'Optional plugin step finished' -NextStep 'Verify force-feedback ownership')
         } else {
             [void](Complete-TpmWorkflowStep -Context $ffbStatus -Outcome Skipped -Summary 'Optional plugin skipped')

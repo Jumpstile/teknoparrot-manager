@@ -4883,6 +4883,7 @@ Describe "Issue #292 PostgreSQL automatic elevation and resume" {
                 $resume = Read-PostgresRecoveryState -StatePath $statePath -ExpectedConfigPath $script:stateConfigPath -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir
                 $resume.PasswordPlain | Should -Be $secret
                 $resume.ClaimPath | Should -Match '\.claim$'
+                (Test-Path -LiteralPath $resume.UsedPath -PathType Leaf) | Should -BeTrue
                 { Read-PostgresRecoveryState -StatePath $statePath -ExpectedConfigPath $script:stateConfigPath -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir } | Should -Throw
             } finally {
                 [void](Remove-PostgresRecoveryState -Path $statePath -ClaimPath ($statePath + '.claim'))
@@ -4930,6 +4931,91 @@ Describe "Issue #292 PostgreSQL automatic elevation and resume" {
                 { Read-PostgresRecoveryState -StatePath $statePath -ExpectedConfigPath $script:stateConfigPath -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir } | Should -Throw
             } finally {
                 [void](Remove-PostgresRecoveryState -Path $statePath -ClaimPath ($statePath + '.claim'))
+            }
+        }
+
+        It "binds consumption to the issuance filename so copied envelopes cannot be replayed" {
+            $secret = 'Copy-Replay-Test-456'
+            $statePath = New-PostgresRecoveryState -ConfigPath $script:stateConfigPath -ScriptPath $script:stateScriptPath -TpRoot $script:stateTpRoot -UserProfilesDir $script:stateUserProfilesDir -Operation Recovery -PasswordPlain $secret
+            $copyPath = Join-Path (Split-Path -Parent $statePath) '.tpm-postgres-recovery-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.json'
+            try {
+                [IO.File]::Copy($statePath, $copyPath)
+                { Read-PostgresRecoveryState -StatePath $copyPath -ExpectedConfigPath $script:stateConfigPath -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir } | Should -Throw
+                $original = Read-PostgresRecoveryState -StatePath $statePath -ExpectedConfigPath $script:stateConfigPath -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir
+                $original.PasswordPlain | Should -Be $secret
+                { Read-PostgresRecoveryState -StatePath $statePath -ExpectedConfigPath $script:stateConfigPath -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir } | Should -Throw
+            } finally {
+                Remove-Item -LiteralPath $copyPath -Force -ErrorAction SilentlyContinue
+                [void](Remove-PostgresRecoveryState -Path $statePath -ClaimPath ($statePath + '.claim'))
+            }
+        }
+
+        It "restores a malformed claimed state after validation failure" {
+            $statePath = New-PostgresRecoveryState -ConfigPath $script:stateConfigPath -ScriptPath $script:stateScriptPath -TpRoot $script:stateTpRoot -UserProfilesDir $script:stateUserProfilesDir -Operation Recovery -PasswordPlain 'Malformed-Claim-Test-123'
+            try {
+                $outer = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+                $outer.CipherText = 'not-valid-dpapi'
+                [IO.File]::WriteAllText($statePath, ($outer | ConvertTo-Json -Depth 4), (New-Object Text.UTF8Encoding $false))
+                { Read-PostgresRecoveryState -StatePath $statePath -ExpectedConfigPath $script:stateConfigPath -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir } | Should -Throw
+                (Test-Path -LiteralPath $statePath -PathType Leaf) | Should -BeTrue
+                (Test-Path -LiteralPath ($statePath + '.claim') -PathType Leaf) | Should -BeFalse
+                (Test-Path -LiteralPath ($statePath + '.used') -PathType Leaf) | Should -BeFalse
+            } finally {
+                [void](Remove-PostgresRecoveryState -Path $statePath -ClaimPath ($statePath + '.claim'))
+            }
+        }
+
+        It "restores a claimed state when the expected parent installation is wrong" {
+            $statePath = New-PostgresRecoveryState -ConfigPath $script:stateConfigPath -ScriptPath $script:stateScriptPath -TpRoot $script:stateTpRoot -UserProfilesDir $script:stateUserProfilesDir -Operation Recovery -PasswordPlain 'Wrong-Parent-Test-123'
+            $wrongConfig = Join-Path $TestDrive 'different-config.json'
+            Set-Content -LiteralPath $wrongConfig -Value '{}' -Encoding utf8
+            try {
+                { Read-PostgresRecoveryState -StatePath $statePath -ExpectedConfigPath $wrongConfig -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir } | Should -Throw
+                (Test-Path -LiteralPath $statePath -PathType Leaf) | Should -BeTrue
+                (Test-Path -LiteralPath ($statePath + '.claim') -PathType Leaf) | Should -BeFalse
+                (Test-Path -LiteralPath ($statePath + '.used') -PathType Leaf) | Should -BeFalse
+            } finally {
+                [void](Remove-PostgresRecoveryState -Path $statePath -ClaimPath ($statePath + '.claim'))
+            }
+        }
+
+        It "allows the original envelope once and rejects a copied envelope in the reverse permutation" {
+            $secret = 'Reverse-Copy-Replay-789'
+            $statePath = New-PostgresRecoveryState -ConfigPath $script:stateConfigPath -ScriptPath $script:stateScriptPath -TpRoot $script:stateTpRoot -UserProfilesDir $script:stateUserProfilesDir -Operation Recovery -PasswordPlain $secret
+            $copyPath = Join-Path (Split-Path -Parent $statePath) '.tpm-postgres-recovery-cccccccccccccccccccccccccccccccc.json'
+            try {
+                [IO.File]::Copy($statePath, $copyPath)
+                $original = Read-PostgresRecoveryState -StatePath $statePath -ExpectedConfigPath $script:stateConfigPath -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir
+                $original.PasswordPlain | Should -Be $secret
+                { Read-PostgresRecoveryState -StatePath $copyPath -ExpectedConfigPath $script:stateConfigPath -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir } | Should -Throw
+            } finally {
+                Remove-Item -LiteralPath $copyPath -Force -ErrorAction SilentlyContinue
+                [void](Remove-PostgresRecoveryState -Path $statePath -ClaimPath ($statePath + '.claim'))
+            }
+        }
+
+        It "cleans a stale claimed envelope after expiry validation fails" {
+            $statePath = Join-Path (Join-Path $TestDrive 'RecoveryState') '.tpm-postgres-recovery-dddddddddddddddddddddddddddddddd.json'
+            New-Item -ItemType Directory -Path (Split-Path -Parent $statePath) -Force | Out-Null
+            [IO.File]::WriteAllText($statePath, '{"SchemaVersion":3,"Purpose":"TeknoParrotManager.PostgresRecovery","CipherText":"fake"}', (New-Object Text.UTF8Encoding $false))
+            $proc = Get-Process -Id $PID
+            $script:fakeExpiredPayload = [ordered]@{
+                SchemaVersion = 3; Purpose = 'TeknoParrotManager.PostgresRecovery'; IssuanceId = 'dddddddddddddddddddddddddddddddd'; Operation = 'Recovery'; Nonce = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'; AttemptId = 1
+                CreatedUtc = (Get-Date).ToUniversalTime().AddMinutes(-10).ToString('o'); ExpiresUtc = (Get-Date).ToUniversalTime().AddMinutes(-5).ToString('o')
+                ParentPid = [int]$PID; ParentStartTicks = [int64]$proc.StartTime.ToUniversalTime().Ticks; ParentProcessPath = [string]$proc.Path; ParentProcessSha256 = (Get-FileHash -LiteralPath $proc.Path -Algorithm SHA256).Hash
+                OriginUserSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; MachineName = [Environment]::MachineName
+                ScriptPath = [System.IO.Path]::GetFullPath($script:stateScriptPath); ScriptSha256 = (Get-FileHash -LiteralPath $script:stateScriptPath -Algorithm SHA256).Hash
+                ConfigPath = [System.IO.Path]::GetFullPath($script:stateConfigPath); ConfigSha256 = (Get-FileHash -LiteralPath $script:stateConfigPath -Algorithm SHA256).Hash
+                TpRoot = [System.IO.Path]::GetFullPath($script:stateTpRoot); UserProfilesDir = [System.IO.Path]::GetFullPath($script:stateUserProfilesDir); PasswordPlain = 'expired'; PasswordOriginEncrypted = 'encrypted'
+            }
+            Mock Unprotect-PostgresRecoveryEnvelope { $script:fakeExpiredPayload | ConvertTo-Json -Depth 6 }
+            try {
+                { Read-PostgresRecoveryState -StatePath $statePath -ExpectedConfigPath $script:stateConfigPath -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir } | Should -Throw
+                (Test-Path -LiteralPath $statePath -PathType Leaf) | Should -BeTrue
+                (Test-Path -LiteralPath ($statePath + '.claim') -PathType Leaf) | Should -BeFalse
+                (Test-Path -LiteralPath ($statePath + '.used') -PathType Leaf) | Should -BeFalse
+            } finally {
+                Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue
             }
         }
 
@@ -5022,6 +5108,46 @@ Describe "BepInEx authorized-root and transaction guards" {
         Test-Path -LiteralPath (Join-Path $outside 'keep.txt') -PathType Leaf | Should -BeTrue
     }
 
+    It "classifies a current-version BepInEx tree as incomplete when bootstrap files are missing" {
+        $game = Join-Path $TestDrive 'BepHealthIncomplete'
+        New-Item -ItemType Directory -Path (Join-Path $game 'BepInEx\core') -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $game 'BepInEx\core\BepInEx.dll') -Force | Out-Null
+        Mock Get-BepInExInstalledVersion { '5.4.23' }
+        Mock Get-BepInExInstalledArch { 'x64' }
+        Mock Test-BepInExNoReparsePath { $true }
+
+        $health = Get-BepInExInstallationHealth -ExeDir $game
+
+        $health.Installed | Should -BeTrue
+        $health.Complete | Should -BeFalse
+        $health.Reason | Should -Match 'Missing'
+    }
+
+    It "offers repair-reset for an installed current-version tree that is incomplete" {
+        $approved = Join-Path $TestDrive 'CurrentBrokenApproved'
+        $game = Join-Path $approved 'CurrentBrokenGame'
+        $profiles = Join-Path $TestDrive 'CurrentBrokenProfiles'
+        $cache = Join-Path $TestDrive 'CurrentBrokenCache'
+        New-Item -ItemType Directory -Path $approved, $game, $profiles -Force | Out-Null
+        $exe = Join-Path $game 'game.exe'
+        New-Item -ItemType File -Path $exe -Force | Out-Null
+        $safeExe = [System.Security.SecurityElement]::Escape($exe)
+        Set-Content -LiteralPath (Join-Path $profiles 'CURRENTBROKEN.xml') -Value ("<GameProfile><GamePath>$safeExe</GamePath></GameProfile>")
+        Mock Test-BepInExGameRootSafe { $true }
+        Mock Test-BepInExNoReparsePath { $true }
+        Mock Get-ExeArchitecture { 'x64' }
+        Mock Get-BepInExLatestRelease { [pscustomobject]@{ Version = '5.4.23'; DownloadUrl = 'https://github.com/BepInEx/BepInEx/releases/download/v5.4.23/BepInEx_win_x64_5.4.23.zip'; FileName = 'BepInEx_win_x64_5.4.23.zip'; SizeBytes = 1; ExpectedSha256 = $null } }
+        Mock Get-BepInExInstallationHealth { [pscustomobject]@{ Installed = $true; Complete = $false; Version = '5.4.23'; Architecture = 'x64'; Reason = 'Missing doorstop_config.ini' } }
+        Mock Read-HostSafe { 'N' }
+        Mock Invoke-TpmDownload { throw 'download must not run after decline' }
+
+        $result = Invoke-BepInExUpdateCheck -UserProfilesDir $profiles -CacheDir $cache -ApprovedGamesRoot $approved
+
+        $result.Reason | Should -Be 'DECLINED'
+        Should -Invoke Read-HostSafe -Times 1 -Exactly
+        Should -Invoke Invoke-TpmDownload -Times 0 -Exactly
+    }
+
     Context "post-promotion staging cleanup reporting" {
         BeforeEach {
             $script:bepApproved = Join-Path $TestDrive 'BepApproved'
@@ -5041,6 +5167,7 @@ Describe "BepInEx authorized-root and transaction guards" {
             Mock Get-BepInExLatestRelease { [pscustomobject]@{ Version = '5.4.23'; DownloadUrl = 'https://github.com/BepInEx/BepInEx/releases/download/v5.4.23/BepInEx_win_x64_5.4.23.zip'; FileName = 'BepInEx_win_x64_5.4.23.zip'; SizeBytes = 1; ExpectedSha256 = $null } }
             Mock Get-BepInExInstalledVersion { '5.4.22' }
             Mock Get-BepInExInstalledArch { 'x64' }
+            Mock Get-BepInExInstallationHealth { [pscustomobject]@{ Installed = $true; Complete = $true; Version = '5.4.22'; Architecture = 'x64'; Reason = 'Complete' } }
             Mock Read-HostSafe { 'Y' }
             Mock Invoke-TpmDownload { $true }
             Mock New-TpmStagingDirectory {
@@ -9018,6 +9145,14 @@ Describe "TeknoParrot-Manager.ps1 -Unattended real child-process fixture (issue 
 }
 
 Describe "Issue #300 shared workflow status state machine" {
+    AfterEach {
+        if ($script:ActiveTpmWorkflowStatus) {
+            $active = $script:ActiveTpmWorkflowStatus
+            if ($active.Failure) { [void](Acknowledge-TpmWorkflowFailure -Context $active -FailureId $active.Failure.FailureId) }
+            [void](Stop-TpmWorkflowStatus -Context $active -Reason 'test cleanup')
+            [void](Close-TpmWorkflowStatus -Context $active)
+        }
+    }
     It "emits ordered structured events without leaking them into normal returns" {
         $events = New-Object System.Collections.Generic.List[object]
         $facts = [pscustomobject]@{ NoRender = $true; Unattended = $false; InputRedirected = $false; OutputRedirected = $false; Certification = $false }
@@ -9081,6 +9216,46 @@ Describe "Issue #300 shared workflow status state machine" {
         $draws[$draws.Count - 1].Width | Should -Be 120
     }
 
+    It "uses the real host capability path without writing cursor controls when the host is redirected" {
+        $ctx = New-TpmWorkflowStatusContext -WorkflowKey 'real-host' -Title 'Real host' -Steps @('one')
+        { Render-TpmWorkflowStatus -Context $ctx } | Should -Not -Throw
+        $ctx.RendererMode | Should -Be 'None'
+    }
+
+    It "guards first-render cursor overlap and scroll-aware stale footer cleanup" {
+        $script:ProductionSource | Should -Not -Match '-and -not \$geometryChanged'
+        $script:ProductionSource | Should -Match '\$cursor\.Y -ge \$top -and \$cursor\.Y -lt \(\$top \+ \$footerHeight\)'
+        $script:ProductionSource | Should -Match 'WindowTop'
+        $script:ProductionSource | Should -Match 'Read-HostSafe \$Prompt'
+    }
+
+    It "clears and redraws its rectangle around prompt input without changing scrollback" {
+        $clears = New-Object System.Collections.ArrayList
+        $draws = New-Object System.Collections.ArrayList
+        $adapter = @{
+            Clear = { param($bounds) [void]$script:footerPromptClears.Add($bounds) }
+            Draw = { param($rows,$cap) [void]$script:footerPromptDraws.Add(@($rows)) }
+            Append = { param($rows) }
+        }
+        $script:footerPromptClears = $clears
+        $script:footerPromptDraws = $draws
+        $facts = [pscustomobject]@{ CanCursor = $true; Width = 120; Height = 30; BufferWidth = 120; BufferHeight = 30; Adapter = $adapter }
+        $ctx = New-TpmWorkflowStatusContext -WorkflowKey 'prompt-footer' -Title 'Prompt footer' -Steps @('one') -ConsoleFacts $facts
+        [void](Start-TpmWorkflowStatus -Context $ctx)
+        $initialClears = $clears.Count
+        Mock Read-Host { 'answer' }
+        (Read-HostSafe '  Prompt') | Should -Be 'answer'
+        $clears.Count | Should -BeGreaterThan $initialClears
+        $draws.Count | Should -BeGreaterThan 1
+    }
+
+    It "publishes append-only status without recursing through the host shim" {
+        $facts = [pscustomobject]@{ CanCursor = $false; Width = 80; Height = 20; BufferWidth = 80; BufferHeight = 20 }
+        $ctx = New-TpmWorkflowStatusContext -WorkflowKey 'append-only' -Title 'Append only' -Steps @('one') -ConsoleFacts $facts
+        { Start-TpmWorkflowStatus -Context $ctx } | Should -Not -Throw
+        $ctx.RendererMode | Should -Be 'AppendOnly'
+    }
+
     It "bypasses all rendering for redirected and certification facts" {
         $adapterCalls = 0
         $adapter = @{ Draw = { $script:adapterCalls++ }; Clear = { $script:adapterCalls++ }; Append = { $script:adapterCalls++ } }
@@ -9090,6 +9265,44 @@ Describe "Issue #300 shared workflow status state machine" {
         [void](Start-TpmWorkflowStatus $ctx)
         [void](Start-TpmWorkflowStep $ctx -StepId 'one' -Activity 'Checking')
         $adapterCalls | Should -Be 0
+    }
+}
+
+Describe "Issue #300 workflow ownership and transition guards" {
+    It "rejects unknown workflow steps without emitting an event" {
+        $events = New-Object System.Collections.Generic.List[object]
+        $facts = [pscustomobject]@{ NoRender = $true }
+        $ctx = New-TpmWorkflowStatusContext -WorkflowKey 'unknown-step' -Title 'Unknown step' -Steps @('one','two') -ConsoleFacts $facts -EventSink { param($event) [void]$events.Add($event) }
+        [void](Start-TpmWorkflowStatus $ctx)
+        { Start-TpmWorkflowStep -Context $ctx -StepId 'missing' } | Should -Throw '*Unknown workflow step*'
+        $events.Count | Should -Be 1
+        $ctx.ActiveStepId | Should -BeNullOrEmpty
+        [void](Stop-TpmWorkflowStatus -Context $ctx -Reason 'test stop')
+        [void](Close-TpmWorkflowStatus -Context $ctx)
+    }
+
+    It "routes reviewed PostgreSQL and optional-flow failures through lifecycle cleanup" {
+        foreach ($failureId in @('postgres-service-state','postgres-install-failed','postgres-backup-unverified','postgres-config-save','postgres-database-backup','postgres-profile-recovery','postgres-profile-errors','postgres-service-restore','reshade-file-missing','reshade-file-type','dgv-folder-missing')) {
+            $script:ProductionSource | Should -Match ([regex]::Escape("Resolve-TpmWorkflowFailure -Context"))
+            $script:ProductionSource | Should -Match ([regex]::Escape("-FailureId '$failureId'"))
+        }
+        $script:ProductionSource | Should -Match 'Complete-TpmWorkflowStatus -Context \$postgresStatus'
+        $script:ProductionSource | Should -Match 'Close-TpmWorkflowStatus -Context \$postgresStatus'
+        $script:ProductionSource | Should -Match 'Close-TpmWorkflowStatus -Context \$reShadeStatus'
+        $script:ProductionSource | Should -Match 'Close-TpmWorkflowStatus -Context \$dgStatus'
+    }
+
+    It "rejects a second active workflow and releases the first on close" {
+        $facts = [pscustomobject]@{ NoRender = $true }
+        $first = New-TpmWorkflowStatusContext -WorkflowKey 'first' -Title 'First' -Steps @('one') -ConsoleFacts $facts
+        $second = New-TpmWorkflowStatusContext -WorkflowKey 'second' -Title 'Second' -Steps @('one') -ConsoleFacts $facts
+        [void](Start-TpmWorkflowStatus $first)
+        { Start-TpmWorkflowStatus $second } | Should -Throw '*already active*'
+        [void](Stop-TpmWorkflowStatus -Context $first -Reason 'test stop')
+        [void](Close-TpmWorkflowStatus -Context $first)
+        [void](Start-TpmWorkflowStatus $second)
+        [void](Stop-TpmWorkflowStatus -Context $second -Reason 'test stop')
+        [void](Close-TpmWorkflowStatus -Context $second)
     }
 }
 
@@ -9108,6 +9321,21 @@ Describe "Issue #300 FFB ownership cleanup" {
         Remove-FFBPluginOwnedDeployment -CacheDir $cache -ProfileCode 'OwnedGame' | Should -BeTrue
         Test-Path -LiteralPath $dest | Should -BeFalse
         @(Get-ChildItem -LiteralPath (Join-Path $root 'FullBackup') -Recurse -File).Count | Should -Be 1
+    }
+
+    It "rolls back ownership deletion when the manifest write fails" {
+        $root = Join-Path $TestDrive 'FfbManifestFailureGame'
+        $cache = Join-Path $TestDrive 'FfbManifestFailureCache'
+        New-Item -ItemType Directory -Path $root, $cache -Force | Out-Null
+        $dest = Join-Path $root 'd3d9.dll'
+        Set-Content -LiteralPath $dest -Value 'owned-hook'
+        $hash = (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash
+        Write-FFBPluginOwnership -CacheDir $cache -Entries @([pscustomobject]@{ ProfileCode = 'FailureGame'; GameRoot = $root; Destination = $dest; SourceSha256 = $hash; DeployedSha256 = $hash; CreatedUtc = (Get-Date).ToUniversalTime().ToString('o') })
+        Mock Write-FFBPluginOwnership { throw 'simulated manifest write failure' }
+
+        { Remove-FFBPluginOwnedDeployment -CacheDir $cache -ProfileCode 'FailureGame' } | Should -Throw '*rolled back*'
+        (Test-Path -LiteralPath $dest -PathType Leaf) | Should -BeTrue
+        (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash | Should -Be $hash
     }
 
     It "preserves a changed owned path instead of deleting it" {

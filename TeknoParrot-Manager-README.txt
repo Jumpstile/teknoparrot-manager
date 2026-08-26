@@ -146,7 +146,7 @@
     can also be set in overrides.json (datFile key); that takes precedence.
 
   - Already-registered detection. Before flagging a shared-executable folder
-    as needing manual registration, the script checks whether any candidate
+    as needing an explicit registration choice, the script checks whether any candidate
     profile already has a UserProfile XML (i.e. was registered via
     TeknoParrotUI or a previous run). If so, it is marked "already set" and
     removed from ACTION REQUIRED. Games set up outside the script no longer
@@ -308,8 +308,9 @@
 
   - Check for Updates. Manually checks the latest GitHub release against
     the version you're running. Nothing is downloaded or changed without
-    your explicit Y/N confirmation, and a read-only script is refused
-    rather than silently overridden. See CHECK FOR UPDATES below.
+    your explicit Y/N confirmation. An approved update may temporarily clear
+    only the target read-only attribute and restores it after the attempt. See
+    CHECK FOR UPDATES below.
     Available as menu option 13.
 
   - Path-length, file-version, and GPU compatibility warnings (automatic).
@@ -334,8 +335,8 @@
 
   - Action summary. At the end of every run the script prints a clear list of
     everything that needs your attention in TeknoParrotUI, including which
-    games to register manually (with best-guess profile shown), which paths to
-    fix, and which control types still need to be set up.
+    ambiguous games received an explicit candidate choice, which paths to fix,
+    and which control types still need to be set up.
 
   - Safe by design. Backs up all profiles before every run, never deletes
     your games, guards the staging folder against the emulator and source
@@ -418,7 +419,7 @@
 
   ACTION REQUIRED       The end-of-run summary listing everything that
                        still needs your attention in TeknoParrotUI itself --
-                       games needing manual registration, paths to fix,
+                       ambiguous registration choices, paths to fix,
                        missing control bindings. See ACTION REQUIRED SUMMARY
                        below.
 
@@ -790,13 +791,10 @@
                           exactly as it is. The script never overwrites
                           existing work.
 
-    Register manually    The executable name is shared and the folder name
-                          did not match any profile confidently enough to
-                          auto-register. The ACTION REQUIRED section shows
-                          the executable to browse to, a best-guess profile
-                          name (where the similarity score was still
-                          meaningful), and the full list of candidates to
-                          choose from in TeknoParrotUI.
+    Register manually    The executable is shared. TPM presents validated
+                          candidates for an explicit choice; pressing Enter
+                          leaves the case in ACTION REQUIRED for TeknoParrotUI
+                          instead of promoting a best guess.
 
     Register manually    A TeknoParrot profile allows only one GamePath. If
     (duplicate)            this folder resolves to a profile code another
@@ -834,8 +832,8 @@
     Score >= 0.72   Auto-registered. Shown in Cyan with the score so you
                     can spot-check the match.
 
-    Score >= 0.40   Flagged in ACTION REQUIRED with a best-guess profile
-                    shown. One click in TeknoParrotUI to confirm.
+    Score >= 0.40   Presented in TPM for an explicit candidate choice;
+                    unresolved cases remain in ACTION REQUIRED.
 
     Score < 0.40    Flagged in ACTION REQUIRED with only the full candidate
                     list. No reliable guess could be made.
@@ -1357,8 +1355,8 @@
     dgVoodoo2 (by Dege) is a free compatibility layer that intercepts those
     old graphics calls and re-issues them as modern DirectX 11/12 commands.
     It works by placing one or more small DLL files in the game's folder.
-    Your original game files are never modified. To remove it, delete the
-    DLL(s) from the game folder.
+    TPM does not automatically remove unowned or changed hook files; use the
+    advanced troubleshooting path for those files.
 
   What it fixes
 
@@ -1552,9 +1550,9 @@
 
   What mode 9 does
 
-    Mode 9 offers a user-approved install, update, or repair-reset for
-    selected games. TPM chooses the stable x64 or x86 package matching each
-    game's executable. It downloads only after the game root passes the
+    Mode 9 is the BepInEx update check and offers a user-approved install,
+    update, or repair-reset for selected games. TPM chooses the stable x64 or
+    x86 package matching each game's executable. It downloads only after the game root passes the
     approved-root and non-reparse checks, verifies the staged file set and
     backup, and uses rollback-safe promotion.
 
@@ -1675,9 +1673,9 @@
 
   Read-only targets
 
-    If TeknoParrot-Manager.ps1 is marked read-only, the update is
-    refused with an actionable error explaining how to remove the
-    read-only attribute -- it is never silently overridden.
+    After you approve an update, TPM may temporarily clear only the
+    target file's read-only attribute, then restores it after the attempt.
+    Backup creation still comes first and any failure is reported clearly.
 
   After a successful update
 
@@ -2200,9 +2198,10 @@
     Fixed                The path was re-pointed to the correct executable.
     Not yet extracted    The game has not been extracted to the staging folder
                           yet. Extract it first, then run Repair again.
-    Register manually    The executable is shared by multiple games and cannot
-                          be safely auto-assigned. Use TeknoParrotUI to point
-                          this profile to the correct game folder.
+    Register manually    The executable is shared. TPM presents validated
+                          candidates for an explicit choice; pressing Enter
+                          leaves the case in ACTION REQUIRED for TeknoParrotUI
+                          instead of promoting a best guess.
 
   Games whose path already works are left untouched.
 
@@ -2313,9 +2312,9 @@
 
   A game does not appear in TeknoParrotUI after running the script.
     Check the ACTION REQUIRED section printed at the end of the run. The game
-    may need manual registration (shared executable, or its profile was
-    already claimed by another copy of the game -- see "Register these
-    games") or may not yet be extracted ("Extract first"). If neither applies,
+    may need an explicit ambiguous-registration choice or TeknoParrotUI
+    fallback (see "Register these games") or may not yet be extracted
+    ("Extract first"). If neither applies,
     check TeknoParrot-Manager.log for a registration error for that game.
 
   A game does not extract.

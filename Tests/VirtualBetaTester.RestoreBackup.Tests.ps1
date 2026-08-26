@@ -37,6 +37,12 @@ BeforeAll {
     }
 }
 
+# The restore suite is intentionally behavioral: selection is most-recent-first,
+# confirmation happens before deletion, malformed backups leave live profiles
+# untouched, sibling snapshots survive, and application locks cancel without
+# force-closing or consuming the selected backup. These cases are the safety
+# contract for the beginner-facing restore flow, not incidental implementation
+# assertions.
 Describe "Virtual Beta Tester: restore backup enumeration and selection (issue #88 A2)" -Tag 'TVD-High' {
     It "restores the selected backup's content into UserProfiles, replacing current content" {
         $userProfilesDir = New-RestoreFixture -Name 'restore-basic'
@@ -80,6 +86,25 @@ Describe "Virtual Beta Tester: restore backup safe cancel/decline (issue #88 A2 
         Invoke-RestoreBackup -userProfilesDir $userProfilesDir
         (Test-Path -LiteralPath (Join-Path $userProfilesDir 'CURRENT.xml')) | Should -Be $true
         (Test-Path -LiteralPath $backupDir) | Should -Be $true
+    }
+
+    It "refuses a restore when the pre-restore rollback snapshot cannot be created" {
+        $userProfilesDir = New-RestoreFixture -Name 'restore-rollback-snapshot-failure'
+        $current = Join-Path $userProfilesDir 'CURRENT.xml'
+        Set-Content -LiteralPath $current -Value '<GameProfile>current</GameProfile>' -Encoding ascii
+        $backupDir = Join-Path $userProfilesDir 'FullBackup\PropagateControls_2026-07-01_12-00-00'
+        New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $backupDir 'ALIENS.xml') -Value '<GameProfile>backed-up</GameProfile>' -Encoding ascii
+        Mock Read-Host { return '1' } -ParameterFilter { $Prompt -like '*Enter number to restore*' }
+        Mock Read-Host { return 'YES' } -ParameterFilter { $Prompt -like '*Type YES to confirm*' }
+        Mock Wait-TpmForProcessClose { return $true }
+        Mock Copy-Item { throw 'simulated rollback snapshot failure' }
+
+        $result = Invoke-RestoreBackup -userProfilesDir $userProfilesDir
+
+        $result.Succeeded | Should -BeFalse
+        (Get-Content -LiteralPath $current -Raw) | Should -Be ('<GameProfile>current</GameProfile>' + [Environment]::NewLine)
+        (Test-Path -LiteralPath (Join-Path $userProfilesDir 'ALIENS.xml')) | Should -BeFalse
     }
 
     It "declining the YES confirmation cancels with zero changes -- current content is never deleted before confirmation" {

@@ -169,16 +169,21 @@ property string, clears the password variables after the in-process call, and
 removes the downloaded working folder.
 
 The UAC resume state is a DPAPI-authenticated envelope covering all metadata,
-not a password blob beside mutable JSON. It binds the nonce, attempt number,
-creation/expiry window, exact script/config/root hashes, origin SID, machine,
-parent PID/start time/executable path/hash, and the operation. The maximum
-lifetime is five minutes. The child atomically renames the challenge and
-creates a one-time consumed marker before any privileged reset/install side
-effect; a started child never replays the same attempt. UAC denial occurs
-before claim and may retry the untouched challenge. A started-child failure
-issues a fresh attempt only after validating that the original metadata is
-unchanged. PostgreSQL's original service state is restored after the complete
-recovery transaction, and failure to restore it blocks completion.
+not a password blob beside mutable JSON. Its durable issuance identity is a
+random identifier embedded in the protected payload and encoded in the legal
+state filename; a copied envelope therefore cannot be consumed under a second
+filename. The consumed marker records that issuance identity, nonce, and
+attempt number. The state binds the creation/expiry window, exact
+script/config/root hashes, origin SID, machine, parent PID/start time/
+executable path/hash, and operation. The maximum lifetime is five minutes.
+The child atomically claims the challenge and reserves its one-time marker
+before privileged work. Validation failures remove the marker and restore the
+claimed encrypted envelope for a safe retry; successful consumption retains
+the marker until final cleanup. UAC denial occurs before claim and may retry
+the untouched challenge. A started-child failure issues a fresh attempt only
+after validating the original metadata is unchanged. PostgreSQL's original
+service state is restored after the complete recovery transaction, and failure
+to restore it blocks completion.
 
 ## dgVoodoo2 selective extraction (Scripts\dgVoodoo2\)
 

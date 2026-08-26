@@ -284,6 +284,15 @@ Describe "Release-document consistency contract" -Tag 'ReleaseConsistency' {
                             [void]$findings.Add("$($document.Path): active text gives guidance toward a superseded RC.")
                         }
                     }
+                    if ($text -match '(?im)read-only.{0,120}(?:refused|silently overridden)' ) {
+                        [void]$findings.Add("$($document.Path): active text contradicts approved read-only update handling.")
+                    }
+                    if ($text -match '(?im)(?:remove|removing|to remove).{0,80}delete.{0,40}(?:DLL|dll)' ) {
+                        [void]$findings.Add("$($document.Path): active text gives stale manual DLL-removal guidance.")
+                    }
+                    if ($text -match '(?im)best-guess profile|manual registration.{0,80}best-guess' ) {
+                        [void]$findings.Add("$($document.Path): active text promotes stale best-guess registration guidance.")
+                    }
                 }
 
                 if ([string]$document.Scope -eq 'ActiveBepInEx') {
@@ -370,6 +379,18 @@ Describe "Release-document consistency contract" -Tag 'ReleaseConsistency' {
 
         $findings = @(& $script:ReleaseDocumentConsistencyFinder -Documents $documents -Contract $script:ReleaseDocumentContract)
         $findings.Count | Should -Be 0
+    }
+
+    It "rejects the exact stale #300 UX contradictions" {
+        $stale = @([pscustomobject]@{
+            Path = 'README.md'; Scope = 'ActiveIdentity'; Text = @'
+The read-only update is refused. To remove ReShade, delete the DLL.
+Register manually with the best-guess profile.
+'@
+        })
+        $findings = @(& $script:ReleaseDocumentConsistencyFinder -Documents $stale -Contract $script:ReleaseDocumentContract)
+        $findings.Count | Should -BeGreaterThan 2
+        ($findings -join "`n") | Should -Match 'read-only update|manual DLL-removal|best-guess'
     }
 
     It "passes the repository active release and BepInEx documents" {

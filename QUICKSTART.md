@@ -187,7 +187,7 @@ Run mode 4 again any time to change designs. Add your own PNG files to the `Cros
 
 ## ReShade Visual Enhancements
 
-ReShade adds post-processing effects without modifying any game files. Remove it by deleting one DLL from a game folder.
+ReShade adds post-processing effects without modifying game data. TPM does not automatically remove unowned or changed hook files; use the advanced troubleshooting path for those files.
 
 **Popular effects:**
 
@@ -211,7 +211,7 @@ archive failure stays blocked; TPM never substitutes an unverified DLL.
 
 **In-game:** press **Home** to open the ReShade overlay. Toggle effects, adjust sliders — settings save to `ReShade.ini` in the game folder.
 
-**To remove:** delete the DLL (`dxgi.dll`, `d3d9.dll`, `d3d12.dll`, or `opengl32.dll`) from the game folder.
+**Removal:** TPM does not automatically remove unowned or changed hook files; use the advanced troubleshooting path for those files.
 
 **Note:** before deploying, the script checks your ReShade DLLs Authenticode signature (ReShade installer is code-signed) and warns -- without blocking -- if it is not validly signed. When mode 5 downloads the installer, the log also records the authoritative source, filename/version, SHA-256, transfer metrics, signer/status/thumbprint, and final trust result; the SHA-256 is an audit hash, not a published-digest comparison.
 
@@ -300,7 +300,7 @@ PostgreSQL 8.3 database. Mode 12 detects which registered games need it.
 
 ## Check for Updates
 
-Mode 13 manually checks the latest GitHub release against the version you are running -- nothing is downloaded or changed without your explicit Y/N confirmation. If an update exists, it backs up the current script, downloads and validates the update, replaces the script, then exits so you can restart cleanly. A read-only script is refused with a clear error rather than silently overridden, and any failure tells you exactly what went wrong and whether a backup was made. The download log records source, filename/version, SHA-256, and transfer metrics; the manager update path does not consume GitHub optional asset digests, so the hash is audit-only.
+Mode 13 manually checks the latest GitHub release against the version you are running -- nothing is downloaded or changed without your explicit Y/N confirmation. If an update exists, it backs up the current script, downloads and validates the update, replaces the script, then exits so you can restart cleanly. An approved update may temporarily clear only the target file protection and restores it after the attempt; any failure tells you exactly what went wrong and whether a backup was made. The download log records source, filename/version, SHA-256, and transfer metrics; the manager update path does not consume GitHub optional asset digests, so the hash is audit-only.
 
 ---
 
@@ -451,7 +451,7 @@ Games that share an executable (all NESiCAxLive titles use `game.exe`) are auto-
 | Score   | Action                                                                         |
 | ------- | ------------------------------------------------------------------------------ |
 | >= 0.72 | Auto-registered and shown in cyan — spot-check                                 |
-| >= 0.40 | Listed in ACTION REQUIRED with best-guess profile shown — one click to confirm |
+| >= 0.40 | Presented in TPM for an explicit candidate choice; unresolved cases remain in ACTION REQUIRED |
 | < 0.40  | Listed in ACTION REQUIRED with full candidate list                             |
 
 Folder names are normalised before comparison: years like `(2012)`, ISO dates like `(2015-12-28)`, decimal versions like `(2.10.00)`, region codes like `(JPN)`, version strings like `(ver 1.1)`, and bracket metadata like `[NESiCAxLive]` are all stripped. Meaningful names like `(Special Edition)` are kept because they may distinguish two titles.

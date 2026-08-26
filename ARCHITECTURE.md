@@ -301,7 +301,11 @@ rumble on Xbox/XInput-style controllers.
 **Skip counters.** `$skippedNoMatch` and `$skippedDllMissing` are separate. A game the
 AutoSetup.cmd table does not know about is `$skippedNoMatch`; a game the table matches
 but whose MAME DLL is not locally present is `$skippedDllMissing` (user-fixable). Each
-has its own summary line and log field.
+has its own summary line and log field. Ownership cleanup copies the unchanged
+hook to a verified game backup before deletion; if the ownership manifest cannot
+be atomically rewritten, the deletion is restored from that backup and the
+operation fails closed. If restoration itself fails, the backup path remains
+recovery evidence and no clean completion is reported.
 
 ### Eggman dat source
 
@@ -368,7 +372,11 @@ restore the pre-operation tree, while rollback or cleanup uncertainty
 preserves evidence and does not report clean completion. If live promotion
 succeeds but ordinary staging cleanup fails, the update is reported separately
 as applied-with-cleanup-failure, excluded from the clean-update count, and the
-validated residue path is logged and shown as ACTION REQUIRED.
+validated residue path is logged and shown as ACTION REQUIRED. Before version
+comparison, `Get-BepInExInstallationHealth` verifies required core/bootstrap
+files, version, architecture, and reparse safety. A current-version but
+incomplete tree therefore reaches the explicit repair-reset choice instead of
+being classified healthy by version equality alone.
 
 ---
 
@@ -806,13 +814,16 @@ the downloaded/extracted working folder in finally.
   The password is held only for the immediate operation. If Windows permission
   is needed, TPM writes a short-lived DPAPI-authenticated envelope covering
   the password and all resume metadata: exact script/config/TeknoParrot paths
-  and hashes, a nonce, attempt number, creation/expiry, origin SID/machine,
-  and parent PID/start time/executable path/hash. The state directory/file
-  ACL grants access only to the origin user, local Administrators, and SYSTEM.
-  The UAC child receives only the random state-file path, atomically claims it
-  and creates a consumed marker before privileged side effects, validates the
-  five-minute maximum lifetime and parent identity, decrypts the password, and
-  continues option 12 automatically. UAC denial can reuse the untouched
+  and hashes, a durable random issuance identity, nonce, attempt number,
+  creation/expiry, origin SID/machine, and parent PID/start time/executable
+  path/hash. The issuance identity is encoded in the legal state filename, so
+  a byte-for-byte copy cannot be consumed under another filename. The state
+  directory/file ACL grants access only to the origin user, local
+  Administrators, and SYSTEM. The UAC child receives only the random state-file
+  path, atomically claims it, reserves a marker containing the issuance,
+  nonce, and attempt, validates the envelope, decrypts the password, and
+  continues option 12 automatically. Validation failure removes the marker
+  and restores the encrypted challenge. UAC denial can reuse the untouched
   challenge; a started-child retry always receives a fresh attempt. The
   password is never placed in the child command line, logs, console output, or
   reports.
@@ -1638,11 +1649,16 @@ secure strings, native arguments, and raw exception text are excluded.
 
 The renderer remeasures window and buffer geometry before every draw, owns only
 its recorded footer rectangle, clips stale cells after resize, and truncates
-rows to the current width. A too-short or failing RawUI downgrades to
+rows to the current width. It refuses a first or subsequent cursor draw when
+the body cursor occupies the footer rectangle, and switches to append-only when
+scrolling changes the recorded window origin; it never clears arbitrary
+scrollback after that invalidation. `Read-HostSafe` clears and redraws the
+footer around prompt input. A too-short or failing RawUI downgrades to
 append-only status lines; redirected, unattended, and certification runs keep
 events but perform no cursor or progress writes. Failures remain pinned until
 acknowledged. The existing menu clear/repaint path is never used as failure
-acknowledgement.
+acknowledgement. Workflow start rejects a second active context, and every
+workflow branch must close or acknowledge/finalize before returning to the menu.
 
 ---
 

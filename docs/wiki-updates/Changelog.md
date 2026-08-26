@@ -16,6 +16,7 @@
   expose beginner-readable retry/status guidance. The shared TPM STATUS footer
   uses structured events, real steps, and resize-safe cursor/append-only
   fallbacks without affecting redirected runs.
+- Review follow-up binds protected recovery consumption to its issuance, restores failed claims safely, exposes repair for incomplete current BepInEx trees, and closes workflow failures without false completion.
 - Certification captures and guards exact branch, commit, upstream, ref, and
   reflog identity through publication/finalization.
 - Release packaging requires exact source/package identity and a completed #290

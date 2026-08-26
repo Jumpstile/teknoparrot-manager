@@ -115,7 +115,7 @@ Terms used throughout this README, in the order you're likely to need them.
 | **Control propagation**          | Bind ONE game per control type in TeknoParrot's own UI; TPM can copy known bindings to compatible unbound games in the same detected family. This is not universal device or shooter mapping. See [Control Propagation](#control-propagation).                      |
 | **Archetype / reference game**   | A game with enough buttons already bound (by you) to be used as the propagation source for its control family. Never modified by propagation itself — only ever a source, never a target.                                                                           |
 | **Family**                       | Which kind of controls a game uses — button / driving / lightgun / trackball / analog. Auto-detected per game; overridable in `overrides.json`.                                                                                                                     |
-| **ACTION REQUIRED**              | The end-of-run summary listing everything still needing your attention in TeknoParrotUI — games needing manual registration, paths to fix, missing bindings. See [Action Required Summary](#action-required-summary).                                               |
+| **ACTION REQUIRED**              | The end-of-run summary listing everything still needing your attention in TeknoParrotUI — ambiguous registration choices, paths to fix, missing bindings. See [Action Required Summary](#action-required-summary).                                               |
 | **Dry-run / preview mode**       | Runs AutoSync or Registration showing exactly what would happen, without writing anything. Offered automatically before a real run in modes 1/2.                                                                                                                    |
 | **Overrides (`overrides.json`)** | An optional file next to this script for overriding automatic choices per game — skip syncing one, pin a game to a specific archetype, override its detected family, and a few other exceptions. See [Per-Game Overrides](#per-game-overrides).                     |
 | **HasTwoExecutables**            | A GameProfile property (e.g. Initial D: Arcade Stage games) meaning the game needs a second companion executable launched alongside the main one. Handled automatically via `GamePath2`.                                                                            |
@@ -307,7 +307,7 @@ For each game folder, there are four possible outcomes:
 | **Registered (dat)**        | The folder name matched a dat file entry. The dat's authoritative profile code and executable path are used. Covers shared-exe games, exe-less-matched folders (pcsx2x6, ELF-based), and slightly misnamed folders.            |
 | **Registered (code/fuzzy)** | Folder name matched a TeknoParrot profile code by Dice similarity. Used for games whose profile has an empty `ExecutableName` (BladeStrangers, LuigisMansion, etc.) — the best available executable in the folder is selected. |
 | **Already set**             | A profile for this game already exists and is left exactly as-is.                                                                                                                                                              |
-| **Register manually**       | Shared exe, folder name below confidence threshold. The ACTION REQUIRED section shows the exe to browse to, a best-guess profile, and the full candidate list.                                                                 |
+| **Register manually**       | Advanced TeknoParrotUI fallback when an ambiguous case is left unresolved; TPM presents validated candidates first.                                                                 |
 
 ---
 
@@ -333,7 +333,7 @@ Dice score: ~0.85  -->  auto-registered
 | Score   | Action                                                                                           |
 | ------- | ------------------------------------------------------------------------------------------------ |
 | >= 0.72 | Auto-registered. Shown in cyan with score — spot-check.                                          |
-| >= 0.40 | Flagged in ACTION REQUIRED with best-guess profile shown. One click in TeknoParrotUI to confirm. |
+| >= 0.40 | Presented in TPM for an explicit candidate choice; unresolved cases remain in ACTION REQUIRED. |
 | < 0.40  | Flagged in ACTION REQUIRED with full candidate list only.                                        |
 
 **What is stripped during normalisation:** square-bracket metadata, bare 4-digit years, ISO dates, decimal versions, region codes (JPN/USA/EUR/etc.), version strings with prefix (ver/rev/v). Meaningful names like `(Special Edition)` are kept intentionally.
@@ -438,7 +438,7 @@ Mode 4 deploys custom P1/P2 crosshair cursor images to all registered lightgun g
 
 ## ReShade Visual Enhancements
 
-ReShade adds post-processing effects to games without modifying any game files. Remove it by deleting one DLL per game folder — the game is completely unchanged.
+ReShade adds post-processing effects without changing game data. TPM does not automatically remove unowned or changed hooks; review those through advanced troubleshooting.
 
 **Popular effects for arcade games:**
 
@@ -474,7 +474,7 @@ DLLs are never bundled in the release ZIP (ReShade's own policy prohibits redist
 
 **Signature check:** before deploying, the script checks the Authenticode signature on your ReShade DLL(s) — ReShade's own installer is code-signed, and that signature survives extracting/renaming the DLL. An invalid or missing signature is shown as a warning (with a plain-English reason) but doesn't block setup, since you supplied the file yourself; just make sure it actually came from reshade.me.
 
-**Removing:** delete the DLL (`dxgi.dll`, `d3d9.dll`, `d3d12.dll`, or `opengl32.dll`) from the game folder. Optionally delete `ReShade.ini` as well.
+**Removing:** TPM does not automatically remove unowned or changed ReShade hooks. Review those files through the advanced troubleshooting path.
 
 Mode 10 (Library health check) reports, purely informationally, how many registered games have ReShade installed -- not flagged as something to fix, since it's a per-game cosmetic choice rather than a clear right answer.
 
@@ -510,7 +510,7 @@ DLLs are never bundled in the release ZIP; TPM always fetches fresh from the off
 
 The wizard scans every registered game exe for legacy API imports and shows auto-detected games first. You can install to all at once or pick individually.
 
-**Removing:** delete the deployed DLLs from the game folder. Nothing else is changed.
+**Removing:** TPM does not automatically remove unowned or changed dgVoodoo2 hooks. Review those files through the advanced troubleshooting path.
 
 Mode 10 (Library health check) reports which registered games import a legacy API but don't have the matching DLL deployed yet, read-only and without changing anything.
 
@@ -609,7 +609,7 @@ Mode 13 manually checks the latest TeknoParrot Manager release on GitHub against
 
 - If you're already current, it says so and returns you to the menu.
 - If a newer version exists, it explains exactly what updating will do — back up the current script, download the update, validate it, replace the script, and require a restart — before asking a single Y/N question.
-- The current script is backed up to `UpdateBackups\TeknoParrotManager_<timestamp>\` before anything is replaced. If the target is marked read-only, the update is refused with an actionable error instead of silently clearing that attribute.
+- The current script is backed up to `UpdateBackups\TeknoParrotManager_<timestamp>\` before anything is replaced. If the target is marked read-only, an approved update temporarily clears only that file attribute and restores it after the attempt; failures remain actionable.
 - After a successful update, the script exits so you can restart it cleanly — it never keeps running the old, now-stale code in the same session.
 - If anything fails partway through, the exact error is shown, you're told whether a backup was created, and the script returns safely to the main menu without exiting.
   The update download is recorded with its GitHub source, filename/version, computed SHA-256, and transfer metrics. The manager update path validates size and extracted-script content but does not consume GitHub optional asset digests, so that SHA-256 is an audit value rather than an authenticity gate.

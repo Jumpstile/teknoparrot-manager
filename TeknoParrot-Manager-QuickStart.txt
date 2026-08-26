@@ -204,8 +204,9 @@
   Game won't launch          Open TeknoParrotUI, point the profile to the
                              correct .exe. Re-run the script and choose Repair.
 
-  Game not in TeknoParrot    Check ACTION REQUIRED -- it may need manual
-                             registration or needs to be extracted first.
+  Game not in TeknoParrot    For an ambiguous executable, choose one of TPM's validated candidates or
+                             leave it for TeknoParrotUI. If it is not extracted,
+                             extract it first.
 
   Extraction keeps failing   Check the log for the specific error. Verify
                              free space and that the ZIP is not corrupted.
@@ -276,9 +277,9 @@
 
   Common uses include sharpening, scanlines, colour enhancement, and decorative bezels.
 
-  Your games work perfectly WITHOUT ReShade. It is 100% optional and can
-  be removed at any time by deleting one DLL file from a game folder.
-  No game files are ever changed.
+  Your games work perfectly WITHOUT ReShade. It is 100% optional. TPM does not
+  automatically remove unowned or changed hook files; use the advanced
+  troubleshooting path for those files.
 
   HOW TO SET IT UP
 
@@ -307,9 +308,8 @@
   Once installed, press the  Home  key while in-game to open the
   ReShade overlay and switch effects on or off.
 
-  To remove ReShade from a game: delete the DLL (e.g. dxgi.dll,
-  d3d9.dll, or opengl32.dll) from that game's folder. Nothing else
-  needs to be changed.
+  TPM does not automatically remove unowned or changed ReShade hooks. Use
+  the advanced troubleshooting path when those files need review.
 
   Full details, effect descriptions, and update instructions:
   TeknoParrot-Manager-README.txt -- RESHADE VISUAL ENHANCEMENTS section.
@@ -336,7 +336,8 @@
     3. Run the script and choose mode 6, or answer Y at the end of any run.
        The wizard auto-detects which games need it and shows them first.
 
-  To remove: delete the deployed DLL file(s) from the game folder.
+  TPM does not automatically remove unowned or changed dgVoodoo2 hooks; use
+  the advanced troubleshooting path for those files.
 
   Full details: TeknoParrot-Manager-README.txt -- DGVOODOO2 LEGACY
   COMPATIBILITY section.
@@ -555,8 +556,8 @@
   profile code using a similarity score. Three outcomes are possible:
 
     Score >= 0.72   Auto-registered and shown in Cyan -- spot-check these.
-    Score >= 0.40   Listed in ACTION REQUIRED with a best-guess profile shown.
-                    One click in TeknoParrotUI to confirm the right one.
+    Score >= 0.40   Presented in TPM for an explicit candidate choice;
+                    unresolved cases remain in ACTION REQUIRED.
     Score < 0.40    Listed in ACTION REQUIRED with the full candidate list.
 
   Folder names are normalised before comparison: years like (2012), ISO dates
@@ -755,7 +756,7 @@
                                        Postgres databases, made before each
                                        Postgres setup run. Restore via menu 11.
   TeknoParrot-Manager-ActionItems.txt  Action items from the last run
-                                       (manual registration, broken paths,
+                                       (ambiguous registration choices, broken paths,
                                        etc.). Written after registration runs
                                        that have outstanding items. Default
                                        location -- a Save dialog lets you

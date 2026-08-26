@@ -68,7 +68,7 @@ Ten tests, all passing, deliberately induce failure conditions and verify the or
 2. Zip missing `TeknoParrot-Manager.ps1` -- rejected with a specific "does not contain expected entry" error.
 3. Content-validation failures -- both a missing `$ScriptVersion` and an extracted file that is itself raw zip bytes are rejected before replacement.
 4. Truncated/partial download -- treated as corrupt, rejected.
-5. Read-only destination -- refused before backup/download/replacement. This explicitly avoids relying on `Move-Item -Force`, which can clear the `ReadOnly` attribute and replace a file rather than failing closed.
+5. Read-only destination -- the approved main-menu flow clears only the target file's ReadOnly attribute after explicit approval, then restores it in cleanup. The standalone `tools\` helper remains manual-unlock-only.
 6. Backup creation failure -- aborts before any download; original untouched.
 7. Extraction failure (valid zip, corrupted entry payload) -- rejected, original and backup intact.
 8. Replacement failure after a successful backup (destination locked by another handle) -- `Move-Item` fails, original file is provably unchanged (not partially written), backup and temp cleanup both hold.

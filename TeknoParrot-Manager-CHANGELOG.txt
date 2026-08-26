@@ -24,6 +24,9 @@
 
   UX: restore, crosshair, first-run, optional-download, update, and recovery
   paths keep beginner-readable status/retry guidance visible. The shared
+  review follow-up binds protected recovery consumption to its issuance,
+  cleans failed claims safely, exposes repair for incomplete current BepInEx
+  trees, and closes workflow status on failure paths without false completion.
   TPM STATUS footer uses structured events, real steps, and resize-safe
   cursor/append-only fallbacks without affecting redirected runs.
 
@@ -2684,7 +2687,7 @@
     (> 9 digits = skip) is now applied before every [int] cast.
 
   - International title matching: Get-NormalizedGameKey used [^a-zA-Z0-9]
-    which stripped all non-ASCII letters, collapsing e.g. "Pokémon" to
+    which stripped all non-ASCII letters, collapsing e.g. "PokÃ©mon" to
     "pokmon" and erasing Japanese characters entirely. Changed to [^\p{L}0-9]
     so Unicode letters are preserved and Dice scores remain valid.
 
@@ -2706,7 +2709,7 @@
   v0.42 BETA  (2026-06-12)
 -------------------------------------------------------------------------------
 
-  New feature — dgVoodoo2 legacy compatibility setup:
+  New feature â€” dgVoodoo2 legacy compatibility setup:
 
   - Mode 6 "dgVoodoo2 setup" added to the main menu. Runs as a standalone
     wizard (skips backup, extraction, and registration) just like Mode 5.
@@ -2739,7 +2742,7 @@
   v0.41 BETA  (2026-06-12)
 -------------------------------------------------------------------------------
 
-  New feature — Custom thumbnails folder:
+  New feature â€” Custom thumbnails folder:
 
   - The script now checks for a  CustomThumbnails\  folder next to the script
     at the start of every thumbnail download step.
@@ -2769,7 +2772,7 @@
   v0.40 BETA  (2026-06-12)
 -------------------------------------------------------------------------------
 
-  New feature — ReShade visual enhancements:
+  New feature â€” ReShade visual enhancements:
 
   - Mode 5 "ReShade setup" added to the main menu. Runs as a standalone
     wizard that skips backup, extraction, and registration entirely.
@@ -2816,7 +2819,7 @@
   v0.39 BETA  (2026-06-12)
 -------------------------------------------------------------------------------
 
-  New feature — Custom crosshairs:
+  New feature â€” Custom crosshairs:
 
   - Mode 4 "Crosshair setup" added to the main menu. Running the script in
     this mode skips backup, extraction, and registration entirely; it just
@@ -3224,7 +3227,7 @@
     GamePath set. Existing profiles are never overwritten.
 
   - Fuzzy name matching. Games that share a single executable (NESiCAxLive,
-    etc.) are matched by folder-name similarity using a Sørensen-Dice bigram
+    etc.) are matched by folder-name similarity using a SÃ¸rensen-Dice bigram
     score. Games above the 0.72 threshold are auto-registered; games below
     appear in ACTION REQUIRED with a best-guess profile and full candidate
     list.
