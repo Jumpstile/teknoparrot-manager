@@ -341,7 +341,7 @@ $($menuIfAst.Extent.Text)
     }
 
     It "main-menu-invalid-option-recovers: an invalid choice prints a clear message and the menu asks again" {
-        $captured = Invoke-MainMenuHarness -AnswerQueue @('99', '14') 6>&1
+        $captured = Invoke-MainMenuHarness -AnswerQueue @('99', '15') 6>&1
         $text = ($captured | ForEach-Object { $_.ToString() }) -join "`n"
 
         $scenario = Get-Scenario -Id 'main-menu-invalid-option-recovers'
@@ -359,10 +359,15 @@ $($menuIfAst.Extent.Text)
         $text.Contains('Invalid choice') | Should -Be $false
     }
 
-    It "exiting (choice 14) returns without printing an invalid-choice message" {
-        $captured = Invoke-MainMenuHarness -AnswerQueue @('14') 6>&1
+    It "exiting (choice 15) returns without printing an invalid-choice message" {
+        $captured = Invoke-MainMenuHarness -AnswerQueue @('15') 6>&1
         $text = ($captured | ForEach-Object { $_.ToString() }) -join "`n"
         $text.Contains('Invalid choice') | Should -Be $false
+    }
+
+    It "choice 14 returns the support mode without entering an invalid path" {
+        $captured = Invoke-MainMenuHarness -AnswerQueue @('14') 6>&1
+        (($captured | ForEach-Object { $_.ToString() }) -join "`n") | Should -Match 'Support'
     }
 
     It "recovers from several consecutive invalid choices before a valid one succeeds" {

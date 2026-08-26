@@ -34,6 +34,8 @@ support, or any other post-1.0 feature.
 | UX-S06  | Registration ambiguity  | Present validated candidate profiles for an explicit choice; blank/invalid input leaves the case unresolved instead of guessing. | Invoke-ManualRegistrationChoices; registration tests |
 | UX-S07  | Health boundaries       | Missing firmware/components remain contract-backed, read-only warnings with a legitimate-source/TPUI repair handoff; TPM does not fabricate or replace vendor files. | Get-CompatibilityWarnings; health tests |
 | UX-S08  | Update boundary         | Explicit approved main-menu updates may clear only the target ReadOnly flag after backup intent, and restore it on every exit path; failures state backup truthfully. | Invoke-ManagerUpdateInstall; update tests |
+| SUP-S01 | Support package collection | Option 14 gathers only allowlisted TPM/TeknoParrot/game text diagnostics and metadata-only plugin inventories into a fixed support ZIP; it never archives arbitrary directories or game payloads. | New-TpmSupportPackage; SupportPackage.Tests.ps1 |
+| SUP-S02 | Support package privacy | Common credentials and user-profile paths are redacted from included text; credentials, profiles, recovery state, executables, DLL payloads, archives, firmware, and unrelated files are excluded. The manifest records collected/absent/excluded/failed sources. | Redact-TpmSupportText; manifest/privacy tests |
 | WS-S01 | Engineering handoff      | GitHub is authoritative; each machine uses a local clone/worktree and hands off pushed refs plus exact SHAs. NAS is storage/mirror evidence, not an authoritative active Git worktree. | AGENTS.md; RELEASE-SAFETY-CHECKLIST.md; #293 policy           |
 
 ## System invariant inventory
@@ -46,6 +48,9 @@ support, or any other post-1.0 feature.
 | INV-PG-04 | Profile XML writes are deterministic by filename and occur only after all affected profiles have been backed up.                                                                                                                                                    | Must hold for multi-profile runs              |
 | INV-EG-01 | Unsafe Eggman paths are rejected before any download or destination write.                                                                                                                                                                                          | Must hold for default and user-selected paths |
 | INV-BX-01 | No BepInEx live path is touched until root safety, digest, staging extraction, and backup verification pass.                                                                                                                                                        | Must hold for all candidates                  |
+| INV-SUP-01 | Support ZIP collection is fixed-scope and allowlist-driven; no arbitrary directory recursion or game payload copying is permitted. | Must hold for every package |
+| INV-SUP-02 | Support package text is redacted for common secrets and user-profile paths, while credential-bearing files and recovery state are excluded before staging. | Must hold before ZIP creation |
+| INV-SUP-03 | Missing optional diagnostics are recorded as absent; collection/ZIP failures cannot produce a success result, and workflow status is closed on every exit. | Must hold on success and failure |
 | INV-BX-02 | A recoverable BepInEx promotion failure restores the complete pre-operation tree; an unrecoverable failure preserves evidence and reports blocked.                                                                                                                  | Must hold in rollback matrix                  |
 | INV-BX-03 | An applied BepInEx update is counted as clean only after its validated staging directory is removed. Cleanup failure preserves the exact validated residue path and produces ACTION REQUIRED output.                                                                | Must hold after successful promotion          |
 
@@ -57,6 +62,9 @@ support, or any other post-1.0 feature.
 - PostgreSQL service stop/start failure and single-user reset nonzero exit.
 - Missing pg_hba.conf or postgresql.conf evidence copy.
 - Existing database with profile password already correct, empty, and stale.
+- Support-package path traversal, reparse-point, malicious-name, oversized-log,
+  forbidden-binary, credential-file, redaction, partial-collection, ZIP-failure,
+  and workflow-cleanup cases.
 - Duplicate database names across deterministically ordered profiles.
 - BepInEx root outside the approved games root, a reparse root, an intermediate
   reparse component, and a reparse leaf.

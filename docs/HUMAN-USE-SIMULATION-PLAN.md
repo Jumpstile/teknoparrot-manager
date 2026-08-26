@@ -45,6 +45,19 @@ Human-use simulation should catch issues like:
 - Back/cancel works from nested flows.
 - Update option is visible and understandable.
 
+### Support package
+
+- User can choose the clearly labelled Create Support Package action without
+  knowing where logs or reports live.
+- TPM explains each collection step in plain language through the persistent
+  status area.
+- Completion shows the exact ZIP path and says to send that ZIP when asking
+  for help.
+- Missing optional diagnostics are described as missing; a partial or failed
+  collection is never presented as complete.
+- The package excludes game payloads and credentials and includes a readable
+  manifest of collected and excluded sources.
+
 ### AutoSync normal path
 
 - User selects AutoSync.

@@ -47,6 +47,9 @@
 #   Device survey  Asks which controls you have and prints a tailored plan of
 #                  which game to bind with which device.
 #
+#   Support package  Gathers allowlisted TPM, TeknoParrot, and game diagnostics
+#                  into one redacted ZIP without copying game payloads.
+#
 # WHAT IT DOES NOT DO
 #   Controls are copied only from a reference game you have already bound;
 #   anything else is left for you and reported. Game files are not provided.
@@ -876,6 +879,407 @@ function Read-TpmWorkflowInput {
     $answer = Read-HostSafe $Prompt
     Resume-TpmWorkflowStatus -Context $Context
     return $answer
+}
+function Get-TpmSupportSafeName {
+    param([Parameter(Mandatory)][string]$Value)
+    $safe = [regex]::Replace($Value, '[^A-Za-z0-9_.-]', '_')
+    if ([string]::IsNullOrWhiteSpace($safe)) { $safe = 'item' }
+    if ($safe.Length -gt 80) { $safe = $safe.Substring(0, 80) }
+    return $safe
+}
+
+function Redact-TpmSupportText {
+    param([AllowEmptyString()][string]$Text)
+    $value = if ($null -eq $Text) { '' } else { $Text }
+    $count = 0
+    $patterns = @(
+        '(?im)(password|passwd|pwd|secret|token|api[_-]?key|authorization)\s*[:=]\s*("[^"]*"|''[^'']*''|[^\s,;]+)',
+        '(?im)(PGPASSWORD|PGUSER|PGHOST|PGPORT)\s*=\s*[^\s,;]+',
+        '(?im)(postgres(?:ql)?://)[^\s"''<>]+',
+        '(?im)(--password\s+|/password\s+)[^\s]+',
+        '(?i)[A-Z]:\\Users\\[^\\\s"''<>]+(?:\\[^\\\s"''<>]+)*',
+        '(?i)\\\\[^\\\s"''<>]+\\[^\\\s"''<>]+(?:\\[^\\\s"''<>]+)*'
+    )
+    foreach ($pattern in $patterns) {
+        $before = $value
+        if ($pattern -match 'Users' -or $pattern -match '\\\\') {
+            $replacement = if ($pattern -match 'Users') { '<user-profile>' } else { '<network-path>' }
+            $value = [regex]::Replace($value, $pattern, $replacement)
+        } elseif ($pattern -match 'postgres') {
+            $value = [regex]::Replace($value, $pattern, '$1<redacted-uri>')
+        } else {
+            $value = [regex]::Replace($value, $pattern, {
+                param($match)
+                $name = $match.Groups[1].Value
+                return ($name + '=<redacted>')
+            })
+        }
+        if ($value -ne $before) { $count++ }
+    }
+    return [pscustomobject]@{ Text = $value; RedactionCount = $count }
+}
+
+function Add-TpmSupportRecord {
+    param(
+        [Parameter(Mandatory)]$Records,
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][ValidateSet('Collected','NotPresent','IntentionallyExcluded','CollectionFailed')][string]$Status,
+        [string]$Destination = '',
+        [string]$Detail = '',
+        [int]$Redactions = 0
+    )
+    $safeDetail = (Redact-TpmSupportText -Text $Detail).Text
+    [void]$Records.Add([pscustomobject]@{
+        Source = $Source
+        Status = $Status
+        Destination = $Destination
+        Detail = $safeDetail
+        Redactions = $Redactions
+    })
+}
+
+function Copy-TpmSupportTextFile {
+    param(
+        [Parameter(Mandatory)]$Records,
+        [Parameter(Mandatory)][string]$SourcePath,
+        [Parameter(Mandatory)][string]$AllowedRoot,
+        [Parameter(Mandatory)][string]$SourceLabel,
+        [Parameter(Mandatory)][string]$StageDirectory,
+        [Parameter(Mandatory)][string]$DestinationName,
+        [int64]$MaximumBytes = 5242880
+    )
+    try {
+        $sourceFull = [System.IO.Path]::GetFullPath($SourcePath)
+        $rootFull = [System.IO.Path]::GetFullPath($AllowedRoot)
+    } catch {
+        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status IntentionallyExcluded -Detail 'Path could not be canonicalized.'
+        return
+    }
+    if (-not (Test-PathInside -child $sourceFull -parent $rootFull)) {
+        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status IntentionallyExcluded -Detail 'Candidate escaped its approved diagnostic root.'
+        return
+    }
+    if (-not (Test-TpmNoReparsePath -Path $sourceFull)) {
+        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status IntentionallyExcluded -Detail 'Candidate or an existing parent is reparse-backed.'
+        return
+    }
+    if (-not (Test-Path -LiteralPath $sourceFull -PathType Leaf)) {
+        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status NotPresent -Detail 'Expected diagnostic file was not present.'
+        return
+    }
+    try {
+        $item = Get-Item -LiteralPath $sourceFull -Force -ErrorAction Stop
+        if ($item.Length -gt $MaximumBytes) {
+            Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status IntentionallyExcluded -Detail 'Diagnostic text exceeded the safe size limit.'
+            return
+        }
+        $text = [System.IO.File]::ReadAllText($sourceFull)
+        $redacted = Redact-TpmSupportText -Text $text
+        $destination = Join-Path $StageDirectory $DestinationName
+        [System.IO.File]::WriteAllText($destination, $redacted.Text, (New-Object System.Text.UTF8Encoding($false)))
+        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status Collected -Destination $DestinationName -Detail 'Allowlisted text diagnostic collected.' -Redactions $redacted.RedactionCount
+    } catch {
+        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status CollectionFailed -Detail 'The allowlisted diagnostic could not be read or redacted safely.'
+    }
+}
+
+function Get-TpmSupportFileSha256 {
+    param([Parameter(Mandatory)][string]$Path)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return (-join ($sha.ComputeHash([System.IO.File]::ReadAllBytes($Path)) | ForEach-Object { $_.ToString('x2') }))
+    } finally {
+        $sha.Dispose()
+    }
+}
+
+function Get-TpmSupportPluginInventory {
+    param(
+        [Parameter(Mandatory)][string]$GameRoot,
+        [Parameter(Mandatory)][string]$GameCode,
+        [Parameter(Mandatory)]$Records,
+        [Parameter(Mandatory)][string]$StageDirectory
+    )
+    $pluginRoots = New-Object System.Collections.Generic.List[string]
+    $bepPlugins = Join-Path $GameRoot 'BepInEx\plugins'
+    if (Test-Path -LiteralPath $bepPlugins -PathType Container) { [void]$pluginRoots.Add($bepPlugins) }
+    try {
+        foreach ($dataDir in @(Get-ChildItem -LiteralPath $GameRoot -Directory -Force -ErrorAction Stop | Where-Object { $_.Name -match '_Data$' })) {
+            if (($dataDir.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+            foreach ($relative in @('Plugins','Plugins\x86_64','Plugins\x86')) {
+                $candidate = Join-Path $dataDir.FullName $relative
+                if (Test-Path -LiteralPath $candidate -PathType Container) { [void]$pluginRoots.Add($candidate) }
+            }
+        }
+    } catch {
+        Add-TpmSupportRecord -Records $Records -Source ('Game:' + $GameCode + ':plugin inventory') -Status CollectionFailed -Detail 'Plugin directories could not be inspected safely.'
+        return
+    }
+    if ($pluginRoots.Count -eq 0) {
+        Add-TpmSupportRecord -Records $Records -Source ('Game:' + $GameCode + ':plugin inventory') -Status NotPresent -Detail 'No allowlisted plugin directory was present.'
+        return
+    }
+    $rows = New-Object System.Collections.Generic.List[string]
+    $rows.Add('RelativePath' + "`t" + 'FileName' + "`t" + 'SizeBytes' + "`t" + 'Version' + "`t" + 'SHA256') | Out-Null
+    $fileCount = 0
+    foreach ($pluginRoot in @($pluginRoots | Select-Object -Unique)) {
+        if (-not (Test-TpmNoReparsePath -Path $pluginRoot)) {
+            $rows.Add('[EXCLUDED]' + "`t" + (Get-TpmSupportSafeName (Split-Path -LiteralPath $pluginRoot -Leaf)) + "`tunsafe-reparse-path") | Out-Null
+            continue
+        }
+        $pending = New-Object 'System.Collections.Generic.Stack[string]'
+        $pending.Push($pluginRoot)
+        while ($pending.Count -gt 0) {
+            $current = $pending.Pop()
+            if (-not (Test-PathInside -child $current -parent $GameRoot) -or -not (Test-TpmNoReparsePath -Path $current)) {
+                $rows.Add('[EXCLUDED]' + "`t" + (Get-TpmSupportSafeName (Split-Path -LiteralPath $current -Leaf)) + "`tunsafe-directory-path") | Out-Null
+                continue
+            }
+            try {
+                foreach ($child in @(Get-ChildItem -LiteralPath $current -Force -ErrorAction Stop)) {
+                    if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                        $rows.Add('[EXCLUDED]' + "`t" + (Get-TpmSupportSafeName $child.Name) + "`treparse-backed entry") | Out-Null
+                        continue
+                    }
+                    if ($child.PSIsContainer) {
+                        $pending.Push($child.FullName)
+                        continue
+                    }
+                    if ($fileCount -ge 500) {
+                        $rows.Add('[EXCLUDED]' + "`tinventory-limit`t500-file limit reached") | Out-Null
+                        $pending.Clear()
+                        break
+                    }
+                    try {
+                        $relative = $child.FullName.Substring([System.IO.Path]::GetFullPath($GameRoot).TrimEnd('\').Length).TrimStart('\').Replace('\','/')
+                        $version = ''
+                        if ($child.Extension -ieq '.dll') {
+                            try { $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($child.FullName).FileVersion } catch { $version = '' }
+                        }
+                        $hash = if ($child.Length -le 67108864) { Get-TpmSupportFileSha256 -Path $child.FullName } else { 'HASH_SKIPPED_OVERSIZED' }
+                        $rows.Add(($relative + "`t" + $child.Name + "`t" + $child.Length + "`t" + $version + "`t" + $hash)) | Out-Null
+                        $fileCount++
+                    } catch {
+                        $rows.Add('[EXCLUDED]' + "`t" + (Get-TpmSupportSafeName $child.Name) + "`tmetadata-read-failed") | Out-Null
+                    }
+                }
+            } catch {
+                $rows.Add('[EXCLUDED]' + "`t" + (Get-TpmSupportSafeName (Split-Path -LiteralPath $current -Leaf)) + "`tenumeration-failed") | Out-Null
+            }
+        }
+    }
+    if ($fileCount -eq 0) {
+        Add-TpmSupportRecord -Records $Records -Source ('Game:' + $GameCode + ':plugin inventory') -Status NotPresent -Detail 'Allowlisted plugin directories contained no safe regular files.'
+        return
+    }
+    $destinationName = 'metadata\inventory-' + (Get-TpmSupportSafeName $GameCode) + '.tsv'
+    $destination = Join-Path $StageDirectory $destinationName
+    [System.IO.File]::WriteAllText($destination, ($rows -join "`r`n") + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
+    Add-TpmSupportRecord -Records $Records -Source ('Game:' + $GameCode + ':plugin inventory') -Status Collected -Destination $destinationName -Detail ('Metadata only; ' + $fileCount + ' safe file entries. DLL payloads were not copied.')
+}
+
+function Get-TpmSupportManifestText {
+    param(
+        [Parameter(Mandatory)]$Records,
+        [Parameter(Mandatory)]$Errors,
+        [string[]]$GameCodes,
+        [Parameter(Mandatory)][string]$AffectedGameSummary
+    )
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('TPM Support Package Manifest v1') | Out-Null
+    $lines.Add('Created UTC: ' + (Get-Date).ToUniversalTime().ToString('o')) | Out-Null
+    $lines.Add('TPM version: ' + (Get-ManagerDisplayVersion)) | Out-Null
+    $lines.Add('PowerShell: ' + $PSVersionTable.PSVersion.ToString()) | Out-Null
+    $lines.Add('OS: Windows ' + [Environment]::OSVersion.Version.ToString()) | Out-Null
+    $lines.Add('64-bit operating system: ' + [Environment]::Is64BitOperatingSystem) | Out-Null
+    $lines.Add('Affected game scope: ' + $AffectedGameSummary) | Out-Null
+    $lines.Add('Registered game diagnostics considered: ' + $GameCodes.Count) | Out-Null
+    $lines.Add('') | Out-Null
+    $lines.Add('Diagnostic sources checked:') | Out-Null
+    $lines.Add('- TPM-owned allowlisted logs and reports beside the script') | Out-Null
+    $lines.Add('- Allowlisted TeknoParrot root logs, including ParrotPatcher_Log.txt') | Out-Null
+    $lines.Add('- Allowlisted text logs in safely identified registered game folders') | Out-Null
+    $lines.Add('- Metadata-only inventories of allowlisted BepInEx and Unity plugin folders') | Out-Null
+    $lines.Add('') | Out-Null
+    $lines.Add('Collection results:') | Out-Null
+    foreach ($record in $Records) {
+        $detail = if ($record.Detail) { ' -- ' + $record.Detail } else { '' }
+        $destination = if ($record.Destination) { ' -> ' + $record.Destination } else { '' }
+        $lines.Add(('[{0}] {1}{2}{3}' -f $record.Status, $record.Source, $destination, $detail)) | Out-Null
+    }
+    $lines.Add('') | Out-Null
+    $lines.Add('Intentionally excluded by design:') | Out-Null
+    foreach ($excluded in @(
+        'ROMs, game archives, game executables, arbitrary DLL payloads, firmware, and copyrighted assets',
+        'PostgreSQL passwords, .pgpass, tokens, API keys, cookies, saved passwords, and DPAPI recovery state',
+        'UserProfiles XML, configuration files, and unrelated personal files',
+        'All non-allowlisted directories and files',
+        'Absolute user-profile paths where they are not needed for diagnosis'
+    )) { $lines.Add('- ' + $excluded) | Out-Null }
+    $lines.Add('') | Out-Null
+    $lines.Add('Redaction note: allowlisted text is redacted for common credential patterns and user-profile paths. Redaction is defense in depth, not a guarantee that arbitrary secrets can be detected.') | Out-Null
+    if ($Errors.Count -gt 0) {
+        $lines.Add('') | Out-Null
+        $lines.Add('Collection or packaging failures:') | Out-Null
+        foreach ($errorText in $Errors) { $lines.Add('- ' + (Redact-TpmSupportText -Text $errorText).Text) | Out-Null }
+    }
+    return ($lines -join "`r`n") + "`r`n"
+}
+
+function New-TpmSupportPackage {
+    param(
+        [Parameter(Mandatory)][string]$ScriptRoot,
+        [string]$TeknoParrotRoot = '',
+        [string]$UserProfilesDir = '',
+        [string]$ApprovedGamesRoot = '',
+        [string]$OutputRoot = '',
+        [string]$AffectedGameSummary = 'all safely identified registered games'
+    )
+    $records = New-Object System.Collections.Generic.List[object]
+    $errors = New-Object System.Collections.Generic.List[string]
+    $gameCodes = New-Object System.Collections.Generic.List[string]
+    $status = New-TpmWorkflowStatusContext -WorkflowKey 'SupportPackage' -Title 'Create support package' -Steps @(
+        @{ Id = 'tpm'; Label = 'Collect TPM diagnostics' }
+        @{ Id = 'tekno'; Label = 'Collect TeknoParrot diagnostics' }
+        @{ Id = 'game'; Label = 'Check game-specific logs and metadata' }
+        @{ Id = 'redact'; Label = 'Remove private information' }
+        @{ Id = 'zip'; Label = 'Create support ZIP' }
+    )
+    $stage = $null
+    $zipTemp = $null
+    $packagePath = $null
+    $result = [ordered]@{
+        Succeeded = $false
+        Partial = $false
+        PackagePath = $null
+        Records = @()
+        Errors = @()
+        RedactionCount = 0
+        StatusContext = $status
+    }
+    try {
+        Start-TpmWorkflowStatus -Context $status
+        Start-TpmWorkflowStep -Context $status -StepId 'tpm' -Activity 'Collecting TPM logs and reports'
+        if ([string]::IsNullOrWhiteSpace($OutputRoot)) { $OutputRoot = Join-Path $ScriptRoot 'SupportPackages' }
+        $expectedOutputRoot = [System.IO.Path]::GetFullPath((Join-Path $ScriptRoot 'SupportPackages')).TrimEnd('\','/')
+        $requestedOutputRoot = [System.IO.Path]::GetFullPath($OutputRoot).TrimEnd('\','/')
+        if (-not [string]::Equals($expectedOutputRoot, $requestedOutputRoot, [System.StringComparison]::OrdinalIgnoreCase)) { throw 'Support package destination must be the TPM SupportPackages folder.' }
+        if (-not (Test-Path -LiteralPath $OutputRoot -PathType Container)) { [void](New-Item -ItemType Directory -Path $OutputRoot -Force) }
+        $stage = Join-Path ([System.IO.Path]::GetTempPath()) ('tpm-support-stage-' + [guid]::NewGuid().ToString('N'))
+        [void](New-Item -ItemType Directory -Path (Join-Path $stage 'diagnostics'), (Join-Path $stage 'metadata') -Force)
+        if (-not (Test-TpmNoReparsePath -Path $stage)) { throw 'Support package staging folder is unsafe.' }
+        $tpmNames = @('TeknoParrot-Manager.log','TeknoParrot-Manager-controls.txt','TeknoParrot-Manager-ActionItems.txt','TeknoParrot-Manager-HealthCheck.txt','TeknoParrot-Manager-Readiness.txt','TPM-Validation-Report.md','TPM-Validation-Report.json','TPM-Certification-Scorecard.md','TPM-Certification-Scorecard.json','TPM-Certification-Final-Outcome.md','TPM-Certification-Final-Outcome.json','TPM-Certification-Manifest.md','TPM-Certification-Manifest.json')
+        $index = 0
+        foreach ($name in $tpmNames) {
+            $index++
+            Copy-TpmSupportTextFile -Records $records -SourcePath (Join-Path $ScriptRoot $name) -AllowedRoot $ScriptRoot -SourceLabel ('TPM:' + $name) -StageDirectory (Join-Path $stage 'diagnostics') -DestinationName ('tpm-{0:D2}-{1}.txt' -f $index, (Get-TpmSupportSafeName $name))
+        }
+        Complete-TpmWorkflowStep -Context $status -Summary 'TPM diagnostics checked' -NextStep 'TeknoParrot diagnostics'
+        Start-TpmWorkflowStep -Context $status -StepId 'tekno' -Activity 'Checking allowlisted TeknoParrot logs'
+        if ([string]::IsNullOrWhiteSpace($TeknoParrotRoot)) {
+            Add-TpmSupportRecord -Records $records -Source 'TeknoParrot root' -Status NotPresent -Detail 'No TeknoParrot root was available to inspect.'
+        } elseif (-not (Test-TpmNoReparsePath -Path $TeknoParrotRoot)) {
+            Add-TpmSupportRecord -Records $records -Source 'TeknoParrot root' -Status IntentionallyExcluded -Detail 'TeknoParrot root is reparse-backed or inaccessible.'
+        } else {
+            $tpNames = @('ParrotPatcher_Log.txt','TeknoParrotUI.log','TeknoParrotUI_Log.txt','TeknoParrot.log','Logs\TeknoParrotUI.log','Logs\TeknoParrot.log','logs\TeknoParrotUI.log','logs\TeknoParrot.log','TeknoParrotUI\Logs\TeknoParrotUI.log')
+            $index = 0
+            foreach ($name in $tpNames) {
+                $index++
+                Copy-TpmSupportTextFile -Records $records -SourcePath (Join-Path $TeknoParrotRoot $name) -AllowedRoot $TeknoParrotRoot -SourceLabel ('TeknoParrot:' + $name) -StageDirectory (Join-Path $stage 'diagnostics') -DestinationName ('tekno-{0:D2}-{1}.txt' -f $index, (Get-TpmSupportSafeName $name))
+            }
+        }
+        Complete-TpmWorkflowStep -Context $status -Summary 'TeknoParrot diagnostics checked' -NextStep 'Game-specific diagnostics'
+        Start-TpmWorkflowStep -Context $status -StepId 'game' -Activity 'Checking safely identified registered game folders'
+        if ([string]::IsNullOrWhiteSpace($UserProfilesDir) -or -not (Test-Path -LiteralPath $UserProfilesDir -PathType Container)) {
+            Add-TpmSupportRecord -Records $records -Source 'Registered game diagnostics' -Status NotPresent -Detail 'Registered UserProfiles folder was not available.'
+        } elseif (-not (Test-TpmNoReparsePath -Path $UserProfilesDir)) {
+            Add-TpmSupportRecord -Records $records -Source 'Registered game diagnostics' -Status IntentionallyExcluded -Detail 'UserProfiles folder is reparse-backed or inaccessible.'
+        } else {
+            $profileFiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | Select-Object -First 200)
+            foreach ($profileFile in $profileFiles) {
+                $code = Get-TpmSupportSafeName $profileFile.BaseName
+                try {
+                    $doc = Read-Xml $profileFile.FullName
+                    $gamePathNode = $doc.SelectSingleNode('/GameProfile/GamePath')
+                    $gamePath = if ($gamePathNode) { [string]$gamePathNode.InnerText } else { '' }
+                    if ([string]::IsNullOrWhiteSpace($gamePath)) {
+                        Add-TpmSupportRecord -Records $records -Source ('Game:' + $code) -Status NotPresent -Detail 'Registered profile has no game path.'
+                        continue
+                    }
+                    $gameRoot = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($gamePath))
+                    if ([string]::IsNullOrWhiteSpace($ApprovedGamesRoot) -or -not (Test-PathInside -child $gameRoot -parent $ApprovedGamesRoot) -or -not (Test-TpmNoReparsePath -Path $gameRoot)) {
+                        Add-TpmSupportRecord -Records $records -Source ('Game:' + $code) -Status IntentionallyExcluded -Detail 'Game folder was not inside the approved, non-reparse games root.'
+                        continue
+                    }
+                    [void]$gameCodes.Add($code)
+                    foreach ($relative in @('BepInEx\LogOutput.log','BepInEx\preloader.log','BepInEx\LogOutput.txt','Player.log','player.log','output_log.txt','error.log','crash.log')) {
+                        Copy-TpmSupportTextFile -Records $records -SourcePath (Join-Path $gameRoot $relative) -AllowedRoot $gameRoot -SourceLabel ('Game:' + $code + ':' + $relative) -StageDirectory (Join-Path $stage 'diagnostics') -DestinationName ('game-' + $code + '-' + (Get-TpmSupportSafeName $relative))
+                    }
+                    Get-TpmSupportPluginInventory -GameRoot $gameRoot -GameCode $code -Records $records -StageDirectory $stage
+                } catch {
+                    Add-TpmSupportRecord -Records $records -Source ('Game:' + $code) -Status CollectionFailed -Detail 'Registered game diagnostics could not be identified safely.'
+                }
+            }
+        }
+        Complete-TpmWorkflowStep -Context $status -Summary 'Game-specific diagnostics checked' -NextStep 'Remove private information'
+        Start-TpmWorkflowStep -Context $status -StepId 'redact' -Activity 'Removing private information from collected text'
+        $recordArray = @($records.ToArray())
+        $redactionMeasure = $recordArray | Measure-Object -Property Redactions -Sum
+        $result.RedactionCount = if ($redactionMeasure) { [int]$redactionMeasure.Sum } else { 0 }
+        Complete-TpmWorkflowStep -Context $status -Summary 'Private information redacted where detected' -NextStep 'Create support ZIP'
+        Start-TpmWorkflowStep -Context $status -StepId 'zip' -Activity 'Writing the support package manifest and ZIP'
+        $manifest = Get-TpmSupportManifestText -Records $records -Errors $errors -GameCodes @($gameCodes) -AffectedGameSummary $AffectedGameSummary
+        [System.IO.File]::WriteAllText((Join-Path $stage 'MANIFEST.txt'), $manifest, (New-Object System.Text.UTF8Encoding($false)))
+        $timestamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss')
+        for ($suffix = 0; $suffix -lt 1000; $suffix++) {
+            $suffixText = if ($suffix -eq 0) { '' } else { '-{0:D3}' -f $suffix }
+            $candidate = Join-Path $OutputRoot ('TeknoParrotManager-Support-{0}{1}.zip' -f $timestamp, $suffixText)
+            if (-not (Test-Path -LiteralPath $candidate)) { $packagePath = $candidate; break }
+        }
+        if ([string]::IsNullOrWhiteSpace($packagePath)) { throw 'Could not reserve a safe support package filename.' }
+        $zipTemp = Join-Path ([System.IO.Path]::GetTempPath()) ('tpm-support-' + [guid]::NewGuid().ToString('N') + '.zip')
+        [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $zipTemp, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+        [System.IO.File]::Move($zipTemp, $packagePath)
+        $zipTemp = $null
+        if (-not (Test-Path -LiteralPath $packagePath -PathType Leaf)) { throw 'The support ZIP could not be verified after creation.' }
+        if (@($records | Where-Object Status -eq 'CollectionFailed').Count -gt 0) { $result.Partial = $true }
+        Complete-TpmWorkflowStep -Context $status -Summary 'Support ZIP created' -NextStep 'Send the ZIP when asking for help'
+        Complete-TpmWorkflowStatus -Context $status -Summary 'Support package created'
+        $result.Succeeded = $true
+        $result.PackagePath = $packagePath
+    } catch {
+        [void]$errors.Add((Redact-TpmSupportText -Text $_.Exception.Message).Text)
+        $result.Partial = (@($records | Where-Object Status -eq 'Collected').Count -gt 0)
+        try {
+            Resolve-TpmWorkflowFailure -Context $status -FailureId 'support-package-failed' -Message 'The support package was not created.' -DataSafety 'No game files or credentials were included. Collected temporary evidence will be removed.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' })
+            Acknowledge-TpmWorkflowFailure -Context $status -FailureId 'support-package-failed'
+        } catch {}
+    } finally {
+        if ($zipTemp -and (Test-Path -LiteralPath $zipTemp)) { Remove-Item -LiteralPath $zipTemp -Force -ErrorAction SilentlyContinue }
+        if ($stage -and (Test-Path -LiteralPath $stage)) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
+        if ($status -and -not $status.Closed) {
+            try {
+                if (-not $status.Failure -and $status.Lifecycle -notin @('Finished','Aborted','Closed')) { Stop-TpmWorkflowStatus -Context $status -Reason 'Support package stopped' }
+                Close-TpmWorkflowStatus -Context $status
+            } catch {}
+        }
+        $result.Records = @($records.ToArray())
+        $result.Errors = @($errors.ToArray())
+    }
+    return [pscustomobject]$result
+}
+
+function Open-TpmLogsAndReports {
+    param([Parameter(Mandatory)][string]$ScriptRoot)
+    try {
+        $target = [System.IO.Path]::GetFullPath($ScriptRoot)
+        if (-not (Test-TpmNoReparsePath -Path $target)) { return [pscustomobject]@{ Succeeded = $false; Path = $target; Error = 'The TPM folder could not be opened safely.' } }
+        if (-not (Test-Path -LiteralPath $target -PathType Container)) { return [pscustomobject]@{ Succeeded = $false; Path = $target; Error = 'The TPM logs folder does not exist yet.' } }
+        Start-Process -FilePath 'explorer.exe' -ArgumentList @($target) -ErrorAction Stop | Out-Null
+        return [pscustomobject]@{ Succeeded = $true; Path = $target; Error = $null }
+    } catch {
+        return [pscustomobject]@{ Succeeded = $false; Path = $ScriptRoot; Error = 'Windows could not open the TPM logs folder.' }
+    }
 }
 
 # Prompts for a file/folder path with an option to browse for it using a
@@ -15147,7 +15551,7 @@ if ($datIndex.Count -gt 0 -and $gameProfilesDir) {
 # of four layout tiers depending on the current console window's width
 # (Get-ConsoleLayoutTier is width-driven; see that function for the exact
 # breakpoints): Compact (<90 columns), Standard (90-119), Professional
-# (120-149), or Ultra (>=150). Every tier shows the same 14 numbered options
+# (120-149), or Ultra (>=150). Every tier shows the same 15 numbered options
 # with the same meaning; only how much description text is shown, and
 # whether the layout is one or two columns, changes. Numbering, the
 # switch-statement dispatch, and all mode behavior are completely unaffected
@@ -15202,7 +15606,8 @@ function Get-MainMenuSections {
         Header = 'Application'
         Items  = @(
             [pscustomobject]@{ Number = 13; Mode = 'CheckForUpdates'; Label = 'Check for Updates'; ShortDesc = 'Manual, backup-first check against the latest GitHub release.'; FullDesc = @('Manual, backup-first check against the latest', 'GitHub release. Nothing is downloaded or changed', 'without your explicit confirmation.') }
-            [pscustomobject]@{ Number = 14; Mode = 'Exit'; Label = 'Exit'; ShortDesc = ''; FullDesc = @() }
+            [pscustomobject]@{ Number = 14; Mode = 'Support'; Label = 'Create Support Package'; ShortDesc = 'Gather safe logs and reports into one ZIP.'; FullDesc = @('Gather safe TPM, TeknoParrot, and game diagnostics', 'into one ZIP you can send when asking for help.') }
+            [pscustomobject]@{ Number = 15; Mode = 'Exit'; Label = 'Exit'; ShortDesc = ''; FullDesc = @() }
         )
     }
     )
@@ -15762,9 +16167,8 @@ function Get-MainMenuBodyRows {
         # Deliberately placed BEFORE the section rows, not after: when a
         # short viewport forces Limit-MainMenuBodyRowsToBudget to trim body
         # rows, it keeps the TAIL of this list so the last real menu item
-        # (14, Exit) always survives. A purely decorative hint like this one
+        # (15, Exit) always survives. A purely decorative hint like this one
         # must never out-rank that -- if it were last, it would win the
-        # tail-preservation over Exit itself at a short height.
         [void]$rows.Add((New-ConsoleRenderRow -Text '  Type ? for descriptions.' -Color 'DarkGray'))
         [void]$rows.Add((New-ConsoleRenderRow))
     }
@@ -15789,12 +16193,11 @@ function Limit-MainMenuRowsToViewport {
 
 # Truncates BODY rows only (never the banner or footer) so a short-height
 # console still shows the footer's Quit/Help controls and the menu's last
-# item (14, Exit) without the terminal itself having to scroll -- issue #104
+# item (15, Exit) without the terminal itself having to scroll -- issue #104
 # RC3 correction. Earlier behavior flattened banner+body+footer into one
 # list and kept only the first N rows, which chopped off the Application
-# section (Check for Updates, Exit) and the entire footer at short heights;
-# a pre-existing test even asserted that as intentional ("small viewport...
-# leaves prompt space" previously asserted `Should -Not -Match 'Exit'`).
+# section (Check for Updates, Create Support Package, Exit) and the entire
+# footer at short heights;
 # Trimming BODY from the front (keeping its tail) instead means whatever
 # gets dropped first is the earliest sections (Library Management, Game
 # Enhancements), not the footer or the last item -- the controls a user
@@ -15877,12 +16280,12 @@ function Get-MainMenuFlowPackedItemRows {
     return @(Get-PaddedMainMenuRows -Rows $rows -Padding $Geometry.LeftPadding)
 }
 
-# Emergency compact presentation for viewports too short to show all 14
+# Emergency compact presentation for viewports too short to show all 15
 # options one per row even with every description stripped (issue #104
 # RC3-B correction: at the minimum supported 60x10 terminal, the normal
-# Compact-tier body -- 4 section headers + 14 item rows, 18 rows minimum --
+# Compact-tier body -- 4 section headers + 15 item rows, 19 rows minimum --
 # cannot fit even after Limit-MainMenuBodyRowsToBudget trims it, so the
-# normal path was silently dropping every item including 14 (Exit), leaving
+# normal path was silently dropping every item including 15 (Exit), leaving
 # only the banner and footer visible. Reserving space for Exit and the
 # footer is not enough on its own if the fix only protects those two and
 # still drops every OTHER option -- this replaces the normal framed banner
@@ -15897,7 +16300,7 @@ function Get-MainMenuEmergencyCompactRows {
         # flow-packed item rows don't all fit alongside the minimal banner
         # and footer, those two are still NEVER dropped; item rows are
         # trimmed from the front instead (keeping the tail), so the last
-        # item line -- which always ends with "14) Exit" -- and the footer
+        # item line -- which always ends with "15) Exit" -- and the footer
         # both survive even at a viewport too short to show every earlier
         # option. Below the documented 60x10 minimum this can still mean an
         # early option's line goes missing, but the footer and Exit itself
@@ -16242,10 +16645,11 @@ while ($true) {
         "11"    { $mode = "Restore"        }
         "12"    { $mode = "PostgresSetup"  }
         "13"    { $mode = "CheckForUpdates" }
-        "14"    { break }
+        "14"    { $mode = "Support" }
+        "15"    { break }
         default { Write-Host "  Invalid choice. Enter 1-$menuMaxNumber." -ForegroundColor Yellow; continue }
     }
-    if ($modeChoice -eq "14") { break }
+    if ($modeChoice -eq "15") { break }
     }
 
     if ($mode -eq "Restore") {
@@ -16692,6 +17096,55 @@ while ($true) {
         }
         Write-Log "CheckForUpdates: complete, no restart needed."
         [void](Read-Host "  Press Enter to return to menu")
+        continue
+    }
+
+    if ($mode -eq "Support") {
+        Write-Host ""
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        Write-Host " Create Support Package" -ForegroundColor Cyan
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        Write-Host "  TPM will collect safe logs and reports for you."
+        Write-Host "  It will not include game files, credentials, or arbitrary folders." -ForegroundColor DarkCyan
+        Write-Host ""
+        Write-Host "  1) Create Support Package"
+        Write-Host "  2) Open TPM Logs and Reports"
+        Write-Host "  3) Return to the main menu"
+        $supportChoice = (Read-HostSafe "  Choose 1-3").Trim()
+        if ($supportChoice -eq '2') {
+            $openResult = Open-TpmLogsAndReports -ScriptRoot $PSScriptRoot
+            if ($openResult.Succeeded) {
+                Write-Host ("  Opened: {0}" -f $openResult.Path) -ForegroundColor Green
+            } else {
+                Write-Host ("  TPM logs and reports could not be opened: {0}" -f $openResult.Error) -ForegroundColor Yellow
+                Write-Host ("  Folder: {0}" -f $openResult.Path) -ForegroundColor DarkGray
+            }
+            [void](Read-HostSafe '  Press Enter to return to the menu')
+            continue
+        }
+        if ($supportChoice -eq '1') {
+            $supportResult = New-TpmSupportPackage -ScriptRoot $PSScriptRoot -TeknoParrotRoot $tpRoot -UserProfilesDir $userProfilesDir -ApprovedGamesRoot $gamesInstallFolder
+            Write-Host ""
+            if ($supportResult.Succeeded) {
+                if ($supportResult.Partial) {
+                    Write-Host "  Support package created with partial evidence." -ForegroundColor Yellow
+                    Write-Host "  Some optional diagnostics were missing or could not be read." -ForegroundColor Yellow
+                } else {
+                    Write-Host "  Support package created successfully." -ForegroundColor Green
+                }
+                Write-Host ("  Saved here: {0}" -f $supportResult.PackagePath) -ForegroundColor Green
+                Write-Host "  This is the file to send when asking for help." -ForegroundColor Cyan
+                $openPackage = (Read-HostSafe "  Open the package folder now? (Y/N)").Trim().ToUpper()
+                if ($openPackage -eq 'Y') {
+                    try { Start-Process -FilePath 'explorer.exe' -ArgumentList @([System.IO.Path]::GetDirectoryName($supportResult.PackagePath)) -ErrorAction Stop | Out-Null } catch { Write-Host "  Windows could not open the package folder." -ForegroundColor Yellow }
+                }
+            } else {
+                Write-Host "  Support package was not created." -ForegroundColor Red
+                Write-Host "  No success was reported. Check the TPM log for details." -ForegroundColor Yellow
+                foreach ($errorText in @($supportResult.Errors)) { Write-Host ("  Reason: {0}" -f $errorText) -ForegroundColor DarkGray }
+            }
+            [void](Read-HostSafe '  Press Enter to return to the menu')
+        }
         continue
     }
 

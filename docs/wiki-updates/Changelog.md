@@ -12,6 +12,9 @@
   fail-closed backup/reset boundaries.
 - BepInEx setup offers approved x64/x86 install, update, and repair-reset paths
   with verified backup and rollback.
+- Create Support Package gathers allowlisted TPM/TeknoParrot/game diagnostics
+  and metadata-only plugin inventories into one redacted ZIP; game binaries,
+  credentials, profiles, and arbitrary directories are excluded.
 - Restore, crosshair, first-run, optional-download, update, and recovery flows
   expose beginner-readable retry/status guidance. The shared TPM STATUS footer
   uses structured events, real steps, and resize-safe cursor/append-only

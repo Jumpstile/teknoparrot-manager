@@ -1485,12 +1485,12 @@ exactly where it physically was and carries zero logic-change risk:
   setup -- status-check first, then the recovery action it would inform, with Postgres
   setup last as the narrowest-scope item in the group (and the one whose own backups are
   restored via the same Restore backup flow, at mode 11, one position earlier).
-- **Application** (13-14): Check for Updates, Exit.
+- **Application** (13-15): Check for Updates, Create Support Package, Exit.
 
 **Old -> new mapping** (for anyone cross-referencing an older screenshot, forum post, or
 saved `-Unattended` invocation): 1->1, 2->2, 3 Crosshair->4, 4 ReShade->5, 5 dgVoodoo2->6,
 6 GPU fix->7, 7 FFB->8, 8 BepInEx->9, 9 Restore backup->11, 10 Health check->10 (unchanged),
-11 Postgres->12, 12 Check for Updates->13, 13 Propagate Controls->3, 14 Exit->14.
+11 Postgres->12, 12 Check for Updates->13, 13 Propagate Controls->3, 14 Exit->15.
 
 **Drift prevention.** `Tests/TeknoParrot-Manager.Tests.ps1`'s "Main menu source-level
 drift check" reads the raw script source (the menu loop is top-level code, not a function,
@@ -1571,9 +1571,9 @@ never shows per-item description text at all (see "Short-viewport truncation" be
 the description TEXT shown there has to stay in sync with every tier, not just the Full/
 UltraCentered one).
 
-**Unchanged by design:** menu numbering (1-14), the `switch` statement's dispatch, and
-every mode's own behavior. Only `Show-MainMenu`'s rendering varies by tier -- this is
-presentation-layer work, not a mode-behavior change.
+**Unchanged by design:** existing menu numbering (1-13) and every existing mode's own behavior remain
+unchanged; option 14 adds the support-package workflow and Exit is now option 15. The `switch`
+dispatch and adaptive renderer keep the same one-source menu model.
 
 **Description text sourcing varies by tier -- a real gap found in review (RC3).**
 `Get-MainMenuSectionRows` does not use one shared description field for every tier:
@@ -1596,10 +1596,10 @@ correction, see `LESSONS_LEARNED.md`).** `Render-MainMenuScreen` builds banner, 
 footer rows separately and reserves the banner and footer unconditionally -- they are never
 truncated. If the body doesn't fit the remaining row budget, `Limit-MainMenuBodyRowsToBudget`
 trims body rows from the FRONT, keeping the tail, specifically so the last real menu item
-(14, Exit) and the footer's Quit/Help controls always render without the terminal itself
+(15, Exit) and the footer's Quit/Help controls always render without the terminal itself
 having to scroll. The Compact tier's decorative "Type ? for descriptions." hint is
 deliberately built into the body BEFORE the section rows (not after) for the same reason --
-placed after, it would out-rank the real "14) Exit" line for tail-preservation priority
+placed after, it would out-rank the real "15) Exit" line for tail-preservation priority
 purely by virtue of render order, not because it's more important. Do not "simplify" this
 back to a single flat `banner + body + footer` list truncated from one end -- that was the
 actual regression this section documents.
@@ -1607,7 +1607,7 @@ actual regression this section documents.
 **Emergency compact presentation for the 60x10 minimum supported viewport and below (RC3-B
 correction, see `LESSONS_LEARNED.md`).** Reserving Exit and the footer is not, on its own,
 enough at very short heights: at the documented minimum supported 60x10 terminal, the normal
-Compact-tier body needs 18 rows at minimum (4 section headers + 14 item rows) even with every
+Compact-tier body needs 19 rows at minimum (4 section headers + 15 item rows) even with every
 description stripped, and the normal framed banner (6 rows) plus footer (2 rows) alone
 already consume the entire available row budget there -- leaving zero rows for body content
 of any kind, Exit included. `Get-MainMenuEmergencyCompactRows` is the fallback:
@@ -1619,7 +1619,7 @@ the width allows (`Get-MainMenuFlowPackedItemRows`) instead of one item per row.
 packed whole -- a label is never split across two lines -- and if even the packed items don't
 fit the real row budget, item rows are trimmed from the front (same tail-preservation
 principle as above), so the minimal banner and footer are still never dropped, and the
-trailing item lines (ending in `14) Exit`) survive over the earliest ones. The row budget used
+trailing item lines (ending in `15) Exit`) survive over the earliest ones. The row budget used
 here, and by the normal path above it, is the caller's real requested `-Height`, not
 `$geometry.ViewportHeight` -- `Get-MainMenuGeometry` internally clamps that to a floor of 10
 for its own column-width math, which would otherwise let more rows render than an actually
@@ -1659,6 +1659,29 @@ events but perform no cursor or progress writes. Failures remain pinned until
 acknowledged. The existing menu clear/repaint path is never used as failure
 acknowledgement. Workflow start rejects a second active context, and every
 workflow branch must close or acknowledge/finalize before returning to the menu.
+
+## Support package architecture (issue #300)
+
+`New-TpmSupportPackage` is a fixed-scope collector invoked by the top-level
+menu's option 14. It creates a uniquely named ZIP beneath the script's
+`SupportPackages\` directory and returns a structured result with
+`Succeeded`, `Partial`, `PackagePath`, per-source records, and failures.
+Collection is split into TPM-owned files, allowlisted TeknoParrot files,
+registered-game text logs, and metadata-only plugin inventories.
+
+TPM and TeknoParrot sources use explicit relative filename allowlists. Game
+diagnostics are considered only for registered game paths inside the approved
+games root with non-reparse path chains. The collector reads text only; plugin
+directories are inspected for metadata and hashes but DLL payloads are never
+copied. Every text artifact passes centralized redaction before staging.
+
+The manifest records environment facts without usernames, source paths, or
+secrets, and distinguishes collected, absent, intentionally excluded, and
+failed sources. Missing optional files do not fail the package. Any unsafe
+path, staging failure, redaction/read failure, or ZIP failure prevents a
+success result. Workflow status is closed in `finally` on every exit path;
+redirected, unattended, and certification hosts therefore retain the existing
+structured-status fallback without cursor writes.
 
 ---
 

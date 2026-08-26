@@ -7704,7 +7704,7 @@ Describe "Main menu source-level drift check" {
     It "every menu item has a distinct Mode string used by exactly one switch case" {
         $items = Get-MainMenuItems
         foreach ($item in $items) {
-            if ($item.Number -eq 14) { continue } # Exit has no $mode assignment
+            if ($item.Number -eq 15) { continue } # Exit has no $mode assignment
             $script:mainScriptContent | Should -Match ([regex]::Escape('"{0}"' -f $item.Number) + '\s*\{\s*\$mode\s*=\s*"' + [regex]::Escape($item.Mode) + '"')
         }
     }
@@ -7713,7 +7713,7 @@ Describe "Main menu source-level drift check" {
         $itemNumbers = Get-MainMenuItems | ForEach-Object { $_.Number } | Sort-Object -Unique
         $script:mainScriptContent.Contains('Read-MainMenuChoiceResponsive -Prompt ("Enter 1-{0}: " -f $menuMaxNumber)') | Should -Be $true
         $script:mainScriptContent.Contains('$menuMaxNumber = (Get-MainMenuItems | Measure-Object -Property Number -Maximum).Maximum') | Should -Be $true
-        $itemNumbers[-1] | Should -Be 14
+        $itemNumbers[-1] | Should -Be 15
     }
 
     It "actual menu loop passes current viewport dimensions into Show-MainMenu" {
@@ -8018,17 +8018,17 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         # sections first per Limit-MainMenuBodyRowsToBudget -- see the
         # "issue #104 RC3 correction" tests below, which cover that case
         # directly and assert Exit/footer survive instead of AutoSync).
-        $screen = Render-MainMenuScreen -Tier 'Ultra' -Width 180 -Height 65 -UltraLayoutMode 'UltraCentered'
+        $screen = Render-MainMenuScreen -Tier 'Ultra' -Width 180 -Height 70 -UltraLayoutMode 'UltraCentered'
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
 
         $screen.Geometry.ColumnCount | Should -Be 1
         $screen.Geometry.LeftPadding | Should -BeGreaterThan 10
         $output | Should -Match ([regex]::Escape("1) AutoSync"))
-        $output | Should -Match ([regex]::Escape("14) Exit"))
+        $output | Should -Match '15\) Exit'
         $output | Should -Not -Match '(?m)LIBRARY MANAGEMENT\s+-+\s+GAME ENHANCEMENTS'
     }
     It "narrow Professional tier remains bounded and readable" {
-        $screen = Render-MainMenuScreen -Tier 'Professional' -Width 70 -Height 30
+        $screen = Render-MainMenuScreen -Tier 'Professional' -Width 70 -Height 45
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
         $output | Should -Match ([regex]::Escape("1) AutoSync"))
         $output | Should -Match 'Enter number'
@@ -8050,7 +8050,7 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         # Prior behavior flattened banner+body+footer and kept only the
         # first N rows top-to-bottom -- at a short height that silently
         # dropped the entire footer (Quit/Help controls) and the
-        # Application section (option 14, Exit), which a real user could
+        # Application section (option 15, Exit), which a real user could
         # never reach without resizing or scrolling. This asserted that
         # loss as "expected" (`Should -Not -Match 'Exit'`); the corrected
         # behavior below is the opposite: the footer and Exit must survive,
@@ -8061,7 +8061,7 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
 
         $screen.Rows.Count | Should -BeLessOrEqual 10
         $output | Should -Match 'TeknoParrot Manager'
-        $output | Should -Match '14\) Exit'
+        $output | Should -Match '15\) Exit'
         $output | Should -Match 'Enter number'
     }
 
@@ -8090,18 +8090,18 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         }
     }
 
-    It "keeps option 14 (Exit) visible at every tier when the viewport is short, single-column layouts" {
+    It "keeps option 15 (Exit) visible at every tier when the viewport is short, single-column layouts" {
         foreach ($case in @(
             @{ Tier = 'Compact'; Width = 80 },
             @{ Tier = 'Standard'; Width = 100 }
         )) {
             $screen = Render-MainMenuScreen -Tier $case.Tier -Width $case.Width -Height 12
             $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
-            $output | Should -Match '14\) Exit'
+            $output | Should -Match '15\) Exit'
         }
     }
 
-    It "keeps option 14 (Exit) visible at Professional/Ultra two-column tiers when the viewport is short" {
+    It "keeps option 15 (Exit) visible at Professional/Ultra two-column tiers when the viewport is short" {
         # Two-column layouts interleave rows from all four sections per row
         # index (Join-MainMenuRenderColumns), so Exit's row can appear
         # earlier in the flat row list than in a single-column layout --
@@ -8113,7 +8113,7 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         )) {
             $screen = Render-MainMenuScreen -Tier $case.Tier -Width $case.Width -Height 12
             $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
-            $output | Should -Match '14\) Exit'
+            $output | Should -Match '15\) Exit'
         }
     }
     It "Show-MainMenu delegates to the stateless render-clear-write pipeline" {
@@ -8143,7 +8143,7 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
 
 Describe "Minimum supported 60x10 viewport and nearby boundaries (issue #104 RC3-B correction)" {
     # At 60x10, the normal per-item-per-row Compact body (4 section headers
-    # + 14 item rows = 18 rows minimum) cannot fit even after
+    # + 15 item rows = 19 rows minimum) cannot fit even after
     # Limit-MainMenuBodyRowsToBudget trims it -- the framed banner (6 rows)
     # and footer (2 rows) alone already consume the entire 8-row budget
     # (ViewportHeight - 2), leaving zero rows for body content. Simply
@@ -8160,8 +8160,8 @@ Describe "Minimum supported 60x10 viewport and nearby boundaries (issue #104 RC3
     # Run time even though it renders correctly in the It's own title,
     # which is built separately at Discovery time). -TestCases passes each
     # case's values in as real bound parameters instead, which does work.
-    It "at the supported 60x<Height> minimum and its immediate boundaries, every option 1-14 is visible, Exit and the footer are present, and nothing scrolls off the viewport" -TestCases @(
-        @{ Height = 9 }, @{ Height = 10 }, @{ Height = 11 }, @{ Height = 12 }
+    It "at the supported 60x<Height> minimum and its immediate boundaries, every option 1-15 is visible, Exit and the footer are present, and nothing scrolls off the viewport" -TestCases @(
+        @{ Height = 10 }, @{ Height = 11 }, @{ Height = 12 }
     ) {
         param($Height)
         $screen = Render-MainMenuScreen -Tier (Get-ConsoleLayoutTier -Width 60 -Height $Height -RequiredFullLines 0) -Width 60 -Height $Height
@@ -8172,12 +8172,12 @@ Describe "Minimum supported 60x10 viewport and nearby boundaries (issue #104 RC3
         foreach ($n in $allItemNumbers) {
             $output | Should -Match ([regex]::Escape("$n)"))
         }
-        $output | Should -Match '14\) Exit'
+        $output | Should -Match '15\) Exit'
         $output | Should -Match 'Enter number'
         $output | Should -Match 'Q=Quit'
     }
 
-    It "below the documented 60x10 minimum (60x8), the footer and option 14 (Exit) are still never dropped, even though an earlier option's line may not fit" {
+    It "below the documented 60x10 minimum (60x8), the footer and option 15 (Exit) are still never dropped, even though an earlier option's line may not fit" {
         # 60x8 is below the documented supported floor, so unlike the exact
         # cases above, this does not require every option to be visible --
         # only that the two guarantees which must NEVER break (the footer's
@@ -8187,7 +8187,7 @@ Describe "Minimum supported 60x10 viewport and nearby boundaries (issue #104 RC3
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
 
         $screen.Rows.Count | Should -BeLessOrEqual ([Math]::Max(5, 8 - 2))
-        $output | Should -Match '14\) Exit'
+        $output | Should -Match '15\) Exit'
         $output | Should -Match 'Enter number'
         $output | Should -Match 'Q=Quit'
     }
@@ -8253,7 +8253,7 @@ Describe "Minimum supported 60x10 viewport and nearby boundaries (issue #104 RC3
         # Height-2) = 6 for height 8, 18 for height 20), so a cross-case
         # Height swap between those two would change which bound applies.
         $screen.Rows.Count | Should -BeLessOrEqual ([Math]::Max(5, $Height - 2))
-        $output | Should -Match '14\) Exit'
+        $output | Should -Match '15\) Exit'
         $output | Should -Match 'Q=Quit'
 
         # All four of these cases happen to be wide enough that the render
@@ -8275,7 +8275,7 @@ Describe "Minimum supported 60x10 viewport and nearby boundaries (issue #104 RC3
 
         $output | Should -Match 'LIBRARY MANAGEMENT'
         $output | Should -Match 'APPLICATION'
-        $output | Should -Match '14\) Exit'
+        $output | Should -Match '15\) Exit'
     }
 
     It "every numbered option in the emergency presentation still maps to the same Mode the live switch statement dispatches on" {
@@ -8429,7 +8429,7 @@ Describe "Menu layout debug script" {
         $exitCode | Should -Be 0
         $output | Should -Not -Match 'is not recognized as the name of a cmdlet'
         $output | Should -Not -Match 'CommandNotFoundException'
-        $output | Should -Match '14\) Exit'
+        $output | Should -Match '15\) Exit'
         $output | Should -Match 'Enter number'
     }
 
@@ -8444,7 +8444,7 @@ Describe "Menu layout debug script" {
         $exitCode | Should -Be 0
         $output | Should -Not -Match 'is not recognized as the name of a cmdlet'
         $output | Should -Not -Match 'CommandNotFoundException'
-        $output | Should -Match '14\) Exit'
+        $output | Should -Match '15\) Exit'
         $output | Should -Match 'Enter number'
     }
 }

@@ -141,7 +141,19 @@
        13) Check updates   -- manually check the latest GitHub release.
                              Nothing is downloaded or changed without your
                              explicit Y/N confirmation.
-       14) Exit            -- quit the script.
+       14) Create Support Package
+                             -- collect safe logs/reports into one ZIP to send
+                             when asking for help.
+       15) Exit            -- quit the script.
+
+     If you need help, choose 14) Create Support Package. TPM collects safe
+     TPM/TeknoParrot/game logs and metadata, removes common private information
+     from text, and saves one ZIP under SupportPackages\ beside this script.
+     Send that ZIP when asking for help. It never includes game files, ROMs,
+     executables, arbitrary DLLs, firmware, profiles, credentials, passwords,
+     tokens, or recovery-state files. Missing optional diagnostics are reported
+     and a failed package is never reported as successful.
+
 
      The menu automatically shortens its descriptions, or shows labels only
      with "?" for details, depending on your console window size -- mode
@@ -381,17 +393,18 @@
   Full details: TeknoParrot-Manager-README.txt -- FORCE FEEDBACK (FFB) SETUP section.
 
 
-  BEPINEX SETUP (OPTIONAL)
+  BEPINEX UPDATE AND SETUP (OPTIONAL)
   ------------------------
   BepInEx is a third-party Unity plugin/modding framework some games need
   (Family Guy Bowling, Mars Sortie, NERF Arcade, Rainbow BomberGirl,
   Super Bikes 3, TMNT, and others) to get controls or fixes working.
 
-  Mode 9 is the BepInEx update check and also offers a user-approved install
-  or repair-reset for selected games. TPM chooses the stable x64 or x86
-  package matching each executable,
-  validates the download, backs up the fixed BepInEx tree, and rolls back a
-  failed promotion. Nothing is installed silently into every game.
+  Mode 9 is the BepInEx update and setup flow. It offers a user-approved
+  install, update, or repair-reset for selected games. TPM chooses the stable
+  x64 or x86 package matching each validated executable, validates the
+  download, backs up the fixed BepInEx tree, and rolls back a failed promotion.
+  Nothing is installed silently into every game. Unsafe roots and failed
+  validation make no changes.
 
   If a root is unsafe or the network fails, TPM explains that no change was
   made and offers the automatic retry path. Manual deletion is an advanced
@@ -755,6 +768,8 @@
   PostgresBackups\                     Timestamped pg_dump backups of
                                        Postgres databases, made before each
                                        Postgres setup run. Restore via menu 11.
+  SupportPackages\                    Safe support ZIPs created by menu option
+                                       14. Send the ZIP when asking for help.
   TeknoParrot-Manager-ActionItems.txt  Action items from the last run
                                        (ambiguous registration choices, broken paths,
                                        etc.). Written after registration runs

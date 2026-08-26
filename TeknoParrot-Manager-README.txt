@@ -53,9 +53,10 @@
     DGVOODOO2 LEGACY COMPATIBILITY -- mode 6
     GPU COMPATIBILITY FIXES        -- mode 7
     FORCE FEEDBACK (FFB) SETUP     -- mode 8
-    BEPINEX UPDATE CHECK           -- mode 9
+    BEPINEX SETUP                   -- mode 9
     POSTGRES SETUP                 -- mode 12
     CHECK FOR UPDATES              -- mode 13
+    CREATE SUPPORT PACKAGE          -- mode 14
     THUMBNAIL DOWNLOAD
     "NOT IN TEKNOPARROT" REPORT
     CONTROLS STATUS FILE
@@ -288,13 +289,12 @@
     asked once which to use for all such games. See FORCE FEEDBACK (FFB)
     SETUP below for full details. Available as menu option 8.
 
-  - BepInEx update check. BepInEx is a third-party Unity plugin/modding
+  - BepInEx update and setup. BepInEx is a third-party Unity plugin/modding
     framework some games need (a live-fetched example list is shown in the
-    menu). This checks every game that already has BepInEx installed
-    against the latest stable release and offers one batched update. Never
-    installs BepInEx into a game that doesn't have it, and only the 64-bit
-    stable line is ever used. See BEPINEX UPDATE CHECK below. Available as
-    menu option 9.
+    menu). Mode 9 offers a user-approved install, update, or repair-reset for selected
+    games using the stable x64 or x86 package matching each validated executable.
+    Unsafe roots and failed validation make no changes. See BEPINEX SETUP
+    below. Available as menu option 9.
 
   - Postgres setup. Installs and configures the local PostgreSQL 8.3
     database that some Incredible Technologies games need (Golden Tee
@@ -645,8 +645,15 @@
        explicit Y/N confirmation. See CHECK FOR UPDATES below for full
        details.
 
-  14) Exit
+  14) Create Support Package
+       Collects safe TPM, TeknoParrot, and game diagnostics into one ZIP.
+       The ZIP is saved under SupportPackages\ beside this script. Send this
+       file when asking for help. Open TPM Logs and Reports is available from
+       the same support menu.
+
+  15) Exit
        Exits the script.
+
 
   ADAPTIVE RESPONSIVE MENU
   -------------------------
@@ -656,9 +663,9 @@
   one-line descriptions per option; a narrow or short window shows labels
   only, with "?" available at the prompt to see the full descriptions on
   demand. The console is also maximized automatically on startup where the
-  terminal supports it. Mode numbers, what each option does, and how to
-  choose one are completely unchanged -- only how much description text is
-  shown adapts to your window size.
+  terminal supports it. Within each release, menu numbers, what each option
+  does, and how to choose one stay consistent across the responsive layouts --
+  only how much description text is shown adapts to your window size.
 
 
 -------------------------------------------------------------------------------
@@ -1550,11 +1557,11 @@
 
   What mode 9 does
 
-    Mode 9 is the BepInEx update check and offers a user-approved install,
-    update, or repair-reset for selected games. TPM chooses the stable x64 or
-    x86 package matching each game's executable. It downloads only after the game root passes the
-    approved-root and non-reparse checks, verifies the staged file set and
-    backup, and uses rollback-safe promotion.
+    Mode 9 is the BepInEx update and setup flow. It offers a user-approved install,
+    update, or repair-reset for selected games. TPM chooses the stable x64 or x86
+    package matching each game's validated executable. It downloads only after
+    the game root passes the approved-root and non-reparse checks, verifies the
+    staged file set and backup, and uses rollback-safe promotion.
 
     Nothing is installed silently into every game. Unsafe roots, failed
     backups, extraction errors, digest failures, and rollback uncertainty fail
@@ -2370,6 +2377,26 @@
     properly configured with its executable path), then try the export
     again. Check TeknoParrot-Manager.log for the exact failure detail.
 
+
+-------------------------------------------------------------------------------
+  CREATE SUPPORT PACKAGE
+-------------------------------------------------------------------------------
+
+  If something goes wrong, choose "Create Support Package" from the main
+  menu. TPM collects safe diagnostics and creates one ZIP under
+  SupportPackages\ beside this script. Send that ZIP when asking for help.
+
+  The package may contain allowlisted TPM/TeknoParrot text logs, safe
+  game-local text logs, and metadata-only inventories of plugin folders.
+  It never contains ROMs, game archives, executables, arbitrary DLL payloads,
+  firmware, UserProfiles XML, configuration files, PostgreSQL passwords,
+  .pgpass, recovery state, tokens, API keys, cookies, or unrelated files.
+  Common credential patterns and unnecessary user-profile paths are redacted
+  from included text as defense in depth.
+
+  Missing optional diagnostics are recorded in the manifest. A partial
+  package is clearly marked. A collection or ZIP failure never reports
+  success.
 
 -------------------------------------------------------------------------------
   WHAT IT DOES NOT DO

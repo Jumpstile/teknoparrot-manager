@@ -11,6 +11,7 @@ Full documentation: [README.md](README.md)
 - [Requirements](#requirements)
 - [Run It](#run-it)
 - [Mode List](#mode-list)
+- [Create Support Package](#create-support-package)
 - [Game Selection (AutoSync)](#game-selection-autosync)
 - [Copy Your Controls](#copy-your-controls)
 - [Crosshair Setup](#crosshair-setup)
@@ -18,7 +19,7 @@ Full documentation: [README.md](README.md)
 - [dgVoodoo2 Legacy Compatibility](#dgvoodoo2-legacy-compatibility)
 - [GPU Compatibility Fixes](#gpu-compatibility-fixes)
 - [Force Feedback (FFB) Setup](#force-feedback-ffb-setup)
-- [BepInEx Update Check](#bepinex-update-check)
+- [BepInEx update and setup](#bepinex-update-and-setup)
 - [Postgres Setup](#postgres-setup)
 - [LaunchBox Integration](#launchbox-integration)
 - [HyperSpin 2 Export](#hyperspin-2-export)
@@ -127,9 +128,27 @@ cursor-control output.
 | 11  | **Restore backup**             | Roll TeknoParrot profiles, LaunchBox's library files, or Postgres databases back to a previous backup                                      |
 | 12  | **Postgres setup**             | Installs/configures the local PostgreSQL database some Incredible Technologies games need                                                  |
 | 13  | **Check for Updates**          | Check GitHub for a newer TPM release and install it                                                                                        |
-| 14  | **Exit**                       | Quit                                                                                                                                       |
+| 14  | **Create Support Package**     | Gather safe logs and reports into one ZIP to send when asking for help                                                                   |
+| 15  | **Exit**                       | Quit                                                                                                                                       |
+## Create Support Package
+
+If you need help, choose **Create Support Package**. TPM collects safe logs and
+reports for you, checks private information, and creates one ZIP in
+`SupportPackages\` beside the script. Send that ZIP when asking for help.
+
+The package may include allowlisted TPM and TeknoParrot text logs, safe
+game-local logs, and metadata about plugin files. It never includes ROMs, game
+executables, arbitrary DLL payloads, firmware, profiles, credentials,
+PostgreSQL passwords, `.pgpass`, recovery state, tokens, API keys, cookies, or
+unrelated personal files. If an optional diagnostic is missing or cannot be
+read, TPM says so and marks the package partial when appropriate. A failed
+collection or ZIP creation is never reported as success.
+
+Choose **Open TPM Logs and Reports** in the same menu to browse the folder
+containing TPM's current logs and reports.
 
 ---
+
 
 ## Game Selection (AutoSync)
 
@@ -256,11 +275,11 @@ troubleshooting boundary.
 
 ---
 
-## BepInEx setup
+## BepInEx update and setup
 
 [BepInEx](https://docs.bepinex.dev) is a third-party Unity plugin/modding
-framework some games need for controls or fixes. Mode 9 shows examples and
-offers a user-approved install, update, or repair-reset for the selected
+framework some games need for controls or fixes. Mode 9 is the BepInEx update
+and setup flow: it offers a user-approved install, update, or repair-reset for
 games. TPM chooses the stable x64 or x86 package from the game's executable,
 downloads it with digest validation, backs up the existing fixed BepInEx
 tree, and rolls back on a failed promotion.

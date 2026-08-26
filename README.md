@@ -33,6 +33,7 @@ tree is for review, certification, and release preparation only.
 - [Installation](#installation)
 - [Running the Script](#running-the-script)
 - [Modes](#modes)
+- [Create Support Package](#create-support-package)
 - [Game Selection (AutoSync)](#game-selection-autosync)
 - [The Staging Folder](#the-staging-folder)
 - [Registration](#registration)
@@ -46,7 +47,7 @@ tree is for review, certification, and release preparation only.
 - [dgVoodoo2 Legacy Compatibility](#dgvoodoo2-legacy-compatibility)
 - [GPU Compatibility Fixes](#gpu-compatibility-fixes)
 - [Force Feedback (FFB) Setup](#force-feedback-ffb-setup)
-- [BepInEx Update Check](#bepinex-update-check)
+- [BepInEx update and setup](#bepinex-update-and-setup)
 - [Postgres Setup](#postgres-setup)
 - [Check for Updates](#check-for-updates)
 - [LaunchBox Integration](#launchbox-integration)
@@ -240,7 +241,8 @@ Choosing mode 1 or 2 offers a preview/dry-run option first — see [Preview / Dr
 | 12                                                              | **Postgres setup**             | Installs/configures the local PostgreSQL database some Incredible Technologies games need (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball) |
 | **Application**                                                 |                                |                                                                                                                                                                                                           |
 | 13                                                              | **Check for Updates**          | Manual, backup-first check against the latest GitHub release                                                                                                                                              |
-| 14                                                              | **Exit**                       | Quit the script                                                                                                                                                                                           |
+| 14                                                              | **Create Support Package**     | Gather safe TPM, TeknoParrot, and game diagnostics into one ZIP to send when asking for help                                                                                                             |
+| 15                                                              | **Exit**                       | Quit the script                                                                                                                                                                                           |
 
 ### Adaptive responsive menu
 
@@ -248,9 +250,9 @@ The menu automatically adjusts its level of detail to your console window size i
 always showing the fully-detailed layout: a large window shows the full descriptions above
 unchanged; a medium window shows one-line descriptions per option; a narrow or short window
 shows labels only, with `?` available at the prompt to see the full descriptions on demand.
-The console is also maximized automatically on startup where the terminal supports it. Mode
-numbers, what each option does, and how to choose one are completely unchanged -- only how
-much description text is shown adapts to your window size.
+The console is also maximized automatically on startup where the terminal supports it. Within
+each release, menu numbers, what each option does, and how to choose one stay consistent across
+the responsive layouts -- only how much description text is shown adapts to your window size.
 
 ---
 
@@ -553,13 +555,13 @@ advanced troubleshooting boundary.
 
 ---
 
-## BepInEx setup
+## BepInEx update and setup
 
 [BepInEx](https://docs.bepinex.dev) is a third-party Unity plugin/modding
-framework. Mode 9 shows known examples and offers a user-approved install,
-update, or repair-reset for selected games. TPM chooses the stable x64 or x86
-package matching each executable, validates the download, backs up the fixed
-BepInEx tree, and rolls back any failed promotion.
+framework. Mode 9 is the BepInEx update and setup flow: it offers a
+user-approved install, update, or repair-reset for selected games. TPM chooses
+the stable x64 or x86 package matching each executable, validates the download,
+backs up the fixed BepInEx tree, and rolls back any failed promotion.
 
 Nothing is installed silently into every game. Unsafe roots, failed backups,
 extraction errors, digest failures, and rollback uncertainty fail closed.
@@ -990,6 +992,30 @@ again.
 - It does not provide game files. You must own or otherwise have lawful rights to the original arcade PCB and any ROM/game data you use. TPM does not provide, distribute, or endorse unauthorized game files; the script only registers and configures your legally obtained games.
 
 ---
+## Create Support Package
+
+If something goes wrong, choose **Create Support Package** from the main menu.
+TPM gathers the useful diagnostics for you and creates one ZIP in the
+`SupportPackages\` folder beside the script. The package includes a
+plain-language manifest and, where safely available, allowlisted TPM logs,
+TeknoParrot logs, game-local text logs, and metadata-only plugin inventories.
+
+The package never copies game executables, ROMs, archives, firmware, arbitrary
+DLL payloads, profiles, configuration files, credentials, PostgreSQL passwords,
+`.pgpass`, recovery state, tokens, API keys, cookies, or unrelated personal
+files. Text diagnostics are checked for common secrets and user-profile paths
+before inclusion. This redaction is additional protection, not a guarantee
+that every possible secret can be detected.
+
+At the end TPM tells you whether the ZIP was created, shows its exact path, and
+tells you that this is the file to send when asking for help. If some optional
+diagnostics were missing, the ZIP is marked as partial. A collection or ZIP
+failure never produces a success message.
+
+**Open TPM Logs and Reports** is available in the same support menu when you
+want to browse the folder containing TPM's current log and report files.
+
+---
 
 ## Files Reference
 
@@ -1001,6 +1027,7 @@ again.
 | `TeknoParrot-Manager.syncstate.json`  | Staging folder                                           | Tracks extracted ZIPs                                                                    |
 | `TeknoParrot-Manager-controls.txt`    | Scripts folder                                           | Controls state after every run                                                           |
 | `TeknoParrot-Manager-ActionItems.txt` | Scripts folder (default; Save dialog can pick elsewhere) | Action items from last run                                                               |
+| `SupportPackages\`                     | Scripts folder                                           | Safe support ZIPs created by the in-product support action                              |
 | `TeknoParrot-LaunchBox-Import.xml`    | Scripts folder                                           | LaunchBox manual-import reference XML (only if you skip direct integration)              |
 | `LaunchBoxBackups\`                   | Scripts folder                                           | Timestamped backups of LaunchBox's own files, made before each direct write              |
 | `PostgresBackups\`                    | Scripts folder                                           | Timestamped `pg_dump` backups of Postgres databases, made before each Postgres setup run |
@@ -1014,9 +1041,8 @@ again.
 
 ## Support / Contributing
 
-Found a bug, or something not working as described here? [Open an issue](https://github.com/Jumpstile/teknoparrot-manager/issues) — please include your `TeknoParrot-Manager.log` and (if relevant) `TeknoParrot-Manager-controls.txt`, most reports get resolved faster with these attached.
+Found a problem? Choose **Create Support Package** in TPM and send us the ZIP it creates. It gathers safe diagnostics automatically. Manual log attachments remain an advanced fallback. Pull requests are welcome too. Full source and version history: [github.com/Jumpstile/teknoparrot-manager](https://github.com/Jumpstile/teknoparrot-manager).
 
-Pull requests are welcome too. Full source and version history: [github.com/Jumpstile/teknoparrot-manager](https://github.com/Jumpstile/teknoparrot-manager).
 
 ---
 
