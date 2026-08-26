@@ -630,7 +630,7 @@ function Render-TpmWorkflowStatus {
             -not $Context.FooterBounds -or $Context.FooterBounds.Width -ne $capability.Width -or
             $Context.FooterBounds.Height -ne $rows.Count
         if ($Context.FooterBounds) { Clear-TpmWorkflowFooter -Context $Context }
-        if ($Context.RendererMode -eq 'AppendOnly') {
+        if ($Context.RendererMode -in @('AppendOnly', 'PermanentAppendOnly')) {
             Microsoft.PowerShell.Utility\Write-Host ($rows[0]) -ForegroundColor DarkCyan
             if ($rows.Count -gt 1) { Microsoft.PowerShell.Utility\Write-Host ($rows[1]) -ForegroundColor DarkGray }
             if ($rows.Count -gt 2) { Microsoft.PowerShell.Utility\Write-Host ($rows[2]) -ForegroundColor Yellow }
