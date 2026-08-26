@@ -9253,7 +9253,7 @@ Describe "Issue #300 shared workflow status state machine" {
         $facts = [pscustomobject]@{ CanCursor = $false; Width = 80; Height = 20; BufferWidth = 80; BufferHeight = 20 }
         $ctx = New-TpmWorkflowStatusContext -WorkflowKey 'append-only' -Title 'Append only' -Steps @('one') -ConsoleFacts $facts
         { Start-TpmWorkflowStatus -Context $ctx } | Should -Not -Throw
-        $ctx.RendererMode | Should -Be 'AppendOnly'
+        $ctx.RendererMode | Should -Be 'PermanentAppendOnly'
     }
 
     It "bypasses all rendering for redirected and certification facts" {
