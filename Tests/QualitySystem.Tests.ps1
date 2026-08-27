@@ -45,6 +45,22 @@ Describe "Quality engineering system metadata" {
             Test-Path -LiteralPath (Join-Path $repoRoot $relative) -PathType Leaf | Should -BeTrue
         }
     }
+    It "requires the RC8 remediation inventory core invariant rows" {
+        $inventoryPath = Join-Path $PSScriptRoot "..\docs\RC8-REMEDIATION-INVENTORY.md"
+        $ids = @(
+            Get-Content -LiteralPath $inventoryPath |
+                ForEach-Object {
+                    if ($_ -match '^\|\s*([A-Z]+-[A-Z]+-\d+)\s*\|') { $Matches[1] }
+                }
+        )
+        foreach ($required in @(
+            'INV-PG-01','INV-PG-02','INV-PG-03','INV-PG-04',
+            'INV-EG-01','INV-BX-01','INV-BX-02','INV-BX-03',
+            'INV-SUP-01','INV-SUP-02','INV-SUP-03','INV-SUP-04'
+        )) {
+            $ids | Should -Contain $required
+        }
+    }
 }
 
 Describe "Release Integrity source identity" -Tag 'ReleaseConsistency' {
