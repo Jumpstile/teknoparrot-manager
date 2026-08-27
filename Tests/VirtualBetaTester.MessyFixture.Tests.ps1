@@ -37,6 +37,10 @@ BeforeAll {
     $extractedFunctionsPath = Join-Path $TestDrive ("vbt-messy-functions-" + [guid]::NewGuid().ToString('N') + '.ps1')
     ($functionAsts | ForEach-Object { $_.Extent.Text }) -join "`n`n" | Set-Content -LiteralPath $extractedFunctionsPath -Encoding utf8
     . $extractedFunctionsPath
+    $script:ActiveTpmWorkflowStatus = $null
+    $script:TpmWorkflowRendering = $false
+    $script:PostgresRecoveryStatus = $null
+    $script:PostgresRecoveryResumeState = $null
 
     $resolvePcsx2Path = Join-Path $PSScriptRoot "..\scripts\Resolve-Pcsx2Directory.ps1"
     . $resolvePcsx2Path

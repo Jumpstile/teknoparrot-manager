@@ -126,6 +126,10 @@ function Invoke-VbtUpdateInstall {
 '@
     Set-Content -LiteralPath $extractedFunctionsPath -Value ($functionSource + "`n`n" + $updateBoundarySource) -Encoding utf8
     . $extractedFunctionsPath
+    $script:ActiveTpmWorkflowStatus = $null
+    $script:TpmWorkflowRendering = $false
+    $script:PostgresRecoveryStatus = $null
+    $script:PostgresRecoveryResumeState = $null
 
     # Top-level script-scope values the extracted functions read directly
     # (not captured by function-body extraction) -- mirrors production.
@@ -321,6 +325,10 @@ function Read-MainMenuChoiceResponsive {
     `$script:answerIndex++
     return [pscustomobject]@{ Redraw = `$false; Value = `$answer }
 }
+`$script:ActiveTpmWorkflowStatus = `$null
+`$script:TpmWorkflowRendering = `$false
+`$script:PostgresRecoveryStatus = `$null
+`$script:PostgresRecoveryResumeState = `$null
 `$pendingApplyMode = `$null
 `$forceRealApply = `$false
 `$Unattended = `$false

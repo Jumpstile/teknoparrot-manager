@@ -36,6 +36,8 @@ $functionAsts = $ast.FindAll({ $args[0] -is [System.Management.Automation.Langua
 foreach ($fn in $functionAsts) {
     . ([scriptblock]::Create($fn.Extent.Text))
 }
+$script:ActiveTpmWorkflowStatus = $null
+$script:TpmWorkflowRendering = $false
 
 if ($mainContent -match '\$ScriptVersion\s*=\s*"([^"]+)"') {
     $ScriptVersion = $Matches[1]

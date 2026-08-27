@@ -69,6 +69,13 @@ BeforeAll {
     $script:zipSource              = $null
     $script:zipSourceSupplementary = $null
     $script:gamesInstallFolder     = $null
+    # The production startup block initializes these script-scoped slots, but
+    # AST function extraction intentionally omits that top-level code. Mirror
+    # only the proven workflow state required by isolated strict-mode tests.
+    $script:ActiveTpmWorkflowStatus = $null
+    $script:TpmWorkflowRendering = $false
+    $script:PostgresRecoveryStatus = $null
+    $script:PostgresRecoveryResumeState = $null
 
     # Same situation for the FFB Blaster gating (issue #41) and schema-drift
     # (issue #43) constants -- they are top-level script-scope variables in
@@ -9154,6 +9161,14 @@ Describe "Issue #300 shared workflow status state machine" {
         }
     }
     It "emits ordered structured events without leaking them into normal returns" {
+        # The isolated AST fixture must not inherit workflow state from any
+        # other test file or prior test execution.
+        $script:ActiveTpmWorkflowStatus | Should -Be $null
+        $script:TpmWorkflowRendering | Should -BeFalse
+        $script:PostgresRecoveryStatus | Should -Be $null
+        $script:PostgresRecoveryResumeState | Should -Be $null
+        $script:ProductionSource | Should -Match '\$script:ActiveTpmWorkflowStatus\s*=\s*\$null'
+        $script:ProductionSource | Should -Match '\$script:TpmWorkflowRendering\s*=\s*\$false'
         $events = New-Object System.Collections.Generic.List[object]
         $facts = [pscustomobject]@{ NoRender = $true; Unattended = $false; InputRedirected = $false; OutputRedirected = $false; Certification = $false }
         $ctx = New-TpmWorkflowStatusContext -WorkflowKey 'test' -Title 'Test workflow' -Steps @('one','two','three','four') -ConsoleFacts $facts -EventSink { param($event) [void]$events.Add($event) }
@@ -9198,7 +9213,7 @@ Describe "Issue #300 shared workflow status state machine" {
         $script:statusDraws = $draws
         $script:statusClears = $clears
         $script:statusAppends = $appends
-        $facts = [pscustomobject]@{ CanCursor = $true; Width = 160; Height = 40; BufferWidth = 160; BufferHeight = 40; Adapter = $adapter }
+        $facts = [pscustomobject]@{ NoRender = $false; Unattended = $false; InputRedirected = $false; OutputRedirected = $false; Certification = $false; CanCursor = $true; Width = 160; Height = 40; BufferWidth = 160; BufferHeight = 40; Adapter = $adapter }
         $ctx = New-TpmWorkflowStatusContext -WorkflowKey 'resize' -Title 'Resize workflow' -Steps @('one','two') -ConsoleFacts $facts
         [void](Start-TpmWorkflowStatus $ctx)
         [void](Start-TpmWorkflowStep $ctx -StepId 'one' -Activity 'Wide activity')
@@ -9239,7 +9254,7 @@ Describe "Issue #300 shared workflow status state machine" {
         }
         $script:footerPromptClears = $clears
         $script:footerPromptDraws = $draws
-        $facts = [pscustomobject]@{ CanCursor = $true; Width = 120; Height = 30; BufferWidth = 120; BufferHeight = 30; Adapter = $adapter }
+        $facts = [pscustomobject]@{ NoRender = $false; Unattended = $false; InputRedirected = $false; OutputRedirected = $false; Certification = $false; CanCursor = $true; Width = 120; Height = 30; BufferWidth = 120; BufferHeight = 30; Adapter = $adapter }
         $ctx = New-TpmWorkflowStatusContext -WorkflowKey 'prompt-footer' -Title 'Prompt footer' -Steps @('one') -ConsoleFacts $facts
         [void](Start-TpmWorkflowStatus -Context $ctx)
         $initialClears = $clears.Count
@@ -9250,7 +9265,7 @@ Describe "Issue #300 shared workflow status state machine" {
     }
 
     It "publishes append-only status without recursing through the host shim" {
-        $facts = [pscustomobject]@{ CanCursor = $false; Width = 80; Height = 20; BufferWidth = 80; BufferHeight = 20 }
+        $facts = [pscustomobject]@{ NoRender = $false; Unattended = $false; InputRedirected = $false; OutputRedirected = $false; Certification = $false; CanCursor = $false; Width = 80; Height = 20; BufferWidth = 80; BufferHeight = 20; Adapter = $null }
         $ctx = New-TpmWorkflowStatusContext -WorkflowKey 'append-only' -Title 'Append only' -Steps @('one') -ConsoleFacts $facts
         { Start-TpmWorkflowStatus -Context $ctx } | Should -Not -Throw
         $ctx.RendererMode | Should -Be 'PermanentAppendOnly'
