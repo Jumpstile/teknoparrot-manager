@@ -91,18 +91,9 @@ function New-TPMSanitizationExhaustedExceptionV1 {
 }
 
 function Invoke-TPMSafeFileRetryV1 {
-    # Shared bounded-retry wrapper for the read and write halves of
-    # Write-TPMSafeTechnicalFileV1. Bound: 20 attempts at 100ms apart
-    # (~2 seconds worst case per direction) -- chosen because the handle-
-    # release race this exists for is a sub-second OS delay (see
-    # LESSONS_LEARNED.md); 2 seconds is generous headroom without letting a
-    # genuinely stuck lock hang the certification pipeline indefinitely.
-    # Only the exact transient HResults from Test-TPMTransientIOHResultV1
-    # are retried -- every other exception (UnauthorizedAccessException,
-    # a nontransient IOException such as disk-full or a bad path, or
-    # anything else) is rethrown immediately with no retry. On exhaustion
-    # this throws (never returns a value pretending success) so neither
-    # the read nor the write path can silently look like it succeeded.
+    # Shared bounded-retry wrapper for technical-log operations. PowerShell
+    # can wrap a constructor failure in MethodInvocationException, so unwrap
+    # nested IOException instances before classifying the Win32 HResult.
     param([Parameter(Mandatory=$true)][string]$Operation,[Parameter(Mandatory=$true)][string]$TargetIdentity,[Parameter(Mandatory=$true)][scriptblock]$Action)
     $stopwatch=[Diagnostics.Stopwatch]::StartNew()
     $attempt=0
@@ -110,10 +101,13 @@ function Invoke-TPMSafeFileRetryV1 {
         $attempt++
         try{
             return (& $Action)
-        }catch [IO.IOException]{
-            if(-not(Test-TPMTransientIOHResultV1 -HResult $_.Exception.HResult)){throw}
+        }catch{
+            $exception=$_.Exception
+            while($exception.InnerException -is [IO.IOException]){$exception=$exception.InnerException}
+            if($exception -isnot [IO.IOException]){throw}
+            if(-not(Test-TPMTransientIOHResultV1 -HResult $exception.HResult)){throw $exception}
             if($attempt-ge20){
-                throw (New-TPMSanitizationExhaustedExceptionV1 -Operation $Operation -TargetIdentity $TargetIdentity -AttemptCount $attempt -ElapsedMilliseconds $stopwatch.Elapsed.TotalMilliseconds -InnerException $_.Exception)
+                throw (New-TPMSanitizationExhaustedExceptionV1 -Operation $Operation -TargetIdentity $TargetIdentity -AttemptCount $attempt -ElapsedMilliseconds $stopwatch.Elapsed.TotalMilliseconds -InnerException $exception)
             }
             Start-Sleep -Milliseconds 100
         }
@@ -121,22 +115,25 @@ function Invoke-TPMSafeFileRetryV1 {
 }
 
 function Write-TPMSafeTechnicalFileV1 {
-    # Sanitization of a just-exited child's captured stdout/stderr is a
-    # safety invariant, not a best-effort convenience: nothing downstream
-    # may assume a log file is safe to display/relay unless this function
-    # actually ran to completion. A persistent (non-transient, or
-    # transient-but-never-clearing) failure on either the read or the
-    # write half must therefore throw rather than silently leaving the
-    # caller believing sanitization happened. The underlying unsanitized
-    # file is never deleted or overwritten on failure -- it remains on
-    # disk as the preserved technical evidence for diagnosis, and this
-    # function never prints its content to the operator console under any
-    # circumstance, including this failure path.
+    # Open the captured log exclusively and perform the complete
+    # read-sanitize-write transaction through that one handle. This makes
+    # the close boundary part of the sanitizer itself: a writer may not
+    # reacquire the file between a successful read and the sanitized write.
     param([Parameter(Mandatory=$true)][string]$Path)
     if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return}
-    $raw=Invoke-TPMSafeFileRetryV1 -Operation 'read-technical-log' -TargetIdentity $Path -Action { [IO.File]::ReadAllText($Path) }
-    $safe=ConvertTo-TPMSafeTechnicalTextV1 -Text $raw
-    [void](Invoke-TPMSafeFileRetryV1 -Operation 'write-technical-log' -TargetIdentity $Path -Action { [IO.File]::WriteAllText($Path,$safe,(New-Object Text.UTF8Encoding $false)) })
+    Invoke-TPMSafeFileRetryV1 -Operation 'sanitize-technical-log' -TargetIdentity $Path -Action {
+        $stream=New-Object IO.FileStream($Path,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+        try{
+            $reader=New-Object IO.StreamReader($stream,(New-Object Text.UTF8Encoding $false),$true,1024,$true)
+            try{$raw=$reader.ReadToEnd()}finally{$reader.Dispose()}
+            $safe=ConvertTo-TPMSafeTechnicalTextV1 -Text $raw
+            $bytes=(New-Object Text.UTF8Encoding $false).GetBytes($safe)
+            $stream.Position=0
+            $stream.SetLength(0)
+            $stream.Write($bytes,0,$bytes.Length)
+            $stream.Flush($true)
+        }finally{$stream.Dispose()}
+    } | Out-Null
 }
 
 function Get-TPMPathComponentsV1 {

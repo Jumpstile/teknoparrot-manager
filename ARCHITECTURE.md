@@ -2052,44 +2052,28 @@ where the original hardening still failed open. Both are now fail-closed;
 neither claims to eliminate every possible filesystem race in general, only
 the specific ones described here.
 
-**Log-sanitization retry (`Write-TPMSafeTechnicalFileV1`).** The original
-bounded retry around reading/writing a just-exited child's captured
-stdout/stderr (see the transient-handle-release race in LESSONS_LEARNED.md)
-retried every `IOException` indiscriminately and, on exhaustion, silently
-returned as if sanitization had succeeded -- so a persistently locked file
-left unsanitized content in place with no signal to the caller.
-`Invoke-TPMSafeFileRetryV1` now classifies exceptions before retrying:
+**Log-sanitization lifecycle (`Write-TPMSafeTechnicalFileV1`).** A captured
+child's stdout/stderr is not sanitized merely because `Process.HasExited` is
+true: Windows may still hold redirected-output handles briefly after process
+exit. The sanitizer now opens the technical log with `FileShare.None` and
+performs read, redaction, truncate, write, and durable flush through that
+single open handle. This makes the writer-close boundary explicit and prevents
+a writer from being reacquired between the read and sanitized write.
 
-- **Retried** (transient only): an `IOException` whose `.HResult` is exactly
-  `0x80070020` (`ERROR_SHARING_VIOLATION`) or `0x80070021`
-  (`ERROR_LOCK_VIOLATION`) -- the two Win32 codes the just-exited-child
-  handle-release race actually produces. `Exception.HResult` is a plain
-  `Int32` on every `System.Exception` in both Windows PowerShell 5.1 (.NET
-  Framework) and pwsh 7+ (.NET), so this classification is identical under
-  both engines without any engine-only API.
-- **Not retried** (fail immediately): every other `IOException` (disk-full,
-  a bad/missing path, `PathTooLongException`/`DirectoryNotFoundException` --
-  both of which derive from `IOException` and would otherwise have been
-  silently retried too), `UnauthorizedAccessException`, and anything else.
-- **Bound**: 20 attempts, 100ms apart (~2 seconds worst case per direction --
-  read and write are each retried independently), chosen because the
-  handle-release race this exists for is a sub-second OS delay; 2 seconds is
-  headroom without letting a genuinely stuck lock hang the pipeline.
-- **On exhaustion**: throws a deliberately tagged exception
-  (`SANITIZATION_RETRY_EXHAUSTED: operation=... target=... attempts=...
-elapsedMs=... innerType=... innerHResult=...`, carried as a
-  `System.IO.IOException` with the original exception preserved as
-  `InnerException`) rather than returning. Both the read half and the write
-  half of `Write-TPMSafeTechnicalFileV1` throw on exhaustion -- neither can
-  silently look like it succeeded. The underlying unsanitized file is never
-  deleted or overwritten on failure (the preserved technical evidence for
-  diagnosis), and no unsanitized content is ever written to the operator
-  console, including on this failure path. Because
-  `Invoke-TPMIsolatedProcessV1` calls this function unguarded, the exception
-  propagates naturally into the harness's existing top-level `catch`, which
-  is the same "PIPELINE ABORTED (infrastructure failure)" path every other
-  isolation failure already uses -- no separate classification wiring was
-  needed.
+`Invoke-TPMSafeFileRetryV1` unwraps PowerShell constructor wrappers before
+classifying exceptions. It retries only the exact transient Win32 HResults
+`0x80070020` (`ERROR_SHARING_VIOLATION`) and `0x80070021`
+(`ERROR_LOCK_VIOLATION`), which cover the observed redirected-output release
+race. Other IO errors, `UnauthorizedAccessException`, and unrelated failures
+are not retried. The bound remains 20 attempts at 100ms intervals.
+
+On exhaustion it throws a tagged
+`SANITIZATION_RETRY_EXHAUSTED: operation=... target=... attempts=...` exception
+instead of claiming success. The raw technical log remains preserved and is
+never printed to the operator console. Because
+`Invoke-TPMIsolatedProcessV1` sanitizes both captured stdout and stderr only
+after disposing the child process object, its returned result is not produced
+until both files have passed this exclusive-handle finalization boundary.
 
 **Owned-directory reparse validation (`Assert-TPMOwnedDirectoryV1`,
 `New-TPMCreateNewFileV1`).** The original version checked only the final

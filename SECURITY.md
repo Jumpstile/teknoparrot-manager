@@ -600,19 +600,17 @@ adversarial test inventory.
 Two invariants in `scripts/TPMCertification.Execution.psm1` that previously
 failed open now fail closed:
 
-- **Sanitizing a just-exited child's captured stdout/stderr is a safety
-  invariant, not a best-effort convenience.** `Write-TPMSafeTechnicalFileV1`
-  retries only the exact transient Win32 errors the just-exited-child
-  handle-release race produces (`ERROR_SHARING_VIOLATION` /
-  `ERROR_LOCK_VIOLATION`, `IOException.HResult` `0x80070020` /
-  `0x80070021`) for a bounded 20 attempts / ~2 seconds; every other
-  exception (disk-full, a bad path, `UnauthorizedAccessException`, etc.)
-  throws immediately with no retry. On retry exhaustion it throws a
-  distinctly tagged exception (`SANITIZATION_RETRY_EXHAUSTED:` ...) instead
-  of silently returning -- neither the read half nor the write half can
-  look like it succeeded when it did not. The unsanitized evidence file is
-  never deleted or overwritten on failure, and no unsanitized content is
-  ever written to the operator console, including in this failure path.
+- **Sanitizing captured stdout/stderr is a close-boundary safety invariant,
+  not a best-effort convenience.** The sanitizer opens each log with
+  `FileShare.None` and performs the complete read, redaction, truncate, write,
+  and durable flush through that one handle. This prevents a writer from being
+  reacquired between reading and writing. The bounded retry unwraps PowerShell
+  constructor wrappers and retries only the exact transient
+  `IOException.HResult` values `0x80070020` (`ERROR_SHARING_VIOLATION`) and
+  `0x80070021` (`ERROR_LOCK_VIOLATION`); all other exceptions fail immediately.
+  Exhaustion throws the tagged `SANITIZATION_RETRY_EXHAUSTED:` exception.
+  The raw technical evidence is never deleted, overwritten, or printed when
+  sanitization fails.
 - **Every existing component of an owned directory's path, from a
   CALLER-SUPPLIED trusted root through the target, is checked individually
   for the `ReparsePoint` attribute** (`Assert-TPMNoReparseInChainV1`) --

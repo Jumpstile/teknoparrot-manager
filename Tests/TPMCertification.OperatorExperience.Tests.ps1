@@ -520,6 +520,35 @@ Describe 'log sanitization fails closed on persistent retry exhaustion' {
    }
    Should -Invoke -ModuleName TPMCertification.Execution -CommandName Write-Host -Times 0 -Because 'the sanitization failure path must never display unsanitized (or any) content to the operator console'
   }
+  It 'does not sanitize until an exclusive writer handle is released' {
+   $path=Join-Path $TestDrive 'writer-release-boundary.log'
+   [IO.File]::WriteAllText($path,"before`e[31mred`e[0m",(New-Object Text.UTF8Encoding $false))
+   $blocker=New-Object IO.FileStream($path,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+   $script:sanitizeInvoked=$false
+   Mock -ModuleName TPMCertification.Execution ConvertTo-TPMSafeTechnicalTextV1 { param([string]$Text) $script:sanitizeInvoked=$true; return ($Text -replace "`e\[[0-9;]*m",'') }
+   $releasePs=[PowerShell]::Create()
+   [void]$releasePs.AddScript({param($blockerStream) Start-Sleep -Milliseconds 350; $blockerStream.Dispose()}).AddArgument($blocker)
+   $releaseHandle=$releasePs.BeginInvoke()
+   try{
+    { Write-TPMSafeTechnicalFileV1 -Path $path }|Should -Not -Throw
+   }finally{
+    [void]$releasePs.EndInvoke($releaseHandle)
+    $releasePs.Dispose()
+   }
+   $script:sanitizeInvoked|Should -BeTrue
+   [IO.File]::ReadAllText($path)|Should -Be 'beforered'
+  }
+
+  It 'keeps an outer self-owned technical log as raw evidence on sharing failure' {
+   $path=Join-Path $TestDrive 'outer-harness-owned.log'
+   $original='outer technical output'
+   [IO.File]::WriteAllText($path,$original,(New-Object Text.UTF8Encoding $false))
+   $blocker=New-Object IO.FileStream($path,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+   try{
+    { Write-TPMSafeTechnicalFileV1 -Path $path }|Should -Throw '*SANITIZATION_RETRY_EXHAUSTED*'
+   }finally{$blocker.Dispose()}
+   [IO.File]::ReadAllText($path)|Should -Be $original
+  }
  }
 }
 
