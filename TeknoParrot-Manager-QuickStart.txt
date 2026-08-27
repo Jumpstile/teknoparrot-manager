@@ -149,10 +149,12 @@
      If you need help, choose 14) Create Support Package. TPM collects safe
      TPM/TeknoParrot/game logs and metadata, removes common private information
      from text, and saves one ZIP under SupportPackages\ beside this script.
-     Send that ZIP when asking for help. It never includes game files, ROMs,
-     executables, arbitrary DLLs, firmware, profiles, credentials, passwords,
-     tokens, or recovery-state files. Missing optional diagnostics are reported
-     and a failed package is never reported as successful.
+     Executable/archive masquerades, binary control bytes, and invalid text
+     are rejected and recorded. Send that ZIP when asking for help. It never
+     includes game files, ROMs, executables, arbitrary DLLs, firmware, profiles,
+     credentials, passwords, tokens, or recovery-state files. Missing optional
+     diagnostics are reported and a failed or cleanup-incomplete package is
+     never reported as successful.
 
 
      The menu automatically shortens its descriptions, or shows labels only

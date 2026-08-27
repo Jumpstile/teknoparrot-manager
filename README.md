@@ -1003,14 +1003,18 @@ TeknoParrot logs, game-local text logs, and metadata-only plugin inventories.
 The package never copies game executables, ROMs, archives, firmware, arbitrary
 DLL payloads, profiles, configuration files, credentials, PostgreSQL passwords,
 `.pgpass`, recovery state, tokens, API keys, cookies, or unrelated personal
-files. Text diagnostics are checked for common secrets and user-profile paths
-before inclusion. This redaction is additional protection, not a guarantee
-that every possible secret can be detected.
+files. Text diagnostics are checked for executable/archive signatures, binary
+control bytes, invalid encoding, common secrets, and user-profile paths before
+inclusion. Unsafe content is recorded as rejected rather than staged. This
+redaction is additional protection, not a guarantee that every possible secret
+can be detected.
 
 At the end TPM tells you whether the ZIP was created, shows its exact path, and
 tells you that this is the file to send when asking for help. If some optional
-diagnostics were missing, the ZIP is marked as partial. A collection or ZIP
-failure never produces a success message.
+diagnostics were missing, the ZIP is marked as partial. If promotion or
+temporary staging cleanup cannot be proven safe, TPM reports a partial result
+and action required instead of clean success. A collection or ZIP failure
+never produces a success message.
 
 **Open TPM Logs and Reports** is available in the same support menu when you
 want to browse the folder containing TPM's current log and report files.

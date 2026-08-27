@@ -647,9 +647,12 @@
 
   14) Create Support Package
        Collects safe TPM, TeknoParrot, and game diagnostics into one ZIP.
+       Text is checked for binary/archive content and common private
+       information before inclusion; unsafe content is recorded as rejected.
        The ZIP is saved under SupportPackages\ beside this script. Send this
        file when asking for help. Open TPM Logs and Reports is available from
-       the same support menu.
+       the same support menu. A promotion or staging-cleanup problem is
+       reported as partial/action required, never clean success.
 
   15) Exit
        Exits the script.

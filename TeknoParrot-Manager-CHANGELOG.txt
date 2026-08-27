@@ -25,8 +25,12 @@
   UX: restore, crosshair, first-run, optional-download, update, recovery, and
   support-package paths keep beginner-readable status/retry guidance visible.
   Create Support Package collects allowlisted TPM/TeknoParrot/game text logs
-  plus metadata-only plugin inventories into one redacted ZIP; it never copies
-  game binaries, credentials, or arbitrary directories. The shared TPM STATUS
+  plus metadata-only plugin inventories into one redacted ZIP; unsafe
+  executable/archive masquerades and materially binary text are rejected
+  instead of staged, and it never copies game binaries, credentials, or
+  arbitrary directories. Source/profile paths and the output root are
+  revalidated for containment and reparse safety; cleanup failures remain
+  partial/action-required rather than green success. The shared TPM STATUS
   footer uses structured events, real steps, and resize-safe cursor/append-only
   fallbacks without affecting redirected runs.
 

@@ -1671,16 +1671,23 @@ registered-game text logs, and metadata-only plugin inventories.
 
 TPM and TeknoParrot sources use explicit relative filename allowlists. Game
 diagnostics are considered only for registered game paths inside the approved
-games root with non-reparse path chains. The collector reads text only; plugin
-directories are inspected for metadata and hashes but DLL payloads are never
-copied. Every text artifact passes centralized redaction before staging.
+games root with non-reparse path chains. Profile paths are revalidated as
+contained, non-reparse files immediately before XML parsing. The collector
+reads text only; plugin directories are inspected for metadata and hashes but
+DLL payloads are never copied. Every text artifact is opened after a final
+source safety check, validated as strict BOM-aware UTF-8/UTF-16 text, and
+rejected with `RejectedUnsafeContent` when it has executable/archive
+signatures, NUL/control bytes, or invalid encoding.
 
 The manifest records environment facts without usernames, source paths, or
-secrets, and distinguishes collected, absent, intentionally excluded, and
-failed sources. Missing optional files do not fail the package. Any unsafe
-path, staging failure, redaction/read failure, or ZIP failure prevents a
-success result. Workflow status is closed in `finally` on every exit path;
-redirected, unattended, and certification hosts therefore retain the existing
+secrets, and every dynamic source, destination, detail, error, and scope value
+passes centralized redaction before insertion. ZIP entry names are generated
+from bounded safe names. The output root is checked as non-reparse immediately
+before promotion; staging cleanup rechecks the complete tree and reports a
+partial package when cleanup cannot be proven safe. Any unsafe path, staging
+failure, redaction/read failure, or ZIP failure prevents a success result.
+Workflow status is closed in `finally` on every exit path; redirected,
+unattended, and certification hosts therefore retain the existing
 structured-status fallback without cursor writes.
 
 ---

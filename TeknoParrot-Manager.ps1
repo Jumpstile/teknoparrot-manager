@@ -893,6 +893,7 @@ function Redact-TpmSupportText {
     $value = if ($null -eq $Text) { '' } else { $Text }
     $count = 0
     $patterns = @(
+        '(?im)(authorization)\s*[:=]\s*(?:bearer|basic)\s+[^\s,;]+',
         '(?im)(password|passwd|pwd|secret|token|api[_-]?key|authorization)\s*[:=]\s*("[^"]*"|''[^'']*''|[^\s,;]+)',
         '(?im)(PGPASSWORD|PGUSER|PGHOST|PGPORT)\s*=\s*[^\s,;]+',
         '(?im)(postgres(?:ql)?://)[^\s"''<>]+',
@@ -918,12 +919,80 @@ function Redact-TpmSupportText {
     }
     return [pscustomobject]@{ Text = $value; RedactionCount = $count }
 }
+function Test-TpmSupportTextContent {
+    param([Parameter(Mandatory)][byte[]]$Bytes)
+    if ($Bytes.Length -ge 2 -and $Bytes[0] -eq 0x4d -and $Bytes[1] -eq 0x5a) { return [pscustomobject]@{ Safe = $false; Reason = 'PE/DOS executable signature (MZ)'; Encoding = $null; Text = $null } }
+    if ($Bytes.Length -ge 4 -and (($Bytes[0] -eq 0x50 -and $Bytes[1] -eq 0x4b -and $Bytes[2] -eq 0x03 -and $Bytes[3] -eq 0x04) -or ($Bytes[0] -eq 0x50 -and $Bytes[1] -eq 0x4b -and $Bytes[2] -eq 0x05 -and $Bytes[3] -eq 0x06) -or ($Bytes[0] -eq 0x50 -and $Bytes[1] -eq 0x4b -and $Bytes[2] -eq 0x07 -and $Bytes[3] -eq 0x08))) { return [pscustomobject]@{ Safe = $false; Reason = 'ZIP archive signature (PK)'; Encoding = $null; Text = $null } }
+    if ($Bytes.Length -ge 6 -and $Bytes[0] -eq 0x37 -and $Bytes[1] -eq 0x7a -and $Bytes[2] -eq 0xbc -and $Bytes[3] -eq 0xaf -and $Bytes[4] -eq 0x27 -and $Bytes[5] -eq 0x1c) { return [pscustomobject]@{ Safe = $false; Reason = '7z archive signature'; Encoding = $null; Text = $null } }
+    if ($Bytes.Length -ge 6 -and $Bytes[0] -eq 0x52 -and $Bytes[1] -eq 0x61 -and $Bytes[2] -eq 0x72 -and $Bytes[3] -eq 0x21 -and $Bytes[4] -eq 0x1a -and $Bytes[5] -eq 0x07) { return [pscustomobject]@{ Safe = $false; Reason = 'RAR archive signature'; Encoding = $null; Text = $null } }
+    if ($Bytes.Length -ge 2 -and $Bytes[0] -eq 0x1f -and $Bytes[1] -eq 0x8b) { return [pscustomobject]@{ Safe = $false; Reason = 'gzip archive signature'; Encoding = $null; Text = $null } }
+    if ($Bytes.Length -ge 4 -and $Bytes[0] -eq 0x4d -and $Bytes[1] -eq 0x53 -and $Bytes[2] -eq 0x43 -and $Bytes[3] -eq 0x46) { return [pscustomobject]@{ Safe = $false; Reason = 'CAB archive signature'; Encoding = $null; Text = $null } }
+    if ($Bytes.Length -ge 4 -and $Bytes[0] -eq 0x7f -and $Bytes[1] -eq 0x45 -and $Bytes[2] -eq 0x4c -and $Bytes[3] -eq 0x46) { return [pscustomobject]@{ Safe = $false; Reason = 'ELF executable signature'; Encoding = $null; Text = $null } }
+    if ($Bytes.Length -ge 4 -and $Bytes[0] -eq 0xd0 -and $Bytes[1] -eq 0xcf -and $Bytes[2] -eq 0x11 -and $Bytes[3] -eq 0xe0) { return [pscustomobject]@{ Safe = $false; Reason = 'OLE compound binary signature'; Encoding = $null; Text = $null } }
+    $encoding = $null
+    $offset = 0
+    if ($Bytes.Length -ge 3 -and $Bytes[0] -eq 0xef -and $Bytes[1] -eq 0xbb -and $Bytes[2] -eq 0xbf) {
+        $encoding = New-Object System.Text.UTF8Encoding($true, $true)
+        $offset = 3
+        $encodingName = 'UTF-8 BOM'
+    } elseif ($Bytes.Length -ge 2 -and $Bytes[0] -eq 0xff -and $Bytes[1] -eq 0xfe) {
+        $encoding = New-Object System.Text.UnicodeEncoding($false, $true, $true)
+        $offset = 2
+        $encodingName = 'UTF-16 LE BOM'
+    } elseif ($Bytes.Length -ge 2 -and $Bytes[0] -eq 0xfe -and $Bytes[1] -eq 0xff) {
+        $encoding = New-Object System.Text.UnicodeEncoding($true, $true, $true)
+        $offset = 2
+        $encodingName = 'UTF-16 BE BOM'
+    } else {
+        $encoding = New-Object System.Text.UTF8Encoding($false, $true)
+        $encodingName = 'UTF-8'
+        $nulCount = @($Bytes | Where-Object { $_ -eq 0 }).Count
+        if ($nulCount -gt 0) { return [pscustomobject]@{ Safe = $false; Reason = 'Material NUL-byte content without a text BOM'; Encoding = $null; Text = $null } }
+    }
+    try {
+        $text = $encoding.GetString($Bytes, $offset, $Bytes.Length - $offset)
+        $controlCount = @([char[]]$text | Where-Object { [int]$_ -lt 32 -and [int]$_ -notin @(9,10,13,27) }).Count
+        if ($controlCount -gt 0) { return [pscustomobject]@{ Safe = $false; Reason = 'Material binary/control-byte content'; Encoding = $null; Text = $null } }
+        return [pscustomobject]@{ Safe = $true; Reason = 'text'; Encoding = $encodingName; Text = $text }
+    } catch {
+        return [pscustomobject]@{ Safe = $false; Reason = 'Invalid or materially non-text encoding'; Encoding = $null; Text = $null }
+    }
+}
+function Test-TpmSupportDirectoryTreeSafe {
+    param([Parameter(Mandatory)][string]$Path)
+    try {
+        if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return $false }
+        $root = [System.IO.Path]::GetFullPath($Path)
+        $pending = New-Object 'System.Collections.Generic.Stack[string]'
+        $pending.Push($root)
+        while ($pending.Count -gt 0) {
+            $current = $pending.Pop()
+            if (-not (Test-PathInside -child $current -parent $root) -or -not (Test-TpmNoReparsePath -Path $current)) { return $false }
+            foreach ($child in @(Get-ChildItem -LiteralPath $current -Force -ErrorAction Stop)) {
+                if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+                if ($child.PSIsContainer) { $pending.Push($child.FullName) }
+            }
+        }
+        return $true
+    } catch { return $false }
+}
+
+function Remove-TpmSupportStageDirectory {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $true }
+    if (-not (Test-TpmSupportDirectoryTreeSafe -Path $Path)) { return $false }
+    try {
+        if (-not (Test-TpmSupportDirectoryTreeSafe -Path $Path)) { return $false }
+        Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+        return (-not (Test-Path -LiteralPath $Path))
+    } catch { return $false }
+}
 
 function Add-TpmSupportRecord {
     param(
         [Parameter(Mandatory)]$Records,
         [Parameter(Mandatory)][string]$Source,
-        [Parameter(Mandatory)][ValidateSet('Collected','NotPresent','IntentionallyExcluded','CollectionFailed')][string]$Status,
+        [Parameter(Mandatory)][ValidateSet('Collected','NotPresent','IntentionallyExcluded','RejectedUnsafeContent','CollectionFailed')][string]$Status,
         [string]$Destination = '',
         [string]$Detail = '',
         [int]$Redactions = 0
@@ -969,15 +1038,39 @@ function Copy-TpmSupportTextFile {
     }
     try {
         $item = Get-Item -LiteralPath $sourceFull -Force -ErrorAction Stop
+        if (-not (Test-TpmNoReparsePath -Path $sourceFull)) {
+            Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status RejectedUnsafeContent -Detail 'Diagnostic path safety changed before the file was opened.'
+            return
+        }
         if ($item.Length -gt $MaximumBytes) {
             Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status IntentionallyExcluded -Detail 'Diagnostic text exceeded the safe size limit.'
             return
         }
-        $text = [System.IO.File]::ReadAllText($sourceFull)
-        $redacted = Redact-TpmSupportText -Text $text
+        $stream = New-Object System.IO.FileStream($sourceFull, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        try {
+            if ($stream.Length -gt $MaximumBytes) {
+                Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status IntentionallyExcluded -Detail 'Diagnostic text exceeded the safe size limit.'
+                return
+            }
+            $bytes = New-Object byte[] ([int]$stream.Length)
+            $offset = 0
+            while ($offset -lt $bytes.Length) {
+                $read = $stream.Read($bytes, $offset, $bytes.Length - $offset)
+                if ($read -le 0) { throw 'Diagnostic file ended before its validated length was read.' }
+                $offset += $read
+            }
+        } finally {
+            $stream.Dispose()
+        }
+        $content = Test-TpmSupportTextContent -Bytes $bytes
+        if (-not $content.Safe) {
+            Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status RejectedUnsafeContent -Detail ('Diagnostic content rejected: ' + $content.Reason)
+            return
+        }
+        $redacted = Redact-TpmSupportText -Text $content.Text
         $destination = Join-Path $StageDirectory $DestinationName
         [System.IO.File]::WriteAllText($destination, $redacted.Text, (New-Object System.Text.UTF8Encoding($false)))
-        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status Collected -Destination $DestinationName -Detail 'Allowlisted text diagnostic collected.' -Redactions $redacted.RedactionCount
+        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status Collected -Destination $DestinationName -Detail ('Allowlisted text diagnostic collected as ' + $content.Encoding + '.') -Redactions $redacted.RedactionCount
     } catch {
         Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status CollectionFailed -Detail 'The allowlisted diagnostic could not be read or redacted safely.'
     }
@@ -986,9 +1079,13 @@ function Copy-TpmSupportTextFile {
 function Get-TpmSupportFileSha256 {
     param([Parameter(Mandatory)][string]$Path)
     $sha = [System.Security.Cryptography.SHA256]::Create()
+    $stream = $null
     try {
-        return (-join ($sha.ComputeHash([System.IO.File]::ReadAllBytes($Path)) | ForEach-Object { $_.ToString('x2') }))
+        $stream = New-Object System.IO.FileStream($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        if ($stream.Length -gt 67108864) { return 'HASH_SKIPPED_OVERSIZED' }
+        return (-join ($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') }))
     } finally {
+        if ($stream) { $stream.Dispose() }
         $sha.Dispose()
     }
 }
@@ -1000,6 +1097,10 @@ function Get-TpmSupportPluginInventory {
         [Parameter(Mandatory)]$Records,
         [Parameter(Mandatory)][string]$StageDirectory
     )
+    if (-not (Test-TpmNoReparsePath -Path $GameRoot)) {
+        Add-TpmSupportRecord -Records $Records -Source ('Game:' + $GameCode + ':plugin inventory') -Status RejectedUnsafeContent -Detail 'Game path safety changed before plugin inspection.'
+        return
+    }
     $pluginRoots = New-Object System.Collections.Generic.List[string]
     $bepPlugins = Join-Path $GameRoot 'BepInEx\plugins'
     if (Test-Path -LiteralPath $bepPlugins -PathType Container) { [void]$pluginRoots.Add($bepPlugins) }
@@ -1043,6 +1144,10 @@ function Get-TpmSupportPluginInventory {
                     }
                     if ($child.PSIsContainer) {
                         $pending.Push($child.FullName)
+                        continue
+                    }
+                    if (-not (Test-TpmNoReparsePath -Path $child.FullName)) {
+                        $rows.Add('[EXCLUDED]' + "`t" + (Get-TpmSupportSafeName $child.Name) + "`tunsafe-file-path") | Out-Null
                         continue
                     }
                     if ($fileCount -ge 500) {
@@ -1092,7 +1197,8 @@ function Get-TpmSupportManifestText {
     $lines.Add('PowerShell: ' + $PSVersionTable.PSVersion.ToString()) | Out-Null
     $lines.Add('OS: Windows ' + [Environment]::OSVersion.Version.ToString()) | Out-Null
     $lines.Add('64-bit operating system: ' + [Environment]::Is64BitOperatingSystem) | Out-Null
-    $lines.Add('Affected game scope: ' + $AffectedGameSummary) | Out-Null
+    $safeAffectedGameSummary = (Redact-TpmSupportText -Text $AffectedGameSummary).Text
+    $lines.Add('Affected game scope: ' + $safeAffectedGameSummary) | Out-Null
     $lines.Add('Registered game diagnostics considered: ' + $GameCodes.Count) | Out-Null
     $lines.Add('') | Out-Null
     $lines.Add('Diagnostic sources checked:') | Out-Null
@@ -1101,11 +1207,11 @@ function Get-TpmSupportManifestText {
     $lines.Add('- Allowlisted text logs in safely identified registered game folders') | Out-Null
     $lines.Add('- Metadata-only inventories of allowlisted BepInEx and Unity plugin folders') | Out-Null
     $lines.Add('') | Out-Null
-    $lines.Add('Collection results:') | Out-Null
     foreach ($record in $Records) {
-        $detail = if ($record.Detail) { ' -- ' + $record.Detail } else { '' }
-        $destination = if ($record.Destination) { ' -> ' + $record.Destination } else { '' }
-        $lines.Add(('[{0}] {1}{2}{3}' -f $record.Status, $record.Source, $destination, $detail)) | Out-Null
+        $recordSource = (Redact-TpmSupportText -Text ([string]$record.Source)).Text
+        $detail = if ($record.Detail) { ' -- ' + (Redact-TpmSupportText -Text ([string]$record.Detail)).Text } else { '' }
+        $destination = if ($record.Destination) { ' -> ' + (Redact-TpmSupportText -Text ([string]$record.Destination)).Text } else { '' }
+        $lines.Add(('[{0}] {1}{2}{3}' -f $record.Status, $recordSource, $destination, $detail)) | Out-Null
     }
     $lines.Add('') | Out-Null
     $lines.Add('Intentionally excluded by design:') | Out-Null
@@ -1133,7 +1239,8 @@ function New-TpmSupportPackage {
         [string]$UserProfilesDir = '',
         [string]$ApprovedGamesRoot = '',
         [string]$OutputRoot = '',
-        [string]$AffectedGameSummary = 'all safely identified registered games'
+        [string]$AffectedGameSummary = 'all safely identified registered games',
+        [scriptblock]$EventSink = $null
     )
     $records = New-Object System.Collections.Generic.List[object]
     $errors = New-Object System.Collections.Generic.List[string]
@@ -1144,7 +1251,7 @@ function New-TpmSupportPackage {
         @{ Id = 'game'; Label = 'Check game-specific logs and metadata' }
         @{ Id = 'redact'; Label = 'Remove private information' }
         @{ Id = 'zip'; Label = 'Create support ZIP' }
-    )
+    ) -EventSink $EventSink
     $stage = $null
     $zipTemp = $null
     $packagePath = $null
@@ -1165,6 +1272,7 @@ function New-TpmSupportPackage {
         $requestedOutputRoot = [System.IO.Path]::GetFullPath($OutputRoot).TrimEnd('\','/')
         if (-not [string]::Equals($expectedOutputRoot, $requestedOutputRoot, [System.StringComparison]::OrdinalIgnoreCase)) { throw 'Support package destination must be the TPM SupportPackages folder.' }
         if (-not (Test-Path -LiteralPath $OutputRoot -PathType Container)) { [void](New-Item -ItemType Directory -Path $OutputRoot -Force) }
+        if (-not (Test-TpmNoReparsePath -Path $OutputRoot)) { throw 'Support package destination is reparse-backed or inaccessible.' }
         $stage = Join-Path ([System.IO.Path]::GetTempPath()) ('tpm-support-stage-' + [guid]::NewGuid().ToString('N'))
         [void](New-Item -ItemType Directory -Path (Join-Path $stage 'diagnostics'), (Join-Path $stage 'metadata') -Force)
         if (-not (Test-TpmNoReparsePath -Path $stage)) { throw 'Support package staging folder is unsafe.' }
@@ -1199,7 +1307,19 @@ function New-TpmSupportPackage {
             foreach ($profileFile in $profileFiles) {
                 $code = Get-TpmSupportSafeName $profileFile.BaseName
                 try {
-                    $doc = Read-Xml $profileFile.FullName
+                    $profileFull = [System.IO.Path]::GetFullPath($profileFile.FullName)
+                    if (-not (Test-PathInside -child $profileFull -parent $UserProfilesDir) -or -not (Test-TpmNoReparsePath -Path $profileFull)) {
+                        Add-TpmSupportRecord -Records $records -Source ('Game:' + $code) -Status RejectedUnsafeContent -Detail 'Profile path was reparse-backed or escaped the approved UserProfiles folder.'
+                        continue
+                    }
+                    $profileStream = New-Object System.IO.FileStream($profileFull, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                    try {
+                        $doc = New-Object System.Xml.XmlDocument
+                        $doc.XmlResolver = $null
+                        $doc.Load($profileStream)
+                    } finally {
+                        $profileStream.Dispose()
+                    }
                     $gamePathNode = $doc.SelectSingleNode('/GameProfile/GamePath')
                     $gamePath = if ($gamePathNode) { [string]$gamePathNode.InnerText } else { '' }
                     if ([string]::IsNullOrWhiteSpace($gamePath)) {
@@ -1239,24 +1359,43 @@ function New-TpmSupportPackage {
         if ([string]::IsNullOrWhiteSpace($packagePath)) { throw 'Could not reserve a safe support package filename.' }
         $zipTemp = Join-Path ([System.IO.Path]::GetTempPath()) ('tpm-support-' + [guid]::NewGuid().ToString('N') + '.zip')
         [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $zipTemp, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+        if (-not (Test-TpmNoReparsePath -Path $OutputRoot) -or (Test-Path -LiteralPath $packagePath)) { throw 'Support package destination changed or is no longer collision-safe.' }
         [System.IO.File]::Move($zipTemp, $packagePath)
         $zipTemp = $null
         if (-not (Test-Path -LiteralPath $packagePath -PathType Leaf)) { throw 'The support ZIP could not be verified after creation.' }
+        $result.PackagePath = $packagePath
+        if (-not (Remove-TpmSupportStageDirectory -Path $stage)) {
+            $result.Partial = $true
+            [void]$errors.Add('Support ZIP was created, but temporary diagnostic staging cleanup needs attention.')
+            throw 'Support staging cleanup did not complete safely.'
+        }
+        $stage = $null
         if (@($records | Where-Object Status -eq 'CollectionFailed').Count -gt 0) { $result.Partial = $true }
         Complete-TpmWorkflowStep -Context $status -Summary 'Support ZIP created' -NextStep 'Send the ZIP when asking for help'
         Complete-TpmWorkflowStatus -Context $status -Summary 'Support package created'
         $result.Succeeded = $true
-        $result.PackagePath = $packagePath
     } catch {
         [void]$errors.Add((Redact-TpmSupportText -Text $_.Exception.Message).Text)
-        $result.Partial = (@($records | Where-Object Status -eq 'Collected').Count -gt 0)
+        $result.Partial = $result.Partial -or (@($records | Where-Object Status -eq 'Collected').Count -gt 0)
         try {
-            Resolve-TpmWorkflowFailure -Context $status -FailureId 'support-package-failed' -Message 'The support package was not created.' -DataSafety 'No game files or credentials were included. Collected temporary evidence will be removed.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' })
+            $failureMessage = if ($result.PackagePath) { 'Support ZIP was created, but temporary cleanup needs attention.' } else { 'The support package was not created.' }
+            Resolve-TpmWorkflowFailure -Context $status -FailureId 'support-package-failed' -Message $failureMessage -DataSafety 'No game files or credentials were included. Collected temporary evidence was handled only through the allowlist.'
             Acknowledge-TpmWorkflowFailure -Context $status -FailureId 'support-package-failed'
         } catch {}
     } finally {
-        if ($zipTemp -and (Test-Path -LiteralPath $zipTemp)) { Remove-Item -LiteralPath $zipTemp -Force -ErrorAction SilentlyContinue }
-        if ($stage -and (Test-Path -LiteralPath $stage)) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
+        if ($zipTemp -and (Test-Path -LiteralPath $zipTemp)) {
+            try {
+                if (-not (Test-TpmNoReparsePath -Path ([System.IO.Path]::GetDirectoryName($zipTemp)))) { throw 'Support ZIP temporary folder is unsafe.' }
+                Remove-Item -LiteralPath $zipTemp -Force -ErrorAction Stop
+            } catch {
+                $result.Partial = $true
+                [void]$errors.Add('Temporary support ZIP cleanup failed and needs attention.')
+            }
+        }
+        if ($stage -and (Test-Path -LiteralPath $stage) -and -not (Remove-TpmSupportStageDirectory -Path $stage)) {
+            $result.Partial = $true
+            [void]$errors.Add('Temporary diagnostic staging cleanup failed and needs attention.')
+        }
         if ($status -and -not $status.Closed) {
             try {
                 if (-not $status.Failure -and $status.Lifecycle -notin @('Finished','Aborted','Closed')) { Stop-TpmWorkflowStatus -Context $status -Reason 'Support package stopped' }
@@ -17139,8 +17278,14 @@ while ($true) {
                     try { Start-Process -FilePath 'explorer.exe' -ArgumentList @([System.IO.Path]::GetDirectoryName($supportResult.PackagePath)) -ErrorAction Stop | Out-Null } catch { Write-Host "  Windows could not open the package folder." -ForegroundColor Yellow }
                 }
             } else {
-                Write-Host "  Support package was not created." -ForegroundColor Red
-                Write-Host "  No success was reported. Check the TPM log for details." -ForegroundColor Yellow
+                if ($supportResult.PackagePath) {
+                    Write-Host "  Support ZIP was created, but temporary cleanup needs attention." -ForegroundColor Yellow
+                    Write-Host ("  Saved here: {0}" -f $supportResult.PackagePath) -ForegroundColor Yellow
+                    Write-Host "  Do not send it until the cleanup warning is resolved." -ForegroundColor Yellow
+                } else {
+                    Write-Host "  Support package was not created." -ForegroundColor Red
+                    Write-Host "  No success was reported. Check the TPM log for details." -ForegroundColor Yellow
+                }
                 foreach ($errorText in @($supportResult.Errors)) { Write-Host ("  Reason: {0}" -f $errorText) -ForegroundColor DarkGray }
             }
             [void](Read-HostSafe '  Press Enter to return to the menu')

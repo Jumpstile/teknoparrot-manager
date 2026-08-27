@@ -75,7 +75,7 @@ Describe 'New-TpmSupportPackage' {
         $r.Succeeded | Should -BeTrue
         $entries = Get-SupportZipEntries $r.PackagePath
         $entries | Should -Contain 'MANIFEST.txt'
-        @($entries | Where-Object { $_ -like 'diagnostics/tpm-*' }).Count | Should -BeGreaterThan 0
+        @($entries | Where-Object { ($_ -replace '\\','/') -like 'diagnostics/tpm-*' }).Count | Should -BeGreaterThan 0
     }
 
     It 'collects allowlisted TeknoParrot diagnostics including ParrotPatcher_Log.txt' {
@@ -83,7 +83,7 @@ Describe 'New-TpmSupportPackage' {
         Write-SupportText (Join-Path $f.Tp 'ParrotPatcher_Log.txt') 'launcher error'
         $r = New-TpmSupportPackage -ScriptRoot $f.Script -TeknoParrotRoot $f.Tp -OutputRoot $f.Output
         $r.Succeeded | Should -BeTrue
-        @((Get-SupportZipEntries $r.PackagePath) | Where-Object { $_ -like 'diagnostics/tekno-*' }).Count | Should -BeGreaterThan 0
+        @((Get-SupportZipEntries $r.PackagePath) | Where-Object { ($_ -replace '\\','/') -like 'diagnostics/tekno-*' }).Count | Should -BeGreaterThan 0
     }
 
     It 'collects game-local BepInEx LogOutput.log' {
@@ -93,7 +93,7 @@ Describe 'New-TpmSupportPackage' {
         $r = New-TpmSupportPackage -ScriptRoot $f.Script -UserProfilesDir $f.Profiles -ApprovedGamesRoot $f.Games -OutputRoot $f.Output
         $r.Succeeded | Should -BeTrue
         $entries = Get-SupportZipEntries $r.PackagePath
-        @($entries | Where-Object { $_ -like 'diagnostics/game-TMNT-BepInEx_LogOutput.log' }).Count | Should -Be 1
+        @($entries | Where-Object { ($_ -replace '\\','/') -eq 'diagnostics/game-TMNT-BepInEx_LogOutput.log' }).Count | Should -Be 1
     }
 
     It 'generates metadata-only plugin inventories' {
@@ -105,8 +105,7 @@ Describe 'New-TpmSupportPackage' {
         $r = New-TpmSupportPackage -ScriptRoot $f.Script -UserProfilesDir $f.Profiles -ApprovedGamesRoot $f.Games -OutputRoot $f.Output
         $r.Succeeded | Should -BeTrue
         $entries = Get-SupportZipEntries $r.PackagePath
-        $inventoryEntry = @($entries | Where-Object { $_ -like 'metadata/inventory-TMNT.tsv' })
-        $inventoryEntry.Count | Should -Be 1
+        $inventoryEntry = @($entries | Where-Object { ($_ -replace '\\','/') -like 'metadata/inventory-TMNT.tsv' })
         $inventory = Get-SupportZipText $r.PackagePath $inventoryEntry[0]
         $inventory | Should -Match 'TMNTTPPlugin.dll'
         $inventory | Should -Match 'OrenVid.dll'
@@ -252,5 +251,118 @@ Describe 'New-TpmSupportPackage' {
         $r = Open-TpmLogsAndReports -ScriptRoot $f.Script
         $r.Succeeded | Should -BeTrue
         Should -Invoke Start-Process -Times 1 -Exactly
+    }
+    It 'rejects executable and archive signatures but accepts valid UTF-8 and BOM text' {
+        foreach ($bytes in @(
+            ,([byte[]](0x4d,0x5a,1,2))
+            ,([byte[]](0x50,0x4b,0x03,0x04,1,2))
+            ,([byte[]](0x37,0x7a,0xbc,0xaf,0x27,0x1c,1))
+            ,([byte[]](0x52,0x61,0x72,0x21,0x1a,0x07,1))
+            ,([byte[]](0x1f,0x8b,1,2))
+            ,([byte[]](0,1,2,0,3))
+        )) {
+            (Test-TpmSupportTextContent -Bytes $bytes).Safe | Should -BeFalse
+        }
+        $utf8 = New-Object System.Text.UTF8Encoding($true)
+        (Test-TpmSupportTextContent -Bytes ([byte[]]($utf8.GetPreamble() + $utf8.GetBytes('valid text')))).Safe | Should -BeTrue
+        $utf16 = New-Object System.Text.UnicodeEncoding($false,$true,$true)
+        $decoded = Test-TpmSupportTextContent -Bytes ([byte[]]($utf16.GetPreamble() + $utf16.GetBytes('unicode text')))
+        $decoded.Safe | Should -BeTrue
+        $decoded.Text | Should -Be 'unicode text'
+    }
+
+    It 'records unsafe content instead of staging allowlisted binary masquerades' {
+        $f = New-SupportFixture
+        [IO.File]::WriteAllBytes((Join-Path $f.Script 'TeknoParrot-Manager.log'),[byte[]](0x4d,0x5a,1,2))
+        [IO.File]::WriteAllBytes((Join-Path $f.Tp 'ParrotPatcher_Log.txt'),[byte[]](0x50,0x4b,0x03,0x04,1,2))
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -TeknoParrotRoot $f.Tp -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        @($r.Records | Where-Object Status -eq 'RejectedUnsafeContent').Count | Should -BeGreaterThan 1
+        (Get-SupportZipText $r.PackagePath 'MANIFEST.txt') | Should -Match 'RejectedUnsafeContent'
+        @((Get-SupportZipEntries $r.PackagePath) | Where-Object { $_ -like 'diagnostics/*.txt' }).Count | Should -Be 0
+    }
+
+    It 'redacts every dynamic manifest field before insertion' {
+        $records = New-Object System.Collections.Generic.List[object]
+        [void]$records.Add([pscustomobject]@{Source='Authorization: Bearer abc';Status='CollectionFailed';Destination='C:\Users\EliSi\secret';Detail='api_key=one'})
+        $errors = New-Object System.Collections.Generic.List[string]
+        [void]$errors.Add('postgresql://user:pw@host/db token=two')
+        $manifest = Get-TpmSupportManifestText -Records $records -Errors $errors -GameCodes ([string[]]@()) -AffectedGameSummary 'password=leaked-secret UNC=\\server\share'
+        $manifest | Should -Not -Match '\babc\b|\bone\b|pw@host|\btwo\b|leaked-secret|EliSi|server\\share'
+        $manifest | Should -Match 'Affected game scope:'
+        $manifest | Should -Match 'Collection or packaging failures:'
+    }
+
+    It 'rejects a source when the reparse safety check changes before open' {
+        $f = New-SupportFixture
+        $source = Join-Path $f.Script 'TeknoParrot-Manager.log'
+        Write-SupportText $source 'safe text'
+        $stage = Join-Path $f.Root 'stage'
+        New-Item -ItemType Directory -Path $stage -Force | Out-Null
+        $records = New-Object System.Collections.Generic.List[object]
+        $script:safetyChecks = 0
+        Mock Test-TpmNoReparsePath { $script:safetyChecks++; return ($script:safetyChecks -eq 1) }
+        Copy-TpmSupportTextFile -Records $records -SourcePath $source -AllowedRoot $f.Script -SourceLabel 'TPM:race' -StageDirectory $stage -DestinationName 'race.txt'
+        $records[0].Status | Should -Be 'RejectedUnsafeContent'
+        Test-Path -LiteralPath (Join-Path $stage 'race.txt') | Should -BeFalse
+    }
+
+    It 'fails closed for a reparse-backed destination when the platform can create a junction' {
+        $f = New-SupportFixture
+        $outside = Join-Path $f.Root 'outside'
+        Remove-Item -LiteralPath $f.Output -Recurse -Force
+        New-Item -ItemType Directory -Path $outside -Force | Out-Null
+        try { New-Item -ItemType Junction -Path $f.Output -Target $outside -ErrorAction Stop | Out-Null } catch { Set-ItResult -Skipped -Because 'Windows junction creation was unavailable'; return }
+        try {
+            $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output
+            $r.Succeeded | Should -BeFalse
+            $r.PackagePath | Should -BeNullOrEmpty
+        } finally {
+            Remove-Item -LiteralPath $f.Output -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'reports staging cleanup failure as partial without clean success' {
+        $f = New-SupportFixture
+        Mock Remove-TpmSupportStageDirectory { return $false }
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output
+        $r.Succeeded | Should -BeFalse
+        $r.Partial | Should -BeTrue
+        $r.PackagePath | Should -Not -BeNullOrEmpty
+        if ($r.PackagePath) { Remove-Item -LiteralPath $r.PackagePath -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'emits support workflow events in phase order and closes ownership' {
+        $f = New-SupportFixture
+        $events = New-Object System.Collections.Generic.List[string]
+        $sink = { param($event) [void]$events.Add([string]$event.EventKind) }.GetNewClosure()
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output -EventSink $sink
+        $r.Succeeded | Should -BeTrue
+        @($events | Where-Object { $_ -eq 'WorkflowStarted' }).Count | Should -Be 1
+        $steps = @($events | Where-Object { $_ -eq 'StepStarted' })
+        $steps.Count | Should -Be 5
+        $steps | Should -Be @('StepStarted','StepStarted','StepStarted','StepStarted','StepStarted')
+        $events[$events.Count - 1] | Should -Be 'WorkflowClosed'
+        $r.StatusContext.Closed | Should -BeTrue
+    }
+    It 'writes only relative safe ZIP entry names' {
+        $f = New-SupportFixture
+        Write-SupportText (Join-Path $f.Script 'TeknoParrot-Manager.log') 'diagnostic'
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        foreach ($entry in @(Get-SupportZipEntries $r.PackagePath)) {
+            $entry | Should -Not -Match '(^|[\\/])\.\.([\\/]|$)'
+            $entry | Should -Not -Match '^[A-Za-z]:[\\/]'
+            $entry | Should -Not -Match '^[/\\]'
+        }
+    }
+
+    It 'does not read profiles from a reparse-backed profiles root' {
+        $f = New-SupportFixture
+        Add-SupportGame $f | Out-Null
+        Mock Test-TpmNoReparsePath { param([string]$Path) return ($Path -ne $f.Profiles) }
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -UserProfilesDir $f.Profiles -ApprovedGamesRoot $f.Games -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        ($r.Records | Where-Object Source -eq 'Registered game diagnostics').Status | Should -Be 'IntentionallyExcluded'
     }
 }
