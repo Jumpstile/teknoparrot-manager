@@ -919,6 +919,114 @@ function Redact-TpmSupportText {
     }
     return [pscustomobject]@{ Text = $value; RedactionCount = $count }
 }
+function Get-TpmSupportNativeType {
+    if (-not ('TpmSupportNativeMethods' -as [type])) {
+        $null = Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Text;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+public static class TpmSupportNativeMethods {
+    public const UInt32 GenericRead = 0x80000000;
+    public const UInt32 GenericWrite = 0x40000000;
+    public const UInt32 FileReadAttributes = 0x00000080;
+    public const UInt32 Delete = 0x00010000;
+    public const UInt32 ShareRead = 0x00000001;
+    public const UInt32 ShareWrite = 0x00000002;
+    public const UInt32 ShareDelete = 0x00000004;
+    public const UInt32 OpenExisting = 3;
+    public const UInt32 CreateNew = 1;
+    public const UInt32 FileFlagBackupSemantics = 0x02000000;
+    public const UInt32 FileFlagOpenReparsePoint = 0x00200000;
+    public const Int32 FileDispositionInfo = 4;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct FileDispositionInfoData {
+        [MarshalAs(UnmanagedType.Bool)]
+        public Boolean DeleteFile;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern SafeFileHandle CreateFile(
+        String fileName,
+        UInt32 desiredAccess,
+        UInt32 shareMode,
+        IntPtr securityAttributes,
+        UInt32 creationDisposition,
+        UInt32 flagsAndAttributes,
+        IntPtr templateFile);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern UInt32 GetFinalPathNameByHandle(
+        SafeFileHandle file,
+        StringBuilder path,
+        UInt32 pathLength,
+        UInt32 flags);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern Boolean SetFileInformationByHandle(
+        SafeFileHandle file,
+        Int32 fileInformationClass,
+        ref FileDispositionInfoData fileInformation,
+        UInt32 bufferSize);
+}
+'@
+    }
+    return ('TpmSupportNativeMethods' -as [type])
+}
+
+function Get-TpmSupportFinalPathFromHandle {
+    param([Parameter(Mandatory)][Microsoft.Win32.SafeHandles.SafeFileHandle]$Handle)
+    $capacity = 512
+    while ($capacity -le 32768) {
+        $buffer = New-Object System.Text.StringBuilder $capacity
+        $length = [TpmSupportNativeMethods]::GetFinalPathNameByHandle($Handle, $buffer, [uint32]$capacity, 0)
+        if ($length -eq 0) { throw 'The final filesystem identity could not be read from the opened handle.' }
+        if ($length -lt ($capacity - 1)) {
+            $value = $buffer.ToString()
+            if ($value.StartsWith('\\?\UNC\', [System.StringComparison]::OrdinalIgnoreCase)) { return ('\\' + $value.Substring(8)) }
+            if ($value.StartsWith('\\?\', [System.StringComparison]::OrdinalIgnoreCase)) { return $value.Substring(4) }
+            return $value
+        }
+        $capacity = $capacity * 2
+    }
+    throw 'The final filesystem identity path was too long to validate safely.'
+}
+
+function Open-TpmSupportSafeFileStream {
+    param(
+        [Parameter(Mandatory)][string]$SourcePath,
+        [Parameter(Mandatory)][string]$AllowedRoot,
+        [int64]$MaximumBytes = 5242880
+    )
+    $rootHandle = $null
+    $stream = $null
+    try {
+        $sourceFull = [System.IO.Path]::GetFullPath($SourcePath)
+        $rootFull = [System.IO.Path]::GetFullPath($AllowedRoot)
+        if (-not (Test-PathInside -child $sourceFull -parent $rootFull)) { throw 'Candidate escaped its approved diagnostic root.' }
+        if (-not (Test-TpmNoReparsePath -Path $rootFull)) { throw 'Approved diagnostic root is reparse-backed or inaccessible.' }
+        $native = Get-TpmSupportNativeType
+        $rootHandle = [TpmSupportNativeMethods]::CreateFile($rootFull, [TpmSupportNativeMethods]::FileReadAttributes, ([TpmSupportNativeMethods]::ShareRead -bor [TpmSupportNativeMethods]::ShareWrite -bor [TpmSupportNativeMethods]::ShareDelete), [IntPtr]::Zero, [TpmSupportNativeMethods]::OpenExisting, ([TpmSupportNativeMethods]::FileFlagBackupSemantics -bor [TpmSupportNativeMethods]::FileFlagOpenReparsePoint), [IntPtr]::Zero)
+        if ($rootHandle.IsInvalid) { throw 'The approved diagnostic root could not be opened for identity validation.' }
+        $rootFinal = Get-TpmSupportFinalPathFromHandle -Handle $rootHandle
+        if (-not (Test-PathInside -child $rootFinal -parent $rootFull) -or -not (Test-TpmNoReparsePath -Path $rootFinal)) { throw 'Approved diagnostic root identity is unsafe.' }
+        $shareMode = [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete
+        $stream = New-Object System.IO.FileStream($sourceFull, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, $shareMode, 4096, [System.IO.FileOptions]::SequentialScan)
+        $sourceFinal = Get-TpmSupportFinalPathFromHandle -Handle $stream.SafeFileHandle
+        if (-not (Test-PathInside -child $sourceFinal -parent $rootFinal) -or -not (Test-TpmNoReparsePath -Path $sourceFinal)) { throw 'Opened diagnostic identity escaped the approved root.' }
+        if ($stream.Length -gt $MaximumBytes) { throw 'Diagnostic text exceeded the safe size limit.' }
+        return [pscustomobject]@{ Stream = $stream; FinalPath = $sourceFinal; Length = $stream.Length }
+    } catch {
+        if ($stream) { $stream.Dispose() }
+        throw
+    } finally {
+        if ($rootHandle) { $rootHandle.Dispose() }
+    }
+}
+
 function Test-TpmSupportTextContent {
     param([Parameter(Mandatory)][byte[]]$Bytes)
     if ($Bytes.Length -ge 2 -and $Bytes[0] -eq 0x4d -and $Bytes[1] -eq 0x5a) { return [pscustomobject]@{ Safe = $false; Reason = 'PE/DOS executable signature (MZ)'; Encoding = $null; Text = $null } }
@@ -958,34 +1066,111 @@ function Test-TpmSupportTextContent {
         return [pscustomobject]@{ Safe = $false; Reason = 'Invalid or materially non-text encoding'; Encoding = $null; Text = $null }
     }
 }
-function Test-TpmSupportDirectoryTreeSafe {
-    param([Parameter(Mandatory)][string]$Path)
+function Remove-TpmSupportHandle {
+    param([Parameter(Mandatory)][Microsoft.Win32.SafeHandles.SafeFileHandle]$Handle)
+    $native = Get-TpmSupportNativeType
+    $info = New-Object 'TpmSupportNativeMethods+FileDispositionInfoData'
+    $info.DeleteFile = $true
+    if (-not [TpmSupportNativeMethods]::SetFileInformationByHandle($Handle, [TpmSupportNativeMethods]::FileDispositionInfo, [ref]$info, [uint32]([Runtime.InteropServices.Marshal]::SizeOf($info)))) {
+        throw 'Owned support path could not be deleted through its opened handle.'
+    }
+}
+
+function Open-TpmSupportOwnedHandle {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$ExpectedRoot)
+    $native = Get-TpmSupportNativeType
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    $flags = [TpmSupportNativeMethods]::FileFlagOpenReparsePoint
+    if ($item.PSIsContainer) { $flags = $flags -bor [TpmSupportNativeMethods]::FileFlagBackupSemantics }
+    $handle = [TpmSupportNativeMethods]::CreateFile($Path, ([TpmSupportNativeMethods]::FileReadAttributes -bor [TpmSupportNativeMethods]::Delete), ([TpmSupportNativeMethods]::ShareRead -bor [TpmSupportNativeMethods]::ShareWrite -bor [TpmSupportNativeMethods]::ShareDelete), [IntPtr]::Zero, [TpmSupportNativeMethods]::OpenExisting, $flags, [IntPtr]::Zero)
+    if ($handle.IsInvalid) { throw 'Owned support path could not be opened for identity validation.' }
     try {
-        if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return $false }
-        $root = [System.IO.Path]::GetFullPath($Path)
-        $pending = New-Object 'System.Collections.Generic.Stack[string]'
-        $pending.Push($root)
-        while ($pending.Count -gt 0) {
-            $current = $pending.Pop()
-            if (-not (Test-PathInside -child $current -parent $root) -or -not (Test-TpmNoReparsePath -Path $current)) { return $false }
-            foreach ($child in @(Get-ChildItem -LiteralPath $current -Force -ErrorAction Stop)) {
-                if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
-                if ($child.PSIsContainer) { $pending.Push($child.FullName) }
-            }
+        $final = Get-TpmSupportFinalPathFromHandle -Handle $handle
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or -not (Test-PathInside -child $final -parent $ExpectedRoot)) { throw 'Owned support path identity is unsafe.' }
+        return [pscustomobject]@{ Handle = $handle; FinalPath = $final; IsDirectory = [bool]$item.PSIsContainer }
+    } catch {
+        $handle.Dispose()
+        throw
+    }
+}
+
+function Remove-TpmSupportOwnedDirectoryTree {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$RootFinal)
+    $opened = Open-TpmSupportOwnedHandle -Path $Path -ExpectedRoot $RootFinal
+    try {
+        if (-not $opened.IsDirectory) { throw 'Support staging ownership expected a directory.' }
+        foreach ($child in @(Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop)) {
+            Remove-TpmSupportOwnedEntry -Path $child.FullName -RootFinal $RootFinal
         }
-        return $true
-    } catch { return $false }
+        if (@(Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop).Count -ne 0) { throw 'Support staging contains unowned residue.' }
+        Remove-TpmSupportHandle -Handle $opened.Handle
+    } finally { $opened.Handle.Dispose() }
+}
+
+function Remove-TpmSupportOwnedEntry {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$RootFinal)
+    $opened = Open-TpmSupportOwnedHandle -Path $Path -ExpectedRoot $RootFinal
+    try {
+        if ($opened.IsDirectory) { Remove-TpmSupportOwnedDirectoryTree -Path $Path -RootFinal $RootFinal }
+        else { Remove-TpmSupportHandle -Handle $opened.Handle }
+    } finally { $opened.Handle.Dispose() }
 }
 
 function Remove-TpmSupportStageDirectory {
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path)) { return $true }
-    if (-not (Test-TpmSupportDirectoryTreeSafe -Path $Path)) { return $false }
+    $root = Open-TpmSupportOwnedHandle -Path $Path -ExpectedRoot ([System.IO.Path]::GetFullPath($Path))
     try {
-        if (-not (Test-TpmSupportDirectoryTreeSafe -Path $Path)) { return $false }
-        Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+        Remove-TpmSupportOwnedEntry -Path (Join-Path $Path 'diagnostics') -RootFinal $root.FinalPath
+        Remove-TpmSupportOwnedEntry -Path (Join-Path $Path 'metadata') -RootFinal $root.FinalPath
+        Remove-TpmSupportOwnedEntry -Path (Join-Path $Path 'MANIFEST.txt') -RootFinal $root.FinalPath
+        if (@(Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop).Count -ne 0) { return $false }
+        Remove-TpmSupportHandle -Handle $root.Handle
+        $root.Handle.Dispose()
         return (-not (Test-Path -LiteralPath $Path))
-    } catch { return $false }
+    } catch { return $false } finally { $root.Handle.Dispose() }
+}
+function Move-TpmSupportZipByIdentity {
+    param(
+        [Parameter(Mandatory)][string]$ZipTempPath,
+        [Parameter(Mandatory)][string]$OutputRoot,
+        [Parameter(Mandatory)][string]$DestinationPath
+    )
+    $native = Get-TpmSupportNativeType
+    $rootHandle = $null
+    $source = $null
+    $destinationHandle = $null
+    $destinationStream = $null
+    try {
+        $rootFull = [System.IO.Path]::GetFullPath($OutputRoot)
+        $destinationFull = [System.IO.Path]::GetFullPath($DestinationPath)
+        if (-not (Test-PathInside -child $destinationFull -parent $rootFull) -or -not (Test-TpmNoReparsePath -Path $rootFull)) { throw 'Support package destination is unsafe.' }
+        $rootHandle = [TpmSupportNativeMethods]::CreateFile($rootFull, [TpmSupportNativeMethods]::FileReadAttributes, ([TpmSupportNativeMethods]::ShareRead -bor [TpmSupportNativeMethods]::ShareWrite -bor [TpmSupportNativeMethods]::ShareDelete), [IntPtr]::Zero, [TpmSupportNativeMethods]::OpenExisting, ([TpmSupportNativeMethods]::FileFlagBackupSemantics -bor [TpmSupportNativeMethods]::FileFlagOpenReparsePoint), [IntPtr]::Zero)
+        if ($rootHandle.IsInvalid) { throw 'Support package destination could not be opened for identity validation.' }
+        $rootFinal = Get-TpmSupportFinalPathFromHandle -Handle $rootHandle
+        if (-not [string]::Equals($rootFinal.TrimEnd('\','/'), $rootFull.TrimEnd('\','/'), [System.StringComparison]::OrdinalIgnoreCase)) { throw 'Support package destination identity changed before promotion.' }
+        $source = Open-TpmSupportSafeFileStream -SourcePath $ZipTempPath -AllowedRoot ([System.IO.Path]::GetTempPath()) -MaximumBytes ([int64]::MaxValue)
+        $destinationHandle = [TpmSupportNativeMethods]::CreateFile($destinationFull, ([TpmSupportNativeMethods]::GenericRead -bor [TpmSupportNativeMethods]::GenericWrite -bor [TpmSupportNativeMethods]::Delete), ([TpmSupportNativeMethods]::ShareRead -bor [TpmSupportNativeMethods]::ShareWrite -bor [TpmSupportNativeMethods]::ShareDelete), [IntPtr]::Zero, [TpmSupportNativeMethods]::CreateNew, 0, [IntPtr]::Zero)
+        if ($destinationHandle.IsInvalid) { throw 'Support package destination could not be created without replacing an existing file.' }
+        $destinationFinal = Get-TpmSupportFinalPathFromHandle -Handle $destinationHandle
+        if (-not (Test-PathInside -child $destinationFinal -parent $rootFinal)) { throw 'Created support package escaped the authorized destination directory.' }
+        $destinationStream = New-Object System.IO.FileStream($destinationHandle, [System.IO.FileAccess]::Write, 65536, $false)
+        $source.Stream.CopyTo($destinationStream, 65536)
+        $destinationStream.Flush($true)
+        $rootFinalAfter = Get-TpmSupportFinalPathFromHandle -Handle $rootHandle
+        $destinationFinalAfter = Get-TpmSupportFinalPathFromHandle -Handle $destinationHandle
+        if (-not [string]::Equals($rootFinalAfter.TrimEnd('\','/'), $rootFinal.TrimEnd('\','/'), [System.StringComparison]::OrdinalIgnoreCase) -or -not (Test-PathInside -child $destinationFinalAfter -parent $rootFinal)) { throw 'Support package destination identity changed during promotion.' }
+        return [pscustomobject]@{ Path = $destinationFull; Length = $destinationStream.Length; FinalPath = $destinationFinalAfter }
+    } catch {
+        if ($destinationHandle -and -not $destinationHandle.IsInvalid) {
+            try { Remove-TpmSupportHandle -Handle $destinationHandle } catch {}
+        }
+        throw
+    } finally {
+        if ($destinationStream) { $destinationStream.Dispose() } elseif ($destinationHandle) { $destinationHandle.Dispose() }
+        if ($source) { $source.Stream.Dispose() }
+        if ($rootHandle) { $rootHandle.Dispose() }
+    }
 }
 
 function Add-TpmSupportRecord {
@@ -1017,42 +1202,16 @@ function Copy-TpmSupportTextFile {
         [Parameter(Mandatory)][string]$DestinationName,
         [int64]$MaximumBytes = 5242880
     )
-    try {
-        $sourceFull = [System.IO.Path]::GetFullPath($SourcePath)
-        $rootFull = [System.IO.Path]::GetFullPath($AllowedRoot)
-    } catch {
-        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status IntentionallyExcluded -Detail 'Path could not be canonicalized.'
-        return
-    }
-    if (-not (Test-PathInside -child $sourceFull -parent $rootFull)) {
-        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status IntentionallyExcluded -Detail 'Candidate escaped its approved diagnostic root.'
-        return
-    }
-    if (-not (Test-TpmNoReparsePath -Path $sourceFull)) {
-        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status IntentionallyExcluded -Detail 'Candidate or an existing parent is reparse-backed.'
-        return
-    }
-    if (-not (Test-Path -LiteralPath $sourceFull -PathType Leaf)) {
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
         Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status NotPresent -Detail 'Expected diagnostic file was not present.'
         return
     }
+    $opened = $null
     try {
-        $item = Get-Item -LiteralPath $sourceFull -Force -ErrorAction Stop
-        if (-not (Test-TpmNoReparsePath -Path $sourceFull)) {
-            Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status RejectedUnsafeContent -Detail 'Diagnostic path safety changed before the file was opened.'
-            return
-        }
-        if ($item.Length -gt $MaximumBytes) {
-            Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status IntentionallyExcluded -Detail 'Diagnostic text exceeded the safe size limit.'
-            return
-        }
-        $stream = New-Object System.IO.FileStream($sourceFull, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        $opened = Open-TpmSupportSafeFileStream -SourcePath $SourcePath -AllowedRoot $AllowedRoot -MaximumBytes $MaximumBytes
+        $stream = $opened.Stream
         try {
-            if ($stream.Length -gt $MaximumBytes) {
-                Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status IntentionallyExcluded -Detail 'Diagnostic text exceeded the safe size limit.'
-                return
-            }
-            $bytes = New-Object byte[] ([int]$stream.Length)
+            $bytes = New-Object byte[] ([int]$opened.Length)
             $offset = 0
             while ($offset -lt $bytes.Length) {
                 $read = $stream.Read($bytes, $offset, $bytes.Length - $offset)
@@ -1072,23 +1231,11 @@ function Copy-TpmSupportTextFile {
         [System.IO.File]::WriteAllText($destination, $redacted.Text, (New-Object System.Text.UTF8Encoding($false)))
         Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status Collected -Destination $DestinationName -Detail ('Allowlisted text diagnostic collected as ' + $content.Encoding + '.') -Redactions $redacted.RedactionCount
     } catch {
-        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status CollectionFailed -Detail 'The allowlisted diagnostic could not be read or redacted safely.'
+        $status = if ($_.Exception.Message -match 'exceeded the safe size limit') { 'IntentionallyExcluded' } elseif ($_.Exception.Message -match 'identity|reparse|escaped|root') { 'RejectedUnsafeContent' } else { 'CollectionFailed' }
+        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status $status -Detail 'The allowlisted diagnostic could not be read or redacted safely.'
     }
 }
 
-function Get-TpmSupportFileSha256 {
-    param([Parameter(Mandatory)][string]$Path)
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    $stream = $null
-    try {
-        $stream = New-Object System.IO.FileStream($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
-        if ($stream.Length -gt 67108864) { return 'HASH_SKIPPED_OVERSIZED' }
-        return (-join ($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') }))
-    } finally {
-        if ($stream) { $stream.Dispose() }
-        $sha.Dispose()
-    }
-}
 
 function Get-TpmSupportPluginInventory {
     param(
@@ -1156,14 +1303,22 @@ function Get-TpmSupportPluginInventory {
                         break
                     }
                     try {
-                        $relative = $child.FullName.Substring([System.IO.Path]::GetFullPath($GameRoot).TrimEnd('\').Length).TrimStart('\').Replace('\','/')
-                        $version = ''
-                        if ($child.Extension -ieq '.dll') {
-                            try { $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($child.FullName).FileVersion } catch { $version = '' }
+                        $opened = Open-TpmSupportSafeFileStream -SourcePath $child.FullName -AllowedRoot $GameRoot -MaximumBytes ([int64]::MaxValue)
+                        try {
+                            $size = $opened.Length
+                            $hash = 'HASH_SKIPPED_OVERSIZED'
+                            if ($size -le 67108864) {
+                                $sha = [System.Security.Cryptography.SHA256]::Create()
+                                try { $hash = (-join ($sha.ComputeHash($opened.Stream) | ForEach-Object { $_.ToString('x2') })) } finally { $sha.Dispose() }
+                            }
+                            $relativeParts = $child.FullName.Substring([System.IO.Path]::GetFullPath($GameRoot).TrimEnd('\').Length).TrimStart('\') -split '[\\/]'
+                            $relative = (($relativeParts | ForEach-Object { Get-TpmSupportSafeName $_ }) -join '/')
+                            $safeName = Get-TpmSupportSafeName $child.Name
+                            $rows.Add(($relative + "`t" + $safeName + "`t" + $size + "`t`t" + $hash)) | Out-Null
+                            $fileCount++
+                        } finally {
+                            $opened.Stream.Dispose()
                         }
-                        $hash = if ($child.Length -le 67108864) { Get-TpmSupportFileSha256 -Path $child.FullName } else { 'HASH_SKIPPED_OVERSIZED' }
-                        $rows.Add(($relative + "`t" + $child.Name + "`t" + $child.Length + "`t" + $version + "`t" + $hash)) | Out-Null
-                        $fileCount++
                     } catch {
                         $rows.Add('[EXCLUDED]' + "`t" + (Get-TpmSupportSafeName $child.Name) + "`tmetadata-read-failed") | Out-Null
                     }
@@ -1312,13 +1467,13 @@ function New-TpmSupportPackage {
                         Add-TpmSupportRecord -Records $records -Source ('Game:' + $code) -Status RejectedUnsafeContent -Detail 'Profile path was reparse-backed or escaped the approved UserProfiles folder.'
                         continue
                     }
-                    $profileStream = New-Object System.IO.FileStream($profileFull, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                    $openedProfile = Open-TpmSupportSafeFileStream -SourcePath $profileFull -AllowedRoot $UserProfilesDir -MaximumBytes 16777216
                     try {
                         $doc = New-Object System.Xml.XmlDocument
                         $doc.XmlResolver = $null
-                        $doc.Load($profileStream)
+                        $doc.Load($openedProfile.Stream)
                     } finally {
-                        $profileStream.Dispose()
+                        $openedProfile.Stream.Dispose()
                     }
                     $gamePathNode = $doc.SelectSingleNode('/GameProfile/GamePath')
                     $gamePath = if ($gamePathNode) { [string]$gamePathNode.InnerText } else { '' }
@@ -1359,11 +1514,9 @@ function New-TpmSupportPackage {
         if ([string]::IsNullOrWhiteSpace($packagePath)) { throw 'Could not reserve a safe support package filename.' }
         $zipTemp = Join-Path ([System.IO.Path]::GetTempPath()) ('tpm-support-' + [guid]::NewGuid().ToString('N') + '.zip')
         [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $zipTemp, [System.IO.Compression.CompressionLevel]::Optimal, $false)
-        if (-not (Test-TpmNoReparsePath -Path $OutputRoot) -or (Test-Path -LiteralPath $packagePath)) { throw 'Support package destination changed or is no longer collision-safe.' }
-        [System.IO.File]::Move($zipTemp, $packagePath)
-        $zipTemp = $null
-        if (-not (Test-Path -LiteralPath $packagePath -PathType Leaf)) { throw 'The support ZIP could not be verified after creation.' }
-        $result.PackagePath = $packagePath
+        $promotion = Move-TpmSupportZipByIdentity -ZipTempPath $zipTemp -OutputRoot $OutputRoot -DestinationPath $packagePath
+        if (-not (Test-Path -LiteralPath $promotion.Path -PathType Leaf)) { throw 'The support ZIP could not be verified after identity-bound promotion.' }
+        $result.PackagePath = $promotion.Path
         if (-not (Remove-TpmSupportStageDirectory -Path $stage)) {
             $result.Partial = $true
             [void]$errors.Add('Support ZIP was created, but temporary diagnostic staging cleanup needs attention.')
@@ -1384,12 +1537,15 @@ function New-TpmSupportPackage {
         } catch {}
     } finally {
         if ($zipTemp -and (Test-Path -LiteralPath $zipTemp)) {
+            $ownedZip = $null
             try {
-                if (-not (Test-TpmNoReparsePath -Path ([System.IO.Path]::GetDirectoryName($zipTemp)))) { throw 'Support ZIP temporary folder is unsafe.' }
-                Remove-Item -LiteralPath $zipTemp -Force -ErrorAction Stop
+                $ownedZip = Open-TpmSupportOwnedHandle -Path $zipTemp -ExpectedRoot ([System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()))
+                Remove-TpmSupportHandle -Handle $ownedZip.Handle
             } catch {
                 $result.Partial = $true
                 [void]$errors.Add('Temporary support ZIP cleanup failed and needs attention.')
+            } finally {
+                if ($ownedZip) { $ownedZip.Handle.Dispose() }
             }
         }
         if ($stage -and (Test-Path -LiteralPath $stage) -and -not (Remove-TpmSupportStageDirectory -Path $stage)) {

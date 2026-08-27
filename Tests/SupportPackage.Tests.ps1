@@ -365,4 +365,117 @@ Describe 'New-TpmSupportPackage' {
         $r.Succeeded | Should -BeTrue
         ($r.Records | Where-Object Source -eq 'Registered game diagnostics').Status | Should -Be 'IntentionallyExcluded'
     }
+    It 'rejects a real source-parent junction substituted before object validation consumes it' {
+        $f = New-SupportFixture
+        $logs = Join-Path $f.Tp 'Logs'
+        $outside = Join-Path $f.Root 'outside-source'
+        $source = Join-Path $logs 'TeknoParrot.log'
+        $stage = Join-Path $f.Root 'stage-source'
+        New-Item -ItemType Directory -Path $logs,$outside,$stage -Force | Out-Null
+        Write-SupportText $source 'approved source'
+        Write-SupportText (Join-Path $outside 'TeknoParrot.log') 'outside source secret'
+        $realSafety = ${function:Test-TpmNoReparsePath}
+        $script:safetyCalls = 0
+        Mock Test-TpmNoReparsePath {
+            $script:safetyCalls++
+            $safe = & $realSafety -Path $Path
+            if ($script:safetyCalls -eq 2) {
+                Remove-Item -LiteralPath $logs -Recurse -Force
+                New-Item -ItemType Junction -Path $logs -Target $outside -ErrorAction Stop | Out-Null
+            }
+            return $safe
+        }
+        $records = New-Object System.Collections.Generic.List[object]
+        Copy-TpmSupportTextFile -Records $records -SourcePath $source -AllowedRoot $logs -SourceLabel 'race-source' -StageDirectory $stage -DestinationName 'race.txt'
+        $records[0].Status | Should -Be 'RejectedUnsafeContent'
+        Test-Path -LiteralPath (Join-Path $stage 'race.txt') | Should -BeFalse
+        (Test-Path -LiteralPath (Join-Path $outside 'TeknoParrot.log')) | Should -BeTrue
+    }
+
+    It 'rejects a real profile-parent junction substituted before XML parsing' {
+        $f = New-SupportFixture
+        $outside = Join-Path $f.Root 'outside-profile'
+        $profile = Join-Path $f.Profiles 'TMNT.xml'
+        New-Item -ItemType Directory -Path $outside -Force | Out-Null
+        Write-SupportText $profile '<GameProfile><GamePath>approved.exe</GamePath></GameProfile>'
+        Write-SupportText (Join-Path $outside 'TMNT.xml') '<GameProfile><GamePath>outside.exe</GamePath></GameProfile>'
+        $realSafety = ${function:Test-TpmNoReparsePath}
+        $script:profileSafetyCalls = 0
+        Mock Test-TpmNoReparsePath {
+            $script:profileSafetyCalls++
+            $safe = & $realSafety -Path $Path
+            if ($script:profileSafetyCalls -eq 2) {
+                Remove-Item -LiteralPath $f.Profiles -Recurse -Force
+                New-Item -ItemType Junction -Path $f.Profiles -Target $outside -ErrorAction Stop | Out-Null
+            }
+            return $safe
+        }
+        $caught = $null
+        try { Open-TpmSupportSafeFileStream -SourcePath $profile -AllowedRoot $f.Profiles -MaximumBytes 16777216 | Out-Null } catch { $caught = $_ }
+        $caught | Should -Not -BeNullOrEmpty
+        $caught.Exception.Message | Should -Match 'identity|escaped|root'
+    }
+
+    It 'does not hash a plugin reached through a substituted real junction' {
+        $f = New-SupportFixture
+        $game = Add-SupportGame $f
+        $pluginRoot = Join-Path $game 'BepInEx\plugins'
+        $outside = Join-Path $f.Root 'outside-plugin'
+        $outsideDll = Join-Path $outside 'Evil.dll'
+        $stage = Join-Path $f.Root 'stage-plugin'
+        New-Item -ItemType Directory -Path $pluginRoot,$outside,$stage -Force | Out-Null
+        [IO.File]::WriteAllBytes($outsideDll,[byte[]](1,2,3,4,5))
+        $expectedHash = (-join ((New-Object Security.Cryptography.SHA256Managed).ComputeHash([IO.File]::ReadAllBytes($outsideDll)) | ForEach-Object { $_.ToString('x2') }))
+        $realSafety = ${function:Test-TpmNoReparsePath}
+        $script:pluginSafetyCalls = 0
+        Mock Test-TpmNoReparsePath {
+            $script:pluginSafetyCalls++
+            $safe = & $realSafety -Path $Path
+            if ($script:pluginSafetyCalls -eq 3) {
+                Remove-Item -LiteralPath $pluginRoot -Recurse -Force
+                New-Item -ItemType Junction -Path $pluginRoot -Target $outside -ErrorAction Stop | Out-Null
+            }
+            return $safe
+        }
+        $records = New-Object System.Collections.Generic.List[object]
+        Get-TpmSupportPluginInventory -GameRoot $game -GameCode 'TMNT' -Records $records -StageDirectory $stage
+        Test-Path -LiteralPath (Join-Path $stage 'metadata\inventory-TMNT.tsv') | Should -BeFalse
+        $script:pluginSafetyCalls | Should -BeGreaterOrEqual 3
+    }
+
+    It 'rejects destination substitution between authorization and promotion' {
+        $f = New-SupportFixture
+        $outside = Join-Path $f.Root 'outside-destination'
+        New-Item -ItemType Directory -Path $outside -Force | Out-Null
+        $realSafety = ${function:Test-TpmNoReparsePath}
+        $script:outputSafetyCalls = 0
+        Mock Test-TpmNoReparsePath {
+            $safe = & $realSafety -Path $Path
+            if ([IO.Path]::GetFullPath($Path) -eq [IO.Path]::GetFullPath($f.Output)) {
+                $script:outputSafetyCalls++
+                if ($script:outputSafetyCalls -eq 2) {
+                    Remove-Item -LiteralPath $f.Output -Recurse -Force
+                    New-Item -ItemType Junction -Path $f.Output -Target $outside -ErrorAction Stop | Out-Null
+                }
+            }
+            return $safe
+        }
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output
+        $r.Succeeded | Should -BeFalse
+        $r.Partial | Should -BeFalse
+        @((Get-ChildItem -LiteralPath $outside -Filter '*.zip' -File -ErrorAction SilentlyContinue)).Count | Should -Be 0
+    }
+
+    It 'preserves residue when a staging child becomes a real junction' {
+        $f = New-SupportFixture
+        $stage = Join-Path $f.Root 'owned-stage'
+        $outside = Join-Path $f.Root 'outside-stage'
+        New-Item -ItemType Directory -Path (Join-Path $stage 'diagnostics'),(Join-Path $stage 'metadata'),$outside -Force | Out-Null
+        Write-SupportText (Join-Path $stage 'MANIFEST.txt') 'manifest'
+        New-Item -ItemType Junction -Path (Join-Path $stage 'diagnostics') -Target $outside -ErrorAction Stop | Out-Null
+        $removed = Remove-TpmSupportStageDirectory -Path $stage
+        $removed | Should -BeFalse
+        Test-Path -LiteralPath $stage | Should -BeTrue
+        Test-Path -LiteralPath $outside | Should -BeTrue
+    }
 }

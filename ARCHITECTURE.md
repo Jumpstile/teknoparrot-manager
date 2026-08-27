@@ -1671,24 +1671,30 @@ registered-game text logs, and metadata-only plugin inventories.
 
 TPM and TeknoParrot sources use explicit relative filename allowlists. Game
 diagnostics are considered only for registered game paths inside the approved
-games root with non-reparse path chains. Profile paths are revalidated as
-contained, non-reparse files immediately before XML parsing. The collector
-reads text only; plugin directories are inspected for metadata and hashes but
-DLL payloads are never copied. Every text artifact is opened after a final
-source safety check, validated as strict BOM-aware UTF-8/UTF-16 text, and
+games root with non-reparse path chains. Profile paths are opened through a
+controlled .NET stream, and the stream handle's final filesystem identity is
+compared with an identity-validated profile-root handle before XML parsing.
+The same opened-object identity proof protects game logs and TPM/TeknoParrot
+diagnostics. The collector reads text only; plugin directories are inspected
+for metadata and hashes but DLL payloads are never copied. Plugin hashes use
+the validated opened stream; unsafe path-based version probes are omitted.
+Every text artifact is validated as strict BOM-aware UTF-8/UTF-16 text and
 rejected with `RejectedUnsafeContent` when it has executable/archive
 signatures, NUL/control bytes, or invalid encoding.
 
 The manifest records environment facts without usernames, source paths, or
 secrets, and every dynamic source, destination, detail, error, and scope value
 passes centralized redaction before insertion. ZIP entry names are generated
-from bounded safe names. The output root is checked as non-reparse immediately
-before promotion; staging cleanup rechecks the complete tree and reports a
-partial package when cleanup cannot be proven safe. Any unsafe path, staging
-failure, redaction/read failure, or ZIP failure prevents a success result.
-Workflow status is closed in `finally` on every exit path; redirected,
-unattended, and certification hosts therefore retain the existing
-structured-status fallback without cursor writes.
+from bounded safe names. Promotion holds an identity-validated destination
+directory handle, creates the ZIP with `CREATE_NEW`, writes through that
+opened file handle, and verifies both root and file final identities after the
+write. Staging cleanup opens each owned entry by handle, rejects reparse
+objects, deletes only through those handles, and preserves residue if the
+owned tree cannot be proven unchanged. Any unsafe path, staging failure,
+redaction/read failure, or ZIP failure prevents a success result. Workflow
+status is closed in `finally` on every exit path; redirected, unattended, and
+certification hosts therefore retain the existing structured-status fallback
+without cursor writes.
 
 ---
 

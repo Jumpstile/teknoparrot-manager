@@ -28,8 +28,10 @@
   plus metadata-only plugin inventories into one redacted ZIP; unsafe
   executable/archive masquerades and materially binary text are rejected
   instead of staged, and it never copies game binaries, credentials, or
-  arbitrary directories. Source/profile paths and the output root are
-  revalidated for containment and reparse safety; cleanup failures remain
+  arbitrary directories. Source/profile/plugin reads use identity-bound open
+  handles rather than check-then-reopen paths; ZIP promotion uses an
+  identity-validated destination handle and cleanup deletes owned staging
+  entries only through validated handles. Cleanup failures remain
   partial/action-required rather than green success. The shared TPM STATUS
   footer uses structured events, real steps, and resize-safe cursor/append-only
   fallbacks without affecting redirected runs.
