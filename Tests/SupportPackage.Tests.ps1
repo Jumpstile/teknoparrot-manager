@@ -51,14 +51,15 @@ BeforeAll {
     function Get-SupportZipEntries {
         param([string]$Path)
         $zip = [System.IO.Compression.ZipFile]::OpenRead($Path)
-        try { return @($zip.Entries | ForEach-Object FullName) } finally { $zip.Dispose() }
+        try { return @($zip.Entries | ForEach-Object { $_.FullName -replace '\\','/' }) } finally { $zip.Dispose() }
     }
 
     function Get-SupportZipText {
         param([string]$Path,[string]$EntryName)
         $zip = [System.IO.Compression.ZipFile]::OpenRead($Path)
         try {
-            $entry = $zip.GetEntry($EntryName)
+            $canonicalEntryName = $EntryName -replace '\\','/'
+            $entry = @($zip.Entries | Where-Object { (($_.FullName -replace '\\','/') -eq $canonicalEntryName) }) | Select-Object -First 1
             if (-not $entry) { return $null }
             $reader = New-Object System.IO.StreamReader($entry.Open())
             try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
@@ -140,8 +141,13 @@ Describe 'New-TpmSupportPackage' {
         Write-SupportText (Join-Path $f.Script 'TeknoParrot-Manager.log') $secret
         $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output
         $r.Succeeded | Should -BeTrue
-        $entries = @((Get-SupportZipEntries $r.PackagePath) | Where-Object { $_ -like 'diagnostics/tpm-*' })
+        $entries = @(Get-SupportZipEntries $r.PackagePath | Where-Object { $_ -like 'diagnostics/tpm-*' })
+        $entries | Should -HaveCount 1
+        $entries[0] | Should -Be 'diagnostics/tpm-01-TeknoParrot-Manager.log.txt'
         $text = Get-SupportZipText $r.PackagePath $entries[0]
+        $text | Should -Not -BeNullOrEmpty
+        $text | Should -Match 'password=<redacted>'
+        $text | Should -Match '<user-profile>'
         $text | Should -Not -Match 'topsecret|abc123|user:pw|EliSi'
         $r.RedactionCount | Should -BeGreaterThan 0
     }
