@@ -45,6 +45,19 @@ Human-use simulation should catch issues like:
 - Back/cancel works from nested flows.
 - Update option is visible and understandable.
 
+### Support package
+
+- User can choose the clearly labelled Create Support Package action without
+  knowing where logs or reports live.
+- TPM explains each collection step in plain language through the persistent
+  status area.
+- Completion shows the exact ZIP path and says to send that ZIP when asking
+  for help.
+- Missing optional diagnostics are described as missing; a partial or failed
+  collection is never presented as complete.
+- The package excludes game payloads and credentials and includes a readable
+  manifest of collected and excluded sources.
+
 ### AutoSync normal path
 
 - User selects AutoSync.
@@ -81,6 +94,28 @@ Human-use simulation should catch issues like:
 - Restore warns before overwriting.
 - Restore confirms final state.
 
+### PostgreSQL guided recovery
+
+- TPM explains that the saved password no longer works in plain language.
+- The user can choose and confirm a new password through masked prompts.
+- TPM asks Windows for permission itself when a reset or install needs it.
+- The same setup resumes after approval; the user does not close TPM or choose
+  the menu option again.
+- Backup, reset, verification, and configuration-save failures remain visible
+  until acknowledged and offer a retry or a safe stop.
+- No password appears in the visible transcript, arguments, logs, or reports.
+
+
+### Persistent workflow status
+
+- Multi-step flows expose structured `TPM.WorkflowStatusEvent.v1` transitions.
+- Interactive consoles show current work, recent completion, next step, and
+  any action needed from the user without clearing scrollback.
+- Window shrink/grow tests cover re-anchoring, stale-cell clearing, narrow
+  fallback, and safe degradation when the viewport cannot reserve the footer.
+- Redirected, unattended, and certification runs retain structured events but
+  emit no cursor or footer writes.
+
 ## Certification gate
 
 Add a future certification gate named `Human-Use Simulation`.
@@ -112,3 +147,5 @@ Suggested future files:
 3. Add transcript-based tests for update check wording.
 4. Add cancel-path no-change checks.
 5. Add a `Human-Use Simulation` line to the certification scorecard.
+6. Add transcript and source guards for PostgreSQL guided recovery, including
+   password choice, UAC resume, retry visibility, and credential redaction.

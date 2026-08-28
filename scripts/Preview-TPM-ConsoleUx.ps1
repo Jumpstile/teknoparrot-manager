@@ -12,7 +12,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$script:DisplayVersion = 'v1.0 RC7'
+$script:DisplayVersion = 'v1.0 RC8'
 
 function Get-ViewportInfo {
     $rawWindowWidth = $null
@@ -180,7 +180,7 @@ function Get-PreviewSections {
                 [pscustomobject]@{ Number = 6; Label = 'dgVoodoo2 Setup'; Desc = 'Fix old DX8, DirectDraw, and Glide games that crash to black screens.' }
                 [pscustomobject]@{ Number = 7; Label = 'GPU Fix Setup'; Desc = 'Auto-detect AMD, NVIDIA, or Intel GPU and apply matching compatibility fixes.' }
                 [pscustomobject]@{ Number = 8; Label = 'Force Feedback Setup'; Desc = 'Wheel and stick rumble plus force feedback through TeknoParrot or a third-party plugin.' }
-                [pscustomobject]@{ Number = 9; Label = 'BepInEx Update Check'; Desc = 'Check games with BepInEx already installed and offer a safe update when appropriate.' }
+                [pscustomobject]@{ Number = 9; Label = 'BepInEx Setup'; Desc = 'Install, update, or repair BepInEx with the matching stable x64/x86 package.' }
             )
         }
         [pscustomobject]@{
@@ -197,7 +197,8 @@ function Get-PreviewSections {
             Color = 'Yellow'
             Items = @(
                 [pscustomobject]@{ Number = 13; Label = 'Check For Updates'; Desc = 'Manual backup-first check against the latest GitHub release.' }
-                [pscustomobject]@{ Number = 14; Label = 'Exit'; Desc = 'Exit TeknoParrot Manager.' }
+                [pscustomobject]@{ Number = 14; Label = 'Create Support Package'; Desc = 'Gather safe logs and reports into one ZIP for support.' }
+                [pscustomobject]@{ Number = 15; Label = 'Exit'; Desc = 'Exit TeknoParrot Manager.' }
             )
         }
     )

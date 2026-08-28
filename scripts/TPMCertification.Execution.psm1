@@ -325,6 +325,158 @@ function New-TPMCreateNewFileV1 {
     return $path
 }
 
+function Get-TPMCertificationSha256HexV1 {
+    param([Parameter(Mandatory=$true)][byte[]]$Bytes)
+    $sha=[Security.Cryptography.SHA256]::Create()
+    try{return (-join($sha.ComputeHash($Bytes)|ForEach-Object{$_.ToString('x2')}))}finally{$sha.Dispose()}
+}
+
+function Invoke-TPMCertificationGitReadV1 {
+    param([Parameter(Mandatory=$true)][string]$RepositoryPath,[Parameter(Mandatory=$true)][string[]]$Arguments)
+    $repo=[IO.Path]::GetFullPath($RepositoryPath).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+    $scoped=@('-c',("safe.directory={0}"-f$repo),'-C',$repo)
+    $commandArguments=@($scoped)+@($Arguments)
+    $output=@(& git @commandArguments 2>$null)
+    $exitCode=$LASTEXITCODE
+    return [pscustomobject]@{Output=$output;ExitCode=$exitCode}
+}
+
+function Get-TPMCertificationGitIdentitySnapshotV1 {
+    param([Parameter(Mandatory=$true)][string]$RepositoryPath)
+    $repo=[IO.Path]::GetFullPath($RepositoryPath).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+    $branchResult=Invoke-TPMCertificationGitReadV1 -RepositoryPath $repo -Arguments @('rev-parse','--abbrev-ref','HEAD')
+    $commitResult=Invoke-TPMCertificationGitReadV1 -RepositoryPath $repo -Arguments @('rev-parse','--verify','HEAD')
+    $statusResult=Invoke-TPMCertificationGitReadV1 -RepositoryPath $repo -Arguments @('status','--porcelain=v1','--untracked-files=all')
+    $upstreamResult=Invoke-TPMCertificationGitReadV1 -RepositoryPath $repo -Arguments @('rev-parse','--abbrev-ref','--symbolic-full-name','@{upstream}')
+
+    $branch=if($branchResult.ExitCode-eq0-and$branchResult.Output.Count-gt0){([string]$branchResult.Output[0]).Trim()}else{$null}
+    $commit=if($commitResult.ExitCode-eq0-and$commitResult.Output.Count-gt0){([string]$commitResult.Output[0]).Trim()}else{$null}
+    $statusLines=@()
+    if($statusResult.ExitCode-eq0){$statusLines=@($statusResult.Output|ForEach-Object{[string]$_})}
+    $upstreamRef=if($upstreamResult.ExitCode-eq0-and$upstreamResult.Output.Count-gt0){([string]$upstreamResult.Output[0]).Trim()}else{$null}
+    $upstreamCommit=$null
+    if(-not[string]::IsNullOrWhiteSpace($upstreamRef)){
+        $upstreamCommitResult=Invoke-TPMCertificationGitReadV1 -RepositoryPath $repo -Arguments @('rev-parse','--verify',($upstreamRef+'^{commit}'))
+        if($upstreamCommitResult.ExitCode-eq0-and$upstreamCommitResult.Output.Count-gt0){$upstreamCommit=([string]$upstreamCommitResult.Output[0]).Trim()}
+    }
+
+    $refResult=Invoke-TPMCertificationGitReadV1 -RepositoryPath $repo -Arguments @('for-each-ref','--format=%(refname)%09%(objectname)','refs')
+    $refEntries=New-Object Collections.Generic.List[string]
+    $refLines=@($refResult.Output|ForEach-Object{([string]$_).Trim()}|Where-Object{$_-ne''}|Sort-Object)
+    if($refResult.ExitCode-eq0){foreach($line in $refLines){[void]$refEntries.Add($line)}}
+    $headPathResult=Invoke-TPMCertificationGitReadV1 -RepositoryPath $repo -Arguments @('rev-parse','--git-path','HEAD')
+    if($headPathResult.ExitCode-eq0-and$headPathResult.Output.Count-gt0){
+        $headPath=([string]$headPathResult.Output[0]).Trim()
+        if(-not[IO.Path]::IsPathRooted($headPath)){$headPath=Join-Path $repo $headPath}
+        if(Test-Path -LiteralPath $headPath -PathType Leaf){
+            $headBytes=[IO.File]::ReadAllBytes($headPath)
+            [void]$refEntries.Add(('HEAD|{0}|{1}'-f(Get-TPMCertificationSha256HexV1 -Bytes $headBytes),$headBytes.Length))
+        }
+    }
+    $refSnapshotHash=$null
+    if($refResult.ExitCode-eq0-and$headPathResult.ExitCode-eq0-and$headPathResult.Output.Count-gt0){
+        try{
+            $refSnapshotText=(($refEntries.ToArray()|Sort-Object)-join"`n")
+            $refSnapshotHash=Get-TPMCertificationSha256HexV1 -Bytes ((New-Object Text.UTF8Encoding $false).GetBytes($refSnapshotText))
+        }catch{$refSnapshotHash=$null}
+    }
+
+    $logsResult=Invoke-TPMCertificationGitReadV1 -RepositoryPath $repo -Arguments @('rev-parse','--git-path','logs')
+    $reflogSnapshotHash=$null
+    if($logsResult.ExitCode-eq0-and$logsResult.Output.Count-gt0){
+        $logsRoot=([string]$logsResult.Output[0]).Trim()
+        if(-not[IO.Path]::IsPathRooted($logsRoot)){$logsRoot=Join-Path $repo $logsRoot}
+        $reflogEntries=New-Object Collections.Generic.List[string]
+        if(Test-Path -LiteralPath $logsRoot -PathType Container){
+            try{
+            $logsBase=[IO.Path]::GetFullPath($logsRoot).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+            foreach($file in @(Get-ChildItem -LiteralPath $logsRoot -File -Recurse -Force -ErrorAction Stop|Sort-Object FullName)){
+                $relative=$file.FullName.Substring($logsBase.Length).TrimStart([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar).Replace('\','/')
+                $bytes=[IO.File]::ReadAllBytes($file.FullName)
+                [void]$reflogEntries.Add(('{0}|{1}|{2}'-f$relative,(Get-TPMCertificationSha256HexV1 -Bytes $bytes),$bytes.Length))
+            }
+            $reflogSnapshotText=(($reflogEntries.ToArray()|Sort-Object)-join"`n")
+                $reflogSnapshotHash=Get-TPMCertificationSha256HexV1 -Bytes ((New-Object Text.UTF8Encoding $false).GetBytes($reflogSnapshotText))
+            }catch{$reflogSnapshotHash=$null}
+        }
+    }
+
+    return [ordered]@{
+        Branch=$branch
+        Commit=$commit
+        RemoteRef=$upstreamRef
+        RemoteCommit=$upstreamCommit
+        Clean=($statusResult.ExitCode-eq0-and$statusLines.Count-eq0)
+        RefSnapshotSha256=$refSnapshotHash
+        ReflogSnapshotSha256=$reflogSnapshotHash
+    }
+}
+
+function New-TPMCertificationGitIdentityV1 {
+    param(
+        [Parameter(Mandatory=$true)]$Start,
+        [Parameter(Mandatory=$true)]$End,
+        [AllowNull()][string]$ExpectedBranch,
+        [AllowNull()][string]$ExpectedCommit
+    )
+    $reasons=New-Object Collections.Generic.List[string]
+    $refMutation=$false
+    if($null-eq$Start-or$null-eq$End){[void]$reasons.Add('CERTIFICATION_IDENTITY_CAPTURE_FAILED')}
+    else{
+        if(-not$Start.Clean){[void]$reasons.Add('CERTIFICATION_WORKTREE_DIRTY_AT_START')}
+        if(-not$End.Clean){[void]$reasons.Add('CERTIFICATION_WORKTREE_DIRTY_AT_END')}
+        if([string]::IsNullOrWhiteSpace([string]$Start.Branch)-or[string]$Start.Branch-ceq'HEAD'-or[string]$Start.Branch-ne[string]$End.Branch){[void]$reasons.Add('CERTIFICATION_BRANCH_CHANGED');$refMutation=$true}
+        if([string]::IsNullOrWhiteSpace([string]$Start.Commit)-or[string]$Start.Commit-ne[string]$End.Commit){[void]$reasons.Add('CERTIFICATION_COMMIT_CHANGED');$refMutation=$true}
+        if([string]$Start.RemoteRef-ne[string]$End.RemoteRef-or[string]$Start.RemoteCommit-ne[string]$End.RemoteCommit){[void]$reasons.Add('CERTIFICATION_REMOTE_REF_CHANGED');$refMutation=$true}
+        if([string]::IsNullOrWhiteSpace([string]$Start.RemoteRef)-or[string]::IsNullOrWhiteSpace([string]$Start.RemoteCommit)){[void]$reasons.Add('CERTIFICATION_REMOTE_SHA_UNAVAILABLE')}
+        elseif([string]$Start.Commit-ne[string]$Start.RemoteCommit-or[string]$End.Commit-ne[string]$End.RemoteCommit){[void]$reasons.Add('CERTIFICATION_REMOTE_SHA_MISMATCH')}
+        if([string]::IsNullOrWhiteSpace([string]$Start.RefSnapshotSha256)-or[string]::IsNullOrWhiteSpace([string]$End.RefSnapshotSha256)){[void]$reasons.Add('CERTIFICATION_REF_SNAPSHOT_UNAVAILABLE')}
+        if([string]::IsNullOrWhiteSpace([string]$Start.ReflogSnapshotSha256)-or[string]::IsNullOrWhiteSpace([string]$End.ReflogSnapshotSha256)){[void]$reasons.Add('CERTIFICATION_REFLOG_SNAPSHOT_UNAVAILABLE')}
+        if([string]$Start.RefSnapshotSha256-ne[string]$End.RefSnapshotSha256){[void]$reasons.Add('CERTIFICATION_REF_MUTATED');$refMutation=$true}
+        if([string]$Start.ReflogSnapshotSha256-ne[string]$End.ReflogSnapshotSha256){[void]$reasons.Add('CERTIFICATION_REFLOG_MUTATED');$refMutation=$true}
+        if(-not[string]::IsNullOrWhiteSpace($ExpectedBranch)-and[string]$Start.Branch-ne$ExpectedBranch){[void]$reasons.Add('CERTIFICATION_EXPECTED_BRANCH_MISMATCH')}
+        if(-not[string]::IsNullOrWhiteSpace($ExpectedCommit)-and[string]$Start.Commit-ne$ExpectedCommit){[void]$reasons.Add('CERTIFICATION_EXPECTED_COMMIT_MISMATCH')}
+        if(-not[string]::IsNullOrWhiteSpace($ExpectedCommit)-and[string]$Start.RemoteCommit-ne$ExpectedCommit){[void]$reasons.Add('CERTIFICATION_EXPECTED_REMOTE_SHA_MISMATCH')}
+    }
+    return [ordered]@{
+        ExpectedBranch=$(if([string]::IsNullOrWhiteSpace($ExpectedBranch)){$null}else{$ExpectedBranch})
+        ExpectedCommit=$(if([string]::IsNullOrWhiteSpace($ExpectedCommit)){$null}else{$ExpectedCommit})
+        Start=$Start
+        End=$End
+        RefMutationDetected=$refMutation
+        RefMutationReason=$(if($reasons.Count-eq0){$null}else{$reasons.ToArray()-join'; '})
+        IdentityValid=($reasons.Count-eq0)
+    }
+}
+
+function Get-TPMCertificationRepositoryLockNameV1 {
+    param([Parameter(Mandatory=$true)][string]$RepositoryPath)
+    $repo=[IO.Path]::GetFullPath($RepositoryPath).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar).ToUpperInvariant()
+    $hash=Get-TPMCertificationSha256HexV1 -Bytes ((New-Object Text.UTF8Encoding $false).GetBytes($repo))
+    return "Local\TeknoParrotManager-Certification-$hash"
+}
+
+function Enter-TPMCertificationRepositoryLockV1 {
+    param([Parameter(Mandatory=$true)][string]$RepositoryPath)
+    $name=Get-TPMCertificationRepositoryLockNameV1 -RepositoryPath $RepositoryPath
+    $mutex=New-Object System.Threading.Mutex($false,$name)
+    $acquired=$false
+    try{
+        try{$acquired=$mutex.WaitOne(0)}catch [Threading.AbandonedMutexException]{$acquired=$true}
+        if(-not$acquired){throw "CERTIFICATION_ALREADY_RUNNING: another certification process holds the repository lock for $([IO.Path]::GetFullPath($RepositoryPath))"}
+        return [pscustomobject]@{RepositoryPath=[IO.Path]::GetFullPath($RepositoryPath);Name=$name;Mutex=$mutex;Acquired=$true}
+    }catch{
+        if(-not$acquired){$mutex.Dispose()}
+        throw
+    }
+}
+
+function Exit-TPMCertificationRepositoryLockV1 {
+    param([AllowNull()]$Lock)
+    if($null-eq$Lock){return}
+    try{if([bool]$Lock.Acquired){$Lock.Mutex.ReleaseMutex()}}finally{$Lock.Mutex.Dispose()}
+}
+
 function Invoke-TPMIsolatedProcessV1 {
     param(
         [Parameter(Mandatory=$true)][string]$FilePath,
@@ -506,4 +658,4 @@ function Read-TPMPesterResultV1 {
         Stop-TPMPesterSchemaV1 'unexpected validation failure'
     }
 }
-Export-ModuleMember -Function ConvertTo-TPMWin32ArgumentV1,ConvertTo-TPMSafeTechnicalTextV1,Write-TPMSafeTechnicalFileV1,Invoke-TPMIsolatedProcessV1,Read-TPMPesterResultV1,Test-TPMTransientIOHResultV1,Invoke-TPMSafeFileRetryV1,New-TPMSanitizationExhaustedExceptionV1,Assert-TPMOwnedDirectoryV1,New-TPMOwnedDirectoryChainV1,New-TPMCreateNewFileV1,Test-TPMPathIsContainedV1,Assert-TPMNoReparseInChainV1,Get-TPMPathComponentsV1
+Export-ModuleMember -Function ConvertTo-TPMWin32ArgumentV1,ConvertTo-TPMSafeTechnicalTextV1,Write-TPMSafeTechnicalFileV1,Invoke-TPMIsolatedProcessV1,Read-TPMPesterResultV1,Test-TPMTransientIOHResultV1,Invoke-TPMSafeFileRetryV1,New-TPMSanitizationExhaustedExceptionV1,Assert-TPMOwnedDirectoryV1,New-TPMOwnedDirectoryChainV1,New-TPMCreateNewFileV1,Test-TPMPathIsContainedV1,Assert-TPMNoReparseInChainV1,Get-TPMPathComponentsV1,Get-TPMCertificationGitIdentitySnapshotV1,New-TPMCertificationGitIdentityV1,Get-TPMCertificationRepositoryLockNameV1,Enter-TPMCertificationRepositoryLockV1,Exit-TPMCertificationRepositoryLockV1

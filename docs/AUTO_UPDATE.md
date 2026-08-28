@@ -1,10 +1,12 @@
 # Auto-Update System
 
-Status: standalone helper merged; menu integration is part of the published v1.0 RC7 release; shared hardened download transport documented below.
+Status: standalone helper merged; menu integration is part of the published v1.0 RC7 release; RC8 candidate source includes the same updater behavior plus the current remediation fixes, but RC8 is not published.
 
 Current published release: v1.0-RC7.
 Release archive: https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7
 Previous published public release: v1.0-RC6 (historical). Final Version 1.0 remains unpublished.
+v1.0 RC8 is the candidate source under review and is not published; RC7 remains the
+current published release and RC6 remains historical.
 Publication note (2026-08-22): GitHub serves the immutable RC7 asset as
 `TeknoParrot.Manager.v1.0.RC7.zip` after filename normalization. The Scripts
 mirror uses that exact published filename. The verified asset is 4,862,794
@@ -66,7 +68,7 @@ Ten tests, all passing, deliberately induce failure conditions and verify the or
 2. Zip missing `TeknoParrot-Manager.ps1` -- rejected with a specific "does not contain expected entry" error.
 3. Content-validation failures -- both a missing `$ScriptVersion` and an extracted file that is itself raw zip bytes are rejected before replacement.
 4. Truncated/partial download -- treated as corrupt, rejected.
-5. Read-only destination -- refused before backup/download/replacement. This explicitly avoids relying on `Move-Item -Force`, which can clear the `ReadOnly` attribute and replace a file rather than failing closed.
+5. Read-only destination -- the approved main-menu flow clears only the target file's ReadOnly attribute after explicit approval, then restores it in cleanup. The standalone `tools\` helper remains manual-unlock-only.
 6. Backup creation failure -- aborts before any download; original untouched.
 7. Extraction failure (valid zip, corrupted entry payload) -- rejected, original and backup intact.
 8. Replacement failure after a successful backup (destination locked by another handle) -- `Move-Item` fails, original file is provably unchanged (not partially written), backup and temp cleanup both hold.
@@ -151,7 +153,7 @@ Actual flow:
 3. If no newer version exists, report that the user is current and return to the menu.
 4. If a newer version exists, show release tag/name and asset selected.
 5. Explain exactly what updating will do (backup, download, validate, replace, restart) and ask for explicit Y/N confirmation.
-6. If read-only, refuse before any backup/download work with an actionable error.
+6. If the target is read-only, the approved main-menu flow temporarily clears only that target attribute; backup creation still precedes download and replacement, and cleanup restores the attribute. The standalone helper refuses it and tells the operator how to unlock it manually.
 7. Backup current script.
 8. Download replacement.
 9. Validate replacement content.
@@ -173,7 +175,7 @@ Flow:
    - **Y** -- shows the same "what updating will do" explanation as the menu option, asks for a second explicit confirmation, then calls `Invoke-ManagerUpdateInstall`. A successful install still requires the caller (top-level script code, not the function) to exit -- same reasoning as the menu option: the function itself never calls `exit`, both for testability and so the "declined at the second confirmation" path can return normally.
    - **N** (or anything else) -- continues straight to the menu; logged as "remind me later."
    - **V** -- prints the full release body, then re-prompts (Y/N/V again) rather than exiting the loop.
-5. A read-only target is refused the same way as the menu option -- before any backup/download work, with the same actionable error.
+5. A read-only target uses the same approved main-menu handling as the menu option; the standalone helper refuses it before backup/download work.
 
 ## Non-goals for 1.0
 

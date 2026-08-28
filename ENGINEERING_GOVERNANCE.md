@@ -23,15 +23,18 @@ Every issue must carry, at minimum:
 
 - **One Type label** (what kind of work this is)
 - **One Priority label** (how urgent)
-- **One Component label** (what part of the system it affects)
+- **One Component/Area label** (what part of the system it affects)
+- **One Status label** (what state the issue is in; new investigations use `status:needs-investigation` until a different state is justified)
 
-A **Release label** and a **Status label** are added when they apply (not
-every issue has a committed release target or a meaningful status beyond
-"open"), but are required for anything actually gating a release.
+Every issue must also record:
 
-An issue missing a Type, Priority, or Component is not yet triaged --
-untriaged issues should not sit for more than one release cycle without
-at least minimal labeling.
+- **A milestone/release decision** -- use the matching milestone and `release:` label when a committed release target exists; otherwise record that there is no committed release target yet.
+- **A relationship review** -- explicitly record `Blocks`, `Blocked by`, `Duplicate of`, `Related to`, or `None known`.
+- **Acceptance criteria** -- state how another person or agent can verify that the issue is fixed or complete.
+
+An issue missing any required field is not fully triaged. Labels, milestones, and
+relationships describe scope and dependencies; none of them alone authorizes a
+release or publication.
 
 ### Label taxonomy
 
@@ -150,7 +153,7 @@ and how it was confirmed fixed, without needing to have been present.
 ### Feature lifecycle
 
 1. **Proposed** -- filed with `type:feature` or `type:enhancement`,
-   component, and priority. During a feature freeze (see `CLAUDE.md`),
+   component, and priority. During a feature freeze (see `AGENTS.md`),
    new proposals default to `release:post-1.0` unless the freeze is
    explicitly lifted for that specific item.
 2. **Scoped** -- acceptance criteria added, `status:ready`.

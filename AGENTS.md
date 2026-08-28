@@ -2,7 +2,11 @@
 
 PowerShell 5.1 script for managing TeknoParrot arcade game libraries.
 Current published release: v1.0 RC7
-Release state: v1.0 RC7 is the current published release; v1.0 RC6 is the previous published release (historical); final Version 1.0 remains unpublished.
+Release state: v1.0 RC7 is the current published release; RC8 is the
+candidate being prepared and is not published; v1.0 RC6 is the previous
+published release (historical); final Version 1.0 remains unpublished.
+
+Canonical workflow and role/path assignments: `docs/ENGINEERING-WORKFLOW.md`. The Desktop ChatGPT and Desktop Codex path is `C:\REPOS\teknoparrot-manager`; the Arcade ChatGPT and Arcade Codex path is `E:\REPOS\teknoparrot-manager`.
 
 ---
 
@@ -125,7 +129,7 @@ Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1
 
 ## Release ZIP contents
 
-Candidate ZIP name: `TeknoParrot Manager v1.0 RC7.zip` (staged validation only until publication is authorized).
+Candidate ZIP name: `TeknoParrot Manager v1.0 RC8.zip` (staged validation only until publication is authorized).
 
 **Include:** `TeknoParrot-Manager.ps1`, `.bat`, `-README.txt`, `-QuickStart.txt`,
 `-CHANGELOG.txt`, `LICENSE`, `Crosshairs\` (all 321 PNGs),
@@ -140,12 +144,12 @@ every ECVF contract load; RC4 shipped without it, see LESSONS_LEARNED.md).
 bundled -- see reshade.me's own do-not-redistribute notice), `dgVoodoo2\`
 (live-fetched from the official dege-diosg/dgVoodoo2 GitHub releases on
 demand, never bundled), `FFBPlugin\` and `BepInExCache\` (live-downloaded
-each run, never bundled), `AGENTS.md`, `CLAUDE.md`, `README.md`, `QUICKSTART.md`,
+each run, never bundled), `AGENTS.md`, `CHATGPT.md`, `CODEX.md`, `ARCADE-CHATGPT.md`, `ARCADE-CLAUDE.md`, `CLAUDE.md`, `README.md`, `QUICKSTART.md`,
 `ARCHITECTURE.md`, `LESSONS_LEARNED.md`, `RELEASE-SAFETY-CHECKLIST.md`,
 `SECURITY.md`, `CONSTITUTION.md`, `ENGINEERING_GOVERNANCE.md`,
 `CONTRIBUTING.md`, `SPECIFICATION_DRIVEN_REVIEW_STANDARD.md`,
 `INVENTORY_STANDARDS.md`, `ENGINEERING_VELOCITY_AND_TIME_STEWARDSHIP_STANDARD.md`,
-`PSScriptAnalyzerSettings.psd1`, `.github\`,
+`PSScriptAnalyzerSettings.psd1`, `docs\`, `.github\`,
 `*.zip`, `*.log`, `*.config.json`.
 
 Full mechanics and the authoritative version of this list:
@@ -163,27 +167,48 @@ Update on every version bump that changes user-facing behaviour. Pages: Home,
 Quick-Start, Setup, AutoSync, Register, Restore-Backup, Crosshairs, ReShade,
 dgVoodoo2, GPU-Fix, FFB-Setup, Troubleshooting, Changelog.
 
-Workflow: clone wiki repo to a temp folder, edit pages, commit, push, delete
-temp folder.
+Workflow: keep source-controlled wiki staging/reference content under `docs/wiki-updates/`. For a live wiki change, use a disposable local clone, not a shared network checkout. Push only after the explicit Desktop ChatGPT gate and human Release Manager authorization; never use a NAS, SMB, mapped-drive, or UNC Git worktree as the active wiki checkout.
 
 ---
 
-## Machine paths (dev environment)
+## Machine and workspace paths
 
-| Role | Path |
+Active Git workspaces are local and role-specific:
+
+| Role or purpose | Path/policy |
 |---|---|
-| Scripts folder | W:\Emulators\TeknoParrot\Scripts |
-| TeknoParrot root | C:\Users\EliSi\LaunchBox\Emulators\TeknoParrot |
-| Games staging | E:\Games\TeknoParrot Games |
-| ZIP source (NAS) | W:\ROMS\TeknoParrot Collection |
-| ReShade DLLs | Scripts\ReShade\ReShade64.dll (x64) and ReShade32.dll (x86, optional) |
-| Crosshairs folder | Scripts\Crosshairs\ (321 PNGs, 000.png--320.png) |
+| Desktop ChatGPT and Desktop Codex | `C:\REPOS\teknoparrot-manager` or a local worktree beneath `C:\REPOS` |
+| Arcade ChatGPT and Arcade Codex | `E:\REPOS\teknoparrot-manager` or a local worktree beneath `E:\REPOS` |
+| Approved TeknoParrot runtime | Explicit per run; verify `TeknoParrotUi.exe`, `GameProfiles`, canonical containment, and reparse-point rules |
+| Data, packages, evidence, and backups | Local or NAS storage is allowed after source identity and local-run provenance are recorded |
+
+Do not use a NAS, SMB share, mapped drive, or UNC path as an authoritative active Git worktree. A package, mirror, or copied report does not establish source identity.
+
+---
+
+## Local worktree and runtime path policy (#293)
+
+GitHub is authoritative for cross-machine and cross-agent handoff. Development,
+review, certification, and release validation use a local clone or disposable
+local worktree on each computer. Handoff uses a pushed Git ref and exact commit
+SHA; a shared SMB/NAS Git working tree is never the authoritative checkout.
+
+NAS paths remain valid for ROMs, source data, packages, generated artifacts,
+evidence, backups, and mirrors. Runtime path safety is role-based: an external
+DAT/source folder may be writable when it canonicalizes, is reachable and
+non-reparse, and is outside protected runtime/install/staging roots. A mapped
+or NAS path is not rejected merely because it is network-backed. A Git
+worktree is an engineering artifact, not a runtime data destination.
+
+Before handoff, record the local repository root, branch, exact HEAD, origin
+ref, ancestry, and clean status. Before a runtime write, revalidate the
+canonical destination and its existing path chain immediately before the write.
 
 ---
 
 ## Key conventions
 
-- Version bump required on every meaningful change set.
+- Version bumps are required for product or release-behavior changes; policy/process-only corrections do not invent a release version.
 - All file writes use BOM-less UTF-8: `(New-Object System.Text.UTF8Encoding $false)`.
 - All `Get-ChildItem` calls use `-LiteralPath`.
 - Backup before every destructive operation; abort the whole operation if backup fails.
@@ -257,6 +282,10 @@ Full sequence with exact commands: RELEASE-SAFETY-CHECKLIST.md section 1.
    script reads or writes GameProfiles. See RELEASE-SAFETY-CHECKLIST.md section 2.
 
 ---
+
+## Current workflow entry points
+
+Use `docs/ENGINEERING-WORKFLOW.md` as the canonical cross-machine workflow. Its role table assigns Desktop ChatGPT and Desktop Codex to `C:\REPOS`, and Arcade ChatGPT and Arcade Codex to `E:\REPOS`. The role files `CHATGPT.md`, `CODEX.md`, `ARCADE-CHATGPT.md`, and `ARCADE-CLAUDE.md` are entry points, not release authority.
 
 ## Codex delegation (mandatory handoff format)
 

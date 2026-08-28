@@ -7,6 +7,12 @@ if($PSVersionTable.PSVersion.Major -ge 6){
  $script:tpmAuthorityNonWindowsPwsh=-not[bool]$tpmIsWindowsValue
 }
 Describe 'ADR-0155 Phase 1 compiled authority primitives' {
+ BeforeAll {
+  function New-TestCertificationIdentity {
+   $commit='a'*40;$hash='a'*64;$snapshot=[ordered]@{Branch='main';Commit=$commit;RemoteRef='origin/main';RemoteCommit=$commit;Clean=$true;RefSnapshotSha256=$hash;ReflogSnapshotSha256=$hash}
+   [ordered]@{ExpectedBranch='main';ExpectedCommit=$commit;Start=$snapshot;End=$snapshot;RefMutationDetected=$false;RefMutationReason=$null;IdentityValid=$true}
+  }
+ }
  It 'loads the complete V1 type set idempotently' {@(Initialize-TPMCertificationTypesV1).Count|Should -Be 10;@(Initialize-TPMCertificationTypesV1).Count|Should -Be 10}
  It 'has no public constructors or setters' {foreach($n in @('TPMScorePreviewV1','TPMSealedRunReaderV1','TPMFactSetV1','TPMFactV1','TPMEvidenceRecordV1','TPMScoreItemV1','TPMEligibilitySnapshotV1','TPMPublicationCandidateV1','TPMPublicationOutcomeV1','TPMFinalOutcomeV1')){$t=('Jumpstile.TPM.Certification.V1.'+$n)-as[type];@($t.GetConstructors()).Count|Should -Be 0;@($t.GetProperties()| Where-Object CanWrite).Count|Should -Be 0}}
  It 'rejects partial incompatible types in a child process' {$engine=if(Get-Command pwsh -ErrorAction SilentlyContinue){(Get-Command pwsh).Source}else{"$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"};$code="Add-Type 'namespace Jumpstile.TPM.Certification.V1 { public class TPMFactV1 {} }'; Import-Module '$modulePath'; try { Initialize-TPMCertificationTypesV1; exit 0 } catch { exit 23 }";$p=Start-Process $engine -ArgumentList @('-NoProfile','-Command',$code) -Wait -PassThru;$p.ExitCode|Should -Be 23}
@@ -41,6 +47,12 @@ Describe 'ADR-0155 Phase 1 JCS and whole-message transport' {
  It 'rejects malformed invalid UTF8 non-string and noncanonical inputs' {{ConvertFrom-TPMFailureMessageBase64UrlV1 'a'}|Should -Throw;{ConvertFrom-TPMFailureMessageBase64UrlV1 '!!!!'}|Should -Throw;$valid=ConvertTo-TPMFailureMessageBase64UrlV1 'padded';{ConvertFrom-TPMFailureMessageBase64UrlV1 ($valid+'=')}|Should -Throw;$bad=[Convert]::ToBase64String([byte[]](0xC3,0x28)).TrimEnd('=').Replace('+','-').Replace('/','_');{ConvertFrom-TPMFailureMessageBase64UrlV1 $bad}|Should -Throw;$u=New-Object Text.UTF8Encoding($false);$number=[Convert]::ToBase64String($u.GetBytes('1')).TrimEnd('=');{ConvertFrom-TPMFailureMessageBase64UrlV1 $number}|Should -Throw;$slash=[Convert]::ToBase64String($u.GetBytes('"a\/b"')).TrimEnd('=').Replace('+','-').Replace('/','_');{ConvertFrom-TPMFailureMessageBase64UrlV1 $slash}|Should -Throw}
 }
 Describe 'ADR-0155 Phase 3 prerequisite: shared fact/evidence primitives extracted from Shadow' {
+ BeforeAll {
+  function New-TestCertificationIdentity {
+   $commit='a'*40;$hash='a'*64;$snapshot=[ordered]@{Branch='main';Commit=$commit;RemoteRef='origin/main';RemoteCommit=$commit;Clean=$true;RefSnapshotSha256=$hash;ReflogSnapshotSha256=$hash}
+   [ordered]@{ExpectedBranch='main';ExpectedCommit=$commit;Start=$snapshot;End=$snapshot;RefMutationDetected=$false;RefMutationReason=$null;IdentityValid=$true}
+  }
+ }
  It 'exports the exact eleven fact identifiers and nine-item evidence manifest used by Phase 2' {
   (Get-TPMFactIdentifiersV1)|Should -Be @('Repository','Pester','Static Analysis','Real Install Health','Backups','Smoke File Safety','Artifacts','pcsx2x6 crosshair path (issue #79)','Behavioral Certification (Virtual Beta Tester)','Unattended TPM root binding','Unattended TPM config restoration')
   (Get-TPMEvidenceManifestV1).Count|Should -Be 9
@@ -50,12 +62,16 @@ Describe 'ADR-0155 Phase 3 prerequisite: shared fact/evidence primitives extract
   (Get-TPMEvidenceFailureCodesV1).Count|Should -Be 19
  }
  It 'validates and decides a Repository fact record identically to the pre-extraction Shadow behavior' {
-  $record=[ordered]@{Identifier='Repository';Applicable=$true;Data=[ordered]@{RepositoryPath=(Join-Path $TestDrive 'repo');RepositoryAvailable=$true;RepositoryClean=$true;GitStatus='(clean)'}}
+  $record=[ordered]@{Identifier='Repository';Applicable=$true;Data=[ordered]@{RepositoryPath=(Join-Path $TestDrive 'repo');RepositoryAvailable=$true;RepositoryClean=$true;GitStatus='(clean)';CertificationIdentity=(New-TestCertificationIdentity)}}
   {Assert-TPMFactRecordV1 $record Smoke (Join-Path $TestDrive 'report')}|Should -Not -Throw
   $decision=Get-TPMFactDecisionV1 $record Smoke (Join-Path $TestDrive 'report')
   $decision.Status|Should -Be 'Pass';$decision.Passed|Should -BeTrue
   $bad=[ordered]@{Identifier='NotARealCategory';Applicable=$true;Data=[ordered]@{}}
   {Assert-TPMFactRecordV1 $bad Smoke (Join-Path $TestDrive 'report')}|Should -Throw '*FACT_IDENTIFIER_INVALID*'
+ }
+ It 'rejects a Repository fact that omits the certification identity seal' {
+  $record=[ordered]@{Identifier='Repository';Applicable=$true;Data=[ordered]@{RepositoryPath=(Join-Path $TestDrive 'repo');RepositoryAvailable=$true;RepositoryClean=$true;GitStatus='(clean)'}}
+  {Assert-TPMFactRecordV1 $record Smoke (Join-Path $TestDrive 'report')}|Should -Throw '*field count*'
  }
  It 'returns NotApplicable with a null Passed value for an inapplicable category' {
   $record=[ordered]@{Identifier='Smoke File Safety';Applicable=$false;Data=[ordered]@{}}
@@ -160,6 +176,31 @@ Describe 'Assert-TPMDiagnosticRecordV1 (Item 3 audit, ADR155-0309 follow-up roun
     }
     It 'rejects an extra, unexpected field' {
         { Assert-TPMDiagnosticRecordV1 -Value ([ordered]@{Stage='S';ExceptionType=$null;Message='m';Extra='x'}) -Context 'Test' } | Should -Throw '*SCHEMA_INVALID: Test must have exactly Stage*'
+    }
+}
+
+Describe 'Artifacts publisher diagnostics (issue #296)' {
+    It 'keeps publication failure code/message detail in both authority details and broad failure reasons' {
+        $report=Join-Path $TestDrive 'artifact-diagnostics-report'
+        New-Item -ItemType Directory -Path $report -Force|Out-Null
+        $diagnostic=[ordered]@{Stage='PublicationCommit';FailureCode='STAGING_FAILED';FailureMessage='staging rejected the certification manifest';ExceptionType=$null}
+        $record=[ordered]@{Identifier='Artifacts';Applicable=$true;Data=[ordered]@{ReportDirectory=$report;ReportDirectoryReserved=$false;StagingDirectoryReady=$true;RequiredArtifactManifestConfigured=$true;PublisherAvailable=$false;PackageValidationExecuted=$true;PackageValidationPassed=$false;PackageValidationErrorCount=1;PackageValidationDiagnostics=@($diagnostic)}}
+        {Assert-TPMFactRecordV1 $record Smoke $report}|Should -Not -Throw
+        $decision=Get-TPMFactDecisionV1 $record Smoke $report
+        @($decision.FailureReasons.Code)|Should -Contain 'PUBLISHER_UNAVAILABLE'
+        @($decision.FailureReasons.Code)|Should -Contain 'PACKAGE_VALIDATION_FAILED'
+        @($decision.FailureReasons|Where-Object Code -eq 'PUBLISHER_UNAVAILABLE')[0].Message|Should -Match 'STAGING_FAILED'
+        @($decision.FailureReasons|Where-Object Code -eq 'PUBLISHER_UNAVAILABLE')[0].Message|Should -Match 'staging rejected the certification manifest'
+        $decision.Details.PackageValidationDiagnostics[0].FailureCode|Should -Be 'STAGING_FAILED'
+        $decision.Details.PackageValidationDiagnostics[0].FailureMessage|Should -Be 'staging rejected the certification manifest'
+    }
+
+    It 'rejects a malformed publisher diagnostic instead of reducing it to a generic error count' {
+        $report=Join-Path $TestDrive 'malformed-artifact-diagnostics-report'
+        New-Item -ItemType Directory -Path $report -Force|Out-Null
+        $bad=[ordered]@{Stage='PublicationCommit';FailureCode='PROMOTION_FAILED';FailureMessage='';ExceptionType=$null}
+        $record=[ordered]@{Identifier='Artifacts';Applicable=$true;Data=[ordered]@{ReportDirectory=$report;ReportDirectoryReserved=$true;StagingDirectoryReady=$true;RequiredArtifactManifestConfigured=$true;PublisherAvailable=$false;PackageValidationExecuted=$true;PackageValidationPassed=$false;PackageValidationErrorCount=1;PackageValidationDiagnostics=@($bad)}}
+        {Assert-TPMFactRecordV1 $record Smoke $report}|Should -Throw '*PackageValidationDiagnostics*'
     }
 }
 

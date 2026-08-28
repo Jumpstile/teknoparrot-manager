@@ -126,6 +126,10 @@ function Invoke-VbtUpdateInstall {
 '@
     Set-Content -LiteralPath $extractedFunctionsPath -Value ($functionSource + "`n`n" + $updateBoundarySource) -Encoding utf8
     . $extractedFunctionsPath
+    $script:ActiveTpmWorkflowStatus = $null
+    $script:TpmWorkflowRendering = $false
+    $script:PostgresRecoveryStatus = $null
+    $script:PostgresRecoveryResumeState = $null
 
     # Top-level script-scope values the extracted functions read directly
     # (not captured by function-body extraction) -- mirrors production.
@@ -134,7 +138,7 @@ function Invoke-VbtUpdateInstall {
     # unqualified; without it here, the main-menu Describe below fails with
     # "$DisplayVersion cannot be retrieved" the moment the menu renders.
     $ScriptVersion = "1.0"
-    $ReleaseCandidateLabel = "RC7"
+    $ReleaseCandidateLabel = "RC8"
     $DisplayVersion = "v$ScriptVersion $ReleaseCandidateLabel"
     $script:logPath = Join-Path $TestDrive "vbt-human-workflow.log"
 
@@ -241,7 +245,7 @@ Describe "Virtual Beta Tester: human workflow simulation (issue #88 phase 1)" {
             Assert-ScenarioOutput -ScenarioId 'read-only-update-failure-actionable' -Action {
                 Invoke-CheckForUpdates -ScriptPath $fixturePath | Out-Null
             }
-            Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeFalse -Because "a read-only target must fail before any backup is attempted"
+            Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeTrue -Because "an approved update creates its backup before the network attempt"
         } finally {
             Set-ItemProperty -LiteralPath $fixturePath -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
         }
@@ -321,6 +325,10 @@ function Read-MainMenuChoiceResponsive {
     `$script:answerIndex++
     return [pscustomobject]@{ Redraw = `$false; Value = `$answer }
 }
+`$script:ActiveTpmWorkflowStatus = `$null
+`$script:TpmWorkflowRendering = `$false
+`$script:PostgresRecoveryStatus = `$null
+`$script:PostgresRecoveryResumeState = `$null
 `$pendingApplyMode = `$null
 `$forceRealApply = `$false
 `$Unattended = `$false
@@ -341,7 +349,7 @@ $($menuIfAst.Extent.Text)
     }
 
     It "main-menu-invalid-option-recovers: an invalid choice prints a clear message and the menu asks again" {
-        $captured = Invoke-MainMenuHarness -AnswerQueue @('99', '14') 6>&1
+        $captured = Invoke-MainMenuHarness -AnswerQueue @('99', '15') 6>&1
         $text = ($captured | ForEach-Object { $_.ToString() }) -join "`n"
 
         $scenario = Get-Scenario -Id 'main-menu-invalid-option-recovers'
@@ -359,10 +367,15 @@ $($menuIfAst.Extent.Text)
         $text.Contains('Invalid choice') | Should -Be $false
     }
 
-    It "exiting (choice 14) returns without printing an invalid-choice message" {
-        $captured = Invoke-MainMenuHarness -AnswerQueue @('14') 6>&1
+    It "exiting (choice 15) returns without printing an invalid-choice message" {
+        $captured = Invoke-MainMenuHarness -AnswerQueue @('15') 6>&1
         $text = ($captured | ForEach-Object { $_.ToString() }) -join "`n"
         $text.Contains('Invalid choice') | Should -Be $false
+    }
+
+    It "choice 14 returns the support mode without entering an invalid path" {
+        $captured = Invoke-MainMenuHarness -AnswerQueue @('14') 6>&1
+        (($captured | ForEach-Object { $_.ToString() }) -join "`n") | Should -Match 'Support'
     }
 
     It "recovers from several consecutive invalid choices before a valid one succeeds" {

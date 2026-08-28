@@ -31,12 +31,11 @@
   {
     "id": "read-only-update-failure-actionable",
     "journey": "update-check",
-    "goal": "Read-only update failure tells the user exactly how to recover.",
+    "goal": "Read-only update failure is handled automatically and protection is restored.",
     "requiredPhrases": [
-      "is marked read-only",
-      "Remove the read-only attribute",
-      "re-run the update",
-      "will not be silently cleared"
+      "temporarily cleared the file protection",
+      "restore it after this attempt",
+      "Backup created"
     ],
     "forbiddenPhrases": [
       "Update installed"
@@ -48,7 +47,7 @@
     "journey": "main-menu",
     "goal": "Invalid menu input does not crash or confuse the user.",
     "requiredPhrases": [
-      "Invalid choice. Enter 1-14."
+      "Invalid choice. Enter 1-15."
     ],
     "forbiddenPhrases": [
       "Exception",
@@ -70,5 +69,39 @@
       "Deleting"
     ],
     "expectedStateChange": false
+  },
+  {
+    "id": "postgres-guided-recovery",
+    "journey": "postgres-recovery",
+    "goal": "A beginner can repair an unusable saved PostgreSQL password without manual administrator steps or losing the setup flow.",
+    "requiredPhrases": [
+      "Fix it now?",
+      "enter it twice",
+      "Windows will ask you to approve this",
+      "continue the same setup automatically",
+      "protected repair information"
+    ],
+    "forbiddenPhrases": [
+      "right-click TeknoParrot-Manager.bat",
+      "select PostgreSQL setup (mode 12) again",
+      "SERVICEPASSWORD=",
+      "SUPERPASSWORD="
+    ],
+    "expectedStateChange": true
+  },
+  {
+    "id": "create-support-package",
+    "journey": "support-package",
+    "goal": "A beginner can create one safe ZIP to send when asking for help.",
+    "requiredPhrases": [
+      "Create Support Package",
+      "This is the file to send when asking for help"
+    ],
+    "forbiddenPhrases": [
+      "password=",
+      "token=",
+      "UserProfiles"
+    ],
+    "expectedStateChange": true
   }
 ]

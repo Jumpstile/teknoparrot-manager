@@ -1,5 +1,5 @@
 ===============================================================================
-  TeknoParrot Manager  |  v1.0 RC7  --  QUICK START
+  TeknoParrot Manager  |  v1.0 RC8  --  QUICK START
   Author: Jumpstile
 ===============================================================================
 
@@ -11,8 +11,8 @@
 
   CURRENT PUBLISHED RELEASE -- v1.0 RC7. Release archive:
   https://github.com/Jumpstile/teknoparrot-manager/releases/tag/v1.0-RC7
-  Previous published release: v1.0 RC6 (historical). Final Version 1.0
-  remains unpublished.
+  Previous published release: v1.0 RC6 (historical). RC8 is the candidate
+  being prepared and is not published. Final Version 1.0 remains unpublished.
   Test one game after every run. Profiles are backed up automatically.
 
 
@@ -54,47 +54,60 @@
   ------------
   - Windows 10 or 11
   - PowerShell 5.1 or later (built in to Windows -- no install needed)
-  - TeknoParrot installed with TeknoParrotUi.exe run at least once
-    (so it has downloaded its GameProfiles folder)
+  - TeknoParrot installed with TeknoParrotUi.exe. TPM opens it automatically
+    if its GameProfiles library is missing.
   - Your games as ZIP files on a NAS/drive (for AutoSync) or already extracted
 
 
   BEFORE YOU START
   ----------------
-  - Run TeknoParrotUi.exe once so it downloads its game profiles.
   - Have your games as ZIP files (for AutoSync) or already extracted.
+  - TPM will open TeknoParrotUI itself if its first-run profile download is
+    still needed. It does not edit TeknoParrot-owned settings or controls.
 
 
   TYPICAL FIRST RUN
   -----------------
-  1. Run TeknoParrotUi.exe once.
-  2. Run TeknoParrot Manager and choose AutoSync or Register only.
-  3. Launch TeknoParrotUI and verify your games appear.
-  4. In TeknoParrotUI, bind one game of each controller type you use.
-  5. Re-run the script -- it can copy those known bindings to compatible
+  1. Double-click TeknoParrot-Manager.bat.
+  2. If TeknoParrot's profile library is missing, TPM opens TeknoParrotUI and
+     waits while it finishes its own setup, then continues automatically.
+  3. Choose AutoSync or Register only.
+  4. Launch TeknoParrotUI and verify your games appear.
+  5. In TeknoParrotUI, bind one game of each controller type you use.
+  6. Re-run the script -- it can copy those known bindings to compatible
      unbound games in the same detected control family. This is a bounded
      reference-copy aid, not universal controller/gun detection or complete
      shooter mapping.
-  6. Launch one updated game and test it.
-  7. Everything else (crosshairs, ReShade, dgVoodoo2, GPU fix, FFB, BepInEx,
-     Postgres -- modes 4-9 and 12) is optional and can be run any time after
-     this, in any order, as many times as you like.
+  7. Launch one updated game and test it.
 
 
   RUN IT
   ------
-  1. Open PowerShell in the folder where TeknoParrot-Manager.ps1 is
-     (typically a Scripts subfolder inside your TeknoParrot install):
+  1. Double-click TeknoParrot-Manager.bat. This is the normal way to start
+     TPM; it opens the menu without requiring a PowerShell command.
+
+     Advanced users can open PowerShell in the folder where
+     TeknoParrot-Manager.ps1 is (typically a Scripts subfolder inside your
+     TeknoParrot install):
 
        cd "C:\path\to\TeknoParrot\Scripts"
 
-  2. Start the script:
+  2. If using the advanced PowerShell route, start the script:
 
        .\TeknoParrot-Manager.ps1
 
-     Blocked? Allow it for this session only:
+     If Windows blocks that advanced route, allow it for this session only:
 
        powershell -ExecutionPolicy Bypass -File .\TeknoParrot-Manager.ps1
+
+  WORKFLOW STATUS
+  ---------------
+  During multi-step work TPM shows a plain-language status area with the
+  current action, recent completion, next step, and any action needed from
+  you. It uses real step counts and adapts safely when the PowerShell window
+  is resized. Important failures remain visible until acknowledged.
+  Redirected, unattended, and certification runs keep structured status
+  events but do not emit cursor-control or footer output.
 
   3. Pick a mode (after each mode completes, you return to this menu):
 
@@ -114,8 +127,8 @@
                              (AMD / NVIDIA / Intel, see below).
        8) FFB setup        -- wheel/stick rumble and force feedback
                              (see below).
-       9) BepInEx update   -- update an already-installed BepInEx to the
-                             latest stable 64-bit release (see below).
+       9) BepInEx setup   -- install, update, or repair-reset selected games
+                             using the stable x64/x86 package (see below).
 
      Maintenance and Recovery
        10) Health check    -- read-only library status, safe to run any time.
@@ -128,7 +141,21 @@
        13) Check updates   -- manually check the latest GitHub release.
                              Nothing is downloaded or changed without your
                              explicit Y/N confirmation.
-       14) Exit            -- quit the script.
+       14) Create Support Package
+                             -- collect safe logs/reports into one ZIP to send
+                             when asking for help.
+       15) Exit            -- quit the script.
+
+     If you need help, choose 14) Create Support Package. TPM collects safe
+     TPM/TeknoParrot/game logs and metadata, removes common private information
+     from text, and saves one ZIP under SupportPackages\ beside this script.
+     Executable/archive masquerades, binary control bytes, and invalid text
+     are rejected and recorded. Send that ZIP when asking for help. It never
+     includes game files, ROMs, executables, arbitrary DLLs, firmware, profiles,
+     credentials, passwords, tokens, or recovery-state files. Missing optional
+     diagnostics are reported and a failed or cleanup-incomplete package is
+     never reported as successful.
+
 
      The menu automatically shortens its descriptions, or shows labels only
      with "?" for details, depending on your console window size -- mode
@@ -191,8 +218,9 @@
   Game won't launch          Open TeknoParrotUI, point the profile to the
                              correct .exe. Re-run the script and choose Repair.
 
-  Game not in TeknoParrot    Check ACTION REQUIRED -- it may need manual
-                             registration or needs to be extracted first.
+  Game not in TeknoParrot    For an ambiguous executable, choose one of TPM's validated candidates or
+                             leave it for TeknoParrotUI. If it is not extracted,
+                             extract it first.
 
   Extraction keeps failing   Check the log for the specific error. Verify
                              free space and that the ZIP is not corrupted.
@@ -263,9 +291,9 @@
 
   Common uses include sharpening, scanlines, colour enhancement, and decorative bezels.
 
-  Your games work perfectly WITHOUT ReShade. It is 100% optional and can
-  be removed at any time by deleting one DLL file from a game folder.
-  No game files are ever changed.
+  Your games work perfectly WITHOUT ReShade. It is 100% optional. TPM does not
+  automatically remove unowned or changed hook files; use the advanced
+  troubleshooting path for those files.
 
   HOW TO SET IT UP
 
@@ -294,9 +322,8 @@
   Once installed, press the  Home  key while in-game to open the
   ReShade overlay and switch effects on or off.
 
-  To remove ReShade from a game: delete the DLL (e.g. dxgi.dll,
-  d3d9.dll, or opengl32.dll) from that game's folder. Nothing else
-  needs to be changed.
+  TPM does not automatically remove unowned or changed ReShade hooks. Use
+  the advanced troubleshooting path when those files need review.
 
   Full details, effect descriptions, and update instructions:
   TeknoParrot-Manager-README.txt -- RESHADE VISUAL ENHANCEMENTS section.
@@ -323,7 +350,8 @@
     3. Run the script and choose mode 6, or answer Y at the end of any run.
        The wizard auto-detects which games need it and shows them first.
 
-  To remove: delete the deployed DLL file(s) from the game folder.
+  TPM does not automatically remove unowned or changed dgVoodoo2 hooks; use
+  the advanced troubleshooting path for those files.
 
   Full details: TeknoParrot-Manager-README.txt -- DGVOODOO2 LEGACY
   COMPATIBILITY section.
@@ -367,25 +395,27 @@
   Full details: TeknoParrot-Manager-README.txt -- FORCE FEEDBACK (FFB) SETUP section.
 
 
-  BEPINEX UPDATE CHECK (OPTIONAL)
-  ----------------------------------
+  BEPINEX UPDATE AND SETUP (OPTIONAL)
+  ------------------------
   BepInEx is a third-party Unity plugin/modding framework some games need
   (Family Guy Bowling, Mars Sortie, NERF Arcade, Rainbow BomberGirl,
   Super Bikes 3, TMNT, and others) to get controls or fixes working.
 
-  This ONLY updates games that already have BepInEx installed -- it never
-  installs BepInEx into a game that doesn't have it. Only the latest STABLE
-  64-bit release is ever used (never 32-bit, never a pre-release). Before
-  the update prompt, TPM verifies every candidate root is inside the
-  configured games folder and existing target paths are not reparse-backed.
-  The stable 64-bit ZIP is extracted to staging, its file set and backup are
-  verified, and live promotion uses rollback-safe transaction handling.
-  Unsafe roots, failed backups, extraction errors, digest failures, and
-  rollback uncertainty fail closed.
+  Mode 9 is the BepInEx update and setup flow. It offers a user-approved
+  install, update, or repair-reset for selected games. TPM chooses the stable
+  x64 or x86 package matching each validated executable, validates the
+  download, backs up the fixed BepInEx tree, and rolls back a failed promotion.
+  Nothing is installed silently into every game. Unsafe roots and failed
+  validation make no changes.
+
+  If a root is unsafe or the network fails, TPM explains that no change was
+  made and offers the automatic retry path. Manual deletion is an advanced
+  troubleshooting boundary, not the normal beginner workflow.
+
   To run:
     Choose mode 9 from the main menu.
 
-  Full details: TeknoParrot-Manager-README.txt -- BEPINEX UPDATE CHECK section.
+  Full details: TeknoParrot-Manager-README.txt -- BEPINEX SETUP section.
 
 
   RETROBAT / BATOCERA
@@ -525,12 +555,13 @@
 
   RESTORING A BACKUP
   ------------------
-  1. Close TeknoParrot completely before restoring (the script checks and
-     will stop if it detects TeknoParrot is still running).
-  2. Re-run the script and choose mode 11) Restore backup.
+  1. Choose mode 11) Restore backup. TPM keeps the selected backup while it
+     checks whether TeknoParrot or LaunchBox/BigBox is still open.
+  2. If an application is open, save your work, close it, and press Enter when
+     TPM asks to check again. TPM resumes the same restore choice.
   3. The script lists all backups (most recent first) with file counts.
   4. Pick one by number, type YES to confirm.
-  5. Done. Re-open TeknoParrot to use the restored profiles.
+  5. TPM reports completion only after the restored files or databases verify.
 
 
   FUZZY MATCHING  (NESiCAxLive and other shared-exe platforms)
@@ -540,8 +571,8 @@
   profile code using a similarity score. Three outcomes are possible:
 
     Score >= 0.72   Auto-registered and shown in Cyan -- spot-check these.
-    Score >= 0.40   Listed in ACTION REQUIRED with a best-guess profile shown.
-                    One click in TeknoParrotUI to confirm the right one.
+    Score >= 0.40   Presented in TPM for an explicit candidate choice;
+                    unresolved cases remain in ACTION REQUIRED.
     Score < 0.40    Listed in ACTION REQUIRED with the full candidate list.
 
   Folder names are normalised before comparison: years like (2012), ISO dates
@@ -574,13 +605,18 @@
     N) Skip (you can always re-run setup later to configure it).
 
   Eggman recognition data is not TeknoParrotUI's ParrotData.xml, not its
-  DAT/XML setting, and not a main or supplementary game ZIP. It is also not
-  the staging/install folder: it is only the index TPM reads to recognize
-  games. On a later explicit update, TPM reuses a valid configured ZIP at its
-  existing path without an alternate-location save dialog. Every supplied,
-  previously configured, or user-selected destination is canonicalized and
-  revalidated before reuse, download, or write. An unsafe destination is
-  rejected before network/download work begins.
+  DAT/XML setting, and not the contents of a main or supplementary game ZIP.
+  It is also not the staging/install folder: it is only the index TPM reads to
+  recognize games. On a later explicit update, TPM reuses a valid configured
+  ZIP at its existing path without an alternate-location save dialog. If the
+  current DAT is under the TeknoParrot root, TPM will not overwrite it; it can
+  offer a reachable mapped/NAS primary ZIP/source folder such as
+  <your-mapped-ZIP-source>\TeknoParrot Collection. The supplementary source is
+  not selected
+  automatically. Every destination is canonicalized, checked for protected,
+  reparse-backed, and ambiguous paths, and revalidated immediately before
+  write. If no safe external folder exists, TPM explains how to correct it
+  instead of silently skipping.
 
   The script uses the dat's <GameProfile> codes to register three types of
   games that would otherwise appear in ACTION REQUIRED:
@@ -609,15 +645,16 @@
 
     Register these games    Games whose executable is shared by multiple
                             TeknoParrot profiles and the folder name did not
-                            match confidently enough to auto-register. Shows
-                            the executable, a best-guess profile (where
-                            available), and the full candidate list to choose
-                            from in TeknoParrotUI.
+                            match confidently enough to auto-register. TPM
+                            presents validated candidates for an explicit
+                            choice; unresolved cases remain in ACTION REQUIRED.
+                            Shows the executable and candidate profiles.
+                            Press Enter to leave a case unresolved; it remains
+                            in ACTION REQUIRED with the TeknoParrotUI fallback.
 
                             NESiCAxLive note: most NESiCAxLive games ARE
                             auto-registered by fuzzy matching. Only those
-                            below the confidence threshold appear here, with
-                            the best-guess profile shown to make picking easy.
+                            below the confidence threshold appear here.
 
     Fix these game paths    Profiles with a broken path that the script
                             could not auto-fix. Open TeknoParrotUI and point
@@ -733,8 +770,10 @@
   PostgresBackups\                     Timestamped pg_dump backups of
                                        Postgres databases, made before each
                                        Postgres setup run. Restore via menu 11.
+  SupportPackages\                    Safe support ZIPs created by menu option
+                                       14. Send the ZIP when asking for help.
   TeknoParrot-Manager-ActionItems.txt  Action items from the last run
-                                       (manual registration, broken paths,
+                                       (ambiguous registration choices, broken paths,
                                        etc.). Written after registration runs
                                        that have outstanding items. Default
                                        location -- a Save dialog lets you

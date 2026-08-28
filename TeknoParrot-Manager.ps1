@@ -1,5 +1,4 @@
-# =============================================================================
-# TeknoParrot Manager  |  v1.0 RC7
+# TeknoParrot Manager  |  v1.0 RC8
 # Author: Jumpstile
 # =============================================================================
 #
@@ -18,8 +17,8 @@
 #                  game folder name to every candidate profile code using a
 #                  Dice bigram similarity score and auto-registers the best
 #                  match when confidence is high enough. Below the threshold,
-#                  the best guess is shown so manual registration takes one
-#                  click rather than a full search.
+#                  validated candidates are shown for an explicit choice; TPM
+#                  never promotes an ambiguous best guess automatically.
 #
 #   AutoSync       Extracts game ZIPs from a NAS or local source to a staging
 #                  folder you choose, skipping unchanged games. Supports
@@ -48,18 +47,25 @@
 #   Device survey  Asks which controls you have and prints a tailored plan of
 #                  which game to bind with which device.
 #
+#   Support package  Gathers allowlisted TPM, TeknoParrot, and game diagnostics
+#                  into one redacted ZIP without copying game payloads.
+#
 # WHAT IT DOES NOT DO
 #   Controls are copied only from a reference game you have already bound;
 #   anything else is left for you and reported. Game files are not provided.
 #
 # REQUIREMENTS
 #   - Windows 10+ with PowerShell 5.1+
-#   - A TeknoParrot install with TeknoParrotUi.exe and its GameProfiles folder.
-#     Run TeknoParrotUi.exe once first so it downloads its profile library.
+#   - A TeknoParrot install containing TeknoParrotUi.exe. If its profile
+#     library is missing, TPM opens TeknoParrot and waits for it to finish.
 #   - Games extracted into per-game subfolders (AutoSync can do this).
 # =============================================================================
 
-param([switch]$Unattended, [switch]$DryRun)
+param(
+    [switch]$Unattended,
+    [switch]$DryRun,
+    [string]$PostgresRecoveryResumeToken = ''
+)
 
 # Single source of truth for the version string used in the banner, log, and
 # GitHub API User-Agent headers. Previously hardcoded in each of those spots
@@ -68,7 +74,7 @@ param([switch]$Unattended, [switch]$DryRun)
 # again at 0.98 -- this line is easy to miss because it's far from the
 # header comment block at the top of the file. Check it every version bump.)
 $ScriptVersion = "1.0"
-$ReleaseCandidateLabel = "RC7"
+$ReleaseCandidateLabel = "RC8"
 $DisplayVersion = "v$ScriptVersion $ReleaseCandidateLabel"
 
 function Get-ManagerDisplayVersion {
@@ -408,6 +414,1169 @@ function Write-Log {
     }
 }
 
+# =============================================================================
+# SHARED WORKFLOW STATUS (issue #300)
+# =============================================================================
+# Status is structured state first and console decoration second. Workflows
+# may capture the event sink in tests without receiving status objects through
+# their normal success pipeline. Cursor rendering is deliberately capability-
+# driven; redirected, unattended, certification, and unsupported hosts use
+# structured events plus ordinary append-only output.
+function Get-TpmWorkflowConsoleCapability {
+    param([object]$Facts = $null)
+    if ($Facts) {
+        if ($Facts.NoRender -or $Facts.Unattended -or $Facts.InputRedirected -or $Facts.OutputRedirected -or $Facts.Certification) {
+            return [pscustomobject]@{ Mode = 'None'; Reason = 'noninteractive'; Width = 0; Height = 0; BufferWidth = 0; BufferHeight = 0 }
+        }
+        $width = [int]$Facts.Width
+        $height = [int]$Facts.Height
+        $bufferWidth = [int]$Facts.BufferWidth
+        $bufferHeight = [int]$Facts.BufferHeight
+        if ($Facts.CanCursor -and $width -gt 0 -and $height -gt 0 -and $bufferWidth -ge $width -and $bufferHeight -ge $height) {
+            return [pscustomobject]@{ Mode = 'CursorFooter'; Reason = 'injected'; Width = $width; Height = $height; BufferWidth = $bufferWidth; BufferHeight = $bufferHeight }
+        }
+        if ($width -gt 0) { return [pscustomobject]@{ Mode = 'AppendOnly'; Reason = 'injected'; Width = $width; Height = $height; BufferWidth = $bufferWidth; BufferHeight = $bufferHeight } }
+        return [pscustomobject]@{ Mode = 'None'; Reason = 'unknown-console'; Width = 0; Height = 0; BufferWidth = 0; BufferHeight = 0 }
+    }
+    try {
+        if ($Unattended -or [Console]::IsInputRedirected -or [Console]::IsOutputRedirected) {
+            return [pscustomobject]@{ Mode = 'None'; Reason = 'redirected-or-unattended'; Width = 0; Height = 0; BufferWidth = 0; BufferHeight = 0 }
+        }
+    } catch {
+        return [pscustomobject]@{ Mode = 'None'; Reason = 'redirection-unknown'; Width = 0; Height = 0; BufferWidth = 0; BufferHeight = 0 }
+    }
+    try {
+        $raw = $Host.UI.RawUI
+        $width = [int]$raw.WindowSize.Width
+        $height = [int]$raw.WindowSize.Height
+        $bufferWidth = [int]$raw.BufferSize.Width
+        $bufferHeight = [int]$raw.BufferSize.Height
+        if ($width -le 0 -or $height -le 0 -or $bufferWidth -lt $width -or $bufferHeight -lt $height) {
+            return [pscustomobject]@{ Mode = 'AppendOnly'; Reason = 'invalid-console-geometry'; Width = $width; Height = $height; BufferWidth = $bufferWidth; BufferHeight = $bufferHeight }
+        }
+        if ($Host.Name -eq 'ConsoleHost') {
+            return [pscustomobject]@{ Mode = 'CursorFooter'; Reason = 'console-host'; Width = $width; Height = $height; BufferWidth = $bufferWidth; BufferHeight = $bufferHeight }
+        }
+        return [pscustomobject]@{ Mode = 'AppendOnly'; Reason = 'unsupported-host'; Width = $width; Height = $height; BufferWidth = $bufferWidth; BufferHeight = $bufferHeight }
+    } catch {
+        return [pscustomobject]@{ Mode = 'AppendOnly'; Reason = 'rawui-unavailable'; Width = 0; Height = 0; BufferWidth = 0; BufferHeight = 0 }
+    }
+}
+
+function New-TpmWorkflowStatusContext {
+    param(
+        [Parameter(Mandatory)][string]$WorkflowKey,
+        [Parameter(Mandatory)][string]$Title,
+        [Parameter(Mandatory)][object[]]$Steps,
+        [scriptblock]$EventSink = $null,
+        [object]$ConsoleFacts = $null
+    )
+    $normalizedSteps = @($Steps | ForEach-Object {
+        if ($_ -is [string]) { [pscustomobject]@{ Id = [string]$_; Label = [string]$_ } }
+        else { [pscustomobject]@{ Id = [string]$_.Id; Label = [string]$_.Label } }
+    })
+    return [pscustomobject]@{
+        PSTypeName       = 'TPM.WorkflowStatusContext.v1'
+        WorkflowId       = [guid]::NewGuid().ToString('N')
+        WorkflowKey      = $WorkflowKey
+        Title            = $Title
+        Steps            = $normalizedSteps
+        EventSink        = $EventSink
+        ConsoleFacts     = $ConsoleFacts
+        Lifecycle        = 'Created'
+        State            = 'Working'
+        Sequence         = 0
+        ActiveStepId     = $null
+        ActiveStepNumber = $null
+        Attempt          = 0
+        Activity         = $null
+        NextStep         = $null
+        UserAction       = 'Nothing needed from you'
+        Completed        = @()
+        Failure          = $null
+        FooterBounds     = $null
+        FooterRows       = @()
+        RendererMode     = $null
+        LastDownloadStatusUtc = $null
+        Closed           = $false
+        OwnerState       = 'Unclaimed'
+    }
+}
+
+function Get-TpmWorkflowStatusSnapshot {
+    param([Parameter(Mandatory)]$Context)
+    return [pscustomobject]@{
+        PSTypeName       = 'TPM.WorkflowStatusSnapshot.v1'
+        WorkflowId       = $Context.WorkflowId
+        WorkflowKey      = $Context.WorkflowKey
+        Title            = $Context.Title
+        Lifecycle        = $Context.Lifecycle
+        State            = $Context.State
+        Sequence         = $Context.Sequence
+        ActiveStepId     = $Context.ActiveStepId
+        ActiveStepNumber = $Context.ActiveStepNumber
+        StepCount        = @($Context.Steps).Count
+        Attempt          = $Context.Attempt
+        Activity         = $Context.Activity
+        NextStep         = $Context.NextStep
+        UserAction       = $Context.UserAction
+        Completed        = @($Context.Completed)
+        Failure          = $Context.Failure
+    }
+}
+
+function Format-TpmWorkflowStatusRows {
+    param([Parameter(Mandatory)]$Snapshot, [int]$Width = 80)
+    $width = [Math]::Max(24, $Width)
+    $clip = {
+        param([string]$Text)
+        $value = if ($null -eq $Text) { '' } else { [string]$Text }
+        if ($value.Length -le ($width - 1)) { return $value }
+        if ($width -le 28) { return $value.Substring(0, [Math]::Max(1, $width - 4)) + '...' }
+        return $value.Substring(0, $width - 4) + '...'
+    }
+    $recent = @($Snapshot.Completed | Select-Object -Last 2 | ForEach-Object { $_.Summary }) -join ' | '
+    $current = if ($Snapshot.Failure) { 'Needs attention: ' + $Snapshot.Failure.Message }
+               elseif ($Snapshot.Activity) { $Snapshot.Activity }
+               elseif ($Snapshot.State -eq 'Finished') { 'Finished' }
+               else { 'Starting' }
+    $statusLine = 'TPM STATUS  ' + ($(if ($recent) { '[OK] ' + $recent + ' -> ' } else { '' })) + $current
+    $stepText = if ($Snapshot.ActiveStepNumber) { 'Step {0} of {1}' -f $Snapshot.ActiveStepNumber, $Snapshot.StepCount } else { 'Workflow' }
+    $action = if ($Snapshot.Failure) { 'Acknowledge the message, then choose retry or stop' } else { $Snapshot.UserAction }
+    $rows = [System.Collections.Generic.List[string]]::new()
+    [void]$rows.Add((&$clip $statusLine))
+    [void]$rows.Add((&$clip ('{0} | {1} | {2}' -f $stepText, $Snapshot.State, $action)))
+    if ($Snapshot.Failure) {
+        [void]$rows.Add((&$clip ('Data safety: {0}' -f $Snapshot.Failure.DataSafety)))
+    } elseif ($Snapshot.NextStep) {
+        [void]$rows.Add((&$clip ('Next: ' + $Snapshot.NextStep)))
+    }
+    return @($rows)
+}
+
+function Clear-TpmWorkflowFooter {
+    param([Parameter(Mandatory)]$Context)
+    if (-not $Context.FooterBounds -or $Context.RendererMode -ne 'CursorFooter') { return }
+    if ($Context.ConsoleFacts -and $Context.ConsoleFacts.Adapter) {
+        try { & $Context.ConsoleFacts.Adapter.Clear $Context.FooterBounds } finally { $Context.FooterBounds = $null; $Context.FooterRows = @() }
+        return
+    }
+    try {
+        $raw = $Host.UI.RawUI
+        $storedTop = [int]$Context.FooterBounds.Top
+        $storedHeight = [int]$Context.FooterBounds.Height
+        $windowTop = [int]$raw.WindowPosition.Y
+        if (($Context.FooterBounds.PSObject.Properties['WindowTop'] -and $windowTop -ne [int]$Context.FooterBounds.WindowTop) -or
+            $raw.CursorPosition.Y -ge $storedTop -and $raw.CursorPosition.Y -lt ($storedTop + $storedHeight)) {
+            $Context.RendererMode = 'TemporaryAppendOnly'
+            $Context.FooterBounds = $null
+            $Context.FooterRows = @()
+            return
+        }
+        $width = [int]$raw.BufferSize.Width
+        $height = [int]$raw.BufferSize.Height
+        $top = [Math]::Max(0, [int]$Context.FooterBounds.Top)
+        $bottom = [Math]::Min($height - 1, $top + [int]$Context.FooterBounds.Height - 1)
+        if ($bottom -lt $top -or $width -le 0) { return }
+        $cells = New-Object 'System.Management.Automation.Host.BufferCell[,]' 1,$width
+        for ($i = 0; $i -lt $width; $i++) {
+            $cells[0,$i] = New-Object System.Management.Automation.Host.BufferCell(' ', [ConsoleColor]::Gray, [ConsoleColor]::Black, [System.Management.Automation.Host.BufferCellType]::Complete)
+        }
+        for ($y = $top; $y -le $bottom; $y++) {
+            $raw.SetBufferContents((New-Object System.Management.Automation.Host.Rectangle(0, $y, $width - 1, $y)), $cells)
+        }
+    } catch {
+        $Context.RendererMode = 'TemporaryAppendOnly'
+    } finally {
+        $Context.FooterBounds = $null
+        $Context.FooterRows = @()
+    }
+}
+
+function Render-TpmWorkflowStatus {
+    param([Parameter(Mandatory)]$Context)
+    $capability = Get-TpmWorkflowConsoleCapability -Facts $Context.ConsoleFacts
+    if ($Context.RendererMode -eq 'PermanentAppendOnly') { $capability.Mode = 'AppendOnly'; $capability.Reason = 'permanent-fallback' }
+    if ($capability.Mode -eq 'None') { $Context.RendererMode = 'None'; return }
+    $snapshot = Get-TpmWorkflowStatusSnapshot -Context $Context
+    $rows = @(Format-TpmWorkflowStatusRows -Snapshot $snapshot -Width ([Math]::Max(24, [int]$capability.Width)))
+    if ($Context.ConsoleFacts -and $Context.ConsoleFacts.Adapter) {
+        try {
+            if ($Context.FooterBounds) { Clear-TpmWorkflowFooter -Context $Context }
+            if ($capability.Height -lt ($rows.Count + 3)) {
+                $Context.RendererMode = 'TemporaryAppendOnly'
+                if ($Context.ConsoleFacts.Adapter.Append) { & $Context.ConsoleFacts.Adapter.Append $rows }
+                return
+            }
+            & $Context.ConsoleFacts.Adapter.Draw $rows $capability
+            $Context.FooterBounds = [pscustomobject]@{ Top = $capability.Height - $rows.Count; Height = $rows.Count; Width = $capability.Width; WindowTop = 0 }
+            $Context.FooterRows = @($rows)
+            $Context.RendererMode = 'CursorFooter'
+            return
+        } catch {
+            Clear-TpmWorkflowFooter -Context $Context
+            $Context.RendererMode = 'TemporaryAppendOnly'
+            if ($Context.ConsoleFacts.Adapter.Append) { & $Context.ConsoleFacts.Adapter.Append @($rows[0]) }
+            return
+        }
+    }
+    if ($capability.Mode -eq 'AppendOnly') {
+        $Context.RendererMode = 'PermanentAppendOnly'
+        Microsoft.PowerShell.Utility\Write-Host ($rows[0]) -ForegroundColor DarkCyan
+        if ($rows.Count -gt 1) { Microsoft.PowerShell.Utility\Write-Host ($rows[1]) -ForegroundColor DarkGray }
+        if ($rows.Count -gt 2) { Microsoft.PowerShell.Utility\Write-Host ($rows[2]) -ForegroundColor Yellow }
+        return
+    }
+    try {
+        $raw = $Host.UI.RawUI
+        $geometryChanged = $Context.RendererMode -ne 'CursorFooter' -or
+            -not $Context.FooterBounds -or $Context.FooterBounds.Width -ne $capability.Width -or
+            $Context.FooterBounds.Height -ne $rows.Count
+        if ($Context.FooterBounds) { Clear-TpmWorkflowFooter -Context $Context }
+        if ($Context.RendererMode -in @('AppendOnly', 'PermanentAppendOnly')) {
+            Microsoft.PowerShell.Utility\Write-Host ($rows[0]) -ForegroundColor DarkCyan
+            if ($rows.Count -gt 1) { Microsoft.PowerShell.Utility\Write-Host ($rows[1]) -ForegroundColor DarkGray }
+            if ($rows.Count -gt 2) { Microsoft.PowerShell.Utility\Write-Host ($rows[2]) -ForegroundColor Yellow }
+            return
+        }
+        $footerHeight = $rows.Count
+        if ($capability.Height -lt ($footerHeight + 3)) {
+            $Context.RendererMode = 'TemporaryAppendOnly'
+            Microsoft.PowerShell.Utility\Write-Host ($rows[0]) -ForegroundColor DarkCyan
+            if ($rows.Count -gt 1) { Microsoft.PowerShell.Utility\Write-Host ($rows[1]) -ForegroundColor DarkGray }
+            return
+        }
+        $top = [int]$raw.WindowPosition.Y + [int]$raw.WindowSize.Height - $footerHeight
+        if ($top -lt 0 -or $top + $footerHeight -gt [int]$raw.BufferSize.Height) { throw 'Footer geometry is outside the current console buffer.' }
+        $cursor = $raw.CursorPosition
+        if ($cursor.Y -ge $top -and $cursor.Y -lt ($top + $footerHeight)) {
+            $Context.RendererMode = 'TemporaryAppendOnly'
+            Microsoft.PowerShell.Utility\Write-Host ($rows[0]) -ForegroundColor DarkCyan
+            if ($rows.Count -gt 1) { Microsoft.PowerShell.Utility\Write-Host ($rows[1]) -ForegroundColor DarkGray }
+            if ($rows.Count -gt 2) { Microsoft.PowerShell.Utility\Write-Host ($rows[2]) -ForegroundColor Yellow }
+            return
+        }
+        $cells = New-Object 'System.Management.Automation.Host.BufferCell[,]' $footerHeight,$capability.Width
+        for ($y = 0; $y -lt $footerHeight; $y++) {
+            $text = $rows[$y].PadRight($capability.Width)
+            for ($x = 0; $x -lt $capability.Width; $x++) {
+                $cells[$y,$x] = New-Object System.Management.Automation.Host.BufferCell($text[$x], [ConsoleColor]::Gray, [ConsoleColor]::Black, [System.Management.Automation.Host.BufferCellType]::Complete)
+            }
+        }
+        $raw.SetBufferContents((New-Object System.Management.Automation.Host.Rectangle(0, $top, $capability.Width - 1, $top + $footerHeight - 1)), $cells)
+        $Context.FooterBounds = [pscustomobject]@{ Top = $top; Height = $footerHeight; Width = $capability.Width; WindowTop = [int]$raw.WindowPosition.Y }
+        $Context.FooterRows = @($rows)
+        $Context.RendererMode = 'CursorFooter'
+    } catch {
+        Clear-TpmWorkflowFooter -Context $Context
+        $Context.RendererMode = 'TemporaryAppendOnly'
+        Microsoft.PowerShell.Utility\Write-Host ($rows[0]) -ForegroundColor DarkCyan
+    }
+}
+
+function Apply-TpmWorkflowStatusEvent {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)]$StatusEvent)
+    switch ($StatusEvent.EventKind) {
+        'WorkflowStarted' {
+            if ($Context.Lifecycle -ne 'Created') { throw 'Workflow can only start from its created state.' }
+            $Context.Lifecycle = 'Running'; $Context.State = 'Working'
+        }
+        'StepStarted' {
+            if ($Context.Lifecycle -notin @('Running','WaitingForUser') -or $Context.ActiveStepId) { throw 'Workflow cannot start a step from its current state.' }
+            $Context.Lifecycle = 'Running'; $Context.State = 'Working'; $Context.ActiveStepId = $StatusEvent.StepId; $Context.ActiveStepNumber = $StatusEvent.StepNumber; $Context.Attempt = $StatusEvent.Attempt; $Context.Activity = $StatusEvent.Activity; $Context.UserAction = 'Nothing needed from you'
+        }
+        'ActivityUpdated' { if ($Context.Lifecycle -notin @('Running','WaitingForUser')) { throw 'Workflow activity cannot update from its current state.' }; $Context.Activity = $StatusEvent.Activity }
+        'WaitingStarted' { if ($Context.Failure) { throw 'Workflow cannot wait while a failure is awaiting acknowledgement.' }; if ($Context.Lifecycle -notin @('Running','Created')) { throw 'Workflow cannot enter waiting state from its current state.' }; $Context.Lifecycle = 'WaitingForUser'; $Context.State = 'Waiting for you'; $Context.UserAction = $StatusEvent.UserAction }
+        'WaitingEnded' { if ($Context.Lifecycle -ne 'WaitingForUser') { throw 'Workflow cannot resume because it is not waiting for user input.' }; $Context.Lifecycle = 'Running'; $Context.State = 'Working'; $Context.UserAction = 'Nothing needed from you' }
+        'StepCompleted' {
+            if (-not $Context.ActiveStepId -or $StatusEvent.StepId -ne $Context.ActiveStepId) { throw 'Workflow can only complete its active step.' }
+            $Context.State = $StatusEvent.Outcome; $Context.Completed = @(@($Context.Completed) + [pscustomobject]@{ Summary = $StatusEvent.Summary; Outcome = $StatusEvent.Outcome } | Select-Object -Last 3); $Context.ActiveStepId = $null; $Context.ActiveStepNumber = $null; $Context.Activity = $null; $Context.NextStep = $StatusEvent.NextStep
+        }
+        'StepSkipped' {
+            if (-not $Context.ActiveStepId -or $StatusEvent.StepId -ne $Context.ActiveStepId) { throw 'Workflow can only skip its active step.' }
+            $Context.State = 'Skipped'; $Context.Completed = @(@($Context.Completed) + [pscustomobject]@{ Summary = $StatusEvent.Summary; Outcome = 'Skipped' } | Select-Object -Last 3); $Context.ActiveStepId = $null; $Context.ActiveStepNumber = $null; $Context.NextStep = $StatusEvent.NextStep
+        }
+        'FailureRaised' { $Context.Lifecycle = 'NeedsAttention'; $Context.State = 'Needs attention'; $Context.Failure = [pscustomobject]@{ FailureId = $StatusEvent.FailureId; Message = $StatusEvent.Summary; DataSafety = $StatusEvent.DataSafety; RecoveryActions = @($StatusEvent.RecoveryActions) } }
+        'FailureAcknowledged' { if (-not $Context.Failure -or $Context.Failure.FailureId -ne $StatusEvent.FailureId) { throw 'Workflow failure acknowledgement does not match the active failure.' }; $Context.Failure = $null; $Context.Lifecycle = 'Running'; $Context.State = 'Working' }
+        'RetryStarted' { $Context.Lifecycle = 'Running'; $Context.State = 'Working'; $Context.Attempt = $StatusEvent.Attempt; $Context.Activity = $StatusEvent.Activity }
+        'WorkflowCompleted' { if ($Context.Failure) { throw 'Workflow cannot complete while a failure is awaiting acknowledgement.' }; $Context.Lifecycle = 'Finished'; $Context.State = 'Finished'; $Context.ActiveStepId = $null; $Context.ActiveStepNumber = $null; $Context.Activity = $null; $Context.NextStep = $null }
+        'WorkflowAborted' { $Context.Lifecycle = 'Aborted'; $Context.State = 'Skipped'; $Context.ActiveStepId = $null; $Context.ActiveStepNumber = $null }
+        'WorkflowClosed' { if ($Context.Failure) { throw 'Workflow cannot close while a failure is awaiting acknowledgement.' }; $Context.Lifecycle = 'Closed'; $Context.Closed = $true }
+        default { throw ('Unknown workflow status event: {0}' -f $StatusEvent.EventKind) }
+    }
+}
+
+function Publish-TpmWorkflowStatusEvent {
+    param(
+        [Parameter(Mandatory)]$Context,
+        [Parameter(Mandatory)][ValidateSet('WorkflowStarted','StepStarted','ActivityUpdated','WaitingStarted','WaitingEnded','StepCompleted','StepSkipped','FailureRaised','FailureAcknowledged','RetryStarted','WorkflowCompleted','WorkflowAborted','WorkflowClosed')][string]$EventKind,
+        [string]$StepId = $null, [int]$StepNumber = 0, [int]$Attempt = 0,
+        [string]$Activity = $null, [string]$Summary = $null, [string]$NextStep = $null,
+        [string]$UserAction = $null, [string]$Outcome = $null, [int]$ItemNumber = 0, [int]$ItemCount = 0,
+        [string]$FailureId = $null, [string]$DataSafety = $null, [object[]]$RecoveryActions = @()
+    )
+    if ($Context.Closed) { throw 'Workflow is already closed.' }
+    $Context.Sequence++
+    $statusEvent = [pscustomobject]@{
+        PSTypeName = 'TPM.WorkflowStatusEvent.v1'; SchemaVersion = 1; WorkflowId = $Context.WorkflowId; WorkflowKey = $Context.WorkflowKey
+        Sequence = $Context.Sequence; OccurredUtc = (Get-Date).ToUniversalTime().ToString('o'); EventKind = $EventKind; StateAfter = $null
+        StepId = $StepId; StepNumber = if ($StepNumber) { $StepNumber } else { $Context.ActiveStepNumber }; StepCount = @($Context.Steps).Count
+        Attempt = if ($Attempt) { $Attempt } else { $Context.Attempt }; Activity = $Activity; Summary = $Summary; NextStep = $NextStep
+        UserAction = $UserAction; Outcome = $Outcome; ItemNumber = if ($ItemNumber) { $ItemNumber } else { $null }; ItemCount = if ($ItemCount) { $ItemCount } else { $null }
+        FailureId = $FailureId; DataSafety = $DataSafety; RecoveryActions = @($RecoveryActions)
+    }
+    Apply-TpmWorkflowStatusEvent -Context $Context -StatusEvent $statusEvent
+    $statusEvent.StateAfter = $Context.State
+    if ($Context.EventSink) { [void](& $Context.EventSink $statusEvent) }
+    $script:TpmWorkflowRendering = $true
+    try { Render-TpmWorkflowStatus -Context $Context } finally { $script:TpmWorkflowRendering = $false }
+}
+
+function Start-TpmWorkflowStatus {
+    param([Parameter(Mandatory)]$Context)
+    $active = $script:ActiveTpmWorkflowStatus
+    if ($active -and -not $active.Closed -and $active -ne $Context) {
+        throw 'A workflow is already active; nested or concurrent workflows are rejected.'
+    }
+    if ($Context.Closed -or $Context.Lifecycle -ne 'Created') { throw 'Workflow context cannot be started again.' }
+    $Context.OwnerState = 'Owned'
+    $script:ActiveTpmWorkflowStatus = $Context
+    try {
+        Publish-TpmWorkflowStatusEvent -Context $Context -EventKind WorkflowStarted -Summary $Context.Title
+    } catch {
+        if ($script:ActiveTpmWorkflowStatus -eq $Context) { $script:ActiveTpmWorkflowStatus = $null }
+        $Context.OwnerState = 'Released'
+        throw
+    }
+}
+
+function Start-TpmWorkflowStep {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$StepId, [string]$Activity = $null)
+    if ($Context.Failure) { throw 'Workflow cannot start a step while a failure is awaiting acknowledgement.' }
+    $index = 0
+    $found = $false
+    foreach ($step in @($Context.Steps)) {
+        $index++
+        if ($step.Id -eq $StepId) { $found = $true; break }
+    }
+    if (-not $found) { throw "Unknown workflow step: $StepId" }
+    Publish-TpmWorkflowStatusEvent -Context $Context -EventKind StepStarted -StepId $StepId -StepNumber $index -Attempt ([int]$Context.Attempt + 1) -Activity $Activity -NextStep $Context.NextStep
+}
+
+function Update-TpmWorkflowActivity {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$Activity, [int]$ItemNumber = 0, [int]$ItemCount = 0)
+    Publish-TpmWorkflowStatusEvent -Context $Context -EventKind ActivityUpdated -Activity $Activity -ItemNumber $ItemNumber -ItemCount $ItemCount
+}
+
+function Set-TpmWorkflowWaiting {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$Message, [Parameter(Mandatory)][string]$UserAction)
+    Publish-TpmWorkflowStatusEvent -Context $Context -EventKind WaitingStarted -Activity $Message -UserAction $UserAction
+}
+
+function Resume-TpmWorkflowStatus {
+    param([Parameter(Mandatory)]$Context)
+    Publish-TpmWorkflowStatusEvent -Context $Context -EventKind WaitingEnded
+}
+
+function Complete-TpmWorkflowStep {
+    param([Parameter(Mandatory)]$Context, [ValidateSet('Fixed','Succeeded','Skipped')][string]$Outcome = 'Succeeded', [Parameter(Mandatory)][string]$Summary, [string]$NextStep = $null)
+    $kind = if ($Outcome -eq 'Skipped') { 'StepSkipped' } else { 'StepCompleted' }
+    Publish-TpmWorkflowStatusEvent -Context $Context -EventKind $kind -StepId $Context.ActiveStepId -Outcome $Outcome -Summary $Summary -NextStep $NextStep
+}
+
+function Set-TpmWorkflowFailure {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$FailureId, [Parameter(Mandatory)][string]$Message, [Parameter(Mandatory)][string]$DataSafety, [object[]]$RecoveryActions = @())
+    Publish-TpmWorkflowStatusEvent -Context $Context -EventKind FailureRaised -FailureId $FailureId -Summary $Message -DataSafety $DataSafety -RecoveryActions $RecoveryActions
+}
+
+function Acknowledge-TpmWorkflowFailure {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$FailureId, [string]$ActionId = 'Acknowledge')
+    if (-not $Context.Failure -or $Context.Failure.FailureId -ne $FailureId) { throw 'Workflow failure acknowledgement does not match the active failure.' }
+    Publish-TpmWorkflowStatusEvent -Context $Context -EventKind FailureAcknowledged -FailureId $FailureId -UserAction $ActionId
+}
+
+function Complete-TpmWorkflowStatus {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$Summary)
+    Publish-TpmWorkflowStatusEvent -Context $Context -EventKind WorkflowCompleted -Summary $Summary
+}
+
+function Stop-TpmWorkflowStatus {
+    param([Parameter(Mandatory)]$Context, [string]$Reason = 'Stopped')
+    if (-not $Context.Failure) { Publish-TpmWorkflowStatusEvent -Context $Context -EventKind WorkflowAborted -Summary $Reason }
+}
+
+function Resolve-TpmWorkflowFailure {
+    param(
+        [Parameter(Mandatory)]$Context,
+        [Parameter(Mandatory)][string]$FailureId,
+        [Parameter(Mandatory)][string]$Message,
+        [Parameter(Mandatory)][string]$DataSafety,
+        [object[]]$RecoveryActions = @(),
+        [switch]$Acknowledge
+    )
+    if (-not $Context.Failure) {
+        [void](Set-TpmWorkflowFailure -Context $Context -FailureId $FailureId -Message $Message -DataSafety $DataSafety -RecoveryActions $RecoveryActions)
+    }
+    if ($Acknowledge) {
+        [void](Read-HostSafe '  Press Enter to acknowledge this result')
+        [void](Acknowledge-TpmWorkflowFailure -Context $Context -FailureId $FailureId)
+        [void](Stop-TpmWorkflowStatus -Context $Context -Reason $Message)
+        [void](Close-TpmWorkflowStatus -Context $Context)
+    }
+}
+
+function Close-TpmWorkflowStatus {
+    param([Parameter(Mandatory)]$Context)
+    if ($Context.Closed) { return }
+    if ($script:ActiveTpmWorkflowStatus -and $script:ActiveTpmWorkflowStatus -ne $Context) {
+        throw 'Workflow context does not own the active status channel.'
+    }
+    try { Publish-TpmWorkflowStatusEvent -Context $Context -EventKind WorkflowClosed }
+    finally {
+        if ($script:ActiveTpmWorkflowStatus -eq $Context) { $script:ActiveTpmWorkflowStatus = $null }
+        if ($script:PostgresRecoveryStatus -eq $Context) { $script:PostgresRecoveryStatus = $null }
+        $Context.OwnerState = 'Released'
+        Clear-TpmWorkflowFooter -Context $Context
+    }
+}
+
+function Write-Host {
+    [CmdletBinding()]
+    param(
+        [Parameter(Position = 0, ValueFromRemainingArguments = $true)][object[]]$Object,
+        [ConsoleColor]$ForegroundColor,
+        [ConsoleColor]$BackgroundColor,
+        [switch]$NoNewline,
+        [string]$Separator = ' '
+    )
+    $activeStatus = $script:ActiveTpmWorkflowStatus
+    if (-not $activeStatus -or $activeStatus.Closed -or $script:TpmWorkflowRendering) {
+        Microsoft.PowerShell.Utility\Write-Host @PSBoundParameters
+        return
+    }
+    Clear-TpmWorkflowFooter -Context $activeStatus
+    try {
+        Microsoft.PowerShell.Utility\Write-Host @PSBoundParameters
+    } finally {
+        if (-not $activeStatus.Closed) {
+            $script:TpmWorkflowRendering = $true
+            try { Render-TpmWorkflowStatus -Context $activeStatus } finally { $script:TpmWorkflowRendering = $false }
+        }
+    }
+}
+
+function Write-TpmWorkflowConsoleLine {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$Message, [string]$ForegroundColor = 'White')
+    Clear-TpmWorkflowFooter -Context $Context
+    Write-Host $Message -ForegroundColor $ForegroundColor
+    Render-TpmWorkflowStatus -Context $Context
+}
+
+function Read-TpmWorkflowInput {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$Prompt)
+    Set-TpmWorkflowWaiting -Context $Context -Message $Prompt -UserAction $Prompt
+    Clear-TpmWorkflowFooter -Context $Context
+    $answer = Read-HostSafe $Prompt
+    Resume-TpmWorkflowStatus -Context $Context
+    return $answer
+}
+function Get-TpmSupportSafeName {
+    param([Parameter(Mandatory)][string]$Value)
+    $safe = [regex]::Replace($Value, '[^A-Za-z0-9_.-]', '_')
+    if ([string]::IsNullOrWhiteSpace($safe)) { $safe = 'item' }
+    if ($safe.Length -gt 80) { $safe = $safe.Substring(0, 80) }
+    return $safe
+}
+
+function Redact-TpmSupportText {
+    param([AllowEmptyString()][string]$Text)
+    $value = if ($null -eq $Text) { '' } else { $Text }
+    $count = 0
+    $patterns = @(
+        '(?im)(authorization)\s*[:=]\s*(?:bearer|basic)\s+[^\s,;]+',
+        '(?im)(password|passwd|pwd|secret|token|api[_-]?key|authorization)\s*[:=]\s*("[^"]*"|''[^'']*''|[^\s,;]+)',
+        '(?im)(PGPASSWORD|PGUSER|PGHOST|PGPORT)\s*=\s*[^\s,;]+',
+        '(?im)(postgres(?:ql)?://)[^\s"''<>]+',
+        '(?im)(--password\s+|/password\s+)[^\s]+',
+        '(?i)[A-Z]:\\Users\\[^\\\s"''<>]+(?:\\[^\\\s"''<>]+)*',
+        '(?i)\\\\[^\\\s"''<>]+\\[^\\\s"''<>]+(?:\\[^\\\s"''<>]+)*'
+    )
+    foreach ($pattern in $patterns) {
+        $before = $value
+        if ($pattern -match 'Users' -or $pattern -match '\\\\') {
+            $replacement = if ($pattern -match 'Users') { '<user-profile>' } else { '<network-path>' }
+            $value = [regex]::Replace($value, $pattern, $replacement)
+        } elseif ($pattern -match 'postgres') {
+            $value = [regex]::Replace($value, $pattern, '$1<redacted-uri>')
+        } else {
+            $value = [regex]::Replace($value, $pattern, {
+                param($match)
+                $name = $match.Groups[1].Value
+                return ($name + '=<redacted>')
+            })
+        }
+        if ($value -ne $before) { $count++ }
+    }
+    return [pscustomobject]@{ Text = $value; RedactionCount = $count }
+}
+function Get-TpmSupportNativeType {
+    if (-not ('TpmSupportNativeMethods' -as [type])) {
+        $null = Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Text;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+public static class TpmSupportNativeMethods {
+    public const UInt32 GenericRead = 0x80000000;
+    public const UInt32 GenericWrite = 0x40000000;
+    public const UInt32 FileReadAttributes = 0x00000080;
+    public const UInt32 Delete = 0x00010000;
+    public const UInt32 ShareRead = 0x00000001;
+    public const UInt32 ShareWrite = 0x00000002;
+    public const UInt32 ShareDelete = 0x00000004;
+    public const UInt32 OpenExisting = 3;
+    public const UInt32 CreateNew = 1;
+    public const UInt32 FileFlagBackupSemantics = 0x02000000;
+    public const UInt32 FileFlagOpenReparsePoint = 0x00200000;
+    public const Int32 FileDispositionInfo = 4;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct FileDispositionInfoData {
+        [MarshalAs(UnmanagedType.Bool)]
+        public Boolean DeleteFile;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern SafeFileHandle CreateFile(
+        String fileName,
+        UInt32 desiredAccess,
+        UInt32 shareMode,
+        IntPtr securityAttributes,
+        UInt32 creationDisposition,
+        UInt32 flagsAndAttributes,
+        IntPtr templateFile);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern UInt32 GetFinalPathNameByHandle(
+        SafeFileHandle file,
+        StringBuilder path,
+        UInt32 pathLength,
+        UInt32 flags);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern Boolean SetFileInformationByHandle(
+        SafeFileHandle file,
+        Int32 fileInformationClass,
+        ref FileDispositionInfoData fileInformation,
+        UInt32 bufferSize);
+}
+'@
+    }
+    return ('TpmSupportNativeMethods' -as [type])
+}
+
+function Get-TpmSupportFinalPathFromHandle {
+    param([Parameter(Mandatory)][Microsoft.Win32.SafeHandles.SafeFileHandle]$Handle)
+    $capacity = 512
+    while ($capacity -le 32768) {
+        $buffer = New-Object System.Text.StringBuilder $capacity
+        $length = [TpmSupportNativeMethods]::GetFinalPathNameByHandle($Handle, $buffer, [uint32]$capacity, 0)
+        if ($length -eq 0) { throw 'The final filesystem identity could not be read from the opened handle.' }
+        if ($length -lt ($capacity - 1)) {
+            $value = $buffer.ToString()
+            if ($value.StartsWith('\\?\UNC\', [System.StringComparison]::OrdinalIgnoreCase)) { return ('\\' + $value.Substring(8)) }
+            if ($value.StartsWith('\\?\', [System.StringComparison]::OrdinalIgnoreCase)) { return $value.Substring(4) }
+            return $value
+        }
+        $capacity = $capacity * 2
+    }
+    throw 'The final filesystem identity path was too long to validate safely.'
+}
+
+function Open-TpmSupportSafeFileStream {
+    param(
+        [Parameter(Mandatory)][string]$SourcePath,
+        [Parameter(Mandatory)][string]$AllowedRoot,
+        [int64]$MaximumBytes = 5242880
+    )
+    $rootHandle = $null
+    $stream = $null
+    try {
+        $sourceFull = [System.IO.Path]::GetFullPath($SourcePath)
+        $rootFull = [System.IO.Path]::GetFullPath($AllowedRoot)
+        if (-not (Test-PathInside -child $sourceFull -parent $rootFull)) { throw 'Candidate escaped its approved diagnostic root.' }
+        if (-not (Test-TpmNoReparsePath -Path $rootFull)) { throw 'Approved diagnostic root is reparse-backed or inaccessible.' }
+        $native = Get-TpmSupportNativeType
+        $rootHandle = [TpmSupportNativeMethods]::CreateFile($rootFull, [TpmSupportNativeMethods]::FileReadAttributes, ([TpmSupportNativeMethods]::ShareRead -bor [TpmSupportNativeMethods]::ShareWrite -bor [TpmSupportNativeMethods]::ShareDelete), [IntPtr]::Zero, [TpmSupportNativeMethods]::OpenExisting, ([TpmSupportNativeMethods]::FileFlagBackupSemantics -bor [TpmSupportNativeMethods]::FileFlagOpenReparsePoint), [IntPtr]::Zero)
+        if ($rootHandle.IsInvalid) { throw 'The approved diagnostic root could not be opened for identity validation.' }
+        $rootFinal = Get-TpmSupportFinalPathFromHandle -Handle $rootHandle
+        if (-not (Test-PathInside -child $rootFinal -parent $rootFull) -or -not (Test-TpmNoReparsePath -Path $rootFinal)) { throw 'Approved diagnostic root identity is unsafe.' }
+        $shareMode = [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete
+        $stream = New-Object System.IO.FileStream($sourceFull, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, $shareMode, 4096, [System.IO.FileOptions]::SequentialScan)
+        $sourceFinal = Get-TpmSupportFinalPathFromHandle -Handle $stream.SafeFileHandle
+        if (-not (Test-PathInside -child $sourceFinal -parent $rootFinal) -or -not (Test-TpmNoReparsePath -Path $sourceFinal)) { throw 'Opened diagnostic identity escaped the approved root.' }
+        if ($stream.Length -gt $MaximumBytes) { throw 'Diagnostic text exceeded the safe size limit.' }
+        return [pscustomobject]@{ Stream = $stream; FinalPath = $sourceFinal; Length = $stream.Length }
+    } catch {
+        if ($stream) { $stream.Dispose() }
+        throw
+    } finally {
+        if ($rootHandle) { $rootHandle.Dispose() }
+    }
+}
+
+function Test-TpmSupportTextContent {
+    param([Parameter(Mandatory)][byte[]]$Bytes)
+    if ($Bytes.Length -ge 2 -and $Bytes[0] -eq 0x4d -and $Bytes[1] -eq 0x5a) { return [pscustomobject]@{ Safe = $false; Reason = 'PE/DOS executable signature (MZ)'; Encoding = $null; Text = $null } }
+    if ($Bytes.Length -ge 4 -and (($Bytes[0] -eq 0x50 -and $Bytes[1] -eq 0x4b -and $Bytes[2] -eq 0x03 -and $Bytes[3] -eq 0x04) -or ($Bytes[0] -eq 0x50 -and $Bytes[1] -eq 0x4b -and $Bytes[2] -eq 0x05 -and $Bytes[3] -eq 0x06) -or ($Bytes[0] -eq 0x50 -and $Bytes[1] -eq 0x4b -and $Bytes[2] -eq 0x07 -and $Bytes[3] -eq 0x08))) { return [pscustomobject]@{ Safe = $false; Reason = 'ZIP archive signature (PK)'; Encoding = $null; Text = $null } }
+    if ($Bytes.Length -ge 6 -and $Bytes[0] -eq 0x37 -and $Bytes[1] -eq 0x7a -and $Bytes[2] -eq 0xbc -and $Bytes[3] -eq 0xaf -and $Bytes[4] -eq 0x27 -and $Bytes[5] -eq 0x1c) { return [pscustomobject]@{ Safe = $false; Reason = '7z archive signature'; Encoding = $null; Text = $null } }
+    if ($Bytes.Length -ge 6 -and $Bytes[0] -eq 0x52 -and $Bytes[1] -eq 0x61 -and $Bytes[2] -eq 0x72 -and $Bytes[3] -eq 0x21 -and $Bytes[4] -eq 0x1a -and $Bytes[5] -eq 0x07) { return [pscustomobject]@{ Safe = $false; Reason = 'RAR archive signature'; Encoding = $null; Text = $null } }
+    if ($Bytes.Length -ge 2 -and $Bytes[0] -eq 0x1f -and $Bytes[1] -eq 0x8b) { return [pscustomobject]@{ Safe = $false; Reason = 'gzip archive signature'; Encoding = $null; Text = $null } }
+    if ($Bytes.Length -ge 4 -and $Bytes[0] -eq 0x4d -and $Bytes[1] -eq 0x53 -and $Bytes[2] -eq 0x43 -and $Bytes[3] -eq 0x46) { return [pscustomobject]@{ Safe = $false; Reason = 'CAB archive signature'; Encoding = $null; Text = $null } }
+    if ($Bytes.Length -ge 4 -and $Bytes[0] -eq 0x7f -and $Bytes[1] -eq 0x45 -and $Bytes[2] -eq 0x4c -and $Bytes[3] -eq 0x46) { return [pscustomobject]@{ Safe = $false; Reason = 'ELF executable signature'; Encoding = $null; Text = $null } }
+    if ($Bytes.Length -ge 4 -and $Bytes[0] -eq 0xd0 -and $Bytes[1] -eq 0xcf -and $Bytes[2] -eq 0x11 -and $Bytes[3] -eq 0xe0) { return [pscustomobject]@{ Safe = $false; Reason = 'OLE compound binary signature'; Encoding = $null; Text = $null } }
+    $encoding = $null
+    $offset = 0
+    if ($Bytes.Length -ge 3 -and $Bytes[0] -eq 0xef -and $Bytes[1] -eq 0xbb -and $Bytes[2] -eq 0xbf) {
+        $encoding = New-Object System.Text.UTF8Encoding($true, $true)
+        $offset = 3
+        $encodingName = 'UTF-8 BOM'
+    } elseif ($Bytes.Length -ge 2 -and $Bytes[0] -eq 0xff -and $Bytes[1] -eq 0xfe) {
+        $encoding = New-Object System.Text.UnicodeEncoding($false, $true, $true)
+        $offset = 2
+        $encodingName = 'UTF-16 LE BOM'
+    } elseif ($Bytes.Length -ge 2 -and $Bytes[0] -eq 0xfe -and $Bytes[1] -eq 0xff) {
+        $encoding = New-Object System.Text.UnicodeEncoding($true, $true, $true)
+        $offset = 2
+        $encodingName = 'UTF-16 BE BOM'
+    } else {
+        $encoding = New-Object System.Text.UTF8Encoding($false, $true)
+        $encodingName = 'UTF-8'
+        $nulCount = @($Bytes | Where-Object { $_ -eq 0 }).Count
+        if ($nulCount -gt 0) { return [pscustomobject]@{ Safe = $false; Reason = 'Material NUL-byte content without a text BOM'; Encoding = $null; Text = $null } }
+    }
+    try {
+        $text = $encoding.GetString($Bytes, $offset, $Bytes.Length - $offset)
+        $controlCount = @([char[]]$text | Where-Object { [int]$_ -lt 32 -and [int]$_ -notin @(9,10,13,27) }).Count
+        if ($controlCount -gt 0) { return [pscustomobject]@{ Safe = $false; Reason = 'Material binary/control-byte content'; Encoding = $null; Text = $null } }
+        return [pscustomobject]@{ Safe = $true; Reason = 'text'; Encoding = $encodingName; Text = $text }
+    } catch {
+        return [pscustomobject]@{ Safe = $false; Reason = 'Invalid or materially non-text encoding'; Encoding = $null; Text = $null }
+    }
+}
+function Remove-TpmSupportHandle {
+    param([Parameter(Mandatory)][Microsoft.Win32.SafeHandles.SafeFileHandle]$Handle)
+    $native = Get-TpmSupportNativeType
+    $info = New-Object 'TpmSupportNativeMethods+FileDispositionInfoData'
+    $info.DeleteFile = $true
+    if (-not [TpmSupportNativeMethods]::SetFileInformationByHandle($Handle, [TpmSupportNativeMethods]::FileDispositionInfo, [ref]$info, [uint32]([Runtime.InteropServices.Marshal]::SizeOf($info)))) {
+        throw 'Owned support path could not be deleted through its opened handle.'
+    }
+}
+
+function Open-TpmSupportOwnedHandle {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$ExpectedRoot)
+    $native = Get-TpmSupportNativeType
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    $flags = [TpmSupportNativeMethods]::FileFlagOpenReparsePoint
+    if ($item.PSIsContainer) { $flags = $flags -bor [TpmSupportNativeMethods]::FileFlagBackupSemantics }
+    $handle = [TpmSupportNativeMethods]::CreateFile($Path, ([TpmSupportNativeMethods]::FileReadAttributes -bor [TpmSupportNativeMethods]::Delete), ([TpmSupportNativeMethods]::ShareRead -bor [TpmSupportNativeMethods]::ShareWrite -bor [TpmSupportNativeMethods]::ShareDelete), [IntPtr]::Zero, [TpmSupportNativeMethods]::OpenExisting, $flags, [IntPtr]::Zero)
+    if ($handle.IsInvalid) { throw 'Owned support path could not be opened for identity validation.' }
+    try {
+        $final = Get-TpmSupportFinalPathFromHandle -Handle $handle
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or -not (Test-PathInside -child $final -parent $ExpectedRoot)) { throw 'Owned support path identity is unsafe.' }
+        return [pscustomobject]@{ Handle = $handle; FinalPath = $final; IsDirectory = [bool]$item.PSIsContainer }
+    } catch {
+        $handle.Dispose()
+        throw
+    }
+}
+
+function Remove-TpmSupportOwnedDirectoryTree {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$RootFinal)
+    $opened = Open-TpmSupportOwnedHandle -Path $Path -ExpectedRoot $RootFinal
+    try {
+        if (-not $opened.IsDirectory) { throw 'Support staging ownership expected a directory.' }
+        foreach ($child in @(Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop)) {
+            Remove-TpmSupportOwnedEntry -Path $child.FullName -RootFinal $RootFinal
+        }
+        if (@(Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop).Count -ne 0) { throw 'Support staging contains unowned residue.' }
+        Remove-TpmSupportHandle -Handle $opened.Handle
+    } finally { $opened.Handle.Dispose() }
+}
+
+function Remove-TpmSupportOwnedEntry {
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$RootFinal)
+    $opened = Open-TpmSupportOwnedHandle -Path $Path -ExpectedRoot $RootFinal
+    try {
+        if ($opened.IsDirectory) { Remove-TpmSupportOwnedDirectoryTree -Path $Path -RootFinal $RootFinal }
+        else { Remove-TpmSupportHandle -Handle $opened.Handle }
+    } finally { $opened.Handle.Dispose() }
+}
+
+function Remove-TpmSupportStageDirectory {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $true }
+    $root = Open-TpmSupportOwnedHandle -Path $Path -ExpectedRoot ([System.IO.Path]::GetFullPath($Path))
+    try {
+        Remove-TpmSupportOwnedEntry -Path (Join-Path $Path 'diagnostics') -RootFinal $root.FinalPath
+        Remove-TpmSupportOwnedEntry -Path (Join-Path $Path 'metadata') -RootFinal $root.FinalPath
+        Remove-TpmSupportOwnedEntry -Path (Join-Path $Path 'MANIFEST.txt') -RootFinal $root.FinalPath
+        if (@(Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop).Count -ne 0) { return $false }
+        Remove-TpmSupportHandle -Handle $root.Handle
+        $root.Handle.Dispose()
+        return (-not (Test-Path -LiteralPath $Path))
+    } catch { return $false } finally { $root.Handle.Dispose() }
+}
+function Move-TpmSupportZipByIdentity {
+    param(
+        [Parameter(Mandatory)][string]$ZipTempPath,
+        [Parameter(Mandatory)][string]$OutputRoot,
+        [Parameter(Mandatory)][string]$DestinationPath
+    )
+    $native = Get-TpmSupportNativeType
+    $rootHandle = $null
+    $source = $null
+    $destinationHandle = $null
+    $destinationStream = $null
+    try {
+        $rootFull = [System.IO.Path]::GetFullPath($OutputRoot)
+        $destinationFull = [System.IO.Path]::GetFullPath($DestinationPath)
+        if (-not (Test-PathInside -child $destinationFull -parent $rootFull) -or -not (Test-TpmNoReparsePath -Path $rootFull)) { throw 'Support package destination is unsafe.' }
+        $rootHandle = [TpmSupportNativeMethods]::CreateFile($rootFull, [TpmSupportNativeMethods]::FileReadAttributes, ([TpmSupportNativeMethods]::ShareRead -bor [TpmSupportNativeMethods]::ShareWrite -bor [TpmSupportNativeMethods]::ShareDelete), [IntPtr]::Zero, [TpmSupportNativeMethods]::OpenExisting, ([TpmSupportNativeMethods]::FileFlagBackupSemantics -bor [TpmSupportNativeMethods]::FileFlagOpenReparsePoint), [IntPtr]::Zero)
+        if ($rootHandle.IsInvalid) { throw 'Support package destination could not be opened for identity validation.' }
+        $rootFinal = Get-TpmSupportFinalPathFromHandle -Handle $rootHandle
+        if (-not [string]::Equals($rootFinal.TrimEnd('\','/'), $rootFull.TrimEnd('\','/'), [System.StringComparison]::OrdinalIgnoreCase)) { throw 'Support package destination identity changed before promotion.' }
+        $source = Open-TpmSupportSafeFileStream -SourcePath $ZipTempPath -AllowedRoot ([System.IO.Path]::GetTempPath()) -MaximumBytes ([int64]::MaxValue)
+        $destinationHandle = [TpmSupportNativeMethods]::CreateFile($destinationFull, ([TpmSupportNativeMethods]::GenericRead -bor [TpmSupportNativeMethods]::GenericWrite -bor [TpmSupportNativeMethods]::Delete), ([TpmSupportNativeMethods]::ShareRead -bor [TpmSupportNativeMethods]::ShareWrite -bor [TpmSupportNativeMethods]::ShareDelete), [IntPtr]::Zero, [TpmSupportNativeMethods]::CreateNew, 0, [IntPtr]::Zero)
+        if ($destinationHandle.IsInvalid) { throw 'Support package destination could not be created without replacing an existing file.' }
+        $destinationFinal = Get-TpmSupportFinalPathFromHandle -Handle $destinationHandle
+        if (-not (Test-PathInside -child $destinationFinal -parent $rootFinal)) { throw 'Created support package escaped the authorized destination directory.' }
+        $destinationStream = New-Object System.IO.FileStream($destinationHandle, [System.IO.FileAccess]::Write, 65536, $false)
+        $source.Stream.CopyTo($destinationStream, 65536)
+        $destinationStream.Flush($true)
+        $rootFinalAfter = Get-TpmSupportFinalPathFromHandle -Handle $rootHandle
+        $destinationFinalAfter = Get-TpmSupportFinalPathFromHandle -Handle $destinationHandle
+        if (-not [string]::Equals($rootFinalAfter.TrimEnd('\','/'), $rootFinal.TrimEnd('\','/'), [System.StringComparison]::OrdinalIgnoreCase) -or -not (Test-PathInside -child $destinationFinalAfter -parent $rootFinal)) { throw 'Support package destination identity changed during promotion.' }
+        return [pscustomobject]@{ Path = $destinationFull; Length = $destinationStream.Length; FinalPath = $destinationFinalAfter }
+    } catch {
+        if ($destinationHandle -and -not $destinationHandle.IsInvalid) {
+            try { Remove-TpmSupportHandle -Handle $destinationHandle } catch {}
+        }
+        throw
+    } finally {
+        if ($destinationStream) { $destinationStream.Dispose() } elseif ($destinationHandle) { $destinationHandle.Dispose() }
+        if ($source) { $source.Stream.Dispose() }
+        if ($rootHandle) { $rootHandle.Dispose() }
+    }
+}
+
+function Add-TpmSupportRecord {
+    param(
+        [Parameter(Mandatory)]$Records,
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][ValidateSet('Collected','NotPresent','IntentionallyExcluded','RejectedUnsafeContent','CollectionFailed')][string]$Status,
+        [string]$Destination = '',
+        [string]$Detail = '',
+        [int]$Redactions = 0
+    )
+    $safeDetail = (Redact-TpmSupportText -Text $Detail).Text
+    [void]$Records.Add([pscustomobject]@{
+        Source = $Source
+        Status = $Status
+        Destination = $Destination
+        Detail = $safeDetail
+        Redactions = $Redactions
+    })
+}
+
+function Copy-TpmSupportTextFile {
+    param(
+        [Parameter(Mandatory)]$Records,
+        [Parameter(Mandatory)][string]$SourcePath,
+        [Parameter(Mandatory)][string]$AllowedRoot,
+        [Parameter(Mandatory)][string]$SourceLabel,
+        [Parameter(Mandatory)][string]$StageDirectory,
+        [Parameter(Mandatory)][string]$DestinationName,
+        [int64]$MaximumBytes = 5242880
+    )
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
+        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status NotPresent -Detail 'Expected diagnostic file was not present.'
+        return
+    }
+    $opened = $null
+    try {
+        $opened = Open-TpmSupportSafeFileStream -SourcePath $SourcePath -AllowedRoot $AllowedRoot -MaximumBytes $MaximumBytes
+        $stream = $opened.Stream
+        try {
+            $bytes = New-Object byte[] ([int]$opened.Length)
+            $offset = 0
+            while ($offset -lt $bytes.Length) {
+                $read = $stream.Read($bytes, $offset, $bytes.Length - $offset)
+                if ($read -le 0) { throw 'Diagnostic file ended before its validated length was read.' }
+                $offset += $read
+            }
+        } finally {
+            $stream.Dispose()
+        }
+        $content = Test-TpmSupportTextContent -Bytes $bytes
+        if (-not $content.Safe) {
+            Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status RejectedUnsafeContent -Detail ('Diagnostic content rejected: ' + $content.Reason)
+            return
+        }
+        $redacted = Redact-TpmSupportText -Text $content.Text
+        $destination = Join-Path $StageDirectory $DestinationName
+        [System.IO.File]::WriteAllText($destination, $redacted.Text, (New-Object System.Text.UTF8Encoding($false)))
+        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status Collected -Destination $DestinationName -Detail ('Allowlisted text diagnostic collected as ' + $content.Encoding + '.') -Redactions $redacted.RedactionCount
+    } catch {
+        $status = if ($_.Exception.Message -match 'exceeded the safe size limit') { 'IntentionallyExcluded' } elseif ($_.Exception.Message -match 'identity|reparse|escaped|root') { 'RejectedUnsafeContent' } else { 'CollectionFailed' }
+        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status $status -Detail 'The allowlisted diagnostic could not be read or redacted safely.'
+    }
+}
+
+
+function Get-TpmSupportPluginInventory {
+    param(
+        [Parameter(Mandatory)][string]$GameRoot,
+        [Parameter(Mandatory)][string]$GameCode,
+        [Parameter(Mandatory)]$Records,
+        [Parameter(Mandatory)][string]$StageDirectory
+    )
+    if (-not (Test-TpmNoReparsePath -Path $GameRoot)) {
+        Add-TpmSupportRecord -Records $Records -Source ('Game:' + $GameCode + ':plugin inventory') -Status RejectedUnsafeContent -Detail 'Game path safety changed before plugin inspection.'
+        return
+    }
+    $pluginRoots = New-Object System.Collections.Generic.List[string]
+    $bepPlugins = Join-Path $GameRoot 'BepInEx\plugins'
+    if (Test-Path -LiteralPath $bepPlugins -PathType Container) { [void]$pluginRoots.Add($bepPlugins) }
+    try {
+        foreach ($dataDir in @(Get-ChildItem -LiteralPath $GameRoot -Directory -Force -ErrorAction Stop | Where-Object { $_.Name -match '_Data$' })) {
+            if (($dataDir.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+            foreach ($relative in @('Plugins','Plugins\x86_64','Plugins\x86')) {
+                $candidate = Join-Path $dataDir.FullName $relative
+                if (Test-Path -LiteralPath $candidate -PathType Container) { [void]$pluginRoots.Add($candidate) }
+            }
+        }
+    } catch {
+        Add-TpmSupportRecord -Records $Records -Source ('Game:' + $GameCode + ':plugin inventory') -Status CollectionFailed -Detail 'Plugin directories could not be inspected safely.'
+        return
+    }
+    if ($pluginRoots.Count -eq 0) {
+        Add-TpmSupportRecord -Records $Records -Source ('Game:' + $GameCode + ':plugin inventory') -Status NotPresent -Detail 'No allowlisted plugin directory was present.'
+        return
+    }
+    $rows = New-Object System.Collections.Generic.List[string]
+    $rows.Add('RelativePath' + "`t" + 'FileName' + "`t" + 'SizeBytes' + "`t" + 'Version' + "`t" + 'SHA256') | Out-Null
+    $fileCount = 0
+    foreach ($pluginRoot in @($pluginRoots | Select-Object -Unique)) {
+        if (-not (Test-TpmNoReparsePath -Path $pluginRoot)) {
+            $rows.Add('[EXCLUDED]' + "`t" + (Get-TpmSupportSafeName (Split-Path -LiteralPath $pluginRoot -Leaf)) + "`tunsafe-reparse-path") | Out-Null
+            continue
+        }
+        $pending = New-Object 'System.Collections.Generic.Stack[string]'
+        $pending.Push($pluginRoot)
+        while ($pending.Count -gt 0) {
+            $current = $pending.Pop()
+            if (-not (Test-PathInside -child $current -parent $GameRoot) -or -not (Test-TpmNoReparsePath -Path $current)) {
+                $rows.Add('[EXCLUDED]' + "`t" + (Get-TpmSupportSafeName (Split-Path -LiteralPath $current -Leaf)) + "`tunsafe-directory-path") | Out-Null
+                continue
+            }
+            try {
+                foreach ($child in @(Get-ChildItem -LiteralPath $current -Force -ErrorAction Stop)) {
+                    if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                        $rows.Add('[EXCLUDED]' + "`t" + (Get-TpmSupportSafeName $child.Name) + "`treparse-backed entry") | Out-Null
+                        continue
+                    }
+                    if ($child.PSIsContainer) {
+                        $pending.Push($child.FullName)
+                        continue
+                    }
+                    if (-not (Test-TpmNoReparsePath -Path $child.FullName)) {
+                        $rows.Add('[EXCLUDED]' + "`t" + (Get-TpmSupportSafeName $child.Name) + "`tunsafe-file-path") | Out-Null
+                        continue
+                    }
+                    if ($fileCount -ge 500) {
+                        $rows.Add('[EXCLUDED]' + "`tinventory-limit`t500-file limit reached") | Out-Null
+                        $pending.Clear()
+                        break
+                    }
+                    try {
+                        $opened = Open-TpmSupportSafeFileStream -SourcePath $child.FullName -AllowedRoot $GameRoot -MaximumBytes ([int64]::MaxValue)
+                        try {
+                            $size = $opened.Length
+                            $hash = 'HASH_SKIPPED_OVERSIZED'
+                            if ($size -le 67108864) {
+                                $sha = [System.Security.Cryptography.SHA256]::Create()
+                                try { $hash = (-join ($sha.ComputeHash($opened.Stream) | ForEach-Object { $_.ToString('x2') })) } finally { $sha.Dispose() }
+                            }
+                            $relativeParts = $child.FullName.Substring([System.IO.Path]::GetFullPath($GameRoot).TrimEnd('\').Length).TrimStart('\') -split '[\\/]'
+                            $relative = (($relativeParts | ForEach-Object { Get-TpmSupportSafeName $_ }) -join '/')
+                            $safeName = Get-TpmSupportSafeName $child.Name
+                            $rows.Add(($relative + "`t" + $safeName + "`t" + $size + "`t`t" + $hash)) | Out-Null
+                            $fileCount++
+                        } finally {
+                            $opened.Stream.Dispose()
+                        }
+                    } catch {
+                        $rows.Add('[EXCLUDED]' + "`t" + (Get-TpmSupportSafeName $child.Name) + "`tmetadata-read-failed") | Out-Null
+                    }
+                }
+            } catch {
+                $rows.Add('[EXCLUDED]' + "`t" + (Get-TpmSupportSafeName (Split-Path -LiteralPath $current -Leaf)) + "`tenumeration-failed") | Out-Null
+            }
+        }
+    }
+    if ($fileCount -eq 0) {
+        Add-TpmSupportRecord -Records $Records -Source ('Game:' + $GameCode + ':plugin inventory') -Status NotPresent -Detail 'Allowlisted plugin directories contained no safe regular files.'
+        return
+    }
+    $destinationName = 'metadata\inventory-' + (Get-TpmSupportSafeName $GameCode) + '.tsv'
+    $destination = Join-Path $StageDirectory $destinationName
+    [System.IO.File]::WriteAllText($destination, ($rows -join "`r`n") + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
+    Add-TpmSupportRecord -Records $Records -Source ('Game:' + $GameCode + ':plugin inventory') -Status Collected -Destination $destinationName -Detail ('Metadata only; ' + $fileCount + ' safe file entries. DLL payloads were not copied.')
+}
+
+function Get-TpmSupportManifestText {
+    param(
+        [Parameter(Mandatory)]$Records,
+        [Parameter(Mandatory)]$Errors,
+        [string[]]$GameCodes,
+        [Parameter(Mandatory)][string]$AffectedGameSummary
+    )
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('TPM Support Package Manifest v1') | Out-Null
+    $lines.Add('Created UTC: ' + (Get-Date).ToUniversalTime().ToString('o')) | Out-Null
+    $lines.Add('TPM version: ' + (Get-ManagerDisplayVersion)) | Out-Null
+    $lines.Add('PowerShell: ' + $PSVersionTable.PSVersion.ToString()) | Out-Null
+    $lines.Add('OS: Windows ' + [Environment]::OSVersion.Version.ToString()) | Out-Null
+    $lines.Add('64-bit operating system: ' + [Environment]::Is64BitOperatingSystem) | Out-Null
+    $safeAffectedGameSummary = (Redact-TpmSupportText -Text $AffectedGameSummary).Text
+    $lines.Add('Affected game scope: ' + $safeAffectedGameSummary) | Out-Null
+    $lines.Add('Registered game diagnostics considered: ' + $GameCodes.Count) | Out-Null
+    $lines.Add('') | Out-Null
+    $lines.Add('Diagnostic sources checked:') | Out-Null
+    $lines.Add('- TPM-owned allowlisted logs and reports beside the script') | Out-Null
+    $lines.Add('- Allowlisted TeknoParrot root logs, including ParrotPatcher_Log.txt') | Out-Null
+    $lines.Add('- Allowlisted text logs in safely identified registered game folders') | Out-Null
+    $lines.Add('- Metadata-only inventories of allowlisted BepInEx and Unity plugin folders') | Out-Null
+    $lines.Add('') | Out-Null
+    foreach ($record in $Records) {
+        $recordSource = (Redact-TpmSupportText -Text ([string]$record.Source)).Text
+        $detail = if ($record.Detail) { ' -- ' + (Redact-TpmSupportText -Text ([string]$record.Detail)).Text } else { '' }
+        $destination = if ($record.Destination) { ' -> ' + (Redact-TpmSupportText -Text ([string]$record.Destination)).Text } else { '' }
+        $lines.Add(('[{0}] {1}{2}{3}' -f $record.Status, $recordSource, $destination, $detail)) | Out-Null
+    }
+    $lines.Add('') | Out-Null
+    $lines.Add('Intentionally excluded by design:') | Out-Null
+    foreach ($excluded in @(
+        'ROMs, game archives, game executables, arbitrary DLL payloads, firmware, and copyrighted assets',
+        'PostgreSQL passwords, .pgpass, tokens, API keys, cookies, saved passwords, and DPAPI recovery state',
+        'UserProfiles XML, configuration files, and unrelated personal files',
+        'All non-allowlisted directories and files',
+        'Absolute user-profile paths where they are not needed for diagnosis'
+    )) { $lines.Add('- ' + $excluded) | Out-Null }
+    $lines.Add('') | Out-Null
+    $lines.Add('Redaction note: allowlisted text is redacted for common credential patterns and user-profile paths. Redaction is defense in depth, not a guarantee that arbitrary secrets can be detected.') | Out-Null
+    if ($Errors.Count -gt 0) {
+        $lines.Add('') | Out-Null
+        $lines.Add('Collection or packaging failures:') | Out-Null
+        foreach ($errorText in $Errors) { $lines.Add('- ' + (Redact-TpmSupportText -Text $errorText).Text) | Out-Null }
+    }
+    return ($lines -join "`r`n") + "`r`n"
+}
+
+function New-TpmSupportPackage {
+    param(
+        [Parameter(Mandatory)][string]$ScriptRoot,
+        [string]$TeknoParrotRoot = '',
+        [string]$UserProfilesDir = '',
+        [string]$ApprovedGamesRoot = '',
+        [string]$OutputRoot = '',
+        [string]$AffectedGameSummary = 'all safely identified registered games',
+        [scriptblock]$EventSink = $null
+    )
+    $records = New-Object System.Collections.Generic.List[object]
+    $errors = New-Object System.Collections.Generic.List[string]
+    $gameCodes = New-Object System.Collections.Generic.List[string]
+    $status = New-TpmWorkflowStatusContext -WorkflowKey 'SupportPackage' -Title 'Create support package' -Steps @(
+        @{ Id = 'tpm'; Label = 'Collect TPM diagnostics' }
+        @{ Id = 'tekno'; Label = 'Collect TeknoParrot diagnostics' }
+        @{ Id = 'game'; Label = 'Check game-specific logs and metadata' }
+        @{ Id = 'redact'; Label = 'Remove private information' }
+        @{ Id = 'zip'; Label = 'Create support ZIP' }
+    ) -EventSink $EventSink
+    $stage = $null
+    $zipTemp = $null
+    $packagePath = $null
+    $result = [ordered]@{
+        Succeeded = $false
+        Partial = $false
+        PackagePath = $null
+        Records = @()
+        Errors = @()
+        RedactionCount = 0
+        StatusContext = $status
+    }
+    try {
+        Start-TpmWorkflowStatus -Context $status
+        Start-TpmWorkflowStep -Context $status -StepId 'tpm' -Activity 'Collecting TPM logs and reports'
+        if ([string]::IsNullOrWhiteSpace($OutputRoot)) { $OutputRoot = Join-Path $ScriptRoot 'SupportPackages' }
+        $expectedOutputRoot = [System.IO.Path]::GetFullPath((Join-Path $ScriptRoot 'SupportPackages')).TrimEnd('\','/')
+        $requestedOutputRoot = [System.IO.Path]::GetFullPath($OutputRoot).TrimEnd('\','/')
+        if (-not [string]::Equals($expectedOutputRoot, $requestedOutputRoot, [System.StringComparison]::OrdinalIgnoreCase)) { throw 'Support package destination must be the TPM SupportPackages folder.' }
+        if (-not (Test-Path -LiteralPath $OutputRoot -PathType Container)) { [void](New-Item -ItemType Directory -Path $OutputRoot -Force) }
+        if (-not (Test-TpmNoReparsePath -Path $OutputRoot)) { throw 'Support package destination is reparse-backed or inaccessible.' }
+        $stage = Join-Path ([System.IO.Path]::GetTempPath()) ('tpm-support-stage-' + [guid]::NewGuid().ToString('N'))
+        [void](New-Item -ItemType Directory -Path (Join-Path $stage 'diagnostics'), (Join-Path $stage 'metadata') -Force)
+        if (-not (Test-TpmNoReparsePath -Path $stage)) { throw 'Support package staging folder is unsafe.' }
+        $tpmNames = @('TeknoParrot-Manager.log','TeknoParrot-Manager-controls.txt','TeknoParrot-Manager-ActionItems.txt','TeknoParrot-Manager-HealthCheck.txt','TeknoParrot-Manager-Readiness.txt','TPM-Validation-Report.md','TPM-Validation-Report.json','TPM-Certification-Scorecard.md','TPM-Certification-Scorecard.json','TPM-Certification-Final-Outcome.md','TPM-Certification-Final-Outcome.json','TPM-Certification-Manifest.md','TPM-Certification-Manifest.json')
+        $index = 0
+        foreach ($name in $tpmNames) {
+            $index++
+            Copy-TpmSupportTextFile -Records $records -SourcePath (Join-Path $ScriptRoot $name) -AllowedRoot $ScriptRoot -SourceLabel ('TPM:' + $name) -StageDirectory (Join-Path $stage 'diagnostics') -DestinationName ('tpm-{0:D2}-{1}.txt' -f $index, (Get-TpmSupportSafeName $name))
+        }
+        Complete-TpmWorkflowStep -Context $status -Summary 'TPM diagnostics checked' -NextStep 'TeknoParrot diagnostics'
+        Start-TpmWorkflowStep -Context $status -StepId 'tekno' -Activity 'Checking allowlisted TeknoParrot logs'
+        if ([string]::IsNullOrWhiteSpace($TeknoParrotRoot)) {
+            Add-TpmSupportRecord -Records $records -Source 'TeknoParrot root' -Status NotPresent -Detail 'No TeknoParrot root was available to inspect.'
+        } elseif (-not (Test-TpmNoReparsePath -Path $TeknoParrotRoot)) {
+            Add-TpmSupportRecord -Records $records -Source 'TeknoParrot root' -Status IntentionallyExcluded -Detail 'TeknoParrot root is reparse-backed or inaccessible.'
+        } else {
+            $tpNames = @('ParrotPatcher_Log.txt','TeknoParrotUI.log','TeknoParrotUI_Log.txt','TeknoParrot.log','Logs\TeknoParrotUI.log','Logs\TeknoParrot.log','logs\TeknoParrotUI.log','logs\TeknoParrot.log','TeknoParrotUI\Logs\TeknoParrotUI.log')
+            $index = 0
+            foreach ($name in $tpNames) {
+                $index++
+                Copy-TpmSupportTextFile -Records $records -SourcePath (Join-Path $TeknoParrotRoot $name) -AllowedRoot $TeknoParrotRoot -SourceLabel ('TeknoParrot:' + $name) -StageDirectory (Join-Path $stage 'diagnostics') -DestinationName ('tekno-{0:D2}-{1}.txt' -f $index, (Get-TpmSupportSafeName $name))
+            }
+        }
+        Complete-TpmWorkflowStep -Context $status -Summary 'TeknoParrot diagnostics checked' -NextStep 'Game-specific diagnostics'
+        Start-TpmWorkflowStep -Context $status -StepId 'game' -Activity 'Checking safely identified registered game folders'
+        if ([string]::IsNullOrWhiteSpace($UserProfilesDir) -or -not (Test-Path -LiteralPath $UserProfilesDir -PathType Container)) {
+            Add-TpmSupportRecord -Records $records -Source 'Registered game diagnostics' -Status NotPresent -Detail 'Registered UserProfiles folder was not available.'
+        } elseif (-not (Test-TpmNoReparsePath -Path $UserProfilesDir)) {
+            Add-TpmSupportRecord -Records $records -Source 'Registered game diagnostics' -Status IntentionallyExcluded -Detail 'UserProfiles folder is reparse-backed or inaccessible.'
+        } else {
+            $profileFiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | Select-Object -First 200)
+            foreach ($profileFile in $profileFiles) {
+                $code = Get-TpmSupportSafeName $profileFile.BaseName
+                try {
+                    $profileFull = [System.IO.Path]::GetFullPath($profileFile.FullName)
+                    if (-not (Test-PathInside -child $profileFull -parent $UserProfilesDir) -or -not (Test-TpmNoReparsePath -Path $profileFull)) {
+                        Add-TpmSupportRecord -Records $records -Source ('Game:' + $code) -Status RejectedUnsafeContent -Detail 'Profile path was reparse-backed or escaped the approved UserProfiles folder.'
+                        continue
+                    }
+                    $openedProfile = Open-TpmSupportSafeFileStream -SourcePath $profileFull -AllowedRoot $UserProfilesDir -MaximumBytes 16777216
+                    try {
+                        $doc = New-Object System.Xml.XmlDocument
+                        $doc.XmlResolver = $null
+                        $doc.Load($openedProfile.Stream)
+                    } finally {
+                        $openedProfile.Stream.Dispose()
+                    }
+                    $gamePathNode = $doc.SelectSingleNode('/GameProfile/GamePath')
+                    $gamePath = if ($gamePathNode) { [string]$gamePathNode.InnerText } else { '' }
+                    if ([string]::IsNullOrWhiteSpace($gamePath)) {
+                        Add-TpmSupportRecord -Records $records -Source ('Game:' + $code) -Status NotPresent -Detail 'Registered profile has no game path.'
+                        continue
+                    }
+                    $gameRoot = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($gamePath))
+                    if ([string]::IsNullOrWhiteSpace($ApprovedGamesRoot) -or -not (Test-PathInside -child $gameRoot -parent $ApprovedGamesRoot) -or -not (Test-TpmNoReparsePath -Path $gameRoot)) {
+                        Add-TpmSupportRecord -Records $records -Source ('Game:' + $code) -Status IntentionallyExcluded -Detail 'Game folder was not inside the approved, non-reparse games root.'
+                        continue
+                    }
+                    [void]$gameCodes.Add($code)
+                    foreach ($relative in @('BepInEx\LogOutput.log','BepInEx\preloader.log','BepInEx\LogOutput.txt','Player.log','player.log','output_log.txt','error.log','crash.log')) {
+                        Copy-TpmSupportTextFile -Records $records -SourcePath (Join-Path $gameRoot $relative) -AllowedRoot $gameRoot -SourceLabel ('Game:' + $code + ':' + $relative) -StageDirectory (Join-Path $stage 'diagnostics') -DestinationName ('game-' + $code + '-' + (Get-TpmSupportSafeName $relative))
+                    }
+                    Get-TpmSupportPluginInventory -GameRoot $gameRoot -GameCode $code -Records $records -StageDirectory $stage
+                } catch {
+                    Add-TpmSupportRecord -Records $records -Source ('Game:' + $code) -Status CollectionFailed -Detail 'Registered game diagnostics could not be identified safely.'
+                }
+            }
+        }
+        Complete-TpmWorkflowStep -Context $status -Summary 'Game-specific diagnostics checked' -NextStep 'Remove private information'
+        Start-TpmWorkflowStep -Context $status -StepId 'redact' -Activity 'Removing private information from collected text'
+        $recordArray = @($records.ToArray())
+        $redactionMeasure = $recordArray | Measure-Object -Property Redactions -Sum
+        $result.RedactionCount = if ($redactionMeasure) { [int]$redactionMeasure.Sum } else { 0 }
+        Complete-TpmWorkflowStep -Context $status -Summary 'Private information redacted where detected' -NextStep 'Create support ZIP'
+        Start-TpmWorkflowStep -Context $status -StepId 'zip' -Activity 'Writing the support package manifest and ZIP'
+        $manifest = Get-TpmSupportManifestText -Records $records -Errors $errors -GameCodes @($gameCodes) -AffectedGameSummary $AffectedGameSummary
+        [System.IO.File]::WriteAllText((Join-Path $stage 'MANIFEST.txt'), $manifest, (New-Object System.Text.UTF8Encoding($false)))
+        $timestamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss')
+        for ($suffix = 0; $suffix -lt 1000; $suffix++) {
+            $suffixText = if ($suffix -eq 0) { '' } else { '-{0:D3}' -f $suffix }
+            $candidate = Join-Path $OutputRoot ('TeknoParrotManager-Support-{0}{1}.zip' -f $timestamp, $suffixText)
+            if (-not (Test-Path -LiteralPath $candidate)) { $packagePath = $candidate; break }
+        }
+        if ([string]::IsNullOrWhiteSpace($packagePath)) { throw 'Could not reserve a safe support package filename.' }
+        $zipTemp = Join-Path ([System.IO.Path]::GetTempPath()) ('tpm-support-' + [guid]::NewGuid().ToString('N') + '.zip')
+        [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $zipTemp, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+        $promotion = Move-TpmSupportZipByIdentity -ZipTempPath $zipTemp -OutputRoot $OutputRoot -DestinationPath $packagePath
+        if (-not (Test-Path -LiteralPath $promotion.Path -PathType Leaf)) { throw 'The support ZIP could not be verified after identity-bound promotion.' }
+        $result.PackagePath = $promotion.Path
+        if (-not (Remove-TpmSupportStageDirectory -Path $stage)) {
+            $result.Partial = $true
+            [void]$errors.Add('Support ZIP was created, but temporary diagnostic staging cleanup needs attention.')
+            throw 'Support staging cleanup did not complete safely.'
+        }
+        $stage = $null
+        if (@($records | Where-Object Status -eq 'CollectionFailed').Count -gt 0) { $result.Partial = $true }
+        Complete-TpmWorkflowStep -Context $status -Summary 'Support ZIP created' -NextStep 'Send the ZIP when asking for help'
+        Complete-TpmWorkflowStatus -Context $status -Summary 'Support package created'
+        $result.Succeeded = $true
+    } catch {
+        [void]$errors.Add((Redact-TpmSupportText -Text $_.Exception.Message).Text)
+        $result.Partial = $result.Partial -or (@($records | Where-Object Status -eq 'Collected').Count -gt 0)
+        try {
+            $failureMessage = if ($result.PackagePath) { 'Support ZIP was created, but temporary cleanup needs attention.' } else { 'The support package was not created.' }
+            Resolve-TpmWorkflowFailure -Context $status -FailureId 'support-package-failed' -Message $failureMessage -DataSafety 'No game files or credentials were included. Collected temporary evidence was handled only through the allowlist.'
+            Acknowledge-TpmWorkflowFailure -Context $status -FailureId 'support-package-failed'
+        } catch {}
+    } finally {
+        if ($zipTemp -and (Test-Path -LiteralPath $zipTemp)) {
+            $ownedZip = $null
+            try {
+                $ownedZip = Open-TpmSupportOwnedHandle -Path $zipTemp -ExpectedRoot ([System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()))
+                Remove-TpmSupportHandle -Handle $ownedZip.Handle
+            } catch {
+                $result.Partial = $true
+                [void]$errors.Add('Temporary support ZIP cleanup failed and needs attention.')
+            } finally {
+                if ($ownedZip) { $ownedZip.Handle.Dispose() }
+            }
+        }
+        if ($stage -and (Test-Path -LiteralPath $stage) -and -not (Remove-TpmSupportStageDirectory -Path $stage)) {
+            $result.Partial = $true
+            [void]$errors.Add('Temporary diagnostic staging cleanup failed and needs attention.')
+        }
+        if ($status -and -not $status.Closed) {
+            try {
+                if (-not $status.Failure -and $status.Lifecycle -notin @('Finished','Aborted','Closed')) { Stop-TpmWorkflowStatus -Context $status -Reason 'Support package stopped' }
+                Close-TpmWorkflowStatus -Context $status
+            } catch {}
+        }
+        $result.Records = @($records.ToArray())
+        $result.Errors = @($errors.ToArray())
+    }
+    return [pscustomobject]$result
+}
+
+function Open-TpmLogsAndReports {
+    param([Parameter(Mandatory)][string]$ScriptRoot)
+    try {
+        $target = [System.IO.Path]::GetFullPath($ScriptRoot)
+        if (-not (Test-TpmNoReparsePath -Path $target)) { return [pscustomobject]@{ Succeeded = $false; Path = $target; Error = 'The TPM folder could not be opened safely.' } }
+        if (-not (Test-Path -LiteralPath $target -PathType Container)) { return [pscustomobject]@{ Succeeded = $false; Path = $target; Error = 'The TPM logs folder does not exist yet.' } }
+        Start-Process -FilePath 'explorer.exe' -ArgumentList @($target) -ErrorAction Stop | Out-Null
+        return [pscustomobject]@{ Succeeded = $true; Path = $target; Error = $null }
+    } catch {
+        return [pscustomobject]@{ Succeeded = $false; Path = $ScriptRoot; Error = 'Windows could not open the TPM logs folder.' }
+    }
+}
+
 # Prompts for a file/folder path with an option to browse for it using a
 # native Windows dialog instead of typing it. Typing "B" (case-insensitive)
 # opens the dialog; anything else is returned exactly as before (typing the
@@ -448,6 +1617,8 @@ function Exit-TpmProcess {
 # Read-Host so this failure mode has exactly one implementation to test.
 function Read-HostSafe {
     param([string]$Prompt, [string]$Default = $null)
+    $activeStatus = $script:ActiveTpmWorkflowStatus
+    if ($activeStatus) { Clear-TpmWorkflowFooter -Context $activeStatus }
     $raw = Read-Host $Prompt
     if ($null -eq $raw) {
         # EOF-safety: Read-Host returned null (redirected/piped stdin
@@ -468,7 +1639,11 @@ function Read-HostSafe {
     # piped/unattended input) and whitespace-only input are both treated as
     # "accept the shown default" when -Default was supplied. Non-blank input
     # always wins and -Default is ignored entirely.
-    if ($trimmed -eq '' -and $null -ne $Default) { return $Default }
+    if ($trimmed -eq '' -and $null -ne $Default) {
+        if ($activeStatus) { Render-TpmWorkflowStatus -Context $activeStatus }
+        return $Default
+    }
+    if ($activeStatus) { Render-TpmWorkflowStatus -Context $activeStatus }
     return $trimmed
 }
 
@@ -987,6 +2162,43 @@ function Test-PathInside {
     return $c.StartsWith($p + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)
 }
 
+# Validate existing path components before TPM treats a location as writable.
+# Missing leaf components are allowed for a future download, but an existing
+# junction, symlink, or mount point makes containment ambiguous and is
+# rejected. Mapped/NAS paths are classified by role and access, not rejected
+# merely because they are network-backed.
+function Test-TpmNoReparsePath {
+    param([string]$Path)
+    try {
+        if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+        $canonical = [System.IO.Path]::GetFullPath($Path)
+        $root = [System.IO.Path]::GetPathRoot($canonical)
+        if ([string]::IsNullOrWhiteSpace($root) -or
+            -not (Test-Path -LiteralPath $root -PathType Container -ErrorAction SilentlyContinue)) {
+            return $false
+        }
+        $rootItem = Get-Item -LiteralPath $root -Force -ErrorAction Stop
+        if (($rootItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+
+        $canonicalTrimmed = $canonical.TrimEnd('\','/')
+        $rootTrimmed = $root.TrimEnd('\','/')
+        if ($canonicalTrimmed -eq $rootTrimmed) { return $true }
+        if (-not $canonical.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) { return $false }
+
+        $relative = $canonical.Substring($root.Length).TrimStart('\','/')
+        $cursor = $root
+        foreach ($part in ($relative -split '[\\/]')) {
+            if ([string]::IsNullOrWhiteSpace($part)) { continue }
+            $cursor = Join-Path $cursor $part
+            if (-not (Test-Path -LiteralPath $cursor -ErrorAction SilentlyContinue)) { continue }
+            $item = Get-Item -LiteralPath $cursor -Force -ErrorAction Stop
+            if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+            if ($cursor.TrimEnd('\','/') -ine $canonicalTrimmed -and -not $item.PSIsContainer) { return $false }
+        }
+        return $true
+    } catch { return $false }
+}
+
 # True when two paths are the same location or one contains the other. This is
 # deliberately symmetric: a staging folder must not be inside a protected
 # folder, and it must not be a parent that would pull a protected folder into
@@ -1362,7 +2574,7 @@ function Invoke-TpmTransactionalPromote {
     } catch {
         $promotionError = $_
         Write-Log "Invoke-TpmTransactionalPromote: FAILED promoting into '$DestDir' -- rolling back. $promotionError"
-        $rollbackErrors = New-Object System.Collections.Generic.List[string]
+        $rollbackErrors = New-Object System.Collections.ArrayList
         foreach ($lostMsg in $lostSources) { [void]$rollbackErrors.Add($lostMsg) }
         foreach ($invalidMsg in $invalidBackups) { [void]$rollbackErrors.Add($invalidMsg) }
 
@@ -1485,6 +2697,57 @@ function Find-TeknoParrotRoot {
         }
     }
     return ,$found   # comma prevents PS 5.1 from unwrapping the ArrayList into individual strings
+}
+
+function Ensure-TeknoParrotProfilesReady {
+    param([Parameter(Mandatory)][string]$TeknoParrotRoot, [Parameter(Mandatory)][string]$TeknoParrotExe)
+    $profilesDir = Join-Path $TeknoParrotRoot 'GameProfiles'
+    while (@(Get-ChildItem -LiteralPath $profilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue).Count -eq 0) {
+        Write-Host ''
+        Write-Host '  TPM needs TeknoParrot to finish its first setup so it can recognize your games.' -ForegroundColor Yellow
+        Write-Host '  TPM will open TeknoParrot now. It will not edit TeknoParrot settings or controls.' -ForegroundColor DarkGray
+        $running = Get-Process -Name 'TeknoParrotUi' -ErrorAction SilentlyContinue
+        if (-not $running) {
+            try {
+                [void](Start-Process -FilePath $TeknoParrotExe -WorkingDirectory $TeknoParrotRoot -PassThru -ErrorAction Stop)
+            } catch {
+                Write-Host '  TPM could not open TeknoParrot automatically.' -ForegroundColor Red
+                Write-Log 'TeknoParrot profiles: automatic launch failed.'
+                return $false
+            }
+        }
+        Write-Host '  Waiting for TeknoParrot to finish downloading its game profiles...' -ForegroundColor Cyan
+        $deadline = (Get-Date).ToUniversalTime().AddSeconds(120)
+        while ((Get-Date).ToUniversalTime() -lt $deadline) {
+            if (@(Get-ChildItem -LiteralPath $profilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue).Count -gt 0) {
+                Write-Host '  TeknoParrot profiles are ready. TPM is continuing.' -ForegroundColor Green
+                return $true
+            }
+            Start-Sleep -Milliseconds 500
+        }
+        Write-Host '  TeknoParrot has not finished its first setup yet.' -ForegroundColor Yellow
+        Write-Host '  Finish the setup window, then press Enter and TPM will check again.' -ForegroundColor Yellow
+        if ((Read-HostSafe '  Press Enter to check again, or N to stop').ToUpper() -eq 'N') { return $false }
+    }
+    return $true
+}
+
+function Wait-TpmForProcessClose {
+    param([Parameter(Mandatory)][string[]]$ProcessNames, [Parameter(Mandatory)][string]$FriendlyName)
+    while ($true) {
+        $running = @(foreach ($name in $ProcessNames) { Get-Process -Name $name -ErrorAction SilentlyContinue })
+        if ($running.Count -eq 0) { return $true }
+        Write-Host ("  {0} is still open. TPM needs it closed before it can safely continue." -f $FriendlyName) -ForegroundColor Yellow
+        Write-Host '  Save any work in that window. TPM will not force-close it because unsaved work could be lost.' -ForegroundColor DarkGray
+        if ((Read-HostSafe '  Close it, then press Enter to check again, or N to cancel').ToUpper() -eq 'N') { return $false }
+        $deadline = (Get-Date).ToUniversalTime().AddSeconds(30)
+        while ((Get-Date).ToUniversalTime() -lt $deadline) {
+            $running = @(foreach ($name in $ProcessNames) { Get-Process -Name $name -ErrorAction SilentlyContinue })
+            if ($running.Count -eq 0) { return $true }
+            Start-Sleep -Milliseconds 250
+        }
+        Write-Host ("  TPM still sees {0}. It will keep your selected operation ready while you finish closing it." -f $FriendlyName) -ForegroundColor Yellow
+    }
 }
 
 # Same strategy as Find-TeknoParrotRoot, but looking for LaunchBox.exe
@@ -2827,7 +4090,7 @@ function Invoke-ReShadeSetup {
     if ($selectedGames.Count -eq 0) {
         Write-Host "  No games selected. ReShade setup cancelled." -ForegroundColor Yellow
         Write-Log "ReShade setup: cancelled -- no games selected."
-        return
+        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'NO_GAMES_SELECTED' }
     }
 
     # Deploy
@@ -2920,9 +4183,10 @@ function Invoke-ReShadeSetup {
     }
     Write-Host ""
     Write-Host "  To turn effects on/off: launch a game and press the  Home  key." -ForegroundColor Cyan
-    Write-Host "  To uninstall ReShade: delete the DLL file (e.g. dxgi.dll, d3d9.dll)" -ForegroundColor DarkCyan
-    Write-Host "  from the game's folder. Your game files are never modified." -ForegroundColor DarkCyan
+    Write-Host "  TPM does not remove an unowned ReShade hook automatically." -ForegroundColor DarkCyan
+    Write-Host "  Existing or changed files need advanced troubleshooting review." -ForegroundColor DarkCyan
     Write-Log ("ReShade setup: Installed={0} Skipped={1} Errors={2} PresetOverrides={3}" -f $deployed, $skipped, $errors, $presetOverrides)
+    return [pscustomobject]@{ Succeeded = ($deployed -gt 0 -and $errors -eq 0); Deployed = $deployed; Errors = $errors; Reason = if ($errors) { 'DEPLOYMENT_ERRORS' } elseif ($deployed -eq 0) { 'NO_GAMES_DEPLOYED' } else { $null } }
 }
 
 # =============================================================================
@@ -2993,7 +4257,7 @@ function Invoke-DgVoodoo2Setup {
         Write-Host ("  ERROR: No dgVoodoo2 DLLs found in: {0}" -f $SourceDir) -ForegroundColor Red
         Write-Host ("  Expected one or more of: {0}" -f ($allExpected -join ', ')) -ForegroundColor Yellow
         Write-Log "dgVoodoo2 setup: aborted -- no DLLs in $SourceDir"
-        return
+        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'NO_SOURCE_FILES' }
     }
     Write-Host ("  Available DLLs : {0}" -f ($available -join ', ')) -ForegroundColor DarkGray
 
@@ -3031,7 +4295,7 @@ function Invoke-DgVoodoo2Setup {
     if ($profiles.Count -eq 0) {
         Write-Host "  No registered games found." -ForegroundColor Yellow
         Write-Log "dgVoodoo2 setup: aborted -- no registered profiles."
-        return
+        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'NO_REGISTERED_PROFILES' }
     }
 
     $detectedMap = @{}   # BaseName -> API array
@@ -3083,13 +4347,13 @@ function Invoke-DgVoodoo2Setup {
     } else {
         Write-Host "  dgVoodoo2 setup cancelled." -ForegroundColor Yellow
         Write-Log "dgVoodoo2 setup: cancelled."
-        return
+        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'DECLINED' }
     }
 
     if ($targetProfiles.Count -eq 0) {
         Write-Host "  No games selected. dgVoodoo2 setup cancelled." -ForegroundColor Yellow
         Write-Log "dgVoodoo2 setup: cancelled -- no games selected."
-        return
+        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'NO_GAMES_SELECTED' }
     }
 
     # Deploy DLLs to each selected game folder.
@@ -3178,9 +4442,10 @@ function Invoke-DgVoodoo2Setup {
     if ($skipped -gt 0) { Write-Host ("  Skipped   : {0}" -f $skipped) -ForegroundColor DarkGray }
     if ($errors  -gt 0) { Write-Host ("  Errors    : {0}" -f $errors)  -ForegroundColor Red      }
     Write-Host ""
-    Write-Host "  To uninstall: delete the deployed DLL file(s) from the game folder." -ForegroundColor DarkCyan
-    Write-Host "  Your original game files are never modified." -ForegroundColor DarkCyan
+    Write-Host "  TPM does not remove an unowned dgVoodoo2 hook automatically." -ForegroundColor DarkCyan
+    Write-Host "  Existing or changed files need advanced troubleshooting review." -ForegroundColor DarkCyan
     Write-Log ("dgVoodoo2 setup: deployed={0} skipped={1} errors={2} presetOverrides={3}" -f $deployed, $skipped, $errors, $presetOverrides)
+    return [pscustomobject]@{ Succeeded = ($deployed -gt 0 -and $errors -eq 0); Deployed = $deployed; Errors = $errors; Reason = if ($errors) { 'DEPLOYMENT_ERRORS' } elseif ($deployed -eq 0) { 'NO_GAMES_DEPLOYED' } else { $null } }
 }
 
 # =============================================================================
@@ -3730,10 +4995,6 @@ function Reset-PostgresPasswordAutomatically {
         Start-Service -Name $script:PostgresServiceName -ErrorAction Stop
         Wait-PostgresServiceState -DesiredStatus 'Running' | Out-Null
         if (-not (Test-PostgresPassword -SuperPasswordPlain $NewPassword)) { throw 'The reset completed but the approved password did not authenticate.' }
-        if (-not $wasRunning) {
-            Stop-Service -Name $script:PostgresServiceName -Force -ErrorAction Stop
-            Wait-PostgresServiceState -DesiredStatus 'Stopped' | Out-Null
-        }
         $result.Succeeded = $true
         $result.RecoveryBlocked = $false
         $result.Reason = 'Automatic PostgreSQL password reset and authentication verification completed.'
@@ -3748,6 +5009,26 @@ function Reset-PostgresPasswordAutomatically {
         } catch { Write-Log 'Postgres recovery: original service state could not be restored.' }
     }
     return [pscustomobject]$result
+}
+
+function Restore-PostgresServiceState {
+    param([object]$WasRunning)
+    if ($null -eq $WasRunning) { return $true }
+    try {
+        $service = Get-Service -Name $script:PostgresServiceName -ErrorAction Stop
+        $running = ([string]$service.Status -ne 'Stopped')
+        if ([bool]$WasRunning -and -not $running) {
+            Start-Service -Name $script:PostgresServiceName -ErrorAction Stop
+            Wait-PostgresServiceState -DesiredStatus 'Running' | Out-Null
+        } elseif (-not [bool]$WasRunning -and $running) {
+            Stop-Service -Name $script:PostgresServiceName -Force -ErrorAction Stop
+            Wait-PostgresServiceState -DesiredStatus 'Stopped' | Out-Null
+        }
+        return $true
+    } catch {
+        Write-Log 'Postgres recovery: original service state could not be restored.'
+        return $false
+    }
 }
 # =============================================================================
 # GPU Fix Setup: detect GPU vendor, scan TeknoParrot GameProfiles for fix
@@ -4473,9 +5754,9 @@ function Invoke-CrosshairSetup {
                             Write-Host "    TPM can trigger the emulator's own first-run initialization, then install the crosshair assets and verify the result." -ForegroundColor DarkGray
                             $firstRunAnswer = (Read-HostSafe "  Configure Automatically? (Y/N)").ToUpper()
                             if ($firstRunAnswer -eq "Y") {
-                                if (Test-Pcsx2ProcessRunning) {
-                                    Write-Host "    SKIPPED: pcsx2-qtx64.exe is currently running -- close it and re-run crosshair setup." -ForegroundColor Yellow
-                                    Write-Log "Crosshairs: Pcsx2x6 first-run setup skipped -- process running"
+                                if (-not (Wait-TpmForProcessClose -ProcessNames @('pcsx2-qtx64') -FriendlyName 'PCSX2')) {
+                                    Write-Host "    Crosshair setup cancelled without changes. The selected crosshairs were not deployed." -ForegroundColor Yellow
+                                    Write-Log "Crosshairs: Pcsx2x6 first-run setup paused while process remained open"
                                 } else {
                                     $firstRun = Invoke-Pcsx2FirstRunSetup -State $prereqState
                                     if ($firstRun.Success) {
@@ -4493,11 +5774,11 @@ function Invoke-CrosshairSetup {
                         }
 
                         if ($prereqState.State -eq 'StockUninitialized') {
-                            # Still not initialized (declined, process running, or
-                            # the trigger failed) -- do not place assets or touch
-                            # cursor_path against an install PCSX2.ini has never
-                            # validated as initialized.
-                            $deployed++; continue
+                            # Still not initialized (declined, process remained
+                            # open, or the trigger failed) -- do not place
+                            # assets or touch cursor_path against an install
+                            # PCSX2.ini that has never been validated.
+                            $skipped++; continue
                         }
 
                         # ECVF is fail-closed for every write-adjacent action:
@@ -4508,7 +5789,7 @@ function Invoke-CrosshairSetup {
                         if ($assetCopyState -eq 'NotInstalled') {
                             Write-Host ("    SKIPPED: Pcsx2x6 prerequisite state is {0}; no crosshair assets or cursor_path handling performed." -f $prereqState.State) -ForegroundColor Yellow
                             Write-Log ("Crosshairs: Pcsx2x6 deployment skipped -- prerequisite state {0} ({1})" -f $prereqState.State, $prereqState.Reason)
-                            $deployed++; continue
+                            $skipped++; continue
                         }
 
                         # Deploy under the contract-resolved DataRoot, not a
@@ -4588,6 +5869,7 @@ function Invoke-CrosshairSetup {
         Write-Host ""
         Invoke-CursorHideSetup -UserProfilesDir $UserProfilesDir
     }
+    return [pscustomobject]@{ Succeeded = ($errors -eq 0 -and $deployed -gt 0); Deployed = $deployed; Skipped = $skipped; Errors = $errors }
 }
 
 # =============================================================================
@@ -5435,6 +6717,25 @@ function Write-TpmDownloadProgress {
         [TimeSpan]$Elapsed,
         [switch]$Complete
     )
+    $activeStatus = $script:ActiveTpmWorkflowStatus
+    if ($activeStatus) {
+        $downloadStatusNow = (Get-Date).ToUniversalTime()
+        if ($Complete) {
+            [void](Update-TpmWorkflowActivity -Context $activeStatus -Activity ("{0} download finished" -f $Label))
+            return
+        }
+        if ($null -eq $activeStatus.LastDownloadStatusUtc -or ($downloadStatusNow - $activeStatus.LastDownloadStatusUtc).TotalMilliseconds -ge 500) {
+            $activeStatus.LastDownloadStatusUtc = $downloadStatusNow
+            $downloadMb = [Math]::Round($DownloadedBytes / 1MB, 1)
+            if ($TotalBytes -gt 0) {
+                $downloadPercent = [Math]::Min(100, [Math]::Max(0, [Math]::Round(($DownloadedBytes / $TotalBytes) * 100, 0)))
+                [void](Update-TpmWorkflowActivity -Context $activeStatus -Activity ("{0}: {1}% downloaded ({2} MB)" -f $Label, $downloadPercent, $downloadMb))
+            } else {
+                [void](Update-TpmWorkflowActivity -Context $activeStatus -Activity ("{0}: {1} MB downloaded" -f $Label, $downloadMb))
+            }
+        }
+        return
+    }
 
     $activity = "Downloading $Label"
     if ($Complete) {
@@ -5669,9 +6970,22 @@ function Test-EggmanDatUpToDate {
 }
 
 function Invoke-EggmanDatDownload {
-    param([string]$downloadUrl, [string]$savePath, [Int64]$ExpectedBytes = 0)
+    param(
+        [string]$downloadUrl,
+        [string]$savePath,
+        [Int64]$ExpectedBytes = 0,
+        [string]$ProgramDirectory = ''
+    )
+    if (-not (Test-EggmanDatDestinationSafe -Path $savePath -ProgramDirectory $ProgramDirectory)) {
+        Write-Log "EggmanDat: SECURITY -- destination failed the immediate pre-download role check: $savePath"
+        return $false
+    }
     return (Invoke-TpmDownload -DownloadUrl $downloadUrl -DestinationPath $savePath -ExpectedBytes $ExpectedBytes -Label 'EggmanDat' -ValidationScript {
         param([string]$DownloadedPath)
+        if (-not (Test-EggmanDatDestinationSafe -Path $savePath -ProgramDirectory $ProgramDirectory)) {
+            Write-Log "EggmanDat: SECURITY -- destination failed the immediate pre-write role check: $savePath"
+            return $false
+        }
         return (Test-EggmanDatZip -Path $DownloadedPath -ExpectedBytes $ExpectedBytes)
     })
 }
@@ -5702,19 +7016,232 @@ function Get-EggmanDatDefaultSavePath {
     return (Join-Path $dataRoot $FileName)
 }
 
-# Download destinations must never overlap a TeknoParrot installation, either
-# game ZIP source, or the extracted-game staging folder. Importing an existing
-# file remains read-only and is handled by the separate B) browse/import path;
-# this guard applies only to paths TPM may write.
-function Test-EggmanDatDestinationSafe {
-    param([string]$Path)
-    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
-    $protectedRoots = @($tpRoot, $zipSource, $zipSourceSupplementary, $gamesInstallFolder) |
-        Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
-    foreach ($protectedRoot in $protectedRoots) {
-        if (Test-PathInside -child $Path -parent ([string]$protectedRoot)) { return $false }
+# Classify Eggman paths by role instead of treating every mapped/NAS path as
+# unsafe. The configured primary ZIP source may be an approved DAT destination
+# when it is reachable, canonical, non-reparse, and outside protected roots.
+# The supplementary source is never selected as a primary fallback.
+function Get-EggmanDatPathRole {
+    param(
+        [string]$Path,
+        [ValidateSet('Destination','PrimaryZipSource')]
+        [string]$RequestedRole = 'Destination',
+        [string]$ProgramDirectory = ''
+    )
+
+    $result = [ordered]@{
+        Safe = $false
+        CanonicalPath = $null
+        Role = 'Unknown'
+        ReasonCode = 'Invalid'
+        Reason = 'The path is empty or cannot be canonicalized.'
+        ReparseBacked = $false
     }
-    return $true
+    if ([string]::IsNullOrWhiteSpace($Path)) { return [pscustomobject]$result }
+
+    try {
+        if (-not [System.IO.Path]::IsPathRooted($Path)) { return [pscustomobject]$result }
+        $result.CanonicalPath = [System.IO.Path]::GetFullPath($Path).TrimEnd('\','/')
+        if ([string]::IsNullOrWhiteSpace($result.CanonicalPath)) { return [pscustomobject]$result }
+    } catch { return [pscustomobject]$result }
+
+    $canonicalRoots = @{}
+    foreach ($entry in @(
+        [pscustomobject]@{ Name = 'TeknoParrotRoot'; Path = $tpRoot },
+        [pscustomobject]@{ Name = 'GamesInstall'; Path = $gamesInstallFolder },
+        [pscustomobject]@{ Name = 'ProgramDirectory'; Path = $ProgramDirectory },
+        [pscustomobject]@{ Name = 'PrimaryZipSource'; Path = $zipSource },
+        [pscustomobject]@{ Name = 'SupplementaryZipSource'; Path = $zipSourceSupplementary }
+    )) {
+        if ([string]::IsNullOrWhiteSpace([string]$entry.Path)) { continue }
+        try {
+            if (-not [System.IO.Path]::IsPathRooted([string]$entry.Path)) {
+                $result.ReasonCode = 'Ambiguous'
+                $result.Reason = "$($entry.Name) is not an absolute path."
+                return [pscustomobject]$result
+            }
+            $canonicalRoots[$entry.Name] = [System.IO.Path]::GetFullPath([string]$entry.Path).TrimEnd('\','/')
+        } catch {
+            $result.ReasonCode = 'Ambiguous'
+            $result.Reason = "$($entry.Name) cannot be canonicalized."
+            return [pscustomobject]$result
+        }
+    }
+
+    if ($canonicalRoots.ContainsKey('PrimaryZipSource') -and
+        $canonicalRoots.ContainsKey('SupplementaryZipSource') -and
+        (Test-TpmPathOverlap $canonicalRoots['PrimaryZipSource'] $canonicalRoots['SupplementaryZipSource'])) {
+        $result.ReasonCode = 'AmbiguousSourceRoles'
+        $result.Reason = 'The primary and supplementary ZIP source folders overlap.'
+        return [pscustomobject]$result
+    }
+
+    foreach ($protectedName in @('TeknoParrotRoot','GamesInstall','ProgramDirectory')) {
+        if ($canonicalRoots.ContainsKey($protectedName) -and
+            (Test-TpmPathOverlap $result.CanonicalPath $canonicalRoots[$protectedName])) {
+            $result.ReasonCode = switch ($protectedName) {
+                'TeknoParrotRoot' { 'TeknoParrotRoot' }
+                'GamesInstall' { 'ProtectedStaging' }
+                default { 'ProtectedRuntime' }
+            }
+            $result.Role = 'Protected'
+            $result.Reason = "The path overlaps the protected $protectedName root."
+            return [pscustomobject]$result
+        }
+    }
+
+    if (-not (Test-TpmNoReparsePath -Path $result.CanonicalPath)) {
+        $result.ReasonCode = 'ReparseOrInaccessible'
+        $result.Reason = 'The path or one of its existing parent components is reparse-backed or inaccessible.'
+        $result.ReparseBacked = $true
+        return [pscustomobject]$result
+    }
+
+    $primaryRoot = if ($canonicalRoots.ContainsKey('PrimaryZipSource')) { $canonicalRoots['PrimaryZipSource'] } else { $null }
+    $supplementaryRoot = if ($canonicalRoots.ContainsKey('SupplementaryZipSource')) { $canonicalRoots['SupplementaryZipSource'] } else { $null }
+
+    if ($RequestedRole -eq 'PrimaryZipSource') {
+        if ([string]::IsNullOrWhiteSpace($primaryRoot) -or
+            -not $result.CanonicalPath.Equals($primaryRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $result.ReasonCode = 'NotPrimarySource'
+            $result.Reason = 'The path is not the configured primary ZIP/source folder.'
+            return [pscustomobject]$result
+        }
+        if (-not (Test-Path -LiteralPath $result.CanonicalPath -PathType Container -ErrorAction SilentlyContinue)) {
+            $result.ReasonCode = 'PrimarySourceUnavailable'
+            $result.Reason = 'The configured primary ZIP/source folder is not a reachable directory.'
+            return [pscustomobject]$result
+        }
+        $result.Safe = $true
+        $result.Role = 'PrimaryZipSource'
+        $result.ReasonCode = 'Safe'
+        $result.Reason = 'The configured primary ZIP/source folder is role-safe.'
+        return [pscustomobject]$result
+    }
+
+    if ($supplementaryRoot -and (Test-PathInside $result.CanonicalPath $supplementaryRoot)) {
+        $result.ReasonCode = 'SupplementarySource'
+        $result.Reason = 'The supplementary ZIP/source folder is not an automatic primary DAT destination.'
+        return [pscustomobject]$result
+    }
+    if ($primaryRoot -and (Test-PathInside $result.CanonicalPath $primaryRoot)) {
+        if (Test-Path -LiteralPath $result.CanonicalPath -PathType Container -ErrorAction SilentlyContinue) {
+            $result.ReasonCode = 'DestinationIsFolder'
+            $result.Reason = 'The destination must be a file path, not a source folder.'
+            return [pscustomobject]$result
+        }
+        $result.Safe = $true
+        $result.Role = 'EggmanDatInPrimaryZipSource'
+        $result.ReasonCode = 'Safe'
+        $result.Reason = 'The destination is inside the explicitly configured primary ZIP/source folder.'
+        return [pscustomobject]$result
+    }
+    if (($primaryRoot -and (Test-TpmPathOverlap $result.CanonicalPath $primaryRoot)) -or
+        ($supplementaryRoot -and (Test-TpmPathOverlap $result.CanonicalPath $supplementaryRoot))) {
+        $result.ReasonCode = 'AmbiguousSourceBoundary'
+        $result.Reason = 'The destination overlaps a configured source boundary without being inside an approved role.'
+        return [pscustomobject]$result
+    }
+    if (Test-Path -LiteralPath $result.CanonicalPath -PathType Container -ErrorAction SilentlyContinue) {
+        $result.ReasonCode = 'DestinationIsFolder'
+        $result.Reason = 'The destination must be a file path, not a folder.'
+        return [pscustomobject]$result
+    }
+
+    $result.Safe = $true
+    $result.Role = 'ExternalEggmanDatDestination'
+    $result.ReasonCode = 'Safe'
+    $result.Reason = 'The destination is outside protected roots and source boundaries.'
+    return [pscustomobject]$result
+}
+
+function Test-EggmanDatDestinationSafe {
+    param(
+        [string]$Path,
+        [string]$ProgramDirectory = ''
+    )
+    return [bool](Get-EggmanDatPathRole -Path $Path -RequestedRole Destination -ProgramDirectory $ProgramDirectory).Safe
+}
+
+# Return only a reachable, non-reparse primary source folder. This is the
+# deliberate fallback for a configured DAT that is readable under TeknoParrot
+# but cannot be overwritten there.
+function Get-EggmanDatDestinationCandidates {
+    param([string]$ProgramDirectory = '')
+    $candidate = Get-EggmanDatPathRole -Path $zipSource -RequestedRole PrimaryZipSource -ProgramDirectory $ProgramDirectory
+    if ($candidate.Safe) {
+        return @([pscustomobject]@{
+            Path = $candidate.CanonicalPath
+            Role = $candidate.Role
+            Reason = $candidate.Reason
+        })
+    }
+    return @()
+}
+
+# Resolve the write destination before any release query or download. The
+# current DAT remains readable for comparison, but TPM never writes a
+# replacement under the TeknoParrot root.
+function Resolve-EggmanDatUpdateDestination {
+    param(
+        [string]$CurrentPath,
+        [string]$ProgramDirectory = ''
+    )
+    $current = Get-EggmanDatPathRole -Path $CurrentPath -RequestedRole Destination -ProgramDirectory $ProgramDirectory
+    if ($current.Safe) {
+        return [pscustomobject]@{
+            Status = 'Ready'
+            DestinationPath = $current.CanonicalPath
+            DestinationFolder = [System.IO.Path]::GetDirectoryName($current.CanonicalPath)
+            Reason = $current.Reason
+        }
+    }
+
+    $tpRootCanonical = $null
+    if (-not [string]::IsNullOrWhiteSpace([string]$tpRoot)) {
+        try { $tpRootCanonical = [System.IO.Path]::GetFullPath($tpRoot).TrimEnd('\','/') } catch {}
+    }
+    if ($tpRootCanonical -and (Test-PathInside $current.CanonicalPath $tpRootCanonical)) {
+        Write-Host '  Current DAT is under the TeknoParrot root, which TPM will not write to.' -ForegroundColor Yellow
+        $candidates = @(Get-EggmanDatDestinationCandidates -ProgramDirectory $ProgramDirectory)
+        if ($candidates.Count -gt 0) {
+            $candidate = $candidates[0]
+            Write-Host ("  Safe external DAT folder found: {0}" -f $candidate.Path) -ForegroundColor Green
+            $choice = (Read-HostSafe 'Download latest DAT there? (Y/N)').ToUpper()
+            if ($choice -eq 'Y') {
+                return [pscustomobject]@{
+                    Status = 'FallbackSelected'
+                    DestinationPath = $null
+                    DestinationFolder = $candidate.Path
+                    Reason = $candidate.Reason
+                }
+            }
+            Write-Host '  Keeping the current DAT. No download was started.' -ForegroundColor Yellow
+            return [pscustomobject]@{
+                Status = 'Declined'
+                DestinationPath = $null
+                DestinationFolder = $null
+                Reason = 'The user declined the safe external destination.'
+            }
+        }
+        Write-Host '  No safe external primary DAT folder is configured or reachable.' -ForegroundColor Yellow
+        Write-Host '  Action: configure a reachable primary ZIP/source folder outside TeknoParrot' -ForegroundColor Yellow
+        Write-Host '  and staging, verify its Windows share permissions, then run the update again.' -ForegroundColor Yellow
+        return [pscustomobject]@{
+            Status = 'NoSafeDestination'
+            DestinationPath = $null
+            DestinationFolder = $null
+            Reason = 'No role-safe primary ZIP/source folder was available.'
+        }
+    }
+
+    Write-Host '  The configured Eggman DAT destination is not safe to write.' -ForegroundColor Yellow
+    Write-Host ("  Action: choose a canonical, non-reparse folder outside TeknoParrot and staging; TPM will not write until it passes validation. ({0})" -f $current.Reason) -ForegroundColor Yellow
+    return [pscustomobject]@{
+        Status = 'Invalid'
+        DestinationPath = $null
+        DestinationFolder = $null
+        Reason = $current.Reason
+    }
 }
 
 # A matching byte count is not enough to trust a downloaded Eggman archive:
@@ -5742,13 +7269,16 @@ function Test-EggmanDatZip {
 # AllowBrowse is used only when no preferred path was supplied. The configured
 # update flow supplies PreferredSavePath, so a valid configured path is reused
 # without an alternate-location dialog and is still revalidated before use.
+# An unsafe configured DAT under TeknoParrot may offer the role-safe primary
+# source folder before any download begins.
 # Returns the saved path on success, or $null on failure/abort.
 function Invoke-EggmanDatDownloadInteractive {
     param(
         [pscustomobject]$rel,
         [switch]$AllowBrowse,
         [string]$PreferredSavePath = '',
-        [string]$DefaultRoot = ''
+        [string]$DefaultRoot = '',
+        [string]$ProgramDirectory = ''
     )
 
     $safeDatFileName = [System.IO.Path]::GetFileName($rel.FileName)
@@ -5766,11 +7296,40 @@ function Invoke-EggmanDatDownloadInteractive {
         Write-Host "  Unexpected filename from GitHub -- skipped for safety." -ForegroundColor Red
         return $null
     }
-    if (-not (Test-EggmanDatDestinationSafe -Path $defaultSavePath)) {
-        Write-Log "EggmanDat: SECURITY -- default destination overlaps a protected location: $defaultSavePath"
-        Write-Host "  TPM could not select a safe Eggman data location for this setup." -ForegroundColor Yellow
-        if (-not $AllowBrowse) { return $null }
-        $defaultSavePath = $null
+    $defaultDestination = Get-EggmanDatPathRole -Path $defaultSavePath -RequestedRole Destination -ProgramDirectory $ProgramDirectory
+    if (-not $defaultDestination.Safe) {
+        $isUnderTeknoParrot = $false
+        if (-not [string]::IsNullOrWhiteSpace([string]$tpRoot)) {
+            try {
+                $isUnderTeknoParrot = Test-PathInside $defaultDestination.CanonicalPath ([System.IO.Path]::GetFullPath($tpRoot))
+            } catch {}
+        }
+        if ($isUnderTeknoParrot) {
+            Write-Host '  Current DAT is under the TeknoParrot root, which TPM will not write to.' -ForegroundColor Yellow
+            $candidates = @(Get-EggmanDatDestinationCandidates -ProgramDirectory $ProgramDirectory)
+            if ($candidates.Count -gt 0) {
+                $candidate = $candidates[0]
+                Write-Host ("  Safe external DAT folder found: {0}" -f $candidate.Path) -ForegroundColor Green
+                $choice = (Read-HostSafe 'Download latest DAT there? (Y/N)').ToUpper()
+                if ($choice -eq 'Y') {
+                    $defaultSavePath = Join-Path $candidate.Path $safeDatFileName
+                    $defaultDestination = Get-EggmanDatPathRole -Path $defaultSavePath -RequestedRole Destination -ProgramDirectory $ProgramDirectory
+                } else {
+                    Write-Host '  Keeping the current DAT. No download was started.' -ForegroundColor Yellow
+                    return $null
+                }
+            } else {
+                Write-Host '  No safe external primary DAT folder is configured or reachable.' -ForegroundColor Yellow
+                Write-Host '  Action: configure a reachable primary ZIP/source folder outside TeknoParrot' -ForegroundColor Yellow
+                Write-Host '  and staging, verify its Windows share permissions, then run the update again.' -ForegroundColor Yellow
+                return $null
+            }
+        } else {
+            Write-Log "EggmanDat: SECURITY -- default destination failed role validation: $defaultSavePath ($($defaultDestination.Reason))"
+            Write-Host '  TPM could not select a safe Eggman data location for this setup.' -ForegroundColor Yellow
+            if (-not $AllowBrowse) { return $null }
+            $defaultSavePath = $null
+        }
     }
     $rawSave = $defaultSavePath
     if ($AllowBrowse -and [string]::IsNullOrWhiteSpace($PreferredSavePath)) {
@@ -5788,18 +7347,20 @@ function Invoke-EggmanDatDownloadInteractive {
         Write-Host "  The selected Eggman data destination is not a valid path -- skipped." -ForegroundColor Yellow
         return $null
     }
-    if (-not (Test-EggmanDatDestinationSafe -Path $rawSave)) {
-        Write-Host "  Refusing to write Eggman recognition data under TeknoParrot, a game ZIP source, or staging." -ForegroundColor Red
-        Write-Log "EggmanDat: SECURITY -- rejected protected destination $rawSave"
+    $finalDestination = Get-EggmanDatPathRole -Path $rawSave -RequestedRole Destination -ProgramDirectory $ProgramDirectory
+    if (-not $finalDestination.Safe) {
+        Write-Host '  Refusing to write Eggman recognition data to an unsafe or ambiguous path.' -ForegroundColor Red
+        Write-Log "EggmanDat: SECURITY -- rejected destination $rawSave ($($finalDestination.Reason))"
         return $null
     }
+    $rawSave = $finalDestination.CanonicalPath
     if ($rel.SizeBytes -gt 0 -and (Test-EggmanDatZip -Path $rawSave -ExpectedBytes $rel.SizeBytes)) {
         Write-Host "  Existing Eggman dat ZIP already matches the release size. Reusing it." -ForegroundColor Green
         Write-Log "EggmanDat: existing ZIP matches release size; download skipped."
         return $rawSave
     }
     Write-Host "  Downloading -- this may take a few minutes..." -ForegroundColor Cyan
-    if (Invoke-EggmanDatDownload $rel.DownloadUrl $rawSave -ExpectedBytes $rel.SizeBytes) { return $rawSave }
+    if (Invoke-EggmanDatDownload $rel.DownloadUrl $rawSave -ExpectedBytes $rel.SizeBytes -ProgramDirectory $ProgramDirectory) { return $rawSave }
     return $null
 }
 
@@ -5890,6 +7451,442 @@ function Test-RunningAsAdministrator {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+# Explain why Windows permission is needed before TPM starts its automatic
+# elevation/resume handoff. The normal user path never asks a beginner to
+# close TPM, find a script, or select the same menu item again.
+function Write-PostgresAdministratorGuidance {
+    param(
+        [ValidateSet('Install','Recovery')]
+        [string]$Operation = 'Recovery'
+    )
+    if ($Operation -eq 'Install') {
+        Write-Host '  TPM needs Windows permission to install the small local database used by these games.' -ForegroundColor Yellow
+    } else {
+        Write-Host '  TPM needs Windows permission to repair the saved PostgreSQL password.' -ForegroundColor Yellow
+    }
+    Write-Host '  Windows will ask you to approve this. TPM will continue the same setup automatically.' -ForegroundColor Yellow
+    Write-Host '  You do not need to close TPM or choose PostgreSQL setup again.' -ForegroundColor Yellow
+    Write-Host '  Existing PostgreSQL data and profiles are protected; TPM backs up before changing anything.' -ForegroundColor Yellow
+}
+
+function Get-PostgresRecoveryStateDirectory {
+    $base = if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) { $env:LOCALAPPDATA } else { $env:TEMP }
+    return (Join-Path $base 'TeknoParrotManager\Recovery')
+}
+
+function Set-PostgresRecoveryStateAcl {
+    param([Parameter(Mandatory)][string]$Path, [switch]$Directory)
+    $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $permission = if ($Directory) { '(OI)(CI)(F)' } else { '(F)' }
+    $rules = @(
+        ('*{0}:{1}' -f $sid, $permission),
+        ('*S-1-5-32-544:{0}' -f $permission),
+        ('*S-1-5-18:{0}' -f $permission)
+    )
+    & icacls $Path /inheritance:r /grant:r @rules 1>$null 2>$null
+    if ($LASTEXITCODE -ne 0) { throw 'Postgres recovery state ACL could not be verified.' }
+}
+
+function Protect-PostgresRecoveryEnvelope {
+    param([Parameter(Mandatory)][string]$PlainText)
+    Add-Type -AssemblyName System.Security
+    $bytes = [Text.Encoding]::UTF8.GetBytes($PlainText)
+    try {
+        $protected = [Security.Cryptography.ProtectedData]::Protect(
+            $bytes, $null, [Security.Cryptography.DataProtectionScope]::LocalMachine)
+        return [Convert]::ToBase64String($protected)
+    } finally {
+        if ($bytes) { [Array]::Clear($bytes, 0, $bytes.Length) }
+    }
+}
+
+function Unprotect-PostgresRecoveryEnvelope {
+    param([Parameter(Mandatory)][string]$ProtectedText)
+    Add-Type -AssemblyName System.Security
+    $protected = [Convert]::FromBase64String($ProtectedText)
+    $bytes = $null
+    try {
+        $bytes = [Security.Cryptography.ProtectedData]::Unprotect(
+            $protected, $null, [Security.Cryptography.DataProtectionScope]::LocalMachine)
+        return [Text.Encoding]::UTF8.GetString($bytes)
+    } finally {
+        if ($protected) { [Array]::Clear($protected, 0, $protected.Length) }
+        if ($bytes) { [Array]::Clear($bytes, 0, $bytes.Length) }
+    }
+}
+
+function Remove-PostgresRecoveryState {
+    param([string]$Path, [string]$ClaimPath = '')
+    $targets = @($Path, $ClaimPath) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+    try {
+        foreach ($target in $targets) {
+            if (Test-Path -LiteralPath $target -PathType Leaf) {
+                Remove-Item -LiteralPath $target -Force -ErrorAction Stop
+            }
+        }
+        return (@($targets | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }).Count -eq 0)
+    } catch {
+        Write-Log 'Postgres recovery: protected resume state cleanup failed.'
+        return $false
+    }
+}
+
+function New-PostgresRecoveryState {
+    param(
+        [Parameter(Mandatory)][string]$ConfigPath,
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [Parameter(Mandatory)][string]$TpRoot,
+        [Parameter(Mandatory)][string]$UserProfilesDir,
+        [ValidateSet('Install','Recovery')]
+        [string]$Operation = 'Recovery',
+        [string]$PasswordPlain = '',
+        [int]$AttemptId = 1,
+        [int]$ParentPid = 0,
+        [Int64]$ParentStartTicks = 0,
+        [string]$ParentProcessPath = '',
+        [string]$ParentProcessSha256 = '',
+        [string]$OriginUserSid = '',
+        [string]$ExpectedScriptSha256 = '',
+        [string]$ExpectedConfigSha256 = ''
+    )
+    if ($Operation -eq 'Recovery' -and [string]::IsNullOrEmpty($PasswordPlain)) {
+        throw 'Postgres recovery state requires a chosen password.'
+    }
+    if ($AttemptId -lt 1 -or $AttemptId -gt 5) { throw 'Postgres recovery state attempt limit was exceeded.' }
+    $stateDirectory = Get-PostgresRecoveryStateDirectory
+    $issuanceId = [guid]::NewGuid().ToString('N')
+    $statePath = Join-Path $stateDirectory ('.tpm-postgres-recovery-' + $issuanceId + '.json')
+    $tempPath = $statePath + '.tmp'
+    try {
+        [void][System.IO.Directory]::CreateDirectory($stateDirectory)
+        Set-PostgresRecoveryStateAcl -Path $stateDirectory -Directory
+        $parent = if ($ParentPid -gt 0) { Get-Process -Id $ParentPid -ErrorAction Stop } else { Get-Process -Id $PID -ErrorAction Stop }
+        if ($ParentPid -le 0) { $ParentPid = [int]$PID }
+        if ($ParentStartTicks -le 0) { $ParentStartTicks = [int64]$parent.StartTime.ToUniversalTime().Ticks }
+        if ([string]::IsNullOrWhiteSpace($ParentProcessPath)) { $ParentProcessPath = [string]$parent.Path }
+        if ([string]::IsNullOrWhiteSpace($ParentProcessPath) -or -not (Test-Path -LiteralPath $ParentProcessPath -PathType Leaf)) { throw 'Postgres recovery parent executable could not be verified.' }
+        if ([string]::IsNullOrWhiteSpace($ParentProcessSha256)) { $ParentProcessSha256 = (Get-FileHash -LiteralPath $ParentProcessPath -Algorithm SHA256 -ErrorAction Stop).Hash }
+        if ([string]::IsNullOrWhiteSpace($OriginUserSid)) { $OriginUserSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value }
+        $scriptFull = [System.IO.Path]::GetFullPath($ScriptPath)
+        $configFull = [System.IO.Path]::GetFullPath($ConfigPath)
+        $scriptHash = (Get-FileHash -LiteralPath $scriptFull -Algorithm SHA256 -ErrorAction Stop).Hash
+        $configHash = (Get-FileHash -LiteralPath $configFull -Algorithm SHA256 -ErrorAction Stop).Hash
+        if ($ExpectedScriptSha256 -and $scriptHash -ne $ExpectedScriptSha256) { throw 'Postgres recovery script changed during retry.' }
+        if ($ExpectedConfigSha256 -and $configHash -ne $ExpectedConfigSha256) { throw 'Postgres recovery configuration changed during retry.' }
+        $created = (Get-Date).ToUniversalTime()
+        $expires = $created.AddMinutes(5)
+        $payload = [ordered]@{
+            SchemaVersion           = 3
+            Purpose                 = 'TeknoParrotManager.PostgresRecovery'
+            IssuanceId              = $issuanceId
+            Operation               = $Operation
+            Nonce                   = [guid]::NewGuid().ToString('N')
+            AttemptId               = $AttemptId
+            CreatedUtc              = $created.ToString('o')
+            ExpiresUtc              = $expires.ToString('o')
+            ParentPid               = $ParentPid
+            ParentStartTicks        = $ParentStartTicks
+            ParentProcessPath       = [System.IO.Path]::GetFullPath($ParentProcessPath)
+            ParentProcessSha256     = $ParentProcessSha256
+            OriginUserSid           = $OriginUserSid
+            MachineName             = [Environment]::MachineName
+            ScriptPath              = $scriptFull
+            ScriptSha256            = $scriptHash
+            ConfigPath              = $configFull
+            ConfigSha256            = $configHash
+            TpRoot                  = [System.IO.Path]::GetFullPath($TpRoot)
+            UserProfilesDir         = [System.IO.Path]::GetFullPath($UserProfilesDir)
+            PasswordPlain           = $PasswordPlain
+            PasswordOriginEncrypted = if ($Operation -eq 'Recovery') { ConvertTo-PostgresEncryptedPassword -PlainText $PasswordPlain } else { '' }
+        }
+        $outer = [ordered]@{
+            SchemaVersion = 3
+            Purpose       = 'TeknoParrotManager.PostgresRecovery'
+            CipherText    = Protect-PostgresRecoveryEnvelope -PlainText ($payload | ConvertTo-Json -Depth 6)
+        }
+        [System.IO.File]::WriteAllText($tempPath, ($outer | ConvertTo-Json -Depth 4), (New-Object System.Text.UTF8Encoding $false))
+        Set-PostgresRecoveryStateAcl -Path $tempPath
+        [System.IO.File]::Move($tempPath, $statePath)
+        Set-PostgresRecoveryStateAcl -Path $statePath
+        if (-not (Test-Path -LiteralPath $statePath -PathType Leaf)) { throw 'Protected recovery state was not created.' }
+        return $statePath
+    } catch {
+        [void](Remove-PostgresRecoveryState -Path $statePath)
+        if (Test-Path -LiteralPath $tempPath -PathType Leaf) { Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue }
+        throw 'TPM could not prepare the protected PostgreSQL recovery handoff.'
+    } finally {
+        $PasswordPlain = $null
+        [GC]::Collect()
+    }
+}
+
+function New-PostgresRecoveryRetryState {
+    param([Parameter(Mandatory)]$State)
+    return New-PostgresRecoveryState -ConfigPath $State.ConfigPath -ScriptPath $State.ScriptPath `
+        -TpRoot $State.TpRoot -UserProfilesDir $State.UserProfilesDir -Operation $State.Operation `
+        -PasswordPlain $State.PasswordPlain -AttemptId ([int]$State.AttemptId + 1) `
+        -ParentPid ([int]$State.ParentPid) -ParentStartTicks ([Int64]$State.ParentStartTicks) `
+        -ParentProcessPath $State.ParentProcessPath -ParentProcessSha256 $State.ParentProcessSha256 `
+        -OriginUserSid $State.OriginUserSid -ExpectedScriptSha256 $State.ScriptSha256 `
+        -ExpectedConfigSha256 $State.ConfigSha256
+}
+
+function Find-PostgresRecoveryRetryState {
+    param(
+        [Parameter(Mandatory)][string]$PreviousStatePath,
+        [Parameter(Mandatory)][string]$ExpectedConfigPath,
+        [Parameter(Mandatory)][string]$ExpectedScriptPath,
+        [Parameter(Mandatory)][string]$ExpectedTpRoot,
+        [Parameter(Mandatory)][string]$ExpectedUserProfilesDir,
+        [Parameter(Mandatory)][int]$ExpectedParentPid,
+        [Parameter(Mandatory)][int]$PreviousAttemptId
+    )
+    $stateDirectory = [System.IO.Path]::GetFullPath((Get-PostgresRecoveryStateDirectory)).TrimEnd('\','/')
+    $previousFull = [System.IO.Path]::GetFullPath($PreviousStatePath)
+    foreach ($candidate in @(Get-ChildItem -LiteralPath $stateDirectory -Filter '.tpm-postgres-recovery-*.json' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending)) {
+        if ($candidate.FullName -ieq $previousFull) { continue }
+        try {
+            $outer = Get-Content -LiteralPath $candidate.FullName -Raw -ErrorAction Stop | ConvertFrom-Json
+            if ($outer.SchemaVersion -ne 3 -or $outer.Purpose -ne 'TeknoParrotManager.PostgresRecovery' -or [string]::IsNullOrWhiteSpace([string]$outer.CipherText)) { continue }
+            $payload = Unprotect-PostgresRecoveryEnvelope -ProtectedText ([string]$outer.CipherText) | ConvertFrom-Json
+            if ([int]$payload.ParentPid -ne $ExpectedParentPid -or [int]$payload.AttemptId -le $PreviousAttemptId) { continue }
+            if ([System.IO.Path]::GetFullPath([string]$payload.ConfigPath) -ine [System.IO.Path]::GetFullPath($ExpectedConfigPath) -or
+                [System.IO.Path]::GetFullPath([string]$payload.ScriptPath) -ine [System.IO.Path]::GetFullPath($ExpectedScriptPath) -or
+                [System.IO.Path]::GetFullPath([string]$payload.TpRoot) -ine [System.IO.Path]::GetFullPath($ExpectedTpRoot) -or
+                [System.IO.Path]::GetFullPath([string]$payload.UserProfilesDir) -ine [System.IO.Path]::GetFullPath($ExpectedUserProfilesDir)) { continue }
+            return $candidate.FullName
+        } catch {}
+    }
+    return $null
+}
+
+function Read-PostgresRecoveryState {
+    param(
+        [Parameter(Mandatory)][string]$StatePath,
+        [Parameter(Mandatory)][string]$ExpectedConfigPath,
+        [Parameter(Mandatory)][string]$ExpectedScriptPath,
+        [Parameter(Mandatory)][string]$ExpectedTpRoot,
+        [Parameter(Mandatory)][string]$ExpectedUserProfilesDir
+    )
+    $passwordPlain = $null
+    $fullPath = $null
+    $claimPath = $null
+    $usedPath = $null
+    try {
+        $stateDirectory = [System.IO.Path]::GetFullPath((Get-PostgresRecoveryStateDirectory)).TrimEnd('\','/')
+        $fullPath = [System.IO.Path]::GetFullPath($StatePath)
+        $leaf = [System.IO.Path]::GetFileName($fullPath)
+        $issuanceMatch = [regex]::Match($leaf, '^\.tpm-postgres-recovery-(?<id>[0-9a-f]{32})\.json$')
+        if ([System.IO.Path]::GetDirectoryName($fullPath).TrimEnd('\','/') -ine $stateDirectory -or
+            -not $issuanceMatch.Success -or
+            -not (Test-Path -LiteralPath $fullPath -PathType Leaf)) { throw 'Recovery state path is not a TPM state file.' }
+        $fileIssuanceId = $issuanceMatch.Groups['id'].Value
+        $claimPath = $fullPath + '.claim'
+        $usedPath = $fullPath + '.used'
+        if ((Test-Path -LiteralPath $usedPath -PathType Leaf) -or (Test-Path -LiteralPath $claimPath -PathType Leaf)) { throw 'Recovery state was already consumed.' }
+        [System.IO.File]::Move($fullPath, $claimPath)
+        $markerStream = $null
+        try {
+            $markerStream = [System.IO.File]::Open($usedPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+            $markerStream.Close()
+        } finally {
+            if ($markerStream) { $markerStream.Dispose() }
+        }
+        Set-PostgresRecoveryStateAcl -Path $usedPath
+        $outer = Get-Content -LiteralPath $claimPath -Raw -ErrorAction Stop | ConvertFrom-Json
+        if ($outer.SchemaVersion -ne 3 -or $outer.Purpose -ne 'TeknoParrotManager.PostgresRecovery' -or [string]::IsNullOrWhiteSpace([string]$outer.CipherText)) { throw 'Recovery state envelope is invalid.' }
+        $payload = Unprotect-PostgresRecoveryEnvelope -ProtectedText ([string]$outer.CipherText) | ConvertFrom-Json
+        if ($payload.SchemaVersion -ne 3 -or $payload.Purpose -ne 'TeknoParrotManager.PostgresRecovery' -or
+            [string]$payload.IssuanceId -ne $fileIssuanceId -or
+            $payload.Operation -notin @('Install','Recovery') -or [string]::IsNullOrWhiteSpace([string]$payload.Nonce) -or
+            [int]$payload.AttemptId -lt 1 -or [int]$payload.AttemptId -gt 5) { throw 'Recovery state metadata is invalid.' }
+        $now = (Get-Date).ToUniversalTime()
+        $created = if ($payload.CreatedUtc -is [DateTime]) { ([DateTime]$payload.CreatedUtc).ToUniversalTime() } else { [DateTimeOffset]::Parse([string]$payload.CreatedUtc).UtcDateTime }
+        $expires = if ($payload.ExpiresUtc -is [DateTime]) { ([DateTime]$payload.ExpiresUtc).ToUniversalTime() } else { [DateTimeOffset]::Parse([string]$payload.ExpiresUtc).UtcDateTime }
+        if ($expires -le $created -or ($expires - $created) -gt [TimeSpan]::FromMinutes(5) -or $created -gt $now.AddMinutes(2) -or $expires -le $now) { throw 'Recovery state lifetime is invalid or expired.' }
+        if ([System.IO.Path]::GetFullPath([string]$payload.ConfigPath) -ine [System.IO.Path]::GetFullPath($ExpectedConfigPath) -or
+            [System.IO.Path]::GetFullPath([string]$payload.ScriptPath) -ine [System.IO.Path]::GetFullPath($ExpectedScriptPath) -or
+            [System.IO.Path]::GetFullPath([string]$payload.TpRoot) -ine [System.IO.Path]::GetFullPath($ExpectedTpRoot) -or
+            [System.IO.Path]::GetFullPath([string]$payload.UserProfilesDir) -ine [System.IO.Path]::GetFullPath($ExpectedUserProfilesDir)) { throw 'Recovery state belongs to a different TPM installation.' }
+        if ([string]$payload.MachineName -ine [Environment]::MachineName -or [string]$payload.OriginUserSid -ne [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value) { throw 'Recovery state belongs to a different Windows identity.' }
+        $parent = Get-Process -Id ([int]$payload.ParentPid) -ErrorAction Stop
+        if ([int64]$parent.StartTime.ToUniversalTime().Ticks -ne [int64]$payload.ParentStartTicks -or
+            [System.IO.Path]::GetFullPath([string]$parent.Path) -ine [System.IO.Path]::GetFullPath([string]$payload.ParentProcessPath) -or
+            (Get-FileHash -LiteralPath $parent.Path -Algorithm SHA256 -ErrorAction Stop).Hash -ne [string]$payload.ParentProcessSha256) { throw 'Recovery parent identity changed.' }
+        if ((Get-FileHash -LiteralPath $ExpectedScriptPath -Algorithm SHA256 -ErrorAction Stop).Hash -ne [string]$payload.ScriptSha256 -or
+            (Get-FileHash -LiteralPath $ExpectedConfigPath -Algorithm SHA256 -ErrorAction Stop).Hash -ne [string]$payload.ConfigSha256) { throw 'Recovery source or configuration changed during the handoff.' }
+        $markerText = 'TPM.PostgresRecovery.v3|' + [string]$payload.IssuanceId + '|' + [string]$payload.Nonce + '|' + [string]$payload.AttemptId
+        [System.IO.File]::WriteAllText($usedPath, $markerText, (New-Object System.Text.UTF8Encoding $false))
+        if ((Get-Content -LiteralPath $usedPath -Raw -ErrorAction Stop) -ne $markerText) { throw 'Recovery state consumption marker could not be verified.' }
+        if ($payload.Operation -eq 'Recovery') {
+            $passwordPlain = [string]$payload.PasswordPlain
+            if ([string]::IsNullOrEmpty($passwordPlain) -or [string]::IsNullOrEmpty([string]$payload.PasswordOriginEncrypted)) { throw 'Recovery password state is missing.' }
+        } elseif (-not [string]::IsNullOrEmpty([string]$payload.PasswordPlain) -or -not [string]::IsNullOrEmpty([string]$payload.PasswordOriginEncrypted)) {
+            throw 'Install state unexpectedly contains a password.'
+        }
+        return [pscustomobject]@{
+            Path                    = $fullPath
+            ClaimPath               = $claimPath
+            UsedPath                = $usedPath
+            IssuanceId              = [string]$payload.IssuanceId
+            Nonce                   = [string]$payload.Nonce
+            Operation               = [string]$payload.Operation
+            AttemptId               = [int]$payload.AttemptId
+            CreatedUtc              = [string]$payload.CreatedUtc
+            ExpiresUtc              = [string]$payload.ExpiresUtc
+            ParentPid               = [int]$payload.ParentPid
+            ParentStartTicks        = [Int64]$payload.ParentStartTicks
+            ParentProcessPath       = [string]$payload.ParentProcessPath
+            ParentProcessSha256     = [string]$payload.ParentProcessSha256
+            OriginUserSid            = [string]$payload.OriginUserSid
+            ScriptPath              = [string]$payload.ScriptPath
+            ScriptSha256            = [string]$payload.ScriptSha256
+            ConfigPath              = [string]$payload.ConfigPath
+            ConfigSha256            = [string]$payload.ConfigSha256
+            TpRoot                  = [string]$payload.TpRoot
+            UserProfilesDir         = [string]$payload.UserProfilesDir
+            PasswordPlain           = $passwordPlain
+            PasswordOriginEncrypted = [string]$payload.PasswordOriginEncrypted
+        }
+    } catch {
+        Write-Log ("Postgres recovery state validation failed -- {0}" -f $_.Exception.Message)
+        try {
+            if ($usedPath -and (Test-Path -LiteralPath $usedPath -PathType Leaf)) { Remove-Item -LiteralPath $usedPath -Force -ErrorAction Stop }
+            if ($claimPath -and (Test-Path -LiteralPath $claimPath -PathType Leaf) -and -not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+                [System.IO.File]::Move($claimPath, $fullPath)
+            }
+        } catch { Write-Log 'Postgres recovery state validation cleanup failed; encrypted evidence was retained.' }
+        throw 'TPM could not safely resume the protected PostgreSQL setup.'
+    } finally {
+        $passwordPlain = $null
+        [GC]::Collect()
+    }
+}
+
+function Exit-PostgresRecoveryResume {
+    param([Parameter(Mandatory)][string]$Message, [int]$ExitCode = 1)
+    $retryPath = $null
+    $resumeState = $script:PostgresRecoveryResumeState
+    if ($resumeState -and $resumeState.ClaimPath) {
+        try {
+            $retryPath = New-PostgresRecoveryRetryState -State $resumeState
+            if (-not (Remove-PostgresRecoveryState -Path $resumeState.Path -ClaimPath $resumeState.ClaimPath)) {
+                $retryPath = $null
+            }
+        } catch {
+            $retryPath = $null
+        }
+    }
+    if ($script:PostgresRecoveryStatus) {
+        try {
+            [void](Set-TpmWorkflowFailure -Context $script:PostgresRecoveryStatus -FailureId 'postgres-resume-failure' -Message $Message -DataSafety 'TPM did not report profile or database changes as complete.' -RecoveryActions @(@{ Id = 'Retry'; Label = 'Use the protected retry' }; @{ Id = 'Stop'; Label = 'Stop safely' }))
+        } catch {}
+    }
+    Write-Host ''
+    Write-Host ('  ' + $Message) -ForegroundColor Red
+    Write-Host '  TPM did not report the PostgreSQL setup as complete. No further profile changes were made.' -ForegroundColor Yellow
+    if ($retryPath) {
+        Write-Host '  TPM preserved a protected retry. Choose PostgreSQL setup again to continue safely.' -ForegroundColor Yellow
+        Write-Log 'Postgres recovery resume: stopped before completion; a fresh protected retry state was issued.'
+    } else {
+        Write-Host '  TPM could not preserve a safe retry state. Nothing else was changed.' -ForegroundColor Yellow
+        Write-Log 'Postgres recovery resume: stopped before completion; no retry state was retained.'
+    }
+    [void](Read-HostSafe '  Press Enter to close TPM')
+    if ($script:PostgresRecoveryStatus -and $script:PostgresRecoveryStatus.Failure) {
+        try {
+            [void](Acknowledge-TpmWorkflowFailure -Context $script:PostgresRecoveryStatus -FailureId 'postgres-resume-failure')
+            [void](Stop-TpmWorkflowStatus -Context $script:PostgresRecoveryStatus -Reason 'PostgreSQL recovery stopped')
+            [void](Close-TpmWorkflowStatus -Context $script:PostgresRecoveryStatus)
+        } catch {}
+    }
+    exit $ExitCode
+}
+
+function ConvertTo-PostgresProcessArgument {
+    param([Parameter(Mandatory)][string]$Value)
+    if ($Value -notmatch '[\s"]') { return $Value }
+    return '"' + ($Value -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"'
+}
+
+function Start-PostgresRecoveryAsAdministrator {
+    param(
+        [Parameter(Mandatory)][string]$ConfigPath,
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [Parameter(Mandatory)][string]$TpRoot,
+        [Parameter(Mandatory)][string]$UserProfilesDir,
+        [ValidateSet('Install','Recovery')]
+        [string]$Operation = 'Recovery',
+        [string]$PasswordPlain = ''
+    )
+    $statePath = $null
+    $attemptId = 1
+    $makeArguments = {
+        param([string]$Token)
+        $items = @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $ScriptPath, '-PostgresRecoveryResumeToken', $Token)
+        return (($items | ForEach-Object { ConvertTo-PostgresProcessArgument -Value ([string]$_) }) -join ' ')
+    }
+    try {
+        $statePath = New-PostgresRecoveryState -ConfigPath $ConfigPath -ScriptPath $ScriptPath -TpRoot $TpRoot -UserProfilesDir $UserProfilesDir -Operation $Operation -PasswordPlain $PasswordPlain
+        $hostName = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh.exe' } else { 'powershell.exe' }
+        $hostPath = Join-Path $PSHOME $hostName
+        if (-not (Test-Path -LiteralPath $hostPath -PathType Leaf)) { throw 'PowerShell host was not found.' }
+        $argumentString = & $makeArguments $statePath
+    } catch {
+        Write-Host '  TPM could not prepare the automatic repair. No changes were made.' -ForegroundColor Red
+        Write-Log 'Postgres recovery: protected UAC handoff could not be prepared.'
+        [void](Remove-PostgresRecoveryState -Path $statePath)
+        return $false
+    } finally {
+        $PasswordPlain = $null
+        [GC]::Collect()
+    }
+
+    while ($true) {
+        Write-Host '  TPM will ask Windows for permission, then continue this setup automatically.' -ForegroundColor Cyan
+        $childExit = $null
+        try {
+            $child = Start-Process -FilePath $hostPath -ArgumentList $argumentString -Verb RunAs -Wait -PassThru -ErrorAction Stop
+            $childExit = [int]$child.ExitCode
+            if ($childExit -eq 0) {
+                if (-not (Remove-PostgresRecoveryState -Path $statePath -ClaimPath ($statePath + '.claim'))) {
+                    Write-Host '  PostgreSQL setup finished, but TPM could not clean its one-time recovery record.' -ForegroundColor Red
+                    Write-Log 'Postgres recovery: child succeeded but consumed-state cleanup was not verified.'
+                    return $false
+                }
+                return $true
+            }
+            Write-Host '  Windows allowed TPM to continue, but PostgreSQL setup did not finish.' -ForegroundColor Red
+        } catch {
+            Write-Host '  Windows did not give TPM permission to continue.' -ForegroundColor Yellow
+            Write-Log 'Postgres recovery: UAC approval was unavailable or was declined.'
+        }
+        $nextState = Find-PostgresRecoveryRetryState -PreviousStatePath $statePath `
+            -ExpectedConfigPath $ConfigPath -ExpectedScriptPath $ScriptPath -ExpectedTpRoot $TpRoot `
+            -ExpectedUserProfilesDir $UserProfilesDir -ExpectedParentPid $PID -PreviousAttemptId $attemptId
+        if ($nextState) {
+            $statePath = $nextState
+            $attemptId++
+            $argumentString = & $makeArguments $statePath
+            Write-Host '  TPM prepared a fresh protected retry. Your password was not requested again.' -ForegroundColor Yellow
+        } elseif (Test-Path -LiteralPath $statePath -PathType Leaf) {
+            Write-Host '  Nothing was changed by the failed automatic repair. The protected repair information is still available.' -ForegroundColor Yellow
+        } else {
+            Write-Host '  TPM consumed the failed attempt and could not prepare a safe retry. Nothing else was changed.' -ForegroundColor Yellow
+        }
+        $retry = (Read-HostSafe '  Try again? (Y/N)').ToUpper()
+        if ($retry -ne 'Y') {
+            [void](Remove-PostgresRecoveryState -Path $statePath -ClaimPath ($statePath + '.claim'))
+            return $false
+        }
+        if (-not (Test-Path -LiteralPath $statePath -PathType Leaf)) {
+            Write-Host '  TPM cannot retry this consumed attempt safely. Start PostgreSQL setup again to create a new protected request.' -ForegroundColor Red
+            [void](Read-HostSafe '  Press Enter to continue')
+            return $false
+        }
+    }
+}
+
 # Decrypts a SecureString to plaintext only as long as needed, then
 # explicitly zeroes and frees the unmanaged memory holding it -- letting GC
 # eventually collect a managed string isn't the same as zeroing the bytes,
@@ -5940,6 +7937,31 @@ function Read-ConfirmedPostgresPassword {
         }
         Write-Host "  Those two entries did not match or were empty -- let's try again." -ForegroundColor Yellow
     }
+}
+
+function Invoke-PostgresSelectedPasswordRecovery {
+    param(
+        [Parameter(Mandatory)][string]$UserProfilesDir,
+        [Parameter(Mandatory)][string]$PasswordPlain,
+        [object]$StatusContext = $null
+    )
+    if ($StatusContext) { [void](Start-TpmWorkflowStep -Context $StatusContext -StepId 'backup' -Activity 'Making a verified safety backup') }
+    Write-Host "  TPM is creating a verified recovery backup before resetting the PostgreSQL role password..." -ForegroundColor Cyan
+    $backup = New-PostgresRecoveryBackup -UserProfilesDir $UserProfilesDir
+    if (-not $backup.Verified) {
+        return [pscustomobject]@{ Succeeded = $false; Backup = $backup; Reason = 'RECOVERY_BACKUP_UNVERIFIED' }
+    }
+    if ($StatusContext) { [void](Complete-TpmWorkflowStep -Context $StatusContext -Outcome Succeeded -Summary 'Verified safety backup complete' -NextStep 'Repair and verify the database password') }
+    if ($StatusContext) { [void](Start-TpmWorkflowStep -Context $StatusContext -StepId 'reset' -Activity 'Repairing the PostgreSQL password') }
+    $reset = Reset-PostgresPasswordAutomatically -NewPassword $PasswordPlain -RecoveryBackup $backup
+    if (-not $reset.Succeeded) {
+        return [pscustomobject]@{ Succeeded = $false; Backup = $backup; Reason = 'PASSWORD_RESET_FAILED' }
+    }
+    if (-not (Test-PostgresPassword -SuperPasswordPlain $PasswordPlain)) {
+        return [pscustomobject]@{ Succeeded = $false; Backup = $backup; Reason = 'PASSWORD_VERIFICATION_FAILED' }
+    }
+    if ($StatusContext) { [void](Complete-TpmWorkflowStep -Context $StatusContext -Outcome Fixed -Summary 'Password repaired and verified' -NextStep 'Save the repaired settings') }
+    return [pscustomobject]@{ Succeeded = $true; Backup = $backup; Reason = $null }
 }
 
 # Cross-checks PostgreSQL's own installation registry record -- written by
@@ -6077,24 +8099,52 @@ function Remove-PostgresPartialInstall {
     }
 }
 
+# Windows Installer's Automation interface accepts the same public MSI
+# properties without launching msiexec.exe. This keeps SERVICEPASSWORD and
+# SUPERPASSWORD out of process argument lists while retaining the MSI's
+# unattended property-driven install. No verbose installer log is requested.
+function Invoke-PostgresMsiPackage {
+    param(
+        [Parameter(Mandatory)][string]$MsiPath,
+        [Parameter(Mandatory)][string]$PropertyValues
+    )
+    $installer = $null
+    try {
+        $installer = New-Object -ComObject WindowsInstaller.Installer
+        $installer.UILevel = 2
+        $installer.InstallProduct($MsiPath, $PropertyValues)
+        return $true
+    } catch {
+        Write-Log 'Postgres install: Windows Installer automation failed.'
+        return $false
+    } finally {
+        $PropertyValues = $null
+        if ($installer) {
+            try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($installer) } catch {}
+        }
+        $installer = $null
+        [GC]::Collect()
+    }
+}
+
 # Installs PostgreSQL 8.3 silently using the confirmed-working property set
 # above. Requires Administrator (creates a Windows service + a local user
 # account) -- prints a clear message and returns $false rather than failing
 # unhelpfully if not elevated. Returns $true on confirmed success
-# (Test-PostgresInstalled checked afterward, not just msiexec's exit code,
+# (Test-PostgresInstalled checked afterward, not just the installer API return,
 # since a misleading "success" with no real service was observed during
 # this session's testing). The superuser password is returned via
 # $OutSuperPasswordPlain so the caller can DPAPI-encrypt and save it --
 # this function never persists anything itself, and always deletes its
 # working folder (the ZIP and extracted MSI) in a finally block regardless of
-# outcome. No verbose MSI log is requested because this PostgreSQL 8.3 MSI can
+# outcome. No verbose MSI log is requested because the PostgreSQL 8.3 MSI can
 # write connection passwords into deferred custom-action logging.
 function Install-Postgres83 {
     param([ref]$OutSuperPasswordPlain)
 
     if (-not (Test-RunningAsAdministrator)) {
-        Write-Host "  ERROR: Installing PostgreSQL requires Administrator privileges." -ForegroundColor Red
-        Write-Host "  Close this window and re-run TeknoParrot Manager as Administrator." -ForegroundColor Yellow
+        Write-Host "  TPM needs Windows permission before it can install PostgreSQL." -ForegroundColor Red
+        Write-Host "  No changes were made. TPM will request that permission from its normal setup flow." -ForegroundColor Yellow
         Write-Log "Postgres install: aborted -- not running as Administrator."
         return $false
     }
@@ -6147,9 +8197,7 @@ function Install-Postgres83 {
         Remove-PostgresPartialInstall
 
         Write-Host "  Installing PostgreSQL 8.3 -- this can take a minute or two..." -ForegroundColor Cyan
-        $msiArgs = @(
-            "/i", "`"$($msiFile.FullName)`"",
-            "/qn",
+        $msiPropertyValues = @(
             "INTERNALLAUNCH=1",
             "ROOTDRIVE=C:\",
             "SERVICEACCOUNT=postgres",
@@ -6168,25 +8216,20 @@ function Install-Postgres83 {
             "DOSERVICE=1",
             "DOINITDB=1"
         )
-        # Known, accepted limitation: the PostgreSQL 8.3 MSI requires
-        # SERVICEPASSWORD/SUPERPASSWORD as public command-line properties. They are
-        # briefly visible to OS process inspection (Task Manager, Process Explorer,
-        # WMI, or equivalent) during this synchronous call. TPM does not request a
-        # verbose MSI log because this MSI's deferred custom actions can write the
-        # connection passwords into that log. There is no property-driven MSI
-        # mechanism that removes the command-line exposure; TPM does not print or log
-        # the argument list, clears its password variables immediately after the call,
-        # and deletes the downloaded/extracted working folder in finally.
-        $proc = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -PassThru
+        $msiPropertyString = $msiPropertyValues -join ' '
+        $msiSucceeded = Invoke-PostgresMsiPackage -MsiPath $msiFile.FullName -PropertyValues $msiPropertyString
+        $msiPropertyString = $null
+        $msiPropertyValues = $null
         $svcPwPlain = $null
         [GC]::Collect()
 
-        if ($proc.ExitCode -ne 0 -or -not (Test-PostgresInstalled)) {
+        if (-not $msiSucceeded -or -not (Test-PostgresInstalled)) {
             Write-Host "  ERROR: PostgreSQL install did not complete successfully." -ForegroundColor Red
-            Write-Log "Postgres install: FAILED -- msiexec exit code $($proc.ExitCode)"
+            Write-Log 'Postgres install: FAILED -- Windows Installer did not produce a verified PostgreSQL service.'
             $superPwPlain = $null
             return $false
         }
+
 
         Write-Host "  PostgreSQL 8.3 installed and running." -ForegroundColor Green
         Write-Log "Postgres install: succeeded."
@@ -6442,6 +8485,86 @@ function Invoke-FFBPluginDownload {
 # AutoSetup.cmd table by fuzzy folder-name similarity. Never overwrites an
 # existing file at the destination filename (ReShade or anything else
 # already occupying that hook point) -- skips and reports instead.
+function Get-FFBPluginOwnershipPath {
+    param([Parameter(Mandatory)][string]$CacheDir)
+    return (Join-Path $CacheDir 'TPM-FFB-Plugin-Ownership.json')
+}
+
+function Read-FFBPluginOwnership {
+    param([Parameter(Mandatory)][string]$CacheDir)
+    $path = Get-FFBPluginOwnershipPath -CacheDir $CacheDir
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return @() }
+    try {
+        $data = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json
+        return @($data.Entries)
+    } catch {
+        Write-Log 'FFBPlugin ownership manifest could not be read; no automatic removal was attempted.'
+        return @()
+    }
+}
+
+function Write-FFBPluginOwnership {
+    param([Parameter(Mandatory)][string]$CacheDir, [Parameter(Mandatory)][object]$Entries)
+    [void][System.IO.Directory]::CreateDirectory($CacheDir)
+    $path = Get-FFBPluginOwnershipPath -CacheDir $CacheDir
+    $temp = $path + '.tmp'
+    $payload = [ordered]@{ SchemaVersion = 1; Entries = @($Entries) }
+    [System.IO.File]::WriteAllText($temp, ($payload | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding $false))
+    Move-Item -LiteralPath $temp -Destination $path -Force -ErrorAction Stop
+}
+
+function Remove-FFBPluginOwnedDeployment {
+    param([Parameter(Mandatory)][string]$CacheDir, [Parameter(Mandatory)][string]$ProfileCode)
+    $entries = @(Read-FFBPluginOwnership -CacheDir $CacheDir)
+    $remaining = New-Object System.Collections.Generic.List[object]
+    $removedItems = New-Object System.Collections.ArrayList
+    $removed = $false
+    foreach ($entry in $entries) {
+        if ([string]$entry.ProfileCode -ne $ProfileCode) { [void]$remaining.Add($entry); continue }
+        $destination = [string]$entry.Destination
+        if (-not (Test-Path -LiteralPath $destination -PathType Leaf) -or
+            [string]::IsNullOrWhiteSpace([string]$entry.GameRoot) -or
+            -not (Test-PathInside -child $destination -parent ([string]$entry.GameRoot))) {
+            [void]$remaining.Add($entry); continue
+        }
+        $currentHash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256 -ErrorAction Stop).Hash
+        if ($currentHash -ine [string]$entry.DeployedSha256) {
+            Write-Host ("    Kept {0}: the hook file changed after TPM installed it." -f $destination) -ForegroundColor Yellow
+            Write-Log "FFBPlugin ownership: refused removal of changed file $destination"
+            [void]$remaining.Add($entry); continue
+        }
+        $backupDir = Join-Path (Join-Path ([string]$entry.GameRoot) 'FullBackup') ('FFBPluginCleanup_' + (Get-Date).ToString('yyyy-MM-dd_HH-mm-ss'))
+        [void][System.IO.Directory]::CreateDirectory($backupDir)
+        $backupPath = Join-Path $backupDir ([System.IO.Path]::GetFileName($destination))
+        Copy-Item -LiteralPath $destination -Destination $backupPath -Force -ErrorAction Stop
+        Remove-Item -LiteralPath $destination -Force -ErrorAction Stop
+        [void]$removedItems.Add([pscustomobject]@{ Destination = $destination; Backup = $backupPath; Hash = $entry.DeployedSha256 })
+        $removed = $true
+    }
+    if ($removed) {
+        try {
+            Write-FFBPluginOwnership -CacheDir $CacheDir -Entries $remaining.ToArray()
+        } catch {
+            $rollbackErrors = New-Object System.Collections.Generic.List[string]
+            foreach ($item in @($removedItems)) {
+                try {
+                    if (-not (Test-Path -LiteralPath $item.Destination -PathType Leaf)) {
+                        Copy-Item -LiteralPath $item.Backup -Destination $item.Destination -Force -ErrorAction Stop
+                    }
+                    if ((Get-FileHash -LiteralPath $item.Destination -Algorithm SHA256 -ErrorAction Stop).Hash -ine [string]$item.Hash) { throw 'restored hash mismatch' }
+                } catch { [void]$rollbackErrors.Add($item.Destination) }
+            }
+            if ($rollbackErrors.Count -gt 0) {
+                Write-Log ("FFBPlugin ownership: manifest write and deletion rollback failed; evidence remains in backup(s): {0}" -f ($rollbackErrors -join ', '))
+                throw 'FFBPlugin ownership manifest update failed and deletion rollback was incomplete.'
+            }
+            Write-Log 'FFBPlugin ownership: manifest write failed; deletion was rolled back from verified backup.'
+            throw 'FFBPlugin ownership manifest update failed; deletion was rolled back.'
+        }
+    }
+    return $removed
+}
+
 function Invoke-FFBPluginSetup {
     param([string]$UserProfilesDir, [string]$CacheDir, [string[]]$NativeEnabledCodes = @())
 
@@ -6451,6 +8574,7 @@ function Invoke-FFBPluginSetup {
     if ($null -eq $NativeEnabledCodes) { $NativeEnabledCodes = @() }
     $nativeEnabledSet = [System.Collections.Generic.HashSet[string]]::new(
         [string[]]$NativeEnabledCodes, [System.StringComparer]::OrdinalIgnoreCase)
+    $ownershipEntries = @(Read-FFBPluginOwnership -CacheDir $CacheDir)
 
     Write-Host ""
     Write-Host "  Fetching the current supported-games list..." -ForegroundColor DarkGray
@@ -6458,7 +8582,7 @@ function Invoke-FFBPluginSetup {
     if ($gameMap.Count -eq 0) {
         Write-Host "  Could not reach GitHub to fetch the FFB plugin game list -- try again later." -ForegroundColor Red
         Write-Log "FFBPlugin setup: aborted -- game map fetch failed."
-        return
+        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 1; Reason = 'GAME_MAP_FAILED' }
     }
     Write-Host ("  {0} game(s) in the upstream table." -f $gameMap.Count) -ForegroundColor DarkGray
 
@@ -6466,7 +8590,7 @@ function Invoke-FFBPluginSetup {
     if (-not (Invoke-FFBPluginDownload -destDir $CacheDir)) {
         Write-Host "  Could not download the FFB plugin DLLs -- try again later." -ForegroundColor Red
         Write-Log "FFBPlugin setup: aborted -- DLL download failed."
-        return
+        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 1; Reason = 'DLL_DOWNLOAD_FAILED' }
     }
     $srcDll32 = Join-Path $CacheDir "MAME32.dll"
     $srcDll64 = Join-Path $CacheDir "MAME64.dll"
@@ -6476,7 +8600,7 @@ function Invoke-FFBPluginSetup {
     if ($profiles.Count -eq 0) {
         Write-Host "  No registered games found." -ForegroundColor Yellow
         Write-Log "FFBPlugin setup: aborted -- no registered profiles."
-        return
+        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'NO_REGISTERED_PROFILES' }
     }
 
     # Pre-normalise the FFB table once for fuzzy matching.
@@ -6553,8 +8677,7 @@ function Invoke-FFBPluginSetup {
         $pf = $c.Profile
         try {
             if ($nativeEnabledSet.Contains($pf.BaseName) -and $useNativeForOverlaps) {
-                # Native FFB Blaster covers this game and the user chose to
-                # keep native for overlaps -- don't deploy the third-party DLL.
+                [void](Remove-FFBPluginOwnedDeployment -CacheDir $CacheDir -ProfileCode $pf.BaseName)
                 $skippedNative++
                 continue
             }
@@ -6588,6 +8711,18 @@ function Invoke-FFBPluginSetup {
             }
 
             Copy-Item -LiteralPath $srcDll -Destination $destPath -ErrorAction Stop
+            $sourceHash = (Get-FileHash -LiteralPath $srcDll -Algorithm SHA256 -ErrorAction Stop).Hash
+            $deployedHash = (Get-FileHash -LiteralPath $destPath -Algorithm SHA256 -ErrorAction Stop).Hash
+            $ownershipEntries = @($ownershipEntries | Where-Object { $_.Destination -ine $destPath })
+            $ownershipEntries += [pscustomobject]@{
+                ProfileCode = $pf.BaseName
+                GameRoot = $exeDir
+                Destination = $destPath
+                SourceSha256 = $sourceHash
+                DeployedSha256 = $deployedHash
+                CreatedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            }
+            Write-FFBPluginOwnership -CacheDir $CacheDir -Entries $ownershipEntries
             Write-Host ("    OK    {0}  [{1}]  (matched '{2}', {3})" -f $pf.BaseName, $destDll, $c.Match.Name, [Math]::Round($c.Score,2)) -ForegroundColor Green
             Write-Log "FFBPlugin: deployed $destDll to $exeDir (matched '$($c.Match.Name)', score $([Math]::Round($c.Score,2)))"
             $deployed++
@@ -6616,11 +8751,12 @@ function Invoke-FFBPluginSetup {
         Write-Host ("  Errors             : {0}  -- see TeknoParrot-Manager.log for details" -f $errors) -ForegroundColor Red
     }
     Write-Host ""
-    Write-Host "  To uninstall: delete the deployed DLL file from the game's folder." -ForegroundColor DarkCyan
+    Write-Host "  TPM records its own deployed hook files so a later native choice can remove only verified ownership." -ForegroundColor DarkCyan
+    Write-Host "  TPM does not remove an unowned FFB hook automatically." -ForegroundColor DarkCyan
     Write-Log ("FFBPlugin setup: deployed={0} skippedNative={1} skippedCollision={2} skippedNoMatch={3} skippedDllMissing={4} errors={5}" -f $deployed, $skippedNative, $skippedCollision, $skippedNoMatch, $skippedDllMissing, $errors)
+    return [pscustomobject]@{ Succeeded = ($errors -eq 0); Deployed = $deployed; Errors = $errors; Reason = if ($errors) { 'DEPLOYMENT_ERRORS' } else { $null } }
 }
 
-# Discovers the FFB Blaster Bool field name by scanning TeknoParrot
 # GameProfiles at runtime -- never hardcoded. Shared (read-only) between
 # Invoke-FFBBlasterSetup and the Library health check's coverage report.
 function Get-FFBBlasterFieldNames {
@@ -7001,14 +9137,13 @@ function Invoke-FFBBlasterSetup {
 # BepInEx is a third-party Unity plugin/modding framework. Several
 # TeknoParrot games require a community BepInEx plugin to get controls or
 # fixes working (the live-fetched example list is shown in the menu --
-# see Get-BepInExRequiredGames below). This script never installs BepInEx
-# fresh into a game -- only checks/updates EXISTING installs, and only
-# the x64 stable line (never x86, never a pre-release), per explicit
-# project policy.
+# see Get-BepInExRequiredGames below). Mode 9 offers a user-approved install,
+# update, or reset using stable x64 or x86 packages; it never applies the
+# framework silently to every game.
 
 # Fetches the live list of games known to require BepInEx, for display
-# only (menu text, not used to gate any actual logic -- the update check
-# itself only ever acts on games that already have BepInEx installed).
+# only (menu text, not used to gate actual logic -- the setup flow can offer
+# install/update/reset for selected games after safety checks).
 # Source: eggmansworld.github.io/TeknoParrot, the structured replacement
 # for the old plain-text gamenotes doc, already used for the v0.88-v0.90
 # compatibility tables. That site has no clean "requires BepInEx" tag, so
@@ -7061,6 +9196,7 @@ function Get-EggmanGameData {
 # shape identical to Get-EggmanDatRelease/Get-FFBPluginGameMap.
 # Returns [pscustomobject]@{ Version; DownloadUrl; FileName } or $null.
 function Get-BepInExLatestRelease {
+    param([ValidateSet('x64','x86')][string]$Architecture = 'x64')
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         try {
             $apiUri = 'https://api.github.com/repos/BepInEx/BepInEx/releases'
@@ -7072,10 +9208,10 @@ function Get-BepInExLatestRelease {
             # pre-releases -- no tag-name parsing needed.
             $stable = @($releases | Where-Object { -not $_.prerelease }) | Select-Object -First 1
             if (-not $stable) { return $null }
-            $x64Asset = @($stable.assets | Where-Object { $_.name -like 'BepInEx_win_x64_*.zip' }) | Select-Object -First 1
-            if (-not $x64Asset) { return $null }
+            $asset = @($stable.assets | Where-Object { $_.name -like ('BepInEx_win_{0}_*.zip' -f $Architecture) }) | Select-Object -First 1
+            if (-not $asset) { return $null }
             $parsedUri = $null
-            $urlOk = [System.Uri]::TryCreate($x64Asset.browser_download_url, [System.UriKind]::Absolute, [ref]$parsedUri) -and
+            $urlOk = [System.Uri]::TryCreate($asset.browser_download_url, [System.UriKind]::Absolute, [ref]$parsedUri) -and
                      $parsedUri.Scheme -eq 'https' -and
                      $parsedUri.Host -eq 'github.com' -and
                      [string]::IsNullOrEmpty($parsedUri.UserInfo) -and
@@ -7094,9 +9230,9 @@ function Get-BepInExLatestRelease {
             # Invoke-TpmDownload -ExpectedSha256 instead of trusting size
             # alone; $null (not present/not sha256) means the caller falls
             # back to size-only validation, same as before this field existed.
-            $expectedSha256 = Get-TpmSha256FromDigestField -Digest $x64Asset.digest
+            $expectedSha256 = Get-TpmSha256FromDigestField -Digest $asset.digest
             return [pscustomobject]@{
-                Version = $verStr; DownloadUrl = $x64Asset.browser_download_url; FileName = $x64Asset.name; SizeBytes = [int64]$x64Asset.size; ExpectedSha256 = $expectedSha256
+                Version = $verStr; Architecture = $Architecture; DownloadUrl = $asset.browser_download_url; FileName = $asset.name; SizeBytes = [int64]$asset.size; ExpectedSha256 = $expectedSha256
             }
         } catch {
             $status = 0
@@ -7361,6 +9497,46 @@ function Test-BepInExGameRootSafe {
     return (Test-BepInExNoReparsePath -Root $ApprovedRoot -Path $GameRoot)
 }
 
+function Write-BepInExUnsafeRootGuidance {
+    param(
+        [Parameter(Mandatory)][string]$GameCode,
+        [string]$ApprovedRoot = '',
+        [string]$Reason = 'the game folder is outside the approved root or contains a reparse-backed path'
+    )
+    Write-Host ("  TPM could not safely update BepInEx for {0}." -f $GameCode) -ForegroundColor Red
+    Write-Host '  The game folder is not a normal folder inside your chosen Games folder.' -ForegroundColor Yellow
+    Write-Host ("  Check this game's path in TeknoParrot and move or correct it so it is inside: {0}" -f $ApprovedRoot) -ForegroundColor Yellow
+    Write-Host '  TPM did not download or change anything. Then choose the BepInEx update again.' -ForegroundColor Yellow
+    Write-Log "BepInEx update check: blocked on unsafe game root for $GameCode. Technical reason: $Reason. Action required: verify the game is inside the approved non-reparse root."
+}
+
+function Get-BepInExInstallationHealth {
+    param([Parameter(Mandatory)][string]$ExeDir)
+    $result = [ordered]@{ Installed = $false; Complete = $false; Version = $null; Architecture = $null; Reason = 'Not installed' }
+    $dllPath = Join-Path $ExeDir 'BepInEx\core\BepInEx.dll'
+    if (-not (Test-Path -LiteralPath $dllPath -PathType Leaf)) { return [pscustomobject]$result }
+    $result.Installed = $true
+    $result.Version = Get-BepInExInstalledVersion -ExeDir $ExeDir
+    $result.Architecture = Get-BepInExInstalledArch -ExeDir $ExeDir
+    $required = @('BepInEx\core\BepInEx.dll', 'winhttp.dll', 'doorstop_config.ini', '.doorstop_version')
+    foreach ($relative in $required) {
+        $path = Join-Path $ExeDir $relative
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            $result.Reason = 'Missing ' + $relative
+            return [pscustomobject]$result
+        }
+        if (-not (Test-BepInExNoReparsePath -Root $ExeDir -Path $path)) {
+            $result.Reason = 'Unsafe ' + $relative
+            return [pscustomobject]$result
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$result.Version)) { $result.Reason = 'BepInEx version is unreadable'; return [pscustomobject]$result }
+    if ($result.Architecture -notin @('x64','x86')) { $result.Reason = 'BepInEx native bootstrap architecture is unreadable'; return [pscustomobject]$result }
+    $result.Complete = $true
+    $result.Reason = 'Complete'
+    return [pscustomobject]$result
+}
+
 function Test-BepInExExistingTreeSafe {
     param([Parameter(Mandatory)][string]$GameRoot)
     foreach ($name in @('BepInEx', 'doorstop_config.ini', 'winhttp.dll', '.doorstop_version', 'changelog.txt')) {
@@ -7529,6 +9705,26 @@ function New-BepInExUpdateBackup {
     } catch { throw "BepInEx backup failed; evidence remains at '$backupPath'." }
 }
 
+function Remove-BepInExFixedTree {
+    param([Parameter(Mandatory)][string]$GameRoot)
+    foreach ($name in @('BepInEx', 'doorstop_config.ini', 'winhttp.dll', '.doorstop_version', 'changelog.txt')) {
+        $path = Join-Path $GameRoot $name
+        if (Test-Path -LiteralPath $path) {
+            if (-not (Test-BepInExNoReparsePath -Root $GameRoot -Path $path)) { throw "BepInEx reset refused unsafe path: $name" }
+            Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
+        }
+    }
+}
+
+function Restore-BepInExUpdateBackup {
+    param([Parameter(Mandatory)][string]$GameRoot, [Parameter(Mandatory)][string]$BackupPath)
+    foreach ($item in @(Get-ChildItem -LiteralPath $BackupPath -Force -ErrorAction Stop)) {
+        $destination = Join-Path $GameRoot $item.Name
+        Copy-Item -LiteralPath $item.FullName -Destination $destination -Recurse -Force -ErrorAction Stop
+        if (-not (Test-BepInExBackupEntry -Source $item.FullName -Backup $destination)) { throw "BepInEx reset rollback verification failed: $($item.Name)" }
+    }
+}
+
 function Invoke-TpmTransactionalTreePromote {
     param(
         [Parameter(Mandatory)][string]$StagingDir,
@@ -7633,8 +9829,8 @@ function Invoke-TpmTransactionalTreePromote {
 }
 
 # Validates every inspectable game root before release query, prompt, download,
-# backup, extraction, or promotion. Only an existing BepInEx installation is
-# eligible for update, and only stable x64 releases are considered.
+# backup, extraction, or promotion. Fresh installs and existing updates use
+# stable x64 or x86 releases selected from the executable/installed shim.
 function Invoke-BepInExUpdateCheck {
     param([string]$UserProfilesDir, [string]$CacheDir, [string]$ApprovedGamesRoot = '')
     if ([string]::IsNullOrWhiteSpace($ApprovedGamesRoot)) { $ApprovedGamesRoot = $gamesInstallFolder }
@@ -7654,62 +9850,122 @@ function Invoke-BepInExUpdateCheck {
             $exeDir = [System.IO.Path]::GetDirectoryName($gamePath)
             if (-not (Test-BepInExGameRootSafe -GameRoot $exeDir -ApprovedRoot $ApprovedGamesRoot) -or -not (Test-BepInExNoReparsePath -Root $exeDir -Path $gamePath)) {
                 $safetyBlocked = $true
-                Write-Host ("  Refusing BepInEx updates because game root is not safe: {0}" -f $pf.BaseName) -ForegroundColor Red
-                Write-Log "BepInEx update check: blocked on unsafe game root for $($pf.BaseName)."
+                Write-BepInExUnsafeRootGuidance -GameCode $pf.BaseName -ApprovedRoot $ApprovedGamesRoot
                 continue
             }
-            [void]$candidates.Add([pscustomobject]@{ Code = $pf.BaseName; ExeDir = $exeDir })
-        } catch { $safetyBlocked = $true; Write-Log "BepInEx update check: root validation failed for $($pf.BaseName)." }
+            [void]$candidates.Add([pscustomobject]@{ Code = $pf.BaseName; ExeDir = $exeDir; GamePath = $gamePath })
+        } catch {
+            $safetyBlocked = $true
+            Write-BepInExUnsafeRootGuidance -GameCode $pf.BaseName -ApprovedRoot $ApprovedGamesRoot -Reason 'the game root could not be verified'
+        }
     }
-    if ($safetyBlocked) { Write-Host '  No BepInEx download or write was attempted.' -ForegroundColor Yellow; return }
+    if ($safetyBlocked) { Write-Host '  No BepInEx download or write was attempted.' -ForegroundColor Yellow; return [pscustomobject]@{ Succeeded = $false; Reason = 'UNSAFE_ROOT' } }
 
     Write-Host ''
-    Write-Host '  Checking the latest stable BepInEx release...' -ForegroundColor DarkGray
-    $latest = Get-BepInExLatestRelease
-    if (-not $latest) { Write-Host '  Could not reach GitHub to check the latest BepInEx version -- try again later.' -ForegroundColor Red; Write-Log 'BepInEx update check: aborted -- release query failed.'; return }
-    Write-Host ("  Latest stable: {0}" -f $latest.Version) -ForegroundColor DarkGray
+    Write-Host '  Checking stable BepInEx releases for the detected game architectures...' -ForegroundColor DarkGray
+    $latestByArch = @{}
+    $requiredArchitectures = @($candidates | ForEach-Object {
+        $installedArch = Get-BepInExInstalledArch -ExeDir $_.ExeDir
+        $exeArch = $null
+        try { $exeArch = Get-ExeArchitecture -ExePath $_.GamePath } catch {}
+        if ($installedArch -in @('x64','x86') -and ($exeArch -notin @('x64','x86') -or $exeArch -eq $installedArch)) { $installedArch } else { $exeArch }
+    } | Where-Object { $_ -in @('x64','x86') } | Sort-Object -Unique)
+    foreach ($architecture in $requiredArchitectures) {
+        $latestByArch[$architecture] = Get-BepInExLatestRelease -Architecture $architecture
+        if (-not $latestByArch[$architecture]) {
+            Write-Host ("  TPM could not reach GitHub for the stable {0} BepInEx release. Nothing was changed." -f $architecture) -ForegroundColor Red
+            Write-Host '  Check the connection and choose this setup again; TPM will retry the automatic download.' -ForegroundColor Yellow
+            Write-Log "BepInEx update check: release query failed for $architecture."
+            return [pscustomobject]@{ Succeeded = $false; Reason = 'RELEASE_QUERY_FAILED' }
+        }
+    }
     $outdated = New-Object System.Collections.Generic.List[object]
-    $upToDate = 0; $skippedX86 = 0; $errors = 0
+    $upToDate = 0; $errors = 0
     foreach ($candidate in $candidates) {
         try {
-            $installedVer = Get-BepInExInstalledVersion -ExeDir $candidate.ExeDir
-            if (-not $installedVer) { continue }
-            $arch = Get-BepInExInstalledArch -ExeDir $candidate.ExeDir
-            if ($arch -eq 'x86') { $skippedX86++; continue }
-            if ($arch -ne 'x64') { continue }
+            $health = Get-BepInExInstallationHealth -ExeDir $candidate.ExeDir
+            $installedVer = $health.Version
+            $installedArch = $health.Architecture
+            $exeArch = $null
+            try { $exeArch = Get-ExeArchitecture -ExePath $candidate.GamePath } catch {}
+            if ($exeArch -in @('x64','x86') -and $installedArch -in @('x64','x86') -and $installedArch -ne $exeArch) {
+                [void]$outdated.Add([pscustomobject]@{ Code = $candidate.Code; ExeDir = $candidate.ExeDir; GamePath = $candidate.GamePath; Installed = $installedVer; Architecture = $exeArch; Latest = $latestByArch[$exeArch]; RepairRequired = $true })
+                continue
+            }
+            $arch = if ($installedArch -in @('x64','x86')) { $installedArch } else { $exeArch }
+            $latest = $latestByArch[$arch]
+            if (-not $latest) { continue }
+            if (-not $health.Installed) {
+                [void]$outdated.Add([pscustomobject]@{ Code = $candidate.Code; ExeDir = $candidate.ExeDir; GamePath = $candidate.GamePath; Installed = 'Not installed'; Architecture = $arch; Latest = $latest; RepairRequired = $false })
+                continue
+            }
+            if (-not $health.Complete) {
+                [void]$outdated.Add([pscustomobject]@{ Code = $candidate.Code; ExeDir = $candidate.ExeDir; GamePath = $candidate.GamePath; Installed = 'Broken (' + $health.Reason + ')'; Architecture = $arch; Latest = $latest; RepairRequired = $true })
+                continue
+            }
             $instParsed = $null; $latestParsed = $null
             if (-not [version]::TryParse($installedVer, [ref]$instParsed) -or -not [version]::TryParse($latest.Version, [ref]$latestParsed)) { continue }
-            if ($instParsed -lt $latestParsed) { [void]$outdated.Add([pscustomobject]@{ Code = $candidate.Code; ExeDir = $candidate.ExeDir; Installed = $installedVer }) } else { $upToDate++ }
+            if ($instParsed -lt $latestParsed) {
+                [void]$outdated.Add([pscustomobject]@{ Code = $candidate.Code; ExeDir = $candidate.ExeDir; GamePath = $candidate.GamePath; Installed = $installedVer; Architecture = $arch; Latest = $latest })
+            } else { $upToDate++ }
         } catch { $errors++; Write-Log "BepInEx update check: inspection failed for $($candidate.Code)." }
     }
-    if ($outdated.Count -eq 0) { Write-Host ("  Up to date: {0} game(s)" -f $upToDate) -ForegroundColor Green; if($skippedX86 -gt 0){Write-Host ("  32-bit skipped: {0}" -f $skippedX86) -ForegroundColor DarkGray}; if($errors -gt 0){Write-Host ("  Errors: {0}" -f $errors) -ForegroundColor Red}; return }
-    Write-Host ("  {0} game(s) have an outdated BepInEx install:" -f $outdated.Count) -ForegroundColor Cyan
-    foreach ($o in @($outdated | Sort-Object Code)) { Write-Host ("    - {0}: {1} -> {2}" -f $o.Code, $o.Installed, $latest.Version) -ForegroundColor DarkGray }
-    if ((Read-HostSafe ("  Update BepInEx to {0} for these {1} game(s)? (Y/N)" -f $latest.Version, $outdated.Count)).ToUpper() -ne 'Y') { Write-Log 'BepInEx update check: user declined the batched update.'; return }
+    if ($outdated.Count -eq 0) {
+        Write-Host ("  Up to date: {0} game(s)" -f $upToDate) -ForegroundColor Green
+        if ($errors -gt 0) { Write-Host ("  Errors: {0}" -f $errors) -ForegroundColor Red }
+        return [pscustomobject]@{ Succeeded = ($errors -eq 0); Reason = if ($errors) { 'INSPECTION_FAILED' } else { $null } }
+    }
+    Write-Host ("  {0} game(s) need BepInEx installation or update:" -f $outdated.Count) -ForegroundColor Cyan
+    foreach ($o in @($outdated | Sort-Object Code)) { Write-Host ("    - {0}: {1} -> {2} ({3})" -f $o.Code, $o.Installed, $o.Latest.Version, $o.Architecture) -ForegroundColor DarkGray }
+    $repairChoice = (Read-HostSafe ("  Y Install/update, R repair-reset then install, or N cancel for these {0} game(s)? (Y/R/N)" -f $outdated.Count)).ToUpper()
+    if ($repairChoice -notin @('Y','R')) {
+        Write-Log 'BepInEx update check: user declined installation/update/reset.'
+        return [pscustomobject]@{ Succeeded = $false; Reason = 'DECLINED' }
+    }
+    $repairReset = ($repairChoice -eq 'R')
     [void][System.IO.Directory]::CreateDirectory($CacheDir)
-    $safeFileName = [System.IO.Path]::GetFileName($latest.FileName)
-    $zipPath = Join-Path $CacheDir $safeFileName
-    if ([string]::IsNullOrWhiteSpace($safeFileName) -or -not (Test-PathInside $zipPath $CacheDir)) { Write-Log 'BepInEx update check: blocked on unsafe release filename.'; return }
-    if (-not (Invoke-TpmDownload -DownloadUrl $latest.DownloadUrl -DestinationPath $zipPath -ExpectedBytes $latest.SizeBytes -Label 'BepInEx' -Version $latest.Version -ExpectedSha256 $latest.ExpectedSha256)) { Write-Log 'BepInEx update check: download or digest verification failed.'; return }
+    $zipByArch = @{}
+    foreach ($architecture in @($outdated | Select-Object -ExpandProperty Architecture -Unique)) {
+        $latest = $latestByArch[$architecture]
+        $safeFileName = [System.IO.Path]::GetFileName($latest.FileName)
+        $zipPath = Join-Path $CacheDir $safeFileName
+        if ([string]::IsNullOrWhiteSpace($safeFileName) -or -not (Test-PathInside $zipPath $CacheDir)) {
+            Write-Log "BepInEx update check: blocked on unsafe $architecture release filename."
+            return [pscustomobject]@{ Succeeded = $false; Reason = 'UNSAFE_RELEASE_FILENAME' }
+        }
+        if (-not (Invoke-TpmDownload -DownloadUrl $latest.DownloadUrl -DestinationPath $zipPath -ExpectedBytes $latest.SizeBytes -Label 'BepInEx' -Version $latest.Version -ExpectedSha256 $latest.ExpectedSha256)) {
+            Write-Host ("  BepInEx {0}-bit download failed. Nothing was changed." -f ($(if ($architecture -eq 'x86') { '32' } else { '64' }))) -ForegroundColor Red
+            Write-Host '  Choose this setup again to retry automatically, or cancel without changing the game.' -ForegroundColor Yellow
+            Write-Log "BepInEx update check: download or digest verification failed for $architecture."
+            return [pscustomobject]@{ Succeeded = $false; Reason = 'DOWNLOAD_FAILED' }
+        }
+        $zipByArch[$architecture] = $zipPath
+    }
     $updated = 0; $updatedWithCleanupFailure = 0; $updateErrors = 0; $cleanupErrors = 0
     foreach ($o in @($outdated | Sort-Object Code)) {
         $stagingDir = $null; $preserveStaging = $false; $promotionSucceeded = $false; $cleanupFailureRecorded = $false
         $backupPath = $null
+        $resetApplied = $false
         try {
             if (-not (Test-BepInExGameRootSafe -GameRoot $o.ExeDir -ApprovedRoot $ApprovedGamesRoot) -or -not (Test-BepInExExistingTreeSafe -GameRoot $o.ExeDir)) { throw 'BepInEx final root safety check failed.' }
             $stagingDir = New-TpmStagingDirectory -Label 'BepInEx'
-            Expand-ZipFileSafe -ZipPath $zipPath -DestDir $stagingDir -GameName $o.Code
+            $zipPathForGame = $zipByArch[$o.Architecture]
+            Expand-ZipFileSafe -ZipPath $zipPathForGame -DestDir $stagingDir -GameName $o.Code
             $relativeFiles = @(Get-BepInExStagedFiles -StagingDir $stagingDir -DestDir $o.ExeDir)
             if (-not (Test-BepInExGameRootSafe -GameRoot $o.ExeDir -ApprovedRoot $ApprovedGamesRoot) -or -not (Test-BepInExExistingTreeSafe -GameRoot $o.ExeDir)) { throw 'BepInEx root changed before backup.' }
             $backupPath = New-BepInExUpdateBackup -GameRoot $o.ExeDir
             if (-not (Test-BepInExGameRootSafe -GameRoot $o.ExeDir -ApprovedRoot $ApprovedGamesRoot) -or -not (Test-BepInExExistingTreeSafe -GameRoot $o.ExeDir)) { throw 'BepInEx root failed after backup.' }
-            $validation = { return ((Get-BepInExInstalledVersion -ExeDir $o.ExeDir) -eq $latest.Version) }
+            if ($repairReset) {
+                $resetApplied = $true
+                Remove-BepInExFixedTree -GameRoot $o.ExeDir
+            }
+            $validation = { return ((Get-BepInExInstalledVersion -ExeDir $o.ExeDir) -eq $o.Latest.Version) }
             [void](Invoke-TpmTransactionalTreePromote -StagingDir $stagingDir -DestDir $o.ExeDir -RelativeFiles $relativeFiles -ValidationScript $validation)
             $promotionSucceeded = $true
             [void](Remove-BepInExStagingDirectory -StagingDir $stagingDir)
             $stagingDir = $null
-            Write-Host ("    OK    {0}  ({1} -> {2})" -f $o.Code, $o.Installed, $latest.Version) -ForegroundColor Green
-            Write-Log "BepInEx: updated $($o.Code) from $($o.Installed) to $($latest.Version); backup=$backupPath"
+            Write-Host ("    OK    {0}  ({1} -> {2})" -f $o.Code, $o.Installed, $o.Latest.Version) -ForegroundColor Green
+            Write-Log "BepInEx: updated $($o.Code) from $($o.Installed) to $($o.Latest.Version); backup=$backupPath"
             $updated++
         } catch {
             if ($promotionSucceeded -and $_.Exception.Message -match '^TPM BEPINEX STAGING CLEANUP (FAILED|REFUSED)') {
@@ -7721,6 +9977,10 @@ function Invoke-BepInExUpdateCheck {
                 $updatedWithCleanupFailure++
                 $cleanupErrors++
             } else {
+                if ($resetApplied -and -not $promotionSucceeded -and $backupPath) {
+                    try { Restore-BepInExUpdateBackup -GameRoot $o.ExeDir -BackupPath $backupPath }
+                    catch { Write-Host ("    ERROR {0} -- repair reset rollback failed; backup remains at {1}" -f $o.Code, $backupPath) -ForegroundColor Red; Write-Log "BepInEx reset rollback failed for $($o.Code); backup=$backupPath"; $updateErrors++ }
+                }
                 if ($_.Exception.Message -match 'ROLLBACK FAILED|CLEANUP FAILED') { $preserveStaging = $true }
                 Write-Host ("    ERROR {0} -- update blocked" -f $o.Code) -ForegroundColor Red
                 Write-Log "BepInEx: update blocked for $($o.Code); evidence and backups were preserved where available."
@@ -7745,11 +10005,10 @@ function Invoke-BepInExUpdateCheck {
     }
     Write-Host ("  Updated cleanly: {0} game(s)" -f $updated) -ForegroundColor Green
     if ($updatedWithCleanupFailure -gt 0) { Write-Host ("  Updated with cleanup failure: {0} -- ACTION REQUIRED" -f $updatedWithCleanupFailure) -ForegroundColor Yellow }
-    if ($upToDate -gt 0) { Write-Host ("  Up to date: {0}" -f $upToDate) -ForegroundColor DarkGray }
-    if ($skippedX86 -gt 0) { Write-Host ("  32-bit skipped: {0}" -f $skippedX86) -ForegroundColor DarkGray }
     if ($updateErrors -gt 0) { Write-Host ("  Errors: {0} -- see log for details" -f $updateErrors) -ForegroundColor Red }
     if ($cleanupErrors -gt 0) { Write-Host ("  Cleanup failures: {0} -- see log for residue path(s)" -f $cleanupErrors) -ForegroundColor Yellow }
     Write-Log ("BepInEx update check: updatedCleanly={0} updatedWithCleanupFailure={1} errors={2} cleanupFailures={3}" -f $updated, $updatedWithCleanupFailure, $updateErrors, $cleanupErrors)
+    return [pscustomobject]@{ Succeeded = ($updateErrors -eq 0 -and $cleanupErrors -eq 0 -and $updatedWithCleanupFailure -eq 0); Updated = $updated; Errors = $updateErrors + $cleanupErrors }
 }
 # =============================================================================
 # CHECK FOR UPDATES -- manual, backup-first self-update for this script
@@ -7888,15 +10147,16 @@ function Get-ManagerUpdateReleaseSummary {
 function Assert-ManagerUpdateTargetWritable {
     param([Parameter(Mandatory)][string]$Path)
 
-    # Move-Item -Force silently clears the ReadOnly attribute and replaces
-    # the file anyway rather than failing (verified empirically while
-    # building the standalone updater tool). A read-only target is never
-    # overridden here -- the update is refused with an actionable message.
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return }
-    $item = Get-Item -LiteralPath $Path -Force
+    # An explicitly approved update may clear only the target script's
+    # ReadOnly attribute. The installer transaction records that fact and
+    # reapplies it to the replacement or original file in finally.
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
     if ($item.IsReadOnly) {
-        throw "'$Path' is marked read-only. Remove the read-only attribute (e.g. Set-ItemProperty -LiteralPath '$Path' -Name IsReadOnly -Value `$false) and re-run the update; it will not be silently cleared."
+        Set-ItemProperty -LiteralPath $Path -Name IsReadOnly -Value $false -ErrorAction Stop
+        return $true
     }
+    return $false
 }
 
 function New-ManagerUpdateBackup {
@@ -7991,15 +10251,18 @@ function Invoke-ManagerUpdateInstall {
         [Parameter(Mandatory)][string]$ScriptPath,
         [Parameter(Mandatory)][pscustomobject]$Release
     )
-
+    $readOnlyCleared = $false
     try {
-        Assert-ManagerUpdateTargetWritable -Path $ScriptPath
+        $readOnlyCleared = [bool](Assert-ManagerUpdateTargetWritable -Path $ScriptPath)
     } catch {
         Write-Host ""
-        Write-Host "  ERROR: $_" -ForegroundColor Red
-        Write-Host "  Backup created: No" -ForegroundColor Yellow
-        Write-Log "CheckForUpdates: read-only check failed -- $_"
+        Write-Host "  TPM could not prepare the update because the script file could not be changed safely." -ForegroundColor Red
+        Write-Host "  No backup or download was attempted." -ForegroundColor Yellow
+        Write-Log "CheckForUpdates: writable-target preparation failed."
         return $false
+    }
+    if ($readOnlyCleared) {
+        Write-Host '  TPM temporarily cleared the file protection for this approved update and will restore it after this attempt.' -ForegroundColor DarkGray
     }
 
     $downloadedZipPath = $null
@@ -8064,6 +10327,14 @@ function Invoke-ManagerUpdateInstall {
         }
         if ($extractedScriptPath -and (Test-Path -LiteralPath $extractedScriptPath -PathType Leaf)) {
             Remove-Item -LiteralPath $extractedScriptPath -Force -ErrorAction SilentlyContinue
+        }
+        if ($readOnlyCleared -and (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) {
+            try {
+                Set-ItemProperty -LiteralPath $ScriptPath -Name IsReadOnly -Value $true -ErrorAction Stop
+            } catch {
+                Write-Host '  WARNING: TPM could not restore the original read-only protection on the manager script.' -ForegroundColor Red
+                Write-Log 'CheckForUpdates: read-only attribute restoration failed.'
+            }
         }
     }
 }
@@ -8965,6 +11236,88 @@ function Register-Games {
 
     $unmatched = @($allExeFolders.Keys | Where-Object { -not $matchedFolders.ContainsKey($_) } | Sort-Object)
     return [pscustomobject]@{ Registered = $registered; Already = $already; Ambiguous = $ambiguous; Unmatched = $unmatched }
+}
+
+function Invoke-ManualRegistrationChoices {
+    param(
+        [Parameter(Mandatory)][hashtable]$ManualRegData,
+        [Parameter(Mandatory)][string]$UserProfilesDir,
+        [Parameter(Mandatory)][string]$GameProfilesDir,
+        [Parameter(Mandatory)][string]$InstallFolder,
+        [Parameter(Mandatory)]$Result,
+        [bool]$DryRun = $false
+    )
+
+    foreach ($folderName in @($ManualRegData.Keys | Sort-Object)) {
+        $info = $ManualRegData[$folderName]
+        $candidates = @($info.Profiles -split ',' | ForEach-Object { $_.Trim() } |
+            Where-Object { $_ -match '^[\w]+$' })
+        if ($candidates.Count -eq 0) { continue }
+
+        Write-Host ""
+        Write-Host ("  Ambiguous registration: {0}" -f $folderName) -ForegroundColor Yellow
+        Write-Host ("  Executable: {0}" -f $info.Exe) -ForegroundColor DarkGray
+        for ($i = 0; $i -lt $candidates.Count; $i++) {
+            Write-Host ("    {0}) {1}" -f ($i + 1), $candidates[$i]) -ForegroundColor DarkCyan
+        }
+        $choice = (Read-HostSafe "  Pick a profile number, or press Enter to leave unresolved").Trim()
+        if ([string]::IsNullOrWhiteSpace($choice)) { continue }
+        if ($choice -notmatch '^\d+$' -or [int]$choice -lt 1 -or [int]$choice -gt $candidates.Count) {
+            Write-Host "  Invalid choice -- no profile was changed." -ForegroundColor Yellow
+            continue
+        }
+
+        $code = $candidates[[int]$choice - 1]
+        $templatePath = Join-Path $GameProfilesDir ($code + ".xml")
+        $userProfilePath = Join-Path $UserProfilesDir ($code + ".xml")
+        if (-not (Test-Path -LiteralPath $templatePath -PathType Leaf)) {
+            Write-Host ("  Profile template is unavailable: {0}" -f $code) -ForegroundColor Red
+            Write-Log "Manual registration: template unavailable for $code; folder=$folderName"
+            continue
+        }
+        if (Test-Path -LiteralPath $userProfilePath -PathType Leaf) {
+            Write-Host ("  UserProfile {0}.xml already exists -- it was not overwritten." -f $code) -ForegroundColor Yellow
+            Write-Log "Manual registration: existing UserProfile preserved for $code; folder=$folderName"
+            continue
+        }
+        try {
+            $installRoot = [System.IO.Path]::GetFullPath($InstallFolder).TrimEnd('\')
+            $exeFullPath = [System.IO.Path]::GetFullPath($info.Exe)
+        } catch {
+            Write-Host "  The selected executable path could not be validated -- no profile was written." -ForegroundColor Red
+            Write-Log "Manual registration: path validation failed for $code -- $_"
+            continue
+        }
+        if (-not $exeFullPath.StartsWith($installRoot + '\', [System.StringComparison]::OrdinalIgnoreCase) -or
+            -not (Test-Path -LiteralPath $exeFullPath -PathType Leaf) -or
+            -not (Test-BepInExNoReparsePath -Root $installRoot -Path $exeFullPath)) {
+            Write-Host "  The selected executable is outside the game staging folder or no longer present -- no profile was written." -ForegroundColor Red
+            Write-Log "Manual registration: executable rejected for $code; path=$exeFullPath"
+            continue
+        }
+        try {
+            $template = Read-Xml $templatePath
+            $gamePath = $template.GameProfile.SelectSingleNode("GamePath")
+            if ($null -eq $gamePath) {
+                $gamePath = $template.CreateElement("GamePath")
+                [void]$template.GameProfile.PrependChild($gamePath)
+            }
+            $gamePath.InnerText = $info.Exe
+            [void](Set-SecondaryExecutablePath $template $info.Exe)
+            Save-XmlMaybe $template $userProfilePath $DryRun
+            [void]$Result.Registered.Add([pscustomobject]@{
+                Code = $code
+                GamePath = $info.Exe
+                ManualChoice = $true
+            })
+            [void]$ManualRegData.Remove($folderName)
+            Write-Host ("  Registered {0} -> {1}" -f $code, $info.Exe) -ForegroundColor Green
+            Write-Log "Manual registration: selected $code for $folderName -> $($info.Exe)"
+        } catch {
+            Write-Host ("  FAILED to register {0}: {1}" -f $code, $_) -ForegroundColor Red
+            Write-Log "Manual registration FAILED for $code -- $_"
+        }
+    }
 }
 
 # Checks every UserProfile's GamePath and re-points broken ones (empty path or
@@ -10544,12 +12897,24 @@ function Invoke-RestoreBackup {
     # TeknoParrot must be fully closed before files can be safely replaced.
     # If it is running, profile files it has open cannot be deleted, which
     # would leave the UserProfiles directory in a mixed old/new state.
-    $tpProcess = Get-Process -Name "TeknoParrotUi" -ErrorAction SilentlyContinue
-    if ($tpProcess) {
-        Write-Host "  ERROR: TeknoParrotUi.exe is currently running." -ForegroundColor Red
-        Write-Host "  Close TeknoParrot completely and then re-run the restore." -ForegroundColor Yellow
-        Write-Log "Restore: aborted -- TeknoParrotUi.exe is running."
+    if (-not (Wait-TpmForProcessClose -ProcessNames @('TeknoParrotUi') -FriendlyName 'TeknoParrot')) {
+        Write-Host '  Restore cancelled. Your selected backup is unchanged.' -ForegroundColor Yellow
+        Write-Log 'Restore: cancelled while waiting for TeknoParrot to close.'
         return
+    }
+
+    # Snapshot the live profiles before deletion so a partial copy failure can
+    # roll the live directory back without touching historical FullBackup data.
+    $rollbackDir = Join-Path ([System.IO.Path]::GetTempPath()) ('tpm-restore-rollback-' + [guid]::NewGuid().ToString('N'))
+    try {
+        [void][System.IO.Directory]::CreateDirectory($rollbackDir)
+        Get-ChildItem -LiteralPath $userProfilesDir | Where-Object { $_.Name -ne 'FullBackup' } |
+            Copy-Item -Destination $rollbackDir -Recurse -Force -ErrorAction Stop
+    } catch {
+        Write-Host '  ERROR: Could not snapshot current profiles before restore; nothing was changed.' -ForegroundColor Red
+        Write-Log "Restore: rollback snapshot failed -- $_"
+        if (Test-Path -LiteralPath $rollbackDir) { Remove-Item -LiteralPath $rollbackDir -Recurse -Force -ErrorAction SilentlyContinue }
+        return [pscustomobject]@{ Succeeded = $false; Name = $selected.Name; ErrorCount = 1; RollbackSucceeded = $false }
     }
 
     # Remove current UserProfiles content, keeping FullBackup intact.
@@ -10564,10 +12929,18 @@ function Invoke-RestoreBackup {
     Get-ChildItem -LiteralPath $userProfilesDir | Where-Object { $_.Name -ne "FullBackup" } |
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable deleteErrs
     if ($deleteErrs.Count -gt 0) {
-        Write-Host ("  ERROR: {0} file(s) could not be removed." -f $deleteErrs.Count) -ForegroundColor Red
-        Write-Host "  Make sure TeknoParrot is fully closed and no files are open, then try again." -ForegroundColor Yellow
+        Write-Host ("  ERROR: {0} file(s) could not be removed. The restore was not completed." -f $deleteErrs.Count) -ForegroundColor Red
+        Write-Host "  TPM will keep the selected backup and attempt to restore the previous live profiles." -ForegroundColor Yellow
         Write-Log "Restore: FAILED -- $($deleteErrs.Count) file(s) could not be removed."
-        return
+        try {
+            Get-ChildItem -LiteralPath $userProfilesDir | Where-Object { $_.Name -ne 'FullBackup' } | Remove-Item -Recurse -Force -ErrorAction Stop
+            Get-ChildItem -LiteralPath $rollbackDir | Copy-Item -Destination $userProfilesDir -Recurse -Force -ErrorAction Stop
+            Remove-Item -LiteralPath $rollbackDir -Recurse -Force -ErrorAction SilentlyContinue
+            return [pscustomobject]@{ Succeeded = $false; Name = $selected.Name; ErrorCount = $deleteErrs.Count; RollbackSucceeded = $true }
+        } catch {
+            Write-Log "Restore: rollback after delete failure failed -- $_"
+            return [pscustomobject]@{ Succeeded = $false; Name = $selected.Name; ErrorCount = $deleteErrs.Count; RollbackSucceeded = $false; RollbackPath = $rollbackDir }
+        }
     }
 
     # Copy backup into UserProfiles. Copy-Item receives FileInfo/DirectoryInfo
@@ -10582,12 +12955,23 @@ function Invoke-RestoreBackup {
     $errCount = $restoreErrs.Count
 
     if ($errCount -gt 0) {
-        Write-Host ("  WARNING: {0} file(s) could not be restored -- check TeknoParrot-Manager.log." -f $errCount) -ForegroundColor Yellow
-        Write-Log "Restore: completed with $errCount error(s) from $($selected.Name)"
-    } else {
-        Write-Host "  Restore complete." -ForegroundColor Green
-        Write-Log "Restore: completed from $($selected.Name), no errors."
+        Write-Host ("  ERROR: {0} file(s) could not be restored. The restore was not completed." -f $errCount) -ForegroundColor Red
+        Write-Host '  TPM will attempt to restore the previous live profiles from its rollback snapshot.' -ForegroundColor Yellow
+        Write-Log "Restore: failed with $errCount error(s) from $($selected.Name)"
+        try {
+            Get-ChildItem -LiteralPath $userProfilesDir | Where-Object { $_.Name -ne 'FullBackup' } | Remove-Item -Recurse -Force -ErrorAction Stop
+            Get-ChildItem -LiteralPath $rollbackDir | Copy-Item -Destination $userProfilesDir -Recurse -Force -ErrorAction Stop
+            Remove-Item -LiteralPath $rollbackDir -Recurse -Force -ErrorAction SilentlyContinue
+            return [pscustomobject]@{ Succeeded = $false; Name = $selected.Name; ErrorCount = $errCount; RollbackSucceeded = $true }
+        } catch {
+            Write-Log "Restore: rollback after copy failure failed -- $_"
+            return [pscustomobject]@{ Succeeded = $false; Name = $selected.Name; ErrorCount = $errCount; RollbackSucceeded = $false; RollbackPath = $rollbackDir }
+        }
     }
+    Remove-Item -LiteralPath $rollbackDir -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host "  Restore complete." -ForegroundColor Green
+    Write-Log "Restore: completed from $($selected.Name), no errors."
+    return [pscustomobject]@{ Succeeded = $true; Name = $selected.Name; ErrorCount = 0; RollbackSucceeded = $true }
 }
 
 # =============================================================================
@@ -10779,10 +13163,9 @@ function Invoke-RestoreLaunchBoxBackup {
         return
     }
 
-    if (Test-LaunchBoxRunning) {
-        Write-Host "  ERROR: LaunchBox or BigBox is currently running." -ForegroundColor Red
-        Write-Host "  Close it completely and then re-run the restore." -ForegroundColor Yellow
-        Write-Log "LaunchBox restore: aborted -- LaunchBox/BigBox is running."
+    if (-not (Wait-TpmForProcessClose -ProcessNames @('LaunchBox','BigBox') -FriendlyName 'LaunchBox')) {
+        Write-Host '  Restore cancelled. Your selected backup is unchanged.' -ForegroundColor Yellow
+        Write-Log 'LaunchBox restore: cancelled while waiting for LaunchBox to close.'
         return
     }
 
@@ -10802,12 +13185,13 @@ function Invoke-RestoreLaunchBoxBackup {
     }
 
     if ($errCount -gt 0) {
-        Write-Host ("  WARNING: {0} file(s) could not be restored -- check TeknoParrot-Manager.log." -f $errCount) -ForegroundColor Yellow
-        Write-Log "LaunchBox restore: completed with $errCount error(s) from $($selected.Name)"
-    } else {
-        Write-Host "  Restore complete." -ForegroundColor Green
-        Write-Log "LaunchBox restore: completed from $($selected.Name), no errors."
+        Write-Host ("  ERROR: {0} file(s) could not be restored. The restore was not completed." -f $errCount) -ForegroundColor Red
+        Write-Log "LaunchBox restore: failed with $errCount error(s) from $($selected.Name)"
+        return [pscustomobject]@{ Succeeded = $false; Name = $selected.Name; ErrorCount = $errCount }
     }
+    Write-Host "  Restore complete." -ForegroundColor Green
+    Write-Log "LaunchBox restore: completed from $($selected.Name), no errors."
+    return [pscustomobject]@{ Succeeded = $true; Name = $selected.Name; ErrorCount = 0 }
 }
 
 # Finds the existing TeknoParrot <Emulator> entry in Emulators.xml by
@@ -11015,10 +13399,12 @@ function Invoke-RestorePostgresBackup {
     }
 
     if ($errCount -gt 0) {
-        Write-Host ("  WARNING: {0} database(s) could not be restored -- check TeknoParrot-Manager.log." -f $errCount) -ForegroundColor Yellow
-    } else {
-        Write-Host "  Restore complete." -ForegroundColor Green
+        Write-Host ("  ERROR: {0} database(s) could not be restored. The restore was not completed." -f $errCount) -ForegroundColor Red
+        Write-Log "Postgres restore: failed with $errCount database error(s)."
+        return [pscustomobject]@{ Succeeded = $false; ErrorCount = $errCount }
     }
+    Write-Host "  Restore complete." -ForegroundColor Green
+    return [pscustomobject]@{ Succeeded = $true; ErrorCount = 0 }
 }
 
 # never get a duplicate), or creates one using field values verified
@@ -12645,6 +15031,8 @@ function Get-ControlReadinessActionItems {
     return @($items)
 }
 
+$script:ActiveTpmWorkflowStatus = $null
+$script:TpmWorkflowRendering = $false
 Write-Log "Script started (v$ScriptVersion$(if ($Unattended) { ' [Unattended]' }))."
 
 # =============================================================================
@@ -12652,6 +15040,7 @@ Write-Log "Script started (v$ScriptVersion$(if ($Unattended) { ' [Unattended]' }
 # =============================================================================
 
 $configPath         = Join-Path $PSScriptRoot "TeknoParrot-Manager.config.json"
+$isPostgresRecoveryResume = -not [string]::IsNullOrWhiteSpace($PostgresRecoveryResumeToken)
 $tpRoot             = $null
 $mode               = $null   # "AutoSync", "RegisterOnly", "CrosshairSetup", "ReShadeSetup", "DgVoodoo2Setup", "GpuFixSetup", "FFBSetup", "BepInExUpdate", "Restore", or "HealthCheck"
 $pendingApplyMode   = $null   # set when a preview run's "Apply for real now?" prompt is answered Y -- tells the
@@ -12695,7 +15084,7 @@ if ($Unattended -and -not (Test-Path -LiteralPath $configPath)) {
 # responsible for. Rephrases the existing ownership disclaimer already
 # shipped in TeknoParrot-Manager-README.txt ("WHAT IT DOES NOT DO") rather
 # than introducing new legal wording.
-if (-not (Test-Path -LiteralPath $configPath) -and -not $Unattended) {
+if (-not (Test-Path -LiteralPath $configPath) -and -not $Unattended -and -not $isPostgresRecoveryResume) {
     Write-Host ""
     Write-Host "============================================" -ForegroundColor Cyan
     Write-Host "   Welcome to TeknoParrot Manager" -ForegroundColor Cyan
@@ -12757,7 +15146,11 @@ if (Test-Path -LiteralPath $configPath) {
             Write-Host "  Check for updates on startup: Disabled"
         }
         Write-Host ""
-        if ($Unattended) {
+        if ($isPostgresRecoveryResume) {
+            Write-Host "  [Automatic repair] Continuing the PostgreSQL setup." -ForegroundColor DarkCyan
+            Write-Log "Postgres recovery: auto-accepted saved settings for the protected resume."
+            $use = "Y"
+        } elseif ($Unattended) {
             Write-Host "  [Unattended] Using saved settings." -ForegroundColor DarkCyan
             Write-Log "Unattended: auto-accepted saved settings."
             $use = "Y"
@@ -12825,6 +15218,10 @@ if (Test-Path -LiteralPath $configPath) {
                     Write-Log "WARNING: Unattended: config UnattendedMode '$requestedUnattendedMode' is not a recognized mode -- ignoring, menu loop will report the missing-mode error."
                 }
             }
+            if ($isPostgresRecoveryResume) {
+                $pendingApplyMode = 'PostgresSetup'
+                Write-Log 'Postgres recovery: protected resume will enter option 12 automatically.'
+            }
             $configAccepted = $true
         }
         Write-Host ""
@@ -12841,7 +15238,7 @@ if (Test-Path -LiteralPath $configPath) {
 # interactive Y/N/V prompt there, and Unattended is meant to be fast and
 # non-interactive. See Invoke-StartupUpdateCheck's own comment for how it
 # stays from meaningfully delaying startup when GitHub is unreachable.
-if ($checkForUpdatesOnStartup -and -not $Unattended) {
+if ($checkForUpdatesOnStartup -and -not $Unattended -and -not $isPostgresRecoveryResume) {
     $scriptSelfPathForStartupCheck = Join-Path $PSScriptRoot "TeknoParrot-Manager.ps1"
     $startupUpdateInstalled = Invoke-StartupUpdateCheck -ScriptPath $scriptSelfPathForStartupCheck
     if ($startupUpdateInstalled) {
@@ -12965,11 +15362,23 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
     $raw = ''   # shared path variable for B and the download-fallback path
 
     if ($datChoice -eq 'D') {
-        Write-Host "  Checking Eggman's Repository for the latest dat release..." -ForegroundColor Cyan
-        $rel = Get-EggmanDatRelease
+        # The default destination is deterministic even before the release
+        # filename is known. Validate a probe path first so no release query
+        # or download starts before a safe destination has been selected.
+        $firstRunProbe = if ($eggmanDefaultRoot) { Join-Path $eggmanDefaultRoot 'Eggman-destination-probe.zip' } else { $null }
+        $firstRunDestination = Get-EggmanDatPathRole -Path $firstRunProbe -RequestedRole Destination -ProgramDirectory $PSScriptRoot
+        if ($firstRunDestination.Safe) {
+            Write-Host "  Checking Eggman's Repository for the latest dat release..." -ForegroundColor Cyan
+            $rel = Get-EggmanDatRelease
+        } else {
+            Write-Host "  TPM could not validate its default Eggman data folder before the download." -ForegroundColor Yellow
+            Write-Host "  Action: choose B and select a canonical, non-reparse ZIP or dat file outside protected roots." -ForegroundColor Yellow
+            Write-Log "EggmanDat: first-run download skipped before release query because the default destination was unsafe: $($firstRunDestination.Reason)"
+            $rel = $null
+        }
         if ($null -ne $rel) {
             Write-Host ("  Found: {0}  ({1} MB)" -f $rel.FileName, $rel.SizeMB) -ForegroundColor Cyan
-            $savedPath = Invoke-EggmanDatDownloadInteractive $rel
+            $savedPath = Invoke-EggmanDatDownloadInteractive $rel -ProgramDirectory $PSScriptRoot
             if ($savedPath) {
                 $eggmanDatZip = $savedPath
                 $eggmanDatActionThisRun = 'Downloaded'
@@ -12980,6 +15389,10 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
                 $raw      = Read-PathWithBrowse "  Path" -Mode File -FileFilter "ZIP/dat files (*.zip;*.dat)|*.zip;*.dat|All files (*.*)|*.*"
                 $datChoice = 'BROWSE'
             }
+        } elseif (-not $firstRunDestination.Safe) {
+            Write-Host "  Automatic download was not started. Enter an existing ZIP or .dat file, or press Enter to skip:" -ForegroundColor Yellow
+            $raw      = Read-PathWithBrowse "  Path" -Mode File -FileFilter "ZIP/dat files (*.zip;*.dat)|*.zip;*.dat|All files (*.*)|*.*"
+            $datChoice = 'BROWSE'
         } else {
             Write-Host "  Could not reach Eggman's Repository. Enter path to an existing ZIP or .dat file, or press Enter to skip:" -ForegroundColor Yellow
             $raw      = Read-PathWithBrowse "  Path" -Mode File -FileFilter "ZIP/dat files (*.zip;*.dat)|*.zip;*.dat|All files (*.*)|*.*"
@@ -13079,33 +15492,49 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
     Write-Host ("  Currently using  : {0}  ({1} MB)" -f (Split-Path -Leaf $eggmanDatZip), $currentSizeMBPreCheck) -ForegroundColor Cyan
     $checkUpdate = (Read-HostSafe "Check for a newer Eggman dat release? (Y/N)").ToUpper()
     if ($checkUpdate -eq 'Y') {
-        Write-Host "  Checking GitHub for latest Eggman dat release..." -ForegroundColor Cyan
-        $rel = Get-EggmanDatRelease
-        if ($null -eq $rel) {
-            Write-Host "  Could not reach GitHub -- keeping your current dat file." -ForegroundColor Yellow
+        # Select and revalidate the destination before contacting GitHub.
+        # Reading the current DAT for comparison is allowed; writing a
+        # replacement under TeknoParrot is not.
+        $updateDestination = Resolve-EggmanDatUpdateDestination -CurrentPath $eggmanDatZip -ProgramDirectory $PSScriptRoot
+        if ($updateDestination.Status -notin @('Ready','FallbackSelected')) {
+            Write-Log "EggmanDat: update skipped before network work because destination status was $($updateDestination.Status)."
         } else {
-            $upToDate = Test-EggmanDatUpToDate -LocalDatPath $eggmanDatZip -RemoteSizeBytes $rel.SizeBytes
-            $currentSizeMB = if ($null -ne $upToDate.LocalSizeBytes) { [Math]::Round($upToDate.LocalSizeBytes / 1MB, 1) } else { 0 }
-            Write-Host ("  Latest available : {0}  ({1} MB)" -f $rel.FileName, $rel.SizeMB) -ForegroundColor Cyan
-            Write-Host ("  Currently using  : {0}  ({1} MB)" -f (Split-Path -Leaf $eggmanDatZip), $currentSizeMB) -ForegroundColor Cyan
-            if ($upToDate.Status -eq 'Current') {
-                Write-Host "  Your dat file is already current -- no download needed." -ForegroundColor Green
-                Write-Log "EggmanDat: local file already matches the latest release size -- skipped prompt."
+            Write-Host "  Checking GitHub for latest Eggman dat release..." -ForegroundColor Cyan
+            $rel = Get-EggmanDatRelease
+            if ($null -eq $rel) {
+                Write-Host "  Could not reach GitHub -- keeping your current dat file." -ForegroundColor Yellow
             } else {
-                if ($upToDate.Status -eq 'Unknown') {
-                    Write-Host "  Could not determine your current dat file's size -- offering the download anyway." -ForegroundColor Yellow
-                }
-                $doUpdate = (Read-HostSafe "  Download and switch to the latest release? (Y/N)").ToUpper()
-                if ($doUpdate -eq 'Y') {
-                    $savedPath = Invoke-EggmanDatDownloadInteractive $rel -AllowBrowse -PreferredSavePath $eggmanDatZip
-                    if ($savedPath) {
-                        $eggmanDatZip = $savedPath
-                        $eggmanDatActionThisRun = 'Updated'
-                        Write-Host "  Updated: $savedPath" -ForegroundColor Green
-                        Write-Log "EggmanDat: updated to $savedPath"
-                        [void](Save-Config)
+                $upToDate = Test-EggmanDatUpToDate -LocalDatPath $eggmanDatZip -RemoteSizeBytes $rel.SizeBytes
+                $currentSizeMB = if ($null -ne $upToDate.LocalSizeBytes) { [Math]::Round($upToDate.LocalSizeBytes / 1MB, 1) } else { 0 }
+                Write-Host ("  Latest available : {0}  ({1} MB)" -f $rel.FileName, $rel.SizeMB) -ForegroundColor Cyan
+                Write-Host ("  Currently using  : {0}  ({1} MB)" -f (Split-Path -Leaf $eggmanDatZip), $currentSizeMB) -ForegroundColor Cyan
+                if ($upToDate.Status -eq 'Current') {
+                    Write-Host "  Your dat file is already current -- no download needed." -ForegroundColor Green
+                    Write-Log "EggmanDat: local file already matches the latest release size -- skipped prompt."
+                } else {
+                    if ($upToDate.Status -eq 'Unknown') {
+                        Write-Host "  Could not determine your current dat file's size -- offering the download anyway." -ForegroundColor Yellow
+                    }
+                    $doUpdate = if ($updateDestination.Status -eq 'FallbackSelected') {
+                        'Y'
                     } else {
-                        Write-Host "  Download failed -- keeping your current dat file." -ForegroundColor Yellow
+                        (Read-HostSafe "  Download and switch to the latest release? (Y/N)").ToUpper()
+                    }
+                    if ($doUpdate -eq 'Y') {
+                        $preferredUpdatePath = $eggmanDatZip
+                        if ($updateDestination.Status -eq 'FallbackSelected') {
+                            $preferredUpdatePath = Join-Path $updateDestination.DestinationFolder ([System.IO.Path]::GetFileName($rel.FileName))
+                        }
+                        $savedPath = Invoke-EggmanDatDownloadInteractive $rel -AllowBrowse -PreferredSavePath $preferredUpdatePath -ProgramDirectory $PSScriptRoot
+                        if ($savedPath) {
+                            $eggmanDatZip = $savedPath
+                            $eggmanDatActionThisRun = 'Updated'
+                            Write-Host "  Updated: $savedPath" -ForegroundColor Green
+                            Write-Log "EggmanDat: updated to $savedPath"
+                            [void](Save-Config)
+                        } else {
+                            Write-Host "  Download failed -- keeping your current dat file." -ForegroundColor Yellow
+                        }
                     }
                 }
             }
@@ -13132,11 +15561,13 @@ if (-not (Test-Path -LiteralPath $tpExe)) {
 }
 
 $gameProfilesDir = Join-Path $tpRoot "GameProfiles"
-if (-not (Test-Path -LiteralPath $gameProfilesDir)) {
-    Write-Host ""; Write-Host "ERROR: GameProfiles folder not found in: $tpRoot" -ForegroundColor Red
-    Write-Host "This folder ships with TeknoParrot and is required to register games." -ForegroundColor Yellow
-    Write-Host "Run TeknoParrotUi.exe once and let it complete its updates, then retry." -ForegroundColor Yellow
-    Write-Log "ERROR: GameProfiles folder not found."; exit 1
+if ((-not $Unattended -or ($pendingApplyMode -and $pendingApplyMode -ne 'HealthCheck')) -and
+    -not (Ensure-TeknoParrotProfilesReady -TeknoParrotRoot $tpRoot -TeknoParrotExe $tpExe)) {
+    Write-Host ''
+    Write-Host '  TPM stopped before game registration because TeknoParrot profiles are not ready.' -ForegroundColor Red
+    Write-Log 'ERROR: TeknoParrot profiles were not ready after the guided first-run check.'
+    [void](Read-HostSafe '  Press Enter to close TPM')
+    exit 1
 }
 
 $userProfilesDir = Join-Path $tpRoot "UserProfiles"
@@ -13415,7 +15846,7 @@ if ($datIndex.Count -gt 0 -and $gameProfilesDir) {
 # of four layout tiers depending on the current console window's width
 # (Get-ConsoleLayoutTier is width-driven; see that function for the exact
 # breakpoints): Compact (<90 columns), Standard (90-119), Professional
-# (120-149), or Ultra (>=150). Every tier shows the same 14 numbered options
+# (120-149), or Ultra (>=150). Every tier shows the same 15 numbered options
 # with the same meaning; only how much description text is shown, and
 # whether the layout is one or two columns, changes. Numbering, the
 # switch-statement dispatch, and all mode behavior are completely unaffected
@@ -13455,7 +15886,7 @@ function Get-MainMenuSections {
             [pscustomobject]@{ Number = 6; Mode = 'DgVoodoo2Setup'; Label = 'dgVoodoo2 setup'; ShortDesc = 'Fix old DX8/DirectDraw/Glide crashes.'; FullDesc = @('Fix old DX8, DirectDraw, and Glide games that', 'crash or show black screens.') }
             [pscustomobject]@{ Number = 7; Mode = 'GpuFixSetup'; Label = 'GPU fix setup'; ShortDesc = 'Auto-detect GPU, apply matching compatibility fix.'; FullDesc = @('Auto-detect your GPU (AMD / NVIDIA / Intel) and', 'apply the matching compatibility fix to every', 'registered game that has one.') }
             [pscustomobject]@{ Number = 8; Mode = 'FFBSetup'; Label = 'Force feedback (FFB) setup'; ShortDesc = 'Wheel/stick rumble and force feedback.'; FullDesc = @('Wheel/stick rumble and force feedback.', "Covers TeknoParrot's built-in FFB Blaster (needs a", 'paid membership) and a free third-party plugin.') }
-            [pscustomobject]@{ Number = 9; Mode = 'BepInExUpdate'; Label = 'BepInEx update check'; ShortDesc = 'Update BepInEx (a game modding framework), if already installed.'; FullDesc = @('BepInEx is a modding framework some TeknoParrot', 'games use for extra features and fixes. Checks', 'games that already have it installed against the', 'latest stable release and offers to update', '(64-bit only). Never installs it fresh.') }
+            [pscustomobject]@{ Number = 9; Mode = 'BepInExUpdate'; Label = 'BepInEx setup'; ShortDesc = 'Install, update, or repair the BepInEx modding framework.'; FullDesc = @('BepInEx is a modding framework some TeknoParrot', 'games use for extra features and fixes. TPM offers', 'a user-approved install, update, or repair-reset', 'using the stable package matching each game.', 'Unsafe roots and failed downloads make no changes.') }
         )
     }
     [pscustomobject]@{
@@ -13470,7 +15901,8 @@ function Get-MainMenuSections {
         Header = 'Application'
         Items  = @(
             [pscustomobject]@{ Number = 13; Mode = 'CheckForUpdates'; Label = 'Check for Updates'; ShortDesc = 'Manual, backup-first check against the latest GitHub release.'; FullDesc = @('Manual, backup-first check against the latest', 'GitHub release. Nothing is downloaded or changed', 'without your explicit confirmation.') }
-            [pscustomobject]@{ Number = 14; Mode = 'Exit'; Label = 'Exit'; ShortDesc = ''; FullDesc = @() }
+            [pscustomobject]@{ Number = 14; Mode = 'Support'; Label = 'Create Support Package'; ShortDesc = 'Gather safe logs and reports into one ZIP.'; FullDesc = @('Gather safe TPM, TeknoParrot, and game diagnostics', 'into one ZIP you can send when asking for help.') }
+            [pscustomobject]@{ Number = 15; Mode = 'Exit'; Label = 'Exit'; ShortDesc = ''; FullDesc = @() }
         )
     }
     )
@@ -14030,9 +16462,8 @@ function Get-MainMenuBodyRows {
         # Deliberately placed BEFORE the section rows, not after: when a
         # short viewport forces Limit-MainMenuBodyRowsToBudget to trim body
         # rows, it keeps the TAIL of this list so the last real menu item
-        # (14, Exit) always survives. A purely decorative hint like this one
+        # (15, Exit) always survives. A purely decorative hint like this one
         # must never out-rank that -- if it were last, it would win the
-        # tail-preservation over Exit itself at a short height.
         [void]$rows.Add((New-ConsoleRenderRow -Text '  Type ? for descriptions.' -Color 'DarkGray'))
         [void]$rows.Add((New-ConsoleRenderRow))
     }
@@ -14057,12 +16488,11 @@ function Limit-MainMenuRowsToViewport {
 
 # Truncates BODY rows only (never the banner or footer) so a short-height
 # console still shows the footer's Quit/Help controls and the menu's last
-# item (14, Exit) without the terminal itself having to scroll -- issue #104
+# item (15, Exit) without the terminal itself having to scroll -- issue #104
 # RC3 correction. Earlier behavior flattened banner+body+footer into one
 # list and kept only the first N rows, which chopped off the Application
-# section (Check for Updates, Exit) and the entire footer at short heights;
-# a pre-existing test even asserted that as intentional ("small viewport...
-# leaves prompt space" previously asserted `Should -Not -Match 'Exit'`).
+# section (Check for Updates, Create Support Package, Exit) and the entire
+# footer at short heights;
 # Trimming BODY from the front (keeping its tail) instead means whatever
 # gets dropped first is the earliest sections (Library Management, Game
 # Enhancements), not the footer or the last item -- the controls a user
@@ -14079,7 +16509,7 @@ function Limit-MainMenuBodyRowsToBudget {
     return @($BodyRows | Select-Object -Last $BodyBudget)
 }
 
-# Single-line banner ("TeknoParrot Manager v1.0 RC7") with no frame and no
+# Single-line banner ("TeknoParrot Manager v1.0 RC8") with no frame and no
 # blank separator, for viewports too short for the normal framed banner (5-6
 # rows) to leave any room for menu content -- see
 # Get-MainMenuEmergencyCompactRows.
@@ -14145,12 +16575,12 @@ function Get-MainMenuFlowPackedItemRows {
     return @(Get-PaddedMainMenuRows -Rows $rows -Padding $Geometry.LeftPadding)
 }
 
-# Emergency compact presentation for viewports too short to show all 14
+# Emergency compact presentation for viewports too short to show all 15
 # options one per row even with every description stripped (issue #104
 # RC3-B correction: at the minimum supported 60x10 terminal, the normal
-# Compact-tier body -- 4 section headers + 14 item rows, 18 rows minimum --
+# Compact-tier body -- 4 section headers + 15 item rows, 19 rows minimum --
 # cannot fit even after Limit-MainMenuBodyRowsToBudget trims it, so the
-# normal path was silently dropping every item including 14 (Exit), leaving
+# normal path was silently dropping every item including 15 (Exit), leaving
 # only the banner and footer visible. Reserving space for Exit and the
 # footer is not enough on its own if the fix only protects those two and
 # still drops every OTHER option -- this replaces the normal framed banner
@@ -14165,7 +16595,7 @@ function Get-MainMenuEmergencyCompactRows {
         # flow-packed item rows don't all fit alongside the minimal banner
         # and footer, those two are still NEVER dropped; item rows are
         # trimmed from the front instead (keeping the tail), so the last
-        # item line -- which always ends with "14) Exit" -- and the footer
+        # item line -- which always ends with "15) Exit" -- and the footer
         # both survive even at a viewport too short to show every earlier
         # option. Below the documented 60x10 minimum this can still mean an
         # early option's line goes missing, but the footer and Exit itself
@@ -14510,10 +16940,11 @@ while ($true) {
         "11"    { $mode = "Restore"        }
         "12"    { $mode = "PostgresSetup"  }
         "13"    { $mode = "CheckForUpdates" }
-        "14"    { break }
+        "14"    { $mode = "Support" }
+        "15"    { break }
         default { Write-Host "  Invalid choice. Enter 1-$menuMaxNumber." -ForegroundColor Yellow; continue }
     }
-    if ($modeChoice -eq "14") { break }
+    if ($modeChoice -eq "15") { break }
     }
 
     if ($mode -eq "Restore") {
@@ -14526,23 +16957,52 @@ while ($true) {
         Write-Host "     direct LaunchBox integration)"
         Write-Host "  3) Postgres database backup (only relevant if you've used the"
         Write-Host "     Postgres setup mode)"
+        $restoreStatus = New-TpmWorkflowStatusContext -WorkflowKey 'Restore' -Title 'Restore from backup' -Steps @(
+            @{ Id = 'select'; Label = 'Select the backup to restore' }
+            @{ Id = 'preflight'; Label = 'Check that the target application is closed' }
+            @{ Id = 'apply'; Label = 'Restore the selected files or databases' }
+            @{ Id = 'verify'; Label = 'Verify the restored result' }
+        )
+        [void](Start-TpmWorkflowStatus -Context $restoreStatus)
+        [void](Start-TpmWorkflowStep -Context $restoreStatus -StepId 'select' -Activity 'Choosing a backup')
+        [void](Set-TpmWorkflowWaiting -Context $restoreStatus -Message 'Choose which backup to restore.' -UserAction 'Enter a backup choice')
         $restoreChoice = (Read-HostSafe "  Enter 1-3")
+        $restoreResult = $null
         if ($restoreChoice -eq "2") {
             if (-not $lbRoot) {
                 Write-Host "  No LaunchBox root is configured yet -- nothing to restore." -ForegroundColor Yellow
             } else {
-                Invoke-RestoreLaunchBoxBackup -lbRoot $lbRoot
+                $restoreResult = Invoke-RestoreLaunchBoxBackup -lbRoot $lbRoot
             }
         } elseif ($restoreChoice -eq "3") {
-            Invoke-RestorePostgresBackup
+            $restoreResult = Invoke-RestorePostgresBackup
         } else {
-            Invoke-RestoreBackup -userProfilesDir $userProfilesDir
+            $restoreResult = Invoke-RestoreBackup -userProfilesDir $userProfilesDir
+        }
+        [void](Resume-TpmWorkflowStatus -Context $restoreStatus)
+        if ($restoreResult -and $restoreResult.Succeeded) {
+            [void](Complete-TpmWorkflowStep -Context $restoreStatus -Outcome Fixed -Summary 'Restore finished and was verified')
+            [void](Complete-TpmWorkflowStatus -Context $restoreStatus -Summary 'Restore complete')
+            [void](Close-TpmWorkflowStatus -Context $restoreStatus)
+        } else {
+            [void](Set-TpmWorkflowFailure -Context $restoreStatus -FailureId 'restore-failed' -Message 'The restore was not completed.' -DataSafety 'TPM did not claim a complete restore.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
         }
         Write-Host ""
         Write-Host "============================================" -ForegroundColor Cyan
-        Write-Host "   Done." -ForegroundColor Cyan
+        if ($restoreResult -and $restoreResult.Succeeded) {
+            Write-Host "   Restore finished and was verified." -ForegroundColor Green
+            Write-Log "Restore complete."
+        } else {
+            Write-Host "   Restore was not completed. The message above is the authoritative result." -ForegroundColor Yellow
+            Write-Log "Restore did not complete; no success was claimed."
+        }
         Write-Host "============================================" -ForegroundColor Cyan
-        Write-Log "Restore complete."
+        if (-not ($restoreResult -and $restoreResult.Succeeded)) {
+            [void](Read-HostSafe '  Press Enter to acknowledge the restore result')
+            [void](Acknowledge-TpmWorkflowFailure -Context $restoreStatus -FailureId 'restore-failed')
+            [void](Stop-TpmWorkflowStatus -Context $restoreStatus -Reason 'Restore stopped')
+            [void](Close-TpmWorkflowStatus -Context $restoreStatus)
+        }
         [void](Read-Host "  Press Enter to return to menu")
         continue
     }
@@ -14552,7 +17012,18 @@ while ($true) {
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         Write-Host " Library Health Check (read-only)" -ForegroundColor Cyan
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        $healthStatus = New-TpmWorkflowStatusContext -WorkflowKey 'HealthCheck' -Title 'Library health check' -Steps @(
+            @{ Id = 'inspect'; Label = 'Check library and emulator state' }
+            @{ Id = 'report'; Label = 'Show action items and controls readiness' }
+        )
+        [void](Start-TpmWorkflowStatus -Context $healthStatus)
+        [void](Start-TpmWorkflowStep -Context $healthStatus -StepId 'inspect' -Activity 'Checking library and emulator state')
         Invoke-LibraryHealthCheck -UserProfilesDir $userProfilesDir -LogPath $logPath -TpRoot $tpRoot
+        [void](Complete-TpmWorkflowStep -Context $healthStatus -Summary 'Library checks finished' -NextStep 'Review the action items')
+        [void](Start-TpmWorkflowStep -Context $healthStatus -StepId 'report' -Activity 'Preparing the read-only summary')
+        [void](Complete-TpmWorkflowStep -Context $healthStatus -Summary 'Read-only action items prepared')
+        [void](Complete-TpmWorkflowStatus -Context $healthStatus -Summary 'Health check finished')
+        [void](Close-TpmWorkflowStatus -Context $healthStatus)
         Write-Host ""
         Write-Host "============================================" -ForegroundColor Cyan
         Write-Host "   Done." -ForegroundColor Cyan
@@ -14577,6 +17048,30 @@ while ($true) {
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         Write-Host " PostgreSQL Setup (Incredible Technologies games)" -ForegroundColor Cyan
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        $postgresStatus = New-TpmWorkflowStatusContext -WorkflowKey 'PostgresSetup' -Title 'PostgreSQL setup' -Steps @(
+            @{ Id = 'scan'; Label = 'Check which games need PostgreSQL' }
+            @{ Id = 'backup'; Label = 'Make a verified safety backup' }
+            @{ Id = 'reset'; Label = 'Repair and verify the database password' }
+            @{ Id = 'save'; Label = 'Save the repaired settings' }
+            @{ Id = 'database'; Label = 'Back up existing databases' }
+            @{ Id = 'profiles'; Label = 'Finish game database setup' }
+        )
+        $script:PostgresRecoveryStatus = $postgresStatus
+        [void](Start-TpmWorkflowStatus -Context $postgresStatus)
+        [void](Start-TpmWorkflowStep -Context $postgresStatus -StepId 'scan' -Activity 'Checking registered games')
+        $postgresResumeState = $null
+        if ($isPostgresRecoveryResume) {
+            try {
+                $postgresResumeState = Read-PostgresRecoveryState -StatePath $PostgresRecoveryResumeToken -ExpectedConfigPath $configPath -ExpectedScriptPath (Join-Path $PSScriptRoot 'TeknoParrot-Manager.ps1') -ExpectedTpRoot $tpRoot -ExpectedUserProfilesDir (Join-Path $tpRoot 'UserProfiles')
+            } catch {
+                Exit-PostgresRecoveryResume -Message 'TPM could not safely continue the protected PostgreSQL setup.'
+            }
+            $script:PostgresRecoveryResumeState = $postgresResumeState
+            if (-not (Test-RunningAsAdministrator)) {
+                Exit-PostgresRecoveryResume -Message 'Windows did not give TPM the permission needed to continue the protected PostgreSQL setup.'
+            }
+            Write-Host '  TPM is continuing the PostgreSQL setup automatically.' -ForegroundColor Cyan
+        }
         Write-Host "  Scanning registered games for Postgres requirements..." -ForegroundColor DarkGray
         $pgProfiles = @(Get-ChildItem -LiteralPath $userProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object Name)
         $needCount = 0; $scanBlocked = $false
@@ -14588,67 +17083,173 @@ while ($true) {
         }
         if ($scanBlocked) {
             Write-Host "  Could not safely scan every registered profile -- no changes made." -ForegroundColor Red
+            if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not safely read every registered game profile.' }
+            [void](Set-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-scan' -Message 'TPM could not safely check every registered game.' -DataSafety 'No PostgreSQL or profile changes were made.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+            [void](Read-HostSafe '  Press Enter to acknowledge this message')
+            [void](Acknowledge-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-scan')
+            [void](Stop-TpmWorkflowStatus -Context $postgresStatus -Reason 'PostgreSQL scan stopped')
+            [void](Close-TpmWorkflowStatus -Context $postgresStatus)
             [void](Read-Host "  Press Enter to return to menu")
             continue
         }
+        [void](Complete-TpmWorkflowStep -Context $postgresStatus -Outcome Succeeded -Summary 'Game requirements checked' -NextStep 'Make a verified safety backup')
         if ($needCount -eq 0) {
             Write-Host "  No registered games need PostgreSQL -- nothing to do." -ForegroundColor Green
             Write-Log "Postgres setup: no Postgres-needing games registered."
+            [void](Complete-TpmWorkflowStep -Context $postgresStatus -Outcome Skipped -Summary 'No registered game needs PostgreSQL')
+            [void](Complete-TpmWorkflowStatus -Context $postgresStatus -Summary 'Nothing needed')
+            [void](Close-TpmWorkflowStatus -Context $postgresStatus)
+            if ($isPostgresRecoveryResume) {
+                [void](Remove-PostgresRecoveryState -Path $postgresResumeState.Path -ClaimPath $postgresResumeState.ClaimPath)
+                Write-Host '  The automatic PostgreSQL setup is complete.' -ForegroundColor Green
+                [void](Read-HostSafe '  Press Enter to close TPM')
+                exit 0
+            }
             [void](Read-Host "  Press Enter to return to menu")
             continue
         }
         Write-Host ("  {0} registered game(s) need PostgreSQL." -f $needCount) -ForegroundColor Cyan
         if (-not (Test-PostgresInstalled) -and -not (Test-RunningAsAdministrator)) {
-            Write-Host "  PostgreSQL is not installed yet, and installation requires Administrator privileges." -ForegroundColor Red
-            Write-Log 'Postgres setup: blocked because installation requires Administrator privileges.'
-            [void](Read-Host "  Press Enter to return to menu")
+            Write-PostgresAdministratorGuidance -Operation Install
+            [void](Set-TpmWorkflowWaiting -Context $postgresStatus -Message 'Windows needs permission to install PostgreSQL.' -UserAction 'Approve the Windows permission box')
+            $elevated = Start-PostgresRecoveryAsAdministrator -ConfigPath $configPath -ScriptPath (Join-Path $PSScriptRoot 'TeknoParrot-Manager.ps1') -TpRoot $tpRoot -UserProfilesDir $userProfilesDir -Operation Install
+            if ($elevated) {
+                [void](Complete-TpmWorkflowStep -Context $postgresStatus -Outcome Fixed -Summary 'PostgreSQL installation continued automatically')
+                [void](Complete-TpmWorkflowStatus -Context $postgresStatus -Summary 'PostgreSQL installation finished')
+                [void](Close-TpmWorkflowStatus -Context $postgresStatus)
+                exit 0
+            }
+            Write-Log 'Postgres setup: automatic installation handoff did not complete.'
+            [void](Set-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-install-handoff' -Message 'Windows permission was not granted, so PostgreSQL was not installed.' -DataSafety 'No PostgreSQL or profile changes were made.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+            [void](Read-HostSafe '  Press Enter to acknowledge this message')
+            [void](Acknowledge-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-install-handoff')
+            [void](Stop-TpmWorkflowStatus -Context $postgresStatus -Reason 'PostgreSQL installation stopped')
+            [void](Close-TpmWorkflowStatus -Context $postgresStatus)
+            [void](Read-HostSafe "  Press Enter to return to menu")
             continue
+        }
+        if ($isPostgresRecoveryResume -and $postgresResumeState.Operation -eq 'Recovery' -and -not (Test-PostgresInstalled)) {
+            Exit-PostgresRecoveryResume -Message 'The PostgreSQL installation was not available when TPM resumed the repair.'
+        }
+        $postgresServiceWasRunning = $null
+        $postgresServiceRestoreFailed = $false
+        if (Test-PostgresInstalled) {
+            try {
+                $serviceBeforeRecovery = Get-Service -Name $script:PostgresServiceName -ErrorAction Stop
+                $postgresServiceWasRunning = ([string]$serviceBeforeRecovery.Status -ne 'Stopped')
+            } catch {
+                Write-Host '  TPM could not verify PostgreSQL service state. No changes were made.' -ForegroundColor Red
+                Write-Log 'Postgres setup: service state could not be verified before the transaction.'
+                if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not verify the PostgreSQL service state before continuing.' }
+                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-service-state' -Message 'PostgreSQL service state could not be verified.' -DataSafety 'No PostgreSQL or profile changes were made.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
+                continue
+            }
         }
 
         $superPwPlain = $null
         $recoveryBackup = $null
+        $outPw = $null
         try {
             if (Test-PostgresInstalled) {
                 Write-Host "  PostgreSQL is already installed -- existing data will be preserved." -ForegroundColor Green
-                if ($postgresSuperPasswordEncrypted) {
-                    try {
-                        $secure = ConvertTo-SecureString -String $postgresSuperPasswordEncrypted
-                        $savedPwPlain = ConvertFrom-SecureStringPlain $secure
-                        if (Test-PostgresPassword -SuperPasswordPlain $savedPwPlain) { $superPwPlain = $savedPwPlain }
-                        else { Write-Log 'Postgres setup: saved password did not authenticate; guided recovery is required.' }
-                    } catch { Write-Log 'Postgres setup: saved password could not be verified; guided recovery is required.' }
-                    finally { $savedPwPlain = $null }
-                }
-                if (-not $superPwPlain) {
-                    if (-not (Test-RunningAsAdministrator)) {
-                        Write-Host "  The saved password is not usable. Administrator privileges are required for automatic recovery." -ForegroundColor Red
-                        Write-Log 'Postgres setup: recovery blocked because Administrator privileges were unavailable.'
-                        continue
-                    }
-                    $typedPwPlain = Read-ConfirmedPostgresPassword 'the new PostgreSQL database password TPM should set automatically'
+                if ($isPostgresRecoveryResume -and $postgresResumeState.Operation -eq 'Recovery') {
+                    $typedPwPlain = $postgresResumeState.PasswordPlain
                     if (Test-PostgresPassword -SuperPasswordPlain $typedPwPlain) {
                         $superPwPlain = $typedPwPlain
+                        $postgresSuperPasswordEncrypted = $postgresResumeState.PasswordOriginEncrypted
                     } else {
-                        Write-Host "  TPM is creating a verified recovery backup before resetting the PostgreSQL role password..." -ForegroundColor Cyan
-                        $recoveryBackup = New-PostgresRecoveryBackup -UserProfilesDir $userProfilesDir
-                        if (-not $recoveryBackup.Verified) {
-                            Write-Host ("  Recovery BLOCKED. Evidence: {0}" -f $recoveryBackup.Path) -ForegroundColor Red
-                            Write-Log 'Postgres setup: automatic reset blocked because recovery evidence was not verified.'
-                            continue
+                        $recovery = Invoke-PostgresSelectedPasswordRecovery -UserProfilesDir $userProfilesDir -PasswordPlain $typedPwPlain -StatusContext $postgresStatus
+                        if (-not $recovery.Succeeded) {
+                            if ($recovery.Backup.Path) { Write-Host ("  Recovery BLOCKED. Evidence: {0}" -f $recovery.Backup.Path) -ForegroundColor Red }
+                            Exit-PostgresRecoveryResume -Message ('TPM could not complete the protected PostgreSQL repair ({0}).' -f $recovery.Reason)
                         }
-                        $reset = Reset-PostgresPasswordAutomatically -NewPassword $typedPwPlain -RecoveryBackup $recoveryBackup
-                        if (-not $reset.Succeeded) {
-                            Write-Host ("  Recovery BLOCKED. No profile changes were reported complete. Evidence: {0}" -f $reset.BackupPath) -ForegroundColor Red
-                            Write-Log 'Postgres setup: automatic password reset failed; no recovery-complete result was reported.'
-                            continue
-                        }
+                        $recoveryBackup = $recovery.Backup
                         $superPwPlain = $typedPwPlain
+                        $postgresSuperPasswordEncrypted = $postgresResumeState.PasswordOriginEncrypted
+                    }
+                } else {
+                    if ($postgresSuperPasswordEncrypted) {
+                        try {
+                            $secure = ConvertTo-SecureString -String $postgresSuperPasswordEncrypted
+                            $savedPwPlain = ConvertFrom-SecureStringPlain $secure
+                            if (Test-PostgresPassword -SuperPasswordPlain $savedPwPlain) { $superPwPlain = $savedPwPlain }
+                            else { Write-Log 'Postgres setup: saved password did not authenticate; guided recovery is required.' }
+                        } catch { Write-Log 'Postgres setup: saved password could not be verified; guided recovery is required.' }
+                        finally { $savedPwPlain = $null }
+                    }
+                    if (-not $superPwPlain) {
+                        Write-Host "  TPM can't use the saved PostgreSQL password." -ForegroundColor Yellow
+                        Write-Host "  TPM can fix this automatically." -ForegroundColor Yellow
+                        Write-Host "  A verified backup is made before any reset. Nothing is changed unless you approve." -ForegroundColor DarkGray
+                        $repairNow = (Read-HostSafe '  Fix it now? (Y/N)').ToUpper()
+                        if ($repairNow -ne 'Y') {
+                            Write-Host '  Nothing was changed. The PostgreSQL setup was not completed.' -ForegroundColor Yellow
+                            [void](Stop-TpmWorkflowStatus -Context $postgresStatus -Reason 'PostgreSQL repair declined')
+                            [void](Close-TpmWorkflowStatus -Context $postgresStatus)
+                            [void](Read-HostSafe '  Press Enter to return to menu')
+                            continue
+                        }
+                        Write-Host '  Choose a new PostgreSQL password for TPM to use.' -ForegroundColor Cyan
+                        Write-Host '  The password must not be blank. TPM does not add an extra complexity rule; enter it twice to confirm.' -ForegroundColor DarkGray
+                        Write-Host '  The password is masked and will not be displayed, logged, or placed in command-line arguments.' -ForegroundColor DarkGray
+                        $typedPwPlain = Read-ConfirmedPostgresPassword 'the new PostgreSQL database password'
+                        if (Test-PostgresPassword -SuperPasswordPlain $typedPwPlain) {
+                            $superPwPlain = $typedPwPlain
+                        } else {
+                            if (-not (Test-RunningAsAdministrator)) {
+                                Write-PostgresAdministratorGuidance -Operation Recovery
+                                [void](Set-TpmWorkflowWaiting -Context $postgresStatus -Message 'Windows needs permission to repair PostgreSQL.' -UserAction 'Approve the Windows permission box')
+                                $elevated = Start-PostgresRecoveryAsAdministrator -ConfigPath $configPath -ScriptPath (Join-Path $PSScriptRoot 'TeknoParrot-Manager.ps1') -TpRoot $tpRoot -UserProfilesDir $userProfilesDir -Operation Recovery -PasswordPlain $typedPwPlain
+                                if ($elevated) {
+                                    [void](Complete-TpmWorkflowStep -Context $postgresStatus -Outcome Fixed -Summary 'PostgreSQL repair continued automatically')
+                                    [void](Complete-TpmWorkflowStatus -Context $postgresStatus -Summary 'PostgreSQL repair finished')
+                                    [void](Close-TpmWorkflowStatus -Context $postgresStatus)
+                                    exit 0
+                                }
+                                Write-Log 'Postgres setup: automatic password-repair handoff did not complete.'
+                                [void](Set-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-recovery-handoff' -Message 'Windows permission was not granted, so PostgreSQL was not repaired.' -DataSafety 'The chosen password was not applied by TPM.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+                                [void](Read-HostSafe '  Press Enter to acknowledge this message')
+                                [void](Acknowledge-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-recovery-handoff')
+                                [void](Stop-TpmWorkflowStatus -Context $postgresStatus -Reason 'PostgreSQL repair stopped')
+                                [void](Close-TpmWorkflowStatus -Context $postgresStatus)
+                                [void](Read-HostSafe '  Press Enter to return to menu')
+                                continue
+                            }
+                            $directRecoverySucceeded = $false
+                            while (-not $directRecoverySucceeded) {
+                                $recovery = Invoke-PostgresSelectedPasswordRecovery -UserProfilesDir $userProfilesDir -PasswordPlain $typedPwPlain -StatusContext $postgresStatus
+                                if ($recovery.Succeeded) {
+                                    $recoveryBackup = $recovery.Backup
+                                    $superPwPlain = $typedPwPlain
+                                    $directRecoverySucceeded = $true
+                                    break
+                                }
+                                Write-Host '  PostgreSQL repair did not finish. Nothing was reported as complete.' -ForegroundColor Red
+                                if ($recovery.Reason) { Write-Host ("  What happened: {0}" -f $recovery.Reason) -ForegroundColor Yellow }
+                                if ($recovery.Backup.Path) { Write-Host ("  Verified backup evidence: {0}" -f $recovery.Backup.Path) -ForegroundColor Yellow }
+                                Write-Host '  TPM can try the same approved repair again without asking for the password again.' -ForegroundColor Yellow
+                                Write-Log 'Postgres setup: direct recovery failed; user acknowledgement and retry offered.'
+                                [void](Set-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-direct-recovery' -Message 'PostgreSQL repair did not finish.' -DataSafety 'The verified backup remains available; TPM did not report setup complete.' -RecoveryActions @(@{ Id = 'Retry'; Label = 'Try the repair again' }; @{ Id = 'Stop'; Label = 'Stop safely' }))
+                                [void](Read-HostSafe '  Press Enter to acknowledge the repair result')
+                                [void](Acknowledge-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-direct-recovery')
+                                [void](Update-TpmWorkflowActivity -Context $postgresStatus -Activity 'Waiting for your retry choice')
+                                $retryDirect = (Read-HostSafe '  Try the PostgreSQL repair again? (Y/N)').ToUpper()
+                                if ($retryDirect -ne 'Y') {
+                                    [void](Stop-TpmWorkflowStatus -Context $postgresStatus -Reason 'PostgreSQL repair stopped')
+                                    [void](Close-TpmWorkflowStatus -Context $postgresStatus)
+                                    break
+                                }
+                            }
+                            if (-not $directRecoverySucceeded) { continue }
+                        }
                     }
                 }
             } else {
                 $outPw = [ref]$null
                 if (-not (Install-Postgres83 -OutSuperPasswordPlain $outPw)) {
                     Write-Host "  PostgreSQL setup did not complete -- no profile changes made." -ForegroundColor Red
+                    if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'PostgreSQL could not be installed successfully.' }
+                    [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-install-failed' -Message 'PostgreSQL installation did not complete.' -DataSafety 'No PostgreSQL or profile changes were made.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
                     continue
                 }
                 $superPwPlain = $outPw.Value
@@ -14658,41 +17259,68 @@ while ($true) {
             if (-not $recoveryBackup.Verified) {
                 Write-Host ("  Recovery BLOCKED. No profile changes were made. Evidence: {0}" -f $recoveryBackup.Path) -ForegroundColor Red
                 Write-Log 'Postgres setup: verified recovery evidence was unavailable before configuration changes.'
+                if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not verify the protected backup before continuing PostgreSQL setup.' }
+                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-backup-unverified' -Message 'Verified PostgreSQL recovery evidence was unavailable.' -DataSafety 'No PostgreSQL or profile changes were made.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
                 continue
             }
-            $postgresSuperPasswordEncrypted = ConvertTo-PostgresEncryptedPassword $superPwPlain
+            [void](Start-TpmWorkflowStep -Context $postgresStatus -StepId 'save' -Activity 'Saving the repaired settings')
+            if (-not $isPostgresRecoveryResume) {
+                $postgresSuperPasswordEncrypted = ConvertTo-PostgresEncryptedPassword $superPwPlain
+            }
             if (-not (Save-Config)) {
                 Write-Host "  Recovery BLOCKED because the protected manager configuration could not be saved." -ForegroundColor Red
                 Write-Log 'Postgres setup: blocked because encrypted password configuration save failed.'
+                if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not save the protected PostgreSQL password configuration.' }
+                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-config-save' -Message 'Protected PostgreSQL settings could not be saved.' -DataSafety 'PostgreSQL and profile setup did not complete.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
                 continue
             }
-
+            [void](Complete-TpmWorkflowStep -Context $postgresStatus -Outcome Succeeded -Summary 'Repaired settings saved' -NextStep 'Back up existing databases')
+            [void](Start-TpmWorkflowStep -Context $postgresStatus -StepId 'database' -Activity 'Backing up existing databases')
             Write-Host "  Backing up existing Postgres databases..." -ForegroundColor Cyan
             $pgBackup = Backup-PostgresDatabases -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain
             if (-not $pgBackup.Succeeded) {
                 Write-Host "  Recovery BLOCKED because the database backup was incomplete." -ForegroundColor Red
                 if ($pgBackup.Path) { Write-Host ("  Database backup evidence: {0}" -f $pgBackup.Path) -ForegroundColor Yellow }
                 Write-Log 'Postgres setup: blocked before profile population because database backup was incomplete.'
+                if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not finish the database backup before changing game profiles.' }
+                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-database-backup' -Message 'The PostgreSQL database backup was incomplete.' -DataSafety 'No profile population was reported as complete.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
                 continue
             }
             if ($pgBackup.Path) { Write-Host ("  Database backup saved: {0}" -f $pgBackup.Path) -ForegroundColor DarkCyan }
             else { Write-Host "  No existing databases needed backup." -ForegroundColor DarkGray }
 
+
+            [void](Complete-TpmWorkflowStep -Context $postgresStatus -Outcome Succeeded -Summary 'Existing databases backed up' -NextStep 'Finish game database setup')
+
+            [void](Start-TpmWorkflowStep -Context $postgresStatus -StepId 'profiles' -Activity 'Finishing game database setup')
             Write-Host "  Configuring games and creating only missing databases..." -ForegroundColor Cyan
             $pgResults = Invoke-PostgresGameSetup -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain -RecoveryBackup $recoveryBackup
             if ($pgResults.RecoveryBlocked) {
                 Write-Host ("  Recovery BLOCKED. No recovery-complete result was reported. Evidence: {0}" -f $pgResults.BackupPath) -ForegroundColor Red
                 Write-Log 'Postgres setup: profile population was recovery-blocked.'
+                if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not safely finish configuring the PostgreSQL game profiles.' }
+                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-profile-recovery' -Message 'PostgreSQL profile setup was recovery-blocked.' -DataSafety 'No recovery-complete result was reported.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
+                continue
+            }
+            if ([int]$pgResults.Errors -gt 0) {
+                Write-Host ("  PostgreSQL setup reported {0} error(s); TPM will not claim recovery is complete." -f $pgResults.Errors) -ForegroundColor Red
+                Write-Log 'Postgres setup: errors were reported; completion was not claimed.'
+                if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not verify a clean PostgreSQL setup result.' }
+                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-profile-errors' -Message 'PostgreSQL game setup reported errors.' -DataSafety 'TPM did not claim recovery complete.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
                 continue
             }
             Write-Host ""
             Write-Host "  Results:" -ForegroundColor Cyan
+            [void](Complete-TpmWorkflowStep -Context $postgresStatus -Outcome Succeeded -Summary 'Game database setup verified')
             Write-Host ("    Fields updated         : {0}" -f $pgResults.Configured) -ForegroundColor Green
             Write-Host ("    Databases created      : {0}" -f $pgResults.DbCreated) -ForegroundColor Green
             Write-Host ("    Already configured     : {0}" -f $pgResults.AlreadyConfigured) -ForegroundColor DarkGray
             if ($pgResults.Errors -gt 0) { Write-Host ("    Errors                 : {0}  (see TeknoParrot-Manager.log)" -f $pgResults.Errors) -ForegroundColor Red }
             Write-Log ("Postgres setup: complete. Configured={0} DbCreated={1} AlreadyConfigured={2} Errors={3}" -f $pgResults.Configured, $pgResults.DbCreated, $pgResults.AlreadyConfigured, $pgResults.Errors)
         } finally {
+            if ($null -ne $postgresServiceWasRunning -and -not (Restore-PostgresServiceState -WasRunning $postgresServiceWasRunning)) {
+                $postgresServiceRestoreFailed = $true
+            }
             if ($outPw) { $outPw.Value = $null }
             $outPw = $null
             $secure = $null
@@ -14702,6 +17330,28 @@ while ($true) {
             $superPwPlain = $null
             [GC]::Collect()
         }
+        if ($postgresServiceRestoreFailed) {
+            Write-Host '  PostgreSQL setup did not finish safely because TPM could not restore the original service state.' -ForegroundColor Red
+            Write-Log 'Postgres setup: original service state restoration failed; completion was not claimed.'
+            if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not restore the original PostgreSQL service state.' }
+            [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-service-restore' -Message 'The original PostgreSQL service state could not be restored.' -DataSafety 'TPM did not claim PostgreSQL setup complete.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
+            continue
+        }
+        if ($isPostgresRecoveryResume) {
+            if (-not (Remove-PostgresRecoveryState -Path $postgresResumeState.Path -ClaimPath $postgresResumeState.ClaimPath)) {
+                Exit-PostgresRecoveryResume -Message 'PostgreSQL setup finished, but TPM could not remove its protected temporary repair state.'
+            }
+            if ($postgresResumeState.Operation -eq 'Recovery') {
+                Write-Host '  PostgreSQL is fixed.' -ForegroundColor Green
+                Write-Host '  TPM reset and verified the password successfully.' -ForegroundColor Green
+            } else {
+                Write-Host '  PostgreSQL setup is complete. TPM continued the repair automatically.' -ForegroundColor Green
+            }
+            [void](Read-HostSafe '  Press Enter to continue')
+            exit 0
+        }
+        [void](Complete-TpmWorkflowStatus -Context $postgresStatus -Summary 'PostgreSQL setup finished and was verified')
+        [void](Close-TpmWorkflowStatus -Context $postgresStatus)
         [void](Read-Host "  Press Enter to return to menu")
         continue
     }
@@ -14710,8 +17360,28 @@ while ($true) {
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         Write-Host " Check for Updates" -ForegroundColor Cyan
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        $updateStatus = New-TpmWorkflowStatusContext -WorkflowKey 'CheckForUpdates' -Title 'Update check' -Steps @(
+            @{ Id = 'query'; Label = 'Check for a newer TPM release' }
+            @{ Id = 'apply'; Label = 'Back up, download, and validate the update' }
+            @{ Id = 'verify'; Label = 'Verify the installed update' }
+        )
+        [void](Start-TpmWorkflowStatus -Context $updateStatus)
+        [void](Start-TpmWorkflowStep -Context $updateStatus -StepId 'query' -Activity 'Checking for a newer release')
+        [void](Complete-TpmWorkflowStep -Context $updateStatus -Summary 'Release check finished' -NextStep 'Apply only after approval')
         $scriptSelfPath = Join-Path $PSScriptRoot "TeknoParrot-Manager.ps1"
         $updateInstalled = Invoke-CheckForUpdates -ScriptPath $scriptSelfPath
+        if ($updateInstalled) {
+            [void](Start-TpmWorkflowStep -Context $updateStatus -StepId 'apply' -Activity 'Applying the approved update')
+            [void](Complete-TpmWorkflowStep -Context $updateStatus -Outcome Fixed -Summary 'Update installed' -NextStep 'Restart TPM')
+            [void](Start-TpmWorkflowStep -Context $updateStatus -StepId 'verify' -Activity 'Update verified')
+            [void](Complete-TpmWorkflowStep -Context $updateStatus -Summary 'Update verified')
+            [void](Complete-TpmWorkflowStatus -Context $updateStatus -Summary 'Update installed')
+            [void](Close-TpmWorkflowStatus -Context $updateStatus)
+        } else {
+            [void](Complete-TpmWorkflowStep -Context $updateStatus -Outcome Skipped -Summary 'No update was installed')
+            [void](Complete-TpmWorkflowStatus -Context $updateStatus -Summary 'Update check finished')
+            [void](Close-TpmWorkflowStatus -Context $updateStatus)
+        }
         if ($updateInstalled) {
             Write-Host ""
             Write-Host "  Restart TeknoParrot Manager now to run the new version." -ForegroundColor Yellow
@@ -14721,6 +17391,61 @@ while ($true) {
         }
         Write-Log "CheckForUpdates: complete, no restart needed."
         [void](Read-Host "  Press Enter to return to menu")
+        continue
+    }
+
+    if ($mode -eq "Support") {
+        Write-Host ""
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        Write-Host " Create Support Package" -ForegroundColor Cyan
+        Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        Write-Host "  TPM will collect safe logs and reports for you."
+        Write-Host "  It will not include game files, credentials, or arbitrary folders." -ForegroundColor DarkCyan
+        Write-Host ""
+        Write-Host "  1) Create Support Package"
+        Write-Host "  2) Open TPM Logs and Reports"
+        Write-Host "  3) Return to the main menu"
+        $supportChoice = (Read-HostSafe "  Choose 1-3").Trim()
+        if ($supportChoice -eq '2') {
+            $openResult = Open-TpmLogsAndReports -ScriptRoot $PSScriptRoot
+            if ($openResult.Succeeded) {
+                Write-Host ("  Opened: {0}" -f $openResult.Path) -ForegroundColor Green
+            } else {
+                Write-Host ("  TPM logs and reports could not be opened: {0}" -f $openResult.Error) -ForegroundColor Yellow
+                Write-Host ("  Folder: {0}" -f $openResult.Path) -ForegroundColor DarkGray
+            }
+            [void](Read-HostSafe '  Press Enter to return to the menu')
+            continue
+        }
+        if ($supportChoice -eq '1') {
+            $supportResult = New-TpmSupportPackage -ScriptRoot $PSScriptRoot -TeknoParrotRoot $tpRoot -UserProfilesDir $userProfilesDir -ApprovedGamesRoot $gamesInstallFolder
+            Write-Host ""
+            if ($supportResult.Succeeded) {
+                if ($supportResult.Partial) {
+                    Write-Host "  Support package created with partial evidence." -ForegroundColor Yellow
+                    Write-Host "  Some optional diagnostics were missing or could not be read." -ForegroundColor Yellow
+                } else {
+                    Write-Host "  Support package created successfully." -ForegroundColor Green
+                }
+                Write-Host ("  Saved here: {0}" -f $supportResult.PackagePath) -ForegroundColor Green
+                Write-Host "  This is the file to send when asking for help." -ForegroundColor Cyan
+                $openPackage = (Read-HostSafe "  Open the package folder now? (Y/N)").Trim().ToUpper()
+                if ($openPackage -eq 'Y') {
+                    try { Start-Process -FilePath 'explorer.exe' -ArgumentList @([System.IO.Path]::GetDirectoryName($supportResult.PackagePath)) -ErrorAction Stop | Out-Null } catch { Write-Host "  Windows could not open the package folder." -ForegroundColor Yellow }
+                }
+            } else {
+                if ($supportResult.PackagePath) {
+                    Write-Host "  Support ZIP was created, but temporary cleanup needs attention." -ForegroundColor Yellow
+                    Write-Host ("  Saved here: {0}" -f $supportResult.PackagePath) -ForegroundColor Yellow
+                    Write-Host "  Do not send it until the cleanup warning is resolved." -ForegroundColor Yellow
+                } else {
+                    Write-Host "  Support package was not created." -ForegroundColor Red
+                    Write-Host "  No success was reported. Check the TPM log for details." -ForegroundColor Yellow
+                }
+                foreach ($errorText in @($supportResult.Errors)) { Write-Host ("  Reason: {0}" -f $errorText) -ForegroundColor DarkGray }
+            }
+            [void](Read-HostSafe '  Press Enter to return to the menu')
+        }
         continue
     }
 
@@ -14835,12 +17560,39 @@ while ($true) {
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         Write-Host " Crosshair Setup" -ForegroundColor Cyan
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
-        Invoke-CrosshairSetup -UserProfilesDir $userProfilesDir `
+        $crosshairStatus = New-TpmWorkflowStatusContext -WorkflowKey 'CrosshairSetup' -Title 'Crosshair setup' -Steps @(
+            @{ Id = 'inspect'; Label = 'Check the emulator and game folders' }
+            @{ Id = 'choose'; Label = 'Choose the P1 and P2 crosshairs' }
+            @{ Id = 'apply'; Label = 'Install and verify the crosshair files' }
+        )
+        [void](Start-TpmWorkflowStatus -Context $crosshairStatus)
+        [void](Start-TpmWorkflowStep -Context $crosshairStatus -StepId 'inspect' -Activity 'Checking crosshair prerequisites')
+        [void](Complete-TpmWorkflowStep -Context $crosshairStatus -Summary 'Prerequisites checked' -NextStep 'Choose the P1 and P2 crosshairs')
+        [void](Start-TpmWorkflowStep -Context $crosshairStatus -StepId 'choose' -Activity 'Waiting for your crosshair choices')
+        [void](Set-TpmWorkflowWaiting -Context $crosshairStatus -Message 'Choose the crosshair images to use.' -UserAction 'Enter the P1 and P2 image numbers')
+        [void](Resume-TpmWorkflowStatus -Context $crosshairStatus)
+        [void](Complete-TpmWorkflowStep -Context $crosshairStatus -Summary 'Crosshair choices recorded' -NextStep 'Install and verify the files')
+        [void](Start-TpmWorkflowStep -Context $crosshairStatus -StepId 'apply' -Activity 'Installing crosshair files')
+        $crosshairResult = Invoke-CrosshairSetup -UserProfilesDir $userProfilesDir `
                               -GamesInstallFolder $gamesInstallFolder `
                               -TpRoot $tpRoot
-        Write-Host ""
-        Write-Host "Done." -ForegroundColor Green
-        Write-Log "Crosshair setup complete."
+        if ($crosshairResult -and $crosshairResult.Succeeded) {
+            [void](Complete-TpmWorkflowStep -Context $crosshairStatus -Outcome Fixed -Summary 'Crosshair setup finished')
+            [void](Complete-TpmWorkflowStatus -Context $crosshairStatus -Summary 'Crosshair setup finished')
+            [void](Close-TpmWorkflowStatus -Context $crosshairStatus)
+            Write-Host ""
+            Write-Host "Crosshair setup finished and was verified." -ForegroundColor Green
+            Write-Log "Crosshair setup complete."
+        } else {
+            [void](Set-TpmWorkflowFailure -Context $crosshairStatus -FailureId 'crosshair-incomplete' -Message 'Crosshair setup was not completed.' -DataSafety 'TPM did not claim a complete crosshair deployment.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+            Write-Host ""
+            Write-Host "Crosshair setup was not completed. The message above is the authoritative result." -ForegroundColor Yellow
+            [void](Read-HostSafe '  Press Enter to acknowledge the crosshair result')
+            [void](Acknowledge-TpmWorkflowFailure -Context $crosshairStatus -FailureId 'crosshair-incomplete')
+            [void](Stop-TpmWorkflowStatus -Context $crosshairStatus -Reason 'Crosshair setup stopped')
+            [void](Close-TpmWorkflowStatus -Context $crosshairStatus)
+            Write-Log "Crosshair setup did not complete; no success was claimed."
+        }
         [void](Read-Host "  Press Enter to return to menu")
         continue
     }
@@ -14850,6 +17602,14 @@ while ($true) {
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         Write-Host " ReShade Visual Enhancements Setup" -ForegroundColor Cyan
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        $reShadeStatus = New-TpmWorkflowStatusContext -WorkflowKey 'ReShadeSetup' -Title 'ReShade setup' -Steps @(
+            @{ Id = 'inspect'; Label = 'Check the ReShade source' }
+            @{ Id = 'acquire'; Label = 'Download and verify the official installer' }
+            @{ Id = 'apply'; Label = 'Install the selected visual enhancement' }
+            @{ Id = 'verify'; Label = 'Verify the result' }
+        )
+        [void](Start-TpmWorkflowStatus -Context $reShadeStatus)
+        [void](Start-TpmWorkflowStep -Context $reShadeStatus -StepId 'inspect' -Activity 'Checking ReShade files')
         $bundledDll   = Join-Path $PSScriptRoot "ReShade\ReShade64.dll"
         $bundledDll32 = Join-Path $PSScriptRoot "ReShade\ReShade32.dll"
         if (-not $rsSourceDll -or -not (Test-Path -LiteralPath $rsSourceDll)) {
@@ -14857,6 +17617,8 @@ while ($true) {
                 $rsSourceDll = $bundledDll
             } else {
                 Write-Host ""
+                [void](Complete-TpmWorkflowStep -Context $reShadeStatus -Summary 'No local ReShade source was found' -NextStep 'Download and verify the official installer')
+                [void](Start-TpmWorkflowStep -Context $reShadeStatus -StepId 'acquire' -Activity 'Preparing automatic download')
                 Write-Host "  ReShade 64-bit DLL not found." -ForegroundColor Yellow
                 Write-Host "    D) Download automatically from reshade.me"
                 Write-Host "    B) Browse for a file I already have"
@@ -14864,10 +17626,11 @@ while ($true) {
                 $rsGetChoice = (Read-HostSafe "  Choice (D/B/N)").ToUpper()
                 $rsGotDll    = $false
                 if ($rsGetChoice -eq 'D') {
+                while (-not $rsGotDll -and $rsGetChoice -eq 'D') {
                     Write-Host "  Checking reshade.me for the latest version..." -ForegroundColor Cyan
                     $rsLatestVer = Get-ReShadeLatestVersion
                     if (-not $rsLatestVer) {
-                        Write-Host "  Could not reach reshade.me -- try again later, or choose B to browse for a file you already have." -ForegroundColor Red
+                        Write-Host "  TPM could not reach reshade.me. Choose R to retry automatically, B for the advanced existing-file fallback, or N to cancel." -ForegroundColor Red
                         Write-Log "ReShade auto-download: aborted -- could not determine latest version."
                     } else {
                         $rsSetupUrl = Get-ReShadeSetupDownloadUrl -Version $rsLatestVer
@@ -14885,7 +17648,7 @@ while ($true) {
                                 Write-Host ("  Thumbprint : {0}" -f $rsSig.Thumbprint) -ForegroundColor DarkGray
                                 if (-not $rsSig.Trusted) {
                                     Write-Host "  SECURITY: Signature does not match the trusted ReShade certificate -- refusing to use this installer." -ForegroundColor Red
-                                    Write-Host "  Choose B to browse for a file you already have and trust instead." -ForegroundColor Yellow
+                                    Write-Host "  The advanced existing-file fallback is available only if you already have a trusted official file." -ForegroundColor Yellow
                                     Write-Log ("ReShade auto-download: SECURITY -- signature not trusted. Subject='{0}' Thumbprint={1}" -f $rsSig.Signer, $rsSig.Thumbprint)
                                     try { Remove-Item -LiteralPath $rsSetupPath -Force -ErrorAction SilentlyContinue } catch {}
                                 } else {
@@ -14903,12 +17666,19 @@ while ($true) {
                                     }
                                 }
                             } else {
-                                Write-Host "  Download failed -- try again later, or choose B to browse for a file you already have." -ForegroundColor Red
+                                Write-Host "  The automatic ReShade download did not finish. Choose R to retry, B for the advanced fallback, or N to cancel." -ForegroundColor Red
                             }
                         }
                     }
-                }
                 if (-not $rsGotDll) {
+                    Write-Host '  Automatic ReShade download did not finish.' -ForegroundColor Red
+                    $rsRetryChoice = (Read-HostSafe '  R Retry automatic download / B Use an existing file (advanced) / N Cancel').ToUpper()
+                    if ($rsRetryChoice -eq 'R') { $rsGetChoice = 'D'; continue }
+                    $rsGetChoice = $rsRetryChoice
+                }
+                }
+                }
+                if (-not $rsGotDll -and $rsGetChoice -eq 'B') {
                     Write-Host ""
                     Write-Host "    Enter the full path to the DLL file now:" -ForegroundColor White
                     Write-Host ""
@@ -14916,16 +17686,27 @@ while ($true) {
                     if ([string]::IsNullOrWhiteSpace($inp) -or -not (Test-Path -LiteralPath $inp)) {
                         Write-Host "  File not found. ReShade setup cancelled." -ForegroundColor Red
                         Write-Log "ReShade setup: aborted -- DLL not found."
-                        [void](Read-Host "  Press Enter to return to menu")
+                        [void](Resolve-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-file-missing' -Message 'The selected ReShade file was not found.' -DataSafety 'No ReShade file was deployed.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
                         continue
                     }
                     if ([System.IO.Path]::GetExtension($inp).ToLower() -ne '.dll') {
                         Write-Host "  That file does not appear to be a DLL. Cancelled." -ForegroundColor Red
                         Write-Log "ReShade setup: aborted -- file is not a .dll."
-                        [void](Read-Host "  Press Enter to return to menu")
+                        [void](Resolve-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-file-type' -Message 'The selected ReShade file is not a DLL.' -DataSafety 'No ReShade file was deployed.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
                         continue
                     }
                     $rsSourceDll = $inp
+                }
+                if (-not $rsGotDll) {
+                    [void](Set-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-acquisition-cancelled' -Message 'ReShade setup was cancelled.' -DataSafety 'No unverified ReShade file was used.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+                    Write-Host '  ReShade setup cancelled. No unverified DLL was used.' -ForegroundColor Yellow
+                    Write-Log 'ReShade setup: cancelled after automatic acquisition failed.'
+                    [void](Read-HostSafe '  Press Enter to acknowledge the ReShade result')
+                    [void](Acknowledge-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-acquisition-cancelled')
+                    [void](Stop-TpmWorkflowStatus -Context $reShadeStatus -Reason 'ReShade setup stopped')
+                    [void](Close-TpmWorkflowStatus -Context $reShadeStatus)
+                    [void](Read-HostSafe '  Press Enter to return to menu')
+                    continue
                 }
             }
             if (Save-Config) {
@@ -14937,7 +17718,7 @@ while ($true) {
         if (-not $rsSourceDll32 -or -not (Test-Path -LiteralPath $rsSourceDll32)) {
             if (Test-Path -LiteralPath $bundledDll32) { $rsSourceDll32 = $bundledDll32 }
         }
-        Invoke-ReShadeSetup -UserProfilesDir $userProfilesDir `
+        $reShadeResult = Invoke-ReShadeSetup -UserProfilesDir $userProfilesDir `
                             -SourceDll $rsSourceDll `
                             -SourceDll32 $rsSourceDll32 `
                             -ConfigPath $configPath `
@@ -14947,6 +17728,22 @@ while ($true) {
                             -GamesInstallFolder $gamesInstallFolder `
                             -RetroBat $retroBat `
                             -HsDataPath $hsDataPath
+        if ($reShadeResult -and $reShadeResult.Succeeded) {
+            [void](Complete-TpmWorkflowStep -Context $reShadeStatus -Outcome Fixed -Summary 'ReShade source verified' -NextStep 'Install into selected games')
+            [void](Start-TpmWorkflowStep -Context $reShadeStatus -StepId 'apply' -Activity 'Installing ReShade into selected games')
+            [void](Complete-TpmWorkflowStep -Context $reShadeStatus -Outcome Fixed -Summary 'ReShade files installed' -NextStep 'Verify the result')
+            [void](Start-TpmWorkflowStep -Context $reShadeStatus -StepId 'verify' -Activity 'Verifying ReShade setup')
+            [void](Complete-TpmWorkflowStep -Context $reShadeStatus -Summary 'ReShade setup finished')
+            [void](Complete-TpmWorkflowStatus -Context $reShadeStatus -Summary 'ReShade setup finished')
+            [void](Close-TpmWorkflowStatus -Context $reShadeStatus)
+        } else {
+            [void](Set-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-incomplete' -Message 'ReShade setup was not completed.' -DataSafety 'No unverified ReShade deployment was reported as complete.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+            [void](Read-HostSafe '  Press Enter to acknowledge the ReShade result')
+            [void](Acknowledge-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-incomplete')
+            [void](Stop-TpmWorkflowStatus -Context $reShadeStatus -Reason 'ReShade setup stopped')
+            [void](Close-TpmWorkflowStatus -Context $reShadeStatus)
+            continue
+        }
         Write-Host ""
         Write-Host "Done." -ForegroundColor Green
         Write-Log "ReShade setup complete."
@@ -14958,6 +17755,14 @@ while ($true) {
         Write-Host ""
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         Write-Host " dgVoodoo2 Legacy Compatibility Setup" -ForegroundColor Cyan
+        $dgStatus = New-TpmWorkflowStatusContext -WorkflowKey 'DgVoodoo2Setup' -Title 'dgVoodoo2 setup' -Steps @(
+            @{ Id = 'inspect'; Label = 'Check legacy game requirements' }
+            @{ Id = 'acquire'; Label = 'Download and verify the official package' }
+            @{ Id = 'apply'; Label = 'Install the selected compatibility files' }
+            @{ Id = 'verify'; Label = 'Verify the result' }
+        )
+        [void](Start-TpmWorkflowStatus -Context $dgStatus)
+        [void](Start-TpmWorkflowStep -Context $dgStatus -StepId 'inspect' -Activity 'Checking legacy game requirements')
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         $bundledDg = Join-Path $PSScriptRoot "dgVoodoo2"
         if (-not $dgSourceDir -or -not (Test-Path -LiteralPath $dgSourceDir)) {
@@ -14972,10 +17777,11 @@ while ($true) {
                 $dgGetChoice = (Read-HostSafe "  Choice (D/B/N)").ToUpper()
                 $dgGotDir    = $false
                 if ($dgGetChoice -eq 'D') {
+                while (-not $dgGotDir -and $dgGetChoice -eq 'D') {
                     Write-Host "  Checking the official GitHub release for the latest dgVoodoo2..." -ForegroundColor Cyan
                     $dgRel = Get-DgVoodoo2LatestRelease
                     if (-not $dgRel) {
-                        Write-Host "  Could not reach GitHub -- try again later, or choose B to browse for a folder you already have." -ForegroundColor Red
+                        Write-Host "  TPM could not reach the official dgVoodoo2 release. Choose R to retry automatically, B for the advanced existing-folder fallback, or N to cancel." -ForegroundColor Red
                         Write-Log "dgVoodoo2 auto-download: aborted -- release query failed."
                     } else {
                         Write-Host ("  Found: {0}  ({1} MB)" -f $dgRel.FileName, ([Math]::Round($dgRel.SizeBytes / 1MB, 1))) -ForegroundColor Cyan
@@ -14996,11 +17802,17 @@ while ($true) {
                                 try { Remove-Item -LiteralPath $dgZipPath -Force -ErrorAction SilentlyContinue } catch {}
                             }
                         } else {
-                            Write-Host "  Download failed -- try again later, or choose B to browse for a folder you already have." -ForegroundColor Red
+                            Write-Host "  The automatic dgVoodoo2 download did not finish. Choose R to retry, B for the advanced fallback, or N to cancel." -ForegroundColor Red
                         }
                     }
+                    if (-not $dgGotDir) {
+                        $dgRetryChoice = (Read-HostSafe '  R Retry automatic download / B Use an existing folder (advanced) / N Cancel').ToUpper()
+                        if ($dgRetryChoice -eq 'R') { $dgGetChoice = 'D'; continue }
+                        $dgGetChoice = $dgRetryChoice
+                    }
                 }
-                if (-not $dgGotDir) {
+                }
+                if (-not $dgGotDir -and $dgGetChoice -eq 'B') {
                     Write-Host ""
                     Write-Host "    Enter the full path to a folder that already contains those files:" -ForegroundColor White
                     Write-Host ""
@@ -15008,10 +17820,21 @@ while ($true) {
                     if ([string]::IsNullOrWhiteSpace($inp) -or -not (Test-Path -LiteralPath $inp)) {
                         Write-Host "  Folder not found. dgVoodoo2 setup cancelled." -ForegroundColor Red
                         Write-Log "dgVoodoo2 setup: aborted -- folder not found."
-                        [void](Read-Host "  Press Enter to return to menu")
+                        [void](Resolve-TpmWorkflowFailure -Context $dgStatus -FailureId 'dgv-folder-missing' -Message 'The selected dgVoodoo2 folder was not found.' -DataSafety 'No dgVoodoo2 files were deployed.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
                         continue
                     }
                     $dgSourceDir = $inp
+                }
+                if (-not $dgGotDir -and $dgGetChoice -ne 'B') {
+                    [void](Set-TpmWorkflowFailure -Context $dgStatus -FailureId 'dgv-acquisition-cancelled' -Message 'dgVoodoo2 setup was cancelled.' -DataSafety 'No unverified dgVoodoo2 files were used.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+                    Write-Host '  dgVoodoo2 setup cancelled. No unverified files were used.' -ForegroundColor Yellow
+                    Write-Log 'dgVoodoo2 setup: cancelled after automatic acquisition failed.'
+                    [void](Read-HostSafe '  Press Enter to acknowledge the dgVoodoo2 result')
+                    [void](Acknowledge-TpmWorkflowFailure -Context $dgStatus -FailureId 'dgv-acquisition-cancelled')
+                    [void](Stop-TpmWorkflowStatus -Context $dgStatus -Reason 'dgVoodoo2 setup stopped')
+                    [void](Close-TpmWorkflowStatus -Context $dgStatus)
+                    [void](Read-HostSafe '  Press Enter to return to menu')
+                    continue
                 }
             }
             if (Save-Config) {
@@ -15020,9 +17843,22 @@ while ($true) {
                 Write-Log "Config: could not save DgVoodoo2SourceDir"
             }
         }
-        Invoke-DgVoodoo2Setup -UserProfilesDir $userProfilesDir `
+        $dgResult = Invoke-DgVoodoo2Setup -UserProfilesDir $userProfilesDir `
                               -SourceDir $dgSourceDir `
                               -TpRoot $tpRoot
+        if (-not ($dgResult -and $dgResult.Succeeded)) {
+            [void](Set-TpmWorkflowFailure -Context $dgStatus -FailureId 'dgv-deployment-failed' -Message 'dgVoodoo2 setup was not completed.' -DataSafety 'TPM did not claim a complete dgVoodoo2 deployment.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+            [void](Read-HostSafe '  Press Enter to acknowledge the dgVoodoo2 result')
+            [void](Acknowledge-TpmWorkflowFailure -Context $dgStatus -FailureId 'dgv-deployment-failed')
+            [void](Stop-TpmWorkflowStatus -Context $dgStatus -Reason 'dgVoodoo2 setup stopped')
+            [void](Close-TpmWorkflowStatus -Context $dgStatus)
+            continue
+        }
+        [void](Complete-TpmWorkflowStep -Context $dgStatus -Outcome Fixed -Summary 'dgVoodoo2 files installed' -NextStep 'Verify the result')
+        [void](Start-TpmWorkflowStep -Context $dgStatus -StepId 'verify' -Activity 'Verifying dgVoodoo2 setup')
+        [void](Complete-TpmWorkflowStep -Context $dgStatus -Summary 'dgVoodoo2 setup finished')
+        [void](Complete-TpmWorkflowStatus -Context $dgStatus -Summary 'dgVoodoo2 setup finished')
+        [void](Close-TpmWorkflowStatus -Context $dgStatus)
         Write-Host ""
         Write-Host "Done." -ForegroundColor Green
         Write-Log "dgVoodoo2 setup complete."
@@ -15054,6 +17890,14 @@ while ($true) {
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
         Write-Host " Force Feedback (FFB) Setup" -ForegroundColor Cyan
         Write-Host "--------------------------------------------" -ForegroundColor Cyan
+        $ffbStatus = New-TpmWorkflowStatusContext -WorkflowKey 'FFBSetup' -Title 'Force feedback setup' -Steps @(
+            @{ Id = 'inspect'; Label = 'Check available force-feedback options' }
+            @{ Id = 'native'; Label = 'Apply the approved native option' }
+            @{ Id = 'plugin'; Label = 'Download and apply the optional plugin' }
+            @{ Id = 'verify'; Label = 'Verify ownership and results' }
+        )
+        [void](Start-TpmWorkflowStatus -Context $ffbStatus)
+        [void](Start-TpmWorkflowStep -Context $ffbStatus -StepId 'inspect' -Activity 'Checking force-feedback options')
         Write-Host ""
         Write-Host "  Force feedback makes a wheel or stick push back / rumble to match"
         Write-Host "  what's happening on screen (e.g. road vibration, recoil, collisions)."
@@ -15069,16 +17913,36 @@ while ($true) {
         Write-Host ""
         Write-Host "  If a game is covered by both, you'll be asked which one to use for it."
 
+        [void](Complete-TpmWorkflowStep -Context $ffbStatus -Summary 'Force-feedback options checked' -NextStep 'Apply the approved native option')
+        [void](Start-TpmWorkflowStep -Context $ffbStatus -StepId 'native' -Activity 'Applying the native option')
         $nativeEnabledCodes = Invoke-FFBBlasterSetup -UserProfilesDir $userProfilesDir -TpRoot $tpRoot
+        [void](Complete-TpmWorkflowStep -Context $ffbStatus -Summary 'Native force feedback step finished' -NextStep 'Choose whether to add the optional plugin')
+        [void](Set-TpmWorkflowWaiting -Context $ffbStatus -Message 'TPM can add the optional third-party force-feedback plugin.' -UserAction 'Answer Y or N')
 
         Write-Host ""
         $doFfbPlugin = (Read-HostSafe "  Also set up the free third-party FFB plugin (covers additional games)? (Y/N)").ToUpper()
+        [void](Resume-TpmWorkflowStatus -Context $ffbStatus)
         if ($doFfbPlugin -eq "Y") {
+            [void](Start-TpmWorkflowStep -Context $ffbStatus -StepId 'plugin' -Activity 'Downloading and applying the optional plugin')
             $ffbCacheDir = Join-Path $PSScriptRoot "FFBPlugin"
-            Invoke-FFBPluginSetup -UserProfilesDir $userProfilesDir -CacheDir $ffbCacheDir -NativeEnabledCodes $nativeEnabledCodes
+            $ffbPluginResult = Invoke-FFBPluginSetup -UserProfilesDir $userProfilesDir -CacheDir $ffbCacheDir -NativeEnabledCodes $nativeEnabledCodes
+            if (-not ($ffbPluginResult -and $ffbPluginResult.Succeeded)) {
+                [void](Set-TpmWorkflowFailure -Context $ffbStatus -FailureId 'ffb-plugin-failed' -Message 'The optional force-feedback plugin was not completed.' -DataSafety 'TPM did not claim a complete third-party plugin deployment.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+                [void](Read-HostSafe '  Press Enter to acknowledge the force-feedback result')
+                [void](Acknowledge-TpmWorkflowFailure -Context $ffbStatus -FailureId 'ffb-plugin-failed')
+                [void](Stop-TpmWorkflowStatus -Context $ffbStatus -Reason 'Force-feedback setup stopped')
+                [void](Close-TpmWorkflowStatus -Context $ffbStatus)
+                continue
+            }
+            [void](Complete-TpmWorkflowStep -Context $ffbStatus -Outcome Fixed -Summary 'Optional plugin step finished' -NextStep 'Verify force-feedback ownership')
         } else {
+            [void](Complete-TpmWorkflowStep -Context $ffbStatus -Outcome Skipped -Summary 'Optional plugin skipped')
             Write-Log "FFBPlugin setup: skipped by user choice."
         }
+        [void](Start-TpmWorkflowStep -Context $ffbStatus -StepId 'verify' -Activity 'Verifying force-feedback results')
+        [void](Complete-TpmWorkflowStep -Context $ffbStatus -Summary 'Force-feedback results recorded')
+        [void](Complete-TpmWorkflowStatus -Context $ffbStatus -Summary 'Force-feedback setup finished')
+        [void](Close-TpmWorkflowStatus -Context $ffbStatus)
 
         Write-Host ""
         Write-Host "Done." -ForegroundColor Green
@@ -15112,23 +17976,41 @@ while ($true) {
             Write-Host ""
         }
         Write-Host ""
-        Write-Host "  This ONLY checks/updates games that already have BepInEx installed --"
-        Write-Host "  it never installs BepInEx into a game that doesn't have it. Only the"
-        Write-Host "  latest STABLE 64-bit release is ever used; 32-bit installs are left"
-        Write-Host "  alone (update those manually), and pre-release builds are never used."
+        Write-Host "  TPM can install, update, or repair-reset BepInEx for selected games." -ForegroundColor DarkCyan
+        Write-Host "  It chooses the stable package matching each game's 32-bit or 64-bit executable." -ForegroundColor DarkCyan
+        Write-Host "  Nothing is changed until you approve the listed games." -ForegroundColor DarkCyan
         Write-Host ""
         Write-Host "  Troubleshooting: https://docs.bepinex.dev/articles/user_guide/troubleshooting.html"
-        Write-Host "  Clean manual reset: delete doorstop_config.ini, winhttp.dll,"
-        Write-Host "  .doorstop_version, changelog.txt, and the BepInEx folder from the"
-        Write-Host "  game's folder, then reinstall."
-
         $bepInExCacheDir = Join-Path $PSScriptRoot "BepInExCache"
-        Invoke-BepInExUpdateCheck -UserProfilesDir $userProfilesDir -CacheDir $bepInExCacheDir -ApprovedGamesRoot $gamesInstallFolder
-
+        $bepStatus = New-TpmWorkflowStatusContext -WorkflowKey 'BepInEx' -Title 'BepInEx setup' -Steps @(
+            @{ Id = 'inspect'; Label = 'Check eligible game folders' }
+            @{ Id = 'acquire'; Label = 'Download and verify the matching package' }
+            @{ Id = 'apply'; Label = 'Back up and apply the selected change' }
+            @{ Id = 'verify'; Label = 'Verify the result' }
+        )
+        [void](Start-TpmWorkflowStatus -Context $bepStatus)
+        [void](Start-TpmWorkflowStep -Context $bepStatus -StepId 'inspect' -Activity 'Checking game folders')
+        [void](Complete-TpmWorkflowStep -Context $bepStatus -Summary 'Game folders checked' -NextStep 'Download and verify the matching package')
+        $bepResult = Invoke-BepInExUpdateCheck -UserProfilesDir $userProfilesDir -CacheDir $bepInExCacheDir -ApprovedGamesRoot $gamesInstallFolder
         Write-Host ""
-        Write-Host "Done." -ForegroundColor Green
-        Write-Log "BepInEx update check complete."
-        [void](Read-Host "  Press Enter to return to menu")
+        if ($bepResult -and $bepResult.Succeeded) {
+            [void](Start-TpmWorkflowStep -Context $bepStatus -StepId 'apply' -Activity 'Applying the selected BepInEx change')
+            [void](Complete-TpmWorkflowStep -Context $bepStatus -Outcome Fixed -Summary 'BepInEx change applied' -NextStep 'Verify the result')
+            [void](Start-TpmWorkflowStep -Context $bepStatus -StepId 'verify' -Activity 'Verifying the result')
+            [void](Complete-TpmWorkflowStep -Context $bepStatus -Summary 'BepInEx setup finished and was verified')
+            [void](Complete-TpmWorkflowStatus -Context $bepStatus -Summary 'BepInEx setup finished')
+            [void](Close-TpmWorkflowStatus -Context $bepStatus)
+            Write-Host "BepInEx setup finished and was verified." -ForegroundColor Green
+            Write-Log "BepInEx update check complete."
+        } else {
+            [void](Set-TpmWorkflowFailure -Context $bepStatus -FailureId 'bepinex-failed' -Message 'BepInEx setup was not completed.' -DataSafety 'No unverified BepInEx change was reported as complete.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+            Write-Host "BepInEx setup was not completed. The message above is the authoritative result." -ForegroundColor Yellow
+            Write-Log "BepInEx setup did not complete; no success was claimed."
+            [void](Read-HostSafe '  Press Enter to acknowledge the BepInEx result')
+            [void](Acknowledge-TpmWorkflowFailure -Context $bepStatus -FailureId 'bepinex-failed')
+            [void](Stop-TpmWorkflowStatus -Context $bepStatus -Reason 'BepInEx setup stopped')
+            [void](Close-TpmWorkflowStatus -Context $bepStatus)
+        }
         continue
     }
 
@@ -15736,9 +18618,13 @@ if ($duplicateConflicts.Count -gt 0 -and -not $Unattended) {
     }
 }
 
+if ($manualRegData.Count -gt 0 -and -not $Unattended -and -not $dryRunActive) {
+    Invoke-ManualRegistrationChoices -ManualRegData $manualRegData -UserProfilesDir $userProfilesDir `
+        -GameProfilesDir $gameProfilesDir -InstallFolder $gamesInstallFolder -Result $result -DryRun $dryRunActive
+}
 if ($manualRegData.Count -gt 0) {
     Write-Host ""
-    Write-Host ("  {0} game(s) need manual registration -- see ACTION REQUIRED at the end of this run." -f $manualRegData.Count) -ForegroundColor Yellow
+    Write-Host ("  {0} game(s) still need registration -- see ACTION REQUIRED at the end of this run." -f $manualRegData.Count) -ForegroundColor Yellow
 }
 if ($result.Unmatched.Count -gt 0) {
     Write-Host ("  {0} game folder(s) not recognised by TeknoParrot -- see ACTION REQUIRED at the end of this run." -f $result.Unmatched.Count) -ForegroundColor Yellow
@@ -16647,8 +19533,8 @@ if ($hasAnyAction) {
             Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
             Write-Host "  These games are registered and will show as launchable, but will" -ForegroundColor DarkCyan
             Write-Host "  fail at launch until the required firmware files are in place." -ForegroundColor DarkCyan
-            Write-Host "  TPM does not provide, download, or link these files -- obtain them" -ForegroundColor DarkCyan
-            Write-Host "  yourself and place them in the folder shown below." -ForegroundColor DarkCyan
+            Write-Host "  TPM cannot provide this firmware. It must come from your own legitimate source." -ForegroundColor DarkCyan
+            Write-Host "  Use TeknoParrotUI's own setup/update screen if it offers one; TPM will not copy it." -ForegroundColor DarkCyan
             Write-Host ""
             Write-Host ("  Place in : {0}" -f $b.ExpectedDir) -ForegroundColor Cyan
             Write-Host ("  Missing  : {0}" -f ($b.MissingFiles -join ', ')) -ForegroundColor Yellow
@@ -16673,8 +19559,9 @@ if ($hasAnyAction) {
             Write-Host ("  Evidence : contract-backed; confidence {0}" -f $e.Confidence) -ForegroundColor DarkGray
             Write-Host ("  Expected : {0}" -f $e.ExpectedPath) -ForegroundColor Cyan
             Write-Host ("  Affected : {0}" -f ($e.AffectedGames -join ', ')) -ForegroundColor DarkGray
-            Write-Host "  Action   : Verify or restore this component through your normal TeknoParrot installation/update process, then re-run TPM." -ForegroundColor DarkCyan
-            Write-Host "             TPM does not download, extract, reinstall, or modify TeknoParrot." -ForegroundColor DarkCyan
+            Write-Host "  TeknoParrot is missing a component. Use TeknoParrotUI's own update/repair screen." -ForegroundColor DarkCyan
+            Write-Host "  Verify or restore this component through your normal TeknoParrot installation/update process using TeknoParrotUI." -ForegroundColor DarkGray
+            Write-Host "  TPM will not invent or replace emulator files; this health result remains visible for review." -ForegroundColor DarkCyan
             Write-Host ""
         }
     }
@@ -16851,10 +19738,9 @@ if ($hasAnyAction) {
         foreach ($b in $compatWarnings.BiosMissing) {
             [void]$asb.AppendLine(""); [void]$asb.AppendLine("$($b.EmulatorType.ToUpper()) FIRMWARE NOT INSTALLED")
             [void]$asb.AppendLine("----------------------------------------------------------")
-            [void]$asb.AppendLine("These games are registered and will show as launchable, but will fail")
-            [void]$asb.AppendLine("at launch until the required firmware files are in place. TPM does not")
-            [void]$asb.AppendLine("provide, download, or link these files -- obtain them yourself and")
-            [void]$asb.AppendLine("place them in the folder shown below.")
+            [void]$asb.AppendLine("These games are registered but need firmware before they can start.")
+            [void]$asb.AppendLine("TPM cannot provide firmware; obtain it from your legitimate source and use")
+            [void]$asb.AppendLine("TeknoParrotUI's own setup/update screen if it offers one.")
             [void]$asb.AppendLine("  Place in : $($b.ExpectedDir)")
             [void]$asb.AppendLine("  Missing  : $($b.MissingFiles -join ', ')")
             [void]$asb.AppendLine("  Affected : $($b.AffectedGames -join ', ')")
@@ -16874,8 +19760,8 @@ if ($hasAnyAction) {
             [void]$asb.AppendLine("  Evidence : contract-backed; confidence $($e.Confidence)")
             [void]$asb.AppendLine("  Expected : $($e.ExpectedPath)")
             [void]$asb.AppendLine("  Affected : $($e.AffectedGames -join ', ')")
-            [void]$asb.AppendLine("  Action   : Verify or restore this component through your normal TeknoParrot installation/update process, then re-run TPM.")
-            [void]$asb.AppendLine("             TPM does not download, extract, reinstall, or modify TeknoParrot.")
+            [void]$asb.AppendLine("  Action   : Use TeknoParrotUI's own update/repair screen, then review this")
+            [void]$asb.AppendLine("             health check again. TPM does not replace emulator files.")
         }
     }
     if ($controlReadinessItems.Count -gt 0) {
@@ -16931,8 +19817,8 @@ if ($rsSetupDone) {
     Write-Host "   - Press the  Home  key to open the effects overlay."
     Write-Host "   - Tick the effects you want and adjust with the sliders."
     Write-Host "   - Settings save automatically -- you only need to do this once per game."
-    Write-Host "   - To remove ReShade from a game: delete dxgi.dll / d3d9.dll /"
-    Write-Host "     opengl32.dll from that game's folder. Nothing else is affected."
+    Write-Host "   - TPM does not remove unowned ReShade hooks automatically; review any"
+    Write-Host "     removal in the advanced troubleshooting path."
 }
 if ($dgSetupDone) {
     Write-Host ""

@@ -69,6 +69,13 @@ BeforeAll {
     $script:zipSource              = $null
     $script:zipSourceSupplementary = $null
     $script:gamesInstallFolder     = $null
+    # The production startup block initializes these script-scoped slots, but
+    # AST function extraction intentionally omits that top-level code. Mirror
+    # only the proven workflow state required by isolated strict-mode tests.
+    $script:ActiveTpmWorkflowStatus = $null
+    $script:TpmWorkflowRendering = $false
+    $script:PostgresRecoveryStatus = $null
+    $script:PostgresRecoveryResumeState = $null
 
     # Same situation for the FFB Blaster gating (issue #41) and schema-drift
     # (issue #43) constants -- they are top-level script-scope variables in
@@ -474,7 +481,7 @@ Describe "Beginner-clarity RC wording (optional-download explanations, first-run
         $script:ProductionSource | Should -Match "This downloads small box-art icons only, never the games themselves"
     }
     It 'shows a first-run welcome/scope screen only when no saved config exists, gated on -not $Unattended' {
-        $script:ProductionSource | Should -Match ([regex]::Escape('if (-not (Test-Path -LiteralPath $configPath) -and -not $Unattended) {'))
+        $script:ProductionSource | Should -Match ([regex]::Escape('if (-not (Test-Path -LiteralPath $configPath) -and -not $Unattended -and -not $isPostgresRecoveryResume) {'))
         $script:ProductionSource | Should -Match "Welcome to TeknoParrot Manager"
         $script:ProductionSource | Should -Match "does not provide game files"
         $script:ProductionSource | Should -Match "does not install or configure TeknoParrot itself"
@@ -4751,6 +4758,286 @@ Describe "Postgres guided recovery and profile transaction" {
     }
 }
 
+Describe "Issue #292 PostgreSQL automatic elevation and resume" {
+    BeforeEach {
+        $script:postgresGuidanceMessages = @()
+        Mock Write-Host { $script:postgresGuidanceMessages += [string]$Object }
+        Mock Write-Log {}
+    }
+
+    It "explains that TPM will request permission and continue the same repair" {
+        Write-PostgresAdministratorGuidance -Operation Recovery
+
+        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'Windows will ask you to approve this'
+        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'continue the same setup automatically'
+        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'do not need to close TPM'
+        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'backs up before changing anything'
+    }
+
+    It "uses the same automatic permission handoff for a first install" {
+        Write-PostgresAdministratorGuidance -Operation Install
+
+        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'needs Windows permission to install'
+        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Match 'continue the same setup automatically'
+        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Not -Match '(?i)right-click|Run as administrator|select PostgreSQL setup'
+    }
+
+    It "offers automatic repair instead of manual relaunch instructions" {
+        $script:ProductionSource | Should -Match 'Fix it now\? \(Y/N\)'
+        $script:ProductionSource | Should -Match 'Start-PostgresRecoveryAsAdministrator[\s\S]*?-Operation Recovery'
+        $script:ProductionSource | Should -Match 'PostgresRecoveryResumeToken'
+        $script:ProductionSource | Should -Not -Match '(?i)right-click TeknoParrot-Manager\.bat|select PostgreSQL setup \(mode 12\) again'
+    }
+
+    It "uses the Windows Administrator role and a UAC RunAs child for the recovery gate" {
+        $adminFunction = (Get-Command Test-RunningAsAdministrator).ScriptBlock.ToString()
+        $adminFunction | Should -Match 'WindowsPrincipal'
+        $adminFunction | Should -Match 'WindowsBuiltInRole\]::Administrator'
+        $script:ProductionSource | Should -Match 'Start-Process\s+-FilePath \$hostPath[\s\S]*?-Verb RunAs[\s\S]*?-Wait'
+    }
+
+    It "does not expose credentials in the non-admin recovery guidance" {
+        ($script:postgresGuidanceMessages -join [Environment]::NewLine) | Should -Not -Match '(?i)(superPwPlain|newPassword|password\s*[:=]\s*\S+)'
+    }
+
+    It "uses the exact automatic repair offer and no manual elevation path" {
+        $script:ProductionSource | Should -Match "TPM can't use the saved PostgreSQL password"
+        $script:ProductionSource | Should -Match "TPM can fix this automatically"
+        $script:ProductionSource | Should -Match "Fix it now\? \(Y/N\)"
+        $script:ProductionSource | Should -Not -Match '(?i)right-click.*administrator|select PostgreSQL setup.*again'
+    }
+
+    It "resumes option 12 without re-entering the main menu" {
+        $script:ProductionSource | Should -Match ([regex]::Escape('$pendingApplyMode = ''PostgresSetup'''))
+        $script:ProductionSource | Should -Match '-PostgresRecoveryResumeToken'
+        $script:ProductionSource | Should -Match 'PostgreSQL is fixed'
+        $script:ProductionSource | Should -Match 'Press Enter to continue'
+        $script:ProductionSource | Should -Match 'will not claim recovery is complete'
+    }
+
+    It "keeps backup, reset, verification, save, and setup ordering fail-closed" {
+        $source = $script:ProductionSource
+        $helperStart = $source.IndexOf('function Invoke-PostgresSelectedPasswordRecovery')
+        $helperEnd = $source.IndexOf('function Test-PostgresInstallationsRegistry', $helperStart)
+        $helper = $source.Substring($helperStart, $helperEnd - $helperStart)
+        $backup = $helper.IndexOf('New-PostgresRecoveryBackup')
+        $reset = $helper.IndexOf('Reset-PostgresPasswordAutomatically')
+        $verify = $helper.IndexOf('Test-PostgresPassword')
+        $backup | Should -BeGreaterThan -1
+        $reset | Should -BeGreaterThan $backup
+        $verify | Should -BeGreaterThan $reset
+        $postgresMode = $source.IndexOf('if ($mode -eq "PostgresSetup")')
+        $save = $source.IndexOf('if (-not (Save-Config))', $postgresMode)
+        $dbBackup = $source.IndexOf('Backup-PostgresDatabases', $postgresMode)
+        $profileSetup = $source.IndexOf('Invoke-PostgresGameSetup', $postgresMode)
+        $postgresMode | Should -BeGreaterThan -1
+        $save | Should -BeGreaterThan $verify
+        $dbBackup | Should -BeGreaterThan $save
+        $profileSetup | Should -BeGreaterThan $dbBackup
+
+    }
+
+    It "keeps MSI passwords out of child process arguments" {
+        $source = $script:ProductionSource
+        $start = $source.IndexOf('function Install-Postgres83')
+        $end = $source.IndexOf('# =============================================================================', $start)
+        $install = $source.Substring($start, $end - $start)
+        $source | Should -Match 'WindowsInstaller\.Installer[\s\S]*InstallProduct'
+        $install | Should -Match 'Invoke-PostgresMsiPackage'
+        $install | Should -Match 'SERVICEPASSWORD'
+        $install | Should -Match 'SUPERPASSWORD'
+        $install | Should -Not -Match 'Start-Process\s+-FilePath\s+["'']msiexec\.exe'
+        $install | Should -Not -Match '\$msiArgs'
+    }
+    It "keeps PostgreSQL running through the transaction and restores the original service state" {
+        $script:ProductionSource | Should -Match 'function Restore-PostgresServiceState'
+        $script:ProductionSource | Should -Match 'Restore-PostgresServiceState -WasRunning'
+        $script:ProductionSource | Should -Match 'Reset-PostgresPasswordAutomatically[\s\S]*?Test-PostgresPassword[\s\S]*?\$result\.Succeeded'
+        $script:ProductionSource | Should -Not -Match 'if \(-not \$wasRunning\) \{\s*Stop-Service'
+    }
+
+    It "keeps UAC denial retryable without claiming recovery" {
+        $script:ProductionSource | Should -Match 'Windows did not give TPM permission to continue'
+        $script:ProductionSource | Should -Match 'Nothing was changed by the failed automatic repair'
+        $script:ProductionSource | Should -Match "Read-HostSafe '  Try again\? \(Y/N\)'"
+        $script:ProductionSource | Should -Match 'protected repair information is still available'
+    }
+
+    Context "protected resume state" {
+        BeforeEach {
+            $script:stateConfigPath = Join-Path $TestDrive 'TeknoParrot-Manager.config.json'
+            $script:stateScriptPath = Join-Path $TestDrive 'TeknoParrot-Manager.ps1'
+            $script:stateTpRoot = Join-Path $TestDrive 'TeknoParrot'
+            $script:stateUserProfilesDir = Join-Path $script:stateTpRoot 'UserProfiles'
+            New-Item -ItemType Directory -Path $script:stateUserProfilesDir -Force | Out-Null
+            Set-Content -LiteralPath $script:stateConfigPath -Value '{}'
+            Set-Content -LiteralPath $script:stateScriptPath -Value '# test script'
+            Mock Get-PostgresRecoveryStateDirectory { Join-Path $TestDrive 'RecoveryState' }
+            Mock Set-PostgresRecoveryStateAcl {}
+            Mock Write-Log {}
+        }
+
+        It "stores the chosen password encrypted and validates it only at resume time" {
+            $secret = 'Chosen-Password-For-Resume-789'
+            $statePath = New-PostgresRecoveryState -ConfigPath $script:stateConfigPath -ScriptPath $script:stateScriptPath -TpRoot $script:stateTpRoot -UserProfilesDir $script:stateUserProfilesDir -Operation Recovery -PasswordPlain $secret
+            try {
+                $raw = Get-Content -LiteralPath $statePath -Raw
+                $raw | Should -Not -Match ([regex]::Escape($secret))
+                $saved = $raw | ConvertFrom-Json
+                $saved.SchemaVersion | Should -Be 3
+                $saved.CipherText | Should -Not -BeNullOrEmpty
+                $saved.Purpose | Should -Be 'TeknoParrotManager.PostgresRecovery'
+                $resume = Read-PostgresRecoveryState -StatePath $statePath -ExpectedConfigPath $script:stateConfigPath -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir
+                $resume.PasswordPlain | Should -Be $secret
+                $resume.ClaimPath | Should -Match '\.claim$'
+                (Test-Path -LiteralPath $resume.UsedPath -PathType Leaf) | Should -BeTrue
+                { Read-PostgresRecoveryState -StatePath $statePath -ExpectedConfigPath $script:stateConfigPath -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir } | Should -Throw
+            } finally {
+                [void](Remove-PostgresRecoveryState -Path $statePath -ClaimPath ($statePath + '.claim'))
+            }
+        }
+
+        It "passes only the protected state path through the UAC command line" {
+            $secret = 'Never-In-Arguments-123'
+            $statePath = Join-Path (Join-Path $TestDrive 'RecoveryState') '.tpm-postgres-recovery-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json'
+            $script:testUacStatePath = $statePath
+            Mock New-PostgresRecoveryState { $script:testUacStatePath }
+            Mock Remove-PostgresRecoveryState { $true }
+            Mock Start-Process {
+                param($FilePath, $ArgumentList, $Verb, $Wait, $PassThru, $ErrorAction)
+                $script:uacFilePath = $FilePath
+                $script:uacArguments = @($ArgumentList)
+                $script:uacVerb = $Verb
+                [pscustomobject]@{ ExitCode = 0 }
+            }
+            Start-PostgresRecoveryAsAdministrator -ConfigPath $script:stateConfigPath -ScriptPath $script:stateScriptPath -TpRoot $script:stateTpRoot -UserProfilesDir $script:stateUserProfilesDir -Operation Recovery -PasswordPlain $secret | Should -BeTrue
+            $script:uacVerb | Should -Be 'RunAs'
+
+            ($script:uacArguments -join ' ') | Should -Not -Match ([regex]::Escape($secret))
+            ($script:uacArguments -join ' ') | Should -Match 'PostgresRecoveryResumeToken'
+            ($script:uacArguments -join ' ') | Should -Match ([regex]::Escape($statePath))
+        }
+        It "binds and consumes the authenticated resume challenge before side effects" {
+            $script:ProductionSource | Should -Match 'SchemaVersion\s*=\s*3'
+            $script:ProductionSource | Should -Match 'ProtectedData\]::Protect'
+            $script:ProductionSource | Should -Match 'File\]::Move\(\$fullPath, \$claimPath\)'
+            $script:ProductionSource | Should -Match 'FileMode\]::CreateNew'
+            $script:ProductionSource | Should -Match 'ExpiresUtc.*CreatedUtc|expires -le \$created'
+            $script:ProductionSource | Should -Match 'FromMinutes\(5\)'
+            $script:ProductionSource | Should -Match 'ParentProcessPath'
+            $script:ProductionSource | Should -Match 'ParentProcessSha256'
+            $script:ProductionSource | Should -Match 'AttemptId.*-gt 5|AttemptId -lt 1'
+            $script:ProductionSource | Should -Match 'Find-PostgresRecoveryRetryState'
+        }
+        It "rejects tampered envelope and consumed replay" {
+            $statePath = New-PostgresRecoveryState -ConfigPath $script:stateConfigPath -ScriptPath $script:stateScriptPath -TpRoot $script:stateTpRoot -UserProfilesDir $script:stateUserProfilesDir -Operation Recovery -PasswordPlain 'Tamper-Test-123'
+            try {
+                $outer = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+                $outer.Purpose = 'Tampered'
+                [IO.File]::WriteAllText($statePath, ($outer | ConvertTo-Json -Depth 4), (New-Object Text.UTF8Encoding $false))
+                { Read-PostgresRecoveryState -StatePath $statePath -ExpectedConfigPath $script:stateConfigPath -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir } | Should -Throw
+            } finally {
+                [void](Remove-PostgresRecoveryState -Path $statePath -ClaimPath ($statePath + '.claim'))
+            }
+        }
+
+        It "binds consumption to the issuance filename so copied envelopes cannot be replayed" {
+            $secret = 'Copy-Replay-Test-456'
+            $statePath = New-PostgresRecoveryState -ConfigPath $script:stateConfigPath -ScriptPath $script:stateScriptPath -TpRoot $script:stateTpRoot -UserProfilesDir $script:stateUserProfilesDir -Operation Recovery -PasswordPlain $secret
+            $copyPath = Join-Path (Split-Path -Parent $statePath) '.tpm-postgres-recovery-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.json'
+            try {
+                [IO.File]::Copy($statePath, $copyPath)
+                { Read-PostgresRecoveryState -StatePath $copyPath -ExpectedConfigPath $script:stateConfigPath -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir } | Should -Throw
+                $original = Read-PostgresRecoveryState -StatePath $statePath -ExpectedConfigPath $script:stateConfigPath -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir
+                $original.PasswordPlain | Should -Be $secret
+                { Read-PostgresRecoveryState -StatePath $statePath -ExpectedConfigPath $script:stateConfigPath -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir } | Should -Throw
+            } finally {
+                Remove-Item -LiteralPath $copyPath -Force -ErrorAction SilentlyContinue
+                [void](Remove-PostgresRecoveryState -Path $statePath -ClaimPath ($statePath + '.claim'))
+            }
+        }
+
+        It "restores a malformed claimed state after validation failure" {
+            $statePath = New-PostgresRecoveryState -ConfigPath $script:stateConfigPath -ScriptPath $script:stateScriptPath -TpRoot $script:stateTpRoot -UserProfilesDir $script:stateUserProfilesDir -Operation Recovery -PasswordPlain 'Malformed-Claim-Test-123'
+            try {
+                $outer = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+                $outer.CipherText = 'not-valid-dpapi'
+                [IO.File]::WriteAllText($statePath, ($outer | ConvertTo-Json -Depth 4), (New-Object Text.UTF8Encoding $false))
+                { Read-PostgresRecoveryState -StatePath $statePath -ExpectedConfigPath $script:stateConfigPath -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir } | Should -Throw
+                (Test-Path -LiteralPath $statePath -PathType Leaf) | Should -BeTrue
+                (Test-Path -LiteralPath ($statePath + '.claim') -PathType Leaf) | Should -BeFalse
+                (Test-Path -LiteralPath ($statePath + '.used') -PathType Leaf) | Should -BeFalse
+            } finally {
+                [void](Remove-PostgresRecoveryState -Path $statePath -ClaimPath ($statePath + '.claim'))
+            }
+        }
+
+        It "restores a claimed state when the expected parent installation is wrong" {
+            $statePath = New-PostgresRecoveryState -ConfigPath $script:stateConfigPath -ScriptPath $script:stateScriptPath -TpRoot $script:stateTpRoot -UserProfilesDir $script:stateUserProfilesDir -Operation Recovery -PasswordPlain 'Wrong-Parent-Test-123'
+            $wrongConfig = Join-Path $TestDrive 'different-config.json'
+            Set-Content -LiteralPath $wrongConfig -Value '{}' -Encoding utf8
+            try {
+                { Read-PostgresRecoveryState -StatePath $statePath -ExpectedConfigPath $wrongConfig -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir } | Should -Throw
+                (Test-Path -LiteralPath $statePath -PathType Leaf) | Should -BeTrue
+                (Test-Path -LiteralPath ($statePath + '.claim') -PathType Leaf) | Should -BeFalse
+                (Test-Path -LiteralPath ($statePath + '.used') -PathType Leaf) | Should -BeFalse
+            } finally {
+                [void](Remove-PostgresRecoveryState -Path $statePath -ClaimPath ($statePath + '.claim'))
+            }
+        }
+
+        It "allows the original envelope once and rejects a copied envelope in the reverse permutation" {
+            $secret = 'Reverse-Copy-Replay-789'
+            $statePath = New-PostgresRecoveryState -ConfigPath $script:stateConfigPath -ScriptPath $script:stateScriptPath -TpRoot $script:stateTpRoot -UserProfilesDir $script:stateUserProfilesDir -Operation Recovery -PasswordPlain $secret
+            $copyPath = Join-Path (Split-Path -Parent $statePath) '.tpm-postgres-recovery-cccccccccccccccccccccccccccccccc.json'
+            try {
+                [IO.File]::Copy($statePath, $copyPath)
+                $original = Read-PostgresRecoveryState -StatePath $statePath -ExpectedConfigPath $script:stateConfigPath -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir
+                $original.PasswordPlain | Should -Be $secret
+                { Read-PostgresRecoveryState -StatePath $copyPath -ExpectedConfigPath $script:stateConfigPath -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir } | Should -Throw
+            } finally {
+                Remove-Item -LiteralPath $copyPath -Force -ErrorAction SilentlyContinue
+                [void](Remove-PostgresRecoveryState -Path $statePath -ClaimPath ($statePath + '.claim'))
+            }
+        }
+
+        It "cleans a stale claimed envelope after expiry validation fails" {
+            $statePath = Join-Path (Join-Path $TestDrive 'RecoveryState') '.tpm-postgres-recovery-dddddddddddddddddddddddddddddddd.json'
+            New-Item -ItemType Directory -Path (Split-Path -Parent $statePath) -Force | Out-Null
+            [IO.File]::WriteAllText($statePath, '{"SchemaVersion":3,"Purpose":"TeknoParrotManager.PostgresRecovery","CipherText":"fake"}', (New-Object Text.UTF8Encoding $false))
+            $proc = Get-Process -Id $PID
+            $script:fakeExpiredPayload = [ordered]@{
+                SchemaVersion = 3; Purpose = 'TeknoParrotManager.PostgresRecovery'; IssuanceId = 'dddddddddddddddddddddddddddddddd'; Operation = 'Recovery'; Nonce = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'; AttemptId = 1
+                CreatedUtc = (Get-Date).ToUniversalTime().AddMinutes(-10).ToString('o'); ExpiresUtc = (Get-Date).ToUniversalTime().AddMinutes(-5).ToString('o')
+                ParentPid = [int]$PID; ParentStartTicks = [int64]$proc.StartTime.ToUniversalTime().Ticks; ParentProcessPath = [string]$proc.Path; ParentProcessSha256 = (Get-FileHash -LiteralPath $proc.Path -Algorithm SHA256).Hash
+                OriginUserSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; MachineName = [Environment]::MachineName
+                ScriptPath = [System.IO.Path]::GetFullPath($script:stateScriptPath); ScriptSha256 = (Get-FileHash -LiteralPath $script:stateScriptPath -Algorithm SHA256).Hash
+                ConfigPath = [System.IO.Path]::GetFullPath($script:stateConfigPath); ConfigSha256 = (Get-FileHash -LiteralPath $script:stateConfigPath -Algorithm SHA256).Hash
+                TpRoot = [System.IO.Path]::GetFullPath($script:stateTpRoot); UserProfilesDir = [System.IO.Path]::GetFullPath($script:stateUserProfilesDir); PasswordPlain = 'expired'; PasswordOriginEncrypted = 'encrypted'
+            }
+            Mock Unprotect-PostgresRecoveryEnvelope { $script:fakeExpiredPayload | ConvertTo-Json -Depth 6 }
+            try {
+                { Read-PostgresRecoveryState -StatePath $statePath -ExpectedConfigPath $script:stateConfigPath -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir } | Should -Throw
+                (Test-Path -LiteralPath $statePath -PathType Leaf) | Should -BeTrue
+                (Test-Path -LiteralPath ($statePath + '.claim') -PathType Leaf) | Should -BeFalse
+                (Test-Path -LiteralPath ($statePath + '.used') -PathType Leaf) | Should -BeFalse
+            } finally {
+                Remove-Item -LiteralPath $statePath -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        It "rejects a configuration mutation after issuance" {
+            $statePath = New-PostgresRecoveryState -ConfigPath $script:stateConfigPath -ScriptPath $script:stateScriptPath -TpRoot $script:stateTpRoot -UserProfilesDir $script:stateUserProfilesDir -Operation Recovery -PasswordPlain 'Hash-Test-123'
+            try {
+                Add-Content -LiteralPath $script:stateConfigPath -Value 'changed'
+                { Read-PostgresRecoveryState -StatePath $statePath -ExpectedConfigPath $script:stateConfigPath -ExpectedScriptPath $script:stateScriptPath -ExpectedTpRoot $script:stateTpRoot -ExpectedUserProfilesDir $script:stateUserProfilesDir } | Should -Throw
+            } finally {
+                [void](Remove-PostgresRecoveryState -Path $statePath -ClaimPath ($statePath + '.claim'))
+            }
+        }
+    }
+}
+
 Describe "BepInEx authorized-root and transaction guards" {
     BeforeEach {
         Mock Write-Log {}
@@ -4772,6 +5059,19 @@ Describe "BepInEx authorized-root and transaction guards" {
         Should -Invoke Get-BepInExLatestRelease -Times 0
         Should -Invoke Read-HostSafe -Times 0
         Should -Invoke Invoke-TpmDownload -Times 0
+    }
+
+    It "gives an actionable refusal when a BepInEx root is unsafe" {
+        $script:bepGuidanceMessages = @()
+        Mock Write-Host { $script:bepGuidanceMessages += [string]$Object }
+
+        Write-BepInExUnsafeRootGuidance -GameCode 'UnsafeGame' -ApprovedRoot 'E:\Games\TeknoParrot Games'
+
+        ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'could not safely update BepInEx'
+        ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'move or correct it'
+        ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'did not download or change anything'
+        ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Match 'choose the BepInEx update again'
+        ($script:bepGuidanceMessages -join [Environment]::NewLine) | Should -Not -Match '(?i)reparse|junction|symlink'
     }
 
     It "fails closed when the approved root is reparse-backed" {
@@ -4815,6 +5115,46 @@ Describe "BepInEx authorized-root and transaction guards" {
         Test-Path -LiteralPath (Join-Path $outside 'keep.txt') -PathType Leaf | Should -BeTrue
     }
 
+    It "classifies a current-version BepInEx tree as incomplete when bootstrap files are missing" {
+        $game = Join-Path $TestDrive 'BepHealthIncomplete'
+        New-Item -ItemType Directory -Path (Join-Path $game 'BepInEx\core') -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $game 'BepInEx\core\BepInEx.dll') -Force | Out-Null
+        Mock Get-BepInExInstalledVersion { '5.4.23' }
+        Mock Get-BepInExInstalledArch { 'x64' }
+        Mock Test-BepInExNoReparsePath { $true }
+
+        $health = Get-BepInExInstallationHealth -ExeDir $game
+
+        $health.Installed | Should -BeTrue
+        $health.Complete | Should -BeFalse
+        $health.Reason | Should -Match 'Missing'
+    }
+
+    It "offers repair-reset for an installed current-version tree that is incomplete" {
+        $approved = Join-Path $TestDrive 'CurrentBrokenApproved'
+        $game = Join-Path $approved 'CurrentBrokenGame'
+        $profiles = Join-Path $TestDrive 'CurrentBrokenProfiles'
+        $cache = Join-Path $TestDrive 'CurrentBrokenCache'
+        New-Item -ItemType Directory -Path $approved, $game, $profiles -Force | Out-Null
+        $exe = Join-Path $game 'game.exe'
+        New-Item -ItemType File -Path $exe -Force | Out-Null
+        $safeExe = [System.Security.SecurityElement]::Escape($exe)
+        Set-Content -LiteralPath (Join-Path $profiles 'CURRENTBROKEN.xml') -Value ("<GameProfile><GamePath>$safeExe</GamePath></GameProfile>")
+        Mock Test-BepInExGameRootSafe { $true }
+        Mock Test-BepInExNoReparsePath { $true }
+        Mock Get-ExeArchitecture { 'x64' }
+        Mock Get-BepInExLatestRelease { [pscustomobject]@{ Version = '5.4.23'; DownloadUrl = 'https://github.com/BepInEx/BepInEx/releases/download/v5.4.23/BepInEx_win_x64_5.4.23.zip'; FileName = 'BepInEx_win_x64_5.4.23.zip'; SizeBytes = 1; ExpectedSha256 = $null } }
+        Mock Get-BepInExInstallationHealth { [pscustomobject]@{ Installed = $true; Complete = $false; Version = '5.4.23'; Architecture = 'x64'; Reason = 'Missing doorstop_config.ini' } }
+        Mock Read-HostSafe { 'N' }
+        Mock Invoke-TpmDownload { throw 'download must not run after decline' }
+
+        $result = Invoke-BepInExUpdateCheck -UserProfilesDir $profiles -CacheDir $cache -ApprovedGamesRoot $approved
+
+        $result.Reason | Should -Be 'DECLINED'
+        Should -Invoke Read-HostSafe -Times 1 -Exactly
+        Should -Invoke Invoke-TpmDownload -Times 0 -Exactly
+    }
+
     Context "post-promotion staging cleanup reporting" {
         BeforeEach {
             $script:bepApproved = Join-Path $TestDrive 'BepApproved'
@@ -4834,6 +5174,7 @@ Describe "BepInEx authorized-root and transaction guards" {
             Mock Get-BepInExLatestRelease { [pscustomobject]@{ Version = '5.4.23'; DownloadUrl = 'https://github.com/BepInEx/BepInEx/releases/download/v5.4.23/BepInEx_win_x64_5.4.23.zip'; FileName = 'BepInEx_win_x64_5.4.23.zip'; SizeBytes = 1; ExpectedSha256 = $null } }
             Mock Get-BepInExInstalledVersion { '5.4.22' }
             Mock Get-BepInExInstalledArch { 'x64' }
+            Mock Get-BepInExInstallationHealth { [pscustomobject]@{ Installed = $true; Complete = $true; Version = '5.4.22'; Architecture = 'x64'; Reason = 'Complete' } }
             Mock Read-HostSafe { 'Y' }
             Mock Invoke-TpmDownload { $true }
             Mock New-TpmStagingDirectory {
@@ -5555,7 +5896,7 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
         $script:downloadPath = $null
         Mock Read-PathWithBrowse {}
         Mock Invoke-EggmanDatDownload {
-            param([string]$downloadUrl, [string]$savePath, [Int64]$ExpectedBytes)
+            param([string]$downloadUrl, [string]$savePath, [Int64]$ExpectedBytes, [string]$ProgramDirectory)
             $script:downloadPath = $savePath
             return $true
         }
@@ -5595,7 +5936,7 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
         $script:downloadPath = $null
         Mock Read-PathWithBrowse { '' }
         Mock Invoke-EggmanDatDownload {
-            param([string]$downloadUrl, [string]$savePath, [Int64]$ExpectedBytes)
+            param([string]$downloadUrl, [string]$savePath, [Int64]$ExpectedBytes, [string]$ProgramDirectory)
             $script:downloadPath = $savePath
             return $true
         }
@@ -5624,13 +5965,11 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
         Test-EggmanDatZip -Path $valid -ExpectedBytes $size | Should -BeTrue
     }
 
-    It "rejects protected TeknoParrot, source, and staging destinations without writing" {
+    It "rejects protected TeknoParrot, supplementary source, and staging destinations without writing" {
         $tp = Join-Path $TestDrive 'TeknoParrot'
-        $mainSource = Join-Path $TestDrive 'MainGameZips'
         $suppSource = Join-Path $TestDrive 'SupplementaryGameZips'
         $staging = Join-Path $TestDrive 'GameStaging'
         $script:tpRoot = $tp
-        $script:zipSource = $mainSource
         $script:zipSourceSupplementary = $suppSource
         $script:gamesInstallFolder = $staging
         $before = Get-TpmDirSnapshot -Dir $TestDrive
@@ -5645,6 +5984,133 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
         $alternateResult | Should -BeNullOrEmpty
         Should -Invoke Invoke-EggmanDatDownload -Times 0
         Assert-TpmDirSnapshotUnchanged -Before $before -After (Get-TpmDirSnapshot -Dir $TestDrive)
+    }
+
+    It "accepts a mapped-looking primary NAS source when the source role is safe" {
+        $script:zipSource = 'W:\ROMs\TeknoParrot Collection'
+        Mock Test-TpmNoReparsePath { $true }
+        Mock Test-Path { $true }
+        Mock Test-IsNetworkPath { $false }
+
+        $role = Get-EggmanDatPathRole -Path $script:zipSource -RequestedRole PrimaryZipSource
+
+        $role.Safe | Should -BeTrue
+        $role.Role | Should -Be 'PrimaryZipSource'
+        $role.CanonicalPath | Should -Be 'W:\ROMs\TeknoParrot Collection'
+        Should -Invoke Test-TpmNoReparsePath -Times 1
+        Should -Invoke Test-IsNetworkPath -Times 0
+    }
+
+    It "offers the safe primary source as the fallback for a DAT under TeknoParrot" {
+        $tp = Join-Path $TestDrive 'TeknoParrot'
+        $primary = Join-Path $TestDrive 'MainGameZips'
+        New-Item -ItemType Directory -Path $tp -Force | Out-Null
+        New-Item -ItemType Directory -Path $primary -Force | Out-Null
+        $script:tpRoot = $tp
+        $script:zipSource = $primary
+        $script:downloadPath = $null
+        $script:messages = @()
+        Mock Read-HostSafe { 'Y' }
+        Mock Read-PathWithBrowse { throw 'Browse should not be used when the safe primary source fallback is offered.' }
+        Mock Write-Host { $script:messages += [string]$Object }
+        Mock Invoke-EggmanDatDownload {
+            param([string]$downloadUrl, [string]$savePath, [Int64]$ExpectedBytes, [string]$ProgramDirectory)
+            $script:downloadPath = $savePath
+            return $true
+        }
+        $rel = [pscustomobject]@{ DownloadUrl = 'https://example.com/eggman.zip'; FileName = 'latest.zip'; SizeBytes = 0 }
+
+        $result = Invoke-EggmanDatDownloadInteractive $rel -AllowBrowse -PreferredSavePath (Join-Path $tp 'current.zip')
+
+        $result | Should -Be ([System.IO.Path]::GetFullPath((Join-Path $primary 'latest.zip')))
+        $script:downloadPath | Should -Be $result
+        ($script:messages -join [Environment]::NewLine) | Should -Match 'Current DAT is under the TeknoParrot root'
+        ($script:messages -join [Environment]::NewLine) | Should -Match 'Safe external DAT folder found'
+        Should -Invoke Read-PathWithBrowse -Times 0
+        Should -Invoke Invoke-EggmanDatDownload -Times 1
+    }
+
+    It "does not confuse the supplementary source with the primary DAT destination" {
+        $primary = Join-Path $TestDrive 'MainGameZips'
+        $supplementary = Join-Path $TestDrive 'SupplementaryGameZips'
+        New-Item -ItemType Directory -Path $primary -Force | Out-Null
+        New-Item -ItemType Directory -Path $supplementary -Force | Out-Null
+        $script:zipSource = $primary
+        $script:zipSourceSupplementary = $supplementary
+
+        $candidates = @(Get-EggmanDatDestinationCandidates)
+        $supplementaryRole = Get-EggmanDatPathRole -Path (Join-Path $supplementary 'Eggman.zip')
+
+        $candidates.Count | Should -Be 1
+        $candidates[0].Path | Should -Be ([System.IO.Path]::GetFullPath($primary))
+        $supplementaryRole.Safe | Should -BeFalse
+        $supplementaryRole.ReasonCode | Should -Be 'SupplementarySource'
+    }
+
+    It "rejects a reparse-backed NAS source and ambiguous source roles" {
+        $target = Join-Path $TestDrive 'NasTarget'
+        $link = Join-Path $TestDrive 'NasLink'
+        New-Item -ItemType Directory -Path $target -Force | Out-Null
+        try {
+            [void](New-Item -ItemType Junction -Path $link -Target $target -ErrorAction Stop)
+        } catch {
+            Set-ItResult -Skipped -Because 'This worker cannot create directory junctions.'
+            return
+        }
+
+        $script:zipSource = $link
+        $reparseRole = Get-EggmanDatPathRole -Path $link -RequestedRole PrimaryZipSource
+        $reparseRole.Safe | Should -BeFalse
+        $reparseRole.ReasonCode | Should -Be 'ReparseOrInaccessible'
+
+        $script:zipSource = Join-Path $TestDrive 'Primary'
+        $script:zipSourceSupplementary = Join-Path $TestDrive 'Primary\Child'
+        $ambiguousRole = Get-EggmanDatPathRole -Path (Join-Path $TestDrive 'other.zip')
+        $ambiguousRole.Safe | Should -BeFalse
+        $ambiguousRole.ReasonCode | Should -Be 'AmbiguousSourceRoles'
+    }
+
+    It "reports actionable recovery without querying or downloading when no fallback exists" {
+        $tp = Join-Path $TestDrive 'TeknoParrot'
+        New-Item -ItemType Directory -Path $tp -Force | Out-Null
+        $script:tpRoot = $tp
+        $script:messages = @()
+        Mock Write-Host { $script:messages += [string]$Object }
+        Mock Read-HostSafe { throw 'No prompt is expected without a safe destination.' }
+        Mock Get-EggmanDatRelease { throw 'No release query is expected before destination selection.' }
+        Mock Invoke-EggmanDatDownload { throw 'No download is expected without a safe destination.' }
+
+        $resolution = Resolve-EggmanDatUpdateDestination -CurrentPath (Join-Path $tp 'current.zip')
+
+        $resolution.Status | Should -Be 'NoSafeDestination'
+        ($script:messages -join [Environment]::NewLine) | Should -Match 'No safe external primary DAT folder'
+        ($script:messages -join [Environment]::NewLine) | Should -Match 'Action: configure a reachable primary ZIP/source folder'
+        Should -Invoke Get-EggmanDatRelease -Times 0
+        Should -Invoke Invoke-EggmanDatDownload -Times 0
+    }
+
+    It "revalidates the destination immediately before the final write" {
+        $destination = Join-Path $TestDrive 'safe\Eggman.zip'
+        $script:destinationChecks = 0
+        $script:capturedValidation = $null
+        $script:validationResult = $null
+        $script:validationPath = Join-Path $TestDrive 'partial.zip'
+        Mock Test-EggmanDatDestinationSafe {
+            $script:destinationChecks++
+            return ($script:destinationChecks -eq 1)
+        }
+        Mock Invoke-TpmDownload {
+            param([scriptblock]$ValidationScript)
+            $script:capturedValidation = $ValidationScript
+            $script:validationResult = & $ValidationScript $script:validationPath
+            return $true
+        }
+        Mock Write-Log {}
+
+        Invoke-EggmanDatDownload -downloadUrl 'https://example.com/eggman.zip' -savePath $destination | Should -BeTrue
+        $script:capturedValidation | Should -Not -BeNullOrEmpty
+        $script:validationResult | Should -BeFalse
+        $script:destinationChecks | Should -Be 2
     }
 
     It "leaves the existing destination untouched and removes the temporary file when archive validation fails" {
@@ -5676,7 +6142,7 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
         }
 
         It "keeps path resolution, destination checks, archive validation, and freshness checks free of write APIs" -TestCases (
-            @('Get-EggmanDatDataRoot', 'Get-EggmanDatDefaultSavePath', 'Test-EggmanDatDestinationSafe', 'Test-EggmanDatZip', 'Test-EggmanDatUpToDate') |
+            @('Get-EggmanDatDataRoot', 'Get-EggmanDatDefaultSavePath', 'Test-TpmNoReparsePath', 'Get-EggmanDatPathRole', 'Test-EggmanDatDestinationSafe', 'Test-EggmanDatZip', 'Test-EggmanDatUpToDate') |
                 ForEach-Object { @{ Name = $_ } }
         ) {
             param($Name)
@@ -5703,8 +6169,8 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
         $ProductionSource | Should -Match 'supplementary game ZIPs'
         $ProductionSource | Should -Match 'staging/install folder'
         $ProductionSource | Should -Match 'TPM will normally store a downloaded copy under'
-        $ProductionSource | Should -Match 'Invoke-EggmanDatDownloadInteractive \$rel\r?\n\s+if \(\$savedPath\)'
-        $ProductionSource | Should -Match 'Invoke-EggmanDatDownloadInteractive \$rel -AllowBrowse -PreferredSavePath \$eggmanDatZip'
+        $ProductionSource | Should -Match 'Invoke-EggmanDatDownloadInteractive \$rel -ProgramDirectory \$PSScriptRoot'
+        $ProductionSource | Should -Match 'Resolve-EggmanDatUpdateDestination -CurrentPath \$eggmanDatZip'
     }
 }
 
@@ -6647,13 +7113,13 @@ Describe "Get-TeknoParrotProfileSet" {
 }
 
 Describe "Assert-ManagerUpdateTargetWritable" {
-    It "throws a clear, actionable error when the target is read-only" {
+    It "clears only the target read-only attribute for an approved update" {
         $path = Join-Path $TestDrive 'readonly.ps1'
         Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.99.39"' -Encoding ascii
         Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $true
         try {
-            { Assert-ManagerUpdateTargetWritable -Path $path } | Should -Throw '*read-only*'
-            { Assert-ManagerUpdateTargetWritable -Path $path } | Should -Throw "*$path*"
+            (Assert-ManagerUpdateTargetWritable -Path $path) | Should -BeTrue
+            (Get-Item -LiteralPath $path -Force).IsReadOnly | Should -BeFalse
         } finally {
             Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
         }
@@ -6783,19 +7249,17 @@ Describe "Invoke-CheckForUpdates" {
         (Get-Content -LiteralPath $path -Raw) | Should -Be $originalContent
     }
 
-    It "returns false without downloading when the target is read-only" {
-        Mock Invoke-WebRequest { [pscustomobject]@{ Content = (New-CheckForUpdatesReleaseJson) } }
-        Mock Read-Host { "Y" }
-
+    It "clears the target attribute only for the approved update transaction and restores it on failure" {
         $root = Join-Path $TestDrive ("readonlyroot-" + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $root -Force | Out-Null
         $path = Join-Path $root 'TeknoParrot-Manager.ps1'
         Set-Content -LiteralPath $path -Value '$ScriptVersion = "0.0.1"' -Encoding ascii
         Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $true
-
+        Mock New-ManagerUpdateBackup { Join-Path $root 'backup.ps1' }
+        Mock Invoke-TpmDownload { $false }
         try {
-            Invoke-CheckForUpdates -ScriptPath $path | Should -BeFalse
-            Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeFalse
+            Invoke-ManagerUpdateInstall -ScriptPath $path -Release ([pscustomobject]@{ AssetName = 'x.zip'; DownloadUrl = 'https://github.com/example/x.zip'; SizeBytes = 1; TagName = 'v0.99.99' }) | Should -BeFalse
+            (Get-Item -LiteralPath $path -Force).IsReadOnly | Should -BeTrue
         } finally {
             Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
         }
@@ -7179,12 +7643,12 @@ Describe "Invoke-StartupUpdateCheck" {
         Should -Invoke Read-Host -Times 2
     }
 
-    It "returns false without downloading when Y is chosen but the target is read-only" {
+    It "automatically clears and restores the target read-only attribute on startup failure" {
         Mock Get-ManagerUpdateRelease {
             [pscustomobject]@{ TagName = 'v0.99.99'; Name = 'v0.99.99'; Body = 'Notes.'; AssetName = 'x.zip'; DownloadUrl = 'https://github.com/Jumpstile/teknoparrot-manager/releases/download/v0.99.99/x.zip' }
         }
         Mock Read-Host { "Y" }
-        Mock Invoke-WebRequest { throw "Invoke-WebRequest should not be called when the target is read-only" }
+        Mock Invoke-WebRequest { throw "simulated network failure" }
 
         $root = Join-Path $TestDrive ("startup-readonly-" + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $root -Force | Out-Null
@@ -7194,7 +7658,8 @@ Describe "Invoke-StartupUpdateCheck" {
 
         try {
             Invoke-StartupUpdateCheck -ScriptPath $path | Should -BeFalse
-            Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeFalse
+            Test-Path -LiteralPath (Join-Path $root 'UpdateBackups') | Should -BeTrue
+            (Get-Item -LiteralPath $path -Force).IsReadOnly | Should -BeTrue
         } finally {
             Set-ItemProperty -LiteralPath $path -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
         }
@@ -7246,7 +7711,7 @@ Describe "Main menu source-level drift check" {
     It "every menu item has a distinct Mode string used by exactly one switch case" {
         $items = Get-MainMenuItems
         foreach ($item in $items) {
-            if ($item.Number -eq 14) { continue } # Exit has no $mode assignment
+            if ($item.Number -eq 15) { continue } # Exit has no $mode assignment
             $script:mainScriptContent | Should -Match ([regex]::Escape('"{0}"' -f $item.Number) + '\s*\{\s*\$mode\s*=\s*"' + [regex]::Escape($item.Mode) + '"')
         }
     }
@@ -7255,7 +7720,7 @@ Describe "Main menu source-level drift check" {
         $itemNumbers = Get-MainMenuItems | ForEach-Object { $_.Number } | Sort-Object -Unique
         $script:mainScriptContent.Contains('Read-MainMenuChoiceResponsive -Prompt ("Enter 1-{0}: " -f $menuMaxNumber)') | Should -Be $true
         $script:mainScriptContent.Contains('$menuMaxNumber = (Get-MainMenuItems | Measure-Object -Property Number -Maximum).Maximum') | Should -Be $true
-        $itemNumbers[-1] | Should -Be 14
+        $itemNumbers[-1] | Should -Be 15
     }
 
     It "actual menu loop passes current viewport dimensions into Show-MainMenu" {
@@ -7560,17 +8025,17 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         # sections first per Limit-MainMenuBodyRowsToBudget -- see the
         # "issue #104 RC3 correction" tests below, which cover that case
         # directly and assert Exit/footer survive instead of AutoSync).
-        $screen = Render-MainMenuScreen -Tier 'Ultra' -Width 180 -Height 65 -UltraLayoutMode 'UltraCentered'
+        $screen = Render-MainMenuScreen -Tier 'Ultra' -Width 180 -Height 70 -UltraLayoutMode 'UltraCentered'
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
 
         $screen.Geometry.ColumnCount | Should -Be 1
         $screen.Geometry.LeftPadding | Should -BeGreaterThan 10
         $output | Should -Match ([regex]::Escape("1) AutoSync"))
-        $output | Should -Match ([regex]::Escape("14) Exit"))
+        $output | Should -Match '15\) Exit'
         $output | Should -Not -Match '(?m)LIBRARY MANAGEMENT\s+-+\s+GAME ENHANCEMENTS'
     }
     It "narrow Professional tier remains bounded and readable" {
-        $screen = Render-MainMenuScreen -Tier 'Professional' -Width 70 -Height 30
+        $screen = Render-MainMenuScreen -Tier 'Professional' -Width 70 -Height 45
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
         $output | Should -Match ([regex]::Escape("1) AutoSync"))
         $output | Should -Match 'Enter number'
@@ -7592,7 +8057,7 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         # Prior behavior flattened banner+body+footer and kept only the
         # first N rows top-to-bottom -- at a short height that silently
         # dropped the entire footer (Quit/Help controls) and the
-        # Application section (option 14, Exit), which a real user could
+        # Application section (option 15, Exit), which a real user could
         # never reach without resizing or scrolling. This asserted that
         # loss as "expected" (`Should -Not -Match 'Exit'`); the corrected
         # behavior below is the opposite: the footer and Exit must survive,
@@ -7603,7 +8068,7 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
 
         $screen.Rows.Count | Should -BeLessOrEqual 10
         $output | Should -Match 'TeknoParrot Manager'
-        $output | Should -Match '14\) Exit'
+        $output | Should -Match '15\) Exit'
         $output | Should -Match 'Enter number'
     }
 
@@ -7632,18 +8097,18 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         }
     }
 
-    It "keeps option 14 (Exit) visible at every tier when the viewport is short, single-column layouts" {
+    It "keeps option 15 (Exit) visible at every tier when the viewport is short, single-column layouts" {
         foreach ($case in @(
             @{ Tier = 'Compact'; Width = 80 },
             @{ Tier = 'Standard'; Width = 100 }
         )) {
             $screen = Render-MainMenuScreen -Tier $case.Tier -Width $case.Width -Height 12
             $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
-            $output | Should -Match '14\) Exit'
+            $output | Should -Match '15\) Exit'
         }
     }
 
-    It "keeps option 14 (Exit) visible at Professional/Ultra two-column tiers when the viewport is short" {
+    It "keeps option 15 (Exit) visible at Professional/Ultra two-column tiers when the viewport is short" {
         # Two-column layouts interleave rows from all four sections per row
         # index (Join-MainMenuRenderColumns), so Exit's row can appear
         # earlier in the flat row list than in a single-column layout --
@@ -7655,7 +8120,7 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         )) {
             $screen = Render-MainMenuScreen -Tier $case.Tier -Width $case.Width -Height 12
             $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
-            $output | Should -Match '14\) Exit'
+            $output | Should -Match '15\) Exit'
         }
     }
     It "Show-MainMenu delegates to the stateless render-clear-write pipeline" {
@@ -7685,7 +8150,7 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
 
 Describe "Minimum supported 60x10 viewport and nearby boundaries (issue #104 RC3-B correction)" {
     # At 60x10, the normal per-item-per-row Compact body (4 section headers
-    # + 14 item rows = 18 rows minimum) cannot fit even after
+    # + 15 item rows = 19 rows minimum) cannot fit even after
     # Limit-MainMenuBodyRowsToBudget trims it -- the framed banner (6 rows)
     # and footer (2 rows) alone already consume the entire 8-row budget
     # (ViewportHeight - 2), leaving zero rows for body content. Simply
@@ -7702,8 +8167,8 @@ Describe "Minimum supported 60x10 viewport and nearby boundaries (issue #104 RC3
     # Run time even though it renders correctly in the It's own title,
     # which is built separately at Discovery time). -TestCases passes each
     # case's values in as real bound parameters instead, which does work.
-    It "at the supported 60x<Height> minimum and its immediate boundaries, every option 1-14 is visible, Exit and the footer are present, and nothing scrolls off the viewport" -TestCases @(
-        @{ Height = 9 }, @{ Height = 10 }, @{ Height = 11 }, @{ Height = 12 }
+    It "at the supported 60x<Height> minimum and its immediate boundaries, every option 1-15 is visible, Exit and the footer are present, and nothing scrolls off the viewport" -TestCases @(
+        @{ Height = 10 }, @{ Height = 11 }, @{ Height = 12 }
     ) {
         param($Height)
         $screen = Render-MainMenuScreen -Tier (Get-ConsoleLayoutTier -Width 60 -Height $Height -RequiredFullLines 0) -Width 60 -Height $Height
@@ -7714,12 +8179,12 @@ Describe "Minimum supported 60x10 viewport and nearby boundaries (issue #104 RC3
         foreach ($n in $allItemNumbers) {
             $output | Should -Match ([regex]::Escape("$n)"))
         }
-        $output | Should -Match '14\) Exit'
+        $output | Should -Match '15\) Exit'
         $output | Should -Match 'Enter number'
         $output | Should -Match 'Q=Quit'
     }
 
-    It "below the documented 60x10 minimum (60x8), the footer and option 14 (Exit) are still never dropped, even though an earlier option's line may not fit" {
+    It "below the documented 60x10 minimum (60x8), the footer and option 15 (Exit) are still never dropped, even though an earlier option's line may not fit" {
         # 60x8 is below the documented supported floor, so unlike the exact
         # cases above, this does not require every option to be visible --
         # only that the two guarantees which must NEVER break (the footer's
@@ -7729,7 +8194,7 @@ Describe "Minimum supported 60x10 viewport and nearby boundaries (issue #104 RC3
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
 
         $screen.Rows.Count | Should -BeLessOrEqual ([Math]::Max(5, 8 - 2))
-        $output | Should -Match '14\) Exit'
+        $output | Should -Match '15\) Exit'
         $output | Should -Match 'Enter number'
         $output | Should -Match 'Q=Quit'
     }
@@ -7795,7 +8260,7 @@ Describe "Minimum supported 60x10 viewport and nearby boundaries (issue #104 RC3
         # Height-2) = 6 for height 8, 18 for height 20), so a cross-case
         # Height swap between those two would change which bound applies.
         $screen.Rows.Count | Should -BeLessOrEqual ([Math]::Max(5, $Height - 2))
-        $output | Should -Match '14\) Exit'
+        $output | Should -Match '15\) Exit'
         $output | Should -Match 'Q=Quit'
 
         # All four of these cases happen to be wide enough that the render
@@ -7817,7 +8282,7 @@ Describe "Minimum supported 60x10 viewport and nearby boundaries (issue #104 RC3
 
         $output | Should -Match 'LIBRARY MANAGEMENT'
         $output | Should -Match 'APPLICATION'
-        $output | Should -Match '14\) Exit'
+        $output | Should -Match '15\) Exit'
     }
 
     It "every numbered option in the emergency presentation still maps to the same Mode the live switch statement dispatches on" {
@@ -7971,7 +8436,7 @@ Describe "Menu layout debug script" {
         $exitCode | Should -Be 0
         $output | Should -Not -Match 'is not recognized as the name of a cmdlet'
         $output | Should -Not -Match 'CommandNotFoundException'
-        $output | Should -Match '14\) Exit'
+        $output | Should -Match '15\) Exit'
         $output | Should -Match 'Enter number'
     }
 
@@ -7986,7 +8451,7 @@ Describe "Menu layout debug script" {
         $exitCode | Should -Be 0
         $output | Should -Not -Match 'is not recognized as the name of a cmdlet'
         $output | Should -Not -Match 'CommandNotFoundException'
-        $output | Should -Match '14\) Exit'
+        $output | Should -Match '15\) Exit'
         $output | Should -Match 'Enter number'
     }
 }
@@ -8683,5 +9148,222 @@ Describe "TeknoParrot-Manager.ps1 -Unattended real child-process fixture (issue 
         # -Unattended launch with no mode chosen already does -- not crash.
         $process.ExitCode | Should -Be 1 -Because 'no UnattendedMode means no mode was chosen; this must be the pre-existing safe failure, not a new crash'
         $stdout | Should -Match 'Mode must be set before starting' -Because 'this is the pre-existing, expected safe failure for no mode chosen'
+    }
+}
+
+Describe "Issue #300 shared workflow status state machine" {
+    AfterEach {
+        if ($script:ActiveTpmWorkflowStatus) {
+            $active = $script:ActiveTpmWorkflowStatus
+            if ($active.Failure) { [void](Acknowledge-TpmWorkflowFailure -Context $active -FailureId $active.Failure.FailureId) }
+            [void](Stop-TpmWorkflowStatus -Context $active -Reason 'test cleanup')
+            [void](Close-TpmWorkflowStatus -Context $active)
+        }
+    }
+    It "emits ordered structured events without leaking them into normal returns" {
+        # The isolated AST fixture must not inherit workflow state from any
+        # other test file or prior test execution.
+        $script:ActiveTpmWorkflowStatus | Should -Be $null
+        $script:TpmWorkflowRendering | Should -BeFalse
+        $script:PostgresRecoveryStatus | Should -Be $null
+        $script:PostgresRecoveryResumeState | Should -Be $null
+        $script:ProductionSource | Should -Match '\$script:ActiveTpmWorkflowStatus\s*=\s*\$null'
+        $script:ProductionSource | Should -Match '\$script:TpmWorkflowRendering\s*=\s*\$false'
+        $events = New-Object System.Collections.Generic.List[object]
+        $facts = [pscustomobject]@{ NoRender = $true; Unattended = $false; InputRedirected = $false; OutputRedirected = $false; Certification = $false }
+        $ctx = New-TpmWorkflowStatusContext -WorkflowKey 'test' -Title 'Test workflow' -Steps @('one','two','three','four') -ConsoleFacts $facts -EventSink { param($event) [void]$events.Add($event) }
+        [void](Start-TpmWorkflowStatus $ctx)
+        [void](Start-TpmWorkflowStep $ctx -StepId 'one' -Activity 'Doing first work')
+        [void](Complete-TpmWorkflowStep $ctx -Summary 'First complete' -NextStep 'Second work')
+        [void](Start-TpmWorkflowStep $ctx -StepId 'two' -Activity 'Doing second work')
+        [void](Complete-TpmWorkflowStep $ctx -Summary 'Second complete')
+        $events.Count | Should -Be 5
+        @($events | Select-Object -ExpandProperty Sequence) | Should -Be @(1,2,3,4,5)
+        $events[0].PSTypeNames | Should -Contain 'TPM.WorkflowStatusEvent.v1'
+        (Get-TpmWorkflowStatusSnapshot $ctx).Completed.Count | Should -Be 2
+        (Start-TpmWorkflowStep $ctx -StepId 'three' -Activity 'Third work') | Should -BeNullOrEmpty
+    }
+
+    It "pins failures until acknowledgement and retains only bounded completion history" {
+        $ctx = New-TpmWorkflowStatusContext -WorkflowKey 'failure' -Title 'Failure workflow' -Steps @('a','b','c','d','e') -ConsoleFacts ([pscustomobject]@{ NoRender = $true })
+        [void](Start-TpmWorkflowStatus $ctx)
+        foreach ($step in @('a','b','c','d')) {
+            [void](Start-TpmWorkflowStep $ctx -StepId $step -Activity $step)
+            [void](Complete-TpmWorkflowStep $ctx -Summary ("Completed $step"))
+        }
+        (Get-TpmWorkflowStatusSnapshot $ctx).Completed.Summary | Should -Be @('Completed b','Completed c','Completed d')
+        [void](Set-TpmWorkflowFailure -Context $ctx -FailureId 'f1' -Message 'Repair failed' -DataSafety 'Backup is safe' -RecoveryActions @(@{ Id = 'Retry'; Label = 'Retry' }))
+        { Complete-TpmWorkflowStatus -Context $ctx -Summary 'must fail' } | Should -Throw
+        { Close-TpmWorkflowStatus -Context $ctx } | Should -Throw
+        [void](Acknowledge-TpmWorkflowFailure -Context $ctx -FailureId 'f1')
+        [void](Complete-TpmWorkflowStatus -Context $ctx -Summary 'Stopped safely')
+        [void](Close-TpmWorkflowStatus -Context $ctx)
+        $ctx.Lifecycle | Should -Be 'Closed'
+    }
+
+    It "handles simulated resize shrink/grow, stale footer clearing, and narrow fallback" {
+        $draws = New-Object System.Collections.Generic.List[object]
+        $clears = New-Object System.Collections.Generic.List[object]
+        $appends = New-Object System.Collections.Generic.List[object]
+        $adapter = @{
+            Clear  = { param($bounds) [void]$script:statusClears.Add($bounds) }
+            Draw   = { param($rows,$cap) [void]$script:statusDraws.Add([pscustomobject]@{ Rows = @($rows); Width = $cap.Width; Height = $cap.Height }) }
+            Append = { param($rows) [void]$script:statusAppends.Add(@($rows)) }
+        }
+        $script:statusDraws = $draws
+        $script:statusClears = $clears
+        $script:statusAppends = $appends
+        $facts = [pscustomobject]@{ NoRender = $false; Unattended = $false; InputRedirected = $false; OutputRedirected = $false; Certification = $false; CanCursor = $true; Width = 160; Height = 40; BufferWidth = 160; BufferHeight = 40; Adapter = $adapter }
+        $ctx = New-TpmWorkflowStatusContext -WorkflowKey 'resize' -Title 'Resize workflow' -Steps @('one','two') -ConsoleFacts $facts
+        [void](Start-TpmWorkflowStatus $ctx)
+        [void](Start-TpmWorkflowStep $ctx -StepId 'one' -Activity 'Wide activity')
+        $facts.Width = 60; $facts.Height = 12; $facts.BufferWidth = 60; $facts.BufferHeight = 12
+        [void](Update-TpmWorkflowActivity -Context $ctx -Activity 'Narrow activity that must be clipped safely')
+        $draws.Count | Should -BeGreaterThan 1
+        $clears.Count | Should -BeGreaterThan 0
+        foreach ($draw in $draws) { @($draw.Rows | Where-Object { $_.Length -gt ($draw.Width - 1) }).Count | Should -Be 0 }
+        $facts.Width = 40; $facts.Height = 4; $facts.BufferWidth = 40; $facts.BufferHeight = 4
+        [void](Update-TpmWorkflowActivity -Context $ctx -Activity 'Too short for the normal footer')
+        $appends.Count | Should -BeGreaterThan 0
+        $facts.Width = 120; $facts.Height = 30; $facts.BufferWidth = 120; $facts.BufferHeight = 30
+        [void](Update-TpmWorkflowActivity -Context $ctx -Activity 'Grown again')
+        $ctx.RendererMode | Should -Be 'CursorFooter'
+        $draws[$draws.Count - 1].Width | Should -Be 120
+    }
+
+    It "uses the real host capability path without writing cursor controls when the host is redirected" {
+        $ctx = New-TpmWorkflowStatusContext -WorkflowKey 'real-host' -Title 'Real host' -Steps @('one')
+        { Render-TpmWorkflowStatus -Context $ctx } | Should -Not -Throw
+        $ctx.RendererMode | Should -Be 'None'
+    }
+
+    It "guards first-render cursor overlap and scroll-aware stale footer cleanup" {
+        $script:ProductionSource | Should -Not -Match '-and -not \$geometryChanged'
+        $script:ProductionSource | Should -Match '\$cursor\.Y -ge \$top -and \$cursor\.Y -lt \(\$top \+ \$footerHeight\)'
+        $script:ProductionSource | Should -Match 'WindowTop'
+        $script:ProductionSource | Should -Match 'Read-HostSafe \$Prompt'
+    }
+
+    It "clears and redraws its rectangle around prompt input without changing scrollback" {
+        $clears = New-Object System.Collections.ArrayList
+        $draws = New-Object System.Collections.ArrayList
+        $adapter = @{
+            Clear = { param($bounds) [void]$script:footerPromptClears.Add($bounds) }
+            Draw = { param($rows,$cap) [void]$script:footerPromptDraws.Add(@($rows)) }
+            Append = { param($rows) }
+        }
+        $script:footerPromptClears = $clears
+        $script:footerPromptDraws = $draws
+        $facts = [pscustomobject]@{ NoRender = $false; Unattended = $false; InputRedirected = $false; OutputRedirected = $false; Certification = $false; CanCursor = $true; Width = 120; Height = 30; BufferWidth = 120; BufferHeight = 30; Adapter = $adapter }
+        $ctx = New-TpmWorkflowStatusContext -WorkflowKey 'prompt-footer' -Title 'Prompt footer' -Steps @('one') -ConsoleFacts $facts
+        [void](Start-TpmWorkflowStatus -Context $ctx)
+        $initialClears = $clears.Count
+        Mock Read-Host { 'answer' }
+        (Read-HostSafe '  Prompt') | Should -Be 'answer'
+        $clears.Count | Should -BeGreaterThan $initialClears
+        $draws.Count | Should -BeGreaterThan 1
+    }
+
+    It "publishes append-only status without recursing through the host shim" {
+        $facts = [pscustomobject]@{ NoRender = $false; Unattended = $false; InputRedirected = $false; OutputRedirected = $false; Certification = $false; CanCursor = $false; Width = 80; Height = 20; BufferWidth = 80; BufferHeight = 20; Adapter = $null }
+        $ctx = New-TpmWorkflowStatusContext -WorkflowKey 'append-only' -Title 'Append only' -Steps @('one') -ConsoleFacts $facts
+        { Start-TpmWorkflowStatus -Context $ctx } | Should -Not -Throw
+        $ctx.RendererMode | Should -Be 'PermanentAppendOnly'
+    }
+
+    It "bypasses all rendering for redirected and certification facts" {
+        $adapterCalls = 0
+        $adapter = @{ Draw = { $script:adapterCalls++ }; Clear = { $script:adapterCalls++ }; Append = { $script:adapterCalls++ } }
+        $script:adapterCalls = 0
+        $facts = [pscustomobject]@{ NoRender = $false; Unattended = $false; InputRedirected = $true; OutputRedirected = $false; Certification = $false; CanCursor = $true; Width = 120; Height = 30; BufferWidth = 120; BufferHeight = 30; Adapter = $adapter }
+        $ctx = New-TpmWorkflowStatusContext -WorkflowKey 'redirected' -Title 'Redirected' -Steps @('one') -ConsoleFacts $facts
+        [void](Start-TpmWorkflowStatus $ctx)
+        [void](Start-TpmWorkflowStep $ctx -StepId 'one' -Activity 'Checking')
+        $adapterCalls | Should -Be 0
+    }
+}
+
+Describe "Issue #300 workflow ownership and transition guards" {
+    It "rejects unknown workflow steps without emitting an event" {
+        $events = New-Object System.Collections.Generic.List[object]
+        $facts = [pscustomobject]@{ NoRender = $true }
+        $ctx = New-TpmWorkflowStatusContext -WorkflowKey 'unknown-step' -Title 'Unknown step' -Steps @('one','two') -ConsoleFacts $facts -EventSink { param($event) [void]$events.Add($event) }
+        [void](Start-TpmWorkflowStatus $ctx)
+        { Start-TpmWorkflowStep -Context $ctx -StepId 'missing' } | Should -Throw '*Unknown workflow step*'
+        $events.Count | Should -Be 1
+        $ctx.ActiveStepId | Should -BeNullOrEmpty
+        [void](Stop-TpmWorkflowStatus -Context $ctx -Reason 'test stop')
+        [void](Close-TpmWorkflowStatus -Context $ctx)
+    }
+
+    It "routes reviewed PostgreSQL and optional-flow failures through lifecycle cleanup" {
+        foreach ($failureId in @('postgres-service-state','postgres-install-failed','postgres-backup-unverified','postgres-config-save','postgres-database-backup','postgres-profile-recovery','postgres-profile-errors','postgres-service-restore','reshade-file-missing','reshade-file-type','dgv-folder-missing')) {
+            $script:ProductionSource | Should -Match ([regex]::Escape("Resolve-TpmWorkflowFailure -Context"))
+            $script:ProductionSource | Should -Match ([regex]::Escape("-FailureId '$failureId'"))
+        }
+        $script:ProductionSource | Should -Match 'Complete-TpmWorkflowStatus -Context \$postgresStatus'
+        $script:ProductionSource | Should -Match 'Close-TpmWorkflowStatus -Context \$postgresStatus'
+        $script:ProductionSource | Should -Match 'Close-TpmWorkflowStatus -Context \$reShadeStatus'
+        $script:ProductionSource | Should -Match 'Close-TpmWorkflowStatus -Context \$dgStatus'
+    }
+
+    It "rejects a second active workflow and releases the first on close" {
+        $facts = [pscustomobject]@{ NoRender = $true }
+        $first = New-TpmWorkflowStatusContext -WorkflowKey 'first' -Title 'First' -Steps @('one') -ConsoleFacts $facts
+        $second = New-TpmWorkflowStatusContext -WorkflowKey 'second' -Title 'Second' -Steps @('one') -ConsoleFacts $facts
+        [void](Start-TpmWorkflowStatus $first)
+        { Start-TpmWorkflowStatus $second } | Should -Throw '*already active*'
+        [void](Stop-TpmWorkflowStatus -Context $first -Reason 'test stop')
+        [void](Close-TpmWorkflowStatus -Context $first)
+        [void](Start-TpmWorkflowStatus $second)
+        [void](Stop-TpmWorkflowStatus -Context $second -Reason 'test stop')
+        [void](Close-TpmWorkflowStatus -Context $second)
+    }
+}
+
+Describe "Issue #300 FFB ownership cleanup" {
+    It "removes only an unchanged TPM-owned hook and preserves a backup" {
+        $root = Join-Path $TestDrive 'FfbOwnedGame'
+        $cache = Join-Path $TestDrive 'FfbCache'
+        New-Item -ItemType Directory -Path $root, $cache -Force | Out-Null
+        $dest = Join-Path $root 'd3d9.dll'
+        Set-Content -LiteralPath $dest -Value 'TPM plugin'
+        $hash = (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash
+        Write-FFBPluginOwnership -CacheDir $cache -Entries @([pscustomobject]@{
+            ProfileCode = 'OwnedGame'; GameRoot = $root; Destination = $dest
+            SourceSha256 = $hash; DeployedSha256 = $hash; CreatedUtc = (Get-Date).ToUniversalTime().ToString('o')
+        })
+        Remove-FFBPluginOwnedDeployment -CacheDir $cache -ProfileCode 'OwnedGame' | Should -BeTrue
+        Test-Path -LiteralPath $dest | Should -BeFalse
+        @(Get-ChildItem -LiteralPath (Join-Path $root 'FullBackup') -Recurse -File).Count | Should -Be 1
+    }
+
+    It "rolls back ownership deletion when the manifest write fails" {
+        $root = Join-Path $TestDrive 'FfbManifestFailureGame'
+        $cache = Join-Path $TestDrive 'FfbManifestFailureCache'
+        New-Item -ItemType Directory -Path $root, $cache -Force | Out-Null
+        $dest = Join-Path $root 'd3d9.dll'
+        Set-Content -LiteralPath $dest -Value 'owned-hook'
+        $hash = (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash
+        Write-FFBPluginOwnership -CacheDir $cache -Entries @([pscustomobject]@{ ProfileCode = 'FailureGame'; GameRoot = $root; Destination = $dest; SourceSha256 = $hash; DeployedSha256 = $hash; CreatedUtc = (Get-Date).ToUniversalTime().ToString('o') })
+        Mock Write-FFBPluginOwnership { throw 'simulated manifest write failure' }
+
+        { Remove-FFBPluginOwnedDeployment -CacheDir $cache -ProfileCode 'FailureGame' } | Should -Throw '*rolled back*'
+        (Test-Path -LiteralPath $dest -PathType Leaf) | Should -BeTrue
+        (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash | Should -Be $hash
+    }
+
+    It "preserves a changed owned path instead of deleting it" {
+        $root = Join-Path $TestDrive 'FfbChangedGame'
+        $cache = Join-Path $TestDrive 'FfbChangedCache'
+        New-Item -ItemType Directory -Path $root, $cache -Force | Out-Null
+        $dest = Join-Path $root 'd3d9.dll'
+        Set-Content -LiteralPath $dest -Value 'changed by another tool'
+        Write-FFBPluginOwnership -CacheDir $cache -Entries @([pscustomobject]@{
+            ProfileCode = 'ChangedGame'; GameRoot = $root; Destination = $dest
+            SourceSha256 = ('a' * 64); DeployedSha256 = ('b' * 64); CreatedUtc = (Get-Date).ToUniversalTime().ToString('o')
+        })
+        Remove-FFBPluginOwnedDeployment -CacheDir $cache -ProfileCode 'ChangedGame' | Should -BeFalse
+        Test-Path -LiteralPath $dest | Should -BeTrue
     }
 }

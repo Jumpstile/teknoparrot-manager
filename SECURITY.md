@@ -4,7 +4,9 @@ This file documents this project's threat model and the sanitization
 invariants that follow from it. It is the canonical reference for "why is
 this input treated as untrusted" questions raised in code comments.
 
-Current release state: v1.0 RC7 is the current published release; v1.0 RC6 is the previous published release (historical), and final Version 1.0 remains unpublished.
+Current release state: v1.0 RC7 is the current published release; RC8 is the
+candidate being prepared and is not published; v1.0 RC6 is the previous
+published release (historical); final Version 1.0 remains unpublished.
 
 ## Threat model: live-fetched and externally-sourced values are untrusted input
 
@@ -160,11 +162,69 @@ under PostgresRecoveryBackups with inherited ACLs removed and full control
 for the current Windows identity; it may contain the prior profile state for
 exact restoration and must be treated as a local credential backup.
 
-The legacy PostgreSQL MSI requires password public properties, so the values
-can be visible to OS process inspection during one synchronous install call.
-TPM does not request a verbose MSI log, does not print or log the argument list,
-clears the password variables immediately afterward, and removes the working
-folder. This is an explicit residual threat boundary of the legacy installer.
+The legacy PostgreSQL MSI receives its public password properties through the
+Windows Installer Automation interface. TPM does not launch a password-bearing
+child process, does not request a verbose MSI log, does not print or log the
+property string, clears the password variables after the in-process call, and
+removes the downloaded working folder.
+
+The UAC resume state is a DPAPI-authenticated envelope covering all metadata,
+not a password blob beside mutable JSON. Its durable issuance identity is a
+random identifier embedded in the protected payload and encoded in the legal
+state filename; a copied envelope therefore cannot be consumed under a second
+filename. The consumed marker records that issuance identity, nonce, and
+attempt number. The state binds the creation/expiry window, exact
+script/config/root hashes, origin SID, machine, parent PID/start time/
+executable path/hash, and operation. The maximum lifetime is five minutes.
+The child atomically claims the challenge and reserves its one-time marker
+before privileged work. Validation failures remove the marker and restore the
+claimed encrypted envelope for a safe retry; successful consumption retains
+the marker until final cleanup. UAC denial occurs before claim and may retry
+the untouched challenge. A started-child failure issues a fresh attempt only
+after validating the original metadata is unchanged. PostgreSQL's original
+service state is restored after the complete recovery transaction, and failure
+to restore it blocks completion.
+
+## Support package collection boundary
+
+`New-TpmSupportPackage` is an allowlist collector, not a directory archiver.
+It reads only named TPM diagnostic files beside the script, named
+TeknoParrot diagnostic files at approved relative paths, and named text logs
+under safely identified registered game roots. Game roots must be inside the
+approved games root and every existing path component must be non-reparse.
+
+Plugin inspection is metadata-only and limited to `BepInEx\plugins` and the
+recognized Unity `*_Data\Plugins` directories. It records relative path,
+filename, size, and bounded SHA-256 values from identity-validated open
+handles; unsafe version probes are omitted rather than reopening a path.
+It never copies plugin binaries or recursively archives game directories.
+
+The collector excludes game files, archives, executables, arbitrary DLLs,
+firmware, UserProfiles XML, configuration files, `.pgpass`, PostgreSQL
+passwords, DPAPI recovery state, tokens, API keys, cookies, and unrelated
+personal files. Included text is opened through a controlled handle, and the
+handle's final filesystem path is checked against an identity-validated
+approved-root handle before the bytes are read. Profile XML is parsed through
+the same validated stream. This prevents a substituted junction or symlink
+from redirecting a path-only validation into an unauthorized object. Text is
+then validated as strict UTF-8/UTF-16 text (with BOM support) and rejected as
+`RejectedUnsafeContent` for executable/archive signatures, NUL/control bytes,
+or invalid encoding. All dynamic manifest source, destination, detail, error,
+and scope values pass the same centralized redaction boundary. Redaction is
+defense in depth, not a claim of perfect secret detection.
+
+The manifest records collected, absent, intentionally excluded, failed, and
+unsafe-content-rejected sources. A missing optional source does not abort the
+package; collection or ZIP failures cannot produce a success result. Promotion
+creates the destination with `CREATE_NEW` through an identity-validated
+destination directory boundary, copies through the opened destination handle,
+and verifies the final handle path before success. The output root is
+revalidated as non-reparse immediately before promotion.
+Temporary staging is deleted only through handles opened for the owned tree;
+unexpected reparse or residue leaves a partial result with the ZIP path and
+explicit action-required status rather than green success. The output filename
+and destination are generated by TPM under `SupportPackages\`, never accepted
+from arbitrary user input.
 
 ## dgVoodoo2 selective extraction (Scripts\dgVoodoo2\)
 
@@ -296,6 +356,24 @@ expected value. Its safety boundary is therefore HTTPS, release URL
 allowlisting, ZIP/script content validation, backup-before-replace behavior,
 and manual confirmation. BepInEx and dgVoodoo2 release assets are separate
 paths and do enforce their GitHub-provided SHA-256 digest when available.
+
+## Rule: runtime paths are classified by role, not by NAS/local location
+
+An SMB, UNC, or mapped path is not unsafe merely because it is network-backed.
+Before a runtime write, TPM canonicalizes the path, checks its role and
+containment against protected install/runtime/staging roots, rejects
+reparse-backed or ambiguous path chains, and revalidates the same destination
+immediately before the final write or move. An external primary DAT/source
+folder can therefore be valid when Windows can reach it and its role-specific
+checks pass. A supplementary source is not an automatic primary destination.
+
+This runtime rule is separate from engineering workspace policy. GitHub is
+authoritative for handoff; development, review, certification, and release
+validation use local clones or disposable local worktrees. NAS remains valid
+for ROMs, source data, packages, evidence, backups, generated artifacts, and
+mirrors, but a shared NAS Git worktree is not an authoritative active checkout.
+Operating-system ACLs, share permissions, credentials, and disconnected
+mapped-drive state remain independent reasons a role-safe write can fail.
 
 ## Rule: sanitize before joining into a filesystem path
 

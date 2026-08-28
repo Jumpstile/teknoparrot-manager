@@ -2460,7 +2460,7 @@ clean.
 ## Issue #154 real-hardware certification blockers -- unattended Mode config and Pester 5.8.0 regression -- 2026-07-27
 
 Two independently confirmed blockers from a real-hardware certification run
-at `2405a59` (preserved evidence:
+at `2405a59` (historical evidence retained for provenance only:
 `W:\Emulators\TeknoParrot\TPM-TestHarness\Reports\2026-07-27_19-33-01`).
 
 **Blocker 1 -- `[Unattended] Mode must be set before starting.` (exit 1).**

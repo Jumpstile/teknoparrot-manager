@@ -1,5 +1,30 @@
 # Changelog
 
+## v1.0 RC8 (candidate, not published) -- runtime recovery and release-integrity preparation
+
+- RC7 remains the current published release. RC8 has no public tag, release
+  asset, or Scripts mirror; final Version 1.0 remains unpublished.
+- Eggman updates protect a DAT under the TeknoParrot root and can offer the
+  validated primary ZIP/source folder as the explicit destination.
+- PostgreSQL recovery asks the user to choose a replacement password, uses
+  in-process Windows Installer properties, authenticates one-time protected
+  UAC resume state, restores service state truthfully, and keeps the
+  fail-closed backup/reset boundaries.
+- BepInEx setup offers approved x64/x86 install, update, and repair-reset paths
+  with verified backup and rollback.
+- Create Support Package gathers allowlisted TPM/TeknoParrot/game diagnostics
+  and metadata-only plugin inventories into one redacted ZIP; game binaries,
+  credentials, profiles, and arbitrary directories are excluded.
+- Restore, crosshair, first-run, optional-download, update, and recovery flows
+  expose beginner-readable retry/status guidance. The shared TPM STATUS footer
+  uses structured events, real steps, and resize-safe cursor/append-only
+  fallbacks without affecting redirected runs.
+- Review follow-up binds protected recovery consumption to its issuance, restores failed claims safely, exposes repair for incomplete current BepInEx trees, and closes workflow failures without false completion.
+- Certification captures and guards exact branch, commit, upstream, ref, and
+  reflog identity through publication/finalization.
+- Release packaging requires exact source/package identity and a completed #290
+  repository and live-wiki freshness audit.
+
 ## v1.0 RC7 (2026-08-22) -- published release candidate
 
 - Publication: v1.0 RC7 is published. Release archive:

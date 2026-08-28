@@ -11,7 +11,9 @@ documented in that subsystem's own architecture document (e.g.
 here, with a matching entry in `LESSONS_LEARNED.md` -- see `CONSTITUTION.md`,
 "Documenting non-obvious implementation constraints," for when this applies.
 
-Current release state: v1.0 RC7 is the current published release; v1.0 RC6 is the previous published release (historical), and final Version 1.0 remains unpublished.
+Current release state: v1.0 RC7 is the current published release; RC8 is the
+candidate being prepared and is not published; v1.0 RC6 is the previous
+published release (historical); final Version 1.0 remains unpublished.
 
 ---
 
@@ -299,7 +301,11 @@ rumble on Xbox/XInput-style controllers.
 **Skip counters.** `$skippedNoMatch` and `$skippedDllMissing` are separate. A game the
 AutoSetup.cmd table does not know about is `$skippedNoMatch`; a game the table matches
 but whose MAME DLL is not locally present is `$skippedDllMissing` (user-fixable). Each
-has its own summary line and log field.
+has its own summary line and log field. Ownership cleanup copies the unchanged
+hook to a verified game backup before deletion; if the ownership manifest cannot
+be atomically rewritten, the deletion is restored from that backup and the
+operation fails closed. If restoration itself fails, the backup path remains
+recovery evidence and no clean completion is reported.
 
 ### Eggman dat source
 
@@ -329,11 +335,21 @@ alternate-location save dialog, so it is not silently relocated.
 
 When a configured Eggman ZIP is already verified safe, the update flow
 reuses a safe configured destination without an unnecessary browse prompt.
+The path policy is role-based rather than location-based: the protected
+TeknoParrot root, program/runtime paths, and game staging root remain blocked,
+while the explicitly configured primary ZIP/source folder may be a DAT
+destination when it is reachable, canonical, non-reparse, and outside those
+protected roots. A mapped or NAS path is not rejected merely because it is
+network-backed. The supplementary source is not auto-selected as a primary
+DAT destination, and overlapping source roles are ambiguous and rejected.
+
 Every destination supplied to the downloader, including a previously
 configured or user-selected path, is canonicalized and revalidated before
-reuse, download, or write. A destination that overlaps the TeknoParrot root,
-either game ZIP source, or the game staging folder is rejected before any
-network/download work begins.
+reuse, download, or write. The destination is checked again immediately
+before the shared downloader moves a validated temporary file into place.
+If no role-safe external destination exists, TPM explains the recovery action
+instead of silently skipping the update. Windows share permissions and
+credentials remain an independent operating-system write boundary.
 Before reuse or replacement, the ZIP must meet the expected byte count (when
 known), open as a readable archive, and contain the collection DAT entry used
 by `Build-DatIndexFromZip`. Validation happens before the shared downloader
@@ -356,7 +372,11 @@ restore the pre-operation tree, while rollback or cleanup uncertainty
 preserves evidence and does not report clean completion. If live promotion
 succeeds but ordinary staging cleanup fails, the update is reported separately
 as applied-with-cleanup-failure, excluded from the clean-update count, and the
-validated residue path is logged and shown as ACTION REQUIRED.
+validated residue path is logged and shown as ACTION REQUIRED. Before version
+comparison, `Get-BepInExInstallationHealth` verifies required core/bootstrap
+files, version, architecture, and reparse safety. A current-version but
+incomplete tree therefore reaches the explicit repair-reset choice instead of
+being classified healthy by version equality alone.
 
 ---
 
@@ -780,17 +800,33 @@ WOW6432Node `\Installations\` roots is checked via wildcard (not assumed to lite
 
 **MSI log and command-line security.**
 
-The PostgreSQL 8.3 MSI requires SERVICEPASSWORD and SUPERPASSWORD as public
-properties. TPM passes them only during one synchronous msiexec call, does
-not print or log the argument list, clears its password variables afterward,
-and deletes the downloaded/extracted working folder in finally. TPM does not
-request a verbose MSI log because this MSI can write connection passwords into
-deferred custom-action logging. The remaining command-line visibility to OS
-process inspection during the call is an explicit accepted threat boundary.
+The PostgreSQL 8.3 MSI receives SERVICEPASSWORD and SUPERPASSWORD through the
+Windows Installer Automation interface, not a child process command line.
+TPM does not print or log the property string, does not request a verbose MSI
+log because this MSI can write connection passwords into deferred custom-action
+logging, clears its password variables after the in-process call, and deletes
+the downloaded/extracted working folder in finally.
 **Credential storage.**
 
 - Postgres superuser password: DPAPI-encrypted in config.json, tied to the
   current Windows user and machine.
+- Guided recovery asks the user to choose and confirm a non-empty password.
+  The password is held only for the immediate operation. If Windows permission
+  is needed, TPM writes a short-lived DPAPI-authenticated envelope covering
+  the password and all resume metadata: exact script/config/TeknoParrot paths
+  and hashes, a durable random issuance identity, nonce, attempt number,
+  creation/expiry, origin SID/machine, and parent PID/start time/executable
+  path/hash. The issuance identity is encoded in the legal state filename, so
+  a byte-for-byte copy cannot be consumed under another filename. The state
+  directory/file ACL grants access only to the origin user, local
+  Administrators, and SYSTEM. The UAC child receives only the random state-file
+  path, atomically claims it, reserves a marker containing the issuance,
+  nonce, and attempt, validates the envelope, decrypts the password, and
+  continues option 12 automatically. Validation failure removes the marker
+  and restores the encrypted challenge. UAC denial can reuse the untouched
+  challenge; a started-child retry always receives a fresh attempt. The
+  password is never placed in the child command line, logs, console output, or
+  reports.
 - Windows service-account password: never persisted; used only during
   installation and cleared afterward.
 - UserProfile Postgres Pass: plaintext is required because TeknoParrotUI
@@ -823,18 +859,21 @@ and leaves database creation/restore to TPUI's first-launch flow. Only for older
   database, or wipes PostgreSQL data.
 - Verified recovery evidence is created before service stop, role reset,
   configuration persistence, database backup, or profile write.
+- The role reset and authentication verification complete before the recovered
+  password is saved to config.json. Database backup completes after that save,
+  and profile setup starts only after both the protected recovery evidence and
+  database backup succeed.
 - A reset, restart, backup, or profile write that cannot be verified returns
   a blocked result and is never reported complete.
 - Profiles are sorted deterministically. Database state is tri-state verified/
   exists so a query failure cannot be treated as database absence.
-  **Known accepted risks.**
-- Legacy PostgreSQL MSI public properties are briefly visible to OS process
-  inspection during the synchronous install call; TPM does not request a
-  verbose installer log and clears its own password variables afterward.
+**Known accepted risks.**
+- TPM's in-process Windows Installer call keeps the two installer passwords out
+  of child process arguments. The MSI's lack of a signed package remains an
+  audit boundary; no password-bearing verbose log is requested.
 - TeknoParrotUI's plaintext UserProfile Pass field remains a compatibility
   boundary and must be protected as a local credential.
 - The PostgreSQL installer is not Authenticode-signed (audit logging only).
-
 ---
 
 ## Control propagation (Invoke-ControlPropagation)
@@ -1277,6 +1316,17 @@ suite's `BeforeAll` -- the AST extractor only loads function bodies, never top-l
 `$script:X = ...` assignments. See LESSONS_LEARNED.md (general Pester entry, v0.99.19
 extension).
 
+### Interactive ambiguous registration choice (#300)
+
+`Invoke-ManualRegistrationChoices` handles the remaining shared-executable cases after
+`Register-Games` and duplicate-conflict resolution finish. It presents every validated
+candidate profile code and writes only the profile explicitly selected by the operator.
+Blank or invalid input leaves the folder in ACTION REQUIRED; no best guess is promoted.
+The helper reads the immutable `GameProfiles` template, sets `GamePath`/secondary
+executable state, and writes a new `UserProfiles` XML only when the destination does not
+already exist. Candidate executable paths must remain inside the approved staging root.
+Unresolved cases retain the TeknoParrotUI fallback in the final action summary.
+
 ### Ambiguous list post-loop filter (v0.99.8)
 
 The "needs manual registration" list (`$ambiguous`) is filtered right before `return`
@@ -1435,12 +1485,12 @@ exactly where it physically was and carries zero logic-change risk:
   setup -- status-check first, then the recovery action it would inform, with Postgres
   setup last as the narrowest-scope item in the group (and the one whose own backups are
   restored via the same Restore backup flow, at mode 11, one position earlier).
-- **Application** (13-14): Check for Updates, Exit.
+- **Application** (13-15): Check for Updates, Create Support Package, Exit.
 
 **Old -> new mapping** (for anyone cross-referencing an older screenshot, forum post, or
 saved `-Unattended` invocation): 1->1, 2->2, 3 Crosshair->4, 4 ReShade->5, 5 dgVoodoo2->6,
 6 GPU fix->7, 7 FFB->8, 8 BepInEx->9, 9 Restore backup->11, 10 Health check->10 (unchanged),
-11 Postgres->12, 12 Check for Updates->13, 13 Propagate Controls->3, 14 Exit->14.
+11 Postgres->12, 12 Check for Updates->13, 13 Propagate Controls->3, 14 Exit->15.
 
 **Drift prevention.** `Tests/TeknoParrot-Manager.Tests.ps1`'s "Main menu source-level
 drift check" reads the raw script source (the menu loop is top-level code, not a function,
@@ -1521,9 +1571,9 @@ never shows per-item description text at all (see "Short-viewport truncation" be
 the description TEXT shown there has to stay in sync with every tier, not just the Full/
 UltraCentered one).
 
-**Unchanged by design:** menu numbering (1-14), the `switch` statement's dispatch, and
-every mode's own behavior. Only `Show-MainMenu`'s rendering varies by tier -- this is
-presentation-layer work, not a mode-behavior change.
+**Unchanged by design:** existing menu numbering (1-13) and every existing mode's own behavior remain
+unchanged; option 14 adds the support-package workflow and Exit is now option 15. The `switch`
+dispatch and adaptive renderer keep the same one-source menu model.
 
 **Description text sourcing varies by tier -- a real gap found in review (RC3).**
 `Get-MainMenuSectionRows` does not use one shared description field for every tier:
@@ -1546,10 +1596,10 @@ correction, see `LESSONS_LEARNED.md`).** `Render-MainMenuScreen` builds banner, 
 footer rows separately and reserves the banner and footer unconditionally -- they are never
 truncated. If the body doesn't fit the remaining row budget, `Limit-MainMenuBodyRowsToBudget`
 trims body rows from the FRONT, keeping the tail, specifically so the last real menu item
-(14, Exit) and the footer's Quit/Help controls always render without the terminal itself
+(15, Exit) and the footer's Quit/Help controls always render without the terminal itself
 having to scroll. The Compact tier's decorative "Type ? for descriptions." hint is
 deliberately built into the body BEFORE the section rows (not after) for the same reason --
-placed after, it would out-rank the real "14) Exit" line for tail-preservation priority
+placed after, it would out-rank the real "15) Exit" line for tail-preservation priority
 purely by virtue of render order, not because it's more important. Do not "simplify" this
 back to a single flat `banner + body + footer` list truncated from one end -- that was the
 actual regression this section documents.
@@ -1557,7 +1607,7 @@ actual regression this section documents.
 **Emergency compact presentation for the 60x10 minimum supported viewport and below (RC3-B
 correction, see `LESSONS_LEARNED.md`).** Reserving Exit and the footer is not, on its own,
 enough at very short heights: at the documented minimum supported 60x10 terminal, the normal
-Compact-tier body needs 18 rows at minimum (4 section headers + 14 item rows) even with every
+Compact-tier body needs 19 rows at minimum (4 section headers + 15 item rows) even with every
 description stripped, and the normal framed banner (6 rows) plus footer (2 rows) alone
 already consume the entire available row budget there -- leaving zero rows for body content
 of any kind, Exit included. `Get-MainMenuEmergencyCompactRows` is the fallback:
@@ -1569,7 +1619,7 @@ the width allows (`Get-MainMenuFlowPackedItemRows`) instead of one item per row.
 packed whole -- a label is never split across two lines -- and if even the packed items don't
 fit the real row budget, item rows are trimmed from the front (same tail-preservation
 principle as above), so the minimal banner and footer are still never dropped, and the
-trailing item lines (ending in `14) Exit`) survive over the earliest ones. The row budget used
+trailing item lines (ending in `15) Exit`) survive over the earliest ones. The row budget used
 here, and by the normal path above it, is the caller's real requested `-Height`, not
 `$geometry.ViewportHeight` -- `Get-MainMenuGeometry` internally clamps that to a floor of 10
 for its own column-width math, which would otherwise let more rows render than an actually
@@ -1586,6 +1636,65 @@ extraction marker (which locates the inline if/else block by a distinctive strin
 own source text) was updated from the literal `"Library Management"` header -- which no
 longer appears inline in the if-block, since it now lives inside `Get-MainMenuSections`
 -- to `"Show-MainMenu"`.
+
+## Shared workflow status and footer (issue #300)
+
+`New-TpmWorkflowStatusContext` creates the structured state machine used by
+multi-step RC8 workflows. Public transitions emit
+`TPM.WorkflowStatusEvent.v1` events through an injected sink; cosmetic console
+rendering never drives workflow decisions. Events carry sequence, immutable
+step denominator, attempt, current activity, next step, user action, outcome,
+bounded recent completions, and sanitized failure/data-safety fields. Passwords,
+secure strings, native arguments, and raw exception text are excluded.
+
+The renderer remeasures window and buffer geometry before every draw, owns only
+its recorded footer rectangle, clips stale cells after resize, and truncates
+rows to the current width. It refuses a first or subsequent cursor draw when
+the body cursor occupies the footer rectangle, and switches to append-only when
+scrolling changes the recorded window origin; it never clears arbitrary
+scrollback after that invalidation. `Read-HostSafe` clears and redraws the
+footer around prompt input. A too-short or failing RawUI downgrades to
+append-only status lines; redirected, unattended, and certification runs keep
+events but perform no cursor or progress writes. Failures remain pinned until
+acknowledged. The existing menu clear/repaint path is never used as failure
+acknowledgement. Workflow start rejects a second active context, and every
+workflow branch must close or acknowledge/finalize before returning to the menu.
+
+## Support package architecture (issue #300)
+
+`New-TpmSupportPackage` is a fixed-scope collector invoked by the top-level
+menu's option 14. It creates a uniquely named ZIP beneath the script's
+`SupportPackages\` directory and returns a structured result with
+`Succeeded`, `Partial`, `PackagePath`, per-source records, and failures.
+Collection is split into TPM-owned files, allowlisted TeknoParrot files,
+registered-game text logs, and metadata-only plugin inventories.
+
+TPM and TeknoParrot sources use explicit relative filename allowlists. Game
+diagnostics are considered only for registered game paths inside the approved
+games root with non-reparse path chains. Profile paths are opened through a
+controlled .NET stream, and the stream handle's final filesystem identity is
+compared with an identity-validated profile-root handle before XML parsing.
+The same opened-object identity proof protects game logs and TPM/TeknoParrot
+diagnostics. The collector reads text only; plugin directories are inspected
+for metadata and hashes but DLL payloads are never copied. Plugin hashes use
+the validated opened stream; unsafe path-based version probes are omitted.
+Every text artifact is validated as strict BOM-aware UTF-8/UTF-16 text and
+rejected with `RejectedUnsafeContent` when it has executable/archive
+signatures, NUL/control bytes, or invalid encoding.
+
+The manifest records environment facts without usernames, source paths, or
+secrets, and every dynamic source, destination, detail, error, and scope value
+passes centralized redaction before insertion. ZIP entry names are generated
+from bounded safe names. Promotion holds an identity-validated destination
+directory handle, creates the ZIP with `CREATE_NEW`, writes through that
+opened file handle, and verifies both root and file final identities after the
+write. Staging cleanup opens each owned entry by handle, rejects reparse
+objects, deletes only through those handles, and preserves residue if the
+owned tree cannot be proven unchanged. Any unsafe path, staging failure,
+redaction/read failure, or ZIP failure prevents a success result. Workflow
+status is closed in `finally` on every exit path; redirected, unattended, and
+certification hosts therefore retain the existing structured-status fallback
+without cursor writes.
 
 ---
 
@@ -1760,6 +1869,17 @@ could be erased. The corrected model:
    parent directory, a path that no longer resolves inside its recorded
    parent, or a path that is (or has become) a reparse point -- it deletes
    only the one child it itself created and still owns.
+10. Every `Artifacts` fact carries an ordered `PackageValidationDiagnostics`
+    collection. Each diagnostic preserves the real publication/preflight
+    `Stage`, `FailureCode`, `FailureMessage`, and optional `ExceptionType`; the
+    broad `PUBLISHER_UNAVAILABLE` and `PACKAGE_VALIDATION_FAILED` decisions
+    retain that detail in both authority `Details` and failure-reason text.
+11. `Complete-TPMProductionCertificationCycleV1` requires an identity guard.
+    The production harness guard re-snapshots branch, commit, remote, refs,
+    and reflogs before eligibility, before commit, after commit, after final
+    outcome, and after final projection. A rejection after commit stays inside
+    the existing rollback boundary and cannot leave an authoritative-looking
+    marker without a valid identity.
 
 ### System Invariant Inventory (collection abort and launcher exit)
 
@@ -1853,6 +1973,15 @@ Scorecard,Validation,Manifest,Commit}.{json,md}`. The remaining
   diagnostic naming the failure, and exits `1` -- it never falls back to the
   removed legacy mechanism, never reports `CERTIFIED`/`NOT CERTIFIED`, and
   never publishes a marker or bundle.
+- **Publication and finalization are identity-guarded as one rollback window.**
+  `Complete-TPMProductionCertificationCycleV1` requires the production caller
+  to supply a guard and invokes it before eligibility, before publication,
+  after commit, after the dispatcher issues the final outcome, and after the
+  final projection is built. The real smoke harness guard re-snapshots the
+  checkout and compares it with the pre-cycle identity. A mutation after
+  commit is therefore treated like any other post-commit finalization failure:
+  the commit marker is removed first and the cycle reports rollback success or
+  rollback failure truthfully.
 - **The dispatcher-issued final outcome is the sole source of the harness's
   externally visible status and exit code.** `$productionCycleResult.Projection`
   (`FinalStatus`, `ExitCode`, `RunIdentity`) drives the only "FINAL STATUS"/
