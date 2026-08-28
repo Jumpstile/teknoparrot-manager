@@ -25,6 +25,10 @@ BeforeAll {
     $extractedFunctionsPath = Join-Path $TestDrive ("vbt-restore-backup-functions-" + [guid]::NewGuid().ToString('N') + '.ps1')
     ($functionAsts | ForEach-Object { $_.Extent.Text }) -join "`n`n" | Set-Content -LiteralPath $extractedFunctionsPath -Encoding utf8
     . $extractedFunctionsPath
+    $script:ActiveTpmWorkflowStatus = $null
+    $script:TpmWorkflowRendering = $false
+    $script:PostgresRecoveryStatus = $null
+    $script:PostgresRecoveryResumeState = $null
 
     $script:logPath = Join-Path $TestDrive "vbt-restore-backup.log"
 
