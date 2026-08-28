@@ -4,13 +4,15 @@
 # harness script (scripts/Invoke-TPM-RealInstanceSmoke.ps1) cannot be run
 # end to end here (no real TeknoParrot install on this dev machine), and its
 # certification tail is top-level script code, not an extractable function.
-# Instead, this drives the EXACT REAL functions the harness calls, in the
-# exact same sequence and shapes the harness uses (New-TPMProductionFactRecordsV1,
-# New-TPMProductionEvidenceRecordV1, and Complete-TPMProductionCertificationCycleV1
-# against a real New-TPMProductionWorkflowAuthorityV1, wrapped only by a
-# thin, transparent order-logging spy) -- this exercises the real
-# composition seam the harness relies on, not a source-text match and not a
-# reimplementation of the harness's own logic.
+# Instead, this drives the exact real fact assembler and composition
+# functions the harness calls, in the same sequence and shapes the harness
+# uses. The parser, PSScriptAnalyzer, and InjectionHunter adapters are
+# mocked in BeforeEach because their real contracts are covered directly
+# by TPMCertification.ProductionFacts.Tests.ps1; rerunning those external
+# tool jobs for every composition case added roughly seven minutes to the
+# complete suite on this machine without increasing composition coverage.
+# This exercises the real composition seam the harness relies on, not a
+# source-text match or a reimplementation of the harness's own logic.
 
 BeforeAll {
     $scriptsDir = Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts'
@@ -176,6 +178,23 @@ Describe 'ADR-0155 production harness composition seam (ADR155-0309 Checkpoint B
     BeforeEach {
         $root = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $root | Out-Null
+        # The analyzer/parser adapters have their own full real-tool coverage
+        # in TPMCertification.ProductionFacts.Tests.ps1. Keep this composition
+        # suite focused on fact assembly, authority ordering, and publication
+        # behavior rather than repeating 38 parser child launches plus 38
+        # bounded analyzer jobs for every composition case.
+        Mock Test-TPMProductionParserProbeV1 {
+            param($Inventory, $Engine, $WorkingDirectoryRoot, $WorkingDirectory, $TimeoutSeconds)
+            [ordered]@{ Identifier = $Engine; Executed = $true; ErrorCount = 0; ToolVersion = 'composition-test' }
+        } -ModuleName TPMCertification.ProductionFacts
+        Mock Test-TPMProductionPSScriptAnalyzerV1 {
+            param($Inventory, $SettingsPath, $PerFileTimeoutSeconds)
+            [ordered]@{ Executed = $true; FindingCount = 0; ToolVersion = 'composition-test' }
+        } -ModuleName TPMCertification.ProductionFacts
+        Mock Test-TPMProductionInjectionHunterV1 {
+            param($Inventory, $DispositionRegistryPath, $PerFileTimeoutSeconds)
+            [ordered]@{ Executed = $true; FindingCount = 0; UnresolvedFindingCount = 0; ToolVersion = 'composition-test'; Dispositions = @() }
+        } -ModuleName TPMCertification.ProductionFacts
     }
 
     It 'records all eleven facts exactly once, in canonical order' {
