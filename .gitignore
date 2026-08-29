@@ -4,7 +4,14 @@ TeknoParrot.Manager*.zip
 
 # Third-party DLLs -- proprietary, user provides; see README.md's ReShade
 # Visual Enhancements / dgVoodoo2 Legacy Compatibility sections for bundling notes
-ReShade/
+ReShade/*
+!ReShade/Previews/
+ReShade/Previews/*
+!ReShade/Previews/TPM-preview-original.svg
+!ReShade/Previews/TPM-preview-clean.svg
+!ReShade/Previews/TPM-preview-vivid.svg
+!ReShade/Previews/TPM-preview-crt.svg
+!ReShade/Previews/TPM-preview-enhanced.svg
 dgVoodoo2/
 
 # FFB plugin DLL cache -- auto-downloaded live from GitHub each run, never bundled
