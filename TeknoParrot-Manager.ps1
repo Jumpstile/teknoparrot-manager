@@ -1239,7 +1239,7 @@ function Copy-TpmSupportTextFile {
             Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status RejectedUnsafeContent -Detail ('Diagnostic content rejected: ' + $content.Reason)
             return
         }
-        $destination = Join-Path $StageDirectory $DestinationName
+        $redacted = Redact-TpmSupportText -Text $content.Text
         $baseName = [System.IO.Path]::GetFileNameWithoutExtension($DestinationName)
         $extension = [System.IO.Path]::GetExtension($DestinationName)
         $candidate = $DestinationName
