@@ -145,7 +145,6 @@ Describe 'New-TpmSupportPackage' {
         $entries | Should -HaveCount 1
         $entries[0] | Should -Be 'diagnostics/tpm-01-TeknoParrot-Manager.log.txt'
         $text = Get-SupportZipText $r.PackagePath $entries[0]
-        $text | Should -Not -BeNullOrEmpty
         $text | Should -Match 'password=<redacted>'
         $text | Should -Match '<user-profile>'
         $text | Should -Not -Match 'topsecret|abc123|user:pw|EliSi'
