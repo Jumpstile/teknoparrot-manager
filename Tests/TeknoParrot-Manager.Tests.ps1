@@ -4756,6 +4756,52 @@ Describe "Postgres guided recovery and profile transaction" {
             $result | Should -Not -BeNullOrEmpty
         }
     }
+    It "returns array-shaped backup collections on success and catch paths" {
+        $root = Join-Path $TestDrive 'postgres-backup-shape'
+        $data = Join-Path $root 'data'
+        $profiles = Join-Path $TestDrive 'postgres-backup-shape-profiles'
+        New-Item -ItemType Directory -Path $data, $profiles -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $data 'pg_hba.conf') -Value 'hba'
+        Set-Content -LiteralPath (Join-Path $data 'postgresql.conf') -Value 'postgresql'
+        $profilePath = Join-Path $profiles 'Game.xml'
+        Set-Content -LiteralPath $profilePath -Value '<GameProfile><ConfigValues><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>DbName</FieldName><FieldValue>GameDB01</FieldValue></FieldInformation></ConfigValues></GameProfile>'
+        $script:PostgresInstallDir = $root
+        Mock Lock-PostgresRecoveryDirectory { $global:LASTEXITCODE = 0 }
+        Mock Copy-PostgresRecoveryEvidenceFile { [pscustomobject]@{ Source = $Source; Backup = $Destination; Sha256 = 'hash' } }
+        Mock Write-Log {}
+
+        $success = New-PostgresRecoveryBackup -UserProfilesDir $profiles
+        $success.Verified | Should -BeTrue
+        $success.ConfigBackups -is [array] | Should -BeTrue
+        $success.ProfileBackups -is [array] | Should -BeTrue
+        @($success.ConfigBackups).Count | Should -Be 2
+        @($success.ProfileBackups).Count | Should -Be 1
+
+        $failure = New-PostgresRecoveryBackup -UserProfilesDir (Join-Path $TestDrive 'missing-profiles')
+        $failure.Verified | Should -BeFalse
+        $failure.ConfigBackups -is [array] | Should -BeTrue
+        $failure.ProfileBackups -is [array] | Should -BeTrue
+    }
+
+    It "blocks every PostgreSQL mutation when recovery backup is unverified" {
+        $profiles = Join-Path $TestDrive 'postgres-unverified-profiles'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        $script:pgMutationCalls = New-Object System.Collections.Generic.List[string]
+        Mock Reset-PostgresPasswordAutomatically { [void]$script:pgMutationCalls.Add('reset') }
+        Mock Save-Xml { [void]$script:pgMutationCalls.Add('save') }
+        Mock Get-PostgresDatabaseState { [void]$script:pgMutationCalls.Add('state'); [pscustomobject]@{ Exists = $true; Verified = $true } }
+        Mock New-PostgresDatabaseFromBackup { [void]$script:pgMutationCalls.Add('database'); $true }
+        Mock Write-Log {}
+        $result = Invoke-PostgresGameSetup -UserProfilesDir $profiles -SuperPasswordPlain 'secret' -RecoveryBackup ([pscustomobject]@{
+            Path = (Join-Path $TestDrive 'unverified'); Verified = $false
+        })
+        $result.RecoveryBlocked | Should -BeTrue
+        @($script:pgMutationCalls).Count | Should -Be 0
+        Should -Invoke Reset-PostgresPasswordAutomatically -Times 0
+        Should -Invoke Save-Xml -Times 0
+        Should -Invoke Get-PostgresDatabaseState -Times 0
+        Should -Invoke New-PostgresDatabaseFromBackup -Times 0
+    }
 }
 
 Describe "Issue #292 PostgreSQL automatic elevation and resume" {
