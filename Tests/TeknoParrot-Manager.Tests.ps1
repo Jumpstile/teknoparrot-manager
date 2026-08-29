@@ -4783,7 +4783,7 @@ Describe "Issue #292 PostgreSQL automatic elevation and resume" {
     }
 
     It "offers automatic repair instead of manual relaunch instructions" {
-        $script:ProductionSource | Should -Match 'Fix it now\? \(Y/N\)'
+        $script:ProductionSource | Should -Match 'Repair the PostgreSQL password now\? \(Y/N\)'
         $script:ProductionSource | Should -Match 'Start-PostgresRecoveryAsAdministrator[\s\S]*?-Operation Recovery'
         $script:ProductionSource | Should -Match 'PostgresRecoveryResumeToken'
         $script:ProductionSource | Should -Not -Match '(?i)right-click TeknoParrot-Manager\.bat|select PostgreSQL setup \(mode 12\) again'
@@ -4801,9 +4801,11 @@ Describe "Issue #292 PostgreSQL automatic elevation and resume" {
     }
 
     It "uses the exact automatic repair offer and no manual elevation path" {
-        $script:ProductionSource | Should -Match "TPM can't use the saved PostgreSQL password"
-        $script:ProductionSource | Should -Match "TPM can fix this automatically"
-        $script:ProductionSource | Should -Match "Fix it now\? \(Y/N\)"
+        $script:ProductionSource | Should -Match 'PostgreSQL needs attention'
+        $script:ProductionSource | Should -Match 'saved PostgreSQL password cannot be used'
+        $script:ProductionSource | Should -Match 'verified backup'
+        $script:ProductionSource | Should -Match 'Existing PostgreSQL data is preserved'
+        $script:ProductionSource | Should -Match 'Repair the PostgreSQL password now\? \(Y/N\)'
         $script:ProductionSource | Should -Not -Match '(?i)right-click.*administrator|select PostgreSQL setup.*again'
     }
 

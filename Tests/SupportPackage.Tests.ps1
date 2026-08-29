@@ -484,4 +484,20 @@ Describe 'New-TpmSupportPackage' {
         Test-Path -LiteralPath $stage | Should -BeTrue
         Test-Path -LiteralPath $outside | Should -BeTrue
     }
+    It 'includes explanatory README and concise manifest summary without duplicate extensions' {
+        $f = New-SupportFixture
+        Write-SupportText (Join-Path $f.Script 'TeknoParrot-Manager-controls.txt') 'controls'
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        $entries = @(Get-SupportZipEntries $r.PackagePath)
+        $entries | Should -Contain 'README.txt'
+        $readme = Get-SupportZipText $r.PackagePath 'README.txt'
+        $readme | Should -Match 'diagnostics'
+        $readme | Should -Match 'metadata'
+        $readme | Should -Match 'plugin DLL'
+        $manifest = Get-SupportZipText $r.PackagePath 'MANIFEST.txt'
+        $manifest | Should -Match 'Games considered:'
+        $manifest | Should -Match 'Optional diagnostics not found:'
+        $entries | Where-Object { $_ -match '\.txt\.txt$' } | Should -BeNullOrEmpty
+    }
 }
