@@ -469,7 +469,8 @@ function New-TpmWorkflowStatusContext {
         [Parameter(Mandatory)][string]$Title,
         [Parameter(Mandatory)][object[]]$Steps,
         [scriptblock]$EventSink = $null,
-        [object]$ConsoleFacts = $null
+        [object]$ConsoleFacts = $null,
+        [switch]$ShowTelemetry
     )
     $normalizedSteps = @($Steps | ForEach-Object {
         if ($_ -is [string]) { [pscustomobject]@{ Id = [string]$_; Label = [string]$_ } }
@@ -483,6 +484,7 @@ function New-TpmWorkflowStatusContext {
         Steps            = $normalizedSteps
         EventSink        = $EventSink
         ConsoleFacts     = $ConsoleFacts
+        ShowTelemetry    = [bool]($ShowTelemetry -or $null -ne $ConsoleFacts)
         Lifecycle        = 'Created'
         State            = 'Working'
         Sequence         = 0
@@ -728,8 +730,12 @@ function Publish-TpmWorkflowStatusEvent {
     Apply-TpmWorkflowStatusEvent -Context $Context -StatusEvent $statusEvent
     $statusEvent.StateAfter = $Context.State
     if ($Context.EventSink) { [void](& $Context.EventSink $statusEvent) }
-    $script:TpmWorkflowRendering = $true
-    try { Render-TpmWorkflowStatus -Context $Context } finally { $script:TpmWorkflowRendering = $false }
+    Write-Log ("Workflow event: {0} workflow={1} step={2} state={3} summary={4}" -f $EventKind, $Context.WorkflowKey, $statusEvent.StepId, $statusEvent.StateAfter, $statusEvent.Summary)
+    $renderActionable = $EventKind -in @('FailureRaised','WaitingStarted','WorkflowCompleted','WorkflowAborted')
+    if ($Context.ShowTelemetry -or $renderActionable) {
+        $script:TpmWorkflowRendering = $true
+        try { Render-TpmWorkflowStatus -Context $Context } finally { $script:TpmWorkflowRendering = $false }
+    }
 }
 
 function Start-TpmWorkflowStatus {
@@ -850,7 +856,7 @@ function Write-Host {
         [string]$Separator = ' '
     )
     $activeStatus = $script:ActiveTpmWorkflowStatus
-    if (-not $activeStatus -or $activeStatus.Closed -or $script:TpmWorkflowRendering) {
+    if (-not $activeStatus -or $activeStatus.Closed -or $script:TpmWorkflowRendering -or -not $activeStatus.ShowTelemetry) {
         Microsoft.PowerShell.Utility\Write-Host @PSBoundParameters
         return
     }
@@ -869,7 +875,7 @@ function Write-TpmWorkflowConsoleLine {
     param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$Message, [string]$ForegroundColor = 'White')
     Clear-TpmWorkflowFooter -Context $Context
     Write-Host $Message -ForegroundColor $ForegroundColor
-    Render-TpmWorkflowStatus -Context $Context
+    if ($Context.ShowTelemetry) { Render-TpmWorkflowStatus -Context $Context }
 }
 
 function Read-TpmWorkflowInput {
@@ -884,8 +890,14 @@ function Get-TpmSupportSafeName {
     param([Parameter(Mandatory)][string]$Value)
     $safe = [regex]::Replace($Value, '[^A-Za-z0-9_.-]', '_')
     if ([string]::IsNullOrWhiteSpace($safe)) { $safe = 'item' }
+    if ($safe -match '(?i)\.txt\.txt$') { $safe = $safe.Substring(0, $safe.Length - 4) }
     if ($safe.Length -gt 80) { $safe = $safe.Substring(0, 80) }
     return $safe
+}
+function Get-TpmSupportDiagnosticName {
+    param([Parameter(Mandatory)][string]$Prefix,[Parameter(Mandatory)][string]$Value)
+    $safe = Get-TpmSupportSafeName -Value $Value
+    return ($Prefix + $(if ($safe -match '(?i)\.txt$') { $safe } else { $safe + '.txt' }))
 }
 
 function Redact-TpmSupportText {
@@ -1124,6 +1136,7 @@ function Remove-TpmSupportStageDirectory {
         Remove-TpmSupportOwnedEntry -Path (Join-Path $Path 'diagnostics') -RootFinal $root.FinalPath
         Remove-TpmSupportOwnedEntry -Path (Join-Path $Path 'metadata') -RootFinal $root.FinalPath
         Remove-TpmSupportOwnedEntry -Path (Join-Path $Path 'MANIFEST.txt') -RootFinal $root.FinalPath
+        Remove-TpmSupportOwnedEntry -Path (Join-Path $Path 'README.txt') -RootFinal $root.FinalPath
         if (@(Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop).Count -ne 0) { return $false }
         Remove-TpmSupportHandle -Handle $root.Handle
         $root.Handle.Dispose()
@@ -1227,9 +1240,18 @@ function Copy-TpmSupportTextFile {
             return
         }
         $redacted = Redact-TpmSupportText -Text $content.Text
-        $destination = Join-Path $StageDirectory $DestinationName
+        $baseName = [System.IO.Path]::GetFileNameWithoutExtension($DestinationName)
+        $extension = [System.IO.Path]::GetExtension($DestinationName)
+        $candidate = $DestinationName
+        $suffix = 1
+        while ((Test-Path -LiteralPath (Join-Path $StageDirectory $candidate) -PathType Leaf) -or
+               @($Records | Where-Object { $_.Status -eq 'Collected' -and $_.Destination -eq $candidate }).Count -gt 0) {
+            $suffix++
+            $candidate = '{0}-{1:D2}{2}' -f $baseName, $suffix, $extension
+        }
+        $destination = Join-Path $StageDirectory $candidate
         [System.IO.File]::WriteAllText($destination, $redacted.Text, (New-Object System.Text.UTF8Encoding($false)))
-        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status Collected -Destination $DestinationName -Detail ('Allowlisted text diagnostic collected as ' + $content.Encoding + '.') -Redactions $redacted.RedactionCount
+        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status Collected -Destination $candidate -Detail ('Allowlisted text diagnostic collected as ' + $content.Encoding + '.') -Redactions $redacted.RedactionCount
     } catch {
         $status = if ($_.Exception.Message -match 'exceeded the safe size limit') { 'IntentionallyExcluded' } elseif ($_.Exception.Message -match 'identity|reparse|escaped|root') { 'RejectedUnsafeContent' } else { 'CollectionFailed' }
         Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status $status -Detail 'The allowlisted diagnostic could not be read or redacted safely.'
@@ -1346,16 +1368,25 @@ function Get-TpmSupportManifestText {
         [Parameter(Mandatory)][string]$AffectedGameSummary
     )
     $lines = New-Object System.Collections.Generic.List[string]
-    $lines.Add('TPM Support Package Manifest v1') | Out-Null
-    $lines.Add('Created UTC: ' + (Get-Date).ToUniversalTime().ToString('o')) | Out-Null
-    $lines.Add('TPM version: ' + (Get-ManagerDisplayVersion)) | Out-Null
-    $lines.Add('PowerShell: ' + $PSVersionTable.PSVersion.ToString()) | Out-Null
-    $lines.Add('OS: Windows ' + [Environment]::OSVersion.Version.ToString()) | Out-Null
-    $lines.Add('64-bit operating system: ' + [Environment]::Is64BitOperatingSystem) | Out-Null
-    $safeAffectedGameSummary = (Redact-TpmSupportText -Text $AffectedGameSummary).Text
-    $lines.Add('Affected game scope: ' + $safeAffectedGameSummary) | Out-Null
-    $lines.Add('Registered game diagnostics considered: ' + $GameCodes.Count) | Out-Null
-    $lines.Add('') | Out-Null
+$lines.Add('TPM Support Package Manifest v1') | Out-Null
+$lines.Add('Created UTC: ' + (Get-Date).ToUniversalTime().ToString('o')) | Out-Null
+$lines.Add('TPM version: ' + (Get-ManagerDisplayVersion)) | Out-Null
+$lines.Add('PowerShell: ' + $PSVersionTable.PSVersion.ToString()) | Out-Null
+$lines.Add('OS: Windows ' + [Environment]::OSVersion.Version.ToString()) | Out-Null
+$lines.Add('64-bit operating system: ' + [Environment]::Is64BitOperatingSystem) | Out-Null
+$safeAffectedGameSummary = (Redact-TpmSupportText -Text $AffectedGameSummary).Text
+$lines.Add('Affected game scope: ' + $safeAffectedGameSummary) | Out-Null
+$lines.Add('Games considered: ' + $GameCodes.Count) | Out-Null
+$collected = @($Records | Where-Object Status -eq 'Collected')
+$lines.Add('Collected diagnostic files: ' + @($collected | Where-Object Destination -notlike 'metadata\*').Count) | Out-Null
+$lines.Add('Plugin inventory files: ' + @($collected | Where-Object Destination -like 'metadata\*').Count) | Out-Null
+$lines.Add('Optional diagnostics not found: ' + @($Records | Where-Object Status -eq 'NotPresent').Count) | Out-Null
+$lines.Add('Collection failures: ' + @($Records | Where-Object Status -eq 'CollectionFailed').Count) | Out-Null
+$lines.Add('Intentional exclusions or unsafe content: ' + @($Records | Where-Object Status -in @('IntentionallyExcluded','RejectedUnsafeContent')).Count) | Out-Null
+$lines.Add('') | Out-Null
+$lines.Add('A missing game usually means no matching safe diagnostic file was present; it does not mean TPM ignored that game.') | Out-Null
+$lines.Add('This ZIP may still be useful for support when only partial evidence was collected.') | Out-Null
+$lines.Add('') | Out-Null
     $lines.Add('Diagnostic sources checked:') | Out-Null
     $lines.Add('- TPM-owned allowlisted logs and reports beside the script') | Out-Null
     $lines.Add('- Allowlisted TeknoParrot root logs, including ParrotPatcher_Log.txt') | Out-Null
@@ -1435,7 +1466,7 @@ function New-TpmSupportPackage {
         $index = 0
         foreach ($name in $tpmNames) {
             $index++
-            Copy-TpmSupportTextFile -Records $records -SourcePath (Join-Path $ScriptRoot $name) -AllowedRoot $ScriptRoot -SourceLabel ('TPM:' + $name) -StageDirectory (Join-Path $stage 'diagnostics') -DestinationName ('tpm-{0:D2}-{1}.txt' -f $index, (Get-TpmSupportSafeName $name))
+            Copy-TpmSupportTextFile -Records $records -SourcePath (Join-Path $ScriptRoot $name) -AllowedRoot $ScriptRoot -SourceLabel ('TPM:' + $name) -StageDirectory (Join-Path $stage 'diagnostics') -DestinationName (Get-TpmSupportDiagnosticName -Prefix ('tpm-{0:D2}-' -f $index) -Value (Get-TpmSupportSafeName $name))
         }
         Complete-TpmWorkflowStep -Context $status -Summary 'TPM diagnostics checked' -NextStep 'TeknoParrot diagnostics'
         Start-TpmWorkflowStep -Context $status -StepId 'tekno' -Activity 'Checking allowlisted TeknoParrot logs'
@@ -1448,7 +1479,7 @@ function New-TpmSupportPackage {
             $index = 0
             foreach ($name in $tpNames) {
                 $index++
-                Copy-TpmSupportTextFile -Records $records -SourcePath (Join-Path $TeknoParrotRoot $name) -AllowedRoot $TeknoParrotRoot -SourceLabel ('TeknoParrot:' + $name) -StageDirectory (Join-Path $stage 'diagnostics') -DestinationName ('tekno-{0:D2}-{1}.txt' -f $index, (Get-TpmSupportSafeName $name))
+                Copy-TpmSupportTextFile -Records $records -SourcePath (Join-Path $TeknoParrotRoot $name) -AllowedRoot $TeknoParrotRoot -SourceLabel ('TeknoParrot:' + $name) -StageDirectory (Join-Path $stage 'diagnostics') -DestinationName (Get-TpmSupportDiagnosticName -Prefix ('tekno-{0:D2}-' -f $index) -Value (Get-TpmSupportSafeName $name))
             }
         }
         Complete-TpmWorkflowStep -Context $status -Summary 'TeknoParrot diagnostics checked' -NextStep 'Game-specific diagnostics'
@@ -1505,6 +1536,22 @@ function New-TpmSupportPackage {
         Start-TpmWorkflowStep -Context $status -StepId 'zip' -Activity 'Writing the support package manifest and ZIP'
         $manifest = Get-TpmSupportManifestText -Records $records -Errors $errors -GameCodes @($gameCodes) -AffectedGameSummary $AffectedGameSummary
         [System.IO.File]::WriteAllText((Join-Path $stage 'MANIFEST.txt'), $manifest, (New-Object System.Text.UTF8Encoding($false)))
+        $readme = @(
+            'TPM Support Package'
+            ''
+            'diagnostics\'
+            'Contains actual allowlisted log and report files TPM safely found.'
+            'Only games with a matching safe diagnostic file appear here.'
+            'For example, Family Guy Bowling appears when its BepInEx log is available.'
+            ''
+            'metadata\'
+            'Contains file inventories only. These inventories help support identify installed plugins.'
+            'Plugin DLL payloads and game files are not copied into this package.'
+            ''
+            'No ROMs, game executables, arbitrary DLLs, passwords, API keys, or unrelated personal files are included.'
+            'If evidence is partial, the ZIP may still be useful to send for support.'
+        ) -join "`r`n"
+        [System.IO.File]::WriteAllText((Join-Path $stage 'README.txt'), $readme + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
         $timestamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss')
         for ($suffix = 0; $suffix -lt 1000; $suffix++) {
             $suffixText = if ($suffix -eq 0) { '' } else { '-{0:D3}' -f $suffix }
@@ -4949,10 +4996,10 @@ function New-PostgresRecoveryBackup {
             }
         }
         if ($profileBackups.Count -eq 0) { throw 'No affected PostgreSQL profiles were identified.' }
-        return [pscustomobject]@{ Path = $backupRoot; ConfigBackups = @($configBackups); ProfileBackups = @($profileBackups); Verified = $true }
+        return [pscustomobject]@{ Path = $backupRoot; ConfigBackups = $configBackups.ToArray(); ProfileBackups = $profileBackups.ToArray(); Verified = $true }
     } catch {
         Write-Log "Postgres recovery backup: blocked; evidence remains at $backupRoot."
-        return [pscustomobject]@{ Path = $backupRoot; ConfigBackups = @($configBackups); ProfileBackups = @($profileBackups); Verified = $false }
+        return [pscustomobject]@{ Path = $backupRoot; ConfigBackups = $configBackups.ToArray(); ProfileBackups = $profileBackups.ToArray(); Verified = $false }
     }
 }
 
@@ -11589,6 +11636,13 @@ function Invoke-LibraryHealthCheck {
     Write-Host "  are per-game choices, not a hardware/membership-driven yes-or-no):" -ForegroundColor DarkGray
     Write-Host ("    ReShade installed  : {0} of {1} registered games" -f $reShadeCount, $valid.Count) -ForegroundColor DarkGray
     Write-Host ("    BepInEx installed  : {0} of {1} registered games" -f $bepInExCount, $valid.Count) -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host ("  Summary: {0} registered; {1} valid paths; {2} broken; {3} empty." -f $profiles.Count, $valid.Count, $broken.Count, $empty.Count) -ForegroundColor Cyan
+    if ($broken.Count -eq 0 -and $empty.Count -eq 0) {
+        Write-Host "  No library path action needed." -ForegroundColor Green
+    } else {
+        Write-Host "  Next action: run Register or AutoSync Repair for highlighted paths." -ForegroundColor Yellow
+    }
 
     if ($LogPath -and (Test-Path -LiteralPath $LogPath)) {
         try {
@@ -17096,8 +17150,9 @@ while ($true) {
         if ($needCount -eq 0) {
             Write-Host "  No registered games need PostgreSQL -- nothing to do." -ForegroundColor Green
             Write-Log "Postgres setup: no Postgres-needing games registered."
+            [void](Start-TpmWorkflowStep -Context $postgresStatus -StepId 'backup' -Activity 'No PostgreSQL repair is needed')
             [void](Complete-TpmWorkflowStep -Context $postgresStatus -Outcome Skipped -Summary 'No registered game needs PostgreSQL')
-            [void](Complete-TpmWorkflowStatus -Context $postgresStatus -Summary 'Nothing needed')
+            [void](Complete-TpmWorkflowStatus -Context $postgresStatus -Summary 'No action needed')
             [void](Close-TpmWorkflowStatus -Context $postgresStatus)
             if ($isPostgresRecoveryResume) {
                 [void](Remove-PostgresRecoveryState -Path $postgresResumeState.Path -ClaimPath $postgresResumeState.ClaimPath)
@@ -17178,10 +17233,10 @@ while ($true) {
                         finally { $savedPwPlain = $null }
                     }
                     if (-not $superPwPlain) {
-                        Write-Host "  TPM can't use the saved PostgreSQL password." -ForegroundColor Yellow
-                        Write-Host "  TPM can fix this automatically." -ForegroundColor Yellow
-                        Write-Host "  A verified backup is made before any reset. Nothing is changed unless you approve." -ForegroundColor DarkGray
-                        $repairNow = (Read-HostSafe '  Fix it now? (Y/N)').ToUpper()
+                        Write-Host "  PostgreSQL needs attention: the saved PostgreSQL password cannot be used." -ForegroundColor Yellow
+                        Write-Host "  TPM can repair it automatically. TPM will make and verify a safety backup first." -ForegroundColor Yellow
+                        Write-Host "  Existing PostgreSQL data is preserved; after repair TPM verifies the password works." -ForegroundColor DarkGray
+                        $repairNow = (Read-HostSafe '  Repair the PostgreSQL password now? (Y/N)').ToUpper()
                         if ($repairNow -ne 'Y') {
                             Write-Host '  Nothing was changed. The PostgreSQL setup was not completed.' -ForegroundColor Yellow
                             [void](Stop-TpmWorkflowStatus -Context $postgresStatus -Reason 'PostgreSQL repair declined')
@@ -17378,8 +17433,9 @@ while ($true) {
             [void](Complete-TpmWorkflowStatus -Context $updateStatus -Summary 'Update installed')
             [void](Close-TpmWorkflowStatus -Context $updateStatus)
         } else {
+            [void](Start-TpmWorkflowStep -Context $updateStatus -StepId 'apply' -Activity 'No update is needed')
             [void](Complete-TpmWorkflowStep -Context $updateStatus -Outcome Skipped -Summary 'No update was installed')
-            [void](Complete-TpmWorkflowStatus -Context $updateStatus -Summary 'Update check finished')
+            [void](Complete-TpmWorkflowStatus -Context $updateStatus -Summary 'You already have the latest version')
             [void](Close-TpmWorkflowStatus -Context $updateStatus)
         }
         if ($updateInstalled) {

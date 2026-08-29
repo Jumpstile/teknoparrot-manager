@@ -4756,6 +4756,52 @@ Describe "Postgres guided recovery and profile transaction" {
             $result | Should -Not -BeNullOrEmpty
         }
     }
+    It "returns array-shaped backup collections on success and catch paths" {
+        $root = Join-Path $TestDrive 'postgres-backup-shape'
+        $data = Join-Path $root 'data'
+        $profiles = Join-Path $TestDrive 'postgres-backup-shape-profiles'
+        New-Item -ItemType Directory -Path $data, $profiles -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $data 'pg_hba.conf') -Value 'hba'
+        Set-Content -LiteralPath (Join-Path $data 'postgresql.conf') -Value 'postgresql'
+        $profilePath = Join-Path $profiles 'Game.xml'
+        Set-Content -LiteralPath $profilePath -Value '<GameProfile><ConfigValues><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>DbName</FieldName><FieldValue>GameDB01</FieldValue></FieldInformation></ConfigValues></GameProfile>'
+        $script:PostgresInstallDir = $root
+        Mock Lock-PostgresRecoveryDirectory { $global:LASTEXITCODE = 0 }
+        Mock Copy-PostgresRecoveryEvidenceFile { [pscustomobject]@{ Source = $Source; Backup = $Destination; Sha256 = 'hash' } }
+        Mock Write-Log {}
+
+        $success = New-PostgresRecoveryBackup -UserProfilesDir $profiles
+        $success.Verified | Should -BeTrue
+        $success.ConfigBackups -is [array] | Should -BeTrue
+        $success.ProfileBackups -is [array] | Should -BeTrue
+        @($success.ConfigBackups).Count | Should -Be 2
+        @($success.ProfileBackups).Count | Should -Be 1
+
+        $failure = New-PostgresRecoveryBackup -UserProfilesDir (Join-Path $TestDrive 'missing-profiles')
+        $failure.Verified | Should -BeFalse
+        $failure.ConfigBackups -is [array] | Should -BeTrue
+        $failure.ProfileBackups -is [array] | Should -BeTrue
+    }
+
+    It "blocks every PostgreSQL mutation when recovery backup is unverified" {
+        $profiles = Join-Path $TestDrive 'postgres-unverified-profiles'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        $script:pgMutationCalls = New-Object System.Collections.Generic.List[string]
+        Mock Reset-PostgresPasswordAutomatically { [void]$script:pgMutationCalls.Add('reset') }
+        Mock Save-Xml { [void]$script:pgMutationCalls.Add('save') }
+        Mock Get-PostgresDatabaseState { [void]$script:pgMutationCalls.Add('state'); [pscustomobject]@{ Exists = $true; Verified = $true } }
+        Mock New-PostgresDatabaseFromBackup { [void]$script:pgMutationCalls.Add('database'); $true }
+        Mock Write-Log {}
+        $result = Invoke-PostgresGameSetup -UserProfilesDir $profiles -SuperPasswordPlain 'secret' -RecoveryBackup ([pscustomobject]@{
+            Path = (Join-Path $TestDrive 'unverified'); Verified = $false
+        })
+        $result.RecoveryBlocked | Should -BeTrue
+        @($script:pgMutationCalls).Count | Should -Be 0
+        Should -Invoke Reset-PostgresPasswordAutomatically -Times 0
+        Should -Invoke Save-Xml -Times 0
+        Should -Invoke Get-PostgresDatabaseState -Times 0
+        Should -Invoke New-PostgresDatabaseFromBackup -Times 0
+    }
 }
 
 Describe "Issue #292 PostgreSQL automatic elevation and resume" {
@@ -4783,7 +4829,7 @@ Describe "Issue #292 PostgreSQL automatic elevation and resume" {
     }
 
     It "offers automatic repair instead of manual relaunch instructions" {
-        $script:ProductionSource | Should -Match 'Fix it now\? \(Y/N\)'
+        $script:ProductionSource | Should -Match 'Repair the PostgreSQL password now\? \(Y/N\)'
         $script:ProductionSource | Should -Match 'Start-PostgresRecoveryAsAdministrator[\s\S]*?-Operation Recovery'
         $script:ProductionSource | Should -Match 'PostgresRecoveryResumeToken'
         $script:ProductionSource | Should -Not -Match '(?i)right-click TeknoParrot-Manager\.bat|select PostgreSQL setup \(mode 12\) again'
@@ -4801,9 +4847,11 @@ Describe "Issue #292 PostgreSQL automatic elevation and resume" {
     }
 
     It "uses the exact automatic repair offer and no manual elevation path" {
-        $script:ProductionSource | Should -Match "TPM can't use the saved PostgreSQL password"
-        $script:ProductionSource | Should -Match "TPM can fix this automatically"
-        $script:ProductionSource | Should -Match "Fix it now\? \(Y/N\)"
+        $script:ProductionSource | Should -Match 'PostgreSQL needs attention'
+        $script:ProductionSource | Should -Match 'saved PostgreSQL password cannot be used'
+        $script:ProductionSource | Should -Match 'verified backup'
+        $script:ProductionSource | Should -Match 'Existing PostgreSQL data is preserved'
+        $script:ProductionSource | Should -Match 'Repair the PostgreSQL password now\? \(Y/N\)'
         $script:ProductionSource | Should -Not -Match '(?i)right-click.*administrator|select PostgreSQL setup.*again'
     }
 
@@ -7235,6 +7283,11 @@ Describe "Invoke-CheckForUpdates" {
         Set-Content -LiteralPath $path -Value "`$ScriptVersion = `"$ScriptVersion`"" -Encoding ascii
 
         Invoke-CheckForUpdates -ScriptPath $path | Should -BeFalse
+        $updateFlow = $script:ProductionSource.Substring($script:ProductionSource.IndexOf("if (`$updateInstalled)"))
+        $startApply = $updateFlow.IndexOf("Start-TpmWorkflowStep -Context `$updateStatus -StepId 'apply'")
+        $skipApply = $updateFlow.IndexOf("Complete-TpmWorkflowStep -Context `$updateStatus -Outcome Skipped")
+        $startApply | Should -BeGreaterThan -1
+        $skipApply | Should -BeGreaterThan $startApply
     }
 
     It "returns false and makes no changes when the user declines the update" {
@@ -9280,6 +9333,53 @@ Describe "Issue #300 shared workflow status state machine" {
         [void](Start-TpmWorkflowStatus $ctx)
         [void](Start-TpmWorkflowStep $ctx -StepId 'one' -Activity 'Checking')
         $adapterCalls | Should -Be 0
+    }
+    It "suppresses routine normal-mode rendering while preserving events and logs" {
+        $script:events = New-Object System.Collections.Generic.List[object]
+        $script:logs = New-Object System.Collections.Generic.List[string]
+        $script:renders = 0
+        Mock Render-TpmWorkflowStatus { $script:renders++ }
+        Mock Write-Log { param([string]$Message) [void]$script:logs.Add($Message) }
+        $ctx = New-TpmWorkflowStatusContext -WorkflowKey 'normal' -Title 'Normal' -Steps @('one') -EventSink { param($event) [void]$script:events.Add($event) }
+        [void](Start-TpmWorkflowStatus $ctx)
+        [void](Start-TpmWorkflowStep $ctx -StepId 'one' -Activity 'Checking')
+        [void](Complete-TpmWorkflowStep $ctx -Summary 'Checked')
+        $script:renders | Should -Be 0
+        @($script:events.EventKind) | Should -Be @('WorkflowStarted','StepStarted','StepCompleted')
+        $script:logs.Count | Should -Be 3
+        [void](Complete-TpmWorkflowStatus -Context $ctx -Summary 'done')
+        [void](Close-TpmWorkflowStatus -Context $ctx)
+        $telemetry = New-TpmWorkflowStatusContext -WorkflowKey 'telemetry' -Title 'Telemetry' -Steps @('one') -ShowTelemetry
+        [void](Start-TpmWorkflowStatus $telemetry)
+        $script:renders | Should -BeGreaterThan 0
+    }
+
+    It "renders actionable normal-mode states without hiding user messages" {
+        $renders = 0
+        Mock Render-TpmWorkflowStatus { $script:renders++ }
+        Mock Write-Host { $script:userMessages += [string]$Object }
+        $script:userMessages = @()
+        foreach ($kind in @('failure','waiting','completed','aborted')) {
+            $ctx = New-TpmWorkflowStatusContext -WorkflowKey $kind -Title $kind -Steps @('one')
+            [void](Start-TpmWorkflowStatus $ctx)
+            if ($kind -eq 'failure') {
+                [void](Set-TpmWorkflowFailure -Context $ctx -FailureId 'test-failure' -Message 'Warning: repair needs attention' -DataSafety 'safe' -RecoveryActions @())
+                [void](Acknowledge-TpmWorkflowFailure -Context $ctx -FailureId 'test-failure')
+                [void](Complete-TpmWorkflowStatus -Context $ctx -Summary 'completed after failure')
+            } elseif ($kind -eq 'waiting') {
+                [void](Set-TpmWorkflowWaiting -Context $ctx -Message 'Prompt: continue?' -UserAction 'Prompt')
+                [void](Resume-TpmWorkflowStatus -Context $ctx)
+                [void](Complete-TpmWorkflowStatus -Context $ctx -Summary 'completed')
+            } elseif ($kind -eq 'completed') {
+                [void](Complete-TpmWorkflowStatus -Context $ctx -Summary 'completed')
+            } else {
+                [void](Stop-TpmWorkflowStatus -Context $ctx -Reason 'aborted')
+            }
+            [void](Close-TpmWorkflowStatus -Context $ctx)
+        }
+        $script:renders | Should -BeGreaterThan 0
+        Write-TpmWorkflowConsoleLine -Context (New-TpmWorkflowStatusContext -WorkflowKey 'message' -Title 'Message' -Steps @('one')) -Message 'Warning: visible task message'
+        $script:userMessages | Should -Contain 'Warning: visible task message'
     }
 }
 
