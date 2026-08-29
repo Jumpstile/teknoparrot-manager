@@ -500,4 +500,25 @@ Describe 'New-TpmSupportPackage' {
         $manifest | Should -Match 'Optional diagnostics not found:'
         $entries | Where-Object { $_ -match '\.txt\.txt$' } | Should -BeNullOrEmpty
     }
+    It 'preserves both diagnostics when destination names collide' {
+        $f = New-SupportFixture
+        $stage = Join-Path $f.Root 'collision-stage'
+        New-Item -ItemType Directory -Path $stage -Force | Out-Null
+        $first = Join-Path $f.Root 'first-a.txt'
+        $second = Join-Path $f.Root 'first-b.txt'
+        Write-SupportText $first 'first contents'
+        Write-SupportText $second 'second contents'
+        $records = New-Object System.Collections.Generic.List[object]
+        Copy-TpmSupportTextFile -Records $records -SourcePath $first -AllowedRoot $f.Root -SourceLabel 'first' -StageDirectory $stage -DestinationName 'first_.txt'
+        Copy-TpmSupportTextFile -Records $records -SourcePath $second -AllowedRoot $f.Root -SourceLabel 'second' -StageDirectory $stage -DestinationName 'first_.txt'
+        $collected = @($records | Where-Object Status -eq 'Collected')
+        $collected.Count | Should -Be 2
+        Test-Path -LiteralPath (Join-Path $stage 'first_.txt') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $stage 'first_-02.txt') | Should -BeTrue
+        [IO.File]::ReadAllText($first) | Should -Be 'first contents'
+        [IO.File]::ReadAllText($second) | Should -Be 'second contents'
+        $collected.Destination | Should -Contain 'first_.txt'
+        $collected.Destination | Should -Contain 'first_-02.txt'
+        $collected.Destination | ForEach-Object { $_ | Should -Not -Match '(^|[\\/])\.\.([\\/]|$)' }
+    }
 }

@@ -1239,10 +1239,19 @@ function Copy-TpmSupportTextFile {
             Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status RejectedUnsafeContent -Detail ('Diagnostic content rejected: ' + $content.Reason)
             return
         }
-        $redacted = Redact-TpmSupportText -Text $content.Text
         $destination = Join-Path $StageDirectory $DestinationName
+        $baseName = [System.IO.Path]::GetFileNameWithoutExtension($DestinationName)
+        $extension = [System.IO.Path]::GetExtension($DestinationName)
+        $candidate = $DestinationName
+        $suffix = 1
+        while ((Test-Path -LiteralPath (Join-Path $StageDirectory $candidate) -PathType Leaf) -or
+               @($Records | Where-Object { $_.Status -eq 'Collected' -and $_.Destination -eq $candidate }).Count -gt 0) {
+            $suffix++
+            $candidate = '{0}-{1:D2}{2}' -f $baseName, $suffix, $extension
+        }
+        $destination = Join-Path $StageDirectory $candidate
         [System.IO.File]::WriteAllText($destination, $redacted.Text, (New-Object System.Text.UTF8Encoding($false)))
-        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status Collected -Destination $DestinationName -Detail ('Allowlisted text diagnostic collected as ' + $content.Encoding + '.') -Redactions $redacted.RedactionCount
+        Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status Collected -Destination $candidate -Detail ('Allowlisted text diagnostic collected as ' + $content.Encoding + '.') -Redactions $redacted.RedactionCount
     } catch {
         $status = if ($_.Exception.Message -match 'exceeded the safe size limit') { 'IntentionallyExcluded' } elseif ($_.Exception.Message -match 'identity|reparse|escaped|root') { 'RejectedUnsafeContent' } else { 'CollectionFailed' }
         Add-TpmSupportRecord -Records $Records -Source $SourceLabel -Status $status -Detail 'The allowlisted diagnostic could not be read or redacted safely.'
