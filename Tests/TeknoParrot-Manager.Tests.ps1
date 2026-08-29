@@ -7283,6 +7283,11 @@ Describe "Invoke-CheckForUpdates" {
         Set-Content -LiteralPath $path -Value "`$ScriptVersion = `"$ScriptVersion`"" -Encoding ascii
 
         Invoke-CheckForUpdates -ScriptPath $path | Should -BeFalse
+        $updateFlow = $script:ProductionSource.Substring($script:ProductionSource.IndexOf("if (`$updateInstalled)"))
+        $startApply = $updateFlow.IndexOf("Start-TpmWorkflowStep -Context `$updateStatus -StepId 'apply'")
+        $skipApply = $updateFlow.IndexOf("Complete-TpmWorkflowStep -Context `$updateStatus -Outcome Skipped")
+        $startApply | Should -BeGreaterThan -1
+        $skipApply | Should -BeGreaterThan $startApply
     }
 
     It "returns false and makes no changes when the user declines the update" {
@@ -9328,6 +9333,53 @@ Describe "Issue #300 shared workflow status state machine" {
         [void](Start-TpmWorkflowStatus $ctx)
         [void](Start-TpmWorkflowStep $ctx -StepId 'one' -Activity 'Checking')
         $adapterCalls | Should -Be 0
+    }
+    It "suppresses routine normal-mode rendering while preserving events and logs" {
+        $script:events = New-Object System.Collections.Generic.List[object]
+        $script:logs = New-Object System.Collections.Generic.List[string]
+        $script:renders = 0
+        Mock Render-TpmWorkflowStatus { $script:renders++ }
+        Mock Write-Log { param([string]$Message) [void]$script:logs.Add($Message) }
+        $ctx = New-TpmWorkflowStatusContext -WorkflowKey 'normal' -Title 'Normal' -Steps @('one') -EventSink { param($event) [void]$script:events.Add($event) }
+        [void](Start-TpmWorkflowStatus $ctx)
+        [void](Start-TpmWorkflowStep $ctx -StepId 'one' -Activity 'Checking')
+        [void](Complete-TpmWorkflowStep $ctx -Summary 'Checked')
+        $script:renders | Should -Be 0
+        @($script:events.EventKind) | Should -Be @('WorkflowStarted','StepStarted','StepCompleted')
+        $script:logs.Count | Should -Be 3
+        [void](Complete-TpmWorkflowStatus -Context $ctx -Summary 'done')
+        [void](Close-TpmWorkflowStatus -Context $ctx)
+        $telemetry = New-TpmWorkflowStatusContext -WorkflowKey 'telemetry' -Title 'Telemetry' -Steps @('one') -ShowTelemetry
+        [void](Start-TpmWorkflowStatus $telemetry)
+        $script:renders | Should -BeGreaterThan 0
+    }
+
+    It "renders actionable normal-mode states without hiding user messages" {
+        $renders = 0
+        Mock Render-TpmWorkflowStatus { $script:renders++ }
+        Mock Write-Host { $script:userMessages += [string]$Object }
+        $script:userMessages = @()
+        foreach ($kind in @('failure','waiting','completed','aborted')) {
+            $ctx = New-TpmWorkflowStatusContext -WorkflowKey $kind -Title $kind -Steps @('one')
+            [void](Start-TpmWorkflowStatus $ctx)
+            if ($kind -eq 'failure') {
+                [void](Set-TpmWorkflowFailure -Context $ctx -FailureId 'test-failure' -Message 'Warning: repair needs attention' -DataSafety 'safe' -RecoveryActions @())
+                [void](Acknowledge-TpmWorkflowFailure -Context $ctx -FailureId 'test-failure')
+                [void](Complete-TpmWorkflowStatus -Context $ctx -Summary 'completed after failure')
+            } elseif ($kind -eq 'waiting') {
+                [void](Set-TpmWorkflowWaiting -Context $ctx -Message 'Prompt: continue?' -UserAction 'Prompt')
+                [void](Resume-TpmWorkflowStatus -Context $ctx)
+                [void](Complete-TpmWorkflowStatus -Context $ctx -Summary 'completed')
+            } elseif ($kind -eq 'completed') {
+                [void](Complete-TpmWorkflowStatus -Context $ctx -Summary 'completed')
+            } else {
+                [void](Stop-TpmWorkflowStatus -Context $ctx -Reason 'aborted')
+            }
+            [void](Close-TpmWorkflowStatus -Context $ctx)
+        }
+        $script:renders | Should -BeGreaterThan 0
+        Write-TpmWorkflowConsoleLine -Context (New-TpmWorkflowStatusContext -WorkflowKey 'message' -Title 'Message' -Steps @('one')) -Message 'Warning: visible task message'
+        $script:userMessages | Should -Contain 'Warning: visible task message'
     }
 }
 
