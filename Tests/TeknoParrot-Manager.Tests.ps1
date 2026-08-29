@@ -3502,6 +3502,14 @@ Describe "Expand-ReShadeSelfExtractingArchive (embedded ZIP scan, fail-closed on
         (Get-Content -LiteralPath (Join-Path $dest "ReShade32.dll") -Raw) | Should -Be 'r32'
         (Get-Content -LiteralPath (Join-Path $dest "ReShade64.dll") -Raw) | Should -Be 'r64'
     }
+    It "extracts 6.8 DLLs without requiring setup [PROXY] or display dimensions" {
+        $exe=Join-Path $TestDrive 'setup-680-runtime-defaults.exe'; $dest=Join-Path $TestDrive 'setup-680-runtime-defaults-out'
+        New-TestSelfExtractingExe $exe @{ 'ReShade32.dll'='r32'; 'ReShade64.dll'='r64'; 'ReShade.ini'="[PROXY]`r`nEnableProxyLibrary=0`r`n[INPUT]`r`nKeyOverlay=145`r`nMinimumWidth=160`r`nMinimumHeight=120" }
+        Expand-ReShadeSelfExtractingArchive -SetupExePath $exe -DestDir $dest
+        (Get-Content -LiteralPath (Join-Path $dest 'ReShade32.dll') -Raw) | Should -Be 'r32'
+        (Get-Content -LiteralPath (Join-Path $dest 'ReShade64.dll') -Raw) | Should -Be 'r64'
+        Test-Path -LiteralPath (Join-Path $dest 'ReShade.ini') | Should -BeFalse
+    }
     It "skips a decoy PK signature and still finds the real archive further in the file" {
         $exe  = Join-Path $TestDrive "decoy-setup.exe"
         $dest = Join-Path $TestDrive "decoy-setup-out"
@@ -5301,6 +5309,25 @@ Describe "Get-ReShadeLatestVersion retry behavior" {
     It "parses the version out of a successful response" {
         Mock Invoke-WebRequest { [pscustomobject]@{ Content = "...ReShade_Setup_6.7.3.exe..." } }
         Get-ReShadeLatestVersion | Should -Be "6.7.3"
+    }
+    It "discovers ReShade 6.8.0 and builds the official plain installer URL" {
+        Mock Invoke-WebRequest { [pscustomobject]@{ Content = "ReShade_Setup_6.8.0.exe" } }
+        Get-ReShadeLatestVersion | Should -Be '6.8.0'
+        Get-ReShadeSetupDownloadUrl -Version '6.8.0' | Should -Be 'https://reshade.me/downloads/ReShade_Setup_6.8.0.exe'
+    }
+    It "rejects Addon, lookalike-host, and malformed installer versions" {
+        Get-ReShadeSetupDownloadUrl -Version '6.8.0-Addon' | Should -BeNullOrEmpty
+        Get-ReShadeSetupDownloadUrl -Version '6.8.0.exe' | Should -BeNullOrEmpty
+        Get-ReShadeSetupDownloadUrl -Version '6.8.0/../../evil' | Should -BeNullOrEmpty
+    }
+}
+Describe "ReShade 6.8 architecture and direct extraction compatibility" {
+    It "selects x86 and x64 from PE machine headers without mixing DLL identities" {
+        $x86=Join-Path $TestDrive 'game-x86.exe'; $x64=Join-Path $TestDrive 'game-x64.exe'
+        foreach ($case in @([pscustomobject]@{Path=$x86;Machine=0x014C;Expected='x86'},[pscustomobject]@{Path=$x64;Machine=0x8664;Expected='x64'})) {
+            $bytes=New-Object byte[] 160; $bytes[0]=0x4D; $bytes[1]=0x5A; [Array]::Copy([BitConverter]::GetBytes([int32]0x80),0,$bytes,0x3C,4); $bytes[0x80]=0x50; $bytes[0x81]=0x45; [Array]::Copy([BitConverter]::GetBytes([uint16]$case.Machine),0,$bytes,0x84,2); [IO.File]::WriteAllBytes($case.Path,$bytes)
+            Get-ExeArchitecture -ExePath $case.Path | Should -Be $case.Expected
+        }
     }
 }
 
@@ -9465,5 +9492,753 @@ Describe "Issue #300 FFB ownership cleanup" {
         })
         Remove-FFBPluginOwnedDeployment -CacheDir $cache -ProfileCode 'ChangedGame' | Should -BeFalse
         Test-Path -LiteralPath $dest | Should -BeTrue
+    }
+}
+
+Describe "RC8 menu and ReShade regressions" {
+    It "does not retain a description-only row after front trimming" {
+        $rows = @(
+            (New-ConsoleRenderRow -Text '      orphan description'),
+            (New-ConsoleRenderRow -Text '  4) Crosshair Setup'),
+            (New-ConsoleRenderRow -Text '      Deploy lightgun crosshairs.'),
+            (New-ConsoleRenderRow -Text '  5) ReShade Setup')
+        )
+        $kept = @(Limit-MainMenuBodyRowsToBudget -BodyRows $rows -BodyBudget 3)
+        $kept[0].Text | Should -Be '  4) Crosshair Setup'
+        ($kept | Where-Object { $_.Text -match 'orphan' }).Count | Should -Be 0
+    }
+
+    It "keeps every numbered choice in the supported compact boundary matrix" {
+        foreach ($height in @(10, 11, 12)) {
+            $tier = Get-ConsoleLayoutTier -Width 60 -Height $height -RequiredFullLines 0
+            $screen = Render-MainMenuScreen -Tier $tier -Width 60 -Height $height
+            $text = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+            foreach ($number in 1..15) {
+                ([regex]::Matches($text, ("(?m)(?<!\d){0}\)" -f $number))).Count | Should -Be 1
+            }
+        }
+    }
+
+    It "normal ReShade setup does not require a preset path" {
+        $source = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1') -Raw
+        $source | Should -Match 'Visual profile'
+        $source | Should -Match 'keep selected profile'
+        $source | Should -Not -Match 'Get it at\s+https://reshade\.me'
+        $source | Should -Not -Match 'replace ReShade\\ReShade64\.dll'
+    }
+}
+
+Describe "ReShade custom preset validation" {
+    It "returns null for blank or whitespace input without probing the path" {
+        Mock Test-Path { throw 'path probe must not occur' }
+        Resolve-ReShadeCustomPresetPath -InputPath '   ' | Should -BeNullOrEmpty
+        Should -Invoke Test-Path -Times 0
+    }
+
+    It "rejects cancel, invalid extension, and missing files" {
+        Resolve-ReShadeCustomPresetPath -InputPath $null | Should -BeNullOrEmpty
+        Resolve-ReShadeCustomPresetPath -InputPath 'preset.txt' | Should -BeNullOrEmpty
+        Mock Test-Path { $false }
+        Resolve-ReShadeCustomPresetPath -InputPath 'missing.ini' | Should -BeNullOrEmpty
+    }
+
+    It "returns a trimmed existing ini path for Advanced custom flow" {
+        Mock Test-Path { $true }
+        Resolve-ReShadeCustomPresetPath -InputPath '  C:\Temp\look.ini  ' | Should -Be 'C:\Temp\look.ini'
+        Should -Invoke Test-Path -ParameterFilter { $LiteralPath -eq 'C:\Temp\look.ini' -and $PathType -eq 'Leaf' } -Times 1
+    }
+}
+
+Describe "Approved ReShade profile catalog" {
+    It "has deterministic unique profiles and exactly one recommendation" {
+        $profiles = @(Get-TpmReShadeProfiles)
+        ($profiles.ProfileId | Sort-Object -Unique).Count | Should -Be $profiles.Count
+        ($profiles.FriendlyName | Sort-Object -Unique).Count | Should -Be $profiles.Count
+        @($profiles | Where-Object Recommended).Count | Should -Be 1
+        @($profiles | Where-Object ProfileId -eq 'Original').Count | Should -Be 1
+        @($profiles | Where-Object { $_.SchemaVersion -eq 2 }).Count | Should -Be $profiles.Count
+    }
+    It "defines the five canonical profiles and exact effect order" {
+        $expected=@{ Original=@(); CleanSharp=@('SweetFX.LumaSharpen'); Vivid=@('SweetFX.Vibrance'); ClassicCrt=@('FXShaders.CRT_Lottes'); EnhancedArcade=@('SweetFX.LumaSharpen','SweetFX.Vibrance') }
+        $profiles=@(Get-TpmReShadeProfiles);$profiles.Count|Should -Be 5
+        foreach($p in $profiles){(@($p.Effects)-join ',')|Should -Be (@($expected[$p.ProfileId])-join ',');(New-TpmReShadePresetContent -ProfileDefinition $p)|Should -Match '(?m)^Techniques='}
+        (New-TpmReShadePresetContent -ProfileDefinition (Get-TpmReShadeProfile -ProfileId 'EnhancedArcade'))|Should -Match 'Techniques=LumaSharpen,Vibrance'
+        (Get-TpmReShadeProfile -ProfileId 'Original').Effects.Count|Should -Be 0
+    }
+
+
+
+    It "uses approved upstream techniques in deterministic presets" {
+        $profile = Get-TpmReShadeProfile -ProfileId 'CleanSharp'
+        $first = New-TpmReShadePresetContent -ProfileDefinition $profile
+        $second = New-TpmReShadePresetContent -ProfileDefinition $profile
+        $first | Should -Be $second
+        $first | Should -Match 'Techniques=LumaSharpen'
+        $first | Should -Not -Match 'TPM_'
+    }
+
+    It "contains immutable source metadata for every approved effect" {
+        $effects = @(Get-TpmReShadeEffectCatalog)
+        $effects.Count | Should -Be 3
+        foreach ($effect in $effects) {
+            $effect.PinnedCommit | Should -Match '^[0-9a-f]{40}$'
+            @($effect.RelativeFiles).Count | Should -BeGreaterThan 0
+            @($effect.SHA256).Count | Should -Be @($effect.RelativeFiles).Count
+            $effect.AllowedHosts | Should -Contain 'raw.githubusercontent.com'
+            $effect.License | Should -Not -BeNullOrEmpty
+            $effect.Attribution | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    It "rejects CRT conflicts in either request order" {
+        foreach ($ids in @(
+            @('SweetFX.LumaSharpen','FXShaders.CRT_Lottes'),
+            @('FXShaders.CRT_Lottes','SweetFX.LumaSharpen'),
+            @('SweetFX.Vibrance','FXShaders.CRT_Lottes'),
+            @('FXShaders.CRT_Lottes','SweetFX.Vibrance')
+        )) {
+            $result = Resolve-TpmReShadeEffectStack -EffectIds $ids
+            $result.Valid | Should -BeFalse
+            ($result.Errors -join ' ') | Should -Match 'conflict'
+        }
+    }
+
+    It "accepts LumaSharpen and Vibrance with a warning" {
+        foreach ($ids in @(
+            @('SweetFX.LumaSharpen','SweetFX.Vibrance'),
+            @('SweetFX.Vibrance','SweetFX.LumaSharpen')
+        )) {
+            $result = Resolve-TpmReShadeEffectStack -EffectIds $ids
+            $result.Valid | Should -BeTrue
+            @($result.Effects).Count | Should -Be 2
+            @($result.Effects | Select-Object -ExpandProperty EffectId -Unique).Count | Should -Be 2
+            $result.Warning | Should -Match 'requires direct TPM validation'
+            $result.Errors.Count | Should -Be 0
+        }
+    }
+
+    It "rejects unknown effects and deduplicates approved effects" {
+        $unknown = Resolve-TpmReShadeEffectStack -EffectIds @('Unknown.Effect','SweetFX.Vibrance')
+        $unknown.Valid | Should -BeFalse
+        ($unknown.Errors -join ' ') | Should -Match 'not in the approved catalog'
+        $dedup = Resolve-TpmReShadeEffectStack -EffectIds @('SweetFX.LumaSharpen','SweetFX.LumaSharpen','SweetFX.Vibrance')
+        @($dedup.Effects | Select-Object -ExpandProperty EffectId).Count | Should -Be 2
+        @($dedup.Effects | Select-Object -ExpandProperty EffectId -Unique).Count | Should -Be 2
+    }
+
+    It "requires explicit compatibility schema fields on every effect" {
+        foreach ($effect in @(Get-TpmReShadeEffectCatalog)) {
+            $effect.PSObject.Properties.Name | Should -Contain 'CompatibleWith'
+            $effect.PSObject.Properties.Name | Should -Contain 'ConflictsWith'
+            $effect.PSObject.Properties.Name | Should -Contain 'OrderConstraints'
+            $effect.CompatibleWith.GetType().IsArray | Should -BeTrue
+            $effect.ConflictsWith.GetType().IsArray | Should -BeTrue
+            $effect.OrderConstraints.GetType().IsArray | Should -BeTrue
+        }
+    }
+}
+Describe "ReShade profile previews" {
+    It "binds every canonical profile to its local synthetic preview" {
+        $expected=@{Original='TPM-preview-original.svg';CleanSharp='TPM-preview-clean.svg';Vivid='TPM-preview-vivid.svg';EnhancedArcade='TPM-preview-enhanced.svg';ClassicCrt='TPM-preview-crt.svg'}
+        $gallery=@(Get-TpmReShadeProfileGallery -PreviewRoot (Join-Path $PSScriptRoot '..\ReShade\Previews'));$gallery.Count|Should -Be 5
+        foreach($item in $gallery){$item.PreviewAvailable|Should -BeTrue;$item.Provenance|Should -Be 'TPM synthetic';([IO.Path]::GetFileName($item.PreviewPath))|Should -Be $expected[$item.ProfileId]}
+    }
+    It "fails closed for missing, invalid, traversal, and wrong binding without blocking profiles" {
+        $root=Join-Path $TestDrive 'previews';[IO.Directory]::CreateDirectory($root)|Out-Null
+        $p=Get-TpmReShadeProfile -ProfileId Original
+        (Get-TpmReShadePreviewInfo -ProfileDefinition $p -PreviewRoot $root).Available|Should -BeFalse
+        [IO.File]::WriteAllText((Join-Path $root 'TPM-preview-original.svg'),'bad')
+        (Get-TpmReShadePreviewInfo -ProfileDefinition $p -PreviewRoot $root).Reason|Should -Be 'PREVIEW_INVALID'
+        $p.PreviewAsset='..\escape.svg'
+        (Get-TpmReShadePreviewInfo -ProfileDefinition $p -PreviewRoot $root).Reason|Should -Be 'PREVIEW_BINDING_INVALID'
+        (Get-TpmReShadeProfile -ProfileId Original).ProfileId|Should -Be 'Original'
+    }
+}
+Describe "ReShade preview renderer and cache" {
+    BeforeAll { Add-Type -AssemblyName System.Drawing }
+    It "renders deterministic Before, After, and Split artifacts from one reference identity" {
+        $root=Join-Path $TestDrive 'preview-root';$cache=Join-Path $root 'Cache';[IO.Directory]::CreateDirectory($root)|Out-Null
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\ReShade\Previews\TPM-preview-original.svg') -Destination (Join-Path $root 'TPM-preview-original.svg')
+        $p=Get-TpmReShadeProfile -ProfileId EnhancedArcade;$a=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Before -PreviewRoot $root -CacheRoot $cache;$b=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode After -PreviewRoot $root -CacheRoot $cache;$c=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache
+        foreach($x in @($a,$b,$c)){$x.Available|Should -BeTrue -Because ($x|ConvertTo-Json);$x.ReferenceIdentity|Should -Be 'TPM-SYNTHETIC-ARCADE-V1';Test-Path -LiteralPath $x.Path -PathType Leaf|Should -BeTrue}
+        $a.CacheKey|Should -Not -Be $b.CacheKey;$b.CacheKey|Should -Not -Be $c.CacheKey
+        (New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache).Reused|Should -BeTrue
+    }
+    It "regenerates corrupt or stale cache and fails gracefully without the reference" {
+        $root=Join-Path $TestDrive 'preview-root';$cache=Join-Path $root 'Cache';[IO.Directory]::CreateDirectory($root)|Out-Null
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\ReShade\Previews\TPM-preview-original.svg') -Destination (Join-Path $root 'TPM-preview-original.svg')
+        $p=Get-TpmReShadeProfile -ProfileId CleanSharp;$first=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache
+        Set-Content -LiteralPath $first.Path -Value 'not an image';(New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache).Available|Should -BeTrue
+        $manifest=Join-Path $cache ($first.CacheKey+'.json');$json=Get-Content -LiteralPath $manifest -Raw|ConvertFrom-Json;$json.CacheKey='stale';$json|ConvertTo-Json|Set-Content -LiteralPath $manifest
+        (New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache).Available|Should -BeTrue
+        Remove-Item -LiteralPath (Join-Path $root 'TPM-preview-original.svg') -Force;(New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache).Available|Should -BeFalse
+    }
+    It "keeps preview rendering outside preset, asset, game, and trust state" {
+        $root=Join-Path $TestDrive 'preview-root';$cache=Join-Path $root 'Cache';[IO.Directory]::CreateDirectory($root)|Out-Null
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\ReShade\Previews\TPM-preview-original.svg') -Destination (Join-Path $root 'TPM-preview-original.svg')
+        $p=Get-TpmReShadeProfile -ProfileId EnhancedArcade;$preset=(New-TpmReShadePresetContent -ProfileDefinition $p);$hashes=@(Get-TpmReShadeEffectCatalog|ForEach-Object{(@($_.SHA256)-join ',')});$game=Join-Path $TestDrive 'game';[IO.Directory]::CreateDirectory($game)|Out-Null;[IO.File]::WriteAllText((Join-Path $game 'keep.txt'),'keep')
+        $null=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache
+        (New-TpmReShadePresetContent -ProfileDefinition $p)|Should -Be $preset;(@(Get-TpmReShadeEffectCatalog|ForEach-Object{(@($_.SHA256)-join ',')}))|Should -Be $hashes;(Get-Content -LiteralPath (Join-Path $game 'keep.txt') -Raw)|Should -Be 'keep'
+    }
+    It "provides safe noninteractive window fallback and cache identity changes" {
+        $p=Get-TpmReShadeProfile -ProfileId Vivid;(Show-TpmReShadePreviewWindow -ProfileDefinition $p).Reason|Should -Be 'PREVIEW_WINDOW_NOT_REQUESTED'
+        $base=Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('a') -ReferenceSha256 'r';(Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('b') -ReferenceSha256 'r')|Should -Not -Be $base;(Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('a') -ReferenceSha256 's')|Should -Not -Be $base;(Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('a') -ReferenceSha256 'r' -RendererVersion '2')|Should -Not -Be $base
+    }
+}
+Describe "ReShade profile state features" {
+    It "compares approved profiles without deployment and supports only reviewed default intensity" {
+        $r=Compare-TpmReShadeProfiles -LeftProfileId Original -RightProfileId EnhancedArcade
+        $r.Valid|Should -BeTrue;$r.Deploys|Should -BeFalse;$r.ReferenceIdentity|Should -Be 'TPM-SYNTHETIC-ARCADE-V1'
+        @((Get-TpmReShadeIntensityVariants -ProfileDefinition (Get-TpmReShadeProfile -ProfileId Vivid))).Count|Should -Be 1
+        { Resolve-TpmReShadeIntensityVariant -ProfileDefinition (Get-TpmReShadeProfile -ProfileId Vivid) -VariantId Strong }|Should -Throw
+        (Compare-TpmReShadeProfiles -LeftProfileId NotApproved -RightProfileId Original).Valid|Should -BeFalse
+    }
+    It "round trips remembered selection, favorites, and bounded applied history by stable IDs" {
+        $root=Join-Path $TestDrive 'state';$p=Get-TpmReShadeProfile -ProfileId CleanSharp
+        Set-TpmReShadeRememberedProfile -GameId 'game-1' -ProfileDefinition $p -StateRoot $root
+        $remembered=Get-TpmReShadeRememberedProfile -GameId 'game-1' -StateRoot $root;$remembered.Valid|Should -BeTrue;$remembered.Profile.ProfileId|Should -Be 'CleanSharp'
+        Set-TpmReShadeFavorite -ProfileId CleanSharp -StateRoot $root|Should -BeTrue;Set-TpmReShadeFavorite -ProfileId CleanSharp -StateRoot $root|Should -BeTrue
+        (Read-TpmReShadeState -StateRoot $root).Favorites.Count|Should -Be 1;Remove-TpmReShadeFavorite -ProfileId CleanSharp -StateRoot $root;(Read-TpmReShadeState -StateRoot $root).Favorites.Count|Should -Be 0
+        Add-TpmReShadeProfileHistory -GameId 'game-1' -ProfileDefinition $p -StateRoot $root;@(Get-TpmReShadeProfileHistory -GameId 'game-1' -StateRoot $root).Count|Should -Be 1
+    }
+}
+Describe "ReShade trusted profile restore" {
+    It "deploys the complete DLL, preset, and approved effect set through one trusted transaction" {
+        $root=Join-Path $TestDrive 'full-profile';$game=Join-Path $root 'game.exe';$dll=Join-Path $root 'ReShade64.dll';$stage=Join-Path $root 'effect-stage';$effect=Join-Path $stage 'LumaSharpen.fx';$ownership=Join-Path $root 'profile.json'
+        [IO.Directory]::CreateDirectory($root)|Out-Null;[IO.Directory]::CreateDirectory($stage)|Out-Null
+        [IO.File]::WriteAllBytes($game,[Text.Encoding]::ASCII.GetBytes('MZ-test-game'));[IO.File]::WriteAllBytes($dll,[Text.Encoding]::ASCII.GetBytes('MZ-test-reshade'));[IO.File]::WriteAllText($effect,'effect-bytes')
+        $effectHash=(Get-FileHash -LiteralPath $effect -Algorithm SHA256).Hash;$profile=Get-TpmReShadeProfile -ProfileId CleanSharp
+        Mock Install-TpmReShadeApprovedEffect { [pscustomobject]@{Succeeded=$true;State='PREPARED';StagingRoot=$stage;Files=@([pscustomobject]@{RelativePath='Shaders/SweetFX/LumaSharpen.fx';Path=$effect;SHA256=$effectHash})} }
+        $result=Install-TpmReShadeProfileDeployment -ProfileDefinition $profile -GamePath $game -Doc ([xml]'<GameProfile><EmulatorType>Default</EmulatorType></GameProfile>') -SourceDll $dll -CacheRoot (Join-Path $root 'cache') -OwnershipPath $ownership -CanonicalPreset
+        $result.Succeeded|Should -BeTrue;$result.PresetApplied|Should -BeTrue;$result.DllName|Should -Be 'dxgi.dll'
+        Test-Path -LiteralPath (Join-Path $root 'ReShade.ini')|Should -BeTrue;Test-Path -LiteralPath (Join-Path $root 'Shaders\SweetFX\LumaSharpen.fx')|Should -BeTrue
+        (Read-TpmReShadeOwnershipManifest -Path $ownership).Files.Count|Should -Be 3;Should -Invoke Install-TpmReShadeApprovedEffect -Times 1 -ParameterFilter { $PrepareOnly }
+    }
+    It "routes restore through the complete trusted profile deployment path and records history afterward" {
+        $profile=Get-TpmReShadeProfile -ProfileId CleanSharp;$entry=[pscustomobject]@{ProfileId='CleanSharp';VariantId='Default';DefinitionVersion='2';EffectIds=@('SweetFX.LumaSharpen');EffectSha256=@(Get-TpmReShadeProfileEffectHashes -ProfileDefinition $profile);Applied=$true}
+        $root=Join-Path $TestDrive 'restore-route';$game=Join-Path $root 'game.exe';$dll=Join-Path $root 'ReShade64.dll';[IO.Directory]::CreateDirectory($root)|Out-Null;[IO.File]::WriteAllText($game,'game');[IO.File]::WriteAllText($dll,'dll')
+        $script:RestoreEvents=@();Mock Install-TpmReShadeProfileDeployment { $script:RestoreEvents+='deploy';[pscustomobject]@{Succeeded=$true;State='INSTALLED';TargetDir=$root;DllName='dxgi.dll';PresetApplied=$true} };Mock Add-TpmReShadeProfileHistory { $script:RestoreEvents+='history' }
+        $result=Restore-TpmReShadeProfile -HistoryEntry $entry -CacheRoot (Join-Path $root 'cache') -OwnershipRoot (Join-Path $root 'ownership') -GamePath $game -Doc ([xml]'<GameProfile/>') -SourceDll $dll -GameId restore-game -StateRoot (Join-Path $root 'state')
+        $result.Succeeded|Should -BeTrue;($script:RestoreEvents -join ',')|Should -Be 'deploy,history';Should -Invoke Install-TpmReShadeProfileDeployment -Times 1
+    }
+    It "rejects stale, corrupt, and unsupported history before any deployment" {
+        $profile=Get-TpmReShadeProfile -ProfileId CleanSharp;$hash=@(Get-TpmReShadeProfileEffectHashes -ProfileDefinition $profile);$base=[pscustomobject]@{ProfileId='CleanSharp';VariantId='Default';DefinitionVersion='2';EffectIds=@('SweetFX.LumaSharpen');EffectSha256=$hash;Applied=$true}
+        Mock Install-TpmReShadeProfileDeployment { throw 'must not deploy' }
+        $stale=$base|Select-Object *;$stale.EffectSha256=@('bad');(Restore-TpmReShadeProfile -HistoryEntry $stale -CacheRoot $TestDrive -OwnershipRoot $TestDrive -GamePath (Join-Path $TestDrive 'game.exe') -Doc ([xml]'<GameProfile/>') -SourceDll (Join-Path $TestDrive 'dll')).Reason|Should -Be 'STALE_EFFECT_DEFINITION'
+        $unsupported=$base|Select-Object *;$unsupported.VariantId='Strong';(Restore-TpmReShadeProfile -HistoryEntry $unsupported -CacheRoot $TestDrive -OwnershipRoot $TestDrive -GamePath (Join-Path $TestDrive 'game.exe') -Doc ([xml]'<GameProfile/>') -SourceDll (Join-Path $TestDrive 'dll')).Reason|Should -Be 'UNSUPPORTED_VARIANT'
+        $corrupt=$base|Select-Object *;$corrupt.PSObject.Properties.Remove('EffectSha256');(Restore-TpmReShadeProfile -HistoryEntry $corrupt -CacheRoot $TestDrive -OwnershipRoot $TestDrive -GamePath (Join-Path $TestDrive 'game.exe') -Doc ([xml]'<GameProfile/>') -SourceDll (Join-Path $TestDrive 'dll')).Reason|Should -Be 'CORRUPT_HISTORY'
+        Should -Invoke Install-TpmReShadeProfileDeployment -Times 0
+    }
+    It "rolls back a failed full restore without replacing ownership or user files" {
+        $root=Join-Path $TestDrive 'restore-rollback';$game=Join-Path $root 'game.exe';$targetDll=Join-Path $root 'dxgi.dll';$sourceDll=Join-Path $root 'ReShade64.dll';$preset=Join-Path $root 'ReShade.ini';$effect=Join-Path $root 'Shaders\SweetFX\LumaSharpen.fx';$stage=Join-Path $root 'effect-stage';$ownership=Join-Path $root 'profile.json';$stateRoot=Join-Path $root 'state'
+        [IO.Directory]::CreateDirectory((Join-Path $root 'Shaders\SweetFX'))|Out-Null;[IO.Directory]::CreateDirectory($stage)|Out-Null;[IO.File]::WriteAllText($game,'game');[IO.File]::WriteAllText($targetDll,'old-dll');[IO.File]::WriteAllText($sourceDll,'new-dll');[IO.File]::WriteAllText($preset,'old-preset');[IO.File]::WriteAllText($effect,'old-effect')
+        $oldDll=(Get-FileHash $targetDll -Algorithm SHA256).Hash;$oldPreset=(Get-FileHash $preset -Algorithm SHA256).Hash;$oldEffect=(Get-FileHash $effect -Algorithm SHA256).Hash
+        Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{SchemaVersion=1;EffectId='ReShadeProfile.CleanSharp';PinnedRevision='TPM-PROFILE';Files=@([pscustomobject]@{RelativeSource='dxgi.dll';DestinationPath=$targetDll;ExpectedSHA256=$oldDll;ActualSHA256=$oldDll;TPMManaged=$true},[pscustomobject]@{RelativeSource='ReShade.ini';DestinationPath=$preset;ExpectedSHA256=$oldPreset;ActualSHA256=$oldPreset;TPMManaged=$true},[pscustomobject]@{RelativeSource='Shaders/SweetFX/LumaSharpen.fx';DestinationPath=$effect;ExpectedSHA256=$oldEffect;ActualSHA256=$oldEffect;TPMManaged=$true})}) -Path $ownership
+        $profile=Get-TpmReShadeProfile -ProfileId CleanSharp;$entry=[pscustomobject]@{ProfileId='CleanSharp';VariantId='Default';DefinitionVersion='2';EffectIds=@('SweetFX.LumaSharpen');EffectSha256=@(Get-TpmReShadeProfileEffectHashes -ProfileDefinition $profile);Applied=$true}
+        $newEffect=Join-Path $stage 'new-effect.fx';[IO.File]::WriteAllText($newEffect,'new-effect');$newHash=(Get-FileHash $newEffect -Algorithm SHA256).Hash
+        Mock Install-TpmReShadeApprovedEffect { [pscustomobject]@{Succeeded=$true;State='PREPARED';StagingRoot=$stage;Files=@([pscustomobject]@{RelativePath='Shaders/SweetFX/LumaSharpen.fx';Path=$newEffect;SHA256=$newHash})} }
+        $beforeDll=[Convert]::ToBase64String([IO.File]::ReadAllBytes($targetDll));$beforePreset=[Convert]::ToBase64String([IO.File]::ReadAllBytes($preset));$beforeEffect=[Convert]::ToBase64String([IO.File]::ReadAllBytes($effect));$beforeOwnership=[Convert]::ToBase64String([IO.File]::ReadAllBytes($ownership))
+        $result=Restore-TpmReShadeProfile -HistoryEntry $entry -CacheRoot (Join-Path $root 'cache') -OwnershipRoot $ownership -GamePath $game -Doc ([xml]'<GameProfile/>') -SourceDll $sourceDll -StateRoot $stateRoot -FaultStage BeforeCommit
+        $result.Succeeded|Should -BeFalse;$result.State|Should -Be 'ROLLED_BACK';[Convert]::ToBase64String([IO.File]::ReadAllBytes($targetDll))|Should -Be $beforeDll;[Convert]::ToBase64String([IO.File]::ReadAllBytes($preset))|Should -Be $beforePreset;[Convert]::ToBase64String([IO.File]::ReadAllBytes($effect))|Should -Be $beforeEffect;[Convert]::ToBase64String([IO.File]::ReadAllBytes($ownership))|Should -Be $beforeOwnership
+    }
+    It "preserves existing unowned game content and ignores arbitrary historical file paths" {
+        $root=Join-Path $TestDrive 'owned-content';$game=Join-Path $root 'game.exe';$targetDll=Join-Path $root 'dxgi.dll';$sourceDll=Join-Path $root 'ReShade64.dll';$arbitrary=Join-Path $root 'historical-copy.dll';[IO.Directory]::CreateDirectory($root)|Out-Null;[IO.File]::WriteAllText($game,'game');[IO.File]::WriteAllText($targetDll,'user-dll');[IO.File]::WriteAllText($sourceDll,'trusted-dll');[IO.File]::WriteAllText($arbitrary,'must-remain')
+        $before=[Convert]::ToBase64String([IO.File]::ReadAllBytes($targetDll));$entry=[pscustomobject]@{ProfileId='Original';VariantId='Default';DefinitionVersion='2';EffectIds=@();EffectSha256=@();Applied=$true;HistoricalFilePath=$arbitrary}
+        $result=Restore-TpmReShadeProfile -HistoryEntry $entry -CacheRoot (Join-Path $root 'cache') -OwnershipRoot (Join-Path $root 'ownership') -GamePath $game -Doc ([xml]'<GameProfile><EmulatorType>Default</EmulatorType></GameProfile>') -SourceDll $sourceDll
+        $result.Succeeded|Should -BeFalse;$result.State|Should -Be 'COLLISION';$result.Reason|Should -Be 'USER_OWNED_CONTENT_PRESERVED';Test-Path -LiteralPath $arbitrary|Should -BeTrue;[Convert]::ToBase64String([IO.File]::ReadAllBytes($targetDll))|Should -Be $before
+    }
+    It "exposes valid remembered, favorite, and restore choices without trust or display mutation" {
+        $root=Join-Path $TestDrive 'chooser-state';$profile=Get-TpmReShadeProfile -ProfileId CleanSharp;Set-TpmReShadeRememberedProfile -GameId chooser-game -ProfileDefinition $profile -StateRoot $root;Set-TpmReShadeFavorite -ProfileId CleanSharp -StateRoot $root;Add-TpmReShadeProfileHistory -GameId chooser-game -ProfileDefinition $profile -StateRoot $root
+        $options=Get-TpmReShadeChooserOptions -GameId chooser-game -StateRoot $root
+        $options.Remembered.Valid|Should -BeTrue;$options.Restore.Valid|Should -BeTrue;$options.Favorites.Count|Should -Be 1
+        $source=$script:ProductionSource;$source|Should -Match 'R\) Restore previous trusted profile';$source|Should -Match 'Restore .* for this game';$source|Should -Match 'Choose a favorite profile'
+    }
+    It "rejects unsupported remembered variants and hides unsupported favorites" {
+        $root=Join-Path $TestDrive 'chooser-unsupported';$profile=Get-TpmReShadeProfile -ProfileId CleanSharp
+        Set-TpmReShadeRememberedProfile -GameId chooser-game -ProfileDefinition $profile -StateRoot $root;Set-TpmReShadeFavorite -ProfileId CleanSharp -StateRoot $root
+        $state=Read-TpmReShadeState -StateRoot $root;$profileEntry=@($state.Profiles.PSObject.Properties|Where-Object Name -eq 'chooser-game')[0].Value;$profileEntry.VariantId='Strong';$favoriteEntry=@($state.Favorites)[0];$favoriteEntry.VariantId='Strong';Write-TpmReShadeState -State $state -StateRoot $root
+        $options=Get-TpmReShadeChooserOptions -GameId chooser-game -StateRoot $root
+        $options.Remembered.Valid|Should -BeFalse;$options.Remembered.Reason|Should -Be 'UNSUPPORTED_VARIANT';$options.Favorites.Count|Should -Be 0
+    }
+    It "shows a friendly nonmutating path for corrupt or stale chooser history" {
+        $root=Join-Path $TestDrive 'chooser-invalid';$paths=Get-TpmReShadeStatePath -StateRoot $root;[IO.Directory]::CreateDirectory($paths.Root)|Out-Null;[IO.File]::WriteAllText($paths.Path,'{not-json')
+        $corrupt=Get-TpmReShadeChooserOptions -GameId bad-game -StateRoot $root;$corrupt.Restore.Valid|Should -BeFalse;$corrupt.Restore.Reason|Should -Be 'CORRUPT_HISTORY'
+        $profile=Get-TpmReShadeProfile -ProfileId CleanSharp;$entry=[pscustomobject]@{ProfileId='CleanSharp';VariantId='Default';DefinitionVersion='1';EffectIds=@('SweetFX.LumaSharpen');EffectSha256=@(Get-TpmReShadeProfileEffectHashes -ProfileDefinition $profile);Applied=$true};Write-TpmReShadeState -State ([pscustomobject]@{Profiles=[pscustomobject]@{};Favorites=@();History=[pscustomobject]@{'bad-game'=@($entry)}}) -StateRoot (Join-Path $TestDrive 'chooser-stale')
+        $stale=Get-TpmReShadeChooserOptions -GameId bad-game -StateRoot (Join-Path $TestDrive 'chooser-stale');$stale.Restore.Valid|Should -BeFalse;$stale.Restore.Reason|Should -Be 'STALE_PROFILE_DEFINITION'
+    }
+}
+
+
+
+Describe "Bounded ReShade display behavior" {
+    It "classifies missing, malformed, low, normal, high, wide, and extreme resolutions conservatively" {
+        $cases=@(
+            @{W=$null;H=$null;S='UNKNOWN'},@{W='bad';H=1080;S='MALFORMED'},@{W=1920;H='bad';S='MALFORMED'},@{W=0;H=0;S='MALFORMED'},@{W=-1;H=120;S='MALFORMED'},
+            @{W=160;H=120;S='KNOWN_UNUSUALLY_LOW'},@{W=159;H=119;S='KNOWN_UNUSUALLY_LOW'},@{W=1920;H=1080;S='KNOWN_NORMAL'},@{W=2560;H=1440;S='KNOWN_NORMAL'},@{W=3840;H=2160;S='KNOWN_UNUSUALLY_HIGH'},@{W=3440;H=1440;S='KNOWN_UNUSUALLY_WIDE'},@{W=10000;H=8000;S='KNOWN_UNUSUALLY_HIGH'}
+        )
+        foreach($case in $cases){ (Get-TpmResolutionClassification -Width $case.W -Height $case.H).State | Should -Be $case.S -Because (('{0}x{1}' -f $case.W,$case.H)) }
+    }
+    It "keeps unknown and malformed resolution advisory-only for CRT eligibility" {
+        $profile=Get-TpmReShadeProfile -ProfileId 'ClassicCrt'; $stack=[pscustomobject]@{Valid=$true;Warning=$null;Effects=@([pscustomobject]@{PerformanceClass='HIGH';FallbackBehavior='CleanSharp'})}
+        foreach($state in @('UNKNOWN','MALFORMED')) {
+            $e=[pscustomobject]@{ActiveGpuConfidence='KNOWN';ResolutionConfidence=$state;ResolutionClass=$state;RamPressure=$false;PowerSavingActive=$false;RenderWidth=$null;StagingFreeBytes=[int64]1GB;BackupFreeBytes=[int64]1GB;CacheFreeBytes=[int64]1GB;TargetVolumeFreeBytes=[int64]1GB;RequiredWorkingBytes=[int64]1}
+            $r=Get-TpmReShadeEligibility -Stack $stack -Evidence $e
+            $r.Status | Should -Be 'UNKNOWN' -Because $state
+            $r.Status | Should -Not -Be 'NOT_RECOMMENDED'
+        }
+    }
+    It "represents the bounded sensitivity metadata without changing approved effect hashes" {
+        $profiles=@(Get-TpmReShadeProfiles); (@($profiles|Where-Object ProfileId -eq 'Vivid')[0].ResolutionSensitivity) | Should -Be 'LOW'
+        (@($profiles|Where-Object ProfileId -eq 'CleanSharp')[0].ResolutionSensitivity) | Should -Be 'MEDIUM'
+        (@($profiles|Where-Object ProfileId -eq 'ClassicCrt')[0].ResolutionSensitivity) | Should -Be 'HIGH'
+        $before=@(Get-TpmReShadeEffectCatalog|ForEach-Object{ '{0}:{1}' -f $_.EffectId,(@($_.SHA256)-join ',') })
+        $null=Get-TpmResolutionClassification -Width 3840 -Height 2160
+        $after=@(Get-TpmReShadeEffectCatalog|ForEach-Object{ '{0}:{1}' -f $_.EffectId,(@($_.SHA256)-join ',') })
+        $after | Should -Be $before
+    }
+}
+Describe "Bounded ReShade multi-monitor behavior" {
+    BeforeAll {
+        function New-TestDisplay($id,$w,$h,$primary,$connected=$true,$mirrored=$false,$orientation='Landscape',$refresh=60) {
+            [pscustomobject]@{ Id=$id; Width=$w; Height=$h; IsPrimary=$primary; Connected=$connected; IsMirrored=$mirrored; Orientation=$orientation; RefreshRate=$refresh }
+        }
+    }
+    It "classifies single, extended, mirrored, mixed, malformed, zero, and stale topologies" {
+        $cases=@(
+            @{N='single';D=@((New-TestDisplay 'a' 1920 1080 $true));S='SINGLE';C='KNOWN'},
+            @{N='dual';D=@((New-TestDisplay 'a' 1920 1080 $true),(New-TestDisplay 'b' 1920 1080 $false));S='MULTIPLE_PRIMARY';C='KNOWN'},
+            @{N='mixed';D=@((New-TestDisplay 'a' 1920 1080 $true),(New-TestDisplay 'b' 3840 2160 $false));S='MULTIPLE_MIXED';C='KNOWN'},
+            @{N='mirrored';D=@((New-TestDisplay 'a' 1920 1080 $true $true $true),(New-TestDisplay 'b' 1920 1080 $false $true $true));S='MIRRORED';C='KNOWN'},
+            @{N='no-primary';D=@((New-TestDisplay 'a' 1920 1080 $false),(New-TestDisplay 'b' 1920 1080 $false));S='MULTIPLE_NO_PRIMARY';C='AMBIGUOUS'},
+            @{N='multiple-primary';D=@((New-TestDisplay 'a' 1920 1080 $true),(New-TestDisplay 'b' 1920 1080 $true));S='MALFORMED';C='UNKNOWN'},
+            @{N='zero';D=@();S='UNKNOWN';C='UNKNOWN'},
+            @{N='stale';D=@((New-TestDisplay 'a' 1920 1080 $true $false));S='ZERO_USABLE';C='UNKNOWN'},
+            @{N='bad-record';D=@([pscustomobject]@{Id='a';Width=0;Height=1080;IsPrimary=$true;Connected=$true});S='MALFORMED';C='UNKNOWN'}
+        )
+        foreach($case in $cases){$r=Get-TpmDisplayTopologyClassification -Displays $case.D;$r.State|Should -Be $case.S -Because $case.N;$r.Confidence|Should -Be $case.C -Because $case.N}
+    }
+    It "keeps target confidence and target resolution explicit across topology changes" {
+        $d=@((New-TestDisplay 'a' 1920 1080 $true),(New-TestDisplay 'b' 3840 2160 $false))
+        $known=Get-TpmDisplayTopologyClassification -Displays $d -TargetDisplayId 'b';$known.TargetConfidence|Should -Be 'CONFIDENT';$known.TargetResolution.State|Should -Be 'KNOWN_UNUSUALLY_HIGH'
+        (Get-TpmDisplayTopologyClassification -Displays $d).TargetConfidence|Should -Be 'AMBIGUOUS'
+        $changed=Get-TpmDisplayTopologyClassification -Displays @(New-TestDisplay 'c' 1920 1080 $true) -TargetDisplayId 'b';$changed.TargetConfidence|Should -Be 'UNKNOWN';$changed.TargetDisplayId|Should -BeNullOrEmpty
+    }
+    It "does not modify display settings, game configuration, trust, or effect hashes" {
+        $before=@(Get-TpmReShadeEffectCatalog|ForEach-Object{ '{0}:{1}' -f $_.EffectId,(@($_.SHA256)-join ',') })
+        $null=Get-TpmDisplayTopologyClassification -Displays @(New-TestDisplay 'a' 1920 1080 $true),(New-TestDisplay 'b' 3840 2160 $false)
+        $after=@(Get-TpmReShadeEffectCatalog|ForEach-Object{ '{0}:{1}' -f $_.EffectId,(@($_.SHA256)-join ',') });$after|Should -Be $before
+    }
+}
+
+Describe "ReShade whole-system eligibility" {
+    It "keeps unknown GPU evidence distinct from performance risk" {
+        $stack = [pscustomobject]@{ Valid = $true; Warning = $null; Effects = @([pscustomobject]@{ PerformanceClass = 'LOW'; FallbackBehavior = 'Original' }) }
+        $evidence = [pscustomobject]@{
+            ActiveGpuConfidence = 'UNKNOWN'; ResolutionConfidence = 'KNOWN'
+            RenderWidth = 1920; RamPressure = $false; PowerSavingActive = $false
+            StagingFreeBytes = [int64]1GB; BackupFreeBytes = [int64]1GB
+            CacheFreeBytes = [int64]1GB; TargetVolumeFreeBytes = [int64]1GB
+            RequiredWorkingBytes = [int64]64MB
+        }
+        $result = Get-TpmReShadeEligibility -Stack $stack -Evidence $evidence
+        $result.Status | Should -Be 'UNKNOWN'
+        $result.Reasons | Should -Contain 'ACTIVE_GPU_UNKNOWN'
+    }
+
+    It "distinguishes sufficient, low, unknown, and zero-byte disk states" {
+        $make = {
+            param($staging, $backup, $cache, $target)
+            [pscustomobject]@{ RequiredWorkingBytes = [int64]100; StagingFreeBytes = $staging; BackupFreeBytes = $backup; CacheFreeBytes = $cache; TargetVolumeFreeBytes = $target }
+        }
+        (Test-TpmReShadeWorkingSpace -Evidence (&$make ([int64]200) ([int64]200) ([int64]200) ([int64]200))).Sufficient | Should -BeTrue
+        (Test-TpmReShadeWorkingSpace -Evidence (&$make ([int64]99) ([int64]200) ([int64]200) ([int64]200))).InsufficientVolumes | Should -Contain 'staging'
+        (Test-TpmReShadeWorkingSpace -Evidence (&$make $null ([int64]200) ([int64]200) ([int64]200))).UnknownVolumes | Should -Contain 'staging'
+        (Test-TpmReShadeWorkingSpace -Evidence (&$make ([int64]0) ([int64]200) ([int64]200) ([int64]200))).InsufficientVolumes | Should -Contain 'staging'
+    }
+
+    It "applies concrete-risk dominance over unknown evidence" {
+        $stack = [pscustomobject]@{ Valid = $true; Warning = $null; Effects = @([pscustomobject]@{ PerformanceClass = 'LOW'; FallbackBehavior = 'Original' }) }
+        $base = @{ ActiveGpuConfidence = 'UNKNOWN'; ResolutionConfidence = 'KNOWN'; RenderWidth = 1920; RamPressure = $false; RequiredWorkingBytes = [int64]100; StagingFreeBytes = [int64]200; BackupFreeBytes = [int64]200; CacheFreeBytes = [int64]200; TargetVolumeFreeBytes = [int64]200 }
+        $disk = [pscustomobject]($base.Clone()); $disk.StagingFreeBytes = [int64]50
+        (Get-TpmReShadeEligibility -Stack $stack -Evidence $disk).Status | Should -Be 'NOT_RECOMMENDED'
+        $ram = [pscustomobject]($base.Clone()); $ram.RamPressure = $true
+        (Get-TpmReShadeEligibility -Stack $stack -Evidence $ram).Status | Should -Be 'PERFORMANCE_RISK'
+    }
+
+    It "downgrades high-cost CRT at 4K and rejects conflicts" {
+        $crt = [pscustomobject]@{ Valid = $true; Warning = $null; Effects = @([pscustomobject]@{ PerformanceClass = 'HIGH'; FallbackBehavior = 'CleanSharp' }) }
+        $evidence = [pscustomobject]@{ ActiveGpuConfidence = 'KNOWN'; ResolutionConfidence = 'KNOWN'; RenderWidth = 3840; RenderHeight = 2160; RamPressure = $false; RequiredWorkingBytes = [int64]100; StagingFreeBytes = [int64]200; BackupFreeBytes = [int64]200; CacheFreeBytes = [int64]200 }
+        (Get-TpmReShadeEligibility -Stack $crt -Evidence $evidence).Status | Should -Be 'PERFORMANCE_RISK'
+        $conflict = Resolve-TpmReShadeEffectStack -EffectIds @('SweetFX.LumaSharpen','FXShaders.CRT_Lottes')
+        (Get-TpmReShadeEligibility -Stack $conflict -Evidence $evidence).Status | Should -Be 'NOT_RECOMMENDED'
+    }
+}
+
+Describe "Shared TPM hardware environment evidence" {
+    It "returns privacy-safe subsystem-neutral fields with partial-query tolerance" {
+        Mock Get-CimInstance { throw 'fixture query failure' }
+        $evidence = Get-TpmHardwareEnvironmentEvidence -VolumePaths @('C:\')
+        $names = @($evidence.PSObject.Properties.Name)
+        $expected = @('OSVersion','OSBuild','Architecture','CpuModel','PhysicalCoreCount','LogicalProcessorCount','CpuEvidenceConfidence','Adapters','ActiveGpuConfidence','MultiGpuAmbiguous','InstalledRamBytes','AvailableRamBytes','MemoryEvidenceConfidence','RenderWidth','RenderHeight','ResolutionConfidence','DisplayCount','RefreshRate','BatteryPowered','PowerSavingActive','PowerEvidenceConfidence','Volumes','DynamicRefreshed','SensitiveIdentifiersIncluded')
+        foreach ($name in $expected) { $names | Should -Contain $name }
+        $names | Should -Contain 'Adapters'
+        $names | Should -Contain 'Volumes'
+        $names | Should -Contain 'DynamicRefreshed'
+        $names | Should -Contain 'SensitiveIdentifiersIncluded'
+        $evidence.SensitiveIdentifiersIncluded | Should -BeFalse
+        $names | Should -Not -Contain 'SerialNumber'
+        $names | Should -Not -Contain 'UUID'
+        $names | Should -Not -Contain 'MacAddress'
+        $evidence.ActiveGpuConfidence | Should -Be 'UNKNOWN'
+    }
+}
+
+Describe "Approved ReShade asset inventory" {
+    It "contains only approved upstream files and validates their presence" {
+        @(Get-TpmReShadeAssetInventory) | Should -Be @('Shaders/SweetFX/LumaSharpen.fx','Shaders/SweetFX/Vibrance.fx','Shaders/CRT_Lottes.fx','Shaders/CRT_Lottes.fxh')
+        Test-TpmReShadeAssetInventory -AssetRoot (Join-Path $PSScriptRoot '..\ReShade') | Should -BeFalse
+    }
+}
+
+Describe "Approved ReShade transactional deployment" {
+    It "writes ownership only after a clean Vibrance install" {
+        $root = Join-Path $TestDrive 'vibrance'
+        $cache = Join-Path $root 'cache'
+        $dest = Join-Path $root 'ReShade'
+        $stage = Join-Path $root 'stage'
+        [void][IO.Directory]::CreateDirectory($stage)
+        $source = Join-Path $stage 'Vibrance.fx'
+        [IO.File]::WriteAllText($source, 'vibrance-fixture')
+        $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+        Mock Acquire-TpmReShadeApprovedEffect {
+            [pscustomobject]@{ EffectId = 'SweetFX.Vibrance'; StagingRoot = $stage; Files = @([pscustomobject]@{ RelativePath = 'Shaders/SweetFX/Vibrance.fx'; Path = $source; SHA256 = $hash }) }
+        }
+        Mock Get-TpmReShadeEffectCatalog { @([pscustomobject]@{ EffectId='SweetFX.Vibrance'; PinnedCommit=('a' * 40); RelativeFiles=@('Shaders/SweetFX/Vibrance.fx'); SHA256=@($hash) }) }
+        Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.Vibrance' -CacheRoot $cache -DestinationRoot $dest -OwnershipPath (Join-Path $root 'ownership.json') | Should -Not -BeNullOrEmpty
+        Test-Path -LiteralPath (Join-Path $dest 'Shaders\SweetFX\Vibrance.fx') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $root 'ownership.json') | Should -BeTrue
+    }
+
+    It "returns NO_OP for exact TPM-managed Vibrance state" {
+        $root = Join-Path $TestDrive 'noop'; $dest = Join-Path $root 'ReShade'; $path = Join-Path $dest 'Shaders\SweetFX\Vibrance.fx'
+        [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($path)); [IO.File]::WriteAllText($path, 'exact')
+        $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        Mock Acquire-TpmReShadeApprovedEffect { [pscustomobject]@{ StagingRoot=$root; Files=@() } }
+        Mock New-TpmReShadeOwnershipManifest { [pscustomobject]@{ Files=@([pscustomobject]@{ DestinationPath=$path; ExpectedSHA256=$hash; RelativeSource='Shaders/SweetFX/Vibrance.fx' }) } }
+        $priorManifest = [pscustomobject]@{ SchemaVersion=1; EffectId='SweetFX.Vibrance'; PinnedRevision=('a' * 40); Files=@([pscustomobject]@{ DestinationPath=$path; ExpectedSHA256=$hash; TPMManaged=$true }) }
+        Save-TpmReShadeOwnershipManifest -Manifest $priorManifest -Path (Join-Path $root 'ownership.json')
+        Mock Test-TpmReShadeApprovedEffectFile { $true }
+        $result = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.Vibrance' -CacheRoot $root -DestinationRoot $dest -OwnershipPath (Join-Path $root 'ownership.json')
+        $result.State | Should -Be 'NO_OP'
+    }
+
+    It "repairs a wrong-hash TPM-managed Vibrance file" {
+        $root = Join-Path $TestDrive 'repair'; $dest = Join-Path $root 'ReShade'; $path = Join-Path $dest 'Shaders\SweetFX\Vibrance.fx'
+        [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($path)); [IO.File]::WriteAllText($path, 'old')
+        $stage = Join-Path $root 'stage'; [void][IO.Directory]::CreateDirectory($stage); $source = Join-Path $stage 'Vibrance.fx'; [IO.File]::WriteAllText($source, 'new')
+        $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+        $prior = [pscustomobject]@{ SchemaVersion=1; EffectId='SweetFX.Vibrance'; PinnedRevision=('a' * 40); Files=@([pscustomobject]@{ DestinationPath=$path; ExpectedSHA256=('b' * 64); TPMManaged=$true }) }
+        $ownership = Join-Path $root 'ownership.json'; Save-TpmReShadeOwnershipManifest -Manifest $prior -Path $ownership
+        Mock Acquire-TpmReShadeApprovedEffect { [pscustomobject]@{ StagingRoot=$stage; Files=@([pscustomobject]@{ RelativePath='Shaders/SweetFX/Vibrance.fx'; Path=$source; SHA256=$hash }) } }
+        Mock New-TpmReShadeOwnershipManifest { [pscustomobject]@{ Files=@([pscustomobject]@{ DestinationPath=$path; ExpectedSHA256=$hash; ActualSHA256=$null; RelativeSource='Shaders/SweetFX/Vibrance.fx'; TPMManaged=$true }) } }
+        $result = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.Vibrance' -CacheRoot $root -DestinationRoot $dest -OwnershipPath $ownership
+        $result.State | Should -Be 'REPAIR'
+        (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash | Should -Be $hash
+    }
+
+    It "fails before mutation when approved staging fails" {
+        $root = Join-Path $TestDrive 'stage-failure'; $dest = Join-Path $root 'ReShade'; $ownership = Join-Path $root 'ownership.json'
+        $prior = [pscustomobject]@{ SchemaVersion=1; EffectId='SweetFX.Vibrance'; PinnedRevision=('a' * 40); Files=@([pscustomobject]@{ DestinationPath=(Join-Path $root 'prior.fx'); ExpectedSHA256=('0' * 64); ActualSHA256=('0' * 64); TPMManaged=$true }) }
+        Save-TpmReShadeOwnershipManifest -Manifest $prior -Path $ownership
+        $preBytes=[IO.File]::ReadAllBytes($ownership); $preSha=(Get-FileHash -LiteralPath $ownership -Algorithm SHA256).Hash
+        Mock Acquire-TpmReShadeApprovedEffect { throw 'staging fixture failure' }
+        { Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.Vibrance' -CacheRoot $root -DestinationRoot $dest -OwnershipPath $ownership } | Should -Throw '*staging fixture failure*'
+        $postBytes=[IO.File]::ReadAllBytes($ownership); $postSha=(Get-FileHash -LiteralPath $ownership -Algorithm SHA256).Hash
+        [Convert]::ToBase64String($postBytes) | Should -Be ([Convert]::ToBase64String($preBytes)); $postSha | Should -Be $preSha
+        Test-Path -LiteralPath $dest | Should -BeFalse
+    }
+    It "preserves ownership bytes on staged hash failure" {
+        $root=Join-Path $TestDrive 'hash-preserve'; $ownership=Join-Path $root 'ownership.json'; [void][IO.Directory]::CreateDirectory($root)
+        Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{SchemaVersion=1;EffectId='SweetFX.Vibrance';Files=@([pscustomobject]@{DestinationPath=(Join-Path $root 'old.fx');ExpectedSHA256=('0'*64);ActualSHA256=('0'*64);TPMManaged=$true})}) -Path $ownership
+        $pre=[IO.File]::ReadAllBytes($ownership); $sha=(Get-FileHash -LiteralPath $ownership -Algorithm SHA256).Hash; $stage=Join-Path $root 'stage'; [void][IO.Directory]::CreateDirectory($stage); $src=Join-Path $stage 'bad.fx'; [IO.File]::WriteAllText($src,'bad')
+        Mock Acquire-TpmReShadeApprovedEffect { [pscustomobject]@{StagingRoot=$stage;Files=@([pscustomobject]@{RelativePath='Shaders/SweetFX/Vibrance.fx';Path=$src;SHA256=('0'*64)})} }
+        {Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.Vibrance' -CacheRoot $root -DestinationRoot (Join-Path $root 'ReShade') -OwnershipPath $ownership} | Should -Throw '*INTEGRITY*'
+        [Convert]::ToBase64String([IO.File]::ReadAllBytes($ownership)) | Should -Be ([Convert]::ToBase64String($pre)); (Get-FileHash -LiteralPath $ownership -Algorithm SHA256).Hash | Should -Be $sha
+    }
+    It "preserves ownership bytes across all single-file non-commit failures" {
+        foreach ($fault in @('BackupCreation','BackupVerification','AfterFirstPromotion','BeforeCommit','AfterFirstPromotionRollbackFailure')) {
+            $root=Join-Path $TestDrive ('matrix-' + $fault); $dest=Join-Path $root 'ReShade'; $stage=Join-Path $root 'stage'; [void][IO.Directory]::CreateDirectory($stage)
+            $src=Join-Path $stage 'Vibrance.fx'; $dst=Join-Path $dest 'Shaders\SweetFX\Vibrance.fx'; [IO.File]::WriteAllText($src,'new'); [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($dst)); [IO.File]::WriteAllText($dst,'old')
+            $newHash=(Get-FileHash $src -Algorithm SHA256).Hash; $oldHash=(Get-FileHash $dst -Algorithm SHA256).Hash; $ownership=Join-Path $root 'ownership.json'
+            Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{SchemaVersion=1;EffectId='SweetFX.Vibrance';Files=@([pscustomobject]@{DestinationPath=$dst;ExpectedSHA256=$oldHash;ActualSHA256=$oldHash;TPMManaged=$true})}) -Path $ownership
+            $pre=[IO.File]::ReadAllBytes($ownership); $preSha=(Get-FileHash $ownership -Algorithm SHA256).Hash
+            Mock Acquire-TpmReShadeApprovedEffect { [pscustomobject]@{StagingRoot=$stage;Files=@([pscustomobject]@{RelativePath='Shaders/SweetFX/Vibrance.fx';Path=$src;SHA256=$newHash})} }
+            $result=Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.Vibrance' -CacheRoot $root -DestinationRoot $dest -OwnershipPath $ownership -FaultStage $fault
+            $result.Succeeded | Should -BeFalse -Because $fault
+            [Convert]::ToBase64String([IO.File]::ReadAllBytes($ownership)) | Should -Be ([Convert]::ToBase64String($pre)) -Because $fault
+            (Get-FileHash $ownership -Algorithm SHA256).Hash | Should -Be $preSha -Because $fault
+        }
+    }
+    It "rejects staged content with an invalid approved hash" {
+        $root = Join-Path $TestDrive 'hash-failure'; $stage = Join-Path $root 'stage'; [void][IO.Directory]::CreateDirectory($stage)
+        $source = Join-Path $stage 'bad.fx'; [IO.File]::WriteAllText($source, 'bad')
+        Mock Acquire-TpmReShadeApprovedEffect { [pscustomobject]@{ StagingRoot=$stage; Files=@([pscustomobject]@{ RelativePath='Shaders/SweetFX/Vibrance.fx'; Path=$source; SHA256=('0' * 64) }) } }
+        { Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.Vibrance' -CacheRoot $root -DestinationRoot (Join-Path $root 'ReShade') -OwnershipPath (Join-Path $root 'ownership.json') } | Should -Throw '*INTEGRITY*'
+    }
+    It "blocks before promotion when backup creation fails" {
+        $root = Join-Path $TestDrive 'backup-failure'; $dest = Join-Path $root 'ReShade'; $path = Join-Path $dest 'Shaders\SweetFX\Vibrance.fx'
+        [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($path)); [IO.File]::WriteAllText($path, 'old')
+        $stage = Join-Path $root 'stage'; [void][IO.Directory]::CreateDirectory($stage); $source = Join-Path $stage 'Vibrance.fx'; [IO.File]::WriteAllText($source, 'new')
+        $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash; $oldHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        $ownership = Join-Path $root 'ownership.json'; Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='SweetFX.Vibrance'; Files=@([pscustomobject]@{ DestinationPath=$path; ExpectedSHA256=$oldHash; TPMManaged=$true }) }) -Path $ownership
+        Mock Acquire-TpmReShadeApprovedEffect { [pscustomobject]@{ StagingRoot=$stage; Files=@([pscustomobject]@{ RelativePath='Shaders/SweetFX/Vibrance.fx'; Path=$source; SHA256=$hash }) } }
+        Mock New-TpmReShadeOwnershipManifest { [pscustomobject]@{ Files=@([pscustomobject]@{ DestinationPath=$path; ExpectedSHA256=$hash; RelativeSource='Shaders/SweetFX/Vibrance.fx'; TPMManaged=$true }) } }
+        $result = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.Vibrance' -CacheRoot $root -DestinationRoot $dest -OwnershipPath $ownership -FaultStage BackupCreation
+        $result.State | Should -Be 'ROLLED_BACK'
+        (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash | Should -Be $oldHash
+    }
+    It "blocks before promotion when backup verification fails" {
+        $root = Join-Path $TestDrive 'backup-verification'; $dest = Join-Path $root 'ReShade'; $path = Join-Path $dest 'Shaders\SweetFX\Vibrance.fx'
+        [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($path)); [IO.File]::WriteAllText($path, 'old')
+        $stage = Join-Path $root 'stage'; [void][IO.Directory]::CreateDirectory($stage); $source = Join-Path $stage 'Vibrance.fx'; [IO.File]::WriteAllText($source, 'new')
+        $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash; $oldHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        $ownership = Join-Path $root 'ownership.json'; Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='SweetFX.Vibrance'; Files=@([pscustomobject]@{ DestinationPath=$path; ExpectedSHA256=$oldHash; TPMManaged=$true }) }) -Path $ownership
+        Mock Acquire-TpmReShadeApprovedEffect { [pscustomobject]@{ StagingRoot=$stage; Files=@([pscustomobject]@{ RelativePath='Shaders/SweetFX/Vibrance.fx'; Path=$source; SHA256=$hash }) } }
+        Mock New-TpmReShadeOwnershipManifest { [pscustomobject]@{ Files=@([pscustomobject]@{ DestinationPath=$path; ExpectedSHA256=$hash; ActualSHA256=$null; RelativeSource='Shaders/SweetFX/Vibrance.fx'; TPMManaged=$true }) } }
+        $result = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.Vibrance' -CacheRoot $root -DestinationRoot $dest -OwnershipPath $ownership -FaultStage BackupVerification
+        $result.Error | Should -Match 'BACKUP'
+        (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash | Should -Be $oldHash
+    }
+    It "rolls back physical promotion when commit is forced to fail" {
+        $root = Join-Path $TestDrive 'before-commit'; $dest = Join-Path $root 'ReShade'; $path = Join-Path $dest 'Shaders\SweetFX\Vibrance.fx'
+        [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($path)); [IO.File]::WriteAllText($path, 'old')
+        $stage = Join-Path $root 'stage'; [void][IO.Directory]::CreateDirectory($stage); $source = Join-Path $stage 'Vibrance.fx'; [IO.File]::WriteAllText($source, 'new')
+        $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash; $oldHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        $ownership = Join-Path $root 'ownership.json'; Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='SweetFX.Vibrance'; Files=@([pscustomobject]@{ DestinationPath=$path; ExpectedSHA256=$oldHash; TPMManaged=$true }) }) -Path $ownership
+        $pre=[IO.File]::ReadAllBytes($ownership); $preSha=(Get-FileHash $ownership -Algorithm SHA256).Hash
+        Mock Acquire-TpmReShadeApprovedEffect { [pscustomobject]@{ StagingRoot=$stage; Files=@([pscustomobject]@{ RelativePath='Shaders/SweetFX/Vibrance.fx'; Path=$source; SHA256=$hash }) } }
+        Mock New-TpmReShadeOwnershipManifest { [pscustomobject]@{ Files=@([pscustomobject]@{ DestinationPath=$path; ExpectedSHA256=$hash; ActualSHA256=$null; RelativeSource='Shaders/SweetFX/Vibrance.fx'; TPMManaged=$true }) } }
+        $result = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.Vibrance' -CacheRoot $root -DestinationRoot $dest -OwnershipPath $ownership -FaultStage BeforeCommit
+        $result.State | Should -Be 'ROLLED_BACK'; $result.RollbackVerified | Should -BeTrue
+        (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash | Should -Be $oldHash
+        [Convert]::ToBase64String([IO.File]::ReadAllBytes($ownership)) | Should -Be ([Convert]::ToBase64String($pre)); (Get-FileHash $ownership -Algorithm SHA256).Hash | Should -Be $preSha
+    }
+
+    It "installs the real two-file CRT effect coherently" {
+        $root = Join-Path $TestDrive 'crt-install'; $dest = Join-Path $root 'ReShade'; $stage = Join-Path $root 'stage'
+        [void][IO.Directory]::CreateDirectory($stage)
+        $fx = Join-Path $stage 'CRT_Lottes.fx'; $fxh = Join-Path $stage 'CRT_Lottes.fxh'
+        [IO.File]::WriteAllText($fx, 'fx'); [IO.File]::WriteAllText($fxh, 'fxh')
+        $h1 = (Get-FileHash -LiteralPath $fx -Algorithm SHA256).Hash; $h2 = (Get-FileHash -LiteralPath $fxh -Algorithm SHA256).Hash
+        Mock Acquire-TpmReShadeApprovedEffect { [pscustomobject]@{ StagingRoot=$stage; Files=@(
+            [pscustomobject]@{ RelativePath='Shaders/CRT_Lottes.fx'; Path=$fx; SHA256=$h1 },
+            [pscustomobject]@{ RelativePath='Shaders/CRT_Lottes.fxh'; Path=$fxh; SHA256=$h2 }) } }
+        Mock New-TpmReShadeOwnershipManifest { [pscustomobject]@{ Files=@(
+            [pscustomobject]@{ DestinationPath=(Join-Path $dest 'Shaders\CRT_Lottes.fx'); ExpectedSHA256=$h1; ActualSHA256=$null; RelativeSource='Shaders/CRT_Lottes.fx'; TPMManaged=$true },
+            [pscustomobject]@{ DestinationPath=(Join-Path $dest 'Shaders\CRT_Lottes.fxh'); ExpectedSHA256=$h2; ActualSHA256=$null; RelativeSource='Shaders/CRT_Lottes.fxh'; TPMManaged=$true }) } }
+        $result = Install-TpmReShadeApprovedEffect -EffectId 'FXShaders.CRT_Lottes' -CacheRoot $root -DestinationRoot $dest -OwnershipPath (Join-Path $root 'ownership.json')
+        $result.State | Should -Be 'INSTALLED'
+        Test-Path -LiteralPath (Join-Path $dest 'Shaders\CRT_Lottes.fx') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $dest 'Shaders\CRT_Lottes.fxh') | Should -BeTrue
+    }
+    It "rolls back a CRT pair after first-file promotion failure" {
+        $root = Join-Path $TestDrive 'crt-partial'; $dest = Join-Path $root 'ReShade'; $stage = Join-Path $root 'stage'; [void][IO.Directory]::CreateDirectory($stage)
+        $fx = Join-Path $stage 'CRT_Lottes.fx'; $fxh = Join-Path $stage 'CRT_Lottes.fxh'; [IO.File]::WriteAllText($fx,'fx'); [IO.File]::WriteAllText($fxh,'fxh')
+        $h1=(Get-FileHash $fx -Algorithm SHA256).Hash; $h2=(Get-FileHash $fxh -Algorithm SHA256).Hash; $ownership=Join-Path $root 'ownership.json'
+        Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{SchemaVersion=1;EffectId='FXShaders.CRT_Lottes';Files=@([pscustomobject]@{DestinationPath=(Join-Path $root 'prior.fx');ExpectedSHA256=('0'*64);ActualSHA256=('0'*64);TPMManaged=$true})}) -Path $ownership
+        $pre=[IO.File]::ReadAllBytes($ownership); $preSha=(Get-FileHash $ownership -Algorithm SHA256).Hash
+        Mock Acquire-TpmReShadeApprovedEffect { [pscustomobject]@{ StagingRoot=$stage; Files=@([pscustomobject]@{RelativePath='Shaders/CRT_Lottes.fx';Path=$fx;SHA256=$h1},[pscustomobject]@{RelativePath='Shaders/CRT_Lottes.fxh';Path=$fxh;SHA256=$h2}) } }
+        $result=Install-TpmReShadeApprovedEffect -EffectId 'FXShaders.CRT_Lottes' -CacheRoot $root -DestinationRoot $dest -OwnershipPath $ownership -FaultStage AfterFirstPromotion
+        $result.State | Should -Be 'ROLLED_BACK'; $result.RollbackVerified | Should -BeTrue
+        Test-Path (Join-Path $dest 'Shaders\CRT_Lottes.fx') | Should -BeFalse; Test-Path (Join-Path $dest 'Shaders\CRT_Lottes.fxh') | Should -BeFalse
+        [Convert]::ToBase64String([IO.File]::ReadAllBytes($ownership)) | Should -Be ([Convert]::ToBase64String($pre)); (Get-FileHash $ownership -Algorithm SHA256).Hash | Should -Be $preSha
+    }
+    It "rolls back both CRT files before ownership commit" {
+        $root = Join-Path $TestDrive 'crt-commit'; $dest = Join-Path $root 'ReShade'; $stage = Join-Path $root 'stage'; [void][IO.Directory]::CreateDirectory($stage)
+        $fx = Join-Path $stage 'CRT_Lottes.fx'; $fxh = Join-Path $stage 'CRT_Lottes.fxh'; [IO.File]::WriteAllText($fx,'fx'); [IO.File]::WriteAllText($fxh,'fxh')
+        $h1=(Get-FileHash $fx -Algorithm SHA256).Hash; $h2=(Get-FileHash $fxh -Algorithm SHA256).Hash; $ownership=Join-Path $root 'ownership.json'
+        Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{SchemaVersion=1;EffectId='FXShaders.CRT_Lottes';Files=@([pscustomobject]@{DestinationPath=(Join-Path $root 'prior.fx');ExpectedSHA256=('0'*64);ActualSHA256=('0'*64);TPMManaged=$true})}) -Path $ownership
+        $pre=[IO.File]::ReadAllBytes($ownership); $preSha=(Get-FileHash $ownership -Algorithm SHA256).Hash
+        Mock Acquire-TpmReShadeApprovedEffect { [pscustomobject]@{ StagingRoot=$stage; Files=@([pscustomobject]@{RelativePath='Shaders/CRT_Lottes.fx';Path=$fx;SHA256=$h1},[pscustomobject]@{RelativePath='Shaders/CRT_Lottes.fxh';Path=$fxh;SHA256=$h2}) } }
+        $result=Install-TpmReShadeApprovedEffect -EffectId 'FXShaders.CRT_Lottes' -CacheRoot $root -DestinationRoot $dest -OwnershipPath $ownership -FaultStage BeforeCommit
+        $result.State | Should -Be 'ROLLED_BACK'; $result.RollbackVerified | Should -BeTrue
+        Test-Path (Join-Path $dest 'Shaders\CRT_Lottes.fx') | Should -BeFalse; Test-Path (Join-Path $dest 'Shaders\CRT_Lottes.fxh') | Should -BeFalse
+        [Convert]::ToBase64String([IO.File]::ReadAllBytes($ownership)) | Should -Be ([Convert]::ToBase64String($pre)); (Get-FileHash $ownership -Algorithm SHA256).Hash | Should -Be $preSha
+    }
+    It "rolls back a forced post-promotion Vibrance failure" {
+        $root = Join-Path $TestDrive 'promotion-failure'; $dest = Join-Path $root 'ReShade'; $path = Join-Path $dest 'Shaders\SweetFX\Vibrance.fx'
+        [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($path)); [IO.File]::WriteAllText($path, 'old')
+        $stage = Join-Path $root 'stage'; [void][IO.Directory]::CreateDirectory($stage); $source = Join-Path $stage 'Vibrance.fx'; [IO.File]::WriteAllText($source, 'new')
+        $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash; $oldHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        $ownership = Join-Path $root 'ownership.json'; Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='SweetFX.Vibrance'; Files=@([pscustomobject]@{ DestinationPath=$path; ExpectedSHA256=$oldHash; TPMManaged=$true }) }) -Path $ownership
+        $pre=[IO.File]::ReadAllBytes($ownership); $preSha=(Get-FileHash $ownership -Algorithm SHA256).Hash
+        Mock Acquire-TpmReShadeApprovedEffect { [pscustomobject]@{ StagingRoot=$stage; Files=@([pscustomobject]@{ RelativePath='Shaders/SweetFX/Vibrance.fx'; Path=$source; SHA256=$hash }) } }
+        Mock New-TpmReShadeOwnershipManifest { [pscustomobject]@{ Files=@([pscustomobject]@{ DestinationPath=$path; ExpectedSHA256=$hash; ActualSHA256=$null; RelativeSource='Shaders/SweetFX/Vibrance.fx'; TPMManaged=$true }) } }
+        $result = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.Vibrance' -CacheRoot $root -DestinationRoot $dest -OwnershipPath $ownership -FaultStage AfterFirstPromotion
+        $result.State | Should -Be 'ROLLED_BACK'
+        $result.RollbackVerified | Should -BeTrue
+        (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash | Should -Be $oldHash
+        [Convert]::ToBase64String([IO.File]::ReadAllBytes($ownership)) | Should -Be ([Convert]::ToBase64String($pre)); (Get-FileHash $ownership -Algorithm SHA256).Hash | Should -Be $preSha
+    }
+
+    It "returns ACTION_REQUIRED when rollback restoration fails" {
+        $root = Join-Path $TestDrive 'rollback-failure'; $dest = Join-Path $root 'ReShade'; $path = Join-Path $dest 'Shaders\SweetFX\Vibrance.fx'
+        [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($path)); [IO.File]::WriteAllText($path, 'old')
+        $stage = Join-Path $root 'stage'; [void][IO.Directory]::CreateDirectory($stage); $source = Join-Path $stage 'Vibrance.fx'; [IO.File]::WriteAllText($source, 'new')
+        $newHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash; $oldHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        $ownership = Join-Path $root 'ownership.json'; Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='SweetFX.Vibrance'; Files=@([pscustomobject]@{ DestinationPath=$path; ExpectedSHA256=$oldHash; TPMManaged=$true }) }) -Path $ownership
+        $pre=[IO.File]::ReadAllBytes($ownership); $preSha=(Get-FileHash $ownership -Algorithm SHA256).Hash
+        Mock Acquire-TpmReShadeApprovedEffect { [pscustomobject]@{ StagingRoot=$stage; Files=@([pscustomobject]@{ RelativePath='Shaders/SweetFX/Vibrance.fx'; Path=$source; SHA256=$newHash }) } }
+        $result = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.Vibrance' -CacheRoot $root -DestinationRoot $dest -OwnershipPath $ownership -FaultStage AfterFirstPromotionRollbackFailure
+        $result.State | Should -Be 'ACTION_REQUIRED'
+        $result.RollbackVerified | Should -BeFalse
+        [Convert]::ToBase64String([IO.File]::ReadAllBytes($ownership)) | Should -Be ([Convert]::ToBase64String($pre)); (Get-FileHash $ownership -Algorithm SHA256).Hash | Should -Be $preSha
+        $result.RollbackError | Should -Match 'forced rollback'
+    }
+    It "rejects an existing user-owned Vibrance file" {
+        $root = Join-Path $TestDrive 'collision'
+        $dest = Join-Path $root 'ReShade'
+        $path = Join-Path $dest 'Shaders\SweetFX\Vibrance.fx'
+        [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($path))
+        [IO.File]::WriteAllText($path, 'user-owned')
+        $stage = Join-Path $root 'stage'
+        [void][IO.Directory]::CreateDirectory($stage)
+        $source = Join-Path $stage 'Vibrance.fx'
+        [IO.File]::WriteAllText($source, 'fixture')
+        $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+        Mock Acquire-TpmReShadeApprovedEffect { [pscustomobject]@{ StagingRoot=$stage; Files=@([pscustomobject]@{ RelativePath='Shaders/SweetFX/Vibrance.fx'; Path=$source; SHA256=$hash }) } }
+        Mock New-TpmReShadeOwnershipManifest { [pscustomobject]@{ Files=@([pscustomobject]@{ DestinationPath=$path; ExpectedSHA256=$hash; RelativeSource='Shaders/SweetFX/Vibrance.fx' }) } }
+
+        Mock Get-TpmReShadeEffectCatalog { @([pscustomobject]@{ EffectId='SweetFX.Vibrance'; PinnedCommit=('a' * 40); RelativeFiles=@('Shaders/SweetFX/Vibrance.fx'); SHA256=@('x') }) }
+        Mock Get-TpmReShadeApprovedEffectFiles { @([pscustomobject]@{ RelativePath='Shaders/SweetFX/Vibrance.fx'; SHA256='x'; Url='https://raw.githubusercontent.com/x' }) }
+        Mock Invoke-WebRequest { [IO.File]::WriteAllText($OutFile, 'fixture') }
+        $ownership = Join-Path $root 'ownership.json'
+        Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='SweetFX.Vibrance'; PinnedRevision=('a' * 40); Files=@([pscustomobject]@{ DestinationPath=(Join-Path $root 'prior.fx'); ExpectedSHA256=('0' * 64); ActualSHA256=('0' * 64); TPMManaged=$true }) }) -Path $ownership
+        $preBytes = [IO.File]::ReadAllBytes($ownership); $preSha = (Get-FileHash -LiteralPath $ownership -Algorithm SHA256).Hash
+        $result = Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.Vibrance' -CacheRoot $root -DestinationRoot $dest -OwnershipPath $ownership
+        $postBytes = [IO.File]::ReadAllBytes($ownership); $postSha = (Get-FileHash -LiteralPath $ownership -Algorithm SHA256).Hash
+        $result.State | Should -Be 'COLLISION'
+        $result.Error | Should -Match 'COLLISION'
+        Get-Content -LiteralPath $path -Raw | Should -Be 'user-owned'
+        [Convert]::ToBase64String($postBytes) | Should -Be ([Convert]::ToBase64String($preBytes))
+        $postSha | Should -Be $preSha
+    }
+
+    It "supports a coherent two-file CRT manifest" {
+        $manifest = [pscustomobject]@{ SchemaVersion=1; EffectId='FXShaders.CRT_Lottes'; PinnedRevision=('b' * 40); Files=@(
+            [pscustomobject]@{ EffectId='FXShaders.CRT_Lottes'; PinnedRevision=('b' * 40); RelativeSource='Shaders/CRT_Lottes.fx'; DestinationPath='C:\ReShade\Shaders\CRT_Lottes.fx'; ExpectedSHA256='A'; ActualSHA256='A'; TPMManaged=$true },
+            [pscustomobject]@{ EffectId='FXShaders.CRT_Lottes'; PinnedRevision=('b' * 40); RelativeSource='Shaders/CRT_Lottes.fxh'; DestinationPath='C:\ReShade\Shaders\CRT_Lottes.fxh'; ExpectedSHA256='B'; ActualSHA256='B'; TPMManaged=$true }) }
+        $path = Join-Path $TestDrive 'crt-ownership.json'
+        Save-TpmReShadeOwnershipManifest -Manifest $manifest -Path $path
+        $loaded = Read-TpmReShadeOwnershipManifest -Path $path
+        @($loaded.Files).Count | Should -Be 2
+        $loaded.EffectId | Should -Be 'FXShaders.CRT_Lottes'
+    }
+}
+Describe "ReShade transaction storage preflight" {
+    It "aggregates shared roles and blocks insufficient capacity" {
+        $e = [pscustomobject]@{ Volumes = @([pscustomobject]@{ Root='C:\'; FreeBytes=[int64]99; RequiredBytes=[int64]100; Roles=@('CachePath','StagingPath','BackupPath','TargetPath') }) }
+        $r = Test-TpmReShadeStoragePreflight -Evidence $e
+        $r.Allowed | Should -BeFalse; $r.BlockingVolumes | Should -Contain 'C:\'
+    }
+    It "keeps unknown and zero-capacity states explicit" {
+        (Test-TpmReShadeStoragePreflight -Evidence ([pscustomobject]@{ Volumes=@([pscustomobject]@{ Root='X:\'; FreeBytes=$null; RequiredBytes=1; Roles=@('StagingPath') }) })).Allowed | Should -BeFalse
+        (Test-TpmReShadeStoragePreflight -Evidence ([pscustomobject]@{ Volumes=@([pscustomobject]@{ Root='Y:\'; FreeBytes=0; RequiredBytes=1; Roles=@('TargetPath') }) })).Allowed | Should -BeFalse
+    }
+    It "reports distinct role demand in a transaction plan" {
+        $stage = Join-Path $TestDrive 'storage-plan'; [void][IO.Directory]::CreateDirectory($stage); $file = Join-Path $stage 'asset.fx'; [IO.File]::WriteAllText($file, 'asset')
+        $plan = Get-TpmReShadeTransactionStoragePlan -AcquiredFiles @([pscustomobject]@{ Path=$file }) -DestinationRoot $stage
+        $plan.StagedBytes | Should -Be 5; $plan.PromotionBytes | Should -Be 5
+    }
+}
+
+Describe "ReShade storage role matrix" {
+    It "evaluates sufficient and blocking physical-volume plans independently" {
+        $cases = @(
+            [pscustomobject]@{ Name='same sufficient'; Volumes=@([pscustomobject]@{Root='C:\';FreeBytes=1000;RequiredBytes=900;Roles=@('CACHE','STAGING','BACKUP','TARGET','ROLLBACK')}); Allowed=$true },
+            [pscustomobject]@{ Name='same insufficient'; Volumes=@([pscustomobject]@{Root='C:\';FreeBytes=899;RequiredBytes=900;Roles=@('CACHE','STAGING','BACKUP','TARGET','ROLLBACK')}); Allowed=$false },
+            [pscustomobject]@{ Name='cross sufficient'; Volumes=@([pscustomobject]@{Root='C:\';FreeBytes=500;RequiredBytes=400;Roles=@('CACHE','STAGING')},[pscustomobject]@{Root='D:\';FreeBytes=500;RequiredBytes=400;Roles=@('BACKUP','TARGET','ROLLBACK')}); Allowed=$true },
+            [pscustomobject]@{ Name='cross one insufficient'; Volumes=@([pscustomobject]@{Root='C:\';FreeBytes=500;RequiredBytes=400;Roles=@('CACHE','STAGING')},[pscustomobject]@{Root='D:\';FreeBytes=399;RequiredBytes=400;Roles=@('BACKUP','TARGET','ROLLBACK')}); Allowed=$false },
+            [pscustomobject]@{ Name='unknown'; Volumes=@([pscustomobject]@{Root='C:\';FreeBytes=$null;RequiredBytes=1;Roles=@('TARGET')}); Allowed=$false },
+            [pscustomobject]@{ Name='zero'; Volumes=@([pscustomobject]@{Root='C:\';FreeBytes=0;RequiredBytes=1;Roles=@('TARGET')}); Allowed=$false }
+        )
+        foreach ($case in $cases) { (Test-TpmReShadeStoragePreflight -Evidence ([pscustomobject]@{Volumes=$case.Volumes})).Allowed | Should -Be $case.Allowed -Because $case.Name }
+    }
+    It "reduces pre-acquisition demand only for an exact-SHA cache" {
+        $root=Join-Path $TestDrive 'cache-valid'; $cache=Join-Path $root 'SweetFX.Vibrance'; [void][IO.Directory]::CreateDirectory($cache); $path=Join-Path $cache 'Vibrance.fx'; [IO.File]::WriteAllText($path,'cached')
+        $hash=(Get-FileHash $path -Algorithm SHA256).Hash
+        Mock Get-TpmReShadeEffectCatalog { @([pscustomobject]@{EffectId='SweetFX.Vibrance';ByteLengths=@(99)}) }; Mock Get-TpmReShadeApprovedEffectFiles { @([pscustomobject]@{RelativePath='Shaders/SweetFX/Vibrance.fx';SHA256=$hash}) }
+        $p=Get-TpmReShadePreAcquisitionStoragePlan -EffectId 'SweetFX.Vibrance' -CacheRoot $root -DestinationRoot (Join-Path $root 'ReShade')
+        $p.CacheBytes | Should -Be 6; $p.StagingBytes | Should -Be 6; $p.RequiredWorkingBytes | Should -Be 12
+    }
+    It "uses pinned catalog lengths when cache content is corrupt" {
+        $root=Join-Path $TestDrive 'cache-corrupt'; $cache=Join-Path $root 'SweetFX.Vibrance'; [void][IO.Directory]::CreateDirectory($cache); [IO.File]::WriteAllText((Join-Path $cache 'Vibrance.fx'),'bad')
+        Mock Get-TpmReShadeEffectCatalog { @([pscustomobject]@{EffectId='SweetFX.Vibrance';ByteLengths=@(99)}) }; Mock Get-TpmReShadeApprovedEffectFiles { @([pscustomobject]@{RelativePath='Shaders/SweetFX/Vibrance.fx';SHA256=('0'*64)}) }
+        $p=Get-TpmReShadePreAcquisitionStoragePlan -EffectId 'SweetFX.Vibrance' -CacheRoot $root -DestinationRoot (Join-Path $root 'ReShade')
+        $p.CacheBytes | Should -Be 99; $p.RequiredWorkingBytes | Should -Be 198; $p.CapacityKnown | Should -BeTrue
+    }
+    It "blocks unknown pre-acquisition size before acquisition or mutation" {
+        $root=Join-Path $TestDrive 'unknown-storage'; $ownership=Join-Path $root 'ownership.json'; $dest=Join-Path $root 'ReShade'
+        Mock Get-TpmReShadeEffectCatalog { @([pscustomobject]@{EffectId='SweetFX.Vibrance';ByteLengths=@()}) }; Mock Get-TpmReShadeApprovedEffectFiles { @([pscustomobject]@{RelativePath='Shaders/SweetFX/Vibrance.fx';SHA256=('0'*64)}) }
+        Mock Acquire-TpmReShadeApprovedEffect { throw 'ACQUIRE_MUST_NOT_RUN' }
+        $e=[pscustomobject]@{Volumes=@([pscustomobject]@{Root='C:\';FreeBytes=999;RequiredBytes=0;Roles=@('CACHE','STAGING','TARGET','ROLLBACK')})}
+        {Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.Vibrance' -CacheRoot $root -DestinationRoot $dest -OwnershipPath $ownership -StoragePreflight $e} | Should -Throw '*UNKNOWN*'
+        Should -Invoke Acquire-TpmReShadeApprovedEffect -Times 0
+        Test-Path $dest | Should -BeFalse; Test-Path $ownership | Should -BeFalse
+    }
+    It "blocks each exact storage role on its assigned physical volume" {
+        foreach ($case in @(
+            [pscustomobject]@{Role='CACHE';Demand=10},
+            [pscustomobject]@{Role='STAGING';Demand=10},
+            [pscustomobject]@{Role='TARGET';Demand=10},
+            [pscustomobject]@{Role='BACKUP';Demand=1},
+            [pscustomobject]@{Role='ROLLBACK';Demand=1}
+        )) {
+            $root=Join-Path $TestDrive ('role-' + $case.Role); $dest=Join-Path $root 'ReShade'; $path=Join-Path $dest 'Shaders\SweetFX\Vibrance.fx'; $stage=Join-Path $root 'stage'; [void][IO.Directory]::CreateDirectory($stage); [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($path)); [IO.File]::WriteAllText($path,'x'); $src=Join-Path $stage 'Vibrance.fx'; [IO.File]::WriteAllText($src,'1234567890')
+            $hash=(Get-FileHash $src -Algorithm SHA256).Hash; $old=(Get-FileHash $path -Algorithm SHA256).Hash; $ownership=Join-Path $root 'ownership.json'
+            Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{SchemaVersion=1;EffectId='SweetFX.Vibrance';Files=@([pscustomobject]@{DestinationPath=$path;ExpectedSHA256=$old;ActualSHA256=$old;TPMManaged=$true})}) -Path $ownership
+            $pre=[IO.File]::ReadAllBytes($ownership)
+            Mock Get-TpmReShadeEffectCatalog { @([pscustomobject]@{EffectId='SweetFX.Vibrance';ByteLengths=@(10)}) }; Mock Get-TpmReShadeApprovedEffectFiles { @([pscustomobject]@{RelativePath='Shaders/SweetFX/Vibrance.fx';SHA256=$hash}) }; Mock Acquire-TpmReShadeApprovedEffect { throw 'ACQUIRE_MUST_NOT_RUN' }
+            $e=[pscustomobject]@{Volumes=@([pscustomobject]@{Root='C:\';FreeBytes=([int64]$case.Demand-1);RequiredBytes=0;Roles=@($case.Role)})}
+            {Install-TpmReShadeApprovedEffect -EffectId 'SweetFX.Vibrance' -CacheRoot $root -DestinationRoot $dest -OwnershipPath $ownership -StoragePreflight $e} | Should -Throw '*insufficient*' -Because $case.Role
+            Should -Invoke Acquire-TpmReShadeApprovedEffect -Times 0 -Because $case.Role
+            [Convert]::ToBase64String([IO.File]::ReadAllBytes($ownership)) | Should -Be ([Convert]::ToBase64String($pre)) -Because $case.Role
+            (Get-FileHash $path -Algorithm SHA256).Hash | Should -Be $old -Because $case.Role
+            Test-Path (Join-Path $stage '.tpm-backup') | Should -BeFalse -Because $case.Role
+        }
+    }
+    It "reports the two-file CRT storage plan values" {
+        Mock Get-TpmReShadeEffectCatalog { @([pscustomobject]@{EffectId='FXShaders.CRT_Lottes';ByteLengths=@(5114,21710)}) }; Mock Get-TpmReShadeApprovedEffectFiles { @([pscustomobject]@{RelativePath='Shaders/CRT_Lottes.fx';SHA256=('0'*64)},[pscustomobject]@{RelativePath='Shaders/CRT_Lottes.fxh';SHA256=('0'*64)}) }
+        $p=Get-TpmReShadePreAcquisitionStoragePlan -EffectId 'FXShaders.CRT_Lottes' -CacheRoot (Join-Path $TestDrive 'crt-storage') -DestinationRoot (Join-Path $TestDrive 'crt-target')
+        $p.CacheBytes | Should -Be 26824; $p.StagingBytes | Should -Be 26824; $p.TargetBytes | Should -Be 26824; $p.BackupBytes | Should -Be 0; $p.RollbackBytes | Should -Be 0; $p.RequiredWorkingBytes | Should -Be 53648
+    }
+    It "aggregates role demand once on a shared physical volume" {
+        Mock Get-PSDrive { param($Name) [pscustomobject]@{ Free = [int64]1000 } }
+        $context = [pscustomobject]@{ CachePath='C:\cache'; StagingPath='C:\stage'; BackupPath='C:\backup'; TargetPath='C:\target'; RoleBytes=[pscustomobject]@{ CACHE=10; STAGING=20; BACKUP=30; TARGET=40 } }
+        $evidence = Get-TpmReShadeStorageEvidence -DeploymentContext $context
+        @($evidence.Volumes).Count | Should -Be 1
+        $evidence.Volumes[0].RequiredBytes | Should -Be 100
+        @($evidence.Volumes[0].Roles).Count | Should -Be 4
+        $evidence.Volumes[0].DemandByRole.CACHE | Should -Be 10
+        $evidence.Volumes[0].DemandByRole.TARGET | Should -Be 40
+    }
+    It "keeps cross-volume role demand independent" {
+        Mock Get-PSDrive { param($Name) [pscustomobject]@{ Free = [int64]1000 } }
+        $context = [pscustomobject]@{ CachePath='C:\cache'; StagingPath='C:\stage'; BackupPath='D:\backup'; TargetPath='D:\target'; RoleBytes=[pscustomobject]@{ CACHE=10; STAGING=20; BACKUP=30; TARGET=40 } }
+        $evidence = Get-TpmReShadeStorageEvidence -DeploymentContext $context
+        @($evidence.Volumes).Count | Should -Be 2
+        ($evidence.Volumes | Where-Object Root -eq 'C:\').RequiredBytes | Should -Be 30
+        ($evidence.Volumes | Where-Object Root -eq 'D:\').RequiredBytes | Should -Be 70
+        (Test-TpmReShadeStoragePreflight -Evidence $evidence).Allowed | Should -BeTrue
+    }
+    It "exposes every post-acquisition role and totals its demand" {
+        $root = Join-Path $TestDrive 'role-plan'; $stage = Join-Path $root 'stage'; $target = Join-Path $root 'target'; [void][IO.Directory]::CreateDirectory($stage); [void][IO.Directory]::CreateDirectory($target)
+        $source = Join-Path $stage 'asset.fx'; $old = Join-Path $target 'asset.fx'; [IO.File]::WriteAllText($source, '12345'); [IO.File]::WriteAllText($old, 'old')
+        $oldHash = (Get-FileHash $old -Algorithm SHA256).Hash
+        $prior = [pscustomobject]@{ Files=@([pscustomobject]@{ DestinationPath=$old; ExpectedSHA256=$oldHash; TPMManaged=$true }) }
+        $plan = Get-TpmReShadeTransactionStoragePlan -AcquiredFiles @([pscustomobject]@{ Path=$source }) -DestinationRoot $target -PriorManifest $prior
+        $plan.RoleBytes.STAGING | Should -Be 5; $plan.RoleBytes.BACKUP | Should -Be 3; $plan.RoleBytes.TARGET | Should -Be 5; $plan.RoleBytes.ROLLBACK | Should -Be 3
+        $plan.RequiredWorkingBytes | Should -Be 16
+        @($plan.Roles | Select-Object -ExpandProperty Role) | Should -Be @('STAGING','BACKUP','TARGET','ROLLBACK')
     }
 }

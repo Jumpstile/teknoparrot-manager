@@ -441,6 +441,33 @@ Mode 4 deploys custom P1/P2 crosshair cursor images to all registered lightgun g
 ## ReShade Visual Enhancements
 
 ReShade adds post-processing effects without changing game data. TPM does not automatically remove unowned or changed hooks; review those through advanced troubleshooting.
+**Beginner visual profiles:** ReShade setup shows five bounded choices with short descriptions and local illustrative previews when available. The preview window uses a TPM-owned synthetic test scene with the same neutral source on both sides:
+
+| Profile | Result |
+| --- | --- |
+| Original | No TPM visual enhancement |
+| Clean & Sharp | LumaSharpen only |
+| Vivid Arcade | Vibrance only |
+| Enhanced Arcade | LumaSharpen followed by Vibrance |
+| Classic Arcade CRT | CRT_Lottes only |
+
+The preview window offers Before, After, and Split views. It is illustrative, not a pixel-perfect promise for every game. Preview files and cached renderings are local and TPM-owned; no game screenshots are bundled. If rendering or display is unavailable, TPM shows the text description and profile selection continues. Display and performance notes are advisory only. TPM does not configure monitors or game display settings.
+
+**Remembered profiles, favorites, and restore:** TPM stores per-game profile
+selection and a bounded history using stable profile IDs and approved effect
+SHA-256 values. ReShade setup offers `R` to explicitly restore the previous
+trusted profile, `F` to choose a favorite, or a fresh profile selection.
+Remembered selections are offered separately and require explicit confirmation;
+TPM never restores automatically. A restore is accepted only when the current
+profile definition, ordered effects, pinned hashes, and intensity variant still
+match. Missing, corrupt, stale, or unsupported history falls back to a friendly
+fresh-selection path and never copies historical file paths.
+
+**Transactional safety:** DLL, generated preset, and approved effect files are
+staged and promoted together. Before replacement, every existing destination
+must be recorded as TPM-managed in that game's ownership manifest. Unknown or
+user-owned files cause a collision and remain untouched. Earlier TPM-managed
+files are retained when changing profiles; TPM does not silently delete them.
 
 **Popular effects for arcade games:**
 
