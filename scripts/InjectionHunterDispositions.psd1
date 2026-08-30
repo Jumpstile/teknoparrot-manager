@@ -277,5 +277,69 @@
             Disposition = 'FalsePositive'
             Reasoning   = 'ADR155-0309 round 3 correction (Line renumbered in review round 2 after Test-TPMInteractiveDisplayAvailable was inserted earlier in this file -- match key is File+RuleName+Extent, not Line, so this renumbering does not change what this entry disposes): this reasoning previously claimed this was "a second, separate occurrence... see line 1169 [now 1185] above" -- that count was wrong. The source actually contains multiple textually-identical "Add-Type -AssemblyName System.Drawing" statements in this file (in Test-TPMPngStructure/PNG validation, in Save-TPMScreenCapture, in Save-TPMRenderedTextCapture, and -- as of review round 2 -- in Test-TPMInteractiveDisplayAvailable). Only three of these trigger a raw InjectionRisk.AddType finding from this scanner/rule version (confirmed empirically: the Save-TPMScreenCapture occurrence, immediately preceded by an Add-Type -AssemblyName System.Windows.Forms call in the same function, does not produce its own separate finding). This entry disposes the finding actually observed at this line (Save-TPMRenderedTextCapture''s occurrence); the Save-TPMScreenCapture occurrence is equally safe (same fixed-literal AssemblyName) but deliberately has no disposition entry of its own, since this registry only records dispositions for findings the scanner actually emits -- see ADR-0155-IMPLEMENTATION-CHECKLIST.md for the raw-evidence trail this correction is based on. No attacker-controlled input reaches Add-Type at any of these source occurrences.'
         }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 4167
+            Extent      = "[BitConverter]::ToString(([Security.Cryptography.SHA256]::Create().ComputeHash(`$bytes))) -replace '-', ''"
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The SHA-256 bytes are converted to a string with fixed regex and replacement literals. The variable is only the searched hash byte sequence; no attacker-controlled pattern or replacement reaches -replace.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 4359
+            Extent      = "[BitConverter]::ToString(([Security.Cryptography.SHA256]::Create().ComputeHash(`$bytes))) -replace '-', ''"
+            Disposition = 'FalsePositive'
+            Reasoning   = 'This is the same fixed-literal hash formatting operation in the preview reference reader. Only the computed byte sequence is variable; the regex and replacement are fixed and cannot carry injection syntax.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.AddType'
+            Line        = 4366
+            Extent      = 'Add-Type -AssemblyName System.Drawing -ErrorAction Stop'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The assembly name is a fixed framework literal used to create the TPM-owned synthetic preview bitmap. No external or attacker-controlled value reaches Add-Type.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.AddType'
+            Line        = 4438
+            Extent      = 'Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The assembly name is a fixed framework literal used for the optional preview window, and the adjacent System.Drawing load is also fixed. No external or attacker-controlled value reaches Add-Type.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 4574
+            Extent      = "`$Role.ToUpperInvariant() -replace 'PATH`$',''"
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The role name is selected from the fixed internal storage-role list, while both regex pattern and replacement are fixed literals. This normalizes a bounded property-name suffix and cannot perform regex or replacement injection.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 4764
+            Extent      = "[BitConverter]::ToString(([Security.Cryptography.SHA256]::Create().ComputeHash(`$idBytes))) -replace '-', ''"
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The per-game ownership filename is derived from SHA-256 bytes using fixed regex and replacement literals. The variable is only the searched hash byte sequence; no attacker-controlled pattern or replacement reaches -replace.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.StaticPropertyInjection'
+            Line        = 5040
+            Extent      = "`$context.`$role"
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The dynamic property name is bounded by the fixed internal list StagingPath, BackupPath, CachePath, TargetPath. The access only reads those four context fields; no untrusted value selects a property or invokes code.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.UnsafeEscaping'
+            Line        = 5041
+            Extent      = "([string]`$role).ToUpperInvariant() -replace 'PATH`$',''"
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The role value comes from the same fixed four-entry storage-role list, and the regex pattern and replacement are fixed literals. This cannot carry attacker-controlled regex or replacement syntax.'
+        }
     )
 }
