@@ -43,6 +43,10 @@
   lookups, optional eligibility/storage evidence, and rollback result shapes now
   remain explicit under the certification runner's strict PowerShell mode;
   collision and verified-rollback states are preserved.
+  Certification boundary: the runner now completes authoritative
+  CERTIFIED/NOT CERTIFIED decisions from sealed evidence without entering the
+  publication commit path; publication/finalization requires an explicit
+  -Publish caller and remains outside certification-only execution.
 
   Governance: local-worktree/GitHub handoff, package identity, and #290
   documentation-freshness evidence are mandatory source-controlled gates.

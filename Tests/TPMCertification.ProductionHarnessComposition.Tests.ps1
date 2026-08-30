@@ -169,7 +169,7 @@ BeforeAll {
         if ($BeforeCycle) { & $BeforeCycle $realAuthority $destination }
 
         $identityGuard = { param([string]$Stage) return $true }
-        $result = Complete-TPMProductionCertificationCycleV1 -Authority $authority -SealedRun $sealedRun -StagingParentRoot $staging -DestinationRoot $destination -IdentityGuard $identityGuard
+        $result = Complete-TPMProductionCertificationCycleV1 -Authority $authority -SealedRun $sealedRun -StagingParentRoot $staging -DestinationRoot $destination -IdentityGuard $identityGuard -Publish
         return [pscustomobject]@{ Result = $result; Log = $spy.Log; Facts = $facts; DestinationRoot = $destination }
     }
 }

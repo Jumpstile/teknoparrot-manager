@@ -14,55 +14,56 @@ function Assert-TPMProductionIdentityGuardV1 {
 }
 
 function Complete-TPMProductionCertificationCycleV1 {
-    # Safety invariant (ADR-0155 Section 8.3 vs Section 9): the Section 8.3
-    # candidate final-outcome report and the Section 9 dispatcher-issued
-    # TPMFinalOutcomeV1 can diverge only when EligibleForCertification=true
-    # and the publication attempt does not commit. In every other case their
-    # FinalStatus/ExitCode agree, because the candidate's own derivation
-    # (EligibleForCertification alone) and the dispatcher's real derivation
-    # (EligibleForCertification AND PublicationCommitted) reduce to the same
-    # value whenever EligibleForCertification is false, and coincide by
-    # definition once PublicationCommitted is true. In the one divergent
-    # case, the published bundle is never durably committed -- no valid
-    # commit marker exists at the destination -- so per Section 8.2/8.3 the
-    # candidate-bearing bundle is non-authoritative and must be ignored by
-    # any consumer. This function never lets the candidate drive runtime
-    # certification: it is used only while constructing and staging the
-    # five-artifact bundle and manifest (steps 2-3 below); the returned
-    # Projection is derived exclusively from the genuine, dispatcher-issued
-    # TPMFinalOutcomeV1 issued after publication is registered (steps 4-6).
+    # Certification-only mode issues the authoritative dispatcher outcome from
+    # eligibility and never enters the publication/finalization commit path.
+    # Publication remains available only to an explicit caller that passes
+    # -Publish.
     param(
         [Parameter(Mandatory=$true)]$Authority,
         [Parameter(Mandatory=$true)]$SealedRun,
         [Parameter(Mandatory=$true)][string]$StagingParentRoot,
         [Parameter(Mandatory=$true)][string]$DestinationRoot,
-        [Parameter(Mandatory=$true)][scriptblock]$IdentityGuard
+        [Parameter(Mandatory=$true)][scriptblock]$IdentityGuard,
+        [switch]$Publish
     )
 
     # The authoritative production caller supplies a guard that snapshots
     # the checkout identity and throws when branch, ref, reflog, or remote
-    # identity changes. The guard is mandatory so a future caller cannot
-    # accidentally publish a certification result without covering the
-    # publication/finalization window.
+    # identity changes.
     [void](Assert-TPMProductionIdentityGuardV1 -IdentityGuard $IdentityGuard -Stage 'BeforeEligibility')
 
-    # Step 1: issue eligibility through the workflow authority.
     $eligibility=&$Authority IssueEligibility $SealedRun
 
-    # Step 2: build the Section 8.3 candidate final-outcome report from that
-    # issued eligibility -- available before any publication attempt exists.
-    $finalOutcomeCandidateReport=New-TPMFinalOutcomeCandidateReportV1 -Eligibility $eligibility
+    if(-not$Publish){
+        [void](Assert-TPMProductionIdentityGuardV1 -IdentityGuard $IdentityGuard -Stage 'BeforeFinalOutcome')
+        $finalOutcome=&$Authority IssueCertificationFinalOutcome $eligibility
+        [void](Assert-TPMProductionIdentityGuardV1 -IdentityGuard $IdentityGuard -Stage 'AfterFinalOutcome')
+        $projection=New-TPMFinalOutcomeProjectionV1 -FinalOutcome $finalOutcome
+        [void](Assert-TPMProductionIdentityGuardV1 -IdentityGuard $IdentityGuard -Stage 'AfterFinalProjection')
+        return [pscustomobject]@{
+            Eligibility=$eligibility
+            FinalOutcomeCandidateReport=(New-TPMFinalOutcomeCandidateReportV1 -Eligibility $eligibility)
+            FinalOutcomeReport=(New-TPMFinalOutcomeReportV1 -FinalOutcome $finalOutcome -CertificationOnly)
+            PublicationCandidate=$null
+            Manifest=$null
+            Marker=$null
+            Commit=[pscustomobject]@{Committed=$false;Skipped=$true;FailureCode='CERTIFICATION_ONLY';FailureMessage='publication is not part of certification-only execution';DestinationDirectory=$null}
+            PublicationOutcome=$null
+            FinalOutcome=$finalOutcome
+            Projection=$projection
+        }
+    }
 
     $candidate=&$Authority IssuePublicationCandidate $eligibility
-
-    # Step 3: use the candidate only while constructing and staging the
-    # five-artifact publication bundle and manifest.
+    $finalOutcomeCandidateReport=New-TPMFinalOutcomeCandidateReportV1 -Eligibility $eligibility
     $eligibilityReport=New-TPMEligibilityReportV1 -Eligibility $eligibility
     $publicationReport=New-TPMPublicationReportV1 -PublicationCandidate $candidate
     $scorecardReport=New-TPMScorecardReportV1 -Eligibility $eligibility
     $validationReport=New-TPMValidationReportV1 -SealedRun $SealedRun -Eligibility $eligibility
     $manifest=New-TPMManifestReportV1 -Eligibility $eligibility -EligibilityReport $eligibilityReport -PublicationReport $publicationReport -FinalOutcomeReport $finalOutcomeCandidateReport -ScorecardReport $scorecardReport -ValidationReport $validationReport
     $marker=New-TPMCommitMarkerReportV1 -Manifest $manifest
+
+    # Explicit publication/finalization path begins here.
 
     [void](Assert-TPMProductionIdentityGuardV1 -IdentityGuard $IdentityGuard -Stage 'BeforePublicationCommit')
     $commit=New-TPMPublicationCommitV1 -StagingParentRoot $StagingParentRoot -DestinationRoot $DestinationRoot -EligibilityReport $eligibilityReport -PublicationReport $publicationReport -FinalOutcomeReport $finalOutcomeCandidateReport -ScorecardReport $scorecardReport -ValidationReport $validationReport -Manifest $manifest -Marker $marker
