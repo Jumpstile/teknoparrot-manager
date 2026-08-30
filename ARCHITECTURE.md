@@ -216,6 +216,12 @@ The cache manifest records the subject/mode, intensity identity, preset version,
 Restore history is a selector, not trust evidence. Restore validates the profile schema, ordered approved effect IDs, ordered catalog hashes, and intensity variant before deployment; it never copies a historical path or arbitrary historical file. Missing, corrupt, stale, or unsupported history produces a friendly fresh-selection path. The chooser requires an explicit `R` restore choice, offers a remembered profile only after explicit confirmation, and exposes validated favorites through `F`.
 
 Before replacing any target file, deployment requires a matching TPM-managed ownership entry. Existing files without that ownership evidence return `COLLISION` / `USER_OWNED_CONTENT_PRESERVED` and remain byte-for-byte untouched. Previous TPM-managed files not part of the new profile are retained rather than deleted, so switching to `Original` or a smaller effect set is non-destructive and may require manual review of old files.
+
+Certification strict-mode invariant: empty approved-profile/effect/display
+lookups, optional eligibility/storage evidence, and optional failure-result
+fields are represented as explicit null/empty values. Strict certification
+must preserve collision and verified-rollback outcomes instead of converting
+them into property or index exceptions.
 ---
 
 ## dgVoodoo2 deployment (Mode 6)
