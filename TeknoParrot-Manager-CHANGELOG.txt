@@ -42,6 +42,54 @@
 
   Governance: local-worktree/GitHub handoff, package identity, and #290
   documentation-freshness evidence are mandatory source-controlled gates.
+  ReShade visual profiles: RC8 now defines five deterministic, bounded choices:
+  Original, Clean & Sharp, Vivid Arcade, Classic Arcade CRT, and Enhanced
+  Arcade. Generated presets use only approved catalog effects with pinned
+  revisions, exact hashes, required dependencies, safe defaults, and explicit
+  ordering. Enhanced Arcade validates LumaSharpen before Vibrance; CRT remains
+  isolated from those effects in normal profile mode. Preset generation is
+  deterministic and validated, while advanced custom presets remain bounded
+  user input and never become approved effect evidence. Display and resolution
+  checks remain advisory; TPM does not configure monitors or overwrite
+  ambiguous/user-owned preset content.
+  Added a local preview gallery for the five canonical visual profiles using
+  TPM-owned synthetic imagery only. Preview metadata is illustrative and is
+  not part of the approved effect trust boundary. Missing or invalid previews
+  fall back gracefully without blocking profile selection or ReShade safety;
+  no copyrighted game screenshots are bundled, and no browser or external
+  application is required for normal selection.
+  Preview rendering now materializes deterministic TPM synthetic Before,
+  After, and Split PNG comparisons under the TPM-owned preview cache. Cache
+  identity includes the profile/mode, approved effect hashes, preset version,
+  reference identity/hash, intensity identity, and renderer version. Invalid
+  or stale cache regenerates; unavailable windows fall back without affecting
+  selection or deployment. The separate preview window requires no browser
+  and never changes game, ReShade, trust, or monitor state.
+  ReShade restore hardening: the explicit per-game restore action now routes
+  through one trusted transaction covering the architecture-selected DLL,
+  canonical generated preset, and approved effect assets. Restore history is
+  checked against the current profile schema, ordered effect hashes, and
+  intensity variant; stale, corrupt, or unsupported history falls back to
+  fresh selection and never supplies file paths. Per-game ownership manifests
+  are committed only after verified promotion, and applied history is recorded
+  only after deployment succeeds. Unknown or user-owned destination files are
+  preserved and reported as collisions; previous TPM-managed files are
+  retained when profiles change. The chooser exposes explicit restore,
+  remembered-selection, and favorite paths without changing trust or monitor
+  state.
+
+
+
+
+  ReShade suitability now accepts bounded, read-only multi-monitor evidence.
+  TPM classifies single, extended, mixed, mirrored, unavailable, and malformed
+  topologies and requires explicit target-display evidence when multiple
+  displays are usable. Stale or ambiguous target evidence remains advisory and
+  can downgrade eligibility to UNKNOWN; bounded resolution and effect
+  sensitivity continue to provide guidance only. TPM never changes the primary
+  monitor, enables/disables displays, changes resolution/refresh/orientation,
+  moves windows, or writes game display settings.
+
 
 -------------------------------------------------------------------------------
   v1.0 RC7  (2026-08-22)  -- published release candidate

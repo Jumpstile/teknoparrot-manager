@@ -2202,11 +2202,11 @@ function Measure-PathWriteThroughput {
 function Test-PathInside {
     param([string]$child, [string]$parent)
     try {
-        $c = [System.IO.Path]::GetFullPath($child).TrimEnd('\','/')
-        $p = [System.IO.Path]::GetFullPath($parent).TrimEnd('\','/')
+        $c = [System.IO.Path]::GetFullPath($child).TrimEnd([char[]]"\/")
+        $p = [System.IO.Path]::GetFullPath($parent).TrimEnd([char[]]"\/")
     } catch { return $false }
     if ($c -eq $p) { return $true }
-    return $c.StartsWith($p + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)
+    return $c.ToLowerInvariant().StartsWith(($p + '\').ToLowerInvariant())
 }
 
 # Validate existing path components before TPM treats a location as writable.
@@ -2495,10 +2495,10 @@ function Copy-TpmZipEntryToFile {
 # names, containment, size/format checks) -- this function's only job is
 # the move itself, not content validation.
 #
-# $FileNames must be flat file names (no subpaths) already sanitized and
-# containment-checked by the caller; this function re-validates containment
-# against $DestDir defensively before every write as well, matching the
-# same protection class as the rest of this script's extraction code.
+# $FileNames may contain forward-slash or backslash relative paths beneath
+# $DestDir. Each path must be sanitized and containment-checked by the
+# caller; this function re-validates containment before every write and
+# preserves the relative directory shape during backup and promotion.
 #
 # Rollback bookkeeping rules (P1 remediation -- a prior version of this
 # function recorded a file as "moved" only in the statement immediately
@@ -2537,7 +2537,7 @@ function Copy-TpmZipEntryToFile {
 #     The destination is restored in both cases, but a cleanup failure throws
 #     "TPM TRANSACTION CLEANUP FAILED" and preserves the residue for diagnosis.
 function Invoke-TpmTransactionalPromote {
-    param([string]$StagingDir, [string]$DestDir, [string[]]$FileNames)
+    param([string]$StagingDir, [string]$DestDir, [string[]]$FileNames, [scriptblock]$CommitAction = $null)
 
     $destDirExisted = Test-Path -LiteralPath $DestDir -PathType Container
     $rollbackDir = Join-Path $StagingDir '.tpm-rollback-backup'
@@ -2546,19 +2546,26 @@ function Invoke-TpmTransactionalPromote {
     $promoted = New-Object System.Collections.Generic.List[string]
     $lostSources = New-Object System.Collections.Generic.List[string]
     $invalidBackups = New-Object System.Collections.Generic.List[string]
+    $createdDirectories = New-Object System.Collections.Generic.List[string]
 
     try {
         [void][System.IO.Directory]::CreateDirectory($DestDir)
         [void][System.IO.Directory]::CreateDirectory($rollbackDir)
 
         foreach ($name in $FileNames) {
-            $safeName = [System.IO.Path]::GetFileName($name)
-            $destPath = Join-Path $DestDir $safeName
-            if ([string]::IsNullOrWhiteSpace($safeName) -or -not (Test-PathInside $destPath $DestDir)) {
+            $relativeName = ($name -replace '/', '\').TrimStart('\')
+            $safeName = [System.IO.Path]::GetFileName($relativeName)
+            $destPath = Join-Path $DestDir $relativeName
+            $parentPath = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($destPath))
+            while ($parentPath -and (Test-PathInside $parentPath $DestDir) -and $parentPath.TrimEnd('\') -ne ([System.IO.Path]::GetFullPath($DestDir)).TrimEnd('\')) {
+                if (-not (Test-Path -LiteralPath $parentPath -PathType Container) -and $createdDirectories -notcontains $parentPath) { [void]$createdDirectories.Add($parentPath) }
+                $parentPath = [System.IO.Path]::GetDirectoryName($parentPath)
+            }
+            if ([string]::IsNullOrWhiteSpace($relativeName) -or [System.IO.Path]::IsPathRooted($relativeName) -or $relativeName -match '(^|\\)\.\.(\\|$)' -or -not (Test-PathInside $destPath $DestDir)) {
                 throw "SECURITY: refused to promote entry outside destination folder ($name)."
             }
             if (Test-Path -LiteralPath $destPath -PathType Leaf) {
-                $bakPath = Join-Path $rollbackDir $safeName
+                $bakPath = Join-Path $rollbackDir $relativeName
                 try {
                     $preItem = Get-Item -LiteralPath $destPath -ErrorAction Stop
                     $preHash = (Get-FileHash -LiteralPath $destPath -Algorithm SHA256 -ErrorAction Stop).Hash
@@ -2572,8 +2579,9 @@ function Invoke-TpmTransactionalPromote {
                     throw "TPM TRANSACTION PRE-STATE CAPTURE FAILED for '$destPath' -- refusing to move the existing file. $_"
                 }
                 try {
+                    [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($bakPath))
                     Move-Item -LiteralPath $destPath -Destination $bakPath -Force -ErrorAction Stop
-                    [void]$movedAside.Add($safeName)
+                    [void]$movedAside.Add($relativeName)
                 } catch {
                     $originalExistsAfterFailure = Test-Path -LiteralPath $destPath -PathType Leaf
                     $backupExistsAfterFailure = Test-Path -LiteralPath $bakPath -PathType Leaf
@@ -2591,7 +2599,7 @@ function Invoke-TpmTransactionalPromote {
                         }
                     }
                     if ($backupValid) {
-                        [void]$movedAside.Add($safeName)
+                        [void]$movedAside.Add($relativeName)
                     } elseif (-not $originalExistsAfterFailure) {
                         $lostMsg = "original file for '$destPath' was lost during move-aside and no valid backup is observable at '$bakPath' -- unrecoverable. Pre-move evidence: $preMoveEvidence. Backup evidence: $backupEvidence. Move error: $_"
                         [void]$lostSources.Add($lostMsg)
@@ -2607,17 +2615,19 @@ function Invoke-TpmTransactionalPromote {
         }
 
         foreach ($name in $FileNames) {
-            $safeName = [System.IO.Path]::GetFileName($name)
-            $srcPath  = Join-Path $StagingDir $safeName
-            $destPath = Join-Path $DestDir $safeName
+            $relativeName = ($name -replace '/', '\').TrimStart('\')
+            $srcPath  = Join-Path $StagingDir $relativeName
+            $destPath = Join-Path $DestDir $relativeName
             try {
+                [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($destPath))
                 Move-Item -LiteralPath $srcPath -Destination $destPath -Force -ErrorAction Stop
-                [void]$promoted.Add($safeName)
+                [void]$promoted.Add($relativeName)
             } catch {
-                if (Test-Path -LiteralPath $destPath) { [void]$promoted.Add($safeName) }
+                if (Test-Path -LiteralPath $destPath) { [void]$promoted.Add($relativeName) }
                 throw
             }
         }
+        if ($CommitAction) { & $CommitAction }
     } catch {
         $promotionError = $_
         Write-Log "Invoke-TpmTransactionalPromote: FAILED promoting into '$DestDir' -- rolling back. $promotionError"
@@ -2639,6 +2649,7 @@ function Invoke-TpmTransactionalPromote {
             $destPath = Join-Path $DestDir $name
             try {
                 if (Test-Path -LiteralPath $bakPath) {
+                    [void][System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($destPath))
                     Move-Item -LiteralPath $bakPath -Destination $destPath -Force -ErrorAction Stop
                 } else {
                     [void]$rollbackErrors.Add("backup for '$destPath' is missing -- cannot restore original file")
@@ -2656,6 +2667,16 @@ function Invoke-TpmTransactionalPromote {
             } catch {
                 Write-Log "Invoke-TpmTransactionalPromote: ROLLBACK FAILED removing newly-created destination directory '$DestDir' -- $_"
                 [void]$rollbackErrors.Add("remove newly-created destination directory '$DestDir' -- $_")
+            }
+        }
+        foreach ($createdDir in @($createdDirectories | Sort-Object Length -Descending)) {
+            try {
+                if ((Test-Path -LiteralPath $createdDir -PathType Container) -and (@(Get-ChildItem -LiteralPath $createdDir -Force -ErrorAction SilentlyContinue).Count -eq 0)) {
+                    Remove-Item -LiteralPath $createdDir -Force -ErrorAction Stop
+                }
+            } catch {
+                Write-Log "Invoke-TpmTransactionalPromote: ROLLBACK FAILED removing newly-created directory '$createdDir' -- $_"
+                [void]$rollbackErrors.Add("remove newly-created directory '$createdDir' -- $_")
             }
         }
         if ($rollbackErrors.Count -gt 0) {
@@ -4011,6 +4032,1104 @@ function Get-ReShadeTargetInfo {
     return [pscustomobject]@{ TargetDir = $targetDir; DllName = $dllName; ApiDetected = $apiDetected }
 }
 
+function Get-TpmReShadeProfiles {
+    return @(
+        [pscustomobject]@{
+            ProfileId = 'Original'; FriendlyName = 'Original'; Description = 'No visual processing.'
+            Recommended = $false; Effects = @(); RequiredEffects = @(); TechniqueOrder = @()
+            Parameters = @{}; PerformanceClass = 'LOW'; ResolutionSensitivity = 'LOW'
+            CompatibilityState = 'VALIDATED_SINGLE'; CompatibleWith = @(); ConflictsWith = @()
+            OrderConstraints = @(); FallbackProfileId = 'Original'
+            PreviewAsset = 'ReShade\Previews\TPM-preview-original.svg'; SchemaVersion = 2
+        }
+        [pscustomobject]@{
+            ProfileId = 'CleanSharp'; FriendlyName = 'Clean & Sharp'; Description = 'Clearer edges and text with very little change to the original image.'
+            Recommended = $true; Effects = @('SweetFX.LumaSharpen'); RequiredEffects = @('LumaSharpen.fx')
+            TechniqueOrder = @('LumaSharpen'); Parameters = @{}; PerformanceClass = 'LOW'
+            ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'VALIDATED_SINGLE'
+            CompatibleWith = @(); ConflictsWith = @('CRT_Lottes'); OrderConstraints = @()
+            FallbackProfileId = 'Original'; PreviewAsset = 'ReShade\Previews\TPM-preview-clean.svg'; SchemaVersion = 2
+        }
+        [pscustomobject]@{
+            ProfileId = 'ClassicCrt'; FriendlyName = 'Classic Arcade CRT'; Description = 'Traditional scanlines and restrained arcade-monitor character.'
+            Recommended = $false; Effects = @('FXShaders.CRT_Lottes'); RequiredEffects = @('CRT_Lottes.fx','CRT_Lottes.fxh')
+            TechniqueOrder = @('CRT_Lottes'); Parameters = @{}; PerformanceClass = 'HIGH'
+            ResolutionSensitivity = 'HIGH'; CompatibilityState = 'VALIDATED_SINGLE'
+            CompatibleWith = @(); ConflictsWith = @('LumaSharpen','Vibrance'); OrderConstraints = @()
+            FallbackProfileId = 'CleanSharp'; PreviewAsset = 'ReShade\Previews\TPM-preview-crt.svg'; SchemaVersion = 2
+        }
+        [pscustomobject]@{
+            ProfileId = 'Vivid'; FriendlyName = 'Vivid Arcade'; Description = 'Richer color for modern displays.'
+            Recommended = $false; Effects = @('SweetFX.Vibrance'); RequiredEffects = @('Vibrance.fx')
+            TechniqueOrder = @('Vibrance'); Parameters = @{}; PerformanceClass = 'LOW'
+            ResolutionSensitivity = 'LOW'; CompatibilityState = 'VALIDATED_SINGLE'
+            CompatibleWith = @(); ConflictsWith = @(); OrderConstraints = @()
+            FallbackProfileId = 'Original'; PreviewAsset = 'ReShade\Previews\TPM-preview-vivid.svg'; SchemaVersion = 2
+        }
+        [pscustomobject]@{
+            ProfileId = 'EnhancedArcade'; FriendlyName = 'Enhanced Arcade'; Description = 'Sharper edges and richer color while preserving the approved effect order.'
+            Recommended = $false; Effects = @('SweetFX.LumaSharpen','SweetFX.Vibrance'); RequiredEffects = @('LumaSharpen.fx','Vibrance.fx')
+            TechniqueOrder = @('LumaSharpen','Vibrance'); Parameters = @{}; PerformanceClass = 'LOW'
+            ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'VALIDATED_SINGLE'
+            CompatibleWith = @(); ConflictsWith = @('CRT_Lottes'); OrderConstraints = @('LumaSharpen before Vibrance')
+            FallbackProfileId = 'CleanSharp'; PreviewAsset = 'ReShade\Previews\TPM-preview-enhanced.svg'; SchemaVersion = 2
+        }
+    )
+}
+
+function Get-TpmReShadeEffectCatalog {
+    $effects = @(
+        [pscustomobject]@{ EffectId = 'SweetFX.LumaSharpen'; FriendlyName = 'LumaSharpen'; Category = 'SHARPNESS'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '16d1a42247cb5baaf660120ee35c9a33bb94649c'; RelativeFiles = @('Shaders/SweetFX/LumaSharpen.fx'); SHA256 = @('7B358EBBDAA7BC4C44EBF6E9D41AFCB3F21EE3DDE5C5F85BF40201D5C6044680'); RequiredIncludes = @('ReShadeUI.fxh','ReShade.fxh'); RequiredTextures = @(); License = 'MIT'; Attribution = 'Christian Cann Schuldt Jensen (CeeJay.dk)'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/16d1a42247cb5baaf660120ee35c9a33bb94649c/'; TechniqueName = 'LumaSharpen'; PerformanceClass = 'LOW'; ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'VALIDATED_SINGLE'; FallbackBehavior = 'Original' }
+        [pscustomobject]@{ EffectId = 'SweetFX.Vibrance'; FriendlyName = 'Vibrance'; Category = 'COLOR'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '16d1a42247cb5baaf660120ee35c9a33bb94649c'; RelativeFiles = @('Shaders/SweetFX/Vibrance.fx'); SHA256 = @('B9189A28CA4A645A0E188F8396C81889D217E3C706E8900DFE6594D43E7C33EB'); RequiredIncludes = @('ReShadeUI.fxh','ReShade.fxh'); RequiredTextures = @(); License = 'MIT'; Attribution = 'Christian Cann Schuldt Jensen (CeeJay.dk)'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/16d1a42247cb5baaf660120ee35c9a33bb94649c/'; TechniqueName = 'Vibrance'; PerformanceClass = 'LOW'; ResolutionSensitivity = 'LOW'; CompatibilityState = 'VALIDATED_SINGLE'; FallbackBehavior = 'Original' }
+[pscustomobject]@{ EffectId = 'FXShaders.CRT_Lottes'; FriendlyName = 'CRT Lottes'; Category = 'ARCADE DISPLAY'; Repository = 'luluco250/FXShaders'; PinnedCommit = '76365e35c48e30170985ca371e67d8daf8eb9a98'; RelativeFiles = @('Shaders/CRT_Lottes.fx','Shaders/CRT_Lottes.fxh'); SHA256 = @('6B214F43C97650A34D9848211402B475627092E127258F02BB0C5919451C9B20','FE19870235B2C4C166BD367227366AAE115E9AC9EF60E84774A069D4CFC0B1E6'); RequiredIncludes = @('ReShade.fxh','CRT_Lottes.fxh'); RequiredTextures = @(); License = 'MIT; Unlicense/public domain dedication for Timothy Lottes implementation'; Attribution = 'Lucas Melo; Timothy Lottes'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/luluco250/FXShaders/76365e35c48e30170985ca371e67d8daf8eb9a98/'; TechniqueName = 'CRT_Lottes'; PerformanceClass = 'HIGH'; ResolutionSensitivity = 'HIGH'; CompatibilityState = 'VALIDATED_SINGLE'; FallbackBehavior = 'CleanSharp' }
+    )
+    foreach ($effect in $effects) {
+        if ($effect.EffectId -eq 'SweetFX.LumaSharpen') { $effect | Add-Member -NotePropertyName CompatibleWith -NotePropertyValue @('SweetFX.Vibrance') -Force; $effect | Add-Member -NotePropertyName ConflictsWith -NotePropertyValue @('FXShaders.CRT_Lottes') -Force }
+        elseif ($effect.EffectId -eq 'SweetFX.Vibrance') { $effect | Add-Member -NotePropertyName CompatibleWith -NotePropertyValue @('SweetFX.LumaSharpen') -Force; $effect | Add-Member -NotePropertyName ConflictsWith -NotePropertyValue @() -Force }
+        else { $effect | Add-Member -NotePropertyName CompatibleWith -NotePropertyValue @() -Force; $effect | Add-Member -NotePropertyName ConflictsWith -NotePropertyValue @('SweetFX.LumaSharpen','SweetFX.Vibrance') -Force }
+        $effect | Add-Member -NotePropertyName OrderConstraints -NotePropertyValue @() -Force
+        if ($effect.EffectId -eq 'SweetFX.LumaSharpen') { $effect | Add-Member -NotePropertyName ByteLengths -NotePropertyValue @([int64]8688) -Force }
+        elseif ($effect.EffectId -eq 'SweetFX.Vibrance') { $effect | Add-Member -NotePropertyName ByteLengths -NotePropertyValue @([int64]2217) -Force }
+        else { $effect | Add-Member -NotePropertyName ByteLengths -NotePropertyValue @([int64]5114,[int64]21710) -Force }
+    }
+    return $effects
+}
+
+function Get-TpmReShadeProfile {
+    param([string]$ProfileId)
+    return @(Get-TpmReShadeProfiles | Where-Object { $_.ProfileId -eq $ProfileId })[0]
+}
+
+function Test-TpmReShadePresetContent {
+    param([Parameter(Mandatory)][string]$Content, [Parameter(Mandatory)]$ProfileDefinition)
+    if ($Content -match '[^\x09\x0A\x0D\x20-\x7E]') { return $false }
+    $techniqueLine = @($Content -split "`r?`n" | Where-Object { $_ -like 'Techniques=*' })[0]
+    if ($null -eq $techniqueLine) { return $false }
+    $actual = if ($techniqueLine.Length -gt 11) { @($techniqueLine.Substring(11) -split ',') } else { @() }
+    $expected = @($ProfileDefinition.TechniqueOrder)
+    if (($actual -join ',') -ne ($expected -join ',')) { return $false }
+    foreach ($technique in $actual) { if ($technique -notin @('LumaSharpen','Vibrance','CRT_Lottes')) { return $false } }
+    return $true
+}
+
+function New-TpmReShadePresetContent {
+    param([object]$ProfileDefinition)
+    if (-not $ProfileDefinition -or $ProfileDefinition.SchemaVersion -ne 2) { throw 'Invalid TPM ReShade profile.' }
+    $stack = Resolve-TpmReShadeEffectStack -EffectIds @($ProfileDefinition.Effects)
+    if (-not $stack.Valid -or (($stack.Effects | ForEach-Object EffectId) -join ',') -ne (@($ProfileDefinition.Effects) -join ',')) { throw 'Profile effect stack is not approved.' }
+    $lines = New-Object System.Collections.Generic.List[string]
+    [void]$lines.Add('; TPM-managed approved ReShade profile: ' + $ProfileDefinition.ProfileId)
+
+    [void]$lines.Add('; Generated by TeknoParrot Manager. Do not edit.')
+    [void]$lines.Add('PresetName=' + $ProfileDefinition.FriendlyName)
+    [void]$lines.Add('Techniques=' + (@($ProfileDefinition.TechniqueOrder) -join ','))
+    foreach ($key in @($ProfileDefinition.Parameters.Keys | Sort-Object)) { [void]$lines.Add(('{0}={1}' -f $key, $ProfileDefinition.Parameters[$key])) }
+    $content = ($lines -join "`r`n") + "`r`n"
+    if (-not (Test-TpmReShadePresetContent -Content $content -ProfileDefinition $ProfileDefinition)) { throw 'Generated ReShade preset failed validation.' }
+    return $content
+}
+function Get-TpmReShadePreviewInfo {
+    param([Parameter(Mandatory)]$ProfileDefinition, [string]$PreviewRoot = '')
+    $root = if ($PreviewRoot) { [IO.Path]::GetFullPath($PreviewRoot) } else { [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'ReShade\Previews')) }
+    $relative = [string]$ProfileDefinition.PreviewAsset
+    $expected = @{
+        Original = 'TPM-preview-original.svg'; CleanSharp = 'TPM-preview-clean.svg'
+        Vivid = 'TPM-preview-vivid.svg'; EnhancedArcade = 'TPM-preview-enhanced.svg'; ClassicCrt = 'TPM-preview-crt.svg'
+    }
+    $name = if ($expected.ContainsKey($ProfileDefinition.ProfileId)) { $expected[$ProfileDefinition.ProfileId] } else { $null }
+    if (-not $name -or [IO.Path]::GetFileName($relative) -ne $name -or $relative -match '(^|[\\/])\.\.([\\/]|$)') { return [pscustomobject]@{ ProfileId=$ProfileDefinition.ProfileId; Available=$false; Path=$null; Provenance='TPM synthetic'; Reason='PREVIEW_BINDING_INVALID' } }
+    $path = [IO.Path]::GetFullPath((Join-Path $root $name))
+    if (-not $path.StartsWith($root.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { return [pscustomobject]@{ ProfileId=$ProfileDefinition.ProfileId; Available=$false; Path=$null; Provenance='TPM synthetic'; Reason='PREVIEW_MISSING' } }
+    try { $text = [IO.File]::ReadAllText($path); if ($text -notmatch '^\s*<svg\b' -or $text -notmatch '</svg>\s*$') { throw 'invalid' }; return [pscustomobject]@{ ProfileId=$ProfileDefinition.ProfileId; Available=$true; Path=$path; Provenance='TPM synthetic'; Reason=$null } } catch { return [pscustomobject]@{ ProfileId=$ProfileDefinition.ProfileId; Available=$false; Path=$null; Provenance='TPM synthetic'; Reason='PREVIEW_INVALID' } }
+}
+
+function Get-TpmReShadeProfileGallery {
+    param([string]$PreviewRoot = '')
+    return @(Get-TpmReShadeProfiles | ForEach-Object {
+        $preview = Get-TpmReShadePreviewInfo -ProfileDefinition $_ -PreviewRoot $PreviewRoot
+        [pscustomobject]@{ ProfileId=$_.ProfileId; FriendlyName=$_.FriendlyName; Description=$_.Description; PreviewAvailable=$preview.Available; PreviewPath=$preview.Path; PreviewReason=$preview.Reason; Provenance=$preview.Provenance; PerformanceClass=$_.PerformanceClass; ResolutionSensitivity=$_.ResolutionSensitivity }
+    })
+}
+function Get-TpmReShadePerformanceBadge {
+    param([string]$PerformanceClass = '')
+    switch ($PerformanceClass.ToUpperInvariant()) {
+        'LOW' { return 'Very Light' }
+        'MEDIUM' { return 'Moderate' }
+        'HIGH' { return 'Heavy' }
+        default { return 'Performance unknown' }
+    }
+}
+
+function Get-TpmReShadePreviewCacheKey {
+    param([Parameter(Mandatory)][string]$SubjectId, [string[]]$ShaderSha256 = @(), [string]$IntensityId = 'Default', [string]$PresetVersion = '2', [string]$ReferenceVersion = '1', [string]$ReferenceSha256 = 'TPM-SYNTHETIC-REFERENCE-V1', [string]$RendererVersion = '1')
+    $raw = (@($SubjectId,$IntensityId,$PresetVersion,$ReferenceVersion,$ReferenceSha256,$RendererVersion,(@($ShaderSha256) -join ',')) -join '|')
+    $bytes = [Text.Encoding]::UTF8.GetBytes($raw)
+    return ([BitConverter]::ToString(([Security.Cryptography.SHA256]::Create().ComputeHash($bytes))) -replace '-', '').ToLowerInvariant()
+}
+function Compare-TpmReShadeProfiles {
+    param([Parameter(Mandatory)][string]$LeftProfileId, [Parameter(Mandatory)][string]$RightProfileId, [string]$ReferenceIdentity = 'TPM-SYNTHETIC-ARCADE-V1')
+    $left=Get-TpmReShadeProfile -ProfileId $LeftProfileId;$right=Get-TpmReShadeProfile -ProfileId $RightProfileId
+    if(-not $left -or -not $right -or [string]::IsNullOrWhiteSpace($ReferenceIdentity)){return [pscustomobject]@{Valid=$false;Reason='INVALID_PREVIEW_SUBJECT'}}
+    return [pscustomobject]@{Valid=$true;LeftProfileId=$left.ProfileId;RightProfileId=$right.ProfileId;ReferenceIdentity=$ReferenceIdentity;Deploys=$false;LeftEffects=@($left.Effects);RightEffects=@($right.Effects)}
+}
+
+function Get-TpmReShadeIntensityVariants {
+    param([Parameter(Mandatory)]$ProfileDefinition)
+    return @([pscustomobject]@{VariantId='Default';FriendlyName='Balanced';Supported=$true;SettingsVersion='1';Parameters=@{};ProfileId=$ProfileDefinition.ProfileId})
+}
+
+function Resolve-TpmReShadeIntensityVariant {
+    param([Parameter(Mandatory)]$ProfileDefinition,[string]$VariantId='Default')
+    $variant=@(Get-TpmReShadeIntensityVariants -ProfileDefinition $ProfileDefinition|Where-Object VariantId -eq $VariantId)[0]
+    if(-not $variant){throw 'Unsupported ReShade intensity variant.'}
+    return $variant
+}
+
+function Get-TpmReShadeStatePath {
+    param([string]$StateRoot='')
+    $root=if($StateRoot){[IO.Path]::GetFullPath($StateRoot)}else{[IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'ReShade\TPM-State'))}
+    $file=Join-Path $root 'profiles.json'
+    return [pscustomobject]@{Root=$root;Path=$file}
+}
+
+function Read-TpmReShadeState {
+    param([string]$StateRoot='')
+    $paths=Get-TpmReShadeStatePath -StateRoot $StateRoot
+    if(-not(Test-Path -LiteralPath $paths.Path -PathType Leaf)){return [pscustomobject]@{Profiles=[pscustomobject]@{};Favorites=@();History=[pscustomobject]@{}}}
+    try{$state=Get-Content -LiteralPath $paths.Path -Raw|ConvertFrom-Json;if(-not $state.Profiles){$state|Add-Member Profiles ([pscustomobject]@{}) -Force};if(-not $state.Favorites){$state|Add-Member Favorites @() -Force};if(-not $state.History){$state|Add-Member History ([pscustomobject]@{}) -Force};return $state}catch{return [pscustomobject]@{Profiles=@{};Favorites=@();History=@{};Corrupt=$true}}
+}
+
+function Write-TpmReShadeState {
+    param([Parameter(Mandatory)]$State,[string]$StateRoot='')
+    $paths=Get-TpmReShadeStatePath -StateRoot $StateRoot;[IO.Directory]::CreateDirectory($paths.Root)|Out-Null
+    $tmp=$paths.Path+'.tmp';$json=$State|ConvertTo-Json -Depth 12;[IO.File]::WriteAllText($tmp,$json,(New-Object Text.UTF8Encoding($false)));Move-Item -LiteralPath $tmp -Destination $paths.Path -Force
+    return $true
+}
+
+function Set-TpmReShadeRememberedProfile {
+    param([Parameter(Mandatory)][string]$GameId,[Parameter(Mandatory)]$ProfileDefinition,[string]$VariantId='Default',[string]$StateRoot='')
+    $variant=Resolve-TpmReShadeIntensityVariant -ProfileDefinition $ProfileDefinition -VariantId $VariantId;$state=Read-TpmReShadeState -StateRoot $StateRoot
+    if(-not $state.Profiles){$state|Add-Member Profiles ([pscustomobject]@{}) -Force}
+    $entry=[pscustomobject]@{ProfileId=$ProfileDefinition.ProfileId;VariantId=$variant.VariantId;DefinitionVersion=[string]$ProfileDefinition.SchemaVersion;EffectIds=@($ProfileDefinition.Effects)}
+    $state.Profiles|Add-Member -MemberType NoteProperty -Name $GameId -Value $entry -Force;Write-TpmReShadeState -State $state -StateRoot $StateRoot
+}
+
+function Get-TpmReShadeRememberedProfile {
+    param([Parameter(Mandatory)][string]$GameId,[string]$StateRoot='')
+    $state=Read-TpmReShadeState -StateRoot $StateRoot
+    $props=@($state.Profiles.PSObject.Properties|Where-Object { $_.Name -eq $GameId });$entry=if($props.Count -gt 0){$props[0].Value}else{$null}
+    if(-not $entry){return [pscustomobject]@{Found=$false}}
+    $rememberedProfile=Get-TpmReShadeProfile -ProfileId $entry.ProfileId
+    if(-not $rememberedProfile -or [string]$rememberedProfile.SchemaVersion -ne [string]$entry.DefinitionVersion -or (@($rememberedProfile.Effects)-join ',') -ne (@($entry.EffectIds)-join ',')){return [pscustomobject]@{Found=$true;Valid=$false;Reason='STALE_PROFILE_DEFINITION'}}
+    try { $rememberedVariant=Resolve-TpmReShadeIntensityVariant -ProfileDefinition $rememberedProfile -VariantId $entry.VariantId } catch { return [pscustomobject]@{Found=$true;Valid=$false;Reason='UNSUPPORTED_VARIANT'} }
+    return [pscustomobject]@{Found=$true;Valid=$true;Profile=$rememberedProfile;VariantId=$rememberedVariant.VariantId}
+}
+
+function Set-TpmReShadeFavorite {
+    param([Parameter(Mandatory)][string]$ProfileId,[string]$VariantId='Default',[string]$StateRoot='')
+    $favoriteProfile=Get-TpmReShadeProfile -ProfileId $ProfileId;if(-not $favoriteProfile){return $false};$variant=Resolve-TpmReShadeIntensityVariant -ProfileDefinition $favoriteProfile -VariantId $VariantId;$state=Read-TpmReShadeState -StateRoot $StateRoot
+    $items=@($state.Favorites|Where-Object { $_.ProfileId -ne $ProfileId -or $_.VariantId -ne $variant.VariantId });$state.Favorites=@($items+[pscustomobject]@{ProfileId=$ProfileId;VariantId=$variant.VariantId});Write-TpmReShadeState -State $state -StateRoot $StateRoot
+    return $true
+}
+
+function Remove-TpmReShadeFavorite {
+    param([Parameter(Mandatory)][string]$ProfileId,[string]$VariantId='Default',[string]$StateRoot='')
+    $state=Read-TpmReShadeState -StateRoot $StateRoot;$state.Favorites=@($state.Favorites|Where-Object { $_.ProfileId -ne $ProfileId -or $_.VariantId -ne $VariantId });Write-TpmReShadeState -State $state -StateRoot $StateRoot
+}
+
+function Get-TpmReShadeProfileEffectHashes {
+    param([Parameter(Mandatory)]$ProfileDefinition)
+    $catalog = @(Get-TpmReShadeEffectCatalog)
+    $hashes = New-Object System.Collections.Generic.List[string]
+    foreach ($effectId in @($ProfileDefinition.Effects)) {
+        $effect = @($catalog | Where-Object EffectId -eq $effectId)[0]
+        if (-not $effect) { throw "Effect is not approved: $effectId" }
+        foreach ($hash in @($effect.SHA256)) { [void]$hashes.Add([string]$hash) }
+    }
+    return $hashes.ToArray()
+}
+
+function Add-TpmReShadeProfileHistory {
+    param([Parameter(Mandatory)][string]$GameId,[Parameter(Mandatory)]$ProfileDefinition,[string]$VariantId='Default',[string]$StateRoot='', [int]$MaximumEntries=5)
+    $variant=Resolve-TpmReShadeIntensityVariant -ProfileDefinition $ProfileDefinition -VariantId $VariantId;$state=Read-TpmReShadeState -StateRoot $StateRoot
+    if(-not $state.History){$state|Add-Member History ([pscustomobject]@{}) -Force}
+    $old=@();$props=@($state.History.PSObject.Properties|Where-Object { $_.Name -eq $GameId });if($props.Count -gt 0){$old=@($props[0].Value)}
+    $hashes=@(Get-TpmReShadeProfileEffectHashes -ProfileDefinition $ProfileDefinition)
+    $entry=[pscustomobject]@{ProfileId=$ProfileDefinition.ProfileId;VariantId=$variant.VariantId;DefinitionVersion=[string]$ProfileDefinition.SchemaVersion;EffectIds=@($ProfileDefinition.Effects);EffectSha256=@($hashes);Applied=$true;RecordedAt=(Get-Date).ToUniversalTime().ToString('o')}
+    $state.History|Add-Member -MemberType NoteProperty -Name $GameId -Value (@($entry)+$old|Select-Object -First $MaximumEntries) -Force;Write-TpmReShadeState -State $state -StateRoot $StateRoot
+}
+
+function Get-TpmReShadeProfileHistory {
+    param([Parameter(Mandatory)][string]$GameId,[string]$StateRoot='')
+    $state=Read-TpmReShadeState -StateRoot $StateRoot;$props=@($state.History.PSObject.Properties|Where-Object { $_.Name -eq $GameId });if($props.Count -gt 0){return @($props[0].Value)};return @()
+}
+
+function Get-TpmReShadeRestoreCandidate {
+    param([Parameter(Mandatory)][string]$GameId, [string]$StateRoot = '')
+    $state = Read-TpmReShadeState -StateRoot $StateRoot
+    if ($state.PSObject.Properties['Corrupt'] -and $state.Corrupt) { return [pscustomobject]@{ Found = $true; Valid = $false; Reason = 'CORRUPT_HISTORY' } }
+    $history = @()
+    $props = @($state.History.PSObject.Properties | Where-Object { $_.Name -eq $GameId })
+    if ($props.Count -gt 0) { $history = @($props[0].Value) }
+    if ($history.Count -eq 0) { return [pscustomobject]@{ Found = $false } }
+    $invalidReason = 'CORRUPT_HISTORY'
+    foreach ($entry in $history) {
+        $complete = $true
+        foreach ($propertyName in @('ProfileId','VariantId','DefinitionVersion','EffectIds','EffectSha256','Applied')) { if (-not $entry.PSObject.Properties[$propertyName]) { $complete = $false; break } }
+        if (-not $complete -or [string]$entry.Applied -ne 'True') { continue }
+        $candidateProfile = Get-TpmReShadeProfile -ProfileId $entry.ProfileId
+        if (-not $candidateProfile -or [string]$candidateProfile.SchemaVersion -ne [string]$entry.DefinitionVersion -or (@($candidateProfile.Effects) -join ',') -ne (@($entry.EffectIds) -join ',')) { $invalidReason = 'STALE_PROFILE_DEFINITION'; continue }
+        try { $candidateVariant = Resolve-TpmReShadeIntensityVariant -ProfileDefinition $candidateProfile -VariantId $entry.VariantId } catch { $invalidReason = 'UNSUPPORTED_VARIANT'; continue }
+        try { $candidateHashes = @(Get-TpmReShadeProfileEffectHashes -ProfileDefinition $candidateProfile) } catch { $invalidReason = 'STALE_EFFECT_DEFINITION'; continue }
+        if ((@($candidateHashes) -join ',') -ne (@($entry.EffectSha256) -join ',')) { $invalidReason = 'STALE_EFFECT_DEFINITION'; continue }
+        return [pscustomobject]@{ Found = $true; Valid = $true; Profile = $candidateProfile; VariantId = $candidateVariant.VariantId; HistoryEntry = $entry }
+    }
+    return [pscustomobject]@{ Found = $true; Valid = $false; Reason = $invalidReason }
+}
+
+function Get-TpmReShadeChooserOptions {
+    param([Parameter(Mandatory)][string]$GameId, [string]$StateRoot = '')
+    $state = Read-TpmReShadeState -StateRoot $StateRoot
+    $favoriteProfiles = @()
+    if (-not ($state.PSObject.Properties['Corrupt'] -and $state.Corrupt)) {
+        foreach ($favorite in @($state.Favorites)) {
+            $favoriteProfile = Get-TpmReShadeProfile -ProfileId $favorite.ProfileId
+            if ($favoriteProfile) {
+                try { $favoriteVariant = Resolve-TpmReShadeIntensityVariant -ProfileDefinition $favoriteProfile -VariantId $favorite.VariantId; $favoriteProfiles += [pscustomobject]@{ Profile = $favoriteProfile; VariantId = $favoriteVariant.VariantId } } catch {}
+            }
+        }
+    }
+    return [pscustomobject]@{
+        Remembered = Get-TpmReShadeRememberedProfile -GameId $GameId -StateRoot $StateRoot
+        Restore = Get-TpmReShadeRestoreCandidate -GameId $GameId -StateRoot $StateRoot
+        Favorites = $favoriteProfiles
+    }
+}
+
+function Restore-TpmReShadeProfile {
+    param(
+        [Parameter(Mandatory)]$HistoryEntry,
+        [Parameter(Mandatory)][string]$CacheRoot,
+        [Parameter(Mandatory)][string]$OwnershipRoot,
+        [Parameter(Mandatory)][string]$GamePath,
+        [Parameter(Mandatory)][System.Xml.XmlDocument]$Doc,
+        [Parameter(Mandatory)][string]$SourceDll,
+        [string]$SourceDll32 = '',
+        [string]$GameId = '',
+        [string]$StateRoot = '',
+        [ValidateSet('None','BeforeCommit')][string]$FaultStage = 'None'
+    )
+    try {
+        foreach ($propertyName in @('ProfileId','VariantId','DefinitionVersion','EffectIds','EffectSha256','Applied')) {
+            if (-not $HistoryEntry.PSObject.Properties[$propertyName]) { return [pscustomobject]@{ Succeeded = $false; Reason = 'CORRUPT_HISTORY' } }
+        }
+        if ([string]$HistoryEntry.Applied -ne 'True' -or [string]::IsNullOrWhiteSpace([string]$HistoryEntry.ProfileId) -or [string]::IsNullOrWhiteSpace([string]$HistoryEntry.DefinitionVersion)) {
+            return [pscustomobject]@{ Succeeded = $false; Reason = 'CORRUPT_HISTORY' }
+        }
+        $restoreProfile = Get-TpmReShadeProfile -ProfileId $HistoryEntry.ProfileId
+        if (-not $restoreProfile -or [string]$restoreProfile.SchemaVersion -ne [string]$HistoryEntry.DefinitionVersion -or (@($restoreProfile.Effects) -join ',') -ne (@($HistoryEntry.EffectIds) -join ',')) {
+            return [pscustomobject]@{ Succeeded = $false; Reason = 'STALE_PROFILE_DEFINITION' }
+        }
+        try { $variant = Resolve-TpmReShadeIntensityVariant -ProfileDefinition $restoreProfile -VariantId $HistoryEntry.VariantId } catch { return [pscustomobject]@{ Succeeded = $false; Reason = 'UNSUPPORTED_VARIANT' } }
+        try { $currentHashes = @(Get-TpmReShadeProfileEffectHashes -ProfileDefinition $restoreProfile) } catch { return [pscustomobject]@{ Succeeded = $false; Reason = 'STALE_EFFECT_DEFINITION' } }
+        if ((@($currentHashes) -join ',') -ne (@($HistoryEntry.EffectSha256) -join ',')) { return [pscustomobject]@{ Succeeded = $false; Reason = 'STALE_EFFECT_DEFINITION' } }
+        $ownershipPath = if ([System.IO.Path]::GetExtension($OwnershipRoot) -ieq '.json') { $OwnershipRoot } else { Join-Path $OwnershipRoot 'profile.json' }
+        $deployment = Install-TpmReShadeProfileDeployment -ProfileDefinition $restoreProfile -VariantId $variant.VariantId -GamePath $GamePath -Doc $Doc -SourceDll $SourceDll -SourceDll32 $SourceDll32 -CacheRoot $CacheRoot -OwnershipPath $ownershipPath -CanonicalPreset -FaultStage $FaultStage
+        if (-not $deployment.Succeeded) {
+            return [pscustomobject]@{ Succeeded = $false; State = $deployment.State; Reason = $deployment.Reason; Error = $deployment.Error; RollbackVerified = $deployment.RollbackVerified }
+        }
+        if ($GameId) {
+            try { Add-TpmReShadeProfileHistory -GameId $GameId -ProfileDefinition $restoreProfile -VariantId $variant.VariantId -StateRoot $StateRoot | Out-Null }
+            catch { return [pscustomobject]@{ Succeeded = $false; State = 'HISTORY_NOT_COMMITTED'; Reason = 'HISTORY_WRITE_FAILED'; Error = $_.Exception.Message; DeploymentSucceeded = $true } }
+        }
+        return [pscustomobject]@{ Succeeded = $true; State = 'RESTORED'; ProfileId = $restoreProfile.ProfileId; VariantId = $variant.VariantId; TargetDir = $deployment.TargetDir; DllName = $deployment.DllName; PresetApplied = $deployment.PresetApplied; HistoryRecorded = [bool]$GameId }
+    } catch {
+        return [pscustomobject]@{ Succeeded = $false; State = 'RESTORE_FAILED'; Reason = 'RESTORE_FAILED'; Error = $_.Exception.Message }
+    }
+}
+
+
+function Get-TpmReShadePreviewReference {
+    param([string]$PreviewRoot = '')
+    $root = if ($PreviewRoot) { [IO.Path]::GetFullPath($PreviewRoot) } else { [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'ReShade\Previews')) }
+    $info = Get-TpmReShadePreviewInfo -ProfileDefinition (Get-TpmReShadeProfile -ProfileId 'Original') -PreviewRoot $root
+    if (-not $info.Available) { return [pscustomobject]@{ Available=$false; Reason='REFERENCE_IMAGE_UNAVAILABLE' } }
+    try {
+        $bytes = [IO.File]::ReadAllBytes($info.Path)
+        $hash = ([BitConverter]::ToString(([Security.Cryptography.SHA256]::Create().ComputeHash($bytes))) -replace '-', '').ToLowerInvariant()
+        return [pscustomobject]@{ Available=$true; Path=$info.Path; Version='1'; Hash=$hash; Identity='TPM-SYNTHETIC-ARCADE-V1' }
+    } catch { return [pscustomobject]@{ Available=$false; Reason='REFERENCE_IMAGE_UNAVAILABLE' } }
+}
+
+function New-TpmReShadePreviewBitmap {
+    param([Parameter(Mandatory)]$ProfileDefinition, [ValidateSet('Before','After','Split')][string]$Mode = 'Split', [int]$Width = 960, [int]$Height = 540)
+    Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+    $bitmap = New-Object Drawing.Bitmap($Width,$Height)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $graphics.Clear([Drawing.Color]::FromArgb(16,24,32))
+        $font = New-Object Drawing.Font('Consolas',18)
+        $small = New-Object Drawing.Font('Consolas',12)
+        $brush = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(38,56,69))
+        $graphics.FillRectangle($brush,40,40,$Width-80,$Height-80)
+        $pen = New-Object Drawing.Pen([Drawing.Color]::White,3)
+        $graphics.DrawRectangle($pen,40,40,$Width-80,$Height-80)
+        $colors = @([Drawing.Color]::FromArgb(210,70,70),[Drawing.Color]::FromArgb(55,165,210),[Drawing.Color]::FromArgb(242,193,78))
+        for ($i=0; $i -lt 3; $i++) { $b=New-Object Drawing.SolidBrush($colors[$i]);$graphics.FillRectangle($b,80+($i*270),90,250,150);$b.Dispose() }
+        $green=New-Object Drawing.Pen([Drawing.Color]::FromArgb(98,195,112),28);$graphics.DrawLine($green,80,310,$Width-80,310);$green.Dispose()
+        $white=New-Object Drawing.Pen([Drawing.Color]::White,2);$graphics.DrawLine($white,100,400,$Width-100,400);$white.Dispose()
+        $textBrush=New-Object Drawing.SolidBrush([Drawing.Color]::White);$graphics.DrawString('TPM SYNTHETIC ARCADE TEST SCENE',$font,$textBrush,100,440);$textBrush.Dispose()
+        $drawAfter = {
+            if ($ProfileDefinition.Effects -contains 'SweetFX.LumaSharpen') {
+                $sharp=New-Object Drawing.Pen([Drawing.Color]::White,1)
+                for ($x=80; $x -lt ($Width-80); $x+=18) { $graphics.DrawLine($sharp,$x,250,$x+8,260) }
+                $sharp.Dispose()
+            }
+            if ($ProfileDefinition.Effects -contains 'SweetFX.Vibrance') {
+                $vivid=New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(45,80,255,40))
+                $graphics.FillRectangle($vivid,80,90,($Width-160),150);$vivid.Dispose()
+            }
+            if ($ProfileDefinition.Effects -contains 'FXShaders.CRT_Lottes') {
+                $scan=New-Object Drawing.Pen([Drawing.Color]::FromArgb(75,0,0,0),2)
+                for ($y=90; $y -lt 400; $y+=6) { $graphics.DrawLine($scan,80,$y,$Width-80,$y) }
+                $scan.Dispose()
+            }
+        }
+        if ($Mode -eq 'After') { & $drawAfter }
+        elseif ($Mode -eq 'Split') {
+            $graphics.SetClip((New-Object Drawing.Rectangle(480,40,440,460)))
+            & $drawAfter
+            $graphics.ResetClip()
+            $divider=New-Object Drawing.Pen([Drawing.Color]::White,4);$graphics.DrawLine($divider,480,40,480,500);$divider.Dispose()
+            $label=New-Object Drawing.SolidBrush([Drawing.Color]::White);$graphics.DrawString('BEFORE',$small,$label,70,55);$graphics.DrawString('AFTER',$small,$label,510,55);$label.Dispose()
+        }
+        return $bitmap
+    } catch { $bitmap.Dispose(); throw } finally { $graphics.Dispose(); $font.Dispose(); $small.Dispose(); $brush.Dispose(); $pen.Dispose() }
+}
+
+function New-TpmReShadePreviewArtifact {
+    param([Parameter(Mandatory)]$ProfileDefinition, [ValidateSet('Before','After','Split')][string]$Mode = 'Split', [string]$PreviewRoot = '', [string]$CacheRoot = '', [string]$IntensityId = 'Default')
+    try {
+        $reference = Get-TpmReShadePreviewReference -PreviewRoot $PreviewRoot
+        if (-not $reference.Available) { return [pscustomobject]@{ Available=$false; Reason=$reference.Reason; Mode=$Mode; ProfileId=$ProfileDefinition.ProfileId } }
+        $catalog=@(Get-TpmReShadeEffectCatalog);$hashes=@()
+        foreach($id in @($ProfileDefinition.Effects)){$effect=@($catalog|Where-Object EffectId -eq $id)[0];if(-not $effect){return [pscustomobject]@{Available=$false;Reason='UNAPPROVED_EFFECT';Mode=$Mode;ProfileId=$ProfileDefinition.ProfileId}};$hashes+=@($effect.SHA256)}
+        $key=Get-TpmReShadePreviewCacheKey -SubjectId ($ProfileDefinition.ProfileId+'|'+$Mode) -ShaderSha256 $hashes -IntensityId $IntensityId -PresetVersion ([string]$ProfileDefinition.SchemaVersion) -ReferenceVersion $reference.Version -ReferenceSha256 $reference.Hash -RendererVersion '2'
+        $sourceRoot=if($PreviewRoot){[IO.Path]::GetFullPath($PreviewRoot)}else{[IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'ReShade\Previews'))}
+        $root=if($CacheRoot){[IO.Path]::GetFullPath($CacheRoot)}else{[IO.Path]::GetFullPath((Join-Path $sourceRoot 'Cache'))}
+        $previewRootFull=$sourceRoot
+        if(-not $root.StartsWith($previewRootFull.TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)){return [pscustomobject]@{Available=$false;Reason='CACHE_ROOT_UNSAFE';Mode=$Mode;ProfileId=$ProfileDefinition.ProfileId}}
+        [IO.Directory]::CreateDirectory($root)|Out-Null;$imagePath=Join-Path $root ($key+'.png');$manifestPath=Join-Path $root ($key+'.json')
+        if((Test-Path -LiteralPath $imagePath -PathType Leaf) -and (Test-Path -LiteralPath $manifestPath -PathType Leaf)){
+            try{$manifest=Get-Content -LiteralPath $manifestPath -Raw|ConvertFrom-Json;if($manifest.CacheKey -eq $key -and $manifest.ReferenceHash -eq $reference.Hash){$check=[Drawing.Image]::FromFile($imagePath);$check.Dispose();return [pscustomobject]@{Available=$true;Path=$imagePath;CacheKey=$key;Reused=$true;ReferenceIdentity=$reference.Identity;Mode=$Mode;ProfileId=$ProfileDefinition.ProfileId}}}catch{}
+        }
+        $bitmap=New-TpmReShadePreviewBitmap -ProfileDefinition $ProfileDefinition -Mode $Mode
+        try{$bitmap.Save($imagePath,[Drawing.Imaging.ImageFormat]::Png)}finally{$bitmap.Dispose()}
+        [pscustomobject]@{CacheKey=$key;ProfileId=$ProfileDefinition.ProfileId;Mode=$Mode;ReferenceIdentity=$reference.Identity;ReferenceHash=$reference.Hash;RendererVersion='2';PresetVersion=[string]$ProfileDefinition.SchemaVersion;ShaderSha256=@($hashes);IntensityId=$IntensityId}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $manifestPath -Encoding UTF8
+        return [pscustomobject]@{Available=$true;Path=$imagePath;CacheKey=$key;Reused=$false;ReferenceIdentity=$reference.Identity;Mode=$Mode;ProfileId=$ProfileDefinition.ProfileId}
+    } catch { return [pscustomobject]@{Available=$false;Reason='PREVIEW_RENDER_FAILED';Mode=$Mode;ProfileId=$ProfileDefinition.ProfileId;Error=$_.Exception.Message} }
+}
+
+function Open-TpmReShadePreviewWindow {
+    param([Parameter(Mandatory)]$ProfileDefinition, [ValidateSet('Before','After','Split')][string]$Mode='Split', [string]$CacheRoot='', [switch]$Show)
+    if(-not $Show){return [pscustomobject]@{Available=$false;Closed=$true;Reason='PREVIEW_WINDOW_NOT_REQUESTED';Mode=$Mode}}
+    try{
+        if([Threading.Thread]::CurrentThread.GetApartmentState() -ne [Threading.ApartmentState]::STA){throw 'STA required'}
+        Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop;Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+        $artifact=New-TpmReShadePreviewArtifact -ProfileDefinition $ProfileDefinition -Mode $Mode -CacheRoot $CacheRoot
+        if(-not $artifact.Available){return $artifact}
+        $form=New-Object Windows.Forms.Form;$form.Text='TeknoParrot ReShade Preview - '+$ProfileDefinition.FriendlyName;$form.Width=1000;$form.Height=700
+        $picture=New-Object Windows.Forms.PictureBox;$picture.Dock='Fill';$picture.SizeMode='Zoom';$picture.Image=[Drawing.Image]::FromFile($artifact.Path)
+        $toolbar=New-Object Windows.Forms.FlowLayoutPanel;$toolbar.Dock='Top';$toolbar.Height=40
+        foreach($view in @('Before','After','Split')){$button=New-Object Windows.Forms.Button;$button.Text=$view;$button.Tag=$view;$button.Width=90;$button.Add_Click({[void](Update-TpmReShadePreviewWindow -Mode $this.Tag)});$toolbar.Controls.Add($button)}
+        $form.Controls.Add($picture);$form.Controls.Add($toolbar);$script:TpmReShadePreviewWindowState=[pscustomobject]@{Form=$form;Picture=$picture;Profile=$ProfileDefinition;Mode=$Mode;CacheRoot=$CacheRoot}
+        return [pscustomobject]@{Available=$true;Closed=$false;Mode=$Mode;CacheKey=$artifact.CacheKey}
+    }catch{return [pscustomobject]@{Available=$false;Closed=$true;Reason='PREVIEW_WINDOW_UNAVAILABLE';Mode=$Mode}}
+}
+
+function Update-TpmReShadePreviewWindow {
+    param([ValidateSet('Before','After','Split')][string]$Mode='Split')
+    if(-not $script:TpmReShadePreviewWindowState -or $script:TpmReShadePreviewWindowState.Form.IsDisposed){return [pscustomobject]@{Available=$false;Reason='PREVIEW_WINDOW_CLOSED'}}
+    $state=$script:TpmReShadePreviewWindowState;$artifact=New-TpmReShadePreviewArtifact -ProfileDefinition $state.Profile -Mode $Mode -CacheRoot $state.CacheRoot
+    if(-not $artifact.Available){return $artifact}
+    $old=$state.Picture.Image;$state.Picture.Image=[Drawing.Image]::FromFile($artifact.Path);if($old){$old.Dispose()};$state.Mode=$Mode
+    return [pscustomobject]@{Available=$true;Mode=$Mode;CacheKey=$artifact.CacheKey}
+}
+
+function Close-TpmReShadePreviewWindow {
+    if($script:TpmReShadePreviewWindowState){$state=$script:TpmReShadePreviewWindowState;if($state.Picture.Image){$state.Picture.Image.Dispose()};if($state.Form){$state.Form.Close();$state.Form.Dispose()};$script:TpmReShadePreviewWindowState=$null}
+    return [pscustomobject]@{Closed=$true}
+}
+
+function Show-TpmReShadePreviewWindow {
+    param([Parameter(Mandatory)]$ProfileDefinition, [ValidateSet('Before','After','Split')][string]$Mode = 'Split', [object]$ResolutionEvidence = $null, [switch]$Show)
+    if(-not $Show){return [pscustomobject]@{Available=$false;Closed=$true;Mode=$Mode;Reason='PREVIEW_WINDOW_NOT_REQUESTED'}}
+    $opened=Open-TpmReShadePreviewWindow -ProfileDefinition $ProfileDefinition -Mode $Mode -Show
+    if(-not $opened.Available){return $opened}
+    try{$script:TpmReShadePreviewWindowState.Form.ShowDialog()|Out-Null;return [pscustomobject]@{Available=$true;Closed=$true;Mode=$Mode;CacheKey=$opened.CacheKey}}finally{Close-TpmReShadePreviewWindow|Out-Null}
+}
+
+
+function Get-TpmReShadeAssetInventory {
+    return @(Get-TpmReShadeEffectCatalog | ForEach-Object { $_.RelativeFiles })
+}
+
+function Test-TpmReShadeAssetInventory {
+    param([string]$AssetRoot)
+    foreach ($effect in (Get-TpmReShadeEffectCatalog)) {
+        for ($i = 0; $i -lt @($effect.RelativeFiles).Count; $i++) {
+
+            $path = Join-Path $AssetRoot ($effect.RelativeFiles[$i] -replace '/', '\')
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
+        }
+    }
+    return $true
+}
+function Get-TpmReShadeApprovedEffectFiles {
+    param([Parameter(Mandatory)][string]$EffectId)
+    $effect = @(Get-TpmReShadeEffectCatalog | Where-Object EffectId -eq $EffectId)[0]
+    if (-not $effect) { throw "Effect is not approved: $EffectId" }
+    $files = New-Object System.Collections.Generic.List[object]
+    for ($i = 0; $i -lt @($effect.RelativeFiles).Count; $i++) {
+        $relative = [string]$effect.RelativeFiles[$i]
+        if ($relative -match '(^|/)\.\.?(/|$)' -or $relative.StartsWith('/') -or $relative -match '%2f|%5c|%2e' ) { throw 'Approved effect path is unsafe.' }
+        $url = 'https://raw.githubusercontent.com/' + $effect.AllowedPathPrefix.Trim('/') + '/' + $relative
+        $uri = $null
+        $validUri = [Uri]::TryCreate($url, [UriKind]::Absolute, [ref]$uri)
+        if (-not $validUri -or $uri.Scheme -ne 'https' -or $uri.Host -notin $effect.AllowedHosts -or $uri.Query -or $uri.Fragment -or $uri.AbsolutePath -ne ('/' + $effect.AllowedPathPrefix.Trim('/') + '/' + $relative) -or $uri.AbsolutePath -match '%2f|%5c|%2e' -or -not $uri.AbsolutePath.StartsWith($effect.AllowedPathPrefix, [StringComparison]::Ordinal)) { throw 'Approved effect URL failed allowlist validation.' }
+        [void]$files.Add([pscustomobject]@{ EffectId = $effect.EffectId; RelativePath = $relative; Url = $url; SHA256 = $effect.SHA256[$i] })
+    }
+    return $files.ToArray()
+}
+
+function Test-TpmReShadeApprovedEffectFile {
+    param([Parameter(Mandatory)]$FileSpec, [Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+
+    try { return ((Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash -ieq $FileSpec.SHA256) } catch { return $false }
+}
+function Acquire-TpmReShadeApprovedEffect {
+    param([Parameter(Mandatory)][string]$EffectId, [Parameter(Mandatory)][string]$CacheRoot, [string]$StagingRoot = '')
+    $specs = @(Get-TpmReShadeApprovedEffectFiles -EffectId $EffectId)
+    $effectCache = Join-Path $CacheRoot ($EffectId -replace '[^A-Za-z0-9_.-]', '_')
+    [void][IO.Directory]::CreateDirectory($effectCache)
+    $stage = if ($StagingRoot) { $StagingRoot } else { New-TpmStagingDirectory -Label 'ReShadeEffect' }
+    if (-not (Test-Path -LiteralPath $stage -PathType Container)) { [void][IO.Directory]::CreateDirectory($stage) }
+    $result = New-Object System.Collections.Generic.List[object]
+    foreach ($spec in $specs) {
+        $cachePath = Join-Path $effectCache ([IO.Path]::GetFileName($spec.RelativePath))
+        $stagePath = Join-Path $stage ($spec.RelativePath -replace '/', '\')
+        $stageDir = [IO.Path]::GetDirectoryName($stagePath)
+        [void][IO.Directory]::CreateDirectory($stageDir)
+        $source = $null
+        if (Test-TpmReShadeApprovedEffectFile -FileSpec $spec -Path $cachePath) { $source = $cachePath }
+        else {
+            try {
+                Invoke-WebRequest -Uri $spec.Url -UseBasicParsing -OutFile $stagePath -ErrorAction Stop
+                if (-not (Test-TpmReShadeApprovedEffectFile -FileSpec $spec -Path $stagePath)) { throw "Hash mismatch for $($spec.RelativePath)." }
+                Copy-Item -LiteralPath $stagePath -Destination $cachePath -Force -ErrorAction Stop
+                $source = $stagePath
+            } catch { throw "Approved effect acquisition failed for $($spec.RelativePath): $($_.Exception.Message)" }
+        }
+        if ($source -ne $stagePath) { Copy-Item -LiteralPath $source -Destination $stagePath -Force -ErrorAction Stop }
+        [void]$result.Add([pscustomobject]@{ EffectId = $EffectId; RelativePath = $spec.RelativePath; Path = $stagePath; SHA256 = $spec.SHA256; FromCache = ($source -eq $cachePath) })
+    }
+    return [pscustomobject]@{ EffectId = $EffectId; StagingRoot = $stage; Files = $result.ToArray() }
+}
+
+function New-TpmReShadeOwnershipManifest {
+    param([Parameter(Mandatory)][string]$EffectId, [Parameter(Mandatory)][string]$DestinationRoot, [Parameter(Mandatory)]$AcquiredFiles)
+    $effect = @(Get-TpmReShadeEffectCatalog | Where-Object EffectId -eq $EffectId)[0]
+    if (-not $effect) { throw "Effect is not approved: $EffectId" }
+    $entries = New-Object System.Collections.Generic.List[object]
+    foreach ($file in @($AcquiredFiles)) {
+        $destination = Join-Path $DestinationRoot ($file.RelativePath -replace '/', '\')
+        $actual = $null
+        if (Test-Path -LiteralPath $file.Path -PathType Leaf) { try { $actual = (Get-FileHash -LiteralPath $file.Path -Algorithm SHA256 -ErrorAction Stop).Hash } catch {} }
+        [void]$entries.Add([pscustomobject]@{ EffectId = $EffectId; PinnedRevision = $effect.PinnedCommit; RelativeSource = $file.RelativePath; DestinationPath = $destination; ExpectedSHA256 = $file.SHA256; ActualSHA256 = $actual; TPMManaged = $true })
+    }
+    return [pscustomobject]@{ SchemaVersion = 1; EffectId = $EffectId; PinnedRevision = $effect.PinnedCommit; Files = $entries.ToArray() }
+}
+
+function Save-TpmReShadeOwnershipManifest {
+    param([Parameter(Mandatory)]$Manifest, [Parameter(Mandatory)][string]$Path)
+    $parent = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($Path))
+    [void][IO.Directory]::CreateDirectory($parent)
+    $tmp = $Path + '.tmp'
+    [IO.File]::WriteAllText($tmp, ($Manifest | ConvertTo-Json -Depth 8), (New-Object Text.UTF8Encoding $false))
+    Move-Item -LiteralPath $tmp -Destination $Path -Force -ErrorAction Stop
+}
+
+function Read-TpmReShadeOwnershipManifest {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    $manifest = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json
+    if ($manifest.SchemaVersion -ne 1 -or -not $manifest.EffectId -or -not $manifest.Files) { throw 'Invalid ReShade ownership manifest.' }
+    return $manifest
+}
+
+function Get-TpmReShadeRoleDemandValue {
+    param([object]$RoleBytes, [Parameter(Mandatory)][string]$Role)
+    if (-not $RoleBytes) { return [int64]0 }
+    $key = $Role.ToUpperInvariant() -replace 'PATH$',''
+    $property = $RoleBytes.PSObject.Properties[$key]
+    if ($property -and $null -ne $property.Value) { return [int64]$property.Value }
+    return [int64]0
+}
+
+function Test-TpmReShadeStoragePreflight {
+    param([Parameter(Mandatory)]$Evidence)
+    $blocking = New-Object System.Collections.Generic.List[string]
+    $results = New-Object System.Collections.Generic.List[object]
+    $volumes = @($Evidence.Volumes)
+    $topRequired = $null
+    if ($Evidence.PSObject.Properties['RequiredWorkingBytes'] -and $null -ne $Evidence.RequiredWorkingBytes) { $topRequired = [int64]$Evidence.RequiredWorkingBytes }
+    foreach ($volume in $volumes) {
+        $root = if ($volume.PSObject.Properties['Root'] -and $volume.Root) { [string]$volume.Root } else { 'UNKNOWN_VOLUME' }
+        $required = $null
+        if ($volume.PSObject.Properties['RequiredBytes'] -and $null -ne $volume.RequiredBytes) { $required = [int64]$volume.RequiredBytes }
+        elseif ($volumes.Count -eq 1 -and $null -ne $topRequired) { $required = $topRequired }
+        $free = if ($volume.PSObject.Properties['FreeBytes']) { $volume.FreeBytes } else { $null }
+        $reason = 'sufficient'
+        $sufficient = $true
+        if ($null -eq $required) {
+            $sufficient = $false; $reason = 'required capacity is unknown'
+        } elseif ($required -gt 0 -and $null -eq $free) {
+            $sufficient = $false; $reason = 'free capacity is unknown'
+        } elseif ($null -ne $free -and [int64]$free -lt $required) {
+            $sufficient = $false; $reason = 'free capacity is insufficient'
+        }
+        if (-not $sufficient) { [void]$blocking.Add($root) }
+        [void]$results.Add([pscustomobject]@{ Root = $root; FreeBytes = if ($null -eq $free) { $null } else { [int64]$free }; RequiredBytes = $required; Sufficient = $sufficient; Reason = $reason; Roles = @($volume.Roles); DemandByRole = $volume.DemandByRole })
+    }
+    if ($volumes.Count -eq 0 -and $null -ne $topRequired -and $topRequired -gt 0) { [void]$blocking.Add('UNKNOWN_VOLUME') }
+    return [pscustomobject]@{ Allowed = ($blocking.Count -eq 0); BlockingVolumes = $blocking.ToArray(); RequiredWorkingBytes = $topRequired; Volumes = $volumes; VolumeResults = $results.ToArray() }
+}
+function Get-TpmReShadeTransactionStoragePlan {
+    param([Parameter(Mandatory)]$AcquiredFiles, [string]$DestinationRoot, [object]$PriorManifest = $null)
+    $files = @($AcquiredFiles)
+    $staged = [int64]0
+    foreach ($file in $files) { $staged += [int64](Get-Item -LiteralPath $file.Path -ErrorAction Stop).Length }
+    $backup = [int64]0
+    if ($PriorManifest) { foreach ($file in @($PriorManifest.Files)) { if (Test-Path -LiteralPath $file.DestinationPath -PathType Leaf) { $backup += [int64](Get-Item -LiteralPath $file.DestinationPath -ErrorAction Stop).Length } } }
+    $stagePath = if ($files.Count -gt 0) { [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath([string]$files[0].Path)) } else { $DestinationRoot }
+    $roleBytes = [pscustomobject][ordered]@{ CACHE = [int64]0; STAGING = $staged; BACKUP = $backup; TARGET = $staged; ROLLBACK = $backup }
+    $roles = @(
+        [pscustomobject]@{ Role = 'STAGING'; Path = $stagePath; Bytes = $roleBytes.STAGING },
+        [pscustomobject]@{ Role = 'BACKUP'; Path = $stagePath; Bytes = $roleBytes.BACKUP },
+        [pscustomobject]@{ Role = 'TARGET'; Path = $DestinationRoot; Bytes = $roleBytes.TARGET },
+        [pscustomobject]@{ Role = 'ROLLBACK'; Path = $DestinationRoot; Bytes = $roleBytes.ROLLBACK }
+    )
+    $required = $staged + $backup + $staged + $backup
+    return [pscustomobject]@{ RequiredWorkingBytes = $required; StagedBytes = $staged; BackupBytes = $backup; PromotionBytes = $staged; RollbackBytes = $backup; CacheBytes = [int64]0; RoleBytes = $roleBytes; Roles = $roles; RolePaths = [pscustomobject][ordered]@{ STAGING = $stagePath; BACKUP = $stagePath; TARGET = $DestinationRoot; ROLLBACK = $DestinationRoot } }
+}
+function Get-TpmReShadePreAcquisitionStoragePlan {
+    param([Parameter(Mandatory)][string]$EffectId, [Parameter(Mandatory)][string]$CacheRoot, [Parameter(Mandatory)][string]$DestinationRoot, [object]$PriorManifest = $null)
+    $cache = Join-Path $CacheRoot ($EffectId -replace '[^A-Za-z0-9_.-]', '_')
+    $effect = @(Get-TpmReShadeEffectCatalog | Where-Object EffectId -eq $EffectId)[0]
+    $specs = @(Get-TpmReShadeApprovedEffectFiles -EffectId $EffectId)
+    $assetBytes = [int64]0; $known = $true
+    for ($index = 0; $index -lt $specs.Count; $index++) {
+        $spec = $specs[$index]; $cached = Join-Path $cache ([IO.Path]::GetFileName($spec.RelativePath))
+        if ((Test-Path -LiteralPath $cached -PathType Leaf) -and (Test-TpmReShadeApprovedEffectFile -FileSpec $spec -Path $cached)) { $assetBytes += [int64](Get-Item -LiteralPath $cached -ErrorAction Stop).Length }
+        elseif ($effect -and $effect.PSObject.Properties['ByteLengths'] -and @($effect.ByteLengths).Count -gt $index) { $assetBytes += [int64]$effect.ByteLengths[$index] }
+        else { $known = $false }
+    }
+    $backupBytes = [int64]0
+    if ($PriorManifest) { foreach ($file in @($PriorManifest.Files)) { if (Test-Path -LiteralPath $file.DestinationPath -PathType Leaf) { $backupBytes += [int64](Get-Item -LiteralPath $file.DestinationPath -ErrorAction Stop).Length } } }
+    $targetBytes = $assetBytes
+    $roleBytes = [pscustomobject][ordered]@{ CACHE = $assetBytes; STAGING = $assetBytes; BACKUP = $backupBytes; TARGET = $targetBytes; ROLLBACK = $backupBytes }
+    $required = if ($known) { $assetBytes + $backupBytes + $targetBytes + $backupBytes } else { $null }
+    return [pscustomobject]@{ EffectId = $EffectId; CapacityKnown = $known; CacheBytes = $assetBytes; StagingBytes = $assetBytes; BackupBytes = $backupBytes; TargetBytes = $targetBytes; RollbackBytes = $backupBytes; RoleBytes = $roleBytes; RolePaths = [pscustomobject][ordered]@{ CACHE = $cache; STAGING = $CacheRoot; BACKUP = $DestinationRoot; TARGET = $DestinationRoot; ROLLBACK = $DestinationRoot }; RequiredWorkingBytes = $required; Reason = if ($known) { 'Validated cache or pinned catalog byte lengths.' } else { 'Pinned asset size unavailable before acquisition.' } }
+}
+
+function Install-TpmReShadeApprovedEffect {
+    param([Parameter(Mandatory)][string]$EffectId, [Parameter(Mandatory)][string]$CacheRoot, [Parameter(Mandatory)][string]$DestinationRoot, [Parameter(Mandatory)][string]$OwnershipPath, [ValidateSet('None','AfterFirstPromotion','BeforeCommit','BackupCreation','BackupVerification','RollbackFailure','AfterFirstPromotionRollbackFailure')][string]$FaultStage = 'None', [object]$StoragePreflight = $null, [switch]$PrepareOnly)
+    $priorOwnership = Read-TpmReShadeOwnershipManifest -Path $OwnershipPath
+    if ($StoragePreflight) {
+        $prePlan = Get-TpmReShadePreAcquisitionStoragePlan -EffectId $EffectId -CacheRoot $CacheRoot -DestinationRoot $DestinationRoot -PriorManifest $priorOwnership
+        if ($null -eq $prePlan.RequiredWorkingBytes) { throw "STORAGE: UNKNOWN pre-acquisition capacity requirement. No network or mutation started." }
+        if (-not $StoragePreflight.PSObject.Properties['RequiredWorkingBytes']) { Add-Member -InputObject $StoragePreflight -MemberType NoteProperty -Name RequiredWorkingBytes -Value ([int64]0) }
+        $StoragePreflight.RequiredWorkingBytes = $prePlan.RequiredWorkingBytes
+        foreach ($volume in @($StoragePreflight.Volumes)) {
+            $required = [int64]0
+            foreach ($role in @($volume.Roles)) { $required += Get-TpmReShadeRoleDemandValue -RoleBytes $prePlan.RoleBytes -Role ([string]$role) }
+            if (-not $volume.PSObject.Properties['RequiredBytes']) { Add-Member -InputObject $volume -MemberType NoteProperty -Name RequiredBytes -Value ([int64]0) }
+            $volume.RequiredBytes = $required
+        }
+        $preflight = Test-TpmReShadeStoragePreflight -Evidence $StoragePreflight
+        if (-not $preflight.Allowed) { throw "STORAGE: insufficient or unknown capacity on $($preflight.BlockingVolumes -join ', '). No mutation started." }
+    }
+    $acquired = Acquire-TpmReShadeApprovedEffect -EffectId $EffectId -CacheRoot $CacheRoot
+    if ($StoragePreflight) {
+        $plan = Get-TpmReShadeTransactionStoragePlan -AcquiredFiles @($acquired.Files) -DestinationRoot $DestinationRoot
+        $StoragePreflight.RequiredWorkingBytes = $plan.RequiredWorkingBytes
+        foreach ($volume in @($StoragePreflight.Volumes)) {
+            $required = [int64]0
+            foreach ($role in @($volume.Roles)) { $required += Get-TpmReShadeRoleDemandValue -RoleBytes $plan.RoleBytes -Role ([string]$role) }
+            if (-not $volume.PSObject.Properties['RequiredBytes']) { Add-Member -InputObject $volume -MemberType NoteProperty -Name RequiredBytes -Value ([int64]0) }
+            $volume.RequiredBytes = $required
+        }
+        $postflight = Test-TpmReShadeStoragePreflight -Evidence $StoragePreflight
+        if (-not $postflight.Allowed) { throw "STORAGE: insufficient or unknown capacity on $($postflight.BlockingVolumes -join ', '). No promotion started." }
+    }
+    $manifest = New-TpmReShadeOwnershipManifest -EffectId $EffectId -DestinationRoot $DestinationRoot -AcquiredFiles @($acquired.Files)
+    foreach ($asset in @($acquired.Files)) {
+        if (-not (Test-TpmReShadeApprovedEffectFile -FileSpec $asset -Path $asset.Path)) { throw "INTEGRITY: staged approved effect hash validation failed for $($asset.RelativePath)." }
+    }
+    if ($PrepareOnly) { return [pscustomobject]@{ Succeeded = $true; State = 'PREPARED'; StagingRoot = $acquired.StagingRoot; Files = @($acquired.Files); Manifest = $priorOwnership } }
+    $old = Read-TpmReShadeOwnershipManifest -Path $OwnershipPath
+    $backup = Join-Path $acquired.StagingRoot '.tpm-backup'
+    $changed = @()
+    $wasRepair = $false
+    $allExact = $true
+    foreach ($entry in @($manifest.Files)) {
+        $prior = $null
+        if ($old) { foreach ($candidate in @($old.Files)) { if ([string]$candidate.DestinationPath -eq [string]$entry.DestinationPath) { $prior = $candidate; break } } }
+        if (-not $prior -or [string]$prior.TPMManaged -ne 'True' -or -not (Test-TpmReShadeApprovedEffectFile -FileSpec ([pscustomobject]@{ SHA256 = $entry.ExpectedSHA256 }) -Path $entry.DestinationPath)) { $allExact = $false; break }
+    }
+    if ($allExact) { return [pscustomobject]@{ Succeeded = $true; State = 'NO_OP'; Manifest = $old } }
+    try {
+        foreach ($entry in @($manifest.Files)) {
+            if ([IO.File]::Exists([string]$entry.DestinationPath)) {
+                $owned = $false
+                if ($null -ne $old) {
+                    foreach ($priorEntry in @($old.Files)) {
+                        if ([string]$priorEntry.DestinationPath -eq [string]$entry.DestinationPath -and $priorEntry.TPMManaged -eq $true) { $owned = $true; break }
+                    }
+                }
+                if (-not $owned) { throw "COLLISION: existing non-TPM-managed file '$($entry.DestinationPath)' was preserved." }
+            }
+            if (-not (Test-PathInside ([string]$entry.DestinationPath) ([string]$DestinationRoot))) { throw 'SECURITY: destination escaped approved ReShade root.' }
+            if (Test-Path -LiteralPath $entry.DestinationPath -PathType Leaf) {
+                $owned = $false
+                if ($null -ne $old) {
+                    foreach ($priorEntry in @($old.Files)) {
+                        if ([string]$priorEntry.DestinationPath -eq [string]$entry.DestinationPath -and $priorEntry.TPMManaged -eq $true) { $owned = $true; break }
+                    }
+                }
+                if (-not $owned) { throw "COLLISION: existing non-TPM-managed file '$($entry.DestinationPath)' was preserved." }
+                if ($FaultStage -eq 'BackupCreation') { throw 'BACKUP: forced backup creation failure.' }
+                [void][IO.Directory]::CreateDirectory($backup)
+                $originalHash = (Get-FileHash -LiteralPath $entry.DestinationPath -Algorithm SHA256 -ErrorAction Stop).Hash
+                $backupPath = Join-Path $backup ([IO.Path]::GetFileName($entry.DestinationPath))
+                Copy-Item -LiteralPath $entry.DestinationPath -Destination $backupPath -Force -ErrorAction Stop
+                if ($FaultStage -eq 'BackupVerification') { throw 'BACKUP: forced backup verification failure.' }
+                if (-not (Test-TpmReShadeApprovedEffectFile -FileSpec ([pscustomobject]@{ SHA256 = $originalHash }) -Path $backupPath)) { throw "BACKUP: verification failed for $($entry.DestinationPath)." }
+                $wasRepair = $true
+            }
+            [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($entry.DestinationPath))
+            Copy-Item -LiteralPath ($acquired.Files | Where-Object RelativePath -eq $entry.RelativeSource | Select-Object -ExpandProperty Path) -Destination $entry.DestinationPath -Force -ErrorAction Stop
+            $changed += $entry
+            if (($FaultStage -eq 'AfterFirstPromotion' -or $FaultStage -eq 'AfterFirstPromotionRollbackFailure') -and $changed.Count -eq 1) { throw 'TEST: forced promotion failure after first promotion.' }
+        }
+        foreach ($entry in @($manifest.Files)) {
+            if (-not (Test-TpmReShadeApprovedEffectFile -FileSpec ([pscustomobject]@{ SHA256 = $entry.ExpectedSHA256 }) -Path $entry.DestinationPath)) { throw "VERIFY: installed hash mismatch for $($entry.RelativeSource)." }
+            $entry.ActualSHA256 = (Get-FileHash -LiteralPath $entry.DestinationPath -Algorithm SHA256).Hash
+        }
+        if ($FaultStage -eq 'BeforeCommit') { throw 'TEST: forced final verification failure.' }
+        Save-TpmReShadeOwnershipManifest -Manifest $manifest -Path $OwnershipPath
+        $installState = 'INSTALLED'
+        if ($wasRepair) { $installState = 'REPAIR' }
+        return [pscustomobject]@{ Succeeded = $true; State = $installState; Manifest = $manifest }
+    } catch {
+        if ($_.Exception.Message -like 'COLLISION:*') { return [pscustomobject]@{ Succeeded = $false; State = 'COLLISION'; Error = $_.Exception.Message } }
+        $rollbackOk = $true
+        $rollbackErrors = @()
+        foreach ($entry in @($changed)) {
+            $bak = Join-Path $backup ([IO.Path]::GetFileName($entry.DestinationPath))
+            try {
+                if ($FaultStage -eq 'RollbackFailure' -or $FaultStage -eq 'AfterFirstPromotionRollbackFailure') { throw 'TEST: forced rollback restore failure.' }
+                if (Test-Path -LiteralPath $bak -PathType Leaf) {
+                    Copy-Item -LiteralPath $bak -Destination $entry.DestinationPath -Force -ErrorAction Stop
+                } elseif (Test-Path -LiteralPath $entry.DestinationPath -PathType Leaf) {
+                    Remove-Item -LiteralPath $entry.DestinationPath -Force -ErrorAction Stop
+                }
+                $prior = $null
+                if ($old) { $prior = @($old.Files | Where-Object DestinationPath -eq $entry.DestinationPath)[0] }
+                if ($prior -and -not (Test-TpmReShadeApprovedEffectFile -FileSpec ([pscustomobject]@{ SHA256 = $prior.ExpectedSHA256 }) -Path $entry.DestinationPath)) { throw 'restored file hash mismatch' }
+                if (-not $prior -and (Test-Path -LiteralPath $entry.DestinationPath -PathType Leaf)) { throw 'new file remained after rollback' }
+            } catch { $rollbackOk = $false; $rollbackErrors += $_.Exception.Message }
+        }
+        $rollbackState = 'ACTION_REQUIRED'
+        if ($rollbackOk) { $rollbackState = 'ROLLED_BACK' }
+        return [pscustomobject]@{ Succeeded = $false; State = $rollbackState; Error = $_.Exception.Message; RollbackError = ($rollbackErrors -join '; '); RollbackVerified = $rollbackOk }
+    }
+}
+
+function Get-TpmReShadeProfileOwnershipPath {
+    param([Parameter(Mandatory)][string]$GameId, [string]$StateRoot = '')
+    $paths = Get-TpmReShadeStatePath -StateRoot $StateRoot
+    $idBytes = [Text.Encoding]::UTF8.GetBytes($GameId)
+    $idHash = ([BitConverter]::ToString(([Security.Cryptography.SHA256]::Create().ComputeHash($idBytes))) -replace '-', '').ToLowerInvariant()
+    return (Join-Path (Join-Path $paths.Root 'Deployments') ($idHash + '.json'))
+}
+
+function Install-TpmReShadeProfileDeployment {
+    param(
+        [Parameter(Mandatory)]$ProfileDefinition,
+        [Parameter(Mandatory)][string]$GamePath,
+        [Parameter(Mandatory)][System.Xml.XmlDocument]$Doc,
+        [Parameter(Mandatory)][string]$SourceDll,
+        [string]$SourceDll32 = '',
+        [string]$PresetPath = '',
+        [string]$PerGamePresetPath = '',
+        [Parameter(Mandatory)][string]$CacheRoot,
+        [Parameter(Mandatory)][string]$OwnershipPath,
+        [string]$VariantId = 'Default',
+        [switch]$CanonicalPreset,
+        [ValidateSet('None','BeforeCommit')][string]$FaultStage = 'None'
+    )
+    $staging = $null
+    $preparedStages = New-Object System.Collections.Generic.List[string]
+    $preserveStaging = $false
+    try {
+        $approvedProfile = Get-TpmReShadeProfile -ProfileId $ProfileDefinition.ProfileId
+        if (-not $approvedProfile -or [string]$approvedProfile.SchemaVersion -ne [string]$ProfileDefinition.SchemaVersion -or (@($approvedProfile.Effects) -join ',') -ne (@($ProfileDefinition.Effects) -join ',')) {
+            return [pscustomobject]@{ Succeeded = $false; State = 'STALE_PROFILE_DEFINITION'; Reason = 'STALE_PROFILE_DEFINITION' }
+        }
+        $variant = Resolve-TpmReShadeIntensityVariant -ProfileDefinition $approvedProfile -VariantId $VariantId
+        $exeDir = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($GamePath))
+        if ([string]::IsNullOrWhiteSpace($exeDir)) { return [pscustomobject]@{ Succeeded = $false; State = 'INVALID_GAME_PATH'; Reason = 'INVALID_GAME_PATH' } }
+        $architecture = Get-ExeArchitecture -ExePath $GamePath
+        $activeDll = $SourceDll
+        if ($architecture -eq 'x86') {
+            if (-not $SourceDll32 -or -not (Test-Path -LiteralPath $SourceDll32 -PathType Leaf)) { return [pscustomobject]@{ Succeeded = $false; State = 'MISSING_32BIT_DLL'; Reason = 'MISSING_32BIT_DLL' } }
+            $activeDll = $SourceDll32
+        } elseif ($architecture -and $architecture -ne 'x64') {
+            return [pscustomobject]@{ Succeeded = $false; State = 'UNSUPPORTED_ARCHITECTURE'; Reason = 'UNSUPPORTED_ARCHITECTURE' }
+        }
+        if (-not $activeDll -or -not (Test-Path -LiteralPath $activeDll -PathType Leaf) -or -not (Test-TpmNoReparsePath -Path $activeDll)) { return [pscustomobject]@{ Succeeded = $false; State = 'UNSAFE_PATH'; Reason = 'UNSAFE_PATH' } }
+        if (-not (Test-Path -LiteralPath $GamePath -PathType Leaf) -or -not (Test-TpmNoReparsePath -Path $GamePath)) { return [pscustomobject]@{ Succeeded = $false; State = 'INVALID_GAME_PATH'; Reason = 'INVALID_GAME_PATH' } }
+        $targetInfo = Get-ReShadeTargetInfo -Doc $Doc -GamePath $GamePath -ExeDir $exeDir
+        if (-not $targetInfo -or [string]::IsNullOrWhiteSpace($targetInfo.TargetDir) -or [string]::IsNullOrWhiteSpace($targetInfo.DllName) -or -not (Test-TpmNoReparsePath -Path $targetInfo.TargetDir)) { return [pscustomobject]@{ Succeeded = $false; State = 'UNSAFE_PATH'; Reason = 'UNSAFE_PATH' } }
+        if ((Test-Path -LiteralPath $CacheRoot) -and -not (Test-TpmNoReparsePath -Path $CacheRoot)) { return [pscustomobject]@{ Succeeded = $false; State = 'UNSAFE_PATH'; Reason = 'UNSAFE_PATH' } }
+        if (-not (Test-TpmNoReparsePath -Path $OwnershipPath)) { return [pscustomobject]@{ Succeeded = $false; State = 'UNSAFE_PATH'; Reason = 'UNSAFE_PATH' } }
+        $prior = Read-TpmReShadeOwnershipManifest -Path $OwnershipPath
+        $staging = New-TpmStagingDirectory -Label 'ReShadeProfile'
+        $fileNames = New-Object System.Collections.Generic.List[string]
+        $manifestFiles = New-Object System.Collections.Generic.List[object]
+        $dllName = [System.IO.Path]::GetFileName($targetInfo.DllName)
+        if ([string]::IsNullOrWhiteSpace($dllName) -or $dllName -ne $targetInfo.DllName) { return [pscustomobject]@{ Succeeded = $false; State = 'INVALID_TARGET'; Reason = 'INVALID_TARGET' } }
+        $dllStage = Join-Path $staging $dllName
+        Copy-Item -LiteralPath $activeDll -Destination $dllStage -Force -ErrorAction Stop
+        if (-not (Test-Path -LiteralPath $dllStage -PathType Leaf)) { throw 'DLL staging failed.' }
+        $dllHash = (Get-FileHash -LiteralPath $dllStage -Algorithm SHA256 -ErrorAction Stop).Hash
+        [void]$fileNames.Add($dllName)
+        [void]$manifestFiles.Add([pscustomobject]@{ RelativeSource = $dllName; DestinationPath = (Join-Path $targetInfo.TargetDir $dllName); ExpectedSHA256 = $dllHash; ActualSHA256 = $dllHash; TPMManaged = $true; Kind = 'ReShadeDll' })
+        $effectivePreset = $null
+        $presetSource = $null
+        $presetContent = $null
+        if ($PerGamePresetPath -and (Test-Path -LiteralPath $PerGamePresetPath -PathType Leaf)) { $effectivePreset = $PerGamePresetPath; $presetSource = 'per-game' }
+        elseif ($PresetPath -and (Test-Path -LiteralPath $PresetPath -PathType Leaf)) { $effectivePreset = $PresetPath; $presetSource = 'global' }
+        if ($effectivePreset) {
+            if ([System.IO.Path]::GetExtension($effectivePreset) -ine '.ini') { return [pscustomobject]@{ Succeeded = $false; State = 'INVALID_PRESET'; Reason = 'INVALID_PRESET' } }
+            $presetContent = [IO.File]::ReadAllText($effectivePreset)
+            if ($CanonicalPreset -and $presetSource -eq 'generated' -and -not (Test-TpmReShadePresetContent -Content $presetContent -ProfileDefinition $approvedProfile)) { return [pscustomobject]@{ Succeeded = $false; State = 'INVALID_PRESET'; Reason = 'INVALID_PRESET' } }
+        } elseif ($CanonicalPreset -and $approvedProfile.ProfileId -ne 'Original') {
+            $presetSource = 'generated'
+            $presetContent = New-TpmReShadePresetContent -ProfileDefinition $approvedProfile
+        }
+        if ($effectivePreset -or $presetContent) {
+            $presetName = 'ReShade.ini'
+            $presetStage = Join-Path $staging $presetName
+            if ($null -ne $presetContent) { [IO.File]::WriteAllText($presetStage, [string]$presetContent, (New-Object Text.UTF8Encoding($false))) }
+            else { Copy-Item -LiteralPath $effectivePreset -Destination $presetStage -Force -ErrorAction Stop }
+            $presetHash = (Get-FileHash -LiteralPath $presetStage -Algorithm SHA256 -ErrorAction Stop).Hash
+            [void]$fileNames.Add($presetName)
+            [void]$manifestFiles.Add([pscustomobject]@{ RelativeSource = $presetName; DestinationPath = (Join-Path $targetInfo.TargetDir $presetName); ExpectedSHA256 = $presetHash; ActualSHA256 = $presetHash; TPMManaged = $true; Kind = 'ReShadePreset' })
+        }
+        foreach ($effectId in @($approvedProfile.Effects)) {
+            $prepared = Install-TpmReShadeApprovedEffect -EffectId $effectId -CacheRoot $CacheRoot -DestinationRoot $targetInfo.TargetDir -OwnershipPath $OwnershipPath -PrepareOnly
+            if (-not $prepared -or -not $prepared.Succeeded -or $prepared.State -ne 'PREPARED' -or [string]::IsNullOrWhiteSpace([string]$prepared.StagingRoot)) { throw "Approved effect preparation failed for $effectId." }
+            [void]$preparedStages.Add([string]$prepared.StagingRoot)
+            foreach ($asset in @($prepared.Files)) {
+                $rawRelative = [string]$asset.RelativePath
+                $relative = ($rawRelative -replace '/', '\').TrimStart('\')
+                $assetDestination = Join-Path $targetInfo.TargetDir $relative
+                $assetStage = Join-Path $staging $relative
+                if ([string]::IsNullOrWhiteSpace($rawRelative) -or [System.IO.Path]::IsPathRooted($rawRelative) -or $rawRelative.StartsWith('/') -or $rawRelative.StartsWith('\') -or $relative -match '(^|\\)\.\.(\\|$)' -or -not (Test-PathInside $assetStage $staging) -or -not (Test-PathInside ([string]$asset.Path) ([string]$prepared.StagingRoot))) { throw 'Approved effect path is unsafe.' }
+                [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($assetStage))
+                Copy-Item -LiteralPath $asset.Path -Destination $assetStage -Force -ErrorAction Stop
+                if (-not (Test-TpmReShadeApprovedEffectFile -FileSpec $asset -Path $assetStage)) { throw "INTEGRITY: staged approved effect hash validation failed for $relative." }
+                if ($fileNames -contains $relative) { throw "Duplicate staged ReShade path: $relative" }
+                [void]$fileNames.Add($relative)
+                $assetHash = (Get-FileHash -LiteralPath $assetStage -Algorithm SHA256 -ErrorAction Stop).Hash
+                [void]$manifestFiles.Add([pscustomobject]@{ RelativeSource = $relative; DestinationPath = $assetDestination; ExpectedSHA256 = $assetHash; ActualSHA256 = $assetHash; TPMManaged = $true; Kind = 'ApprovedEffect' })
+            }
+        }
+        foreach ($entry in $manifestFiles.ToArray()) {
+            if (-not (Test-PathInside ([string]$entry.DestinationPath) ([string]$targetInfo.TargetDir))) { throw 'SECURITY: profile destination escaped target folder.' }
+            if (Test-Path -LiteralPath $entry.DestinationPath) {
+                $owned = $false
+                if ($prior) { foreach ($oldEntry in @($prior.Files)) { if ([string]$oldEntry.DestinationPath -eq [string]$entry.DestinationPath -and [string]$oldEntry.TPMManaged -eq 'True') { $owned = $true; break } } }
+                if (-not $owned) { return [pscustomobject]@{ Succeeded = $false; State = 'COLLISION'; Reason = 'USER_OWNED_CONTENT_PRESERVED'; Error = "Existing non-TPM-managed file was preserved: $($entry.DestinationPath)" } }
+            }
+        }
+        $retained = @()
+        if ($prior) { $retained = @($prior.Files | Where-Object { $_.DestinationPath -notin @($manifestFiles.ToArray() | ForEach-Object DestinationPath) }) }
+        $manifest = [pscustomobject]@{ SchemaVersion = 1; EffectId = 'ReShadeProfile.' + $approvedProfile.ProfileId; PinnedRevision = 'TPM-PROFILE'; Files = @($manifestFiles.ToArray() + $retained) }
+        $commit = { if ($FaultStage -eq 'BeforeCommit') { throw 'TEST: forced profile commit failure.' }; Save-TpmReShadeOwnershipManifest -Manifest $manifest -Path $OwnershipPath | Out-Null }
+        [void](Invoke-TpmTransactionalPromote -StagingDir $staging -DestDir $targetInfo.TargetDir -FileNames $fileNames.ToArray() -CommitAction $commit)
+        return [pscustomobject]@{ Succeeded = $true; State = 'INSTALLED'; ProfileId = $approvedProfile.ProfileId; VariantId = $variant.VariantId; TargetDir = $targetInfo.TargetDir; DllName = $dllName; ApiDetected = $targetInfo.ApiDetected; PresetSource = $presetSource; PresetApplied = [bool]($effectivePreset -or $presetContent); Manifest = $manifest }
+    } catch {
+        $message = $_.Exception.Message
+        if ($message -match 'ROLLBACK FAILED|CLEANUP FAILED') { $preserveStaging = $true }
+        return [pscustomobject]@{ Succeeded = $false; State = if ($message -match 'COLLISION') { 'COLLISION' } elseif ($message -match 'ROLLBACK FAILED') { 'ACTION_REQUIRED' } else { 'ROLLED_BACK' }; Reason = 'PROFILE_DEPLOYMENT_FAILED'; Error = $message; RollbackVerified = ($message -notmatch 'ROLLBACK FAILED') }
+    } finally {
+        foreach ($preparedStage in @($preparedStages.ToArray())) { if (Test-Path -LiteralPath $preparedStage) { Remove-Item -LiteralPath $preparedStage -Recurse -Force -ErrorAction SilentlyContinue } }
+        if ($staging -and -not $preserveStaging -and (Test-Path -LiteralPath $staging)) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+function Get-TpmHardwareEnvironmentEvidence {
+    param([switch]$RefreshDynamic, [string[]]$VolumePaths = @())
+    $cpu = $null; $os = $null; $ram = $null; $gpus = @(); $battery = $null
+    try { $cpu = Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object -First 1 } catch {}
+    try { $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop } catch {}
+    try { $ram = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop } catch {}
+    try { $gpus = @(Get-CimInstance Win32_VideoController -ErrorAction Stop) } catch {}
+    try { $battery = Get-CimInstance Win32_Battery -ErrorAction Stop | Select-Object -First 1 } catch {}
+    $volumes = New-Object System.Collections.Generic.List[object]
+    foreach ($path in $VolumePaths) {
+        try {
+            $root = [IO.Path]::GetPathRoot($path)
+            $drive = Get-PSDrive -Name $root.TrimEnd('\').TrimEnd(':') -ErrorAction Stop
+            [void]$volumes.Add([pscustomobject]@{ Path = $path; FreeBytes = [int64]$drive.Free; Confidence = 'KNOWN' })
+        } catch {
+            [void]$volumes.Add([pscustomobject]@{ Path = $path; FreeBytes = $null; Confidence = 'UNKNOWN' })
+        }
+    }
+    return [pscustomobject]@{
+        OSVersion = if ($os) { $os.Version } else { $null }; OSBuild = if ($os) { $os.BuildNumber } else { $null }; Architecture = $env:PROCESSOR_ARCHITECTURE
+        CpuModel = if ($cpu) { $cpu.Name } else { $null }; PhysicalCoreCount = if ($cpu) { $cpu.NumberOfCores } else { $null }; LogicalProcessorCount = if ($cpu) { $cpu.NumberOfLogicalProcessors } else { $null }; CpuEvidenceConfidence = if ($cpu) { 'RELIABLE' } else { 'UNKNOWN' }
+        Adapters = @($gpus | ForEach-Object { [pscustomobject]@{ AdapterIndex = $_.Index; Name = $_.Name; DriverVersion = $_.DriverVersion; DedicatedMemoryBytes = $_.AdapterRAM; Status = $_.Status } }); ActiveAdapterIndex = if ($gpus.Count -eq 1) { 0 } else { $null }; ActiveAdapterName = if ($gpus.Count -eq 1) { $gpus[0].Name } else { $null }; ActiveGpuConfidence = if ($gpus.Count -eq 1) { 'INFERRED' } else { 'UNKNOWN' }; ActiveGpuSelectionReason = if ($gpus.Count -eq 1) { 'only usable adapter enumerated' } else { 'target adapter cannot be established from shared evidence' }; MultiGpuAmbiguous = ($gpus.Count -gt 1)
+        InstalledRamBytes = if ($ram) { [int64]$ram.TotalPhysicalMemory } else { $null }; AvailableRamBytes = if ($os) { [int64]$os.FreePhysicalMemory * 1KB } else { $null }; MemoryEvidenceConfidence = if ($ram -and $os) { 'RELIABLE' } else { 'UNKNOWN' }
+        RenderWidth = if ($gpus.Count -eq 1) { $gpus[0].CurrentHorizontalResolution } else { $null }; RenderHeight = if ($gpus.Count -eq 1) { $gpus[0].CurrentVerticalResolution } else { $null }; ResolutionConfidence = if ($gpus.Count -eq 1 -and $gpus[0].CurrentHorizontalResolution) { 'INFERRED' } else { 'UNKNOWN' }; DisplayCount = $null; RefreshRate = if ($gpus.Count -eq 1) { $gpus[0].CurrentRefreshRate } else { $null }
+        BatteryPowered = [bool]$battery; PowerSavingActive = if ($battery) { $battery.BatteryStatus -in @(1,4,5) } else { $null }; PowerEvidenceConfidence = if ($battery) { 'RELIABLE' } else { 'UNKNOWN' }
+        Volumes = $volumes.ToArray()
+        DynamicRefreshed = [bool]$RefreshDynamic; SensitiveIdentifiersIncluded = $false
+    }
+}
+
+function Get-TpmReShadeExpertEffects {
+    param([string]$Category = '', [string]$Search = '')
+    $effects = @(Get-TpmReShadeEffectCatalog)
+    if (-not [string]::IsNullOrWhiteSpace($Category)) {
+        $effects = @($effects | Where-Object { $_.Category -ieq $Category.Trim() })
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Search)) {
+        $needle = $Search.Trim()
+        $effects = @($effects | Where-Object {
+            $_.FriendlyName -like "*$needle*" -or $_.EffectId -like "*$needle*" -or $_.Category -like "*$needle*"
+        })
+    }
+    return @($effects | Sort-Object Category, FriendlyName, EffectId)
+}
+
+function Resolve-TpmReShadeEffectStack {
+    param([string[]]$EffectIds)
+    $requested = @($EffectIds | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $catalog = @(Get-TpmReShadeEffectCatalog)
+    $selected = New-Object System.Collections.Generic.List[object]
+    $errors = New-Object System.Collections.Generic.List[string]
+    foreach ($id in $requested) {
+        $effect = @($catalog | Where-Object EffectId -eq $id)[0]
+        if (-not $effect) { [void]$errors.Add("Effect is not in the approved catalog: $id"); continue }
+        if (-not ($selected.EffectId -contains $effect.EffectId)) { [void]$selected.Add($effect) }
+    }
+    foreach ($effect in $selected) {
+        foreach ($other in $selected) {
+            if ($effect.EffectId -ne $other.EffectId -and ($effect.ConflictsWith -contains $other.EffectId)) {
+                [void]$errors.Add("Effects conflict: $($effect.FriendlyName) and $($other.FriendlyName)")
+            }
+        }
+    }
+    $ordered = @($selected | Sort-Object { [array]::IndexOf($requested, $_.EffectId) })
+    return [pscustomobject]@{
+        Valid = ($errors.Count -eq 0)
+        Effects = @($ordered)
+        TechniqueOrder = @($ordered | ForEach-Object TechniqueName)
+        Errors = @($errors | Sort-Object -Unique)
+        Warning = if ($ordered.Count -gt 1) { 'This multi-effect stack requires direct TPM validation before normal-mode exposure.' } else { $null }
+    }
+}
+
+function Get-TpmResolutionClassification {
+    param([object]$Width, [object]$Height)
+    if ($null -eq $Width -or $null -eq $Height -or [string]::IsNullOrWhiteSpace([string]$Width) -or [string]::IsNullOrWhiteSpace([string]$Height)) {
+        return [pscustomobject]@{ State = 'UNKNOWN'; Width = $null; Height = $null; Advisory = 'Display resolution is unavailable; no resolution-based compatibility claim is made.' }
+    }
+    try {
+        if ([string]$Width -notmatch '^[0-9]+$' -or [string]$Height -notmatch '^[0-9]+$') { throw 'malformed' }
+        $w = [int64]$Width; $h = [int64]$Height
+        if ($w -le 0 -or $h -le 0) { throw 'malformed' }
+        if ($w -lt 640 -or $h -lt 480) { $state = 'KNOWN_UNUSUALLY_LOW' }
+        elseif ($w -ge 3840 -or $h -ge 2160) { $state = 'KNOWN_UNUSUALLY_HIGH' }
+        elseif (([double]$w / [double]$h) -ge 2.3) { $state = 'KNOWN_UNUSUALLY_WIDE' }
+        else { $state = 'KNOWN_NORMAL' }
+        return [pscustomobject]@{ State = $state; Width = $w; Height = $h; Advisory = if ($state -eq 'KNOWN_UNUSUALLY_LOW') { 'Display resolution is unusually low; resolution-sensitive effects may look different.' } elseif ($state -eq 'KNOWN_UNUSUALLY_HIGH') { 'Display resolution is unusually high; resolution-sensitive effects may cost more performance.' } elseif ($state -eq 'KNOWN_UNUSUALLY_WIDE') { 'Display aspect ratio is unusually wide; framing may differ.' } else { $null } }
+    } catch {
+        return [pscustomobject]@{ State = 'MALFORMED'; Width = $null; Height = $null; Advisory = 'Display resolution evidence is malformed; no resolution-based compatibility claim is made.' }
+    }
+}
+function Get-TpmDisplayTopologyClassification {
+    param([object[]]$Displays = @(), [string]$TargetDisplayId = '')
+    if ($null -eq $Displays -or @($Displays).Count -eq 0) { return [pscustomobject]@{ State = 'UNKNOWN'; Confidence = 'UNKNOWN'; UsableDisplays = 0; TargetConfidence = 'UNKNOWN'; TargetDisplayId = $null; TargetResolution = $null; Advisory = 'Display topology is unavailable; TPM will not choose a monitor.' } }
+    $usable = New-Object System.Collections.Generic.List[object]
+    $malformed = $false
+    foreach ($display in @($Displays)) {
+        if ($null -eq $display -or -not $display.PSObject.Properties['Id'] -or [string]::IsNullOrWhiteSpace([string]$display.Id)) { $malformed = $true; continue }
+        $connected = if ($display.PSObject.Properties['Connected']) { [bool]$display.Connected } else { $true }
+        if (-not $connected) { continue }
+        $resolution = Get-TpmResolutionClassification -Width $display.Width -Height $display.Height
+        if ($resolution.State -eq 'MALFORMED') { $malformed = $true; continue }
+        [void]$usable.Add([pscustomobject]@{ Record = $display; Resolution = $resolution })
+    }
+    if ($usable.Count -eq 0) { return [pscustomobject]@{ State = if ($malformed) { 'MALFORMED' } else { 'ZERO_USABLE' }; Confidence = 'UNKNOWN'; UsableDisplays = 0; TargetConfidence = 'UNKNOWN'; TargetDisplayId = $null; TargetResolution = $null; Advisory = 'No usable connected display evidence is available.' } }
+    $primary = @($usable | Where-Object { $_.Record.PSObject.Properties['IsPrimary'] -and [bool]$_.Record.IsPrimary })
+    $state = 'SINGLE'
+    if ($usable.Count -gt 1) {
+        if ($primary.Count -gt 1 -or $malformed) { $state = 'MALFORMED' }
+        elseif (@($usable | Where-Object { $_.Record.PSObject.Properties['IsMirrored'] -and [bool]$_.Record.IsMirrored }).Count -eq $usable.Count) { $state = 'MIRRORED' }
+        elseif ($primary.Count -eq 0) { $state = 'MULTIPLE_NO_PRIMARY' }
+        else { $state = 'MULTIPLE_PRIMARY' }
+        $orientations = @($usable | ForEach-Object { if ($_.Record.PSObject.Properties['Orientation']) { [string]$_.Record.Orientation } else { '' } } | Select-Object -Unique)
+        $refresh = @($usable | ForEach-Object { if ($_.Record.PSObject.Properties['RefreshRate']) { [string]$_.Record.RefreshRate } else { '' } } | Select-Object -Unique)
+        $sizes = @($usable | ForEach-Object { '{0}x{1}' -f $_.Resolution.Width,$_.Resolution.Height } | Select-Object -Unique)
+        if ($state -ne 'MALFORMED' -and (($orientations.Count -gt 1) -or ($refresh.Count -gt 1) -or ($sizes.Count -gt 1))) { $state = 'MULTIPLE_MIXED' }
+    } elseif ($malformed) { $state = 'MALFORMED' }
+    $target = if (-not [string]::IsNullOrWhiteSpace($TargetDisplayId)) { @($usable | Where-Object { [string]$_.Record.Id -eq $TargetDisplayId })[0] } else { $null }
+    $targetConfidence = if ($target) { 'CONFIDENT' } elseif (-not [string]::IsNullOrWhiteSpace($TargetDisplayId)) { 'UNKNOWN' } elseif ($usable.Count -eq 1) { 'CONFIDENT' } elseif ($state -eq 'MALFORMED') { 'UNKNOWN' } else { 'AMBIGUOUS' }
+    if (-not $target -and [string]::IsNullOrWhiteSpace($TargetDisplayId) -and $usable.Count -eq 1) { $target = $usable[0] }
+    return [pscustomobject]@{ State = $state; Confidence = if ($state -eq 'MALFORMED') { 'UNKNOWN' } elseif ($usable.Count -eq 1 -or $primary.Count -eq 1) { 'KNOWN' } else { 'AMBIGUOUS' }; UsableDisplays = $usable.Count; TargetConfidence = $targetConfidence; TargetDisplayId = if ($target) { [string]$target.Record.Id } else { $null }; TargetResolution = if ($target) { $target.Resolution } else { $null }; Advisory = if ($targetConfidence -eq 'AMBIGUOUS') { 'The game target display is not evidenced; TPM will not choose a monitor.' } elseif ($state -eq 'MALFORMED') { 'Display topology evidence is malformed; TPM will not make a suitability claim.' } else { $null } }
+}
+
+function Get-TpmReShadeEligibilityEvidence {
+    param([object]$Environment = $null, [object]$GameContext = $null, [string]$StagingPath = '')
+    $e = if ($Environment) { $Environment } else { [pscustomobject]@{} }
+    $g = if ($GameContext) { $GameContext } else { [pscustomobject]@{} }
+    $adapter = $null
+    if ($null -ne $e.ActiveAdapterIndex) { $adapter = @($e.Adapters | Where-Object { $_.AdapterIndex -eq $e.ActiveAdapterIndex })[0] }
+    $volumes = @($e.Volumes)
+    $staging = @($volumes | Where-Object { $_.Path -eq $StagingPath })[0]
+    $free = if ($staging) { $staging.FreeBytes } else { $null }
+    $resolution = Get-TpmResolutionClassification -Width $e.RenderWidth -Height $e.RenderHeight
+    $topology = if ($e.PSObject.Properties['DisplayTopology'] -and $e.DisplayTopology) { if ($e.DisplayTopology.PSObject.Properties['State']) { $e.DisplayTopology } else { Get-TpmDisplayTopologyClassification -Displays @($e.DisplayTopology.Displays) -TargetDisplayId ([string]$e.DisplayTopology.TargetDisplayId) } } else { $null }
+
+    # RAM pressure is intentionally not inferred from a fixed threshold here; the shared layer reports bytes and confidence only.
+    return [pscustomobject]@{
+        ActiveGpuKnown = ($null -ne $adapter -and $e.ActiveGpuConfidence -ne 'UNKNOWN'); ActiveGpuConfidence = if ($e.ActiveGpuConfidence) { $e.ActiveGpuConfidence } else { 'UNKNOWN' }
+        ActiveGpuModel = if ($adapter) { $adapter.Name } else { $null }; IsIntegrated = $null; IsDiscrete = $null
+        DedicatedVramBytes = if ($adapter) { $adapter.DedicatedMemoryBytes } else { $null }; SharedGpuMemoryBytes = $null; GraphicsCapability = $null; DriverVersion = if ($adapter) { $adapter.DriverVersion } else { $null }; MultiGpuAmbiguous = $e.MultiGpuAmbiguous
+        CpuModel = $e.CpuModel; PhysicalCoreCount = $e.PhysicalCoreCount; LogicalProcessorCount = $e.LogicalProcessorCount; CpuLoadPercent = $null; CpuLoadConfidence = 'UNKNOWN'
+        InstalledRamBytes = $e.InstalledRamBytes; AvailableRamBytes = $e.AvailableRamBytes; RamPressure = $false; MemoryEvidenceConfidence = $e.MemoryEvidenceConfidence
+        RequiredWorkingBytes = $null; StagingFreeBytes = $free; BackupFreeBytes = $null; CacheFreeBytes = $null; TargetVolumeFreeBytes = $null
+        RenderWidth = $resolution.Width; RenderHeight = $resolution.Height; ResolutionClass = $resolution.State; ResolutionConfidence = if ($resolution.State -eq 'UNKNOWN' -or $resolution.State -eq 'MALFORMED') { $resolution.State } else { if ($e.ResolutionConfidence) { $e.ResolutionConfidence } else { 'KNOWN' } }; RefreshRate = $e.RefreshRate; HdrState = $null
+        PowerSavingActive = $e.PowerSavingActive; BatteryPowered = $e.BatteryPowered; ThermalConcern = $null; GpuLoadPercent = $null; TemporaryLoadConfidence = 'UNKNOWN'
+        RenderingApi = $g.RenderingApi; Bitness = $g.Bitness; GameCompatibilityState = $g.GameCompatibilityState; ContextConfidence = $g.ContextConfidence; DisplayTopology = $topology
+    }
+}
+function Get-TpmReShadeStorageEvidence {
+    param([object]$DeploymentContext = $null)
+    $context = if ($DeploymentContext) { $DeploymentContext } else { [pscustomobject]@{} }
+    $roles = @('StagingPath','BackupPath','CachePath','TargetPath')
+    $groups = [ordered]@{}
+    $roleBytes = if ($context.PSObject.Properties['RoleBytes']) { $context.RoleBytes } else { $null }
+    $rolePaths = if ($context.PSObject.Properties['RolePaths']) { $context.RolePaths } else { $null }
+    foreach ($role in $roles) {
+        $path = [string]$context.$role
+        $normalized = ([string]$role).ToUpperInvariant() -replace 'PATH$',''
+        if ([string]::IsNullOrWhiteSpace($path) -and $rolePaths) {
+            $pathProperty = $rolePaths.PSObject.Properties[$normalized]
+            if ($pathProperty) { $path = [string]$pathProperty.Value }
+        }
+        $demand = Get-TpmReShadeRoleDemandValue -RoleBytes $roleBytes -Role $role
+        if ([string]::IsNullOrWhiteSpace($path)) { continue }
+        try {
+            $root = [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($path)).ToUpperInvariant()
+            if (-not $groups.Contains($root)) {
+                $free = $null
+                try { $drive = Get-PSDrive -Name $root.TrimEnd('\').TrimEnd(':') -ErrorAction Stop; if ($null -ne $drive.Free) { $free = [int64]$drive.Free } } catch { $free = $null }
+                $groups[$root] = [pscustomobject]@{ Root = $root; FreeBytes = $free; RequiredBytes = [int64]0; Roles = New-Object System.Collections.Generic.List[string]; DemandByRole = [ordered]@{} }
+            }
+            if (@($groups[$root].Roles) -notcontains $role) { [void]$groups[$root].Roles.Add($role) }
+            $groups[$root].RequiredBytes = [int64]$groups[$root].RequiredBytes + $demand
+            $groups[$root].DemandByRole[$normalized] = $demand
+        } catch {
+            $unknownRoot = 'UNKNOWN:' + $normalized
+            if (-not $groups.Contains($unknownRoot)) { $groups[$unknownRoot] = [pscustomobject]@{ Root = $unknownRoot; FreeBytes = $null; RequiredBytes = [int64]0; Roles = New-Object System.Collections.Generic.List[string]; DemandByRole = [ordered]@{} } }
+            if (@($groups[$unknownRoot].Roles) -notcontains $role) { [void]$groups[$unknownRoot].Roles.Add($role) }
+            $groups[$unknownRoot].RequiredBytes = [int64]$groups[$unknownRoot].RequiredBytes + $demand
+            $groups[$unknownRoot].DemandByRole[$normalized] = $demand
+        }
+    }
+    $required = if ($context.PSObject.Properties['RequiredWorkingBytes'] -and $null -ne $context.RequiredWorkingBytes) { [int64]$context.RequiredWorkingBytes } else { $null }
+    return [pscustomobject]@{ RequiredWorkingBytes = $required; RoleBytes = $roleBytes; Volumes = @($groups.Values) }
+}
+
+function Get-TpmReShadeEligibilityFromSystem {
+    param([Parameter(Mandatory)][string[]]$EffectIds, [object]$GameContext = $null, [string]$StagingPath = '')
+    $stack = Resolve-TpmReShadeEffectStack -EffectIds $EffectIds
+    $environment = Get-TpmHardwareEnvironmentEvidence -RefreshDynamic -VolumePaths @($StagingPath)
+    $evidence = Get-TpmReShadeEligibilityEvidence -Environment $environment -GameContext $GameContext -StagingPath $StagingPath
+    return Get-TpmReShadeEligibility -Stack $stack -Evidence $evidence
+}
+
+function Get-TpmReShadeEligibility {
+    param([Parameter(Mandatory)]$Stack, [Parameter(Mandatory)]$Evidence)
+    $reasons = New-Object System.Collections.Generic.List[string]
+    $classes = @($Stack.Effects | ForEach-Object PerformanceClass)
+    $resolutionClass = if ($Evidence.ResolutionClass) { $Evidence.ResolutionClass } else { (Get-TpmResolutionClassification -Width $Evidence.RenderWidth -Height $Evidence.RenderHeight).State }
+    if (-not $Stack.Valid) { [void]$reasons.Add('STACK_CONFLICT') }
+    if ($Stack.Warning) { [void]$reasons.Add('STACK_UNVALIDATED') }
+    if ($Evidence.ActiveGpuConfidence -eq 'UNKNOWN') { [void]$reasons.Add('ACTIVE_GPU_UNKNOWN') }
+    if ($resolutionClass -eq 'UNKNOWN') { [void]$reasons.Add('RESOLUTION_UNKNOWN') }
+    elseif ($resolutionClass -eq 'MALFORMED') { [void]$reasons.Add('RESOLUTION_MALFORMED') }
+    if ($Evidence.RamPressure -eq $true) { [void]$reasons.Add('RAM_PRESSURE') }
+    if ($Evidence.DisplayTopology -and $Evidence.DisplayTopology.TargetConfidence -in @('UNKNOWN','AMBIGUOUS')) { [void]$reasons.Add('DISPLAY_TARGET_AMBIGUOUS') }
+    $space = Test-TpmReShadeWorkingSpace -Evidence $Evidence
+    if (@($space.InsufficientVolumes).Count -gt 0) { [void]$reasons.Add('DISK_SPACE_LOW') }
+    elseif (@($space.UnknownVolumes).Count -gt 0) { [void]$reasons.Add('DISK_SPACE_UNKNOWN') }
+    if ($Evidence.PowerSavingActive -eq $true) { [void]$reasons.Add('POWER_SAVING_ACTIVE') }
+    if ($resolutionClass -eq 'KNOWN_UNUSUALLY_HIGH' -and ($classes -contains 'HIGH')) { [void]$reasons.Add('RESOLUTION_HIGH') }
+    $status = 'GOOD_MATCH'
+    if ($reasons -contains 'STACK_CONFLICT' -or $reasons -contains 'DISK_SPACE_LOW') { $status = 'NOT_RECOMMENDED' }
+    elseif ($reasons -contains 'RAM_PRESSURE' -or $reasons -contains 'RESOLUTION_HIGH' -or $reasons -contains 'POWER_SAVING_ACTIVE') { $status = 'PERFORMANCE_RISK' }
+    elseif ($reasons -contains 'ACTIVE_GPU_UNKNOWN' -or $reasons -contains 'RESOLUTION_UNKNOWN' -or $reasons -contains 'RESOLUTION_MALFORMED' -or $reasons -contains 'DISK_SPACE_UNKNOWN' -or $reasons -contains 'DISPLAY_TARGET_AMBIGUOUS') { $status = 'UNKNOWN' }
+    elseif ($classes -contains 'HIGH') { $status = 'LIKELY_OK' }
+    $fallback = if ($status -eq 'NOT_RECOMMENDED') { @($Stack.Effects | Select-Object -First 1 | ForEach-Object FallbackBehavior)[0] } else { $null }
+    return [pscustomobject]@{ Status = $status; Reasons = @($reasons); HardwareConfidence = if ($Evidence.ActiveGpuConfidence -eq 'UNKNOWN') { 'UNKNOWN' } else { 'KNOWN' }; FallbackProfileId = $fallback; Explanation = switch ($status) { 'GOOD_MATCH' { 'Good match for your PC.' }; 'LIKELY_OK' { 'Should run reliably, but this profile has higher processing cost.' }; 'PERFORMANCE_RISK' { 'This profile may reduce performance under current system conditions.' }; 'NOT_RECOMMENDED' { 'This profile is not recommended for the current system conditions.' }; default { 'Hardware performance could not be verified.' } } }
+}
+
+function Test-TpmReShadeWorkingSpace {
+    param([Parameter(Mandatory)]$Evidence)
+    $required = [int64]$(if ($Evidence.RequiredWorkingBytes) { $Evidence.RequiredWorkingBytes } else { 64MB })
+    $checks = @(
+        [pscustomobject]@{ Name = 'staging'; Free = $Evidence.StagingFreeBytes },
+        [pscustomobject]@{ Name = 'backup'; Free = $Evidence.BackupFreeBytes },
+        [pscustomobject]@{ Name = 'cache'; Free = $Evidence.CacheFreeBytes },
+        [pscustomobject]@{ Name = 'target'; Free = $Evidence.TargetVolumeFreeBytes }
+    )
+    $unknown = @($checks | Where-Object { $null -eq $_.Free })
+    $insufficient = @($checks | Where-Object { $_.Free -is [int64] -and $_.Free -lt $required })
+    $insufficientNames = @($insufficient | ForEach-Object { $_.Name })
+    $unknownNames = @($unknown | ForEach-Object { $_.Name })
+    return [pscustomobject]@{ Sufficient = ($insufficientNames.Count -eq 0 -and $unknownNames.Count -eq 0); RequiredBytes = $required; InsufficientVolumes = $insufficientNames; UnknownVolumes = $unknownNames }
+}
+
+function Resolve-ReShadeCustomPresetPath {
+    param([string]$InputPath)
+    if ([string]::IsNullOrWhiteSpace($InputPath)) { return $null }
+    try {
+        $candidate = $InputPath.Trim()
+        if ([System.IO.Path]::GetExtension($candidate) -ine '.ini') { return $null }
+        if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { return $null }
+        return $candidate
+    } catch {
+        return $null
+    }
+}
+
 function Invoke-ReShadeSetup {
     param(
         [string]$UserProfilesDir,
@@ -4067,8 +5186,8 @@ function Invoke-ReShadeSetup {
         $latest = Get-ReShadeLatestVersion
         if ($latest) {
             if ([version]$latest -gt [version]$bVer) {
-                Write-Host ("  Newer version available: {0}  (you have {1})" -f $latest, $bVer) -ForegroundColor Yellow
-                Write-Host "  Get it at  https://reshade.me  and replace ReShade\ReShade64.dll (and ReShade32.dll for 32-bit games)." -ForegroundColor Cyan
+                Write-Host ("  Newer version available: {0}  (TPM can acquire it automatically when setup is rerun.)" -f $latest) -ForegroundColor Yellow
+                Write-Log ("ReShade update available: installed={0}; latest={1}; automatic acquisition is available from setup." -f $bVer, $latest)
             } else {
                 Write-Host ("  Up to date ({0})." -f $bVer) -ForegroundColor Green
             }
@@ -4077,30 +5196,68 @@ function Invoke-ReShadeSetup {
         }
     }
 
-    # Preset / shader options
-    Write-Host ""
-    Write-Host "  Preset / visual effects:" -ForegroundColor Cyan
-    Write-Host "    1) No preset -- just install the DLL."
-    Write-Host "       Once a game launches, press the  Home  key to open the"
-    Write-Host "       ReShade overlay and switch effects on or off."
-    Write-Host "    2) Use a preset file -- copy a ready-made .ini to every selected game."
-    Write-Host "       Useful if you already have settings you are happy with."
-    Write-Host ""
-    Write-Host "  Tip: drop ProfileCode.ini files into a ReShadePresets\ folder next to" -ForegroundColor DarkCyan
-    Write-Host "  this script to pin a specific preset to one game -- it overrides the" -ForegroundColor DarkCyan
-    Write-Host "  choice above for that game only. Profile codes are listed in" -ForegroundColor DarkCyan
-    Write-Host "  TeknoParrot-Manager-controls.txt." -ForegroundColor DarkCyan
-    Write-Host ""
-    $presetChoice = (Read-HostSafe "  Enter 1 or 2")
-    $presetPath   = $null
-    if ($presetChoice -eq "2") {
-        $pInp = Read-PathWithBrowse "  Path to your ReShade preset (.ini) file" -Mode File -FileFilter "ReShade preset (*.ini)|*.ini|All files (*.*)|*.*"
-        if (Test-Path -LiteralPath $pInp) {
-            $presetPath = $pInp
-            Write-Host "  Preset: $pInp" -ForegroundColor DarkGray
-        } else {
-            Write-Host "  File not found -- continuing without preset." -ForegroundColor Yellow
+    $gallery = @(Get-TpmReShadeProfileGallery)
+    Write-Host "  Preview gallery (illustrative, local synthetic scenes)" -ForegroundColor DarkCyan
+    foreach ($item in $gallery) {
+        $previewText = if ($item.PreviewAvailable) { 'preview available' } else { 'preview unavailable; selection still works' }
+        Write-Host ("    {0}: {1} [{2}]" -f $item.FriendlyName, $item.Description, $previewText) -ForegroundColor DarkGray
+    }
+    $favoriteState = Read-TpmReShadeState
+    $favoriteProfiles = @()
+    foreach ($favorite in @($favoriteState.Favorites)) {
+        $favoriteProfile = Get-TpmReShadeProfile -ProfileId $favorite.ProfileId
+        if ($favoriteProfile) {
+            try { $favoriteVariant = Resolve-TpmReShadeIntensityVariant -ProfileDefinition $favoriteProfile -VariantId $favorite.VariantId; $favoriteProfiles += [pscustomobject]@{ Profile = $favoriteProfile; VariantId = $favoriteVariant.VariantId } } catch {}
         }
+    }
+    $favoriteItems = @($favoriteProfiles | ForEach-Object { $_.Profile.FriendlyName })
+    if ($favoriteItems.Count -gt 0) {
+        Write-Host ("  Favorites: " + ($favoriteItems -join ', ')) -ForegroundColor DarkCyan
+        Write-Host "  Choose F at the profile prompt to select a favorite." -ForegroundColor DarkCyan
+    }
+
+    # Curated profile selection is the normal path. Advanced custom .ini remains opt-in.
+    Write-Host ""
+    Write-Host "  Visual profile" -ForegroundColor Cyan
+    Write-Host "    1) Clean & Sharp  (Recommended)" -ForegroundColor White
+    Write-Host "    2) Classic Arcade CRT" -ForegroundColor White
+    Write-Host "    3) Vivid Arcade" -ForegroundColor White
+    Write-Host "    4) Enhanced Arcade" -ForegroundColor White
+    Write-Host "    5) Original" -ForegroundColor White
+    if ($favoriteProfiles.Count -gt 0) { Write-Host "    F) Choose a favorite profile" -ForegroundColor White }
+    $profilePick = (Read-HostSafe "  Choose 1-5$(if($favoriteProfiles.Count -gt 0){' or F'}) (default 1)").Trim()
+    $profileMap = @{ '1' = 'CleanSharp'; '2' = 'ClassicCrt'; '3' = 'Vivid'; '4' = 'EnhancedArcade'; '5' = 'Original' }
+    if ($profilePick -match '^[Ff]$' -and $favoriteProfiles.Count -gt 0) {
+        for ($favoriteIndex = 0; $favoriteIndex -lt $favoriteProfiles.Count; $favoriteIndex++) { Write-Host ("      {0}) {1}" -f ($favoriteIndex + 1), $favoriteProfiles[$favoriteIndex].Profile.FriendlyName) -ForegroundColor DarkGray }
+        $favoritePick = (Read-HostSafe "  Favorite number (blank = Clean & Sharp)").Trim()
+        if ($favoritePick -match '^\d+$' -and [int]$favoritePick -ge 1 -and [int]$favoritePick -le $favoriteProfiles.Count) {
+            $selectedProfile = $favoriteProfiles[[int]$favoritePick - 1].Profile
+        } else { $selectedProfile = Get-TpmReShadeProfile -ProfileId 'CleanSharp' }
+    } else {
+        if ([string]::IsNullOrWhiteSpace($profilePick)) { $profilePick = '1' }
+        if (-not $profileMap.ContainsKey($profilePick)) { $profilePick = '1' }
+        $selectedProfile = Get-TpmReShadeProfile -ProfileId $profileMap[$profilePick]
+    }
+    $presetPath = $null
+    $generatedPresetPath = $null
+    if ($selectedProfile.ProfileId -ne 'Original') {
+        $generatedPresetPath = Join-Path ([System.IO.Path]::GetTempPath()) ('TPM-ReShade-' + [guid]::NewGuid().ToString('N') + '.ini')
+        try {
+            [System.IO.File]::WriteAllText($generatedPresetPath, (New-TpmReShadePresetContent -ProfileDefinition $selectedProfile), (New-Object System.Text.UTF8Encoding $false))
+            $presetPath = $generatedPresetPath
+        } catch {
+            Write-Log "ReShade: failed to generate selected profile preset -- $_"
+            Write-Host "  Could not generate the selected profile. Continuing with Original." -ForegroundColor Yellow
+        }
+    }
+    Write-Host ("  Selected: {0}" -f $selectedProfile.FriendlyName) -ForegroundColor DarkGray
+    $previewWindowResult = Show-TpmReShadePreviewWindow -ProfileDefinition $selectedProfile -Mode 'Split' -Show
+    if (-not $previewWindowResult.Available) { Write-Host "  Preview window unavailable; continuing with text-only profile selection." -ForegroundColor DarkGray }
+    $customPresetChoice = (Read-HostSafe "  Use an advanced custom .ini preset instead? (Y/N, default N)").Trim()
+    if ($customPresetChoice -match '^(Y|y)$') {
+        $pInp = Read-PathWithBrowse "  Path to your ReShade preset (.ini) file (blank/cancel = keep selected profile)" -Mode File -FileFilter "ReShade preset (*.ini)|*.ini|All files (*.*)|*.*"
+        $customPath = Resolve-ReShadeCustomPresetPath -InputPath $pInp
+        if ($customPath) { $presetPath = $customPath; Write-Host "  Advanced preset selected." -ForegroundColor DarkGray }
     }
 
     # Per-game preset overrides: ReShadePresets\<ProfileCode>.ini always wins
@@ -4139,11 +5296,33 @@ function Invoke-ReShadeSetup {
         Write-Log "ReShade setup: cancelled -- no games selected."
         return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'NO_GAMES_SELECTED' }
     }
+    $rememberedSelections = @{}
+    $restoreSelections = @{}
+    foreach ($pf in $selectedGames) {
+        $options = Get-TpmReShadeChooserOptions -GameId $pf.BaseName
+        if ($options.Restore.Found -and $options.Restore.Valid) {
+            Write-Host ("  R) Restore previous trusted profile for {0}: {1}" -f $pf.BaseName, $options.Restore.Profile.FriendlyName) -ForegroundColor DarkCyan
+            $restoreAnswer = (Read-HostSafe ("  Restore {0} for this game? (Y/N, default N)" -f $options.Restore.Profile.FriendlyName)).Trim()
+            if ($restoreAnswer -match '^(Y|y)$') { $restoreSelections[$pf.BaseName] = $options.Restore }
+        } elseif ($options.Restore.Found) {
+            Write-Host ("  Previous profile for {0} is unavailable ({1}); choose a fresh profile." -f $pf.BaseName, $options.Restore.Reason) -ForegroundColor Yellow
+        }
+        if ($options.Remembered.Found -and $options.Remembered.Valid) {
+            Write-Host ("  Remembered for {0}: {1}" -f $pf.BaseName, $options.Remembered.Profile.FriendlyName) -ForegroundColor DarkCyan
+            if (-not $restoreSelections.ContainsKey($pf.BaseName)) {
+                $rememberAnswer = (Read-HostSafe ("  Use remembered {0} for this game? (Y/N, default N)" -f $options.Remembered.Profile.FriendlyName)).Trim()
+                if ($rememberAnswer -match '^(Y|y)$') { $rememberedSelections[$pf.BaseName] = $options.Remembered }
+            }
+        } elseif ($options.Remembered.Found) {
+            Write-Host ("  Saved profile for {0} needs reselection." -f $pf.BaseName) -ForegroundColor Yellow
+        }
+    }
 
     # Deploy
     Write-Host ""
     Write-Host ("  Installing ReShade into {0} game folder(s)..." -f $selectedGames.Count) -ForegroundColor Cyan
     $deployed = 0; $skipped = 0; $errors = 0; $presetOverrides = 0
+    $reShadeCacheRoot = Join-Path $PSScriptRoot 'ReShade\Cache'
 
     foreach ($pf in $selectedGames) {
         try {
@@ -4163,53 +5342,37 @@ function Invoke-ReShadeSetup {
                 Write-Host ("    {0}: invalid game path (no directory component) -- skipped" -f $pf.BaseName) -ForegroundColor Yellow
                 $skipped++; continue
             }
-
-            # Pick the right ReShade DLL based on detected exe architecture.
-            $arch      = Get-ExeArchitecture -ExePath $gamePath
-            $activeDll = $SourceDll   # default: 64-bit
-            if ($arch -eq 'x86') {
-                if ($SourceDll32 -and (Test-Path -LiteralPath $SourceDll32)) {
-                    $activeDll = $SourceDll32
-                } else {
-                    Write-Host ("    {0}: 32-bit game -- ReShade32.dll not found; skipped." -f $pf.BaseName) -ForegroundColor Yellow
-                    Write-Log "ReShade: skipped $($pf.BaseName) -- 32-bit game, no ReShade32.dll."
-                    $skipped++; continue
-                }
-            } elseif ($arch -ne $null -and $arch -ne 'x64') {
-                Write-Host ("    {0}: unsupported architecture ({1}); skipped." -f $pf.BaseName, $arch) -ForegroundColor Yellow
-                Write-Log "ReShade: skipped $($pf.BaseName) -- unsupported architecture ($arch)."
-                $skipped++; continue
+            $ownershipPath = Get-TpmReShadeProfileOwnershipPath -GameId $pf.BaseName
+            if ($restoreSelections.ContainsKey($pf.BaseName)) {
+                $restoreResult = Restore-TpmReShadeProfile -HistoryEntry $restoreSelections[$pf.BaseName].HistoryEntry -CacheRoot $reShadeCacheRoot -OwnershipRoot $ownershipPath -GamePath $gamePath -Doc $doc -SourceDll $SourceDll -SourceDll32 $SourceDll32 -GameId $pf.BaseName -StateRoot ''
+                if (-not $restoreResult.Succeeded) { throw ("restore rejected: {0}" -f $restoreResult.Reason) }
+                $restoreNote = if ($restoreResult.PresetApplied) { '  (preset: generated)' } else { '' }
+                Write-Host ("    {0}  [{1}]{2}  restored previous trusted profile" -f $pf.BaseName, $restoreResult.DllName, $restoreNote) -ForegroundColor Green
+                Write-Log "ReShade: restored $($pf.BaseName) -> $($restoreResult.TargetDir) [$($restoreResult.DllName)]$restoreNote"
+                $deployed++
+                continue
             }
-
-            $targetInfo = Get-ReShadeTargetInfo -Doc $doc -GamePath $gamePath -ExeDir $exeDir
-            $targetDir  = $targetInfo.TargetDir
-            $dllName    = $targetInfo.DllName
-            if (-not $targetInfo.ApiDetected) {
-                Write-Host ("    {0}: graphics API not detected, defaulting to dxgi.dll" -f $pf.BaseName) -ForegroundColor Yellow
+            $profileForGame = $selectedProfile
+            $canonicalForGame = $false
+            if ($rememberedSelections.ContainsKey($pf.BaseName)) {
+                $profileForGame = $rememberedSelections[$pf.BaseName].Profile
+                $canonicalForGame = $true
             }
-
-            $destDll = Join-Path $targetDir $dllName
-            Copy-Item -LiteralPath $activeDll -Destination $destDll -Force -ErrorAction Stop
-
-            # Per-game preset (ReShadePresets\<ProfileCode>.ini) always wins
-            # over the global choice for this one game.
-            $perGamePreset   = Join-Path $reShadePresetsDir ($pf.BaseName + ".ini")
-            $effectivePreset = $null; $presetSource = $null
-            if (Test-Path -LiteralPath $perGamePreset) {
-                $effectivePreset = $perGamePreset; $presetSource = "per-game"
-            } elseif ($presetPath) {
-                $effectivePreset = $presetPath; $presetSource = "global"
+            $perGamePreset = Join-Path $reShadePresetsDir ($pf.BaseName + '.ini')
+            $presetForGame = if ($canonicalForGame) { $null } else { $presetPath }
+            $profileDeployment = Install-TpmReShadeProfileDeployment -ProfileDefinition $profileForGame -GamePath $gamePath -Doc $doc -SourceDll $SourceDll -SourceDll32 $SourceDll32 -PresetPath $presetForGame -PerGamePresetPath $perGamePreset -CacheRoot $reShadeCacheRoot -OwnershipPath $ownershipPath -CanonicalPreset:$canonicalForGame
+            if (-not $profileDeployment.Succeeded) {
+                if ($profileDeployment.State -in @('MISSING_32BIT_DLL','UNSUPPORTED_ARCHITECTURE')) { $skipped++; continue }
+                throw ("profile deployment rejected: {0}" -f $profileDeployment.Reason)
             }
-            if ($effectivePreset) {
-                Copy-Item -LiteralPath $effectivePreset -Destination (Join-Path $targetDir "ReShade.ini") `
-                          -Force -ErrorAction Stop
-                if ($presetSource -eq "per-game") { $presetOverrides++ }
-            }
-
+            if (-not $profileDeployment.ApiDetected) { Write-Host ("    {0}: graphics API not detected, defaulting to dxgi.dll" -f $pf.BaseName) -ForegroundColor Yellow }
+            $presetSource = $profileDeployment.PresetSource
+            if ($presetSource -eq 'per-game') { $presetOverrides++ }
             $presetNote = if ($presetSource) { "  (preset: $presetSource)" } else { "" }
-            Write-Host ("    {0}  [{1}]{2}" -f $pf.BaseName, $dllName, $presetNote) -ForegroundColor Green
-            Write-Log "ReShade: $($pf.BaseName) -> $targetDir [$dllName]$presetNote"
+            Write-Host ("    {0}  [{1}]{2}" -f $pf.BaseName, $profileDeployment.DllName, $presetNote) -ForegroundColor Green
+            Write-Log "ReShade: $($pf.BaseName) -> $($profileDeployment.TargetDir) [$($profileDeployment.DllName)]$presetNote"
             $deployed++
+            try { Add-TpmReShadeProfileHistory -GameId $pf.BaseName -ProfileDefinition $profileForGame -StateRoot '' | Out-Null } catch { Write-Log "ReShade: history record failed for $($pf.BaseName) -- $_" }
         } catch {
             Write-Host ("    FAILED {0}: {1}" -f $pf.BaseName, $_) -ForegroundColor Red
             Write-Log "ReShade: FAILED $($pf.BaseName) -- $_"
@@ -4233,6 +5396,9 @@ function Invoke-ReShadeSetup {
     Write-Host "  TPM does not remove an unowned ReShade hook automatically." -ForegroundColor DarkCyan
     Write-Host "  Existing or changed files need advanced troubleshooting review." -ForegroundColor DarkCyan
     Write-Log ("ReShade setup: Installed={0} Skipped={1} Errors={2} PresetOverrides={3}" -f $deployed, $skipped, $errors, $presetOverrides)
+    if ($generatedPresetPath -and (Test-Path -LiteralPath $generatedPresetPath)) {
+        Remove-Item -LiteralPath $generatedPresetPath -Force -ErrorAction SilentlyContinue
+    }
     return [pscustomobject]@{ Succeeded = ($deployed -gt 0 -and $errors -eq 0); Deployed = $deployed; Errors = $errors; Reason = if ($errors) { 'DEPLOYMENT_ERRORS' } elseif ($deployed -eq 0) { 'NO_GAMES_DEPLOYED' } else { $null } }
 }
 
@@ -15102,6 +16268,7 @@ $pendingApplyMode   = $null   # set when a preview run's "Apply for real now?" p
                                # instead of showing the menu again.
 $forceRealApply     = $false  # consumed once, right after $pendingApplyMode triggers a re-entry, to force
                                # $dryRunActive = $false without re-asking the preview question.
+$menuExpanded       = $false  # H selects the readable expanded layout until toggled again.
 $zipSource               = $null   # AutoSync only (main collection)
 $zipSourceSupplementary  = $null   # AutoSync supplementary source (optional, separate library); $null or ''=not configured
 $gamesInstallFolder = $null   # always (the extracted-games root to register)
@@ -16540,18 +17707,10 @@ function Limit-MainMenuRowsToViewport {
     return @($Rows | Select-Object -First $maxRows)
 }
 
-# Truncates BODY rows only (never the banner or footer) so a short-height
-# console still shows the footer's Quit/Help controls and the menu's last
-# item (15, Exit) without the terminal itself having to scroll -- issue #104
-# RC3 correction. Earlier behavior flattened banner+body+footer into one
-# list and kept only the first N rows, which chopped off the Application
-# section (Check for Updates, Create Support Package, Exit) and the entire
-# footer at short heights;
-# Trimming BODY from the front (keeping its tail) instead means whatever
-# gets dropped first is the earliest sections (Library Management, Game
-# Enhancements), not the footer or the last item -- the controls a user
-# needs to actually operate the menu (pick a number, quit, get help) always
-# render, even if some earlier item descriptions don't fit.
+# Truncates BODY rows only (never the banner or footer) while preserving
+# actionable menu rows and their descriptions as atomic display units.
+# Two-column streams are trimmed only at numbered-row boundaries, preventing
+# a visible description from outliving its heading.
 function Limit-MainMenuBodyRowsToBudget {
     param(
         [object[]]$BodyRows,
@@ -16560,7 +17719,18 @@ function Limit-MainMenuBodyRowsToBudget {
 
     if ($BodyBudget -le 0) { return @() }
     if ($BodyRows.Count -le $BodyBudget) { return @($BodyRows) }
-    return @($BodyRows | Select-Object -Last $BodyBudget)
+
+    $start = $BodyRows.Count - $BodyBudget
+    $isColumnar = @($BodyRows | Where-Object { $_.Segments }).Count -gt 0
+    if ($isColumnar) {
+        while ($start -lt $BodyRows.Count) {
+            $text = [string]$BodyRows[$start].Text
+            if ($text -match '^\s+\d+\)\s+') { break }
+            $start++
+        }
+    }
+    if ($start -ge $BodyRows.Count) { return @() }
+    return @($BodyRows[$start..($BodyRows.Count - 1)])
 }
 
 # Single-line banner ("TeknoParrot Manager v1.0 RC8") with no frame and no
@@ -16662,6 +17832,24 @@ function Get-MainMenuEmergencyCompactRows {
 
     if ($MaxRows -gt 0) {
         $itemBudget = [Math]::Max(0, $MaxRows - $bannerRows.Count - $footerRows.Count)
+        if ($itemRows.Count -gt $itemBudget) {
+            # At the minimum supported viewport, retain every actionable
+            # number even when labels cannot fit. Number-only packing is a
+            # deliberate last resort; silently dropping choices is not.
+            $lastMenuItem = @((Get-MainMenuItems))[-1]
+            $tokens = @((Get-MainMenuItems) | ForEach-Object {
+                if ($_.Number -eq $lastMenuItem.Number) { '{0}) {1}' -f $_.Number, $_.Label } else { '{0})' -f $_.Number }
+            })
+            $packed = New-Object System.Collections.Generic.List[string]
+            $current = ''
+            foreach ($token in $tokens) {
+                if ($current.Length -eq 0) { $current = $token }
+                elseif (($current.Length + 1 + $token.Length) -le $Geometry.MenuWidth) { $current = "$current $token" }
+                else { [void]$packed.Add($current); $current = $token }
+            }
+            if ($current.Length -gt 0) { [void]$packed.Add($current) }
+            $itemRows = @($packed | ForEach-Object { New-ConsoleRenderRow -Text $_ -Color 'White' })
+        }
         $itemRows = Limit-MainMenuBodyRowsToBudget -BodyRows $itemRows -BodyBudget $itemBudget
     }
 
@@ -16940,7 +18128,7 @@ while ($true) {
     # reconnected to a different letter) are picked up rather than using
     # stale cached data from the previous mode's run.
     Clear-LocalDriveInfoCache
-    $mode = $null
+$mode = $null
 
     # A just-finished preview run's "Apply for real now?" prompt was
     # answered Y -- silently re-enter the same mode instead of showing
@@ -16964,7 +18152,8 @@ while ($true) {
     $consoleWidth  = Get-ConsoleContentWidth
     $consoleHeight = Get-ConsoleContentHeight
     $menuTier = Get-ConsoleLayoutTier -Width $consoleWidth -Height $consoleHeight -RequiredFullLines $fullTierLineCount
-    [void](Show-MainMenu -Tier $menuTier -Width $consoleWidth -Height $consoleHeight)
+    $menuLayoutMode = if ($menuExpanded -and $menuTier -eq 'Ultra') { 'UltraCentered' } else { 'Auto' }
+    [void](Show-MainMenu -Tier $menuTier -Width $consoleWidth -Height $consoleHeight -UltraLayoutMode $menuLayoutMode)
     if ($Unattended) {
         Write-Host "  [Unattended] Mode must be set before starting." -ForegroundColor Red
         Write-Log "ERROR: Unattended mode -- reached menu loop."; exit 1
@@ -16973,10 +18162,13 @@ while ($true) {
     if ($choiceResult.Redraw) { continue }
     $modeChoice = $choiceResult.Value.Trim()
     if ($modeChoice -in @('?', 'H', 'h')) {
+        $menuExpanded = -not $menuExpanded
         $helpWidth = Get-ConsoleContentWidth
-        $helpTier = Get-ConsoleLayoutTier -Width $helpWidth -Height (Get-ConsoleContentHeight) -RequiredFullLines $fullTierLineCount
+        $helpHeight = Get-ConsoleContentHeight
+        $helpTier = Get-ConsoleLayoutTier -Width $helpWidth -Height $helpHeight -RequiredFullLines $fullTierLineCount
         if ($helpTier -eq 'Compact') { $helpTier = 'Professional' }
-        [void](Show-MainMenu -Tier $helpTier -Width $helpWidth -Height (Get-ConsoleContentHeight))
+        $helpLayoutMode = if ($menuExpanded -and $helpTier -eq 'Ultra') { 'UltraCentered' } else { 'Auto' }
+        [void](Show-MainMenu -Tier $helpTier -Width $helpWidth -Height $helpHeight -UltraLayoutMode $helpLayoutMode)
         continue
     }
     if ($modeChoice -in @('Q', 'q')) { break }

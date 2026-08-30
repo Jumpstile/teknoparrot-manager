@@ -268,6 +268,21 @@
     games -- the correct DLL is chosen automatically based on each game's
     architecture. Checks reshade.me for newer versions on each run. Optional --
     your games work perfectly without it.
+    Beginner profile and restore choices are explicit and per-game. TPM offers
+    the five approved profile IDs, validated favorites, and a remembered
+    selection. It also offers R to restore the previous trusted profile for
+    that game. Restore is never automatic: the operator must choose it.
+    History is accepted only when the current profile definition, ordered
+    approved effect hashes, and intensity variant still match. Missing,
+    corrupt, stale, or unsupported history falls back to fresh selection; TPM
+    never copies historical file paths.
+
+    DLL, generated preset, and approved effect files are staged and promoted
+    together. Before replacing a destination, TPM requires a matching
+    TPM-managed ownership entry for that game. Existing unknown or user-owned
+    files cause a collision and remain untouched. Earlier TPM-managed files
+    are retained when changing profiles rather than being silently deleted.
+
 
   - dgVoodoo2 legacy compatibility. Fixes older arcade games that crash or
     show black screens due to DirectX 8, DirectDraw, or Glide API usage.
@@ -1200,6 +1215,31 @@
   Your games work perfectly WITHOUT ReShade. It is entirely optional and
   can be uninstalled at any time. No knowledge of graphics or shaders is
   required to use it -- you pick effects through a simple in-game menu.
+  BEGINNER VISUAL PROFILES
+
+    ReShade setup offers five bounded visual profiles:
+
+      Original           No TPM visual enhancement.
+      Clean & Sharp      Clearer edges with LumaSharpen.
+      Vivid Arcade       Stronger color with Vibrance.
+      Enhanced Arcade    Clearer edges followed by stronger color.
+      Classic Arcade CRT CRT-style scanlines and arcade-display character.
+
+    The separate TPM preview window uses a deliberately engineered synthetic
+    arcade test scene. It offers Before, After, and Split views from the same
+    neutral source. The scene includes small text, fine lines, geometric
+    shapes, gradients, contrast regions, color blocks, texture detail, and CRT
+    scanline cues so each approved profile's intended change is easy to see.
+    The preview is illustrative, not a pixel-perfect guarantee for every game.
+    Preview files and cached renderings are local TPM-owned data; no
+    copyrighted game screenshots are bundled.
+
+    If the preview file, cache, graphics window, or display environment is
+    unavailable, TPM shows the profile description and continues normally.
+    Previewing never changes ReShade trust, generated presets, game files,
+    monitor settings, or deployment state. Performance and resolution notes
+    are advisory only.
+
 
   HOW IT IS INSTALLED
 
