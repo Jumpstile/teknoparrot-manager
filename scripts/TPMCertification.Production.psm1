@@ -220,6 +220,19 @@ function New-TPMProductionWorkflowAuthorityV1 {
                 $issued=&$issue 'TPMPublicationOutcomeV1' 'PublicationOutcome' $json
                 $state.Phase='PublicationIssued';return $issued
             }
+            'IssueCertificationFinalOutcome'{
+                if($state.Phase-cne'EligibilityIssued'){throw "ILLEGAL_PHASE: $($state.Phase) IssueCertificationFinalOutcome"}
+                if(-not(&$validate $Value 'Eligibility')){throw 'PROVENANCE_INVALID: Eligibility'}
+                if($state.Registry.ContainsKey('FinalOutcome')){throw 'DUPLICATE_ISSUANCE: FinalOutcome'}
+                $finalStatus=if([bool]$state.EligibleForCertification){'CERTIFIED'}else{'NOT CERTIFIED'}
+                $exitCode=if($state.EligibleForCertification){0}else{1}
+                $failureReasons=New-Object Collections.Generic.List[object]
+                foreach($reason in @($state.EligibilityFailureReasons)){$failureReasons.Add($reason)}
+                $final=[ordered]@{SchemaVersion=1;RunIdentity=$state.RunIdentity;EligibilityPayloadSha256=$state.EligibilityPayloadSha256;EligibleForCertification=[bool]$state.EligibleForCertification;PublicationCommitted=$false;FinalStatus=$finalStatus;ExitCode=$exitCode;FailureReasons=$failureReasons.ToArray()}
+                $json=&$jcs $final
+                $issued=&$issue 'TPMFinalOutcomeV1' 'FinalOutcome' $json
+                $state.Phase='FinalOutcomeIssued';return $issued
+            }
             'IssueFinalOutcome'{
                 if($state.Phase-cne'PublicationIssued'){throw "ILLEGAL_PHASE: $($state.Phase) IssueFinalOutcome"}
                 if(-not(&$validate $Value 'Eligibility')){throw 'PROVENANCE_INVALID: Eligibility'}

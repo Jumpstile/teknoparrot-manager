@@ -2547,12 +2547,8 @@ finally {
         }.GetNewClosure()
 
         # Step 5: invoke the sole seven-step certification core
-        # (Checkpoint B1/ADR155-0309 Sub-step A's
-        # Complete-TPMProductionCertificationCycleV1) -- eligibility,
-        # Section 8.3 candidate (bundle construction only, never presented as
-        # an authoritative runtime outcome), staging, publication commit,
-        # genuine dispatcher-issued TPMFinalOutcomeV1, and the runtime
-        # projection derived exclusively from that genuine final outcome.
+        # Certification is deliberately evidence-only. Publication and
+        # release finalization require a separate explicit -Publish caller.
         $productionCycleResult = Complete-TPMProductionCertificationCycleV1 -Authority $productionAuthority -SealedRun $productionSealedRun -StagingParentRoot $productionStagingParentRoot -DestinationRoot $productionDestinationRoot -IdentityGuard $productionIdentityGuard
     } catch {
         $productionAborted = $true

@@ -51,7 +51,7 @@ function New-TPMPublicationReportV1 {
 }
 
 function New-TPMFinalOutcomeReportV1 {
-    param([Parameter(Mandatory=$true)]$FinalOutcome)
+    param([Parameter(Mandatory=$true)]$FinalOutcome,[switch]$CertificationOnly)
     if($null-eq$FinalOutcome-or$FinalOutcome.GetType().FullName-cne'Jumpstile.TPM.Certification.V1.TPMFinalOutcomeV1'){throw 'REPORT_INVALID: FinalOutcome must be an issued TPMFinalOutcomeV1'}
     try{$parsed=ConvertFrom-Json -InputObject $FinalOutcome.CanonicalJson -ErrorAction Stop}catch{throw 'REPORT_INVALID: FinalOutcome.CanonicalJson did not parse as JSON'}
     foreach($field in @('SchemaVersion','RunIdentity','EligibilityPayloadSha256','EligibleForCertification','PublicationCommitted','FinalStatus','ExitCode')){
@@ -63,7 +63,7 @@ function New-TPMFinalOutcomeReportV1 {
         RunIdentity=[string]$parsed.RunIdentity
         EligibilityPayloadSha256=[string]$parsed.EligibilityPayloadSha256
         EligibilityStatus=$eligibilityStatus
-        RequiredPublicationState='Committed'
+        RequiredPublicationState=if($CertificationOnly){'NotRequiredForCertification'}else{'Committed'}
         FinalStatus=[string]$parsed.FinalStatus
         ExitCode=[int]$parsed.ExitCode
     }

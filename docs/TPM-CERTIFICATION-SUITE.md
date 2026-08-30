@@ -209,6 +209,20 @@ with `-TeknoParrotRoot` (see that script's parameters for `-RepoPath`,
 Passing tests or a successful runtime run is evidence, not release or
 publication authorization.
 
+### Certification-only boundary
+
+Certification execution is evidence-only and fail-closed. The production cycle
+issues the authoritative `CERTIFIED` or `NOT CERTIFIED` outcome from sealed
+eligibility without calling `New-TPMPublicationCommitV1`, writing a commit
+marker, or creating a publication directory. Infrastructure exceptions remain
+`BLOCKED` at the harness boundary and return nonzero.
+
+Publication and release finalization are separate operations. A caller must
+explicitly pass `-Publish` to `Complete-TPMProductionCertificationCycleV1`;
+the certification runner never passes that switch. Passing tests or a
+certification result does not authorize packaging, tagging, releasing,
+pushing, or merging.
+
 ## Pester regression gate: hang detection and live progress (issue #136)
 
 The Pester regression gate runs on a dedicated in-process runspace, not a

@@ -1733,6 +1733,21 @@ without cursor writes.
   for new features/mode numbers -- by definition nothing user-facing changed except
   behavior that was already supposed to work.
 
+## Certification-only and publication boundary
+
+`Complete-TPMProductionCertificationCycleV1` is fail-closed by default:
+certification issues the dispatcher-owned final outcome directly from sealed
+eligibility and does not invoke `New-TPMPublicationCommitV1`. The result keeps
+an explicit skipped commit object so callers can display that no publication
+occurred. The report builder marks this outcome `NotRequiredForCertification`;
+it does not infer that state from a failed publication.
+
+The publication/finalization path is retained behind the explicit `-Publish`
+switch. This separation prevents publisher availability, staging collisions,
+or commit-marker failures from turning a completed certification decision into
+an infrastructure block. Infrastructure failures before an authoritative
+outcome remain harness-level `BLOCKED`.
+
 ## Certification finalization transaction (issue #154)
 
 Complete-TPMCertificationTransaction is the sole authority for the final outcome, over the complete evidence lifecycle, not only the pass/fail decision. It is modeled as a database transaction: it consumes immutable, already-recorded facts -- a private workflow-owned issuance ledger, the scorecard's own Items, an authoritative artifact manifest -- rather than trusting descriptions of those facts that a caller could construct independently, and it treats publication as the final step of the same commit rather than a separate operation the caller has to keep in sync with the decision by hand.

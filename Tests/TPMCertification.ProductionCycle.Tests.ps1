@@ -73,7 +73,7 @@ Describe 'ADR-0155 Phase 3 production certification cycle orchestration' {
 
  It 'produces a genuine CERTIFIED outcome end to end: real manifest/artifact-set hashes drive RegisterCommittedPublication, not placeholders' {
   $run=New-SealedRunV1 $root
-  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard
+  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard -Publish
   $result.Commit.Committed|Should -Be $true
   $observationParsed=$result.PublicationOutcome.CanonicalJson|ConvertFrom-Json
   $observationParsed.ManifestSha256|Should -Be $result.Commit.ManifestSha256
@@ -92,7 +92,7 @@ Describe 'ADR-0155 Phase 3 production certification cycle orchestration' {
   $run=New-SealedRunV1 $root
   $guard={param([string]$Stage) if($Stage-ceq'AfterPublicationCommit'){throw 'CERTIFICATION_IDENTITY_CHANGED_DURING_PRODUCTION_CYCLE: branch/ref mutation'};return $true}.GetNewClosure()
   $errorRecord=$null
-  try{Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $guard}catch{$errorRecord=$_}
+  try{Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $guard -Publish}catch{$errorRecord=$_}
   $errorRecord|Should -Not -BeNullOrEmpty
   $errorRecord.Exception.Message|Should -Match '^POST_COMMIT_ROLLBACK_SUCCEEDED:'
   $errorRecord.Exception.Message|Should -Match 'CERTIFICATION_IDENTITY_CHANGED_DURING_PRODUCTION_CYCLE'
@@ -104,7 +104,7 @@ Describe 'ADR-0155 Phase 3 production certification cycle orchestration' {
   $run=New-SealedRunV1 $root
   $guard={param([string]$Stage) if($Stage-ceq'AfterFinalProjection'){throw 'CERTIFICATION_IDENTITY_CHANGED_DURING_PRODUCTION_CYCLE: ref snapshot changed'};return $true}.GetNewClosure()
   $errorRecord=$null
-  try{Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $guard}catch{$errorRecord=$_}
+  try{Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $guard -Publish}catch{$errorRecord=$_}
   $errorRecord|Should -Not -BeNullOrEmpty
   $errorRecord.Exception.Message|Should -Match '^POST_COMMIT_ROLLBACK_SUCCEEDED:'
   $errorRecord.Exception.Message|Should -Match 'CERTIFICATION_IDENTITY_CHANGED_DURING_PRODUCTION_CYCLE'
@@ -116,13 +116,13 @@ Describe 'ADR-0155 Phase 3 production certification cycle orchestration' {
   $run=New-SealedRunV1 $root
   $stages=New-Object Collections.Generic.List[string]
   $guard={param([string]$Stage);[void]$Stages.Add($Stage);return $true}.GetNewClosure()
-  [void](Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $guard)
+  [void](Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $guard -Publish)
   @($stages.ToArray())|Should -Be @('BeforeEligibility','BeforePublicationCommit','AfterPublicationCommit','AfterFinalOutcome','AfterFinalProjection')
  }
 
  It 'produces a genuine NOT CERTIFIED outcome (score-ineligible) while still publishing the complete committed bundle' {
   $run=New-SealedRunV1 $root $true
-  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard
+  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard -Publish
   $result.Commit.Committed|Should -Be $true
   @(Get-ChildItem -LiteralPath $result.Commit.DestinationDirectory -File).Count|Should -Be 7
   $result.Projection.FinalStatus|Should -Be 'NOT CERTIFIED'
@@ -131,7 +131,7 @@ Describe 'ADR-0155 Phase 3 production certification cycle orchestration' {
 
  It 'watch item: the Section 8.3 candidate participates in manifest construction but cannot drive runtime certification' {
   $run=New-SealedRunV1 $root
-  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard
+  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard -Publish
   # The candidate's own bytes are exactly what got staged/committed into the manifest's FinalOutcomeJson slot.
   $manifestParsed=$result.Manifest.Json|ConvertFrom-Json
   $finalOutcomeEntry=@($manifestParsed.Artifacts|Where-Object{$_.Identifier-eq'FinalOutcomeJson'})[0]
@@ -150,7 +150,7 @@ Describe 'ADR-0155 Phase 3 production certification cycle orchestration' {
   $collidingDir=Join-Path ([IO.Path]::GetFullPath($destinationParent)) $runIdentity
   New-Item -ItemType Directory -Path $collidingDir|Out-Null
   [IO.File]::WriteAllBytes((Join-Path $collidingDir 'TPM-Certification-Eligibility.json'),[byte[]](9,9,9))
-  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard
+  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard -Publish
   $result.Commit.Committed|Should -Be $false
   $observationParsed=$result.PublicationOutcome.CanonicalJson|ConvertFrom-Json
   $observationParsed.Committed|Should -Be $false
@@ -173,7 +173,7 @@ Describe 'ADR-0155 Phase 3 production certification cycle orchestration' {
   $collidingDir=Join-Path ([IO.Path]::GetFullPath($destinationParent)) $runIdentity
   New-Item -ItemType Directory -Path $collidingDir|Out-Null
   [IO.File]::WriteAllBytes((Join-Path $collidingDir 'TPM-Certification-Scorecard.md'),[byte[]](9))
-  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard
+  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard -Publish
   $result.Commit.Committed|Should -Be $false
   $rolledBack=@(Get-ChildItem -LiteralPath $stagingParent -Recurse -File)
   @($rolledBack|Where-Object{$_.Name-eq'TPM-Certification-Eligibility.json'}).Count|Should -Be 1
@@ -183,7 +183,7 @@ Describe 'ADR-0155 Phase 3 production certification cycle orchestration' {
 
  It 'the on-disk committed Final-Outcome artifact is the Section 8.3 candidate schema, agreeing with the runtime projection when publication commits' {
   $run=New-SealedRunV1 $root
-  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard
+  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard -Publish
   $onDiskPath=Join-Path $result.Commit.DestinationDirectory 'TPM-Certification-Final-Outcome.json'
   $onDiskParsed=[IO.File]::ReadAllText($onDiskPath)|ConvertFrom-Json
   @($onDiskParsed.PSObject.Properties.Name|Sort-Object)|Should -Be @('EligibilityPayloadSha256','EligibilityStatus','ExitCode','FinalStatus','RequiredPublicationState','RunIdentity','SchemaVersion')
@@ -244,7 +244,7 @@ Describe 'ADR-0155 Phase 3 post-commit exception safety (ADR155-0309 Checkpoint 
   $failingAuthority=New-TPMFailingAuthorityWrapperV1 -RealAuthority $run.Authority -FailOperation 'IssueFinalOutcome'
   $errorRecord=$null
   try{
-   Complete-TPMProductionCertificationCycleV1 -Authority $failingAuthority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard
+   Complete-TPMProductionCertificationCycleV1 -Authority $failingAuthority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard -Publish
   }catch{$errorRecord=$_}
   $errorRecord|Should -Not -BeNullOrEmpty
   $errorRecord.Exception.Message|Should -Match '^POST_COMMIT_ROLLBACK_SUCCEEDED:'
@@ -260,7 +260,7 @@ Describe 'ADR-0155 Phase 3 post-commit exception safety (ADR155-0309 Checkpoint 
   $failingAuthority=New-TPMFailingAuthorityWrapperV1 -RealAuthority $run.Authority -FailOperation 'RegisterCommittedPublication'
   $errorRecord=$null
   try{
-   Complete-TPMProductionCertificationCycleV1 -Authority $failingAuthority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard
+   Complete-TPMProductionCertificationCycleV1 -Authority $failingAuthority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard -Publish
   }catch{$errorRecord=$_}
   $errorRecord.Exception.Message|Should -Match '^POST_COMMIT_ROLLBACK_SUCCEEDED:'
   (Test-Path -LiteralPath $destinationDir)|Should -Be $false
@@ -292,7 +292,7 @@ Describe 'ADR-0155 Phase 3 post-commit exception safety (ADR155-0309 Checkpoint 
   $errorRecord=$null
   try{
    try{
-    Complete-TPMProductionCertificationCycleV1 -Authority $failingAuthority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard
+    Complete-TPMProductionCertificationCycleV1 -Authority $failingAuthority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard -Publish
    }catch{$errorRecord=$_}
   }finally{
    if($tpmLockBox.Stream){$tpmLockBox.Stream.Dispose();$tpmLockBox.Stream=$null}
@@ -328,7 +328,7 @@ Describe 'ADR-0155 Phase 3 post-commit exception safety (ADR155-0309 Checkpoint 
   $errorRecord=$null
   try{
    try{
-    Complete-TPMProductionCertificationCycleV1 -Authority $failingAuthority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard
+    Complete-TPMProductionCertificationCycleV1 -Authority $failingAuthority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard -Publish
    }catch{$errorRecord=$_}
   }finally{
    if($tpmLockBox.Stream){$tpmLockBox.Stream.Dispose();$tpmLockBox.Stream=$null}
@@ -361,4 +361,34 @@ Describe 'ADR-0155 Phase 3 post-commit exception safety (ADR155-0309 Checkpoint 
   ($failedMessage -like 'POST_COMMIT_ROLLBACK_FAILED:*')|Should -Be $true
   ($ordinaryAbortMessage -like 'POST_COMMIT_ROLLBACK_FAILED:*')|Should -Be $false
  }
+Describe 'Certification-only publication boundary' {
+ BeforeEach {
+  $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $root|Out-Null
+  $stagingParent=Join-Path $root 'staging';New-Item -ItemType Directory -Path $stagingParent|Out-Null
+  $destinationParent=Join-Path $root 'destination';New-Item -ItemType Directory -Path $destinationParent|Out-Null
+ }
+ It 'issues CERTIFIED without invoking or creating publication' {
+  $run=New-SealedRunV1 $root
+  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard
+  $result.Projection.FinalStatus|Should -Be 'CERTIFIED'
+  $result.Projection.ExitCode|Should -Be 0
+  $result.Commit.Skipped|Should -Be $true
+  $result.PublicationOutcome|Should -BeNullOrEmpty
+  &$run.Authority GetPhase|Should -Be 'FinalOutcomeIssued'
+  ($result.FinalOutcomeReport.Json|ConvertFrom-Json).RequiredPublicationState|Should -Be 'NotRequiredForCertification'
+  @(Get-ChildItem -LiteralPath $destinationParent -Recurse -Force)|Should -HaveCount 0
+  @(Get-ChildItem -LiteralPath $stagingParent -Recurse -Force)|Should -HaveCount 0
+ }
+ It 'issues NOT CERTIFIED for ineligible evidence without publication' {
+  $run=New-SealedRunV1 $root $true
+  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard
+  $result.Projection.FinalStatus|Should -Be 'NOT CERTIFIED'
+  $result.Projection.ExitCode|Should -Be 1
+  ($result.FinalOutcome.CanonicalJson|ConvertFrom-Json).PublicationCommitted|Should -BeFalse
+  $result.Commit.Skipped|Should -Be $true
+  $result.PublicationOutcome|Should -BeNullOrEmpty
+  @(Get-ChildItem -LiteralPath $destinationParent -Recurse -Force)|Should -HaveCount 0
+  @(Get-ChildItem -LiteralPath $stagingParent -Recurse -Force)|Should -HaveCount 0
+ }
+}
 }
