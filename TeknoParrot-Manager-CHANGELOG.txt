@@ -39,6 +39,10 @@
   Certification hardening: exact branch/commit/upstream/ref/reflog identity is
   captured and guarded across production publication/finalization, with
   structured publisher diagnostics and concurrent-run protection.
+  Certification strict-mode hardening: empty approved-profile/effect/display
+  lookups, optional eligibility/storage evidence, and rollback result shapes now
+  remain explicit under the certification runner's strict PowerShell mode;
+  collision and verified-rollback states are preserved.
 
   Governance: local-worktree/GitHub handoff, package identity, and #290
   documentation-freshness evidence are mandatory source-controlled gates.

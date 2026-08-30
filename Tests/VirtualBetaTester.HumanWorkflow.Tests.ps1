@@ -332,6 +332,7 @@ function Read-MainMenuChoiceResponsive {
 `$pendingApplyMode = `$null
 `$forceRealApply = `$false
 `$Unattended = `$false
+`$menuExpanded = `$false
 `$iterations = 0
 while (`$true) {
     `$iterations++

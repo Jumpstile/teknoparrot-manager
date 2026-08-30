@@ -4097,7 +4097,9 @@ function Get-TpmReShadeEffectCatalog {
 
 function Get-TpmReShadeProfile {
     param([string]$ProfileId)
-    return @(Get-TpmReShadeProfiles | Where-Object { $_.ProfileId -eq $ProfileId })[0]
+    $profileMatches = @(Get-TpmReShadeProfiles | Where-Object { $_.ProfileId -eq $ProfileId })
+    if ($profileMatches.Count -eq 0) { return $null }
+    return $profileMatches[0]
 }
 
 function Test-TpmReShadePresetContent {
@@ -4336,7 +4338,8 @@ function Restore-TpmReShadeProfile {
         $ownershipPath = if ([System.IO.Path]::GetExtension($OwnershipRoot) -ieq '.json') { $OwnershipRoot } else { Join-Path $OwnershipRoot 'profile.json' }
         $deployment = Install-TpmReShadeProfileDeployment -ProfileDefinition $restoreProfile -VariantId $variant.VariantId -GamePath $GamePath -Doc $Doc -SourceDll $SourceDll -SourceDll32 $SourceDll32 -CacheRoot $CacheRoot -OwnershipPath $ownershipPath -CanonicalPreset -FaultStage $FaultStage
         if (-not $deployment.Succeeded) {
-            return [pscustomobject]@{ Succeeded = $false; State = $deployment.State; Reason = $deployment.Reason; Error = $deployment.Error; RollbackVerified = $deployment.RollbackVerified }
+            $rollbackVerified = if ($deployment.PSObject.Properties['RollbackVerified']) { $deployment.RollbackVerified } else { $null }
+            return [pscustomobject]@{ Succeeded = $false; State = $deployment.State; Reason = $deployment.Reason; Error = $deployment.Error; RollbackVerified = $rollbackVerified }
         }
         if ($GameId) {
             try { Add-TpmReShadeProfileHistory -GameId $GameId -ProfileDefinition $restoreProfile -VariantId $variant.VariantId -StateRoot $StateRoot | Out-Null }
@@ -4590,6 +4593,7 @@ function Test-TpmReShadeStoragePreflight {
         if ($volume.PSObject.Properties['RequiredBytes'] -and $null -ne $volume.RequiredBytes) { $required = [int64]$volume.RequiredBytes }
         elseif ($volumes.Count -eq 1 -and $null -ne $topRequired) { $required = $topRequired }
         $free = if ($volume.PSObject.Properties['FreeBytes']) { $volume.FreeBytes } else { $null }
+        $demandByRole = if ($volume.PSObject.Properties['DemandByRole']) { $volume.DemandByRole } else { [ordered]@{} }
         $reason = 'sufficient'
         $sufficient = $true
         if ($null -eq $required) {
@@ -4600,7 +4604,7 @@ function Test-TpmReShadeStoragePreflight {
             $sufficient = $false; $reason = 'free capacity is insufficient'
         }
         if (-not $sufficient) { [void]$blocking.Add($root) }
-        [void]$results.Add([pscustomobject]@{ Root = $root; FreeBytes = if ($null -eq $free) { $null } else { [int64]$free }; RequiredBytes = $required; Sufficient = $sufficient; Reason = $reason; Roles = @($volume.Roles); DemandByRole = $volume.DemandByRole })
+        [void]$results.Add([pscustomobject]@{ Root = $root; FreeBytes = if ($null -eq $free) { $null } else { [int64]$free }; RequiredBytes = $required; Sufficient = $sufficient; Reason = $reason; Roles = @($volume.Roles); DemandByRole = $demandByRole })
     }
     if ($volumes.Count -eq 0 -and $null -ne $topRequired -and $topRequired -gt 0) { [void]$blocking.Add('UNKNOWN_VOLUME') }
     return [pscustomobject]@{ Allowed = ($blocking.Count -eq 0); BlockingVolumes = $blocking.ToArray(); RequiredWorkingBytes = $topRequired; Volumes = $volumes; VolumeResults = $results.ToArray() }
@@ -4746,7 +4750,10 @@ function Install-TpmReShadeApprovedEffect {
                     Remove-Item -LiteralPath $entry.DestinationPath -Force -ErrorAction Stop
                 }
                 $prior = $null
-                if ($old) { $prior = @($old.Files | Where-Object DestinationPath -eq $entry.DestinationPath)[0] }
+                if ($old) {
+                    $priorMatches = @($old.Files | Where-Object DestinationPath -eq $entry.DestinationPath)
+                    if ($priorMatches.Count -gt 0) { $prior = $priorMatches[0] }
+                }
                 if ($prior -and -not (Test-TpmReShadeApprovedEffectFile -FileSpec ([pscustomobject]@{ SHA256 = $prior.ExpectedSHA256 }) -Path $entry.DestinationPath)) { throw 'restored file hash mismatch' }
                 if (-not $prior -and (Test-Path -LiteralPath $entry.DestinationPath -PathType Leaf)) { throw 'new file remained after rollback' }
             } catch { $rollbackOk = $false; $rollbackErrors += $_.Exception.Message }
@@ -4933,9 +4940,11 @@ function Resolve-TpmReShadeEffectStack {
     $selected = New-Object System.Collections.Generic.List[object]
     $errors = New-Object System.Collections.Generic.List[string]
     foreach ($id in $requested) {
-        $effect = @($catalog | Where-Object EffectId -eq $id)[0]
-        if (-not $effect) { [void]$errors.Add("Effect is not in the approved catalog: $id"); continue }
-        if (-not ($selected.EffectId -contains $effect.EffectId)) { [void]$selected.Add($effect) }
+        $effectMatches = @($catalog | Where-Object EffectId -eq $id)
+        if ($effectMatches.Count -eq 0) { [void]$errors.Add("Effect is not in the approved catalog: $id"); continue }
+        $effect = $effectMatches[0]
+        $selectedIds = @($selected | ForEach-Object { [string]$_.EffectId })
+        if ($selectedIds -notcontains [string]$effect.EffectId) { [void]$selected.Add($effect) }
     }
     foreach ($effect in $selected) {
         foreach ($other in $selected) {
@@ -4998,9 +5007,14 @@ function Get-TpmDisplayTopologyClassification {
         $sizes = @($usable | ForEach-Object { '{0}x{1}' -f $_.Resolution.Width,$_.Resolution.Height } | Select-Object -Unique)
         if ($state -ne 'MALFORMED' -and (($orientations.Count -gt 1) -or ($refresh.Count -gt 1) -or ($sizes.Count -gt 1))) { $state = 'MULTIPLE_MIXED' }
     } elseif ($malformed) { $state = 'MALFORMED' }
-    $target = if (-not [string]::IsNullOrWhiteSpace($TargetDisplayId)) { @($usable | Where-Object { [string]$_.Record.Id -eq $TargetDisplayId })[0] } else { $null }
+    $target = $null
+    if (-not [string]::IsNullOrWhiteSpace($TargetDisplayId)) {
+        $targetMatches = @($usable | Where-Object { [string]$_.Record.Id -eq $TargetDisplayId })
+        if ($targetMatches.Count -gt 0) { $target = $targetMatches[0] }
+    } elseif ($usable.Count -eq 1) {
+        $target = $usable[0]
+    }
     $targetConfidence = if ($target) { 'CONFIDENT' } elseif (-not [string]::IsNullOrWhiteSpace($TargetDisplayId)) { 'UNKNOWN' } elseif ($usable.Count -eq 1) { 'CONFIDENT' } elseif ($state -eq 'MALFORMED') { 'UNKNOWN' } else { 'AMBIGUOUS' }
-    if (-not $target -and [string]::IsNullOrWhiteSpace($TargetDisplayId) -and $usable.Count -eq 1) { $target = $usable[0] }
     return [pscustomobject]@{ State = $state; Confidence = if ($state -eq 'MALFORMED') { 'UNKNOWN' } elseif ($usable.Count -eq 1 -or $primary.Count -eq 1) { 'KNOWN' } else { 'AMBIGUOUS' }; UsableDisplays = $usable.Count; TargetConfidence = $targetConfidence; TargetDisplayId = if ($target) { [string]$target.Record.Id } else { $null }; TargetResolution = if ($target) { $target.Resolution } else { $null }; Advisory = if ($targetConfidence -eq 'AMBIGUOUS') { 'The game target display is not evidenced; TPM will not choose a monitor.' } elseif ($state -eq 'MALFORMED') { 'Display topology evidence is malformed; TPM will not make a suitability claim.' } else { $null } }
 }
 
@@ -5079,18 +5093,22 @@ function Get-TpmReShadeEligibility {
     param([Parameter(Mandatory)]$Stack, [Parameter(Mandatory)]$Evidence)
     $reasons = New-Object System.Collections.Generic.List[string]
     $classes = @($Stack.Effects | ForEach-Object PerformanceClass)
-    $resolutionClass = if ($Evidence.ResolutionClass) { $Evidence.ResolutionClass } else { (Get-TpmResolutionClassification -Width $Evidence.RenderWidth -Height $Evidence.RenderHeight).State }
+    $renderWidth = if ($Evidence.PSObject.Properties['RenderWidth']) { $Evidence.RenderWidth } else { $null }
+    $renderHeight = if ($Evidence.PSObject.Properties['RenderHeight']) { $Evidence.RenderHeight } else { $null }
+    $resolutionClass = if ($Evidence.PSObject.Properties['ResolutionClass'] -and $Evidence.ResolutionClass) { $Evidence.ResolutionClass } else { (Get-TpmResolutionClassification -Width $renderWidth -Height $renderHeight).State }
     if (-not $Stack.Valid) { [void]$reasons.Add('STACK_CONFLICT') }
     if ($Stack.Warning) { [void]$reasons.Add('STACK_UNVALIDATED') }
     if ($Evidence.ActiveGpuConfidence -eq 'UNKNOWN') { [void]$reasons.Add('ACTIVE_GPU_UNKNOWN') }
     if ($resolutionClass -eq 'UNKNOWN') { [void]$reasons.Add('RESOLUTION_UNKNOWN') }
     elseif ($resolutionClass -eq 'MALFORMED') { [void]$reasons.Add('RESOLUTION_MALFORMED') }
     if ($Evidence.RamPressure -eq $true) { [void]$reasons.Add('RAM_PRESSURE') }
-    if ($Evidence.DisplayTopology -and $Evidence.DisplayTopology.TargetConfidence -in @('UNKNOWN','AMBIGUOUS')) { [void]$reasons.Add('DISPLAY_TARGET_AMBIGUOUS') }
+    $displayTopology = if ($Evidence.PSObject.Properties['DisplayTopology']) { $Evidence.DisplayTopology } else { $null }
+    if ($displayTopology -and $displayTopology.TargetConfidence -in @('UNKNOWN','AMBIGUOUS')) { [void]$reasons.Add('DISPLAY_TARGET_AMBIGUOUS') }
     $space = Test-TpmReShadeWorkingSpace -Evidence $Evidence
     if (@($space.InsufficientVolumes).Count -gt 0) { [void]$reasons.Add('DISK_SPACE_LOW') }
     elseif (@($space.UnknownVolumes).Count -gt 0) { [void]$reasons.Add('DISK_SPACE_UNKNOWN') }
-    if ($Evidence.PowerSavingActive -eq $true) { [void]$reasons.Add('POWER_SAVING_ACTIVE') }
+    $powerSavingActive = if ($Evidence.PSObject.Properties['PowerSavingActive']) { $Evidence.PowerSavingActive } else { $false }
+    if ($powerSavingActive -eq $true) { [void]$reasons.Add('POWER_SAVING_ACTIVE') }
     if ($resolutionClass -eq 'KNOWN_UNUSUALLY_HIGH' -and ($classes -contains 'HIGH')) { [void]$reasons.Add('RESOLUTION_HIGH') }
     $status = 'GOOD_MATCH'
     if ($reasons -contains 'STACK_CONFLICT' -or $reasons -contains 'DISK_SPACE_LOW') { $status = 'NOT_RECOMMENDED' }
@@ -5103,12 +5121,13 @@ function Get-TpmReShadeEligibility {
 
 function Test-TpmReShadeWorkingSpace {
     param([Parameter(Mandatory)]$Evidence)
-    $required = [int64]$(if ($Evidence.RequiredWorkingBytes) { $Evidence.RequiredWorkingBytes } else { 64MB })
+    $requiredValue = if ($Evidence.PSObject.Properties['RequiredWorkingBytes']) { $Evidence.RequiredWorkingBytes } else { $null }
+    $required = [int64]$(if ($requiredValue) { $requiredValue } else { 64MB })
     $checks = @(
-        [pscustomobject]@{ Name = 'staging'; Free = $Evidence.StagingFreeBytes },
-        [pscustomobject]@{ Name = 'backup'; Free = $Evidence.BackupFreeBytes },
-        [pscustomobject]@{ Name = 'cache'; Free = $Evidence.CacheFreeBytes },
-        [pscustomobject]@{ Name = 'target'; Free = $Evidence.TargetVolumeFreeBytes }
+        [pscustomobject]@{ Name = 'staging'; Free = if ($Evidence.PSObject.Properties['StagingFreeBytes']) { $Evidence.StagingFreeBytes } else { $null } }
+        [pscustomobject]@{ Name = 'backup'; Free = if ($Evidence.PSObject.Properties['BackupFreeBytes']) { $Evidence.BackupFreeBytes } else { $null } }
+        [pscustomobject]@{ Name = 'cache'; Free = if ($Evidence.PSObject.Properties['CacheFreeBytes']) { $Evidence.CacheFreeBytes } else { $null } }
+        [pscustomobject]@{ Name = 'target'; Free = if ($Evidence.PSObject.Properties['TargetVolumeFreeBytes']) { $Evidence.TargetVolumeFreeBytes } else { $null } }
     )
     $unknown = @($checks | Where-Object { $null -eq $_.Free })
     $insufficient = @($checks | Where-Object { $_.Free -is [int64] -and $_.Free -lt $required })

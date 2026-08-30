@@ -9505,7 +9505,7 @@ Describe "RC8 menu and ReShade regressions" {
         )
         $kept = @(Limit-MainMenuBodyRowsToBudget -BodyRows $rows -BodyBudget 3)
         $kept[0].Text | Should -Be '  4) Crosshair Setup'
-        ($kept | Where-Object { $_.Text -match 'orphan' }).Count | Should -Be 0
+        @($kept | Where-Object { $_.Text -match 'orphan' }).Count | Should -Be 0
     }
 
     It "keeps every numbered choice in the supported compact boundary matrix" {
