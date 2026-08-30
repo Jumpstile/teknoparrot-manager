@@ -379,5 +379,16 @@ Describe 'Certification-only publication boundary' {
   @(Get-ChildItem -LiteralPath $destinationParent -Recurse -Force)|Should -HaveCount 0
   @(Get-ChildItem -LiteralPath $stagingParent -Recurse -Force)|Should -HaveCount 0
  }
+ It 'issues NOT CERTIFIED for ineligible evidence without publication' {
+  $run=New-SealedRunV1 $root $true
+  $result=Complete-TPMProductionCertificationCycleV1 -Authority $run.Authority -SealedRun $run.Sealed -StagingParentRoot $stagingParent -DestinationRoot $destinationParent -IdentityGuard $run.IdentityGuard
+  $result.Projection.FinalStatus|Should -Be 'NOT CERTIFIED'
+  $result.Projection.ExitCode|Should -Be 1
+  ($result.FinalOutcome.CanonicalJson|ConvertFrom-Json).PublicationCommitted|Should -BeFalse
+  $result.Commit.Skipped|Should -Be $true
+  $result.PublicationOutcome|Should -BeNullOrEmpty
+  @(Get-ChildItem -LiteralPath $destinationParent -Recurse -Force)|Should -HaveCount 0
+  @(Get-ChildItem -LiteralPath $stagingParent -Recurse -Force)|Should -HaveCount 0
+ }
 }
 }
