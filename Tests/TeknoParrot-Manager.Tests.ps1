@@ -10456,6 +10456,7 @@ Describe "Action Required report output" {
             Notes = 'Technical note only: verify the TPM profile path before launch.'
         })
         Write-TpmActionRequiredReports -HasAnyAction:$false -WriteNotes `
+            -ActionPath $actionPath `
             -NotesPath $notesPath -SetupNotes $notes | Should -BeFalse
         Test-Path -LiteralPath $notesPath | Should -BeTrue
         Test-Path -LiteralPath $actionPath | Should -BeFalse
