@@ -9,8 +9,8 @@ Canonical links: [GitHub repository](https://github.com/Jumpstile/teknoparrot-ma
 > **Current published release: v1.0 RC7** -- read-only readiness and contract-backed compatibility warnings. Test one game after each run. Profiles are backed up automatically before every run. Previous published release: v1.0 RC6 (historical).
 
 > **RC8 candidate status:** this source tree prepares v1.0 RC8 with the
-> runtime-recovery, certification-identity, and governance corrections described
-> below. RC8 is not published and has no release tag or download asset yet.
+> runtime-recovery, certification-identity, governance, and evidence-boundary
+> corrections described below. RC8 is not published and has no release tag or download asset yet.
 
 ---
 
@@ -89,7 +89,7 @@ tree is for review, certification, and release preparation only.
 - **BepInEx setup** — user-approved install, update, or repair-reset for selected games using stable x64/x86 packages with verified backup and rollback.
 - **Postgres setup** — installs and configures the local PostgreSQL 8.3 database some Incredible Technologies games need (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball). Detects which registered games need it automatically; never reinstalls Postgres or recreates an existing database.
 - **Automatic compatibility warnings** — every run checks for known install-path-length limits (Raw Thrills titles, Yu-Gi-Oh! Duel Terminal 6), pinned-file-version requirements (BlazBlue/iDmacDrv32.dll, Tekken Tag Tournament 2/EBOOT.BIN), and known GPU-vendor incompatibilities (AMD/Intel), with details in ACTION REQUIRED.
-- **Game-specific setup notes** — every run checks the community compatibility database (eggmansworld.github.io/TeknoParrot) for any registered game with special setup notes — workarounds, known quirks, the expected executable name — and lists them in ACTION REQUIRED.
+- **Game-specific setup notes** — every run checks the community compatibility database (eggmansworld.github.io/TeknoParrot) for any registered game with special setup notes — workarounds, known quirks, and the expected executable name — and writes them to the separate `TeknoParrot-Manager-game-notes.txt` report. Raw source notes are not copied into ACTION REQUIRED.
 - **LaunchBox direct integration / HyperSpin 2 export** — writes games straight into LaunchBox's own library, or builds an import file for HyperSpin 2, after each run.
 - **Unattended mode** — `-Unattended` flag for scheduled overnight runs.
 - **Preview / dry-run mode** — see what AutoSync/Register would do (extract, register, repair, propagate) with zero files written, then decide whether to apply it for real.
@@ -452,6 +452,7 @@ ReShade adds post-processing effects without changing game data. TPM does not au
 | Classic Arcade CRT | CRT_Lottes only |
 
 The preview window offers Before, After, and Split views. It is illustrative, not a pixel-perfect promise for every game. Preview files and cached renderings are local and TPM-owned; no game screenshots are bundled. If rendering or display is unavailable, TPM shows the text description and profile selection continues. Display and performance notes are advisory only. TPM does not configure monitors or game display settings.
+Profile and effect catalog metadata is advisory until measured evidence exists. No profile is marked recommended or `VALIDATED_SINGLE` without that evidence; pinned hashes establish catalog integrity, not performance validation. Multi-monitor suitability is read-only and advisory, uses caller-supplied evidence, treats duplicate target IDs as ambiguous, and does not separately label `EXTENDED` arrangements or acquire Windows display topology itself.
 
 **Remembered profiles, favorites, and restore:** TPM stores per-game profile
 selection and a bounded history using stable profile IDs and approved effect
@@ -816,7 +817,7 @@ At the end of every run the script prints — and saves to a text file — every
 | **GPU incompatibility**          | Specific registered games confirmed not to work on your detected GPU vendor (AMD or Intel). Informational only — no fix exists. Checked automatically every run; silently skipped if the vendor can't be auto-detected.                                                                                                        |
 | **Firmware not installed**       | Registered games whose emulator (currently pcsx2x6 only) needs firmware/BIOS files TeknoParrot itself doesn't provide. Shows the exact files and folder needed. TPM never downloads, links, or redistributes these — existence check only. Checked automatically every run when a pcsx2x6-based game is registered.            |
 | **Emulator component not found** | A contract-backed required emulator component is missing at its expected path. Shows the contract/detector evidence and affected profiles. Use the normal TeknoParrot installation/update process; TPM does not diagnose why it is missing or repair, download, reinstall, or modify TeknoParrot.                              |
-| **Setup notes**                  | Any registered game with special setup notes in the community compatibility database (eggmansworld.github.io/TeknoParrot) — workarounds, known quirks, etc. Shows the expected executable name and the full notes text, word-wrapped and separated game-by-game. Informational only; skipped silently if the live fetch fails. |
+| **Setup notes**                  | Any registered game with special setup notes in the community compatibility database (eggmansworld.github.io/TeknoParrot) — workarounds, known quirks, etc. Writes the expected executable name and sanitized notes to the separate `TeknoParrot-Manager-game-notes.txt` report. Raw source notes are excluded from Action Required; informational only; skipped silently if the live fetch fails. |
 
 ---
 

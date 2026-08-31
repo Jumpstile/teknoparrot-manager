@@ -4,6 +4,11 @@
 
 - RC7 remains the current published release. RC8 has no public tag, release
   asset, or Scripts mirror; final Version 1.0 remains unpublished.
+- Additional RC8 candidate fixes keep duplicate display identities
+  ambiguous, extend the read-only ReShade eligibility guard through reachable
+  helpers, mark curated profiles/effects `ADVISORY_UNMEASURED`, and separate
+  sanitized setup notes from ACTION REQUIRED. No separate `EXTENDED` topology
+  classification or live Windows display acquisition is included.
 - Eggman updates protect a DAT under the TeknoParrot root and can offer the
   validated primary ZIP/source folder as the explicit destination.
 - PostgreSQL recovery asks the user to choose a replacement password, uses

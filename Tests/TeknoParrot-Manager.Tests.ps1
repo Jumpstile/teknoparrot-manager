@@ -465,9 +465,13 @@ Describe "Issue #220 AutoSync Z recovery" {
     }
 }
 Describe "Beginner-clarity RC wording (optional-download explanations, first-run framing)" {
-    It "clarifies the Eggman dat is not a game download" {
-        $script:ProductionSource | Should -Match "not the games themselves -- it"
-        $script:ProductionSource | Should -Match "never downloads any game data\. It helps TPM recognize and correctly"
+    It "uses the concise Eggman's TeknoParrot DAT prompt" {
+        $script:ProductionSource | Should -Match ([regex]::Escape("Download Eggman's TeknoParrot DAT file package?"))
+        $script:ProductionSource | Should -Match ([regex]::Escape("(TeknoParrot Manager can download Eggman's TeknoParrot DAT file, to be used for game recognition and to help recognize"))
+        $script:ProductionSource | Should -Match ([regex]::Escape("renamed or oddly named games. These are not the games themselves -- TeknoParrot Manager never downloads any game data)"))
+        $script:ProductionSource | Should -Match ([regex]::Escape("D) Download (default)"))
+        $script:ProductionSource | Should -Not -Match "highly recommended|Game-recognition index file|TPM will normally store|Without one, a few games"
+        $script:ProductionSource | Should -Not -Match "Download the latest from Eggman's Repository"
     }
     It "defers the supplementary-dat follow-up out of the initial wizard, with a note rather than a blocking Y/N" {
         # Part 2 item 4: the blocking Y/N was removed from the initial
@@ -498,11 +502,11 @@ Describe "Get-WhatTpmDidSummaryLines (beginner-clarity end-of-run recap)" {
         $registerOnlyLines = Get-WhatTpmDidSummaryLines -AutoSyncRan $false -ZipsExtracted 0 -NewlyRegistered 3 -AlreadyPresent 10 -DatAction 'Reused' -ThumbnailsRequested $true -ManualNeeded 0 -NotInTeknoParrot 0
         ($registerOnlyLines -join "`n") | Should -Not -Match "Extracted"
     }
-    It "describes each dat action distinctly" {
-        ((Get-WhatTpmDidSummaryLines -AutoSyncRan $false -DatAction 'Downloaded' -ThumbnailsRequested $false) -join "`n") | Should -Match "Downloaded the Eggman dat index file"
-        ((Get-WhatTpmDidSummaryLines -AutoSyncRan $false -DatAction 'Updated'    -ThumbnailsRequested $false) -join "`n") | Should -Match "Updated the Eggman dat index file"
-        ((Get-WhatTpmDidSummaryLines -AutoSyncRan $false -DatAction 'Reused'     -ThumbnailsRequested $false) -join "`n") | Should -Match "Used your already-configured dat index file"
-        ((Get-WhatTpmDidSummaryLines -AutoSyncRan $false -DatAction 'NotConfigured' -ThumbnailsRequested $false) -join "`n") | Should -Match "No dat index file configured"
+    It "describes each DAT action distinctly" {
+        ((Get-WhatTpmDidSummaryLines -AutoSyncRan $false -DatAction 'Downloaded' -ThumbnailsRequested $false) -join "`n") | Should -Match "Downloaded Eggman's TeknoParrot DAT file"
+        ((Get-WhatTpmDidSummaryLines -AutoSyncRan $false -DatAction 'Updated'    -ThumbnailsRequested $false) -join "`n") | Should -Match "Updated Eggman's TeknoParrot DAT file"
+        ((Get-WhatTpmDidSummaryLines -AutoSyncRan $false -DatAction 'Reused'     -ThumbnailsRequested $false) -join "`n") | Should -Match "Used your already-configured Eggman's TeknoParrot DAT file"
+        ((Get-WhatTpmDidSummaryLines -AutoSyncRan $false -DatAction 'NotConfigured' -ThumbnailsRequested $false) -join "`n") | Should -Match "No Eggman's TeknoParrot DAT file configured"
     }
     It "distinguishes thumbnails downloaded from skipped" {
         ((Get-WhatTpmDidSummaryLines -AutoSyncRan $false -DatAction 'Reused' -ThumbnailsRequested $true)  -join "`n") | Should -Match "Downloaded missing game icons"
@@ -1909,7 +1913,7 @@ Describe "TeknoParrot Wizard Readiness Handoff (issue #253)" {
                 'TeknoParrot first-run setup: Complete'
                 'Controls: Not verified'
                 ''
-                "TPM registered this game. TeknoParrot owns its own setup wizard, controls configuration, and DAT/XML setup -- those are managed separately and are not performed by TPM."
+                "TeknoParrot Manager registered this game. TeknoParrotUI still owns the game setup wizard and controls configuration."
                 ''
                 'Open TeknoParrot controls configuration and map/test controls before treating this game as ready.'
             ) -join "`n")
@@ -1923,11 +1927,11 @@ Describe "TeknoParrot Wizard Readiness Handoff (issue #253)" {
 
             ($lines -join "`n") | Should -Be (@(
                 'Game registered successfully'
-                'Launch status: Not tested by TPM'
+                'Launch status: Not tested by TeknoParrot Manager'
                 'TeknoParrot first-run setup: Not yet complete -- TeknoParrot may still ask you to complete its setup wizard'
                 'Controls: Missing'
                 ''
-                "TPM registered this game. TeknoParrot owns its own setup wizard, controls configuration, and DAT/XML setup -- those are managed separately and are not performed by TPM."
+                "TeknoParrot Manager registered this game. TeknoParrotUI still owns the game setup wizard and controls configuration."
                 ''
                 'Open TeknoParrot controls configuration and map/test controls before treating this game as ready.'
             ) -join "`n")
@@ -1939,7 +1943,7 @@ Describe "TeknoParrot Wizard Readiness Handoff (issue #253)" {
             $lines = Get-OnboardingHandoffSummaryLines -Assessment $assessment -WizardState $wizardState
 
             $lines | Should -Contain 'Game registered successfully'
-            $lines | Should -Contain 'Launch status: Not tested by TPM'
+            $lines | Should -Contain 'Launch status: Not tested by TeknoParrot Manager'
             $lines | Should -Contain 'TeknoParrot first-run setup: Complete'
             $lines | Should -Contain 'Controls: Not verified'
         }
@@ -1995,8 +1999,8 @@ Describe "TeknoParrot Wizard Readiness Handoff (issue #253)" {
             $text = (Get-OnboardingHandoffSummaryLines -Assessment $assessment -WizardState $wizardState) -join "`n"
 
             $text | Should -Not -Match 'TeknoParrot handled registration'
-            $text | Should -Match 'TPM registered this game'
-            $text | Should -Match "TeknoParrot owns its own setup wizard"
+            $text | Should -Match 'TeknoParrot Manager registered this game'
+            $text | Should -Match 'TeknoParrotUI still owns the game setup wizard'
         }
     }
 
@@ -6240,10 +6244,10 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
 
     It "documents the ownership boundary and keeps the normal first-run call prompt-free" {
         $ProductionSource | Should -Match 'ParrotData\.xml'
-        $ProductionSource | Should -Match 'DAT/XML setting'
-        $ProductionSource | Should -Match 'supplementary game ZIPs'
-        $ProductionSource | Should -Match 'staging/install folder'
-        $ProductionSource | Should -Match 'TPM will normally store a downloaded copy under'
+        $ProductionSource | Should -Match 'Eggman.{0,20}TeknoParrot DAT file'
+        $ProductionSource | Should -Match 'extra version-info file'
+        $ProductionSource | Should -Match 'staging folder'
+        $ProductionSource | Should -Match 'TeknoParrot Manager can download a fresh copy of Eggman.{0,20}TeknoParrot DAT file'
         $ProductionSource | Should -Match 'Invoke-EggmanDatDownloadInteractive \$rel -ProgramDirectory \$PSScriptRoot'
         $ProductionSource | Should -Match 'Resolve-EggmanDatUpdateDestination -CurrentPath \$eggmanDatZip'
     }
@@ -7855,6 +7859,20 @@ Describe "Onboarding pointer-text menu-label sync (Part 2 item 8: no hardcoded m
         $script:ProductionSource | Should -Not -Match 'choose option 6 from the menu'
     }
 }
+Describe "dgVoodoo2 no-candidate beginner flow" {
+    It "reports no setup needed without exposing broad manual selection" {
+        $script:ProductionSource | Should -Match 'No dgVoodoo2 setup needed'
+        $script:ProductionSource | Should -Match 'Choice, default Q'
+        $script:ProductionSource | Should -Match '\[M\] Select specific games'
+        $script:ProductionSource | Should -Not -Match 'No dgVoodoo2 setup needed[\s\S]{0,1200}All \$\(\$profiles.Count\) registered game'
+    }
+    It "keeps manual selection behind Details and does not use TPM status wording" {
+        $script:ProductionSource | Should -Match '\[D\] Details  \[Q\] Back to menu'
+        $script:ProductionSource | Should -Not -Match 'TPM STATUS'
+        $script:ProductionSource | Should -Match 'Select-DgVoodoo2GamesInteractive'
+    }
+}
+
 
 Describe "Path-concept non-conflation guard (Part 2 item 9)" {
     # Guards against re-collapsing the three distinct path concepts this
@@ -8120,6 +8138,19 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         $output | Should -Match ([regex]::Escape("1) AutoSync"))
         $output | Should -Match 'Enter number'
     }
+    It "keeps selectable menu items visible at medium widths" {
+        foreach ($case in @(
+            @{ Tier = 'Standard'; Width = 100 },
+            @{ Tier = 'Professional'; Width = 120 }
+        )) {
+            $screen = Render-MainMenuScreen -Tier $case.Tier -Width $case.Width -Height 25
+            $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+            $output | Should -Match '1\)'
+            $output | Should -Match '15\)'
+            $screen.Rows.Count | Should -BeGreaterThan 0
+        }
+    }
+
     It "rendered rows never exceed the detected viewport width" {
         foreach ($case in @(
             @{ Tier = 'Compact'; Width = 80; Height = 25 },
@@ -8942,7 +8973,7 @@ Describe "Get-CompatibilityWarnings -- pcsx2x6 component (issue #254)" {
 
     It "keeps the warning actionable without asserting antivirus causality" {
         $start = $script:ProductionSource.IndexOf('# -- 8a. Missing emulator component (issue #254)')
-        $end = $script:ProductionSource.IndexOf('# -- 9. Game-specific setup notes', $start)
+        $end = $script:ProductionSource.IndexOf('Write-Host "============================================" -ForegroundColor Yellow', $start)
         $warningBlock = $script:ProductionSource.Substring($start, $end - $start)
 
         $warningBlock | Should -Match 'Get-CompatibilityWarnings|ExeMissing'
@@ -8951,9 +8982,9 @@ Describe "Get-CompatibilityWarnings -- pcsx2x6 component (issue #254)" {
         $warningBlock | Should -Match 'Confidence'
         $warningBlock | Should -Match 'Verify or restore this component through your normal TeknoParrot installation/update process'
         $warningBlock | Should -Not -Match '(?i)anti[- ]?virus|quarantine'
-        $script:ProductionSource | Should -Match '\$asb\.AppendLine\("  Contract : \$\(\$e\.ContractId\)'
-        $script:ProductionSource | Should -Match '\$asb\.AppendLine\("  Detector : \$\(\$e\.DetectorMethod\)'
-        $script:ProductionSource | Should -Match '\$asb\.AppendLine\("  Evidence : contract-backed; confidence \$\(\$e\.Confidence\)'
+        $script:ProductionSource | Should -Match '\$builder\.AppendLine\("  Contract : \$\(\$e\.ContractId\)'
+        $script:ProductionSource | Should -Match '\$builder\.AppendLine\("  Detector : \$\(\$e\.DetectorMethod\)'
+        $script:ProductionSource | Should -Match '\$builder\.AppendLine\("  Evidence : contract-backed; confidence \$\(\$e\.Confidence\)'
     }
 
     It "keeps component assessment read-only and preserves the complete TP-root snapshot" {
@@ -9522,7 +9553,9 @@ Describe "RC8 menu and ReShade regressions" {
     It "normal ReShade setup does not require a preset path" {
         $source = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1') -Raw
         $source | Should -Match 'Visual profile'
-        $source | Should -Match 'keep selected profile'
+        $source | Should -Match 'Use the selected ReShade profile\?'
+        $source | Should -Match '\{0\} will be applied\. Choose Custom only if you already have your own ReShade \.ini preset\.'
+        $source | Should -Match '\[Y\] Yes, use \{0\}\s+\[C\] Custom preset\s+\[B\] Back'
         $source | Should -Not -Match 'Get it at\s+https://reshade\.me'
         $source | Should -Not -Match 'replace ReShade\\ReShade64\.dll'
     }
@@ -9550,11 +9583,11 @@ Describe "ReShade custom preset validation" {
 }
 
 Describe "Approved ReShade profile catalog" {
-    It "has deterministic unique profiles and exactly one recommendation" {
+    It "has deterministic unique profiles without unsupported recommendations" {
         $profiles = @(Get-TpmReShadeProfiles)
         ($profiles.ProfileId | Sort-Object -Unique).Count | Should -Be $profiles.Count
         ($profiles.FriendlyName | Sort-Object -Unique).Count | Should -Be $profiles.Count
-        @($profiles | Where-Object Recommended).Count | Should -Be 1
+        @($profiles | Where-Object Recommended).Count | Should -Be 0
         @($profiles | Where-Object ProfileId -eq 'Original').Count | Should -Be 1
         @($profiles | Where-Object { $_.SchemaVersion -eq 2 }).Count | Should -Be $profiles.Count
     }
@@ -9564,6 +9597,14 @@ Describe "Approved ReShade profile catalog" {
         foreach($p in $profiles){(@($p.Effects)-join ',')|Should -Be (@($expected[$p.ProfileId])-join ',');(New-TpmReShadePresetContent -ProfileDefinition $p)|Should -Match '(?m)^Techniques='}
         (New-TpmReShadePresetContent -ProfileDefinition (Get-TpmReShadeProfile -ProfileId 'EnhancedArcade'))|Should -Match 'Techniques=LumaSharpen,Vibrance'
         (Get-TpmReShadeProfile -ProfileId 'Original').Effects.Count|Should -Be 0
+    }
+    It "requires measured evidence before compatibility status or recommendation is asserted" {
+        $profiles = @(Get-TpmReShadeProfiles)
+        $effects = @(Get-TpmReShadeEffectCatalog)
+        @($profiles | Where-Object { $_.Recommended -or $_.MeasuredEvidence -or $_.CompatibilityState -eq 'VALIDATED_SINGLE' }).Count | Should -Be 0
+        @($effects | Where-Object { $_.MeasuredEvidence -or $_.CompatibilityState -eq 'VALIDATED_SINGLE' }).Count | Should -Be 0
+        @($profiles | Where-Object CompatibilityState -ne 'ADVISORY_UNMEASURED').Count | Should -Be 0
+        @($effects | Where-Object CompatibilityState -ne 'ADVISORY_UNMEASURED').Count | Should -Be 0
     }
 
 
@@ -9823,10 +9864,86 @@ Describe "Bounded ReShade multi-monitor behavior" {
         (Get-TpmDisplayTopologyClassification -Displays $d).TargetConfidence|Should -Be 'AMBIGUOUS'
         $changed=Get-TpmDisplayTopologyClassification -Displays @(New-TestDisplay 'c' 1920 1080 $true) -TargetDisplayId 'b';$changed.TargetConfidence|Should -Be 'UNKNOWN';$changed.TargetDisplayId|Should -BeNullOrEmpty
     }
+    It "treats duplicate explicit display IDs as ambiguous evidence" {
+        $d = @(
+            (New-TestDisplay 'dup' 1920 1080 $true),
+            (New-TestDisplay 'dup' 1920 1080 $false)
+        )
+        $result = Get-TpmDisplayTopologyClassification -Displays $d -TargetDisplayId 'dup'
+        $result.TargetConfidence | Should -Be 'AMBIGUOUS'
+        $result.TargetDisplayId | Should -BeNullOrEmpty
+        $result.DuplicateDisplayIds | Should -Contain 'dup'
+        $result.Advisory | Should -Match 'duplicated'
+    }
     It "does not modify display settings, game configuration, trust, or effect hashes" {
         $before=@(Get-TpmReShadeEffectCatalog|ForEach-Object{ '{0}:{1}' -f $_.EffectId,(@($_.SHA256)-join ',') })
         $null=Get-TpmDisplayTopologyClassification -Displays @(New-TestDisplay 'a' 1920 1080 $true),(New-TestDisplay 'b' 3840 2160 $false)
         $after=@(Get-TpmReShadeEffectCatalog|ForEach-Object{ '{0}:{1}' -f $_.EffectId,(@($_.SHA256)-join ',') });$after|Should -Be $before
+    }
+}
+Describe "ReShade eligibility display mutation guard" {
+    It "keeps every display and eligibility path read-only" {
+        $tokens = $null
+        $parseErrors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1'), [ref]$tokens, [ref]$parseErrors)
+        $parseErrors.Count | Should -Be 0
+        $roots = @(
+            'Get-TpmResolutionClassification',
+            'Get-TpmDisplayTopologyClassification',
+            'Get-TpmHardwareEnvironmentEvidence',
+            'Get-TpmReShadeEligibilityEvidence',
+            'Get-TpmReShadeEligibilityFromSystem',
+            'Get-TpmReShadeEligibility',
+            'Test-TpmReShadeWorkingSpace'
+        )
+        $functionAsts = @{}
+        foreach ($candidate in @($ast.FindAll({
+            $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst]
+        }, $true))) {
+            if (-not $functionAsts.ContainsKey($candidate.Name)) {
+                $functionAsts[$candidate.Name] = $candidate
+            }
+        }
+        $pending = New-Object 'System.Collections.Generic.Queue[string]'
+        $seen = @{}
+        foreach ($root in $roots) {
+            $functionAsts.ContainsKey($root) | Should -BeTrue -Because $root
+            if ($functionAsts.ContainsKey($root)) { $pending.Enqueue($root) }
+        }
+        $reachable = New-Object System.Collections.Generic.List[string]
+        while ($pending.Count -gt 0) {
+            $name = $pending.Dequeue()
+            if ($seen.ContainsKey($name)) { continue }
+            $seen[$name] = $true
+            [void]$reachable.Add($name)
+            $localCalls = @($functionAsts[$name].Body.FindAll({
+                $args[0] -is [System.Management.Automation.Language.CommandAst]
+            }, $true) | ForEach-Object { $_.GetCommandName() } | Where-Object { $_ })
+            foreach ($call in $localCalls) {
+                if ($functionAsts.ContainsKey($call) -and -not $seen.ContainsKey($call)) {
+                    $pending.Enqueue($call)
+                }
+            }
+        }
+        $reachable.Count | Should -BeGreaterThan $roots.Count
+        $forbiddenCommands = @(
+            'ChangeDisplaySettings', 'ChangeDisplaySettingsEx', 'SetDisplayConfig',
+            'DisplaySwitch', 'SetPrimaryMonitor', 'EnableDisplay', 'DisableDisplay',
+            'SetDisplayMode', 'SetRefreshRate', 'SetOrientation', 'SetWindowPos',
+            'MoveWindow', 'Set-Content', 'Add-Content', 'Out-File', 'Set-ItemProperty',
+            'Save-Xml', 'Save-XmlMaybe', 'Invoke-ControlPropagation'
+        )
+        foreach ($name in $reachable) {
+            $fn = $functionAsts[$name]
+            $calls = @($fn.Body.FindAll({
+                $args[0] -is [System.Management.Automation.Language.CommandAst]
+            }, $true) | ForEach-Object { $_.GetCommandName() } | Where-Object { $_ })
+            foreach ($command in $forbiddenCommands) { $calls | Should -Not -Contain $command -Because $name }
+            $fn.Extent.Text | Should -Not -Match '(?i)\[(System\.IO\.(File|Directory))\]::(Write|Append|Create|Delete|Move|Copy)'
+            $fn.Extent.Text | Should -Not -Match '(?i)\.(Save|WriteAllText|WriteAllBytes|AppendAllText|Create|Delete|Move|Copy)\s*\('
+            $fn.Extent.Text | Should -Not -Match '(?i)(FullScreen|Windowed|Borderless)\s*='
+        }
     }
 }
 
@@ -10240,5 +10357,110 @@ Describe "ReShade storage role matrix" {
         $plan.RoleBytes.STAGING | Should -Be 5; $plan.RoleBytes.BACKUP | Should -Be 3; $plan.RoleBytes.TARGET | Should -Be 5; $plan.RoleBytes.ROLLBACK | Should -Be 3
         $plan.RequiredWorkingBytes | Should -Be 16
         @($plan.Roles | Select-Object -ExpandProperty Role) | Should -Be @('STAGING','BACKUP','TARGET','ROLLBACK')
+    }
+}
+Describe "Paged picker wrapping" {
+    It "wraps next and previous navigation without clearing queue state" {
+        $source = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1') -Raw
+        $source | Should -Match '\$page = if \(\$page -lt \(\$totalPages - 1\)\) \{ \$page \+ 1 \} else \{ 0 \}'
+        $source | Should -Match '\$page = if \(\$page -gt 0\) \{ \$page - 1 \} else \{ \$totalPages - 1 \}'
+        $source | Should -Match '\(\* = already in queue\)'
+        $source | Should -Match '\(\* = in queue \| \[\+\] = supplementary\)'
+    }
+    It "does not retain the old edge error messages and keeps one-page lists stable" {
+        $source = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1') -Raw
+        $source | Should -Not -Match 'Already on last page|Already on first page'
+        $source | Should -Match '\$page = if \(\$page -lt \(\$pages - 1\)\) \{ \$page \+ 1 \} else \{ 0 \}'
+        $source | Should -Match '\$page = if \(\$page -gt 0\) \{ \$page - 1 \} else \{ \$pages - 1 \}'
+    }
+}
+
+Describe "Action Required report output" {
+    It "Action Required report excludes raw imported notes" {
+        $actionPath = Join-Path $TestDrive 'ActionItems.txt'
+        $notesPath = Join-Path $TestDrive 'GameNotes.txt'
+        $manual = @{
+            'Manual Racer' = [pscustomobject]@{
+                ExeName = 'arcade.exe'; Reason = 'unmatched'; ClaimedBy = $null
+                Profiles = 'ManualProfile'; ProfileCount = 1; BestGuess = $null; BestScore = 0
+            }
+        }
+        $ambiguous = @([pscustomobject]@{ Code = 'Broken Racer'; Exe = 'C:\Games\Broken\pcsx2x6.exe' })
+        $notFound = @([pscustomobject]@{ Code = 'Missing Racer' })
+        $noArchetype = @([pscustomobject]@{ Code = 'Controls Racer'; Family = 'driving' })
+        $result = [pscustomobject]@{ Unmatched = @('TPM-ExternalFolder') }
+        $compatibilityWarnings = [pscustomobject]@{
+            PathTooLong = @([pscustomobject]@{ Code = 'Long Racer'; Length = 280; Limit = 260; Suggested = 'D:\TPGames\Long Racer' })
+            DllMismatch = @()
+            GpuIncompatible = @()
+            BiosMissing = @([pscustomobject]@{
+                EmulatorType = 'PCSX2X6'; ExpectedDir = 'C:\TPM\firmware'
+                MissingFiles = @('bios.bin'); AffectedGames = @('TPM-ExternalGame')
+            })
+            ExeMissing = @([pscustomobject]@{
+                EmulatorType = 'PCSX2X6'; ContractId = 'TPM.ECVF'; ContractStatus = 'VALID'
+                DetectorMethod = 'contract'; DetectorSource = 'TPM source'; Confidence = 'HIGH'
+                ExpectedPath = 'C:\TPM\emulator\pcsx2x6.exe'; AffectedGames = @('TPM-ExternalGame')
+            })
+        }
+        $controls = @([pscustomobject]@{
+            Code = 'Controls Racer'
+            SummaryLines = @(
+                'TeknoParrot Manager registered this game, but that does not prove controls work.'
+                'TeknoParrotUI still owns the game setup wizard and controls configuration.'
+            )
+        })
+        $importedNotes = @([pscustomobject]@{
+            Code = 'Broken Racer'; GameName = 'Broken Racer'; SetupExe = 'setup.exe'
+            Notes = 'Raw technical note: this game sucks; fuckin source text should stay out of Action Required.'
+        })
+        Write-TpmGameNotesReport -SetupNotes $importedNotes -NotesPath $notesPath -Quiet | Should -BeTrue
+        Write-TpmActionRequiredReport -ActionPath $actionPath -ManualRegData $manual `
+            -AmbiguousPaths $ambiguous -NotFound $notFound -NoArchetypeItems $noArchetype `
+            -Result $result -CompatibilityWarnings $compatibilityWarnings `
+            -ControlReadinessItems $controls -GameNotesPath $notesPath -Quiet | Should -BeTrue
+        $action = [System.IO.File]::ReadAllText($actionPath)
+        $action | Should -Match 'FIX THESE GAME PATHS IN TEKNOPARROTUI'
+        $action | Should -Match 'pcsx2x6\.exe'
+        $action | Should -Match 'folder paths are too long'
+        $action | Should -Match 'PCSX2X6 FIRMWARE NOT INSTALLED'
+        $action | Should -Match 'CONTROLS NOT READY : Controls Racer'
+        $action | Should -Match 'TeknoParrot Manager only checked the contract-declared path'
+        $action | Should -Not -Match 'TPM only checked the contract-declared path'
+        $action | Should -Not -Match 'Source notes:|Raw technical note|This game sucks|fuckin'
+        $action.Contains('TPM-ExternalFolder') | Should -BeTrue
+        $action.Contains('TPM.ECVF') | Should -BeTrue
+        $action.Contains('C:\TPM\emulator\pcsx2x6.exe') | Should -BeTrue
+    }
+
+    It "Beginner-facing reports exclude hostile source-note wording" {
+        $notesPath = Join-Path $TestDrive 'GameNotes.txt'
+        $notes = @([pscustomobject]@{
+            Code = 'Broken Racer'; GameName = 'Broken Racer'; SetupExe = 'setup.exe'
+            Notes = 'Useful technical note: use C:\TPM\profiles\broken.xml. This game sucks; fuckin devs called users useless users and sensitive snowflake.'
+        })
+        Write-TpmGameNotesReport -SetupNotes $notes -NotesPath $notesPath -Quiet | Should -BeTrue
+        $text = [System.IO.File]::ReadAllText($notesPath)
+        $text | Should -Match 'Useful technical note'
+        $text | Should -Match '\[language removed\]'
+        $text | Should -Match '\[insult removed\]'
+        $text | Should -Not -Match '(?i)sucks?|fuck\w*|useless users|sensitive snowflake'
+        $text.Contains('C:\TPM\profiles\broken.xml') | Should -BeTrue
+    }
+
+    It "Imported notes are separated from required actions" {
+        $actionPath = Join-Path $TestDrive 'ActionItems-notes-only.txt'
+        $notesPath = Join-Path $TestDrive 'GameNotes.txt'
+        $notes = @([pscustomobject]@{
+            Code = 'Notes Only'; GameName = 'Notes Only'; SetupExe = ''
+            Notes = 'Technical note only: verify the TPM profile path before launch.'
+        })
+        Write-TpmActionRequiredReports -HasAnyAction:$false -WriteNotes `
+            -ActionPath $actionPath `
+            -NotesPath $notesPath -SetupNotes $notes | Should -BeFalse
+        Test-Path -LiteralPath $notesPath | Should -BeTrue
+        Test-Path -LiteralPath $actionPath | Should -BeFalse
+        ([System.IO.File]::ReadAllText($notesPath)) | Should -Match 'Technical note only'
+        ([System.IO.File]::ReadAllText($notesPath)) | Should -Match 'TPM profile path'
     }
 }

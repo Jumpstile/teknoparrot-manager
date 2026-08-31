@@ -542,7 +542,7 @@ function Format-TpmWorkflowStatusRows {
                elseif ($Snapshot.Activity) { $Snapshot.Activity }
                elseif ($Snapshot.State -eq 'Finished') { 'Finished' }
                else { 'Starting' }
-    $statusLine = 'TPM STATUS  ' + ($(if ($recent) { '[OK] ' + $recent + ' -> ' } else { '' })) + $current
+    $statusLine = 'TeknoParrot Manager status  ' + ($(if ($recent) { '[OK] ' + $recent + ' -> ' } else { '' })) + $current
     $stepText = if ($Snapshot.ActiveStepNumber) { 'Step {0} of {1}' -f $Snapshot.ActiveStepNumber, $Snapshot.StepCount } else { 'Workflow' }
     $action = if ($Snapshot.Failure) { 'Acknowledge the message, then choose retry or stop' } else { $Snapshot.UserAction }
     $rows = [System.Collections.Generic.List[string]]::new()
@@ -3262,9 +3262,9 @@ function Select-GamesInteractive {
                     $browsing = $false
                     $done     = $true
                 } elseif ($cmd -eq 'N') {
-                    if ($page -lt $totalPages - 1) { $page++ } else { Write-Host "  Already on last page." -ForegroundColor DarkCyan }
+                    $page = if ($page -lt ($totalPages - 1)) { $page + 1 } else { 0 }
                 } elseif ($cmd -eq 'P') {
-                    if ($page -gt 0) { $page-- } else { Write-Host "  Already on first page." -ForegroundColor DarkCyan }
+                    $page = if ($page -gt 0) { $page - 1 } else { $totalPages - 1 }
                 } elseif ($cmd -ne '') {
                     $nums  = Expand-NumberList -str $cmd -max $pageItems.Count
                     $added = 0
@@ -3438,8 +3438,8 @@ function Select-GamesInteractiveCombined {
                 $cmd = (Read-HostSafe "  >").ToUpper()
                 if     ($cmd -eq 'B') { $browsing = $false }
                 elseif ($cmd -eq 'D') { $browsing = $false; $done = $true }
-                elseif ($cmd -eq 'N') { if ($page -lt $totalPages-1) { $page++ } else { Write-Host "  Already on last page." -ForegroundColor DarkCyan } }
-                elseif ($cmd -eq 'P') { if ($page -gt 0) { $page-- } else { Write-Host "  Already on first page." -ForegroundColor DarkCyan } }
+                elseif ($cmd -eq 'N') { $page = if ($page -lt ($totalPages - 1)) { $page + 1 } else { 0 } }
+                elseif ($cmd -eq 'P') { $page = if ($page -gt 0) { $page - 1 } else { $totalPages - 1 } }
                 elseif ($cmd -ne '') {
                     $nums = Expand-NumberList -str $cmd -max $pageItems.Count
                     $added = 0
@@ -3688,8 +3688,8 @@ function Select-RegisteredGamesInteractive {
         $inp = (Read-HostSafe "    >").ToUpper()
         if ($inp -eq "D") { break }
         if ($inp -eq "A") { return $profiles }
-        if ($inp -eq "N" -and $page -lt ($pages - 1)) { $page++; continue }
-        if ($inp -eq "P" -and $page -gt 0)            { $page--; continue }
+        if ($inp -eq "N") { $page = if ($page -lt ($pages - 1)) { $page + 1 } else { 0 }; continue }
+        if ($inp -eq "P") { $page = if ($page -gt 0) { $page - 1 } else { $pages - 1 }; continue }
         $nums = Expand-NumberList -str $inp -max $profiles.Count
         foreach ($n in $nums) {
             $item = $profiles[$n - 1]
@@ -3699,6 +3699,41 @@ function Select-RegisteredGamesInteractive {
     }
     return @($selected)
 }
+# Narrow dgVoodoo2 advanced picker. Unlike the general registered-game picker,
+# this never offers an all-games action after an empty detection result.
+function Select-DgVoodoo2GamesInteractive {
+    param([string]$UserProfilesDir)
+    $fullBackupDir = Join-Path $UserProfilesDir "FullBackup"
+    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -File -ErrorAction SilentlyContinue |
+                  Where-Object { $_.DirectoryName -ne $fullBackupDir } |
+                  Sort-Object BaseName)
+    if ($profiles.Count -eq 0) { return ,@() }
+    $pageSize = 20
+    $pages = [Math]::Ceiling($profiles.Count / $pageSize)
+    $page = 0
+    $selected = [System.Collections.Generic.List[object]]::new()
+    while ($true) {
+        $start = $page * $pageSize
+        $end = [Math]::Min($start + $pageSize - 1, $profiles.Count - 1)
+        Write-Host ""
+        Write-Host ("  Advanced dgVoodoo2 selection -- page {0}/{1}" -f ($page + 1), $pages) -ForegroundColor Cyan
+        for ($i = $start; $i -le $end; $i++) {
+            $mark = if ($selected -contains $profiles[$i]) { '*' } else { ' ' }
+            Write-Host ("    {0,3}) {1} {2}" -f ($i + 1), $mark, $profiles[$i].BaseName)
+        }
+        Write-Host "  Enter number(s) to toggle | N=next | P=previous | D=done | B=back" -ForegroundColor DarkCyan
+        $inp = (Read-HostSafe "  >").ToUpper()
+        if ($inp -eq 'D') { return @($selected) }
+        if ($inp -eq 'B') { return ,@() }
+        if ($inp -eq 'N') { $page = if ($page -lt ($pages - 1)) { $page + 1 } else { 0 }; continue }
+        if ($inp -eq 'P') { $page = if ($page -gt 0) { $page - 1 } else { $pages - 1 }; continue }
+        foreach ($n in (Expand-NumberList -str $inp -max $profiles.Count)) {
+            $item = $profiles[$n - 1]
+            if ($selected -contains $item) { [void]$selected.Remove($item) } else { [void]$selected.Add($item) }
+        }
+    }
+}
+
 
 # Checks the Authenticode signature on a user-provided ReShade DLL. Unlike
 # the BepInEx/FFBPlugin/Eggman-dat downloads (unsigned community builds with
@@ -4036,41 +4071,41 @@ function Get-TpmReShadeProfiles {
     return @(
         [pscustomobject]@{
             ProfileId = 'Original'; FriendlyName = 'Original'; Description = 'No visual processing.'
-            Recommended = $false; Effects = @(); RequiredEffects = @(); TechniqueOrder = @()
+            Recommended = $false; MeasuredEvidence = $false; Effects = @(); RequiredEffects = @(); TechniqueOrder = @()
             Parameters = @{}; PerformanceClass = 'LOW'; ResolutionSensitivity = 'LOW'
-            CompatibilityState = 'VALIDATED_SINGLE'; CompatibleWith = @(); ConflictsWith = @()
+            CompatibilityState = 'ADVISORY_UNMEASURED'; CompatibleWith = @(); ConflictsWith = @()
             OrderConstraints = @(); FallbackProfileId = 'Original'
             PreviewAsset = 'ReShade\Previews\TPM-preview-original.svg'; SchemaVersion = 2
         }
         [pscustomobject]@{
             ProfileId = 'CleanSharp'; FriendlyName = 'Clean & Sharp'; Description = 'Clearer edges and text with very little change to the original image.'
-            Recommended = $true; Effects = @('SweetFX.LumaSharpen'); RequiredEffects = @('LumaSharpen.fx')
+            Recommended = $false; MeasuredEvidence = $false; Effects = @('SweetFX.LumaSharpen'); RequiredEffects = @('LumaSharpen.fx')
             TechniqueOrder = @('LumaSharpen'); Parameters = @{}; PerformanceClass = 'LOW'
-            ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'VALIDATED_SINGLE'
+            ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'ADVISORY_UNMEASURED'
             CompatibleWith = @(); ConflictsWith = @('CRT_Lottes'); OrderConstraints = @()
             FallbackProfileId = 'Original'; PreviewAsset = 'ReShade\Previews\TPM-preview-clean.svg'; SchemaVersion = 2
         }
         [pscustomobject]@{
             ProfileId = 'ClassicCrt'; FriendlyName = 'Classic Arcade CRT'; Description = 'Traditional scanlines and restrained arcade-monitor character.'
-            Recommended = $false; Effects = @('FXShaders.CRT_Lottes'); RequiredEffects = @('CRT_Lottes.fx','CRT_Lottes.fxh')
+            Recommended = $false; MeasuredEvidence = $false; Effects = @('FXShaders.CRT_Lottes'); RequiredEffects = @('CRT_Lottes.fx','CRT_Lottes.fxh')
             TechniqueOrder = @('CRT_Lottes'); Parameters = @{}; PerformanceClass = 'HIGH'
-            ResolutionSensitivity = 'HIGH'; CompatibilityState = 'VALIDATED_SINGLE'
+            ResolutionSensitivity = 'HIGH'; CompatibilityState = 'ADVISORY_UNMEASURED'
             CompatibleWith = @(); ConflictsWith = @('LumaSharpen','Vibrance'); OrderConstraints = @()
             FallbackProfileId = 'CleanSharp'; PreviewAsset = 'ReShade\Previews\TPM-preview-crt.svg'; SchemaVersion = 2
         }
         [pscustomobject]@{
             ProfileId = 'Vivid'; FriendlyName = 'Vivid Arcade'; Description = 'Richer color for modern displays.'
-            Recommended = $false; Effects = @('SweetFX.Vibrance'); RequiredEffects = @('Vibrance.fx')
+            Recommended = $false; MeasuredEvidence = $false; Effects = @('SweetFX.Vibrance'); RequiredEffects = @('Vibrance.fx')
             TechniqueOrder = @('Vibrance'); Parameters = @{}; PerformanceClass = 'LOW'
-            ResolutionSensitivity = 'LOW'; CompatibilityState = 'VALIDATED_SINGLE'
+            ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'
             CompatibleWith = @(); ConflictsWith = @(); OrderConstraints = @()
             FallbackProfileId = 'Original'; PreviewAsset = 'ReShade\Previews\TPM-preview-vivid.svg'; SchemaVersion = 2
         }
         [pscustomobject]@{
             ProfileId = 'EnhancedArcade'; FriendlyName = 'Enhanced Arcade'; Description = 'Sharper edges and richer color while preserving the approved effect order.'
-            Recommended = $false; Effects = @('SweetFX.LumaSharpen','SweetFX.Vibrance'); RequiredEffects = @('LumaSharpen.fx','Vibrance.fx')
+            Recommended = $false; MeasuredEvidence = $false; Effects = @('SweetFX.LumaSharpen','SweetFX.Vibrance'); RequiredEffects = @('LumaSharpen.fx','Vibrance.fx')
             TechniqueOrder = @('LumaSharpen','Vibrance'); Parameters = @{}; PerformanceClass = 'LOW'
-            ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'VALIDATED_SINGLE'
+            ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'ADVISORY_UNMEASURED'
             CompatibleWith = @(); ConflictsWith = @('CRT_Lottes'); OrderConstraints = @('LumaSharpen before Vibrance')
             FallbackProfileId = 'CleanSharp'; PreviewAsset = 'ReShade\Previews\TPM-preview-enhanced.svg'; SchemaVersion = 2
         }
@@ -4079,9 +4114,9 @@ function Get-TpmReShadeProfiles {
 
 function Get-TpmReShadeEffectCatalog {
     $effects = @(
-        [pscustomobject]@{ EffectId = 'SweetFX.LumaSharpen'; FriendlyName = 'LumaSharpen'; Category = 'SHARPNESS'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '16d1a42247cb5baaf660120ee35c9a33bb94649c'; RelativeFiles = @('Shaders/SweetFX/LumaSharpen.fx'); SHA256 = @('7B358EBBDAA7BC4C44EBF6E9D41AFCB3F21EE3DDE5C5F85BF40201D5C6044680'); RequiredIncludes = @('ReShadeUI.fxh','ReShade.fxh'); RequiredTextures = @(); License = 'MIT'; Attribution = 'Christian Cann Schuldt Jensen (CeeJay.dk)'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/16d1a42247cb5baaf660120ee35c9a33bb94649c/'; TechniqueName = 'LumaSharpen'; PerformanceClass = 'LOW'; ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'VALIDATED_SINGLE'; FallbackBehavior = 'Original' }
-        [pscustomobject]@{ EffectId = 'SweetFX.Vibrance'; FriendlyName = 'Vibrance'; Category = 'COLOR'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '16d1a42247cb5baaf660120ee35c9a33bb94649c'; RelativeFiles = @('Shaders/SweetFX/Vibrance.fx'); SHA256 = @('B9189A28CA4A645A0E188F8396C81889D217E3C706E8900DFE6594D43E7C33EB'); RequiredIncludes = @('ReShadeUI.fxh','ReShade.fxh'); RequiredTextures = @(); License = 'MIT'; Attribution = 'Christian Cann Schuldt Jensen (CeeJay.dk)'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/16d1a42247cb5baaf660120ee35c9a33bb94649c/'; TechniqueName = 'Vibrance'; PerformanceClass = 'LOW'; ResolutionSensitivity = 'LOW'; CompatibilityState = 'VALIDATED_SINGLE'; FallbackBehavior = 'Original' }
-[pscustomobject]@{ EffectId = 'FXShaders.CRT_Lottes'; FriendlyName = 'CRT Lottes'; Category = 'ARCADE DISPLAY'; Repository = 'luluco250/FXShaders'; PinnedCommit = '76365e35c48e30170985ca371e67d8daf8eb9a98'; RelativeFiles = @('Shaders/CRT_Lottes.fx','Shaders/CRT_Lottes.fxh'); SHA256 = @('6B214F43C97650A34D9848211402B475627092E127258F02BB0C5919451C9B20','FE19870235B2C4C166BD367227366AAE115E9AC9EF60E84774A069D4CFC0B1E6'); RequiredIncludes = @('ReShade.fxh','CRT_Lottes.fxh'); RequiredTextures = @(); License = 'MIT; Unlicense/public domain dedication for Timothy Lottes implementation'; Attribution = 'Lucas Melo; Timothy Lottes'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/luluco250/FXShaders/76365e35c48e30170985ca371e67d8daf8eb9a98/'; TechniqueName = 'CRT_Lottes'; PerformanceClass = 'HIGH'; ResolutionSensitivity = 'HIGH'; CompatibilityState = 'VALIDATED_SINGLE'; FallbackBehavior = 'CleanSharp' }
+        [pscustomobject]@{ EffectId = 'SweetFX.LumaSharpen'; FriendlyName = 'LumaSharpen'; Category = 'SHARPNESS'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '16d1a42247cb5baaf660120ee35c9a33bb94649c'; RelativeFiles = @('Shaders/SweetFX/LumaSharpen.fx'); SHA256 = @('7B358EBBDAA7BC4C44EBF6E9D41AFCB3F21EE3DDE5C5F85BF40201D5C6044680'); RequiredIncludes = @('ReShadeUI.fxh','ReShade.fxh'); RequiredTextures = @(); License = 'MIT'; Attribution = 'Christian Cann Schuldt Jensen (CeeJay.dk)'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/16d1a42247cb5baaf660120ee35c9a33bb94649c/'; TechniqueName = 'LumaSharpen'; PerformanceClass = 'LOW'; ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false; FallbackBehavior = 'Original' }
+        [pscustomobject]@{ EffectId = 'SweetFX.Vibrance'; FriendlyName = 'Vibrance'; Category = 'COLOR'; Repository = 'CeeJayDK/SweetFX'; PinnedCommit = '16d1a42247cb5baaf660120ee35c9a33bb94649c'; RelativeFiles = @('Shaders/SweetFX/Vibrance.fx'); SHA256 = @('B9189A28CA4A645A0E188F8396C81889D217E3C706E8900DFE6594D43E7C33EB'); RequiredIncludes = @('ReShadeUI.fxh','ReShade.fxh'); RequiredTextures = @(); License = 'MIT'; Attribution = 'Christian Cann Schuldt Jensen (CeeJay.dk)'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/CeeJayDK/SweetFX/16d1a42247cb5baaf660120ee35c9a33bb94649c/'; TechniqueName = 'Vibrance'; PerformanceClass = 'LOW'; ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false; FallbackBehavior = 'Original' }
+        [pscustomobject]@{ EffectId = 'FXShaders.CRT_Lottes'; FriendlyName = 'CRT Lottes'; Category = 'ARCADE DISPLAY'; Repository = 'luluco250/FXShaders'; PinnedCommit = '76365e35c48e30170985ca371e67d8daf8eb9a98'; RelativeFiles = @('Shaders/CRT_Lottes.fx','Shaders/CRT_Lottes.fxh'); SHA256 = @('6B214F43C97650A34D9848211402B475627092E127258F02BB0C5919451C9B20','FE19870235B2C4C166BD367227366AAE115E9AC9EF60E84774A069D4CFC0B1E6'); RequiredIncludes = @('ReShade.fxh','CRT_Lottes.fxh'); RequiredTextures = @(); License = 'MIT; Unlicense/public domain dedication for Timothy Lottes implementation'; Attribution = 'Lucas Melo; Timothy Lottes'; AllowedHosts = @('raw.githubusercontent.com'); AllowedPathPrefix = '/luluco250/FXShaders/76365e35c48e30170985ca371e67d8daf8eb9a98/'; TechniqueName = 'CRT_Lottes'; PerformanceClass = 'HIGH'; ResolutionSensitivity = 'HIGH'; CompatibilityState = 'ADVISORY_UNMEASURED'; MeasuredEvidence = $false; FallbackBehavior = 'CleanSharp' }
     )
     foreach ($effect in $effects) {
         if ($effect.EffectId -eq 'SweetFX.LumaSharpen') { $effect | Add-Member -NotePropertyName CompatibleWith -NotePropertyValue @('SweetFX.Vibrance') -Force; $effect | Add-Member -NotePropertyName ConflictsWith -NotePropertyValue @('FXShaders.CRT_Lottes') -Force }
@@ -4436,18 +4471,37 @@ function New-TpmReShadePreviewArtifact {
 function Open-TpmReShadePreviewWindow {
     param([Parameter(Mandatory)]$ProfileDefinition, [ValidateSet('Before','After','Split')][string]$Mode='Split', [string]$CacheRoot='', [switch]$Show)
     if(-not $Show){return [pscustomobject]@{Available=$false;Closed=$true;Reason='PREVIEW_WINDOW_NOT_REQUESTED';Mode=$Mode}}
-    try{
-        if([Threading.Thread]::CurrentThread.GetApartmentState() -ne [Threading.ApartmentState]::STA){throw 'STA required'}
-        Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop;Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+    $formsLoaded = $false
+    $drawingLoaded = $false
+    $previewRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'ReShade\Previews'))
+    $assetChecks = @()
+    try {
+        foreach ($preview in @(Get-TpmReShadeProfiles)) {
+            $assetPath = Join-Path $previewRoot ([IO.Path]::GetFileName([string]$preview.PreviewAsset))
+            $assetChecks += ('{0}={1}' -f $assetPath, (Test-Path -LiteralPath $assetPath -PathType Leaf))
+        }
+        if (@($assetChecks | Where-Object { $_ -like '*=False' }).Count -gt 0) {
+            Write-Log ("ReShade preview unavailable: reason=PREVIEW_ASSETS_MISSING root='{0}' assets={1} PowerShell={2} edition={3} FormsLoaded={4} DrawingLoaded={5} Host='{6}'" -f $previewRoot, ($assetChecks -join ';'), $PSVersionTable.PSVersion, $PSVersionTable.PSEdition, $formsLoaded, $drawingLoaded, $Host.Name)
+            return [pscustomobject]@{Available=$false;Closed=$true;Reason='PREVIEW_ASSETS_MISSING';Mode=$Mode;PreviewRoot=$previewRoot}
+        }
+        if([Threading.Thread]::CurrentThread.GetApartmentState() -ne [Threading.ApartmentState]::STA){throw [InvalidOperationException]::new('STA required')}
+        Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop; $formsLoaded = $true
+        Add-Type -AssemblyName System.Drawing -ErrorAction Stop; $drawingLoaded = $true
         $artifact=New-TpmReShadePreviewArtifact -ProfileDefinition $ProfileDefinition -Mode $Mode -CacheRoot $CacheRoot
-        if(-not $artifact.Available){return $artifact}
+        if(-not $artifact.Available){
+            Write-Log ("ReShade preview unavailable: reason={0} error='{1}' root='{2}' assets={3} PowerShell={4} edition={5} FormsLoaded={6} DrawingLoaded={7} Host='{8}'" -f $artifact.Reason, $artifact.Error, $previewRoot, ($assetChecks -join ';'), $PSVersionTable.PSVersion, $PSVersionTable.PSEdition, $formsLoaded, $drawingLoaded, $Host.Name)
+            return $artifact
+        }
         $form=New-Object Windows.Forms.Form;$form.Text='TeknoParrot ReShade Preview - '+$ProfileDefinition.FriendlyName;$form.Width=1000;$form.Height=700
         $picture=New-Object Windows.Forms.PictureBox;$picture.Dock='Fill';$picture.SizeMode='Zoom';$picture.Image=[Drawing.Image]::FromFile($artifact.Path)
         $toolbar=New-Object Windows.Forms.FlowLayoutPanel;$toolbar.Dock='Top';$toolbar.Height=40
         foreach($view in @('Before','After','Split')){$button=New-Object Windows.Forms.Button;$button.Text=$view;$button.Tag=$view;$button.Width=90;$button.Add_Click({[void](Update-TpmReShadePreviewWindow -Mode $this.Tag)});$toolbar.Controls.Add($button)}
         $form.Controls.Add($picture);$form.Controls.Add($toolbar);$script:TpmReShadePreviewWindowState=[pscustomobject]@{Form=$form;Picture=$picture;Profile=$ProfileDefinition;Mode=$Mode;CacheRoot=$CacheRoot}
         return [pscustomobject]@{Available=$true;Closed=$false;Mode=$Mode;CacheKey=$artifact.CacheKey}
-    }catch{return [pscustomobject]@{Available=$false;Closed=$true;Reason='PREVIEW_WINDOW_UNAVAILABLE';Mode=$Mode}}
+    } catch {
+        Write-Log ("ReShade preview unavailable: reason=PREVIEW_WINDOW_UNAVAILABLE errorType='{0}' error='{1}' root='{2}' assets={3} PowerShell={4} edition={5} FormsLoaded={6} DrawingLoaded={7} Host='{8}'" -f $_.Exception.GetType().FullName, $_.Exception.Message, $previewRoot, ($assetChecks -join ';'), $PSVersionTable.PSVersion, $PSVersionTable.PSEdition, $formsLoaded, $drawingLoaded, $Host.Name)
+        return [pscustomobject]@{Available=$false;Closed=$true;Reason='PREVIEW_WINDOW_UNAVAILABLE';Mode=$Mode;Error=$_.Exception.Message}
+    }
 }
 
 function Update-TpmReShadePreviewWindow {
@@ -4785,6 +4839,7 @@ function Install-TpmReShadeProfileDeployment {
         [Parameter(Mandatory)][string]$OwnershipPath,
         [string]$VariantId = 'Default',
         [switch]$CanonicalPreset,
+        [switch]$AllowUserOwnedOverwrite,
         [ValidateSet('None','BeforeCommit')][string]$FaultStage = 'None'
     )
     $staging = $null
@@ -4870,7 +4925,7 @@ function Install-TpmReShadeProfileDeployment {
             if (Test-Path -LiteralPath $entry.DestinationPath) {
                 $owned = $false
                 if ($prior) { foreach ($oldEntry in @($prior.Files)) { if ([string]$oldEntry.DestinationPath -eq [string]$entry.DestinationPath -and [string]$oldEntry.TPMManaged -eq 'True') { $owned = $true; break } } }
-                if (-not $owned) { return [pscustomobject]@{ Succeeded = $false; State = 'COLLISION'; Reason = 'USER_OWNED_CONTENT_PRESERVED'; Error = "Existing non-TPM-managed file was preserved: $($entry.DestinationPath)" } }
+                if (-not $owned -and -not $AllowUserOwnedOverwrite) { return [pscustomobject]@{ Succeeded = $false; State = 'COLLISION'; Reason = 'USER_OWNED_CONTENT_PRESERVED'; Error = "Existing non-TPM-managed file was preserved: $($entry.DestinationPath)" } }
             }
         }
         $retained = @()
@@ -4983,7 +5038,7 @@ function Get-TpmResolutionClassification {
 }
 function Get-TpmDisplayTopologyClassification {
     param([object[]]$Displays = @(), [string]$TargetDisplayId = '')
-    if ($null -eq $Displays -or @($Displays).Count -eq 0) { return [pscustomobject]@{ State = 'UNKNOWN'; Confidence = 'UNKNOWN'; UsableDisplays = 0; TargetConfidence = 'UNKNOWN'; TargetDisplayId = $null; TargetResolution = $null; Advisory = 'Display topology is unavailable; TPM will not choose a monitor.' } }
+    if ($null -eq $Displays -or @($Displays).Count -eq 0) { return [pscustomobject]@{ State = 'UNKNOWN'; Confidence = 'UNKNOWN'; UsableDisplays = 0; TargetConfidence = 'UNKNOWN'; TargetDisplayId = $null; TargetResolution = $null; DuplicateDisplayIds = @(); Advisory = 'Display topology is unavailable; TPM will not choose a monitor.' } }
     $usable = New-Object System.Collections.Generic.List[object]
     $malformed = $false
     foreach ($display in @($Displays)) {
@@ -4994,8 +5049,9 @@ function Get-TpmDisplayTopologyClassification {
         if ($resolution.State -eq 'MALFORMED') { $malformed = $true; continue }
         [void]$usable.Add([pscustomobject]@{ Record = $display; Resolution = $resolution })
     }
-    if ($usable.Count -eq 0) { return [pscustomobject]@{ State = if ($malformed) { 'MALFORMED' } else { 'ZERO_USABLE' }; Confidence = 'UNKNOWN'; UsableDisplays = 0; TargetConfidence = 'UNKNOWN'; TargetDisplayId = $null; TargetResolution = $null; Advisory = 'No usable connected display evidence is available.' } }
+    if ($usable.Count -eq 0) { return [pscustomobject]@{ State = if ($malformed) { 'MALFORMED' } else { 'ZERO_USABLE' }; Confidence = 'UNKNOWN'; UsableDisplays = 0; TargetConfidence = 'UNKNOWN'; TargetDisplayId = $null; TargetResolution = $null; DuplicateDisplayIds = @(); Advisory = 'No usable connected display evidence is available.' } }
     $primary = @($usable | Where-Object { $_.Record.PSObject.Properties['IsPrimary'] -and [bool]$_.Record.IsPrimary })
+    $duplicateIds = @($usable | Group-Object { [string]$_.Record.Id } | Where-Object { $_.Count -gt 1 } | Select-Object -ExpandProperty Name)
     $state = 'SINGLE'
     if ($usable.Count -gt 1) {
         if ($primary.Count -gt 1 -or $malformed) { $state = 'MALFORMED' }
@@ -5008,14 +5064,16 @@ function Get-TpmDisplayTopologyClassification {
         if ($state -ne 'MALFORMED' -and (($orientations.Count -gt 1) -or ($refresh.Count -gt 1) -or ($sizes.Count -gt 1))) { $state = 'MULTIPLE_MIXED' }
     } elseif ($malformed) { $state = 'MALFORMED' }
     $target = $null
+    $targetAmbiguous = $false
     if (-not [string]::IsNullOrWhiteSpace($TargetDisplayId)) {
         $targetMatches = @($usable | Where-Object { [string]$_.Record.Id -eq $TargetDisplayId })
-        if ($targetMatches.Count -gt 0) { $target = $targetMatches[0] }
+        if ($targetMatches.Count -eq 1) { $target = $targetMatches[0] }
+        elseif ($targetMatches.Count -gt 1) { $targetAmbiguous = $true }
     } elseif ($usable.Count -eq 1) {
         $target = $usable[0]
     }
-    $targetConfidence = if ($target) { 'CONFIDENT' } elseif (-not [string]::IsNullOrWhiteSpace($TargetDisplayId)) { 'UNKNOWN' } elseif ($usable.Count -eq 1) { 'CONFIDENT' } elseif ($state -eq 'MALFORMED') { 'UNKNOWN' } else { 'AMBIGUOUS' }
-    return [pscustomobject]@{ State = $state; Confidence = if ($state -eq 'MALFORMED') { 'UNKNOWN' } elseif ($usable.Count -eq 1 -or $primary.Count -eq 1) { 'KNOWN' } else { 'AMBIGUOUS' }; UsableDisplays = $usable.Count; TargetConfidence = $targetConfidence; TargetDisplayId = if ($target) { [string]$target.Record.Id } else { $null }; TargetResolution = if ($target) { $target.Resolution } else { $null }; Advisory = if ($targetConfidence -eq 'AMBIGUOUS') { 'The game target display is not evidenced; TPM will not choose a monitor.' } elseif ($state -eq 'MALFORMED') { 'Display topology evidence is malformed; TPM will not make a suitability claim.' } else { $null } }
+    $targetConfidence = if ($targetAmbiguous) { 'AMBIGUOUS' } elseif ($target) { 'CONFIDENT' } elseif (-not [string]::IsNullOrWhiteSpace($TargetDisplayId)) { 'UNKNOWN' } elseif ($usable.Count -eq 1) { 'CONFIDENT' } elseif ($state -eq 'MALFORMED') { 'UNKNOWN' } else { 'AMBIGUOUS' }
+    return [pscustomobject]@{ State = $state; Confidence = if ($state -eq 'MALFORMED') { 'UNKNOWN' } elseif ($usable.Count -eq 1 -or $primary.Count -eq 1) { 'KNOWN' } else { 'AMBIGUOUS' }; UsableDisplays = $usable.Count; TargetConfidence = $targetConfidence; TargetDisplayId = if ($target) { [string]$target.Record.Id } else { $null }; TargetResolution = if ($target) { $target.Resolution } else { $null }; DuplicateDisplayIds = $duplicateIds; Advisory = if ($targetAmbiguous) { 'The target display identity is duplicated; TPM will not choose a monitor.' } elseif ($targetConfidence -eq 'AMBIGUOUS') { 'The game target display is not evidenced; TPM will not choose a monitor.' } elseif ($state -eq 'MALFORMED') { 'Display topology evidence is malformed; TPM will not make a suitability claim.' } else { $null } }
 }
 
 function Get-TpmReShadeEligibilityEvidence {
@@ -5270,13 +5328,22 @@ function Invoke-ReShadeSetup {
         }
     }
     Write-Host ("  Selected: {0}" -f $selectedProfile.FriendlyName) -ForegroundColor DarkGray
-    $previewWindowResult = Show-TpmReShadePreviewWindow -ProfileDefinition $selectedProfile -Mode 'Split' -Show
-    if (-not $previewWindowResult.Available) { Write-Host "  Preview window unavailable; continuing with text-only profile selection." -ForegroundColor DarkGray }
-    $customPresetChoice = (Read-HostSafe "  Use an advanced custom .ini preset instead? (Y/N, default N)").Trim()
-    if ($customPresetChoice -match '^(Y|y)$') {
-        $pInp = Read-PathWithBrowse "  Path to your ReShade preset (.ini) file (blank/cancel = keep selected profile)" -Mode File -FileFilter "ReShade preset (*.ini)|*.ini|All files (*.*)|*.*"
+    do {
+        $previewWindowResult = Show-TpmReShadePreviewWindow -ProfileDefinition $selectedProfile -Mode 'Split' -Show
+        if ($previewWindowResult.Available) { break }
+        Write-Host "  ReShade preview could not open." -ForegroundColor Yellow
+        Write-Host "  TeknoParrot Manager needs the preview window so you can choose a visual style." -ForegroundColor Yellow
+        Write-Host "  [R] Retry preview  [S] Skip ReShade setup  [T] Use text-only setup anyway"
+        $previewChoice = (Read-HostSafe "  Choice (R/S/T)" -Default 'R').Trim().ToUpper()
+        if ($previewChoice -eq 'S') { return }
+    } while ($previewChoice -eq 'R' -or $previewChoice -eq '')
+    $customPresetChoice = (Read-HostSafe ("  Use the selected ReShade profile?`n  ({0} will be applied. Choose Custom only if you already have your own ReShade .ini preset.)`n`n  [Y] Yes, use {0}  [C] Custom preset  [B] Back`n`n  Choice, default Y" -f $selectedProfile.FriendlyName) -Default 'Y').Trim().ToUpper()
+    if ($customPresetChoice -eq 'C') {
+        $pInp = Read-PathWithBrowse "  Path to your ReShade preset (.ini) file" -Mode File -FileFilter "ReShade preset (*.ini)|*.ini|All files (*.*)|*.*"
         $customPath = Resolve-ReShadeCustomPresetPath -InputPath $pInp
-        if ($customPath) { $presetPath = $customPath; Write-Host "  Advanced preset selected." -ForegroundColor DarkGray }
+        if ($customPath) { $presetPath = $customPath; Write-Host "  Custom preset selected." -ForegroundColor DarkGray }
+    } elseif ($customPresetChoice -eq 'B') {
+        return
     }
 
     # Per-game preset overrides: ReShadePresets\<ProfileCode>.ini always wins
@@ -5340,7 +5407,7 @@ function Invoke-ReShadeSetup {
     # Deploy
     Write-Host ""
     Write-Host ("  Installing ReShade into {0} game folder(s)..." -f $selectedGames.Count) -ForegroundColor Cyan
-    $deployed = 0; $skipped = 0; $errors = 0; $presetOverrides = 0
+    $deployed = 0; $skipped = 0; $protected = 0; $errors = 0; $presetOverrides = 0
     $reShadeCacheRoot = Join-Path $PSScriptRoot 'ReShade\Cache'
 
     foreach ($pf in $selectedGames) {
@@ -5381,6 +5448,7 @@ function Invoke-ReShadeSetup {
             $presetForGame = if ($canonicalForGame) { $null } else { $presetPath }
             $profileDeployment = Install-TpmReShadeProfileDeployment -ProfileDefinition $profileForGame -GamePath $gamePath -Doc $doc -SourceDll $SourceDll -SourceDll32 $SourceDll32 -PresetPath $presetForGame -PerGamePresetPath $perGamePreset -CacheRoot $reShadeCacheRoot -OwnershipPath $ownershipPath -CanonicalPreset:$canonicalForGame
             if (-not $profileDeployment.Succeeded) {
+                if ($profileDeployment.Reason -eq 'USER_OWNED_CONTENT_PRESERVED') { $protected++; Write-Log "ReShade: protected existing user-owned files for $($pf.BaseName)"; continue }
                 if ($profileDeployment.State -in @('MISSING_32BIT_DLL','UNSUPPORTED_ARCHITECTURE')) { $skipped++; continue }
                 throw ("profile deployment rejected: {0}" -f $profileDeployment.Reason)
             }
@@ -5407,6 +5475,9 @@ function Invoke-ReShadeSetup {
     if ($skipped -gt 0) {
         Write-Host ("  Skipped   : {0}  (path not found, 32-bit DLL missing, or unsupported architecture)" -f $skipped) -ForegroundColor DarkGray
     }
+    if ($protected -gt 0) {
+        Write-Host ("  Protected : {0}  (existing ReShade files were kept unchanged)" -f $protected) -ForegroundColor Yellow
+    }
     if ($errors -gt 0) {
         Write-Host ("  Errors    : {0}  -- see TeknoParrot-Manager.log for details" -f $errors) -ForegroundColor Red
     }
@@ -5414,7 +5485,7 @@ function Invoke-ReShadeSetup {
     Write-Host "  To turn effects on/off: launch a game and press the  Home  key." -ForegroundColor Cyan
     Write-Host "  TPM does not remove an unowned ReShade hook automatically." -ForegroundColor DarkCyan
     Write-Host "  Existing or changed files need advanced troubleshooting review." -ForegroundColor DarkCyan
-    Write-Log ("ReShade setup: Installed={0} Skipped={1} Errors={2} PresetOverrides={3}" -f $deployed, $skipped, $errors, $presetOverrides)
+    Write-Log ("ReShade setup: Installed={0} Protected={1} Skipped={2} Errors={3} PresetOverrides={4}" -f $deployed, $protected, $skipped, $errors, $presetOverrides)
     if ($generatedPresetPath -and (Test-Path -LiteralPath $generatedPresetPath)) {
         Remove-Item -LiteralPath $generatedPresetPath -Force -ErrorAction SilentlyContinue
     }
@@ -5553,29 +5624,46 @@ function Invoke-DgVoodoo2Setup {
             Write-Host ("    {0}  [{1}]" -f $name, ($detectedMap[$name] -join ', '))
         }
     } else {
-        Write-Host "  No games were auto-detected as using legacy APIs." -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "  No dgVoodoo2 setup needed" -ForegroundColor Green
+        Write-Host "  TeknoParrot Manager checked your registered games and did not find any games that appear to need dgVoodoo2." -ForegroundColor Cyan
+        Write-Host "  dgVoodoo2 is only used for select older games that need legacy DirectX, DirectDraw, or Glide compatibility." -ForegroundColor DarkGray
+        Write-Host "  Nothing was changed." -ForegroundColor Green
+        Write-Host ""
+        Write-Host "  [D] Details  [Q] Back to menu"
+        $selectionMode = (Read-HostSafe "  Choice, default Q").ToUpper()
+        if ($selectionMode -eq 'D') {
+            Write-Host ""
+            Write-Host "  Details" -ForegroundColor Cyan
+            Write-Host ("  Scanned game count: {0}" -f $profiles.Count) -ForegroundColor DarkGray
+            Write-Host ("  Available DLLs: {0}" -f ($available -join ', ')) -ForegroundColor DarkGray
+            Write-Host "  Detection checks executable imports for DirectX, DirectDraw, and Glide APIs." -ForegroundColor DarkGray
+            Write-Host "  Advanced dgVoodoo2 selection is available for expert use:" -ForegroundColor Cyan
+            Write-Host "  [M] Select specific games"
+            Write-Host "  [Q] Back to menu"
+            $selectionMode = (Read-HostSafe "  Choice, default Q").ToUpper()
+        }
+        if ($selectionMode -ne 'M') {
+            Write-Log "dgVoodoo2 setup: no candidates detected; no changes made."
+            return [pscustomobject]@{ Succeeded = $true; Deployed = 0; Errors = 0; Reason = 'NOT_NEEDED' }
+        }
     }
 
     # Game selection.
-    Write-Host ""
-    Write-Host "  Which games should get dgVoodoo2?" -ForegroundColor Cyan
-    $selectionMode = ""
     if ($detectedMap.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  Which games should get dgVoodoo2?" -ForegroundColor Cyan
         Write-Host "  A) Auto-detected games only ($($detectedMap.Count) game(s) listed above)"
         Write-Host "  M) Pick games manually from the full list"
         Write-Host "  Q) Cancel"
         $selectionMode = (Read-HostSafe "  Enter A, M, or Q").ToUpper()
-    } else {
-        Write-Host "  M) Pick games manually from the full list"
-        Write-Host "  Q) Cancel"
-        $selectionMode = (Read-HostSafe "  Enter M or Q").ToUpper()
     }
 
     $targetProfiles = @()
     if ($selectionMode -eq 'A') {
         $targetProfiles = @($profiles | Where-Object { $detectedMap.ContainsKey($_.BaseName) })
     } elseif ($selectionMode -eq 'M') {
-        $targetProfiles = @(Select-RegisteredGamesInteractive -UserProfilesDir $UserProfilesDir)
+        $targetProfiles = @(Select-DgVoodoo2GamesInteractive -UserProfilesDir $UserProfilesDir)
     } else {
         Write-Host "  dgVoodoo2 setup cancelled." -ForegroundColor Yellow
         Write-Log "dgVoodoo2 setup: cancelled."
@@ -5658,7 +5746,6 @@ function Invoke-DgVoodoo2Setup {
             Write-Host ("  OK    {0}{1}{2}" -f $pf.BaseName, $apiStr, $confNote) -ForegroundColor Green
             Write-Log ("dgVoodoo2: deployed {0} to {1}{2}" -f ($toDeploy -join ', '), $exeDir, $confNote)
             $deployed++
-
         } catch {
             Write-Host ("  ERROR {0} -- {1}" -f $pf.BaseName, $_) -ForegroundColor Red
             Write-Log "dgVoodoo2: error on $($pf.BaseName) -- $_"
@@ -5674,7 +5761,7 @@ function Invoke-DgVoodoo2Setup {
     if ($skipped -gt 0) { Write-Host ("  Skipped   : {0}" -f $skipped) -ForegroundColor DarkGray }
     if ($errors  -gt 0) { Write-Host ("  Errors    : {0}" -f $errors)  -ForegroundColor Red      }
     Write-Host ""
-    Write-Host "  TPM does not remove an unowned dgVoodoo2 hook automatically." -ForegroundColor DarkCyan
+    Write-Host "  TeknoParrot Manager does not remove an unowned dgVoodoo2 hook automatically." -ForegroundColor DarkCyan
     Write-Host "  Existing or changed files need advanced troubleshooting review." -ForegroundColor DarkCyan
     Write-Log ("dgVoodoo2 setup: deployed={0} skipped={1} errors={2} presetOverrides={3}" -f $deployed, $skipped, $errors, $presetOverrides)
     return [pscustomobject]@{ Succeeded = ($deployed -gt 0 -and $errors -eq 0); Deployed = $deployed; Errors = $errors; Reason = if ($errors) { 'DEPLOYMENT_ERRORS' } elseif ($deployed -eq 0) { 'NO_GAMES_DEPLOYED' } else { $null } }
@@ -13523,6 +13610,7 @@ function Get-ProfileDevices {
     return $names
 }
 
+
 # Config fields that describe INPUT behaviour (aim mode, sensitivity, axis
 # handling). These are safe to copy between same-type games so a propagated
 # game reproduces the reference game's feel. A field is copied only when the target
@@ -15502,10 +15590,10 @@ function Get-WhatTpmDidSummaryLines {
     }
     [void]$lines.Add("    - Registered $NewlyRegistered new game(s) with TeknoParrot ($AlreadyPresent already registered from before).")
     switch ($DatAction) {
-        'Downloaded' { [void]$lines.Add("    - Downloaded the Eggman dat index file (an index used to match games -- not a game download).") }
-        'Updated'    { [void]$lines.Add("    - Updated the Eggman dat index file to the latest release.") }
-        'Reused'     { [void]$lines.Add("    - Used your already-configured dat index file (no download this run).") }
-        default      { [void]$lines.Add("    - No dat index file configured -- some games may need manual registration.") }
+        'Downloaded' { [void]$lines.Add("    - Downloaded Eggman's TeknoParrot DAT file (an index used to match games -- not a game download).") }
+        'Updated'    { [void]$lines.Add("    - Updated Eggman's TeknoParrot DAT file to the latest release.") }
+        'Reused'     { [void]$lines.Add("    - Used your already-configured Eggman's TeknoParrot DAT file (no download this run).") }
+        default      { [void]$lines.Add("    - No Eggman's TeknoParrot DAT file configured -- some games may need manual registration.") }
     }
     if ($ThumbnailsRequested) {
         [void]$lines.Add("    - Downloaded missing game icons (small box-art images, not game data).")
@@ -16162,7 +16250,7 @@ function Get-OnboardingHandoffSummaryLines {
     }
 
     $launchText = switch ($Assessment.Launch) {
-        'NotTestedByTpm'  { 'Launch status: Not tested by TPM' }
+        'NotTestedByTpm'  { 'Launch status: Not tested by TeknoParrot Manager' }
         'ObservedSuccess' { 'Launch status: Explicitly observed (success)' }
         'ObservedFailure' { 'Launch status: Explicitly observed (failure)' }
         default           { "Launch status: $($Assessment.Launch)" }
@@ -16197,7 +16285,7 @@ function Get-OnboardingHandoffSummaryLines {
         $wizardText,
         $controlsText,
         '',
-        "TPM registered this game. TeknoParrot owns its own setup wizard, controls configuration, and DAT/XML setup -- those are managed separately and are not performed by TPM."
+        "TeknoParrot Manager registered this game. TeknoParrotUI still owns the game setup wizard and controls configuration."
     )
 
     # Same gate as Get-ControlReadinessSummaryLines: only offer a direct
@@ -16568,8 +16656,8 @@ if ((($eggmanDatZip -and -not (Test-Path -LiteralPath $eggmanDatZip)) -or ($datF
     # duplicating its D/Z/F/N logic a second time.
     $missingPath = if ($eggmanDatZip -and -not (Test-Path -LiteralPath $eggmanDatZip)) { $eggmanDatZip } else { $datFilePath }
     Write-Host ""
-    Write-Host "  WARNING: Your configured dat file no longer exists:" -ForegroundColor Yellow
-    Write-Host "    $missingPath" -ForegroundColor Yellow
+    Write-Host "  Saved DAT file was not found." -ForegroundColor Yellow
+    Write-Host "  TeknoParrot Manager can download a fresh copy of Eggman's TeknoParrot DAT file." -ForegroundColor Yellow
     Write-Log "EggmanDat: configured path no longer exists ($missingPath) -- re-prompting."
     $eggmanDatZip = ''
     $datFilePath = ''
@@ -16579,25 +16667,12 @@ $eggmanDatActionThisRun = if ($eggmanDatZip -or $datFilePath) { 'Reused' } else 
 
 if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
     Write-Host ""
-    Write-Host "  Game-recognition index file (Eggman dat)  (highly recommended)" -ForegroundColor Cyan
-    Write-Host "  This is a small index/database file, not the games themselves -- it" -ForegroundColor DarkCyan
-    Write-Host "  never downloads any game data. It helps TPM recognize and correctly" -ForegroundColor DarkCyan
-    Write-Host "  register games that share an executable name, use an ELF instead of" -ForegroundColor DarkCyan
-    Write-Host "  an .exe, or have a slightly misnamed folder. Maintained by the" -ForegroundColor DarkCyan
-    Write-Host "  community game-recognition project (Eggman's Repository) -- a" -ForegroundColor DarkCyan
-    Write-Host "  trusted third-party maintainer's index project, not a game-file" -ForegroundColor DarkCyan
-    Write-Host "  source." -ForegroundColor DarkCyan
-    Write-Host "  This recognition data is separate from TeknoParrot's ParrotData.xml" -ForegroundColor DarkCyan
-    Write-Host "  and its DAT/XML setting. It is also separate from your main game ZIPs," -ForegroundColor DarkCyan
-    Write-Host "  supplementary game ZIPs, and the staging/install folder." -ForegroundColor DarkCyan
     $eggmanDefaultRoot = Get-EggmanDatDataRoot
-    if ($eggmanDefaultRoot) {
-        Write-Host ("  TPM will normally store a downloaded copy under: {0}" -f $eggmanDefaultRoot) -ForegroundColor DarkCyan
-    }
-    Write-Host "  Without one, a few games may need registering by hand instead." -ForegroundColor DarkCyan
-    Write-Host "    D) Download the latest from Eggman's Repository  (~145 MB; TPM chooses the safe data location)"
-    Write-Host "    B) Browse/import a ZIP or dat file I already have"
-    Write-Host "    N) Skip (not recommended)"
+    Write-Host "  Download Eggman's TeknoParrot DAT file package?" -ForegroundColor Cyan
+    Write-Host "  (TeknoParrot Manager can download Eggman's TeknoParrot DAT file, to be used for game recognition and to help recognize renamed or oddly named games. These are not the games themselves -- TeknoParrot Manager never downloads any game data)" -ForegroundColor DarkCyan
+    Write-Host "    D) Download (default)"
+    Write-Host "    B) Browse/import a DAT file I already have"
+    Write-Host "    N) Skip"
     $datChoice = (Read-HostSafe "  Choice (D/B/N, default D)" -Default 'D').ToUpper()
     $raw = ''   # shared path variable for B and the download-fallback path
 
@@ -20559,9 +20634,286 @@ if ($doGpuFix -eq "Y") {
     Invoke-GpuFixSetup -UserProfilesDir $userProfilesDir `
                        -TpRoot $tpRoot
 }
+
 # =============================================================================
 # ACTION REQUIRED -- collects everything the user must do manually
 # =============================================================================
+
+function New-TpmGameNotesReportText {
+    param([object[]]$SetupNotes = @())
+    $builder = New-Object System.Text.StringBuilder
+    [void]$builder.AppendLine("TeknoParrot Manager - Game Notes")
+    [void]$builder.AppendLine("These imported notes are informational; complete required actions in the separate Action Required report.")
+    foreach ($sn in @($SetupNotes | Sort-Object Code)) {
+        [void]$builder.AppendLine("")
+        [void]$builder.AppendLine(("Game: {0} ({1})" -f $sn.Code, $sn.GameName))
+        if ($sn.SetupExe) { [void]$builder.AppendLine(("Run: {0}" -f $sn.SetupExe)) }
+        [void]$builder.AppendLine("Source notes:")
+        foreach ($line in (Format-NoteLines -Text $sn.Notes)) {
+            $safeLine = $line -replace '(?i)fuck\w*', '[language removed]' -replace '(?i)\bsucks?\b', '[insult removed]' -replace '(?i)\b(useless users|sensitive snowflake)\b', '[insult removed]'
+            [void]$builder.AppendLine($safeLine)
+        }
+    }
+    return $builder.ToString()
+}
+
+function Write-TpmGameNotesReport {
+    param([object[]]$SetupNotes = @(), [string]$NotesPath, [switch]$Quiet)
+    if (@($SetupNotes).Count -eq 0) { return $false }
+    try {
+        [System.IO.File]::WriteAllText($NotesPath, (New-TpmGameNotesReportText -SetupNotes $SetupNotes), (New-Object System.Text.UTF8Encoding $false))
+        if (-not $Quiet) {
+            Write-Host ("  Informational game notes saved separately: {0}" -f $NotesPath) -ForegroundColor DarkCyan
+            Write-Log "Game notes report written to $NotesPath"
+        }
+        return $true
+    } catch {
+        Write-Log "Game notes report could not be written -- $_"
+        return $false
+    }
+}
+
+function New-TpmActionRequiredReportText {
+    param(
+        [hashtable]$ManualRegData = @{},
+        [object[]]$AmbiguousPaths = @(),
+        [object[]]$NotFound = @(),
+        [object[]]$NoArchetypeItems = @(),
+        [object]$Result,
+        [object]$CompatibilityWarnings,
+        [object[]]$ControlReadinessItems = @(),
+        [string]$GameNotesPath = ''
+    )
+    $unmatched = @()
+    if ($Result -and $Result.PSObject.Properties['Unmatched']) { $unmatched = @($Result.Unmatched) }
+    $pathTooLong = @()
+    $dllMismatch = @()
+    $gpuIncompatible = @()
+    $biosMissing = @()
+    $exeMissing = @()
+    if ($CompatibilityWarnings) {
+        $pathTooLong = @($CompatibilityWarnings.PathTooLong)
+        $dllMismatch = @($CompatibilityWarnings.DllMismatch)
+        $gpuIncompatible = @($CompatibilityWarnings.GpuIncompatible)
+        $biosMissing = @($CompatibilityWarnings.BiosMissing)
+        $exeMissing = @($CompatibilityWarnings.ExeMissing)
+    }
+    $builder = New-Object System.Text.StringBuilder
+    [void]$builder.AppendLine("TeknoParrot Manager - Action Required")
+    [void]$builder.AppendLine("Generated: $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))")
+    [void]$builder.AppendLine("============================================================")
+    if ($ManualRegData.Count -gt 0) {
+        [void]$builder.AppendLine(""); [void]$builder.AppendLine("REGISTER THESE GAMES IN TEKNOPARROTUI")
+        [void]$builder.AppendLine("----------------------------------------------------------")
+        [void]$builder.AppendLine("Open TeknoParrotUI -> Add Game -> select the profile -> browse to the executable.")
+        foreach ($fn in ($ManualRegData.Keys | Sort-Object)) {
+            $ai = $ManualRegData[$fn]
+            [void]$builder.AppendLine("")
+            [void]$builder.AppendLine("  Game     : $fn")
+            [void]$builder.AppendLine("  Run      : $($ai.ExeName)")
+            if ($ai.Reason -eq "duplicate") {
+                $claimedBy = if ($ai.ClaimedBy) { $ai.ClaimedBy } else { "another folder" }
+                [void]$builder.AppendLine("  Note     : profile '$($ai.Profiles)' is already used by: $claimedBy")
+                [void]$builder.AppendLine("             TeknoParrot can only point one profile at one executable -- this copy")
+                [void]$builder.AppendLine("             needs its own profile, or you must choose which copy to use.")
+                continue
+            }
+            if ($ai.BestGuess -and $ai.BestScore -ge 0.40) {
+                [void]$builder.AppendLine(("  Best guess: {0}  (similarity {1})" -f $ai.BestGuess, $ai.BestScore))
+            }
+            if ($ai.ProfileCount -le 15) {
+                [void]$builder.AppendLine("  Profiles ($($ai.ProfileCount)): $($ai.Profiles)")
+            } else {
+                [void]$builder.AppendLine("  Profiles : shared by $($ai.ProfileCount) games -- search by name in TeknoParrotUI")
+            }
+        }
+    }
+    if (@($AmbiguousPaths).Count -gt 0) {
+        [void]$builder.AppendLine(""); [void]$builder.AppendLine("FIX THESE GAME PATHS IN TEKNOPARROTUI")
+        [void]$builder.AppendLine("----------------------------------------------------------")
+        $byExe = @{}
+        foreach ($r in @($AmbiguousPaths)) {
+            if (-not $byExe.ContainsKey($r.Exe)) { $byExe[$r.Exe] = [System.Collections.Generic.List[string]]::new() }
+            $byExe[$r.Exe].Add($r.Code)
+        }
+        foreach ($exePath in ($byExe.Keys | Sort-Object)) {
+            $codes = ($byExe[$exePath] | Sort-Object) -join " and "
+            $exeName = [System.IO.Path]::GetFileName($exePath)
+            [void]$builder.AppendLine("")
+            [void]$builder.AppendLine(("  {0} needs a corrected game folder." -f $codes))
+            [void]$builder.AppendLine(("  TeknoParrot Manager could not find: {0}" -f $exeName))
+            [void]$builder.AppendLine(("  Open TeknoParrotUI and point each game to the folder containing {0}." -f $exeName))
+        }
+    }
+    if (@($NotFound).Count -gt 0) {
+        [void]$builder.AppendLine(""); [void]$builder.AppendLine("EXTRACT THESE GAMES FIRST, THEN RE-RUN REPAIR")
+        [void]$builder.AppendLine("----------------------------------------------------------")
+        foreach ($item in (@($NotFound) | Sort-Object Code | ForEach-Object { $_.Code })) { [void]$builder.AppendLine("  $item") }
+    }
+    if (@($NoArchetypeItems).Count -gt 0) {
+        $byFamily = @{}
+        foreach ($r in @($NoArchetypeItems)) {
+            if (-not $byFamily.ContainsKey($r.Family)) { $byFamily[$r.Family] = [System.Collections.Generic.List[string]]::new() }
+            $byFamily[$r.Family].Add($r.Code)
+        }
+        [void]$builder.AppendLine(""); [void]$builder.AppendLine("SET UP CONTROLS FOR THESE GAME TYPES IN TEKNOPARROTUI")
+        [void]$builder.AppendLine("----------------------------------------------------------")
+        [void]$builder.AppendLine("Bind one game of each type fully, then re-run and choose Register.")
+        foreach ($family in ($byFamily.Keys | Sort-Object)) {
+            [void]$builder.AppendLine("")
+            [void]$builder.AppendLine(("  {0} GAMES ({1} waiting):" -f $family.ToUpper(), $byFamily[$family].Count))
+            [void]$builder.AppendLine("  $( ($byFamily[$family] | Sort-Object) -join ', ' )")
+        }
+    }
+    if (@($unmatched).Count -gt 0) {
+        [void]$builder.AppendLine(""); [void]$builder.AppendLine("GAME FOLDERS NOT RECOGNISED BY TEKNOPARROT (informational)")
+        [void]$builder.AppendLine("----------------------------------------------------------")
+        foreach ($folder in ($unmatched | Sort-Object)) { [void]$builder.AppendLine("  $folder") }
+    }
+    if (@($pathTooLong).Count -gt 0) {
+        [void]$builder.AppendLine("These games may fail to launch because their folder paths are too long.")
+        [void]$builder.AppendLine("TeknoParrot Manager cannot safely rename folders and update profiles automatically here.")
+        [void]$builder.AppendLine("Manual safe repair: back up each UserProfile XML, close TeknoParrotUI,")
+        [void]$builder.AppendLine("move/rename the folder near a drive root, update the profile in TeknoParrotUI,")
+        [void]$builder.AppendLine("then re-run Repair and test the game.")
+        foreach ($w in ($pathTooLong | Sort-Object Code)) {
+            [void]$builder.AppendLine("")
+            [void]$builder.AppendLine("  Game        : $($w.Code)")
+            [void]$builder.AppendLine("  Current path: $($w.Length) characters (limit ~$($w.Limit))")
+            [void]$builder.AppendLine("  Rename to   : $($w.Suggested)")
+        }
+    }
+    if (@($dllMismatch).Count -gt 0) {
+        [void]$builder.AppendLine(""); [void]$builder.AppendLine("FILE VERSION MISMATCH -- THESE GAMES NEED A SPECIFIC OLDER FILE")
+        [void]$builder.AppendLine("----------------------------------------------------------")
+        [void]$builder.AppendLine("How to fix: join the TeknoParrot Discord (linked from teknoparrot.com),")
+        [void]$builder.AppendLine("ask in #fixes for the file named below matching the required CRC32, and")
+        [void]$builder.AppendLine("replace that file in the game's own folder. Do NOT let TeknoParrot")
+        [void]$builder.AppendLine("redeploy its current copy here -- that makes it worse, not better.")
+        foreach ($w in ($dllMismatch | Sort-Object Code)) {
+            [void]$builder.AppendLine("")
+            [void]$builder.AppendLine("  Game           : $($w.Code)")
+            [void]$builder.AppendLine("  File           : $($w.FileName)")
+            [void]$builder.AppendLine("  Current CRC32  : $($w.Found)")
+            [void]$builder.AppendLine("  Required CRC32 : $($w.Required)")
+        }
+    }
+    if (@($gpuIncompatible).Count -gt 0) {
+        $vendor = $gpuIncompatible[0].Vendor
+        [void]$builder.AppendLine(""); [void]$builder.AppendLine("KNOWN $($vendor.ToUpper()) GPU INCOMPATIBILITY -- NO FIX AVAILABLE (informational)")
+        [void]$builder.AppendLine("----------------------------------------------------------")
+        [void]$builder.AppendLine("These games are confirmed not to work on $vendor GPUs. Known")
+        [void]$builder.AppendLine("limitation, not a setup mistake -- there is no fix to apply.")
+        foreach ($w in ($gpuIncompatible | Sort-Object Code)) { [void]$builder.AppendLine("  $($w.Code)") }
+    }
+    if (@($biosMissing).Count -gt 0) {
+        foreach ($b in $biosMissing) {
+            [void]$builder.AppendLine(""); [void]$builder.AppendLine("$($b.EmulatorType.ToUpper()) FIRMWARE NOT INSTALLED")
+            [void]$builder.AppendLine("----------------------------------------------------------")
+            [void]$builder.AppendLine("These games are registered but need firmware before they can start.")
+            [void]$builder.AppendLine("TeknoParrot Manager cannot provide firmware.")
+            [void]$builder.AppendLine("Obtain the firmware from your legitimate source.")
+            [void]$builder.AppendLine("  Place in : $($b.ExpectedDir)")
+            [void]$builder.AppendLine("  Missing  : $($b.MissingFiles -join ', ')")
+            [void]$builder.AppendLine("  Affected : $($b.AffectedGames -join ', ')")
+        }
+    }
+    if (@($exeMissing).Count -gt 0) {
+        foreach ($e in $exeMissing) {
+            [void]$builder.AppendLine("")
+            [void]$builder.AppendLine("$($e.EmulatorType.ToUpper()) EMULATOR COMPONENT NOT FOUND")
+            [void]$builder.AppendLine("----------------------------------------------------------")
+            [void]$builder.AppendLine("A registered game uses this emulator, but the component declared")
+            [void]$builder.AppendLine("by its ECVF contract was not found at the expected path below.")
+            [void]$builder.AppendLine("TeknoParrot Manager only checked the contract-declared path; it did not determine why")
+            [void]$builder.AppendLine("the file is missing.")
+            [void]$builder.AppendLine("  Contract : $($e.ContractId) ($($e.ContractStatus))")
+            [void]$builder.AppendLine("  Detector : $($e.DetectorMethod) / $($e.DetectorSource)")
+            [void]$builder.AppendLine("  Evidence : contract-backed; confidence $($e.Confidence)")
+            [void]$builder.AppendLine("  Expected : $($e.ExpectedPath)")
+            [void]$builder.AppendLine("  Affected : $($e.AffectedGames -join ', ')")
+            [void]$builder.AppendLine("  Action   : Use TeknoParrotUI's own update/repair screen, then review this")
+            [void]$builder.AppendLine("             health check again. TeknoParrot Manager does not replace emulator files.")
+        }
+    }
+    if (@($ControlReadinessItems).Count -gt 0) {
+        foreach ($item in @($ControlReadinessItems)) {
+            [void]$builder.AppendLine("")
+            [void]$builder.AppendLine("CONTROLS NOT READY : $($item.Code)")
+            [void]$builder.AppendLine("----------------------------------------------------------")
+            [void]$builder.AppendLine("Registration, launch success, and TeknoParrot wizard completion")
+            [void]$builder.AppendLine("are reported separately and do not prove that controls work.")
+            foreach ($line in $item.SummaryLines) { [void]$builder.AppendLine([string]$line) }
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($GameNotesPath)) {
+        [void]$builder.AppendLine("")
+        [void]$builder.AppendLine("Additional informational game notes were written separately to:")
+        [void]$builder.AppendLine(("  {0}" -f $GameNotesPath))
+    }
+    return $builder.ToString()
+}
+
+function Write-TpmActionRequiredReport {
+    param(
+        [string]$ActionPath,
+        [hashtable]$ManualRegData = @{},
+        [object[]]$AmbiguousPaths = @(),
+        [object[]]$NotFound = @(),
+        [object[]]$NoArchetypeItems = @(),
+        [object]$Result,
+        [object]$CompatibilityWarnings,
+        [object[]]$ControlReadinessItems = @(),
+        [string]$GameNotesPath = '',
+        [switch]$Quiet
+    )
+    try {
+        $text = New-TpmActionRequiredReportText -ManualRegData $ManualRegData -AmbiguousPaths $AmbiguousPaths -NotFound $NotFound -NoArchetypeItems $NoArchetypeItems -Result $Result -CompatibilityWarnings $CompatibilityWarnings -ControlReadinessItems $ControlReadinessItems -GameNotesPath $GameNotesPath
+        [System.IO.File]::WriteAllText($ActionPath, $text, (New-Object System.Text.UTF8Encoding $false))
+        if (-not $Quiet) {
+            Write-Host ""
+            Write-Host "  Action items saved to:" -ForegroundColor Green
+            Write-Host "  $ActionPath" -ForegroundColor Cyan
+            Write-Host "  Open that file to review everything you need to do manually." -ForegroundColor DarkCyan
+            Write-Log "Action items written to $ActionPath"
+        }
+        return $true
+    } catch {
+        Write-Log "Action items: could not write file -- $_"
+        return $false
+    }
+}
+function Write-TpmActionRequiredReports {
+    param(
+        [bool]$HasAnyAction,
+        [switch]$WriteNotes,
+        [string]$ActionPath = '',
+        [string]$NotesPath = '',
+        [object[]]$SetupNotes = @(),
+        [hashtable]$ManualRegData = @{},
+        [object[]]$AmbiguousPaths = @(),
+        [object[]]$NotFound = @(),
+        [object[]]$NoArchetypeItems = @(),
+        [object]$Result,
+        [object]$CompatibilityWarnings,
+        [object[]]$ControlReadinessItems = @(),
+        [string]$GameNotesPath = ''
+    )
+    if ($WriteNotes) {
+        $null = Write-TpmGameNotesReport -SetupNotes $SetupNotes -NotesPath $NotesPath -Quiet
+    }
+    if (-not $HasAnyAction) { return $false }
+    return (Write-TpmActionRequiredReport `
+        -ActionPath $ActionPath `
+        -ManualRegData $ManualRegData `
+        -AmbiguousPaths $AmbiguousPaths `
+        -NotFound $NotFound `
+        -NoArchetypeItems $NoArchetypeItems `
+        -Result $Result `
+        -CompatibilityWarnings $CompatibilityWarnings `
+        -ControlReadinessItems $ControlReadinessItems `
+        -GameNotesPath $GameNotesPath)
+}
 
 $compatWarnings = Get-CompatibilityWarnings -UserProfilesDir $userProfilesDir -TeknoParrotRoot $tpRoot
 $setupNotes     = Get-GameSetupNotes -UserProfilesDir $userProfilesDir
@@ -20574,9 +20926,10 @@ $hasAnyAction = ($manualRegData.Count -gt 0) -or ($amb2.Count -gt 0) -or
                 ($compatWarnings.DllMismatch.Count -gt 0) -or
                 ($compatWarnings.GpuIncompatible.Count -gt 0) -or
                 ($compatWarnings.BiosMissing.Count -gt 0) -or
-                ($compatWarnings.ExeMissing.Count -gt 0) -or
-                ($setupNotes.Count -gt 0)
+                ($compatWarnings.ExeMissing.Count -gt 0)
 
+$notesPath = Join-Path $PSScriptRoot "TeknoParrot-Manager-game-notes.txt"
+$null = Write-TpmActionRequiredReports -HasAnyAction:$false -WriteNotes -NotesPath $notesPath -SetupNotes $setupNotes
 if ($hasAnyAction) {
     Write-Host ""
     Write-Host "============================================" -ForegroundColor Yellow
@@ -20632,16 +20985,12 @@ if ($hasAnyAction) {
         }
         Write-Host "  FIX THESE GAME PATHS IN TEKNOPARROTUI" -ForegroundColor Yellow
         Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
-        Write-Host "  These profiles exist but have a broken or empty path to their" -ForegroundColor DarkCyan
-        Write-Host "  game. The script could not repair them automatically because" -ForegroundColor DarkCyan
-        Write-Host "  the executable name is shared by multiple TeknoParrot profiles." -ForegroundColor DarkCyan
-        Write-Host "  Open TeknoParrotUI, find each profile, and point it to the" -ForegroundColor DarkCyan
-        Write-Host "  correct game folder." -ForegroundColor DarkCyan
-        Write-Host ""
-        foreach ($exeName in ($byExe.Keys | Sort-Object)) {
-            $codes = ($byExe[$exeName] | Sort-Object) -join ", "
-            Write-Host "  Executable : $exeName" -ForegroundColor Yellow
-            Write-Host "  Profiles   : $codes" -ForegroundColor DarkGray
+        foreach ($exePath in ($byExe.Keys | Sort-Object)) {
+            $codes = ($byExe[$exePath] | Sort-Object) -join " and "
+            $exeName = [System.IO.Path]::GetFileName($exePath)
+            Write-Host ("  {0} needs a corrected game folder." -f $codes) -ForegroundColor Yellow
+            Write-Host ("  TeknoParrot Manager could not find: {0}" -f $exeName) -ForegroundColor DarkGray
+            Write-Host ("  Open TeknoParrotUI and point each game to the folder containing {0}." -f $exeName) -ForegroundColor DarkCyan
             Write-Host ""
         }
     }
@@ -20728,14 +21077,16 @@ if ($hasAnyAction) {
         Write-Host ""
         Write-Host "  PATH TOO LONG -- THESE GAMES MAY FAIL TO LAUNCH" -ForegroundColor Yellow
         Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
-        Write-Host "  These specific games have a hard-coded limit on how long their" -ForegroundColor DarkCyan
-        Write-Host "  full install path can be. Past that limit, the game will not start." -ForegroundColor DarkCyan
+        Write-Host "  This game may fail to launch because its folder path is too long." -ForegroundColor DarkCyan
+        Write-Host "  TeknoParrot Manager cannot safely rename folders and update profiles automatically" -ForegroundColor DarkCyan
+        Write-Host "  in this report, so use the manual steps below." -ForegroundColor DarkCyan
         Write-Host ""
-        Write-Host "  HOW TO FIX:" -ForegroundColor DarkCyan
-        Write-Host "    1. Close TeknoParrot if it is open." -ForegroundColor DarkCyan
-        Write-Host "    2. Move/rename the game's folder to the short name shown below," -ForegroundColor DarkCyan
-        Write-Host "       placed as close to a drive root as possible (e.g. D:\TPGames\<name>)." -ForegroundColor DarkCyan
-        Write-Host "    3. Re-run this script (mode 1 or 2) and choose Repair when offered." -ForegroundColor DarkCyan
+        Write-Host "  MANUAL SAFE REPAIR:" -ForegroundColor DarkCyan
+        Write-Host "    1. Back up the affected UserProfile XML before changing anything." -ForegroundColor DarkCyan
+        Write-Host "    2. Close TeknoParrotUI, then rename/move the folder to the recommended name." -ForegroundColor DarkCyan
+        Write-Host "    3. Use a location near a drive root, such as D:\TPGames\<name>." -ForegroundColor DarkCyan
+        Write-Host "    4. Point the profile to the renamed folder in TeknoParrotUI." -ForegroundColor DarkCyan
+        Write-Host "    5. Re-run Repair and test the game." -ForegroundColor DarkCyan
         Write-Host ""
         foreach ($w in ($compatWarnings.PathTooLong | Sort-Object Code)) {
             Write-Host ("  Game        : {0}" -f $w.Code) -ForegroundColor Yellow
@@ -20800,8 +21151,8 @@ if ($hasAnyAction) {
             Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
             Write-Host "  These games are registered and will show as launchable, but will" -ForegroundColor DarkCyan
             Write-Host "  fail at launch until the required firmware files are in place." -ForegroundColor DarkCyan
-            Write-Host "  TPM cannot provide this firmware. It must come from your own legitimate source." -ForegroundColor DarkCyan
-            Write-Host "  Use TeknoParrotUI's own setup/update screen if it offers one; TPM will not copy it." -ForegroundColor DarkCyan
+            Write-Host "  TeknoParrot Manager cannot provide firmware. Obtain the firmware from your legitimate source." -ForegroundColor DarkCyan
+            Write-Host "  Use TeknoParrotUI's own setup/update screen if it offers one; TeknoParrot Manager will not copy it." -ForegroundColor DarkCyan
             Write-Host ""
             Write-Host ("  Place in : {0}" -f $b.ExpectedDir) -ForegroundColor Cyan
             Write-Host ("  Missing  : {0}" -f ($b.MissingFiles -join ', ')) -ForegroundColor Yellow
@@ -20818,7 +21169,7 @@ if ($hasAnyAction) {
             Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
             Write-Host "  A registered game uses this emulator, but the component declared" -ForegroundColor DarkCyan
             Write-Host "  by its ECVF contract was not found at the expected path below." -ForegroundColor DarkCyan
-            Write-Host "  TPM only checked the contract-declared path; it did not determine why" -ForegroundColor DarkCyan
+            Write-Host "  TeknoParrot Manager only checked the contract-declared path; it did not determine why" -ForegroundColor DarkCyan
             Write-Host "  the file is missing." -ForegroundColor DarkCyan
             Write-Host ""
             Write-Host ("  Contract : {0} ({1})" -f $e.ContractId, $e.ContractStatus) -ForegroundColor DarkGray
@@ -20828,7 +21179,7 @@ if ($hasAnyAction) {
             Write-Host ("  Affected : {0}" -f ($e.AffectedGames -join ', ')) -ForegroundColor DarkGray
             Write-Host "  TeknoParrot is missing a component. Use TeknoParrotUI's own update/repair screen." -ForegroundColor DarkCyan
             Write-Host "  Verify or restore this component through your normal TeknoParrot installation/update process using TeknoParrotUI." -ForegroundColor DarkGray
-            Write-Host "  TPM will not invent or replace emulator files; this health result remains visible for review." -ForegroundColor DarkCyan
+            Write-Host "  TeknoParrot Manager will not invent or replace emulator files; this health result remains visible for review." -ForegroundColor DarkCyan
             Write-Host ""
         }
     }
@@ -20851,28 +21202,7 @@ if ($hasAnyAction) {
         }
     }
 
-    # -- 9. Game-specific setup notes (informational) -------------------------
-    if ($setupNotes.Count -gt 0) {
-        Write-Host ""
-        Write-Host "  GAME-SPECIFIC SETUP NOTES" -ForegroundColor Yellow
-        Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
-        Write-Host "  These registered games have special setup notes from the community" -ForegroundColor DarkCyan
-        Write-Host "  compatibility database. Read them before troubleshooting blind." -ForegroundColor DarkCyan
-        Write-Host ""
-        $sortedNotes = @($setupNotes | Sort-Object Code)
-        for ($i = 0; $i -lt $sortedNotes.Count; $i++) {
-            $sn = $sortedNotes[$i]
-            Write-Host ("  Game : {0} ({1})" -f $sn.Code, $sn.GameName) -ForegroundColor Yellow
-            if ($sn.SetupExe) { Write-Host ("  Run  : {0}" -f $sn.SetupExe) -ForegroundColor DarkGray }
-            Write-Host "  Notes:" -ForegroundColor Cyan
-            foreach ($line in (Format-NoteLines -Text $sn.Notes)) { Write-Host $line -ForegroundColor DarkCyan }
-            Write-Host ""
-            if ($i -lt ($sortedNotes.Count - 1)) {
-                Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
-                Write-Host ""
-            }
-        }
-    }
+
 
     Write-Host "============================================" -ForegroundColor Yellow
 
@@ -20896,179 +21226,18 @@ if ($hasAnyAction) {
             Write-Log "Action items: save dialog failed, using default path -- $_"
         }
     }
-    $asb = New-Object System.Text.StringBuilder
-    [void]$asb.AppendLine("TeknoParrot Manager - Action Required")
-    [void]$asb.AppendLine("Generated: $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))")
-    [void]$asb.AppendLine("============================================================")
-    if ($manualRegData.Count -gt 0) {
-        [void]$asb.AppendLine(""); [void]$asb.AppendLine("REGISTER THESE GAMES IN TEKNOPARROTUI")
-        [void]$asb.AppendLine("----------------------------------------------------------")
-        [void]$asb.AppendLine("Open TeknoParrotUI -> Add Game -> select the profile -> browse to the executable.")
-        foreach ($fn in ($manualRegData.Keys | Sort-Object)) {
-            $ai = $manualRegData[$fn]
-            [void]$asb.AppendLine("")
-            [void]$asb.AppendLine("  Game     : $fn")
-            [void]$asb.AppendLine("  Run      : $($ai.ExeName)")
-            if ($ai.Reason -eq "duplicate") {
-                $claimedBy = if ($ai.ClaimedBy) { $ai.ClaimedBy } else { "another folder" }
-                [void]$asb.AppendLine("  Note     : profile '$($ai.Profiles)' is already used by: $claimedBy")
-                [void]$asb.AppendLine("             TeknoParrot can only point one profile at one executable -- this copy")
-                [void]$asb.AppendLine("             needs its own profile, or you must choose which copy to use.")
-                continue
-            }
-            if ($ai.BestGuess -and $ai.BestScore -ge 0.40) {
-                [void]$asb.AppendLine(("  Best guess: {0}  (similarity {1})" -f $ai.BestGuess, $ai.BestScore))
-            }
-            if ($ai.ProfileCount -le 15) {
-                [void]$asb.AppendLine("  Profiles ($($ai.ProfileCount)): $($ai.Profiles)")
-            } else {
-                [void]$asb.AppendLine("  Profiles : shared by $($ai.ProfileCount) games -- search by name in TeknoParrotUI")
-            }
-        }
-    }
-    if ($amb2.Count -gt 0) {
-        [void]$asb.AppendLine(""); [void]$asb.AppendLine("FIX THESE GAME PATHS IN TEKNOPARROTUI")
-        [void]$asb.AppendLine("----------------------------------------------------------")
-        $aByExe = @{}
-        foreach ($r in $amb2) {
-            if (-not $aByExe.ContainsKey($r.Exe)) { $aByExe[$r.Exe] = [System.Collections.Generic.List[string]]::new() }
-            $aByExe[$r.Exe].Add($r.Code)
-        }
-        foreach ($exeN in ($aByExe.Keys | Sort-Object)) {
-            [void]$asb.AppendLine("")
-            [void]$asb.AppendLine("  Executable : $exeN")
-            [void]$asb.AppendLine("  Profiles   : $(($aByExe[$exeN] | Sort-Object) -join ', ')")
-        }
-    }
-    if ($nf.Count -gt 0) {
-        [void]$asb.AppendLine(""); [void]$asb.AppendLine("EXTRACT THESE GAMES FIRST, THEN RE-RUN REPAIR")
-        [void]$asb.AppendLine("----------------------------------------------------------")
-        foreach ($item in ($nf | Sort-Object Code | ForEach-Object { $_.Code })) { [void]$asb.AppendLine("  $item") }
-    }
-    if ($noArchetypeItems.Count -gt 0) {
-        $aByFam = @{}
-        foreach ($r in $noArchetypeItems) {
-            if (-not $aByFam.ContainsKey($r.Family)) { $aByFam[$r.Family] = [System.Collections.Generic.List[string]]::new() }
-            $aByFam[$r.Family].Add($r.Code)
-        }
-        [void]$asb.AppendLine(""); [void]$asb.AppendLine("SET UP CONTROLS FOR THESE GAME TYPES IN TEKNOPARROTUI")
-        [void]$asb.AppendLine("----------------------------------------------------------")
-        [void]$asb.AppendLine("Bind one game of each type fully, then re-run and choose Register.")
-        foreach ($fam in ($aByFam.Keys | Sort-Object)) {
-            [void]$asb.AppendLine("")
-            [void]$asb.AppendLine(("  {0} GAMES ({1} waiting):" -f $fam.ToUpper(), $aByFam[$fam].Count))
-            [void]$asb.AppendLine("  $( ($aByFam[$fam] | Sort-Object) -join ', ' )")
-        }
-    }
-    if ($result.Unmatched.Count -gt 0) {
-        [void]$asb.AppendLine(""); [void]$asb.AppendLine("GAME FOLDERS NOT RECOGNISED BY TEKNOPARROT (informational)")
-        [void]$asb.AppendLine("----------------------------------------------------------")
-        foreach ($folder in ($result.Unmatched | Sort-Object)) { [void]$asb.AppendLine("  $folder") }
-    }
-    if ($compatWarnings.PathTooLong.Count -gt 0) {
-        [void]$asb.AppendLine(""); [void]$asb.AppendLine("PATH TOO LONG -- THESE GAMES MAY FAIL TO LAUNCH")
-        [void]$asb.AppendLine("----------------------------------------------------------")
-        [void]$asb.AppendLine("How to fix: close TeknoParrot, move/rename the folder to the short name")
-        [void]$asb.AppendLine("shown below (placed near a drive root, e.g. D:\TPGames\<name>), then")
-        [void]$asb.AppendLine("re-run this script and choose Repair when offered.")
-        foreach ($w in ($compatWarnings.PathTooLong | Sort-Object Code)) {
-            [void]$asb.AppendLine("")
-            [void]$asb.AppendLine("  Game        : $($w.Code)")
-            [void]$asb.AppendLine("  Current path: $($w.Length) characters (limit ~$($w.Limit))")
-            [void]$asb.AppendLine("  Rename to   : $($w.Suggested)")
-        }
-    }
-    if ($compatWarnings.DllMismatch.Count -gt 0) {
-        [void]$asb.AppendLine(""); [void]$asb.AppendLine("FILE VERSION MISMATCH -- THESE GAMES NEED A SPECIFIC OLDER FILE")
-        [void]$asb.AppendLine("----------------------------------------------------------")
-        [void]$asb.AppendLine("How to fix: join the TeknoParrot Discord (linked from teknoparrot.com),")
-        [void]$asb.AppendLine("ask in #fixes for the file named below matching the required CRC32, and")
-        [void]$asb.AppendLine("replace that file in the game's own folder. Do NOT let TeknoParrot")
-        [void]$asb.AppendLine("redeploy its current copy here -- that makes it worse, not better.")
-        foreach ($w in ($compatWarnings.DllMismatch | Sort-Object Code)) {
-            [void]$asb.AppendLine("")
-            [void]$asb.AppendLine("  Game           : $($w.Code)")
-            [void]$asb.AppendLine("  File           : $($w.FileName)")
-            [void]$asb.AppendLine("  Current CRC32  : $($w.Found)")
-            [void]$asb.AppendLine("  Required CRC32 : $($w.Required)")
-        }
-    }
-    if ($compatWarnings.GpuIncompatible.Count -gt 0) {
-        $gpuVendorSeen = $compatWarnings.GpuIncompatible[0].Vendor
-        [void]$asb.AppendLine(""); [void]$asb.AppendLine("KNOWN $($gpuVendorSeen.ToUpper()) GPU INCOMPATIBILITY -- NO FIX AVAILABLE (informational)")
-        [void]$asb.AppendLine("----------------------------------------------------------")
-        [void]$asb.AppendLine("These games are confirmed not to work on $gpuVendorSeen GPUs. Known")
-        [void]$asb.AppendLine("limitation, not a setup mistake -- there is no fix to apply.")
-        foreach ($w in ($compatWarnings.GpuIncompatible | Sort-Object Code)) { [void]$asb.AppendLine("  $($w.Code)") }
-    }
-    if ($compatWarnings.BiosMissing.Count -gt 0) {
-        foreach ($b in $compatWarnings.BiosMissing) {
-            [void]$asb.AppendLine(""); [void]$asb.AppendLine("$($b.EmulatorType.ToUpper()) FIRMWARE NOT INSTALLED")
-            [void]$asb.AppendLine("----------------------------------------------------------")
-            [void]$asb.AppendLine("These games are registered but need firmware before they can start.")
-            [void]$asb.AppendLine("TPM cannot provide firmware; obtain it from your legitimate source and use")
-            [void]$asb.AppendLine("TeknoParrotUI's own setup/update screen if it offers one.")
-            [void]$asb.AppendLine("  Place in : $($b.ExpectedDir)")
-            [void]$asb.AppendLine("  Missing  : $($b.MissingFiles -join ', ')")
-            [void]$asb.AppendLine("  Affected : $($b.AffectedGames -join ', ')")
-        }
-    }
-    if ($compatWarnings.ExeMissing.Count -gt 0) {
-        foreach ($e in $compatWarnings.ExeMissing) {
-            [void]$asb.AppendLine("")
-            [void]$asb.AppendLine("$($e.EmulatorType.ToUpper()) EMULATOR COMPONENT NOT FOUND")
-            [void]$asb.AppendLine("----------------------------------------------------------")
-            [void]$asb.AppendLine("A registered game uses this emulator, but the component declared")
-            [void]$asb.AppendLine("by its ECVF contract was not found at the expected path below.")
-            [void]$asb.AppendLine("TPM only checked the contract-declared path; it did not determine why")
-            [void]$asb.AppendLine("the file is missing.")
-            [void]$asb.AppendLine("  Contract : $($e.ContractId) ($($e.ContractStatus))")
-            [void]$asb.AppendLine("  Detector : $($e.DetectorMethod) / $($e.DetectorSource)")
-            [void]$asb.AppendLine("  Evidence : contract-backed; confidence $($e.Confidence)")
-            [void]$asb.AppendLine("  Expected : $($e.ExpectedPath)")
-            [void]$asb.AppendLine("  Affected : $($e.AffectedGames -join ', ')")
-            [void]$asb.AppendLine("  Action   : Use TeknoParrotUI's own update/repair screen, then review this")
-            [void]$asb.AppendLine("             health check again. TPM does not replace emulator files.")
-        }
-    }
-    if ($controlReadinessItems.Count -gt 0) {
-        foreach ($item in $controlReadinessItems) {
-            [void]$asb.AppendLine("")
-            [void]$asb.AppendLine("CONTROLS NOT READY : $($item.Code)")
-            [void]$asb.AppendLine("----------------------------------------------------------")
-            [void]$asb.AppendLine("Registration, launch success, and TeknoParrot wizard completion")
-            [void]$asb.AppendLine("are reported separately and do not prove that controls work.")
-            foreach ($line in $item.SummaryLines) {
-                [void]$asb.AppendLine([string]$line)
-            }
-        }
-    }
-    if ($setupNotes.Count -gt 0) {
-        [void]$asb.AppendLine(""); [void]$asb.AppendLine("GAME-SPECIFIC SETUP NOTES (informational)")
-        [void]$asb.AppendLine("----------------------------------------------------------")
-        $sortedNotesFile = @($setupNotes | Sort-Object Code)
-        for ($i = 0; $i -lt $sortedNotesFile.Count; $i++) {
-            $sn = $sortedNotesFile[$i]
-            [void]$asb.AppendLine("")
-            [void]$asb.AppendLine("  Game : $($sn.Code) ($($sn.GameName))")
-            if ($sn.SetupExe) { [void]$asb.AppendLine("  Run  : $($sn.SetupExe)") }
-            [void]$asb.AppendLine("  Notes:")
-            foreach ($line in (Format-NoteLines -Text $sn.Notes)) { [void]$asb.AppendLine($line) }
-            if ($i -lt ($sortedNotesFile.Count - 1)) {
-                [void]$asb.AppendLine(""); [void]$asb.AppendLine("----------------------------------------------------------")
-            }
-        }
-    }
-    try {
-        [System.IO.File]::WriteAllText($actionPath, $asb.ToString(), (New-Object System.Text.UTF8Encoding $false))
-        Write-Host ""
-        Write-Host "  Action items saved to:" -ForegroundColor Green
-        Write-Host "  $actionPath" -ForegroundColor Cyan
-        Write-Host "  Open that file to review everything you need to do manually." -ForegroundColor DarkCyan
-        Write-Log "Action items written to $actionPath"
-    } catch {
-        Write-Log "Action items: could not write file -- $_"
-    }
+    $gameNotesPathForReport = if ($setupNotes.Count -gt 0) { $notesPath } else { '' }
+    $null = Write-TpmActionRequiredReports `
+        -HasAnyAction:$true `
+        -ActionPath $actionPath `
+        -ManualRegData $manualRegData `
+        -AmbiguousPaths $amb2 `
+        -NotFound $nf `
+        -NoArchetypeItems $noArchetypeItems `
+        -Result $result `
+        -CompatibilityWarnings $compatWarnings `
+        -ControlReadinessItems $controlReadinessItems `
+        -GameNotesPath $gameNotesPathForReport
 }
 
 Write-Host ""
