@@ -269,13 +269,18 @@
     architecture. Checks reshade.me for newer versions on each run. Optional --
     your games work perfectly without it.
     Beginner profile and restore choices are explicit and per-game. TPM offers
-    the five approved profile IDs, validated favorites, and a remembered
-    selection. It also offers R to restore the previous trusted profile for
+    the five approved profile IDs, catalog-bound favorites, and a remembered
+    selection. No profile is marked recommended or validated without measured
+    evidence; pinned effect hashes establish catalog integrity, not performance
+    validation. It also offers R to restore the previous trusted profile for
     that game. Restore is never automatic: the operator must choose it.
     History is accepted only when the current profile definition, ordered
     approved effect hashes, and intensity variant still match. Missing,
     corrupt, stale, or unsupported history falls back to fresh selection; TPM
     never copies historical file paths.
+    Multi-monitor suitability is read-only and advisory, uses caller-supplied
+    evidence, treats duplicate target IDs as ambiguous, and does not separately
+    label EXTENDED arrangements or acquire Windows display topology itself.
 
     DLL, generated preset, and approved effect files are staged and promoted
     together. Before replacing a destination, TPM requires a matching
@@ -2158,10 +2163,11 @@
                               database (eggmansworld.github.io/TeknoParrot) --
                               workarounds, known quirks, anything else that
                               site's maintainer has written up for that game.
-                              Shows the executable TeknoParrot expects to run
-                              and the full notes text, word-wrapped and
-                              separated game-by-game so long entries stay
-                              readable. Informational only.
+                              Writes the expected executable and sanitized notes
+                              to the separate
+                              TeknoParrot-Manager-game-notes.txt report.
+                              Raw source notes are excluded from ACTION
+                              REQUIRED. Informational only.
 
   These compatibility, firmware, emulator-component, controls-readiness,
   and setup-notes checks run automatically on every AutoSync/Register run --
@@ -2177,6 +2183,9 @@
   file name; it's skipped automatically during unattended runs and preview/
   dry-run mode, both of which just save to the default path with no prompt.
   The script tells you the path when it writes the file.
+  If setup notes exist, the sanitized notes report is written separately even
+  when there are no ACTION REQUIRED items. Raw imported notes are never copied
+  into the ActionItems report.
 
 
 -------------------------------------------------------------------------------

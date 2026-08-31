@@ -2,7 +2,6 @@
   TeknoParrot Manager  --  CHANGELOG
   Author: Jumpstile
 ===============================================================================
-
   Most recent version first. The RC8 entry below is a candidate record only;
   RC8 is not published and has no tag, release asset, or Scripts mirror.
 
@@ -13,6 +12,15 @@
   Candidate source status: v1.0 RC7 remains the current published release.
   RC8 is being prepared for independent review and guarded certification.
   Final Version 1.0 remains unpublished.
+
+  Additional RC8 candidate fixes: duplicate display identities remain
+  ambiguous instead of selecting the first matching monitor; the read-only
+  display/ReShade guard traverses reachable local helpers; curated ReShade
+  profiles and effects are ADVISORY_UNMEASURED without measured compatibility
+  evidence; and imported setup notes are sanitized into a separate report
+  instead of being copied into Action Required. External TPM values remain
+  unchanged. No separate EXTENDED topology classification or live Windows
+  display-topology acquisition is included under the feature freeze.
 
   Fixes: Eggman updates offer a validated primary ZIP/source folder when the
   current DAT is protected under the TeknoParrot root; PostgreSQL setup asks
@@ -50,16 +58,22 @@
 
   Governance: local-worktree/GitHub handoff, package identity, and #290
   documentation-freshness evidence are mandatory source-controlled gates.
-  ReShade visual profiles: RC8 now defines five deterministic, bounded choices:
+  ReShade visual profiles: RC8 defines five deterministic, bounded choices:
   Original, Clean & Sharp, Vivid Arcade, Classic Arcade CRT, and Enhanced
   Arcade. Generated presets use only approved catalog effects with pinned
   revisions, exact hashes, required dependencies, safe defaults, and explicit
-  ordering. Enhanced Arcade validates LumaSharpen before Vibrance; CRT remains
-  isolated from those effects in normal profile mode. Preset generation is
-  deterministic and validated, while advanced custom presets remain bounded
+  ordering. Enhanced Arcade orders LumaSharpen before Vibrance; CRT remains
+  isolated from those effects in normal profile mode. Profile/effect metadata
+  is `ADVISORY_UNMEASURED` with no measured-evidence or recommendation claim;
+  pinned hashes establish catalog integrity, not performance validation. Preset
+  generation is deterministic, while advanced custom presets remain bounded
   user input and never become approved effect evidence. Display and resolution
   checks remain advisory; TPM does not configure monitors or overwrite
   ambiguous/user-owned preset content.
+  Report hardening: imported setup notes are sanitized into the separate
+  TeknoParrot-Manager-game-notes.txt report, including on notes-only runs;
+  Action Required contains authored guidance only, and external `TPM` values in
+  paths, contract fields, and game identifiers are preserved.
   Added a local preview gallery for the five canonical visual profiles using
   TPM-owned synthetic imagery only. Preview metadata is illustrative and is
   not part of the approved effect trust boundary. Missing or invalid previews
@@ -89,14 +103,17 @@
 
 
 
-  ReShade suitability now accepts bounded, read-only multi-monitor evidence.
-  TPM classifies single, extended, mixed, mirrored, unavailable, and malformed
-  topologies and requires explicit target-display evidence when multiple
-  displays are usable. Stale or ambiguous target evidence remains advisory and
-  can downgrade eligibility to UNKNOWN; bounded resolution and effect
-  sensitivity continue to provide guidance only. TPM never changes the primary
-  monitor, enables/disables displays, changes resolution/refresh/orientation,
-  moves windows, or writes game display settings.
+  ReShade suitability accepts bounded, read-only multi-monitor evidence supplied
+  by the caller. TPM distinguishes single, multiple-primary, mixed, mirrored,
+  no-primary, unavailable/zero-usable, and malformed topologies, but does not
+  expose a separate EXTENDED classification. An explicit target display must
+  be present and connected; duplicate target IDs remain AMBIGUOUS and TPM does
+  not choose a monitor. Live Windows display acquisition is not wired into the
+  eligibility path in this candidate. Stale or ambiguous target evidence can
+  downgrade eligibility to UNKNOWN; bounded resolution and effect sensitivity
+  continue to provide guidance only. TPM never changes the primary monitor,
+  enables/disables displays, changes resolution/refresh/orientation, moves
+  windows, or writes game display settings.
 
 
 -------------------------------------------------------------------------------
