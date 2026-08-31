@@ -59,8 +59,26 @@ does not change the path or gate rules here.
 - Active implementation, review, certification, and release-validation Git
   worktrees are local clones or local worktrees. Do not use a NAS, SMB share,
   mapped drive, or UNC path as an authoritative active Git worktree.
-- The Desktop convention is `C:\REPOS\teknoparrot-manager`.
-- The ARCADE convention is `E:\REPOS\teknoparrot-manager`.
+- The Desktop host uses `C:\REPOS\teknoparrot-manager` or an explicitly
+  Desktop-local worktree beneath `C:\REPOS`.
+- The ARCADE host uses `E:\REPOS\teknoparrot-manager` or an explicitly
+  ARCADE-local worktree beneath `E:\REPOS`.
+- These are normative host/path pairs, not interchangeable examples. A drive
+  letter does not identify another machine. A `C:\REPOS` path observed from
+  ARCADE is still ARCADE-local storage and is not Desktop evidence; an
+  `E:\REPOS` path observed from Desktop is still Desktop-local storage unless
+  an explicitly configured remote transport proves otherwise.
+- If the approved machine-scoped repository root is missing, fail closed and
+  report the missing path. Do not substitute another local drive, checkout,
+  mapped path, historical worktree, or similarly named folder.
+- A copy from one local drive letter to another on the same host is not a
+  cross-machine transfer. Cross-machine transfer is established only through
+  the authoritative GitHub ref/SHA or another explicitly configured remote
+  transport that the actual receiving host independently verifies.
+- Claims such as `Desktop verified`, `ARCADE verified`, `transferred to Desktop`,
+  or `transferred to ARCADE` require evidence produced by or independently
+  verified from that actual host. Evidence from another machine cannot
+  substitute for it.
 - NAS storage may hold ROM/source data, packages, generated artifacts,
   validation evidence, backups, and mirrors. Those files are not an active
   Git checkout and do not establish source identity.
@@ -69,8 +87,8 @@ does not change the path or gate rules here.
   trusted. Each runtime procedure must verify the specific approved root,
   markers, containment, and reparse-point rules defined by its contract.
 - A report copied to an artifact or evidence store after a local run remains
-  evidence from the local checkout. Record the source branch, exact SHA, local
-  repository path, and report path together.
+  evidence from the local checkout. Record the source host, source branch,
+  exact SHA, local repository path, and report path together.
 
 ## Standard implementation and review flow
 
@@ -131,8 +149,10 @@ the new SHA. Do not validate a moving branch under an old evidence record.
 
 Arcade Codex creates or refreshes a local checkout under
 `E:\REPOS\teknoparrot-manager`, fetches the named GitHub branch, and checks
-out the exact handed-off SHA. A certification run is blocked unless all of
-the following are recorded:
+out the exact handed-off SHA. If that ARCADE-local E root is unavailable,
+validation stops with a missing-path report; ARCADE must not fall back to
+`C:\REPOS` or any other local path and must not claim Desktop-side evidence.
+A certification run is blocked unless all of the following are recorded:
 
 - `git ls-remote origin refs/heads/<branch>` equals the expected SHA;
 - local `git rev-parse HEAD` equals the expected SHA;
@@ -228,6 +248,7 @@ Issue/PR:
 Source branch or tag:
 Expected GitHub SHA:
 GitHub ref SHA at validation:
+Current host: Desktop/ARCADE
 Desktop checkout:
 ARCADE checkout:
 Local HEAD:
@@ -253,4 +274,5 @@ Release Manager authorization: not requested/approved
 When an older procedure conflicts with this document, stop and identify the
 conflict. Mark the old material historical or update it to link here. Do not
 silently choose a stale branch name, shared worktree, agent role, release
-claim, or package identity rule because it appears in an older report.
+claim, package identity rule, host, or drive because it appears in an older
+report.
