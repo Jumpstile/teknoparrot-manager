@@ -1322,6 +1322,18 @@ fix never touched.
 first find (via `Get-StagingFolderMap`), so the next run hits the normal up-to-date path
 directly.
 
+### AutoSync extraction progress ownership (issue #243)
+
+Expand-ZipFileSafe owns progress ID 43 for the lifetime of each extraction. It uses
+that explicit ID for per-entry updates and completes the same ID in finally, including
+archive-open/validation failures, cancellation-like host exceptions, and other exits
+after extraction begins. The download overlay remains ID 42; Register-Games retains
+the legacy/default ID 0 for the active library scan. Extraction does not create a
+parent/child progress tree. Empty-source, skipped, and already-up-to-date AutoSync
+paths do not start extraction and therefore do not create an extraction progress
+record. Explicit ownership prevents a completed extraction row from surviving into
+the registration scan on hosts that do not fully redraw the previous progress record.
+
 ### Fuzzy-match tie-break (v0.99.19)
 
 `Resolve-BestFuzzyMatch` (same "pure, shared, testable" pattern as
