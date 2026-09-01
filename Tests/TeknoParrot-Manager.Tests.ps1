@@ -4586,11 +4586,15 @@ Describe "AutoSync one-game registration behavior" {
         $newExe = New-Item -ItemType File -Path (Join-Path $install "Deathsmiles II\game.exe") -Force
         $oldExe = New-Item -ItemType File -Path (Join-Path $install "Unrelated\game.exe") -Force
         $before = (Get-ChildItem -LiteralPath $install -Recurse -File | ForEach-Object FullName) -join "`n"
-        Mock Get-GameFiles { @($newExe, $oldExe) }
+        $script:scanRoots = @()
+        Mock Get-GameFiles { param($folder); $script:scanRoots += $folder; if ($folder -like '*Deathsmiles II') { @($newExe) } else { throw "Unexpected scan root: $folder" } }
         Mock Write-Log {}
-        $result = Register-Games -userProfilesDir $profiles -installFolder $install -profileIndex @{} -gameProfilesDir $profiles -DryRun:$true -GameFolders @('Deathsmiles II')
+        $result = Register-Games -userProfilesDir $profiles -installFolder $install -profileIndex @{} -gameProfilesDir $profiles -DryRun:$false -GameFolders @('Deathsmiles II')
         $after = (Get-ChildItem -LiteralPath $install -Recurse -File | ForEach-Object FullName) -join "`n"
         $before | Should -Be $after
+        $scanRoots.Count | Should -Be 1
+        $scanRoots[0] | Should -Not -Be ([System.IO.Path]::GetFullPath($install))
+        $scanRoots[0] | Should -Match 'Deathsmiles II$'
         $result.Registered.Count | Should -Be 0
         $result.Already.Count | Should -Be 0
     }

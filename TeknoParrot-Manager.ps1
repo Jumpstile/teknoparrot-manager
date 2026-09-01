@@ -11933,16 +11933,20 @@ function Register-Games {
           [string]$tpRootDir = '', [hashtable]$subFolderMap = $null,
           [string[]]$GameFolders = $null)
 
-    if ($null -eq $datIndex) { $datIndex = @{} }
-
-    $exeFiles       = @(Get-GameFiles $installFolder)
-    if ($null -ne $GameFolders -and $GameFolders.Count -gt 0) {
-        $wanted = @{}; foreach ($folder in $GameFolders) { $wanted[[string]$folder] = $true }
-        $exeFiles = @($exeFiles | Where-Object {
-            $relative = $_.FullName.Substring($installFolder.TrimEnd('\').Length).TrimStart('\')
-            $top = ($relative -split '\\')[0]
-            $wanted.ContainsKey($top)
-        })
+    if ($null -eq $GameFolders -or $GameFolders.Count -eq 0) {
+        $exeFiles = @(Get-GameFiles $installFolder)
+    } else {
+        $installRoot = [System.IO.Path]::GetFullPath($installFolder).TrimEnd('\')
+        $scanRoots = New-Object System.Collections.Generic.List[string]
+        foreach ($folder in $GameFolders) {
+            $child = [System.IO.Path]::GetFullPath((Join-Path $installRoot ([string]$folder))).TrimEnd('\')
+            if (-not (Test-PathInside $child $installRoot) -or -not (Test-Path -LiteralPath $child -PathType Container)) {
+                Write-Log "Register-Games: rejected unsafe or missing filtered game folder '$folder'."
+                continue
+            }
+            [void]$scanRoots.Add($child)
+        }
+        $exeFiles = @($scanRoots | ForEach-Object { Get-GameFiles $_ })
     }
     $registered     = New-Object System.Collections.ArrayList
     $already        = New-Object System.Collections.ArrayList
