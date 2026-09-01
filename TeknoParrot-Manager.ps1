@@ -3575,7 +3575,10 @@ function Start-CrosshairSelectionBridge {
         try {
             $context = $result.AsyncState.Listener.EndGetContext($result)
             $query = $context.Request.QueryString
-            $index = Test-CrosshairSelectionIndex -Token $query['token'] -ExpectedToken $result.AsyncState.Token -Value $query['index']
+            $rawValue = $query['index']
+            $index = 0
+            $validSelection = ($query['token'] -eq $result.AsyncState.Token -and $rawValue -match '^\d+$' -and [int]::TryParse($rawValue,[ref]$index) -and $index -ge 0 -and $index -lt 321)
+            if (-not $validSelection) { $index = $null }
             if ($null -ne $index) { $result.AsyncState.Index = $index }
             $bytes = [Text.Encoding]::UTF8.GetBytes('selected')
             $context.Response.Headers['Access-Control-Allow-Origin'] = '*'
