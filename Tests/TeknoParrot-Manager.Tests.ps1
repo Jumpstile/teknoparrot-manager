@@ -10187,11 +10187,21 @@ Describe "ReShade trusted profile restore" {
         $options.Remembered.Valid|Should -BeTrue;$options.Restore.Valid|Should -BeTrue;$options.Favorites.Count|Should -Be 1
         $source=$script:ProductionSource;$source|Should -Match 'R\) Reapply previous trusted profile';$source|Should -Match 'Reapply .* for this game';$source|Should -Not -Match 'Restore .* for this game';$source|Should -Match 'Choose a favorite profile'
     }
-    It "states crosshair click limitations and keeps numeric fallback" {
-        $script:ProductionSource | Should -Match 'Click selection is not available in this preview\. Type the number shown under the crosshair in TeknoParrot Manager\.'
+    It "supports bounded browser click selection and keeps numeric fallback" {
+        $script:ProductionSource | Should -Match 'Start-CrosshairSelectionBridge'
+        $script:ProductionSource | Should -Match 'Test-CrosshairSelectionIndex'
+        $script:ProductionSource | Should -Match '127\.0\.0\.1'
+        $script:ProductionSource | Should -Match 'Typed numeric fallback remains available'
         $script:ProductionSource | Should -Match 'Apply these crosshairs\? \(Y/N, default Y\)'
         $script:ProductionSource | Should -Match '\$crosshairConfirm'
         $script:ProductionSource | Should -Match 'Read-HostSafe'
+    }
+
+    It "rejects invalid browser selection tokens and indexes" {
+        Test-CrosshairSelectionIndex -Token 'bad' -ExpectedToken 'good' -Value '1' | Should -BeNullOrEmpty
+        Test-CrosshairSelectionIndex -Token 'good' -ExpectedToken 'good' -Value '-1' | Should -BeNullOrEmpty
+        Test-CrosshairSelectionIndex -Token 'good' -ExpectedToken 'good' -Value '321' | Should -BeNullOrEmpty
+        Test-CrosshairSelectionIndex -Token 'good' -ExpectedToken 'good' -Value '320' | Should -Be 320
     }
     It "covers ReShade preview recovery choices and empty-source failure" {
         $script:ProductionSource | Should -Match '\[R\] Retry preview'

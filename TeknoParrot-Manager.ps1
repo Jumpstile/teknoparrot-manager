@@ -3583,7 +3583,7 @@ function Start-CrosshairSelectionBridge {
         } catch {}
     }
     $session = [pscustomobject]@{ Token=$token; Port=$port; Url=("http://127.0.0.1:{0}/" -f $port); State=$state; Callback=$callback }
-    [void]$listener.BeginGetContext($callback,$state)
+    [void]$listener.BeginGetContext(([System.AsyncCallback]$callback),$state)
     return $session
 }
 function Stop-CrosshairSelectionBridge {
