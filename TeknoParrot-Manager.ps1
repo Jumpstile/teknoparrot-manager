@@ -15323,9 +15323,24 @@ function Export-HyperSpinJson {
     $tpSystemGuid = [string]$tpEmu.id
     if ([string]::IsNullOrEmpty($tpSystemGuid)) {
         Write-Host "  WARNING: TeknoParrot emulator entry has no 'id' field in emulators.json." -ForegroundColor Yellow
-        Write-Host "  Game entries will be written with an empty systemId; HyperSpin 2 may not" -ForegroundColor Yellow
-        Write-Host "  associate them with the TeknoParrot system until the emulator is re-added." -ForegroundColor Yellow
-        Write-Log "HyperSpin export: WARNING -- emulator entry has no id; systemId will be empty."
+        Write-Host "  HyperSpin cannot associate exported games with this emulator safely." -ForegroundColor Yellow
+        Write-Host "  [F] Fix it (re-add TeknoParrot in HyperSpin, then retry)" -ForegroundColor Cyan
+        Write-Host "  [A] Add anyway (empty systemId)" -ForegroundColor Yellow
+        Write-Host "  [S] Skip export (default)" -ForegroundColor Cyan
+        do {
+            $missingIdChoice = (Read-HostSafe '  Choice (F/A/S)' -Default 'S').Trim().ToUpper()
+            if ($missingIdChoice -eq 'F') {
+                Write-Host "  Fix the TeknoParrot emulator entry in HyperSpin, then run export again." -ForegroundColor Yellow
+                Write-Log "HyperSpin export: skipped because emulator id is missing; operator chose Fix."
+                return -1
+            }
+            if ($missingIdChoice -eq 'S') {
+                Write-Log "HyperSpin export: skipped because emulator id is missing; operator chose Skip."
+                return 0
+            }
+            if ($missingIdChoice -notin @('A', '')) { Write-Host "  Enter F, A, or S." -ForegroundColor Yellow }
+        } while ($missingIdChoice -notin @('A', ''))
+        Write-Log "HyperSpin export: operator chose Add anyway with empty systemId."
     }
 
     # Locate the games folder; create it if HyperSpin 2 has not yet made it.

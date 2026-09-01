@@ -21,6 +21,9 @@
   instead of being copied into Action Required. External TPM values remain
   unchanged. No separate EXTENDED topology classification or live Windows
   display-topology acquisition is included under the feature freeze.
+  HyperSpin export now gates missing emulator IDs with explicit Fix, Add
+  anyway, or Skip choices; Skip is the safe default and no games are written.
+
 
   Fixes: Eggman updates offer a validated primary ZIP/source folder when the
   current DAT is protected under the TeknoParrot root; PostgreSQL setup asks
