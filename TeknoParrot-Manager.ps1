@@ -15434,10 +15434,10 @@ function Export-HyperSpinJson {
         }
     }
 
-    # No games file found -- create a new empty one named after the emulator title.
+    # No games file found -- create or use the named file after validating it.
     # This eliminates the prerequisite of adding one game manually first.
-    # Guard: only write when no file with that name already exists on disk -- a file
-    # could exist outside the scanned paths (manual creation, alternate HS install).
+    # Guard: a pre-existing named file is never trusted by filename alone. With a
+    # valid emulator ID it must be empty or contain only the same system GUID.
     if (-not $tpGamesPath) {
         $safeName = ($tpEmu.title -replace '[^A-Za-z0-9\-\.]', '_').Trim('_')
         if ([string]::IsNullOrEmpty($safeName)) { $safeName = 'TeknoParrot' }
@@ -15453,7 +15453,24 @@ function Export-HyperSpinJson {
                 return -1
             }
         } else {
-            Write-Log "HyperSpin export: using existing file at $tpGamesPath (found outside scanned paths)"
+            if ($tpSystemGuid) {
+                try {
+                    $namedEntries = @(Get-Content -LiteralPath $tpGamesPath -Raw | ConvertFrom-Json)
+                    $mismatchedNamedEntries = @($namedEntries | Where-Object {
+                        -not $_ -or [string]$_.gameSystemId -ne $tpSystemGuid
+                    })
+                    if ($mismatchedNamedEntries.Count -gt 0) {
+                        Write-Host "  ERROR: Existing HyperSpin games file '$($safeName).json' does not match TeknoParrot's emulator ID; no changes made." -ForegroundColor Red
+                        Write-Log "HyperSpin export: refused named games file with mismatched system ID at $tpGamesPath"
+                        return -1
+                    }
+                } catch {
+                    Write-Host "  ERROR: Could not validate existing HyperSpin games file: $_" -ForegroundColor Red
+                    Write-Log "HyperSpin export: named games file validation failed -- $_"
+                    return -1
+                }
+            }
+            Write-Log "HyperSpin export: using existing validated file at $tpGamesPath"
         }
     }
 

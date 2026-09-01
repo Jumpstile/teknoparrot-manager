@@ -8313,6 +8313,35 @@ Describe "HyperSpin emulator identity gate" {
         $exportedJson = Get-Content -LiteralPath (Join-Path $games 'TeknoParrot.json') -Raw
         $exportedJson | Should -Match '"gameSystemId"\s*:\s*"valid-guid"'
     }
+    It "refuses a nonempty same-name games file with a mismatched emulator ID" {
+        $hsRoot = Join-Path $TestDrive 'HyperSpinNamedFileMismatch'
+        $profiles = Join-Path $hsRoot 'UserProfiles'
+        $games = Join-Path $hsRoot 'games'
+        [void](New-Item -ItemType Directory -Path $profiles,$games -Force)
+
+        [System.IO.File]::WriteAllText(
+            (Join-Path $hsRoot 'emulators.json'),
+            '[{"title":"TeknoParrot","id":"valid-guid"}]',
+            (New-Object System.Text.UTF8Encoding $false))
+
+        $namedPath = Join-Path $games 'TeknoParrot.json'
+        $namedJson = '[{"gameSystemId":"other-guid","roms":[{"name":"other.xml"}]}]'
+        [System.IO.File]::WriteAllText($namedPath, $namedJson, (New-Object System.Text.UTF8Encoding $false))
+
+        $gamePath = Join-Path $hsRoot 'SampleGame.exe'
+        [System.IO.File]::WriteAllText($gamePath, '', (New-Object System.Text.UTF8Encoding $false))
+        $profileXml = '<GameProfile><GamePath>{0}</GamePath><Description>Sample Game</Description></GameProfile>' -f $gamePath
+        [System.IO.File]::WriteAllText((Join-Path $profiles 'SampleGame.xml'), $profileXml, (New-Object System.Text.UTF8Encoding $false))
+
+        Mock Write-Log {}
+
+        $result = Export-HyperSpinJson -userProfilesDir $profiles -hsDataPath $hsRoot
+
+        $result | Should -Be -1
+        [System.IO.File]::ReadAllText($namedPath) | Should -Be $namedJson
+        @(Get-ChildItem -LiteralPath $games -Filter 'TeknoParrot.json.bak_*' -File -ErrorAction SilentlyContinue).Count | Should -Be 0
+    }
+
 }
 
 Describe "Render-MainMenuScreen / Show-MainMenu" {
