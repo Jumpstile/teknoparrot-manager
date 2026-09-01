@@ -428,10 +428,13 @@ Mode 4 deploys custom P1/P2 crosshair cursor images to all registered lightgun g
 
 **How to use it:**
 
-1. An HTML preview grid opens in your browser showing all 321 included designs
-2. Enter the index number for your P1 and P2 crosshairs (can be the same) — the script remembers your last choice by filename and offers it as a default, so a re-run is just pressing Enter twice
-3. The script copies the images to every registered lightgun game
-4. Optionally set cursor-hide for all gun games (backs up profiles first)
+1. An HTML preview grid opens in your browser showing all 321 included designs.
+   Click a design to select P1 when the short-lived local bridge is available.
+   The bridge accepts only a per-session token and an index from 0 through 320.
+2. Choose the P1 and P2 indices (they can be the same). If the browser bridge
+   times out or is unavailable, typed numeric selection remains available.
+3. Confirm the choices before the script copies images to registered games.
+4. Optionally set cursor-hide for all gun games (backs up profiles first).
 
 **Adding your own crosshairs:** drop any PNG into the `Crosshairs\` folder next to the script. No naming convention required, though numbering helps. The script validates against the PNG magic-byte signature before including any file.
 
@@ -442,7 +445,9 @@ Mode 4 deploys custom P1/P2 crosshair cursor images to all registered lightgun g
 ## ReShade Visual Enhancements
 
 ReShade adds post-processing effects without changing game data. TPM does not automatically remove unowned or changed hooks; review those through advanced troubleshooting.
-**Beginner visual profiles:** ReShade setup shows five bounded choices with short descriptions and local illustrative previews when available. The preview window uses a TPM-owned synthetic test scene with the same neutral source on both sides:
+**Beginner visual profiles:** ReShade setup first shows the five profile
+descriptions, then lets you choose one. A single preview window opens for the
+selected profile before the final confirmation:
 
 | Profile | Result |
 | --- | --- |
@@ -452,7 +457,16 @@ ReShade adds post-processing effects without changing game data. TPM does not au
 | Enhanced Arcade | LumaSharpen followed by Vibrance |
 | Classic Arcade CRT | CRT_Lottes only |
 
-The preview window offers Before, After, and Split views plus a 0-100 comparison slider: at the left position the synthetic scene is all Before, at the right position it is all After, and intermediate positions show the corresponding split. It is illustrative, not a pixel-perfect promise for every game. Preview files and cached renderings are local and TPM-owned; no game screenshots are bundled. If rendering or display is unavailable, TPM shows the text description and profile selection continues. Display and performance notes are advisory only. TPM does not configure monitors or game display settings.
+The preview uses a safe, TPM-owned representative arcade scene with dark and
+bright areas, neon color variation, text, edges, and perspective detail. It
+offers Before, After, Split, and a 0-100 comparison slider. If rendering or
+display is unavailable, the text description and typed selection remain
+available. Nothing is deployed until the explicit confirmation.
+
+After deployment, the result separates newly installed, updated, protected
+unchanged, missing saved paths, unsupported architecture, and errors. Missing
+saved paths include the game name; use the main-menu path-repair tool and run
+ReShade setup again.
 Profile and effect catalog metadata is advisory until measured evidence exists. No profile is marked recommended or `VALIDATED_SINGLE` without that evidence; pinned hashes establish catalog integrity, not performance validation. Multi-monitor suitability is read-only and advisory, uses caller-supplied evidence, treats duplicate target IDs as ambiguous, and does not separately label `EXTENDED` arrangements or acquire Windows display topology itself.
 
 **Remembered profiles, favorites, and restore:** TPM stores per-game profile

@@ -267,9 +267,11 @@
   and the script will pick them up automatically on the next run.
 
   When you run mode 4:
-    1. A preview page opens in your browser showing all available designs.
-    2. Enter the number of your chosen design for Player 1 and Player 2
-       (press Enter to reuse your last choice -- no need to re-find it).
+    1. A preview page opens in your browser showing all 321 available designs.
+       Click a design to select P1 through the short-lived localhost bridge.
+    2. If click selection times out or is unavailable, type the numeric
+       indices for Player 1 and Player 2. Press Enter to reuse last choices.
+       Confirm the choices before files are changed.
     3. The script copies those images to every registered lightgun game:
          - Standard games: P1.png + P2.png in the game's exe folder.
          - ElfLdr2 games: shared pair in the ElfLdr2 emulator folder.
@@ -279,8 +281,6 @@
     4. You are asked whether to also hide the Windows cursor for all
        lightgun games. Answer Y to set the cursor-hide field in each
        gun game's UserProfile XML (a backup is taken automatically first).
-
-  Run mode 4 again any time to change the crosshair design.
 
 
   RESHADE VISUAL ENHANCEMENTS (OPTIONAL)
@@ -296,6 +296,17 @@
   troubleshooting path for those files.
 
   HOW TO SET IT UP
+  Before choosing a profile, TPM explains:
+    Choose how your game should look.
+    Use the preview window to compare the options.
+    Nothing will be changed until you confirm.
+  After you choose one of five profiles, one preview window shows a safe
+  representative arcade scene with dark and bright areas, neon color,
+  text, fine edges, and perspective detail. Before, After, Split, and a
+  0-100 slider are available. Deployment waits for explicit confirmation.
+  If the preview is unavailable, the text descriptions and safe fallback
+  remain available.
+
 
   If you downloaded TeknoParrot Manager as a ZIP release, the ReShade DLLs
   are not bundled. Choose mode 5 and answer D to fetch the official installer
@@ -318,6 +329,14 @@
   Before deploying, the script checks the Authenticode signature on your
   ReShade DLL(s) -- ReShade's own installer is code-signed. An invalid or
   missing signature is shown as a warning but does not block setup.
+  POSTGRESQL BACKUP FAILURES
+  PostgreSQL setup verifies a recovery backup before changing settings. If a
+  database backup fails, TPM lists each affected game/database and the cause
+  category, such as connection, service, tool, permission, missing database,
+  or unknown query failure. Choose D for details, F for repair guidance, R
+  after correcting the issue, O for logs/support guidance, or S/B to leave
+  without profile or database changes.
+
 
   Once installed, press the  Home  key while in-game to open the
   ReShade overlay and switch effects on or off.

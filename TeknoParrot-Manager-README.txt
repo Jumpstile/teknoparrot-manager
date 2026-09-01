@@ -1161,17 +1161,18 @@
        anything that fails validation is reported and skipped.
 
     2. An HTML preview grid (TeknoParrot-Crosshairs-Preview.html) is
-       generated and opened in your default browser so you can browse all
-       available designs visually before picking.
+       generated and opened in your default browser. All 321 included designs
+       are listed. Click a design to select P1 when the short-lived localhost
+       bridge is available; it accepts only the session token and index 0-320.
 
-    3. Enter the index number for your Player 1 crosshair and Player 2
-       crosshair. The two can be the same or different. The script
-       remembers your last choice (by filename, so it still works if you
-       add or remove PNGs from the folder) and offers it as a default --
-       just press Enter to reuse it on your next run.
+    3. Choose the Player 1 and Player 2 indices. If the bridge times out or
+       is unavailable, type the numeric indices in the console. The two can be
+       the same or different. Confirm before any game files are changed.
+       The script remembers your last choice by filename and offers it as a
+       default -- just press Enter to reuse it on your next run.
 
     4. The script copies the chosen images to every registered lightgun game
-       folder, reporting the count of games deployed, skipped, and errored.
+       folder, reporting deployed, skipped, and errored games.
 
     5. After deploying, the script asks whether to also hide the Windows
        mouse cursor for all lightgun games. If you answer Y, it sets the
@@ -1227,7 +1228,13 @@
   required to use it -- you pick effects through a simple in-game menu.
   BEGINNER VISUAL PROFILES
 
-    ReShade setup offers five bounded visual profiles:
+    ReShade setup says:
+
+      Choose how your game should look.
+      Use the preview window to compare the options.
+      Nothing will be changed until you confirm.
+
+    It then lists five bounded visual profiles:
 
       Original           No TPM visual enhancement.
       Clean & Sharp      Clearer edges with LumaSharpen.
@@ -1235,22 +1242,17 @@
       Enhanced Arcade    Clearer edges followed by stronger color.
       Classic Arcade CRT CRT-style scanlines and arcade-display character.
 
-    The separate TPM preview window uses a deliberately engineered synthetic
-    arcade test scene. It offers Before, After, and Split views plus a 0-100
-    comparison slider: left is all Before, right is all After, and intermediate
-    positions show the corresponding split from the same neutral source.
-    The scene includes small text, fine lines, geometric shapes, gradients,
-    contrast regions, color blocks, texture detail, and CRT scanline cues so
-    each approved profile's intended change is easy to see.
+    After choosing a profile, one preview window opens before the final
+    confirmation. The preview uses a safe TPM-owned representative arcade
+    scene with dark and bright areas, neon colors, text, fine edges, and
+    perspective detail. It offers Before, After, Split, and a 0-100 slider.
+
     The preview is illustrative, not a pixel-perfect guarantee for every game.
     Preview files and cached renderings are local TPM-owned data; no
-    copyrighted game screenshots are bundled.
-
-    If the preview file, cache, graphics window, or display environment is
+    copyrighted game screenshots are bundled. If rendering or display is
     unavailable, TPM shows the profile description and continues normally.
     Previewing never changes ReShade trust, generated presets, game files,
-    monitor settings, or deployment state. Performance and resolution notes
-    are advisory only.
+    monitor settings, or deployment state.
 
 
   HOW IT IS INSTALLED
