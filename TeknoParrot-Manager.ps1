@@ -5427,7 +5427,7 @@ function Invoke-ReShadeSetup {
     }
     $bulkApply = $false
     $allRegisteredGames = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | Where-Object { $_.Directory.Name -ne 'FullBackup' })
-    if ($allRegisteredGames.Count -gt 0 -and $selectedGames.Count -eq $allRegisteredGames.Count) {
+    if ($selectedGames.Count -gt 1) {
         $bulkChoice = ''
         do {
             Write-Host ("  Apply {0} to all {1} selected games?" -f $selectedProfile.FriendlyName, $selectedGames.Count) -ForegroundColor Cyan

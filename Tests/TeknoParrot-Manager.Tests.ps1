@@ -9869,6 +9869,15 @@ Describe "ReShade trusted profile restore" {
         $script:ProductionSource | Should -Match 'Visual-only gallery'
         $script:ProductionSource | Should -Match 'type the index number'
     }
+    It "offers bulk choices for every multi-game selection including subsets" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$selectedGames\.Count -gt 1'
+        $source | Should -Match '\[Y\] Yes, apply to all'
+        $source | Should -Match '\[S\] Select games one by one'
+        $source | Should -Match '\[D\] Show details'
+        $source | Should -Match '\[B\] Back'
+        $source | Should -Match '\$bulkApply = \(\$bulkChoice -eq ''Y''\)'
+    }
     It "rejects unsupported remembered variants and hides unsupported favorites" {
         $root=Join-Path $TestDrive 'chooser-unsupported';$profile=Get-TpmReShadeProfile -ProfileId CleanSharp
         Set-TpmReShadeRememberedProfile -GameId chooser-game -ProfileDefinition $profile -StateRoot $root;Set-TpmReShadeFavorite -ProfileId CleanSharp -StateRoot $root
