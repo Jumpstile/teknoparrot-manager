@@ -4861,6 +4861,14 @@ Describe "RC8 PostgreSQL and support UX" {
         $script:ProductionSource | Should -Match '\[B\] Back to main menu'
         $script:ProductionSource | Should -Match 'FailureDetails'
     }
+    It "provides concrete PostgreSQL retry and stop action metadata" {
+        $actions = @(Get-PostgresRecoveryActions -FailureId 'postgres-profile-recovery')
+        @($actions).Count | Should -Be 2
+        ($actions | Where-Object Id -eq 'Retry').Label | Should -Be 'Review the backup evidence, then retry PostgreSQL profile setup'
+        ($actions | Where-Object Id -eq 'Stop').Label | Should -Be 'Return to menu without claiming PostgreSQL setup complete'
+        $script:ProductionSource | Should -Match "Get-PostgresRecoveryActions -FailureId 'postgres-profile-recovery'"
+        $script:ProductionSource | Should -Match "Get-PostgresRecoveryActions -FailureId 'postgres-backup-unverified'"
+    }
     It "returns friendly affected game names when database state cannot be verified" {
         $profiles = Join-Path $TestDrive 'postgres-affected-labels'
         New-Item -ItemType Directory -Path $profiles -Force | Out-Null
@@ -9617,6 +9625,22 @@ Describe "Issue #300 shared workflow status state machine" {
         [void](Complete-TpmWorkflowStatus -Context $ctx -Summary 'Stopped safely')
         [void](Close-TpmWorkflowStatus -Context $ctx)
         $ctx.Lifecycle | Should -Be 'Closed'
+    }
+    It "renders concrete failure recovery actions in the status footer" {
+        $snapshot = [pscustomobject]@{
+            Completed = @()
+            Failure = [pscustomobject]@{
+                Message = 'PostgreSQL profile setup was recovery-blocked.'
+                DataSafety = 'No profile changes were claimed.'
+                RecoveryActions = @(Get-PostgresRecoveryActions -FailureId 'postgres-profile-recovery')
+            }
+            Activity = $null
+            State = 'Needs attention'
+            ActiveStepNumber = 6
+            StepCount = 6
+        }
+        $rows = @(Format-TpmWorkflowStatusRows -Snapshot $snapshot -Width 200)
+        ($rows -join "`n") | Should -Match 'Recovery: Retry: Review the backup evidence, then retry PostgreSQL profile setup; Stop: Return to menu without claiming PostgreSQL setup complete'
     }
 
     It "handles simulated resize shrink/grow, stale footer clearing, and narrow fallback" {

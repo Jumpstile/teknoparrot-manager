@@ -545,7 +545,12 @@ function Format-TpmWorkflowStatusRows {
                else { 'Starting' }
     $statusLine = 'TeknoParrot Manager status  ' + ($(if ($recent) { '[OK] ' + $recent + ' -> ' } else { '' })) + $current
     $stepText = if ($Snapshot.ActiveStepNumber) { 'Step {0} of {1}' -f $Snapshot.ActiveStepNumber, $Snapshot.StepCount } else { 'Workflow' }
-    $action = if ($Snapshot.Failure) { 'Acknowledge the message, then choose retry or stop' } else { $Snapshot.UserAction }
+    if ($Snapshot.Failure) {
+        $actions = @($Snapshot.Failure.RecoveryActions | ForEach-Object { '{0}: {1}' -f $_.Id, $_.Label })
+        $action = if ($actions.Count -gt 0) { 'Recovery: ' + ($actions -join '; ') } else { 'Acknowledge the message and return to menu' }
+    } else {
+        $action = $Snapshot.UserAction
+    }
     $rows = [System.Collections.Generic.List[string]]::new()
     [void]$rows.Add((&$clip $statusLine))
     [void]$rows.Add((&$clip ('{0} | {1} | {2}' -f $stepText, $Snapshot.State, $action)))
@@ -794,6 +799,25 @@ function Complete-TpmWorkflowStep {
 function Set-TpmWorkflowFailure {
     param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$FailureId, [Parameter(Mandatory)][string]$Message, [Parameter(Mandatory)][string]$DataSafety, [object[]]$RecoveryActions = @())
     Publish-TpmWorkflowStatusEvent -Context $Context -EventKind FailureRaised -FailureId $FailureId -Summary $Message -DataSafety $DataSafety -RecoveryActions $RecoveryActions
+}
+function Get-PostgresRecoveryActions {
+    param([Parameter(Mandatory)][string]$FailureId)
+    $retryLabel = 'Retry PostgreSQL setup after correcting the reported issue'
+    switch ($FailureId) {
+        'postgres-scan' { $retryLabel = 'Repair the unreadable profile, then retry PostgreSQL setup' }
+        'postgres-install-handoff' { $retryLabel = 'Approve the Windows permission request, then retry PostgreSQL setup' }
+        'postgres-service-state' { $retryLabel = 'Check the PostgreSQL service, then retry PostgreSQL setup' }
+        'postgres-recovery-handoff' { $retryLabel = 'Approve the Windows permission request, then retry PostgreSQL repair' }
+        'postgres-install-failed' { $retryLabel = 'Correct the installation issue, then retry PostgreSQL setup' }
+        'postgres-backup-unverified' { $retryLabel = 'Correct the backup issue, then retry the protected backup' }
+        'postgres-profile-recovery' { $retryLabel = 'Review the backup evidence, then retry PostgreSQL profile setup' }
+        'postgres-profile-errors' { $retryLabel = 'Review the PostgreSQL log, then retry game database setup' }
+        'postgres-service-restore' { $retryLabel = 'Restore the expected service state, then retry PostgreSQL setup' }
+    }
+    return @(
+        @{ Id = 'Retry'; Label = $retryLabel }
+        @{ Id = 'Stop'; Label = 'Return to menu without claiming PostgreSQL setup complete' }
+    )
 }
 
 function Acknowledge-TpmWorkflowFailure {
@@ -18871,7 +18895,7 @@ $mode = $null
         if ($scanBlocked) {
             Write-Host "  Could not safely scan every registered profile -- no changes made." -ForegroundColor Red
             if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not safely read every registered game profile.' }
-            [void](Set-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-scan' -Message 'TPM could not safely check every registered game.' -DataSafety 'No PostgreSQL or profile changes were made.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+            [void](Set-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-scan' -Message 'TPM could not safely check every registered game.' -DataSafety 'No PostgreSQL or profile changes were made.' -RecoveryActions (Get-PostgresRecoveryActions -FailureId 'postgres-scan'))
             [void](Read-HostSafe '  Press Enter to acknowledge this message')
             [void](Acknowledge-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-scan')
             [void](Stop-TpmWorkflowStatus -Context $postgresStatus -Reason 'PostgreSQL scan stopped')
@@ -18908,7 +18932,7 @@ $mode = $null
                 exit 0
             }
             Write-Log 'Postgres setup: automatic installation handoff did not complete.'
-            [void](Set-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-install-handoff' -Message 'Windows permission was not granted, so PostgreSQL was not installed.' -DataSafety 'No PostgreSQL or profile changes were made.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+            [void](Set-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-install-handoff' -Message 'Windows permission was not granted, so PostgreSQL was not installed.' -DataSafety 'No PostgreSQL or profile changes were made.' -RecoveryActions (Get-PostgresRecoveryActions -FailureId 'postgres-install-handoff'))
             [void](Read-HostSafe '  Press Enter to acknowledge this message')
             [void](Acknowledge-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-install-handoff')
             [void](Stop-TpmWorkflowStatus -Context $postgresStatus -Reason 'PostgreSQL installation stopped')
@@ -18929,7 +18953,7 @@ $mode = $null
                 Write-Host '  TPM could not verify PostgreSQL service state. No changes were made.' -ForegroundColor Red
                 Write-Log 'Postgres setup: service state could not be verified before the transaction.'
                 if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not verify the PostgreSQL service state before continuing.' }
-                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-service-state' -Message 'PostgreSQL service state could not be verified.' -DataSafety 'No PostgreSQL or profile changes were made.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
+                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-service-state' -Message 'PostgreSQL service state could not be verified.' -DataSafety 'No PostgreSQL or profile changes were made.' -RecoveryActions (Get-PostgresRecoveryActions -FailureId 'postgres-service-state') -Acknowledge)
                 continue
             }
         }
@@ -18995,7 +19019,7 @@ $mode = $null
                                     exit 0
                                 }
                                 Write-Log 'Postgres setup: automatic password-repair handoff did not complete.'
-                                [void](Set-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-recovery-handoff' -Message 'Windows permission was not granted, so PostgreSQL was not repaired.' -DataSafety 'The chosen password was not applied by TPM.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+                                [void](Set-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-recovery-handoff' -Message 'Windows permission was not granted, so PostgreSQL was not repaired.' -DataSafety 'The chosen password was not applied by TPM.' -RecoveryActions (Get-PostgresRecoveryActions -FailureId 'postgres-recovery-handoff'))
                                 [void](Read-HostSafe '  Press Enter to acknowledge this message')
                                 [void](Acknowledge-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-recovery-handoff')
                                 [void](Stop-TpmWorkflowStatus -Context $postgresStatus -Reason 'PostgreSQL repair stopped')
@@ -19037,7 +19061,7 @@ $mode = $null
                 if (-not (Install-Postgres83 -OutSuperPasswordPlain $outPw)) {
                     Write-Host "  PostgreSQL setup did not complete -- no profile changes made." -ForegroundColor Red
                     if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'PostgreSQL could not be installed successfully.' }
-                    [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-install-failed' -Message 'PostgreSQL installation did not complete.' -DataSafety 'No PostgreSQL or profile changes were made.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
+                    [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-install-failed' -Message 'PostgreSQL installation did not complete.' -DataSafety 'No PostgreSQL or profile changes were made.' -RecoveryActions (Get-PostgresRecoveryActions -FailureId 'postgres-install-failed') -Acknowledge)
                     continue
                 }
                 $superPwPlain = $outPw.Value
@@ -19048,7 +19072,7 @@ $mode = $null
                 Write-Host ("  Recovery BLOCKED. No profile changes were made. Evidence: {0}" -f $recoveryBackup.Path) -ForegroundColor Red
                 Write-Log 'Postgres setup: verified recovery evidence was unavailable before configuration changes.'
                 if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not verify the protected backup before continuing PostgreSQL setup.' }
-                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-backup-unverified' -Message 'Verified PostgreSQL recovery evidence was unavailable.' -DataSafety 'No PostgreSQL or profile changes were made.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
+                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-backup-unverified' -Message 'Verified PostgreSQL recovery evidence was unavailable.' -DataSafety 'No PostgreSQL or profile changes were made.' -RecoveryActions (Get-PostgresRecoveryActions -FailureId 'postgres-backup-unverified') -Acknowledge)
                 continue
             }
             [void](Start-TpmWorkflowStep -Context $postgresStatus -StepId 'database' -Activity 'Backing up existing databases')
@@ -19116,14 +19140,14 @@ $mode = $null
                 Write-Host ("  Recovery BLOCKED. No recovery-complete result was reported. Evidence: {0}" -f $pgResults.BackupPath) -ForegroundColor Red
                 Write-Log 'Postgres setup: profile population was recovery-blocked.'
                 if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not safely finish configuring the PostgreSQL game profiles.' }
-                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-profile-recovery' -Message 'PostgreSQL profile setup was recovery-blocked.' -DataSafety 'No recovery-complete result was reported.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
+                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-profile-recovery' -Message 'PostgreSQL profile setup was recovery-blocked.' -DataSafety 'No recovery-complete result was reported.' -RecoveryActions (Get-PostgresRecoveryActions -FailureId 'postgres-profile-recovery') -Acknowledge)
                 continue
             }
             if ([int]$pgResults.Errors -gt 0) {
                 Write-Host ("  PostgreSQL setup reported {0} error(s); TPM will not claim recovery is complete." -f $pgResults.Errors) -ForegroundColor Red
                 Write-Log 'Postgres setup: errors were reported; completion was not claimed.'
                 if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not verify a clean PostgreSQL setup result.' }
-                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-profile-errors' -Message 'PostgreSQL game setup reported errors.' -DataSafety 'TPM did not claim recovery complete.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
+                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-profile-errors' -Message 'PostgreSQL game setup reported errors.' -DataSafety 'TPM did not claim recovery complete.' -RecoveryActions (Get-PostgresRecoveryActions -FailureId 'postgres-profile-errors') -Acknowledge)
                 continue
             }
             Write-Host ""
@@ -19151,7 +19175,7 @@ $mode = $null
             Write-Host '  PostgreSQL setup did not finish safely because TPM could not restore the original service state.' -ForegroundColor Red
             Write-Log 'Postgres setup: original service state restoration failed; completion was not claimed.'
             if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not restore the original PostgreSQL service state.' }
-            [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-service-restore' -Message 'The original PostgreSQL service state could not be restored.' -DataSafety 'TPM did not claim PostgreSQL setup complete.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
+            [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-service-restore' -Message 'The original PostgreSQL service state could not be restored.' -DataSafety 'TPM did not claim PostgreSQL setup complete.' -RecoveryActions (Get-PostgresRecoveryActions -FailureId 'postgres-service-restore') -Acknowledge)
             continue
         }
         if ($isPostgresRecoveryResume) {

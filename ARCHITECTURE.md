@@ -824,6 +824,10 @@ exit code before classifying the failure. The backup result retains structured
 `FailureDiagnoses` plus display-safe detail text, so support can distinguish a
 missing tool, stopped service, permission/elevation issue, missing database,
 connection failure, or unknown query failure without treating the database as absent.
+Other PostgreSQL failure branches carry explicit structured Retry and Stop
+actions with remediation-specific labels (for example, check the service,
+approve elevation, review evidence, or restore service state) rather than
+exposing an acknowledgement-only recovery contract.
 
 **Confirmed working silent-install recipe** (derived from real failed install attempts
 root-caused via verbose MSI logs; see LESSONS_LEARNED.md for the full post-mortem):

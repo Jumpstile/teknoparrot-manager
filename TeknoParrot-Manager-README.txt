@@ -518,6 +518,9 @@
   It uses real step counts, keeps failures visible until acknowledged, and
   adapts safely when the PowerShell window is resized. Redirected, unattended,
   and certification runs keep structured events without cursor-control output.
+  When recovery metadata is available, the status action line names the
+  concrete Retry and Stop choices and their remediation instead of showing
+  acknowledgement alone.
 
   Any time you're asked to type a file or folder path, you can type B
   instead to open a native Windows browse dialog and pick it visually.

@@ -108,6 +108,9 @@
   is resized. Important failures remain visible until acknowledged.
   Redirected, unattended, and certification runs keep structured status
   events but do not emit cursor-control or footer output.
+  When recovery metadata is available, the status action line names the
+  concrete Retry and Stop choices and their remediation instead of showing
+  acknowledgement alone.
 
   3. Pick a mode (after each mode completes, you return to this menu):
 

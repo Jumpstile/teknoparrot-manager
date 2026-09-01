@@ -48,6 +48,8 @@
 PostgreSQL backup diagnostics now retain the psql/pg_dump diagnostic stream
 and exit code in the blocked result, so cause categories are based on the
 actual client failure instead of a generic existence-query message.
+PostgreSQL workflow failures now carry concrete Retry/Stop remediation
+labels in the status contract instead of acknowledgement-only metadata.
 
 
 

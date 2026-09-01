@@ -207,6 +207,9 @@ the current action, recent completed work, the next step, and whether it needs
 anything from you. Failures stay visible until you acknowledge them. The
 status uses real workflow steps, not invented percentages, and keeps the
 technical detail in the normal output and log.
+When a failure has recovery metadata, the status action line names the concrete
+Retry and Stop choices and their remediation, rather than showing acknowledgement
+alone.
 
 The status area adapts to a resized PowerShell window. It clears only its own
 known area, truncates safely in narrow windows, and falls back to ordinary
