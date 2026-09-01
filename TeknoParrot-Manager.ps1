@@ -19350,7 +19350,7 @@ $mode = $null
                     Write-Host "    Enter the full path to the DLL file now:" -ForegroundColor White
                     Write-Host ""
                     $inp = Read-PathWithBrowse "  Path to ReShade 64-bit DLL (or press Enter to cancel)" -Mode File -FileFilter "DLL files (*.dll)|*.dll|All files (*.*)|*.*"
-                    if ([string]::IsNullOrWhiteSpace($inp) -or -not (Test-Path -LiteralPath $inp)) {
+                    if ([string]::IsNullOrWhiteSpace($inp) -or -not (Test-Path -LiteralPath $inp -PathType Leaf)) {
                         Write-Host "  File not found. ReShade setup cancelled." -ForegroundColor Red
                         Write-Log "ReShade setup: aborted -- DLL not found."
                         [void](Resolve-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-file-missing' -Message 'The selected ReShade file was not found.' -DataSafety 'No ReShade file was deployed.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
@@ -19363,6 +19363,7 @@ $mode = $null
                         continue
                     }
                     $rsSourceDll = $inp
+                    $rsGotDll    = $true
                 }
                 if (-not $rsGotDll) {
                     [void](Set-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-acquisition-cancelled' -Message 'ReShade setup was cancelled.' -DataSafety 'No unverified ReShade file was used.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))

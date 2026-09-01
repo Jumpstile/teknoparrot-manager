@@ -9878,6 +9878,36 @@ Describe "RC8 menu and ReShade regressions" {
         $source | Should -Not -Match 'Get it at\s+https://reshade\.me'
         $source | Should -Not -Match 'replace ReShade\\ReShade64\.dll'
     }
+
+    It "transitions a validated existing ReShade DLL into acquired state before cancellation" {
+        $source = $script:ProductionSource
+        $branchStart = $source.IndexOf("if (-not `$rsGotDll -and `$rsGetChoice -eq 'B')")
+        $branchStart | Should -BeGreaterThan -1
+        $stateIndex = $source.IndexOf('$rsGotDll    = $true', $branchStart)
+        $cancelIndex = $source.IndexOf("Write-Host '  ReShade setup cancelled. No unverified DLL was used.'", $branchStart)
+        $stateIndex | Should -BeGreaterThan $branchStart
+        $cancelIndex | Should -BeGreaterThan $stateIndex
+        $source.Substring($branchStart, $cancelIndex - $branchStart) | Should -Match 'Test-Path -LiteralPath \$inp -PathType Leaf'
+        $source.Substring($branchStart, $cancelIndex - $branchStart) | Should -Match '(?s)\$rsSourceDll\s*=\s*\$inp\s*\r?\n\s*\$rsGotDll\s*=\s*\$true'
+    }
+
+    It "keeps invalid DLL paths rejected and Skip on the intentional cancellation path" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'Test-Path -LiteralPath \$inp -PathType Leaf'
+        $source | Should -Match 'GetExtension\(\$inp\)\.ToLower\(\) -ne ''.dll'''
+        $source | Should -Match "Write-Host '  ReShade setup cancelled. No unverified DLL was used.'"
+    }
+
+    It "keeps ReShade DLL signature inspection and disclosure before deployment" {
+        $source = $script:ProductionSource
+        $invokeStart = $source.IndexOf('function Invoke-ReShadeSetup')
+        $signatureCheck = $source.IndexOf('Test-ReShadeDllSignature -Path $dllCheck.Path', $invokeStart)
+        $reviewWarning = $source.IndexOf('source needs review before use', $signatureCheck)
+        $deployment = $source.IndexOf('Installing ReShade into', $signatureCheck)
+        $signatureCheck | Should -BeGreaterThan $invokeStart
+        $reviewWarning | Should -BeGreaterThan $signatureCheck
+        $deployment | Should -BeGreaterThan $reviewWarning
+    }
 }
 
 Describe "ReShade custom preset validation" {
