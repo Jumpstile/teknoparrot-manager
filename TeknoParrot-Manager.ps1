@@ -5282,6 +5282,40 @@ function Invoke-ReShadeUpdateIfAvailable {
     }
 }
 
+function Resolve-ReShadeDllAcquisition {
+    param(
+        [string]$Choice,
+        [string]$InputPath
+    )
+
+    if ($Choice -ne 'B') {
+        return [pscustomobject]@{
+            State  = 'Skipped'
+            Path   = $null
+            Reason = 'UserSkipped'
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($InputPath) -or -not (Test-Path -LiteralPath $InputPath -PathType Leaf)) {
+        return [pscustomobject]@{
+            State  = 'Invalid'
+            Path   = $null
+            Reason = 'FileMissing'
+        }
+    }
+    if ([System.IO.Path]::GetExtension($InputPath).ToLower() -ne '.dll') {
+        return [pscustomobject]@{
+            State  = 'Invalid'
+            Path   = $null
+            Reason = 'FileType'
+        }
+    }
+    return [pscustomobject]@{
+        State  = 'Acquired'
+        Path   = $InputPath
+        Reason = $null
+    }
+}
+
 function Invoke-ReShadeSetup {
     param(
         [string]$UserProfilesDir,
@@ -19345,25 +19379,31 @@ $mode = $null
                 }
                 }
                 }
-                if (-not $rsGotDll -and $rsGetChoice -eq 'B') {
-                    Write-Host ""
-                    Write-Host "    Enter the full path to the DLL file now:" -ForegroundColor White
-                    Write-Host ""
-                    $inp = Read-PathWithBrowse "  Path to ReShade 64-bit DLL (or press Enter to cancel)" -Mode File -FileFilter "DLL files (*.dll)|*.dll|All files (*.*)|*.*"
-                    if ([string]::IsNullOrWhiteSpace($inp) -or -not (Test-Path -LiteralPath $inp -PathType Leaf)) {
-                        Write-Host "  File not found. ReShade setup cancelled." -ForegroundColor Red
-                        Write-Log "ReShade setup: aborted -- DLL not found."
-                        [void](Resolve-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-file-missing' -Message 'The selected ReShade file was not found.' -DataSafety 'No ReShade file was deployed.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
+                if (-not $rsGotDll) {
+                    $inp = $null
+                    if ($rsGetChoice -eq 'B') {
+                        Write-Host ""
+                        Write-Host "    Enter the full path to the DLL file now:" -ForegroundColor White
+                        Write-Host ""
+                        $inp = Read-PathWithBrowse "  Path to ReShade 64-bit DLL (or press Enter to cancel)" -Mode File -FileFilter "DLL files (*.dll)|*.dll|All files (*.*)|*.*"
+                    }
+                    $rsAcquisition = Resolve-ReShadeDllAcquisition -Choice $rsGetChoice -InputPath $inp
+                    if ($rsAcquisition.State -eq 'Invalid') {
+                        if ($rsAcquisition.Reason -eq 'FileType') {
+                            Write-Host "  That file does not appear to be a DLL. Cancelled." -ForegroundColor Red
+                            Write-Log "ReShade setup: aborted -- file is not a .dll."
+                            [void](Resolve-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-file-type' -Message 'The selected ReShade file is not a DLL.' -DataSafety 'No ReShade file was deployed.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
+                        } else {
+                            Write-Host "  File not found. ReShade setup cancelled." -ForegroundColor Red
+                            Write-Log "ReShade setup: aborted -- DLL not found."
+                            [void](Resolve-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-file-missing' -Message 'The selected ReShade file was not found.' -DataSafety 'No ReShade file was deployed.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
+                        }
                         continue
                     }
-                    if ([System.IO.Path]::GetExtension($inp).ToLower() -ne '.dll') {
-                        Write-Host "  That file does not appear to be a DLL. Cancelled." -ForegroundColor Red
-                        Write-Log "ReShade setup: aborted -- file is not a .dll."
-                        [void](Resolve-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-file-type' -Message 'The selected ReShade file is not a DLL.' -DataSafety 'No ReShade file was deployed.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
-                        continue
+                    if ($rsAcquisition.State -eq 'Acquired') {
+                        $rsSourceDll = $rsAcquisition.Path
+                        $rsGotDll    = $true
                     }
-                    $rsSourceDll = $inp
-                    $rsGotDll    = $true
                 }
                 if (-not $rsGotDll) {
                     [void](Set-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-acquisition-cancelled' -Message 'ReShade setup was cancelled.' -DataSafety 'No unverified ReShade file was used.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))

@@ -9878,24 +9878,60 @@ Describe "RC8 menu and ReShade regressions" {
         $source | Should -Not -Match 'Get it at\s+https://reshade\.me'
         $source | Should -Not -Match 'replace ReShade\\ReShade64\.dll'
     }
+    It "returns Acquired for a valid Browse DLL and Skipped for an intentional Skip" {
+        $dllPath = Join-Path $TestDrive 'existing-reshade.dll'
+        [System.IO.File]::WriteAllText($dllPath, 'fixture')
 
-    It "transitions a validated existing ReShade DLL into acquired state before cancellation" {
-        $source = $script:ProductionSource
-        $branchStart = $source.IndexOf("if (-not `$rsGotDll -and `$rsGetChoice -eq 'B')")
-        $branchStart | Should -BeGreaterThan -1
-        $stateIndex = $source.IndexOf('$rsGotDll    = $true', $branchStart)
-        $cancelIndex = $source.IndexOf("Write-Host '  ReShade setup cancelled. No unverified DLL was used.'", $branchStart)
-        $stateIndex | Should -BeGreaterThan $branchStart
-        $cancelIndex | Should -BeGreaterThan $stateIndex
-        $source.Substring($branchStart, $cancelIndex - $branchStart) | Should -Match 'Test-Path -LiteralPath \$inp -PathType Leaf'
-        $source.Substring($branchStart, $cancelIndex - $branchStart) | Should -Match '(?s)\$rsSourceDll\s*=\s*\$inp\s*\r?\n\s*\$rsGotDll\s*=\s*\$true'
+        $acquired = Resolve-ReShadeDllAcquisition -Choice 'B' -InputPath $dllPath
+        $acquired.State | Should -Be 'Acquired'
+        $acquired.Path | Should -Be $dllPath
+
+        $skipped = Resolve-ReShadeDllAcquisition -Choice 'N' -InputPath $null
+        $skipped.State | Should -Be 'Skipped'
+        $skipped.Path | Should -BeNullOrEmpty
     }
 
-    It "keeps invalid DLL paths rejected and Skip on the intentional cancellation path" {
+    It "returns Invalid for missing, non-leaf, and non-DLL Browse paths" {
+        $missing = Resolve-ReShadeDllAcquisition -Choice 'B' -InputPath (Join-Path $TestDrive 'missing.dll')
+        $missing.State | Should -Be 'Invalid'
+        $missing.Reason | Should -Be 'FileMissing'
+
+        $directory = Join-Path $TestDrive 'directory.dll'
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        $nonLeaf = Resolve-ReShadeDllAcquisition -Choice 'B' -InputPath $directory
+        $nonLeaf.State | Should -Be 'Invalid'
+        $nonLeaf.Reason | Should -Be 'FileMissing'
+
+        $textPath = Join-Path $TestDrive 'not-a-dll.txt'
+        [System.IO.File]::WriteAllText($textPath, 'fixture')
+        $wrongType = Resolve-ReShadeDllAcquisition -Choice 'B' -InputPath $textPath
+        $wrongType.State | Should -Be 'Invalid'
+        $wrongType.Reason | Should -Be 'FileType'
+    }
+
+
+    It "wires the ReShade acquisition result into the existing cancellation guard" {
         $source = $script:ProductionSource
-        $source | Should -Match 'Test-Path -LiteralPath \$inp -PathType Leaf'
-        $source | Should -Match 'GetExtension\(\$inp\)\.ToLower\(\) -ne ''.dll'''
-        $source | Should -Match "Write-Host '  ReShade setup cancelled. No unverified DLL was used.'"
+        $acquisitionCall = $source.IndexOf('$rsAcquisition = Resolve-ReShadeDllAcquisition -Choice $rsGetChoice -InputPath $inp')
+        $acquisitionCall | Should -BeGreaterThan -1
+        $stateIndex = $source.IndexOf('$rsGotDll    = $true', $acquisitionCall)
+        $cancelIndex = $source.IndexOf("Write-Host '  ReShade setup cancelled. No unverified DLL was used.'", $acquisitionCall)
+        $stateIndex | Should -BeGreaterThan $acquisitionCall
+        $cancelIndex | Should -BeGreaterThan $stateIndex
+        $source.Substring($acquisitionCall, $cancelIndex - $acquisitionCall) | Should -Match '(?s)\$rsSourceDll\s*=\s*\$rsAcquisition\.Path\s*\r?\n\s*\$rsGotDll\s*=\s*\$true'
+        $source | Should -Match 'if \(\$rsAcquisition\.State -eq ''Acquired''\)'
+    }
+
+    It "keeps source-level validation and Skip handling supplemental to acquisition behavior tests" {
+        $source = $script:ProductionSource
+        $helperStart = $source.IndexOf('function Resolve-ReShadeDllAcquisition')
+        $helperEnd = $source.IndexOf('function Invoke-ReShadeSetup', $helperStart)
+        $helper = $source.Substring($helperStart, $helperEnd - $helperStart)
+        $helper | Should -Match 'Test-Path -LiteralPath \$InputPath -PathType Leaf'
+        $helper | Should -Match 'GetExtension\(\$InputPath\)\.ToLower\(\) -ne ''.dll'''
+        $helper | Should -Match "State  = 'Skipped'"
+        $source | Should -Match "FailureId 'reshade-file-missing'"
+        $source | Should -Match "FailureId 'reshade-file-type'"
     }
 
     It "keeps ReShade DLL signature inspection and disclosure before deployment" {
