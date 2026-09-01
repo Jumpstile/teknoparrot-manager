@@ -684,11 +684,11 @@
   window size instead of always showing the fully-detailed layout: a large
   window shows the full descriptions above unchanged; a medium window shows
   one-line descriptions per option; a narrow or short window shows labels
-  only, with "?" available at the prompt to see the full descriptions on
-  demand. The console is also maximized automatically on startup where the
-  terminal supports it. Within each release, menu numbers, what each option
-  does, and how to choose one stay consistent across the responsive layouts --
-  only how much description text is shown adapts to your window size.
+  only. Press H at the prompt for the separate help screen; L opens the log
+  folder and Q quits. The console is also maximized automatically on startup
+  where the terminal supports it. Within each release, menu numbers, what each
+  option does, and how to choose one stay consistent across the responsive
+  layouts -- only how much description text is shown adapts to your window size.
 
 
 -------------------------------------------------------------------------------
