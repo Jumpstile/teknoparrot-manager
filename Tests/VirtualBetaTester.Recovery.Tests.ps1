@@ -605,8 +605,9 @@ Describe "Pcsx2x6 crosshair prerequisite automation (issue #173)" -Tag 'TVD-Medi
         $customRoot = Join-Path $fixture.Pcsx2Root 'PortableData'
         New-Item -ItemType Directory -Path $customRoot -Force | Out-Null
         . $fixture.FixturePath
-        Mock Read-HostSafe { '0' }
-        Mock Start-Process {}
+        Mock Read-HostSafe {
+            if ($Prompt -match 'Apply these crosshairs') { 'Y' } else { '0' }
+        }
         Mock Export-CrosshairPreview {}
         Mock Get-Pcsx2CrosshairPrerequisiteState {
             [pscustomobject]@{
