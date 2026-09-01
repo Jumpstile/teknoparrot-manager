@@ -19038,15 +19038,25 @@ $mode = $null
             $leavePostgres = $false
             while (-not $pgBackup.Succeeded) {
                 Write-Host "  PostgreSQL setup stopped because the database backup did not complete." -ForegroundColor Red
-                Write-Host "  Nothing was changed." -ForegroundColor Green
+                Write-Host "  No PostgreSQL database or game-profile changes were made." -ForegroundColor Green
                 if (@($pgBackup.FailedDatabases).Count -gt 0) { Write-Host ("  Affected games/databases: {0}" -f (@($pgBackup.FailedDatabases) -join ', ')) -ForegroundColor Yellow }
-                Write-Host "  [R] Retry backup  [S] Skip PostgreSQL setup  [D] Show details  [B] Back to main menu"
+                Write-Host "  [F] Retry after checking PostgreSQL access  [R] Retry backup  [O] Open logs/support guidance"
+                Write-Host "  [D] Show details  [S] Skip PostgreSQL setup  [B] Back to main menu"
                 $backupChoice = (Read-HostSafe "  Choice, default R" -Default 'R').Trim().ToUpper()
+                if ($backupChoice -eq 'F') {
+                    Write-Host "  Check PostgreSQL service, client tools, permissions, and credentials, then retrying backup." -ForegroundColor Yellow
+                    $pgBackup = Backup-PostgresDatabases -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain
+                    continue
+                }
+                if ($backupChoice -eq 'O') {
+                    Write-Host "  Review TeknoParrot-Manager.log and the generated support package for the failed check." -ForegroundColor Cyan
+                    continue
+                }
                 if ($backupChoice -eq 'D') {
                     Write-Host "  PostgreSQL backup details" -ForegroundColor Cyan
                     if ($pgBackup.Path) { Write-Host ("    Backup evidence: {0}" -f $pgBackup.Path) -ForegroundColor DarkGray }
                     foreach ($failedDatabase in @($pgBackup.FailedDatabases)) { Write-Host ("    Failed game/database: {0}" -f $failedDatabase) -ForegroundColor DarkGray }
-                    foreach ($failureDetail in @($pgBackup.FailureDetails)) { Write-Host ("    Cause: {0}" -f $failureDetail) -ForegroundColor DarkGray }
+                    foreach ($failureDetail in @($pgBackup.FailureDetails)) { Write-Host ("    Cause and next action: {0}" -f $failureDetail) -ForegroundColor DarkGray }
                     Write-Log ("Postgres backup details shown. FailedDatabases={0}; FailureDetails={1}" -f (@($pgBackup.FailedDatabases) -join '|'), (@($pgBackup.FailureDetails) -join '|'))
                     continue
                 }
@@ -19055,7 +19065,7 @@ $mode = $null
                     continue
                 }
                 if ($backupChoice -eq 'S' -or $backupChoice -eq 'B') { $leavePostgres = $true; break }
-                Write-Host "  Invalid choice. Choose R, S, D, or B." -ForegroundColor Yellow
+                Write-Host "  Invalid choice. Choose F, R, O, D, S, or B." -ForegroundColor Yellow
             }
             if ($isPostgresRecoveryResume -and (-not $pgBackup.Succeeded -or $leavePostgres)) { Exit-PostgresRecoveryResume -Message 'TPM could not finish the PostgreSQL database backup.' }
             if ($leavePostgres) {
