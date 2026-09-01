@@ -355,6 +355,11 @@ Export registered games to HyperSpin 2? (Y/N)
 Answer Y to merge every registered game not already present into HyperSpin 2's TeknoParrot game list (default data folder: `C:\ProgramData\HyperSpin\data`). Your path is saved and reused on future runs.
 
 **Prerequisites:** TeknoParrot must be set up as an emulator in HyperSpin 2 first — the emulator title must contain "TeknoParrot" (spacing and capitalisation variations are fine). HyperSpin 2 must not be running when you answer Y.
+If the TeknoParrot entry in `emulators.json` has no `id`, TPM stops before
+locating or writing a games file and asks **F** to fix it, **A** to add anyway,
+or **S** to skip (the safe default). Re-add TeknoParrot in HyperSpin before
+choosing **F**. Only **A** permits the legacy `.xml` ROM-entry fallback and may
+write entries with an empty `systemId`; **S** leaves HyperSpin data unchanged.
 
 Games are added with title only. Use HyperSpin 2's Scrape feature for box art and metadata.
 

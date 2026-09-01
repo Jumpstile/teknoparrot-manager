@@ -547,6 +547,13 @@
   spelling and spacing do not matter). No games need to be added to
   HyperSpin 2 first; the script creates the game list file if it does
   not yet exist.
+  If the TeknoParrot entry in emulators.json has no id, TPM stops before
+  locating or writing a games file and asks:
+    F = Fix the emulator entry, then retry
+    A = Add anyway (permits the legacy .xml scan and empty systemId)
+    S = Skip export (safe default; no HyperSpin data is changed)
+  Re-add TeknoParrot in HyperSpin before choosing F. Only A permits the
+  legacy .xml ROM-entry fallback.
 
   Games are added with title only. Use HyperSpin 2's Scrape feature for
   box art and metadata. HyperSpin 2 must not be running when you answer Y.

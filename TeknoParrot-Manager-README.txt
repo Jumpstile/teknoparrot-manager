@@ -1077,14 +1077,19 @@
   How it finds the TeknoParrot game list:
 
     HyperSpin 2 stores one JSON file per system under <dataPath>\games\.
-    The script reads emulators.json to find TeknoParrot's entry, takes
-    the system GUID from that entry, then scans the games subfolder for the
-    JSON file whose entries reference the same GUID. If no file is found by
-    GUID (older HyperSpin 2 installs where the emulator entry has no id), it
-    falls back to looking for the file whose ROM entries use the .xml
-    extension. If still no file is found, the script creates a new empty one
-    named after the emulator title -- so no game needs to be added manually
-    first.
+    The script reads emulators.json to find TeknoParrot's entry and its
+    system GUID, then scans the games subfolder for the JSON file whose
+    entries reference the same GUID.
+
+    If the TeknoParrot entry has no id, TPM stops before locating or writing
+    a games file and asks:
+      F = Fix the emulator entry, then retry
+      A = Add anyway (permits the legacy .xml scan and empty systemId)
+      S = Skip export (safe default; no HyperSpin data is changed)
+    Re-add TeknoParrot in HyperSpin before choosing F. Only A permits the
+    fallback scan for a file whose ROM entries use the .xml extension. If
+    no file is found after A, the script creates a new empty one named after
+    the emulator title.
 
     Title matching is flexible: "TeknoParrot", "Tekno Parrot", "teknoparrot"
     and other variations are all recognised by stripping spaces and
