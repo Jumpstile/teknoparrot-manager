@@ -287,14 +287,6 @@
         }
         @{
             File        = 'TeknoParrot-Manager.ps1'
-            RuleName    = 'InjectionRisk.UnsafeEscaping'
-            Line        = 4359
-            Extent      = "[BitConverter]::ToString(([Security.Cryptography.SHA256]::Create().ComputeHash(`$bytes))) -replace '-', ''"
-            Disposition = 'FalsePositive'
-            Reasoning   = 'This is the same fixed-literal hash formatting operation in the preview reference reader. Only the computed byte sequence is variable; the regex and replacement are fixed and cannot carry injection syntax.'
-        }
-        @{
-            File        = 'TeknoParrot-Manager.ps1'
             RuleName    = 'InjectionRisk.AddType'
             Line        = 4366
             Extent      = 'Add-Type -AssemblyName System.Drawing -ErrorAction Stop'
