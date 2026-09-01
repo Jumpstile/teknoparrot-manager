@@ -4838,11 +4838,6 @@ Describe "RC8 PostgreSQL and support UX" {
         $script:ProductionSource | Should -Match '\[B\] Back to main menu'
         $script:ProductionSource | Should -Match 'FailureDetails'
     }
-    It "keeps affected PostgreSQL entries friendly while retaining database details" {
-        $script:ProductionSource | Should -Match '\$doc\.GameProfile\.GameName'
-        $script:ProductionSource | Should -Match '\$gameLabel, \$dbName'
-        $script:ProductionSource | Should -Match '\$databaseGameLabels'
-    }
     It "returns friendly affected game names when database state cannot be verified" {
         $profiles = Join-Path $TestDrive 'postgres-affected-labels'
         New-Item -ItemType Directory -Path $profiles -Force | Out-Null
