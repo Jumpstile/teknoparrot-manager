@@ -8100,6 +8100,21 @@ Describe "RC8 main-menu command routing and visibility" {
         $script:ProductionSource | Should -Match '\[B\] Back'
         $script:ProductionSource | Should -Match "Choice, default P"
     }
+    It "decides Preview or Back before AutoSync/Register writes or preflight probes" {
+        $source = $script:ProductionSource
+        $dispatch = $source.IndexOf('switch ($modeChoice)')
+        $preview = $source.IndexOf('[P] Preview only -- no changes')
+        $capture = $source.IndexOf('$zipPathsJustCaptured = $false', $dispatch)
+        $save = $source.IndexOf('Save-Config', $capture)
+        $benchmark = $source.IndexOf('Measure-PathWriteThroughput $gamesInstallFolder', $capture)
+        $create = $source.IndexOf('[System.IO.Directory]::CreateDirectory($gamesInstallFolder)', $capture)
+        $preview | Should -BeGreaterThan $dispatch
+        $preview | Should -BeLessThan $capture
+        $preview | Should -BeLessThan $save
+        $preview | Should -BeLessThan $benchmark
+        $preview | Should -BeLessThan $create
+        $source | Should -Match '\$previewChoice -eq ''B''\) \{ continue \}'
+    }
     It "keeps the polished banner and first option at full-screen size" {
         $screen = Render-MainMenuScreen -Tier 'Ultra' -Width 200 -Height 60
         $output = ($screen.Rows | ForEach-Object Text) -join "`n"

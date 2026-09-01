@@ -19502,6 +19502,31 @@ $mode = $null
         continue
     }
 
+    # Decide Preview/Run/Back before any AutoSync/Register input, config write,
+    # network probe, benchmark, or staging operation.
+    if ($forceRealApply) {
+        $dryRunActive   = $false
+        $forceRealApply = $false
+    } else {
+        $dryRunActive = [bool]$DryRun
+        if (-not $Unattended -and -not $dryRunActive) {
+            Write-Host ""
+            $previewChoice = ''
+            do {
+                Write-Host '  [P] Preview only -- no changes'
+                Write-Host '  [R] Run now -- may make changes'
+                Write-Host '  [B] Back'
+                $previewChoice = (Read-HostSafe '  Choice, default P' -Default 'P').Trim().ToUpper()
+                if ($previewChoice -notin @('P', 'R', 'B')) {
+                    Write-Host '  Invalid choice. Choose P, R, or B.' -ForegroundColor Yellow
+                }
+            } while ($previewChoice -notin @('P', 'R', 'B'))
+            if ($previewChoice -eq 'B') { continue }
+            $dryRunActive = ($previewChoice -eq 'P')
+        }
+    }
+    if ($dryRunActive) { Write-Log "PREVIEW MODE active for this run -- no changes will be written." }
+
     $zipPathsJustCaptured = $false
     if ($mode -eq "AutoSync" -and -not $zipSource) {
         Write-Host ""
@@ -19751,34 +19776,6 @@ $mode = $null
 
     Write-Log "Mode=$mode install=$gamesInstallFolder"
 
-    # Preview mode: -DryRun on the command line always applies; otherwise
-    # ask once per AutoSync/Register run (skipped entirely when -Unattended,
-    # which by definition never prompts -- pass -DryRun alongside
-    # -Unattended to preview a scheduled run instead).
-    if ($forceRealApply) {
-        # Re-entering right after a preview run's "Apply for real now?" was
-        # answered Y -- skip the prompt entirely and force a real pass.
-        $dryRunActive   = $false
-        $forceRealApply = $false
-    } else {
-        $dryRunActive = [bool]$DryRun
-        if (-not $Unattended -and -not $dryRunActive) {
-            Write-Host ""
-            $previewChoice = ''
-            do {
-                Write-Host '  [P] Preview only -- no changes'
-                Write-Host '  [R] Run now -- may make changes'
-                Write-Host '  [B] Back'
-                $previewChoice = (Read-HostSafe '  Choice, default P' -Default 'P').Trim().ToUpper()
-                if ($previewChoice -notin @('P', 'R', 'B')) {
-                    Write-Host '  Invalid choice. Choose P, R, or B.' -ForegroundColor Yellow
-                }
-            } while ($previewChoice -notin @('P', 'R', 'B'))
-            if ($previewChoice -eq 'B') { continue }
-            $dryRunActive = ($previewChoice -eq 'P')
-        }
-    }
-    if ($dryRunActive) { Write-Log "PREVIEW MODE active for this run -- no changes will be written." }
 
     # Creating the destination is itself a write. Keep it after the preview
     # decision so Preview/Dry Run never creates a staging directory.
