@@ -5459,14 +5459,10 @@ function Invoke-ReShadeSetup {
     Write-Host "  Choose how your game should look." -ForegroundColor Cyan
     Write-Host "  Use the preview window to compare the options." -ForegroundColor Cyan
     Write-Host "  Nothing will be changed until you confirm." -ForegroundColor DarkCyan
-    Write-Host "  Preview gallery (safe, built-in arcade scene)" -ForegroundColor DarkCyan
+    Write-Host "  Preview gallery (safe, built-in arcade scene; preview opens after you choose an option)" -ForegroundColor DarkCyan
     foreach ($item in $gallery) {
         $previewText = if ($item.PreviewAvailable) { 'preview available' } else { 'preview unavailable; selection still works' }
         Write-Host ("    {0}: {1} [{2}]" -f $item.FriendlyName, $item.Description, $previewText) -ForegroundColor DarkGray
-    }
-    foreach ($galleryItem in $gallery) {
-        $galleryProfile = Get-TpmReShadeProfile -ProfileId $galleryItem.ProfileId
-        if ($galleryProfile) { [void](Show-TpmReShadePreviewWindow -ProfileDefinition $galleryProfile -Mode 'Split' -Show) }
     }
     $favoriteState = Read-TpmReShadeState
     $favoriteProfiles = @()
@@ -14841,8 +14837,10 @@ function Backup-PostgresDatabases {
                 $state = Get-PostgresDatabaseState -DbName $dbName -SuperPasswordPlain $SuperPasswordPlain
                 if ($state.Exists) { [void]$names.Add($dbName) }
             } catch {
+                $detail = [string]$_.Exception.Message
+                $diagnosis = Get-PostgresFailureDiagnosis -GameLabel $gameLabel -DbName $dbName -Detail $detail
                 [void]$failedDatabases.Add(('{0} / {1}' -f $gameLabel, $dbName))
-                [void]$failureDetails.Add(('{0} / {1}: {2}' -f $gameLabel, $dbName, $_.Exception.Message))
+                [void]$failureDetails.Add(('{0} / {1}: {2} ({3}) Next action: {4}' -f $gameLabel, $dbName, $detail, $diagnosis.Category, $diagnosis.NextAction))
             }
         }
     } catch {
