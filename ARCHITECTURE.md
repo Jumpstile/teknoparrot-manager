@@ -1584,8 +1584,7 @@ which are historical only.
   mode specifically) reproduces the original full wording (`FullDesc`) exactly; Ultra's
   default `UltraTwoColumn` layout and Standard/Compact show progressively less detail;
   Professional has its own single-line description source (see "Description text sourcing
-  varies by tier" below) rather than sharing Ultra-two-column's. Compact prints labels only
-  plus "Type ? for descriptions."
+  varies by tier" below) rather than sharing Ultra-two-column's. Compact prints labels only.
 - `Set-ConsoleMaximizedIfSupported` -- best-effort console maximize, called once at
   startup (not on every redraw). Wrapped in try/catch and silently no-ops on hosts that
   don't support resizing (redirected output, ISE, some CI/test runners) -- this is a
@@ -1607,18 +1606,10 @@ dispatch and adaptive renderer keep the same one-source menu model.
 **Description text sourcing varies by tier -- a real gap found in review (RC3).**
 `Get-MainMenuSectionRows` does not use one shared description field for every tier:
 Standard and Compact tiers show no description at all (Detail `'Labels'`); UltraCentered
-(single-column) uses `$item.FullDesc`; Ultra-two-column and Compact's `?`-triggered
-Professional fallback route through _different_ fields depending on `$Geometry.Layout` --
-Ultra-two-column uses `$item.ShortDesc`, but Professional-two-column has its own carve-out
-(`if ($Geometry.Layout -eq 'ProfessionalTwoColumn') { Get-MainMenuDefaultDescription -Item
-$item }`) that ignores ShortDesc/FullDesc entirely and always sources from the separate
-`Get-MainMenuDefaultDescription` switch statement. A wording update to `ShortDesc`/
-`FullDesc` on `Get-MainMenuSections` (issue #140) therefore does NOT automatically reach
-Professional tier or Compact's `?` fallback -- `Get-MainMenuDefaultDescription` must be
-updated too, as its own, separate copy of the same information. Any future menu-wording
-change must update both places and be verified at every tier (Compact via `?`, Standard has
-no description to update, Professional, Ultra-two-column, and UltraCentered), not just
-whichever tier happened to be open in a terminal at the time.
+(single-column) uses `$item.FullDesc`; Ultra-two-column and Professional use their bounded
+description sources depending on `$Geometry.Layout`. The rendered command surface is
+deliberately limited to the visible numeric options plus the footer's H/L/Q commands;
+there is no hidden `?` help command or compact-tier hint advertising one.
 
 **Complete-or-block rendering (RC8).** `Render-MainMenuScreen` never presents a partial
 numbered menu. It first computes the visible option set against the caller's actual width

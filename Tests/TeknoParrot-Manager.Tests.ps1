@@ -8160,15 +8160,19 @@ Describe "Render-MainMenuScreen / Show-MainMenu" {
         $output | Should -Not -Match ([regex]::Escape($item.ShortDesc))
         $output | Should -Match 'Enter number'
     }
-    It "Compact tier renders only labels and the 'Type ? for descriptions' hint, no ShortDesc/FullDesc text" {
+    It "Compact tier renders labels without advertising unsupported commands" {
         $screen = Render-MainMenuScreen -Tier 'Compact' -Width 80 -Height 80
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
         $output | Should -Match 'TeknoParrot Manager'
         $output | Should -Match 'Version 1.0 RC3'
         $output | Should -Not -Match '/_  __/'
-        $output | Should -Match 'Type \? for descriptions'
-        $autoSync = (Get-MainMenuItems) | Where-Object { $_.Mode -eq 'AutoSync' }
-        $output | Should -Not -Match ([regex]::Escape($autoSync.ShortDesc))
+        $output | Should -Not -Match 'Type \? for descriptions'
+        $output | Should -Not -Match 'U\s*='
+        $output | Should -Match 'H\s*=\s*Help'
+        $output | Should -Match 'L\s*=\s*View Log'
+        $output | Should -Match 'Q\s*=\s*Quit'
+        $script:ProductionSource | Should -Not -Match 'Type \? for descriptions'
+        $script:ProductionSource | Should -Not -Match 'Compact.{0,80}\? for descriptions'
     }
     It "Professional default tier uses a complete framed two-column menu" {
         $screen = Render-MainMenuScreen -Tier 'Professional' -Width 150 -Height 30

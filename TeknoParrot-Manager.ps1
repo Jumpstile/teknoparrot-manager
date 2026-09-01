@@ -17817,15 +17817,6 @@ function Get-MainMenuBodyRows {
     }
 
     $rows = New-Object System.Collections.Generic.List[object]
-    if ($Geometry.Tier -eq 'Compact') {
-        # Deliberately placed BEFORE the section rows, not after: when a
-        # short viewport forces Limit-MainMenuBodyRowsToBudget to trim body
-        # rows, it keeps the TAIL of this list so the last real menu item
-        # (15, Exit) always survives. A purely decorative hint like this one
-        # must never out-rank that -- if it were last, it would win the
-        [void]$rows.Add((New-ConsoleRenderRow -Text '  Type ? for descriptions.' -Color 'DarkGray'))
-        [void]$rows.Add((New-ConsoleRenderRow))
-    }
     foreach ($section in $Sections) {
         foreach ($row in (Get-MainMenuSectionRows -Section $section -Geometry $Geometry -Detail $detail)) {
             [void]$rows.Add($row)
