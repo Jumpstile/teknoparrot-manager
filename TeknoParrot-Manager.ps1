@@ -7465,6 +7465,7 @@ function Invoke-AutoSync {
         return @{ Synced = 0; UpToDate = 0; Failed = 0; Skipped = 0; WouldSync = 0 }
     }
 
+$syncedNames = New-Object System.Collections.Generic.List[string]
     $synced = 0; $upToDate = 0; $failed = 0; $skipped = 0; $wouldSync = 0
 
     if ($onlySync.Count -gt 0) {
@@ -7610,6 +7611,7 @@ function Invoke-AutoSync {
                 Write-Host "    -> $extractDir" -ForegroundColor Green
                 Write-Log "AutoSync: completed $rawName -> $extractDir"
                 $synced++
+                [void]$syncedNames.Add($extractFolderName)
             } catch {
                 Write-Host "    FAILED : $_" -ForegroundColor Red
                 Write-Log "AutoSync: FAILED $rawName -- $_"
@@ -7640,7 +7642,7 @@ function Invoke-AutoSync {
         catch { Write-Log "AutoSync: WARNING -- could not save sync state: $_" }
     }
 
-    return @{ Synced = $synced; UpToDate = $upToDate; Failed = $failed; Skipped = $skipped; WouldSync = $wouldSync }
+    return @{ Synced = $synced; SyncedNames = @($syncedNames); UpToDate = $upToDate; Failed = $failed; Skipped = $skipped; WouldSync = $wouldSync }
 }
 
 # Builds a lookup of TeknoParrot profiles keyed by their executable name(s)
@@ -11923,21 +11925,30 @@ function Invoke-StartupUpdateCheck {
 # one GamePath per profile). Folders that resolve to a code already claimed by
 # an earlier folder (e.g. several ROM revisions sharing one generic exe name
 # and one profile, like multiple Virtua Fighter 5 Lindbergh dumps) are added to
-# $ambiguous with Reason="duplicate" instead of being silently dropped.
 function Register-Games {
     param([string]$userProfilesDir, [string]$installFolder, [hashtable]$profileIndex,
           [string]$gameProfilesDir = '', [hashtable]$datIndex = $null,
           [System.Collections.Generic.HashSet[string]]$profileSet = $null,
           [bool]$DryRun = $false,
-          [string]$tpRootDir = '', [hashtable]$subFolderMap = $null)
+          [string]$tpRootDir = '', [hashtable]$subFolderMap = $null,
+          [string[]]$GameFolders = $null)
 
     if ($null -eq $datIndex) { $datIndex = @{} }
 
     $exeFiles       = @(Get-GameFiles $installFolder)
+    if ($null -ne $GameFolders -and $GameFolders.Count -gt 0) {
+        $wanted = @{}; foreach ($folder in $GameFolders) { $wanted[[string]$folder] = $true }
+        $exeFiles = @($exeFiles | Where-Object {
+            $relative = $_.FullName.Substring($installFolder.TrimEnd('\').Length).TrimStart('\')
+            $top = ($relative -split '\\')[0]
+            $wanted.ContainsKey($top)
+        })
+    }
     $registered     = New-Object System.Collections.ArrayList
     $already        = New-Object System.Collections.ArrayList
     $ambiguous      = New-Object System.Collections.ArrayList
     $seenCodes      = @{}
+
     $codeClaimedBy  = @{}   # profile code -> folder name that already claimed it this run
     # Snapshot of codes that already had a UserProfile BEFORE this run started.
     # Needed to tell apart two genuinely different situations that both make
@@ -20018,10 +20029,18 @@ if ($mode -eq "AutoSync") {
 # SECTION 7 -- Build profile index from GameProfiles
 # =============================================================================
 
+$registrationFolders = @()
+if ($sync -and $sync.SyncedNames) { $registrationFolders += @($sync.SyncedNames) }
+if ($syncSupp -and $syncSupp.SyncedNames) { $registrationFolders += @($syncSupp.SyncedNames) }
 Write-Host ""
-Write-Host "Checking your TeknoParrot folder so the new game is registered correctly." -ForegroundColor Cyan
-Write-Host "This checks existing installed games, but only changed or new games will be written." -ForegroundColor DarkCyan
-Write-Log "Registration check: scanning installed games; only changed or new games will be written."
+if ($registrationFolders.Count -gt 0) {
+    Write-Host "Checking your TeknoParrot folder so the new game is registered correctly." -ForegroundColor Cyan
+    Write-Host "This checks the selected new game folder; only changed or new games will be written." -ForegroundColor DarkCyan
+    Write-Log "Registration check: checking selected new game folders; only changed or new games will be written."
+} else {
+    Write-Host "Checking existing TeknoParrot games for registration changes." -ForegroundColor Cyan
+    Write-Host "Only changed or new games will be written." -ForegroundColor DarkCyan
+}
 Write-Host ""
 Write-Host "Indexing TeknoParrot game profiles..." -ForegroundColor Cyan
 $profileIndex = Build-ProfileIndex $gameProfilesDir
@@ -20048,7 +20067,7 @@ Write-Host "--------------------------------------------" -ForegroundColor Cyan
 Write-Host " Scanning: $gamesInstallFolder" -ForegroundColor DarkCyan
 Write-Host ""
 
-$result = Register-Games -userProfilesDir $userProfilesDir -installFolder $gamesInstallFolder -profileIndex $profileIndex -gameProfilesDir $gameProfilesDir -datIndex $datIndex -profileSet $profileSet -DryRun $dryRunActive -tpRootDir $tpRoot -subFolderMap $subFolderMap
+$result = Register-Games -userProfilesDir $userProfilesDir -installFolder $gamesInstallFolder -profileIndex $profileIndex -gameProfilesDir $gameProfilesDir -datIndex $datIndex -profileSet $profileSet -DryRun $dryRunActive -tpRootDir $tpRoot -subFolderMap $subFolderMap -GameFolders $registrationFolders
 
 foreach ($r in $result.Registered) {
     if ($r.DatMatch) {

@@ -4577,16 +4577,22 @@ Describe "Resolve-ExtractedGameFolder (issue #66 extraction prompt correctness)"
     }
 }
 
-Describe "AutoSync one-game registration UX" {
-    It "keeps extraction, existing-game checks, and changed-game writes distinct" {
-        $source = $script:ProductionSource
-        $source | Should -Match 'Final queue'
-        $source | Should -Match 'Whitelist active: only extracting'
-        $source | Should -Match 'No supplementary games selected -- skipping'
-        $source | Should -Match 'Checking your TeknoParrot folder so the new game is registered correctly'
-        $source | Should -Match 'checks existing installed games, but only changed or new games will be written'
-        $source | Should -Match 'Registered\s+:\s'
-        $source | Should -Match 'Extracted\s+:\s'
+Describe "AutoSync one-game registration behavior" {
+    It "scans and registers only the newly extracted folder" {
+        $root = Join-Path $TestDrive "one-game-registration"
+        $install = Join-Path $root "Games"
+        $profiles = Join-Path $root "Profiles"
+        New-Item -ItemType Directory -Path (Join-Path $install "Deathsmiles II"), (Join-Path $install "Unrelated"), $profiles -Force | Out-Null
+        $newExe = New-Item -ItemType File -Path (Join-Path $install "Deathsmiles II\game.exe") -Force
+        $oldExe = New-Item -ItemType File -Path (Join-Path $install "Unrelated\game.exe") -Force
+        $before = (Get-ChildItem -LiteralPath $install -Recurse -File | ForEach-Object FullName) -join "`n"
+        Mock Get-GameFiles { @($newExe, $oldExe) }
+        Mock Write-Log {}
+        $result = Register-Games -userProfilesDir $profiles -installFolder $install -profileIndex @{} -gameProfilesDir $profiles -DryRun:$true -GameFolders @('Deathsmiles II')
+        $after = (Get-ChildItem -LiteralPath $install -Recurse -File | ForEach-Object FullName) -join "`n"
+        $before | Should -Be $after
+        $result.Registered.Count | Should -Be 0
+        $result.Already.Count | Should -Be 0
     }
 }
 
