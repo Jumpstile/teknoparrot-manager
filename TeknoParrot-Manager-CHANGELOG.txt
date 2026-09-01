@@ -23,6 +23,9 @@
   display-topology acquisition is included under the feature freeze.
   HyperSpin export now gates missing emulator IDs with explicit Fix, Add
   anyway, or Skip choices; Skip is the safe default and no games are written.
+  One-game AutoSync now pauses before optional library maintenance and offers
+  New game only, related setup, all games, or Back; New game only is safe default.
+
 
 
   Fixes: Eggman updates offer a validated primary ZIP/source folder when the
