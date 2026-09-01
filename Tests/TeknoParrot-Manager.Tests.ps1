@@ -4794,6 +4794,19 @@ Describe "Postgres guided recovery and profile transaction" {
         $failure.ConfigBackups -is [array] | Should -BeTrue
         $failure.ProfileBackups -is [array] | Should -BeTrue
     }
+    It "converts malformed recovery-backup input into a verified false result" {
+        $profiles = Join-Path $TestDrive 'postgres-malformed-recovery-profiles'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $profiles 'Broken.xml') -Value '<GameProfile><ConfigValues>'
+        $script:PostgresInstallDir = Join-Path $TestDrive 'postgres-malformed-recovery'
+        Mock Lock-PostgresRecoveryDirectory { $global:LASTEXITCODE = 0 }
+        Mock Copy-PostgresRecoveryEvidenceFile { [pscustomobject]@{ Source = $Source; Backup = $Destination; Sha256 = 'hash' } }
+        Mock Write-Log {}
+        $result = New-PostgresRecoveryBackup -UserProfilesDir $profiles
+        $result.Verified | Should -BeFalse
+        $result.ConfigBackups -is [array] | Should -BeTrue
+        $result.ProfileBackups -is [array] | Should -BeTrue
+    }
 
     It "blocks every PostgreSQL mutation when recovery backup is unverified" {
         $profiles = Join-Path $TestDrive 'postgres-unverified-profiles'
@@ -4817,13 +4830,42 @@ Describe "Postgres guided recovery and profile transaction" {
 }
 Describe "RC8 PostgreSQL and support UX" {
     It "reports database backup failures with affected entries and explicit recovery choices" {
-        $script:ProductionSource | Should -Match 'PostgreSQL setup stopped because the backup did not complete'
+        $script:ProductionSource | Should -Match 'PostgreSQL setup stopped because the database backup did not complete'
+        $script:ProductionSource | Should -Match 'Nothing was changed'
         $script:ProductionSource | Should -Match '\[R\] Retry backup'
         $script:ProductionSource | Should -Match '\[S\] Skip PostgreSQL setup'
         $script:ProductionSource | Should -Match '\[D\] Show details'
         $script:ProductionSource | Should -Match '\[B\] Back to main menu'
         $script:ProductionSource | Should -Match 'FailureDetails'
-        $script:ProductionSource | Should -Match 'Affected games/databases'
+    }
+    It "keeps affected PostgreSQL entries friendly while retaining database details" {
+        $script:ProductionSource | Should -Match '\$doc\.GameProfile\.GameName'
+        $script:ProductionSource | Should -Match '\$gameLabel, \$dbName'
+        $script:ProductionSource | Should -Match '\$databaseGameLabels'
+    }
+    It "returns friendly affected game names when database state cannot be verified" {
+        $profiles = Join-Path $TestDrive 'postgres-affected-labels'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        $entries = @(
+            @{ File = 'GoldenTeeLive2019'; Game = 'Golden Tee Live 2019' }
+            @{ File = 'PowerPuttLive2012'; Game = 'Power Putt Live 2012' }
+            @{ File = 'PowerPuttLive2013'; Game = 'Power Putt Live 2013' }
+            @{ File = 'SilverStrikeBowlingLive'; Game = 'Silver Strike Bowling Live' }
+            @{ File = 'TargetTossProBags'; Game = 'Target Toss Pro Bags' }
+            @{ File = 'TargetTossProLawndarts'; Game = 'Target Toss Pro Lawn Darts' }
+        )
+        foreach ($entry in $entries) {
+            $xml = '<GameProfile><GameName>{0}</GameName><ConfigValues><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>DbName</FieldName><FieldValue>{1}</FieldValue></FieldInformation></ConfigValues></GameProfile>' -f $entry.Game, $entry.File
+            Set-Content -LiteralPath (Join-Path $profiles ($entry.File + '.xml')) -Value $xml
+        }
+        Mock Test-PostgresInstalled { $true }
+        Mock Get-PostgresDatabaseState { throw 'database state could not be verified' }
+        $result = Backup-PostgresDatabases -UserProfilesDir $profiles -SuperPasswordPlain 'secret'
+        $display = @($result.FailedDatabases) -join ', '
+        foreach ($entry in $entries) {
+            $display | Should -Match ([regex]::Escape(('{0} / {1}' -f $entry.Game, $entry.File)))
+        }
+        $result.Succeeded | Should -BeFalse
     }
     It "keeps full NotPresent support detail out of the normal summary section" {
         $records = @(
@@ -9884,9 +9926,19 @@ Describe "ReShade trusted profile restore" {
         $options.Remembered.Valid|Should -BeTrue;$options.Restore.Valid|Should -BeTrue;$options.Favorites.Count|Should -Be 1
         $source=$script:ProductionSource;$source|Should -Match 'R\) Reapply previous trusted profile';$source|Should -Match 'Reapply .* for this game';$source|Should -Not -Match 'Restore .* for this game';$source|Should -Match 'Choose a favorite profile'
     }
-    It "labels the non-interactive crosshair gallery and keeps numeric fallback" {
-        $script:ProductionSource | Should -Match 'Visual-only gallery'
-        $script:ProductionSource | Should -Match 'type the index number'
+    It "states crosshair click limitations and keeps numeric fallback" {
+        $script:ProductionSource | Should -Match 'Click selection is not available in this preview\. Type the number shown under the crosshair in TeknoParrot Manager\.'
+        $script:ProductionSource | Should -Match 'Apply these crosshairs\? \(Y/N, default Y\)'
+        $script:ProductionSource | Should -Match '\$crosshairConfirm'
+        $script:ProductionSource | Should -Match 'Read-HostSafe'
+    }
+    It "covers ReShade preview recovery choices and empty-source failure" {
+        $script:ProductionSource | Should -Match '\[R\] Retry preview'
+        $script:ProductionSource | Should -Match '\[T\] Text-only setup'
+        $script:ProductionSource | Should -Match '\[S\] Skip ReShade setup'
+        $script:ProductionSource | Should -Match '\[B\] Back'
+        $script:ProductionSource | Should -Match '\[D\] Details'
+        $script:ProductionSource | Should -Match 'SOURCE_DLL_UNAVAILABLE'
     }
     It "offers bulk choices for every multi-game selection including subsets" {
         $source = $script:ProductionSource

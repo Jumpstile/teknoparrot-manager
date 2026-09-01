@@ -796,6 +796,10 @@ Bowling Live, Target Toss Pro Bags/Lawn Darts, Orange County Choppers Pinball (a
 per-game-setting structure GPU Fix/FFB Blaster already use. `Test-GameNeedsPostgres`
 detects these dynamically (category existence check); no hardcoded game list.
 
+Backup verification failures are rendered before any PostgreSQL profile mutation.
+The normal screen uses the profile's friendly `GameName` plus the technical database
+identifier, states that nothing changed, and offers Retry, Skip, Details, and Back.
+
 **Confirmed working silent-install recipe** (derived from real failed install attempts
 root-caused via verbose MSI logs; see LESSONS_LEARNED.md for the full post-mortem):
 

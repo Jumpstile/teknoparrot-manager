@@ -3576,7 +3576,7 @@ function Export-CrosshairPreview {
     [void]$sb.Append('.num{color:#4af;font-size:12px}.name{color:#888;font-size:10px;word-break:break-all}')
     [void]$sb.Append('</style></head><body>')
     [void]$sb.Append('<h1>TeknoParrot Crosshairs</h1>')
-    [void]$sb.Append('<p>Visual-only gallery. Clicking an image does not select it. Type the index number shown under the image in TeknoParrot Manager.</p>')
+    [void]$sb.Append('<p>Click selection is not available in this preview. Type the number shown under the crosshair in TeknoParrot Manager.</p>')
     [void]$sb.Append('<div class="grid">')
 
     $i = 0
@@ -5272,6 +5272,12 @@ function Invoke-ReShadeSetup {
         [string]$HsDataPath
     )
 
+    if ([string]::IsNullOrWhiteSpace($SourceDll) -or -not (Test-Path -LiteralPath $SourceDll -PathType Leaf)) {
+        Write-Host '  ReShade setup stopped: a valid 64-bit ReShade source DLL was not found.' -ForegroundColor Yellow
+        Write-Log 'ReShade setup blocked: SourceDll was empty or did not resolve to a file.'
+        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'SOURCE_DLL_UNAVAILABLE' }
+    }
+
     # Version check
     $bVer = $null
     try {
@@ -5371,15 +5377,28 @@ function Invoke-ReShadeSetup {
         }
     }
     Write-Host ("  Selected: {0}" -f $selectedProfile.FriendlyName) -ForegroundColor DarkGray
+    $previewFailureShown = $false
     do {
         $previewWindowResult = Show-TpmReShadePreviewWindow -ProfileDefinition $selectedProfile -Mode 'Split' -Show
         if ($previewWindowResult.Available) { break }
-        Write-Host "  ReShade preview could not open." -ForegroundColor Yellow
-        Write-Host "  TeknoParrot Manager needs the preview window so you can choose a visual style." -ForegroundColor Yellow
-        Write-Host "  [R] Retry preview  [S] Skip ReShade setup  [T] Use text-only setup anyway"
-        $previewChoice = (Read-HostSafe "  Choice (R/S/T)" -Default 'R').Trim().ToUpper()
-        if ($previewChoice -eq 'S') { return }
-    } while ($previewChoice -eq 'R' -or $previewChoice -eq '')
+        if (-not $previewFailureShown) {
+            Write-Host "  ReShade preview could not open." -ForegroundColor Yellow
+            Write-Host "  The visual preview is unavailable, but text-only setup remains available." -ForegroundColor Yellow
+            $previewFailureShown = $true
+        }
+        Write-Host "  [R] Retry preview  [T] Text-only setup  [S] Skip ReShade setup  [B] Back  [D] Details"
+        $previewChoice = (Read-HostSafe "  Choice (R/T/S/B/D)" -Default 'R').Trim().ToUpper()
+        if ($previewChoice -eq 'D') {
+            Write-Host ("  Preview reason: {0}" -f $previewWindowResult.Reason) -ForegroundColor DarkGray
+            Write-Log ("ReShade preview details: reason={0}; root={1}" -f $previewWindowResult.Reason, $previewWindowResult.PreviewRoot)
+        } elseif ($previewChoice -in @('S', 'B')) {
+            return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'PREVIEW_CANCELLED' }
+        } elseif ($previewChoice -eq 'T') {
+            break
+        } elseif ($previewChoice -notin @('R', '')) {
+            Write-Host "  Enter R, T, S, B, or D." -ForegroundColor Yellow
+        }
+    } while ($true)
     $customPresetChoice = (Read-HostSafe ("  Use the selected ReShade profile?`n  ({0} will be applied. Choose Custom only if you already have your own ReShade .ini preset.)`n`n  [Y] Yes, use {0}  [C] Custom preset  [B] Back`n`n  Choice, default Y" -f $selectedProfile.FriendlyName) -Default 'Y').Trim().ToUpper()
     if ($customPresetChoice -eq 'C') {
         $pInp = Read-PathWithBrowse "  Path to your ReShade preset (.ini) file" -Mode File -FileFilter "ReShade preset (*.ini)|*.ini|All files (*.*)|*.*"
@@ -14639,30 +14658,35 @@ function Backup-PostgresDatabases {
     }
     if (-not (Test-PostgresInstalled)) { return [pscustomobject]$result }
     $names = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::OrdinalIgnoreCase)
+    $databaseGameLabels = @{}
     try {
         $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction Stop | Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object Name)
         foreach ($pf in $profiles) {
             $dbName = ''
+            $gameLabel = $pf.BaseName
             try {
                 $doc = Read-Xml $pf.FullName
+                if ($doc.GameProfile -and $doc.GameProfile.GameName) { $gameLabel = ([string]$doc.GameProfile.GameName).Trim() }
                 if (-not $doc.GameProfile -or -not (Test-GameNeedsPostgres $doc)) { continue }
                 $dbName = Get-PostgresFieldValue $doc 'DbName'
                 if ([string]::IsNullOrWhiteSpace($dbName) -or -not (Test-SafePostgresDbName $dbName)) {
-                    [void]$failedDatabases.Add($pf.BaseName)
-                    [void]$failureDetails.Add(('{0}: missing or unsafe database name.' -f $pf.BaseName))
+                    [void]$failedDatabases.Add(('{0} / {1}' -f $gameLabel, $pf.BaseName))
+                    [void]$failureDetails.Add(('{0}: missing or unsafe database name.' -f $gameLabel))
                     continue
                 }
+                $databaseGameLabels[$dbName] = $gameLabel
                 $state = Get-PostgresDatabaseState -DbName $dbName -SuperPasswordPlain $SuperPasswordPlain
                 if ($state.Exists) { [void]$names.Add($dbName) }
             } catch {
-                [void]$failedDatabases.Add(('{0} / {1}' -f $pf.BaseName, $dbName))
-                [void]$failureDetails.Add(('{0} / {1}: {2}' -f $pf.BaseName, $dbName, $_.Exception.Message))
+                [void]$failedDatabases.Add(('{0} / {1}' -f $gameLabel, $dbName))
+                [void]$failureDetails.Add(('{0} / {1}: {2}' -f $gameLabel, $dbName, $_.Exception.Message))
             }
         }
     } catch {
         [void]$failedDatabases.Add('UserProfiles enumeration')
         [void]$failureDetails.Add(('Could not enumerate game profiles: {0}' -f $_.Exception.Message))
     }
+
     if ($names.Count -eq 0) {
         $result.Succeeded = ($failedDatabases.Count -eq 0)
         $result.FailedDatabaseCount = $failedDatabases.Count
@@ -14678,7 +14702,8 @@ function Backup-PostgresDatabases {
     if (-not (Test-Path -LiteralPath $pgDumpExe -PathType Leaf)) {
         $result.Succeeded = $false
         foreach ($dbName in @($names | Sort-Object)) {
-            [void]$failedDatabases.Add($dbName)
+            $label = if ($databaseGameLabels.ContainsKey($dbName)) { $databaseGameLabels[$dbName] } else { $dbName }
+            [void]$failedDatabases.Add(('{0} / {1}' -f $label, $dbName))
             [void]$failureDetails.Add(('{0}: pg_dump.exe was not found at {1}.' -f $dbName, $pgDumpExe))
         }
     } else {
@@ -14693,7 +14718,8 @@ function Backup-PostgresDatabases {
                 $exitCode = $LASTEXITCODE
                 if ($exitCode -ne 0 -or -not (Test-Path -LiteralPath $destFile -PathType Leaf) -or (Get-Item -LiteralPath $destFile).Length -eq 0) {
                     $result.Succeeded = $false
-                    [void]$failedDatabases.Add($dbName)
+                    $label = if ($databaseGameLabels.ContainsKey($dbName)) { $databaseGameLabels[$dbName] } else { $dbName }
+                    [void]$failedDatabases.Add(('{0} / {1}' -f $label, $dbName))
                     [void]$failureDetails.Add(('{0}: pg_dump exit code {1}. {2}' -f $dbName, $exitCode, $dumpOutput))
                 } else {
                     Write-Log "Postgres backup: verified database backup for $dbName at $($result.Path)."
@@ -18737,7 +18763,7 @@ $mode = $null
             $pgBackup = Backup-PostgresDatabases -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain
             $leavePostgres = $false
             while (-not $pgBackup.Succeeded) {
-                Write-Host "  PostgreSQL setup stopped because the backup did not complete." -ForegroundColor Red
+                Write-Host "  PostgreSQL setup stopped because the database backup did not complete." -ForegroundColor Red
                 Write-Host "  Nothing was changed." -ForegroundColor Green
                 if (@($pgBackup.FailedDatabases).Count -gt 0) { Write-Host ("  Affected games/databases: {0}" -f (@($pgBackup.FailedDatabases) -join ', ')) -ForegroundColor Yellow }
                 Write-Host "  [R] Retry backup  [S] Skip PostgreSQL setup  [D] Show details  [B] Back to main menu"

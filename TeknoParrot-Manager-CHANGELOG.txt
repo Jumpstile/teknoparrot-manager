@@ -37,9 +37,10 @@
   separate Help screen. AutoSync/Register use P/R/B preview choices with preview as the
   safe default. ReShade offers trusted source updates and an all-games profile choice;
   crosshair galleries are explicitly visual-only and require typed indices. PostgreSQL
-  database backups now precede config/profile writes and expose affected databases plus
-  retry/details/skip/back recovery choices. Support output shows concise collection
-  counts while retaining verbose NotPresent detail in the manifest.
+  database backups now precede config/profile writes and expose friendly affected game
+  names alongside technical database identifiers, clearly state that nothing changed,
+  and offer Retry, Details, Skip, and Back recovery choices. Support output shows concise
+  collection counts while retaining verbose NotPresent detail in the manifest.
   Create Support Package collects allowlisted TPM/TeknoParrot/game text logs
   plus metadata-only plugin inventories into one redacted ZIP; unsafe
   executable/archive masquerades and materially binary text are rejected
