@@ -39,6 +39,12 @@
   unsupported hosts once, and leaves the constrained responsive menu usable
   without repeating resize errors on redraw; invalid menu choices persist
   through the next cleared redraw before the prompt.
+  ReShade's normal flow now shows a representative built-in arcade scene
+  gallery before profile selection and keeps deployment behind explicit
+  confirmation. Deployment output separates installed, updated, protected,
+  missing-path, and unsupported-game outcomes with a direct path-repair action.
+  Crosshair preview pages now support bounded localhost click selection with a
+  per-session token; typed numeric selection remains available as fallback.
 
 
 

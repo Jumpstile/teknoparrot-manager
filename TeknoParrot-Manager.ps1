@@ -3562,8 +3562,54 @@ function Test-PngFile {
 # Writes an HTML grid preview of all crosshairs to $OutPath.
 # Images are referenced as relative paths so the file works anywhere on the
 # same machine without embedding base64.
+function Start-CrosshairSelectionBridge {
+    param([int]$TimeoutSeconds = 30)
+    $token = [guid]::NewGuid().ToString('N')
+    $port = (Get-Random -Minimum 18000 -Maximum 48000)
+    $listener = New-Object System.Net.HttpListener
+    $listener.Prefixes.Add(("http://127.0.0.1:{0}/" -f $port))
+    $listener.Start()
+    $state = [hashtable]::Synchronized(@{ Token = $token; Index = $null; Expires = [datetime]::UtcNow.AddSeconds($TimeoutSeconds); Listener = $listener })
+    $callback = {
+        param($result)
+        try {
+            $context = $result.AsyncState.Listener.EndGetContext($result)
+            $query = $context.Request.QueryString
+            $index = Test-CrosshairSelectionIndex -Token $query['token'] -ExpectedToken $result.AsyncState.Token -Value $query['index']
+            if ($null -ne $index) { $result.AsyncState.Index = $index }
+            $bytes = [Text.Encoding]::UTF8.GetBytes('selected')
+            $context.Response.Headers['Access-Control-Allow-Origin'] = '*'
+            $context.Response.OutputStream.Write($bytes,0,$bytes.Length);$context.Response.Close()
+        } catch {}
+    }
+    $session = [pscustomobject]@{ Token=$token; Port=$port; Url=("http://127.0.0.1:{0}/" -f $port); State=$state; Callback=$callback }
+    [void]$listener.BeginGetContext($callback,$state)
+    return $session
+}
+function Stop-CrosshairSelectionBridge {
+    param($Session)
+    if ($Session -and $Session.State.Listener) { try { $Session.State.Listener.Stop();$Session.State.Listener.Close() } catch {} }
+}
+function Read-CrosshairSelectionBridge {
+    param($Session)
+    if (-not $Session) { return $null }
+    while ([datetime]::UtcNow -lt $Session.State.Expires -and $null -eq $Session.State.Index) {
+        Start-Sleep -Milliseconds 100
+    }
+    $value = $Session.State.Index
+    Stop-CrosshairSelectionBridge -Session $Session
+    return $value
+}
+
+function Test-CrosshairSelectionIndex {
+    param([string]$Token, [string]$ExpectedToken, [string]$Value, [int]$Count = 321)
+    $index = 0
+    if ([string]::IsNullOrWhiteSpace($ExpectedToken) -or $Token -ne $ExpectedToken -or $Value -notmatch '^\d+$' -or -not [int]::TryParse($Value, [ref]$index) -or $index -lt 0 -or $index -ge $Count) { return $null }
+    return $index
+}
+
 function Export-CrosshairPreview {
-    param([string[]]$CrosshairPaths, [string]$OutPath)
+    param([string[]]$CrosshairPaths, [string]$OutPath, [string]$BridgeUrl = '', [string]$BridgeToken = '')
 
     $sb = New-Object System.Text.StringBuilder
     [void]$sb.Append('<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">')
@@ -3576,8 +3622,13 @@ function Export-CrosshairPreview {
     [void]$sb.Append('.cell img{width:64px;height:64px;image-rendering:pixelated;display:block;margin:0 auto 4px}')
     [void]$sb.Append('.num{color:#4af;font-size:12px}.name{color:#888;font-size:10px;word-break:break-all}')
     [void]$sb.Append('</style></head><body>')
-    [void]$sb.Append('<h1>TeknoParrot Crosshairs</h1>')
-    [void]$sb.Append('<p>Click selection is not available in this preview. Type the number shown under the crosshair in TeknoParrot Manager.</p>')
+    $bridgeUrlHtml = [System.Net.WebUtility]::HtmlEncode($BridgeUrl)
+    $bridgeTokenHtml = [System.Net.WebUtility]::HtmlEncode($BridgeToken)
+    if ($BridgeUrl -and $BridgeToken) {
+        [void]$sb.Append("<script>const bridge='$bridgeUrlHtml',token='$bridgeTokenHtml';function choose(i){fetch(bridge+'?token='+encodeURIComponent(token)+'&index='+i).then(function(){document.title='Selected crosshair '+i;});}</script>")
+    }
+    $instructionText = if ($BridgeUrl -and $BridgeToken) { '<p>Click a crosshair to select it. Typed numeric fallback remains available in TeknoParrot Manager.</p>' } else { '<p>Type the number shown under the crosshair in TeknoParrot Manager.</p>' }
+    [void]$sb.Append($instructionText)
     [void]$sb.Append('<div class="grid">')
 
     $i = 0
@@ -3586,7 +3637,8 @@ function Export-CrosshairPreview {
         $stem     = [System.IO.Path]::GetFileNameWithoutExtension($path)
         $rel      = 'Crosshairs/' + [System.Net.WebUtility]::HtmlEncode($fname)
         $stemHtml = [System.Net.WebUtility]::HtmlEncode($stem)
-        [void]$sb.Append("<div class=`"cell`"><img src=`"$rel`" alt=`"$stemHtml`">")
+        $cellClick = if ($BridgeUrl -and $BridgeToken) { " onclick=`"choose($i)`" tabindex=`"0`"" } else { '' }
+        [void]$sb.Append("<div class=`"cell`"$cellClick><img src=`"$rel`" alt=`"$stemHtml`">")
         [void]$sb.Append("<div class=`"num`">$i</div><div class=`"name`">$stemHtml</div></div>")
         $i++
     }
@@ -4422,18 +4474,37 @@ function New-TpmReShadePreviewBitmap {
     $bitmap = New-Object Drawing.Bitmap($canvasWidth,$canvasHeight)
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
     try {
-        $graphics.Clear([Drawing.Color]::FromArgb(16,24,32))
+        $graphics.Clear([Drawing.Color]::FromArgb(10,14,24))
         $font = New-Object Drawing.Font('Consolas',18)
         $small = New-Object Drawing.Font('Consolas',12)
-        $brush = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(38,56,69))
+        $brush = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(28,38,60))
         $graphics.FillRectangle($brush,40,40,$canvasWidth-80,$canvasHeight-80)
         $pen = New-Object Drawing.Pen([Drawing.Color]::White,3)
         $graphics.DrawRectangle($pen,40,40,$canvasWidth-80,$canvasHeight-80)
-        $colors = @([Drawing.Color]::FromArgb(210,70,70),[Drawing.Color]::FromArgb(55,165,210),[Drawing.Color]::FromArgb(242,193,78))
-        for ($i=0; $i -lt 3; $i++) { $b=New-Object Drawing.SolidBrush($colors[$i]);$graphics.FillRectangle($b,80+($i*270),90,250,150);$b.Dispose() }
-        $green=New-Object Drawing.Pen([Drawing.Color]::FromArgb(98,195,112),28);$graphics.DrawLine($green,80,310,$canvasWidth-80,310);$green.Dispose()
-        $white=New-Object Drawing.Pen([Drawing.Color]::White,2);$graphics.DrawLine($white,100,400,$canvasWidth-100,400);$white.Dispose()
-        $textBrush=New-Object Drawing.SolidBrush([Drawing.Color]::White);$graphics.DrawString('TPM SYNTHETIC ARCADE TEST SCENE',$font,$textBrush,100,440);$textBrush.Dispose()
+        $sky = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(38,58,104))
+        $graphics.FillRectangle($sky,60,60,$canvasWidth-120,260);$sky.Dispose()
+        $ground = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(24,28,34))
+        $graphics.FillRectangle($ground,60,320,$canvasWidth-120,160);$ground.Dispose()
+        $sun = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(247,190,76))
+        $graphics.FillEllipse($sun,($canvasWidth/2)-55,112,110,110);$sun.Dispose()
+        $neon = New-Object Drawing.Pen([Drawing.Color]::FromArgb(69,218,220),4)
+        $graphics.DrawLine($neon,60,318,($canvasWidth/2)-80,220);$graphics.DrawLine($neon,($canvasWidth/2)+80,220,$canvasWidth-60,318)
+        $graphics.DrawLine($neon,($canvasWidth/2)-80,220,($canvasWidth/2)+80,220);$neon.Dispose()
+        $cab = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(122,42,132))
+        $graphics.FillRectangle($cab,120,205,210,220);$cab.Dispose()
+        $screen = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(12,18,26))
+        $graphics.FillRectangle($screen,145,230,160,105);$screen.Dispose()
+        $cabEdge = New-Object Drawing.Pen([Drawing.Color]::FromArgb(255,86,178),3)
+        $graphics.DrawRectangle($cabEdge,145,230,160,105);$graphics.DrawEllipse($cabEdge,175,360,35,35);$graphics.DrawEllipse($cabEdge,240,360,35,35);$cabEdge.Dispose()
+        $road = New-Object Drawing.Pen([Drawing.Color]::FromArgb(232,232,220),2)
+        for ($x=90; $x -lt $canvasWidth-80; $x+=55) { $graphics.DrawLine($road,$canvasWidth/2,320,$x,480) }
+        for ($y=345; $y -lt 480; $y+=28) { $graphics.DrawLine($road,70,$y,$canvasWidth-70,$y) };$road.Dispose()
+        $textBrush=New-Object Drawing.SolidBrush([Drawing.Color]::White)
+        $graphics.DrawString('NEON CIRCUIT',$font,$textBrush,82,78)
+        $graphics.DrawString('SCORE 084200   1UP   INSERT COIN',$small,$textBrush,82,175)
+        $graphics.DrawString('ARCADE PREVIEW',$small,$textBrush,155,282)
+        $graphics.DrawString('DARK + BRIGHT DETAIL',$small,$textBrush,($canvasWidth-300),440)
+        $textBrush.Dispose()
         $drawAfter = {
             if ($ProfileDefinition.Effects -contains 'SweetFX.LumaSharpen') {
                 $sharp=New-Object Drawing.Pen([Drawing.Color]::White,1)
@@ -5381,10 +5452,17 @@ function Invoke-ReShadeSetup {
 
 
     $gallery = @(Get-TpmReShadeProfileGallery)
-    Write-Host "  Preview gallery (illustrative, local synthetic scenes)" -ForegroundColor DarkCyan
+    Write-Host "  Choose how your game should look." -ForegroundColor Cyan
+    Write-Host "  Use the preview window to compare the options." -ForegroundColor Cyan
+    Write-Host "  Nothing will be changed until you confirm." -ForegroundColor DarkCyan
+    Write-Host "  Preview gallery (safe, built-in arcade scene)" -ForegroundColor DarkCyan
     foreach ($item in $gallery) {
         $previewText = if ($item.PreviewAvailable) { 'preview available' } else { 'preview unavailable; selection still works' }
         Write-Host ("    {0}: {1} [{2}]" -f $item.FriendlyName, $item.Description, $previewText) -ForegroundColor DarkGray
+    }
+    foreach ($galleryItem in $gallery) {
+        $galleryProfile = Get-TpmReShadeProfile -ProfileId $galleryItem.ProfileId
+        if ($galleryProfile) { [void](Show-TpmReShadePreviewWindow -ProfileDefinition $galleryProfile -Mode 'Split' -Show) }
     }
     $favoriteState = Read-TpmReShadeState
     $favoriteProfiles = @()
@@ -5518,11 +5596,6 @@ function Invoke-ReShadeSetup {
         } while ($bulkChoice -notin @('Y', 'S', 'B'))
         if ($bulkChoice -eq 'B') { return }
         $bulkApply = ($bulkChoice -eq 'Y')
-    }
-
-    $rememberedSelections = @{}
-    $restoreSelections = @{}
-    if (-not $bulkApply) {
     foreach ($pf in $selectedGames) {
         $options = Get-TpmReShadeChooserOptions -GameId $pf.BaseName
         if ($options.Restore.Found -and $options.Restore.Valid) {
@@ -5544,24 +5617,24 @@ function Invoke-ReShadeSetup {
     }
     }
 
-    # Deploy
+    # Deploy only after the explicit profile confirmation above.
     Write-Host ""
     Write-Host ("  Installing ReShade into {0} game folder(s)..." -f $selectedGames.Count) -ForegroundColor Cyan
-    $deployed = 0; $skipped = 0; $protected = 0; $errors = 0; $presetOverrides = 0
+    $deployed = 0; $installed = 0; $updated = 0; $skipped = 0; $missingPath = 0; $unsupported = 0; $protected = 0; $errors = 0; $presetOverrides = 0
     $reShadeCacheRoot = Join-Path $PSScriptRoot 'ReShade\Cache'
 
     foreach ($pf in $selectedGames) {
         try {
             $doc = Read-Xml $pf.FullName
-            if (-not $doc.GameProfile) { $skipped++; continue }
+            if (-not $doc.GameProfile) { $skipped++; Write-Host ("    {0}: game profile is invalid -- skipped" -f $pf.BaseName) -ForegroundColor Yellow; continue }
 
             $gpNode = $doc.GameProfile.SelectSingleNode("GamePath")
-            if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { $skipped++; continue }
+            if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { $skipped++; Write-Host ("    {0}: saved game path was empty -- skipped" -f $pf.BaseName) -ForegroundColor DarkGray; continue }
 
             $gamePath = $gpNode.InnerText.Trim()
             if (-not (Test-Path -LiteralPath $gamePath)) {
-                Write-Host ("    {0}: game path not found -- skipped" -f $pf.BaseName) -ForegroundColor DarkGray
-                $skipped++; continue
+                Write-Host ("    {0}: saved game path was not found -- skipped" -f $pf.BaseName) -ForegroundColor DarkGray
+                $missingPath++; $skipped++; continue
             }
             $exeDir = [System.IO.Path]::GetDirectoryName($gamePath)
             if ([string]::IsNullOrWhiteSpace($exeDir)) {
@@ -5587,18 +5660,19 @@ function Invoke-ReShadeSetup {
             $perGamePreset = Join-Path $reShadePresetsDir ($pf.BaseName + '.ini')
             $presetForGame = if ($canonicalForGame) { $null } else { $presetPath }
             $profileDeployment = Install-TpmReShadeProfileDeployment -ProfileDefinition $profileForGame -GamePath $gamePath -Doc $doc -SourceDll $SourceDll -SourceDll32 $SourceDll32 -PresetPath $presetForGame -PerGamePresetPath $perGamePreset -CacheRoot $reShadeCacheRoot -OwnershipPath $ownershipPath -CanonicalPreset:$canonicalForGame
+            $hadExistingProfile = Test-Path -LiteralPath $ownershipPath -PathType Leaf
             if (-not $profileDeployment.Succeeded) {
-                if ($profileDeployment.Reason -eq 'USER_OWNED_CONTENT_PRESERVED') { $protected++; Write-Log "ReShade: protected existing user-owned files for $($pf.BaseName)"; continue }
-                if ($profileDeployment.State -in @('MISSING_32BIT_DLL','UNSUPPORTED_ARCHITECTURE')) { $skipped++; continue }
+                if ($profileDeployment.Reason -eq 'USER_OWNED_CONTENT_PRESERVED') { $protected++; Write-Host ("    {0}: protected existing ReShade files -- unchanged" -f $pf.BaseName) -ForegroundColor Yellow; Write-Log "ReShade: protected existing user-owned files for $($pf.BaseName)"; continue }
+                if ($profileDeployment.State -in @('MISSING_32BIT_DLL','UNSUPPORTED_ARCHITECTURE')) { $unsupported++; $skipped++; continue }
                 throw ("profile deployment rejected: {0}" -f $profileDeployment.Reason)
             }
             if (-not $profileDeployment.ApiDetected) { Write-Host ("    {0}: graphics API not detected, defaulting to dxgi.dll" -f $pf.BaseName) -ForegroundColor Yellow }
             $presetSource = $profileDeployment.PresetSource
-            if ($presetSource -eq 'per-game') { $presetOverrides++ }
             $presetNote = if ($presetSource) { "  (preset: $presetSource)" } else { "" }
             Write-Host ("    {0}  [{1}]{2}" -f $pf.BaseName, $profileDeployment.DllName, $presetNote) -ForegroundColor Green
             Write-Log "ReShade: $($pf.BaseName) -> $($profileDeployment.TargetDir) [$($profileDeployment.DllName)]$presetNote"
             $deployed++
+            if ($hadExistingProfile) { $updated++ } else { $installed++ }
             try { Add-TpmReShadeProfileHistory -GameId $pf.BaseName -ProfileDefinition $profileForGame -StateRoot '' | Out-Null } catch { Write-Log "ReShade: history record failed for $($pf.BaseName) -- $_" }
         } catch {
             Write-Host ("    FAILED {0}: {1}" -f $pf.BaseName, $_) -ForegroundColor Red
@@ -5608,24 +5682,20 @@ function Invoke-ReShadeSetup {
     }
 
     Write-Host ""
-    Write-Host ("  Installed : {0} game(s)" -f $deployed) -ForegroundColor Green
-    if ($presetOverrides -gt 0) {
-        Write-Host ("  Per-game presets applied : {0}" -f $presetOverrides) -ForegroundColor Cyan
+    Write-Host ("  Installed new : {0} game(s)" -f $installed) -ForegroundColor Green
+    Write-Host ("  Updated       : {0} game(s)" -f $updated) -ForegroundColor Green
+    if ($presetOverrides -gt 0) { Write-Host ("  Per-game presets applied : {0}" -f $presetOverrides) -ForegroundColor Cyan }
+    if ($missingPath -gt 0) {
+        Write-Host ("  Skipped missing path : {0} game(s)" -f $missingPath) -ForegroundColor Yellow
+        Write-Host "  Some saved game paths no longer exist. Use the path-repair tool from the main menu, then run ReShade setup again." -ForegroundColor Yellow
     }
-    if ($skipped -gt 0) {
-        Write-Host ("  Skipped   : {0}  (path not found, 32-bit DLL missing, or unsupported architecture)" -f $skipped) -ForegroundColor DarkGray
-    }
-    if ($protected -gt 0) {
-        Write-Host ("  Protected : {0}  (existing ReShade files were kept unchanged)" -f $protected) -ForegroundColor Yellow
-    }
-    if ($errors -gt 0) {
-        Write-Host ("  Errors    : {0}  -- see TeknoParrot-Manager.log for details" -f $errors) -ForegroundColor Red
-    }
+    if ($unsupported -gt 0) { Write-Host ("  Skipped unsupported or missing 32-bit : {0} game(s)" -f $unsupported) -ForegroundColor DarkGray }
+    if ($protected -gt 0) { Write-Host ("  Protected: {0} game(s) already had ReShade files, so TeknoParrot Manager left them unchanged." -f $protected) -ForegroundColor Yellow }
+    if ($errors -gt 0) { Write-Host ("  Errors        : {0}  -- see TeknoParrot-Manager.log for details" -f $errors) -ForegroundColor Red }
     Write-Host ""
     Write-Host "  To turn effects on/off: launch a game and press the  Home  key." -ForegroundColor Cyan
     Write-Host "  TPM does not remove an unowned ReShade hook automatically." -ForegroundColor DarkCyan
-    Write-Host "  Existing or changed files need advanced troubleshooting review." -ForegroundColor DarkCyan
-    Write-Log ("ReShade setup: Installed={0} Protected={1} Skipped={2} Errors={3} PresetOverrides={4}" -f $deployed, $protected, $skipped, $errors, $presetOverrides)
+    Write-Log ("ReShade setup: InstalledNew={0} Updated={1} Protected={2} MissingPath={3} Unsupported={4} Errors={5} PresetOverrides={6}" -f $installed, $updated, $protected, $missingPath, $unsupported, $errors, $presetOverrides)
     if ($generatedPresetPath -and (Test-Path -LiteralPath $generatedPresetPath)) {
         Remove-Item -LiteralPath $generatedPresetPath -Force -ErrorAction SilentlyContinue
     }
@@ -6245,6 +6315,18 @@ function Test-PostgresInstalled {
 # Returns a verified tri-state result instead of collapsing a connection or
 # query failure into "database absent". Creation is allowed only when
 # Verified is true and Exists is false.
+function Get-PostgresFailureDiagnosis {
+    param([string]$GameLabel, [string]$DbName, [string]$Detail, [int]$ExitCode = 1)
+    $text = [string]$Detail
+    $category = 'UnknownQueryFailure'; $next = 'Review the PostgreSQL log details, then retry after correcting the reported condition.'
+    if ($text -match 'not found|could not be verified|psql\.exe') { $category = 'ToolUnavailable'; $next = 'Install or repair the PostgreSQL client tools, then retry.' }
+    elseif ($text -match 'service|not running|stopped') { $category = 'ServiceNotRunning'; $next = 'Start the PostgreSQL service with administrator rights, then retry.' }
+    elseif ($text -match 'permission|access denied|administrator|elevation') { $category = 'PermissionOrElevation'; $next = 'Run TeknoParrot Manager as administrator or grant the PostgreSQL account access, then retry.' }
+    elseif ($text -match 'does not exist|database .* missing') { $category = 'DatabaseMissing'; $next = 'Verify the game database name and restore the database before retrying.' }
+    elseif ($text -match 'connect|connection|refused|server') { $category = 'CannotConnect'; $next = 'Verify the PostgreSQL service, host, port, and credentials, then retry.' }
+    return [pscustomobject]@{ GameLabel=$GameLabel; Database=$DbName; Category=$category; Detail=$text; NextAction=$next; ExitCode=$ExitCode }
+}
+
 function Get-PostgresDatabaseState {
     param([Parameter(Mandatory)][string]$DbName, [Parameter(Mandatory)][string]$SuperPasswordPlain)
     if (-not (Test-SafePostgresDbName $DbName)) { throw 'Postgres: unsafe database name.' }
@@ -7092,9 +7174,10 @@ function Invoke-CrosshairSetup {
     }
 
     Write-Host ("  Found {0} valid crosshair(s). Generating preview..." -f $valid.Count) -ForegroundColor Cyan
-    Export-CrosshairPreview -CrosshairPaths $valid.ToArray() -OutPath $previewPath
+    $bridgeSession = Start-CrosshairSelectionBridge -TimeoutSeconds 45
+    Export-CrosshairPreview -CrosshairPaths $valid.ToArray() -OutPath $previewPath -BridgeUrl $bridgeSession.Url -BridgeToken $bridgeSession.Token
     Write-Host "  Preview: $previewPath" -ForegroundColor Cyan
-    Write-Host "  Opening in browser -- browse the grid, then come back here." -ForegroundColor DarkCyan
+    Write-Host "  Click a crosshair to select P1, or use the typed numeric fallback below." -ForegroundColor DarkCyan
     if (Test-Path -LiteralPath $previewPath -PathType Leaf) { Start-Process -FilePath $previewPath }
     Write-Host ""
 
@@ -7117,9 +7200,11 @@ function Invoke-CrosshairSetup {
             }
         } catch { Write-Log "Crosshairs: could not read last-used state -- $_" }
     }
+    $browserP1Idx = Read-CrosshairSelectionBridge -Session $bridgeSession
+    if ($null -ne $browserP1Idx) { Write-Host ("  Browser selected P1 index {0}." -f $browserP1Idx) -ForegroundColor Green }
 
     # Pick P1
-    $p1Idx = $null
+    $p1Idx = $browserP1Idx
     while ($null -eq $p1Idx) {
         $promptText = if ($null -ne $lastP1Idx) {
             "  P1 crosshair index (0-{0}, Enter for last used: {1} {2})" -f ($valid.Count - 1), $lastP1Idx, [System.IO.Path]::GetFileNameWithoutExtension($valid[$lastP1Idx])
