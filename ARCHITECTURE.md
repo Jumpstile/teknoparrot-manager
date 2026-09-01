@@ -213,6 +213,13 @@ The cache manifest records the subject/mode, intensity identity, preset version,
 **Full profile deployment and restore (RC8 freeze exception).** Normal ReShade setup and the explicit per-game restore action call `Install-TpmReShadeProfileDeployment`. It stages the architecture-selected ReShade DLL, a canonical generated `ReShade.ini` when a trusted profile is selected, and every approved effect asset, then promotes them with one `Invoke-TpmTransactionalPromote` transaction. The per-game ownership manifest is stored under `ReShade\TPM-State\Deployments\<SHA256(game ID)>.json`; ownership is committed only after the physical promotion and post-promotion hashes succeed. A later profile-history entry is written only after that deployment returns success.
 
 Restore history is a selector, not trust evidence. Restore validates the profile schema, ordered approved effect IDs, ordered catalog hashes, and intensity variant before deployment; it never copies a historical path or arbitrary historical file. Missing, corrupt, stale, or unsupported history produces a friendly fresh-selection path. The chooser requires an explicit `R` restore choice, offers a remembered profile only after explicit confirmation, and exposes catalog-bound favorites through `F`.
+Before game selection, `Invoke-ReShadeUpdateIfAvailable` compares the installed trusted
+installer version with the official `reshade.me` version, verifies the downloaded installer
+and extracted DLLs, and offers an explicit update/keep choice. It does not deploy to games
+until the source decision and all later preflight checks succeed. When multiple eligible
+games are selected, setup asks once whether to apply the chosen profile to all games;
+`S` retains the per-game chooser, `D` shows profile details, and `B` returns without
+deployment. Remembered profiles are described as reapply actions, not restore operations.
 
 Before replacing any target file, deployment requires a matching TPM-managed ownership entry. Existing files without that ownership evidence return `COLLISION` / `USER_OWNED_CONTENT_PRESERVED` and remain byte-for-byte untouched. Previous TPM-managed files not part of the new profile are retained rather than deleted, so switching to `Original` or a smaller effect set is non-destructive and may require manual review of old files.
 
@@ -559,11 +566,11 @@ accidentally still write during a preview, covered by tests. `Invoke-AutoSync`,
 `Register-Games`, `Repair-GamePaths`, and `Invoke-ControlPropagation` all take a
 `[bool]$DryRun` parameter.
 
-**Interactive flow.** The "Run in PREVIEW mode first?" prompt is asked once per
-AutoSync/Register run, skipped when `-Unattended` or when `-DryRun` was already passed
-on the command line. Both paths converge on one runtime variable (`$dryRunActive`) passed
-into every downstream call -- never branch on the raw switch and the prompt result
-separately.
+**Interactive flow.** Before AutoSync/Register work, the operator chooses an explicit
+`[P] Preview only`, `[R] Run now`, or `[B] Back` action. The selector rejects all other
+input and defaults to preview, so `N` cannot accidentally mean "run." Back exits before
+backup, preflight, staging, or downstream input is consumed. Both preview and real paths
+converge on `$dryRunActive`, which is passed into every downstream call.
 
 **Preview skips.** The `FullBackup` step, LaunchBox/HyperSpin 2 export offers, thumbnail
 download offer, and GPU fix offer are all skipped in preview mode. They are themselves
@@ -615,6 +622,11 @@ write), only the shared detection helpers. Third-party FFB plugin coverage is NO
 -- checking it needs a live fetch of `AutoSetup.cmd` (`Get-FFBPluginGameMap`), which
 would break the health check's documented "no network access" contract. The check prints a
 one-line note pointing at mode 8 instead.
+
+**Crosshair gallery selection.** The HTML gallery is visual-only: clicking a PNG does not
+select or mutate state. Selection continues through the typed numeric index, with the
+existing P1/P2 keyboard fallback, and deployment has a separate explicit confirmation
+before any crosshair files or state are written.
 
 **Crosshair last-used state.** `TeknoParrot-Manager-crosshairs.json` (gitignored, like
 `config.json`) remembers last-used P1/P2 crosshair filenames (not indices -- indices shift
@@ -878,12 +890,15 @@ and leaves database creation/restore to TPUI's first-launch flow. Only for older
 - Guided recovery changes only the postgres role password. It never edits
   pg_hba.conf, drops or recreates a database, restores over an existing
   database, or wipes PostgreSQL data.
-- Verified recovery evidence is created before service stop, role reset,
-  configuration persistence, database backup, or profile write.
-- The role reset and authentication verification complete before the recovered
-  password is saved to config.json. Database backup completes after that save,
-  and profile setup starts only after both the protected recovery evidence and
-  database backup succeed.
+- Verified recovery evidence is created before service stop, role reset, configuration
+  persistence, database backup, or profile write.
+- Database backup completes before config persistence or any UserProfile mutation. An
+  incomplete backup returns affected game/database names plus redacted failure details;
+  the operator can retry the backup, show details, skip PostgreSQL setup, or return to the
+  main menu. No PostgreSQL setup mutation is reported complete after a failed backup.
+- The role reset and authentication verification complete before the recovered password is
+  saved to config.json. Profile setup starts only after both the protected recovery evidence
+  and database backup succeed.
 - A reset, restart, backup, or profile write that cannot be verified returns
   a blocked result and is never reported complete.
 - Profiles are sorted deterministically. Database state is tri-state verified/
@@ -1576,21 +1591,14 @@ which are historical only.
   don't support resizing (redirected output, ISE, some CI/test runners) -- this is a
   cosmetic nicety, never allowed to block startup.
 
-**Wiring.** The main menu loop's `if ($mode) { ... } else { ... }` block still lives inline
-(not moved into a function) so `break`/`continue` inside the `switch` statement keep
-working exactly as before, governed by the same enclosing `while ($true)` loop. Only the
-static `Write-Host` lines were replaced with a call to `Show-MainMenu -Tier $menuTier`,
-where `$menuTier` is recomputed fresh every redraw (via `Get-ConsoleLayoutTier`) -- so a
-user resizing the window mid-session gets the right tier next time the menu draws, not just
-at startup. The `Enter 1-N` prompt and the "Invalid choice" message both use
-`$menuMaxNumber` (derived from `Get-MainMenuItems`) instead of a hardcoded `14`. Typing `?`
-at the prompt re-renders once at the Professional tier (`if ($helpTier -eq 'Compact')
-{ $helpTier = 'Professional' }`) regardless of the console's own detected tier, then
-re-prompts, without disturbing `$mode` or the surrounding loop -- this is how a Compact-tier
-console's "Type ? for descriptions." hint is actually fulfilled, since Compact's own render
-never shows per-item description text at all (see "Short-viewport truncation" below for why
-the description TEXT shown there has to stay in sync with every tier, not just the Full/
-UltraCentered one).
+**Wiring.** The main menu loop calls `Show-MainMenu -ReturnScreen` and refuses to prompt when
+the returned screen is not complete for the actual viewport. In that case it prints resize
+guidance and redraws; no hidden or clipped option can consume input. Once a complete screen
+is available, `Resolve-MainMenuCommand` is the only command allowlist before numeric
+dispatch: exact `1`-`15` selects a mode, `H` opens the distinct help screen, `L` opens the
+log/report folder, and `Q` exits. Invalid text, legacy `U`, leading-zero numbers, and
+blank input are rejected before any workflow branch can see them. Help returns on Enter and
+does not alter menu expansion state.
 
 **Unchanged by design:** existing menu numbering (1-13) and every existing mode's own behavior remain
 unchanged; option 14 adds the support-package workflow and Exit is now option 15. The `switch`
@@ -1612,39 +1620,26 @@ change must update both places and be verified at every tier (Compact via `?`, S
 no description to update, Professional, Ultra-two-column, and UltraCentered), not just
 whichever tier happened to be open in a terminal at the time.
 
-**Short-viewport truncation keeps the footer and Exit, never the earliest content (RC3
-correction, see `LESSONS_LEARNED.md`).** `Render-MainMenuScreen` builds banner, body, and
-footer rows separately and reserves the banner and footer unconditionally -- they are never
-truncated. If the body doesn't fit the remaining row budget, `Limit-MainMenuBodyRowsToBudget`
-trims body rows from the FRONT, keeping the tail, specifically so the last real menu item
-(15, Exit) and the footer's Quit/Help controls always render without the terminal itself
-having to scroll. The Compact tier's decorative "Type ? for descriptions." hint is
-deliberately built into the body BEFORE the section rows (not after) for the same reason --
-placed after, it would out-rank the real "15) Exit" line for tail-preservation priority
-purely by virtue of render order, not because it's more important. Do not "simplify" this
-back to a single flat `banner + body + footer` list truncated from one end -- that was the
-actual regression this section documents.
+**Complete-or-block rendering (RC8).** `Render-MainMenuScreen` never presents a partial
+numbered menu. It first computes the visible option set against the caller's actual width
+and height; the prompt is allowed only when every option 1-15 is visible and the layout
+fits within the viewport. A too-short or otherwise incomplete render shows resize guidance
+and the main loop consumes no menu choice. This prevents a beginner from selecting a
+different action because the intended item was clipped below the prompt.
 
-**Emergency compact presentation for the 60x10 minimum supported viewport and below (RC3-B
-correction, see `LESSONS_LEARNED.md`).** Reserving Exit and the footer is not, on its own,
-enough at very short heights: at the documented minimum supported 60x10 terminal, the normal
-Compact-tier body needs 19 rows at minimum (4 section headers + 15 item rows) even with every
-description stripped, and the normal framed banner (6 rows) plus footer (2 rows) alone
-already consume the entire available row budget there -- leaving zero rows for body content
-of any kind, Exit included. `Get-MainMenuEmergencyCompactRows` is the fallback:
-`Render-MainMenuScreen` switches to it whenever the body budget can't hold at least one row
-per item (`$bodyBudget -lt $totalItemCount`), and it replaces the framed banner and footer
-with single-line minimal versions (`Get-MainMenuMinimalBannerRows` /
-`Get-MainMenuMinimalFooterRows`) and flow-packs every item's `"N) Label"` token as densely as
-the width allows (`Get-MainMenuFlowPackedItemRows`) instead of one item per row. Tokens are
-packed whole -- a label is never split across two lines -- and if even the packed items don't
-fit the real row budget, item rows are trimmed from the front (same tail-preservation
-principle as above), so the minimal banner and footer are still never dropped, and the
-trailing item lines (ending in `15) Exit`) survive over the earliest ones. The row budget used
-here, and by the normal path above it, is the caller's real requested `-Height`, not
-`$geometry.ViewportHeight` -- `Get-MainMenuGeometry` internally clamps that to a floor of 10
-for its own column-width math, which would otherwise let more rows render than an actually
-8- or 9-row-tall real terminal can show without scrolling.
+For tall enough windows, narrow layouts use a flow-packed fallback that keeps the normal
+version banner and footer while fitting all numbered labels. For very short windows, the
+emergency compact layout uses one-line banner/footer rows and whole, never-split item
+tokens. If that still cannot fit, the renderer shows only the banner and resize guidance;
+it does not trim the front or tail of the numbered menu.
+
+**Emergency compact presentation for very short viewports (RC8).** The emergency renderer
+uses `Get-MainMenuMinimalBannerRows`, `Get-MainMenuMinimalFooterRows`, and
+`Get-MainMenuFlowPackedItemRows` to preserve the version identity, every whole numbered
+item token, and the quit/help controls. The row budget is the caller's real requested
+`-Height`, not the geometry helper's clamped math height. If all item tokens still cannot
+fit, the result is banner plus resize guidance with `PromptAllowed = $false`; no partial
+numbered list is offered and the next loop iteration redraws without consuming input.
 
 **Test changes.** "Main menu source-level drift check" was rewritten to validate the data
 model (`Get-MainMenuItems`) against the `switch` statement's case labels, instead of the
@@ -1716,6 +1711,11 @@ redaction/read failure, or ZIP failure prevents a success result. Workflow
 status is closed in `finally` on every exit path; redirected, unattended, and
 certification hosts therefore retain the existing structured-status fallback
 without cursor writes.
+
+**Operator summary.** The normal console output presents counts for games checked, files
+collected, plugin inventories, optional diagnostics not present, collection failures, and
+intentionally excluded content. The manifest retains per-record detail, including verbose
+`NotPresent` reasons, without flooding the default beginner-facing summary.
 
 ---
 

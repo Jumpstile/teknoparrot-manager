@@ -4815,6 +4815,29 @@ Describe "Postgres guided recovery and profile transaction" {
         Should -Invoke New-PostgresDatabaseFromBackup -Times 0
     }
 }
+Describe "RC8 PostgreSQL and support UX" {
+    It "reports database backup failures with affected entries and explicit recovery choices" {
+        $script:ProductionSource | Should -Match 'PostgreSQL setup stopped because the backup did not complete'
+        $script:ProductionSource | Should -Match '\[R\] Retry backup'
+        $script:ProductionSource | Should -Match '\[S\] Skip PostgreSQL setup'
+        $script:ProductionSource | Should -Match '\[D\] Show details'
+        $script:ProductionSource | Should -Match '\[B\] Back to main menu'
+        $script:ProductionSource | Should -Match 'FailureDetails'
+        $script:ProductionSource | Should -Match 'Affected games/databases'
+    }
+    It "keeps full NotPresent support detail out of the normal summary section" {
+        $records = @(
+            [pscustomobject]@{ Status = 'Collected'; Source = 'TPM log'; Destination = 'diagnostics\manager.log'; Detail = '' }
+            [pscustomobject]@{ Status = 'NotPresent'; Source = 'Game:Example:log'; Destination = ''; Detail = 'Expected diagnostic file was not present.' }
+        )
+        $text = Get-TpmSupportManifestText -Records $records -Errors @() -GameCodes @('Example') -AffectedGameSummary 'Example'
+        $text | Should -Match 'Collected evidence:'
+        $text | Should -Match 'Verbose NotPresent detail:'
+        $text.IndexOf('Collected evidence:') | Should -BeLessThan $text.IndexOf('Verbose NotPresent detail:')
+        $script:ProductionSource | Should -Match 'full detail is in the package manifest'
+    }
+}
+
 
 Describe "Issue #292 PostgreSQL automatic elevation and resume" {
     BeforeEach {
@@ -4892,7 +4915,7 @@ Describe "Issue #292 PostgreSQL automatic elevation and resume" {
         $profileSetup = $source.IndexOf('Invoke-PostgresGameSetup', $postgresMode)
         $postgresMode | Should -BeGreaterThan -1
         $save | Should -BeGreaterThan $verify
-        $dbBackup | Should -BeGreaterThan $save
+        $save | Should -BeGreaterThan $dbBackup
         $profileSetup | Should -BeGreaterThan $dbBackup
 
     }
@@ -8039,6 +8062,56 @@ Describe "Format-MainMenuItemLines" {
     }
 }
 
+Describe "RC8 main-menu command routing and visibility" {
+    It "accepts only advertised hotkeys and exact numeric choices" {
+        (Resolve-MainMenuCommand -InputText 'L' -MaxNumber 15) | Should -Be 'L'
+        (Resolve-MainMenuCommand -InputText 'l' -MaxNumber 15) | Should -Be 'L'
+        (Resolve-MainMenuCommand -InputText 'H' -MaxNumber 15) | Should -Be 'H'
+        (Resolve-MainMenuCommand -InputText 'h' -MaxNumber 15) | Should -Be 'H'
+        (Resolve-MainMenuCommand -InputText 'Q' -MaxNumber 15) | Should -Be 'Q'
+        (Resolve-MainMenuCommand -InputText '1' -MaxNumber 15) | Should -Be '1'
+        (Resolve-MainMenuCommand -InputText '01' -MaxNumber 15) | Should -Be $null
+        (Resolve-MainMenuCommand -InputText 'N' -MaxNumber 15) | Should -Be $null
+        (Resolve-MainMenuCommand -InputText 'U' -MaxNumber 15) | Should -Be $null
+    }
+    It "routes help and log before numeric workflow dispatch" {
+        $script:ProductionSource | Should -Match '(?s)if \(\$modeChoice -eq ''H''\).*Show-MainMenuHelp'
+        $script:ProductionSource | Should -Match '(?s)if \(\$modeChoice -eq ''L''\).*Open-TpmLogsAndReports'
+        $script:ProductionSource | Should -Match 'Open-TpmLogsAndReports -ScriptRoot \$PSScriptRoot'
+        $script:ProductionSource | Should -Not -Match "Run in PREVIEW mode first\?.*\(Y/N"
+    }
+    It "does not advertise unattended mode in the normal footer" {
+        $footer = Get-MainMenuFooterRows -Geometry (Get-MainMenuGeometry -Tier Compact -ViewportWidth 80 -ViewportHeight 25)
+        (($footer | ForEach-Object Text) -join "`n") | Should -Not -Match 'Unattended'
+    }
+    It "suppresses the prompt when the rendered body is incomplete" {
+        $screen = Render-MainMenuScreen -Tier Compact -Width 60 -Height 8
+        $screen.PromptAllowed | Should -BeFalse
+        $screen.MissingOptionNumbers.Count | Should -BeGreaterOrEqual 0
+    }
+    It "uses a dedicated help title and a safe return path" {
+        $help = Get-Command Show-MainMenuHelp
+        $help.Definition | Should -Match 'TeknoParrot Manager Help'
+        $help.Definition | Should -Match 'Press Enter to return'
+    }
+    It "uses explicit safe preview choices" {
+        $script:ProductionSource | Should -Match '\[P\] Preview only -- no changes'
+        $script:ProductionSource | Should -Match '\[R\] Run now -- may make changes'
+        $script:ProductionSource | Should -Match '\[B\] Back'
+        $script:ProductionSource | Should -Match "Choice, default P"
+    }
+    It "keeps the polished banner and first option at full-screen size" {
+        $screen = Render-MainMenuScreen -Tier 'Ultra' -Width 200 -Height 60
+        $output = ($screen.Rows | ForEach-Object Text) -join "`n"
+        $screen.Geometry.Layout | Should -Be 'UltraTwoColumn'
+        $output | Should -Match ([regex]::Escape((Get-ManagerVersionLine)))
+        $output.IndexOf('1) AutoSync') | Should -BeGreaterThan -1
+        $output.IndexOf('1) AutoSync') | Should -BeLessThan $output.IndexOf('6) dgVoodoo2 setup')
+        $screen.PromptAllowed | Should -BeTrue
+    }
+
+}
+
 Describe "Render-MainMenuScreen / Show-MainMenu" {
     It "renders the complete Professional menu into a deterministic buffer" {
         $screen = Render-MainMenuScreen -Tier 'Professional' -Width 150 -Height 80
@@ -8295,19 +8368,15 @@ Describe "Minimum supported 60x10 viewport and nearby boundaries (issue #104 RC3
         $output | Should -Match 'Q=Quit'
     }
 
-    It "below the documented 60x10 minimum (60x8), the footer and option 15 (Exit) are still never dropped, even though an earlier option's line may not fit" {
-        # 60x8 is below the documented supported floor, so unlike the exact
-        # cases above, this does not require every option to be visible --
-        # only that the two guarantees which must NEVER break (the footer's
-        # Quit control, and Exit specifically) still hold, and that nothing
-        # crashes or silently renders a blank/broken screen.
+    It "blocks the prompt below the supported viewport height instead of showing a partial menu" {
         $screen = Render-MainMenuScreen -Tier (Get-ConsoleLayoutTier -Width 60 -Height 8 -RequiredFullLines 0) -Width 60 -Height 8
         $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
 
-        $screen.Rows.Count | Should -BeLessOrEqual ([Math]::Max(5, 8 - 2))
-        $output | Should -Match '15\) Exit'
-        $output | Should -Match 'Enter number'
-        $output | Should -Match 'Q=Quit'
+        $screen.Rows.Count | Should -BeLessOrEqual 8
+        $screen.PromptAllowed | Should -BeFalse
+        $output | Should -Match 'Resize the PowerShell window'
+        $output | Should -Not -Match '15\) Exit'
+        $output | Should -Not -Match 'Enter number'
     }
 
     It "every flow-packed 'N) Label' token matches Get-MainMenuItems exactly (no drift between the emergency presentation and the real dispatch data)" {
@@ -8371,16 +8440,18 @@ Describe "Minimum supported 60x10 viewport and nearby boundaries (issue #104 RC3
         # Height-2) = 6 for height 8, 18 for height 20), so a cross-case
         # Height swap between those two would change which bound applies.
         $screen.Rows.Count | Should -BeLessOrEqual ([Math]::Max(5, $Height - 2))
-        $output | Should -Match '15\) Exit'
-        $output | Should -Match 'Q=Quit'
-
-        # All four of these cases happen to be wide enough that the render
-        # pipeline shows every option even in its most space-constrained
-        # form (confirmed empirically, not assumed) -- verified per case
-        # rather than in a separate test, so this remains part of the same
-        # independently-reported, per-case proof.
-        foreach ($n in @((Get-MainMenuItems) | ForEach-Object { $_.Number })) {
-            $output | Should -Match ([regex]::Escape("$n)"))
+        if ($Height -lt 10) {
+            $screen.PromptAllowed | Should -BeFalse
+            $output | Should -Match 'Resize the PowerShell window'
+            $output | Should -Not -Match '15\) Exit'
+            $output | Should -Not -Match 'Enter number'
+        } else {
+            $screen.PromptAllowed | Should -BeTrue
+            $output | Should -Match '15\) Exit'
+            $output | Should -Match 'Q=Quit'
+            foreach ($n in @((Get-MainMenuItems) | ForEach-Object { $_.Number })) {
+                $output | Should -Match ([regex]::Escape("$n)"))
+            }
         }
     }
 
@@ -9455,7 +9526,7 @@ Describe "Issue #300 workflow ownership and transition guards" {
     }
 
     It "routes reviewed PostgreSQL and optional-flow failures through lifecycle cleanup" {
-        foreach ($failureId in @('postgres-service-state','postgres-install-failed','postgres-backup-unverified','postgres-config-save','postgres-database-backup','postgres-profile-recovery','postgres-profile-errors','postgres-service-restore','reshade-file-missing','reshade-file-type','dgv-folder-missing')) {
+        foreach ($failureId in @('postgres-service-state','postgres-install-failed','postgres-backup-unverified','postgres-profile-recovery','postgres-profile-errors','postgres-service-restore','postgres-direct-recovery','reshade-file-missing','reshade-file-type','dgv-folder-missing')) {
             $script:ProductionSource | Should -Match ([regex]::Escape("Resolve-TpmWorkflowFailure -Context"))
             $script:ProductionSource | Should -Match ([regex]::Escape("-FailureId '$failureId'"))
         }
@@ -9792,7 +9863,11 @@ Describe "ReShade trusted profile restore" {
         $root=Join-Path $TestDrive 'chooser-state';$profile=Get-TpmReShadeProfile -ProfileId CleanSharp;Set-TpmReShadeRememberedProfile -GameId chooser-game -ProfileDefinition $profile -StateRoot $root;Set-TpmReShadeFavorite -ProfileId CleanSharp -StateRoot $root;Add-TpmReShadeProfileHistory -GameId chooser-game -ProfileDefinition $profile -StateRoot $root
         $options=Get-TpmReShadeChooserOptions -GameId chooser-game -StateRoot $root
         $options.Remembered.Valid|Should -BeTrue;$options.Restore.Valid|Should -BeTrue;$options.Favorites.Count|Should -Be 1
-        $source=$script:ProductionSource;$source|Should -Match 'R\) Restore previous trusted profile';$source|Should -Match 'Restore .* for this game';$source|Should -Match 'Choose a favorite profile'
+        $source=$script:ProductionSource;$source|Should -Match 'R\) Reapply previous trusted profile';$source|Should -Match 'Reapply .* for this game';$source|Should -Not -Match 'Restore .* for this game';$source|Should -Match 'Choose a favorite profile'
+    }
+    It "labels the non-interactive crosshair gallery and keeps numeric fallback" {
+        $script:ProductionSource | Should -Match 'Visual-only gallery'
+        $script:ProductionSource | Should -Match 'type the index number'
     }
     It "rejects unsupported remembered variants and hides unsupported favorites" {
         $root=Join-Path $TestDrive 'chooser-unsupported';$profile=Get-TpmReShadeProfile -ProfileId CleanSharp

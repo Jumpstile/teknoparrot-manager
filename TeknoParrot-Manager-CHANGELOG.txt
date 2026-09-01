@@ -32,6 +32,14 @@
 
   UX: restore, crosshair, first-run, optional-download, update, recovery, and
   support-package paths keep beginner-readable status/retry guidance visible.
+  Beginner-flow hardening: the main menu now uses a complete-or-block render contract
+  with deterministic width/height behavior, an explicit H/L/Q command allowlist, and a
+  separate Help screen. AutoSync/Register use P/R/B preview choices with preview as the
+  safe default. ReShade offers trusted source updates and an all-games profile choice;
+  crosshair galleries are explicitly visual-only and require typed indices. PostgreSQL
+  database backups now precede config/profile writes and expose affected databases plus
+  retry/details/skip/back recovery choices. Support output shows concise collection
+  counts while retaining verbose NotPresent detail in the manifest.
   Create Support Package collects allowlisted TPM/TeknoParrot/game text logs
   plus metadata-only plugin inventories into one redacted ZIP; unsafe
   executable/archive masquerades and materially binary text are rejected

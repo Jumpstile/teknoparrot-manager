@@ -1393,11 +1393,19 @@ $lines.Add('') | Out-Null
     $lines.Add('- Allowlisted text logs in safely identified registered game folders') | Out-Null
     $lines.Add('- Metadata-only inventories of allowlisted BepInEx and Unity plugin folders') | Out-Null
     $lines.Add('') | Out-Null
-    foreach ($record in $Records) {
+    $lines.Add('Collected evidence:') | Out-Null
+    foreach ($record in @($Records | Where-Object Status -ne 'NotPresent')) {
         $recordSource = (Redact-TpmSupportText -Text ([string]$record.Source)).Text
         $detail = if ($record.Detail) { ' -- ' + (Redact-TpmSupportText -Text ([string]$record.Detail)).Text } else { '' }
         $destination = if ($record.Destination) { ' -> ' + (Redact-TpmSupportText -Text ([string]$record.Destination)).Text } else { '' }
         $lines.Add(('[{0}] {1}{2}{3}' -f $record.Status, $recordSource, $destination, $detail)) | Out-Null
+    }
+    $lines.Add('') | Out-Null
+    $lines.Add('Verbose NotPresent detail:') | Out-Null
+    foreach ($record in @($Records | Where-Object Status -eq 'NotPresent')) {
+        $recordSource = (Redact-TpmSupportText -Text ([string]$record.Source)).Text
+        $detail = if ($record.Detail) { ' -- ' + (Redact-TpmSupportText -Text ([string]$record.Detail)).Text } else { '' }
+        $lines.Add(('[NotPresent] {0}{1}' -f $recordSource, $detail)) | Out-Null
     }
     $lines.Add('') | Out-Null
     $lines.Add('Intentionally excluded by design:') | Out-Null
@@ -1607,6 +1615,14 @@ function New-TpmSupportPackage {
         }
         $result.Records = @($records.ToArray())
         $result.Errors = @($errors.ToArray())
+        $result.Summary = [pscustomobject]@{
+            GamesChecked = $gameCodes.Count
+            FilesCollected = @($records | Where-Object { $_.Status -eq 'Collected' -and $_.Destination -notlike 'metadata\*' }).Count
+            PluginInventoriesCollected = @($records | Where-Object { $_.Status -eq 'Collected' -and $_.Destination -like 'metadata\*' }).Count
+            OptionalDiagnosticsNotFound = @($records | Where-Object Status -eq 'NotPresent').Count
+            CollectionFailures = @($records | Where-Object Status -eq 'CollectionFailed').Count
+            IntentionallyExcluded = @($records | Where-Object Status -in @('IntentionallyExcluded','RejectedUnsafeContent')).Count
+        }
     }
     return [pscustomobject]$result
 }
@@ -3560,7 +3576,7 @@ function Export-CrosshairPreview {
     [void]$sb.Append('.num{color:#4af;font-size:12px}.name{color:#888;font-size:10px;word-break:break-all}')
     [void]$sb.Append('</style></head><body>')
     [void]$sb.Append('<h1>TeknoParrot Crosshairs</h1>')
-    [void]$sb.Append('<p>Browse below, then enter the <span style="color:#4af">index number</span> in the script to select P1 and P2.</p>')
+    [void]$sb.Append('<p>Visual-only gallery. Clicking an image does not select it. Type the index number shown under the image in TeknoParrot Manager.</p>')
     [void]$sb.Append('<div class="grid">')
 
     $i = 0
@@ -5207,6 +5223,41 @@ function Resolve-ReShadeCustomPresetPath {
     }
 }
 
+function Invoke-ReShadeUpdateIfAvailable {
+    param([string]$SourceDll, [string]$SourceDll32, [string]$InstalledVersion)
+    if ([string]::IsNullOrWhiteSpace($InstalledVersion)) { return [pscustomobject]@{ Updated = $false; SourceDll = $SourceDll; SourceDll32 = $SourceDll32 } }
+    $latest = Get-ReShadeLatestVersion
+    if (-not $latest -or [version]$latest -le [version]$InstalledVersion) {
+        return [pscustomobject]@{ Updated = $false; SourceDll = $SourceDll; SourceDll32 = $SourceDll32 }
+    }
+    Write-Host '  ReShade update available' -ForegroundColor Yellow
+    Write-Host ("  Installed: {0}" -f $InstalledVersion)
+    Write-Host ("  Available: {0}" -f $latest)
+    $choice = (Read-HostSafe '  [Y] Update now  [N] Keep current version  Choice, default Y' -Default 'Y').Trim().ToUpper()
+    if ($choice -ne 'Y') { Write-Log ("ReShade update declined: installed={0}; available={1}" -f $InstalledVersion, $latest); return [pscustomobject]@{ Updated = $false; SourceDll = $SourceDll; SourceDll32 = $SourceDll32 } }
+    $url = Get-ReShadeSetupDownloadUrl -Version $latest
+    if (-not $url) { Write-Host '  ReShade update could not be started safely; keeping the installed version.' -ForegroundColor Yellow; return [pscustomobject]@{ Updated = $false; SourceDll = $SourceDll; SourceDll32 = $SourceDll32 } }
+    $cacheDir = Join-Path $PSScriptRoot 'ReShade'
+    $setupPath = Join-Path $cacheDir ("ReShade_Setup_{0}.exe" -f $latest)
+    try {
+        [void][IO.Directory]::CreateDirectory($cacheDir)
+        if (-not (Invoke-TpmDownload -DownloadUrl $url -DestinationPath $setupPath -Label 'ReShadeSetup' -Version $latest)) { throw 'The official download did not complete.' }
+        $signature = Test-ReShadeSetupTrustedSignature -Path $setupPath
+        if (-not $signature.Trusted) { throw 'The downloaded installer did not pass the trusted ReShade signature check.' }
+        Expand-ReShadeSelfExtractingArchive -SetupExePath $setupPath -DestDir $cacheDir
+        $newDll = Join-Path $cacheDir 'ReShade64.dll'
+        $newDll32 = Join-Path $cacheDir 'ReShade32.dll'
+        if (-not (Test-Path -LiteralPath $newDll -PathType Leaf)) { throw 'The updated 64-bit DLL was not found after extraction.' }
+        Write-Host ("  ReShade {0} downloaded and verified." -f $latest) -ForegroundColor Green
+        Write-Log ("ReShade update applied to setup source: installed={0}; available={1}" -f $InstalledVersion, $latest)
+        return [pscustomobject]@{ Updated = $true; SourceDll = $newDll; SourceDll32 = $(if (Test-Path -LiteralPath $newDll32 -PathType Leaf) { $newDll32 } else { $SourceDll32 }) }
+    } catch {
+        Write-Host ("  ReShade update failed safely: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
+        Write-Log ("ReShade update failed: {0}" -f $_.Exception.Message)
+        return [pscustomobject]@{ Updated = $false; SourceDll = $SourceDll; SourceDll32 = $SourceDll32 }
+    }
+}
+
 function Invoke-ReShadeSetup {
     param(
         [string]$UserProfilesDir,
@@ -5249,29 +5300,21 @@ function Invoke-ReShadeSetup {
         try { $sha256 = (Get-FileHash -LiteralPath $dllCheck.Path -Algorithm SHA256).Hash } catch {}
         Write-Log ("ReShade ({0}): signature={1} signer='{2}' sha256={3}" -f $dllCheck.Label, $sigResult.Status, $sigResult.Signer, $sha256)
         if ($sigResult.Status -eq 'Valid') {
-            Write-Host ("  ReShade ($($dllCheck.Label)) signature : Valid -- $($sigResult.Signer)") -ForegroundColor DarkGray
+            Write-Host ("  ReShade ($($dllCheck.Label)) source verified.") -ForegroundColor DarkGray
         } else {
-            $statusText = Get-SignatureStatusText -Status $sigResult.Status
-            Write-Host ("  ReShade ($($dllCheck.Label)) signature : not validly signed -- $statusText. (raw status: $($sigResult.Status))") -ForegroundColor Yellow
-            Write-Host "  Continuing anyway since you supplied this file yourself -- just make sure" -ForegroundColor Yellow
-            Write-Host "  it actually came from https://reshade.me and wasn't substituted." -ForegroundColor Yellow
+            Write-Host ("  ReShade ($($dllCheck.Label)) source needs review before use.") -ForegroundColor Yellow
         }
+    }
+    $updateResult = Invoke-ReShadeUpdateIfAvailable -SourceDll $SourceDll -SourceDll32 $SourceDll32 -InstalledVersion $bVer
+    if ($updateResult.Updated) {
+        $SourceDll = $updateResult.SourceDll
+        $SourceDll32 = $updateResult.SourceDll32
+        try {
+            $vi = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($SourceDll)
+            $bVer = "$($vi.FileMajorPart).$($vi.FileMinorPart).$($vi.FileBuildPart)"
+        } catch {}
     }
 
-    if ($bVer) {
-        Write-Host "  Checking reshade.me for updates..." -ForegroundColor DarkGray
-        $latest = Get-ReShadeLatestVersion
-        if ($latest) {
-            if ([version]$latest -gt [version]$bVer) {
-                Write-Host ("  Newer version available: {0}  (TPM can acquire it automatically when setup is rerun.)" -f $latest) -ForegroundColor Yellow
-                Write-Log ("ReShade update available: installed={0}; latest={1}; automatic acquisition is available from setup." -f $bVer, $latest)
-            } else {
-                Write-Host ("  Up to date ({0})." -f $bVer) -ForegroundColor Green
-            }
-        } else {
-            Write-Host "  (Could not reach reshade.me -- update check skipped.)" -ForegroundColor DarkGray
-        }
-    }
 
     $gallery = @(Get-TpmReShadeProfileGallery)
     Write-Host "  Preview gallery (illustrative, local synthetic scenes)" -ForegroundColor DarkCyan
@@ -5382,13 +5425,32 @@ function Invoke-ReShadeSetup {
         Write-Log "ReShade setup: cancelled -- no games selected."
         return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'NO_GAMES_SELECTED' }
     }
+    $bulkApply = $false
+    $allRegisteredGames = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | Where-Object { $_.Directory.Name -ne 'FullBackup' })
+    if ($allRegisteredGames.Count -gt 0 -and $selectedGames.Count -eq $allRegisteredGames.Count) {
+        $bulkChoice = ''
+        do {
+            Write-Host ("  Apply {0} to all {1} selected games?" -f $selectedProfile.FriendlyName, $selectedGames.Count) -ForegroundColor Cyan
+            Write-Host '  [Y] Yes, apply to all'
+            Write-Host '  [S] Select games one by one'
+            Write-Host '  [B] Back'
+            Write-Host '  [D] Details'
+            $bulkChoice = (Read-HostSafe '  Choice, default Y' -Default 'Y').Trim().ToUpper()
+            if ($bulkChoice -eq 'D') { Write-Host ("  Profile: {0} -- {1}" -f $selectedProfile.FriendlyName, $selectedProfile.Description) -ForegroundColor DarkGray }
+            elseif ($bulkChoice -notin @('Y', 'S', 'B')) { Write-Host '  Invalid choice. Choose Y, S, B, or D.' -ForegroundColor Yellow }
+        } while ($bulkChoice -notin @('Y', 'S', 'B'))
+        if ($bulkChoice -eq 'B') { return }
+        $bulkApply = ($bulkChoice -eq 'Y')
+    }
+
     $rememberedSelections = @{}
     $restoreSelections = @{}
+    if (-not $bulkApply) {
     foreach ($pf in $selectedGames) {
         $options = Get-TpmReShadeChooserOptions -GameId $pf.BaseName
         if ($options.Restore.Found -and $options.Restore.Valid) {
-            Write-Host ("  R) Restore previous trusted profile for {0}: {1}" -f $pf.BaseName, $options.Restore.Profile.FriendlyName) -ForegroundColor DarkCyan
-            $restoreAnswer = (Read-HostSafe ("  Restore {0} for this game? (Y/N, default N)" -f $options.Restore.Profile.FriendlyName)).Trim()
+            Write-Host ("  R) Reapply previous trusted profile for {0}: {1}" -f $pf.BaseName, $options.Restore.Profile.FriendlyName) -ForegroundColor DarkCyan
+            $restoreAnswer = (Read-HostSafe ("  Reapply {0} for this game? (Y/N, default N)" -f $options.Restore.Profile.FriendlyName)).Trim()
             if ($restoreAnswer -match '^(Y|y)$') { $restoreSelections[$pf.BaseName] = $options.Restore }
         } elseif ($options.Restore.Found) {
             Write-Host ("  Previous profile for {0} is unavailable ({1}); choose a fresh profile." -f $pf.BaseName, $options.Restore.Reason) -ForegroundColor Yellow
@@ -5402,6 +5464,7 @@ function Invoke-ReShadeSetup {
         } elseif ($options.Remembered.Found) {
             Write-Host ("  Saved profile for {0} needs reselection." -f $pf.BaseName) -ForegroundColor Yellow
         }
+    }
     }
 
     # Deploy
@@ -5431,10 +5494,10 @@ function Invoke-ReShadeSetup {
             $ownershipPath = Get-TpmReShadeProfileOwnershipPath -GameId $pf.BaseName
             if ($restoreSelections.ContainsKey($pf.BaseName)) {
                 $restoreResult = Restore-TpmReShadeProfile -HistoryEntry $restoreSelections[$pf.BaseName].HistoryEntry -CacheRoot $reShadeCacheRoot -OwnershipRoot $ownershipPath -GamePath $gamePath -Doc $doc -SourceDll $SourceDll -SourceDll32 $SourceDll32 -GameId $pf.BaseName -StateRoot ''
-                if (-not $restoreResult.Succeeded) { throw ("restore rejected: {0}" -f $restoreResult.Reason) }
+                if (-not $restoreResult.Succeeded) { throw ("reapply rejected: {0}" -f $restoreResult.Reason) }
                 $restoreNote = if ($restoreResult.PresetApplied) { '  (preset: generated)' } else { '' }
-                Write-Host ("    {0}  [{1}]{2}  restored previous trusted profile" -f $pf.BaseName, $restoreResult.DllName, $restoreNote) -ForegroundColor Green
-                Write-Log "ReShade: restored $($pf.BaseName) -> $($restoreResult.TargetDir) [$($restoreResult.DllName)]$restoreNote"
+                Write-Host ("    {0}  [{1}]{2}  reapplied previous trusted profile" -f $pf.BaseName, $restoreResult.DllName, $restoreNote) -ForegroundColor Green
+                Write-Log "ReShade: reapplied $($pf.BaseName) -> $($restoreResult.TargetDir) [$($restoreResult.DllName)]$restoreNote"
                 $deployed++
                 continue
             }
@@ -7005,6 +7068,12 @@ function Invoke-CrosshairSetup {
     $p2Name = [System.IO.Path]::GetFileNameWithoutExtension($valid[$p2Idx])
     Write-Host ""
     Write-Host "  P1: $p1Name    P2: $p2Name" -ForegroundColor Green
+    $crosshairConfirm = (Read-HostSafe "  Apply these crosshairs? (Y/N, default Y)" -Default 'Y').Trim().ToUpper()
+    if ($crosshairConfirm -ne 'Y') {
+        Write-Host "  Crosshair setup cancelled. No files were changed." -ForegroundColor Yellow
+        Write-Log "Crosshairs: cancelled before deployment."
+        return
+    }
     Write-Log "Crosshairs: P1=$p1Name  P2=$p2Name"
 
     try {
@@ -14558,51 +14627,90 @@ function Set-XmlChildText {
 # backup.
 function Backup-PostgresDatabases {
     param([string]$UserProfilesDir, [string]$SuperPasswordPlain)
-    $result = [ordered]@{ Path = $null; Succeeded = $true; ExistingDatabaseCount = 0; FailedDatabaseCount = 0 }
+    $failedDatabases = New-Object System.Collections.Generic.List[string]
+    $failureDetails = New-Object System.Collections.Generic.List[string]
+    $result = [ordered]@{
+        Path = $null
+        Succeeded = $true
+        ExistingDatabaseCount = 0
+        FailedDatabaseCount = 0
+        FailedDatabases = @()
+        FailureDetails = @()
+    }
     if (-not (Test-PostgresInstalled)) { return [pscustomobject]$result }
     $names = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::OrdinalIgnoreCase)
-    $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction Stop | Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object Name)
-    foreach ($pf in $profiles) {
-        try {
-            $doc = Read-Xml $pf.FullName
-            if (-not $doc.GameProfile -or -not (Test-GameNeedsPostgres $doc)) { continue }
-            $dbName = Get-PostgresFieldValue $doc 'DbName'
-            if ([string]::IsNullOrWhiteSpace($dbName) -or -not (Test-SafePostgresDbName $dbName)) { $result.FailedDatabaseCount++; continue }
-            $state = Get-PostgresDatabaseState -DbName $dbName -SuperPasswordPlain $SuperPasswordPlain
-            if ($state.Exists) { [void]$names.Add($dbName) }
-        } catch {
-            $result.FailedDatabaseCount++
-            Write-Log "Postgres backup: database state could not be verified for $($pf.BaseName); backup is incomplete."
+    try {
+        $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction Stop | Where-Object { $_.Directory.Name -ne 'FullBackup' } | Sort-Object Name)
+        foreach ($pf in $profiles) {
+            $dbName = ''
+            try {
+                $doc = Read-Xml $pf.FullName
+                if (-not $doc.GameProfile -or -not (Test-GameNeedsPostgres $doc)) { continue }
+                $dbName = Get-PostgresFieldValue $doc 'DbName'
+                if ([string]::IsNullOrWhiteSpace($dbName) -or -not (Test-SafePostgresDbName $dbName)) {
+                    [void]$failedDatabases.Add($pf.BaseName)
+                    [void]$failureDetails.Add(('{0}: missing or unsafe database name.' -f $pf.BaseName))
+                    continue
+                }
+                $state = Get-PostgresDatabaseState -DbName $dbName -SuperPasswordPlain $SuperPasswordPlain
+                if ($state.Exists) { [void]$names.Add($dbName) }
+            } catch {
+                [void]$failedDatabases.Add(('{0} / {1}' -f $pf.BaseName, $dbName))
+                [void]$failureDetails.Add(('{0} / {1}: {2}' -f $pf.BaseName, $dbName, $_.Exception.Message))
+            }
         }
+    } catch {
+        [void]$failedDatabases.Add('UserProfiles enumeration')
+        [void]$failureDetails.Add(('Could not enumerate game profiles: {0}' -f $_.Exception.Message))
     }
     if ($names.Count -eq 0) {
-        if ($result.FailedDatabaseCount -gt 0) { $result.Succeeded = $false }
+        $result.Succeeded = ($failedDatabases.Count -eq 0)
+        $result.FailedDatabaseCount = $failedDatabases.Count
+        $result.FailedDatabases = @($failedDatabases.ToArray())
+        $result.FailureDetails = @($failureDetails.ToArray())
         return [pscustomobject]$result
     }
+    if ($failedDatabases.Count -gt 0) { $result.Succeeded = $false }
     $result.ExistingDatabaseCount = $names.Count
     $result.Path = Join-Path (Join-Path $PSScriptRoot 'PostgresBackups') ((Get-Date).ToString('yyyy-MM-dd_HH-mm-ss_fff'))
     [void][System.IO.Directory]::CreateDirectory($result.Path)
     $pgDumpExe = Join-Path $script:PostgresBinDir 'pg_dump.exe'
-    if (-not (Test-Path -LiteralPath $pgDumpExe -PathType Leaf)) { $result.Succeeded = $false; $result.FailedDatabaseCount += $names.Count; return [pscustomobject]$result }
-    $pgpassFile = $null; $previousPgPassFile = $null
-    try {
-        $pgpassFile = New-PostgresPgPassFile -Password $SuperPasswordPlain
-        $previousPgPassFile = Set-PostgresPgPassFileEnvironment -Path $pgpassFile
-        foreach ($dbName in @($names | Sort-Object)) {
-            $destFile = Join-Path $result.Path ($dbName + '.backup')
-            & $pgDumpExe -U postgres -h 127.0.0.1 -p 5432 -F c -f $destFile $dbName 2>$null
-            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $destFile -PathType Leaf) -or (Get-Item -LiteralPath $destFile).Length -eq 0) {
-                $result.FailedDatabaseCount++
-                $result.Succeeded = $false
-            } else { Write-Log "Postgres backup: verified database backup for $dbName at $($result.Path)." }
-        }
-    } catch {
+    if (-not (Test-Path -LiteralPath $pgDumpExe -PathType Leaf)) {
         $result.Succeeded = $false
-        $result.FailedDatabaseCount++
-    } finally {
-        if ($previousPgPassFile -ne $null -or $pgpassFile) { Restore-PostgresPgPassFileEnvironment -PreviousValue $previousPgPassFile }
-        if ($pgpassFile) { Remove-PostgresPgPassFile -Path $pgpassFile -ThrowOnFailure }
+        foreach ($dbName in @($names | Sort-Object)) {
+            [void]$failedDatabases.Add($dbName)
+            [void]$failureDetails.Add(('{0}: pg_dump.exe was not found at {1}.' -f $dbName, $pgDumpExe))
+        }
+    } else {
+        $pgpassFile = $null
+        $previousPgPassFile = $null
+        try {
+            $pgpassFile = New-PostgresPgPassFile -Password $SuperPasswordPlain
+            $previousPgPassFile = Set-PostgresPgPassFileEnvironment -Path $pgpassFile
+            foreach ($dbName in @($names | Sort-Object)) {
+                $destFile = Join-Path $result.Path ($dbName + '.backup')
+                $dumpOutput = (& $pgDumpExe -U postgres -h 127.0.0.1 -p 5432 -F c -f $destFile $dbName 2>&1 | Out-String).Trim()
+                $exitCode = $LASTEXITCODE
+                if ($exitCode -ne 0 -or -not (Test-Path -LiteralPath $destFile -PathType Leaf) -or (Get-Item -LiteralPath $destFile).Length -eq 0) {
+                    $result.Succeeded = $false
+                    [void]$failedDatabases.Add($dbName)
+                    [void]$failureDetails.Add(('{0}: pg_dump exit code {1}. {2}' -f $dbName, $exitCode, $dumpOutput))
+                } else {
+                    Write-Log "Postgres backup: verified database backup for $dbName at $($result.Path)."
+                }
+            }
+        } catch {
+            $result.Succeeded = $false
+            [void]$failureDetails.Add(('Backup execution failed: {0}' -f $_.Exception.Message))
+        } finally {
+            if ($previousPgPassFile -ne $null -or $pgpassFile) { Restore-PostgresPgPassFileEnvironment -PreviousValue $previousPgPassFile }
+            if ($pgpassFile) { Remove-PostgresPgPassFile -Path $pgpassFile -ThrowOnFailure }
+        }
     }
+    $result.FailedDatabaseCount = $failedDatabases.Count
+    $result.FailedDatabases = @($failedDatabases.ToArray())
+    $result.FailureDetails = @($failureDetails.ToArray())
+    if (-not $result.Succeeded) { Write-Log ("Postgres backup incomplete. FailedDatabases={0}; FailureDetails={1}" -f ($result.FailedDatabases -join '|'), ($result.FailureDetails -join '|')) }
     return [pscustomobject]$result
 }
 
@@ -17610,79 +17718,15 @@ function Get-MainMenuBannerRows {
 function Get-MainMenuFooterRows {
     param([object]$Geometry)
     $rows = New-Object System.Collections.Generic.List[object]
-    $footer = 'Enter number and press Enter | H = Help | U = Unattended Mode | L = View Log | Q = Quit'
-    if ($footer.Length -gt $Geometry.FooterWidth) {
-        $footer = 'Enter number | H=Help | U=Unattended | L=Log | Q=Quit'
-    }
-    if ($footer.Length -gt $Geometry.FooterWidth) {
-        $footer = 'Enter number | H=Help | Q=Quit'
-    }
-    if ($Geometry.FrameEnabled) {
-        $rule = '+' + ('-' * ($Geometry.FooterWidth - 2)) + '+'
-        $innerWidth = $Geometry.FooterWidth - 4
-        [void]$rows.Add((New-ConsoleRenderRow -Text $rule -Color 'DarkCyan'))
-        if ($footer -eq 'Enter number and press Enter | H = Help | U = Unattended Mode | L = View Log | Q = Quit') {
-            $pad = [Math]::Max(0, [Math]::Floor(($innerWidth - $footer.Length) / 2))
-            $rightPad = [Math]::Max(0, $innerWidth - $pad - $footer.Length)
-            [void]$rows.Add((New-ConsoleRenderSegmentRow -Segments @(
-                (New-ConsoleRenderSegment -Text '| ' -Color 'DarkCyan')
-                (New-ConsoleRenderSegment -Text (' ' * $pad) -Color 'White')
-                (New-ConsoleRenderSegment -Text 'Enter number and press ' -Color 'White')
-                (New-ConsoleRenderSegment -Text 'Enter' -Color 'Green')
-                (New-ConsoleRenderSegment -Text ' | ' -Color 'White')
-                (New-ConsoleRenderSegment -Text 'H' -Color 'Cyan')
-                (New-ConsoleRenderSegment -Text ' = Help | ' -Color 'White')
-                (New-ConsoleRenderSegment -Text 'U' -Color 'Magenta')
-                (New-ConsoleRenderSegment -Text ' = Unattended Mode | ' -Color 'White')
-                (New-ConsoleRenderSegment -Text 'L' -Color 'Yellow')
-                (New-ConsoleRenderSegment -Text ' = View Log | ' -Color 'White')
-                (New-ConsoleRenderSegment -Text 'Q' -Color 'Red')
-                (New-ConsoleRenderSegment -Text ' = Quit' -Color 'White')
-                (New-ConsoleRenderSegment -Text (' ' * $rightPad) -Color 'White')
-                (New-ConsoleRenderSegment -Text ' |' -Color 'DarkCyan')
-            )))
-            [void]$rows.Add((New-ConsoleRenderRow -Text $rule -Color 'DarkCyan'))
-            return @(Get-PaddedMainMenuRows -Rows $rows.ToArray() -Padding $Geometry.LeftPadding)
-        }
-    } else {
-        $rule = '-' * $Geometry.FooterWidth
-        [void]$rows.Add((New-ConsoleRenderRow -Text $rule -Color 'DarkCyan'))
-    }
-    if ($footer -eq 'Enter number and press Enter | H = Help | U = Unattended Mode | L = View Log | Q = Quit') {
-        $pad = [Math]::Max(0, [Math]::Floor(($Geometry.FooterWidth - $footer.Length) / 2))
-        [void]$rows.Add((New-ConsoleRenderSegmentRow -Segments @(
-            (New-ConsoleRenderSegment -Text (' ' * $pad) -Color 'White')
-            (New-ConsoleRenderSegment -Text 'Enter number and press ' -Color 'White')
-            (New-ConsoleRenderSegment -Text 'Enter' -Color 'Green')
-            (New-ConsoleRenderSegment -Text ' | ' -Color 'White')
-            (New-ConsoleRenderSegment -Text 'H' -Color 'Cyan')
-            (New-ConsoleRenderSegment -Text ' = Help | ' -Color 'White')
-            (New-ConsoleRenderSegment -Text 'U' -Color 'Magenta')
-            (New-ConsoleRenderSegment -Text ' = Unattended Mode | ' -Color 'White')
-            (New-ConsoleRenderSegment -Text 'L' -Color 'Yellow')
-            (New-ConsoleRenderSegment -Text ' = View Log | ' -Color 'White')
-            (New-ConsoleRenderSegment -Text 'Q' -Color 'Red')
-            (New-ConsoleRenderSegment -Text ' = Quit' -Color 'White')
-        )))
-        return @(Get-PaddedMainMenuRows -Rows $rows.ToArray() -Padding $Geometry.LeftPadding)
-    }
+    $footer = 'Enter number and press Enter | H = Help | L = View Log | Q = Quit'
+    if ($footer.Length -gt $Geometry.FooterWidth) { $footer = 'Enter number | H=Help | L=Log | Q=Quit' }
+    if ($footer.Length -gt $Geometry.FooterWidth) { $footer = 'Enter number | H=Help | Q=Quit' }
+    if ($Geometry.FrameEnabled) { [void]$rows.Add((New-ConsoleRenderRow -Text ('+' + ('-' * ($Geometry.FooterWidth - 2)) + '+') -Color 'DarkCyan')) }
     foreach ($line in (Split-TextForMenuWidth -Text $footer -Width $Geometry.FooterWidth)) {
         $pad = [Math]::Max(0, [Math]::Floor(($Geometry.FooterWidth - $line.Length) / 2))
-        if ($Geometry.FrameEnabled) {
-            $innerWidth = $Geometry.FooterWidth - 4
-            $rightPad = [Math]::Max(0, $innerWidth - $pad - $line.Length)
-            [void]$rows.Add((New-ConsoleRenderSegmentRow -Segments @(
-                (New-ConsoleRenderSegment -Text '| ' -Color 'DarkCyan')
-                (New-ConsoleRenderSegment -Text (' ' * $pad) -Color 'White')
-                (New-ConsoleRenderSegment -Text $line -Color 'White')
-                (New-ConsoleRenderSegment -Text (' ' * $rightPad) -Color 'White')
-                (New-ConsoleRenderSegment -Text ' |' -Color 'DarkCyan')
-            )))
-            [void]$rows.Add((New-ConsoleRenderRow -Text $rule -Color 'DarkCyan'))
-        } else {
-            [void]$rows.Add((New-ConsoleRenderRow -Text ((' ' * $pad) + $line) -Color 'White'))
-        }
+        [void]$rows.Add((New-ConsoleRenderRow -Text ((' ' * $pad) + $line) -Color 'White'))
     }
+    if ($Geometry.FrameEnabled) { [void]$rows.Add((New-ConsoleRenderRow -Text ('+' + ('-' * ($Geometry.FooterWidth - 2)) + '+') -Color 'DarkCyan')) }
     return @(Get-PaddedMainMenuRows -Rows $rows.ToArray() -Padding $Geometry.LeftPadding)
 }
 
@@ -17954,6 +17998,51 @@ function Get-MainMenuEmergencyCompactRows {
     return @($rows.ToArray())
 }
 
+function Get-MainMenuVisibleOptionNumbers {
+    param([object[]]$Rows)
+    $numbers = New-Object System.Collections.Generic.List[int]
+    foreach ($row in @($Rows)) {
+        foreach ($match in [regex]::Matches([string]$row.Text, '(?<!\d)(\d{1,2})\)(?=\s|$)')) {
+            $number = [int]$match.Groups[1].Value
+            if (-not $numbers.Contains($number)) { [void]$numbers.Add($number) }
+        }
+    }
+    return @($numbers | Sort-Object)
+}
+
+function New-MainMenuScreenResult {
+    param([Parameter(Mandatory)]$Geometry, [Parameter(Mandatory)][object[]]$Rows, [int]$ViewportHeight = 0)
+    if ($ViewportHeight -le 0) { $ViewportHeight = $Geometry.ViewportHeight }
+    $expected = @((Get-MainMenuItems | ForEach-Object { [int]$_.Number }))
+    $visible = @(Get-MainMenuVisibleOptionNumbers -Rows $Rows)
+    $missing = @($expected | Where-Object { $visible -notcontains $_ })
+    $allowed = ($ViewportHeight -ge 10 -and $expected.Count -gt 0 -and $missing.Count -eq 0)
+    if (-not $allowed) {
+        $fallbackRows = @()
+        if ($ViewportHeight -ge 20) {
+            $fallbackRows = @((Get-MainMenuBannerRows -Geometry $Geometry); (Get-MainMenuFlowPackedItemRows -Width ([Math]::Max(20, $Geometry.MenuWidth - $Geometry.LeftPadding)) -Geometry $Geometry); (Get-MainMenuFooterRows -Geometry $Geometry))
+        } else {
+            $fallbackRows = @(Get-MainMenuEmergencyCompactRows -Geometry $Geometry -MaxRows $ViewportHeight)
+        }
+        $fallbackVisible = @(Get-MainMenuVisibleOptionNumbers -Rows $fallbackRows)
+        if ($ViewportHeight -ge 10 -and @($expected | Where-Object { $fallbackVisible -notcontains $_ }).Count -eq 0 -and $fallbackRows.Count -le [Math]::Max(5, $ViewportHeight - 2)) {
+            $Rows = $fallbackRows
+            $visible = $fallbackVisible
+            $missing = @()
+            $allowed = $true
+        } else {
+            $Rows = @((Get-MainMenuMinimalBannerRows -Geometry $Geometry); (New-ConsoleRenderRow -Text '  The menu options do not fit in this window.' -Color 'Yellow'); (New-ConsoleRenderRow -Text '  Resize the PowerShell window and press Enter to redraw.'))
+        }
+    }
+    return [pscustomobject]@{ Geometry = $Geometry; Rows = @($Rows); VisibleOptionNumbers = $visible; MissingOptionNumbers = $missing; AllOptionsVisible = $allowed; PromptAllowed = $allowed }
+}
+
+function Get-MainMenuPromptText {
+    param([Parameter(Mandatory)]$Screen, [Parameter(Mandatory)][int]$MaxNumber)
+    if (-not $Screen.PromptAllowed) { return $null }
+    return 'Enter 1-{0}: ' -f $MaxNumber
+}
+
 function Render-MainMenuScreen {
     param(
         [ValidateSet('Ultra', 'Professional', 'Standard', 'Compact')][string]$Tier,
@@ -17995,7 +18084,7 @@ function Render-MainMenuScreen {
         # overflowed. Get-MainMenuEmergencyCompactRows reserves the banner
         # and footer unconditionally and only trims item rows if needed.
         $rows = Get-MainMenuEmergencyCompactRows -Geometry $geometry -MaxRows $maxTotalRows
-        return [pscustomobject]@{ Geometry = $geometry; Rows = $rows }
+        return New-MainMenuScreenResult -Geometry $geometry -Rows $rows -ViewportHeight $Height
     }
 
     $bodyRows = Limit-MainMenuBodyRowsToBudget -BodyRows $bodyRows -BodyBudget $bodyBudget
@@ -18004,7 +18093,7 @@ function Render-MainMenuScreen {
     foreach ($row in $bannerRows) { [void]$rows.Add($row) }
     foreach ($row in $bodyRows) { [void]$rows.Add($row) }
     foreach ($row in $footerRows) { [void]$rows.Add($row) }
-    return [pscustomobject]@{ Geometry = $geometry; Rows = (Limit-MainMenuRowsToViewport -Rows $rows.ToArray() -ViewportHeight $Height) }
+    return New-MainMenuScreenResult -Geometry $geometry -Rows (Limit-MainMenuRowsToViewport -Rows $rows.ToArray() -ViewportHeight $Height) -ViewportHeight $Height
 }
 
 function Write-ConsoleRenderRows {
@@ -18119,12 +18208,48 @@ function Show-MainMenu {
         [ValidateSet('Ultra', 'Professional', 'Standard', 'Compact')][string]$Tier,
         [int]$Width = (Get-ConsoleContentWidth),
         [int]$Height = (Get-ConsoleContentHeight),
-        [ValidateSet('Auto', 'UltraTwoColumn', 'UltraCentered')][string]$UltraLayoutMode = 'Auto'
+        [ValidateSet('Auto', 'UltraTwoColumn', 'UltraCentered')][string]$UltraLayoutMode = 'Auto',
+        [switch]$ReturnScreen
     )
-
     $screen = Render-MainMenuScreen -Tier $Tier -Width $Width -Height $Height -UltraLayoutMode $UltraLayoutMode
     Clear-ConsoleForFreshRender
     Write-ConsoleRenderRows -Rows $screen.Rows
+    if ($ReturnScreen) { return $screen }
+}
+
+function Resolve-MainMenuCommand {
+    param([AllowEmptyString()][string]$InputText, [Parameter(Mandatory)][int]$MaxNumber)
+    $choice = if ($null -eq $InputText) { '' } else { $InputText.Trim() }
+    if ($choice -match '^\d+$') {
+        $number = 0
+        if ([int]::TryParse($choice, [ref]$number) -and $choice -eq [string]$number -and $number -ge 1 -and $number -le $MaxNumber) { return $choice }
+        return $null
+    }
+    switch ($choice.ToUpperInvariant()) {
+        'H' { return 'H' }
+        'L' { return 'L' }
+        'Q' { return 'Q' }
+        default { return $null }
+    }
+}
+
+
+function Show-MainMenuHelp {
+    Clear-ConsoleForFreshRender
+    Write-Host 'TeknoParrot Manager Help' -ForegroundColor Cyan
+    Write-Host '========================' -ForegroundColor Cyan
+    Write-Host '  1 AutoSync: extract and register games.'
+    Write-Host '  2 Register only: register already extracted games.'
+    Write-Host '  3-10 Setup and maintenance actions.'
+    Write-Host '  11 Restore from a trusted backup.'
+    Write-Host '  12 PostgreSQL setup and repair.'
+    Write-Host '  13 Check for updates.  14 Create a support package.'
+    Write-Host ''
+    Write-Host '  Safe/read-only: Help, View Log, Health Check, and previews.'
+    Write-Host '  File-changing actions: AutoSync, Register, setup, restore, and updates.'
+    Write-Host '  Enter a number only when it is shown in the main menu.'
+    Write-Host '  Press Enter to return to the main menu.'
+    [void](Read-HostSafe '  Press Enter to return')
 }
 
 function Read-MainMenuChoiceResponsive {
@@ -18160,6 +18285,7 @@ function Read-MainMenuChoiceResponsive {
     }
 
     $value = ''
+
     Write-Host $Prompt -NoNewline
     while ($true) {
         $currentWidth = Get-ConsoleContentWidth
@@ -18247,25 +18373,37 @@ $mode = $null
     $consoleHeight = Get-ConsoleContentHeight
     $menuTier = Get-ConsoleLayoutTier -Width $consoleWidth -Height $consoleHeight -RequiredFullLines $fullTierLineCount
     $menuLayoutMode = if ($menuExpanded -and $menuTier -eq 'Ultra') { 'UltraCentered' } else { 'Auto' }
-    [void](Show-MainMenu -Tier $menuTier -Width $consoleWidth -Height $consoleHeight -UltraLayoutMode $menuLayoutMode)
+    $screen = Show-MainMenu -Tier $menuTier -Width $consoleWidth -Height $consoleHeight -UltraLayoutMode $menuLayoutMode -ReturnScreen
+    if (-not $screen.PromptAllowed) {
+        [void](Read-HostSafe '  Resize the window, then press Enter to redraw')
+        continue
+    }
     if ($Unattended) {
         Write-Host "  [Unattended] Mode must be set before starting." -ForegroundColor Red
         Write-Log "ERROR: Unattended mode -- reached menu loop."; exit 1
     }
     $choiceResult = Read-MainMenuChoiceResponsive -Prompt ("Enter 1-{0}: " -f $menuMaxNumber) -InitialWidth $consoleWidth -InitialHeight $consoleHeight
     if ($choiceResult.Redraw) { continue }
-    $modeChoice = $choiceResult.Value.Trim()
-    if ($modeChoice -in @('?', 'H', 'h')) {
-        $menuExpanded = -not $menuExpanded
-        $helpWidth = Get-ConsoleContentWidth
-        $helpHeight = Get-ConsoleContentHeight
-        $helpTier = Get-ConsoleLayoutTier -Width $helpWidth -Height $helpHeight -RequiredFullLines $fullTierLineCount
-        if ($helpTier -eq 'Compact') { $helpTier = 'Professional' }
-        $helpLayoutMode = if ($menuExpanded -and $helpTier -eq 'Ultra') { 'UltraCentered' } else { 'Auto' }
-        [void](Show-MainMenu -Tier $helpTier -Width $helpWidth -Height $helpHeight -UltraLayoutMode $helpLayoutMode)
+    $modeChoice = Resolve-MainMenuCommand -InputText $choiceResult.Value -MaxNumber $menuMaxNumber
+    if ($null -eq $modeChoice) {
+        Write-Host "  Invalid choice. Enter 1-$menuMaxNumber, H, L, or Q." -ForegroundColor Yellow
         continue
     }
-    if ($modeChoice -in @('Q', 'q')) { break }
+    if ($modeChoice -eq 'H') {
+        Show-MainMenuHelp
+        continue
+    }
+    if ($modeChoice -eq 'L') {
+        $logResult = Open-TpmLogsAndReports -ScriptRoot $PSScriptRoot
+        if ($logResult.Succeeded) {
+            Write-Host ("  Log folder opened: {0}" -f $logResult.Path) -ForegroundColor Green
+        } else {
+            Write-Host ("  Could not open the log folder: {0}" -f $logResult.Error) -ForegroundColor Yellow
+        }
+        [void](Read-HostSafe '  Press Enter to return to the main menu')
+        continue
+    }
+    if ($modeChoice -eq 'Q') { break }
     switch ($modeChoice) {
         "1"     { $mode = "AutoSync"       }
         "2"     { $mode = "RegisterOnly"   }
@@ -18282,7 +18420,6 @@ $mode = $null
         "13"    { $mode = "CheckForUpdates" }
         "14"    { $mode = "Support" }
         "15"    { break }
-        default { Write-Host "  Invalid choice. Enter 1-$menuMaxNumber." -ForegroundColor Yellow; continue }
     }
     if ($modeChoice -eq "15") { break }
     }
@@ -18604,34 +18741,53 @@ $mode = $null
                 [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-backup-unverified' -Message 'Verified PostgreSQL recovery evidence was unavailable.' -DataSafety 'No PostgreSQL or profile changes were made.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
                 continue
             }
-            [void](Start-TpmWorkflowStep -Context $postgresStatus -StepId 'save' -Activity 'Saving the repaired settings')
-            if (-not $isPostgresRecoveryResume) {
-                $postgresSuperPasswordEncrypted = ConvertTo-PostgresEncryptedPassword $superPwPlain
-            }
-            if (-not (Save-Config)) {
-                Write-Host "  Recovery BLOCKED because the protected manager configuration could not be saved." -ForegroundColor Red
-                Write-Log 'Postgres setup: blocked because encrypted password configuration save failed.'
-                if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not save the protected PostgreSQL password configuration.' }
-                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-config-save' -Message 'Protected PostgreSQL settings could not be saved.' -DataSafety 'PostgreSQL and profile setup did not complete.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
-                continue
-            }
-            [void](Complete-TpmWorkflowStep -Context $postgresStatus -Outcome Succeeded -Summary 'Repaired settings saved' -NextStep 'Back up existing databases')
             [void](Start-TpmWorkflowStep -Context $postgresStatus -StepId 'database' -Activity 'Backing up existing databases')
             Write-Host "  Backing up existing Postgres databases..." -ForegroundColor Cyan
             $pgBackup = Backup-PostgresDatabases -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain
-            if (-not $pgBackup.Succeeded) {
-                Write-Host "  Recovery BLOCKED because the database backup was incomplete." -ForegroundColor Red
-                if ($pgBackup.Path) { Write-Host ("  Database backup evidence: {0}" -f $pgBackup.Path) -ForegroundColor Yellow }
-                Write-Log 'Postgres setup: blocked before profile population because database backup was incomplete.'
-                if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not finish the database backup before changing game profiles.' }
-                [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-database-backup' -Message 'The PostgreSQL database backup was incomplete.' -DataSafety 'No profile population was reported as complete.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
+            $leavePostgres = $false
+            while (-not $pgBackup.Succeeded) {
+                Write-Host "  PostgreSQL setup stopped because the backup did not complete." -ForegroundColor Red
+                Write-Host "  Nothing was changed." -ForegroundColor Green
+                if (@($pgBackup.FailedDatabases).Count -gt 0) { Write-Host ("  Affected games/databases: {0}" -f (@($pgBackup.FailedDatabases) -join ', ')) -ForegroundColor Yellow }
+                Write-Host "  [R] Retry backup  [S] Skip PostgreSQL setup  [D] Show details  [B] Back to main menu"
+                $backupChoice = (Read-HostSafe "  Choice, default R" -Default 'R').Trim().ToUpper()
+                if ($backupChoice -eq 'D') {
+                    Write-Host "  PostgreSQL backup details" -ForegroundColor Cyan
+                    if ($pgBackup.Path) { Write-Host ("    Backup evidence: {0}" -f $pgBackup.Path) -ForegroundColor DarkGray }
+                    foreach ($failedDatabase in @($pgBackup.FailedDatabases)) { Write-Host ("    Failed game/database: {0}" -f $failedDatabase) -ForegroundColor DarkGray }
+                    foreach ($failureDetail in @($pgBackup.FailureDetails)) { Write-Host ("    Cause: {0}" -f $failureDetail) -ForegroundColor DarkGray }
+                    Write-Log ("Postgres backup details shown. FailedDatabases={0}; FailureDetails={1}" -f (@($pgBackup.FailedDatabases) -join '|'), (@($pgBackup.FailureDetails) -join '|'))
+                    continue
+                }
+                if ($backupChoice -eq 'R') {
+                    $pgBackup = Backup-PostgresDatabases -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain
+                    continue
+                }
+                if ($backupChoice -eq 'S' -or $backupChoice -eq 'B') { $leavePostgres = $true; break }
+                Write-Host "  Invalid choice. Choose R, S, D, or B." -ForegroundColor Yellow
+            }
+            if ($isPostgresRecoveryResume -and (-not $pgBackup.Succeeded -or $leavePostgres)) { Exit-PostgresRecoveryResume -Message 'TPM could not finish the PostgreSQL database backup.' }
+            if ($leavePostgres) {
+                [void](Stop-TpmWorkflowStatus -Context $postgresStatus -Reason 'PostgreSQL setup skipped')
+                [void](Close-TpmWorkflowStatus -Context $postgresStatus)
                 continue
             }
+            if (-not $pgBackup.Succeeded) { continue }
             if ($pgBackup.Path) { Write-Host ("  Database backup saved: {0}" -f $pgBackup.Path) -ForegroundColor DarkCyan }
             else { Write-Host "  No existing databases needed backup." -ForegroundColor DarkGray }
+            [void](Start-TpmWorkflowStep -Context $postgresStatus -StepId 'save' -Activity 'Saving the repaired settings')
+            if (-not $isPostgresRecoveryResume) { $postgresSuperPasswordEncrypted = ConvertTo-PostgresEncryptedPassword $superPwPlain }
+            if (-not (Save-Config)) {
+                Write-Host "  PostgreSQL setup stopped because the repaired settings could not be saved." -ForegroundColor Red
+                Write-Log 'Postgres setup: encrypted password configuration save failed after database backup.'
+                if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'TPM could not save the protected PostgreSQL password configuration.' }
+                [void](Stop-TpmWorkflowStatus -Context $postgresStatus -Reason 'PostgreSQL setup stopped')
+                [void](Close-TpmWorkflowStatus -Context $postgresStatus)
+                continue
+            }
+            [void](Complete-TpmWorkflowStep -Context $postgresStatus -Outcome Succeeded -Summary 'Repaired settings saved' -NextStep 'Finish game database setup')
 
 
-            [void](Complete-TpmWorkflowStep -Context $postgresStatus -Outcome Succeeded -Summary 'Existing databases backed up' -NextStep 'Finish game database setup')
 
             [void](Start-TpmWorkflowStep -Context $postgresStatus -StepId 'profiles' -Activity 'Finishing game database setup')
             Write-Host "  Configuring games and creating only missing databases..." -ForegroundColor Cyan
@@ -18763,12 +18919,11 @@ $mode = $null
             $supportResult = New-TpmSupportPackage -ScriptRoot $PSScriptRoot -TeknoParrotRoot $tpRoot -UserProfilesDir $userProfilesDir -ApprovedGamesRoot $gamesInstallFolder
             Write-Host ""
             if ($supportResult.Succeeded) {
-                if ($supportResult.Partial) {
-                    Write-Host "  Support package created with partial evidence." -ForegroundColor Yellow
-                    Write-Host "  Some optional diagnostics were missing or could not be read." -ForegroundColor Yellow
-                } else {
-                    Write-Host "  Support package created successfully." -ForegroundColor Green
-                }
+                Write-Host "  Support package created." -ForegroundColor Green
+                Write-Host ("  Checked {0} safely identified games." -f $supportResult.Summary.GamesChecked)
+                Write-Host ("  Collected {0} diagnostic files and {1} plugin inventories." -f $supportResult.Summary.FilesCollected, $supportResult.Summary.PluginInventoriesCollected)
+                Write-Host ("  {0} optional diagnostics were not present; full detail is in the package manifest." -f $supportResult.Summary.OptionalDiagnosticsNotFound) -ForegroundColor DarkGray
+                Write-Host ("  Collection failures: {0}. Intentional exclusions: {1}." -f $supportResult.Summary.CollectionFailures, $supportResult.Summary.IntentionallyExcluded) -ForegroundColor DarkGray
                 Write-Host ("  Saved here: {0}" -f $supportResult.PackagePath) -ForegroundColor Green
                 Write-Host "  This is the file to send when asking for help." -ForegroundColor Cyan
                 $openPackage = (Read-HostSafe "  Open the package folder now? (Y/N)").Trim().ToUpper()
@@ -19618,18 +19773,18 @@ $mode = $null
         $dryRunActive = [bool]$DryRun
         if (-not $Unattended -and -not $dryRunActive) {
             Write-Host ""
-            # True first run (no config.json existed before this wizard):
-            # default to Y so a brand-new user's first look is a safe
-            # preview. Returning users keep the previous default-to-last-
-            # choice behavior (no default forced, blank Enter = N).
-            $previewDefault = if ($isTrueFirstRun) { 'Y' } else { $null }
-            $previewPromptText = if ($isTrueFirstRun) {
-                "  Run in PREVIEW mode first? No changes will be written -- this just shows what AutoSync/Register would do. (Y/N, default Y)"
-            } else {
-                "  Run in PREVIEW mode first? No changes will be written -- this just shows what AutoSync/Register would do. (Y/N)"
-            }
-            $previewAns = (Read-HostSafe $previewPromptText -Default $previewDefault).ToUpper()
-            $dryRunActive = ($previewAns -eq "Y")
+            $previewChoice = ''
+            do {
+                Write-Host '  [P] Preview only -- no changes'
+                Write-Host '  [R] Run now -- may make changes'
+                Write-Host '  [B] Back'
+                $previewChoice = (Read-HostSafe '  Choice, default P' -Default 'P').Trim().ToUpper()
+                if ($previewChoice -notin @('P', 'R', 'B')) {
+                    Write-Host '  Invalid choice. Choose P, R, or B.' -ForegroundColor Yellow
+                }
+            } while ($previewChoice -notin @('P', 'R', 'B'))
+            if ($previewChoice -eq 'B') { continue }
+            $dryRunActive = ($previewChoice -eq 'P')
         }
     }
     if ($dryRunActive) { Write-Log "PREVIEW MODE active for this run -- no changes will be written." }
