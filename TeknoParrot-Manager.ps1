@@ -19044,8 +19044,8 @@ $mode = $null
                 Write-Host "  [D] Show details  [S] Skip PostgreSQL setup  [B] Back to main menu"
                 $backupChoice = (Read-HostSafe "  Choice, default R" -Default 'R').Trim().ToUpper()
                 if ($backupChoice -eq 'F') {
-                    Write-Host "  Check PostgreSQL service, client tools, permissions, and credentials, then retrying backup." -ForegroundColor Yellow
-                    $pgBackup = Backup-PostgresDatabases -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain
+                    Write-Host "  Check PostgreSQL service, client tools, permissions, and credentials." -ForegroundColor Yellow
+                    Write-Host "  After correcting the reported issue, choose [R] to retry the backup." -ForegroundColor Yellow
                     continue
                 }
                 if ($backupChoice -eq 'O') {
