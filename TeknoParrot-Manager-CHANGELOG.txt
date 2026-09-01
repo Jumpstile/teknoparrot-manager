@@ -26,6 +26,9 @@
   One-game AutoSync now pauses before optional library maintenance and offers
   New game only, all games, or Back; New game only is safe default. Related-only
   scoping is deferred rather than presented as an unimplemented choice.
+  ReShade preview comparison now has a real 0-100 in-memory slider; its
+  percentage controls the Before/After split, and disk cache keys include the
+  slider position when cached artifacts are requested.
 
 
 

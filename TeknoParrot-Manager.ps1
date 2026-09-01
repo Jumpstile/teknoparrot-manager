@@ -4416,59 +4416,77 @@ function Get-TpmReShadePreviewReference {
 }
 
 function New-TpmReShadePreviewBitmap {
-    param([Parameter(Mandatory)]$ProfileDefinition, [ValidateSet('Before','After','Split')][string]$Mode = 'Split', [int]$Width = 960, [int]$Height = 540)
+    param([Parameter(Mandatory)]$ProfileDefinition, [ValidateSet('Before','After','Split','Slider')][string]$Mode = 'Split', [int]$Width = 960, [int]$Height = 540, [ValidateRange(0,100)][int]$SliderPosition = 50)
     Add-Type -AssemblyName System.Drawing -ErrorAction Stop
-    $bitmap = New-Object Drawing.Bitmap($Width,$Height)
+    $canvasWidth=[int]$Width;$canvasHeight=[int]$Height
+    $bitmap = New-Object Drawing.Bitmap($canvasWidth,$canvasHeight)
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
     try {
         $graphics.Clear([Drawing.Color]::FromArgb(16,24,32))
         $font = New-Object Drawing.Font('Consolas',18)
         $small = New-Object Drawing.Font('Consolas',12)
         $brush = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(38,56,69))
-        $graphics.FillRectangle($brush,40,40,$Width-80,$Height-80)
+        $graphics.FillRectangle($brush,40,40,$canvasWidth-80,$canvasHeight-80)
         $pen = New-Object Drawing.Pen([Drawing.Color]::White,3)
-        $graphics.DrawRectangle($pen,40,40,$Width-80,$Height-80)
+        $graphics.DrawRectangle($pen,40,40,$canvasWidth-80,$canvasHeight-80)
         $colors = @([Drawing.Color]::FromArgb(210,70,70),[Drawing.Color]::FromArgb(55,165,210),[Drawing.Color]::FromArgb(242,193,78))
         for ($i=0; $i -lt 3; $i++) { $b=New-Object Drawing.SolidBrush($colors[$i]);$graphics.FillRectangle($b,80+($i*270),90,250,150);$b.Dispose() }
-        $green=New-Object Drawing.Pen([Drawing.Color]::FromArgb(98,195,112),28);$graphics.DrawLine($green,80,310,$Width-80,310);$green.Dispose()
-        $white=New-Object Drawing.Pen([Drawing.Color]::White,2);$graphics.DrawLine($white,100,400,$Width-100,400);$white.Dispose()
+        $green=New-Object Drawing.Pen([Drawing.Color]::FromArgb(98,195,112),28);$graphics.DrawLine($green,80,310,$canvasWidth-80,310);$green.Dispose()
+        $white=New-Object Drawing.Pen([Drawing.Color]::White,2);$graphics.DrawLine($white,100,400,$canvasWidth-100,400);$white.Dispose()
         $textBrush=New-Object Drawing.SolidBrush([Drawing.Color]::White);$graphics.DrawString('TPM SYNTHETIC ARCADE TEST SCENE',$font,$textBrush,100,440);$textBrush.Dispose()
         $drawAfter = {
             if ($ProfileDefinition.Effects -contains 'SweetFX.LumaSharpen') {
                 $sharp=New-Object Drawing.Pen([Drawing.Color]::White,1)
-                for ($x=80; $x -lt ($Width-80); $x+=18) { $graphics.DrawLine($sharp,$x,250,$x+8,260) }
+                for ($x=80; $x -lt ($canvasWidth-80); $x+=18) { $graphics.DrawLine($sharp,$x,250,$x+8,260) }
                 $sharp.Dispose()
             }
             if ($ProfileDefinition.Effects -contains 'SweetFX.Vibrance') {
                 $vivid=New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(45,80,255,40))
-                $graphics.FillRectangle($vivid,80,90,($Width-160),150);$vivid.Dispose()
+                $graphics.FillRectangle($vivid,80,90,($canvasWidth-160),150);$vivid.Dispose()
             }
             if ($ProfileDefinition.Effects -contains 'FXShaders.CRT_Lottes') {
                 $scan=New-Object Drawing.Pen([Drawing.Color]::FromArgb(75,0,0,0),2)
-                for ($y=90; $y -lt 400; $y+=6) { $graphics.DrawLine($scan,80,$y,$Width-80,$y) }
+                for ($y=90; $y -lt 400; $y+=6) { $graphics.DrawLine($scan,80,$y,$canvasWidth-80,$y) }
                 $scan.Dispose()
             }
         }
         if ($Mode -eq 'After') { & $drawAfter }
-        elseif ($Mode -eq 'Split') {
-            $graphics.SetClip((New-Object Drawing.Rectangle(480,40,440,460)))
-            & $drawAfter
-            $graphics.ResetClip()
-            $divider=New-Object Drawing.Pen([Drawing.Color]::White,4);$graphics.DrawLine($divider,480,40,480,500);$divider.Dispose()
-            $label=New-Object Drawing.SolidBrush([Drawing.Color]::White);$graphics.DrawString('BEFORE',$small,$label,70,55);$graphics.DrawString('AFTER',$small,$label,510,55);$label.Dispose()
+        elseif ($Mode -eq 'Split' -or $Mode -eq 'Slider') {
+            $leftBound = 40
+            $rightBound = $canvasWidth - 40
+            $topBound = 40
+            $bottomBound = $canvasHeight - 40
+            $isSlider = $Mode -eq 'Slider'
+            $splitX = if ($isSlider) { $leftBound + [int](($rightBound - $leftBound) * ($SliderPosition / 100.0)) } else { [int](($leftBound + $rightBound) / 2) }
+            if ($isSlider) {
+                $clipX = $leftBound
+                $clipWidth = [Math]::Max(0, $splitX - $leftBound)
+            } else {
+                $clipX = $splitX
+                $clipWidth = [Math]::Max(0, $rightBound - $splitX)
+            }
+            if ($clipWidth -gt 0) {
+                $graphics.SetClip((New-Object Drawing.Rectangle -ArgumentList @($clipX,$topBound,$clipWidth,($bottomBound-$topBound))))
+                & $drawAfter
+                $graphics.ResetClip()
+            }
+            $divider=New-Object Drawing.Pen([Drawing.Color]::White,4);$graphics.DrawLine($divider,$splitX,$topBound,$splitX,$bottomBound);$divider.Dispose()
+            $label=New-Object Drawing.SolidBrush([Drawing.Color]::White)
+            $graphics.DrawString('BEFORE',$small,$label,70,55);$graphics.DrawString('AFTER',$small,$label,[Math]::Min($splitX+30,$canvasWidth-130),55)
+            $label.Dispose()
         }
         return $bitmap
     } catch { $bitmap.Dispose(); throw } finally { $graphics.Dispose(); $font.Dispose(); $small.Dispose(); $brush.Dispose(); $pen.Dispose() }
 }
 
 function New-TpmReShadePreviewArtifact {
-    param([Parameter(Mandatory)]$ProfileDefinition, [ValidateSet('Before','After','Split')][string]$Mode = 'Split', [string]$PreviewRoot = '', [string]$CacheRoot = '', [string]$IntensityId = 'Default')
+    param([Parameter(Mandatory)]$ProfileDefinition, [ValidateSet('Before','After','Split','Slider')][string]$Mode = 'Split', [string]$PreviewRoot = '', [string]$CacheRoot = '', [string]$IntensityId = 'Default', [ValidateRange(0,100)][int]$SliderPosition = 50)
     try {
         $reference = Get-TpmReShadePreviewReference -PreviewRoot $PreviewRoot
         if (-not $reference.Available) { return [pscustomobject]@{ Available=$false; Reason=$reference.Reason; Mode=$Mode; ProfileId=$ProfileDefinition.ProfileId } }
         $catalog=@(Get-TpmReShadeEffectCatalog);$hashes=@()
         foreach($id in @($ProfileDefinition.Effects)){$effect=@($catalog|Where-Object EffectId -eq $id)[0];if(-not $effect){return [pscustomobject]@{Available=$false;Reason='UNAPPROVED_EFFECT';Mode=$Mode;ProfileId=$ProfileDefinition.ProfileId}};$hashes+=@($effect.SHA256)}
-        $key=Get-TpmReShadePreviewCacheKey -SubjectId ($ProfileDefinition.ProfileId+'|'+$Mode) -ShaderSha256 $hashes -IntensityId $IntensityId -PresetVersion ([string]$ProfileDefinition.SchemaVersion) -ReferenceVersion $reference.Version -ReferenceSha256 $reference.Hash -RendererVersion '2'
+        $key=Get-TpmReShadePreviewCacheKey -SubjectId ($ProfileDefinition.ProfileId+'|'+$Mode+'|'+$SliderPosition) -ShaderSha256 $hashes -IntensityId $IntensityId -PresetVersion ([string]$ProfileDefinition.SchemaVersion) -ReferenceVersion $reference.Version -ReferenceSha256 $reference.Hash -RendererVersion '2'
         $sourceRoot=if($PreviewRoot){[IO.Path]::GetFullPath($PreviewRoot)}else{[IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'ReShade\Previews'))}
         $root=if($CacheRoot){[IO.Path]::GetFullPath($CacheRoot)}else{[IO.Path]::GetFullPath((Join-Path $sourceRoot 'Cache'))}
         $previewRootFull=$sourceRoot
@@ -4477,7 +4495,7 @@ function New-TpmReShadePreviewArtifact {
         if((Test-Path -LiteralPath $imagePath -PathType Leaf) -and (Test-Path -LiteralPath $manifestPath -PathType Leaf)){
             try{$manifest=Get-Content -LiteralPath $manifestPath -Raw|ConvertFrom-Json;if($manifest.CacheKey -eq $key -and $manifest.ReferenceHash -eq $reference.Hash){$check=[Drawing.Image]::FromFile($imagePath);$check.Dispose();return [pscustomobject]@{Available=$true;Path=$imagePath;CacheKey=$key;Reused=$true;ReferenceIdentity=$reference.Identity;Mode=$Mode;ProfileId=$ProfileDefinition.ProfileId}}}catch{}
         }
-        $bitmap=New-TpmReShadePreviewBitmap -ProfileDefinition $ProfileDefinition -Mode $Mode
+        $bitmap=New-TpmReShadePreviewBitmap -ProfileDefinition $ProfileDefinition -Mode $Mode -SliderPosition $SliderPosition
         try{$bitmap.Save($imagePath,[Drawing.Imaging.ImageFormat]::Png)}finally{$bitmap.Dispose()}
         [pscustomobject]@{CacheKey=$key;ProfileId=$ProfileDefinition.ProfileId;Mode=$Mode;ReferenceIdentity=$reference.Identity;ReferenceHash=$reference.Hash;RendererVersion='2';PresetVersion=[string]$ProfileDefinition.SchemaVersion;ShaderSha256=@($hashes);IntensityId=$IntensityId}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $manifestPath -Encoding UTF8
         return [pscustomobject]@{Available=$true;Path=$imagePath;CacheKey=$key;Reused=$false;ReferenceIdentity=$reference.Identity;Mode=$Mode;ProfileId=$ProfileDefinition.ProfileId}
@@ -4510,9 +4528,13 @@ function Open-TpmReShadePreviewWindow {
         }
         $form=New-Object Windows.Forms.Form;$form.Text='TeknoParrot ReShade Preview - '+$ProfileDefinition.FriendlyName;$form.Width=1000;$form.Height=700
         $picture=New-Object Windows.Forms.PictureBox;$picture.Dock='Fill';$picture.SizeMode='Zoom';$picture.Image=[Drawing.Image]::FromFile($artifact.Path)
-        $toolbar=New-Object Windows.Forms.FlowLayoutPanel;$toolbar.Dock='Top';$toolbar.Height=40
+        $toolbar=New-Object Windows.Forms.FlowLayoutPanel;$toolbar.Dock='Top';$toolbar.Height=70
         foreach($view in @('Before','After','Split')){$button=New-Object Windows.Forms.Button;$button.Text=$view;$button.Tag=$view;$button.Width=90;$button.Add_Click({[void](Update-TpmReShadePreviewWindow -Mode $this.Tag)});$toolbar.Controls.Add($button)}
-        $form.Controls.Add($picture);$form.Controls.Add($toolbar);$script:TpmReShadePreviewWindowState=[pscustomobject]@{Form=$form;Picture=$picture;Profile=$ProfileDefinition;Mode=$Mode;CacheRoot=$CacheRoot}
+        $sliderLabel=New-Object Windows.Forms.Label;$sliderLabel.Text='Comparison slider';$sliderLabel.AutoSize=$true;$toolbar.Controls.Add($sliderLabel)
+        $slider=New-Object Windows.Forms.TrackBar;$slider.Name='ComparisonSlider';$slider.Minimum=0;$slider.Maximum=100;$slider.Value=50;$slider.TickFrequency=25;$slider.Width=300
+        $script:TpmReShadePreviewWindowState=[pscustomobject]@{Form=$form;Picture=$picture;Profile=$ProfileDefinition;Mode=$Mode;CacheRoot=$CacheRoot;Slider=$slider;SliderValue=50}
+        $slider.Add_ValueChanged({[void](Update-TpmReShadePreviewWindow -Mode 'Slider' -SliderPosition $this.Value)});$toolbar.Controls.Add($slider)
+        $form.Controls.Add($picture);$form.Controls.Add($toolbar)
         return [pscustomobject]@{Available=$true;Closed=$false;Mode=$Mode;CacheKey=$artifact.CacheKey}
     } catch {
         Write-Log ("ReShade preview unavailable: reason=PREVIEW_WINDOW_UNAVAILABLE errorType='{0}' error='{1}' root='{2}' assets={3} PowerShell={4} edition={5} FormsLoaded={6} DrawingLoaded={7} Host='{8}'" -f $_.Exception.GetType().FullName, $_.Exception.Message, $previewRoot, ($assetChecks -join ';'), $PSVersionTable.PSVersion, $PSVersionTable.PSEdition, $formsLoaded, $drawingLoaded, $Host.Name)
@@ -4521,12 +4543,22 @@ function Open-TpmReShadePreviewWindow {
 }
 
 function Update-TpmReShadePreviewWindow {
-    param([ValidateSet('Before','After','Split')][string]$Mode='Split')
+    param([ValidateSet('Before','After','Split','Slider')][string]$Mode='Split', [ValidateRange(0,100)][int]$SliderPosition=50)
     if(-not $script:TpmReShadePreviewWindowState -or $script:TpmReShadePreviewWindowState.Form.IsDisposed){return [pscustomobject]@{Available=$false;Reason='PREVIEW_WINDOW_CLOSED'}}
-    $state=$script:TpmReShadePreviewWindowState;$artifact=New-TpmReShadePreviewArtifact -ProfileDefinition $state.Profile -Mode $Mode -CacheRoot $state.CacheRoot
+    $state=$script:TpmReShadePreviewWindowState
+    if($Mode -eq 'Slider'){
+        try{
+            $image=New-TpmReShadePreviewBitmap -ProfileDefinition $state.Profile -Mode Slider -SliderPosition $SliderPosition
+            $old=$state.Picture.Image;$state.Picture.Image=$image;if($old){$old.Dispose()};$state.Mode=$Mode;$state.SliderValue=$SliderPosition
+            return [pscustomobject]@{Available=$true;Mode=$Mode;SliderPosition=$SliderPosition;InMemory=$true}
+        }catch{
+            return [pscustomobject]@{Available=$false;Reason='PREVIEW_RENDER_FAILED';Error=$_.Exception.Message}
+        }
+    }
+    $artifact=New-TpmReShadePreviewArtifact -ProfileDefinition $state.Profile -Mode $Mode -CacheRoot $state.CacheRoot -SliderPosition $SliderPosition
     if(-not $artifact.Available){return $artifact}
-    $old=$state.Picture.Image;$state.Picture.Image=[Drawing.Image]::FromFile($artifact.Path);if($old){$old.Dispose()};$state.Mode=$Mode
-    return [pscustomobject]@{Available=$true;Mode=$Mode;CacheKey=$artifact.CacheKey}
+    $old=$state.Picture.Image;$state.Picture.Image=[Drawing.Image]::FromFile($artifact.Path);if($old){$old.Dispose()};$state.Mode=$Mode;$state.SliderValue=$SliderPosition
+    return [pscustomobject]@{Available=$true;Mode=$Mode;CacheKey=$artifact.CacheKey;SliderPosition=$SliderPosition}
 }
 
 function Close-TpmReShadePreviewWindow {
@@ -18392,6 +18424,20 @@ try {
 Set-ConsoleMaximizedIfSupported
 function Invoke-TpmFfbSetupMode {
     param([Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$TpRoot, [string]$ScriptRoot = $PSScriptRoot, [scriptblock]$EventSink = $null)
+    Write-Host ""
+    Write-Host "  Force feedback makes a wheel or stick push back / rumble to match" -ForegroundColor Cyan
+    Write-Host "  what's happening on screen (e.g. road vibration, recoil, collisions)." -ForegroundColor Cyan
+    Write-Host "  Two independent ways to get it, covering different games -- both can" -ForegroundColor Cyan
+    Write-Host "  be set up, neither requires the other:" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "    1) FFB Blaster -- TeknoParrot's own built-in force feedback." -ForegroundColor Cyan
+    Write-Host "       Native and well-integrated, but requires an active paid" -ForegroundColor Cyan
+    Write-Host "       TeknoParrot membership (teknoparrot.com/en/Home/Subscription)." -ForegroundColor Cyan
+    Write-Host "    2) Third-party FFB plugin -- a free, separately-maintained DLL" -ForegroundColor Cyan
+    Write-Host "       (mightymikem/FFBArcadePlugin) that adds force feedback to a" -ForegroundColor Cyan
+    Write-Host "       different set of arcade titles. No subscription needed." -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  If a game is covered by both, you'll be asked which one to use for it." -ForegroundColor Cyan
     $status = New-TpmWorkflowStatusContext -WorkflowKey 'FFBSetup' -Title 'Force feedback setup' -EventSink $EventSink -Steps @(
         @{ Id = 'inspect'; Label = 'Check available force-feedback options' }
         @{ Id = 'native'; Label = 'Apply the approved native option' }
@@ -19477,8 +19523,8 @@ $mode = $null
             Write-Host ""
             Write-Host "Done." -ForegroundColor Green
             Write-Log "FFB setup complete."
+            [void](Read-Host "  Press Enter to return to menu")
         }
-        [void](Read-Host "  Press Enter to return to menu")
         continue
     }
 

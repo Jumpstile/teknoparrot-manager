@@ -9862,10 +9862,10 @@ Describe "ReShade preview renderer and cache" {
     It "renders deterministic Before, After, and Split artifacts from one reference identity" {
         $root=Join-Path $TestDrive 'preview-root';$cache=Join-Path $root 'Cache';[IO.Directory]::CreateDirectory($root)|Out-Null
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\ReShade\Previews\TPM-preview-original.svg') -Destination (Join-Path $root 'TPM-preview-original.svg')
-        $p=Get-TpmReShadeProfile -ProfileId EnhancedArcade;$a=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Before -PreviewRoot $root -CacheRoot $cache;$b=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode After -PreviewRoot $root -CacheRoot $cache;$c=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache
-        foreach($x in @($a,$b,$c)){$x.Available|Should -BeTrue -Because ($x|ConvertTo-Json);$x.ReferenceIdentity|Should -Be 'TPM-SYNTHETIC-ARCADE-V1';Test-Path -LiteralPath $x.Path -PathType Leaf|Should -BeTrue}
-        $a.CacheKey|Should -Not -Be $b.CacheKey;$b.CacheKey|Should -Not -Be $c.CacheKey
-        (New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache).Reused|Should -BeTrue
+        $p=Get-TpmReShadeProfile -ProfileId EnhancedArcade;$a=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Before -PreviewRoot $root -CacheRoot $cache;$b=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode After -PreviewRoot $root -CacheRoot $cache;$c=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache;$s0=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 0 -PreviewRoot $root -CacheRoot $cache;$s50=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 50 -PreviewRoot $root -CacheRoot $cache;$s100=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 100 -PreviewRoot $root -CacheRoot $cache
+        foreach($x in @($a,$b,$c,$s0,$s50,$s100)){$x.Available|Should -BeTrue -Because ($x|ConvertTo-Json);$x.ReferenceIdentity|Should -Be 'TPM-SYNTHETIC-ARCADE-V1';Test-Path -LiteralPath $x.Path -PathType Leaf|Should -BeTrue}
+        $a.CacheKey|Should -Not -Be $b.CacheKey;$b.CacheKey|Should -Not -Be $c.CacheKey;$s0.CacheKey|Should -Not -Be $s50.CacheKey;$s50.CacheKey|Should -Not -Be $s100.CacheKey
+        (New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 50 -PreviewRoot $root -CacheRoot $cache).Reused|Should -BeTrue
     }
     It "regenerates corrupt or stale cache and fails gracefully without the reference" {
         $root=Join-Path $TestDrive 'preview-root';$cache=Join-Path $root 'Cache';[IO.Directory]::CreateDirectory($root)|Out-Null
@@ -9969,6 +9969,48 @@ Describe "ReShade trusted profile restore" {
         $script:ProductionSource | Should -Match '\[B\] Back'
         $script:ProductionSource | Should -Match '\[D\] Details'
         $script:ProductionSource | Should -Match 'SOURCE_DLL_UNAVAILABLE'
+    }
+    It "renders distinct left, middle, and right comparison slider positions" {
+        $profile = Get-TpmReShadeProfile -ProfileId EnhancedArcade
+        $left = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 0 -Width 960 -Height 540
+        $middle = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 50 -Width 960 -Height 540
+        $right = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 100 -Width 960 -Height 540
+        try {
+            $left.GetPixel(200, 180).ToArgb() | Should -Not -Be $middle.GetPixel(200, 180).ToArgb()
+            $middle.GetPixel(800, 180).ToArgb() | Should -Not -Be $right.GetPixel(800, 180).ToArgb()
+            $left.GetPixel(800, 180).ToArgb() | Should -Be $middle.GetPixel(800, 180).ToArgb()
+            $middle.GetPixel(200, 180).ToArgb() | Should -Be $right.GetPixel(200, 180).ToArgb()
+        } finally {
+            $left.Dispose(); $middle.Dispose(); $right.Dispose()
+        }
+    }
+    It "threads slider state through preview updates and cache identity" {
+        $script:ProductionSource | Should -Match 'TrackBar'
+        $script:ProductionSource | Should -Match 'SliderPosition'
+        $script:ProductionSource | Should -Match 'ValueChanged'
+        $script:ProductionSource | Should -Match 'ComparisonSlider'
+    }
+    It "updates the live preview image in memory for slider changes" {
+        $state = [pscustomobject]@{
+            Form = [pscustomobject]@{ IsDisposed = $false }
+            Picture = [pscustomobject]@{ Image = $null }
+            Profile = Get-TpmReShadeProfile -ProfileId EnhancedArcade
+            CacheRoot = $TestDrive
+            SliderValue = 50
+            Mode = 'Split'
+        }
+        $script:TpmReShadePreviewWindowState = $state
+        try {
+            $first = Update-TpmReShadePreviewWindow -Mode Slider -SliderPosition 25
+            $first.Available | Should -BeTrue
+            $first.InMemory | Should -BeTrue
+            $state.Mode | Should -Be 'Slider'
+            $state.SliderValue | Should -Be 25
+            $state.Picture.Image | Should -Not -BeNullOrEmpty
+        } finally {
+            if ($state.Picture.Image) { $state.Picture.Image.Dispose() }
+            $script:TpmReShadePreviewWindowState = $null
+        }
     }
     It "offers bulk choices for every multi-game selection including subsets" {
         $source = $script:ProductionSource
