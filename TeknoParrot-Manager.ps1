@@ -18403,7 +18403,7 @@ $mode = $null
     if ($choiceResult.Redraw) { continue }
     $modeChoice = Resolve-MainMenuCommand -InputText $choiceResult.Value -MaxNumber $menuMaxNumber
     if ($null -eq $modeChoice) {
-        Write-Host "  Invalid choice. Enter 1-$menuMaxNumber, H, L, or Q." -ForegroundColor Yellow
+        Write-Host "  Invalid choice. Enter 1-15, H, L, or Q." -ForegroundColor Yellow
         continue
     }
     if ($modeChoice -eq 'H') {
