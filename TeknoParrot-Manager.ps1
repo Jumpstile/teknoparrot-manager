@@ -3569,7 +3569,7 @@ function Start-CrosshairSelectionBridge {
     $listener = New-Object System.Net.HttpListener
     $listener.Prefixes.Add(("http://127.0.0.1:{0}/" -f $port))
     $listener.Start()
-    $state = [hashtable]::Synchronized(@{ Token = $token; Index = $null; Expires = [datetime]::UtcNow.AddSeconds($TimeoutSeconds); Listener = $listener })
+    $state = [hashtable]::Synchronized(@{ Token = $token; Index = $null; Expires = [datetime]::UtcNow.AddSeconds($TimeoutSeconds); Listener = $listener; Callback = $null })
     $callback = {
         param($result)
         try {
@@ -3580,8 +3580,12 @@ function Start-CrosshairSelectionBridge {
             $bytes = [Text.Encoding]::UTF8.GetBytes('selected')
             $context.Response.Headers['Access-Control-Allow-Origin'] = '*'
             $context.Response.OutputStream.Write($bytes,0,$bytes.Length);$context.Response.Close()
+            if ($null -eq $index -and [datetime]::UtcNow -lt $result.AsyncState.Expires -and $result.AsyncState.Listener.IsListening) {
+                [void]$result.AsyncState.Listener.BeginGetContext(([System.AsyncCallback]$result.AsyncState.Callback),$result.AsyncState)
+            }
         } catch {}
     }
+    $state.Callback = $callback
     $session = [pscustomobject]@{ Token=$token; Port=$port; Url=("http://127.0.0.1:{0}/" -f $port); State=$state; Callback=$callback }
     [void]$listener.BeginGetContext(([System.AsyncCallback]$callback),$state)
     return $session
