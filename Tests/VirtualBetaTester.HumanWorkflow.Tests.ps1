@@ -325,6 +325,8 @@ function Read-MainMenuChoiceResponsive {
     `$script:answerIndex++
     return [pscustomobject]@{ Redraw = `$false; Value = `$answer }
 }
+function Get-ConsoleContentWidth { return 160 }
+function Get-ConsoleContentHeight { return 60 }
 `$script:ActiveTpmWorkflowStatus = `$null
 `$script:TpmWorkflowRendering = `$false
 `$script:PostgresRecoveryStatus = `$null
