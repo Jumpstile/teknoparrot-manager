@@ -16565,6 +16565,7 @@ $pendingApplyMode   = $null   # set when a preview run's "Apply for real now?" p
 $forceRealApply     = $false  # consumed once, right after $pendingApplyMode triggers a re-entry, to force
                                # $dryRunActive = $false without re-asking the preview question.
 $menuExpanded       = $false  # H selects the readable expanded layout until toggled again.
+$menuNotice         = ''
 $zipSource               = $null   # AutoSync only (main collection)
 $zipSourceSupplementary  = $null   # AutoSync supplementary source (optional, separate library); $null or ''=not configured
 $gamesInstallFolder = $null   # always (the extracted-games root to register)
@@ -17797,12 +17798,20 @@ function Get-MainMenuBannerRows {
 }
 
 function Get-MainMenuFooterRows {
-    param([object]$Geometry)
+    param(
+        [object]$Geometry,
+        [string]$Notice = ''
+    )
     $rows = New-Object System.Collections.Generic.List[object]
     $footer = 'Enter number and press Enter | H = Help | L = View Log | Q = Quit'
     if ($footer.Length -gt $Geometry.FooterWidth) { $footer = 'Enter number | H=Help | L=Log | Q=Quit' }
     if ($footer.Length -gt $Geometry.FooterWidth) { $footer = 'Enter number | H=Help | Q=Quit' }
     if ($Geometry.FrameEnabled) { [void]$rows.Add((New-ConsoleRenderRow -Text ('+' + ('-' * ($Geometry.FooterWidth - 2)) + '+') -Color 'DarkCyan')) }
+    if (-not [string]::IsNullOrWhiteSpace($Notice)) {
+        foreach ($line in (Split-TextForMenuWidth -Text $Notice -Width ([Math]::Max(20, $Geometry.FooterWidth - 4)))) {
+            [void]$rows.Add((New-ConsoleRenderRow -Text ('  ' + $line) -Color 'Yellow'))
+        }
+    }
     foreach ($line in (Split-TextForMenuWidth -Text $footer -Width $Geometry.FooterWidth)) {
         $pad = [Math]::Max(0, [Math]::Floor(($Geometry.FooterWidth - $line.Length) / 2))
         [void]$rows.Add((New-ConsoleRenderRow -Text ((' ' * $pad) + $line) -Color 'White'))
@@ -17960,10 +17969,22 @@ function Get-MainMenuMinimalBannerRows {
 # Single-line footer with no frame/rule, for the same reason as
 # Get-MainMenuMinimalBannerRows above.
 function Get-MainMenuMinimalFooterRows {
-    param([object]$Geometry)
-    $footer = 'Enter number | Q=Quit'
+    param(
+        [object]$Geometry,
+        [string]$Notice = ''
+    )
+    $rows = New-Object System.Collections.Generic.List[object]
+    $footer = 'Enter number | H=Help | L=Log | Q=Quit'
+    if ($footer.Length -gt $Geometry.FooterWidth) { $footer = 'Enter number | H=Help | Q=Quit' }
+    if ($footer.Length -gt $Geometry.FooterWidth) { $footer = 'Enter number | Q=Quit' }
     if ($footer.Length -gt $Geometry.FooterWidth) { $footer = 'N | Q' }
-    return @(Get-PaddedMainMenuRows -Rows @((New-ConsoleRenderRow -Text $footer -Color 'White')) -Padding $Geometry.LeftPadding)
+    if (-not [string]::IsNullOrWhiteSpace($Notice)) {
+        foreach ($line in (Split-TextForMenuWidth -Text $Notice -Width ([Math]::Max(20, $Geometry.FooterWidth - 2)))) {
+            [void]$rows.Add((New-ConsoleRenderRow -Text $line -Color 'Yellow'))
+        }
+    }
+    [void]$rows.Add((New-ConsoleRenderRow -Text $footer -Color 'White'))
+    return @(Get-PaddedMainMenuRows -Rows $rows.ToArray() -Padding $Geometry.LeftPadding)
 }
 
 # Packs every menu item's "N) Label" as densely as the viewport width
@@ -18010,18 +18031,6 @@ function Get-MainMenuFlowPackedItemRows {
 }
 
 # Emergency compact presentation for viewports too short to show all 15
-# options one per row even with every description stripped (issue #104
-# RC3-B correction: at the minimum supported 60x10 terminal, the normal
-# Compact-tier body -- 4 section headers + 15 item rows, 19 rows minimum --
-# cannot fit even after Limit-MainMenuBodyRowsToBudget trims it, so the
-# normal path was silently dropping every item including 15 (Exit), leaving
-# only the banner and footer visible. Reserving space for Exit and the
-# footer is not enough on its own if the fix only protects those two and
-# still drops every OTHER option -- this replaces the normal framed banner
-# and footer with single-line minimal versions (freeing several rows) and
-# flow-packs every item's "N) Label" as densely as the width allows, so
-# every option number stays visible and reachable without scrolling, rather
-# than choosing which options to silently omit.
 function Get-MainMenuEmergencyCompactRows {
     param(
         [object]$Geometry,
@@ -18034,10 +18043,11 @@ function Get-MainMenuEmergencyCompactRows {
         # option. Below the documented 60x10 minimum this can still mean an
         # early option's line goes missing, but the footer and Exit itself
         # are the two guarantees that must never break.
-        [int]$MaxRows = 0
+        [int]$MaxRows = 0,
+        [string]$Notice = ''
     )
     $bannerRows = @(Get-MainMenuMinimalBannerRows -Geometry $Geometry)
-    $footerRows = @(Get-MainMenuMinimalFooterRows -Geometry $Geometry)
+    $footerRows = @(Get-MainMenuMinimalFooterRows -Geometry $Geometry -Notice $Notice)
     $itemRows = @(Get-MainMenuFlowPackedItemRows -Width ([Math]::Max(20, $Geometry.MenuWidth - $Geometry.LeftPadding)) -Geometry $Geometry)
 
     if ($MaxRows -gt 0) {
@@ -18081,9 +18091,13 @@ function Get-MainMenuVisibleOptionNumbers {
     }
     return @($numbers | Sort-Object)
 }
-
 function New-MainMenuScreenResult {
-    param([Parameter(Mandatory)]$Geometry, [Parameter(Mandatory)][object[]]$Rows, [int]$ViewportHeight = 0)
+    param(
+        [Parameter(Mandatory)]$Geometry,
+        [Parameter(Mandatory)][object[]]$Rows,
+        [int]$ViewportHeight = 0,
+        [string]$Notice = ''
+    )
     if ($ViewportHeight -le 0) { $ViewportHeight = $Geometry.ViewportHeight }
     $expected = @((Get-MainMenuItems | ForEach-Object { [int]$_.Number }))
     $visible = @(Get-MainMenuVisibleOptionNumbers -Rows $Rows)
@@ -18092,9 +18106,9 @@ function New-MainMenuScreenResult {
     if (-not $allowed) {
         $fallbackRows = @()
         if ($ViewportHeight -ge 20) {
-            $fallbackRows = @((Get-MainMenuBannerRows -Geometry $Geometry); (Get-MainMenuFlowPackedItemRows -Width ([Math]::Max(20, $Geometry.MenuWidth - $Geometry.LeftPadding)) -Geometry $Geometry); (Get-MainMenuFooterRows -Geometry $Geometry))
+            $fallbackRows = @((Get-MainMenuBannerRows -Geometry $Geometry); (Get-MainMenuFlowPackedItemRows -Width ([Math]::Max(20, $Geometry.MenuWidth - $Geometry.LeftPadding)) -Geometry $Geometry); (Get-MainMenuFooterRows -Geometry $Geometry -Notice $Notice))
         } else {
-            $fallbackRows = @(Get-MainMenuEmergencyCompactRows -Geometry $Geometry -MaxRows $ViewportHeight)
+            $fallbackRows = @(Get-MainMenuEmergencyCompactRows -Geometry $Geometry -MaxRows $ViewportHeight -Notice $Notice)
         }
         $fallbackVisible = @(Get-MainMenuVisibleOptionNumbers -Rows $fallbackRows)
         if ($ViewportHeight -ge 10 -and @($expected | Where-Object { $fallbackVisible -notcontains $_ }).Count -eq 0 -and $fallbackRows.Count -le [Math]::Max(5, $ViewportHeight - 2)) {
@@ -18109,24 +18123,19 @@ function New-MainMenuScreenResult {
     return [pscustomobject]@{ Geometry = $Geometry; Rows = @($Rows); VisibleOptionNumbers = $visible; MissingOptionNumbers = $missing; AllOptionsVisible = $allowed; PromptAllowed = $allowed }
 }
 
-function Get-MainMenuPromptText {
-    param([Parameter(Mandatory)]$Screen, [Parameter(Mandatory)][int]$MaxNumber)
-    if (-not $Screen.PromptAllowed) { return $null }
-    return 'Enter 1-{0}: ' -f $MaxNumber
-}
-
 function Render-MainMenuScreen {
     param(
         [ValidateSet('Ultra', 'Professional', 'Standard', 'Compact')][string]$Tier,
         [int]$Width,
         [int]$Height,
-        [ValidateSet('Auto', 'UltraTwoColumn', 'UltraCentered')][string]$UltraLayoutMode = 'Auto'
+        [ValidateSet('Auto', 'UltraTwoColumn', 'UltraCentered')][string]$UltraLayoutMode = 'Auto',
+        [string]$Notice = ''
     )
 
     $geometry = Get-MainMenuGeometry -Tier $Tier -ViewportWidth $Width -ViewportHeight $Height -UltraLayoutMode $UltraLayoutMode
     $sections = @(Get-MainMenuSections)
     $bannerRows = @(Get-MainMenuBannerRows -Geometry $geometry)
-    $footerRows = @(Get-MainMenuFooterRows -Geometry $geometry)
+    $footerRows = @(Get-MainMenuFooterRows -Geometry $geometry -Notice $Notice)
     $bodyRows = @(Get-MainMenuBodyRows -Sections $sections -Geometry $geometry)
 
     # Uses the caller's real requested $Height here, NOT $geometry.ViewportHeight
@@ -18155,8 +18164,8 @@ function Render-MainMenuScreen {
         # which would cut off the LAST rows (the footer) once content
         # overflowed. Get-MainMenuEmergencyCompactRows reserves the banner
         # and footer unconditionally and only trims item rows if needed.
-        $rows = Get-MainMenuEmergencyCompactRows -Geometry $geometry -MaxRows $maxTotalRows
-        return New-MainMenuScreenResult -Geometry $geometry -Rows $rows -ViewportHeight $Height
+        $rows = Get-MainMenuEmergencyCompactRows -Geometry $geometry -MaxRows $maxTotalRows -Notice $Notice
+        return New-MainMenuScreenResult -Geometry $geometry -Rows $rows -ViewportHeight $Height -Notice $Notice
     }
 
     $bodyRows = Limit-MainMenuBodyRowsToBudget -BodyRows $bodyRows -BodyBudget $bodyBudget
@@ -18165,7 +18174,7 @@ function Render-MainMenuScreen {
     foreach ($row in $bannerRows) { [void]$rows.Add($row) }
     foreach ($row in $bodyRows) { [void]$rows.Add($row) }
     foreach ($row in $footerRows) { [void]$rows.Add($row) }
-    return New-MainMenuScreenResult -Geometry $geometry -Rows (Limit-MainMenuRowsToViewport -Rows $rows.ToArray() -ViewportHeight $Height) -ViewportHeight $Height
+    return New-MainMenuScreenResult -Geometry $geometry -Rows (Limit-MainMenuRowsToViewport -Rows $rows.ToArray() -ViewportHeight $Height) -ViewportHeight $Height -Notice $Notice
 }
 
 function Write-ConsoleRenderRows {
@@ -18294,9 +18303,10 @@ function Show-MainMenu {
         [int]$Width = (Get-ConsoleContentWidth),
         [int]$Height = (Get-ConsoleContentHeight),
         [ValidateSet('Auto', 'UltraTwoColumn', 'UltraCentered')][string]$UltraLayoutMode = 'Auto',
+        [string]$Notice = '',
         [switch]$ReturnScreen
     )
-    $screen = Render-MainMenuScreen -Tier $Tier -Width $Width -Height $Height -UltraLayoutMode $UltraLayoutMode
+    $screen = Render-MainMenuScreen -Tier $Tier -Width $Width -Height $Height -UltraLayoutMode $UltraLayoutMode -Notice $Notice
     Clear-ConsoleForFreshRender
     Write-ConsoleRenderRows -Rows $screen.Rows
     if ($ReturnScreen) { return $screen }
@@ -18513,11 +18523,12 @@ $mode = $null
     $consoleHeight = Get-ConsoleContentHeight
     $menuTier = Get-ConsoleLayoutTier -Width $consoleWidth -Height $consoleHeight -RequiredFullLines $fullTierLineCount
     $menuLayoutMode = if ($menuExpanded -and $menuTier -eq 'Ultra') { 'UltraCentered' } else { 'Auto' }
-    $screen = Show-MainMenu -Tier $menuTier -Width $consoleWidth -Height $consoleHeight -UltraLayoutMode $menuLayoutMode -ReturnScreen
+    $screen = Show-MainMenu -Tier $menuTier -Width $consoleWidth -Height $consoleHeight -UltraLayoutMode $menuLayoutMode -Notice $menuNotice -ReturnScreen
     if (-not $screen.PromptAllowed) {
         [void](Read-HostSafe '  Resize the window, then press Enter to redraw')
         continue
     }
+    $menuNotice = ''
     if ($Unattended) {
         Write-Host "  [Unattended] Mode must be set before starting." -ForegroundColor Red
         Write-Log "ERROR: Unattended mode -- reached menu loop."; exit 1
@@ -18526,7 +18537,7 @@ $mode = $null
     if ($choiceResult.Redraw) { continue }
     $modeChoice = Resolve-MainMenuCommand -InputText $choiceResult.Value -MaxNumber $menuMaxNumber
     if ($null -eq $modeChoice) {
-        Write-Host "  Invalid choice. Enter 1-15. Commands: H = Help, L = View Log, Q = Quit." -ForegroundColor Yellow
+        $menuNotice = "Invalid choice. Enter 1-15. Commands: H = Help, L = View Log, Q = Quit."
         continue
     }
     if ($modeChoice -eq 'H') {

@@ -1601,9 +1601,10 @@ the returned screen is not complete for the actual viewport. In that case it pri
 guidance and redraws; no hidden or clipped option can consume input. Once a complete screen
 is available, `Resolve-MainMenuCommand` is the only command allowlist before numeric
 dispatch: exact `1`-`15` selects a mode, `H` opens the distinct help screen, `L` opens the
-log/report folder, and `Q` exits. Invalid text, legacy `U`, leading-zero numbers, and
-blank input are rejected before any workflow branch can see them. Help returns on Enter and
-does not alter menu expansion state.
+log/report folder, and `Q` exits. Invalid text is stored as a render notice and shown on
+the next cleared redraw before the prompt; legacy `U`, leading-zero numbers, and blank input
+are rejected before any workflow branch can see them. Help returns on Enter and does not
+alter menu expansion state.
 
 **Unchanged by design:** existing menu numbering (1-13) and every existing mode's own behavior remain
 unchanged; option 14 adds the support-package workflow and Exit is now option 15. The `switch`

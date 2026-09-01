@@ -35,7 +35,8 @@
   when optional SVG illustration files are absent after a script-only update.
   Console startup sizing now grows BufferSize before WindowSize, catches
   unsupported hosts once, and leaves the constrained responsive menu usable
-  without repeating resize errors on redraw.
+  without repeating resize errors on redraw; invalid menu choices persist
+  through the next cleared redraw before the prompt.
 
 
 

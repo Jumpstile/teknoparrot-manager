@@ -8211,6 +8211,17 @@ Describe "RC8 main-menu command routing and visibility" {
         (Resolve-MainMenuCommand -InputText 'L' -MaxNumber 15) | Should -Be 'L'
         (Resolve-MainMenuCommand -InputText 'Q' -MaxNumber 15) | Should -Be 'Q'
     }
+    It "keeps an invalid-choice notice visible through the next constrained redraw" {
+        $notice = 'Invalid choice. Enter 1-15. Commands: H = Help, L = View Log, Q = Quit.'
+        $screen = Render-MainMenuScreen -Tier Compact -Width 80 -Height 25 -Notice $notice
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+        $output | Should -Match 'Invalid choice'
+        $output | Should -Match 'H = Help'
+        $output | Should -Match 'L = View Log'
+        $output | Should -Match 'Q = Quit'
+        $script:ProductionSource.Contains('-Notice $menuNotice -ReturnScreen') | Should -BeTrue
+        $script:ProductionSource.Contains('$menuNotice = "Invalid choice.') | Should -BeTrue
+    }
     It "uses a dedicated help title and a safe return path" {
         $help = Get-Command Show-MainMenuHelp
         $help.Definition | Should -Match 'TeknoParrot Manager Help'
