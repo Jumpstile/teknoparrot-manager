@@ -819,6 +819,11 @@ detects these dynamically (category existence check); no hardcoded game list.
 Backup verification failures are rendered before any PostgreSQL profile mutation.
 The normal screen uses the profile's friendly `GameName` plus the technical database
 identifier, states that nothing changed, and offers Retry, Skip, Details, and Back.
+When the database existence query fails, TPM captures the psql diagnostic stream and
+exit code before classifying the failure. The backup result retains structured
+`FailureDiagnoses` plus display-safe detail text, so support can distinguish a
+missing tool, stopped service, permission/elevation issue, missing database,
+connection failure, or unknown query failure without treating the database as absent.
 
 **Confirmed working silent-install recipe** (derived from real failed install attempts
 root-caused via verbose MSI logs; see LESSONS_LEARNED.md for the full post-mortem):

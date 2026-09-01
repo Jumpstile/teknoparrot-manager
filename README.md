@@ -642,12 +642,13 @@ Lawn Darts), and Orange County Choppers Pinball -- need a small local PostgreSQL
   reads it directly; already-correct profiles are skipped.
  - Recovery evidence and database backups are created before profile population.
    Any backup, reset, database, or profile-write failure is reported as blocked.
-   If an existing database backup fails, TPM lists every affected game/database
-   and classifies the failure as connection, service, tool, permission, missing
-   database, or unknown query failure. Details include the failed check and
-   next action. `[F]` shows repair guidance, `[R]` retries after correction,
-   `[O]` points to logs/support guidance, `[D]` shows details, and `[S]/[B]`
-   leave without profile or database changes.
+   If an existing database backup fails, TPM captures the PostgreSQL client
+   diagnostic and exit code, lists every affected game/database, and classifies
+   the failure as connection, service, tool, permission, missing database, or
+   unknown query failure. Details include the failed check and next action.
+   `[F]` shows repair guidance, `[R]` retries after correction, `[O]` points to
+   logs/support guidance, `[D]` shows details, and `[S]/[B]` leave without profile
+   or database changes.
 
 **A note on trust:** the PostgreSQL 8.3 installer is distributed via Eggmansworld/tp-it-guides GitHub release bundle. The installer is not Authenticode-signed and this path does not consume a published asset digest, so the script records source, filename/version, computed SHA-256, and transfer metrics but cannot independently verify publisher authenticity the way it does for ReShade. This is a limitation of the installer/source, not something a stronger check in this script can fix.
 

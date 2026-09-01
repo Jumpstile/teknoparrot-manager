@@ -331,11 +331,12 @@
   missing signature is shown as a warning but does not block setup.
   POSTGRESQL BACKUP FAILURES
   PostgreSQL setup verifies a recovery backup before changing settings. If a
-  database backup fails, TPM lists each affected game/database and the cause
-  category, such as connection, service, tool, permission, missing database,
-  or unknown query failure. Choose D for details, F for repair guidance, R
-  after correcting the issue, O for logs/support guidance, or S/B to leave
-  without profile or database changes.
+  database backup fails, TPM captures the PostgreSQL client diagnostic and
+  exit code, lists each affected game/database, and shows the cause category:
+  connection, service, tool, permission, missing database, or unknown query
+  failure. Choose D for details, F for repair guidance, R after correcting the
+  issue, O for logs/support guidance, or S/B to leave without profile or
+  database changes.
 
 
   Once installed, press the  Home  key while in-game to open the

@@ -6322,10 +6322,11 @@ function Get-PostgresFailureDiagnosis {
     param([string]$GameLabel, [string]$DbName, [string]$Detail, [int]$ExitCode = 1)
     $text = [string]$Detail
     $category = 'UnknownQueryFailure'; $next = 'Review the PostgreSQL log details, then retry after correcting the reported condition.'
-    if ($text -match 'not found|could not be verified|psql\.exe') { $category = 'ToolUnavailable'; $next = 'Install or repair the PostgreSQL client tools, then retry.' }
+    if ($text -match 'not found|could not be verified|not recognized|cannot find path') { $category = 'ToolUnavailable'; $next = 'Install or repair the PostgreSQL client tools, then retry.' }
     elseif ($text -match 'service|not running|stopped') { $category = 'ServiceNotRunning'; $next = 'Start the PostgreSQL service with administrator rights, then retry.' }
     elseif ($text -match 'permission|access denied|administrator|elevation') { $category = 'PermissionOrElevation'; $next = 'Run TeknoParrot Manager as administrator or grant the PostgreSQL account access, then retry.' }
     elseif ($text -match 'does not exist|database .* missing') { $category = 'DatabaseMissing'; $next = 'Verify the game database name and restore the database before retrying.' }
+    elseif ($text -match 'authentication failed|password') { $category = 'CannotConnect'; $next = 'Verify the PostgreSQL service, host, port, and credentials, then retry.' }
     elseif ($text -match 'connect|connection|refused|server') { $category = 'CannotConnect'; $next = 'Verify the PostgreSQL service, host, port, and credentials, then retry.' }
     return [pscustomobject]@{ GameLabel=$GameLabel; Database=$DbName; Category=$category; Detail=$text; NextAction=$next; ExitCode=$ExitCode }
 }
@@ -6339,9 +6340,13 @@ function Get-PostgresDatabaseState {
     $previousPgPassFile = $null
     try {
         $previousPgPassFile = Set-PostgresPgPassFileEnvironment -Path $pgpassFile
-        $result = & $psqlExe -U postgres -h 127.0.0.1 -p 5432 -tAc "SELECT 1 FROM pg_database WHERE datname='$DbName'" 2>$null
-        if ($LASTEXITCODE -ne 0) { throw 'Postgres: database existence query failed.' }
-        return [pscustomobject]@{ Exists = ($result -match '^\s*1\s*$'); Verified = $true }
+        $queryOutput = (& $psqlExe -U postgres -h 127.0.0.1 -p 5432 -tAc "SELECT 1 FROM pg_database WHERE datname='$DbName'" 2>&1 | Out-String).Trim()
+        $queryExitCode = $LASTEXITCODE
+        if ($queryExitCode -ne 0) {
+            $detail = if ($queryOutput) { ConvertTo-PostgresRedactedText -Text $queryOutput -Secrets @($SuperPasswordPlain) } else { 'psql returned no diagnostic text.' }
+            throw ("Postgres: database existence query failed (exit code {0}). Detail: {1}" -f $queryExitCode, $detail)
+        }
+        return [pscustomobject]@{ Exists = ($queryOutput -match '^\s*1\s*$'); Verified = $true }
     } finally {
         Restore-PostgresPgPassFileEnvironment -PreviousValue $previousPgPassFile
         Remove-PostgresPgPassFile -Path $pgpassFile -ThrowOnFailure
@@ -14810,6 +14815,7 @@ function Backup-PostgresDatabases {
     param([string]$UserProfilesDir, [string]$SuperPasswordPlain)
     $failedDatabases = New-Object System.Collections.Generic.List[string]
     $failureDetails = New-Object System.Collections.Generic.List[string]
+    $failureDiagnoses = New-Object System.Collections.Generic.List[object]
     $result = [ordered]@{
         Path = $null
         Succeeded = $true
@@ -14817,6 +14823,7 @@ function Backup-PostgresDatabases {
         FailedDatabaseCount = 0
         FailedDatabases = @()
         FailureDetails = @()
+        FailureDiagnoses = @()
     }
     if (-not (Test-PostgresInstalled)) { return [pscustomobject]$result }
     $names = New-Object System.Collections.Generic.HashSet[string]([StringComparer]::OrdinalIgnoreCase)
@@ -14842,6 +14849,7 @@ function Backup-PostgresDatabases {
             } catch {
                 $detail = [string]$_.Exception.Message
                 $diagnosis = Get-PostgresFailureDiagnosis -GameLabel $gameLabel -DbName $dbName -Detail $detail
+                [void]$failureDiagnoses.Add($diagnosis)
                 [void]$failedDatabases.Add(('{0} / {1}' -f $gameLabel, $dbName))
                 [void]$failureDetails.Add(('{0} / {1}: {2} ({3}) Next action: {4}' -f $gameLabel, $dbName, $detail, $diagnosis.Category, $diagnosis.NextAction))
             }
@@ -14856,6 +14864,7 @@ function Backup-PostgresDatabases {
         $result.FailedDatabaseCount = $failedDatabases.Count
         $result.FailedDatabases = @($failedDatabases.ToArray())
         $result.FailureDetails = @($failureDetails.ToArray())
+        $result.FailureDiagnoses = @($failureDiagnoses.ToArray())
         return [pscustomobject]$result
     }
     if ($failedDatabases.Count -gt 0) { $result.Succeeded = $false }
@@ -14867,8 +14876,11 @@ function Backup-PostgresDatabases {
         $result.Succeeded = $false
         foreach ($dbName in @($names | Sort-Object)) {
             $label = if ($databaseGameLabels.ContainsKey($dbName)) { $databaseGameLabels[$dbName] } else { $dbName }
+            $detail = 'pg_dump.exe was not found at {0}.' -f $pgDumpExe
+            $diagnosis = Get-PostgresFailureDiagnosis -GameLabel $label -DbName $dbName -Detail $detail
+            [void]$failureDiagnoses.Add($diagnosis)
             [void]$failedDatabases.Add(('{0} / {1}' -f $label, $dbName))
-            [void]$failureDetails.Add(('{0}: pg_dump.exe was not found at {1}.' -f $dbName, $pgDumpExe))
+            [void]$failureDetails.Add(('{0}: {1}' -f $dbName, $detail))
         }
     } else {
         $pgpassFile = $null
@@ -14883,8 +14895,11 @@ function Backup-PostgresDatabases {
                 if ($exitCode -ne 0 -or -not (Test-Path -LiteralPath $destFile -PathType Leaf) -or (Get-Item -LiteralPath $destFile).Length -eq 0) {
                     $result.Succeeded = $false
                     $label = if ($databaseGameLabels.ContainsKey($dbName)) { $databaseGameLabels[$dbName] } else { $dbName }
+                    $detail = if ($dumpOutput) { ConvertTo-PostgresRedactedText -Text $dumpOutput -Secrets @($SuperPasswordPlain) } else { 'pg_dump returned no diagnostic text.' }
+                    $diagnosis = Get-PostgresFailureDiagnosis -GameLabel $label -DbName $dbName -Detail $detail -ExitCode $exitCode
+                    [void]$failureDiagnoses.Add($diagnosis)
                     [void]$failedDatabases.Add(('{0} / {1}' -f $label, $dbName))
-                    [void]$failureDetails.Add(('{0}: pg_dump exit code {1}. {2}' -f $dbName, $exitCode, $dumpOutput))
+                    [void]$failureDetails.Add(('{0}: pg_dump exit code {1}. {2} ({3}) Next action: {4}' -f $dbName, $exitCode, $detail, $diagnosis.Category, $diagnosis.NextAction))
                 } else {
                     Write-Log "Postgres backup: verified database backup for $dbName at $($result.Path)."
                 }
@@ -14900,6 +14915,7 @@ function Backup-PostgresDatabases {
     $result.FailedDatabaseCount = $failedDatabases.Count
     $result.FailedDatabases = @($failedDatabases.ToArray())
     $result.FailureDetails = @($failureDetails.ToArray())
+    $result.FailureDiagnoses = @($failureDiagnoses.ToArray())
     if (-not $result.Succeeded) { Write-Log ("Postgres backup incomplete. FailedDatabases={0}; FailureDetails={1}" -f ($result.FailedDatabases -join '|'), ($result.FailureDetails -join '|')) }
     return [pscustomobject]$result
 }

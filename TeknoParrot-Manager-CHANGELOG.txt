@@ -45,6 +45,9 @@
   missing-path, and unsupported-game outcomes with a direct path-repair action.
   Crosshair preview pages now support bounded localhost click selection with a
   per-session token; typed numeric selection remains available as fallback.
+PostgreSQL backup diagnostics now retain the psql/pg_dump diagnostic stream
+and exit code in the blocked result, so cause categories are based on the
+actual client failure instead of a generic existence-query message.
 
 
 

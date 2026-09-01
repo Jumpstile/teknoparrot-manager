@@ -10210,6 +10210,14 @@ Describe "ReShade trusted profile restore" {
         $diagnosis = Get-PostgresFailureDiagnosis -GameLabel 'GameD' -DbName 'db_d' -Detail 'access denied'
         $diagnosis.Category | Should -Be 'PermissionOrElevation'
         $diagnosis.NextAction | Should -Not -BeNullOrEmpty
+        (Get-PostgresFailureDiagnosis -GameLabel 'GameE' -DbName 'db_e' -Detail 'psql.exe : FATAL: password authentication failed for user postgres').Category | Should -Be 'CannotConnect'
+    }
+    It "captures PostgreSQL client diagnostics before blocking writes" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$queryOutput = \(& \$psqlExe .*2>&1 \| Out-String\)\.Trim\(\)'
+        $source | Should -Match '\$queryExitCode = \$LASTEXITCODE'
+        $source | Should -Match 'database existence query failed \(exit code \{0\}\)'
+        $source | Should -Match 'FailureDiagnoses = @\(\$failureDiagnoses\.ToArray\(\)\)'
     }
 
     It "keeps ReShade preview and deployment confirmation wording explicit" {

@@ -1680,6 +1680,13 @@
     that already exists is never recreated or restored over. TPM updates
     only affected profiles whose values are not already correct, in a
     deterministic order, and fails closed on any backup or write failure.
+    Any backup failure is shown before profile writes. TPM captures the
+    PostgreSQL client diagnostic and exit code, lists each affected
+    game/database, and classifies the cause as connection, service, tool,
+    permission, missing database, or unknown query failure. Details include
+    the failed check and next action. F) repair guidance, R) retry after
+    correction, O) logs/support guidance, D) details, and S)/B) leave
+    without profile or database changes.
   Password storage
 
     The database password is encrypted using Windows DPAPI (tied to your
