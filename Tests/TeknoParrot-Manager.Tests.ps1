@@ -4577,6 +4577,19 @@ Describe "Resolve-ExtractedGameFolder (issue #66 extraction prompt correctness)"
     }
 }
 
+Describe "AutoSync one-game registration UX" {
+    It "keeps extraction, existing-game checks, and changed-game writes distinct" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'Final queue'
+        $source | Should -Match 'Whitelist active: only extracting'
+        $source | Should -Match 'No supplementary games selected -- skipping'
+        $source | Should -Match 'Checking your TeknoParrot folder so the new game is registered correctly'
+        $source | Should -Match 'checks existing installed games, but only changed or new games will be written'
+        $source | Should -Match 'Registered\s+:\s'
+        $source | Should -Match 'Extracted\s+:\s'
+    }
+}
+
 Describe "Invoke-AutoSync extracted-folder regression guards" {
     BeforeAll {
         $script:OriginalAutoSyncRawThrillsPathLimits = $script:RawThrillsPathLimits

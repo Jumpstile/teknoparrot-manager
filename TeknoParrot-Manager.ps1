@@ -20019,6 +20019,10 @@ if ($mode -eq "AutoSync") {
 # =============================================================================
 
 Write-Host ""
+Write-Host "Checking your TeknoParrot folder so the new game is registered correctly." -ForegroundColor Cyan
+Write-Host "This checks existing installed games, but only changed or new games will be written." -ForegroundColor DarkCyan
+Write-Log "Registration check: scanning installed games; only changed or new games will be written."
+Write-Host ""
 Write-Host "Indexing TeknoParrot game profiles..." -ForegroundColor Cyan
 $profileIndex = Build-ProfileIndex $gameProfilesDir
 Write-Host "  Indexed $($profileIndex.Keys.Count) executable names across the profile set." -ForegroundColor DarkCyan
