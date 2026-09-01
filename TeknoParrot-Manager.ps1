@@ -20190,11 +20190,10 @@ if ($registrationFolders.Count -gt 0 -and -not $dryRunActive) {
     Write-Host ""
     Write-Host ("{0} was added. TeknoParrot Manager can now check your library for related setup tasks." -f $newGameLabel) -ForegroundColor Green
     Write-Host "  [N] New game only (default)" -ForegroundColor Cyan
-    Write-Host "  [C] Check related setup" -ForegroundColor Cyan
     Write-Host "  [A] Check all games" -ForegroundColor Yellow
     Write-Host "  [B] Back" -ForegroundColor Cyan
-    $maintenanceChoice = (Read-HostSafe "  Choice (N/C/A/B)" -Default "N").Trim().ToUpper()
-    if ($maintenanceChoice -notin @('N','C','A','B','')) { $maintenanceChoice = 'N' }
+    $maintenanceChoice = (Read-HostSafe "  Choice (N/A/B)" -Default "N").Trim().ToUpper()
+    if ($maintenanceChoice -notin @('N','A','B','')) { $maintenanceChoice = 'N' }
     if ($maintenanceChoice -in @('N','')) {
         Write-Log "AutoSync: one-game maintenance scope = New game only."
         Write-Host "  New game only selected. Whole-library maintenance was not run." -ForegroundColor Green
@@ -20205,7 +20204,7 @@ if ($registrationFolders.Count -gt 0 -and -not $dryRunActive) {
         Write-Log "AutoSync: maintenance scope selection backed out."
         continue
     }
-    Write-Log ("AutoSync: maintenance scope = {0}." -f $(if ($maintenanceChoice -eq 'A') { 'all games' } else { 'related setup' }))
+    Write-Log "AutoSync: maintenance scope = all games."
 }
 
 # =============================================================================

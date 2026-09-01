@@ -24,7 +24,8 @@
   HyperSpin export now gates missing emulator IDs with explicit Fix, Add
   anyway, or Skip choices; Skip is the safe default and no games are written.
   One-game AutoSync now pauses before optional library maintenance and offers
-  New game only, related setup, all games, or Back; New game only is safe default.
+  New game only, all games, or Back; New game only is safe default. Related-only
+  scoping is deferred rather than presented as an unimplemented choice.
 
 
 
