@@ -19450,6 +19450,7 @@ $mode = $null
             }
             [void](Complete-TpmWorkflowStep -Context $ffbStatus -Outcome Fixed -Summary 'Optional plugin step finished' -NextStep 'Verify force-feedback ownership')
         } else {
+            [void](Start-TpmWorkflowStep -Context $ffbStatus -StepId 'plugin' -Activity 'Optional plugin skipped by user choice')
             [void](Complete-TpmWorkflowStep -Context $ffbStatus -Outcome Skipped -Summary 'Optional plugin skipped')
             Write-Log "FFBPlugin setup: skipped by user choice."
         }
