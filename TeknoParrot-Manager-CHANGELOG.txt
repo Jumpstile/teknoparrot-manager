@@ -29,6 +29,8 @@
   ReShade preview comparison now has a real 0-100 in-memory slider; its
   percentage controls the Before/After split, and disk cache keys include the
   slider position when cached artifacts are requested.
+  TPM-owned preview reference assets now ship under PreviewAssets\ReShadePreviews
+  instead of the excluded live-fetched ReShade\ runtime directory.
 
 
 

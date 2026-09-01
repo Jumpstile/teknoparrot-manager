@@ -133,6 +133,7 @@ Candidate ZIP name: `TeknoParrot Manager v1.0 RC8.zip` (staged validation only u
 
 **Include:** `TeknoParrot-Manager.ps1`, `.bat`, `-README.txt`, `-QuickStart.txt`,
 `-CHANGELOG.txt`, `LICENSE`, `Crosshairs\` (all 321 PNGs),
+`PreviewAssets\ReShadePreviews\` (the five TPM-owned SVG preview references),
 `tools\Invoke-TpmAutoUpdate.ps1`, `tools\TpmAutoUpdate.Core.psm1`,
 `scripts\Debug-TPM-MenuLayout.ps1`, `contracts\` (ECVF registered contracts),
 `scripts\TPMCertification.Contracts.psm1` (ECVF loader/validator/evaluator),

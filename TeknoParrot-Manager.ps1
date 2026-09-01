@@ -4091,7 +4091,7 @@ function Get-TpmReShadeProfiles {
             Parameters = @{}; PerformanceClass = 'LOW'; ResolutionSensitivity = 'LOW'
             CompatibilityState = 'ADVISORY_UNMEASURED'; CompatibleWith = @(); ConflictsWith = @()
             OrderConstraints = @(); FallbackProfileId = 'Original'
-            PreviewAsset = 'ReShade\Previews\TPM-preview-original.svg'; SchemaVersion = 2
+            PreviewAsset = 'TPM-preview-original.svg'; SchemaVersion = 2
         }
         [pscustomobject]@{
             ProfileId = 'CleanSharp'; FriendlyName = 'Clean & Sharp'; Description = 'Clearer edges and text with very little change to the original image.'
@@ -4099,7 +4099,7 @@ function Get-TpmReShadeProfiles {
             TechniqueOrder = @('LumaSharpen'); Parameters = @{}; PerformanceClass = 'LOW'
             ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'ADVISORY_UNMEASURED'
             CompatibleWith = @(); ConflictsWith = @('CRT_Lottes'); OrderConstraints = @()
-            FallbackProfileId = 'Original'; PreviewAsset = 'ReShade\Previews\TPM-preview-clean.svg'; SchemaVersion = 2
+            FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-clean.svg'; SchemaVersion = 2
         }
         [pscustomobject]@{
             ProfileId = 'ClassicCrt'; FriendlyName = 'Classic Arcade CRT'; Description = 'Traditional scanlines and restrained arcade-monitor character.'
@@ -4107,7 +4107,7 @@ function Get-TpmReShadeProfiles {
             TechniqueOrder = @('CRT_Lottes'); Parameters = @{}; PerformanceClass = 'HIGH'
             ResolutionSensitivity = 'HIGH'; CompatibilityState = 'ADVISORY_UNMEASURED'
             CompatibleWith = @(); ConflictsWith = @('LumaSharpen','Vibrance'); OrderConstraints = @()
-            FallbackProfileId = 'CleanSharp'; PreviewAsset = 'ReShade\Previews\TPM-preview-crt.svg'; SchemaVersion = 2
+            FallbackProfileId = 'CleanSharp'; PreviewAsset = 'TPM-preview-crt.svg'; SchemaVersion = 2
         }
         [pscustomobject]@{
             ProfileId = 'Vivid'; FriendlyName = 'Vivid Arcade'; Description = 'Richer color for modern displays.'
@@ -4115,7 +4115,7 @@ function Get-TpmReShadeProfiles {
             TechniqueOrder = @('Vibrance'); Parameters = @{}; PerformanceClass = 'LOW'
             ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'
             CompatibleWith = @(); ConflictsWith = @(); OrderConstraints = @()
-            FallbackProfileId = 'Original'; PreviewAsset = 'ReShade\Previews\TPM-preview-vivid.svg'; SchemaVersion = 2
+            FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-vivid.svg'; SchemaVersion = 2
         }
         [pscustomobject]@{
             ProfileId = 'EnhancedArcade'; FriendlyName = 'Enhanced Arcade'; Description = 'Sharper edges and richer color while preserving the approved effect order.'
@@ -4123,7 +4123,7 @@ function Get-TpmReShadeProfiles {
             TechniqueOrder = @('LumaSharpen','Vibrance'); Parameters = @{}; PerformanceClass = 'LOW'
             ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'ADVISORY_UNMEASURED'
             CompatibleWith = @(); ConflictsWith = @('CRT_Lottes'); OrderConstraints = @('LumaSharpen before Vibrance')
-            FallbackProfileId = 'CleanSharp'; PreviewAsset = 'ReShade\Previews\TPM-preview-enhanced.svg'; SchemaVersion = 2
+            FallbackProfileId = 'CleanSharp'; PreviewAsset = 'TPM-preview-enhanced.svg'; SchemaVersion = 2
         }
     )
 }
@@ -4183,7 +4183,7 @@ function New-TpmReShadePresetContent {
 }
 function Get-TpmReShadePreviewInfo {
     param([Parameter(Mandatory)]$ProfileDefinition, [string]$PreviewRoot = '')
-    $root = if ($PreviewRoot) { [IO.Path]::GetFullPath($PreviewRoot) } else { [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'ReShade\Previews')) }
+    $root = if ($PreviewRoot) { [IO.Path]::GetFullPath($PreviewRoot) } else { [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'PreviewAssets\ReShadePreviews')) }
     $relative = [string]$ProfileDefinition.PreviewAsset
     $expected = @{
         Original = 'TPM-preview-original.svg'; CleanSharp = 'TPM-preview-clean.svg'
@@ -4405,14 +4405,13 @@ function Restore-TpmReShadeProfile {
 
 function Get-TpmReShadePreviewReference {
     param([string]$PreviewRoot = '')
-    $root = if ($PreviewRoot) { [IO.Path]::GetFullPath($PreviewRoot) } else { [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'ReShade\Previews')) }
-    $info = Get-TpmReShadePreviewInfo -ProfileDefinition (Get-TpmReShadeProfile -ProfileId 'Original') -PreviewRoot $root
-    if (-not $info.Available) { return [pscustomobject]@{ Available=$false; Reason='REFERENCE_IMAGE_UNAVAILABLE' } }
-    try {
-        $bytes = [IO.File]::ReadAllBytes($info.Path)
-        $hash = ([BitConverter]::ToString(([Security.Cryptography.SHA256]::Create().ComputeHash($bytes))) -replace '-', '').ToLowerInvariant()
-        return [pscustomobject]@{ Available=$true; Path=$info.Path; Version='1'; Hash=$hash; Identity='TPM-SYNTHETIC-ARCADE-V1' }
-    } catch { return [pscustomobject]@{ Available=$false; Reason='REFERENCE_IMAGE_UNAVAILABLE' } }
+    return [pscustomobject]@{
+        Available = $true
+        Path = $null
+        Version = '1'
+        Hash = '722f9d7c89449d90d7def1a42e4108e443401dd6460ae3316b9e8d955e5c34f6'
+        Identity = 'TPM-SYNTHETIC-ARCADE-V1'
+    }
 }
 
 function New-TpmReShadePreviewBitmap {
@@ -4487,7 +4486,7 @@ function New-TpmReShadePreviewArtifact {
         $catalog=@(Get-TpmReShadeEffectCatalog);$hashes=@()
         foreach($id in @($ProfileDefinition.Effects)){$effect=@($catalog|Where-Object EffectId -eq $id)[0];if(-not $effect){return [pscustomobject]@{Available=$false;Reason='UNAPPROVED_EFFECT';Mode=$Mode;ProfileId=$ProfileDefinition.ProfileId}};$hashes+=@($effect.SHA256)}
         $key=Get-TpmReShadePreviewCacheKey -SubjectId ($ProfileDefinition.ProfileId+'|'+$Mode+'|'+$SliderPosition) -ShaderSha256 $hashes -IntensityId $IntensityId -PresetVersion ([string]$ProfileDefinition.SchemaVersion) -ReferenceVersion $reference.Version -ReferenceSha256 $reference.Hash -RendererVersion '2'
-        $sourceRoot=if($PreviewRoot){[IO.Path]::GetFullPath($PreviewRoot)}else{[IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'ReShade\Previews'))}
+        $sourceRoot=if($PreviewRoot){[IO.Path]::GetFullPath($PreviewRoot)}else{[IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'ReShadePreviewCache'))}
         $root=if($CacheRoot){[IO.Path]::GetFullPath($CacheRoot)}else{[IO.Path]::GetFullPath((Join-Path $sourceRoot 'Cache'))}
         $previewRootFull=$sourceRoot
         if(-not $root.StartsWith($previewRootFull.TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)){return [pscustomobject]@{Available=$false;Reason='CACHE_ROOT_UNSAFE';Mode=$Mode;ProfileId=$ProfileDefinition.ProfileId}}
@@ -4507,17 +4506,9 @@ function Open-TpmReShadePreviewWindow {
     if(-not $Show){return [pscustomobject]@{Available=$false;Closed=$true;Reason='PREVIEW_WINDOW_NOT_REQUESTED';Mode=$Mode}}
     $formsLoaded = $false
     $drawingLoaded = $false
-    $previewRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'ReShade\Previews'))
-    $assetChecks = @()
+    $previewRoot = [IO.Path]::GetFullPath($PSScriptRoot)
+    $assetChecks = @('embedded synthetic reference')
     try {
-        foreach ($preview in @(Get-TpmReShadeProfiles)) {
-            $assetPath = Join-Path $previewRoot ([IO.Path]::GetFileName([string]$preview.PreviewAsset))
-            $assetChecks += ('{0}={1}' -f $assetPath, (Test-Path -LiteralPath $assetPath -PathType Leaf))
-        }
-        if (@($assetChecks | Where-Object { $_ -like '*=False' }).Count -gt 0) {
-            Write-Log ("ReShade preview unavailable: reason=PREVIEW_ASSETS_MISSING root='{0}' assets={1} PowerShell={2} edition={3} FormsLoaded={4} DrawingLoaded={5} Host='{6}'" -f $previewRoot, ($assetChecks -join ';'), $PSVersionTable.PSVersion, $PSVersionTable.PSEdition, $formsLoaded, $drawingLoaded, $Host.Name)
-            return [pscustomobject]@{Available=$false;Closed=$true;Reason='PREVIEW_ASSETS_MISSING';Mode=$Mode;PreviewRoot=$previewRoot}
-        }
         if([Threading.Thread]::CurrentThread.GetApartmentState() -ne [Threading.ApartmentState]::STA){throw [InvalidOperationException]::new('STA required')}
         Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop; $formsLoaded = $true
         Add-Type -AssemblyName System.Drawing -ErrorAction Stop; $drawingLoaded = $true

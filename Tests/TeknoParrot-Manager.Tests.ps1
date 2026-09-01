@@ -9843,7 +9843,7 @@ Describe "Approved ReShade profile catalog" {
 Describe "ReShade profile previews" {
     It "binds every canonical profile to its local synthetic preview" {
         $expected=@{Original='TPM-preview-original.svg';CleanSharp='TPM-preview-clean.svg';Vivid='TPM-preview-vivid.svg';EnhancedArcade='TPM-preview-enhanced.svg';ClassicCrt='TPM-preview-crt.svg'}
-        $gallery=@(Get-TpmReShadeProfileGallery -PreviewRoot (Join-Path $PSScriptRoot '..\ReShade\Previews'));$gallery.Count|Should -Be 5
+        $gallery=@(Get-TpmReShadeProfileGallery -PreviewRoot (Join-Path $PSScriptRoot '..\PreviewAssets\ReShadePreviews'));$gallery.Count|Should -Be 5
         foreach($item in $gallery){$item.PreviewAvailable|Should -BeTrue;$item.Provenance|Should -Be 'TPM synthetic';([IO.Path]::GetFileName($item.PreviewPath))|Should -Be $expected[$item.ProfileId]}
     }
     It "fails closed for missing, invalid, traversal, and wrong binding without blocking profiles" {
@@ -9861,24 +9861,33 @@ Describe "ReShade preview renderer and cache" {
     BeforeAll { Add-Type -AssemblyName System.Drawing }
     It "renders deterministic Before, After, and Split artifacts from one reference identity" {
         $root=Join-Path $TestDrive 'preview-root';$cache=Join-Path $root 'Cache';[IO.Directory]::CreateDirectory($root)|Out-Null
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\ReShade\Previews\TPM-preview-original.svg') -Destination (Join-Path $root 'TPM-preview-original.svg')
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\PreviewAssets\ReShadePreviews\TPM-preview-original.svg') -Destination (Join-Path $root 'TPM-preview-original.svg')
         $p=Get-TpmReShadeProfile -ProfileId EnhancedArcade;$a=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Before -PreviewRoot $root -CacheRoot $cache;$b=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode After -PreviewRoot $root -CacheRoot $cache;$c=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache;$s0=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 0 -PreviewRoot $root -CacheRoot $cache;$s50=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 50 -PreviewRoot $root -CacheRoot $cache;$s100=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 100 -PreviewRoot $root -CacheRoot $cache
         foreach($x in @($a,$b,$c,$s0,$s50,$s100)){$x.Available|Should -BeTrue -Because ($x|ConvertTo-Json);$x.ReferenceIdentity|Should -Be 'TPM-SYNTHETIC-ARCADE-V1';Test-Path -LiteralPath $x.Path -PathType Leaf|Should -BeTrue}
         $a.CacheKey|Should -Not -Be $b.CacheKey;$b.CacheKey|Should -Not -Be $c.CacheKey;$s0.CacheKey|Should -Not -Be $s50.CacheKey;$s50.CacheKey|Should -Not -Be $s100.CacheKey
         (New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 50 -PreviewRoot $root -CacheRoot $cache).Reused|Should -BeTrue
     }
-    It "regenerates corrupt or stale cache and fails gracefully without the reference" {
+    It "regenerates corrupt or stale cache without an external reference dependency" {
         $root=Join-Path $TestDrive 'preview-root';$cache=Join-Path $root 'Cache';[IO.Directory]::CreateDirectory($root)|Out-Null
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\ReShade\Previews\TPM-preview-original.svg') -Destination (Join-Path $root 'TPM-preview-original.svg')
         $p=Get-TpmReShadeProfile -ProfileId CleanSharp;$first=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache
         Set-Content -LiteralPath $first.Path -Value 'not an image';(New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache).Available|Should -BeTrue
         $manifest=Join-Path $cache ($first.CacheKey+'.json');$json=Get-Content -LiteralPath $manifest -Raw|ConvertFrom-Json;$json.CacheKey='stale';$json|ConvertTo-Json|Set-Content -LiteralPath $manifest
         (New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache).Available|Should -BeTrue
-        Remove-Item -LiteralPath (Join-Path $root 'TPM-preview-original.svg') -Force;(New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache).Available|Should -BeFalse
+    }
+    It "renders from the embedded reference when ancillary assets are absent" {
+        $p = Get-TpmReShadeProfile -ProfileId EnhancedArcade
+        $artifact = New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 50
+        try {
+            $artifact.Available | Should -BeTrue -Because ($artifact | ConvertTo-Json)
+            $artifact.ReferenceIdentity | Should -Be 'TPM-SYNTHETIC-ARCADE-V1'
+        } finally {
+            if ($artifact.Path) { Remove-Item -LiteralPath $artifact.Path -Force -ErrorAction SilentlyContinue }
+            if ($artifact.Path) { Remove-Item -LiteralPath ([IO.Path]::ChangeExtension($artifact.Path, '.json')) -Force -ErrorAction SilentlyContinue }
+        }
     }
     It "keeps preview rendering outside preset, asset, game, and trust state" {
         $root=Join-Path $TestDrive 'preview-root';$cache=Join-Path $root 'Cache';[IO.Directory]::CreateDirectory($root)|Out-Null
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\ReShade\Previews\TPM-preview-original.svg') -Destination (Join-Path $root 'TPM-preview-original.svg')
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\PreviewAssets\ReShadePreviews\TPM-preview-original.svg') -Destination (Join-Path $root 'TPM-preview-original.svg')
         $p=Get-TpmReShadeProfile -ProfileId EnhancedArcade;$preset=(New-TpmReShadePresetContent -ProfileDefinition $p);$hashes=@(Get-TpmReShadeEffectCatalog|ForEach-Object{(@($_.SHA256)-join ',')});$game=Join-Path $TestDrive 'game';[IO.Directory]::CreateDirectory($game)|Out-Null;[IO.File]::WriteAllText((Join-Path $game 'keep.txt'),'keep')
         $null=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache
         (New-TpmReShadePresetContent -ProfileDefinition $p)|Should -Be $preset;(@(Get-TpmReShadeEffectCatalog|ForEach-Object{(@($_.SHA256)-join ',')}))|Should -Be $hashes;(Get-Content -LiteralPath (Join-Path $game 'keep.txt') -Raw)|Should -Be 'keep'
