@@ -12600,7 +12600,8 @@ function Register-Games {
     # Example: CrediarDolphin titles whose game files must live at
     # TeknoParrot\CrediarDolphin\User\Wii\. Configured in overrides.json:
     # { "subFolderMap": { "TatsunokoCap": "CrediarDolphin\\User\\Wii" } }
-    if ($subFolderMap -and $subFolderMap.Count -gt 0 -and $gameProfilesDir -and
+    if (($null -eq $GameFolders -or $GameFolders.Count -eq 0) -and
+        $subFolderMap -and $subFolderMap.Count -gt 0 -and $gameProfilesDir -and
         $tpRootDir -and (Test-Path -LiteralPath $tpRootDir)) {
         foreach ($sfCode in @($subFolderMap.Keys)) {
             $sfCode = [string]$sfCode
