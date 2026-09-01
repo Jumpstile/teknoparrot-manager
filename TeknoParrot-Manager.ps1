@@ -18390,6 +18390,47 @@ function Read-MainMenuChoiceResponsive {
 $MinBoundForArchetype = 5
 try {
 Set-ConsoleMaximizedIfSupported
+function Invoke-TpmFfbSetupMode {
+    param([Parameter(Mandatory)][string]$UserProfilesDir, [Parameter(Mandatory)][string]$TpRoot, [string]$ScriptRoot = $PSScriptRoot, [scriptblock]$EventSink = $null)
+    $status = New-TpmWorkflowStatusContext -WorkflowKey 'FFBSetup' -Title 'Force feedback setup' -EventSink $EventSink -Steps @(
+        @{ Id = 'inspect'; Label = 'Check available force-feedback options' }
+        @{ Id = 'native'; Label = 'Apply the approved native option' }
+        @{ Id = 'plugin'; Label = 'Download and apply the optional plugin' }
+        @{ Id = 'verify'; Label = 'Verify ownership and results' }
+    )
+    [void](Start-TpmWorkflowStatus -Context $status)
+    [void](Start-TpmWorkflowStep -Context $status -StepId 'inspect' -Activity 'Checking force-feedback options')
+    [void](Complete-TpmWorkflowStep -Context $status -Summary 'Force-feedback options checked' -NextStep 'Apply the approved native option')
+    [void](Start-TpmWorkflowStep -Context $status -StepId 'native' -Activity 'Applying the native option')
+    $nativeCodes = Invoke-FFBBlasterSetup -UserProfilesDir $UserProfilesDir -TpRoot $TpRoot
+    [void](Complete-TpmWorkflowStep -Context $status -Summary 'Native force feedback step finished' -NextStep 'Choose whether to add the optional plugin')
+    [void](Set-TpmWorkflowWaiting -Context $status -Message 'TPM can add the optional third-party force-feedback plugin.' -UserAction 'Answer Y or N')
+    $choice = (Read-HostSafe 'Also set up the free third-party FFB plugin? (Y/N)').Trim().ToUpper()
+    [void](Resume-TpmWorkflowStatus -Context $status)
+    if ($choice -eq 'Y') {
+        [void](Start-TpmWorkflowStep -Context $status -StepId 'plugin' -Activity 'Downloading and applying the optional plugin')
+        $plugin = Invoke-FFBPluginSetup -UserProfilesDir $UserProfilesDir -CacheDir (Join-Path $ScriptRoot 'FFBPlugin') -NativeEnabledCodes $nativeCodes
+        if (-not ($plugin -and $plugin.Succeeded)) {
+            [void](Set-TpmWorkflowFailure -Context $status -FailureId 'ffb-plugin-failed' -Message 'The optional force-feedback plugin was not completed.' -DataSafety 'TPM did not claim a complete third-party plugin deployment.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+            [void](Read-HostSafe 'Press Enter to acknowledge the force-feedback result')
+            [void](Acknowledge-TpmWorkflowFailure -Context $status -FailureId 'ffb-plugin-failed')
+            [void](Stop-TpmWorkflowStatus -Context $status -Reason 'Force-feedback setup stopped')
+            [void](Close-TpmWorkflowStatus -Context $status)
+            return [pscustomobject]@{ Completed = $false; Context = $status }
+        }
+        [void](Complete-TpmWorkflowStep -Context $status -Outcome Fixed -Summary 'Optional plugin step finished' -NextStep 'Verify force-feedback ownership')
+    } else {
+        [void](Start-TpmWorkflowStep -Context $status -StepId 'plugin' -Activity 'Optional plugin skipped by user choice')
+        [void](Complete-TpmWorkflowStep -Context $status -Outcome Skipped -Summary 'Optional plugin skipped')
+        Write-Log 'FFBPlugin setup: skipped by user choice.'
+    }
+    [void](Start-TpmWorkflowStep -Context $status -StepId 'verify' -Activity 'Verifying force-feedback results')
+    [void](Complete-TpmWorkflowStep -Context $status -Summary 'Force-feedback results recorded')
+    [void](Complete-TpmWorkflowStatus -Context $status -Summary 'Force-feedback setup finished')
+    [void](Close-TpmWorkflowStatus -Context $status)
+    return [pscustomobject]@{ Completed = $true; Context = $status }
+}
+
 while ($true) {
     # Refresh the drive-info snapshot at the start of each menu iteration so
     # any drive changes since the last pass (USB ejected, network share
@@ -19431,68 +19472,12 @@ $mode = $null
     }
 
     if ($mode -eq "FFBSetup") {
-        Write-Host ""
-        Write-Host "--------------------------------------------" -ForegroundColor Cyan
-        Write-Host " Force Feedback (FFB) Setup" -ForegroundColor Cyan
-        Write-Host "--------------------------------------------" -ForegroundColor Cyan
-        $ffbStatus = New-TpmWorkflowStatusContext -WorkflowKey 'FFBSetup' -Title 'Force feedback setup' -Steps @(
-            @{ Id = 'inspect'; Label = 'Check available force-feedback options' }
-            @{ Id = 'native'; Label = 'Apply the approved native option' }
-            @{ Id = 'plugin'; Label = 'Download and apply the optional plugin' }
-            @{ Id = 'verify'; Label = 'Verify ownership and results' }
-        )
-        [void](Start-TpmWorkflowStatus -Context $ffbStatus)
-        [void](Start-TpmWorkflowStep -Context $ffbStatus -StepId 'inspect' -Activity 'Checking force-feedback options')
-        Write-Host ""
-        Write-Host "  Force feedback makes a wheel or stick push back / rumble to match"
-        Write-Host "  what's happening on screen (e.g. road vibration, recoil, collisions)."
-        Write-Host "  Two independent ways to get it, covering different games -- both can"
-        Write-Host "  be set up, neither requires the other:"
-        Write-Host ""
-        Write-Host "    1) FFB Blaster -- TeknoParrot's own built-in force feedback."
-        Write-Host "       Native and well-integrated, but requires an active paid"
-        Write-Host "       TeknoParrot membership (teknoparrot.com/en/Home/Subscription)."
-        Write-Host "    2) Third-party FFB plugin -- a free, separately-maintained DLL"
-        Write-Host "       (mightymikem/FFBArcadePlugin) that adds force feedback to a"
-        Write-Host "       different set of arcade titles. No subscription needed."
-        Write-Host ""
-        Write-Host "  If a game is covered by both, you'll be asked which one to use for it."
-
-        [void](Complete-TpmWorkflowStep -Context $ffbStatus -Summary 'Force-feedback options checked' -NextStep 'Apply the approved native option')
-        [void](Start-TpmWorkflowStep -Context $ffbStatus -StepId 'native' -Activity 'Applying the native option')
-        $nativeEnabledCodes = Invoke-FFBBlasterSetup -UserProfilesDir $userProfilesDir -TpRoot $tpRoot
-        [void](Complete-TpmWorkflowStep -Context $ffbStatus -Summary 'Native force feedback step finished' -NextStep 'Choose whether to add the optional plugin')
-        [void](Set-TpmWorkflowWaiting -Context $ffbStatus -Message 'TPM can add the optional third-party force-feedback plugin.' -UserAction 'Answer Y or N')
-
-        Write-Host ""
-        $doFfbPlugin = (Read-HostSafe "  Also set up the free third-party FFB plugin (covers additional games)? (Y/N)").ToUpper()
-        [void](Resume-TpmWorkflowStatus -Context $ffbStatus)
-        if ($doFfbPlugin -eq "Y") {
-            [void](Start-TpmWorkflowStep -Context $ffbStatus -StepId 'plugin' -Activity 'Downloading and applying the optional plugin')
-            $ffbCacheDir = Join-Path $PSScriptRoot "FFBPlugin"
-            $ffbPluginResult = Invoke-FFBPluginSetup -UserProfilesDir $userProfilesDir -CacheDir $ffbCacheDir -NativeEnabledCodes $nativeEnabledCodes
-            if (-not ($ffbPluginResult -and $ffbPluginResult.Succeeded)) {
-                [void](Set-TpmWorkflowFailure -Context $ffbStatus -FailureId 'ffb-plugin-failed' -Message 'The optional force-feedback plugin was not completed.' -DataSafety 'TPM did not claim a complete third-party plugin deployment.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
-                [void](Read-HostSafe '  Press Enter to acknowledge the force-feedback result')
-                [void](Acknowledge-TpmWorkflowFailure -Context $ffbStatus -FailureId 'ffb-plugin-failed')
-                [void](Stop-TpmWorkflowStatus -Context $ffbStatus -Reason 'Force-feedback setup stopped')
-                [void](Close-TpmWorkflowStatus -Context $ffbStatus)
-                continue
-            }
-            [void](Complete-TpmWorkflowStep -Context $ffbStatus -Outcome Fixed -Summary 'Optional plugin step finished' -NextStep 'Verify force-feedback ownership')
-        } else {
-            [void](Start-TpmWorkflowStep -Context $ffbStatus -StepId 'plugin' -Activity 'Optional plugin skipped by user choice')
-            [void](Complete-TpmWorkflowStep -Context $ffbStatus -Outcome Skipped -Summary 'Optional plugin skipped')
-            Write-Log "FFBPlugin setup: skipped by user choice."
+        $ffbModeResult = Invoke-TpmFfbSetupMode -UserProfilesDir $userProfilesDir -TpRoot $tpRoot -ScriptRoot $PSScriptRoot
+        if ($ffbModeResult.Completed) {
+            Write-Host ""
+            Write-Host "Done." -ForegroundColor Green
+            Write-Log "FFB setup complete."
         }
-        [void](Start-TpmWorkflowStep -Context $ffbStatus -StepId 'verify' -Activity 'Verifying force-feedback results')
-        [void](Complete-TpmWorkflowStep -Context $ffbStatus -Summary 'Force-feedback results recorded')
-        [void](Complete-TpmWorkflowStatus -Context $ffbStatus -Summary 'Force-feedback setup finished')
-        [void](Close-TpmWorkflowStatus -Context $ffbStatus)
-
-        Write-Host ""
-        Write-Host "Done." -ForegroundColor Green
-        Write-Log "FFB setup complete."
         [void](Read-Host "  Press Enter to return to menu")
         continue
     }

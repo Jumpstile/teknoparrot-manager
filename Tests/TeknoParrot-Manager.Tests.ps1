@@ -9589,6 +9589,18 @@ Describe "Issue #300 shared workflow status state machine" {
         Write-TpmWorkflowConsoleLine -Context (New-TpmWorkflowStatusContext -WorkflowKey 'message' -Title 'Message' -Steps @('one')) -Message 'Warning: visible task message'
         $script:userMessages | Should -Contain 'Warning: visible task message'
     }
+    It "executes the production FFBSetup caller safely when the optional plugin is declined" {
+        $events = New-Object System.Collections.Generic.List[object]
+        Mock Invoke-FFBBlasterSetup { @('native-code') }
+        Mock Invoke-FFBPluginSetup { throw 'plugin must not be called' }
+        Mock Read-HostSafe { 'N' }
+        $result = Invoke-TpmFfbSetupMode -UserProfilesDir $TestDrive -TpRoot $TestDrive -ScriptRoot $TestDrive -EventSink { param($event) [void]$events.Add($event) }
+        $result.Completed | Should -BeTrue
+        $result.Context.Lifecycle | Should -Be 'Closed'
+        @($events | Where-Object { $_.StepId -eq 'plugin' -and $_.Outcome -eq 'Skipped' }).Count | Should -Be 1
+        Should -Invoke Invoke-FFBPluginSetup -Times 0 -Exactly
+    }
+
 }
 
 Describe "Issue #300 workflow ownership and transition guards" {
