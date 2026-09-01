@@ -10203,6 +10203,25 @@ Describe "ReShade trusted profile restore" {
         Test-CrosshairSelectionIndex -Token 'good' -ExpectedToken 'good' -Value '321' | Should -BeNullOrEmpty
         Test-CrosshairSelectionIndex -Token 'good' -ExpectedToken 'good' -Value '320' | Should -Be 320
     }
+    It "classifies PostgreSQL failure causes and preserves next actions" {
+        (Get-PostgresFailureDiagnosis -GameLabel 'GameA' -DbName 'db_a' -Detail 'connection refused').Category | Should -Be 'CannotConnect'
+        (Get-PostgresFailureDiagnosis -GameLabel 'GameB' -DbName 'db_b' -Detail 'psql.exe could not be verified').Category | Should -Be 'ToolUnavailable'
+        (Get-PostgresFailureDiagnosis -GameLabel 'GameC' -DbName 'db_c' -Detail 'database does not exist').Category | Should -Be 'DatabaseMissing'
+        $diagnosis = Get-PostgresFailureDiagnosis -GameLabel 'GameD' -DbName 'db_d' -Detail 'access denied'
+        $diagnosis.Category | Should -Be 'PermissionOrElevation'
+        $diagnosis.NextAction | Should -Not -BeNullOrEmpty
+    }
+
+    It "keeps ReShade preview and deployment confirmation wording explicit" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'Choose how your game should look'
+        $source | Should -Match 'Use the preview window to compare the options'
+        $source | Should -Match 'Nothing will be changed until you confirm'
+        $source | Should -Match 'saved game path was not found -- skipped'
+        $source | Should -Match 'protected existing ReShade files -- unchanged'
+        $source | Should -Match 'Installed new'
+        $source | Should -Match 'Updated'
+    }
     It "covers ReShade preview recovery choices and empty-source failure" {
         $script:ProductionSource | Should -Match '\[R\] Retry preview'
         $script:ProductionSource | Should -Match '\[T\] Text-only setup'
