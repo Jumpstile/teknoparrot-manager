@@ -1589,10 +1589,12 @@ which are historical only.
   default `UltraTwoColumn` layout and Standard/Compact show progressively less detail;
   Professional has its own single-line description source (see "Description text sourcing
   varies by tier" below) rather than sharing Ultra-two-column's. Compact prints labels only.
-- `Set-ConsoleMaximizedIfSupported` -- best-effort console maximize, called once at
-  startup (not on every redraw). Wrapped in try/catch and silently no-ops on hosts that
-  don't support resizing (redirected output, ISE, some CI/test runners) -- this is a
-  cosmetic nicety, never allowed to block startup.
+- `Set-ConsoleMaximizedIfSupported` -- best-effort console sizing, called once at
+   startup (not on every redraw). It grows `RawUI.BufferSize` before assigning
+   `RawUI.WindowSize`, clamps the requested window to the resulting buffer, and
+   catches unsupported-host failures. A script-scope attempt guard prevents the
+   same resize error from repeating during later menu redraws; constrained tiers
+   remain the normal fallback when sizing is unavailable.
 
 **Wiring.** The main menu loop calls `Show-MainMenu -ReturnScreen` and refuses to prompt when
 the returned screen is not complete for the actual viewport. In that case it prints resize

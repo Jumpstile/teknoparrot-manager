@@ -31,6 +31,11 @@
   slider position when cached artifacts are requested.
   TPM-owned preview reference assets now ship under PreviewAssets\ReShadePreviews
   instead of the excluded live-fetched ReShade\ runtime directory.
+  The ReShade profile gallery now reports embedded preview availability even
+  when optional SVG illustration files are absent after a script-only update.
+  Console startup sizing now grows BufferSize before WindowSize, catches
+  unsupported hosts once, and leaves the constrained responsive menu usable
+  without repeating resize errors on redraw.
 
 
 

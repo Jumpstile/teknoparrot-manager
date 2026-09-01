@@ -385,6 +385,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $logPath               = Join-Path $PSScriptRoot "TeknoParrot-Manager.log"
 $script:logWarnShown   = $false   # full warning shown at most once to avoid repeated noise
 $script:logFailedCount = 0        # total entries that could not be written this run
+$script:TpmConsoleResizeAttempted = $false
 
 function Write-Log {
     param([string]$msg)
@@ -4198,9 +4199,9 @@ function Get-TpmReShadePreviewInfo {
 
 function Get-TpmReShadeProfileGallery {
     param([string]$PreviewRoot = '')
+    $reference = Get-TpmReShadePreviewReference -PreviewRoot $PreviewRoot
     return @(Get-TpmReShadeProfiles | ForEach-Object {
-        $preview = Get-TpmReShadePreviewInfo -ProfileDefinition $_ -PreviewRoot $PreviewRoot
-        [pscustomobject]@{ ProfileId=$_.ProfileId; FriendlyName=$_.FriendlyName; Description=$_.Description; PreviewAvailable=$preview.Available; PreviewPath=$preview.Path; PreviewReason=$preview.Reason; Provenance=$preview.Provenance; PerformanceClass=$_.PerformanceClass; ResolutionSensitivity=$_.ResolutionSensitivity }
+        [pscustomobject]@{ ProfileId=$_.ProfileId; FriendlyName=$_.FriendlyName; Description=$_.Description; PreviewAvailable=$reference.Available; PreviewPath=$null; PreviewReason=if($reference.Available){$null}else{$reference.Reason}; Provenance='TPM synthetic'; PerformanceClass=$_.PerformanceClass; ResolutionSensitivity=$_.ResolutionSensitivity }
     })
 }
 function Get-TpmReShadePerformanceBadge {
@@ -15377,8 +15378,8 @@ function Export-HyperSpinJson {
                 Write-Log "HyperSpin export: skipped because emulator id is missing; operator chose Skip."
                 return 0
             }
-            if ($missingIdChoice -notin @('A', '')) { Write-Host "  Enter F, A, or S." -ForegroundColor Yellow }
-        } while ($missingIdChoice -notin @('A', ''))
+            if ($missingIdChoice -notin @('A')) { Write-Host "  Enter F, A, or S." -ForegroundColor Yellow }
+        } while ($missingIdChoice -notin @('A'))
         Write-Log "HyperSpin export: operator chose Add anyway with empty systemId."
     }
 
@@ -18257,14 +18258,27 @@ function Join-MainMenuColumns {
 # so a user resizing mid-session still gets the right tier next time the
 # menu draws.
 function Set-ConsoleMaximizedIfSupported {
+    param([object]$RawUi = $null)
+    if ($script:TpmConsoleResizeAttempted) { return }
+    $script:TpmConsoleResizeAttempted = $true
     try {
-        $rawUi = $Host.UI.RawUI
-        $maxSize = $rawUi.MaxPhysicalWindowSize
+        if ($null -eq $RawUi) {
+            try {
+                if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) { return }
+            } catch {}
+            $RawUi = $Host.UI.RawUI
+        }
+        $maxSize = $RawUi.MaxPhysicalWindowSize
         if ($maxSize.Width -gt 0 -and $maxSize.Height -gt 0) {
-            $rawUi.WindowSize = [System.Management.Automation.Host.Size]::new($maxSize.Width, $maxSize.Height)
-            if ($rawUi.BufferSize.Width -lt $maxSize.Width) {
-                $rawUi.BufferSize = [System.Management.Automation.Host.Size]::new($maxSize.Width, $rawUi.BufferSize.Height)
+            $currentBuffer = $RawUi.BufferSize
+            $targetWidth = [Math]::Max(1, $maxSize.Width)
+            $targetHeight = [Math]::Max(1, $maxSize.Height)
+            if ($currentBuffer.Width -lt $targetWidth -or $currentBuffer.Height -lt $targetHeight) {
+                $bufferWidth = [Math]::Max($currentBuffer.Width, $targetWidth)
+                $bufferHeight = [Math]::Max($currentBuffer.Height, $targetHeight)
+                $RawUi.BufferSize = [System.Management.Automation.Host.Size]::new($bufferWidth, $bufferHeight)
             }
+            $RawUi.WindowSize = [System.Management.Automation.Host.Size]::new([Math]::Min($targetWidth, $RawUi.BufferSize.Width), [Math]::Min($targetHeight, $RawUi.BufferSize.Height))
         }
     } catch {
         Write-Log "Set-ConsoleMaximizedIfSupported: could not resize console -- $_"

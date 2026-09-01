@@ -8045,6 +8045,53 @@ Describe "Get-MainMenuRenderMetrics" {
         $metrics.ConstrainedBy | Should -Be 'width,height'
     }
 }
+Describe "Console resize safety" {
+    It "sets the buffer before the window and suppresses repeated resize attempts" {
+        if (-not ('TpmResizeRawUi' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.Management.Automation.Host;
+public sealed class TpmResizeRawUi {
+    private Size bufferSize;
+    private Size windowSize;
+    public Size MaxPhysicalWindowSize { get; set; }
+    public Size BufferSize {
+        get { return bufferSize; }
+        set { bufferSize = value; }
+    }
+    public Size WindowSize {
+        get { return windowSize; }
+        set {
+            if (value.Width > bufferSize.Width || value.Height > bufferSize.Height) {
+                throw new InvalidOperationException("Window cannot be wider than the screen buffer.");
+            }
+            windowSize = value;
+        }
+    }
+}
+'@
+        }
+        $rawUi = New-Object TpmResizeRawUi
+        $rawUi.MaxPhysicalWindowSize = [System.Management.Automation.Host.Size]::new(120, 40)
+        $rawUi.BufferSize = [System.Management.Automation.Host.Size]::new(80, 25)
+        $rawUi.WindowSize = [System.Management.Automation.Host.Size]::new(80, 25)
+        $script:TpmConsoleResizeAttempted = $false
+        try {
+            Set-ConsoleMaximizedIfSupported -RawUi $rawUi
+            $rawUi.BufferSize.Width | Should -BeGreaterOrEqual 120
+            $rawUi.BufferSize.Height | Should -BeGreaterOrEqual 40
+            $rawUi.WindowSize.Width | Should -BeLessOrEqual $rawUi.BufferSize.Width
+            $rawUi.WindowSize.Height | Should -BeLessOrEqual $rawUi.BufferSize.Height
+            $firstWindow = $rawUi.WindowSize
+            $rawUi.MaxPhysicalWindowSize = [System.Management.Automation.Host.Size]::new(160, 50)
+            Set-ConsoleMaximizedIfSupported -RawUi $rawUi
+            $rawUi.WindowSize.Width | Should -Be $firstWindow.Width
+            $rawUi.WindowSize.Height | Should -Be $firstWindow.Height
+        } finally {
+            $script:TpmConsoleResizeAttempted = $false
+        }
+    }
+}
 
 Describe "Manager banner rendering" {
     It "uses the compact plain-text banner for narrow widths" {
@@ -8149,6 +8196,21 @@ Describe "RC8 main-menu command routing and visibility" {
         $screen.PromptAllowed | Should -BeFalse
         $screen.MissingOptionNumbers.Count | Should -BeGreaterOrEqual 0
     }
+    It "renders every constrained-width option and command footer before allowing the prompt" {
+        $screen = Render-MainMenuScreen -Tier Compact -Width 80 -Height 25
+        $output = ($screen.Rows | ForEach-Object { $_.Text }) -join "`n"
+        foreach ($item in (Get-MainMenuItems)) {
+            $output | Should -Match ([regex]::Escape("$($item.Number)) $($item.Label)"))
+        }
+        $output | Should -Match 'H\s*=\s*Help'
+        $output | Should -Match 'L\s*=\s*View Log'
+        $output | Should -Match 'Q\s*=\s*Quit'
+        $screen.PromptAllowed | Should -BeTrue
+        (Resolve-MainMenuCommand -InputText 'invalid' -MaxNumber 15) | Should -Be $null
+        (Resolve-MainMenuCommand -InputText 'H' -MaxNumber 15) | Should -Be 'H'
+        (Resolve-MainMenuCommand -InputText 'L' -MaxNumber 15) | Should -Be 'L'
+        (Resolve-MainMenuCommand -InputText 'Q' -MaxNumber 15) | Should -Be 'Q'
+    }
     It "uses a dedicated help title and a safe return path" {
         $help = Get-Command Show-MainMenuHelp
         $help.Definition | Should -Match 'TeknoParrot Manager Help'
@@ -8185,6 +8247,28 @@ Describe "RC8 main-menu command routing and visibility" {
         $screen.PromptAllowed | Should -BeTrue
     }
 
+}
+
+Describe "HyperSpin emulator identity gate" {
+    It "defaults a missing emulator ID to Skip without creating or changing games data" {
+        $hsRoot = Join-Path $TestDrive 'HyperSpinMissingId'
+        [void](New-Item -ItemType Directory -Path $hsRoot -Force)
+        [System.IO.File]::WriteAllText(
+            (Join-Path $hsRoot 'emulators.json'),
+            '[{"title":"TeknoParrot"}]',
+            (New-Object System.Text.UTF8Encoding $false))
+        Mock Read-HostSafe {
+            param($Prompt, $Default)
+            return $Default
+        }
+        Mock Write-Log {}
+
+        $result = Export-HyperSpinJson -userProfilesDir $hsRoot -hsDataPath $hsRoot
+
+        $result | Should -Be 0
+        (Test-Path -LiteralPath (Join-Path $hsRoot 'games')) | Should -BeFalse
+        $script:ProductionSource | Should -Match "Read-HostSafe '  Choice \(F/A/S\)' -Default 'S'"
+    }
 }
 
 Describe "Render-MainMenuScreen / Show-MainMenu" {
@@ -9841,10 +9925,9 @@ Describe "Approved ReShade profile catalog" {
     }
 }
 Describe "ReShade profile previews" {
-    It "binds every canonical profile to its local synthetic preview" {
-        $expected=@{Original='TPM-preview-original.svg';CleanSharp='TPM-preview-clean.svg';Vivid='TPM-preview-vivid.svg';EnhancedArcade='TPM-preview-enhanced.svg';ClassicCrt='TPM-preview-crt.svg'}
-        $gallery=@(Get-TpmReShadeProfileGallery -PreviewRoot (Join-Path $PSScriptRoot '..\PreviewAssets\ReShadePreviews'));$gallery.Count|Should -Be 5
-        foreach($item in $gallery){$item.PreviewAvailable|Should -BeTrue;$item.Provenance|Should -Be 'TPM synthetic';([IO.Path]::GetFileName($item.PreviewPath))|Should -Be $expected[$item.ProfileId]}
+    It "reports every canonical profile as available from the embedded preview renderer" {
+        $gallery=@(Get-TpmReShadeProfileGallery);$gallery.Count|Should -Be 5
+        foreach($item in $gallery){$item.PreviewAvailable|Should -BeTrue;$item.PreviewPath|Should -BeNullOrEmpty;$item.PreviewReason|Should -BeNullOrEmpty;$item.Provenance|Should -Be 'TPM synthetic'}
     }
     It "fails closed for missing, invalid, traversal, and wrong binding without blocking profiles" {
         $root=Join-Path $TestDrive 'previews';[IO.Directory]::CreateDirectory($root)|Out-Null
@@ -9989,6 +10072,22 @@ Describe "ReShade trusted profile restore" {
             $middle.GetPixel(800, 180).ToArgb() | Should -Not -Be $right.GetPixel(800, 180).ToArgb()
             $left.GetPixel(800, 180).ToArgb() | Should -Be $middle.GetPixel(800, 180).ToArgb()
             $middle.GetPixel(200, 180).ToArgb() | Should -Be $right.GetPixel(200, 180).ToArgb()
+        } finally {
+            $left.Dispose(); $middle.Dispose(); $right.Dispose()
+        }
+    }
+    It "honors non-default dimensions while applying the slider split" {
+        $profile = Get-TpmReShadeProfile -ProfileId EnhancedArcade
+        $left = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 0 -Width 640 -Height 360
+        $middle = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 50 -Width 640 -Height 360
+        $right = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 100 -Width 640 -Height 360
+        try {
+            $left.Width | Should -Be 640
+            $left.Height | Should -Be 360
+            $left.GetPixel(100, 180).ToArgb() | Should -Not -Be $middle.GetPixel(100, 180).ToArgb()
+            $middle.GetPixel(520, 180).ToArgb() | Should -Not -Be $right.GetPixel(520, 180).ToArgb()
+            $left.GetPixel(520, 180).ToArgb() | Should -Be $middle.GetPixel(520, 180).ToArgb()
+            $middle.GetPixel(100, 180).ToArgb() | Should -Be $right.GetPixel(100, 180).ToArgb()
         } finally {
             $left.Dispose(); $middle.Dispose(); $right.Dispose()
         }
