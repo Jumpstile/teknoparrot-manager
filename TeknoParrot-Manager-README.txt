@@ -1231,10 +1231,12 @@
       Classic Arcade CRT CRT-style scanlines and arcade-display character.
 
     The separate TPM preview window uses a deliberately engineered synthetic
-    arcade test scene. It offers Before, After, and Split views from the same
-    neutral source. The scene includes small text, fine lines, geometric
-    shapes, gradients, contrast regions, color blocks, texture detail, and CRT
-    scanline cues so each approved profile's intended change is easy to see.
+    arcade test scene. It offers Before, After, and Split views plus a 0-100
+    comparison slider: left is all Before, right is all After, and intermediate
+    positions show the corresponding split from the same neutral source.
+    The scene includes small text, fine lines, geometric shapes, gradients,
+    contrast regions, color blocks, texture detail, and CRT scanline cues so
+    each approved profile's intended change is easy to see.
     The preview is illustrative, not a pixel-perfect guarantee for every game.
     Preview files and cached renderings are local TPM-owned data; no
     copyrighted game screenshots are bundled.

@@ -451,7 +451,7 @@ ReShade adds post-processing effects without changing game data. TPM does not au
 | Enhanced Arcade | LumaSharpen followed by Vibrance |
 | Classic Arcade CRT | CRT_Lottes only |
 
-The preview window offers Before, After, and Split views. It is illustrative, not a pixel-perfect promise for every game. Preview files and cached renderings are local and TPM-owned; no game screenshots are bundled. If rendering or display is unavailable, TPM shows the text description and profile selection continues. Display and performance notes are advisory only. TPM does not configure monitors or game display settings.
+The preview window offers Before, After, and Split views plus a 0-100 comparison slider: at the left position the synthetic scene is all Before, at the right position it is all After, and intermediate positions show the corresponding split. It is illustrative, not a pixel-perfect promise for every game. Preview files and cached renderings are local and TPM-owned; no game screenshots are bundled. If rendering or display is unavailable, TPM shows the text description and profile selection continues. Display and performance notes are advisory only. TPM does not configure monitors or game display settings.
 Profile and effect catalog metadata is advisory until measured evidence exists. No profile is marked recommended or `VALIDATED_SINGLE` without that evidence; pinned hashes establish catalog integrity, not performance validation. Multi-monitor suitability is read-only and advisory, uses caller-supplied evidence, treats duplicate target IDs as ambiguous, and does not separately label `EXTENDED` arrangements or acquire Windows display topology itself.
 
 **Remembered profiles, favorites, and restore:** TPM stores per-game profile
