@@ -8080,6 +8080,8 @@ public sealed class TpmResizeRawUi {
             Set-ConsoleMaximizedIfSupported -RawUi $rawUi
             $rawUi.BufferSize.Width | Should -BeGreaterOrEqual 120
             $rawUi.BufferSize.Height | Should -BeGreaterOrEqual 40
+            $rawUi.WindowSize.Width | Should -Be 120
+            $rawUi.WindowSize.Height | Should -Be 40
             $rawUi.WindowSize.Width | Should -BeLessOrEqual $rawUi.BufferSize.Width
             $rawUi.WindowSize.Height | Should -BeLessOrEqual $rawUi.BufferSize.Height
             $firstWindow = $rawUi.WindowSize
@@ -8279,6 +8281,37 @@ Describe "HyperSpin emulator identity gate" {
         $result | Should -Be 0
         (Test-Path -LiteralPath (Join-Path $hsRoot 'games')) | Should -BeFalse
         $script:ProductionSource | Should -Match "Read-HostSafe '  Choice \(F/A/S\)' -Default 'S'"
+    }
+    It "does not use an unrelated XML games file when a valid emulator ID has no GUID match" {
+        $hsRoot = Join-Path $TestDrive 'HyperSpinValidIdUnrelatedXml'
+        $profiles = Join-Path $hsRoot 'UserProfiles'
+        $games = Join-Path $hsRoot 'games'
+        [void](New-Item -ItemType Directory -Path $profiles,$games -Force)
+
+        [System.IO.File]::WriteAllText(
+            (Join-Path $hsRoot 'emulators.json'),
+            '[{"title":"TeknoParrot","id":"valid-guid"}]',
+            (New-Object System.Text.UTF8Encoding $false))
+
+        $unrelatedPath = Join-Path $games 'OtherSystem.json'
+        $unrelatedJson = '[{"gameSystemId":"other-guid","roms":[{"name":"other.xml"}]}]'
+        [System.IO.File]::WriteAllText($unrelatedPath, $unrelatedJson, (New-Object System.Text.UTF8Encoding $false))
+
+        $gamePath = Join-Path $hsRoot 'SampleGame.exe'
+        [System.IO.File]::WriteAllText($gamePath, '', (New-Object System.Text.UTF8Encoding $false))
+        $profileXml = '<GameProfile><GamePath>{0}</GamePath><Description>Sample Game</Description></GameProfile>' -f $gamePath
+        [System.IO.File]::WriteAllText((Join-Path $profiles 'SampleGame.xml'), $profileXml, (New-Object System.Text.UTF8Encoding $false))
+
+        Mock Write-Log {}
+
+        $result = Export-HyperSpinJson -userProfilesDir $profiles -hsDataPath $hsRoot
+
+        $result | Should -Be 1
+        [System.IO.File]::ReadAllText($unrelatedPath) | Should -Be $unrelatedJson
+        (Test-Path -LiteralPath (Join-Path $games 'TeknoParrot.json')) | Should -BeTrue
+        @(Get-ChildItem -LiteralPath $games -Filter 'OtherSystem.json.bak_*' -File -ErrorAction SilentlyContinue).Count | Should -Be 0
+        $exportedJson = Get-Content -LiteralPath (Join-Path $games 'TeknoParrot.json') -Raw
+        $exportedJson | Should -Match '"gameSystemId"\s*:\s*"valid-guid"'
     }
 }
 

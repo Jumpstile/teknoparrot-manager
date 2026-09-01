@@ -23,6 +23,8 @@
   display-topology acquisition is included under the feature freeze.
   HyperSpin export now gates missing emulator IDs with explicit Fix, Add
   anyway, or Skip choices; Skip is the safe default and no games are written.
+  Legacy .xml fallback is now limited to an explicit Add anyway choice after
+  a missing emulator ID; valid IDs never scan unrelated games files.
   One-game AutoSync now pauses before optional library maintenance and offers
   New game only, all games, or Back; New game only is safe default. Related-only
   scoping is deferred rather than presented as an unimplemented choice.

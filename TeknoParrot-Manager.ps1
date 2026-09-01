@@ -15315,9 +15315,9 @@ function Invoke-LaunchBoxDirectWrite {
 # =============================================================================
 # Adds registered TeknoParrot games to HyperSpin 2's game list JSON.
 # HyperSpin 2 stores one JSON file per system under <dataPath>\games\.
-# The TeknoParrot file is identified by looking for one whose games have
-# .xml ROM entries (the format TeknoParrot uses for its profile files).
-# Games already present (matched by fileName) are never duplicated.
+# The TeknoParrot file is identified by the emulator system GUID. A legacy
+# .xml ROM-entry scan is permitted only after the operator chooses Add anyway
+# for an emulator entry whose id is missing.
 # The existing file is backed up before any write.
 function Export-HyperSpinJson {
     param([string]$userProfilesDir, [string]$hsDataPath)
@@ -15361,6 +15361,7 @@ function Export-HyperSpinJson {
     # works even when no TeknoParrot games have been added to HyperSpin 2 yet,
     # eliminating the "add one game manually first" prerequisite.
     $tpSystemGuid = [string]$tpEmu.id
+    $allowLegacyXmlFallback = $false
     if ([string]::IsNullOrEmpty($tpSystemGuid)) {
         Write-Host "  WARNING: TeknoParrot emulator entry has no 'id' field in emulators.json." -ForegroundColor Yellow
         Write-Host "  HyperSpin cannot associate exported games with this emulator safely." -ForegroundColor Yellow
@@ -15381,6 +15382,7 @@ function Export-HyperSpinJson {
             if ($missingIdChoice -notin @('A')) { Write-Host "  Enter F, A, or S." -ForegroundColor Yellow }
         } while ($missingIdChoice -notin @('A'))
         Write-Log "HyperSpin export: operator chose Add anyway with empty systemId."
+        $allowLegacyXmlFallback = $true
     }
 
     # Locate the games folder; create it if HyperSpin 2 has not yet made it.
@@ -15413,9 +15415,9 @@ function Export-HyperSpinJson {
         }
     }
 
-    # Fallback scan: match by .xml ROM entries (for installs where the emulator
-    # entry has no id field, or the system GUID could not be determined).
-    if (-not $tpGamesPath) {
+    # Legacy fallback scan: match by .xml ROM entries only after the operator
+    # explicitly chose Add anyway for a missing emulator id.
+    if ($allowLegacyXmlFallback -and -not $tpGamesPath) {
         foreach ($gf in (Get-ChildItem -LiteralPath $gamesDir -Filter "*.json" -File -ErrorAction SilentlyContinue)) {
             try {
                 $sample    = Get-Content -LiteralPath $gf.FullName -Raw | ConvertFrom-Json
