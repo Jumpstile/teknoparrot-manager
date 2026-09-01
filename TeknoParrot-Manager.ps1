@@ -4510,9 +4510,12 @@ function Open-TpmReShadePreviewWindow {
         }
         $form=New-Object Windows.Forms.Form;$form.Text='TeknoParrot ReShade Preview - '+$ProfileDefinition.FriendlyName;$form.Width=1000;$form.Height=700
         $picture=New-Object Windows.Forms.PictureBox;$picture.Dock='Fill';$picture.SizeMode='Zoom';$picture.Image=[Drawing.Image]::FromFile($artifact.Path)
-        $toolbar=New-Object Windows.Forms.FlowLayoutPanel;$toolbar.Dock='Top';$toolbar.Height=40
+        $toolbar=New-Object Windows.Forms.FlowLayoutPanel;$toolbar.Dock='Top';$toolbar.Height=70
         foreach($view in @('Before','After','Split')){$button=New-Object Windows.Forms.Button;$button.Text=$view;$button.Tag=$view;$button.Width=90;$button.Add_Click({[void](Update-TpmReShadePreviewWindow -Mode $this.Tag)});$toolbar.Controls.Add($button)}
-        $form.Controls.Add($picture);$form.Controls.Add($toolbar);$script:TpmReShadePreviewWindowState=[pscustomobject]@{Form=$form;Picture=$picture;Profile=$ProfileDefinition;Mode=$Mode;CacheRoot=$CacheRoot}
+        $sliderLabel=New-Object Windows.Forms.Label;$sliderLabel.Text='Comparison slider';$sliderLabel.AutoSize=$true;$toolbar.Controls.Add($sliderLabel)
+        $slider=New-Object Windows.Forms.TrackBar;$slider.Name='ComparisonSlider';$slider.Minimum=0;$slider.Maximum=100;$slider.Value=50;$slider.TickFrequency=25;$slider.Width=300
+        $slider.Add_ValueChanged({$view=if($this.Value -le 0){'Before'}elseif($this.Value -ge 100){'After'}else{'Split'};[void](Update-TpmReShadePreviewWindow -Mode $view);$script:TpmReShadePreviewWindowState.SliderValue=$this.Value});$toolbar.Controls.Add($slider)
+        $form.Controls.Add($picture);$form.Controls.Add($toolbar);$script:TpmReShadePreviewWindowState=[pscustomobject]@{Form=$form;Picture=$picture;Profile=$ProfileDefinition;Mode=$Mode;CacheRoot=$CacheRoot;Slider=$slider;SliderValue=50}
         return [pscustomobject]@{Available=$true;Closed=$false;Mode=$Mode;CacheKey=$artifact.CacheKey}
     } catch {
         Write-Log ("ReShade preview unavailable: reason=PREVIEW_WINDOW_UNAVAILABLE errorType='{0}' error='{1}' root='{2}' assets={3} PowerShell={4} edition={5} FormsLoaded={6} DrawingLoaded={7} Host='{8}'" -f $_.Exception.GetType().FullName, $_.Exception.Message, $previewRoot, ($assetChecks -join ';'), $PSVersionTable.PSVersion, $PSVersionTable.PSEdition, $formsLoaded, $drawingLoaded, $Host.Name)

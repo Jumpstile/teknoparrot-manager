@@ -9970,6 +9970,13 @@ Describe "ReShade trusted profile restore" {
         $script:ProductionSource | Should -Match '\[D\] Details'
         $script:ProductionSource | Should -Match 'SOURCE_DLL_UNAVAILABLE'
     }
+    It "includes a real comparison slider and updates preview state on movement" {
+        $script:ProductionSource | Should -Match 'TrackBar'
+        $script:ProductionSource | Should -Match 'ComparisonSlider'
+        $script:ProductionSource | Should -Match 'ValueChanged'
+        $script:ProductionSource | Should -Match 'this\.Value -le 0'
+        $script:ProductionSource | Should -Match 'this\.Value -ge 100'
+    }
     It "offers bulk choices for every multi-game selection including subsets" {
         $source = $script:ProductionSource
         $source | Should -Match '\$selectedGames\.Count -gt 1'
