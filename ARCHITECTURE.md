@@ -779,6 +779,26 @@ the `Data\Platforms\<name>.xml` filename. `Invoke-LaunchBoxDirectWrite` also run
 input. Same "live/user-supplied value joined into a filesystem path must be sanitized"
 convention as SECURITY.md.
 
+## HyperSpin 2 JSON export (RC8)
+
+`Export-HyperSpinJson` treats the TeknoParrot emulator `id` in
+`emulators.json` as the authoritative system identity. It scans existing
+games JSON files for a matching `gameSystemId`; it never chooses a file by
+filename or by an unrelated ROM extension when a valid ID is present.
+
+When the emulator entry has no `id`, export stops before creating the games
+folder or writing a games file and presents Fix, Add anyway, and Skip. Skip
+is the safe default and Fix returns without writes. Only an explicit Add
+anyway choice enables the legacy scan for a games file whose first ROM entry
+uses the `.xml` extension. If that scan finds nothing, the exporter creates
+the sanitized emulator-title filename as a new empty games file. A valid ID
+with no GUID match takes that named-file creation path directly; it does not
+use the legacy scan. Existing games files are backed up before mutation.
+
+This ordering is a safety invariant: a legacy format heuristic may be
+operator-authorized for a missing identity, but it must not be allowed to
+redirect a valid emulator export into an unrelated system's games file.
+
 **Config consolidation.** `Save-Config` was consolidated from seven near-duplicate
 `[ordered]@{...}` field-list blocks scattered at every settings-change call site. New
 persistent settings go into `Save-Config` once, not at each call site.
