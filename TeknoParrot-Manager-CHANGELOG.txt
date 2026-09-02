@@ -46,10 +46,22 @@
   unsupported hosts once, and leaves the constrained responsive menu usable
   without repeating resize errors on redraw; invalid menu choices persist
   through the next cleared redraw before the prompt.
-  ReShade's normal flow now shows a representative built-in arcade scene
-  gallery before profile selection and keeps deployment behind explicit
-  confirmation. Deployment output separates installed, updated, protected,
-  missing-path, and unsupported-game outcomes with a direct path-repair action.
+  ReShade's normal flow now shows a deterministic, TPM-owned arcade-room
+  render with layered cabinet shading, glossy surfaces, reflective floor,
+  neon spill, textured background cabinets, detailed gameplay, readable HUD
+  text, and profile-specific in-memory processing. Before, After, Split, and
+  the 0-100 slider now use the same reference and a tested moving boundary;
+  deployment remains behind explicit confirmation. Deployment output separates
+  installed, updated, protected, missing-path, and unsupported-game outcomes
+  with a direct path-repair action.
+  ReShade option 5 no longer waits behind a blocking modal gallery. It opens
+  the optional gallery non-modally and immediately shows a numbered terminal
+  chooser with U/R/B/D commands; profile selection remains usable when the
+  preview is behind, closed, unavailable, or fails. The normal menu clamps
+  anomalous Windows Terminal backing-buffer widths to a compact readable
+  layout instead of rendering a giant empty frame. Support manifests now
+  summarize routine missing optional diagnostics while preserving individual
+  collection failures.
   Crosshair preview pages now support bounded localhost click selection with a
   per-session token; typed numeric selection remains available as fallback.
   ReShade mode 5 now includes a removal action. The scanner reports

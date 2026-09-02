@@ -278,10 +278,25 @@
     approved effect hashes, and intensity variant still match. Missing,
     corrupt, stale, or unsupported history falls back to fresh selection; TPM
     never copies historical file paths.
-    The visual gallery opens before the final profile confirmation. Switch
-    profiles in one window to compare the embedded synthetic arcade scene;
-    choosing a profile does not write files. If the window cannot open, the
-    typed profile fallback remains available.
+    An optional non-modal visual gallery opens before final confirmation, but
+    the terminal chooser is always immediately available and authoritative:
+      [1] Original
+      [2] Clean & Sharp
+      [3] Classic Arcade CRT
+      [4] Vivid Arcade
+      [5] Enhanced Arcade
+    Choose: [1-5] Preview profile  [U] Use selected profile  [R] Reopen preview
+            [B] Back  [D] Details
+    The terminal remains usable if the gallery is behind another window,
+    closed, unavailable, or fails. Numbered selection updates the gallery when
+    available. U is the only path toward deployment; B cancels without
+    changes and D returns after showing details. The gallery compares a
+    deterministic TPM-owned arcade-room render with layered cabinet shading,
+    glossy bezel and marquee, reflective floor, neon spill lighting, textured
+    background cabinets, detailed racing gameplay, readable HUD text, and fine
+    high-contrast edges. Before is the untouched baseline, After is the
+    processed profile, Split places baseline left and processed output right,
+    and the slider moves that boundary from all processed to all baseline.
     Multi-monitor suitability is read-only and advisory, uses caller-supplied
     evidence, treats duplicate target IDs as ambiguous, and does not separately
     label EXTENDED arrangements or acquire Windows display topology itself.
@@ -1251,11 +1266,14 @@
       Enhanced Arcade    Clearer edges followed by stronger color.
       Classic Arcade CRT CRT-style scanlines and arcade-display character.
 
-    One visual gallery opens before the final confirmation. It shows the safe
-    TPM-owned representative arcade scene with dark and bright areas, neon
-    colors, text, fine edges, and perspective detail for each profile. It
-    offers Before, After, Split, and a 0-100 slider while you switch profiles.
-
+    One visual gallery opens before the final confirmation. It shows a
+    deterministic TPM-owned arcade-room render with layered cabinet shading,
+    glossy bezel and marquee, reflective floor, neon spill, textured
+    background cabinets, a detailed racing screen, readable HUD text, and
+    fine high-contrast edges for each profile. It offers Before as the
+    untouched baseline, After as the processed profile, Split with baseline
+    on the left and processed output on the right, and a 0-100 slider from
+    all processed to all baseline while you switch profiles.
     The preview is illustrative, not a pixel-perfect guarantee for every game.
     Preview files and cached renderings are local TPM-owned data; no
     copyrighted game screenshots are bundled. If rendering or display is

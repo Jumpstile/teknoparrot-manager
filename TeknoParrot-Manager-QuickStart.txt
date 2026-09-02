@@ -319,15 +319,20 @@
   HOW TO SET IT UP
   Before choosing a profile, TPM explains:
     Choose how your game should look.
-    Use the preview window to compare the options.
-    Nothing will be changed until you confirm.
-  One visual gallery opens before confirmation. It shows the safe representative
-  arcade scene with dark and bright areas, neon color, text, fine edges, and
-  perspective detail for every profile. Before, After, Split, and a 0-100
-  slider are available while you switch profiles. Deployment waits for
-  explicit confirmation.
-  If the preview is unavailable, the text descriptions and safe fallback
-  remain available.
+    The optional preview window is non-modal; the terminal chooser remains
+    active even if the window is behind, closed, unavailable, or fails.
+    Nothing will be changed until you choose U and then confirm.
+  The terminal always shows:
+    [1] Original
+    [2] Clean & Sharp
+    [3] Classic Arcade CRT
+    [4] Vivid Arcade
+    [5] Enhanced Arcade
+    Choose: [1-5] Preview profile  [U] Use selected profile  [R] Reopen preview
+            [B] Back  [D] Details
+  Numbered selection updates the optional preview. U is the only path toward
+  deployment; B cancels without changes and D returns after showing details.
+  A terminal-only selection remains available when the preview cannot open.
 
 
   If you downloaded TeknoParrot Manager as a ZIP release, the ReShade DLLs

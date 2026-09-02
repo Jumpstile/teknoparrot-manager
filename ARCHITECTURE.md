@@ -29,11 +29,21 @@ runspace. `HttpListener` completion is polled and finalized with
 Listener shutdown is guaranteed, and typed numeric selection remains the
 fallback when preview or browser startup fails.
 
-ReShade profile selection uses one modal gallery window. The gallery changes
-the displayed synthetic arcade comparison when the user changes profile, but
-does not deploy files. Deployment remains behind the existing explicit
-confirmation. The preview renderer's reference identity and effect hashes are
-part of the cache key so stale artifacts are regenerated.
+ReShade profile selection opens an optional non-modal gallery and immediately
+leaves the terminal at the authoritative numbered chooser. The terminal
+chooser remains usable when WinForms is behind another window, closed,
+unavailable, or fails to open. Numbered selection updates the gallery when it
+is available; `U` is the only path toward deployment, while `B` and invalid
+input remain non-mutating. The gallery changes the displayed deterministic,
+TPM-owned arcade-room comparison when the user changes profile, but does not
+deploy files. The reference is rendered in memory with layered cabinet
+materials, neon spill, reflective floor, background machines, a detailed
+racing screen, readable HUD text, and deterministic texture noise. `Before` is
+the untouched reference, `After` contains only the selected profile transform,
+and `Split`/`Slider` compose those two bitmaps at the requested boundary.
+Deployment remains behind the existing explicit confirmation. The reference
+identity, renderer version, and effect hashes are part of the cache key so
+stale artifacts regenerate.
 
 
 ## Startup: network-path detection and hard timeout (v0.99.23)
@@ -226,13 +236,18 @@ The result is advisory input to ReShade eligibility only. It may add `DISPLAY_TA
 
 `New-TpmReShadePresetContent` generates stable TPM-owned preset text from the selected definition, with normalized technique order and no timestamps, randomness, paths, or user code. `Test-TpmReShadePresetContent` validates the generated structure and rejects techniques outside the approved bounded set. Original intentionally generates no effect techniques. Advanced custom `.ini` input remains opt-in and is path/extension/existence validated; its contents do not become approved effect evidence.
 **Profile suitability and report boundaries.** Profile suitability is advisory. Bounded resolution, caller-supplied multi-monitor target confidence, and effect sensitivity can report performance or review guidance, including high-cost CRT at a confidently known demanding resolution, but they do not alter profile mapping or hard-block ordinary profile selection solely on resolution evidence. TPM does not configure monitors, rewrite display settings, or silently overwrite ambiguous or user-owned preset content. `Write-TpmActionRequiredReports` writes sanitized imported notes to the separate `TeknoParrot-Manager-game-notes.txt` report and writes Action Required only when actionable evidence exists; Action Required contains authored guidance, not raw source notes.
-**Preview renderer and cache (RC8 freeze exception).** `New-TpmReShadePreviewBitmap` renders a deterministic TPM-owned representative arcade scene with engineered edges, small text, dark and bright regions, neon color variation, geometric shapes, perspective detail, and CRT-visible scanline treatment. `New-TpmReShadePreviewArtifact` materializes Before, After, Split, or percentage-driven Slider PNG output under the cache below `ReShadePreviewCache\`; both comparison sides derive from the embedded neutral reference identity, so preview rendering and slider updates do not depend on live-fetched ReShade files or ancillary upgrade state. The five TPM-owned SVG reference assets under `PreviewAssets\ReShadePreviews\` remain optional gallery illustrations and are packaged separately from the excluded live-fetched ReShade runtime.
+**Preview renderer and cache (RC8 freeze exception).** `New-TpmReShadePreviewBitmap` renders deterministic `TPM-SYNTHETIC-ARCADE-V2` output from one TPM-owned arcade-room reference. The reference combines layered cabinet materials, glossy bezel and marquee, neon spill lighting, reflective floor, textured background cabinets, a detailed racing screen, readable HUD text, perspective shading, and deterministic raster texture. `Before` returns the untouched reference, `After` applies only the selected approved profile transform, and `Split`/percentage-driven `Slider` compose those two bitmaps at the requested boundary. `New-TpmReShadePreviewArtifact` materializes the result under the cache below `ReShadePreviewCache\`; rendering does not depend on live-fetched ReShade files or ancillary upgrade state. The legacy SVG assets under `PreviewAssets\ReShadePreviews\` remain only for the isolated preview-info compatibility helper and are not gallery input.
 
 The cache manifest records the subject/mode, slider position when applicable, intensity identity, preset version, approved shader SHA-256 values, reference version/hash, and renderer version. A missing, corrupt, stale, or mismatched manifest/image regenerates safely; cache artifacts are never trust or deployment evidence. `Open-TpmReShadePreviewWindow`, `Update-TpmReShadePreviewWindow`, `Close-TpmReShadePreviewWindow`, and `Show-TpmReShadePreviewWindow` provide the window lifecycle. WinForms is loaded lazily, requires STA for actual display, and returns a text-only fallback in noninteractive or unavailable environments. Preview rendering and mode changes never write game files, generated presets, effect assets, trust evidence, or display settings.
 **Full profile deployment and restore (RC8 freeze exception).** Normal ReShade setup and the explicit per-game restore action call `Install-TpmReShadeProfileDeployment`. It stages the architecture-selected ReShade DLL, a canonical generated `ReShade.ini` when a trusted profile is selected, and every approved effect asset, then promotes them with one `Invoke-TpmTransactionalPromote` transaction. The per-game ownership manifest is stored under `ReShade\TPM-State\Deployments\<SHA256(game ID)>.json`; ownership is committed only after the physical promotion and post-promotion hashes succeed. A later profile-history entry is written only after that deployment returns success.
 
 Restore history is a selector, not trust evidence. Restore validates the profile schema, ordered approved effect IDs, ordered catalog hashes, and intensity variant before deployment; it never copies a historical path or arbitrary historical file. Missing, corrupt, stale, or unsupported history produces a friendly fresh-selection path. The chooser requires an explicit `R` restore choice, offers a remembered profile only after explicit confirmation, and exposes catalog-bound favorites through `F`.
-The normal visual-first setup prints the profile descriptions, opens one visual gallery containing all five profiles, and asks for explicit confirmation before any deployment. It does not loop over modal windows for every profile; text selection and the preview failure fallback remain usable when WinForms is unavailable.
+The normal visual-first setup prints the profile descriptions, opens an optional
+non-modal gallery, and immediately presents the terminal chooser for all five
+profiles. The numbered terminal path remains authoritative when WinForms is
+unavailable or the gallery closes. It does not block on modal UI or leave the
+workflow without a visible prompt; text selection, `U`, `R`, `B`, and `D` all
+remain available before explicit confirmation.
 Before game selection, `Invoke-ReShadeUpdateIfAvailable` compares the installed trusted
 installer version with the official `reshade.me` version, verifies the downloaded installer
 and extracted DLLs, and offers an explicit update/keep choice. It does not deploy to games

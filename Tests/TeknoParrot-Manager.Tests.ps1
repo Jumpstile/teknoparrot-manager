@@ -4893,16 +4893,19 @@ Describe "RC8 PostgreSQL and support UX" {
         }
         $result.Succeeded | Should -BeFalse
     }
-    It "keeps full NotPresent support detail out of the normal summary section" {
+    It "collapses normal NotPresent support detail while preserving failure separation" {
         $records = @(
-            [pscustomobject]@{ Status = 'Collected'; Source = 'TPM log'; Destination = 'diagnostics\manager.log'; Detail = '' }
+            [pscustomobject]@{ Status = 'Collected'; Source = 'TPM:log'; Destination = 'diagnostics\manager.log'; Detail = '' }
             [pscustomobject]@{ Status = 'NotPresent'; Source = 'Game:Example:log'; Destination = ''; Detail = 'Expected diagnostic file was not present.' }
+            [pscustomobject]@{ Status = 'CollectionFailed'; Source = 'Game:Other:plugin inventory'; Destination = ''; Detail = 'Plugin directory could not be inspected safely.' }
         )
         $text = Get-TpmSupportManifestText -Records $records -Errors @() -GameCodes @('Example') -AffectedGameSummary 'Example'
         $text | Should -Match 'Collected evidence:'
-        $text | Should -Match 'Verbose NotPresent detail:'
-        $text.IndexOf('Collected evidence:') | Should -BeLessThan $text.IndexOf('Verbose NotPresent detail:')
-        $script:ProductionSource | Should -Match 'full detail is in the package manifest'
+        $text | Should -Match 'Optional diagnostics not found are summarized'
+        $text | Should -Match '\[NotPresent\] Registered-game diagnostics: 1 items'
+        $text | Should -Not -Match 'Verbose NotPresent detail:'
+        $text | Should -Match '\[CollectionFailed\] Game:Other:plugin inventory'
+        $script:ProductionSource | Should -Match 'absence is not a collection failure'
     }
 }
 
@@ -9895,12 +9898,42 @@ Describe "RC8 menu and ReShade regressions" {
 
     It "normal ReShade setup does not require a preset path" {
         $source = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\TeknoParrot-Manager.ps1') -Raw
-        $source | Should -Match 'Visual profile'
+        $source | Should -Match 'Read-TpmReShadeTerminalProfile'
         $source | Should -Match 'Use the selected ReShade profile\?'
         $source | Should -Match '\{0\} will be applied\. Choose Custom only if you already have your own ReShade \.ini preset\.'
         $source | Should -Match '\[Y\] Yes, use \{0\}\s+\[C\] Custom preset\s+\[B\] Back'
         $source | Should -Not -Match 'Get it at\s+https://reshade\.me'
         $source | Should -Not -Match 'replace ReShade\\ReShade64\.dll'
+    }
+    It "provides a visible terminal-only ReShade chooser with explicit selection and Back" {
+        $profiles = @(Get-TpmReShadeProfiles)
+        $script:chooserInputs = [System.Collections.Generic.Queue[string]]::new()
+        [void]$script:chooserInputs.Enqueue('2')
+        [void]$script:chooserInputs.Enqueue('U')
+        Mock Read-HostSafe { $script:chooserInputs.Dequeue() }
+        Mock Write-Host {}
+        Mock Write-Log {}
+        $selected = Read-TpmReShadeTerminalProfile -Profiles $profiles
+        $selected.Cancelled | Should -BeFalse
+        $selected.SelectedProfile.ProfileId | Should -Be 'CleanSharp'
+
+        $script:chooserInputs = [System.Collections.Generic.Queue[string]]::new()
+        [void]$script:chooserInputs.Enqueue('B')
+        $back = Read-TpmReShadeTerminalProfile -Profiles $profiles
+        $back.Cancelled | Should -BeTrue
+        $back.SelectedProfile | Should -BeNullOrEmpty
+    }
+    It "does not use a blocking modal gallery from the normal ReShade setup path" {
+        $source = $script:ProductionSource
+        $invokeStart = $source.IndexOf('function Invoke-ReShadeSetup')
+        $chooserIndex = $source.IndexOf('Read-TpmReShadeTerminalProfile -Profiles', $invokeStart)
+        $setupBeforeChooser = $source.Substring($invokeStart, $chooserIndex - $invokeStart)
+        $nonModalIndex = $source.IndexOf('Show-TpmReShadeProfileGalleryWindow -Profiles', $invokeStart)
+        $chooserIndex | Should -BeGreaterThan $invokeStart
+        $nonModalIndex | Should -BeGreaterThan $invokeStart
+        $setupBeforeChooser | Should -Not -Match 'ShowDialog\(\)'
+        $source.Substring($nonModalIndex, $chooserIndex - $nonModalIndex) | Should -Match '\-NonModal'
+        $source | Should -Match 'ReShade profile chooser: selected'
     }
     It "returns Acquired for a valid Browse DLL and Skipped for an intentional Skip" {
         $dllPath = Join-Path $TestDrive 'existing-reshade.dll'
@@ -10347,12 +10380,41 @@ Describe "ReShade profile previews" {
     }
 }
 Describe "ReShade preview renderer and cache" {
-    BeforeAll { Add-Type -AssemblyName System.Drawing }
+    BeforeAll {
+        Add-Type -AssemblyName System.Drawing
+        function Get-TpmPreviewPixelDiffCount {
+            param([Parameter(Mandatory)][Drawing.Bitmap]$Left, [Parameter(Mandatory)][Drawing.Bitmap]$Right)
+            $difference = [long]0
+            for ($y = 0; $y -lt $Left.Height; $y++) {
+                for ($x = 0; $x -lt $Left.Width; $x++) {
+                    if ($Left.GetPixel($x, $y).ToArgb() -ne $Right.GetPixel($x, $y).ToArgb()) { $difference++ }
+                }
+            }
+            return $difference
+        }
+        function Get-TpmPreviewRegionPixelDiffCount {
+            param(
+                [Parameter(Mandatory)][Drawing.Bitmap]$Left,
+                [Parameter(Mandatory)][Drawing.Bitmap]$Right,
+                [int]$XStart,
+                [int]$XEnd,
+                [int]$YStart,
+                [int]$YEnd
+            )
+            $difference = [long]0
+            for ($y = $YStart; $y -le $YEnd; $y++) {
+                for ($x = $XStart; $x -le $XEnd; $x++) {
+                    if ($Left.GetPixel($x, $y).ToArgb() -ne $Right.GetPixel($x, $y).ToArgb()) { $difference++ }
+                }
+            }
+            return $difference
+        }
+    }
     It "renders deterministic Before, After, and Split artifacts from one reference identity" {
         $root=Join-Path $TestDrive 'preview-root';$cache=Join-Path $root 'Cache';[IO.Directory]::CreateDirectory($root)|Out-Null
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\PreviewAssets\ReShadePreviews\TPM-preview-original.svg') -Destination (Join-Path $root 'TPM-preview-original.svg')
         $p=Get-TpmReShadeProfile -ProfileId EnhancedArcade;$a=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Before -PreviewRoot $root -CacheRoot $cache;$b=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode After -PreviewRoot $root -CacheRoot $cache;$c=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache;$s0=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 0 -PreviewRoot $root -CacheRoot $cache;$s50=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 50 -PreviewRoot $root -CacheRoot $cache;$s100=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 100 -PreviewRoot $root -CacheRoot $cache
-        foreach($x in @($a,$b,$c,$s0,$s50,$s100)){$x.Available|Should -BeTrue -Because ($x|ConvertTo-Json);$x.ReferenceIdentity|Should -Be 'TPM-SYNTHETIC-ARCADE-V1';Test-Path -LiteralPath $x.Path -PathType Leaf|Should -BeTrue}
+        foreach($x in @($a,$b,$c,$s0,$s50,$s100)){$x.Available|Should -BeTrue -Because ($x|ConvertTo-Json);$x.ReferenceIdentity|Should -Be 'TPM-SYNTHETIC-ARCADE-V2';Test-Path -LiteralPath $x.Path -PathType Leaf|Should -BeTrue}
         $a.CacheKey|Should -Not -Be $b.CacheKey;$b.CacheKey|Should -Not -Be $c.CacheKey;$s0.CacheKey|Should -Not -Be $s50.CacheKey;$s50.CacheKey|Should -Not -Be $s100.CacheKey
         (New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 50 -PreviewRoot $root -CacheRoot $cache).Reused|Should -BeTrue
     }
@@ -10362,14 +10424,65 @@ Describe "ReShade preview renderer and cache" {
         $rendererEnd = $source.IndexOf('function New-TpmReShadePreviewArtifact', $rendererStart)
         $renderer = $source.Substring($rendererStart, $rendererEnd - $rendererStart)
         $renderer | Should -Match 'New-TpmReShadePreviewReferenceBitmap -Width \$canvasWidth -Height \$canvasHeight'
-        $renderer | Should -Match 'DrawImageUnscaled\(\$referenceBitmap,0,0\)'
-        $renderer | Should -Match 'drawAfter'
+        $renderer | Should -Match 'DrawImageUnscaled\(\$referenceBitmap, 0, 0\)'
+        $renderer | Should -Match 'Invoke-TpmReShadePreviewProfilePixels'
+        $renderer | Should -Not -Match 'drawAfter'
         $reference = New-TpmReShadePreviewReferenceBitmap -Width 320 -Height 180
         $processed = New-TpmReShadePreviewBitmap -ProfileDefinition (Get-TpmReShadeProfile -ProfileId EnhancedArcade) -Mode After -Width 320 -Height 180
         try {
-            $reference.GetPixel(160,90).ToArgb() | Should -Not -Be $processed.GetPixel(160,90).ToArgb()
+            (Get-TpmPreviewPixelDiffCount -Left $reference -Right $processed) | Should -BeGreaterThan 1000
         } finally {
             $reference.Dispose(); $processed.Dispose()
+        }
+    }
+    It "renders meaningful distinct outputs for every approved profile without changing the baseline" {
+        $baseline = New-TpmReShadePreviewBitmap -ProfileDefinition (Get-TpmReShadeProfile -ProfileId EnhancedArcade) -Mode Before -Width 320 -Height 180
+        $outputs = @{}
+        $stateRoot = Join-Path $TestDrive 'preview-renderer-state'
+        [IO.Directory]::CreateDirectory($stateRoot) | Out-Null
+        [IO.File]::WriteAllText((Join-Path $stateRoot 'sentinel.txt'), 'unchanged')
+        try {
+            foreach ($profile in @(Get-TpmReShadeProfiles)) {
+                $rendered = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode After -Width 320 -Height 180
+                $outputs[[string]$profile.ProfileId] = $rendered
+                $difference = Get-TpmPreviewPixelDiffCount -Left $baseline -Right $rendered
+                if ($profile.ProfileId -eq 'Original') {
+                    $difference | Should -Be 0
+                } else {
+                    $difference | Should -BeGreaterThan 1000
+                }
+            }
+            $ids = @($outputs.Keys)
+            for ($i = 0; $i -lt $ids.Count; $i++) {
+                for ($j = $i + 1; $j -lt $ids.Count; $j++) {
+                    (Get-TpmPreviewPixelDiffCount -Left $outputs[$ids[$i]] -Right $outputs[$ids[$j]]) | Should -BeGreaterThan 100
+                }
+            }
+            (Get-Content -LiteralPath (Join-Path $stateRoot 'sentinel.txt') -Raw) | Should -Be 'unchanged'
+            @(Get-ChildItem -LiteralPath $stateRoot -Recurse -File).Count | Should -Be 1
+        } finally {
+            foreach ($rendered in @($outputs.Values)) { if ($rendered) { $rendered.Dispose() } }
+            $baseline.Dispose()
+        }
+    }
+    It "keeps split and slider sides tied to baseline and processed pixels" {
+        $profile = Get-TpmReShadeProfile -ProfileId EnhancedArcade
+        $before = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Before -Width 320 -Height 180
+        $after = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode After -Width 320 -Height 180
+        $split = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Split -Width 320 -Height 180
+        $slider0 = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 0 -Width 320 -Height 180
+        $slider50 = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 50 -Width 320 -Height 180
+        $slider100 = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 100 -Width 320 -Height 180
+        try {
+            (Get-TpmPreviewRegionPixelDiffCount -Left $split -Right $before -XStart 0 -XEnd 150 -YStart 60 -YEnd 179) | Should -Be 0
+            (Get-TpmPreviewRegionPixelDiffCount -Left $split -Right $after -XStart 170 -XEnd 319 -YStart 60 -YEnd 179) | Should -Be 0
+            (Get-TpmPreviewRegionPixelDiffCount -Left $slider0 -Right $after -XStart 0 -XEnd 319 -YStart 60 -YEnd 179) | Should -Be 0
+            (Get-TpmPreviewRegionPixelDiffCount -Left $slider100 -Right $before -XStart 0 -XEnd 319 -YStart 60 -YEnd 179) | Should -Be 0
+            (Get-TpmPreviewRegionPixelDiffCount -Left $slider50 -Right $before -XStart 0 -XEnd 150 -YStart 60 -YEnd 179) | Should -Be 0
+            (Get-TpmPreviewRegionPixelDiffCount -Left $slider50 -Right $after -XStart 170 -XEnd 319 -YStart 60 -YEnd 179) | Should -Be 0
+            $slider0.GetPixel(40, 100).ToArgb() | Should -Not -Be $slider100.GetPixel(40, 100).ToArgb()
+        } finally {
+            $before.Dispose(); $after.Dispose(); $split.Dispose(); $slider0.Dispose(); $slider50.Dispose(); $slider100.Dispose()
         }
     }
     It "regenerates corrupt or stale cache without an external reference dependency" {
@@ -10384,7 +10497,7 @@ Describe "ReShade preview renderer and cache" {
         $artifact = New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 50
         try {
             $artifact.Available | Should -BeTrue -Because ($artifact | ConvertTo-Json)
-            $artifact.ReferenceIdentity | Should -Be 'TPM-SYNTHETIC-ARCADE-V1'
+            $artifact.ReferenceIdentity | Should -Be 'TPM-SYNTHETIC-ARCADE-V2'
         } finally {
             if ($artifact.Path) { Remove-Item -LiteralPath $artifact.Path -Force -ErrorAction SilentlyContinue }
             if ($artifact.Path) { Remove-Item -LiteralPath ([IO.Path]::ChangeExtension($artifact.Path, '.json')) -Force -ErrorAction SilentlyContinue }
@@ -10399,13 +10512,13 @@ Describe "ReShade preview renderer and cache" {
     }
     It "provides safe noninteractive window fallback and cache identity changes" {
         $p=Get-TpmReShadeProfile -ProfileId Vivid;(Show-TpmReShadePreviewWindow -ProfileDefinition $p).Reason|Should -Be 'PREVIEW_WINDOW_NOT_REQUESTED'
-        $base=Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('a') -ReferenceSha256 'r';(Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('b') -ReferenceSha256 'r')|Should -Not -Be $base;(Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('a') -ReferenceSha256 's')|Should -Not -Be $base;(Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('a') -ReferenceSha256 'r' -RendererVersion '2')|Should -Not -Be $base
+        $base=Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('a') -ReferenceSha256 'r';(Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('b') -ReferenceSha256 'r')|Should -Not -Be $base;(Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('a') -ReferenceSha256 's')|Should -Not -Be $base;(Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('a') -ReferenceSha256 'r' -RendererVersion '1')|Should -Not -Be $base
     }
 }
 Describe "ReShade profile state features" {
     It "compares approved profiles without deployment and supports only reviewed default intensity" {
         $r=Compare-TpmReShadeProfiles -LeftProfileId Original -RightProfileId EnhancedArcade
-        $r.Valid|Should -BeTrue;$r.Deploys|Should -BeFalse;$r.ReferenceIdentity|Should -Be 'TPM-SYNTHETIC-ARCADE-V1'
+        $r.Valid|Should -BeTrue;$r.Deploys|Should -BeFalse;$r.ReferenceIdentity|Should -Be 'TPM-SYNTHETIC-ARCADE-V2'
         @((Get-TpmReShadeIntensityVariants -ProfileDefinition (Get-TpmReShadeProfile -ProfileId Vivid))).Count|Should -Be 1
         { Resolve-TpmReShadeIntensityVariant -ProfileDefinition (Get-TpmReShadeProfile -ProfileId Vivid) -VariantId Strong }|Should -Throw
         (Compare-TpmReShadeProfiles -LeftProfileId NotApproved -RightProfileId Original).Valid|Should -BeFalse
@@ -10546,6 +10659,8 @@ Describe "ReShade trusted profile restore" {
         $galleryBody = [regex]::Match($script:ProductionSource, '(?s)function Show-TpmReShadeProfileGalleryWindow \{.*?function Show-TpmReShadePreviewWindow').Value
         $galleryBody | Should -Match 'New-TpmReShadePreviewBitmap'
         $galleryBody | Should -Not -Match 'New-TpmReShadePreviewArtifact'
+        $galleryBody | Should -Not -Match 'Install-TpmReShadeProfileDeployment'
+        $galleryBody | Should -Not -Match 'Save-Config'
         $galleryBody | Should -Match "Mode = 'Slider'"
         $galleryBody | Should -Match 'SliderPosition.{0,30}this.Value'
     }

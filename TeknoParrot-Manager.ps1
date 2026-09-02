@@ -1426,11 +1426,20 @@ $lines.Add('') | Out-Null
         $lines.Add(('[{0}] {1}{2}{3}' -f $record.Status, $recordSource, $destination, $detail)) | Out-Null
     }
     $lines.Add('') | Out-Null
-    $lines.Add('Verbose NotPresent detail:') | Out-Null
-    foreach ($record in @($Records | Where-Object Status -eq 'NotPresent')) {
-        $recordSource = (Redact-TpmSupportText -Text ([string]$record.Source)).Text
-        $detail = if ($record.Detail) { ' -- ' + (Redact-TpmSupportText -Text ([string]$record.Detail)).Text } else { '' }
-        $lines.Add(('[NotPresent] {0}{1}' -f $recordSource, $detail)) | Out-Null
+    $notPresent = @($Records | Where-Object Status -eq 'NotPresent')
+    $lines.Add('Optional diagnostics not found are summarized below; absence is not a collection failure.') | Out-Null
+    if ($notPresent.Count -gt 0) {
+        foreach ($group in @($notPresent | Group-Object -Property {
+            $source = [string]$_.Source
+            if ($source -like 'TPM:*') { 'TPM diagnostics' }
+            elseif ($source -like 'TeknoParrot:*') { 'TeknoParrot diagnostics' }
+            elseif ($source -like 'Game:*') { 'Registered-game diagnostics' }
+            else { 'Other optional diagnostics' }
+        } | Sort-Object Name)) {
+            $lines.Add(('[NotPresent] {0}: {1} items (details available in the collected evidence context)' -f $group.Name, $group.Count)) | Out-Null
+        }
+    } else {
+        $lines.Add('[NotPresent] none') | Out-Null
     }
     $lines.Add('') | Out-Null
     $lines.Add('Intentionally excluded by design:') | Out-Null
@@ -3614,10 +3623,13 @@ function Stop-CrosshairSelectionBridge {
     if ($Session -and $Session.State.Listener) { try { $Session.State.Listener.Stop();$Session.State.Listener.Close() } catch {} }
 }
 function Read-CrosshairSelectionBridge {
-    param($Session, [int]$Count = 321)
+    param($Session, [int]$Count = 321, [int]$SelectionCount = 1)
     if (-not $Session) { return $null }
+    $targetCount = [Math]::Max(1, $SelectionCount)
+    $selections = New-Object System.Collections.Generic.List[int]
+    $Session.State.Index = $null
     try {
-        while ([datetime]::UtcNow -lt $Session.State.Expires -and $null -eq $Session.State.Index) {
+        while ([datetime]::UtcNow -lt $Session.State.Expires -and $selections.Count -lt $targetCount) {
             $pending = $Session.State.Pending
             if (-not $pending -or -not $pending.AsyncWaitHandle.WaitOne(100)) { continue }
             try {
@@ -3629,8 +3641,11 @@ function Read-CrosshairSelectionBridge {
                 $context.Response.Headers['Access-Control-Allow-Origin'] = '*'
                 $context.Response.OutputStream.Write($bytes,0,$bytes.Length)
                 $context.Response.Close()
-                if ($null -ne $index) { $Session.State.Index = $index; break }
-                if ([datetime]::UtcNow -lt $Session.State.Expires -and $Session.State.Listener.IsListening) {
+                if ($null -ne $index) {
+                    [void]$selections.Add($index)
+                    $Session.State.Index = $index
+                }
+                if ($selections.Count -lt $targetCount -and [datetime]::UtcNow -lt $Session.State.Expires -and $Session.State.Listener.IsListening) {
                     $Session.State.Pending = $Session.State.Listener.BeginGetContext([System.AsyncCallback]$null, $Session.State)
                 }
             } catch {
@@ -3639,7 +3654,8 @@ function Read-CrosshairSelectionBridge {
                 }
             }
         }
-        return $Session.State.Index
+        if ($targetCount -eq 1) { return $Session.State.Index }
+        return $selections.ToArray()
     } finally {
         Stop-CrosshairSelectionBridge -Session $Session
     }
@@ -3671,7 +3687,7 @@ function Export-CrosshairPreview {
     if ($BridgeUrl -and $BridgeToken) {
         [void]$sb.Append("<script>const bridge='$bridgeUrlHtml',token='$bridgeTokenHtml';function choose(i){fetch(bridge+'?token='+encodeURIComponent(token)+'&index='+i).then(function(){document.title='Selected crosshair '+i;});}</script>")
     }
-    $instructionText = if ($BridgeUrl -and $BridgeToken) { '<p>Click a crosshair to select it. Typed numeric fallback remains available in TeknoParrot Manager.</p>' } else { '<p>Type the number shown under the crosshair in TeknoParrot Manager.</p>' }
+    $instructionText = if ($BridgeUrl -and $BridgeToken) { '<p>Click a crosshair to select P1, then click another to select P2. Typed numeric fallback remains available in TeknoParrot Manager.</p>' } else { '<p>Type the number shown under the crosshair in TeknoParrot Manager.</p>' }
     [void]$sb.Append($instructionText)
     [void]$sb.Append('<div class="grid">')
 
@@ -4316,13 +4332,13 @@ function Get-TpmReShadePerformanceBadge {
 }
 
 function Get-TpmReShadePreviewCacheKey {
-    param([Parameter(Mandatory)][string]$SubjectId, [string[]]$ShaderSha256 = @(), [string]$IntensityId = 'Default', [string]$PresetVersion = '2', [string]$ReferenceVersion = '1', [string]$ReferenceSha256 = 'TPM-SYNTHETIC-REFERENCE-V1', [string]$RendererVersion = '1')
+    param([Parameter(Mandatory)][string]$SubjectId, [string[]]$ShaderSha256 = @(), [string]$IntensityId = 'Default', [string]$PresetVersion = '2', [string]$ReferenceVersion = '2', [string]$ReferenceSha256 = '34e93eb66ccca95364ad91db189185a3778544fb57351280c2092e27fc381c33', [string]$RendererVersion = '2')
     $raw = (@($SubjectId,$IntensityId,$PresetVersion,$ReferenceVersion,$ReferenceSha256,$RendererVersion,(@($ShaderSha256) -join ',')) -join '|')
     $bytes = [Text.Encoding]::UTF8.GetBytes($raw)
     return ([BitConverter]::ToString(([Security.Cryptography.SHA256]::Create().ComputeHash($bytes))) -replace '-', '').ToLowerInvariant()
 }
 function Compare-TpmReShadeProfiles {
-    param([Parameter(Mandatory)][string]$LeftProfileId, [Parameter(Mandatory)][string]$RightProfileId, [string]$ReferenceIdentity = 'TPM-SYNTHETIC-ARCADE-V1')
+    param([Parameter(Mandatory)][string]$LeftProfileId, [Parameter(Mandatory)][string]$RightProfileId, [string]$ReferenceIdentity = 'TPM-SYNTHETIC-ARCADE-V2')
     $left=Get-TpmReShadeProfile -ProfileId $LeftProfileId;$right=Get-TpmReShadeProfile -ProfileId $RightProfileId
     if(-not $left -or -not $right -or [string]::IsNullOrWhiteSpace($ReferenceIdentity)){return [pscustomobject]@{Valid=$false;Reason='INVALID_PREVIEW_SUBJECT'}}
     return [pscustomobject]@{Valid=$true;LeftProfileId=$left.ProfileId;RightProfileId=$right.ProfileId;ReferenceIdentity=$ReferenceIdentity;Deploys=$false;LeftEffects=@($left.Effects);RightEffects=@($right.Effects)}
@@ -4510,119 +4526,797 @@ function Get-TpmReShadePreviewReference {
     return [pscustomobject]@{
         Available = $true
         Path = $null
-        Version = '1'
-        Hash = '722f9d7c89449d90d7def1a42e4108e443401dd6460ae3316b9e8d955e5c34f6'
-        Identity = 'TPM-SYNTHETIC-ARCADE-V1'
+        Version = '2'
+        Hash = '34e93eb66ccca95364ad91db189185a3778544fb57351280c2092e27fc381c33'
+        Identity = 'TPM-SYNTHETIC-ARCADE-V2'
     }
 }
-
+function Invoke-TpmReShadePreviewSceneTexture {
+    param([Parameter(Mandatory)][Drawing.Bitmap]$Bitmap)
+    $rectangle = New-Object Drawing.Rectangle -ArgumentList @(0, 0, $Bitmap.Width, $Bitmap.Height)
+    $data = $null
+    try {
+        $data = $Bitmap.LockBits($rectangle, [System.Drawing.Imaging.ImageLockMode]::ReadWrite, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+        $stride = [Math]::Abs([int]$data.Stride)
+        $length = $stride * $Bitmap.Height
+        $pixels = New-Object byte[] $length
+        [Runtime.InteropServices.Marshal]::Copy($data.Scan0, $pixels, 0, $length)
+        $width = [int]$Bitmap.Width
+        $height = [int]$Bitmap.Height
+        for ($y = 0; $y -lt $height; $y++) {
+            $row = if ($data.Stride -lt 0) { $height - 1 - $y } else { $y }
+            for ($x = 0; $x -lt $width; $x++) {
+                $index = ($row * $stride) + ($x * 4)
+                $noiseSeed = (([int64]$x * 73856093) -bxor ([int64]$y * 19349663))
+                $noiseSeed = $noiseSeed -bxor (([int64]$x * [int64]$x * 83492791) + ([int64]$y * [int64]$y * 49979687))
+                $noise = [int](($noiseSeed -band 2147483647) % 17) - 8
+                $roomShadow = if ($y -gt ($height * 0.82)) { -5 } else { 0 }
+                $edgeX = [Math]::Abs((2.0 * $x / [Math]::Max(1, $width - 1)) - 1.0)
+                $edgeY = [Math]::Abs((2.0 * $y / [Math]::Max(1, $height - 1)) - 1.0)
+                $exposure = 1.0 - (0.08 * [Math]::Max($edgeX, $edgeY))
+                $blue = ([int]$pixels[$index] + $noise + $roomShadow) * $exposure
+                $green = ([int]$pixels[$index + 1] + $noise) * $exposure
+                $red = ([int]$pixels[$index + 2] + $noise) * $exposure
+                if ($blue -lt 0) { $blue = 0 }; if ($blue -gt 255) { $blue = 255 }
+                if ($green -lt 0) { $green = 0 }; if ($green -gt 255) { $green = 255 }
+                if ($red -lt 0) { $red = 0 }; if ($red -gt 255) { $red = 255 }
+                $pixels[$index] = [byte]$blue
+                $pixels[$index + 1] = [byte]$green
+                $pixels[$index + 2] = [byte]$red
+            }
+        }
+        [Runtime.InteropServices.Marshal]::Copy($pixels, 0, $data.Scan0, $length)
+    } finally {
+        if ($data) { $Bitmap.UnlockBits($data) }
+    }
+}
 function New-TpmReShadePreviewReferenceBitmap {
     param([int]$Width = 960, [int]$Height = 540)
     Add-Type -AssemblyName System.Drawing -ErrorAction Stop
-    $canvasWidth=[int]$Width; $canvasHeight=[int]$Height
-    $bitmap = New-Object Drawing.Bitmap($canvasWidth,$canvasHeight)
+    $canvasWidth = [Math]::Max(1, [int]$Width)
+    $canvasHeight = [Math]::Max(1, [int]$Height)
+    $bitmap = New-Object Drawing.Bitmap($canvasWidth, $canvasHeight)
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
-    $font = $null; $small = $null; $brush = $null; $pen = $null
     try {
-        $graphics.Clear([Drawing.Color]::FromArgb(10,14,24))
-        $font = New-Object Drawing.Font('Consolas',18)
-        $small = New-Object Drawing.Font('Consolas',12)
-        $brush = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(28,38,60))
-        $graphics.FillRectangle($brush,40,40,$canvasWidth-80,$canvasHeight-80)
-        $pen = New-Object Drawing.Pen([Drawing.Color]::White,3)
-        $graphics.DrawRectangle($pen,40,40,$canvasWidth-80,$canvasHeight-80)
-        $sky = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(38,58,104))
-        $graphics.FillRectangle($sky,60,60,$canvasWidth-120,260);$sky.Dispose()
-        $ground = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(24,28,34))
-        $graphics.FillRectangle($ground,60,320,$canvasWidth-120,160);$ground.Dispose()
-        $sun = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(247,190,76))
-        $graphics.FillEllipse($sun,($canvasWidth/2)-55,112,110,110);$sun.Dispose()
-        $neon = New-Object Drawing.Pen([Drawing.Color]::FromArgb(69,218,220),4)
-        $graphics.DrawLine($neon,60,318,($canvasWidth/2)-80,220);$graphics.DrawLine($neon,($canvasWidth/2)+80,220,$canvasWidth-60,318)
-        $graphics.DrawLine($neon,($canvasWidth/2)-80,220,($canvasWidth/2)+80,220);$neon.Dispose()
-        $cab = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(122,42,132))
-        $graphics.FillRectangle($cab,120,205,210,220);$cab.Dispose()
-        $screen = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(12,18,26))
-        $graphics.FillRectangle($screen,145,230,160,105);$screen.Dispose()
-        $cabEdge = New-Object Drawing.Pen([Drawing.Color]::FromArgb(255,86,178),3)
-        $graphics.DrawRectangle($cabEdge,145,230,160,105);$graphics.DrawEllipse($cabEdge,175,360,35,35);$graphics.DrawEllipse($cabEdge,240,360,35,35);$cabEdge.Dispose()
-        $road = New-Object Drawing.Pen([Drawing.Color]::FromArgb(232,232,220),2)
-        for ($x=90; $x -lt $canvasWidth-80; $x+=55) { $graphics.DrawLine($road,$canvasWidth/2,320,$x,480) }
-        for ($y=345; $y -lt 480; $y+=28) { $graphics.DrawLine($road,70,$y,$canvasWidth-70,$y) };$road.Dispose()
-        $textBrush=New-Object Drawing.SolidBrush([Drawing.Color]::White)
-        $graphics.DrawString('NEON CIRCUIT',$font,$textBrush,82,78)
-        $graphics.DrawString('SCORE 084200   1UP   INSERT COIN',$small,$textBrush,82,175)
-        $graphics.DrawString('ARCADE PREVIEW',$small,$textBrush,155,282)
-        $graphics.DrawString('DARK + BRIGHT DETAIL',$small,$textBrush,($canvasWidth-300),440)
-        $textBrush.Dispose()
-        return $bitmap
+        $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+        $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+        $graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+        $graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
+        $graphics.ScaleTransform([float]($canvasWidth / 960.0), [float]($canvasHeight / 540.0))
+
+        $wallRect = New-Object Drawing.Rectangle -ArgumentList @(0, 0, 960, 360)
+        $wall = New-Object System.Drawing.Drawing2D.LinearGradientBrush -ArgumentList @(
+            $wallRect,
+            [Drawing.Color]::FromArgb(3, 6, 15),
+            [Drawing.Color]::FromArgb(48, 19, 56),
+            90.0
+        )
+        $graphics.FillRectangle($wall, $wallRect)
+        $wall.Dispose()
+        $wallLine = New-Object Drawing.Pen([Drawing.Color]::FromArgb(36, 53, 71), 1)
+        for ($wallY = 38; $wallY -lt 348; $wallY += 38) {
+            $graphics.DrawLine($wallLine, 0, $wallY, 960, $wallY)
+        }
+        for ($wallX = 18; $wallX -lt 960; $wallX += 96) {
+            $graphics.DrawLine($wallLine, $wallX, 0, $wallX, 352)
+        }
+        $wallLine.Dispose()
+        $ambientPink = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(18, 238, 37, 143))
+        $ambientBlue = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(22, 26, 105, 203))
+        $ambientGold = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(15, 231, 151, 53))
+        $graphics.FillEllipse($ambientPink, -180, 42, 510, 330)
+        $graphics.FillEllipse($ambientBlue, 660, 16, 500, 370)
+        $graphics.FillEllipse($ambientGold, 338, 145, 320, 270)
+        $ambientPink.Dispose()
+        $ambientBlue.Dispose()
+        $ambientGold.Dispose()
+
+        $ceilingPen = New-Object Drawing.Pen([Drawing.Color]::FromArgb(24, 30, 37, 52), 2)
+        $graphics.DrawLine($ceilingPen, 0, 78, 960, 78)
+        $graphics.DrawLine($ceilingPen, 0, 116, 960, 116)
+        $ceilingPen.Dispose()
+        $ceilingLight = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(42, 238, 77, 177))
+        $graphics.FillRectangle($ceilingLight, 70, 82, 210, 5)
+        $graphics.FillRectangle($ceilingLight, 680, 82, 210, 5)
+        $ceilingLight.Dispose()
+        $ceilingGlow = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(14, 230, 69, 178))
+        $graphics.FillEllipse($ceilingGlow, 44, 76, 270, 42)
+        $graphics.FillEllipse($ceilingGlow, 646, 76, 270, 42)
+        $ceilingGlow.Dispose()
+        $wallTextureA = New-Object Drawing.Pen([Drawing.Color]::FromArgb(18, 156, 178, 194), 1)
+        $wallTextureB = New-Object Drawing.Pen([Drawing.Color]::FromArgb(12, 244, 92, 176), 1)
+        $wallRandom = New-Object System.Random(17421)
+        for ($wallMark = 0; $wallMark -lt 620; $wallMark++) {
+            $wallMarkX = $wallRandom.Next(0, 960)
+            $wallMarkY = $wallRandom.Next(18, 340)
+            $wallMarkLength = $wallRandom.Next(2, 9)
+            if (($wallMark % 11) -eq 0) {
+                $graphics.DrawLine($wallTextureB, $wallMarkX, $wallMarkY, $wallMarkX + $wallMarkLength, $wallMarkY)
+            } else {
+                $graphics.DrawLine($wallTextureA, $wallMarkX, $wallMarkY, $wallMarkX + $wallMarkLength, $wallMarkY)
+            }
+        }
+        $wallTextureA.Dispose()
+        $wallTextureB.Dispose()
+        $wallCable = New-Object Drawing.Pen([Drawing.Color]::FromArgb(84, 4, 5, 12), 3)
+        $graphics.DrawBezier($wallCable, 8, 145, 92, 204, 118, 254, 152, 319)
+        $graphics.DrawBezier($wallCable, 952, 145, 868, 204, 842, 254, 808, 319)
+        $wallCable.Dispose()
+        $wallSignFont = New-Object Drawing.Font('Segoe UI', 7, [Drawing.FontStyle]::Bold)
+        $wallSign = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(116, 191, 229, 222))
+        $graphics.DrawString('OPEN 24 HOURS', $wallSignFont, $wallSign, 404, 49)
+        $wallSign.Dispose()
+        $wallSignFont.Dispose()
+
+
+
+        $floorRect = New-Object Drawing.Rectangle -ArgumentList @(0, 340, 960, 200)
+        $floor = New-Object System.Drawing.Drawing2D.LinearGradientBrush -ArgumentList @(
+            $floorRect,
+            [Drawing.Color]::FromArgb(28, 31, 42),
+            [Drawing.Color]::FromArgb(2, 4, 9),
+            90.0
+        )
+        $graphics.FillRectangle($floor, $floorRect)
+        $floor.Dispose()
+        $floorGlow = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(24, 31, 166, 188))
+        $graphics.FillEllipse($floorGlow, 176, 362, 610, 166)
+        $floorGlow.Dispose()
+        $floorSeam = New-Object Drawing.Pen([Drawing.Color]::FromArgb(48, 70, 78), 1)
+        foreach ($floorY in @(347, 359, 374, 394, 420, 453, 493, 533)) {
+            $graphics.DrawLine($floorSeam, 0, $floorY, 960, $floorY)
+        }
+        foreach ($floorX in @(34, 100, 171, 248, 329, 405, 480, 555, 631, 712, 793, 865, 930)) {
+            $graphics.DrawLine($floorSeam, 480, 340, $floorX, 540)
+        }
+        $floorSeam.Dispose()
+        $floorThreadA = New-Object Drawing.Pen([Drawing.Color]::FromArgb(30, 111, 134, 141), 1)
+        $floorThreadB = New-Object Drawing.Pen([Drawing.Color]::FromArgb(26, 190, 52, 141), 1)
+        $floorRandom = New-Object System.Random(25817)
+        for ($thread = 0; $thread -lt 920; $thread++) {
+            $threadX = $floorRandom.Next(0, 960)
+            $threadY = $floorRandom.Next(344, 540)
+            $threadLength = $floorRandom.Next(2, 10)
+            if (($thread % 7) -eq 0) {
+                $graphics.DrawLine($floorThreadB, $threadX, $threadY, $threadX + $threadLength, $threadY)
+            } else {
+                $graphics.DrawLine($floorThreadA, $threadX, $threadY, $threadX + $threadLength, $threadY)
+            }
+        }
+        $floorThreadA.Dispose()
+        $floorThreadB.Dispose()
+        $reflectionRect = New-Object Drawing.Rectangle -ArgumentList @(250, 390, 460, 135)
+        $reflection = New-Object System.Drawing.Drawing2D.LinearGradientBrush -ArgumentList @(
+            $reflectionRect,
+            [Drawing.Color]::FromArgb(40, 68, 199, 200),
+            [Drawing.Color]::FromArgb(0, 68, 199, 200),
+            90.0
+        )
+        $graphics.FillEllipse($reflection, $reflectionRect)
+        $reflection.Dispose()
+
+        $rearShadow = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(155, 0, 0, 0))
+        $graphics.FillEllipse($rearShadow, 13, 327, 190, 47)
+        $graphics.FillEllipse($rearShadow, 757, 327, 190, 47)
+        $rearShadow.Dispose()
+        foreach ($cabinetX in @(28, 806)) {
+            $rearBody = [Drawing.Point[]]@(
+                (New-Object Drawing.Point -ArgumentList @([int]($cabinetX + 8), 148)),
+                (New-Object Drawing.Point -ArgumentList @([int]($cabinetX + 120), 148)),
+                (New-Object Drawing.Point -ArgumentList @([int]($cabinetX + 133), 360)),
+                (New-Object Drawing.Point -ArgumentList @([int]($cabinetX - 6), 360))
+            )
+            $rearBrush = New-Object System.Drawing.Drawing2D.LinearGradientBrush -ArgumentList @(
+                (New-Object Drawing.Rectangle -ArgumentList @([int]($cabinetX - 6), 148, 139, 212)),
+                [Drawing.Color]::FromArgb(43, 26, 60),
+                [Drawing.Color]::FromArgb(9, 12, 25),
+                90.0
+            )
+            $graphics.FillPolygon($rearBrush, $rearBody)
+            $rearBrush.Dispose()
+            $rearEdge = New-Object Drawing.Pen([Drawing.Color]::FromArgb(118, 39, 115), 2)
+            $graphics.DrawPolygon($rearEdge, $rearBody)
+            $rearEdge.Dispose()
+            $rearScreen = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(7, 13, 25))
+            $graphics.FillRectangle($rearScreen, $cabinetX + 8, 184, 102, 91)
+            $rearScreen.Dispose()
+            $rearGlass = New-Object System.Drawing.Drawing2D.LinearGradientBrush -ArgumentList @(
+                (New-Object Drawing.Rectangle -ArgumentList @([int]($cabinetX + 12), 188, 94, 82)),
+                [Drawing.Color]::FromArgb(5, 20, 42),
+                [Drawing.Color]::FromArgb(20, 78, 82),
+                90.0
+            )
+            $graphics.FillRectangle($rearGlass, $cabinetX + 12, 188, 94, 82)
+            $rearGlass.Dispose()
+            $rearScreenLine = New-Object Drawing.Pen([Drawing.Color]::FromArgb(47, 167, 176), 1)
+            for ($rearY = 200; $rearY -lt 265; $rearY += 13) {
+                $graphics.DrawLine($rearScreenLine, $cabinetX + 20, $rearY, $cabinetX + 96, $rearY)
+            }
+            $rearScreenLine.Dispose()
+            $rearControl = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(20, 22, 37))
+            $graphics.FillPolygon($rearControl, [Drawing.Point[]]@(
+                (New-Object Drawing.Point -ArgumentList @([int]($cabinetX + 4), 281)),
+                (New-Object Drawing.Point -ArgumentList @([int]($cabinetX + 116), 281)),
+                (New-Object Drawing.Point -ArgumentList @([int]($cabinetX + 126), 310)),
+                (New-Object Drawing.Point -ArgumentList @([int]($cabinetX - 3), 310))
+            ))
+            $rearControl.Dispose()
+            $rearTrim = New-Object Drawing.Pen([Drawing.Color]::FromArgb(89, 216, 203), 1)
+            $graphics.DrawLine($rearTrim, $cabinetX + 5, 286, $cabinetX + 116, 286)
+            $rearTrim.Dispose()
+            $rearLabelFont = New-Object Drawing.Font('Segoe UI', 8, [Drawing.FontStyle]::Bold)
+            $rearLabel = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(194, 235, 220))
+            $graphics.DrawString('RACING', $rearLabelFont, $rearLabel, $cabinetX + 28, 326)
+            $rearLabel.Dispose()
+            $rearLabelFont.Dispose()
+        }
+
+        $mainShadow = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(190, 0, 0, 0))
+        $graphics.FillEllipse($mainShadow, 128, 453, 704, 74)
+        $mainShadow.Dispose()
+        $cabinetBody = [Drawing.Point[]]@(
+            (New-Object Drawing.Point -ArgumentList @(198, 86)),
+            (New-Object Drawing.Point -ArgumentList @(762, 86)),
+            (New-Object Drawing.Point -ArgumentList @(818, 458)),
+            (New-Object Drawing.Point -ArgumentList @(142, 458))
+        )
+        $cabinetGradient = New-Object System.Drawing.Drawing2D.LinearGradientBrush -ArgumentList @(
+            (New-Object Drawing.Rectangle -ArgumentList @(142, 86, 676, 372)),
+            [Drawing.Color]::FromArgb(55, 24, 33, 53),
+            [Drawing.Color]::FromArgb(10, 11, 19),
+            90.0
+        )
+        $graphics.FillPolygon($cabinetGradient, $cabinetBody)
+        $cabinetGradient.Dispose()
+        $cabinetShade = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(48, 0, 0, 0))
+        $graphics.FillPolygon($cabinetShade, [Drawing.Point[]]@(
+            (New-Object Drawing.Point -ArgumentList @(180, 432)),
+            (New-Object Drawing.Point -ArgumentList @(211, 105)),
+            (New-Object Drawing.Point -ArgumentList @(244, 105)),
+            (New-Object Drawing.Point -ArgumentList @(226, 432))
+        ))
+        $graphics.FillPolygon($cabinetShade, [Drawing.Point[]]@(
+            (New-Object Drawing.Point -ArgumentList @(736, 105)),
+            (New-Object Drawing.Point -ArgumentList @(763, 105)),
+            (New-Object Drawing.Point -ArgumentList @(795, 432)),
+            (New-Object Drawing.Point -ArgumentList @(766, 432))
+        ))
+        $cabinetShade.Dispose()
+        $cabinetEdge = New-Object Drawing.Pen([Drawing.Color]::FromArgb(222, 77, 184), 3)
+        $graphics.DrawPolygon($cabinetEdge, $cabinetBody)
+        $cabinetEdge.Dispose()
+        $cabinetHighlight = New-Object Drawing.Pen([Drawing.Color]::FromArgb(248, 137, 215), 2)
+        $graphics.DrawLine($cabinetHighlight, 211, 101, 749, 101)
+        $graphics.DrawLine($cabinetHighlight, 211, 101, 174, 432)
+        $cabinetHighlight.Dispose()
+        $cabinetSpecular = New-Object Drawing.Pen([Drawing.Color]::FromArgb(74, 255, 203, 243), 1)
+        $graphics.DrawLine($cabinetSpecular, 228, 121, 203, 301)
+        $graphics.DrawLine($cabinetSpecular, 733, 121, 759, 301)
+        $cabinetSpecular.Dispose()
+        $bodyGloss = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(19, 255, 255, 255))
+        $graphics.FillPolygon($bodyGloss, [Drawing.Point[]]@(
+            (New-Object Drawing.Point -ArgumentList @(222, 122)),
+            (New-Object Drawing.Point -ArgumentList @(286, 122)),
+            (New-Object Drawing.Point -ArgumentList @(247, 423)),
+            (New-Object Drawing.Point -ArgumentList @(205, 423))
+        ))
+        $graphics.FillPolygon($bodyGloss, [Drawing.Point[]]@(
+            (New-Object Drawing.Point -ArgumentList @(681, 122)),
+            (New-Object Drawing.Point -ArgumentList @(735, 122)),
+            (New-Object Drawing.Point -ArgumentList @(770, 423)),
+            (New-Object Drawing.Point -ArgumentList @(733, 423))
+        ))
+        $bodyGloss.Dispose()
+        $bodyShade = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(28, 0, 0, 0))
+        $graphics.FillPolygon($bodyShade, [Drawing.Point[]]@(
+            (New-Object Drawing.Point -ArgumentList @(254, 428)),
+            (New-Object Drawing.Point -ArgumentList @(706, 428)),
+            (New-Object Drawing.Point -ArgumentList @(728, 447)),
+            (New-Object Drawing.Point -ArgumentList @(232, 447))
+        ))
+        $bodyShade.Dispose()
+
+
+        $marqueeOuter = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(7, 10, 18))
+        $graphics.FillRectangle($marqueeOuter, 216, 103, 528, 76)
+        $marqueeOuter.Dispose()
+        $marquee = New-Object System.Drawing.Drawing2D.LinearGradientBrush -ArgumentList @(
+            (New-Object Drawing.Rectangle -ArgumentList @(228, 113, 504, 54)),
+            [Drawing.Color]::FromArgb(6, 23, 57),
+            [Drawing.Color]::FromArgb(28, 108, 123),
+            90.0
+        )
+        $graphics.FillRectangle($marquee, 228, 113, 504, 54)
+        $marquee.Dispose()
+        $marqueeGloss = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(38, 255, 255, 255))
+        $graphics.FillRectangle($marqueeGloss, 234, 117, 492, 7)
+        $marqueeGloss.Dispose()
+        $marqueeLine = New-Object Drawing.Pen([Drawing.Color]::FromArgb(255, 218, 119), 2)
+        $graphics.DrawRectangle($marqueeLine, 226, 111, 508, 58)
+        $marqueeLine.Dispose()
+        $marqueeFont = New-Object Drawing.Font('Segoe UI', 22, [Drawing.FontStyle]::Bold)
+        $marqueeText = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 241, 186))
+        $graphics.DrawString('NEON CIRCUIT', $marqueeFont, $marqueeText, 344, 121)
+        $marqueeText.Dispose()
+        $marqueeFont.Dispose()
+        $marqueeSmallFont = New-Object Drawing.Font('Segoe UI', 7, [Drawing.FontStyle]::Bold)
+        $marqueeSmall = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(168, 194, 235))
+        $graphics.DrawString('MIDNIGHT GRAND PRIX  //  PLAYER 1', $marqueeSmallFont, $marqueeSmall, 347, 153)
+        $marqueeSmall.Dispose()
+        $marqueeSmallFont.Dispose()
+
+        $screenFrame = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(5, 7, 13))
+        $graphics.FillRectangle($screenFrame, 235, 181, 490, 274)
+        $screenFrame.Dispose()
+        $screenBezel = New-Object Drawing.Pen([Drawing.Color]::FromArgb(115, 125, 148), 3)
+        $graphics.DrawRectangle($screenBezel, 238, 184, 484, 268)
+        $screenBezel.Dispose()
+        $screenBezelLight = New-Object Drawing.Pen([Drawing.Color]::FromArgb(236, 239, 232), 2)
+        $graphics.DrawLine($screenBezelLight, 247, 193, 713, 193)
+        $graphics.DrawLine($screenBezelLight, 247, 193, 247, 445)
+        $screenBezelLight.Dispose()
+        $screenBorder = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(2, 3, 8))
+        $graphics.FillRectangle($screenBorder, 251, 195, 458, 252)
+        $screenBorder.Dispose()
+
+        for ($skyBand = 0; $skyBand -lt 28; $skyBand++) {
+            $skyT = $skyBand / 27.0
+            $skyRed = [int](14 + (58 * $skyT))
+            $skyGreen = [int](38 - (17 * $skyT))
+            $skyBlue = [int](76 + (24 * $skyT))
+            $skyBrush = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, $skyRed, $skyGreen, $skyBlue))
+            $graphics.FillRectangle($skyBrush, 255, 199 + ($skyBand * 6), 450, 7)
+            $skyBrush.Dispose()
+        }
+        $sunGlowOuter = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(16, 255, 168, 79))
+        $sunGlowMiddle = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(29, 255, 183, 82))
+        $sunBrush = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 250, 207, 134))
+        $graphics.FillEllipse($sunGlowOuter, 570, 214, 132, 132)
+        $graphics.FillEllipse($sunGlowMiddle, 586, 229, 100, 100)
+        $graphics.FillEllipse($sunBrush, 604, 247, 64, 64)
+        $sunGlowOuter.Dispose()
+        $sunGlowMiddle.Dispose()
+        $sunBrush.Dispose()
+        $cloudPen = New-Object Drawing.Pen([Drawing.Color]::FromArgb(38, 214, 219, 229), 8)
+        $graphics.DrawLine($cloudPen, 284, 256, 367, 256)
+        $graphics.DrawLine($cloudPen, 517, 276, 580, 276)
+        $cloudPen.Dispose()
+        $mountainBack = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(90, 41, 47, 89))
+        $graphics.FillPolygon($mountainBack, [Drawing.Point[]]@(
+            (New-Object Drawing.Point -ArgumentList @(255, 326)),
+            (New-Object Drawing.Point -ArgumentList @(318, 268)),
+            (New-Object Drawing.Point -ArgumentList @(372, 315)),
+            (New-Object Drawing.Point -ArgumentList @(438, 250)),
+            (New-Object Drawing.Point -ArgumentList @(512, 319)),
+            (New-Object Drawing.Point -ArgumentList @(583, 264)),
+            (New-Object Drawing.Point -ArgumentList @(705, 329)),
+            (New-Object Drawing.Point -ArgumentList @(705, 347)),
+            (New-Object Drawing.Point -ArgumentList @(255, 347))
+        ))
+        $mountainBack.Dispose()
+        $mountainFront = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(220, 23, 27, 45))
+        $graphics.FillPolygon($mountainFront, [Drawing.Point[]]@(
+            (New-Object Drawing.Point -ArgumentList @(255, 347)),
+            (New-Object Drawing.Point -ArgumentList @(325, 298)),
+            (New-Object Drawing.Point -ArgumentList @(389, 328)),
+            (New-Object Drawing.Point -ArgumentList @(466, 286)),
+            (New-Object Drawing.Point -ArgumentList @(546, 331)),
+            (New-Object Drawing.Point -ArgumentList @(624, 292)),
+            (New-Object Drawing.Point -ArgumentList @(705, 341)),
+            (New-Object Drawing.Point -ArgumentList @(705, 365)),
+            (New-Object Drawing.Point -ArgumentList @(255, 365))
+        ))
+        $mountainFront.Dispose()
+        $mountainLine = New-Object Drawing.Pen([Drawing.Color]::FromArgb(115, 100, 116, 196), 2)
+        $graphics.DrawLines($mountainLine, [Drawing.Point[]]@(
+            (New-Object Drawing.Point -ArgumentList @(255, 347)),
+            (New-Object Drawing.Point -ArgumentList @(325, 298)),
+            (New-Object Drawing.Point -ArgumentList @(389, 328)),
+            (New-Object Drawing.Point -ArgumentList @(466, 286)),
+            (New-Object Drawing.Point -ArgumentList @(546, 331)),
+            (New-Object Drawing.Point -ArgumentList @(624, 292)),
+            (New-Object Drawing.Point -ArgumentList @(705, 341))
+        ))
+        $mountainLine.Dispose()
+        $horizonFog = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(32, 143, 202, 194))
+        $graphics.FillRectangle($horizonFog, 255, 330, 450, 22)
+        $horizonFog.Dispose()
+        $ground = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 11, 16, 24))
+        $graphics.FillRectangle($ground, 255, 347, 450, 96)
+        $ground.Dispose()
+        $road = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 21, 28, 36))
+        $graphics.FillPolygon($road, [Drawing.Point[]]@(
+            (New-Object Drawing.Point -ArgumentList @(431, 322)),
+            (New-Object Drawing.Point -ArgumentList @(533, 322)),
+            (New-Object Drawing.Point -ArgumentList @(705, 443)),
+            (New-Object Drawing.Point -ArgumentList @(255, 443))
+        ))
+        $road.Dispose()
+        $roadBand = New-Object Drawing.Pen([Drawing.Color]::FromArgb(38, 93, 115, 116), 2)
+        foreach ($roadY in @(333, 344, 359, 379, 404, 432)) {
+            $roadT = ($roadY - 322) / 121.0
+            $roadHalf = [int](51 + (205 * $roadT))
+            $graphics.DrawLine($roadBand, 482 - $roadHalf, $roadY, 482 + $roadHalf, $roadY)
+        }
+        $roadBand.Dispose()
+        $lanePen = New-Object Drawing.Pen([Drawing.Color]::FromArgb(183, 220, 224, 211), 2)
+        $graphics.DrawLine($lanePen, 482, 323, 482, 443)
+        $graphics.DrawLine($lanePen, 450, 323, 291, 443)
+        $graphics.DrawLine($lanePen, 514, 323, 674, 443)
+        $lanePen.Dispose()
+        $roadNoisePen = New-Object Drawing.Pen([Drawing.Color]::FromArgb(42, 176, 193, 195), 1)
+        $roadRandom = New-Object System.Random(47811)
+        for ($roadMark = 0; $roadMark -lt 170; $roadMark++) {
+            $markY = $roadRandom.Next(350, 443)
+            $markT = ($markY - 322) / 121.0
+            $markHalf = [int](51 + (205 * $markT))
+            $markX = $roadRandom.Next([Math]::Max(255, 482 - $markHalf), [Math]::Min(705, 483 + $markHalf))
+            $graphics.DrawLine($roadNoisePen, $markX, $markY, $markX + $roadRandom.Next(2, 8), $markY)
+        }
+        $roadNoisePen.Dispose()
+        $railPen = New-Object Drawing.Pen([Drawing.Color]::FromArgb(155, 73, 213, 202), 2)
+        $graphics.DrawLine($railPen, 255, 343, 431, 322)
+        $graphics.DrawLine($railPen, 705, 343, 533, 322)
+        $railPen.Dispose()
+        $postBrush = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 227, 224, 172))
+        $postGlow = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(65, 255, 214, 105))
+        foreach ($post in @(@(308, 349), @(649, 350), @(280, 375), @(676, 374))) {
+            $graphics.FillEllipse($postGlow, $post[0] - 7, $post[1] - 7, 14, 14)
+            $graphics.FillRectangle($postBrush, $post[0], $post[1], 3, 12)
+        }
+        $postBrush.Dispose()
+        $postGlow.Dispose()
+
+        $opponentShadow = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(115, 0, 0, 0))
+        $graphics.FillEllipse($opponentShadow, 309, 330, 48, 13)
+        $graphics.FillEllipse($opponentShadow, 607, 345, 41, 11)
+        $opponentShadow.Dispose()
+        $opponent = New-Object System.Drawing.Drawing2D.LinearGradientBrush -ArgumentList @(
+            (New-Object Drawing.Rectangle -ArgumentList @(312, 321, 44, 25)),
+            [Drawing.Color]::FromArgb(234, 223, 57, 87),
+            [Drawing.Color]::FromArgb(136, 82, 20, 49),
+            90.0
+        )
+        $graphics.FillEllipse($opponent, 312, 321, 44, 25)
+        $opponent.Dispose()
+        $opponentSmall = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(220, 215, 64, 86))
+        $graphics.FillEllipse($opponentSmall, 610, 337, 34, 19)
+        $opponentSmall.Dispose()
+        $opponentWindow = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(175, 24, 41, 63))
+        $graphics.FillEllipse($opponentWindow, 323, 325, 22, 10)
+        $graphics.FillEllipse($opponentWindow, 618, 340, 17, 8)
+        $opponentWindow.Dispose()
+        $opponentLight = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 252, 230, 137))
+        $graphics.FillEllipse($opponentLight, 316, 331, 5, 4)
+        $graphics.FillEllipse($opponentLight, 347, 331, 5, 4)
+        $graphics.FillEllipse($opponentLight, 613, 345, 4, 3)
+        $graphics.FillEllipse($opponentLight, 638, 345, 4, 3)
+        $opponentLight.Dispose()
+
+        $carShadow = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(160, 0, 0, 0))
+        $graphics.FillEllipse($carShadow, 399, 394, 170, 29)
+        $carShadow.Dispose()
+        $carGlow = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(36, 57, 235, 218))
+        $graphics.FillEllipse($carGlow, 395, 337, 180, 89)
+        $carGlow.Dispose()
+        $carBody = [Drawing.Point[]]@(
+            (New-Object Drawing.Point -ArgumentList @(407, 391)),
+            (New-Object Drawing.Point -ArgumentList @(430, 357)),
+            (New-Object Drawing.Point -ArgumentList @(469, 344)),
+            (New-Object Drawing.Point -ArgumentList @(524, 352)),
+            (New-Object Drawing.Point -ArgumentList @(557, 389)),
+            (New-Object Drawing.Point -ArgumentList @(526, 408)),
+            (New-Object Drawing.Point -ArgumentList @(433, 408))
+        )
+        $carGradient = New-Object System.Drawing.Drawing2D.LinearGradientBrush -ArgumentList @(
+            (New-Object Drawing.Rectangle -ArgumentList @(407, 344, 150, 65)),
+            [Drawing.Color]::FromArgb(53, 225, 227),
+            [Drawing.Color]::FromArgb(13, 34, 105),
+            90.0
+        )
+        $graphics.FillPolygon($carGradient, $carBody)
+        $carGradient.Dispose()
+        $carLower = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(185, 12, 25, 71))
+        $graphics.FillPolygon($carLower, [Drawing.Point[]]@(
+            (New-Object Drawing.Point -ArgumentList @(407, 391)),
+            (New-Object Drawing.Point -ArgumentList @(557, 389)),
+            (New-Object Drawing.Point -ArgumentList @(526, 408)),
+            (New-Object Drawing.Point -ArgumentList @(433, 408))
+        ))
+        $carLower.Dispose()
+        $carWindow = New-Object System.Drawing.Drawing2D.LinearGradientBrush -ArgumentList @(
+            (New-Object Drawing.Rectangle -ArgumentList @(450, 351, 65, 32)),
+            [Drawing.Color]::FromArgb(238, 9, 20, 39),
+            [Drawing.Color]::FromArgb(215, 83, 197, 197),
+            90.0
+        )
+        $graphics.FillEllipse($carWindow, 450, 351, 65, 32)
+        $carWindow.Dispose()
+        $carWindowLine = New-Object Drawing.Pen([Drawing.Color]::FromArgb(222, 222, 252, 244), 1)
+        $graphics.DrawEllipse($carWindowLine, 450, 351, 65, 32)
+        $graphics.DrawLine($carWindowLine, 483, 352, 483, 382)
+        $graphics.DrawLine($carWindowLine, 430, 357, 414, 341)
+        $graphics.DrawLine($carWindowLine, 524, 353, 540, 340)
+        $carWindowLine.Dispose()
+        $carHighlight = New-Object Drawing.Pen([Drawing.Color]::FromArgb(225, 241, 255, 250), 2)
+        $graphics.DrawLine($carHighlight, 433, 391, 524, 391)
+        $graphics.DrawLine($carHighlight, 450, 363, 507, 363)
+        $carHighlight.Dispose()
+        $carWheel = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 5, 7, 13))
+        $graphics.FillEllipse($carWheel, 425, 395, 22, 22)
+        $graphics.FillEllipse($carWheel, 512, 395, 22, 22)
+        $carHub = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(215, 83, 211, 204))
+        $graphics.FillEllipse($carHub, 432, 402, 8, 8)
+        $graphics.FillEllipse($carHub, 519, 402, 8, 8)
+        $carWheel.Dispose()
+        $carHub.Dispose()
+        $carLight = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 247, 234, 142))
+        $graphics.FillEllipse($carLight, 418, 385, 12, 7)
+        $graphics.FillEllipse($carLight, 529, 385, 12, 7)
+        $carLight.Dispose()
+
+        $screenHud = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(150, 3, 10, 20))
+        $graphics.FillRectangle($screenHud, 269, 211, 162, 43)
+        $graphics.FillRectangle($screenHud, 540, 211, 147, 43)
+        $graphics.FillRectangle($screenHud, 269, 414, 418, 28)
+        $screenHud.Dispose()
+        $hudFont = New-Object Drawing.Font('Consolas', 10, [Drawing.FontStyle]::Bold)
+        $tinyFont = New-Object Drawing.Font('Consolas', 7, [Drawing.FontStyle]::Regular)
+        $hudWhite = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(244, 248, 255))
+        $hudCyan = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(86, 240, 230))
+        $hudYellow = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 224, 124))
+        $graphics.DrawString('SCORE 084200', $hudFont, $hudYellow, 280, 216)
+        $graphics.DrawString('1UP  INSERT COIN', $tinyFont, $hudWhite, 280, 237)
+        $graphics.DrawString('SHIELD  78%', $hudFont, $hudCyan, 552, 216)
+        $graphics.DrawString('WAVE 07  TARGETS 04', $tinyFont, $hudWhite, 552, 237)
+        $graphics.DrawString('CHECKPOINT 03   SPEED 186 KM/H   LAP 02/03', $tinyFont, $hudWhite, 280, 421)
+        $hudWhite.Dispose()
+        $hudCyan.Dispose()
+        $hudYellow.Dispose()
+        $hudFont.Dispose()
+        $tinyFont.Dispose()
+        $hudBar = New-Object Drawing.Pen([Drawing.Color]::FromArgb(170, 99, 231, 204), 2)
+        $graphics.DrawLine($hudBar, 283, 249, 410, 249)
+        $graphics.DrawLine($hudBar, 553, 249, 674, 249)
+        $hudBar.Dispose()
+
+        $screenReflection = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(22, 255, 255, 255))
+        $graphics.FillPolygon($screenReflection, [Drawing.Point[]]@(
+            (New-Object Drawing.Point -ArgumentList @(612, 199)),
+            (New-Object Drawing.Point -ArgumentList @(681, 199)),
+            (New-Object Drawing.Point -ArgumentList @(642, 300)),
+            (New-Object Drawing.Point -ArgumentList @(615, 300))
+        ))
+        $graphics.FillRectangle($screenReflection, 262, 199, 5, 244)
+        $screenReflection.Dispose()
+
+        $controlDeck = New-Object System.Drawing.Drawing2D.LinearGradientBrush -ArgumentList @(
+            (New-Object Drawing.Rectangle -ArgumentList @(220, 432, 520, 47)),
+            [Drawing.Color]::FromArgb(39, 47, 57),
+            [Drawing.Color]::FromArgb(5, 8, 15),
+            90.0
+        )
+        $graphics.FillPolygon($controlDeck, [Drawing.Point[]]@(
+            (New-Object Drawing.Point -ArgumentList @(220, 430)),
+            (New-Object Drawing.Point -ArgumentList @(740, 430)),
+            (New-Object Drawing.Point -ArgumentList @(786, 477)),
+            (New-Object Drawing.Point -ArgumentList @(174, 477))
+        ))
+        $controlDeck.Dispose()
+        $deckEdge = New-Object Drawing.Pen([Drawing.Color]::FromArgb(197, 65, 215, 194), 2)
+        $graphics.DrawLine($deckEdge, 220, 430, 740, 430)
+        $graphics.DrawLine($deckEdge, 174, 477, 786, 477)
+        $deckEdge.Dispose()
+        $speakerPen = New-Object Drawing.Pen([Drawing.Color]::FromArgb(84, 150, 165, 174), 1)
+        for ($speaker = 0; $speaker -lt 14; $speaker++) {
+            $graphics.DrawLine($speakerPen, 535 + ($speaker * 11), 449, 540 + ($speaker * 11), 462)
+        }
+        $speakerPen.Dispose()
+        $buttonYellow = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 239, 228, 82))
+        $buttonRed = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 230, 59, 85))
+        $buttonBlue = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 74, 212, 222))
+        $buttonRing = New-Object Drawing.Pen([Drawing.Color]::FromArgb(230, 245, 245, 232), 1)
+        $graphics.FillEllipse($buttonYellow, 272, 437, 27, 27)
+        $graphics.FillEllipse($buttonRed, 306, 437, 27, 27)
+        $graphics.FillEllipse($buttonBlue, 340, 437, 27, 27)
+        $graphics.DrawEllipse($buttonRing, 272, 437, 27, 27)
+        $graphics.DrawEllipse($buttonRing, 306, 437, 27, 27)
+        $graphics.DrawEllipse($buttonRing, 340, 437, 27, 27)
+        $buttonYellow.Dispose()
+        $buttonRed.Dispose()
+        $buttonBlue.Dispose()
+        $buttonRing.Dispose()
+        $stick = New-Object Drawing.Pen([Drawing.Color]::FromArgb(207, 231, 237, 232), 4)
+        $graphics.DrawLine($stick, 403, 459, 412, 435)
+        $stick.Dispose()
+        $stickBall = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 231, 62, 107))
+        $graphics.FillEllipse($stickBall, 397, 425, 28, 20)
+        $stickBall.Dispose()
+        $controlTextFont = New-Object Drawing.Font('Segoe UI', 8, [Drawing.FontStyle]::Bold)
+        $controlText = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(224, 231, 239))
+        $graphics.DrawString('P1', $controlTextFont, $controlText, 276, 466)
+        $graphics.DrawString('START', $controlTextFont, $controlText, 315, 466)
+        $graphics.DrawString('CREDIT 03', $controlTextFont, $controlText, 680, 463)
+        $controlText.Dispose()
+        $controlTextFont.Dispose()
+        $lowerPanel = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(29, 14, 31))
+        $graphics.FillRectangle($lowerPanel, 229, 482, 502, 18)
+        $lowerPanel.Dispose()
+        $coinDoor = New-Object Drawing.Pen([Drawing.Color]::FromArgb(108, 212, 112, 197), 1)
+        $graphics.DrawRectangle($coinDoor, 419, 487, 112, 45)
+        $graphics.DrawLine($coinDoor, 428, 495, 522, 495)
+        $graphics.DrawLine($coinDoor, 428, 503, 522, 503)
+        $graphics.DrawLine($coinDoor, 428, 511, 522, 511)
+        $coinDoor.Dispose()
+        $coinLight = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(220, 98, 235, 217))
+        $graphics.FillEllipse($coinLight, 457, 516, 8, 8)
+        $graphics.FillEllipse($coinLight, 487, 516, 8, 8)
+        $coinLight.Dispose()
+
+        $bodyTexturePen = New-Object Drawing.Pen([Drawing.Color]::FromArgb(31, 255, 182, 233), 1)
+        $bodyRandom = New-Object System.Random(8091)
+        for ($bodyMark = 0; $bodyMark -lt 420; $bodyMark++) {
+            $bodyX = $bodyRandom.Next(210, 750)
+            $bodyY = $bodyRandom.Next(181, 428)
+            if (($bodyMark % 3) -eq 0) {
+                $graphics.DrawLine($bodyTexturePen, $bodyX, $bodyY, $bodyX + $bodyRandom.Next(2, 13), $bodyY)
+            }
+        }
+        $bodyTexturePen.Dispose()
+        $detailPen = New-Object Drawing.Pen([Drawing.Color]::FromArgb(110, 82, 239, 191), 1)
+        for ($detailX = 170; $detailX -lt 806; $detailX += 18) {
+            $graphics.DrawLine($detailPen, $detailX, 507, $detailX + 8, 507)
+        }
+        $detailPen.Dispose()
+        Invoke-TpmReShadePreviewSceneTexture -Bitmap $bitmap
     } catch {
-        $bitmap.Dispose()
+        if ($bitmap) { $bitmap.Dispose() }
         throw
     } finally {
-        $graphics.Dispose()
-        if ($font) { $font.Dispose() }
-        if ($small) { $small.Dispose() }
-        if ($brush) { $brush.Dispose() }
-        if ($pen) { $pen.Dispose() }
+        if ($graphics) { $graphics.Dispose() }
     }
+    return $bitmap
 }
 
+
+function Invoke-TpmReShadePreviewProfilePixels {
+    param([Parameter(Mandatory)][Drawing.Bitmap]$Bitmap, [Parameter(Mandatory)]$ProfileDefinition)
+    $profileId = [string]$ProfileDefinition.ProfileId
+    if ($profileId -eq 'Original') { return }
+    $isSharp = $profileId -in @('CleanSharp', 'EnhancedArcade')
+    $isVivid = $profileId -in @('Vivid', 'EnhancedArcade')
+    $isCrt = $profileId -eq 'ClassicCrt'
+    $rectangle = New-Object Drawing.Rectangle -ArgumentList @(0, 0, $Bitmap.Width, $Bitmap.Height)
+    $data = $null
+    try {
+        $data = $Bitmap.LockBits($rectangle, [System.Drawing.Imaging.ImageLockMode]::ReadWrite, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+        $stride = [Math]::Abs([int]$data.Stride)
+        $length = $stride * $Bitmap.Height
+        $pixels = New-Object byte[] $length
+        $source = New-Object byte[] $length
+        [Runtime.InteropServices.Marshal]::Copy($data.Scan0, $pixels, 0, $length)
+        [Array]::Copy($pixels, $source, $length)
+        $width = [int]$Bitmap.Width
+        $height = [int]$Bitmap.Height
+        for ($y = 0; $y -lt $height; $y++) {
+            $row = if ($data.Stride -lt 0) { $height - 1 - $y } else { $y }
+            for ($x = 0; $x -lt $width; $x++) {
+                $index = ($row * $stride) + ($x * 4)
+                $blue = [double]$source[$index]
+                $green = [double]$source[$index + 1]
+                $red = [double]$source[$index + 2]
+                if ($isSharp) {
+                    $left = if ($x -gt 0) { $index - 4 } else { $index }
+                    $right = if ($x -lt ($width - 1)) { $index + 4 } else { $index }
+                    $upRow = [Math]::Max(0, $row - 1)
+                    $downRow = [Math]::Min($height - 1, $row + 1)
+                    $up = $upRow * $stride + ($x * 4)
+                    $down = $downRow * $stride + ($x * 4)
+                    $amount = if ($profileId -eq 'CleanSharp') { 1.20 } else { 0.72 }
+                    $blurBlue = (($blue * 4.0) + $source[$left] + $source[$right] + $source[$up] + $source[$down]) / 8.0
+                    $blurGreen = (($green * 4.0) + $source[$left + 1] + $source[$right + 1] + $source[$up + 1] + $source[$down + 1]) / 8.0
+                    $blurRed = (($red * 4.0) + $source[$left + 2] + $source[$right + 2] + $source[$up + 2] + $source[$down + 2]) / 8.0
+                    $blue += ($blue - $blurBlue) * $amount
+                    $green += ($green - $blurGreen) * $amount
+                    $red += ($red - $blurRed) * $amount
+                }
+                if ($isVivid) {
+                    $luma = (0.299 * $red) + (0.587 * $green) + (0.114 * $blue)
+                    $saturation = if ($profileId -eq 'Vivid') { 1.48 } else { 1.16 }
+                    $contrast = if ($profileId -eq 'Vivid') { 1.12 } else { 1.05 }
+                    $red = $luma + (($red - $luma) * $saturation)
+                    $green = $luma + (($green - $luma) * $saturation)
+                    $blue = $luma + (($blue - $luma) * $saturation)
+                    $red = (($red - 128.0) * $contrast) + 128.0
+                    $green = (($green - 128.0) * $contrast) + 128.0
+                    $blue = (($blue - 128.0) * $contrast) + 128.0
+                }
+                if ($isCrt) {
+                    $scanline = if (($y % 3) -eq 1) { 0.58 } elseif (($y % 3) -eq 2) { 0.84 } else { 1.0 }
+                    $maskRed = 1.0; $maskGreen = 1.0; $maskBlue = 1.0
+                    switch ($x % 3) {
+                        0 { $maskRed = 1.08; $maskGreen = 0.96; $maskBlue = 0.96 }
+                        1 { $maskRed = 0.96; $maskGreen = 1.08; $maskBlue = 0.96 }
+                        2 { $maskRed = 0.96; $maskGreen = 0.96; $maskBlue = 1.08 }
+                    }
+                    $edgeX = [Math]::Abs((2.0 * $x / [Math]::Max(1, $width - 1)) - 1.0)
+                    $edgeY = [Math]::Abs((2.0 * $y / [Math]::Max(1, $height - 1)) - 1.0)
+                    $vignette = 1.0 - (0.18 * [Math]::Max($edgeX, $edgeY))
+                    $red *= $scanline * $maskRed * $vignette
+                    $green *= $scanline * $maskGreen * $vignette
+                    $blue *= $scanline * $maskBlue * $vignette
+                }
+                if ($red -lt 0) { $red = 0 }; if ($red -gt 255) { $red = 255 }
+                if ($green -lt 0) { $green = 0 }; if ($green -gt 255) { $green = 255 }
+                if ($blue -lt 0) { $blue = 0 }; if ($blue -gt 255) { $blue = 255 }
+                $pixels[$index] = [byte][Math]::Round($blue)
+                $pixels[$index + 1] = [byte][Math]::Round($green)
+                $pixels[$index + 2] = [byte][Math]::Round($red)
+            }
+        }
+        [Runtime.InteropServices.Marshal]::Copy($pixels, 0, $data.Scan0, $length)
+    } finally {
+        if ($data) { $Bitmap.UnlockBits($data) }
+    }
+}
 function New-TpmReShadePreviewBitmap {
     param([Parameter(Mandatory)]$ProfileDefinition, [ValidateSet('Before','After','Split','Slider')][string]$Mode = 'Split', [int]$Width = 960, [int]$Height = 540, [ValidateRange(0,100)][int]$SliderPosition = 50)
     Add-Type -AssemblyName System.Drawing -ErrorAction Stop
-    $canvasWidth=[int]$Width;$canvasHeight=[int]$Height
-    $bitmap = New-Object Drawing.Bitmap($canvasWidth,$canvasHeight)
-    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    $canvasWidth = [Math]::Max(1, [int]$Width)
+    $canvasHeight = [Math]::Max(1, [int]$Height)
     $referenceBitmap = $null
-    $small = $null
+    $processedBitmap = $null
+    $outputBitmap = $null
+    $outputGraphics = $null
+    $ownsProcessed = $false
     try {
         $referenceBitmap = New-TpmReShadePreviewReferenceBitmap -Width $canvasWidth -Height $canvasHeight
-        $graphics.DrawImageUnscaled($referenceBitmap,0,0)
-        $small = New-Object Drawing.Font('Consolas',12)
-        $drawAfter = {
-            if ($ProfileDefinition.Effects -contains 'SweetFX.LumaSharpen') {
-                $sharp=New-Object Drawing.Pen([Drawing.Color]::White,1)
-                for ($x=80; $x -lt ($canvasWidth-80); $x+=18) { $graphics.DrawLine($sharp,$x,250,$x+8,260) }
-                $sharp.Dispose()
-            }
-            if ($ProfileDefinition.Effects -contains 'SweetFX.Vibrance') {
-                $vivid=New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(45,80,255,40))
-                $graphics.FillRectangle($vivid,80,90,($canvasWidth-160),150);$vivid.Dispose()
-            }
-            if ($ProfileDefinition.Effects -contains 'FXShaders.CRT_Lottes') {
-                $scan=New-Object Drawing.Pen([Drawing.Color]::FromArgb(75,0,0,0),2)
-                for ($y=90; $y -lt 400; $y+=6) { $graphics.DrawLine($scan,80,$y,$canvasWidth-80,$y) }
-                $scan.Dispose()
-            }
+        if ([string]$ProfileDefinition.ProfileId -eq 'Original') {
+            $processedBitmap = $referenceBitmap
+        } else {
+            $processedBitmap = New-Object Drawing.Bitmap($canvasWidth, $canvasHeight)
+            $processedGraphics = [Drawing.Graphics]::FromImage($processedBitmap)
+            try { $processedGraphics.DrawImageUnscaled($referenceBitmap, 0, 0) } finally { $processedGraphics.Dispose() }
+            Invoke-TpmReShadePreviewProfilePixels -Bitmap $processedBitmap -ProfileDefinition $ProfileDefinition
+            $ownsProcessed = $true
         }
-        if ($Mode -eq 'After') { & $drawAfter }
-        elseif ($Mode -eq 'Split' -or $Mode -eq 'Slider') {
-            $leftBound = 40
-            $rightBound = $canvasWidth - 40
-            $topBound = 40
-            $bottomBound = $canvasHeight - 40
-            $isSlider = $Mode -eq 'Slider'
-            $splitX = if ($isSlider) { $leftBound + [int](($rightBound - $leftBound) * ($SliderPosition / 100.0)) } else { [int](($leftBound + $rightBound) / 2) }
-            if ($isSlider) {
-                $clipX = $leftBound
-                $clipWidth = [Math]::Max(0, $splitX - $leftBound)
-            } else {
-                $clipX = $splitX
-                $clipWidth = [Math]::Max(0, $rightBound - $splitX)
+        $outputBitmap = New-Object Drawing.Bitmap($canvasWidth, $canvasHeight)
+        $outputGraphics = [Drawing.Graphics]::FromImage($outputBitmap)
+        $outputGraphics.Clear([Drawing.Color]::Black)
+        if ($Mode -eq 'Before') {
+            $outputGraphics.DrawImageUnscaled($referenceBitmap, 0, 0)
+        } elseif ($Mode -eq 'After') {
+            $outputGraphics.DrawImageUnscaled($processedBitmap, 0, 0)
+        } else {
+            $outputGraphics.DrawImageUnscaled($referenceBitmap, 0, 0)
+            $splitX = if ($Mode -eq 'Slider') { [int][Math]::Round($canvasWidth * ($SliderPosition / 100.0)) } else { [int][Math]::Round($canvasWidth / 2.0) }
+            if ($splitX -lt $canvasWidth) {
+                $clipWidth = $canvasWidth - $splitX
+                $outputGraphics.SetClip((New-Object Drawing.Rectangle -ArgumentList @($splitX, 0, $clipWidth, $canvasHeight)))
+                try { $outputGraphics.DrawImageUnscaled($processedBitmap, 0, 0) } finally { $outputGraphics.ResetClip() }
             }
-            if ($clipWidth -gt 0) {
-                $graphics.SetClip((New-Object Drawing.Rectangle -ArgumentList @($clipX,$topBound,$clipWidth,($bottomBound-$topBound))))
-                & $drawAfter
-                $graphics.ResetClip()
+            if ($splitX -gt 0 -and $splitX -lt $canvasWidth) {
+                $divider = New-Object Drawing.Pen([Drawing.Color]::FromArgb(255, 255, 255), 3)
+                $outputGraphics.DrawLine($divider, $splitX, 0, $splitX, $canvasHeight)
+                $divider.Dispose()
             }
-            $divider=New-Object Drawing.Pen([Drawing.Color]::White,4);$graphics.DrawLine($divider,$splitX,$topBound,$splitX,$bottomBound);$divider.Dispose()
-            $label=New-Object Drawing.SolidBrush([Drawing.Color]::White)
-            $graphics.DrawString('BEFORE',$small,$label,70,55);$graphics.DrawString('AFTER',$small,$label,[Math]::Min($splitX+30,$canvasWidth-130),55)
-            $label.Dispose()
+            $labelFont = New-Object Drawing.Font('Consolas', 11, [Drawing.FontStyle]::Bold)
+            $labelBrush = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(245, 250, 255))
+            if ($Mode -ne 'Slider' -or $splitX -gt 0) { $outputGraphics.DrawString('BEFORE', $labelFont, $labelBrush, 14, 12) }
+            if ($Mode -ne 'Slider' -or $splitX -lt $canvasWidth) { $outputGraphics.DrawString('AFTER', $labelFont, $labelBrush, [Math]::Min($splitX + 12, [Math]::Max(14, $canvasWidth - 80)), 12) }
+            $labelBrush.Dispose()
+            $labelFont.Dispose()
         }
-        return $bitmap
-    } catch { $bitmap.Dispose(); throw } finally { $graphics.Dispose(); if ($small) { $small.Dispose() }; if ($referenceBitmap) { $referenceBitmap.Dispose() } }
+        return $outputBitmap
+    } catch {
+        if ($outputBitmap) { $outputBitmap.Dispose() }
+        throw
+    } finally {
+        if ($outputGraphics) { $outputGraphics.Dispose() }
+        if ($ownsProcessed -and $processedBitmap) { $processedBitmap.Dispose() }
+        if ($referenceBitmap) { $referenceBitmap.Dispose() }
+    }
 }
 
 function New-TpmReShadePreviewArtifact {
@@ -4705,7 +5399,7 @@ function Close-TpmReShadePreviewWindow {
 }
 
 function Show-TpmReShadeProfileGalleryWindow {
-    param([Parameter(Mandatory)]$Profiles, [string]$DefaultProfileId = 'CleanSharp', [switch]$Show)
+    param([Parameter(Mandatory)]$Profiles, [string]$DefaultProfileId = 'CleanSharp', [switch]$Show, [switch]$NonModal)
     if (-not $Show) { return [pscustomobject]@{ Available=$false; SelectedProfile=$null; Reason='PREVIEW_WINDOW_NOT_REQUESTED' } }
     try {
         Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
@@ -4730,7 +5424,7 @@ function Show-TpmReShadeProfileGalleryWindow {
         $cancel.Text = 'Cancel'
         $cancel.Dock = 'Bottom'
         $cancel.Height = 32
-        $state = [hashtable]::Synchronized(@{ Selected=$null; Image=$null; Mode='Split'; SliderPosition=50; Profiles=@($Profiles) })
+        $state = [hashtable]::Synchronized(@{ Selected=$null; Image=$null; Mode='Split'; SliderPosition=50; Profiles=@($Profiles); Closed=$false; Refresh=$null; Form=$form; Combo=$combo })
         $toolbar = New-Object Windows.Forms.FlowLayoutPanel
         $toolbar.Dock = 'Top'
         $toolbar.Height = 55
@@ -4742,6 +5436,7 @@ function Show-TpmReShadeProfileGalleryWindow {
             $picture.Image = $image
             if ($old) { $old.Dispose() }
         }
+        $state.Refresh = $selectProfile
         foreach ($view in @('Before','After','Split')) {
             $viewButton = New-Object Windows.Forms.Button
             $viewButton.Text = $view
@@ -4768,6 +5463,12 @@ function Show-TpmReShadeProfileGalleryWindow {
         $defaultIndex = 0
         for ($i = 0; $i -lt $combo.Items.Count; $i++) { if ($combo.Items[$i].ProfileId -eq $DefaultProfileId) { $defaultIndex = $i; break } }
         $combo.SelectedIndex = $defaultIndex
+        if ($NonModal) {
+            $form.Add_FormClosed({ $state.Closed = $true })
+            $form.Show()
+            [Windows.Forms.Application]::DoEvents()
+            return [pscustomobject]@{ Available=$true; SelectedProfile=$null; Closed=$false; NonModal=$true; Session=$state }
+        }
         [void]$form.ShowDialog()
         if ($picture.Image) { $picture.Image.Dispose() }
         $form.Dispose()
@@ -4777,6 +5478,17 @@ function Show-TpmReShadeProfileGalleryWindow {
     }
 }
 
+function Close-TpmReShadeProfileGallerySession {
+    param([object]$Session)
+    if ($Session -and $Session.Form) {
+        try { $Session.Form.Close() } catch {}
+        try {
+            if ($Session.Image) { $Session.Image.Dispose() }
+            $Session.Form.Dispose()
+        } catch {}
+        $Session.Closed = $true
+    }
+}
 function Show-TpmReShadePreviewWindow {
     param([Parameter(Mandatory)]$ProfileDefinition, [ValidateSet('Before','After','Split')][string]$Mode = 'Split', [object]$ResolutionEvidence = $null, [switch]$Show)
     if(-not $Show){return [pscustomobject]@{Available=$false;Closed=$true;Mode=$Mode;Reason='PREVIEW_WINDOW_NOT_REQUESTED'}}
@@ -5902,6 +6614,81 @@ function Resolve-ReShadeDllAcquisition {
     }
 }
 
+function Read-TpmReShadeTerminalProfile {
+    param(
+        [Parameter(Mandatory)][object[]]$Profiles,
+        [string]$DefaultProfileId = '',
+        [object]$PreviewSession = $null
+    )
+    $orderedIds = @('Original', 'CleanSharp', 'ClassicCrt', 'Vivid', 'EnhancedArcade')
+    $selected = $null
+    if ($DefaultProfileId) { $selected = Get-TpmReShadeProfile -ProfileId $DefaultProfileId }
+    while ($true) {
+        Write-Host ''
+        Write-Host '  Choose how your game should look.' -ForegroundColor Cyan
+        Write-Host '  The preview is safe: nothing changes until you choose U and confirm.' -ForegroundColor DarkCyan
+        for ($profileIndex = 0; $profileIndex -lt $orderedIds.Count; $profileIndex++) {
+            $id = $orderedIds[$profileIndex]
+            $profileEntry = @($Profiles | Where-Object { $_.ProfileId -eq $id })[0]
+            if (-not $profileEntry) { continue }
+            $marker = if ($selected -and $selected.ProfileId -eq $id) { '*' } else { ' ' }
+            Write-Host ('  [{0}] {1} {2}' -f ($profileIndex + 1), $marker, $profileEntry.FriendlyName) -ForegroundColor $(if ($marker -eq '*') { 'Yellow' } else { 'White' })
+        }
+        Write-Host ''
+        Write-Host ('  Current selection: {0}' -f $(if ($selected) { $selected.FriendlyName } else { 'none -- choose 1-5 first' })) -ForegroundColor Yellow
+        Write-Host '  Choose: [1-5] Preview profile  [U] Use selected profile  [R] Reopen preview  [B] Back  [D] Details' -ForegroundColor White
+        $choice = (Read-HostSafe '  Choice').Trim().ToUpperInvariant()
+        if ($choice -match '^[1-5]$') {
+            $selected = @($Profiles | Where-Object { $_.ProfileId -eq $orderedIds[[int]$choice - 1] })[0]
+            if ($selected) {
+                if ($PreviewSession -and -not $PreviewSession.Closed -and $PreviewSession.Combo) {
+                    $PreviewSession.Combo.SelectedIndex = ([int]$choice - 1)
+                    if ($PreviewSession.Refresh) { & $PreviewSession.Refresh }
+                    [Windows.Forms.Application]::DoEvents()
+                }
+                Write-Host ('  Preview selection changed to: {0}' -f $selected.FriendlyName) -ForegroundColor Green
+            }
+            continue
+        }
+        if ($choice -eq 'D') {
+            foreach ($id in $orderedIds) {
+                $profileEntry = @($Profiles | Where-Object { $_.ProfileId -eq $id })[0]
+                if ($profileEntry) { Write-Host ('    {0}: {1}' -f $profileEntry.FriendlyName, $profileEntry.Description) -ForegroundColor DarkGray }
+            }
+            continue
+        }
+        if ($choice -eq 'R') {
+            if ($PreviewSession -and $PreviewSession.Form -and -not $PreviewSession.Closed) {
+                try {
+                    $PreviewSession.Form.Show()
+                    $PreviewSession.Form.Activate()
+                    [Windows.Forms.Application]::DoEvents()
+                    Write-Host '  Preview window reopened. Terminal selection remains active below.' -ForegroundColor DarkCyan
+                } catch {
+                    Write-Host '  Preview could not be reopened. Terminal selection remains active.' -ForegroundColor Yellow
+                    Write-Log ("ReShade profile chooser: preview reopen failed -- {0}" -f $_.Exception.Message)
+                }
+            } else {
+                Write-Host '  Preview window is unavailable. Terminal selection remains active.' -ForegroundColor Yellow
+                Write-Log 'ReShade profile chooser: preview reopen requested while unavailable.'
+            }
+            continue
+        }
+        if ($choice -eq 'B') {
+            Write-Log 'ReShade profile chooser: cancelled before confirmation.'
+            return [pscustomobject]@{ SelectedProfile = $null; Cancelled = $true }
+        }
+        if ($choice -eq 'U') {
+            if ($selected) {
+                return [pscustomobject]@{ SelectedProfile = $selected; Cancelled = $false }
+            }
+            Write-Host '  Choose a numbered profile before using it.' -ForegroundColor Yellow
+            continue
+        }
+        Write-Host '  Invalid choice. Use 1-5, U, R, B, or D.' -ForegroundColor Yellow
+    }
+}
+
 function Invoke-ReShadeSetup {
     param(
         [string]$UserProfilesDir,
@@ -5970,7 +6757,7 @@ function Invoke-ReShadeSetup {
     Write-Host "  Choose how your game should look." -ForegroundColor Cyan
     Write-Host "  Use the preview window to compare the options." -ForegroundColor Cyan
     Write-Host "  Nothing will be changed until you confirm." -ForegroundColor DarkCyan
-    Write-Host "  Preview gallery (safe, built-in arcade scene; choose profiles in one switchable window)" -ForegroundColor DarkCyan
+    Write-Host "  Preview gallery (safe, built-in arcade scene; switchable before/after comparison; choose profiles in one switchable window)" -ForegroundColor DarkCyan
     foreach ($item in $gallery) {
         $previewText = if ($item.PreviewAvailable) { 'preview available' } else { 'preview unavailable; selection still works' }
         Write-Host ("    {0}: {1} [{2}]" -f $item.FriendlyName, $item.Description, $previewText) -ForegroundColor DarkGray
@@ -5985,33 +6772,26 @@ function Invoke-ReShadeSetup {
         Write-Host ("  Favorites available in the gallery: " + (($favoriteProfiles | ForEach-Object FriendlyName) -join ', ')) -ForegroundColor DarkCyan
     }
 
-    # The gallery is the normal profile-selection path. It shows one live,
-    # switchable before/after comparison and does not deploy anything.
+    # Terminal selection is the authoritative path. The old modal gallery
+    # could hide behind Windows Terminal and leave this workflow waiting with
+    # no visible prompt. Preview rendering remains available separately, but
+    # it can never be required to choose a profile or continue safely.
     $galleryProfiles = @(Get-TpmReShadeProfiles)
-    $galleryResult = Show-TpmReShadeProfileGalleryWindow -Profiles $galleryProfiles -DefaultProfileId 'CleanSharp' -Show
-    $selectedProfile = $galleryResult.SelectedProfile
-    if ($galleryResult.Available -and -not $selectedProfile) {
-        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'PREVIEW_CANCELLED' }
-    }
-    if (-not $selectedProfile) {
-        Write-Host "  Visual profile" -ForegroundColor Cyan
-        Write-Host "    1) Clean & Sharp" -ForegroundColor White
-        Write-Host "    2) Classic Arcade CRT" -ForegroundColor White
-        Write-Host "    3) Vivid Arcade" -ForegroundColor White
-        Write-Host "    4) Enhanced Arcade" -ForegroundColor White
-        Write-Host "    5) Original" -ForegroundColor White
-        $profilePick = (Read-HostSafe "  Choose 1-5 (default 1)").Trim()
-        $profileMap = @{ '1' = 'CleanSharp'; '2' = 'ClassicCrt'; '3' = 'Vivid'; '4' = 'EnhancedArcade'; '5' = 'Original' }
-        if ([string]::IsNullOrWhiteSpace($profilePick) -or -not $profileMap.ContainsKey($profilePick)) { $profilePick = '1' }
-        $selectedProfile = Get-TpmReShadeProfile -ProfileId $profileMap[$profilePick]
-    }
-    $presetPath = $null
-    $generatedPresetPath = $null
-    Write-Host ("  Selected: {0}" -f $selectedProfile.FriendlyName) -ForegroundColor DarkGray
+    $galleryResult = Show-TpmReShadeProfileGalleryWindow -Profiles $galleryProfiles -DefaultProfileId 'CleanSharp' -Show -NonModal
+    $gallerySession = if ($galleryResult.Available) { $galleryResult.Session } else { $null }
     if (-not $galleryResult.Available) {
-        Write-Host "  ReShade visual gallery unavailable; typed profile fallback remains available." -ForegroundColor Yellow
-        Write-Log ("ReShade gallery unavailable: {0}" -f $galleryResult.Reason)
+        Write-Host '  ReShade visual gallery unavailable; typed profile fallback remains active.' -ForegroundColor Yellow
+        Write-Log ("ReShade visual gallery unavailable before terminal chooser: {0}" -f $galleryResult.Reason)
     }
+    $chooserResult = Read-TpmReShadeTerminalProfile -Profiles $galleryProfiles -PreviewSession $gallerySession
+    Close-TpmReShadeProfileGallerySession -Session $gallerySession
+    if ($chooserResult.Cancelled -or -not $chooserResult.SelectedProfile) {
+        Write-Host '  ReShade setup cancelled. No files were changed.' -ForegroundColor Yellow
+        Write-Log 'ReShade setup: terminal profile chooser cancelled before confirmation.'
+        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'PROFILE_SELECTION_CANCELLED' }
+    }
+    $selectedProfile = $chooserResult.SelectedProfile
+    Write-Log ("ReShade profile chooser: selected {0}; explicit confirmation still required." -f $selectedProfile.ProfileId)
     $customPresetChoice = (Read-HostSafe ("  Use the selected ReShade profile?`n  ({0} will be applied. Choose Custom only if you already have your own ReShade .ini preset.)`n`n  [Y] Yes, use {0}  [C] Custom preset  [B] Back`n`n  Choice, default Y" -f $selectedProfile.FriendlyName) -Default 'Y').Trim().ToUpper()
     if ($customPresetChoice -eq 'C') {
         $pInp = Read-PathWithBrowse "  Path to your ReShade preset (.ini) file" -Mode File -FileFilter "ReShade preset (*.ini)|*.ini|All files (*.*)|*.*"
@@ -7680,7 +8460,7 @@ function Invoke-CrosshairSetup {
         Export-CrosshairPreview -CrosshairPaths $valid.ToArray() -OutPath $previewPath
     }
     Write-Host "  Preview: $previewPath" -ForegroundColor Cyan
-    Write-Host "  Click a crosshair to select P1 during the preview, or use typed numeric selection." -ForegroundColor DarkCyan
+    Write-Host "  Click a crosshair to select P1, then click another to select P2, or use typed numeric selection." -ForegroundColor DarkCyan
     if (Test-Path -LiteralPath $previewPath -PathType Leaf) { Start-Process -FilePath $previewPath }
     Write-Host ""
 
@@ -7704,9 +8484,13 @@ function Invoke-CrosshairSetup {
         } catch { Write-Log "Crosshairs: could not read last-used state -- $_" }
     }
     $browserP1Idx = $null
+    $browserP2Idx = $null
     if ($bridgeSession) {
-        try { $browserP1Idx = Read-CrosshairSelectionBridge -Session $bridgeSession -Count $valid.Count }
-        catch { Write-Log "Crosshairs: browser selection read failed -- $_"; Stop-CrosshairSelectionBridge -Session $bridgeSession }
+        try {
+            $browserChoices = @(Read-CrosshairSelectionBridge -Session $bridgeSession -Count $valid.Count -SelectionCount 2)
+            if ($browserChoices.Count -gt 0) { $browserP1Idx = [int]$browserChoices[0] }
+            if ($browserChoices.Count -gt 1) { $browserP2Idx = [int]$browserChoices[1] }
+        } catch { Write-Log "Crosshairs: browser selection read failed -- $_"; Stop-CrosshairSelectionBridge -Session $bridgeSession }
     }
 
     # Pick P1
@@ -7721,7 +8505,7 @@ function Invoke-CrosshairSetup {
         else { Write-Host ("  Enter a number between 0 and {0}." -f ($valid.Count - 1)) -ForegroundColor Yellow }
     }
     # Pick P2
-    $p2Idx = $null
+    $p2Idx = $browserP2Idx
     while ($null -eq $p2Idx) {
         $promptText = if ($null -ne $lastP2Idx) {
             "  P2 crosshair index (0-{0}, or same as P1, Enter for last used: {1} {2})" -f ($valid.Count - 1), $lastP2Idx, [System.IO.Path]::GetFileNameWithoutExtension($valid[$lastP2Idx])
@@ -18303,15 +19087,28 @@ function Get-MainMenuGeometry {
 function Get-ConsoleContentWidth {
     try {
         $width = [int]$Host.UI.RawUI.WindowSize.Width
-        if ($width -gt 0) { return $width }
+        if ($width -gt 0) {
+            # Windows Terminal can expose the backing buffer width (for
+            # example 1904 columns) even when the visible window is the
+            # normal default size. Treat that value as a host-reporting
+            # anomaly rather than selecting the giant framed layout.
+            if ($width -gt 240) { return 110 }
+            return $width
+        }
     } catch {}
     try {
         $width = [int]$Host.UI.RawUI.BufferSize.Width
-        if ($width -gt 0) { return $width }
+        if ($width -gt 0) {
+            if ($width -gt 240) { return 110 }
+            return $width
+        }
     } catch {}
     try {
         $width = [int][Console]::WindowWidth
-        if ($width -gt 0) { return $width }
+        if ($width -gt 0) {
+            if ($width -gt 240) { return 110 }
+            return $width
+        }
     } catch {}
     return 80
 }
@@ -20069,16 +20866,26 @@ $mode = $null
         if (-not $rsSourceDll32 -or -not (Test-Path -LiteralPath $rsSourceDll32)) {
             if (Test-Path -LiteralPath $bundledDll32) { $rsSourceDll32 = $bundledDll32 }
         }
-        $reShadeResult = Invoke-ReShadeSetup -UserProfilesDir $userProfilesDir `
-                            -SourceDll $rsSourceDll `
-                            -SourceDll32 $rsSourceDll32 `
-                            -ConfigPath $configPath `
-                            -TpRoot $tpRoot `
-                            -Mode $mode `
-                            -ZipSource $zipSource `
-                            -GamesInstallFolder $gamesInstallFolder `
-                            -RetroBat $retroBat `
-                            -HsDataPath $hsDataPath
+        try {
+            $reShadeResult = Invoke-ReShadeSetup -UserProfilesDir $userProfilesDir `
+                                -SourceDll $rsSourceDll `
+                                -SourceDll32 $rsSourceDll32 `
+                                -ConfigPath $configPath `
+                                -TpRoot $tpRoot `
+                                -Mode $mode `
+                                -ZipSource $zipSource `
+                                -GamesInstallFolder $gamesInstallFolder `
+                                -RetroBat $retroBat `
+                                -HsDataPath $hsDataPath
+        } catch {
+            $message = "ReShade setup stopped safely during profile selection or setup: $($_.Exception.Message)"
+            Write-Host ("  {0}" -f $message) -ForegroundColor Red
+            Write-Log $message
+            [void](Resolve-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-unhandled' -Message 'ReShade setup stopped safely after an unexpected error.' -DataSafety 'No unverified ReShade deployment was reported as complete.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }) -Acknowledge)
+            [void](Stop-TpmWorkflowStatus -Context $reShadeStatus -Reason 'ReShade setup stopped after an unexpected error')
+            [void](Close-TpmWorkflowStatus -Context $reShadeStatus)
+            continue
+        }
         if ($reShadeResult -and $reShadeResult.Succeeded) {
             if ($rsSourceDll -and (Test-Path -LiteralPath $rsSourceDll -PathType Leaf)) {
                 if (Save-Config) {

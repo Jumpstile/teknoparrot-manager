@@ -249,14 +249,19 @@ Choosing mode 1 or 2 offers a preview/dry-run option first — see [Preview / Dr
 
 ### Adaptive responsive menu
 
-The menu automatically adjusts its level of detail to your console window size instead of
-always showing the fully-detailed layout: a large window shows the full descriptions above
-unchanged; a medium window shows one-line descriptions per option; a narrow or short window
-shows labels only. Press `H` at the prompt for the separate help screen; `L` opens the log
-folder and `Q` quits. The console is also maximized automatically on startup where the terminal
-supports it. Within each release, menu numbers, what each option does, and how to choose one
-stay consistent across the responsive layouts -- only how much description text is shown adapts
-to your window size.
+The menu automatically adjusts its level of detail to your console window size
+instead of always showing the fully-detailed layout: a large window shows the
+full descriptions above unchanged; a medium window shows one-line
+descriptions per option; a narrow or short window shows labels only. The
+default-sized Windows Terminal layout is clamped to this compact readable
+mode when the host reports its backing buffer rather than the visible width.
+It keeps the title/version, options 1-15, and the prompt together without a
+giant empty frame or repeated filler. Press `H` at the prompt for the separate
+help screen; `L` opens the log folder and `Q` quits. The console is also
+maximized automatically on startup where the terminal supports it. Within
+each release, menu numbers, what each option does, and how to choose one stay
+consistent across the responsive layouts -- only how much description text is
+shown adapts to your window size.
 
 ---
 
@@ -448,23 +453,36 @@ Mode 4 deploys custom P1/P2 crosshair cursor images to all registered lightgun g
 ## ReShade Visual Enhancements
 
 ReShade adds post-processing effects without changing game data. TPM does not automatically remove unowned or changed hooks; review those through advanced troubleshooting.
-**Beginner visual profiles:** ReShade setup opens one visual gallery before
-the final confirmation. Switch among the five profiles in the same window:
+**Beginner visual profiles:** ReShade setup opens an optional non-modal
+comparison gallery and immediately leaves the terminal at the authoritative
+chooser. The terminal remains usable if the gallery is behind another window,
+closed, unavailable, or fails to open:
 
-| Profile | Result |
-| --- | --- |
-| Original | No TPM visual enhancement |
-| Clean & Sharp | LumaSharpen only |
-| Vivid Arcade | Vibrance only |
-| Enhanced Arcade | LumaSharpen followed by Vibrance |
-| Classic Arcade CRT | CRT_Lottes only |
+```text
+[1] Original
+[2] Clean & Sharp
+[3] Classic Arcade CRT
+[4] Vivid Arcade
+[5] Enhanced Arcade
 
-The gallery uses a safe, TPM-owned representative arcade scene with dark and
-bright areas, neon color variation, text, edges, and perspective detail. It
-updates the Before/After comparison when the profile changes. Choosing a
-profile does not write files; deployment remains behind the explicit
-confirmation. If rendering or display is unavailable, typed selection remains
-available.
+Current selection: none -- choose 1-5 first
+Choose: [1-5] Preview profile  [U] Use selected profile  [R] Reopen preview  [B] Back  [D] Details
+```
+
+`U` is the only path toward deployment. `B` cancels without changes, `D`
+shows descriptions, and `R` reopens the optional gallery without taking
+terminal input away from the user.
+
+The gallery uses a deterministic, TPM-owned arcade-room render rather than a
+downloaded asset. The scene includes a physically shaded cabinet shell,
+glossy bezel and marquee, reflective floor, neon spill lighting, textured
+background cabinets, a detailed racing screen, readable HUD text, and
+high-contrast fine edges. `Before` is the untouched baseline, `After` is the
+selected profile transform, `Split` shows baseline on the left and processed
+output on the right, and the slider moves that boundary from 0 (all
+processed) to 100 (all baseline). Choosing a profile does not write files;
+deployment remains behind the explicit confirmation. If rendering or display
+is unavailable, typed selection remains available.
 
 After deployment, the result separates newly installed, updated, protected
 unchanged, missing saved paths, unsupported architecture, and errors. Missing
