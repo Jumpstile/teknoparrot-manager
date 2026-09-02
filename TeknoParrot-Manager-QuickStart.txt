@@ -149,15 +149,16 @@
                              when asking for help.
        15) Exit            -- quit the script.
 
-     If you need help, choose 14) Create Support Package. TPM collects safe
-     TPM/TeknoParrot/game logs and metadata, removes common private information
-     from text, and saves one ZIP under SupportPackages\ beside this script.
-     Executable/archive masquerades, binary control bytes, and invalid text
-     are rejected and recorded. Send that ZIP when asking for help. It never
-     includes game files, ROMs, executables, arbitrary DLLs, firmware, profiles,
-     credentials, passwords, tokens, or recovery-state files. Missing optional
-     diagnostics are reported and a failed or cleanup-incomplete package is
-     never reported as successful.
+    If you need help, choose 14) Create Support Package. TPM collects safe
+    TPM/TeknoParrot/game logs, metadata, and per-file ReShade ownership/removal
+    scan and transaction details, removes common private information from text,
+    and saves one ZIP under SupportPackages\ beside this script.
+    Executable/archive masquerades, binary control bytes, and invalid text
+    are rejected and recorded. Send that ZIP when asking for help. It never
+    includes game files, ROMs, executables, arbitrary DLLs, firmware, profiles,
+    credentials, passwords, tokens, or recovery-state files. Missing optional
+    diagnostics are reported and a failed or cleanup-incomplete package is
+    never reported as successful.
 
 
      The menu automatically shortens its descriptions, or shows labels only
@@ -298,15 +299,33 @@
   automatically remove unowned or changed hook files; use the advanced
   troubleshooting path for those files.
 
+
+  REMOVING RESHADE
+  Choose R from mode 5. The existing filtered game chooser lists only games
+  with removable or reviewable ReShade findings. The preview enumerates each
+  verified TPM-owned file to remove and each bundled, preinstalled, unowned,
+  ambiguous, changed, malformed, or out-of-target file to keep protected. Type
+  REMOVE to confirm; cancel or back makes no changes.
+
+  Removal is limited to unchanged TPM-managed ReShade DLLs, ReShade.ini, and
+  approved effects inside the resolved ReShade target folder. Immediately before
+  backup and deletion, TPM re-reads the profile, re-resolves the target, and
+  rechecks canonical non-reparse leaf containment and the exact hash. TPM creates
+  and verifies a backup before deletion and restores files if the manifest update
+  fails. Game executables, TeknoParrot profiles, LaunchBox data, and HyperSpin
+  data are never removal targets. The final report separates removed,
+  already-clean, missing-path, protected, changed, malformed, rolled-back, and
+  failed outcomes.
   HOW TO SET IT UP
   Before choosing a profile, TPM explains:
     Choose how your game should look.
     Use the preview window to compare the options.
     Nothing will be changed until you confirm.
-  After you choose one of five profiles, one preview window shows a safe
-  representative arcade scene with dark and bright areas, neon color,
-  text, fine edges, and perspective detail. Before, After, Split, and a
-  0-100 slider are available. Deployment waits for explicit confirmation.
+  One visual gallery opens before confirmation. It shows the safe representative
+  arcade scene with dark and bright areas, neon color, text, fine edges, and
+  perspective detail for every profile. Before, After, Split, and a 0-100
+  slider are available while you switch profiles. Deployment waits for
+  explicit confirmation.
   If the preview is unavailable, the text descriptions and safe fallback
   remain available.
 

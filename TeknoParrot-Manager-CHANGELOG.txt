@@ -35,6 +35,13 @@
   instead of the excluded live-fetched ReShade\ runtime directory.
   The ReShade profile gallery now reports embedded preview availability even
   when optional SVG illustration files are absent after a script-only update.
+  RC8 runtime recovery now classifies PostgreSQL password authentication
+  failures separately and offers masked password validation before retrying
+  the protected backup. Crosshair browser selection no longer invokes a
+  PowerShell callback from an I/O thread; it polls completed requests in the
+  main runspace and preserves typed fallback. ReShade all-games chooser state
+  is initialized before iteration, and profile selection now opens a single
+  switchable visual gallery before deployment confirmation.
   Console startup sizing now grows BufferSize before WindowSize, catches
   unsupported hosts once, and leaves the constrained responsive menu usable
   without repeating resize errors on redraw; invalid menu choices persist
@@ -45,6 +52,18 @@
   missing-path, and unsupported-game outcomes with a direct path-repair action.
   Crosshair preview pages now support bounded localhost click selection with a
   per-session token; typed numeric selection remains available as fallback.
+  ReShade mode 5 now includes a removal action. The scanner reports
+  removable TPM-owned files separately from protected bundled/preinstalled,
+  unowned/ambiguous, changed, malformed, missing-path, and already-clean
+  games. Only reviewable games enter the existing filtered chooser. Removal
+  previews enumerate keep/remove decisions, require typing REMOVE, re-read
+  profile metadata and re-resolve each target immediately before backup and
+  deletion, verify canonical containment and live SHA-256 values, back up before
+  deletion, and roll back files plus ownership metadata if the manifest update
+  fails. The final summary separates removed, already-clean, missing-path,
+  protected, changed, malformed, rolled-back, and failed outcomes. Game
+  executables, UserProfiles, LaunchBox, HyperSpin, bundled, and ambiguous files
+  remain protected.
 PostgreSQL backup diagnostics now retain the psql/pg_dump diagnostic stream
 and exit code in the blocked result, so cause categories are based on the
 actual client failure instead of a generic existence-query message.

@@ -16,6 +16,25 @@ candidate being prepared and is not published; v1.0 RC6 is the previous
 published release (historical); final Version 1.0 remains unpublished.
 
 ---
+## RC8 runtime recovery and visual selection
+
+The PostgreSQL setup path classifies client diagnostics before presenting
+recovery. Password authentication failures receive a distinct masked-password
+validation path; rejected credentials are not saved or logged, and profile
+changes remain behind the verified backup boundary.
+
+Crosshair browser selection is deliberately consumed from the main PowerShell
+runspace. `HttpListener` completion is polled and finalized with
+`EndGetContext`; PowerShell scriptblocks are never used as I/O-thread callbacks.
+Listener shutdown is guaranteed, and typed numeric selection remains the
+fallback when preview or browser startup fails.
+
+ReShade profile selection uses one modal gallery window. The gallery changes
+the displayed synthetic arcade comparison when the user changes profile, but
+does not deploy files. Deployment remains behind the existing explicit
+confirmation. The preview renderer's reference identity and effect hashes are
+part of the cache key so stale artifacts are regenerated.
+
 
 ## Startup: network-path detection and hard timeout (v0.99.23)
 
@@ -213,7 +232,7 @@ The cache manifest records the subject/mode, slider position when applicable, in
 **Full profile deployment and restore (RC8 freeze exception).** Normal ReShade setup and the explicit per-game restore action call `Install-TpmReShadeProfileDeployment`. It stages the architecture-selected ReShade DLL, a canonical generated `ReShade.ini` when a trusted profile is selected, and every approved effect asset, then promotes them with one `Invoke-TpmTransactionalPromote` transaction. The per-game ownership manifest is stored under `ReShade\TPM-State\Deployments\<SHA256(game ID)>.json`; ownership is committed only after the physical promotion and post-promotion hashes succeed. A later profile-history entry is written only after that deployment returns success.
 
 Restore history is a selector, not trust evidence. Restore validates the profile schema, ordered approved effect IDs, ordered catalog hashes, and intensity variant before deployment; it never copies a historical path or arbitrary historical file. Missing, corrupt, stale, or unsupported history produces a friendly fresh-selection path. The chooser requires an explicit `R` restore choice, offers a remembered profile only after explicit confirmation, and exposes catalog-bound favorites through `F`.
-The normal visual-first setup prints the profile descriptions, lets the user choose one, opens one modal preview for that selected profile, and asks for explicit confirmation before any deployment. It does not loop over modal windows for every profile; text selection and the preview failure fallback remain usable when WinForms is unavailable.
+The normal visual-first setup prints the profile descriptions, opens one visual gallery containing all five profiles, and asks for explicit confirmation before any deployment. It does not loop over modal windows for every profile; text selection and the preview failure fallback remain usable when WinForms is unavailable.
 Before game selection, `Invoke-ReShadeUpdateIfAvailable` compares the installed trusted
 installer version with the official `reshade.me` version, verifies the downloaded installer
 and extracted DLLs, and offers an explicit update/keep choice. It does not deploy to games
@@ -224,6 +243,29 @@ deployment. Remembered profiles are described as reapply actions, not restore op
 
 Before replacing any target file, deployment requires a matching TPM-managed ownership entry. Existing files without that ownership evidence return `COLLISION` / `USER_OWNED_CONTENT_PRESERVED` and remain byte-for-byte untouched. Previous TPM-managed files not part of the new profile are retained rather than deleted, so switching to `Original` or a smaller effect set is non-destructive and may require manual review of old files.
 
+
+**ReShade removal (RC8 freeze exception).** `Get-TpmReShadeRemovalScan` emits
+one status record per registered game instead of silently discarding findings.
+Records distinguish `Removable`, `ProtectedBundled`, `ProtectedAmbiguous`,
+`Changed`, `MissingPath`, `MalformedMetadata`, and `AlreadyClean`. Only
+reviewable records enter the existing `Select-RegisteredGamesInteractive`
+chooser; no-ReShade and missing-path games are not removable targets, while
+missing paths remain in the report.
+
+`Remove-TpmReShadeOwnedDeployment` re-reads the profile and re-resolves the
+current ReShade target before every backup and every deletion. It compares the
+current GamePath, EmulatorType, target directory, and hook name with the
+scan-time record. It accepts only `ReShadeDll`, `ReShadePreset`, and
+`ApprovedEffect` entries marked `TPMManaged`, with an exact live SHA-256 match,
+an existing canonical non-reparse leaf, and a destination contained by the
+resolved target directory. It creates and verifies a backup before deleting
+files, updates or removes only the ownership manifest, and restores files and
+the manifest if the commit fails. The mode 5 `R` action previews and
+enumerates remove/keep decisions and requires the literal `REMOVE` confirmation.
+Its final report separates removed, already-clean, missing-path, protected,
+changed, malformed, rolled-back, and failed outcomes. Game executables,
+UserProfiles XML, LaunchBox data, HyperSpin data, bundled files, and ambiguous
+files are never deletion targets.
 Certification strict-mode invariant: empty approved-profile/effect/display
 lookups, optional eligibility/storage evidence, and optional failure-result
 fields are represented as explicit null/empty values. Strict certification

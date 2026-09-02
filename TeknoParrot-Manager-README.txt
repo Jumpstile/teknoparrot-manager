@@ -278,6 +278,10 @@
     approved effect hashes, and intensity variant still match. Missing,
     corrupt, stale, or unsupported history falls back to fresh selection; TPM
     never copies historical file paths.
+    The visual gallery opens before the final profile confirmation. Switch
+    profiles in one window to compare the embedded synthetic arcade scene;
+    choosing a profile does not write files. If the window cannot open, the
+    typed profile fallback remains available.
     Multi-monitor suitability is read-only and advisory, uses caller-supplied
     evidence, treats duplicate target IDs as ambiguous, and does not separately
     label EXTENDED arrangements or acquire Windows display topology itself.
@@ -669,13 +673,15 @@
        details.
 
   14) Create Support Package
-       Collects safe TPM, TeknoParrot, and game diagnostics into one ZIP.
-       Text is checked for binary/archive content and common private
-       information before inclusion; unsafe content is recorded as rejected.
-       The ZIP is saved under SupportPackages\ beside this script. Send this
-       file when asking for help. Open TPM Logs and Reports is available from
-       the same support menu. A promotion or staging-cleanup problem is
-       reported as partial/action required, never clean success.
+       Collects safe TPM, TeknoParrot, and game diagnostics into one ZIP,
+       including per-file ReShade ownership/removal scan and transaction
+       details when available. Text is checked for binary/archive content and
+       common private information before inclusion; unsafe content is recorded
+       as rejected. The ZIP is saved under SupportPackages\ beside this
+       script. Send this file when asking for help. Open TPM Logs and Reports
+       is available from the same support menu. A promotion or
+       staging-cleanup problem is reported as partial/action required, never
+       clean success.
 
   15) Exit
        Exits the script.
@@ -1245,10 +1251,10 @@
       Enhanced Arcade    Clearer edges followed by stronger color.
       Classic Arcade CRT CRT-style scanlines and arcade-display character.
 
-    After choosing a profile, one preview window opens before the final
-    confirmation. The preview uses a safe TPM-owned representative arcade
-    scene with dark and bright areas, neon colors, text, fine edges, and
-    perspective detail. It offers Before, After, Split, and a 0-100 slider.
+    One visual gallery opens before the final confirmation. It shows the safe
+    TPM-owned representative arcade scene with dark and bright areas, neon
+    colors, text, fine edges, and perspective detail for each profile. It
+    offers Before, After, Split, and a 0-100 slider while you switch profiles.
 
     The preview is illustrative, not a pixel-perfect guarantee for every game.
     Preview files and cached renderings are local TPM-owned data; no
@@ -1384,10 +1390,26 @@
 
   REMOVING RESHADE
 
-    TPM does not delete an unowned graphics hook because it may belong to
-    another tool. Existing or changed files remain untouched. Any manual
-    removal of a known, user-owned deployment is an advanced troubleshooting
-    action, not the normal beginner workflow.
+    Choose R from the mode 5 ReShade tools prompt. TPM scans registered games
+    and uses the existing filtered game chooser. It shows only games with
+    removable or reviewable ReShade findings. The preview enumerates each
+    verified TPM-owned file to remove and each protected file to keep. Type
+    REMOVE to confirm; cancel or back leaves every file unchanged.
+
+    TPM removes only a TPM-managed ReShade DLL, ReShade.ini, or approved effect
+    file when the ownership manifest is valid, the destination is inside the
+    current ReShade target folder, and the live SHA-256 exactly matches the
+    recorded value. Immediately before each backup and deletion, TPM re-reads
+    the profile metadata, re-resolves the target, and rechecks the destination
+    as an existing canonical non-reparse leaf inside that target. A verified
+    backup is created first and a failed manifest update restores the files.
+    Bundled/preinstalled, unowned, ambiguous, changed, malformed, and
+    out-of-target files remain protected. Game executables, TeknoParrot
+    profiles, LaunchBox files, and HyperSpin files are never removal targets.
+
+    The result report separates removed effects, already-clean games, missing
+    saved paths, protected bundled/preinstalled files, protected ambiguous or
+    changed files, malformed metadata, safe rollbacks, and failures.
 
   NOTE ON KEY CONFLICTS
 
@@ -2454,8 +2476,10 @@
 -------------------------------------------------------------------------------
 
   If something goes wrong, choose "Create Support Package" from the main
-  menu. TPM collects safe diagnostics and creates one ZIP under
-  SupportPackages\ beside this script. Send that ZIP when asking for help.
+  menu. TPM collects safe diagnostics, including per-file ReShade
+  ownership/removal scan and transaction details when available, and creates
+  one ZIP under SupportPackages\ beside this script. Send that ZIP when asking
+  for help.
 
   The package may contain allowlisted TPM/TeknoParrot text logs, safe
   game-local text logs, and metadata-only inventories of plugin folders.

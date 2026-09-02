@@ -9969,6 +9969,249 @@ Describe "RC8 menu and ReShade regressions" {
         $deployment | Should -BeGreaterThan $reviewWarning
     }
 }
+Describe "ReShade removal safety and workflow" {
+    It "emits separate scan records for removable, protected, missing, malformed, changed, and clean games" {
+        $root = Join-Path $TestDrive 'reshade-removal-scan'
+        $profilesDir = Join-Path $root 'UserProfiles'
+        $stateRoot = Join-Path $root 'state'
+        [IO.Directory]::CreateDirectory($profilesDir) | Out-Null
+        $makeProfile = {
+            param($name, $gamePath, $xml = $null)
+            if ($null -eq $xml) { $xml = '<GameProfile><GamePath>' + $gamePath + '</GamePath><EmulatorType>Default</EmulatorType></GameProfile>' }
+            [IO.File]::WriteAllText((Join-Path $profilesDir ($name + '.xml')), $xml)
+        }
+        $ownedDir = Join-Path $root 'owned'; [IO.Directory]::CreateDirectory($ownedDir) | Out-Null
+        $ownedGame = Join-Path $ownedDir 'game.exe'; [IO.File]::WriteAllText($ownedGame, 'game')
+        $ownedHook = Join-Path $ownedDir 'dxgi.dll'; [IO.File]::WriteAllText($ownedHook, 'owned')
+        & $makeProfile 'Owned' $ownedGame
+        $ownedHash = (Get-FileHash -LiteralPath $ownedHook -Algorithm SHA256).Hash
+        Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='ReShadeProfile.CleanSharp'; PinnedRevision='TPM-PROFILE'; Files=@([pscustomobject]@{ RelativeSource='dxgi.dll'; DestinationPath=$ownedHook; ExpectedSHA256=$ownedHash; ActualSHA256=$ownedHash; TPMManaged=$true; Kind='ReShadeDll' }) }) -Path (Get-TpmReShadeProfileOwnershipPath -GameId Owned -StateRoot $stateRoot)
+        $bundleDir = Join-Path $root 'bundled'; [IO.Directory]::CreateDirectory($bundleDir) | Out-Null
+        $bundleGame = Join-Path $bundleDir 'game.exe'; $bundleHook = Join-Path $bundleDir 'dxgi.dll'; [IO.File]::WriteAllText($bundleGame, 'game'); [IO.File]::WriteAllText($bundleHook, 'preinstalled')
+        & $makeProfile 'Bundled' $bundleGame
+        $bundleHash = (Get-FileHash -LiteralPath $bundleHook -Algorithm SHA256).Hash
+        Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='ReShadeProfile.CleanSharp'; PinnedRevision='TPM-PROFILE'; Files=@([pscustomobject]@{ RelativeSource='dxgi.dll'; DestinationPath=$bundleHook; ExpectedSHA256=$bundleHash; ActualSHA256=$bundleHash; TPMManaged=$false; Kind='ReShadeDll' }) }) -Path (Get-TpmReShadeProfileOwnershipPath -GameId Bundled -StateRoot $stateRoot)
+        $changedDir = Join-Path $root 'changed'; [IO.Directory]::CreateDirectory($changedDir) | Out-Null
+        $changedGame = Join-Path $changedDir 'game.exe'; $changedHook = Join-Path $changedDir 'dxgi.dll'; [IO.File]::WriteAllText($changedGame, 'game'); [IO.File]::WriteAllText($changedHook, 'changed')
+        & $makeProfile 'Changed' $changedGame
+        Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='ReShadeProfile.CleanSharp'; PinnedRevision='TPM-PROFILE'; Files=@([pscustomobject]@{ RelativeSource='dxgi.dll'; DestinationPath=$changedHook; ExpectedSHA256=('0' * 64); ActualSHA256=('0' * 64); TPMManaged=$true; Kind='ReShadeDll' }) }) -Path (Get-TpmReShadeProfileOwnershipPath -GameId Changed -StateRoot $stateRoot)
+        $cleanDir = Join-Path $root 'clean'; [IO.Directory]::CreateDirectory($cleanDir) | Out-Null
+        $cleanGame = Join-Path $cleanDir 'game.exe'; [IO.File]::WriteAllText($cleanGame, 'game'); & $makeProfile 'Clean' $cleanGame
+        & $makeProfile 'Missing' (Join-Path $root 'missing.exe')
+        & $makeProfile 'Malformed' '' '<NotGameProfile />'
+        $outsideDir = Join-Path $root 'outside'; [IO.Directory]::CreateDirectory($outsideDir) | Out-Null
+        $outsideGame = Join-Path $outsideDir 'game.exe'; $outsideFile = Join-Path $root 'must-not-delete.txt'; [IO.File]::WriteAllText($outsideGame, 'game'); [IO.File]::WriteAllText($outsideFile, 'outside')
+        & $makeProfile 'Outside' $outsideGame
+        $outsideHash = (Get-FileHash -LiteralPath $outsideFile -Algorithm SHA256).Hash
+        Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='ReShadeProfile.CleanSharp'; PinnedRevision='TPM-PROFILE'; Files=@([pscustomobject]@{ RelativeSource='outside.txt'; DestinationPath=$outsideFile; ExpectedSHA256=$outsideHash; ActualSHA256=$outsideHash; TPMManaged=$true; Kind='ReShadeDll' }) }) -Path (Get-TpmReShadeProfileOwnershipPath -GameId Outside -StateRoot $stateRoot)
+        $unownedDir = Join-Path $root 'unowned'; [IO.Directory]::CreateDirectory($unownedDir) | Out-Null
+        $unownedGame = Join-Path $unownedDir 'game.exe'; $unownedHook = Join-Path $unownedDir 'dxgi.dll'; [IO.File]::WriteAllText($unownedGame, 'game'); [IO.File]::WriteAllText($unownedHook, 'unowned'); & $makeProfile 'Unowned' $unownedGame
+        $scan = Get-TpmReShadeRemovalScan -UserProfilesDir $profilesDir -StateRoot $stateRoot
+        ($scan.Records | Where-Object GameId -eq 'Owned').Status | Should -Be 'Removable'
+        ($scan.Records | Where-Object GameId -eq 'Bundled').Status | Should -Be 'ProtectedBundled'
+        ($scan.Records | Where-Object GameId -eq 'Changed').Status | Should -Be 'Changed'
+        ($scan.Records | Where-Object GameId -eq 'Missing').Status | Should -Be 'MissingPath'
+        ($scan.Records | Where-Object GameId -eq 'Malformed').Status | Should -Be 'MalformedMetadata'
+        ($scan.Records | Where-Object GameId -eq 'Clean').Status | Should -Be 'AlreadyClean'
+        ($scan.Records | Where-Object GameId -eq 'Outside').Status | Should -Be 'ProtectedAmbiguous'
+        @($scan.Candidates | ForEach-Object GameId) | Should -Not -Contain 'Outside'
+        @($scan.Reviewable | ForEach-Object GameId) | Should -Contain 'Owned'
+        @($scan.Reviewable | ForEach-Object GameId) | Should -Contain 'Bundled'
+        ($scan.Records | Where-Object GameId -eq 'Unowned').Status | Should -Be 'ProtectedAmbiguous'
+        @((($scan.Records | Where-Object GameId -eq 'Unowned').ProtectedFiles | ForEach-Object DestinationPath)) | Should -Contain $unownedHook
+        @((($scan.Records | Where-Object GameId -eq 'Owned').RemovableFiles | ForEach-Object DestinationPath)) | Should -Contain $ownedHook
+        @($scan.Reviewable | ForEach-Object GameId) | Should -Not -Contain 'Clean'
+        @($scan.Reviewable | ForEach-Object GameId) | Should -Not -Contain 'Missing'
+        $script:summaryPrompt = 0
+        Mock Read-HostSafe { if ($script:summaryPrompt++ -eq 0) { 'A' } else { 'REMOVE' } }
+        $summary = Invoke-TpmReShadeRemoval -UserProfilesDir $profilesDir -StateRoot $stateRoot -BackupRoot (Join-Path $profilesDir 'FullBackup')
+        $summary.Removed | Should -Be 1
+        $summary.AlreadyClean | Should -Be 1
+        $summary.MissingPath | Should -Be 1
+        $summary.ProtectedBundled | Should -Be 1
+        $summary.ProtectedAmbiguous | Should -Be 2
+        $summary.Changed | Should -Be 1
+        $summary.MalformedMetadata | Should -Be 1
+        $summary.RolledBack | Should -Be 0
+        $summary.Failed | Should -Be 0
+        $summary.Results.Count | Should -Be 5
+        Test-Path -LiteralPath $bundleHook -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath $unownedHook -PathType Leaf | Should -BeTrue
+    }
+    It "passes only filtered reviewable profiles through the existing chooser" {
+        $root = Join-Path $TestDrive 'reshade-filtered-chooser'
+        [IO.Directory]::CreateDirectory($root) | Out-Null
+        $fullBackup = Join-Path $root 'FullBackup'; [IO.Directory]::CreateDirectory($fullBackup) | Out-Null
+        foreach ($name in @('A','B','C')) { [IO.File]::WriteAllText((Join-Path $root ($name + '.xml')), '<GameProfile />') }
+        [IO.File]::WriteAllText((Join-Path $fullBackup 'Hidden.xml'), '<GameProfile />')
+        $filtered = @(Get-ChildItem -LiteralPath $root -Filter '*.xml' -File | Where-Object BaseName -in @('A','C'))
+        Mock Read-HostSafe { 'A' }
+        $selected = @(Select-RegisteredGamesInteractive -UserProfilesDir $root -Profiles $filtered)
+        @($selected | ForEach-Object BaseName) | Should -Be @('A','C')
+        $selected | Should -Not -Contain (Get-Item -LiteralPath (Join-Path $root 'B.xml'))
+        $selected | Should -Not -Contain (Get-Item -LiteralPath (Join-Path $fullBackup 'Hidden.xml'))
+    }
+    It "requires confirmation and removes only verified owned files with a backup" {
+        $root = Join-Path $TestDrive 'reshade-removal-flow'; $profilesDir = Join-Path $root 'UserProfiles'; $stateRoot = Join-Path $root 'state'
+        [IO.Directory]::CreateDirectory($profilesDir) | Out-Null
+        $game = Join-Path $root 'game.exe'; $hook = Join-Path $root 'dxgi.dll'; [IO.File]::WriteAllText($game, 'game'); [IO.File]::WriteAllText($hook, 'owned')
+        [IO.File]::WriteAllText((Join-Path $profilesDir 'Flow.xml'), '<GameProfile><GamePath>' + $game + '</GamePath><EmulatorType>Default</EmulatorType></GameProfile>')
+        $hash = (Get-FileHash -LiteralPath $hook -Algorithm SHA256).Hash
+        Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='ReShadeProfile.CleanSharp'; PinnedRevision='TPM-PROFILE'; Files=@([pscustomobject]@{ RelativeSource='dxgi.dll'; DestinationPath=$hook; ExpectedSHA256=$hash; ActualSHA256=$hash; TPMManaged=$true; Kind='ReShadeDll' }) }) -Path (Get-TpmReShadeProfileOwnershipPath -GameId Flow -StateRoot $stateRoot)
+        $scan = Get-TpmReShadeRemovalScan -UserProfilesDir $profilesDir -StateRoot $stateRoot
+        $notConfirmed = Remove-TpmReShadeOwnedDeployment -ScanRecord $scan.Candidates[0] -UserProfilesDir $profilesDir -BackupRoot (Join-Path $profilesDir 'FullBackup') -StateRoot $stateRoot
+        $notConfirmed.Status | Should -Be 'ConfirmationRequired'; Test-Path -LiteralPath $hook -PathType Leaf | Should -BeTrue
+        $script:removePrompt = 0
+        Mock Read-HostSafe { if ($script:removePrompt++ -eq 0) { 'A' } else { 'REMOVE' } }
+        $result = Invoke-TpmReShadeRemoval -UserProfilesDir $profilesDir -StateRoot $stateRoot
+        $result.Removed | Should -Be 1
+        Test-Path -LiteralPath $hook -PathType Leaf | Should -BeFalse
+        @((Get-ChildItem -LiteralPath (Join-Path $profilesDir 'FullBackup') -Recurse -File -ErrorAction SilentlyContinue)).Count | Should -BeGreaterThan 0
+        $result.Scan.Missing.Count | Should -Be 0
+    }
+    It "rejects a manifest destination moved outside target before backup" {
+        $root = Join-Path $TestDrive 'reshade-removal-moved-destination'; $profilesDir = Join-Path $root 'UserProfiles'; $stateRoot = Join-Path $root 'state'
+        [IO.Directory]::CreateDirectory($profilesDir) | Out-Null
+        $game = Join-Path $root 'game.exe'; $hook = Join-Path $root 'dxgi.dll'; $outside = Join-Path $root 'outside.txt'
+        [IO.File]::WriteAllText($game, 'game'); [IO.File]::WriteAllText($hook, 'owned'); [IO.File]::WriteAllText($outside, 'outside')
+        [IO.File]::WriteAllText((Join-Path $profilesDir 'Moved.xml'), '<GameProfile><GamePath>' + $game + '</GamePath><EmulatorType>Default</EmulatorType></GameProfile>')
+        $hash = (Get-FileHash -LiteralPath $hook -Algorithm SHA256).Hash
+        $ownership = Get-TpmReShadeProfileOwnershipPath -GameId Moved -StateRoot $stateRoot
+        Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='ReShadeProfile.CleanSharp'; PinnedRevision='TPM-PROFILE'; Files=@([pscustomobject]@{ RelativeSource='dxgi.dll'; DestinationPath=$hook; ExpectedSHA256=$hash; ActualSHA256=$hash; TPMManaged=$true; Kind='ReShadeDll' }) }) -Path $ownership
+        $scan = Get-TpmReShadeRemovalScan -UserProfilesDir $profilesDir -StateRoot $stateRoot
+        $scan.Candidates[0].RemovableFiles[0].DestinationPath = $outside
+        $result = Remove-TpmReShadeOwnedDeployment -ScanRecord $scan.Candidates[0] -UserProfilesDir $profilesDir -BackupRoot (Join-Path $profilesDir 'FullBackup') -StateRoot $stateRoot -ConfirmRemoval
+        $result.Status | Should -Be 'RolledBack'
+        Test-Path -LiteralPath $hook -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath $outside -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath $ownership -PathType Leaf | Should -BeTrue
+    }
+    It "rejects changed profile metadata before backup" {
+        $root = Join-Path $TestDrive 'reshade-removal-profile-change'; $profilesDir = Join-Path $root 'UserProfiles'; $stateRoot = Join-Path $root 'state'
+        [IO.Directory]::CreateDirectory($profilesDir) | Out-Null
+        $game = Join-Path $root 'game.exe'; $hook = Join-Path $root 'dxgi.dll'; [IO.File]::WriteAllText($game, 'game'); [IO.File]::WriteAllText($hook, 'owned')
+        $profilePath = Join-Path $profilesDir 'ProfileChange.xml'
+        $defaultXml = '<GameProfile><GamePath>' + $game + '</GamePath><EmulatorType>Default</EmulatorType></GameProfile>'
+        [IO.File]::WriteAllText($profilePath, $defaultXml)
+        $hash = (Get-FileHash -LiteralPath $hook -Algorithm SHA256).Hash
+        Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='ReShadeProfile.CleanSharp'; PinnedRevision='TPM-PROFILE'; Files=@([pscustomobject]@{ RelativeSource='dxgi.dll'; DestinationPath=$hook; ExpectedSHA256=$hash; ActualSHA256=$hash; TPMManaged=$true; Kind='ReShadeDll' }) }) -Path (Get-TpmReShadeProfileOwnershipPath -GameId ProfileChange -StateRoot $stateRoot)
+        $scan = Get-TpmReShadeRemovalScan -UserProfilesDir $profilesDir -StateRoot $stateRoot
+        [IO.File]::WriteAllText($profilePath, $defaultXml.Replace('<EmulatorType>Default</EmulatorType>','<EmulatorType>BudgieLoader</EmulatorType>'))
+        $result = Remove-TpmReShadeOwnedDeployment -ScanRecord $scan.Candidates[0] -UserProfilesDir $profilesDir -BackupRoot (Join-Path $profilesDir 'FullBackup') -StateRoot $stateRoot -ConfirmRemoval
+        $result.Status | Should -Be 'RolledBack'
+        $result.Detail | Should -Match 'EmulatorType changed'
+        Test-Path -LiteralPath $hook -PathType Leaf | Should -BeTrue
+    }
+    It "rechecks profile metadata immediately before deletion" {
+        $root = Join-Path $TestDrive 'reshade-removal-delete-recheck'; $profilesDir = Join-Path $root 'UserProfiles'; $stateRoot = Join-Path $root 'state'
+        [IO.Directory]::CreateDirectory($profilesDir) | Out-Null
+        $game = Join-Path $root 'game.exe'; $hook = Join-Path $root 'dxgi.dll'; [IO.File]::WriteAllText($game, 'game'); [IO.File]::WriteAllText($hook, 'owned')
+        $profilePath = Join-Path $profilesDir 'DeleteRecheck.xml'
+        $defaultXml = '<GameProfile><GamePath>' + $game + '</GamePath><EmulatorType>Default</EmulatorType></GameProfile>'
+        [IO.File]::WriteAllText($profilePath, $defaultXml)
+        $hash = (Get-FileHash -LiteralPath $hook -Algorithm SHA256).Hash
+        $ownership = Get-TpmReShadeProfileOwnershipPath -GameId DeleteRecheck -StateRoot $stateRoot
+        Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='ReShadeProfile.CleanSharp'; PinnedRevision='TPM-PROFILE'; Files=@([pscustomobject]@{ RelativeSource='dxgi.dll'; DestinationPath=$hook; ExpectedSHA256=$hash; ActualSHA256=$hash; TPMManaged=$true; Kind='ReShadeDll' }) }) -Path $ownership
+        $scan = Get-TpmReShadeRemovalScan -UserProfilesDir $profilesDir -StateRoot $stateRoot
+        $script:reshadeMutation = $false
+        $script:reshadeMutationProfile = $profilePath
+        $script:reshadeMutationXml = $defaultXml.Replace('<EmulatorType>Default</EmulatorType>','<EmulatorType>BudgieLoader</EmulatorType>')
+        Mock Copy-Item {
+            param($LiteralPath, $Destination)
+            [IO.File]::Copy($LiteralPath, $Destination, $true)
+            if (-not $script:reshadeMutation -and [IO.Path]::GetFileName($Destination) -eq 'ownership.json') {
+                $script:reshadeMutation = $true
+                [IO.File]::WriteAllText($script:reshadeMutationProfile, $script:reshadeMutationXml)
+            }
+        }
+        $result = Remove-TpmReShadeOwnedDeployment -ScanRecord $scan.Candidates[0] -UserProfilesDir $profilesDir -BackupRoot (Join-Path $profilesDir 'FullBackup') -StateRoot $stateRoot -ConfirmRemoval
+        $result.Status | Should -Be 'RolledBack'
+        $result.Detail | Should -Match 'EmulatorType changed'
+        $script:reshadeMutation | Should -BeTrue
+        Test-Path -LiteralPath $hook -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath $ownership -PathType Leaf | Should -BeTrue
+    }
+
+    It "cancel after the preview leaves files and ownership unchanged" {
+        $root = Join-Path $TestDrive 'reshade-removal-cancel'; $profilesDir = Join-Path $root 'UserProfiles'; $stateRoot = Join-Path $root 'state'
+        [IO.Directory]::CreateDirectory($profilesDir) | Out-Null
+        $game = Join-Path $root 'game.exe'; $hook = Join-Path $root 'dxgi.dll'; [IO.File]::WriteAllText($game, 'game'); [IO.File]::WriteAllText($hook, 'owned')
+        [IO.File]::WriteAllText((Join-Path $profilesDir 'Cancel.xml'), '<GameProfile><GamePath>' + $game + '</GamePath><EmulatorType>Default</EmulatorType></GameProfile>')
+        $hash = (Get-FileHash -LiteralPath $hook -Algorithm SHA256).Hash
+        $ownership = Get-TpmReShadeProfileOwnershipPath -GameId Cancel -StateRoot $stateRoot
+        Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='ReShadeProfile.CleanSharp'; PinnedRevision='TPM-PROFILE'; Files=@([pscustomobject]@{ RelativeSource='dxgi.dll'; DestinationPath=$hook; ExpectedSHA256=$hash; ActualSHA256=$hash; TPMManaged=$true; Kind='ReShadeDll' }) }) -Path $ownership
+        $script:cancelPrompt = 0
+        Mock Read-HostSafe { if ($script:cancelPrompt++ -eq 0) { 'A' } else { '' } }
+        $result = Invoke-TpmReShadeRemoval -UserProfilesDir $profilesDir -StateRoot $stateRoot -BackupRoot (Join-Path $profilesDir 'FullBackup')
+        $result.Cancelled | Should -BeTrue
+        Test-Path -LiteralPath $hook -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath $ownership -PathType Leaf | Should -BeTrue
+    }
+    It "rolls back removed files and ownership when manifest commit fails" {
+        $root = Join-Path $TestDrive 'reshade-removal-rollback'; $profilesDir = Join-Path $root 'UserProfiles'; $stateRoot = Join-Path $root 'state'
+        [IO.Directory]::CreateDirectory($profilesDir) | Out-Null
+        $game = Join-Path $root 'game.exe'; $hook = Join-Path $root 'dxgi.dll'; $keep = Join-Path $root 'user.ini'; [IO.File]::WriteAllText($game, 'game'); [IO.File]::WriteAllText($hook, 'owned'); [IO.File]::WriteAllText($keep, 'keep')
+        [IO.File]::WriteAllText((Join-Path $profilesDir 'Rollback.xml'), '<GameProfile><GamePath>' + $game + '</GamePath><EmulatorType>Default</EmulatorType></GameProfile>')
+        $hash = (Get-FileHash -LiteralPath $hook -Algorithm SHA256).Hash; $keepHash = (Get-FileHash -LiteralPath $keep -Algorithm SHA256).Hash
+        Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='ReShadeProfile.CleanSharp'; PinnedRevision='TPM-PROFILE'; Files=@(
+            [pscustomobject]@{ RelativeSource='dxgi.dll'; DestinationPath=$hook; ExpectedSHA256=$hash; ActualSHA256=$hash; TPMManaged=$true; Kind='ReShadeDll' },
+            [pscustomobject]@{ RelativeSource='user.ini'; DestinationPath=$keep; ExpectedSHA256=$keepHash; ActualSHA256=$keepHash; TPMManaged=$false; Kind='ReShadePreset' }
+        ) }) -Path (Get-TpmReShadeProfileOwnershipPath -GameId Rollback -StateRoot $stateRoot)
+        $scan = Get-TpmReShadeRemovalScan -UserProfilesDir $profilesDir -StateRoot $stateRoot
+        Mock Save-TpmReShadeOwnershipManifest { throw 'simulated manifest commit failure' }
+        $result = Remove-TpmReShadeOwnedDeployment -ScanRecord $scan.Candidates[0] -UserProfilesDir $profilesDir -BackupRoot (Join-Path $profilesDir 'FullBackup') -StateRoot $stateRoot -ConfirmRemoval
+        $result.Status | Should -Be 'RolledBack'
+        Test-Path -LiteralPath $hook -PathType Leaf | Should -BeTrue
+        Test-Path -LiteralPath $keep -PathType Leaf | Should -BeTrue
+        (Read-TpmReShadeOwnershipManifest -Path (Get-TpmReShadeProfileOwnershipPath -GameId Rollback -StateRoot $stateRoot)).Files.Count | Should -Be 2
+    }
+    It "wires the ReShade mode action to the end-to-end removal path" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'Action \(S/R, default S\)'
+        $source | Should -Match 'Invoke-TpmReShadeRemoval -UserProfilesDir \$userProfilesDir'
+        $source | Should -Match 'Type REMOVE to back up and remove verified TPM-owned files'
+        $source | Should -Match 'Remove-TpmReShadeOwnedDeployment'
+        $source | Should -Match 'REMOVE \{0\}: \{1\} \[\{2\}\]'
+        $source | Should -Match 'Removed effects from'
+        $source | Should -Match 'Protected bundled/preinstalled'
+        $source | Should -Match 'Protected ambiguous/needs review'
+        $source | Should -Match 'Skipped missing path'
+        $source | Should -Match 'ReShade removal preview REMOVE'
+        $source | Should -Match 'ReShade removal preview KEEP protected'
+        $source | Should -Match 'ReShade removal preview KEEP changed'
+    }
+    It "supports multiple explicit filtered chooser selections" {
+        $root = Join-Path $TestDrive 'reshade-multiple-chooser'; [IO.Directory]::CreateDirectory($root) | Out-Null
+        foreach ($name in @('A','B','C')) { [IO.File]::WriteAllText((Join-Path $root ($name + '.xml')), '<GameProfile />') }
+        $filtered = @(Get-ChildItem -LiteralPath $root -Filter '*.xml' -File | Where-Object BaseName -in @('A','C'))
+        $script:chooserInput = New-Object 'System.Collections.Generic.Queue[string]'
+        foreach ($value in @('L','1','2','D')) { $script:chooserInput.Enqueue($value) }
+        Mock Read-HostSafe { $script:chooserInput.Dequeue() }
+        $selected = @(Select-RegisteredGamesInteractive -UserProfilesDir $root -Profiles $filtered)
+        @($selected | ForEach-Object BaseName) | Should -Be @('A','C')
+    }
+    It "removes all selected filtered games only after one confirmation" {
+        $root = Join-Path $TestDrive 'reshade-removal-all'; $profilesDir = Join-Path $root 'UserProfiles'; $stateRoot = Join-Path $root 'state'
+        [IO.Directory]::CreateDirectory($profilesDir) | Out-Null
+        foreach ($name in @('One','Two')) {
+            $gameDir = Join-Path $root $name; [IO.Directory]::CreateDirectory($gameDir) | Out-Null
+            $game = Join-Path $gameDir 'game.exe'; $hook = Join-Path $gameDir 'dxgi.dll'; [IO.File]::WriteAllText($game, 'game'); [IO.File]::WriteAllText($hook, $name)
+            [IO.File]::WriteAllText((Join-Path $profilesDir ($name + '.xml')), '<GameProfile><GamePath>' + $game + '</GamePath><EmulatorType>Default</EmulatorType></GameProfile>')
+            $hash = (Get-FileHash -LiteralPath $hook -Algorithm SHA256).Hash
+            Save-TpmReShadeOwnershipManifest -Manifest ([pscustomobject]@{ SchemaVersion=1; EffectId='ReShadeProfile.CleanSharp'; PinnedRevision='TPM-PROFILE'; Files=@([pscustomobject]@{ RelativeSource='dxgi.dll'; DestinationPath=$hook; ExpectedSHA256=$hash; ActualSHA256=$hash; TPMManaged=$true; Kind='ReShadeDll' }) }) -Path (Get-TpmReShadeProfileOwnershipPath -GameId $name -StateRoot $stateRoot)
+        }
+        $script:allRemovePrompt = 0
+        Mock Read-HostSafe { if ($script:allRemovePrompt++ -eq 0) { 'A' } else { 'REMOVE' } }
+        $result = Invoke-TpmReShadeRemoval -UserProfilesDir $profilesDir -StateRoot $stateRoot -BackupRoot (Join-Path $profilesDir 'FullBackup')
+        $result.Removed | Should -Be 2
+        $result.Results.Count | Should -Be 2
+        @($result.Results | Where-Object Status -eq 'Removed').Count | Should -Be 2
+        Test-Path -LiteralPath (Join-Path $root 'One\dxgi.dll') -PathType Leaf | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $root 'Two\dxgi.dll') -PathType Leaf | Should -BeFalse
+        $result.Failed | Should -Be 0
+    }
+}
+
 
 Describe "ReShade custom preset validation" {
     It "returns null for blank or whitespace input without probing the path" {
@@ -10113,6 +10356,22 @@ Describe "ReShade preview renderer and cache" {
         $a.CacheKey|Should -Not -Be $b.CacheKey;$b.CacheKey|Should -Not -Be $c.CacheKey;$s0.CacheKey|Should -Not -Be $s50.CacheKey;$s50.CacheKey|Should -Not -Be $s100.CacheKey
         (New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 50 -PreviewRoot $root -CacheRoot $cache).Reused|Should -BeTrue
     }
+    It "renders the processed side by applying effects to the same reference bitmap" {
+        $source = $script:ProductionSource
+        $rendererStart = $source.IndexOf('function New-TpmReShadePreviewBitmap')
+        $rendererEnd = $source.IndexOf('function New-TpmReShadePreviewArtifact', $rendererStart)
+        $renderer = $source.Substring($rendererStart, $rendererEnd - $rendererStart)
+        $renderer | Should -Match 'New-TpmReShadePreviewReferenceBitmap -Width \$canvasWidth -Height \$canvasHeight'
+        $renderer | Should -Match 'DrawImageUnscaled\(\$referenceBitmap,0,0\)'
+        $renderer | Should -Match 'drawAfter'
+        $reference = New-TpmReShadePreviewReferenceBitmap -Width 320 -Height 180
+        $processed = New-TpmReShadePreviewBitmap -ProfileDefinition (Get-TpmReShadeProfile -ProfileId EnhancedArcade) -Mode After -Width 320 -Height 180
+        try {
+            $reference.GetPixel(160,90).ToArgb() | Should -Not -Be $processed.GetPixel(160,90).ToArgb()
+        } finally {
+            $reference.Dispose(); $processed.Dispose()
+        }
+    }
     It "regenerates corrupt or stale cache without an external reference dependency" {
         $root=Join-Path $TestDrive 'preview-root';$cache=Join-Path $root 'Cache';[IO.Directory]::CreateDirectory($root)|Out-Null
         $p=Get-TpmReShadeProfile -ProfileId CleanSharp;$first=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache
@@ -10209,7 +10468,7 @@ Describe "ReShade trusted profile restore" {
         $root=Join-Path $TestDrive 'chooser-state';$profile=Get-TpmReShadeProfile -ProfileId CleanSharp;Set-TpmReShadeRememberedProfile -GameId chooser-game -ProfileDefinition $profile -StateRoot $root;Set-TpmReShadeFavorite -ProfileId CleanSharp -StateRoot $root;Add-TpmReShadeProfileHistory -GameId chooser-game -ProfileDefinition $profile -StateRoot $root
         $options=Get-TpmReShadeChooserOptions -GameId chooser-game -StateRoot $root
         $options.Remembered.Valid|Should -BeTrue;$options.Restore.Valid|Should -BeTrue;$options.Favorites.Count|Should -Be 1
-        $source=$script:ProductionSource;$source|Should -Match 'R\) Reapply previous trusted profile';$source|Should -Match 'Reapply .* for this game';$source|Should -Not -Match 'Restore .* for this game';$source|Should -Match 'Choose a favorite profile'
+        $source=$script:ProductionSource;$source|Should -Match 'R\) Reapply previous trusted profile';$source|Should -Match 'Reapply .* for this game';$source|Should -Not -Match 'Restore .* for this game';$source|Should -Match 'Show-TpmReShadeProfileGalleryWindow'
     }
     It "supports bounded browser click selection and keeps numeric fallback" {
         $script:ProductionSource | Should -Match 'Start-CrosshairSelectionBridge'
@@ -10234,7 +10493,11 @@ Describe "ReShade trusted profile restore" {
         $diagnosis = Get-PostgresFailureDiagnosis -GameLabel 'GameD' -DbName 'db_d' -Detail 'access denied'
         $diagnosis.Category | Should -Be 'PermissionOrElevation'
         $diagnosis.NextAction | Should -Not -BeNullOrEmpty
-        (Get-PostgresFailureDiagnosis -GameLabel 'GameE' -DbName 'db_e' -Detail 'psql.exe : FATAL: password authentication failed for user postgres').Category | Should -Be 'CannotConnect'
+        (Get-PostgresFailureDiagnosis -GameLabel 'GameE' -DbName 'db_e' -Detail 'psql.exe : FATAL: password authentication failed for user postgres').Category | Should -Be 'PasswordAuthenticationFailed'
+        $source = $script:ProductionSource
+        $source | Should -Match 'could not log in to PostgreSQL as postgres'
+        $source | Should -Match '\[F\] Fix PostgreSQL password'
+        $source | Should -Match 'replacement password validation failed; nothing was saved'
     }
     It "captures PostgreSQL client diagnostics before blocking writes" {
         $source = $script:ProductionSource
@@ -10254,12 +10517,41 @@ Describe "ReShade trusted profile restore" {
         $source | Should -Match 'Installed new'
         $source | Should -Match 'Updated'
     }
-    It "covers ReShade preview recovery choices and empty-source failure" {
-        $script:ProductionSource | Should -Match '\[R\] Retry preview'
-        $script:ProductionSource | Should -Match '\[T\] Text-only setup'
-        $script:ProductionSource | Should -Match '\[S\] Skip ReShade setup'
-        $script:ProductionSource | Should -Match '\[B\] Back'
-        $script:ProductionSource | Should -Match '\[D\] Details'
+    It "routes ReShade selection through one visual gallery before confirmation" {
+        $script:ProductionSource | Should -Match 'Show-TpmReShadeProfileGalleryWindow'
+        $script:ProductionSource | Should -Match 'switchable before/after comparison'
+        $script:ProductionSource | Should -Match 'Use selected profile'
+        $script:ProductionSource | Should -Match 'Nothing will be changed until you confirm'
+        $script:ProductionSource | Should -Match 'choose profiles in one switchable window'
+        $script:ProductionSource | Should -Not -Match 'preview opens after you choose an option'
+        $script:ProductionSource | Should -Not -Match 'Clean & Sharp  \(Recommended\)'
+        $invokeStart = $script:ProductionSource.IndexOf('function Invoke-ReShadeSetup')
+        $galleryIndex = $script:ProductionSource.IndexOf('Show-TpmReShadeProfileGalleryWindow', $invokeStart)
+        $confirmationIndex = $script:ProductionSource.IndexOf('$customPresetChoice', $galleryIndex)
+        $deploymentIndex = $script:ProductionSource.IndexOf('Install-TpmReShadeProfileDeployment -ProfileDefinition', $galleryIndex)
+        $galleryIndex | Should -BeGreaterThan $invokeStart
+        $confirmationIndex | Should -BeGreaterThan $galleryIndex
+        $deploymentIndex | Should -BeGreaterThan $confirmationIndex
+        $modeStart = $script:ProductionSource.IndexOf('if ($mode -eq "ReShadeSetup")')
+        $modeInvoke = $script:ProductionSource.IndexOf('$reShadeResult = Invoke-ReShadeSetup', $modeStart)
+        $modeSave = $script:ProductionSource.IndexOf('if (Save-Config)', $modeStart)
+        $modeSave | Should -BeGreaterThan $modeInvoke
+    }
+    It "keeps gallery object identity and safe cancel behavior" {
+        $script:ProductionSource | Should -Match 'DisplayMember = ''FriendlyName'''
+        $profiles = @(Get-TpmReShadeProfiles)
+        $result = Show-TpmReShadeProfileGalleryWindow -Profiles $profiles
+        $result.Available | Should -BeFalse
+        $result.SelectedProfile | Should -BeNullOrEmpty
+        $galleryBody = [regex]::Match($script:ProductionSource, '(?s)function Show-TpmReShadeProfileGalleryWindow \{.*?function Show-TpmReShadePreviewWindow').Value
+        $galleryBody | Should -Match 'New-TpmReShadePreviewBitmap'
+        $galleryBody | Should -Not -Match 'New-TpmReShadePreviewArtifact'
+        $galleryBody | Should -Match "Mode = 'Slider'"
+        $galleryBody | Should -Match 'SliderPosition.{0,30}this.Value'
+    }
+    It "covers ReShade gallery fallback and empty-source failure" {
+        $script:ProductionSource | Should -Match 'ReShade visual gallery unavailable'
+        $script:ProductionSource | Should -Match 'typed profile fallback'
         $script:ProductionSource | Should -Match 'SOURCE_DLL_UNAVAILABLE'
     }
     It "renders distinct left, middle, and right comparison slider positions" {

@@ -448,9 +448,8 @@ Mode 4 deploys custom P1/P2 crosshair cursor images to all registered lightgun g
 ## ReShade Visual Enhancements
 
 ReShade adds post-processing effects without changing game data. TPM does not automatically remove unowned or changed hooks; review those through advanced troubleshooting.
-**Beginner visual profiles:** ReShade setup first shows the five profile
-descriptions, then lets you choose one. A single preview window opens for the
-selected profile before the final confirmation:
+**Beginner visual profiles:** ReShade setup opens one visual gallery before
+the final confirmation. Switch among the five profiles in the same window:
 
 | Profile | Result |
 | --- | --- |
@@ -460,11 +459,12 @@ selected profile before the final confirmation:
 | Enhanced Arcade | LumaSharpen followed by Vibrance |
 | Classic Arcade CRT | CRT_Lottes only |
 
-The preview uses a safe, TPM-owned representative arcade scene with dark and
+The gallery uses a safe, TPM-owned representative arcade scene with dark and
 bright areas, neon color variation, text, edges, and perspective detail. It
-offers Before, After, Split, and a 0-100 comparison slider. If rendering or
-display is unavailable, the text description and typed selection remain
-available. Nothing is deployed until the explicit confirmation.
+updates the Before/After comparison when the profile changes. Choosing a
+profile does not write files; deployment remains behind the explicit
+confirmation. If rendering or display is unavailable, typed selection remains
+available.
 
 After deployment, the result separates newly installed, updated, protected
 unchanged, missing saved paths, unsupported architecture, and errors. Missing
@@ -487,6 +487,27 @@ staged and promoted together. Before replacement, every existing destination
 must be recorded as TPM-managed in that game's ownership manifest. Unknown or
 user-owned files cause a collision and remain untouched. Earlier TPM-managed
 files are retained when changing profiles; TPM does not silently delete them.
+
+**Removing ReShade:** choose `R` from the mode 5 ReShade tools prompt. TPM
+scans registered games and shows only games with removable or reviewable
+ReShade findings in the existing filtered chooser. The preview lists verified
+TPM-owned files that can be removed and protected files that will be kept.
+Type `REMOVE` to continue; cancelling at the chooser, preview, or confirmation
+leaves every file unchanged.
+
+TPM removes only files whose ownership manifest says they are TPM-managed,
+whose paths resolve inside the current ReShade target folder, and whose live
+SHA-256 still matches the recorded value. Immediately before each backup and
+deletion, TPM re-reads the profile metadata, re-resolves the target, and
+rechecks each destination as an existing canonical non-reparse leaf inside
+that target. A verified backup is created before deletion; manifest updates
+roll back with the files if the commit fails.
+Bundled/preinstalled, unowned, ambiguous, changed, malformed, and out-of-target
+files are protected by default. Game executables, TeknoParrot profiles,
+LaunchBox data, and HyperSpin data are never removal targets. The final report
+separates removed effects, already-clean games, missing saved paths, protected
+bundled/preinstalled files, protected ambiguous/needs-review files, changed
+hashes, malformed metadata, safe rollbacks, and failures.
 
 **Popular effects for arcade games:**
 
@@ -1056,7 +1077,8 @@ If something goes wrong, choose **Create Support Package** from the main menu.
 TPM gathers the useful diagnostics for you and creates one ZIP in the
 `SupportPackages\` folder beside the script. The package includes a
 plain-language manifest and, where safely available, allowlisted TPM logs,
-TeknoParrot logs, game-local text logs, and metadata-only plugin inventories.
+TeknoParrot logs, game-local text logs, metadata-only plugin inventories, and
+per-file ReShade removal scan/transaction details.
 
 The package never copies game executables, ROMs, archives, firmware, arbitrary
 DLL payloads, profiles, configuration files, credentials, PostgreSQL passwords,

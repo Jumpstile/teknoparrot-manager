@@ -133,7 +133,8 @@ cursor-control output.
 ## Create Support Package
 
 If you need help, choose **Create Support Package**. TPM collects safe logs and
-reports for you, checks private information, and creates one ZIP in
+reports for you, including per-file ReShade ownership/removal scan and
+transaction details, checks private information, and creates one ZIP in
 `SupportPackages\` beside the script. Send that ZIP when asking for help.
 
 The package may include allowlisted TPM and TeknoParrot text logs, safe
@@ -207,6 +208,18 @@ Run mode 4 again any time to change designs. Add your own PNG files to the `Cros
 ## ReShade Visual Enhancements
 
 ReShade adds post-processing effects without modifying game data. TPM does not automatically remove unowned or changed hook files; use the advanced troubleshooting path for those files.
+
+To remove ReShade, choose `R` from mode 5. The filtered chooser contains only
+games with verified removable or protected findings. The preview enumerates
+each file that will be removed and each protected file that will be kept. TPM
+requires typing `REMOVE`; cancel/back performs no deletion. Only unchanged
+TPM-owned files inside the resolved ReShade target are eligible. Immediately
+before backup and deletion, TPM re-reads the profile, re-resolves the target,
+and rechecks canonical non-reparse leaf containment and the exact hash. A
+verified backup is created before deletion. Bundled, preinstalled, unowned,
+ambiguous, changed, malformed, and out-of-target files remain protected. The
+final report separates removed, already-clean, missing-path, protected, changed, malformed,
+rolled-back, and failed outcomes.
 
 **Popular effects:**
 
