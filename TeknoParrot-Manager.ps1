@@ -6614,6 +6614,48 @@ function Resolve-ReShadeDllAcquisition {
     }
 }
 
+function Read-TpmReShadeTerminalInput {
+    param(
+        [string]$Prompt,
+        [bool]$PumpPreviewMessages
+    )
+    if (-not $PumpPreviewMessages) { return Read-HostSafe $Prompt }
+    try {
+        if ([Console]::IsInputRedirected) { return Read-HostSafe $Prompt }
+    } catch {
+        return Read-HostSafe $Prompt
+    }
+    Write-Host ($Prompt + ': ') -NoNewline
+    $buffer = New-Object System.Text.StringBuilder
+    while ($true) {
+        try {
+            while ([Console]::KeyAvailable) {
+                $keyInfo = [Console]::ReadKey($true)
+                if ($keyInfo.Key -eq [ConsoleKey]::Enter) {
+                    Write-Host ''
+                    return $buffer.ToString()
+                }
+                if ($keyInfo.Key -eq [ConsoleKey]::Backspace) {
+                    if ($buffer.Length -gt 0) {
+                        [void]$buffer.Remove($buffer.Length - 1, 1)
+                        Write-Host "`b `b" -NoNewline
+                    }
+                    continue
+                }
+                if (-not [char]::IsControl($keyInfo.KeyChar)) {
+                    [void]$buffer.Append($keyInfo.KeyChar)
+                    Write-Host $keyInfo.KeyChar -NoNewline
+                }
+            }
+        } catch {
+            Write-Host ''
+            return Read-HostSafe $Prompt
+        }
+        try { [Windows.Forms.Application]::DoEvents() } catch {}
+        Start-Sleep -Milliseconds 25
+    }
+}
+
 function Read-TpmReShadeTerminalProfile {
     param(
         [Parameter(Mandatory)][object[]]$Profiles,
@@ -6637,7 +6679,7 @@ function Read-TpmReShadeTerminalProfile {
         Write-Host ''
         Write-Host ('  Current selection: {0}' -f $(if ($selected) { $selected.FriendlyName } else { 'none -- choose 1-5 first' })) -ForegroundColor Yellow
         Write-Host '  Choose: [1-5] Preview profile  [U] Use selected profile  [R] Reopen preview  [B] Back  [D] Details' -ForegroundColor White
-        $choice = (Read-HostSafe '  Choice').Trim().ToUpperInvariant()
+        $choice = (Read-TpmReShadeTerminalInput -Prompt '  Choice' -PumpPreviewMessages ([bool]$PreviewSession)).Trim().ToUpperInvariant()
         if ($choice -match '^[1-5]$') {
             $selected = @($Profiles | Where-Object { $_.ProfileId -eq $orderedIds[[int]$choice - 1] })[0]
             if ($selected) {

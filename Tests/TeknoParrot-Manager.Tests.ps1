@@ -9934,6 +9934,9 @@ Describe "RC8 menu and ReShade regressions" {
         $setupBeforeChooser | Should -Not -Match 'ShowDialog\(\)'
         $source.Substring($nonModalIndex, $chooserIndex - $nonModalIndex) | Should -Match '\-NonModal'
         $source | Should -Match 'ReShade profile chooser: selected'
+        $script:ProductionSource | Should -Match 'function Read-TpmReShadeTerminalInput'
+        $script:ProductionSource | Should -Match 'Read-TpmReShadeTerminalInput -Prompt'
+        $script:ProductionSource | Should -Match 'Windows.Forms.Application\]::DoEvents'
     }
     It "returns Acquired for a valid Browse DLL and Skipped for an intentional Skip" {
         $dllPath = Join-Path $TestDrive 'existing-reshade.dll'
