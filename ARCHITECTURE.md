@@ -44,6 +44,16 @@ and `Split`/`Slider` compose those two bitmaps at the requested boundary.
 Deployment remains behind the existing explicit confirmation. The reference
 identity, renderer version, and effect hashes are part of the cache key so
 stale artifacts regenerate.
+The gallery keeps a stable internal `SelectedProfileId` separate from the
+`ViewMode` (`Before`, `After`, `Split`, or `Slider`). ComboBox entries are
+display-only objects carrying a validated profile ID; event handlers never
+infer view state from a selected item or read an optional `Mode` property.
+Initialization keeps preview events disabled until controls and state are
+complete. Every gallery event is closure-bound, guarded, and fail-closed:
+renderer or state errors are logged with their stage, the optional gallery is
+closed, and the terminal-only chooser remains authoritative. Gallery events,
+preview refresh, and all comparison controls are visual-only; deployment is
+still unreachable until terminal `U` plus the existing explicit confirmation.
 
 
 ## Startup: network-path detection and hard timeout (v0.99.23)

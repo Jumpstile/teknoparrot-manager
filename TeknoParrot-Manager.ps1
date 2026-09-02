@@ -5361,11 +5361,43 @@ function Open-TpmReShadePreviewWindow {
         $form=New-Object Windows.Forms.Form;$form.Text='TeknoParrot ReShade Preview - '+$ProfileDefinition.FriendlyName;$form.Width=1000;$form.Height=700
         $picture=New-Object Windows.Forms.PictureBox;$picture.Dock='Fill';$picture.SizeMode='Zoom';$picture.Image=[Drawing.Image]::FromFile($artifact.Path)
         $toolbar=New-Object Windows.Forms.FlowLayoutPanel;$toolbar.Dock='Top';$toolbar.Height=70
-        foreach($view in @('Before','After','Split')){$button=New-Object Windows.Forms.Button;$button.Text=$view;$button.Tag=$view;$button.Width=90;$button.Add_Click({[void](Update-TpmReShadePreviewWindow -Mode $this.Tag)});$toolbar.Controls.Add($button)}
+        foreach($view in @('Before','After','Split')){
+            $button=New-Object Windows.Forms.Button
+            $button.Text=$view;$button.Tag=$view;$button.Width=90
+            $button.Add_Click({
+                try {
+                    $tagProperty = $this.PSObject.Properties['Tag']
+                    $viewMode = if ($tagProperty) { [string]$tagProperty.Value } else { '' }
+                    if ($viewMode -notin @('Before','After','Split')) { throw 'Preview view button has no valid view mode.' }
+                    $result = Update-TpmReShadePreviewWindow -Mode $viewMode
+                    if (-not $result.Available) {
+                        Write-Log ("ReShade preview event failed at stage 'view-mode-{0}': {1}" -f $viewMode, $result.Reason)
+                        Close-TpmReShadePreviewWindow | Out-Null
+                    }
+                } catch {
+                    try { Write-Log ("ReShade preview event failed at stage 'view-mode-handler': {0}" -f $_.Exception.Message) } catch {}
+                    try { Close-TpmReShadePreviewWindow | Out-Null } catch {}
+                }
+            }.GetNewClosure())
+            [void]$toolbar.Controls.Add($button)
+        }
         $sliderLabel=New-Object Windows.Forms.Label;$sliderLabel.Text='Comparison slider';$sliderLabel.AutoSize=$true;$toolbar.Controls.Add($sliderLabel)
         $slider=New-Object Windows.Forms.TrackBar;$slider.Name='ComparisonSlider';$slider.Minimum=0;$slider.Maximum=100;$slider.Value=50;$slider.TickFrequency=25;$slider.Width=300
         $script:TpmReShadePreviewWindowState=[pscustomobject]@{Form=$form;Picture=$picture;Profile=$ProfileDefinition;Mode=$Mode;CacheRoot=$CacheRoot;Slider=$slider;SliderValue=50}
-        $slider.Add_ValueChanged({[void](Update-TpmReShadePreviewWindow -Mode 'Slider' -SliderPosition $this.Value)});$toolbar.Controls.Add($slider)
+        $slider.Add_ValueChanged({
+            try {
+                $valueProperty = $this.PSObject.Properties['Value']
+                if (-not $valueProperty) { throw 'Preview slider event sender has no Value property.' }
+                $result = Update-TpmReShadePreviewWindow -Mode 'Slider' -SliderPosition ([int]$valueProperty.Value)
+                if (-not $result.Available) {
+                    Write-Log ("ReShade preview event failed at stage 'slider-value-changed': {0}" -f $result.Reason)
+                    Close-TpmReShadePreviewWindow | Out-Null
+                }
+            } catch {
+                try { Write-Log ("ReShade preview event failed at stage 'slider-value-changed-handler': {0}" -f $_.Exception.Message) } catch {}
+                try { Close-TpmReShadePreviewWindow | Out-Null } catch {}
+            }
+        }.GetNewClosure());$toolbar.Controls.Add($slider)
         $form.Controls.Add($picture);$form.Controls.Add($toolbar)
         return [pscustomobject]@{Available=$true;Closed=$false;Mode=$Mode;CacheKey=$artifact.CacheKey}
     } catch {
@@ -5387,15 +5419,157 @@ function Update-TpmReShadePreviewWindow {
             return [pscustomobject]@{Available=$false;Reason='PREVIEW_RENDER_FAILED';Error=$_.Exception.Message}
         }
     }
-    $artifact=New-TpmReShadePreviewArtifact -ProfileDefinition $state.Profile -Mode $Mode -CacheRoot $state.CacheRoot -SliderPosition $SliderPosition
-    if(-not $artifact.Available){return $artifact}
-    $old=$state.Picture.Image;$state.Picture.Image=[Drawing.Image]::FromFile($artifact.Path);if($old){$old.Dispose()};$state.Mode=$Mode;$state.SliderValue=$SliderPosition
-    return [pscustomobject]@{Available=$true;Mode=$Mode;CacheKey=$artifact.CacheKey;SliderPosition=$SliderPosition}
+    try {
+        $artifact=New-TpmReShadePreviewArtifact -ProfileDefinition $state.Profile -Mode $Mode -CacheRoot $state.CacheRoot -SliderPosition $SliderPosition
+        if(-not $artifact.Available){return $artifact}
+        $old=$state.Picture.Image;$state.Picture.Image=[Drawing.Image]::FromFile($artifact.Path);if($old){$old.Dispose()};$state.Mode=$Mode;$state.SliderValue=$SliderPosition
+        return [pscustomobject]@{Available=$true;Mode=$Mode;CacheKey=$artifact.CacheKey;SliderPosition=$SliderPosition}
+    } catch {
+        return [pscustomobject]@{Available=$false;Reason='PREVIEW_RENDER_FAILED';Error=$_.Exception.Message}
+    }
 }
 
 function Close-TpmReShadePreviewWindow {
     if($script:TpmReShadePreviewWindowState){$state=$script:TpmReShadePreviewWindowState;if($state.Picture.Image){$state.Picture.Image.Dispose()};if($state.Form){$state.Form.Close();$state.Form.Dispose()};$script:TpmReShadePreviewWindowState=$null}
     return [pscustomobject]@{Closed=$true}
+}
+
+function Get-TpmReShadeGalleryProfileId {
+    param([object]$Item)
+    if (-not $Item) { return $null }
+    try {
+        $property = $Item.PSObject.Properties['ProfileId']
+        if ($property -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)) {
+            return [string]$property.Value
+        }
+    } catch {}
+    return $null
+}
+
+function Set-TpmReShadeGalleryPreviewFailed {
+    param(
+        [object]$State,
+        [string]$Stage,
+        [object]$ErrorRecord
+    )
+    $message = 'unknown preview failure'
+    try {
+        if ($ErrorRecord -and $ErrorRecord.Exception) { $message = [string]$ErrorRecord.Exception.Message }
+        elseif ($ErrorRecord) { $message = [string]$ErrorRecord }
+    } catch {}
+    try {
+        if ($State) {
+            $State['PreviewEnabled'] = $false
+            $State['PreviewFailureStage'] = $Stage
+            $State['PreviewFailureMessage'] = $message
+        }
+    } catch {}
+    try { Write-Log ("ReShade gallery preview failed at stage '{0}': {1}" -f $Stage, $message) } catch {}
+    try {
+        if ($State -and $State['Form'] -and -not $State['Form'].IsDisposed) {
+            $State['Form'].Close()
+        }
+    } catch {}
+    return $false
+}
+
+function Invoke-TpmReShadeGalleryRefreshSafe {
+    param(
+        [object]$State,
+        [scriptblock]$Refresh,
+        [string]$Stage = 'preview-refresh'
+    )
+    if (-not $State -or -not $Refresh) { return $false }
+    try {
+        if (-not [bool]$State['Initialized'] -or -not [bool]$State['PreviewEnabled'] -or [bool]$State['Closed']) {
+            return $false
+        }
+        return [bool](& $Refresh)
+    } catch {
+        return Set-TpmReShadeGalleryPreviewFailed -State $State -Stage $Stage -ErrorRecord $_
+    }
+}
+
+function New-TpmReShadeGalleryEventHandlers {
+    param(
+        [Parameter(Mandatory)]$State,
+        [Parameter(Mandatory)]$Combo,
+        [object]$Form
+    )
+    $refreshSafe = ${function:Invoke-TpmReShadeGalleryRefreshSafe}
+    $previewFailure = ${function:Set-TpmReShadeGalleryPreviewFailed}
+    $viewHandler = {
+        param($senderArg, $eventArgsArg)
+        try {
+            if (-not [bool]$State['Initialized'] -or -not [bool]$State['PreviewEnabled'] -or [bool]$State['Closed']) { return }
+            $eventSender = $senderArg
+            if (-not $eventSender -or -not $eventSender.PSObject.Properties['Tag']) { $eventSender = $this }
+            $tagProperty = if ($eventSender) { $eventSender.PSObject.Properties['Tag'] } else { $null }
+            $viewMode = if ($tagProperty) { [string]$tagProperty.Value } else { '' }
+            if ($viewMode -notin @('Before', 'After', 'Split')) { throw 'Gallery view button has no valid view mode.' }
+            $State['ViewMode'] = $viewMode
+            [void](& $refreshSafe -State $State -Refresh $State['Refresh'] -Stage ('view-mode-' + $viewMode))
+        } catch {
+            [void](& $previewFailure -State $State -Stage 'view-mode-handler' -ErrorRecord $_)
+        }
+    }.GetNewClosure()
+    $sliderHandler = {
+        param($senderArg, $eventArgsArg)
+        try {
+            if (-not [bool]$State['Initialized'] -or -not [bool]$State['PreviewEnabled'] -or [bool]$State['Closed']) { return }
+            $eventSender = $senderArg
+            if (-not $eventSender -or -not $eventSender.PSObject.Properties['Value']) { $eventSender = $this }
+            $valueProperty = if ($eventSender) { $eventSender.PSObject.Properties['Value'] } else { $null }
+            if (-not $valueProperty) { throw 'Gallery slider event sender has no Value property.' }
+            $State['ViewMode'] = 'Slider'
+            $State['SliderPosition'] = [Math]::Max(0, [Math]::Min(100, [int]$valueProperty.Value))
+            [void](& $refreshSafe -State $State -Refresh $State['Refresh'] -Stage 'slider-value-changed')
+        } catch {
+            [void](& $previewFailure -State $State -Stage 'slider-value-changed-handler' -ErrorRecord $_)
+        }
+    }.GetNewClosure()
+    $comboHandler = {
+        param($senderArg, $eventArgsArg)
+        try {
+            if (-not [bool]$State['Initialized'] -or -not [bool]$State['PreviewEnabled'] -or [bool]$State['Closed']) { return }
+            $profileId = Get-TpmReShadeGalleryProfileId -Item $Combo.SelectedItem
+            if ([string]::IsNullOrWhiteSpace($profileId)) { throw 'Gallery dropdown item has no stable ProfileId.' }
+            $State['SelectedProfileId'] = $profileId
+            [void](& $refreshSafe -State $State -Refresh $State['Refresh'] -Stage 'profile-selection')
+        } catch {
+            [void](& $previewFailure -State $State -Stage 'profile-selection-handler' -ErrorRecord $_)
+        }
+    }.GetNewClosure()
+    $chooseHandler = {
+        param($senderArg, $eventArgsArg)
+        try {
+            if (-not [bool]$State['Initialized'] -or [string]::IsNullOrWhiteSpace([string]$State['SelectedProfileId'])) { return }
+            $Form.Close()
+        } catch {
+            [void](& $previewFailure -State $State -Stage 'choose-handler' -ErrorRecord $_)
+        }
+    }.GetNewClosure()
+    $cancelHandler = {
+        param($senderArg, $eventArgsArg)
+        try {
+            $State['SelectedProfileId'] = $null
+            $Form.Close()
+        } catch {
+            [void](& $previewFailure -State $State -Stage 'cancel-handler' -ErrorRecord $_)
+        }
+    }.GetNewClosure()
+    $formClosedHandler = {
+        param($senderArg, $eventArgsArg)
+        try { $State['Closed'] = $true } catch {}
+    }.GetNewClosure()
+    return [pscustomobject]@{
+        View = $viewHandler
+        Slider = $sliderHandler
+        Combo = $comboHandler
+        Choose = $chooseHandler
+        Cancel = $cancelHandler
+        Closed = $formClosedHandler
+    }
 }
 
 function Show-TpmReShadeProfileGalleryWindow {
@@ -5404,6 +5578,27 @@ function Show-TpmReShadeProfileGalleryWindow {
     try {
         Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
         Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+        $knownProfiles = @(Get-TpmReShadeProfiles)
+        $canonicalProfiles = @()
+        $displayItems = @()
+        $seenProfileIds = @{}
+        foreach ($candidate in @($Profiles)) {
+            $candidateId = Get-TpmReShadeGalleryProfileId -Item $candidate
+            if ([string]::IsNullOrWhiteSpace($candidateId) -or $seenProfileIds.ContainsKey($candidateId)) { continue }
+            $canonicalProfile = @($knownProfiles | Where-Object { $_.ProfileId -eq $candidateId })[0]
+            if (-not $canonicalProfile) { continue }
+            $seenProfileIds[$candidateId] = $true
+            $canonicalProfiles += $canonicalProfile
+            $displayItems += [pscustomobject]@{
+                ProfileId = [string]$canonicalProfile.ProfileId
+                FriendlyName = [string]$canonicalProfile.FriendlyName
+                Description = [string]$canonicalProfile.Description
+            }
+        }
+        if ($displayItems.Count -eq 0) {
+            Write-Log 'ReShade gallery preview failed at stage ''profile-normalization'': no valid ProfileId items.'
+            return [pscustomobject]@{ Available=$false; SelectedProfile=$null; Closed=$true; Reason='PREVIEW_GALLERY_INVALID_PROFILES' }
+        }
         $form = New-Object Windows.Forms.Form
         $form.Text = 'TeknoParrot ReShade Profile Gallery'
         $form.Width = 1040
@@ -5412,7 +5607,7 @@ function Show-TpmReShadeProfileGalleryWindow {
         $combo.Dock = 'Top'
         $combo.DropDownStyle = 'DropDownList'
         $combo.DisplayMember = 'FriendlyName'
-        foreach ($galleryProfile in @($Profiles)) { [void]$combo.Items.Add($galleryProfile) }
+        foreach ($displayItem in @($displayItems)) { [void]$combo.Items.Add($displayItem) }
         $picture = New-Object Windows.Forms.PictureBox
         $picture.Dock = 'Fill'
         $picture.SizeMode = 'Zoom'
@@ -5424,70 +5619,130 @@ function Show-TpmReShadeProfileGalleryWindow {
         $cancel.Text = 'Cancel'
         $cancel.Dock = 'Bottom'
         $cancel.Height = 32
-        $state = [hashtable]::Synchronized(@{ Selected=$null; Image=$null; Mode='Split'; SliderPosition=50; Profiles=@($Profiles); Closed=$false; Refresh=$null; Form=$form; Combo=$combo })
+        $state = [hashtable]::Synchronized(@{
+            SelectedProfileId = $null
+            ViewMode = 'Split'
+            SliderPosition = 50
+            Profiles = @($canonicalProfiles)
+            ProfileIds = @($displayItems | ForEach-Object ProfileId)
+            Closed = $false
+            Initialized = $false
+            PreviewEnabled = $true
+            PreviewFailureStage = $null
+            PreviewFailureMessage = $null
+            Refresh = $null
+            Form = $form
+            Combo = $combo
+            Picture = $picture
+            Slider = $null
+            ViewButtons = @()
+        })
+        $refresh = {
+            $image = $null
+            try {
+                if (-not [bool]$state['Initialized'] -or -not [bool]$state['PreviewEnabled'] -or [bool]$state['Closed']) { return $false }
+                $selectedItem = $combo.SelectedItem
+                $profileId = Get-TpmReShadeGalleryProfileId -Item $selectedItem
+                if ([string]::IsNullOrWhiteSpace($profileId)) { throw 'Selected gallery item has no stable ProfileId.' }
+                $canonicalProfile = @($state['Profiles'] | Where-Object { $_.ProfileId -eq $profileId })[0]
+                if (-not $canonicalProfile) { throw ("Selected gallery ProfileId '{0}' is not available." -f $profileId) }
+                $viewMode = [string]$state['ViewMode']
+                if ($viewMode -notin @('Before', 'After', 'Split', 'Slider')) { throw ("Unsupported gallery view mode '{0}'." -f $viewMode) }
+                $sliderPosition = [int]$state['SliderPosition']
+                $image = New-TpmReShadePreviewBitmap -ProfileDefinition $canonicalProfile -Mode $viewMode -SliderPosition $sliderPosition
+                if (-not $image) { throw 'Preview renderer returned no image.' }
+                $oldImage = $picture.Image
+                $picture.Image = $image
+                $image = $null
+                if ($oldImage) { $oldImage.Dispose() }
+                $state['SelectedProfileId'] = $profileId
+                return $true
+            } catch {
+                if ($image) { try { $image.Dispose() } catch {} }
+                throw
+            }
+        }.GetNewClosure()
+        $state['Refresh'] = $refresh
+        $handlers = New-TpmReShadeGalleryEventHandlers -State $state -Combo $combo -Form $form
+        $viewHandler = $handlers.View
+        $sliderHandler = $handlers.Slider
+        $comboHandler = $handlers.Combo
+        $chooseHandler = $handlers.Choose
+        $cancelHandler = $handlers.Cancel
+        $formClosedHandler = $handlers.Closed
         $toolbar = New-Object Windows.Forms.FlowLayoutPanel
         $toolbar.Dock = 'Top'
         $toolbar.Height = 55
-        $selectProfile = {
-            $selectedGalleryProfile = $combo.SelectedItem
-            if (-not $selectedGalleryProfile) { return }
-            $image = New-TpmReShadePreviewBitmap -ProfileDefinition $selectedGalleryProfile -Mode $state.Mode -SliderPosition $state.SliderPosition
-            $old = $picture.Image
-            $picture.Image = $image
-            if ($old) { $old.Dispose() }
-        }
-        $state.Refresh = $selectProfile
-        foreach ($view in @('Before','After','Split')) {
+        foreach ($view in @('Before', 'After', 'Split')) {
             $viewButton = New-Object Windows.Forms.Button
             $viewButton.Text = $view
             $viewButton.Tag = $view
             $viewButton.Width = 70
-            $viewButton.Add_Click({ $state.Mode = [string]$this.Tag; & $selectProfile })
+            $viewButton.Add_Click($viewHandler)
             [void]$toolbar.Controls.Add($viewButton)
         }
+        $state['ViewButtons'] = @($toolbar.Controls | Where-Object { $_ -is [Windows.Forms.Button] })
         $slider = New-Object Windows.Forms.TrackBar
+        $slider.Name = 'ComparisonSlider'
         $slider.Minimum = 0
         $slider.Maximum = 100
         $slider.Value = 50
         $slider.Width = 260
-        $slider.Add_ValueChanged({ $state.Mode = 'Slider'; $state.SliderPosition = $this.Value; & $selectProfile })
+        $state['Slider'] = $slider
+        $slider.Add_ValueChanged($sliderHandler)
         [void]$toolbar.Controls.Add($slider)
-        $combo.Add_SelectedIndexChanged($selectProfile)
-        $choose.Add_Click({ $state.Selected = $combo.SelectedItem; $form.Close() })
-        $cancel.Add_Click({ $state.Selected = $null; $form.Close() })
+        $combo.Add_SelectedIndexChanged($comboHandler)
+        $choose.Add_Click($chooseHandler)
+        $cancel.Add_Click($cancelHandler)
+        $form.Add_FormClosed($formClosedHandler)
         $form.Controls.Add($picture)
         $form.Controls.Add($cancel)
         $form.Controls.Add($choose)
         $form.Controls.Add($toolbar)
         $form.Controls.Add($combo)
         $defaultIndex = 0
-        for ($i = 0; $i -lt $combo.Items.Count; $i++) { if ($combo.Items[$i].ProfileId -eq $DefaultProfileId) { $defaultIndex = $i; break } }
+        for ($i = 0; $i -lt $combo.Items.Count; $i++) {
+            if ([string]$combo.Items[$i].ProfileId -eq $DefaultProfileId) { $defaultIndex = $i; break }
+        }
         $combo.SelectedIndex = $defaultIndex
+        $state['SelectedProfileId'] = [string]$combo.Items[$defaultIndex].ProfileId
+        $state['Initialized'] = $true
+        if (-not (Invoke-TpmReShadeGalleryRefreshSafe -State $state -Refresh $refresh -Stage 'initial-preview')) {
+            return [pscustomobject]@{ Available=$false; SelectedProfile=$null; Closed=$true; Reason='PREVIEW_GALLERY_REFRESH_FAILED'; Session=$state }
+        }
         if ($NonModal) {
-            $form.Add_FormClosed({ $state.Closed = $true })
             $form.Show()
             [Windows.Forms.Application]::DoEvents()
             return [pscustomobject]@{ Available=$true; SelectedProfile=$null; Closed=$false; NonModal=$true; Session=$state }
         }
         [void]$form.ShowDialog()
+        $selectedProfile = if ($state['SelectedProfileId']) { Get-TpmReShadeProfile -ProfileId ([string]$state['SelectedProfileId']) } else { $null }
         if ($picture.Image) { $picture.Image.Dispose() }
         $form.Dispose()
-        return [pscustomobject]@{ Available=$true; SelectedProfile=$state.Selected; Closed=$true }
+        return [pscustomobject]@{ Available=$true; SelectedProfile=$selectedProfile; Closed=$true }
     } catch {
+        try { Write-Log ("ReShade gallery preview failed at stage 'gallery-initialization': {0}" -f $_.Exception.Message) } catch {}
         return [pscustomobject]@{ Available=$false; SelectedProfile=$null; Closed=$true; Reason='PREVIEW_GALLERY_UNAVAILABLE'; Error=$_.Exception.Message }
     }
 }
 
 function Close-TpmReShadeProfileGallerySession {
     param([object]$Session)
-    if ($Session -and $Session.Form) {
-        try { $Session.Form.Close() } catch {}
-        try {
-            if ($Session.Image) { $Session.Image.Dispose() }
-            $Session.Form.Dispose()
-        } catch {}
-        $Session.Closed = $true
-    }
+    if (-not $Session) { return }
+    try {
+        if ($Session.Form -and -not $Session.Form.IsDisposed) { $Session.Form.Close() }
+    } catch {}
+    try {
+        if ($Session.Picture -and $Session.Picture.Image) {
+            $image = $Session.Picture.Image
+            $Session.Picture.Image = $null
+            $image.Dispose()
+        }
+    } catch {}
+    try {
+        if ($Session.Form -and -not $Session.Form.IsDisposed) { $Session.Form.Dispose() }
+    } catch {}
+    try { $Session['Closed'] = $true } catch {}
 }
 function Show-TpmReShadePreviewWindow {
     param([Parameter(Mandatory)]$ProfileDefinition, [ValidateSet('Before','After','Split')][string]$Mode = 'Split', [object]$ResolutionEvidence = $null, [switch]$Show)
@@ -6656,6 +6911,35 @@ function Read-TpmReShadeTerminalInput {
     }
 }
 
+function Sync-TpmReShadeGallerySelection {
+    param(
+        [object]$Session,
+        [Parameter(Mandatory)][string]$ProfileId
+    )
+    if (-not $Session) { return $false }
+    try {
+        $state = $Session
+        if (-not [bool]$state['Initialized'] -or [bool]$state['Closed'] -or -not [bool]$state['PreviewEnabled']) { return $false }
+        $combo = $state['Combo']
+        if (-not $combo) { return $false }
+        $targetIndex = -1
+        for ($i = 0; $i -lt $combo.Items.Count; $i++) {
+            if ((Get-TpmReShadeGalleryProfileId -Item $combo.Items[$i]) -eq $ProfileId) {
+                $targetIndex = $i
+                break
+            }
+        }
+        if ($targetIndex -lt 0) { throw ("Gallery profile '{0}' is not present." -f $ProfileId) }
+        $state['SelectedProfileId'] = $ProfileId
+        if ([int]$combo.SelectedIndex -ne $targetIndex) { $combo.SelectedIndex = $targetIndex }
+        [Windows.Forms.Application]::DoEvents()
+        return $true
+    } catch {
+        [void](Set-TpmReShadeGalleryPreviewFailed -State $Session -Stage 'terminal-profile-sync' -ErrorRecord $_)
+        return $false
+    }
+}
+
 function Read-TpmReShadeTerminalProfile {
     param(
         [Parameter(Mandatory)][object[]]$Profiles,
@@ -6681,12 +6965,11 @@ function Read-TpmReShadeTerminalProfile {
         Write-Host '  Choose: [1-5] Preview profile  [U] Use selected profile  [R] Reopen preview  [B] Back  [D] Details' -ForegroundColor White
         $choice = (Read-TpmReShadeTerminalInput -Prompt '  Choice' -PumpPreviewMessages ([bool]$PreviewSession)).Trim().ToUpperInvariant()
         if ($choice -match '^[1-5]$') {
-            $selected = @($Profiles | Where-Object { $_.ProfileId -eq $orderedIds[[int]$choice - 1] })[0]
+            $selectedProfileId = $orderedIds[[int]$choice - 1]
+            $selected = @($Profiles | Where-Object { $_.ProfileId -eq $selectedProfileId })[0]
             if ($selected) {
-                if ($PreviewSession -and -not $PreviewSession.Closed -and $PreviewSession.Combo) {
-                    $PreviewSession.Combo.SelectedIndex = ([int]$choice - 1)
-                    if ($PreviewSession.Refresh) { & $PreviewSession.Refresh }
-                    [Windows.Forms.Application]::DoEvents()
+                if ($PreviewSession) {
+                    [void](Sync-TpmReShadeGallerySelection -Session $PreviewSession -ProfileId ([string]$selected.ProfileId))
                 }
                 Write-Host ('  Preview selection changed to: {0}' -f $selected.FriendlyName) -ForegroundColor Green
             }

@@ -10664,8 +10664,129 @@ Describe "ReShade trusted profile restore" {
         $galleryBody | Should -Not -Match 'New-TpmReShadePreviewArtifact'
         $galleryBody | Should -Not -Match 'Install-TpmReShadeProfileDeployment'
         $galleryBody | Should -Not -Match 'Save-Config'
-        $galleryBody | Should -Match "Mode = 'Slider'"
-        $galleryBody | Should -Match 'SliderPosition.{0,30}this.Value'
+        $handlerBody = [regex]::Match($script:ProductionSource, '(?s)function New-TpmReShadeGalleryEventHandlers \{.*?function Show-TpmReShadeProfileGalleryWindow').Value
+        $handlerBody | Should -Match "\['ViewMode'\] = 'Slider'"
+        $handlerBody | Should -Match 'SliderPosition.{0,60}valueProperty.Value'
+    }
+    It "uses stable ProfileId identity without reading a gallery item's Mode" {
+        $item = [pscustomobject]@{ ProfileId = 'CleanSharp'; FriendlyName = 'Clean & Sharp' }
+        { Get-TpmReShadeGalleryProfileId -Item $item } | Should -Not -Throw
+        (Get-TpmReShadeGalleryProfileId -Item $item) | Should -Be 'CleanSharp'
+        $galleryBody = [regex]::Match($script:ProductionSource, '(?s)function Show-TpmReShadeProfileGalleryWindow \{.*?function Close-TpmReShadeProfileGallerySession').Value
+        $galleryBody | Should -Not -Match '\.Mode'
+        $galleryBody | Should -Match "SelectedProfileId"
+        $galleryBody | Should -Match "ViewMode = 'Split'"
+    }
+    It "suppresses gallery refresh events until initialization completes" {
+        $state = [hashtable]::Synchronized(@{ Initialized = $false; PreviewEnabled = $true; Closed = $false })
+        $refresh = { throw 'refresh must not run during initialization' }
+        $result = Invoke-TpmReShadeGalleryRefreshSafe -State $state -Refresh $refresh -Stage 'initialization-test'
+        $result | Should -BeFalse
+        $state['PreviewEnabled'] | Should -BeTrue
+    }
+    It "tolerates missing ProfileId and mismatched gallery item shapes" {
+        foreach ($item in @(
+            [pscustomobject]@{ FriendlyName = 'No identity' },
+            [pscustomobject]@{ Mode = 'After'; FriendlyName = 'Wrong shape' },
+            $null
+        )) {
+            { Get-TpmReShadeGalleryProfileId -Item $item } | Should -Not -Throw
+            Get-TpmReShadeGalleryProfileId -Item $item | Should -BeNullOrEmpty
+        }
+        $galleryBody = [regex]::Match($script:ProductionSource, '(?s)function Show-TpmReShadeProfileGalleryWindow \{.*?function Close-TpmReShadeProfileGallerySession').Value
+        $galleryBody | Should -Match 'profile-normalization'
+        $galleryBody | Should -Match 'no valid ProfileId items'
+    }
+    It "fails closed and records the exact preview refresh stage" {
+        $state = [hashtable]::Synchronized(@{
+            Initialized = $true
+            PreviewEnabled = $true
+            Closed = $false
+            Form = $null
+        })
+        Mock Write-Log {}
+        $result = Invoke-TpmReShadeGalleryRefreshSafe -State $state -Refresh { throw 'forced gallery render failure' } -Stage 'slider-value-changed'
+        $result | Should -BeFalse
+        $state['PreviewEnabled'] | Should -BeFalse
+        $state['PreviewFailureStage'] | Should -Be 'slider-value-changed'
+        $state['PreviewFailureMessage'] | Should -Match 'forced gallery render failure'
+        Should -Invoke Write-Log -Times 1 -ParameterFilter { $msg -like "*slider-value-changed*forced gallery render failure*" }
+    }
+    It "guards every gallery view-mode handler and slider event" {
+        $handlerBody = [regex]::Match($script:ProductionSource, '(?s)function New-TpmReShadeGalleryEventHandlers \{.*?function Show-TpmReShadeProfileGalleryWindow').Value
+        $handlerBody | Should -Match 'viewHandler = \{'
+        $handlerBody | Should -Match 'sliderHandler = \{'
+        $handlerBody | Should -Match 'comboHandler = \{'
+        $handlerBody | Should -Match 'view-mode-handler'
+        $handlerBody | Should -Match 'slider-value-changed-handler'
+        $handlerBody | Should -Match 'profile-selection-handler'
+        foreach ($mode in @('Before', 'After', 'Split', 'Slider')) {
+            $handlerBody | Should -Match ([regex]::Escape("'" + $mode + "'"))
+        }
+    }
+    It "executes gallery callbacks safely for initialization and mismatched items" {
+        $state = [hashtable]::Synchronized(@{
+            Initialized = $false
+            PreviewEnabled = $true
+            Closed = $false
+            ViewMode = 'Split'
+            SliderPosition = 50
+            SelectedProfileId = 'CleanSharp'
+            Refresh = { return $true }
+        })
+        $combo = [pscustomobject]@{ SelectedItem = $null }
+        $handlers = New-TpmReShadeGalleryEventHandlers -State $state -Combo $combo -Form $null
+        { & $handlers.View ([pscustomobject]@{ Tag = 'Before' }) $null } | Should -Not -Throw
+        { & $handlers.Slider ([pscustomobject]@{ Value = 75 }) $null } | Should -Not -Throw
+        $state['ViewMode'] | Should -Be 'Split'
+        $state['SliderPosition'] | Should -Be 50
+
+        $state['Initialized'] = $true
+        foreach ($mode in @('Before', 'After', 'Split')) {
+            { & $handlers.View ([pscustomobject]@{ Tag = $mode }) $null } | Should -Not -Throw
+            $state['ViewMode'] | Should -Be $mode
+        }
+        { & $handlers.Slider ([pscustomobject]@{ Value = 75 }) $null } | Should -Not -Throw
+        $state['ViewMode'] | Should -Be 'Slider'
+        $state['SliderPosition'] | Should -Be 75
+
+        foreach ($badItem in @(
+            [pscustomobject]@{ Mode = 'After' }
+        )) {
+            $state['PreviewEnabled'] = $true
+            $state['Closed'] = $false
+            $combo.SelectedItem = $badItem
+            { & $handlers.Combo $combo $null } | Should -Not -Throw
+            $state['PreviewEnabled'] | Should -BeFalse
+            $state['PreviewFailureStage'] | Should -Be 'profile-selection-handler'
+        }
+        $state['PreviewEnabled'] = $true
+        $state['Closed'] = $false
+        $combo.SelectedItem = $null
+        { & $handlers.Combo $combo $null } | Should -Not -Throw
+        $state['PreviewEnabled'] | Should -BeFalse
+        $state['PreviewFailureStage'] | Should -Be 'profile-selection-handler'
+    }
+    It "disposes the gallery picture image idempotently" {
+        $image = [pscustomobject]@{ DisposeCount = 0 }
+        Add-Member -InputObject $image -MemberType ScriptMethod -Name Dispose -Value {
+            $this.DisposeCount = [int]$this.DisposeCount + 1
+        }
+        $picture = [pscustomobject]@{ Image = $image }
+        $session = [hashtable]::Synchronized(@{ Form = $null; Picture = $picture; Closed = $false })
+        { Close-TpmReShadeProfileGallerySession -Session $session } | Should -Not -Throw
+        $image.DisposeCount | Should -Be 1
+        $picture.Image | Should -BeNullOrEmpty
+        $session['Closed'] | Should -BeTrue
+        { Close-TpmReShadeProfileGallerySession -Session $session } | Should -Not -Throw
+        $image.DisposeCount | Should -Be 1
+    }
+    It "keeps preview failure on the terminal-only path" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'PREVIEW_GALLERY_REFRESH_FAILED'
+        $source | Should -Match 'ReShade visual gallery unavailable; typed profile fallback remains active'
+        $source | Should -Match 'preview is safe: nothing changes until you choose U and confirm'
+        $source | Should -Match 'ReShade profile chooser: selected'
     }
     It "covers ReShade gallery fallback and empty-source failure" {
         $script:ProductionSource | Should -Match 'ReShade visual gallery unavailable'
