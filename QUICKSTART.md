@@ -469,13 +469,21 @@ Answer Y to fetch ProfileCode.png for every registered game not already in <Tekn
 
 ## Library Health Check
 
-Mode 10 is a **read-only** status check — it never extracts, registers, repairs, propagates, or touches the network. Safe to run any time. Reports:
+Mode 10 is a **read-only** status check. It reports valid/broken/empty
+`GamePath` counts with affected profile codes, GPU fix / FFB Blaster /
+dgVoodoo2 / Postgres coverage, and informational ReShade / BepInEx counts.
+TPM explicitly says that it checked your setup and did not change anything.
 
-- Registered/broken/empty `GamePath` counts, with affected profile codes listed
-- GPU fix / FFB Blaster / dgVoodoo2 / Postgres coverage — which eligible games don't have each applied yet
-- ReShade / BepInEx install counts, informationally (these are cosmetic per-game choices, not flagged as something to fix)
+For broken saved paths, the result screen offers **R** automatic repair
+(known-folder search plus confirmation) and **M** manual repair (you select
+the exact executable; TPM never guesses). It creates a complete profile backup
+before a confirmed path repair. It also offers **P** PostgreSQL setup when
+needed and direct **5** ReShade, **6** dgVoodoo2, **7** GPU Fix, **8** Force
+Feedback, and **9** BepInEx actions. **D** shows technical details and **B**
+returns to the menu. No repair or setup starts until you choose an action.
 
-Third-party FFB plugin coverage isn't included here (checking it needs a live lookup) — use mode 8 for that instead.
+Third-party FFB plugin coverage isn't included here because checking it needs a
+live lookup; choose **8** for that instead.
 
 ---
 

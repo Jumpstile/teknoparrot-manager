@@ -27,6 +27,87 @@ This evidence remains a remediation hold record, not runtime certification:
   unowned files, rollback failure, and update blocked must remain separate
   reason categories.
 
+## Post-0909174 runtime hold evidence
+
+Support package: `TeknoParrotManager-Support-20260903-032415.zip`
+SHA-256: `D206E58D3492F83877E04F610A7D66B509EAFBB7E3813D97E0F1706CF3E802F2`
+Entries: 11
+
+This evidence is a remediation hold record, not runtime certification. The
+ReShade log records repeated empty-`CacheRoot` parameter binding failures,
+with 51 generic errors and no deployment. The transcript also confirms that
+preview reopen reported only "unavailable", bulk Apply All asked per-game
+reapply questions for a different saved profile, and Before/After did not
+teach a visible difference. The source-signature message did not explain
+download source, hash/size validation, Authenticode status, or whether it was
+safe to continue.
+
+Separately, the crosshair picker needs intermediate browser feedback after P1
+selection and before P2 selection. The selected P1 tile must be highlighted,
+typed numeric fallback must remain available, and deployment must remain
+behind terminal confirmation.
+
+## Post-0909174 GPU Fix runtime hold evidence
+
+Support package: `TeknoParrotManager-Support-20260903-033006.zip`
+SHA-256: `CAADEC33984E9349B206CF94E4A73DAB2CC5E082E295BEE593BAE75763BAEF80`
+Entries: 11
+
+The runtime detected NVIDIA Quadro P620, created a backup, updated zero
+games, left 51 unchanged, skipped four missing saved executables
+(2Spicy, AkaiKatanaShinNesica, BBHPro, BBHWorld), and reported zero errors.
+The operation was safe but the result cleared too quickly for the user to
+understand. The remediation must keep the result visible until acknowledgement,
+explain each skip in beginner language with a next action, and provide a
+separate technical Details view.
+
+## Post-0909174 BepInEx runtime hold evidence
+
+Support package: `TeknoParrotManager-Support-20260903-033354.zip`
+SHA-256: `C404AF1E5F8CB3E1742B55B77AD18FAAA2262EB22E58BAB273F1C32E374606FF`
+Entries: 11
+
+BepInEx safely preflight-skipped four missing executables and one protected or
+reparse-backed root, but 15 approved updates reported rollback failure and one
+reported an unverifiable destination parent. TPM did not claim success. The
+remediation must preserve the exact rollback operation, exception, evidence
+paths, and post-failure file state; group common failures, stop repetition,
+offer repair-reset and Details, and explain destination resolution failures
+with full canonical paths.
+
+The remediation now returns structured failure records, preserves exact
+per-game roots/staging/backup paths and exception text, groups rollback
+failures by a stable operation/exception-type key, stops repeated same-cause
+candidate processing, and exposes repair-reset, Details, and support/log
+guidance. Runtime certification remains held until the approved live
+installation is exercised.
+
+## Post-0909174 PostgreSQL runtime hold evidence
+
+Support package: `TeknoParrotManager-Support-20260903-034015.zip`
+SHA-256: `69BBDCD82B696889EE58FA95D9782D57F33C8BB0CF77B5D7351A24D07D4F4313`
+Entries: 11
+
+PostgreSQL recovery still fails the user-runtime gate. The saved postgres
+password was rejected for six affected databases. A mismatched replacement
+password returned the user to the full backup-failure wall, and Details
+repeated raw psql and PowerShell errors instead of grouping the common cause.
+The log later recorded a validated replacement password, but the workflow did
+not clearly retry and complete the protected backup. This is a primary blocker:
+recovery must be self-contained, grouped, status-accurate, password-safe, and
+must explain every post-validation state transition.
+
+## Release-gate UX invariant
+
+TPM is beginner-friendly by default. A user who only wants to play games must
+not need to understand PowerShell, PostgreSQL, XML, ACLs, reparse points,
+BepInEx internals, permissions, or elevation. Every skipped, blocked, or failed
+item must explain what happened, why it happened, what TPM did or did not
+change, and what the user should do next. Normal screens remain readable and
+wait for acknowledgement; technical details remain available separately.
+The acceptance question is whether a 14-year-old can complete the workflow
+without specialist knowledge.
+
 The shared mutation-path invariant below is the required response to the
 missing-device findings. No affected workflow may promote or mutate a game
 until its registered path is revalidated at the mutation boundary.
@@ -61,6 +142,7 @@ until its registered path is revalidated at the mutation boundary.
 | UX-S05  | Optional downloads      | Automatic ReShade/dgVoodoo2 acquisition retries or offers an explicit advanced existing-file path; signature/digest gates remain mandatory and cancel is truthful. | Invoke-ReShadeSetup; Invoke-DgVoodoo2Setup |
 | UX-S06  | Registration ambiguity  | Present validated candidate profiles for an explicit choice; blank/invalid input leaves the case unresolved instead of guessing. | Invoke-ManualRegistrationChoices; registration tests |
 | UX-S07  | Health boundaries       | Missing firmware/components remain contract-backed, read-only warnings with a legitimate-source/TPUI repair handoff; TPM does not fabricate or replace vendor files. | Get-CompatibilityWarnings; health tests |
+| UX-S08  | Health Check guided repair | Health Check reports `read-only` and `did not change anything` before offering direct, plain-language broken-path, PostgreSQL, and optional-component actions. Automatic path repair asks before saving; manual repair requires explicit folder/file selection and never guesses; Details remains separate. | Invoke-LibraryHealthCheck; Show-LibraryHealthNextActions; Health Check UX and boundary tests |
 | SUP-S01 | Support package collection | Option 14 gathers only allowlisted TPM/TeknoParrot/game text diagnostics and metadata-only plugin inventories into a fixed support ZIP; it never archives arbitrary directories or game payloads. The manifest and completion output lead with `What failed` and `What TPM did not change`. | New-TpmSupportPackage; SupportPackage.Tests.ps1 |
 | SUP-S02 | Support package privacy | Common credentials and user-profile paths are redacted from included text and user-facing failure summaries; credentials, profiles, recovery state, executables, DLL payloads, archives, firmware, and unrelated files are excluded. The manifest records collected/absent/excluded/failed/unsafe-content-rejected sources. | Redact-TpmSupportText; manifest/privacy tests |
 | SUP-S03 | Support package object-bound safety | Source/profile/plugin reads consume identity-validated opened handles; unsafe path identity is rejected, destination promotion uses an identity-validated directory handle and CREATE_NEW, and staging cleanup deletes only through validated owned handles. | Open-TpmSupportSafeFileStream; Move-TpmSupportZipByIdentity; adversarial/workflow tests |
@@ -83,6 +165,7 @@ until its registered path is revalidated at the mutation boundary.
 | INV-BX-02 | A recoverable BepInEx promotion failure restores the complete pre-operation tree; an unrecoverable failure preserves evidence and reports blocked.                                                                                                                  | Must hold in rollback matrix                  |
 | INV-BX-03 | An applied BepInEx update is counted as clean only after its validated staging directory is removed. Cleanup failure preserves the exact validated residue path and produces ACTION REQUIRED output.                                                                | Must hold after successful promotion          |
 | INV-BX-04 | Shared game mutation workflows never act on an unavailable, missing, reparse-backed, inaccessible, or changed registered executable path. | Must hold at every read and mutation boundary |
+| INV-HC-01 | Health Check inspection is read-only and does not mutate game paths, profiles, LaunchBox, PostgreSQL, ReShade, dgVoodoo2, GPU-fix, FFB, BepInEx, or controls. A selected repair/setup action is the only transition to a mutating workflow, and path repair saves only after explicit confirmation and verified backup. | Must hold before selected action |
 | INV-RS-01 | ReShade preview output is derived from the bundled hash-validated landscape reference; cache reuse never becomes deployment or trust evidence, and all in-memory bitmaps are disposed on gallery close. | Must hold for every preview mode |
 | INV-PG-10 | PostgreSQL reset reports a committed-but-unverified state distinctly; it never claims the old password remains authoritative after ALTER succeeded, and it never saves an unverified replacement credential. | Must hold after every reset process outcome |
 

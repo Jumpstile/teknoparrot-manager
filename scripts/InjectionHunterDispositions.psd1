@@ -333,5 +333,21 @@
             Disposition = 'FalsePositive'
             Reasoning   = 'The role value comes from the same fixed four-entry storage-role list, and the regex pattern and replacement are fixed literals. This cannot carry attacker-controlled regex or replacement syntax.'
         }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.AddType'
+            Line        = 4724
+            Extent      = 'Add-Type -AssemblyName System.Drawing -ErrorAction Stop'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The assembly name is a fixed framework literal used to decode the bundled TPM-owned preview reference. No external or attacker-controlled value reaches Add-Type.'
+        }
+        @{
+            File        = 'TeknoParrot-Manager.ps1'
+            RuleName    = 'InjectionRisk.AddType'
+            Line        = 5248
+            Extent      = 'Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop'
+            Disposition = 'FalsePositive'
+            Reasoning   = 'The assembly name is a fixed framework literal used for the optional TPM-owned preview gallery. No external or attacker-controlled value reaches Add-Type.'
+        }
     )
 }

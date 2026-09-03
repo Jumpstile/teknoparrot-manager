@@ -640,20 +640,18 @@
   ------------------------
 
   10) Library health check
-       Read-only. Reports how many registered profiles have a valid,
-       broken, or empty GamePath, lists the affected profile codes, and
-       shows the summary line from your last full run. Also reports
-       optional-setup coverage: how many registered games are eligible
-       for a GPU fix, FFB Blaster, dgVoodoo2, or Postgres setup but don't
-       have it applied yet (all checked locally, no network access --
-       third-party FFB plugin coverage needs a live lookup, so check that
-       via mode 8 instead). Also shows, purely informationally, how many
-       registered games have ReShade or BepInEx installed -- these two are
-       per-game choices rather than a clear right answer, so they are not
-       flagged as something to fix, just reported as a count. Does not
-       extract, register, repair, propagate, or touch the network -- safe
-       to run any time for a quick status check. Returns to the menu when
-       done.
+       Read-only. TPM first reports how many registered profiles have a valid,
+       broken, or empty GamePath and lists broken profile codes by name. It
+       explicitly says that TPM checked your setup and did not change anything.
+       For broken paths, [R] Try automatic path repair searches known game
+       folders and asks before saving; [M] Let me pick the correct folders
+       manually requires you to select the exact executable and never guesses.
+       If database-backed games need setup, [P] Set up PostgreSQL for these
+       games is offered and the setup workflow makes its safety backup.
+       Direct optional actions are offered as [5] ReShade, [6] dgVoodoo2,
+       [7] GPU Fix, [8] Force Feedback, and [9] BepInEx. [D] Details shows
+       technical counts and the log path; [B] returns to the main menu.
+       No repair or setup begins until you choose an action.
 
   11) Restore from backup
        Choose which backup to restore: (1) your UserProfiles -- rolls back
@@ -1442,11 +1440,11 @@
       https://reshade.me
       https://github.com/crosire/reshade
 
-  Mode 10 (Library health check) reports, purely informationally, how
-  many of your registered games have ReShade installed. This is not
-  flagged as something to fix -- ReShade is a per-game cosmetic choice,
-  not a clear right-or-wrong answer like a GPU fix.
-
+  Library Health Check also reports, purely informationally, how many
+  registered games have ReShade installed. This is not flagged as something
+  to fix -- ReShade is a per-game cosmetic choice, not a clear right-or-wrong
+  answer like a GPU fix. The health result screen offers direct [5] ReShade
+  setup after the read-only report.
 
   DGVOODOO2 LEGACY COMPATIBILITY
   --------------------------------
@@ -1547,10 +1545,10 @@
     removal of a known, user-owned deployment is an advanced troubleshooting
     action, not the normal beginner workflow.
 
-  Mode 10 (Library health check) reports which registered games are
-  eligible for dgVoodoo2 (import D3D8/DDraw/Glide) but don't have the
-  matching DLL deployed yet, read-only and without changing anything.
-
+  Library Health Check reports which registered games are eligible for
+  dgVoodoo2 (import D3D8/DDraw/Glide) but don't have the matching DLL deployed
+  yet, read-only and without changing anything. Its result screen offers
+  direct [6] dgVoodoo2 setup after the report.
 
   GPU COMPATIBILITY FIXES
   ------------------------
@@ -1573,10 +1571,9 @@
   these are flagged automatically during every run's compatibility check,
   separate from this setup step.
 
-  Mode 10 (Library health check) reports which registered games are
-  eligible for a GPU fix but don't have it applied yet, read-only and
-  without changing anything.
-
+  Library Health Check reports which registered games are eligible for a GPU
+  fix but don't have it applied yet, read-only and without changing anything.
+  Its result screen offers direct [7] GPU Fix setup after the report.
 
   FORCE FEEDBACK (FFB) SETUP
   ---------------------------

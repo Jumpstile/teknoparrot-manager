@@ -77,6 +77,15 @@ and exit code in the blocked result, so cause categories are based on the
 actual client failure instead of a generic existence-query message.
 PostgreSQL workflow failures now carry concrete Retry/Stop remediation
 labels in the status contract instead of acknowledgement-only metadata.
+Library Health Check now has a read-only report followed by explicit
+broken-path repair, PostgreSQL, and optional-component actions. Automatic path
+repair asks before saving and creates a verified profile backup; manual repair
+requires an explicit executable selection and never guesses. Unattended Health
+Check stops after the report.
+dgVoodoo2 setup now keeps a beginner-readable successful result on screen with
+detected legacy APIs, reason, preserved-file and skipped-path statements, plus
+separate Details and support/log guidance. Missing or unavailable game paths
+remain structured safe skips.
 
 
 

@@ -4787,6 +4787,17 @@ Describe "Postgres guided recovery and profile transaction" {
             Should -Invoke Start-Service -Times 0
             Should -Invoke Test-PostgresPassword -Times 0
         }
+        It "keeps verified backup, reset, and password verification in one recovery path" {
+            Mock New-PostgresRecoveryBackup { $script:pgBackup }
+            Mock Reset-PostgresPasswordAutomatically { [pscustomobject]@{ Succeeded = $true } }
+            Mock Test-PostgresPassword { $true }
+            $result = Invoke-PostgresSelectedPasswordRecovery -UserProfilesDir (Join-Path $TestDrive 'profiles') -PasswordPlain $script:pgSecret
+            $result.Succeeded | Should -BeTrue
+            $result.Backup.Verified | Should -BeTrue
+            Should -Invoke New-PostgresRecoveryBackup -Times 1 -Exactly
+            Should -Invoke Reset-PostgresPasswordAutomatically -Times 1 -Exactly
+            Should -Invoke Test-PostgresPassword -Times 1 -Exactly
+        }
     }
 
     Context "profile planning" {
@@ -5046,7 +5057,10 @@ Describe "Skylinekiller executable workflow regressions" {
         $result = Invoke-BepInExUpdateCheck -UserProfilesDir $profiles -CacheDir (Join-Path $TestDrive 'SkylineBepCache') -ApprovedGamesRoot $approved
         $result.Succeeded | Should -BeFalse
         $result.Reason | Should -Be 'NO_ELIGIBLE_GAMES'
-        $result.MissingDevice | Should -Be 1
+        $result.FailureRecords[0].Game | Should -Be 'BepGame'
+        $result.FailureRecords[0].GameRoot | Should -Be '<unresolved>'
+        $result.FailureRecords[0].ReasonKey | Should -Be 'DEVICE_UNAVAILABLE'
+        $result.FailureRecords[0].NextAction | Should -Match 'Reconnect'
         $result.PathReasonCounts['DEVICE_UNAVAILABLE'] | Should -Be 1
         Should -Invoke Get-BepInExLatestRelease -Times 0
         Should -Invoke Invoke-TpmDownload -Times 0
@@ -5628,6 +5642,48 @@ Describe "BepInEx authorized-root and transaction guards" {
             Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'cleanup failed' } -Times 1 -Exactly
             Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'game path became unavailable' } -Times 0 -Exactly
             Should -Invoke Write-Log -ParameterFilter { [string]$msg -match 'cleanupFailures=1' -and [string]$msg -match 'errors=0' } -Times 1 -Exactly
+        }
+        It "stops production candidate processing after the second same-cause rollback failure" {
+            $roots = @('One', 'Two', 'Three') | ForEach-Object { Join-Path $script:bepApproved $_ }
+            $codes = @('AAA', 'BBB', 'CCC')
+            for ($i = 0; $i -lt $roots.Count; $i++) {
+                New-Item -ItemType Directory -Path $roots[$i] -Force | Out-Null
+                $exe = Join-Path $roots[$i] 'game.exe'
+                New-Item -ItemType File -Path $exe -Force | Out-Null
+                $escaped = [System.Security.SecurityElement]::Escape($exe)
+                Set-Content -LiteralPath (Join-Path $script:bepProfiles ($codes[$i] + '.xml')) -Value ("<GameProfile><GamePath>$escaped</GamePath></GameProfile>")
+            }
+            $script:productionPromoteCalls = 0
+            $script:productionStageNumber = 0
+            Mock New-TpmStagingDirectory {
+                $script:productionStageNumber++
+                $path = Join-Path (Join-Path $env:TEMP 'TeknoParrotManagerStaging') ('BepInEx-production-' + $script:productionStageNumber)
+                New-Item -ItemType Directory -Path $path -Force | Out-Null
+                $path
+            }
+            Mock New-BepInExUpdateBackup {
+                Join-Path $GameRoot ('BepInEx_Backup_' + [System.IO.Path]::GetFileName($GameRoot))
+            }
+            Mock Restore-BepInExUpdateBackup {}
+            Mock Invoke-TpmTransactionalTreePromote {
+                $script:productionPromoteCalls++
+                if ($script:productionPromoteCalls -le 2) {
+                    throw [System.IO.IOException]::new("TPM TRANSACTION ROLLBACK FAILED for '$DestDir'; evidence remains at '$StagingDir'.")
+                }
+            }
+            Mock Read-HostSafe { 'R' }
+
+            $result = Invoke-BepInExUpdateCheck -UserProfilesDir $script:bepProfiles -CacheDir $script:bepCache -ApprovedGamesRoot $script:bepApproved
+
+            $script:productionPromoteCalls | Should -Be 2
+            $result.BatchStopped | Should -BeTrue
+            @($result.FailureRecords).Count | Should -Be 2
+            $result.FailureRecords[0].GameRoot | Should -Not -Be $result.FailureRecords[1].GameRoot
+            $result.FailureRecords[0].StagingPath | Should -Not -Be $result.FailureRecords[1].StagingPath
+            $result.FailureRecords[0].BackupPath | Should -Not -Be $result.FailureRecords[1].BackupPath
+            $result.FailureRecords[0].ReasonKey | Should -Be $result.FailureRecords[1].ReasonKey
+            $result.FailureRecords[0].Exception | Should -Match 'One'
+            $result.FailureRecords[1].Exception | Should -Match 'Two'
         }
     }
 }
@@ -11822,5 +11878,335 @@ Describe "Action Required report output" {
         Test-Path -LiteralPath $actionPath | Should -BeFalse
         ([System.IO.File]::ReadAllText($notesPath)) | Should -Match 'Technical note only'
         ([System.IO.File]::ReadAllText($notesPath)) | Should -Match 'TPM profile path'
+    }
+}
+
+Describe "Post-0909174 remediation result UX contracts" {
+    It "initializes ReShade cache before game processing and reports one fail-closed cause" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$reShadeCacheRoot = Join-Path \$PSScriptRoot ''ReShade'''
+        $source | Should -Match 'CACHE_UNAVAILABLE'
+        $source | Should -Match 'blocked once before game processing'
+        $source | Should -Not -Match 'Cannot bind argument to parameter'
+    }
+    It "keeps GPU Fix results visible and exposes skip reasons and next actions" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'GPU Compatibility Fix complete'
+        $source | Should -Match 'Press Enter to return, D Details, O support-log guidance, or R run again'
+        $source | Should -Match 'Reason:'
+        $source | Should -Match 'What to do:'
+        $source | Should -Match 'technical:'
+        $source | Should -Match 'do \{[\s\S]*\$gpuResult = Invoke-GpuFixSetup[\s\S]*\} while \(\$gpuResultChoice -in @\(''D'',''O'',''R''\)\)'
+    }
+    It "provides browser feedback and P1 highlighting before P2" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'P1 selected:'
+        $source | Should -Match 'Now choose P2'
+        $source | Should -Match 'classList.add\(''p1''\)'
+        $source | Should -Match 'choose\(\$i,this\)'
+        $source | Should -Match 'Typed numeric fallback remains available'
+    }
+    It "classifies bulk profile conflicts instead of prompting per game" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'Previously TPM-managed'
+        $source | Should -Match 'Selected now:'
+        $source | Should -Match '\[A\] Change these TPM-managed games'
+        $source | Should -Match '\[K\] Keep their current profiles'
+        $source | Should -Match 'ChangedProfile'
+        $source | Should -Match 'KeptPrevious'
+    }
+}
+Describe "dgVoodoo2 beginner result screen contracts" {
+    It "answers what changed, why, what was preserved, and what to do next" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'dgVoodoo2 setup finished\.'
+        $source | Should -Match 'What TPM did:'
+        $source | Should -Match 'detected legacy API'
+        $source | Should -Match 'Why TPM did it:'
+        $source | Should -Match 'older DirectX/Glide games'
+        $source | Should -Match 'translate those older graphics calls'
+        $source | Should -Match 'What TPM did not change:'
+        $source | Should -Match 'unowned or changed files'
+        $source | Should -Match 'skipped missing-path games'
+        $source | Should -Match 'What to do next:'
+        $source | Should -Match 'create a support package'
+    }
+    It "keeps technical details and support guidance behind explicit choices" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$dgResult\.DeploymentDetails'
+        $source | Should -Match '\$dgResult\.SkipDetails'
+        $source | Should -Match "Read-HostSafe '  Press Enter to return, D Details, or O support/log guidance'"
+        $source | Should -Match 'Technical log:'
+        $source | Should -Match 'Support package folder:'
+    }
+}
+
+
+Describe "Library Health Check guided repair UX contracts" {
+    It "states that the health check is read-only before offering actions" {
+        $source = $script:ProductionSource
+        $healthStart = $source.IndexOf('function Invoke-LibraryHealthCheck', [StringComparison]::Ordinal)
+        $actionsStart = $source.IndexOf('function Show-LibraryHealthNextActions', $healthStart, [StringComparison]::Ordinal)
+        $health = $source.Substring($healthStart, $actionsStart - $healthStart)
+        $health | Should -Match 'Library Health Check is read-only'
+        $health | Should -Match 'TPM checked your setup and did not change anything'
+        $health | Should -Not -Match '(?m)^\s*(Save-Xml|Save-XmlMaybe|Copy-Item|Remove-Item|Install-\w+|Invoke-\w+Setup)\b'
+    }
+    It "offers broken-path, PostgreSQL, and optional setup actions in plain language" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\[R\] Try automatic path repair'
+        $source | Should -Match '\[M\] Let me pick the correct folders manually'
+        $source | Should -Match '\[D\] Details'
+        $source | Should -Match '\[B\] Back to main menu'
+        $source | Should -Match 'known game folders'
+        $source | Should -Match 'TPM will not guess'
+        $source | Should -Match '\[P\] Set up PostgreSQL for these games'
+        $source | Should -Match 'safety backup before changing PostgreSQL'
+        foreach ($label in @('\[5\] ReShade', '\[6\] dgVoodoo2', '\[7\] GPU Fix', '\[8\] Force Feedback', '\[9\] BepInEx')) {
+            $source | Should -Match $label
+        }
+        $source | Should -Match 'Force feedback plugin was not checked because network access is needed'
+    }
+    It "returns structured read-only findings without invoking mutation helpers" {
+        $root = Join-Path $TestDrive 'health-read-only'
+        $profiles = Join-Path $root 'UserProfiles'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        $profilePath = Join-Path $profiles 'HEALTHGAME.xml'
+        $original = '<GameProfile><GamePath>C:\missing\healthgame.exe</GamePath><ExecutableName>healthgame.exe</ExecutableName></GameProfile>'
+        [System.IO.File]::WriteAllText($profilePath, $original)
+        $directoryPath = Join-Path $profiles 'directory-valued-gamepath'
+        New-Item -ItemType Directory -Path $directoryPath -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $profiles 'HEALTHDIR.xml'), '<GameProfile><GamePath>{0}</GamePath><ExecutableName>healthdir.exe</ExecutableName></GameProfile>' -f $directoryPath)
+        Mock Get-DetectedGpuVendor { [pscustomobject]@{ Vendor = $null } }
+        Mock Get-GpuAndFfbFieldNames { [pscustomobject]@{ Gpu = [pscustomobject]@{ BoolFields=@(); DropdownFields=@() }; Ffb = [pscustomobject]@{} } }
+        Mock Get-FFBBlasterSupport { [pscustomobject]@{ Status = 'Unsupported'; WouldWrite = $false } }
+        Mock Test-GameNeedsPostgres { $false }
+        Mock Test-PostgresInstalled { $false }
+        Mock Get-GameLegacyApi { @() }
+        Mock Get-ReShadeTargetInfo { [pscustomobject]@{ TargetDir = $TestDrive; DllName = 'unused.dll' } }
+        Mock Get-BepInExInstalledVersion { $null }
+        Mock Save-Xml { throw 'health check must not save profiles' }
+        $result = Invoke-LibraryHealthCheck -UserProfilesDir $profiles -LogPath $script:logPath -TpRoot $root
+        $result.ReadOnly | Should -BeTrue
+        @($result.Broken) | Should -Contain 'HEALTHGAME'
+        @($result.Broken) | Should -Contain 'HEALTHDIR'
+        [System.IO.File]::ReadAllText($profilePath) | Should -Be $original
+        Should -Invoke Save-Xml -Times 0 -Exactly
+        Should -Invoke Get-GameLegacyApi -Times 0 -Exactly
+    }
+    It "does not offer a repair prompt until the read-only result exists" {
+        $source = $script:ProductionSource
+        $healthStart = $source.IndexOf('if ($mode -eq "HealthCheck")', [StringComparison]::Ordinal)
+        $postgresStart = $source.IndexOf('if ($mode -eq "PostgresSetup")', $healthStart, [StringComparison]::Ordinal)
+        $branch = $source.Substring($healthStart, $postgresStart - $healthStart)
+        $reportIndex = $branch.IndexOf('$healthResult = Invoke-LibraryHealthCheck', [StringComparison]::Ordinal)
+        $choiceIndex = $branch.IndexOf('$healthChoice = Show-LibraryHealthNextActions', [StringComparison]::Ordinal)
+        $repairIndex = $branch.IndexOf('New-LibraryHealthProfileBackup', [StringComparison]::Ordinal)
+        $reportIndex | Should -BeGreaterOrEqual 0
+        $choiceIndex | Should -BeGreaterThan $reportIndex
+        $repairIndex | Should -BeGreaterThan $choiceIndex
+        $branch.IndexOf('if ($Unattended)', [StringComparison]::Ordinal) | Should -BeLessThan $choiceIndex
+    }
+    It "saves only an explicitly selected executable after confirmation and backup" {
+        $root = Join-Path $TestDrive 'health-manual-repair'
+        $profiles = Join-Path $root 'UserProfiles'
+        $games = Join-Path $root 'Games'
+        New-Item -ItemType Directory -Path $profiles, $games -Force | Out-Null
+        $gameExe = Join-Path $games 'HealthGame\healthgame.exe'
+        $secondaryExe = Join-Path $games 'HealthGame\healthgame2.exe'
+        New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($gameExe)) -Force | Out-Null
+        [System.IO.File]::WriteAllText($gameExe, 'game')
+        [System.IO.File]::WriteAllText($secondaryExe, 'secondary')
+        $profilePath = Join-Path $profiles 'HEALTHGAME.xml'
+        [System.IO.File]::WriteAllText($profilePath, '<GameProfile><GamePath>C:\missing\healthgame.exe</GamePath><ExecutableName>healthgame.exe</ExecutableName><HasTwoExecutables>true</HasTwoExecutables><ExecutableName2>healthgame2.exe</ExecutableName2></GameProfile>')
+        $script:healthManualSelected = $gameExe
+        Mock Read-PathWithBrowse { $script:healthManualSelected }
+        Mock Read-HostSafe { 'Y' }
+        $result = Invoke-LibraryHealthManualPathRepair -UserProfilesDir $profiles -GamesInstallFolder $games -BrokenGames @('HEALTHGAME')
+        $result.Updated | Should -Be 1
+        $result.BackupPath | Should -Match 'HealthCheck'
+        Test-Path -LiteralPath (Join-Path $result.BackupPath 'HEALTHGAME.xml') | Should -BeTrue
+        $savedDoc = Read-Xml -Path $profilePath
+        $savedDoc.GameProfile.GamePath | Should -Be ([System.IO.Path]::GetFullPath($gameExe))
+        $savedDoc.GameProfile.GamePath2 | Should -Be ([System.IO.Path]::GetFullPath($secondaryExe))
+        Should -Invoke Read-PathWithBrowse -Times 1 -Exactly
+    }
+    It "rejects a manually selected executable outside the configured games root" {
+        $root = Join-Path $TestDrive 'health-manual-boundary'
+        $profiles = Join-Path $root 'UserProfiles'
+        $games = Join-Path $root 'Games'
+        $outside = Join-Path $root 'Outside\healthgame.exe'
+        New-Item -ItemType Directory -Path $profiles, $games, ([System.IO.Path]::GetDirectoryName($outside)) -Force | Out-Null
+        [System.IO.File]::WriteAllText($outside, 'outside')
+        $profilePath = Join-Path $profiles 'HEALTHGAME.xml'
+        $original = '<GameProfile><GamePath>C:\missing\healthgame.exe</GamePath><ExecutableName>healthgame.exe</ExecutableName></GameProfile>'
+        [System.IO.File]::WriteAllText($profilePath, $original)
+        Mock Read-PathWithBrowse { $outside }
+        $result = Invoke-LibraryHealthManualPathRepair -UserProfilesDir $profiles -GamesInstallFolder $games -BrokenGames @('HEALTHGAME')
+        $result.Updated | Should -Be 0
+        $result.BackupPath | Should -BeNullOrEmpty
+        [System.IO.File]::ReadAllText($profilePath) | Should -Be $original
+    }
+    It "automatically repairs only a uniquely matched, revalidated game executable" {
+        $root = Join-Path $TestDrive 'health-automatic-repair'
+        $profiles = Join-Path $root 'UserProfiles'
+        $games = Join-Path $root 'Games'
+        New-Item -ItemType Directory -Path $profiles, $games -Force | Out-Null
+        $gameExe = Join-Path $games 'HealthGame\healthgame.exe'
+        New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($gameExe)) -Force | Out-Null
+        [System.IO.File]::WriteAllText($gameExe, 'game')
+        [System.IO.File]::WriteAllText((Join-Path $profiles 'HEALTHGAME.xml'), '<GameProfile><GamePath>C:\missing\healthgame.exe</GamePath><ExecutableName>healthgame.exe</ExecutableName></GameProfile>')
+        $profileIndex = @{ 'healthgame.exe' = @('HEALTHGAME') }
+        $reports = @(Repair-GamePaths -userProfilesDir $profiles -installFolder $games -profileIndex $profileIndex -DryRun:$false)
+        @($reports).Count | Should -Be 1
+        $reports[0].Status | Should -Be 'fixed'
+        (Read-Xml -Path (Join-Path $profiles 'HEALTHGAME.xml')).GameProfile.GamePath | Should -Be ([System.IO.Path]::GetFullPath($gameExe))
+    }
+    It "reports automatic repair outcomes instead of claiming completion blindly" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$repairReports = @\(Repair-GamePaths'
+        $source | Should -Match 'Automatic path repair result:'
+        $source | Should -Match '\$repairFailed'
+        $source | Should -Match 'left unchanged or unresolved'
+    }
+    It "reports an unresolved automatic candidate without changing its profile" {
+        $root = Join-Path $TestDrive 'health-automatic-unresolved'
+        $profiles = Join-Path $root 'UserProfiles'
+        $games = Join-Path $root 'Games'
+        New-Item -ItemType Directory -Path $profiles, $games -Force | Out-Null
+        $profilePath = Join-Path $profiles 'UNRESOLVED.xml'
+        $original = '<GameProfile><GamePath>C:\missing\unresolved.exe</GamePath><ExecutableName>unresolved.exe</ExecutableName></GameProfile>'
+        [System.IO.File]::WriteAllText($profilePath, $original)
+        $profileIndex = @{ 'unresolved.exe' = @('UNRESOLVED') }
+        $reports = @(Repair-GamePaths -userProfilesDir $profiles -installFolder $games -profileIndex $profileIndex -DryRun:$false)
+        $reports[0].Status | Should -Be 'not-found'
+        [System.IO.File]::ReadAllText($profilePath) | Should -Be $original
+    }
+}
+
+Describe "BepInEx runtime hold UX contracts" {
+    It "preserves rollback diagnostics and does not claim success" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'ROLLBACK FAILED'
+        $source | Should -Match 'evidence remains at'
+        $source | Should -Match 'PathReasonCounts'
+        $source | Should -Match 'Succeeded ='
+    }
+    It "keeps BepInEx acknowledgement and recovery guidance explicit" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'Choose R, D, O, or B'
+        $source | Should -Match 'repair-reset'
+        $source | Should -Match 'PROTECTED_OR_REPARSE_ROOT'
+        $source | Should -Match 'GAME_PATH_MISSING'
+    }
+    It "dispatches BepInEx result choices instead of only displaying them" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$bepChoice = \(Read-HostSafe'
+        $source | Should -Match "Invoke-BepInExUpdateCheck -UserProfilesDir"
+        $source | Should -Match "Technical log:"
+        $source | Should -Match "Support package folder:"
+    }
+    It "normalizes a null BepInEx rerun before rendering results" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'if \(-not \$bepResult\)'
+        $source | Should -Match 'RERUN_NO_RESULT'
+        $source | Should -Match 'repair-reset could not complete\. No success was claimed'
+        $source | Should -Match '\$bepResult\.Updated'
+    }
+    It "renders structured BepInEx failure evidence and batch-stop state" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$failureRecords = New-Object'
+        $source | Should -Match 'GameRoot = \$o\.ExeDir'
+        $source | Should -Match 'StagingPath = \$stagingDir'
+        $source | Should -Match 'BackupPath = \$backupPath'
+        $source | Should -Match '\$batchStopped = \$true'
+        $source | Should -Match '\$bepResult\.FailureRecords'
+        $source | Should -Match 'ReasonKey = \$rollbackReasonKey'
+    }
+    It "uses stable rollback categories instead of path-bearing messages" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'ROLLBACK_FAILED\|\{0\}\|\{1\}'
+        $source | Should -Not -Match "\$rollbackReasonKey = .*failureMessage -replace"
+    }
+    It "stops on repeated rollback causes while preserving per-game evidence" {
+        $exceptionType = 'System.IO.IOException'
+        $reasonKey = Get-BepInExRollbackReasonKey -Operation 'transaction rollback' -ExceptionType $exceptionType
+        $records = @(
+            [pscustomobject]@{ Game = 'GameOne'; GameRoot = 'D:\Games\One'; StagingPath = 'C:\Temp\stage-one'; BackupPath = 'C:\Backup\one'; Operation = 'transaction rollback'; ReasonKey = $reasonKey; Exception = 'first exact failure'; EvidencePreserved = $true; NextAction = 'repair-reset' }
+            [pscustomobject]@{ Game = 'GameTwo'; GameRoot = 'E:\Games\Two'; StagingPath = 'C:\Temp\stage-two'; BackupPath = 'C:\Backup\two'; Operation = 'transaction rollback'; ReasonKey = $reasonKey; Exception = 'second exact failure'; EvidencePreserved = $true; NextAction = 'repair-reset' }
+        )
+        (Test-BepInExRollbackBatchStop -FailureRecords $records) | Should -BeTrue
+        $records[0].GameRoot | Should -Not -Be $records[1].GameRoot
+        $records[0].StagingPath | Should -Not -Be $records[1].StagingPath
+        $records[0].BackupPath | Should -Not -Be $records[1].BackupPath
+        $records[0].Exception | Should -Be 'first exact failure'
+        $records[1].Exception | Should -Be 'second exact failure'
+    }
+    It "logs resolved BepInEx destination roots and classifies parent resolution failures" {
+        $source = $script:ProductionSource
+        $source | Should -Match "destination resolution: game root"
+        $source | Should -Match "destination verification:.*resolved to"
+        $source | Should -Match "destination resolution/verification failed"
+        $source | Should -Not -Match 'destination parent is outside the game root'
+    }
+
+    It "renders every structured BepInEx failure detail field" {
+        $source = $script:ProductionSource
+        foreach ($field in @('Game', 'GameRoot', 'StagingPath', 'BackupPath', 'Operation', 'Exception', 'EvidencePreserved', 'NextAction')) {
+            $source | Should -Match ("failure\.$field")
+        }
+    }
+}
+Describe "BepInEx recovery success transition contracts" {
+    It "completes the workflow after a successful repair-reset rerun" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$bepRecovered = \$false'
+        $source | Should -Match '\$bepRecovered = \$true'
+        $source | Should -Match 'BepInEx repair-reset completed and was verified'
+        $source | Should -Match 'if \(\$bepRecovered\)'
+        $source | Should -Match 'Complete-TpmWorkflowStatus -Context \$bepStatus -Summary .BepInEx repair-reset finished.'
+    }
+}
+
+Describe "PostgreSQL recovery runtime hold contracts" {
+    It "keeps password mismatch inside the reset flow" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'PASSWORD_MISMATCH'
+        $source | Should -Match 'Try typing the new password again'
+        $source | Should -Match 'Back to PostgreSQL recovery options'
+        $source | Should -Match 'if \(-not \$resetAttempt\.Succeeded\)'
+    }
+    It "retries protected backup after validated password" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'password changed successfully'
+        $source | Should -Match 'retry the protected backup automatically'
+        $source | Should -Match 'Backup-PostgresDatabases -UserProfilesDir'
+    }
+    It "preserves readable game and database pairs in Details and support guidance" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$game = \[string\]\$_\.GameLabel'
+        $source | Should -Match '\$database = \[string\]\$_\.Database'
+        $source | Should -Match '\{0\} / \{1\}'
+        $source | Should -Match 'Affected databases:'
+        $source | Should -Not -Match 'affected: \{0\}.*\$group\.Name, \(\$affected -join'
+        $source | Should -Not -Match 'ForEach-Object \{ \$_.GameLabel \} \| Sort-Object -Unique'
+    }
+}
+Describe "PostgreSQL grouped diagnosis behavior" {
+    It "returns each game/database pair once" {
+        $diagnoses = @(
+            [pscustomobject]@{ GameLabel = 'GoldenTeeLive2019'; Database = 'GameDB19'; Category = 'PasswordAuthenticationFailed' }
+            [pscustomobject]@{ GameLabel = 'PowerPuttLive2012'; Database = 'GameDBPPL12'; Category = 'PasswordAuthenticationFailed' }
+            [pscustomobject]@{ GameLabel = 'PowerPuttLive2013'; Database = 'GameDBPPL13'; Category = 'PasswordAuthenticationFailed' }
+            [pscustomobject]@{ GameLabel = 'SilverStrikeBowlingLive'; Database = 'GameDBSSBL'; Category = 'PasswordAuthenticationFailed' }
+            [pscustomobject]@{ GameLabel = 'TargetTossProBags'; Database = 'GameDBBags'; Category = 'PasswordAuthenticationFailed' }
+            [pscustomobject]@{ GameLabel = 'TargetTossProLawndarts'; Database = 'GameDBLawndarts'; Category = 'PasswordAuthenticationFailed' }
+        )
+        $pairs = @(Get-PostgresDiagnosisAffectedPairs -Diagnoses $diagnoses)
+        $pairs.Count | Should -Be 6
+        foreach ($diagnosis in $diagnoses) {
+            $pair = '{0} / {1}' -f $diagnosis.GameLabel, $diagnosis.Database
+            @($pairs | Where-Object { $_ -eq $pair }).Count | Should -Be 1
+        }
     }
 }

@@ -17,6 +17,17 @@ published release (historical); final Version 1.0 remains unpublished.
 
 ---
 ## RC8 runtime recovery and visual selection
+## Beginner-friendly default UX (RC8 release gate)
+
+TPM is written for a user who wants to play games, not administer Windows.
+Normal screens use plain English first, remain visible until acknowledgement,
+and explain what happened, why an item was skipped or blocked, what TPM did or
+did not change, and the next safe action. Technical paths and exceptions stay
+in Details, logs, or support packages. No workflow may require knowledge of
+PowerShell, PostgreSQL, XML, ACLs, reparse points, BepInEx internals,
+permissions, or elevation. The release acceptance question is whether a
+14-year-old can complete the workflow without that specialist knowledge.
+
 
 The PostgreSQL setup path classifies client diagnostics before presenting
 recovery. Password authentication failures receive a distinct masked-password
@@ -374,6 +385,15 @@ independently of what is bundled.
 overwrites the destination (unlike the global conf, which never overwrites). Same WRONG
 NAME validation convention as ReShadePresets.
 
+**Beginner result screen.** A successful top-level dgVoodoo2 run renders a
+plain-language summary, not just `Done.`. It identifies each deployed game's
+detected legacy API, explains why older DirectX/Glide calls need translation on
+modern Windows, states that existing dgVoodoo2 DLLs (including unowned or
+changed DLLs) and skipped missing-path games were not changed, and gives launch,
+support-package, and skipped-path recovery guidance. `DeploymentDetails` and
+`SkipDetails` remain available behind `D` Details; `O` exposes the support/log
+locations without creating a package.
+
 ---
 
 ## Force feedback (FFB) setup (Mode 8)
@@ -704,12 +724,21 @@ value-resolution branching a second time after calling the "pure" check.
 code, byte-identical XML output and identical counts for every GPU vendor. Repeat that
 approach if either function is touched again.
 
-**Health check scope.** The Library health check's GPU/FFB coverage report is read-only.
-It never calls `Invoke-GpuFixSetup`/`Invoke-FFBBlasterSetup` (which prompt, back up, and
-write), only the shared detection helpers. Third-party FFB plugin coverage is NOT included
--- checking it needs a live fetch of `AutoSetup.cmd` (`Get-FFBPluginGameMap`), which
-would break the health check's documented "no network access" contract. The check prints a
-one-line note pointing at mode 8 instead.
+**Health check scope and guided actions.** The Library health check is strictly
+read-only during inspection: it checks profile paths and shared optional-coverage
+helpers, but never calls setup/install/deploy functions or writes game paths,
+profiles, LaunchBox, PostgreSQL, ReShade, dgVoodoo2, GPU-fix, FFB, BepInEx, or
+control state. Third-party FFB plugin coverage is NOT included -- checking it needs
+a live fetch of `AutoSetup.cmd`, which would break the no-live-fetch inspection
+contract. The result object carries the named broken/empty profiles and coverage
+lists to the guided action screen. Automatic repair searches known game folders,
+asks before saving, creates a complete `UserProfiles\FullBackup\HealthCheck_*`
+backup first, and reports fixed, unchanged/unresolved, and save-failed outcomes.
+Manual repair requires an explicit executable selection, validates the configured
+games-root and reparse boundaries, and follows the same backup gate. PostgreSQL
+and optional setup entries are direct next actions, but no mutating workflow
+starts until the user selects one.
+
 **Crosshair gallery selection.** The HTML gallery contains all discovered valid
 crosshairs. A short-lived localhost bridge bound only to `127.0.0.1` accepts a
 per-session token and an integer index from 0 through 320; incidental or invalid
@@ -1954,6 +1983,10 @@ Checkpoint B1 entry). Key structural decisions:
   are ScriptProperties bound to the producing runspace, not intrinsic .NET
   properties, and cross-runspace access to them was unreliable. This gives
   every per-file scan a real wall-clock timeout.
+The default bound is 180 seconds per file for PSScriptAnalyzer because analysis
+of a real inventory file can exceed one minute on a slow Windows PowerShell 5.1
+engine. The bound remains finite; a timeout still fails the fact closed as not
+executed.
 
 ### Scratch-directory ownership invariant (New-/Remove-TPMOwnedScratchDirectoryV1)
 

@@ -205,8 +205,9 @@ On later runs it offers to reuse your saved settings — press **Y** to continue
 During multi-step work TPM shows a beginner-readable `TPM STATUS` area with
 the current action, recent completed work, the next step, and whether it needs
 anything from you. Failures stay visible until you acknowledge them. The
-status uses real workflow steps, not invented percentages, and keeps the
-technical detail in the normal output and log.
+status uses real workflow steps, not invented percentages. Normal output stays
+plain-English first; technical paths and exception details are kept in the
+separate Details view, log, or support package.
 When a failure has recovery metadata, the status action line names the concrete
 Retry and Stop choices and their remediation, rather than showing acknowledgement
 alone.
@@ -262,6 +263,26 @@ maximized automatically on startup where the terminal supports it. Within
 each release, menu numbers, what each option does, and how to choose one stay
 consistent across the responsive layouts -- only how much description text is
 shown adapts to your window size.
+
+---
+
+## Library Health Check
+
+Library Health Check is read-only. TPM checks registered profile paths and
+optional coverage, then explicitly says that it did not change anything.
+Broken saved paths are listed by game name and count. The result screen offers
+`[R] Try automatic path repair` and `[M] Let me pick the correct folders
+manually`; automatic repair searches known game folders and asks before saving,
+while manual repair requires you to select the exact executable and never
+guesses. A complete `UserProfiles\FullBackup\HealthCheck_*` backup is made
+before any confirmed path repair.
+
+The same result screen offers `[P] Set up PostgreSQL for these games` when
+database-backed games need setup, plus direct actions for `[5] ReShade`,
+`[6] dgVoodoo2`, `[7] GPU Fix`, `[8] Force Feedback`, and `[9] BepInEx`.
+`[D] Details` shows technical counts and the log path; `[B] Back to main menu`
+leaves the library unchanged. Health Check never installs, deploys, or
+rewrites anything until a subsequent action is selected.
 
 ---
 
@@ -562,7 +583,7 @@ DLLs are never bundled in the release ZIP (ReShade's own policy prohibits redist
 
 **Removing:** TPM does not automatically remove unowned or changed ReShade hooks. Review those files through the advanced troubleshooting path.
 
-Mode 10 (Library health check) reports, purely informationally, how many registered games have ReShade installed -- not flagged as something to fix, since it's a per-game cosmetic choice rather than a clear right answer.
+Library Health Check reports, purely informationally, how many registered games have ReShade installed -- not flagged as something to fix, since it's a per-game cosmetic choice rather than a clear right answer. Its result screen also offers direct optional setup actions.
 
 ---
 
@@ -596,9 +617,17 @@ DLLs are never bundled in the release ZIP; TPM always fetches fresh from the off
 
 The wizard scans every registered game exe for legacy API imports and shows auto-detected games first. You can install to all at once or pick individually.
 
+After a successful run the beginner result screen says `dgVoodoo2 setup
+finished`, names each installed game and detected API (for example `Glide2x`),
+explains that older DirectX/Glide calls may not display correctly on modern
+Windows, and says what to try next. It also states that existing dgVoodoo2
+DLLs, including unowned or changed files, were not removed or replaced and
+that skipped missing-path games were unchanged. Press `D` for technical
+deployment/skip details or `O` for support-package and log guidance.
+
 **Removing:** TPM does not automatically remove unowned or changed dgVoodoo2 hooks. Review those files through the advanced troubleshooting path.
 
-Mode 10 (Library health check) reports which registered games import a legacy API but don't have the matching DLL deployed yet, read-only and without changing anything.
+Library Health Check reports which registered games import a legacy API but don't have the matching DLL deployed yet, read-only and without changing anything. Its result screen offers direct `[6] dgVoodoo2` setup after the report.
 
 ---
 
@@ -606,7 +635,7 @@ Mode 10 (Library health check) reports which registered games import a legacy AP
 
 Many TeknoParrot games include optional per-vendor fix settings (AMD, NVIDIA, Intel). Mode 7 auto-detects your GPU via WMI and applies the correct fix to every registered game that has one. Scans `GameProfiles` at runtime — no update needed when new games are added. Safe to re-run any time you change your GPU.
 
-Not sure if you're missing any? Mode 10 (Library health check) reports which registered games are eligible for a GPU fix but don't have it applied yet, without changing anything.
+Not sure if you're missing any? Library Health Check reports which registered games are eligible for a GPU fix but don't have it applied yet, without changing anything. Its result screen offers direct `[7] GPU Fix` setup after the report.
 
 ---
 
@@ -620,7 +649,7 @@ TeknoParrot's own built-in force feedback feature. Well-integrated, but it **onl
 
 If you answer Y, the script scans your TeknoParrot install's `GameProfiles` for the FFB Blaster field (detected at runtime, never hardcoded) and enables it on every registered profile that has it. `UserProfiles` are backed up first.
 
-Mode 10 (Library health check) also reports which registered games are eligible for FFB Blaster but don't have it enabled yet (read-only, no network access). Third-party plugin coverage isn't included there since checking it needs a live lookup -- use mode 8 for that.
+Library Health Check also reports which registered games are eligible for FFB Blaster but don't have it enabled yet. This coverage is read-only; it does not fetch the third-party plugin. Its result screen offers direct `[8] Force Feedback` setup; third-party plugin coverage isn't included there since checking it needs a live lookup.
 
 **Mechanism 2 — Third-party FFB plugin (free, no subscription needed)**
 
