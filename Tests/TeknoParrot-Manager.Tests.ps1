@@ -10147,6 +10147,11 @@ Describe "Issue #300 shared workflow status state machine" {
         $result.Succeeded | Should -BeTrue
         $field = (Read-Xml (Join-Path $userProfiles 'Overlap.xml')).SelectSingleNode('/GameProfile/ConfigValues/FieldInformation/FieldValue')
         $field.InnerText | Should -Be '0'
+        $backupDirs = @(Get-ChildItem -LiteralPath (Join-Path $userProfiles 'FullBackup') -Directory -Filter 'FFBOverlapSwitch_*')
+        $backupDirs.Count | Should -Be 1
+        $backupField = (Read-Xml (Join-Path $backupDirs[0].FullName 'Overlap.xml')).SelectSingleNode('/GameProfile/ConfigValues/FieldInformation/FieldValue')
+        $backupField.InnerText | Should -Be '1'
+        (Get-FileHash -LiteralPath (Join-Path $userProfiles 'Overlap.xml') -Algorithm SHA256).Hash | Should -Not -Be (Get-FileHash -LiteralPath (Join-Path $backupDirs[0].FullName 'Overlap.xml') -Algorithm SHA256).Hash
         (Test-Path -LiteralPath (Join-Path $gameDir 'd3d9.dll') -PathType Leaf) | Should -BeTrue
         Should -Invoke Read-HostSafe -Times 1 -Exactly
     }

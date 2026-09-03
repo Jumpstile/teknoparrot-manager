@@ -12412,6 +12412,17 @@ function Disable-FFBBlasterForOverlap {
         Get-ChildItem -LiteralPath $UserProfilesDir -Force -ErrorAction Stop |
             Where-Object { $_.Name -ne 'FullBackup' } |
             Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction Stop
+        foreach ($plan in $plans) {
+            $backupFile = Join-Path $backupPath $plan.ProfileFile.Name
+            if (-not (Test-Path -LiteralPath $backupFile -PathType Leaf -ErrorAction Stop)) {
+                throw ("FFB overlap backup is missing profile '{0}'." -f $plan.ProfileFile.Name)
+            }
+            $sourceHash = (Get-FileHash -LiteralPath $plan.ProfileFile.FullName -Algorithm SHA256 -ErrorAction Stop).Hash
+            $backupHash = (Get-FileHash -LiteralPath $backupFile -Algorithm SHA256 -ErrorAction Stop).Hash
+            if ($sourceHash -ne $backupHash) {
+                throw ("FFB overlap backup hash verification failed for profile '{0}'." -f $plan.ProfileFile.Name)
+            }
+        }
 
         foreach ($plan in $plans) {
             foreach ($node in $plan.Nodes) { $node.InnerText = '0' }
