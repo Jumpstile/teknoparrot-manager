@@ -273,6 +273,22 @@ registered profiles (WRONG NAME warning for typos), never required. Same
 The result is advisory input to ReShade eligibility only. It may add `DISPLAY_TARGET_AMBIGUOUS` and downgrade suitability to `UNKNOWN`; it never changes the primary monitor, enables or disables displays, changes resolution/refresh/orientation, moves windows, or writes game display settings. Target resolution reuses `Get-TpmResolutionClassification`, so bounded low/normal/high/wide evidence and ReShade effect-sensitivity metadata remain advisory rather than becoming monitor configuration policy. A changed or stale topology invalidates prior target confidence and requires fresh evidence.
 **Canonical visual profiles and generated presets (RC8).** TPM exposes exactly five bounded profiles: Original (empty stack), Clean & Sharp (`SweetFX.LumaSharpen`), Vivid Arcade (`SweetFX.Vibrance`), Classic Arcade CRT (`FXShaders.CRT_Lottes`), and Enhanced Arcade (`SweetFX.LumaSharpen` followed by `SweetFX.Vibrance`). Profile IDs select definitions, but trust remains in the approved effect catalog, pinned revisions, required files, and SHA-256 values. Curated profile and effect metadata is `ADVISORY_UNMEASURED` with `MeasuredEvidence = $false`; no profile is marked `Recommended` or `VALIDATED_SINGLE` without measured evidence. CRT is isolated from sharpening and vibrance in normal profile mode; the enhanced two-effect order is explicit.
 
+The terminal chooser and preview gallery derive their visible `Techniques:`
+line from each profile's canonical `TechniqueOrder` and the approved effect
+catalog's `RelativeFiles` and `TechniqueName` fields. The display keeps
+beginner-friendly names and descriptions first, then shows shader filenames
+and techniques without exposing internal paths:
+
+- Original -- `(none; no ReShade techniques)`
+- Clean & Sharp -- `LumaSharpen.fx / LumaSharpen`
+- Classic Arcade CRT -- `CRT_Lottes.fx / CRT_Lottes`
+- Vivid Arcade -- `Vibrance.fx / Vibrance`
+- Enhanced Arcade -- `LumaSharpen.fx / LumaSharpen; Vibrance.fx / Vibrance`
+
+These are approved TPM bundled/generated definitions, not claims about
+live-fetched runtime files. Display order follows the canonical profile order
+and `TechniqueOrder`; visible text is never a second hardcoded effect list.
+
 `New-TpmReShadePresetContent` generates stable TPM-owned preset text from the selected definition, with normalized technique order and no timestamps, randomness, paths, or user code. `Test-TpmReShadePresetContent` validates the generated structure and rejects techniques outside the approved bounded set. Original intentionally generates no effect techniques. Advanced custom `.ini` input remains opt-in and is path/extension/existence validated; its contents do not become approved effect evidence.
 **Preview renderer and cache (RC8 freeze exception).** `New-TpmReShadePreviewBitmap` decodes the bundled `TPM-preview-landscape.png` reference and renders deterministic `Before`, `After`, `Split`, and percentage-driven `Slider` output. The processed bitmap is derived from the same decoded reference and cached per profile; comparison composition copies bounded pixel regions so the untouched side remains byte-stable. `New-TpmReShadePreviewArtifact` materializes results under `ReShadePreviewCache\`; rendering does not depend on live-fetched ReShade runtime files.
 

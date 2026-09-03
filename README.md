@@ -490,6 +490,31 @@ Current selection: none -- choose 1-5 first
 Choose: [1-5] Preview profile  [U] Use selected profile  [R] Reopen preview  [B] Back  [D] Details
 ```
 
+The chooser and the gallery show the friendly description first, followed by
+the approved shader filename and technique name:
+
+```text
+[1] Original
+    No visual processing.
+    Techniques: (none; no ReShade techniques)
+[2] Clean & Sharp
+    Clearer edges and text with very little change to the original image.
+    Techniques: LumaSharpen.fx / LumaSharpen
+[3] Classic Arcade CRT
+    Traditional scanlines and restrained arcade-monitor character.
+    Techniques: CRT_Lottes.fx / CRT_Lottes
+[4] Vivid Arcade
+    Richer color for modern displays.
+    Techniques: Vibrance.fx / Vibrance
+[5] Enhanced Arcade
+    Sharper edges and richer color while preserving the approved effect order.
+    Techniques: LumaSharpen.fx / LumaSharpen; Vibrance.fx / Vibrance
+```
+
+The technique labels come from TPM's approved bundled/generated profile
+definitions. They identify the intended shader and technique without exposing
+internal cache paths or implying that live-fetched runtime files are bundled.
+
 `U` is the only path toward deployment. `B` cancels without changes, `D`
 shows descriptions, and `R` reopens the optional gallery without taking
 terminal input away from the user.

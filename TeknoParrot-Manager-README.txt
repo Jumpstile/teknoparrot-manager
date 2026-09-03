@@ -1256,13 +1256,27 @@
       Use the preview window to compare the options.
       Nothing will be changed until you confirm.
 
-    It then lists five bounded visual profiles:
+    It then lists five bounded visual profiles in this order. The friendly
+    description is followed by the approved shader filename and technique:
 
-      Original           No TPM visual enhancement.
-      Clean & Sharp      Clearer edges with LumaSharpen.
-      Vivid Arcade       Stronger color with Vibrance.
-      Enhanced Arcade    Clearer edges followed by stronger color.
-      Classic Arcade CRT CRT-style scanlines and arcade-display character.
+      Original            No visual processing.
+                          Techniques: (none; no ReShade techniques)
+      Clean & Sharp       Clearer edges and text with very little change to
+                          the original image.
+                          Techniques: LumaSharpen.fx / LumaSharpen
+      Classic Arcade CRT  Traditional scanlines and restrained arcade-monitor
+                          character.
+                          Techniques: CRT_Lottes.fx / CRT_Lottes
+      Vivid Arcade         Richer color for modern displays.
+                          Techniques: Vibrance.fx / Vibrance
+      Enhanced Arcade      Sharper edges and richer color while preserving
+                          the approved effect order.
+                          Techniques: LumaSharpen.fx / LumaSharpen; Vibrance.fx
+                                      / Vibrance
+
+    These are approved TPM bundled/generated definitions. The labels do not
+    expose internal cache paths or imply that live-fetched runtime files are
+    included in the release.
 
     One visual gallery opens before the final confirmation. It uses the
     bundled and hash-validated TPM landscape reference at

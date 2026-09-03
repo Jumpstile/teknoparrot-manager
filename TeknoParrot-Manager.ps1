@@ -4431,6 +4431,21 @@ function Get-TpmReShadeEffectCatalog {
     }
     return $effects
 }
+function Get-TpmReShadeProfileTechniqueDisplay {
+    param([Parameter(Mandatory)]$ProfileDefinition)
+    $catalog = @(Get-TpmReShadeEffectCatalog)
+    $rows = @()
+    foreach ($techniqueName in @($ProfileDefinition.TechniqueOrder)) {
+        $effectEntry = @($catalog | Where-Object { $_.TechniqueName -eq $techniqueName })[0]
+        if (-not $effectEntry) { throw ("No approved ReShade effect catalog entry exists for technique '{0}'." -f $techniqueName) }
+        $shaderFiles = @($effectEntry.RelativeFiles | Where-Object { [IO.Path]::GetExtension($_) -ieq '.fx' } | ForEach-Object { [IO.Path]::GetFileName($_) })
+        if ($shaderFiles.Count -eq 0) { throw ("No approved shader file exists for technique '{0}'." -f $techniqueName) }
+        $rows += ('{0} / {1}' -f ($shaderFiles -join ', '), $effectEntry.TechniqueName)
+    }
+    if ($rows.Count -eq 0) { return '(none; no ReShade techniques)' }
+    return ($rows -join '; ')
+}
+
 
 function Get-TpmReShadeProfile {
     param([string]$ProfileId)
@@ -5402,6 +5417,14 @@ function Show-TpmReShadeProfileGalleryWindow {
         $picture = New-Object Windows.Forms.PictureBox
         $picture.Dock = 'Fill'
         $picture.SizeMode = 'Zoom'
+        $descriptionLabel = New-Object Windows.Forms.Label
+        $descriptionLabel.Dock = 'Top'
+        $descriptionLabel.AutoSize = $false
+        $descriptionLabel.Height = 56
+        $descriptionLabel.Padding = New-Object Windows.Forms.Padding(6, 4, 6, 4)
+        $descriptionLabel.TextAlign = 'TopLeft'
+        $descriptionLabel.AutoEllipsis = $true
+        $descriptionLabel.Text = ''
         $choose = New-Object Windows.Forms.Button
         $choose.Text = 'Use selected profile'
         $choose.Dock = 'Bottom'
@@ -5430,6 +5453,7 @@ function Show-TpmReShadeProfileGalleryWindow {
             Form = $form
             Combo = $combo
             Picture = $picture
+            DescriptionLabel = $descriptionLabel
             Slider = $null
             ViewButtons = @()
         })
@@ -5460,6 +5484,7 @@ function Show-TpmReShadeProfileGalleryWindow {
                 if ([string]::IsNullOrWhiteSpace($profileId)) { throw 'Selected gallery item has no stable ProfileId.' }
                 $canonicalProfile = @($state['Profiles'] | Where-Object { $_.ProfileId -eq $profileId })[0]
                 if (-not $canonicalProfile) { throw ("Selected gallery ProfileId '{0}' is not available." -f $profileId) }
+                $descriptionLabel.Text = "{0}`r`nTechniques: {1}" -f $canonicalProfile.Description, (Get-TpmReShadeProfileTechniqueDisplay -ProfileDefinition $canonicalProfile)
                 $viewMode = [string]$state['ViewMode']
                 if ($viewMode -notin @('Before', 'After', 'Split', 'Slider')) { throw ("Unsupported gallery view mode '{0}'." -f $viewMode) }
                 [void](Get-TpmReShadePreviewProcessedBitmap -Cache $state['PreviewCache'] -ProfileDefinition $canonicalProfile)
@@ -5533,6 +5558,7 @@ function Show-TpmReShadeProfileGalleryWindow {
         $form.Controls.Add($choose)
         $form.Controls.Add($toolbar)
         $form.Controls.Add($combo)
+        $form.Controls.Add($descriptionLabel)
         $defaultIndex = 0
         for ($i = 0; $i -lt $combo.Items.Count; $i++) {
             if ([string]$combo.Items[$i].ProfileId -eq $DefaultProfileId) { $defaultIndex = $i; break }
@@ -6804,6 +6830,8 @@ function Read-TpmReShadeTerminalProfile {
             if (-not $profileEntry) { continue }
             $marker = if ($selected -and $selected.ProfileId -eq $id) { '*' } else { ' ' }
             Write-Host ('  [{0}] {1} {2}' -f ($profileIndex + 1), $marker, $profileEntry.FriendlyName) -ForegroundColor $(if ($marker -eq '*') { 'Yellow' } else { 'White' })
+            Write-Host ('      {0}' -f $profileEntry.Description) -ForegroundColor DarkGray
+            Write-Host ('      Techniques: {0}' -f (Get-TpmReShadeProfileTechniqueDisplay -ProfileDefinition $profileEntry)) -ForegroundColor DarkCyan
         }
         Write-Host ''
         Write-Host ('  Current selection: {0}' -f $(if ($selected) { $selected.FriendlyName } else { 'none -- choose 1-5 first' })) -ForegroundColor Yellow
@@ -6823,7 +6851,10 @@ function Read-TpmReShadeTerminalProfile {
         if ($choice -eq 'D') {
             foreach ($id in $orderedIds) {
                 $profileEntry = @($Profiles | Where-Object { $_.ProfileId -eq $id })[0]
-                if ($profileEntry) { Write-Host ('    {0}: {1}' -f $profileEntry.FriendlyName, $profileEntry.Description) -ForegroundColor DarkGray }
+                if ($profileEntry) {
+                    Write-Host ('    {0}: {1}' -f $profileEntry.FriendlyName, $profileEntry.Description) -ForegroundColor DarkGray
+                    Write-Host ('      Techniques: {0}' -f (Get-TpmReShadeProfileTechniqueDisplay -ProfileDefinition $profileEntry)) -ForegroundColor DarkCyan
+                }
             }
             continue
         }
@@ -6952,7 +6983,9 @@ function Invoke-ReShadeSetup {
     Write-Host "  Preview gallery (bundled landscape; compare Original/After or Split; choose profiles in the terminal)" -ForegroundColor DarkCyan
     foreach ($item in $gallery) {
         $previewText = if ($item.PreviewAvailable) { 'preview available' } else { 'preview unavailable; selection still works' }
+        $profileDefinition = Get-TpmReShadeProfile -ProfileId ([string]$item.ProfileId)
         Write-Host ("    {0}: {1} [{2}]" -f $item.FriendlyName, $item.Description, $previewText) -ForegroundColor DarkGray
+        if ($profileDefinition) { Write-Host ("      Techniques: {0}" -f (Get-TpmReShadeProfileTechniqueDisplay -ProfileDefinition $profileDefinition)) -ForegroundColor DarkCyan }
     }
     $favoriteState = Read-TpmReShadeState
     $favoriteProfiles = @()

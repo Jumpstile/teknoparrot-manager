@@ -35,6 +35,11 @@
   reflog identity through publication/finalization.
 - Release packaging requires exact source/package identity and a completed #290
   repository and live-wiki freshness audit.
+- ReShade profile choices now show friendly descriptions followed by the
+  approved shader filename and technique, including the exact
+  `LumaSharpen.fx / LumaSharpen`, `CRT_Lottes.fx / CRT_Lottes`, and
+  `Vibrance.fx / Vibrance` labels. The visible text is generated from the
+  canonical TPM definitions and hides internal paths and live runtime files.
 
 ## v1.0 RC7 (2026-08-22) -- published release candidate
 

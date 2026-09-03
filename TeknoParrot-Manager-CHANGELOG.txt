@@ -175,6 +175,11 @@ remain structured safe skips.
   retained when profiles change. The chooser exposes explicit restore,
   remembered-selection, and favorite paths without changing trust or monitor
   state.
+  ReShade chooser refinement: terminal and gallery descriptions now include
+  the exact approved shader filename and technique for each non-empty profile,
+  in canonical order. The labels are generated from TPM's approved profile
+  definitions and effect catalog; internal paths and live-fetched runtime
+  files remain hidden.
 
 
 

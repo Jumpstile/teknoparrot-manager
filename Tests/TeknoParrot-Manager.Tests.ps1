@@ -10603,6 +10603,45 @@ Describe "Approved ReShade profile catalog" {
         (New-TpmReShadePresetContent -ProfileDefinition (Get-TpmReShadeProfile -ProfileId 'EnhancedArcade'))|Should -Match 'Techniques=LumaSharpen,Vibrance'
         (Get-TpmReShadeProfile -ProfileId 'Original').Effects.Count|Should -Be 0
     }
+    It "derives visible technique labels from canonical profile and effect definitions" {
+        $catalog = @(Get-TpmReShadeEffectCatalog)
+        $displaySource = $script:ProductionSource
+        $displayStart = $displaySource.IndexOf('function Get-TpmReShadeProfileTechniqueDisplay')
+        $displayEnd = $displaySource.IndexOf('function Get-TpmReShadeProfile {', $displayStart)
+        $displayFunction = $displaySource.Substring($displayStart, $displayEnd - $displayStart)
+        $displayFunction | Should -Match 'Get-TpmReShadeEffectCatalog'
+        $displayFunction | Should -Match 'TechniqueOrder'
+        $displayFunction | Should -Match 'RelativeFiles'
+        $displayFunction | Should -Match 'TechniqueName'
+        $displayFunction | Should -Not -Match 'LumaSharpen\.fx|Vibrance\.fx|CRT_Lottes\.fx'
+        foreach ($profile in @(Get-TpmReShadeProfiles)) {
+            $expectedRows = @(
+                foreach ($techniqueName in @($profile.TechniqueOrder)) {
+                    $effectEntry = @($catalog | Where-Object { $_.TechniqueName -eq $techniqueName })[0]
+                    $shaderFiles = @($effectEntry.RelativeFiles | Where-Object { [IO.Path]::GetExtension($_) -ieq '.fx' } | ForEach-Object { [IO.Path]::GetFileName($_) })
+                    '{0} / {1}' -f ($shaderFiles -join ', '), $effectEntry.TechniqueName
+                }
+            )
+            $expectedText = if ($expectedRows.Count -eq 0) { '(none; no ReShade techniques)' } else { $expectedRows -join '; ' }
+            (Get-TpmReShadeProfileTechniqueDisplay -ProfileDefinition $profile) | Should -Be $expectedText
+        }
+    }
+    It "fails closed when a profile technique is absent from the approved catalog" {
+        $invalidProfile = [pscustomobject]@{ TechniqueOrder = @('UnapprovedTechnique') }
+        { Get-TpmReShadeProfileTechniqueDisplay -ProfileDefinition $invalidProfile } | Should -Throw "*No approved ReShade effect catalog entry*"
+    }
+    It "uses canonical technique display metadata in terminal and gallery surfaces" {
+        $source = $script:ProductionSource
+        foreach ($functionName in @('Read-TpmReShadeTerminalProfile', 'Show-TpmReShadeProfileGalleryWindow', 'Invoke-ReShadeSetup')) {
+            $functionStart = $source.IndexOf("function $functionName")
+            $functionEnd = $source.IndexOf("`nfunction ", $functionStart + $functionName.Length + 10)
+            if ($functionEnd -lt 0) { $functionEnd = $source.Length }
+            $functionSource = $source.Substring($functionStart, $functionEnd - $functionStart)
+            $functionSource | Should -Match 'Get-TpmReShadeProfileTechniqueDisplay'
+        }
+        $source | Should -Match 'Techniques:'
+        $source | Should -Match 'DescriptionLabel'
+    }
     It "requires measured evidence before compatibility status or recommendation is asserted" {
         $profiles = @(Get-TpmReShadeProfiles)
         $effects = @(Get-TpmReShadeEffectCatalog)

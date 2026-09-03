@@ -143,6 +143,7 @@ until its registered path is revalidated at the mutation boundary.
 | UX-S06  | Registration ambiguity  | Present validated candidate profiles for an explicit choice; blank/invalid input leaves the case unresolved instead of guessing. | Invoke-ManualRegistrationChoices; registration tests |
 | UX-S07  | Health boundaries       | Missing firmware/components remain contract-backed, read-only warnings with a legitimate-source/TPUI repair handoff; TPM does not fabricate or replace vendor files. | Get-CompatibilityWarnings; health tests |
 | UX-S08  | Health Check guided repair | Health Check reports `read-only` and `did not change anything` before offering direct, plain-language broken-path, PostgreSQL, and optional-component actions. Automatic path repair asks before saving; manual repair requires explicit folder/file selection and never guesses; Details remains separate. | Invoke-LibraryHealthCheck; Show-LibraryHealthNextActions; Health Check UX and boundary tests |
+| RS-S01  | ReShade profile display | The five bounded profile choices show beginner-friendly names and descriptions first, followed by a `Techniques:` line derived from canonical `TechniqueOrder` and approved effect-catalog shader filenames/technique names. The terminal chooser remains ordered 1-5; internal paths and live runtime files are never displayed. | Get-TpmReShadeProfileTechniqueDisplay; ReShade chooser/gallery tests |
 | SUP-S01 | Support package collection | Option 14 gathers only allowlisted TPM/TeknoParrot/game text diagnostics and metadata-only plugin inventories into a fixed support ZIP; it never archives arbitrary directories or game payloads. The manifest and completion output lead with `What failed` and `What TPM did not change`. | New-TpmSupportPackage; SupportPackage.Tests.ps1 |
 | SUP-S02 | Support package privacy | Common credentials and user-profile paths are redacted from included text and user-facing failure summaries; credentials, profiles, recovery state, executables, DLL payloads, archives, firmware, and unrelated files are excluded. The manifest records collected/absent/excluded/failed/unsafe-content-rejected sources. | Redact-TpmSupportText; manifest/privacy tests |
 | SUP-S03 | Support package object-bound safety | Source/profile/plugin reads consume identity-validated opened handles; unsafe path identity is rejected, destination promotion uses an identity-validated directory handle and CREATE_NEW, and staging cleanup deletes only through validated owned handles. | Open-TpmSupportSafeFileStream; Move-TpmSupportZipByIdentity; adversarial/workflow tests |
@@ -167,6 +168,7 @@ until its registered path is revalidated at the mutation boundary.
 | INV-BX-04 | Shared game mutation workflows never act on an unavailable, missing, reparse-backed, inaccessible, or changed registered executable path. | Must hold at every read and mutation boundary |
 | INV-HC-01 | Health Check inspection is read-only and does not mutate game paths, profiles, LaunchBox, PostgreSQL, ReShade, dgVoodoo2, GPU-fix, FFB, BepInEx, or controls. A selected repair/setup action is the only transition to a mutating workflow, and path repair saves only after explicit confirmation and verified backup. | Must hold before selected action |
 | INV-RS-01 | ReShade preview output is derived from the bundled hash-validated landscape reference; cache reuse never becomes deployment or trust evidence, and all in-memory bitmaps are disposed on gallery close. | Must hold for every preview mode |
+| INV-RS-02 | ReShade profile display text is generated from the selected canonical profile's ordered techniques and the approved effect catalog; it does not duplicate shader or technique names in a second stale list. | Must hold in terminal chooser, Details, setup listing, and gallery |
 | INV-PG-10 | PostgreSQL reset reports a committed-but-unverified state distinctly; it never claims the old password remains authoritative after ALTER succeeded, and it never saves an unverified replacement credential. | Must hold after every reset process outcome |
 
 ## Adversarial review cases required before handoff
@@ -186,3 +188,6 @@ cleanup-race, and workflow-cleanup cases.
   reparse component, and a reparse leaf.
 - Failed BepInEx backup, failed staged extraction, digest mismatch, promotion
   failure, rollback failure, and ordinary staging cleanup failure.
+- ReShade profile metadata with a missing catalog technique, missing approved
+  shader file, or changed technique order must fail closed rather than display
+  a guessed or stale effect label.
