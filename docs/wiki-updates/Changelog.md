@@ -40,6 +40,10 @@
   `LumaSharpen.fx / LumaSharpen`, `CRT_Lottes.fx / CRT_Lottes`, and
   `Vibrance.fx / Vibrance` labels. The visible text is generated from the
   canonical TPM definitions and hides internal paths and live runtime files.
+- FFB overlap ownership is now exclusive: choosing the third-party owner
+  creates a fresh verified profile backup, clears native FFB Blaster fields
+  for the overlap set, verifies the switch, and blocks plugin deployment if
+  the transition cannot be completed safely.
 
 ## v1.0 RC7 (2026-08-22) -- published release candidate
 

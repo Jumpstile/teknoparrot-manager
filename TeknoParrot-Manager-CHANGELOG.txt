@@ -1603,7 +1603,11 @@ remain structured safe skips.
       per-game prompt, so the script resolves matches first, then asks
       ONE question covering every overlapping game at once: keep native
       for all of them, or use the third-party plugin for all of them.
-      Never silently defaults to either side.
+      Native is the safe default; only an explicit N selects the plugin.
+      Blank or invalid input keeps native.
+    - Choosing the third-party owner creates a fresh verified profile backup,
+      clears native FFB Blaster fields for exactly the overlaps, verifies the
+      switch, and blocks plugin deployment if that ownership transition fails.
     - If the third-party plugin's destination DLL filename is already
       occupied (e.g. ReShade using d3d9.dll for the same game), that game
       is skipped with a warning -- never overwritten.

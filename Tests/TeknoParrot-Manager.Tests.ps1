@@ -10102,6 +10102,88 @@ Describe "Issue #300 shared workflow status state machine" {
         Should -Invoke Invoke-FFBPluginSetup -Times 0 -Exactly
     }
 
+    It "passes TeknoParrot root to the plugin overlap switch" {
+        $script:capturedFfbTpRoot = $null
+        Mock Invoke-FFBBlasterSetup { @('native-code') }
+        Mock Invoke-FFBPluginSetup {
+            param([string]$UserProfilesDir, [string]$CacheDir, [string[]]$NativeEnabledCodes, [string]$TpRoot)
+            $script:capturedFfbTpRoot = $TpRoot
+            [pscustomobject]@{ Succeeded = $true }
+        }
+        Mock Read-HostSafe { 'Y' }
+        $result = Invoke-TpmFfbSetupMode -UserProfilesDir $TestDrive -TpRoot $TestDrive -ScriptRoot $TestDrive
+        $result.Completed | Should -BeTrue
+        $script:capturedFfbTpRoot | Should -Be $TestDrive
+        Should -Invoke Invoke-FFBPluginSetup -Times 1 -Exactly
+    }
+
+    It "switches native FFB off before deploying a selected plugin for an overlap" {
+        $root = Join-Path $TestDrive 'ffb-overlap'
+        $userProfiles = Join-Path $root 'UserProfiles'
+        $tpRoot = Join-Path $root 'TeknoParrot'
+        $gameDir = Join-Path $root 'OverlapGame'
+        $cacheDir = Join-Path $root 'FFBPlugin'
+        New-Item -ItemType Directory -Path $userProfiles, (Join-Path $tpRoot 'GameProfiles'), $gameDir, $cacheDir -Force | Out-Null
+        $gamePath = Join-Path $gameDir 'overlap.exe'
+        [System.IO.File]::WriteAllBytes($gamePath, [System.Text.Encoding]::ASCII.GetBytes('MZ-overlap'))
+        $profileXml = @"
+<GameProfile>
+  <EmulationProfile>Daytona3</EmulationProfile>
+  <GamePath>$gamePath</GamePath>
+  <ConfigValues>
+    <FieldInformation><CategoryName>FFB Blaster</CategoryName><FieldName>Enable</FieldName><FieldType>Bool</FieldType><FieldValue>1</FieldValue></FieldInformation>
+  </ConfigValues>
+</GameProfile>
+"@
+        $encoding = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText((Join-Path $userProfiles 'Overlap.xml'), $profileXml, $encoding)
+        [System.IO.File]::WriteAllText((Join-Path $tpRoot 'GameProfiles\Canonical.xml'), $profileXml, $encoding)
+        [System.IO.File]::WriteAllBytes((Join-Path $cacheDir 'MAME64.dll'), [System.Text.Encoding]::ASCII.GetBytes('plugin'))
+        Mock Get-FFBPluginGameMap { [ordered]@{ OverlapGame = 'd3d9.dll' } }
+        Mock Invoke-FFBPluginDownload { $true }
+        Mock Get-ExeArchitecture { 'x64' }
+        Mock Read-HostSafe { 'N' }
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $userProfiles -CacheDir $cacheDir -TpRoot $tpRoot -NativeEnabledCodes @('Overlap')
+        $result.Succeeded | Should -BeTrue
+        $field = (Read-Xml (Join-Path $userProfiles 'Overlap.xml')).SelectSingleNode('/GameProfile/ConfigValues/FieldInformation/FieldValue')
+        $field.InnerText | Should -Be '0'
+        (Test-Path -LiteralPath (Join-Path $gameDir 'd3d9.dll') -PathType Leaf) | Should -BeTrue
+        Should -Invoke Read-HostSafe -Times 1 -Exactly
+    }
+    It "defaults an invalid overlap owner response to native" {
+        $root = Join-Path $TestDrive 'ffb-invalid-overlap'
+        $userProfiles = Join-Path $root 'UserProfiles'
+        $tpRoot = Join-Path $root 'TeknoParrot'
+        $gameDir = Join-Path $root 'OverlapGame'
+        $cacheDir = Join-Path $root 'FFBPlugin'
+        New-Item -ItemType Directory -Path $userProfiles, (Join-Path $tpRoot 'GameProfiles'), $gameDir, $cacheDir -Force | Out-Null
+        $gamePath = Join-Path $gameDir 'overlap.exe'
+        [System.IO.File]::WriteAllBytes($gamePath, [System.Text.Encoding]::ASCII.GetBytes('MZ-overlap'))
+        $profileXml = @"
+<GameProfile>
+  <EmulationProfile>Daytona3</EmulationProfile>
+  <GamePath>$gamePath</GamePath>
+  <ConfigValues>
+    <FieldInformation><CategoryName>FFB Blaster</CategoryName><FieldName>Enable</FieldName><FieldType>Bool</FieldType><FieldValue>1</FieldValue></FieldInformation>
+  </ConfigValues>
+</GameProfile>
+"@
+        $encoding = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText((Join-Path $userProfiles 'Overlap.xml'), $profileXml, $encoding)
+        [System.IO.File]::WriteAllText((Join-Path $tpRoot 'GameProfiles\Canonical.xml'), $profileXml, $encoding)
+        [System.IO.File]::WriteAllBytes((Join-Path $cacheDir 'MAME64.dll'), [System.Text.Encoding]::ASCII.GetBytes('plugin'))
+        Mock Get-FFBPluginGameMap { [ordered]@{ OverlapGame = 'd3d9.dll' } }
+        Mock Invoke-FFBPluginDownload { $true }
+        Mock Get-ExeArchitecture { 'x64' }
+        Mock Read-HostSafe { 'Q' }
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $userProfiles -CacheDir $cacheDir -TpRoot $tpRoot -NativeEnabledCodes @('Overlap')
+        $result.Succeeded | Should -BeTrue
+        $result.Deployed | Should -Be 0
+        $field = (Read-Xml (Join-Path $userProfiles 'Overlap.xml')).SelectSingleNode('/GameProfile/ConfigValues/FieldInformation/FieldValue')
+        $field.InnerText | Should -Be '1'
+        (Test-Path -LiteralPath (Join-Path $gameDir 'd3d9.dll') -PathType Leaf) | Should -BeFalse
+        Should -Invoke Read-HostSafe -Times 1 -Exactly
+    }
 }
 
 Describe "Issue #300 workflow ownership and transition guards" {
@@ -10641,6 +10723,14 @@ Describe "Approved ReShade profile catalog" {
         }
         $source | Should -Match 'Techniques:'
         $source | Should -Match 'DescriptionLabel'
+        $gallerySource = [regex]::Match($source, '(?s)function Show-TpmReShadeProfileGalleryWindow \{.*?function Close-TpmReShadeProfileGallerySession').Value
+        $comboAddIndex = $gallerySource.IndexOf('$form.Controls.Add($combo)')
+        $labelAddIndex = $gallerySource.IndexOf('$form.Controls.Add($descriptionLabel)')
+        $labelTextIndex = $gallerySource.IndexOf('$descriptionLabel.Text = "{0}`r`nTechniques: {1}" -f $canonicalProfile.Description')
+        $sliderBranchIndex = $gallerySource.IndexOf('if ($viewMode -eq ''Slider'')')
+        $labelAddIndex | Should -BeGreaterThan $comboAddIndex
+        $labelTextIndex | Should -BeGreaterThan 0
+        $labelTextIndex | Should -BeLessThan $sliderBranchIndex
     }
     It "requires measured evidence before compatibility status or recommendation is asserted" {
         $profiles = @(Get-TpmReShadeProfiles)

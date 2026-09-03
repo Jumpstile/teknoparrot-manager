@@ -1636,6 +1636,11 @@
     game once and asks a single question: keep FFB Blaster (native) for
     all of them, or use the third-party plugin for all of them instead.
     Your answer applies to every game in that overlap list for this run.
+    Native is the safe default; only an explicit N selects the plugin.
+    Blank or invalid input keeps native. Choosing the plugin creates a
+    fresh verified profile backup and clears the native FFB Blaster fields
+    for exactly those overlaps before any third-party DLL is deployed. If
+    that switch cannot be verified, deployment is blocked.
 
     Plugin DLL collisions: a few games need the same destination DLL name
     for both ReShade and this plugin (for example H2Overdrive needs

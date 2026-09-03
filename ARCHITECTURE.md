@@ -271,7 +271,7 @@ registered profiles (WRONG NAME warning for typos), never required. Same
 **Read-only multi-monitor suitability evidence (RC8).** `Get-TpmDisplayTopologyClassification` classifies caller-supplied display records without querying or changing monitor configuration. It distinguishes unavailable/zero-usable, single-display, multiple-primary, mixed-resolution/orientation/refresh, mirrored, no-primary, and malformed topologies. It does not assign a separate `EXTENDED` state; an extended desktop is represented by the applicable multiple-display state. Live Windows display acquisition is not wired into the eligibility path, so callers must supply the evidence. `TargetDisplayId` is optional evidence: an explicit target must still be present and connected to be `CONFIDENT`; duplicate matches are `AMBIGUOUS` and no monitor is selected. A missing target is `UNKNOWN` and does not fall back to another display. Without an explicit target, a sole usable display is confident, while multiple usable displays remain `AMBIGUOUS` until the caller identifies the game target.
 
 The result is advisory input to ReShade eligibility only. It may add `DISPLAY_TARGET_AMBIGUOUS` and downgrade suitability to `UNKNOWN`; it never changes the primary monitor, enables or disables displays, changes resolution/refresh/orientation, moves windows, or writes game display settings. Target resolution reuses `Get-TpmResolutionClassification`, so bounded low/normal/high/wide evidence and ReShade effect-sensitivity metadata remain advisory rather than becoming monitor configuration policy. A changed or stale topology invalidates prior target confidence and requires fresh evidence.
-**Canonical visual profiles and generated presets (RC8).** TPM exposes exactly five bounded profiles: Original (empty stack), Clean & Sharp (`SweetFX.LumaSharpen`), Vivid Arcade (`SweetFX.Vibrance`), Classic Arcade CRT (`FXShaders.CRT_Lottes`), and Enhanced Arcade (`SweetFX.LumaSharpen` followed by `SweetFX.Vibrance`). Profile IDs select definitions, but trust remains in the approved effect catalog, pinned revisions, required files, and SHA-256 values. Curated profile and effect metadata is `ADVISORY_UNMEASURED` with `MeasuredEvidence = $false`; no profile is marked `Recommended` or `VALIDATED_SINGLE` without measured evidence. CRT is isolated from sharpening and vibrance in normal profile mode; the enhanced two-effect order is explicit.
+**Canonical visual profiles and generated presets (RC8).** TPM exposes exactly five bounded profiles in display order: Original (empty stack), Clean & Sharp (`SweetFX.LumaSharpen`), Classic Arcade CRT (`FXShaders.CRT_Lottes`), Vivid Arcade (`SweetFX.Vibrance`), and Enhanced Arcade (`SweetFX.LumaSharpen` followed by `SweetFX.Vibrance`). Profile IDs select definitions, but trust remains in the approved effect catalog, pinned revisions, required files, and SHA-256 values. Curated profile and effect metadata is `ADVISORY_UNMEASURED` with `MeasuredEvidence = $false`; no profile is marked `Recommended` or `VALIDATED_SINGLE` without measured evidence. CRT is isolated from sharpening and vibrance in normal profile mode; the enhanced two-effect order is explicit.
 
 The terminal chooser and preview gallery derive their visible `Techniques:`
 line from each profile's canonical `TechniqueOrder` and the approved effect
@@ -438,8 +438,11 @@ never hardcoded or bundled. Source DLLs (`MAME32.dll`/`MAME64.dll`) also fetched
 
 Overlap handling: roughly half the third-party table also has a native FFB Blaster field.
 `Invoke-FFBPluginSetup` resolves all overlapping games first, then asks ONE batched
-question: keep native for all of them, or use the plugin for all of them. Never silently
-defaults either way.
+question: keep native for all of them, or use the plugin for all of them. Choosing
+the plugin creates a fresh verified profile backup, disables the native Bool fields
+for exactly those overlaps, verifies the saved values, and blocks plugin deployment
+if the switch or rollback fails. Choosing native removes only matching TPM-owned
+plugin files. The run never enables both owners for a selected overlap.
 
 DLL collision: if another DLL (e.g. ReShade's `d3d9.dll`) already occupies the plugin's
 target filename, that game is skipped with a warning, never overwritten.

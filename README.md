@@ -684,7 +684,7 @@ Controller support (per the plugin's own docs): true force feedback on FFB-capab
 
 **Plugin DLL collisions:** a few games need the same destination DLL name for both ReShade and this plugin (e.g. H2Overdrive needs `d3d9.dll` for both). If ReShade already occupies that filename, FFB setup skips that game with a warning rather than overwriting it.
 
-**If a game is covered by both:** the script lists every such game once and asks a single question — keep FFB Blaster (native) for all of them, or use the third-party plugin for all of them. Your answer applies to the whole list for that run; it never silently picks a side.
+**If a game is covered by both:** the script lists every such game once and asks a single question — keep FFB Blaster (native) for all of them, or use the third-party plugin for all of them. Native is the safe default; only an explicit `N` selects the plugin, while blank or invalid input keeps native. Choosing the plugin creates a fresh verified profile backup and clears the native FFB Blaster fields for exactly those overlaps before any third-party DLL is deployed. If that switch cannot be verified, deployment is blocked.
 
 **Removing FFB:** TPM records its own deployed hook files. When you choose
 native FFB for an overlap, it backs up and removes only a matching unchanged

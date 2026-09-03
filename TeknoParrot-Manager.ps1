@@ -11915,7 +11915,12 @@ function Remove-FFBPluginOwnedDeployment {
 }
 
 function Invoke-FFBPluginSetup {
-    param([string]$UserProfilesDir, [string]$CacheDir, [string[]]$NativeEnabledCodes = @())
+    param(
+        [string]$UserProfilesDir,
+        [string]$CacheDir,
+        [string[]]$NativeEnabledCodes = @(),
+        [string]$TpRoot = ''
+    )
 
     # A caller passing an explicit $null overrides the default above (PowerShell
     # does not apply a parameter default when $null is passed deliberately) --
@@ -12005,10 +12010,22 @@ function Invoke-FFBPluginSetup {
         Write-Host ("  {0} game(s) are covered by BOTH FFB Blaster and the third-party plugin:" -f $overlaps.Count) -ForegroundColor Cyan
         foreach ($ov in $overlaps) { Write-Host ("    - {0}" -f $ov.Profile.BaseName) -ForegroundColor DarkGray }
         $ans = (Read-HostSafe "  Choose one FFB owner for these games: Y = native FFB Blaster (recommended), N = third-party plugin. Do not enable both." -Default 'Y').ToUpper()
-        $useNativeForOverlaps = ($ans -eq "Y")
-        Write-Log ("FFBPlugin: {0} overlapping game(s) with native FFB Blaster -- user chose {1}" -f $overlaps.Count, $(if ($useNativeForOverlaps) {"native"} else {"third-party plugin"}))
-    }
+        $useNativeForOverlaps = ($ans -ne "N")
+        if ($ans -ne "Y" -and $ans -ne "N") {
+            Write-Host "  Unrecognized answer -- keeping native FFB Blaster as the safe default." -ForegroundColor Yellow
+            Write-Log ("FFBPlugin: invalid overlap owner response '{0}' -- defaulted to native" -f $ans)
+        }
+        if (-not $useNativeForOverlaps) {
+            Write-Host "  Disabling native FFB Blaster on the overlapping profiles before plugin deployment..." -ForegroundColor Yellow
+            $nativeSwitch = Disable-FFBBlasterForOverlap -UserProfilesDir $UserProfilesDir -TpRoot $TpRoot -ProfileCodes @($overlaps | ForEach-Object { $_.Profile.BaseName })
+            if (-not $nativeSwitch.Succeeded) {
+                Write-Host ("  ERROR: Could not switch overlapping profiles to the third-party plugin -- {0}" -f $nativeSwitch.Reason) -ForegroundColor Red
+                Write-Log "FFBPlugin: blocked because native overlap switch failed -- $($nativeSwitch.Reason)"
+                return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 1; Reason = 'NATIVE_OVERLAP_SWITCH_FAILED' }
+            }
+        }
 
+    }
     # Two distinct reasons get tracked separately, not combined into one
     # "no match" bucket: $skippedNoMatch is a game the live AutoSetup.cmd
     # table doesn't know about at all (nothing this script can do); a game
@@ -12309,6 +12326,115 @@ function Get-FFBBlasterSupport {
         UpToDate   = $false
         Changes    = $emptyChanges
         Platform   = $platform
+    }
+}
+
+# Returns the native FFB Blaster FieldValue nodes for one profile.
+function Get-FFBBlasterFieldValueNodes {
+    param([System.Xml.XmlDocument]$Doc, $Categories)
+    foreach ($key in $Categories) {
+        $xpLit = ConvertTo-XPathStringLiteral $key
+        $fis = @($Doc.SelectNodes("/GameProfile/ConfigValues/FieldInformation[CategoryName=$xpLit]"))
+        if ($fis.Count -eq 0) {
+            $fis = @($Doc.SelectNodes("/GameProfile/ConfigValues/FieldInformation[FieldName=$xpLit]"))
+        }
+        foreach ($fi in $fis) {
+            $fieldType = if ($fi.FieldType) { $fi.FieldType.Trim() } else { '' }
+            if ($fieldType -ne 'Bool') { continue }
+            $fvNode = $fi.SelectSingleNode("FieldValue")
+            if ($fvNode) { $fvNode }
+        }
+    }
+}
+
+# Disable native FFB Blaster fields for profiles where the user explicitly
+# chooses the third-party plugin. This runs after the native setup step, so it
+# must create and verify its own backup immediately before changing profiles.
+# A failed preflight or write rolls back from that backup and blocks plugin
+# deployment; the workflow must never leave a selected overlap with both owners.
+function Disable-FFBBlasterForOverlap {
+    param(
+        [Parameter(Mandatory)][string]$UserProfilesDir,
+        [Parameter(Mandatory)][string]$TpRoot,
+        [Parameter(Mandatory)][string[]]$ProfileCodes
+    )
+    $codes = [System.Collections.Generic.HashSet[string]]::new(
+        [string[]]@($ProfileCodes | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }),
+        [System.StringComparer]::OrdinalIgnoreCase)
+    if ($codes.Count -eq 0) {
+        return [pscustomobject]@{ Succeeded = $true; Disabled = 0; BackupPath = $null; Reason = $null }
+    }
+
+    $backupPath = $null
+    try {
+        if (-not (Test-Path -LiteralPath $UserProfilesDir -PathType Container -ErrorAction Stop)) {
+            throw "UserProfiles directory is unavailable: $UserProfilesDir"
+        }
+        $profiles = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction Stop |
+                      Where-Object { $_.DirectoryName -ne (Join-Path $UserProfilesDir 'FullBackup') } |
+                      Sort-Object BaseName)
+        $targets = @($profiles | Where-Object { $codes.Contains($_.BaseName) })
+        if ($targets.Count -ne $codes.Count) {
+            throw 'An overlapping native FFB profile disappeared before ownership could be switched.'
+        }
+        $categories = @(Get-FFBBlasterFieldNames -GameProfilesDir (Join-Path $TpRoot 'GameProfiles'))
+        if ($categories.Count -eq 0) {
+            throw 'FFB Blaster fields could not be rediscovered before the ownership switch.'
+        }
+        $plans = New-Object System.Collections.Generic.List[object]
+        foreach ($profileFile in $targets) {
+            $doc = Read-Xml $profileFile.FullName
+            $nodes = @(Get-FFBBlasterFieldValueNodes -Doc $doc -Categories $categories)
+            if ($nodes.Count -eq 0) {
+                throw ("Native FFB field disappeared from profile '{0}'." -f $profileFile.BaseName)
+            }
+            $enabledNodes = @($nodes | Where-Object { $_.InnerText -eq '1' })
+            if ($enabledNodes.Count -eq 0) {
+                throw ("Native FFB field is no longer enabled for profile '{0}'." -f $profileFile.BaseName)
+            }
+            [void]$plans.Add([pscustomobject]@{ ProfileFile = $profileFile; Document = $doc; Nodes = $nodes })
+        }
+        if ($plans.Count -eq 0) {
+            return [pscustomobject]@{ Succeeded = $true; Disabled = 0; BackupPath = $null; Reason = $null }
+        }
+
+        $backupRoot = Join-Path $UserProfilesDir 'FullBackup'
+        if ((Test-Path -LiteralPath $backupRoot -ErrorAction SilentlyContinue) -and
+            (-not (Test-TpmNoReparsePath -Path $backupRoot))) {
+            throw "FFB overlap backup path is unsafe: $backupRoot"
+        }
+        [void][System.IO.Directory]::CreateDirectory($backupRoot)
+        $backupPath = Join-Path $backupRoot ('FFBOverlapSwitch_{0}_{1}' -f (Get-Date).ToString('yyyy-MM-dd_HH-mm-ss_fff'), [guid]::NewGuid().ToString('N'))
+        [void][System.IO.Directory]::CreateDirectory($backupPath)
+        if (-not (Test-TpmNoReparsePath -Path $backupPath)) {
+            throw "FFB overlap backup path is unsafe: $backupPath"
+        }
+        Get-ChildItem -LiteralPath $UserProfilesDir -Force -ErrorAction Stop |
+            Where-Object { $_.Name -ne 'FullBackup' } |
+            Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction Stop
+
+        foreach ($plan in $plans) {
+            foreach ($node in $plan.Nodes) { $node.InnerText = '0' }
+            Save-Xml $plan.Document $plan.ProfileFile.FullName
+            $verifyDoc = Read-Xml $plan.ProfileFile.FullName
+            $remaining = @(Get-FFBBlasterFieldValueNodes -Doc $verifyDoc -Categories $categories | Where-Object { $_.InnerText -eq '1' })
+            if ($remaining.Count -gt 0) {
+                throw ("Native FFB remained enabled for profile '{0}' after the ownership switch." -f $plan.ProfileFile.BaseName)
+            }
+        }
+        return [pscustomobject]@{ Succeeded = $true; Disabled = $plans.Count; BackupPath = $backupPath; Reason = $null }
+    } catch {
+        $message = $_.Exception.Message
+        if ($backupPath -and (Test-Path -LiteralPath $backupPath -PathType Container -ErrorAction SilentlyContinue)) {
+            try {
+                Get-ChildItem -LiteralPath $backupPath -Force -ErrorAction Stop |
+                    Copy-Item -Destination $UserProfilesDir -Recurse -Force -ErrorAction Stop
+                Write-Log "FFB overlap switch rolled back after failure: $message"
+            } catch {
+                Write-Log "FFB overlap switch rollback failed after '$message': $_"
+            }
+        }
+        return [pscustomobject]@{ Succeeded = $false; Disabled = 0; BackupPath = $backupPath; Reason = $message }
     }
 }
 
@@ -20867,7 +20993,7 @@ function Invoke-TpmFfbSetupMode {
     [void](Resume-TpmWorkflowStatus -Context $status)
     if ($choice -eq 'Y') {
         [void](Start-TpmWorkflowStep -Context $status -StepId 'plugin' -Activity 'Downloading and applying the optional plugin')
-        $plugin = Invoke-FFBPluginSetup -UserProfilesDir $UserProfilesDir -CacheDir (Join-Path $ScriptRoot 'FFBPlugin') -NativeEnabledCodes $nativeCodes
+        $plugin = Invoke-FFBPluginSetup -UserProfilesDir $UserProfilesDir -CacheDir (Join-Path $ScriptRoot 'FFBPlugin') -NativeEnabledCodes $nativeCodes -TpRoot $TpRoot
         if (-not ($plugin -and $plugin.Succeeded)) {
             [void](Set-TpmWorkflowFailure -Context $status -FailureId 'ffb-plugin-failed' -Message 'The optional force-feedback plugin was not completed.' -DataSafety 'TPM did not claim a complete third-party plugin deployment.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
             [void](Read-HostSafe 'Press Enter to acknowledge the force-feedback result')
