@@ -550,6 +550,32 @@ Describe "Test-PathInside" {
         Test-PathInside "c:\foo\bar\baz.txt" "C:\Foo\Bar" | Should -BeTrue
     }
 }
+Describe "Test-TpmGameMutationPath" {
+    It "accepts an existing executable and returns one resolved target" {
+        $root = Join-Path $TestDrive 'game-path-valid'
+        [IO.Directory]::CreateDirectory($root) | Out-Null
+        $exe = Join-Path $root 'game.exe'
+        [IO.File]::WriteAllText($exe, 'fixture')
+        $result = Test-TpmGameMutationPath -GamePath $exe -RequireLeaf
+        $result.Valid | Should -BeTrue
+        $result.ReasonCode | Should -Be 'VALID'
+        $result.ResolvedPath | Should -Be ([IO.Path]::GetFullPath($exe))
+        $result.GameDirectory | Should -Be ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($exe)))
+    }
+    It "classifies a missing executable separately from an unavailable device" {
+        $root = Join-Path $TestDrive 'game-path-missing'
+        [IO.Directory]::CreateDirectory($root) | Out-Null
+        (Test-TpmGameMutationPath -GamePath (Join-Path $root 'missing.exe') -RequireLeaf).ReasonCode | Should -Be 'GAME_PATH_MISSING'
+        $missingDevice = $null
+        foreach ($letter in @('Z','Y','X','W','V')) {
+            if (-not (Test-Path -LiteralPath ($letter + ':\') -PathType Container)) { $missingDevice = $letter + ':\missing\game.exe'; break }
+        }
+        if ($missingDevice) {
+            $deviceResult = Test-TpmGameMutationPath -GamePath $missingDevice -RequireLeaf
+            $deviceResult.ReasonCode | Should -Be 'DEVICE_UNAVAILABLE'
+        }
+    }
+}
 
 Describe "Invoke-WithHardTimeout" {
     # Issue #5 (v1.0 roadmap): a generic hard-timeout wrapper for a local call
@@ -4734,6 +4760,19 @@ Describe "Postgres guided recovery and profile transaction" {
             Should -Invoke Invoke-PostgresNativeProcessWithInput -Times 1
             Should -Invoke Test-PostgresPassword -Times 1
         }
+        It "reports a committed but unverified reset when restart fails after ALTER" {
+            Mock Invoke-PostgresNativeProcessWithInput {
+                [pscustomobject]@{ ExitCode = 0; Output = ''; Error = '' }
+            }
+            Mock Start-Service { throw 'service restart failed' }
+            $result = Reset-PostgresPasswordAutomatically -NewPassword $script:pgSecret -RecoveryBackup $script:pgBackup
+            $result.PasswordChangeCommitted | Should -BeTrue
+            $result.Succeeded | Should -BeFalse
+            $result.RecoveryBlocked | Should -BeTrue
+            $result.Reason | Should -Match 'password was changed'
+            $result.Reason | Should -Not -Match 'password was not changed'
+        }
+
 
         It "leaves evidence and reports recovery blocked when the reset fails" {
             Mock Invoke-PostgresNativeProcessWithInput {
@@ -4851,6 +4890,168 @@ Describe "Postgres guided recovery and profile transaction" {
         Should -Invoke New-PostgresDatabaseFromBackup -Times 0
     }
 }
+Describe "Shared game mutation path safety" {
+    It "distinguishes a valid executable, a missing leaf, and an unavailable device" {
+        $gameRoot = Join-Path $TestDrive 'mutation-game'
+        New-Item -ItemType Directory -Path $gameRoot -Force | Out-Null
+        $gamePath = Join-Path $gameRoot 'game.exe'
+        New-Item -ItemType File -Path $gamePath -Force | Out-Null
+
+        $valid = Test-TpmGameMutationPath -GamePath $gamePath -RequireLeaf
+        $valid.Valid | Should -BeTrue
+        $valid.ReasonCode | Should -Be 'VALID'
+        $valid.ResolvedPath | Should -Be $valid.CanonicalPath
+
+        $missing = Test-TpmGameMutationPath -GamePath (Join-Path $gameRoot 'missing.exe') -RequireLeaf
+        $missing.Valid | Should -BeFalse
+        $missing.ReasonCode | Should -Be 'GAME_PATH_MISSING'
+
+        $usedRoots = @([IO.Directory]::GetLogicalDrives() | ForEach-Object { $_.Substring(0, 1).ToUpperInvariant() })
+        $availableLetter = @(68..90 | ForEach-Object { [string][char]$_ } | Where-Object { $usedRoots -notcontains $_ }) | Select-Object -First 1
+        if (-not $availableLetter) {
+            Set-ItResult -Skipped -Because 'No unused drive letter is available for the unavailable-device case.'
+            return
+        }
+        $unavailable = Test-TpmGameMutationPath -GamePath ("{0}:\TPM-unavailable\game.exe" -f $availableLetter) -RequireLeaf
+        $unavailable.Valid | Should -BeFalse
+        $unavailable.ReasonCode | Should -Be 'DEVICE_UNAVAILABLE'
+    }
+
+    It "uses the shared guard before every game mutation workflow" {
+        $script:ProductionSource | Should -Match 'Invoke-BepInExUpdateCheck[\s\S]*?Test-TpmGameMutationPath'
+        $script:ProductionSource | Should -Match 'Invoke-ReShadeSetup[\s\S]*?Test-TpmGameMutationPath'
+        $script:ProductionSource | Should -Match 'Invoke-DgVoodoo2Setup[\s\S]*?Test-TpmGameMutationPath'
+        $script:ProductionSource | Should -Match 'Invoke-GpuFixSetup[\s\S]*?Test-TpmGameMutationPath'
+    }
+}
+Describe "Skylinekiller missing-device regressions" {
+    It "records the external hold package and all four runtime finding areas" {
+        $inventoryPath = Join-Path $PSScriptRoot '..\docs\RC8-REMEDIATION-INVENTORY.md'
+        $inventory = [IO.File]::ReadAllText($inventoryPath)
+        $inventory | Should -Match 'External tester: Skylinekiller'
+        $inventory | Should -Match 'TeknoParrotManager-Support-20260902-161402\.zip'
+        $inventory | Should -Match '6a2fa446e09dc795748773ea542e75576715ced9b7803b750cfe71c90d8763ab'
+        $inventory | Should -Match 'Entries: 5'
+        $inventory | Should -Match 'ReShade: partial installation'
+        $inventory | Should -Match 'dgVoodoo2: BattleFantasia'
+        $inventory | Should -Match 'GPU Compatibility Fix: setup fatally aborted'
+        $inventory | Should -Match 'BepInEx: 15 games reported update blocked'
+    }
+
+    It "classifies supplied missing-device and missing-path exceptions" {
+        $deviceException = New-Object System.IO.IOException 'A device which does not exist was specified.'
+        $deviceRecord = New-Object System.Management.Automation.ErrorRecord($deviceException, 'SkylinekillerMissingDevice', 'ReadError', $null)
+        Get-TpmGameMutationFailureCode -ErrorRecord $deviceRecord | Should -Be 'DEVICE_UNAVAILABLE'
+        $pathException = New-Object System.IO.FileNotFoundException 'The system cannot find the path specified.'
+        $pathRecord = New-Object System.Management.Automation.ErrorRecord($pathException, 'SkylinekillerMissingPath', 'ReadError', $null)
+        Get-TpmGameMutationFailureCode -ErrorRecord $pathRecord | Should -Be 'GAME_PATH_MISSING'
+    }
+
+    It "routes ReShade, dgVoodoo2, GPU Fix, and BepInEx catches through classification" {
+        foreach ($workflow in @('Invoke-ReShadeSetup', 'Invoke-DgVoodoo2Setup', 'Invoke-GpuFixSetup', 'Invoke-BepInExUpdateCheck')) {
+            $start = $script:ProductionSource.IndexOf("function $workflow", [StringComparison]::Ordinal)
+            $start | Should -BeGreaterOrEqual 0
+            $end = $script:ProductionSource.IndexOf("function ", $start + 10, [StringComparison]::Ordinal)
+            if ($end -lt 0) { $end = $script:ProductionSource.Length }
+            $body = $script:ProductionSource.Substring($start, $end - $start)
+            $body | Should -Match 'Get-TpmGameMutationFailureCode'
+            $body | Should -Match 'DEVICE_UNAVAILABLE'
+            $body | Should -Match 'SKIP'
+        }
+    }
+}
+Describe "Skylinekiller executable workflow regressions" {
+    BeforeEach {
+        Mock Write-Log {}
+        Mock Write-Host {}
+    }
+
+    It "skips a ReShade missing-device deployment before calling the transaction" {
+        $profiles = Join-Path $TestDrive 'SkylineReShadeProfiles'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        $gamePath = 'X:\Skylinekiller\CaladriusAC.exe'
+        $profilePath = Join-Path $profiles 'CaladriusAC.xml'
+        Set-Content -LiteralPath $profilePath -Value ("<GameProfile><GamePath>{0}</GamePath></GameProfile>" -f $gamePath)
+        $sourceDll = Join-Path $TestDrive 'ReShade64.dll'
+        Set-Content -LiteralPath $sourceDll -Value 'source'
+        $profile = [pscustomobject]@{ ProfileId = 'Original'; FriendlyName = 'Original'; Description = 'baseline'; BaseName = 'CaladriusAC' }
+        Mock Invoke-ReShadeUpdateIfAvailable { [pscustomobject]@{ Updated = $false; SourceDll = $SourceDll; SourceDll32 = $SourceDll32 } }
+        Mock Test-ReShadeDllSignature { [pscustomobject]@{ Status = 'Unknown'; Signer = $null } }
+        Mock Get-TpmReShadeProfileGallery { @() }
+        Mock Get-TpmReShadeProfiles { @($profile) }
+        Mock Get-TpmReShadeProfile { $profile }
+        Mock Read-TpmReShadeState { [pscustomobject]@{ Favorites = @() } }
+        Mock Show-TpmReShadeProfileGalleryWindow { [pscustomobject]@{ Available = $false; Session = $null; Reason = 'test' } }
+        Mock Close-TpmReShadeProfileGallerySession {}
+        Mock Read-TpmReShadeTerminalProfile { [pscustomobject]@{ Cancelled = $false; SelectedProfile = $profile } }
+        Mock Read-HostSafe { 'Y' }
+        Mock Select-RegisteredGamesInteractive { @(Get-Item -LiteralPath $profilePath) }
+        Mock Get-TpmReShadeChooserOptions { [pscustomobject]@{ Restore = [pscustomobject]@{ Found = $false; Valid = $false }; Remembered = [pscustomobject]@{ Found = $false; Valid = $false } } }
+        Mock Test-TpmGameMutationPath { [pscustomobject]@{ Valid = $false; ReasonCode = 'DEVICE_UNAVAILABLE'; Reason = 'A device which does not exist was specified.'; ResolvedPath = $null; GameDirectory = $null } }
+        Mock Install-TpmReShadeProfileDeployment { throw 'transaction must not run' }
+        $result = Invoke-ReShadeSetup -UserProfilesDir $profiles -SourceDll $sourceDll -SourceDll32 '' -ConfigPath '' -TpRoot '' -Mode '' -ZipSource '' -GamesInstallFolder '' -RetroBat $false -HsDataPath ''
+        $result.Succeeded | Should -BeFalse
+        $result.Deployed | Should -Be 0
+        $result.MissingDevice | Should -Be 1
+        Should -Invoke Install-TpmReShadeProfileDeployment -Times 0
+    }
+
+    It "classifies a BattleFantasia-style dgVoodoo2 scan failure without deployment" {
+        $profiles = Join-Path $TestDrive 'SkylineDgProfiles'
+        $source = Join-Path $TestDrive 'SkylineDgSource'
+        New-Item -ItemType Directory -Path $profiles, $source -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $source 'D3D8.dll') -Value 'dll'
+        $gamePath = 'X:\Skylinekiller\BattleFantasia.exe'
+        $profilePath = Join-Path $profiles 'BattleFantasia.xml'
+        Set-Content -LiteralPath $profilePath -Value ("<GameProfile><GamePath>{0}</GamePath></GameProfile>" -f $gamePath)
+        Mock Test-TpmGameMutationPath { [pscustomobject]@{ Valid = $false; ReasonCode = 'DEVICE_UNAVAILABLE'; Reason = 'A device which does not exist was specified.'; ResolvedPath = $null; GameDirectory = $null } }
+        Mock Get-GameLegacyApi { throw 'legacy scan must not run for an unavailable device' }
+        $result = Invoke-DgVoodoo2Setup -UserProfilesDir $profiles -SourceDir $source -TpRoot ''
+        $result.Succeeded | Should -BeFalse
+        $result.Reason | Should -Be 'NO_ELIGIBLE_GAMES'
+        $result.MissingDevice | Should -Be 1
+        $result.Skipped | Should -Be 1
+        Should -Invoke Get-GameLegacyApi -Times 0
+    }
+
+    It "turns a GPU missing-device IOException into a safe per-game skip" {
+        $profiles = Join-Path $TestDrive 'SkylineGpuProfiles'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        $gamePath = Join-Path $TestDrive 'SkylineGpu\game.exe'
+        New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($gamePath)) -Force | Out-Null
+        Set-Content -LiteralPath $gamePath -Value 'game'
+        $profilePath = Join-Path $profiles 'GPUFail.xml'
+        Set-Content -LiteralPath $profilePath -Value ("<GameProfile><GamePath>{0}</GamePath><ConfigValues><FieldInformation><FieldName>UseNvidiaFix</FieldName><FieldValue>1</FieldValue></FieldInformation></ConfigValues></GameProfile>" -f $gamePath)
+        Mock Get-DetectedGpuVendor { [pscustomobject]@{ Vendor = 'NVIDIA'; Name = 'RTX3070' } }
+        Mock Get-GpuFixFieldNames { [pscustomobject]@{ GameProfilesFound = $true; BoolFields = @('UseNvidiaFix'); DropdownFields = @() } }
+        Mock Save-Xml { throw (New-Object System.IO.IOException 'A device which does not exist was specified.') }
+        $result = Invoke-GpuFixSetup -UserProfilesDir $profiles -TpRoot (Join-Path $TestDrive 'TeknoParrot')
+        $result.Succeeded | Should -BeFalse
+        $result.Skipped | Should -Be 1
+        $result.MissingDevice | Should -Be 1
+        $result.Errors | Should -Be 0
+        (Get-Content -LiteralPath $profilePath -Raw) | Should -Match ([regex]::Escape($gamePath))
+        Should -Invoke Save-Xml -Times 1
+    }
+
+    It "blocks BepInEx before release discovery for an unavailable device" {
+        $approved = Join-Path $TestDrive 'SkylineBepGames'
+        $profiles = Join-Path $TestDrive 'SkylineBepProfiles'
+        New-Item -ItemType Directory -Path $approved, $profiles -Force | Out-Null
+        $gamePath = 'X:\Skylinekiller\BepGame.exe'
+        Set-Content -LiteralPath (Join-Path $profiles 'BepGame.xml') -Value ("<GameProfile><GamePath>{0}</GamePath></GameProfile>" -f $gamePath)
+        Mock Test-TpmGameMutationPath { [pscustomobject]@{ Valid = $false; ReasonCode = 'DEVICE_UNAVAILABLE'; Reason = 'A device which does not exist was specified.' } }
+        Mock Get-BepInExLatestRelease { throw 'release discovery must not run' }
+        Mock Invoke-TpmDownload { throw 'download must not run' }
+        $result = Invoke-BepInExUpdateCheck -UserProfilesDir $profiles -CacheDir (Join-Path $TestDrive 'SkylineBepCache') -ApprovedGamesRoot $approved
+        $result.Succeeded | Should -BeFalse
+        $result.Reason | Should -Be 'NO_ELIGIBLE_GAMES'
+        $result.MissingDevice | Should -Be 1
+        $result.PathReasonCounts['DEVICE_UNAVAILABLE'] | Should -Be 1
+        Should -Invoke Get-BepInExLatestRelease -Times 0
+        Should -Invoke Invoke-TpmDownload -Times 0
+    }
+}
 Describe "RC8 PostgreSQL and support UX" {
     It "reports database backup failures with affected entries and explicit recovery choices" {
         $script:ProductionSource | Should -Match 'PostgreSQL setup stopped because the database backup did not complete'
@@ -4905,7 +5106,27 @@ Describe "RC8 PostgreSQL and support UX" {
         $text | Should -Match '\[NotPresent\] Registered-game diagnostics: 1 items'
         $text | Should -Not -Match 'Verbose NotPresent detail:'
         $text | Should -Match '\[CollectionFailed\] Game:Other:plugin inventory'
+        $text | Should -Match 'What failed:'
+        $text | Should -Match 'Game:Other:plugin inventory'
+        $text | Should -Match 'What TPM did not change:'
+        $text | Should -Match 'No game files, executables, DLL payloads, profiles, credentials, or emulator files'
+        $script:ProductionSource | Should -Match 'Redact-TpmSupportText -Text \(\[string\]\$record\.Source\)'
+        $script:ProductionSource | Should -Match 'Redact-TpmSupportText -Text \(\[string\]\$record\.Detail\)'
         $script:ProductionSource | Should -Match 'absence is not a collection failure'
+    }
+    It "redacts secrets and profile paths from failure summaries" {
+        $records = @(
+            [pscustomobject]@{
+                Status = 'CollectionFailed'
+                Source = 'Game:SecretGame:C:\Users\EliSi\private.log'
+                Destination = ''
+                Detail = 'password=Console-Only-Secret-987'
+            }
+        )
+        $text = Get-TpmSupportManifestText -Records $records -Errors @() -GameCodes @('SecretGame') -AffectedGameSummary 'SecretGame'
+        $text | Should -Not -Match 'Console-Only-Secret-987'
+        $text | Should -Not -Match 'C:\\Users\\EliSi\\private\.log'
+        $text | Should -Match '(?i)<redacted>'
     }
 }
 
@@ -5353,7 +5574,7 @@ Describe "BepInEx authorized-root and transaction guards" {
             Test-Path -LiteralPath $script:bepStage | Should -BeFalse
             Should -Invoke Write-Host -ParameterFilter { [string]$Object -match '^  Updated cleanly: 1 game\(s\)$' } -Times 1 -Exactly
             Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'Updated with cleanup failure' } -Times 0 -Exactly
-            Should -Invoke Write-Log -ParameterFilter { [string]$msg -eq 'BepInEx update check: updatedCleanly=1 updatedWithCleanupFailure=0 errors=0 cleanupFailures=0' } -Times 1 -Exactly
+            Should -Invoke Write-Log -ParameterFilter { [string]$msg -eq 'BepInEx update check: updatedCleanly=1 updatedWithCleanupFailure=0 skippedMissingDevice=0 skippedMissingPath=0 skippedProtected=0 errors=0 cleanupFailures=0' } -Times 1 -Exactly
         }
 
         It "reports action required and excludes a promoted update from the clean count when staging cleanup fails" {
@@ -5366,7 +5587,47 @@ Describe "BepInEx authorized-root and transaction guards" {
             Should -Invoke Write-Host -ParameterFilter { [string]$Object -match '^  Updated with cleanup failure: 1 -- ACTION REQUIRED$' } -Times 1 -Exactly
             Should -Invoke Write-Host -ParameterFilter { [string]$Object -match [regex]::Escape($script:bepStage) } -Times 1 -Exactly
             Should -Invoke Write-Log -ParameterFilter { [string]$msg -match 'update applied.*staging cleanup failed' -and [string]$msg -match [regex]::Escape($script:bepStage) } -Times 1 -Exactly
-            Should -Invoke Write-Log -ParameterFilter { [string]$msg -eq 'BepInEx update check: updatedCleanly=0 updatedWithCleanupFailure=1 errors=0 cleanupFailures=1' } -Times 1 -Exactly
+            Should -Invoke Write-Log -ParameterFilter { [string]$msg -eq 'BepInEx update check: updatedCleanly=0 updatedWithCleanupFailure=1 skippedMissingDevice=0 skippedMissingPath=0 skippedProtected=0 errors=0 cleanupFailures=1' } -Times 1 -Exactly
+        }
+        It "keeps repair-reset rollback failure distinct from the original update failure" {
+            Mock Read-HostSafe { 'R' }
+            Mock Invoke-TpmTransactionalTreePromote { throw 'simulated promotion failure: A device which does not exist was specified.' }
+            Mock Restore-BepInExUpdateBackup { throw 'simulated rollback restore failure' }
+
+            $result = Invoke-BepInExUpdateCheck -UserProfilesDir $script:bepProfiles -CacheDir $script:bepCache -ApprovedGamesRoot $script:bepApproved
+
+            $result.Succeeded | Should -BeFalse
+            $result.Errors | Should -Be 1
+            $result.PathReasonCounts['ROLLBACK_FAILED'] | Should -Be 1
+            Should -Invoke Restore-BepInExUpdateBackup -Times 1 -Exactly
+            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'transaction rollback failed' } -Times 1 -Exactly
+            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'update blocked:' } -Times 0 -Exactly
+        }
+        It "keeps transactional rollback failure ahead of device classification" {
+            Mock Invoke-TpmTransactionalTreePromote { throw 'ROLLBACK FAILED: A device which does not exist was specified.' }
+
+            $result = Invoke-BepInExUpdateCheck -UserProfilesDir $script:bepProfiles -CacheDir $script:bepCache -ApprovedGamesRoot $script:bepApproved
+
+            $result.Succeeded | Should -BeFalse
+            $result.Errors | Should -Be 1
+            $result.MissingDevice | Should -Be 0
+            $result.PathReasonCounts['ROLLBACK_FAILED'] | Should -Be 1
+            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'transaction rollback failed' } -Times 1 -Exactly
+            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'update blocked:' } -Times 0 -Exactly
+        }
+        It "keeps cleanup failure ahead of device classification" {
+            Mock Invoke-TpmTransactionalTreePromote { throw 'CLEANUP FAILED: staging path became unavailable on device' }
+
+            $result = Invoke-BepInExUpdateCheck -UserProfilesDir $script:bepProfiles -CacheDir $script:bepCache -ApprovedGamesRoot $script:bepApproved
+
+            $result.Succeeded | Should -BeFalse
+            $result.Errors | Should -Be 1
+            $result.MissingDevice | Should -Be 0
+            $result.MissingPath | Should -Be 0
+            $result.PathReasonCounts['DEVICE_UNAVAILABLE'] | Should -Be $null
+            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'cleanup failed' } -Times 1 -Exactly
+            Should -Invoke Write-Host -ParameterFilter { [string]$Object -match 'game path became unavailable' } -Times 0 -Exactly
+            Should -Invoke Write-Log -ParameterFilter { [string]$msg -match 'cleanupFailures=1' -and [string]$msg -match 'errors=0' } -Times 1 -Exactly
         }
     }
 }
@@ -9998,7 +10259,7 @@ Describe "RC8 menu and ReShade regressions" {
         $source = $script:ProductionSource
         $invokeStart = $source.IndexOf('function Invoke-ReShadeSetup')
         $signatureCheck = $source.IndexOf('Test-ReShadeDllSignature -Path $dllCheck.Path', $invokeStart)
-        $reviewWarning = $source.IndexOf('source needs review before use', $signatureCheck)
+        $reviewWarning = $source.IndexOf('TPM will not claim installer trust', $signatureCheck)
         $deployment = $source.IndexOf('Installing ReShade into', $signatureCheck)
         $signatureCheck | Should -BeGreaterThan $invokeStart
         $reviewWarning | Should -BeGreaterThan $signatureCheck
@@ -10367,24 +10628,51 @@ Describe "Approved ReShade profile catalog" {
     }
 }
 Describe "ReShade profile previews" {
-    It "reports every canonical profile as available from the embedded preview renderer" {
-        $gallery=@(Get-TpmReShadeProfileGallery);$gallery.Count|Should -Be 5
-        foreach($item in $gallery){$item.PreviewAvailable|Should -BeTrue;$item.PreviewPath|Should -BeNullOrEmpty;$item.PreviewReason|Should -BeNullOrEmpty;$item.Provenance|Should -Be 'TPM synthetic'}
+    BeforeAll {
+        $script:PreviewFixtureRoot = Join-Path $TestDrive 'landscape-preview'
+        [IO.Directory]::CreateDirectory($script:PreviewFixtureRoot) | Out-Null
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\PreviewAssets\ReShadePreviews\TPM-preview-landscape.png') -Destination (Join-Path $script:PreviewFixtureRoot 'TPM-preview-landscape.png')
     }
-    It "fails closed for missing, invalid, traversal, and wrong binding without blocking profiles" {
-        $root=Join-Path $TestDrive 'previews';[IO.Directory]::CreateDirectory($root)|Out-Null
-        $p=Get-TpmReShadeProfile -ProfileId Original
-        (Get-TpmReShadePreviewInfo -ProfileDefinition $p -PreviewRoot $root).Available|Should -BeFalse
-        [IO.File]::WriteAllText((Join-Path $root 'TPM-preview-original.svg'),'bad')
-        (Get-TpmReShadePreviewInfo -ProfileDefinition $p -PreviewRoot $root).Reason|Should -Be 'PREVIEW_INVALID'
-        $p.PreviewAsset='..\escape.svg'
-        (Get-TpmReShadePreviewInfo -ProfileDefinition $p -PreviewRoot $root).Reason|Should -Be 'PREVIEW_BINDING_INVALID'
-        (Get-TpmReShadeProfile -ProfileId Original).ProfileId|Should -Be 'Original'
+    It "validates the bundled landscape identity, dimensions, and hash" {
+        $reference = Get-TpmReShadePreviewReference -PreviewRoot $script:PreviewFixtureRoot
+        $reference.Available | Should -BeTrue
+        $reference.Identity | Should -Be 'TPM-LANDSCAPE-V1'
+        $reference.Version | Should -Be '3'
+        $reference.Hash | Should -Be '7203032094bfd4d174cd3125ef55c87d7b35053fc4e274914b6ae1ac43f286d8'
+        $image = [Drawing.Image]::FromFile($reference.Path)
+        try {
+            $image.Width | Should -Be 1672
+            $image.Height | Should -Be 941
+        } finally {
+            $image.Dispose()
+        }
+    }
+    It "reports every canonical profile as available from the bundled landscape renderer" {
+        $gallery = @(Get-TpmReShadeProfileGallery -PreviewRoot $script:PreviewFixtureRoot)
+        $gallery.Count | Should -Be 5
+        foreach ($item in $gallery) {
+            $item.PreviewAvailable | Should -BeTrue
+            $item.PreviewPath | Should -Be (Join-Path $script:PreviewFixtureRoot 'TPM-preview-landscape.png')
+            $item.PreviewReason | Should -BeNullOrEmpty
+            $item.Provenance | Should -Be 'TPM bundled landscape'
+        }
+    }
+    It "fails closed for missing and invalid landscape assets without blocking profiles" {
+        $root = Join-Path $TestDrive 'previews'
+        [IO.Directory]::CreateDirectory($root) | Out-Null
+        $p = Get-TpmReShadeProfile -ProfileId Original
+        (Get-TpmReShadePreviewInfo -ProfileDefinition $p -PreviewRoot $root).Available | Should -BeFalse
+        [IO.File]::WriteAllText((Join-Path $root 'TPM-preview-landscape.png'), 'bad')
+        (Get-TpmReShadePreviewInfo -ProfileDefinition $p -PreviewRoot $root).Reason | Should -Be 'PREVIEW_LANDSCAPE_ASSET_UNREADABLE'
+        (Get-TpmReShadeProfile -ProfileId Original).ProfileId | Should -Be 'Original'
     }
 }
 Describe "ReShade preview renderer and cache" {
     BeforeAll {
         Add-Type -AssemblyName System.Drawing
+        $script:PreviewFixtureRoot = Join-Path $TestDrive 'renderer-landscape'
+        [IO.Directory]::CreateDirectory($script:PreviewFixtureRoot) | Out-Null
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\PreviewAssets\ReShadePreviews\TPM-preview-landscape.png') -Destination (Join-Path $script:PreviewFixtureRoot 'TPM-preview-landscape.png')
         function Get-TpmPreviewPixelDiffCount {
             param([Parameter(Mandatory)][Drawing.Bitmap]$Left, [Parameter(Mandatory)][Drawing.Bitmap]$Right)
             $difference = [long]0
@@ -10415,23 +10703,23 @@ Describe "ReShade preview renderer and cache" {
     }
     It "renders deterministic Before, After, and Split artifacts from one reference identity" {
         $root=Join-Path $TestDrive 'preview-root';$cache=Join-Path $root 'Cache';[IO.Directory]::CreateDirectory($root)|Out-Null
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\PreviewAssets\ReShadePreviews\TPM-preview-original.svg') -Destination (Join-Path $root 'TPM-preview-original.svg')
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\PreviewAssets\ReShadePreviews\TPM-preview-landscape.png') -Destination (Join-Path $root 'TPM-preview-landscape.png')
         $p=Get-TpmReShadeProfile -ProfileId EnhancedArcade;$a=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Before -PreviewRoot $root -CacheRoot $cache;$b=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode After -PreviewRoot $root -CacheRoot $cache;$c=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache;$s0=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 0 -PreviewRoot $root -CacheRoot $cache;$s50=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 50 -PreviewRoot $root -CacheRoot $cache;$s100=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 100 -PreviewRoot $root -CacheRoot $cache
-        foreach($x in @($a,$b,$c,$s0,$s50,$s100)){$x.Available|Should -BeTrue -Because ($x|ConvertTo-Json);$x.ReferenceIdentity|Should -Be 'TPM-SYNTHETIC-ARCADE-V2';Test-Path -LiteralPath $x.Path -PathType Leaf|Should -BeTrue}
+        foreach($x in @($a,$b,$c,$s0,$s50,$s100)){$x.Available|Should -BeTrue -Because ($x|ConvertTo-Json);$x.ReferenceIdentity|Should -Be 'TPM-LANDSCAPE-V1';Test-Path -LiteralPath $x.Path -PathType Leaf|Should -BeTrue}
         $a.CacheKey|Should -Not -Be $b.CacheKey;$b.CacheKey|Should -Not -Be $c.CacheKey;$s0.CacheKey|Should -Not -Be $s50.CacheKey;$s50.CacheKey|Should -Not -Be $s100.CacheKey
         (New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 50 -PreviewRoot $root -CacheRoot $cache).Reused|Should -BeTrue
     }
     It "renders the processed side by applying effects to the same reference bitmap" {
         $source = $script:ProductionSource
-        $rendererStart = $source.IndexOf('function New-TpmReShadePreviewBitmap')
-        $rendererEnd = $source.IndexOf('function New-TpmReShadePreviewArtifact', $rendererStart)
+        $rendererStart = $source.IndexOf('function Get-TpmReShadePreviewProcessedBitmap')
+        $rendererEnd = $source.IndexOf('function Dispose-TpmReShadePreviewRenderCache', $rendererStart)
         $renderer = $source.Substring($rendererStart, $rendererEnd - $rendererStart)
-        $renderer | Should -Match 'New-TpmReShadePreviewReferenceBitmap -Width \$canvasWidth -Height \$canvasHeight'
-        $renderer | Should -Match 'DrawImageUnscaled\(\$referenceBitmap, 0, 0\)'
+        $renderer | Should -Match 'Get-TpmReShadePreviewProcessedBitmap -Cache \$Cache -ProfileDefinition'
+        $renderer | Should -Match '\$graphics\.DrawImageUnscaled\(\$Cache\.Reference, 0, 0\)'
         $renderer | Should -Match 'Invoke-TpmReShadePreviewProfilePixels'
         $renderer | Should -Not -Match 'drawAfter'
-        $reference = New-TpmReShadePreviewReferenceBitmap -Width 320 -Height 180
-        $processed = New-TpmReShadePreviewBitmap -ProfileDefinition (Get-TpmReShadeProfile -ProfileId EnhancedArcade) -Mode After -Width 320 -Height 180
+        $reference = New-TpmReShadePreviewReferenceBitmap -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
+        $processed = New-TpmReShadePreviewBitmap -ProfileDefinition (Get-TpmReShadeProfile -ProfileId EnhancedArcade) -Mode After -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
         try {
             (Get-TpmPreviewPixelDiffCount -Left $reference -Right $processed) | Should -BeGreaterThan 1000
         } finally {
@@ -10439,14 +10727,14 @@ Describe "ReShade preview renderer and cache" {
         }
     }
     It "renders meaningful distinct outputs for every approved profile without changing the baseline" {
-        $baseline = New-TpmReShadePreviewBitmap -ProfileDefinition (Get-TpmReShadeProfile -ProfileId EnhancedArcade) -Mode Before -Width 320 -Height 180
+        $baseline = New-TpmReShadePreviewBitmap -ProfileDefinition (Get-TpmReShadeProfile -ProfileId EnhancedArcade) -Mode Before -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
         $outputs = @{}
         $stateRoot = Join-Path $TestDrive 'preview-renderer-state'
         [IO.Directory]::CreateDirectory($stateRoot) | Out-Null
         [IO.File]::WriteAllText((Join-Path $stateRoot 'sentinel.txt'), 'unchanged')
         try {
             foreach ($profile in @(Get-TpmReShadeProfiles)) {
-                $rendered = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode After -Width 320 -Height 180
+                $rendered = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode After -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
                 $outputs[[string]$profile.ProfileId] = $rendered
                 $difference = Get-TpmPreviewPixelDiffCount -Left $baseline -Right $rendered
                 if ($profile.ProfileId -eq 'Original') {
@@ -10470,12 +10758,12 @@ Describe "ReShade preview renderer and cache" {
     }
     It "keeps split and slider sides tied to baseline and processed pixels" {
         $profile = Get-TpmReShadeProfile -ProfileId EnhancedArcade
-        $before = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Before -Width 320 -Height 180
-        $after = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode After -Width 320 -Height 180
-        $split = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Split -Width 320 -Height 180
-        $slider0 = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 0 -Width 320 -Height 180
-        $slider50 = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 50 -Width 320 -Height 180
-        $slider100 = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 100 -Width 320 -Height 180
+        $before = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Before -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
+        $after = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode After -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
+        $split = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Split -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
+        $slider0 = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 0 -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
+        $slider50 = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 50 -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
+        $slider100 = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 100 -Width 320 -Height 180 -PreviewRoot $script:PreviewFixtureRoot
         try {
             (Get-TpmPreviewRegionPixelDiffCount -Left $split -Right $before -XStart 0 -XEnd 150 -YStart 60 -YEnd 179) | Should -Be 0
             (Get-TpmPreviewRegionPixelDiffCount -Left $split -Right $after -XStart 170 -XEnd 319 -YStart 60 -YEnd 179) | Should -Be 0
@@ -10495,20 +10783,20 @@ Describe "ReShade preview renderer and cache" {
         $manifest=Join-Path $cache ($first.CacheKey+'.json');$json=Get-Content -LiteralPath $manifest -Raw|ConvertFrom-Json;$json.CacheKey='stale';$json|ConvertTo-Json|Set-Content -LiteralPath $manifest
         (New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache).Available|Should -BeTrue
     }
-    It "renders from the embedded reference when ancillary assets are absent" {
+    It "renders from the bundled landscape reference" {
         $p = Get-TpmReShadeProfile -ProfileId EnhancedArcade
-        $artifact = New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 50
+        $artifact = New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Slider -SliderPosition 50 -PreviewRoot $script:PreviewFixtureRoot -CacheRoot (Join-Path $script:PreviewFixtureRoot 'Cache')
         try {
             $artifact.Available | Should -BeTrue -Because ($artifact | ConvertTo-Json)
-            $artifact.ReferenceIdentity | Should -Be 'TPM-SYNTHETIC-ARCADE-V2'
+            $artifact.ReferenceIdentity | Should -Be 'TPM-LANDSCAPE-V1'
         } finally {
             if ($artifact.Path) { Remove-Item -LiteralPath $artifact.Path -Force -ErrorAction SilentlyContinue }
             if ($artifact.Path) { Remove-Item -LiteralPath ([IO.Path]::ChangeExtension($artifact.Path, '.json')) -Force -ErrorAction SilentlyContinue }
         }
     }
     It "keeps preview rendering outside preset, asset, game, and trust state" {
-        $root=Join-Path $TestDrive 'preview-root';$cache=Join-Path $root 'Cache';[IO.Directory]::CreateDirectory($root)|Out-Null
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\PreviewAssets\ReShadePreviews\TPM-preview-original.svg') -Destination (Join-Path $root 'TPM-preview-original.svg')
+        $root=Join-Path $TestDrive 'preview-state';$cache=Join-Path $root 'Cache';[IO.Directory]::CreateDirectory($root)|Out-Null
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\PreviewAssets\ReShadePreviews\TPM-preview-landscape.png') -Destination (Join-Path $root 'TPM-preview-landscape.png')
         $p=Get-TpmReShadeProfile -ProfileId EnhancedArcade;$preset=(New-TpmReShadePresetContent -ProfileDefinition $p);$hashes=@(Get-TpmReShadeEffectCatalog|ForEach-Object{(@($_.SHA256)-join ',')});$game=Join-Path $TestDrive 'game';[IO.Directory]::CreateDirectory($game)|Out-Null;[IO.File]::WriteAllText((Join-Path $game 'keep.txt'),'keep')
         $null=New-TpmReShadePreviewArtifact -ProfileDefinition $p -Mode Split -PreviewRoot $root -CacheRoot $cache
         (New-TpmReShadePresetContent -ProfileDefinition $p)|Should -Be $preset;(@(Get-TpmReShadeEffectCatalog|ForEach-Object{(@($_.SHA256)-join ',')}))|Should -Be $hashes;(Get-Content -LiteralPath (Join-Path $game 'keep.txt') -Raw)|Should -Be 'keep'
@@ -10521,7 +10809,7 @@ Describe "ReShade preview renderer and cache" {
 Describe "ReShade profile state features" {
     It "compares approved profiles without deployment and supports only reviewed default intensity" {
         $r=Compare-TpmReShadeProfiles -LeftProfileId Original -RightProfileId EnhancedArcade
-        $r.Valid|Should -BeTrue;$r.Deploys|Should -BeFalse;$r.ReferenceIdentity|Should -Be 'TPM-SYNTHETIC-ARCADE-V2'
+        $r.Valid|Should -BeTrue;$r.Deploys|Should -BeFalse;$r.ReferenceIdentity|Should -Be 'TPM-LANDSCAPE-V1'
         @((Get-TpmReShadeIntensityVariants -ProfileDefinition (Get-TpmReShadeProfile -ProfileId Vivid))).Count|Should -Be 1
         { Resolve-TpmReShadeIntensityVariant -ProfileDefinition (Get-TpmReShadeProfile -ProfileId Vivid) -VariantId Strong }|Should -Throw
         (Compare-TpmReShadeProfiles -LeftProfileId NotApproved -RightProfileId Original).Valid|Should -BeFalse
@@ -10536,6 +10824,11 @@ Describe "ReShade profile state features" {
     }
 }
 Describe "ReShade trusted profile restore" {
+    BeforeAll {
+        $script:TrustedPreviewRoot = Join-Path $TestDrive 'trusted-profile-landscape'
+        [IO.Directory]::CreateDirectory($script:TrustedPreviewRoot) | Out-Null
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\PreviewAssets\ReShadePreviews\TPM-preview-landscape.png') -Destination (Join-Path $script:TrustedPreviewRoot 'TPM-preview-landscape.png')
+    }
     It "deploys the complete DLL, preset, and approved effect set through one trusted transaction" {
         $root=Join-Path $TestDrive 'full-profile';$game=Join-Path $root 'game.exe';$dll=Join-Path $root 'ReShade64.dll';$stage=Join-Path $root 'effect-stage';$effect=Join-Path $stage 'LumaSharpen.fx';$ownership=Join-Path $root 'profile.json'
         [IO.Directory]::CreateDirectory($root)|Out-Null;[IO.Directory]::CreateDirectory($stage)|Out-Null
@@ -10612,7 +10905,7 @@ Describe "ReShade trusted profile restore" {
         (Get-PostgresFailureDiagnosis -GameLabel 'GameE' -DbName 'db_e' -Detail 'psql.exe : FATAL: password authentication failed for user postgres').Category | Should -Be 'PasswordAuthenticationFailed'
         $source = $script:ProductionSource
         $source | Should -Match 'could not log in to PostgreSQL as postgres'
-        $source | Should -Match '\[F\] Fix PostgreSQL password'
+        $source | Should -Match '\[F\] Try another postgres password'
         $source | Should -Match 'replacement password validation failed; nothing was saved'
     }
     It "captures PostgreSQL client diagnostics before blocking writes" {
@@ -10628,17 +10921,17 @@ Describe "ReShade trusted profile restore" {
         $source | Should -Match 'Choose how your game should look'
         $source | Should -Match 'Use the preview window to compare the options'
         $source | Should -Match 'Nothing will be changed until you confirm'
-        $source | Should -Match 'saved game path was not found -- skipped'
+        $source | Should -Match 'saved game executable was not found -- skipped'
         $source | Should -Match 'protected existing ReShade files -- unchanged'
         $source | Should -Match 'Installed new'
         $source | Should -Match 'Updated'
     }
     It "routes ReShade selection through one visual gallery before confirmation" {
         $script:ProductionSource | Should -Match 'Show-TpmReShadeProfileGalleryWindow'
-        $script:ProductionSource | Should -Match 'switchable before/after comparison'
+        $script:ProductionSource | Should -Match 'compare Original/After or Split'
         $script:ProductionSource | Should -Match 'Use selected profile'
         $script:ProductionSource | Should -Match 'Nothing will be changed until you confirm'
-        $script:ProductionSource | Should -Match 'choose profiles in one switchable window'
+        $script:ProductionSource | Should -Match 'choose profiles in the terminal'
         $script:ProductionSource | Should -Not -Match 'preview opens after you choose an option'
         $script:ProductionSource | Should -Not -Match 'Clean & Sharp  \(Recommended\)'
         $invokeStart = $script:ProductionSource.IndexOf('function Invoke-ReShadeSetup')
@@ -10795,9 +11088,9 @@ Describe "ReShade trusted profile restore" {
     }
     It "renders distinct left, middle, and right comparison slider positions" {
         $profile = Get-TpmReShadeProfile -ProfileId EnhancedArcade
-        $left = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 0 -Width 960 -Height 540
-        $middle = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 50 -Width 960 -Height 540
-        $right = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 100 -Width 960 -Height 540
+        $left = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 0 -Width 960 -Height 540 -PreviewRoot $script:TrustedPreviewRoot
+        $middle = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 50 -Width 960 -Height 540 -PreviewRoot $script:TrustedPreviewRoot
+        $right = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 100 -Width 960 -Height 540 -PreviewRoot $script:TrustedPreviewRoot
         try {
             $left.GetPixel(200, 180).ToArgb() | Should -Not -Be $middle.GetPixel(200, 180).ToArgb()
             $middle.GetPixel(800, 180).ToArgb() | Should -Not -Be $right.GetPixel(800, 180).ToArgb()
@@ -10809,9 +11102,9 @@ Describe "ReShade trusted profile restore" {
     }
     It "honors non-default dimensions while applying the slider split" {
         $profile = Get-TpmReShadeProfile -ProfileId EnhancedArcade
-        $left = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 0 -Width 640 -Height 360
-        $middle = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 50 -Width 640 -Height 360
-        $right = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 100 -Width 640 -Height 360
+        $left = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 0 -Width 640 -Height 360 -PreviewRoot $script:TrustedPreviewRoot
+        $middle = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 50 -Width 640 -Height 360 -PreviewRoot $script:TrustedPreviewRoot
+        $right = New-TpmReShadePreviewBitmap -ProfileDefinition $profile -Mode Slider -SliderPosition 100 -Width 640 -Height 360 -PreviewRoot $script:TrustedPreviewRoot
         try {
             $left.Width | Should -Be 640
             $left.Height | Should -Be 360
@@ -10835,6 +11128,7 @@ Describe "ReShade trusted profile restore" {
             Picture = [pscustomobject]@{ Image = $null }
             Profile = Get-TpmReShadeProfile -ProfileId EnhancedArcade
             CacheRoot = $TestDrive
+            PreviewRoot = $script:TrustedPreviewRoot
             SliderValue = 50
             Mode = 'Split'
         }

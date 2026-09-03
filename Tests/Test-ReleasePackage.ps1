@@ -56,6 +56,7 @@ try {
         'TeknoParrot-Manager-QuickStart.txt',
         'TeknoParrot-Manager-CHANGELOG.txt',
         'LICENSE',
+        'PreviewAssets/ReShadePreviews/TPM-preview-landscape.png',
         'PreviewAssets/ReShadePreviews/TPM-preview-original.svg',
         'PreviewAssets/ReShadePreviews/TPM-preview-clean.svg',
         'PreviewAssets/ReShadePreviews/TPM-preview-vivid.svg',

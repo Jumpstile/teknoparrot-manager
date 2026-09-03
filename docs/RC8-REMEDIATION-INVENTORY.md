@@ -4,6 +4,33 @@ This inventory is limited to the RC8 gate fixes on the RC7-descended remediation
 branch. It does not authorize profile-pack import, broad control mapping, PCSX2x6
 support, or any other post-1.0 feature.
 
+## Skylinekiller hold evidence
+
+External tester: Skylinekiller
+Support package: `TeknoParrotManager-Support-20260902-161402.zip`
+SHA-256: `6a2fa446e09dc795748773ea542e75576715ced9b7803b750cfe71c90d8763ab`
+Entries: 5
+This evidence remains a remediation hold record, not runtime certification:
+
+- ReShade: partial installation occurred and errors occurred. The stale
+  `No local ReShade source was found` / setup incomplete wording appeared
+  despite source acquisition/install activity. Missing-device failures must be
+  classified as safe skips.
+- dgVoodoo2: BattleFantasia was auto-detected as a legacy API game, then
+  deployment failed with `A device which does not exist was specified.` The
+  result must be a missing-device/path skip, not a generic deployment failure.
+- GPU Compatibility Fix: setup fatally aborted with
+  `A device which does not exist was specified.` The result must be a
+  per-game safe skip, not a script-aborting fatal.
+- BepInEx: 15 games reported update blocked, and rollback-failure/update-blocked
+  evidence was present in the support log. Missing device/path, protected or
+  unowned files, rollback failure, and update blocked must remain separate
+  reason categories.
+
+The shared mutation-path invariant below is the required response to the
+missing-device findings. No affected workflow may promote or mutate a game
+until its registered path is revalidated at the mutation boundary.
+
 ## Specification inventory
 
 | ID     | Area                      | Governing behavior                                                                                                                                                                                                                                                             | Implementation/test pointer                                   |
@@ -22,6 +49,7 @@ support, or any other post-1.0 feature.
 | EG-S03 | Eggman path roles         | An external primary ZIP/source folder may be an explicit DAT destination when it is reachable, non-reparse, outside protected roots, and revalidated before the final move; supplementary and ambiguous source roles are never auto-selected.                                  | Get-EggmanDatPathRole; fallback/reparse/role tests             |
 | BX-S01 | BepInEx target            | Each candidate root must be inside the approved games root and every existing path component must be non-reparse before update discovery can lead to a prompt, download, backup, or transaction. Integrity health checks must also identify incomplete current-version trees so repair-reset remains reachable.                                                                               | Test-BepInExGameRootSafe; no-write tests                      |
 | BX-S02 | BepInEx transaction       | ZIP extraction occurs in isolated staging. Backup creation is verified before promotion. Live promotion rolls back all promoted files on failure; rollback failure preserves evidence and is never reported as success.                                                        | Invoke-TpmTransactionalTreePromote; rollback tests            |
+| BX-S05 | Shared game mutation path | ReShade, dgVoodoo2, GPU-fix, and BepInEx validate the registered executable path immediately before inspection and again at the mutation boundary; unavailable devices, missing leaves, inaccessible/reparse paths, and resolution changes are classified and never mutated. | Test-TpmGameMutationPath; workflow preflight/boundary tests |
 | BX-S03 | BepInEx cleanup           | Recursive staging cleanup is limited to a canonical non-reparse `BepInEx-*` directory under the controlled TPM staging root. A post-promotion cleanup failure preserves residue, reports ACTION REQUIRED with the validated path, and is excluded from the clean-update count. | Remove-BepInExStagingDirectory; cleanup result tests          |
 
 | FFB-S01 | FFB plugin ownership   | TPM records each deployed hook with game-root/path/source/deployed hashes and removes it only when the current file still matches the recorded ownership. Unowned or changed hooks remain untouched. | Write/Remove-FFBPluginOwnership; ownership tests |
@@ -33,9 +61,8 @@ support, or any other post-1.0 feature.
 | UX-S05  | Optional downloads      | Automatic ReShade/dgVoodoo2 acquisition retries or offers an explicit advanced existing-file path; signature/digest gates remain mandatory and cancel is truthful. | Invoke-ReShadeSetup; Invoke-DgVoodoo2Setup |
 | UX-S06  | Registration ambiguity  | Present validated candidate profiles for an explicit choice; blank/invalid input leaves the case unresolved instead of guessing. | Invoke-ManualRegistrationChoices; registration tests |
 | UX-S07  | Health boundaries       | Missing firmware/components remain contract-backed, read-only warnings with a legitimate-source/TPUI repair handoff; TPM does not fabricate or replace vendor files. | Get-CompatibilityWarnings; health tests |
-| UX-S08  | Update boundary         | Explicit approved main-menu updates may clear only the target ReadOnly flag after backup intent, and restore it on every exit path; failures state backup truthfully. | Invoke-ManagerUpdateInstall; update tests |
-| SUP-S01 | Support package collection | Option 14 gathers only allowlisted TPM/TeknoParrot/game text diagnostics and metadata-only plugin inventories into a fixed support ZIP; it never archives arbitrary directories or game payloads. | New-TpmSupportPackage; SupportPackage.Tests.ps1 |
-| SUP-S02 | Support package privacy | Common credentials and user-profile paths are redacted from included text; credentials, profiles, recovery state, executables, DLL payloads, archives, firmware, and unrelated files are excluded. The manifest records collected/absent/excluded/failed/unsafe-content-rejected sources. | Redact-TpmSupportText; manifest/privacy tests |
+| SUP-S01 | Support package collection | Option 14 gathers only allowlisted TPM/TeknoParrot/game text diagnostics and metadata-only plugin inventories into a fixed support ZIP; it never archives arbitrary directories or game payloads. The manifest and completion output lead with `What failed` and `What TPM did not change`. | New-TpmSupportPackage; SupportPackage.Tests.ps1 |
+| SUP-S02 | Support package privacy | Common credentials and user-profile paths are redacted from included text and user-facing failure summaries; credentials, profiles, recovery state, executables, DLL payloads, archives, firmware, and unrelated files are excluded. The manifest records collected/absent/excluded/failed/unsafe-content-rejected sources. | Redact-TpmSupportText; manifest/privacy tests |
 | SUP-S03 | Support package object-bound safety | Source/profile/plugin reads consume identity-validated opened handles; unsafe path identity is rejected, destination promotion uses an identity-validated directory handle and CREATE_NEW, and staging cleanup deletes only through validated owned handles. | Open-TpmSupportSafeFileStream; Move-TpmSupportZipByIdentity; adversarial/workflow tests |
 | WS-S01 | Engineering handoff      | GitHub is authoritative; each machine uses a local clone/worktree and hands off pushed refs plus exact SHAs. NAS is storage/mirror evidence, not an authoritative active Git worktree. | AGENTS.md; RELEASE-SAFETY-CHECKLIST.md; #293 policy           |
 
@@ -55,6 +82,9 @@ support, or any other post-1.0 feature.
 | INV-SUP-04 | Missing optional diagnostics are recorded as absent; collection/ZIP failures cannot produce a success result, and workflow status is closed on every exit. | Must hold on success and failure |
 | INV-BX-02 | A recoverable BepInEx promotion failure restores the complete pre-operation tree; an unrecoverable failure preserves evidence and reports blocked.                                                                                                                  | Must hold in rollback matrix                  |
 | INV-BX-03 | An applied BepInEx update is counted as clean only after its validated staging directory is removed. Cleanup failure preserves the exact validated residue path and produces ACTION REQUIRED output.                                                                | Must hold after successful promotion          |
+| INV-BX-04 | Shared game mutation workflows never act on an unavailable, missing, reparse-backed, inaccessible, or changed registered executable path. | Must hold at every read and mutation boundary |
+| INV-RS-01 | ReShade preview output is derived from the bundled hash-validated landscape reference; cache reuse never becomes deployment or trust evidence, and all in-memory bitmaps are disposed on gallery close. | Must hold for every preview mode |
+| INV-PG-10 | PostgreSQL reset reports a committed-but-unverified state distinctly; it never claims the old password remains authoritative after ALTER succeeded, and it never saves an unverified replacement credential. | Must hold after every reset process outcome |
 
 ## Adversarial review cases required before handoff
 

@@ -380,7 +380,7 @@ the #290 gate.
   - Include: `TeknoParrot-Manager.ps1`, `TeknoParrot-Manager.bat`,
     `TeknoParrot-Manager-README.txt`, `TeknoParrot-Manager-QuickStart.txt`,
     `TeknoParrot-Manager-CHANGELOG.txt`, `LICENSE`, `Crosshairs\` (all 321 PNGs),
-    `PreviewAssets\ReShadePreviews\` (the five TPM-owned SVG preview references),
+    `PreviewAssets\ReShadePreviews\` (the bundled landscape PNG plus the five TPM-owned SVG preview references),
     `tools\Invoke-TpmAutoUpdate.ps1`, `tools\TpmAutoUpdate.Core.psm1`,
     helper documented in `docs/AUTO_UPDATE.md` -- omitting this folder was a
     real pre-1.0 packaging gap; the menu-integrated "Check for Updates" option

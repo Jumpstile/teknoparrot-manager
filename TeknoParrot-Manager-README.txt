@@ -290,13 +290,13 @@
     The terminal remains usable if the gallery is behind another window,
     closed, unavailable, or fails. Numbered selection updates the gallery when
     available. U is the only path toward deployment; B cancels without
-    changes and D returns after showing details. The gallery compares a
-    deterministic TPM-owned arcade-room render with layered cabinet shading,
-    glossy bezel and marquee, reflective floor, neon spill lighting, textured
-    background cabinets, detailed racing gameplay, readable HUD text, and fine
-    high-contrast edges. Before is the untouched baseline, After is the
-    processed profile, Split places baseline left and processed output right,
-    and the slider moves that boundary from all processed to all baseline.
+    changes and D returns after showing details. The gallery compares the
+    bundled TPM-owned landscape reference image from
+    PreviewAssets\ReShadePreviews\TPM-preview-landscape.png. TPM validates and
+    hashes this image before rendering. Before is the untouched baseline, After
+    is the processed profile, Split places baseline left and processed output
+    right, and the slider moves that boundary from all processed to all
+    baseline. The terminal remains authoritative if the preview cannot open.
     Multi-monitor suitability is read-only and advisory, uses caller-supplied
     evidence, treats duplicate target IDs as ambiguous, and does not separately
     label EXTENDED arrangements or acquire Windows display topology itself.
@@ -1266,20 +1266,18 @@
       Enhanced Arcade    Clearer edges followed by stronger color.
       Classic Arcade CRT CRT-style scanlines and arcade-display character.
 
-    One visual gallery opens before the final confirmation. It shows a
-    deterministic TPM-owned arcade-room render with layered cabinet shading,
-    glossy bezel and marquee, reflective floor, neon spill, textured
-    background cabinets, a detailed racing screen, readable HUD text, and
-    fine high-contrast edges for each profile. It offers Before as the
-    untouched baseline, After as the processed profile, Split with baseline
-    on the left and processed output on the right, and a 0-100 slider from
-    all processed to all baseline while you switch profiles.
+    One visual gallery opens before the final confirmation. It uses the
+    bundled and hash-validated TPM landscape reference at
+    PreviewAssets\ReShadePreviews\TPM-preview-landscape.png. It offers Before
+    as the untouched baseline, After as the processed profile, Split with
+    baseline on the left and processed output on the right, and a 0-100 slider
+    from all processed to all baseline while you switch profiles.
     The preview is illustrative, not a pixel-perfect guarantee for every game.
-    Preview files and cached renderings are local TPM-owned data; no
-    copyrighted game screenshots are bundled. If rendering or display is
-    unavailable, TPM shows the profile description and continues normally.
-    Previewing never changes ReShade trust, generated presets, game files,
-    monitor settings, or deployment state.
+    Cached renderings are local TPM-owned data and are not trust or deployment
+    evidence. If rendering or display is unavailable, TPM shows the profile
+    description and continues normally. Previewing never changes ReShade
+    trust, generated presets, game files, monitor settings, or deployment
+    state.
 
 
   HOW IT IS INSTALLED
@@ -2506,6 +2504,13 @@
   .pgpass, recovery state, tokens, API keys, cookies, or unrelated files.
   Common credential patterns and unnecessary user-profile paths are redacted
   from included text as defense in depth.
+
+  The package output leads with:
+    What failed:
+      Detailed allowlisted collection failures, if any.
+    What TPM did not change:
+      Game files, profiles, credentials, and emulator files.
+  Routine missing optional diagnostics remain summarized in the manifest.
 
   Missing optional diagnostics are recorded in the manifest. A partial
   package is clearly marked. A collection or ZIP failure never reports

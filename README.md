@@ -473,13 +473,12 @@ Choose: [1-5] Preview profile  [U] Use selected profile  [R] Reopen preview  [B]
 shows descriptions, and `R` reopens the optional gallery without taking
 terminal input away from the user.
 
-The gallery uses a deterministic, TPM-owned arcade-room render rather than a
-downloaded asset. The scene includes a physically shaded cabinet shell,
-glossy bezel and marquee, reflective floor, neon spill lighting, textured
-background cabinets, a detailed racing screen, readable HUD text, and
-high-contrast fine edges. `Before` is the untouched baseline, `After` is the
-selected profile transform, `Split` shows baseline on the left and processed
-output on the right, and the slider moves that boundary from 0 (all
+The gallery uses a deterministic, TPM-owned comparison based on the bundled
+`PreviewAssets\ReShadePreviews\TPM-preview-landscape.png` reference image.
+TPM validates the image before use and records its identity, version, and
+SHA-256 in preview cache metadata. `Before` is the untouched baseline, `After`
+is the selected profile transform, `Split` shows baseline on the left and
+processed output on the right, and the slider moves that boundary from 0 (all
 processed) to 100 (all baseline). Choosing a profile does not write files;
 deployment remains behind the explicit confirmation. If rendering or display
 is unavailable, typed selection remains available.
@@ -1098,6 +1097,12 @@ plain-language manifest and, where safely available, allowlisted TPM logs,
 TeknoParrot logs, game-local text logs, metadata-only plugin inventories, and
 per-file ReShade removal scan/transaction details.
 
+
+The package output leads with `What failed:` and `What TPM did not change:`.
+The first section preserves detailed allowlisted collection failures while
+routine missing optional diagnostics stay collapsed. The second section
+states that support collection does not change game files, profiles,
+credentials, or emulator files.
 The package never copies game executables, ROMs, archives, firmware, arbitrary
 DLL payloads, profiles, configuration files, credentials, PostgreSQL passwords,
 `.pgpass`, recovery state, tokens, API keys, cookies, or unrelated personal

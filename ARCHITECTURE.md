@@ -35,11 +35,12 @@ chooser remains usable when WinForms is behind another window, closed,
 unavailable, or fails to open. Numbered selection updates the gallery when it
 is available; `U` is the only path toward deployment, while `B` and invalid
 input remain non-mutating. The gallery changes the displayed deterministic,
-TPM-owned arcade-room comparison when the user changes profile, but does not
-deploy files. The reference is rendered in memory with layered cabinet
-materials, neon spill, reflective floor, background machines, a detailed
-racing screen, readable HUD text, and deterministic texture noise. `Before` is
-the untouched reference, `After` contains only the selected profile transform,
+TPM-owned comparison when the user changes profile, but does not deploy files.
+The reference is the bundled `PreviewAssets\ReShadePreviews\TPM-preview-landscape.png`
+asset, validated by System.Drawing decoding, fixed dimensions, identity
+`TPM-LANDSCAPE-V1`, version `3`, and SHA-256
+`7203032094bfd4d174cd3125ef55c87d7b35053fc4e274914b6ae1ac43f286d8`. `Before` is the
+untouched reference, `After` contains only the selected profile transform,
 and `Split`/`Slider` compose those two bitmaps at the requested boundary.
 Deployment remains behind the existing explicit confirmation. The reference
 identity, renderer version, and effect hashes are part of the cache key so
@@ -54,6 +55,23 @@ renderer or state errors are logged with their stage, the optional gallery is
 closed, and the terminal-only chooser remains authoritative. Gallery events,
 preview refresh, and all comparison controls are visual-only; deployment is
 still unreachable until terminal `U` plus the existing explicit confirmation.
+
+**Shared game mutation path boundary (RC8).** ReShade, dgVoodoo2, GPU-fix,
+and BepInEx call `Test-TpmGameMutationPath` before inspection and immediately
+before a game mutation. The guard canonicalizes the registered executable,
+classifies unavailable devices separately from missing leaves, rejects
+reparse/inaccessible paths, and requires the resolved target to remain the
+same. A failed boundary leaves that game unchanged and prevents a partial
+success result from being reported as complete.
+Mutation exceptions are mapped to the same `DEVICE_UNAVAILABLE` and
+`GAME_PATH_MISSING` reason codes before workflow counters are updated, so an
+unavailable device cannot be reported as a generic deployment error.
+
+**PostgreSQL committed-state recovery (RC8).** The single-user `ALTER ROLE`
+is the mutation cutoff. If it succeeds but service restart or new-password
+authentication cannot be verified, recovery returns `PasswordChangeCommitted`
+and a blocked result with evidence; it never says the old password remains
+authoritative and never saves the unverified replacement credential.
 
 
 ## Startup: network-path detection and hard timeout (v0.99.23)
@@ -245,10 +263,9 @@ The result is advisory input to ReShade eligibility only. It may add `DISPLAY_TA
 **Canonical visual profiles and generated presets (RC8).** TPM exposes exactly five bounded profiles: Original (empty stack), Clean & Sharp (`SweetFX.LumaSharpen`), Vivid Arcade (`SweetFX.Vibrance`), Classic Arcade CRT (`FXShaders.CRT_Lottes`), and Enhanced Arcade (`SweetFX.LumaSharpen` followed by `SweetFX.Vibrance`). Profile IDs select definitions, but trust remains in the approved effect catalog, pinned revisions, required files, and SHA-256 values. Curated profile and effect metadata is `ADVISORY_UNMEASURED` with `MeasuredEvidence = $false`; no profile is marked `Recommended` or `VALIDATED_SINGLE` without measured evidence. CRT is isolated from sharpening and vibrance in normal profile mode; the enhanced two-effect order is explicit.
 
 `New-TpmReShadePresetContent` generates stable TPM-owned preset text from the selected definition, with normalized technique order and no timestamps, randomness, paths, or user code. `Test-TpmReShadePresetContent` validates the generated structure and rejects techniques outside the approved bounded set. Original intentionally generates no effect techniques. Advanced custom `.ini` input remains opt-in and is path/extension/existence validated; its contents do not become approved effect evidence.
-**Profile suitability and report boundaries.** Profile suitability is advisory. Bounded resolution, caller-supplied multi-monitor target confidence, and effect sensitivity can report performance or review guidance, including high-cost CRT at a confidently known demanding resolution, but they do not alter profile mapping or hard-block ordinary profile selection solely on resolution evidence. TPM does not configure monitors, rewrite display settings, or silently overwrite ambiguous or user-owned preset content. `Write-TpmActionRequiredReports` writes sanitized imported notes to the separate `TeknoParrot-Manager-game-notes.txt` report and writes Action Required only when actionable evidence exists; Action Required contains authored guidance, not raw source notes.
-**Preview renderer and cache (RC8 freeze exception).** `New-TpmReShadePreviewBitmap` renders deterministic `TPM-SYNTHETIC-ARCADE-V2` output from one TPM-owned arcade-room reference. The reference combines layered cabinet materials, glossy bezel and marquee, neon spill lighting, reflective floor, textured background cabinets, a detailed racing screen, readable HUD text, perspective shading, and deterministic raster texture. `Before` returns the untouched reference, `After` applies only the selected approved profile transform, and `Split`/percentage-driven `Slider` compose those two bitmaps at the requested boundary. `New-TpmReShadePreviewArtifact` materializes the result under the cache below `ReShadePreviewCache\`; rendering does not depend on live-fetched ReShade files or ancillary upgrade state. The legacy SVG assets under `PreviewAssets\ReShadePreviews\` remain only for the isolated preview-info compatibility helper and are not gallery input.
+**Preview renderer and cache (RC8 freeze exception).** `New-TpmReShadePreviewBitmap` decodes the bundled `TPM-preview-landscape.png` reference and renders deterministic `Before`, `After`, `Split`, and percentage-driven `Slider` output. The processed bitmap is derived from the same decoded reference and cached per profile; comparison composition copies bounded pixel regions so the untouched side remains byte-stable. `New-TpmReShadePreviewArtifact` materializes results under `ReShadePreviewCache\`; rendering does not depend on live-fetched ReShade runtime files.
 
-The cache manifest records the subject/mode, slider position when applicable, intensity identity, preset version, approved shader SHA-256 values, reference version/hash, and renderer version. A missing, corrupt, stale, or mismatched manifest/image regenerates safely; cache artifacts are never trust or deployment evidence. `Open-TpmReShadePreviewWindow`, `Update-TpmReShadePreviewWindow`, `Close-TpmReShadePreviewWindow`, and `Show-TpmReShadePreviewWindow` provide the window lifecycle. WinForms is loaded lazily, requires STA for actual display, and returns a text-only fallback in noninteractive or unavailable environments. Preview rendering and mode changes never write game files, generated presets, effect assets, trust evidence, or display settings.
+The cache manifest records the subject/mode, slider position when applicable, intensity identity, preset version, approved shader SHA-256 values, reference identity/version/hash, and renderer version. A missing, corrupt, stale, or mismatched manifest/image regenerates safely; cache artifacts are never trust or deployment evidence. The WinForms lifecycle keeps one reference and processed-bitmap cache per window, lazily creates it when needed, and disposes every cached bitmap during close. `Open-TpmReShadePreviewWindow`, `Update-TpmReShadePreviewWindow`, `Close-TpmReShadePreviewWindow`, and `Show-TpmReShadePreviewWindow` provide the window lifecycle. WinForms is loaded lazily, requires STA for actual display, and returns a text-only fallback in noninteractive or unavailable environments. Preview rendering and mode changes never write game files, generated presets, effect assets, trust evidence, or display settings.
 **Full profile deployment and restore (RC8 freeze exception).** Normal ReShade setup and the explicit per-game restore action call `Install-TpmReShadeProfileDeployment`. It stages the architecture-selected ReShade DLL, a canonical generated `ReShade.ini` when a trusted profile is selected, and every approved effect asset, then promotes them with one `Invoke-TpmTransactionalPromote` transaction. The per-game ownership manifest is stored under `ReShade\TPM-State\Deployments\<SHA256(game ID)>.json`; ownership is committed only after the physical promotion and post-promotion hashes succeed. A later profile-history entry is written only after that deployment returns success.
 
 Restore history is a selector, not trust evidence. Restore validates the profile schema, ordered approved effect IDs, ordered catalog hashes, and intensity variant before deployment; it never copies a historical path or arbitrary historical file. Missing, corrupt, stale, or unsupported history produces a friendly fresh-selection path. The chooser requires an explicit `R` restore choice, offers a remembered profile only after explicit confirmation, and exposes catalog-bound favorites through `F`.
@@ -465,9 +482,12 @@ The release ZIP is staged and inventory-checked before promotion. A
 timestamped BepInEx backup is copied and hash-verified before live changes.
 Promotion uses one rollback-safe tree transaction; recoverable failures
 restore the pre-operation tree, while rollback or cleanup uncertainty
-preserves evidence and does not report clean completion. If live promotion
-succeeds but ordinary staging cleanup fails, the update is reported separately
-as applied-with-cleanup-failure, excluded from the clean-update count, and the
+preserves evidence and does not report clean completion. Rollback failure is
+a distinct `ROLLBACK_FAILED` reason category and error counter; it takes
+precedence over device/path text embedded in the original failure so recovery
+uncertainty is never downgraded to a safe skip. If live promotion succeeds but
+ordinary staging cleanup fails, the update is reported separately as
+applied-with-cleanup-failure, excluded from the clean-update count, and the
 validated residue path is logged and shown as ACTION REQUIRED. Before version
 comparison, `Get-BepInExInstallationHealth` verifies required core/bootstrap
 files, version, architecture, and reparse safety. A current-version but

@@ -1403,15 +1403,30 @@ $safeAffectedGameSummary = (Redact-TpmSupportText -Text $AffectedGameSummary).Te
 $lines.Add('Affected game scope: ' + $safeAffectedGameSummary) | Out-Null
 $lines.Add('Games considered: ' + $GameCodes.Count) | Out-Null
 $collected = @($Records | Where-Object Status -eq 'Collected')
+$failureRecords = @($Records | Where-Object Status -eq 'CollectionFailed')
 $lines.Add('Collected diagnostic files: ' + @($collected | Where-Object Destination -notlike 'metadata\*').Count) | Out-Null
 $lines.Add('Plugin inventory files: ' + @($collected | Where-Object Destination -like 'metadata\*').Count) | Out-Null
 $lines.Add('Optional diagnostics not found: ' + @($Records | Where-Object Status -eq 'NotPresent').Count) | Out-Null
-$lines.Add('Collection failures: ' + @($Records | Where-Object Status -eq 'CollectionFailed').Count) | Out-Null
+$lines.Add('Collection failures: ' + $failureRecords.Count) | Out-Null
 $lines.Add('Intentional exclusions or unsafe content: ' + @($Records | Where-Object Status -in @('IntentionallyExcluded','RejectedUnsafeContent')).Count) | Out-Null
+$lines.Add('') | Out-Null
+$lines.Add('What failed:') | Out-Null
+if ($failureRecords.Count -eq 0) {
+    $lines.Add('- No allowlisted collection failure was recorded.') | Out-Null
+} else {
+    foreach ($record in $failureRecords) {
+        $recordSource = (Redact-TpmSupportText -Text ([string]$record.Source)).Text
+        $detail = if ($record.Detail) { ' -- ' + (Redact-TpmSupportText -Text ([string]$record.Detail)).Text } else { '' }
+        $lines.Add(('- {0}{1}' -f $recordSource, $detail)) | Out-Null
+    }
+}
+$lines.Add('') | Out-Null
+$lines.Add('What TPM did not change:') | Out-Null
+$lines.Add('- No game files, executables, DLL payloads, profiles, credentials, or emulator files were included or modified by support collection.') | Out-Null
+$lines.Add('- Missing optional diagnostics are not collection failures; they were left unchanged.') | Out-Null
 $lines.Add('') | Out-Null
 $lines.Add('A missing game usually means no matching safe diagnostic file was present; it does not mean TPM ignored that game.') | Out-Null
 $lines.Add('This ZIP may still be useful for support when only partial evidence was collected.') | Out-Null
-$lines.Add('') | Out-Null
     $lines.Add('Diagnostic sources checked:') | Out-Null
     $lines.Add('- TPM-owned allowlisted logs and reports beside the script') | Out-Null
     $lines.Add('- Allowlisted TeknoParrot root logs, including ParrotPatcher_Log.txt') | Out-Null
@@ -2294,6 +2309,125 @@ function Test-TpmNoReparsePath {
         }
         return $true
     } catch { return $false }
+}
+
+# Validate a registered game executable immediately before a workflow reads or
+# mutates its directory. The result is structured so callers can distinguish a
+# temporarily unavailable device from an ordinary missing executable, an
+# inaccessible path, or a reparse/containment failure.
+function Test-TpmGameMutationPath {
+    param(
+        [Parameter(Mandatory)][string]$GamePath,
+        [switch]$RequireLeaf
+    )
+    $result = [ordered]@{
+        Valid = $false
+        ReasonCode = 'EMPTY_PATH'
+        Reason = 'The registered game path is empty.'
+        OriginalPath = $GamePath
+        CanonicalPath = $null
+        ResolvedPath = $null
+        GameDirectory = $null
+    }
+    if ([string]::IsNullOrWhiteSpace($GamePath)) { return [pscustomobject]$result }
+    $trimmedGamePath = $GamePath.Trim()
+    if ($trimmedGamePath -match '^[A-Za-z]:[\\/]') {
+        $rawRoot = $trimmedGamePath.Substring(0, 3)
+        try {
+            if (-not (Test-Path -LiteralPath $rawRoot -PathType Container -ErrorAction Stop)) {
+                $result.ReasonCode = 'DEVICE_UNAVAILABLE'
+                $result.Reason = "The device or drive '$rawRoot' is unavailable."
+                return [pscustomobject]$result
+            }
+        } catch {
+            $result.ReasonCode = 'DEVICE_UNAVAILABLE'
+            $result.Reason = "The device or drive '$rawRoot' is unavailable."
+            return [pscustomobject]$result
+        }
+    }
+    try {
+        $canonical = [System.IO.Path]::GetFullPath($GamePath.Trim())
+        $result.CanonicalPath = $canonical
+        $root = [System.IO.Path]::GetPathRoot($canonical)
+        if ([string]::IsNullOrWhiteSpace($root)) {
+            $result.ReasonCode = 'INVALID_PATH'
+            $result.Reason = 'The registered game path has no usable path root.'
+            return [pscustomobject]$result
+        }
+        $rootAvailable = $false
+        try { $rootAvailable = Test-Path -LiteralPath $root -PathType Container -ErrorAction Stop } catch { $rootAvailable = $false }
+        if (-not $rootAvailable) {
+            $result.ReasonCode = 'DEVICE_UNAVAILABLE'
+            $result.Reason = "The device or drive '$root' is unavailable."
+            return [pscustomobject]$result
+        }
+        if ($RequireLeaf -and -not (Test-Path -LiteralPath $canonical -PathType Leaf -ErrorAction SilentlyContinue)) {
+            $result.ReasonCode = 'GAME_PATH_MISSING'
+            $result.Reason = 'The registered game executable was not found.'
+            return [pscustomobject]$result
+        }
+        if (-not (Test-TpmNoReparsePath -Path $canonical)) {
+            $result.ReasonCode = 'REPARSE_OR_INACCESSIBLE'
+            $result.Reason = 'The game path or an existing parent is reparse-backed or inaccessible.'
+            return [pscustomobject]$result
+        }
+        $item = Get-Item -LiteralPath $canonical -Force -ErrorAction Stop
+        $result.ResolvedPath = [System.IO.Path]::GetFullPath([string]$item.FullName)
+        if (-not [string]::Equals($result.ResolvedPath, $canonical, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $result.ReasonCode = 'RESOLUTION_MISMATCH'
+            $result.Reason = 'The registered game path resolved to a different target.'
+            return [pscustomobject]$result
+        }
+        if ($RequireLeaf -and $item.PSIsContainer) {
+            $result.ReasonCode = 'NOT_EXECUTABLE'
+            $result.Reason = 'The registered game path resolves to a directory, not an executable.'
+            return [pscustomobject]$result
+        }
+        $result.GameDirectory = [System.IO.Path]::GetDirectoryName($canonical)
+        if ([string]::IsNullOrWhiteSpace($result.GameDirectory) -or
+            -not (Test-Path -LiteralPath $result.GameDirectory -PathType Container -ErrorAction SilentlyContinue)) {
+            $result.ReasonCode = 'GAME_DIRECTORY_UNAVAILABLE'
+            $result.Reason = 'The game executable directory is not accessible.'
+            return [pscustomobject]$result
+        }
+        $result.Valid = $true
+        $result.ReasonCode = 'VALID'
+        $result.Reason = ''
+    } catch [System.IO.IOException] {
+        $result.ReasonCode = 'DEVICE_UNAVAILABLE'
+        $result.Reason = "The game device or path could not be accessed: $($_.Exception.Message)"
+    } catch [System.UnauthorizedAccessException] {
+        $result.ReasonCode = 'ACCESS_DENIED'
+        $result.Reason = 'Access to the registered game path was denied.'
+    } catch {
+        $result.ReasonCode = 'PATH_VALIDATION_FAILED'
+        $result.Reason = "The registered game path could not be validated: $($_.Exception.Message)"
+    }
+    return [pscustomobject]$result
+}
+
+# Classify a deployment exception without discarding its raw detail. The
+# returned code drives per-game skip/error counters; callers keep the original
+# exception text only in the detailed log.
+function Get-TpmGameMutationFailureCode {
+    param([AllowNull()][object]$ErrorRecord)
+    $detailParts = New-Object System.Collections.Generic.List[string]
+    if ($ErrorRecord) {
+        [void]$detailParts.Add([string]$ErrorRecord)
+        $current = $ErrorRecord.Exception
+        while ($current) {
+            [void]$detailParts.Add([string]$current.Message)
+            $current = $current.InnerException
+        }
+    }
+    $detail = $detailParts -join ' | '
+    if (($detail -match '(?i)device') -and ($detail -match '(?i)does not exist|unavailable|could not be accessed')) {
+        return 'DEVICE_UNAVAILABLE'
+    }
+    if ($detail -match '(?i)path not found|cannot find (?:the )?path|could not find file|file not found|path specified') {
+        return 'GAME_PATH_MISSING'
+    }
+    return 'MUTATION_FAILED'
 }
 
 # True when two paths are the same location or one contains the other. This is
@@ -3738,6 +3872,36 @@ function Get-GameApiDll {
     } catch { return $null }
 }
 
+# Scans the first 2 MB of a game executable for legacy DirectX/Glide imports.
+# Returns a deterministic list used by dgVoodoo2 detection.
+function Get-GameLegacyApi {
+    param([string]$ExePath)
+    try {
+        $readLen = [int][Math]::Min((Get-Item -LiteralPath $ExePath -ErrorAction Stop).Length, 2097152)
+        $buf = New-Object byte[] $readLen
+        $fs = [System.IO.File]::OpenRead($ExePath)
+        try {
+            $pos = 0
+            while ($pos -lt $readLen) {
+                $n = $fs.Read($buf, $pos, $readLen - $pos)
+                if ($n -eq 0) { break }
+                $pos += $n
+            }
+        } finally { $fs.Dispose() }
+        $text = [System.Text.Encoding]::ASCII.GetString($buf, 0, $pos)
+        $found = New-Object System.Collections.Generic.List[string]
+        foreach ($entry in @(
+            [pscustomobject]@{ Name = 'D3D8'; Pattern = '(?i)d3d8\.dll' }
+            [pscustomobject]@{ Name = 'DDraw'; Pattern = '(?i)ddraw\.dll' }
+            [pscustomobject]@{ Name = 'Glide2x'; Pattern = '(?i)glide2x\.dll' }
+            [pscustomobject]@{ Name = 'Glide3x'; Pattern = '(?i)glide3x\.dll' }
+        )) {
+            if ($text -match $entry.Pattern) { [void]$found.Add($entry.Name) }
+        }
+        return $found.ToArray()
+    } catch { return @() }
+}
+
 # Reads the PE Optional Header to determine whether an exe is 32-bit or 64-bit.
 # Returns 'x86', 'x64', or $null on error or unrecognised format.
 function Get-ExeArchitecture {
@@ -4209,7 +4373,7 @@ function Get-TpmReShadeProfiles {
             Parameters = @{}; PerformanceClass = 'LOW'; ResolutionSensitivity = 'LOW'
             CompatibilityState = 'ADVISORY_UNMEASURED'; CompatibleWith = @(); ConflictsWith = @()
             OrderConstraints = @(); FallbackProfileId = 'Original'
-            PreviewAsset = 'TPM-preview-original.svg'; SchemaVersion = 2
+            PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
         }
         [pscustomobject]@{
             ProfileId = 'CleanSharp'; FriendlyName = 'Clean & Sharp'; Description = 'Clearer edges and text with very little change to the original image.'
@@ -4217,7 +4381,7 @@ function Get-TpmReShadeProfiles {
             TechniqueOrder = @('LumaSharpen'); Parameters = @{}; PerformanceClass = 'LOW'
             ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'ADVISORY_UNMEASURED'
             CompatibleWith = @(); ConflictsWith = @('CRT_Lottes'); OrderConstraints = @()
-            FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-clean.svg'; SchemaVersion = 2
+            FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
         }
         [pscustomobject]@{
             ProfileId = 'ClassicCrt'; FriendlyName = 'Classic Arcade CRT'; Description = 'Traditional scanlines and restrained arcade-monitor character.'
@@ -4225,7 +4389,7 @@ function Get-TpmReShadeProfiles {
             TechniqueOrder = @('CRT_Lottes'); Parameters = @{}; PerformanceClass = 'HIGH'
             ResolutionSensitivity = 'HIGH'; CompatibilityState = 'ADVISORY_UNMEASURED'
             CompatibleWith = @(); ConflictsWith = @('LumaSharpen','Vibrance'); OrderConstraints = @()
-            FallbackProfileId = 'CleanSharp'; PreviewAsset = 'TPM-preview-crt.svg'; SchemaVersion = 2
+            FallbackProfileId = 'CleanSharp'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
         }
         [pscustomobject]@{
             ProfileId = 'Vivid'; FriendlyName = 'Vivid Arcade'; Description = 'Richer color for modern displays.'
@@ -4233,7 +4397,7 @@ function Get-TpmReShadeProfiles {
             TechniqueOrder = @('Vibrance'); Parameters = @{}; PerformanceClass = 'LOW'
             ResolutionSensitivity = 'LOW'; CompatibilityState = 'ADVISORY_UNMEASURED'
             CompatibleWith = @(); ConflictsWith = @(); OrderConstraints = @()
-            FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-vivid.svg'; SchemaVersion = 2
+            FallbackProfileId = 'Original'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
         }
         [pscustomobject]@{
             ProfileId = 'EnhancedArcade'; FriendlyName = 'Enhanced Arcade'; Description = 'Sharper edges and richer color while preserving the approved effect order.'
@@ -4241,7 +4405,7 @@ function Get-TpmReShadeProfiles {
             TechniqueOrder = @('LumaSharpen','Vibrance'); Parameters = @{}; PerformanceClass = 'LOW'
             ResolutionSensitivity = 'MEDIUM'; CompatibilityState = 'ADVISORY_UNMEASURED'
             CompatibleWith = @(); ConflictsWith = @('CRT_Lottes'); OrderConstraints = @('LumaSharpen before Vibrance')
-            FallbackProfileId = 'CleanSharp'; PreviewAsset = 'TPM-preview-enhanced.svg'; SchemaVersion = 2
+            FallbackProfileId = 'CleanSharp'; PreviewAsset = 'TPM-preview-landscape.png'; SchemaVersion = 2
         }
     )
 }
@@ -4301,24 +4465,33 @@ function New-TpmReShadePresetContent {
 }
 function Get-TpmReShadePreviewInfo {
     param([Parameter(Mandatory)]$ProfileDefinition, [string]$PreviewRoot = '')
-    $root = if ($PreviewRoot) { [IO.Path]::GetFullPath($PreviewRoot) } else { [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'PreviewAssets\ReShadePreviews')) }
-    $relative = [string]$ProfileDefinition.PreviewAsset
-    $expected = @{
-        Original = 'TPM-preview-original.svg'; CleanSharp = 'TPM-preview-clean.svg'
-        Vivid = 'TPM-preview-vivid.svg'; EnhancedArcade = 'TPM-preview-enhanced.svg'; ClassicCrt = 'TPM-preview-crt.svg'
+    $reference = Get-TpmReShadePreviewReference -PreviewRoot $PreviewRoot
+    return [pscustomobject]@{
+        ProfileId = $ProfileDefinition.ProfileId
+        Available = $reference.Available
+        Path = $reference.Path
+        Provenance = 'TPM bundled landscape'
+        Reason = $reference.Reason
+        Identity = $reference.Identity
+        Hash = $reference.Hash
     }
-    $name = if ($expected.ContainsKey($ProfileDefinition.ProfileId)) { $expected[$ProfileDefinition.ProfileId] } else { $null }
-    if (-not $name -or [IO.Path]::GetFileName($relative) -ne $name -or $relative -match '(^|[\\/])\.\.([\\/]|$)') { return [pscustomobject]@{ ProfileId=$ProfileDefinition.ProfileId; Available=$false; Path=$null; Provenance='TPM synthetic'; Reason='PREVIEW_BINDING_INVALID' } }
-    $path = [IO.Path]::GetFullPath((Join-Path $root $name))
-    if (-not $path.StartsWith($root.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { return [pscustomobject]@{ ProfileId=$ProfileDefinition.ProfileId; Available=$false; Path=$null; Provenance='TPM synthetic'; Reason='PREVIEW_MISSING' } }
-    try { $text = [IO.File]::ReadAllText($path); if ($text -notmatch '^\s*<svg\b' -or $text -notmatch '</svg>\s*$') { throw 'invalid' }; return [pscustomobject]@{ ProfileId=$ProfileDefinition.ProfileId; Available=$true; Path=$path; Provenance='TPM synthetic'; Reason=$null } } catch { return [pscustomobject]@{ ProfileId=$ProfileDefinition.ProfileId; Available=$false; Path=$null; Provenance='TPM synthetic'; Reason='PREVIEW_INVALID' } }
 }
 
 function Get-TpmReShadeProfileGallery {
     param([string]$PreviewRoot = '')
     $reference = Get-TpmReShadePreviewReference -PreviewRoot $PreviewRoot
     return @(Get-TpmReShadeProfiles | ForEach-Object {
-        [pscustomobject]@{ ProfileId=$_.ProfileId; FriendlyName=$_.FriendlyName; Description=$_.Description; PreviewAvailable=$reference.Available; PreviewPath=$null; PreviewReason=if($reference.Available){$null}else{$reference.Reason}; Provenance='TPM synthetic'; PerformanceClass=$_.PerformanceClass; ResolutionSensitivity=$_.ResolutionSensitivity }
+        [pscustomobject]@{
+            ProfileId = $_.ProfileId
+            FriendlyName = $_.FriendlyName
+            Description = $_.Description
+            PreviewAvailable = $reference.Available
+            PreviewPath = $reference.Path
+            PreviewReason = if ($reference.Available) { $null } else { $reference.Reason }
+            Provenance = 'TPM bundled landscape'
+            PerformanceClass = $_.PerformanceClass
+            ResolutionSensitivity = $_.ResolutionSensitivity
+        }
     })
 }
 function Get-TpmReShadePerformanceBadge {
@@ -4338,7 +4511,7 @@ function Get-TpmReShadePreviewCacheKey {
     return ([BitConverter]::ToString(([Security.Cryptography.SHA256]::Create().ComputeHash($bytes))) -replace '-', '').ToLowerInvariant()
 }
 function Compare-TpmReShadeProfiles {
-    param([Parameter(Mandatory)][string]$LeftProfileId, [Parameter(Mandatory)][string]$RightProfileId, [string]$ReferenceIdentity = 'TPM-SYNTHETIC-ARCADE-V2')
+    param([Parameter(Mandatory)][string]$LeftProfileId, [Parameter(Mandatory)][string]$RightProfileId, [string]$ReferenceIdentity = 'TPM-LANDSCAPE-V1')
     $left=Get-TpmReShadeProfile -ProfileId $LeftProfileId;$right=Get-TpmReShadeProfile -ProfileId $RightProfileId
     if(-not $left -or -not $right -or [string]::IsNullOrWhiteSpace($ReferenceIdentity)){return [pscustomobject]@{Valid=$false;Reason='INVALID_PREVIEW_SUBJECT'}}
     return [pscustomobject]@{Valid=$true;LeftProfileId=$left.ProfileId;RightProfileId=$right.ProfileId;ReferenceIdentity=$ReferenceIdentity;Deploys=$false;LeftEffects=@($left.Effects);RightEffects=@($right.Effects)}
@@ -4523,660 +4696,57 @@ function Restore-TpmReShadeProfile {
 
 function Get-TpmReShadePreviewReference {
     param([string]$PreviewRoot = '')
-    return [pscustomobject]@{
-        Available = $true
-        Path = $null
-        Version = '2'
-        Hash = '34e93eb66ccca95364ad91db189185a3778544fb57351280c2092e27fc381c33'
-        Identity = 'TPM-SYNTHETIC-ARCADE-V2'
+    $root = if ($PreviewRoot) { [IO.Path]::GetFullPath($PreviewRoot) } else { [IO.Path]::GetFullPath($PSScriptRoot) }
+    $nestedPath = Join-Path (Join-Path $root 'PreviewAssets\ReShadePreviews') 'TPM-preview-landscape.png'
+    $directPath = Join-Path $root 'TPM-preview-landscape.png'
+    $path = if (Test-Path -LiteralPath $directPath -PathType Leaf) { $directPath } else { $nestedPath }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        return [pscustomobject]@{ Available = $false; Path = $path; Version = '3'; Hash = $null; Identity = 'TPM-LANDSCAPE-V1'; Reason = 'PREVIEW_LANDSCAPE_ASSET_MISSING' }
     }
-}
-function Invoke-TpmReShadePreviewSceneTexture {
-    param([Parameter(Mandatory)][Drawing.Bitmap]$Bitmap)
-    $rectangle = New-Object Drawing.Rectangle -ArgumentList @(0, 0, $Bitmap.Width, $Bitmap.Height)
-    $data = $null
     try {
-        $data = $Bitmap.LockBits($rectangle, [System.Drawing.Imaging.ImageLockMode]::ReadWrite, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-        $stride = [Math]::Abs([int]$data.Stride)
-        $length = $stride * $Bitmap.Height
-        $pixels = New-Object byte[] $length
-        [Runtime.InteropServices.Marshal]::Copy($data.Scan0, $pixels, 0, $length)
-        $width = [int]$Bitmap.Width
-        $height = [int]$Bitmap.Height
-        for ($y = 0; $y -lt $height; $y++) {
-            $row = if ($data.Stride -lt 0) { $height - 1 - $y } else { $y }
-            for ($x = 0; $x -lt $width; $x++) {
-                $index = ($row * $stride) + ($x * 4)
-                $noiseSeed = (([int64]$x * 73856093) -bxor ([int64]$y * 19349663))
-                $noiseSeed = $noiseSeed -bxor (([int64]$x * [int64]$x * 83492791) + ([int64]$y * [int64]$y * 49979687))
-                $noise = [int](($noiseSeed -band 2147483647) % 17) - 8
-                $roomShadow = if ($y -gt ($height * 0.82)) { -5 } else { 0 }
-                $edgeX = [Math]::Abs((2.0 * $x / [Math]::Max(1, $width - 1)) - 1.0)
-                $edgeY = [Math]::Abs((2.0 * $y / [Math]::Max(1, $height - 1)) - 1.0)
-                $exposure = 1.0 - (0.08 * [Math]::Max($edgeX, $edgeY))
-                $blue = ([int]$pixels[$index] + $noise + $roomShadow) * $exposure
-                $green = ([int]$pixels[$index + 1] + $noise) * $exposure
-                $red = ([int]$pixels[$index + 2] + $noise) * $exposure
-                if ($blue -lt 0) { $blue = 0 }; if ($blue -gt 255) { $blue = 255 }
-                if ($green -lt 0) { $green = 0 }; if ($green -gt 255) { $green = 255 }
-                if ($red -lt 0) { $red = 0 }; if ($red -gt 255) { $red = 255 }
-                $pixels[$index] = [byte]$blue
-                $pixels[$index + 1] = [byte]$green
-                $pixels[$index + 2] = [byte]$red
-            }
-        }
-        [Runtime.InteropServices.Marshal]::Copy($pixels, 0, $data.Scan0, $length)
-    } finally {
-        if ($data) { $Bitmap.UnlockBits($data) }
+        Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+        $decoded = [Drawing.Image]::FromFile($path)
+        try {
+            $decodedWidth = [int]$decoded.Width
+            $decodedHeight = [int]$decoded.Height
+            $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+        } finally { $decoded.Dispose() }
+        if ($decodedWidth -ne 1672 -or $decodedHeight -ne 941) { throw 'The bundled landscape preview dimensions do not match the pinned asset.' }
+        if ($hash -ne '7203032094bfd4d174cd3125ef55c87d7b35053fc4e274914b6ae1ac43f286d8') { throw 'The bundled landscape preview hash does not match the pinned asset.' }
+        return [pscustomobject]@{ Available = $true; Path = $path; Version = '3'; Hash = $hash; Identity = 'TPM-LANDSCAPE-V1'; Width = $decodedWidth; Height = $decodedHeight }
+    } catch {
+        return [pscustomobject]@{ Available = $false; Path = $path; Version = '3'; Hash = $null; Identity = 'TPM-LANDSCAPE-V1'; Reason = 'PREVIEW_LANDSCAPE_ASSET_UNREADABLE'; Error = $_.Exception.Message }
     }
 }
 function New-TpmReShadePreviewReferenceBitmap {
-    param([int]$Width = 960, [int]$Height = 540)
+    param([int]$Width = 960, [int]$Height = 540, [string]$PreviewRoot = '')
     Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+    $reference = Get-TpmReShadePreviewReference -PreviewRoot $PreviewRoot
+    if (-not $reference.Available) { throw ($reference.Reason + ': ' + $reference.Path) }
     $canvasWidth = [Math]::Max(1, [int]$Width)
     $canvasHeight = [Math]::Max(1, [int]$Height)
+    $bytes = [IO.File]::ReadAllBytes($reference.Path)
+    $stream = New-Object IO.MemoryStream(,$bytes)
+    $loaded = $null
     $bitmap = New-Object Drawing.Bitmap($canvasWidth, $canvasHeight)
-    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    $graphics = $null
     try {
-        $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-        $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-        $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
-        $graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
-        $graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
-        $graphics.ScaleTransform([float]($canvasWidth / 960.0), [float]($canvasHeight / 540.0))
-
-        $wallRect = New-Object Drawing.Rectangle -ArgumentList @(0, 0, 960, 360)
-        $wall = New-Object System.Drawing.Drawing2D.LinearGradientBrush -ArgumentList @(
-            $wallRect,
-            [Drawing.Color]::FromArgb(3, 6, 15),
-            [Drawing.Color]::FromArgb(48, 19, 56),
-            90.0
-        )
-        $graphics.FillRectangle($wall, $wallRect)
-        $wall.Dispose()
-        $wallLine = New-Object Drawing.Pen([Drawing.Color]::FromArgb(36, 53, 71), 1)
-        for ($wallY = 38; $wallY -lt 348; $wallY += 38) {
-            $graphics.DrawLine($wallLine, 0, $wallY, 960, $wallY)
-        }
-        for ($wallX = 18; $wallX -lt 960; $wallX += 96) {
-            $graphics.DrawLine($wallLine, $wallX, 0, $wallX, 352)
-        }
-        $wallLine.Dispose()
-        $ambientPink = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(18, 238, 37, 143))
-        $ambientBlue = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(22, 26, 105, 203))
-        $ambientGold = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(15, 231, 151, 53))
-        $graphics.FillEllipse($ambientPink, -180, 42, 510, 330)
-        $graphics.FillEllipse($ambientBlue, 660, 16, 500, 370)
-        $graphics.FillEllipse($ambientGold, 338, 145, 320, 270)
-        $ambientPink.Dispose()
-        $ambientBlue.Dispose()
-        $ambientGold.Dispose()
-
-        $ceilingPen = New-Object Drawing.Pen([Drawing.Color]::FromArgb(24, 30, 37, 52), 2)
-        $graphics.DrawLine($ceilingPen, 0, 78, 960, 78)
-        $graphics.DrawLine($ceilingPen, 0, 116, 960, 116)
-        $ceilingPen.Dispose()
-        $ceilingLight = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(42, 238, 77, 177))
-        $graphics.FillRectangle($ceilingLight, 70, 82, 210, 5)
-        $graphics.FillRectangle($ceilingLight, 680, 82, 210, 5)
-        $ceilingLight.Dispose()
-        $ceilingGlow = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(14, 230, 69, 178))
-        $graphics.FillEllipse($ceilingGlow, 44, 76, 270, 42)
-        $graphics.FillEllipse($ceilingGlow, 646, 76, 270, 42)
-        $ceilingGlow.Dispose()
-        $wallTextureA = New-Object Drawing.Pen([Drawing.Color]::FromArgb(18, 156, 178, 194), 1)
-        $wallTextureB = New-Object Drawing.Pen([Drawing.Color]::FromArgb(12, 244, 92, 176), 1)
-        $wallRandom = New-Object System.Random(17421)
-        for ($wallMark = 0; $wallMark -lt 620; $wallMark++) {
-            $wallMarkX = $wallRandom.Next(0, 960)
-            $wallMarkY = $wallRandom.Next(18, 340)
-            $wallMarkLength = $wallRandom.Next(2, 9)
-            if (($wallMark % 11) -eq 0) {
-                $graphics.DrawLine($wallTextureB, $wallMarkX, $wallMarkY, $wallMarkX + $wallMarkLength, $wallMarkY)
-            } else {
-                $graphics.DrawLine($wallTextureA, $wallMarkX, $wallMarkY, $wallMarkX + $wallMarkLength, $wallMarkY)
-            }
-        }
-        $wallTextureA.Dispose()
-        $wallTextureB.Dispose()
-        $wallCable = New-Object Drawing.Pen([Drawing.Color]::FromArgb(84, 4, 5, 12), 3)
-        $graphics.DrawBezier($wallCable, 8, 145, 92, 204, 118, 254, 152, 319)
-        $graphics.DrawBezier($wallCable, 952, 145, 868, 204, 842, 254, 808, 319)
-        $wallCable.Dispose()
-        $wallSignFont = New-Object Drawing.Font('Segoe UI', 7, [Drawing.FontStyle]::Bold)
-        $wallSign = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(116, 191, 229, 222))
-        $graphics.DrawString('OPEN 24 HOURS', $wallSignFont, $wallSign, 404, 49)
-        $wallSign.Dispose()
-        $wallSignFont.Dispose()
-
-
-
-        $floorRect = New-Object Drawing.Rectangle -ArgumentList @(0, 340, 960, 200)
-        $floor = New-Object System.Drawing.Drawing2D.LinearGradientBrush -ArgumentList @(
-            $floorRect,
-            [Drawing.Color]::FromArgb(28, 31, 42),
-            [Drawing.Color]::FromArgb(2, 4, 9),
-            90.0
-        )
-        $graphics.FillRectangle($floor, $floorRect)
-        $floor.Dispose()
-        $floorGlow = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(24, 31, 166, 188))
-        $graphics.FillEllipse($floorGlow, 176, 362, 610, 166)
-        $floorGlow.Dispose()
-        $floorSeam = New-Object Drawing.Pen([Drawing.Color]::FromArgb(48, 70, 78), 1)
-        foreach ($floorY in @(347, 359, 374, 394, 420, 453, 493, 533)) {
-            $graphics.DrawLine($floorSeam, 0, $floorY, 960, $floorY)
-        }
-        foreach ($floorX in @(34, 100, 171, 248, 329, 405, 480, 555, 631, 712, 793, 865, 930)) {
-            $graphics.DrawLine($floorSeam, 480, 340, $floorX, 540)
-        }
-        $floorSeam.Dispose()
-        $floorThreadA = New-Object Drawing.Pen([Drawing.Color]::FromArgb(30, 111, 134, 141), 1)
-        $floorThreadB = New-Object Drawing.Pen([Drawing.Color]::FromArgb(26, 190, 52, 141), 1)
-        $floorRandom = New-Object System.Random(25817)
-        for ($thread = 0; $thread -lt 920; $thread++) {
-            $threadX = $floorRandom.Next(0, 960)
-            $threadY = $floorRandom.Next(344, 540)
-            $threadLength = $floorRandom.Next(2, 10)
-            if (($thread % 7) -eq 0) {
-                $graphics.DrawLine($floorThreadB, $threadX, $threadY, $threadX + $threadLength, $threadY)
-            } else {
-                $graphics.DrawLine($floorThreadA, $threadX, $threadY, $threadX + $threadLength, $threadY)
-            }
-        }
-        $floorThreadA.Dispose()
-        $floorThreadB.Dispose()
-        $reflectionRect = New-Object Drawing.Rectangle -ArgumentList @(250, 390, 460, 135)
-        $reflection = New-Object System.Drawing.Drawing2D.LinearGradientBrush -ArgumentList @(
-            $reflectionRect,
-            [Drawing.Color]::FromArgb(40, 68, 199, 200),
-            [Drawing.Color]::FromArgb(0, 68, 199, 200),
-            90.0
-        )
-        $graphics.FillEllipse($reflection, $reflectionRect)
-        $reflection.Dispose()
-
-        $rearShadow = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(155, 0, 0, 0))
-        $graphics.FillEllipse($rearShadow, 13, 327, 190, 47)
-        $graphics.FillEllipse($rearShadow, 757, 327, 190, 47)
-        $rearShadow.Dispose()
-        foreach ($cabinetX in @(28, 806)) {
-            $rearBody = [Drawing.Point[]]@(
-                (New-Object Drawing.Point -ArgumentList @([int]($cabinetX + 8), 148)),
-                (New-Object Drawing.Point -ArgumentList @([int]($cabinetX + 120), 148)),
-                (New-Object Drawing.Point -ArgumentList @([int]($cabinetX + 133), 360)),
-                (New-Object Drawing.Point -ArgumentList @([int]($cabinetX - 6), 360))
-            )
-            $rearBrush = New-Object System.Drawing.Drawing2D.LinearGradientBrush -ArgumentList @(
-                (New-Object Drawing.Rectangle -ArgumentList @([int]($cabinetX - 6), 148, 139, 212)),
-                [Drawing.Color]::FromArgb(43, 26, 60),
-                [Drawing.Color]::FromArgb(9, 12, 25),
-                90.0
-            )
-            $graphics.FillPolygon($rearBrush, $rearBody)
-            $rearBrush.Dispose()
-            $rearEdge = New-Object Drawing.Pen([Drawing.Color]::FromArgb(118, 39, 115), 2)
-            $graphics.DrawPolygon($rearEdge, $rearBody)
-            $rearEdge.Dispose()
-            $rearScreen = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(7, 13, 25))
-            $graphics.FillRectangle($rearScreen, $cabinetX + 8, 184, 102, 91)
-            $rearScreen.Dispose()
-            $rearGlass = New-Object System.Drawing.Drawing2D.LinearGradientBrush -ArgumentList @(
-                (New-Object Drawing.Rectangle -ArgumentList @([int]($cabinetX + 12), 188, 94, 82)),
-                [Drawing.Color]::FromArgb(5, 20, 42),
-                [Drawing.Color]::FromArgb(20, 78, 82),
-                90.0
-            )
-            $graphics.FillRectangle($rearGlass, $cabinetX + 12, 188, 94, 82)
-            $rearGlass.Dispose()
-            $rearScreenLine = New-Object Drawing.Pen([Drawing.Color]::FromArgb(47, 167, 176), 1)
-            for ($rearY = 200; $rearY -lt 265; $rearY += 13) {
-                $graphics.DrawLine($rearScreenLine, $cabinetX + 20, $rearY, $cabinetX + 96, $rearY)
-            }
-            $rearScreenLine.Dispose()
-            $rearControl = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(20, 22, 37))
-            $graphics.FillPolygon($rearControl, [Drawing.Point[]]@(
-                (New-Object Drawing.Point -ArgumentList @([int]($cabinetX + 4), 281)),
-                (New-Object Drawing.Point -ArgumentList @([int]($cabinetX + 116), 281)),
-                (New-Object Drawing.Point -ArgumentList @([int]($cabinetX + 126), 310)),
-                (New-Object Drawing.Point -ArgumentList @([int]($cabinetX - 3), 310))
-            ))
-            $rearControl.Dispose()
-            $rearTrim = New-Object Drawing.Pen([Drawing.Color]::FromArgb(89, 216, 203), 1)
-            $graphics.DrawLine($rearTrim, $cabinetX + 5, 286, $cabinetX + 116, 286)
-            $rearTrim.Dispose()
-            $rearLabelFont = New-Object Drawing.Font('Segoe UI', 8, [Drawing.FontStyle]::Bold)
-            $rearLabel = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(194, 235, 220))
-            $graphics.DrawString('RACING', $rearLabelFont, $rearLabel, $cabinetX + 28, 326)
-            $rearLabel.Dispose()
-            $rearLabelFont.Dispose()
-        }
-
-        $mainShadow = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(190, 0, 0, 0))
-        $graphics.FillEllipse($mainShadow, 128, 453, 704, 74)
-        $mainShadow.Dispose()
-        $cabinetBody = [Drawing.Point[]]@(
-            (New-Object Drawing.Point -ArgumentList @(198, 86)),
-            (New-Object Drawing.Point -ArgumentList @(762, 86)),
-            (New-Object Drawing.Point -ArgumentList @(818, 458)),
-            (New-Object Drawing.Point -ArgumentList @(142, 458))
-        )
-        $cabinetGradient = New-Object System.Drawing.Drawing2D.LinearGradientBrush -ArgumentList @(
-            (New-Object Drawing.Rectangle -ArgumentList @(142, 86, 676, 372)),
-            [Drawing.Color]::FromArgb(55, 24, 33, 53),
-            [Drawing.Color]::FromArgb(10, 11, 19),
-            90.0
-        )
-        $graphics.FillPolygon($cabinetGradient, $cabinetBody)
-        $cabinetGradient.Dispose()
-        $cabinetShade = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(48, 0, 0, 0))
-        $graphics.FillPolygon($cabinetShade, [Drawing.Point[]]@(
-            (New-Object Drawing.Point -ArgumentList @(180, 432)),
-            (New-Object Drawing.Point -ArgumentList @(211, 105)),
-            (New-Object Drawing.Point -ArgumentList @(244, 105)),
-            (New-Object Drawing.Point -ArgumentList @(226, 432))
-        ))
-        $graphics.FillPolygon($cabinetShade, [Drawing.Point[]]@(
-            (New-Object Drawing.Point -ArgumentList @(736, 105)),
-            (New-Object Drawing.Point -ArgumentList @(763, 105)),
-            (New-Object Drawing.Point -ArgumentList @(795, 432)),
-            (New-Object Drawing.Point -ArgumentList @(766, 432))
-        ))
-        $cabinetShade.Dispose()
-        $cabinetEdge = New-Object Drawing.Pen([Drawing.Color]::FromArgb(222, 77, 184), 3)
-        $graphics.DrawPolygon($cabinetEdge, $cabinetBody)
-        $cabinetEdge.Dispose()
-        $cabinetHighlight = New-Object Drawing.Pen([Drawing.Color]::FromArgb(248, 137, 215), 2)
-        $graphics.DrawLine($cabinetHighlight, 211, 101, 749, 101)
-        $graphics.DrawLine($cabinetHighlight, 211, 101, 174, 432)
-        $cabinetHighlight.Dispose()
-        $cabinetSpecular = New-Object Drawing.Pen([Drawing.Color]::FromArgb(74, 255, 203, 243), 1)
-        $graphics.DrawLine($cabinetSpecular, 228, 121, 203, 301)
-        $graphics.DrawLine($cabinetSpecular, 733, 121, 759, 301)
-        $cabinetSpecular.Dispose()
-        $bodyGloss = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(19, 255, 255, 255))
-        $graphics.FillPolygon($bodyGloss, [Drawing.Point[]]@(
-            (New-Object Drawing.Point -ArgumentList @(222, 122)),
-            (New-Object Drawing.Point -ArgumentList @(286, 122)),
-            (New-Object Drawing.Point -ArgumentList @(247, 423)),
-            (New-Object Drawing.Point -ArgumentList @(205, 423))
-        ))
-        $graphics.FillPolygon($bodyGloss, [Drawing.Point[]]@(
-            (New-Object Drawing.Point -ArgumentList @(681, 122)),
-            (New-Object Drawing.Point -ArgumentList @(735, 122)),
-            (New-Object Drawing.Point -ArgumentList @(770, 423)),
-            (New-Object Drawing.Point -ArgumentList @(733, 423))
-        ))
-        $bodyGloss.Dispose()
-        $bodyShade = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(28, 0, 0, 0))
-        $graphics.FillPolygon($bodyShade, [Drawing.Point[]]@(
-            (New-Object Drawing.Point -ArgumentList @(254, 428)),
-            (New-Object Drawing.Point -ArgumentList @(706, 428)),
-            (New-Object Drawing.Point -ArgumentList @(728, 447)),
-            (New-Object Drawing.Point -ArgumentList @(232, 447))
-        ))
-        $bodyShade.Dispose()
-
-
-        $marqueeOuter = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(7, 10, 18))
-        $graphics.FillRectangle($marqueeOuter, 216, 103, 528, 76)
-        $marqueeOuter.Dispose()
-        $marquee = New-Object System.Drawing.Drawing2D.LinearGradientBrush -ArgumentList @(
-            (New-Object Drawing.Rectangle -ArgumentList @(228, 113, 504, 54)),
-            [Drawing.Color]::FromArgb(6, 23, 57),
-            [Drawing.Color]::FromArgb(28, 108, 123),
-            90.0
-        )
-        $graphics.FillRectangle($marquee, 228, 113, 504, 54)
-        $marquee.Dispose()
-        $marqueeGloss = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(38, 255, 255, 255))
-        $graphics.FillRectangle($marqueeGloss, 234, 117, 492, 7)
-        $marqueeGloss.Dispose()
-        $marqueeLine = New-Object Drawing.Pen([Drawing.Color]::FromArgb(255, 218, 119), 2)
-        $graphics.DrawRectangle($marqueeLine, 226, 111, 508, 58)
-        $marqueeLine.Dispose()
-        $marqueeFont = New-Object Drawing.Font('Segoe UI', 22, [Drawing.FontStyle]::Bold)
-        $marqueeText = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 241, 186))
-        $graphics.DrawString('NEON CIRCUIT', $marqueeFont, $marqueeText, 344, 121)
-        $marqueeText.Dispose()
-        $marqueeFont.Dispose()
-        $marqueeSmallFont = New-Object Drawing.Font('Segoe UI', 7, [Drawing.FontStyle]::Bold)
-        $marqueeSmall = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(168, 194, 235))
-        $graphics.DrawString('MIDNIGHT GRAND PRIX  //  PLAYER 1', $marqueeSmallFont, $marqueeSmall, 347, 153)
-        $marqueeSmall.Dispose()
-        $marqueeSmallFont.Dispose()
-
-        $screenFrame = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(5, 7, 13))
-        $graphics.FillRectangle($screenFrame, 235, 181, 490, 274)
-        $screenFrame.Dispose()
-        $screenBezel = New-Object Drawing.Pen([Drawing.Color]::FromArgb(115, 125, 148), 3)
-        $graphics.DrawRectangle($screenBezel, 238, 184, 484, 268)
-        $screenBezel.Dispose()
-        $screenBezelLight = New-Object Drawing.Pen([Drawing.Color]::FromArgb(236, 239, 232), 2)
-        $graphics.DrawLine($screenBezelLight, 247, 193, 713, 193)
-        $graphics.DrawLine($screenBezelLight, 247, 193, 247, 445)
-        $screenBezelLight.Dispose()
-        $screenBorder = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(2, 3, 8))
-        $graphics.FillRectangle($screenBorder, 251, 195, 458, 252)
-        $screenBorder.Dispose()
-
-        for ($skyBand = 0; $skyBand -lt 28; $skyBand++) {
-            $skyT = $skyBand / 27.0
-            $skyRed = [int](14 + (58 * $skyT))
-            $skyGreen = [int](38 - (17 * $skyT))
-            $skyBlue = [int](76 + (24 * $skyT))
-            $skyBrush = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, $skyRed, $skyGreen, $skyBlue))
-            $graphics.FillRectangle($skyBrush, 255, 199 + ($skyBand * 6), 450, 7)
-            $skyBrush.Dispose()
-        }
-        $sunGlowOuter = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(16, 255, 168, 79))
-        $sunGlowMiddle = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(29, 255, 183, 82))
-        $sunBrush = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 250, 207, 134))
-        $graphics.FillEllipse($sunGlowOuter, 570, 214, 132, 132)
-        $graphics.FillEllipse($sunGlowMiddle, 586, 229, 100, 100)
-        $graphics.FillEllipse($sunBrush, 604, 247, 64, 64)
-        $sunGlowOuter.Dispose()
-        $sunGlowMiddle.Dispose()
-        $sunBrush.Dispose()
-        $cloudPen = New-Object Drawing.Pen([Drawing.Color]::FromArgb(38, 214, 219, 229), 8)
-        $graphics.DrawLine($cloudPen, 284, 256, 367, 256)
-        $graphics.DrawLine($cloudPen, 517, 276, 580, 276)
-        $cloudPen.Dispose()
-        $mountainBack = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(90, 41, 47, 89))
-        $graphics.FillPolygon($mountainBack, [Drawing.Point[]]@(
-            (New-Object Drawing.Point -ArgumentList @(255, 326)),
-            (New-Object Drawing.Point -ArgumentList @(318, 268)),
-            (New-Object Drawing.Point -ArgumentList @(372, 315)),
-            (New-Object Drawing.Point -ArgumentList @(438, 250)),
-            (New-Object Drawing.Point -ArgumentList @(512, 319)),
-            (New-Object Drawing.Point -ArgumentList @(583, 264)),
-            (New-Object Drawing.Point -ArgumentList @(705, 329)),
-            (New-Object Drawing.Point -ArgumentList @(705, 347)),
-            (New-Object Drawing.Point -ArgumentList @(255, 347))
-        ))
-        $mountainBack.Dispose()
-        $mountainFront = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(220, 23, 27, 45))
-        $graphics.FillPolygon($mountainFront, [Drawing.Point[]]@(
-            (New-Object Drawing.Point -ArgumentList @(255, 347)),
-            (New-Object Drawing.Point -ArgumentList @(325, 298)),
-            (New-Object Drawing.Point -ArgumentList @(389, 328)),
-            (New-Object Drawing.Point -ArgumentList @(466, 286)),
-            (New-Object Drawing.Point -ArgumentList @(546, 331)),
-            (New-Object Drawing.Point -ArgumentList @(624, 292)),
-            (New-Object Drawing.Point -ArgumentList @(705, 341)),
-            (New-Object Drawing.Point -ArgumentList @(705, 365)),
-            (New-Object Drawing.Point -ArgumentList @(255, 365))
-        ))
-        $mountainFront.Dispose()
-        $mountainLine = New-Object Drawing.Pen([Drawing.Color]::FromArgb(115, 100, 116, 196), 2)
-        $graphics.DrawLines($mountainLine, [Drawing.Point[]]@(
-            (New-Object Drawing.Point -ArgumentList @(255, 347)),
-            (New-Object Drawing.Point -ArgumentList @(325, 298)),
-            (New-Object Drawing.Point -ArgumentList @(389, 328)),
-            (New-Object Drawing.Point -ArgumentList @(466, 286)),
-            (New-Object Drawing.Point -ArgumentList @(546, 331)),
-            (New-Object Drawing.Point -ArgumentList @(624, 292)),
-            (New-Object Drawing.Point -ArgumentList @(705, 341))
-        ))
-        $mountainLine.Dispose()
-        $horizonFog = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(32, 143, 202, 194))
-        $graphics.FillRectangle($horizonFog, 255, 330, 450, 22)
-        $horizonFog.Dispose()
-        $ground = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 11, 16, 24))
-        $graphics.FillRectangle($ground, 255, 347, 450, 96)
-        $ground.Dispose()
-        $road = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 21, 28, 36))
-        $graphics.FillPolygon($road, [Drawing.Point[]]@(
-            (New-Object Drawing.Point -ArgumentList @(431, 322)),
-            (New-Object Drawing.Point -ArgumentList @(533, 322)),
-            (New-Object Drawing.Point -ArgumentList @(705, 443)),
-            (New-Object Drawing.Point -ArgumentList @(255, 443))
-        ))
-        $road.Dispose()
-        $roadBand = New-Object Drawing.Pen([Drawing.Color]::FromArgb(38, 93, 115, 116), 2)
-        foreach ($roadY in @(333, 344, 359, 379, 404, 432)) {
-            $roadT = ($roadY - 322) / 121.0
-            $roadHalf = [int](51 + (205 * $roadT))
-            $graphics.DrawLine($roadBand, 482 - $roadHalf, $roadY, 482 + $roadHalf, $roadY)
-        }
-        $roadBand.Dispose()
-        $lanePen = New-Object Drawing.Pen([Drawing.Color]::FromArgb(183, 220, 224, 211), 2)
-        $graphics.DrawLine($lanePen, 482, 323, 482, 443)
-        $graphics.DrawLine($lanePen, 450, 323, 291, 443)
-        $graphics.DrawLine($lanePen, 514, 323, 674, 443)
-        $lanePen.Dispose()
-        $roadNoisePen = New-Object Drawing.Pen([Drawing.Color]::FromArgb(42, 176, 193, 195), 1)
-        $roadRandom = New-Object System.Random(47811)
-        for ($roadMark = 0; $roadMark -lt 170; $roadMark++) {
-            $markY = $roadRandom.Next(350, 443)
-            $markT = ($markY - 322) / 121.0
-            $markHalf = [int](51 + (205 * $markT))
-            $markX = $roadRandom.Next([Math]::Max(255, 482 - $markHalf), [Math]::Min(705, 483 + $markHalf))
-            $graphics.DrawLine($roadNoisePen, $markX, $markY, $markX + $roadRandom.Next(2, 8), $markY)
-        }
-        $roadNoisePen.Dispose()
-        $railPen = New-Object Drawing.Pen([Drawing.Color]::FromArgb(155, 73, 213, 202), 2)
-        $graphics.DrawLine($railPen, 255, 343, 431, 322)
-        $graphics.DrawLine($railPen, 705, 343, 533, 322)
-        $railPen.Dispose()
-        $postBrush = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 227, 224, 172))
-        $postGlow = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(65, 255, 214, 105))
-        foreach ($post in @(@(308, 349), @(649, 350), @(280, 375), @(676, 374))) {
-            $graphics.FillEllipse($postGlow, $post[0] - 7, $post[1] - 7, 14, 14)
-            $graphics.FillRectangle($postBrush, $post[0], $post[1], 3, 12)
-        }
-        $postBrush.Dispose()
-        $postGlow.Dispose()
-
-        $opponentShadow = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(115, 0, 0, 0))
-        $graphics.FillEllipse($opponentShadow, 309, 330, 48, 13)
-        $graphics.FillEllipse($opponentShadow, 607, 345, 41, 11)
-        $opponentShadow.Dispose()
-        $opponent = New-Object System.Drawing.Drawing2D.LinearGradientBrush -ArgumentList @(
-            (New-Object Drawing.Rectangle -ArgumentList @(312, 321, 44, 25)),
-            [Drawing.Color]::FromArgb(234, 223, 57, 87),
-            [Drawing.Color]::FromArgb(136, 82, 20, 49),
-            90.0
-        )
-        $graphics.FillEllipse($opponent, 312, 321, 44, 25)
-        $opponent.Dispose()
-        $opponentSmall = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(220, 215, 64, 86))
-        $graphics.FillEllipse($opponentSmall, 610, 337, 34, 19)
-        $opponentSmall.Dispose()
-        $opponentWindow = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(175, 24, 41, 63))
-        $graphics.FillEllipse($opponentWindow, 323, 325, 22, 10)
-        $graphics.FillEllipse($opponentWindow, 618, 340, 17, 8)
-        $opponentWindow.Dispose()
-        $opponentLight = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 252, 230, 137))
-        $graphics.FillEllipse($opponentLight, 316, 331, 5, 4)
-        $graphics.FillEllipse($opponentLight, 347, 331, 5, 4)
-        $graphics.FillEllipse($opponentLight, 613, 345, 4, 3)
-        $graphics.FillEllipse($opponentLight, 638, 345, 4, 3)
-        $opponentLight.Dispose()
-
-        $carShadow = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(160, 0, 0, 0))
-        $graphics.FillEllipse($carShadow, 399, 394, 170, 29)
-        $carShadow.Dispose()
-        $carGlow = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(36, 57, 235, 218))
-        $graphics.FillEllipse($carGlow, 395, 337, 180, 89)
-        $carGlow.Dispose()
-        $carBody = [Drawing.Point[]]@(
-            (New-Object Drawing.Point -ArgumentList @(407, 391)),
-            (New-Object Drawing.Point -ArgumentList @(430, 357)),
-            (New-Object Drawing.Point -ArgumentList @(469, 344)),
-            (New-Object Drawing.Point -ArgumentList @(524, 352)),
-            (New-Object Drawing.Point -ArgumentList @(557, 389)),
-            (New-Object Drawing.Point -ArgumentList @(526, 408)),
-            (New-Object Drawing.Point -ArgumentList @(433, 408))
-        )
-        $carGradient = New-Object System.Drawing.Drawing2D.LinearGradientBrush -ArgumentList @(
-            (New-Object Drawing.Rectangle -ArgumentList @(407, 344, 150, 65)),
-            [Drawing.Color]::FromArgb(53, 225, 227),
-            [Drawing.Color]::FromArgb(13, 34, 105),
-            90.0
-        )
-        $graphics.FillPolygon($carGradient, $carBody)
-        $carGradient.Dispose()
-        $carLower = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(185, 12, 25, 71))
-        $graphics.FillPolygon($carLower, [Drawing.Point[]]@(
-            (New-Object Drawing.Point -ArgumentList @(407, 391)),
-            (New-Object Drawing.Point -ArgumentList @(557, 389)),
-            (New-Object Drawing.Point -ArgumentList @(526, 408)),
-            (New-Object Drawing.Point -ArgumentList @(433, 408))
-        ))
-        $carLower.Dispose()
-        $carWindow = New-Object System.Drawing.Drawing2D.LinearGradientBrush -ArgumentList @(
-            (New-Object Drawing.Rectangle -ArgumentList @(450, 351, 65, 32)),
-            [Drawing.Color]::FromArgb(238, 9, 20, 39),
-            [Drawing.Color]::FromArgb(215, 83, 197, 197),
-            90.0
-        )
-        $graphics.FillEllipse($carWindow, 450, 351, 65, 32)
-        $carWindow.Dispose()
-        $carWindowLine = New-Object Drawing.Pen([Drawing.Color]::FromArgb(222, 222, 252, 244), 1)
-        $graphics.DrawEllipse($carWindowLine, 450, 351, 65, 32)
-        $graphics.DrawLine($carWindowLine, 483, 352, 483, 382)
-        $graphics.DrawLine($carWindowLine, 430, 357, 414, 341)
-        $graphics.DrawLine($carWindowLine, 524, 353, 540, 340)
-        $carWindowLine.Dispose()
-        $carHighlight = New-Object Drawing.Pen([Drawing.Color]::FromArgb(225, 241, 255, 250), 2)
-        $graphics.DrawLine($carHighlight, 433, 391, 524, 391)
-        $graphics.DrawLine($carHighlight, 450, 363, 507, 363)
-        $carHighlight.Dispose()
-        $carWheel = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 5, 7, 13))
-        $graphics.FillEllipse($carWheel, 425, 395, 22, 22)
-        $graphics.FillEllipse($carWheel, 512, 395, 22, 22)
-        $carHub = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(215, 83, 211, 204))
-        $graphics.FillEllipse($carHub, 432, 402, 8, 8)
-        $graphics.FillEllipse($carHub, 519, 402, 8, 8)
-        $carWheel.Dispose()
-        $carHub.Dispose()
-        $carLight = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 247, 234, 142))
-        $graphics.FillEllipse($carLight, 418, 385, 12, 7)
-        $graphics.FillEllipse($carLight, 529, 385, 12, 7)
-        $carLight.Dispose()
-
-        $screenHud = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(150, 3, 10, 20))
-        $graphics.FillRectangle($screenHud, 269, 211, 162, 43)
-        $graphics.FillRectangle($screenHud, 540, 211, 147, 43)
-        $graphics.FillRectangle($screenHud, 269, 414, 418, 28)
-        $screenHud.Dispose()
-        $hudFont = New-Object Drawing.Font('Consolas', 10, [Drawing.FontStyle]::Bold)
-        $tinyFont = New-Object Drawing.Font('Consolas', 7, [Drawing.FontStyle]::Regular)
-        $hudWhite = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(244, 248, 255))
-        $hudCyan = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(86, 240, 230))
-        $hudYellow = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 224, 124))
-        $graphics.DrawString('SCORE 084200', $hudFont, $hudYellow, 280, 216)
-        $graphics.DrawString('1UP  INSERT COIN', $tinyFont, $hudWhite, 280, 237)
-        $graphics.DrawString('SHIELD  78%', $hudFont, $hudCyan, 552, 216)
-        $graphics.DrawString('WAVE 07  TARGETS 04', $tinyFont, $hudWhite, 552, 237)
-        $graphics.DrawString('CHECKPOINT 03   SPEED 186 KM/H   LAP 02/03', $tinyFont, $hudWhite, 280, 421)
-        $hudWhite.Dispose()
-        $hudCyan.Dispose()
-        $hudYellow.Dispose()
-        $hudFont.Dispose()
-        $tinyFont.Dispose()
-        $hudBar = New-Object Drawing.Pen([Drawing.Color]::FromArgb(170, 99, 231, 204), 2)
-        $graphics.DrawLine($hudBar, 283, 249, 410, 249)
-        $graphics.DrawLine($hudBar, 553, 249, 674, 249)
-        $hudBar.Dispose()
-
-        $screenReflection = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(22, 255, 255, 255))
-        $graphics.FillPolygon($screenReflection, [Drawing.Point[]]@(
-            (New-Object Drawing.Point -ArgumentList @(612, 199)),
-            (New-Object Drawing.Point -ArgumentList @(681, 199)),
-            (New-Object Drawing.Point -ArgumentList @(642, 300)),
-            (New-Object Drawing.Point -ArgumentList @(615, 300))
-        ))
-        $graphics.FillRectangle($screenReflection, 262, 199, 5, 244)
-        $screenReflection.Dispose()
-
-        $controlDeck = New-Object System.Drawing.Drawing2D.LinearGradientBrush -ArgumentList @(
-            (New-Object Drawing.Rectangle -ArgumentList @(220, 432, 520, 47)),
-            [Drawing.Color]::FromArgb(39, 47, 57),
-            [Drawing.Color]::FromArgb(5, 8, 15),
-            90.0
-        )
-        $graphics.FillPolygon($controlDeck, [Drawing.Point[]]@(
-            (New-Object Drawing.Point -ArgumentList @(220, 430)),
-            (New-Object Drawing.Point -ArgumentList @(740, 430)),
-            (New-Object Drawing.Point -ArgumentList @(786, 477)),
-            (New-Object Drawing.Point -ArgumentList @(174, 477))
-        ))
-        $controlDeck.Dispose()
-        $deckEdge = New-Object Drawing.Pen([Drawing.Color]::FromArgb(197, 65, 215, 194), 2)
-        $graphics.DrawLine($deckEdge, 220, 430, 740, 430)
-        $graphics.DrawLine($deckEdge, 174, 477, 786, 477)
-        $deckEdge.Dispose()
-        $speakerPen = New-Object Drawing.Pen([Drawing.Color]::FromArgb(84, 150, 165, 174), 1)
-        for ($speaker = 0; $speaker -lt 14; $speaker++) {
-            $graphics.DrawLine($speakerPen, 535 + ($speaker * 11), 449, 540 + ($speaker * 11), 462)
-        }
-        $speakerPen.Dispose()
-        $buttonYellow = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 239, 228, 82))
-        $buttonRed = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 230, 59, 85))
-        $buttonBlue = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 74, 212, 222))
-        $buttonRing = New-Object Drawing.Pen([Drawing.Color]::FromArgb(230, 245, 245, 232), 1)
-        $graphics.FillEllipse($buttonYellow, 272, 437, 27, 27)
-        $graphics.FillEllipse($buttonRed, 306, 437, 27, 27)
-        $graphics.FillEllipse($buttonBlue, 340, 437, 27, 27)
-        $graphics.DrawEllipse($buttonRing, 272, 437, 27, 27)
-        $graphics.DrawEllipse($buttonRing, 306, 437, 27, 27)
-        $graphics.DrawEllipse($buttonRing, 340, 437, 27, 27)
-        $buttonYellow.Dispose()
-        $buttonRed.Dispose()
-        $buttonBlue.Dispose()
-        $buttonRing.Dispose()
-        $stick = New-Object Drawing.Pen([Drawing.Color]::FromArgb(207, 231, 237, 232), 4)
-        $graphics.DrawLine($stick, 403, 459, 412, 435)
-        $stick.Dispose()
-        $stickBall = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 231, 62, 107))
-        $graphics.FillEllipse($stickBall, 397, 425, 28, 20)
-        $stickBall.Dispose()
-        $controlTextFont = New-Object Drawing.Font('Segoe UI', 8, [Drawing.FontStyle]::Bold)
-        $controlText = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(224, 231, 239))
-        $graphics.DrawString('P1', $controlTextFont, $controlText, 276, 466)
-        $graphics.DrawString('START', $controlTextFont, $controlText, 315, 466)
-        $graphics.DrawString('CREDIT 03', $controlTextFont, $controlText, 680, 463)
-        $controlText.Dispose()
-        $controlTextFont.Dispose()
-        $lowerPanel = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(29, 14, 31))
-        $graphics.FillRectangle($lowerPanel, 229, 482, 502, 18)
-        $lowerPanel.Dispose()
-        $coinDoor = New-Object Drawing.Pen([Drawing.Color]::FromArgb(108, 212, 112, 197), 1)
-        $graphics.DrawRectangle($coinDoor, 419, 487, 112, 45)
-        $graphics.DrawLine($coinDoor, 428, 495, 522, 495)
-        $graphics.DrawLine($coinDoor, 428, 503, 522, 503)
-        $graphics.DrawLine($coinDoor, 428, 511, 522, 511)
-        $coinDoor.Dispose()
-        $coinLight = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(220, 98, 235, 217))
-        $graphics.FillEllipse($coinLight, 457, 516, 8, 8)
-        $graphics.FillEllipse($coinLight, 487, 516, 8, 8)
-        $coinLight.Dispose()
-
-        $bodyTexturePen = New-Object Drawing.Pen([Drawing.Color]::FromArgb(31, 255, 182, 233), 1)
-        $bodyRandom = New-Object System.Random(8091)
-        for ($bodyMark = 0; $bodyMark -lt 420; $bodyMark++) {
-            $bodyX = $bodyRandom.Next(210, 750)
-            $bodyY = $bodyRandom.Next(181, 428)
-            if (($bodyMark % 3) -eq 0) {
-                $graphics.DrawLine($bodyTexturePen, $bodyX, $bodyY, $bodyX + $bodyRandom.Next(2, 13), $bodyY)
-            }
-        }
-        $bodyTexturePen.Dispose()
-        $detailPen = New-Object Drawing.Pen([Drawing.Color]::FromArgb(110, 82, 239, 191), 1)
-        for ($detailX = 170; $detailX -lt 806; $detailX += 18) {
-            $graphics.DrawLine($detailPen, $detailX, 507, $detailX + 8, 507)
-        }
-        $detailPen.Dispose()
-        Invoke-TpmReShadePreviewSceneTexture -Bitmap $bitmap
+        $loaded = [Drawing.Image]::FromStream($stream, $true, $true)
+        $graphics = [Drawing.Graphics]::FromImage($bitmap)
+        $graphics.SmoothingMode = [Drawing.Drawing2D.SmoothingMode]::HighQuality
+        $graphics.InterpolationMode = [Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $graphics.PixelOffsetMode = [Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+        $graphics.CompositingQuality = [Drawing.Drawing2D.CompositingQuality]::HighQuality
+        $graphics.DrawImage($loaded, (New-Object Drawing.Rectangle -ArgumentList @(0, 0, $canvasWidth, $canvasHeight)))
+        return $bitmap
     } catch {
         if ($bitmap) { $bitmap.Dispose() }
         throw
     } finally {
         if ($graphics) { $graphics.Dispose() }
+        if ($loaded) { $loaded.Dispose() }
+        if ($stream) { $stream.Dispose() }
     }
-    return $bitmap
 }
 
 
@@ -5260,63 +4830,149 @@ function Invoke-TpmReShadePreviewProfilePixels {
         if ($data) { $Bitmap.UnlockBits($data) }
     }
 }
-function New-TpmReShadePreviewBitmap {
-    param([Parameter(Mandatory)]$ProfileDefinition, [ValidateSet('Before','After','Split','Slider')][string]$Mode = 'Split', [int]$Width = 960, [int]$Height = 540, [ValidateRange(0,100)][int]$SliderPosition = 50)
-    Add-Type -AssemblyName System.Drawing -ErrorAction Stop
-    $canvasWidth = [Math]::Max(1, [int]$Width)
-    $canvasHeight = [Math]::Max(1, [int]$Height)
-    $referenceBitmap = $null
-    $processedBitmap = $null
-    $outputBitmap = $null
-    $outputGraphics = $null
-    $ownsProcessed = $false
+function Copy-TpmReShadePreviewBitmapRegion {
+    param([Parameter(Mandatory)][Drawing.Bitmap]$Source, [Parameter(Mandatory)][Drawing.Bitmap]$Destination, [int]$XStart = 0, [int]$XEnd = -1)
+    if ($Source.Width -ne $Destination.Width -or $Source.Height -ne $Destination.Height) { throw 'Preview bitmap dimensions do not match.' }
+    $x = [Math]::Max(0, [Math]::Min($Source.Width, [int]$XStart))
+    $end = if ($XEnd -lt 0) { $Source.Width } else { [Math]::Max($x, [Math]::Min($Source.Width, [int]$XEnd)) }
+    $regionWidth = $end - $x
+    $rectangle = New-Object Drawing.Rectangle -ArgumentList @(0, 0, $Source.Width, $Source.Height)
+    $sourceData = $null
+    $destinationData = $null
     try {
-        $referenceBitmap = New-TpmReShadePreviewReferenceBitmap -Width $canvasWidth -Height $canvasHeight
-        if ([string]$ProfileDefinition.ProfileId -eq 'Original') {
-            $processedBitmap = $referenceBitmap
-        } else {
-            $processedBitmap = New-Object Drawing.Bitmap($canvasWidth, $canvasHeight)
-            $processedGraphics = [Drawing.Graphics]::FromImage($processedBitmap)
-            try { $processedGraphics.DrawImageUnscaled($referenceBitmap, 0, 0) } finally { $processedGraphics.Dispose() }
-            Invoke-TpmReShadePreviewProfilePixels -Bitmap $processedBitmap -ProfileDefinition $ProfileDefinition
-            $ownsProcessed = $true
+        $sourceData = $Source.LockBits($rectangle, [System.Drawing.Imaging.ImageLockMode]::ReadOnly, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+        $destinationData = $Destination.LockBits($rectangle, [System.Drawing.Imaging.ImageLockMode]::ReadWrite, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+        $sourceStride = [Math]::Abs([int]$sourceData.Stride)
+        $destinationStride = [Math]::Abs([int]$destinationData.Stride)
+        $rowBytes = $regionWidth * 4
+        $sourceBuffer = New-Object byte[] $rowBytes
+        $destinationBuffer = New-Object byte[] $rowBytes
+        for ($y = 0; $y -lt $Source.Height; $y++) {
+            $sourceRow = if ($sourceData.Stride -lt 0) { $Source.Height - 1 - $y } else { $y }
+            $destinationRow = if ($destinationData.Stride -lt 0) { $Destination.Height - 1 - $y } else { $y }
+            $sourcePointer = [IntPtr]::Add($sourceData.Scan0, ($sourceRow * $sourceStride) + ($x * 4))
+            $destinationPointer = [IntPtr]::Add($destinationData.Scan0, ($destinationRow * $destinationStride) + ($x * 4))
+            [Runtime.InteropServices.Marshal]::Copy($sourcePointer, $sourceBuffer, 0, $rowBytes)
+            [Runtime.InteropServices.Marshal]::Copy($destinationPointer, $destinationBuffer, 0, $rowBytes)
+            for ($offset = 0; $offset -lt $rowBytes; $offset += 4) {
+                $sourceAlpha = [int]$sourceBuffer[$offset + 3]
+                if ($sourceAlpha -eq 255) {
+                    $destinationBuffer[$offset] = $sourceBuffer[$offset]
+                    $destinationBuffer[$offset + 1] = $sourceBuffer[$offset + 1]
+                    $destinationBuffer[$offset + 2] = $sourceBuffer[$offset + 2]
+                    $destinationBuffer[$offset + 3] = 255
+                    continue
+                }
+                if ($sourceAlpha -eq 0) { continue }
+                $destinationAlpha = [int]$destinationBuffer[$offset + 3]
+                $outAlpha = $sourceAlpha + [int][Math]::Round(($destinationAlpha * (255 - $sourceAlpha)) / 255.0)
+                if ($outAlpha -le 0) { continue }
+                for ($channel = 0; $channel -lt 3; $channel++) {
+                    $sourceValue = [int]$sourceBuffer[$offset + $channel]
+                    $destinationValue = [int]$destinationBuffer[$offset + $channel]
+                    $composite = (($sourceValue * $sourceAlpha) + (($destinationValue * $destinationAlpha * (255 - $sourceAlpha)) / 255.0)) / $outAlpha
+                    $destinationBuffer[$offset + $channel] = [byte][Math]::Max(0, [Math]::Min(255, [Math]::Round($composite)))
+                }
+                $destinationBuffer[$offset + 3] = [byte]$outAlpha
+            }
+            [Runtime.InteropServices.Marshal]::Copy($destinationBuffer, 0, $destinationPointer, $rowBytes)
         }
-        $outputBitmap = New-Object Drawing.Bitmap($canvasWidth, $canvasHeight)
-        $outputGraphics = [Drawing.Graphics]::FromImage($outputBitmap)
+    } finally {
+        if ($sourceData) { $Source.UnlockBits($sourceData) }
+        if ($destinationData) { $Destination.UnlockBits($destinationData) }
+    }
+}
+function New-TpmReShadePreviewRenderCache {
+    param([int]$Width = 960, [int]$Height = 540, [string]$PreviewRoot = '')
+    $cacheWidth = [Math]::Max(1, [int]$Width)
+    $cacheHeight = [Math]::Max(1, [int]$Height)
+    return [pscustomobject]@{
+        Width = $cacheWidth
+        Height = $cacheHeight
+        PreviewRoot = $PreviewRoot
+        Reference = (New-TpmReShadePreviewReferenceBitmap -Width $cacheWidth -Height $cacheHeight -PreviewRoot $PreviewRoot)
+        Processed = @{}
+    }
+}
+
+function Get-TpmReShadePreviewProcessedBitmap {
+    param([Parameter(Mandatory)]$Cache, [Parameter(Mandatory)]$ProfileDefinition)
+    $profileId = [string]$ProfileDefinition.ProfileId
+    if ($Cache.Processed.ContainsKey($profileId)) { return $Cache.Processed[$profileId] }
+    if ($profileId -eq 'Original') {
+        $Cache.Processed[$profileId] = $Cache.Reference
+        return $Cache.Reference
+    }
+    $bitmap = New-Object Drawing.Bitmap($Cache.Width, $Cache.Height)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    try { $graphics.DrawImageUnscaled($Cache.Reference, 0, 0) } finally { $graphics.Dispose() }
+    try {
+        Invoke-TpmReShadePreviewProfilePixels -Bitmap $bitmap -ProfileDefinition $ProfileDefinition
+        $Cache.Processed[$profileId] = $bitmap
+        return $bitmap
+    } catch {
+        $bitmap.Dispose()
+        throw
+    }
+}
+
+function New-TpmReShadePreviewBitmapFromCache {
+    param([Parameter(Mandatory)]$Cache, [Parameter(Mandatory)]$ProfileDefinition, [ValidateSet('Before','After','Split','Slider')][string]$Mode = 'Split', [ValidateRange(0,100)][int]$SliderPosition = 50)
+    $referenceBitmap = $Cache.Reference
+    $processedBitmap = Get-TpmReShadePreviewProcessedBitmap -Cache $Cache -ProfileDefinition $ProfileDefinition
+    $outputBitmap = New-Object Drawing.Bitmap($Cache.Width, $Cache.Height)
+    $outputGraphics = [Drawing.Graphics]::FromImage($outputBitmap)
+    try {
         $outputGraphics.Clear([Drawing.Color]::Black)
         if ($Mode -eq 'Before') {
-            $outputGraphics.DrawImageUnscaled($referenceBitmap, 0, 0)
+            Copy-TpmReShadePreviewBitmapRegion -Source $referenceBitmap -Destination $outputBitmap -XStart 0
+            $label = 'ORIGINAL'
+            $labelX = 14
         } elseif ($Mode -eq 'After') {
-            $outputGraphics.DrawImageUnscaled($processedBitmap, 0, 0)
+            Copy-TpmReShadePreviewBitmapRegion -Source $processedBitmap -Destination $outputBitmap -XStart 0
+            $label = if ($ProfileDefinition.ProfileId -eq 'Original') { 'ORIGINAL' } else { 'AFTER' }
+            $labelX = 14
         } else {
-            $outputGraphics.DrawImageUnscaled($referenceBitmap, 0, 0)
-            $splitX = if ($Mode -eq 'Slider') { [int][Math]::Round($canvasWidth * ($SliderPosition / 100.0)) } else { [int][Math]::Round($canvasWidth / 2.0) }
-            if ($splitX -lt $canvasWidth) {
-                $clipWidth = $canvasWidth - $splitX
-                $outputGraphics.SetClip((New-Object Drawing.Rectangle -ArgumentList @($splitX, 0, $clipWidth, $canvasHeight)))
-                try { $outputGraphics.DrawImageUnscaled($processedBitmap, 0, 0) } finally { $outputGraphics.ResetClip() }
-            }
-            if ($splitX -gt 0 -and $splitX -lt $canvasWidth) {
-                $divider = New-Object Drawing.Pen([Drawing.Color]::FromArgb(255, 255, 255), 3)
-                $outputGraphics.DrawLine($divider, $splitX, 0, $splitX, $canvasHeight)
+            $splitX = if ($Mode -eq 'Slider') { [int][Math]::Round($Cache.Width * ($SliderPosition / 100.0)) } else { [int][Math]::Round($Cache.Width / 2.0) }
+            Copy-TpmReShadePreviewBitmapRegion -Source $referenceBitmap -Destination $outputBitmap -XStart 0 -XEnd $splitX
+            Copy-TpmReShadePreviewBitmapRegion -Source $processedBitmap -Destination $outputBitmap -XStart $splitX -XEnd $Cache.Width
+            if ($splitX -gt 0 -and $splitX -lt $Cache.Width) {
+                $divider = New-Object Drawing.Pen([Drawing.Color]::FromArgb(255, 255, 255), 4)
+                $outputGraphics.DrawLine($divider, $splitX, 0, $splitX, $Cache.Height)
                 $divider.Dispose()
             }
-            $labelFont = New-Object Drawing.Font('Consolas', 11, [Drawing.FontStyle]::Bold)
-            $labelBrush = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(245, 250, 255))
-            if ($Mode -ne 'Slider' -or $splitX -gt 0) { $outputGraphics.DrawString('BEFORE', $labelFont, $labelBrush, 14, 12) }
-            if ($Mode -ne 'Slider' -or $splitX -lt $canvasWidth) { $outputGraphics.DrawString('AFTER', $labelFont, $labelBrush, [Math]::Min($splitX + 12, [Math]::Max(14, $canvasWidth - 80)), 12) }
-            $labelBrush.Dispose()
-            $labelFont.Dispose()
+            $label = 'BEFORE  |  AFTER'
+            $labelX = 14
         }
+        $labelFont = New-Object Drawing.Font('Consolas', 11, [Drawing.FontStyle]::Bold)
+        $labelBrush = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(245, 250, 255))
+        $outputGraphics.DrawString($label, $labelFont, $labelBrush, $labelX, 12)
+        $labelBrush.Dispose()
+        $labelFont.Dispose()
         return $outputBitmap
     } catch {
-        if ($outputBitmap) { $outputBitmap.Dispose() }
+        $outputBitmap.Dispose()
         throw
-    } finally {
-        if ($outputGraphics) { $outputGraphics.Dispose() }
-        if ($ownsProcessed -and $processedBitmap) { $processedBitmap.Dispose() }
-        if ($referenceBitmap) { $referenceBitmap.Dispose() }
+    } finally { $outputGraphics.Dispose() }
+}
+
+function Dispose-TpmReShadePreviewRenderCache {
+    param([object]$Cache)
+    if (-not $Cache) { return }
+    foreach ($bitmap in @($Cache.Processed.Values)) {
+        if ($bitmap -and $bitmap -ne $Cache.Reference) { try { $bitmap.Dispose() } catch {} }
     }
+    if ($Cache.Reference) { try { $Cache.Reference.Dispose() } catch {} }
+    $Cache.Processed.Clear()
+    $Cache.Reference = $null
+}
+
+function New-TpmReShadePreviewBitmap {
+    param([Parameter(Mandatory)]$ProfileDefinition, [ValidateSet('Before','After','Split','Slider')][string]$Mode = 'Split', [int]$Width = 960, [int]$Height = 540, [ValidateRange(0,100)][int]$SliderPosition = 50, [string]$PreviewRoot = '')
+    $cache = New-TpmReShadePreviewRenderCache -Width $Width -Height $Height -PreviewRoot $PreviewRoot
+    try {
+        return New-TpmReShadePreviewBitmapFromCache -Cache $cache -ProfileDefinition $ProfileDefinition -Mode $Mode -SliderPosition $SliderPosition
+    } finally { Dispose-TpmReShadePreviewRenderCache -Cache $cache }
 }
 
 function New-TpmReShadePreviewArtifact {
@@ -5326,7 +4982,7 @@ function New-TpmReShadePreviewArtifact {
         if (-not $reference.Available) { return [pscustomobject]@{ Available=$false; Reason=$reference.Reason; Mode=$Mode; ProfileId=$ProfileDefinition.ProfileId } }
         $catalog=@(Get-TpmReShadeEffectCatalog);$hashes=@()
         foreach($id in @($ProfileDefinition.Effects)){$effect=@($catalog|Where-Object EffectId -eq $id)[0];if(-not $effect){return [pscustomobject]@{Available=$false;Reason='UNAPPROVED_EFFECT';Mode=$Mode;ProfileId=$ProfileDefinition.ProfileId}};$hashes+=@($effect.SHA256)}
-        $key=Get-TpmReShadePreviewCacheKey -SubjectId ($ProfileDefinition.ProfileId+'|'+$Mode+'|'+$SliderPosition) -ShaderSha256 $hashes -IntensityId $IntensityId -PresetVersion ([string]$ProfileDefinition.SchemaVersion) -ReferenceVersion $reference.Version -ReferenceSha256 $reference.Hash -RendererVersion '2'
+        $key=Get-TpmReShadePreviewCacheKey -SubjectId ($ProfileDefinition.ProfileId+'|'+$Mode+'|'+$SliderPosition) -ShaderSha256 $hashes -IntensityId $IntensityId -PresetVersion ([string]$ProfileDefinition.SchemaVersion) -ReferenceVersion $reference.Version -ReferenceSha256 $reference.Hash -RendererVersion '3'
         $sourceRoot=if($PreviewRoot){[IO.Path]::GetFullPath($PreviewRoot)}else{[IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'ReShadePreviewCache'))}
         $root=if($CacheRoot){[IO.Path]::GetFullPath($CacheRoot)}else{[IO.Path]::GetFullPath((Join-Path $sourceRoot 'Cache'))}
         $previewRootFull=$sourceRoot
@@ -5335,9 +4991,9 @@ function New-TpmReShadePreviewArtifact {
         if((Test-Path -LiteralPath $imagePath -PathType Leaf) -and (Test-Path -LiteralPath $manifestPath -PathType Leaf)){
             try{$manifest=Get-Content -LiteralPath $manifestPath -Raw|ConvertFrom-Json;if($manifest.CacheKey -eq $key -and $manifest.ReferenceHash -eq $reference.Hash){$check=[Drawing.Image]::FromFile($imagePath);$check.Dispose();return [pscustomobject]@{Available=$true;Path=$imagePath;CacheKey=$key;Reused=$true;ReferenceIdentity=$reference.Identity;Mode=$Mode;ProfileId=$ProfileDefinition.ProfileId}}}catch{}
         }
-        $bitmap=New-TpmReShadePreviewBitmap -ProfileDefinition $ProfileDefinition -Mode $Mode -SliderPosition $SliderPosition
+        $bitmap=New-TpmReShadePreviewBitmap -ProfileDefinition $ProfileDefinition -Mode $Mode -SliderPosition $SliderPosition -PreviewRoot $PreviewRoot
         try{$bitmap.Save($imagePath,[Drawing.Imaging.ImageFormat]::Png)}finally{$bitmap.Dispose()}
-        [pscustomobject]@{CacheKey=$key;ProfileId=$ProfileDefinition.ProfileId;Mode=$Mode;ReferenceIdentity=$reference.Identity;ReferenceHash=$reference.Hash;RendererVersion='2';PresetVersion=[string]$ProfileDefinition.SchemaVersion;ShaderSha256=@($hashes);IntensityId=$IntensityId}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $manifestPath -Encoding UTF8
+        [pscustomobject]@{CacheKey=$key;ProfileId=$ProfileDefinition.ProfileId;Mode=$Mode;ReferenceIdentity=$reference.Identity;ReferenceHash=$reference.Hash;RendererVersion='3';PresetVersion=[string]$ProfileDefinition.SchemaVersion;ShaderSha256=@($hashes);IntensityId=$IntensityId}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $manifestPath -Encoding UTF8
         return [pscustomobject]@{Available=$true;Path=$imagePath;CacheKey=$key;Reused=$false;ReferenceIdentity=$reference.Identity;Mode=$Mode;ProfileId=$ProfileDefinition.ProfileId}
     } catch { return [pscustomobject]@{Available=$false;Reason='PREVIEW_RENDER_FAILED';Mode=$Mode;ProfileId=$ProfileDefinition.ProfileId;Error=$_.Exception.Message} }
 }
@@ -5348,7 +5004,7 @@ function Open-TpmReShadePreviewWindow {
     $formsLoaded = $false
     $drawingLoaded = $false
     $previewRoot = [IO.Path]::GetFullPath($PSScriptRoot)
-    $assetChecks = @('embedded synthetic reference')
+    $assetChecks = @('bundled landscape reference')
     try {
         if([Threading.Thread]::CurrentThread.GetApartmentState() -ne [Threading.ApartmentState]::STA){throw [InvalidOperationException]::new('STA required')}
         Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop; $formsLoaded = $true
@@ -5383,7 +5039,7 @@ function Open-TpmReShadePreviewWindow {
         }
         $sliderLabel=New-Object Windows.Forms.Label;$sliderLabel.Text='Comparison slider';$sliderLabel.AutoSize=$true;$toolbar.Controls.Add($sliderLabel)
         $slider=New-Object Windows.Forms.TrackBar;$slider.Name='ComparisonSlider';$slider.Minimum=0;$slider.Maximum=100;$slider.Value=50;$slider.TickFrequency=25;$slider.Width=300
-        $script:TpmReShadePreviewWindowState=[pscustomobject]@{Form=$form;Picture=$picture;Profile=$ProfileDefinition;Mode=$Mode;CacheRoot=$CacheRoot;Slider=$slider;SliderValue=50}
+        $script:TpmReShadePreviewWindowState=[pscustomobject]@{Form=$form;Picture=$picture;Profile=$ProfileDefinition;Mode=$Mode;CacheRoot=$CacheRoot;PreviewRoot='';PreviewCache=(New-TpmReShadePreviewRenderCache -Width 960 -Height 540);Slider=$slider;SliderValue=50}
         $slider.Add_ValueChanged({
             try {
                 $valueProperty = $this.PSObject.Properties['Value']
@@ -5410,9 +5066,15 @@ function Update-TpmReShadePreviewWindow {
     param([ValidateSet('Before','After','Split','Slider')][string]$Mode='Split', [ValidateRange(0,100)][int]$SliderPosition=50)
     if(-not $script:TpmReShadePreviewWindowState -or $script:TpmReShadePreviewWindowState.Form.IsDisposed){return [pscustomobject]@{Available=$false;Reason='PREVIEW_WINDOW_CLOSED'}}
     $state=$script:TpmReShadePreviewWindowState
+    $previewRoot = if ($state.PSObject.Properties['PreviewRoot']) { [string]$state.PreviewRoot } else { '' }
     if($Mode -eq 'Slider'){
         try{
-            $image=New-TpmReShadePreviewBitmap -ProfileDefinition $state.Profile -Mode Slider -SliderPosition $SliderPosition
+            $cache = if ($state.PSObject.Properties['PreviewCache']) { $state.PreviewCache } else { $null }
+            if (-not $cache) {
+                $cache = New-TpmReShadePreviewRenderCache -Width 960 -Height 540 -PreviewRoot $previewRoot
+                $state | Add-Member -MemberType NoteProperty -Name PreviewCache -Value $cache
+            }
+            $image=New-TpmReShadePreviewBitmapFromCache -Cache $cache -ProfileDefinition $state.Profile -Mode Slider -SliderPosition $SliderPosition
             $old=$state.Picture.Image;$state.Picture.Image=$image;if($old){$old.Dispose()};$state.Mode=$Mode;$state.SliderValue=$SliderPosition
             return [pscustomobject]@{Available=$true;Mode=$Mode;SliderPosition=$SliderPosition;InMemory=$true}
         }catch{
@@ -5420,7 +5082,7 @@ function Update-TpmReShadePreviewWindow {
         }
     }
     try {
-        $artifact=New-TpmReShadePreviewArtifact -ProfileDefinition $state.Profile -Mode $Mode -CacheRoot $state.CacheRoot -SliderPosition $SliderPosition
+        $artifact=New-TpmReShadePreviewArtifact -ProfileDefinition $state.Profile -Mode $Mode -PreviewRoot $previewRoot -CacheRoot $state.CacheRoot -SliderPosition $SliderPosition
         if(-not $artifact.Available){return $artifact}
         $old=$state.Picture.Image;$state.Picture.Image=[Drawing.Image]::FromFile($artifact.Path);if($old){$old.Dispose()};$state.Mode=$Mode;$state.SliderValue=$SliderPosition
         return [pscustomobject]@{Available=$true;Mode=$Mode;CacheKey=$artifact.CacheKey;SliderPosition=$SliderPosition}
@@ -5430,7 +5092,13 @@ function Update-TpmReShadePreviewWindow {
 }
 
 function Close-TpmReShadePreviewWindow {
-    if($script:TpmReShadePreviewWindowState){$state=$script:TpmReShadePreviewWindowState;if($state.Picture.Image){$state.Picture.Image.Dispose()};if($state.Form){$state.Form.Close();$state.Form.Dispose()};$script:TpmReShadePreviewWindowState=$null}
+    if($script:TpmReShadePreviewWindowState){
+        $state=$script:TpmReShadePreviewWindowState
+        if($state.Picture.Image){$state.Picture.Image.Dispose()}
+        if($state.PreviewCache){Dispose-TpmReShadePreviewRenderCache -Cache $state.PreviewCache}
+        if($state.Form){$state.Form.Close();$state.Form.Dispose()}
+        $script:TpmReShadePreviewWindowState=$null
+    }
     return [pscustomobject]@{Closed=$true}
 }
 
@@ -5599,6 +5267,7 @@ function Show-TpmReShadeProfileGalleryWindow {
             Write-Log 'ReShade gallery preview failed at stage ''profile-normalization'': no valid ProfileId items.'
             return [pscustomobject]@{ Available=$false; SelectedProfile=$null; Closed=$true; Reason='PREVIEW_GALLERY_INVALID_PROFILES' }
         }
+        $previewCache = New-TpmReShadePreviewRenderCache -Width 960 -Height 540
         $form = New-Object Windows.Forms.Form
         $form.Text = 'TeknoParrot ReShade Profile Gallery'
         $form.Width = 1040
@@ -5630,6 +5299,7 @@ function Show-TpmReShadeProfileGalleryWindow {
             PreviewEnabled = $true
             PreviewFailureStage = $null
             PreviewFailureMessage = $null
+            PreviewCache = $previewCache
             Refresh = $null
             Form = $form
             Combo = $combo
@@ -5649,7 +5319,7 @@ function Show-TpmReShadeProfileGalleryWindow {
                 $viewMode = [string]$state['ViewMode']
                 if ($viewMode -notin @('Before', 'After', 'Split', 'Slider')) { throw ("Unsupported gallery view mode '{0}'." -f $viewMode) }
                 $sliderPosition = [int]$state['SliderPosition']
-                $image = New-TpmReShadePreviewBitmap -ProfileDefinition $canonicalProfile -Mode $viewMode -SliderPosition $sliderPosition
+                $image = New-TpmReShadePreviewBitmapFromCache -Cache $state['PreviewCache'] -ProfileDefinition $canonicalProfile -Mode $viewMode -SliderPosition $sliderPosition
                 if (-not $image) { throw 'Preview renderer returned no image.' }
                 $oldImage = $picture.Image
                 $picture.Image = $image
@@ -5708,7 +5378,8 @@ function Show-TpmReShadeProfileGalleryWindow {
         $state['SelectedProfileId'] = [string]$combo.Items[$defaultIndex].ProfileId
         $state['Initialized'] = $true
         if (-not (Invoke-TpmReShadeGalleryRefreshSafe -State $state -Refresh $refresh -Stage 'initial-preview')) {
-            return [pscustomobject]@{ Available=$false; SelectedProfile=$null; Closed=$true; Reason='PREVIEW_GALLERY_REFRESH_FAILED'; Session=$state }
+            Close-TpmReShadeProfileGallerySession -Session $state
+            return [pscustomobject]@{ Available=$false; SelectedProfile=$null; Closed=$true; Reason='PREVIEW_GALLERY_REFRESH_FAILED' }
         }
         if ($NonModal) {
             $form.Show()
@@ -5717,10 +5388,10 @@ function Show-TpmReShadeProfileGalleryWindow {
         }
         [void]$form.ShowDialog()
         $selectedProfile = if ($state['SelectedProfileId']) { Get-TpmReShadeProfile -ProfileId ([string]$state['SelectedProfileId']) } else { $null }
-        if ($picture.Image) { $picture.Image.Dispose() }
-        $form.Dispose()
+        Close-TpmReShadeProfileGallerySession -Session $state
         return [pscustomobject]@{ Available=$true; SelectedProfile=$selectedProfile; Closed=$true }
     } catch {
+        try { if ($state) { Close-TpmReShadeProfileGallerySession -Session $state } } catch {}
         try { Write-Log ("ReShade gallery preview failed at stage 'gallery-initialization': {0}" -f $_.Exception.Message) } catch {}
         return [pscustomobject]@{ Available=$false; SelectedProfile=$null; Closed=$true; Reason='PREVIEW_GALLERY_UNAVAILABLE'; Error=$_.Exception.Message }
     }
@@ -5742,6 +5413,7 @@ function Close-TpmReShadeProfileGallerySession {
     try {
         if ($Session.Form -and -not $Session.Form.IsDisposed) { $Session.Form.Dispose() }
     } catch {}
+    try { Dispose-TpmReShadePreviewRenderCache -Cache $Session['PreviewCache'] } catch {}
     try { $Session['Closed'] = $true } catch {}
 }
 function Show-TpmReShadePreviewWindow {
@@ -7064,7 +6736,7 @@ function Invoke-ReShadeSetup {
         if ($sigResult.Status -eq 'Valid') {
             Write-Host ("  ReShade ($($dllCheck.Label)) source verified.") -ForegroundColor DarkGray
         } else {
-            Write-Host ("  ReShade ($($dllCheck.Label)) source needs review before use.") -ForegroundColor Yellow
+            Write-Host ("  ReShade ($($dllCheck.Label)) source signature was not verified; TPM will not claim installer trust." ) -ForegroundColor Yellow
         }
     }
     $updateResult = Invoke-ReShadeUpdateIfAvailable -SourceDll $SourceDll -SourceDll32 $SourceDll32 -InstalledVersion $bVer
@@ -7082,7 +6754,7 @@ function Invoke-ReShadeSetup {
     Write-Host "  Choose how your game should look." -ForegroundColor Cyan
     Write-Host "  Use the preview window to compare the options." -ForegroundColor Cyan
     Write-Host "  Nothing will be changed until you confirm." -ForegroundColor DarkCyan
-    Write-Host "  Preview gallery (safe, built-in arcade scene; switchable before/after comparison; choose profiles in one switchable window)" -ForegroundColor DarkCyan
+    Write-Host "  Preview gallery (bundled landscape; compare Original/After or Split; choose profiles in the terminal)" -ForegroundColor DarkCyan
     foreach ($item in $gallery) {
         $previewText = if ($item.PreviewAvailable) { 'preview available' } else { 'preview unavailable; selection still works' }
         Write-Host ("    {0}: {1} [{2}]" -f $item.FriendlyName, $item.Description, $previewText) -ForegroundColor DarkGray
@@ -7108,8 +6780,11 @@ function Invoke-ReShadeSetup {
         Write-Host '  ReShade visual gallery unavailable; typed profile fallback remains active.' -ForegroundColor Yellow
         Write-Log ("ReShade visual gallery unavailable before terminal chooser: {0}" -f $galleryResult.Reason)
     }
-    $chooserResult = Read-TpmReShadeTerminalProfile -Profiles $galleryProfiles -PreviewSession $gallerySession
-    Close-TpmReShadeProfileGallerySession -Session $gallerySession
+    try {
+        $chooserResult = Read-TpmReShadeTerminalProfile -Profiles $galleryProfiles -PreviewSession $gallerySession
+    } finally {
+        Close-TpmReShadeProfileGallerySession -Session $gallerySession
+    }
     if ($chooserResult.Cancelled -or -not $chooserResult.SelectedProfile) {
         Write-Host '  ReShade setup cancelled. No files were changed.' -ForegroundColor Yellow
         Write-Log 'ReShade setup: terminal profile chooser cancelled before confirmation.'
@@ -7214,9 +6889,32 @@ function Invoke-ReShadeSetup {
     # Deploy only after the explicit profile confirmation above.
     Write-Host ""
     Write-Host ("  Installing ReShade into {0} game folder(s)..." -f $selectedGames.Count) -ForegroundColor Cyan
-    $deployed = 0; $installed = 0; $updated = 0; $skipped = 0; $missingPath = 0; $unsupported = 0; $protected = 0; $errors = 0; $presetOverrides = 0
-    $reShadeCacheRoot = Join-Path $PSScriptRoot 'ReShade\Cache'
-
+    $deployed = 0; $installed = 0; $updated = 0; $reapplied = 0; $skipped = 0; $missingPath = 0; $missingDevice = 0; $unsupported = 0; $protected = 0; $errors = 0; $presetOverrides = 0
+    $pathReasonCounts = @{}
+    $preflightValid = 0
+    $preflightReasonCounts = @{}
+    foreach ($preflightProfile in $selectedGames) {
+        try {
+            $preflightDoc = Read-Xml $preflightProfile.FullName
+            $preflightNode = if ($preflightDoc.GameProfile) { $preflightDoc.GameProfile.SelectSingleNode('GamePath') } else { $null }
+            $preflightGamePath = if ($preflightNode) { [string]$preflightNode.InnerText } else { '' }
+            $preflightCheck = Test-TpmGameMutationPath -GamePath $preflightGamePath -RequireLeaf
+            if ($preflightCheck.Valid) {
+                $preflightValid++
+            } else {
+                $preflightReason = [string]$preflightCheck.ReasonCode
+                if (-not $preflightReasonCounts.ContainsKey($preflightReason)) { $preflightReasonCounts[$preflightReason] = 0 }
+                $preflightReasonCounts[$preflightReason]++
+            }
+        } catch {
+            if (-not $preflightReasonCounts.ContainsKey('PROFILE_READ_FAILED')) { $preflightReasonCounts['PROFILE_READ_FAILED'] = 0 }
+            $preflightReasonCounts['PROFILE_READ_FAILED']++
+        }
+    }
+    Write-Host ("  Path preflight: {0} valid, {1} skipped before transaction." -f $preflightValid, ($selectedGames.Count - $preflightValid)) -ForegroundColor DarkCyan
+    foreach ($preflightReason in ($preflightReasonCounts.Keys | Sort-Object)) {
+        Write-Host ("    {0}: {1}" -f $preflightReason, $preflightReasonCounts[$preflightReason]) -ForegroundColor DarkGray
+    }
     foreach ($pf in $selectedGames) {
         try {
             $doc = Read-Xml $pf.FullName
@@ -7226,15 +6924,26 @@ function Invoke-ReShadeSetup {
             if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { $skipped++; Write-Host ("    {0}: saved game path was empty -- skipped" -f $pf.BaseName) -ForegroundColor DarkGray; continue }
 
             $gamePath = $gpNode.InnerText.Trim()
-            if (-not (Test-Path -LiteralPath $gamePath)) {
-                Write-Host ("    {0}: saved game path was not found -- skipped" -f $pf.BaseName) -ForegroundColor DarkGray
-                $missingPath++; $skipped++; continue
+            $pathCheck = Test-TpmGameMutationPath -GamePath $gamePath -RequireLeaf
+            if (-not $pathCheck.Valid) {
+                $reasonCode = [string]$pathCheck.ReasonCode
+                if (-not $pathReasonCounts.ContainsKey($reasonCode)) { $pathReasonCounts[$reasonCode] = 0 }
+                $pathReasonCounts[$reasonCode]++
+                if ($reasonCode -eq 'DEVICE_UNAVAILABLE') {
+                    $missingDevice++
+                    Write-Host ("    {0}: device unavailable -- skipped before ReShade transaction" -f $pf.BaseName) -ForegroundColor Yellow
+                } elseif ($reasonCode -eq 'GAME_PATH_MISSING') {
+                    $missingPath++
+                    Write-Host ("    {0}: saved game executable was not found -- skipped" -f $pf.BaseName) -ForegroundColor DarkGray
+                } else {
+                    Write-Host ("    {0}: path safety check failed ({1}) -- skipped before ReShade transaction" -f $pf.BaseName, $pathCheck.Reason) -ForegroundColor Yellow
+                }
+                $skipped++
+                Write-Log ("ReShade: skipped {0} before transaction; path reason={1}; detail={2}" -f $pf.BaseName, $reasonCode, $pathCheck.Reason)
+                continue
             }
-            $exeDir = [System.IO.Path]::GetDirectoryName($gamePath)
-            if ([string]::IsNullOrWhiteSpace($exeDir)) {
-                Write-Host ("    {0}: invalid game path (no directory component) -- skipped" -f $pf.BaseName) -ForegroundColor Yellow
-                $skipped++; continue
-            }
+            $gamePath = [string]$pathCheck.ResolvedPath
+            $exeDir = [string]$pathCheck.GameDirectory
             $ownershipPath = Get-TpmReShadeProfileOwnershipPath -GameId $pf.BaseName
             if ($restoreSelections.ContainsKey($pf.BaseName)) {
                 $restoreResult = Restore-TpmReShadeProfile -HistoryEntry $restoreSelections[$pf.BaseName].HistoryEntry -CacheRoot $reShadeCacheRoot -OwnershipRoot $ownershipPath -GamePath $gamePath -Doc $doc -SourceDll $SourceDll -SourceDll32 $SourceDll32 -GameId $pf.BaseName -StateRoot ''
@@ -7242,6 +6951,7 @@ function Invoke-ReShadeSetup {
                 $restoreNote = if ($restoreResult.PresetApplied) { '  (preset: generated)' } else { '' }
                 Write-Host ("    {0}  [{1}]{2}  reapplied previous trusted profile" -f $pf.BaseName, $restoreResult.DllName, $restoreNote) -ForegroundColor Green
                 Write-Log "ReShade: reapplied $($pf.BaseName) -> $($restoreResult.TargetDir) [$($restoreResult.DllName)]$restoreNote"
+                $reapplied++
                 $deployed++
                 continue
             }
@@ -7253,6 +6963,23 @@ function Invoke-ReShadeSetup {
             }
             $perGamePreset = Join-Path $reShadePresetsDir ($pf.BaseName + '.ini')
             $presetForGame = if ($canonicalForGame) { $null } else { $presetPath }
+            $boundaryCheck = Test-TpmGameMutationPath -GamePath $gamePath -RequireLeaf
+            if (-not $boundaryCheck.Valid) {
+                $skipped++
+                if ($boundaryCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ }
+                if ($boundaryCheck.ReasonCode -eq 'GAME_PATH_MISSING') { $missingPath++ }
+                Write-Host ("    {0}: mutation-boundary path check failed ({1}) -- unchanged" -f $pf.BaseName, $boundaryCheck.Reason) -ForegroundColor Yellow
+                Write-Log ("ReShade: skipped {0} at mutation boundary; path reason={1}; detail={2}" -f $pf.BaseName, $boundaryCheck.ReasonCode, $boundaryCheck.Reason)
+                continue
+            }
+            if ([string]$boundaryCheck.ResolvedPath -ine [string]$gamePath) {
+                $errors++
+                Write-Host ("    FAILED {0}: game path changed before mutation -- unchanged" -f $pf.BaseName) -ForegroundColor Red
+                Write-Log "ReShade: mutation-boundary path changed for $($pf.BaseName)"
+                continue
+            }
+            $gamePath = [string]$boundaryCheck.ResolvedPath
+            $exeDir = [string]$boundaryCheck.GameDirectory
             $profileDeployment = Install-TpmReShadeProfileDeployment -ProfileDefinition $profileForGame -GamePath $gamePath -Doc $doc -SourceDll $SourceDll -SourceDll32 $SourceDll32 -PresetPath $presetForGame -PerGamePresetPath $perGamePreset -CacheRoot $reShadeCacheRoot -OwnershipPath $ownershipPath -CanonicalPreset:$canonicalForGame
             $hadExistingProfile = Test-Path -LiteralPath $ownershipPath -PathType Leaf
             if (-not $profileDeployment.Succeeded) {
@@ -7269,19 +6996,33 @@ function Invoke-ReShadeSetup {
             if ($hadExistingProfile) { $updated++ } else { $installed++ }
             try { Add-TpmReShadeProfileHistory -GameId $pf.BaseName -ProfileDefinition $profileForGame -StateRoot '' | Out-Null } catch { Write-Log "ReShade: history record failed for $($pf.BaseName) -- $_" }
         } catch {
-            Write-Host ("    FAILED {0}: {1}" -f $pf.BaseName, $_) -ForegroundColor Red
-            Write-Log "ReShade: FAILED $($pf.BaseName) -- $_"
-            $errors++
+            $failureCode = Get-TpmGameMutationFailureCode -ErrorRecord $_
+            if ($failureCode -eq 'DEVICE_UNAVAILABLE' -or $failureCode -eq 'GAME_PATH_MISSING') {
+                $skipped++
+                if (-not $pathReasonCounts.ContainsKey($failureCode)) { $pathReasonCounts[$failureCode] = 0 }
+                $pathReasonCounts[$failureCode]++
+                if ($failureCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ } else { $missingPath++ }
+                Write-Host ("    SKIP {0}: mutation became unavailable ({1}) -- unchanged" -f $pf.BaseName, $failureCode) -ForegroundColor Yellow
+                Write-Log ("ReShade: skipped {0} after mutation failure; path reason={1}; detail={2}" -f $pf.BaseName, $failureCode, $_)
+            } else {
+                Write-Host ("    FAILED {0}: {1}" -f $pf.BaseName, $_) -ForegroundColor Red
+                Write-Log "ReShade: FAILED $($pf.BaseName) -- $_"
+                $errors++
+            }
         }
     }
 
-    Write-Host ""
     Write-Host ("  Installed new : {0} game(s)" -f $installed) -ForegroundColor Green
     Write-Host ("  Updated       : {0} game(s)" -f $updated) -ForegroundColor Green
+    Write-Host ("  Reapplied     : {0} game(s)" -f $reapplied) -ForegroundColor Cyan
     if ($presetOverrides -gt 0) { Write-Host ("  Per-game presets applied : {0}" -f $presetOverrides) -ForegroundColor Cyan }
+    if ($missingDevice -gt 0) {
+        Write-Host ("  Skipped unavailable device : {0} game(s)" -f $missingDevice) -ForegroundColor Yellow
+        Write-Host "  These games were not changed because their saved drive/device was unavailable." -ForegroundColor Yellow
+    }
     if ($missingPath -gt 0) {
-        Write-Host ("  Skipped missing path : {0} game(s)" -f $missingPath) -ForegroundColor Yellow
-        Write-Host "  Some saved game paths no longer exist. Use the path-repair tool from the main menu, then run ReShade setup again." -ForegroundColor Yellow
+        Write-Host ("  Skipped missing executable : {0} game(s)" -f $missingPath) -ForegroundColor Yellow
+        Write-Host "  Repair saved game paths, then run ReShade setup again." -ForegroundColor Yellow
     }
     if ($unsupported -gt 0) { Write-Host ("  Skipped unsupported or missing 32-bit : {0} game(s)" -f $unsupported) -ForegroundColor DarkGray }
     if ($protected -gt 0) { Write-Host ("  Protected: {0} game(s) already had ReShade files, so TeknoParrot Manager left them unchanged." -f $protected) -ForegroundColor Yellow }
@@ -7289,19 +7030,25 @@ function Invoke-ReShadeSetup {
     Write-Host ""
     Write-Host "  To turn effects on/off: launch a game and press the  Home  key." -ForegroundColor Cyan
     Write-Host "  TPM does not remove an unowned ReShade hook automatically." -ForegroundColor DarkCyan
-    Write-Log ("ReShade setup: InstalledNew={0} Updated={1} Protected={2} MissingPath={3} Unsupported={4} Errors={5} PresetOverrides={6}" -f $installed, $updated, $protected, $missingPath, $unsupported, $errors, $presetOverrides)
+    Write-Log ("ReShade setup: InstalledNew={0} Updated={1} Reapplied={2} Protected={3} MissingPath={4} MissingDevice={5} Unsupported={6} Errors={7} PresetOverrides={8}" -f $installed, $updated, $reapplied, $protected, $missingPath, $missingDevice, $unsupported, $errors, $presetOverrides)
     if ($generatedPresetPath -and (Test-Path -LiteralPath $generatedPresetPath)) {
         Remove-Item -LiteralPath $generatedPresetPath -Force -ErrorAction SilentlyContinue
     }
-    return [pscustomobject]@{ Succeeded = ($deployed -gt 0 -and $errors -eq 0); Deployed = $deployed; Errors = $errors; Reason = if ($errors) { 'DEPLOYMENT_ERRORS' } elseif ($deployed -eq 0) { 'NO_GAMES_DEPLOYED' } else { $null } }
-}
-
-# =============================================================================
-# Scans the first 2 MB of a game exe for legacy graphics API imports (DX8 /
-# DirectDraw / Glide). Returns an array from: 'D3D8', 'DDraw', 'Glide2x',
-# 'Glide3x'. Returns empty array if nothing is detected or on error.
-function Get-GameLegacyApi {
-    param([string]$ExePath)
+    return [pscustomobject]@{
+        Succeeded = ($deployed -gt 0 -and $errors -eq 0 -and $skipped -eq 0 -and $missingPath -eq 0 -and $missingDevice -eq 0 -and $unsupported -eq 0 -and $protected -eq 0)
+        Deployed = $deployed
+        Installed = $installed
+        Updated = $updated
+        Reapplied = $reapplied
+        Protected = $protected
+        Skipped = $skipped
+        MissingPath = $missingPath
+        MissingDevice = $missingDevice
+        Unsupported = $unsupported
+        Errors = $errors
+        Reason = if ($errors) { 'DEPLOYMENT_ERRORS' } elseif ($deployed -eq 0) { 'NO_GAMES_DEPLOYED' } else { $null }
+        PathReasonCounts = $pathReasonCounts
+    }
     $found = @()
     try {
         $readLen = [int][Math]::Min((Get-Item -LiteralPath $ExePath).Length, 2097152)
@@ -7406,19 +7153,31 @@ function Invoke-DgVoodoo2Setup {
     }
 
     $detectedMap = @{}   # BaseName -> API array
+    $scanPathReasons = @{}
     foreach ($pf in $profiles) {
         try {
             $doc = Read-Xml $pf.FullName
             if (-not $doc.GameProfile) { continue }
-            $gpNode   = $doc.GameProfile.SelectSingleNode("GamePath")
+            $gpNode = $doc.GameProfile.SelectSingleNode("GamePath")
             if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { continue }
             $gamePath = $gpNode.InnerText.Trim()
-            if (-not (Test-Path -LiteralPath $gamePath)) { continue }
+            $pathCheck = Test-TpmGameMutationPath -GamePath $gamePath -RequireLeaf
+            if (-not $pathCheck.Valid) {
+                $reasonCode = [string]$pathCheck.ReasonCode
+                if (-not $scanPathReasons.ContainsKey($reasonCode)) { $scanPathReasons[$reasonCode] = 0 }
+                $scanPathReasons[$reasonCode]++
+                Write-Log ("dgVoodoo2 scan: skipped {0}; path reason={1}; detail={2}" -f $pf.BaseName, $reasonCode, $pathCheck.Reason)
+                continue
+            }
+            $gamePath = [string]$pathCheck.ResolvedPath
             $apis = @(Get-GameLegacyApi -ExePath $gamePath)
             if ($apis.Count -gt 0) { $detectedMap[$pf.BaseName] = $apis }
         } catch {
             Write-Log "dgVoodoo2 scan: error reading $($pf.BaseName) -- $_"
         }
+    }
+    foreach ($reasonCode in ($scanPathReasons.Keys | Sort-Object)) {
+        Write-Host ("  Preflight skipped {0} game(s): {1}" -f $scanPathReasons[$reasonCode], $reasonCode) -ForegroundColor Yellow
     }
 
     Write-Host ("  Scanned {0} game(s)." -f $profiles.Count) -ForegroundColor DarkGray
@@ -7428,6 +7187,26 @@ function Invoke-DgVoodoo2Setup {
             Write-Host ("    {0}  [{1}]" -f $name, ($detectedMap[$name] -join ', '))
         }
     } else {
+        if ($scanPathReasons.Count -gt 0) {
+            Write-Host "  No dgVoodoo2 deployment was attempted because one or more game paths were unavailable." -ForegroundColor Yellow
+            Write-Host "  Nothing was changed." -ForegroundColor Yellow
+            if ($scanPathReasons.ContainsKey('DEVICE_UNAVAILABLE')) {
+                Write-Host ("  Skipped unavailable device: {0} game(s)" -f $scanPathReasons['DEVICE_UNAVAILABLE']) -ForegroundColor Yellow
+            }
+            if ($scanPathReasons.ContainsKey('GAME_PATH_MISSING')) {
+                Write-Host ("  Skipped missing executable: {0} game(s)" -f $scanPathReasons['GAME_PATH_MISSING']) -ForegroundColor Yellow
+            }
+            return [pscustomobject]@{
+                Succeeded = $false
+                Deployed = 0
+                Skipped = [int](($scanPathReasons.Values | Measure-Object -Sum).Sum)
+                MissingDevice = if ($scanPathReasons.ContainsKey('DEVICE_UNAVAILABLE')) { $scanPathReasons['DEVICE_UNAVAILABLE'] } else { 0 }
+                MissingPath = if ($scanPathReasons.ContainsKey('GAME_PATH_MISSING')) { $scanPathReasons['GAME_PATH_MISSING'] } else { 0 }
+                Errors = 0
+                Reason = 'NO_ELIGIBLE_GAMES'
+                PathReasonCounts = $scanPathReasons
+            }
+        }
         Write-Host ""
         Write-Host "  No dgVoodoo2 setup needed" -ForegroundColor Green
         Write-Host "  TeknoParrot Manager checked your registered games and did not find any games that appear to need dgVoodoo2." -ForegroundColor Cyan
@@ -7483,7 +7262,7 @@ function Invoke-DgVoodoo2Setup {
     # Deploy DLLs to each selected game folder.
     Write-Host ""
     Write-Host ("  Installing dgVoodoo2 into {0} game folder(s)..." -f $targetProfiles.Count) -ForegroundColor Cyan
-    $deployed = 0; $skipped = 0; $errors = 0; $presetOverrides = 0
+    $deployed = 0; $skipped = 0; $missingDevice = 0; $missingPath = 0; $errors = 0; $presetOverrides = 0
     $hasConf  = Test-Path -LiteralPath (Join-Path $SourceDir "dgVoodoo.conf")
 
     foreach ($pf in $targetProfiles) {
@@ -7493,12 +7272,23 @@ function Invoke-DgVoodoo2Setup {
             $gpNode   = $doc.GameProfile.SelectSingleNode("GamePath")
             if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { $skipped++; continue }
             $gamePath = $gpNode.InnerText.Trim()
-            if (-not (Test-Path -LiteralPath $gamePath)) {
-                Write-Host ("  SKIP  {0} -- exe not found." -f $pf.BaseName) -ForegroundColor Yellow
-                $skipped++; continue
+            $pathCheck = Test-TpmGameMutationPath -GamePath $gamePath -RequireLeaf
+            if (-not $pathCheck.Valid) {
+                if ($pathCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') {
+                    $missingDevice++
+                    Write-Host ("  SKIP  {0} -- saved device unavailable; no deployment attempted." -f $pf.BaseName) -ForegroundColor Yellow
+                } elseif ($pathCheck.ReasonCode -eq 'GAME_PATH_MISSING') {
+                    $missingPath++
+                    Write-Host ("  SKIP  {0} -- exe not found." -f $pf.BaseName) -ForegroundColor Yellow
+                } else {
+                    Write-Host ("  SKIP  {0} -- path safety check failed: {1}" -f $pf.BaseName, $pathCheck.Reason) -ForegroundColor Yellow
+                }
+                $skipped++
+                Write-Log ("dgVoodoo2: skipped {0} before deployment; path reason={1}; detail={2}" -f $pf.BaseName, $pathCheck.ReasonCode, $pathCheck.Reason)
+                continue
             }
-            $exeDir = [System.IO.Path]::GetDirectoryName($gamePath)
-            if ([string]::IsNullOrWhiteSpace($exeDir)) { $skipped++; continue }
+            $gamePath = [string]$pathCheck.ResolvedPath
+            $exeDir = [string]$pathCheck.GameDirectory
 
             # Determine which DLLs this game needs based on detected API.
             $apis = if ($detectedMap.ContainsKey($pf.BaseName)) `
@@ -7521,6 +7311,19 @@ function Invoke-DgVoodoo2Setup {
                     $toDeploy = $available
                 }
             }
+            $boundaryCheck = Test-TpmGameMutationPath -GamePath $gamePath -RequireLeaf
+            if (-not $boundaryCheck.Valid -or [string]$boundaryCheck.ResolvedPath -ine [string]$gamePath) {
+                $skipped++
+                if ($boundaryCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ }
+                if ($boundaryCheck.ReasonCode -eq 'GAME_PATH_MISSING') { $missingPath++ }
+                $boundaryReason = if ($boundaryCheck.Valid) { 'RESOLUTION_CHANGED' } else { $boundaryCheck.ReasonCode }
+                Write-Host ("  SKIP  {0} -- mutation-boundary path check failed ({1}); unchanged." -f $pf.BaseName, $boundaryReason) -ForegroundColor Yellow
+                Write-Log ("dgVoodoo2: skipped {0} at mutation boundary; path reason={1}; detail={2}" -f $pf.BaseName, $boundaryReason, $boundaryCheck.Reason)
+                continue
+            }
+            $gamePath = [string]$boundaryCheck.ResolvedPath
+            $exeDir = [string]$boundaryCheck.GameDirectory
+
 
             foreach ($dllName in $toDeploy) {
                 $dstDll = Join-Path $exeDir $dllName
@@ -7540,20 +7343,23 @@ function Invoke-DgVoodoo2Setup {
                 Copy-Item -LiteralPath $perGameConf -Destination $dstConf -Force -ErrorAction Stop
                 $presetOverrides++
                 $confNote = "  (config: per-game)"
-            } elseif ($hasConf) {
-                $dstConf = Join-Path $exeDir "dgVoodoo.conf"
-                if (-not (Test-Path -LiteralPath $dstConf)) {
-                    Copy-Item -LiteralPath (Join-Path $SourceDir "dgVoodoo.conf") -Destination $dstConf -ErrorAction Stop
-                }
             }
             $apiStr = if ($apis.Count -gt 0) { "  [{0}]" -f ($apis -join ', ') } else { "" }
             Write-Host ("  OK    {0}{1}{2}" -f $pf.BaseName, $apiStr, $confNote) -ForegroundColor Green
             Write-Log ("dgVoodoo2: deployed {0} to {1}{2}" -f ($toDeploy -join ', '), $exeDir, $confNote)
             $deployed++
         } catch {
-            Write-Host ("  ERROR {0} -- {1}" -f $pf.BaseName, $_) -ForegroundColor Red
-            Write-Log "dgVoodoo2: error on $($pf.BaseName) -- $_"
-            $errors++
+            $failureCode = Get-TpmGameMutationFailureCode -ErrorRecord $_
+            if ($failureCode -eq 'DEVICE_UNAVAILABLE' -or $failureCode -eq 'GAME_PATH_MISSING') {
+                $skipped++
+                if ($failureCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ } else { $missingPath++ }
+                Write-Host ("  SKIP  {0} -- mutation became unavailable ({1}); unchanged." -f $pf.BaseName, $failureCode) -ForegroundColor Yellow
+                Write-Log ("dgVoodoo2: skipped {0} after mutation failure; path reason={1}; detail={2}" -f $pf.BaseName, $failureCode, $_)
+            } else {
+                Write-Host ("  ERROR {0} -- {1}" -f $pf.BaseName, $_) -ForegroundColor Red
+                Write-Log "dgVoodoo2: error on $($pf.BaseName) -- $_"
+                $errors++
+            }
         }
     }
 
@@ -7562,13 +7368,23 @@ function Invoke-DgVoodoo2Setup {
     if ($presetOverrides -gt 0) {
         Write-Host ("  Per-game configs applied : {0}" -f $presetOverrides) -ForegroundColor Cyan
     }
+    if ($missingDevice -gt 0) { Write-Host ("  Skipped unavailable device : {0} game(s)" -f $missingDevice) -ForegroundColor Yellow }
+    if ($missingPath -gt 0) { Write-Host ("  Skipped missing executable : {0} game(s)" -f $missingPath) -ForegroundColor Yellow }
     if ($skipped -gt 0) { Write-Host ("  Skipped   : {0}" -f $skipped) -ForegroundColor DarkGray }
     if ($errors  -gt 0) { Write-Host ("  Errors    : {0}" -f $errors)  -ForegroundColor Red      }
     Write-Host ""
     Write-Host "  TeknoParrot Manager does not remove an unowned dgVoodoo2 hook automatically." -ForegroundColor DarkCyan
     Write-Host "  Existing or changed files need advanced troubleshooting review." -ForegroundColor DarkCyan
-    Write-Log ("dgVoodoo2 setup: deployed={0} skipped={1} errors={2} presetOverrides={3}" -f $deployed, $skipped, $errors, $presetOverrides)
-    return [pscustomobject]@{ Succeeded = ($deployed -gt 0 -and $errors -eq 0); Deployed = $deployed; Errors = $errors; Reason = if ($errors) { 'DEPLOYMENT_ERRORS' } elseif ($deployed -eq 0) { 'NO_GAMES_DEPLOYED' } else { $null } }
+    Write-Log ("dgVoodoo2 setup: deployed={0} skipped={1} missingDevice={2} missingPath={3} errors={4} presetOverrides={5}" -f $deployed, $skipped, $missingDevice, $missingPath, $errors, $presetOverrides)
+    return [pscustomobject]@{
+        Succeeded = ($deployed -gt 0 -and $errors -eq 0 -and $skipped -eq 0 -and $missingDevice -eq 0 -and $missingPath -eq 0)
+        Deployed = $deployed
+        Skipped = $skipped
+        MissingDevice = $missingDevice
+        MissingPath = $missingPath
+        Errors = $errors
+        Reason = if ($errors) { 'DEPLOYMENT_ERRORS' } elseif ($deployed -eq 0) { 'NO_GAMES_DEPLOYED' } else { $null }
+    }
 }
 
 # =============================================================================
@@ -8109,7 +7925,7 @@ function Restore-PostgresProfileBackups {
 
 function Reset-PostgresPasswordAutomatically {
     param([Parameter(Mandatory)][string]$NewPassword, [Parameter(Mandatory)]$RecoveryBackup)
-    $result = [ordered]@{ Attempted = $false; Succeeded = $false; RecoveryBlocked = $true; BackupPath = $RecoveryBackup.Path; Reason = '' }
+    $result = [ordered]@{ Attempted = $false; Succeeded = $false; RecoveryBlocked = $true; PasswordChangeCommitted = $false; BackupPath = $RecoveryBackup.Path; Reason = '' }
     if (-not $RecoveryBackup.Verified) { $result.Reason = 'Verified recovery evidence is unavailable.'; return [pscustomobject]$result }
     $postgresExe = Join-Path $script:PostgresBinDir 'postgres.exe'
     $dataDir = Join-Path $script:PostgresInstallDir 'data'
@@ -8132,15 +7948,21 @@ function Reset-PostgresPasswordAutomatically {
         $sql = 'ALTER ROLE postgres WITH PASSWORD ' + $literal + ';' + [Environment]::NewLine + [Environment]::NewLine
         $processResult = Invoke-PostgresNativeProcessWithInput -FilePath $postgresExe -Arguments ('--single -D "' + $dataDir + '" -j postgres') -InputText $sql -Secrets @($NewPassword)
         if ($processResult.ExitCode -ne 0) { throw "Automatic PostgreSQL password reset failed with exit code $($processResult.ExitCode)." }
+        $result.PasswordChangeCommitted = $true
         Start-Service -Name $script:PostgresServiceName -ErrorAction Stop
         Wait-PostgresServiceState -DesiredStatus 'Running' | Out-Null
         if (-not (Test-PostgresPassword -SuperPasswordPlain $NewPassword)) { throw 'The reset completed but the approved password did not authenticate.' }
         $result.Succeeded = $true
         $result.RecoveryBlocked = $false
         $result.Reason = 'Automatic PostgreSQL password reset and authentication verification completed.'
-        Write-Log "Postgres recovery: automatic password reset completed; pg_hba.conf was not changed. Evidence=$($RecoveryBackup.Path)"
     } catch {
-        $result.Reason = 'Automatic PostgreSQL password reset did not complete.'
+        if ($result.PasswordChangeCommitted) {
+            $result.Reason = 'The PostgreSQL password was changed, but TPM could not verify the service restart and new login.'
+            Write-Log "Postgres recovery: password change committed but verification failed; no database or profile changes were made. Evidence=$($RecoveryBackup.Path)"
+        } else {
+            $result.Reason = 'Automatic PostgreSQL password reset did not complete; the role password was not changed.'
+            Write-Log "Postgres recovery: reset failed before password change; no recovery-complete result was reported. Evidence=$($RecoveryBackup.Path)"
+        }
         Write-Log "Postgres recovery: blocked; no recovery-complete result was reported. Evidence=$($RecoveryBackup.Path)"
         try {
             $current = Get-Service -Name $script:PostgresServiceName -ErrorAction SilentlyContinue
@@ -8260,16 +8082,38 @@ function Invoke-GpuFixSetup {
     Write-Host ""
     Write-Host "  Applying GPU fixes to registered profiles..." -ForegroundColor DarkGray
     $profiles  = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter "*.xml" -ErrorAction SilentlyContinue)
-    $updated   = 0
-    $unchanged = 0
-    $errors    = 0
-
+    $updated    = 0
+    $unchanged  = 0
+    $skipped    = 0
+    $missingDevice = 0
+    $missingPath = 0
+    $errors     = 0
     foreach ($pf in $profiles) {
         try {
             $doc    = Read-Xml $pf.FullName
+            $gpuPathNode = if ($doc.GameProfile) { $doc.GameProfile.SelectSingleNode('GamePath') } else { $null }
+            $registeredGamePath = if ($gpuPathNode) { [string]$gpuPathNode.InnerText } else { '' }
+            $gpuPathCheck = Test-TpmGameMutationPath -GamePath $registeredGamePath -RequireLeaf
+            if (-not $gpuPathCheck.Valid) {
+                $skipped++
+                if ($gpuPathCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ }
+                if ($gpuPathCheck.ReasonCode -eq 'GAME_PATH_MISSING') { $missingPath++ }
+                Write-Host ("    SKIP {0}: {1}" -f $pf.BaseName, $gpuPathCheck.Reason) -ForegroundColor Yellow
+                Write-Log ("GPU Fix: skipped {0}; path reason={1}; detail={2}" -f $pf.BaseName, $gpuPathCheck.ReasonCode, $gpuPathCheck.Reason)
+                continue
+            }
             $result = Test-GpuFixUpToDate -Doc $doc -BoolFields $boolAmdFields -DropdownFields $dropdownGpuFields -Vendor $gpuVendor
 
             if ($result.Changes.Count -gt 0) {
+                $boundaryCheck = Test-TpmGameMutationPath -GamePath ([string]$gpuPathCheck.ResolvedPath) -RequireLeaf
+                if (-not $boundaryCheck.Valid -or [string]$boundaryCheck.ResolvedPath -ine [string]$gpuPathCheck.ResolvedPath) {
+                    $skipped++
+                    if ($boundaryCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ }
+                    if ($boundaryCheck.ReasonCode -eq 'GAME_PATH_MISSING') { $missingPath++ }
+                    Write-Host ("    SKIP {0}: mutation-boundary path check failed; profile unchanged." -f $pf.BaseName) -ForegroundColor Yellow
+                    Write-Log ("GPU Fix: mutation-boundary path check failed for {0}; reason={1}" -f $pf.BaseName, $boundaryCheck.ReasonCode)
+                    continue
+                }
                 foreach ($c in $result.Changes) {
                     $c.Node.InnerText = $c.NewValue
                     Write-Log "GPU Fix: $($pf.BaseName) :: $($c.FieldName) $($c.OldValue) -> $($c.NewValue)"
@@ -8281,22 +8125,33 @@ function Invoke-GpuFixSetup {
                 $unchanged++
             }
         } catch {
-            Write-Host ("    FAILED {0}: {1}" -f $pf.BaseName, $_) -ForegroundColor Red
-            Write-Log "GPU Fix: FAILED $($pf.BaseName) -- $_"
-            $errors++
+            $failureCode = Get-TpmGameMutationFailureCode -ErrorRecord $_
+            if ($failureCode -eq 'DEVICE_UNAVAILABLE' -or $failureCode -eq 'GAME_PATH_MISSING') {
+                $skipped++
+                if ($failureCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ } else { $missingPath++ }
+                Write-Host ("    SKIP {0}: mutation became unavailable ({1}); profile unchanged" -f $pf.BaseName, $failureCode) -ForegroundColor Yellow
+                Write-Log ("GPU Fix: skipped {0} after mutation failure; path reason={1}; detail={2}" -f $pf.BaseName, $failureCode, $_)
+            } else {
+                Write-Host ("    FAILED {0}: {1}" -f $pf.BaseName, $_) -ForegroundColor Red
+                Write-Log "GPU Fix: FAILED $($pf.BaseName) -- $_"
+                $errors++
+            }
         }
     }
-
     Write-Host ""
     Write-Host ("  Updated  : {0} profile(s)" -f $updated) -ForegroundColor Green
     if ($unchanged -gt 0) {
         Write-Host ("  No change: {0} (already correct or no GPU fix fields)" -f $unchanged) -ForegroundColor DarkGray
     }
+    if ($skipped -gt 0) { Write-Host ("  Skipped  : {0} profile(s)" -f $skipped) -ForegroundColor Yellow }
+    if ($missingDevice -gt 0) { Write-Host ("  Unavailable devices: {0} profile(s) left unchanged" -f $missingDevice) -ForegroundColor Yellow }
+    if ($missingPath -gt 0) { Write-Host ("  Missing executables: {0} profile(s) left unchanged" -f $missingPath) -ForegroundColor Yellow }
     if ($errors -gt 0) {
         Write-Host ("  Errors   : {0} -- see log for details" -f $errors) -ForegroundColor Red
     }
-    Write-Log ("GPU Fix: complete. Vendor={0} Updated={1} Unchanged={2} Errors={3}" -f `
-        $gpuVendor, $updated, $unchanged, $errors)
+    Write-Log ("GPU Fix: complete. Vendor={0} Updated={1} Unchanged={2} Skipped={3} MissingDevice={4} MissingPath={5} Errors={6}" -f `
+        $gpuVendor, $updated, $unchanged, $skipped, $missingDevice, $missingPath, $errors)
+    return [pscustomobject]@{ Succeeded = ($errors -eq 0 -and $skipped -eq 0); Updated = $updated; Unchanged = $unchanged; Skipped = $skipped; MissingDevice = $missingDevice; MissingPath = $missingPath; Errors = $errors }
 }
 
 # =============================================================================
@@ -11105,6 +10960,32 @@ function Read-ConfirmedPostgresPassword {
         Write-Host "  Those two entries did not match or were empty -- let's try again." -ForegroundColor Yellow
     }
 }
+function Read-PostgresPasswordAttempt {
+    param([string]$WhatFor)
+    $first = $null; $second = $null; $firstPlain = $null; $secondPlain = $null
+    try {
+        $first = Read-Host ("  Enter {0}" -f $WhatFor) -AsSecureString
+        $second = Read-Host '  Re-enter the same password to confirm' -AsSecureString
+        $firstPlain = ConvertFrom-SecureStringPlain $first
+        $secondPlain = ConvertFrom-SecureStringPlain $second
+        if ([string]::IsNullOrEmpty($firstPlain)) {
+            Write-Host '  The new password cannot be empty. Nothing was changed.' -ForegroundColor Yellow
+            return [pscustomobject]@{ Succeeded = $false; Reason = 'EMPTY_PASSWORD'; Password = $null }
+        }
+        if (-not [string]::Equals($firstPlain, $secondPlain, [System.StringComparison]::Ordinal)) {
+            Write-Host '  The two password entries did not match. Nothing was changed.' -ForegroundColor Yellow
+            return [pscustomobject]@{ Succeeded = $false; Reason = 'PASSWORD_MISMATCH'; Password = $null }
+        }
+        $approved = $firstPlain
+        $firstPlain = $null
+        return [pscustomobject]@{ Succeeded = $true; Reason = $null; Password = $approved }
+    } finally {
+        $first = $null
+        $second = $null
+        $firstPlain = $null
+        $secondPlain = $null
+    }
+}
 
 function Invoke-PostgresSelectedPasswordRecovery {
     param(
@@ -13006,6 +12887,10 @@ function Invoke-BepInExUpdateCheck {
     if (-not (Test-Path -LiteralPath $ApprovedGamesRoot -PathType Container -ErrorAction SilentlyContinue)) { Write-Host '  The configured games root could not be verified -- no BepInEx changes made.' -ForegroundColor Red; Write-Log "BepInEx update check: blocked because approved root is unavailable: $ApprovedGamesRoot"; return }
     $candidates = New-Object System.Collections.Generic.List[object]
     $safetyBlocked = $false
+    $missingDevice = 0
+    $missingPath = 0
+    $protected = 0
+    $pathReasonCounts = @{}
     foreach ($pf in $profiles) {
         try {
             $doc = Read-Xml $pf.FullName
@@ -13013,10 +12898,23 @@ function Invoke-BepInExUpdateCheck {
             $gamePathNode = $doc.GameProfile.SelectSingleNode('GamePath')
             if (-not $gamePathNode -or [string]::IsNullOrWhiteSpace($gamePathNode.InnerText)) { continue }
             $gamePath = $gamePathNode.InnerText.Trim()
-            if (-not (Test-Path -LiteralPath $gamePath -PathType Leaf)) { continue }
-            $exeDir = [System.IO.Path]::GetDirectoryName($gamePath)
+            $pathCheck = Test-TpmGameMutationPath -GamePath $gamePath -RequireLeaf
+            if (-not $pathCheck.Valid) {
+                $reasonCode = [string]$pathCheck.ReasonCode
+                if (-not $pathReasonCounts.ContainsKey($reasonCode)) { $pathReasonCounts[$reasonCode] = 0 }
+                $pathReasonCounts[$reasonCode]++
+                if ($reasonCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ }
+                if ($reasonCode -eq 'GAME_PATH_MISSING') { $missingPath++ }
+                Write-Host ("  SKIP {0} -- {1}" -f $pf.BaseName, $pathCheck.Reason) -ForegroundColor Yellow
+                Write-Log ("BepInEx: skipped {0} during path preflight; reason={1}; detail={2}" -f $pf.BaseName, $reasonCode, $pathCheck.Reason)
+                continue
+            }
+            $gamePath = [string]$pathCheck.ResolvedPath
+            $exeDir = [string]$pathCheck.GameDirectory
             if (-not (Test-BepInExGameRootSafe -GameRoot $exeDir -ApprovedRoot $ApprovedGamesRoot) -or -not (Test-BepInExNoReparsePath -Root $exeDir -Path $gamePath)) {
-                $safetyBlocked = $true
+                $protected++
+                if (-not $pathReasonCounts.ContainsKey('PROTECTED_OR_REPARSE_ROOT')) { $pathReasonCounts['PROTECTED_OR_REPARSE_ROOT'] = 0 }
+                $pathReasonCounts['PROTECTED_OR_REPARSE_ROOT']++
                 Write-BepInExUnsafeRootGuidance -GameCode $pf.BaseName -ApprovedRoot $ApprovedGamesRoot
                 continue
             }
@@ -13026,7 +12924,14 @@ function Invoke-BepInExUpdateCheck {
             Write-BepInExUnsafeRootGuidance -GameCode $pf.BaseName -ApprovedRoot $ApprovedGamesRoot -Reason 'the game root could not be verified'
         }
     }
-    if ($safetyBlocked) { Write-Host '  No BepInEx download or write was attempted.' -ForegroundColor Yellow; return [pscustomobject]@{ Succeeded = $false; Reason = 'UNSAFE_ROOT' } }
+    Write-Host ("  Path preflight: {0} eligible game(s), {1} unavailable-device skip(s), {2} missing-path skip(s), {3} protected/reparse skip(s)." -f $candidates.Count, $missingDevice, $missingPath, $protected) -ForegroundColor DarkCyan
+    foreach ($reasonCode in ($pathReasonCounts.Keys | Sort-Object)) {
+        Write-Host ("    {0}: {1}" -f $reasonCode, $pathReasonCounts[$reasonCode]) -ForegroundColor DarkGray
+    }
+    if ($candidates.Count -eq 0) {
+        Write-Host '  No eligible BepInEx game folders remain. Nothing was changed.' -ForegroundColor Yellow
+        return [pscustomobject]@{ Succeeded = ($missingDevice -eq 0 -and $missingPath -eq 0 -and $protected -eq 0); Updated = 0; Errors = 0; MissingDevice = $missingDevice; MissingPath = $missingPath; Protected = $protected; Reason = 'NO_ELIGIBLE_GAMES'; PathReasonCounts = $pathReasonCounts }
+    }
 
     Write-Host ''
     Write-Host '  Checking stable BepInEx releases for the detected game architectures...' -ForegroundColor DarkGray
@@ -13110,15 +13015,21 @@ function Invoke-BepInExUpdateCheck {
     }
     $updated = 0; $updatedWithCleanupFailure = 0; $updateErrors = 0; $cleanupErrors = 0
     foreach ($o in @($outdated | Sort-Object Code)) {
-        $stagingDir = $null; $preserveStaging = $false; $promotionSucceeded = $false; $cleanupFailureRecorded = $false
+        $stagingDir = $null; $preserveStaging = $false; $promotionSucceeded = $false; $cleanupFailureRecorded = $false; $rollbackFailure = $false; $cleanupFailure = $false
         $backupPath = $null
         $resetApplied = $false
         try {
+            $boundaryCheck = Test-TpmGameMutationPath -GamePath $o.GamePath -RequireLeaf
+            if (-not $boundaryCheck.Valid) { throw ("BepInEx mutation-boundary path check failed ({0}): {1}" -f $boundaryCheck.ReasonCode, $boundaryCheck.Reason) }
+            $o.GamePath = [string]$boundaryCheck.ResolvedPath
+            $o.ExeDir = [string]$boundaryCheck.GameDirectory
             if (-not (Test-BepInExGameRootSafe -GameRoot $o.ExeDir -ApprovedRoot $ApprovedGamesRoot) -or -not (Test-BepInExExistingTreeSafe -GameRoot $o.ExeDir)) { throw 'BepInEx final root safety check failed.' }
             $stagingDir = New-TpmStagingDirectory -Label 'BepInEx'
             $zipPathForGame = $zipByArch[$o.Architecture]
             Expand-ZipFileSafe -ZipPath $zipPathForGame -DestDir $stagingDir -GameName $o.Code
             $relativeFiles = @(Get-BepInExStagedFiles -StagingDir $stagingDir -DestDir $o.ExeDir)
+            $boundaryCheck = Test-TpmGameMutationPath -GamePath $o.GamePath -RequireLeaf
+            if (-not $boundaryCheck.Valid -or [string]$boundaryCheck.ResolvedPath -ine [string]$o.GamePath) { throw 'BepInEx mutation-boundary path changed before backup.' }
             if (-not (Test-BepInExGameRootSafe -GameRoot $o.ExeDir -ApprovedRoot $ApprovedGamesRoot) -or -not (Test-BepInExExistingTreeSafe -GameRoot $o.ExeDir)) { throw 'BepInEx root changed before backup.' }
             $backupPath = New-BepInExUpdateBackup -GameRoot $o.ExeDir
             if (-not (Test-BepInExGameRootSafe -GameRoot $o.ExeDir -ApprovedRoot $ApprovedGamesRoot) -or -not (Test-BepInExExistingTreeSafe -GameRoot $o.ExeDir)) { throw 'BepInEx root failed after backup.' }
@@ -13144,14 +13055,42 @@ function Invoke-BepInExUpdateCheck {
                 $updatedWithCleanupFailure++
                 $cleanupErrors++
             } else {
+                $failureMessage = [string]$_.Exception.Message
+                $failureCode = Get-TpmGameMutationFailureCode -ErrorRecord $_
+                $rollbackFailure = $rollbackFailure -or ($failureMessage -match 'ROLLBACK FAILED')
                 if ($resetApplied -and -not $promotionSucceeded -and $backupPath) {
                     try { Restore-BepInExUpdateBackup -GameRoot $o.ExeDir -BackupPath $backupPath }
-                    catch { Write-Host ("    ERROR {0} -- repair reset rollback failed; backup remains at {1}" -f $o.Code, $backupPath) -ForegroundColor Red; Write-Log "BepInEx reset rollback failed for $($o.Code); backup=$backupPath"; $updateErrors++ }
+                    catch { $rollbackFailure = $true; $preserveStaging = $true; Write-Host ("    ERROR {0} -- repair reset rollback failed; backup remains at {1}" -f $o.Code, $backupPath) -ForegroundColor Red; Write-Log "BepInEx reset rollback failed for $($o.Code); backup=$backupPath" }
                 }
-                if ($_.Exception.Message -match 'ROLLBACK FAILED|CLEANUP FAILED') { $preserveStaging = $true }
-                Write-Host ("    ERROR {0} -- update blocked" -f $o.Code) -ForegroundColor Red
-                Write-Log "BepInEx: update blocked for $($o.Code); evidence and backups were preserved where available."
-                $updateErrors++
+                if ($rollbackFailure) {
+                    $preserveStaging = $true
+                    if (-not $pathReasonCounts.ContainsKey('ROLLBACK_FAILED')) { $pathReasonCounts['ROLLBACK_FAILED'] = 0 }
+                    $pathReasonCounts['ROLLBACK_FAILED']++
+                    Write-Host ("    ERROR {0} -- transaction rollback failed; backup/evidence preserved at {1}" -f $o.Code, $backupPath) -ForegroundColor Red
+                    Write-Log "BepInEx: rollback failed for $($o.Code); backup=$backupPath; detail=$failureMessage"
+                    $updateErrors++
+                } elseif ($failureMessage -match 'CLEANUP FAILED') {
+                    $cleanupFailure = $true
+                    $preserveStaging = $true
+                    Write-Host ("    ERROR {0} -- update blocked because cleanup failed; inspect {1}" -f $o.Code, $stagingDir) -ForegroundColor Red
+                    $cleanupErrors++
+                    Write-Log "BepInEx: cleanup failed for $($o.Code); residue=$stagingDir; detail=$failureMessage"
+                } elseif ($failureCode -eq 'DEVICE_UNAVAILABLE' -or $failureCode -eq 'GAME_PATH_MISSING') {
+                    if (-not $pathReasonCounts.ContainsKey($failureCode)) { $pathReasonCounts[$failureCode] = 0 }
+                    $pathReasonCounts[$failureCode]++
+                    if ($failureCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ } else { $missingPath++ }
+                    Write-Host ("    SKIP {0} -- game path became unavailable ({1}); no final update claimed" -f $o.Code, $failureCode) -ForegroundColor Yellow
+                    Write-Log "BepInEx: mutation-boundary path failure for $($o.Code); reason=$failureCode; detail=$failureMessage"
+                } elseif ($failureMessage -match 'mutation-boundary|device|path') {
+                    if (-not $pathReasonCounts.ContainsKey('MUTATION_BOUNDARY_FAILED')) { $pathReasonCounts['MUTATION_BOUNDARY_FAILED'] = 0 }
+                    $pathReasonCounts['MUTATION_BOUNDARY_FAILED']++
+                    Write-Host ("    SKIP {0} -- game path changed or became unavailable; no final update claimed" -f $o.Code) -ForegroundColor Yellow
+                    Write-Log "BepInEx: mutation-boundary failure for $($o.Code); detail=$failureMessage"
+                } else {
+                    Write-Host ("    ERROR {0} -- update blocked: {1}" -f $o.Code, $failureMessage) -ForegroundColor Red
+                    Write-Log "BepInEx: update blocked for $($o.Code); detail=$failureMessage; evidence and backups were preserved where available."
+                }
+                if (-not $rollbackFailure -and -not $cleanupFailure -and $failureCode -ne 'DEVICE_UNAVAILABLE' -and $failureCode -ne 'GAME_PATH_MISSING') { $updateErrors++ }
             }
         } finally {
             if ($stagingDir -and -not $preserveStaging) {
@@ -13172,10 +13111,13 @@ function Invoke-BepInExUpdateCheck {
     }
     Write-Host ("  Updated cleanly: {0} game(s)" -f $updated) -ForegroundColor Green
     if ($updatedWithCleanupFailure -gt 0) { Write-Host ("  Updated with cleanup failure: {0} -- ACTION REQUIRED" -f $updatedWithCleanupFailure) -ForegroundColor Yellow }
+    if ($missingDevice -gt 0) { Write-Host ("  Skipped unavailable device: {0} game(s) -- nothing changed for these games" -f $missingDevice) -ForegroundColor Yellow }
+    if ($missingPath -gt 0) { Write-Host ("  Skipped missing executable: {0} game(s)" -f $missingPath) -ForegroundColor Yellow }
+    if ($protected -gt 0) { Write-Host ("  Skipped protected/reparse root: {0} game(s)" -f $protected) -ForegroundColor Yellow }
     if ($updateErrors -gt 0) { Write-Host ("  Errors: {0} -- see log for details" -f $updateErrors) -ForegroundColor Red }
     if ($cleanupErrors -gt 0) { Write-Host ("  Cleanup failures: {0} -- see log for residue path(s)" -f $cleanupErrors) -ForegroundColor Yellow }
-    Write-Log ("BepInEx update check: updatedCleanly={0} updatedWithCleanupFailure={1} errors={2} cleanupFailures={3}" -f $updated, $updatedWithCleanupFailure, $updateErrors, $cleanupErrors)
-    return [pscustomobject]@{ Succeeded = ($updateErrors -eq 0 -and $cleanupErrors -eq 0 -and $updatedWithCleanupFailure -eq 0); Updated = $updated; Errors = $updateErrors + $cleanupErrors }
+    Write-Log ("BepInEx update check: updatedCleanly={0} updatedWithCleanupFailure={1} skippedMissingDevice={2} skippedMissingPath={3} skippedProtected={4} errors={5} cleanupFailures={6}" -f $updated, $updatedWithCleanupFailure, $missingDevice, $missingPath, $protected, $updateErrors, $cleanupErrors)
+    return [pscustomobject]@{ Succeeded = ($updateErrors -eq 0 -and $cleanupErrors -eq 0 -and $updatedWithCleanupFailure -eq 0 -and $missingDevice -eq 0 -and $missingPath -eq 0 -and $protected -eq 0); Updated = $updated; MissingDevice = $missingDevice; MissingPath = $missingPath; Protected = $protected; Errors = $updateErrors + $cleanupErrors; PathReasonCounts = $pathReasonCounts }
 }
 # =============================================================================
 # CHECK FOR UPDATES -- manual, backup-first self-update for this script
@@ -20675,15 +20617,20 @@ $mode = $null
             Write-Host "  Backing up existing Postgres databases..." -ForegroundColor Cyan
             $pgBackup = Backup-PostgresDatabases -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain
             $leavePostgres = $false
+            $validatedPasswordForBackup = $false
             while (-not $pgBackup.Succeeded) {
                 $authFailure = @($pgBackup.FailureDiagnoses | Where-Object { $_.Category -eq 'PasswordAuthenticationFailed' }).Count -gt 0
                 Write-Host "  PostgreSQL setup stopped because the database backup did not complete." -ForegroundColor Red
                 Write-Host "  No PostgreSQL database or game-profile changes were made." -ForegroundColor Green
-                if ($authFailure) {
+                if ($authFailure -and -not $validatedPasswordForBackup) {
                     Write-Host "  TeknoParrot Manager could not log in to PostgreSQL as postgres. The saved PostgreSQL password is wrong, missing, or no longer works." -ForegroundColor Yellow
-                    Write-Host "  [F] Fix PostgreSQL password  [R] Retry after fixing  [D] Show details  [O] Open logs/support package  [S] Skip PostgreSQL setup  [B] Back to main menu"
+                    Write-Host "  [F] Try a known postgres password  [X] Reset postgres password  [R] Retry  [D] Show details  [O] Open logs/support package  [S] Skip  [B] Back"
+                } elseif ($authFailure) {
+                    Write-Host "  TPM validated the selected password, but PostgreSQL rejected this backup login. Check the service and authentication configuration." -ForegroundColor Yellow
+                    Write-Host "  [F] Try another postgres password  [X] Reset postgres password  [R] Retry  [D] Show details  [O] Open logs/support package  [S] Skip  [B] Back"
                 } else {
-                    Write-Host "  [F] Retry after checking PostgreSQL access  [R] Retry backup  [O] Open logs/support guidance"
+                    Write-Host "  PostgreSQL login was not the reported failure. The safety backup failed; no database or game-profile changes were made." -ForegroundColor Yellow
+                    Write-Host "  [F] Check PostgreSQL access  [R] Retry backup  [O] Open logs/support guidance"
                     Write-Host "  [D] Show details  [S] Skip PostgreSQL setup  [B] Back to main menu"
                 }
                 if (@($pgBackup.FailedDatabases).Count -gt 0) { Write-Host ("  Affected games/databases: {0}" -f (@($pgBackup.FailedDatabases) -join ', ')) -ForegroundColor Yellow }
@@ -20691,15 +20638,76 @@ $mode = $null
                 if ($authFailure -and $backupChoice -eq 'F') {
                     Write-Host "  Enter the working postgres password. It is masked and is never logged." -ForegroundColor Cyan
                     $candidatePassword = Read-ConfirmedPostgresPassword 'the working PostgreSQL password'
-                    if (Test-PostgresPassword -SuperPasswordPlain $candidatePassword) {
-                        $superPwPlain = $candidatePassword
-                        $postgresSuperPasswordEncrypted = ConvertTo-PostgresEncryptedPassword $candidatePassword
-                        Write-Host "  PostgreSQL password validated. Choose [R] to retry the protected backup." -ForegroundColor Green
-                        Write-Log 'Postgres setup: replacement password validated without logging the password.'
-                    } else {
-                        Write-Host "  PostgreSQL rejected that password. Nothing was saved." -ForegroundColor Red
-                        Write-Log 'Postgres setup: replacement password validation failed; nothing was saved.'
+                    try {
+                        if (Test-PostgresPassword -SuperPasswordPlain $candidatePassword) {
+                            $superPwPlain = $candidatePassword
+                            $postgresSuperPasswordEncrypted = ConvertTo-PostgresEncryptedPassword $candidatePassword
+                            if (-not (Save-Config)) {
+                                Write-Host "  PostgreSQL login succeeded, but TPM could not save the new credential. No database or game-profile changes were made." -ForegroundColor Red
+                                Write-Log 'Postgres setup: validated replacement password could not be saved.'
+                                continue
+                            }
+                            $validatedPasswordForBackup = $true
+                            Write-Host "  PostgreSQL password validated and saved securely." -ForegroundColor Green
+                            Write-Host "  TPM will now retry the protected backup automatically." -ForegroundColor Cyan
+                            Write-Log 'Postgres setup: replacement password validated and saved without logging the password.'
+                            $pgBackup = Backup-PostgresDatabases -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain
+                        } else {
+                            Write-Host "  PostgreSQL rejected that password. Nothing was saved." -ForegroundColor Red
+                            Write-Log 'Postgres setup: replacement password validation failed; nothing was saved.'
+                        }
+                    } finally { $candidatePassword = $null }
+                    continue
+                }
+                if ($authFailure -and $backupChoice -eq 'X') {
+                    Write-Host "  Resetting the PostgreSQL password will change the password for the local postgres database user." -ForegroundColor Yellow
+                    Write-Host "  TPM will save the new password securely and use it for the affected games." -ForegroundColor Yellow
+                    $resetConfirm = (Read-HostSafe '  Do you want TPM to reset the local postgres password now? (Y/B)' -Default 'B').Trim().ToUpper()
+                    if ($resetConfirm -ne 'Y') {
+                        Write-Host "  Password reset cancelled. Nothing was changed." -ForegroundColor DarkGray
+                        continue
                     }
+                    $resetAttempt = Read-PostgresPasswordAttempt 'the new postgres password'
+                    if (-not $resetAttempt.Succeeded) { continue }
+                    $newPassword = [string]$resetAttempt.Password
+                    $resetResult = $null
+                    try {
+                        if (-not $recoveryBackup -or -not $recoveryBackup.Verified) {
+                            $resetResult = [pscustomobject]@{ Succeeded = $false; PasswordChangeCommitted = $false; Reason = 'Verified recovery evidence is unavailable.' }
+                        } else {
+                            $resetResult = Reset-PostgresPasswordAutomatically -NewPassword $newPassword -RecoveryBackup $recoveryBackup
+                        }
+                    } catch {
+                        $resetResult = [pscustomobject]@{ Succeeded = $false; PasswordChangeCommitted = $false; Reason = $_.Exception.Message }
+                        Write-Log 'Postgres setup: password reset invocation failed without logging the password.'
+                    } finally {
+                        $resetAttempt.Password = $null
+                    }
+                    if ($resetResult.Succeeded) {
+                        $superPwPlain = $newPassword
+                        $newPassword = $null
+                        $postgresSuperPasswordEncrypted = ConvertTo-PostgresEncryptedPassword $superPwPlain
+                        if (-not (Save-Config)) {
+                            Write-Host "  PostgreSQL password changed, but TPM could not save the new credential." -ForegroundColor Red
+                            Write-Host "  No database or game-profile changes were made." -ForegroundColor Yellow
+                            Write-Log 'Postgres setup: password reset succeeded but encrypted credential save failed.'
+                            continue
+                        }
+                        $validatedPasswordForBackup = $true
+                        Write-Host "  PostgreSQL password changed successfully." -ForegroundColor Green
+                        Write-Host "  TPM saved the new password securely." -ForegroundColor Green
+                        Write-Host "  TPM will now retry the protected backup automatically." -ForegroundColor Cyan
+                        Write-Log 'Postgres setup: password reset succeeded and credential was saved without logging the password.'
+                        $pgBackup = Backup-PostgresDatabases -UserProfilesDir $userProfilesDir -SuperPasswordPlain $superPwPlain
+                    } elseif ($resetResult.PasswordChangeCommitted) {
+                        Write-Host "  TPM could not verify the PostgreSQL password reset." -ForegroundColor Red
+                        Write-Host "  No database or game-profile changes were made. The PostgreSQL password may have changed; review details before retrying." -ForegroundColor Yellow
+                        Write-Log 'Postgres setup: password reset was committed but verification failed; database and profile changes were not made.'
+                    } else {
+                        Write-Host "  TPM could not reset the PostgreSQL password." -ForegroundColor Red
+                        Write-Host "  Nothing was changed." -ForegroundColor Yellow
+                    }
+                    $newPassword = $null
                     continue
                 }
                 if (-not $authFailure -and $backupChoice -eq 'F') {
@@ -20879,6 +20887,20 @@ $mode = $null
             $supportResult = New-TpmSupportPackage -ScriptRoot $PSScriptRoot -TeknoParrotRoot $tpRoot -UserProfilesDir $userProfilesDir -ApprovedGamesRoot $gamesInstallFolder
             Write-Host ""
             if ($supportResult.Succeeded) {
+                Write-Host "  What failed:" -ForegroundColor Yellow
+                $failedRecords = @($supportResult.Records | Where-Object Status -eq 'CollectionFailed')
+                if ($failedRecords.Count -eq 0) {
+                    Write-Host "    Nothing in the allowlisted collection was reported as failed." -ForegroundColor DarkGray
+                } else {
+                    foreach ($record in $failedRecords) {
+                        $safeSource = (Redact-TpmSupportText -Text ([string]$record.Source)).Text
+                        $safeDetail = (Redact-TpmSupportText -Text ([string]$record.Detail)).Text
+                        Write-Host ("    {0} -- {1}" -f $safeSource, $safeDetail) -ForegroundColor Yellow
+                    }
+                }
+                Write-Host "  What TPM did not change:" -ForegroundColor Cyan
+                Write-Host "    No game files, profiles, credentials, or emulator files were changed by support collection." -ForegroundColor DarkCyan
+                Write-Host ""
                 Write-Host "  Support package created." -ForegroundColor Green
                 Write-Host ("  Checked {0} safely identified games." -f $supportResult.Summary.GamesChecked)
                 Write-Host ("  Collected {0} diagnostic files and {1} plugin inventories." -f $supportResult.Summary.FilesCollected, $supportResult.Summary.PluginInventoriesCollected)
@@ -21088,7 +21110,7 @@ $mode = $null
                 $rsSourceDll = $bundledDll
             } else {
                 Write-Host ""
-                [void](Complete-TpmWorkflowStep -Context $reShadeStatus -Summary 'No local ReShade source was found' -NextStep 'Download and verify the official installer')
+                [void](Complete-TpmWorkflowStep -Context $reShadeStatus -Summary 'ReShade source check complete; acquisition may be required' -NextStep 'Download and verify the official installer')
                 [void](Start-TpmWorkflowStep -Context $reShadeStatus -StepId 'acquire' -Activity 'Preparing automatic download')
                 Write-Host "  ReShade 64-bit DLL not found." -ForegroundColor Yellow
                 Write-Host "    D) Download automatically from reshade.me"
@@ -21227,10 +21249,16 @@ $mode = $null
             [void](Complete-TpmWorkflowStatus -Context $reShadeStatus -Summary 'ReShade setup finished')
             [void](Close-TpmWorkflowStatus -Context $reShadeStatus)
         } else {
-            [void](Set-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-incomplete' -Message 'ReShade setup was not completed.' -DataSafety 'No unverified ReShade deployment was reported as complete.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+            $partialSummary = if ($reShadeResult -and $reShadeResult.Deployed -gt 0) {
+                "ReShade applied partially: {0} game(s) changed, {1} error(s), {2} unavailable-device skip(s)." -f $reShadeResult.Deployed, $reShadeResult.Errors, $reShadeResult.MissingDevice
+            } else {
+                'ReShade setup did not change any game files.'
+            }
+            Write-Host ("  {0}" -f $partialSummary) -ForegroundColor Yellow
+            [void](Set-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-incomplete' -Message $partialSummary -DataSafety 'TPM did not claim success for every selected game; skipped and failed games were left unchanged.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
             [void](Read-HostSafe '  Press Enter to acknowledge the ReShade result')
             [void](Acknowledge-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-incomplete')
-            [void](Stop-TpmWorkflowStatus -Context $reShadeStatus -Reason 'ReShade setup stopped')
+            [void](Stop-TpmWorkflowStatus -Context $reShadeStatus -Reason 'ReShade setup completed with skips or errors')
             [void](Close-TpmWorkflowStatus -Context $reShadeStatus)
             continue
         }
@@ -21337,10 +21365,16 @@ $mode = $null
                               -SourceDir $dgSourceDir `
                               -TpRoot $tpRoot
         if (-not ($dgResult -and $dgResult.Succeeded)) {
-            [void](Set-TpmWorkflowFailure -Context $dgStatus -FailureId 'dgv-deployment-failed' -Message 'dgVoodoo2 setup was not completed.' -DataSafety 'TPM did not claim a complete dgVoodoo2 deployment.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+            $dgSummary = if ($dgResult) {
+                "dgVoodoo2 setup was partial or blocked: {0} deployed, {1} skipped, {2} unavailable-device skip(s), {3} missing-path skip(s), {4} error(s)." -f $dgResult.Deployed, $dgResult.Skipped, $dgResult.MissingDevice, $dgResult.MissingPath, $dgResult.Errors
+            } else {
+                'dgVoodoo2 setup did not return a verified result.'
+            }
+            [void](Set-TpmWorkflowFailure -Context $dgStatus -FailureId 'dgv-deployment-failed' -Message $dgSummary -DataSafety 'TPM did not claim a complete dgVoodoo2 deployment; blocked or failed games were left unchanged.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+            Write-Host ("  {0}" -f $dgSummary) -ForegroundColor Yellow
             [void](Read-HostSafe '  Press Enter to acknowledge the dgVoodoo2 result')
             [void](Acknowledge-TpmWorkflowFailure -Context $dgStatus -FailureId 'dgv-deployment-failed')
-            [void](Stop-TpmWorkflowStatus -Context $dgStatus -Reason 'dgVoodoo2 setup stopped')
+            [void](Stop-TpmWorkflowStatus -Context $dgStatus -Reason 'dgVoodoo2 setup completed with skips or errors')
             [void](Close-TpmWorkflowStatus -Context $dgStatus)
             continue
         }
@@ -21366,12 +21400,21 @@ $mode = $null
         Write-Host "  compatibility fix for your graphics card to each profile that"
         Write-Host "  supports one. It is safe to re-run any time you update your GPU"
         Write-Host "  drivers or switch to a new card."
-        Invoke-GpuFixSetup -UserProfilesDir $userProfilesDir `
+        $gpuResult = Invoke-GpuFixSetup -UserProfilesDir $userProfilesDir `
                            -TpRoot $tpRoot
         Write-Host ""
-        Write-Host "Done." -ForegroundColor Green
-        Write-Log "GPU fix setup complete."
-        [void](Read-Host "  Press Enter to return to menu")
+        if ($gpuResult -and $gpuResult.Succeeded) {
+            Write-Host "Done." -ForegroundColor Green
+            Write-Log "GPU fix setup complete."
+        } else {
+            $gpuSummary = if ($gpuResult) {
+                "GPU fix setup was partial or blocked: {0} updated, {1} skipped, {2} error(s)." -f $gpuResult.Updated, $gpuResult.Skipped, $gpuResult.Errors
+            } else {
+                'GPU fix setup did not return a verified result.'
+            }
+            Write-Host $gpuSummary -ForegroundColor Yellow
+            Write-Log $gpuSummary
+        }
         continue
     }
 
@@ -21438,12 +21481,17 @@ $mode = $null
             Write-Host "BepInEx setup finished and was verified." -ForegroundColor Green
             Write-Log "BepInEx update check complete."
         } else {
-            [void](Set-TpmWorkflowFailure -Context $bepStatus -FailureId 'bepinex-failed' -Message 'BepInEx setup was not completed.' -DataSafety 'No unverified BepInEx change was reported as complete.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
-            Write-Host "BepInEx setup was not completed. The message above is the authoritative result." -ForegroundColor Yellow
-            Write-Log "BepInEx setup did not complete; no success was claimed."
+            $bepSummary = if ($bepResult -and ($bepResult.Updated -gt 0 -or $bepResult.MissingDevice -gt 0 -or $bepResult.MissingPath -gt 0)) {
+                "BepInEx result: {0} updated cleanly, {1} unavailable-device skip(s), {2} missing-path skip(s), {3} error(s)." -f $bepResult.Updated, $bepResult.MissingDevice, $bepResult.MissingPath, $bepResult.Errors
+            } else {
+                'BepInEx setup did not complete; no unverified change was reported as complete.'
+            }
+            [void](Set-TpmWorkflowFailure -Context $bepStatus -FailureId 'bepinex-failed' -Message $bepSummary -DataSafety 'TPM did not claim success for blocked or failed games; no unverified change was reported as complete.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+            Write-Host ("  {0}" -f $bepSummary) -ForegroundColor Yellow
+            Write-Log ("BepInEx setup result: {0}" -f $bepSummary)
             [void](Read-HostSafe '  Press Enter to acknowledge the BepInEx result')
             [void](Acknowledge-TpmWorkflowFailure -Context $bepStatus -FailureId 'bepinex-failed')
-            [void](Stop-TpmWorkflowStatus -Context $bepStatus -Reason 'BepInEx setup stopped')
+            [void](Stop-TpmWorkflowStatus -Context $bepStatus -Reason 'BepInEx setup completed with skips or errors')
             [void](Close-TpmWorkflowStatus -Context $bepStatus)
         }
         continue

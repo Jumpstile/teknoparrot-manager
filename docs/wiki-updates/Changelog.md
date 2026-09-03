@@ -20,6 +20,12 @@
 - Create Support Package gathers allowlisted TPM/TeknoParrot/game diagnostics
   and metadata-only plugin inventories into one redacted ZIP; game binaries,
   credentials, profiles, and arbitrary directories are excluded.
+- ReShade preview selection now uses the bundled, hash-validated
+  `TPM-preview-landscape.png` reference and reuses one bounded in-memory cache
+  per gallery window; split and slider sides remain tied to the same pixels.
+- Support-package output leads with `What failed` and `What TPM did not change`,
+  preserves detailed allowlisted collection failures, and collapses routine
+  missing optional diagnostics.
 - Restore, crosshair, first-run, optional-download, update, and recovery flows
   expose beginner-readable retry/status guidance. The shared TPM STATUS footer
   uses structured events, real steps, and resize-safe cursor/append-only

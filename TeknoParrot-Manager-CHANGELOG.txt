@@ -30,11 +30,9 @@
   scoping is deferred rather than presented as an unimplemented choice.
   ReShade preview comparison now has a real 0-100 in-memory slider; its
   percentage controls the Before/After split, and disk cache keys include the
-  slider position when cached artifacts are requested.
-  TPM-owned preview reference assets now ship under PreviewAssets\ReShadePreviews
-  instead of the excluded live-fetched ReShade\ runtime directory.
-  The ReShade profile gallery now reports embedded preview availability even
-  when optional SVG illustration files are absent after a script-only update.
+  slider position when cached artifacts are requested. The gallery now decodes
+  the bundled TPM-preview-landscape.png reference, validates its identity and
+  SHA-256, and reuses a bounded in-memory reference/processed cache.
   RC8 runtime recovery now classifies PostgreSQL password authentication
   failures separately and offers masked password validation before retrying
   the protected backup. Crosshair browser selection no longer invokes a
@@ -46,11 +44,9 @@
   unsupported hosts once, and leaves the constrained responsive menu usable
   without repeating resize errors on redraw; invalid menu choices persist
   through the next cleared redraw before the prompt.
-  ReShade's normal flow now shows a deterministic, TPM-owned arcade-room
-  render with layered cabinet shading, glossy surfaces, reflective floor,
-  neon spill, textured background cabinets, detailed gameplay, readable HUD
-  text, and profile-specific in-memory processing. Before, After, Split, and
-  the 0-100 slider now use the same reference and a tested moving boundary;
+  ReShade's normal flow now shows the bundled, validated TPM landscape
+  reference with profile-specific in-memory processing. Before, After, Split,
+  and the 0-100 slider use the same reference and a tested moving boundary;
   deployment remains behind explicit confirmation. Deployment output separates
   installed, updated, protected, missing-path, and unsupported-game outcomes
   with a direct path-repair action.

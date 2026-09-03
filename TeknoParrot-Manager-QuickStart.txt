@@ -159,6 +159,9 @@
     credentials, passwords, tokens, or recovery-state files. Missing optional
     diagnostics are reported and a failed or cleanup-incomplete package is
     never reported as successful.
+    The package output begins with "What failed" and "What TPM did not
+    change". Detailed allowlisted collection failures are preserved; routine
+    missing optional diagnostics remain summarized.
 
 
      The menu automatically shortens its descriptions, or shows labels only
@@ -333,6 +336,10 @@
   Numbered selection updates the optional preview. U is the only path toward
   deployment; B cancels without changes and D returns after showing details.
   A terminal-only selection remains available when the preview cannot open.
+  The optional gallery uses the bundled and validated
+  PreviewAssets\ReShadePreviews\TPM-preview-landscape.png reference image;
+  its identity and hash are recorded in the preview cache. No profile
+  selection changes files until U and the existing confirmation.
 
 
   If you downloaded TeknoParrot Manager as a ZIP release, the ReShade DLLs
