@@ -10861,6 +10861,30 @@ Describe "ReShade preview renderer and cache" {
         $p=Get-TpmReShadeProfile -ProfileId Vivid;(Show-TpmReShadePreviewWindow -ProfileDefinition $p).Reason|Should -Be 'PREVIEW_WINDOW_NOT_REQUESTED'
         $base=Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('a') -ReferenceSha256 'r';(Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('b') -ReferenceSha256 'r')|Should -Not -Be $base;(Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('a') -ReferenceSha256 's')|Should -Not -Be $base;(Get-TpmReShadePreviewCacheKey -SubjectId Vivid -ShaderSha256 @('a') -ReferenceSha256 'r' -RendererVersion '1')|Should -Not -Be $base
     }
+    It "keeps slider interaction on cached paint and coalesces pending values" {
+        $source = $script:ProductionSource
+        $paintStart = $source.IndexOf('function New-TpmReShadePreviewPaintHandler')
+        $paintEnd = $source.IndexOf('function New-TpmReShadePreviewArtifact', $paintStart)
+        $paint = $source.Substring($paintStart, $paintEnd - $paintStart)
+        $paint | Should -Match '\$cache\.Processed\[\[string\]\$selectedProfile\.ProfileId\]'
+        $paint | Should -Not -Match 'Get-TpmReShadePreviewProcessedBitmap'
+        $paint | Should -Not -Match 'New-TpmReShadePreviewBitmapFromCache'
+        $paint | Should -Not -Match '\.Image\s*='
+        $source | Should -Match 'slider-keyboard-handler'
+        $source | Should -Match 'Add_KeyUp'
+        $source | Should -Match 'Remove_KeyUp'
+        $source | Should -Match '\$State\[''PendingSliderPosition''\]'
+        $source | Should -Match '\$State\[''SliderTimer''\]\.Start\(\)'
+        $source | Should -Match '\$state\.Picture\.Invalidate\(\)'
+        $source | Should -Match 'Remove_Paint'
+        $source | Should -Match 'PendingSliderPosition=\$null'
+    }
+    It "returns the replacement gallery session so the caller owns teardown after R" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'PreviewSession = \$PreviewSession'
+        $source | Should -Match '\$gallerySession = \$chooserResult\.PreviewSession'
+        $source | Should -Match 'Show-TpmReShadeProfileGalleryWindow -Profiles \$Profiles -DefaultProfileId \$reopenId -Show -NonModal'
+    }
 }
 Describe "ReShade profile state features" {
     It "compares approved profiles without deployment and supports only reviewed default intensity" {
@@ -11097,7 +11121,7 @@ Describe "ReShade trusted profile restore" {
         }
         { & $handlers.Slider ([pscustomobject]@{ Value = 75 }) $null } | Should -Not -Throw
         $state['ViewMode'] | Should -Be 'Slider'
-        $state['SliderPosition'] | Should -Be 75
+        $state['PendingSliderPosition'] | Should -Be 75
 
         foreach ($badItem in @(
             [pscustomobject]@{ Mode = 'After' }
@@ -11178,14 +11202,21 @@ Describe "ReShade trusted profile restore" {
         $script:ProductionSource | Should -Match 'ValueChanged'
         $script:ProductionSource | Should -Match 'ComparisonSlider'
     }
-    It "updates the live preview image in memory for slider changes" {
+    It "updates slider state in memory without replacing the preview image" {
+        $picture = [pscustomobject]@{ Image = $null; InvalidateCount = 0 }
+        Add-Member -InputObject $picture -MemberType ScriptMethod -Name Invalidate -Value {
+            $this.InvalidateCount = [int]$this.InvalidateCount + 1
+        }
         $state = [pscustomobject]@{
             Form = [pscustomobject]@{ IsDisposed = $false }
-            Picture = [pscustomobject]@{ Image = $null }
+            Picture = $picture
             Profile = Get-TpmReShadeProfile -ProfileId EnhancedArcade
             CacheRoot = $TestDrive
             PreviewRoot = $script:TrustedPreviewRoot
+            PreviewCache = $null
             SliderValue = 50
+            SliderPosition = 50
+            PendingSliderPosition = $null
             Mode = 'Split'
         }
         $script:TpmReShadePreviewWindowState = $state
@@ -11195,9 +11226,10 @@ Describe "ReShade trusted profile restore" {
             $first.InMemory | Should -BeTrue
             $state.Mode | Should -Be 'Slider'
             $state.SliderValue | Should -Be 25
-            $state.Picture.Image | Should -Not -BeNullOrEmpty
+            $state.SliderPosition | Should -Be 25
+            $state.Picture.InvalidateCount | Should -Be 1
+            $state.Picture.Image | Should -BeNullOrEmpty
         } finally {
-            if ($state.Picture.Image) { $state.Picture.Image.Dispose() }
             $script:TpmReShadePreviewWindowState = $null
         }
     }
@@ -11892,11 +11924,11 @@ Describe "Post-0909174 remediation result UX contracts" {
     It "keeps GPU Fix results visible and exposes skip reasons and next actions" {
         $source = $script:ProductionSource
         $source | Should -Match 'GPU Compatibility Fix complete'
-        $source | Should -Match 'Press Enter to return, D Details, O support-log guidance, or R run again'
+        $source | Should -Match 'Press Enter to return, D Details, O support-log guidance, P repair skipped paths, or R run again'
         $source | Should -Match 'Reason:'
         $source | Should -Match 'What to do:'
         $source | Should -Match 'technical:'
-        $source | Should -Match 'do \{[\s\S]*\$gpuResult = Invoke-GpuFixSetup[\s\S]*\} while \(\$gpuResultChoice -in @\(''D'',''O'',''R''\)\)'
+        $source | Should -Match 'do \{[\s\S]*\$gpuResult = Invoke-GpuFixSetup[\s\S]*\} while \(\$gpuResultChoice -in @\(''D'',''O'',''P'',''R''\)\)'
     }
     It "provides browser feedback and P1 highlighting before P2" {
         $source = $script:ProductionSource
@@ -12208,5 +12240,31 @@ Describe "PostgreSQL grouped diagnosis behavior" {
             $pair = '{0} / {1}' -f $diagnosis.GameLabel, $diagnosis.Database
             @($pairs | Where-Object { $_ -eq $pair }).Count | Should -Be 1
         }
+    }
+}
+Describe "Focused RC8 remediation contracts" {
+    It "accepts a normal nested BepInEx path inside an approved root" {
+        $root = Join-Path $TestDrive 'bep-approved-root'
+        $nested = Join-Path $root 'GameA\BepInEx\core'
+        [IO.Directory]::CreateDirectory($nested) | Out-Null
+        (Test-BepInExNoReparsePath -Root ($root + '\') -Path ($nested + '\')) | Should -BeTrue
+        (Test-BepInExGameRootSafe -GameRoot (Join-Path $root 'GameA') -ApprovedRoot ($root + '\')) | Should -BeTrue
+    }
+    It "uses one explicit PostgreSQL credential context for validation and dumps" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'psqlExe -U postgres -h 127\.0\.0\.1 -p 5432 -d postgres -w'
+        $source | Should -Match 'pgDumpExe -U postgres -h 127\.0\.0\.1 -p 5432 -d \$dbName -w'
+    }
+    It "routes GPU path skips to guided repair and explains the next action" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'P repair skipped paths'
+        $source | Should -Match 'Invoke-LibraryHealthManualPathRepair -UserProfilesDir \$userProfilesDir -GamesInstallFolder \$gamesInstallFolder'
+        $source | Should -Match 'choose P to repair the saved path'
+    }
+    It "keeps support package next actions explicit and starts each mode cleanly" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$lines\.Add\(''What to do next:''\)'
+        $source | Should -Match 'Write-Host "  What to do next:"'
+        $source | Should -Match 'Clear-ConsoleForFreshRender'
     }
 }

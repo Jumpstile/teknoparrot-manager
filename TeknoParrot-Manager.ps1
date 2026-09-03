@@ -1424,6 +1424,9 @@ $lines.Add('') | Out-Null
 $lines.Add('What TPM did not change:') | Out-Null
 $lines.Add('- No game files, executables, DLL payloads, profiles, credentials, or emulator files were included or modified by support collection.') | Out-Null
 $lines.Add('- Missing optional diagnostics are not collection failures; they were left unchanged.') | Out-Null
+$lines.Add('What to do next:') | Out-Null
+$lines.Add('- Review the failure details above, resolve the reported file or access problem, then run the affected TPM workflow again.') | Out-Null
+$lines.Add('- If no collection failure is listed, send this ZIP with the TPM log and describe the workflow and game that failed.') | Out-Null
 $lines.Add('') | Out-Null
 $lines.Add('A missing game usually means no matching safe diagnostic file was present; it does not mean TPM ignored that game.') | Out-Null
 $lines.Add('This ZIP may still be useful for support when only partial evidence was collected.') | Out-Null
@@ -3822,7 +3825,7 @@ function Export-CrosshairPreview {
     if ($BridgeUrl -and $BridgeToken) {
         [void]$sb.Append("<script>const bridge='$bridgeUrlHtml',token='$bridgeTokenHtml';let p1=null,p2=null;function choose(i,cell){fetch(bridge+'?token='+encodeURIComponent(token)+'&index='+i).then(function(r){if(!r.ok)throw new Error('selection bridge rejected the click');return r.text();}).then(function(){const n=String(i).padStart(3,'0');if(p1===null){p1=i;cell.classList.add('p1');document.getElementById('status').textContent='P1 selected: '+n+'. Now choose P2.';}else if(p2===null){p2=i;cell.classList.add('p2');document.getElementById('status').textContent='P1: '+String(p1).padStart(3,'0')+' / P2: '+n+' selected. Return to TeknoParrot Manager to confirm.';}else{document.getElementById('status').textContent='P1: '+String(p1).padStart(3,'0')+' / P2: '+String(p2).padStart(3,'0')+' selected. Return to TeknoParrot Manager to confirm.';}document.title='Crosshair selection '+n;}).catch(function(e){document.getElementById('status').textContent='Selection failed: '+e.message;});}</script>")
     }
-    $instructionText = if ($BridgeUrl -and $BridgeToken) { '<p id="status">Choose a crosshair for P1.</p><p>Click one crosshair for P1, then another for P2. Typed numeric fallback remains available in TeknoParrot Manager.</p>' } else { '<p>Type the number shown under the crosshair in TeknoParrot Manager.</p>' }
+    $instructionText = if ($BridgeUrl -and $BridgeToken) { '<p id="status">Ready: click one crosshair for Player 1.</p><p>Then click another crosshair for Player 2. The status above confirms each selection. Return to TeknoParrot Manager when both are selected. Typed numeric fallback remains available.</p>' } else { '<p>Type the number shown under the crosshair in TeknoParrot Manager.</p>' }
     [void]$sb.Append($instructionText)
     [void]$sb.Append('<div class="grid">')
 
@@ -4975,9 +4978,71 @@ function New-TpmReShadePreviewBitmap {
         return New-TpmReShadePreviewBitmapFromCache -Cache $cache -ProfileDefinition $ProfileDefinition -Mode $Mode -SliderPosition $SliderPosition
     } finally { Dispose-TpmReShadePreviewRenderCache -Cache $cache }
 }
+function New-TpmReShadePreviewPaintHandler {
+    param([Parameter(Mandatory)]$State, [Parameter(Mandatory)]$Picture)
+    return {
+        param($senderArg, $eventArgsArg)
+        try {
+            $getState = {
+                param([string]$Name)
+                if ($State -is [hashtable]) { return $State[$Name] }
+                $property = $State.PSObject.Properties[$Name]
+                if ($property) { return $property.Value }
+                return $null
+            }.GetNewClosure()
+            if (-not [bool](& $getState 'Initialized') -and $State -is [hashtable]) { return }
+            $previewEnabled = & $getState 'PreviewEnabled'
+            if ($null -ne $previewEnabled -and -not [bool]$previewEnabled) { return }
+            $viewState = & $getState 'ViewMode'
+            $modeState = & $getState 'Mode'
+            if ($viewState -ne 'Slider' -and $modeState -ne 'Slider') { return }
+            $selectedProfile = & $getState 'Profile'
+            if (-not $selectedProfile) {
+                $profileId = [string](& $getState 'SelectedProfileId')
+                if ($profileId) { $selectedProfile = Get-TpmReShadeProfile -ProfileId $profileId }
+            }
+            if (-not $selectedProfile) { return }
+            $cache = & $getState 'PreviewCache'
+            $reference = if ($cache) { $cache.Reference } else { $null }
+            $processed = if ($cache) { $cache.Processed[[string]$selectedProfile.ProfileId] } else { $null }
+            if (-not $reference -or -not $processed) { return }
+            $canvas = $Picture.ClientRectangle
+            if ($canvas.Width -le 0 -or $canvas.Height -le 0) { return }
+            $scale = [Math]::Min($canvas.Width / [double]$reference.Width, $canvas.Height / [double]$reference.Height)
+            $drawWidth = [Math]::Max(1, [int][Math]::Round($reference.Width * $scale))
+            $drawHeight = [Math]::Max(1, [int][Math]::Round($reference.Height * $scale))
+            $drawX = [int][Math]::Floor(($canvas.Width - $drawWidth) / 2)
+            $drawY = [int][Math]::Floor(($canvas.Height - $drawHeight) / 2)
+            $destination = New-Object Drawing.Rectangle($drawX, $drawY, $drawWidth, $drawHeight)
+            $position = & $getState 'SliderPosition'
+            if ($null -eq $position) { $position = & $getState 'SliderValue' }
+            $position = [Math]::Max(0, [Math]::Min(100, [int]$position))
+            $splitPixels = [int][Math]::Round($drawWidth * ($position / 100.0))
+            $graphics = $eventArgsArg.Graphics
+            $graphics.Clear([Drawing.Color]::Black)
+            $leftClip = New-Object Drawing.Rectangle($drawX, $drawY, [Math]::Max(0, $splitPixels), $drawHeight)
+            $rightClip = New-Object Drawing.Rectangle($drawX + $splitPixels, $drawY, [Math]::Max(0, $drawWidth - $splitPixels), $drawHeight)
+            $graphics.SetClip($leftClip)
+            $graphics.DrawImage($reference, $destination)
+            $graphics.SetClip($rightClip)
+            $graphics.DrawImage($processed, $destination)
+            $graphics.ResetClip()
+            if ($splitPixels -gt 0 -and $splitPixels -lt $drawWidth) {
+                $divider = New-Object Drawing.Pen([Drawing.Color]::White, 3)
+                try { $graphics.DrawLine($divider, $drawX + $splitPixels, $drawY, $drawX + $splitPixels, $drawY + $drawHeight) } finally { $divider.Dispose() }
+            }
+            $font = New-Object Drawing.Font('Consolas', 11, [Drawing.FontStyle]::Bold)
+            $brush = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(245, 250, 255))
+            try { $graphics.DrawString('BEFORE  |  AFTER', $font, $brush, $drawX + 14, $drawY + 12) } finally { $brush.Dispose(); $font.Dispose() }
+        } catch {
+            try { Write-Log ("ReShade preview paint failed: {0}" -f $_.Exception.Message) } catch {}
+        }
+    }.GetNewClosure()
+}
+
 
 function New-TpmReShadePreviewArtifact {
-    param([Parameter(Mandatory)]$ProfileDefinition, [ValidateSet('Before','After','Split','Slider')][string]$Mode = 'Split', [string]$PreviewRoot = '', [string]$CacheRoot = '', [string]$IntensityId = 'Default', [ValidateRange(0,100)][int]$SliderPosition = 50)
+    param([Parameter(Mandatory)]$ProfileDefinition, [ValidateSet('Before','After','Split','Slider')][string]$Mode = 'Split', [string]$PreviewRoot = '', [string]$CacheRoot = '', [string]$IntensityId = 'Default', [ValidateRange(0,100)][int]$SliderPosition = 50, [object]$RenderCache = $null)
     try {
         $reference = Get-TpmReShadePreviewReference -PreviewRoot $PreviewRoot
         if (-not $reference.Available) { return [pscustomobject]@{ Available=$false; Reason=$reference.Reason; Mode=$Mode; ProfileId=$ProfileDefinition.ProfileId } }
@@ -4992,7 +5057,7 @@ function New-TpmReShadePreviewArtifact {
         if((Test-Path -LiteralPath $imagePath -PathType Leaf) -and (Test-Path -LiteralPath $manifestPath -PathType Leaf)){
             try{$manifest=Get-Content -LiteralPath $manifestPath -Raw|ConvertFrom-Json;if($manifest.CacheKey -eq $key -and $manifest.ReferenceHash -eq $reference.Hash){$check=[Drawing.Image]::FromFile($imagePath);$check.Dispose();return [pscustomobject]@{Available=$true;Path=$imagePath;CacheKey=$key;Reused=$true;ReferenceIdentity=$reference.Identity;Mode=$Mode;ProfileId=$ProfileDefinition.ProfileId}}}catch{}
         }
-        $bitmap=New-TpmReShadePreviewBitmap -ProfileDefinition $ProfileDefinition -Mode $Mode -SliderPosition $SliderPosition -PreviewRoot $PreviewRoot
+        $bitmap=if($RenderCache){New-TpmReShadePreviewBitmapFromCache -Cache $RenderCache -ProfileDefinition $ProfileDefinition -Mode $Mode -SliderPosition $SliderPosition}else{New-TpmReShadePreviewBitmap -ProfileDefinition $ProfileDefinition -Mode $Mode -SliderPosition $SliderPosition -PreviewRoot $PreviewRoot}
         try{$bitmap.Save($imagePath,[Drawing.Imaging.ImageFormat]::Png)}finally{$bitmap.Dispose()}
         [pscustomobject]@{CacheKey=$key;ProfileId=$ProfileDefinition.ProfileId;Mode=$Mode;ReferenceIdentity=$reference.Identity;ReferenceHash=$reference.Hash;RendererVersion='3';PresetVersion=[string]$ProfileDefinition.SchemaVersion;ShaderSha256=@($hashes);IntensityId=$IntensityId}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $manifestPath -Encoding UTF8
         return [pscustomobject]@{Available=$true;Path=$imagePath;CacheKey=$key;Reused=$false;ReferenceIdentity=$reference.Identity;Mode=$Mode;ProfileId=$ProfileDefinition.ProfileId}
@@ -5006,17 +5071,26 @@ function Open-TpmReShadePreviewWindow {
     $drawingLoaded = $false
     $previewRoot = [IO.Path]::GetFullPath($PSScriptRoot)
     $assetChecks = @('bundled landscape reference')
+    $previewCache = $null
+    $form = $null
+    $picture = $null
+    $initialImage = $null
     try {
         if([Threading.Thread]::CurrentThread.GetApartmentState() -ne [Threading.ApartmentState]::STA){throw [InvalidOperationException]::new('STA required')}
         Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop; $formsLoaded = $true
         Add-Type -AssemblyName System.Drawing -ErrorAction Stop; $drawingLoaded = $true
-        $artifact=New-TpmReShadePreviewArtifact -ProfileDefinition $ProfileDefinition -Mode $Mode -CacheRoot $CacheRoot
+        $previewCache=New-TpmReShadePreviewRenderCache -Width 960 -Height 540
+        [void](Get-TpmReShadePreviewProcessedBitmap -Cache $previewCache -ProfileDefinition $ProfileDefinition)
+        $artifact=New-TpmReShadePreviewArtifact -ProfileDefinition $ProfileDefinition -Mode $Mode -CacheRoot $CacheRoot -RenderCache $previewCache
         if(-not $artifact.Available){
-            Write-Log ("ReShade preview unavailable: reason={0} error='{1}' root='{2}' assets={3} PowerShell={4} edition={5} FormsLoaded={6} DrawingLoaded={7} Host='{8}'" -f $artifact.Reason, $artifact.Error, $previewRoot, ($assetChecks -join ';'), $PSVersionTable.PSVersion, $PSVersionTable.PSEdition, $formsLoaded, $drawingLoaded, $Host.Name)
+            Dispose-TpmReShadePreviewRenderCache -Cache $previewCache
             return $artifact
         }
         $form=New-Object Windows.Forms.Form;$form.Text='TeknoParrot ReShade Preview - '+$ProfileDefinition.FriendlyName;$form.Width=1000;$form.Height=700
         $picture=New-Object Windows.Forms.PictureBox;$picture.Dock='Fill';$picture.SizeMode='Zoom';$picture.Image=[Drawing.Image]::FromFile($artifact.Path)
+        $initialImage = $picture.Image
+        $picture.Image = $null
+        if ($initialImage) { $initialImage.Dispose(); $initialImage = $null }
         $toolbar=New-Object Windows.Forms.FlowLayoutPanel;$toolbar.Dock='Top';$toolbar.Height=70
         foreach($view in @('Before','After','Split')){
             $button=New-Object Windows.Forms.Button
@@ -5027,37 +5101,64 @@ function Open-TpmReShadePreviewWindow {
                     $viewMode = if ($tagProperty) { [string]$tagProperty.Value } else { '' }
                     if ($viewMode -notin @('Before','After','Split')) { throw 'Preview view button has no valid view mode.' }
                     $result = Update-TpmReShadePreviewWindow -Mode $viewMode
-                    if (-not $result.Available) {
-                        Write-Log ("ReShade preview event failed at stage 'view-mode-{0}': {1}" -f $viewMode, $result.Reason)
-                        Close-TpmReShadePreviewWindow | Out-Null
-                    }
+                    if (-not $result.Available) { Write-Log ("ReShade preview event failed at stage 'view-mode-{0}': {1}" -f $viewMode, $result.Reason) }
                 } catch {
                     try { Write-Log ("ReShade preview event failed at stage 'view-mode-handler': {0}" -f $_.Exception.Message) } catch {}
-                    try { Close-TpmReShadePreviewWindow | Out-Null } catch {}
                 }
             }.GetNewClosure())
             [void]$toolbar.Controls.Add($button)
         }
         $sliderLabel=New-Object Windows.Forms.Label;$sliderLabel.Text='Comparison slider';$sliderLabel.AutoSize=$true;$toolbar.Controls.Add($sliderLabel)
         $slider=New-Object Windows.Forms.TrackBar;$slider.Name='ComparisonSlider';$slider.Minimum=0;$slider.Maximum=100;$slider.Value=50;$slider.TickFrequency=25;$slider.Width=300
-        $script:TpmReShadePreviewWindowState=[pscustomobject]@{Form=$form;Picture=$picture;Profile=$ProfileDefinition;Mode=$Mode;CacheRoot=$CacheRoot;PreviewRoot='';PreviewCache=(New-TpmReShadePreviewRenderCache -Width 960 -Height 540);Slider=$slider;SliderValue=50}
+        $script:TpmReShadePreviewWindowState=[pscustomobject]@{Form=$form;Picture=$picture;Profile=$ProfileDefinition;Mode='Slider';CacheRoot=$CacheRoot;PreviewRoot='';PreviewCache=$previewCache;Slider=$slider;SliderValue=50;SliderPosition=50;PendingSliderPosition=$null;SliderTimer=$null;SliderKeyUpHandler=$null;Initialized=$true;PreviewEnabled=$true;Closed=$false}
+        $paintHandler = New-TpmReShadePreviewPaintHandler -State $script:TpmReShadePreviewWindowState -Picture $picture
+        $script:TpmReShadePreviewWindowState.PaintHandler = $paintHandler
+        $picture.Add_Paint($paintHandler)
+        $sliderTimer = New-Object Windows.Forms.Timer
+        $sliderTimer.Interval = 16
+        $sliderTimer.Add_Tick({
+            try {
+                if (-not $script:TpmReShadePreviewWindowState) { $this.Stop(); return }
+                $pending = $script:TpmReShadePreviewWindowState.PendingSliderPosition
+                if ($null -ne $pending) {
+                    $script:TpmReShadePreviewWindowState.SliderPosition = [int]$pending
+                    $script:TpmReShadePreviewWindowState.PendingSliderPosition = $null
+                    $picture.Invalidate()
+                }
+                $this.Stop()
+            } catch { try { $this.Stop() } catch {} }
+        }.GetNewClosure())
+        $script:TpmReShadePreviewWindowState.SliderTimer = $sliderTimer
         $slider.Add_ValueChanged({
             try {
                 $valueProperty = $this.PSObject.Properties['Value']
                 if (-not $valueProperty) { throw 'Preview slider event sender has no Value property.' }
-                $result = Update-TpmReShadePreviewWindow -Mode 'Slider' -SliderPosition ([int]$valueProperty.Value)
-                if (-not $result.Available) {
-                    Write-Log ("ReShade preview event failed at stage 'slider-value-changed': {0}" -f $result.Reason)
-                    Close-TpmReShadePreviewWindow | Out-Null
-                }
+                $script:TpmReShadePreviewWindowState.Mode = 'Slider'
+                $script:TpmReShadePreviewWindowState.PendingSliderPosition = [Math]::Max(0, [Math]::Min(100, [int]$valueProperty.Value))
+                if (-not $script:TpmReShadePreviewWindowState.SliderTimer.Enabled) { $script:TpmReShadePreviewWindowState.SliderTimer.Start() }
             } catch {
                 try { Write-Log ("ReShade preview event failed at stage 'slider-value-changed-handler': {0}" -f $_.Exception.Message) } catch {}
-                try { Close-TpmReShadePreviewWindow | Out-Null } catch {}
             }
-        }.GetNewClosure());$toolbar.Controls.Add($slider)
+        }.GetNewClosure())
+        $sliderKeyUpHandler = {
+            try {
+                $valueProperty = $this.PSObject.Properties['Value']
+                if (-not $valueProperty) { throw 'Preview keyboard event sender has no Value property.' }
+                [void](Update-TpmReShadePreviewWindow -Mode 'Slider' -SliderPosition ([int]$valueProperty.Value))
+            } catch {
+                try { Write-Log ("ReShade preview event failed at stage 'slider-keyboard-handler': {0}" -f $_.Exception.Message) } catch {}
+            }
+        }.GetNewClosure()
+        $script:TpmReShadePreviewWindowState.SliderKeyUpHandler = $sliderKeyUpHandler
+        $slider.Add_KeyUp($sliderKeyUpHandler)
+        $toolbar.Controls.Add($slider)
         $form.Controls.Add($picture);$form.Controls.Add($toolbar)
         return [pscustomobject]@{Available=$true;Closed=$false;Mode=$Mode;CacheKey=$artifact.CacheKey}
     } catch {
+        if ($picture -and $picture.Image) { try { $image = $picture.Image; $picture.Image = $null; $image.Dispose() } catch {} }
+        if ($form) { try { $form.Dispose() } catch {} }
+        if ($initialImage) { try { $initialImage.Dispose() } catch {} }
+        if ($previewCache) { try { Dispose-TpmReShadePreviewRenderCache -Cache $previewCache } catch {} }
         Write-Log ("ReShade preview unavailable: reason=PREVIEW_WINDOW_UNAVAILABLE errorType='{0}' error='{1}' root='{2}' assets={3} PowerShell={4} edition={5} FormsLoaded={6} DrawingLoaded={7} Host='{8}'" -f $_.Exception.GetType().FullName, $_.Exception.Message, $previewRoot, ($assetChecks -join ';'), $PSVersionTable.PSVersion, $PSVersionTable.PSEdition, $formsLoaded, $drawingLoaded, $Host.Name)
         return [pscustomobject]@{Available=$false;Closed=$true;Reason='PREVIEW_WINDOW_UNAVAILABLE';Mode=$Mode;Error=$_.Exception.Message}
     }
@@ -5070,20 +5171,18 @@ function Update-TpmReShadePreviewWindow {
     $previewRoot = if ($state.PSObject.Properties['PreviewRoot']) { [string]$state.PreviewRoot } else { '' }
     if($Mode -eq 'Slider'){
         try{
-            $cache = if ($state.PSObject.Properties['PreviewCache']) { $state.PreviewCache } else { $null }
-            if (-not $cache) {
-                $cache = New-TpmReShadePreviewRenderCache -Width 960 -Height 540 -PreviewRoot $previewRoot
-                $state | Add-Member -MemberType NoteProperty -Name PreviewCache -Value $cache
-            }
-            $image=New-TpmReShadePreviewBitmapFromCache -Cache $cache -ProfileDefinition $state.Profile -Mode Slider -SliderPosition $SliderPosition
-            $old=$state.Picture.Image;$state.Picture.Image=$image;if($old){$old.Dispose()};$state.Mode=$Mode;$state.SliderValue=$SliderPosition
-            return [pscustomobject]@{Available=$true;Mode=$Mode;SliderPosition=$SliderPosition;InMemory=$true}
+            $state.Mode='Slider'
+            $state.SliderPosition=[Math]::Max(0,[Math]::Min(100,$SliderPosition))
+            $state.SliderValue=$state.SliderPosition
+            $state.PendingSliderPosition=$null
+            $state.Picture.Invalidate()
+            return [pscustomobject]@{Available=$true;Mode=$Mode;SliderPosition=$state.SliderPosition;InMemory=$true}
         }catch{
             return [pscustomobject]@{Available=$false;Reason='PREVIEW_RENDER_FAILED';Error=$_.Exception.Message}
         }
     }
     try {
-        $artifact=New-TpmReShadePreviewArtifact -ProfileDefinition $state.Profile -Mode $Mode -PreviewRoot $previewRoot -CacheRoot $state.CacheRoot -SliderPosition $SliderPosition
+        $artifact=New-TpmReShadePreviewArtifact -ProfileDefinition $state.Profile -Mode $Mode -PreviewRoot $previewRoot -CacheRoot $state.CacheRoot -RenderCache $state.PreviewCache -SliderPosition $SliderPosition
         if(-not $artifact.Available){return $artifact}
         $old=$state.Picture.Image;$state.Picture.Image=[Drawing.Image]::FromFile($artifact.Path);if($old){$old.Dispose()};$state.Mode=$Mode;$state.SliderValue=$SliderPosition
         return [pscustomobject]@{Available=$true;Mode=$Mode;CacheKey=$artifact.CacheKey;SliderPosition=$SliderPosition}
@@ -5095,7 +5194,12 @@ function Update-TpmReShadePreviewWindow {
 function Close-TpmReShadePreviewWindow {
     if($script:TpmReShadePreviewWindowState){
         $state=$script:TpmReShadePreviewWindowState
-        if($state.Picture.Image){$state.Picture.Image.Dispose()}
+        if($state.Slider -and $state.SliderKeyUpHandler){try{$state.Slider.Remove_KeyUp($state.SliderKeyUpHandler)}catch{};$state.SliderKeyUpHandler=$null}
+        $state.Closed=$true
+        if($state.SliderTimer){try{$state.SliderTimer.Stop();$state.SliderTimer.Dispose()}catch{};$state.SliderTimer=$null}
+        $state.PendingSliderPosition=$null
+        if($state.Picture -and $state.PaintHandler){try{$state.Picture.Remove_Paint($state.PaintHandler)}catch{};$state.PaintHandler=$null}
+        if($state.Picture.Image){$state.Picture.Image.Dispose();$state.Picture.Image=$null}
         if($state.PreviewCache){Dispose-TpmReShadePreviewRenderCache -Cache $state.PreviewCache}
         if($state.Form){$state.Form.Close();$state.Form.Dispose()}
         $script:TpmReShadePreviewWindowState=$null
@@ -5191,10 +5295,26 @@ function New-TpmReShadeGalleryEventHandlers {
             $valueProperty = if ($eventSender) { $eventSender.PSObject.Properties['Value'] } else { $null }
             if (-not $valueProperty) { throw 'Gallery slider event sender has no Value property.' }
             $State['ViewMode'] = 'Slider'
-            $State['SliderPosition'] = [Math]::Max(0, [Math]::Min(100, [int]$valueProperty.Value))
-            [void](& $refreshSafe -State $State -Refresh $State['Refresh'] -Stage 'slider-value-changed')
+            $State['PendingSliderPosition'] = [Math]::Max(0, [Math]::Min(100, [int]$valueProperty.Value))
+            if ($State['SliderTimer'] -and -not $State['SliderTimer'].Enabled) { $State['SliderTimer'].Start() }
         } catch {
             [void](& $previewFailure -State $State -Stage 'slider-value-changed-handler' -ErrorRecord $_)
+        }
+    }.GetNewClosure()
+    $sliderKeyUpHandler = {
+        param($senderArg, $eventArgsArg)
+        try {
+            if (-not [bool]$State['Initialized'] -or -not [bool]$State['PreviewEnabled'] -or [bool]$State['Closed']) { return }
+            $eventSender = $senderArg
+            if (-not $eventSender -or -not $eventSender.PSObject.Properties['Value']) { $eventSender = $this }
+            $valueProperty = if ($eventSender) { $eventSender.PSObject.Properties['Value'] } else { $null }
+            if (-not $valueProperty) { throw 'Gallery keyboard event sender has no Value property.' }
+            $State['ViewMode'] = 'Slider'
+            $State['PendingSliderPosition'] = $null
+            $State['SliderPosition'] = [Math]::Max(0, [Math]::Min(100, [int]$valueProperty.Value))
+            if ($State['Picture']) { $State['Picture'].Invalidate() }
+        } catch {
+            [void](& $previewFailure -State $State -Stage 'slider-keyboard-handler' -ErrorRecord $_)
         }
     }.GetNewClosure()
     $comboHandler = {
@@ -5237,6 +5357,7 @@ function New-TpmReShadeGalleryEventHandlers {
         Combo = $comboHandler
         Choose = $chooseHandler
         Cancel = $cancelHandler
+        KeyUp = $sliderKeyUpHandler
         Closed = $formClosedHandler
     }
 }
@@ -5293,14 +5414,18 @@ function Show-TpmReShadeProfileGalleryWindow {
             SelectedProfileId = $null
             ViewMode = 'Split'
             SliderPosition = 50
+            PendingSliderPosition = $null
+            SliderTimer = $null
             Profiles = @($canonicalProfiles)
             ProfileIds = @($displayItems | ForEach-Object ProfileId)
+            Profile = $null
             Closed = $false
             Initialized = $false
             PreviewEnabled = $true
             PreviewFailureStage = $null
             PreviewFailureMessage = $null
             PreviewCache = $previewCache
+            PaintHandler = $null
             Refresh = $null
             Form = $form
             Combo = $combo
@@ -5308,6 +5433,24 @@ function Show-TpmReShadeProfileGalleryWindow {
             Slider = $null
             ViewButtons = @()
         })
+        $paintHandler = New-TpmReShadePreviewPaintHandler -State $state -Picture $picture
+        $state['PaintHandler'] = $paintHandler
+        $picture.Add_Paint($paintHandler)
+        $sliderTimer = New-Object Windows.Forms.Timer
+        $sliderTimer.Interval = 16
+        $sliderTimer.Add_Tick({
+            try {
+                if (-not $state -or [bool]$state['Closed']) { $this.Stop(); return }
+                $pending = $state['PendingSliderPosition']
+                if ($null -ne $pending) {
+                    $state['SliderPosition'] = [int]$pending
+                    $state['PendingSliderPosition'] = $null
+                    $picture.Invalidate()
+                }
+                $this.Stop()
+            } catch { try { $this.Stop() } catch {} }
+        }.GetNewClosure())
+        $state['SliderTimer'] = $sliderTimer
         $refresh = {
             $image = $null
             try {
@@ -5319,7 +5462,17 @@ function Show-TpmReShadeProfileGalleryWindow {
                 if (-not $canonicalProfile) { throw ("Selected gallery ProfileId '{0}' is not available." -f $profileId) }
                 $viewMode = [string]$state['ViewMode']
                 if ($viewMode -notin @('Before', 'After', 'Split', 'Slider')) { throw ("Unsupported gallery view mode '{0}'." -f $viewMode) }
+                [void](Get-TpmReShadePreviewProcessedBitmap -Cache $state['PreviewCache'] -ProfileDefinition $canonicalProfile)
+                $state['Profile'] = $canonicalProfile
                 $sliderPosition = [int]$state['SliderPosition']
+                if ($viewMode -eq 'Slider') {
+                    $oldImage = $picture.Image
+                    $picture.Image = $null
+                    if ($oldImage) { $oldImage.Dispose() }
+                    $picture.Invalidate()
+                    $state['SelectedProfileId'] = $profileId
+                    return $true
+                }
                 $image = New-TpmReShadePreviewBitmapFromCache -Cache $state['PreviewCache'] -ProfileDefinition $canonicalProfile -Mode $viewMode -SliderPosition $sliderPosition
                 if (-not $image) { throw 'Preview renderer returned no image.' }
                 $oldImage = $picture.Image
@@ -5337,10 +5490,18 @@ function Show-TpmReShadeProfileGalleryWindow {
         $handlers = New-TpmReShadeGalleryEventHandlers -State $state -Combo $combo -Form $form
         $viewHandler = $handlers.View
         $sliderHandler = $handlers.Slider
+        $sliderKeyUpHandler = $handlers.KeyUp
         $comboHandler = $handlers.Combo
         $chooseHandler = $handlers.Choose
         $cancelHandler = $handlers.Cancel
         $formClosedHandler = $handlers.Closed
+        $state['ViewHandler'] = $viewHandler
+        $state['SliderHandler'] = $sliderHandler
+        $state['SliderKeyUpHandler'] = $sliderKeyUpHandler
+        $state['ComboHandler'] = $comboHandler
+        $state['ChooseHandler'] = $chooseHandler
+        $state['CancelHandler'] = $cancelHandler
+        $state['FormClosedHandler'] = $formClosedHandler
         $toolbar = New-Object Windows.Forms.FlowLayoutPanel
         $toolbar.Dock = 'Top'
         $toolbar.Height = 55
@@ -5361,6 +5522,7 @@ function Show-TpmReShadeProfileGalleryWindow {
         $slider.Width = 260
         $state['Slider'] = $slider
         $slider.Add_ValueChanged($sliderHandler)
+        $slider.Add_KeyUp($sliderKeyUpHandler)
         [void]$toolbar.Controls.Add($slider)
         $combo.Add_SelectedIndexChanged($comboHandler)
         $choose.Add_Click($chooseHandler)
@@ -5401,6 +5563,17 @@ function Show-TpmReShadeProfileGalleryWindow {
 function Close-TpmReShadeProfileGallerySession {
     param([object]$Session)
     if (-not $Session) { return }
+    try { $Session['Closed'] = $true } catch {}
+    try {
+        if ($Session['SliderTimer']) { $Session['SliderTimer'].Stop(); $Session['SliderTimer'].Dispose(); $Session['SliderTimer'] = $null }
+        $Session['PendingSliderPosition'] = $null
+    } catch {}
+    try { if ($Session['Picture'] -and $Session['PaintHandler']) { $Session['Picture'].Remove_Paint($Session['PaintHandler']); $Session['PaintHandler'] = $null } } catch {}
+    try { if ($Session['Slider'] -and $Session['SliderHandler']) { $Session['Slider'].Remove_ValueChanged($Session['SliderHandler']) } } catch {}
+    try { if ($Session['Combo'] -and $Session['ComboHandler']) { $Session['Combo'].Remove_SelectedIndexChanged($Session['ComboHandler']) } } catch {}
+    try { if ($Session['Slider'] -and $Session['SliderKeyUpHandler']) { $Session['Slider'].Remove_KeyUp($Session['SliderKeyUpHandler']); $Session['SliderKeyUpHandler'] = $null } } catch {}
+    try { foreach ($button in @($Session['ViewButtons'])) { if ($button -and $Session['ViewHandler']) { $button.Remove_Click($Session['ViewHandler']) } } } catch {}
+    try { if ($Session['Form'] -and $Session['FormClosedHandler']) { $Session['Form'].Remove_FormClosed($Session['FormClosedHandler']) } } catch {}
     try {
         if ($Session.Form -and -not $Session.Form.IsDisposed) { $Session.Form.Close() }
     } catch {}
@@ -5415,7 +5588,6 @@ function Close-TpmReShadeProfileGallerySession {
         if ($Session.Form -and -not $Session.Form.IsDisposed) { $Session.Form.Dispose() }
     } catch {}
     try { Dispose-TpmReShadePreviewRenderCache -Cache $Session['PreviewCache'] } catch {}
-    try { $Session['Closed'] = $true } catch {}
 }
 function Show-TpmReShadePreviewWindow {
     param([Parameter(Mandatory)]$ProfileDefinition, [ValidateSet('Before','After','Split')][string]$Mode = 'Split', [object]$ResolutionEvidence = $null, [switch]$Show)
@@ -6656,23 +6828,24 @@ function Read-TpmReShadeTerminalProfile {
             continue
         }
         if ($choice -eq 'R') {
-            if ($PreviewSession -and $PreviewSession.Form -and -not $PreviewSession.Form.IsDisposed) {
+            if ($PreviewSession) {
                 try {
-                    $PreviewSession.Closed = $false
-                    $PreviewSession.Form.Show()
-                    $PreviewSession.Form.Activate()
-                    [Windows.Forms.Application]::DoEvents()
+                    $reopenId = if ($selected) { [string]$selected.ProfileId } else { 'CleanSharp' }
+                    $replacement = Show-TpmReShadeProfileGalleryWindow -Profiles $Profiles -DefaultProfileId $reopenId -Show -NonModal
+                    if (-not $replacement.Available -or -not $replacement.Session) {
+                        throw ("fresh preview window was unavailable ({0})" -f $replacement.Reason)
+                    }
+                    $oldSession = $PreviewSession
+                    $PreviewSession = $replacement.Session
+                    Close-TpmReShadeProfileGallerySession -Session $oldSession
+                    if ($selected) { [void](Sync-TpmReShadeGallerySelection -Session $PreviewSession -ProfileId ([string]$selected.ProfileId)) }
+                    [void][Windows.Forms.Application]::DoEvents()
                     Write-Host ("  Preview window reopened. Your selected profile is still {0}." -f $(if ($selected) { $selected.FriendlyName } else { 'not selected' })) -ForegroundColor DarkCyan
                 } catch {
                     Write-Host ("  TPM could not reopen the preview because: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
                     Write-Host '  You can still continue from the terminal.' -ForegroundColor Yellow
                     Write-Log ("ReShade profile chooser: preview reopen failed -- {0}" -f $_.Exception.Message)
                 }
-            } elseif ($PreviewSession) {
-                Write-Host ("  Preview window closed. Your selected profile is still {0}." -f $(if ($selected) { $selected.FriendlyName } else { 'not selected' })) -ForegroundColor Yellow
-                Write-Host '  TPM could not reopen the preview because: Windows disposed the preview window.' -ForegroundColor Yellow
-                Write-Host '  You can still continue from the terminal.' -ForegroundColor Yellow
-                Write-Log 'ReShade profile chooser: preview reopen blocked because the window was disposed.'
             } else {
                 Write-Host '  TPM could not reopen the preview because: no preview session was created.' -ForegroundColor Yellow
                 Write-Host '  You can still continue from the terminal.' -ForegroundColor Yellow
@@ -6682,11 +6855,11 @@ function Read-TpmReShadeTerminalProfile {
         }
         if ($choice -eq 'B') {
             Write-Log 'ReShade profile chooser: cancelled before confirmation.'
-            return [pscustomobject]@{ SelectedProfile = $null; Cancelled = $true }
+            return [pscustomobject]@{ SelectedProfile = $null; Cancelled = $true; PreviewSession = $PreviewSession }
         }
         if ($choice -eq 'U') {
             if ($selected) {
-                return [pscustomobject]@{ SelectedProfile = $selected; Cancelled = $false }
+                return [pscustomobject]@{ SelectedProfile = $selected; Cancelled = $false; PreviewSession = $PreviewSession }
             }
             Write-Host '  Choose a numbered profile before using it.' -ForegroundColor Yellow
             continue
@@ -6804,6 +6977,7 @@ function Invoke-ReShadeSetup {
     }
     try {
         $chooserResult = Read-TpmReShadeTerminalProfile -Profiles $galleryProfiles -PreviewSession $gallerySession
+        if ($chooserResult.PSObject.Properties['PreviewSession']) { $gallerySession = $chooserResult.PreviewSession }
     } finally {
         Close-TpmReShadeProfileGallerySession -Session $gallerySession
     }
@@ -7838,7 +8012,7 @@ function Get-PostgresDatabaseState {
     $previousPgPassFile = $null
     try {
         $previousPgPassFile = Set-PostgresPgPassFileEnvironment -Path $pgpassFile
-        $queryOutput = (& $psqlExe -U postgres -h 127.0.0.1 -p 5432 -tAc "SELECT 1 FROM pg_database WHERE datname='$DbName'" 2>&1 | Out-String).Trim()
+        $queryOutput = (& $psqlExe -U postgres -h 127.0.0.1 -p 5432 -d postgres -w -tAc "SELECT 1 FROM pg_database WHERE datname='$DbName'" 2>&1 | Out-String).Trim()
         $queryExitCode = $LASTEXITCODE
         if ($queryExitCode -ne 0) {
             $detail = if ($queryOutput) { ConvertTo-PostgresRedactedText -Text $queryOutput -Secrets @($SuperPasswordPlain) } else { 'psql returned no diagnostic text.' }
@@ -7868,7 +8042,7 @@ function Test-PostgresPassword {
     $previousPgPassFile = $null
     try {
         $previousPgPassFile = Set-PostgresPgPassFileEnvironment -Path $pgpassFile
-        & $psqlExe -U postgres -h 127.0.0.1 -p 5432 -tAc 'SELECT 1' 2>$null | Out-Null
+        & $psqlExe -U postgres -h 127.0.0.1 -p 5432 -d postgres -w -tAc 'SELECT 1' 2>$null | Out-Null
         return ($LASTEXITCODE -eq 0)
     } finally {
         Restore-PostgresPgPassFileEnvironment -PreviousValue $previousPgPassFile
@@ -8192,7 +8366,7 @@ function Invoke-GpuFixSetup {
                 if ($gpuPathCheck.ReasonCode -eq 'GAME_PATH_MISSING') { $missingPath++ }
                 Write-Host ("    SKIP {0}: {1}" -f $pf.BaseName, $gpuPathCheck.Reason) -ForegroundColor Yellow
                 $skipReason = if ($gpuPathCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { 'The saved game drive or device is unavailable.' } else { 'TPM has a saved location for this game, but Windows cannot find the executable right now.' }
-                $nextAction = if ($gpuPathCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run GPU Fix again.' } else { 'Reconnect the drive, restore the folder, or repair the saved path, then run GPU Fix again.' }
+                $nextAction = if ($gpuPathCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then choose P to repair the saved path.' } else { 'Reconnect the drive, restore the folder, or choose P to repair the saved path.' }
                 [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; Reason = $skipReason; SavedPath = $registeredGamePath; NextAction = $nextAction; Technical = [string]$gpuPathCheck.Reason })
                 Write-Log ("GPU Fix: skipped {0}; path reason={1}; detail={2}" -f $pf.BaseName, $gpuPathCheck.ReasonCode, $gpuPathCheck.Reason)
                 continue
@@ -8204,7 +8378,7 @@ function Invoke-GpuFixSetup {
                 if (-not $boundaryCheck.Valid -or [string]$boundaryCheck.ResolvedPath -ine [string]$gpuPathCheck.ResolvedPath) {
                     $skipped++
                     if ($boundaryCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ }
-                    [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; Reason = 'The registered game path changed or became unavailable before the safe write.'; SavedPath = $registeredGamePath; NextAction = 'Reconnect the drive or repair the saved path, then run GPU Fix again.'; Technical = [string]$boundaryCheck.ReasonCode })
+                    [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; Reason = 'The registered game path changed or became unavailable before the safe write.'; SavedPath = $registeredGamePath; NextAction = 'Reconnect the drive or choose P to repair the saved path, then run GPU Fix again.'; Technical = [string]$boundaryCheck.ReasonCode })
                     if ($boundaryCheck.ReasonCode -eq 'GAME_PATH_MISSING') { $missingPath++ }
                     Write-Host ("    SKIP {0}: mutation-boundary path check failed; profile unchanged." -f $pf.BaseName) -ForegroundColor Yellow
                     Write-Log ("GPU Fix: mutation-boundary path check failed for {0}; reason={1}" -f $pf.BaseName, $boundaryCheck.ReasonCode)
@@ -8227,7 +8401,7 @@ function Invoke-GpuFixSetup {
                 if ($failureCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ } else { $missingPath++ }
                 Write-Host ("    SKIP {0}: mutation became unavailable ({1}); profile unchanged" -f $pf.BaseName, $failureCode) -ForegroundColor Yellow
                 $catchReason = if ($failureCode -eq 'DEVICE_UNAVAILABLE') { 'The saved game drive or device is unavailable.' } else { 'TPM could not find the saved game executable.' }
-                [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; Reason = $catchReason; SavedPath = $registeredGamePath; NextAction = 'Reconnect the drive, restore the folder, or repair the saved path, then run GPU Fix again.'; Technical = [string]$_.Exception.Message })
+                [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; Reason = $catchReason; SavedPath = $registeredGamePath; NextAction = 'Reconnect the drive, restore the folder, or choose P to repair the saved path, then run GPU Fix again.'; Technical = [string]$_.Exception.Message })
                 Write-Log ("GPU Fix: skipped {0} after mutation failure; path reason={1}; detail={2}" -f $pf.BaseName, $failureCode, $_)
             } else {
                 Write-Host ("    FAILED {0}: {1}" -f $pf.BaseName, $_) -ForegroundColor Red
@@ -11434,10 +11608,10 @@ function New-PostgresDatabaseFromBackup {
     $previousPgPassFile = $null
     try {
         $previousPgPassFile = Set-PostgresPgPassFileEnvironment -Path $pgpassFile
-        & $createdbExe -U postgres -h 127.0.0.1 -p 5432 -E $Encoding -T template0 $DbName 2>&1 | Out-Null
+        & $createdbExe -U postgres -h 127.0.0.1 -p 5432 -w -E $Encoding -T template0 $DbName 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { return $false }
-        & $psqlExe -U postgres -h 127.0.0.1 -p 5432 -d $DbName -c "ALTER DATABASE `"$DbName`" SET standard_conforming_strings = on;" 2>&1 | Out-Null
-        & $pgRestoreExe -U postgres -h 127.0.0.1 -p 5432 -d $DbName $BackupFile 2>&1 | Out-Null
+        & $psqlExe -U postgres -h 127.0.0.1 -p 5432 -d $DbName -w -c "ALTER DATABASE `"$DbName`" SET standard_conforming_strings = on;" 2>&1 | Out-Null
+        & $pgRestoreExe -U postgres -h 127.0.0.1 -p 5432 -d $DbName -w $BackupFile 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) { return $false }
         $state = Get-PostgresDatabaseState -DbName $DbName -SuperPasswordPlain $SuperPasswordPlain
         return ($state.Verified -and $state.Exists)
@@ -11797,7 +11971,7 @@ function Invoke-FFBPluginSetup {
         Write-Host ""
         Write-Host ("  {0} game(s) are covered by BOTH FFB Blaster and the third-party plugin:" -f $overlaps.Count) -ForegroundColor Cyan
         foreach ($ov in $overlaps) { Write-Host ("    - {0}" -f $ov.Profile.BaseName) -ForegroundColor DarkGray }
-        $ans = (Read-HostSafe "  Use FFB Blaster (native) for these games instead of the third-party plugin? (Y/N)").ToUpper()
+        $ans = (Read-HostSafe "  Choose one FFB owner for these games: Y = native FFB Blaster (recommended), N = third-party plugin. Do not enable both." -Default 'Y').ToUpper()
         $useNativeForOverlaps = ($ans -eq "Y")
         Write-Log ("FFBPlugin: {0} overlapping game(s) with native FFB Blaster -- user chose {1}" -f $overlaps.Count, $(if ($useNativeForOverlaps) {"native"} else {"third-party plugin"}))
     }
@@ -12613,13 +12787,15 @@ function Test-BepInExNoReparsePath {
     param([Parameter(Mandatory)][string]$Root, [Parameter(Mandatory)][string]$Path)
     try {
         if ([string]::IsNullOrWhiteSpace($Root) -or [string]::IsNullOrWhiteSpace($Path)) { return $false }
-        $rootFull = [System.IO.Path]::GetFullPath($Root).TrimEnd('\','/')
-        $pathFull = [System.IO.Path]::GetFullPath($Path).TrimEnd('\','/')
-        if (-not (Test-PathInside -child $pathFull -parent $rootFull)) { return $false }
+        $rootFull = [System.IO.Path]::GetFullPath($Root)
+        $pathFull = [System.IO.Path]::GetFullPath($Path)
+        $rootCompare = $rootFull.TrimEnd('\','/')
+        $pathCompare = $pathFull.TrimEnd('\','/')
+        if (-not (Test-PathInside -child $pathCompare -parent $rootCompare)) { return $false }
         if (-not (Test-Path -LiteralPath $rootFull -PathType Container -ErrorAction SilentlyContinue)) { return $false }
         $rootItem = Get-Item -LiteralPath $rootFull -Force -ErrorAction Stop
         if (($rootItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
-        $relative = $pathFull.Substring($rootFull.Length).TrimStart('\','/')
+        $relative = $pathCompare.Substring($rootCompare.Length).TrimStart('\','/')
         $cursor = $rootFull
         foreach ($part in ($relative -split '[\/]')) {
             if ([string]::IsNullOrWhiteSpace($part)) { continue }
@@ -16906,7 +17082,7 @@ function Backup-PostgresDatabases {
             $previousPgPassFile = Set-PostgresPgPassFileEnvironment -Path $pgpassFile
             foreach ($dbName in @($names | Sort-Object)) {
                 $destFile = Join-Path $result.Path ($dbName + '.backup')
-                $dumpOutput = (& $pgDumpExe -U postgres -h 127.0.0.1 -p 5432 -F c -f $destFile $dbName 2>&1 | Out-String).Trim()
+                $dumpOutput = (& $pgDumpExe -U postgres -h 127.0.0.1 -p 5432 -d $dbName -w -F c -f $destFile 2>&1 | Out-String).Trim()
                 $exitCode = $LASTEXITCODE
                 if ($exitCode -ne 0 -or -not (Test-Path -LiteralPath $destFile -PathType Leaf) -or (Get-Item -LiteralPath $destFile).Length -eq 0) {
                     $result.Succeeded = $false
@@ -17031,7 +17207,7 @@ function Invoke-RestorePostgresBackup {
             $previousPgPassFile = $null
             try {
                 $previousPgPassFile = Set-PostgresPgPassFileEnvironment -Path $pgpassFile
-                & $dropdbExe -U postgres -h 127.0.0.1 -p 5432 --if-exists $dbName 2>&1 | Out-Null
+                & $dropdbExe -U postgres -h 127.0.0.1 -p 5432 -w --if-exists $dbName 2>&1 | Out-Null
             } finally {
                 Restore-PostgresPgPassFileEnvironment -PreviousValue $previousPgPassFile
                 Remove-PostgresPgPassFile -Path $pgpassFile -ThrowOnFailure
@@ -20762,6 +20938,7 @@ $mode = $null
     }
     if ($modeChoice -eq "15") { break }
     }
+    Clear-ConsoleForFreshRender
 
     if ($mode -eq "Restore") {
         Write-Host ""
@@ -20860,6 +21037,7 @@ $mode = $null
                     $healthBackup = New-LibraryHealthProfileBackup -UserProfilesDir $userProfilesDir
                     $repairIndex = Build-ProfileIndex -gameProfilesDir $gameProfilesDir
                     $repairReports = @(Repair-GamePaths -userProfilesDir $userProfilesDir -installFolder $gamesInstallFolder -profileIndex $repairIndex -DryRun:$false)
+                    Write-Host ("  Health check identified {0} broken saved path(s); automatic repair examined each one." -f @($healthResult.Broken).Count) -ForegroundColor Cyan
                     $repairFixed = @($repairReports | Where-Object { $_.Status -eq 'fixed' })
                     $repairFailed = @($repairReports | Where-Object { $_.Status -eq 'save-failed' })
                     $repairUnresolved = @($repairReports | Where-Object { $_.Status -notin @('fixed', 'save-failed') })
@@ -20867,6 +21045,7 @@ $mode = $null
                     if ($repairFixed.Count -gt 0) { Write-Host ("    Fixed: {0}" -f (($repairFixed | ForEach-Object { $_.Code }) -join ', ')) -ForegroundColor Green }
                     if ($repairUnresolved.Count -gt 0) { Write-Host ("    Left unchanged or unresolved: {0}" -f (($repairUnresolved | ForEach-Object { $_.Code }) -join ', ')) -ForegroundColor Yellow }
                     if ($repairFailed.Count -gt 0) { Write-Host ("    Save failed: {0}" -f (($repairFailed | ForEach-Object { $_.Code }) -join ', ')) -ForegroundColor Red }
+                    if ($repairUnresolved.Count -gt 0 -and $repairFixed.Count -eq 0) { Write-Host "    No automatic repair was applied. Choose M next to browse to each exact executable; TPM will not guess." -ForegroundColor Cyan }
                     Write-Host ("  Safety backup: {0}" -f $healthBackup.Path) -ForegroundColor DarkGray
                 } catch {
                     Write-Host ("  Automatic path repair was not saved: {0}" -f $_.Exception.Message) -ForegroundColor Red
@@ -21460,6 +21639,9 @@ $mode = $null
                         Write-Host ("    {0} -- {1}" -f $safeSource, $safeDetail) -ForegroundColor Yellow
                     }
                 }
+                Write-Host "  What to do next:" -ForegroundColor Cyan
+                Write-Host "    Review the failure details above, resolve the reported file or access problem, then run the affected workflow again." -ForegroundColor DarkCyan
+                Write-Host "    If no collection failure is listed, send this ZIP with the TPM log and describe the workflow and game that failed." -ForegroundColor DarkCyan
                 Write-Host "  What TPM did not change:" -ForegroundColor Cyan
                 Write-Host "    No game files, profiles, credentials, or emulator files were changed by support collection." -ForegroundColor DarkCyan
                 Write-Host ""
@@ -22038,7 +22220,7 @@ $mode = $null
                 Write-Host ("    Saved path: {0}" -f $detail.SavedPath) -ForegroundColor DarkGray
                 Write-Host ("    What to do: {0}" -f $detail.NextAction) -ForegroundColor DarkGray
             }
-            $gpuResultChoice = (Read-HostSafe 'Press Enter to return, D Details, O support-log guidance, or R run again' -Default '').Trim().ToUpper()
+            $gpuResultChoice = (Read-HostSafe 'Press Enter to return, D Details, O support-log guidance, P repair skipped paths, or R run again' -Default '').Trim().ToUpper()
             if ($gpuResultChoice -eq 'D') {
                 foreach ($detail in @($gpuResult.SkipDetails)) {
                     Write-Host ("  {0}: {1} (technical: {2})" -f $detail.Game, $detail.SavedPath, $detail.Technical) -ForegroundColor DarkGray
@@ -22046,6 +22228,18 @@ $mode = $null
             }
             elseif ($gpuResultChoice -eq 'O') {
                 Write-Host "  Open the support package or TeknoParrot-Manager.log for the recorded technical details." -ForegroundColor DarkGray
+            }
+            elseif ($gpuResultChoice -eq 'P') {
+                $repairCodes = @($gpuResult.SkipDetails | ForEach-Object { [string]$_.Game } | Where-Object { $_ } | Select-Object -Unique)
+                if ($repairCodes.Count -eq 0) {
+                    Write-Host "  No skipped game paths are available for guided repair." -ForegroundColor DarkGray
+                } else {
+                    Write-Host "  Guided path repair will prompt for each skipped game. Nothing is saved until all choices pass validation and the backup succeeds." -ForegroundColor Cyan
+                    $repairResult = Invoke-LibraryHealthManualPathRepair -UserProfilesDir $userProfilesDir -GamesInstallFolder $gamesInstallFolder -BrokenGames ([string[]]$repairCodes)
+                    Write-Host ("  Guided repair saved {0} profile(s)." -f $repairResult.Updated) -ForegroundColor $(if ($repairResult.Updated -gt 0) { 'Green' } else { 'DarkGray' })
+                    if (@($repairResult.Skipped).Count -gt 0) { Write-Host ("  Left unchanged: {0}" -f (@($repairResult.Skipped) -join ', ')) -ForegroundColor Yellow }
+                    if (@($repairResult.Errors).Count -gt 0) { Write-Host ("  Repair errors: {0}" -f (@($repairResult.Errors) -join ', ')) -ForegroundColor Red }
+                }
             }
             elseif ($gpuResultChoice -eq 'R') {
                 $gpuResult = Invoke-GpuFixSetup -UserProfilesDir $userProfilesDir -TpRoot $tpRoot
@@ -22067,7 +22261,7 @@ $mode = $null
                     }
                 }
             }
-        } while ($gpuResultChoice -in @('D','O','R'))
+        } while ($gpuResultChoice -in @('D','O','P','R'))
         continue
     }
 
