@@ -517,6 +517,13 @@ Certification.
   release, runtime banner matches the release, script identity matches docs,
   README latest tag matches the release, release ZIP identity validation
   passes, and release metadata can be checked before publication.
+- [ ] Arcade OMP Packaged Runtime UX Gate (#323) completed on the exact
+      packaged source identity as the final gate before RC8 release
+      authorization: package identity/hash/assets, default and constrained
+      terminal screenshots, menu and one-letter prompt UX, ReShade
+      gallery/slider, Health Check repair routing, feature routing,
+      backup-failure truthfulness, and support-package clarity. Record logs,
+      screenshots, runtime path, branch, and exact SHA.
 
 ### Phase 7 -- Report
 

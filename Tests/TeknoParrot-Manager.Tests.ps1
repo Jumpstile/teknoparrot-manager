@@ -5108,20 +5108,24 @@ Describe "RC8 PostgreSQL and support UX" {
         }
         $result.Succeeded | Should -BeFalse
     }
-    It "collapses normal NotPresent support detail while preserving failure separation" {
+    It "separates path-limited support omissions from true collection failures" {
         $records = @(
             [pscustomobject]@{ Status = 'Collected'; Source = 'TPM:log'; Destination = 'diagnostics\manager.log'; Detail = '' }
             [pscustomobject]@{ Status = 'NotPresent'; Source = 'Game:Example:log'; Destination = ''; Detail = 'Expected diagnostic file was not present.' }
             [pscustomobject]@{ Status = 'CollectionFailed'; Source = 'Game:Other:plugin inventory'; Destination = ''; Detail = 'Plugin directory could not be inspected safely.' }
+            [pscustomobject]@{ Status = 'CollectionFailed'; Source = 'TPM:required report'; Destination = ''; Detail = 'The required report could not be written.' }
         )
-        $text = Get-TpmSupportManifestText -Records $records -Errors @() -GameCodes @('Example') -AffectedGameSummary 'Example'
+        $text = Get-TpmSupportManifestText -Records $records -Errors @() -GameCodes @('Example', 'Other') -AffectedGameSummary 'Example, Other'
         $text | Should -Match 'Collected evidence:'
         $text | Should -Match 'Optional diagnostics not found are summarized'
         $text | Should -Match '\[NotPresent\] Registered-game diagnostics: 1 items'
         $text | Should -Not -Match 'Verbose NotPresent detail:'
-        $text | Should -Match '\[CollectionFailed\] Game:Other:plugin inventory'
-        $text | Should -Match 'What failed:'
-        $text | Should -Match 'Game:Other:plugin inventory'
+        $text | Should -Match 'Collection failures: 1'
+        $failedSection = ($text -split 'What failed:', 2)[1] -split 'What TPM could not collect:', 2
+        $failedSection[0] | Should -Match 'TPM:required report'
+        $failedSection[0] | Should -Not -Match 'Game:Other:plugin inventory'
+        $text | Should -Match 'What TPM could not collect:'
+        $text | Should -Match 'Not collected: Game:Other:plugin inventory'
         $text | Should -Match 'What TPM did not change:'
         $text | Should -Match 'No game files, executables, DLL payloads, profiles, credentials, or emulator files'
         $script:ProductionSource | Should -Match 'Redact-TpmSupportText -Text \(\[string\]\$record\.Source\)'
@@ -7077,10 +7081,9 @@ Describe "New-PropagationBackup (P1 fix: standalone Propagate Controls must abor
     # Independent engineering review finding on PR #62: a backup-copy error in the standalone
     # Propagate Controls menu option only warned and allowed the caller to
     # continue -- including automatically in -Unattended mode -- so
-    # Invoke-ControlPropagation could run against an incomplete backup. This
-    # directly proves the gating condition every caller relies on: ErrorCount
-    # is greater than zero whenever any source file could not be copied, with
-    # no path that reports success/zero on a partial failure.
+    # Invoke-ControlPropagation could run against an incomplete backup. The
+    # helper now uses terminating copy errors, and the caller also retains its
+    # explicit failure-result gate: no path reports success after a partial copy.
     It "reports zero errors and the correct path when every file copies successfully" {
         $profiles = Join-Path $TestDrive ("propback-ok-" + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $profiles -Force | Out-Null
@@ -7092,34 +7095,21 @@ Describe "New-PropagationBackup (P1 fix: standalone Propagate Controls must abor
         Test-Path -LiteralPath (Join-Path $result.Path 'Game.xml') | Should -BeTrue
     }
 
-    It "signals an abort-worthy failure when a source file is locked and cannot be copied" {
-        # A sharing-violation on Copy-Item can surface either as a
-        # non-terminating error (caught into ErrorCount via -ErrorAction
-        # SilentlyContinue) or, depending on exactly how the underlying I/O
-        # call fails, as a terminating exception that -ErrorAction alone
-        # does not suppress. Both are safe: the real caller in the
-        # "PropagateControls" menu block wraps this call in try/catch AND
-        # checks ErrorCount, so either outcome correctly prevents
-        # Invoke-ControlPropagation from running. This test accepts either,
-        # since the point is proving no path silently reports success.
-        $profiles = Join-Path $TestDrive ("propback-locked-" + [guid]::NewGuid().ToString('N'))
+    It "throws when a profile copy fails" {
+        $profiles = Join-Path $TestDrive ("propback-copy-failure-" + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $profiles -Force | Out-Null
-        $lockedPath = Join-Path $profiles 'Locked.xml'
-        Set-Content -LiteralPath $lockedPath -Value '<GameProfile/>' -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $profiles 'CopyFailure.xml') -Value '<GameProfile/>' -Encoding UTF8
+        Mock Copy-Item { throw 'simulated profile copy failure' }
 
-        $handle = [System.IO.File]::Open($lockedPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
-        try {
-            $threw = $false
-            $result = $null
-            try {
-                $result = New-PropagationBackup -UserProfilesDir $profiles
-            } catch {
-                $threw = $true
-            }
-            ($threw -or $result.ErrorCount -gt 0) | Should -BeTrue
-        } finally {
-            $handle.Dispose()
-        }
+        { New-PropagationBackup -UserProfilesDir $profiles } | Should -Throw '*Propagation profile backup failed*'
+    }
+
+    It "throws when profile enumeration fails" {
+        $profiles = Join-Path $TestDrive ("propback-enumeration-failure-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        Mock Get-ChildItem { throw 'simulated profile enumeration failure' }
+
+        { New-PropagationBackup -UserProfilesDir $profiles } | Should -Throw '*Propagation profile backup failed*'
     }
 }
 
@@ -10098,8 +10088,44 @@ Describe "Issue #300 shared workflow status state machine" {
         $result = Invoke-TpmFfbSetupMode -UserProfilesDir $TestDrive -TpRoot $TestDrive -ScriptRoot $TestDrive -EventSink { param($event) [void]$events.Add($event) }
         $result.Completed | Should -BeTrue
         $result.Context.Lifecycle | Should -Be 'Closed'
+        $result.NativeSucceeded | Should -BeTrue
         @($events | Where-Object { $_.StepId -eq 'plugin' -and $_.Outcome -eq 'Skipped' }).Count | Should -Be 1
         Should -Invoke Invoke-FFBPluginSetup -Times 0 -Exactly
+    }
+
+    It "blocks the optional plugin after a failed native FFB setup" {
+        $events = New-Object System.Collections.Generic.List[object]
+        Mock Invoke-FFBBlasterSetup {
+            [pscustomobject]@{
+                Succeeded = $false
+                BackupSucceeded = $false
+                EnabledCodes = @()
+                Errors = 1
+                Reason = 'PROFILE_BACKUP_FAILED'
+            }
+        }
+        Mock Invoke-FFBPluginSetup { throw 'plugin must not be called after native failure' }
+        Mock Read-HostSafe { '' }
+        $result = Invoke-TpmFfbSetupMode -UserProfilesDir $TestDrive -TpRoot $TestDrive -ScriptRoot $TestDrive -EventSink { param($event) [void]$events.Add($event) }
+        $result.Completed | Should -BeFalse
+        $result.NativeSucceeded | Should -BeFalse
+        $result.Context.Lifecycle | Should -Be 'Closed'
+        @($events | Where-Object { $_.EventKind -eq 'FailureRaised' -and $_.FailureId -eq 'ffb-native-failed' }).Count | Should -Be 1
+        Should -Invoke Invoke-FFBPluginSetup -Times 0 -Exactly
+    }
+    It "returns a failed native result when the FFB profile backup copy fails" {
+        $userProfiles = Join-Path $TestDrive 'ffb-native-backup-failure'
+        $tpRoot = Join-Path $TestDrive 'ffb-native-tp'
+        New-Item -ItemType Directory -Path $userProfiles, $tpRoot -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $userProfiles 'Existing.xml') -Value '<GameProfile />'
+        Mock Read-HostSafe { 'Y' }
+        Mock Get-FFBBlasterFieldNames { @('FFB Blaster') }
+        Mock Copy-Item { throw 'simulated profile backup copy failure' }
+        $result = Invoke-FFBBlasterSetup -UserProfilesDir $userProfiles -TpRoot $tpRoot
+        $result.Succeeded | Should -BeFalse
+        $result.BackupSucceeded | Should -BeFalse
+        $result.Reason | Should -Be 'PROFILE_BACKUP_FAILED'
+        @($result.EnabledCodes).Count | Should -Be 0
     }
 
     It "passes TeknoParrot root to the plugin overlap switch" {
@@ -10188,6 +10214,74 @@ Describe "Issue #300 shared workflow status state machine" {
         $field.InnerText | Should -Be '1'
         (Test-Path -LiteralPath (Join-Path $gameDir 'd3d9.dll') -PathType Leaf) | Should -BeFalse
         Should -Invoke Read-HostSafe -Times 1 -Exactly
+    }
+    It "reports missing saved paths separately from unsupported FFB games" {
+        $userProfiles = Join-Path $TestDrive 'ffb-missing-path'
+        $cacheDir = Join-Path $TestDrive 'ffb-missing-cache'
+        New-Item -ItemType Directory -Path $userProfiles, $cacheDir -Force | Out-Null
+        $profileXml = @"
+<GameProfile>
+  <EmulationProfile>MissingFfbGame</EmulationProfile>
+  <GamePath>C:\missing\MissingFfbGame.exe</GamePath>
+</GameProfile>
+"@
+        [System.IO.File]::WriteAllText((Join-Path $userProfiles 'MissingFfbGame.xml'), $profileXml, (New-Object System.Text.UTF8Encoding $false))
+        $unmatchedExe = Join-Path $TestDrive 'UnmatchedFfbFolder\unmatched.exe'
+        New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($unmatchedExe)) -Force | Out-Null
+        [System.IO.File]::WriteAllText($unmatchedExe, 'unmatched')
+        [System.IO.File]::WriteAllText((Join-Path $userProfiles 'UnmatchedFfbGame.xml'), '<GameProfile><EmulationProfile>UnmatchedFfbGame</EmulationProfile><GamePath>{0}</GamePath></GameProfile>' -f $unmatchedExe)
+        Mock Get-FFBPluginGameMap { [ordered]@{ MissingFfbGame = 'd3d9.dll' } }
+        Mock Invoke-FFBPluginDownload { $true }
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $userProfiles -CacheDir $cacheDir
+        $result.Succeeded | Should -BeTrue
+        $result.MissingPath | Should -Be 1
+        @($result.MissingPathGames) | Should -Contain 'MissingFfbGame'
+        $result.Deployed | Should -Be 0
+        $result.Errors | Should -Be 0
+        $result.SkippedNoMatch | Should -Be 1
+        $result.MissingDevice | Should -Be 0
+    }
+    It "classifies an unavailable device separately from a missing saved path" {
+        $userProfiles = Join-Path $TestDrive 'ffb-device-unavailable'
+        $cacheDir = Join-Path $TestDrive 'ffb-device-cache'
+        New-Item -ItemType Directory -Path $userProfiles, $cacheDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $userProfiles 'DeviceFfbGame.xml') -Value '<GameProfile><EmulationProfile>DeviceFfbGame</EmulationProfile><GamePath>Z:\missing\DeviceFfbGame.exe</GamePath></GameProfile>'
+        Mock Get-FFBPluginGameMap { [ordered]@{ DeviceFfbGame = 'd3d9.dll' } }
+        Mock Invoke-FFBPluginDownload { $true }
+        Mock Test-TpmGameMutationPath { [pscustomobject]@{ Valid = $false; ReasonCode = 'DEVICE_UNAVAILABLE'; Reason = 'A device which does not exist was specified.' } }
+        $result = Invoke-FFBPluginSetup -UserProfilesDir $userProfiles -CacheDir $cacheDir
+        $result.Succeeded | Should -BeTrue
+        $result.MissingPath | Should -Be 0
+        $result.MissingDevice | Should -Be 1
+        @($result.MissingDeviceGames) | Should -Contain 'DeviceFfbGame'
+        $result.PathReasonCounts['DEVICE_UNAVAILABLE'] | Should -Be 1
+    }
+    It "preserves path metadata when optional plugin deployment fails" {
+        $script:ffbAnswerIndex = 0
+        Mock Invoke-FFBBlasterSetup { @() }
+        Mock Invoke-FFBPluginSetup {
+            [pscustomobject]@{
+                Succeeded = $false
+                MissingPath = 1
+                MissingDevice = 1
+                MissingPathGames = @('MissingFfbGame')
+                MissingDeviceGames = @('DeviceFfbGame')
+                PathReasonCounts = @{ GAME_PATH_MISSING = 1; DEVICE_UNAVAILABLE = 1 }
+            }
+        }
+        Mock Read-HostSafe { @('Y', '')[$script:ffbAnswerIndex++] }
+        $result = Invoke-TpmFfbSetupMode -UserProfilesDir $TestDrive -TpRoot $TestDrive -ScriptRoot $TestDrive
+        $result.Completed | Should -BeFalse
+        $result.MissingPath | Should -Be 1
+        $result.MissingDevice | Should -Be 1
+        @($result.MissingPathGames) | Should -Contain 'MissingFfbGame'
+        @($result.MissingDeviceGames) | Should -Contain 'DeviceFfbGame'
+    }
+    It "routes FFB missing-path results to Health Check from the main dispatch" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$ffbModeResult\.MissingPath -gt 0'
+        $source | Should -Match "\$pendingApplyMode = 'HealthCheck'"
+        $source | Should -Match "Choose H or B"
     }
 }
 
@@ -10731,7 +10825,7 @@ Describe "Approved ReShade profile catalog" {
         $gallerySource = [regex]::Match($source, '(?s)function Show-TpmReShadeProfileGalleryWindow \{.*?function Close-TpmReShadeProfileGallerySession').Value
         $comboAddIndex = $gallerySource.IndexOf('$form.Controls.Add($combo)')
         $labelAddIndex = $gallerySource.IndexOf('$form.Controls.Add($descriptionLabel)')
-        $labelTextIndex = $gallerySource.IndexOf('$descriptionLabel.Text = "{0}`r`nTechniques: {1}" -f $canonicalProfile.Description')
+        $labelTextIndex = $gallerySource.IndexOf('$descriptionLabel.Text = "Preview approximation using a bundled image. TPM does not run the game or execute ReShade shaders during preview. Actual in-game results may vary.`r`n{0}`r`nTechniques TPM will install/apply: {1}" -f $canonicalProfile.Description')
         $sliderBranchIndex = $gallerySource.IndexOf('if ($viewMode -eq ''Slider'')')
         $labelAddIndex | Should -BeGreaterThan $comboAddIndex
         $labelTextIndex | Should -BeGreaterThan 0
@@ -11000,8 +11094,8 @@ Describe "ReShade preview renderer and cache" {
         $paintStart = $source.IndexOf('function New-TpmReShadePreviewPaintHandler')
         $paintEnd = $source.IndexOf('function New-TpmReShadePreviewArtifact', $paintStart)
         $paint = $source.Substring($paintStart, $paintEnd - $paintStart)
-        $paint | Should -Match '\$cache\.Processed\[\[string\]\$selectedProfile\.ProfileId\]'
-        $paint | Should -Not -Match 'Get-TpmReShadePreviewProcessedBitmap'
+        $paint | Should -Match 'Get-TpmReShadePreviewProcessedBitmap'
+        $paint | Should -Not -Match '\$cache\.Processed\[\[string\]\$selectedProfile\.ProfileId\]'
         $paint | Should -Not -Match 'New-TpmReShadePreviewBitmapFromCache'
         $paint | Should -Not -Match '\.Image\s*='
         $source | Should -Match 'slider-keyboard-handler'
@@ -11255,6 +11349,7 @@ Describe "ReShade trusted profile restore" {
         }
         { & $handlers.Slider ([pscustomobject]@{ Value = 75 }) $null } | Should -Not -Throw
         $state['ViewMode'] | Should -Be 'Slider'
+        $state['SliderPosition'] | Should -Be 75
         $state['PendingSliderPosition'] | Should -Be 75
 
         foreach ($badItem in @(
@@ -11292,7 +11387,7 @@ Describe "ReShade trusted profile restore" {
         $source = $script:ProductionSource
         $source | Should -Match 'PREVIEW_GALLERY_REFRESH_FAILED'
         $source | Should -Match 'ReShade visual gallery unavailable; typed profile fallback remains active'
-        $source | Should -Match 'preview is safe: nothing changes until you choose U and confirm'
+        $source | Should -Match 'does not run the game or execute ReShade shaders during preview'
         $source | Should -Match 'ReShade profile chooser: selected'
     }
     It "covers ReShade gallery fallback and empty-source failure" {
@@ -12058,11 +12153,11 @@ Describe "Post-0909174 remediation result UX contracts" {
     It "keeps GPU Fix results visible and exposes skip reasons and next actions" {
         $source = $script:ProductionSource
         $source | Should -Match 'GPU Compatibility Fix complete'
-        $source | Should -Match 'Press Enter to return, D Details, O support-log guidance, P repair skipped paths, or R run again'
+        $source | Should -Match 'Open 10\) Library Health Check for missing paths'
         $source | Should -Match 'Reason:'
         $source | Should -Match 'What to do:'
         $source | Should -Match 'technical:'
-        $source | Should -Match 'do \{[\s\S]*\$gpuResult = Invoke-GpuFixSetup[\s\S]*\} while \(\$gpuResultChoice -in @\(''D'',''O'',''P'',''R''\)\)'
+        $source | Should -Match 'do \{[\s\S]*\$gpuResult = Invoke-GpuFixSetup[\s\S]*\} while \(\$gpuResultChoice -in @\(''D'',\s*''O'',\s*''H'',\s*''R''\)\)'
     }
     It "provides browser feedback and P1 highlighting before P2" {
         $source = $script:ProductionSource
@@ -12101,7 +12196,8 @@ Describe "dgVoodoo2 beginner result screen contracts" {
         $source = $script:ProductionSource
         $source | Should -Match '\$dgResult\.DeploymentDetails'
         $source | Should -Match '\$dgResult\.SkipDetails'
-        $source | Should -Match "Read-HostSafe '  Press Enter to return, D Details, or O support/log guidance'"
+        $source | Should -Match '\$dgPromptChoices'
+        $source | Should -Match 'Choose \{0\}'
         $source | Should -Match 'Technical log:'
         $source | Should -Match 'Support package folder:'
     }
@@ -12121,7 +12217,11 @@ Describe "Library Health Check guided repair UX contracts" {
     It "offers broken-path, PostgreSQL, and optional setup actions in plain language" {
         $source = $script:ProductionSource
         $source | Should -Match '\[R\] Try automatic path repair'
-        $source | Should -Match '\[M\] Let me pick the correct folders manually'
+        $source | Should -Match '\[M\] Let me pick the correct executable or folder manually'
+        $source | Should -Match '\[S\] Search another game folder'
+        $source | Should -Match '\[C\] Re-extract from the configured source'
+        $source | Should -Match 'Candidate paths found'
+        $source | Should -Match 'Choose S or B'
         $source | Should -Match '\[D\] Details'
         $source | Should -Match '\[B\] Back to main menu'
         $source | Should -Match 'known game folders'
@@ -12132,6 +12232,20 @@ Describe "Library Health Check guided repair UX contracts" {
             $source | Should -Match $label
         }
         $source | Should -Match 'Force feedback plugin was not checked because network access is needed'
+    }
+    It "offers Health Check only for optional-workflow path skips" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$reShadePathIssue = \$reShadeResult -and \(\$reShadeResult\.MissingPath -gt 0 -or \$reShadeResult\.MissingDevice -gt 0\)'
+        $source | Should -Match '\$dgPathIssue = \$dgResult -and \(\$dgResult\.MissingPath -gt 0 -or \$dgResult\.MissingDevice -gt 0\)'
+        $source | Should -Match '\$bepResult\.MissingPath -gt 0 -or \$bepResult\.MissingDevice -gt 0'
+        $source | Should -Match '\$gpuHasPathIssue = \(\$gpuResult\.MissingPath -gt 0 -or \$gpuResult\.MissingDevice -gt 0\)'
+        $source | Should -Match "\$pendingApplyMode = 'HealthCheck'"
+    }
+    It "uses the same indented Choose layout for optional result menus" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$dgResultChoice = \(Read-HostSafe \("  Choose \{0\}"'
+        $source | Should -Match '\$gpuResultChoice = \(Read-HostSafe \("  Choose \{0\}"'
+        $source | Should -Match '\$bepChoice = \(Read-HostSafe \("  Choose \{0\}"'
     }
     It "returns structured read-only findings without invoking mutation helpers" {
         $root = Join-Path $TestDrive 'health-read-only'
@@ -12228,12 +12342,85 @@ Describe "Library Health Check guided repair UX contracts" {
         $reports[0].Status | Should -Be 'fixed'
         (Read-Xml -Path (Join-Path $profiles 'HEALTHGAME.xml')).GameProfile.GamePath | Should -Be ([System.IO.Path]::GetFullPath($gameExe))
     }
+    It "returns a candidate during dry-run without changing the profile" {
+        $root = Join-Path $TestDrive 'health-dry-run-candidate'
+        $profiles = Join-Path $root 'UserProfiles'
+        $games = Join-Path $root 'Games'
+        New-Item -ItemType Directory -Path $profiles, $games -Force | Out-Null
+        $gameExe = Join-Path $games 'HealthGame\healthgame.exe'
+        New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($gameExe)) -Force | Out-Null
+        [System.IO.File]::WriteAllText($gameExe, 'game')
+        $profilePath = Join-Path $profiles 'HEALTHGAME.xml'
+        $original = '<GameProfile><GamePath>C:\missing\healthgame.exe</GamePath><ExecutableName>healthgame.exe</ExecutableName></GameProfile>'
+        [System.IO.File]::WriteAllText($profilePath, $original)
+        $reports = @(Repair-GamePaths -userProfilesDir $profiles -installFolder $games -profileIndex @{ 'healthgame.exe' = @('HEALTHGAME') } -DryRun:$true)
+        $reports[0].Status | Should -Be 'candidate'
+        $reports[0].CandidatePaths | Should -Contain ([System.IO.Path]::GetFullPath($gameExe))
+        [System.IO.File]::ReadAllText($profilePath) | Should -Be $original
+    }
+    It "does not save a candidate outside the explicitly reviewed set" {
+        $root = Join-Path $TestDrive 'health-reviewed-set'
+        $profiles = Join-Path $root 'UserProfiles'
+        $games = Join-Path $root 'Games'
+        New-Item -ItemType Directory -Path $profiles, $games -Force | Out-Null
+        $gameExe = Join-Path $games 'HealthGame\healthgame.exe'
+        New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($gameExe)) -Force | Out-Null
+        [System.IO.File]::WriteAllText($gameExe, 'game')
+        $profilePath = Join-Path $profiles 'HEALTHGAME.xml'
+        $original = '<GameProfile><GamePath>C:\missing\healthgame.exe</GamePath><ExecutableName>healthgame.exe</ExecutableName></GameProfile>'
+        [System.IO.File]::WriteAllText($profilePath, $original)
+        $reports = @(Repair-GamePaths -userProfilesDir $profiles -installFolder $games -profileIndex @{ 'healthgame.exe' = @('HEALTHGAME') } -DryRun:$false -ReviewedCandidates @([pscustomobject]@{ Code = 'OTHERGAME'; NewPath = $gameExe }))
+        $reports[0].Status | Should -Be 'not-reviewed'
+        [System.IO.File]::ReadAllText($profilePath) | Should -Be $original
+    }
+    It "repairs using a non-primary executable alternative from the profile" {
+        $root = Join-Path $TestDrive 'health-executable-alternative'
+        $profiles = Join-Path $root 'UserProfiles'
+        $games = Join-Path $root 'Games'
+        New-Item -ItemType Directory -Path $profiles, $games -Force | Out-Null
+        $gameExe = Join-Path $games 'AlternativeGame\secondary.bin'
+        New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($gameExe)) -Force | Out-Null
+        [System.IO.File]::WriteAllText($gameExe, 'game')
+        $profilePath = Join-Path $profiles 'ALTERNATIVE.xml'
+        [System.IO.File]::WriteAllText($profilePath, '<GameProfile><GamePath>C:\missing\primary.exe</GamePath><ExecutableName>primary.exe;secondary.bin</ExecutableName></GameProfile>')
+        $profileIndex = @{ 'primary.exe' = @('ALTERNATIVE'); 'secondary.bin' = @('ALTERNATIVE') }
+        $reports = @(Repair-GamePaths -userProfilesDir $profiles -installFolder $games -profileIndex $profileIndex -DryRun:$true)
+        $reports[0].Status | Should -Be 'candidate'
+        $reports[0].NewPath | Should -Be ([System.IO.Path]::GetFullPath($gameExe))
+        [System.IO.File]::ReadAllText($profilePath) | Should -Match 'primary\.exe;secondary\.bin'
+    }
+    It "does not apply a candidate that appears after the review scan" {
+        $root = Join-Path $TestDrive 'health-review-scan-boundary'
+        $profiles = Join-Path $root 'UserProfiles'
+        $games = Join-Path $root 'Games'
+        New-Item -ItemType Directory -Path $profiles, $games -Force | Out-Null
+        $healthExe = Join-Path $games 'HealthGame\healthgame.exe'
+        New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($healthExe)) -Force | Out-Null
+        [System.IO.File]::WriteAllText($healthExe, 'health')
+        [System.IO.File]::WriteAllText((Join-Path $profiles 'HEALTHGAME.xml'), '<GameProfile><GamePath>C:\missing\healthgame.exe</GamePath><ExecutableName>healthgame.exe</ExecutableName></GameProfile>')
+        $initialReports = @(Repair-GamePaths -userProfilesDir $profiles -installFolder $games -profileIndex @{ 'healthgame.exe' = @('HEALTHGAME') } -DryRun:$true)
+        $reviewedCandidates = @($initialReports | Where-Object { $_.Status -eq 'candidate' } | ForEach-Object {
+            [pscustomobject]@{ Code = $_.Code; NewPath = $_.NewPath }
+        })
+        $reviewedCandidates.Count | Should -Be 1
+        $extraExe = Join-Path $games 'ExtraGame\extra.exe'
+        New-Item -ItemType Directory -Path ([System.IO.Path]::GetDirectoryName($extraExe)) -Force | Out-Null
+        [System.IO.File]::WriteAllText($extraExe, 'extra')
+        $extraOriginal = '<GameProfile><GamePath>C:\missing\extra.exe</GamePath><ExecutableName>extra.exe</ExecutableName></GameProfile>'
+        [System.IO.File]::WriteAllText((Join-Path $profiles 'EXTRAGAME.xml'), $extraOriginal)
+        $reports = @(Repair-GamePaths -userProfilesDir $profiles -installFolder $games -profileIndex @{ 'healthgame.exe' = @('HEALTHGAME'); 'extra.exe' = @('EXTRAGAME') } -DryRun:$false -ReviewedCandidates $reviewedCandidates)
+        $reportItems = $reports[0]
+        ($reportItems | Where-Object { $_.Code -eq 'HEALTHGAME' }).Status | Should -Be 'fixed'
+        ($reportItems | Where-Object { $_.Code -eq 'EXTRAGAME' }).Status | Should -Be 'not-reviewed'
+        (Read-Xml (Join-Path $profiles 'HEALTHGAME.xml')).GameProfile.GamePath | Should -Be ([System.IO.Path]::GetFullPath($healthExe))
+        [System.IO.File]::ReadAllText((Join-Path $profiles 'EXTRAGAME.xml')) | Should -Be $extraOriginal
+    }
     It "reports automatic repair outcomes instead of claiming completion blindly" {
         $source = $script:ProductionSource
         $source | Should -Match '\$repairReports = @\(Repair-GamePaths'
-        $source | Should -Match 'Automatic path repair result:'
-        $source | Should -Match '\$repairFailed'
-        $source | Should -Match 'left unchanged or unresolved'
+        $source | Should -Match '-DryRun:\$true'
+        $source | Should -Match '-ReviewedCandidates \$repairCandidates'
+        $source | Should -Match 'Candidate paths found'
     }
     It "reports an unresolved automatic candidate without changing its profile" {
         $root = Join-Path $TestDrive 'health-automatic-unresolved'
@@ -12258,12 +12445,16 @@ Describe "BepInEx runtime hold UX contracts" {
         $source | Should -Match 'PathReasonCounts'
         $source | Should -Match 'Succeeded ='
     }
-    It "keeps BepInEx acknowledgement and recovery guidance explicit" {
+    It "keeps BepInEx acknowledgement and Health Check routing explicit" {
         $source = $script:ProductionSource
-        $source | Should -Match 'Choose R, D, O, or B'
+        $source | Should -Match '\$bepPromptChoices = if \(\$bepPathIssue\)'
+        $source | Should -Match "Choose \{0\}"
+        $source | Should -Match '\$bepChoice -eq ''H'' -and \$bepPathIssue'
         $source | Should -Match 'repair-reset'
         $source | Should -Match 'PROTECTED_OR_REPARSE_ROOT'
         $source | Should -Match 'GAME_PATH_MISSING'
+        $source | Should -Match "\$bepChoice -eq 'H'"
+        $source | Should -Match "pendingApplyMode = 'HealthCheck'"
     }
     It "dispatches BepInEx result choices instead of only displaying them" {
         $source = $script:ProductionSource
@@ -12389,16 +12580,89 @@ Describe "Focused RC8 remediation contracts" {
         $source | Should -Match 'psqlExe -U postgres -h 127\.0\.0\.1 -p 5432 -d postgres -w'
         $source | Should -Match 'pgDumpExe -U postgres -h 127\.0\.0\.1 -p 5432 -d \$dbName -w'
     }
-    It "routes GPU path skips to guided repair and explains the next action" {
+    It "routes GPU path skips to Health Check and explains the next action" {
         $source = $script:ProductionSource
-        $source | Should -Match 'P repair skipped paths'
-        $source | Should -Match 'Invoke-LibraryHealthManualPathRepair -UserProfilesDir \$userProfilesDir -GamesInstallFolder \$gamesInstallFolder'
-        $source | Should -Match 'choose P to repair the saved path'
+        $source | Should -Match '\$gpuHasPathIssue = \(\$gpuResult\.MissingPath -gt 0 -or \$gpuResult\.MissingDevice -gt 0\)'
+        $source | Should -Match "\$pendingApplyMode = 'HealthCheck'"
+        $source | Should -Match 'Open 10\) Library Health Check for missing paths'
+        $source | Should -Match 'repair saved game paths'
     }
     It "keeps support package next actions explicit and starts each mode cleanly" {
         $source = $script:ProductionSource
         $source | Should -Match '\$lines\.Add\(''What to do next:''\)'
         $source | Should -Match 'Write-Host "  What to do next:"'
         $source | Should -Match 'Clear-ConsoleForFreshRender'
+    }
+    It "validates Health Check search roots against canonical protected paths and reparse state" {
+        $root = Join-Path $TestDrive 'health-search-root'
+        $tp = Join-Path $root 'TeknoParrot'
+        $program = Join-Path $root 'Tpm'
+        $mainZip = Join-Path $root 'MainZips'
+        $suppZip = Join-Path $root 'SuppZips'
+        $safe = Join-Path $root 'RepairSearch'
+        New-Item -ItemType Directory -Path $tp, $program, $mainZip, $suppZip, $safe -Force | Out-Null
+        $valid = Test-TpmRepairSearchRoot -Candidate $safe -TeknoParrotRoot $tp -ProgramDirectory $program -ZipSource $mainZip -ZipSourceSupplementary $suppZip
+        $valid.Valid | Should -BeTrue
+        $valid.CanonicalPath | Should -Be ([System.IO.Path]::GetFullPath($safe))
+        $overlap = Test-TpmRepairSearchRoot -Candidate $tp -TeknoParrotRoot $tp -ProgramDirectory $program -ZipSource $mainZip -ZipSourceSupplementary $suppZip
+        $overlap.Valid | Should -BeFalse
+        $overlap.Reason | Should -Match 'TeknoParrot'
+        Mock Test-TpmNoReparsePath { $false }
+        $reparse = Test-TpmRepairSearchRoot -Candidate $safe -TeknoParrotRoot $tp -ProgramDirectory $program -ZipSource $mainZip -ZipSourceSupplementary $suppZip
+        $reparse.Valid | Should -BeFalse
+        $reparse.Reason | Should -Match 'reparse'
+    }
+    It "does not turn an affected combined selection into an all-games sentinel" {
+        $main = Join-Path $TestDrive 'health-picker-main'
+        $supp = Join-Path $TestDrive 'health-picker-supp'
+        $install = Join-Path $TestDrive 'health-picker-install'
+        New-Item -ItemType Directory -Path $main, $supp, (Join-Path $install 'AffectedGame') -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $main 'AffectedGame.zip') -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $install 'AffectedGame\game.exe') -Force | Out-Null
+        $selection = Select-GamesInteractiveCombined -zipSourceMain $main -zipSourceSupp $supp -installFolder $install -AllowedNames @('AffectedGame')
+        $selection.Main | Should -BeNullOrEmpty
+        $selection.Supp | Should -BeNullOrEmpty
+    }
+    It "keeps Health Check AutoSync re-entry limited to the broken game codes" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$pendingAutoSyncGames = \$null'
+        $source | Should -Match '\$autoSyncTargetGames = if \(\$pendingApplyMode -eq ''AutoSync'' -and \$pendingAutoSyncGames\)'
+        $source | Should -Match '\$onlySyncList = @\(\$autoSyncTargetGames\)'
+        $source | Should -Match 'Health Check repair scope: affected games only'
+        $source | Should -Match '-AllowedNames \$autoSyncTargetGames'
+        $source | Should -Match 'if \(\$null -ne \$autoSyncTargetGames -and @\(\$autoSyncTargetGames\)\.Count -gt 0\)'
+    }
+    It "initializes the automatic Health Check search root before validating R and S choices" {
+        $source = $script:ProductionSource
+        $healthStart = $source.IndexOf('if ($mode -eq "HealthCheck")', [StringComparison]::Ordinal)
+        $postgresStart = $source.IndexOf('if ($mode -eq "PostgresSetup")', $healthStart, [StringComparison]::Ordinal)
+        $branch = $source.Substring($healthStart, $postgresStart - $healthStart)
+        $rootIndex = $branch.IndexOf('$searchRoot = $gamesInstallFolder', [StringComparison]::Ordinal)
+        $choiceIndex = $branch.IndexOf('$healthChoice -in @(''R'', ''S'')', [StringComparison]::Ordinal)
+        $rootIndex | Should -BeGreaterOrEqual 0
+        $rootIndex | Should -BeLessThan $choiceIndex
+    }
+    It "keeps BepInEx invalid choices in the result loop and only offers Health Check for path issues" {
+        $source = $script:ProductionSource
+        $source | Should -Match '\$bepValidChoices = @\(''R'', ''D'', ''O'', ''B'', ''''\)'
+        $source | Should -Match '\$bepChoice -notin \$bepValidChoices'
+        $source | Should -Match '\} while \(\$bepChoice -notin @\(''B'', ''''\)\)'
+        $source | Should -Match '\$bepPathIssue = \$bepResult -and \(\$bepResult\.MissingPath -gt 0 -or \$bepResult\.MissingDevice -gt 0\)'
+    }
+    It "fails closed on incomplete profile backups before destructive writes" {
+        $source = $script:ProductionSource
+        foreach ($functionName in @('Invoke-GpuFixSetup', 'Invoke-CursorHideSetup', 'Invoke-FFBBlasterSetup', 'New-PropagationBackup')) {
+            $start = $source.IndexOf(("function {0}" -f $functionName), [StringComparison]::Ordinal)
+            $next = $source.IndexOf('function ', $start + 1, [StringComparison]::Ordinal)
+            $block = if ($next -gt $start) { $source.Substring($start, $next - $start) } else { $source.Substring($start) }
+            $block | Should -Match 'Copy-Item -Destination \$backupPath -Recurse -Force -ErrorAction Stop'
+            $block | Should -Match 'Get-ChildItem -LiteralPath \$UserProfilesDir -ErrorAction Stop'
+            $block | Should -Not -Match 'Copy-Item -Destination \$backupPath -Recurse -Force -ErrorAction SilentlyContinue'
+        }
+        $autoStart = $source.IndexOf('Write-Log "Mode=$mode install=$gamesInstallFolder"', [StringComparison]::Ordinal)
+        $autoEnd = $source.IndexOf('# SECTION 6 -- AutoSync: game selection and extraction', $autoStart, [StringComparison]::Ordinal)
+        $autoBackupBlock = $source.Substring($autoStart, $autoEnd - $autoStart)
+        $autoBackupBlock | Should -Match 'Copy-Item -Destination \$backupPath -Recurse -Force -ErrorAction Stop'
+        $autoBackupBlock | Should -Not -Match 'Continue anyway|incomplete backup -- continuing'
     }
 }

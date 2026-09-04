@@ -1404,21 +1404,35 @@ $lines.Add('Affected game scope: ' + $safeAffectedGameSummary) | Out-Null
 $lines.Add('Games considered: ' + $GameCodes.Count) | Out-Null
 $collected = @($Records | Where-Object Status -eq 'Collected')
 $failureRecords = @($Records | Where-Object Status -eq 'CollectionFailed')
+$pathLimitedRecords = @($failureRecords | Where-Object {
+    [string]$_.Source -like 'Game:*:plugin inventory' -and
+    [string]$_.Detail -like '*could not be inspected safely*'
+})
+$trueFailureRecords = @($failureRecords | Where-Object { $pathLimitedRecords -notcontains $_ })
 $lines.Add('Collected diagnostic files: ' + @($collected | Where-Object Destination -notlike 'metadata\*').Count) | Out-Null
 $lines.Add('Plugin inventory files: ' + @($collected | Where-Object Destination -like 'metadata\*').Count) | Out-Null
 $lines.Add('Optional diagnostics not found: ' + @($Records | Where-Object Status -eq 'NotPresent').Count) | Out-Null
-$lines.Add('Collection failures: ' + $failureRecords.Count) | Out-Null
+$lines.Add('Collection failures: ' + $trueFailureRecords.Count) | Out-Null
 $lines.Add('Intentional exclusions or unsafe content: ' + @($Records | Where-Object Status -in @('IntentionallyExcluded','RejectedUnsafeContent')).Count) | Out-Null
 $lines.Add('') | Out-Null
 $lines.Add('What failed:') | Out-Null
-if ($failureRecords.Count -eq 0) {
-    $lines.Add('- No allowlisted collection failure was recorded.') | Out-Null
+if ($trueFailureRecords.Count -eq 0) {
+    $lines.Add('- Support collection itself reported no failed required diagnostics.') | Out-Null
 } else {
-    foreach ($record in $failureRecords) {
+    foreach ($record in $trueFailureRecords) {
         $recordSource = (Redact-TpmSupportText -Text ([string]$record.Source)).Text
         $detail = if ($record.Detail) { ' -- ' + (Redact-TpmSupportText -Text ([string]$record.Detail)).Text } else { '' }
         $lines.Add(('- {0}{1}' -f $recordSource, $detail)) | Out-Null
     }
+}
+$lines.Add('') | Out-Null
+if ($pathLimitedRecords.Count -gt 0) {
+    $lines.Add('What TPM could not collect:') | Out-Null
+    $lines.Add(('- Plugin inventory for {0} game(s) whose saved paths or folders could not be inspected safely.' -f $pathLimitedRecords.Count)) | Out-Null
+    foreach ($record in $pathLimitedRecords) {
+        $lines.Add(('- Not collected: {0}' -f (Redact-TpmSupportText -Text ([string]$record.Source)).Text)) | Out-Null
+    }
+    $lines.Add('Why: Windows could not safely find or inspect those saved game folders.') | Out-Null
 }
 $lines.Add('') | Out-Null
 $lines.Add('What TPM did not change:') | Out-Null
@@ -2508,6 +2522,46 @@ function Test-TpmStagingFolderCandidate {
         Reason = ''
     }
 }
+# Validate a user-selected folder before Health Check searches it for repair
+# candidates. Search roots are read-only inputs, but they still need canonical,
+# non-reparse identity and must not overlap TPM, TeknoParrot, or ZIP roots.
+function Test-TpmRepairSearchRoot {
+    param(
+        [string]$Candidate,
+        [string]$TeknoParrotRoot,
+        [string]$ProgramDirectory,
+        [string]$ZipSource = '',
+        [string]$ZipSourceSupplementary = ''
+    )
+    $canonical = $null
+    try {
+        if ([string]::IsNullOrWhiteSpace($Candidate)) { throw 'The search folder path is empty.' }
+        $canonical = [System.IO.Path]::GetFullPath($Candidate.Trim()).TrimEnd('\','/')
+        if ([string]::IsNullOrWhiteSpace($canonical)) { throw 'The search folder path is empty.' }
+    } catch {
+        return [pscustomobject]@{ Valid = $false; CanonicalPath = $null; Reason = $_.Exception.Message }
+    }
+    if (-not (Test-Path -LiteralPath $canonical -PathType Container -ErrorAction SilentlyContinue)) {
+        return [pscustomobject]@{ Valid = $false; CanonicalPath = $canonical; Reason = 'the selected path is not an existing folder' }
+    }
+    if (-not (Test-TpmNoReparsePath -Path $canonical)) {
+        return [pscustomobject]@{ Valid = $false; CanonicalPath = $canonical; Reason = 'the selected folder or an existing parent is reparse-backed or inaccessible' }
+    }
+    $protected = @(
+        [pscustomobject]@{ Label = 'the TeknoParrot installation'; Path = $TeknoParrotRoot },
+        [pscustomobject]@{ Label = 'the TPM program/package folder'; Path = $ProgramDirectory },
+        [pscustomobject]@{ Label = 'the main ZIP source'; Path = $ZipSource },
+        [pscustomobject]@{ Label = 'the supplementary ZIP source'; Path = $ZipSourceSupplementary }
+    )
+    foreach ($item in $protected) {
+        if ([string]::IsNullOrWhiteSpace($item.Path)) { continue }
+        if (Test-TpmPathOverlap $canonical $item.Path) {
+            return [pscustomobject]@{ Valid = $false; CanonicalPath = $canonical; Reason = "it overlaps $($item.Label)" }
+        }
+    }
+    return [pscustomobject]@{ Valid = $true; CanonicalPath = $canonical; Reason = '' }
+}
+
 
 # Derive a safe, environment-specific default. The first candidates are at
 # the root of the same volume/share as TeknoParrot (for example,
@@ -3341,7 +3395,7 @@ function Expand-NumberList {
 #   @()     -- A pressed; no filter (extract all)
 #   @(...)  -- explicit whitelist of ZIP BaseName strings
 function Select-GamesInteractive {
-    param([string]$zipSource, [string]$installFolder, [hashtable]$datIndex = $null, [string]$userProfilesDir = '')
+    param([string]$zipSource, [string]$installFolder, [hashtable]$datIndex = $null, [string]$userProfilesDir = '', [string[]]$AllowedNames = @())
 
     if ([string]::IsNullOrWhiteSpace($zipSource) -or [string]::IsNullOrWhiteSpace($installFolder)) {
         Write-Log "Select-GamesInteractive: called with empty path -- skipping"
@@ -3350,6 +3404,18 @@ function Select-GamesInteractive {
     $all = @(Get-ChildItem -LiteralPath $zipSource -Filter *.zip -ErrorAction SilentlyContinue |
                  Where-Object { $_.BaseName -notlike '!TeknoParrot Collection*' } |
                  Sort-Object BaseName)
+    $restrictedNames = @($AllowedNames | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_ ) })
+    if ($restrictedNames.Count -gt 0) {
+        $allowedNameSet = @{}
+        foreach ($name in $restrictedNames) { $allowedNameSet[[string]$name] = $true }
+        $all = @($all | Where-Object { $allowedNameSet.ContainsKey([string]$_.BaseName) })
+        if ($all.Count -eq 0) {
+            Write-Host ("  No configured source ZIP matched the affected game selection: {0}" -f ($restrictedNames -join ', ')) -ForegroundColor Yellow
+            Write-Host "  Nothing was changed." -ForegroundColor Yellow
+            return $null
+        }
+        Write-Host ("  Health Check scope: select only the affected game(s): {0}" -f ($restrictedNames -join ', ')) -ForegroundColor Cyan
+    }
 
     if ($all.Count -eq 0) {
         Write-Host "  No game ZIPs found in source folder." -ForegroundColor Yellow
@@ -3387,6 +3453,9 @@ function Select-GamesInteractive {
     }
     if ($toExtract.Count -eq 0) {
         Write-Host "  All games are already extracted. Nothing left to do." -ForegroundColor Green
+        if ($restrictedNames.Count -gt 0) {
+            return $null
+        }
         return ,@()
     }
     Write-Host ("  {0} game(s) available to extract." -f $toExtract.Count) -ForegroundColor Cyan
@@ -3412,7 +3481,10 @@ function Select-GamesInteractive {
         # -- ALL GAMES -------------------------------------------------------
         if ($choice -eq 'A') {
             Write-Host ""
-            Write-Host "  All $($all.Count) unextracted game(s) will be extracted." -ForegroundColor Green
+            Write-Host "  All $($all.Count) unextracted affected game(s) will be extracted." -ForegroundColor Green
+            if ($restrictedNames.Count -gt 0) {
+                return ,@($all | ForEach-Object { $_.BaseName })
+            }
             return ,@()   # empty = no whitelist = extract everything; comma forces
                           # real array semantics so the caller's $null-vs-empty
                           # check doesn't see this as "nothing selected"
@@ -3538,7 +3610,7 @@ function Select-GamesInteractive {
 #   @()     -- no filter; extract all (A pressed)
 #   @(...)  -- explicit whitelist of ZIP BaseName strings to extract
 function Select-GamesInteractiveCombined {
-    param([string]$zipSourceMain, [string]$zipSourceSupp, [string]$installFolder, [hashtable]$datIndex = $null, [string]$userProfilesDir = '')
+    param([string]$zipSourceMain, [string]$zipSourceSupp, [string]$installFolder, [hashtable]$datIndex = $null, [string]$userProfilesDir = '', [string[]]$AllowedNames = @())
 
     if ([string]::IsNullOrWhiteSpace($zipSourceMain) -or [string]::IsNullOrWhiteSpace($zipSourceSupp) -or [string]::IsNullOrWhiteSpace($installFolder)) {
         Write-Log "Select-GamesInteractiveCombined: called with empty path -- skipping"
@@ -3550,6 +3622,19 @@ function Select-GamesInteractiveCombined {
     $allSupp = @(Get-ChildItem -LiteralPath $zipSourceSupp -Filter *.zip -ErrorAction SilentlyContinue |
                      Where-Object { $_.BaseName -notlike '!TeknoParrot Collection*' } |
                      Sort-Object BaseName)
+    $restrictedNames = @($AllowedNames | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_ ) })
+    if ($restrictedNames.Count -gt 0) {
+        $allowedNameSet = @{}
+        foreach ($name in $restrictedNames) { $allowedNameSet[[string]$name] = $true }
+        $allMain = @($allMain | Where-Object { $allowedNameSet.ContainsKey([string]$_.BaseName) })
+        $allSupp = @($allSupp | Where-Object { $allowedNameSet.ContainsKey([string]$_.BaseName) })
+        if ($allMain.Count -eq 0 -and $allSupp.Count -eq 0) {
+            Write-Host ("  No configured source ZIP matched the affected game selection: {0}" -f ($restrictedNames -join ', ')) -ForegroundColor Yellow
+            Write-Host "  Nothing was changed." -ForegroundColor Yellow
+            return [PSCustomObject]@{ Main = $null; Supp = $null }
+        }
+        Write-Host ("  Health Check scope: select only the affected game(s): {0}" -f ($restrictedNames -join ', ')) -ForegroundColor Cyan
+    }
 
     $normalizedFolderMap = Get-StagingFolderMap $installFolder
 
@@ -3577,6 +3662,9 @@ function Select-GamesInteractiveCombined {
     }
     if ($all.Count -eq 0) {
         Write-Host "  All games are already extracted. Nothing left to do." -ForegroundColor Green
+        if ($restrictedNames.Count -gt 0) {
+            return [PSCustomObject]@{ Main = $null; Supp = $null }
+        }
         return [PSCustomObject]@{ Main = @(); Supp = @() }
     }
     Write-Host ("  {0} game(s) available to extract ({1} collection, {2} supplementary [+])." -f $all.Count, $toExtractMain.Count, $toExtractSupp.Count) -ForegroundColor Cyan
@@ -3599,7 +3687,13 @@ function Select-GamesInteractiveCombined {
 
         if ($choice -eq 'A') {
             Write-Host ""
-            Write-Host "  All $($all.Count) unextracted game(s) will be extracted." -ForegroundColor Green
+            Write-Host "  All $($all.Count) unextracted affected game(s) will be extracted." -ForegroundColor Green
+            if ($restrictedNames.Count -gt 0) {
+                return [PSCustomObject]@{
+                    Main = @($toExtractMain | ForEach-Object { $_.BaseName })
+                    Supp = @($toExtractSupp | ForEach-Object { $_.BaseName })
+                }
+            }
             return [PSCustomObject]@{ Main = @(); Supp = @() }
         }
         elseif ($choice -eq 'L') {
@@ -5019,7 +5113,9 @@ function New-TpmReShadePreviewPaintHandler {
             if (-not $selectedProfile) { return }
             $cache = & $getState 'PreviewCache'
             $reference = if ($cache) { $cache.Reference } else { $null }
-            $processed = if ($cache) { $cache.Processed[[string]$selectedProfile.ProfileId] } else { $null }
+            $processed = if ($cache -and $selectedProfile) {
+                Get-TpmReShadePreviewProcessedBitmap -Cache $cache -ProfileDefinition $selectedProfile
+            } else { $null }
             if (-not $reference -or -not $processed) { return }
             $canvas = $Picture.ClientRectangle
             if ($canvas.Width -le 0 -or $canvas.Height -le 0) { return }
@@ -5310,7 +5406,10 @@ function New-TpmReShadeGalleryEventHandlers {
             $valueProperty = if ($eventSender) { $eventSender.PSObject.Properties['Value'] } else { $null }
             if (-not $valueProperty) { throw 'Gallery slider event sender has no Value property.' }
             $State['ViewMode'] = 'Slider'
-            $State['PendingSliderPosition'] = [Math]::Max(0, [Math]::Min(100, [int]$valueProperty.Value))
+            $position = [Math]::Max(0, [Math]::Min(100, [int]$valueProperty.Value))
+            $State['SliderPosition'] = $position
+            $State['PendingSliderPosition'] = $position
+            if ($State['Picture']) { $State['Picture'].Invalidate() }
             if ($State['SliderTimer'] -and -not $State['SliderTimer'].Enabled) { $State['SliderTimer'].Start() }
         } catch {
             [void](& $previewFailure -State $State -Stage 'slider-value-changed-handler' -ErrorRecord $_)
@@ -5420,7 +5519,7 @@ function Show-TpmReShadeProfileGalleryWindow {
         $descriptionLabel = New-Object Windows.Forms.Label
         $descriptionLabel.Dock = 'Top'
         $descriptionLabel.AutoSize = $false
-        $descriptionLabel.Height = 56
+        $descriptionLabel.Height = 84
         $descriptionLabel.Padding = New-Object Windows.Forms.Padding(6, 4, 6, 4)
         $descriptionLabel.TextAlign = 'TopLeft'
         $descriptionLabel.AutoEllipsis = $true
@@ -5484,7 +5583,7 @@ function Show-TpmReShadeProfileGalleryWindow {
                 if ([string]::IsNullOrWhiteSpace($profileId)) { throw 'Selected gallery item has no stable ProfileId.' }
                 $canonicalProfile = @($state['Profiles'] | Where-Object { $_.ProfileId -eq $profileId })[0]
                 if (-not $canonicalProfile) { throw ("Selected gallery ProfileId '{0}' is not available." -f $profileId) }
-                $descriptionLabel.Text = "{0}`r`nTechniques: {1}" -f $canonicalProfile.Description, (Get-TpmReShadeProfileTechniqueDisplay -ProfileDefinition $canonicalProfile)
+                $descriptionLabel.Text = "Preview approximation using a bundled image. TPM does not run the game or execute ReShade shaders during preview. Actual in-game results may vary.`r`n{0}`r`nTechniques TPM will install/apply: {1}" -f $canonicalProfile.Description, (Get-TpmReShadeProfileTechniqueDisplay -ProfileDefinition $canonicalProfile)
                 $viewMode = [string]$state['ViewMode']
                 if ($viewMode -notin @('Before', 'After', 'Split', 'Slider')) { throw ("Unsupported gallery view mode '{0}'." -f $viewMode) }
                 [void](Get-TpmReShadePreviewProcessedBitmap -Cache $state['PreviewCache'] -ProfileDefinition $canonicalProfile)
@@ -6823,7 +6922,7 @@ function Read-TpmReShadeTerminalProfile {
     while ($true) {
         Write-Host ''
         Write-Host '  Choose how your game should look.' -ForegroundColor Cyan
-        Write-Host '  The preview is safe: nothing changes until you choose U and confirm.' -ForegroundColor DarkCyan
+        Write-Host '  Preview uses a bundled image to approximate each TPM-approved profile. Actual in-game results may vary.' -ForegroundColor DarkCyan
         for ($profileIndex = 0; $profileIndex -lt $orderedIds.Count; $profileIndex++) {
             $id = $orderedIds[$profileIndex]
             $profileEntry = @($Profiles | Where-Object { $_.ProfileId -eq $id })[0]
@@ -6849,6 +6948,10 @@ function Read-TpmReShadeTerminalProfile {
             continue
         }
         if ($choice -eq 'D') {
+            Write-Host '  TPM shows a safe preview approximation using a bundled image.' -ForegroundColor DarkCyan
+            Write-Host '  It does not run the game or execute ReShade shaders during preview.' -ForegroundColor DarkCyan
+            Write-Host '  The listed techniques are the approved ReShade techniques TPM will install if you confirm.' -ForegroundColor DarkCyan
+            Write-Host '  Actual in-game results may vary.' -ForegroundColor DarkCyan
             foreach ($id in $orderedIds) {
                 $profileEntry = @($Profiles | Where-Object { $_.ProfileId -eq $id })[0]
                 if ($profileEntry) {
@@ -7434,7 +7537,7 @@ function Invoke-DgVoodoo2Setup {
                 if (-not $scanPathReasons.ContainsKey($reasonCode)) { $scanPathReasons[$reasonCode] = 0 }
                 $scanPathReasons[$reasonCode]++
                 $skipReason = if ($reasonCode -eq 'DEVICE_UNAVAILABLE') { 'The saved game drive or device is unavailable.' } else { 'TPM has a saved location for this game, but Windows cannot find the executable.' }
-                $nextAction = if ($reasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run dgVoodoo2 setup again.' } else { 'Reconnect the drive, restore the folder, or repair the saved path, then run dgVoodoo2 setup again.' }
+                $nextAction = if ($reasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run dgVoodoo2 setup again.' } else { 'Return to the main menu and choose 10) Library Health Check to repair saved game paths.' }
                 [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; ReasonCode = $reasonCode; Reason = $skipReason; SavedPath = $gamePath; NextAction = $nextAction; Technical = [string]$pathCheck.Reason })
                 Write-Log ("dgVoodoo2 scan: skipped {0}; path reason={1}; detail={2}" -f $pf.BaseName, $reasonCode, $pathCheck.Reason)
                 continue
@@ -7558,7 +7661,7 @@ function Invoke-DgVoodoo2Setup {
                 }
                 $skipped++
                 $skipReason = if ($pathCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { 'The saved game drive or device is unavailable.' } else { 'TPM could not find the saved game executable.' }
-                $nextAction = if ($pathCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run dgVoodoo2 setup again.' } else { 'Reconnect the drive, restore the folder, or repair the saved path, then run dgVoodoo2 setup again.' }
+                $nextAction = if ($pathCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run dgVoodoo2 setup again.' } else { 'Return to the main menu and choose 10) Library Health Check to repair saved game paths.' }
                 [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; ReasonCode = [string]$pathCheck.ReasonCode; Reason = $skipReason; SavedPath = $gamePath; NextAction = $nextAction; Technical = [string]$pathCheck.Reason })
                 Write-Log ("dgVoodoo2: skipped {0} before deployment; path reason={1}; detail={2}" -f $pf.BaseName, $pathCheck.ReasonCode, $pathCheck.Reason)
                 continue
@@ -7593,7 +7696,7 @@ function Invoke-DgVoodoo2Setup {
                 if ($boundaryCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ }
                 if ($boundaryCheck.ReasonCode -eq 'GAME_PATH_MISSING') { $missingPath++ }
                 $boundaryReason = if ($boundaryCheck.Valid) { 'RESOLUTION_CHANGED' } else { $boundaryCheck.ReasonCode }
-                $boundaryNextAction = if ($boundaryCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run dgVoodoo2 setup again.' } else { 'Reconnect the drive, restore the folder, or repair the saved path, then run dgVoodoo2 setup again.' }
+                $boundaryNextAction = if ($boundaryCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run dgVoodoo2 setup again.' } else { 'Return to the main menu and choose 10) Library Health Check to repair saved game paths.' }
                 [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; ReasonCode = [string]$boundaryReason; Reason = 'The game path changed or became unavailable before the safe write.'; SavedPath = $gamePath; NextAction = $boundaryNextAction; Technical = [string]$boundaryCheck.Reason })
                 Write-Host ("  SKIP  {0} -- mutation-boundary path check failed ({1}); unchanged." -f $pf.BaseName, $boundaryReason) -ForegroundColor Yellow
                 Write-Log ("dgVoodoo2: skipped {0} at mutation boundary; path reason={1}; detail={2}" -f $pf.BaseName, $boundaryReason, $boundaryCheck.Reason)
@@ -7637,7 +7740,7 @@ function Invoke-DgVoodoo2Setup {
             $failureCode = Get-TpmGameMutationFailureCode -ErrorRecord $_
             if ($failureCode -eq 'DEVICE_UNAVAILABLE' -or $failureCode -eq 'GAME_PATH_MISSING') {
                 $skipped++
-                $nextAction = if ($failureCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run dgVoodoo2 setup again.' } else { 'Reconnect the drive, restore the folder, or repair the saved path, then run dgVoodoo2 setup again.' }
+                $nextAction = if ($failureCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run dgVoodoo2 setup again.' } else { 'Return to the main menu and choose 10) Library Health Check to repair saved game paths.' }
                 [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; ReasonCode = $failureCode; Reason = if ($failureCode -eq 'DEVICE_UNAVAILABLE') { 'The saved game drive or device is unavailable.' } else { 'The saved game executable could not be found.' }; SavedPath = $gamePath; NextAction = $nextAction; Technical = [string]$_.Exception.Message })
                 if ($failureCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ } else { $missingPath++ }
                 Write-Host ("  SKIP  {0} -- mutation became unavailable ({1}); unchanged." -f $pf.BaseName, $failureCode) -ForegroundColor Yellow
@@ -7767,11 +7870,10 @@ function Get-GpuFixFieldNames {
 # be 1000+ files) gets parsed twice for no reason. Returns
 # [pscustomobject]@{ Gpu = <same shape as Get-GpuFixFieldNames>; Ffb = <same shape as Get-FFBBlasterFieldNames> }
 # -- the matching logic for each is identical to the two standalone
-# functions, just evaluated in the same loop iteration. Invoke-GpuFixSetup
-# and Invoke-FFBBlasterSetup keep calling their own standalone functions
-# unchanged (they only ever need one or the other, never both at once), so
-# this is purely additive -- only the health check's combined-need call
-# site switches to use it.
+# functions, just evaluated in the same loop iteration. Invoke-GpuFixSetup and
+# Invoke-FFBBlasterSetup continue to own their standalone mutation and backup
+# contracts; only the health check's combined-need call site switches to this
+# helper.
 function Get-GpuAndFfbFieldNames {
     param([string]$TpRoot)
 
@@ -8362,16 +8464,18 @@ function Invoke-GpuFixSetup {
         Write-Log "GPU Fix: backup failed -- $_"
         return
     }
-    $backupCopyErrs = $null
-    # Copy-Item receives FileInfo/DirectoryInfo objects from the pipeline
-    # (not path strings), so pipeline binding already bypasses wildcard
-    # expansion -- safe even with [, ], $ in game folder names. If this
-    # source is ever changed to raw path strings, add -LiteralPath there.
-    Get-ChildItem -LiteralPath $UserProfilesDir | Where-Object { $_.Name -ne "FullBackup" } |
-        Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable backupCopyErrs
-    if ($backupCopyErrs.Count -gt 0) {
-        Write-Host ("  WARNING: {0} file(s) could not be backed up." -f $backupCopyErrs.Count) -ForegroundColor Yellow
-        Write-Log "GPU Fix: backup had $($backupCopyErrs.Count) error(s)"
+    try {
+        # Copy-Item receives FileInfo/DirectoryInfo objects from the pipeline
+        # (not path strings), so pipeline binding already bypasses wildcard
+        # expansion -- safe even with [, ], $ in game folder names. If this
+        # source is ever changed to raw path strings, add -LiteralPath there.
+        Get-ChildItem -LiteralPath $UserProfilesDir -ErrorAction Stop | Where-Object { $_.Name -ne "FullBackup" } |
+            Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction Stop
+    } catch {
+        Write-Host "  ERROR: UserProfiles backup failed: $_" -ForegroundColor Red
+        Write-Host "  The script will not continue without a complete backup." -ForegroundColor Red
+        Write-Log "GPU Fix: backup FAILED -- profile copy did not complete -- $_"
+        return
     }
     Write-Host ("  Backup: {0}" -f $backupPath) -ForegroundColor DarkGray
     Write-Log "GPU Fix: backup at $backupPath"
@@ -8399,7 +8503,7 @@ function Invoke-GpuFixSetup {
                 if ($gpuPathCheck.ReasonCode -eq 'GAME_PATH_MISSING') { $missingPath++ }
                 Write-Host ("    SKIP {0}: {1}" -f $pf.BaseName, $gpuPathCheck.Reason) -ForegroundColor Yellow
                 $skipReason = if ($gpuPathCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { 'The saved game drive or device is unavailable.' } else { 'TPM has a saved location for this game, but Windows cannot find the executable right now.' }
-                $nextAction = if ($gpuPathCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then choose P to repair the saved path.' } else { 'Reconnect the drive, restore the folder, or choose P to repair the saved path.' }
+                $nextAction = if ($gpuPathCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then choose 10) Library Health Check to repair saved game paths.' } else { 'Return to the main menu and choose 10) Library Health Check to repair saved game paths.' }
                 [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; Reason = $skipReason; SavedPath = $registeredGamePath; NextAction = $nextAction; Technical = [string]$gpuPathCheck.Reason })
                 Write-Log ("GPU Fix: skipped {0}; path reason={1}; detail={2}" -f $pf.BaseName, $gpuPathCheck.ReasonCode, $gpuPathCheck.Reason)
                 continue
@@ -8411,7 +8515,7 @@ function Invoke-GpuFixSetup {
                 if (-not $boundaryCheck.Valid -or [string]$boundaryCheck.ResolvedPath -ine [string]$gpuPathCheck.ResolvedPath) {
                     $skipped++
                     if ($boundaryCheck.ReasonCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ }
-                    [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; Reason = 'The registered game path changed or became unavailable before the safe write.'; SavedPath = $registeredGamePath; NextAction = 'Reconnect the drive or choose P to repair the saved path, then run GPU Fix again.'; Technical = [string]$boundaryCheck.ReasonCode })
+                    [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; Reason = 'The registered game path changed or became unavailable before the safe write.'; SavedPath = $registeredGamePath; NextAction = 'Return to the main menu and choose 10) Library Health Check to repair saved game paths.'; Technical = [string]$boundaryCheck.ReasonCode })
                     if ($boundaryCheck.ReasonCode -eq 'GAME_PATH_MISSING') { $missingPath++ }
                     Write-Host ("    SKIP {0}: mutation-boundary path check failed; profile unchanged." -f $pf.BaseName) -ForegroundColor Yellow
                     Write-Log ("GPU Fix: mutation-boundary path check failed for {0}; reason={1}" -f $pf.BaseName, $boundaryCheck.ReasonCode)
@@ -8434,7 +8538,7 @@ function Invoke-GpuFixSetup {
                 if ($failureCode -eq 'DEVICE_UNAVAILABLE') { $missingDevice++ } else { $missingPath++ }
                 Write-Host ("    SKIP {0}: mutation became unavailable ({1}); profile unchanged" -f $pf.BaseName, $failureCode) -ForegroundColor Yellow
                 $catchReason = if ($failureCode -eq 'DEVICE_UNAVAILABLE') { 'The saved game drive or device is unavailable.' } else { 'TPM could not find the saved game executable.' }
-                [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; Reason = $catchReason; SavedPath = $registeredGamePath; NextAction = 'Reconnect the drive, restore the folder, or choose P to repair the saved path, then run GPU Fix again.'; Technical = [string]$_.Exception.Message })
+                [void]$skipDetails.Add([pscustomobject]@{ Game = $pf.BaseName; Reason = $catchReason; SavedPath = $registeredGamePath; NextAction = 'Return to the main menu and choose 10) Library Health Check to repair saved game paths.'; Technical = [string]$_.Exception.Message })
                 Write-Log ("GPU Fix: skipped {0} after mutation failure; path reason={1}; detail={2}" -f $pf.BaseName, $failureCode, $_)
             } else {
                 Write-Host ("    FAILED {0}: {1}" -f $pf.BaseName, $_) -ForegroundColor Red
@@ -9213,16 +9317,18 @@ function Invoke-CursorHideSetup {
         Write-Log "CursorHide: backup failed -- $_"
         return
     }
-    $backupCopyErrs = $null
-    # Copy-Item receives FileInfo/DirectoryInfo objects from the pipeline
-    # (not path strings), so pipeline binding already bypasses wildcard
-    # expansion -- safe even with [, ], $ in game folder names. If this
-    # source is ever changed to raw path strings, add -LiteralPath there.
-    Get-ChildItem -LiteralPath $UserProfilesDir | Where-Object { $_.Name -ne "FullBackup" } |
-        Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable backupCopyErrs
-    if ($backupCopyErrs.Count -gt 0) {
-        Write-Host ("  WARNING: {0} file(s) could not be backed up." -f $backupCopyErrs.Count) -ForegroundColor Yellow
-        Write-Log "CursorHide: backup had $($backupCopyErrs.Count) error(s)"
+    try {
+        # Copy-Item receives FileInfo/DirectoryInfo objects from the pipeline
+        # (not path strings), so pipeline binding already bypasses wildcard
+        # expansion -- safe even with [, ], $ in game folder names. If this
+        # source is ever changed to raw path strings, add -LiteralPath there.
+        Get-ChildItem -LiteralPath $UserProfilesDir -ErrorAction Stop | Where-Object { $_.Name -ne "FullBackup" } |
+            Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction Stop
+    } catch {
+        Write-Host "  ERROR: UserProfiles backup failed: $_" -ForegroundColor Red
+        Write-Host "  The script will not continue without a complete backup." -ForegroundColor Red
+        Write-Log "CursorHide: backup FAILED -- profile copy did not complete -- $_"
+        return
     }
     Write-Host ("  Backup: {0}" -f $backupPath) -ForegroundColor DarkGray
     Write-Log "CursorHide: backup at $backupPath"
@@ -11936,7 +12042,7 @@ function Invoke-FFBPluginSetup {
     if ($gameMap.Count -eq 0) {
         Write-Host "  Could not reach GitHub to fetch the FFB plugin game list -- try again later." -ForegroundColor Red
         Write-Log "FFBPlugin setup: aborted -- game map fetch failed."
-        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 1; Reason = 'GAME_MAP_FAILED' }
+        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 1; MissingPath = 0; MissingDevice = 0; MissingPathGames = @(); MissingDeviceGames = @(); Reason = 'GAME_MAP_FAILED' }
     }
     Write-Host ("  {0} game(s) in the upstream table." -f $gameMap.Count) -ForegroundColor DarkGray
 
@@ -11944,7 +12050,7 @@ function Invoke-FFBPluginSetup {
     if (-not (Invoke-FFBPluginDownload -destDir $CacheDir)) {
         Write-Host "  Could not download the FFB plugin DLLs -- try again later." -ForegroundColor Red
         Write-Log "FFBPlugin setup: aborted -- DLL download failed."
-        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 1; Reason = 'DLL_DOWNLOAD_FAILED' }
+        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 1; MissingPath = 0; MissingDevice = 0; MissingPathGames = @(); MissingDeviceGames = @(); Reason = 'DLL_DOWNLOAD_FAILED' }
     }
     $srcDll32 = Join-Path $CacheDir "MAME32.dll"
     $srcDll64 = Join-Path $CacheDir "MAME64.dll"
@@ -11954,7 +12060,7 @@ function Invoke-FFBPluginSetup {
     if ($profiles.Count -eq 0) {
         Write-Host "  No registered games found." -ForegroundColor Yellow
         Write-Log "FFBPlugin setup: aborted -- no registered profiles."
-        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'NO_REGISTERED_PROFILES' }
+        return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; MissingPath = 0; MissingDevice = 0; MissingPathGames = @(); MissingDeviceGames = @(); Reason = 'NO_REGISTERED_PROFILES' }
     }
 
     # Pre-normalise the FFB table once for fuzzy matching.
@@ -11969,16 +12075,32 @@ function Invoke-FFBPluginSetup {
     # native status) so overlaps -- games covered by BOTH mechanisms -- can be
     # surfaced and decided on once, rather than silently defaulting to native.
     $candidates = @()
+    $missingPathGames = New-Object System.Collections.Generic.List[string]
+    $missingDeviceGames = New-Object System.Collections.Generic.List[string]
+    $pathReasonCounts = @{}
     $matchErrors = 0
     foreach ($pf in $profiles) {
         try {
             $doc = Read-Xml $pf.FullName
-            if (-not $doc.GameProfile) { continue }
-            $gpNode = $doc.GameProfile.SelectSingleNode("GamePath")
-            if (-not $gpNode -or [string]::IsNullOrWhiteSpace($gpNode.InnerText)) { continue }
-            $gamePath = $gpNode.InnerText.Trim()
-            if (-not (Test-Path -LiteralPath $gamePath)) { continue }
-            $exeDir     = [System.IO.Path]::GetDirectoryName($gamePath)
+            $gamePath = ''
+            if ($doc.GameProfile) {
+                $gpNode = $doc.GameProfile.SelectSingleNode("GamePath")
+                if ($gpNode) { $gamePath = $gpNode.InnerText.Trim() }
+            }
+            $pathCheck = Test-TpmGameMutationPath -GamePath $gamePath -RequireLeaf
+            if (-not $pathCheck.Valid) {
+                $reasonCode = [string]$pathCheck.ReasonCode
+                if (-not $pathReasonCounts.ContainsKey($reasonCode)) { $pathReasonCounts[$reasonCode] = 0 }
+                $pathReasonCounts[$reasonCode]++
+                if ($reasonCode -eq 'DEVICE_UNAVAILABLE') {
+                    [void]$missingDeviceGames.Add($pf.BaseName)
+                } else {
+                    [void]$missingPathGames.Add($pf.BaseName)
+                }
+                continue
+            }
+            $gamePath = [string]$pathCheck.ResolvedPath
+            $exeDir = [string]$pathCheck.GameDirectory
             $folderName = Split-Path -Path $exeDir -Leaf
             $normFolder = Get-NormalizedGameKey $folderName
 
@@ -12009,7 +12131,9 @@ function Invoke-FFBPluginSetup {
         Write-Host ""
         Write-Host ("  {0} game(s) are covered by BOTH FFB Blaster and the third-party plugin:" -f $overlaps.Count) -ForegroundColor Cyan
         foreach ($ov in $overlaps) { Write-Host ("    - {0}" -f $ov.Profile.BaseName) -ForegroundColor DarkGray }
-        $ans = (Read-HostSafe "  Choose one FFB owner for these games: Y = native FFB Blaster (recommended), N = third-party plugin. Do not enable both." -Default 'Y').ToUpper()
+        Write-Host "  [Y] Use native FFB Blaster (recommended)" -ForegroundColor White
+        Write-Host "  [N] Use the third-party plugin" -ForegroundColor White
+        $ans = (Read-HostSafe '  Choose Y or N' -Default 'Y').Trim().ToUpperInvariant()
         $useNativeForOverlaps = ($ans -ne "N")
         if ($ans -ne "Y" -and $ans -ne "N") {
             Write-Host "  Unrecognized answer -- keeping native FFB Blaster as the safe default." -ForegroundColor Yellow
@@ -12021,7 +12145,7 @@ function Invoke-FFBPluginSetup {
             if (-not $nativeSwitch.Succeeded) {
                 Write-Host ("  ERROR: Could not switch overlapping profiles to the third-party plugin -- {0}" -f $nativeSwitch.Reason) -ForegroundColor Red
                 Write-Log "FFBPlugin: blocked because native overlap switch failed -- $($nativeSwitch.Reason)"
-                return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 1; Reason = 'NATIVE_OVERLAP_SWITCH_FAILED' }
+                return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 1; MissingPath = $missingPathGames.Count; MissingDevice = $missingDeviceGames.Count; MissingPathGames = $missingPathGames.ToArray(); MissingDeviceGames = $missingDeviceGames.ToArray(); PathReasonCounts = $pathReasonCounts; Reason = 'NATIVE_OVERLAP_SWITCH_FAILED' }
             }
         }
 
@@ -12035,8 +12159,9 @@ function Invoke-FFBPluginSetup {
     # under one label would make "no match" misleadingly look like every
     # one of those games is simply unsupported.
     $deployed = 0; $skippedNative = 0; $skippedCollision = 0
-    $skippedNoMatch = 0; $skippedDllMissing = 0; $errors = $matchErrors
-    $noMatchCount = $profiles.Count - $candidates.Count - $matchErrors
+    $skippedNoMatch = 0; $skippedDllMissing = 0; $skippedMissingPath = $missingPathGames.Count; $skippedMissingDevice = $missingDeviceGames.Count; $errors = $matchErrors
+    $invalidPathCount = $skippedMissingPath + $skippedMissingDevice
+    $noMatchCount = [Math]::Max(0, $profiles.Count - $candidates.Count - $matchErrors - $invalidPathCount)
     $skippedNoMatch += $noMatchCount
 
     foreach ($c in $candidates) {
@@ -12113,14 +12238,36 @@ function Invoke-FFBPluginSetup {
     if ($skippedDllMissing -gt 0) {
         Write-Host ("  Skipped (no DLL)   : {0}  (matched, but the 32-bit or 64-bit plugin DLL isn't downloaded)" -f $skippedDllMissing) -ForegroundColor Yellow
     }
+    if ($skippedMissingPath -gt 0) {
+        Write-Host ("  Skipped (saved path): {0} game(s)  -- repair paths in 10) Library Health Check first" -f $skippedMissingPath) -ForegroundColor Yellow
+        Write-Host ("    Affected games: {0}" -f ($missingPathGames -join ', ')) -ForegroundColor DarkGray
+    }
+    if ($skippedMissingDevice -gt 0) {
+        Write-Host ("  Skipped (device unavailable): {0} game(s)  -- reconnect the drive and retry" -f $skippedMissingDevice) -ForegroundColor Yellow
+        Write-Host ("    Affected games: {0}" -f ($missingDeviceGames -join ', ')) -ForegroundColor DarkGray
+    }
     if ($errors -gt 0) {
         Write-Host ("  Errors             : {0}  -- see TeknoParrot-Manager.log for details" -f $errors) -ForegroundColor Red
     }
     Write-Host ""
     Write-Host "  TPM records its own deployed hook files so a later native choice can remove only verified ownership." -ForegroundColor DarkCyan
     Write-Host "  TPM does not remove an unowned FFB hook automatically." -ForegroundColor DarkCyan
-    Write-Log ("FFBPlugin setup: deployed={0} skippedNative={1} skippedCollision={2} skippedNoMatch={3} skippedDllMissing={4} errors={5}" -f $deployed, $skippedNative, $skippedCollision, $skippedNoMatch, $skippedDllMissing, $errors)
-    return [pscustomobject]@{ Succeeded = ($errors -eq 0); Deployed = $deployed; Errors = $errors; Reason = if ($errors) { 'DEPLOYMENT_ERRORS' } else { $null } }
+    Write-Log ("FFBPlugin setup: deployed={0} skippedNative={1} skippedCollision={2} skippedNoMatch={3} skippedDllMissing={4} skippedMissingPath={5} skippedMissingDevice={6} errors={7}" -f $deployed, $skippedNative, $skippedCollision, $skippedNoMatch, $skippedDllMissing, $skippedMissingPath, $skippedMissingDevice, $errors)
+    return [pscustomobject]@{
+        Succeeded = ($errors -eq 0)
+        Deployed = $deployed
+        Errors = $errors
+        MissingPath = $skippedMissingPath
+        MissingDevice = $skippedMissingDevice
+        MissingPathGames = $missingPathGames.ToArray()
+        MissingDeviceGames = $missingDeviceGames.ToArray()
+        PathReasonCounts = $pathReasonCounts
+        SkippedNoMatch = $skippedNoMatch
+        SkippedDllMissing = $skippedDllMissing
+        SkippedNative = $skippedNative
+        SkippedCollision = $skippedCollision
+        Reason = if ($errors) { 'DEPLOYMENT_ERRORS' } else { $null }
+    }
 }
 
 # GameProfiles at runtime -- never hardcoded. Shared (read-only) between
@@ -12531,13 +12678,16 @@ function Invoke-FFBBlasterSetup {
     } catch {
         Write-Host "  ERROR: Could not create backup folder: $_" -ForegroundColor Red
         Write-Log "FFBBlaster: backup failed -- $_"
-        return ,@()
+        return [pscustomobject]@{ Succeeded = $false; BackupSucceeded = $false; EnabledCodes = @(); Errors = 1; Reason = 'PROFILE_BACKUP_FAILED' }
     }
-    $backupCopyErrs = $null
-    Get-ChildItem -LiteralPath $UserProfilesDir | Where-Object { $_.Name -ne "FullBackup" } |
-        Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable backupCopyErrs
-    if ($backupCopyErrs.Count -gt 0) {
-        Write-Host ("  WARNING: {0} file(s) could not be backed up." -f $backupCopyErrs.Count) -ForegroundColor Yellow
+    try {
+        Get-ChildItem -LiteralPath $UserProfilesDir -ErrorAction Stop | Where-Object { $_.Name -ne "FullBackup" } |
+            Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction Stop
+    } catch {
+        Write-Host "  ERROR: UserProfiles backup failed: $_" -ForegroundColor Red
+        Write-Host "  The script will not continue without a complete backup." -ForegroundColor Red
+        Write-Log "FFBBlaster: backup FAILED -- profile copy did not complete -- $_"
+        return [pscustomobject]@{ Succeeded = $false; BackupSucceeded = $false; EnabledCodes = @(); Errors = 1; Reason = 'PROFILE_BACKUP_FAILED' }
     }
     Write-Host ("  Backup: {0}" -f $backupPath) -ForegroundColor DarkGray
     Write-Log "FFBBlaster: backup at $backupPath"
@@ -12613,7 +12763,11 @@ function Invoke-FFBBlasterSetup {
         Write-Host ("    {0}" -f ($unknownNames -join ', ')) -ForegroundColor DarkGray
     }
     if ($errors -gt 0)    { Write-Host ("  Errors   : {0} -- see log for details" -f $errors) -ForegroundColor Red }
-    Write-Log ("FFBBlaster setup: complete. Supported={0} Updated={1} Unchanged={2} Unsupported={3} Unknown={4} Errors={5}" -f $supportedTotal, $updated, $unchanged, $unsupported, $unknown, $errors)
+    $nativeStatus = if ($errors -gt 0) { 'failed' } else { 'complete' }
+    Write-Log ("FFBBlaster setup: {0}. Supported={1} Updated={2} Unchanged={3} Unsupported={4} Unknown={5} Errors={6}" -f $nativeStatus, $supportedTotal, $updated, $unchanged, $unsupported, $unknown, $errors)
+    if ($errors -gt 0) {
+        return [pscustomobject]@{ Succeeded = $false; BackupSucceeded = $true; EnabledCodes = $enabledCodes.ToArray(); Errors = $errors; Reason = 'NATIVE_DEPLOYMENT_ERRORS' }
+    }
     return @($enabledCodes)
 }
 
@@ -13375,7 +13529,7 @@ function Invoke-BepInExUpdateCheck {
                     ReasonKey = $reasonCode
                     Exception = [string]$pathCheck.Reason
                     EvidencePreserved = $false
-                    NextAction = if ($reasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run BepInEx setup again.' } else { 'Restore the game executable or repair its saved path, then run BepInEx setup again.' }
+                    NextAction = if ($reasonCode -eq 'DEVICE_UNAVAILABLE') { 'Reconnect the drive or device, then run BepInEx setup again.' } else { 'Return to the main menu and choose 10) Library Health Check to repair saved game paths.' }
                 })
                 Write-Log ("BepInEx: skipped {0} during path preflight; reason={1}; detail={2}" -f $pf.BaseName, $reasonCode, $pathCheck.Reason)
                 continue
@@ -15019,7 +15173,7 @@ function Invoke-ManualRegistrationChoices {
 # because there is no safe way to know which game the file belongs to.
 # Profiles with a valid, working path are left untouched.
 function Repair-GamePaths {
-    param([string]$userProfilesDir, [string]$installFolder, [hashtable]$profileIndex, [bool]$DryRun = $false)
+    param([string]$userProfilesDir, [string]$installFolder, [hashtable]$profileIndex, [bool]$DryRun = $false, [object[]]$ReviewedCandidates = @())
 
     # Map filename (lowercased) -> list of full paths found on disk.
     # Uses Get-GameFiles so .xbe, .dll, ELF, disc images, and extension-less
@@ -15063,23 +15217,31 @@ function Repair-GamePaths {
             continue
         }
 
-        # Try each alternative name in the on-disk map.
+        $reviewed = @($ReviewedCandidates | Where-Object { [string]$_.Code -ieq $f.BaseName })[0]
+        if ($ReviewedCandidates.Count -gt 0 -and -not $reviewed) {
+            [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = 'not-reviewed'; Exe = $exeName })
+            continue
+        }
         $key = $null
-        foreach ($alt in $alts) {
-            $ak = $alt.ToLower()
-            if ($exeMap.ContainsKey($ak)) { $key = $ak; break }
+        $newPath = $null
+        if ($reviewed) {
+            $newPath = [string]$reviewed.NewPath
+        } else {
+            # Try each alternative name in the on-disk map.
+            foreach ($alt in $alts) {
+                $ak = $alt.ToLower()
+                if ($exeMap.ContainsKey($ak)) { $key = $ak; break }
+            }
+            if ($null -eq $key) {
+                [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "not-found"; Exe = $exeName })
+                continue
+            }
+            if ($exeMap[$key].Count -gt 1) {
+                [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "ambiguous"; Exe = $exeName })
+                continue
+            }
+            $newPath = [string]$exeMap[$key][0]
         }
-        if ($null -eq $key) {
-            [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "not-found"; Exe = $exeName })
-            continue
-        }
-        if ($exeMap[$key].Count -gt 1) {
-            [void]$reports.Add([pscustomobject]@{ Code = $f.BaseName; Status = "ambiguous"; Exe = $exeName })
-            continue
-        }
-
-        # Exe name is unique in the library and only one file exists on disk.
-        $newPath = [string]$exeMap[$key][0]
         $repairPathCheck = Test-TpmGameMutationPath -GamePath $newPath -RequireLeaf
         if (-not $repairPathCheck.Valid -or
             -not (Test-PathInside -child $newPath -parent $installFolder) -or
@@ -15091,6 +15253,17 @@ function Repair-GamePaths {
             continue
         }
         $newPath = [string]$repairPathCheck.ResolvedPath
+        if ($DryRun) {
+            [void]$reports.Add([pscustomobject]@{
+                Code = $f.BaseName
+                Status = 'candidate'
+                Exe = $exeName
+                CandidatePaths = @($newPath)
+                NewPath = $newPath
+            })
+            Write-Log "Repair-GamePaths: candidate for $($f.BaseName) -> $newPath"
+            continue
+        }
         try {
             if ($null -eq $gpNode) {
                 $gpNode = $doc.CreateElement("GamePath")
@@ -15183,6 +15356,8 @@ function Invoke-LibraryHealthManualPathRepair {
             if (-not $doc.GameProfile) { throw 'profile has no GameProfile node' }
             $exeNode = $doc.GameProfile.SelectSingleNode('ExecutableName')
             $exeName = if ($exeNode) { $exeNode.InnerText.Trim() } else { '' }
+            $exeAlternatives = @(Get-ExeAlternatives $exeName)
+            $expectedDisplay = ($exeAlternatives -join ' or ')
             if ([string]::IsNullOrWhiteSpace($exeName)) {
                 Write-Host ("  {0}: no executable name is recorded, so TPM will not guess." -f $code) -ForegroundColor Yellow
                 [void]$errors.Add($code)
@@ -15190,10 +15365,10 @@ function Invoke-LibraryHealthManualPathRepair {
             }
 
             Write-Host ""
-            Write-Host ("  Select the correct executable for {0} (expected: {1})." -f $code, $exeName) -ForegroundColor Cyan
+            Write-Host ("  Select the correct executable for {0} (expected: {1})." -f $code, $expectedDisplay) -ForegroundColor Cyan
             Write-Host "  Browse to the file inside the correct game folder. TPM will not guess." -ForegroundColor DarkGray
             $selected = Read-PathWithBrowse -Prompt ("  Executable for {0}; press Enter to leave unchanged" -f $code) `
-                -Mode File -FileFilter ("{0}|{0}|All files (*.*)|*.*" -f $exeName) -InitialDirectory $GamesInstallFolder
+                -Mode File -FileFilter 'All files (*.*)|*.*' -InitialDirectory $GamesInstallFolder
             if ([string]::IsNullOrWhiteSpace($selected)) {
                 [void]$skipped.Add($code)
                 continue
@@ -15203,8 +15378,8 @@ function Invoke-LibraryHealthManualPathRepair {
                 [void]$errors.Add($code)
                 continue
             }
-            if ([System.IO.Path]::GetFileName($selected) -ine $exeName) {
-                Write-Host ("  {0}: selected file is not '{1}'; left unchanged." -f $code, $exeName) -ForegroundColor Yellow
+            if ((@($exeAlternatives | Where-Object { $_ -ieq [System.IO.Path]::GetFileName($selected) })).Count -eq 0) {
+                Write-Host ("  {0}: selected file is not one of '{1}'; left unchanged." -f $code, $expectedDisplay) -ForegroundColor Yellow
                 [void]$errors.Add($code)
                 continue
             }
@@ -15499,8 +15674,32 @@ function Invoke-LibraryHealthCheck {
 function Show-LibraryHealthNextActions {
     param([Parameter(Mandatory)]$Result)
     $allowedChoices = @('5', '6', '7', '8', '9', 'D', 'B')
-    if (@($Result.Broken).Count -gt 0) { $allowedChoices += @('R', 'M') }
+    if (@($Result.Broken).Count -gt 0) { $allowedChoices += @('R', 'M', 'S', 'C') }
     if (@($Result.PostgresNeeded).Count -gt 0) { $allowedChoices += 'P' }
+
+
+    if (@($Result.Broken).Count -gt 0) {
+        do {
+            Write-Host ""
+            Write-Host "Broken saved paths need repair before optional setup." -ForegroundColor Yellow
+            Write-Host ("  Found {0} broken game path(s): {1}" -f @($Result.Broken).Count, (@($Result.Broken) -join ', ')) -ForegroundColor Yellow
+            Write-Host "  [R] Try automatic path repair" -ForegroundColor White
+            Write-Host "  [M] Let me pick the correct executable or folder manually" -ForegroundColor White
+            Write-Host "  [S] Search another game folder" -ForegroundColor White
+            Write-Host "  [C] Re-extract from the configured source" -ForegroundColor White
+            Write-Host "  [D] Details" -ForegroundColor White
+            Write-Host "  [B] Back to main menu" -ForegroundColor White
+            $choice = (Read-HostSafe '  Choose R, M, S, C, D, or B' -Default 'B').Trim().ToUpperInvariant()
+            if ($choice -eq 'D') {
+                Write-Host ""
+                Write-Host "Details (the health check itself was read-only):" -ForegroundColor Cyan
+                Write-Host ("  Registered: {0}; valid: {1}; broken: {2}; empty: {3}" -f $Result.Registered, @($Result.Valid).Count, @($Result.Broken).Count, @($Result.Empty).Count) -ForegroundColor DarkGray
+            } elseif ($choice -notin @('R', 'M', 'S', 'C', 'B')) {
+                Write-Host "  Choose R, M, S, C, D, or B." -ForegroundColor Yellow
+            }
+        } while ($choice -eq 'D' -or $choice -notin @('R', 'M', 'S', 'C', 'B'))
+        return $choice
+    }
 
     do {
         Write-Host ""
@@ -16630,13 +16829,16 @@ function New-PropagationBackup {
     [void][System.IO.Directory]::CreateDirectory($backupRoot)
     [void][System.IO.Directory]::CreateDirectory($backupPath)
 
-    $backupCopyErrs = $null
-    Get-ChildItem -LiteralPath $UserProfilesDir | Where-Object { $_.Name -ne "FullBackup" } |
-        Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable backupCopyErrs
+    try {
+        Get-ChildItem -LiteralPath $UserProfilesDir -ErrorAction Stop | Where-Object { $_.Name -ne "FullBackup" } |
+            Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction Stop
+    } catch {
+        throw "Propagation profile backup failed: $_"
+    }
 
     return [pscustomobject]@{
         Path       = $backupPath
-        ErrorCount = $backupCopyErrs.Count
+        ErrorCount = 0
     }
 }
 
@@ -19082,6 +19284,7 @@ $tpRoot             = $null
 $mode               = $null   # "AutoSync", "RegisterOnly", "CrosshairSetup", "ReShadeSetup", "DgVoodoo2Setup", "GpuFixSetup", "FFBSetup", "BepInExUpdate", "Restore", or "HealthCheck"
 $pendingApplyMode   = $null   # mode to enter without showing the menu again
 $pendingApplyForce  = $false  # true only for preview re-entry
+$pendingAutoSyncGames = $null  # broken profile codes handed off by Health Check
 $forceRealApply     = $false  # consumed once, right after a forced re-entry,
                               # to disable preview without prompting again.
 $menuExpanded       = $false  # H selects the readable expanded layout until toggled again.
@@ -20997,11 +21200,38 @@ function Invoke-TpmFfbSetupMode {
     [void](Start-TpmWorkflowStep -Context $status -StepId 'inspect' -Activity 'Checking force-feedback options')
     [void](Complete-TpmWorkflowStep -Context $status -Summary 'Force-feedback options checked' -NextStep 'Apply the approved native option')
     [void](Start-TpmWorkflowStep -Context $status -StepId 'native' -Activity 'Applying the native option')
-    $nativeCodes = Invoke-FFBBlasterSetup -UserProfilesDir $UserProfilesDir -TpRoot $TpRoot
+    $nativeResult = Invoke-FFBBlasterSetup -UserProfilesDir $UserProfilesDir -TpRoot $TpRoot
+    $nativeHasContract = ($null -ne $nativeResult -and $null -ne $nativeResult.PSObject.Properties['EnabledCodes'])
+    $nativeCodes = if ($nativeHasContract) { @($nativeResult.EnabledCodes) } elseif ($null -eq $nativeResult) { @() } else { @($nativeResult) }
+    if ($nativeHasContract -and -not [bool]$nativeResult.Succeeded) {
+        $nativeFailureMessage = if ($nativeResult.BackupSucceeded -eq $false) {
+            'The native force-feedback setup was blocked because its profile backup failed.'
+        } else {
+            'The native force-feedback setup did not complete successfully.'
+        }
+        [void](Set-TpmWorkflowFailure -Context $status -FailureId 'ffb-native-failed' -Message $nativeFailureMessage -DataSafety 'TPM did not claim a complete native force-feedback setup or proceed to the optional plugin.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
+        [void](Read-HostSafe 'Press Enter to acknowledge the force-feedback result')
+        [void](Acknowledge-TpmWorkflowFailure -Context $status -FailureId 'ffb-native-failed')
+        [void](Stop-TpmWorkflowStatus -Context $status -Reason 'Force-feedback setup stopped')
+        [void](Close-TpmWorkflowStatus -Context $status)
+        return [pscustomobject]@{
+            Completed = $false
+            Context = $status
+            NativeSucceeded = $false
+            MissingPath = 0
+            MissingDevice = 0
+            MissingPathGames = @()
+            MissingDeviceGames = @()
+            PathReasonCounts = @{}
+        }
+    }
     [void](Complete-TpmWorkflowStep -Context $status -Summary 'Native force feedback step finished' -NextStep 'Choose whether to add the optional plugin')
     [void](Set-TpmWorkflowWaiting -Context $status -Message 'TPM can add the optional third-party force-feedback plugin.' -UserAction 'Answer Y or N')
-    $choice = (Read-HostSafe 'Also set up the free third-party FFB plugin? (Y/N)').Trim().ToUpper()
+    Write-Host '  [Y] Set up the free third-party FFB plugin' -ForegroundColor White
+    Write-Host '  [N] Skip the optional plugin' -ForegroundColor White
+    $choice = (Read-HostSafe '  Choose Y or N' -Default 'N').Trim().ToUpperInvariant()
     [void](Resume-TpmWorkflowStatus -Context $status)
+    $plugin = $null
     if ($choice -eq 'Y') {
         [void](Start-TpmWorkflowStep -Context $status -StepId 'plugin' -Activity 'Downloading and applying the optional plugin')
         $plugin = Invoke-FFBPluginSetup -UserProfilesDir $UserProfilesDir -CacheDir (Join-Path $ScriptRoot 'FFBPlugin') -NativeEnabledCodes $nativeCodes -TpRoot $TpRoot
@@ -21011,7 +21241,16 @@ function Invoke-TpmFfbSetupMode {
             [void](Acknowledge-TpmWorkflowFailure -Context $status -FailureId 'ffb-plugin-failed')
             [void](Stop-TpmWorkflowStatus -Context $status -Reason 'Force-feedback setup stopped')
             [void](Close-TpmWorkflowStatus -Context $status)
-            return [pscustomobject]@{ Completed = $false; Context = $status }
+            return [pscustomobject]@{
+                Completed = $false
+                Context = $status
+                NativeSucceeded = $true
+                MissingPath = if ($plugin) { [int]$plugin.MissingPath } else { 0 }
+                MissingDevice = if ($plugin) { [int]$plugin.MissingDevice } else { 0 }
+                MissingPathGames = if ($plugin) { @($plugin.MissingPathGames) } else { @() }
+                MissingDeviceGames = if ($plugin) { @($plugin.MissingDeviceGames) } else { @() }
+                PathReasonCounts = if ($plugin) { $plugin.PathReasonCounts } else { @{} }
+            }
         }
         [void](Complete-TpmWorkflowStep -Context $status -Outcome Fixed -Summary 'Optional plugin step finished' -NextStep 'Verify force-feedback ownership')
     } else {
@@ -21023,7 +21262,16 @@ function Invoke-TpmFfbSetupMode {
     [void](Complete-TpmWorkflowStep -Context $status -Summary 'Force-feedback results recorded')
     [void](Complete-TpmWorkflowStatus -Context $status -Summary 'Force-feedback setup finished')
     [void](Close-TpmWorkflowStatus -Context $status)
-    return [pscustomobject]@{ Completed = $true; Context = $status }
+    return [pscustomobject]@{
+        Completed = $true
+        Context = $status
+        NativeSucceeded = $true
+        MissingPath = if ($plugin) { [int]$plugin.MissingPath } else { 0 }
+        MissingDevice = if ($plugin) { [int]$plugin.MissingDevice } else { 0 }
+        MissingPathGames = if ($plugin) { @($plugin.MissingPathGames) } else { @() }
+        MissingDeviceGames = if ($plugin) { @($plugin.MissingDeviceGames) } else { @() }
+        PathReasonCounts = if ($plugin) { $plugin.PathReasonCounts } else { @{} }
+    }
 }
 
 while ($true) {
@@ -21035,9 +21283,12 @@ while ($true) {
 $mode = $null
 
     # A pending mode either came from a preview/recovery re-entry or from a
-    # read-only Health Check action. Only the former may bypass the run preview.
+    # read-only Health Check action. Only the latter carries an AutoSync target list.
+    $autoSyncTargetGames = $null
     if ($pendingApplyMode) {
         $mode = $pendingApplyMode
+        $autoSyncTargetGames = if ($pendingApplyMode -eq 'AutoSync' -and $pendingAutoSyncGames) { @($pendingAutoSyncGames) } else { $null }
+        $pendingAutoSyncGames = $null
         $pendingApplyMode = $null
         $forceRealApply = [bool]$pendingApplyForce
         $pendingApplyForce = $false
@@ -21198,31 +21449,92 @@ $mode = $null
             Write-Log "Unattended: health check complete -- exiting."
             exit 0
         }
+        $searchRoot = $gamesInstallFolder
         $healthChoice = Show-LibraryHealthNextActions -Result $healthResult
-        if ($healthChoice -eq 'R' -and @($healthResult.Broken).Count -gt 0) {
-            Write-Host "  TPM will search known game folders for matching executables. It will ask before saving repaired paths." -ForegroundColor Cyan
-            $repairConfirm = (Read-HostSafe '  Try automatic path repair now? (Y/N)' -Default 'N').Trim().ToUpperInvariant()
-            if ($repairConfirm -eq 'Y') {
-                try {
-                    $healthBackup = New-LibraryHealthProfileBackup -UserProfilesDir $userProfilesDir
-                    $repairIndex = Build-ProfileIndex -gameProfilesDir $gameProfilesDir
-                    $repairReports = @(Repair-GamePaths -userProfilesDir $userProfilesDir -installFolder $gamesInstallFolder -profileIndex $repairIndex -DryRun:$false)
-                    Write-Host ("  Health check identified {0} broken saved path(s); automatic repair examined each one." -f @($healthResult.Broken).Count) -ForegroundColor Cyan
-                    $repairFixed = @($repairReports | Where-Object { $_.Status -eq 'fixed' })
-                    $repairFailed = @($repairReports | Where-Object { $_.Status -eq 'save-failed' })
-                    $repairUnresolved = @($repairReports | Where-Object { $_.Status -notin @('fixed', 'save-failed') })
-                    Write-Host ("  Automatic path repair result: {0} fixed; {1} left unchanged or unresolved; {2} save failure(s)." -f $repairFixed.Count, $repairUnresolved.Count, $repairFailed.Count) -ForegroundColor $(if ($repairFailed.Count -gt 0) { 'Yellow' } elseif ($repairFixed.Count -gt 0) { 'Green' } else { 'DarkGray' })
-                    if ($repairFixed.Count -gt 0) { Write-Host ("    Fixed: {0}" -f (($repairFixed | ForEach-Object { $_.Code }) -join ', ')) -ForegroundColor Green }
-                    if ($repairUnresolved.Count -gt 0) { Write-Host ("    Left unchanged or unresolved: {0}" -f (($repairUnresolved | ForEach-Object { $_.Code }) -join ', ')) -ForegroundColor Yellow }
-                    if ($repairFailed.Count -gt 0) { Write-Host ("    Save failed: {0}" -f (($repairFailed | ForEach-Object { $_.Code }) -join ', ')) -ForegroundColor Red }
-                    if ($repairUnresolved.Count -gt 0 -and $repairFixed.Count -eq 0) { Write-Host "    No automatic repair was applied. Choose M next to browse to each exact executable; TPM will not guess." -ForegroundColor Cyan }
-                    Write-Host ("  Safety backup: {0}" -f $healthBackup.Path) -ForegroundColor DarkGray
-                } catch {
-                    Write-Host ("  Automatic path repair was not saved: {0}" -f $_.Exception.Message) -ForegroundColor Red
-                    Write-Host "  No repair is claimed. Review the existing profiles and backup state before retrying." -ForegroundColor Yellow
+        if ($healthChoice -in @('R', 'S') -and @($healthResult.Broken).Count -gt 0) {
+            if ($healthChoice -eq 'S') {
+                $searchRoot = Read-PathWithBrowse -Prompt '  Choose another game folder to search' -Mode Folder -InitialDirectory $gamesInstallFolder
+            }
+            $searchRootCheck = Test-TpmRepairSearchRoot `
+                -Candidate $searchRoot -TeknoParrotRoot $tpRoot -ProgramDirectory $PSScriptRoot `
+                -ZipSource $zipSource -ZipSourceSupplementary $zipSourceSupplementary
+            if (-not $searchRootCheck.Valid) {
+                Write-Host ("  Search folder rejected: {0}. Nothing was changed." -f $searchRootCheck.Reason) -ForegroundColor Yellow
+                [void](Read-HostSafe '  Press Enter to return to the main menu')
+                continue
+            }
+            $searchRoot = $searchRootCheck.CanonicalPath
+            $repairSearchAgain = $false
+            do {
+                Write-Host ("  TPM will search {0} for matching executables." -f $searchRoot) -ForegroundColor Cyan
+                Write-Host '  [Y] Search for repair candidates' -ForegroundColor White
+                Write-Host '  [N] Cancel' -ForegroundColor White
+                $repairConfirm = (Read-HostSafe '  Choose Y or N' -Default 'N').Trim().ToUpperInvariant()
+                if ($repairConfirm -eq 'Y') {
+                    try {
+                        $repairIndex = Build-ProfileIndex -gameProfilesDir $gameProfilesDir
+                        $repairReports = @(Repair-GamePaths -userProfilesDir $userProfilesDir -installFolder $searchRoot -profileIndex $repairIndex -DryRun:$true)
+                        $repairCandidates = @($repairReports | Where-Object { $_.Status -eq 'candidate' })
+                        if ($repairCandidates.Count -gt 0) {
+                            Write-Host '  Candidate paths found (no profile changes made):' -ForegroundColor Cyan
+                            foreach ($candidate in $repairCandidates) {
+                                Write-Host ("    {0} -> {1}" -f $candidate.Code, $candidate.NewPath) -ForegroundColor White
+                            }
+                            Write-Host '  [Y] Apply these reviewed candidates' -ForegroundColor White
+                            Write-Host '  [N] Leave them unchanged' -ForegroundColor White
+                            $applyChoice = (Read-HostSafe '  Choose Y or N' -Default 'N').Trim().ToUpperInvariant()
+                            if ($applyChoice -eq 'Y') {
+                                $healthBackup = New-LibraryHealthProfileBackup -UserProfilesDir $userProfilesDir
+                                $repairReports = @(Repair-GamePaths -userProfilesDir $userProfilesDir -installFolder $searchRoot -profileIndex $repairIndex -DryRun:$false -ReviewedCandidates $repairCandidates)
+                                $repairFixed = @($repairReports | Where-Object { $_.Status -eq 'fixed' })
+                                Write-Host ("  Applied {0} repaired path(s)." -f $repairFixed.Count) -ForegroundColor Green
+                                Write-Host ("  Safety backup: {0}" -f $healthBackup.Path) -ForegroundColor DarkGray
+                            } else {
+                                Write-Host '  Candidates were reviewed but not applied. Nothing was changed.' -ForegroundColor DarkGray
+                            }
+                            $repairSearchAgain = $false
+                        } else {
+                            Write-Host '  No safe automatic candidates were found in this folder. Nothing was changed.' -ForegroundColor Yellow
+                            Write-Host '  [S] Search another game folder' -ForegroundColor White
+                            Write-Host '  [B] Back to the main menu' -ForegroundColor White
+                            do {
+                                $searchAgainChoice = (Read-HostSafe '  Choose S or B' -Default 'B').Trim().ToUpperInvariant()
+                                if ($searchAgainChoice -notin @('S', 'B')) { Write-Host '  Choose S or B.' -ForegroundColor Yellow }
+                            } while ($searchAgainChoice -notin @('S', 'B'))
+                            if ($searchAgainChoice -eq 'S') {
+                                $selectedSearchRoot = Read-PathWithBrowse -Prompt '  Choose another game folder to search' -Mode Folder -InitialDirectory $searchRoot
+                                $searchRootCheck = Test-TpmRepairSearchRoot `
+                                    -Candidate $selectedSearchRoot -TeknoParrotRoot $tpRoot -ProgramDirectory $PSScriptRoot `
+                                    -ZipSource $zipSource -ZipSourceSupplementary $zipSourceSupplementary
+                                $repairSearchAgain = $searchRootCheck.Valid
+                                if ($repairSearchAgain) {
+                                    $searchRoot = $searchRootCheck.CanonicalPath
+                                } else {
+                                    Write-Host ("  Search folder rejected: {0}. Nothing was changed." -f $searchRootCheck.Reason) -ForegroundColor Yellow
+                                }
+                            }
+                        }
+                    } catch {
+                        Write-Host ("  Automatic path repair was not saved: {0}" -f $_.Exception.Message) -ForegroundColor Red
+                        Write-Host '  No repair is claimed. Review the existing profiles and backup state before retrying.' -ForegroundColor Yellow
+                        $repairSearchAgain = $false
+                    }
+                } else {
+                    Write-Host "  Automatic path search cancelled. Nothing was changed." -ForegroundColor DarkGray
+                    $repairSearchAgain = $false
                 }
+            } while ($repairSearchAgain)
+            [void](Read-HostSafe '  Press Enter to return to the main menu')
+            continue
+        }
+        if ($healthChoice -eq 'C' -and @($healthResult.Broken).Count -gt 0) {
+            if ([string]::IsNullOrWhiteSpace($zipSource) -and [string]::IsNullOrWhiteSpace($zipSourceSupplementary)) {
+                Write-Host '  No configured source ZIP folder is available. Choose option 1 to configure AutoSync first.' -ForegroundColor Yellow
             } else {
-                Write-Host "  Automatic path repair cancelled. Nothing was changed." -ForegroundColor DarkGray
+                Write-Host '  Returning to AutoSync so you can re-copy or re-extract the affected games.' -ForegroundColor Cyan
+                $pendingAutoSyncGames = @($healthResult.Broken)
+                $pendingApplyMode = 'AutoSync'
+                $pendingApplyForce = $false
             }
             [void](Read-HostSafe '  Press Enter to return to the main menu')
             continue
@@ -21860,7 +22172,7 @@ $mode = $null
         try {
             $propagationBackup = New-PropagationBackup -UserProfilesDir $userProfilesDir
         } catch {
-            Write-Host "  ERROR: Could not create backup folder: $_" -ForegroundColor Red
+            Write-Host "  ERROR: Could not complete UserProfiles backup: $_" -ForegroundColor Red
             Write-Host "  The script will not continue without a successful backup." -ForegroundColor Red
             Write-Log "PropagateControls: backup FAILED -- $_"
             [void](Read-Host "  Press Enter to return to menu")
@@ -22170,7 +22482,21 @@ $mode = $null
             }
             Write-Host ("  {0}" -f $partialSummary) -ForegroundColor Yellow
             [void](Set-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-incomplete' -Message $partialSummary -DataSafety 'TPM did not claim success for every selected game; skipped and failed games were left unchanged.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
-            [void](Read-HostSafe '  Press Enter to acknowledge the ReShade result')
+            $reShadePathIssue = $reShadeResult -and ($reShadeResult.MissingPath -gt 0 -or $reShadeResult.MissingDevice -gt 0)
+            if ($reShadePathIssue) {
+                do {
+                    Write-Host "  [H] Open 10) Library Health Check for missing paths" -ForegroundColor White
+                    Write-Host "  [B] Back to main menu" -ForegroundColor White
+                    $reShadeChoice = (Read-HostSafe '  Choose H or B' -Default 'B').Trim().ToUpperInvariant()
+                    if ($reShadeChoice -notin @('H', 'B')) { Write-Host '  Choose H or B.' -ForegroundColor Yellow }
+                } while ($reShadeChoice -notin @('H', 'B'))
+                if ($reShadeChoice -eq 'H') {
+                    $pendingApplyMode = 'HealthCheck'
+                    $pendingApplyForce = $false
+                }
+            } else {
+                [void](Read-HostSafe '  Press Enter to acknowledge the ReShade result')
+            }
             [void](Acknowledge-TpmWorkflowFailure -Context $reShadeStatus -FailureId 'reshade-incomplete')
             [void](Stop-TpmWorkflowStatus -Context $reShadeStatus -Reason 'ReShade setup completed with skips or errors')
             [void](Close-TpmWorkflowStatus -Context $reShadeStatus)
@@ -22286,7 +22612,21 @@ $mode = $null
             }
             [void](Set-TpmWorkflowFailure -Context $dgStatus -FailureId 'dgv-deployment-failed' -Message $dgSummary -DataSafety 'TPM did not claim a complete dgVoodoo2 deployment; blocked or failed games were left unchanged.' -RecoveryActions @(@{ Id = 'Acknowledge'; Label = 'Return to menu' }))
             Write-Host ("  {0}" -f $dgSummary) -ForegroundColor Yellow
-            [void](Read-HostSafe '  Press Enter to acknowledge the dgVoodoo2 result')
+            $dgPathIssue = $dgResult -and ($dgResult.MissingPath -gt 0 -or $dgResult.MissingDevice -gt 0)
+            if ($dgPathIssue) {
+                Write-Host "  [H] Open 10) Library Health Check for missing paths" -ForegroundColor White
+                Write-Host "  [B] Back to main menu" -ForegroundColor White
+                do {
+                    $dgFailureChoice = (Read-HostSafe '  Choose H or B' -Default 'B').Trim().ToUpperInvariant()
+                    if ($dgFailureChoice -notin @('H', 'B')) { Write-Host '  Choose H or B.' -ForegroundColor Yellow }
+                } while ($dgFailureChoice -notin @('H', 'B'))
+                if ($dgFailureChoice -eq 'H') {
+                    $pendingApplyMode = 'HealthCheck'
+                    $pendingApplyForce = $false
+                }
+            } else {
+                [void](Read-HostSafe '  Press Enter to acknowledge the dgVoodoo2 result')
+            }
             [void](Acknowledge-TpmWorkflowFailure -Context $dgStatus -FailureId 'dgv-deployment-failed')
             [void](Stop-TpmWorkflowStatus -Context $dgStatus -Reason 'dgVoodoo2 setup completed with skips or errors')
             [void](Close-TpmWorkflowStatus -Context $dgStatus)
@@ -22328,9 +22668,14 @@ $mode = $null
         Write-Host "What to do next:" -ForegroundColor Cyan
         Write-Host "  Try launching the game." -ForegroundColor DarkGray
         Write-Host "  If it looks wrong or crashes, create a support package and include the log." -ForegroundColor DarkGray
-        Write-Host "  For skipped games, reconnect the drive, restore the folder, or repair the saved path." -ForegroundColor DarkGray
+        Write-Host "  For skipped games, return to the main menu and choose 10) Library Health Check to repair saved game paths." -ForegroundColor DarkGray
+        $dgHasPathIssue = ($dgResult.MissingPath -gt 0 -or $dgResult.MissingDevice -gt 0)
         do {
-            $dgResultChoice = (Read-HostSafe '  Press Enter to return, D Details, or O support/log guidance' -Default '').Trim().ToUpperInvariant()
+            Write-Host "  [D] Details   [O] Open support/log guidance" -ForegroundColor White
+            if ($dgHasPathIssue) { Write-Host "  [H] Open 10) Library Health Check for missing paths" -ForegroundColor White }
+            Write-Host "  [B] Back to main menu" -ForegroundColor White
+            $dgPromptChoices = if ($dgHasPathIssue) { 'D, O, H, or B' } else { 'D, O, or B' }
+            $dgResultChoice = (Read-HostSafe ("  Choose {0}" -f $dgPromptChoices) -Default 'B').Trim().ToUpperInvariant()
             if ($dgResultChoice -eq 'D') {
                 Write-Host "  Details:" -ForegroundColor Cyan
                 foreach ($detail in @($dgResult.DeploymentDetails)) {
@@ -22350,8 +22695,14 @@ $mode = $null
                 Write-Host ("  Support package folder: {0}" -f (Join-Path $PSScriptRoot 'SupportPackages')) -ForegroundColor Cyan
                 Write-Host ("  Technical log: {0}" -f (Join-Path $PSScriptRoot 'TeknoParrot-Manager.log')) -ForegroundColor Cyan
                 Write-Host "  This screen does not create or open a support ZIP." -ForegroundColor DarkGray
+            } elseif ($dgResultChoice -eq 'H' -and $dgHasPathIssue) {
+                $pendingApplyMode = 'HealthCheck'
+                $pendingApplyForce = $false
+                $dgResultChoice = 'B'
+            } elseif ($dgResultChoice -notin @('B', '')) {
+                Write-Host ("  Choose {0}." -f $dgPromptChoices) -ForegroundColor Yellow
             }
-        } while ($dgResultChoice -in @('D', 'O'))
+        } while ($dgResultChoice -in @('D', 'O', 'H'))
         Write-Log "dgVoodoo2 setup complete."
         continue
     }
@@ -22390,55 +22741,62 @@ $mode = $null
                 Write-Host ("    Saved path: {0}" -f $detail.SavedPath) -ForegroundColor DarkGray
                 Write-Host ("    What to do: {0}" -f $detail.NextAction) -ForegroundColor DarkGray
             }
-            $gpuResultChoice = (Read-HostSafe 'Press Enter to return, D Details, O support-log guidance, P repair skipped paths, or R run again' -Default '').Trim().ToUpper()
+            Write-Host "  [D] Details" -ForegroundColor White
+            Write-Host "  [O] Open support/log guidance" -ForegroundColor White
+            $gpuHasPathIssue = ($gpuResult.MissingPath -gt 0 -or $gpuResult.MissingDevice -gt 0)
+            if ($gpuHasPathIssue) { Write-Host "  [H] Open 10) Library Health Check for missing paths" -ForegroundColor White }
+            Write-Host "  [R] Run GPU Fix again" -ForegroundColor White
+            Write-Host "  [B] Back to main menu" -ForegroundColor White
+            $gpuPromptChoices = if ($gpuHasPathIssue) { 'D, O, H, R, or B' } else { 'D, O, R, or B' }
+            $gpuResultChoice = (Read-HostSafe ("  Choose {0}" -f $gpuPromptChoices) -Default 'B').Trim().ToUpperInvariant()
             if ($gpuResultChoice -eq 'D') {
                 foreach ($detail in @($gpuResult.SkipDetails)) {
                     Write-Host ("  {0}: {1} (technical: {2})" -f $detail.Game, $detail.SavedPath, $detail.Technical) -ForegroundColor DarkGray
                 }
-            }
-            elseif ($gpuResultChoice -eq 'O') {
+            } elseif ($gpuResultChoice -eq 'O') {
                 Write-Host "  Open the support package or TeknoParrot-Manager.log for the recorded technical details." -ForegroundColor DarkGray
-            }
-            elseif ($gpuResultChoice -eq 'P') {
-                $repairCodes = @($gpuResult.SkipDetails | ForEach-Object { [string]$_.Game } | Where-Object { $_ } | Select-Object -Unique)
-                if ($repairCodes.Count -eq 0) {
-                    Write-Host "  No skipped game paths are available for guided repair." -ForegroundColor DarkGray
-                } else {
-                    Write-Host "  Guided path repair will prompt for each skipped game. Nothing is saved until all choices pass validation and the backup succeeds." -ForegroundColor Cyan
-                    $repairResult = Invoke-LibraryHealthManualPathRepair -UserProfilesDir $userProfilesDir -GamesInstallFolder $gamesInstallFolder -BrokenGames ([string[]]$repairCodes)
-                    Write-Host ("  Guided repair saved {0} profile(s)." -f $repairResult.Updated) -ForegroundColor $(if ($repairResult.Updated -gt 0) { 'Green' } else { 'DarkGray' })
-                    if (@($repairResult.Skipped).Count -gt 0) { Write-Host ("  Left unchanged: {0}" -f (@($repairResult.Skipped) -join ', ')) -ForegroundColor Yellow }
-                    if (@($repairResult.Errors).Count -gt 0) { Write-Host ("  Repair errors: {0}" -f (@($repairResult.Errors) -join ', ')) -ForegroundColor Red }
-                }
-            }
-            elseif ($gpuResultChoice -eq 'R') {
+            } elseif ($gpuResultChoice -eq 'H' -and $gpuHasPathIssue) {
+                $pendingApplyMode = 'HealthCheck'
+                $pendingApplyForce = $false
+                $gpuResultChoice = 'B'
+            } elseif ($gpuResultChoice -eq 'R') {
                 $gpuResult = Invoke-GpuFixSetup -UserProfilesDir $userProfilesDir -TpRoot $tpRoot
                 if (-not $gpuResult) {
-                    $gpuResult = [pscustomobject]@{
-                        GpuName = 'Unknown'
-                        GpuVendor = 'Unknown'
-                        Updated = 0
-                        Unchanged = 0
-                        Skipped = 0
-                        Errors = 1
-                        SkipDetails = @([pscustomobject]@{
-                            Game = 'GPU Fix run'
-                            Reason = 'The operation did not return a result.'
-                            SavedPath = ''
-                            NextAction = 'Review the log and support package, then try again.'
-                            Technical = 'Invoke-GpuFixSetup returned null.'
-                        })
-                    }
+                    $gpuResult = [pscustomobject]@{ GpuName = 'Unknown'; GpuVendor = 'Unknown'; Updated = 0; Unchanged = 0; Skipped = 0; MissingPath = 0; MissingDevice = 0; Errors = 1; SkipDetails = @() }
                 }
+            } elseif ($gpuResultChoice -notin @('B', '')) {
+                Write-Host ("  Choose {0}." -f $gpuPromptChoices) -ForegroundColor Yellow
             }
-        } while ($gpuResultChoice -in @('D','O','P','R'))
+        } while ($gpuResultChoice -in @('D', 'O', 'H', 'R'))
         continue
     }
 
     if ($mode -eq "FFBSetup") {
         $ffbModeResult = Invoke-TpmFfbSetupMode -UserProfilesDir $userProfilesDir -TpRoot $tpRoot -ScriptRoot $PSScriptRoot
-        if ($ffbModeResult.Completed) {
+        $ffbHasPathIssue = ($ffbModeResult -and ($ffbModeResult.MissingPath -gt 0 -or $ffbModeResult.MissingDevice -gt 0))
+        if ($ffbHasPathIssue) {
             Write-Host ""
+            if ($ffbModeResult.MissingPath -gt 0) {
+                Write-Host ("  FFB skipped {0} game(s) because their saved paths are unavailable." -f $ffbModeResult.MissingPath) -ForegroundColor Yellow
+                Write-Host ("    Affected games: {0}" -f (@($ffbModeResult.MissingPathGames) -join ', ')) -ForegroundColor DarkGray
+            }
+            if ($ffbModeResult.MissingDevice -gt 0) {
+                Write-Host ("  FFB skipped {0} game(s) because their saved devices are unavailable." -f $ffbModeResult.MissingDevice) -ForegroundColor Yellow
+                Write-Host ("    Affected games: {0}" -f (@($ffbModeResult.MissingDeviceGames) -join ', ')) -ForegroundColor DarkGray
+            }
+            Write-Host "  [H] Open 10) Library Health Check to repair saved paths" -ForegroundColor White
+            Write-Host "  [B] Back to main menu" -ForegroundColor White
+            do {
+                $ffbPathChoice = (Read-HostSafe '  Choose H or B' -Default 'B').Trim().ToUpperInvariant()
+                if ($ffbPathChoice -notin @('H', 'B')) { Write-Host '  Choose H or B.' -ForegroundColor Yellow }
+            } while ($ffbPathChoice -notin @('H', 'B'))
+            if ($ffbPathChoice -eq 'H') {
+                $pendingApplyMode = 'HealthCheck'
+                $pendingApplyForce = $false
+            } else {
+                [void](Read-Host "  Press Enter to return to menu")
+            }
+        } elseif ($ffbModeResult.Completed) {
             Write-Host "Done." -ForegroundColor Green
             Write-Log "FFB setup complete."
             [void](Read-Host "  Press Enter to return to menu")
@@ -22508,6 +22866,10 @@ $mode = $null
             Write-Host "What TPM did not change: no failed or unverified update was claimed as successful." -ForegroundColor Green
             Write-Host ("What happened: {0}" -f $bepSummary) -ForegroundColor Yellow
             Write-Host "What to do next: close TeknoParrot and running games, check antivirus/file access, then run BepInEx repair-reset again." -ForegroundColor DarkCyan
+            $bepPathIssue = $bepResult -and ($bepResult.MissingPath -gt 0 -or $bepResult.MissingDevice -gt 0)
+            if ($bepResult -and ($bepResult.MissingPath -gt 0 -or $bepResult.MissingDevice -gt 0)) {
+                Write-Host "  Missing or unavailable saved paths belong in 10) Library Health Check before retrying BepInEx." -ForegroundColor Cyan
+            }
             if ($bepResult -and $bepResult.PathReasonCounts) {
                 foreach ($reasonCode in ($bepResult.PathReasonCounts.Keys | Sort-Object)) {
                     Write-Host ("  {0}: {1} game(s)" -f $reasonCode, $bepResult.PathReasonCounts[$reasonCode]) -ForegroundColor DarkGray
@@ -22515,8 +22877,15 @@ $mode = $null
             }
             $bepChoice = ''
             $bepRecovered = $false
+            $bepValidChoices = @('R', 'D', 'O', 'B', '')
+            if ($bepPathIssue) { $bepValidChoices += 'H' }
             do {
-                $bepChoice = (Read-HostSafe '  Choose R, D, O, or B (Enter also returns to menu)' -Default 'B').Trim().ToUpper()
+                Write-Host "  [R] Try BepInEx repair-reset again" -ForegroundColor White
+                Write-Host "  [D] Show details" -ForegroundColor White
+                Write-Host "  [O] Open support/log guidance" -ForegroundColor White
+                if ($bepPathIssue) { Write-Host "  [H] Open 10) Library Health Check for missing paths" -ForegroundColor White }
+                $bepPromptChoices = if ($bepPathIssue) { 'R, D, O, B, or H' } else { 'R, D, O, or B' }
+                $bepChoice = (Read-HostSafe ("  Choose {0}" -f $bepPromptChoices) -Default 'B').Trim().ToUpperInvariant()
                 if ($bepChoice -eq 'R') {
                     Write-Host "  Starting BepInEx repair-reset again. No success is claimed until verification completes." -ForegroundColor Cyan
                     $bepResult = Invoke-BepInExUpdateCheck -UserProfilesDir $userProfilesDir -CacheDir $bepInExCacheDir -ApprovedGamesRoot $gamesInstallFolder
@@ -22531,6 +22900,9 @@ $mode = $null
                         }
                         Write-Host "  BepInEx repair-reset could not complete. No success was claimed." -ForegroundColor Yellow
                     }
+                    $bepPathIssue = $bepResult -and ($bepResult.MissingPath -gt 0 -or $bepResult.MissingDevice -gt 0)
+                    $bepValidChoices = @('R', 'D', 'O', 'B', '')
+                    if ($bepPathIssue) { $bepValidChoices += 'H' }
                     if ($bepResult.Succeeded) {
                         $bepRecovered = $true
                         Write-Host "  BepInEx repair-reset completed and was verified. Returning to the menu." -ForegroundColor Green
@@ -22541,6 +22913,10 @@ $mode = $null
                             Write-Host ("    {0}: {1} game(s)" -f $reasonCode, $bepResult.PathReasonCounts[$reasonCode]) -ForegroundColor DarkGray
                         }
                     }
+                } elseif ($bepChoice -eq 'H' -and $bepPathIssue) {
+                    $pendingApplyMode = 'HealthCheck'
+                    $pendingApplyForce = $false
+                    $bepChoice = 'B'
                 } elseif ($bepChoice -eq 'D') {
                     Write-Host ("  Technical log: {0}" -f (Join-Path $PSScriptRoot 'TeknoParrot-Manager.log')) -ForegroundColor DarkGray
                     foreach ($failure in @($bepResult.FailureRecords)) {
@@ -22557,10 +22933,10 @@ $mode = $null
                     Write-Host ("  Support package folder: {0}" -f (Join-Path $PSScriptRoot 'SupportPackages')) -ForegroundColor Cyan
                     Write-Host ("  Technical log: {0}" -f (Join-Path $PSScriptRoot 'TeknoParrot-Manager.log')) -ForegroundColor Cyan
                     Write-Host "  This screen does not create or open a support ZIP." -ForegroundColor DarkGray
-                } elseif ($bepChoice -notin @('B','')) {
-                    Write-Host "  Choose R, D, O, or B." -ForegroundColor Yellow
+                } elseif ($bepChoice -notin $bepValidChoices) {
+                    Write-Host ("  Choose {0}." -f $bepPromptChoices) -ForegroundColor Yellow
                 }
-            } while ($bepChoice -in @('R','D','O',''))
+            } while ($bepChoice -notin @('B', ''))
             if ($bepRecovered) {
                 [void](Acknowledge-TpmWorkflowFailure -Context $bepStatus -FailureId 'bepinex-failed')
                 [void](Start-TpmWorkflowStep -Context $bepStatus -StepId 'apply' -Activity 'Applying the repaired BepInEx state')
@@ -22870,56 +23246,46 @@ $mode = $null
     $timestamp  = (Get-Date).ToString("yyyy-MM-dd_HH-mm-ss")
     $backupPath = Join-Path $backupRoot $timestamp
 
-Write-Host ""
-if ($dryRunActive) {
-    Write-Host "PREVIEW MODE -- skipping backup (nothing will be changed)." -ForegroundColor Yellow
-} else {
-Write-Host "Backing up UserProfiles..." -ForegroundColor Cyan
-
-# Guard: if the backup folder cannot be created the script exits here rather
-# than proceeding with modifications that have no restore point.
-try {
-    [void][System.IO.Directory]::CreateDirectory($backupRoot)
-    [void][System.IO.Directory]::CreateDirectory($backupPath)
-} catch {
-    Write-Host "  ERROR: Could not create backup folder: $_" -ForegroundColor Red
-    Write-Host "  The script will not continue without a successful backup." -ForegroundColor Red
-    Write-Log "Backup FAILED: could not create backup folder -- $_"
-    [void](Read-Host "  Press Enter to return to menu")
-    continue
-}
-
-# Use Where-Object instead of -Exclude so FullBackup is reliably excluded
-# across all PowerShell 5.1 versions (-Exclude has known edge-case behaviour).
-# Copy-Item below receives FileInfo/DirectoryInfo objects from the pipeline
-# (not path strings), so pipeline binding already bypasses wildcard
-# expansion -- safe even with [, ], $ in game folder names. If this source
-# is ever changed to raw path strings, add -LiteralPath there.
-$backupErrors = 0
-Get-ChildItem -LiteralPath $userProfilesDir | Where-Object { $_.Name -ne "FullBackup" } |
-    Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable copyErrs
-$backupErrors = $copyErrs.Count
-if ($backupErrors -gt 0) {
-    Write-Host "  WARNING: $backupErrors file(s) could not be backed up." -ForegroundColor Yellow
-    Write-Host "  Continuing without a complete backup means you may not be able to fully" -ForegroundColor Yellow
-    Write-Host "  restore this run's changes if something goes wrong." -ForegroundColor Yellow
-    Write-Log "Backup WARNING: $backupErrors file(s) failed to copy."
-    if ($Unattended) {
-        Write-Host "  [Unattended] Continuing despite incomplete backup." -ForegroundColor Yellow
-        Write-Log "Unattended: incomplete backup -- continuing."
+    Write-Host ""
+    if ($dryRunActive) {
+        Write-Host "PREVIEW MODE -- skipping backup (nothing will be changed)." -ForegroundColor Yellow
     } else {
-        $contBackup = (Read-HostSafe "  Continue anyway? (Y/N)").ToUpper()
-        if ($contBackup -ne "Y") {
-            Write-Host "Aborted." -ForegroundColor Yellow
-            Write-Log "Aborted: user declined to continue with incomplete backup."
-            [void](Read-Host "  Press Enter to return to menu")
+        Write-Host "Backing up UserProfiles..." -ForegroundColor Cyan
+
+        # A backup failure blocks the entire destructive AutoSync operation.
+        # Do not offer an interactive or unattended override:
+        # extracting games without a complete restore point violates the
+        # backup-before-destructive-work invariant.
+        try {
+            [void][System.IO.Directory]::CreateDirectory($backupRoot)
+            [void][System.IO.Directory]::CreateDirectory($backupPath)
+        } catch {
+            Write-Host "  ERROR: Could not create backup folder: $_" -ForegroundColor Red
+            Write-Host "  The script will not continue without a successful backup." -ForegroundColor Red
+            Write-Log "Backup FAILED: could not create backup folder -- $_"
+            if (-not $Unattended) { [void](Read-HostSafe '  Press Enter to return to menu') }
             continue
         }
+
+        # Use Where-Object instead of -Exclude so FullBackup is reliably excluded
+        # across all PowerShell 5.1 versions (-Exclude has known edge-case behaviour).
+        # Copy-Item below receives FileInfo/DirectoryInfo objects from the pipeline
+        # (not path strings), so pipeline binding already bypasses wildcard
+        # expansion -- safe even with [, ], $ in game folder names. If this source
+        # is ever changed to raw path strings, add -LiteralPath there.
+        try {
+            Get-ChildItem -LiteralPath $userProfilesDir -ErrorAction Stop | Where-Object { $_.Name -ne "FullBackup" } |
+                Copy-Item -Destination $backupPath -Recurse -Force -ErrorAction Stop
+        } catch {
+            Write-Host "  ERROR: UserProfiles backup failed: $_" -ForegroundColor Red
+            Write-Host "  The script will not continue without a complete backup." -ForegroundColor Red
+            Write-Log "Backup FAILED: profile copy did not complete -- $_"
+            if (-not $Unattended) { [void](Read-HostSafe '  Press Enter to return to menu') }
+            continue
+        }
+        Write-Host "Backup saved to: $backupPath" -ForegroundColor Green
+        Write-Log "Backup created at $backupPath"
     }
-}
-Write-Host "Backup saved to: $backupPath" -ForegroundColor Green
-Write-Log "Backup created at $backupPath"
-}
 
 # =============================================================================
 # SECTION 6 -- AutoSync: game selection and extraction
@@ -22964,6 +23330,12 @@ if ($mode -eq "AutoSync") {
     # Otherwise run the interactive picker. When the supplementary source is valid,
     # both libraries are presented in a single combined list (Select-GamesInteractiveCombined).
     $combinedPickerRan = $false
+    if ($null -ne $autoSyncTargetGames -and @($autoSyncTargetGames).Count -gt 0) {
+        $onlySyncList = @($autoSyncTargetGames)
+        $onlySyncListSupp = if ($suppValid) { @($autoSyncTargetGames) } else { $null }
+        Write-Host ("  Health Check repair scope: affected games only ({0})." -f (@($autoSyncTargetGames) -join ', ')) -ForegroundColor Cyan
+        Write-Log "AutoSync: Health Check re-entry restricted to affected game codes."
+    }
     if ($onlySyncList.Count -eq 0) {
         if ($Unattended) {
             Write-Host "  [Unattended] Game selection: all unextracted games." -ForegroundColor DarkCyan
@@ -22972,12 +23344,12 @@ if ($mode -eq "AutoSync") {
             # Combined picker: both collection and supplementary shown in one sorted list.
             $combined          = Select-GamesInteractiveCombined -zipSourceMain $zipSource `
                                      -zipSourceSupp $zipSourceSupplementary -installFolder $gamesInstallFolder `
-                                     -datIndex $datIndex -userProfilesDir $userProfilesDir
+                                     -datIndex $datIndex -userProfilesDir $userProfilesDir -AllowedNames $autoSyncTargetGames
             $onlySyncList      = $combined.Main
             $onlySyncListSupp  = $combined.Supp
             $combinedPickerRan = $true
         } else {
-            $onlySyncList = Select-GamesInteractive -zipSource $zipSource -installFolder $gamesInstallFolder -datIndex $datIndex -userProfilesDir $userProfilesDir
+            $onlySyncList = Select-GamesInteractive -zipSource $zipSource -installFolder $gamesInstallFolder -datIndex $datIndex -userProfilesDir $userProfilesDir -AllowedNames $autoSyncTargetGames
             # $null means user pressed D with nothing selected -- leave as $null (skip).
             # @() means A was pressed (no filter). Other values are explicit selections.
         }

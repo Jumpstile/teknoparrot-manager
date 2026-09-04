@@ -46,13 +46,17 @@ chooser remains usable when WinForms is behind another window, closed,
 unavailable, or fails to open. Numbered selection updates the gallery when it
 is available; `U` is the only path toward deployment, while `B` and invalid
 input remain non-mutating. The gallery changes the displayed deterministic,
-TPM-owned comparison when the user changes profile, but does not deploy files.
+TPM-owned comparison approximation when the user changes profile, but does not
+run the game or execute ReShade shaders and does not deploy files. Actual
+in-game results may vary.
 The reference is the bundled `PreviewAssets\ReShadePreviews\TPM-preview-landscape.png`
 asset, validated by System.Drawing decoding, fixed dimensions, identity
 `TPM-LANDSCAPE-V1`, version `3`, and SHA-256
-`7203032094bfd4d174cd3125ef55c87d7b35053fc4e274914b6ae1ac43f286d8`. `Before` is the
-untouched reference, `After` contains only the selected profile transform,
-and `Split`/`Slider` compose those two bitmaps at the requested boundary.
+`7203032094bfd4d174cd3125ef55c87d7b35053fc4e274914b6ae1ac43f286d8`. It is a
+safe deterministic approximation: TPM does not run the game or execute
+ReShade shaders. `Before` is the untouched reference, `After` contains only
+the selected profile transform, and `Split`/`Slider` compose those two
+bitmaps at the requested boundary. Actual in-game results may vary.
 Deployment remains behind the existing explicit confirmation. The reference
 identity, renderer version, and effect hashes are part of the cache key so
 stale artifacts regenerate.
@@ -290,7 +294,7 @@ live-fetched runtime files. Display order follows the canonical profile order
 and `TechniqueOrder`; visible text is never a second hardcoded effect list.
 
 `New-TpmReShadePresetContent` generates stable TPM-owned preset text from the selected definition, with normalized technique order and no timestamps, randomness, paths, or user code. `Test-TpmReShadePresetContent` validates the generated structure and rejects techniques outside the approved bounded set. Original intentionally generates no effect techniques. Advanced custom `.ini` input remains opt-in and is path/extension/existence validated; its contents do not become approved effect evidence.
-**Preview renderer and cache (RC8 freeze exception).** `New-TpmReShadePreviewBitmap` decodes the bundled `TPM-preview-landscape.png` reference and renders deterministic `Before`, `After`, `Split`, and percentage-driven `Slider` output. The processed bitmap is derived from the same decoded reference and cached per profile; comparison composition copies bounded pixel regions so the untouched side remains byte-stable. `New-TpmReShadePreviewArtifact` materializes results under `ReShadePreviewCache\`; rendering does not depend on live-fetched ReShade runtime files.
+**Preview renderer and cache (RC8 freeze exception).** `New-TpmReShadePreviewBitmap` decodes the bundled `TPM-preview-landscape.png` reference and renders a safe deterministic approximation for `Before`, `After`, `Split`, and percentage-driven `Slider` output; it does not run a game or execute ReShade shaders. The processed bitmap is derived from the same decoded reference and cached per profile, so actual in-game results may vary. Comparison composition copies bounded pixel regions so the untouched side remains byte-stable. `New-TpmReShadePreviewArtifact` materializes results under `ReShadePreviewCache\`; rendering does not depend on live-fetched ReShade runtime files.
 
 The cache manifest records the subject/mode, slider position when applicable, intensity identity, preset version, approved shader SHA-256 values, reference identity/version/hash, and renderer version. A missing, corrupt, stale, or mismatched manifest/image regenerates safely; cache artifacts are never trust or deployment evidence. Each WinForms preview keeps one decoded `Reference` bitmap and one processed bitmap per profile. Slider Paint reads only those cached bitmaps, clips the two sides, and draws the divider; it never allocates a composite bitmap, replaces `PictureBox.Image`, decodes a file, or runs the profile pixel generator during a drag. Slider changes are coalesced through a short WinForms timer, while keyboard/programmatic updates invalidate the same view immediately. Close detaches handlers, stops and disposes the timer, clears pending state, disposes the picture image and render cache, then disposes the form. `Open-TpmReShadePreviewWindow`, `Update-TpmReShadePreviewWindow`, `Close-TpmReShadePreviewWindow`, and `Show-TpmReShadePreviewWindow` provide the window lifecycle. If a terminal chooser requests `R` after disposal, it creates a fresh gallery session, synchronizes the selected profile, returns that replacement session to the caller, and leaves final teardown with the caller. WinForms is loaded lazily, requires STA for actual display, and returns a text-only fallback in noninteractive hosts.
 **Full profile deployment and restore (RC8 freeze exception).** Normal ReShade setup and the explicit per-game restore action call `Install-TpmReShadeProfileDeployment`. It stages the architecture-selected ReShade DLL, a canonical generated `ReShade.ini` when a trusted profile is selected, and every approved effect asset, then promotes them with one `Invoke-TpmTransactionalPromote` transaction. The per-game ownership manifest is stored under `ReShade\TPM-State\Deployments\<SHA256(game ID)>.json`; ownership is committed only after the physical promotion and post-promotion hashes succeed. A later profile-history entry is written only after that deployment returns success.
@@ -406,9 +410,11 @@ plain-language summary, not just `Done.`. It identifies each deployed game's
 detected legacy API, explains why older DirectX/Glide calls need translation on
 modern Windows, states that existing dgVoodoo2 DLLs (including unowned or
 changed DLLs) and skipped missing-path games were not changed, and gives launch,
-support-package, and skipped-path recovery guidance. `DeploymentDetails` and
-`SkipDetails` remain available behind `D` Details; `O` exposes the support/log
-locations without creating a package.
+support-package, and skipped-path recovery guidance. When the structured result
+contains a missing or unavailable saved path, the screen offers `H` to open
+Health Check; ordinary deployment errors do not receive that path-repair
+choice. `DeploymentDetails` and `SkipDetails` remain available behind `D`
+Details; `O` exposes the support/log locations without creating a package.
 
 ---
 
@@ -430,6 +436,12 @@ with a non-Bool FieldType returns `Unknown`, not `Supported`, and `WouldWrite = 
 This answers TWO independent questions: "does this profile have the right field?" AND
 "is this platform one where the feature works?" A positive answer to the first alone is
 not sufficient to authorize a write.
+When the native FFB backup or profile write fails, `Invoke-FFBBlasterSetup`
+returns a structured failure record after its backup boundary. Normal membership,
+no-op, and successful returns remain arrays for compatibility. The wrapper
+checks `Succeeded` on the failure record before completing the native workflow
+step or offering the optional plugin, so a backup or profile-write failure
+cannot be hidden by later plugin success.
 
 ### Third-party plugin (mightymikem/FFBArcadePlugin)
 
@@ -450,14 +462,21 @@ target filename, that game is skipped with a warning, never overwritten.
 Per the plugin's README: true FFB on FFB-capable wheels (Thrustmaster/PWM2M2-style),
 rumble on Xbox/XInput-style controllers.
 
-**Skip counters.** `$skippedNoMatch` and `$skippedDllMissing` are separate. A game the
-AutoSetup.cmd table does not know about is `$skippedNoMatch`; a game the table matches
-but whose MAME DLL is not locally present is `$skippedDllMissing` (user-fixable). Each
-has its own summary line and log field. Ownership cleanup copies the unchanged
-hook to a verified game backup before deletion; if the ownership manifest cannot
-be atomically rewritten, the deletion is restored from that backup and the
-operation fails closed. If restoration itself fails, the backup path remains
-recovery evidence and no clean completion is reported.
+**Skip counters.** `$skippedNoMatch` and `$skippedDllMissing` are separate, and
+saved-path omissions are classified by the shared `Test-TpmGameMutationPath`
+boundary. A missing leaf is `$skippedMissingPath`; an unavailable drive/device is
+`$skippedMissingDevice`; other unsafe or unresolved path results remain safe path
+skips with their reason code. A game the `AutoSetup.cmd` table does not know about is
+`$skippedNoMatch`; a game the table matches but whose MAME DLL is not locally present
+is `$skippedDllMissing` (user-fixable). Each category has its own summary line and
+log/result field, and invalid saved paths are excluded from the no-match count. FFB
+mode returns affected game names and offers a direct Health Check handoff whenever
+path omissions occur, including a mixed plugin-error result; unsupported/no-match
+games remain distinct from true deployment errors. Ownership cleanup copies the
+unchanged hook to a verified game backup before deletion; if the ownership manifest
+cannot be atomically rewritten, the deletion is restored from that backup and the
+operation fails closed. If restoration itself fails, the backup path remains recovery
+evidence and no clean completion is reported.
 
 ### Eggman dat source
 
@@ -532,6 +551,13 @@ comparison, `Get-BepInExInstallationHealth` verifies required core/bootstrap
 files, version, architecture, and reparse safety. A current-version but
 incomplete tree therefore reaches the explicit repair-reset choice instead of
 being classified healthy by version equality alone.
+
+Path/device safe skips remain distinct from ordinary BepInEx failures. The main
+result offers `[H] Open 10) Library Health Check` only when missing or
+unavailable saved paths were reported; ordinary deployment, rollback, cleanup,
+and update-blocked failures retain their existing retry, Details, and support
+guidance instead of presenting a misleading path-repair action. This routing is
+conditional on the structured result, not on generic failure text.
 
 ---
 
@@ -704,6 +730,12 @@ download offer, and GPU fix offer are all skipped in preview mode. They are them
 writes/downloads that do not make sense after a run that changed nothing. ACTION REQUIRED
 and the controls-status file still print/write normally (reports, not mutations).
 
+**Backup failure gate.** A real AutoSync run creates its `FullBackup` folder
+before extraction and copies all existing profile content with terminating
+errors. Any folder-creation or profile-copy failure returns to the menu and
+blocks extraction, including unattended runs; there is no "continue anyway"
+path for an incomplete restore point.
+
 **Apply immediately.** After a preview pass, a "Preview completed successfully... Would you
 like to perform the operation for real?" prompt lets the user commit without re-running the
 script, explaining that applying performs a fresh scan rather than a replay of the preview
@@ -747,16 +779,22 @@ approach if either function is touched again.
 read-only during inspection: it checks profile paths and shared optional-coverage
 helpers, but never calls setup/install/deploy functions or writes game paths,
 profiles, LaunchBox, PostgreSQL, ReShade, dgVoodoo2, GPU-fix, FFB, BepInEx, or
-control state. Third-party FFB plugin coverage is NOT included -- checking it needs
-a live fetch of `AutoSetup.cmd`, which would break the no-live-fetch inspection
-contract. The result object carries the named broken/empty profiles and coverage
-lists to the guided action screen. Automatic repair searches known game folders,
-asks before saving, creates a complete `UserProfiles\FullBackup\HealthCheck_*`
-backup first, and reports fixed, unchanged/unresolved, and save-failed outcomes.
-Manual repair requires an explicit executable selection, validates the configured
-games-root and reparse boundaries, and follows the same backup gate. PostgreSQL
-and optional setup entries are direct next actions, but no mutating workflow
-starts until the user selects one.
+control state. Third-party FFB plugin coverage is NOT included -- checking it
+needs a live fetch of `AutoSetup.cmd`, which would break the no-live-fetch
+inspection contract. The result object carries the named broken/empty profiles
+and coverage lists to the guided action screen. Automatic repair first runs a
+dry-run candidate search, displays exact candidate paths, and asks for explicit
+review before saving. Only the reviewed set is reapplied, with a complete
+`UserProfiles\FullBackup\HealthCheck_*` backup before confirmed writes. The
+configured games folder is the default search root; `[S]` accepts another folder
+only after `Test-TpmRepairSearchRoot` canonicalizes an existing, non-reparse
+folder and rejects overlap with the TeknoParrot root, TPM program folder, or either
+ZIP source. `[C]` re-enters AutoSync with an explicit whitelist of the broken profile
+codes, so the normal preview/fresh-apply pipeline cannot broaden the recovery into
+an all-games extraction. Manual repair requires an explicit executable selection,
+validates the configured games-root and reparse boundaries, and follows the same
+backup gate. PostgreSQL and optional setup entries are direct next actions, but no
+mutating workflow starts until the user selects one.
 
 **Crosshair gallery selection.** The HTML gallery contains all discovered valid
 crosshairs. A short-lived localhost bridge bound only to `127.0.0.1` accepts a
@@ -1651,6 +1689,11 @@ UserProfiles backup (same pattern as GPU fix/cursor hide/FFB Blaster -- each sta
 destructive flow backs up independently rather than sharing one backup call), then calls
 the same `Build-ArchetypePool` / `Invoke-ControlPropagation` functions the AutoSync/
 Register flow already uses. No propagation algorithm code is duplicated.
+All standalone profile-mutation callers use a fail-closed backup boundary:
+folder creation and profile enumeration/copy use terminating errors, and any failure
+returns before XML mutation. This includes GPU Fix, CursorHide, FFB Blaster, and
+Propagate Controls; the FFB wrapper also refuses to continue to its optional plugin
+after a failed native result.
 
 **`Write-ControlPropagationResults`** (next to `Invoke-ControlPropagation`) is a new
 extraction: the results-display block (per-status messaging, games-updated count,

@@ -134,7 +134,14 @@
                              using the stable x64/x86 package (see below).
 
      Maintenance and Recovery
-       10) Health check    -- read-only library status, safe to run any time.
+      10) Health check    -- read-only library status, safe to run any time.
+                          Broken saved paths can be repaired from reviewed
+                          candidates. The default search root is the configured
+                          games folder; another search folder must be existing,
+                          canonical, non-reparse, and outside TeknoParrot, TPM,
+                          and both ZIP source folders. C returns to AutoSync
+                          with only the broken profile codes selected for
+                          re-extraction, never the whole library.
        11) Restore backup  -- roll UserProfiles, LaunchBox files, or Postgres
                              databases back to a previous backup.
        12) Postgres setup  -- install/configure PostgreSQL for games that
@@ -336,10 +343,14 @@
   Numbered selection updates the optional preview. U is the only path toward
   deployment; B cancels without changes and D returns after showing details.
   A terminal-only selection remains available when the preview cannot open.
-  The optional gallery uses the bundled and validated
-  PreviewAssets\ReShadePreviews\TPM-preview-landscape.png reference image;
-  its identity and hash are recorded in the preview cache. No profile
-  selection changes files until U and the existing confirmation.
+    The optional gallery uses a safe approximation based on the bundled and
+    validated PreviewAssets\ReShadePreviews\TPM-preview-landscape.png
+    reference image. It does not run the game or execute ReShade shaders.
+    Before is the untouched baseline, After is a TPM approximation of the
+    selected profile, and Split/slider compare that approximation with the
+    baseline. Actual in-game results may vary. Its identity and hash are
+    recorded in the preview cache. No profile selection changes files until U
+    and the existing confirmation.
 
 
   If you downloaded TeknoParrot Manager as a ZIP release, the ReShade DLLs
@@ -441,7 +452,10 @@
        entry records source, filename/version, computed SHA-256, and transfer
        metrics; no publisher signature or digest trust anchor is claimed.
   If a game is covered by both, you are asked once which to use for all
-  such games -- it never silently picks one for you.
+  such games -- it never silently picks one for you. Missing saved paths and
+  unavailable saved devices are reported separately; either result offers
+  the mode 10 Health Check handoff while unsupported/no-match games remain
+  distinct from true deployment errors.
 
   To run:
     Choose mode 8 from the main menu.
@@ -757,8 +771,8 @@
   ------------
   - Profiles are backed up before every run:
     UserProfiles\FullBackup\<date_time>\. Nothing is ever deleted.
-  - If backup folder creation fails, the script stops rather than proceeding
-    without a restore point.
+  - If the backup folder cannot be created or a profile copy fails, the
+    script stops rather than proceeding without a complete restore point.
   - You must own or otherwise have lawful rights to the original arcade PCB
     and any ROM/game data you use. TPM does not provide, distribute, or
     endorse unauthorized game files.

@@ -290,16 +290,18 @@
     The terminal remains usable if the gallery is behind another window,
     closed, unavailable, or fails. Numbered selection updates the gallery when
     available. U is the only path toward deployment; B cancels without
-    changes and D returns after showing details. The gallery compares the
-    bundled TPM-owned landscape reference image from
-    PreviewAssets\ReShadePreviews\TPM-preview-landscape.png. TPM validates and
-    hashes this image before rendering. Before is the untouched baseline, After
-    is the processed profile, Split places baseline left and processed output
-    right, and the slider moves that boundary from all processed to all
-    baseline. The terminal remains authoritative if the preview cannot open.
-    Multi-monitor suitability is read-only and advisory, uses caller-supplied
-    evidence, treats duplicate target IDs as ambiguous, and does not separately
-    label EXTENDED arrangements or acquire Windows display topology itself.
+    changes and D returns after showing details. The gallery is a safe
+    approximation based on the bundled TPM-owned landscape reference image
+    from PreviewAssets\ReShadePreviews\TPM-preview-landscape.png. It does not
+    run the game or execute ReShade shaders. TPM validates and hashes this
+    image before rendering. Before is the untouched baseline, After is a TPM
+    approximation of the selected profile, Split places baseline left and the
+    approximation right, and the slider moves that boundary from all processed
+    to all baseline. Actual in-game results may vary. The terminal remains
+    authoritative if the preview cannot open. Multi-monitor suitability is
+    read-only and advisory, uses caller-supplied evidence, treats duplicate
+    target IDs as ambiguous, and does not separately label EXTENDED
+    arrangements or acquire Windows display topology itself.
 
     DLL, generated preset, and approved effect files are staged and promoted
     together. Before replacing a destination, TPM requires a matching
@@ -318,22 +320,29 @@
     your GPU and applies the correct fix to every registered game that has one.
     TeknoParrot's GameProfiles folder is scanned at runtime so newly added games
     are always covered. Safe to re-run any time you change or update your GPU.
-    Available as menu option 7 or as an optional step at the end of a normal run.
+    If a saved game path is missing or unavailable, the result offers a direct
+    handoff to mode 10, Library Health Check. Available as menu option 7 or as
+    an optional step at the end of a normal run.
 
   - Force feedback (FFB). Two independent ways to get wheel/stick rumble and
     force feedback -- TeknoParrot's own built-in FFB Blaster (needs a paid
     TeknoParrot membership) and a free third-party plugin (no subscription
     needed, fetched live from GitHub each run). Both can be set up at once
     since they cover different games; if a game is covered by both, you are
-    asked once which to use for all such games. See FORCE FEEDBACK (FFB)
-    SETUP below for full details. Available as menu option 8.
+    asked once which to use for all such games. Missing or unavailable saved
+    paths are reported separately and offer a direct handoff to mode 10,
+    Library Health Check. Unsupported/no-match games remain distinct from
+    true deployment errors. See FORCE FEEDBACK (FFB) SETUP below for full
+    details. Available as menu option 8.
 
   - BepInEx update and setup. BepInEx is a third-party Unity plugin/modding
     framework some games need (a live-fetched example list is shown in the
     menu). Mode 9 offers a user-approved install, update, or repair-reset for selected
     games using the stable x64 or x86 package matching each validated executable.
-    Unsafe roots and failed validation make no changes. See BEPINEX SETUP
-    below. Available as menu option 9.
+    Unsafe roots and failed validation make no changes. Missing or unavailable
+    saved paths offer a conditional H handoff to mode 10, Library Health Check;
+    ordinary deployment failures keep their normal retry, Details, and support
+    guidance. See BEPINEX SETUP below. Available as menu option 9.
 
   - Postgres setup. Installs and configures the local PostgreSQL 8.3
     database that some Incredible Technologies games need (Golden Tee
@@ -643,15 +652,22 @@
        Read-only. TPM first reports how many registered profiles have a valid,
        broken, or empty GamePath and lists broken profile codes by name. It
        explicitly says that TPM checked your setup and did not change anything.
-       For broken paths, [R] Try automatic path repair searches known game
-       folders and asks before saving; [M] Let me pick the correct folders
-       manually requires you to select the exact executable and never guesses.
-       If database-backed games need setup, [P] Set up PostgreSQL for these
-       games is offered and the setup workflow makes its safety backup.
-       Direct optional actions are offered as [5] ReShade, [6] dgVoodoo2,
-       [7] GPU Fix, [8] Force Feedback, and [9] BepInEx. [D] Details shows
-       technical counts and the log path; [B] returns to the main menu.
-       No repair or setup begins until you choose an action.
+       For broken paths, [R] Try automatic path repair first performs a
+       dry-run candidate search. TPM displays the exact proposed paths, then
+       asks again before applying the reviewed set. The configured games folder
+       is the default search root. [S] Search another game folder accepts only
+       an existing, canonical, non-reparse folder outside TeknoParrot, TPM,
+       and both ZIP source folders. [S] is offered when the current search
+       finds no candidate. [C] Re-extract from the configured source returns
+       to AutoSync with only the broken profile codes selected; it cannot
+       broaden into an all-games extraction. [M] Let me pick the correct
+       folders manually requires you to select the exact executable and never
+       guesses. A complete HealthCheck backup is made before confirmed saves.
+       Once no broken paths remain, [P] Set up PostgreSQL for these games is
+       offered when needed, along with direct optional actions [5] ReShade,
+       [6] dgVoodoo2, [7] GPU Fix, [8] Force Feedback, and [9] BepInEx.
+       [D] Details shows technical counts and the log path; [B] returns to
+       the main menu. No repair or setup begins until you choose an action.
 
   11) Restore from backup
        Choose which backup to restore: (1) your UserProfiles -- rolls back
@@ -781,6 +797,9 @@
     - NOT overlap the main or supplementary ZIP source folder.
     - NOT be inside or contain the TPM program/package folder.
     - pass the same checks after every typed or browsed recovery choice.
+    - a profile-backup folder or copy failure stops real AutoSync before
+      extraction; there is no "continue anyway" override, including in
+      unattended runs.
 
   Naming convention. Extraction folders use the raw ZIP file name as-is,
   so they match the naming convention used by the collection. If a game was
@@ -1616,6 +1635,10 @@
     games) and enables it on every registered profile that has it. Your
     UserProfiles are backed up first, same as every other destructive
     operation in this script.
+    If the native FFB Blaster backup cannot be created or copied completely,
+    or a native profile write fails, the native step stops as incomplete and
+    the optional plugin is not offered. A later plugin result cannot mask that
+    native failure.
 
   Mechanism 2 -- Third-party FFB plugin (free, no subscription needed)
 
@@ -1641,12 +1664,15 @@
     fresh verified profile backup and clears the native FFB Blaster fields
     for exactly those overlaps before any third-party DLL is deployed. If
     that switch cannot be verified, deployment is blocked.
-
     Plugin DLL collisions: a few games need the same destination DLL name
     for both ReShade and this plugin (for example H2Overdrive needs
     d3d9.dll for both). If ReShade already occupies that filename in a
     game's folder, FFB plugin setup skips that game with a warning rather
-    than overwriting it.
+    than overwriting it. Missing saved paths and unavailable saved devices
+    are reported separately and offer a direct handoff to mode 10, Library
+    Health Check; unsupported/no-match games remain distinct from true
+    deployment errors, even when the same run has path-limited games.
+
 
   Removing FFB
 

@@ -1,5 +1,26 @@
 # Changelog
 
+## RC8 wiki publication plan (HOLD -- no push)
+
+- Authoritative final pre-release gate: issue #323. Live wiki publication
+  remains blocked until PR #321 remediation is committed and pushed, exact-head
+  CI/source/documentation/package checks pass, the owner smoke-tests the exact
+  candidate package, and ARCADE OMP completes the full packaged-runtime bug
+  pass against that same package identity.
+- No live wiki checkout, live-wiki inspection, or wiki push was performed in
+  this worktree. The files under `docs/wiki-updates\` are staging/reference
+  content only.
+- Complete wiki page list for the publication audit: Home, Quick-Start, Setup,
+  AutoSync, Register, Restore-Backup, Crosshairs, ReShade, dgVoodoo2, GPU-Fix,
+  FFB-Setup, Troubleshooting, and Changelog.
+- Planned changed-page report: Home, Quick-Start, AutoSync, ReShade,
+  dgVoodoo2, GPU-Fix, FFB-Setup, Troubleshooting, and Changelog require
+  review/synchronization for the current remediation. Setup, Register,
+  Restore-Backup, and Crosshairs remain listed for review; no live-page change
+  is claimed here.
+- Publication remains HOLD. No release notes were published externally, and
+  no wiki content was pushed.
+
 ## v1.0 RC8 (candidate, not published) -- runtime recovery and release-integrity preparation
 
 - RC7 remains the current published release. RC8 has no public tag, release

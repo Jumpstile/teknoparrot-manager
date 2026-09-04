@@ -271,18 +271,27 @@ shown adapts to your window size.
 Library Health Check is read-only. TPM checks registered profile paths and
 optional coverage, then explicitly says that it did not change anything.
 Broken saved paths are listed by game name and count. The result screen offers
-`[R] Try automatic path repair` and `[M] Let me pick the correct folders
-manually`; automatic repair searches known game folders and asks before saving,
-while manual repair requires you to select the exact executable and never
-guesses. A complete `UserProfiles\FullBackup\HealthCheck_*` backup is made
-before any confirmed path repair.
+`[R] Try automatic path repair`, `[M] Let me pick the correct executable or
+folder manually`, `[S] Search another game folder`, and `[C] Re-extract from
+the configured source`. Automatic repair first performs a dry-run candidate
+search and displays the exact proposed paths. The configured games folder is
+the default search root; `[S]` accepts only an existing, canonical,
+non-reparse folder outside the TeknoParrot root, TPM program folder, and ZIP
+source folders. If no candidate is found, TPM offers another folder search.
+TPM asks again before applying the reviewed set, creates a complete
+`UserProfiles\FullBackup\HealthCheck_*` backup, and applies only that reviewed
+set.
+`[C]` re-enters AutoSync with an explicit whitelist of the broken profile
+codes, so its normal preview and fresh apply scan cannot broaden recovery into
+an all-games extraction. Manual repair requires you to select the exact
+executable and never guesses.
 
-The same result screen offers `[P] Set up PostgreSQL for these games` when
-database-backed games need setup, plus direct actions for `[5] ReShade`,
-`[6] dgVoodoo2`, `[7] GPU Fix`, `[8] Force Feedback`, and `[9] BepInEx`.
-`[D] Details` shows technical counts and the log path; `[B] Back to main menu`
-leaves the library unchanged. Health Check never installs, deploys, or
-rewrites anything until a subsequent action is selected.
+Once no broken paths remain, the same result screen offers `[P] Set up
+PostgreSQL for these games` when database-backed games need setup, plus direct
+actions for `[5] ReShade`, `[6] dgVoodoo2`, `[7] GPU Fix`, `[8] Force
+Feedback`, and `[9] BepInEx`. `[D] Details` shows technical counts and the log
+path; `[B] Back to main menu` leaves the library unchanged. Health Check never
+installs, deploys, or rewrites anything until a subsequent action is selected.
 
 ---
 
@@ -322,6 +331,9 @@ Rules:
 - Must **not overlap** the main or supplementary ZIP source folder
 - Must **not be inside or contain** the TPM program/package folder
 - An invalid typed or browsed path is rejected before it is saved or used
+- A profile-backup folder or copy failure stops a real AutoSync run before
+  extraction; there is no "continue anyway" override, including unattended
+  runs.
 - The script warns if the drive has less than ~1.5x the total ZIP size free
 
 Interrupted extractions are handled automatically: a `.extracting` sentinel file is placed next to the game folder at the start and removed only on success. If the sentinel is found on the next run, the incomplete folder is detected and the game is re-extracted from scratch.
@@ -519,15 +531,17 @@ internal cache paths or implying that live-fetched runtime files are bundled.
 shows descriptions, and `R` reopens the optional gallery without taking
 terminal input away from the user.
 
-The gallery uses a deterministic, TPM-owned comparison based on the bundled
+The gallery uses a safe deterministic comparison based on the bundled
 `PreviewAssets\ReShadePreviews\TPM-preview-landscape.png` reference image.
-TPM validates the image before use and records its identity, version, and
-SHA-256 in preview cache metadata. `Before` is the untouched baseline, `After`
-is the selected profile transform, `Split` shows baseline on the left and
-processed output on the right, and the slider moves that boundary from 0 (all
-processed) to 100 (all baseline). Choosing a profile does not write files;
-deployment remains behind the explicit confirmation. If rendering or display
-is unavailable, typed selection remains available.
+It does not run the game or execute ReShade shaders. TPM validates the image
+before use and records its identity, version, and SHA-256 in preview cache
+metadata. `Before` is the untouched baseline, `After` is a TPM preview
+approximation of the selected profile, `Split` shows baseline on the left and
+the approximation on the right, and the slider moves that boundary from 0
+(all processed) to 100 (all baseline). The actual in-game result may vary.
+Choosing a profile does not write files; deployment remains behind the
+explicit confirmation. If rendering or display is unavailable, typed
+selection remains available.
 
 After deployment, the result separates newly installed, updated, protected
 unchanged, missing saved paths, unsupported architecture, and errors. Missing
@@ -647,21 +661,20 @@ finished`, names each installed game and detected API (for example `Glide2x`),
 explains that older DirectX/Glide calls may not display correctly on modern
 Windows, and says what to try next. It also states that existing dgVoodoo2
 DLLs, including unowned or changed files, were not removed or replaced and
-that skipped missing-path games were unchanged. Press `D` for technical
+that skipped missing-path games were unchanged. For missing saved paths, the
+result offers `[H] Open 10) Library Health Check`; ordinary deployment errors
+do not offer that path-specific choice. Press `D` for technical
 deployment/skip details or `O` for support-package and log guidance.
-
-**Removing:** TPM does not automatically remove unowned or changed dgVoodoo2 hooks. Review those files through the advanced troubleshooting path.
-
-Library Health Check reports which registered games import a legacy API but don't have the matching DLL deployed yet, read-only and without changing anything. Its result screen offers direct `[6] dgVoodoo2` setup after the report.
 
 ---
 
 ## GPU Compatibility Fixes
 
-Many TeknoParrot games include optional per-vendor fix settings (AMD, NVIDIA, Intel). Mode 7 auto-detects your GPU via WMI and applies the correct fix to every registered game that has one. Scans `GameProfiles` at runtime — no update needed when new games are added. Safe to re-run any time you change your GPU.
-
-Not sure if you're missing any? Library Health Check reports which registered games are eligible for a GPU fix but don't have it applied yet, without changing anything. Its result screen offers direct `[7] GPU Fix` setup after the report.
-
+Not sure if you're missing any? Library Health Check reports which registered
+games are eligible for a GPU fix but don't have it applied yet, without
+changing anything. If GPU setup skips missing or unavailable saved paths, its
+result offers `[H] Open 10) Library Health Check`. Its result screen offers
+direct `[7] GPU Fix` setup after the report.
 ---
 
 ## Force Feedback (FFB) Setup
@@ -673,6 +686,9 @@ Force feedback makes a wheel or stick push back / rumble to match what's happeni
 TeknoParrot's own built-in force feedback feature. Well-integrated, but it **only works with an active, paid TeknoParrot membership** ([teknoparrot.com/en/Home/Subscription](https://teknoparrot.com/en/Home/Subscription)). The script can't check your subscription status, so it asks directly before changing anything — answering N skips it entirely.
 
 If you answer Y, the script scans your TeknoParrot install's `GameProfiles` for the FFB Blaster field (detected at runtime, never hardcoded) and enables it on every registered profile that has it. `UserProfiles` are backed up first.
+If native FFB Blaster backup creation/copy or profile writes fail, the native
+step is reported as incomplete and the optional plugin is not offered; a later
+plugin result cannot mask the native failure.
 
 Library Health Check also reports which registered games are eligible for FFB Blaster but don't have it enabled yet. This coverage is read-only; it does not fetch the third-party plugin. Its result screen offers direct `[8] Force Feedback` setup; third-party plugin coverage isn't included there since checking it needs a live lookup.
 
@@ -684,7 +700,7 @@ Controller support (per the plugin's own docs): true force feedback on FFB-capab
 
 **Plugin DLL collisions:** a few games need the same destination DLL name for both ReShade and this plugin (e.g. H2Overdrive needs `d3d9.dll` for both). If ReShade already occupies that filename, FFB setup skips that game with a warning rather than overwriting it.
 
-**If a game is covered by both:** the script lists every such game once and asks a single question — keep FFB Blaster (native) for all of them, or use the third-party plugin for all of them. Native is the safe default; only an explicit `N` selects the plugin, while blank or invalid input keeps native. Choosing the plugin creates a fresh verified profile backup and clears the native FFB Blaster fields for exactly those overlaps before any third-party DLL is deployed. If that switch cannot be verified, deployment is blocked.
+**If a game is covered by both:** the script lists every such game once and asks a single question -- keep FFB Blaster (native) for all of them, or use the third-party plugin for all of them. Native is the safe default; only an explicit `N` selects the plugin, while blank or invalid input keeps native. Choosing the plugin creates a fresh verified profile backup and clears the native FFB Blaster fields for exactly those overlaps before any third-party DLL is deployed. If that switch cannot be verified, deployment is blocked. Missing saved paths and unavailable saved devices are classified separately and offer a direct handoff to `[H] 10) Library Health Check`; unsupported/no-match games remain distinct from true deployment errors, including when a plugin deployment also has path-limited games.
 
 **Removing FFB:** TPM records its own deployed hook files. When you choose
 native FFB for an overlap, it backs up and removes only a matching unchanged
@@ -704,8 +720,10 @@ backs up the fixed BepInEx tree, and rolls back any failed promotion.
 Nothing is installed silently into every game. Unsafe roots, failed backups,
 extraction errors, digest failures, and rollback uncertainty fail closed.
 Network failures keep the operation incomplete and offer an automatic retry;
-they do not claim that the setup finished. The official troubleshooting guide
-remains available for advanced cases.
+they do not claim that the setup finished. Missing or unavailable saved paths
+are offered a direct `[H] 10) Library Health Check` handoff, while ordinary
+deployment failures keep their normal Details/support guidance. The official
+troubleshooting guide remains available for advanced cases.
 
 ---
 
