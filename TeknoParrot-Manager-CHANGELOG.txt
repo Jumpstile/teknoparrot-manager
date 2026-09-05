@@ -21,6 +21,89 @@
   instead of being copied into Action Required. External TPM values remain
   unchanged. No separate EXTENDED topology classification or live Windows
   display-topology acquisition is included under the feature freeze.
+  HyperSpin export now gates missing emulator IDs with explicit Fix, Add
+  anyway, or Skip choices; Skip is the safe default and no games are written.
+  Legacy .xml fallback is now limited to an explicit Add anyway choice after
+  a missing emulator ID; valid IDs never scan unrelated games files.
+  One-game AutoSync now pauses before optional library maintenance and offers
+  New game only, all games, or Back; New game only is safe default. Related-only
+  scoping is deferred rather than presented as an unimplemented choice.
+  ReShade preview comparison now has a real 0-100 in-memory slider; its
+  percentage controls the Before/After split, and disk cache keys include the
+  slider position when cached artifacts are requested. The gallery now decodes
+  the bundled TPM-preview-landscape.png reference, validates its identity and
+  SHA-256, and reuses a bounded in-memory reference/processed cache.
+  RC8 runtime recovery now classifies PostgreSQL password authentication
+  failures separately and offers masked password validation before retrying
+  the protected backup. Crosshair browser selection no longer invokes a
+  PowerShell callback from an I/O thread; it polls completed requests in the
+  main runspace and preserves typed fallback. ReShade all-games chooser state
+  is initialized before iteration, and profile selection now opens a single
+  switchable visual gallery before deployment confirmation.
+  Console startup sizing now grows BufferSize before WindowSize, catches
+  unsupported hosts once, and leaves the constrained responsive menu usable
+  without repeating resize errors on redraw; invalid menu choices persist
+  through the next cleared redraw before the prompt.
+  ReShade's normal flow now shows the bundled, validated TPM landscape
+  reference with profile-specific in-memory processing. Before, After, Split,
+  and the 0-100 slider use the same reference and a tested moving boundary;
+  deployment remains behind explicit confirmation. Deployment output separates
+  installed, updated, protected, missing-path, and unsupported-game outcomes
+  with a direct path-repair action.
+  ReShade option 5 no longer waits behind a blocking modal gallery. It opens
+  the optional gallery non-modally and immediately shows a numbered terminal
+  chooser with U/R/B/D commands; profile selection remains usable when the
+  preview is behind, closed, unavailable, or fails. The normal menu clamps
+  anomalous Windows Terminal backing-buffer widths to a compact readable
+  layout instead of rendering a giant empty frame. Support manifests now
+  summarize routine missing optional diagnostics while preserving individual
+  collection failures.
+  Crosshair preview pages now support bounded localhost click selection with a
+  per-session token; typed numeric selection remains available as fallback.
+  ReShade mode 5 now includes a removal action. The scanner reports
+  removable TPM-owned files separately from protected bundled/preinstalled,
+  unowned/ambiguous, changed, malformed, missing-path, and already-clean
+  games. Only reviewable games enter the existing filtered chooser. Removal
+  previews enumerate keep/remove decisions, require typing REMOVE, re-read
+  profile metadata and re-resolve each target immediately before backup and
+  deletion, verify canonical containment and live SHA-256 values, back up before
+  deletion, and roll back files plus ownership metadata if the manifest update
+  fails. The final summary separates removed, already-clean, missing-path,
+  protected, changed, malformed, rolled-back, and failed outcomes. Game
+  executables, UserProfiles, LaunchBox, HyperSpin, bundled, and ambiguous files
+  remain protected.
+PostgreSQL backup diagnostics now retain the psql/pg_dump diagnostic stream
+and exit code in the blocked result, so cause categories are based on the
+actual client failure instead of a generic existence-query message.
+PostgreSQL workflow failures now carry concrete Retry/Stop remediation
+labels in the status contract instead of acknowledgement-only metadata.
+Library Health Check now has a read-only report followed by explicit
+broken-path repair, PostgreSQL, and optional-component actions. Automatic path
+repair first performs a dry-run candidate search, displays exact proposed
+paths, asks before applying the reviewed set, and creates a verified profile
+backup before saving. The configured games folder is the automatic search root;
+an [S] folder is accepted only when it is existing, canonical, non-reparse, and
+outside TeknoParrot, TPM, and ZIP source roots. If no candidate is found, the
+user can search another game folder. [C] returns to AutoSync with an explicit
+whitelist of broken profile codes, so recovery cannot broaden into an
+all-games extraction. Manual repair requires an explicit executable selection
+and never guesses. Unattended Health Check stops after the report.
+All destructive profile workflows now stop before mutation if a profile backup
+folder cannot be created or any profile copy fails; interactive and unattended
+runs have no incomplete-backup override.
+The FFB workflow now treats native FFB Blaster backup or profile-write failure as
+fatal before offering the optional plugin; a later plugin result cannot mask an
+incomplete native step.
+
+Optional setup results now route missing or unavailable saved paths directly to
+Health Check while leaving ordinary deployment failures on their normal
+failure guidance. FFB centrally classifies missing leaves and unavailable
+devices separately, preserves path metadata even when plugin deployment also
+fails, and keeps no-match games distinct from true errors. ReShade preview
+text now states that the bundled-image comparison is an approximation and does
+not run games or ReShade shaders; actual in-game results may vary.
+
+
 
   Fixes: Eggman updates offer a validated primary ZIP/source folder when the
   current DAT is protected under the TeknoParrot root; PostgreSQL setup asks
@@ -32,6 +115,15 @@
 
   UX: restore, crosshair, first-run, optional-download, update, recovery, and
   support-package paths keep beginner-readable status/retry guidance visible.
+  Beginner-flow hardening: the main menu now uses a complete-or-block render contract
+  with deterministic width/height behavior, an explicit H/L/Q command allowlist, and a
+  separate Help screen. AutoSync/Register use P/R/B preview choices with preview as the
+  safe default. ReShade offers trusted source updates and an all-games profile choice;
+  crosshair galleries are explicitly visual-only and require typed indices. PostgreSQL
+  database backups now precede config/profile writes and expose friendly affected game
+  names alongside technical database identifiers, clearly state that nothing changed,
+  and offer Retry, Details, Skip, and Back recovery choices. Support output shows concise
+  collection counts while retaining verbose NotPresent detail in the manifest.
   Create Support Package collects allowlisted TPM/TeknoParrot/game text logs
   plus metadata-only plugin inventories into one redacted ZIP; unsafe
   executable/archive masquerades and materially binary text are rejected
@@ -99,6 +191,11 @@
   retained when profiles change. The chooser exposes explicit restore,
   remembered-selection, and favorite paths without changing trust or monitor
   state.
+  ReShade chooser refinement: terminal and gallery descriptions now include
+  the exact approved shader filename and technique for each non-empty profile,
+  in canonical order. The labels are generated from TPM's approved profile
+  definitions and effect catalog; internal paths and live-fetched runtime
+  files remain hidden.
 
 
 
@@ -1522,7 +1619,11 @@
       per-game prompt, so the script resolves matches first, then asks
       ONE question covering every overlapping game at once: keep native
       for all of them, or use the third-party plugin for all of them.
-      Never silently defaults to either side.
+      Native is the safe default; only an explicit N selects the plugin.
+      Blank or invalid input keeps native.
+    - Choosing the third-party owner creates a fresh verified profile backup,
+      clears native FFB Blaster fields for exactly the overlaps, verifies the
+      switch, and blocks plugin deployment if that ownership transition fails.
     - If the third-party plugin's destination DLL filename is already
       occupied (e.g. ReShade using d3d9.dll for the same game), that game
       is skipped with a warning -- never overwritten.

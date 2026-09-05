@@ -143,11 +143,101 @@ genuinely makes zero changes.
   to genuinely touch nothing on disk via a full before/after filesystem
   diff, not just console wording.
 
+## Arcade OMP Packaged Runtime UX Gate (final RC8 pre-release gate; issue #323)
+
+Purpose: catch defects that appear only when TeknoParrot Manager runs as the
+real packaged script in the real Arcade environment. This is the final required
+gate before RC8 release authorization, not post-release hardening or optional polish.
+
+### 1. Package identity
+
+- Verify the package was built from the exact PR head and record the branch and
+  commit SHA.
+- Verify the packaged script hash matches that exact source head.
+- Verify every bundled asset exists, including all 321 Crosshairs PNGs and
+  packaged runtime dependencies.
+- Verify the intended package path/name and source identity so no stale ZIP is
+  used accidentally.
+
+### 2. Terminal and menu UX
+
+- Run the package in default-size Windows Terminal and in a constrained-height
+  terminal.
+- Capture screenshots and inspect the rendered output.
+- Verify the title/version, options 1-15, H/L/Q controls, and prompt appear
+  directly below the choices.
+- Verify there is no giant empty frame, clipped choice, or lost prompt.
+
+### 3. One-letter prompts
+
+- Verify choices are immediately above each prompt, the prompt line is short,
+  and the cursor remains on the same line after the prompt.
+- Verify no malformed prompt such as `.:` appears.
+- Cover GPU Fix, dgVoodoo2, ReShade, BepInEx, FFB, Health Check, PostgreSQL
+  recovery, and support/log guidance.
+
+### 4. ReShade runtime UX
+
+- Open option 5 from the package and verify numbered profiles plus shader and
+  technique names.
+- Verify the wording identifies a preview approximation using the bundled
+  image, says no game or shader execution occurs, and says actual results may
+  vary.
+- Verify the gallery opens non-modally while the terminal chooser remains
+  usable.
+- Verify the slider visibly moves the divider; switching profiles preserves
+  slider operation; `R` reopen preserves selection and slider operation; and
+  `U` applies only after confirmation.
+
+### 5. Library Health Check path repair
+
+- Use broken-path fixtures or real broken paths.
+- Verify broken-path mode does not show unrelated setup choices.
+- Verify automatic search precedes manual browse, candidates are displayed
+  before saving, backups are created only before applying, and no save occurs
+  without confirmation.
+- Verify no-match offers manual executable selection and source re-copy or
+  re-extraction.
+
+### 6. Feature workflow routing
+
+- Verify GPU Fix, dgVoodoo2, ReShade, BepInEx, and FFB skip broken paths
+  safely and route to option 10, Library Health Check.
+- Verify those workflows do not expose duplicate feature-specific path-repair
+  wizards.
+
+### 7. Failure truthfulness
+
+- Simulate backup and profile-copy failures and verify each workflow fails
+  closed before mutation.
+- Verify plugin success cannot mask native FFB failure.
+- Verify AutoSync aborts before extraction when backup or profile copy fails.
+- Verify result screens state what happened, what TPM changed or did not
+  change, and the next action.
+
+### 8. Support package clarity
+
+- Create a support package containing broken-path games and verify creation
+  succeeds.
+- Verify path-limited plugin inventory omissions are not counted as true
+  collection failures.
+- Verify affected games appear under `What TPM could not collect`.
+
+Pester remains the home for pure logic and source contracts. Dedicated Arcade
+packaged-runtime smoke scripts should exercise the real package, capture
+screenshots and logs as evidence, and run on the exact frozen source identity.
+The acceptance target is that clipped menus, hidden choosers, misleading
+success screens, broken ReShade slider behavior, incorrect path-repair routing,
+and support-package false-failure wording are caught before a user reports
+them.
+
+
 Explicitly out of scope through phase 1.7 (tracked in issue #88 for later
 phases, not implemented yet): broad fuzzing, long soak testing, mutation
 testing, a full property-based framework, randomized menu walking, large
-synthetic libraries, GUI/browser automation, performance timing, soak
-testing, cross-project portability.
+synthetic libraries, performance timing, and cross-project portability. GUI
+and browser automation remain out of scope for phase 1.7; the packaged-runtime
+UX gate above is the separate final RC8 pre-release requirement tracked in #323.
 
 ## Certification Levels
 

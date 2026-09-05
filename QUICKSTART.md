@@ -133,7 +133,8 @@ cursor-control output.
 ## Create Support Package
 
 If you need help, choose **Create Support Package**. TPM collects safe logs and
-reports for you, checks private information, and creates one ZIP in
+reports for you, including per-file ReShade ownership/removal scan and
+transaction details, checks private information, and creates one ZIP in
 `SupportPackages\` beside the script. Send that ZIP when asking for help.
 
 The package may include allowlisted TPM and TeknoParrot text logs, safe
@@ -207,6 +208,18 @@ Run mode 4 again any time to change designs. Add your own PNG files to the `Cros
 ## ReShade Visual Enhancements
 
 ReShade adds post-processing effects without modifying game data. TPM does not automatically remove unowned or changed hook files; use the advanced troubleshooting path for those files.
+
+To remove ReShade, choose `R` from mode 5. The filtered chooser contains only
+games with verified removable or protected findings. The preview enumerates
+each file that will be removed and each protected file that will be kept. TPM
+requires typing `REMOVE`; cancel/back performs no deletion. Only unchanged
+TPM-owned files inside the resolved ReShade target are eligible. Immediately
+before backup and deletion, TPM re-reads the profile, re-resolves the target,
+and rechecks canonical non-reparse leaf containment and the exact hash. A
+verified backup is created before deletion. Bundled, preinstalled, unowned,
+ambiguous, changed, malformed, and out-of-target files remain protected. The
+final report separates removed, already-clean, missing-path, protected, changed, malformed,
+rolled-back, and failed outcomes.
 
 **Popular effects:**
 
@@ -355,6 +368,11 @@ Export registered games to HyperSpin 2? (Y/N)
 Answer Y to merge every registered game not already present into HyperSpin 2's TeknoParrot game list (default data folder: `C:\ProgramData\HyperSpin\data`). Your path is saved and reused on future runs.
 
 **Prerequisites:** TeknoParrot must be set up as an emulator in HyperSpin 2 first — the emulator title must contain "TeknoParrot" (spacing and capitalisation variations are fine). HyperSpin 2 must not be running when you answer Y.
+If the TeknoParrot entry in `emulators.json` has no `id`, TPM stops before
+locating or writing a games file and asks **F** to fix it, **A** to add anyway,
+or **S** to skip (the safe default). Re-add TeknoParrot in HyperSpin before
+choosing **F**. Only **A** permits the legacy `.xml` ROM-entry fallback and may
+write entries with an empty `systemId`; **S** leaves HyperSpin data unchanged.
 
 Games are added with title only. Use HyperSpin 2's Scrape feature for box art and metadata.
 
@@ -451,13 +469,21 @@ Answer Y to fetch ProfileCode.png for every registered game not already in <Tekn
 
 ## Library Health Check
 
-Mode 10 is a **read-only** status check — it never extracts, registers, repairs, propagates, or touches the network. Safe to run any time. Reports:
+Mode 10 is a **read-only** status check. It reports valid/broken/empty
+`GamePath` counts with affected profile codes, GPU fix / FFB Blaster /
+dgVoodoo2 / Postgres coverage, and informational ReShade / BepInEx counts.
+TPM explicitly says that it checked your setup and did not change anything.
 
-- Registered/broken/empty `GamePath` counts, with affected profile codes listed
-- GPU fix / FFB Blaster / dgVoodoo2 / Postgres coverage — which eligible games don't have each applied yet
-- ReShade / BepInEx install counts, informationally (these are cosmetic per-game choices, not flagged as something to fix)
+For broken saved paths, the result screen offers **R** automatic repair
+(known-folder search plus confirmation) and **M** manual repair (you select
+the exact executable; TPM never guesses). It creates a complete profile backup
+before a confirmed path repair. It also offers **P** PostgreSQL setup when
+needed and direct **5** ReShade, **6** dgVoodoo2, **7** GPU Fix, **8** Force
+Feedback, and **9** BepInEx actions. **D** shows technical details and **B**
+returns to the menu. No repair or setup starts until you choose an action.
 
-Third-party FFB plugin coverage isn't included here (checking it needs a live lookup) — use mode 8 for that instead.
+Third-party FFB plugin coverage isn't included here because checking it needs a
+live lookup; choose **8** for that instead.
 
 ---
 

@@ -422,7 +422,11 @@ function Test-TPMProductionPSScriptAnalyzerV1 {
     # actually performed the analysis), never by a parent-process
     # Get-Module -ListAvailable discovery -- a version discovered in the
     # parent is not proof of what the job genuinely loaded and ran.
-    param([Parameter(Mandatory=$true)]$Inventory,[Parameter(Mandatory=$true)][string]$SettingsPath,[int]$PerFileTimeoutSeconds=60)
+    # Analysis of a real inventory file can exceed one minute on a slow
+    # Windows PowerShell 5.1 engine. Keep the per-file bound finite, but use
+    # three minutes so the certification gate does not report an unavailable
+    # analyzer on a slow-but-healthy engine.
+    param([Parameter(Mandatory=$true)]$Inventory,[Parameter(Mandatory=$true)][string]$SettingsPath,[int]$PerFileTimeoutSeconds=180)
     $notExecuted=[ordered]@{Executed=$false;FindingCount=0;ToolVersion=$null;Diagnostic=$null}
     # Confirmed by direct reproduction against the real powershell.exe 5.1
     # engine: Test-Path throws System.ArgumentException for a path

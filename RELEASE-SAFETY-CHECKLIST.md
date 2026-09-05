@@ -380,7 +380,8 @@ the #290 gate.
   - Include: `TeknoParrot-Manager.ps1`, `TeknoParrot-Manager.bat`,
     `TeknoParrot-Manager-README.txt`, `TeknoParrot-Manager-QuickStart.txt`,
     `TeknoParrot-Manager-CHANGELOG.txt`, `LICENSE`, `Crosshairs\` (all 321 PNGs),
-    `tools\` (the standalone `Invoke-TpmAutoUpdate.ps1` / `TpmAutoUpdate.Core.psm1`
+    `PreviewAssets\ReShadePreviews\` (the bundled landscape PNG plus the five TPM-owned SVG preview references),
+    `tools\Invoke-TpmAutoUpdate.ps1`, `tools\TpmAutoUpdate.Core.psm1`,
     helper documented in `docs/AUTO_UPDATE.md` -- omitting this folder was a
     real pre-1.0 packaging gap; the menu-integrated "Check for Updates" option
     does not itself depend on it, but the documented standalone helper does),
@@ -516,6 +517,13 @@ Certification.
   release, runtime banner matches the release, script identity matches docs,
   README latest tag matches the release, release ZIP identity validation
   passes, and release metadata can be checked before publication.
+- [ ] Arcade OMP Packaged Runtime UX Gate (#323) completed on the exact
+      packaged source identity as the final gate before RC8 release
+      authorization: package identity/hash/assets, default and constrained
+      terminal screenshots, menu and one-letter prompt UX, ReShade
+      gallery/slider, Health Check repair routing, feature routing,
+      backup-failure truthfulness, and support-package clarity. Record logs,
+      screenshots, runtime path, branch, and exact SHA.
 
 ### Phase 7 -- Report
 
