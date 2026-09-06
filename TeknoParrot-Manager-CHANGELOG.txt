@@ -91,6 +91,16 @@ and never guesses. Unattended Health Check stops after the report.
 All destructive profile workflows now stop before mutation if a profile backup
 folder cannot be created or any profile copy fails; interactive and unattended
 runs have no incomplete-backup override.
+ReShade setup now synchronizes gallery choices back into the terminal chooser,
+preflights selected games by ready/protected/missing/unsafe bucket, and reports
+explicit protected-install adoption separately. Health Check re-copy is scoped by
+DAT profile code, including supplementary sources, and no-candidate repair offers
+the configured-source re-copy action with saved-path evidence.
+Thumbnail downloads now use one compact progress row, identify exact online-pack
+misses without calling them unsupported, and suppress PowerShell web progress
+overlays. The support manifest explains how to refresh stale Action Required data.
+dgVoodoo2 output describes compatibility-file copying rather than emulator setup;
+control summaries continue to distinguish saved settings from verified hardware.
 The FFB workflow now treats native FFB Blaster backup or profile-write failure as
 fatal before offering the optional plugin; a later plugin result cannot mask an
 incomplete native step.

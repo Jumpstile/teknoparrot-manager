@@ -2806,7 +2806,7 @@ Describe "Get-DgVoodoo2LatestRelease (URL allowlist + digest extraction)" {
         function Get-TpmHttpStatusCodeFromError { param($ErrorRecord) return 0 }
     }
     It "accepts a well-formed release with a safe github.com download URL and extracts the digest" {
-        Mock Invoke-WebRequest {
+        Mock Invoke-TpmWebRequestSilently {
             [pscustomobject]@{
                 Content = (@{
                     tag_name = 'v2.87.3'
@@ -2826,7 +2826,7 @@ Describe "Get-DgVoodoo2LatestRelease (URL allowlist + digest extraction)" {
         $rel.ExpectedSha256 | Should -Be ('A' * 64)
     }
     It "never selects the dev or debug variant asset as the main ZIP" {
-        Mock Invoke-WebRequest {
+        Mock Invoke-TpmWebRequestSilently {
             [pscustomobject]@{
                 Content = (@{
                     tag_name = 'v2.87.3'
@@ -2840,7 +2840,7 @@ Describe "Get-DgVoodoo2LatestRelease (URL allowlist + digest extraction)" {
         Get-DgVoodoo2LatestRelease | Should -BeNullOrEmpty
     }
     It "rejects a download URL on a host other than github.com" {
-        Mock Invoke-WebRequest {
+        Mock Invoke-TpmWebRequestSilently {
             [pscustomobject]@{
                 Content = (@{
                     tag_name = 'v2.87.3'
@@ -2853,7 +2853,7 @@ Describe "Get-DgVoodoo2LatestRelease (URL allowlist + digest extraction)" {
         Get-DgVoodoo2LatestRelease | Should -BeNullOrEmpty
     }
     It "returns null (no ExpectedSha256) when the asset has no digest field, degrading gracefully" {
-        Mock Invoke-WebRequest {
+        Mock Invoke-TpmWebRequestSilently {
             [pscustomobject]@{
                 Content = (@{
                     tag_name = 'v2.87.3'
@@ -4766,6 +4766,26 @@ Describe "Invoke-AutoSync extracted-folder regression guards" {
         $result.Synced | Should -Be 0
         Should -Invoke Expand-ZipFileSafe -Times 0
     }
+    It "filters scoped re-copy by DAT profile code instead of ZIP display name" {
+        $zipA = 'Display Name A (2024)'
+        $zipB = 'Display Name B (2024)'
+        Set-Content -LiteralPath (Join-Path $script:autoSyncZipSource ($zipA + '.zip')) -Value 'A' -NoNewline
+        Set-Content -LiteralPath (Join-Path $script:autoSyncZipSource ($zipB + '.zip')) -Value 'B' -NoNewline
+        $datIndex = @{
+            (Get-NormalizedGameKey $zipA) = [pscustomobject]@{ ProfileCode = 'TargetProfile'; Executable = 'game.exe' }
+            (Get-NormalizedGameKey $zipB) = [pscustomobject]@{ ProfileCode = 'OtherProfile'; Executable = 'game.exe' }
+        }
+        Mock Resolve-ExtractedGameFolder { $null }
+        $script:expandedZips = @()
+        Mock Expand-ZipFileSafe {
+            param([string]$ZipPath)
+            $script:expandedZips += [IO.Path]::GetFileNameWithoutExtension($ZipPath)
+        }
+        $result = Invoke-AutoSync -zipSource $script:autoSyncZipSource -installFolder $script:autoSyncInstallRoot `
+            -syncStatePath (Join-Path $TestDrive 'scoped-sync.json') -datIndex $datIndex -OnlyProfileCodes @('TargetProfile')
+        $result.Synced | Should -Be 1
+        $script:expandedZips | Should -Be @($zipA)
+    }
     It "returns Back without extraction or mutation" {
         $zipName = 'Cancel Game'
         $zipPath = Join-Path $script:autoSyncZipSource ($zipName + '.zip')
@@ -5420,6 +5440,47 @@ Describe "Skylinekiller executable workflow regressions" {
         $result.Updated | Should -Be 0
         Should -Invoke Install-TpmReShadeProfileDeployment -Times 0
     }
+    It "reports protected, missing, and ready ReShade preflight buckets before mutation" {
+        $profiles = Join-Path $TestDrive 'ReShadePreflightProfiles'
+        New-Item -ItemType Directory -Path $profiles -Force | Out-Null
+        foreach ($name in @('ProtectedGame', 'MissingGame')) {
+            $path = Join-Path $TestDrive ($name + '\Game.exe')
+            New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($path)) -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $profiles ($name + '.xml')) -Value ("<GameProfile><GamePath>{0}</GamePath></GameProfile>" -f $path)
+        }
+        $sourceDll = Join-Path $TestDrive 'preflight-ReShade.dll'
+        Set-Content -LiteralPath $sourceDll -Value 'source'
+        Mock Get-TpmReShadeProfileOwnershipPath { Join-Path $TestDrive ($GameId + '.ownership.json') }
+        Mock Test-TpmGameMutationPath {
+            param([string]$GamePath)
+            if ($GamePath -like '*MissingGame*') {
+                return [pscustomobject]@{ Valid = $false; ReasonCode = 'GAME_PATH_MISSING'; Reason = 'saved executable is missing' }
+            }
+            return [pscustomobject]@{ Valid = $true; ResolvedPath = $GamePath; GameDirectory = [IO.Path]::GetDirectoryName($GamePath) }
+        }
+        Mock Get-ReShadeTargetInfo {
+            param($Doc, [string]$GamePath, [string]$ExeDir)
+            [pscustomobject]@{ TargetDir = $ExeDir; DllName = 'dxgi.dll' }
+        }
+        Mock Get-ExeArchitecture { 'x64' }
+        Mock Get-TpmReShadeOwnershipClassification {
+            param([string]$TargetRoot)
+            if ($TargetRoot -like '*ProtectedGame*') {
+                return [pscustomobject]@{ Status = 'UnknownUserOwnedConflict'; Detail = 'existing hook is protected' }
+            }
+            return [pscustomobject]@{ Status = 'ManagedByTpm'; Detail = 'no protected content detected' }
+        }
+        $result = Get-TpmReShadeApplyPreflight `
+            -SelectedGames @(Get-ChildItem -LiteralPath $profiles -Filter '*.xml' -File) `
+            -ProfileDefinition ([pscustomobject]@{ ProfileId = 'Original' }) `
+            -SourceDll $sourceDll -SourceDll32 ''
+        $result.Total | Should -Be 2
+        $result.Protected | Should -Be 1
+        $result.MissingPath | Should -Be 1
+        $result.Ready | Should -Be 0
+        @($result.Records | Where-Object Status -eq 'Protected').Count | Should -Be 1
+        @($result.Records | Where-Object Status -eq 'MissingPath').Count | Should -Be 1
+    }
 
     It "classifies a BattleFantasia-style dgVoodoo2 scan failure without deployment" {
         $profiles = Join-Path $TestDrive 'SkylineDgProfiles'
@@ -5484,14 +5545,42 @@ Describe "RC8 PostgreSQL and support UX" {
     It "reports database backup failures with affected entries and clean recovery choices" {
         $script:ProductionSource | Should -Match 'PostgreSQL setup stopped because the database backup did not complete'
         $script:ProductionSource | Should -Match 'Nothing was changed'
-        $script:ProductionSource | Should -Match '\[R\] Repair PostgreSQL automatically'
+        $script:ProductionSource | Should -Match '\[R\] Diagnose and retry the protected backup'
         $script:ProductionSource | Should -Match '\[I\] Reinitialize PostgreSQL data for these games'
         $script:ProductionSource | Should -Match '\[D\] Show details'
         $script:ProductionSource | Should -Match '\[O\] Open logs/support guidance'
         $script:ProductionSource | Should -Match '\[B\] Back to main menu'
+        $script:ProductionSource | Should -Not -Match '\[R\] Repair PostgreSQL automatically'
         $script:ProductionSource | Should -Not -Match '\[F\].*\[X\].*\[R\].*\[D\].*\[O\].*\[S\].*\[B\]'
         $script:ProductionSource | Should -Not -Match 'Write-Host ".*\[F\].*\[X\].*Skip'
         $script:ProductionSource | Should -Match 'FailureDetails'
+    }
+    It "diagnoses the service, client tools, version, and failed database without changing state" {
+        $script:PostgresBinDir = Join-Path $TestDrive 'postgres-bin'
+        $script:PostgresServiceName = 'pgsql-8.3'
+        $script:PostgresBinDir = Join-Path $TestDrive 'postgres-bin'
+        New-Item -ItemType Directory -Path $script:PostgresBinDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:PostgresBinDir 'psql.exe') -Value ''
+        Set-Content -LiteralPath (Join-Path $script:PostgresBinDir 'pg_dump.exe') -Value ''
+        Mock Get-Service { [pscustomobject]@{ Status = 'Running' } }
+        Mock Test-Path {
+            param([string]$LiteralPath, [string]$PathType)
+            return ($LiteralPath -like '*postgres-bin*')
+        }
+        $backup = [pscustomobject]@{
+            FailureDiagnoses = @([pscustomobject]@{
+                GameLabel = 'Game A'; Database = 'GameDB01'; Category = 'CannotConnect'
+                Detail = 'connection refused'; NextAction = 'Start PostgreSQL and retry'
+            })
+            FailureDetails = @('Game A / GameDB01: connection refused')
+        }
+        $result = Get-PostgresBackupRepairDiagnosis -BackupResult $backup
+        $result.ReadOnly | Should -BeTrue
+        $result.Summary | Should -Match 'reported database failures'
+        @($result.Checks | Where-Object { $_.Name -eq 'PostgreSQL service' }).Status | Should -Be 'Present'
+        @($result.Checks | Where-Object { $_.Name -eq 'pg_dump.exe' }).Status | Should -Be 'Present'
+        @($result.Checks | Where-Object { $_.Name -like 'Backup failure:*' }).Count | Should -Be 1
+        Should -Invoke Get-Service -Times 1
     }
     It "provides concrete PostgreSQL retry and stop action metadata" {
         $actions = @(Get-PostgresRecoveryActions -FailureId 'postgres-profile-recovery')
@@ -5565,7 +5654,7 @@ Describe "RC8 PostgreSQL and support UX" {
     }
     It "requires typed YES and verified selection before destructive reinitialize" {
         $source = $script:ProductionSource
-        $source | Should -Match "Read-HostSafe '  Type YES to confirm destructive PostgreSQL reinitialize'"
+        $source | Should -Match "Read-HostSafe '  Type YES in all caps to confirm. Anything else cancels.'"
         $source | Should -Match 'Test-PostgresReinitializePlan'
         $source | Should -Match 'SelectionPlanJson'
         $source | Should -Match 'SelectionPlanHash'
@@ -6374,21 +6463,21 @@ Describe "Read-PathWithBrowse" {
 
 Describe "Get-ReShadeLatestVersion retry behavior" {
     BeforeAll {
-        Mock Invoke-WebRequest {}
+        Mock Invoke-TpmWebRequestSilently {}
     }
 
     It "makes only a single attempt and returns null on failure -- no retry, unlike Invoke-TpmDownload's HttpClient/Invoke-WebRequest tiers" {
-        Mock Invoke-WebRequest { throw "site unreachable" }
+        Mock Invoke-TpmWebRequestSilently { throw "site unreachable" }
         $result = Get-ReShadeLatestVersion
         $result | Should -BeNullOrEmpty
-        Should -Invoke Invoke-WebRequest -Times 1
+        Should -Invoke Invoke-TpmWebRequestSilently -Times 1
     }
     It "parses the version out of a successful response" {
-        Mock Invoke-WebRequest { [pscustomobject]@{ Content = "...ReShade_Setup_6.7.3.exe..." } }
+        Mock Invoke-TpmWebRequestSilently { [pscustomobject]@{ Content = "...ReShade_Setup_6.7.3.exe..." } }
         Get-ReShadeLatestVersion | Should -Be "6.7.3"
     }
     It "discovers ReShade 6.8.0 and builds the official plain installer URL" {
-        Mock Invoke-WebRequest { [pscustomobject]@{ Content = "ReShade_Setup_6.8.0.exe" } }
+        Mock Invoke-TpmWebRequestSilently { [pscustomobject]@{ Content = "ReShade_Setup_6.8.0.exe" } }
         Get-ReShadeLatestVersion | Should -Be '6.8.0'
         Get-ReShadeSetupDownloadUrl -Version '6.8.0' | Should -Be 'https://reshade.me/downloads/ReShade_Setup_6.8.0.exe'
     }
@@ -8136,7 +8225,7 @@ Describe "ConvertTo-ManagerDisplayVersionFromTag" {
 
 Describe "Get-ManagerUpdateRelease" {
     It "returns the matching asset for a well-formed release" {
-        Mock Invoke-WebRequest {
+        Mock Invoke-TpmWebRequestSilently {
             [pscustomobject]@{
                 Content = (@{
                     tag_name = 'v0.99.99'
@@ -8156,7 +8245,7 @@ Describe "Get-ManagerUpdateRelease" {
     }
 
     It "returns null when no asset matches the expected name pattern" {
-        Mock Invoke-WebRequest {
+        Mock Invoke-TpmWebRequestSilently {
             [pscustomobject]@{
                 Content = (@{
                     tag_name = 'v0.99.99'
@@ -8168,7 +8257,7 @@ Describe "Get-ManagerUpdateRelease" {
     }
 
     It "returns null and does not retry when the matching asset URL is not a real GitHub release URL" {
-        Mock Invoke-WebRequest {
+        Mock Invoke-TpmWebRequestSilently {
             [pscustomobject]@{
                 Content = (@{
                     tag_name = 'v0.99.99'
@@ -8177,14 +8266,14 @@ Describe "Get-ManagerUpdateRelease" {
             }
         }
         Get-ManagerUpdateRelease | Should -BeNullOrEmpty
-        Should -Invoke Invoke-WebRequest -Times 1
+        Should -Invoke Invoke-TpmWebRequestSilently -Times 1
     }
 
     It "retries on a transient (5xx-shaped) failure and gives up after 3 attempts" {
-        Mock Invoke-WebRequest { throw [System.Net.WebException]::new('transient') }
+        Mock Invoke-TpmWebRequestSilently { throw [System.Net.WebException]::new('transient') }
         Mock Start-Sleep {}
         Get-ManagerUpdateRelease | Should -BeNullOrEmpty
-        Should -Invoke Invoke-WebRequest -Times 3
+        Should -Invoke Invoke-TpmWebRequestSilently -Times 3
         Should -Invoke Start-Sleep -Times 2
     }
 }
@@ -8202,25 +8291,25 @@ Describe "Get-TeknoParrotProfileSet" {
         # instead of ".../git/trees/master?recursive=1". GitHub then 404s on
         # that malformed URL every single time -- this was not intermittent
         # or network-related. The fix braces the variable: "${branchEncoded}?...".
-        Mock Invoke-WebRequest -ParameterFilter { $Uri -eq 'https://api.github.com/repos/teknogods/TeknoParrotUI' } {
+        Mock Invoke-TpmWebRequestSilently -ParameterFilter { $Uri -eq 'https://api.github.com/repos/teknogods/TeknoParrotUI' } {
             [pscustomobject]@{ Content = (@{ default_branch = 'master' } | ConvertTo-Json) }
         }
-        Mock Invoke-WebRequest -ParameterFilter { $Uri -like '*/git/trees/*' } {
+        Mock Invoke-TpmWebRequestSilently -ParameterFilter { $Uri -like '*/git/trees/*' } {
             [pscustomobject]@{ Content = (@{ tree = @(@{ type = 'blob'; path = 'TeknoParrotUi.Common/GameProfiles/Foo.xml' }) } | ConvertTo-Json -Depth 5) }
         }
 
         [void](Get-TeknoParrotProfileSet)
 
-        Should -Invoke Invoke-WebRequest -Times 1 -ParameterFilter {
+        Should -Invoke Invoke-TpmWebRequestSilently -Times 1 -ParameterFilter {
             $Uri -eq 'https://api.github.com/repos/teknogods/TeknoParrotUI/git/trees/master?recursive=1'
         }
     }
 
     It "returns the profile stems parsed from the tree response" {
-        Mock Invoke-WebRequest -ParameterFilter { $Uri -eq 'https://api.github.com/repos/teknogods/TeknoParrotUI' } {
+        Mock Invoke-TpmWebRequestSilently -ParameterFilter { $Uri -eq 'https://api.github.com/repos/teknogods/TeknoParrotUI' } {
             [pscustomobject]@{ Content = (@{ default_branch = 'master' } | ConvertTo-Json) }
         }
-        Mock Invoke-WebRequest -ParameterFilter { $Uri -like '*/git/trees/*' } {
+        Mock Invoke-TpmWebRequestSilently -ParameterFilter { $Uri -like '*/git/trees/*' } {
             [pscustomobject]@{
                 Content = (@{
                     tree = @(
@@ -8238,10 +8327,10 @@ Describe "Get-TeknoParrotProfileSet" {
     }
 
     It "logs the HTTP status code when the tree request fails" {
-        Mock Invoke-WebRequest -ParameterFilter { $Uri -eq 'https://api.github.com/repos/teknogods/TeknoParrotUI' } {
+        Mock Invoke-TpmWebRequestSilently -ParameterFilter { $Uri -eq 'https://api.github.com/repos/teknogods/TeknoParrotUI' } {
             [pscustomobject]@{ Content = (@{ default_branch = 'master' } | ConvertTo-Json) }
         }
-        Mock Invoke-WebRequest -ParameterFilter { $Uri -like '*/git/trees/*' } {
+        Mock Invoke-TpmWebRequestSilently -ParameterFilter { $Uri -like '*/git/trees/*' } {
             # Mirror the shape production code actually reads --
             # $_.Exception.Response.StatusCode -- rather than relying on a
             # specific exception type, since PowerShell 5.1 (the script's
@@ -8439,10 +8528,10 @@ Describe "Get-ManagerUpdateReleaseSummary" {
 
 Describe "Get-ManagerUpdateRelease -MaxAttempts" {
     It "makes exactly one request and does not sleep when MaxAttempts is 1" {
-        Mock Invoke-WebRequest { throw [System.Net.WebException]::new('transient') }
+        Mock Invoke-TpmWebRequestSilently { throw [System.Net.WebException]::new('transient') }
         Mock Start-Sleep {}
         Get-ManagerUpdateRelease -MaxAttempts 1 -TimeoutSec 5 | Should -BeNullOrEmpty
-        Should -Invoke Invoke-WebRequest -Times 1
+        Should -Invoke Invoke-TpmWebRequestSilently -Times 1
         Should -Invoke Start-Sleep -Times 0
     }
 }
@@ -11124,6 +11213,20 @@ Describe "RC8 menu and ReShade regressions" {
         $back.Cancelled | Should -BeTrue
         $back.SelectedProfile | Should -BeNullOrEmpty
     }
+    It "uses the profile selected in the preview when the terminal chooser accepts U" {
+        $profiles = @(Get-TpmReShadeProfiles)
+        $session = [hashtable]::Synchronized(@{
+            Initialized = $true
+            Closed = $false
+            PreviewEnabled = $true
+            SelectedProfileId = 'Vivid'
+        })
+        $selected = Update-TpmReShadeSelectionFromPreview -Session $session -Profiles $profiles -CurrentSelection $null
+        $selected.ProfileId | Should -Be 'Vivid'
+        $script:ProductionSource | Should -Match 'Update-TpmReShadeSelectionFromPreview -Session \$PreviewSession'
+        $script:ProductionSource | Should -Match 'Step 1: Pick a look in this preview window'
+        $script:ProductionSource | Should -Match 'Return to TeknoParrot Manager and press U to use it'
+    }
     It "does not use a blocking modal gallery from the normal ReShade setup path" {
         $source = $script:ProductionSource
         $invokeStart = $source.IndexOf('function Invoke-ReShadeSetup')
@@ -11934,6 +12037,8 @@ Describe "ReShade trusted profile restore" {
         $script:ProductionSource | Should -Match 'Test-CrosshairSelectionIndex'
         $script:ProductionSource | Should -Match '127\.0\.0\.1'
         $script:ProductionSource | Should -Match 'Typed numeric fallback remains available'
+        $script:ProductionSource | Should -Match 'Stop-CrosshairSelectionBridge -Session \$bridgeSession'
+        $script:ProductionSource | Should -Match 'browser preview launch failed'
         $script:ProductionSource | Should -Match 'Apply these crosshairs\? \(Y/N, default Y\)'
         $script:ProductionSource | Should -Match '\$crosshairConfirm'
         $script:ProductionSource | Should -Match 'Read-HostSafe'
@@ -13069,9 +13174,11 @@ Describe "Library Health Check guided repair UX contracts" {
         $source | Should -Match '\[R\] Try automatic path repair'
         $source | Should -Match '\[M\] Let me pick the correct executable or folder manually'
         $source | Should -Match '\[S\] Search another game folder'
-        $source | Should -Not -Match '\[C\] Re-extract from the configured source'
-        $source | Should -Match 'Candidate paths found'
-        $source | Should -Match 'Choose S or B'
+        $source | Should -Match '\[C\] Re-copy/re-extract only these affected games from the configured source'
+        $source | Should -Match 'Saved-path evidence for the affected games'
+        $source | Should -Match 'Searched folder:'
+        $source | Should -Match 'if \(\$searchAgainChoice -eq ''B''\)'
+        $source | Should -Match 'HealthCheck: user selected Back after no automatic repair candidates'
         $source | Should -Match '\[D\] Details'
         $source | Should -Match '\[B\] Back to main menu'
         $source | Should -Match 'known game folders'
@@ -13475,13 +13582,14 @@ Describe "Focused RC8 remediation contracts" {
         $selection.Main | Should -BeNullOrEmpty
         $selection.Supp | Should -BeNullOrEmpty
     }
-    It "keeps Health Check AutoSync re-entry limited to the broken game codes" {
+    It "keeps Health Check AutoSync re-entry limited to the broken profile codes" {
         $source = $script:ProductionSource
         $source | Should -Match '\$pendingAutoSyncGames = \$null'
         $source | Should -Match '\$autoSyncTargetGames = if \(\$pendingApplyMode -eq ''AutoSync'' -and \$pendingAutoSyncGames\)'
-        $source | Should -Match '\$onlySyncList = @\(\$autoSyncTargetGames\)'
-        $source | Should -Match 'Health Check repair scope: affected games only'
-        $source | Should -Match '-AllowedNames \$autoSyncTargetGames'
+        $source | Should -Match '\$onlySyncList = @\(\)'
+        $source | Should -Match 'Health Check repair scope: affected profile codes only'
+        $source | Should -Match '-OnlyProfileCodes \(\[string\[\]\]\$autoSyncTargetGames\)'
+        $source | Should -Match '\$scopedHealthRepair'
         $source | Should -Match 'if \(\$null -ne \$autoSyncTargetGames -and @\(\$autoSyncTargetGames\)\.Count -gt 0\)'
     }
     It "initializes the automatic Health Check search root before validating R and S choices" {

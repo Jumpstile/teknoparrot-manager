@@ -223,8 +223,9 @@
   - Thumbnail download. After registration, optionally downloads game icons
     from the TeknoParrotUIThumbnails GitHub repository directly into
     TeknoParrot's Icons folder. Only fetches icons that are absent; never
-    overwrites existing files. Reports how many were fetched, already present,
-    or not yet in the repo.
+    overwrites existing files. Uses one compact progress row, lists the exact
+    games missing from the online pack, and explains that a missing icon does
+    not mean the game is unsupported.
 
   - Unattended mode. A -Unattended switch skips all Y/N prompts, uses
     saved settings, extracts all new games, runs registration, repair, and
@@ -308,6 +309,10 @@
     TPM-managed ownership entry for that game. Existing unknown or user-owned
     files cause a collision and remain untouched. Earlier TPM-managed files
     are retained when changing profiles rather than being silently deleted.
+    Before deployment TPM reports ready, protected, missing-executable, and
+    unsafe/malformed preflight counts. Protected existing files stay unchanged
+    unless you explicitly choose Adopt and confirm; adopted installations are
+    counted separately from ordinary installs.
 
 
   - dgVoodoo2 legacy compatibility. Fixes older arcade games that crash or
@@ -655,14 +660,16 @@
        For broken paths, [R] Try automatic path repair first performs a
        dry-run candidate search. TPM displays the exact proposed paths, then
        asks again before applying the reviewed set. The configured games folder
-       is the default search root. [S] Search another game folder accepts only
-       an existing, canonical, non-reparse folder outside TeknoParrot, TPM,
-       and both ZIP source folders. [S] is offered when the current search
-       finds no candidate. [C] Re-extract from the configured source returns
-       to AutoSync with only the broken profile codes selected; it cannot
-       broaden into an all-games extraction. [M] Let me pick the correct
-       folders manually requires you to select the exact executable and never
-       guesses. A complete HealthCheck backup is made before confirmed saves.
+       is the default search root. If no candidate is found, TPM shows each
+       saved executable path and offers [C] to re-copy/re-extract only the
+       affected profile codes from a configured source, or [S] to search
+       another game folder. [S] Search another game folder accepts only an
+       existing, canonical, non-reparse folder outside TeknoParrot, TPM,
+       and both ZIP source folders. [C] returns to AutoSync with only the
+       broken profile codes selected; it cannot broaden into an all-games
+       extraction. [M] Let me pick the correct folders manually requires you
+       to select the exact executable and never guesses. A complete HealthCheck
+       backup is made before confirmed saves.
        Once no broken paths remain, [P] Set up PostgreSQL for these games is
        offered when needed, along with direct optional actions [5] ReShade,
        [6] dgVoodoo2, [7] GPU Fix, [8] Force Feedback, and [9] BepInEx.

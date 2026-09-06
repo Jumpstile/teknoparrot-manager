@@ -313,6 +313,10 @@ until the source decision and all later preflight checks succeed. When multiple 
 games are selected, setup asks once whether to apply the chosen profile to all games;
 `S` retains the per-game chooser, `D` shows profile details, and `B` returns without
 deployment. Remembered profiles are described as reapply actions, not restore operations.
+Before deployment, the selected set is summarized by read-only preflight buckets:
+ready, protected, missing executable, and unsafe or malformed. Protected installs
+remain unchanged unless the operator explicitly selects `Adopt` and confirms the
+ownership change; successful adoptions are counted separately in the result.
 
 Before replacing any target file, deployment requires a matching TPM-managed ownership entry. Existing files without that ownership evidence return `COLLISION` / `USER_OWNED_CONTENT_PRESERVED` and remain byte-for-byte untouched. Previous TPM-managed files not part of the new profile are retained rather than deleted, so switching to `Original` or a smaller effect set is non-destructive and may require manual review of old files.
 
@@ -1918,6 +1922,10 @@ status is closed in `finally` on every exit path; redirected, unattended, and
 certification hosts therefore retain the existing structured-status fallback
 without cursor writes.
 
+The manifest compares the Action Required report timestamp with the latest TPM
+log timestamp. A stale report is labeled as stale and tells the operator to rerun
+the affected workflow and create a fresh support package instead of presenting old
+metadata as current evidence.
 **Operator summary.** The normal console output presents counts for games checked, files
 collected, plugin inventories, optional diagnostics not present, collection failures, and
 intentionally excluded content. The manifest retains per-record detail, including verbose

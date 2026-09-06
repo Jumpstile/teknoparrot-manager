@@ -277,8 +277,10 @@ the configured source`. Automatic repair first performs a dry-run candidate
 search and displays the exact proposed paths. The configured games folder is
 the default search root; `[S]` accepts only an existing, canonical,
 non-reparse folder outside the TeknoParrot root, TPM program folder, and ZIP
-source folders. If no candidate is found, TPM offers another folder search.
-TPM asks again before applying the reviewed set, creates a complete
+source folders. If no candidate is found, TPM shows the saved executable paths
+and offers `[C]` to re-copy/re-extract only the affected profile codes from a
+configured source, or `[S]` to search another folder. TPM asks again before
+applying the reviewed set, creates a complete
 `UserProfiles\FullBackup\HealthCheck_*` backup, and applies only that reviewed
 set.
 `[C]` re-enters AutoSync with an explicit whitelist of the broken profile
@@ -547,6 +549,10 @@ After deployment, the result separates newly installed, updated, protected
 unchanged, missing saved paths, unsupported architecture, and errors. Missing
 saved paths include the game name; use the main-menu path-repair tool and run
 ReShade setup again.
+Before deployment, TPM reports ready, protected, missing-executable, and
+unsafe/malformed preflight counts. Protected existing files remain unchanged
+unless you explicitly choose `Adopt` and confirm; adopted installations are
+counted separately from ordinary installs.
 Profile and effect catalog metadata is advisory until measured evidence exists. No profile is marked recommended or `VALIDATED_SINGLE` without that evidence; pinned hashes establish catalog integrity, not performance validation. Multi-monitor suitability is read-only and advisory, uses caller-supplied evidence, treats duplicate target IDs as ambiguous, and does not separately label `EXTENDED` arrangements or acquire Windows display topology itself.
 
 **Remembered profiles, favorites, and restore:** TPM stores per-game profile
@@ -871,7 +877,7 @@ After registration the script offers to download game icons:
 Download thumbnails for registered games missing an icon? (Y/N)
 ```
 
-Answering Y downloads ProfileCode.png for every registered game that does not already have one in <TeknoParrotRoot> Icons -- the folder TeknoParrotUI uses for thumbnails. Source: TeknoParrotUIThumbnails on GitHub. Missing games are skipped without error. The shared audit records source, filename, computed SHA-256, and transfer metrics; no published digest or signer trust gate is claimed for icons.
+Answering Y downloads ProfileCode.png for every registered game that does not already have one in <TeknoParrotRoot> Icons -- the folder TeknoParrotUI uses for thumbnails. Source: TeknoParrotUIThumbnails on GitHub. TPM uses one compact progress row, lists exact games missing from the online pack, and explains that a missing icon is not an unsupported-game decision. The shared audit records source, filename, computed SHA-256, and transfer metrics; no published digest or signer trust gate is claimed for icons.
 
 **Custom thumbnails:** create a `CustomThumbnails\` folder next to the script and drop your PNGs there named `ProfileCode.png` (e.g. `Daytona3.png`). The script copies them to TeknoParrot's Icons folder on the thumbnail step. Files already in Icons are never overwritten.
 

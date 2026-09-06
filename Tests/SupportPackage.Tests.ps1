@@ -92,6 +92,7 @@ Describe 'New-TpmSupportPackage' {
         $manifest = Get-SupportZipText $r.PackagePath 'MANIFEST.txt'
         $manifest | Should -Match 'Action Required evidence status: stale'
         $manifest | Should -Match 'Action Required report is older than the latest TPM run'
+        $manifest | Should -Match 'Action Required remediation: rerun the affected workflow'
     }
 
     It 'collects allowlisted TeknoParrot diagnostics including ParrotPatcher_Log.txt' {
