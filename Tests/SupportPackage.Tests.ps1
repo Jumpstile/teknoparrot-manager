@@ -78,6 +78,21 @@ Describe 'New-TpmSupportPackage' {
         $entries | Should -Contain 'MANIFEST.txt'
         @($entries | Where-Object { ($_ -replace '\\','/') -like 'diagnostics/tpm-*' }).Count | Should -BeGreaterThan 0
     }
+    It 'records Action Required freshness in the packaged manifest' {
+        $f = New-SupportFixture
+        $actionPath = Join-Path $f.Script 'TeknoParrot-Manager-ActionItems.txt'
+        $logPath = Join-Path $f.Script 'TeknoParrot-Manager.log'
+        Write-SupportText $actionPath 'Action item from an earlier run'
+        Write-SupportText $logPath 'Current TPM run'
+        $now = [DateTime]::UtcNow
+        [System.IO.File]::SetLastWriteTimeUtc($actionPath, $now.AddMinutes(-10))
+        [System.IO.File]::SetLastWriteTimeUtc($logPath, $now)
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        $manifest = Get-SupportZipText $r.PackagePath 'MANIFEST.txt'
+        $manifest | Should -Match 'Action Required evidence status: stale'
+        $manifest | Should -Match 'Action Required report is older than the latest TPM run'
+    }
 
     It 'collects allowlisted TeknoParrot diagnostics including ParrotPatcher_Log.txt' {
         $f = New-SupportFixture
@@ -385,6 +400,8 @@ Describe 'New-TpmSupportPackage' {
         $workflowEvidence.RunId | Should -Be $runId
         $workflowEvidence.LatestWorkflow.RunId | Should -Be $runId
         $workflowEvidence.SupportWorkflow.RunId | Should -Be $runId
+        $workflowEvidence.SupportWorkflow.Lifecycle | Should -Be 'Finished'
+        $workflowEvidence.SupportWorkflow.State | Should -Be 'Finished'
     }
     It 'writes only relative safe ZIP entry names' {
         $f = New-SupportFixture

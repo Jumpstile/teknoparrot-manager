@@ -1648,6 +1648,8 @@ function New-TpmSupportPackage {
         $result.RedactionCount = if ($redactionMeasure) { [int]$redactionMeasure.Sum } else { 0 }
         Complete-TpmWorkflowStep -Context $status -Summary 'Private information redacted where detected' -NextStep 'Create support ZIP'
         Start-TpmWorkflowStep -Context $status -StepId 'zip' -Activity 'Writing the support package manifest and ZIP'
+        Complete-TpmWorkflowStep -Context $status -Summary 'Support package manifest and ZIP generation started' -NextStep 'Send the ZIP when asking for help'
+        Complete-TpmWorkflowStatus -Context $status -Summary 'Support package created'
         $supportWorkflowResult = Get-TpmWorkflowStatusSnapshot -Context $status
         $result.SupportWorkflowResult = $supportWorkflowResult
         $workflowEvidence = [ordered]@{
@@ -1675,7 +1677,7 @@ function New-TpmSupportPackage {
         $workflowEvidencePath = Join-Path $stage 'metadata\workflow-result.json'
         [System.IO.File]::WriteAllText($workflowEvidencePath, ($workflowEvidence | ConvertTo-Json -Depth 6) + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
         Add-TpmSupportRecord -Records $records -Source 'TPM:workflow result' -Status Collected -Destination 'metadata\workflow-result.json' -Detail 'RunId-linked latest workflow and support workflow state.'
-        $manifest = Get-TpmSupportManifestText -Records $records -Errors $errors -GameCodes @($gameCodes) -AffectedGameSummary $AffectedGameSummary -RunId $runId -LatestWorkflowResult $latestWorkflowResult -SupportWorkflowResult $supportWorkflowResult
+        $manifest = Get-TpmSupportManifestText -Records $records -Errors $errors -GameCodes @($gameCodes) -AffectedGameSummary $AffectedGameSummary -RunId $runId -LatestWorkflowResult $latestWorkflowResult -SupportWorkflowResult $supportWorkflowResult -ActionItemsPath (Join-Path $ScriptRoot 'TeknoParrot-Manager-ActionItems.txt') -ManagerLogPath (Join-Path $ScriptRoot 'TeknoParrot-Manager.log')
         [System.IO.File]::WriteAllText((Join-Path $stage 'MANIFEST.txt'), $manifest, (New-Object System.Text.UTF8Encoding($false)))
         $readme = @(
             'TPM Support Package'
@@ -1712,11 +1714,13 @@ function New-TpmSupportPackage {
         }
         $stage = $null
         if (@($records | Where-Object Status -eq 'CollectionFailed').Count -gt 0) { $result.Partial = $true }
-        Complete-TpmWorkflowStep -Context $status -Summary 'Support ZIP created' -NextStep 'Send the ZIP when asking for help'
-        Complete-TpmWorkflowStatus -Context $status -Summary 'Support package created'
+        # The support workflow was completed before its final metadata snapshot so
+        # the manifest and workflow-result evidence cannot remain in Working state.
         $result.Succeeded = $true
-        $manifestText = Get-TpmSupportManifestText -Records $records -Errors $errors -GameCodes $gameCodes.ToArray() -AffectedGameSummary $AffectedGameSummary -ActionItemsPath (Join-Path $ScriptRoot 'TeknoParrot-Manager-ActionItems.txt') -ManagerLogPath (Join-Path $ScriptRoot 'TeknoParrot-Manager.log')
     } catch {
+        if ($status.State -eq 'Finished' -and -not $result.PackagePath) {
+            try { Publish-TpmWorkflowStatusEvent -Context $status -EventKind WorkflowAborted -Summary 'Support package artifact creation failed after collection completed' } catch {}
+        }
         [void]$errors.Add((Redact-TpmSupportText -Text $_.Exception.Message).Text)
         $result.Partial = $result.Partial -or [bool]$result.PackagePath
         try {
@@ -1840,6 +1844,18 @@ function Read-HostSafe {
     }
     return $trimmed
 }
+function Read-TpmYesNo {
+    param([Parameter(Mandatory)][string]$Prompt, [string]$Default = '')
+    if ($Default -and $Default.ToUpperInvariant() -notin @('Y', 'N')) { throw "Invalid yes/no default '$Default'." }
+    do {
+        $answer = (Read-HostSafe $Prompt -Default $Default).Trim().ToUpperInvariant()
+        if ($answer -notin @('Y', 'N')) {
+            Write-Host '  Please choose Y or N.' -ForegroundColor Yellow
+        }
+    } while ($answer -notin @('Y', 'N'))
+    return $answer
+}
+
 
 function Read-PathWithBrowse {
     param(
@@ -5579,7 +5595,7 @@ function New-TpmReShadeGalleryEventHandlers {
 }
 
 function Show-TpmReShadeProfileGalleryWindow {
-    param([Parameter(Mandatory)]$Profiles, [string]$DefaultProfileId = 'CleanSharp', [switch]$Show, [switch]$NonModal)
+    param([Parameter(Mandatory)]$Profiles, [string]$DefaultProfileId = 'Original', [switch]$Show, [switch]$NonModal)
     if (-not $Show) { return [pscustomobject]@{ Available=$false; SelectedProfile=$null; Reason='PREVIEW_WINDOW_NOT_REQUESTED' } }
     try {
         Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
@@ -5724,16 +5740,6 @@ function Show-TpmReShadeProfileGalleryWindow {
             [void]$toolbar.Controls.Add($viewButton)
         }
         $state['ViewButtons'] = @($toolbar.Controls | Where-Object { $_ -is [Windows.Forms.Button] })
-        $slider = New-Object Windows.Forms.TrackBar
-        $slider.Name = 'ComparisonSlider'
-        $slider.Minimum = 0
-        $slider.Maximum = 100
-        $slider.Value = 50
-        $slider.Width = 260
-        $state['Slider'] = $slider
-        $slider.Add_ValueChanged($sliderHandler)
-        $slider.Add_KeyUp($sliderKeyUpHandler)
-        [void]$toolbar.Controls.Add($slider)
         $combo.Add_SelectedIndexChanged($comboHandler)
         $choose.Add_Click($chooseHandler)
         $cancel.Add_Click($cancelHandler)
@@ -5744,9 +5750,15 @@ function Show-TpmReShadeProfileGalleryWindow {
         $form.Controls.Add($toolbar)
         $form.Controls.Add($combo)
         $form.Controls.Add($descriptionLabel)
-        $defaultIndex = 0
+        $defaultIndex = -1
         for ($i = 0; $i -lt $combo.Items.Count; $i++) {
             if ([string]$combo.Items[$i].ProfileId -eq $DefaultProfileId) { $defaultIndex = $i; break }
+        }
+        if ($defaultIndex -lt 0) {
+            $defaultIndex = 0
+            for ($i = 0; $i -lt $combo.Items.Count; $i++) {
+                if ([string]$combo.Items[$i].ProfileId -eq 'Original') { $defaultIndex = $i; break }
+            }
         }
         $combo.SelectedIndex = $defaultIndex
         $state['SelectedProfileId'] = [string]$combo.Items[$defaultIndex].ProfileId
@@ -6983,7 +6995,7 @@ function Invoke-ReShadeUpdateIfAvailable {
     Write-Host '  ReShade update available' -ForegroundColor Yellow
     Write-Host ("  Installed: {0}" -f $InstalledVersion)
     Write-Host ("  Available: {0}" -f $latest)
-    $choice = (Read-HostSafe '  [Y] Update now  [N] Keep current version  Choice, default Y' -Default 'Y').Trim().ToUpper()
+    $choice = Read-TpmYesNo -Prompt '  [Y] Update now  [N] Keep current version  Choice, default Y' -Default 'Y'
     if ($choice -ne 'Y') { Write-Log ("ReShade update declined: installed={0}; available={1}" -f $InstalledVersion, $latest); return [pscustomobject]@{ Updated = $false; SourceDll = $SourceDll; SourceDll32 = $SourceDll32 } }
     $url = Get-ReShadeSetupDownloadUrl -Version $latest
     if (-not $url) { Write-Host '  ReShade update could not be started safely; keeping the installed version.' -ForegroundColor Yellow; return [pscustomobject]@{ Updated = $false; SourceDll = $SourceDll; SourceDll32 = $SourceDll32 } }
@@ -7136,7 +7148,7 @@ function Read-TpmReShadeTerminalProfile {
         }
         Write-Host ''
         Write-Host ('  Current selection: {0}' -f $(if ($selected) { $selected.FriendlyName } else { 'none -- choose 1-5 first' })) -ForegroundColor Yellow
-        Write-Host '  Choose: [1-5] Preview profile  [U] Use selected profile  [R] Reopen preview  [B] Back  [D] Details' -ForegroundColor White
+        Write-Host '  Choose: [1-5] Select profile  [U] Use selected profile  [N] Skip ReShade -- no changes  [R] Reopen preview  [B] Back  [D] Details' -ForegroundColor White
         $choice = (Read-TpmReShadeTerminalInput -Prompt '  Choice' -PumpPreviewMessages ([bool]$PreviewSession)).Trim().ToUpperInvariant()
         if ($choice -match '^[1-5]$') {
             $selectedProfileId = $orderedIds[[int]$choice - 1]
@@ -7166,7 +7178,7 @@ function Read-TpmReShadeTerminalProfile {
         if ($choice -eq 'R') {
             if ($PreviewSession) {
                 try {
-                    $reopenId = if ($selected) { [string]$selected.ProfileId } else { 'CleanSharp' }
+                    $reopenId = if ($selected) { [string]$selected.ProfileId } else { 'Original' }
                     $replacement = Show-TpmReShadeProfileGalleryWindow -Profiles $Profiles -DefaultProfileId $reopenId -Show -NonModal
                     if (-not $replacement.Available -or -not $replacement.Session) {
                         throw ("fresh preview window was unavailable ({0})" -f $replacement.Reason)
@@ -7189,6 +7201,11 @@ function Read-TpmReShadeTerminalProfile {
             }
             continue
         }
+        if ($choice -eq 'N') {
+            Write-Host '  ReShade setup skipped. No ReShade files were installed or changed.' -ForegroundColor DarkGray
+            Write-Log 'ReShade profile chooser: skipped by user; no files changed.'
+            return [pscustomobject]@{ SelectedProfile = $null; Cancelled = $true; Skipped = $true; PreviewSession = $PreviewSession }
+        }
         if ($choice -eq 'B') {
             Write-Log 'ReShade profile chooser: cancelled before confirmation.'
             return [pscustomobject]@{ SelectedProfile = $null; Cancelled = $true; PreviewSession = $PreviewSession }
@@ -7200,10 +7217,10 @@ function Read-TpmReShadeTerminalProfile {
             Write-Host '  Choose a numbered profile before using it.' -ForegroundColor Yellow
             continue
         }
-        Write-Host '  Invalid choice. Use 1-5, U, R, B, or D.' -ForegroundColor Yellow
+        Write-Host '  Invalid choice. Use 1-5, U, N, R, B, or D.' -ForegroundColor Yellow
+
     }
 }
-
 function Update-TpmReShadeTutorialProgressText {
     param([AllowEmptyString()][string]$Content)
     $lines = if ([string]::IsNullOrEmpty($Content)) { @() } else { [regex]::Split($Content, "`r`n|`n|`r") }
@@ -7337,7 +7354,7 @@ function Invoke-ReShadeSetup {
     # no visible prompt. Preview rendering remains available separately, but
     # it can never be required to choose a profile or continue safely.
     $galleryProfiles = @(Get-TpmReShadeProfiles)
-    $galleryResult = Show-TpmReShadeProfileGalleryWindow -Profiles $galleryProfiles -DefaultProfileId 'CleanSharp' -Show -NonModal
+    $galleryResult = Show-TpmReShadeProfileGalleryWindow -Profiles $galleryProfiles -DefaultProfileId 'Original' -Show -NonModal
     $gallerySession = if ($galleryResult.Available) { $galleryResult.Session } else { $null }
     if (-not $galleryResult.Available) {
         Write-Host '  ReShade visual gallery unavailable; typed profile fallback remains active.' -ForegroundColor Yellow
@@ -7454,14 +7471,14 @@ function Invoke-ReShadeSetup {
             $options = Get-TpmReShadeChooserOptions -GameId $pf.BaseName
             if ($options.Restore.Found -and $options.Restore.Valid) {
                 Write-Host ("  R) Reapply previous trusted profile for {0}: {1}" -f $pf.BaseName, $options.Restore.Profile.FriendlyName) -ForegroundColor DarkCyan
-                $restoreAnswer = (Read-HostSafe ("  Reapply {0} for this game? (Y/N, default N)" -f $options.Restore.Profile.FriendlyName)).Trim()
+                $restoreAnswer = Read-TpmYesNo -Prompt ("  Reapply {0} for this game? (Y/N, default N)" -f $options.Restore.Profile.FriendlyName) -Default 'N'
                 if ($restoreAnswer -match '^(Y|y)$') { $restoreSelections[$pf.BaseName] = $options.Restore }
             } elseif ($options.Restore.Found) {
                 Write-Host ("  Previous profile for {0} is unavailable ({1}); choose a fresh profile." -f $pf.BaseName, $options.Restore.Reason) -ForegroundColor Yellow
             }
             if ($options.Remembered.Found -and $options.Remembered.Valid -and -not $restoreSelections.ContainsKey($pf.BaseName)) {
                 Write-Host ("  Remembered for {0}: {1}" -f $pf.BaseName, $options.Remembered.Profile.FriendlyName) -ForegroundColor DarkCyan
-                $rememberAnswer = (Read-HostSafe ("  Use remembered {0} for this game? (Y/N, default N)" -f $options.Remembered.Profile.FriendlyName)).Trim()
+                $rememberAnswer = Read-TpmYesNo -Prompt ("  Use remembered {0} for this game? (Y/N, default N)" -f $options.Remembered.Profile.FriendlyName) -Default 'N'
                 if ($rememberAnswer -match '^(Y|y)$') { $rememberedSelections[$pf.BaseName] = $options.Remembered }
             }
         }
@@ -7860,7 +7877,7 @@ function Invoke-DgVoodoo2Setup {
             }
         }
         Write-Host ""
-        Write-Host "  No dgVoodoo2 setup needed" -ForegroundColor Green
+        Write-Host "  No dgVoodoo2 setup is needed right now." -ForegroundColor Green
         Write-Host "  TeknoParrot Manager checked your registered games and did not find any games that appear to need dgVoodoo2." -ForegroundColor Cyan
         Write-Host "  dgVoodoo2 is only used for select older games that need legacy DirectX, DirectDraw, or Glide compatibility." -ForegroundColor DarkGray
         Write-Host "  Nothing was changed." -ForegroundColor Green
@@ -8916,8 +8933,12 @@ function Invoke-GpuFixSetup {
     $missingPath = 0
     $skipDetails = New-Object System.Collections.Generic.List[object]
     $errors     = 0
+    $gpuProgressStarted = Get-Date
+    $gpuProgressCurrent = 0
     foreach ($pf in $profiles) {
         try {
+        $gpuProgressCurrent++
+        Write-TpmCompactExtractionProgress -Phase Checking -Label 'GPU Fix' -Current $gpuProgressCurrent -Total $profiles.Count -StartedAt $gpuProgressStarted
             $doc    = Read-Xml $pf.FullName
             $gpuPathNode = if ($doc.GameProfile) { $doc.GameProfile.SelectSingleNode('GamePath') } else { $null }
             $registeredGamePath = if ($gpuPathNode) { [string]$gpuPathNode.InnerText } else { '' }
@@ -8972,6 +8993,7 @@ function Invoke-GpuFixSetup {
             }
         }
     }
+    Write-TpmCompactExtractionProgress -Phase Checking -Label 'GPU Fix' -Current 0 -Total 0 -StartedAt (Get-Date) -Complete
     Write-Host ""
     Write-Host ("  Updated  : {0} profile(s)" -f $updated) -ForegroundColor Green
     if ($unchanged -gt 0) { Write-Host ("  No change: {0} (already correct or no GPU fix fields)" -f $unchanged) -ForegroundColor DarkGray }
@@ -8979,6 +9001,7 @@ function Invoke-GpuFixSetup {
     if ($missingDevice -gt 0) { Write-Host ("  Unavailable devices: {0} profile(s) left unchanged" -f $missingDevice) -ForegroundColor Yellow }
     if ($missingPath -gt 0) { Write-Host ("  Missing executables: {0} profile(s) left unchanged" -f $missingPath) -ForegroundColor Yellow }
     if ($errors -gt 0) { Write-Host ("  Errors   : {0} -- see log for details" -f $errors) -ForegroundColor Red }
+    Write-Host "  Note: GPU Fix changes saved compatibility fields only; TPM does not verify game launch or display output." -ForegroundColor DarkGray
     Write-Log ("GPU Fix: complete. Vendor={0} Updated={1} Unchanged={2} Skipped={3} MissingDevice={4} MissingPath={5} Errors={6}" -f `
         $gpuVendor, $updated, $unchanged, $skipped, $missingDevice, $missingPath, $errors)
     return [pscustomobject]@{ Succeeded = ($errors -eq 0 -and $skipped -eq 0); GpuName = $gpuName; GpuVendor = $gpuVendor; Updated = $updated; Unchanged = $unchanged; Skipped = $skipped; MissingDevice = $missingDevice; MissingPath = $missingPath; Errors = $errors; SkipDetails = $skipDetails.ToArray() }
@@ -9418,6 +9441,27 @@ function Get-Pcsx2CursorPathReport {
     }
 }
 
+function Focus-TpmConsoleBestEffort {
+    try {
+        if (-not ('TpmConsoleNativeMethods' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class TpmConsoleNativeMethods {
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+}
+'@ -ErrorAction Stop
+        }
+        $process = Get-Process -Id $PID -ErrorAction Stop
+        if ($process.MainWindowHandle -ne [IntPtr]::Zero) {
+            [void][TpmConsoleNativeMethods]::SetForegroundWindow($process.MainWindowHandle)
+        }
+    } catch {
+        # Browser focus recovery is best effort; selection remains in the bridge.
+    }
+}
+
 # Crosshair setup wizard: HTML preview of all crosshair PNGs, P1/P2 picker,
 # deploy selected images to all registered lightgun game folders. Optionally
 # hides the hardware cursor by setting HideCursor/DisableCursor=1 in every
@@ -9500,6 +9544,7 @@ function Invoke-CrosshairSetup {
             if ($browserChoices.Count -gt 1) { $browserP2Idx = [int]$browserChoices[1] }
         } catch { Write-Log "Crosshairs: browser selection read failed -- $_"; Stop-CrosshairSelectionBridge -Session $bridgeSession }
     }
+    if ($bridgeSession) { Focus-TpmConsoleBestEffort }
 
     # Pick P1
     $p1Idx = $browserP1Idx
@@ -9528,7 +9573,7 @@ function Invoke-CrosshairSetup {
     $p2Name = [System.IO.Path]::GetFileNameWithoutExtension($valid[$p2Idx])
     Write-Host ""
     Write-Host "  P1: $p1Name    P2: $p2Name" -ForegroundColor Green
-    $crosshairConfirm = (Read-HostSafe "  Apply these crosshairs? (Y/N, default Y)" -Default 'Y').Trim().ToUpper()
+    $crosshairConfirm = Read-TpmYesNo -Prompt "  Apply these crosshairs? (Y/N, default Y)" -Default 'Y'
     if ($crosshairConfirm -ne 'Y') {
         Write-Host "  Crosshair setup cancelled. No files were changed." -ForegroundColor Yellow
         Write-Log "Crosshairs: cancelled before deployment."
@@ -9600,7 +9645,7 @@ function Invoke-CrosshairSetup {
                             Write-Host "  PCSX2 Crosshair Setup Required" -ForegroundColor Cyan
                             Write-Host ("    TPM found pcsx2x6 installed but not yet initialized for TeknoParrot ({0})." -f $prereqState.Reason) -ForegroundColor DarkGray
                             Write-Host "    TPM can trigger the emulator's own first-run initialization, then install the crosshair assets and verify the result." -ForegroundColor DarkGray
-                            $firstRunAnswer = (Read-HostSafe "  Configure Automatically? (Y/N)").ToUpper()
+                            $firstRunAnswer = Read-TpmYesNo -Prompt "  Configure Automatically? (Y/N)"
                             if ($firstRunAnswer -eq "Y") {
                                 if (-not (Wait-TpmForProcessClose -ProcessNames @('pcsx2-qtx64') -FriendlyName 'PCSX2')) {
                                     Write-Host "    Crosshair setup cancelled without changes. The selected crosshairs were not deployed." -ForegroundColor Yellow
@@ -9711,7 +9756,7 @@ function Invoke-CrosshairSetup {
     if ($errors  -gt 0) { Write-Host ("  Errors   : {0}" -f $errors) -ForegroundColor Red }
     Write-Log ("Crosshairs: done. Deployed={0} Skipped={1} Errors={2}" -f $deployed, $skipped, $errors)
 
-    $hideCursor = (Read-HostSafe "  Also hide the Windows cursor for all lightgun games? (Y/N)").ToUpper()
+    $hideCursor = Read-TpmYesNo -Prompt "  Also hide the Windows cursor for all lightgun games? (Y/N)"
     if ($hideCursor -eq "Y") {
         Write-Host ""
         Invoke-CursorHideSetup -UserProfilesDir $UserProfilesDir
@@ -10618,7 +10663,7 @@ function Write-TpmDownloadProgress {
 
     $activity = "Downloading $Label"
     if ($Complete) {
-        Write-Progress -Id 42 -Activity $activity -Completed
+        Write-TpmCompactExtractionProgress -Phase Checking -Label ("Downloading {0}" -f $Label) -Current 0 -Total 0 -StartedAt (Get-Date) -Complete
         return
     }
 
@@ -10635,9 +10680,12 @@ function Write-TpmDownloadProgress {
                 $etaText = " ETA {0}" -f ([TimeSpan]::FromSeconds($remainingSeconds).ToString("mm\:ss"))
             }
         }
-        Write-Progress -Id 42 -Activity $activity -Status ("{0}: {1}%  {2}/{3} MB  {4} MB/s{5}" -f $Method, $percent, $downloadedMb, $totalMb, $mbps, $etaText) -PercentComplete $percent
+        $progressCurrent = [int][Math]::Min([int]::MaxValue, [Math]::Round($DownloadedBytes / 1MB))
+        $progressTotal = [int][Math]::Min([int]::MaxValue, [Math]::Round($TotalBytes / 1MB))
+        Write-TpmCompactExtractionProgress -Phase Checking -Label ("{0} via {1}" -f $Label, $Method) -Current $progressCurrent -Total $progressTotal -StartedAt ((Get-Date).Subtract($Elapsed))
     } else {
-        Write-Progress -Id 42 -Activity $activity -Status ("{0}: {1} MB downloaded  {2} MB/s" -f $Method, $downloadedMb, $mbps)
+        $progressCurrent = [int][Math]::Min([int]::MaxValue, [Math]::Round($DownloadedBytes / 1MB))
+        Write-TpmCompactExtractionProgress -Phase Checking -Label ("{0} via {1}" -f $Label, $Method) -Current $progressCurrent -Total 0 -StartedAt ((Get-Date).Subtract($Elapsed))
     }
 }
 
@@ -10812,16 +10860,10 @@ function Invoke-TpmDownload {
         if ($LastStatusCode) { $LastStatusCode.Value = $detectedStatusCode }
         return $false
     } finally {
-        # The BITS/HttpClient/Invoke-WebRequest tiers each raise the Id 42
-        # progress overlay as they start working, but only the success path
-        # in each of them clears it. Every failure/exception exit above used
-        # to leave whatever partial-progress text ("0 MB downloaded") was
-        # last written on screen permanently, since nothing after this point
-        # in the whole call chain ever touches Id 42 again. Clearing here
-        # unconditionally (success, per-tier failure, or an unexpected
-        # throw) guarantees the overlay never survives past this function
-        # regardless of how it exits -- see issue #132.
-        Write-Progress -Id 42 -Activity "Downloading $Label" -Completed
+        # Every transport tier updates the shared compact progress row. This
+        # unconditional final update prevents stale download text after a
+        # success, definitive 404, per-tier failure, or unexpected exception.
+        Write-TpmCompactExtractionProgress -Phase Checking -Label ("Downloading {0}" -f $Label) -Current 0 -Total 0 -StartedAt (Get-Date) -Complete
     }
 }
 
@@ -11085,7 +11127,7 @@ function Resolve-EggmanDatUpdateDestination {
         if ($candidates.Count -gt 0) {
             $candidate = $candidates[0]
             Write-Host ("  Safe external DAT folder found: {0}" -f $candidate.Path) -ForegroundColor Green
-            $choice = (Read-HostSafe 'Download latest DAT there? (Y/N)').ToUpper()
+            $choice = Read-TpmYesNo -Prompt 'Download latest DAT there? (Y/N)'
             if ($choice -eq 'Y') {
                 return [pscustomobject]@{
                     Status = 'FallbackSelected'
@@ -11189,7 +11231,7 @@ function Invoke-EggmanDatDownloadInteractive {
             if ($candidates.Count -gt 0) {
                 $candidate = $candidates[0]
                 Write-Host ("  Safe external DAT folder found: {0}" -f $candidate.Path) -ForegroundColor Green
-                $choice = (Read-HostSafe 'Download latest DAT there? (Y/N)').ToUpper()
+                $choice = Read-TpmYesNo -Prompt 'Download latest DAT there? (Y/N)'
                 if ($choice -eq 'Y') {
                     $defaultSavePath = Join-Path $candidate.Path $safeDatFileName
                     $defaultDestination = Get-EggmanDatPathRole -Path $defaultSavePath -RequestedRole Destination -ProgramDirectory $ProgramDirectory
@@ -11778,7 +11820,7 @@ function Start-PostgresRecoveryAsAdministrator {
         } else {
             Write-Host '  TPM consumed the failed attempt and could not prepare a safe retry. Nothing else was changed.' -ForegroundColor Yellow
         }
-        $retry = (Read-HostSafe '  Try again? (Y/N)').ToUpper()
+        $retry = Read-TpmYesNo -Prompt '  Try again? (Y/N)'
         if ($retry -ne 'Y') {
             [void](Remove-PostgresRecoveryState -Path $statePath -ClaimPath ($statePath + '.claim'))
             return $false
@@ -12693,12 +12735,8 @@ function Invoke-FFBPluginSetup {
         foreach ($ov in $overlaps) { Write-Host ("    - {0}" -f $ov.Profile.BaseName) -ForegroundColor DarkGray }
         Write-Host "  [Y] Use native FFB Blaster (recommended)" -ForegroundColor White
         Write-Host "  [N] Use the third-party plugin" -ForegroundColor White
-        $ans = (Read-HostSafe '  Choose Y or N' -Default 'Y').Trim().ToUpperInvariant()
+        $ans = Read-TpmYesNo -Prompt '  Choose Y or N' -Default 'Y'
         $useNativeForOverlaps = ($ans -ne "N")
-        if ($ans -ne "Y" -and $ans -ne "N") {
-            Write-Host "  Unrecognized answer -- keeping native FFB Blaster as the safe default." -ForegroundColor Yellow
-            Write-Log ("FFBPlugin: invalid overlap owner response '{0}' -- defaulted to native" -f $ans)
-        }
         if (-not $useNativeForOverlaps) {
             Write-Host "  Disabling native FFB Blaster on the overlapping profiles before plugin deployment..." -ForegroundColor Yellow
             $nativeSwitch = Disable-FFBBlasterForOverlap -UserProfilesDir $UserProfilesDir -TpRoot $TpRoot -ProfileCodes @($overlaps | ForEach-Object { $_.Profile.BaseName })
@@ -14789,7 +14827,7 @@ function Invoke-CheckForUpdates {
     Write-Host "       this session will exit rather than keep running the old code."
     Write-Host ""
 
-    $ans = (Read-HostSafe "  Update to $latestDisplay now? (Y/N)").ToUpper()
+    $ans = Read-TpmYesNo -Prompt "  Update to $latestDisplay now? (Y/N)"
     if ($ans -ne "Y") {
         Write-Host "  Skipped -- no changes made." -ForegroundColor DarkGray
         Write-Log "CheckForUpdates: user declined the update to $($release.TagName)."
@@ -14879,7 +14917,7 @@ function Invoke-StartupUpdateCheck {
             Write-Host "    5) Require you to restart TeknoParrot Manager afterward --"
             Write-Host "       this session will exit rather than keep running the old code."
             Write-Host ""
-            $confirm = (Read-HostSafe "  Proceed? (Y/N)").ToUpper()
+            $confirm = Read-TpmYesNo -Prompt "  Proceed? (Y/N)"
             if ($confirm -ne "Y") {
                 Write-Host "  Skipped -- no changes made." -ForegroundColor DarkGray
                 Write-Log "StartupUpdateCheck: user backed out of the update to $($release.TagName)."
@@ -14888,10 +14926,12 @@ function Invoke-StartupUpdateCheck {
             return Invoke-ManagerUpdateInstall -ScriptPath $ScriptPath -Release $release
         }
 
-        # N, or anything else -- remind me later.
-        Write-Host "  Continuing -- you can check again any time from menu option 13." -ForegroundColor DarkGray
-        Write-Log "StartupUpdateCheck: user chose to be reminded later."
-        return $false
+        if ($ans -eq "N") {
+            Write-Host "  Continuing -- you can check again any time from menu option 13." -ForegroundColor DarkGray
+            Write-Log "StartupUpdateCheck: user chose to be reminded later."
+            return $false
+        }
+        Write-Host "  Invalid choice. Enter Y, N, or V." -ForegroundColor Yellow
     }
 }
 
@@ -15729,7 +15769,7 @@ function Invoke-ManualRegistrationChoices {
 # because there is no safe way to know which game the file belongs to.
 # Profiles with a valid, working path are left untouched.
 function Repair-GamePaths {
-    param([string]$userProfilesDir, [string]$installFolder, [hashtable]$profileIndex, [bool]$DryRun = $false, [object[]]$ReviewedCandidates = @())
+    param([string]$userProfilesDir, [string]$installFolder, [hashtable]$profileIndex, [bool]$DryRun = $false, [object[]]$ReviewedCandidates = @(), [string[]]$OnlyGames = @())
 
     # Map filename (lowercased) -> list of full paths found on disk.
     # Uses Get-GameFiles so .xbe, .dll, ELF, disc images, and extension-less
@@ -15743,6 +15783,10 @@ function Repair-GamePaths {
 
     $reports = New-Object System.Collections.ArrayList
     $files = @(Get-ChildItem -LiteralPath $userProfilesDir -Filter *.xml -File -ErrorAction SilentlyContinue)
+    if (@($OnlyGames).Count -gt 0) {
+        $allowedGames = @($OnlyGames | ForEach-Object { [string]$_ } | Where-Object { $_ } | ForEach-Object { $_.ToLowerInvariant() })
+        $files = @($files | Where-Object { $allowedGames -contains $_.BaseName.ToLowerInvariant() })
+    }
     $repairIndex = 0
     foreach ($f in $files) {
         $repairIndex++
@@ -15971,7 +16015,7 @@ function Invoke-LibraryHealthManualPathRepair {
     }
     Write-Host ""
     Write-Host "TPM will save only the explicitly selected paths after making a safety backup." -ForegroundColor Yellow
-    $confirm = (Read-HostSafe '  Save these path repairs? (Y/N)' -Default 'N').Trim().ToUpperInvariant()
+    $confirm = Read-TpmYesNo -Prompt '  Save these path repairs? (Y/N)' -Default 'N'
     if ($confirm -ne 'Y') {
         foreach ($plan in $plans) { [void]$skipped.Add($plan.Code) }
         Write-Host "  Manual path repair cancelled. Nothing was changed." -ForegroundColor DarkGray
@@ -16229,14 +16273,11 @@ function Invoke-LibraryHealthCheck {
 }
 
 # Presents plain-language actions after the read-only Health Check report.
-# Selecting a repair or setup action is the only point where a later workflow
-# can mutate anything.
 function Show-LibraryHealthNextActions {
     param([Parameter(Mandatory)]$Result)
     $allowedChoices = @('5', '6', '7', '8', '9', 'D', 'B')
-    if (@($Result.Broken).Count -gt 0) { $allowedChoices += @('R', 'M', 'S', 'C') }
+    if (@($Result.Broken).Count -gt 0) { $allowedChoices += @('R', 'M', 'S') }
     if (@($Result.PostgresNeeded).Count -gt 0) { $allowedChoices += 'P' }
-
 
     if (@($Result.Broken).Count -gt 0) {
         do {
@@ -16246,30 +16287,25 @@ function Show-LibraryHealthNextActions {
             Write-Host "  [R] Try automatic path repair" -ForegroundColor White
             Write-Host "  [M] Let me pick the correct executable or folder manually" -ForegroundColor White
             Write-Host "  [S] Search another game folder" -ForegroundColor White
-            Write-Host "  [C] Re-extract from the configured source" -ForegroundColor White
+            Write-Host "  Search checks only known game folders and never changes a valid path." -ForegroundColor DarkGray
             Write-Host "  [D] Details" -ForegroundColor White
             Write-Host "  [B] Back to main menu" -ForegroundColor White
-            $choice = (Read-HostSafe '  Choose R, M, S, C, D, or B' -Default 'B').Trim().ToUpperInvariant()
+            $choice = (Read-HostSafe '  Choose R, M, S, D, or B' -Default 'B').Trim().ToUpperInvariant()
             if ($choice -eq 'D') {
                 Write-Host ""
                 Write-Host "Details (the health check itself was read-only):" -ForegroundColor Cyan
                 Write-Host ("  Registered: {0}; valid: {1}; broken: {2}; empty: {3}" -f $Result.Registered, @($Result.Valid).Count, @($Result.Broken).Count, @($Result.Empty).Count) -ForegroundColor DarkGray
-            } elseif ($choice -notin @('R', 'M', 'S', 'C', 'B')) {
-                Write-Host "  Choose R, M, S, C, D, or B." -ForegroundColor Yellow
+            } elseif ($choice -notin @('R', 'M', 'S', 'B')) {
+                Write-Host "  Choose R, M, S, D, or B." -ForegroundColor Yellow
             }
-        } while ($choice -eq 'D' -or $choice -notin @('R', 'M', 'S', 'C', 'B'))
+        } while ($choice -eq 'D' -or $choice -notin @('R', 'M', 'S', 'B'))
         return $choice
     }
 
     do {
         Write-Host ""
         Write-Host "What TPM can do next:" -ForegroundColor Cyan
-        if (@($Result.Broken).Count -gt 0) {
-            Write-Host ("  Broken saved paths: {0} game(s) -- {1}" -f @($Result.Broken).Count, (@($Result.Broken) -join ', ')) -ForegroundColor Yellow
-            Write-Host "  TPM can search known game folders for matching files, then ask before saving any repaired paths." -ForegroundColor DarkGray
-            Write-Host "  [R] Try automatic path repair" -ForegroundColor White
-            Write-Host "  [M] Let me pick the correct folders manually" -ForegroundColor White
-        } elseif (@($Result.Empty).Count -gt 0) {
+        if (@($Result.Empty).Count -gt 0) {
             Write-Host ("  {0} profile(s) have no saved path yet. Manual folder selection is available through Register." -f @($Result.Empty).Count) -ForegroundColor Yellow
         } else {
             Write-Host "  No broken saved paths were found." -ForegroundColor Green
@@ -17458,6 +17494,7 @@ function Write-ControlPropagationResults {
     Write-Host (" Games skipped: {0}" -f $skippedCount) -ForegroundColor DarkGray
     Write-Host (" Games failed: {0}" -f $failedCount) -ForegroundColor Red
     Write-Host (" Settings/API corrected only: {0}" -f $apiFixedCount) -ForegroundColor DarkCyan
+    Write-Host " Note: these counts describe saved settings, not a verified physical device binding. Test each game in TeknoParrotUI." -ForegroundColor DarkGray
     return [pscustomobject]@{ BoundCount = $boundCount; ControlsCopiedCount = $copiedCount; SettingsOnlyCount = $settingsOnlyCount; ApiFixedCount = $apiFixedCount; ManualCount = $manualCount; SkippedCount = $skippedCount; FailedCount = $failedCount; NoArchetypeItems = $noArchetype }
 }
 
@@ -17470,7 +17507,7 @@ function Invoke-DeviceSurvey {
     # Scriptblock instead of a nested function: PowerShell nested functions
     # escape into session scope after the first call, polluting the environment
     # for the rest of the session. A scriptblock stays local to this function.
-    $readYesNo = { param([string]$q) return ((Read-HostSafe "   $q (Y/N)").ToUpper() -eq "Y") }
+    $readYesNo = { param([string]$q) return ((Read-TpmYesNo -Prompt "   $q (Y/N)") -eq "Y") }
 
     Write-Host ""
     Write-Host " Which controls do you have and want to use?" -ForegroundColor Cyan
@@ -19957,7 +19994,7 @@ if (Test-Path -LiteralPath $configPath) {
             Write-Log "Unattended: auto-accepted saved settings."
             $use = "Y"
         } else {
-            $use = (Read-HostSafe "Use these settings? (Y/N)")
+            $use = Read-TpmYesNo -Prompt "Use these settings? (Y/N)"
         }
         if ($use.ToUpper() -eq "Y") {
             # A config saved by an older script version could have
@@ -20067,7 +20104,7 @@ if (-not $tpRoot) {
     } elseif ($detected.Count -eq 1) {
         Write-Host ""
         Write-Host "  Auto-detected TeknoParrot at: $($detected[0])" -ForegroundColor Cyan
-        $useIt = (Read-HostSafe "  Use this path? (Y/N)").ToUpper()
+        $useIt = Read-TpmYesNo -Prompt "  Use this path? (Y/N)"
         if ($useIt -eq "Y") { $tpRoot = $detected[0] }
     } elseif ($detected.Count -gt 1) {
         Write-Host ""
@@ -20115,7 +20152,7 @@ if (-not $configAccepted -and -not $Unattended) {
     Write-Host "  Folder naming mode" -ForegroundColor Cyan
     Write-Host "  Y = RetroBat/Batocera style: GameName.teknoparrot" -ForegroundColor DarkCyan
     Write-Host "  N = Standard style: GameName  (used by LaunchBox and most other frontends)" -ForegroundColor DarkCyan
-    $rbChoice = (Read-HostSafe "  Use RetroBat folder naming? (Y/N, default N)" -Default 'N').ToUpper()
+    $rbChoice = Read-TpmYesNo -Prompt "  Use RetroBat folder naming? (Y/N, default N)" -Default 'N'
     $retroBat = ($rbChoice -eq "Y")
     if ($retroBat) { Write-Log "RetroBat mode enabled by user." }
 }
@@ -20280,7 +20317,7 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
     # optional -- so only "currently using" appears here.
     $currentSizeMBPreCheck = if (Test-Path -LiteralPath $eggmanDatZip) { [Math]::Round((Get-Item -LiteralPath $eggmanDatZip).Length / 1MB, 1) } else { 0 }
     Write-Host ("  Currently using  : {0}  ({1} MB)" -f (Split-Path -Leaf $eggmanDatZip), $currentSizeMBPreCheck) -ForegroundColor Cyan
-    $checkUpdate = (Read-HostSafe "Check for a newer Eggman dat release? (Y/N)").ToUpper()
+    $checkUpdate = Read-TpmYesNo -Prompt "Check for a newer Eggman dat release? (Y/N)"
     if ($checkUpdate -eq 'Y') {
         # Select and revalidate the destination before contacting GitHub.
         # Reading the current DAT for comparison is allowed; writing a
@@ -20308,7 +20345,7 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
                     $doUpdate = if ($updateDestination.Status -eq 'FallbackSelected') {
                         'Y'
                     } else {
-                        (Read-HostSafe "  Download and switch to the latest release? (Y/N)").ToUpper()
+                        Read-TpmYesNo -Prompt "  Download and switch to the latest release? (Y/N)"
                     }
                     if ($doUpdate -eq 'Y') {
                         $preferredUpdatePath = $eggmanDatZip
@@ -21790,7 +21827,7 @@ function Invoke-TpmFfbSetupMode {
     [void](Set-TpmWorkflowWaiting -Context $status -Message 'TPM can add the optional third-party force-feedback plugin.' -UserAction 'Answer Y or N')
     Write-Host '  [Y] Set up the free third-party FFB plugin' -ForegroundColor White
     Write-Host '  [N] Skip the optional plugin' -ForegroundColor White
-    $choice = (Read-HostSafe '  Choose Y or N' -Default 'N').Trim().ToUpperInvariant()
+    $choice = Read-TpmYesNo -Prompt '  Choose Y or N' -Default 'N'
     [void](Resume-TpmWorkflowStatus -Context $status)
     $plugin = $null
     if ($choice -eq 'Y') {
@@ -22035,11 +22072,11 @@ $mode = $null
                 Write-Host ("  TPM will search {0} for matching executables." -f $searchRoot) -ForegroundColor Cyan
                 Write-Host '  [Y] Search for repair candidates' -ForegroundColor White
                 Write-Host '  [N] Cancel' -ForegroundColor White
-                $repairConfirm = (Read-HostSafe '  Choose Y or N' -Default 'N').Trim().ToUpperInvariant()
+                $repairConfirm = Read-TpmYesNo -Prompt '  Choose Y or N' -Default 'N'
                 if ($repairConfirm -eq 'Y') {
                     try {
                         $repairIndex = Build-ProfileIndex -gameProfilesDir $gameProfilesDir
-                        $repairReports = @(Repair-GamePaths -userProfilesDir $userProfilesDir -installFolder $searchRoot -profileIndex $repairIndex -DryRun:$true)
+                        $repairReports = @(Repair-GamePaths -userProfilesDir $userProfilesDir -installFolder $searchRoot -profileIndex $repairIndex -DryRun:$true -OnlyGames ([string[]]@($healthResult.Broken)))
                         $repairCandidates = @($repairReports | Where-Object { $_.Status -eq 'candidate' })
                         if ($repairCandidates.Count -gt 0) {
                             Write-Host '  Candidate paths found (no profile changes made):' -ForegroundColor Cyan
@@ -22048,10 +22085,10 @@ $mode = $null
                             }
                             Write-Host '  [Y] Apply these reviewed candidates' -ForegroundColor White
                             Write-Host '  [N] Leave them unchanged' -ForegroundColor White
-                            $applyChoice = (Read-HostSafe '  Choose Y or N' -Default 'N').Trim().ToUpperInvariant()
+                            $applyChoice = Read-TpmYesNo -Prompt '  Choose Y or N' -Default 'N'
                             if ($applyChoice -eq 'Y') {
                                 $healthBackup = New-LibraryHealthProfileBackup -UserProfilesDir $userProfilesDir
-                                $repairReports = @(Repair-GamePaths -userProfilesDir $userProfilesDir -installFolder $searchRoot -profileIndex $repairIndex -DryRun:$false -ReviewedCandidates $repairCandidates)
+                                $repairReports = @(Repair-GamePaths -userProfilesDir $userProfilesDir -installFolder $searchRoot -profileIndex $repairIndex -DryRun:$false -ReviewedCandidates $repairCandidates -OnlyGames ([string[]]@($healthResult.Broken)))
                                 $repairFixed = @($repairReports | Where-Object { $_.Status -eq 'fixed' })
                                 Write-Host ("  Applied {0} repaired path(s)." -f $repairFixed.Count) -ForegroundColor Green
                                 Write-Host ("  Safety backup: {0}" -f $healthBackup.Path) -ForegroundColor DarkGray
@@ -22090,18 +22127,6 @@ $mode = $null
                     $repairSearchAgain = $false
                 }
             } while ($repairSearchAgain)
-            [void](Read-HostSafe '  Press Enter to return to the main menu')
-            continue
-        }
-        if ($healthChoice -eq 'C' -and @($healthResult.Broken).Count -gt 0) {
-            if ([string]::IsNullOrWhiteSpace($zipSource) -and [string]::IsNullOrWhiteSpace($zipSourceSupplementary)) {
-                Write-Host '  No configured source ZIP folder is available. Choose option 1 to configure AutoSync first.' -ForegroundColor Yellow
-            } else {
-                Write-Host '  Returning to AutoSync so you can re-copy or re-extract the affected games.' -ForegroundColor Cyan
-                $pendingAutoSyncGames = @($healthResult.Broken)
-                $pendingApplyMode = 'AutoSync'
-                $pendingApplyForce = $false
-            }
             [void](Read-HostSafe '  Press Enter to return to the main menu')
             continue
         }
@@ -22284,7 +22309,7 @@ $mode = $null
                         Write-Host "  TPM can repair it automatically. TPM will make and verify a safety backup first." -ForegroundColor Yellow
                         Write-Host "  [F] Try another postgres password"
                         Write-Host "  Existing PostgreSQL data is preserved; after repair TPM verifies the password works." -ForegroundColor DarkGray
-                        $repairNow = (Read-HostSafe '  Repair the PostgreSQL password now? (Y/N)').ToUpper()
+                        $repairNow = Read-TpmYesNo -Prompt '  Repair the PostgreSQL password now? (Y/N)'
                         if ($repairNow -ne 'Y') {
                             Write-Host '  Nothing was changed. The PostgreSQL setup was not completed.' -ForegroundColor Yellow
                             [void](Stop-TpmWorkflowStatus -Context $postgresStatus -Reason 'PostgreSQL repair declined')
@@ -22336,7 +22361,7 @@ $mode = $null
                                 [void](Read-HostSafe '  Press Enter to acknowledge the repair result')
                                 [void](Acknowledge-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-direct-recovery')
                                 [void](Update-TpmWorkflowActivity -Context $postgresStatus -Activity 'Waiting for your retry choice')
-                                $retryDirect = (Read-HostSafe '  Try the PostgreSQL repair again? (Y/N)').ToUpper()
+                                $retryDirect = Read-TpmYesNo -Prompt '  Try the PostgreSQL repair again? (Y/N)'
                                 if ($retryDirect -ne 'Y') {
                                     [void](Stop-TpmWorkflowStatus -Context $postgresStatus -Reason 'PostgreSQL repair stopped')
                                     [void](Close-TpmWorkflowStatus -Context $postgresStatus)
@@ -22346,16 +22371,16 @@ $mode = $null
                             if (-not $directRecoverySucceeded) { continue }
                         }
                     }
-                } else {
-                    $outPw = [ref]$null
-                    if (-not (Install-Postgres83 -OutSuperPasswordPlain $outPw)) {
-                        Write-Host "  PostgreSQL setup did not complete -- no profile changes made." -ForegroundColor Red
-                        if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'PostgreSQL could not be installed successfully.' }
-                        [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-install-failed' -Message 'PostgreSQL installation did not complete.' -DataSafety 'No PostgreSQL or profile changes were made.' -RecoveryActions (Get-PostgresRecoveryActions -FailureId 'postgres-install-failed') -Acknowledge)
-                        continue
-                    }
-                    $superPwPlain = $outPw.Value
                 }
+            } else {
+                $outPw = [ref]$null
+                if (-not (Install-Postgres83 -OutSuperPasswordPlain $outPw)) {
+                    Write-Host "  PostgreSQL setup did not complete -- no profile changes made." -ForegroundColor Red
+                    if ($isPostgresRecoveryResume) { Exit-PostgresRecoveryResume -Message 'PostgreSQL could not be installed successfully.' }
+                    [void](Resolve-TpmWorkflowFailure -Context $postgresStatus -FailureId 'postgres-install-failed' -Message 'PostgreSQL installation did not complete.' -DataSafety 'No PostgreSQL or profile changes were made.' -RecoveryActions (Get-PostgresRecoveryActions -FailureId 'postgres-install-failed') -Acknowledge)
+                    continue
+                }
+                $superPwPlain = $outPw.Value
             }
 
             if (-not $recoveryBackup) { $recoveryBackup = New-PostgresRecoveryBackup -UserProfilesDir $userProfilesDir }
@@ -22594,6 +22619,7 @@ $mode = $null
             }
             if ($pgBackup.Path) { Write-Host ("  Database backup saved: {0}" -f $pgBackup.Path) -ForegroundColor DarkCyan }
             else { Write-Host "  No existing databases needed backup." -ForegroundColor DarkGray }
+            [void](Complete-TpmWorkflowStep -Context $postgresStatus -Outcome Succeeded -Summary 'Existing database backup checked' -NextStep 'Save the repaired settings')
             [void](Start-TpmWorkflowStep -Context $postgresStatus -StepId 'save' -Activity 'Saving the repaired settings')
             if (-not $isPostgresRecoveryResume) { $postgresSuperPasswordEncrypted = ConvertTo-PostgresEncryptedPassword $superPwPlain }
             if (-not (Save-Config)) {
@@ -22762,8 +22788,14 @@ $mode = $null
                 Write-Host ("  Collection failures: {0}. Intentional exclusions: {1}." -f $supportResult.Summary.CollectionFailures, $supportResult.Summary.IntentionallyExcluded) -ForegroundColor DarkGray
                 Write-Host ("  Saved here: {0}" -f $supportResult.PackagePath) -ForegroundColor Green
                 Write-Host "  This is the file to send when asking for help." -ForegroundColor Cyan
-                $openPackage = (Read-HostSafe "  Open the package folder now? (Y/N)").Trim().ToUpper()
-                if ($openPackage -eq 'Y') {
+                Write-Host "  Next step:" -ForegroundColor Cyan
+                Write-Host "  [O] Open the support package folder" -ForegroundColor White
+                Write-Host "  [B] Back to main menu" -ForegroundColor White
+                do {
+                    $openPackage = (Read-HostSafe '  Choice, default O' -Default 'O').Trim().ToUpperInvariant()
+                    if ($openPackage -notin @('O', 'B')) { Write-Host '  Choose O or B.' -ForegroundColor Yellow }
+                } while ($openPackage -notin @('O', 'B'))
+                if ($openPackage -eq 'O') {
                     try { Start-Process -FilePath 'explorer.exe' -ArgumentList @([System.IO.Path]::GetDirectoryName($supportResult.PackagePath)) -ErrorAction Stop | Out-Null } catch { Write-Host "  Windows could not open the package folder." -ForegroundColor Yellow }
                 }
             } else {
@@ -22867,7 +22899,7 @@ $mode = $null
             Write-Log "PropagateControls: unattended -- propagation = Y."
             $goCtl = "Y"
         } else {
-            $goCtl = (Read-HostSafe " Propagate controls now? (Y/N)")
+            $goCtl = Read-TpmYesNo -Prompt " Propagate controls now? (Y/N)"
         }
 
         if ($goCtl.ToUpper() -eq "Y") {
@@ -23137,7 +23169,7 @@ $mode = $null
                     $reShadeChoice = (Read-HostSafe ("  Choose {0}" -f $reShadePromptChoices) -Default 'B').Trim().ToUpperInvariant()
                     if ($reShadeChoice -eq 'M' -and $reShadePathIssue) { $pendingApplyMode = 'HealthCheck'; $pendingApplyForce = $false; $pendingReShadeAction = 'Select' }
                     elseif ($reShadeChoice -eq 'A') {
-                        $adoptConfirm = (Read-HostSafe '  Confirm adopting/replacing existing ReShade files? (Y/N)' -Default 'N').Trim().ToUpperInvariant()
+                        $adoptConfirm = Read-TpmYesNo -Prompt '  Confirm adopting/replacing existing ReShade files? (Y/N)' -Default 'N'
                         if ($adoptConfirm -eq 'Y') { $pendingApplyMode = 'ReShadeSetup'; $pendingApplyForce = $false; $pendingReShadeAction = 'Adopt' }
                         else { Write-Host '  Adopt/replace cancelled. No files were changed.' -ForegroundColor DarkGray; $reShadeChoice = 'B' }
                     }
@@ -23735,7 +23767,7 @@ $mode = $null
                 Write-Host "  [Unattended] Continuing with network staging folder." -ForegroundColor Yellow
                 Write-Log "Unattended: network staging folder -- continuing."
             } else {
-                $contNet = (Read-HostSafe "  Continue with network staging folder? (Y/N)")
+                $contNet = Read-TpmYesNo -Prompt "  Continue with network staging folder? (Y/N)"
                 if ($contNet.ToUpper() -ne "Y") {
                     Write-Host "Aborted." -ForegroundColor Yellow
                     Write-Log "Aborted: user declined network staging folder."
@@ -23857,7 +23889,7 @@ $mode = $null
                     Write-Host "  [Unattended] Continuing despite low free space." -ForegroundColor Yellow
                     Write-Log "Unattended: low disk space warning -- continuing."
                 } else {
-                    $cont = (Read-HostSafe "  Continue anyway? (Y/N)")
+                    $cont = Read-TpmYesNo -Prompt "  Continue anyway? (Y/N)"
                     if ($cont.ToUpper() -ne "Y") { Write-Host "Aborted." -ForegroundColor Yellow; Write-Log "Aborted: low staging-drive space."; [void](Read-Host "  Press Enter to return to menu"); continue }
                 }
             }
@@ -24180,7 +24212,7 @@ $duplicateConflicts = @($manualRegData.GetEnumerator() | Where-Object { $_.Value
 if ($duplicateConflicts.Count -gt 0 -and -not $Unattended) {
     Write-Host ""
     Write-Host ("  {0} duplicate profile conflict(s) found (one profile code claimed by two folders)." -f $duplicateConflicts.Count) -ForegroundColor Yellow
-    $resolveChoice = (Read-HostSafe "  Resolve them now by picking which folder keeps the profile? (Y/N)").ToUpper()
+    $resolveChoice = Read-TpmYesNo -Prompt "  Resolve them now by picking which folder keeps the profile? (Y/N)"
     if ($resolveChoice -eq "Y") {
         foreach ($entry in $duplicateConflicts) {
             $folderName = $entry.Key
@@ -24280,7 +24312,7 @@ if ($dryRunActive) {
     Write-Host "  same as that game's file in the UserProfiles\ folder (called the profile" -ForegroundColor DarkCyan
     Write-Host "  code), but ending in .png instead of .xml. TeknoParrot-Manager-controls.txt" -ForegroundColor DarkCyan
     Write-Host "  lists every game's file name if you're not sure." -ForegroundColor DarkCyan
-    $doThumb = (Read-HostSafe "Download thumbnails for registered games missing an icon? (Y/N)").ToUpper()
+    $doThumb = Read-TpmYesNo -Prompt "Download thumbnails for registered games missing an icon? (Y/N)"
 }
 if ($doThumb -eq "Y") {
     Write-Host ""
@@ -24300,7 +24332,7 @@ if ($Unattended) {
     Write-Log "Unattended: repair = Y."
     $doRepair = "Y"
 } else {
-    $doRepair = (Read-HostSafe "Check for and repair broken game paths now? (Y/N)")
+    $doRepair = Read-TpmYesNo -Prompt "Check for and repair broken game paths now? (Y/N)"
 }
 $nf   = @(); $amb2 = @()   # initialise so the final summary can reference them safely
 if ($doRepair.Trim().ToUpper() -eq "Y") {
@@ -24381,7 +24413,7 @@ if ($pool.Count -eq 0) {
     Write-Host " your lightgun reports position. If anything looks wrong, answer N," -ForegroundColor Yellow
     Write-Host " fix the game above in TeknoParrotUI, then re-run." -ForegroundColor Yellow
     Write-Host ""
-    if (-not $Unattended -and (Read-HostSafe " Want a recommended binding plan for more control types first? (Y/N)").ToUpper() -eq "Y") {
+    if (-not $Unattended -and (Read-TpmYesNo -Prompt " Want a recommended binding plan for more control types first? (Y/N)") -eq "Y") {
         Invoke-DeviceSurvey
         Write-Host ""
     }
@@ -24390,7 +24422,7 @@ if ($pool.Count -eq 0) {
         Write-Log "Unattended: propagation = Y."
         $goCtl = "Y"
     } else {
-        $goCtl = (Read-HostSafe " Propagate controls now? (Y/N)")
+        $goCtl = Read-TpmYesNo -Prompt " Propagate controls now? (Y/N)"
     }
     if ($goCtl.ToUpper() -eq "Y") {
         $reports = Invoke-ControlPropagation -userProfilesDir $userProfilesDir -pool $pool -minBound $MinBoundForArchetype -noPropagate $noPropagateList -forceArchetype $forceArchetypeMap -familyOverride $familyOverrideMap -canonicalArchetype $canonicalArchetypeMap -DryRun $dryRunActive
@@ -24451,7 +24483,7 @@ if (-not $dryRunActive -and -not $Unattended -and -not $includeSupplementary -an
     Write-Host ""
     Write-Host ("  {0} game(s) this run had an uncertain match. An extra version-info" -f $result.Ambiguous.Count) -ForegroundColor Yellow
     Write-Host "  file (supplementary dat) can improve that -- set it up now?" -ForegroundColor Yellow
-    $askSuppNow = (Read-HostSafe "  Set up a supplementary dat now? (Y/N, default N)" -Default 'N').ToUpper()
+    $askSuppNow = Read-TpmYesNo -Prompt "  Set up a supplementary dat now? (Y/N, default N)" -Default 'N'
     if ($askSuppNow -eq 'Y') {
         $rawSuppNow = Read-PathWithBrowse "  Path to supplementary dat file" -Mode File -FileFilter "dat files (*.dat)|*.dat|All files (*.*)|*.*"
         if ($rawSuppNow -and (Test-Path -LiteralPath $rawSuppNow)) {
@@ -24531,12 +24563,24 @@ if ($dryRunActive) {
     $doLBSetup = "N"
     Write-Log "Unattended: LaunchBox setup skipped."
 } else {
-    Write-Host "  Add your registered games to LaunchBox now? (Y/N)" -ForegroundColor Cyan
-    Write-Host "    This writes directly into LaunchBox's library -- no import wizard" -ForegroundColor DarkGray
-    Write-Host "    needed. LaunchBox must be closed first; the script checks for you." -ForegroundColor DarkGray
-    Write-Host "    (Prefer the old manual-import reference file instead? Answer N here," -ForegroundColor DarkGray
-    Write-Host "     then Y to the next question.)" -ForegroundColor DarkGray
-    $doLBSetup = (Read-HostSafe "  Y/N").ToUpper()
+    Write-Host "  TeknoParrot registration is finished." -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  Optional next step: add or update these games in your LaunchBox library." -ForegroundColor Cyan
+    Write-Host "  Recommended: [P] Preview LaunchBox changes first -- no changes" -ForegroundColor White
+    Write-Host "  [A] Add/update LaunchBox now -- may write to LaunchBox" -ForegroundColor White
+    Write-Host "  [F] Create manual import/reference file -- no LaunchBox write" -ForegroundColor White
+    Write-Host "  [B] Back to main menu" -ForegroundColor White
+    do {
+        $lbChoice = (Read-HostSafe '  Choice, default P' -Default 'P').Trim().ToUpperInvariant()
+        if ($lbChoice -eq 'P') {
+            Write-Host "  Preview: TPM would add or update registered games; no LaunchBox changes were made." -ForegroundColor DarkCyan
+            Write-Host "  Choose A to continue, F for a manual reference file, or B to skip." -ForegroundColor DarkGray
+        } elseif ($lbChoice -notin @('A', 'F', 'B')) {
+            Write-Host "  Choose P, A, F, or B." -ForegroundColor Yellow
+        }
+    } while ($lbChoice -eq 'P' -or $lbChoice -notin @('A', 'F', 'B'))
+    $doLBSetup = if ($lbChoice -eq 'A') { 'Y' } else { 'N' }
+    $doLB = if ($lbChoice -eq 'F') { 'Y' } else { 'N' }
 }
 
 if ($doLBSetup -eq "Y" -and -not $lbRoot) {
@@ -24544,7 +24588,7 @@ if ($doLBSetup -eq "Y" -and -not $lbRoot) {
     if ($lbDetected.Count -eq 1) {
         Write-Host ""
         Write-Host "  Auto-detected LaunchBox at: $($lbDetected[0])" -ForegroundColor Cyan
-        $useLbIt = (Read-HostSafe "  Use this path? (Y/N)").ToUpper()
+        $useLbIt = Read-TpmYesNo -Prompt "  Use this path? (Y/N)"
         if ($useLbIt -eq "Y") { $lbRoot = $lbDetected[0] }
     } elseif ($lbDetected.Count -gt 1) {
         Write-Host ""
@@ -24578,9 +24622,9 @@ if ($doLBSetup -eq "Y" -and $lbRoot -and (Test-LaunchBoxRunning)) {
     Write-Host "  LaunchBox path not available -- falling back to the manual-import reference file." -ForegroundColor Yellow
     $doLBSetup = "N"
     $doLB = "Y"
-} elseif ($doLBSetup -ne "Y" -and -not $dryRunActive -and -not $Unattended) {
-    $doLB = (Read-HostSafe "  Export a LaunchBox manual-import reference file instead? (Y/N)").ToUpper()
-} else {
+} elseif ($doLBSetup -ne "Y" -and -not $dryRunActive -and -not $Unattended -and [string]::IsNullOrWhiteSpace([string]$lbChoice)) {
+    $doLB = Read-TpmYesNo -Prompt "  Export a LaunchBox manual-import reference file instead? (Y/N)"
+} elseif ([string]::IsNullOrWhiteSpace([string]$lbChoice)) {
     $doLB = "N"
 }
 
@@ -24588,7 +24632,7 @@ if ($doLBSetup -eq "Y") {
     $usesSavedChoice = $false
     if ($lbPlatformMode -and -not $Unattended) {
         $savedLabel = if ($lbPlatformMode -eq "Custom") { $lbCustomPlatformName } else { $lbPlatformMode }
-        $useSaved = (Read-HostSafe "  Use saved LaunchBox platform choice ($savedLabel)? (Y/N)").ToUpper()
+        $useSaved = Read-TpmYesNo -Prompt "  Use saved LaunchBox platform choice ($savedLabel)? (Y/N)"
         $usesSavedChoice = ($useSaved -eq "Y")
     }
     if (-not $usesSavedChoice) {
@@ -24696,45 +24740,9 @@ if ($doLB -eq "Y") {
 # HYPERSPIN 2 EXPORT  (optional, runs after LaunchBox export)
 # =============================================================================
 
-Write-Host ""
-if ($dryRunActive) {
-    $doHS = "N"
-    Write-Log "PreviewMode: HyperSpin 2 export skipped."
-} elseif ($Unattended) {
-    $doHS = "N"
-    Write-Log "Unattended: HyperSpin 2 export skipped."
-} else {
-    $doHS = (Read-HostSafe "Export registered games to HyperSpin 2? (Y/N)").ToUpper()
-}
-if ($doHS -eq "Y") {
-    if (-not $hsDataPath) {
-        Write-Host ""
-        Write-Host "  Enter HyperSpin 2 data folder path." -ForegroundColor Cyan
-        $hsInput = Read-PathWithBrowse "  Path (default: C:\ProgramData\HyperSpin\data)" -InitialDirectory "C:\ProgramData\HyperSpin"
-        if ([string]::IsNullOrWhiteSpace($hsInput)) { $hsInput = "C:\ProgramData\HyperSpin\data" }
-        $hsDataPath = $hsInput
-
-        if (Save-Config) {
-            Write-Log "Config: saved HyperSpinDataPath = $hsDataPath"
-        } else {
-            Write-Log "Config: could not save HyperSpinDataPath"
-        }
-    }
-
-    Write-Host ""
-    $hsCount = Export-HyperSpinJson -userProfilesDir $userProfilesDir -hsDataPath $hsDataPath
-    if ($hsCount -lt 0) {
-        Write-Host "  HyperSpin 2 export failed -- see TeknoParrot-Manager.log" -ForegroundColor Red
-    } elseif ($hsCount -eq 0) {
-        Write-Host "  HyperSpin 2 already up to date -- no new games to add." -ForegroundColor Green
-    } else {
-        Write-Host ("  Added : {0} game(s) to HyperSpin 2" -f $hsCount) -ForegroundColor Green
-        Write-Host ""
-        Write-Host "  Games are added with title only. Use HyperSpin's Scrape feature" -ForegroundColor DarkCyan
-        Write-Host "  to fetch box art, descriptions, and ratings for the new entries." -ForegroundColor DarkCyan
-        Write-Log "HyperSpin 2: exported $hsCount game(s)"
-    }
-}
+Write-Host "  HyperSpin 2 integration is guidance-only in RC8; no normal-flow export was started." -ForegroundColor DarkCyan
+$doHS = "N"
+Write-Log "HyperSpin 2 export skipped from normal completion flow; guidance-only in RC8."
 
 # =============================================================================
 # CROSSHAIR SETUP  (optional, runs after HyperSpin export)
@@ -24745,7 +24753,7 @@ if ($Unattended) {
     $doCrosshairs = "N"
     Write-Log "Unattended: crosshair setup skipped."
 } else {
-    $doCrosshairs = (Read-HostSafe "Configure custom crosshairs for lightgun games? (Y/N)").ToUpper()
+    $doCrosshairs = Read-TpmYesNo -Prompt "Configure custom crosshairs for lightgun games? (Y/N)"
 }
 if ($doCrosshairs -eq "Y") {
     Write-Host ""
@@ -24786,7 +24794,7 @@ if ($Unattended) {
     $doReShade = "N"
     Write-Log "Unattended: ReShade setup skipped."
 } else {
-    $doReShade = (Read-HostSafe "Set up ReShade visual enhancements for your games? (Y/N, default N)" -Default 'N').ToUpper()
+    $doReShade = Read-TpmYesNo -Prompt '  Set up ReShade visual enhancements for your games? (Y/N, default N)' -Default 'N'
 }
 $rsSetupDone = $false
 if ($doReShade -eq "Y") {
@@ -24858,7 +24866,7 @@ if ($Unattended) {
     $doDgVoodoo = "N"
     Write-Log "Unattended: dgVoodoo2 setup skipped."
 } else {
-    $doDgVoodoo = (Read-HostSafe "Set up dgVoodoo2 for old DX8/Glide games? (Y/N, default N)" -Default 'N').ToUpper()
+    $doDgVoodoo = Read-TpmYesNo -Prompt '  Set up dgVoodoo2 for old DX8/Glide games? (Y/N, default N)' -Default 'N'
 }
 if ($doDgVoodoo -eq "Y") {
     # No blocking manual-acquisition prompt here (deferred to the
@@ -24912,7 +24920,7 @@ if ($dryRunActive) {
     $doGpuFix = "N"
     Write-Log "Unattended: GPU fix setup skipped."
 } else {
-    $doGpuFix = (Read-HostSafe "Apply GPU compatibility fixes for your games? (Y/N)").ToUpper()
+    $doGpuFix = Read-TpmYesNo -Prompt "Apply GPU compatibility fixes for your games? (Y/N)"
 }
 if ($doGpuFix -eq "Y") {
     Write-Host ""

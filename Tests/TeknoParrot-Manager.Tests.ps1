@@ -1056,6 +1056,18 @@ Describe "Read-HostSafe -Default contract (onboarding flow restructuring)" {
         Read-HostSafe -Prompt 'Continue?' | Should -Be ''
     }
 }
+Describe "Read-TpmYesNo validation" {
+    It "rejects an invalid answer and accepts the next explicit Y or N answer" {
+        $script:yesNoInputs = [System.Collections.Generic.Queue[string]]::new()
+        [void]$script:yesNoInputs.Enqueue('Q')
+        [void]$script:yesNoInputs.Enqueue('Y')
+        Mock Read-Host { $script:yesNoInputs.Dequeue() }
+        Mock Write-Host {}
+        Read-TpmYesNo -Prompt 'Continue? (Y/N)' | Should -Be 'Y'
+        Should -Invoke Read-Host -Times 2 -Exactly
+    }
+}
+
 
 Describe "Read-MainMenuChoiceResponsive redirected-input handling (issue #135)" {
     # Confirms the main menu prompt never enters the [Console]::KeyAvailable
@@ -4840,6 +4852,225 @@ Describe "New-PostgresPgPassFile / Remove-PostgresPgPassFile" {
 }
 
 Describe "Postgres guided recovery and profile transaction" {
+    BeforeAll {
+        function Invoke-TpmPostgresTopLevelFixture {
+            param(
+                [Parameter(Mandatory)][string]$Scenario,
+                [bool]$Installed,
+                [bool]$RecoverExistingData,
+                [bool]$BackupFails,
+                [int]$ProfileCount
+            )
+            $tokens = $null
+            $parseErrors = $null
+            $parsed = [System.Management.Automation.Language.Parser]::ParseInput($script:ProductionSource, [ref]$tokens, [ref]$parseErrors)
+            if ($parseErrors.Count -gt 0) { throw "Production source did not parse: $($parseErrors -join '; ')" }
+            $branchAst = @($parsed.FindAll({
+                $args[0] -is [System.Management.Automation.Language.IfStatementAst] -and
+                $args[0].Extent.Text.TrimStart() -match '^if \(\$mode -eq "PostgresSetup"\)'
+            }, $true))[0]
+            if (-not $branchAst) { throw 'The top-level PostgreSQL branch was not found.' }
+            $functionText = @($parsed.FindAll({
+                $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst]
+            }, $true) | ForEach-Object { $_.Extent.Text }) -join "`r`n`r`n"
+            $fixtureRoot = Join-Path $TestDrive ('postgres-top-level-' + $Scenario + '-' + [guid]::NewGuid().ToString('N'))
+            $profilesRoot = Join-Path $fixtureRoot 'UserProfiles'
+            $oldScenario = $env:TPM_PG_FIXTURE_SCENARIO
+            $oldInstalled = $env:TPM_PG_FIXTURE_INSTALLED
+            $oldRecovery = $env:TPM_PG_FIXTURE_RECOVERY
+            $oldBackupFails = $env:TPM_PG_FIXTURE_BACKUP_FAILS
+            $oldProfileCount = $env:TPM_PG_FIXTURE_PROFILE_COUNT
+            try {
+                New-Item -ItemType Directory -Path $profilesRoot -Force | Out-Null
+                $profileXml = '<GameProfile><GameName>Top Level PostgreSQL Fixture</GameName><ConfigValues><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>DbName</FieldName><FieldValue>GameDB01</FieldValue></FieldInformation></ConfigValues></GameProfile>'
+                if ($ProfileCount -gt 0) {
+                    foreach ($index in 1..$ProfileCount) {
+                        [System.IO.File]::WriteAllText((Join-Path $profilesRoot ('Game{0}.xml' -f $index)), $profileXml, (New-Object System.Text.UTF8Encoding($false)))
+                    }
+                } else {
+                    [System.IO.File]::WriteAllText((Join-Path $profilesRoot 'NoPostgres.xml'), '<GameProfile><ConfigValues><FieldInformation><CategoryName>Controls</CategoryName><FieldName>InputApi</FieldName><FieldValue>RawInput</FieldValue></FieldInformation></ConfigValues></GameProfile>', (New-Object System.Text.UTF8Encoding($false)))
+                }
+                $env:TPM_PG_FIXTURE_SCENARIO = $Scenario
+                $env:TPM_PG_FIXTURE_INSTALLED = [string]$Installed
+                $env:TPM_PG_FIXTURE_RECOVERY = [string]$RecoverExistingData
+                $env:TPM_PG_FIXTURE_BACKUP_FAILS = [string]$BackupFails
+                $env:TPM_PG_FIXTURE_PROFILE_COUNT = [string]$ProfileCount
+                $harnessTemplate = @'
+$ErrorActionPreference = 'Stop'
+$script:FixtureRoot = [Environment]::GetEnvironmentVariable('TPM_PG_FIXTURE_ROOT')
+$script:Scenario = [Environment]::GetEnvironmentVariable('TPM_PG_FIXTURE_SCENARIO')
+$script:FakeInstalled = [bool]::Parse([Environment]::GetEnvironmentVariable('TPM_PG_FIXTURE_INSTALLED'))
+$script:RecoverExistingData = [bool]::Parse([Environment]::GetEnvironmentVariable('TPM_PG_FIXTURE_RECOVERY'))
+$script:BackupFails = [bool]::Parse([Environment]::GetEnvironmentVariable('TPM_PG_FIXTURE_BACKUP_FAILS'))
+$script:FixtureProfileCount = [int][Environment]::GetEnvironmentVariable('TPM_PG_FIXTURE_PROFILE_COUNT')
+$script:InstallCalls = 0
+$script:RecoveryCalls = 0
+$script:DatabaseBackupCalls = 0
+$script:SaveConfigCalls = 0
+$script:SetupCalls = 0
+$script:PasswordChecks = 0
+$script:Configured = 0
+$script:LoopCount = 0
+$script:ActiveTpmWorkflowStatus = $null
+$script:TpmWorkflowRendering = $false
+$script:PostgresRecoveryStatus = $null
+$script:PostgresRecoveryResumeState = $null
+$script:logPath = Join-Path $script:FixtureRoot 'fixture.log'
+$script:PostgresServiceName = 'pgsql-fixture'
+$script:PostgresBinDir = Join-Path $script:FixtureRoot 'bin'
+$script:PostgresInstallDir = $script:FixtureRoot
+$Unattended = $true
+$DryRun = $false
+$PostgresRecoveryResumeToken = ''
+$isPostgresRecoveryResume = $false
+$tpRoot = $script:FixtureRoot
+$userProfilesDir = Join-Path $script:FixtureRoot 'UserProfiles'
+$gamesInstallFolder = Join-Path $script:FixtureRoot 'Games'
+$configPath = Join-Path $script:FixtureRoot 'TeknoParrot-Manager.config.json'
+$zipSource = ''
+$zipSourceSupplementary = ''
+$postgresSuperPasswordEncrypted = if ($script:FakeInstalled -and -not $script:RecoverExistingData) { 'fixture-encrypted' } else { '' }
+
+__FUNCTIONS__
+
+function Write-Log { param([object]$msg) }
+function Test-RunningAsAdministrator { return $true }
+function Test-PostgresInstalled { return $script:FakeInstalled }
+function Get-Service {
+    [CmdletBinding()]
+    param([string]$Name)
+    return [pscustomobject]@{ Name = $Name; Status = 'Running' }
+}
+function Start-Service { param([string]$Name) }
+function Stop-Service { param([string]$Name, [switch]$Force) }
+function Wait-PostgresServiceState { param([string]$DesiredStatus) }
+function Read-HostSafe {
+    param([string]$Prompt, [string]$Default = $null)
+    if ($script:Scenario -eq 'ExistingDatabaseBackupFailure' -and $Prompt -like '*Choice*') { return 'B' }
+    if ($null -ne $Default) { return $Default }
+    return ''
+}
+function Read-Host { param([string]$Prompt) return '' }
+function Read-TpmYesNo { param([string]$Prompt, [string]$Default = '') return 'Y' }
+function Read-ConfirmedPostgresPassword { param([string]$Prompt) return 'fixture-password' }
+function ConvertTo-SecureString { param([string]$String) return 'fixture-secure' }
+function ConvertFrom-SecureStringPlain { param([object]$Secure) return 'fixture-password' }
+function Test-PostgresPassword {
+    param([string]$SuperPasswordPlain)
+    [void]($script:PasswordChecks++)
+    if ($script:RecoverExistingData -and $script:PasswordChecks -eq 1) { return $false }
+    return $true
+}
+function ConvertTo-PostgresEncryptedPassword { param([string]$PasswordPlain) return 'fixture-encrypted' }
+function Invoke-PostgresSelectedPasswordRecovery {
+    param([string]$UserProfilesDir, [string]$PasswordPlain, [object]$StatusContext)
+    [void]($script:RecoveryCalls++)
+    return [pscustomobject]@{
+        Succeeded = $true
+        Reason = $null
+        Backup = [pscustomobject]@{ Path = (Join-Path $script:FixtureRoot 'recovery-evidence'); Verified = $true }
+    }
+}
+function Install-Postgres83 {
+    param([ref]$OutSuperPasswordPlain)
+    [void]($script:InstallCalls++)
+    $OutSuperPasswordPlain.Value = 'fixture-password'
+    return $true
+}
+function New-PostgresRecoveryBackup {
+    param([string]$UserProfilesDir)
+    return [pscustomobject]@{ Path = (Join-Path $script:FixtureRoot 'recovery-evidence'); Verified = $true; ProfileBackups = @() }
+}
+function Backup-PostgresDatabases {
+    param([string]$UserProfilesDir, [string]$SuperPasswordPlain)
+    [void]($script:DatabaseBackupCalls++)
+    if ($script:BackupFails) {
+        return [pscustomobject]@{
+            Succeeded = $false
+            Path = $null
+            FailedDatabases = @('GameDB01')
+            FailureDetails = @('fixture backup failure')
+            FailureDiagnoses = @([pscustomobject]@{ GameLabel = 'Game1'; Database = 'GameDB01'; Category = 'BackupFailed'; NextAction = 'Back' })
+        }
+    }
+    return [pscustomobject]@{ Succeeded = $true; Path = $null; FailedDatabases = @(); FailureDetails = @(); FailureDiagnoses = @() }
+}
+function Save-Config { [void]($script:SaveConfigCalls++); return $true }
+function Invoke-PostgresGameSetup {
+    param([string]$UserProfilesDir, [string]$SuperPasswordPlain, [object]$RecoveryBackup)
+    [void]($script:SetupCalls++)
+    $script:Configured = $script:FixtureProfileCount
+    return [pscustomobject]@{
+        Configured = $script:FixtureProfileCount
+        DbCreated = 0
+        AlreadyConfigured = 0
+        Errors = 0
+        RecoveryBlocked = $false
+        BackupPath = $RecoveryBackup.Path
+    }
+}
+
+$script:LoopCount = 0
+while ($true) {
+    [void]($script:LoopCount++)
+    $mode = if ($script:LoopCount -eq 1) { 'PostgresSetup' } else { 'Exit' }
+__BRANCH__
+    if ($script:LoopCount -gt 1) { break }
+}
+[pscustomobject]@{
+    Scenario = $script:Scenario
+    LoopCount = $script:LoopCount
+    InstallCalls = $script:InstallCalls
+    RecoveryCalls = $script:RecoveryCalls
+    DatabaseBackupCalls = $script:DatabaseBackupCalls
+    SaveConfigCalls = $script:SaveConfigCalls
+    SetupCalls = $script:SetupCalls
+    Configured = $script:Configured
+} | ConvertTo-Json -Compress
+'@
+                $harness = $harnessTemplate.Replace('__FUNCTIONS__', $functionText).Replace('__BRANCH__', $branchAst.Extent.Text)
+                $harnessPath = Join-Path $fixtureRoot 'Run-PostgresTopLevelFixture.ps1'
+                [System.IO.File]::WriteAllText($harnessPath, $harness, (New-Object System.Text.UTF8Encoding($false)))
+                $env:TPM_PG_FIXTURE_ROOT = $fixtureRoot
+                $output = @(& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $harnessPath 2>&1)
+                $exitCode = $LASTEXITCODE
+                $jsonLine = @($output | ForEach-Object { [string]$_ } | Where-Object { $_ -match '^\{"Scenario"' } | Select-Object -Last 1)
+                if ($exitCode -ne 0 -or $jsonLine.Count -ne 1) {
+                    throw ("Top-level PostgreSQL fixture failed for {0} (exit={1}): {2}" -f $Scenario, $exitCode, ($output -join [Environment]::NewLine))
+                }
+                return ($jsonLine[0] | ConvertFrom-Json)
+            } finally {
+                $env:TPM_PG_FIXTURE_ROOT = $null
+                $env:TPM_PG_FIXTURE_SCENARIO = $oldScenario
+                $env:TPM_PG_FIXTURE_INSTALLED = $oldInstalled
+                $env:TPM_PG_FIXTURE_RECOVERY = $oldRecovery
+                $env:TPM_PG_FIXTURE_BACKUP_FAILS = $oldBackupFails
+                $env:TPM_PG_FIXTURE_PROFILE_COUNT = $oldProfileCount
+                if (Test-Path -LiteralPath $fixtureRoot) { Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue }
+            }
+        }
+    }
+
+    It "executes the real top-level PostgreSQL branch across the required runtime-equivalent matrix" -TestCases @(
+        @{ Scenario = 'AlreadyInstalledDataPreserved'; Installed = $true; Recover = $false; BackupFails = $false; Profiles = 6; Install = 0; Recovery = 0; DatabaseBackup = 1; SaveConfig = 1; Setup = 1; Configured = 6 }
+        @{ Scenario = 'NoPostgresNeeded'; Installed = $true; Recover = $false; BackupFails = $false; Profiles = 0; Install = 0; Recovery = 0; DatabaseBackup = 0; SaveConfig = 0; Setup = 0; Configured = 0 }
+        @{ Scenario = 'ExistingDataRecovery'; Installed = $true; Recover = $true; BackupFails = $false; Profiles = 6; Install = 0; Recovery = 1; DatabaseBackup = 1; SaveConfig = 1; Setup = 1; Configured = 6 }
+        @{ Scenario = 'ExistingDatabaseBackupFailure'; Installed = $true; Recover = $false; BackupFails = $true; Profiles = 6; Install = 0; Recovery = 0; DatabaseBackup = 1; SaveConfig = 0; Setup = 0; Configured = 0 }
+        @{ Scenario = 'FreshInstall'; Installed = $false; Recover = $false; BackupFails = $false; Profiles = 6; Install = 1; Recovery = 0; DatabaseBackup = 1; SaveConfig = 1; Setup = 1; Configured = 6 }
+        @{ Scenario = 'Postgres83Compatibility'; Installed = $false; Recover = $false; BackupFails = $false; Profiles = 1; Install = 1; Recovery = 0; DatabaseBackup = 1; SaveConfig = 1; Setup = 1; Configured = 1 }
+        @{ Scenario = 'TopLevelBranchReturns'; Installed = $true; Recover = $false; BackupFails = $false; Profiles = 2; Install = 0; Recovery = 0; DatabaseBackup = 1; SaveConfig = 1; Setup = 1; Configured = 2 }
+    ) {
+        param($Scenario, $Installed, $Recover, $BackupFails, $Profiles, $Install, $Recovery, $DatabaseBackup, $SaveConfig, $Setup, $Configured)
+        $result = Invoke-TpmPostgresTopLevelFixture -Scenario $Scenario -Installed $Installed -RecoverExistingData $Recover -BackupFails $BackupFails -ProfileCount $Profiles
+        $result.LoopCount | Should -Be 2
+        $result.InstallCalls | Should -Be $Install
+        $result.RecoveryCalls | Should -Be $Recovery
+        $result.DatabaseBackupCalls | Should -Be $DatabaseBackup
+        $result.SaveConfigCalls | Should -Be $SaveConfig
+        $result.SetupCalls | Should -Be $Setup
+        $result.Configured | Should -Be $Configured
+    }
+
     It "accepts a confirmed new password through SecureString input without echoing it" {
         $secure = ConvertTo-SecureString 'New-Password-For-Test' -AsPlainText -Force
         Mock Read-Host { $secure }
@@ -4969,6 +5200,21 @@ Describe "Postgres guided recovery and profile transaction" {
             $result.Configured | Should -Be 1
             $script:restoreCount | Should -Be 1
             $result | Should -Not -BeNullOrEmpty
+        }
+        It "preserves existing PostgreSQL data while configuring six registered games" {
+            $script:pgProfiles = Join-Path $script:pgProfiles 'six-games'
+            New-Item -ItemType Directory -Path $script:pgProfiles -Force | Out-Null
+            $xml = '<GameProfile><GameName>PostgreSQL Test Game</GameName><ConfigValues><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>DbName</FieldName><FieldValue>GameDB01</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Path</FieldName><FieldValue>C:\\PostgreSQL\\bin\\</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Address</FieldName><FieldValue>127.0.0.1</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Port</FieldName><FieldValue>5432</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>User</FieldName><FieldValue>postgres</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Pass</FieldName><FieldValue>old</FieldValue></FieldInformation><FieldInformation><CategoryName>Postgres</CategoryName><FieldName>Automatically create Database</FieldName><FieldValue>1</FieldValue></FieldInformation></ConfigValues></GameProfile>'
+            foreach ($name in @('GameA','GameB','GameC','GameD','GameE','GameF')) {
+                Set-Content -LiteralPath (Join-Path $script:pgProfiles ($name + '.xml')) -Value $xml
+            }
+            Mock New-PostgresRecoveryBackup { [void]$script:pgEvents.Add('backup'); $script:pgRecovery }
+            $result = Invoke-PostgresGameSetup -UserProfilesDir $script:pgProfiles -SuperPasswordPlain 'approved'
+            $result.Configured | Should -Be 6
+            $result.AlreadyConfigured | Should -Be 0
+            $result.RecoveryBlocked | Should -BeFalse
+            @($script:pgEvents) | Should -Be @('backup', 'save', 'save', 'save', 'save', 'save', 'save')
+            $script:pgSaved.Count | Should -Be 6
         }
     }
     It "returns array-shaped backup collections on success and catch paths" {
@@ -5570,7 +5816,7 @@ Describe "Issue #292 PostgreSQL automatic elevation and resume" {
     It "keeps UAC denial retryable without claiming recovery" {
         $script:ProductionSource | Should -Match 'Windows did not give TPM permission to continue'
         $script:ProductionSource | Should -Match 'Nothing was changed by the failed automatic repair'
-        $script:ProductionSource | Should -Match "Read-HostSafe '  Try again\? \(Y/N\)'"
+        $script:ProductionSource | Should -Match "Read-TpmYesNo -Prompt '  Try again\? \(Y/N\)'"
         $script:ProductionSource | Should -Match 'protected repair information is still available'
     }
 
@@ -6378,33 +6624,31 @@ Describe "Invoke-TpmDownload method selection and partial-file cleanup" {
 Describe "Invoke-TpmDownload progress overlay cleanup (issue #132)" {
     # Regression coverage for the stale "Downloading Thumbnails" progress
     # overlay that persisted over the TPM menu after a thumbnail 404. Root
-    # cause: every download tier raises the Id 42 Write-Progress overlay as
-    # it starts, but only each tier's own success path cleared it -- every
-    # failure/exception exit left whatever was last written on screen
-    # permanently. The fix wraps Invoke-TpmDownload in a finally that always
-    # completes Id 42, regardless of how the function exits.
+    # cause: every download tier updates the shared compact progress row, but
+    # failure/exception exits previously left the last progress text on screen.
+    # The fix wraps Invoke-TpmDownload in a finally that always completes that row.
     BeforeAll {
         Mock Write-Log {}
         Mock Write-Host {}
         Mock Write-DownloadAudit {}
         Mock Write-TpmDownloadMetrics {}
         Mock Start-Sleep {}
-        Mock Write-Progress {}
+        Mock Write-TpmCompactExtractionProgress {}
     }
     BeforeEach {
         Mock Test-TpmDownloadBitsAvailable { $false }
     }
 
-    It "completes the Id 42 overlay after a successful download" {
+    It "completes the compact progress row after a successful download" {
         Mock Invoke-TpmDownloadHttpClient { Set-Content -LiteralPath $TempPath -Value "fake" -NoNewline }
         $savePath = Join-Path $TestDrive "progress-success.png"
 
         Invoke-TpmDownload -DownloadUrl "https://example.com/a.png" -DestinationPath $savePath -Label 'Thumbnails' | Should -BeTrue
+        Should -Invoke Write-TpmCompactExtractionProgress -Times 1 -ParameterFilter { $Complete }
 
-        Should -Invoke Write-Progress -Times 1 -ParameterFilter { $Id -eq 42 -and $Completed }
     }
 
-    It "completes the Id 42 overlay after a single definitive 404 (one thumbnail missing upstream)" {
+    It "completes the compact progress row after a single definitive 404 (one thumbnail missing upstream)" {
         Mock Invoke-TpmDownloadHttpClient { throw "Response status code does not indicate success: 404 (Not Found)." }
         Mock Invoke-TpmDownloadWebRequest { throw "Response status code does not indicate success: 404 (Not Found)." }
         $savePath = Join-Path $TestDrive "progress-404.png"
@@ -6414,27 +6658,27 @@ Describe "Invoke-TpmDownload progress overlay cleanup (issue #132)" {
 
         $result | Should -BeFalse
         $statusCode | Should -Be 404
-        Should -Invoke Write-Progress -Times 1 -ParameterFilter { $Id -eq 42 -and $Completed }
+        Should -Invoke Write-TpmCompactExtractionProgress -Times 1 -ParameterFilter { $Complete }
     }
 
-    It "completes the Id 42 overlay after a non-404 failure (generic download error, all tiers exhausted)" {
+    It "completes the compact progress row after a non-404 failure (generic download error, all tiers exhausted)" {
         Mock Invoke-TpmDownloadHttpClient { throw "DNS resolution failed" }
         Mock Invoke-TpmDownloadWebRequest { throw "DNS resolution failed" }
         $savePath = Join-Path $TestDrive "progress-generic-fail.png"
 
         Invoke-TpmDownload -DownloadUrl "https://example.com/a.png" -DestinationPath $savePath -Label 'Thumbnails' | Should -BeFalse
+        Should -Invoke Write-TpmCompactExtractionProgress -Times 1 -ParameterFilter { $Complete }
 
-        Should -Invoke Write-Progress -Times 1 -ParameterFilter { $Id -eq 42 -and $Completed }
     }
 
-    It "completes the Id 42 overlay even when an unexpected exception is thrown after a successful transfer" {
+    It "completes the compact progress row even when an unexpected exception is thrown after a successful transfer" {
         Mock Invoke-TpmDownloadHttpClient { Set-Content -LiteralPath $TempPath -Value "fake" -NoNewline }
         Mock Write-DownloadAudit { throw "unexpected post-download failure" }
         $savePath = Join-Path $TestDrive "progress-exception.png"
 
         Invoke-TpmDownload -DownloadUrl "https://example.com/a.png" -DestinationPath $savePath -Label 'Thumbnails' | Should -BeFalse
+        Should -Invoke Write-TpmCompactExtractionProgress -Times 1 -ParameterFilter { $Complete }
 
-        Should -Invoke Write-Progress -Times 1 -ParameterFilter { $Id -eq 42 -and $Completed }
     }
 
     It "clears the overlay independently for each call in a mixed batch (404, then success, then generic failure)" {
@@ -6457,7 +6701,7 @@ Describe "Invoke-TpmDownload progress overlay cleanup (issue #132)" {
         $r1 | Should -BeFalse
         $r2 | Should -BeTrue
         $r3 | Should -BeFalse
-        Should -Invoke Write-Progress -Times 3 -ParameterFilter { $Id -eq 42 -and $Completed }
+        Should -Invoke Write-TpmCompactExtractionProgress -Times 3 -ParameterFilter { $Complete }
     }
 
     It "clears the overlay for every call across an all-404 batch (upstream has none of these icons)" {
@@ -6468,8 +6712,8 @@ Describe "Invoke-TpmDownload progress overlay cleanup (issue #132)" {
             $savePath = Join-Path $TestDrive "all-404-$_.png"
             Invoke-TpmDownload -DownloadUrl "https://example.com/missing-$_.png" -DestinationPath $savePath -Label 'Thumbnails' | Should -BeFalse
         }
+        Should -Invoke Write-TpmCompactExtractionProgress -Times 3 -ParameterFilter { $Complete }
 
-        Should -Invoke Write-Progress -Times 3 -ParameterFilter { $Id -eq 42 -and $Completed }
     }
 }
 
@@ -6480,14 +6724,14 @@ Describe "Invoke-TpmDownload timeout / malformed content / cancellation (issue #
     # not special-cased anywhere in Invoke-TpmDownload -- they are ordinary
     # exceptions that must still be caught by the outer try/catch/finally,
     # never mis-reported as a 404 ("not in the online pack"), and must still
-    # clear the Id 42 progress overlay and remove the partial temp file.
+    # clear the compact progress row and remove the partial temp file.
     BeforeAll {
         Mock Write-Log {}
         Mock Write-Host {}
         Mock Write-DownloadAudit {}
         Mock Write-TpmDownloadMetrics {}
         Mock Start-Sleep {}
-        Mock Write-Progress {}
+        Mock Write-TpmCompactExtractionProgress {}
     }
     BeforeEach {
         Mock Test-TpmDownloadBitsAvailable { $false }
@@ -6507,7 +6751,7 @@ Describe "Invoke-TpmDownload timeout / malformed content / cancellation (issue #
         $result | Should -BeFalse
         $statusCode | Should -Not -Be 404
         Test-Path -LiteralPath $savePath | Should -BeFalse
-        Should -Invoke Write-Progress -Times 1 -ParameterFilter { $Id -eq 42 -and $Completed }
+        Should -Invoke Write-TpmCompactExtractionProgress -Times 1 -ParameterFilter { $Complete }
     }
 
     It "rejects an incomplete/malformed download that doesn't match the expected size, clears the overlay, and leaves no partial file behind" {
@@ -6522,7 +6766,7 @@ Describe "Invoke-TpmDownload timeout / malformed content / cancellation (issue #
 
         $result | Should -BeFalse
         Test-Path -LiteralPath $savePath | Should -BeFalse
-        Should -Invoke Write-Progress -Times 1 -ParameterFilter { $Id -eq 42 -and $Completed }
+        Should -Invoke Write-TpmCompactExtractionProgress -Times 1 -ParameterFilter { $Complete }
     }
 
     It "treats a cancelled transfer (OperationCanceledException) as a clean failure, not an unhandled crash" {
@@ -6534,7 +6778,7 @@ Describe "Invoke-TpmDownload timeout / malformed content / cancellation (issue #
         $result = Invoke-TpmDownload -DownloadUrl "https://example.com/a.png" -DestinationPath $savePath -Label 'Thumbnails'
 
         $result | Should -BeFalse
-        Should -Invoke Write-Progress -Times 2 -ParameterFilter { $Id -eq 42 -and $Completed }
+        Should -Invoke Write-TpmCompactExtractionProgress -Times 2 -ParameterFilter { $Complete }
     }
 
     It "clears the overlay for every call across a complete non-404 batch failure (e.g. upstream host unreachable)" {
@@ -6550,7 +6794,7 @@ Describe "Invoke-TpmDownload timeout / malformed content / cancellation (issue #
         }
 
         $statusCodes | Should -Not -Contain 404
-        Should -Invoke Write-Progress -Times 3 -ParameterFilter { $Id -eq 42 -and $Completed }
+        Should -Invoke Write-TpmCompactExtractionProgress -Times 3 -ParameterFilter { $Complete }
     }
 }
 
@@ -6695,22 +6939,22 @@ Describe "Invoke-ThumbnailDownload 404-vs-failure distinction" {
 
 Describe "Write-TpmDownloadProgress" {
     BeforeAll {
-        Mock Write-Progress {}
+        Mock Write-TpmCompactExtractionProgress {}
     }
 
-    It "shows percent complete when total size is known" {
+    It "reports a known total through the shared compact progress renderer" {
         Write-TpmDownloadProgress -Method 'HttpClient' -DownloadedBytes 5242880 -TotalBytes 10485760 -Elapsed ([TimeSpan]::FromSeconds(2))
 
-        Should -Invoke Write-Progress -Times 1 -ParameterFilter {
-            $PercentComplete -eq 50 -and $Status -like '*5/10 MB*' -and $Status -like '*MB/s*' -and $Status -like '*ETA*'
+        Should -Invoke Write-TpmCompactExtractionProgress -Times 1 -ParameterFilter {
+            $Phase -eq 'Checking' -and $Current -eq 5 -and $Total -eq 10 -and $Label -like '*HttpClient*'
         }
     }
 
-    It "uses an indeterminate status when total size is unknown" {
+    It "reports an unknown total through the shared compact progress renderer" {
         Write-TpmDownloadProgress -Method 'HttpClient' -DownloadedBytes 5242880 -TotalBytes 0 -Elapsed ([TimeSpan]::FromSeconds(2))
 
-        Should -Invoke Write-Progress -Times 1 -ParameterFilter {
-            $Status -like '*5 MB downloaded*' -and -not $PSBoundParameters.ContainsKey('PercentComplete')
+        Should -Invoke Write-TpmCompactExtractionProgress -Times 1 -ParameterFilter {
+            $Phase -eq 'Checking' -and $Current -eq 5 -and $Total -eq 0 -and $Label -like '*HttpClient*'
         }
     }
 }
@@ -7030,7 +7274,7 @@ Describe "Issue #252 Eggman recognition-data location and write boundary" {
             $script:eggmanTransportTempPath = $TempPath
             Set-Content -LiteralPath $TempPath -Value '12345' -NoNewline
         }
-        Mock Write-Progress {}
+        Mock Write-TpmCompactExtractionProgress {}
         $relSize = 5
 
         $result = Invoke-EggmanDatDownload -downloadUrl 'https://example.com/eggman.zip' -savePath $destination -ExpectedBytes $relSize
@@ -7108,14 +7352,14 @@ Describe "Thumbnail download regression guards" {
 }
 
 Describe "Invoke-TpmDownload finally block always clears the progress overlay (issue #132)" {
-    It "the finally block completes Id 42 unconditionally, not only on the success path" {
+    It "the finally block invokes the shared compact renderer unconditionally, not only on the success path" {
         $fullSource = Get-Content -LiteralPath $scriptPath -Raw
         $start = $fullSource.IndexOf('function Invoke-TpmDownload {')
         $start | Should -BeGreaterThan -1
         $end = $fullSource.IndexOf("`nfunction ", $start + 10)
         $downloadFnSource = $fullSource.Substring($start, $end - $start)
 
-        $downloadFnSource | Should -Match '\}\s*finally\s*\{\s*[\s\S]*?Write-Progress\s+-Id\s+42\s+-Activity\s+"Downloading\s+\$Label"\s+-Completed'
+        $downloadFnSource | Should -Match '\}\s*finally\s*\{\s*[\s\S]*?Write-TpmCompactExtractionProgress[\s\S]*?-Complete'
     }
 }
 
@@ -8684,10 +8928,10 @@ Describe "Onboarding pointer-text menu-label sync (Part 2 item 8: no hardcoded m
 }
 Describe "dgVoodoo2 no-candidate beginner flow" {
     It "reports no setup needed without exposing broad manual selection" {
-        $script:ProductionSource | Should -Match 'No dgVoodoo2 setup needed'
+        $script:ProductionSource | Should -Match 'No dgVoodoo2 setup is needed right now'
         $script:ProductionSource | Should -Match 'Choice, default Q'
         $script:ProductionSource | Should -Match '\[M\] Select specific games'
-        $script:ProductionSource | Should -Not -Match 'No dgVoodoo2 setup needed[\s\S]{0,1200}All \$\(\$profiles.Count\) registered game'
+        $script:ProductionSource | Should -Not -Match 'No dgVoodoo2 setup is needed right now[\s\S]{0,1200}All \$\(\$profiles.Count\) registered game'
     }
     It "keeps manual selection behind Details and does not use TPM status wording" {
         $script:ProductionSource | Should -Match '\[D\] Details  \[Q\] Back to menu'
@@ -10637,7 +10881,7 @@ Describe "Issue #300 shared workflow status state machine" {
         (Test-Path -LiteralPath (Join-Path $gameDir 'd3d9.dll') -PathType Leaf) | Should -BeTrue
         Should -Invoke Read-HostSafe -Times 1 -Exactly
     }
-    It "defaults an invalid overlap owner response to native" {
+    It "rejects an invalid overlap owner response and accepts a safe follow-up" {
         $root = Join-Path $TestDrive 'ffb-invalid-overlap'
         $userProfiles = Join-Path $root 'UserProfiles'
         $tpRoot = Join-Path $root 'TeknoParrot'
@@ -10662,14 +10906,17 @@ Describe "Issue #300 shared workflow status state machine" {
         Mock Get-FFBPluginGameMap { [ordered]@{ OverlapGame = 'd3d9.dll' } }
         Mock Invoke-FFBPluginDownload { $true }
         Mock Get-ExeArchitecture { 'x64' }
-        Mock Read-HostSafe { 'Q' }
+        $script:ffbOverlapAnswers = [System.Collections.Generic.Queue[string]]::new()
+        [void]$script:ffbOverlapAnswers.Enqueue('Q')
+        [void]$script:ffbOverlapAnswers.Enqueue('Y')
+        Mock Read-HostSafe { $script:ffbOverlapAnswers.Dequeue() }
         $result = Invoke-FFBPluginSetup -UserProfilesDir $userProfiles -CacheDir $cacheDir -TpRoot $tpRoot -NativeEnabledCodes @('Overlap')
         $result.Succeeded | Should -BeTrue
         $result.Deployed | Should -Be 0
         $field = (Read-Xml (Join-Path $userProfiles 'Overlap.xml')).SelectSingleNode('/GameProfile/ConfigValues/FieldInformation/FieldValue')
         $field.InnerText | Should -Be '1'
         (Test-Path -LiteralPath (Join-Path $gameDir 'd3d9.dll') -PathType Leaf) | Should -BeFalse
-        Should -Invoke Read-HostSafe -Times 1 -Exactly
+        Should -Invoke Read-HostSafe -Times 2 -Exactly
     }
     It "reports missing saved paths separately from unsupported FFB games" {
         $userProfiles = Join-Path $TestDrive 'ffb-missing-path'
@@ -10957,6 +11204,19 @@ Describe "RC8 menu and ReShade regressions" {
         $signatureCheck | Should -BeGreaterThan $invokeStart
         $reviewWarning | Should -BeGreaterThan $signatureCheck
         $deployment | Should -BeGreaterThan $reviewWarning
+    }
+    It "preserves the requested ReShade profile when reopening the gallery" {
+        $source = $script:ProductionSource
+        $galleryStart = $source.IndexOf('function Show-TpmReShadeProfileGalleryWindow')
+        $defaultStart = $source.IndexOf('$defaultIndex = -1', $galleryStart)
+        $selectedIndex = $source.IndexOf('$combo.SelectedIndex = $defaultIndex', $defaultStart)
+        $defaultBlock = $source.Substring($defaultStart, $selectedIndex - $defaultStart)
+        $defaultStart | Should -BeGreaterThan $galleryStart
+        $defaultBlock | Should -Match 'if \(\$defaultIndex -lt 0\)'
+        $defaultBlock | Should -Match 'ProfileId -eq \$DefaultProfileId'
+        $defaultBlock | Should -Match 'ProfileId -eq ''Original'''
+        $defaultBlock | Should -Not -Match 'ProfileId -ne ''Original'''
+        $source | Should -Match 'Show-TpmReShadeProfileGalleryWindow -Profiles \$Profiles -DefaultProfileId \$reopenId -Show -NonModal'
     }
 }
 Describe "ReShade removal safety and workflow" {
@@ -12809,7 +13069,7 @@ Describe "Library Health Check guided repair UX contracts" {
         $source | Should -Match '\[R\] Try automatic path repair'
         $source | Should -Match '\[M\] Let me pick the correct executable or folder manually'
         $source | Should -Match '\[S\] Search another game folder'
-        $source | Should -Match '\[C\] Re-extract from the configured source'
+        $source | Should -Not -Match '\[C\] Re-extract from the configured source'
         $source | Should -Match 'Candidate paths found'
         $source | Should -Match 'Choose S or B'
         $source | Should -Match '\[D\] Details'

@@ -885,10 +885,11 @@ Transport order is:
 All methods write to a sibling `.partial` file first. The helper validates that the
 download is non-empty, and validates exact size when the release/API response supplies an
 expected byte count, before moving the partial file into the final cache/destination path.
-Failed attempts delete the partial file and leave the final path untouched whenever
-possible. Progress is reported through a single `Write-Progress` activity: percent,
-downloaded MB / total MB, MB/s, and ETA when `Content-Length`/BITS total size is known;
-otherwise an indeterminate downloaded-MB/MB/s message is shown. Completion logs the method,
+Failed attempts delete the partial file and leave the final path untouched whenever possible.
+Progress is rendered through the shared compact console row
+`Write-TpmCompactExtractionProgress`: known totals show downloaded/total MB,
+speed, and ETA; unknown totals show downloaded MB and speed without inventing a
+percentage. Completion always emits a final compact-row update, logs the method,
 file size, elapsed time, and average MB/s, and still writes the SHA256 download audit.
 
 Current main-script call sites using the helper:
