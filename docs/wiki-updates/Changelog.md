@@ -1,5 +1,26 @@
 # Changelog
 
+## RC8 wiki publication plan (HOLD -- no push)
+
+- Authoritative final pre-release gate: issue #323. Live wiki publication
+  remains blocked until PR #321 remediation is committed and pushed, exact-head
+  CI/source/documentation/package checks pass, the owner smoke-tests the exact
+  candidate package, and ARCADE OMP completes the full packaged-runtime bug
+  pass against that same package identity.
+- No live wiki checkout, live-wiki inspection, or wiki push was performed in
+  this worktree. The files under `docs/wiki-updates\` are staging/reference
+  content only.
+- Complete wiki page list for the publication audit: Home, Quick-Start, Setup,
+  AutoSync, Register, Restore-Backup, Crosshairs, ReShade, dgVoodoo2, GPU-Fix,
+  FFB-Setup, Troubleshooting, and Changelog.
+- Planned changed-page report: Home, Quick-Start, AutoSync, ReShade,
+  dgVoodoo2, GPU-Fix, FFB-Setup, Troubleshooting, and Changelog require
+  review/synchronization for the current remediation. Setup, Register,
+  Restore-Backup, and Crosshairs remain listed for review; no live-page change
+  is claimed here.
+- Publication remains HOLD. No release notes were published externally, and
+  no wiki content was pushed.
+
 ## v1.0 RC8 (candidate, not published) -- runtime recovery and release-integrity preparation
 
 - RC7 remains the current published release. RC8 has no public tag, release
@@ -20,6 +41,12 @@
 - Create Support Package gathers allowlisted TPM/TeknoParrot/game diagnostics
   and metadata-only plugin inventories into one redacted ZIP; game binaries,
   credentials, profiles, and arbitrary directories are excluded.
+- ReShade preview selection now uses the bundled, hash-validated
+  `TPM-preview-landscape.png` reference and reuses one bounded in-memory cache
+  per gallery window; split and slider sides remain tied to the same pixels.
+- Support-package output leads with `What failed` and `What TPM did not change`,
+  preserves detailed allowlisted collection failures, and collapses routine
+  missing optional diagnostics.
 - Restore, crosshair, first-run, optional-download, update, and recovery flows
   expose beginner-readable retry/status guidance. The shared TPM STATUS footer
   uses structured events, real steps, and resize-safe cursor/append-only
@@ -29,6 +56,15 @@
   reflog identity through publication/finalization.
 - Release packaging requires exact source/package identity and a completed #290
   repository and live-wiki freshness audit.
+- ReShade profile choices now show friendly descriptions followed by the
+  approved shader filename and technique, including the exact
+  `LumaSharpen.fx / LumaSharpen`, `CRT_Lottes.fx / CRT_Lottes`, and
+  `Vibrance.fx / Vibrance` labels. The visible text is generated from the
+  canonical TPM definitions and hides internal paths and live runtime files.
+- FFB overlap ownership is now exclusive: choosing the third-party owner
+  creates a fresh verified profile backup, clears native FFB Blaster fields
+  for the overlap set, verifies the switch, and blocks plugin deployment if
+  the transition cannot be completed safely.
 
 ## v1.0 RC7 (2026-08-22) -- published release candidate
 

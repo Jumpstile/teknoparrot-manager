@@ -78,6 +78,22 @@ Describe 'New-TpmSupportPackage' {
         $entries | Should -Contain 'MANIFEST.txt'
         @($entries | Where-Object { ($_ -replace '\\','/') -like 'diagnostics/tpm-*' }).Count | Should -BeGreaterThan 0
     }
+    It 'records Action Required freshness in the packaged manifest' {
+        $f = New-SupportFixture
+        $actionPath = Join-Path $f.Script 'TeknoParrot-Manager-ActionItems.txt'
+        $logPath = Join-Path $f.Script 'TeknoParrot-Manager.log'
+        Write-SupportText $actionPath 'Action item from an earlier run'
+        Write-SupportText $logPath 'Current TPM run'
+        $now = [DateTime]::UtcNow
+        [System.IO.File]::SetLastWriteTimeUtc($actionPath, $now.AddMinutes(-10))
+        [System.IO.File]::SetLastWriteTimeUtc($logPath, $now)
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output
+        $r.Succeeded | Should -BeTrue
+        $manifest = Get-SupportZipText $r.PackagePath 'MANIFEST.txt'
+        $manifest | Should -Match 'Action Required evidence status: stale'
+        $manifest | Should -Match 'Action Required report is older than the latest TPM run'
+        $manifest | Should -Match 'Action Required remediation: rerun the affected workflow'
+    }
 
     It 'collects allowlisted TeknoParrot diagnostics including ParrotPatcher_Log.txt' {
         $f = New-SupportFixture
@@ -349,6 +365,44 @@ Describe 'New-TpmSupportPackage' {
         $steps | Should -Be @('StepStarted','StepStarted','StepStarted','StepStarted','StepStarted')
         $events[$events.Count - 1] | Should -Be 'WorkflowClosed'
         $r.StatusContext.Closed | Should -BeTrue
+    }
+    It 'links collected evidence and workflow results to one session RunId' {
+        $f = New-SupportFixture
+        $runId = '11111111111111111111111111111111'
+        $script:TpmSessionRunId = $runId
+        $script:LatestTpmWorkflowResult = [pscustomobject]@{
+            WorkflowId = '22222222222222222222222222222222'
+            RunId = $runId
+            WorkflowKey = 'AutoSync'
+            Lifecycle = 'Finished'
+            State = 'Finished'
+            Sequence = 9
+        }
+        (New-TpmActionRequiredReportText -RunId $runId) | Should -Match ("Run ID: " + $runId)
+        $controlsPath = Join-Path $f.Script 'controls-generated.txt'
+        Write-ControlsStatus -userProfilesDir $f.Profiles -pool @() -propagationReports @() -outputPath $controlsPath -RunId $runId | Should -Be 0
+        [System.IO.File]::ReadAllText($controlsPath) | Should -Match ("Run ID    : " + $runId)
+        Write-Log 'session linkage check'
+        [System.IO.File]::ReadAllText($script:logPath) | Should -Match ("RunId=" + $runId)
+        Write-SupportText (Join-Path $f.Script 'TeknoParrot-Manager.log') "[2026-09-04 12:00:00] [RunId=$runId] workflow complete"
+        Write-SupportText (Join-Path $f.Script 'TeknoParrot-Manager-ActionItems.txt') "Action Required`r`nRun ID: $runId"
+        Write-SupportText (Join-Path $f.Script 'TeknoParrot-Manager-controls.txt') "Controls Status`r`nRun ID    : $runId"
+        $events = New-Object System.Collections.Generic.List[object]
+        $sink = { param($event) [void]$events.Add($event) }.GetNewClosure()
+        $r = New-TpmSupportPackage -ScriptRoot $f.Script -OutputRoot $f.Output -EventSink $sink
+        $r.Succeeded | Should -BeTrue
+        $r.RunId | Should -Be $runId
+        @($events | Where-Object { $_.RunId -ne $runId }).Count | Should -Be 0
+        (Get-SupportZipText $r.PackagePath 'MANIFEST.txt') | Should -Match ("Run ID: " + $runId)
+        (Get-SupportZipText $r.PackagePath 'diagnostics/tpm-01-TeknoParrot-Manager.log.txt') | Should -Match $runId
+        (Get-SupportZipText $r.PackagePath 'diagnostics/tpm-02-TeknoParrot-Manager-controls.txt') | Should -Match $runId
+        (Get-SupportZipText $r.PackagePath 'diagnostics/tpm-03-TeknoParrot-Manager-ActionItems.txt') | Should -Match $runId
+        $workflowEvidence = Get-SupportZipText $r.PackagePath 'metadata/workflow-result.json' | ConvertFrom-Json
+        $workflowEvidence.RunId | Should -Be $runId
+        $workflowEvidence.LatestWorkflow.RunId | Should -Be $runId
+        $workflowEvidence.SupportWorkflow.RunId | Should -Be $runId
+        $workflowEvidence.SupportWorkflow.Lifecycle | Should -Be 'Finished'
+        $workflowEvidence.SupportWorkflow.State | Should -Be 'Finished'
     }
     It 'writes only relative safe ZIP entry names' {
         $f = New-SupportFixture

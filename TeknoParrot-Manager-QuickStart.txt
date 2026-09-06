@@ -108,6 +108,9 @@
   is resized. Important failures remain visible until acknowledged.
   Redirected, unattended, and certification runs keep structured status
   events but do not emit cursor-control or footer output.
+  When recovery metadata is available, the status action line names the
+  concrete Retry and Stop choices and their remediation instead of showing
+  acknowledgement alone.
 
   3. Pick a mode (after each mode completes, you return to this menu):
 
@@ -131,7 +134,14 @@
                              using the stable x64/x86 package (see below).
 
      Maintenance and Recovery
-       10) Health check    -- read-only library status, safe to run any time.
+      10) Health check    -- read-only library status, safe to run any time.
+                          Broken saved paths can be repaired from reviewed
+                          candidates. The default search root is the configured
+                          games folder; another search folder must be existing,
+                          canonical, non-reparse, and outside TeknoParrot, TPM,
+                          and both ZIP source folders. C returns to AutoSync
+                          with only the broken profile codes selected for
+                          re-extraction, never the whole library.
        11) Restore backup  -- roll UserProfiles, LaunchBox files, or Postgres
                              databases back to a previous backup.
        12) Postgres setup  -- install/configure PostgreSQL for games that
@@ -146,15 +156,19 @@
                              when asking for help.
        15) Exit            -- quit the script.
 
-     If you need help, choose 14) Create Support Package. TPM collects safe
-     TPM/TeknoParrot/game logs and metadata, removes common private information
-     from text, and saves one ZIP under SupportPackages\ beside this script.
-     Executable/archive masquerades, binary control bytes, and invalid text
-     are rejected and recorded. Send that ZIP when asking for help. It never
-     includes game files, ROMs, executables, arbitrary DLLs, firmware, profiles,
-     credentials, passwords, tokens, or recovery-state files. Missing optional
-     diagnostics are reported and a failed or cleanup-incomplete package is
-     never reported as successful.
+    If you need help, choose 14) Create Support Package. TPM collects safe
+    TPM/TeknoParrot/game logs, metadata, and per-file ReShade ownership/removal
+    scan and transaction details, removes common private information from text,
+    and saves one ZIP under SupportPackages\ beside this script.
+    Executable/archive masquerades, binary control bytes, and invalid text
+    are rejected and recorded. Send that ZIP when asking for help. It never
+    includes game files, ROMs, executables, arbitrary DLLs, firmware, profiles,
+    credentials, passwords, tokens, or recovery-state files. Missing optional
+    diagnostics are reported and a failed or cleanup-incomplete package is
+    never reported as successful.
+    The package output begins with "What failed" and "What TPM did not
+    change". Detailed allowlisted collection failures are preserved; routine
+    missing optional diagnostics remain summarized.
 
 
      The menu automatically shortens its descriptions, or shows labels only
@@ -267,9 +281,11 @@
   and the script will pick them up automatically on the next run.
 
   When you run mode 4:
-    1. A preview page opens in your browser showing all available designs.
-    2. Enter the number of your chosen design for Player 1 and Player 2
-       (press Enter to reuse your last choice -- no need to re-find it).
+    1. A preview page opens in your browser showing all 321 available designs.
+       Click a design to select P1 through the short-lived localhost bridge.
+    2. If click selection times out or is unavailable, type the numeric
+       indices for Player 1 and Player 2. Press Enter to reuse last choices.
+       Confirm the choices before files are changed.
     3. The script copies those images to every registered lightgun game:
          - Standard games: P1.png + P2.png in the game's exe folder.
          - ElfLdr2 games: shared pair in the ElfLdr2 emulator folder.
@@ -279,8 +295,6 @@
     4. You are asked whether to also hide the Windows cursor for all
        lightgun games. Answer Y to set the cursor-hide field in each
        gun game's UserProfile XML (a backup is taken automatically first).
-
-  Run mode 4 again any time to change the crosshair design.
 
 
   RESHADE VISUAL ENHANCEMENTS (OPTIONAL)
@@ -295,7 +309,49 @@
   automatically remove unowned or changed hook files; use the advanced
   troubleshooting path for those files.
 
+
+  REMOVING RESHADE
+  Choose R from mode 5. The existing filtered game chooser lists only games
+  with removable or reviewable ReShade findings. The preview enumerates each
+  verified TPM-owned file to remove and each bundled, preinstalled, unowned,
+  ambiguous, changed, malformed, or out-of-target file to keep protected. Type
+  REMOVE to confirm; cancel or back makes no changes.
+
+  Removal is limited to unchanged TPM-managed ReShade DLLs, ReShade.ini, and
+  approved effects inside the resolved ReShade target folder. Immediately before
+  backup and deletion, TPM re-reads the profile, re-resolves the target, and
+  rechecks canonical non-reparse leaf containment and the exact hash. TPM creates
+  and verifies a backup before deletion and restores files if the manifest update
+  fails. Game executables, TeknoParrot profiles, LaunchBox data, and HyperSpin
+  data are never removal targets. The final report separates removed,
+  already-clean, missing-path, protected, changed, malformed, rolled-back, and
+  failed outcomes.
   HOW TO SET IT UP
+  Before choosing a profile, TPM explains:
+    Choose how your game should look.
+    The optional preview window is non-modal; the terminal chooser remains
+    active even if the window is behind, closed, unavailable, or fails.
+    Nothing will be changed until you choose U and then confirm.
+  The terminal always shows:
+    [1] Original
+    [2] Clean & Sharp
+    [3] Classic Arcade CRT
+    [4] Vivid Arcade
+    [5] Enhanced Arcade
+    Choose: [1-5] Preview profile  [U] Use selected profile  [R] Reopen preview
+            [B] Back  [D] Details
+  Numbered selection updates the optional preview. U is the only path toward
+  deployment; B cancels without changes and D returns after showing details.
+  A terminal-only selection remains available when the preview cannot open.
+    The optional gallery uses a safe approximation based on the bundled and
+    validated PreviewAssets\ReShadePreviews\TPM-preview-landscape.png
+    reference image. It does not run the game or execute ReShade shaders.
+    Before is the untouched baseline, After is a TPM approximation of the
+    selected profile, and Split/slider compare that approximation with the
+    baseline. Actual in-game results may vary. Its identity and hash are
+    recorded in the preview cache. No profile selection changes files until U
+    and the existing confirmation.
+
 
   If you downloaded TeknoParrot Manager as a ZIP release, the ReShade DLLs
   are not bundled. Choose mode 5 and answer D to fetch the official installer
@@ -318,6 +374,15 @@
   Before deploying, the script checks the Authenticode signature on your
   ReShade DLL(s) -- ReShade's own installer is code-signed. An invalid or
   missing signature is shown as a warning but does not block setup.
+  POSTGRESQL BACKUP FAILURES
+  PostgreSQL setup verifies a recovery backup before changing settings. If a
+  database backup fails, TPM captures the PostgreSQL client diagnostic and
+  exit code, lists each affected game/database, and shows the cause category:
+  connection, service, tool, permission, missing database, or unknown query
+  failure. Choose D for details, F for repair guidance, R after correcting the
+  issue, O for logs/support guidance, or S/B to leave without profile or
+  database changes.
+
 
   Once installed, press the  Home  key while in-game to open the
   ReShade overlay and switch effects on or off.
@@ -387,7 +452,10 @@
        entry records source, filename/version, computed SHA-256, and transfer
        metrics; no publisher signature or digest trust anchor is claimed.
   If a game is covered by both, you are asked once which to use for all
-  such games -- it never silently picks one for you.
+  such games -- it never silently picks one for you. Missing saved paths and
+  unavailable saved devices are reported separately; either result offers
+  the mode 10 Health Check handoff while unsupported/no-match games remain
+  distinct from true deployment errors.
 
   To run:
     Choose mode 8 from the main menu.
@@ -547,6 +615,13 @@
   spelling and spacing do not matter). No games need to be added to
   HyperSpin 2 first; the script creates the game list file if it does
   not yet exist.
+  If the TeknoParrot entry in emulators.json has no id, TPM stops before
+  locating or writing a games file and asks:
+    F = Fix the emulator entry, then retry
+    A = Add anyway (permits the legacy .xml scan and empty systemId)
+    S = Skip export (safe default; no HyperSpin data is changed)
+  Re-add TeknoParrot in HyperSpin before choosing F. Only A permits the
+  legacy .xml ROM-entry fallback.
 
   Games are added with title only. Use HyperSpin 2's Scrape feature for
   box art and metadata. HyperSpin 2 must not be running when you answer Y.
@@ -696,8 +771,8 @@
   ------------
   - Profiles are backed up before every run:
     UserProfiles\FullBackup\<date_time>\. Nothing is ever deleted.
-  - If backup folder creation fails, the script stops rather than proceeding
-    without a restore point.
+  - If the backup folder cannot be created or a profile copy fails, the
+    script stops rather than proceeding without a complete restore point.
   - You must own or otherwise have lawful rights to the original arcade PCB
     and any ROM/game data you use. TPM does not provide, distribute, or
     endorse unauthorized game files.
