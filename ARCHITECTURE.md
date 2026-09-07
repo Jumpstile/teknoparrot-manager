@@ -1342,6 +1342,14 @@ combined `Ready` flag. Uncataloged profiles remain outside this catalog-backed
 action list and stay `Unknown` in direct assessments rather than being
 promoted by heuristic structure.
 
+**Controls truthfulness contract (TPM-CONTROLS-001).** Control propagation
+results describe saved configuration changes only. `Write-ControlPropagationResults`
+must report physical verification as zero because TPM does not launch games or
+observe device input. The readiness engine may display `Verified` only when a
+structured observed-test record supplies both a nonblank method and timestamp;
+static completeness, wizard state, registration, or Input API selection cannot
+earn that state.
+
 **Fail-closed on `Controls = 'Verified'`.** `Get-ControlReadinessAssessment`
 never produces `Verified` -- this engine has no evidence source that could
 earn it. The only way `Verified` reaches the formatter is a caller building

@@ -7896,6 +7896,7 @@ Describe "Write-ControlPropagationResults (issue #59: standalone Propagate Contr
         $result.NoArchetypeItems.Count | Should -Be 1
         $result.NoArchetypeItems[0].Code | Should -Be 'GameD'
         $result.ApiFixedCount | Should -Be 2
+        $result.VerifiedPhysicalBindingsCount | Should -Be 0
     }
     It "returns zero copied controls for settings-only results" {
         $reports = @(

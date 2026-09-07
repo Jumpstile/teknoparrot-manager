@@ -17831,8 +17831,9 @@ function Write-ControlPropagationResults {
     Write-Host (" Games skipped: {0}" -f $skippedCount) -ForegroundColor DarkGray
     Write-Host (" Games failed: {0}" -f $failedCount) -ForegroundColor Red
     Write-Host (" Settings/API corrected only: {0}" -f $apiFixedCount) -ForegroundColor DarkCyan
+    Write-Host " Verified physical bindings: 0 (TPM does not launch games or test device input)." -ForegroundColor DarkGray
     Write-Host " Note: these counts describe saved settings, not a verified physical device binding. Test each game in TeknoParrotUI." -ForegroundColor DarkGray
-    return [pscustomobject]@{ BoundCount = $boundCount; ControlsCopiedCount = $copiedCount; SettingsOnlyCount = $settingsOnlyCount; ApiFixedCount = $apiFixedCount; ManualCount = $manualCount; SkippedCount = $skippedCount; FailedCount = $failedCount; NoArchetypeItems = $noArchetype }
+    return [pscustomobject]@{ BoundCount = $boundCount; ControlsCopiedCount = $copiedCount; SettingsOnlyCount = $settingsOnlyCount; ApiFixedCount = $apiFixedCount; ManualCount = $manualCount; SkippedCount = $skippedCount; FailedCount = $failedCount; VerifiedPhysicalBindingsCount = 0; NoArchetypeItems = $noArchetype }
 }
 
 # Asks the user which control devices they have and want to use, then prints a

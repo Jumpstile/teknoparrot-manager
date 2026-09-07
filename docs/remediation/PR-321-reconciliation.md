@@ -3,12 +3,12 @@
 - Repository root: `C:\REPOS\tpm-rc8-certified-a700d093`
 - Branch: `fix/rc8-release-blockers`
 - HEAD: `7cd77108759084679f33eb27f98b6bfaaa58ff4d`
-- Report generated UTC: TPM-only PR #321 source audits completed for Progress.Core, Prompt.Core, repair, PostgreSQL, and controls/ReShade test surfaces; unresolved design blockers remain.
+- Report generated UTC: TPM-CONTROLS-001 source contract and focused implementation complete; final validation follows the slice gate.
 - Source/test last-edit UTC: not captured in this working report.
 - Candidate/package identity: `C:\REPOS\tpm-rc8-candidate-output\TeknoParrot Manager v1.0 RC8.zip`
 - Candidate SHA-256: `8E0343AE85F63F06280CE4E5AE737C0D68E05629A446C22B61AD79C732F40303`
 - Source SHA: `7cd77108759084679f33eb27f98b6bfaaa58ff4d` (working-tree source/test/doc changes remain uncommitted)
-- Remediation scope: TPM-only PR #321 source-audit reconciliation, unresolved ReShade ownership/accounting and controls blockers, owner-smoke reconciliation, and permanent procedure enforcement
+- Remediation scope: TPM-only PR #321 Controls truthfulness slice `TPM-CONTROLS-001`, unresolved ReShade blockers, owner-smoke reconciliation, and permanent procedure enforcement
 
 ## Provenance
 
@@ -50,7 +50,7 @@
 | 27 | Support final prompt | SOURCE FIXED; OWNER RUNTIME NEEDED | Support `1-3` and package `O/B` routes | `Prompt.Core fixed choice routes`; SupportPackage.Tests | Packaged support prompt |
 | 28 | Fatal workflow surfacing | SOURCE FIXED; OWNER RUNTIME NEEDED | Get-TpmSupportManifestText | SupportPackage.Tests: `records Action Required freshness in the packaged manifest` | Fresh fatal-log package |
 | 29 | Action Required freshness | SOURCE FIXED; OWNER RUNTIME NEEDED | New-TpmSupportPackage | SupportPackage.Tests: `records Action Required freshness in the packaged manifest` | Multiple-report package |
-| 30 | Controls truthfulness | NOT FIXED | Full controls result audit required | Existing controls tests | Zero-bound runtime result |
+| 30 | Controls truthfulness | SOURCE FIXED; OWNER RUNTIME NEEDED | `Write-ControlPropagationResults`; control-readiness engine | `Write-ControlPropagationResults` focused tests; existing controls tests | Zero-bound packaged runtime result |
 | 31 | dgVoodoo2 wording | SOURCE FIXED; OWNER RUNTIME NEEDED | dgVoodoo2 result wording | No dedicated wording test | Owner wording review |
 | 32 | Global consistency rule | SOURCE FIXED; OWNER RUNTIME NEEDED | `TPM-PROMPT-001` finite-choice inventory and documented stateful/exact-token/secure/path/renderer-aware boundaries | `Read-TpmChoice validation`; `Prompt.Core fixed choice routes` | Packaged consistency smoke |
 
@@ -109,8 +109,8 @@ This report retains the prior prompt audit table below for cross-slice traceabil
 | HyperSpin direct prompts | Missing-emulator-ID flow | `G/S` uses `Read-TpmChoice`; no emulator ID is synthesized | Normal completion runtime proof remains absent | `Prompt.Core fixed choice routes` |
 | Support package prompts | Support main and package-open completion | `1-3` and `O/B` use `Read-TpmChoice`; `O` still opens the folder | Packaged support runtime proof remains absent | `Prompt.Core fixed choice routes`; SupportPackage.Tests |
 
-- IDs 11, 12, and 30 remain `NOT FIXED`; IDs 26 and 32 are `SOURCE FIXED; OWNER RUNTIME NEEDED`; IDs 24, 25, and 27 have source evidence but still require owner-runtime proof.
-- `TPM-PROMPT-001` centralizes feasible finite-choice routes and records every deliberate specialized boundary; global source consistency is covered, but packaged consistency smoke remains outstanding.
+- IDs 11 and 12 remain `NOT FIXED`; IDs 3, 17-22, 26, 30, and 32 are `SOURCE FIXED; OWNER RUNTIME NEEDED`.
+- `TPM-CONTROLS-001` separates saved configuration, inferred readiness, and observed physical binding; propagation now reports zero verified physical bindings because TPM does not test device input.
 - PR #321 remains blocked. Candidate ZIP is stale, the permanent procedure gate must fail closed, owner-runtime evidence is outstanding, and no package or owner smoke is authorized.
 
 ## Affected-games repair-flow scoping audit
@@ -141,10 +141,11 @@ required one/multiple/zero/no-candidate functional coverage is not complete.
 ## Tests with exact counts and timestamps
 | Gate/test | Exact command | Count/result | Started UTC | Finished UTC | Engine/version |
 |---|---|---:|---|---|---|
-| Main Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -Output Normal` | 996 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
+| Main Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -Output Normal` | 997 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
 | SupportPackage.Tests | `Invoke-Pester -Path .\Tests\SupportPackage.Tests.ps1 -Output Normal` | 36 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
-| Progress.Core focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Progress.Core*' -Output Detailed` | 2 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
-| Prompt.Core focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Prompt.Core*' -Output Detailed` | 3 passed, 0 failed, 0 skipped at prior checkpoint | not captured | not captured | Pester 6.1.0 |
+| Controls focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Write-ControlPropagationResults*' -Output Detailed` | 3 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
+| Progress.Core focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Progress.Core*' -Output Detailed` | 2 passed, 0 failed, 0 skipped at prior checkpoint | not captured | not captured | Pester 6.1.0 |
+| Prompt.Core focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Prompt.Core*' -Output Detailed` | 4 passed, 0 failed, 0 skipped at prior checkpoint | not captured | not captured | Pester 6.1.0 |
 | Governance/source parse, ASCII, registry, PSScriptAnalyzer, diff | Final static-check commands; individual start/finish timestamps not captured | 0 parse errors; 27 registry entries; affected source/report text ASCII clean; 0 PSScriptAnalyzer findings; diff check clean | not captured | not captured | pwsh / PSScriptAnalyzer |
 | Permanent procedure gate | `Test-TpmPermanentProcedures.ps1 -RepoRoot . -SourcePath .\TeknoParrot-Manager.ps1 -ReportPath .\docs\remediation\PR-321-reconciliation.md` | Expected fail: unresolved `NOT FIXED`; owner-runtime evidence outstanding; candidate package stale | not captured | not captured | pwsh |
 Pester 5.7.1 was not confirmed in this environment. These results are not

@@ -49,7 +49,7 @@ Allowed statuses are exactly: `NOT FIXED`, `SOURCE FIXED; OWNER RUNTIME NEEDED`,
 | 27 | Support final prompt | Support choices validate and preserve Back/open-folder behavior | SOURCE FIXED; OWNER RUNTIME NEEDED | Prompts/navigation | Support `1-3` and package `O/B` routes | `Prompt.Core fixed choice routes`; SupportPackage.Tests | Packaged support prompt | Owner runtime | Prompt.Core |
 | 28 | Support fatal workflow surfacing | Fatal evidence surfaces | SOURCE FIXED; OWNER RUNTIME NEEDED | Support package | Support manifest | SupportPackage.Tests | Fatal-log smoke | Owner runtime | Support follow-up |
 | 29 | Action Required freshness mismatch | Newest evidence is labeled | SOURCE FIXED; OWNER RUNTIME NEEDED | Support package | Support package freshness | SupportPackage.Tests | Multiple-report smoke | Owner runtime | Support follow-up |
-| 30 | Controls truthfulness | Zero-bound results never imply verified readiness | NOT FIXED | Controls truthfulness | Controls result reporting | Controls tests | Zero-bound runtime result | Complete result audit | Controls follow-up |
+| 30 | Controls truthfulness | Zero-bound results never imply verified readiness | SOURCE FIXED; OWNER RUNTIME NEEDED | Controls truthfulness | Write-ControlPropagationResults; control-readiness engine | Controls truthfulness focused tests; existing controls tests | Zero-bound packaged runtime result | Owner runtime | TPM-CONTROLS-001 |
 | 31 | dgVoodoo2 wording | Results explain deployment state | SOURCE FIXED; OWNER RUNTIME NEEDED | Progress/status | dgVoodoo2 result wording | Existing tests | Owner wording review | Owner runtime | Progress slice |
 | 32 | Global consistency rule | Every enumerated prompt uses the central contract or has a documented design boundary | SOURCE FIXED; OWNER RUNTIME NEEDED | Prompts/navigation | TPM-PROMPT-001 inventory; finite-choice routes centralized; stateful, exact-token, secure, path, and renderer-aware boundaries documented | `Read-TpmChoice validation`; `Prompt.Core fixed choice routes` | Packaged consistency smoke | Owner runtime | Prompt.Core |
 
@@ -69,17 +69,15 @@ Allowed statuses are exactly: `NOT FIXED`, `SOURCE FIXED; OWNER RUNTIME NEEDED`,
 
 ## Current blockers
 
-- Source blockers: IDs 11, 12, and 30 remain NOT FIXED; IDs 3, 17-22, 26, and 32 have source evidence.
+- Source blockers: IDs 11 and 12 remain NOT FIXED; IDs 3, 17-22, 26, 30, and 32 have source evidence.
 - Test blockers: no focused source-test blocker remains for audited paths, but unresolved design work and owner-runtime routes remain.
 - Package/runtime blockers: candidate ZIP is stale; no owner smoke is authorized.
-- Owner-design blockers: ReShade ownership, controls truthfulness, and the remaining stateful prompt-picker boundaries need explicit future contracts.
+- Owner-design blockers: ReShade ownership/accounting and remaining stateful prompt-picker boundaries need explicit future contracts.
 
 ## Next-slice queue
-
-1. Progress.Core source inventory (`TPM-PROGRESS-001`). Contract: each long-running path has compact TPM progress, structured workflow status, or a documented bounded/no-progress reason. Tests: focused source inventory plus existing progress contracts. Gate: expected fail on owner-runtime evidence until package proof exists.
-2. Prompt.Core + global input behavior (`TPM-PROMPT-001`). Excludes ReShade ownership/accounting, controls, packaging, and owner smoke. Contract: invalid finite choices reprompt through `Read-TpmChoice`; exact-token safety, free-text, secure input, renderer-aware input, and stateful pickers remain documented boundaries. Tests: focused prompt contracts before and after implementation. Gate: expected fail on unrelated blockers.
-3. ReShade ownership and accounting. Excludes prompt/progress cleanup. Contract: protected files are never silently adopted or removed and every selected game has one terminal outcome. Tests: ownership matrix and result accounting tests. Gate: expected fail until owner smoke.
-4. Controls truthfulness. Excludes device certification. Contract: output distinguishes saved configuration, inferred readiness, and verified physical binding. Tests: zero/mixed/failure result contracts. Gate: expected fail until runtime observation.
+1. Controls truthfulness (`TPM-CONTROLS-001`). Contract: saved configuration, inferred readiness, and observed physical binding remain separate. Gate: expected fail until owner runtime.
+2. ReShade ownership and accounting. Excludes controls. Contract: protected files are never silently adopted or removed and every selected game has one terminal outcome. Gate: expected fail until owner runtime.
+3. Final PR #321 reconciliation and package identity review.
 
 ## Control-board rule
 
