@@ -13636,4 +13636,22 @@ Describe "Focused RC8 remediation contracts" {
             $picker | Should -Match 'I did not understand'
         }
     }
+    It "requires the TPM organization reset artifacts" {
+        foreach ($relativePath in @(
+            'docs\governance\tpm-development-operating-model.md',
+            'docs\governance\tpm-contract-types.md',
+            'docs\architecture\tpm-subsystem-ownership-map.md',
+            'docs\architecture\tpm-subsystem-extraction-roadmap.md',
+            'docs\remediation\PR-321-control-board.md',
+            'docs\remediation\slices\README.md',
+            'docs\remediation\slices\PR-321-current-slice.md',
+            'docs\templates\tpm-slice-contract.md'
+        )) {
+            Test-Path -LiteralPath (Join-Path (Join-Path $PSScriptRoot '..') $relativePath) -PathType Leaf | Should -BeTrue
+        }
+        $gate = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\scripts\Test-TpmPermanentProcedures.ps1') -Raw
+        $gate | Should -Match 'PR-321-control-board.md'
+        $gate | Should -Match 'PR-321-current-slice.md'
+        $gate | Should -Match 'TPM-RESET-001'
+    }
 }

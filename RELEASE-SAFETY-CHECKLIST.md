@@ -242,6 +242,16 @@ is inherently unsafe.
   guidance toward superseded RCs, preserves clearly historical references,
   and enforces BepInEx update-check/update-only wording. The normal CI Pester
   run includes `QualitySystem.Tests.ps1`; a red result blocks the release.
+- [ ] Permanent procedure gate -- every remediation report must pass the fail-closed governance gate before commit authorization:
+  ```powershell
+  pwsh -NoProfile -File .\scripts\Run-TpmQualityGate.ps1 -ReportPath <report>
+  ```
+  The report must contain the owner mapping, script-wide progress audit,
+  prompt/gate audit, affected-games repair audit, support-package audit,
+  exact validation timestamps, hunk ownership, permanent procedure compliance,
+  non-actions, and runtime owner-smoke checklist. A passing gate is not release
+  or owner-runtime authorization.
+
 
 ---
 
@@ -765,3 +775,12 @@ silently unchecked box.
 ---
 
 _For the engineering rationale behind each item, see SECURITY.md, LESSONS_LEARNED.md, and ARCHITECTURE.md._
+## 12. Contract-first TPM remediation
+
+- [ ] Every TPM remediation change has a current slice contract under
+  `docs/remediation/slices/`, unless it is a trivial documentation typo.
+- [ ] Included owner IDs, exclusions, behavior contract, focused tests,
+  runtime proof, stop condition, and forbidden actions are recorded.
+- [ ] The control board, remediation report, provenance ledger, and hunk
+  classification agree.
+- [ ] Source, package, and runtime evidence are not conflated.

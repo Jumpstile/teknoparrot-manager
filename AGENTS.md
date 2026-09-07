@@ -281,7 +281,21 @@ Full sequence with exact commands: RELEASE-SAFETY-CHECKLIST.md section 1.
    resource leaks, TOCTOU).
 6. **Upstream compatibility safety review** -- for any round that touches how the
    script reads or writes GameProfiles. See RELEASE-SAFETY-CHECKLIST.md section 2.
+7. **Permanent procedure gate** -- every remediation report must be validated before commit authorization:
+   `pwsh -NoProfile -File .\scripts\Run-TpmQualityGate.ps1 -ReportPath <report>`
+   The gate is fail-closed. A passing source/test gate does not replace owner-runtime proof.
 
+## TPM remediation slice rule
+
+Before modifying product behavior, write or update a concrete slice contract
+under `docs/remediation/slices/` using
+`docs/templates/tpm-slice-contract.md`. The contract must state exact owner
+report IDs, the exact failure and expected behavior, forbidden regressions,
+tests before and with implementation, runtime proof, and a stop condition.
+The control board at `docs/remediation/PR-321-control-board.md` and the
+remediation report must be updated in the same slice. No source hunk is
+unmapped: record its owner report ID, permanent procedure ID, slice contract
+ID, and issue ID.
 ---
 
 ## Current workflow entry points

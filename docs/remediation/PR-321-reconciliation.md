@@ -1,0 +1,194 @@
+# PR #321 Remediation Gate Report
+
+- Repository root: `C:\REPOS\tpm-rc8-certified-a700d093`
+- Branch: `fix/rc8-release-blockers`
+- HEAD: `a697edacc7be0f006c4616b32e8cbfcba650cd13`
+- Report generated UTC: 2026-09-07T14:55:46.6971140Z
+- Source/test last-edit UTC: source 2026-09-07T14:55:01.9593175Z; tests 2026-09-07T14:55:46.6971140Z (filesystem LastWriteTimeUtc)
+- Candidate/package identity: `C:\REPOS\tpm-rc8-candidate-output\TeknoParrot Manager v1.0 RC8.zip`
+- Candidate SHA-256: `8E0343AE85F63F06280CE4E5AE737C0D68E05629A446C22B61AD79C732F40303`
+- Source SHA: `a697edacc7be0f006c4616b32e8cbfcba650cd13`
+- Remediation scope: TPM-only PR #321 owner-smoke reconciliation and permanent procedure enforcement
+
+## Provenance
+
+- Git status: dirty; source, tests, governance, and gate files are uncommitted.
+- The canonical control board is `docs/remediation/PR-321-control-board.md`; the current organization slice is `docs/remediation/slices/PR-321-current-slice.md`.
+- No monitor-pipeline files changed.
+- No runtime, state, log, ZIP, or package artifact was created by this report.
+
+## Owner report mapping table
+
+| ID | Owner report | Status | Files/functions | Exact test names | Runtime proof still needed |
+|---:|---|---|---|---|---|
+| 1 | ReShade no-change/back/cancel crash | SOURCE FIXED; OWNER RUNTIME NEEDED | ReShade action-result handling | ReShade null-result regression | Packaged `Original -> U -> B` smoke |
+| 2 | Duplicate ErrorAction binding | SOURCE FIXED; OWNER RUNTIME NEEDED | Invoke-TpmWebRequestSilently and download wrappers | Focused RC8 remediation contracts | Startup, Eggman, ProfileSet, game-data, thumbnail smoke |
+| 3 | Script-wide universal progress | NOT FIXED | Script-wide progress inventory and compact TPM progress call sites | Focused progress contracts required | Full packaged operation matrix |
+| 4 | AutoSync old scan output | SOURCE FIXED; OWNER RUNTIME NEEDED | AutoSync compact progress | `truncates compact progress to constrained width and shows elapsed heartbeat` | Packaged AutoSync scan |
+| 5 | GPU Fix blue PowerShell progress | SOURCE FIXED; OWNER RUNTIME NEEDED | `Invoke-GpuFixSetupWithStatus`; `Invoke-GpuFixSetup` per-profile loop; GPU menu retry path | `wraps GPU Fix in the universal workflow status lifecycle`; GPU-specific source scan: 0 `Write-Progress`, 2 compact progress calls | GPU Fix packaged smoke |
+| 6 | Thumbnail bad progress | SOURCE FIXED; OWNER RUNTIME NEEDED | Thumbnail download caller | `supports opt-in no-fallback behavior for thumbnail-style 404 probes` | Packaged thumbnail smoke |
+| 7 | Missing thumbnail list | SOURCE FIXED; OWNER RUNTIME NEEDED | Invoke-ThumbnailDownload | `clarifies thumbnail download is box art only, not game data` | Verify every no-icon code is listed |
+| 8 | Thumbnail 404 fallback | SOURCE FIXED; OWNER RUNTIME NEEDED | Invoke-TpmDownload | `supports opt-in no-fallback behavior for thumbnail-style 404 probes` | Packaged 404 behavior |
+| 9 | ReShade preview sync | SOURCE FIXED; OWNER RUNTIME NEEDED | Read-TpmReShadeTerminalProfile | `uses the live Classic Arcade CRT preview selection when U is pressed` | Actual preview selection smoke |
+| 10 | ReShade selector visibility | SOURCE FIXED; OWNER RUNTIME NEEDED | ReShade selector instructions | ReShade selector contract coverage | Packaged UI smoke |
+| 11 | Protected ReShade adopt/replace | NOT FIXED | Existing path requires reconciliation | ReShade ownership tests | Explicit adopt/replace smoke |
+| 12 | ReShade all-games accounting | NOT FIXED | Full accounting audit required | Existing ReShade result tests | All-games packaged smoke |
+| 13 | Crosshair browser close | SOURCE FIXED; OWNER RUNTIME NEEDED | Export-CrosshairPreview | Crosshair source-contract coverage | Actual browser P1/P2 smoke |
+| 14 | Crosshair focus return | SOURCE FIXED; OWNER RUNTIME NEEDED | Crosshair focus fallback | Crosshair fallback tests | Actual focus smoke |
+| 15 | Crosshair prompt row | SOURCE FIXED; OWNER RUNTIME NEEDED | `Invoke-CrosshairSetup` and `Read-TpmWorkflowInput` | `routes the P1 and P2 prompts through workflow input when a status context exists` | Constrained console smoke |
+| 16 | PostgreSQL repair loop | SOURCE FIXED; OWNER RUNTIME NEEDED | PostgreSQL recovery action loop and password-mismatch retry | `keeps password mismatch inside the reset flow`; `retries protected backup after validated password` | Backup-failure R smoke |
+| 17 | Affected-games repair scope | SOURCE FIXED; OWNER RUNTIME NEEDED | Repair-GamePaths and Health Check handoff | `emits compact repair progress for each profile` | One/multiple/zero affected smoke |
+| 18 | Health Check no-candidate explanation | SOURCE FIXED; OWNER RUNTIME NEEDED | Health Check repair reporting | Health Check repair tests | No-candidate smoke |
+| 19 | Health Check source recopy | SOURCE FIXED; OWNER RUNTIME NEEDED | Scoped AutoSync re-entry | Affected-path source contracts | Source recopy smoke |
+| 20 | Health Check Back routing | SOURCE FIXED; OWNER RUNTIME NEEDED | Health Check routing | Health Check Back routing coverage | Press B in packaged runtime |
+| 21 | Option 10 repair clarity | SOURCE FIXED; OWNER RUNTIME NEEDED | Repair result reporting | Repair result tests | Verify per-game accounting |
+| 22 | Post-thumbnail repair scope | SOURCE FIXED; OWNER RUNTIME NEEDED | Affected-only AutoSync handoff | Scoped repair tests | Verify no optional-flow escape |
+| 23 | LaunchBox Back gate | SOURCE FIXED; OWNER RUNTIME NEEDED | Optional-chain routing | LaunchBox Back coverage | Packaged B smoke |
+| 24 | LaunchBox prompt wording | NOT FIXED | Prompt redesign required | No qualifying test | Guided prompt smoke |
+| 25 | HyperSpin direct prompt | SOURCE FIXED; OWNER RUNTIME NEEDED | `Export-HyperSpinJson` missing-ID choice | No qualifying test | Normal completion smoke |
+| 26 | Invalid optional Y/N input | NOT FIXED | Centralized reader migration remains incomplete | Focused prompt contracts required | Invalid-input smoke |
+| 27 | Support final prompt | SOURCE FIXED; OWNER RUNTIME NEEDED | Support menu and package-open choice | `uses the same indented Choose layout for optional result menus` | Packaged support prompt |
+| 28 | Fatal workflow surfacing | SOURCE FIXED; OWNER RUNTIME NEEDED | Get-TpmSupportManifestText | SupportPackage.Tests: `records Action Required freshness in the packaged manifest` | Fresh fatal-log package |
+| 29 | Action Required freshness | SOURCE FIXED; OWNER RUNTIME NEEDED | New-TpmSupportPackage | SupportPackage.Tests: `records Action Required freshness in the packaged manifest` | Multiple-report package |
+| 30 | Controls truthfulness | NOT FIXED | Full controls result audit required | Existing controls tests | Zero-bound runtime result |
+| 31 | dgVoodoo2 wording | SOURCE FIXED; OWNER RUNTIME NEEDED | dgVoodoo2 result wording | No dedicated wording test | Owner wording review |
+| 32 | Global consistency rule | NOT FIXED | Script-wide choice-route inventory and centralized readers | Focused prompt contracts required | Packaged consistency smoke |
+
+## SCRIPT-WIDE UNIVERSAL PROGRESS BAR AUDIT
+
+| Path | Function/call site | Current behavior | Disposition | Test |
+|---|---|---|---|---|
+| AutoSync scan | Select-GamesInteractive | Compact TPM status exists; package proof absent | CONVERTED TO UNIVERSAL TPM PROGRESS | `truncates compact progress to constrained width and shows elapsed heartbeat` |
+| AutoSync extraction | Invoke-AutoSync | Mixed compact status and operation output | CONVERTED TO UNIVERSAL TPM PROGRESS | `uses compact TPM progress and preserves cleanup instead of a PowerShell progress panel` |
+| Remaining unclassified progress paths | Global inventory | Progress contract is not complete for ID 3 | NOT FIXED | Focused progress tests required |
+| Library Health Check repair search | Repair-GamePaths / Select-GamesInteractive | Compact search/selection status and scoped repair handoff; owner package proof absent | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing repair-flow tests; owner smoke |
+| GPU Fix web/check/download | Invoke-GpuFixSetup | Workflow status plus compact per-profile checks/download stages; owner package proof absent | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing GPU source contracts; owner smoke |
+| Shared download tiers | Invoke-TpmDownload | Compact download status is centralized for network transfers; owner package proof absent | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing download tests; owner smoke |
+| Thumbnail checks/downloads | Invoke-ThumbnailDownload | Box-art download path uses shared compact download status; owner package proof absent | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing thumbnail tests; owner smoke |
+| AutoSync registration/import | Register-Games | Registration scan is covered by per-executable compact TPM progress; owner package proof absent | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing registration/source tests; owner smoke |
+| AutoSync copy/move operations | Invoke-AutoSync promotion | AutoSync extraction/promotion path uses compact TPM progress; owner package proof absent | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing AutoSync tests; owner smoke |
+| Library Health Check affected-games re-copy/re-extract | Health Check scoped AutoSync | Scoped AutoSync reuses the universal extraction progress path; owner package proof absent | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing scoped-flow tests; owner smoke |
+| DAT checks/downloads | Eggman DAT functions | Shared compact download progress plus bounded destination-selection prompt | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing DAT tests; owner smoke |
+| Eggman game data fetch | Eggman game-data functions | Shared compact download progress; bounded release/download retries | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing game-data tests; owner smoke |
+| ProfileSet GitHub/default-branch query | Get-TeknoParrotProfileSet | Compact checking status surrounds default-branch/tree query and local fallback | SOURCE FIXED; OWNER RUNTIME NEEDED | Source contract; owner smoke |
+| Startup update check | CheckForUpdates | Shared download/status path; startup behavior still needs packaged proof | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing updater tests; owner smoke |
+| updater download | Invoke-TpmDownload update path | Shared compact download progress | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing updater tests; owner smoke |
+| dgVoodoo2 download/check/deploy | Invoke-DgVoodoo2Setup | Compact scan and deployment progress added around per-game loops | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing dgVoodoo2 tests; owner smoke |
+| ReShade download/check/signature/preview loading | Invoke-ReShadeSetup | Compact path-check and deployment progress added; preview remains interactive, not a long-running transfer | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing ReShade tests; owner smoke |
+| FFB/network/download checks | FFB setup | Shared compact download progress and workflow status cover network/plugin stages; owner proof absent | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing FFB tests; owner smoke |
+| Backup operations | Health Check/LaunchBox/PostgreSQL backup helpers | Compact progress added to Health Check and LaunchBox backup loops; PostgreSQL recovery remains workflow-step based | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing backup tests; owner smoke |
+| Restore operations | UserProfiles/LaunchBox/PostgreSQL restore flows | Compact restore progress added to profile and LaunchBox restore paths; PostgreSQL restore remains workflow-step based | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing restore tests; owner smoke |
+| PostgreSQL profile/database setup | Invoke-PostgresGameSetup and recovery flow | Compact per-profile setup progress plus workflow steps | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing PostgreSQL tests; owner smoke |
+| Support package collection | New-TpmSupportPackage | Workflow status exists; runtime proof absent | SOURCE FIXED; OWNER RUNTIME NEEDED | SupportPackage.Tests: `collects TPM diagnostics into one support ZIP` |
+| LaunchBox export/write | LaunchBox functions | Compact export, backup, and restore progress added around file loops | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing LaunchBox tests; owner smoke |
+| BepInEx package/download/deploy | Invoke-BepInExUpdateCheck | Compact preflight, version-check, and deployment progress added | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing BepInEx tests; owner smoke |
+| Crosshair/HyperSpin bounded asset writes | Crosshair and HyperSpin setup/export | Small bounded writes; no long-running progress surface needed | JUSTIFIED NO PROGRESS SURFACE | Existing crosshair/HyperSpin tests |
+
+## Prompt/gate/back-routing consistency audit
+
+| Pattern | Locations audited | Converted | Excluded with reason | Tests |
+|---|---|---|---|---|
+| Y/N | Main, optional setup, readiness, and process-wait prompts | Converted to `Read-TpmYesNo`, including readiness/process retry prompts | Free-text confirmations remain deliberate (`YES`, `REMOVE`, path/vendor/profile input) | `Read-TpmYesNo validation`; `audits source progress and optional gate readers` |
+| Invalid input | Main, setup, dynamic path, restore, and result prompts | `Read-TpmChoice` now covers migrated menus, dynamic detected-root choices, and all three restore menu families | Free-text search/path/vendor/profile prompts remain non-choice inputs | `Read-TpmYesNo validation`; `audits source progress and optional gate readers` |
+| Back | Health Check, LaunchBox, ReShade, setup, selection browsers | Enumerated Back/return choices use centralized `Read-TpmChoice` or existing workflow routing | Search boxes at `Select-GamesInteractive`/`Select-GamesForAutoSync` accept free-text `back`; acknowledgements use Enter-only prompts | ID32 raw-prompt boundary test; owner smoke |
+| Skip | AutoSync and optional setup | Enumerated Skip/decline choices use centralized readers and explicit workflow outcomes | Free-text search and exact-token confirmations are not choice menus | ID32 raw-prompt boundary test; owner smoke |
+| Cancel | ReShade, crosshair, AutoSync, repair | Enumerated cancellation choices use centralized readers | `REMOVE`, blank path/vendor input, and Enter-only acknowledgements remain deliberate safety/input contracts | ID32 raw-prompt boundary test; owner smoke |
+| Preview/Run | AutoSync and ReShade | Enumerated preview/run choices use centralized readers | Graphical preview interaction and terminal profile/search input are design-specific | ID32 raw-prompt boundary test; existing preview tests |
+| Mutation confirmation | Repair, install, update, restore | Enumerated mutation choices use centralized readers | `YES`/`REMOVE` exact-token gates remain deliberate safety contracts at PostgreSQL/ReShade mutation boundaries | ID32 raw-prompt boundary test; existing mutation tests |
+| Optional setup gates | GPU, FFB, dgVoodoo2, BepInEx | Enumerated setup gates use centralized readers | GPU vendor and PostgreSQL password prompts are free-text/secure input, not Y/N choice gates | ID32 raw-prompt boundary test; existing optional-setup tests |
+| HyperSpin direct prompts | Missing-emulator-ID flow | Converted to `Read-TpmChoice`; normal completion runtime proof remains absent | No qualifying test |
+| Support package prompts | Support completion flow | Converted to `Read-TpmChoice`; runtime proof remains absent | SupportPackage.Tests only |
+
+- The organization slice does not change product status: IDs 3, 11, 12, 26, 30, and 32 remain `NOT FIXED`; ID 5 remains `SOURCE FIXED; OWNER RUNTIME NEEDED`.
+- The enumerated prompt rows describe partial source evidence only; they do not close global ID 32.
+- PR #321 remains blocked. Candidate ZIP is stale, permanent procedure gate must fail closed, owner-runtime evidence is outstanding, and no package or owner smoke is authorized.
+
+## Affected-games repair-flow scoping audit
+
+- One affected game: source path uses the broken profile-code collection.
+- Multiple affected games: source path passes all broken profile codes through the scoped handoff.
+- Zero affected games: no repair should be offered; packaged runtime proof is absent.
+- No-candidate result: source reporting exists; packaged runtime proof is absent.
+- Back returns to main menu: source route exists; packaged runtime proof is absent.
+- No BBHWorld hardcode exists in the inspected repair implementation.
+- Full AutoSync escape: source-only evidence indicates affected-code filtering; runtime proof is absent.
+- Thumbnails: no scoped-repair runtime proof.
+- LaunchBox: no scoped-repair runtime proof.
+- HyperSpin: no scoped-repair runtime proof.
+- Controls propagation: no scoped-repair runtime proof.
+
+Status: SOURCE FIXED; OWNER RUNTIME NEEDED for the generic source path. The
+required one/multiple/zero/no-candidate functional coverage is not complete.
+
+## Support package/fatal surfacing audit
+
+- Fatal workflow fallback when metadata is unavailable: source implementation and SupportPackage.Tests coverage exist.
+- Newest Action Required inclusion: source selects newest `*ActionItems*.txt`; SupportPackage.Tests coverage exists.
+- Stale evidence labeled stale: manifest source implementation exists.
+- Support final prompt clean: NOT FIXED; runtime proof and dedicated prompt coverage are absent.
+- Fresh owner-runtime support package proof: outstanding.
+
+## Tests with exact counts and timestamps
+
+| Gate/test | Exact command | Count/result | Started UTC | Finished UTC | Engine/version |
+|---|---|---:|---|---|---|
+| Main Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -CI -Output Normal -PassThru` | 989 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
+| SupportPackage.Tests | `Invoke-Pester -Path .\Tests\SupportPackage.Tests.ps1 -CI -Output Normal -PassThru` | 36 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
+| Governance/source parse, ASCII, registry, PSScriptAnalyzer, diff | Final static-check commands; individual start/finish timestamps not captured | 0 parse errors; 27 registry entries; source/report text ASCII clean; 0 PSScriptAnalyzer findings; diff check clean | not captured | not captured | pwsh / PSScriptAnalyzer |
+| Permanent procedure gate | `Test-TpmPermanentProcedures.ps1 -RepoRoot . -SourcePath .\TeknoParrot-Manager.ps1 -ReportPath .\docs\remediation\PR-321-reconciliation.md` | Expected fail: unresolved `NOT FIXED`; owner-runtime evidence outstanding; candidate package stale | not captured | not captured | pwsh |
+Pester 5.7.1 was not confirmed in this environment. These results are not
+certification-compatible evidence. Main and support suites passed, static
+checks passed, and the permanent procedure gate failed closed. The report
+edit itself makes a fresh validation timestamp necessary; no combined-gate
+pass is claimed.
+
+## Static gates
+
+- Parse: passed for production and all three gate/debug scripts; 0 errors.
+- ASCII: 0 non-ASCII bytes across production, tests, report, gate/debug scripts, and registry.
+- PSScriptAnalyzer: production plus all three gate/debug scripts returned 0 findings.
+- `git diff --check`: passed.
+- GPU-specific source scan found 0 `Write-Progress` calls and 2 per-profile `Write-TpmCompactExtractionProgress` calls in `Invoke-GpuFixSetup`; the remaining proof is packaged runtime behavior.
+- InjectionHunter unavailable in this environment; no InjectionHunter result claimed.
+
+## Hunk classification
+
+| File | Hunk/range | Procedure ID, owner report ID, issue, or authorization | Evidence |
+|---|---|---|---|
+| AGENTS.md | Permanent gate checklist addition | TPM-AUTH-001, authorized governance requirement | Changed-section review |
+| RELEASE-SAFETY-CHECKLIST.md | Permanent gate checklist addition | TPM-AUTH-001, TPM-TRACE-002 | Changed-section review |
+| docs/ENGINEERING-WORKFLOW.md | Remediation gate workflow | TPM-OWNER-001, TPM-TRACE-001 | Changed-section review |
+| quality/permanent-procedures.json | Registry | All TPM procedure IDs | JSON parse |
+| docs/governance/permanent-procedures.md | Registry documentation | All TPM procedure IDs | Readability review |
+| docs/templates/remediation-gate-report.md | Mandatory report schema | TPM-TRACE-001, TPM-OWNER-003 | Required-section review |
+| scripts/Test-TpmPermanentProcedures.ps1 | Fail-closed report/source gate | All registry IDs | Parse, analyzer, expected-fail run |
+| scripts/Run-TpmQualityGate.ps1 | Combined quality wrapper | TPM-AUTH-001, TPM-EVIDENCE-001 | Parse and analyzer |
+| .github/pull_request_template.md | PR checklist | TPM-AUTH-001, TPM-TRACE-001 | File review |
+| TeknoParrot-Manager.ps1 | Prior PR321 remediation hunks | Owner report IDs 1-4, 6-10, 13-14, 17-23, 28-29, 31 | Existing tests; runtime proof outstanding |
+| docs/governance/tpm-development-operating-model.md; docs/governance/tpm-contract-types.md; docs/architecture/tpm-subsystem-ownership-map.md; docs/architecture/tpm-subsystem-extraction-roadmap.md; docs/remediation/PR-321-control-board.md; docs/remediation/slices/README.md; docs/remediation/slices/PR-321-current-slice.md; docs/templates/tpm-slice-contract.md | TPM-RESET-001 organization slice | TPM-TRACE-001, TPM-TRACE-002, TPM-OWNER-001, PR #321 | Artifact and governance tests |
+| Tests/TeknoParrot-Manager.Tests.ps1 | Prior PR321 regression coverage | Owner report IDs 1-4, 6, 8-10, 13, 23, 28-29 | Main suite result |
+
+## Permanent procedure compliance
+
+- Registry exists and contains 27 stable IDs.
+- Report uses the required owner statuses only.
+- Universal progress remains NOT FIXED for the paths marked NOT FIXED.
+- Prompt/gate consistency remains NOT FIXED where global evidence is absent.
+- Affected-games repair remains SOURCE FIXED; OWNER RUNTIME NEEDED.
+- Support fatal/newest/stale evidence is source/test covered; owner-runtime proof is outstanding.
+- The supplied ZIP is stale relative to current uncommitted source changes.
+- This report intentionally records failed acceptance conditions rather than claiming completion.
+
+## Non-actions
+
+No commit, push, package, wiki, release, certification, or ARCADE/#323 action
+was performed. No monitor-pipeline work was mixed into PR #321. No generated
+runtime artifact remains in the worktree.
+
+## Runtime owner-smoke checklist
+
+Owner-runtime proof remains required for the packaged candidate for ReShade
+null/back/cancel, preview synchronization, universal progress, GPU and
+thumbnail progress, crosshair close/focus/row placement, PostgreSQL retry,
+LaunchBox/HyperSpin gates, affected-games repair scoping, support-package
+freshness/fatal evidence, and controls truthfulness.
