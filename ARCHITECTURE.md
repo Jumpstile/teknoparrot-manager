@@ -318,6 +318,18 @@ ready, protected, missing executable, and unsafe or malformed. Protected install
 remain unchanged unless the operator explicitly selects `Adopt` and confirms the
 ownership change; successful adoptions are counted separately in the result.
 
+**Protected ownership and all-games accounting (TPM-RESHADE-001).** ReShade
+files without verified TPM ownership remain unchanged by default. The explicit
+`Adopt` action passes `AllowUserOwnedOverwrite` only after the user-facing
+warning explains that TPM found files it did not create, protected the custom
+setup, and will back up files before replacement; transactional promotion and
+rollback make backup failure a hard stop, and ownership metadata is committed
+only after successful promotion. Apply preflight reports ready, protected,
+missing, unsafe, and failed/preflight-blocked buckets. The final apply result
+uses `Get-TpmReShadeApplyAccounting` to expose non-overlapping terminal
+outcomes whose total must equal the selected-game count; a failed invariant
+stops the result rather than presenting an incomplete summary.
+
 Before replacing any target file, deployment requires a matching TPM-managed ownership entry. Existing files without that ownership evidence return `COLLISION` / `USER_OWNED_CONTENT_PRESERVED` and remain byte-for-byte untouched. Previous TPM-managed files not part of the new profile are retained rather than deleted, so switching to `Original` or a smaller effect set is non-destructive and may require manual review of old files.
 
 

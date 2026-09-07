@@ -13743,4 +13743,34 @@ Describe "Focused RC8 remediation contracts" {
         $gate | Should -Match 'PR-321-current-slice.md'
         $gate | Should -Match 'Slice ID'
     }
+Describe "ReShade protected adoption and accounting" {
+    It "keeps protected installs unchanged by default and makes accounting exact" {
+        $source = $script:ProductionSource
+        $deploymentCall = [regex]::Match($source, '(?s)Install-TpmReShadeProfileDeployment .*?AllowUserOwnedOverwrite:\(\$Action -eq ''Adopt''\)').Value
+        $deploymentCall | Should -Not -BeNullOrEmpty
+        $deploymentCall | Should -Match 'AllowUserOwnedOverwrite'
+        $deploymentCall | Should -Match "Action -eq 'Adopt'"
+        $source | Should -Match 'backup failure blocks replacement'
+        $result = Get-TpmReShadeApplyAccounting -Selected 7 -Deployed 2 -Adopted 1 -Protected 1 -MissingPath 1 -MissingDevice 1 -Unsafe 1 -Failed 1
+        $result.ChangedTpmManaged | Should -Be 1
+        $result.AdoptedReplaced | Should -Be 1
+        $result.ProtectedUnchanged | Should -Be 1
+        $result.MissingPath | Should -Be 2
+        $result.UnsafeOwnershipPath | Should -Be 1
+        $result.Failed | Should -Be 1
+        $result.SkippedCancelled | Should -Be 0
+        $result.Total | Should -Be 7
+        $result.Complete | Should -BeTrue
+        $mismatch = Get-TpmReShadeApplyAccounting -Selected 2 -Deployed 1 -Protected 1 -SkippedCancelled 1
+        $mismatch.Total | Should -Be 3
+        $mismatch.Complete | Should -BeFalse
+    }
+
+    It "reports preflight failed and protected categories explicitly" {
+        $source = $script:ProductionSource
+        $source | Should -Match 'failed/preflight blocked'
+        $source | Should -Match 'TPM found ReShade files it did not create'
+        $source | Should -Match 'TPM will back them up first'
+    }
+}
 }

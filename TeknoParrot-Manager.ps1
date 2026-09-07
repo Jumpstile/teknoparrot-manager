@@ -7443,9 +7443,44 @@ function Get-TpmReShadeApplyPreflight {
         Protected = $protected
         MissingPath = $missingPath
         Unsafe = $unsafe
+        Failed = 0
         Records = @($records.ToArray())
     }
 }
+function Get-TpmReShadeApplyAccounting {
+    param(
+        [Parameter(Mandatory)][int]$Selected,
+        [int]$Deployed = 0,
+        [int]$Adopted = 0,
+        [int]$Protected = 0,
+        [int]$MissingPath = 0,
+        [int]$MissingDevice = 0,
+        [int]$Unsafe = 0,
+        [int]$Failed = 0,
+        [int]$SkippedCancelled = 0
+    )
+    $adoptedCount = [Math]::Max(0, $Adopted)
+    $changedCount = [Math]::Max(0, $Deployed - $adoptedCount)
+    $missingCount = [Math]::Max(0, $MissingPath + $MissingDevice)
+    $unsafeCount = [Math]::Max(0, $Unsafe)
+    $failedCount = [Math]::Max(0, $Failed)
+    $protectedCount = [Math]::Max(0, $Protected)
+    $skippedCount = $SkippedCancelled
+    $total = $changedCount + $adoptedCount + $protectedCount + $missingCount + $unsafeCount + $failedCount + $skippedCount
+    return [pscustomobject]@{
+        Selected = $Selected
+        ChangedTpmManaged = $changedCount
+        AdoptedReplaced = $adoptedCount
+        ProtectedUnchanged = $protectedCount
+        MissingPath = $missingCount
+        UnsafeOwnershipPath = $unsafeCount
+        Failed = $failedCount
+        SkippedCancelled = $skippedCount
+        Total = $total
+        Complete = ($total -eq $Selected)
+    }
+}
+
 
 function Invoke-ReShadeSetup {
     param(
@@ -7583,7 +7618,6 @@ function Invoke-ReShadeSetup {
     # over the global choice above for that one game. Same convention as
     # CustomThumbnails\<ProfileCode>.png (Invoke-ThumbnailDownload) -- file
     # name is the profile code, validated against registered profiles, with
-    # a WRONG NAME warning for typos instead of a silent no-op.
     $reShadePresetsDir = Join-Path $PSScriptRoot "ReShadePresets"
     if (Test-Path -LiteralPath $reShadePresetsDir) {
         $presetFiles = @(Get-ChildItem -LiteralPath $reShadePresetsDir -Filter "*.ini" -File -ErrorAction SilentlyContinue)
@@ -7616,9 +7650,15 @@ function Invoke-ReShadeSetup {
         return [pscustomobject]@{ Succeeded = $false; Deployed = 0; Errors = 0; Reason = 'NO_GAMES_SELECTED' }
     }
     $preflightSummary = Get-TpmReShadeApplyPreflight -SelectedGames $selectedGames -ProfileDefinition $selectedProfile -SourceDll $SourceDll -SourceDll32 $SourceDll32
-    Write-Host ("  ReShade preflight: {0} ready, {1} protected, {2} missing executable, {3} unsafe or malformed." -f $preflightSummary.Ready, $preflightSummary.Protected, $preflightSummary.MissingPath, $preflightSummary.Unsafe) -ForegroundColor DarkCyan
+    Write-Host ("  ReShade preflight: {0} ready, {1} protected, {2} missing executable, {3} unsafe or malformed, {4} failed/preflight blocked." -f $preflightSummary.Ready, $preflightSummary.Protected, $preflightSummary.MissingPath, $preflightSummary.Unsafe, $preflightSummary.Failed) -ForegroundColor DarkCyan
     if ($preflightSummary.Protected -gt 0) {
         Write-Host '  Protected installs remain unchanged unless the separate, explicit Adopt action is used.' -ForegroundColor Yellow
+        if ($Action -eq 'Adopt') {
+            Write-Host '  TPM found ReShade files it did not create.' -ForegroundColor Yellow
+            Write-Host '  TPM protected them so it would not overwrite a custom setup.' -ForegroundColor Yellow
+            Write-Host '  You may replace them with TPM-managed ReShade because you chose Adopt/replace.' -ForegroundColor Yellow
+            Write-Host '  TPM will back them up first; backup failure blocks replacement.' -ForegroundColor Yellow
+        }
     }
     $bulkApply = $false
     $deployed = 0; $installed = 0; $updated = 0; $reapplied = 0; $changedProfile = 0; $keptProfile = 0; $skipped = 0; $missingPath = 0; $missingDevice = 0; $unsupported = 0; $protected = 0; $adopted = 0; $errors = 0; $presetOverrides = 0; $tutorialProgressFixed = 0
@@ -7870,6 +7910,15 @@ function Invoke-ReShadeSetup {
             }
         }
     }
+$unsafeAccounting = 0
+foreach ($reasonKey in @($pathReasonCounts.Keys)) {
+    if ($reasonKey -notin @('DEVICE_UNAVAILABLE', 'GAME_PATH_MISSING')) { $unsafeAccounting += [int]$pathReasonCounts[$reasonKey] }
+}
+$skippedForAccounting = $skipped - $missingPath - $missingDevice - $unsafeAccounting
+$accounting = Get-TpmReShadeApplyAccounting -Selected $selectedGames.Count -Deployed $deployed -Adopted $adopted -Protected $protected -MissingPath $missingPath -MissingDevice $missingDevice -Unsafe $unsafeAccounting -Failed $errors -SkippedCancelled $skippedForAccounting
+Write-Host ("  Accounting: {0} selected = {1} changed TPM-managed + {2} adopted/replaced + {3} protected unchanged + {4} missing path + {5} unsafe + {6} failed + {7} skipped/cancelled." -f $accounting.Selected, $accounting.ChangedTpmManaged, $accounting.AdoptedReplaced, $accounting.ProtectedUnchanged, $accounting.MissingPath, $accounting.UnsafeOwnershipPath, $accounting.Failed, $accounting.SkippedCancelled) -ForegroundColor DarkCyan
+if (-not $accounting.Complete) { throw 'ReShade accounting invariant failed: terminal outcomes did not equal selected games.' }
+Write-Log ("ReShade accounting: Selected={0} ChangedTpmManaged={1} AdoptedReplaced={2} ProtectedUnchanged={3} MissingPath={4} UnsafeOwnershipPath={5} Failed={6} SkippedCancelled={7}" -f $accounting.Selected, $accounting.ChangedTpmManaged, $accounting.AdoptedReplaced, $accounting.ProtectedUnchanged, $accounting.MissingPath, $accounting.UnsafeOwnershipPath, $accounting.Failed, $accounting.SkippedCancelled)
 
     Write-Host ("  Installed new : {0} game(s)" -f $installed) -ForegroundColor Green
     Write-Host ("  Updated       : {0} game(s)" -f $updated) -ForegroundColor Green

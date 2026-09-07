@@ -3,12 +3,12 @@
 - Repository root: `C:\REPOS\tpm-rc8-certified-a700d093`
 - Branch: `fix/rc8-release-blockers`
 - HEAD: `7cd77108759084679f33eb27f98b6bfaaa58ff4d`
-- Report generated UTC: TPM-CONTROLS-001 source contract and focused implementation complete; final validation follows the slice gate.
+- Report generated UTC: TPM-RESHADE-001 source contract and focused implementation complete; final validation follows the slice gate.
 - Source/test last-edit UTC: not captured in this working report.
 - Candidate/package identity: `C:\REPOS\tpm-rc8-candidate-output\TeknoParrot Manager v1.0 RC8.zip`
 - Candidate SHA-256: `8E0343AE85F63F06280CE4E5AE737C0D68E05629A446C22B61AD79C732F40303`
 - Source SHA: `7cd77108759084679f33eb27f98b6bfaaa58ff4d` (working-tree source/test/doc changes remain uncommitted)
-- Remediation scope: TPM-only PR #321 Controls truthfulness slice `TPM-CONTROLS-001`, unresolved ReShade blockers, owner-smoke reconciliation, and permanent procedure enforcement
+- Remediation scope: TPM-only PR #321 ReShade ownership/accounting slice `TPM-RESHADE-001`, prior controls/progress/prompt source evidence, owner-smoke reconciliation, and permanent procedure enforcement
 
 ## Provenance
 
@@ -31,8 +31,8 @@
 | 8 | Thumbnail 404 fallback | SOURCE FIXED; OWNER RUNTIME NEEDED | Invoke-TpmDownload | `supports opt-in no-fallback behavior for thumbnail-style 404 probes` | Packaged 404 behavior |
 | 9 | ReShade preview sync | SOURCE FIXED; OWNER RUNTIME NEEDED | Read-TpmReShadeTerminalProfile | `uses the live Classic Arcade CRT preview selection when U is pressed` | Actual preview selection smoke |
 | 10 | ReShade selector visibility | SOURCE FIXED; OWNER RUNTIME NEEDED | ReShade selector instructions | ReShade selector contract coverage | Packaged UI smoke |
-| 11 | Protected ReShade adopt/replace | NOT FIXED | Existing path requires reconciliation | ReShade ownership tests | Explicit adopt/replace smoke |
-| 12 | ReShade all-games accounting | NOT FIXED | Full accounting audit required | Existing ReShade result tests | All-games packaged smoke |
+| 11 | Protected ReShade adopt/replace | SOURCE FIXED; OWNER RUNTIME NEEDED | `Get-TpmReShadeOwnershipClassification`; `Install-TpmReShadeProfileDeployment`; `Invoke-ReShadeSetup` | ReShade protected-adoption tests | Explicit adopt/replace smoke |
+| 12 | ReShade all-games accounting | SOURCE FIXED; OWNER RUNTIME NEEDED | `Get-TpmReShadeApplyPreflight`; `Get-TpmReShadeApplyAccounting`; `Invoke-ReShadeSetup` | ReShade accounting tests | All-games packaged smoke |
 | 13 | Crosshair browser close | SOURCE FIXED; OWNER RUNTIME NEEDED | Export-CrosshairPreview | Crosshair source-contract coverage | Actual browser P1/P2 smoke |
 | 14 | Crosshair focus return | SOURCE FIXED; OWNER RUNTIME NEEDED | Crosshair focus fallback | Crosshair fallback tests | Actual focus smoke |
 | 15 | Crosshair prompt row | SOURCE FIXED; OWNER RUNTIME NEEDED | `Invoke-CrosshairSetup` and `Read-TpmWorkflowInput` | `routes the P1 and P2 prompts through workflow input when a status context exists` | Constrained console smoke |
@@ -109,8 +109,9 @@ This report retains the prior prompt audit table below for cross-slice traceabil
 | HyperSpin direct prompts | Missing-emulator-ID flow | `G/S` uses `Read-TpmChoice`; no emulator ID is synthesized | Normal completion runtime proof remains absent | `Prompt.Core fixed choice routes` |
 | Support package prompts | Support main and package-open completion | `1-3` and `O/B` use `Read-TpmChoice`; `O` still opens the folder | Packaged support runtime proof remains absent | `Prompt.Core fixed choice routes`; SupportPackage.Tests |
 
-- IDs 11 and 12 remain `NOT FIXED`; IDs 3, 17-22, 26, 30, and 32 are `SOURCE FIXED; OWNER RUNTIME NEEDED`.
-- `TPM-CONTROLS-001` separates saved configuration, inferred readiness, and observed physical binding; propagation now reports zero verified physical bindings because TPM does not test device input.
+- IDs 11 and 12 are `SOURCE FIXED; OWNER RUNTIME NEEDED`; IDs 3, 17-22, 26, 30, and 32 remain `SOURCE FIXED; OWNER RUNTIME NEEDED`.
+- `TPM-RESHADE-001` protects unknown/custom ReShade files by default, gates adopt/replace behind explicit action and backup, reports preflight buckets, and enforces exact final accounting.
+- `TPM-CONTROLS-001` separates saved configuration, inferred readiness, and observed physical binding; propagation reports zero verified physical bindings because TPM does not test device input.
 - PR #321 remains blocked. Candidate ZIP is stale, the permanent procedure gate must fail closed, owner-runtime evidence is outstanding, and no package or owner smoke is authorized.
 
 ## Affected-games repair-flow scoping audit
@@ -140,10 +141,10 @@ required one/multiple/zero/no-candidate functional coverage is not complete.
 
 ## Tests with exact counts and timestamps
 | Gate/test | Exact command | Count/result | Started UTC | Finished UTC | Engine/version |
-|---|---|---:|---|---|---|
-| Main Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -Output Normal` | 997 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
-| SupportPackage.Tests | `Invoke-Pester -Path .\Tests\SupportPackage.Tests.ps1 -Output Normal` | 36 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
+| Main Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -Output Normal` | 999 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
+| SupportPackage.Tests | `Invoke-Pester -Path .\Tests\SupportPackage.Tests.ps1 -Output Normal` | 36 passed, 0 failed, 0 skipped at prior checkpoint; not rerun in this slice | not captured | not captured | Pester 6.1.0 |
 | Controls focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Write-ControlPropagationResults*' -Output Detailed` | 3 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
+| ReShade focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*ReShade*' -Output Normal` | 186 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
 | Progress.Core focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Progress.Core*' -Output Detailed` | 2 passed, 0 failed, 0 skipped at prior checkpoint | not captured | not captured | Pester 6.1.0 |
 | Prompt.Core focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Prompt.Core*' -Output Detailed` | 4 passed, 0 failed, 0 skipped at prior checkpoint | not captured | not captured | Pester 6.1.0 |
 | Governance/source parse, ASCII, registry, PSScriptAnalyzer, diff | Final static-check commands; individual start/finish timestamps not captured | 0 parse errors; 27 registry entries; affected source/report text ASCII clean; 0 PSScriptAnalyzer findings; diff check clean | not captured | not captured | pwsh / PSScriptAnalyzer |
@@ -181,8 +182,7 @@ pass is claimed.
 | Tests/TeknoParrot-Manager.Tests.ps1 | `Read-TpmChoice` behavior, Prompt.Core route contracts, and specialized-boundary inventory | TPM-PROMPT-001, owner report IDs 26/32, PR #321 | Focused prompt tests and full suite: 996 passed; owner runtime outstanding |
 | ARCHITECTURE.md | Prompt.Core finite-choice invariant and boundaries | TPM-PROMPT-001, TPM-TRACE-001, PR #321 | Changed-section review |
 | ARCHITECTURE.md | Progress.Core compact/workflow/waiting contract | TPM-PROGRESS-001, TPM-TRACE-001, PR #321 | Changed-section review |
-| docs/remediation/slices/PR-321-current-slice.md; docs/remediation/PR-321-control-board.md | Prompt inventory, boundaries, statuses, next-slice assignment | TPM-PROMPT-001, TPM-TRACE-001, TPM-OWNER-001, PR #321 | Artifact review and gate checks |
-| docs/remediation/slices/PR-321-current-slice.md; docs/remediation/PR-321-control-board.md | Progress inventory, statuses, next-slice assignment | TPM-PROGRESS-001, TPM-TRACE-001, TPM-OWNER-001, PR #321 | Artifact review and gate checks |
+| docs/remediation/slices/PR-321-current-slice.md; docs/remediation/PR-321-control-board.md | ReShade ownership/accounting contract, prompt inventory, boundaries, statuses, and slice assignment | TPM-RESHADE-001, TPM-TRACE-001, TPM-OWNER-001, owner report IDs 11-12, PR #321 | Artifact review and focused source tests |
 | README.md; QUICKSTART.md; TeknoParrot-Manager-README.txt; TeknoParrot-Manager-QuickStart.txt | Corrected LaunchBox/HyperSpin prompt instructions | TPM-PROMPT-001, owner report IDs 24-25, PR #321 | Documentation review against current routes |
 
 ## Permanent procedure compliance
