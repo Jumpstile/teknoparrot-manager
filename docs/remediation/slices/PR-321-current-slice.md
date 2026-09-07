@@ -1,89 +1,115 @@
-# PR-321 Current Slice: Prompt.Core and Navigation Consistency
+# PR-321 Current Slice: Progress.Core Inventory
 
-- Slice ID: TPM-PROMPT-001
-- Slice name: Prompt.Core centralized enumerated-choice validation and prompt inventory
-- Included owner-report IDs: 24, 25, 26, 27, and the prompt/navigation portion of 32.
-- Explicit exclusions: ReShade protected ownership and accounting (11, 12), universal progress (3), controls truthfulness (30), packaging, release, certification, owner-runtime smoke, ARCADE/#323, wiki, commit, and push.
+- Slice ID: TPM-PROGRESS-001
+- Slice name: Script-wide progress inventory and source-side progress contract
+- Included owner-report IDs: 3, 26, 32.
+- Issue: PR #321.
+- Permanent procedures: TPM-PROMPT-001 follow-up, TPM-TRACE-001, TPM-OWNER-001.
+- Explicit exclusions: repair behavior (17-22), PostgreSQL repair (16), ReShade ownership/accounting (11-12), controls truthfulness (30), packaging, release, certification, owner-runtime smoke, ARCADE/#323, wiki, commit, and push.
 
 ## Contract
 
-- `Read-TpmYesNo` owns ordinary Y/N decisions.
-- `Read-TpmChoice` owns finite enumerated choices. It normalizes case, applies an allowed default, and keeps invalid input on the same prompt until an allowed value is entered.
-- Enumerated Back, Skip, Cancel, Preview, Run, Details, retry, and optional-setup routes use the centralized reader where the route has a finite contract.
-- Exact-token confirmations (`YES`, `REMOVE`), free text, secure password input, paths, search terms, numeric ranges, and renderer-aware keyboard input remain explicit contracts rather than being forced through a one-letter reader.
-- Back, Skip, Cancel, and Preview do not mutate state before their route is selected. Support `O` opens the generated package folder; `B` returns without opening it.
-- HyperSpin missing-emulator-ID handling accepts only `G` (guidance) or `S` (skip) and never synthesizes an emulator ID.
+- Every user-facing long-running path must use either compact TPM progress or structured TPM workflow status.
+- Known-total loops use `Write-TpmCompactExtractionProgress` with bounded labels and a completion update.
+- Network transfers use `Write-TpmDownloadProgress`, which delegates to the shared compact renderer and clears the row in `finally`.
+- Multi-step optional flows use `New-TpmWorkflowStatusContext`, explicit steps, failure/waiting states, and lifecycle closure.
+- External waits are not fake percentage operations: profile readiness and process-close waits use explicit bounded deadlines and actionable waiting messages.
+- Small bounded writes and renderer-aware interaction are documented as no-progress surfaces when they do not constitute long-running work.
+- No PowerShell `Write-Progress` surface is permitted in the production script.
 
 ## Prompt inventory and classification
 
-The inventory below covers every user-facing prompt in `TeknoParrot-Manager.ps1`, including prompts that intentionally remain outside `Read-TpmChoice`.
+Prompt.Core finite-choice and back-routing classifications remain represented
+by the committed checkpoint `7cd77108759084679f33eb27f98b6bfaaa58ff4d`.
+This slice adds a bounded Prompt.Core follow-up inventory for IDs 26 and 32;
+ReShade ownership/accounting and controls remain explicitly excluded.
 
-### Centralized finite choices in this slice
+## Prompt.Core follow-up inventory
 
-- LaunchBox: `P/A/F/B` top-level action, detected-root number or `N`, and platform `1-4`.
-- HyperSpin: missing emulator ID `G/S`.
-- Support: main `1-3` and final package action `O/B`.
-- AutoSync and setup gates: preview `P/R/B`; Eggman DAT `D/B/N`; maintenance `N/A/B`; startup update `Y/N/V`; BepInEx approval `Y/R/N`; ReShade custom preset `Y/S/B`, bulk `Y/S/B/D`, conflict `A/K/S/B/D`, and result actions; dgVoodoo2 acquisition/result actions; GPU result actions; FFB membership `Y/N` and missing-path `H/B`.
-- Repair and recovery: Health Check finite action menus, scoped recopy choices, PostgreSQL backup/recovery choices, password reset `Y/B`, password-mismatch `T/B`, staging boundary `R/Q` and `R/Z/Q`, restore `1-3`, preview apply `Y/N`, and conflict resolution `K/S/Q`.
-- Retry/result menus use dynamic allowed arrays when a path issue or detected root changes the available choices. The helper remains the single validation path.
+- Finite enumerated routes use `Read-TpmChoice`, including dynamic allowed sets.
+- Stateful selectors remain specialized boundaries: AutoSync and combined game
+  pickers, ReShade terminal profile selection, and crosshair/browser selection.
+- Exact-token confirmations, secure passwords, paths, free-text search, numeric
+  candidate selection, and renderer-aware input remain specialized by design.
+- `Read-TpmChoice validation` and `Prompt.Core fixed choice routes` cover the
+  source-side contract. Packaged consistency smoke remains owner-runtime work.
 
-### Free-text, path, secure-input, and numeric contracts
+## Progress inventory and classification
 
-- `Read-PathWithBrowse` and `Read-TpmStagingFolder`: folders/files, browse fallback, Enter defaults, and path safety validation.
-- Search keyword, game-folder search root, custom LaunchBox platform name, GPU vendor, ReShade preset path, DAT import path, and other operator-supplied names.
-- PostgreSQL passwords and other secret-bearing fields use their secure/password-specific input path.
-- Crosshair P1/P2 indices, profile-number repair selection, backup restore numbers, and game-number lists carry range or blank semantics and retain specialized validation.
-- AutoSync selection numbers and combined selections allow number lists, ranges, search-again, and stateful selection; they are not one-letter choices.
+The source inventory below classifies each inspected long-running path as
+`CONVERTED TO UNIVERSAL TPM PROGRESS`, `JUSTIFIED NO PROGRESS SURFACE`, or
+an explicit bounded wait. No production `Write-Progress` call remains.
 
-### Exact-token safety contracts
 
-- ReShade removal requires the exact `REMOVE` token.
-- PostgreSQL reinitialization and restore destructive actions require exact `YES`.
-- These prompts are intentionally not treated as casual enumerated choices.
+## Source inventory
 
-### Runtime-only or renderer-aware input
+### Compact progress converted
 
-- `Read-MainMenuChoiceResponsive` uses keyboard polling, redirected-input fallback, and menu redraw state.
-- ReShade terminal profile selection and preview use terminal key handling and custom redraw behavior.
-- Enter-only acknowledgement/return prompts, Enter-or-N wait/retry prompts, browser/process wait prompts, and window-resize prompts are runtime navigation controls, not finite business decisions.
+- AutoSync scan and extraction.
+- Registration scan/import.
+- Health Check affected-game repair and scoped recopy.
+- GPU per-profile checks.
+- Thumbnail checks and downloads.
+- Shared BITS, HttpClient, and Invoke-WebRequest download tiers.
+- DAT, game-data, ProfileSet, updater, FFB, BepInEx, dgVoodoo2, and ReShade download paths.
+- LaunchBox export, backup, and restore loops.
+- PostgreSQL profile/database setup loops where per-profile work occurs.
 
-### Design boundaries retained for follow-up
+### Structured workflow status converted
 
-- AutoSync page/search pickers (`Select-GamesInteractive`, `Select-GamesForAutoSync`, and combined selection) retain command keys plus free-text search and number-list input.
-- Crosshair preview/browser interaction and the ReShade terminal selector retain their renderer-aware input contracts.
-- Path/vendor/password and exact-token prompts retain their specialized safety semantics.
-- Every remaining raw `Read-HostSafe` call is in one of the free-text, exact-token, runtime-only, or stateful-picker categories above; no unclassified finite choice is being silently treated as fixed.
+- Support package collection.
+- FFB setup.
+- Library Health Check.
+- PostgreSQL setup and recovery.
+- ReShade setup.
+- dgVoodoo2 setup.
+- BepInEx setup.
+- Restore flow.
+- Crosshair setup.
+- Startup update flow.
 
-## Files allowed to change
+### Explicit waiting or bounded/no-progress surfaces
 
-- `TeknoParrot-Manager.ps1`: `Read-TpmChoice` and finite-choice call sites only.
-- `Tests/TeknoParrot-Manager.Tests.ps1`: helper behavior and prompt-route contract coverage.
-- `ARCHITECTURE.md`: Prompt.Core finite-choice invariant and deliberate boundaries.
-- `README.md`, `QUICKSTART.md`, `TeknoParrot-Manager-README.txt`, `TeknoParrot-Manager-QuickStart.txt`: corrected frontend prompt instructions.
-- `docs/remediation/PR-321-control-board.md`
-- `docs/remediation/PR-321-reconciliation.md`
-- this slice contract and the permanent procedure gate only where needed to enforce this slice ID.
+- `Ensure-TeknoParrotProfilesReady`: external TeknoParrot startup wait with a 120-second deadline and actionable retry message.
+- `Wait-TpmForProcessClose`: external process-close wait with a 30-second polling window and no forced termination.
+- Crosshair and HyperSpin bounded asset writes: short bounded writes, not long-running operations.
+- ReShade terminal/browser preview interaction: renderer-aware input, not a percentage operation.
+- AutoSync number/search selection: stateful input, not a progress operation.
 
-No ReShade ownership/accounting, controls, package, release, or runtime-evidence files are in scope.
+### Remaining source limitation
+
+The source-side inventory is complete for the inspected production paths. Packaged runtime proof remains unavailable and is not authorized in this slice. ID 3 therefore becomes `SOURCE FIXED; OWNER RUNTIME NEEDED` only after focused source tests and static gates pass; it is not claimed globally certified.
 
 ## Tests required
 
-- Focused `Read-TpmChoice` and prompt-route Pester tests.
-- Main Pester suite, SupportPackage.Tests, production/test parse, ASCII, PSScriptAnalyzer with `PSScriptAnalyzerSettings.psd1`, `git diff --check`, and the permanent procedure gate.
-- The gate must continue to fail closed for unresolved owner IDs, stale candidate identity, and missing owner-runtime evidence.
+- Progress.Core focused source-contract tests.
+- Main Pester suite.
+- SupportPackage.Tests because workflow/support paths are included in the inventory.
+- Production/test/gate parse checks.
+- ASCII check.
+- PSScriptAnalyzer with `PSScriptAnalyzerSettings.psd1`.
+- `git diff --check`.
+- Permanent procedure gate, expected to fail only for unresolved owner/runtime/package blockers.
+
+## Files allowed to change
+
+- `TeknoParrot-Manager.ps1`: no product code change planned; inspect only unless a concrete uncovered long-running path is found.
+- `Tests/TeknoParrot-Manager.Tests.ps1`: Progress.Core source-contract coverage.
+- `ARCHITECTURE.md`: Progress.Core contract and inventory boundary.
+- `README.md`, `QUICKSTART.md`, `TeknoParrot-Manager-README.txt`, `TeknoParrot-Manager-QuickStart.txt`: only if user-facing progress wording is stale.
+- `docs/remediation/PR-321-current-slice.md`
+- `docs/remediation/PR-321-control-board.md`
+- `docs/remediation/PR-321-reconciliation.md`
+- permanent procedure gate only if required to enforce this slice ID.
 
 ## Runtime proof required
 
-None authorized in this slice. Owner runtime proof still requires a freshly built package tied to an exact source SHA and a checklist covering LaunchBox Back, HyperSpin normal completion, invalid choice reprompting, and Support `O/B`.
+None authorized. Owner runtime proof requires a freshly built package tied to the final source SHA and a packaged operation matrix.
 
 ## Stop condition
 
-Stop after the finite-choice helper, feasible finite-choice routes, exhaustive prompt classification, focused source/behavior tests, control-board mapping, reconciliation hunk mapping, and expected-fail gate evidence are current. Do not claim global ID 32 closed while stateful picker and owner-runtime evidence remain outstanding.
+Stop if a concrete path needs new product behavior beyond the contract, if tests fail for a non-obvious reason, or if package/runtime proof is required to distinguish source correctness from host behavior.
 
 ## Forbidden actions
 
-No commit, push, package, release, certification, wiki, owner smoke, ReShade ownership/accounting work, controls work, ARCADE/#323 work, or broad picker redesign.
-
-## Gate expectations
-
-The gate must pass the new slice-ID and prompt-contract checks while failing closed for unresolved `NOT FIXED` rows, `SOURCE FIXED; OWNER RUNTIME NEEDED` rows, stale candidate identity, and absent owner-runtime proof.
+No commit, push, package, release, certification, wiki, owner smoke, ReShade ownership/accounting work, controls work, ARCADE/#323 work, or unrelated prompt redesign.

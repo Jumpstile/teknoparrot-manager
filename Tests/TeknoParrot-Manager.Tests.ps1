@@ -1117,6 +1117,18 @@ Describe "Prompt.Core fixed choice routes" {
         $supportChoiceIndex | Should -BeGreaterOrEqual 0
         $openFolderIndex | Should -BeGreaterThan $supportChoiceIndex
     }
+
+    It "documents specialized stateful and non-enumerated prompt boundaries" {
+        $source = $script:ProductionSource
+        foreach ($functionName in @('Select-GamesInteractive', 'Select-GamesInteractiveCombined', 'Read-TpmReShadeTerminalProfile', 'Invoke-CrosshairSetup')) {
+            $start = $source.IndexOf(("function {0} " -f $functionName), [StringComparison]::Ordinal)
+            $start | Should -BeGreaterOrEqual 0
+        }
+        $source | Should -Match 'Read-TpmStagingFolder'
+        $source | Should -Match 'Read-Host.*-AsSecureString'
+        $source | Should -Match 'Type YES'
+        $source | Should -Match 'Type REMOVE'
+    }
 }
 Describe "Read-MainMenuChoiceResponsive redirected-input handling (issue #135)" {
     # Confirms the main menu prompt never enters the [Console]::KeyAvailable
@@ -2772,6 +2784,31 @@ Describe "Expand-ZipFileSafe" {
         Mock Write-TpmCompactExtractionProgress {}
         { Expand-ZipFileSafe -ZipPath $zip -DestDir $dest } | Should -Throw "*escapes destination folder*"
         Should -Invoke Write-TpmCompactExtractionProgress -Times 1 -ParameterFilter { $Complete }
+    }
+}
+
+Describe "PR #321 Progress.Core source inventory" {
+    It "keeps long-running paths on compact progress or structured workflow status" {
+        $source = $script:ProductionSource
+        $source | Should -Not -Match '\bWrite-Progress\b'
+        foreach ($workflowKey in @('SupportPackage', 'FFBSetup', 'HealthCheck', 'PostgresSetup', 'ReShadeSetup', 'DgVoodoo2Setup', 'BepInEx')) {
+            $source | Should -Match ("WorkflowKey\s+'{0}'" -f [regex]::Escape($workflowKey))
+        }
+        $source | Should -Match 'Write-TpmCompactExtractionProgress -Phase Scanning'
+        $source | Should -Match 'Write-TpmCompactExtractionProgress -Phase Repairing'
+        $source | Should -Match 'Write-TpmDownloadProgress'
+    }
+
+    It "classifies external waits as bounded waiting rather than fake percentage progress" {
+        $source = $script:ProductionSource
+        $profileWait = [regex]::Match($source, '(?s)function Ensure-TeknoParrotProfilesReady \{.*?\n\}').Value
+        $processWait = [regex]::Match($source, '(?s)function Wait-TpmForProcessClose \{.*?\n\}').Value
+        $profileWait | Should -Match 'AddSeconds\(120\)'
+        $profileWait | Should -Match 'needs TeknoParrot to finish its first setup'
+        $processWait | Should -Match 'AddSeconds\(30\)'
+        $processWait | Should -Match 'will not force-close'
+        $profileWait | Should -Not -Match 'Write-Progress'
+        $processWait | Should -Not -Match 'Write-Progress'
     }
 }
 

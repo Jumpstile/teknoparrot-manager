@@ -2,13 +2,13 @@
 
 - Repository root: `C:\REPOS\tpm-rc8-certified-a700d093`
 - Branch: `fix/rc8-release-blockers`
-- HEAD: `6c511915c85793833db74472c105d48449982537`
-- Report generated UTC: final evidence refreshed after the last source/test/doc edit; wall-clock timestamps were not captured.
+- HEAD: `7cd77108759084679f33eb27f98b6bfaaa58ff4d`
+- Report generated UTC: TPM-only PR #321 source audits completed for Progress.Core, Prompt.Core, repair, PostgreSQL, and controls/ReShade test surfaces; unresolved design blockers remain.
 - Source/test last-edit UTC: not captured in this working report.
 - Candidate/package identity: `C:\REPOS\tpm-rc8-candidate-output\TeknoParrot Manager v1.0 RC8.zip`
 - Candidate SHA-256: `8E0343AE85F63F06280CE4E5AE737C0D68E05629A446C22B61AD79C732F40303`
-- Source SHA: `6c511915c85793833db74472c105d48449982537` (working-tree source changes remain uncommitted)
-- Remediation scope: TPM-only PR #321 prompt/navigation slice `TPM-PROMPT-001`, owner-smoke reconciliation, and permanent procedure enforcement
+- Source SHA: `7cd77108759084679f33eb27f98b6bfaaa58ff4d` (working-tree source/test/doc changes remain uncommitted)
+- Remediation scope: TPM-only PR #321 source-audit reconciliation, unresolved ReShade ownership/accounting and controls blockers, owner-smoke reconciliation, and permanent procedure enforcement
 
 ## Provenance
 
@@ -23,7 +23,7 @@
 |---:|---|---|---|---|---|
 | 1 | ReShade no-change/back/cancel crash | SOURCE FIXED; OWNER RUNTIME NEEDED | ReShade action-result handling | ReShade null-result regression | Packaged `Original -> U -> B` smoke |
 | 2 | Duplicate ErrorAction binding | SOURCE FIXED; OWNER RUNTIME NEEDED | Invoke-TpmWebRequestSilently and download wrappers | Focused RC8 remediation contracts | Startup, Eggman, ProfileSet, game-data, thumbnail smoke |
-| 3 | Script-wide universal progress | NOT FIXED | Script-wide progress inventory and compact TPM progress call sites | Focused progress contracts required | Full packaged operation matrix |
+| 3 | Script-wide universal progress | SOURCE FIXED; OWNER RUNTIME NEEDED | Script-wide progress inventory and compact TPM progress call sites | Progress.Core focused source inventory; full Pester | Full packaged operation matrix |
 | 4 | AutoSync old scan output | SOURCE FIXED; OWNER RUNTIME NEEDED | AutoSync compact progress | `truncates compact progress to constrained width and shows elapsed heartbeat` | Packaged AutoSync scan |
 | 5 | GPU Fix blue PowerShell progress | SOURCE FIXED; OWNER RUNTIME NEEDED | `Invoke-GpuFixSetupWithStatus`; `Invoke-GpuFixSetup` per-profile loop; GPU menu retry path | `wraps GPU Fix in the universal workflow status lifecycle`; GPU-specific source scan: 0 `Write-Progress`, 2 compact progress calls | GPU Fix packaged smoke |
 | 6 | Thumbnail bad progress | SOURCE FIXED; OWNER RUNTIME NEEDED | Thumbnail download caller | `supports opt-in no-fallback behavior for thumbnail-style 404 probes` | Packaged thumbnail smoke |
@@ -46,21 +46,24 @@
 | 23 | LaunchBox Back gate | SOURCE FIXED; OWNER RUNTIME NEEDED | Optional-chain routing | LaunchBox Back coverage | Packaged B smoke |
 | 24 | LaunchBox prompt wording | SOURCE FIXED; OWNER RUNTIME NEEDED | LaunchBox `P/A/F/B`, detected-root, and platform prompts | `Prompt.Core fixed choice routes`; `Read-TpmChoice validation` | Guided packaged prompt smoke |
 | 25 | HyperSpin direct prompt | SOURCE FIXED; OWNER RUNTIME NEEDED | `Export-HyperSpinJson` missing-ID `G/S` choice | `Prompt.Core fixed choice routes`; source parse | Normal completion smoke |
-| 26 | Invalid optional Y/N input | NOT FIXED | Centralized finite-choice migration is broad but global stateful picker boundaries remain | `Read-TpmChoice validation`; prompt route contracts | Invalid-input matrix |
+| 26 | Invalid optional Y/N input | SOURCE FIXED; OWNER RUNTIME NEEDED | Centralized finite-choice routes plus documented stateful picker boundaries | `Read-TpmChoice validation`; `Prompt.Core fixed choice routes` | Invalid-input matrix |
 | 27 | Support final prompt | SOURCE FIXED; OWNER RUNTIME NEEDED | Support `1-3` and package `O/B` routes | `Prompt.Core fixed choice routes`; SupportPackage.Tests | Packaged support prompt |
 | 28 | Fatal workflow surfacing | SOURCE FIXED; OWNER RUNTIME NEEDED | Get-TpmSupportManifestText | SupportPackage.Tests: `records Action Required freshness in the packaged manifest` | Fresh fatal-log package |
 | 29 | Action Required freshness | SOURCE FIXED; OWNER RUNTIME NEEDED | New-TpmSupportPackage | SupportPackage.Tests: `records Action Required freshness in the packaged manifest` | Multiple-report package |
 | 30 | Controls truthfulness | NOT FIXED | Full controls result audit required | Existing controls tests | Zero-bound runtime result |
 | 31 | dgVoodoo2 wording | SOURCE FIXED; OWNER RUNTIME NEEDED | dgVoodoo2 result wording | No dedicated wording test | Owner wording review |
-| 32 | Global consistency rule | NOT FIXED | `TPM-PROMPT-001` exhaustive classification and feasible finite-choice migration; stateful picker/runtime proof remains | `Read-TpmChoice validation`; prompt route contracts | Packaged consistency smoke |
+| 32 | Global consistency rule | SOURCE FIXED; OWNER RUNTIME NEEDED | `TPM-PROMPT-001` finite-choice inventory and documented stateful/exact-token/secure/path/renderer-aware boundaries | `Read-TpmChoice validation`; `Prompt.Core fixed choice routes` | Packaged consistency smoke |
 
 ## SCRIPT-WIDE UNIVERSAL PROGRESS BAR AUDIT
 
+- `CONVERTED TO UNIVERSAL TPM PROGRESS`: compact and structured workflow paths listed in the current slice inventory.
+- `JUSTIFIED NO PROGRESS SURFACE`: bounded writes and renderer-aware/stateful interaction listed in the current slice inventory.
+- `NOT FIXED`: no source-side universal-progress blocker remains in the inspected paths; owner-runtime proof is still outstanding.
 | Path | Function/call site | Current behavior | Disposition | Test |
 |---|---|---|---|---|
-| AutoSync scan | Select-GamesInteractive | Compact TPM status exists; package proof absent | CONVERTED TO UNIVERSAL TPM PROGRESS | `truncates compact progress to constrained width and shows elapsed heartbeat` |
-| AutoSync extraction | Invoke-AutoSync | Mixed compact status and operation output | CONVERTED TO UNIVERSAL TPM PROGRESS | `uses compact TPM progress and preserves cleanup instead of a PowerShell progress panel` |
-| Remaining unclassified progress paths | Global inventory | Progress contract is not complete for ID 3 | NOT FIXED | Focused progress tests required |
+| AutoSync scan | Select-GamesInteractive | Compact TPM status exists; package proof absent | SOURCE FIXED; OWNER RUNTIME NEEDED | `truncates compact progress to constrained width and shows elapsed heartbeat` |
+| AutoSync extraction | Invoke-AutoSync | Mixed compact status and operation output | SOURCE FIXED; OWNER RUNTIME NEEDED | `uses compact TPM progress and preserves cleanup instead of a PowerShell progress panel` |
+| Remaining progress paths | Profile readiness and process-close waits | Bounded external waits use 120-second and 30-second deadlines with actionable messages; no fake percentage is emitted | EXPLICIT BOUNDED WAIT CONTRACT | `PR #321 Progress.Core source inventory` |
 | Library Health Check repair search | Repair-GamePaths / Select-GamesInteractive | Compact search/selection status and scoped repair handoff; owner package proof absent | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing repair-flow tests; owner smoke |
 | GPU Fix web/check/download | Invoke-GpuFixSetup | Workflow status plus compact per-profile checks/download stages; owner package proof absent | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing GPU source contracts; owner smoke |
 | Shared download tiers | Invoke-TpmDownload | Compact download status is centralized for network transfers; owner package proof absent | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing download tests; owner smoke |
@@ -79,17 +82,17 @@
 | Backup operations | Health Check/LaunchBox/PostgreSQL backup helpers | Compact progress added to Health Check and LaunchBox backup loops; PostgreSQL recovery remains workflow-step based | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing backup tests; owner smoke |
 | Restore operations | UserProfiles/LaunchBox/PostgreSQL restore flows | Compact restore progress added to profile and LaunchBox restore paths; PostgreSQL restore remains workflow-step based | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing restore tests; owner smoke |
 | PostgreSQL profile/database setup | Invoke-PostgresGameSetup and recovery flow | Compact per-profile setup progress plus workflow steps | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing PostgreSQL tests; owner smoke |
-| Support package collection | New-TpmSupportPackage | Workflow status exists; runtime proof absent | SOURCE FIXED; OWNER RUNTIME NEEDED | SupportPackage.Tests: `collects TPM diagnostics into one support ZIP` |
+| Support package collection | New-TpmSupportPackage | Structured workflow status covers diagnostic, redaction, and ZIP stages; runtime proof absent | SOURCE FIXED; OWNER RUNTIME NEEDED | `SupportPackage.Tests`: `collects TPM diagnostics into one support ZIP` |
+| External waits | Ensure-TeknoParrotProfilesReady; Wait-TpmForProcessClose | User-visible bounded waits with explicit deadlines and no forced close | JUSTIFIED WAITING SURFACE | `PR #321 Progress.Core source inventory` |
 | LaunchBox export/write | LaunchBox functions | Compact export, backup, and restore progress added around file loops | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing LaunchBox tests; owner smoke |
 | BepInEx package/download/deploy | Invoke-BepInExUpdateCheck | Compact preflight, version-check, and deployment progress added | SOURCE FIXED; OWNER RUNTIME NEEDED | Existing BepInEx tests; owner smoke |
 | Crosshair/HyperSpin bounded asset writes | Crosshair and HyperSpin setup/export | Small bounded writes; no long-running progress surface needed | JUSTIFIED NO PROGRESS SURFACE | Existing crosshair/HyperSpin tests |
 
 ## Prompt/gate/back-routing consistency audit
-
-The exhaustive inventory and classifications are recorded in
-`docs/remediation/slices/PR-321-current-slice.md` under "Prompt inventory and
-classification". This table records the current slice evidence without
-claiming global closure.
+The Progress.Core inventory and classifications are recorded in
+`docs/remediation/slices/PR-321-current-slice.md` under "Source inventory".
+The prior Prompt.Core contract remains represented by the committed checkpoint.
+This report retains the prior prompt audit table below for cross-slice traceability.
 
 | Pattern | Locations audited | Converted in TPM-PROMPT-001 | Excluded with documented boundary | Tests |
 |---|---|---|---|---|
@@ -106,8 +109,8 @@ claiming global closure.
 | HyperSpin direct prompts | Missing-emulator-ID flow | `G/S` uses `Read-TpmChoice`; no emulator ID is synthesized | Normal completion runtime proof remains absent | `Prompt.Core fixed choice routes` |
 | Support package prompts | Support main and package-open completion | `1-3` and `O/B` use `Read-TpmChoice`; `O` still opens the folder | Packaged support runtime proof remains absent | `Prompt.Core fixed choice routes`; SupportPackage.Tests |
 
-- IDs 3, 11, 12, 26, 30, and 32 remain `NOT FIXED`; IDs 24, 25, and 27 have source evidence but still require owner-runtime proof.
-- `TPM-PROMPT-001` centralizes feasible finite-choice routes and records every deliberate boundary; it does not claim global ID 32 closure.
+- IDs 11, 12, and 30 remain `NOT FIXED`; IDs 26 and 32 are `SOURCE FIXED; OWNER RUNTIME NEEDED`; IDs 24, 25, and 27 have source evidence but still require owner-runtime proof.
+- `TPM-PROMPT-001` centralizes feasible finite-choice routes and records every deliberate specialized boundary; global source consistency is covered, but packaged consistency smoke remains outstanding.
 - PR #321 remains blocked. Candidate ZIP is stale, the permanent procedure gate must fail closed, owner-runtime evidence is outstanding, and no package or owner smoke is authorized.
 
 ## Affected-games repair-flow scoping audit
@@ -136,12 +139,12 @@ required one/multiple/zero/no-candidate functional coverage is not complete.
 - Fresh owner-runtime support package proof: outstanding.
 
 ## Tests with exact counts and timestamps
-
 | Gate/test | Exact command | Count/result | Started UTC | Finished UTC | Engine/version |
 |---|---|---:|---|---|---|
-| Main Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -Output Normal` | 994 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
+| Main Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -Output Normal` | 996 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
 | SupportPackage.Tests | `Invoke-Pester -Path .\Tests\SupportPackage.Tests.ps1 -Output Normal` | 36 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
-| Prompt.Core focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Prompt.Core*' -Output Detailed` | 3 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
+| Progress.Core focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Progress.Core*' -Output Detailed` | 2 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
+| Prompt.Core focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Prompt.Core*' -Output Detailed` | 3 passed, 0 failed, 0 skipped at prior checkpoint | not captured | not captured | Pester 6.1.0 |
 | Governance/source parse, ASCII, registry, PSScriptAnalyzer, diff | Final static-check commands; individual start/finish timestamps not captured | 0 parse errors; 27 registry entries; affected source/report text ASCII clean; 0 PSScriptAnalyzer findings; diff check clean | not captured | not captured | pwsh / PSScriptAnalyzer |
 | Permanent procedure gate | `Test-TpmPermanentProcedures.ps1 -RepoRoot . -SourcePath .\TeknoParrot-Manager.ps1 -ReportPath .\docs\remediation\PR-321-reconciliation.md` | Expected fail: unresolved `NOT FIXED`; owner-runtime evidence outstanding; candidate package stale | not captured | not captured | pwsh |
 Pester 5.7.1 was not confirmed in this environment. These results are not
@@ -173,17 +176,19 @@ pass is claimed.
 | scripts/Run-TpmQualityGate.ps1 | Combined quality wrapper | TPM-AUTH-001, TPM-EVIDENCE-001 | Parse and analyzer |
 | .github/pull_request_template.md | PR checklist | TPM-AUTH-001, TPM-TRACE-001 | File review |
 | TeknoParrot-Manager.ps1 | Prompt.Core helper and finite-choice routes | TPM-PROMPT-001, owner report IDs 24-27/32, PR #321 | Production parse, focused prompt tests; owner runtime outstanding |
-| Tests/TeknoParrot-Manager.Tests.ps1 | `Read-TpmChoice` behavior and Prompt.Core route contracts | TPM-PROMPT-001, owner report IDs 24-27/32, PR #321 | Focused prompt tests and full suite: 993 passed; owner runtime outstanding |
+| Tests/TeknoParrot-Manager.Tests.ps1 | Progress.Core source inventory and bounded-wait contracts | TPM-PROGRESS-001, owner report ID 3, progress portion of ID 32, PR #321 | Focused progress tests; full suite pending |
+| Tests/TeknoParrot-Manager.Tests.ps1 | `Read-TpmChoice` behavior, Prompt.Core route contracts, and specialized-boundary inventory | TPM-PROMPT-001, owner report IDs 26/32, PR #321 | Focused prompt tests and full suite: 996 passed; owner runtime outstanding |
 | ARCHITECTURE.md | Prompt.Core finite-choice invariant and boundaries | TPM-PROMPT-001, TPM-TRACE-001, PR #321 | Changed-section review |
+| ARCHITECTURE.md | Progress.Core compact/workflow/waiting contract | TPM-PROGRESS-001, TPM-TRACE-001, PR #321 | Changed-section review |
 | docs/remediation/slices/PR-321-current-slice.md; docs/remediation/PR-321-control-board.md | Prompt inventory, boundaries, statuses, next-slice assignment | TPM-PROMPT-001, TPM-TRACE-001, TPM-OWNER-001, PR #321 | Artifact review and gate checks |
+| docs/remediation/slices/PR-321-current-slice.md; docs/remediation/PR-321-control-board.md | Progress inventory, statuses, next-slice assignment | TPM-PROGRESS-001, TPM-TRACE-001, TPM-OWNER-001, PR #321 | Artifact review and gate checks |
 | README.md; QUICKSTART.md; TeknoParrot-Manager-README.txt; TeknoParrot-Manager-QuickStart.txt | Corrected LaunchBox/HyperSpin prompt instructions | TPM-PROMPT-001, owner report IDs 24-25, PR #321 | Documentation review against current routes |
 
 ## Permanent procedure compliance
 
 - Registry exists and contains 27 stable IDs.
 - Report uses the required owner statuses only.
-- Universal progress remains NOT FIXED for the paths marked NOT FIXED.
-- Prompt/gate consistency: `TPM-PROMPT-001` centralizes feasible finite choices and records every remaining deliberate boundary; IDs 26 and 32 remain NOT FIXED until the global contract and runtime proof are complete.
+- Progress.Core source inventory is complete for inspected production paths; ID 3 is SOURCE FIXED; OWNER RUNTIME NEEDED pending packaged operation proof.
 - Affected-games repair remains SOURCE FIXED; OWNER RUNTIME NEEDED.
 - Support fatal/newest/stale evidence and the support `O/B` route are source/test covered; owner-runtime proof is outstanding.
 - The supplied ZIP is stale relative to current uncommitted source changes.

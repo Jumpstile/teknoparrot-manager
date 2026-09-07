@@ -1886,6 +1886,20 @@ acknowledged. The existing menu clear/repaint path is never used as failure
 acknowledgement. Workflow start rejects a second active context, and every
 workflow branch must close or acknowledge/finalize before returning to the menu.
 
+## Progress.Core source contract (TPM-PROGRESS-001)
+
+Every user-facing long-running operation uses one of three honest surfaces:
+
+- known-total work uses `Write-TpmCompactExtractionProgress`;
+- network transfers use `Write-TpmDownloadProgress`, including final cleanup;
+- multi-step optional flows use structured `New-TpmWorkflowStatusContext` steps,
+  waiting states, failure recovery, and lifecycle closure.
+
+External waits are not represented as fake percentages. `Ensure-TeknoParrotProfilesReady`
+and `Wait-TpmForProcessClose` use bounded deadlines and actionable messages. Small
+bounded writes and renderer-aware selection remain documented no-progress surfaces.
+The production script must not use PowerShell `Write-Progress`.
+
 ## Prompt.Core finite-choice contract (TPM-PROMPT-001)
 
 `Read-TpmYesNo` owns ordinary Y/N decisions. `Read-TpmChoice` owns finite
