@@ -1858,6 +1858,26 @@ function Read-TpmYesNo {
     } while ($answer -notin @('Y', 'N'))
     return $answer
 }
+function Read-TpmChoice {
+    param(
+        [Parameter(Mandatory)][string]$Prompt,
+        [Parameter(Mandatory)][string[]]$Choices,
+        [string]$Default = ''
+    )
+    $allowed = @($Choices | ForEach-Object { ([string]$_).Trim().ToUpperInvariant() } | Where-Object { $_ })
+    if ($allowed.Count -eq 0) { throw 'Read-TpmChoice requires at least one choice.' }
+    if ($Default -and $allowed -notcontains $Default.Trim().ToUpperInvariant()) {
+        throw "Invalid choice default '$Default'."
+    }
+    $choiceText = $allowed -join ', '
+    do {
+        $answer = (Read-HostSafe $Prompt -Default $Default).Trim().ToUpperInvariant()
+        if ($answer -notin $allowed) {
+            Write-Host ("  Invalid choice. Choose {0}." -f $choiceText) -ForegroundColor Yellow
+        }
+    } while ($answer -notin $allowed)
+    return $answer
+}
 
 
 function Read-PathWithBrowse {
@@ -4174,7 +4194,7 @@ function Select-RegisteredGamesInteractive {
     Write-Host "    A) All $($profiles.Count) registered game(s)" -ForegroundColor White
     Write-Host "    L) Browse and select specific games" -ForegroundColor White
     Write-Host ""
-    $pick = (Read-HostSafe "    Enter A or L").ToUpper()
+    $pick = Read-TpmChoice -Prompt "    Enter A or L" -Choices @('A', 'L')
     if ($pick -eq "A") { return $profiles }
 
     $pageSize = 20
@@ -7550,7 +7570,7 @@ function Invoke-ReShadeSetup {
     }
     $selectedProfile = $chooserResult.SelectedProfile
     Write-Log ("ReShade profile chooser: selected {0}; explicit confirmation still required." -f $selectedProfile.ProfileId)
-    $customPresetChoice = (Read-HostSafe ("  Use the selected ReShade profile?`n  ({0} will be applied. Choose a custom ReShade .ini preset only if you already have one.)`n`n  [Y] Yes, use {0}  [S] Custom preset  [B] Back`n  Choice (default Y)" -f $selectedProfile.FriendlyName) -Default 'Y').Trim().ToUpper()
+    $customPresetChoice = Read-TpmChoice -Prompt ("  Use the selected ReShade profile?`n  ({0} will be applied. Choose a custom ReShade .ini preset only if you already have one.)`n`n  [Y] Yes, use {0}  [S] Custom preset  [B] Back`n  Choice (default Y)" -f $selectedProfile.FriendlyName) -Choices @('Y', 'S', 'B') -Default 'Y'
     if ($customPresetChoice -eq 'S') {
         $pInp = Read-PathWithBrowse "  Path to your ReShade preset (.ini) file" -Mode File -FileFilter "ReShade preset (*.ini)|*.ini|All files (*.*)|*.*"
         $customPath = Resolve-ReShadeCustomPresetPath -InputPath $pInp
@@ -7607,17 +7627,15 @@ function Invoke-ReShadeSetup {
     $restoreSelections = @{}
     $allRegisteredGames = @(Get-ChildItem -LiteralPath $UserProfilesDir -Filter '*.xml' -File -ErrorAction SilentlyContinue | Where-Object { $_.Directory.Name -ne 'FullBackup' })
     if ($selectedGames.Count -gt 1) {
-        $bulkChoice = ''
         do {
             Write-Host ("  Apply {0} to all {1} selected games?" -f $selectedProfile.FriendlyName, $selectedGames.Count) -ForegroundColor Cyan
             Write-Host '  [Y] Yes, apply to all'
             Write-Host '  [S] Select games one by one'
             Write-Host '  [B] Back'
             Write-Host '  [D] Details'
-            $bulkChoice = (Read-HostSafe '  Choice, default Y' -Default 'Y').Trim().ToUpper()
+            $bulkChoice = Read-TpmChoice -Prompt '  Choice, default Y' -Choices @('Y', 'S', 'B', 'D') -Default 'Y'
             if ($bulkChoice -eq 'D') { Write-Host ("  Profile: {0} -- {1}" -f $selectedProfile.FriendlyName, $selectedProfile.Description) -ForegroundColor DarkGray }
-            elseif ($bulkChoice -notin @('Y', 'S', 'B')) { Write-Host '  Invalid choice. Choose Y, S, B, or D.' -ForegroundColor Yellow }
-        } while ($bulkChoice -notin @('Y', 'S', 'B'))
+        } while ($bulkChoice -eq 'D')
         if ($bulkChoice -eq 'B') { return }
         $bulkApply = ($bulkChoice -eq 'Y')
     }
@@ -7640,9 +7658,9 @@ function Invoke-ReShadeSetup {
                 Write-Host '  [S] Select games manually'
                 Write-Host '  [D] Details'
                 Write-Host '  [B] Back'
-                $conflictChoice = (Read-HostSafe '  Choice, default A' -Default 'A').Trim().ToUpper()
+                $conflictChoice = Read-TpmChoice -Prompt '  Choice, default A' -Choices @('A', 'K', 'S', 'B', 'D') -Default 'A'
                 if ($conflictChoice -eq 'D') { Write-Host '  A changes only TPM-owned profiles; K leaves those game folders untouched.' -ForegroundColor DarkGray }
-            } while ($conflictChoice -notin @('A','K','S','B'))
+            } while ($conflictChoice -eq 'D')
             if ($conflictChoice -eq 'B') { return }
             if ($conflictChoice -eq 'S') { $bulkApply = $false }
             if ($conflictChoice -eq 'K') { foreach ($conflict in $conflicts) { $keepSelections[$conflict.Game.BaseName] = $conflict.Previous } }
@@ -8069,7 +8087,7 @@ function Invoke-DgVoodoo2Setup {
         Write-Host "  Nothing was changed." -ForegroundColor Green
         Write-Host ""
         Write-Host "  [D] Details  [Q] Back to menu"
-        $selectionMode = (Read-HostSafe "  Choice, default Q").ToUpper()
+        $selectionMode = Read-TpmChoice -Prompt "  Choice, default Q" -Choices @('D', 'Q') -Default 'Q'
         if ($selectionMode -eq 'D') {
             Write-Host ""
             Write-Host "  Details" -ForegroundColor Cyan
@@ -8079,7 +8097,7 @@ function Invoke-DgVoodoo2Setup {
             Write-Host "  Advanced dgVoodoo2 selection is available for expert use:" -ForegroundColor Cyan
             Write-Host "  [M] Select specific games"
             Write-Host "  [Q] Back to menu"
-            $selectionMode = (Read-HostSafe "  Choice, default Q").ToUpper()
+            $selectionMode = Read-TpmChoice -Prompt "  Choice, default Q" -Choices @('M', 'Q') -Default 'Q'
         }
         if ($selectionMode -ne 'M') {
             Write-Log "dgVoodoo2 setup: no candidates detected; no changes made."
@@ -8094,7 +8112,7 @@ function Invoke-DgVoodoo2Setup {
         Write-Host "  A) Auto-detected games only ($($detectedMap.Count) game(s) listed above)"
         Write-Host "  M) Pick games manually from the full list"
         Write-Host "  Q) Cancel"
-        $selectionMode = (Read-HostSafe "  Enter A, M, or Q").ToUpper()
+        $selectionMode = Read-TpmChoice -Prompt "  Enter A, M, or Q" -Choices @('A', 'M', 'Q') -Default 'Q'
     }
 
     $targetProfiles = @()
@@ -13536,7 +13554,7 @@ function Invoke-FFBBlasterSetup {
     Write-Host "  Do you have an active, paid TeknoParrot membership? (Y/N)" -ForegroundColor Yellow
     Write-Host "  If you answer N, FFB Blaster will NOT be set up -- it does not work" -ForegroundColor Yellow
     Write-Host "  without one, and there is no point enabling a field that has no effect." -ForegroundColor Yellow
-    $hasSub = (Read-HostSafe "  Answer").ToUpper()
+    $hasSub = Read-TpmYesNo -Prompt "  Do you have an active, paid TeknoParrot membership? (Y/N)"
     if ($hasSub -ne "Y") {
         Write-Host "  Skipped -- no membership." -ForegroundColor DarkGray
         Write-Log "FFBBlaster setup: skipped -- user has no TeknoParrot membership."
@@ -14557,7 +14575,7 @@ function Invoke-BepInExUpdateCheck {
     }
     Write-Host ("  {0} game(s) need BepInEx installation or update:" -f $outdated.Count) -ForegroundColor Cyan
     foreach ($o in @($outdated | Sort-Object Code)) { Write-Host ("    - {0}: {1} -> {2} ({3})" -f $o.Code, $o.Installed, $o.Latest.Version, $o.Architecture) -ForegroundColor DarkGray }
-    $repairChoice = (Read-HostSafe ("  Y Install/update, R repair-reset then install, or N cancel for these {0} game(s)? (Y/R/N)" -f $outdated.Count)).ToUpper()
+    $repairChoice = Read-TpmChoice -Prompt ("  Y Install/update, R repair-reset then install, or N cancel for these {0} game(s)? (Y/R/N)" -f $outdated.Count) -Choices @('Y', 'R', 'N')
     if ($repairChoice -notin @('Y','R')) {
         Write-Log 'BepInEx update check: user declined installation/update/reset.'
         return [pscustomobject]@{ Succeeded = $false; Reason = 'DECLINED' }
@@ -15217,7 +15235,7 @@ function Invoke-StartupUpdateCheck {
     Write-Log "StartupUpdateCheck: update available (v$ScriptVersion -> $($release.TagName))."
 
     while ($true) {
-        $ans = (Read-HostSafe "  Update now, remind me later, or view release notes? (Y/N/V)").ToUpper()
+        $ans = Read-TpmChoice -Prompt "  Update now, remind me later, or view release notes? (Y/N/V)" -Choices @('Y', 'N', 'V')
 
         if ($ans -eq "V") {
             Write-Host ""
@@ -16613,15 +16631,13 @@ function Show-LibraryHealthNextActions {
             Write-Host "  Search checks only known game folders and never changes a valid path." -ForegroundColor DarkGray
             Write-Host "  [D] Details" -ForegroundColor White
             Write-Host "  [B] Back to main menu" -ForegroundColor White
-            $choice = (Read-HostSafe '  Choose R, M, S, D, or B' -Default 'B').Trim().ToUpperInvariant()
+            $choice = Read-TpmChoice -Prompt '  Choose R, M, S, D, or B' -Choices @('R', 'M', 'S', 'D', 'B') -Default 'B'
             if ($choice -eq 'D') {
                 Write-Host ""
                 Write-Host "Details (the health check itself was read-only):" -ForegroundColor Cyan
                 Write-Host ("  Registered: {0}; valid: {1}; broken: {2}; empty: {3}" -f $Result.Registered, @($Result.Valid).Count, @($Result.Broken).Count, @($Result.Empty).Count) -ForegroundColor DarkGray
-            } elseif ($choice -notin @('R', 'M', 'S', 'B')) {
-                Write-Host "  Choose R, M, S, D, or B." -ForegroundColor Yellow
             }
-        } while ($choice -eq 'D' -or $choice -notin @('R', 'M', 'S', 'B'))
+        } while ($choice -eq 'D')
         return $choice
     }
 
@@ -16647,7 +16663,7 @@ function Show-LibraryHealthNextActions {
         Write-Host ""
         Write-Host "  [D] Details" -ForegroundColor White
         Write-Host "  [B] Back to main menu" -ForegroundColor White
-        $choice = (Read-HostSafe '  Choose an action' -Default 'B').Trim().ToUpperInvariant()
+        $choice = Read-TpmChoice -Prompt '  Choose an action' -Choices $allowedChoices -Default 'B'
         if ($choice -eq 'D') {
             Write-Host ""
             Write-Host "Details (the health check itself was read-only):" -ForegroundColor Cyan
@@ -16658,10 +16674,8 @@ function Show-LibraryHealthNextActions {
             Write-Host ("  PostgreSQL setup needed: {0}" -f ((@($Result.PostgresNeeded) -join ', '))) -ForegroundColor DarkGray
             Write-Host ("  Detected GPU vendor: {0}" -f $(if ($Result.DetectedGpuVendor) { $Result.DetectedGpuVendor } else { 'not detected' })) -ForegroundColor DarkGray
             Write-Host ("  Technical log: {0}" -f $Result.LogPath) -ForegroundColor DarkGray
-        } elseif ($choice -notin $allowedChoices) {
-            Write-Host "  Choose one of the listed actions." -ForegroundColor Yellow
         }
-    } while ($choice -eq 'D' -or $choice -notin $allowedChoices)
+    } while ($choice -eq 'D')
     return $choice
 }
 
@@ -17869,7 +17883,7 @@ function Invoke-DeviceSurvey {
             Write-Host "   No lightgun. For gun games, aim with:" -ForegroundColor Yellow
             Write-Host "     1) Trackball       (precise, but no fixed center; you roll to aim)"
             Write-Host "     2) Xbox right stick (smooth and self-centering)"
-            if ((Read-HostSafe "   Choose 1 or 2") -eq "2") {
+            if ((Read-TpmChoice -Prompt "   Choose 1 or 2" -Choices @('1', '2')) -eq "2") {
                 $plan["Lightgun games (no gun)"] = "your Xbox right stick (analog aim)"
             } else {
                 $plan["Lightgun games (no gun)"] = "your trackball (relative/mouse aim)"
@@ -19002,22 +19016,19 @@ function Export-HyperSpinJson {
         Write-Host "  HyperSpin cannot associate exported games with this emulator safely." -ForegroundColor Yellow
         Write-Host "  [G] Show HyperSpin 2 plugin setup guidance" -ForegroundColor Cyan
         Write-Host "  [S] Skip HyperSpin integration" -ForegroundColor Cyan
-        do {
-            $missingIdChoice = (Read-HostSafe '  Choice (G/S)' -Default 'S').Trim().ToUpper()
-            if ($missingIdChoice -eq 'G') {
-                Write-Host "  HyperSpin 2 integration is handled by the TeknoParrot Manager HyperSpin 2 plugin." -ForegroundColor Yellow
-                Write-Host "  The plugin is still in beta and is not bundled with this RC8 package or downloadable by TPM yet." -ForegroundColor Yellow
-                Write-Host "  TPM will not write HyperSpin game associations without a valid emulator ID." -ForegroundColor Yellow
-                Write-Host "  Intended integration layer: the HyperSpin 2 plugin." -ForegroundColor DarkGray
-                Write-Host "  Manual install: copy the TeknoParrot Manager plugin folder into <HyperSpinRoot>\plugins\TeknoParrot Manager" -ForegroundColor DarkGray
-                Write-Host "  Example: E:\HyperSpin\plugins\TeknoParrot Manager" -ForegroundColor DarkGray
-                Write-Host "  Automatic plugin download/install will be considered after the plugin has a published release artifact." -ForegroundColor DarkGray
-                Write-Host "  TPM did not modify HyperSpin files." -ForegroundColor DarkGray
-                Write-Log "HyperSpin export: skipped because emulator id is missing; operator chose guided plugin setup."
-                return 0
-            }
-            if ($missingIdChoice -ne 'S') { Write-Host "  Enter G or S." -ForegroundColor Yellow }
-        } while ($missingIdChoice -notin @('G','S'))
+        $missingIdChoice = Read-TpmChoice -Prompt '  Choice (G/S)' -Choices @('G', 'S') -Default 'S'
+        if ($missingIdChoice -eq 'G') {
+            Write-Host "  HyperSpin 2 integration is handled by the TeknoParrot Manager HyperSpin 2 plugin." -ForegroundColor Yellow
+            Write-Host "  The plugin is still in beta and is not bundled with this RC8 package or downloadable by TPM yet." -ForegroundColor Yellow
+            Write-Host "  TPM will not write HyperSpin game associations without a valid emulator ID." -ForegroundColor Yellow
+            Write-Host "  Intended integration layer: the HyperSpin 2 plugin." -ForegroundColor DarkGray
+            Write-Host "  Manual install: copy the TeknoParrot Manager plugin folder into <HyperSpinRoot>\plugins\TeknoParrot Manager" -ForegroundColor DarkGray
+            Write-Host "  Example: E:\HyperSpin\plugins\TeknoParrot Manager" -ForegroundColor DarkGray
+            Write-Host "  Automatic plugin download/install will be considered after the plugin has a published release artifact." -ForegroundColor DarkGray
+            Write-Host "  TPM did not modify HyperSpin files." -ForegroundColor DarkGray
+            Write-Log "HyperSpin export: skipped because emulator id is missing; operator chose guided plugin setup."
+            return 0
+        }
         Write-Log "HyperSpin export: skipped because emulator id is missing; operator chose Skip."
         return 0
     }
@@ -20436,10 +20447,11 @@ if (-not $tpRoot) {
         for ($i = 0; $i -lt $detected.Count; $i++) {
             Write-Host ("    {0}) {1}" -f ($i + 1), $detected[$i])
         }
-        $pick = (Read-HostSafe "  Enter number to use one, or N to type the path manually")
-        if ($pick -match '^\d+$' -and $pick.Length -le 9) {
+        $rootChoices = @('N') + @($detected | ForEach-Object { [array]::IndexOf($detected, $_) + 1 } | ForEach-Object { [string]$_ })
+        $pick = Read-TpmChoice -Prompt "  Enter number to use one, or N to type the path manually" -Choices $rootChoices -Default 'N'
+        if ($pick -match '^\d+$') {
             $idx = [int]$pick - 1
-            if ($idx -ge 0 -and $idx -lt $detected.Count) { $tpRoot = $detected[$idx] }
+            $tpRoot = $detected[$idx]
         }
     }
     if (-not $tpRoot) {
@@ -20509,7 +20521,7 @@ if (-not $eggmanDatZip -and -not $datFilePath -and -not $Unattended) {
     Write-Host "    D) Download (default)"
     Write-Host "    B) Browse/import a DAT file I already have"
     Write-Host "    N) Skip"
-    $datChoice = (Read-HostSafe "  Choice (D/B/N, default D)" -Default 'D').ToUpper()
+    $datChoice = Read-TpmChoice -Prompt "  Choice (D/B/N, default D)" -Choices @('D', 'B', 'N') -Default 'D'
     $raw = ''   # shared path variable for B and the download-fallback path
 
     if ($datChoice -eq 'D') {
@@ -22307,7 +22319,7 @@ $mode = $null
         [void](Start-TpmWorkflowStatus -Context $restoreStatus)
         [void](Start-TpmWorkflowStep -Context $restoreStatus -StepId 'select' -Activity 'Choosing a backup')
         [void](Set-TpmWorkflowWaiting -Context $restoreStatus -Message 'Choose which backup to restore.' -UserAction 'Enter a backup choice')
-        $restoreChoice = (Read-HostSafe "  Enter 1-3")
+        $restoreChoice = Read-TpmChoice -Prompt "  Enter 1-3" -Choices @('1', '2', '3')
         $restoreResult = $null
         if ($restoreChoice -eq "2") {
             if (-not $lbRoot) {
@@ -22451,10 +22463,7 @@ $mode = $null
                             Write-Host '  [B] Back to the main menu' -ForegroundColor White
                             $repairReCopyRequested = $false
                             $repairChoices = if ($reCopySources.Count -gt 0) { @('S', 'B', 'C') } else { @('S', 'B') }
-                            do {
-                                $searchAgainChoice = (Read-HostSafe ('  Choose {0}' -f ($repairChoices -join ' or ')) -Default 'B').Trim().ToUpperInvariant()
-                                if ($searchAgainChoice -notin $repairChoices) { Write-Host ("  Choose {0}." -f ($repairChoices -join ' or ')) -ForegroundColor Yellow }
-                            } while ($searchAgainChoice -notin $repairChoices)
+                            $searchAgainChoice = Read-TpmChoice -Prompt ('  Choose {0}' -f ($repairChoices -join ' or ')) -Choices $repairChoices -Default 'B'
                             if ($searchAgainChoice -eq 'C') {
                                 $pendingApplyMode = 'AutoSync'
                                 $pendingAutoSyncGames = @($healthResult.Broken)
@@ -22795,7 +22804,7 @@ $mode = $null
                 Write-Host "  [D] Show details"
                 Write-Host "  [O] Open logs/support guidance"
                 Write-Host "  [B] Back to main menu"
-                $backupChoice = (Read-HostSafe "  Choice, default R" -Default 'R').Trim().ToUpper()
+                $backupChoice = Read-TpmChoice -Prompt "  Choice, default R" -Choices @('R', 'I', 'D', 'O', 'B') -Default 'R'
                 [void](Resume-TpmWorkflowStatus -Context $postgresStatus)
                 if ($recoveryEvidenceUnavailable -and $backupChoice -notin @('I','D','O','B')) {
                     Write-Host '  Reinitialize, repair, and password changes are blocked until verified recovery evidence exists.' -ForegroundColor Red
@@ -22840,7 +22849,7 @@ $mode = $null
                 if ($authFailure -and $backupChoice -eq 'X') {
                     Write-Host "  Resetting the PostgreSQL password will change the password for the local postgres database user." -ForegroundColor Yellow
                     Write-Host "  TPM will save the new password securely and use it for the affected games." -ForegroundColor Yellow
-                    $resetConfirm = (Read-HostSafe '  Do you want TPM to reset the local postgres password now? (Y/B)' -Default 'B').Trim().ToUpper()
+                    $resetConfirm = Read-TpmChoice -Prompt '  Do you want TPM to reset the local postgres password now? (Y/B)' -Choices @('Y', 'B') -Default 'B'
                     if ($resetConfirm -ne 'Y') {
                         Write-Host "  Password reset cancelled. Nothing was changed." -ForegroundColor DarkGray
                         continue
@@ -22852,7 +22861,7 @@ $mode = $null
                         if ($resetAttempt.Reason -eq 'PASSWORD_MISMATCH') {
                             Write-Host '  Those two passwords did not match. Nothing changed.' -ForegroundColor Yellow
                             [void](Set-TpmWorkflowWaiting -Context $postgresStatus -Message 'Password was not changed.' -UserAction 'Choose T to retry or B to return to recovery options')
-                            $mismatchChoice = (Read-HostSafe '  [T] Try typing the new password again  [B] Back to PostgreSQL recovery options' -Default 'T').Trim().ToUpper()
+                            $mismatchChoice = Read-TpmChoice -Prompt '  [T] Try typing the new password again  [B] Back to PostgreSQL recovery options' -Choices @('T', 'B') -Default 'T'
                             [void](Resume-TpmWorkflowStatus -Context $postgresStatus)
                             if ($mismatchChoice -eq 'B') {
                                 Write-Host '  Returning to the PostgreSQL recovery options. No backup will be retried.' -ForegroundColor DarkGray
@@ -23115,7 +23124,7 @@ $mode = $null
         Write-Host "  1) Create Support Package"
         Write-Host "  2) Open TPM Logs and Reports"
         Write-Host "  3) Return to the main menu"
-        $supportChoice = (Read-HostSafe "  Choose 1-3").Trim()
+        $supportChoice = Read-TpmChoice -Prompt "  Choose 1-3" -Choices @('1', '2', '3')
         if ($supportChoice -eq '2') {
             $openResult = Open-TpmLogsAndReports -ScriptRoot $PSScriptRoot
             if ($openResult.Succeeded) {
@@ -23158,10 +23167,7 @@ $mode = $null
                 Write-Host "  Next step:" -ForegroundColor Cyan
                 Write-Host "  [O] Open the support package folder" -ForegroundColor White
                 Write-Host "  [B] Back to main menu" -ForegroundColor White
-                do {
-                    $openPackage = (Read-HostSafe '  Choice, default O' -Default 'O').Trim().ToUpperInvariant()
-                    if ($openPackage -notin @('O', 'B')) { Write-Host '  Choose O or B.' -ForegroundColor Yellow }
-                } while ($openPackage -notin @('O', 'B'))
+                $openPackage = Read-TpmChoice -Prompt '  Choice, default O' -Choices @('O', 'B') -Default 'O'
                 if ($openPackage -eq 'O') {
                     try { Start-Process -FilePath 'explorer.exe' -ArgumentList @([System.IO.Path]::GetDirectoryName($supportResult.PackagePath)) -ErrorAction Stop | Out-Null } catch { Write-Host "  Windows could not open the package folder." -ForegroundColor Yellow }
                 }
@@ -23338,7 +23344,7 @@ $mode = $null
         if (-not $reShadeActionPending) {
             Write-Host '  S) Set up ReShade visual enhancements' -ForegroundColor White
             Write-Host '  R) Remove verified TPM-managed ReShade files' -ForegroundColor White
-            $reShadeAction = (Read-HostSafe '  Action (S/R, default S)' -Default 'S').Trim().ToUpperInvariant()
+            $reShadeAction = Read-TpmChoice -Prompt '  Action (S/R, default S)' -Choices @('S', 'R') -Default 'S'
             if ($reShadeAction -eq 'S') { $reShadeAction = 'Select' }
         }
         if ($reShadeAction -eq 'R') {
@@ -23372,7 +23378,7 @@ $mode = $null
                 Write-Host "    D) Download automatically from reshade.me"
                 Write-Host "    B) Browse for a file I already have"
                 Write-Host "    N) Skip"
-                $rsGetChoice = (Read-HostSafe "  Choice (D/B/N)").ToUpper()
+                $rsGetChoice = Read-TpmChoice -Prompt "  Choice (D/B/N)" -Choices @('D', 'B', 'N')
                 $rsGotDll    = $false
                 if ($rsGetChoice -eq 'D') {
                 while (-not $rsGotDll -and $rsGetChoice -eq 'D') {
@@ -23421,7 +23427,7 @@ $mode = $null
                     }
                 if (-not $rsGotDll) {
                     Write-Host '  Automatic ReShade download did not finish.' -ForegroundColor Red
-                    $rsRetryChoice = (Read-HostSafe '  R Retry automatic download / B Use an existing file (advanced) / N Cancel').ToUpper()
+                    $rsRetryChoice = Read-TpmChoice -Prompt '  R Retry automatic download / B Use an existing file (advanced) / N Cancel' -Choices @('R', 'B', 'N')
                     if ($rsRetryChoice -eq 'R') { $rsGetChoice = 'D'; continue }
                     $rsGetChoice = $rsRetryChoice
                 }
@@ -23526,15 +23532,17 @@ $mode = $null
             $reShadeProtectedIssue = $reShadeActionModel.Primary -eq 'ReShade'
             $reShadePathIssue = $reShadeResult -and ($reShadeResult.MissingPath -gt 0 -or $reShadeResult.MissingDevice -gt 0)
             if ($reShadeProtectedIssue) {
+                $reShadeChoices = @('A', 'S', 'D', 'B')
+                if ($reShadePathIssue) { $reShadeChoices = @('A', 'S', 'M', 'D', 'B') }
                 do {
                     Write-Host '  [A] Adopt/replace existing ReShade installs with TPM-managed ReShade' -ForegroundColor White
                     Write-Host '  [S] Select games individually' -ForegroundColor White
                     if ($reShadePathIssue) { Write-Host '  [M] Show missing-path games' -ForegroundColor White }
                     Write-Host '  [D] Details' -ForegroundColor White
                     Write-Host '  [B] Back to main menu' -ForegroundColor White
-                    $reShadePromptChoices = if ($reShadePathIssue) { 'A, S, M, D, or B' } else { 'A, S, D, or B' }
-                    $reShadeChoice = (Read-HostSafe ("  Choose {0}" -f $reShadePromptChoices) -Default 'B').Trim().ToUpperInvariant()
-                    if ($reShadeChoice -eq 'M' -and $reShadePathIssue) { $pendingApplyMode = 'HealthCheck'; $pendingApplyForce = $false; $pendingReShadeAction = 'Select' }
+                    $reShadePromptChoices = $reShadeChoices -join ', '
+                    $reShadeChoice = Read-TpmChoice -Prompt ("  Choose {0}" -f $reShadePromptChoices) -Choices $reShadeChoices -Default 'B'
+                    if ($reShadeChoice -eq 'M') { $pendingApplyMode = 'HealthCheck'; $pendingApplyForce = $false; $pendingReShadeAction = 'Select' }
                     elseif ($reShadeChoice -eq 'A') {
                         $adoptConfirm = Read-TpmYesNo -Prompt '  Confirm adopting/replacing existing ReShade files? (Y/N)' -Default 'N'
                         if ($adoptConfirm -eq 'Y') { $pendingApplyMode = 'ReShadeSetup'; $pendingApplyForce = $false; $pendingReShadeAction = 'Adopt' }
@@ -23544,18 +23552,18 @@ $mode = $null
                     elseif ($reShadeChoice -eq 'D') {
                         foreach ($detail in @($reShadeResult.ProtectedDetails)) { Write-Host ("    {0}" -f $detail) -ForegroundColor Yellow }
                         if ($reShadeResult.ProtectedDetails.Count -eq 0) { Write-Host '    No additional classification detail was recorded.' -ForegroundColor DarkGray }
-                    } elseif ($reShadeChoice -ne 'B') { Write-Host '  Choose A, S, M, D, or B.' -ForegroundColor Yellow }
-                } while ($reShadeChoice -notin @('A','S','M','D','B') -or ($reShadeChoice -eq 'M' -and -not $reShadePathIssue))
+                    }
+                } while ($reShadeChoice -in @('M', 'D'))
             } elseif ($reShadePathIssue) {
+                $reShadeChoices = @('M', 'D', 'B')
                 do {
                     Write-Host '  [M] Show missing-path games' -ForegroundColor White
                     Write-Host '  [D] Details' -ForegroundColor White
                     Write-Host '  [B] Back to main menu' -ForegroundColor White
-                    $reShadeChoice = (Read-HostSafe '  Choose M, D, or B' -Default 'B').Trim().ToUpperInvariant()
+                    $reShadeChoice = Read-TpmChoice -Prompt '  Choose M, D, or B' -Choices $reShadeChoices -Default 'B'
                     if ($reShadeChoice -eq 'M') { $pendingApplyMode = 'HealthCheck'; $pendingApplyForce = $false }
                     elseif ($reShadeChoice -eq 'D') { Write-Host ("    Missing paths: {0}" -f ($reShadeResult.MissingPath + $reShadeResult.MissingDevice)) -ForegroundColor Yellow }
-                    elseif ($reShadeChoice -ne 'B') { Write-Host '  Choose M, D, or B.' -ForegroundColor Yellow }
-                } while ($reShadeChoice -notin @('M','D','B'))
+                } while ($reShadeChoice -eq 'D')
             } else {
                 [void](Read-HostSafe '  Press Enter to acknowledge the ReShade result')
             }
@@ -23594,7 +23602,7 @@ $mode = $null
                 Write-Host "    D) Download automatically from the official GitHub release"
                 Write-Host "    B) Browse for a folder I already have"
                 Write-Host "    N) Skip"
-                $dgGetChoice = (Read-HostSafe "  Choice (D/B/N)").ToUpper()
+                $dgGetChoice = Read-TpmChoice -Prompt "  Choice (D/B/N)" -Choices @('D', 'B', 'N')
                 $dgGotDir    = $false
                 if ($dgGetChoice -eq 'D') {
                 while (-not $dgGotDir -and $dgGetChoice -eq 'D') {
@@ -23626,7 +23634,7 @@ $mode = $null
                         }
                     }
                     if (-not $dgGotDir) {
-                        $dgRetryChoice = (Read-HostSafe '  R Retry automatic download / B Use an existing folder (advanced) / N Cancel').ToUpper()
+                        $dgRetryChoice = Read-TpmChoice -Prompt '  R Retry automatic download / B Use an existing folder (advanced) / N Cancel' -Choices @('R', 'B', 'N')
                         if ($dgRetryChoice -eq 'R') { $dgGetChoice = 'D'; continue }
                         $dgGetChoice = $dgRetryChoice
                     }
@@ -23679,7 +23687,7 @@ $mode = $null
                 Write-Host "  [H] Open 10) Library Health Check for missing paths" -ForegroundColor White
                 Write-Host "  [B] Back to main menu" -ForegroundColor White
                 do {
-                    $dgFailureChoice = (Read-HostSafe '  Choose H or B' -Default 'B').Trim().ToUpperInvariant()
+                    $dgFailureChoice = Read-TpmChoice -Prompt '  Choose H or B' -Choices @('H', 'B') -Default 'B'
                     if ($dgFailureChoice -notin @('H', 'B')) { Write-Host '  Choose H or B.' -ForegroundColor Yellow }
                 } while ($dgFailureChoice -notin @('H', 'B'))
                 if ($dgFailureChoice -eq 'H') {
@@ -23732,12 +23740,14 @@ $mode = $null
         Write-Host "  If it looks wrong or crashes, create a support package and include the log." -ForegroundColor DarkGray
         Write-Host "  For skipped games, return to the main menu and choose 10) Library Health Check to repair saved game paths." -ForegroundColor DarkGray
         $dgHasPathIssue = ($dgResult.MissingPath -gt 0 -or $dgResult.MissingDevice -gt 0)
+        $dgChoices = @('D', 'O', 'B')
+        if ($dgHasPathIssue) { $dgChoices = @('D', 'O', 'H', 'B') }
         do {
             Write-Host "  [D] Details   [O] Open support/log guidance" -ForegroundColor White
             if ($dgHasPathIssue) { Write-Host "  [H] Open 10) Library Health Check for missing paths" -ForegroundColor White }
             Write-Host "  [B] Back to main menu" -ForegroundColor White
-            $dgPromptChoices = if ($dgHasPathIssue) { 'D, O, H, or B' } else { 'D, O, or B' }
-            $dgResultChoice = (Read-HostSafe ("  Choose {0}" -f $dgPromptChoices) -Default 'B').Trim().ToUpperInvariant()
+            $dgPromptChoices = $dgChoices -join ', '
+            $dgResultChoice = Read-TpmChoice -Prompt ("  Choose {0}" -f $dgPromptChoices) -Choices $dgChoices -Default 'B'
             if ($dgResultChoice -eq 'D') {
                 Write-Host "  Details:" -ForegroundColor Cyan
                 foreach ($detail in @($dgResult.DeploymentDetails)) {
@@ -23757,14 +23767,12 @@ $mode = $null
                 Write-Host ("  Support package folder: {0}" -f (Join-Path $PSScriptRoot 'SupportPackages')) -ForegroundColor Cyan
                 Write-Host ("  Technical log: {0}" -f (Join-Path $PSScriptRoot 'TeknoParrot-Manager.log')) -ForegroundColor Cyan
                 Write-Host "  This screen does not create or open a support ZIP." -ForegroundColor DarkGray
-            } elseif ($dgResultChoice -eq 'H' -and $dgHasPathIssue) {
+            } elseif ($dgResultChoice -eq 'H') {
                 $pendingApplyMode = 'HealthCheck'
                 $pendingApplyForce = $false
                 $dgResultChoice = 'B'
-            } elseif ($dgResultChoice -notin @('B', '')) {
-                Write-Host ("  Choose {0}." -f $dgPromptChoices) -ForegroundColor Yellow
             }
-        } while ($dgResultChoice -in @('D', 'O', 'H'))
+        } while ($dgResultChoice -in @('D', 'O'))
         Write-Log "dgVoodoo2 setup complete."
         continue
     }
@@ -23809,15 +23817,17 @@ $mode = $null
             if ($gpuHasPathIssue) { Write-Host "  [H] Open 10) Library Health Check for missing paths" -ForegroundColor White }
             Write-Host "  [R] Run GPU Fix again" -ForegroundColor White
             Write-Host "  [B] Back to main menu" -ForegroundColor White
-            $gpuPromptChoices = if ($gpuHasPathIssue) { 'D, O, H, R, or B' } else { 'D, O, R, or B' }
-            $gpuResultChoice = (Read-HostSafe ("  Choose {0}" -f $gpuPromptChoices) -Default 'B').Trim().ToUpperInvariant()
+            $gpuChoices = @('D', 'O', 'R', 'B')
+            if ($gpuHasPathIssue) { $gpuChoices = @('D', 'O', 'H', 'R', 'B') }
+            $gpuPromptChoices = $gpuChoices -join ', '
+            $gpuResultChoice = Read-TpmChoice -Prompt ("  Choose {0}" -f $gpuPromptChoices) -Choices $gpuChoices -Default 'B'
             if ($gpuResultChoice -eq 'D') {
                 foreach ($detail in @($gpuResult.SkipDetails)) {
                     Write-Host ("  {0}: {1} (technical: {2})" -f $detail.Game, $detail.SavedPath, $detail.Technical) -ForegroundColor DarkGray
                 }
             } elseif ($gpuResultChoice -eq 'O') {
                 Write-Host "  Open the support package or TeknoParrot-Manager.log for the recorded technical details." -ForegroundColor DarkGray
-            } elseif ($gpuResultChoice -eq 'H' -and $gpuHasPathIssue) {
+            } elseif ($gpuResultChoice -eq 'H') {
                 $pendingApplyMode = 'HealthCheck'
                 $pendingApplyForce = $false
                 $gpuResultChoice = 'B'
@@ -23826,10 +23836,8 @@ $mode = $null
                 if (-not $gpuResult) {
                     $gpuResult = [pscustomobject]@{ GpuName = 'Unknown'; GpuVendor = 'Unknown'; Updated = 0; Unchanged = 0; Skipped = 0; MissingPath = 0; MissingDevice = 0; Errors = 1; SkipDetails = @() }
                 }
-            } elseif ($gpuResultChoice -notin @('B', '')) {
-                Write-Host ("  Choose {0}." -f $gpuPromptChoices) -ForegroundColor Yellow
             }
-        } while ($gpuResultChoice -in @('D', 'O', 'H', 'R'))
+        } while ($gpuResultChoice -in @('D', 'O', 'R'))
         continue
     }
 
@@ -23848,10 +23856,7 @@ $mode = $null
             }
             Write-Host "  [H] Open 10) Library Health Check to repair saved paths" -ForegroundColor White
             Write-Host "  [B] Back to main menu" -ForegroundColor White
-            do {
-                $ffbPathChoice = (Read-HostSafe '  Choose H or B' -Default 'B').Trim().ToUpperInvariant()
-                if ($ffbPathChoice -notin @('H', 'B')) { Write-Host '  Choose H or B.' -ForegroundColor Yellow }
-            } while ($ffbPathChoice -notin @('H', 'B'))
+            $ffbPathChoice = Read-TpmChoice -Prompt '  Choose H or B' -Choices @('H', 'B') -Default 'B'
             if ($ffbPathChoice -eq 'H') {
                 $pendingApplyMode = 'HealthCheck'
                 $pendingApplyForce = $false
@@ -23937,17 +23942,16 @@ $mode = $null
                     Write-Host ("  {0}: {1} game(s)" -f $reasonCode, $bepResult.PathReasonCounts[$reasonCode]) -ForegroundColor DarkGray
                 }
             }
-            $bepChoice = ''
             $bepRecovered = $false
-            $bepValidChoices = @('R', 'D', 'O', 'B', '')
-            if ($bepPathIssue) { $bepValidChoices += 'H' }
+            $bepChoices = @('R', 'D', 'O', 'B')
+            if ($bepPathIssue) { $bepChoices += 'H' }
             do {
                 Write-Host "  [R] Try BepInEx repair-reset again" -ForegroundColor White
                 Write-Host "  [D] Show details" -ForegroundColor White
                 Write-Host "  [O] Open support/log guidance" -ForegroundColor White
                 if ($bepPathIssue) { Write-Host "  [H] Open 10) Library Health Check for missing paths" -ForegroundColor White }
-                $bepPromptChoices = if ($bepPathIssue) { 'R, D, O, B, or H' } else { 'R, D, O, or B' }
-                $bepChoice = (Read-HostSafe ("  Choose {0}" -f $bepPromptChoices) -Default 'B').Trim().ToUpperInvariant()
+                $bepPromptChoices = $bepChoices -join ', '
+                $bepChoice = Read-TpmChoice -Prompt ("  Choose {0}" -f $bepPromptChoices) -Choices $bepChoices -Default 'B'
                 if ($bepChoice -eq 'R') {
                     Write-Host "  Starting BepInEx repair-reset again. No success is claimed until verification completes." -ForegroundColor Cyan
                     $bepResult = Invoke-BepInExUpdateCheck -UserProfilesDir $userProfilesDir -CacheDir $bepInExCacheDir -ApprovedGamesRoot $gamesInstallFolder
@@ -23963,8 +23967,8 @@ $mode = $null
                         Write-Host "  BepInEx repair-reset could not complete. No success was claimed." -ForegroundColor Yellow
                     }
                     $bepPathIssue = $bepResult -and ($bepResult.MissingPath -gt 0 -or $bepResult.MissingDevice -gt 0)
-                    $bepValidChoices = @('R', 'D', 'O', 'B', '')
-                    if ($bepPathIssue) { $bepValidChoices += 'H' }
+                    $bepChoices = @('R', 'D', 'O', 'B')
+                    if ($bepPathIssue) { $bepChoices += 'H' }
                     if ($bepResult.Succeeded) {
                         $bepRecovered = $true
                         Write-Host "  BepInEx repair-reset completed and was verified. Returning to the menu." -ForegroundColor Green
@@ -23975,7 +23979,7 @@ $mode = $null
                             Write-Host ("    {0}: {1} game(s)" -f $reasonCode, $bepResult.PathReasonCounts[$reasonCode]) -ForegroundColor DarkGray
                         }
                     }
-                } elseif ($bepChoice -eq 'H' -and $bepPathIssue) {
+                } elseif ($bepChoice -eq 'H') {
                     $pendingApplyMode = 'HealthCheck'
                     $pendingApplyForce = $false
                     $bepChoice = 'B'
@@ -23995,10 +23999,8 @@ $mode = $null
                     Write-Host ("  Support package folder: {0}" -f (Join-Path $PSScriptRoot 'SupportPackages')) -ForegroundColor Cyan
                     Write-Host ("  Technical log: {0}" -f (Join-Path $PSScriptRoot 'TeknoParrot-Manager.log')) -ForegroundColor Cyan
                     Write-Host "  This screen does not create or open a support ZIP." -ForegroundColor DarkGray
-                } elseif ($bepChoice -notin $bepValidChoices) {
-                    Write-Host ("  Choose {0}." -f $bepPromptChoices) -ForegroundColor Yellow
                 }
-            } while ($bepChoice -notin @('B', ''))
+            } while ($bepChoice -in @('R', 'D', 'O'))
             if ($bepRecovered) {
                 [void](Acknowledge-TpmWorkflowFailure -Context $bepStatus -FailureId 'bepinex-failed')
                 [void](Start-TpmWorkflowStep -Context $bepStatus -StepId 'apply' -Activity 'Applying the repaired BepInEx state')
@@ -24026,15 +24028,10 @@ $mode = $null
         if (-not $Unattended -and -not $dryRunActive) {
             Write-Host ""
             $previewChoice = ''
-            do {
                 Write-Host '  [P] Preview only -- no changes'
                 Write-Host '  [R] Run now -- may make changes'
                 Write-Host '  [B] Back'
-                $previewChoice = (Read-HostSafe '  Choice, default P' -Default 'P').Trim().ToUpper()
-                if ($previewChoice -notin @('P', 'R', 'B')) {
-                    Write-Host '  Invalid choice. Choose P, R, or B.' -ForegroundColor Yellow
-                }
-            } while ($previewChoice -notin @('P', 'R', 'B'))
+                $previewChoice = Read-TpmChoice -Prompt '  Choice, default P' -Choices @('P', 'R', 'B') -Default 'P'
             if ($previewChoice -eq 'B') { continue }
             $dryRunActive = ($previewChoice -eq 'P')
         }
@@ -24155,7 +24152,7 @@ $mode = $null
                 }
                 Write-Host ""; Write-Host "    R) Choose a different staging folder" -ForegroundColor Cyan
                 Write-Host "    Q) Return to menu" -ForegroundColor Cyan
-                $fix = (Read-HostSafe "  Choice").Trim().ToUpperInvariant()
+                $fix = Read-TpmChoice -Prompt "  Choice" -Choices @('R', 'Q')
                 if ($fix -eq 'R') {
                     $recoveryDefault = Get-TpmSafeStagingFolderDefault `
                         -TeknoParrotRoot $tpRoot -ZipSource $zipSource `
@@ -24181,7 +24178,7 @@ $mode = $null
                 Write-Host ""; Write-Host "    R) Choose a different staging folder" -ForegroundColor Cyan
                 Write-Host "    Z) Choose a different ZIP source folder" -ForegroundColor Cyan
                 Write-Host "    Q) Return to menu" -ForegroundColor Cyan
-                $fix = (Read-HostSafe "  Choice").Trim().ToUpperInvariant()
+                $fix = Read-TpmChoice -Prompt "  Choice" -Choices @('R', 'Z', 'Q')
                 if ($fix -eq 'R') {
                     Write-Host ("  New staging folder must differ from: {0}" -f $zipSource) -ForegroundColor DarkCyan
                     $recoveryDefault = Get-TpmSafeStagingFolderDefault `
@@ -24224,7 +24221,7 @@ $mode = $null
                 }
                 Write-Host ""; Write-Host "    R) Choose a different staging folder" -ForegroundColor Cyan
                 Write-Host "    Q) Return to menu" -ForegroundColor Cyan
-                $fix = (Read-HostSafe "  Choice").Trim().ToUpperInvariant()
+                $fix = Read-TpmChoice -Prompt "  Choice" -Choices @('R', 'Q')
                 if ($fix -eq 'R') {
                     $recoveryDefault = Get-TpmSafeStagingFolderDefault `
                         -TeknoParrotRoot $tpRoot -ZipSource $zipSource `
@@ -24599,7 +24596,7 @@ if ($duplicateConflicts.Count -gt 0 -and -not $Unattended) {
             Write-Host ("  Profile          : {0}" -f $code) -ForegroundColor Yellow
             Write-Host ("  Currently set to : {0}" -f $currentExe) -ForegroundColor DarkGray
             Write-Host ("  Conflicting copy : {0}" -f $info.Exe) -ForegroundColor DarkGray
-            $pick = (Read-HostSafe "  [K]eep current / [S]witch to conflicting copy / [Q]uit resolving").ToUpper()
+            $pick = Read-TpmChoice -Prompt "  [K]eep current / [S]witch to conflicting copy / [Q]uit resolving" -Choices @('K', 'S', 'Q')
             if ($pick -eq "Q") { break }
             if ($pick -eq "S") {
                 try {
@@ -24643,11 +24640,10 @@ if ($registrationFolders.Count -gt 0 -and -not $dryRunActive) {
     Write-Host ""
     Write-Host ("{0} was added. TeknoParrot Manager can now check your library for related setup tasks." -f $newGameLabel) -ForegroundColor Green
     Write-Host "  [N] New game only (default)" -ForegroundColor Cyan
-    Write-Host "  [A] Check all games" -ForegroundColor Yellow
+    Write-Host "  [A] Check all games" -ForegroundColor Cyan
     Write-Host "  [B] Back" -ForegroundColor Cyan
-    $maintenanceChoice = (Read-HostSafe "  Choice (N/A/B)" -Default "N").Trim().ToUpper()
-    if ($maintenanceChoice -notin @('N','A','B','')) { $maintenanceChoice = 'N' }
-    if ($maintenanceChoice -in @('N','')) {
+    $maintenanceChoice = Read-TpmChoice -Prompt "  Choice (N/A/B)" -Choices @('N', 'A', 'B') -Default 'N'
+    if ($maintenanceChoice -eq 'N') {
         Write-Log "AutoSync: one-game maintenance scope = New game only."
         Write-Host "  New game only selected. Whole-library maintenance was not run." -ForegroundColor Green
         Write-Host "  Registration complete: $($result.Registered.Count) new game(s)." -ForegroundColor Green
@@ -24939,14 +24935,12 @@ if ($dryRunActive) {
     Write-Host "  [F] Create manual import/reference file -- no LaunchBox write" -ForegroundColor White
     Write-Host "  [B] Back to main menu" -ForegroundColor White
     do {
-        $lbChoice = (Read-HostSafe '  Choice, default P' -Default 'P').Trim().ToUpperInvariant()
+        $lbChoice = Read-TpmChoice -Prompt '  Choice, default P' -Choices @('P', 'A', 'F', 'B') -Default 'P'
         if ($lbChoice -eq 'P') {
             Write-Host "  Preview: TPM would add or update registered games; no LaunchBox changes were made." -ForegroundColor DarkCyan
             Write-Host "  Choose A to continue, F for a manual reference file, or B to skip." -ForegroundColor DarkGray
-        } elseif ($lbChoice -notin @('A', 'F', 'B')) {
-            Write-Host "  Choose P, A, F, or B." -ForegroundColor Yellow
         }
-    } while ($lbChoice -eq 'P' -or $lbChoice -notin @('A', 'F', 'B'))
+    } while ($lbChoice -eq 'P')
     $doLBSetup = if ($lbChoice -eq 'A') { 'Y' } else { 'N' }
     $doLB = if ($lbChoice -eq 'F') { 'Y' } else { 'N' }
 }
@@ -24964,10 +24958,10 @@ if ($doLBSetup -eq "Y" -and -not $lbRoot) {
         for ($i = 0; $i -lt $lbDetected.Count; $i++) {
             Write-Host ("    {0}) {1}" -f ($i + 1), $lbDetected[$i])
         }
-        $lbPick = (Read-HostSafe "  Enter number to use one, or N to type the path manually")
-        if ($lbPick -match '^\d+$' -and $lbPick.Length -le 9) {
-            $lbIdx = [int]$lbPick - 1
-            if ($lbIdx -ge 0 -and $lbIdx -lt $lbDetected.Count) { $lbRoot = $lbDetected[$lbIdx] }
+        $lbChoices = @('N') + @($lbDetected | ForEach-Object { [array]::IndexOf($lbDetected, $_) + 1 } | ForEach-Object { [string]$_ })
+        $lbPick = Read-TpmChoice -Prompt "  Enter a number to use one, or N to type the path manually" -Choices $lbChoices -Default 'N'
+        if ($lbPick -ne 'N') {
+            $lbRoot = $lbDetected[[int]$lbPick - 1]
         }
     }
     if (-not $lbRoot) {
@@ -25014,12 +25008,7 @@ if ($doLBSetup -eq "Y") {
         Write-Host "    3) A separate platform with a name you choose"
         Write-Host "    4) Both -- mixed into Arcade AND a separate TeknoParrot platform"
         Write-Host ""
-        do {
-            $platChoice = (Read-HostSafe "  Enter 1-4").Trim()
-            if ($platChoice -notin @('1', '2', '3', '4')) {
-                Write-Host "  Choose 1, 2, 3, or 4." -ForegroundColor Yellow
-            }
-        } while ($platChoice -notin @('1', '2', '3', '4'))
+        $platChoice = Read-TpmChoice -Prompt "  Enter 1-4" -Choices @('1', '2', '3', '4')
         switch ($platChoice) {
             "1" { $lbPlatformMode = "Arcade" }
             "2" { $lbPlatformMode = "TeknoParrot" }
@@ -25109,7 +25098,7 @@ if ($doLB -eq "Y") {
 }
 
 # =============================================================================
-# HYPERSPIN 2 EXPORT  (optional, runs after LaunchBox export)
+# HYPERSPIN 2 PLUGIN GUIDANCE  (normal flow does not export)
 # =============================================================================
 
 Write-Host "  HyperSpin 2 integration is guidance-only in RC8; no normal-flow export was started." -ForegroundColor DarkCyan
@@ -25117,7 +25106,7 @@ $doHS = "N"
 Write-Log "HyperSpin 2 export skipped from normal completion flow; guidance-only in RC8."
 
 # =============================================================================
-# CROSSHAIR SETUP  (optional, runs after HyperSpin export)
+# CROSSHAIR SETUP  (optional, follows frontend guidance)
 # =============================================================================
 
 Write-Host ""
@@ -25955,7 +25944,7 @@ Write-Host ""
         Write-Host ""
         Write-Host "  [Y] Apply changes" -ForegroundColor Cyan
         Write-Host "  [N] Return to the main menu" -ForegroundColor Cyan
-        $applyNow = (Read-HostSafe "  Your choice").ToUpper()
+        $applyNow = Read-TpmChoice -Prompt "  Your choice" -Choices @('Y', 'N')
         if ($applyNow -eq "Y") {
             $pendingApplyMode = $mode
             $pendingApplyForce = $true

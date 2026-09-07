@@ -1067,8 +1067,57 @@ Describe "Read-TpmYesNo validation" {
         Should -Invoke Read-Host -Times 2 -Exactly
     }
 }
+Describe "Read-TpmChoice validation" {
+    It "rejects an invalid answer, normalizes case, and accepts the next allowed choice" {
+        $script:choiceInputs = [System.Collections.Generic.Queue[string]]::new()
+        [void]$script:choiceInputs.Enqueue('Q')
+        [void]$script:choiceInputs.Enqueue('b')
+        Mock Read-Host { $script:choiceInputs.Dequeue() }
+        Mock Write-Host {}
+
+        Read-TpmChoice -Prompt 'Choose A or B' -Choices @('a', 'B') | Should -Be 'B'
+
+        Should -Invoke Read-Host -Times 2 -Exactly
+        Should -Invoke Write-Host -Times 1 -Exactly
+    }
+
+    It "uses an allowed default for a blank answer" {
+        Mock Read-Host { return '' }
+        Read-TpmChoice -Prompt 'Choose A or B' -Choices @('A', 'B') -Default 'b' | Should -Be 'B'
+    }
+}
 
 
+Describe "Prompt.Core fixed choice routes" {
+    It "centralizes enumerated choices for HyperSpin, LaunchBox, Support, and detected roots" {
+        $script:ProductionSource | Should -Match '\$missingIdChoice = Read-TpmChoice'
+        $script:ProductionSource | Should -Match '\$lbChoice = Read-TpmChoice'
+        $script:ProductionSource | Should -Match '\$platChoice = Read-TpmChoice'
+        $script:ProductionSource | Should -Match '\$supportChoice = Read-TpmChoice'
+        $script:ProductionSource | Should -Match '\$openPackage = Read-TpmChoice'
+        $script:ProductionSource | Should -Match '\$rootChoices = @\(''N''\)'
+        $script:ProductionSource | Should -Match '\$pick = Read-TpmChoice'
+        $script:ProductionSource | Should -Match '\[A\] Check all games'
+        $script:ProductionSource | Should -Match '\[B\] Back'
+    }
+
+    It "keeps HyperSpin export out of normal completion and leaves plugin guidance" {
+        $normalStart = $script:ProductionSource.IndexOf('# HYPERSPIN 2 PLUGIN GUIDANCE')
+        $crosshairStart = $script:ProductionSource.IndexOf('# CROSSHAIR SETUP', $normalStart)
+        $normalStart | Should -BeGreaterOrEqual 0
+        $crosshairStart | Should -BeGreaterThan $normalStart
+        $normalBlock = $script:ProductionSource.Substring($normalStart, $crosshairStart - $normalStart)
+        $normalBlock | Should -Match 'guidance-only'
+        $normalBlock | Should -Not -Match 'Export-HyperSpinJson'
+    }
+
+    It "preserves the support package folder action after validating O or B" {
+        $supportChoiceIndex = $script:ProductionSource.IndexOf('$openPackage = Read-TpmChoice')
+        $openFolderIndex = $script:ProductionSource.IndexOf("Start-Process -FilePath 'explorer.exe'", $supportChoiceIndex)
+        $supportChoiceIndex | Should -BeGreaterOrEqual 0
+        $openFolderIndex | Should -BeGreaterThan $supportChoiceIndex
+    }
+}
 Describe "Read-MainMenuChoiceResponsive redirected-input handling (issue #135)" {
     # Confirms the main menu prompt never enters the [Console]::KeyAvailable
     # polling loop when stdin is redirected (polling a keyboard that cannot
@@ -9353,7 +9402,7 @@ Describe "HyperSpin emulator identity gate" {
 
         $result | Should -Be 0
         (Test-Path -LiteralPath (Join-Path $hsRoot 'games')) | Should -BeFalse
-        $script:ProductionSource | Should -Match "Read-HostSafe '  Choice \(G/S\)' -Default 'S'"
+        $script:ProductionSource | Should -Match "Read-TpmChoice -Prompt '  Choice \(G/S\)' -Choices @\('G', 'S'\) -Default 'S'"
         $script:ProductionSource | Should -Not -Match '\[A\] Add anyway|allowLegacyXmlFallback'
     }
     It "uses guided-only missing-ID fix wording without mutating HyperSpin" {
@@ -13112,7 +13161,9 @@ Describe "Post-0909174 remediation result UX contracts" {
         $source | Should -Match 'Reason:'
         $source | Should -Match 'What to do:'
         $source | Should -Match 'technical:'
-        $source | Should -Match 'do \{[\s\S]*\$gpuResult = Invoke-GpuFixSetup[\s\S]*\} while \(\$gpuResultChoice -in @\(''D'',\s*''O'',\s*''H'',\s*''R''\)\)'
+        $source | Should -Match '\$gpuChoices = @\(''D'', ''O'', ''R'', ''B''\)'
+        $source | Should -Match '\$gpuChoices = @\(''D'', ''O'', ''H'', ''R'', ''B''\)'
+        $source | Should -Match '\} while \(\$gpuResultChoice -in @\(''D'',\s*''O'',\s*''R''\)\)'
     }
     It "provides browser feedback and P1 highlighting before P2" {
         $source = $script:ProductionSource
@@ -13200,9 +13251,9 @@ Describe "Library Health Check guided repair UX contracts" {
     }
     It "uses the same indented Choose layout for optional result menus" {
         $source = $script:ProductionSource
-        $source | Should -Match '\$dgResultChoice = \(Read-HostSafe \("  Choose \{0\}"'
-        $source | Should -Match '\$gpuResultChoice = \(Read-HostSafe \("  Choose \{0\}"'
-        $source | Should -Match '\$bepChoice = \(Read-HostSafe \("  Choose \{0\}"'
+        $source | Should -Match '\$dgResultChoice = Read-TpmChoice'
+        $source | Should -Match '\$gpuResultChoice = Read-TpmChoice'
+        $source | Should -Match '\$bepChoice = Read-TpmChoice'
     }
     It "returns structured read-only findings without invoking mutation helpers" {
         $root = Join-Path $TestDrive 'health-read-only'
@@ -13404,9 +13455,9 @@ Describe "BepInEx runtime hold UX contracts" {
     }
     It "keeps BepInEx acknowledgement and Health Check routing explicit" {
         $source = $script:ProductionSource
-        $source | Should -Match '\$bepPromptChoices = if \(\$bepPathIssue\)'
-        $source | Should -Match "Choose \{0\}"
-        $source | Should -Match '\$bepChoice -eq ''H'' -and \$bepPathIssue'
+        $source | Should -Match '\$bepChoices = @\(''R'', ''D'', ''O'', ''B''\)'
+        $source | Should -Match '\$bepPromptChoices = \$bepChoices -join'
+        $source | Should -Match "\$bepChoices \+= 'H'"
         $source | Should -Match 'repair-reset'
         $source | Should -Match 'PROTECTED_OR_REPARSE_ROOT'
         $source | Should -Match 'GAME_PATH_MISSING'
@@ -13415,7 +13466,7 @@ Describe "BepInEx runtime hold UX contracts" {
     }
     It "dispatches BepInEx result choices instead of only displaying them" {
         $source = $script:ProductionSource
-        $source | Should -Match '\$bepChoice = \(Read-HostSafe'
+        $source | Should -Match '\$bepChoice = Read-TpmChoice'
         $source | Should -Match "Invoke-BepInExUpdateCheck -UserProfilesDir"
         $source | Should -Match "Technical log:"
         $source | Should -Match "Support package folder:"
@@ -13602,11 +13653,11 @@ Describe "Focused RC8 remediation contracts" {
         $rootIndex | Should -BeGreaterOrEqual 0
         $rootIndex | Should -BeLessThan $choiceIndex
     }
-    It "keeps BepInEx invalid choices in the result loop and only offers Health Check for path issues" {
+    It "keeps BepInEx result choices centralized and only offers Health Check for path issues" {
         $source = $script:ProductionSource
-        $source | Should -Match '\$bepValidChoices = @\(''R'', ''D'', ''O'', ''B'', ''''\)'
-        $source | Should -Match '\$bepChoice -notin \$bepValidChoices'
-        $source | Should -Match '\} while \(\$bepChoice -notin @\(''B'', ''''\)\)'
+        $source | Should -Match '\$bepChoices = @\(''R'', ''D'', ''O'', ''B''\)'
+        $source | Should -Match '\$bepChoice = Read-TpmChoice'
+        $source | Should -Match '\} while \(\$bepChoice -in @\(''R'', ''D'', ''O''\)\)'
         $source | Should -Match '\$bepPathIssue = \$bepResult -and \(\$bepResult\.MissingPath -gt 0 -or \$bepResult\.MissingDevice -gt 0\)'
     }
     It "fails closed on incomplete profile backups before destructive writes" {
@@ -13636,7 +13687,7 @@ Describe "Focused RC8 remediation contracts" {
             $picker | Should -Match 'I did not understand'
         }
     }
-    It "requires the TPM organization reset artifacts" {
+    It "requires the TPM remediation and prompt-slice artifacts" {
         foreach ($relativePath in @(
             'docs\governance\tpm-development-operating-model.md',
             'docs\governance\tpm-contract-types.md',
@@ -13652,6 +13703,6 @@ Describe "Focused RC8 remediation contracts" {
         $gate = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\scripts\Test-TpmPermanentProcedures.ps1') -Raw
         $gate | Should -Match 'PR-321-control-board.md'
         $gate | Should -Match 'PR-321-current-slice.md'
-        $gate | Should -Match 'TPM-RESET-001'
+        $gate | Should -Match 'Slice ID'
     }
 }

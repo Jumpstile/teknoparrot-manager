@@ -193,15 +193,18 @@
     game already there. Choose to mix TeknoParrot games into your existing
     Arcade platform, a dedicated "TeknoParrot" platform, a platform with a
     name you choose, or both Arcade and a dedicated platform at once; your
-    choice is remembered for next time. A manual-import reference file (for
-    LaunchBox's own Import wizard) remains available if you prefer not to
+    choice is remembered for next time. The end-of-run menu is explicit:
+    P previews without changing LaunchBox, A adds/updates now, F creates a
+    manual import/reference file, and B skips the optional LaunchBox step.
+    A manual-import reference file remains available if you prefer not to
     let the script touch LaunchBox's files directly.
 
-  - HyperSpin 2 export. After each run the script offers to add all registered
-    games to HyperSpin 2's game list. Locates the TeknoParrot system in your
-    HyperSpin 2 data folder and merges in any games not already present. Games
-    are added with title only; use HyperSpin's Scrape feature to fetch box art
-    and metadata.
+  - HyperSpin 2 integration. In RC8 the normal completion flow is
+    guidance-only: TPM does not start a HyperSpin export or write HyperSpin
+    files. The normal-flow message directs operators to the HyperSpin 2
+    plugin. TPM does not synthesize an emulator id or write game associations
+    in the normal flow. Use HyperSpin's Scrape feature for box art and
+    metadata after the plugin manages entries.
 
   - RetroBat / Batocera support. A single setting switches extraction to use
     GameName.teknoparrot folder naming as required by RetroBat and Batocera.
@@ -1041,8 +1044,8 @@
 -------------------------------------------------------------------------------
 
   The script integrates with three frontends: LaunchBox, HyperSpin 2, and
-  RetroBat/Batocera. LaunchBox and HyperSpin 2 receive your registered games
-  as optional export steps at the end of each run. RetroBat/Batocera support
+  RetroBat/Batocera. LaunchBox offers an optional action menu at the end of
+  each run. HyperSpin 2 is guidance-only in RC8. RetroBat/Batocera support
   is a one-time extraction setting that changes how game folders are named
   on disk.
 
@@ -1050,126 +1053,52 @@
   LAUNCHBOX
   ---------
 
-  At the end of each run the script offers to add your registered games
-  directly into LaunchBox:
+  At the end of each normal interactive run the script offers a LaunchBox
+  action menu:
 
-      Add your registered games to LaunchBox now? (Y/N)
+      [P] Preview only
+      [A] Add/update LaunchBox now
+      [F] Create a manual import/reference file
+      [B] Back to the main menu
 
-  Answering Y writes straight into LaunchBox's own Data\ files -- no import
-  wizard step required. Before writing anything, the script:
+  P previews without changing LaunchBox, A writes directly into LaunchBox's
+  own Data\ files after the close and backup checks, F creates the reference
+  file without a LaunchBox write, and B skips the optional LaunchBox step.
 
-      - Checks that LaunchBox and BigBox are both closed (refuses to write
-        while either is running, since LaunchBox can overwrite external
-        changes when it next saves).
-      - Backs up every file it is about to change into
-        Scripts\LaunchBoxBackups\<timestamp>\, preserving the same relative
-        layout as your LaunchBox install. If the backup fails for any
-        reason, nothing is written.
-      - Creates the TeknoParrot emulator entry in LaunchBox if one does not
-        already exist (or reuses your existing one by name, so re-running
-        this never creates a duplicate).
-      - Skips any game that already has an entry in the target platform, so
-        re-runs never duplicate games or touch favorites/play counts you
-        have already set in LaunchBox.
-
-  The first time you use this, you are asked how TeknoParrot games should
-  appear in LaunchBox:
+  When direct integration is selected, the first use asks how TeknoParrot
+  games should appear:
 
       1) Mixed into your existing Arcade platform
       2) A separate "TeknoParrot" platform
       3) A separate platform with a name you choose
       4) Both -- mixed into Arcade AND a separate TeknoParrot platform
 
-  Your choice is remembered and offered again (with the option to change it)
-  on future runs. Choosing "Both" creates two separate game records (one per
-  platform) pointing at the same TeknoParrot profile -- LaunchBox has no
-  concept of one game belonging to two platforms at once, so favorites and
-  play counts are tracked separately between the two views.
-
-  New games have no box art or metadata yet, since this script has no way to
-  populate LaunchBox's own scraped database fields. In LaunchBox, right-click
-  a newly added game and use Edit... -> Search to fetch metadata and box art,
-  the same way you would for any manually-imported game.
+  Your choice is remembered for future runs. "Both" creates two separate
+  game records pointing at the same TeknoParrot profile. New games have no
+  box art or metadata yet; use LaunchBox Edit... -> Search to fetch it.
 
   If anything looks wrong afterward, use menu option 11 (Restore backup) and
-  choose "LaunchBox library backup" to restore the exact files the script
-  changed, from before it changed them.
+  choose "LaunchBox library backup" to restore the exact changed files.
 
   PREFER THE MANUAL IMPORT WIZARD INSTEAD?
 
-  Answer N to the direct-integration question, then Y to the follow-up
-  question, to get a reference file and step-by-step instructions for
-  LaunchBox's own Import wizard instead -- useful if you would rather not
-  let the script touch LaunchBox's files directly. This writes
+  Choose F to get a reference file and step-by-step instructions for
+  LaunchBox's own Import wizard. This writes
   TeknoParrot-LaunchBox-Import.xml next to the script and prints the exact
-  wizard steps, including the emulator command line
-  (--profile=%romfile%.xml) and where to point the wizard (your
-  UserProfiles folder, importing the profile *.xml files themselves --
-  TeknoParrot launches games by profile, so the profile XML is what
-  LaunchBox treats as the "rom" for each game, not the game's executable).
-
-
+  wizard steps, including --profile=%romfile%.xml and the UserProfiles
+  folder. Import the profile *.xml files themselves, not game executables.
   HYPERSPIN 2
   -----------
 
-  At the end of each run the script offers to add your registered games to
-  HyperSpin 2's game list:
+  In RC8 the normal completion flow is guidance-only. TPM does not start a
+  HyperSpin export or write HyperSpin files; it prints a message directing
+  operators to the HyperSpin 2 plugin.
 
-      Export registered games to HyperSpin 2? (Y/N)
+  There is no end-of-run HyperSpin export prompt in RC8. TPM does not
+  synthesize an emulator id or write game associations in the normal flow.
+  Use HyperSpin's Scrape feature for box art and metadata after the plugin
+  manages entries.
 
-  Answering Y locates the TeknoParrot system inside your HyperSpin 2 data
-  folder (default: C:\ProgramData\HyperSpin\data) and merges in every
-  registered game not already present. Your path is saved to config so the
-  prompt is skipped on future runs.
-
-  How it finds the TeknoParrot game list:
-
-    HyperSpin 2 stores one JSON file per system under <dataPath>\games\.
-    The script reads emulators.json to find TeknoParrot's entry and its
-    system GUID, then scans the games subfolder for the JSON file whose
-    entries reference the same GUID.
-
-    If the TeknoParrot entry has no id, TPM stops before locating or writing
-    a games file and asks:
-      F = Fix the emulator entry, then retry
-      A = Add anyway (permits the legacy .xml scan and empty systemId)
-      S = Skip export (safe default; no HyperSpin data is changed)
-    Re-add TeknoParrot in HyperSpin before choosing F. Only A permits the
-    fallback scan for a file whose ROM entries use the .xml extension. If
-    no file is found after A, the script creates a new empty one named after
-    the emulator title.
-
-    Title matching is flexible: "TeknoParrot", "Tekno Parrot", "teknoparrot"
-    and other variations are all recognised by stripping spaces and
-    punctuation before comparing.
-
-  What it does:
-
-    1. Checks that HyperSpin 2 is not currently running.
-    2. Parses emulators.json to find the TeknoParrot entry.
-    3. Locates or creates the TeknoParrot game list JSON in the games subfolder.
-    4. Backs up the existing game list before any write (skipped if the file
-       was just created).
-    5. Checks every XML in your UserProfiles folder.
-    6. For each registered game not already in the list, adds a new entry.
-    7. Reports how many games were added (or confirms the list is up to date).
-
-  Games already present in HyperSpin 2 are never duplicated.
-
-  Games are added with title only. Use HyperSpin 2's Scrape feature to
-  fetch box art, descriptions, and ratings for new entries.
-
-  The export is skipped automatically in -Unattended mode. HyperSpin 2 must
-  not be running when you answer Y; the script checks and will refuse to
-  write if the process is detected.
-
-  Prerequisites:
-
-    - TeknoParrot must be set up as an emulator in HyperSpin 2 (it must
-      appear in emulators.json with a title that contains "TeknoParrot",
-      such as "TeknoParrot" or "Tekno Parrot").
-    - No games need to be added to HyperSpin 2 first. The script creates the
-      game list file if it does not yet exist.
 
 
   CROSSHAIR SETUP

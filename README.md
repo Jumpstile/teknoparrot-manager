@@ -2,7 +2,7 @@
 
 ![TeknoParrot Manager](images/banner.png)
 
-TeknoParrot Manager is a Windows PowerShell tool for managing TeknoParrot arcade libraries on Windows. It registers extracted games, propagates controls, deploys lightgun crosshairs, applies ReShade and dgVoodoo2 compatibility fixes, and exports libraries to LaunchBox or HyperSpin.
+TeknoParrot Manager is a Windows PowerShell tool for managing TeknoParrot arcade libraries on Windows. It registers extracted games, propagates controls, deploys lightgun crosshairs, applies ReShade and dgVoodoo2 compatibility fixes, exports libraries to LaunchBox, and provides HyperSpin 2 plugin guidance.
 
 Canonical links: [GitHub repository](https://github.com/Jumpstile/teknoparrot-manager) | [Releases](https://github.com/Jumpstile/teknoparrot-manager/releases) | [Issue tracker](https://github.com/Jumpstile/teknoparrot-manager/issues)
 
@@ -51,7 +51,7 @@ tree is for review, certification, and release preparation only.
 - [Postgres Setup](#postgres-setup)
 - [Check for Updates](#check-for-updates)
 - [LaunchBox Integration](#launchbox-integration)
-- [HyperSpin 2 Export](#hyperspin-2-export)
+- [HyperSpin 2 plugin guidance](#hyperspin-2-plugin-guidance)
 - [RetroBat / Batocera](#retrobat--batocera)
 - [Thumbnail Download](#thumbnail-download)
 - [Controls Status File](#controls-status-file)
@@ -90,7 +90,7 @@ tree is for review, certification, and release preparation only.
 - **Postgres setup** — installs and configures the local PostgreSQL 8.3 database some Incredible Technologies games need (Golden Tee Live, Power Putt Live, Silver Strike Bowling Live, Target Toss Pro, Orange County Choppers Pinball). Detects which registered games need it automatically; never reinstalls Postgres or recreates an existing database.
 - **Automatic compatibility warnings** — every run checks for known install-path-length limits (Raw Thrills titles, Yu-Gi-Oh! Duel Terminal 6), pinned-file-version requirements (BlazBlue/iDmacDrv32.dll, Tekken Tag Tournament 2/EBOOT.BIN), and known GPU-vendor incompatibilities (AMD/Intel), with details in ACTION REQUIRED.
 - **Game-specific setup notes** — every run checks the community compatibility database (eggmansworld.github.io/TeknoParrot) for any registered game with special setup notes — workarounds, known quirks, and the expected executable name — and writes them to the separate `TeknoParrot-Manager-game-notes.txt` report. Raw source notes are not copied into ACTION REQUIRED.
-- **LaunchBox direct integration / HyperSpin 2 export** — writes games straight into LaunchBox's own library, or builds an import file for HyperSpin 2, after each run.
+- **LaunchBox direct integration / HyperSpin 2 plugin guidance** — writes games straight into LaunchBox's own library; the normal RC8 flow does not export HyperSpin files and directs operators to the plugin path.
 - **Unattended mode** — `-Unattended` flag for scheduled overnight runs.
 - **Preview / dry-run mode** — see what AutoSync/Register would do (extract, register, repair, propagate) with zero files written, then decide whether to apply it for real.
 - **Download audit logging** -- every shared-pipeline download records its authoritative source URL, filename, version when known, computed SHA-256, and transfer metrics (method, size, elapsed time, average speed). ReShade additionally logs the installer signer/subject, Authenticode status, signer thumbprint, and the status/thumbprint/trust result; its SHA-256 is an audit hash, not a published-digest comparison. BepInEx records its GitHub release source, filename/version, and computed SHA-256; when GitHub supplies an asset digest, the downloader validates it before extraction and logs/fails closed on a mismatch. dgVoodoo2 uses the same digest validation when available. FFBArcadePlugin, Eggman/RomVault dat, the PostgreSQL guide bundle, the TPM update package, and TeknoParrotUI thumbnail downloads receive source/hash/transfer audit entries; unsigned or digest-less sources are not described as cryptographically authenticated.
@@ -794,13 +794,17 @@ See `docs/Compatibility.md` for the pre-1.0 compatibility checklist and known te
 
 ## LaunchBox Integration
 
-At the end of each run the script offers to add your registered games directly into LaunchBox:
+At the end of each normal interactive run the script offers a clearly separated LaunchBox action menu:
 
 ```
-Add your registered games to LaunchBox now? (Y/N)
+[P] Preview only  [A] Add/update now  [F] Manual import/reference file  [B] Back
 ```
 
-Answering Y writes straight into LaunchBox's own `Data\` files — no import wizard step required. Before writing anything, the script:
+`P` previews the route without changing LaunchBox, `A` writes directly into
+LaunchBox's own `Data\` files, `F` creates the reference file without a
+LaunchBox write, and `B` skips the optional LaunchBox step.
+
+Before writing anything, the script:
 
 - Checks LaunchBox and BigBox are both closed (refuses to write while either is running).
 - Backs up every file it is about to change into `Scripts\LaunchBoxBackups\<timestamp>\`. If the backup fails, nothing is written.
@@ -820,29 +824,19 @@ New games have no box art or metadata yet. In LaunchBox, right-click a newly add
 
 If anything looks wrong afterward, use menu option 11 (**Restore backup**) and choose **LaunchBox library backup** to restore the exact files the script changed.
 
-**Prefer the manual import wizard instead?** Answer N to the direct-integration question, then Y to the follow-up, to get a reference file (`TeknoParrot-LaunchBox-Import.xml`) and step-by-step wizard instructions — useful if you'd rather not let the script touch LaunchBox's files directly. The wizard command line is `--profile=%romfile%.xml`, and you point it at your `UserProfiles` folder importing the profile `*.xml` files themselves (not the game executables — TeknoParrot launches by profile, so the profile XML is what LaunchBox treats as the "rom").
+**Prefer the manual import wizard instead?** Choose `F` in the LaunchBox action menu to get a reference file (`TeknoParrot-LaunchBox-Import.xml`) and step-by-step wizard instructions -- useful if you'd rather not let the script touch LaunchBox's files directly. The wizard command line is `--profile=%romfile%.xml`, and you point it at your `UserProfiles` folder importing the profile `*.xml` files themselves (not the game executables -- TeknoParrot launches by profile, so the profile XML is what LaunchBox treats as the "rom").
 
 ---
 
-## HyperSpin 2 Export
+## HyperSpin 2 plugin guidance
 
-At the end of each run the script offers to add your registered games to HyperSpin 2:
+In RC8 the normal completion flow is guidance-only: TPM does not start a
+HyperSpin export and does not write HyperSpin files. The normal-flow message
+directs operators to the HyperSpin 2 plugin instead.
 
-```
-Export registered games to HyperSpin 2? (Y/N)
-```
+Use the HyperSpin 2 plugin for the intended integration path. Use HyperSpin
+2's Scrape feature for box art and metadata after the plugin manages entries.
 
-Answering Y locates the TeknoParrot game list in your HyperSpin 2 data folder (default: `C:\ProgramData\HyperSpin\data`) and merges in every registered game not already present. Your path is saved for future runs.
-
-**Prerequisites:** TeknoParrot must be set up as an emulator in HyperSpin 2 with a title containing "TeknoParrot" (variations like "Tekno Parrot" are fine). No games need to be added first — the script creates the game list file if it doesn't exist.
-If `emulators.json` contains the TeknoParrot entry without an `id`, TPM stops
-before locating or writing a games file and asks **F** to fix the emulator entry,
-**A** to add anyway, or **S** to skip (the safe default). Choose **F** after
-re-adding TeknoParrot in HyperSpin, or **S** to leave HyperSpin data unchanged.
-Only **A** permits the older `.xml` ROM-entry fallback and may write entries
-with an empty `systemId`.
-
-Games are added with title only. Use HyperSpin 2's Scrape feature for box art and metadata. HyperSpin 2 must not be running when you answer Y.
 
 ---
 
@@ -977,7 +971,7 @@ Run with `-Unattended` to skip all prompts:
 
 Automatically: loads saved settings, extracts all new games, registers, repairs, propagates controls, downloads thumbnails, and logs everything. Requires saved settings from a previous interactive run.
 
-Does NOT run: Restore mode (requires interactive backup selection), LaunchBox direct integration/HyperSpin 2 export.
+Does NOT run: Restore mode (requires interactive backup selection), LaunchBox direct integration.
 
 **Scheduling with Windows Task Scheduler:**
 
@@ -1014,7 +1008,7 @@ Combine with `-Unattended` to preview a scheduled run with no prompts at all.
 In preview mode:
 
 - No backup is created (there is nothing yet to restore)
-- The optional follow-up offers (LaunchBox direct integration/HyperSpin 2 export, thumbnail download, GPU fix) are skipped, since they only make sense after real changes
+- The optional LaunchBox direct-integration offer, thumbnail download, and GPU fix are skipped, since they only make sense after real changes
 - The summary and ACTION REQUIRED sections still print normally, based on the games that would have been registered
 
 After a preview finishes, the script confirms nothing was changed and asks whether you'd like to perform the operation for real — answer **Y** to immediately re-run the same mode for real (a fresh scan, not a replay of the preview, since anything could have changed since it ran; no menu, no preview prompt shown again), or **N** to return to the menu without changing anything.
@@ -1127,8 +1121,9 @@ Delete one of the duplicate `.xml` files from `UserProfiles`. Keep the one with 
 **`[UNLOGGED]` entries on console.**
 `TeknoParrot-Manager.log` can't be written. Check that the folder is not read-only and you have write permission.
 
-**HyperSpin 2 export fails with "TeknoParrot not found in emulators.json".**
-TeknoParrot must be set up as an emulator in HyperSpin 2 first. The title must contain "TeknoParrot" (spacing and capitalisation variations are fine).
+**HyperSpin 2 integration is not started by the normal RC8 flow.**
+Use the HyperSpin 2 plugin for integration and its Scrape feature for box art
+and metadata.
 
 **Script appears to hang or freeze during registration.**
 The scan is still running — large game libraries can take a minute. A progress bar (`Scanning game library`) shows current folder/total exe count. If the console is truly frozen (no progress bar, no output for several minutes), check that your staging folder is reachable and not on a disconnected network drive.

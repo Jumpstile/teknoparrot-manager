@@ -31,7 +31,7 @@ if (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf)) {
         if ($board -notmatch ("(?im)^\|\s*" + [regex]::Escape($id) + '(\s*\||-)')) { Fail "Owner report ID $id is missing from the control board." }
     }
     $slice = Get-Content -LiteralPath $currentSlicePath -Raw
-    foreach ($requiredSliceText in @('Explicit exclusions','Stop condition','Forbidden actions','Runtime proof required')) {
+    foreach ($requiredSliceText in @('Explicit exclusions','Stop condition','Forbidden actions','Runtime proof required','Prompt inventory and classification')) {
         if ($slice.IndexOf($requiredSliceText, [StringComparison]::OrdinalIgnoreCase) -lt 0) { Fail "Current slice is missing: $requiredSliceText" }
     }
     $requiredSections = @(
@@ -46,7 +46,12 @@ if (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf)) {
     $ownerStart = $report.IndexOf('## Owner report mapping table')
     $ownerEnd = $report.IndexOf('## SCRIPT-WIDE UNIVERSAL PROGRESS BAR AUDIT')
     $ownerSection = if ($ownerStart -ge 0 -and $ownerEnd -gt $ownerStart) { $report.Substring($ownerStart, $ownerEnd - $ownerStart) } else { '' }
-    if ($report.IndexOf('TPM-RESET-001', [StringComparison]::OrdinalIgnoreCase) -lt 0) { Fail 'Remediation report hunk classification does not reference the current slice contract.' }
+    $sliceIdMatch = [regex]::Match($slice, '(?im)^\s*-\s*Slice ID:\s*(\S+)')
+    if (-not $sliceIdMatch.Success) {
+        Fail 'Current slice does not declare a Slice ID.'
+    } elseif ($report.IndexOf($sliceIdMatch.Groups[1].Value, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+        Fail 'Remediation report hunk classification does not reference the current slice contract.'
+    }
     if ($report -match '(?im)## Tests with exact counts and timestamps[\s\S]*Main Pester[^|]*\|[^|]*\|\s*[^|]*\|\s*[^|]*\|\s*[^|]*\|') {
         if ($ownerSection -notmatch '(?i)Exact test names') { Fail 'Broad suite counts are not accompanied by focused owner test names.' }
     }

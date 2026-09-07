@@ -2,13 +2,13 @@
 
 - Repository root: `C:\REPOS\tpm-rc8-certified-a700d093`
 - Branch: `fix/rc8-release-blockers`
-- HEAD: `a697edacc7be0f006c4616b32e8cbfcba650cd13`
-- Report generated UTC: 2026-09-07T14:55:46.6971140Z
-- Source/test last-edit UTC: source 2026-09-07T14:55:01.9593175Z; tests 2026-09-07T14:55:46.6971140Z (filesystem LastWriteTimeUtc)
+- HEAD: `6c511915c85793833db74472c105d48449982537`
+- Report generated UTC: final evidence refreshed after the last source/test/doc edit; wall-clock timestamps were not captured.
+- Source/test last-edit UTC: not captured in this working report.
 - Candidate/package identity: `C:\REPOS\tpm-rc8-candidate-output\TeknoParrot Manager v1.0 RC8.zip`
 - Candidate SHA-256: `8E0343AE85F63F06280CE4E5AE737C0D68E05629A446C22B61AD79C732F40303`
-- Source SHA: `a697edacc7be0f006c4616b32e8cbfcba650cd13`
-- Remediation scope: TPM-only PR #321 owner-smoke reconciliation and permanent procedure enforcement
+- Source SHA: `6c511915c85793833db74472c105d48449982537` (working-tree source changes remain uncommitted)
+- Remediation scope: TPM-only PR #321 prompt/navigation slice `TPM-PROMPT-001`, owner-smoke reconciliation, and permanent procedure enforcement
 
 ## Provenance
 
@@ -44,15 +44,15 @@
 | 21 | Option 10 repair clarity | SOURCE FIXED; OWNER RUNTIME NEEDED | Repair result reporting | Repair result tests | Verify per-game accounting |
 | 22 | Post-thumbnail repair scope | SOURCE FIXED; OWNER RUNTIME NEEDED | Affected-only AutoSync handoff | Scoped repair tests | Verify no optional-flow escape |
 | 23 | LaunchBox Back gate | SOURCE FIXED; OWNER RUNTIME NEEDED | Optional-chain routing | LaunchBox Back coverage | Packaged B smoke |
-| 24 | LaunchBox prompt wording | NOT FIXED | Prompt redesign required | No qualifying test | Guided prompt smoke |
-| 25 | HyperSpin direct prompt | SOURCE FIXED; OWNER RUNTIME NEEDED | `Export-HyperSpinJson` missing-ID choice | No qualifying test | Normal completion smoke |
-| 26 | Invalid optional Y/N input | NOT FIXED | Centralized reader migration remains incomplete | Focused prompt contracts required | Invalid-input smoke |
-| 27 | Support final prompt | SOURCE FIXED; OWNER RUNTIME NEEDED | Support menu and package-open choice | `uses the same indented Choose layout for optional result menus` | Packaged support prompt |
+| 24 | LaunchBox prompt wording | SOURCE FIXED; OWNER RUNTIME NEEDED | LaunchBox `P/A/F/B`, detected-root, and platform prompts | `Prompt.Core fixed choice routes`; `Read-TpmChoice validation` | Guided packaged prompt smoke |
+| 25 | HyperSpin direct prompt | SOURCE FIXED; OWNER RUNTIME NEEDED | `Export-HyperSpinJson` missing-ID `G/S` choice | `Prompt.Core fixed choice routes`; source parse | Normal completion smoke |
+| 26 | Invalid optional Y/N input | NOT FIXED | Centralized finite-choice migration is broad but global stateful picker boundaries remain | `Read-TpmChoice validation`; prompt route contracts | Invalid-input matrix |
+| 27 | Support final prompt | SOURCE FIXED; OWNER RUNTIME NEEDED | Support `1-3` and package `O/B` routes | `Prompt.Core fixed choice routes`; SupportPackage.Tests | Packaged support prompt |
 | 28 | Fatal workflow surfacing | SOURCE FIXED; OWNER RUNTIME NEEDED | Get-TpmSupportManifestText | SupportPackage.Tests: `records Action Required freshness in the packaged manifest` | Fresh fatal-log package |
 | 29 | Action Required freshness | SOURCE FIXED; OWNER RUNTIME NEEDED | New-TpmSupportPackage | SupportPackage.Tests: `records Action Required freshness in the packaged manifest` | Multiple-report package |
 | 30 | Controls truthfulness | NOT FIXED | Full controls result audit required | Existing controls tests | Zero-bound runtime result |
 | 31 | dgVoodoo2 wording | SOURCE FIXED; OWNER RUNTIME NEEDED | dgVoodoo2 result wording | No dedicated wording test | Owner wording review |
-| 32 | Global consistency rule | NOT FIXED | Script-wide choice-route inventory and centralized readers | Focused prompt contracts required | Packaged consistency smoke |
+| 32 | Global consistency rule | NOT FIXED | `TPM-PROMPT-001` exhaustive classification and feasible finite-choice migration; stateful picker/runtime proof remains | `Read-TpmChoice validation`; prompt route contracts | Packaged consistency smoke |
 
 ## SCRIPT-WIDE UNIVERSAL PROGRESS BAR AUDIT
 
@@ -86,22 +86,29 @@
 
 ## Prompt/gate/back-routing consistency audit
 
-| Pattern | Locations audited | Converted | Excluded with reason | Tests |
-|---|---|---|---|---|
-| Y/N | Main, optional setup, readiness, and process-wait prompts | Converted to `Read-TpmYesNo`, including readiness/process retry prompts | Free-text confirmations remain deliberate (`YES`, `REMOVE`, path/vendor/profile input) | `Read-TpmYesNo validation`; `audits source progress and optional gate readers` |
-| Invalid input | Main, setup, dynamic path, restore, and result prompts | `Read-TpmChoice` now covers migrated menus, dynamic detected-root choices, and all three restore menu families | Free-text search/path/vendor/profile prompts remain non-choice inputs | `Read-TpmYesNo validation`; `audits source progress and optional gate readers` |
-| Back | Health Check, LaunchBox, ReShade, setup, selection browsers | Enumerated Back/return choices use centralized `Read-TpmChoice` or existing workflow routing | Search boxes at `Select-GamesInteractive`/`Select-GamesForAutoSync` accept free-text `back`; acknowledgements use Enter-only prompts | ID32 raw-prompt boundary test; owner smoke |
-| Skip | AutoSync and optional setup | Enumerated Skip/decline choices use centralized readers and explicit workflow outcomes | Free-text search and exact-token confirmations are not choice menus | ID32 raw-prompt boundary test; owner smoke |
-| Cancel | ReShade, crosshair, AutoSync, repair | Enumerated cancellation choices use centralized readers | `REMOVE`, blank path/vendor input, and Enter-only acknowledgements remain deliberate safety/input contracts | ID32 raw-prompt boundary test; owner smoke |
-| Preview/Run | AutoSync and ReShade | Enumerated preview/run choices use centralized readers | Graphical preview interaction and terminal profile/search input are design-specific | ID32 raw-prompt boundary test; existing preview tests |
-| Mutation confirmation | Repair, install, update, restore | Enumerated mutation choices use centralized readers | `YES`/`REMOVE` exact-token gates remain deliberate safety contracts at PostgreSQL/ReShade mutation boundaries | ID32 raw-prompt boundary test; existing mutation tests |
-| Optional setup gates | GPU, FFB, dgVoodoo2, BepInEx | Enumerated setup gates use centralized readers | GPU vendor and PostgreSQL password prompts are free-text/secure input, not Y/N choice gates | ID32 raw-prompt boundary test; existing optional-setup tests |
-| HyperSpin direct prompts | Missing-emulator-ID flow | Converted to `Read-TpmChoice`; normal completion runtime proof remains absent | No qualifying test |
-| Support package prompts | Support completion flow | Converted to `Read-TpmChoice`; runtime proof remains absent | SupportPackage.Tests only |
+The exhaustive inventory and classifications are recorded in
+`docs/remediation/slices/PR-321-current-slice.md` under "Prompt inventory and
+classification". This table records the current slice evidence without
+claiming global closure.
 
-- The organization slice does not change product status: IDs 3, 11, 12, 26, 30, and 32 remain `NOT FIXED`; ID 5 remains `SOURCE FIXED; OWNER RUNTIME NEEDED`.
-- The enumerated prompt rows describe partial source evidence only; they do not close global ID 32.
-- PR #321 remains blocked. Candidate ZIP is stale, permanent procedure gate must fail closed, owner-runtime evidence is outstanding, and no package or owner smoke is authorized.
+| Pattern | Locations audited | Converted in TPM-PROMPT-001 | Excluded with documented boundary | Tests |
+|---|---|---|---|---|
+| Y/N | Optional setup, readiness, and process-wait prompts | `Read-TpmYesNo` owns ordinary Y/N decisions; finite Y/N routes in this slice use centralized readers | Secure/password input, exact-token safety, path/vendor/free text, and stateful pickers | `Read-TpmYesNo validation`; `Read-TpmChoice validation` |
+| Invalid input | Main, setup, dynamic path, restore, and result prompts | `Read-TpmChoice` rejects invalid finite choices and re-prompts on the same prompt | Free-text search/path/vendor/profile prompts retain specialized validation | `Read-TpmChoice validation`; `Prompt.Core fixed choice routes` |
+| Finite choices | LaunchBox, HyperSpin, Support, AutoSync, DAT, startup update, BepInEx, ReShade, dgVoodoo2, GPU, FFB, Health Check, repair, PostgreSQL, staging, restore | Migrated finite choices use `Read-TpmChoice`, including dynamic path-aware arrays | Stateful picker commands remain documented design boundaries | `Read-TpmChoice validation`; `Prompt.Core fixed choice routes` |
+| Back | LaunchBox, HyperSpin, Support, Health Check, setup/result menus, repair, restore | Enumerated Back/return choices use centralized validation in migrated routes | Enter-only acknowledgements, browser/process wait controls, and stateful picker `back` commands | `Prompt.Core fixed choice routes`; owner smoke outstanding |
+| Skip | HyperSpin, DAT, BepInEx, optional setup, AutoSync | Finite skip/decline branches use centralized readers where feasible | Search/picker text and exact-token confirmations | `Read-TpmChoice validation`; owner smoke outstanding |
+| Cancel | ReShade, dgVoodoo2, GPU, FFB, PostgreSQL, restore | Finite cancel/back routes use centralized readers where feasible | `REMOVE`, `YES`, blank path/vendor, and Enter-only safety/input contracts | `Read-TpmChoice validation`; owner smoke outstanding |
+| Preview/Run | AutoSync and LaunchBox | `P/R/B` and `P/A/F/B` routes use centralized validation | ReShade terminal profile/search interaction remains renderer-aware | `Prompt.Core fixed choice routes`; existing preview tests |
+| Mutation confirmation | Repair, install, update, restore, ReShade | Finite mutation branches use centralized validation | `YES` and `REMOVE` remain exact-token gates | Existing mutation tests; owner smoke outstanding |
+| Optional setup gates | GPU, FFB, dgVoodoo2, BepInEx, ReShade | Finite setup/result menus use centralized validation, including dynamic path-aware choices | GPU vendor, paths, passwords, and stateful selector input | `Read-TpmChoice validation`; owner smoke outstanding |
+| Stateful pickers | AutoSync game selection, combined selection, ReShade terminal selector, crosshair/browser flows | No forced one-letter rewrite | Number lists, search terms, terminal keys, redraw, and blank semantics require their own contracts | Follow-up design and runtime proof |
+| HyperSpin direct prompts | Missing-emulator-ID flow | `G/S` uses `Read-TpmChoice`; no emulator ID is synthesized | Normal completion runtime proof remains absent | `Prompt.Core fixed choice routes` |
+| Support package prompts | Support main and package-open completion | `1-3` and `O/B` use `Read-TpmChoice`; `O` still opens the folder | Packaged support runtime proof remains absent | `Prompt.Core fixed choice routes`; SupportPackage.Tests |
+
+- IDs 3, 11, 12, 26, 30, and 32 remain `NOT FIXED`; IDs 24, 25, and 27 have source evidence but still require owner-runtime proof.
+- `TPM-PROMPT-001` centralizes feasible finite-choice routes and records every deliberate boundary; it does not claim global ID 32 closure.
+- PR #321 remains blocked. Candidate ZIP is stale, the permanent procedure gate must fail closed, owner-runtime evidence is outstanding, and no package or owner smoke is authorized.
 
 ## Affected-games repair-flow scoping audit
 
@@ -125,16 +132,17 @@ required one/multiple/zero/no-candidate functional coverage is not complete.
 - Fatal workflow fallback when metadata is unavailable: source implementation and SupportPackage.Tests coverage exist.
 - Newest Action Required inclusion: source selects newest `*ActionItems*.txt`; SupportPackage.Tests coverage exists.
 - Stale evidence labeled stale: manifest source implementation exists.
-- Support final prompt clean: NOT FIXED; runtime proof and dedicated prompt coverage are absent.
+- Support final prompt: SOURCE FIXED; `O/B` behavior is covered by Prompt.Core source contracts; runtime proof remains outstanding.
 - Fresh owner-runtime support package proof: outstanding.
 
 ## Tests with exact counts and timestamps
 
 | Gate/test | Exact command | Count/result | Started UTC | Finished UTC | Engine/version |
 |---|---|---:|---|---|---|
-| Main Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -CI -Output Normal -PassThru` | 989 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
-| SupportPackage.Tests | `Invoke-Pester -Path .\Tests\SupportPackage.Tests.ps1 -CI -Output Normal -PassThru` | 36 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
-| Governance/source parse, ASCII, registry, PSScriptAnalyzer, diff | Final static-check commands; individual start/finish timestamps not captured | 0 parse errors; 27 registry entries; source/report text ASCII clean; 0 PSScriptAnalyzer findings; diff check clean | not captured | not captured | pwsh / PSScriptAnalyzer |
+| Main Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -Output Normal` | 994 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
+| SupportPackage.Tests | `Invoke-Pester -Path .\Tests\SupportPackage.Tests.ps1 -Output Normal` | 36 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
+| Prompt.Core focused Pester | `Invoke-Pester -Path .\Tests\TeknoParrot-Manager.Tests.ps1 -FullNameFilter '*Prompt.Core*' -Output Detailed` | 3 passed, 0 failed, 0 skipped | not captured | not captured | Pester 6.1.0 |
+| Governance/source parse, ASCII, registry, PSScriptAnalyzer, diff | Final static-check commands; individual start/finish timestamps not captured | 0 parse errors; 27 registry entries; affected source/report text ASCII clean; 0 PSScriptAnalyzer findings; diff check clean | not captured | not captured | pwsh / PSScriptAnalyzer |
 | Permanent procedure gate | `Test-TpmPermanentProcedures.ps1 -RepoRoot . -SourcePath .\TeknoParrot-Manager.ps1 -ReportPath .\docs\remediation\PR-321-reconciliation.md` | Expected fail: unresolved `NOT FIXED`; owner-runtime evidence outstanding; candidate package stale | not captured | not captured | pwsh |
 Pester 5.7.1 was not confirmed in this environment. These results are not
 certification-compatible evidence. Main and support suites passed, static
@@ -164,18 +172,20 @@ pass is claimed.
 | scripts/Test-TpmPermanentProcedures.ps1 | Fail-closed report/source gate | All registry IDs | Parse, analyzer, expected-fail run |
 | scripts/Run-TpmQualityGate.ps1 | Combined quality wrapper | TPM-AUTH-001, TPM-EVIDENCE-001 | Parse and analyzer |
 | .github/pull_request_template.md | PR checklist | TPM-AUTH-001, TPM-TRACE-001 | File review |
-| TeknoParrot-Manager.ps1 | Prior PR321 remediation hunks | Owner report IDs 1-4, 6-10, 13-14, 17-23, 28-29, 31 | Existing tests; runtime proof outstanding |
-| docs/governance/tpm-development-operating-model.md; docs/governance/tpm-contract-types.md; docs/architecture/tpm-subsystem-ownership-map.md; docs/architecture/tpm-subsystem-extraction-roadmap.md; docs/remediation/PR-321-control-board.md; docs/remediation/slices/README.md; docs/remediation/slices/PR-321-current-slice.md; docs/templates/tpm-slice-contract.md | TPM-RESET-001 organization slice | TPM-TRACE-001, TPM-TRACE-002, TPM-OWNER-001, PR #321 | Artifact and governance tests |
-| Tests/TeknoParrot-Manager.Tests.ps1 | Prior PR321 regression coverage | Owner report IDs 1-4, 6, 8-10, 13, 23, 28-29 | Main suite result |
+| TeknoParrot-Manager.ps1 | Prompt.Core helper and finite-choice routes | TPM-PROMPT-001, owner report IDs 24-27/32, PR #321 | Production parse, focused prompt tests; owner runtime outstanding |
+| Tests/TeknoParrot-Manager.Tests.ps1 | `Read-TpmChoice` behavior and Prompt.Core route contracts | TPM-PROMPT-001, owner report IDs 24-27/32, PR #321 | Focused prompt tests and full suite: 993 passed; owner runtime outstanding |
+| ARCHITECTURE.md | Prompt.Core finite-choice invariant and boundaries | TPM-PROMPT-001, TPM-TRACE-001, PR #321 | Changed-section review |
+| docs/remediation/slices/PR-321-current-slice.md; docs/remediation/PR-321-control-board.md | Prompt inventory, boundaries, statuses, next-slice assignment | TPM-PROMPT-001, TPM-TRACE-001, TPM-OWNER-001, PR #321 | Artifact review and gate checks |
+| README.md; QUICKSTART.md; TeknoParrot-Manager-README.txt; TeknoParrot-Manager-QuickStart.txt | Corrected LaunchBox/HyperSpin prompt instructions | TPM-PROMPT-001, owner report IDs 24-25, PR #321 | Documentation review against current routes |
 
 ## Permanent procedure compliance
 
 - Registry exists and contains 27 stable IDs.
 - Report uses the required owner statuses only.
 - Universal progress remains NOT FIXED for the paths marked NOT FIXED.
-- Prompt/gate consistency remains NOT FIXED where global evidence is absent.
+- Prompt/gate consistency: `TPM-PROMPT-001` centralizes feasible finite choices and records every remaining deliberate boundary; IDs 26 and 32 remain NOT FIXED until the global contract and runtime proof are complete.
 - Affected-games repair remains SOURCE FIXED; OWNER RUNTIME NEEDED.
-- Support fatal/newest/stale evidence is source/test covered; owner-runtime proof is outstanding.
+- Support fatal/newest/stale evidence and the support `O/B` route are source/test covered; owner-runtime proof is outstanding.
 - The supplied ZIP is stale relative to current uncommitted source changes.
 - This report intentionally records failed acceptance conditions rather than claiming completion.
 

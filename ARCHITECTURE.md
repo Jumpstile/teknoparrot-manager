@@ -1886,6 +1886,24 @@ acknowledged. The existing menu clear/repaint path is never used as failure
 acknowledgement. Workflow start rejects a second active context, and every
 workflow branch must close or acknowledge/finalize before returning to the menu.
 
+## Prompt.Core finite-choice contract (TPM-PROMPT-001)
+
+`Read-TpmYesNo` owns ordinary Y/N decisions. `Read-TpmChoice` owns finite
+enumerated decisions and is the only validation loop for migrated menu routes:
+it normalizes case, validates the default against the allowed set, and
+re-prompts through `Read-HostSafe` without changing the workflow state.
+
+Back, Skip, Cancel, Preview, Run, Details, retry, and optional-setup actions
+use this contract when their choices are finite. Dynamic route menus build
+their allowed array from verified state before calling the helper.
+
+This contract does not replace exact-token safety confirmations (`YES`,
+`REMOVE`), secure password input, paths, free-text search, numeric ranges,
+stateful number-list pickers, or renderer-aware terminal/browser input. Those
+contracts retain their specialized validation and are inventoried in
+`docs/remediation/slices/PR-321-current-slice.md`.
+
+
 ## Support package architecture (issue #300)
 
 `New-TpmSupportPackage` is a fixed-scope collector invoked by the top-level

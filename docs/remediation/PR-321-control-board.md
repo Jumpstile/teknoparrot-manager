@@ -6,8 +6,8 @@ Status: blocked. This board is the source of truth for TPM remediation state.
 
 - Root: `C:\REPOS\tpm-rc8-certified-a700d093`
 - Branch: `fix/rc8-release-blockers`
-- HEAD: `a697edacc7be0f006c4616b32e8cbfcba650cd13`
-- Worktree: dirty; this organization/reset slice is uncommitted.
+- HEAD: `6c511915c85793833db74472c105d48449982537`
+- Worktree: dirty; the prompt slice is uncommitted.
 - Candidate ZIP: `C:\REPOS\tpm-rc8-candidate-output\TeknoParrot Manager v1.0 RC8.zip`.
 - Candidate freshness: stale relative to uncommitted source changes; package rebuild is not authorized.
 - Permanent procedure gate: expected fail until unresolved owner findings, stale candidate identity, and owner-runtime evidence are resolved.
@@ -43,15 +43,15 @@ Allowed statuses are exactly: `NOT FIXED`, `SOURCE FIXED; OWNER RUNTIME NEEDED`,
 | 21 | Option 10 repair clarity | Repair outcomes are explicit | SOURCE FIXED; OWNER RUNTIME NEEDED | Repair/scoping | Repair result reporting | Result tests | Result smoke | Owner runtime | Repair follow-up |
 | 22 | Post-thumbnail repair scope | Optional flows do not escape scope | SOURCE FIXED; OWNER RUNTIME NEEDED | Repair/scoping | Affected-only handoff | Scoped-flow tests | Scope smoke | Owner runtime | Repair follow-up |
 | 23 | LaunchBox Back ignored | Back is honored | SOURCE FIXED; OWNER RUNTIME NEEDED | Frontend exports | LaunchBox routing | Back coverage | Packaged B smoke | Owner runtime | Frontend follow-up |
-| 24 | LaunchBox prompt wording | Prompt explains action and consequence | NOT FIXED | Frontend exports | LaunchBox prompts | No qualifying test | Guided prompt smoke | Design prompt contract | Frontend follow-up |
+| 24 | LaunchBox prompt wording | Prompt explains action and consequence | SOURCE FIXED; OWNER RUNTIME NEEDED | Frontend exports | LaunchBox prompts | Prompt.Core route contracts | Guided packaged prompt smoke | Owner runtime | Prompt.Core |
 | 25 | HyperSpin direct prompt | Safe choice and normal completion | SOURCE FIXED; OWNER RUNTIME NEEDED | Frontend exports | Export-HyperSpinJson | Source contracts | Normal completion smoke | Owner runtime | Frontend follow-up |
-| 26 | Invalid optional input | Invalid values reprompt consistently | NOT FIXED | Prompts/navigation | Read-TpmChoice/Read-TpmYesNo migration | Focused prompt tests | Invalid-input matrix | Prompt.Core slice | Prompt.Core |
-| 27 | Support package final prompt | Final prompt is clear | SOURCE FIXED; OWNER RUNTIME NEEDED | Support package | Support menu | SupportPackage.Tests | Packaged support smoke | Owner runtime | Support follow-up |
+| 26 | Invalid optional input | Invalid values reprompt consistently | NOT FIXED | Prompts/navigation | Read-TpmChoice/Read-TpmYesNo migration; remaining stateful picker boundaries documented | Read-TpmChoice validation; prompt route contracts | Invalid-input matrix | Complete remaining finite-choice audit and owner smoke | Prompt.Core |
+| 27 | Support package final prompt | Final prompt is clear | SOURCE FIXED; OWNER RUNTIME NEEDED | Support package | Support menu and package-open route | Prompt.Core route contracts; SupportPackage.Tests | Packaged support smoke | Owner runtime | Prompt.Core |
 | 28 | Support fatal workflow surfacing | Fatal evidence surfaces | SOURCE FIXED; OWNER RUNTIME NEEDED | Support package | Support manifest | SupportPackage.Tests | Fatal-log smoke | Owner runtime | Support follow-up |
 | 29 | Action Required freshness mismatch | Newest evidence is labeled | SOURCE FIXED; OWNER RUNTIME NEEDED | Support package | Support package freshness | SupportPackage.Tests | Multiple-report smoke | Owner runtime | Support follow-up |
 | 30 | Controls truthfulness | Zero-bound results never imply verified readiness | NOT FIXED | Controls truthfulness | Controls result reporting | Controls tests | Zero-bound runtime result | Complete result audit | Controls follow-up |
 | 31 | dgVoodoo2 wording | Results explain deployment state | SOURCE FIXED; OWNER RUNTIME NEEDED | Progress/status | dgVoodoo2 result wording | Existing tests | Owner wording review | Owner runtime | Progress slice |
-| 32 | Global consistency rule | Every enumerated prompt uses the central contract or has a documented design boundary | NOT FIXED | Prompts/navigation | Script-wide prompt inventory | Focused prompt contracts | Packaged consistency smoke | Prompt.Core slice and full inventory | Prompt.Core |
+| 32 | Global consistency rule | Every enumerated prompt uses the central contract or has a documented design boundary | NOT FIXED | Prompts/navigation | TPM-PROMPT-001 inventory; centralized feasible routes; stateful picker boundaries remain | Prompt.Core helper/route contracts | Packaged consistency smoke | Finish remaining finite-choice audit and owner smoke | Prompt.Core |
 
 ## Subsystem grouping
 
@@ -69,15 +69,15 @@ Allowed statuses are exactly: `NOT FIXED`, `SOURCE FIXED; OWNER RUNTIME NEEDED`,
 
 ## Current blockers
 
-- Source blockers: IDs 3, 11, 12, 24, 26, 30, and 32 remain NOT FIXED.
-- Test blockers: focused behavior coverage is incomplete for those IDs.
-- Procedure-gate blockers: unresolved statuses, missing owner-runtime evidence, and required control-board/slice-contract enforcement are not yet satisfied.
+- Source blockers: IDs 3, 11, 12, 26, 30, and 32 remain NOT FIXED.
+- Test blockers: focused behavior coverage for the remaining global prompt contract and owner-runtime routes is incomplete.
+- Procedure-gate blockers: unresolved statuses, missing owner-runtime evidence, stale candidate identity, and current-slice enforcement are not yet satisfied.
 - Package/runtime blockers: candidate ZIP is stale; no owner smoke is authorized.
-- Owner-design blockers: ReShade ownership, LaunchBox wording, controls truthfulness, and global prompt migration need explicit contracts.
+- Owner-design blockers: ReShade ownership, controls truthfulness, and the remaining stateful prompt-picker boundaries need explicit future contracts.
 
 ## Next-slice queue
 
-1. Prompt.Core + global input behavior. Excludes ReShade ownership, controls, packaging, and owner smoke. Contract: invalid input reprompts; enumerated Back/Skip/Cancel/Preview/Run routes use one reader; exact-token safety and free-text inputs remain explicit. Tests: focused prompt contracts before and after implementation. Gate: expected fail on unrelated blockers, pass new contract checks. Stop when every prompt is classified and ID 26 plus the scoped ID 32 routes have source/test evidence.
+1. Prompt.Core + global input behavior (`TPM-PROMPT-001`). Excludes ReShade ownership/accounting, controls, packaging, and owner smoke. Contract: invalid finite choices reprompt through `Read-TpmChoice`; exact-token safety, free-text, secure input, renderer-aware input, and stateful pickers remain documented boundaries. Tests: focused prompt contracts before and after implementation. Gate: expected fail on unrelated blockers. Stop when every prompt is classified and IDs 26 plus the scoped ID 32 routes have source/test evidence.
 2. Progress/status global inventory. Excludes prompt redesign and runtime packaging. Contract: each long-running path has compact TPM progress or a documented instant/bounded reason. Tests: source inventory plus focused path tests. Gate: expected fail on owner-runtime evidence until package proof exists.
 3. ReShade ownership and accounting. Excludes prompt/progress cleanup. Contract: protected files are never silently adopted or removed and every selected game has one terminal outcome. Tests: ownership matrix and result accounting tests. Gate: expected fail until owner smoke.
 4. Controls truthfulness. Excludes device certification. Contract: output distinguishes saved configuration, inferred readiness, and verified physical binding. Tests: zero/mixed/failure result contracts. Gate: expected fail until runtime observation.

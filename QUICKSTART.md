@@ -338,43 +338,39 @@ Mode 13 manually checks the latest GitHub release against the version you are ru
 
 ## LaunchBox Integration
 
-At the end of most runs:
+At the end of most normal interactive runs:
 
 ```
-Add your registered games to LaunchBox now? (Y/N)
+[P] Preview only  [A] Add/update now  [F] Manual import/reference file  [B] Back
 ```
 
-Answer Y to write directly into LaunchBox's own library — no import wizard needed. The script checks LaunchBox/BigBox are closed first, backs up the files it's about to change, and never duplicates a game already there. The first time you use it, choose how games should appear:
+`P` previews without changing LaunchBox, `A` writes directly into LaunchBox's
+own library after the close/backup checks, `F` creates the reference file
+without a LaunchBox write, and `B` skips the optional LaunchBox step. The first
+time you use direct integration, choose how games should appear:
 
 1. Mixed into your existing **Arcade** platform
 2. A separate **TeknoParrot** platform
 3. A platform with a **name you choose**
 4. **Both** Arcade and a dedicated platform at once
 
-Your choice is remembered for next time. New entries have no box art/metadata yet — use LaunchBox's own "Search"/re-scrape per game.
+Your choice is remembered for next time. New entries have no box art/metadata
+yet -- use LaunchBox's own "Search"/re-scrape per game.
 
-Prefer not to let the script touch LaunchBox directly? Answer N, then Y to the next prompt for the older `TeknoParrot-LaunchBox-Import.xml` manual-import file and wizard instructions instead.
+Prefer not to let the script touch LaunchBox directly? Choose `F` for the
+manual `TeknoParrot-LaunchBox-Import.xml` file and wizard instructions.
 
 ---
-
 ## HyperSpin 2 Export
 
-At the end of every run:
+At the end of RC8 runs the normal HyperSpin path is guidance-only:
+TPM does not start a HyperSpin export or write HyperSpin files. The message
+directs operators to the HyperSpin 2 plugin.
 
-```
-Export registered games to HyperSpin 2? (Y/N)
-```
-
-Answer Y to merge every registered game not already present into HyperSpin 2's TeknoParrot game list (default data folder: `C:\ProgramData\HyperSpin\data`). Your path is saved and reused on future runs.
-
-**Prerequisites:** TeknoParrot must be set up as an emulator in HyperSpin 2 first — the emulator title must contain "TeknoParrot" (spacing and capitalisation variations are fine). HyperSpin 2 must not be running when you answer Y.
-If the TeknoParrot entry in `emulators.json` has no `id`, TPM stops before
-locating or writing a games file and asks **F** to fix it, **A** to add anyway,
-or **S** to skip (the safe default). Re-add TeknoParrot in HyperSpin before
-choosing **F**. Only **A** permits the legacy `.xml` ROM-entry fallback and may
-write entries with an empty `systemId`; **S** leaves HyperSpin data unchanged.
-
-Games are added with title only. Use HyperSpin 2's Scrape feature for box art and metadata.
+There is no end-of-run HyperSpin export prompt in RC8. TPM does not
+synthesize an emulator ID or write game associations in the normal flow.
+Use HyperSpin 2's Scrape feature for box art and metadata after the plugin
+manages entries.
 
 ---
 
